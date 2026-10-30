@@ -89,3 +89,5 @@ Playground registers no self-hosted runner, since a fork's pull request could th
 ## Maintaining
 
 The rules are in [AGENTS.md](./AGENTS.md), which CLAUDE.md links to.
+
+Not for public use. All rights reserved. Use at your own risk.
