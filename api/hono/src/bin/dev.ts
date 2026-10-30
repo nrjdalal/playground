@@ -153,7 +153,7 @@ if (!dry) {
           : `dev: cmux would not answer this stack (${checked.dashboard.reason}) and holds no live factory session, so the dashboard reads herdr alone and shows none of your own sessions in cmux`,
       )
     }
-    // The live dashboard and a person's own clone bring the herdr servers up when they are down, so restarting the app alone brings the factory back; a test stack with PLAYGROUND_LIVE_READS never does. It runs the main checkout's job, never this checkout's: the live dashboard runs canary's latest head while its main checkout follows main, so there the pin and config change only once they reach main; a person's own clone is its own main checkout, on whatever branch it holds. A failure is named and the stack starts anyway.
+    // The live dashboard and a person's own clone bring the herdr servers up when they are down, so restarting the app alone brings the factory back; a test stack with PLAYGROUND_LIVE_READS never does. It runs the main checkout's job, never this checkout's: the live dashboard runs the latest head of the branch its main checkout sits on, so there the pin and config change only once they reach that checkout; a person's own clone is its own main checkout, on whatever branch it holds. A failure is named and the stack starts anyway.
     const main = mainCheckoutOf(ROOT)
     if (main && (checked.dashboard.rule === "live-branch" || checked.dashboard.rule === "own")) {
       const herdr = Bun.spawnSync(

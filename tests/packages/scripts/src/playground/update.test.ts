@@ -30,11 +30,11 @@ describe("updateSteps", () => {
 // A run that answers each argv from the script given, by its first matching word, and records every call.
 const fakeRun = (answers: Record<string, { code?: number; out?: string }> = {}) => {
   const calls: string[][] = []
+  // the checkout is on main unless the script says otherwise
+  const script: typeof answers = { "--show-current": { out: "main\n" }, ...answers }
   const run: Run = async (argv) => {
     calls.push(argv)
-    const hit = Object.entries({ "--show-current": { out: "main\n" }, ...answers }).find(([word]) =>
-      argv.includes(word),
-    )
+    const hit = Object.entries(script).find(([word]) => argv.includes(word))
     return { code: hit?.[1].code ?? 0, out: hit?.[1].out ?? "" }
   }
   return { calls, run }
