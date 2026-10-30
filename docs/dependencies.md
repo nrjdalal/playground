@@ -38,13 +38,6 @@ Enforcement is only partial by design. Specs the rule cannot convert are reporte
 - **Risk:** low. `concurrently` runs only in `@api/hono`'s `dev:app` script, with commands written in its `package.json`, never untrusted input; `1.11.0` is a minor release of the same API, and `bun run test` and the build pass on it.
 - **Exit criteria:** remove once `concurrently` declares a `shell-quote` range that resolves `>=1.11.0` on its own.
 
-### `toml` → `^5.0.1`
-
-- **Advisory:** [GHSA-4qx8-w7c3-pj3p](https://github.com/advisories/GHSA-4qx8-w7c3-pj3p), [GHSA-9j65-hcg3-gc64](https://github.com/advisories/GHSA-9j65-hcg3-gc64) and [GHSA-9qmh-m7c6-f92p](https://github.com/advisories/GHSA-9qmh-m7c6-f92p) (all high): CPU denial of service in `toml.parse()` through many array-of-tables headers, long dotted keys or table paths, and unbounded integer literals; each affects `toml <=5.0.0`. They follow [GHSA-82x6-q7mm-w9cf](https://github.com/advisories/GHSA-82x6-q7mm-w9cf) (high, `<4.2.0`) and [GHSA-v5mp-jgw5-2x6j](https://github.com/advisories/GHSA-v5mp-jgw5-2x6j) (high, `<4.1.2`), which the earlier `^4.3.0` pin cleared.
-- **Why an override:** `@lat.md/core@0.1.3`, the latest, depends on `@folder/xdg@4.0.1`, the latest, which declares `toml: ^3.0.0`, so neither `bun update` nor a parent bump can lift it, and the patch is a major above that range.
-- **Risk:** low. `lat-core` calls `xdg()` only for its config and cache folders, and `@folder/xdg` parses TOML only when it expands a `.toml` file, which that path never does. `toml@5` keeps the CommonJS `parse` export `@folder/xdg` requires, and `lat-core check` passes on it.
-- **Exit criteria:** remove once `@lat.md/core` resolves `toml >=5.0.1` on its own, or drops `@folder/xdg`.
-
 ## Patched dependencies
 
 A patch lives in `patches/`, made with `bun patch <pkg>` and registered under `patchedDependencies` in the root `package.json`, which `turbo prune` carries into the Docker build.

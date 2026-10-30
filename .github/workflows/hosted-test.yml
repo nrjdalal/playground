@@ -44,7 +44,7 @@ jobs:
         if: steps.stamp.outputs.green != 'true'
         run: sudo apt-get update && sudo apt-get install -y zsh
 
-      - name: Install dependencies (the lat check runs the locked lat-core from node_modules)
+      - name: Install dependencies
         if: steps.stamp.outputs.green != 'true'
         run: bun install --frozen-lockfile --ignore-scripts
 

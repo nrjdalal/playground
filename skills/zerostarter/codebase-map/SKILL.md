@@ -24,10 +24,6 @@ tests/            # the whole suite, mirroring each subject's path; *.e2e.test.t
 
 Read `AGENTS.md` first for the rules (the dashboard app's are in `.agents/dashboard/<topic>.md`: AGENTS.md holds each ALWAYS rule in one line and a pointer naming when to read its file); `curl "$(bunx portless get playground)/llms-full.txt"` dumps the whole codebase as one context file.
 
-## Where to edit for X
-
-Read `lat.md/where-to-edit.md` before you edit an area you have not worked in: each goal links the file or symbol to edit and names the skill to load next.
-
 ## Trace a feature across the stack
 
 Types flow downhill, so a change ripples predictably:
@@ -57,4 +53,4 @@ ls .agents/skills                                     # every task skill availab
 
 ## Then
 
-Load the task skill (the Then column of `lat.md/where-to-edit.md`); `dev` runs and restarts the stack, and concept docs live under `/docs`.
+Load the task skill that fits; `dev` runs and restarts the stack, and concept docs live under `/docs`.
