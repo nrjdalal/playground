@@ -239,7 +239,7 @@ const setup = ({
       `echo "gh $*" >> ${log}`,
       `if [ "$1 $2" = "auth status" ]; then [ -e ${state}/gh-login ]; exit; fi`,
       `if [ "$1 $2" = "auth login" ]; then read -r answer; echo "gh auth login read $answer" >> ${log}; touch ${state}/gh-login; exit 0; fi`,
-      `if [ "$1 $2" = "repo clone" ]; then exec ${realGit} clone -q ${source} "$4"; fi`,
+      `if [ "$1 $2" = "repo clone" ]; then dir=$4; shift 4; [ "$1" = -- ] && shift; exec ${realGit} clone ${source} "$dir" "$@"; fi`,
       ...(ghUser
         ? [
             `if [ "$1 $2" = "api user" ]; then echo ${ghUser}; exit 0; fi`,
@@ -676,6 +676,16 @@ describe("install.sh", () => {
     )
     expect(calls).not.toContain("bun.sh/install")
     expect(code).toBe(1)
+  })
+
+  test("clones main whatever the repo's default branch is, through gh or over https", () => {
+    for (const ghLogin of [true, false]) {
+      const { dir, home, run, source } = setup({ ghLogin })
+      git(source, home, "checkout", "-q", "-b", "canary")
+      const { code } = run()
+      expect(git(dir, home, "branch", "--show-current").stdout.toString().trim()).toBe("main")
+      expect(code).toBe(0)
+    }
   })
 
   test("--check on a ready machine says it is ready and exits 0", () => {

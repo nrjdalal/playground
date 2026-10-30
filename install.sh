@@ -337,13 +337,13 @@ Playground installs into $DIR. Outside it, it writes only in:
 Every ops job starts off but the Dashboard's own, so nothing goes into $HOME/Library/LaunchAgents.
 EOF
 
-  # While the repo is private a clone goes through the gh login; with none, git clones it over https.
+  # While the repo is private a clone goes through the gh login; with none, git clones it over https. Either clones main, the shipped branch, whatever the repo's default is.
   if [ -d "$DIR/.git" ]; then
     git -C "$DIR" pull -q --ff-only
   elif has gh && gh auth status -h github.com >/dev/null 2>&1; then
-    gh repo clone "$REPO" "$DIR" -- -q
+    gh repo clone "$REPO" "$DIR" -- -q -b main
   else
-    git clone -q "https://github.com/$REPO.git" "$DIR"
+    git clone -q -b main "https://github.com/$REPO.git" "$DIR"
   fi
 
   if ! ensure_bun; then
