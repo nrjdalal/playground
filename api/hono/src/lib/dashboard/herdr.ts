@@ -22,7 +22,7 @@ import { claudeDir, dataDir, transcriptPath } from "@/lib/sessions/paths"
 
 type Json = Record<string, unknown>
 
-// The servers the factory runs: PLAYGROUND_HERDR_SESSIONS names them (factory and probes), each serving its socket at <PLAYGROUND_HERDR_DIR>/<name>.sock, the dir herdr in the data folder, ~/.playground, unless set, following HOME and never CLAUDE_CONFIG_DIR or PLAYGROUND_DATA_DIR as ops-herdr serves them, so a session on another login reads the same servers. A stack that does not read this machine reads no herdr server.
+// The servers Playground runs: PLAYGROUND_HERDR_SESSIONS names them (playground and playground-probes), each serving its socket at <PLAYGROUND_HERDR_DIR>/<name>.sock, the dir herdr in the data folder, ~/.playground, unless set, following HOME and never CLAUDE_CONFIG_DIR or PLAYGROUND_DATA_DIR as ops-herdr serves them, so a session on another login reads the same servers. A stack that does not read this machine reads no herdr server.
 export type HerdrServer = { name: string; socket: string }
 
 const SERVER_NAME = /^[a-z0-9][a-z0-9_-]*$/
