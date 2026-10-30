@@ -192,6 +192,15 @@ describe("a fresh machine", () => {
     return data
   }
 
+  test("add reads the defaults from a root ext init stopped in, with no login or policy.json yet, and goes on to its own checks", () => {
+    const data = join(dir, "stopped")
+    mkdirSync(join(data, "extensions"), { recursive: true })
+    const add = run(data, ["add", "made-up-worker"])
+    expect(add.exitCode).toBe(1)
+    expect(add.stderr.toString()).not.toContain("policy.json")
+    expect(add.stderr.toString()).toContain("made-up-worker gives no kind")
+  })
+
   test("herdr pin --check names the pinned herdr missing from HOME's data folder, exit 1", () => {
     const data = fresh("herdr")
     const check = run(data, ["herdr", "pin", "--check"])

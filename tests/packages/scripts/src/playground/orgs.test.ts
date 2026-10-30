@@ -280,3 +280,19 @@ test("orgs home with no claude on PATH writes the set and says it waits; a faile
   expect(failed.code).toBe(1)
   expect(failed.err.join("\n")).toContain("claude plugin install ws-home@ws --scope user failed")
 })
+
+// ext init can stop after making the extensions root, before it writes the login or clones a scope, and link-skills.sh's last step is orgs home.
+test("a root ext init stopped in, with no policy.json, no login and no scope yet, installs the home set on core alone", async () => {
+  const data = join(scratch, "stopped")
+  mkdirSync(currentDir(data), { recursive: true })
+  const noLogin = () => {
+    throw new Error("no login for the extensions: run playground ext init")
+  }
+  const fake = fakeClaude()
+  const installed = await home(data, { claude: fake.claude, login: noLogin })
+  expect(installed.err).toEqual([])
+  expect(installed.code).toBe(0)
+  const session = await resolve(data, undefined, { login: noLogin })
+  expect(session.code).toBe(0)
+  expect(session.skills.length).toBeGreaterThan(0)
+})

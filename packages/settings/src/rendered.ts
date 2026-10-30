@@ -43,11 +43,11 @@ export const loginOf = (
 // Where an item lives in its scope's folder, without its extension.
 export const itemPath = (kind: string, key: string): string => `${kind}s/${key}`
 
-// How to write a root file that is missing: the guards' lists from the checkout's list files, any other from the settings that derive it.
+// How to write a root file that is missing: the guards' lists from the checkout's list files, any other from the settings that derive it, which need the login ext init writes.
 export const fixFor = (file: string): string =>
   file.startsWith("hooks/")
     ? "seed the guards' lists with playground ext import --from-tree extensions/core/lists"
-    : "set a setting with playground settings set, which writes it"
+    : "run playground ext init, then set a setting with playground settings set, which writes it"
 
 export type Read =
   | { path: string; refusal?: undefined }
@@ -98,6 +98,12 @@ export const readPolicySync = (data: string, org?: string): Policy => {
       values: { ...policy.values, ...(org ? policy.orgs?.[org.toLowerCase()] : undefined) },
     },
   }
+}
+
+// The extensions' policy.json for a reader that renders from the file itself: none while a root ext init made has none yet, so every key takes its default as on a machine with no root.
+export const readPolicyFile = (data: string): Read => {
+  const read = readRenderedSync(data, "policy.json")
+  return read.refusal === undefined ? read : {}
 }
 
 // readPolicySync for a reader whose keys all have safe defaults: a root ext init made, before a first setting writes policy.json, reads none, so every key takes its default and a fresh machine runs to that write; a policy.json that is there and does not parse is still a refusal.

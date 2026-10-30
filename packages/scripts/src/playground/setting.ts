@@ -3,7 +3,6 @@ import { resolve } from "node:path"
 import {
   factorySettings,
   guardedOrgs,
-  readPolicy,
   readPolicyOrDefaults,
   readSessionNames,
   type Settings,
@@ -38,13 +37,13 @@ export const originRepo = (checkout = CHECKOUT): string => {
 export const factoryRepo = (settings: Settings, checkout = CHECKOUT): string =>
   factorySettings.get(settings, "factory.repo").toLowerCase() || originRepo(checkout)
 
-// factory.repo as the data folder's store sets it, else the checkout's origin; a set that cannot be trusted throws its refusal, and so does neither, since a merge gate would then read no repo as the factory's and skip GitGuardian's check.
+// factory.repo as the data folder's store sets it (its default until a first setting writes policy.json), else the checkout's origin; a policy.json that does not parse throws its refusal, and so does neither, since a merge gate would then read no repo as the factory's and skip GitGuardian's check.
 export const factoryRepoOf = async (
   environment: Record<string, string | undefined> = process.env,
   checkout = CHECKOUT,
 ): Promise<string> => {
   const data = dataDir(environment)
-  const read = await readPolicy(data)
+  const read = readPolicyOrDefaults(data)
   if (read.refusal !== undefined) throw new Error(read.refusal)
   const repo = factoryRepo(read.settings, checkout)
   if (!repo)

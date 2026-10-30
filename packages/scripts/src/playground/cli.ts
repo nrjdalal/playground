@@ -5,7 +5,7 @@ import { join } from "node:path"
 
 import { getSessionNames, setSessionNames } from "@packages/config/kinds"
 import { configDirOf, dataDir } from "@packages/env/data-dir"
-import { modelSettings, readPolicy, readSessionNames } from "@packages/settings"
+import { modelSettings, readPolicyOrDefaults, readSessionNames } from "@packages/settings"
 
 import { accountsIo, runAccounts } from "./accounts"
 import { doctor, report } from "./doctor"
@@ -251,7 +251,7 @@ const verb = (name: string, words: string[]): Promise<number> =>
   }).exited
 
 const add = async (args: string[]): Promise<number> => {
-  const policy = await readPolicy(dataDir())
+  const policy = readPolicyOrDefaults(dataDir())
   if (policy.refusal !== undefined) fail(policy.refusal)
   const models = modelSettings.get(policy.settings!, "models.claude")
   const command = addCommand(args, briefExists, pickName, models)
