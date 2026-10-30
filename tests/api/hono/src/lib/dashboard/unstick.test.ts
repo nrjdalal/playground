@@ -258,6 +258,20 @@ describe("withBlocked", () => {
     expect(withBlocked(live, new Map())).toBe(live)
   })
 
+  test("a session ops-unstick finds on a /login prompt waits, and carries loginExpired for its Add account card", () => {
+    const live: Live = {
+      surfaces: new Map(),
+      transcripts: new Map(),
+      workers: [worker("worker-greed", "s-greed", "idle"), worker("worker-envy", "s-envy", "idle")],
+    }
+    const login = new Map([["s-greed", [{ ...ENTRY, kind: "login", line: "Please run /login" }]]])
+    const [greed, envy] = withBlocked(live, login).workers
+    expect(greed).toMatchObject({ light: "needs-you", loginExpired: true })
+    expect(greed?.usageLimit).toBeUndefined()
+    expect(envy?.loginExpired).toBeUndefined()
+    expect(withBlocked(live, blocks("s-greed")).workers[0]?.loginExpired).toBeUndefined()
+  })
+
   test("a session the usage limit alone holds still waits, so nothing is typed into it, and carries its reset", () => {
     const live: Live = {
       surfaces: new Map(),
