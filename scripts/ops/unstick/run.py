@@ -97,7 +97,7 @@ DIALOG_HINT = re.compile(r"Enter to confirm · Esc|Space to select · Esc|Esc to
 # herdr runs by the copy ops-herdr installs and pins, under the data folder of HOME alone (herdrPath in packages/scripts/src/ops-herdr/pin.ts).
 HERDR = os.environ.get("HERDR_BIN_PATH") or os.path.expanduser("~/.playground/bin/herdr")
 HERDR_DIR = os.environ.get("PLAYGROUND_HERDR_DIR") or os.environ.get("DESK_HERDR_DIR") or os.path.expanduser("~/.playground/herdr")
-HERDR_SESSIONS = [n for n in (os.environ.get("PLAYGROUND_HERDR_SESSIONS") or os.environ.get("DESK_HERDR_SESSIONS") or "factory,probes").split(",") if n]
+HERDR_SESSIONS = [n for n in (os.environ.get("PLAYGROUND_HERDR_SESSIONS") or os.environ.get("DESK_HERDR_SESSIONS") or "playground,playground-probes").split(",") if n]
 
 
 def now():
