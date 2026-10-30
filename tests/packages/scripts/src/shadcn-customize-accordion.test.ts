@@ -1,9 +1,9 @@
 import { describe, expect, test } from "bun:test"
 import { join } from "node:path"
 
-import { ACCORDION, accordionHeader } from "../../../.github/scripts/shadcn-customize"
+import { ACCORDION, accordionHeader } from "../../../../packages/scripts/src/shadcn-customize"
 
-const REPO = join(import.meta.dir, "../../..")
+const REPO = join(import.meta.dir, "../../../..")
 const ours = await Bun.file(join(REPO, ACCORDION)).text()
 // the registry's shape, the patch's two edits taken back out of the committed file
 const registry = ours

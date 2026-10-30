@@ -3,11 +3,11 @@
   "version": "0.0.1",
   "private": true,
   "scripts": {
-    "build": "rm -rf .next/dev/types && bun ../../packages/scripts/src/generate-env.ts web && bun ../../.github/scripts/compress-images.ts && bun ../../.github/scripts/docs.ts --strict && bun ../../packages/scripts/src/data-table-metrics.ts && fumadocs-mdx && next build",
+    "build": "rm -rf .next/dev/types && bun ../../packages/scripts/src/generate-env.ts web && bun ../../packages/scripts/src/compress-images.ts && bun ../../packages/scripts/src/docs.ts --strict && bun ../../packages/scripts/src/data-table-metrics.ts && fumadocs-mdx && next build",
     "build:vercel": "bun run --bun build",
-    "check-types": "rm -rf .next/dev/types && next typegen && bun ../../.github/scripts/docs.ts && bun ../../packages/scripts/src/data-table-metrics.ts && fumadocs-mdx && tsc --noEmit",
+    "check-types": "rm -rf .next/dev/types && next typegen && bun ../../packages/scripts/src/docs.ts && bun ../../packages/scripts/src/data-table-metrics.ts && fumadocs-mdx && tsc --noEmit",
     "dev": "portless",
-    "dev:app": "bun ../../.github/scripts/docs.ts && bun ../../packages/scripts/src/data-table-metrics.ts && bun ../../.github/scripts/portless.ts next dev --hostname 127.0.0.1",
+    "dev:app": "bun ../../packages/scripts/src/docs.ts && bun ../../packages/scripts/src/data-table-metrics.ts && bun ../../packages/scripts/src/portless.ts next dev --hostname 127.0.0.1",
     "start": "HOSTNAME=127.0.0.1 bun .next/standalone/web/next/server.js"
   },
   "dependencies": {

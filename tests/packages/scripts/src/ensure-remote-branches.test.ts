@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-const script = join(import.meta.dir, "..", "..", "..", ".github/scripts/ensure-remote-branches.ts")
+const script = join(import.meta.dir, "../../../../packages/scripts/src/ensure-remote-branches.ts")
 const scratch = realpathSync(mkdtempSync(join(tmpdir(), "ensure-remote-branches-")))
 afterAll(() => rmSync(scratch, { force: true, recursive: true }))
 

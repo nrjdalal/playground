@@ -7,9 +7,9 @@ import {
   POINTER_ITEMS,
   pointerCursors,
   pointerItems,
-} from "../../../.github/scripts/shadcn-customize"
+} from "../../../../packages/scripts/src/shadcn-customize"
 
-const REPO = join(import.meta.dir, "../../..")
+const REPO = join(import.meta.dir, "../../../..")
 const css = await Bun.file(join(REPO, "web/next/src/app/globals.css")).text()
 
 // Every button and other clickable control shows the pointer cursor, Send included.

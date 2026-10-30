@@ -51,7 +51,6 @@ lat.md/.cache/
 vercel-bundle/
 
 # custom files
-.github/scripts/*.d.ts
 .npmrc
 .sdk-session
 *.local.json
