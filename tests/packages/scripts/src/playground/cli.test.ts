@@ -185,6 +185,7 @@ describe("bare dispatcher", () => {
         linkSkills?: string
         linked?: boolean
         opsHerdr: string
+        words?: string[]
       }) => {
         const log = join(mkdtempSync(join(realpathSync(dir), "log-")), "log")
         writeFileSync(log, "")
@@ -207,11 +208,16 @@ describe("bare dispatcher", () => {
                 )),
             "packages/scripts/src/ops-herdr/cli.ts": `import { appendFileSync } from "node:fs"\nappendFileSync(${JSON.stringify(log)}, \`ops-herdr \${process.argv.slice(2).join(" ")}\\n\`)\n${opts.opsHerdr}\n`,
             "packages/scripts/src/ops-herdr/pin.json": JSON.stringify(pin),
-            "scripts/briefs/dispatcher.md": "brief\n",
+            ...Object.fromEntries(
+              ["builder", "dispatcher", "ops", "planner"].map((kind) => [
+                `scripts/briefs/${kind}.md`,
+                `${kind} brief\n`,
+              ]),
+            ),
             "scripts/link-skills.sh": `echo link-skills >> ${log}\n${opts.linkSkills ?? ""}\n`,
             "scripts/spawn.sh": `echo "spawn.sh $*" >> ${log}\n`,
           },
-          ["dispatcher"],
+          opts.words ?? ["dispatcher"],
           opts.env,
         )
         const deadline = setTimeout(() => child.kill(), 20_000)
@@ -229,6 +235,14 @@ describe("bare dispatcher", () => {
         expect(ran).toEqual(["ops-herdr start", "spawn.sh manager dispatcher brief-dispatcher.md"])
         expect(code).toBe(0)
       }, 30_000)
+
+      // The dispatcher starts each manager the first time it routes work to it, so no manager sits idle on the user's usage.
+      for (const kind of ["builder", "ops", "planner"])
+        test(`playground ${kind} starts the ${kind} through spawn.sh, its brief from scripts/briefs/${kind}.md`, async () => {
+          const { code, ran } = await run({ binary: true, opsHerdr: "", words: [kind] })
+          expect(ran).toEqual(["ops-herdr start", `spawn.sh manager ${kind} brief-${kind}.md`])
+          expect(code).toBe(0)
+        }, 30_000)
 
       test("with nothing linked in the state folder yet, install's linking step runs first", async () => {
         const { code, ran } = await run({ binary: true, linked: false, opsHerdr: "" })
