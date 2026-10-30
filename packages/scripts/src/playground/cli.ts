@@ -9,6 +9,7 @@ import { modelSettings, readPolicyOrDefaults, readSessionNames } from "@packages
 
 import { accountsIo, runAccounts } from "./accounts"
 import { doctor, report } from "./doctor"
+import { pinHere } from "./herdr-pin"
 import { orgsCommand, orgsIo } from "./orgs"
 import { keepPage, pageArgs } from "./page"
 import {
@@ -96,6 +97,43 @@ const opsHerdr = (args: string[]) =>
   Bun.spawn([process.execPath, "--no-env-file", OPS_HERDR, ...args], {
     stdio: ["inherit", "inherit", "inherit"],
   })
+
+// A step run to its end with its output kept: null when it exits 0, else its last line, from the stream it names its failures on first.
+const stepFailed = async (argv: string[], first: "stderr" | "stdout"): Promise<string | null> => {
+  const child = Bun.spawn(argv, { stderr: "pipe", stdin: "ignore", stdout: "pipe" })
+  const [stdout, stderr, code] = await Promise.all([
+    new Response(child.stdout).text(),
+    new Response(child.stderr).text(),
+    child.exited,
+  ])
+  const last = (text: string) => text.trim().split("\n").at(-1)
+  const second = first === "stdout" ? stderr : stdout
+  return code === 0
+    ? null
+    : last(first === "stdout" ? stdout : stderr) || last(second) || `${argv.at(-1)} exited ${code}`
+}
+
+// The files install's linking step puts in the state folder that a dispatcher's start reads: spawn.sh builds every session's settings from factory-settings.json, and the sessions it starts run heavy work through run-slot.sh and brief their workers from the templates.
+const LINKED = ["factory-settings.json", "handoffs/new-worker.md", "ops/run-slot.sh"]
+
+// playground dispatcher's setup, which install and the bare start give a machine and Start <dispatcher> on a fresh install has not: install's linking step when a file it links is missing, the pinned herdr installed as install.sh installs it, which downloads nothing when the copy is already pinned, then one pass of ops-herdr's start, which writes the pin and config and brings the servers up, since spawn.sh starts none; null once each is in place, else the line that says why not.
+const setUp = async (): Promise<string | null> => {
+  const state = join(process.env.HOME || homedir(), ".playground")
+  if (!LINKED.every((file) => existsSync(join(state, file)))) {
+    const failed = await stepFailed(["bash", join(REPO, "scripts", "link-skills.sh")], "stderr")
+    if (failed) return failed
+  }
+  const pinned = await pinHere()
+  if (pinned.code !== 0) return pinned.line
+  return stepFailed([process.execPath, "--no-env-file", OPS_HERDR, "start"], "stdout")
+}
+
+const dispatcherAlone = async (): Promise<number> => {
+  const unready = await setUp()
+  if (unready === null) return (await dispatcher()).code
+  console.error(`playground: ${unready}`)
+  return 1
+}
 
 // Loaded only for sweep, since sweep.ts reaches past this folder into ops-tick.
 const sweep = async (lead: string): Promise<number> => {
@@ -327,7 +365,7 @@ const code =
           : command === "add"
             ? await add(rest)
             : command === "dispatcher"
-              ? (await dispatcher()).code
+              ? await dispatcherAlone()
               : command === "page"
                 ? page(rest)
                 : command === "view"
