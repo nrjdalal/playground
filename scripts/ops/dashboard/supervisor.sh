@@ -54,7 +54,9 @@ dashboard_urls() { WEB=$(bunx portless get playground) && API=$(bunx portless ge
 # Up to 90 tries, a second apart, for the dashboard's health to answer, its URLs read afresh each try: before portless's proxy runs, portless get names its default port
 # The branch the dashboard rolls to, read once at start, and its head on origin, read each time
 UPSTREAM=$("$D/upstream.sh")
-upstream_head() { git ls-remote origin "refs/heads/$UPSTREAM" 2>/dev/null | cut -f1; }
+upstream_head() { "$D/net-git.sh" ls-remote origin "refs/heads/$UPSTREAM" 2>>"$LOG" | cut -f1; }
+# A roll only moves forward: an upstream head the running head already holds (main behind a checkout that rolled on canary) waits until the upstream passes it
+behind() { git merge-base --is-ancestor "$1" HEAD 2>/dev/null; }
 wait_dashboard() { local i; for i in $(seq 1 90); do dashboard_urls && curl -sf "$API/api/health" > /dev/null 2>&1 && return 0; sleep 1; done; return 1; }
 alive() { kill -0 "$(cat "$S/$1.pid" 2>/dev/null)" 2>/dev/null; }
 # an importer holds the follower's lock: a follower an earlier supervisor left running counts, so this one's "another importer holds the lock" exit is no outage; the status read gets HELD_WAIT seconds, then is stopped by its own process group (set -m gives it one), so a wedged docker child under it goes too, and exits 2, holder unknown, so a wedged Docker or database never freezes the loop
@@ -224,7 +226,8 @@ boot() {
   fi
   was=$(git rev-parse HEAD)
   upstream=$(upstream_head)
-  if [ ! -e "$S/paused" ] && [ -n "$upstream" ] && [ "$upstream" != "$was" ] && ! grep -qx "$upstream" "$BAD" 2>/dev/null; then
+  [ -n "$upstream" ] && [ "$upstream" != "$was" ] && behind "$upstream" && say "$UPSTREAM ${upstream:0:7} is behind the running head ${was:0:7}; waiting"
+  if [ ! -e "$S/paused" ] && [ -n "$upstream" ] && [ "$upstream" != "$was" ] && ! behind "$upstream" && ! grep -qx "$upstream" "$BAD" 2>/dev/null; then
     pull_to "$upstream" && [ "$pulled" -ne 0 ] && { finish_roll START "$upstream" "$was" "$mig" "$pulled"; return; }
   fi
   reload_if "$was" START
@@ -247,7 +250,9 @@ while true; do
     head=$(upstream_head)
     now=$(date +%s)
     if [ -n "$head" ] && [ "$head" != "$target" ]; then say "$UPSTREAM moved: ${target:0:7} -> ${head:0:7}"; target=$head; fi
-    if [ -n "$head" ] && [ -n "$target" ] && [ "$target" != "$running" ] && ! grep -qx "$target" "$BAD" 2>/dev/null; then
+    back=; [ -n "$head" ] && [ "$target" != "$running" ] && behind "$target" && back=1
+    if [ -n "$back" ] && [ "${behind_said:-}" != "$target" ]; then say "$UPSTREAM ${target:0:7} is behind the running head ${running:0:7}; waiting"; behind_said=$target; fi
+    if [ -n "$head" ] && [ -n "$target" ] && [ "$target" != "$running" ] && [ -z "$back" ] && ! grep -qx "$target" "$BAD" 2>/dev/null; then
       why="$UPSTREAM ${head:0:7}"
       if [ -e "$S/roll-now" ]; then
         rm -f "$S/roll-now"; say "roll-now: rolling to ${target:0:7} at once"
@@ -265,7 +270,7 @@ while true; do
     elif [ -n "$head" ] && [ -e "$S/roll-now" ]; then
       # nothing to roll to: answer the roll-now (playground update reads the line) and remove it, so it never lifts the next roll's holds
       rm -f "$S/roll-now"
-      if [ "$target" != "$running" ]; then result "SKIP ${target:0:7} FAIL ${target:0:7} failed its roll before (bad-builds)"; else result "CURRENT $(git rev-parse --short HEAD)"; fi
+      if [ "$target" != "$running" ] && [ -z "$back" ]; then result "SKIP ${target:0:7} FAIL ${target:0:7} failed its roll before (bad-builds)"; else result "CURRENT $(git rev-parse --short HEAD)"; fi
     fi
   fi
   if ! alive dashboard-dev; then

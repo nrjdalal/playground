@@ -13,7 +13,7 @@ OLD=$(git rev-parse HEAD)
 # an optional target sha to reset to (the upstream's head, or the head before a failed roll); none fast-forwards to origin/<upstream>
 UPSTREAM=origin/$("$D/upstream.sh")
 TARGET=${1:-$UPSTREAM}
-git fetch -q origin
+"$D/net-git.sh" fetch -q origin
 if [ "$TARGET" = "$UPSTREAM" ] && git merge-base --is-ancestor HEAD "$UPSTREAM"; then
   git merge -q --ff-only "$UPSTREAM"
 else

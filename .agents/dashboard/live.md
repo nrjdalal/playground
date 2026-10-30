@@ -1,5 +1,6 @@
 - The live dashboard follows the branch its repo's main checkout sits on: an install clones `main`, so it follows `main`, and a developer who wants `canary` keeps their main checkout on `canary` (`scripts/ops/dashboard/upstream.sh` reads it, any other branch reading as `main`).
-  It runs that branch's latest head on `origin`, never one off hashes, branches or worktrees.
+  It runs that branch's latest head on `origin`, never one off hashes, branches or worktrees, and only rolls forward: a head the running one already holds (`main` behind a checkout that rolled on `canary`) waits, logged once, until the branch passes it.
+  Each git call that reaches `origin` goes through `net-git.sh`, with no prompt and no credential helper and stopped after 20 seconds, so a hidden keychain prompt costs one logged line and the head stays.
   Its checkout stays on the branch `live.branch` names (`live/dashboard` by default), since the source rule and portless need that name, and ops-dashboard's supervisor (`scripts/ops/dashboard/supervisor.sh`) rolls it.
   On each move of that branch it stops the stack, resets `live.branch` to its head (`redeploy-pull.sh`), installs, builds `packages/*` or migrates as the move needs, restarts each ops job whose source the move changed (`scripts/ops/README.md`), starts the stack and the follower, and runs `bun run verify`.
   Its verify runs health and map, plus signin, ws and system where the checkout's `.env` turns `AGENT_SIGNIN_ENABLED` on, since those three sign in as the agent and a person's checkout keeps that off.
