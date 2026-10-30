@@ -27,7 +27,7 @@ jobs:
           bun-version-file: package.json
 
       - name: Audit and keep the bump issue
-        # the same level and ignore list as the Audit step in hosted-check-build.yml
+        # the same level and ignore list as the Audit step in auto-check-build.yml
         run: bun packages/scripts/src/audit-canary.ts --audit-level high --ignore GHSA-vfj7-8cjw-p6xm
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

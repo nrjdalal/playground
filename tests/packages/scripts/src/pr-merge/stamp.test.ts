@@ -5,7 +5,6 @@ import { join } from "node:path"
 
 import { gatesOf, type PrFacts } from "../../../../../packages/scripts/src/pr-merge/gates"
 import {
-  carried,
   JOB_CHECKS,
   jobsStamp,
   readsOf,
@@ -440,37 +439,13 @@ describe("the workflows' skip (#2410)", () => {
     why: "",
   })
 
-  test("carried prints green only for a stamp that passed every check the jobs run, and never while canary is red", () => {
-    const ran = head([stamp(HEAD, { checks: suiteChecks() })], SUITE)
-    expect(carried(ran, [])).toMatchObject({ green: true })
-    expect(carried(ran, [stamp(CANARY, { status: "red" })])).toMatchObject({ green: false })
-    expect(carried(head([stamp(HEAD)], ["verify"]), [])).toMatchObject({ green: false })
-    expect(carried("the parents of 69a6a4c did not read", [])).toEqual({
-      green: false,
-      why: "no stamp read: the parents of 69a6a4c did not read",
-    })
-  })
-
   test("the gate's workflows name their jobs as JOB_CHECKS does, so the stamp finds each", async () => {
     const names: string[] = []
-    for (const file of ["hosted-check-build.yml", "hosted-test.yml"]) {
+    for (const file of ["auto-check-build.yml", "auto-test.yml"]) {
       const text = await Bun.file(join(ROOT, ".github", "workflows", file)).text()
       const { jobs } = Bun.YAML.parse(text) as { jobs: Record<string, { name?: string }> }
       names.push(...Object.entries(jobs).map(([id, job]) => job.name ?? id))
     }
     expect(names.toSorted()).toEqual(Object.keys(JOB_CHECKS).toSorted())
   })
-
-  test.each([".github/workflows/hosted-check-build.yml", ".github/workflows/hosted-test.yml"])(
-    "%s reads the stamp first and skips every later step on green=true",
-    async (file) => {
-      const text = await Bun.file(join(ROOT, file)).text()
-      const steps = text.split(/\n\s+- name: /).slice(1)
-      const first = steps.findIndex((step) => step.startsWith("Read the stamp"))
-      expect(steps[first]).toContain("stamp-cli.ts carried")
-      expect(steps[first]).toContain('|| echo "green=false" >> "$GITHUB_OUTPUT"')
-      for (const step of steps.slice(first + 1))
-        expect(step).toContain("if: steps.stamp.outputs.green != 'true'")
-    },
-  )
 })

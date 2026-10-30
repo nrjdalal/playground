@@ -1,4 +1,4 @@
-// The stamp: one owner comment holding one YAML block, rendered and parsed by packages/config/src/verdicts.ts alone, imported by source path so a workflow runs stamp-cli.ts's carried before its install; every merge path walks back from the head past clean canary merges and the reviewer's looks to the newest stamp.
+// The stamp: one owner comment holding one YAML block, rendered and parsed by packages/config/src/verdicts.ts alone, imported by source path, so stamp-cli.ts runs with no build of packages/config; every merge path walks back from the head past clean canary merges and the reviewer's looks to the newest stamp.
 
 import {
   CHECK_STATUSES,
@@ -203,22 +203,7 @@ export const ranSuite = (stamps: Stamp[]): boolean =>
       stamps.some((stamp) => stamp.status === "green" && stamp.checks[name]?.status === "pass"),
     )
 
-// Pure: what `bun run stamp carried` prints: green when suitePassed, so both workflows skip their steps, with why on stderr.
-export function carried(
-  read: StampRead | string,
-  canary: Stamp[],
-): { green: boolean; why: string } {
-  if (typeof read === "string") return { green: false, why: `no stamp read: ${read}` }
-  const green = suitePassed(read, canary)
-  return {
-    green,
-    why: green
-      ? `a green stamp holds from ${read.at?.slice(0, 7)} with every check the jobs run passed`
-      : `no green stamp with every check the jobs run passed: ${read.status ?? read.why}`,
-  }
-}
-
-// Pure: whether a green stamp holds at the head and every check GitHub's gate jobs run passed in it, on the head or carried past clean canary merges and the reviewer's looks: the workflows then skip their steps, since nothing they would run is new. Never while canary's tip (its stamps, canary) is red, since only the fix's own run on its head lets it through.
+// Pure: whether a green stamp holds at the head and every check GitHub's gate jobs run passed in it, on the head or carried past clean canary merges and the reviewer's looks, so the jobs' own stamp adds nothing new. Never while canary's tip (its stamps, canary) is red, since only the fix's own run on its head lets it through.
 export const suitePassed = (read: StampRead | undefined, canary: Stamp[] = []): boolean =>
   read?.status === "green" &&
   !(canary.length > 0 && statusOf(canary) === "red") &&
@@ -226,7 +211,7 @@ export const suitePassed = (read: StampRead | undefined, canary: Stamp[] = []): 
     .flat()
     .every((name) => read.passed.includes(name))
 
-// Pure: the stamp GitHub's gate jobs earn at sha, for go.py to post as the owner: red as soon as one failed; else wait while one is queued or running or was cancelled, since a cancelled job ran nothing; green when the newest run of each passed; each with its jobs' checks and run ids, and verify skipped when the diff has no dashboard code (dashboard false). Null while a job has no run or was skipped, when suitePassed (the jobs then skip their steps), or when sha's CI stamp already says it.
+// Pure: the stamp GitHub's gate jobs earn at sha, for go.py to post as the owner: red as soon as one failed; else wait while one is queued or running or was cancelled, since a cancelled job ran nothing; green when the newest run of each passed; each with its jobs' checks and run ids, and verify skipped when the diff has no dashboard code (dashboard false). Null while a job has no run or was skipped, when suitePassed (nothing the jobs ran is new), or when sha's CI stamp already says it.
 export function jobsStamp(
   read: StampRead | undefined,
   sha: string,

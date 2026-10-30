@@ -63,7 +63,7 @@ export type PrFacts = {
   canaryStamps?: Stamp[] | string
   // The files the head's merge with canary conflicts in, null when it merged clean or could not be read; left out where no merge was read.
   conflicts?: string[] | null
-  // The head's GitHub checks; none while GitHub Actions is off, or while the PR lacks the Cloud CI label that starts them.
+  // The head's GitHub checks; none while GitHub Actions is off.
   checks: Check[]
   comments: Comment[]
   draft: boolean

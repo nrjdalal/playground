@@ -1,0 +1,46 @@
+name: auto-test
+
+on:
+  # no pull_request_review trigger: the result cannot change because someone reviewed, and a
+  # second run on the same commit only cancels the first through the concurrency group below,
+  # which surfaces on the PR as a cancelled check
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches: ["canary", "main"]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  auto-test:
+    name: test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Install uv (runs every Python step under Python 3.13)
+        uses: astral-sh/setup-uv@v10.2.0
+        with:
+          enable-cache: false
+
+      - name: Install Bun (runs test:skills)
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+
+      # test:skills' steps run zsh, which the hosted image may not carry
+      - name: Install zsh
+        run: sudo apt-get update && sudo apt-get install -y zsh
+
+      - name: Install dependencies (the lat check runs the locked lat-core from node_modules)
+        run: bun install --frozen-lockfile --ignore-scripts
+
+      - name: bun run test:skills (each step in the steps list of packages/scripts/src/test-skills.ts)
+        run: bun run test:skills
