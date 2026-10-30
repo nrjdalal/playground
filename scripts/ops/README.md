@@ -80,6 +80,7 @@ A job's entry is the first path in its `jobs.json` command, or in its launchd pl
 Its source is the entry's folder, each repo file the entry imports (TypeScript's relative imports followed through, a Python module beside it or one folder up) and each `@packages/<name>` it imports, whole, with each workspace package that package depends on.
 Each picked job is stopped by its heartbeat's pid, only while that pid's command line still holds the entry, and waited on up to 60s.
 One `up.py --restarted <names>` pass then starts the stopped herdr and cmux jobs again: once any running pass ends, it removes their starts from `up-state.json`, since `up.py` skips a job it started within its 10-minute GRACE; launchd starts its own.
+It first renders `jobs.json` from the settings with the new code, as `up.py` does, so a job whose default the move turned on reads as on; when it stopped no herdr or cmux job, a plain `up.py` pass starts each herdr or cmux job that is on and whose heartbeat pid runs nowhere.
 A paused job stays down, ops-herdr is left running for Ops, and ops-dashboard rolls onto new code itself (`dashboard/supervisor.sh`'s reload).
 
 ## runner-host
