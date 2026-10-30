@@ -76,7 +76,7 @@ export const JOBS: Record<string, Job> = {
   // The one job on by default: the Dashboard serves first run and every settings write, so a store with no row for it, or no store, keeps it running. It runs from the Dashboard's checkout, since its supervisor rolls the checkout it runs in and refuses any other branch.
   "ops-dashboard": terminal("ops-dashboard", "{dashboard}/scripts/ops/dashboard/run.sh", {
     cwd: "{dashboard}",
-    description: "Keeps the live dashboard running on canary's latest head.",
+    description: "Keeps the live dashboard running on its branch's latest head.",
     enabled: true,
     schedule: { every: 60 },
     stop: "dashboard",

@@ -194,8 +194,10 @@ esac
 """,
     "git": """#!/bin/bash
 [ -n "$STUB_GIT_LOG" ] && echo "$*" >> "$STUB_GIT_LOG"
+while [ "$1" = -c ]; do shift 2; done
 [ "$1" = symbolic-ref ] && { echo "${STUB_BRANCH:-live/dashboard}"; exit 0; }
 case "$1 $2" in
+  "merge-base --is-ancestor") exit 1 ;;
   "rev-parse --short") echo 0000000 ;;
   "rev-parse HEAD") echo 0000000000000000000000000000000000000000 ;;
   "ls-remote origin") printf '%s\trefs/heads/canary\n' "${STUB_CANARY:-0000000000000000000000000000000000000000}" ;;

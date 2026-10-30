@@ -20,7 +20,7 @@ export const OPS_DOES: Record<string, string> = {
   "ops-channel-watch": "Passes each new or edited factory channel post to Playground",
   "ops-checks": "Runs each open pull request's checks",
   "ops-consultant": "Starts a code consultant after 10 merges",
-  "ops-dashboard": "Keeps the Dashboard on canary's latest head",
+  "ops-dashboard": "Keeps the Dashboard on its branch's latest head",
   "ops-ext-sync": "Syncs each extension with its private repo each night",
   "ops-fixture": "Runs a Dashboard on made-up data for checks",
   "ops-flow": "Tells the leads when a merge or a run slot stalls",
