@@ -125,6 +125,7 @@
   Before that it refuses, naming both ports, a `POSTGRES_URL` whose port is not the one in the `.env` of the checkout `dashboard-ask.ts` lives in (`checkoutMismatch` in `api/hono/src/lib/sessions/guard.ts`): a run by path from another checkout, or a URL exported in the shell over the `.env`.
   A test run (`NODE_ENV=test`) passes its own container's URL on purpose, and the check skips it.
   Run it in the checkout that serves the dashboard, from anywhere with `bun run --cwd <checkout> ask`: any other checkout has its own database, which the live dashboard never shows, and says so on stderr.
+  From a user install's clone root with no `POSTGRES_URL`, `bun run ask` runs as the Dashboard's checkout's (`.claude/worktrees/desk`, whose `.env` holds the database), through `api/hono/src/bin/ask-from-clone.ts`.
   A fresh worktree runs it once its `.env` is set up (the `dev` skill's Start) and its shared packages are built (`~/.playground/ops/run-slot.sh <your name> -- bunx turbo run build --filter='./packages/*'`), since a cloned `node_modules` alone leaves `@packages/db` unresolved.
 
   ```bash
