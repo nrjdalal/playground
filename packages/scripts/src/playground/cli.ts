@@ -7,8 +7,10 @@ import { getSessionNames, setSessionNames } from "@packages/config/kinds"
 import { configDirOf, dataDir } from "@packages/env/data-dir"
 import { modelSettings, readPolicy, readSessionNames } from "@packages/settings"
 
+import { assetOf, herdrPath, pinnedSum } from "../ops-herdr/pin"
 import { accountsIo, runAccounts } from "./accounts"
 import { doctor, report } from "./doctor"
+import { checkHerdr, pinHere } from "./herdr-pin"
 import { orgsCommand, orgsIo } from "./orgs"
 import { keepPage, pageArgs } from "./page"
 import {
@@ -96,6 +98,34 @@ const opsHerdr = (args: string[]) =>
   Bun.spawn([process.execPath, "--no-env-file", OPS_HERDR, ...args], {
     stdio: ["inherit", "inherit", "inherit"],
   })
+
+// playground dispatcher's herdr, which the bare start brings up and Start <dispatcher> on a fresh install has not: the pinned copy installed as install.sh installs it when it is missing, then one pass of ops-herdr's start, which writes the pin and config and brings the servers up, since spawn.sh starts none; null once herdr is ready, else the line that says why not.
+const herdrReady = async (): Promise<string | null> => {
+  const asset = assetOf()
+  if (checkHerdr(herdrPath(), asset ? pinnedSum(asset) : "").code !== 0) {
+    const pinned = await pinHere()
+    if (pinned.code !== 0) return pinned.line
+  }
+  const child = Bun.spawn([process.execPath, "--no-env-file", OPS_HERDR, "start"], {
+    stderr: "pipe",
+    stdin: "ignore",
+    stdout: "pipe",
+  })
+  const [out, err, code] = await Promise.all([
+    new Response(child.stdout).text(),
+    new Response(child.stderr).text(),
+    child.exited,
+  ])
+  const last = (text: string) => text.trim().split("\n").at(-1)
+  return code === 0 ? null : last(out) || last(err) || `ops-herdr start exited ${code}`
+}
+
+const dispatcherAlone = async (): Promise<number> => {
+  const unready = await herdrReady()
+  if (unready === null) return (await dispatcher()).code
+  console.error(`playground: ${unready}`)
+  return 1
+}
 
 // Loaded only for sweep, since sweep.ts reaches past this folder into ops-tick.
 const sweep = async (lead: string): Promise<number> => {
@@ -327,7 +357,7 @@ const code =
           : command === "add"
             ? await add(rest)
             : command === "dispatcher"
-              ? (await dispatcher()).code
+              ? await dispatcherAlone()
               : command === "page"
                 ? page(rest)
                 : command === "view"

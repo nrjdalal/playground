@@ -46,6 +46,8 @@ describe("bare dispatcher", () => {
     python3: string,
     more: Record<string, string> = {},
     files: Record<string, string> = {},
+    words: string[] = [],
+    env: Record<string, string> = {},
   ) => {
     // dispatcher finds its repo by realpath, which on macOS puts /private before tmpdir's /var
     const root = mkdtempSync(join(realpathSync(dir), "bare-"))
@@ -85,9 +87,9 @@ describe("bare dispatcher", () => {
     }
     for (const [path, text] of Object.entries(files)) await Bun.write(join(repo, path), text)
     const child = Bun.spawn(
-      [process.execPath, "--no-env-file", join(src, "playground", "cli.ts")],
+      [process.execPath, "--no-env-file", join(src, "playground", "cli.ts"), ...words],
       {
-        env: { HOME: root, PATH: `${bin}:${dirname(process.execPath)}:/usr/bin:/bin` },
+        env: { ...env, HOME: root, PATH: `${bin}:${dirname(process.execPath)}:/usr/bin:/bin` },
         stderr: "pipe",
         stdout: "pipe",
       },
@@ -152,6 +154,75 @@ describe("bare dispatcher", () => {
     expect(err).not.toContain("Traceback")
     expect(out).toEndWith(`Left for you:\n  - The dispatcher didn't start: ${refusal}\n`)
   }, 15_000)
+
+  // Start <dispatcher> runs playground dispatcher, which on a fresh install found no herdr: spawn.sh refused on the missing pin, since only the bare start ran ops-herdr.
+  describe("playground dispatcher brings herdr up before spawn.sh", () => {
+    const run = async (opts: {
+      binary: boolean
+      env?: Record<string, string>
+      opsHerdr: string
+    }) => {
+      const log = join(mkdtempSync(join(realpathSync(dir), "log-")), "log")
+      writeFileSync(log, "")
+      const stub = "#!/bin/sh\necho herdr 0.9.5\n"
+      const sum = new Bun.CryptoHasher("sha256").update(stub).digest("hex")
+      const pin = JSON.parse(readFileSync(join(dirname(CLI), "../ops-herdr/pin.json"), "utf8"))
+      for (const asset of Object.keys(pin.sha256)) pin.sha256[asset] = sum
+      // the helper's HOME is the repo's parent, so ../.playground is the data folder the pin names
+      const { child } = await dispatcher(
+        "exit 0",
+        {},
+        {
+          ...(opts.binary ? { "../.playground/bin/herdr": stub } : {}),
+          "packages/scripts/src/ops-herdr/cli.ts": `import { appendFileSync } from "node:fs"\nappendFileSync(${JSON.stringify(log)}, \`ops-herdr \${process.argv.slice(2).join(" ")}\\n\`)\n${opts.opsHerdr}\n`,
+          "packages/scripts/src/ops-herdr/pin.json": JSON.stringify(pin),
+          "scripts/briefs/dispatcher.md": "brief\n",
+          "scripts/spawn.sh": `echo "spawn.sh $*" >> ${log}\n`,
+        },
+        ["dispatcher"],
+        opts.env,
+      )
+      const deadline = setTimeout(() => child.kill(), 20_000)
+      const code = await child.exited
+      clearTimeout(deadline)
+      return {
+        code,
+        err: await new Response(child.stderr).text(),
+        ran: readFileSync(log, "utf8").split("\n").filter(Boolean),
+      }
+    }
+
+    test("with the pinned binary on hand, ops-herdr's start runs first, then spawn.sh starts the dispatcher", async () => {
+      const { code, ran } = await run({ binary: true, opsHerdr: 'console.log("ops-herdr: ok")' })
+      expect(ran).toEqual(["ops-herdr start", "spawn.sh manager dispatcher brief-dispatcher.md"])
+      expect(code).toBe(0)
+    }, 30_000)
+
+    test("an ops-herdr start that fails stops it before spawn.sh, its last line on stderr for Start to show whole", async () => {
+      const reason = "ops-herdr: factory started, but its status did not read running within 10s"
+      const { code, err, ran } = await run({
+        binary: true,
+        opsHerdr: `console.log("ops-herdr: started probes")\nconsole.log(${JSON.stringify(reason)})\nprocess.exit(1)`,
+      })
+      expect(ran).toEqual(["ops-herdr start"])
+      expect(err.trim().split("\n").at(-1)).toBe(`playground: ${reason}`)
+      expect(code).toBe(1)
+    }, 30_000)
+
+    test("with no pinned binary it installs one first, and a download that fails says so and runs neither", async () => {
+      const proxy = "http://127.0.0.1:9"
+      const { code, err, ran } = await run({
+        binary: false,
+        env: { HTTPS_PROXY: proxy, https_proxy: proxy },
+        opsHerdr: "",
+      })
+      expect(ran).toEqual([])
+      expect(err.trim().split("\n").at(-1)).toMatch(
+        /^playground: herdr-pin: https:\/\/github\.com\/herdrdev\/herdr\/releases\/download\/v\S+ could not be fetched: /,
+      )
+      expect(code).toBe(1)
+    }, 30_000)
+  })
 })
 
 describe("a fresh machine", () => {
