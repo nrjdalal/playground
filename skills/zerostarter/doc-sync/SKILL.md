@@ -25,7 +25,6 @@ Hand-authored, keep each in step with the code:
 | `.agents/dashboard/<topic>.md` | the dashboard app's rules, one file per topic, each reached from `AGENTS.md` by a pointer naming when to read it, each ALWAYS rule also there in one line | a dashboard rule changes: edit the topic file that holds it, and its one-line form in `AGENTS.md` when its meaning moves; a new topic file gets its pointer, and a new ALWAYS rule its line under that pointer |
 | `.agents/testing.md` | the test suite's reference (the sandbox, the parallel pass, its traps), reached from `AGENTS.md`'s test rule by a pointer | the suite's runner or its sandbox changes |
 | `scripts/README.md`, `scripts/hooks/README.md` | spawn.sh's and ops-herdr's full rules, and the factory hooks', one section per hook, each reached from its one line in `AGENTS.md` | a hook, spawn.sh or ops-herdr changes: edit its section, and its one line in `AGENTS.md` when its meaning moves; a new hook gets a section and a line |
-| `lat.md/*.md` | the map of which file to edit for each kind of change, and the skill to load next (codebase-map points at it); `lat-core check` keeps only its `[[links]]` true | a command, a text path, a folder or a skill name it names changes |
 | `packages/config/src/site.ts` | the brand, the feature flags, and the hand-written preamble served at the top of `/llms-full.txt` | the layout, the route groups, the packages, or the API surface it describes changes |
 
 Generated, never hand-edit (they regenerate from the surfaces above): `content/docs/meta.json` (git-ignored), the `/llms.txt` and `/llms-full.txt` routes, and the fumadocs search index. The one hand-written part of those routes is the `/llms-full.txt` preamble, which lives in `site.ts` above.
@@ -39,7 +38,7 @@ List what the diff touched: paths, commands, script names, env vars, conventions
 Grep every surface for each changed path, command, or symbol; every hit is a candidate:
 
 ```bash
-rg -n "<changed-path-or-command>" web/next/content/docs README.md AGENTS.md .agents/dashboard .agents/skills .agents/testing.md scripts/README.md scripts/hooks/README.md lat.md web/next/docs.config.ts
+rg -n "<changed-path-or-command>" web/next/content/docs README.md AGENTS.md .agents/dashboard .agents/skills .agents/testing.md scripts/README.md scripts/hooks/README.md web/next/docs.config.ts
 ```
 
 ## 3. Sync, coupled surfaces included

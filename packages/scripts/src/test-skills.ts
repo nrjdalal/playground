@@ -27,7 +27,6 @@ const steps: [string, string[]][] = [
   ["ops cmux", py("test_ops_cmux.py")],
   ["ops checks", py("test_ops_checks.py")],
   ["ops merge train", py("test_ops_merge_train.py")],
-  ["lat check", ["bun", "node_modules/.bin/lat-core", "check"]],
   ["em-dash check", ["bash", "scripts/check-em-dashes.sh"]],
   ["one sentence per line", ["bun", "packages/scripts/src/docs-wrap/cli.ts", "--check"]],
 ]
