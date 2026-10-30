@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # With the follower and the dashboard already stopped by their own recorded process groups (procs.sh, never by name), fast-forward
-# the live branch (live.branch) to origin/canary (or reset it to the sha the supervisor names: canary's head, or the head it ran before a failed roll), install/build/migrate as the merge needs, then restart each ops job whose source the move changed (ops-restart) (the dev launcher sets GIT_SHA, so health reports HEAD without an env rebuild). Start dev and the
+# the live branch (live.branch) to origin/<upstream>, the branch upstream.sh names (or reset it to the sha the supervisor names: the upstream's head, or the head it ran before a failed roll), install/build/migrate as the merge needs, then restart each ops job whose source the move changed (ops-restart) (the dev launcher sets GIT_SHA, so health reports HEAD without an env rebuild). Start dev and the
 # follower afterwards as background tasks of the runner session (each writes its own pid file).
 set -e
 # It runs in the dashboard's checkout, the supervisor's working directory, and refuses any checkout not on live.branch, since it resets hard.
@@ -10,11 +10,12 @@ LIVE=$(bun --no-env-file "$D/../../../packages/scripts/src/playground/setting.ts
 branch=$(git symbolic-ref --short HEAD 2>/dev/null || true)
 [ "$branch" = "$LIVE" ] || { echo "redeploy-pull: refusing to reset $PWD on ${branch:-a detached HEAD}: the dashboard's checkout is on $LIVE" >&2; exit 1; }
 OLD=$(git rev-parse HEAD)
-# an optional target sha to reset to (canary's head, or the head before a failed roll); none fast-forwards to origin/canary
-TARGET=${1:-origin/canary}
-git fetch -q origin
-if [ "$TARGET" = origin/canary ] && git merge-base --is-ancestor HEAD origin/canary; then
-  git merge -q --ff-only origin/canary
+# an optional target sha to reset to (the upstream's head, or the head before a failed roll); none fast-forwards to origin/<upstream>
+UPSTREAM=origin/$("$D/upstream.sh")
+TARGET=${1:-$UPSTREAM}
+"$D/net-git.sh" fetch -q origin
+if [ "$TARGET" = "$UPSTREAM" ] && git merge-base --is-ancestor HEAD "$UPSTREAM"; then
+  git merge -q --ff-only "$UPSTREAM"
 else
   git reset -q --hard "$TARGET"
 fi

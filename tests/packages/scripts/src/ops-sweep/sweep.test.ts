@@ -455,5 +455,13 @@ describe("maybePrune", () => {
     )
     await maybePrune(rolled.ctx)
     expect(rolled.calls).toHaveLength(0)
+    const onMain = setup()
+    mkdirSync(join(onMain.ops, "dashboard"))
+    writeFileSync(
+      join(onMain.ops, "dashboard", "supervisor.log"),
+      `${new Date(NOW - 60_000).toISOString().slice(0, 19)}Z main moved: abc1234 -> def5678\n`,
+    )
+    await maybePrune(onMain.ctx)
+    expect(onMain.calls).toHaveLength(0)
   })
 })
