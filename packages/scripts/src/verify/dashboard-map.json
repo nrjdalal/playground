@@ -23,6 +23,7 @@
         "POST /api/v1/inbox/:id/schedule",
         "POST /api/v1/workers/:sessionId/feed/:requestId",
         "POST /api/v1/workers/:sessionId/mode",
+        "POST /api/v1/workers/:sessionId/restart",
         "GET /api/v1/sessions/:id/steps",
         "POST /api/v1/dashboard/dispatcher/start"
       ],
@@ -45,6 +46,7 @@
         "A message's files show as chips under its bubble, or alone when it has no words: by name and size while the page's outbox knows them, else by kind; an image opens in a new tab and any other file downloads (an image no longer kept reads Expired).",
         "A sent message shows at once as a pending bubble whose footer holds a fixed slot for its state's one action, then its Copy, one icon button that copies the message's words, and marks where it is with one icon in a fixed slot, its words on hover (a spinner while sending or queued, and why, with Unsend; one tick once typed; a red mark when it failed, its reason beside it, with Edit and Discard) until the transcript holds it, then two ticks for Delivered, the time it arrived on hover, with Undo on his newest message for 2 minutes, which sends a fixed line telling the session to ignore it and strikes the message through as Unsent; one sent while a picker waits queues until the picker is answered.",
         "A session waiting on a decision or draft it posted reads Waiting on your inbox, linked to the item.",
+        "A session whose Claude login expired, as its transcript's API error or ops-unstick's read of its pane says, shows a Login expired card above its steps in place of the lost-prompt line: Add account opens Settings' own Add account dialog, and the Claude account it keeps restarts the session on it through POST /api/v1/workers/:sessionId/restart (spawn.sh close, then resume on --account), its conversation kept; Restart reopens it on this Mac's own login; the composer keeps a typed /login unsent and says to use Add account, so it never lands on a prompt.",
         "Above the steps, on a Checkpoint line, Load older pages back through the session's older steps from the database until the start of the session, or says the database has not read that far.",
         "An answered Inbox item keeps one line above its footer saying what he chose and whether it reached its poster, a go reading as still being carried out (Sending in Slack… for a sent draft, Saving a Slack draft… for a Draft) until its poster closes it, then linking where it landed (a Slack link as Open thread) or giving why there is no link, a Draft Slack refused reading, gray, Draft not saved with why.",
         "An Inbox answer that did not reach its poster stays in the list and its count, its result reading Send failed, or Send unconfirmed, with the reason above a footer whose left end holds Retry, which sends it again, and whose right end holds Dismiss, then Reply.",
