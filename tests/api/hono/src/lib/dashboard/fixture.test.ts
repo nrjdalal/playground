@@ -10,11 +10,12 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs"
-import { tmpdir } from "node:os"
+import { homedir, tmpdir } from "node:os"
 import { join, relative } from "node:path"
 
 import {
   checkoutRoot,
+  configDir,
   dashboardSource,
   DASHBOARD_RULES,
   dropFixture,
@@ -876,5 +877,29 @@ describe("the shipped fixture's pulls", () => {
         number: Number(agent.pr!.split("/").at(-1)),
       })
     }
+  })
+})
+
+// A dispatcher spawn.sh started under inscope registered in ~/.claude/sessions while the board read inscope's own folder, so the board showed it off and Start said it was already running
+describe("configDir on a live source", () => {
+  const keep = ["CLAUDE_CONFIG_DIR", "INSCOPE_CCD", "PLAYGROUND_LIVE_READS"].map(
+    (name) => [name, process.env[name]] as const,
+  )
+  afterAll(() => {
+    for (const [name, value] of keep)
+      if (value === undefined) delete process.env[name]
+      else process.env[name] = value
+  })
+
+  test("reads ~/.claude under inscope, where spawn.sh's sessions register, else CLAUDE_CONFIG_DIR", () => {
+    const inscope = join(homedir(), ".config", "inscope", "work", "claude")
+    process.env.PLAYGROUND_LIVE_READS = "1"
+    process.env.CLAUDE_CONFIG_DIR = inscope
+    process.env.INSCOPE_CCD = inscope
+    expect(configDir()).toBe(join(homedir(), ".claude"))
+    delete process.env.INSCOPE_CCD
+    expect(configDir()).toBe(inscope)
+    delete process.env.CLAUDE_CONFIG_DIR
+    expect(configDir()).toBe(join(homedir(), ".claude"))
   })
 })
