@@ -1,13 +1,13 @@
 import { dataDir } from "@packages/env/data-dir"
-import { liveSettings, readPolicySync } from "@packages/settings"
+import { liveSettings, readPolicyOrDefaults } from "@packages/settings"
 
 export type LiveDashboard = { branch: string; database: string }
 
-// The live dashboard's database belongs to its own checkout: a .env copied from there carries it, and a stack elsewhere would write test rows into the board the owner reads. The pair is live.branch and live.container; settings it cannot read throw, so no guard judges by a guessed pair.
+// The live dashboard's database belongs to its own checkout: a .env copied from there carries it, and a stack elsewhere would write test rows into the board the owner reads. The pair is live.branch and live.container, their defaults until a first setting writes policy.json; a policy.json that does not parse throws, so no guard judges by a guessed pair.
 export const livePair = (
   environment: Record<string, string | undefined> = process.env,
 ): LiveDashboard => {
-  const read = readPolicySync(dataDir(environment))
+  const read = readPolicyOrDefaults(dataDir(environment))
   if (read.refusal !== undefined) throw new Error(read.refusal)
   return {
     branch: liveSettings.get(read.settings, "live.branch"),

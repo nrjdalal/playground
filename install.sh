@@ -179,10 +179,42 @@ finish() {
   fi
 }
 
+# The bun every step after the clone runs: the first on PATH, until ensure_bun names one at least the checkout's own.
+BUN=bun
+# Whether version $1 is $2 or newer, by its first three numbers.
+at_least() {
+  local have want i IFS=.-
+  read -r -a have <<<"$1"
+  read -r -a want <<<"$2"
+  for i in 0 1 2; do
+    [ "${have[i]:-0}" -eq "${want[i]:-0}" ] 2>/dev/null && continue
+    [ "${have[i]:-0}" -gt "${want[i]:-0}" ] 2>/dev/null
+    return
+  done
+}
+# A bun at least package.json's packageManager names, since bun.lock's format follows it and an older bun cannot install it: else bun's installer puts that version in ~/.bun, which goes first on PATH, so a step's own `bun` and `#!/usr/bin/env bun` find it too. --check only names it.
+ensure_bun() {
+  local want have path fix
+  want=$(sed -n 's/^ *"packageManager": *"bun@\([^"]*\)".*/\1/p' "$DIR/package.json" 2>/dev/null)
+  [ -n "$want" ] || return 0
+  path=$(command -v bun) || return 1
+  have=$("$path" --version 2>/dev/null || true)
+  at_least "$have" "$want" && BUN="$path" && return 0
+  fix="curl -fsSL https://bun.sh/install | bash -s bun-v$want"
+  if [ -z "$CHECK" ] && curl -fsSL https://bun.sh/install | bash -s "bun-v$want"; then
+    on_path "$HOME/.bun/bin" BUN_INSTALL
+    PATH="$HOME/.bun/bin:$PATH"
+    path="$HOME/.bun/bin/bun"
+    at_least "$("$path" --version 2>/dev/null || true)" "$want" && BUN="$path" && return 0
+  fi
+  left "bun: $path is ${have:-of no version}, older than $want, which Playground's lockfile needs; run $fix"
+  return 1
+}
+
 DOCTOR="$DIR/packages/scripts/src/playground/doctor.ts"
 # The rest of the doctor's own list, as name<TAB>fix in the order the tools are installed in: only the tools install_tool installs, since the gh login waits for a gh this run may install, and herdr is herdr_pin's.
 rest_of_doctor() {
-  bun --no-env-file "$DOCTOR" --tools --json | bun --no-env-file -e '
+  "$BUN" --no-env-file "$DOCTOR" --tools --json | "$BUN" --no-env-file -e '
     const order = ["git", "node", "gh", "python3", "uv", "bun", "claude", "docker"]
     const left = JSON.parse(await Bun.stdin.text()).filter((c) => c.status !== "ok" && order.includes(c.name))
     for (const c of left.sort((a, b) => order.indexOf(a.name) - order.indexOf(b.name)))
@@ -201,7 +233,7 @@ gh_sign_in() {
 herdr_pin() {
   local err
   err=$(mktemp)
-  bun --no-env-file "$DIR/packages/scripts/src/playground/herdr-pin.ts" "$@" 2>"$err" </dev/null ||
+  "$BUN" --no-env-file "$DIR/packages/scripts/src/playground/herdr-pin.ts" "$@" 2>"$err" </dev/null ||
     left "herdr: $(tail -n 1 "$err" | grep . || echo "its pinned install stopped; run bun $DIR/packages/scripts/src/playground/herdr-pin.ts")"
   rm -f "$err"
 }
@@ -274,6 +306,7 @@ main() {
 
   if [ -n "$CHECK" ]; then
     if has bun && [ -f "$DOCTOR" ]; then
+      ensure_bun || true
       install_all 3< <(rest_of_doctor)
       gh_sign_in
       herdr_pin --check
@@ -313,6 +346,11 @@ EOF
     git clone -q "https://github.com/$REPO.git" "$DIR"
   fi
 
+  if ! ensure_bun; then
+    echo "Playground needs a newer bun before it can install, so it stops here."
+    finish
+    exit 1
+  fi
   install_all 3< <(rest_of_doctor)
   gh_sign_in
   herdr_pin
@@ -324,7 +362,7 @@ EOF
     finish
     exit 1
   fi
-  (cd "$DIR" && bun install --frozen-lockfile)
+  (cd "$DIR" && "$BUN" install --frozen-lockfile)
   env NODE_ENV=production SKIP_ENV_VALIDATION=true "$DIR/node_modules/.bin/turbo" run build --filter='./packages/*' --cwd "$DIR"
   bash "$DIR/scripts/link-skills.sh"
   on_path "$HOME/.bun/bin" BUN_INSTALL
@@ -337,7 +375,7 @@ EOF
     echo "The Dashboard's local address is not set up, so playground does not start yet: run bash $DIR/install.sh again in a terminal to set it up and start it."
     exit 1
   fi
-  if bun --no-env-file "$DOCTOR" --tools >/dev/null; then
+  if "$BUN" --no-env-file "$DOCTOR" --tools >/dev/null; then
     exec "$HOME/.bun/bin/playground"
   fi
   echo "Then run: playground"

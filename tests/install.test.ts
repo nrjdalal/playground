@@ -28,6 +28,7 @@ const SOURCE_FILES = [
   ".gitignore",
   "api/hono/src/lib/dev/proxy.ts",
   "install.sh",
+  "package.json",
   "packages/env/src/aliases.ts",
   "packages/env/src/data-dir.ts",
   "packages/scripts/src/ops-herdr/pin.json",
@@ -63,6 +64,10 @@ for (const dir of ["/bin", "/usr/bin"])
     if (!FAKED.includes(name) && !existsSync(join(sys, name)))
       symlinkSync(join(dir, name), join(sys, name))
 const realGit = Bun.which("git")!
+// The bun package.json's packageManager names, which install.sh holds every bun to.
+const WANTED_BUN = /^bun@(\S+)$/.exec(
+  JSON.parse(readFileSync(join(root, "package.json"), "utf8")).packageManager,
+)![1]!
 
 const write = (path: string, text: string, mode = 0o644) => {
   mkdirSync(dirname(path), { recursive: true })
@@ -107,6 +112,8 @@ type Setup = {
   herdr?: { code: number; stderr?: string }
   // the tools not on this machine at the start; brew, bun's installer and Claude Code's add them
   missing?: Tool[]
+  // a bun of this version first on PATH in place of the current one, whose install refuses the lockfile as an old bun does
+  oldBun?: string
   repoExists?: boolean
   // rows a fake doctor.ts adds to its --tools --json list, for a row install.sh has no installer for
   doctorRows?: { detail: string; name: string; status: string }[]
@@ -130,6 +137,7 @@ const setup = ({
   ghUser = "",
   herdr = { code: 0 },
   missing = [],
+  oldBun,
   proxy = { answers: true, plist: true },
   repoExists = false,
   sudoFails = false,
@@ -205,6 +213,7 @@ const setup = ({
       `cp ${store}/$tool ${prefix}/bin/$tool`,
     ].join("\n"),
     bun: [
+      `[ "$1" = --version ] && { echo ${WANTED_BUN}; exit 0; }`,
       // the workspace packages the home skill set's resolver imports, from this checkout's install
       `if [ "$1" = install ]; then echo "bun $*" >> ${log}; mkdir -p node_modules/.bin packages/scripts/node_modules; ln -sfn ${join(root, "packages", "scripts", "node_modules", "@packages")} packages/scripts/node_modules/@packages`,
       `  printf '#!/bin/sh\\necho "turbo $*" >> ${log}\\n' > node_modules/.bin/turbo; chmod +x node_modules/.bin/turbo; cp ${store}/portless node_modules/.bin/portless; exit 0; fi`,
@@ -219,7 +228,7 @@ const setup = ({
       `echo "curl $*" >> ${log}`,
       "for url; do :; done",
       'case "$url" in',
-      `  https://bun.sh/install) ${fail.includes("bun") ? "exit 22" : `echo 'mkdir -p "$HOME/.bun/bin" && cp ${store}/bun "$HOME/.bun/bin/bun"'`} ;;`,
+      `  https://bun.sh/install) ${fail.includes("bun") ? "exit 22" : `echo 'echo "bun installer $*" >> ${log}; mkdir -p "$HOME/.bun/bin" && cp ${store}/bun "$HOME/.bun/bin/bun"'`} ;;`,
       `  https://claude.ai/install.sh) ${fail.includes("claude") ? "exit 22" : `echo 'mkdir -p "$HOME/.local/bin" && cp ${store}/claude "$HOME/.local/bin/claude"'`} ;;`,
       `  https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh) ${fail.includes("brew") ? "exit 22" : `echo 'read -r answer; echo "homebrew installer read $answer" >> ${log}; mkdir -p ${prefix}/bin && cp ${store}/brew ${prefix}/bin/brew'`} ;;`,
       "  *) exit 22 ;;",
@@ -269,6 +278,17 @@ const setup = ({
   ] as const)
     if (!missing.includes(tool as Tool)) cpSync(join(store, tool), join(bin, tool))
   if (!missing.includes("brew")) cpSync(join(store, "brew"), join(prefix, "bin/brew"))
+  if (oldBun)
+    write(
+      join(bin, "bun"),
+      [
+        "#!/bin/sh",
+        `[ "$1" = --version ] && { echo ${oldBun}; exit 0; }`,
+        `if [ "$1" = install ]; then echo "old bun $*" >> ${log}; echo "error: Unknown lockfile version" >&2; exit 1; fi`,
+        `exec ${process.execPath} "$@"`,
+      ].join("\n"),
+      0o755,
+    )
 
   // with no gh login, git's own https clone of the repo lands on the source
   write(
@@ -313,7 +333,7 @@ const setup = ({
   }
   const rc = (name = ".zshrc") =>
     existsSync(join(home, name)) ? readFileSync(join(home, name), "utf8") : null
-  return { bin, dir, home, plist, prefix, rc, run, source, up }
+  return { bin, box, dir, home, plist, prefix, rc, run, source, up }
 }
 
 // Every path under the folder, with its link target or its content, so two snapshots differ when anything changed; git's own files are left to the HEAD and status checks.
@@ -627,6 +647,36 @@ describe("install.sh", () => {
     const { left } = run({ args: ["--check"] })
     expect(left.filter((item) => item.startsWith("node: "))).toEqual(["node: brew install node"])
   }, 60_000)
+
+  test("an older bun first on PATH gets package.json's version from bun's installer into ~/.bun, and every later step runs that one", () => {
+    const { bin, rc, run } = setup({ oldBun: "1.3.14" })
+    const { calls, code, out } = run()
+    expect(calls).toContain(`bun installer bun-v${WANTED_BUN}`)
+    expect(calls).toContain("bun install --frozen-lockfile")
+    expect(calls).not.toContain("old bun")
+    expect(out).not.toContain(`${bin}/bun is 1.3.14`)
+    expect(rc()).toContain(".bun/bin")
+    expect(out).toContain("playground started")
+    expect(code).toBe(0)
+  })
+
+  test("a bun at package.json's version takes no upgrade", () => {
+    const { calls, code } = setup().run()
+    expect(calls).not.toContain("bun.sh/install")
+    expect(calls).toContain("bun install --frozen-lockfile")
+    expect(code).toBe(0)
+  })
+
+  test("--check names an older bun with the command that upgrades it, and installs nothing", () => {
+    const { bin, box, dir, home, run, source } = setup({ oldBun: "1.3.14" })
+    git(box, home, "clone", "-q", source, dir)
+    const { calls, code, left } = run({ args: ["--check"] })
+    expect(left).toContain(
+      `bun: ${bin}/bun is 1.3.14, older than ${WANTED_BUN}, which Playground's lockfile needs; run curl -fsSL https://bun.sh/install | bash -s bun-v${WANTED_BUN}`,
+    )
+    expect(calls).not.toContain("bun.sh/install")
+    expect(code).toBe(1)
+  })
 
   test("--check on a ready machine says it is ready and exits 0", () => {
     const { run } = setup()
