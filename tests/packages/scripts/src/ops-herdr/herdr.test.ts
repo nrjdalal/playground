@@ -12,6 +12,7 @@ import {
   cycle,
   envReport,
   herdrDir,
+  leftOverLines,
   owedFile,
   pinFor,
   pinProblem,
@@ -21,7 +22,9 @@ import {
   serverEnv,
   serverNames,
   serverStatusLines,
+  socketServers,
   startOnce,
+  stateDir,
   statusLine,
   stopRefusal,
   type Pin,
@@ -146,7 +149,16 @@ describe("herdrDir", () => {
 
 describe("serverNames", () => {
   test("lists both servers by default", () => {
-    expect(serverNames({})).toEqual({ sessions: ["factory", "probes"], skipped: [] })
+    expect(serverNames({})).toEqual({ sessions: ["playground", "playground-probes"], skipped: [] })
+  })
+
+  // herdr keeps a server's state by its name alone, so Playground's servers named factory and probes restored the factory's own saved layout on a Mac that runs both
+  test("each default server keeps its state in a folder of its own, never the factory's", () => {
+    const theirs = ["factory", "probes"].map((name) => stateDir("/Users/me", name))
+    for (const session of serverNames({}).sessions) {
+      expect(stateDir("/Users/me", session)).toBe(`/Users/me/.config/herdr/sessions/${session}`)
+      expect(theirs).not.toContain(stateDir("/Users/me", session))
+    }
   })
 
   test("keeps each word from the list and skips any other name", () => {
@@ -161,6 +173,40 @@ describe("serverNames", () => {
       sessions: ["factory"],
       skipped: ["default"],
     })
+  })
+})
+
+describe("socketServers", () => {
+  test("names each server on a socket in the folder, an old name's included, and no client's socket or herdr's default", () => {
+    expect(
+      socketServers([
+        "config.toml",
+        "default.sock",
+        "factory.sock",
+        "pin.json",
+        "playground-client.sock",
+        "playground-probes.sock",
+        "playground.out",
+        "playground.sock",
+        "Bad.sock",
+      ]),
+    ).toEqual(["factory", "playground", "playground-probes"])
+  })
+})
+
+describe("leftOverLines", () => {
+  const sessions = ["playground", "playground-probes"]
+  const servers = ["factory", "playground", "playground-probes", "probes"]
+
+  test("an old-named server still running in the folder gets one line naming the stop, and is left running", () => {
+    expect(leftOverLines(servers, sessions, ["factory", "playground"], "/h")).toEqual([
+      "Left for you: herdr server factory still runs from an older Playground in /h, beside the current ones; playground herdr stop stops every server there, then playground starts the current ones",
+    ])
+  })
+
+  test("none running, or only the current ones, gives no line", () => {
+    expect(leftOverLines(servers, sessions, [], "/h")).toEqual([])
+    expect(leftOverLines(servers, sessions, sessions, "/h")).toEqual([])
   })
 })
 

@@ -501,7 +501,7 @@ def test_up_herdr(scratch):
     sha = __import__("hashlib").sha256(open(os.path.join(bins, "herdr"), "rb").read()).hexdigest()
     with open(os.path.join(pins, "pin.json"), "w") as f:
         json.dump({"path": os.path.join(bins, "herdr"), "sha256": sha, "version": "0.9.5"}, f)
-    sock = os.path.join(pins, "factory.sock")
+    sock = os.path.join(pins, "playground.sock")
     open(sock, "w").close()
     herdr_state = os.path.join(scratch, "herdr-state.json")
     cmux_log = os.path.join(scratch, "cmux.log")
@@ -541,7 +541,7 @@ def test_up_herdr(scratch):
         a = next((p for p in st["panes"] if p.get("label") == "ops-a"), {})
         check(len(ops) == 1 and a.get("workspace_id") == ops[0]["workspace_id"], "up: a herdr job with no Ops workspace creates one labelled Ops", json.dumps(st))
         check(a.get("run") == f"cd /x && exec python3 -I {up.ONCE} ops-a python3 {folder}/ops-a/run.py", "up: the herdr pane runs the job's once.py command", a.get("run"))
-        check(all(c["socket"] == sock and c["session"] == "factory" for c in st["calls"]), "up: every herdr call goes to the factory server's socket in the pin folder")
+        check(all(c["socket"] == sock and c["session"] == "playground" for c in st["calls"]), "up: every herdr call goes to the playground server's socket in the pin folder")
         check(not any("--no-focus" not in c["args"] for c in st["calls"] if c["args"][:2] in (["workspace", "create"], ["pane", "split"])), "up: herdr opens its pane with --no-focus")
 
         # 2: a second herdr job splits right beside the existing Ops pane

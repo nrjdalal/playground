@@ -198,7 +198,7 @@ ZeroStarter's rules above govern Playground too; this section adds its own.
 - Every worktree shares one `.git/hooks`, and lefthook.yml's `lefthook: bun node_modules/.bin/lefthook` makes each hook run the committing worktree's own lefthook, never the binary of whichever worktree last ran `bun install` (which goes when that worktree is removed).
   So a worktree commits, pushes or merges once it has run `bun install`; one that stops on `error: Script not found "node_modules/.bin/lefthook"` needs it.
   lefthook rewrites the shared hooks whenever the committing worktree's config differs from the last install's, so a worktree branched before this setting puts the old hook back on its next commit until it rebases onto `canary`.
-- Run `bun run test:skills`, CI's `hosted-test.yml` steps, before pushing a change to a hook, a script, a skill's frontmatter, or a command that starts a database or stops a process ([scripts/README.md](./scripts/README.md#bun-run-testskills)).
+- Run `bun run test:skills`, CI's `auto-test.yml` steps, before pushing a change to a hook, a script, a skill's frontmatter, or a command that starts a database or stops a process ([scripts/README.md](./scripts/README.md#bun-run-testskills)).
 - The em-dash rule above has one exception: an output format the user specified, such as linear's table, where `—` marks an empty cell.
   `scripts/check-em-dashes.sh` skips inline code and table cells that hold only an em-dash.
 - ALWAYS: In every comment and review body on any of the owner's repos, this one included, write "ship" or "publish step" where "release" (any case) would go, since an owner comment holding the word publishes to npm; `no-release-comment` refuses such a comment ([scripts/hooks/README.md](./scripts/hooks/README.md)).

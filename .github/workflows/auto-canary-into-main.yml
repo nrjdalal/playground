@@ -1,7 +1,8 @@
 name: auto-canary-into-main
 
 on:
-  # by hand alone: a dispatch opens the draft ship PR and moves no version, since the ship skill tags the merge itself
+  push:
+    branches: ["canary"]
   workflow_dispatch:
 
 concurrency: ${{ github.workflow }}-${{ github.ref }}
@@ -40,6 +41,8 @@ jobs:
             echo "canary has no commits ahead of main. Nothing to release. Skipping."
             exit 0
           fi
+          # a release window is open from here on: the version step below runs whether the PR is new or already open
+          echo "window=open" >> "$GITHUB_OUTPUT"
           EXISTING=$(gh pr list --head canary --base main --state open --json number --jq '.[0].number')
           if [ -n "$EXISTING" ]; then
             echo "Pull request #$EXISTING already exists. Skipping creation."

@@ -1,7 +1,6 @@
 import { parseArgs } from "node:util"
 
 import {
-  carried,
   CHECK_STATUSES,
   JOB_CHECKS,
   jobsStamp,
@@ -30,10 +29,6 @@ checks and remark. Only the repo owner's stamps count.
             a GitHub run id or local (the default), and its comment why; --remark is the stamp's
             own; a comment or remark may be left out, and is one sentence of at most 20 words,
             such as --check "verify=skip The diff has no dashboard code."
-  carried <n> <sha>
-            prints green=true when a green stamp holds at <sha> and every check GitHub's jobs
-            run passed in it, on it or carried past clean canary merges and the reviewer's looks,
-            else green=false; the workflows skip their steps on true
   read <n> <sha>
             prints what the stamp reads at <sha> as JSON (at, passed, reach, stamps, status,
             why), or {"error": ...}; ops-checks-go reads it to skip a head whose verify holds
@@ -136,14 +131,14 @@ if (command === "post") {
     fail((error as Error).message)
   }
   await post(body, values.pr, commit)
-} else if (command === "carried" || command === "jobs" || command === "read") {
+} else if (command === "jobs" || command === "read") {
   const [, n = "", sha] = positionals
   const head = full(sha)
   if (!/^\d+$/.test(n)) fail(`"${n}" is not a PR number`)
   const read = await stampAt(head, await comments(n), owner, readsOf(git)).catch(
     (error: Error) => error.message,
   )
-  // canary's tip's stamps: while they read red, no carried green skips the jobs, so the fix runs on its own head
+  // canary's tip's stamps: while they read red, no carried green holds, so the fix runs on its own head
   const tip = (await git(["rev-parse", "origin/canary"])).stdout.trim()
   const canary = /^[0-9a-f]{40}$/.test(tip)
     ? stampsAt(
@@ -156,10 +151,6 @@ if (command === "post") {
     : []
   if (command === "read") {
     console.log(JSON.stringify(typeof read === "string" ? { error: read } : read))
-  } else if (command === "carried") {
-    const { green, why } = carried(read, canary)
-    console.error(why)
-    console.log(`green=${green}`)
   } else {
     if (typeof read === "string") fail(read)
     const listed = await gh([
@@ -193,7 +184,7 @@ if (command === "post") {
       ".[].filename",
     ])
     if (files.code !== 0) fail(`the files of #${n} did not read: ${files.stderr.trim()}`)
-    // gates.ts reads the workspace's packages, which carried runs before its install
+    // gates.ts reads the workspace's packages, so only jobs loads it
     const { touchesDashboard } = await import("./gates")
     const dashboard = touchesDashboard(files.stdout.split("\n").filter(Boolean))
     const body = jobsStamp(

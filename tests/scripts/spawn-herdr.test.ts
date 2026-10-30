@@ -165,7 +165,7 @@ describe("a brief given by its path under ~/.playground starts as its file name 
 })
 
 describe("--runtime herdr opens the session in herdr (#909)", () => {
-  test("a worker opens a labelled workspace in the factory server, its launch names its session id, and both pins and the resume record land", async () => {
+  test("a worker opens a labelled workspace in the playground server, its launch names its session id, and both pins and the resume record land", async () => {
     const r = await spawn(
       ["worker", "worker-brave-otter", "b.md", "--runtime", "herdr"],
       [],
@@ -196,14 +196,14 @@ describe("--runtime herdr opens the session in herdr (#909)", () => {
     ])
     const dir = lw(r.home, "herdr")
     expect(readFileSync(join(r.home, "herdr.env"), "utf8").trim()).toBe(
-      `factory ${dir}/factory.sock ${dir}/config.toml`,
+      `playground ${dir}/playground.sock ${dir}/config.toml`,
     )
     expect(readFileSync(lw(r.home, "runtimes", "worker-brave-otter"), "utf8")).toBe("herdr\n")
     expect(readFileSync(lw(r.home, "backends", "worker-brave-otter"), "utf8")).toBe("claude\n")
     expect(execLine(r, "worker-brave-otter")).toBe(
       `exec spawn.sh resume worker-brave-otter ${root} ${sid}`,
     )
-    expect(resumeFile(r, "worker-brave-otter").split("\n")).toContain("# server: factory")
+    expect(resumeFile(r, "worker-brave-otter").split("\n")).toContain("# server: playground")
     expect(launchOf(r).split("\n")[1]).toBe(`cd ${root} || exit 1`)
     expect(statSync(lw(r.home, "resume", "worker-brave-otter.sh")).mode & 0o777).toBe(0o700)
     expect(r.roster?.some((w) => /^(?:surface|workspace)=./.test(w))).toBe(false)
@@ -1415,7 +1415,7 @@ describe("restore resumes the herdr sessions its resume files list", () => {
     )
   }
 
-  test("each server restores only the sessions its records place there, a record with no server line being the factory's", async () => {
+  test("each server restores only the sessions its records place there, a record with no server line being playground's", async () => {
     const factory = await spawn(
       ["restore"],
       [],
@@ -1565,7 +1565,7 @@ describe("close ends a herdr session by closing the pane it opened (#994)", () =
 
   test.each([
     ["probes", "#!/bin/bash\n# server: probes\nexec x\n", "probes"],
-    ["the factory, with no server line", "#!/bin/bash\nexec x\n", "factory"],
+    ["playground, with no server line", "#!/bin/bash\nexec x\n", "playground"],
   ])("a record naming %s closes the pane there", async (_, record, server) => {
     const r = await spawn(["close", "worker-x"], [], {}, undefined, undefined, opened({ record }))
     expect(r.code).toBe(0)

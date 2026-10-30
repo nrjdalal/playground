@@ -479,7 +479,7 @@ describe("wantsHelp", () => {
 
 describe("playground view", () => {
   test("help names view, herdr in start and status, and the hint bare dispatcher ends with names it", () => {
-    expect(HELP).toContain("playground view       open the factory herdr server")
+    expect(HELP).toContain("playground view       open the playground herdr server")
     expect(HELP).toContain("start herdr's servers that are down and restore their sessions")
     expect(HELP).toContain("each herdr server")
     expect(HELP).toContain("in cmux while a session is open there, else in herdr")

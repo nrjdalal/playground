@@ -11,6 +11,7 @@ import {
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
+import { HERDR_SESSIONS } from "../../../../packages/scripts/src/ops-herdr/herdr"
 import { OLD_NAMES } from "../../../session-names"
 import { storeWith } from "../../hooks/render-set"
 
@@ -1161,5 +1162,15 @@ describe("a hung Docker with the live dashboard's db unreachable restarts OrbSta
     answer(true)
     expect((await check({ docker_misses: 3 })).result).toEqual([])
     expect(calls()).toEqual([])
+  })
+})
+
+// unstick read Playground's herdr servers under the names they had before ops-herdr renamed them, so it found none of the sessions on them
+describe("the herdr servers", () => {
+  test("unstick's default list is ops-herdr's", () => {
+    const text = readFileSync(RUN_PY, "utf8")
+    expect(/^HERDR_SESSIONS = .* or "([^"]+)"\)\.split/m.exec(text)?.[1]).toBe(
+      HERDR_SESSIONS.join(","),
+    )
   })
 })

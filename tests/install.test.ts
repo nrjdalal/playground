@@ -59,10 +59,14 @@ const FAKED = [
 ]
 const sys = join(scratch, "sys")
 mkdirSync(sys)
+// each name once: on a merged /usr, /bin is /usr/bin, and existsSync reads a dangling link there as missing
+const linked = new Set(FAKED)
 for (const dir of ["/bin", "/usr/bin"])
   for (const name of readdirSync(dir))
-    if (!FAKED.includes(name) && !existsSync(join(sys, name)))
+    if (!linked.has(name)) {
+      linked.add(name)
       symlinkSync(join(dir, name), join(sys, name))
+    }
 const realGit = Bun.which("git")!
 // The bun package.json's packageManager names, which install.sh holds every bun to.
 const WANTED_BUN = /^bun@(\S+)$/.exec(
@@ -101,6 +105,8 @@ type Setup = {
   answer?: string
   // each one's sign-in, already made
   claudeLogin?: boolean
+  // claude auth login reads its stdin as a Bun program, as Claude Code does
+  claudeReadsWithBun?: boolean
   // brew's Docker cask puts docker on PATH; without it Docker Desktop has to be opened once
   dockerOnPath?: boolean
   // the installs that fail, by tool
@@ -130,6 +136,7 @@ let made = 0
 const setup = ({
   answer = "from-tty",
   claudeLogin = true,
+  claudeReadsWithBun = false,
   dockerOnPath = true,
   doctorRows = [],
   fail = [],
@@ -196,6 +203,17 @@ const setup = ({
     )
   }
   write(join(source, "skills/playground/fake-skill/SKILL.md"), "# fake\n")
+  const reader = join(box, "reader.ts")
+  write(
+    reader,
+    [
+      'import { appendFileSync, writeFileSync } from "node:fs"',
+      `const said = (line: string) => appendFileSync(${JSON.stringify(log)}, \`claude auth login stdin \${line}\\n\`)`,
+      'process.stdin.on("data", () => {})',
+      'process.stdin.on("error", (error) => { said(error.message); process.exit(1) })',
+      `setTimeout(() => { said("ok"); writeFileSync(${JSON.stringify(join(state, "claude-login"))}, ""); process.exit(0) }, 500)`,
+    ].join("\n"),
+  )
   git(box, home, "init", "-q", "-b", "main", source)
   git(source, home, "add", ".")
   git(source, home, "commit", "-q", "-m", "seed")
@@ -222,7 +240,9 @@ const setup = ({
     claude: [
       `echo "claude $*" >> ${log}`,
       `if [ "$1 $2" = "auth status" ]; then [ -e ${state}/claude-login ] && echo '{"loggedIn": true}' || echo '{"loggedIn": false}'; exit 0; fi`,
-      `if [ "$1 $2" = "auth login" ]; then read -r answer; echo "claude auth login read $answer" >> ${log}; touch ${state}/claude-login; fi`,
+      claudeReadsWithBun
+        ? `if [ "$1 $2" = "auth login" ]; then exec ${process.execPath} ${reader}; fi`
+        : `if [ "$1 $2" = "auth login" ]; then read -r answer; echo "claude auth login read $answer" >> ${log}; touch ${state}/claude-login; fi`,
     ].join("\n"),
     curl: [
       `echo "curl $*" >> ${log}`,
@@ -239,7 +259,7 @@ const setup = ({
       `echo "gh $*" >> ${log}`,
       `if [ "$1 $2" = "auth status" ]; then [ -e ${state}/gh-login ]; exit; fi`,
       `if [ "$1 $2" = "auth login" ]; then read -r answer; echo "gh auth login read $answer" >> ${log}; touch ${state}/gh-login; exit 0; fi`,
-      `if [ "$1 $2" = "repo clone" ]; then exec ${realGit} clone -q ${source} "$4"; fi`,
+      `if [ "$1 $2" = "repo clone" ]; then dir=$4; shift 4; [ "$1" = -- ] && shift; exec ${realGit} clone ${source} "$dir" "$@"; fi`,
       ...(ghUser
         ? [
             `if [ "$1 $2" = "api user" ]; then echo ${ghUser}; exit 0; fi`,
@@ -296,28 +316,41 @@ const setup = ({
     `[url "${source}"]\n\tinsteadOf = https://github.com/${REPO}.git\n`,
   )
   const dir = join(home, "playground")
+  const runEnv = (env: Record<string, string>) => ({
+    ...gitEnv(home),
+    INSTALL_BREW_PREFIXES: prefix,
+    INSTALL_OS: "Darwin",
+    INSTALL_PORTLESS_PLIST: plist,
+    INSTALL_PROXY_UP: up,
+    INSTALL_TTY: tty ? ttyFile : "",
+    PATH: `${bin}:${sys}`,
+    SHELL: "/bin/zsh",
+    ...env,
+  })
+  const calls = () => (existsSync(log) ? readFileSync(log, "utf8") : "")
+  // install.sh as `curl … | bash` runs it in a terminal: read from a pipe, in a terminal of its own that /dev/tty names
+  const runPiped = async () => {
+    let out = ""
+    const proc = Bun.spawn(["/bin/bash", "-c", `cat '${join(source, "install.sh")}' | /bin/bash`], {
+      cwd: box,
+      env: runEnv({ INSTALL_TTY: "/dev/tty" }),
+      terminal: { cols: 200, data: (_, chunk) => void (out += chunk.toString()), rows: 50 },
+    })
+    const code = await proc.exited
+    return { calls: calls(), code, out }
+  }
   const run = ({
     args = [],
     env = {},
   }: { args?: readonly string[]; env?: Record<string, string> } = {}) => {
     const proc = Bun.spawnSync(["/bin/bash", join(source, "install.sh"), ...args], {
       cwd: box,
-      env: {
-        ...gitEnv(home),
-        INSTALL_BREW_PREFIXES: prefix,
-        INSTALL_OS: "Darwin",
-        INSTALL_PORTLESS_PLIST: plist,
-        INSTALL_PROXY_UP: up,
-        INSTALL_TTY: tty ? ttyFile : "",
-        PATH: `${bin}:${sys}`,
-        SHELL: "/bin/zsh",
-        ...env,
-      },
+      env: runEnv(env),
       stdin: "ignore",
     })
     const out = `${proc.stdout}${proc.stderr}`
     return {
-      calls: existsSync(log) ? readFileSync(log, "utf8") : "",
+      calls: calls(),
       code: proc.exitCode,
       // the "Left for you" items, one per line
       left: out.includes("Left for you:")
@@ -333,7 +366,7 @@ const setup = ({
   }
   const rc = (name = ".zshrc") =>
     existsSync(join(home, name)) ? readFileSync(join(home, name), "utf8") : null
-  return { bin, box, dir, home, plist, prefix, rc, run, source, up }
+  return { bin, box, dir, home, plist, prefix, rc, run, runPiped, source, up }
 }
 
 // Every path under the folder, with its link target or its content, so two snapshots differ when anything changed; git's own files are left to the HEAD and status checks.
@@ -531,6 +564,14 @@ describe("install.sh", () => {
     expect(left.some((item) => item.startsWith("Claude sign-in"))).toBe(false)
   }, 60_000)
 
+  // macOS's kqueue refuses /dev/tty itself, so Claude Code, a Bun program, stopped with "EINVAL: invalid argument, kqueue" when given it; Linux reads /dev/tty either way.
+  test("run as curl | bash in a terminal, Claude's sign-in reads that terminal as a Bun program can", async () => {
+    const { runPiped } = setup({ claudeLogin: false, claudeReadsWithBun: true })
+    const { calls } = await runPiped()
+    expect(calls).toContain("claude auth login stdin ok")
+    expect(calls).not.toContain("kqueue")
+  }, 60_000)
+
   test("without a terminal it skips each in-place step and lists it with the command that does it", () => {
     const { calls, left } = setup({
       claudeLogin: false,
@@ -676,6 +717,16 @@ describe("install.sh", () => {
     )
     expect(calls).not.toContain("bun.sh/install")
     expect(code).toBe(1)
+  })
+
+  test("clones main whatever the repo's default branch is, through gh or over https", () => {
+    for (const ghLogin of [true, false]) {
+      const { dir, home, run, source } = setup({ ghLogin })
+      git(source, home, "checkout", "-q", "-b", "canary")
+      const { code } = run()
+      expect(git(dir, home, "branch", "--show-current").stdout.toString().trim()).toBe("main")
+      expect(code).toBe(0)
+    }
   })
 
   test("--check on a ready machine says it is ready and exits 0", () => {

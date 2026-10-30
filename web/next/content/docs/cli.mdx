@@ -16,7 +16,7 @@ The [installer](/docs/install) sets the command up. In a checkout you cloned you
 
 `playground` starts only what is down, then opens the Dashboard in your browser:
 
-1. **herdr**: it starts each herdr server that is down, on the herdr version the repo pins, and brings back the sessions that ran there. It prints `ops-herdr: started factory` for each one it started, or `ops-herdr: all were up: factory, probes` when none was down. When herdr cannot start, it says why and goes on with the rest.
+1. **herdr**: it starts each herdr server that is down, on the herdr version the repo pins, and brings back the sessions that ran there. It prints `ops-herdr: started playground` for each one it started, or `ops-herdr: all were up: playground, playground-probes` when none was down. When herdr cannot start, it says why and goes on with the rest.
 2. **The Dashboard**: when it does not answer, it starts every background job that is not healthy, the Dashboard and the session follower among them, each in herdr's Ops workspace. They keep running when you close your terminal.
 3. **The dispatcher**: when no session has the dispatcher's name (the setting `sessions.names`' dispatcher, `dispatcher` by default), it starts it as `playground dispatcher` does (below), and goes on when that start is refused.
 4. It waits for the Dashboard to answer, then opens it. The first start can take a few minutes, so every 10 seconds it prints how long it has waited, as `Waiting for the Dashboard's API to answer… 1m 20s`, and once the Dashboard answers it prints `The Dashboard answered after 2m 10s`. When the Dashboard's background job exits while it waits, it stops within half a minute and says so, and when the job stops checking in, it stops once the job has been silent for three of its minutes, rather than waiting the whole 15 minutes. Its last line reminds you that `playground view` shows your sessions.
@@ -76,6 +76,10 @@ When the newest commit is the one running, it prints `Already up to date at <sha
 ## Check your install: `playground doctor`
 
 `playground doctor` prints one line per thing Playground needs: `ok`, `MISSING` with the command that fixes it, or `optional`. It checks the tools on your `PATH` (`bun`, `claude`, `docker`, `gh`, `git`, `node` at 20.9 or newer and `python3`, with `uv` optional), your GitHub login (optional; without it syncing your extensions is off, and the line says so), the data folder it reads (`~/.playground`, or the one `PLAYGROUND_DATA_DIR` names), Playground's own herdr (`MISSING` with `playground herdr pin` as its fix when it is missing or changed, naming a herdr of your own on your `PATH`, which it leaves alone), that every link into your checkout points at a file that is there, the release your checkout is at and how far behind `origin/main` it is, and on a Mac that portless's proxy is running for the Dashboard's local address (`MISSING` with running the installer again as its fix) and that each background job you turned on is loaded. It exits with an error when anything is `MISSING`, and changes nothing.
+
+## Stop herdr: `playground herdr stop`
+
+`playground herdr stop` stops every herdr server Playground started, each through its own socket in `~/.playground/herdr`, and no other herdr on your Mac. Every session running in them ends with it. It prints `ops-herdr: stopped <server>` for each one, or that none was running. The next `playground`, or **Start** in the Dashboard, starts them again; when the ops-herdr background job is turned on, it does so within a minute.
 
 ## Put herdr back: `playground herdr pin`
 

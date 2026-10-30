@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs"
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync } from "node:fs"
 import { join } from "node:path"
 
 import {
@@ -124,29 +124,36 @@ export async function extInit(data: string, run: Run, confirm: Confirm): Promise
   const url = await privateRepo(run, slug, lines, confirm, "ext init")
   const root = extensionsDir(data)
   const dir = scopeDir(data, login)
+  // A root this run made goes again when the run fails, since a root with no policy.json refuses every settings read where no root reads the defaults.
+  const made = !existsSync(root)
   mkdirSync(root, { recursive: true })
-  withLock(data, () => {
-    if (existsSync(join(dir, ".git"))) lines.push(`${dir} is already a clone`)
-    else if (existsSync(dir) && readdirSync(dir).length)
-      throw new Error(
-        `${dir} holds files but no clone: move them aside, then run playground ext init`,
-      )
-    else if (mustGit(root, ["ls-remote", "--heads", url])) {
-      mustGit(root, ["clone", "-q", url, login])
-      lines.push(`cloned ${slug} into ${dir}`)
-    } else {
-      mkdirSync(dir, { recursive: true })
-      mustGit(dir, ["init", "-q", "-b", "main"])
-      writeAtomically(join(dir, "settings.json"), "{}\n")
-      mustGit(dir, ["add", "settings.json"])
-      mustGit(dir, ["commit", "-q", "-m", "init"], identity(login))
-      lines.push(`started ${dir} with a first commit`)
-    }
-    if (extGit(dir, ["remote", "set-url", "origin", url]).code !== 0)
-      mustGit(dir, ["remote", "add", "origin", url])
-    writeAtomically(file, `${login}\n`)
-    deriveRoot(data, login)
-  })
+  try {
+    withLock(data, () => {
+      if (existsSync(join(dir, ".git"))) lines.push(`${dir} is already a clone`)
+      else if (existsSync(dir) && readdirSync(dir).length)
+        throw new Error(
+          `${dir} holds files but no clone: move them aside, then run playground ext init`,
+        )
+      else if (mustGit(root, ["ls-remote", "--heads", url])) {
+        mustGit(root, ["clone", "-q", url, login])
+        lines.push(`cloned ${slug} into ${dir}`)
+      } else {
+        mkdirSync(dir, { recursive: true })
+        mustGit(dir, ["init", "-q", "-b", "main"])
+        writeAtomically(join(dir, "settings.json"), "{}\n")
+        mustGit(dir, ["add", "settings.json"])
+        mustGit(dir, ["commit", "-q", "-m", "init"], identity(login))
+        lines.push(`started ${dir} with a first commit`)
+      }
+      if (extGit(dir, ["remote", "set-url", "origin", url]).code !== 0)
+        mustGit(dir, ["remote", "add", "origin", url])
+      writeAtomically(file, `${login}\n`)
+      deriveRoot(data, login)
+    })
+  } catch (error) {
+    if (made) rmSync(root, { force: true, recursive: true })
+    throw error
+  }
   return lines
 }
 

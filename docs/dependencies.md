@@ -59,7 +59,7 @@ A patch lives in `patches/`, made with `bun patch <pkg>` and registered under `p
 
 ## Ignored advisories
 
-An advisory with no patched version anywhere cannot be cleared by updating it, by updating a parent or by an override, so the gate ignores it by ID instead. Each `--ignore` sits in both gates, `lefthook.yml` and `.github/workflows/hosted-check-build.yml`. Remove it from both when its exit criteria are met.
+An advisory with no patched version anywhere cannot be cleared by updating it, by updating a parent or by an override, so the gate ignores it by ID instead. Each `--ignore` sits in both gates, `lefthook.yml` and `.github/workflows/auto-check-build.yml`. Remove it from both when its exit criteria are met.
 
 ### `braces` ([GHSA-vfj7-8cjw-p6xm](https://github.com/advisories/GHSA-vfj7-8cjw-p6xm))
 
