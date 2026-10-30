@@ -6,7 +6,10 @@ source: https://github.com/nrjdalal/zerostarter
 
 # Release
 
-A ship promotes `canary` to `main` by hand: one PR `canary -> main`, merged with a **merge commit**, then a tag and a GitHub release on that merge. No workflow starts on a push to `canary` or a merge into `main`: `auto-canary-into-main.yml` runs by hand alone (`workflow_dispatch`) and only opens the draft ship PR, moving no version, and no workflow tags a ship or writes a changelog, so every step below is yours. `main` deploys to production, so ship only on the user's go-ahead (playbook's **release** rule gives it to Ops).
+A ship promotes `canary` to `main` by hand: one PR `canary -> main`, merged with a **merge commit**, then a tag and a GitHub release on that merge.
+`auto-canary-into-main.yml` runs on each push to `canary`, and by hand (`workflow_dispatch`), and only opens the draft ship PR when none is open, moving no version; it opens the PR with `GITHUB_TOKEN`, so it needs the repository's "Allow GitHub Actions to create and approve pull requests" setting on.
+No workflow tags a ship or writes a changelog, so every step below is yours.
+`main` deploys to production, so ship only on the user's go-ahead (playbook's **release** rule gives it to Ops).
 
 Run every command from a cwd inside the Playground checkout, so `gh` reads the right repository.
 

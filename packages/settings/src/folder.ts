@@ -28,7 +28,13 @@ export const lockPath = (data: string) => `${extensionsDir(data)}.lock`
 // A lock this old outlived the write that took it.
 const STALE_MS = 5 * 60_000
 
-// git as the extensions run it: none of the caller's GIT_ variables (a hook's GIT_DIR or GIT_INDEX_FILE), no signing and no hooks.
+// With gh on PATH, the extensions' repositories are reached as the gh login that made them: gh's credential helper alone, as gh auth setup-git sets it but for this command only, so a keychain holding another login's token never answers for them (GitHub's "Repository not found").
+const ghCredential = (): string[] =>
+  Bun.which("gh", { PATH: process.env.PATH ?? "" })
+    ? ["-c", "credential.helper=", "-c", "credential.helper=!gh auth git-credential"]
+    : []
+
+// git as the extensions run it: none of the caller's GIT_ variables (a hook's GIT_DIR or GIT_INDEX_FILE), no signing, no hooks and gh's credentials.
 export const extGit = (
   dir: string,
   args: string[],
@@ -38,7 +44,17 @@ export const extGit = (
     Object.entries(process.env).filter(([key]) => !key.startsWith("GIT_")),
   )
   const run = Bun.spawnSync(
-    ["git", "-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null", "-C", dir, ...args],
+    [
+      "git",
+      "-c",
+      "commit.gpgsign=false",
+      "-c",
+      "core.hooksPath=/dev/null",
+      ...ghCredential(),
+      "-C",
+      dir,
+      ...args,
+    ],
     { env: { ...clean, ...env }, stderr: "pipe", stdout: "pipe" },
   )
   return {

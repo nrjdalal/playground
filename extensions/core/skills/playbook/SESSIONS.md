@@ -116,13 +116,13 @@ Sessions run in bypass-permissions mode, yet some commands still prompt (`rm`, a
    So a running session moves to GLM only by a close and a fresh start under `--backend glm`.
    The 98% switch to GLM is retired by his decision on Inbox #i827: the account rotation moves the factory between Claude accounts in its place (`scripts/ops/usage/login-flip.py`).
 
-   `--runtime herdr`, with any mode but restore or close and anywhere among its words, opens the session in herdr, as every start does without it, on the factory server `bun run ops:herdr start` (or `dispatcher`) keeps up, by the binary its pin names; spawn.sh never starts or stops a server, and refuses while it is down.
+   `--runtime herdr`, with any mode but restore or close and anywhere among its words, opens the session in herdr, as every start does without it, on the playground server `bun run ops:herdr start` (or `dispatcher`) keeps up, by the binary its pin names; spawn.sh never starts or stops a server, and refuses while it is down.
    A column's anchor is then a herdr pane id (`w1:p2`, or lettered as `wN:p1A`; your own is `$HERDR_PANE_ID`), and a name holds at most 32 characters.
    A probe on a server with no pane to split beside opens in a workspace of its own, in this checkout: `spawn.sh probe <name> <reports-to> <brief>`, with no `--runtime` or with `--runtime herdr`.
-   It opens on the factory server; `PLAYGROUND_HERDR_SESSION=probes` before the command puts it on the probes server.
+   It opens on the playground server; `PLAYGROUND_HERDR_SESSION=playground-probes` before the command puts it on the probes server.
    When herdr refuses a placement, spawn.sh quotes herdr's own error in its refusal.
    It labels the session's pane with its name, and that label is where the session is found: the roster's `workspace` and `surface` are cmux's, so a herdr session records neither.
-   The Dashboard lists it by name beside cmux's sessions, for any session to read; `herdr pane list` shows the labels only when run in a pane on the factory server, since from a cmux session herdr's reads reach another socket.
+   The Dashboard lists it by name beside cmux's sessions, for any session to read; `herdr pane list` shows the labels only when run in a pane on the playground server, since from a cmux session herdr's reads reach another socket.
    It waits for Claude's REPL with `pane wait-output`, and answers the folder trust and MCP picker for you only under the code root (`paths.codeRoot`, else the folder that holds the main checkout) and `~/<org>` for each org `ext.links` guards; anywhere else the session waits at the prompt for the owner, and spawn.sh says so.
    The start records its runtime in `~/.playground/runtimes/<name>`, and a resume whose pin reads `cmux` opens in herdr and rewrites the pin.
    With no `--runtime`, every start and resume opens in herdr, from any terminal; spawn.sh starts nothing in cmux, so it refuses `--runtime cmux` and a column anchored on a cmux `surface:N`.

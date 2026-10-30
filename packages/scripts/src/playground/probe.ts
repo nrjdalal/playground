@@ -10,7 +10,6 @@ import {
   accountsOf,
   liveSettings,
   modelSettings,
-  readPolicy,
   readPolicyOrDefaults,
 } from "@packages/settings"
 
@@ -67,14 +66,14 @@ export const dashboardCheckout = (
 // Where a fresh install's first start cuts the Dashboard's checkout.
 export const dashboardPath = (repo: string): string => join(repo, ".claude", "worktrees", "desk")
 
-// A fresh install's first start: the Dashboard's checkout cut at dashboardPath() on its branch, from origin's default branch, then installed; or the line that says which step failed.
+// A fresh install's first start: the Dashboard's checkout cut at dashboardPath() on its branch, from origin's main, the shipped branch, whatever origin's default is (else HEAD), then installed; or the line that says which step failed.
 export const cutDashboardCheckout = (
   repo: string,
   exec = run,
   branch = liveBranch(),
 ): { checkout: string } | { error: string } => {
-  const head = exec(["git", "-C", repo, "symbolic-ref", "--short", "refs/remotes/origin/HEAD"])
-  const base = head.code === 0 && head.out ? head.out : "HEAD"
+  const main = exec(["git", "-C", repo, "rev-parse", "--verify", "-q", "refs/remotes/origin/main"])
+  const base = main.code === 0 && main.out ? "origin/main" : "HEAD"
   const checkout = dashboardPath(repo)
   const added = exec(["git", "-C", repo, "worktree", "add", "-b", branch, checkout, base])
   if (added.code !== 0) return { error: `could not cut the Dashboard's checkout at ${checkout}` }
@@ -173,7 +172,7 @@ const backendOf = (name: string): Backend | null => {
 
 // Only that the Keychain item spawn.sh's GLM backend reads by default (models.glmKeychainService, the first GLM row's label) exists: no -w, so the key is never read; a render set it cannot trust reads as not set up.
 export const glmSetUp = async (): Promise<boolean> => {
-  const read = await readPolicy(dataDir())
+  const read = readPolicyOrDefaults(dataDir())
   if (read.refusal !== undefined) return false
   const service = modelSettings.get(read.settings, "models.glmKeychainService")
   const label = accountsOf(accountSettings.get(read.settings, "usage.accounts"), "glm")[0]?.label

@@ -212,6 +212,8 @@ export type Worker = {
   lastActiveAt: string | null
   lifecycle: string
   light: Light
+  // Set while its Claude login has expired, as its transcript's API error or ops-unstick's read of its pane says: Add account, then a restart, clears it.
+  loginExpired?: true
   // The model id its newest reply came from (claude-opus-5-5); null when none is known.
   model: string | null
   name: string
@@ -651,6 +653,7 @@ export function composeWorkers(
       ...(herdr && { herdr: true as const }),
       lastActiveAt: activity.get(sessionId) ?? null,
       lifecycle,
+      ...(read.loginExpired && { loginExpired: true as const }),
       // a probe's prompts are its spawner's, so it never reads as waiting on the owner
       light:
         role === "other" && isProbe(name)
@@ -1008,8 +1011,11 @@ export const withBlocked = (
           const entries = blocked.get(w.sessionId)
           if (!entries || (w.role === "other" && isProbe(w.name))) return w
           const limit = w.light === "needs-you" ? null : usageLimitOf(entries, usage)
+          const login = entries.some((entry) => entry.kind === "login") && {
+            loginExpired: true as const,
+          }
           return limit
-            ? { ...w, light: "needs-you", usageLimit: limit }
-            : { ...w, light: "needs-you" }
+            ? { ...w, ...login, light: "needs-you", usageLimit: limit }
+            : { ...w, ...login, light: "needs-you" }
         }),
       }

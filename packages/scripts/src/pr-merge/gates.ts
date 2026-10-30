@@ -39,7 +39,7 @@ export type PrFacts = {
   mergeTree: string | null
   // The files the head's merge with canary conflicts in, null when it merged clean or could not be read; left out where no merge was read.
   conflicts?: string[] | null
-  // The head's GitHub checks.
+  // The head's GitHub checks; none while GitHub Actions is off.
   checks: Check[]
   comments: Comment[]
   draft: boolean

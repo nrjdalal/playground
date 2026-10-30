@@ -223,7 +223,7 @@ describe("the jobs check on a machine with a store", () => {
     ])
   })
 
-  test("takes the store's policy.json over jobs.json, and a store that lacks it is MISSING", async () => {
+  test("takes the store's policy.json over jobs.json, and a store that lacks it reads jobs.json", async () => {
     const data = join(scratch, "store-data")
     mkdirSync(join(data, "ops"), { recursive: true })
     writeFileSync(
@@ -237,8 +237,7 @@ describe("the jobs check on a machine with a store", () => {
       "job ops-zai-usage",
     ])
     writeRoot(extensionsDir(data), new Map([["policy.json", null]]))
-    const refused = await launchdChecks(data, () => true)
-    expect(refused.map((c) => [c.name, c.status])).toEqual([["jobs", "MISSING"]])
+    expect((await launchdChecks(data, () => true)).map((c) => c.name)).toEqual(["job ops-old"])
   })
 })
 

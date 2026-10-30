@@ -46,6 +46,8 @@ describe("bare dispatcher", () => {
     python3: string,
     more: Record<string, string> = {},
     files: Record<string, string> = {},
+    words: string[] = [],
+    env: Record<string, string> = {},
   ) => {
     // dispatcher finds its repo by realpath, which on macOS puts /private before tmpdir's /var
     const root = mkdtempSync(join(realpathSync(dir), "bare-"))
@@ -85,9 +87,9 @@ describe("bare dispatcher", () => {
     }
     for (const [path, text] of Object.entries(files)) await Bun.write(join(repo, path), text)
     const child = Bun.spawn(
-      [process.execPath, "--no-env-file", join(src, "playground", "cli.ts")],
+      [process.execPath, "--no-env-file", join(src, "playground", "cli.ts"), ...words],
       {
-        env: { HOME: root, PATH: `${bin}:${dirname(process.execPath)}:/usr/bin:/bin` },
+        env: { ...env, HOME: root, PATH: `${bin}:${dirname(process.execPath)}:/usr/bin:/bin` },
         stderr: "pipe",
         stdout: "pipe",
       },
@@ -152,6 +154,131 @@ describe("bare dispatcher", () => {
     expect(err).not.toContain("Traceback")
     expect(out).toEndWith(`Left for you:\n  - The dispatcher didn't start: ${refusal}\n`)
   }, 15_000)
+
+  // The servers Playground started had no stop of the user's own, so a pair that restored another herdr setup's layout stayed up
+  test("herdr stop hands ops-herdr its stop-all, which reaches only the sockets in Playground's herdr folder, and keeps its exit", async () => {
+    const log = join(mkdtempSync(join(realpathSync(dir), "log-")), "log")
+    writeFileSync(log, "")
+    const { child } = await dispatcher(
+      "exit 0",
+      {},
+      {
+        "packages/scripts/src/ops-herdr/cli.ts": `import { appendFileSync } from "node:fs"\nappendFileSync(${JSON.stringify(log)}, \`ops-herdr \${process.argv.slice(2).join(" ")}\\n\`)\nconsole.log("ops-herdr: stopped playground")\nprocess.exit(1)\n`,
+      },
+      ["herdr", "stop"],
+    )
+    const code = await child.exited
+    expect(readFileSync(log, "utf8")).toBe("ops-herdr stop-all\n")
+    expect(await new Response(child.stdout).text()).toBe("ops-herdr: stopped playground\n")
+    expect(code).toBe(1)
+  }, 15_000)
+
+  // Playground pins herdr only on macOS, so off a Mac pinHere refuses before any of this runs
+  const onMac = process.platform === "darwin"
+  // Start <dispatcher> runs playground dispatcher, which on a fresh install found no herdr and no factory settings: spawn.sh refused on each in turn, since only install and the bare start set them up.
+  describe.if(onMac)(
+    "playground dispatcher sets up what install and the bare start do before spawn.sh",
+    () => {
+      const run = async (opts: {
+        binary: boolean
+        env?: Record<string, string>
+        linkSkills?: string
+        linked?: boolean
+        opsHerdr: string
+      }) => {
+        const log = join(mkdtempSync(join(realpathSync(dir), "log-")), "log")
+        writeFileSync(log, "")
+        const stub = "#!/bin/sh\necho herdr 0.9.5\n"
+        const sum = new Bun.CryptoHasher("sha256").update(stub).digest("hex")
+        const pin = JSON.parse(readFileSync(join(dirname(CLI), "../ops-herdr/pin.json"), "utf8"))
+        for (const asset of Object.keys(pin.sha256)) pin.sha256[asset] = sum
+        // the helper's HOME is the repo's parent, so ../.playground is the data folder the pin names
+        const { child } = await dispatcher(
+          "exit 0",
+          {},
+          {
+            ...(opts.binary ? { "../.playground/bin/herdr": stub } : {}),
+            ...(opts.linked === false
+              ? {}
+              : Object.fromEntries(
+                  ["factory-settings.json", "handoffs/new-worker.md", "ops/run-slot.sh"].map(
+                    (file) => [`../.playground/${file}`, "linked\n"],
+                  ),
+                )),
+            "packages/scripts/src/ops-herdr/cli.ts": `import { appendFileSync } from "node:fs"\nappendFileSync(${JSON.stringify(log)}, \`ops-herdr \${process.argv.slice(2).join(" ")}\\n\`)\n${opts.opsHerdr}\n`,
+            "packages/scripts/src/ops-herdr/pin.json": JSON.stringify(pin),
+            "scripts/briefs/dispatcher.md": "brief\n",
+            "scripts/link-skills.sh": `echo link-skills >> ${log}\n${opts.linkSkills ?? ""}\n`,
+            "scripts/spawn.sh": `echo "spawn.sh $*" >> ${log}\n`,
+          },
+          ["dispatcher"],
+          opts.env,
+        )
+        const deadline = setTimeout(() => child.kill(), 20_000)
+        const code = await child.exited
+        clearTimeout(deadline)
+        return {
+          code,
+          err: await new Response(child.stderr).text(),
+          ran: readFileSync(log, "utf8").split("\n").filter(Boolean),
+        }
+      }
+
+      test("with the pinned binary on hand, ops-herdr's start runs first, then spawn.sh starts the dispatcher", async () => {
+        const { code, ran } = await run({ binary: true, opsHerdr: 'console.log("ops-herdr: ok")' })
+        expect(ran).toEqual(["ops-herdr start", "spawn.sh manager dispatcher brief-dispatcher.md"])
+        expect(code).toBe(0)
+      }, 30_000)
+
+      test("with nothing linked in the state folder yet, install's linking step runs first", async () => {
+        const { code, ran } = await run({ binary: true, linked: false, opsHerdr: "" })
+        expect(ran).toEqual([
+          "link-skills",
+          "ops-herdr start",
+          "spawn.sh manager dispatcher brief-dispatcher.md",
+        ])
+        expect(code).toBe(0)
+      }, 30_000)
+
+      test("a linking step that fails stops it before herdr and spawn.sh, its reason on stderr", async () => {
+        const reason = "skipped /x/factory-settings.json: a real file, move it aside first"
+        const { code, err, ran } = await run({
+          binary: true,
+          linkSkills: `echo linked one\necho '${reason}' >&2\nexit 1`,
+          linked: false,
+          opsHerdr: "",
+        })
+        expect(ran).toEqual(["link-skills"])
+        expect(err.trim().split("\n").at(-1)).toBe(`playground: ${reason}`)
+        expect(code).toBe(1)
+      }, 30_000)
+
+      test("an ops-herdr start that fails stops it before spawn.sh, its last line on stderr for Start to show whole", async () => {
+        const reason = "ops-herdr: factory started, but its status did not read running within 10s"
+        const { code, err, ran } = await run({
+          binary: true,
+          opsHerdr: `console.log("ops-herdr: started probes")\nconsole.log(${JSON.stringify(reason)})\nprocess.exit(1)`,
+        })
+        expect(ran).toEqual(["ops-herdr start"])
+        expect(err.trim().split("\n").at(-1)).toBe(`playground: ${reason}`)
+        expect(code).toBe(1)
+      }, 30_000)
+
+      test("with no pinned binary it installs one first, and a download that fails says so and runs neither", async () => {
+        const proxy = "http://127.0.0.1:9"
+        const { code, err, ran } = await run({
+          binary: false,
+          env: { HTTPS_PROXY: proxy, https_proxy: proxy },
+          opsHerdr: "",
+        })
+        expect(ran).toEqual([])
+        expect(err.trim().split("\n").at(-1)).toMatch(
+          /^playground: herdr-pin: https:\/\/github\.com\/herdrdev\/herdr\/releases\/download\/v\S+ could not be fetched: /,
+        )
+        expect(code).toBe(1)
+      }, 30_000)
+    },
+  )
 })
 
 describe("a fresh machine", () => {
@@ -172,6 +299,15 @@ describe("a fresh machine", () => {
     writeFileSync(join(data, "extensions", "login"), "made-up-me\n")
     return data
   }
+
+  test("add reads the defaults from a root ext init stopped in, with no login or policy.json yet, and goes on to its own checks", () => {
+    const data = join(dir, "stopped")
+    mkdirSync(join(data, "extensions"), { recursive: true })
+    const add = run(data, ["add", "made-up-worker"])
+    expect(add.exitCode).toBe(1)
+    expect(add.stderr.toString()).not.toContain("policy.json")
+    expect(add.stderr.toString()).toContain("made-up-worker gives no kind")
+  })
 
   test("herdr pin --check names the pinned herdr missing from HOME's data folder, exit 1", () => {
     const data = fresh("herdr")

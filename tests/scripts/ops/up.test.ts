@@ -513,7 +513,7 @@ test("an empty lsof read leaves every job alone", () => {
 const RENDER = `${LOAD}up.render_jobs()
 `
 
-test("a pass renders jobs.json from the store, and keeps the last one with the reason in up.log when the set is refused", async () => {
+test("a pass renders jobs.json from the store, keeps it when the store has no policy.json yet, and keeps the last one with the reason in up.log when the set is refused", async () => {
   const { writeRoot } = await import("../../../packages/settings/src/folder")
   const { extensionsDir } = await import("../../../packages/settings/src/rendered")
   const config = join(scratch, "config-render")
@@ -542,6 +542,10 @@ test("a pass renders jobs.json from the store, and keeps the last one with the r
   expect(readFileSync(join(ops, "up.log"), "utf8")).toContain("jobs: rendered jobs.json")
   const rendered = readFileSync(join(ops, "jobs.json"), "utf8")
   writeRoot(extensionsDir(data), new Map([["policy.json", null]]))
+  expect(pass().stderr.toString()).toBe("")
+  expect(readFileSync(join(ops, "jobs.json"), "utf8")).toBe(rendered)
+  expect(readFileSync(join(ops, "up.log"), "utf8")).not.toContain("jobs.json kept: ")
+  writeRoot(extensionsDir(data), new Map([["policy.json", "{"]]))
   expect(pass().stderr.toString()).toBe("")
   expect(readFileSync(join(ops, "jobs.json"), "utf8")).toBe(rendered)
   expect(readFileSync(join(ops, "up.log"), "utf8")).toContain("jobs.json kept: ")

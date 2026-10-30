@@ -66,7 +66,7 @@ describe("the real workflows", () => {
   const files = readdirSync(DIR).filter((name) => /\.ya?ml$/.test(name))
   const read = (name: string) => Bun.file(join(DIR, name)).text()
 
-  test("the pull request gate is the hosted pair, each on hosted runners alone", async () => {
+  test("the pull request checks are auto-check-build and auto-test, each on hosted runners alone", async () => {
     const gate: string[] = []
     for (const name of files) {
       const text = await read(name)
@@ -75,7 +75,7 @@ describe("the real workflows", () => {
       gate.push(name)
       expect(runnerProblems(name, text)).toEqual([])
     }
-    expect(gate.toSorted()).toEqual(["hosted-check-build.yml", "hosted-test.yml"])
+    expect(gate.toSorted()).toEqual(["auto-check-build.yml", "auto-test.yml"])
   })
 
   // a self-hosted runner would run a fork's pull request on that machine, so the list stays empty and a new self-hosted workflow fails here

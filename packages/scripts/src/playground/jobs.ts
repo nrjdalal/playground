@@ -18,6 +18,7 @@ import {
   importedJob,
   loginOf,
   plistProgram,
+  readPolicyFile,
   readRendered,
   renderJobs,
   scopeDir,
@@ -68,17 +69,13 @@ const installScripts = async (data: string, err: (line: string) => void): Promis
   return changed
 }
 
-// The ops runner's render, at the top of each pass: jobs.json and each enabled launchd job's plist from the store's policy.json, and each org's script folders installed under ops. Exits 3 with jobs.json untouched on a machine with no store whose jobs.json is there (a fresh one gets the registry's defaults, the Dashboard's job alone on), and 2 with the refusal on stderr when the store lacks policy.json, so the runner keeps the last jobs.json and logs why. Plists go only into the folder it is handed; one for a job now off is removed.
+// The ops runner's render, at the top of each pass: jobs.json and each enabled launchd job's plist from the store's policy.json, and each org's script folders installed under ops. Exits 3 with jobs.json untouched on a machine with no store whose jobs.json is there (a fresh one gets the registry's defaults, the Dashboard's job alone on, as does a store with no policy.json yet), and 2 on stderr when policy.json or jobs.json does not parse, so the runner keeps the last jobs.json and logs why. Plists go only into the folder it is handed; one for a job now off is removed.
 export const renderJobsFile = async (
   options: { data: string; fill: Fill; jobs: string; launchAgents?: string },
   out: (line: string) => void,
   err: (line: string) => void,
 ): Promise<number> => {
-  const read = await readRendered(options.data, "policy.json")
-  if (read.refusal) {
-    err(read.refusal)
-    return 2
-  }
+  const read = readPolicyFile(options.data)
   if (!read.path && existsSync(options.jobs)) return 3
   let values: Record<string, unknown>
   let existing: Record<string, unknown> = {}

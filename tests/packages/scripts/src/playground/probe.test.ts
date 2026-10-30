@@ -151,7 +151,7 @@ describe("a fresh install's first start", () => {
     return { code: child.exitCode ?? 1, out: child.stdout.toString().trim() }
   }
 
-  test("cuts the Dashboard's checkout on its branch from origin's default branch, installs it, and finds it after", () => {
+  test("cuts the Dashboard's checkout on its branch from origin's main, installs it, and finds it after", () => {
     const repo = clone()
     expect(dashboardCheckout(repo)).toBeNull()
     const installs: string[] = []
@@ -165,6 +165,29 @@ describe("a fresh install's first start", () => {
       liveBranch(),
     )
     expect(dashboardCheckout(repo)?.endsWith(join(".claude", "worktrees", "desk"))).toBe(true)
+  })
+
+  test("cuts the Dashboard's checkout from origin's main, the shipped branch, though origin's default branch is canary", () => {
+    const root = mkdtempSync(join(tmpdir(), "fresh-checkout-"))
+    const git = (...args: string[]) =>
+      Bun.spawnSync(["git", "-c", "user.email=fixture", "-c", "user.name=a", ...args], {
+        cwd: root,
+      })
+        .stdout.toString()
+        .trim()
+    git("init", "-q", "-b", "main", "origin")
+    git("-C", "origin", "commit", "-q", "--allow-empty", "-m", "shipped")
+    git("-C", "origin", "checkout", "-q", "-b", "canary")
+    git("-C", "origin", "commit", "-q", "--allow-empty", "-m", "unshipped")
+    git("clone", "-q", "-b", "main", "origin", "repo")
+    const repo = join(root, "repo")
+    const exec = (argv: string[], cwd?: string) =>
+      argv[0] === "bun" ? { code: 0, out: "" } : real(argv, cwd)
+    const made = cutDashboardCheckout(repo, exec)
+    expect(made).toEqual({ checkout: join(repo, ".claude", "worktrees", "desk") })
+    expect(git("-C", join(repo, ".claude", "worktrees", "desk"), "log", "-1", "--format=%s")).toBe(
+      "shipped",
+    )
   })
 
   test("names the step that failed: the cut, or the install", () => {

@@ -22,7 +22,7 @@ import { claudeDir, dataDir, transcriptPath } from "@/lib/sessions/paths"
 
 type Json = Record<string, unknown>
 
-// The servers the factory runs: PLAYGROUND_HERDR_SESSIONS names them (factory and probes), each serving its socket at <PLAYGROUND_HERDR_DIR>/<name>.sock, the dir herdr in the data folder, ~/.playground, unless set, following HOME and never CLAUDE_CONFIG_DIR or PLAYGROUND_DATA_DIR as ops-herdr serves them, so a session on another login reads the same servers. A stack that does not read this machine reads no herdr server.
+// The servers Playground runs: PLAYGROUND_HERDR_SESSIONS names them (playground and playground-probes), each serving its socket at <PLAYGROUND_HERDR_DIR>/<name>.sock, the dir herdr in the data folder, ~/.playground, unless set, following HOME and never CLAUDE_CONFIG_DIR or PLAYGROUND_DATA_DIR as ops-herdr serves them, so a session on another login reads the same servers. A stack that does not read this machine reads no herdr server.
 export type HerdrServer = { name: string; socket: string }
 
 const SERVER_NAME = /^[a-z0-9][a-z0-9_-]*$/
@@ -33,14 +33,14 @@ export const herdrServers = (
   if (!readsLive()) return []
   const dir =
     envValue(env, "PLAYGROUND_HERDR_DIR") || join(dataDirOf({}, env.HOME || homedir()), "herdr")
-  return (envValue(env, "PLAYGROUND_HERDR_SESSIONS") || "factory,probes")
+  return (envValue(env, "PLAYGROUND_HERDR_SESSIONS") || "playground,playground-probes")
     .split(",")
     .map((name) => name.trim())
     .filter((name) => SERVER_NAME.test(name))
     .map((name) => ({ name, socket: join(dir, `${name}.sock`) }))
 }
 
-// A herdr session's surface on the board, `herdr:<server>:<pane id>` (herdr:factory:w2:p1; herdr numbers past 9 in letters, wA:p1), since pane ids repeat across servers. A pane's id changes when it moves, and every board reads it afresh, so the surface always names where the session is now.
+// A herdr session's surface on the board, `herdr:<server>:<pane id>` (herdr:playground:w2:p1; herdr numbers past 9 in letters, wA:p1), since pane ids repeat across servers. A pane's id changes when it moves, and every board reads it afresh, so the surface always names where the session is now.
 const PANE_ID = "w[0-9A-Za-z]+:p[0-9A-Za-z]+"
 const SURFACE = new RegExp(`^herdr:([a-z0-9][a-z0-9_-]*):(${PANE_ID})$`)
 
