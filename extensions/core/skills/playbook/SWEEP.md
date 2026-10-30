@@ -1,14 +1,14 @@
 # Sweep (leads)
 
 Each lead sweeps its own agents every 15 minutes, from a session cron job kept running as [SESSIONS.md](SESSIONS.md#keep-the-sweep-running) says.
-The cron is the backstop: every event a lead acts on already reaches it as a message (Checks lines, a worker's ready CI, ops-report's alerts), and each turn re-reads the lead's whole context, so the Builder's sweep spends one call while nothing has changed, and Ops' adds only step 2's reads (Inbox #i706).
+The cron is the backstop: every event a lead acts on already reaches it as a message (a worker's ready CI, ops-report's alerts), and each turn re-reads the lead's whole context, so the Builder's sweep spends one call while nothing has changed, and Ops' adds only step 2's reads (Inbox #i706).
 A sweep is the lead's one look at its sessions between turns: it finds each agent's state and acts on it, so nothing waits unseen.
 Work the steps in order.
 
 ## 1. Read what changed
 
 Run `playground sweep <your name>`.
-It prints only what changed since your last sweep, one line each: a new Checks line, a new alert from `ops/alerts-pending.json`, the merge queue when it changes, load5 (the third field of `sysctl -n vm.loadavg`) crossing 15, the single-slot flag turning on or off, each of your roster rows whose ETA has passed, and for Ops, once an hour, each ops switch on with its age and reason;
+It prints only what changed since your last sweep, one line each: a new alert from `ops/alerts-pending.json`, the merge queue when it changes, load5 (the third field of `sysctl -n vm.loadavg`) crossing 15, the single-slot flag turning on or off, each of your roster rows whose ETA has passed, and for Ops, once an hour, each ops switch on with its age and reason;
 its cursor is `sweep/<your name>.json` in the data folder.
 For each `switch on:` line, Ops checks whether its reason still holds: one that does is set again with a fresh reason through `run-slot.sh set`, and any other is lifted by moving it to `<name>.lifted-<ts>` ([scripts/ops/README.md](../../../../scripts/ops/README.md#ops-switches)).
 When it prints `quiet`, the Builder's sweep ends there, and Ops' goes on to step 2 and ends after it.

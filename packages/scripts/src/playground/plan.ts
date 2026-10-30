@@ -25,7 +25,7 @@ playground view       open the ${VIEW_SERVER} herdr server, where the sessions r
 playground dispatcher start the dispatcher in a herdr workspace of its own, its brief written once from scripts/briefs/dispatcher.md into the data folder as brief-<dispatcher>.md: exit 0 started, 3 already running, 1 refused with spawn.sh's reason
 playground status     one line each for the terminal, the Dashboard, the follower, each dispatcher, GLM and each herdr server
 playground sweep <lead>
-                      what changed since that lead's last sweep (Checks lines, alerts, the merge queue, load5 crossing 15, the single-slot flag, its rows' passed ETAs), or quiet
+                      what changed since that lead's last sweep (alerts, the merge queue, load5 crossing 15, the single-slot flag, its rows' passed ETAs), or quiet
 playground page <file.html> --title "<title>" --by <session> [--for <session>]
                       keep a page for the Dashboard: copy it into the previews folder under a free name, with its title as its caption and a line in pages.jsonl, then open the copy; it shows on the Pages tab of --by's view, of --for's and of the dispatcher's
 playground update [--to <tag>]

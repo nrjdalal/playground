@@ -1,5 +1,3 @@
-import { dlopen, FFIType } from "bun:ffi"
-import { closeSync, openSync } from "node:fs"
 import { appendFile, readdir } from "node:fs/promises"
 import { join } from "node:path"
 
@@ -30,9 +28,6 @@ type Json = Record<string, unknown>
 export const HEADROOM = 85
 export const IDLE_DB_AFTER = 7200
 export const IDLE_DB_GAP = 900
-const LOCK_EX = 2
-const LOCK_NB = 4
-const LOCK_UN = 8
 export const PRUNE_EVERY = 21600
 export const STALE_EVERY = 1800
 
@@ -214,28 +209,6 @@ export async function dashboardDb(ctx: Context): Promise<string | undefined> {
   return r.code === 0 && name ? name : undefined
 }
 
-let libc: { flock: (fd: number, op: number) => number } | undefined
-
-// Whether a Checks run holds ops/checks/lane-<lane>.lock, read by taking its flock without waiting and letting it go; a lock file that cannot be opened is not busy.
-function laneBusy(ctx: Context, lane: string): boolean {
-  let fd: number
-  try {
-    fd = openSync(join(ctx.ops, "checks", `lane-${lane}.lock`), "a")
-  } catch {
-    return false
-  }
-  try {
-    libc ??= dlopen(process.platform === "darwin" ? "libc.dylib" : "libc.so.6", {
-      flock: { args: [FFIType.i32, FFIType.i32], returns: FFIType.i32 },
-    }).symbols
-    if (libc.flock(fd, LOCK_EX | LOCK_NB) !== 0) return true
-    libc.flock(fd, LOCK_UN)
-    return false
-  } finally {
-    closeSync(fd)
-  }
-}
-
 // A playground-* Postgres container with no client for IDLE_DB_AFTER seconds is a finding, read by its own client connections, since an owner's session can stay live long after its stack is down; the dashboard's own is never one, and when it cannot be found no container is judged.
 export async function idleDbs(ctx: Context): Promise<string[]> {
   const ps = await ctx.run(
@@ -262,9 +235,6 @@ export async function idleDbs(ctx: Context): Promise<string[]> {
   const keep: Record<string, number> = {}
   for (const name of names) {
     if (name === dashboard) continue
-    // a Checks lane's database has no client between a run's brief steps, so one whose lane lock a run holds is in use
-    const lane = /^playground-(chk-\d+)-db$/.exec(name)?.[1]
-    if (lane && laneBusy(ctx, lane)) continue
     const r = await ctx.run(["docker", "exec", name, "psql", "-U", "postgres", "-tAc", IDLE_SQL], {
       timeoutMs: 30_000,
     })
