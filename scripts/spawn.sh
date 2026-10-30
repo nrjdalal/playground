@@ -42,7 +42,7 @@ set -euo pipefail
 #   spawn.sh probe     <name> <reports-to> <brief>     in herdr alone: its own workspace, this checkout, for a server with no pane to split beside
 #   spawn.sh manager   <dispatcher|second dispatcher|optimizer> <brief>   its own workspace in the main checkout's .claude/worktrees/leads: the first dispatcher (sessions.names' dispatcher), which works with the owner and reports to no session; the second dispatcher (Inbox #i520), sessions.names' dispatcher with -2 or an <id>-dispatcher it records as slot=2, on --backend glm or --account <a second account>; the optimizer (optimizer, an <id>-optimizer, or a session the roster gives the optimizer kind), a lead; those two report to the first dispatcher
 #   spawn.sh resume    <name> <dir> [session-id]        reopens a closed session: in herdr in the pane herdr kept under its label while that pane holds no agent, else in a workspace of its own; with no session id, only in a folder it ran in; a <dir> in the Desktop folder resumes in the same tree under the code root, its transcript copied there when a session id is given; with no code root it resumes in the Desktop folder itself
-#   spawn.sh restore                                    resumes every herdr session whose resume record (~/.playground/resume) names it on the server PLAYGROUND_HERDR_SESSION names (factory by default) and that the roster has not ended, parked or paused, each through `spawn.sh resume` and its gate with the --account its start was given and the --model it started with; a live one is skipped, and one restore runs at a time
+#   spawn.sh restore                                    resumes every herdr session whose resume record (~/.playground/resume) names it on the server PLAYGROUND_HERDR_SESSION names (playground by default) and that the roster has not ended, parked or paused, each through `spawn.sh resume` and its gate with the --account its start was given and the --model it started with; a live one is skipped, and one restore runs at a time
 #   spawn.sh close     <name>                           closes the herdr pane spawn.sh opened for <name>, by the label it set, on the server its resume record names; it refuses any other pane and your own, and ends its roster row once the pane closes
 #   spawn.sh move      <name>                           takes the live cmux session holding <name> to herdr: every check and the usage gate run but the load and memory gates, since the copy it closes frees what the new one takes; only then it closes the session's cmux surface (its workspace when that was the last surface), waits up to 30s (PLAYGROUND_MOVE_WAIT seconds) for its process to exit, and resumes it in herdr by its session id. It takes --model, --account and --brief as a resume does, --backend for a session with no pin, and --runtime herdr alone; a session cmux holds no record of at its pid is left alone, and a session cannot move itself: its lead moves it
 #   --size <small|medium|big>  with any mode but restore or close, anywhere among its words: the item's size the load gate counts, in place of small for a reviewer or tester and the one ops/run-slot.sh size reads from the roster and plan.json for the rest
@@ -56,7 +56,7 @@ set -euo pipefail
 #   --title "<title>"  with worker or a reviewer's or tester's column, anywhere among its words: the plain title the sidebar reads the session by, up to 40 characters; a worker needs one, and a checker with none takes "Review: " or "Test: " before its worker's roster title
 #   --reports-to <session>  with worker alone, anywhere among its words: the session it reports to, named in its first prompt in place of the builder
 #   --in <dir>         with worker alone, anywhere among its words: the folder the worker runs in, in place of this checkout: an existing folder under the code root (paths.codeRoot) or under ~/<org> for an org ext.links guards, any other refused
-#   --runtime herdr    with any mode but restore or close, anywhere among its words: the session opens in herdr, on the factory server of ~/.playground/herdr (PLAYGROUND_HERDR_DIR and PLAYGROUND_HERDR_SESSION move it), by the binary its pin.json names alone; a column's anchor is then a herdr pane id (w1:p2, or lettered as wN:p1A), its spawner's own being $HERDR_PANE_ID. The session's name is at most 32 characters, herdr's limit for an agent's name.
+#   --runtime herdr    with any mode but restore or close, anywhere among its words: the session opens in herdr, on the playground server of ~/.playground/herdr (PLAYGROUND_HERDR_DIR and PLAYGROUND_HERDR_SESSION move it), by the binary its pin.json names alone; a column's anchor is then a herdr pane id (w1:p2, or lettered as wN:p1A), its spawner's own being $HERDR_PANE_ID. The session's name is at most 32 characters, herdr's limit for an agent's name.
 #   --runtime cmux     is refused: spawn.sh starts nothing in cmux
 #     With no --runtime, every start and resume opens in herdr, whatever terminal its spawner runs in.
 #     The runtime is recorded at the start in ~/.playground/runtimes/<name>; a resume whose pin reads cmux opens in herdr and rewrites the pin.
@@ -775,8 +775,8 @@ if [ "$MODE" = restore ]; then
   fi
   trap '[ "$(readlink "$LOCK")" = "$ME" ] && rm -f "$LOCK"' EXIT
   # A function holds the heredoc, since macOS bash 3.2 misreads the # in a heredoc inside $( ). The roster is roster.ts's own, which runs without CLAUDE_CONFIG_DIR under inscope, as the TITLE read below does.
-  # Each server restores the sessions its own records place there (a probes server restored nothing of its own on 18 Oct), a record with no server line being the factory's, as every session before the line was.
-  SERVER=${PLAYGROUND_HERDR_SESSION:-${DESK_HERDR_SESSION:-factory}}
+  # Each server restores the sessions its own records place there (a probes server restored nothing of its own on 18 Oct), a record with no server line being playground's, as every session before the line was.
+  SERVER=${PLAYGROUND_HERDR_SESSION:-${DESK_HERDR_SESSION:-playground}}
   word "$SERVER" || refuse "PLAYGROUND_HERDR_SESSION is a word, not $SERVER"
   restore_list() {
     env $UNSET python3 -I - "$DATA" "$SERVER" <<'PY'
@@ -800,7 +800,7 @@ for file in sorted(os.listdir(folder)) if os.path.isdir(folder) else []:
         words = shlex.split(next(l for l in lines if l.startswith("exec ")))
     except (OSError, StopIteration, ValueError):
         continue
-    if next((l[len("# server: "):] for l in lines if l.startswith("# server: ")), "factory") != server:
+    if next((l[len("# server: "):] for l in lines if l.startswith("# server: ")), "playground") != server:
         continue
     extras = words[6:]
     keys = extras[::2]
@@ -840,9 +840,9 @@ if [ "$MODE" = close ]; then
   [ "$(cat "$DATA/runtimes/$NAME" 2>/dev/null)" = herdr ] ||
     refuse "its runtime pin ($SHOWN/runtimes/$NAME) does not read herdr, so spawn.sh did not open it in herdr"
   [ -f "$RESUME_DIR/$NAME.sh" ] || refuse "it has no resume record ($RESUME_DIR/$NAME.sh), which spawn.sh writes when herdr runs a session it opened"
-  # A record with no server line is the factory's, as restore reads it.
+  # A record with no server line is playground's, as restore reads it.
   server=$(sed -n 's/^# server: //p' "$RESUME_DIR/$NAME.sh" | head -1)
-  server=${server:-factory}
+  server=${server:-playground}
   word "$server" || refuse "its resume record names its server $server, which is not a word"
   herdr_ready "$server"
   panes=$(hr pane list 2>/dev/null | python3 -I -c 'import json, sys
@@ -1222,7 +1222,7 @@ fi
 if [ "$RUNTIME" = herdr ]; then
   # herdr names an agent by [a-z][a-z0-9_-]{0,31}, so a longer name could never name the session's agent there.
   [ "${#NAME}" -le 32 ] || refuse "herdr names an agent with at most 32 characters, and $NAME has ${#NAME}"
-  herdr_ready "${PLAYGROUND_HERDR_SESSION:-${DESK_HERDR_SESSION:-factory}}"
+  herdr_ready "${PLAYGROUND_HERDR_SESSION:-${DESK_HERDR_SESSION:-playground}}"
 fi
 if [ -n "$CHECK" ]; then
   if [ -n "$MOVE_PID" ]; then echo "ok: $NAME can move"; else echo "ok: $NAME can start"; fi

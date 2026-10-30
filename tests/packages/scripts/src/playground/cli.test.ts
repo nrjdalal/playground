@@ -155,6 +155,24 @@ describe("bare dispatcher", () => {
     expect(out).toEndWith(`Left for you:\n  - The dispatcher didn't start: ${refusal}\n`)
   }, 15_000)
 
+  // The servers Playground started had no stop of the user's own, so a pair that restored another herdr setup's layout stayed up
+  test("herdr stop hands ops-herdr its stop-all, which reaches only the sockets in Playground's herdr folder, and keeps its exit", async () => {
+    const log = join(mkdtempSync(join(realpathSync(dir), "log-")), "log")
+    writeFileSync(log, "")
+    const { child } = await dispatcher(
+      "exit 0",
+      {},
+      {
+        "packages/scripts/src/ops-herdr/cli.ts": `import { appendFileSync } from "node:fs"\nappendFileSync(${JSON.stringify(log)}, \`ops-herdr \${process.argv.slice(2).join(" ")}\\n\`)\nconsole.log("ops-herdr: stopped playground")\nprocess.exit(1)\n`,
+      },
+      ["herdr", "stop"],
+    )
+    const code = await child.exited
+    expect(readFileSync(log, "utf8")).toBe("ops-herdr stop-all\n")
+    expect(await new Response(child.stdout).text()).toBe("ops-herdr: stopped playground\n")
+    expect(code).toBe(1)
+  }, 15_000)
+
   // Start <dispatcher> runs playground dispatcher, which on a fresh install found no herdr: spawn.sh refused on the missing pin, since only the bare start ran ops-herdr.
   describe("playground dispatcher brings herdr up before spawn.sh", () => {
     const run = async (opts: {
@@ -243,6 +261,15 @@ describe("a fresh machine", () => {
     writeFileSync(join(data, "extensions", "login"), "made-up-me\n")
     return data
   }
+
+  test("add reads the defaults from a root ext init stopped in, with no login or policy.json yet, and goes on to its own checks", () => {
+    const data = join(dir, "stopped")
+    mkdirSync(join(data, "extensions"), { recursive: true })
+    const add = run(data, ["add", "made-up-worker"])
+    expect(add.exitCode).toBe(1)
+    expect(add.stderr.toString()).not.toContain("policy.json")
+    expect(add.stderr.toString()).toContain("made-up-worker gives no kind")
+  })
 
   test("herdr pin --check names the pinned herdr missing from HOME's data folder, exit 1", () => {
     const data = fresh("herdr")

@@ -5,7 +5,7 @@ import { join } from "node:path"
 
 import { getSessionNames, setSessionNames } from "@packages/config/kinds"
 import { configDirOf, dataDir } from "@packages/env/data-dir"
-import { modelSettings, readPolicy, readSessionNames } from "@packages/settings"
+import { modelSettings, readPolicyOrDefaults, readSessionNames } from "@packages/settings"
 
 import { assetOf, herdrPath, pinnedSum } from "../ops-herdr/pin"
 import { accountsIo, runAccounts } from "./accounts"
@@ -281,7 +281,7 @@ const verb = (name: string, words: string[]): Promise<number> =>
   }).exited
 
 const add = async (args: string[]): Promise<number> => {
-  const policy = await readPolicy(dataDir())
+  const policy = readPolicyOrDefaults(dataDir())
   if (policy.refusal !== undefined) fail(policy.refusal)
   const models = modelSettings.get(policy.settings!, "models.claude")
   const command = addCommand(args, briefExists, pickName, models)
@@ -401,13 +401,17 @@ const code =
                                     ? await orgsCommand(rest, orgsIo(REPO, dataDir()))
                                     : command === "accounts"
                                       ? await runAccounts(rest, accountsIo(dataDir()))
-                                      : command === "herdr" && rest[0] === "pin"
-                                        ? await (
-                                            await import("./herdr-pin")
-                                          ).runHerdrPin(rest.slice(1))
-                                        : VERBS.includes(command)
-                                          ? await verb(command, rest)
-                                          : fail(
-                                              `no command ${command}; playground --help lists them`,
-                                            )
+                                      : command === "herdr" && rest[0] === "stop"
+                                        ? (await opsHerdr(["stop-all"]).exited) === 0
+                                          ? 0
+                                          : 1
+                                        : command === "herdr" && rest[0] === "pin"
+                                          ? await (
+                                              await import("./herdr-pin")
+                                            ).runHerdrPin(rest.slice(1))
+                                          : VERBS.includes(command)
+                                            ? await verb(command, rest)
+                                            : fail(
+                                                `no command ${command}; playground --help lists them`,
+                                              )
 process.exit(code)

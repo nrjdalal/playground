@@ -10,8 +10,7 @@ import {
   accountsOf,
   liveSettings,
   modelSettings,
-  readPolicy,
-  readPolicySync,
+  readPolicyOrDefaults,
 } from "@packages/settings"
 
 import { portlessCa } from "../portless-ca"
@@ -39,9 +38,9 @@ const run = (argv: string[], cwd?: string, timeout = 10_000): { code: number; ou
   return { code: child.exitCode ?? 1, out: child.stdout.toString().trim() }
 }
 
-// The live dashboard's branch, which its checkout is on (live.branch); settings it cannot read throw.
+// The live dashboard's branch, which its checkout is on (live.branch): its default until a first setting writes policy.json, so a first start runs after ext init stopped; a policy.json that does not parse throws.
 export const liveBranch = (): string => {
-  const read = readPolicySync(dataDir())
+  const read = readPolicyOrDefaults(dataDir())
   if (read.refusal !== undefined) throw new Error(read.refusal)
   return liveSettings.get(read.settings, "live.branch")
 }
@@ -173,7 +172,7 @@ const backendOf = (name: string): Backend | null => {
 
 // Only that the Keychain item spawn.sh's GLM backend reads by default (models.glmKeychainService, the first GLM row's label) exists: no -w, so the key is never read; a render set it cannot trust reads as not set up.
 export const glmSetUp = async (): Promise<boolean> => {
-  const read = await readPolicy(dataDir())
+  const read = readPolicyOrDefaults(dataDir())
   if (read.refusal !== undefined) return false
   const service = modelSettings.get(read.settings, "models.glmKeychainService")
   const label = accountsOf(accountSettings.get(read.settings, "usage.accounts"), "glm")[0]?.label

@@ -21,7 +21,7 @@ import {
   extLinksSchema,
   loginOf,
   markerPath,
-  readPolicy,
+  readPolicyOrDefaults,
   scopeDir,
 } from "@packages/settings"
 
@@ -173,7 +173,7 @@ export type OrgsIo = {
   personal: string
 }
 
-// What a session in repo, or in a repo of org, resolves to (the home set with neither): ext.order and ext.links from the extensions' policy (their defaults with none), each skill from the first scope that has it; a refusal when the policy cannot be trusted or the extensions name no login.
+// What a session in repo, or in a repo of org, resolves to (the home set with neither): ext.order and ext.links from the extensions' policy (their defaults until a first setting writes it), each skill from the first scope that has it; a root ext init stopped in, holding no scope's folder yet, resolves with no login; a refusal when the policy does not parse, or when scopes are there and no login names whose they are.
 export const resolveFor = async (
   io: OrgsIo,
   repo?: string,
@@ -181,14 +181,17 @@ export const resolveFor = async (
 ): Promise<
   ({ plan: Plan; refusal?: undefined } & Resolved) | { plan?: undefined; refusal: string }
 > => {
-  const policy = await readPolicy(io.data)
+  const policy = readPolicyOrDefaults(io.data)
   if (policy.refusal !== undefined) return { refusal: policy.refusal }
   const extensions = existsSync(markerPath(io.data))
   let login: string | undefined
   try {
     login = extensions ? io.login() : undefined
   } catch (error) {
-    return { refusal: (error as Error).message }
+    const scopes = readdirSync(markerPath(io.data), { withFileTypes: true }).filter((entry) =>
+      entry.isDirectory(),
+    )
+    if (scopes.length) return { refusal: (error as Error).message }
   }
   const owner = org?.toLowerCase() ?? (repo ? ownerOf(io.origin(repo)) : undefined)
   const plan = planFor(owner, policy.settings.values, login)

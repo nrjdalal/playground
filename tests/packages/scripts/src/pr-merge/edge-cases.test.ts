@@ -8,7 +8,6 @@ import {
   type PrFacts,
 } from "../../../../../packages/scripts/src/pr-merge/gates"
 import {
-  carried,
   jobsStamp,
   stampAt,
   stampsAt,
@@ -239,12 +238,9 @@ describe("the README's edge cases (#2410)", () => {
     const parents = { [HEAD]: [OWN, CANARY], [OWN]: [OLD] }
     const skipped = jobs("success", "success").map((run) => ({ ...run, skippedSteps: true }))
     const full = { clean: [HEAD], comments: [review(OWN), suite(OWN)], parents }
-    const facts = await factsOf(full)
-    expect(carried(facts.stamp, [])).toMatchObject({ green: true })
     expect(await failing(full)).toEqual([])
     const part = { ...full, comments: [review(OWN), stamped(example(13))] }
     const partFacts = await factsOf(part)
-    expect(carried(partFacts.stamp, [])).toMatchObject({ green: false })
     const read = typeof partFacts.stamp === "string" ? undefined : partFacts.stamp
     expect(jobsStamp(read, HEAD, skipped)).toBeNull()
     expect(await failing(part)).toEqual(["suite"])

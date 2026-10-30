@@ -2,27 +2,33 @@ import { describe, expect, test } from "bun:test"
 import { readdirSync } from "node:fs"
 import { join } from "node:path"
 
-import { GATE_LABEL, LOCAL_LABEL } from "../../../packages/scripts/src/pr-merge/go"
-
 const DIR = join(import.meta.dir, "../../../.github/workflows")
 const workflows = readdirSync(DIR).filter((name) => /\.ya?ml$/.test(name))
 const text = (name: string) => Bun.file(join(DIR, name)).text()
-const REQUIRED = /contains\(github\.event\.pull_request\.labels\.\*\.name, '([^']+)'\)/g
-const NAMED = /github\.event\.label\.name == '([^']+)'/g
 
-describe("the workflows' label gate", () => {
-  test("only Cloud CI starts the gated workflows", async () => {
-    const gated: string[] = []
-    for (const name of workflows) {
+type Workflow = {
+  on?: {
+    pull_request?: { branches?: string[]; types?: string[] }
+  }
+  permissions?: Record<string, string>
+}
+
+describe("the checks on a pull request", () => {
+  test("run on every pull request into canary or main, with no label to start them", async () => {
+    for (const name of ["auto-check-build.yml", "auto-test.yml"]) {
       const body = await text(name)
-      const labels = [...body.matchAll(REQUIRED), ...body.matchAll(NAMED)].map((m) => m[1])
-      if (labels.length) gated.push(name)
-      expect(labels.every((label) => label === GATE_LABEL)).toBe(true)
+      const { on, permissions } = Bun.YAML.parse(body) as Workflow
+      expect(on?.pull_request?.types?.toSorted()).toEqual(["opened", "reopened", "synchronize"])
+      expect(on?.pull_request?.branches?.toSorted()).toEqual(["canary", "main"])
+      expect(permissions).toEqual({ contents: "read" })
     }
-    expect(gated.sort()).toEqual(["hosted-check-build.yml", "hosted-test.yml"])
   })
 
-  test("Local CI starts no workflow", async () => {
-    for (const name of workflows) expect(await text(name)).not.toContain(LOCAL_LABEL)
+  test("no workflow waits on a label, or runs a fork's code with the base's token", async () => {
+    for (const name of workflows) {
+      const body = await text(name)
+      expect(body).not.toMatch(/labels\.\*\.name|event\.label\.name/)
+      expect(body).not.toContain("pull_request_target:")
+    }
   })
 })
