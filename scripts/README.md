@@ -97,7 +97,7 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
   The binary is Playground's own copy at `~/.playground/bin/herdr`, following HOME alone as the sockets do, and `playground herdr pin` (`packages/scripts/src/playground/herdr-pin.ts`) puts it there: it downloads the pinned version's release asset for this Mac, checks its SHA-256 against the pin before the move, and refuses a mismatch naming both sums.
   The pin holds GitHub's digest of each release asset, keyed `darwin-arm64` and `darwin-x64`, and the job takes this Mac's, refusing a machine the pin names no asset for; a herdr on PATH is the human's own, which nothing runs.
   Moving to a new herdr is a PR to `pin.json`: its version and every asset's sum.
-  Once it has started a server, any of `PLAYGROUND_HERDR_SESSIONS` (`factory,probes` by default; a name that is not a word is named on its beat and skipped), it runs `spawn.sh restore` pointed at that server, since the pinned config turns herdr's own resume off.
+  Once it has started a server, any of `PLAYGROUND_HERDR_SESSIONS` (`playground,playground-probes` by default; a name that is not a word is named on its beat and skipped), it runs `spawn.sh restore` pointed at that server, since the pinned config turns herdr's own resume off.
   A person brings herdr back with bare `playground`, which runs its `start` first.
   A server hands its panes the shell basics alone, so `spawn.sh`'s herdr launch file sets `TMPDIR` to `$(getconf DARWIN_USER_TEMP_DIR)`, keeping one already set: every start, resume and restore writes that file, so a running server needs no restart for it.
   Nothing in the factory lives under the Desktop folder: macOS guards it by each binary's Full Disk Access, which a herdr or Claude Code update can drop, so the job asks for no grant, and `tests/desktop-paths.test.ts` fails on a tracked file naming a path there.
@@ -129,6 +129,6 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
 
 ## bun run test:skills
 
-- `bun run test:skills` runs Playground's checks, as CI's `hosted-test.yml` does, through `packages/scripts/src/test-skills.ts`: every Python step runs under `uv run --python 3.13` (the system `python3` is 3.9 on a Mac, too old for the skills' Python), every step runs even after one fails, and a red run ends naming each failed step and its first `FAIL` line.
+- `bun run test:skills` runs Playground's checks, as CI's `auto-test.yml` does, through `packages/scripts/src/test-skills.ts`: every Python step runs under `uv run --python 3.13` (the system `python3` is 3.9 on a Mac, too old for the skills' Python), every step runs even after one fails, and a red run ends naming each failed step and its first `FAIL` line.
   Each step runs in the suite's sandbox (`packages/scripts/src/sandbox.ts`, shared with `test-sandbox.ts`), with uv's Pythons and cache and Docker's config kept in the real home, so a step never writes the real `~/.claude` and a second run downloads nothing.
   Its `steps` list in [packages/scripts/src/test-skills.ts](../packages/scripts/src/test-skills.ts) names every step.

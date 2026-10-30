@@ -34,6 +34,7 @@ import { caretPoint } from "@/lib/caret"
 import { isPrimary } from "@/lib/dashboard"
 import { draftSaver, readDrafts, takeHanded } from "@/lib/drafts"
 import { itemTag, useInbox } from "@/lib/inbox"
+import { isLoginCommand, LOGIN_HINT } from "@/lib/login-expired"
 import { comparable, submittable } from "@/lib/outbox"
 import { insertPaste } from "@/lib/paste"
 import { markInserted, watchPastes } from "@/lib/paste-log"
@@ -148,6 +149,11 @@ export function Composer({ threadId, worker }: { threadId?: string; worker: Work
           title: "A message ending in a backslash would not send: drop it and send again",
           type: "info",
         })
+        return
+      }
+      // /login would land on whatever prompt the session shows; an account is added in the app instead
+      if (isLoginCommand(words)) {
+        toast.add({ title: LOGIN_HINT, type: "info" })
         return
       }
       // A send carries only uploaded files, so it waits for the rest rather than leaving them behind.

@@ -30,8 +30,9 @@ On a fresh install, the first `playground` first cuts the Dashboard's own checko
 ## Start the dispatcher: `playground dispatcher`
 
 `playground dispatcher` starts the dispatcher, the session you talk with, in a herdr workspace of its own. It takes nothing.
+It sets up first what the installer and `playground` would have, so the Dashboard's **Start** works on a fresh install: when a file the installer links into `~/.playground` is missing (the factory settings every session starts with among them) it runs the installer's linking step, `scripts/link-skills.sh`; when the pinned herdr is missing it installs it as `playground herdr pin` does; then it starts each herdr server that is down as `playground` does. When a step fails, it exits 1 with that step's reason and starts nothing.
 Its brief is `brief-<dispatcher>.md` in the data folder, written once from `scripts/briefs/dispatcher.md` when it is missing, so your own edits to it stay.
-It exits 0 once the dispatcher starts, 3 when a session already holds the dispatcher's name (it starts nothing), and 1 with spawn.sh's reason when a gate refuses the start.
+It exits 0 once the dispatcher starts, 3 when a session already holds the dispatcher's name (it starts nothing), and 1 with spawn.sh's reason when a gate refuses the start, or herdr's when herdr cannot come up.
 
 ## View your sessions: `playground view`
 
@@ -57,7 +58,7 @@ Each herdr server shows whether it is up and how many sessions it holds, first, 
 
 `playground update` brings your checkout up to the newest release, then moves the Dashboard to the newest commit of the branch it follows. It runs, in order, and stops at the first step that fails, naming it:
 
-1. It fetches `origin/main` and fast-forwards your checkout onto it. A checkout with commits of its own cannot fast-forward, so it stops there and changes nothing.
+1. It fetches `origin/main` and fast-forwards your checkout onto it. A checkout left on another branch, such as `canary`, moves to `main` first when it holds no uncommitted changes, and the update says so; with uncommitted changes it stops there and changes nothing. A checkout with commits of its own on `main` cannot fast-forward, so it stops there too.
 2. It runs `scripts/link-skills.sh`, so the home skill set takes a new or renamed skill.
 3. It installs the dependencies when `bun.lock` or a `package.json` changed, and builds the shared packages when one of them changed.
 4. It restarts each background job whose code changed.

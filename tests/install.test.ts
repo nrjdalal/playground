@@ -259,7 +259,7 @@ const setup = ({
       `echo "gh $*" >> ${log}`,
       `if [ "$1 $2" = "auth status" ]; then [ -e ${state}/gh-login ]; exit; fi`,
       `if [ "$1 $2" = "auth login" ]; then read -r answer; echo "gh auth login read $answer" >> ${log}; touch ${state}/gh-login; exit 0; fi`,
-      `if [ "$1 $2" = "repo clone" ]; then exec ${realGit} clone -q ${source} "$4"; fi`,
+      `if [ "$1 $2" = "repo clone" ]; then dir=$4; shift 4; [ "$1" = -- ] && shift; exec ${realGit} clone ${source} "$dir" "$@"; fi`,
       ...(ghUser
         ? [
             `if [ "$1 $2" = "api user" ]; then echo ${ghUser}; exit 0; fi`,
@@ -718,6 +718,48 @@ describe("install.sh", () => {
     expect(calls).not.toContain("bun.sh/install")
     expect(code).toBe(1)
   })
+
+  test("clones main whatever the repo's default branch is, through gh or over https", () => {
+    for (const ghLogin of [true, false]) {
+      const { dir, home, run, source } = setup({ ghLogin })
+      git(source, home, "checkout", "-q", "-b", "canary")
+      const { code } = run()
+      expect(git(dir, home, "branch", "--show-current").stdout.toString().trim()).toBe("main")
+      expect(code).toBe(0)
+    }
+  })
+
+  test("a re-run moves a clean checkout left on canary to main at origin/main, and refuses one with uncommitted changes", () => {
+    const { dir, home, run, source } = setup()
+    expect(run().code).toBe(0)
+    git(dir, home, "checkout", "-q", "-b", "canary")
+    write(join(dir, "canary.txt"), "canary\n")
+    git(dir, home, "add", "canary.txt")
+    git(dir, home, "commit", "-q", "-m", "canary")
+    write(join(source, "README.md"), "two\n")
+    git(source, home, "add", "README.md")
+    git(source, home, "commit", "-q", "-m", "two")
+    const main = git(source, home, "rev-parse", "HEAD").stdout.toString().trim()
+    const head = git(dir, home, "rev-parse", "HEAD").stdout.toString().trim()
+    const at = () => [
+      git(dir, home, "branch", "--show-current").stdout.toString().trim(),
+      git(dir, home, "rev-parse", "HEAD").stdout.toString().trim(),
+    ]
+
+    write(join(dir, "install.sh"), "mine\n")
+    const dirty = run()
+    expect(dirty.out).toContain(`Playground in ${dir} is on canary with uncommitted changes`)
+    expect(at()).toEqual(["canary", head])
+    expect(dirty.code).toBe(1)
+
+    git(dir, home, "checkout", "-q", "--", "install.sh")
+    const clean = run()
+    expect(clean.out).toContain(
+      `Playground in ${dir} was on canary, so it moves to main at origin/main.`,
+    )
+    expect(at()).toEqual(["main", main])
+    expect(clean.code).toBe(0)
+  }, 90_000)
 
   test("--check on a ready machine says it is ready and exits 0", () => {
     const { run } = setup()

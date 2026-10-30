@@ -89,5 +89,6 @@ Keep the Mac on a network you trust, or block the port in its firewall.
 ## Run it again
 
 Every step checks before it acts, so running the command again changes nothing on a working install, and puts back a link that went missing.
+A checkout left on another branch, such as `canary`, moves to `main` at the newest release, when it holds no uncommitted changes; with uncommitted changes the run stops and names the branch.
 To update an install, run `playground update` ([CLI](/docs/cli)).
 To check one, run `playground doctor`; to remove one, `playground uninstall`, which also takes the home skill set and its `ws` marketplace back out of Claude Code.

@@ -4,7 +4,7 @@ import { existsSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 
 import { proxyRefusal } from "../../../../api/hono/src/lib/dev/proxy"
-import { fixFor, readRendered } from "../../../settings/src/rendered"
+import { readPolicyFile } from "../../../settings/src/rendered"
 import { assetOf, herdrPath, PIN_SOURCE, pinnedSum } from "../ops-herdr/pin"
 import { checkHerdr } from "./herdr-pin"
 import { type Link, linksInto } from "./links"
@@ -177,13 +177,12 @@ const tools = (): Check[] =>
       Bun.spawnSync(["node", "--version"], { stderr: "ignore" }).stdout.toString().trim() || null,
   )
 
-// The jobs launchd should hold, from the job registry on a machine with extensions, else from jobs.json; extensions that lack policy.json is MISSING with its reason.
+// The jobs launchd should hold, from the job registry on a machine whose extensions hold policy.json, else from jobs.json.
 export const launchdChecks = async (
   data: string,
   loaded: (label: string) => boolean,
 ): Promise<Check[]> => {
-  const read = await readRendered(data, "policy.json")
-  if (read.refusal) return [check("jobs", true, false, fixFor("policy.json"), read.refusal)]
+  const read = readPolicyFile(data)
   if (read.path) return jobChecks(registryJobsText(readFileSync(read.path, "utf8")), loaded)
   const jobs = join(data, "ops", "jobs.json")
   return jobChecks(existsSync(jobs) ? readFileSync(jobs, "utf8") : null, loaded)

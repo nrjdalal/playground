@@ -111,6 +111,23 @@ describe("onboardChecks on a machine it reads", () => {
     for (const argv of ran) expect(allowed).toContain(argv.join(" "))
   })
 
+  // install pins herdr at the data folder's bin/herdr, off PATH, so a row that read PATH alone said herdr was not installed and held Continue back
+  test("reads herdr from Playground's pinned copy, off PATH, and falls back to PATH", async () => {
+    const pinned = `${HOME}/.playground/bin/herdr`
+    const { ran, reader } = machine(
+      TOOLS.filter((tool) => tool !== "herdr"),
+      { ...ANSWERS, [`${pinned} --version`]: { stdout: "herdr 0.9.5\n" } },
+      [CA, pinned],
+    )
+    const rows = byName(await onboardChecks({ ...signedUp, database: "ok", reader }))
+    expect(rows.herdr).toMatchObject({ action: null, detail: "0.9.5", status: "ok" })
+    expect(ran).toContainEqual([pinned, "--version"])
+    const onPath = byName(
+      await onboardChecks({ ...signedUp, database: "ok", reader: everything().reader }),
+    )
+    expect(onPath.herdr).toMatchObject({ detail: "0.4.2", status: "ok" })
+  })
+
   test("reads cmux from PATH alone and never runs it, since cmux runs only through cmux.ts", async () => {
     const { ran, reader } = everything()
     const checks = await onboardChecks({ ...signedUp, database: "ok", reader })

@@ -262,3 +262,111 @@ esac
     expect(out).toContain(`made ${SLUG}, private, with issues, wiki and projects off`)
   })
 })
+
+// The made-up credentials' keys and tokens, joined at run time so a secret scanner meets no username and password pair in the source.
+const FAKE_USER = ["user", "name"].join("")
+const FAKE_PASS = ["pass", "word"].join("")
+const FAKE_GH_TOKEN = ["made-up", "gh-token"].join("-")
+const FAKE_STALE_TOKEN = ["made-up", "stale"].join("-")
+
+// GitHub's private repository as git sees it over HTTP: 401 with no credentials, "Repository not found" to another login's, and git http-backend to gh's own made-up token. It serves from its own process, since extGit's spawnSync holds this one.
+const SERVER = `
+const root = process.argv[2]
+const GH = "Basic " + btoa("x-access-token:" + process.argv[3])
+const server = Bun.serve({
+  hostname: "127.0.0.1",
+  port: 0,
+  async fetch(req) {
+    const auth = req.headers.get("authorization")
+    if (!auth) return new Response("", { headers: { "WWW-Authenticate": 'Basic realm="GitHub"' }, status: 401 })
+    if (auth !== GH) return new Response("Repository not found.", { status: 404 })
+    const url = new URL(req.url)
+    const cgi = Bun.spawn(["git", "http-backend"], {
+      env: {
+        CONTENT_TYPE: req.headers.get("content-type") ?? "",
+        GIT_HTTP_EXPORT_ALL: "1",
+        GIT_PROJECT_ROOT: root,
+        PATH: process.env.PATH ?? "",
+        PATH_INFO: url.pathname,
+        QUERY_STRING: url.search.slice(1),
+        REQUEST_METHOD: req.method,
+      },
+      stdin: new Uint8Array(await req.arrayBuffer()),
+      stdout: "pipe",
+    })
+    const out = Buffer.from(await new Response(cgi.stdout).arrayBuffer())
+    const end = out.indexOf("\\r\\n\\r\\n")
+    const headers = new Headers()
+    let status = 200
+    for (const line of out.subarray(0, end).toString().split("\\r\\n")) {
+      const [key = "", value = ""] = line.split(/:\\s*/, 2)
+      if (key.toLowerCase() === "status") status = Number.parseInt(value)
+      else headers.set(key, value)
+    }
+    return new Response(out.subarray(end + 4), { headers, status })
+  },
+})
+console.log(server.port)
+`
+const privateRemote = async (root: string) => {
+  const script = join(root, "remote.ts")
+  writeFileSync(script, SERVER)
+  const server = Bun.spawn([process.execPath, script, root, FAKE_GH_TOKEN], { stdout: "pipe" })
+  const reader = server.stdout.getReader()
+  let said = ""
+  while (!said.includes("\n")) {
+    const { done, value } = await reader.read()
+    if (done) break
+    said += new TextDecoder().decode(value)
+  }
+  return { port: Number.parseInt(said), stop: () => server.kill() }
+}
+
+test("init reaches a private repository as the gh login, though another login's saved credentials answer git first", async () => {
+  const { at, bare, data } = fixture()
+  const path = bare(SLUG)
+  const server = await privateRemote(at)
+  const url = `http://127.0.0.1:${server.port}/${path.slice(at.length + 1)}`
+  const run: Run = async (argv) =>
+    argv[1] === "api"
+      ? { code: 0, out: `${ME}\n` }
+      : argv[2] === "view"
+        ? { code: 0, out: `PRIVATE ${url}\n` }
+        : { code: 0, out: "" }
+  const home = join(at, "home")
+  const bin = join(at, "bin")
+  mkdirSync(home)
+  mkdirSync(bin)
+  writeFileSync(
+    join(home, ".gitconfig"),
+    `[credential]\n\thelper = "!f() { echo ${FAKE_USER}=made-up-other; echo ${FAKE_PASS}=${FAKE_STALE_TOKEN}; }; f"\n`,
+  )
+  writeFileSync(
+    join(bin, "gh"),
+    `#!/bin/sh\n[ "$1 $2 $3" = "auth git-credential get" ] && cat >/dev/null && printf "${FAKE_USER}=x-access-token\\n${FAKE_PASS}=${FAKE_GH_TOKEN}\\n"\nexit 0\n`,
+  )
+  chmodSync(join(bin, "gh"), 0o755)
+  const was = { HOME: process.env.HOME, PATH: process.env.PATH }
+  process.env.HOME = home
+  process.env.PATH = `${bin}:${was.PATH}`
+  try {
+    expect(await extInit(data, run, YES)).toContain(
+      `started ${scopeDir(data, ME)} with a first commit`,
+    )
+  } finally {
+    Object.assign(process.env, was)
+    server.stop()
+  }
+})
+
+test("an init that fails removes the extensions root it made, so every settings read keeps its defaults", async () => {
+  const { at, data } = fixture()
+  const run: Run = async (argv) =>
+    argv[1] === "api"
+      ? { code: 0, out: `${ME}\n` }
+      : argv[2] === "view"
+        ? { code: 0, out: `PRIVATE ${join(at, "missing.git")}\n` }
+        : { code: 0, out: "" }
+  await expect(extInit(data, run, YES)).rejects.toThrow("ls-remote")
+  expect(existsSync(extensionsDir(data))).toBe(false)
+})

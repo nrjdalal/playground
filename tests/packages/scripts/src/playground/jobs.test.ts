@@ -136,9 +136,21 @@ test("each org's script folder is installed under ops beside the state its job k
   expect((await run(data, jobs)).out).toBe("jobs: unchanged")
 })
 
-test("an extensions root that lacks policy.json is refused, exit 2, and jobs.json is kept", async () => {
-  const data = join(scratch, "refused")
+// ext init can stop after making the extensions root, before a first setting writes policy.json.
+test("an extensions root that lacks policy.json gets the registry's defaults, as a fresh machine does", async () => {
+  const data = join(scratch, "no-policy")
   writeRoot(extensionsDir(data), new Map([["hooks/a.json", "[]"]]))
+  const jobs = join(scratch, "no-policy", "ops", "jobs.json")
+  expect(await run(data, jobs)).toEqual({ code: 0, err: "", out: "jobs: rendered jobs.json" })
+  const rendered = JSON.parse(readFileSync(jobs, "utf8")).jobs as Record<string, unknown>[]
+  expect(rendered.filter((job) => job.disabled !== true).map((job) => job.name)).toEqual([
+    "ops-dashboard",
+  ])
+})
+
+test("a policy.json that does not parse is refused, exit 2, and jobs.json is kept", async () => {
+  const data = join(scratch, "refused")
+  writeRoot(extensionsDir(data), new Map([["policy.json", "{"]]))
   const jobs = join(scratch, "refused-jobs.json")
   writeFileSync(jobs, '{"jobs":[]}\n')
   const refused = await run(data, jobs)
