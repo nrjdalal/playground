@@ -60,10 +60,12 @@ follower_held() { local p i; bun api/hono/src/bin/dashboard-ingest.ts status > /
 # Dev up and checked: health answers, verify passes against origin/canary, approvals stay off. Prints one summary.
 # every verify check but pages, one call each (verify takes one check per call): the pages check opens /dashboard/apps/changelog,
 # which marks the changelog read for LocalAgent, the owner's account, so each roll cleared the owner's +1 (fixed since, 7 Oct)
+# signin, ws and system sign in through the agent route, which only a checkout whose .env turns AGENT_SIGNIN_ENABLED on serves; a person's checkout starts it blank from .env.example, so there health and map are the checks
 verify_dashboard() {
-  local c out rc=0
+  local c out rc=0 checks="health map"
+  grep -qiE '^AGENT_SIGNIN_ENABLED=(true|1|yes|on|y|enabled)$' .env 2>/dev/null && checks="health signin ws system map"
   dashboard_urls || { echo "✗ urls: bunx portless get failed"; return 1; }
-  for c in health signin ws system map; do
+  for c in $checks; do
     out=$(bun run verify "$c" --web "$WEB" --api "$API" --expect "$(git rev-parse HEAD)" 2>&1) || rc=1
     echo "$out"
   done

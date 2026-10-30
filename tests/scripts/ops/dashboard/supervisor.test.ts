@@ -745,3 +745,31 @@ describe("the loop's DOWN dev reason (#1356)", () => {
     expect(await new Response(proc.stdout).text()).toBe("")
   })
 })
+
+// verify_dashboard with stand-ins for bun and git, run in a checkout whose .env holds the given AGENT_SIGNIN_ENABLED line: the checks it runs, in order
+const verifyChecks = async (signIn: string) => {
+  const dir = join(scratch, `verify-${signIn || "blank"}`)
+  const calls = join(dir, "calls")
+  await Bun.write(join(dir, ".env"), `AGENT_SIGNIN_ENABLED=${signIn}\n`)
+  await Bun.write(join(dir, "bin", "bun"), `#!/bin/sh\necho "$3" >> ${calls}\n`)
+  await Bun.write(join(dir, "bin", "git"), "#!/bin/sh\necho abc123\n")
+  chmodSync(join(dir, "bin", "bun"), 0o755)
+  chmodSync(join(dir, "bin", "git"), 0o755)
+  const body = `dashboard_urls() { WEB=https://web.test API=https://api.test; }\n${block("verify_dashboard")}\nverify_dashboard`
+  const proc = Bun.spawn(["bash", "-c", body], {
+    cwd: dir,
+    env: { ...process.env, PATH: `${join(dir, "bin")}:${process.env.PATH}` },
+  })
+  expect(await proc.exited).toBe(0)
+  return (await Bun.file(calls).text()).trim().split("\n")
+}
+
+describe("the supervisor's verify", () => {
+  test("leaves out the signed-in checks on a checkout with agent sign-in off, as a person's .env starts it", async () => {
+    expect(await verifyChecks("")).toEqual(["health", "map"])
+  })
+
+  test("runs every check where agent sign-in is on", async () => {
+    expect(await verifyChecks("true")).toEqual(["health", "signin", "ws", "system", "map"])
+  })
+})
