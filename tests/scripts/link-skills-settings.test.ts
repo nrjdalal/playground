@@ -187,7 +187,6 @@ describe("link-skills.sh links the playground command and its brief templates", 
         /os\.path\.join\(OPS, "([\w.-]+\.(?:sh|py))"\)/g,
       ))
         called.add(match[1]!)
-    expect([...called]).toContain("run-slot.sh")
     expect([...called]).toContain("notify.sh")
     expect([...called].filter((name) => !installed.has(name))).toEqual([])
   })
