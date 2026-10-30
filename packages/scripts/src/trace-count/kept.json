@@ -21,6 +21,13 @@
     "reason": "switch step 8: a link to an issue the issue re-file moves; that commit puts the new number in and drops this entry"
   },
   {
+    "hits": 1,
+    "kind": "ownerName",
+    "line": "Copyright (c) 2026 nrjdalal. All rights reserved.",
+    "path": "LICENSE",
+    "reason": "the copyright line, in the owner's own words: the handle is the copyright holder"
+  },
+  {
     "hits": 3,
     "kind": "oldNames",
     "line": "\"aliases\": [\"lightboy\", \"lightkid\", \"lightplan\"],",
@@ -236,6 +243,13 @@
     "line": "source: https://github.com/nrjdalal/zerostarter",
     "path": "skills/zerostarter/ui-verify/SKILL.md",
     "reason": "a vendored skill's provenance: the public upstream it syncs from, which a fork keeps"
+  },
+  {
+    "hits": 1,
+    "kind": "ownerName",
+    "line": "const LICENSE = `Copyright (c) 2026 nrjdalal. All rights reserved.",
+    "path": "tests/NOTICE.test.ts",
+    "reason": "the NOTICE test's copy of LICENSE's copyright line, which holds the root LICENSE to its exact text"
   },
   {
     "hits": 3,
