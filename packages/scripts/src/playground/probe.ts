@@ -11,7 +11,7 @@ import {
   liveSettings,
   modelSettings,
   readPolicy,
-  readPolicySync,
+  readPolicyOrDefaults,
 } from "@packages/settings"
 
 import { portlessCa } from "../portless-ca"
@@ -39,9 +39,9 @@ const run = (argv: string[], cwd?: string, timeout = 10_000): { code: number; ou
   return { code: child.exitCode ?? 1, out: child.stdout.toString().trim() }
 }
 
-// The live dashboard's branch, which its checkout is on (live.branch); settings it cannot read throw.
+// The live dashboard's branch, which its checkout is on (live.branch): its default until a first setting writes policy.json, so a first start runs after ext init stopped; a policy.json that does not parse throws.
 export const liveBranch = (): string => {
-  const read = readPolicySync(dataDir())
+  const read = readPolicyOrDefaults(dataDir())
   if (read.refusal !== undefined) throw new Error(read.refusal)
   return liveSettings.get(read.settings, "live.branch")
 }
