@@ -777,10 +777,13 @@ describe("herdrServers and readScreen", () => {
     }
   })
 
-  test("names the factory's servers by default, where ops-herdr serves them, and only names herdr takes", () => {
+  test("names Playground's servers by default, where ops-herdr serves them, and only names herdr takes", () => {
     // ops-herdr's sockets follow HOME, never CLAUDE_CONFIG_DIR, so a session on another login reads the same servers
     expect(herdrServers({ CLAUDE_CONFIG_DIR: "/c", HOME: "/home/u" }).map((s) => s.socket)).toEqual(
-      ["/home/u/.playground/herdr/factory.sock", "/home/u/.playground/herdr/probes.sock"],
+      [
+        "/home/u/.playground/herdr/playground.sock",
+        "/home/u/.playground/herdr/playground-probes.sock",
+      ],
     )
     for (const env of [
       { HOME: "/home/u" },

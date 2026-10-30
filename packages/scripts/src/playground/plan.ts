@@ -17,8 +17,8 @@ const BACKENDS = ["claude", "glm"]
 const KINDS = ["worker", "runner"]
 const NAME = /^[a-z0-9]+(-[a-z0-9]+)*$/
 
-// The server playground view opens: the factory's, since probes keep to a server of their own.
-export const VIEW_SERVER = "factory"
+// The server playground view opens: the sessions', since probes keep to a server of their own.
+export const VIEW_SERVER = "playground"
 
 export const HELP = `playground            start herdr's servers that are down and restore their sessions, start the Dashboard's stack and follower when down (in cmux while a session is open there, else in herdr), start the dispatcher when it is not running (playground dispatcher), stop there when the Dashboard needs a cmux terminal open, else wait for the Dashboard (a progress line every 10s, stopping early once ops-dashboard's supervisor stops, 15 minutes at most), then open it; a step that failed is named last, with why, under Left for you, and the run exits 1
 playground view       open the ${VIEW_SERVER} herdr server, where the sessions run, in this terminal
@@ -33,6 +33,7 @@ playground update [--to <tag>]
 playground doctor     one line per need, as ok, MISSING with its fix, or optional: the tools, the data folder, the pinned herdr, the links into this checkout, the release it is at, and each ops job launchd should hold
 playground herdr pin [--check | --asset <file>]
                       put the pinned herdr's release asset for this Mac at the data folder's bin/herdr, after checking its SHA-256 against the pin, refusing a mismatch with both sums; --check reads the copy alone, exit 1 when it is missing or changed; --asset installs from a file instead of downloading
+playground herdr stop stop every herdr server Playground started, each through its own socket in the data folder's herdr folder; every session in them ends with it, and the next playground or Start brings them back
 playground version    this checkout's tag and sha, the extensions' last commit and Claude Code's version
 playground ask <command> ...
                       the Inbox: post an ask, read its answer, close it (bun run ask)
@@ -128,6 +129,7 @@ export const WORDS: Record<string, number | "rest"> = {
   "ext which": 1,
   "ext why": 3,
   "herdr pin": "rest",
+  "herdr stop": 0,
   migrate: 0,
   "orgs home": 0,
   "orgs resolve": 0,
