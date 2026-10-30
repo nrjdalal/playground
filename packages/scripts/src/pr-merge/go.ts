@@ -6,7 +6,7 @@ import type { Drop } from "./train"
 
 export { goLogPath } from "./merge"
 
-// The label GitHub Actions wait for (.github/workflows/hosted-check-build.yml, hosted-test.yml): a lead's ci:go puts it on the PR.
+// The go's label, which ops-checks-go reads to start a Checks run (scripts/ops/checks/go.py): a lead's ci:go puts it on the PR.
 export const GATE_LABEL = "Cloud CI"
 // The label the Checks lane puts on a PR it runs with no go (scripts/ops/checks/parallel.py); the go swaps it for GATE_LABEL, so a PR never carries both.
 export const LOCAL_LABEL = "Local CI"

@@ -9,7 +9,7 @@ const USAGE = `Usage: bun run ci:go <n> <sha7> [options]
 A lead's ci:go for PR <n> at head <sha7>. Refuses unless the repo's owner opened the
 PR, or --outside-author names who did, it is open, and its head starts with <sha7>; then:
 
-  label   adds ${GATE_LABEL}, which GitHub Actions wait for (.github/workflows/hosted-test.yml),
+  label   adds ${GATE_LABEL}, the go ops-checks-go reads to start a Checks run (scripts/ops/checks/go.py),
           and takes off ${LOCAL_LABEL}, the Checks lane's label for a run with no go
   log     appends {pr, sha, at, by} to ops/gos.jsonl beside the merge lock
           (~/.playground, or PLAYGROUND_MERGE_LOCK_DIR)
