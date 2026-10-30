@@ -59,10 +59,14 @@ const FAKED = [
 ]
 const sys = join(scratch, "sys")
 mkdirSync(sys)
+// each name once: on a merged /usr, /bin is /usr/bin, and existsSync reads a dangling link there as missing
+const linked = new Set(FAKED)
 for (const dir of ["/bin", "/usr/bin"])
   for (const name of readdirSync(dir))
-    if (!FAKED.includes(name) && !existsSync(join(sys, name)))
+    if (!linked.has(name)) {
+      linked.add(name)
       symlinkSync(join(dir, name), join(sys, name))
+    }
 const realGit = Bun.which("git")!
 // The bun package.json's packageManager names, which install.sh holds every bun to.
 const WANTED_BUN = /^bun@(\S+)$/.exec(
