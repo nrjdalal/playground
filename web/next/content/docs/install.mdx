@@ -20,18 +20,18 @@ To install somewhere else, set `PLAYGROUND_DIR` first: `curl -fsSL <the URL abov
 A Mac is all you need: the installer installs every tool below that is missing, in one run, each through its project's own installer.
 A tool it cannot install goes on the **Left for you** list it prints at the end, with the one command that does it, and the run carries on.
 
-| Tool      | Needed for                                    | Installed with                                    |
-| --------- | --------------------------------------------- | ------------------------------------------------- |
-| `brew`    | installing the tools below                    | Homebrew's own installer                          |
-| `bun`     | running Playground                            | `curl -fsSL https://bun.sh/install \| bash`       |
-| `claude`  | every session (Claude Code)                   | `curl -fsSL https://claude.ai/install.sh \| bash` |
-| `docker`  | the dashboard's database (Docker or OrbStack) | `brew install --cask docker`                      |
-| `gh`      | clones, pull requests and your private repos  | `brew install gh`                                 |
-| `git`     | the checkout                                  | `brew install git`                                |
-| `herdr`   | the terminal your sessions run in             | its pinned build, checked by its sha256           |
-| `node`    | 20.9 or newer: the build and the dashboard    | `brew install node`                               |
-| `python3` | the background jobs                           | `brew install python`                             |
-| `uv`      | optional: the skills' own tests               | `brew install uv`                                 |
+| Tool      | Needed for                                                           | Installed with                                                                                           |
+| --------- | -------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `brew`    | installing the tools below                                           | Homebrew's own installer                                                                                 |
+| `bun`     | package.json's `packageManager` version or newer: running Playground | `curl -fsSL https://bun.sh/install \| bash`, given `-s bun-v<version>` over an older bun first on `PATH` |
+| `claude`  | every session (Claude Code)                                          | `curl -fsSL https://claude.ai/install.sh \| bash`                                                        |
+| `docker`  | the dashboard's database (Docker or OrbStack)                        | `brew install --cask docker`                                                                             |
+| `gh`      | clones, pull requests and your private repos                         | `brew install gh`                                                                                        |
+| `git`     | the checkout                                                         | `brew install git`                                                                                       |
+| `herdr`   | the terminal your sessions run in                                    | its pinned build, checked by its sha256                                                                  |
+| `node`    | 20.9 or newer: the build and the dashboard                           | `brew install node`                                                                                      |
+| `python3` | the background jobs                                                  | `brew install python`                                                                                    |
+| `uv`      | optional: the skills' own tests                                      | `brew install uv`                                                                                        |
 
 It stops to wait for you only where it cannot act alone, and only when it runs in a terminal; otherwise each of these goes on the list:
 
