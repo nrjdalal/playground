@@ -1,3 +1,4 @@
+import "@/bin/ask-from-clone"
 import { join } from "node:path"
 
 import { ASK_CODE_COLUMNS } from "@packages/config/inbox"

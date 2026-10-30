@@ -353,7 +353,7 @@ export async function maybePrune(ctx: Context): Promise<void> {
     .some(
       (l) =>
         l.slice(0, 19) >= cutoff &&
-        (l.includes("canary moved") || l.includes("dev started") || l.includes("stopping")),
+        (/\b(main|canary) moved\b/.test(l) || l.includes("dev started") || l.includes("stopping")),
     )
   if (rolled) return
   const created = await ctx.run(

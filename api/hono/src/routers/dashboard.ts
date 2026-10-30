@@ -65,6 +65,7 @@ import {
   pasteReportSchema,
   storePasteReport,
 } from "@/lib/dashboard/paste-report"
+import { restartSession } from "@/lib/dashboard/restart"
 import { readRoster } from "@/lib/dashboard/roster"
 import {
   answerHosted,
@@ -98,6 +99,7 @@ import {
   type ErrorCode,
 } from "@/lib/error"
 import { upgradeWebSocket } from "@/lib/server"
+import { listAccounts } from "@/lib/store/accounts"
 import { systemReport } from "@/lib/system/sampler"
 import {
   authMiddleware,
@@ -125,6 +127,13 @@ export const answerLimiter = createRateLimiter({
 export const modeLimiter = createRateLimiter({
   getUserId: (c) => c.get("session")?.userId,
   limit: 10,
+  windowMs: 60_000,
+})
+
+// A restart closes and reopens a session's pane; a person asks for one after adding an account, so a few a minute is plenty.
+export const restartLimiter = createRateLimiter({
+  getUserId: (c) => c.get("session")?.userId,
+  limit: 5,
   windowMs: 60_000,
 })
 
@@ -831,6 +840,66 @@ const dashboardRoutes = new Hono<{ Variables: Session }>()
         sessionId: c.req.valid("param").sessionId,
       })
       return c.json({ data })
+    },
+  )
+  .post(
+    "/workers/:sessionId/restart",
+    describeRoute({
+      tags: ["Dashboard"],
+      description:
+        "Restart a live session whose Claude login expired, with no terminal step: spawn.sh closes the pane it opened and resumes the same conversation in its folder, on `account` (a Claude account added in Settings > Accounts, with its token kept) or, with none, on this Mac's own login. A fixture stack runs nothing and clears the session's login block. A refusal names its reason: NOT_FOUND for no such live session or no such kept account, ERROR for spawn.sh's own words.",
+      responses: {
+        200: {
+          description: "Restarted: the session runs again on the account named",
+          content: {
+            "application/json": {
+              schema: resolver(
+                z.object({
+                  data: z.object({ account: z.string().nullable(), restarted: z.literal(true) }),
+                }),
+              ),
+            },
+          },
+        },
+        ...validationErrorResponses,
+        ...authErrorResponses,
+        ...forbiddenErrorResponses,
+        ...notFoundErrorResponses,
+        502: errorResponse("ERROR", "spawn.sh refused or failed, its reason passed through"),
+      },
+    }),
+    restartLimiter,
+    sValidator("param", z.object({ sessionId: z.string().min(1).max(200) }), (result) => {
+      if (!result.success) {
+        throw new ApiError(400, "VALIDATION_ERROR", "Invalid input", { issues: result.error })
+      }
+    }),
+    sValidator("json", z.object({ account: z.email().max(254).optional() }), (result) => {
+      if (!result.success) {
+        throw new ApiError(400, "VALIDATION_ERROR", "Invalid input", { issues: result.error })
+      }
+    }),
+    async (c) => {
+      const { sessionId } = c.req.valid("param")
+      const { account } = c.req.valid("json")
+      const worker = (await listLive()).workers.find((w) => w.sessionId === sessionId)
+      if (!worker) throw new ApiError(404, "NOT_FOUND", "No live session has that id")
+      const kept = listAccounts().some(
+        (row) =>
+          row.provider === "claude" &&
+          row.stored &&
+          row.email?.toLowerCase() === account?.toLowerCase(),
+      )
+      if (account && !kept)
+        throw new ApiError(404, "NOT_FOUND", `No Claude account ${account} is kept`)
+      const restarted = await restartSession({
+        account,
+        cwd: worker.cwd,
+        name: worker.name,
+        sessionId,
+      })
+      if (restarted.status === "refused") throw new ApiError(502, "ERROR", restarted.detail)
+      return c.json({ data: { account: account ?? null, restarted: true as const } })
     },
   )
   .post(

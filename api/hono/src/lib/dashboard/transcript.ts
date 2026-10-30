@@ -421,6 +421,8 @@ export type SessionFacts = {
   effort: string | null
   // its newest reply is Claude Code's API error line (isApiErrorMessage): the turn ended in an error, not a question
   failed: boolean
+  // that error says the session's Claude login has expired, which only a new account or a fresh login clears
+  loginExpired: boolean
   model: string | null
   pickers: Pickers
   tasks: Record<string, SessionTask>
@@ -432,6 +434,7 @@ export const NO_FACTS: SessionFacts = {
   calls: [],
   effort: null,
   failed: false,
+  loginExpired: false,
   model: null,
   pickers: { answeredAt: null, interrupted: false, open: [] },
   tasks: {},
@@ -454,6 +457,17 @@ const findTask = (tasks: Record<string, SessionTask>, key: string | null): Sessi
 const ended = (task: SessionTask, state: SessionTask["state"], at: string): SessionTask =>
   task.state === "running" ? { ...task, endedAt: at || null, state } : task
 
+// Claude Code's words when a session's login no longer works, as its API error line or its pane shows them.
+export const LOGIN_EXPIRED =
+  /Login expired|Please run \/login|OAuth token (has )?expired|Invalid API key/i
+
+const textOf = (content: unknown): string =>
+  typeof content === "string"
+    ? content
+    : (Array.isArray(content) ? content : [])
+        .map((block) => (isRecord(block) && typeof block.text === "string" ? block.text : ""))
+        .join("\n")
+
 // Pure: one transcript line folded into what earlier lines said. A subagent's own lines (isSidechain) are its parent's business only through the Agent call and its result, so they count for nothing here.
 export function factsIn(line: string, into: SessionFacts): SessionFacts {
   const d = parseRecord(line)
@@ -461,11 +475,12 @@ export function factsIn(line: string, into: SessionFacts): SessionFacts {
   const at = str(d.timestamp)
   const message = isRecord(d.message) ? d.message : {}
   const content = message.content
-  let { calls, effort, failed, model, pickers, turnAt } = into
+  let { calls, effort, failed, loginExpired, model, pickers, turnAt } = into
   const tasks = { ...into.tasks }
   if ((d.type === "user" || d.type === "assistant") && at) turnAt = at
   if (d.type === "assistant") {
     failed = d.isApiErrorMessage === true
+    loginExpired = failed && LOGIN_EXPIRED.test(textOf(content))
     if (str(message.model) && str(message.model) !== "<synthetic>") model = str(message.model)
     if (str(d.effort)) effort = str(d.effort)
     for (const block of Array.isArray(content) ? content : []) {
@@ -544,7 +559,7 @@ export function factsIn(line: string, into: SessionFacts): SessionFacts {
     const state = TASK_STATE[str(a.status)]
     if (task && state) tasks[task.id] = ended(task, state, at)
   }
-  return { calls, effort, failed, model, pickers, tasks, turnAt }
+  return { calls, effort, failed, loginExpired, model, pickers, tasks, turnAt }
 }
 
 // Pure: the whole lines of text folded into what earlier text said, quickly passing lines that hold nothing these facts read.
@@ -655,6 +670,7 @@ export async function readSession(path: string, from: SessionRead | null): Promi
     calls: scan.calls,
     effort: scan.effort ?? known?.effort ?? null,
     failed: scan.failed,
+    loginExpired: scan.loginExpired,
     model: scan.model ?? known?.model ?? null,
     name: scan.name ?? known?.name ?? null,
     pickers: scan.pickers,
