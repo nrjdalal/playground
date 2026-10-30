@@ -30,7 +30,7 @@ On a fresh install, the first `playground` first cuts the Dashboard's own checko
 ## Start the dispatcher: `playground dispatcher`
 
 `playground dispatcher` starts the dispatcher, the session you talk with, in a herdr workspace of its own. It takes nothing.
-It brings herdr up first, so the Dashboard's **Start** works on a fresh install: when the pinned herdr is missing it installs it as `playground herdr pin` does, then starts each herdr server that is down as `playground` does. When either fails, it exits 1 with its reason and starts nothing.
+It sets up first what the installer and `playground` would have, so the Dashboard's **Start** works on a fresh install: when a file the installer links into `~/.playground` is missing (the factory settings every session starts with among them) it runs the installer's linking step, `scripts/link-skills.sh`; when the pinned herdr is missing it installs it as `playground herdr pin` does; then it starts each herdr server that is down as `playground` does. When a step fails, it exits 1 with that step's reason and starts nothing.
 Its brief is `brief-<dispatcher>.md` in the data folder, written once from `scripts/briefs/dispatcher.md` when it is missing, so your own edits to it stay.
 It exits 0 once the dispatcher starts, 3 when a session already holds the dispatcher's name (it starts nothing), and 1 with spawn.sh's reason when a gate refuses the start, or herdr's when herdr cannot come up.
 
