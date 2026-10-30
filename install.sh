@@ -361,8 +361,20 @@ Every ops job starts off but the Dashboard's own, so nothing goes into $HOME/Lib
 EOF
 
   # While the repo is private a clone goes through the gh login; with none, git clones it over https. Either clones main, the shipped branch, whatever the repo's default is.
+  # A checkout left on another branch, such as one cloned while canary was the default, moves to main first, when it holds no uncommitted changes.
   if [ -d "$DIR/.git" ]; then
-    git -C "$DIR" pull -q --ff-only
+    git -C "$DIR" fetch -q origin main
+    branch=$(git -C "$DIR" branch --show-current)
+    if [ "$branch" != main ]; then
+      if ! git -C "$DIR" diff --quiet HEAD; then
+        echo "Playground in $DIR is on ${branch:-a detached HEAD} with uncommitted changes; commit or stash them, then run this again."
+        finish
+        exit 1
+      fi
+      echo "Playground in $DIR was on ${branch:-a detached HEAD}, so it moves to main at origin/main."
+      git -C "$DIR" checkout -q -B main origin/main
+    fi
+    git -C "$DIR" merge -q --ff-only origin/main
   elif has gh && gh auth status -h github.com >/dev/null 2>&1; then
     gh repo clone "$REPO" "$DIR" -- -q -b main
   else

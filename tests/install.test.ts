@@ -739,6 +739,38 @@ describe("install.sh", () => {
     }
   })
 
+  test("a re-run moves a clean checkout left on canary to main at origin/main, and refuses one with uncommitted changes", () => {
+    const { dir, home, run, source } = setup()
+    expect(run().code).toBe(0)
+    git(dir, home, "checkout", "-q", "-b", "canary")
+    write(join(dir, "canary.txt"), "canary\n")
+    git(dir, home, "add", "canary.txt")
+    git(dir, home, "commit", "-q", "-m", "canary")
+    write(join(source, "README.md"), "two\n")
+    git(source, home, "add", "README.md")
+    git(source, home, "commit", "-q", "-m", "two")
+    const main = git(source, home, "rev-parse", "HEAD").stdout.toString().trim()
+    const head = git(dir, home, "rev-parse", "HEAD").stdout.toString().trim()
+    const at = () => [
+      git(dir, home, "branch", "--show-current").stdout.toString().trim(),
+      git(dir, home, "rev-parse", "HEAD").stdout.toString().trim(),
+    ]
+
+    write(join(dir, "install.sh"), "mine\n")
+    const dirty = run()
+    expect(dirty.out).toContain(`Playground in ${dir} is on canary with uncommitted changes`)
+    expect(at()).toEqual(["canary", head])
+    expect(dirty.code).toBe(1)
+
+    git(dir, home, "checkout", "-q", "--", "install.sh")
+    const clean = run()
+    expect(clean.out).toContain(
+      `Playground in ${dir} was on canary, so it moves to main at origin/main.`,
+    )
+    expect(at()).toEqual(["main", main])
+    expect(clean.code).toBe(0)
+  }, 90_000)
+
   test("--check on a ready machine says it is ready and exits 0", () => {
     const { run } = setup()
     expect(run().code).toBe(0)

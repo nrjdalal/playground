@@ -36,7 +36,7 @@ describe("opsRowOf", () => {
   test("Running while the last result is ok and it beat within three cycles", () => {
     expect(opsRowOf("ops-dashboard", beat(), true, NOW)).toEqual({
       callsModel: false,
-      does: "Keeps the Dashboard on canary's latest head",
+      does: "Keeps the Dashboard on its branch's latest head",
       job: "ops-dashboard",
       lastBeatAt: "2026-10-06T11:59:45.000Z",
       model: null,
@@ -150,7 +150,7 @@ describe("readOps", () => {
     const rows = await readOps(dir, NOW)
     expect(rows.map((row) => row.job)).toEqual(["ops-dashboard", "ops-linear", "ops-report"])
     expect(rows.at(-1)).toMatchObject({ job: "ops-report", status: "running" })
-    expect(rows[0]?.does).toBe("Keeps the Dashboard on canary's latest head")
+    expect(rows[0]?.does).toBe("Keeps the Dashboard on its branch's latest head")
   })
 
   test("jobs.json pauses a disabled job, which keeps its row marked paused, heartbeat or not, and a job it expects with no heartbeat is down", async () => {

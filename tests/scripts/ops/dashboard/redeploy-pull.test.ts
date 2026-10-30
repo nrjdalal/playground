@@ -16,7 +16,7 @@ const git = (cwd: string, ...args: string[]) =>
     .stdout.toString()
     .trim()
 
-// An origin with canary, a dashboard clone on live/dashboard, and a stand-in turbo there that logs each build it is asked for, and a stand-in ops-restart that writes the move it is handed
+// An origin with canary, a main checkout kept on canary so the pull follows it, the dashboard's checkout as its worktree on live/dashboard, and a stand-in turbo there that logs each build it is asked for, and a stand-in ops-restart that writes the move it is handed
 const origin = join(scratch, "origin.git")
 const seed = join(scratch, "seed")
 const dashboard = join(scratch, "dashboard")
@@ -39,8 +39,9 @@ git(seed, "init", "-q", "-b", "canary")
 git(seed, "add", ".")
 git(seed, "commit", "-qm", "c0")
 git(seed, "push", "-q", origin, "canary")
-git(scratch, "clone", "-q", "-b", "canary", origin, dashboard)
-git(dashboard, "switch", "-q", "-c", "live/dashboard")
+const checkout = join(scratch, "checkout")
+git(scratch, "clone", "-q", "-b", "canary", origin, checkout)
+git(checkout, "worktree", "add", "-q", "-b", "live/dashboard", dashboard)
 await Bun.write(
   join(dashboard, "node_modules", ".bin", "turbo"),
   `#!/bin/sh\necho "$NODE_ENV $*" >> ${builds}\nexit "\${TURBO_EXIT:-0}"\n`,
