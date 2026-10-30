@@ -29,6 +29,11 @@ else
   BREW_PREFIXES="/opt/homebrew /usr/local"
   OS=$(uname -s)
 fi
+# The terminal by its own device: macOS's kqueue refuses /dev/tty itself, so a Bun program reading it, as claude's sign-in does, stops with "EINVAL: invalid argument, kqueue".
+if [ "$TTY" = /dev/tty ]; then
+  TTY_NAME=$(ps -o tty= -p $$ 2>/dev/null | tr -d ' ') || TTY_NAME=""
+  [ -n "$TTY_NAME" ] && [ -c "/dev/$TTY_NAME" ] && TTY="/dev/$TTY_NAME"
+fi
 
 # The startup file of the login shell, where a tool's PATH line goes once; another shell gets the lines printed.
 case "$(basename "${SHELL:-}")" in
