@@ -40,10 +40,29 @@ const fakeGit = (
 }
 
 describe("upstreamOf", () => {
-  test("main follows main; canary and the live dashboard's branch follow canary", () => {
+  test("main follows main, canary follows canary, and the live dashboard's branch follows the branch the install cloned: main, unless its checkout was cloned on canary", () => {
     expect(upstreamOf("main")).toBe("main")
     expect(upstreamOf("canary")).toBe("canary")
-    expect(upstreamOf("live/dashboard")).toBe("canary")
+    expect(upstreamOf("live/dashboard", "live/dashboard", "main")).toBe("main")
+    expect(upstreamOf("live/dashboard", "live/dashboard", null)).toBe("main")
+    expect(upstreamOf("live/dashboard", "live/dashboard", "canary")).toBe("canary")
+  })
+
+  test("the install's checkout is the repo's first worktree, whose branch a Dashboard worktree cut beside it does not change", () => {
+    const root = mkdtempSync(join(tmpdir(), "update-cloned-"))
+    try {
+      const git = (...args: string[]) =>
+        Bun.spawnSync(["git", "-c", "user.email=t@t", "-c", "user.name=t", ...args], { cwd: root })
+      git("init", "-q", "-b", "main", "repo")
+      git("-C", "repo", "commit", "-q", "--allow-empty", "-m", "first")
+      git("-C", "repo", "worktree", "add", "-q", "-b", "live/dashboard", join(root, "desk"))
+      expect(gitOf(join(root, "desk")).start()).toMatchObject({
+        branch: "live/dashboard",
+        cloned: "main",
+      })
+    } finally {
+      rmSync(root, { force: true, recursive: true })
+    }
   })
 
   test("any other branch, or a detached HEAD, follows nothing", () => {
