@@ -103,6 +103,17 @@ test("with factory.repo unset and no GitHub origin, factoryRepoOf refuses, namin
   ).toBe("acme/factory")
 })
 
+test("a root ext init stopped in, with no policy.json yet, reads factory.repo from the checkout's origin", async () => {
+  const data = join(scratch, "stopped")
+  mkdirSync(extensionsDir(data), { recursive: true })
+  expect(
+    await factoryRepoOf(
+      { PLAYGROUND_DATA_DIR: data },
+      checkout("stopped-origin", "git@github.com:Acme/Factory.git"),
+    ),
+  ).toBe("acme/factory")
+})
+
 test("the CLI prints factory.repo resolved, the checkout's origin when unset", async () => {
   expect(JSON.parse((await exit(["factory.repo"], join(scratch, "none"))).out)).toBe(originRepo())
 })

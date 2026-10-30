@@ -10,7 +10,6 @@ import {
   accountsOf,
   liveSettings,
   modelSettings,
-  readPolicy,
   readPolicyOrDefaults,
 } from "@packages/settings"
 
@@ -173,7 +172,7 @@ const backendOf = (name: string): Backend | null => {
 
 // Only that the Keychain item spawn.sh's GLM backend reads by default (models.glmKeychainService, the first GLM row's label) exists: no -w, so the key is never read; a render set it cannot trust reads as not set up.
 export const glmSetUp = async (): Promise<boolean> => {
-  const read = await readPolicy(dataDir())
+  const read = readPolicyOrDefaults(dataDir())
   if (read.refusal !== undefined) return false
   const service = modelSettings.get(read.settings, "models.glmKeychainService")
   const label = accountsOf(accountSettings.get(read.settings, "usage.accounts"), "glm")[0]?.label
