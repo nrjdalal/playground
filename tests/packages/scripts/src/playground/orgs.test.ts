@@ -6,6 +6,7 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  readlinkSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -256,17 +257,39 @@ test("orgs home lists the home set in the ws marketplace, adds and installs it o
   ])
 })
 
-test("orgs home removes a personal link at a name the set ships, keeps the rest, and names a real folder, exit 1", async () => {
+test("orgs home removes a personal link into the checkout at a name the set ships, keeps the rest, and names a real folder, exit 1", async () => {
   const data = extensionsWith("personal", policy)
   const personal = join(data, "personal-skills")
   mkdirSync(join(personal, "tdd"), { recursive: true })
-  for (const name of ["archify", "ask"])
-    symlinkSync(join(scratch, "elsewhere", name), join(personal, name))
+  symlinkSync(join(scratch, "elsewhere", "archify"), join(personal, "archify"))
+  symlinkSync(join(checkout, "skills", "playground", "ask"), join(personal, "ask"))
   const result = await home(data)
   expect(result.code).toBe(1)
   expect(readdirSync(personal).sort()).toEqual(["archify", "tdd"])
   expect(lstatSync(join(personal, "tdd")).isDirectory()).toBe(true)
   expect(result.err.join("\n")).toContain(`skipped tdd: ${join(personal, "tdd")} is a real folder`)
+})
+
+// An install's link-skills removed the user's own links at the names the home set ships, writing-for-agents into inscope's cache among them, so running sessions lost those skills
+test("orgs home keeps a personal link that points outside Playground's checkout, naming the clash, and replaces only its own", async () => {
+  const own = join(scratch, "own-checkout")
+  for (const name of ["ask", "writing-for-agents"])
+    put(join(own, "skills", "playground", name, "SKILL.md"), name)
+  const data = extensionsWith("foreign-links", {})
+  const personal = join(data, "personal-skills")
+  const foreign = join(scratch, "inscope-cache", "skills", "writing-for-agents")
+  put(join(foreign, "SKILL.md"), "THE USER'S OWN")
+  mkdirSync(personal, { recursive: true })
+  symlinkSync(foreign, join(personal, "writing-for-agents"))
+  symlinkSync(join(own, "skills", "playground", "ask"), join(personal, "ask"))
+  const result = await home(data, { checkout: own })
+  expect(result.code).toBe(0)
+  expect(readdirSync(personal)).toEqual(["writing-for-agents"])
+  expect(readlinkSync(join(personal, "writing-for-agents"))).toBe(foreign)
+  expect(result.out).toContain(
+    "kept the personal link writing-for-agents: it points outside Playground, so it takes the name over the home skill set's writing-for-agents",
+  )
+  expect(result.out).toContain("removed the personal link ask: the home skill set ships it")
 })
 
 test("orgs home with no claude on PATH writes the set and says it waits; a failed install exits 1 naming it", async () => {

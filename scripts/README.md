@@ -109,6 +109,7 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
 - Skills reach a session as a plugin, and a personal skill in `~/.claude/skills` takes a bare name over any plugin's, so link-skills.sh removes every link there at a name the home set ships, another tool's included, and every other foreign link stays: inscope links upstream's `pr` at `~/.claude/skills/pr`, which would otherwise run in place of the repo's copy.
   inscope 0.15 and older put that link back on an `apply`, so run link-skills.sh again after one.
 - It then installs the home skill set at user scope with `playground orgs home`, through the `ws` marketplace it writes in `~/.playground/orgs`; a later run moves the marketplace's entry to the new set and runs `claude plugin update ws-home@ws`, since Claude Code installs a copy.
+  Before it installs, it removes each `~/.claude/skills` link at a name the set ships that points into Playground's checkout, and keeps a link that points anywhere else (inscope's cache, another checkout) as the user's own, naming the clash in one line.
 - Beside the home set, it symlinks `~/.playground/factory-settings.json` to `scripts/factory-settings.json`, each brief template in `~/.playground/handoffs/` to its file in `scripts/briefs/`, `~/.playground/brief-rush.md` to `scripts/briefs/brief-rush.md`,
   `~/.bun/bin/playground` and its old name to the `playground` command (`packages/scripts/src/playground/cli.ts`; `playground --help` lists what it does),
   and each ops script it names into `~/.playground/ops/`;
