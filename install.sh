@@ -349,7 +349,7 @@ Playground installs into $DIR. Outside it, it writes only in:
   $HOME/.playground          the data folder: your extensions, the brief templates, the ops scripts and the skill sets
   Claude Code's user settings  the home skill set, installed with claude plugin install
   $startup  a PATH line for each tool it installs off your PATH, once$service
-Every ops job starts off but the Dashboard's own, so nothing goes into $HOME/Library/LaunchAgents.
+Every ops job starts off but the Dashboard's own and the usage read, so nothing goes into $HOME/Library/LaunchAgents.
 EOF
 
   # While the repo is private a clone goes through the gh login; with none, git clones it over https. Either clones main, the shipped branch, whatever the repo's default is.

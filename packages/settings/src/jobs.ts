@@ -2,7 +2,7 @@ import { z } from "zod"
 
 import { defineSettings } from "@/settings"
 
-// The ops job registry: one setting per job, `jobs.<camelName>`, holding the whole job, so turning a job on, pausing it or moving its schedule is a settings write with a reason, never a PR. The runner renders <data>/ops/jobs.json and each launchd job's plist from it at the top of every pass. A fresh install has every job off but the Dashboard's (ops-dashboard). In a command, cwd or program, {bun}, {checkout} (the install's checkout), {dashboard} (the Dashboard's checkout, on live.branch) and {data} (the data folder) are filled in by the render.
+// The ops job registry: one setting per job, `jobs.<camelName>`, holding the whole job, so turning a job on, pausing it or moving its schedule is a settings write with a reason, never a PR. The runner renders <data>/ops/jobs.json and each launchd job's plist from it at the top of every pass. A fresh install has every job off but the Dashboard's (ops-dashboard) and ops-usage, so the Dashboard shows the account's week with no setting. In a command, cwd or program, {bun}, {checkout} (the install's checkout), {dashboard} (the Dashboard's checkout, on live.branch) and {data} (the data folder) are filled in by the render.
 export const jobSchema = z.strictObject({
   callsModel: z.boolean(),
   // A job a terminal holds (herdr, cmux or auto): its command, run from cwd.
@@ -137,6 +137,7 @@ export const JOBS: Record<string, Job> = {
   }),
   "ops-usage": terminal("ops-usage", "python3 -I {checkout}/scripts/ops/usage/run.py", {
     description: "Reads the account's usage windows into usage.json every 5 minutes.",
+    enabled: true,
     neverPause: true,
     schedule: { every: 300 },
   }),
