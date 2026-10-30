@@ -1,0 +1,230 @@
+---
+slug: /docs/dashboard
+title: Dashboard
+description: Your chat with the dispatcher, the sidebar and the apps.
+---
+
+# Dashboard
+
+The Dashboard reads your own machine: your Claude Code sessions in herdr, your `~/.claude` folder and your repos.
+Its sessions are the ones Playground started, on the board, under Sessions and in System; a session another terminal runs stays off it and out of its database, and every session, cmux's included, joins it once you set `PLAYGROUND_CMUX_SESSIONS=true` in the app's `.env`.
+Where an area has nothing to show yet, it says what is missing and what fills it, naming the button or page when the app has one, such as "No Claude Code sessions yet.
+Sessions appear here once Playground starts them, the first from the Dashboard's chat."
+A stack that shows test data instead, a made-up machine for tests and screenshots, wears a **Test data** badge beside the name in the sidebar and in the tab's title.
+
+## Your chat
+
+`/dashboard` opens your chat with the dispatcher, the session you talk to (`sessions.names`' dispatcher, `dispatcher` by default, unless `PLAYGROUND_DISPATCHER` names another), with the box to message it.
+A second dispatcher can run beside it on another model (the first's name plus `-2`, unless `PLAYGROUND_DISPATCHER_SECONDARY` names another), with a chat and a box of its own, opened from its row in the sidebar.
+Each dispatcher's chat and its box are named by its label, such as Message Alpha; the model its newest reply ran shows in its sidebar row's tooltip.
+On a first run the chat starts with **Let's check this Mac**, each check marked there or missing with the button that fixes it, then **Continue**, which makes you this Mac's owner ([Where to start](/docs#where-to-start)).
+Once every check has passed, it shows one line, **This Mac has everything Playground needs**, over the steps left, each ticked once done: GitHub, Settings (**Set up settings**), a Claude account (**Add a Claude account**) and **Start** with the dispatcher's name.
+Once the dispatcher runs, its chat takes their place.
+A smaller link under them opens the System page.
+
+Beside your chat are the [Inbox](/docs/inbox), your [apps](#apps), Pages ([Agents](/docs/agents)), Apps and Settings, as squares in a small bar at the bottom of that half: hover one, or reach it with Tab, for its name.
+The Inbox shows first.
+Every other dashboard page has the same half beside it, with the Inbox, your chat with the dispatcher and your apps, so you can answer, send or look something up from anywhere; another session's view adds its Pages.
+When the squares outgrow the bar, it scrolls sideways.
+The half keeps its size and the square you picked as you move between pages.
+Drag the divider to resize the two halves; let go near the middle and it snaps there.
+On a phone the same bar sits at the bottom of the page, with the page itself as its first square and Menu, which opens the sidebar, as its last.
+
+A link to `/dashboard` that names another session (`?worker=`) opens that session's own view, read-only, and one that names a session that has ended opens your chat.
+A link to something waiting on you (`#needs-you-<id>`) opens the view that holds it.
+
+### Send a message
+
+Type in the box at the bottom of your chat and press Enter to send; Shift+Enter adds a line.
+On a touch screen, Enter adds a line and the send button sends.
+What you send reaches the dispatcher as if you typed it in its terminal.
+
+Under your message, one small icon shows where it is: a spinner while it is on its way, one tick once it is typed into the session, two ticks once it is delivered, and a red mark if it failed, with the reason beside it.
+Hover it, or reach it with Tab, for the words.
+Your earlier messages keep their two ticks after the page reloads.
+Every action in a message's footer is an icon button: hover it, or reach it with Tab, for its name.
+
+- **Copy** copies the message's words.
+- **Unsend** removes a message still waiting to go out, before it reaches the session.
+- **Undo** shows for 2 minutes after your newest message arrives: the session gets a line saying you unsent your previous message and to ignore it, and your message shows struck through with Unsent.
+- **Retry**, **Edit** and **Discard** show on a message that was not sent, with the reason.
+
+A message that cannot go yet, such as while the Dashboard restarts or the session's box holds other words, waits as Queued and tries again by itself.
+It fails in front of you only when you need to act.
+
+What you type and the files you attach stay until you send them, even if you open another session or page, or reload the tab.
+They are kept in this browser only.
+The session's row says **Draft** in its tooltip while it holds words or files, and sending clears the draft.
+
+### Send files
+
+Click the **+** button beside the box to attach files, or paste or drop them into the box.
+A message carries up to five files: images (PNG, JPEG, GIF or WebP), PDFs and text files, each up to 10 MB.
+Each file uploads the moment you add it and shows as a chip above the box; open it from its chip, or remove it before you send.
+The session gets your words and a line naming each file's path on this Mac.
+
+A long paste, over 2,000 characters or more than a message can hold (8,000 characters, 100 lines, or more line breaks and backslashes than can be typed in one go), is attached as a text file named for its length, such as **Pasted text · 15.2k chars**, rather than put in the box.
+With five files already attached, a paste goes in the box as words.
+
+If the Dashboard does not answer while a file uploads, as while it restarts, the file reads **Queued** and tries again by itself for about 2 minutes, then reads **Upload failed** with a Retry button.
+Until it uploads, the file is kept in this browser, so a reload brings it back and finishes the upload.
+Files are kept for a week; a file removed since is left out when a draft comes back.
+
+### Run a skill with `/`
+
+A message that starts with `/` and the name of a skill the session can run, such as `/daily-notes`, runs that skill, with anything after it.
+Type `/` at the start of the box, or after a space or a new line, to see those skills in a small list just above where you typed (across the box on a phone).
+The list narrows as you type: arrow keys move, Enter picks and Escape closes it.
+The skill you pick goes first in the message, with your words after it, and replaces any skill already there, since a message runs one skill.
+Any other message starting with `/` or `!` is not sent, since it would run a command in the session.
+
+### Read the chat
+
+A link in the chat opens when you click it: a link to another site in a new tab, a link to the Dashboard in the same tab.
+Only `http` and `https` links open; any other link shows as plain text.
+An image loads only when it is a file you attached or a preview; any other image shows as text.
+A long line in a code block wraps, so nothing is cut at the box's edge.
+
+Each chat is either Watching or Reading, and the toggle in the bar under it shows which; click it to switch.
+While Watching, the chat scrolls through new messages at reading speed, and its toggle says how far behind it runs, such as "Watching · 15s behind".
+A message you send while Watching lands at the end.
+While Reading, the chat moves only when you scroll it, and its toggle counts the new steps below you, each tool call and reply on its own, such as "Reading · 3 new".
+A message you send while Reading glides up to rest just below the top and stays there however long the reply runs, until you scroll or send again.
+Scrolling up turns Reading, and scrolling down to the very end turns Watching.
+The arrows in the bar take you to your previous and next message, as do Alt+↑ and Alt+↓ while you are not typing in a box.
+Scroll to end shows in the bar while there is more below you, and takes you to the end.
+
+### The hosted session
+
+`probe-sdk` is a throwaway session the Dashboard runs itself on the Claude Agent SDK, when `PLAYGROUND_SDK_PROBE_DIR` names its folder.
+Its view has a box too: your message goes straight into it, and its questions, permission requests and plans show as cards in its view.
+A menu beside its attach button shows its permission mode (Default, Accept edits, Plan or Bypass permissions) and changes it while approvals are on (`PLAYGROUND_APPROVALS_ENABLED`).
+It shows no `/` list yet, since it cannot run a skill.
+
+## Sidebar
+
+Wherever these pages say hover, the Dashboard shows its own tooltip, never the browser's: it opens once the pointer has rested for a second, so sweeping down the sidebar opens none, and at once when you Tab to a link or a button.
+
+### The top
+
+The top line holds the name and, at its right end, the GitHub icon, which opens your repo's pull requests in a new tab (it is not shown when your checkout has no GitHub `origin`).
+
+Between the name and GitHub sit this machine's system icons: memory used, CPU load and swap used, then disk free only when it is low (orange under 50 GB, red under 20 GB).
+When the top line has no room for them, as when the Test data badge sits beside the name, they sit on a line of their own under it.
+Each icon shows its number beside it, green while its reading is normal, orange past its warning level and red past its critical one.
+Hover or Tab to an icon for its full reading and level, and click it to open the System page.
+The icons are gray outlines with no number before the first reading and once sampling stops, and dim when live sessions cannot be read, which also shows one toast with the reason.
+
+Under the top line, with no title, sits a row for each dispatcher, Alpha and then Bravo, its model, effort and state in its hover.
+The first opens your chat at `/dashboard`, the second its own chat.
+While the first is not running its row reads Alpha, Not running, so the rows below never move.
+The second's row shows only while its session runs or the roster lists it.
+
+The name, GitHub and the system icons are hidden when the sidebar is collapsed, where each session row, the dispatchers' included, shows its icon alone.
+Click the sidebar's right edge, or press Cmd+B (Ctrl+B), to collapse or expand it.
+
+### Groups
+
+Below the header are the live sessions in groups:
+
+- **Orchestrators**: the sessions that lead the others, each by its role (Builder, Ops, Planner, Optimizer), A to Z by title until you drag them into an order of your own.
+  Drag a row, or focus it and press Space, the arrows and Space, or use Move up and Move down in its menu (a right click, a long press, or Shift+F10).
+  Reset order to A to Z, in the Orchestrators label's own menu, brings the default back.
+- **Subagents**: the `worker-` sessions, with each reviewer and tester under the worker it checks.
+- **AI Runners**: the `runner-` sessions.
+- **Scripts**: the background jobs that run with no Claude session, collapsed until you click its label.
+- **Other**: test sessions and sessions outside these groups, shown only while one is live, collapsed until you click its label.
+
+Before the model's logo at the end of the Claude dispatcher's row, the week and the 5-hour window of your Claude usage each show as an icon and a number, in the system icons' green, orange and red.
+With a GLM plan, its week and 5-hour window show the same way on the GLM dispatcher's row, or, while none runs on GLM, on the second dispatcher's row, led by the Z.ai mark, each hover naming GLM.
+When a usage window stops being reported, or GLM's have not been read for 10 minutes, its last reading stays, gray and dimmed, its hover saying it is stale, when it reset and when it was last seen.
+Each live usage reading's hover, and the System page's usage line, say how long ago it was read (`read 2 min. ago`).
+With several Claude accounts, every list of them, in the hover, on the System page and in the Usage app, puts the account whose week resets soonest first.
+
+Each group's label ends with how many sessions it holds, at its right, the reviewers and testers nested in it included; Scripts counts the jobs it lists.
+Subagents, AI Runners and Other list the most urgent state first, then go by ticket, pull request number and title.
+What each row shows, and what its icon means, is on [Agents](/docs/agents).
+
+Scripts lists the background jobs.
+A script's row shows its plain name over its status (Running, Failing or Down), when it runs and the model it calls when it calls one, such as `Script · Running · every 5 min`.
+A script that is Failing or Down shows in red, even while the group is collapsed.
+Hover it for its job id, what it does, the reason and its last beat.
+A script paused on purpose is not listed; the System page lists it under Paused.
+
+### Threads
+
+First under the top, the Threads group lists the things you asked about, five to a page, pinned first, then the newest.
+A row's number counts its messages you have not read.
+Each row leads with the thread icon, the one a thread shows everywhere, and with the sidebar collapsed the icon is all it shows, its title on hover.
+
+Click a row to open the thread on its own page, which holds only its messages, in order: what you asked first, then what others wrote since you last opened it, then the rest under **Full history**, folded until you click it, then whatever arrives while it is open, your replies included.
+Opening it marks the thread read.
+The box at its bottom messages the dispatcher, and what you send there goes to the thread; your full chat still shows it, in time order.
+To start a thread from your chat, turn on **New thread**, the round thread button left of send, then send your message: the thread takes its title from your message's first line.
+Every message in a thread opens with a small chip showing the thread's 4-character id, in your chat too, and the dispatcher's replies carry the same chip, so they land in the thread as well; click a chip to open its thread.
+**Back to chat** at the top, or the browser's Back, returns to your chat, and a Cmd-click (Ctrl-click) opens the thread in a new tab.
+A row's menu marks it read or unread, renames, pins or archives it.
+
+### The red dot
+
+The browser tab reads Playground on every page, and its icon wears a red dot only when something is new for you: a Changelog entry you have not read, or an Inbox item that came after you last looked at the Inbox.
+Each of these is also marked where it lives: the Inbox square and the Changelog square show their count inside a red dot at their top right.
+Opening the Inbox square beside any page, or the Changelog, clears its mark.
+
+### The user menu
+
+The square with this Mac's initials, at the right end of the toolbar beside every page, is the user menu.
+It opens upward.
+On a phone, the tab bar at the bottom ends with the user menu, then Menu, which opens the sidebar.
+When your checkout's branch has new commits, the square wears a green dot, and the menu shows **Update now** at its top, under Auto-hide tab bar on a wide screen.
+See [Settings](/docs/settings).
+
+### Music
+
+The bottom of the sidebar is a music player for YouTube.
+Press ♫ or 🔍, then paste a YouTube song or playlist link, or type to search YouTube, and press Enter or pick a result.
+A link to a song inside a mix plays the mix from that song.
+The box has three tabs: Recent (the last fifty songs you played), Liked (the songs you hearted, with the heart over the volume button) and Search.
+Shuffle, at the tabs' right end, plays the tab's songs in a random order, and deals a new order after the last one.
+The box stays open while you play songs; press Collapse, above Shuffle, 🔍 again or Esc to close it.
+Click the cover to show the video in the sidebar at its own shape, then Detach to move it to a window at the top of the chat that you can drag and resize from any edge or corner.
+Minimize (the music note), at the video's top-right corner, or Esc puts it back in the card, and the song plays on through each move.
+Drag the timeline, under the controls and along the video's bottom, to move through the song, or hover a time to skip 10 seconds back or ahead.
+After a reload, Play resumes the last song where it stopped, Previous plays it from its start, and Next moves on into its mix.
+Click the volume button to mute, or hover it a moment to drag the volume up or down, which the player keeps.
+
+## The System page
+
+`/dashboard/system`, opened by the system icons, shows a status table of every agent, then Next up (the work queued for the next free agent, fixes first, then what you asked for), then Needs you (what waits on your answer), then System (the room this machine has for more sessions), then Paused (the background jobs paused on purpose, when there are any).
+
+## Apps
+
+Apps show what a skill or the sessions produced.
+Each one only shows what it reads, unless its line below names what it changes.
+
+Each app has a square in the bar beside every page, after the Inbox and the chat, and clicking it opens the app there, beside the page you are on.
+The Apps square lists every app: turn its switch off to hide an app's square, or drag a row (or focus it and press Space, the arrows and Space) to change the squares' order.
+Both are kept in this browser.
+The Settings square, after Apps, opens the [Settings page](/docs/settings#the-settings-page).
+Each app also has its own page under `/dashboard/apps`.
+Plan, Previews and Usage are parked until they are built again: they have no square and are not on the Apps list, and each page stays at its URL.
+
+- **Changelog**: what changed, one plain line each: every merge, version, rule, setting and background-job change.
+  Changes are grouped by version, with the ones not shipped yet on top.
+  Each version is a row you open or fold, as the Inbox's are, showing its name, date and how many changes it holds; the top row starts open, and a search or filter opens every version it leaves.
+  Each line starts with its kind's mark (feature, fix, rule, setting, ops), and the Kind filter counts each kind.
+  The newest change opens beside the list, with what changed in a few short lines and its before and after screenshots; pick another, or open a link such as `/dashboard/apps/changelog?entry=pr-253` (a merge by its pull request) or `?entry=v0.0.9` (a version by its tag).
+  On a phone the change opens in a drawer from the bottom.
+  Its square counts the changes you have not read, and opening it marks them read.
+  New merges and versions arrive each time `playground changelog sync` runs; with none yet the page says they appear once it has.
+  A merge's line is its pull request body's `Outcome:` line, else the first bullet of its `## TL;DR`, else a prose TL;DR's first sentence.
+- **Plan**: what is going on and why, then what each lane builds next.
+  Its Report tab, which opens first, explains the latest ops report in plain words.
+  Its Plan tab shows what is in flight first, then what lands next, one table for each lane with each item's What you get line, then what merged today.
+  Its Board tab shows a queued column for each lane, then the work in flight, in review and done today.
+  Drag a queued card, or move it with the keyboard, to set what is built first; Undo in the message that follows puts it back.
+- **Previews**: the images and live HTML pages agents make for your choices, so you see them rather than read a description.
+  They are grouped by topic, newest first, each with its caption; filter by topic, or open a link such as `/dashboard/apps/previews?topic=spinner`.
+  An HTML preview plays in a frame that runs no script and cannot reach the Dashboard.
+  Agents put the files in `previews` in the Dashboard's data folder: PNG, GIF, WebP or HTML, with an optional caption in a `.txt` of the same name.
+- **Usage**: what your sessions spend, by agent, model, hour and merged pull request.

@@ -1,0 +1,2 @@
+// The widest line, in characters, a drawing in an Inbox ask fits at the card's code size on the narrowest real card, so bun run ask can warn its author before the card shrinks it: the aside at its 30% minimum on a 1512px screen leaves the block 267px, and JetBrains Mono at 12px is 7.2px a character, so floor(267 / 7.2) (measured; the phone's 390px Inbox leaves 296px).
+export const ASK_CODE_COLUMNS = 37

@@ -1,0 +1,1 @@
+CREATE INDEX "claude_entry_session_id_message_id_seq_idx" ON "claude_entry" USING btree ("session_id","message_id","seq" DESC NULLS FIRST) INCLUDE ("at","input_tokens","output_tokens","cache_read_tokens","cache_creation_tokens");

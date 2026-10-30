@@ -1,0 +1,22 @@
+{
+  "$schema": "./node_modules/oxfmt/configuration_schema.json",
+  "semi": false,
+  "experimentalSortImports": {},
+  "experimentalTailwindcss": {},
+  // The pr skill, ZeroStarter's skills and core's upstream skills stay upstream's bytes
+  "ignorePatterns": [
+    ".agents/**",
+    "extensions/core/skills/code-review/**",
+    "extensions/core/skills/diagnosing-bugs/**",
+    "extensions/core/skills/domain-modeling/**",
+    "extensions/core/skills/handoff/**",
+    "extensions/core/skills/pr/**",
+    "extensions/core/skills/research/**",
+    "extensions/core/skills/tdd/**",
+    "extensions/core/skills/to-spec/**",
+    "extensions/core/skills/writing-for-agents/**",
+    "extensions/core/upstream/**",
+    "skills/zerostarter/**",
+    "tests/extensions/core/skills/pr/upstream/**",
+  ],
+}

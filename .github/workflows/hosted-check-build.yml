@@ -1,0 +1,75 @@
+name: hosted-check-build
+
+on:
+  # once per PR at the merge gate, on a hosted runner: when the `Cloud CI` label lands, and on a push to a head that carries it
+  pull_request:
+    types: [labeled, synchronize, reopened]
+    branches: ["canary", "main"]
+
+jobs:
+  hosted-check-build:
+    name: Audit, Lint, and Build
+    # a label other than Cloud CI added to a gated PR starts no second run
+    if: contains(github.event.pull_request.labels.*.name, 'Cloud CI') && (github.event.action != 'labeled' || github.event.label.name == 'Cloud CI')
+    runs-on: ubuntu-latest
+    # in the job, not the workflow, so a skipped run never joins the group and cancels the gate run
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+
+      # a head whose stamp already passed every check these jobs run, on it or past clean canary merges, runs nothing new; a read that fails runs everything
+      - name: Read the stamp
+        id: stamp
+        run: bun packages/scripts/src/pr-merge/stamp-cli.ts carried ${{ github.event.pull_request.number }} ${{ github.event.pull_request.head.sha }} >> "$GITHUB_OUTPUT" || echo "green=false" >> "$GITHUB_OUTPUT"
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      # the spawn gates' fake pane types its command into zsh, which ubuntu-latest lacks
+      - name: Install zsh
+        if: steps.stamp.outputs.green != 'true'
+        run: sudo apt-get update -q && sudo apt-get install -y -q zsh
+
+      - name: Cache turbo
+        if: steps.stamp.outputs.green != 'true'
+        uses: actions/cache@v4
+        with:
+          path: .turbo/cache
+          key: turbo-${{ runner.os }}-${{ github.sha }}
+          restore-keys: turbo-${{ runner.os }}-
+
+      - name: Install dependencies
+        if: steps.stamp.outputs.green != 'true'
+        run: bun install --ignore-scripts
+
+      # audit.ts tries again when npm's advisories endpoint hangs or answers 5xx, and fails only on an advisory this PR adds over its base
+      - name: Audit
+        if: steps.stamp.outputs.green != 'true'
+        # GHSA-vfj7-8cjw-p6xm: braces has no patched release, and only dev tooling (shadcn, globby) reaches it
+        run: bun packages/scripts/src/audit.ts --audit-level high --ignore GHSA-vfj7-8cjw-p6xm --new-over origin/${{ github.base_ref }}
+
+      - name: Format, Lint, Check-types, Test, and Build
+        if: steps.stamp.outputs.green != 'true'
+        run: |
+          bun run format:check
+          bun run lint
+          # turbo's tasks for the packages this PR changes and those that depend on them alone, from its cache otherwise
+          bunx turbo run check-types build --filter='...[origin/${{ github.base_ref }}]'
+          # the root checks import packages/* and @api/hono through dist, and web/next's tests the generated data-table metrics, which a PR changing none of them leaves unmade on a clean checkout
+          bunx turbo run build --filter='./packages/*' --filter=@api/hono
+          bun packages/scripts/src/data-table-metrics.ts
+          bun run check-types:scripts
+          bun run check-types:tests
+          bun run test
+        env:
+          NODE_ENV: production
+          SKIP_ENV_VALIDATION: true

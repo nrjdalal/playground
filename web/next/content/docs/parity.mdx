@@ -1,0 +1,95 @@
+---
+slug: /docs/parity
+title: The parity check
+description: See what a change takes away from your sessions before it lands.
+---
+
+# The parity check
+
+`bun run parity` compares two versions of Playground and lists what the newer one lost or changed for your sessions.
+Run it after a change to the rules, the hooks, the settings or the tests, so nothing your sessions rely on goes away by accident.
+When it prints nothing, the two versions give every session the same hooks, rules and values, and no test went missing.
+
+## Run it
+
+```bash
+bun run parity
+```
+
+By default it compares your working tree with the local `parity-baseline` tag, the commit the current work started from.
+Make that tag once with `git tag parity-baseline <commit>`; it stays on your machine.
+
+- `--base <ref>` compares against another commit in place of the tag.
+- `--head <ref>` checks a commit in place of your working tree.
+- `--print` prints the full record of the head instead of the comparison.
+
+It exits with an error when it prints any line, so a script can stop on it.
+Its last line, on standard error, gives both commits' test totals, such as `test cases 8322 -> 8352`.
+
+## What it compares
+
+For each kind of session it reads what that session gets at its start:
+
+- **Hooks**: every hook the session's settings files register, with its event, its matcher, the hook it runs and its timeout. A hook that two settings files both register counts once, since it runs once.
+- **Rules**: the id of every rule in the documents the session loads: each `- **name**` rule, each `ALWAYS` and `NEVER` rule by its first five words, and each heading.
+- **Values**: every setting in its settings files and the constants its launch script sets.
+
+The kinds are a worker in this repo, a worker in another repo, a reviewer, the dispatcher and the leads; a skill an extension ships is an extension's own to record.
+
+It also counts the test cases in every test file under `tests/`:
+
+- In a TypeScript test file it reads each `test(` and `it(` call through the TypeScript parser, so a call inside a comment or a string does not count.
+- A table test (`test.each`) counts one case per row of its table, written in place or as a named array in the same file.
+- A `test.skip` or `test.todo` counts as no case, since it does not run.
+- In a Python test file it counts each `def test_` function and each `check(` call, or, in a file with neither, each public top-level function.
+
+## Read its output
+
+Each line starts with `-` for something the head lost and `+` for something it has in its place:
+
+```text
+- reviewer	hook	PreToolUse ^Bash$ no-stash timeout=15
++ reviewer	hook	PreToolUse ^(Bash|Write)$ no-stash timeout=15
+- tests	tests/scripts/roster.test.ts	30 -> 29
+```
+
+- A changed hook, rule or value shows as its old line and its new one.
+- A test file that lost cases shows its count before and after, or `gone` when the file is gone. A test you add shows nowhere, since it takes nothing away.
+- `missing` means a session reads a file the head does not have, such as a skill that was moved twice or deleted. It shows even when the base lacks the file too, since every line that file holds is gone from the comparison.
+
+A line is not always a mistake: a change you meant shows too.
+Explain each one where you record the change, such as in its commit message, and fix the rest.
+
+## Renames and moves
+
+Both versions pass through the rename rules (`bun run rename`) first, so a version from before the rename and one after it compare by meaning, not by spelling.
+A document or script that moved to another folder is still found by the end of its path.
+
+## Replays
+
+`bun run parity` compares what your sessions are given.
+`bun run parity replay` checks what a headless skill does with it, for each replay an extension carries: a scope keeps its replays beside its skills, in `replays/` (`replays.json`, `map.json` and `fixtures/<replay>/`), and core carries none.
+Each replay runs its skill's `SKILL.md` before a change (the scope's `skills` at `--base` in the scope's own git, `HEAD` by default) and after it (the scope's working tree), on made-up fixtures, and compares the two by its comparator:
+
+- **Board scan**: the same rows, each with its status, tier, priority, assignee and the person its next step asks, and the same count line.
+- **End-of-day scan**: the same ticket and pull request numbers on each line, whatever the wording.
+- **Triage**: the same systems read, in any order, and the same writes refused, each with what it aimed at, counting each read or refusal that more than half a side's runs make, so a read the model adds in some runs leaves the result alone.
+
+```bash
+bun run parity replay --runs 0                  # check every replay's setup, with no model run
+bun run parity replay --only <replay>           # replay one skill
+bun run parity replay --snapshot                # refresh each server's tool list from the real server
+```
+
+- `--runs <n>` sets each side's run count; a replay passes when the after side's majority matches the before side's, and fails as changed only when both sides have a majority and the two differ.
+  A side with no majority fails as noisy, after a before side reruns at 5, since a skill the model runs two ways says nothing about the change; its fixture or its prompt fixes it.
+- Nothing real is read or written. Every MCP server is a stub under the same name that answers from the replay's `fixtures/` folder in its scope, and `gh` is a shim that does the same.
+  A call the fixture lacks fails the replay as a miss.
+- Each run is headless on `--permission-mode dontAsk`, with only the skill's reads allowed.
+  Every write stays callable, so the run refuses it and records the refusal, and nothing is sent.
+- A run needs `claude` on your PATH and `CLAUDE_CODE_OAUTH_TOKEN` set, and runs in a sandboxed home of its own, with every skill beside the replayed one in its scope linked under its `~/.claude/skills`.
+  Each Bash call there runs one plain command, since a compound command is refused whole.
+
+A replay at 3 runs a side is 6 runs, about $1.30 to $2.30 and 5 to 12 minutes (estimated from three skills' 18 runs).
+A scope's `map.json` names each replay's skill folder, relative to the scope, and the files it covers, so a change to one skill replays only that one; its `file`, relative to the skill's folder, names the file a run reads in place of `SKILL.md` (a scan's `references/SCAN.md`).
+A machine with no extension holds no replay, and `--runs 0` says so.

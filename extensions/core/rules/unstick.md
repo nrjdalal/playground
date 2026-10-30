@@ -1,0 +1,11 @@
+A stuck or failed session's hook tells its manager at once and the dispatcher {unstick.escalateMinutes} minutes on; the manager allows a needed prompt or denies it (`playground picker`), and ops-unstick routes what no hook recorded.
+No session sits stuck unseen: each session's own hooks write its state as it changes, working, idle, stuck on a prompt, at its usage limit, or failed.
+The moment that state reads stuck or failed, one line goes to the session's manager alone, with the session, its task, the reason, the command or question and its last message.
+The manager allows a permission prompt the work needs and otherwise denies it with the reason and a simpler shape, denying whenever it cannot tell what the command does.
+Only `playground picker`, run by the session's manager, answers a permission prompt, since a key pressed in another's pane reads as the owner's.
+Each manager wakes on its alerts within seconds through its own `playground alerts-wait` task, and the relay sends each line too, as the backstop.
+ops-session-resume sends one carry-on line past a usage limit's reset, after a failed turn and after a restart that lost a turn, and tells the session's lead when the same failure stands again.
+ops-unstick reads every live session's screen for what no hook reports, such as the folder-trust and MCP-server dialogs, and sends each such block to the session's manager, pressing nothing on a permission prompt.
+It clears the usage-limit dialog with Escape only while the session's account has room, and sends a limit with no room to the Builder and the dispatcher, since one limit holds every session on that account.
+The `no-prompt-stop` hook refuses the `rm` shapes that stop a session on a prompt, so fewer prompts arise at all.
+scripts/hooks/README.md's session-state section and scripts/ops/README.md's ops-unstick section hold the how, and SESSIONS.md holds how a manager answers a prompt.

@@ -1,0 +1,4 @@
+{
+  "finished": ["closed", "done", "ended", "merged", "parked", "paused"],
+  "live": ["starting", "waiting", "working"]
+}

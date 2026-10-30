@@ -1,0 +1,93 @@
+---
+slug: /docs/install
+title: Install
+description: Install Playground on a Mac with one command, and run it again to repair it.
+---
+
+# Install
+
+One command installs Playground:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/nrjdalal/playground/main/install.sh | bash
+```
+
+It puts a checkout of Playground in `~/playground`, links its skills and the `playground` command, then starts Playground.
+To install somewhere else, set `PLAYGROUND_DIR` first: `curl -fsSL <the URL above> | PLAYGROUND_DIR=~/code/playground bash`.
+
+## What it installs
+
+A Mac is all you need: the installer installs every tool below that is missing, in one run, each through its project's own installer.
+A tool it cannot install goes on the **Left for you** list it prints at the end, with the one command that does it, and the run carries on.
+
+| Tool      | Needed for                                    | Installed with                                    |
+| --------- | --------------------------------------------- | ------------------------------------------------- |
+| `brew`    | installing the tools below                    | Homebrew's own installer                          |
+| `bun`     | running Playground                            | `curl -fsSL https://bun.sh/install \| bash`       |
+| `claude`  | every session (Claude Code)                   | `curl -fsSL https://claude.ai/install.sh \| bash` |
+| `docker`  | the dashboard's database (Docker or OrbStack) | `brew install --cask docker`                      |
+| `gh`      | clones, pull requests and your private repos  | `brew install gh`                                 |
+| `git`     | the checkout                                  | `brew install git`                                |
+| `herdr`   | the terminal your sessions run in             | its pinned build, checked by its sha256           |
+| `node`    | 20.9 or newer: the build and the dashboard    | `brew install node`                               |
+| `python3` | the background jobs                           | `brew install python`                             |
+| `uv`      | optional: the skills' own tests               | `brew install uv`                                 |
+
+It stops to wait for you only where it cannot act alone, and only when it runs in a terminal; otherwise each of these goes on the list:
+
+- Homebrew's installer asks for your Mac's password.
+- Docker Desktop's first start, in the window it opens.
+- The GitHub sign-in, `gh auth login`.
+- Claude Code's sign-in, `claude auth login`, in your browser.
+- Your Mac's password, once, for the Dashboard's local address (below).
+
+To see what is missing without changing anything, run it with `--check` (`curl -fsSL <the URL above> | bash -s -- --check`), or set `PLAYGROUND_INSTALL=0`.
+
+Playground brings its own herdr, the terminal your sessions run in: `playground herdr pin` downloads the version Playground pins, checks it against the pinned SHA-256, and keeps it at `~/.playground/bin/herdr`.
+A herdr you installed yourself stays yours: Playground never runs it, and `playground doctor` names it.
+
+While the Playground repository is private, the URL above does not answer, and the clone needs a GitHub login (`gh auth login`) that can read it.
+Until then, clone it and run the installer from the clone, which then installs into that same folder:
+
+```bash
+gh repo clone nrjdalal/playground ~/playground && bash ~/playground/install.sh
+```
+
+Once it is public, the login is optional for the install, and syncing your extensions with your private repos still needs it.
+
+## What it does
+
+1. Installs whatever is missing of Homebrew, `git`, `node` and `bun`, since every later step runs on them; `playground doctor` checks that `node` is 20.9 or newer.
+2. Prints every place outside its folder it will write to, before it writes there.
+3. Clones Playground into its folder, or, when the folder already holds a checkout, fast-forwards it. With a GitHub login it clones through `gh`, else over HTTPS.
+4. Installs the rest of `playground doctor`'s tool list that is missing, then the pinned `herdr`, and signs Claude Code in.
+5. Installs the dependencies (`bun install --frozen-lockfile`) and builds the shared packages.
+6. Runs `scripts/link-skills.sh`, which installs the home skill set and links the command.
+7. With a GitHub login, sets your settings up in your private repo, which it reuses, or makes once you answer `y` on the terminal, and clones your extensions from it; when it cannot, **Set up settings** in the app's Settings does it ([Your private repos](/docs/backup#your-private-repos)).
+8. Sets up the Dashboard's local address, `https://playground.localhost`: it says why, then `sudo` asks for your Mac's password once to install portless's proxy, a service on port 443 that starts with your Mac and adds its own certificate to your Mac's trusted list. A run that finds the proxy running asks nothing, and one that finds it stopped sets it up again. When the password is refused, or there is no terminal, it goes on the list and `playground` does not start; run the installer again to set it up.
+9. Prints **Left for you**, or `Playground is ready.` when nothing is left.
+10. Starts `playground` once every required tool is there and the local address is set up. Its first start cuts the Dashboard's own checkout in `.claude/worktrees/desk`, installs it, starts the Dashboard and opens it, whose chat starts with **Let's check this Mac** ([Where to start](/docs#where-to-start)).
+
+## Where it writes
+
+Outside its own folder it writes in these places, besides the tools' own installers:
+
+- `~/.bun/bin`: the `playground` command, on a new terminal's `PATH`.
+- `~/.playground`: the data folder (`$PLAYGROUND_DATA_DIR` when you set it), with your extensions, links to the brief templates and the background jobs' scripts, and the skill sets in `orgs`. Playground's own herdr stays at `~/.playground/bin/herdr` either way.
+- Claude Code's user settings: the home skill set, `ws-home@ws`, installed from the `ws` marketplace in `~/.playground/orgs` ([Skills and orgs](/docs/skills)).
+- `/Library/LaunchDaemons/sh.portless.proxy.plist`: portless's proxy service, installed with sudo, and its certificate in the System keychain; the proxy keeps its own files in `~/.portless`.
+- Your shell's startup file (`~/.zshrc` for zsh, `~/.bashrc` for bash): one line for each tool folder it put on your `PATH` (Homebrew's `shellenv`, `~/.bun/bin`, `~/.local/bin`), added once. For any other shell it prints the lines for you to add. Open a new terminal, or run `source ~/.zshrc`, to pick them up.
+
+Every background job starts off but the Dashboard's own ([Ops jobs](/docs/jobs)), so the installer adds nothing to `~/Library/LaunchAgents`.
+
+## The Dashboard's database
+
+On its first start the Dashboard's **Start a local container**, on the Database row of **Let's check this Mac**, makes its database with [pglaunch](https://www.npmjs.com/package/pglaunch): a Postgres container on Docker or OrbStack, on a random port.
+That database listens on every interface with pglaunch's own credentials (user, password and database `postgres`), so anyone who can reach this Mac on that port can read and change it.
+Keep the Mac on a network you trust, or block the port in its firewall.
+
+## Run it again
+
+Every step checks before it acts, so running the command again changes nothing on a working install, and puts back a link that went missing.
+To update an install, run `playground update` ([CLI](/docs/cli)).
+To check one, run `playground doctor`; to remove one, `playground uninstall`, which also takes the home skill set and its `ws` marketplace back out of Claude Code.

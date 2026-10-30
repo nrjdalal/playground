@@ -1,0 +1,419 @@
+{
+  "about": "The dashboard's feature map: every page under web/next/src/app/(protected), what it shows (one entry per feature, sorted A to Z, so features added in different places usually merge without a conflict, while two edits to one entry still conflict), how to reach it and which API routes back it, then the sidebar's groups in the order they appear, then any dashboard API route no page calls. `bun run verify map` and the test beside the map fail when a page, a sidebar group or an owner-rung API route exists in code but not here, or when a page's shows is not a list sorted A to Z; `bun run verify pages` opens every page listed and checks its heading.",
+  "pages": [
+    {
+      "api": [
+        "WS /api/v1/ws",
+        "GET /api/v1/agents",
+        "GET /api/v1/ops",
+        "GET /api/v1/system",
+        "GET /api/v1/inbox",
+        "GET /api/v1/inbox/attachments/:id",
+        "GET /api/v1/workers/:sessionId/transcript",
+        "GET /api/v1/workers/:sessionId/agents/:agentId/transcript",
+        "GET /api/v1/workers/:sessionId/skills",
+        "POST /api/v1/messages",
+        "POST /api/v1/attachments",
+        "GET /api/v1/attachments/:id",
+        "POST /api/v1/debug/paste",
+        "POST /api/v1/inbox/:id/answer",
+        "POST /api/v1/inbox/dismiss",
+        "POST /api/v1/inbox/read",
+        "POST /api/v1/inbox/:id/retry",
+        "POST /api/v1/inbox/:id/schedule",
+        "POST /api/v1/workers/:sessionId/feed/:requestId",
+        "POST /api/v1/workers/:sessionId/mode",
+        "GET /api/v1/sessions/:id/steps",
+        "POST /api/v1/dashboard/dispatcher/start"
+      ],
+      "dispatcherHeading": true,
+      "heading": "Alpha",
+      "query": {
+        "worker": "A live session's id: the page is that session's own view. Absent, or no longer live, it is Playground's chat."
+      },
+      "reach": [
+        "Sidebar dispatcher rows: in the sidebar's header under its name row, above every group, with no group title or count, one row for each dispatcher drawn as every agent's (its one icon, its label, Alpha or Bravo, its model, effort and state in its tooltip, with no count and no dropdown, and on the Claude dispatcher's row the week and the 5-hour window after its name, GLM's on the GLM dispatcher's row or, with none on GLM, the second dispatcher's row behind Z.ai's mark, each an icon and its number in mono, in its level's colour, a stale one gray and dimmed, then its provider's logo and its effort's icon at its right end); the primary's opening /dashboard, and with something waiting /dashboard#needs-you-<id>, scrolled to the first card (the newest Inbox item, else the oldest prompt), and the second's, shown only while it is live or in the roster, opening /dashboard?worker=<sessionId>",
+        "Sidebar Orchestrators, Subagents, AI Runners or Other: a session's row opens /dashboard?worker=<sessionId>, and with something waiting (a Feed card, or the red alarm while it is Stuck) /dashboard?worker=<sessionId>#needs-you-<id>, scrolled to the oldest card, or while it waits only on an inbox item it posted, /dashboard#needs-you-<id>, that item in Playground's Inbox",
+        "System page: an agent's name in the Agents table, or a place in Needs you, opens /dashboard?worker=<sessionId>",
+        "User menu square: at the aside toolbar's end, a green dot at its top right while the build is behind, and Auto-hide tab bar then Update now first in its menu, sending the dispatcher one line naming the update and opening /dashboard",
+        "Below the owner rung: the sidebar's plain Dashboard link"
+      ],
+      "route": "/dashboard",
+      "shows": [
+        "A link with no ?worker= and a #needs-you-<id> anchor (a bookmark from when /dashboard was the status table) goes on to /dashboard?worker=<sessionId>#needs-you-<id> for the session whose view holds that card, unless Playground's view holds it.",
+        "A message sent from the view while Reading moves to the top of the stream and stays there however long the turn grows, no reply or other session's message taking it, until you scroll or send again; while Watching it lands at the end.",
+        "A message's files show as chips under its bubble, or alone when it has no words: by name and size while the page's outbox knows them, else by kind; an image opens in a new tab and any other file downloads (an image no longer kept reads Expired).",
+        "A sent message shows at once as a pending bubble whose footer holds a fixed slot for its state's one action, then its Copy, one icon button that copies the message's words, and marks where it is with one icon in a fixed slot, its words on hover (a spinner while sending or queued, and why, with Unsend; one tick once typed; a red mark when it failed, its reason beside it, with Edit and Discard) until the transcript holds it, then two ticks for Delivered, the time it arrived on hover, with Undo on his newest message for 2 minutes, which sends a fixed line telling the session to ignore it and strikes the message through as Unsent; one sent while a picker waits queues until the picker is answered.",
+        "A session waiting on a decision or draft it posted reads Waiting on your inbox, linked to the item.",
+        "Above the steps, on a Checkpoint line, Load older pages back through the session's older steps from the database until the start of the session, or says the database has not read that far.",
+        "An answered Inbox item keeps one line above its footer saying what he chose and whether it reached its poster, a go reading as still being carried out (Sending in Slack… for a sent draft, Saving a Slack draft… for a Draft) until its poster closes it, then linking where it landed (a Slack link as Open thread) or giving why there is no link, a Draft Slack refused reading, gray, Draft not saved with why.",
+        "An Inbox answer that did not reach its poster stays in the list and its count, its result reading Send failed, or Send unconfirmed, with the reason above a footer whose left end holds Retry, which sends it again, and whose right end holds Dismiss, then Reply.",
+        "An Inbox decision previews exactly what Approve does (a Slack message, a ship of canary, a new Linear ticket, a delete, a schema, a budget, or a plain ask saying what its poster does) over Approve and Deny in muted green and red, then an optional comment box that goes with whatever he answers, and on the right Archive, which sets it aside for later (cleared, neither yes nor no, to the Archived row), Snooze and Reply.",
+        "An Inbox decision's plain ask can carry its own Approve and Deny labels, one line each, which his card shows as two choices under its text, the quoted block, when both are there.",
+        "An Inbox draft is its Slack message or Linear comment, editable in place, over Send, Draft (a Slack draft alone: its poster saves it in Slack's Drafts & Sent) and Discard, its meta line naming which from its link and linking the thread it replies in as Open thread.",
+        "An Inbox item keeps its place while the list is open: one that arrives waits behind a pill at the top (1 new update), which puts what waits on top, newest first, as the list glides down, and a card that moved under him (another left for Done, or the pill was taken) pauses its buttons for 1 second.",
+        "An Inbox update is an outcome, bold with a dot while unread, and a click on its title, its tick or its Dismiss marks it read.",
+        "Below the owner rung, a lock.",
+        "Beside the view, the aside window's tabs, the Inbox first, then on another session's view dispatcher's own chat and composer (Chat), then a square for each app you show, then Pages, then Apps last (on a phone the view's own tab leads them): one plain list of what the factory posted through bun run ask, in priority order (decisions and drafts that need you, then unread updates, then the rest of the week, each newest first), each a card whose band ends in its time and a Mark as read tick and whose footer holds an open card's Approve and Deny (green and red) at its left end and, at its right end, Archive and Snooze (where offered), then Dismiss, then Reply, an open decision or draft taking an optional comment, an answered or settled card's result reading on its own line above the footer; the list and its shelves are rows that open and shut, each with its count: Inbox with Mark all as read, then In progress (a chat reply its poster carries out, five minutes on), Snoozed, Archived and Done, and All caught up over a list with nothing waiting.",
+        "Each Inbox item's Chat about it button prefills the composer with a removable Replying to #iN chip, the item marked until the message, led by re #iN, is sent.",
+        "Each Inbox item's meta line gives its kind as an icon and a word, who posted it, when and its #i id, then where a draft or a slack, ship or ticket decision will land (its link by name, or why there is none yet).",
+        "Each Inbox item's meta line says when a decision or draft was updated after it was posted, or an update edited by its poster, a blue Updated marking one changed since his last look, and colour says its kind (its icon) and its state, as the sidebar's status marks beside its title (the orange eye waiting on him, the blue spinner while being carried out, the green check once done with its link green, the red error when it failed to send, the grey circle once closed).",
+        "Files come with a message by the composer's attach button, a paste or a drop, each uploading at once and showing as a chip above the box (a thumbnail for an image, else its kind and size, with a remove button), and the message carries their paths for the session to Read; a paste over 2,000 characters, or one the message could not hold, becomes a text file chip named for its length (Pasted text · 15.2k chars) rather than words in the box.",
+        "In the composer, typing / at the start or after a space or a new line opens a menu of dispatcher's own skills by name, about six rows tall and scrolling inside itself, just above the / on a wide screen and across the box on a phone, filtered as he types (arrow keys and Enter pick, Escape closes), and a pick puts that skill first in the message, replacing any other (not on probe-sdk's until its sends take a skill).",
+        "On dispatcher's page, and on probe-sdk's, the session the dashboard hosts on the Agent SDK while PLAYGROUND_SDK_PROBE_DIR names its folder (listed under Other), a composer under the steps sends a message as you, typed into dispatcher's terminal and put on probe-sdk's input (Enter sends, Shift+Enter adds a line), probe-sdk's with a permission-mode menu beside the attach button (Default, Accept edits, Plan or Bypass permissions, the mode also in its sidebar row's tooltip), read-only while approvals are off.",
+        "Playground's chat, the dashboard's home: the live session the API gives the dispatcher role under the primary's name (PLAYGROUND_DISPATCHER, dispatcher by default), found by that role, shown as a session's own view below with the composer under its steps, its heading and its composer (Message Alpha) naming it by its label, never a session's name; while it is not live, first run in its place: this Mac's checks until their done mark is written, then one ✓ line over the steps left (GitHub, Settings, a Claude account and Start), with a link to the System page.",
+        "Snooze, an icon on an open decision or draft that holds no answer yet (one already put away included), beside its footer's other actions: its fixed times in IST, each beside its day and time (in 30 minutes, in 1 hour, in 3 hours, this evening 18:00 while it is ahead, the next 09:00, Monday 09:00 and next week's same weekday at 09:00) or a day and time he picks, and the item leaves the list and the count until its time, asking again once it has passed, new to the tab's dot again.",
+        "The Inbox is one accordion: its first row reads Inbox and how many items are in the list, 0 included, gray when none, with the new-items pill and an icon Mark all as read on its right, which marks every waiting decision and draft read and every update read, each staying in the list; under it In progress (a chat reply its poster is carrying out, 5 minutes on), Snoozed, Archived and Done rows, each with its count of all it holds and a circle when empty or a chevron, an empty one gray and shut, Archived's and Done's headers each holding a check that dismisses all on that row, and last a Preview row with no count, always there and shut at first, opening onto the preview pane's picker of dev stacks and Previews, its address and the live page; each item's band ends in its time and a check, Mark as read, which only marks it seen.",
+        "The second dispatcher's chat (PLAYGROUND_DISPATCHER_SECONDARY, the primary's name plus -2 by default, dispatcher-2), opened from its own row in the sidebar's header: its own view with the composer under its steps, named by its label as the primary's is (Message Bravo), with the aside of any session's view beside it: the Inbox, Playground's chat and its Pages.",
+        "Under the steps of every chat, with or without a composer, the Checkpoint bar, one row that stays from first paint: on the left that the session waits on a picker, else how many messages are on their way; on the right Scroll to end while there is more below, up and down arrows to his previous and next message (Alt+Up and Alt+Down), and the Watching / Reading toggle. Watching plays the stream at reading speed, resting at each new message and reading how far behind it is; Reading moves only by his hand and counts what arrived below. His scroll up turns Reading, his own scroll to the end or a click turns Watching, and each chat remembers its mode in this browser.",
+        "With ?worker=, that session's own view, read-only but for probe-sdk's, with no header (its label is the page's heading for screen readers alone): its steps as they happen, from the top of the page (what it was asked, then each turn of its own as one message: what it said, its thinking closed to a Thought row, each tool call closed to one row that opens to its input and what it returned (a spinner and its name shimmering while it runs, a warning icon and red when it failed), and a subagent's run as a Task that opens to the subagent's own steps and its report; every agent named by its label, each message headed by its sender and the time it was sent, such as You · 7:37 PM, and keeping its line breaks; a link opens on click with no pop-up, another site's in a new tab, and only http and https links open) with what waits on you inside them: each prompt it left in cmux's Feed as a card where it was asked: a picker answered with its options or the person's own words, a permission request with the tool's whole input and Allow once or Deny, a plan with its text and Start it or Send it back with a note; permission and plan cards are read-only, pointing to the session's terminal (a hosted session's saying it is refused after 10 minutes), while approvals are off (PLAYGROUND_APPROVALS_ENABLED), and only refusing is offered when not all of one could be shown."
+      ],
+      "title": "Dashboard"
+    },
+    {
+      "api": ["GET /api/v1/apps/plan", "GET /api/v1/apps/previews"],
+      "heading": "Apps",
+      "reach": ["Its URL alone: the aside's app squares and its Apps tab list the same apps"],
+      "route": "/dashboard/apps",
+      "shows": [
+        "Beside the page, the aside window drawn once for every dashboard page, in half-and-half panes the divider resizes, its size and picked tab kept from page to page: the Inbox and dispatcher's own chat and composer (Chat), as on /dashboard, then a square for each app you show (Changelog with its unread count; Plan, Previews and Usage are parked off the bar), each opening that app in the aside, then Apps, which shows, hides and orders them in this browser, then a Settings square that opens /dashboard/settings; on a phone the page's own tab first, then the same squares, in one bar at the bottom that scrolls sideways when they outgrow it.",
+        "One row per app web/next/src/lib/apps.ts lists, with its one-line description and when it last reported (the plan's grooming, the newest preview); a row opens the app."
+      ],
+      "title": "Apps"
+    },
+    {
+      "api": [
+        "GET /api/v1/apps/changelog",
+        "POST /api/v1/apps/changelog/seen",
+        "GET /api/v1/apps/changelog/images/:id"
+      ],
+      "heading": "Changelog",
+      "query": {
+        "entry": "One entry's name, a merge by its PR (pr-253), a version by its tag (v0.0.9), a rule by its key, else its id (an older link's id still opens it): that entry opens in the aside (the phone's bottom drawer). Absent, the newest change shown opens."
+      },
+      "reach": [
+        "Aside: the Changelog square opens the app beside the page (its corner counts the changes this viewer has not read)",
+        "Apps home: the Changelog row"
+      ],
+      "route": "/dashboard/apps/changelog",
+      "shows": [
+        "404 while CHANGELOG_ENABLED is false.",
+        "An aside with the picked change in full: its line, kind, time and link, what changed as a few short lines of Markdown, and its before and after screenshots, served by our own API.",
+        "Below the owner rung, a lock.",
+        "Beside the page, the aside window drawn once for every dashboard page, in half-and-half panes the divider resizes, its size and picked tab kept from page to page: the Inbox and dispatcher's own chat and composer (Chat), as on /dashboard, then a square for each app you show (Changelog with its unread count; Plan, Previews and Usage are parked off the bar), each opening that app in the aside, then Apps, which shows, hides and orders them in this browser, then a Settings square that opens /dashboard/settings; on a phone the page's own tab first, then the same squares, in one bar at the bottom that scrolls sideways when they outgrow it.",
+        "Half and half (a resizable split), the changes grouped by version, each version one accordion row (its icon, name, date and count, the newest open, the rest folded, every version a search or filter leaves open), Not shipped yet on top, then each version on main newest first with its date and count, a version the search or filter leaves empty hidden whole (No changes match with Clear filters when none is left), each change its kind's icon inline before its one plain line (a dot when it arrived since this viewer's last look) and its date.",
+        "On a phone the aside is a bottom drawer, which a link's ?entry= opens on first load and closing it drops.",
+        "Opening the page marks every change it shows read for this viewer, except verify's own visit.",
+        "What changed in the factory, from the Changelog plugin's table, read-only: its title with no subtitle, one toolbar row of search and a Kind filter (feature, fix, rule, setting, ops, each with its count, only the kinds there are).",
+        "With no changes, an empty state."
+      ],
+      "title": "Changelog"
+    },
+    {
+      "api": [
+        "GET /api/v1/apps/plan",
+        "POST /api/v1/apps/plan/order",
+        "GET /api/v1/apps/plan/report",
+        "GET /api/v1/agents"
+      ],
+      "heading": "Plan",
+      "reach": [
+        "Parked off the aside and the Apps home: its URL alone, /dashboard/apps/plan",
+        "A link to ?view=plan opens the Plan tab",
+        "A link to ?view=board opens the Board tab"
+      ],
+      "route": "/dashboard/apps/plan",
+      "shows": [
+        "Below the owner rung, a lock.",
+        "Beside the page, the aside window drawn once for every dashboard page, in half-and-half panes the divider resizes, its size and picked tab kept from page to page: the Inbox and dispatcher's own chat and composer (Chat), as on /dashboard, then a square for each app you show (Changelog with its unread count; Plan, Previews and Usage are parked off the bar), each opening that app in the aside, then Apps, which shows, hides and orders them in this browser, then a Settings square that opens /dashboard/settings; on a phone the page's own tab first, then the same squares, in one bar at the bottom that scrolls sideways when they outgrow it.",
+        "Board (?view=board) shows the same plan as columns: a Queued column per lane (Easy, Medium, Hard) with each item's title and pull request, its What you get line, and its worker, lane, estimate and status, then In flight, In review and Done today, each with its count.",
+        "Every agent is named by its label and links to its view while its session is live.",
+        "In three tabs. Report, which opens first, is the ops report the ops-report job writes to ops/report.json in the data folder, in plain words: Now, one line per lane (its worker, the item in flight, else whether the worker is busy, down or free and the lane's next one, the worker's status in the Dashboard's words, the pull request and the estimate, over the item's What you get line).",
+        "On either tab, a file that does not read now shows its last good read, named so in the subtitle, and any part that did not read (an item with no What you get line, a finding with no why, an item listed twice) is named in a notice.",
+        "Plan (?view=plan) is the plan the planner writes to bundles/plan.json in the data folder on every re-groom; its subtitle says when it was groomed (how long ago and the time in IST).",
+        "Queued cards drag by pointer or keyboard (Space or Enter picks up, arrows move, Space or Enter drops, Escape cancels), within a lane or to another; the others do not move. A drop shows at once, is saved to bundles/order.json in the data folder with a toast that offers Undo, and the board reads it back; a failed save says so in a toast and the board shows the saved order.",
+        "The Board is the page's one write.",
+        "The Plan tab shows In flight first (each item being built, its What you get line, worker, pull request and ETA in IST), then Landing next (each item and when it should finish, in IST).",
+        "The Plan tab's Done today (each merged pull request, its What you get line and how long ago it merged).",
+        "The Plan tab's one table per lane, Easy, Medium and Hard, headed by the lane's worker: each item (its id and title), its What you get line, its status in plain words (Ready, Waits on #<n>), its worker, its start and finish in IST and its pull request.",
+        "The Report's Earlier reports, the last ten kept (when, how many needed attention, what changed).",
+        "The Report's Health and System, a Reading / Now table and when it was read.",
+        "The Report's Needs attention (each stuck or unhealthy item, its state and since when, why, and what is being done by whom, or Nothing needs you).",
+        "The Report's Since the last report.",
+        "The Report's subtitle says when the report was written, in IST; with no report file, an empty state.",
+        "The Report's Today, what merged.",
+        "With no plan file, an empty state."
+      ],
+      "title": "Plan"
+    },
+    {
+      "api": ["GET /api/v1/apps/previews", "GET /api/v1/apps/previews/:name"],
+      "heading": "Previews",
+      "query": {
+        "topic": "One or more topics, comma-separated (a preview's name before its first - or .): only those topics' previews. Absent, every topic."
+      },
+      "reach": [
+        "Parked off the aside and the Apps home: its URL alone, /dashboard/apps/previews",
+        "A session's stream: a link an agent wrote to /dashboard/apps/previews?topic=<topic>"
+      ],
+      "route": "/dashboard/apps/previews",
+      "shows": [
+        "Any file that looks like a preview but is not shown (a symlink, a hard link, a bad name, too large), named in a notice.",
+        "Below the owner rung, a lock.",
+        "Beside the page, the aside window drawn once for every dashboard page, in half-and-half panes the divider resizes, its size and picked tab kept from page to page: the Inbox and dispatcher's own chat and composer (Chat), as on /dashboard, then a square for each app you show (Changelog with its unread count; Plan, Previews and Usage are parked off the bar), each opening that app in the aside, then Apps, which shows, hides and orders them in this browser, then a Settings square that opens /dashboard/settings; on a phone the page's own tab first, then the same squares, in one bar at the bottom that scrolls sideways when they outgrow it.",
+        "Its subtitle counts the previews and topics and says when the newest arrived.",
+        "One section per topic, newest first, each a grid of cards: the image, or the HTML page live in a frame sandboxed to allow nothing (no script, no same-origin), so its CSS motion plays; the file's name, its caption from a .txt of the same name and when it changed, and a button that opens it alone in a new tab.",
+        "One toolbar row of a Topic filter and Refresh.",
+        "The images and HTML pages agents leave in the data folder's previews for you, read-only.",
+        "With no previews, an empty state."
+      ],
+      "title": "Previews"
+    },
+    {
+      "api": ["GET /api/v1/apps/usage"],
+      "heading": "Usage",
+      "reach": ["Parked off the aside and the Apps home: its URL alone, /dashboard/apps/usage"],
+      "route": "/dashboard/apps/usage",
+      "shows": [
+        "A table of the usage windows the usage job writes (the 5-hour window and the week, each with its share used and a forecast at the burn since it opened: when it runs out and whether that comes before it resets).",
+        "Any part that did not read or price, named in a notice; the page is read-only.",
+        "Below the owner rung, a lock.",
+        "Beside the page, the aside window drawn once for every dashboard page, in half-and-half panes the divider resizes, its size and picked tab kept from page to page: the Inbox and dispatcher's own chat and composer (Chat), as on /dashboard, then a square for each app you show (Changelog with its unread count; Plan, Previews and Usage are parked off the bar), each opening that app in the aside, then Apps, which shows, hides and orders them in this browser, then a Settings square that opens /dashboard/settings; on a phone the page's own tab first, then the same squares, in one bar at the bottom that scrolls sideways when they outgrow it.",
+        "Each table's number columns sort.",
+        "For Today or Last 7 days, tables of spend by agent (each session counted toward the one it was started from), the costliest sessions and spend by model (one with no price marked so).",
+        "GLM credit windows under the usage windows, one line per window with its used credits of the cap and reset time, can't read for a window the file lacks, and one line naming the job's command where there is no file.",
+        "Spend, a table of today and the last 7 days in API-equivalent dollars at the published per-token prices, with tokens and calls, and this table's dollars beside Claude Code's own totals for the week's exited sessions.",
+        "The cost of each PR a worker opened that merged in the last 7 days: its worker's spend, its share of that sin's reviewer and tester, tokens, total, review rounds, wall time and any fix PR within 7 days, with a spinner while GitHub's first read of a repo is still going.",
+        "The hourly burn over the last 24 hours as a bar chart."
+      ],
+      "title": "Usage"
+    },
+    {
+      "api": ["GET /api/v1/sessions"],
+      "heading": "Sessions",
+      "reach": [
+        "Aside toolbar: the user menu square's Sessions item (owner rung only)",
+        "A session's page: See all under the other sessions of its name (?session=<name>)"
+      ],
+      "route": "/dashboard/sessions",
+      "shows": [
+        "Below the owner rung, a lock.",
+        "Beside the page, the aside window drawn once for every dashboard page, in half-and-half panes the divider resizes, its size and picked tab kept from page to page: the Inbox and dispatcher's own chat and composer (Chat), as on /dashboard, then a square for each app you show (Changelog with its unread count; Plan, Previews and Usage are parked off the bar), each opening that app in the aside, then Apps, which shows, hides and orders them in this browser, then a Settings square that opens /dashboard/settings; on a phone the page's own tab first, then the same squares, in one bar at the bottom that scrolls sideways when they outgrow it.",
+        "Every Claude Code session the dashboard's database holds, live and past, newest activity first: the session (its label, linking to its page), its task (or, while searching, the line of its log that matched), kind (interactive, headless, subagent or fork), status (Working, Idle or Live while it runs, Ended after, a dash for a subagent or fork, which Claude Code's registry cannot see), last activity, line count and cost.",
+        "Name, shown only while the URL names one (?session=<name>), keeps to the sessions of that exact name; clearing it lists every session again.",
+        "Search matches a name, task, title or id, or any word of a session's log; Kind filters."
+      ],
+      "title": "Sessions"
+    },
+    {
+      "api": ["GET /api/v1/sessions/:id", "GET /api/v1/sessions/:id/entries"],
+      "reach": [
+        "Sessions: a session's label",
+        "A session's page: the session that started it, or one it started",
+        "A session's page: another session of its name"
+      ],
+      "route": "/dashboard/sessions/[id]",
+      "shows": [
+        "Below its facts, the other sessions of its name (the nearest five on each side, in the order they started, See all linking to the rest), each saying whether it came before, after or ran alongside, and how it began: Continues after /clear, Continues from <handover note>, or Fresh start.",
+        "Below its facts, the sessions it started.",
+        "Below the owner rung, a lock.",
+        "Below the sessions it started, its log, newest page last with Load older above it on a Checkpoint line (The start of the session once it is reached), showing what was asked, said and done, and with Every line on, tool output, thinking and the hook, system and bookkeeping lines too.",
+        "Beside the page, the aside window drawn once for every dashboard page, in half-and-half panes the divider resizes, its size and picked tab kept from page to page: the Inbox and dispatcher's own chat and composer (Chat), as on /dashboard, then a square for each app you show (Changelog with its unread count; Plan, Previews and Usage are parked off the bar), each opening that app in the aside, then Apps, which shows, hides and orders them in this browser, then a Settings square that opens /dashboard/settings; on a phone the page's own tab first, then the same squares, in one bar at the bottom that scrolls sideways when they outgrow it.",
+        "One session from the dashboard's database, headed by its label and task: its kind, status, start, how it began, last activity, model, directory, branch, tokens, cost, the session that started it and its pull requests."
+      ],
+      "title": "Session"
+    },
+    {
+      "api": [
+        "GET /api/v1/system",
+        "GET /api/v1/accounts",
+        "POST /api/v1/accounts",
+        "DELETE /api/v1/accounts/:provider/:key",
+        "GET /api/v1/extensions",
+        "GET /api/v1/extensions/why",
+        "GET /api/v1/extensions/check",
+        "GET /api/v1/extensions/init/check",
+        "POST /api/v1/extensions/init",
+        "POST /api/v1/extensions",
+        "PUT /api/v1/extensions/order",
+        "POST /api/v1/extensions/:name/links",
+        "DELETE /api/v1/extensions/:name/links/:org",
+        "POST /api/v1/extensions/:name/sync",
+        "DELETE /api/v1/extensions/:name",
+        "POST /api/v1/accounts/claude/setup",
+        "POST /api/v1/accounts/claude/setup/:id/code",
+        "POST /api/v1/accounts/claude/open-private"
+      ],
+      "heading": "Settings",
+      "reach": [
+        "User menu: its Settings item, on the aside toolbar's square in the Dashboard and the sidebar footer's card in the Console"
+      ],
+      "route": "/dashboard/settings",
+      "shows": [
+        "Accounts: every Claude and GLM account the factory spends, each with its provider, email or label and whether its token is kept, with Add account (Claude in three steps: open sign-in, which opens in a new window on a fresh profile of the browser the button names, or, with no such browser, shows the link to copy; sign in with the account to add; paste the code with its email and an optional label, the toast saying when the account was not confirmed, and a sign-in for another account refused; GLM by its label and the pasted API key; a token goes to the Keychain and is never shown again, and a refusal shows in the dialog) and Remove on each, which takes out its row and its Keychain item; before the settings are set up, Your settings aren't set up yet with Set up settings, which names the private GitHub repo in a confirm, sets it up and turns Add account on with no reload.",
+        "Below the owner rung, a lock.",
+        "Beside the page, the aside window drawn once for every dashboard page, in half-and-half panes the divider resizes, its size and picked tab kept from page to page: the Inbox and dispatcher's own chat and composer (Chat), as on /dashboard, then a square for each app you show (Changelog with its unread count; Plan, Previews and Usage are parked off the bar), each opening that app in the aside, then Apps, which shows, hides and orders them in this browser, then a Settings square that opens /dashboard/settings; on a phone the page's own tab first, then the same squares, in one bar at the bottom that scrolls sideways when they outgrow it.",
+        "Extensions: every extension in the order sessions read them, first wins, each a card with its place, name and repo, its Linked to chips (an org, or everywhere) with a cross on each but the login's and + org, its skills, rules and lists counted and when it last synced, dragged by its handle (or Space and the arrows) into a new order, and a menu: Sync now, Open on GitHub, Why… (which extension a session in a repo of an org takes a skill from, and the copies it hides) and Remove (not on the login's, its folder kept); core last, locked, built into Playground; Add extension (a name, a repo or the login's playground-<name>, and its links), which checks GitHub as you type (repo is private and has skills/ with its count, or the repo will be created, private) and names a repo not on GitHub yet in a confirm before it is made; before the settings are set up, the same Set up settings step as Accounts, and a read that fails says Extensions could not be read.",
+        "Things to fix: each check first run finds missing on this Mac, read live whatever the done mark says (GET /api/v1/onboard/checks?live=1, the onboard router's, outside the owner rung), with why and the button that fixes it, and Re-check; shown only while one is missing, so a Mac with every tool shows nothing here."
+      ],
+      "title": "Settings"
+    },
+    {
+      "api": [
+        "WS /api/v1/ws",
+        "GET /api/v1/agents",
+        "GET /api/v1/ops",
+        "GET /api/v1/system",
+        "GET /api/v1/inbox"
+      ],
+      "heading": "System",
+      "reach": [
+        "Sidebar header: the machine at a glance, as system icons on the Playground title's row between the title and GitHub, or on a centred line under it while the row shows the Test data badge or is under 238px (memory, CPU load and swap in three fixed slots, then disk only while it is orange under 50 GB or red under 20 GB; each an icon and its number in mono at its own width, green, orange or red by its own levels, gray outlines with no number before a sample or once sampling stops, dimmed while the live feed is lost; each reading in shadcn's Tooltip on hover or focus, each opening the System page), and the white GitHub icon at the title row's right end opening the repo's pull requests in a new tab; none of them shown on the collapsed rail"
+      ],
+      "route": "/dashboard/system",
+      "shows": [
+        "Below the owner rung, a lock.",
+        "Beside the page, the aside window drawn once for every dashboard page, in half-and-half panes the divider resizes, its size and picked tab kept from page to page: the Inbox and dispatcher's own chat and composer (Chat), as on /dashboard, then a square for each app you show (Changelog with its unread count; Plan, Previews and Usage are parked off the bar), each opening that app in the aside, then Apps, which shows, hides and orders them in this browser, then a Settings square that opens /dashboard/settings; on a phone the page's own tab first, then the same squares, in one bar at the bottom that scrolls sideways when they outgrow it.",
+        "Needs you, the dispatchers alone: each one's Feed prompts, named by its label (Alpha, Bravo), and what needs you in the first one's Inbox (each count linked to its first card: the newest Inbox item, else the oldest prompt), and the first stopped on a prompt the cards do not hold.",
+        "Next up, the roster's backlog still waiting, fixes first, then your own asks, then the rest.",
+        "Paused, the scripts jobs.json pauses on purpose (its plain name, what it does, when it runs, last beat), muted, shown only when one is.",
+        "System, this machine's room for more workers, sampled every 30s: the capacity line (Room for ~N more workers, and what limits it), what stopping a worker's dev stack idle for 15 minutes would free, the usage windows the usage job writes, a plain table of the readings (memory with macOS's pressure, CPU load against the cores, swap, disk free and Docker's VM), the first three with a small sparkline of their last hour, and each live session's footprint (its memory, its claude process, its dev stack with that stack's Postgres container, and its CPU), then what runs in a checkout with no session.",
+        "The System page, which the sidebar header's system icons open (the status table and what goes with it moved here when /dashboard became Playground's chat) leads with Agents, a table of every agent dispatcher's roster lists or cmux runs (Agent with its one Worker Lights icon and label, Role, Doing as its roster title with its PR linked in its PR's colour, Status as the icon's word such as Working, Fixing, Waiting on checks, Ready, Stuck or (Playground's own) Waiting on you, the working or stuck worker's time left in the sidebar row's tooltip, none once its pull request is merged or it sits paused on a usage limit), in the sidebar's order (Dispatchers, Orchestrators, Subagents, AI Runners, Scripts and Other, each reviewer and tester indented under its worker), under one toolbar row of search, a Role filter, Show N idle while an Other agent has idled past three hours, and Refresh, and kept live."
+      ],
+      "title": "System"
+    },
+    {
+      "api": [
+        "GET /api/v1/threads/:id/messages",
+        "POST /api/v1/messages",
+        "POST /api/v1/attachments",
+        "GET /api/v1/workers/:sessionId/skills"
+      ],
+      "reach": [
+        "Sidebar Threads: a thread's row opens /dashboard/threads/<id>, and a middle or modified click opens it in a new tab"
+      ],
+      "route": "/dashboard/threads/[id]",
+      "shows": [
+        "A reply box under the messages, its own draft kept apart from the full chat's, whose message goes to Playground and is routed to this thread once its transcript holds it, showing under the messages as on its way until then.",
+        "Back to chat in its header opens the full chat, where every message stays in time order; the browser's Back works too.",
+        "Below the owner rung, a lock.",
+        "Beside the page, the aside window drawn once for every dashboard page, in half-and-half panes the divider resizes, its size and picked tab kept from page to page: the Inbox and dispatcher's own chat and composer (Chat), as on /dashboard, then a square for each app you show (Changelog with its unread count; Plan, Previews and Usage are parked off the bar), each opening that app in the aside, then Apps, which shows, hides and orders them in this browser, then a Settings square that opens /dashboard/settings; on a phone the page's own tab first, then the same squares, in one bar at the bottom that scrolls sideways when they outgrow it.",
+        "One thread on its own, headed by its title and how many messages it holds: You asked, its first message when it is yours; then Unread (n), the messages others wrote since it was last read; then the rest, your replies included, folded under Full history; then what lands while it is open; each shown as the chat shows it.",
+        "Opening it marks the thread read, while what was unread stays under Unread until the view is left."
+      ],
+      "title": "Thread"
+    }
+  ],
+  "sidebar": [
+    {
+      "label": "Dispatchers",
+      "shows": "No group in the nav: the dispatchers' rows sit in the sidebar's header, under its name row and above Threads, with no title or count (the map keeps this entry since GROUP_ORDER still lists Dispatchers for the System page's table): a row for each the API names, the primary's first, each drawn as every agent's and named Alpha or Bravo, with the usage windows after its name (Sidebar dispatcher rows on /dashboard's reach); the primary's row stays while its session is down, Not running in its tooltip, and the second's shows only while it is live or in the roster; before the sidebar is read, as many empty rows as /api/health counts. Owner rung only."
+    },
+    {
+      "label": "Threads",
+      "shows": "The nav's first group, under the header's dispatcher rows and above the session groups, your threads from GET /api/v1/threads, five to a page, pinned first, then the newest update; absent with no threads, and on the collapsed rail each row its thread icon alone. Past five, the label holds an arrow each side of the page number and a short last page keeps five rows' height. Each row a thread's icon (RiChatThreadLine), then its title, cut at its end, its full title as its tooltip, and its unread count as a badge, none once all are read; a click opens the thread's own view at /dashboard/threads/<id>, which marks it read. A row's menu takes the badge's place on hover and focus: Mark as read or unread, Rename, Pin or Unpin, and Archive, each through PATCH /api/v1/threads/:id. Owner rung only."
+    },
+    {
+      "label": "Orchestrators",
+      "shows": "The managers under the dispatchers, whose own rows sit in the sidebar's header (`planner`, `builder`, `ops`, an <id>-builder, <id>-ops, <id>-planner or <id>-optimizer, and any agent dispatcher's roster gives the manager role, A to Z by roster title until dragged into an order of your own, which POST /api/v1/managers/order keeps and the label's menu's Reset order to A to Z forgets): each row its light, then its role word alone (Builder, Ops, Planner, Optimizer) with no title after it, or, with no kind, its ticket and pull request then the triaged title dispatcher keeps in its roster (else its first ask), which drops an id the row already shows from its start or end and gives way before the label does, then its provider's logo and its effort's icon, each naming itself on hover, on one 32px line (Builder), its full name, its model, effort and state, Draft while its composer holds an unsent draft and, while it works or is stuck, the time left to its roster ETA in its title's tooltip on hover, its pull request's number in the PR's colour, linking to its stream on the dashboard, its one icon on the left from Worker Lights' thirteen states (Stuck, Paused · usage limit, Merged, Down or Ended, Failing, No progress, Fixing, Working, Waiting, Waiting on approvals, Ready, Parked, Idle) with no count, and a chevron, when it has any, in the effort's place on hover, focus, while open and always on a phone, opening its subagents and background processes with each one's state. Hovering or focusing a row shows its words, a line each; a right click, a long press or Shift+F10 on a manager row opens its menu, Move up and Move down. Connecting, in the first group, until the dashboard's socket answers; None running when none is live. Owner rung only."
+    },
+    {
+      "label": "Subagents",
+      "shows": "The worker sessions (the roster's worker kind, else an <id>-worker or worker-<sin> name) and any the roster calls a worker, by the state its icon draws, the most urgent first (Stuck, a wait on an inbox item it posted with it; then Failing, No progress, Fixing, Working, Waiting, Waiting on approvals, Ready, Parked, Paused · usage limit with Idle, and Done, Merged and Ended last), then within one state by ticket, then pull request, then title (AB-9#8 before AB-262#7 before #9), with each reviewer and tester (by its roster kind, else its name) nested under the worker whose pull request it checks (its chevron opens them, each leading with its label, AB-843#8 Reviewer, each in the same set, Done once its verdict stands at the head; one whose worker is not live nests under its worker's roster row, one at work makes its idle worker's row Waiting on checks, and a stuck one leaves its worker collapsed, the worker's row drawing the red alarm and naming it in its tooltip while it hides it; each member row's tooltip holds its name over its lines): each row its light, then its label (its ticket and its pull request with no role word, AB-843#8; with no ticket or pull request, its title alone, Row wrap; with no kind, its ticket and pull request) and the triaged title dispatcher keeps in its roster (else its first ask), which drops an id the row already shows from its start or end and gives way before the label does, then its provider's logo and its effort's icon, each naming itself on hover, on one 32px line (ABC-1234#97 Dashboard home), its full name, its model, effort and state, Draft while its composer holds an unsent draft and, while it works or is stuck, the time left to its roster ETA in its title's tooltip on hover, its pull request's number in the PR's colour, linking to its stream on the dashboard, its one icon on the left from Worker Lights' thirteen states (Stuck, Paused · usage limit, Merged, Down or Ended, Failing, No progress, Fixing, Working, Waiting, Waiting on approvals, Ready, Parked, Idle) with no count, and a chevron, when it has any, in the effort's place on hover, focus, while open and always on a phone, opening its subagents and background processes with each one's state. None running when there are none. Owner rung only."
+    },
+    {
+      "label": "AI Runners",
+      "shows": "The long-running runner-<sin> sessions and any the roster calls a runner, unless it calls one a manager, in the Subagents group's order: each row its light, then its label (its ticket, its pull request and its kind, as a worker's; with neither, its title then its kind, Dashboard · runner) and the triaged title dispatcher keeps in its roster (else its first ask), which drops an id the row already shows from its start or end and gives way before the label does, then its provider's logo and its effort's icon, each naming itself on hover, on one 32px line (Dashboard · runner), its full name, its model, effort, state and when it runs, Draft while its composer holds an unsent draft and, while it works or is stuck, the time left to its roster ETA in its title's tooltip on hover, its pull request's number in the PR's colour, linking to its stream on the dashboard, its one icon on the left from Worker Lights' thirteen states (Stuck, Paused · usage limit, Merged, Down or Ended, Failing, No progress, Fixing, Working, Waiting, Waiting on approvals, Ready, Parked, Idle) with no count, and a chevron, when it has any, in the effort's place on hover, focus, while open and always on a phone, opening its subagents and background processes with each one's state. None running when there are none. Its label, as every group's, ends with how many sessions it holds, at its right, muted, with tabular digits (AI Runners 3), and a runner's tooltip holds its model, its state and when it runs from the roster's schedule (Opus 5.5 high · Working · every day at 5:00 AM). Owner rung only."
+    },
+    {
+      "label": "Scripts",
+      "shows": "The ops jobs Ops runs as scripts with no session, one for each ops-*.json heartbeat file or job ops/jobs.json lists, A to Z, collapsed until its label is clicked, a Failing or Down one still shown, in red, under the collapsed label, and any job jobs.json marks disabled (paused) left out: each its plain name over Script, its state, when it runs and the model it calls when jobs.json marks it callsModel (its name, or AI when none is named; Calls <model> on hover and to screen readers), red while it is not running, in a 32px row whose second line cuts from its end, never the state (Dashboard updates over Script · Running · every hour), its hover giving its job id, what it does, its reason, its last beat and a schedule its heartbeat disagrees with, opening nothing. Its label ends with how many scripts it lists, the paused ones left out (Scripts 15). Owner rung only."
+    },
+    {
+      "label": "Other",
+      "shows": "Shown only while a probe (a session its roster kind or its name, probe-<what> or <id>-probe, makes one) or one outside the factory's names is live (a name that is not `dispatcher`, `planner`, `builder` or `ops`, that gives no kind the way an <id>-<kind> manager does or the way worker-<sin> or <id>-worker does, and that the roster gives no role), such as one started by hand: collapsed until its label is clicked; open, its rows in the Subagents group's order, with any idle for over three hours behind Show N idle (Hide idle puts them back). A session waiting on you (at a picker or a prompt, or with an open ask), or open in the view, shows even while the group is collapsed; a probe never waits on him. Owner rung only."
+    }
+  ],
+  "unpagedApi": [
+    {
+      "route": "DELETE /api/v1/managers/order",
+      "use": "Forgets the order dragged into the sidebar's Orchestrators rows, which every dashboard page's sidebar offers, so they go A to Z by roster title again."
+    },
+    {
+      "route": "GET /api/v1/apps/changelog/unread",
+      "use": "The count of changes this viewer has not read, which the aside's Changelog square reads on every page rather than one page; 404 while CHANGELOG_ENABLED is false."
+    },
+    {
+      "route": "GET /api/v1/ext/items",
+      "use": "Every item each scope holds, by scope, kind and key, accepted or proposed, the same list `playground ext list --scope <scope>` or `--kind <kind>` reads from the folders, while a bare `playground ext list` names the extensions themselves."
+    },
+    {
+      "route": "GET /api/v1/ext/items/:scope/:kind/:key",
+      "use": "One item as it stands, or as the commit named by rev wrote it, the same item `playground ext show` reads from the folders."
+    },
+    {
+      "route": "GET /api/v1/ext/items/:scope/:kind/:key/diff",
+      "use": "git's diff of an item between two commits, the same diff `playground ext diff` reads from the folders."
+    },
+    {
+      "route": "GET /api/v1/ext/items/:scope/:kind/:key/why",
+      "use": "Every commit that wrote or judged an item, newest first, with its author, reason and trailers, the same history `playground ext why` reads from the folders."
+    },
+    {
+      "route": "GET /api/v1/ext/search",
+      "use": "The words in each scope's accepted items, by line, at most 50, the same search `playground ext search` runs over the folders."
+    },
+    {
+      "route": "GET /api/v1/music/search",
+      "use": "A page of YouTube's videos for a search, and the token for the next as the list scrolls, which the sidebar's music player reads on every dashboard page rather than one page."
+    },
+    {
+      "route": "GET /api/v1/settings",
+      "use": "Every setting key with its default, description and the rows set off it, the same list `playground settings list` reads from the folder itself; no page reads it yet."
+    },
+    {
+      "route": "GET /api/v1/settings/:key",
+      "use": "One setting's value as it applies, at its narrowest scope, the same value `playground settings get` reads from the folder itself."
+    },
+    {
+      "route": "GET /api/v1/settings/:key/why",
+      "use": "One setting's history, each change with its author, reason and inbox ref, the same history `playground settings why` reads from the folder itself."
+    },
+    {
+      "route": "GET /api/v1/stacks",
+      "use": "The web stacks portless serves, which the Inbox's Preview row offers in its picker on every dashboard page's aside rather than one page."
+    },
+    {
+      "route": "GET /api/v1/threads",
+      "use": "A page of your threads, five to a page, which the sidebar's Threads group reads on every dashboard page rather than one page."
+    },
+    {
+      "route": "GET /api/v1/workers",
+      "use": "The board over REST, for an agent or curl; the dashboard's pages read it from the WebSocket's workers frame instead."
+    },
+    {
+      "route": "PATCH /api/v1/threads/:id",
+      "use": "Marks a thread read or unread, renames, pins, unpins or archives it, from the sidebar's Threads row menu on every dashboard page; a thread's view marks it read as it opens."
+    },
+    {
+      "route": "POST /api/v1/ext/items/:scope/:kind/:key",
+      "use": "An item's next revision, a whole copy with a reason and any attachments up to 50 MB, as one commit in its scope, the same write `playground ext put` makes in the folders."
+    },
+    {
+      "route": "POST /api/v1/ext/items/:scope/:kind/:key/revisions/:rev/judge",
+      "use": "Scores, accepts or rejects a proposal with a reason, a 5 or an accept moving it out of proposed/, the same verdict `playground ext score`, `accept` and `reject` write in the folders."
+    },
+    {
+      "route": "POST /api/v1/managers/order",
+      "use": "Saves the order you drag the sidebar's Orchestrators rows into, which every dashboard page's sidebar offers; read back as managersOrder on GET /api/v1/agents."
+    },
+    {
+      "route": "POST /api/v1/settings/:key/reset",
+      "use": "Puts a setting back to its default at a scope, with a reason, the same write `playground settings reset` makes in the folder itself."
+    },
+    {
+      "route": "PUT /api/v1/settings/:key",
+      "use": "Sets a setting at a scope, with a reason, checked by its key's schema, the same write `playground settings set` makes in the folder itself."
+    }
+  ]
+}

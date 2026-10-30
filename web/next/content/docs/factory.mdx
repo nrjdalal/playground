@@ -1,0 +1,92 @@
+---
+slug: /docs/factory
+title: The factory
+description: The sessions Playground runs, what each one does and how work moves between them.
+---
+
+# The factory
+
+Playground runs your Claude Code sessions as a factory: a few long-lived managers route and plan the work, and short-lived workers do it.
+
+## The roles
+
+| Role       | What it does                                                                  | How many       |
+| ---------- | ----------------------------------------------------------------------------- | -------------- |
+| Dispatcher | talks with you, keeps the Inbox and routes each ask to the role that owns it  | 1              |
+| Planner    | researches, compares and plans; it never builds                               | 1              |
+| Builder    | a lead: starts workers, writes their briefs, and holds review and merge order | 1              |
+| Ops        | a lead: runs the background jobs, the live dashboard and each ship            | 1              |
+| Worker     | one bounded chore: a fix, a feature, an investigation                         | as room allows |
+| Reviewer   | scores its worker's pull request out of 5, round by round                     | 1 per worker   |
+| Tester     | drives its worker's change in a real browser                                  | 1 per worker   |
+| Runner     | keeps one long-running job alive, such as a dev server                        | as room allows |
+| Probe      | one throwaway test                                                            | per test       |
+
+The four managers' session names are a setting, so you can call them what you like.
+
+## How an ask moves
+
+Every ask goes to the dispatcher, which routes it by the role that owns it: research, a comparison or a plan to the planner, a build to the Builder, and anything about the background jobs, the live Dashboard or a ship to Ops.
+The planner plans and never builds; the Builder turns a plan into workers, each with a brief, and Ops keeps the runners and jobs alive.
+Each worker reports to its lead, each lead to the dispatcher, and the dispatcher to you.
+
+A session decides each choice it can take back itself and records it.
+Only a choice that cannot be taken back reaches you, as an Inbox decision, and the session carries on while it waits ([Inbox](/docs/inbox)).
+
+## Starting and ending sessions
+
+```bash
+playground add --title "<title>"              # a worker, under a name Playground picks
+playground add --kind runner <name>           # a runner, titled by its name
+```
+
+Every start passes a capacity check first: the Mac's load, its free memory, and the Claude account's week, and a name a live session already holds is refused.
+A refusal names the check and its reading, so you can wait or free room.
+
+A worker, reviewer or tester ends on its own once its work is done: right after its pull request merges, or, when `jobs.opsTick` is on ([Turn a job on](/docs/jobs#turn-a-job-on)), at the 5-minute check that finds it finished.
+It stays open while it is working, for its first 10 quiet minutes, and while a worktree it used holds uncommitted or unpushed work.
+A manager, the dispatcher, a runner or a probe never ends this way, and each end is one line to the session's lead.
+
+## Standing rules
+
+Every factory session starts with its standing rules in front of it, and gets them again after a resume or a compaction.
+Each rule is one short file saying what to do and why, and the session sees each rule's first line, the core rules first, then each org's the session takes, then your own.
+A rule names a value as a setting in braces, such as `{glm.readOnlyLoad5}`, and the session sees your setting's value there, so changing a number is one `playground settings set`, with no change to any rule.
+`playground rules` lists them as a session sees them, and `playground rules <name>` prints one rule whole, with your values in it.
+
+## Guards
+
+Every factory session registers the same guards, the Claude Code hooks in `scripts/hooks/`, from `scripts/factory-settings.json`, and `.claude/settings.json` registers them too for a session restored without its settings.
+A background job that runs `claude -p` from outside the checkout passes that settings file and sets `PLAYGROUND_REPO` to the checkout, so its guards run there as well.
+
+Some guards read a list of their own, such as the words to keep out of a write or the repositories whose comments to check.
+Each list is read at every call, and it fails closed:
+
+| The list                          | The guarded call                           |
+| --------------------------------- | ------------------------------------------ |
+| holds a list (`[]` counts)        | runs as the list says                      |
+| empty, malformed or missing a key | refused, naming the file and how to fix it |
+| missing, with extensions          | refused, naming the file                   |
+| missing, on a fresh clone         | runs on the guard's empty default          |
+
+A machine has extensions once its data folder holds the `extensions/` folder ([Settings and extensions](/docs/extensions)).
+A broken list refuses only the calls its guard checks, so the rest of your work runs on.
+
+One guard keeps the public repository clean: a pull request, issue, review, comment or stamp there is refused when it holds a person's name, a handle, a company term, a Slack id, a ticket key, an email address or a link into the old private repository.
+Its refusal names the kind of text, never the text, and says how to put it in plain words.
+
+## Traces
+
+`bun run trace-count` counts each of those kinds over the code, plus issue numbers, the old session names and the old skill names, and fails when any count rises.
+It needs that guard's list: when the list is missing or one of its keys is empty, it stops and says how to add it, since those kinds would count nothing.
+A made-up address counts as none: one on a domain kept for examples (`example.com`, `.test`, `.invalid`, `.localhost`) or the fixtures' `local.host`.
+So do a made-up issue number in a test or a fixture and a hex colour such as `#000`.
+So new comments, docs and tests are written in plain words, and the counts only fall.
+`bun run trace-count --write` records a lower count once some are gone.
+`bun run trace-count --report` lists each file holding a list value, with its hits per kind, and `--swap` gives each one in the tests, the API's fixtures and the replay fixtures a made-up stand-in made from its place in the list.
+
+## Shipping a change
+
+Each change is made in a worktree of its own, branched from the latest `canary`, and opened as a draft pull request.
+A reviewer session other than its author scores it out of 5, round by round, and the author fixes what it finds until it scores 5 on the latest commit with the checks green.
+Then it merges with `bun run pr:merge <n>`, or a merge train lands it, the only two ways a change reaches `canary`.

@@ -1,0 +1,139 @@
+{
+  "$schema": "https://turborepo.com/schema.json",
+  // turbo 2.11.5 writes a managed block into AGENTS.md when it detects an agent; this repo generates that file and forks inherit it whole, so a second writer would fight both. Off here, as Next's writer is in web/next/next.config.ts
+  "agentGuidance": false,
+  // Each checkout caches inside itself, so a worktree never shares the main checkout's .turbo/cache, which every installed skill follows and must stay clean; the pre-commit hook points TURBO_CACHE_DIR at one folder outside every checkout instead
+  "cacheDir": ".turbo/cache",
+  "tasks": {
+    // the root version is baked into this build (BUILD_VERSION), so a version-only commit must miss its cache; the apps rebuild behind it through their dependency hashes
+    "@packages/env#build": {
+      "dependsOn": ["^build"],
+      "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/package.json"],
+      "outputs": ["dist/**"]
+    },
+    // web's build also writes .generated/ at the repo root, which a bare check-types:tests reads, so a cached replay restores it too
+    "@web/next#build": {
+      "dependsOn": ["^build"],
+      "outputs": [
+        ".next/**",
+        "!.next/cache/**",
+        "!.next/dev/**",
+        ".source/**",
+        "bundle/**",
+        "dist/**",
+        "$TURBO_ROOT$/.generated/data-table-metrics.json",
+        "$TURBO_ROOT$/.generated/web-env.json"
+      ]
+    },
+    // web's dev builds its workspace packages but not @api/hono, whose own dev task watches the dist a build would clean under it (web imports only its types); tests/api/hono/src/bin/dev.test.ts keeps this list whole
+    "@web/next#dev": {
+      "dependsOn": ["@packages/auth#build", "@packages/config#build", "@packages/env#build"],
+      "passThroughEnv": ["GIT_SHA"],
+      "persistent": true,
+      "cache": false
+    },
+    "build": {
+      "dependsOn": ["^build"],
+      "outputs": [
+        ".next/**",
+        "!.next/cache/**",
+        "!.next/dev/**",
+        ".source/**",
+        "bundle/**",
+        "dist/**"
+      ]
+    },
+    "build:vercel": {
+      "dependsOn": ["^build"],
+      "outputs": [
+        ".next/**",
+        "!.next/cache/**",
+        "!.next/dev/**",
+        ".source/**",
+        "dist/**",
+        "vercel-bundle/**"
+      ]
+    },
+    "check-types": {
+      "dependsOn": ["^build"]
+    },
+    "dev": {
+      "dependsOn": ["^build"],
+      // the launcher (api/hono/src/bin/dev.ts) sets HEAD's sha, which /api/health reports over the one baked into a cached @packages/env build; passed through rather than hashed, so a commit costs no cache
+      "passThroughEnv": ["GIT_SHA"],
+      "persistent": true,
+      "cache": false
+    },
+    "start": {
+      "persistent": true,
+      "cache": false
+    }
+  },
+  "globalDependencies": [
+    ".env*",
+    // build-time generators (font metrics, env derivation): a build cached before an edit here would ship their stale output
+    "packages/scripts/src/**"
+  ],
+  "globalEnv": [
+    // CI variables
+    "SKIP_ENV_VALIDATION",
+    "SKIP_ENV_VALIDATION_SERVER",
+    // Server variables
+    "NODE_ENV",
+    "BETTER_AUTH_SECRET",
+    "CHANGELOG_ENABLED",
+    "CHANGELOG_PEOPLE",
+    "HONO_APP_URL",
+    "HONO_HOSTNAME",
+    "HONO_PORT",
+    "HONO_RATE_LIMIT",
+    "HONO_RATE_LIMIT_WINDOW_MS",
+    "HONO_TRUSTED_ORIGINS",
+    "HONO_WEB_URL",
+    "INTERNAL_API_URL",
+    "PLAYGROUND_APPROVALS_ENABLED",
+    "PLAYGROUND_CMUX_SESSIONS",
+    "PLAYGROUND_DISPATCHER",
+    "PLAYGROUND_DISPATCHER_SECONDARY",
+    "PLAYGROUND_SDK_PERMISSION_MODE",
+    "PLAYGROUND_SDK_PROBE_DIR",
+    "POSTGRES_URL",
+    "REDIS_URL",
+    // Client variables
+    "NEXT_PUBLIC_API_URL",
+    "NEXT_PUBLIC_APP_URL",
+    "NEXT_PUBLIC_POSTHOG_HOST",
+    "NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN",
+    "NEXT_PUBLIC_USERJOT_URL"
+  ],
+  // CLAUDECODE, PLAYGROUND_FIXTURE, PLAYGROUND_FIXTURE_DIR, PLAYGROUND_LIVE_READS and PLAYGROUND_ROLE are read straight from the environment by the dashboard's source (api/hono/src/lib/dashboard/fixture.ts), so an exported one reaches the API as it reaches the dev launcher, and the API chooses the source the launcher checked (a factory session's role, or Claude Code with none), which writes the fixture the API then reads, PLAYGROUND_FIXTURE_LAUNCHED is the launcher's word to its stack that it wrote that fixture, and PLAYGROUND_HERDR_ALONE its word that the dashboard reads herdr alone (api/hono/src/lib/dashboard/cmux.ts); the organisation's config (packages/config/src/org.ts: PLAYGROUND_DATA_DIR, PLAYGROUND_OWNER_NAME, SLACK_ENABLED, WORK_GITHUB_ORG and WORK_LABEL) is read straight from the environment too, and so is each live-reads stack's scratch path, by its reader: PLAYGROUND_ATTACHMENTS_DIR by the dashboard's attachments (api/hono/src/lib/dashboard/attachments.ts), which the transcript parser reads too, PLAYGROUND_CHANGELOG_DIR by the Changelog's screenshots (api/hono/src/plugins/changelog/images.ts), PLAYGROUND_DEBUG_PASTE_DIR by the composer's temporary debug report (api/hono/src/lib/dashboard/debug-report.ts), PLAYGROUND_HERDR_DIR and PLAYGROUND_HERDR_SESSIONS by the dashboard's herdr provider (api/hono/src/lib/dashboard/herdr.ts), PLAYGROUND_MERGED_PULLS by the merged pull requests' cache (api/hono/src/lib/dashboard/agents.ts), and PLAYGROUND_PREVIEWS_DIR by the Previews app (api/hono/src/lib/apps/previews.ts); each old name the DESK_* wildcard passes still reads (packages/env/src/aliases.ts); PLAYGROUND_BARE_NAMES is the dev launcher's word to the live dashboard's apps that the bare names are theirs too (.github/scripts/portless.ts), and PORTLESS_STATE_DIR keeps portless in the apps on the routes the launcher read; PLAYGROUND_ONBOARD_MISSING is read by onboarding's checks on a fixture stack alone (api/hono/src/lib/onboard/checks.ts)
+  "globalPassThroughEnv": [
+    "CLAUDECODE",
+    "DESK_*",
+    "PLAYGROUND_ATTACHMENTS_DIR",
+    "PLAYGROUND_BARE_NAMES",
+    "PLAYGROUND_CHANGELOG_DIR",
+    "PLAYGROUND_DATA_DIR",
+    "PLAYGROUND_DEBUG_PASTE_DIR",
+    "PLAYGROUND_FIXTURE",
+    "PLAYGROUND_FIXTURE_DIR",
+    "PLAYGROUND_FIXTURE_LAUNCHED",
+    "PLAYGROUND_HERDR_ALONE",
+    "PLAYGROUND_HERDR_DIR",
+    "PLAYGROUND_HERDR_SESSIONS",
+    "PLAYGROUND_LIVE_READS",
+    "PLAYGROUND_MERGED_PULLS",
+    "PLAYGROUND_ONBOARD_MISSING",
+    "PLAYGROUND_OWNER_NAME",
+    "PLAYGROUND_PREVIEWS_DIR",
+    "PLAYGROUND_ROLE",
+    "PORTLESS",
+    "PORTLESS_HTTPS",
+    "PORTLESS_PORT",
+    "PORTLESS_STATE_DIR",
+    "PORTLESS_SYNC_HOSTS",
+    "SLACK_ENABLED",
+    "WORK_GITHUB_ORG",
+    "WORK_LABEL"
+  ]
+}

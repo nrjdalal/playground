@@ -1,0 +1,73 @@
+---
+slug: /docs/settings
+title: Settings
+description: The user menu, the Settings page and how to take an update.
+---
+
+# Settings
+
+## The user menu
+
+The square with this Mac's initials, at the right end of the toolbar beside every page, is the user menu. In the Console it is the card at the bottom of the sidebar, its top line naming this Mac and its second the Claude account your usage numbers come from. Click it to open the menu:
+
+- **Auto-hide tab bar** shows first, in the Dashboard on a wide screen: untick it to keep the tab bar shown.
+- **Update now** shows next, in the Dashboard only, while an update is available (see below).
+- **Settings** opens the Settings page.
+- **Console** opens the console, when your role reaches it.
+- **Sessions** lists every Claude Code session Playground has run, live and past ([the Dashboard](/docs/dashboard) says how to list every one on this machine).
+- **Documentation** opens these pages.
+- **Feedback** opens the feedback board in a new tab, when one is set up.
+- **Log out** shows in the Console only, and signs you out.
+
+## The Settings page
+
+`/dashboard/settings` holds one section for each thing you can set up.
+Open it from the user menu, or from the Settings square after Apps in the bar beside every page.
+
+### Things to fix
+
+While something Playground needs is missing on this Mac, Settings lists it under **N things to fix** with the same rows as **Let's check this Mac**, each with the button that fixes it, and **Re-check**; the section goes once every one is fixed.
+
+### Accounts
+
+Accounts lists every Claude account and GLM key your sessions spend: a Claude account by its label or email, a GLM key by its label, each saying whether its token is kept, and Logged in on the one Claude Code is logged in as.
+Accounts are kept in your settings (`usage.accounts`), so a machine needs a GitHub login and its settings set up first: until then the section reads **Your settings aren't set up yet** over **Set up settings**, which names the private repo it reuses or makes on GitHub and sets it up once you confirm, and **Add account** stays off ([Where to start](/docs#where-to-start) gives the order).
+
+#### Add an account
+
+Add as many Claude and GLM accounts as you like.
+On this page, **Add account** takes the provider.
+A Claude account takes its email (and an optional label), then three steps: open sign-in, which opens in a new window on a fresh profile of Chrome, Brave, Edge or Firefox (the button names the browser), deleted when the sign-in ends, so the sign-in uses the new account, not the one already signed in; sign in there with the account you are adding and approve access; then paste the code the page shows.
+While Claude checks the code the dialog reads **Checking the code with Claude…**, for up to about 70 seconds; a code Claude refuses, no answer in that time, a sign-in that ended (most likely because Playground restarted) and a lost connection each say what happened over **Start again**, which opens a new sign-in.
+When this Mac has none of those (Safari alone takes no fresh profile), the dialog shows the link with **Copy link**: open it in a private or guest window yourself.
+The account is listed once the sign-in names the email you gave; a sign-in for another account is refused and its token dropped, and one whose account cannot be read back is listed with **account not confirmed**.
+A GLM key takes its label and your Z.ai API key.
+The token goes to this Mac's Keychain and is never shown again, and **Remove**, the bin on each row, takes the account off the list and its token out of the Keychain.
+
+From a terminal, `playground accounts add --provider claude --email <email>` signs one in through Claude Code and keeps its token in the Keychain, and `playground accounts add --provider glm --label <label>` keeps a Z.ai key there under that label.
+`playground accounts list` shows each with its usage and `playground accounts remove <email|label>` takes one off; no token or key is ever shown ([The playground command](/docs/cli#accounts-playground-accounts)).
+
+### Extensions
+
+Extensions lists every extension in the order sessions read them, first wins: one card each with its place, name and repo, the orgs it is linked to (or everywhere), its skills, rules and lists counted, and when it last synced.
+Before your settings are set up the section holds no extensions and shows the same **Set up settings** step as Accounts.
+Drag a card by its handle, or focus the handle and use Space and the arrows, to change the order; core, built into Playground, stays last and locked.
+A chip's cross unlinks an org, **+ org** links one (or `*` for every repo), and your login's extension is linked everywhere and stays so.
+Each card's menu holds **Sync now**, **Open on GitHub**, **Why…** (which extension a session in a repo of an org takes a skill from, and the copies it hides) and, on every card but your login's, **Remove**, which takes it out of the order, links and repos while its folder stays.
+**Add extension** takes a name (a-z, 0-9 and -), a repo or none (your login's `playground-<name>`) and its links.
+As you type it checks GitHub, making nothing: a repo that is there reads whether it is private and how many skills its `skills/` holds, and one that is not reads that it will be created, private, which a confirm names again before it is made.
+Each of these is the same change `playground ext add|order|link|unlink|remove|sync|why` makes, and the check is `playground ext add --dry-run` ([Settings and extensions](/docs/extensions#extensions)).
+
+## From the terminal
+
+`playground settings` reads and changes your settings from a terminal, each change with its reason ([Settings and extensions](/docs/extensions#settings)).
+
+## Updates
+
+When the branch this copy follows (`main` or `canary`) has new changes, the user menu's square wears a green dot, and the menu shows **Update now** at its top, under Auto-hide tab bar on a wide screen.
+
+**Update now** sends that update to the dispatcher as a message from you, then opens your chat. On the `live.branch` branch, which updates itself on a schedule, the message asks for the update now; on any other branch it carries the update and how to take it. The app never updates by itself.
+
+## If the app restarts
+
+When the app restarts, for example after an update, the page waits for it to come back and keeps you signed in. There is no sign-in window: a visit with no session signs you back in as this Mac's owner. If the app stays down for more than a short time, the page says something went wrong, with **Try again**.

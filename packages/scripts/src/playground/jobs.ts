@@ -1,0 +1,195 @@
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs"
+import { homedir } from "node:os"
+import { dirname, join, resolve } from "node:path"
+import { parseArgs } from "node:util"
+
+import {
+  CORE,
+  type Fill,
+  filesIn,
+  importedJob,
+  loginOf,
+  plistProgram,
+  readRendered,
+  renderJobs,
+  scopeDir,
+  scopesIn,
+} from "@packages/settings"
+
+import { engineDataOf } from "../ops-job/job"
+import { dashboardPath } from "./probe"
+
+const USAGE =
+  "usage: bun packages/scripts/src/playground/jobs.ts render --jobs <jobs.json> [--launch-agents <dir>] [--data <dir>]"
+
+const CHECKOUT = resolve(import.meta.dir, "../../../..")
+
+const writeIfChanged = (path: string, text: string, mode = 0o644): boolean => {
+  if (existsSync(path) && readFileSync(path, "utf8") === text) return false
+  mkdirSync(dirname(path), { recursive: true })
+  const temp = `${path}.${process.pid}.tmp`
+  writeFileSync(temp, text, { mode })
+  renameSync(temp, path)
+  return true
+}
+
+// Each org's script folder, <org>/scripts/<key>/, into <data>/ops/<key>/, beside the state its job keeps there, which no item holds and this never touches; the login's own scripts and core's stay where they are, and a file the extensions cannot vouch for is left as it was, with the reason on stderr.
+const installScripts = async (data: string, err: (line: string) => void): Promise<string[]> => {
+  const changed: string[] = []
+  let login: string
+  try {
+    login = loginOf(data)
+  } catch (error) {
+    err(`jobs: ${(error as Error).message}`)
+    return changed
+  }
+  for (const org of scopesIn(data).filter((scope) => scope !== login && scope !== CORE))
+    for (const file of filesIn(scopeDir(data, org))) {
+      const parts = file.split("/")
+      if (parts[0] !== "scripts" || parts.length < 3) continue
+      const read = await readRendered(data, `${org}/${file}`)
+      if (!read.path) {
+        err(`jobs: ${read.refusal ?? `no ${org}/${file}`}`)
+        continue
+      }
+      const to = parts.slice(1).join("/")
+      const text = readFileSync(read.path, "utf8")
+      if (writeIfChanged(join(data, "ops", to), text, to.endsWith(".sh") ? 0o755 : 0o644))
+        changed.push(to)
+    }
+  return changed
+}
+
+// The ops runner's render, at the top of each pass: jobs.json and each enabled launchd job's plist from the store's policy.json, and each org's script folders installed under ops. Exits 3 with jobs.json untouched on a machine with no store whose jobs.json is there (a fresh one gets the registry's defaults, the Dashboard's job alone on), and 2 with the refusal on stderr when the store lacks policy.json, so the runner keeps the last jobs.json and logs why. Plists go only into the folder it is handed; one for a job now off is removed.
+export const renderJobsFile = async (
+  options: { data: string; fill: Fill; jobs: string; launchAgents?: string },
+  out: (line: string) => void,
+  err: (line: string) => void,
+): Promise<number> => {
+  const read = await readRendered(options.data, "policy.json")
+  if (read.refusal) {
+    err(read.refusal)
+    return 2
+  }
+  if (!read.path && existsSync(options.jobs)) return 3
+  let values: Record<string, unknown>
+  let existing: Record<string, unknown> = {}
+  try {
+    values = read.path ? (JSON.parse(readFileSync(read.path, "utf8")).values ?? {}) : {}
+    if (existsSync(options.jobs)) existing = JSON.parse(readFileSync(options.jobs, "utf8"))
+  } catch (error) {
+    err(`jobs: ${(error as Error).message}`)
+    return 2
+  }
+  const listed = Array.isArray(existing.jobs) ? (existing.jobs as { name?: unknown }[]) : []
+  const { jobs, plists } = renderJobs(values, listed, options.fill)
+  const changed = [
+    writeIfChanged(options.jobs, `${JSON.stringify({ ...existing, jobs }, null, 2)}\n`)
+      ? "jobs.json"
+      : "",
+    ...(read.path ? await installScripts(options.data, err) : []),
+  ]
+  if (options.launchAgents) {
+    for (const [label, text] of plists)
+      if (writeIfChanged(join(options.launchAgents, `${label}.plist`), text)) changed.push(label)
+    for (const file of existsSync(options.launchAgents) ? readdirSync(options.launchAgents) : [])
+      if (file.startsWith("com.playground.") && !plists.has(file.replace(/\.plist$/, ""))) {
+        rmSync(join(options.launchAgents, file))
+        changed.push(`-${file}`)
+      }
+  }
+  const lines = changed.filter(Boolean)
+  out(lines.length ? `jobs: rendered ${lines.join(", ")}` : "jobs: unchanged")
+  return 0
+}
+
+// playground settings import-jobs, run once at the switch: each job jobs.json lists that the registry knows becomes its jobs.<camelName> setting, a launchd job's program read from its plist; a job the registry does not know stays in jobs.json, which the render keeps.
+export const importJobs = async (
+  file: string,
+  options: { dryRun: boolean; launchAgents?: string; scope: string },
+  set: (key: string, value: unknown, reason: string) => unknown,
+  out: (line: string) => void,
+): Promise<number> => {
+  const listed = (JSON.parse(readFileSync(file, "utf8")).jobs ?? []) as Record<string, unknown>[]
+  const agents = options.launchAgents ?? join(homedir(), "Library", "LaunchAgents")
+  const reason = `imported from ${file} at the switch`
+  const scope = options.scope
+  let problems = 0
+  for (const job of listed) {
+    const plist = join(agents, `${String(job.launchd)}.plist`)
+    const read = job.launchd && existsSync(plist) ? plistProgram(readFileSync(plist, "utf8")) : null
+    const imported = importedJob(job, read)
+    if ("kept" in imported)
+      out(`kept ${imported.kept}: the registry does not know it, so jobs.json keeps it`)
+    else if ("problem" in imported) {
+      problems++
+      out(`refused ${imported.problem}`)
+    } else {
+      if (!options.dryRun) set(imported.key, imported.value, reason)
+      out(
+        `${options.dryRun ? "would set" : "set"} ${imported.key} at ${scope}, ${imported.value.enabled ? "on" : "off"}`,
+      )
+    }
+  }
+  return problems ? 1 : 0
+}
+
+export const jobsExit = async (
+  argv: string[],
+  environment: Record<string, string | undefined>,
+  out: (line: string) => void,
+  err: (line: string) => void,
+): Promise<number> => {
+  let parsed
+  try {
+    parsed = parseArgs({
+      allowPositionals: true,
+      args: argv,
+      options: {
+        data: { type: "string" },
+        jobs: { type: "string" },
+        "launch-agents": { type: "string" },
+      },
+    })
+  } catch (error) {
+    err(`${(error as Error).message}\n${USAGE}`)
+    return 2
+  }
+  const { positionals, values } = parsed
+  if (positionals[0] !== "render" || !values.jobs) {
+    err(USAGE)
+    return 2
+  }
+  const found = engineDataOf(argv, CHECKOUT, environment)
+  if ("refusal" in found) {
+    err(`jobs: ${found.refusal}`)
+    return 2
+  }
+  return renderJobsFile(
+    {
+      data: found.data,
+      fill: {
+        bun: process.execPath,
+        checkout: CHECKOUT,
+        dashboard: dashboardPath(CHECKOUT),
+        data: found.data,
+        path: environment.PATH ?? "/usr/bin:/bin",
+      },
+      jobs: values.jobs,
+      launchAgents: values["launch-agents"],
+    },
+    out,
+    err,
+  )
+}
+
+if (import.meta.main)
+  process.exit(await jobsExit(process.argv.slice(2), process.env, console.log, console.error))

@@ -1,0 +1,324 @@
+[
+  {
+    "hits": 1,
+    "kind": "issueRefs",
+    "line": "- An org's scope is its ticket and its product team's decisions; creative liberty is Playground's alone, since an org has its own process -> #714",
+    "path": ".agents/decisions.md",
+    "reason": "switch step 8: a link to an issue the issue re-file moves; that commit puts the new number in and drops this entry"
+  },
+  {
+    "hits": 1,
+    "kind": "issueRefs",
+    "line": "- Labs is the spec for behaviour and the Product team answers its product questions, as triage-and-implement's Labs line holds -> #714",
+    "path": ".agents/decisions.md",
+    "reason": "switch step 8: a link to an issue the issue re-file moves; that commit puts the new number in and drops this entry"
+  },
+  {
+    "hits": 1,
+    "kind": "issueRefs",
+    "line": "- Slack links go in messages as link chips in their full shape, never bare URLs; the `no-bare-slack-link` hook refuses a bare one -> #761",
+    "path": ".agents/decisions.md",
+    "reason": "switch step 8: a link to an issue the issue re-file moves; that commit puts the new number in and drops this entry"
+  },
+  {
+    "hits": 3,
+    "kind": "oldNames",
+    "line": "\"aliases\": [\"lightboy\", \"lightkid\", \"lightplan\"],",
+    "path": "extensions/core/lists/playground-terms.json",
+    "reason": "the leak guard's own list of old terms: no-playground-leak refuses a write to a work repository holding them, so the list must name them"
+  },
+  {
+    "hits": 1,
+    "kind": "oldNames",
+    "line": "\"lightman\",",
+    "path": "extensions/core/lists/playground-terms.json",
+    "reason": "the leak guard's own list of old terms: no-playground-leak refuses a write to a work repository holding them, so the list must name them"
+  },
+  {
+    "hits": 1,
+    "kind": "oldNames",
+    "line": "\"lightman-factory\",",
+    "path": "extensions/core/lists/playground-terms.json",
+    "reason": "the leak guard's own list of old terms: no-playground-leak refuses a write to a work repository holding them, so the list must name them"
+  },
+  {
+    "hits": 1,
+    "kind": "ownerName",
+    "line": "source: https://github.com/nrjdalal/zerostarter",
+    "path": "skills/zerostarter/add-package/SKILL.md",
+    "reason": "a vendored skill's provenance: the public upstream it syncs from, which a fork keeps"
+  },
+  {
+    "hits": 1,
+    "kind": "ownerName",
+    "line": "> Synced from https://github.com/nrjdalal/zerostarter. Customize this skill or remove this note to stop syncing.",
+    "path": "skills/zerostarter/add-package/SKILL.md",
+    "reason": "a vendored skill's provenance: the public upstream it syncs from, which a fork keeps"
+  },
+  {
+    "hits": 1,
+    "kind": "ownerName",
+    "line": "source: https://github.com/nrjdalal/zerostarter",
+    "path": "skills/zerostarter/api-endpoint/SKILL.md",
+    "reason": "a vendored skill's provenance: the public upstream it syncs from, which a fork keeps"
+  },
+  {
+    "hits": 1,
+    "kind": "ownerName",
+    "line": "> Synced from https://github.com/nrjdalal/zerostarter. Customize this skill or remove this note to stop syncing.",
+    "path": "skills/zerostarter/api-endpoint/SKILL.md",
+    "reason": "a vendored skill's provenance: the public upstream it syncs from, which a fork keeps"
+  },
+  {
+    "hits": 1,
+    "kind": "ownerName",
+    "line": "source: https://github.com/nrjdalal/zerostarter",
+    "path": "skills/zerostarter/audit/SKILL.md",
+    "reason": "a vendored skill's provenance: the public upstream it syncs from, which a fork keeps"
+  },
+  {
+    "hits": 1,
+    "kind": "ownerName",
+    "line": "> Synced from https://github.com/nrjdalal/zerostarter. Customize this skill or remove this note to stop syncing.",
+    "path": "skills/zerostarter/audit/SKILL.md",
+    "reason": "a vendored skill's provenance: the public upstream it syncs from, which a fork keeps"
+  },
+  {
+    "hits": 1,
+    "kind": "ownerName",
+    "line": "source: https://github.com/nrjdalal/zerostarter",
+    "path": "skills/zerostarter/codebase-map/SKILL.md",
+    "reason": "a vendored skill's provenance: the public upstream it syncs from, which a fork keeps"
+  },
+  {
+    "hits": 1,
+    "kind": "ownerName",
+    "line": "source: https://github.com/nrjdalal/zerostarter",
+    "path": "skills/zerostarter/db-migration/SKILL.md",
+    "reason": "a vendored skill's provenance: the public upstream it syncs from, which a fork keeps"
+  },
+  {
+    "hits": 1,
+    "kind": "ownerName",
+    "line": "source: https://github.com/nrjdalal/zerostarter",
+    "path": "skills/zerostarter/design/SKILL.md",
+    "reason": "a vendored skill's provenance: the public upstream it syncs from, which a fork keeps"
+  },
+  {
+    "hits": 1,
+    "kind": "ownerName",
+    "line": "source: https://github.com/nrjdalal/zerostarter",
+    "path": "skills/zerostarter/dev/SKILL.md",
+    "reason": "a vendored skill's provenance: the public upstream it syncs from, which a fork keeps"
+  },
+  {
+    "hits": 1,
+    "kind": "ownerName",
+    "line": "source: https://github.com/nrjdalal/zerostarter",
+    "path": "skills/zerostarter/doc-sync/SKILL.md",
+    "reason": "a vendored skill's provenance: the public upstream it syncs from, which a fork keeps"
+  },
+  {
+    "hits": 1,
+    "kind": "ownerName",
+    "line": "> Synced from https://github.com/nrjdalal/zerostarter. Customize this skill or remove this note to stop syncing.",
+    "path": "skills/zerostarter/doc-sync/SKILL.md",
+    "reason": "a vendored skill's provenance: the public upstream it syncs from, which a fork keeps"
+  },
+  {
+    "hits": 1,
+    "kind": "ownerName",
+    "line": "source: https://github.com/nrjdalal/zerostarter",
+    "path": "skills/zerostarter/docker-test/SKILL.md",
+    "reason": "a vendored skill's provenance: the public upstream it syncs from, which a fork keeps"
+  },
+  {
+    "hits": 1,
+    "kind": "ownerName",
+    "line": "source: https://github.com/nrjdalal/zerostarter",
+    "path": "skills/zerostarter/fonts/SKILL.md",
+    "reason": "a vendored skill's provenance: the public upstream it syncs from, which a fork keeps"
+  },
+  {
+    "hits": 1,
+    "kind": "ownerName",
+    "line": "> Synced from https://github.com/nrjdalal/zerostarter. Customize this skill or remove this note to stop syncing.",
+    "path": "skills/zerostarter/fonts/SKILL.md",
+    "reason": "a vendored skill's provenance: the public upstream it syncs from, which a fork keeps"
+  },
+  {
+    "hits": 1,
+    "kind": "ownerName",
+    "line": "source: https://github.com/nrjdalal/zerostarter",
+    "path": "skills/zerostarter/gh-commit/SKILL.md",
+    "reason": "a vendored skill's provenance: the public upstream it syncs from, which a fork keeps"
+  },
+  {
+    "hits": 1,
+    "kind": "ownerName",
+    "line": "> Synced from https://github.com/nrjdalal/zerostarter. Customize this skill or remove this note to stop syncing.",
+    "path": "skills/zerostarter/gh-commit/SKILL.md",
+    "reason": "a vendored skill's provenance: the public upstream it syncs from, which a fork keeps"
+  },
+  {
+    "hits": 1,
+    "kind": "ownerName",
+    "line": "source: https://github.com/nrjdalal/zerostarter",
+    "path": "skills/zerostarter/icebox/SKILL.md",
+    "reason": "a vendored skill's provenance: the public upstream it syncs from, which a fork keeps"
+  },
+  {
+    "hits": 1,
+    "kind": "ownerName",
+    "line": "source: https://github.com/nrjdalal/zerostarter",
+    "path": "skills/zerostarter/ignore-sync/SKILL.md",
+    "reason": "a vendored skill's provenance: the public upstream it syncs from, which a fork keeps"
+  },
+  {
+    "hits": 1,
+    "kind": "ownerName",
+    "line": "> Synced from https://github.com/nrjdalal/zerostarter. Customize this skill or remove this note to stop syncing.",
+    "path": "skills/zerostarter/ignore-sync/SKILL.md",
+    "reason": "a vendored skill's provenance: the public upstream it syncs from, which a fork keeps"
+  },
+  {
+    "hits": 1,
+    "kind": "ownerName",
+    "line": "source: https://github.com/nrjdalal/zerostarter",
+    "path": "skills/zerostarter/release/SKILL.md",
+    "reason": "a vendored skill's provenance: the public upstream it syncs from, which a fork keeps"
+  },
+  {
+    "hits": 1,
+    "kind": "ownerName",
+    "line": "source: https://github.com/nrjdalal/zerostarter",
+    "path": "skills/zerostarter/runtime-apis/SKILL.md",
+    "reason": "a vendored skill's provenance: the public upstream it syncs from, which a fork keeps"
+  },
+  {
+    "hits": 1,
+    "kind": "ownerName",
+    "line": "> Synced from https://github.com/nrjdalal/zerostarter. Customize this skill or remove this note to stop syncing.",
+    "path": "skills/zerostarter/runtime-apis/SKILL.md",
+    "reason": "a vendored skill's provenance: the public upstream it syncs from, which a fork keeps"
+  },
+  {
+    "hits": 1,
+    "kind": "ownerName",
+    "line": "source: https://github.com/nrjdalal/zerostarter",
+    "path": "skills/zerostarter/shadcn-sync/SKILL.md",
+    "reason": "a vendored skill's provenance: the public upstream it syncs from, which a fork keeps"
+  },
+  {
+    "hits": 1,
+    "kind": "ownerName",
+    "line": "> Synced from https://github.com/nrjdalal/zerostarter. Customize this skill or remove this note to stop syncing.",
+    "path": "skills/zerostarter/shadcn-sync/SKILL.md",
+    "reason": "a vendored skill's provenance: the public upstream it syncs from, which a fork keeps"
+  },
+  {
+    "hits": 1,
+    "kind": "ownerName",
+    "line": "source: https://github.com/nrjdalal/zerostarter",
+    "path": "skills/zerostarter/skills-manager/SKILL.md",
+    "reason": "a vendored skill's provenance: the public upstream it syncs from, which a fork keeps"
+  },
+  {
+    "hits": 1,
+    "kind": "ownerName",
+    "line": "> Synced from https://github.com/nrjdalal/zerostarter. Customize this skill or remove this note to stop syncing.",
+    "path": "skills/zerostarter/skills-manager/SKILL.md",
+    "reason": "a vendored skill's provenance: the public upstream it syncs from, which a fork keeps"
+  },
+  {
+    "hits": 1,
+    "kind": "ownerName",
+    "line": "source: https://github.com/nrjdalal/zerostarter",
+    "path": "skills/zerostarter/ui-verify/SKILL.md",
+    "reason": "a vendored skill's provenance: the public upstream it syncs from, which a fork keeps"
+  },
+  {
+    "hits": 3,
+    "kind": "oldNames",
+    "line": "\"LightMan at ~/.claude/lightman, lightman-desk-db, `lightman page`\",",
+    "path": "tests/packages/scripts/src/rename/rules.test.ts",
+    "reason": "the test checks old-name handling"
+  },
+  {
+    "hits": 1,
+    "kind": "oldNames",
+    "line": "const line = \"/_?Sent via (LightMan|Playground)_?$/\"",
+    "path": "tests/packages/scripts/src/rename/rules.test.ts",
+    "reason": "the test checks old-name handling"
+  },
+  {
+    "hits": 1,
+    "kind": "oldNames",
+    "line": "expect(renameText(\"_Sent via LightMan_, two LightMans\")).toBe(",
+    "path": "tests/packages/scripts/src/rename/rules.test.ts",
+    "reason": "the test checks old-name handling"
+  },
+  {
+    "hits": 1,
+    "kind": "oldNames",
+    "line": "`<p>LightBoy's loop writes it</p>`,",
+    "path": "tests/web/next/src/ui-copy.test.ts",
+    "reason": "test data: names the copy check must catch"
+  },
+  {
+    "hits": 1,
+    "kind": "oldNames",
+    "line": "`<p>Lightman is live</p>`,",
+    "path": "tests/web/next/src/ui-copy.test.ts",
+    "reason": "test data: names the copy check must catch"
+  },
+  {
+    "hits": 1,
+    "kind": "oldNames",
+    "line": "`<p>Templates arrive by a PR to LightMan.</p>`,",
+    "path": "tests/web/next/src/ui-copy.test.ts",
+    "reason": "test data: names the copy check must catch"
+  },
+  {
+    "hits": 1,
+    "kind": "oldNames",
+    "line": "\"lightman:aside:autoHide\": \"playground:aside:autoHide\",",
+    "path": "web/next/src/lib/old-keys.ts",
+    "reason": "the browser's storage key from before the rename, which the dashboard reads once and copies to its new name until the switch moves the live stack"
+  },
+  {
+    "hits": 1,
+    "kind": "oldNames",
+    "line": "\"lightman:music:last\": \"playground:music:last\",",
+    "path": "web/next/src/lib/old-keys.ts",
+    "reason": "the browser's storage key from before the rename, which the dashboard reads once and copies to its new name until the switch moves the live stack"
+  },
+  {
+    "hits": 1,
+    "kind": "oldNames",
+    "line": "\"lightman:music:liked\": \"playground:music:liked\",",
+    "path": "web/next/src/lib/old-keys.ts",
+    "reason": "the browser's storage key from before the rename, which the dashboard reads once and copies to its new name until the switch moves the live stack"
+  },
+  {
+    "hits": 1,
+    "kind": "oldNames",
+    "line": "\"lightman:music:recent\": \"playground:music:recent\",",
+    "path": "web/next/src/lib/old-keys.ts",
+    "reason": "the browser's storage key from before the rename, which the dashboard reads once and copies to its new name until the switch moves the live stack"
+  },
+  {
+    "hits": 1,
+    "kind": "oldNames",
+    "line": "\"lightman:music:volume\": \"playground:music:volume\",",
+    "path": "web/next/src/lib/old-keys.ts",
+    "reason": "the browser's storage key from before the rename, which the dashboard reads once and copies to its new name until the switch moves the live stack"
+  },
+  {
+    "hits": 1,
+    "kind": "oldNames",
+    "line": "\"lightman:seen:inbox\": \"playground:seen:inbox\",",
+    "path": "web/next/src/lib/old-keys.ts",
+    "reason": "the browser's storage key from before the rename, which the dashboard reads once and copies to its new name until the switch moves the live stack"
+  }
+]

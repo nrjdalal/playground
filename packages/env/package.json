@@ -1,0 +1,69 @@
+{
+  "name": "@packages/env",
+  "version": "0.0.1",
+  "private": true,
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.mts",
+      "default": "./dist/index.mjs"
+    },
+    "./aliases": {
+      "types": "./dist/aliases.d.mts",
+      "bun": "./src/aliases.ts",
+      "default": "./dist/aliases.mjs"
+    },
+    "./api-hono": {
+      "types": "./dist/api-hono.d.mts",
+      "default": "./dist/api-hono.mjs"
+    },
+    "./auth": {
+      "types": "./dist/auth.d.mts",
+      "default": "./dist/auth.mjs"
+    },
+    "./data-dir": {
+      "types": "./dist/data-dir.d.mts",
+      "bun": "./src/data-dir.ts",
+      "default": "./dist/data-dir.mjs"
+    },
+    "./db": {
+      "types": "./dist/db.d.mts",
+      "default": "./dist/db.mjs"
+    },
+    "./gaps": {
+      "types": "./dist/gaps.d.mts",
+      "default": "./dist/gaps.mjs"
+    },
+    "./load-dotenv": {
+      "types": "./dist/load-dotenv.d.mts",
+      "default": "./dist/load-dotenv.mjs"
+    },
+    "./redis": {
+      "types": "./dist/redis.d.mts",
+      "default": "./dist/redis.mjs"
+    },
+    "./web-next": {
+      "types": "./dist/web-next.d.mts",
+      "default": "./dist/web-next.mjs"
+    }
+  },
+  "scripts": {
+    "build": "tsdown",
+    "check-types": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@t3-oss/env-core": "catalog:",
+    "dotenv": "catalog:",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@packages/config": "workspace:*",
+    "@types/bun": "catalog:",
+    "@types/node": "catalog:",
+    "tsdown": "catalog:",
+    "typescript": "catalog:"
+  }
+}

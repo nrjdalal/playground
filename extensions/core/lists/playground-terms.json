@@ -1,0 +1,27 @@
+{
+  "aliases": ["lightboy", "lightkid", "lightplan"],
+  "everyday": ["builder", "ops", "planner", "pr"],
+  "names": [
+    "com.playground",
+    "glm",
+    "lightman",
+    "lightman-factory",
+    "live desk",
+    "live/dashboard",
+    "no-playground-leak",
+    "playground-backup",
+    "playground-dashboard-db",
+    "playground-factory",
+    "playground.localhost",
+    "PLAYGROUND_",
+    "roster.json",
+    "z.ai",
+    "zhipu"
+  ],
+  "paths": [".playground"],
+  "probe": "probe",
+  "sessions": {
+    "roles": ["reviewer", "runner", "tester", "worker"],
+    "sins": ["envy", "gluttony", "greed", "lust", "pride", "sloth", "wrath"]
+  }
+}

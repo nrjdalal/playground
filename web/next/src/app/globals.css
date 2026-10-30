@@ -1,0 +1,242 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "fumadocs-ui/css/neutral.css";
+@import "fumadocs-ui/css/preset.css";
+@import "shadcn/tailwind.css";
+
+/* streamdown renders the dashboard's markdown with its own Tailwind classes, so Tailwind has to scan it */
+@source "../../node_modules/streamdown/dist/*.js";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-dm-sans), sans-serif;
+  --font-mono: var(--font-jetbrains-mono), monospace;
+  --font-heading: var(--font-sans);
+  /* one step below text-xs, for a third line under a secondary one (the dashboard sidebar's sin name) */
+  --text-2xs: 0.625rem;
+  --text-2xs--line-height: 0.875rem;
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  /* status colours are Tailwind 600 in light mode and 500 in dark; caution is orange for the system readings at warning, so amber --warning keeps every other warning */
+  --color-bravo: var(--bravo);
+  --color-caution: var(--caution);
+  --color-destructive: var(--destructive);
+  --color-inactive: var(--inactive);
+  --color-info: var(--info);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
+  --radius-3xl: calc(var(--radius) + 12px);
+  --radius-4xl: calc(var(--radius) + 16px);
+}
+
+:root {
+  --radius: 0.625rem;
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.145 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.145 0 0);
+  --primary: oklch(0.205 0 0);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.97 0 0);
+  --secondary-foreground: oklch(0.205 0 0);
+  --muted: oklch(0.97 0 0);
+  --muted-foreground: oklch(0.556 0 0);
+  --accent: oklch(0.97 0 0);
+  --accent-foreground: oklch(0.205 0 0);
+  --bravo: var(--color-purple-600);
+  --caution: var(--color-orange-600);
+  --destructive: var(--color-red-600);
+  --inactive: var(--color-neutral-600);
+  --info: var(--color-blue-600);
+  --success: var(--color-green-600);
+  --warning: var(--color-amber-600);
+  --border: oklch(0.922 0 0);
+  --input: oklch(0.922 0 0);
+  --ring: oklch(0.708 0 0);
+  --chart-1: oklch(0.809 0.105 251.813);
+  --chart-2: oklch(0.623 0.214 259.815);
+  --chart-3: oklch(0.546 0.245 262.881);
+  --chart-4: oklch(0.488 0.243 264.376);
+  --chart-5: oklch(0.424 0.199 265.638);
+  --sidebar: var(--background);
+  --sidebar-foreground: oklch(0.145 0 0);
+  --sidebar-primary: oklch(0.205 0 0);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.97 0 0);
+  --sidebar-accent-foreground: oklch(0.205 0 0);
+  --sidebar-border: oklch(0.922 0 0);
+  --sidebar-ring: oklch(0.708 0 0);
+  --fd-banner-height: 3.5rem;
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.145 0 0);
+}
+
+.dark {
+  --background: oklch(0.145 0 0);
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.205 0 0);
+  --card-foreground: oklch(0.985 0 0);
+  --popover: oklch(0.205 0 0);
+  --popover-foreground: oklch(0.985 0 0);
+  --primary: oklch(0.922 0 0);
+  --primary-foreground: oklch(0.205 0 0);
+  --secondary: oklch(0.269 0 0);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.269 0 0);
+  --muted-foreground: oklch(0.708 0 0);
+  --accent: oklch(0.269 0 0);
+  --accent-foreground: oklch(0.985 0 0);
+  --bravo: var(--color-purple-500);
+  --caution: var(--color-orange-500);
+  --destructive: var(--color-red-500);
+  --inactive: var(--color-neutral-500);
+  --info: var(--color-blue-500);
+  --success: var(--color-green-500);
+  --warning: var(--color-amber-500);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.556 0 0);
+  --chart-1: oklch(0.809 0.105 251.813);
+  --chart-2: oklch(0.623 0.214 259.815);
+  --chart-3: oklch(0.546 0.245 262.881);
+  --chart-4: oklch(0.488 0.243 264.376);
+  --chart-5: oklch(0.424 0.199 265.638);
+  --sidebar: var(--background);
+  --sidebar-foreground: oklch(0.985 0 0);
+  --sidebar-primary: oklch(0.488 0.243 264.376);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.269 0 0);
+  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --sidebar-border: oklch(1 0 0 / 10%);
+  --sidebar-ring: oklch(0.556 0 0);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+    scrollbar-width: none !important;
+  }
+  *::-webkit-scrollbar {
+    display: none;
+  }
+  html {
+    @apply font-sans;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+  :is(
+    a[href],
+    button,
+    label[for],
+    select,
+    summary,
+    [role="button"],
+    [role="checkbox"],
+    [role="menuitem"],
+    [role="menuitemcheckbox"],
+    [role="menuitemradio"],
+    [role="option"],
+    [role="radio"],
+    [role="switch"],
+    [role="tab"]
+  ) {
+    cursor: pointer;
+    &:is(:disabled, [aria-disabled="true"], [data-disabled]:not([data-disabled="false"])) {
+      cursor: not-allowed;
+    }
+  }
+}
+
+/* fumadocs */
+#nd-page {
+  @apply mt-10;
+}
+
+.console-docs {
+  --fd-banner-height: 0px;
+  #nd-page {
+    @apply mt-0;
+  }
+}
+
+/* no focus ring anywhere, an invalid field's included: a focused or invalid control, or the field wrapping it, highlights its border alone; unlayered, so it outranks every ring utility */
+:focus-visible,
+[aria-invalid="true"],
+[data-slot="input-group"]:has([aria-invalid="true"]),
+[data-focused="true"] [data-day],
+[data-slot="attachment"]:focus-within,
+[data-slot="code-block"]:has(:focus-visible),
+[data-slot="combobox-chips"]:focus-within,
+[data-slot="input-group"]:has(:focus-visible),
+[data-slot="item"]:has(a:focus-visible),
+[data-slot="resizable-handle"]:focus-visible > div,
+label:has(> [data-slot="questionnaire-choice-input"]:focus-visible) {
+  --tw-ring-offset-shadow: 0 0 #0000;
+  --tw-ring-shadow: 0 0 #0000;
+}
+:focus-visible {
+  outline: none;
+}
+@media (forced-colors: active) {
+  :focus-visible {
+    outline: 2px solid;
+  }
+}
+
+/* a focus mark without a ring: a focused control with no fill of its own takes a muted one, the base layer letting a component's own fill win; a valid control asking for focus-visible:border-ring gets it over a dark: border, and a control whose own fill is the muted one deepens it */
+@layer base {
+  :focus-visible {
+    background-color: var(--muted);
+  }
+}
+[data-slot="message-scroller-viewport"]:focus-visible,
+[data-slot="tabs-content"]:focus-visible {
+  background-color: color-mix(in oklab, var(--foreground) 4%, transparent);
+}
+[data-slot="resizable-handle"]:focus-visible {
+  background-color: var(--ring);
+}
+[class~="focus-visible:border-ring"]:focus-visible:not([aria-invalid="true"]) {
+  border-color: var(--ring);
+}
+[data-slot="needs-you-body"]:focus-visible,
+[data-slot="sidebar-menu-button"][data-active]:focus-visible,
+[data-slot="sidebar-menu-sub-button"][data-active]:focus-visible,
+[role="tab"][data-active]:focus-visible {
+  background-color: color-mix(in oklab, var(--foreground) 12%, var(--muted));
+}

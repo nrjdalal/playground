@@ -1,0 +1,38 @@
+---
+slug: /docs/versions
+title: Versions
+description: How Playground keeps the old version of a change, reads the latest, and takes the code back to a release.
+---
+
+# Versions
+
+A change to a contract or a piece of content never edits it in place: the old version stays, and everything reads the latest.
+
+## What has versions
+
+| Kind             | How a new version shows                                                     |
+| ---------------- | --------------------------------------------------------------------------- |
+| API routes       | `/api/v2/<name>` beside `/api/v1/<name>` when a contract breaks             |
+| Extension items  | each change is one commit in its scope's folder, so git holds every version |
+| Settings keys    | a renamed key reads its old name as an alias                                |
+| Exports          | a folder of clones, each scope with its whole history                       |
+| Code in the repo | git and its tags                                                            |
+
+## An older version of an item
+
+```bash
+playground ext why <scope> <kind> <key>                 # every version, newest first, each with its reason
+playground ext show <scope> <kind> <key> --rev <sha>    # one older version
+playground ext diff <scope> <kind> <key> --from <sha> --to <sha>
+```
+
+Sessions always read an item's latest version; to go back, put the older one again as the next version, with its reason ([Settings and extensions](/docs/extensions#extensions)).
+
+## Going back to a release
+
+```bash
+playground update --to <tag>
+```
+
+It moves your checkout to that release, back or on, and leaves the Dashboard to roll on its own ([The playground command](/docs/cli#update-playground-update)).
+`playground doctor` then shows the release it is held at, and a plain `playground update` moves it on to the newest again.

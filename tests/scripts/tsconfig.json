@@ -1,0 +1,15 @@
+// Type-checks the tests of playground's root scripts and, through their imports, the scripts themselves.
+// @/ resolves as api/hono resolves it, for the tests that import its source.
+{
+  "compilerOptions": {
+    "target": "ESNext",
+    "module": "Preserve",
+    "moduleResolution": "bundler",
+    "types": ["bun"],
+    "strict": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "paths": { "@/*": ["../../api/hono/src/*"] }
+  },
+  "include": ["**/*.ts"]
+}

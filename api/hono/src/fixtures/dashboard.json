@@ -1,0 +1,5429 @@
+{
+  "account": {
+    "email": "merritt@example.com",
+    "name": "Merritt Rivera"
+  },
+  "anchor": "2026-01-01T12:00:00.000Z",
+  "cmux": {
+    "feed": [
+      {
+        "created_at": "2026-01-01T11:59:00.000Z",
+        "cwd": "/fixture/playground",
+        "id": "8B000000-0000-4000-8000-000000000003",
+        "kind": "permissionRequest",
+        "request_id": "9A000000-0000-4000-8000-000000000002",
+        "session": "11111111-1111-4111-8111-000000000003",
+        "source": "claude",
+        "title": "Bash",
+        "tool_input": "{\"command\":\"bun run verify all\",\"description\":\"Run the ops checks on the fixture tester stack\"}",
+        "tool_name": "Bash",
+        "updated_at": "2026-01-01T11:59:00.000Z"
+      },
+      {
+        "created_at": "2026-01-01T11:57:00.000Z",
+        "id": "8B000000-0000-4000-8000-000000000004",
+        "kind": "question",
+        "questions": [
+          {
+            "header": "Spacing",
+            "id": "q0",
+            "multi_select": false,
+            "options": [
+              {
+                "description": "6px between rows, twelve sessions fit",
+                "id": "opt0",
+                "label": "Tighter rows"
+              },
+              {
+                "description": "Keep 8px and scroll past ten",
+                "id": "opt1",
+                "label": "Keep as is"
+              }
+            ],
+            "prompt": "Fixture: which row spacing should the sidebar keep?"
+          }
+        ],
+        "request_id": "9A000000-0000-4000-8000-000000000001",
+        "session": "11111111-1111-4111-8111-000000000004",
+        "source": "claude",
+        "title": "AskUserQuestion",
+        "updated_at": "2026-01-01T11:57:00.000Z"
+      },
+      {
+        "created_at": "2026-01-01T11:55:00.000Z",
+        "cwd": "/fixture/playground/.claude/worktrees/test-lust",
+        "default_mode": "manual",
+        "id": "8B000000-0000-4000-8000-000000000009",
+        "kind": "exitPlan",
+        "plan": "{\"plan\":\"## Fixture plan: round 2's browser run\\n\\n1. Start the fixture stack on #101's head.\\n2. Open the Board in light and dark at 1782x972 and 390 wide.\\n3. Take full-page shots, before and after.\"}",
+        "request_id": "9A000000-0000-4000-8000-000000000003",
+        "session": "11111111-1111-4111-8111-000000000009",
+        "source": "claude",
+        "title": "ExitPlanMode",
+        "updated_at": "2026-01-01T11:55:00.000Z"
+      }
+    ],
+    "screens": {
+      "5F000000-0000-4000-8000-000000000003": "⏺ I need to run the ops checks on the tester stack.",
+      "5F000000-0000-4000-8000-000000000004": "⏺ Two spacings read well. I am asking which one to keep.",
+      "5F000000-0000-4000-8000-000000000005": "⏺ Reading the sidebar first.\n\n✻ Formulating… (1m 11s · ↓ 2.1k tokens · thought for 4s)",
+      "5F000000-0000-4000-8000-000000000009": "⏺ I have a plan for round 2's browser run.",
+      "5F000000-0000-4000-8000-00000000000a": "⏺ The demo kettle is warm.",
+      "5F000000-0000-4000-8000-00000000000b": "⏺ Done for the day.",
+      "5F000000-0000-4000-8000-00000000001b": "⏺ Reading the thread's transcript for its title.",
+      "5F000000-0000-4000-8000-00000000001c": "⏺ Round 1 is posted. Which of the two fixes do you want first?"
+    },
+    "sessions": [
+      {
+        "agent": "claude",
+        "agent_lifecycle": "idle",
+        "cwd": "/fixture/playground",
+        "launch_arguments": ["/usr/local/bin/claude", "-n", "dispatcher"],
+        "launch_backed": true,
+        "pastes": true,
+        "session_id": "11111111-1111-4111-8111-000000000001",
+        "started_at": "2026-01-01T08:00:00.000Z",
+        "pid": 900001,
+        "stored_pid_exists": true,
+        "surface_id": "5F000000-0000-4000-8000-000000000001",
+        "transcript_path": "$CONFIG/projects/-fixture-playground/11111111-1111-4111-8111-000000000001.jsonl",
+        "updated_at": "2026-01-01T12:00:00.000Z",
+        "workspace_id": "7A000000-0000-4000-8000-000000000001"
+      },
+      {
+        "agent": "claude",
+        "agent_lifecycle": "idle",
+        "cwd": "/fixture/playground",
+        "launch_arguments": ["/usr/local/bin/claude", "-n", "dispatcher-2"],
+        "launch_backed": true,
+        "session_id": "11111111-1111-4111-8111-000000000020",
+        "started_at": "2026-01-01T08:05:00.000Z",
+        "pid": 900017,
+        "stored_pid_exists": true,
+        "surface_id": "5F000000-0000-4000-8000-000000000020",
+        "transcript_path": "$CONFIG/projects/-fixture-playground/11111111-1111-4111-8111-000000000020.jsonl",
+        "updated_at": "2026-01-01T11:58:00.000Z",
+        "workspace_id": "7A000000-0000-4000-8000-000000000020"
+      },
+      {
+        "agent": "claude",
+        "agent_lifecycle": "running",
+        "cwd": "/fixture/playground",
+        "launch_arguments": ["/usr/local/bin/claude", "-n", "builder"],
+        "launch_backed": true,
+        "session_id": "11111111-1111-4111-8111-000000000002",
+        "started_at": "2026-01-01T08:05:00.000Z",
+        "pid": 900002,
+        "stored_pid_exists": true,
+        "surface_id": "5F000000-0000-4000-8000-000000000002",
+        "transcript_path": "$CONFIG/projects/-fixture-playground/11111111-1111-4111-8111-000000000002.jsonl",
+        "updated_at": "2026-01-01T12:00:00.000Z",
+        "workspace_id": "7A000000-0000-4000-8000-000000000002"
+      },
+      {
+        "agent": "claude",
+        "agent_lifecycle": "needsInput",
+        "cwd": "/fixture/playground",
+        "launch_arguments": ["/usr/local/bin/claude", "-n", "ops"],
+        "launch_backed": true,
+        "session_id": "11111111-1111-4111-8111-000000000003",
+        "started_at": "2026-01-01T08:06:00.000Z",
+        "pid": 900003,
+        "stored_pid_exists": true,
+        "surface_id": "5F000000-0000-4000-8000-000000000003",
+        "transcript_path": "$CONFIG/projects/-fixture-playground/11111111-1111-4111-8111-000000000003.jsonl",
+        "updated_at": "2026-01-01T12:00:00.000Z",
+        "workspace_id": "7A000000-0000-4000-8000-000000000003"
+      },
+      {
+        "agent": "claude",
+        "agent_lifecycle": "idle",
+        "cwd": "/fixture/playground",
+        "launch_arguments": ["/usr/local/bin/claude", "-n", "planner"],
+        "launch_backed": true,
+        "session_id": "11111111-1111-4111-8111-00000000000c",
+        "started_at": "2026-01-01T08:07:00.000Z",
+        "pid": 900012,
+        "stored_pid_exists": true,
+        "surface_id": "5F000000-0000-4000-8000-00000000000c",
+        "transcript_path": "$CONFIG/projects/-fixture-playground/11111111-1111-4111-8111-00000000000c.jsonl",
+        "updated_at": "2026-01-01T11:50:00.000Z",
+        "workspace_id": "7A000000-0000-4000-8000-00000000000c"
+      },
+      {
+        "agent": "claude",
+        "agent_lifecycle": "needsInput",
+        "cwd": "/fixture/playground/.claude/worktrees/sidebar-spacing",
+        "launch_arguments": ["/usr/local/bin/claude", "-n", "worker-greed"],
+        "launch_backed": true,
+        "session_id": "11111111-1111-4111-8111-000000000004",
+        "started_at": "2026-01-01T11:10:00.000Z",
+        "pid": 900004,
+        "stored_pid_exists": true,
+        "surface_id": "5F000000-0000-4000-8000-000000000004",
+        "transcript_path": "$CONFIG/projects/-fixture-playground/11111111-1111-4111-8111-000000000004.jsonl",
+        "updated_at": "2026-01-01T12:00:00.000Z",
+        "workspace_id": "7A000000-0000-4000-8000-000000000004"
+      },
+      {
+        "agent": "claude",
+        "agent_lifecycle": "running",
+        "cwd": "/fixture/playground/.claude/worktrees/board-colours",
+        "launch_arguments": ["/usr/local/bin/claude", "-n", "worker-lust-2"],
+        "launch_backed": true,
+        "session_id": "11111111-1111-4111-8111-000000000005",
+        "started_at": "2026-01-01T10:30:00.000Z",
+        "pid": 900005,
+        "stored_pid_exists": true,
+        "surface_id": "5F000000-0000-4000-8000-000000000005",
+        "transcript_path": "$CONFIG/projects/-fixture-playground/11111111-1111-4111-8111-000000000005.jsonl",
+        "updated_at": "2026-01-01T12:00:00.000Z",
+        "workspace_id": "7A000000-0000-4000-8000-000000000005"
+      },
+      {
+        "agent": "claude",
+        "agent_lifecycle": "idle",
+        "cwd": "/fixture/playground/.claude/worktrees/composer-paste",
+        "launch_arguments": ["/usr/local/bin/claude", "-n", "worker-sloth"],
+        "launch_backed": true,
+        "session_id": "11111111-1111-4111-8111-000000000006",
+        "started_at": "2026-01-01T07:00:00.000Z",
+        "pid": 900006,
+        "stored_pid_exists": true,
+        "surface_id": "5F000000-0000-4000-8000-000000000006",
+        "transcript_path": "$CONFIG/projects/-fixture-playground/11111111-1111-4111-8111-000000000006.jsonl",
+        "updated_at": "2026-01-01T12:00:00.000Z",
+        "workspace_id": "7A000000-0000-4000-8000-000000000006"
+      },
+      {
+        "agent": "claude",
+        "agent_lifecycle": "running",
+        "cwd": "/fixture/playground/.claude/worktrees/canary",
+        "launch_arguments": ["/usr/local/bin/claude", "-n", "runner-pride"],
+        "launch_backed": true,
+        "session_id": "11111111-1111-4111-8111-000000000007",
+        "started_at": "2026-01-01T08:07:00.000Z",
+        "pid": 900007,
+        "stored_pid_exists": true,
+        "surface_id": "5F000000-0000-4000-8000-000000000007",
+        "transcript_path": "$CONFIG/projects/-fixture-playground/11111111-1111-4111-8111-000000000007.jsonl",
+        "updated_at": "2026-01-01T12:00:00.000Z",
+        "workspace_id": "7A000000-0000-4000-8000-000000000007"
+      },
+      {
+        "agent": "claude",
+        "agent_lifecycle": "running",
+        "cwd": "/fixture/playground/.claude/worktrees/review-lust",
+        "launch_arguments": ["/usr/local/bin/claude", "-n", "h4n8zt-reviewer"],
+        "launch_backed": true,
+        "session_id": "11111111-1111-4111-8111-000000000008",
+        "started_at": "2026-01-01T11:20:00.000Z",
+        "pid": 900008,
+        "stored_pid_exists": true,
+        "surface_id": "5F000000-0000-4000-8000-000000000008",
+        "transcript_path": "$CONFIG/projects/-fixture-playground/11111111-1111-4111-8111-000000000008.jsonl",
+        "updated_at": "2026-01-01T12:00:00.000Z",
+        "workspace_id": "7A000000-0000-4000-8000-000000000008"
+      },
+      {
+        "agent": "claude",
+        "agent_lifecycle": "needsInput",
+        "cwd": "/fixture/playground/.claude/worktrees/test-lust",
+        "launch_arguments": ["/usr/local/bin/claude", "-n", "p9c3wx-tester"],
+        "launch_backed": true,
+        "session_id": "11111111-1111-4111-8111-000000000009",
+        "started_at": "2026-01-01T11:21:00.000Z",
+        "pid": 900009,
+        "stored_pid_exists": true,
+        "surface_id": "5F000000-0000-4000-8000-000000000009",
+        "transcript_path": "$CONFIG/projects/-fixture-playground/11111111-1111-4111-8111-000000000009.jsonl",
+        "updated_at": "2026-01-01T12:00:00.000Z",
+        "workspace_id": "7A000000-0000-4000-8000-000000000009"
+      },
+      {
+        "agent": "claude",
+        "agent_lifecycle": "idle",
+        "cwd": "/fixture/scratch",
+        "launch_arguments": ["/usr/local/bin/claude", "-n", "scratch-demo"],
+        "launch_backed": true,
+        "session_id": "11111111-1111-4111-8111-00000000000a",
+        "started_at": "2026-01-01T05:20:00.000Z",
+        "pid": 900010,
+        "stored_pid_exists": true,
+        "surface_id": "5F000000-0000-4000-8000-00000000000a",
+        "transcript_path": "$CONFIG/projects/-fixture-playground/11111111-1111-4111-8111-00000000000a.jsonl",
+        "updated_at": "2026-01-01T12:00:00.000Z",
+        "workspace_id": "7A000000-0000-4000-8000-00000000000a"
+      },
+      {
+        "agent": "claude",
+        "agent_lifecycle": "needsInput",
+        "cwd": "/fixture/playground/.claude/worktrees/old-ghost",
+        "launch_arguments": ["/usr/local/bin/claude", "-n", "gluttony"],
+        "launch_backed": true,
+        "session_id": "11111111-1111-4111-8111-00000000000b",
+        "started_at": "2025-12-31T11:00:00.000Z",
+        "pid": 900011,
+        "stored_pid_exists": true,
+        "surface_id": "5F000000-0000-4000-8000-00000000000b",
+        "transcript_path": "$CONFIG/projects/-fixture-playground/11111111-1111-4111-8111-00000000000b.jsonl",
+        "updated_at": "2026-01-01T12:00:00.000Z",
+        "workspace_id": "7A000000-0000-4000-8000-00000000000b"
+      },
+      {
+        "agent": "claude",
+        "agent_lifecycle": "running",
+        "cwd": "/fixture/playground/.claude/worktrees/row-wrap",
+        "launch_arguments": ["/usr/local/bin/claude", "-n", "worker-bright-lark"],
+        "launch_backed": true,
+        "session_id": "11111111-1111-4111-8111-000000000010",
+        "started_at": "2026-01-01T07:30:00.000Z",
+        "pid": 900013,
+        "stored_pid_exists": true,
+        "surface_id": "5F000000-0000-4000-8000-000000000010",
+        "transcript_path": "$CONFIG/projects/-fixture-playground/11111111-1111-4111-8111-000000000010.jsonl",
+        "updated_at": "2026-01-01T12:00:00.000Z",
+        "workspace_id": "7A000000-0000-4000-8000-000000000010"
+      },
+      {
+        "agent": "claude",
+        "agent_lifecycle": "running",
+        "cwd": "/fixture/playground/.claude/worktrees/thread-titles",
+        "launch_arguments": ["/usr/local/bin/claude", "-n", "k3m9px-worker"],
+        "launch_backed": true,
+        "session_id": "11111111-1111-4111-8111-00000000001b",
+        "started_at": "2026-01-01T11:40:00.000Z",
+        "pid": 900021,
+        "stored_pid_exists": true,
+        "surface_id": "5F000000-0000-4000-8000-00000000001b",
+        "transcript_path": "$CONFIG/projects/-fixture-playground/11111111-1111-4111-8111-00000000001b.jsonl",
+        "updated_at": "2026-01-01T12:00:00.000Z",
+        "workspace_id": "7A000000-0000-4000-8000-00000000001b"
+      },
+      {
+        "agent": "claude",
+        "agent_lifecycle": "needsInput",
+        "cwd": "/fixture/playground/.claude/worktrees/review-106",
+        "launch_arguments": ["/usr/local/bin/claude", "-n", "q7w8f2-reviewer"],
+        "launch_backed": true,
+        "session_id": "11111111-1111-4111-8111-00000000001c",
+        "started_at": "2026-01-01T11:45:00.000Z",
+        "pid": 900022,
+        "stored_pid_exists": true,
+        "surface_id": "5F000000-0000-4000-8000-00000000001c",
+        "transcript_path": "$CONFIG/projects/-fixture-playground/11111111-1111-4111-8111-00000000001c.jsonl",
+        "updated_at": "2026-01-01T12:00:00.000Z",
+        "workspace_id": "7A000000-0000-4000-8000-00000000001c"
+      },
+      {
+        "agent": "claude",
+        "agent_lifecycle": "running",
+        "cwd": "/fixture/playground/.claude/worktrees/train-test",
+        "launch_arguments": ["/usr/local/bin/claude", "-n", "r6t2dv-tester"],
+        "launch_backed": true,
+        "session_id": "11111111-1111-4111-8111-000000000011",
+        "started_at": "2026-01-01T11:35:00.000Z",
+        "pid": 900014,
+        "stored_pid_exists": true,
+        "surface_id": "5F000000-0000-4000-8000-00000000000e",
+        "transcript_path": "$CONFIG/projects/-fixture-playground/11111111-1111-4111-8111-000000000011.jsonl",
+        "updated_at": "2026-01-01T12:00:00.000Z",
+        "workspace_id": "7A000000-0000-4000-8000-00000000000e"
+      },
+      {
+        "agent": "claude",
+        "agent_lifecycle": "running",
+        "cwd": "/fixture/playground/.claude/worktrees/review-envy",
+        "launch_arguments": ["/usr/local/bin/claude", "-n", "b7k2mq-reviewer"],
+        "launch_backed": true,
+        "session_id": "11111111-1111-4111-8111-000000000012",
+        "started_at": "2026-01-01T11:30:00.000Z",
+        "pid": 900015,
+        "stored_pid_exists": true,
+        "surface_id": "5F000000-0000-4000-8000-00000000000d",
+        "transcript_path": "$CONFIG/projects/-fixture-playground/11111111-1111-4111-8111-000000000012.jsonl",
+        "updated_at": "2026-01-01T12:00:00.000Z",
+        "workspace_id": "7A000000-0000-4000-8000-00000000000d"
+      },
+      {
+        "agent": "claude",
+        "agent_lifecycle": "running",
+        "cwd": "/fixture/playground/.claude/worktrees/glm-rows",
+        "launch_arguments": ["/usr/local/bin/claude", "-n", "worker-glm-flash"],
+        "launch_backed": true,
+        "session_id": "11111111-1111-4111-8111-000000000013",
+        "started_at": "2026-01-01T11:30:00.000Z",
+        "pid": 900016,
+        "stored_pid_exists": true,
+        "surface_id": "5F000000-0000-4000-8000-00000000000f",
+        "transcript_path": "$CONFIG/projects/-fixture-playground/11111111-1111-4111-8111-000000000013.jsonl",
+        "updated_at": "2026-01-01T12:00:00.000Z",
+        "workspace_id": "7A000000-0000-4000-8000-00000000000f"
+      },
+      {
+        "agent": "claude",
+        "agent_lifecycle": "running",
+        "cwd": "/fixture/playground/.claude/worktrees/canary",
+        "launch_arguments": ["/usr/local/bin/claude", "-n", "runner-calm-dial"],
+        "launch_backed": true,
+        "session_id": "11111111-1111-4111-8111-000000000014",
+        "started_at": "2026-01-01T08:07:00.000Z",
+        "pid": 900019,
+        "stored_pid_exists": true,
+        "surface_id": "5F000000-0000-4000-8000-000000000012",
+        "transcript_path": "$CONFIG/projects/-fixture-playground/11111111-1111-4111-8111-000000000014.jsonl",
+        "updated_at": "2026-01-01T12:00:00.000Z",
+        "workspace_id": "7A000000-0000-4000-8000-000000000012"
+      },
+      {
+        "agent": "claude",
+        "agent_lifecycle": "running",
+        "cwd": "/fixture/playground/.claude/worktrees/canary",
+        "launch_arguments": ["/usr/local/bin/claude", "-n", "runner-quiet-lamp"],
+        "launch_backed": true,
+        "session_id": "11111111-1111-4111-8111-000000000015",
+        "started_at": "2026-01-01T08:07:00.000Z",
+        "pid": 900018,
+        "stored_pid_exists": true,
+        "surface_id": "5F000000-0000-4000-8000-000000000013",
+        "transcript_path": "$CONFIG/projects/-fixture-playground/11111111-1111-4111-8111-000000000015.jsonl",
+        "updated_at": "2026-01-01T12:00:00.000Z",
+        "workspace_id": "7A000000-0000-4000-8000-000000000013"
+      }
+    ],
+    "workspaces": [
+      {
+        "custom_title": "dispatcher",
+        "id": "7A000000-0000-4000-8000-000000000001",
+        "ref": "workspace:1",
+        "title": "dispatcher"
+      },
+      {
+        "custom_title": "dispatcher-2",
+        "id": "7A000000-0000-4000-8000-000000000020",
+        "ref": "workspace:20",
+        "title": "dispatcher-2"
+      },
+      {
+        "custom_title": "builder",
+        "id": "7A000000-0000-4000-8000-000000000002",
+        "ref": "workspace:2",
+        "title": "builder"
+      },
+      {
+        "custom_title": "ops",
+        "id": "7A000000-0000-4000-8000-000000000003",
+        "ref": "workspace:3",
+        "title": "ops"
+      },
+      {
+        "custom_title": "planner",
+        "id": "7A000000-0000-4000-8000-00000000000c",
+        "ref": "workspace:13",
+        "title": "planner"
+      },
+      {
+        "custom_title": "worker-greed",
+        "id": "7A000000-0000-4000-8000-000000000004",
+        "ref": "workspace:4",
+        "title": "worker-greed"
+      },
+      {
+        "custom_title": "worker-lust-2",
+        "id": "7A000000-0000-4000-8000-000000000005",
+        "ref": "workspace:5",
+        "title": "worker-lust-2"
+      },
+      {
+        "custom_title": "worker-sloth",
+        "id": "7A000000-0000-4000-8000-000000000006",
+        "ref": "workspace:6",
+        "title": "worker-sloth"
+      },
+      {
+        "custom_title": "runner-pride",
+        "id": "7A000000-0000-4000-8000-000000000007",
+        "ref": "workspace:7",
+        "title": "runner-pride"
+      },
+      {
+        "custom_title": "h4n8zt-reviewer",
+        "id": "7A000000-0000-4000-8000-000000000008",
+        "ref": "workspace:8",
+        "title": "h4n8zt-reviewer"
+      },
+      {
+        "custom_title": "p9c3wx-tester",
+        "id": "7A000000-0000-4000-8000-000000000009",
+        "ref": "workspace:9",
+        "title": "p9c3wx-tester"
+      },
+      {
+        "custom_title": "scratch-demo",
+        "id": "7A000000-0000-4000-8000-00000000000a",
+        "ref": "workspace:10",
+        "title": "scratch-demo"
+      },
+      {
+        "custom_title": "gluttony",
+        "id": "7A000000-0000-4000-8000-00000000000b",
+        "ref": "workspace:11",
+        "title": "gluttony"
+      },
+      {
+        "custom_title": "worker-bright-lark",
+        "id": "7A000000-0000-4000-8000-000000000010",
+        "ref": "workspace:14",
+        "title": "worker-bright-lark"
+      },
+      {
+        "custom_title": "r6t2dv-tester",
+        "id": "7A000000-0000-4000-8000-00000000000e",
+        "ref": "workspace:15",
+        "title": "r6t2dv-tester"
+      },
+      {
+        "custom_title": "b7k2mq-reviewer",
+        "id": "7A000000-0000-4000-8000-00000000000d",
+        "ref": "workspace:16",
+        "title": "b7k2mq-reviewer"
+      },
+      {
+        "custom_title": "worker-glm-flash",
+        "id": "7A000000-0000-4000-8000-00000000000f",
+        "ref": "workspace:17",
+        "title": "worker-glm-flash"
+      },
+      {
+        "custom_title": "k3m9px-worker",
+        "id": "7A000000-0000-4000-8000-00000000001b",
+        "ref": "workspace:21",
+        "title": "k3m9px-worker"
+      },
+      {
+        "custom_title": "q7w8f2-reviewer",
+        "id": "7A000000-0000-4000-8000-00000000001c",
+        "ref": "workspace:22",
+        "title": "q7w8f2-reviewer"
+      },
+      {
+        "custom_title": "runner-calm-dial",
+        "id": "7A000000-0000-4000-8000-000000000012",
+        "ref": "workspace:18",
+        "title": "runner-calm-dial"
+      },
+      {
+        "custom_title": "runner-quiet-lamp",
+        "id": "7A000000-0000-4000-8000-000000000013",
+        "ref": "workspace:19",
+        "title": "runner-quiet-lamp"
+      }
+    ]
+  },
+  "doctor": {
+    "checks": [
+      {
+        "action": null,
+        "detail": "1.3.2",
+        "name": "bun",
+        "need": "runs Playground",
+        "note": null,
+        "status": "ok"
+      },
+      {
+        "action": null,
+        "detail": "2.1.4",
+        "name": "claude",
+        "need": "every session",
+        "note": null,
+        "status": "ok"
+      },
+      {
+        "action": null,
+        "detail": "0.61.0",
+        "name": "cmux",
+        "need": "the terminal sessions run in",
+        "note": null,
+        "status": "ok"
+      },
+      {
+        "action": null,
+        "detail": "28.3.1",
+        "name": "docker",
+        "need": "the database",
+        "note": null,
+        "status": "ok"
+      },
+      {
+        "action": null,
+        "detail": "2.80.0",
+        "name": "gh",
+        "need": "sync and private repos",
+        "note": null,
+        "status": "ok"
+      },
+      {
+        "action": null,
+        "detail": "2.51.0",
+        "name": "git",
+        "need": "the checkout",
+        "note": null,
+        "status": "ok"
+      },
+      {
+        "action": null,
+        "detail": "0.4.2",
+        "name": "herdr",
+        "need": "the sessions' second terminal",
+        "note": null,
+        "status": "ok"
+      },
+      {
+        "action": null,
+        "detail": "4.6.2",
+        "name": "Homebrew",
+        "need": "installs the other tools",
+        "note": null,
+        "status": "ok"
+      },
+      {
+        "action": null,
+        "detail": "22.11.0",
+        "name": "node",
+        "need": "the Dashboard",
+        "note": null,
+        "status": "ok"
+      },
+      {
+        "action": null,
+        "detail": "ready",
+        "name": "portless",
+        "need": "the Dashboard's https address",
+        "note": null,
+        "status": "ok"
+      },
+      {
+        "action": null,
+        "detail": "3.13.1",
+        "name": "python3",
+        "need": "the ops jobs",
+        "note": null,
+        "status": "ok"
+      },
+      {
+        "action": null,
+        "detail": "0.9.2",
+        "name": "uv",
+        "need": "the skills' tests",
+        "note": null,
+        "status": "ok"
+      },
+      {
+        "action": null,
+        "detail": "set up",
+        "name": "Settings",
+        "need": "your settings on GitHub",
+        "note": null,
+        "status": "ok"
+      }
+    ],
+    "missing": [
+      {
+        "action": null,
+        "detail": "1.3.2",
+        "name": "bun",
+        "need": "runs Playground",
+        "note": null,
+        "status": "ok"
+      },
+      {
+        "action": null,
+        "detail": "2.1.4",
+        "name": "claude",
+        "need": "every session",
+        "note": null,
+        "status": "ok"
+      },
+      {
+        "action": null,
+        "detail": "0.61.0",
+        "name": "cmux",
+        "need": "the terminal sessions run in",
+        "note": null,
+        "status": "ok"
+      },
+      {
+        "action": {
+          "id": "docker",
+          "label": "Install Docker"
+        },
+        "detail": "not found",
+        "name": "docker",
+        "need": "the database",
+        "note": "Docker Desktop is not installed.",
+        "status": "MISSING"
+      },
+      {
+        "action": {
+          "id": "gh-login",
+          "label": "Sign in to GitHub"
+        },
+        "detail": "not signed in",
+        "name": "gh",
+        "need": "sync and private repos",
+        "note": "GitHub CLI is not signed in. Without it, your extensions stay on this Mac only.",
+        "status": "MISSING"
+      },
+      {
+        "action": null,
+        "detail": "2.51.0",
+        "name": "git",
+        "need": "the checkout",
+        "note": null,
+        "status": "ok"
+      },
+      {
+        "action": null,
+        "detail": "0.4.2",
+        "name": "herdr",
+        "need": "the sessions' second terminal",
+        "note": null,
+        "status": "ok"
+      },
+      {
+        "action": null,
+        "detail": "4.6.2",
+        "name": "Homebrew",
+        "need": "installs the other tools",
+        "note": null,
+        "status": "ok"
+      },
+      {
+        "action": null,
+        "detail": "22.11.0",
+        "name": "node",
+        "need": "the Dashboard",
+        "note": null,
+        "status": "ok"
+      },
+      {
+        "action": null,
+        "detail": "ready",
+        "name": "portless",
+        "need": "the Dashboard's https address",
+        "note": null,
+        "status": "ok"
+      },
+      {
+        "action": null,
+        "detail": "3.13.1",
+        "name": "python3",
+        "need": "the ops jobs",
+        "note": null,
+        "status": "ok"
+      },
+      {
+        "action": null,
+        "detail": "not found",
+        "name": "uv",
+        "need": "the skills' tests",
+        "note": "uv is not installed. Only the skills' tests need it.",
+        "status": "optional"
+      },
+      {
+        "action": null,
+        "detail": "set up",
+        "name": "Settings",
+        "need": "your settings on GitHub",
+        "note": null,
+        "status": "ok"
+      }
+    ]
+  },
+  "files": {
+    "projects/-fixture-playground/11111111-1111-4111-8111-000000000001.jsonl": [
+      {
+        "agentName": "dispatcher",
+        "sessionId": "11111111-1111-4111-8111-000000000001",
+        "type": "agent-name"
+      },
+      {
+        "cwd": "/fixture/playground",
+        "entrypoint": "cli",
+        "sessionId": "11111111-1111-4111-8111-000000000001",
+        "timestamp": "2026-01-01T08:00:00.000Z",
+        "type": "user",
+        "uuid": "22222222-2222-4222-8222-000000000001",
+        "version": "2.1.0",
+        "message": {
+          "content": "Fixture: run the dashboard for the day and route what comes in.",
+          "role": "user"
+        },
+        "origin": {
+          "kind": "human"
+        }
+      },
+      {
+        "cwd": "/fixture/playground",
+        "entrypoint": "cli",
+        "sessionId": "11111111-1111-4111-8111-000000000001",
+        "timestamp": "2026-01-01T08:02:00.000Z",
+        "type": "assistant",
+        "effort": "high",
+        "uuid": "22222222-2222-4222-8222-000000000002",
+        "version": "2.1.0",
+        "message": {
+          "content": [
+            {
+              "text": "On it. Both leads are up; I will route each ask to the lead it belongs to.",
+              "type": "text"
+            }
+          ],
+          "model": "claude-opus-5-5",
+          "role": "assistant",
+          "id": "msg_fixture_001",
+          "usage": {
+            "cache_creation": {
+              "ephemeral_1h_input_tokens": 0,
+              "ephemeral_5m_input_tokens": 4250
+            },
+            "cache_creation_input_tokens": 4250,
+            "cache_read_input_tokens": 69000,
+            "input_tokens": 13,
+            "output_tokens": 345
+          }
+        }
+      },
+      {
+        "cwd": "/fixture/playground",
+        "entrypoint": "cli",
+        "sessionId": "11111111-1111-4111-8111-000000000001",
+        "timestamp": "2026-01-01T11:30:00.000Z",
+        "type": "user",
+        "uuid": "22222222-2222-4222-8222-000000000003",
+        "version": "2.1.0",
+        "message": {
+          "content": "<cross-session-message from=\"uds:/fixture/sockets/builder.sock\" from-name=\"builder\">\nFixture report: worker-lust-2 opened #101, review round 2 is 4/5.\n</cross-session-message>",
+          "role": "user"
+        },
+        "origin": {
+          "body": "Fixture report: worker-lust-2 opened #101, review round 2 is 4/5.",
+          "from": "uds:/fixture/sockets/builder.sock",
+          "kind": "peer",
+          "name": "builder"
+        }
+      },
+      {
+        "cwd": "/fixture/playground",
+        "entrypoint": "cli",
+        "sessionId": "11111111-1111-4111-8111-000000000001",
+        "timestamp": "2026-01-01T11:31:00.000Z",
+        "type": "assistant",
+        "effort": "high",
+        "uuid": "22222222-2222-4222-8222-000000000004",
+        "version": "2.1.0",
+        "message": {
+          "content": [
+            {
+              "text": "Noted. I will watch for the 5/5.",
+              "type": "text"
+            }
+          ],
+          "model": "claude-opus-5-5",
+          "role": "assistant",
+          "id": "msg_fixture_002",
+          "usage": {
+            "cache_creation": {
+              "ephemeral_1h_input_tokens": 0,
+              "ephemeral_5m_input_tokens": 4500
+            },
+            "cache_creation_input_tokens": 4500,
+            "cache_read_input_tokens": 78000,
+            "input_tokens": 14,
+            "output_tokens": 390
+          }
+        }
+      },
+      {
+        "cwd": "/fixture/playground",
+        "entrypoint": "cli",
+        "sessionId": "11111111-1111-4111-8111-000000000001",
+        "timestamp": "2026-01-01T11:48:00.000Z",
+        "type": "user",
+        "uuid": "22222222-2222-4222-8222-000000000005",
+        "version": "2.1.0",
+        "message": {
+          "content": "Fixture: here is the sketch for the sidebar.\n\nAttached: $CONFIG/playground/attachments/3f0e7a52-1c4b-4d2a-9e6f-0000000000a1.png",
+          "role": "user"
+        },
+        "origin": {
+          "kind": "human"
+        }
+      },
+      {
+        "cwd": "/fixture/playground",
+        "entrypoint": "cli",
+        "sessionId": "11111111-1111-4111-8111-000000000001",
+        "timestamp": "2026-01-01T11:49:00.000Z",
+        "type": "assistant",
+        "effort": "high",
+        "uuid": "22222222-2222-4222-8222-000000000006",
+        "version": "2.1.0",
+        "message": {
+          "content": [
+            {
+              "text": "Got the sketch. I passed it to builder for worker-greed.",
+              "type": "text"
+            }
+          ],
+          "model": "claude-opus-5-5",
+          "role": "assistant",
+          "id": "msg_fixture_003",
+          "usage": {
+            "cache_creation": {
+              "ephemeral_1h_input_tokens": 0,
+              "ephemeral_5m_input_tokens": 4750
+            },
+            "cache_creation_input_tokens": 4750,
+            "cache_read_input_tokens": 87000,
+            "input_tokens": 15,
+            "output_tokens": 435
+          }
+        }
+      },
+      {
+        "cwd": "/fixture/playground",
+        "entrypoint": "cli",
+        "sessionId": "11111111-1111-4111-8111-000000000001",
+        "timestamp": "2026-01-01T11:49:00.000Z",
+        "type": "assistant",
+        "effort": "high",
+        "uuid": "22222222-2222-4222-8222-000000000007",
+        "version": "2.1.0",
+        "message": {
+          "content": [
+            {
+              "id": "toolu_fixture_7",
+              "input": {
+                "message": "Fixture: Merritt's sidebar sketch is in the dispatcher's chat; hand it to worker-greed.",
+                "summary": "Fixture: Merritt's sidebar sketch is in the ",
+                "to": "builder"
+              },
+              "name": "SendMessage",
+              "type": "tool_use"
+            }
+          ],
+          "model": "claude-opus-5-5",
+          "role": "assistant",
+          "id": "msg_fixture_004",
+          "usage": {
+            "cache_creation": {
+              "ephemeral_1h_input_tokens": 0,
+              "ephemeral_5m_input_tokens": 5000
+            },
+            "cache_creation_input_tokens": 5000,
+            "cache_read_input_tokens": 96000,
+            "input_tokens": 16,
+            "output_tokens": 480
+          }
+        }
+      },
+      {
+        "cwd": "/fixture/playground",
+        "entrypoint": "cli",
+        "sessionId": "11111111-1111-4111-8111-000000000001",
+        "timestamp": "2026-01-01T11:49:00.000Z",
+        "type": "user",
+        "uuid": "22222222-2222-4222-8222-000000000008",
+        "version": "2.1.0",
+        "message": {
+          "content": [
+            {
+              "content": "ok",
+              "tool_use_id": "toolu_fixture_7",
+              "type": "tool_result"
+            }
+          ],
+          "role": "user"
+        }
+      },
+      {
+        "cwd": "/fixture/playground",
+        "entrypoint": "cli",
+        "sessionId": "11111111-1111-4111-8111-000000000001",
+        "version": "2.1.0",
+        "timestamp": "2026-01-01T11:50:00.000Z",
+        "type": "assistant",
+        "effort": "high",
+        "uuid": "22222222-2222-4222-8222-000000000050",
+        "message": {
+          "content": [
+            {
+              "type": "thinking",
+              "thinking": "The sketch moves the needs-you bubble beside each row. Check the sidebar's spacing before routing it.",
+              "signature": "fixture"
+            }
+          ],
+          "role": "assistant",
+          "model": "claude-opus-5-5"
+        }
+      },
+      {
+        "cwd": "/fixture/playground",
+        "entrypoint": "cli",
+        "sessionId": "11111111-1111-4111-8111-000000000001",
+        "version": "2.1.0",
+        "timestamp": "2026-01-01T11:50:00.000Z",
+        "type": "assistant",
+        "effort": "high",
+        "uuid": "22222222-2222-4222-8222-000000000051",
+        "message": {
+          "content": [
+            {
+              "id": "toolu_fixture_bash_1",
+              "input": {
+                "command": "rg -n \"SidebarMenuBadge\" web/next/src/components/dashboard",
+                "description": "Find the sidebar's badges"
+              },
+              "name": "Bash",
+              "type": "tool_use"
+            }
+          ],
+          "role": "assistant",
+          "model": "claude-opus-5-5"
+        }
+      },
+      {
+        "cwd": "/fixture/playground",
+        "entrypoint": "cli",
+        "sessionId": "11111111-1111-4111-8111-000000000001",
+        "version": "2.1.0",
+        "timestamp": "2026-01-01T11:50:00.000Z",
+        "type": "user",
+        "uuid": "22222222-2222-4222-8222-000000000052",
+        "message": {
+          "content": [
+            {
+              "content": "web/next/src/components/dashboard/app-sidebar.tsx:212:        <SidebarMenuBadge>{count}</SidebarMenuBadge>",
+              "tool_use_id": "toolu_fixture_bash_1",
+              "type": "tool_result"
+            }
+          ],
+          "role": "user"
+        }
+      },
+      {
+        "cwd": "/fixture/playground",
+        "entrypoint": "cli",
+        "sessionId": "11111111-1111-4111-8111-000000000001",
+        "version": "2.1.0",
+        "timestamp": "2026-01-01T11:51:00.000Z",
+        "type": "assistant",
+        "effort": "high",
+        "uuid": "22222222-2222-4222-8222-000000000053",
+        "message": {
+          "content": [
+            {
+              "id": "toolu_fixture_agent_1",
+              "input": {
+                "description": "Check the sketch against the sidebar",
+                "prompt": "Fixture: read the dashboard sidebar and say whether the sketch's bubble fits the row.",
+                "subagent_type": "Explore"
+              },
+              "name": "Agent",
+              "type": "tool_use"
+            }
+          ],
+          "role": "assistant",
+          "model": "claude-opus-5-5"
+        }
+      },
+      {
+        "cwd": "/fixture/playground",
+        "entrypoint": "cli",
+        "sessionId": "11111111-1111-4111-8111-000000000001",
+        "version": "2.1.0",
+        "timestamp": "2026-01-01T11:51:30.000Z",
+        "type": "user",
+        "uuid": "22222222-2222-4222-8222-000000000054",
+        "message": {
+          "content": [
+            {
+              "content": [
+                {
+                  "type": "text",
+                  "text": "The sketch fits: the bubble sits in the row's action slot.\nagentId: fixture0002 (use SendMessage with to: 'fixture0002' to continue this agent)"
+                }
+              ],
+              "tool_use_id": "toolu_fixture_agent_1",
+              "type": "tool_result"
+            }
+          ],
+          "role": "user"
+        },
+        "toolUseResult": {
+          "agentId": "fixture0002",
+          "status": "completed"
+        }
+      },
+      {
+        "cwd": "/fixture/playground",
+        "entrypoint": "cli",
+        "sessionId": "11111111-1111-4111-8111-000000000001",
+        "version": "2.1.0",
+        "timestamp": "2026-01-01T11:52:00.000Z",
+        "type": "assistant",
+        "effort": "high",
+        "uuid": "22222222-2222-4222-8222-000000000055",
+        "message": {
+          "content": [
+            {
+              "text": "The sketch fits the sidebar as it is.",
+              "type": "text"
+            }
+          ],
+          "role": "assistant",
+          "model": "claude-opus-5-5"
+        }
+      },
+      {
+        "cwd": "/fixture/playground",
+        "entrypoint": "cli",
+        "sessionId": "11111111-1111-4111-8111-000000000001",
+        "version": "2.1.0",
+        "timestamp": "2026-01-01T11:53:00.000Z",
+        "type": "assistant",
+        "effort": "high",
+        "uuid": "22222222-2222-4222-8222-000000000056",
+        "message": {
+          "content": [
+            {
+              "text": "Fixture: the spinner choices are on [Previews](/dashboard/apps/previews?topic=spinner), the light one first:\n\n![Spinner, light](/api/v1/apps/previews/spinner-light-1.png)",
+              "type": "text"
+            }
+          ],
+          "role": "assistant",
+          "model": "claude-opus-5-5"
+        }
+      },
+      {
+        "cwd": "/fixture/playground",
+        "entrypoint": "cli",
+        "sessionId": "11111111-1111-4111-8111-000000000001",
+        "version": "2.1.0",
+        "timestamp": "2026-01-01T11:54:00.000Z",
+        "type": "user",
+        "uuid": "22222222-2222-4222-8222-000000000057",
+        "message": {
+          "content": "Fixture: the light one, please.",
+          "role": "user"
+        },
+        "origin": {
+          "kind": "human"
+        }
+      },
+      {
+        "cwd": "/fixture/playground",
+        "entrypoint": "cli",
+        "sessionId": "11111111-1111-4111-8111-000000000001",
+        "version": "2.1.0",
+        "timestamp": "2026-01-01T11:55:00.000Z",
+        "type": "assistant",
+        "effort": "high",
+        "uuid": "22222222-2222-4222-8222-000000000058",
+        "message": {
+          "content": [
+            {
+              "text": "Fixture: the light spinner it is.",
+              "type": "text"
+            }
+          ],
+          "role": "assistant",
+          "model": "claude-opus-5-5"
+        }
+      },
+      {
+        "cwd": "/fixture/playground",
+        "entrypoint": "cli",
+        "sessionId": "11111111-1111-4111-8111-000000000001",
+        "version": "2.1.0",
+        "timestamp": "2026-01-01T11:56:00.000Z",
+        "type": "assistant",
+        "effort": "high",
+        "uuid": "22222222-2222-4222-8222-000000000059",
+        "message": {
+          "content": [
+            {
+              "text": "Fixture: here is the day so far.\n\n| Lane | Work | State |\n| --- | --- | --- |\n| Boards | The Linear app | 5/5, ready to merge |\n| Sidebar | The worker lights | In review |\n\nThe Linear app merges once its check reads green:\n\n```ts\nconst ready = (pull: Pull) => pull.score === 5 && pull.ci !== \"failing\"\n```\n\n```json\n{ \"number\": 97, \"score\": 5, \"ci\": \"passing\" }\n```\n\n```sh\nbun run pr:merge 97\n```",
+              "type": "text"
+            }
+          ],
+          "role": "assistant",
+          "model": "claude-opus-5-5"
+        }
+      },
+      {
+        "cwd": "/fixture/playground",
+        "entrypoint": "cli",
+        "sessionId": "11111111-1111-4111-8111-000000000001",
+        "version": "2.1.0",
+        "timestamp": "2026-01-01T11:57:00.000Z",
+        "type": "user",
+        "uuid": "22222222-2222-4222-8222-000000000060",
+        "promptId": "fixture-prompt-files",
+        "imagePasteIds": [1],
+        "message": {
+          "content": [
+            {
+              "text": "[Image #1]Fixture: three files for the board.\nSecond paragraph after a blank line.\nAttached:\nAttached:\n$CONFIG/playground/attachments/3f0e7a52-1c4b-4d2a-9e6f-0000000000a3.pdf\nAttached:\n$CONFIG/playground/attachments/3f0e7a52-1c4b-4d2a-9e6f-0000000000a4.txt",
+              "type": "text"
+            },
+            {
+              "source": {
+                "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=",
+                "media_type": "image/png",
+                "type": "base64"
+              },
+              "type": "image"
+            }
+          ],
+          "role": "user"
+        },
+        "origin": {
+          "kind": "human"
+        }
+      },
+      {
+        "cwd": "/fixture/playground",
+        "entrypoint": "cli",
+        "sessionId": "11111111-1111-4111-8111-000000000001",
+        "version": "2.1.0",
+        "timestamp": "2026-01-01T11:57:00.000Z",
+        "type": "user",
+        "uuid": "22222222-2222-4222-8222-000000000061",
+        "isMeta": true,
+        "promptId": "fixture-prompt-files",
+        "message": {
+          "content": [
+            {
+              "text": "[Image: source: $CONFIG/playground/attachments/3f0e7a52-1c4b-4d2a-9e6f-0000000000a2.png]",
+              "type": "text"
+            }
+          ],
+          "role": "user"
+        }
+      },
+      {
+        "cwd": "/fixture/playground",
+        "entrypoint": "cli",
+        "sessionId": "11111111-1111-4111-8111-000000000001",
+        "version": "2.1.0",
+        "timestamp": "2026-01-01T11:58:00.000Z",
+        "type": "assistant",
+        "effort": "high",
+        "uuid": "22222222-2222-4222-8222-000000000062",
+        "message": {
+          "content": [
+            {
+              "text": "Fixture: all three files are in.",
+              "type": "text"
+            }
+          ],
+          "role": "assistant",
+          "model": "claude-opus-5-5"
+        }
+      }
+    ],
+    "sessions/900001.json": {
+      "cwd": "/fixture/playground",
+      "kind": "interactive",
+      "messagingSocketPath": "/fixture/sockets/dispatcher.sock",
+      "name": "dispatcher",
+      "pid": 900001,
+      "procStart": "Thu Jan  1 08:00:00 2026",
+      "sessionId": "11111111-1111-4111-8111-000000000001",
+      "startedAt": 1767254400000,
+      "status": "idle"
+    },
+    "sessions/900017.json": {
+      "cwd": "/fixture/playground",
+      "kind": "interactive",
+      "messagingSocketPath": "/fixture/sockets/dispatcher-2.sock",
+      "name": "dispatcher-2",
+      "pid": 900017,
+      "procStart": "Thu Jan  1 08:05:00 2026",
+      "sessionId": "11111111-1111-4111-8111-000000000020",
+      "startedAt": 1767254700000,
+      "status": "idle"
+    },
+    "projects/-fixture-playground/11111111-1111-4111-8111-000000000002.jsonl": [
+      {
+        "agentName": "builder",
+        "sessionId": "11111111-1111-4111-8111-000000000002",
+        "type": "agent-name"
+      },
+      {
+        "cwd": "/fixture/playground",
+        "entrypoint": "cli",
+        "sessionId": "11111111-1111-4111-8111-000000000002",
+        "timestamp": "2026-01-01T08:05:00.000Z",
+        "type": "user",
+        "uuid": "22222222-2222-4222-8222-000000000009",
+        "version": "2.1.0",
+        "message": {
+          "content": "Fixture: lead the workers. Pick up from ~/.playground/handoffs/builder-2025-12-31.md and keep the slots full.",
+          "role": "user"
+        },
+        "origin": {
+          "kind": "human"
+        }
+      },
+      {
+        "cwd": "/fixture/playground",
+        "entrypoint": "cli",
+        "sessionId": "11111111-1111-4111-8111-000000000002",
+        "timestamp": "2026-01-01T08:40:00.000Z",
+        "type": "assistant",
+        "uuid": "22222222-2222-4222-8222-00000000000a",
+        "version": "2.1.0",
+        "message": {
+          "content": [
+            {
+              "text": "Dispatched worker-greed and worker-lust-2 from the backlog.",
+              "type": "text"
+            }
+          ],
+          "model": "claude-opus-5-5",
+          "role": "assistant",
+          "id": "msg_fixture_005",
+          "usage": {
+            "cache_creation": {
+              "ephemeral_1h_input_tokens": 0,
+              "ephemeral_5m_input_tokens": 5250
+            },
+            "cache_creation_input_tokens": 5250,
+            "cache_read_input_tokens": 105000,
+            "input_tokens": 17,
+            "output_tokens": 525
+          }
+        }
+      },
+      {
+        "cwd": "/fixture/playground",
+        "entrypoint": "cli",
+        "sessionId": "11111111-1111-4111-8111-000000000002",
+        "timestamp": "2026-01-01T11:30:00.000Z",
+        "type": "assistant",
+        "uuid": "22222222-2222-4222-8222-00000000000b",
+        "version": "2.1.0",
+        "message": {
+          "content": [
+            {
+              "id": "toolu_fixture_11",
+              "input": {
+                "message": "Fixture report: worker-lust-2 opened #101, review round 2 is 4/5.",
+                "summary": "Fixture report: worker-lust-2 opened #101,",
+                "to": "dispatcher"
+              },
+              "name": "SendMessage",
+              "type": "tool_use"
+            }
+          ],
+          "model": "claude-opus-5-5",
+          "role": "assistant",
+          "id": "msg_fixture_006",
+          "usage": {
+            "cache_creation": {
+              "ephemeral_1h_input_tokens": 0,
+              "ephemeral_5m_input_tokens": 5500
+            },
+            "cache_creation_input_tokens": 5500,
+            "cache_read_input_tokens": 114000,
+            "input_tokens": 18,
+            "output_tokens": 570
+          }
+        }
+      },
+      {
+        "cwd": "/fixture/playground",
+        "entrypoint": "cli",
+        "sessionId": "11111111-1111-4111-8111-000000000002",
+        "timestamp": "2026-01-01T11:30:00.000Z",
+        "type": "user",
+        "uuid": "22222222-2222-4222-8222-00000000000c",
+        "version": "2.1.0",
+        "message": {
+          "content": [
+            {
+              "content": "ok",
+              "tool_use_id": "toolu_fixture_11",
+              "type": "tool_result"
+            }
+          ],
+          "role": "user"
+        }
+      },
+      {
+        "cwd": "/fixture/playground",
+        "entrypoint": "cli",
+        "sessionId": "11111111-1111-4111-8111-000000000002",
+        "timestamp": "2026-01-01T11:58:00.000Z",
+        "type": "assistant",
+        "uuid": "22222222-2222-4222-8222-00000000000d",
+        "version": "2.1.0",
+        "message": {
+          "content": [
+            {
+              "id": "toolu_fixture_13",
+              "input": {
+                "command": "bun run verify system",
+                "description": "Read the room for more workers"
+              },
+              "name": "Bash",
+              "type": "tool_use"
+            }
+          ],
+          "model": "claude-opus-5-5",
+          "role": "assistant",
+          "id": "msg_fixture_007",
+          "usage": {
+            "cache_creation": {
+              "ephemeral_1h_input_tokens": 0,
+              "ephemeral_5m_input_tokens": 5750
+            },
+            "cache_creation_input_tokens": 5750,
+            "cache_read_input_tokens": 123000,
+            "input_tokens": 19,
+            "output_tokens": 615
+          }
+        }
+      },
+      {
+        "cwd": "/fixture/playground",
+        "entrypoint": "cli",
+        "sessionId": "11111111-1111-4111-8111-000000000002",
+        "timestamp": "2026-01-01T11:58:00.000Z",
+        "type": "user",
+        "uuid": "22222222-2222-4222-8222-00000000000e",
+        "version": "2.1.0",
+        "message": {
+          "content": [
+            {
+              "content": "✓ system  Room for 3 more workers",
+              "tool_use_id": "toolu_fixture_13",
+              "type": "tool_result"
+            }
+          ],
+          "role": "user"
+        }
+      }
+    ],
+    "projects/-fixture-playground/11111111-1111-4111-8111-00000000000d.jsonl": [
+      {
+        "agentName": "builder",
+        "sessionId": "11111111-1111-4111-8111-00000000000d",
+        "type": "agent-name"
+      },
+      {
+        "cwd": "/fixture/playground",
+        "entrypoint": "cli",
+        "sessionId": "11111111-1111-4111-8111-00000000000d",
+        "timestamp": "2025-12-31T06:00:00.000Z",
+        "uuid": "22222222-2222-4222-8222-0000000000d1",
+        "version": "2.1.0",
+        "type": "user",
+        "message": {
+          "content": "Fixture: lead the workers for the day.",
+          "role": "user"
+        },
+        "origin": {
+          "kind": "human"
+        }
+      },
+      {
+        "cwd": "/fixture/playground",
+        "entrypoint": "cli",
+        "sessionId": "11111111-1111-4111-8111-00000000000d",
+        "timestamp": "2025-12-31T12:30:00.000Z",
+        "uuid": "22222222-2222-4222-8222-0000000000d2",
+        "version": "2.1.0",
+        "type": "assistant",
+        "message": {
+          "content": [
+            {
+              "text": "Fixture: three workers dispatched, two pull requests merged.",
+              "type": "text"
+            }
+          ],
+          "model": "claude-opus-5-5",
+          "role": "assistant",
+          "id": "msg_fixture_d2"
+        }
+      }
+    ],
+    "projects/-fixture-playground/11111111-1111-4111-8111-00000000000e.jsonl": [
+      {
+        "agentName": "builder",
+        "sessionId": "11111111-1111-4111-8111-00000000000e",
+        "type": "agent-name"
+      },
+      {
+        "cwd": "/fixture/playground",
+        "entrypoint": "cli",
+        "sessionId": "11111111-1111-4111-8111-00000000000e",
+        "timestamp": "2025-12-31T12:40:00.000Z",
+        "uuid": "22222222-2222-4222-8222-0000000000e1",
+        "version": "2.1.0",
+        "type": "user",
+        "isMeta": true,
+        "message": {
+          "content": "<local-command-caveat>The command below was run directly in Claude Code, not sent to you as a request.</local-command-caveat>",
+          "role": "user"
+        }
+      },
+      {
+        "cwd": "/fixture/playground",
+        "entrypoint": "cli",
+        "sessionId": "11111111-1111-4111-8111-00000000000e",
+        "timestamp": "2025-12-31T12:40:00.000Z",
+        "uuid": "22222222-2222-4222-8222-0000000000e2",
+        "version": "2.1.0",
+        "type": "user",
+        "message": {
+          "content": "<command-name>/clear</command-name>\n            <command-message>clear</command-message>\n            <command-args></command-args>",
+          "role": "user"
+        }
+      },
+      {
+        "cwd": "/fixture/playground",
+        "entrypoint": "cli",
+        "sessionId": "11111111-1111-4111-8111-00000000000e",
+        "timestamp": "2025-12-31T18:10:00.000Z",
+        "uuid": "22222222-2222-4222-8222-0000000000e3",
+        "version": "2.1.0",
+        "type": "assistant",
+        "message": {
+          "content": [
+            {
+              "text": "Fixture: wrote the handover note for the next lead and closed.",
+              "type": "text"
+            }
+          ],
+          "model": "claude-opus-5-5",
+          "role": "assistant",
+          "id": "msg_fixture_e3"
+        }
+      }
+    ],
+    "projects/-fixture-playground/11111111-1111-4111-8111-00000000000f.jsonl": [
+      {
+        "agentName": "builder",
+        "sessionId": "11111111-1111-4111-8111-00000000000f",
+        "type": "agent-name"
+      },
+      {
+        "cwd": "/fixture/playground",
+        "entrypoint": "cli",
+        "sessionId": "11111111-1111-4111-8111-00000000000f",
+        "timestamp": "2026-01-01T09:00:00.000Z",
+        "uuid": "22222222-2222-4222-8222-0000000000f1",
+        "version": "2.1.0",
+        "type": "user",
+        "message": {
+          "content": "Fixture: a second lead, started by mistake under the same name.",
+          "role": "user"
+        },
+        "origin": {
+          "kind": "human"
+        }
+      },
+      {
+        "cwd": "/fixture/playground",
+        "entrypoint": "cli",
+        "sessionId": "11111111-1111-4111-8111-00000000000f",
+        "timestamp": "2026-01-01T09:30:00.000Z",
+        "uuid": "22222222-2222-4222-8222-0000000000f2",
+        "version": "2.1.0",
+        "type": "assistant",
+        "message": {
+          "content": [
+            {
+              "text": "Fixture: another lead is already running, so this one stops here.",
+              "type": "text"
+            }
+          ],
+          "model": "claude-opus-5-5",
+          "role": "assistant",
+          "id": "msg_fixture_f2"
+        }
+      }
+    ],
+    "sessions/900002.json": {
+      "cwd": "/fixture/playground",
+      "kind": "interactive",
+      "messagingSocketPath": "/fixture/sockets/builder.sock",
+      "name": "builder",
+      "pid": 900002,
+      "procStart": "Thu Jan  1 08:00:00 2026",
+      "sessionId": "11111111-1111-4111-8111-000000000002",
+      "startedAt": 1767254700000,
+      "status": "busy"
+    },
+    "projects/-fixture-playground/11111111-1111-4111-8111-000000000003.jsonl": [
+      {
+        "agentName": "ops",
+        "sessionId": "11111111-1111-4111-8111-000000000003",
+        "type": "agent-name"
+      },
+      {
+        "cwd": "/fixture/playground",
+        "entrypoint": "cli",
+        "sessionId": "11111111-1111-4111-8111-000000000003",
+        "timestamp": "2026-01-01T08:06:00.000Z",
+        "type": "user",
+        "uuid": "22222222-2222-4222-8222-00000000000f",
+        "version": "2.1.0",
+        "message": {
+          "content": "Fixture: lead the runners and ops. Keep the dashboard on the newest canary.",
+          "role": "user"
+        },
+        "origin": {
+          "kind": "human"
+        }
+      },
+      {
+        "cwd": "/fixture/playground",
+        "entrypoint": "cli",
+        "sessionId": "11111111-1111-4111-8111-000000000003",
+        "timestamp": "2026-01-01T11:00:00.000Z",
+        "type": "assistant",
+        "uuid": "22222222-2222-4222-8222-000000000010",
+        "version": "2.1.0",
+        "message": {
+          "content": [
+            {
+              "text": "The dashboard runner pulled the newest canary and restarted the stack.",
+              "type": "text"
+            }
+          ],
+          "model": "claude-opus-5-5",
+          "role": "assistant",
+          "id": "msg_fixture_008",
+          "usage": {
+            "cache_creation": {
+              "ephemeral_1h_input_tokens": 0,
+              "ephemeral_5m_input_tokens": 6000
+            },
+            "cache_creation_input_tokens": 6000,
+            "cache_read_input_tokens": 132000,
+            "input_tokens": 20,
+            "output_tokens": 660
+          }
+        }
+      },
+      {
+        "cwd": "/fixture/playground",
+        "entrypoint": "cli",
+        "sessionId": "11111111-1111-4111-8111-000000000003",
+        "timestamp": "2026-01-01T11:00:00.000Z",
+        "type": "assistant",
+        "uuid": "22222222-2222-4222-8222-000000000011",
+        "version": "2.1.0",
+        "message": {
+          "content": [
+            {
+              "id": "toolu_fixture_17",
+              "input": {
+                "message": "Fixture report: the dashboard is on the newest canary, health is ok.",
+                "summary": "Fixture report: the dashboard is on the newes",
+                "to": "dispatcher"
+              },
+              "name": "SendMessage",
+              "type": "tool_use"
+            }
+          ],
+          "model": "claude-opus-5-5",
+          "role": "assistant",
+          "id": "msg_fixture_009",
+          "usage": {
+            "cache_creation": {
+              "ephemeral_1h_input_tokens": 0,
+              "ephemeral_5m_input_tokens": 6250
+            },
+            "cache_creation_input_tokens": 6250,
+            "cache_read_input_tokens": 141000,
+            "input_tokens": 21,
+            "output_tokens": 705
+          }
+        }
+      },
+      {
+        "cwd": "/fixture/playground",
+        "entrypoint": "cli",
+        "sessionId": "11111111-1111-4111-8111-000000000003",
+        "timestamp": "2026-01-01T11:00:00.000Z",
+        "type": "user",
+        "uuid": "22222222-2222-4222-8222-000000000012",
+        "version": "2.1.0",
+        "message": {
+          "content": [
+            {
+              "content": "ok",
+              "tool_use_id": "toolu_fixture_17",
+              "type": "tool_result"
+            }
+          ],
+          "role": "user"
+        }
+      },
+      {
+        "cwd": "/fixture/playground",
+        "entrypoint": "cli",
+        "sessionId": "11111111-1111-4111-8111-000000000003",
+        "timestamp": "2026-01-01T11:59:00.000Z",
+        "type": "assistant",
+        "uuid": "22222222-2222-4222-8222-000000000013",
+        "version": "2.1.0",
+        "message": {
+          "content": [
+            {
+              "text": "I need to run the ops checks on the tester stack.",
+              "type": "text"
+            }
+          ],
+          "model": "claude-opus-5-5",
+          "role": "assistant",
+          "id": "msg_fixture_010",
+          "usage": {
+            "cache_creation": {
+              "ephemeral_1h_input_tokens": 0,
+              "ephemeral_5m_input_tokens": 6500
+            },
+            "cache_creation_input_tokens": 6500,
+            "cache_read_input_tokens": 150000,
+            "input_tokens": 22,
+            "output_tokens": 750
+          }
+        }
+      }
+    ],
+    "sessions/900003.json": {
+      "cwd": "/fixture/playground",
+      "kind": "interactive",
+      "messagingSocketPath": "/fixture/sockets/ops.sock",
+      "name": "ops",
+      "pid": 900003,
+      "procStart": "Thu Jan  1 08:00:00 2026",
+      "sessionId": "11111111-1111-4111-8111-000000000003",
+      "startedAt": 1767254760000,
+      "status": "idle"
+    },
+    "projects/-fixture-playground/11111111-1111-4111-8111-00000000000c.jsonl": [
+      {
+        "agentName": "planner",
+        "sessionId": "11111111-1111-4111-8111-00000000000c",
+        "type": "agent-name"
+      },
+      {
+        "cwd": "/fixture/playground",
+        "entrypoint": "cli",
+        "sessionId": "11111111-1111-4111-8111-00000000000c",
+        "timestamp": "2026-01-01T08:07:00.000Z",
+        "type": "user",
+        "uuid": "22222222-2222-4222-8222-000000000064",
+        "version": "2.1.0",
+        "message": {
+          "content": "Fixture: plan the work. Order each new ask and keep the plan current.",
+          "role": "user"
+        },
+        "origin": {
+          "kind": "human"
+        }
+      },
+      {
+        "cwd": "/fixture/playground",
+        "entrypoint": "cli",
+        "sessionId": "11111111-1111-4111-8111-00000000000c",
+        "timestamp": "2026-01-01T11:50:00.000Z",
+        "type": "assistant",
+        "uuid": "22222222-2222-4222-8222-000000000065",
+        "version": "2.1.0",
+        "message": {
+          "content": [
+            {
+              "text": "Groomed the plan: the sidebar spacing fix lands next.",
+              "type": "text"
+            }
+          ],
+          "model": "claude-opus-5-5",
+          "role": "assistant",
+          "id": "msg_fixture_030",
+          "usage": {
+            "cache_creation": {
+              "ephemeral_1h_input_tokens": 0,
+              "ephemeral_5m_input_tokens": 4000
+            },
+            "cache_creation_input_tokens": 4000,
+            "cache_read_input_tokens": 80000,
+            "input_tokens": 12,
+            "output_tokens": 300
+          }
+        }
+      }
+    ],
+    "sessions/900012.json": {
+      "cwd": "/fixture/playground",
+      "kind": "interactive",
+      "messagingSocketPath": "/fixture/sockets/planner.sock",
+      "name": "planner",
+      "pid": 900012,
+      "procStart": "Thu Jan  1 08:00:00 2026",
+      "sessionId": "11111111-1111-4111-8111-00000000000c",
+      "startedAt": 1767254820000,
+      "status": "idle"
+    },
+    "projects/-fixture-playground/11111111-1111-4111-8111-000000000004.jsonl": [
+      {
+        "agentName": "worker-greed",
+        "sessionId": "11111111-1111-4111-8111-000000000004",
+        "type": "agent-name"
+      },
+      {
+        "cwd": "/fixture/playground/.claude/worktrees/sidebar-spacing",
+        "entrypoint": "cli",
+        "gitBranch": "fix/sidebar-spacing",
+        "sessionId": "11111111-1111-4111-8111-000000000004",
+        "timestamp": "2026-01-01T11:10:00.000Z",
+        "type": "user",
+        "uuid": "22222222-2222-4222-8222-000000000014",
+        "version": "2.1.0",
+        "message": {
+          "content": "<cross-session-message from=\"uds:/fixture/sockets/builder.sock\" from-name=\"builder\">\nFixture task: tighten the sidebar's row spacing so twelve sessions fit without scrolling.\n</cross-session-message>",
+          "role": "user"
+        },
+        "origin": {
+          "body": "Fixture task: tighten the sidebar's row spacing so twelve sessions fit without scrolling.",
+          "from": "uds:/fixture/sockets/builder.sock",
+          "kind": "peer",
+          "name": "builder"
+        }
+      },
+      {
+        "cwd": "/fixture/playground/.claude/worktrees/sidebar-spacing",
+        "entrypoint": "cli",
+        "gitBranch": "fix/sidebar-spacing",
+        "sessionId": "11111111-1111-4111-8111-000000000004",
+        "timestamp": "2026-01-01T11:12:00.000Z",
+        "type": "assistant",
+        "uuid": "22222222-2222-4222-8222-000000000015",
+        "version": "2.1.0",
+        "message": {
+          "content": [
+            {
+              "text": "Reading the sidebar component and the design skill first.",
+              "type": "text"
+            }
+          ],
+          "model": "claude-opus-5-5",
+          "role": "assistant",
+          "id": "msg_fixture_011",
+          "usage": {
+            "cache_creation": {
+              "ephemeral_1h_input_tokens": 0,
+              "ephemeral_5m_input_tokens": 6750
+            },
+            "cache_creation_input_tokens": 6750,
+            "cache_read_input_tokens": 159000,
+            "input_tokens": 23,
+            "output_tokens": 795
+          }
+        }
+      },
+      {
+        "cwd": "/fixture/playground/.claude/worktrees/sidebar-spacing",
+        "entrypoint": "cli",
+        "gitBranch": "fix/sidebar-spacing",
+        "sessionId": "11111111-1111-4111-8111-000000000004",
+        "timestamp": "2026-01-01T11:13:00.000Z",
+        "type": "assistant",
+        "uuid": "22222222-2222-4222-8222-000000000016",
+        "version": "2.1.0",
+        "message": {
+          "content": [
+            {
+              "id": "toolu_fixture_22",
+              "input": {
+                "file_path": "/fixture/playground/web/next/src/components/dashboard/app-sidebar.tsx"
+              },
+              "name": "Read",
+              "type": "tool_use"
+            }
+          ],
+          "model": "claude-opus-5-5",
+          "role": "assistant",
+          "id": "msg_fixture_012",
+          "usage": {
+            "cache_creation": {
+              "ephemeral_1h_input_tokens": 0,
+              "ephemeral_5m_input_tokens": 7000
+            },
+            "cache_creation_input_tokens": 7000,
+            "cache_read_input_tokens": 168000,
+            "input_tokens": 24,
+            "output_tokens": 840
+          }
+        }
+      },
+      {
+        "cwd": "/fixture/playground/.claude/worktrees/sidebar-spacing",
+        "entrypoint": "cli",
+        "gitBranch": "fix/sidebar-spacing",
+        "sessionId": "11111111-1111-4111-8111-000000000004",
+        "timestamp": "2026-01-01T11:13:00.000Z",
+        "type": "user",
+        "uuid": "22222222-2222-4222-8222-000000000017",
+        "version": "2.1.0",
+        "message": {
+          "content": [
+            {
+              "content": "ok",
+              "tool_use_id": "toolu_fixture_22",
+              "type": "tool_result"
+            }
+          ],
+          "role": "user"
+        }
+      },
+      {
+        "cwd": "/fixture/playground/.claude/worktrees/sidebar-spacing",
+        "entrypoint": "cli",
+        "gitBranch": "fix/sidebar-spacing",
+        "sessionId": "11111111-1111-4111-8111-000000000004",
+        "timestamp": "2026-01-01T11:15:00.000Z",
+        "type": "assistant",
+        "uuid": "22222222-2222-4222-8222-000000000018",
+        "version": "2.1.0",
+        "message": {
+          "content": [
+            {
+              "id": "toolu_fixture_24",
+              "input": {
+                "message": "Fixture plan: drop the row padding from 8px to 6px and keep the hit area at 32px. ETA 25 min.",
+                "summary": "Fixture plan: drop the row padding from ",
+                "to": "builder"
+              },
+              "name": "SendMessage",
+              "type": "tool_use"
+            }
+          ],
+          "model": "claude-opus-5-5",
+          "role": "assistant",
+          "id": "msg_fixture_013",
+          "usage": {
+            "cache_creation": {
+              "ephemeral_1h_input_tokens": 0,
+              "ephemeral_5m_input_tokens": 7250
+            },
+            "cache_creation_input_tokens": 7250,
+            "cache_read_input_tokens": 177000,
+            "input_tokens": 25,
+            "output_tokens": 885
+          }
+        }
+      },
+      {
+        "cwd": "/fixture/playground/.claude/worktrees/sidebar-spacing",
+        "entrypoint": "cli",
+        "gitBranch": "fix/sidebar-spacing",
+        "sessionId": "11111111-1111-4111-8111-000000000004",
+        "timestamp": "2026-01-01T11:15:00.000Z",
+        "type": "user",
+        "uuid": "22222222-2222-4222-8222-000000000019",
+        "version": "2.1.0",
+        "message": {
+          "content": [
+            {
+              "content": "ok",
+              "tool_use_id": "toolu_fixture_24",
+              "type": "tool_result"
+            }
+          ],
+          "role": "user"
+        }
+      },
+      {
+        "cwd": "/fixture/playground/.claude/worktrees/sidebar-spacing",
+        "entrypoint": "cli",
+        "gitBranch": "fix/sidebar-spacing",
+        "sessionId": "11111111-1111-4111-8111-000000000004",
+        "timestamp": "2026-01-01T11:57:00.000Z",
+        "type": "assistant",
+        "uuid": "22222222-2222-4222-8222-00000000001a",
+        "version": "2.1.0",
+        "message": {
+          "content": [
+            {
+              "text": "Two spacings read well. I am asking which one to keep.",
+              "type": "text"
+            }
+          ],
+          "model": "claude-opus-5-5",
+          "role": "assistant",
+          "id": "msg_fixture_014",
+          "usage": {
+            "cache_creation": {
+              "ephemeral_1h_input_tokens": 0,
+              "ephemeral_5m_input_tokens": 7500
+            },
+            "cache_creation_input_tokens": 7500,
+            "cache_read_input_tokens": 186000,
+            "input_tokens": 26,
+            "output_tokens": 930
+          }
+        }
+      }
+    ],
+    "sessions/900004.json": {
+      "cwd": "/fixture/playground/.claude/worktrees/sidebar-spacing",
+      "kind": "interactive",
+      "messagingSocketPath": "/fixture/sockets/worker-greed.sock",
+      "name": "worker-greed",
+      "pid": 900004,
+      "procStart": "Thu Jan  1 08:00:00 2026",
+      "sessionId": "11111111-1111-4111-8111-000000000004",
+      "startedAt": 1767265800000,
+      "status": "idle"
+    },
+    "projects/-fixture-playground/11111111-1111-4111-8111-000000000005.jsonl": [
+      {
+        "agentName": "worker-lust-2",
+        "sessionId": "11111111-1111-4111-8111-000000000005",
+        "type": "agent-name"
+      },
+      {
+        "cwd": "/fixture/playground/.claude/worktrees/board-colours",
+        "entrypoint": "cli",
+        "gitBranch": "feat/board-colours",
+        "sessionId": "11111111-1111-4111-8111-000000000005",
+        "timestamp": "2026-01-01T10:30:00.000Z",
+        "type": "user",
+        "uuid": "22222222-2222-4222-8222-00000000001b",
+        "version": "2.1.0",
+        "message": {
+          "content": "<cross-session-message from=\"uds:/fixture/sockets/builder.sock\" from-name=\"builder\">\nFixture task: give each Board status its own colour, in both themes.\n</cross-session-message>",
+          "role": "user"
+        },
+        "origin": {
+          "body": "Fixture task: give each Board status its own colour, in both themes.",
+          "from": "uds:/fixture/sockets/builder.sock",
+          "kind": "peer",
+          "name": "builder"
+        }
+      },
+      {
+        "cwd": "/fixture/playground/.claude/worktrees/board-colours",
+        "entrypoint": "cli",
+        "gitBranch": "feat/board-colours",
+        "sessionId": "11111111-1111-4111-8111-000000000005",
+        "timestamp": "2026-01-01T10:32:00.000Z",
+        "type": "assistant",
+        "uuid": "22222222-2222-4222-8222-00000000001c",
+        "version": "2.1.0",
+        "message": {
+          "content": [
+            {
+              "text": "Starting from the design skill's colour tokens.",
+              "type": "text"
+            }
+          ],
+          "model": "claude-opus-5-5",
+          "role": "assistant",
+          "id": "msg_fixture_015",
+          "usage": {
+            "cache_creation": {
+              "ephemeral_1h_input_tokens": 0,
+              "ephemeral_5m_input_tokens": 7750
+            },
+            "cache_creation_input_tokens": 7750,
+            "cache_read_input_tokens": 195000,
+            "input_tokens": 27,
+            "output_tokens": 975
+          }
+        }
+      },
+      {
+        "cwd": "/fixture/playground/.claude/worktrees/board-colours",
+        "entrypoint": "cli",
+        "gitBranch": "feat/board-colours",
+        "sessionId": "11111111-1111-4111-8111-000000000005",
+        "timestamp": "2026-01-01T10:40:00.000Z",
+        "type": "assistant",
+        "uuid": "22222222-2222-4222-8222-00000000001d",
+        "version": "2.1.0",
+        "message": {
+          "content": [
+            {
+              "id": "toolu_fixture_29",
+              "input": {
+                "file_path": "/fixture/playground/web/next/src/components/apps/board.tsx",
+                "new_string": "…",
+                "old_string": "…"
+              },
+              "name": "Edit",
+              "type": "tool_use"
+            }
+          ],
+          "model": "claude-opus-5-5",
+          "role": "assistant",
+          "id": "msg_fixture_016",
+          "usage": {
+            "cache_creation": {
+              "ephemeral_1h_input_tokens": 0,
+              "ephemeral_5m_input_tokens": 8000
+            },
+            "cache_creation_input_tokens": 8000,
+            "cache_read_input_tokens": 204000,
+            "input_tokens": 28,
+            "output_tokens": 1020
+          }
+        }
+      },
+      {
+        "cwd": "/fixture/playground/.claude/worktrees/board-colours",
+        "entrypoint": "cli",
+        "gitBranch": "feat/board-colours",
+        "sessionId": "11111111-1111-4111-8111-000000000005",
+        "timestamp": "2026-01-01T10:40:00.000Z",
+        "type": "user",
+        "uuid": "22222222-2222-4222-8222-00000000001e",
+        "version": "2.1.0",
+        "message": {
+          "content": [
+            {
+              "content": "ok",
+              "tool_use_id": "toolu_fixture_29",
+              "type": "tool_result"
+            }
+          ],
+          "role": "user"
+        }
+      },
+      {
+        "cwd": "/fixture/playground/.claude/worktrees/board-colours",
+        "entrypoint": "cli",
+        "gitBranch": "feat/board-colours",
+        "sessionId": "11111111-1111-4111-8111-000000000005",
+        "timestamp": "2026-01-01T11:25:00.000Z",
+        "type": "assistant",
+        "uuid": "22222222-2222-4222-8222-00000000001f",
+        "version": "2.1.0",
+        "message": {
+          "content": [
+            {
+              "id": "toolu_fixture_31",
+              "input": {
+                "message": "Fixture report: #101 is open, round 2 scored 4/5; fixing the contrast nit now.",
+                "summary": "Fixture report: #101 is open, round 2 sc",
+                "to": "builder"
+              },
+              "name": "SendMessage",
+              "type": "tool_use"
+            }
+          ],
+          "model": "claude-opus-5-5",
+          "role": "assistant",
+          "id": "msg_fixture_017",
+          "usage": {
+            "cache_creation": {
+              "ephemeral_1h_input_tokens": 0,
+              "ephemeral_5m_input_tokens": 8250
+            },
+            "cache_creation_input_tokens": 8250,
+            "cache_read_input_tokens": 213000,
+            "input_tokens": 29,
+            "output_tokens": 1065
+          }
+        }
+      },
+      {
+        "cwd": "/fixture/playground/.claude/worktrees/board-colours",
+        "entrypoint": "cli",
+        "gitBranch": "feat/board-colours",
+        "sessionId": "11111111-1111-4111-8111-000000000005",
+        "timestamp": "2026-01-01T11:25:00.000Z",
+        "type": "user",
+        "uuid": "22222222-2222-4222-8222-000000000020",
+        "version": "2.1.0",
+        "message": {
+          "content": [
+            {
+              "content": "ok",
+              "tool_use_id": "toolu_fixture_31",
+              "type": "tool_result"
+            }
+          ],
+          "role": "user"
+        }
+      },
+      {
+        "cwd": "/fixture/playground/.claude/worktrees/board-colours",
+        "entrypoint": "cli",
+        "gitBranch": "feat/board-colours",
+        "sessionId": "11111111-1111-4111-8111-000000000005",
+        "timestamp": "2026-01-01T11:59:00.000Z",
+        "type": "assistant",
+        "uuid": "22222222-2222-4222-8222-000000000021",
+        "version": "2.1.0",
+        "message": {
+          "content": [
+            {
+              "id": "toolu_fixture_33",
+              "input": {
+                "command": "bun run test",
+                "description": "Run the suite"
+              },
+              "name": "Bash",
+              "type": "tool_use"
+            }
+          ],
+          "model": "claude-opus-5-5",
+          "role": "assistant",
+          "id": "msg_fixture_018",
+          "usage": {
+            "cache_creation": {
+              "ephemeral_1h_input_tokens": 0,
+              "ephemeral_5m_input_tokens": 8500
+            },
+            "cache_creation_input_tokens": 8500,
+            "cache_read_input_tokens": 222000,
+            "input_tokens": 30,
+            "output_tokens": 1110
+          }
+        }
+      },
+      {
+        "cwd": "/fixture/playground/.claude/worktrees/board-colours",
+        "entrypoint": "cli",
+        "gitBranch": "feat/board-colours",
+        "sessionId": "11111111-1111-4111-8111-000000000005",
+        "timestamp": "2026-01-01T11:59:00.000Z",
+        "type": "user",
+        "uuid": "22222222-2222-4222-8222-000000000022",
+        "version": "2.1.0",
+        "message": {
+          "content": [
+            {
+              "content": "1210 pass, 0 fail",
+              "tool_use_id": "toolu_fixture_33",
+              "type": "tool_result"
+            }
+          ],
+          "role": "user"
+        }
+      }
+    ],
+    "sessions/900005.json": {
+      "cwd": "/fixture/playground/.claude/worktrees/board-colours",
+      "kind": "interactive",
+      "messagingSocketPath": "/fixture/sockets/worker-lust-2.sock",
+      "name": "worker-lust-2",
+      "pid": 900005,
+      "procStart": "Thu Jan  1 08:00:00 2026",
+      "sessionId": "11111111-1111-4111-8111-000000000005",
+      "startedAt": 1767263400000,
+      "status": "busy"
+    },
+    "projects/-fixture-playground/11111111-1111-4111-8111-000000000006.jsonl": [
+      {
+        "agentName": "worker-sloth",
+        "sessionId": "11111111-1111-4111-8111-000000000006",
+        "type": "agent-name"
+      },
+      {
+        "cwd": "/fixture/playground/.claude/worktrees/composer-paste",
+        "entrypoint": "cli",
+        "gitBranch": "fix/composer-paste",
+        "sessionId": "11111111-1111-4111-8111-000000000006",
+        "timestamp": "2026-01-01T07:00:00.000Z",
+        "type": "user",
+        "uuid": "22222222-2222-4222-8222-000000000023",
+        "version": "2.1.0",
+        "message": {
+          "content": "<cross-session-message from=\"uds:/fixture/sockets/builder.sock\" from-name=\"builder\">\nFixture task: a pasted image in the composer keeps its file name.\n</cross-session-message>",
+          "role": "user"
+        },
+        "origin": {
+          "body": "Fixture task: a pasted image in the composer keeps its file name.",
+          "from": "uds:/fixture/sockets/builder.sock",
+          "kind": "peer",
+          "name": "builder"
+        }
+      },
+      {
+        "cwd": "/fixture/playground/.claude/worktrees/composer-paste",
+        "entrypoint": "cli",
+        "gitBranch": "fix/composer-paste",
+        "sessionId": "11111111-1111-4111-8111-000000000006",
+        "timestamp": "2026-01-01T08:40:00.000Z",
+        "type": "assistant",
+        "uuid": "22222222-2222-4222-8222-000000000024",
+        "version": "2.1.0",
+        "message": {
+          "content": [
+            {
+              "text": "Fixed and merged as #97.",
+              "type": "text"
+            }
+          ],
+          "model": "claude-opus-5-5",
+          "role": "assistant",
+          "id": "msg_fixture_019",
+          "usage": {
+            "cache_creation": {
+              "ephemeral_1h_input_tokens": 0,
+              "ephemeral_5m_input_tokens": 8750
+            },
+            "cache_creation_input_tokens": 8750,
+            "cache_read_input_tokens": 231000,
+            "input_tokens": 31,
+            "output_tokens": 1155
+          }
+        }
+      },
+      {
+        "cwd": "/fixture/playground/.claude/worktrees/composer-paste",
+        "entrypoint": "cli",
+        "gitBranch": "fix/composer-paste",
+        "sessionId": "11111111-1111-4111-8111-000000000006",
+        "timestamp": "2026-01-01T08:50:00.000Z",
+        "type": "assistant",
+        "uuid": "22222222-2222-4222-8222-000000000025",
+        "version": "2.1.0",
+        "message": {
+          "content": [
+            {
+              "id": "toolu_fixture_37",
+              "input": {
+                "message": "Fixture report: #97 merged at canary 1a2b3c4.",
+                "summary": "Fixture report: #97 merged at canary 1a2",
+                "to": "builder"
+              },
+              "name": "SendMessage",
+              "type": "tool_use"
+            }
+          ],
+          "model": "claude-opus-5-5",
+          "role": "assistant",
+          "id": "msg_fixture_020",
+          "usage": {
+            "cache_creation": {
+              "ephemeral_1h_input_tokens": 0,
+              "ephemeral_5m_input_tokens": 9000
+            },
+            "cache_creation_input_tokens": 9000,
+            "cache_read_input_tokens": 240000,
+            "input_tokens": 32,
+            "output_tokens": 1200
+          }
+        }
+      },
+      {
+        "cwd": "/fixture/playground/.claude/worktrees/composer-paste",
+        "entrypoint": "cli",
+        "gitBranch": "fix/composer-paste",
+        "sessionId": "11111111-1111-4111-8111-000000000006",
+        "timestamp": "2026-01-01T08:50:00.000Z",
+        "type": "user",
+        "uuid": "22222222-2222-4222-8222-000000000026",
+        "version": "2.1.0",
+        "message": {
+          "content": [
+            {
+              "content": "ok",
+              "tool_use_id": "toolu_fixture_37",
+              "type": "tool_result"
+            }
+          ],
+          "role": "user"
+        }
+      },
+      {
+        "prNumber": 97,
+        "prRepository": "example/fixture",
+        "prUrl": "https://github.com/example/fixture/pull/97",
+        "sessionId": "11111111-1111-4111-8111-000000000006",
+        "timestamp": "2026-01-01T08:50:00.000Z",
+        "type": "pr-link"
+      }
+    ],
+    "sessions/900006.json": {
+      "cwd": "/fixture/playground/.claude/worktrees/composer-paste",
+      "kind": "interactive",
+      "messagingSocketPath": "/fixture/sockets/worker-sloth.sock",
+      "name": "worker-sloth",
+      "pid": 900006,
+      "procStart": "Thu Jan  1 08:00:00 2026",
+      "sessionId": "11111111-1111-4111-8111-000000000006",
+      "startedAt": 1767250800000,
+      "status": "idle"
+    },
+    "projects/-fixture-playground/11111111-1111-4111-8111-000000000007.jsonl": [
+      {
+        "agentName": "runner-pride",
+        "sessionId": "11111111-1111-4111-8111-000000000007",
+        "type": "agent-name"
+      },
+      {
+        "cwd": "/fixture/playground/.claude/worktrees/canary",
+        "entrypoint": "cli",
+        "sessionId": "11111111-1111-4111-8111-000000000007",
+        "timestamp": "2026-01-01T08:07:00.000Z",
+        "type": "user",
+        "uuid": "22222222-2222-4222-8222-000000000027",
+        "version": "2.1.0",
+        "message": {
+          "content": "<cross-session-message from=\"uds:/fixture/sockets/ops.sock\" from-name=\"ops\">\nFixture task: keep the dashboard on the newest canary.\n</cross-session-message>",
+          "role": "user"
+        },
+        "origin": {
+          "body": "Fixture task: keep the dashboard on the newest canary.",
+          "from": "uds:/fixture/sockets/ops.sock",
+          "kind": "peer",
+          "name": "ops"
+        }
+      },
+      {
+        "cwd": "/fixture/playground/.claude/worktrees/canary",
+        "entrypoint": "cli",
+        "sessionId": "11111111-1111-4111-8111-000000000007",
+        "timestamp": "2026-01-01T10:59:00.000Z",
+        "type": "assistant",
+        "uuid": "22222222-2222-4222-8222-000000000028",
+        "version": "2.1.0",
+        "message": {
+          "content": [
+            {
+              "id": "toolu_fixture_40",
+              "input": {
+                "command": "git -C /fixture/playground/.claude/worktrees/canary pull --ff-only",
+                "description": "Pull the newest canary"
+              },
+              "name": "Bash",
+              "type": "tool_use"
+            }
+          ],
+          "model": "claude-opus-5-5",
+          "role": "assistant",
+          "id": "msg_fixture_021",
+          "usage": {
+            "cache_creation": {
+              "ephemeral_1h_input_tokens": 0,
+              "ephemeral_5m_input_tokens": 9250
+            },
+            "cache_creation_input_tokens": 9250,
+            "cache_read_input_tokens": 249000,
+            "input_tokens": 33,
+            "output_tokens": 1245
+          }
+        }
+      },
+      {
+        "cwd": "/fixture/playground/.claude/worktrees/canary",
+        "entrypoint": "cli",
+        "sessionId": "11111111-1111-4111-8111-000000000007",
+        "timestamp": "2026-01-01T10:59:00.000Z",
+        "type": "user",
+        "uuid": "22222222-2222-4222-8222-000000000029",
+        "version": "2.1.0",
+        "message": {
+          "content": [
+            {
+              "content": "Fast-forward",
+              "tool_use_id": "toolu_fixture_40",
+              "type": "tool_result"
+            }
+          ],
+          "role": "user"
+        }
+      },
+      {
+        "cwd": "/fixture/playground/.claude/worktrees/canary",
+        "entrypoint": "cli",
+        "sessionId": "11111111-1111-4111-8111-000000000007",
+        "timestamp": "2026-01-01T11:00:00.000Z",
+        "type": "assistant",
+        "uuid": "22222222-2222-4222-8222-00000000002a",
+        "version": "2.1.0",
+        "message": {
+          "content": [
+            {
+              "id": "toolu_fixture_42",
+              "input": {
+                "message": "Fixture report: the dashboard restarted on the newest canary.",
+                "summary": "Fixture report: the dashboard restarted on th",
+                "to": "ops"
+              },
+              "name": "SendMessage",
+              "type": "tool_use"
+            }
+          ],
+          "model": "claude-opus-5-5",
+          "role": "assistant",
+          "id": "msg_fixture_022",
+          "usage": {
+            "cache_creation": {
+              "ephemeral_1h_input_tokens": 0,
+              "ephemeral_5m_input_tokens": 9500
+            },
+            "cache_creation_input_tokens": 9500,
+            "cache_read_input_tokens": 258000,
+            "input_tokens": 34,
+            "output_tokens": 1290
+          }
+        }
+      },
+      {
+        "cwd": "/fixture/playground/.claude/worktrees/canary",
+        "entrypoint": "cli",
+        "sessionId": "11111111-1111-4111-8111-000000000007",
+        "timestamp": "2026-01-01T11:00:00.000Z",
+        "type": "user",
+        "uuid": "22222222-2222-4222-8222-00000000002b",
+        "version": "2.1.0",
+        "message": {
+          "content": [
+            {
+              "content": "ok",
+              "tool_use_id": "toolu_fixture_42",
+              "type": "tool_result"
+            }
+          ],
+          "role": "user"
+        }
+      },
+      {
+        "cwd": "/fixture/playground/.claude/worktrees/canary",
+        "entrypoint": "cli",
+        "sessionId": "11111111-1111-4111-8111-000000000007",
+        "timestamp": "2026-01-01T11:40:00.000Z",
+        "type": "assistant",
+        "uuid": "22222222-2222-4222-8222-0000000002a1",
+        "version": "2.1.0",
+        "message": {
+          "content": [
+            {
+              "id": "toolu_fixture_ops1",
+              "input": {
+                "command": "bun run ingest --follow",
+                "description": "Start the transcript follower",
+                "run_in_background": true
+              },
+              "name": "Bash",
+              "type": "tool_use"
+            }
+          ],
+          "model": "claude-opus-5-5",
+          "role": "assistant"
+        }
+      },
+      {
+        "cwd": "/fixture/playground/.claude/worktrees/canary",
+        "entrypoint": "cli",
+        "sessionId": "11111111-1111-4111-8111-000000000007",
+        "timestamp": "2026-01-01T11:40:00.000Z",
+        "type": "user",
+        "uuid": "22222222-2222-4222-8222-0000000002a2",
+        "version": "2.1.0",
+        "message": {
+          "content": [
+            {
+              "content": "Command running in background with ID: bfixture01",
+              "tool_use_id": "toolu_fixture_ops1",
+              "type": "tool_result"
+            }
+          ],
+          "role": "user"
+        },
+        "toolUseResult": {
+          "backgroundTaskId": "bfixture01"
+        }
+      },
+      {
+        "cwd": "/fixture/playground/.claude/worktrees/canary",
+        "entrypoint": "cli",
+        "sessionId": "11111111-1111-4111-8111-000000000007",
+        "timestamp": "2026-01-01T11:44:00.000Z",
+        "type": "user",
+        "uuid": "22222222-2222-4222-8222-0000000002a3",
+        "version": "2.1.0",
+        "message": {
+          "content": "<task-notification>\n<task-id>bfixture01</task-id>\n<tool-use-id>toolu_fixture_ops1</tool-use-id>\n<status>killed</status>\n</task-notification>",
+          "role": "user"
+        },
+        "origin": {
+          "kind": "task-notification"
+        }
+      },
+      {
+        "cwd": "/fixture/playground/.claude/worktrees/canary",
+        "entrypoint": "cli",
+        "sessionId": "11111111-1111-4111-8111-000000000007",
+        "timestamp": "2026-01-01T11:44:30.000Z",
+        "type": "assistant",
+        "uuid": "22222222-2222-4222-8222-0000000002a4",
+        "version": "2.1.0",
+        "message": {
+          "content": [
+            {
+              "id": "toolu_fixture_ops2",
+              "input": {
+                "command": "bun run ingest --follow",
+                "description": "Restart the follower after the pull",
+                "run_in_background": true
+              },
+              "name": "Bash",
+              "type": "tool_use"
+            }
+          ],
+          "model": "claude-opus-5-5",
+          "role": "assistant"
+        }
+      },
+      {
+        "cwd": "/fixture/playground/.claude/worktrees/canary",
+        "entrypoint": "cli",
+        "sessionId": "11111111-1111-4111-8111-000000000007",
+        "timestamp": "2026-01-01T11:44:30.000Z",
+        "type": "user",
+        "uuid": "22222222-2222-4222-8222-0000000002a5",
+        "version": "2.1.0",
+        "message": {
+          "content": [
+            {
+              "content": "Command running in background with ID: bfixture02",
+              "tool_use_id": "toolu_fixture_ops2",
+              "type": "tool_result"
+            }
+          ],
+          "role": "user"
+        },
+        "toolUseResult": {
+          "backgroundTaskId": "bfixture02"
+        }
+      },
+      {
+        "cwd": "/fixture/playground/.claude/worktrees/canary",
+        "entrypoint": "cli",
+        "sessionId": "11111111-1111-4111-8111-000000000007",
+        "timestamp": "2026-01-01T11:48:00.000Z",
+        "type": "assistant",
+        "uuid": "22222222-2222-4222-8222-0000000002a6",
+        "version": "2.1.0",
+        "message": {
+          "content": [
+            {
+              "id": "toolu_fixture_ops3",
+              "input": {
+                "command": "bun run ingest --follow",
+                "description": "Restart the follower with the new chunk size",
+                "run_in_background": true
+              },
+              "name": "Bash",
+              "type": "tool_use"
+            }
+          ],
+          "model": "claude-opus-5-5",
+          "role": "assistant"
+        }
+      },
+      {
+        "cwd": "/fixture/playground/.claude/worktrees/canary",
+        "entrypoint": "cli",
+        "sessionId": "11111111-1111-4111-8111-000000000007",
+        "timestamp": "2026-01-01T11:48:00.000Z",
+        "type": "user",
+        "uuid": "22222222-2222-4222-8222-0000000002a7",
+        "version": "2.1.0",
+        "message": {
+          "content": [
+            {
+              "content": "Command running in background with ID: bfixture03",
+              "tool_use_id": "toolu_fixture_ops3",
+              "type": "tool_result"
+            }
+          ],
+          "role": "user"
+        },
+        "toolUseResult": {
+          "backgroundTaskId": "bfixture03"
+        }
+      },
+      {
+        "cwd": "/fixture/playground/.claude/worktrees/canary",
+        "entrypoint": "cli",
+        "sessionId": "11111111-1111-4111-8111-000000000007",
+        "timestamp": "2026-01-01T11:50:00.000Z",
+        "type": "assistant",
+        "uuid": "22222222-2222-4222-8222-0000000002a8",
+        "version": "2.1.0",
+        "message": {
+          "content": [
+            {
+              "id": "toolu_fixture_ops4",
+              "input": {
+                "command": "bun run test",
+                "description": "Run the suite",
+                "run_in_background": true
+              },
+              "name": "Bash",
+              "type": "tool_use"
+            }
+          ],
+          "model": "claude-opus-5-5",
+          "role": "assistant"
+        }
+      },
+      {
+        "cwd": "/fixture/playground/.claude/worktrees/canary",
+        "entrypoint": "cli",
+        "sessionId": "11111111-1111-4111-8111-000000000007",
+        "timestamp": "2026-01-01T11:50:00.000Z",
+        "type": "user",
+        "uuid": "22222222-2222-4222-8222-0000000002a9",
+        "version": "2.1.0",
+        "message": {
+          "content": [
+            {
+              "content": "Command running in background with ID: bfixture04",
+              "tool_use_id": "toolu_fixture_ops4",
+              "type": "tool_result"
+            }
+          ],
+          "role": "user"
+        },
+        "toolUseResult": {
+          "backgroundTaskId": "bfixture04"
+        }
+      },
+      {
+        "cwd": "/fixture/playground/.claude/worktrees/canary",
+        "entrypoint": "cli",
+        "sessionId": "11111111-1111-4111-8111-000000000007",
+        "timestamp": "2026-01-01T11:52:00.000Z",
+        "type": "user",
+        "uuid": "22222222-2222-4222-8222-0000000002aa",
+        "version": "2.1.0",
+        "message": {
+          "content": "<task-notification>\n<task-id>bfixture04</task-id>\n<tool-use-id>toolu_fixture_ops4</tool-use-id>\n<status>completed</status>\n</task-notification>",
+          "role": "user"
+        },
+        "origin": {
+          "kind": "task-notification"
+        }
+      },
+      {
+        "cwd": "/fixture/playground/.claude/worktrees/canary",
+        "entrypoint": "cli",
+        "sessionId": "11111111-1111-4111-8111-000000000007",
+        "timestamp": "2026-01-01T11:54:00.000Z",
+        "type": "assistant",
+        "uuid": "22222222-2222-4222-8222-0000000002ab",
+        "version": "2.1.0",
+        "message": {
+          "content": [
+            {
+              "id": "toolu_fixture_ops5",
+              "input": {
+                "command": "tail -f ops.log",
+                "run_in_background": true
+              },
+              "name": "Bash",
+              "type": "tool_use"
+            }
+          ],
+          "model": "claude-opus-5-5",
+          "role": "assistant"
+        }
+      },
+      {
+        "cwd": "/fixture/playground/.claude/worktrees/canary",
+        "entrypoint": "cli",
+        "sessionId": "11111111-1111-4111-8111-000000000007",
+        "timestamp": "2026-01-01T11:54:00.000Z",
+        "type": "user",
+        "uuid": "22222222-2222-4222-8222-0000000002ac",
+        "version": "2.1.0",
+        "message": {
+          "content": [
+            {
+              "content": "Command running in background with ID: bfixture05",
+              "tool_use_id": "toolu_fixture_ops5",
+              "type": "tool_result"
+            }
+          ],
+          "role": "user"
+        },
+        "toolUseResult": {
+          "backgroundTaskId": "bfixture05"
+        }
+      }
+    ],
+    "sessions/900007.json": {
+      "cwd": "/fixture/playground/.claude/worktrees/canary",
+      "kind": "interactive",
+      "messagingSocketPath": "/fixture/sockets/runner-pride.sock",
+      "name": "runner-pride",
+      "pid": 900007,
+      "procStart": "Thu Jan  1 08:00:00 2026",
+      "sessionId": "11111111-1111-4111-8111-000000000007",
+      "startedAt": 1767254820000,
+      "status": "busy"
+    },
+    "projects/-fixture-playground/11111111-1111-4111-8111-000000000008.jsonl": [
+      {
+        "agentName": "h4n8zt-reviewer",
+        "sessionId": "11111111-1111-4111-8111-000000000008",
+        "type": "agent-name"
+      },
+      {
+        "cwd": "/fixture/playground/.claude/worktrees/review-lust",
+        "entrypoint": "cli",
+        "gitBranch": "canary",
+        "sessionId": "11111111-1111-4111-8111-000000000008",
+        "timestamp": "2026-01-01T11:20:00.000Z",
+        "type": "user",
+        "uuid": "22222222-2222-4222-8222-00000000002c",
+        "version": "2.1.0",
+        "message": {
+          "content": "<cross-session-message from=\"uds:/fixture/sockets/worker-lust-2.sock\" from-name=\"worker-lust-2\">\nFixture brief: review #101 round by round until it scores 5/5.\n</cross-session-message>",
+          "role": "user"
+        },
+        "origin": {
+          "body": "Fixture brief: review #101 round by round until it scores 5/5.",
+          "from": "uds:/fixture/sockets/worker-lust-2.sock",
+          "kind": "peer",
+          "name": "worker-lust-2"
+        }
+      },
+      {
+        "cwd": "/fixture/playground/.claude/worktrees/review-lust",
+        "entrypoint": "cli",
+        "gitBranch": "canary",
+        "sessionId": "11111111-1111-4111-8111-000000000008",
+        "timestamp": "2026-01-01T11:40:00.000Z",
+        "type": "assistant",
+        "uuid": "22222222-2222-4222-8222-00000000002d",
+        "version": "2.1.0",
+        "message": {
+          "content": [
+            {
+              "text": "Round 2: 4/5, one contrast nit in the dark theme.",
+              "type": "text"
+            }
+          ],
+          "model": "claude-sonnet-5-5",
+          "role": "assistant",
+          "id": "msg_fixture_023",
+          "usage": {
+            "cache_creation": {
+              "ephemeral_1h_input_tokens": 0,
+              "ephemeral_5m_input_tokens": 9750
+            },
+            "cache_creation_input_tokens": 9750,
+            "cache_read_input_tokens": 267000,
+            "input_tokens": 35,
+            "output_tokens": 1335
+          }
+        }
+      },
+      {
+        "cwd": "/fixture/playground/.claude/worktrees/review-lust",
+        "entrypoint": "cli",
+        "gitBranch": "canary",
+        "sessionId": "11111111-1111-4111-8111-000000000008",
+        "timestamp": "2026-01-01T11:40:00.000Z",
+        "type": "assistant",
+        "uuid": "22222222-2222-4222-8222-00000000002e",
+        "version": "2.1.0",
+        "message": {
+          "content": [
+            {
+              "id": "toolu_fixture_46",
+              "input": {
+                "message": "Fixture review: round 2 4/5 at abc1234, one should-fix.",
+                "summary": "Fixture review: round 2 4/5 at abc1234, ",
+                "to": "worker-lust-2"
+              },
+              "name": "SendMessage",
+              "type": "tool_use"
+            }
+          ],
+          "model": "claude-sonnet-5-5",
+          "role": "assistant",
+          "id": "msg_fixture_024",
+          "usage": {
+            "cache_creation": {
+              "ephemeral_1h_input_tokens": 0,
+              "ephemeral_5m_input_tokens": 10000
+            },
+            "cache_creation_input_tokens": 10000,
+            "cache_read_input_tokens": 276000,
+            "input_tokens": 36,
+            "output_tokens": 1380
+          }
+        }
+      },
+      {
+        "cwd": "/fixture/playground/.claude/worktrees/review-lust",
+        "entrypoint": "cli",
+        "gitBranch": "canary",
+        "sessionId": "11111111-1111-4111-8111-000000000008",
+        "timestamp": "2026-01-01T11:40:00.000Z",
+        "type": "user",
+        "uuid": "22222222-2222-4222-8222-00000000002f",
+        "version": "2.1.0",
+        "message": {
+          "content": [
+            {
+              "content": "ok",
+              "tool_use_id": "toolu_fixture_46",
+              "type": "tool_result"
+            }
+          ],
+          "role": "user"
+        }
+      }
+    ],
+    "sessions/900008.json": {
+      "cwd": "/fixture/playground/.claude/worktrees/review-lust",
+      "kind": "interactive",
+      "messagingSocketPath": "/fixture/sockets/h4n8zt-reviewer.sock",
+      "name": "h4n8zt-reviewer",
+      "pid": 900008,
+      "procStart": "Thu Jan  1 08:00:00 2026",
+      "sessionId": "11111111-1111-4111-8111-000000000008",
+      "startedAt": 1767266400000,
+      "status": "busy"
+    },
+    "projects/-fixture-playground/11111111-1111-4111-8111-000000000009.jsonl": [
+      {
+        "agentName": "p9c3wx-tester",
+        "sessionId": "11111111-1111-4111-8111-000000000009",
+        "type": "agent-name"
+      },
+      {
+        "cwd": "/fixture/playground/.claude/worktrees/test-lust",
+        "entrypoint": "cli",
+        "gitBranch": "canary",
+        "sessionId": "11111111-1111-4111-8111-000000000009",
+        "timestamp": "2026-01-01T11:21:00.000Z",
+        "type": "user",
+        "uuid": "22222222-2222-4222-8222-000000000030",
+        "version": "2.1.0",
+        "message": {
+          "content": "<cross-session-message from=\"uds:/fixture/sockets/worker-lust-2.sock\" from-name=\"worker-lust-2\">\nFixture brief: test #101 in a browser on a fixture stack, before and after.\n</cross-session-message>",
+          "role": "user"
+        },
+        "origin": {
+          "body": "Fixture brief: test #101 in a browser on a fixture stack, before and after.",
+          "from": "uds:/fixture/sockets/worker-lust-2.sock",
+          "kind": "peer",
+          "name": "worker-lust-2"
+        }
+      },
+      {
+        "cwd": "/fixture/playground/.claude/worktrees/test-lust",
+        "entrypoint": "cli",
+        "gitBranch": "canary",
+        "sessionId": "11111111-1111-4111-8111-000000000009",
+        "timestamp": "2026-01-01T11:55:00.000Z",
+        "type": "assistant",
+        "uuid": "22222222-2222-4222-8222-000000000031",
+        "version": "2.1.0",
+        "message": {
+          "content": [
+            {
+              "text": "I have a plan for round 2's browser run.",
+              "type": "text"
+            }
+          ],
+          "model": "claude-sonnet-5-5",
+          "role": "assistant",
+          "id": "msg_fixture_025",
+          "usage": {
+            "cache_creation": {
+              "ephemeral_1h_input_tokens": 0,
+              "ephemeral_5m_input_tokens": 10250
+            },
+            "cache_creation_input_tokens": 10250,
+            "cache_read_input_tokens": 285000,
+            "input_tokens": 37,
+            "output_tokens": 1425
+          }
+        }
+      }
+    ],
+    "sessions/900009.json": {
+      "cwd": "/fixture/playground/.claude/worktrees/test-lust",
+      "kind": "interactive",
+      "messagingSocketPath": "/fixture/sockets/p9c3wx-tester.sock",
+      "name": "p9c3wx-tester",
+      "pid": 900009,
+      "procStart": "Thu Jan  1 08:00:00 2026",
+      "sessionId": "11111111-1111-4111-8111-000000000009",
+      "startedAt": 1767266460000,
+      "status": "idle"
+    },
+    "projects/-fixture-playground/11111111-1111-4111-8111-00000000000a.jsonl": [
+      {
+        "cwd": "/fixture/scratch",
+        "entrypoint": "cli",
+        "sessionId": "11111111-1111-4111-8111-00000000000a",
+        "timestamp": "2026-01-01T05:20:00.000Z",
+        "type": "user",
+        "uuid": "22222222-2222-4222-8222-000000000032",
+        "version": "2.1.0",
+        "message": {
+          "content": "Fixture: say something about the kettle.",
+          "role": "user"
+        },
+        "origin": {
+          "kind": "human"
+        }
+      },
+      {
+        "cwd": "/fixture/scratch",
+        "entrypoint": "cli",
+        "sessionId": "11111111-1111-4111-8111-00000000000a",
+        "timestamp": "2026-01-01T05:21:00.000Z",
+        "type": "assistant",
+        "uuid": "22222222-2222-4222-8222-000000000033",
+        "version": "2.1.0",
+        "message": {
+          "content": [
+            {
+              "text": "The demo kettle is warm.",
+              "type": "text"
+            }
+          ],
+          "model": "claude-opus-5-5",
+          "role": "assistant",
+          "id": "msg_fixture_026",
+          "usage": {
+            "cache_creation": {
+              "ephemeral_1h_input_tokens": 0,
+              "ephemeral_5m_input_tokens": 10500
+            },
+            "cache_creation_input_tokens": 10500,
+            "cache_read_input_tokens": 294000,
+            "input_tokens": 38,
+            "output_tokens": 1470
+          }
+        }
+      }
+    ],
+    "sessions/900010.json": {
+      "cwd": "/fixture/scratch",
+      "kind": "interactive",
+      "messagingSocketPath": "/fixture/sockets/scratch-demo.sock",
+      "name": "scratch-demo",
+      "pid": 900010,
+      "procStart": "Thu Jan  1 08:00:00 2026",
+      "sessionId": "11111111-1111-4111-8111-00000000000a",
+      "startedAt": 1767244800000,
+      "status": "idle"
+    },
+    "sessions/900013.json": {
+      "cwd": "/fixture/playground/.claude/worktrees/row-wrap",
+      "kind": "interactive",
+      "messagingSocketPath": "/fixture/sockets/worker-bright-lark.sock",
+      "name": "worker-bright-lark",
+      "pid": 900013,
+      "procStart": "Thu Jan  1 07:30:00 2026",
+      "sessionId": "11111111-1111-4111-8111-000000000010",
+      "startedAt": 1767249000000,
+      "status": "busy"
+    },
+    "sessions/900014.json": {
+      "cwd": "/fixture/playground/.claude/worktrees/train-test",
+      "kind": "interactive",
+      "messagingSocketPath": "/fixture/sockets/r6t2dv-tester.sock",
+      "name": "r6t2dv-tester",
+      "pid": 900014,
+      "procStart": "Thu Jan  1 08:00:00 2026",
+      "sessionId": "11111111-1111-4111-8111-000000000011",
+      "startedAt": 1767266580000,
+      "status": "busy"
+    },
+    "sessions/900015.json": {
+      "cwd": "/fixture/playground/.claude/worktrees/review-envy",
+      "kind": "interactive",
+      "messagingSocketPath": "/fixture/sockets/b7k2mq-reviewer.sock",
+      "name": "b7k2mq-reviewer",
+      "pid": 900015,
+      "procStart": "Thu Jan  1 08:00:00 2026",
+      "sessionId": "11111111-1111-4111-8111-000000000012",
+      "startedAt": 1767266520000,
+      "status": "busy"
+    },
+    "sessions/900016.json": {
+      "cwd": "/fixture/playground/.claude/worktrees/glm-rows",
+      "kind": "interactive",
+      "messagingSocketPath": "/fixture/sockets/worker-glm-flash.sock",
+      "name": "worker-glm-flash",
+      "pid": 900016,
+      "procStart": "Thu Jan  1 08:00:00 2026",
+      "sessionId": "11111111-1111-4111-8111-000000000013",
+      "startedAt": 1767266520000,
+      "status": "busy"
+    },
+    "sessions/900021.json": {
+      "cwd": "/fixture/playground/.claude/worktrees/thread-titles",
+      "kind": "interactive",
+      "messagingSocketPath": "/fixture/sockets/k3m9px-worker.sock",
+      "name": "k3m9px-worker",
+      "pid": 900021,
+      "procStart": "Thu Jan  1 08:00:00 2026",
+      "sessionId": "11111111-1111-4111-8111-00000000001b",
+      "startedAt": 1767266520000,
+      "status": "busy"
+    },
+    "sessions/900022.json": {
+      "cwd": "/fixture/playground/.claude/worktrees/review-106",
+      "kind": "interactive",
+      "messagingSocketPath": "/fixture/sockets/q7w8f2-reviewer.sock",
+      "name": "q7w8f2-reviewer",
+      "pid": 900022,
+      "procStart": "Thu Jan  1 08:00:00 2026",
+      "sessionId": "11111111-1111-4111-8111-00000000001c",
+      "startedAt": 1767266520000,
+      "status": "busy"
+    },
+    "projects/-fixture-playground/11111111-1111-4111-8111-00000000000b.jsonl": [
+      {
+        "cwd": "/fixture/playground/.claude/worktrees/old-ghost",
+        "entrypoint": "cli",
+        "sessionId": "11111111-1111-4111-8111-00000000000b",
+        "timestamp": "2025-12-31T11:00:00.000Z",
+        "type": "user",
+        "uuid": "22222222-2222-4222-8222-000000000034",
+        "version": "2.1.0",
+        "message": {
+          "content": "Fixture: a session that ended yesterday; its pid now belongs to another process.",
+          "role": "user"
+        },
+        "origin": {
+          "kind": "human"
+        }
+      },
+      {
+        "cwd": "/fixture/playground/.claude/worktrees/old-ghost",
+        "entrypoint": "cli",
+        "sessionId": "11111111-1111-4111-8111-00000000000b",
+        "timestamp": "2025-12-31T11:01:00.000Z",
+        "type": "assistant",
+        "uuid": "22222222-2222-4222-8222-000000000035",
+        "version": "2.1.0",
+        "message": {
+          "content": [
+            {
+              "text": "Done for the day.",
+              "type": "text"
+            }
+          ],
+          "model": "claude-opus-5-5",
+          "role": "assistant",
+          "id": "msg_fixture_027",
+          "usage": {
+            "cache_creation": {
+              "ephemeral_1h_input_tokens": 0,
+              "ephemeral_5m_input_tokens": 10750
+            },
+            "cache_creation_input_tokens": 10750,
+            "cache_read_input_tokens": 303000,
+            "input_tokens": 39,
+            "output_tokens": 1515
+          }
+        }
+      }
+    ],
+    "projects/-fixture-playground/11111111-1111-4111-8111-000000000010.jsonl": [
+      {
+        "agentName": "worker-bright-lark",
+        "sessionId": "11111111-1111-4111-8111-000000000010",
+        "type": "agent-name"
+      },
+      {
+        "cwd": "/fixture/playground/.claude/worktrees/row-wrap",
+        "entrypoint": "cli",
+        "gitBranch": "feat/row-wrap",
+        "sessionId": "11111111-1111-4111-8111-000000000010",
+        "timestamp": "2026-01-01T07:30:00.000Z",
+        "type": "user",
+        "uuid": "22222222-2222-4222-8222-000000000040",
+        "version": "2.1.0",
+        "message": {
+          "content": "<cross-session-message from=\"uds:/fixture/sockets/builder.sock\" from-name=\"builder\">\nFixture task: the row's title cuts from its end, so the model and effort icons stay visible at any width.\n</cross-session-message>",
+          "role": "user"
+        },
+        "origin": {
+          "body": "Fixture task: the row's title cuts from its end, so the model and effort icons stay visible at any width.",
+          "from": "uds:/fixture/sockets/builder.sock",
+          "kind": "peer",
+          "name": "builder"
+        }
+      },
+      {
+        "cwd": "/fixture/playground/.claude/worktrees/row-wrap",
+        "entrypoint": "cli",
+        "gitBranch": "feat/row-wrap",
+        "sessionId": "11111111-1111-4111-8111-000000000010",
+        "timestamp": "2026-01-01T11:59:00.000Z",
+        "type": "assistant",
+        "uuid": "22222222-2222-4222-8222-000000000041",
+        "version": "2.1.0",
+        "effort": "high",
+        "message": {
+          "content": [
+            {
+              "text": "Second line wraps in whole parts now; the model and effort read at any width.",
+              "type": "text"
+            }
+          ],
+          "model": "claude-opus-5-5",
+          "role": "assistant",
+          "id": "msg_fixture_040",
+          "usage": {
+            "cache_creation": {
+              "ephemeral_1h_input_tokens": 0,
+              "ephemeral_5m_input_tokens": 8750
+            },
+            "cache_creation_input_tokens": 8750,
+            "cache_read_input_tokens": 231000,
+            "input_tokens": 31,
+            "output_tokens": 1155
+          }
+        }
+      }
+    ],
+    "projects/-fixture-playground/11111111-1111-4111-8111-000000000011.jsonl": [
+      {
+        "agentName": "r6t2dv-tester",
+        "sessionId": "11111111-1111-4111-8111-000000000011",
+        "type": "agent-name"
+      },
+      {
+        "cwd": "/fixture/playground/.claude/worktrees/train-test",
+        "entrypoint": "cli",
+        "gitBranch": "canary",
+        "sessionId": "11111111-1111-4111-8111-000000000011",
+        "timestamp": "2026-01-01T11:35:00.000Z",
+        "type": "user",
+        "uuid": "22222222-2222-4222-8222-000000000042",
+        "version": "2.1.0",
+        "message": {
+          "content": "<cross-session-message from=\"uds:/fixture/sockets/builder.sock\" from-name=\"builder\">\nFixture brief: drive the merge train's steps end to end before it lands.\n</cross-session-message>",
+          "role": "user"
+        },
+        "origin": {
+          "body": "Fixture brief: drive the merge train's steps end to end before it lands.",
+          "from": "uds:/fixture/sockets/builder.sock",
+          "kind": "peer",
+          "name": "builder"
+        }
+      },
+      {
+        "cwd": "/fixture/playground/.claude/worktrees/train-test",
+        "entrypoint": "cli",
+        "gitBranch": "canary",
+        "sessionId": "11111111-1111-4111-8111-000000000011",
+        "timestamp": "2026-01-01T11:55:00.000Z",
+        "type": "assistant",
+        "uuid": "22222222-2222-4222-8222-000000000043",
+        "version": "2.1.0",
+        "message": {
+          "content": [
+            {
+              "text": "The train's steps land in order and the queue holds.",
+              "type": "text"
+            }
+          ],
+          "id": "msg_fixture_046",
+          "model": "claude-sonnet-5-5",
+          "role": "assistant",
+          "usage": {
+            "cache_creation": {
+              "ephemeral_1h_input_tokens": 0,
+              "ephemeral_5m_input_tokens": 10250
+            },
+            "cache_creation_input_tokens": 10250,
+            "cache_read_input_tokens": 285000,
+            "input_tokens": 37,
+            "output_tokens": 1425
+          }
+        }
+      }
+    ],
+    "projects/-fixture-playground/11111111-1111-4111-8111-000000000012.jsonl": [
+      {
+        "agentName": "b7k2mq-reviewer",
+        "sessionId": "11111111-1111-4111-8111-000000000012",
+        "type": "agent-name"
+      },
+      {
+        "cwd": "/fixture/playground/.claude/worktrees/review-envy",
+        "entrypoint": "cli",
+        "gitBranch": "feat/feed-paint",
+        "sessionId": "11111111-1111-4111-8111-000000000012",
+        "timestamp": "2026-01-01T11:30:00.000Z",
+        "type": "user",
+        "uuid": "22222222-2222-4222-8222-000000000040",
+        "version": "2.1.0",
+        "message": {
+          "content": "<cross-session-message from=\"uds:/fixture/sockets/worker-envy.sock\" from-name=\"worker-envy\">\nFixture brief: review #104 round by round until it scores 5/5.\n</cross-session-message>",
+          "role": "user"
+        },
+        "origin": {
+          "body": "Fixture brief: review #104 round by round until it scores 5/5.",
+          "from": "uds:/fixture/sockets/worker-envy.sock",
+          "kind": "peer",
+          "name": "worker-envy"
+        }
+      },
+      {
+        "cwd": "/fixture/playground/.claude/worktrees/review-envy",
+        "entrypoint": "cli",
+        "gitBranch": "feat/feed-paint",
+        "sessionId": "11111111-1111-4111-8111-000000000012",
+        "timestamp": "2026-01-01T11:50:00.000Z",
+        "type": "assistant",
+        "uuid": "22222222-2222-4222-8222-000000000041",
+        "version": "2.1.0",
+        "message": {
+          "content": [
+            {
+              "text": "Round 1 of #104 reads well; the first paint skips the layout shift.",
+              "type": "text"
+            }
+          ],
+          "id": "msg_fixture_045",
+          "model": "claude-sonnet-5-5",
+          "role": "assistant",
+          "usage": {
+            "cache_creation": {
+              "ephemeral_1h_input_tokens": 0,
+              "ephemeral_5m_input_tokens": 10250
+            },
+            "cache_creation_input_tokens": 10250,
+            "cache_read_input_tokens": 285000,
+            "input_tokens": 37,
+            "output_tokens": 1425
+          }
+        }
+      }
+    ],
+    "projects/-fixture-playground/11111111-1111-4111-8111-000000000013.jsonl": [
+      {
+        "agentName": "worker-glm-flash",
+        "sessionId": "11111111-1111-4111-8111-000000000013",
+        "type": "agent-name"
+      },
+      {
+        "cwd": "/fixture/playground/.claude/worktrees/glm-rows",
+        "entrypoint": "cli",
+        "gitBranch": "feat/glm-rows",
+        "sessionId": "11111111-1111-4111-8111-000000000013",
+        "timestamp": "2026-01-01T11:30:00.000Z",
+        "type": "user",
+        "uuid": "22222222-2222-4222-8222-000000000040",
+        "version": "2.1.0",
+        "message": {
+          "content": "<cross-session-message from=\"uds:/fixture/sockets/builder.sock\" from-name=\"builder\">\nFixture task: the sidebar names a GLM session's model.\n</cross-session-message>",
+          "role": "user"
+        }
+      },
+      {
+        "cwd": "/fixture/playground/.claude/worktrees/glm-rows",
+        "entrypoint": "cli",
+        "gitBranch": "feat/glm-rows",
+        "sessionId": "11111111-1111-4111-8111-000000000013",
+        "timestamp": "2026-01-01T11:40:00.000Z",
+        "type": "assistant",
+        "uuid": "22222222-2222-4222-8222-000000000041",
+        "version": "2.1.0",
+        "message": {
+          "content": [{ "text": "On it: the row reads GLM 5.3 Flash.", "type": "text" }],
+          "model": "glm-5.3-flash[1m]",
+          "role": "assistant"
+        }
+      }
+    ],
+    "playground/attachments/3f0e7a52-1c4b-4d2a-9e6f-0000000000a1.png": {
+      "$base64": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="
+    },
+    "playground/attachments/3f0e7a52-1c4b-4d2a-9e6f-0000000000a2.png": {
+      "$base64": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="
+    },
+    "playground/attachments/3f0e7a52-1c4b-4d2a-9e6f-0000000000a3.pdf": {
+      "$base64": "JVBERi0xLjQKJSVFT0YK"
+    },
+    "playground/attachments/3f0e7a52-1c4b-4d2a-9e6f-0000000000a4.txt": {
+      "$base64": "Rml4dHVyZTogbm90ZXMgZm9yIHRoZSBib2FyZC4K"
+    },
+    "playground/bundles/plan.json": {
+      "generatedAt": "2026-01-01T11:50:00.000Z",
+      "landingNext": [
+        {
+          "id": "F1",
+          "title": "Fixture: tighter sidebar rows",
+          "finish": "2026-01-01T12:25:00.000Z"
+        },
+        {
+          "id": "F4",
+          "title": "Fixture: board colours",
+          "finish": "2026-01-01T20:40:00.000Z"
+        },
+        {
+          "id": "F2",
+          "title": "Fixture: a quieter empty state",
+          "finish": "2026-01-01T13:30:00.000Z"
+        }
+      ],
+      "lanes": [
+        {
+          "id": "easy",
+          "title": "Easy",
+          "worker": "worker-greed",
+          "items": [
+            {
+              "id": "F1",
+              "bundle": "F1",
+              "title": "Fixture: tighter sidebar rows",
+              "outcome": "Fixture line: the sidebar's rows sit a little closer, so more sessions fit without scrolling.",
+              "priority": "P1",
+              "difficulty": 1,
+              "estimateHours": 0.5,
+              "estimateRange": "0.5-0.7h",
+              "visible": true,
+              "dependsOn": [],
+              "status": "IN REVIEW",
+              "start": "2026-01-01T11:30:00.000Z",
+              "finish": "2026-01-01T12:25:00.000Z",
+              "pr": "https://github.com/example/fixture/pull/102"
+            },
+            {
+              "id": "F2",
+              "bundle": "F2",
+              "title": "Fixture: a quieter empty state",
+              "outcome": "Fixture line: an empty table says so in one muted line instead of a large picture.",
+              "priority": "P2",
+              "difficulty": 2,
+              "estimateHours": 1.0,
+              "estimateRange": "1.0-1.4h",
+              "visible": true,
+              "dependsOn": [],
+              "status": "READY",
+              "start": "2026-01-01T12:25:00.000Z",
+              "finish": "2026-01-01T13:30:00.000Z"
+            },
+            {
+              "id": "F3",
+              "bundle": "F3",
+              "title": "Fixture: times in one format",
+              "outcome": "Fixture line: every time on the dashboard reads the same way, so nothing needs a second look.",
+              "priority": "P3",
+              "difficulty": 1,
+              "estimateHours": 0.8,
+              "estimateRange": "0.8-1.0h",
+              "visible": true,
+              "dependsOn": ["F2"],
+              "status": "WAITS ON F2",
+              "start": "2026-01-01T13:30:00.000Z",
+              "finish": "2026-01-01T14:20:00.000Z"
+            }
+          ]
+        },
+        {
+          "id": "medium",
+          "title": "Medium",
+          "worker": "worker-lust-2",
+          "items": [
+            {
+              "id": "F4",
+              "bundle": "F4",
+              "title": "Fixture: board colours",
+              "outcome": "Fixture line: each status on the board gets its own quiet colour, so a glance tells what moved.",
+              "priority": "P2",
+              "difficulty": 3,
+              "estimateHours": 1.6,
+              "estimateRange": "1.6-2.2h",
+              "visible": true,
+              "dependsOn": [],
+              "status": "IN FLIGHT",
+              "start": "2026-01-01T11:00:00.000Z",
+              "finish": "2026-01-01T20:40:00.000Z",
+              "pr": "https://github.com/example/fixture/pull/101"
+            },
+            {
+              "id": "F5",
+              "bundle": "F5",
+              "title": "Fixture: a search box that remembers",
+              "outcome": "Fixture line: the search box keeps what you typed when you come back to the page.",
+              "priority": "P2",
+              "difficulty": 3,
+              "estimateHours": 1.5,
+              "estimateRange": "1.5-2.0h",
+              "visible": true,
+              "dependsOn": ["F4"],
+              "status": "WAITS ON F4",
+              "start": "2026-01-01T20:40:00.000Z",
+              "finish": "2026-01-01T22:10:00.000Z"
+            }
+          ]
+        },
+        {
+          "id": "hard",
+          "title": "Hard",
+          "worker": null,
+          "items": [
+            {
+              "id": "F6",
+              "bundle": "F6",
+              "title": "Fixture: one view of every queue",
+              "outcome": "Fixture line: every queue shows on one page, with who holds each item and when it should land.",
+              "priority": "P1",
+              "difficulty": 4,
+              "estimateHours": 2.8,
+              "estimateRange": "2.8-3.9h",
+              "visible": true,
+              "dependsOn": ["F4", "F5"],
+              "status": "WAITS ON F4, F5",
+              "start": "2026-01-01T22:10:00.000Z",
+              "finish": "2026-01-02T01:00:00.000Z"
+            }
+          ]
+        }
+      ],
+      "inFlight": [
+        {
+          "id": "F1",
+          "worker": "worker-greed",
+          "pr": "https://github.com/example/fixture/pull/102",
+          "since": "2026-01-01T11:30:00.000Z",
+          "eta": "2026-01-01T12:25:00.000Z",
+          "outcome": "Fixture line: the sidebar's rows sit a little closer, so more sessions fit without scrolling."
+        },
+        {
+          "id": "F4",
+          "worker": "worker-lust-2",
+          "pr": "https://github.com/example/fixture/pull/101",
+          "since": "2026-01-01T09:05:00.000Z",
+          "eta": "2026-01-01T20:40:00.000Z",
+          "outcome": "Fixture line: each status on the board gets its own quiet colour, so a glance tells what moved."
+        }
+      ],
+      "doneToday": [
+        {
+          "pr": "#97",
+          "at": "2026-01-01T08:50:00.000Z",
+          "url": "https://github.com/example/fixture/pull/97",
+          "outcome": "Fixture line: pasting into the composer keeps the text's line breaks."
+        }
+      ],
+      "later": [
+        {
+          "id": "F9",
+          "title": "Fixture: parked idea",
+          "priority": "P3",
+          "why": "parked",
+          "outcome": "Fixture line: an idea waiting until it is raised again."
+        }
+      ]
+    },
+    "playground/extensions/example/.git/FETCH_HEAD": "",
+    "playground/extensions/example/lists/ignored-paths.json": ["dist/", "coverage/"],
+    "playground/extensions/example/rules/review-checklist.md": "A made-up rule: every change names its test.\n",
+    "playground/extensions/example/rules/ship-window.md": "A made-up rule: ship before 16:00.\n",
+    "playground/extensions/example/settings.json": {},
+    "playground/extensions/example/skills/deploy-notes/SKILL.md": "---\nname: deploy-notes\ndescription: A made-up skill for example's deploy notes.\n---\n\nA made-up skill for example's deploy notes.\n",
+    "playground/extensions/example/skills/end-of-day/SKILL.md": "---\nname: end-of-day\ndescription: A made-up skill that writes example's end-of-day lines.\n---\n\nA made-up skill that writes example's end-of-day lines.\n",
+    "playground/extensions/example/skills/incident-drill/SKILL.md": "---\nname: incident-drill\ndescription: A made-up skill for an incident drill.\n---\n\nA made-up skill for an incident drill.\n",
+    "playground/extensions/example/skills/release-notes/SKILL.md": "---\nname: release-notes\ndescription: A made-up skill that drafts release notes.\n---\n\nA made-up skill that drafts release notes.\n",
+    "playground/extensions/login": "taylor\n",
+    "playground/extensions/taylor/.git/FETCH_HEAD": "",
+    "playground/extensions/taylor/rules/short-replies.md": "A made-up rule: keep replies short.\n",
+    "playground/extensions/taylor/settings.json": {
+      "ext.links": { "example": ["example"], "teammate-tests": ["example", "example-labs"] },
+      "ext.order": ["taylor", "example", "teammate-tests"],
+      "ext.repos": { "teammate-tests": "someone-else/qa-skills" },
+      "usage.accounts": [
+        { "email": "pat@example.com", "label": "work", "provider": "claude" },
+        { "label": "zai", "provider": "glm" }
+      ]
+    },
+    "playground/extensions/taylor/skills/daily-notes-extra/SKILL.md": "---\nname: daily-notes-extra\ndescription: A made-up skill for taylor's own notes.\n---\n\nA made-up skill for taylor's own notes.\n",
+    "playground/extensions/taylor/skills/end-of-day/SKILL.md": "---\nname: end-of-day\ndescription: A made-up skill that writes taylor's own end-of-day lines.\n---\n\nA made-up skill that writes taylor's own end-of-day lines.\n",
+    "playground/extensions/teammate-tests/lists/flaky-tests.json": ["login.spec.ts"],
+    "playground/extensions/teammate-tests/settings.json": {},
+    "playground/extensions/teammate-tests/skills/end-of-day/SKILL.md": "---\nname: end-of-day\ndescription: A made-up skill: a teammate's end-of-day lines.\n---\n\nA made-up skill: a teammate's end-of-day lines.\n",
+    "playground/extensions/teammate-tests/skills/smoke-run/SKILL.md": "---\nname: smoke-run\ndescription: A made-up skill that runs a smoke test.\n---\n\nA made-up skill that runs a smoke test.\n",
+    "playground/extensions/teammate-tests/skills/test-plan/SKILL.md": "---\nname: test-plan\ndescription: A made-up skill that drafts a test plan.\n---\n\nA made-up skill that drafts a test plan.\n",
+    "playground/previews/pages.jsonl": [
+      {
+        "at": "2026-01-01T11:30:00.000Z",
+        "by": "worker-envy",
+        "file": "sidebar-mock.html",
+        "for": "planner",
+        "title": "Fixture: sidebar spacing, two options side by side"
+      }
+    ],
+    "playground/previews/sidebar-mock.html": "<!doctype html><title>Sidebar spacing</title><style>body{margin:0;padding:32px;font:14px system-ui;background:#fafafa;color:#18181b;display:grid;gap:24px;grid-template-columns:1fr 1fr}@media (prefers-color-scheme:dark){body{background:#18181b;color:#fafafa}}section{border:1px solid #a1a1aa;border-radius:8px;padding:16px}h2{font-size:14px;margin:0 0 12px}p{margin:0;padding:6px 0}.tight p{padding:2px 0}</style><section><h2>Option A: 6px rows</h2><p>Builder</p><p>Planner</p><p>Ops</p></section><section class=\"tight\"><h2>Option B: 2px rows</h2><p>Builder</p><p>Planner</p><p>Ops</p></section>",
+    "playground/previews/sidebar-mock.txt": "Fixture: sidebar spacing, two options side by side",
+    "playground/previews/spinner-dark-1.png": {
+      "$base64": "iVBORw0KGgoAAAANSUhEUgAAAUAAAAC0CAIAAABqhmJGAAADHUlEQVR42u3cy20CQRBFUcJAcjDsyD8eViYBW8PQn3o1B90109X0Uc/C8u1+/5EU2s0WSABLAlgSwBLAkgCWBLAkgCWAJQEsCWAJYEkASwJYEsASwJIAlgSwJIAlgCUBLAlgCWBJAEsCWBLAEsCSAJYEsCSAJYAlASwJYAlgSQBLAlgSwBLAkgCWBLAEsF2QAJYEsCSAJYAV0uvvz+Px/CdbB7DKoT0OGGaAVdHtCcAkA6xCdE8Dxhhg7af7JWCMAdZOukMAYwyw9tAdCBhjgLVB71jADAOsdXRnAMYYYK3T+/68v5ZhgFVd74knMgywNusd8nSGAdZSupMWgzHAmqt3waoYBljjAS9eG8AAK1UvwwBrjN7tS2UYYKXqZRhgZetlGGB9DLjgygEGmN5UvQwDTG+2XoYBBjhb73HDfm6A6WVYAIcAjpsIYIDp7QyYYYBdvy5hAUwvwwALYIABprePXoYBBhhgAZwJuM2YAAPs+nUJC2CAAQZY3p+9RQMMMMAAA+z92Vu0AHb9uoQBFsAAAwwwwAIYYIABtgsAAwywAAYYYIABFsAAAwyw5gBuPDXAALuOjCyAnWYjAyyn2cgAAwwwwAA7zUYWwE6zkQGW02xkgAE2sgD2HyrMC7DcSIYFWAADDLC3SpMKYMfapADLi6UxAQa45eF2/QIMsBkFsPNtOoDliJsOYPU/5fQCDHDqWW85FMC6ymVFL8AAp5541y/ADKceenoBBjj16PeYAmBd8fTTCzDDqQboBVhHGVSTELpsgAUDvQArlgS9AOsrGLts1F+hAGaYXoA1H8kyKjVXJYCbGJ4HptRiBHBzxqPw7H26AL604dOW1j9RADP8MbNJXyuAtcIwvQALY3QBVrJhPwrAimTshwBYkYxtPsCKZGzDAVYkY5sMsPIk21KAdcW/xBTAkgCWAJYEsCSAJQEsASwJYEkASwJYAlgSwJIAlgCWBLAkgCUBLAEsCWBJAEsASwJYEsCSAJYAlgSwJIAlASwBLAlgSQBLAEsCWBLAkgCWAJYEsCSAJQEsASwJYEkASwBLAljS5H4BwwgakSbsQDEAAAAASUVORK5CYII="
+    },
+    "playground/previews/spinner-dark-1.txt": "Fixture: the spinner on the dark theme",
+    "playground/previews/spinner-light-1.png": {
+      "$base64": "iVBORw0KGgoAAAANSUhEUgAAAUAAAAC0CAIAAABqhmJGAAADG0lEQVR42u3czW0qQRCFUcJAcv6ZIZEDK5OArWHon7o15xNr0zXUUc/i6d1ekmK7eQQSwJIAlgSwBLAkgCUBLAlgCWBJAEsCWAJYEsCSAJYEsASwJIAlASwJYAlgSQBLAlgCWBLAkgCWBLAEsCSAJQEsCWAJYEkASwJYAlgSwJIAlgSwBLAkgCUBLAEsCWBJAEsCWAJYId3vP399Ho/nPx+PDmCVQ3scMMwAq6LbE4BJBliF6J4GjDHA2k/3S8AYA6yddIcAxhhg7aE7EDDGAGuD3rGAGQZY6+jOAIwxwFqn9/15/1mGAVZ1vSe+kWGAtVnvkG9nGGAtpTvpMBgDrLl6F5yKYYA1HvDiswEMsFL1MgywxujdflSGAVaqXoYBVrZehgHWx4ALnhxggOlN1cswwPRm62UYYICz9R437OcGmF6GBXAI4LiJAAaY3s6AGQbY9esSFsD0MgywAAYYYHr76GUYYIABFsCZgNuMCTDArl+XsAAGGGCA5f3ZWzTAAAMMMMDen71FC2DXr0sYYAEMMMAAAyyAAQYYYAEMMMACGGCAAQZYAAMMMMCaA7jx1AAD7DoysgC2zUYGWLbZyAADDDDAANtmIwtg22xkgGWbjQwwwEYWwP6HCvMCLDeSYQEWwAAD7K3SpALYWpsUYHmxNCbAALdcbtcvwACbUQDbb9MBLCtuOoDVf8vpBRjg1F1vORTAusplRS/AAKduvOsXYIZTl55egAFOXf0eUwCsK24/vQAznGqAXoB1lEE1CaHHBlgw0AuwYknQC7C+grHLRv0TCmCG6QVY85Eso1LzVAK4ieF5YEodRgA3ZzwKz95vF8CXNnza0vpvFMAMf8xs0p8VwFphmF6AhTG6ACvZsB8FYEUy9kMArEjGHj7AimTsgQOsSMYeMsDKk+yRAqwr/ktMASwJYAlgSQBLAlgSwBLAkgCWBLAkgCWAJQEsCWAJYEkASwJYEsASwJIAlgSwBLAkgCUBLAlgCWBJAEsCWBLAEsCSAJYEsASwJIAlASwJYAlgSQBLAlgSwBLAkgCWBLAEsCSAJU3uF7Ps3VfJB2mAAAAAAElFTkSuQmCC"
+    },
+    "playground/previews/spinner-light-1.txt": "Fixture: the spinner on the light theme, at rest",
+    "playground/previews/spinner-light-2.png": {
+      "$base64": "iVBORw0KGgoAAAANSUhEUgAAAUAAAAC0CAIAAABqhmJGAAADGklEQVR42u3dTW7CMBSFUZaBxP53htQ9MAKJWVFV8mPn3ZfziTGxTY5sqZBeHpJiu1gCCWBJAEsCWAJYEsCSAJYEsASwJIAlASwBLAlgSQBLAlgCWBLAkgCWBLAEsCSAJQEsASwJYEkASwJYAlgSwJIAlgSwBLAkgCUBLAEsCWBJAEsCWAJYEsCSAJYAlgSwJIAlASwBrJDu9591L0sHsMLQwgyw+rglGWA1oYsxwIqnizHAiqeLMcCKp/t+Xa+318uHArBS9TIMsMLofgLGGGBN1bvxbT/1Mgyw9tc76Ip/AWYYYFX5LuQKvQwDrPV05wzmX8AYA0xvuT/JLtLLMMAAV/w2BcAAK1UvwwBrH72HD5VhgJWql2GAla2XYYC1GHDBkQMMML3ZP99jGGB6s398yzDAAGf/dB5ggOnNfvAFwwADnP3YGoABprczYIYBtv3ahAUwvQwDLIABBpjebo9cZhhggAEWwGmA20wTYIBtvzZhAQwwwADL+dkpGmCAAQYYYOdnp2gBbPu1CQMsgAEGGGCABTDAAAMsgAEGWAADDDDAAAtggAEGWGMAN541wADbge3AAhhggAEWwAADDDDAAAMMMMACGGCAARbAAAMMMMAC2BM5PJEDYNmEbb8AC2CAAXaKdn4WwAADDLCcop2fAQbYfycUwAADLIAZphdgAQwwwAwHz4tegM8OONHwr/EDDLBNOH5G9AJsE46fDsAAM2wiAjjtvq9/6/eYBcA6491PL8AMpxqgF2B9y6CahNBhAywY6AVYsSToBVibYBxlo/4IBTDD9AKs8UimUak5KgHcxPA4MKUGI4CbM94Lz7FXF8CnNrza0vwrCmCGFzMb9LYCWDMM0wuwMEYXYCUb9qEArEjGPgiAFcnY4gOsSMYWHGBFMrbIACtPsiUFWGf8JqYAlgSwBLAkgCUBLAlgCWBJAEsCWBLAEsCSAJYEsASwJIAlASwJYAlgSQBLAlgCWBLAkgCWBLAEsCSAJQEsCWAJYEkASwJYAlgSwJIAlgSwBLAkgCUBLAlgCWBJAEsCWAJYEsCSBvcEwUHdVyyXELYAAAAASUVORK5CYII="
+    },
+    "playground/previews/spinner-preview.html": "<!doctype html><title>Spinner</title><style>body{margin:0;display:grid;place-items:center;height:100vh;gap:16px;grid-auto-flow:column;font:12px system-ui;background:#fafafa;color:#18181b}@media (prefers-color-scheme:dark){body{background:#18181b;color:#fafafa}}.ring{width:48px;height:48px;border-radius:50%;border:5px solid #a1a1aa;border-top-color:currentColor;animation:spin .8s linear infinite}.slow{animation-duration:1.6s}@keyframes spin{to{transform:rotate(1turn)}}</style><div class=\"ring\"></div><div class=\"ring slow\"></div>",
+    "playground/previews/spinner-preview.txt": "Fixture: both speeds, live",
+    "playground/previews/system-item-1.png": {
+      "$base64": "iVBORw0KGgoAAAANSUhEUgAAAUAAAAC0CAIAAABqhmJGAAAB1ElEQVR42u3csQnAIBRF0T+Lc1hniAxm7ZypMoBpVISI5/AmEG6lGA+wrXAEIGBAwICAQcCAgAEBAwIGAQMCBgQMAgYEDAgYEDAIGBAwIGBAwCBgQMCAgEHAgIABAQMCBgEDAgYEDAgYBAwIGBAwCBgQMCBgQMAgYEDAgIBBwICAAQEDAgYBAwIGBAwIGAQMCBgQMAgYEDAgYEDAIGBAwICAAQGDgAEBAwIGAQMCBgQMCBgEDAgYEDAgYBAwIGBAwCBgQMCAgAEBg4ABAU/K+TJrJ2ABm4AFLGATsIAFbAIWsAlYwAI2AR8ecKp3OwGbgDcI+LPe4YaB+EO9GgYBg4AFDAIWMAgYEDAIWMDgHli9cPxLrFKqrZ48BLyKugSMgE3AAhawgBGwgAWMXylBwICAAQEDAgYBAwIGBAwCBgQMCBgQMAgYEDAgYEDAIGBAwICAQcCAgAEBAwIGAQMCBgQMCBgEDAgYEDAIGBAwIGBAwCBgQMCAgAEBg4ABAQMCBgEDAgYEDAgYBAwIGBAwCBgQMCBgQMAgYEDAgIABAYOAAQEDAgYBAwIGBAwIGAQMCBgQMCBgEDAgYEDAIGBAwICAAQGDgAEBAwIGATsCEDAgYKDHCyE1Nmw4thWpAAAAAElFTkSuQmCC"
+    },
+    "playground/previews/system-item-1.txt": "Fixture: the System row with its dot and readings",
+    "playground/roster.json": {
+      "agents": [
+        {
+          "kind": "dispatcher",
+          "name": "dispatcher",
+          "role": "manager",
+          "status": "working",
+          "task": "Run the dashboard",
+          "title": "Dispatch"
+        },
+        {
+          "backlogNext": "1",
+          "kind": "builder",
+          "name": "builder",
+          "role": "manager",
+          "status": "working",
+          "task": "Lead the workers",
+          "title": "Lead: workers"
+        },
+        {
+          "kind": "ops",
+          "name": "ops",
+          "role": "manager",
+          "status": "working",
+          "task": "Lead the runners and ops",
+          "title": "Lead: ops"
+        },
+        {
+          "kind": "planner",
+          "name": "planner",
+          "role": "manager",
+          "status": "working",
+          "task": "Order the asks and keep the plan",
+          "title": "Plan: order of work"
+        },
+        {
+          "branch": "feat/feed-paint",
+          "kind": "worker",
+          "lastReport": "Fixture report: the usage window is nearly out, parking until the reset",
+          "lastReportAt": "2026-01-01T11:05:00.000Z",
+          "name": "worker-envy",
+          "pr": "https://github.com/example/fixture/pull/104",
+          "repo": "example/fixture",
+          "role": "worker",
+          "status": "parked",
+          "task": "Fixture task: speed up the Feed's first paint",
+          "title": "Feed first paint"
+        },
+        {
+          "branch": "fix/sidebar-spacing",
+          "eta": "2026-01-01T12:25:00.000Z",
+          "kind": "worker",
+          "lastReport": "Fixture plan: row padding 8px to 6px",
+          "lastReportAt": "2026-01-01T11:15:00.000Z",
+          "name": "worker-greed",
+          "pr": "https://github.com/example/fixture/pull/102",
+          "repo": "example/fixture",
+          "role": "worker",
+          "status": "working",
+          "task": "Fixture task: tighten the sidebar's row spacing",
+          "title": "Sidebar spacing",
+          "workspace": "workspace:4"
+        },
+        {
+          "branch": "feat/board-colours",
+          "eta": "2026-01-01T20:40:00.000Z",
+          "kind": "worker",
+          "lastReport": "Fixture report: #101 round 2 is 4/5",
+          "lastReportAt": "2026-01-01T11:25:00.000Z",
+          "name": "worker-lust-2",
+          "pr": "https://github.com/example/fixture/pull/101",
+          "repo": "example/fixture",
+          "role": "worker",
+          "status": "working",
+          "task": "Fixture task: give each Board status its own colour",
+          "ticket": "FIX-101",
+          "title": "Board colours",
+          "workspace": "workspace:5"
+        },
+        {
+          "kind": "reviewer",
+          "name": "b7k2mq-reviewer",
+          "role": "worker",
+          "status": "working",
+          "task": "Fixture task: review #104 round by round until it scores 5/5",
+          "worker": "worker-envy"
+        },
+        {
+          "kind": "reviewer",
+          "name": "h4n8zt-reviewer",
+          "role": "worker",
+          "status": "working",
+          "task": "Fixture task: review #101 round by round until it scores 5/5",
+          "worker": "worker-lust-2"
+        },
+        {
+          "kind": "tester",
+          "name": "p9c3wx-tester",
+          "role": "worker",
+          "status": "working",
+          "task": "Fixture task: drive #101 on the fixture until it passes",
+          "worker": "worker-lust-2"
+        },
+        {
+          "branch": "fix/composer-paste",
+          "kind": "worker",
+          "lastReport": "Fixture report: #97 merged",
+          "lastReportAt": "2026-01-01T08:50:00.000Z",
+          "name": "worker-sloth",
+          "pr": "https://github.com/example/fixture/pull/97",
+          "repo": "example/fixture",
+          "role": "worker",
+          "status": "merged",
+          "task": "Fixture task: a pasted image keeps its file name",
+          "title": "Composer paste",
+          "workspace": "workspace:6"
+        },
+        {
+          "branch": "fix/kettle-timer",
+          "eta": "2026-01-01T11:50:00.000Z",
+          "kind": "worker",
+          "lastReport": "Fixture report: tests green, opening the PR",
+          "lastReportAt": "2026-01-01T10:50:00.000Z",
+          "name": "worker-wrath",
+          "repo": "example/fixture",
+          "role": "worker",
+          "status": "working",
+          "task": "Fixture task: the kettle timer keeps its last setting",
+          "title": "Kettle timer",
+          "workspace": "workspace:12"
+        },
+        {
+          "branch": "LM-7-row-wrap",
+          "eta": "2026-01-01T13:30:00.000Z",
+          "kind": "worker",
+          "lastReport": "Fixture report: rows wrap whole",
+          "lastReportAt": "2026-01-01T11:59:00.000Z",
+          "name": "worker-bright-lark",
+          "repo": "example/fixture",
+          "role": "worker",
+          "status": "working",
+          "task": "Fixture task: the title cuts from its end, model and effort always visible",
+          "title": "Row wrap",
+          "workspace": "workspace:14"
+        },
+        {
+          "branch": "feat/thread-titles",
+          "eta": "2026-01-01T12:40:00.000Z",
+          "kind": "worker",
+          "lastReport": "Fixture report: the first ask titles the thread",
+          "lastReportAt": "2026-01-01T11:55:00.000Z",
+          "name": "k3m9px-worker",
+          "pr": "https://github.com/example/fixture/pull/106",
+          "repo": "example/fixture",
+          "role": "worker",
+          "status": "working",
+          "task": "Fixture task: a thread takes its title from the chat's first ask",
+          "title": "Thread titles",
+          "workspace": "workspace:21"
+        },
+        {
+          "kind": "tester",
+          "name": "r6t2dv-tester",
+          "role": "worker",
+          "status": "working",
+          "task": "Fixture task: drive the merge train's steps end to end",
+          "title": "Test the train",
+          "worker": "builder"
+        },
+        {
+          "kind": "reviewer",
+          "name": "q7w8f2-reviewer",
+          "role": "worker",
+          "status": "working",
+          "task": "Fixture task: review #106 round by round until it scores 5/5",
+          "worker": "k3m9px-worker"
+        },
+        {
+          "kind": "runner",
+          "name": "runner-pride",
+          "role": "runner",
+          "status": "running",
+          "task": "Keep the dashboard on the newest canary",
+          "title": "Dashboard runner",
+          "workspace": "workspace:7",
+          "schedule": "always"
+        },
+        {
+          "name": "runner-calm-dial",
+          "role": "runner",
+          "schedule": "*/5 * * * *",
+          "status": "running",
+          "task": "Read each session's transcript",
+          "title": "Session ingest",
+          "workspace": "workspace:18"
+        },
+        {
+          "name": "runner-quiet-lamp",
+          "role": "runner",
+          "schedule": "0 5 * * *",
+          "status": "running",
+          "task": "Post the morning usage note",
+          "title": "Morning usage note",
+          "workspace": "workspace:19"
+        }
+      ],
+      "backlog": [
+        "Fixture: a first entry, settled already",
+        "Fixture: tidy the Templates list",
+        "A compact mode for the status table",
+        "Fix: the System panel's clock drifts after a sleep"
+      ],
+      "updatedAt": "2026-01-01T11:59:00.000Z"
+    },
+    "playground/usage-alex.json": {
+      "account": "alex@example.com",
+      "rate_limits": {
+        "five_hour": {
+          "resets_at": 1767276600,
+          "used_percentage": 71
+        },
+        "seven_day": {
+          "resets_at": 1767441600,
+          "used_percentage": 100
+        }
+      },
+      "writtenAt": "2026-01-01T11:59:00.000Z"
+    },
+    "playground/usage-jo.json": {
+      "account": "jo@example.com",
+      "rate_limits": {
+        "five_hour": {
+          "resets_at": 1767276600,
+          "used_percentage": 12
+        },
+        "seven_day": {
+          "resets_at": 1767528000,
+          "used_percentage": 41
+        }
+      },
+      "writtenAt": "2026-01-01T11:58:00.000Z"
+    },
+    "playground/usage-pat.json": {
+      "account": "pat@example.com",
+      "rate_limits": {
+        "five_hour": {
+          "resets_at": 1767276600,
+          "used_percentage": 42
+        },
+        "seven_day": {
+          "resets_at": 1767528000,
+          "used_percentage": 18
+        }
+      },
+      "writtenAt": "2026-01-01T11:59:00.000Z"
+    },
+    "playground/usage-robin.json": {
+      "account": "robin@example.com",
+      "rate_limits": {
+        "five_hour": {
+          "resets_at": 1767276600,
+          "used_percentage": 5
+        },
+        "seven_day": {
+          "resets_at": 1767528000,
+          "used_percentage": 23
+        }
+      },
+      "writtenAt": "2026-01-01T11:20:00.000Z"
+    },
+    "playground/usage-merritt.json": {
+      "account": "merritt@example.com",
+      "rate_limits": {
+        "five_hour": {
+          "resets_at": 1767276600,
+          "used_percentage": 35
+        },
+        "seven_day": {
+          "resets_at": 1767614400,
+          "used_percentage": 62
+        }
+      },
+      "writtenAt": "2026-01-01T11:59:00.000Z"
+    },
+    "playground/usage.json": {
+      "account": "pat@example.com",
+      "rate_limits": {
+        "five_hour": {
+          "resets_at": 1767276600,
+          "used_percentage": 42
+        },
+        "seven_day": {
+          "resets_at": 1767528000,
+          "used_percentage": 18
+        }
+      },
+      "rotation": {
+        "pool": [
+          { "account": "alex@example.com", "ending": true, "endsAt": null, "renewsOn": null },
+          { "account": "jo@example.com", "ending": false, "endsAt": null, "renewsOn": 3 },
+          {
+            "account": "pat@example.com",
+            "ending": true,
+            "endsAt": "2026-01-10T18:30:00.000Z",
+            "renewsOn": null
+          },
+          { "account": "robin@example.com", "ending": false, "endsAt": null, "renewsOn": null },
+          { "account": "merritt@example.com", "ending": true, "endsAt": null, "renewsOn": null }
+        ]
+      },
+      "writtenAt": "2026-01-01T11:59:00.000Z"
+    },
+    "playground/zai-usage.json": {
+      "windows": {
+        "fiveHour": {
+          "cap": 28000,
+          "resetsAt": "2026-01-01T15:00:00.000Z",
+          "used": 11480
+        },
+        "week": {
+          "cap": 140000,
+          "resetsAt": "2026-01-05T00:00:00.000Z",
+          "used": 39900
+        }
+      },
+      "writtenAt": "2026-01-01T11:59:00.000Z"
+    },
+    "playground/merge-queue.json": {
+      "parked": [
+        {
+          "item": "Kettle timer",
+          "pr": 103,
+          "why": "waiting on its base branch"
+        }
+      ],
+      "queue": [
+        {
+          "etaMerge": "2026-01-01T12:45:00.000Z",
+          "item": "Board status colours",
+          "nextGate": "tester",
+          "pr": 101
+        },
+        {
+          "item": "Sidebar row spacing",
+          "pr": 102
+        },
+        {
+          "etaMerge": "2026-01-01T13:30:00.000Z",
+          "item": "Kettle timer sound",
+          "pr": 107
+        }
+      ],
+      "updatedAt": "2026-01-01T11:30:00.000Z"
+    },
+    "playground/ops/jobs.json": {
+      "jobs": [
+        {
+          "heartbeat": "ops-awake",
+          "name": "ops-awake",
+          "schedule": {
+            "always": true
+          }
+        },
+        {
+          "heartbeat": "ops-changelog",
+          "name": "ops-changelog",
+          "schedule": {
+            "cron": "*/5 * * * *"
+          }
+        },
+        {
+          "heartbeat": "ops-checks",
+          "name": "ops-checks",
+          "schedule": {
+            "every": 3600
+          }
+        },
+        {
+          "disabled": true,
+          "disabledWhy": "Fixture: paused on purpose",
+          "heartbeat": "ops-consultant",
+          "name": "ops-consultant",
+          "schedule": {
+            "cron": "*/10 * * * *"
+          }
+        },
+        {
+          "heartbeat": "ops-dashboard",
+          "name": "ops-dashboard",
+          "schedule": {
+            "every": 3600
+          }
+        },
+        {
+          "disabled": true,
+          "disabledWhy": "Fixture: paused on purpose",
+          "heartbeat": "ops-fixture",
+          "name": "ops-fixture",
+          "schedule": {
+            "always": true
+          }
+        },
+        {
+          "disabled": true,
+          "disabledWhy": "Fixture: paused on purpose",
+          "heartbeat": "ops-linear-dm",
+          "name": "ops-linear-dm",
+          "schedule": {
+            "cron": "*/2 * * * *"
+          }
+        },
+        {
+          "disabled": true,
+          "disabledWhy": "Fixture: paused on purpose",
+          "heartbeat": "ops-loom-relay",
+          "name": "ops-loom-relay",
+          "schedule": {
+            "cron": "0 5 * * *"
+          }
+        },
+        {
+          "heartbeat": "ops-machine",
+          "name": "ops-machine",
+          "schedule": {
+            "cron": "* * * * *"
+          }
+        },
+        {
+          "heartbeat": "ops-merge-train",
+          "name": "ops-merge-train",
+          "schedule": {
+            "cron": "*/5 * * * *"
+          }
+        },
+        {
+          "heartbeat": "ops-merge-watch",
+          "name": "ops-merge-watch",
+          "schedule": {
+            "cron": "*/10 * * * *"
+          }
+        },
+        {
+          "heartbeat": "ops-report",
+          "name": "ops-report",
+          "schedule": {
+            "cron": "*/30 * * * *"
+          }
+        },
+        {
+          "heartbeat": "ops-slack-watch",
+          "name": "ops-slack-watch",
+          "schedule": {
+            "cron": "*/5 * * * *"
+          }
+        },
+        {
+          "heartbeat": "ops-sweep",
+          "name": "ops-sweep",
+          "schedule": {
+            "cron": "*/10 * * * *"
+          }
+        },
+        {
+          "heartbeat": "ops-tickets",
+          "name": "ops-tickets",
+          "schedule": {
+            "cron": "*/5 * * * *"
+          }
+        },
+        {
+          "heartbeat": "ops-unstick",
+          "name": "ops-unstick",
+          "schedule": {
+            "cron": "* * * * *"
+          }
+        },
+        {
+          "heartbeat": "ops-usage",
+          "name": "ops-usage",
+          "schedule": {
+            "cron": "* * * * *"
+          }
+        },
+        {
+          "disabled": true,
+          "disabledWhy": "Fixture: paused on purpose",
+          "heartbeat": "ops-usage-post",
+          "name": "ops-usage-post",
+          "schedule": {
+            "cron": "0 5 * * *"
+          }
+        },
+        {
+          "disabled": true,
+          "disabledWhy": "Fixture: paused on purpose",
+          "heartbeat": "ops-zai-usage",
+          "name": "ops-zai-usage",
+          "schedule": {
+            "cron": "*/5 * * * *"
+          }
+        }
+      ]
+    },
+    "playground/ops/ops-checks.json": {
+      "cycleSeconds": 3600,
+      "job": "ops-checks",
+      "lastBeatAt": "2026-01-01T11:59:00.000Z",
+      "lastResult": "ok",
+      "pid": 900030,
+      "startedAt": "2026-01-01T08:00:00.000Z"
+    },
+    "playground/ops/ops-dashboard.json": {
+      "cycleSeconds": 3600,
+      "job": "ops-dashboard",
+      "lastBeatAt": "2026-01-01T11:59:00.000Z",
+      "lastResult": "ok",
+      "pid": 900031,
+      "startedAt": "2026-01-01T08:00:00.000Z"
+    },
+    "playground/ops/ops-report.json": {
+      "cycleSeconds": 3600,
+      "job": "ops-report",
+      "lastBeatAt": "2026-01-01T11:59:00.000Z",
+      "lastResult": "report build: the sources folder is missing",
+      "pid": 900033,
+      "startedAt": "2026-01-01T08:00:00.000Z"
+    },
+    "playground/ops/report.json": {
+      "generatedAt": "2026-01-01T11:58:00.000Z",
+      "hash": "fx000003",
+      "history": "reports",
+      "findings": [
+        {
+          "item": "F4 Fixture: board colours",
+          "state": "waiting on its reviewer",
+          "why": "Fixture: the reviewer has not scored the latest push yet, 18 minutes after it went up",
+          "action": "Lust asked its reviewer to score the new head",
+          "owner": "worker-lust-2",
+          "since": "2026-01-01T11:40:00.000Z"
+        }
+      ],
+      "health": [
+        {
+          "label": "Dashboard",
+          "reading": "up",
+          "now": "2026-01-01T11:58:00.000Z"
+        },
+        {
+          "label": "Live updates",
+          "reading": "connected",
+          "now": "2026-01-01T11:58:00.000Z"
+        },
+        {
+          "label": "Transcript import",
+          "reading": "running",
+          "now": "2026-01-01T11:58:00.000Z"
+        },
+        {
+          "label": "Workers",
+          "reading": "all 3 busy",
+          "now": "2026-01-01T11:58:00.000Z"
+        },
+        {
+          "label": "Memory",
+          "reading": "41% used, Claude sessions 2.1 GB",
+          "now": "2026-01-01T11:58:00.000Z"
+        },
+        {
+          "label": "Swap",
+          "reading": "62% used",
+          "now": "2026-01-01T11:58:00.000Z"
+        },
+        {
+          "label": "5-hour window",
+          "reading": "22% used",
+          "now": "2026-01-01T11:58:00.000Z"
+        }
+      ],
+      "changes": [
+        {
+          "line": "Fixture: #102 now reads In review, 4/5, CI green",
+          "url": "https://github.com/example/fixture/pull/102"
+        },
+        {
+          "line": "Fixture: the Easy lane moved on to F2",
+          "url": null
+        }
+      ],
+      "merges": [
+        {
+          "line": "Fixture: #97 pasting into the composer keeps line breaks",
+          "url": "https://github.com/example/fixture/pull/97"
+        }
+      ],
+      "text": "REPORT fx000003 (fixture)",
+      "fields": {},
+      "seen": {},
+      "sentAt": "2026-01-01T11:58:00.000Z",
+      "sentHash": "fx000003"
+    },
+    "playground/ops/reports/2026-01-01T104500Z.json": {
+      "generatedAt": "2026-01-01T10:45:00.000Z",
+      "hash": "fx000001",
+      "history": "reports",
+      "findings": [
+        {
+          "item": "ops-tickets",
+          "state": "failing",
+          "why": "Fixture: the Linear read timed out twice",
+          "action": "Ops restarted the job",
+          "owner": "ops",
+          "since": "2026-01-01T10:30:00.000Z"
+        }
+      ],
+      "health": [
+        {
+          "label": "Dashboard",
+          "reading": "up",
+          "now": "2026-01-01T10:45:00.000Z"
+        },
+        {
+          "label": "Live updates",
+          "reading": "connected",
+          "now": "2026-01-01T10:45:00.000Z"
+        },
+        {
+          "label": "Transcript import",
+          "reading": "running",
+          "now": "2026-01-01T10:45:00.000Z"
+        },
+        {
+          "label": "Workers",
+          "reading": "all 3 busy",
+          "now": "2026-01-01T10:45:00.000Z"
+        },
+        {
+          "label": "Memory",
+          "reading": "35% used, Claude sessions 1.7 GB",
+          "now": "2026-01-01T10:45:00.000Z"
+        },
+        {
+          "label": "Swap",
+          "reading": "58% used",
+          "now": "2026-01-01T10:45:00.000Z"
+        },
+        {
+          "label": "5-hour window",
+          "reading": "12% used",
+          "now": "2026-01-01T10:45:00.000Z"
+        }
+      ],
+      "changes": [
+        {
+          "line": "Fixture: #97 merged",
+          "url": "https://github.com/example/fixture/pull/97"
+        }
+      ],
+      "merges": [
+        {
+          "line": "Fixture: #97 pasting into the composer keeps line breaks",
+          "url": "https://github.com/example/fixture/pull/97"
+        }
+      ],
+      "text": "REPORT fx000001 (fixture)"
+    },
+    "playground/ops/reports/2026-01-01T113000Z.json": {
+      "generatedAt": "2026-01-01T11:30:00.000Z",
+      "hash": "fx000002",
+      "history": "reports",
+      "findings": [],
+      "health": [
+        {
+          "label": "Dashboard",
+          "reading": "up",
+          "now": "2026-01-01T11:30:00.000Z"
+        },
+        {
+          "label": "Live updates",
+          "reading": "connected",
+          "now": "2026-01-01T11:30:00.000Z"
+        },
+        {
+          "label": "Transcript import",
+          "reading": "running",
+          "now": "2026-01-01T11:30:00.000Z"
+        },
+        {
+          "label": "Workers",
+          "reading": "2 of 3 busy",
+          "now": "2026-01-01T11:30:00.000Z"
+        },
+        {
+          "label": "Memory",
+          "reading": "38% used, Claude sessions 1.9 GB",
+          "now": "2026-01-01T11:30:00.000Z"
+        },
+        {
+          "label": "Swap",
+          "reading": "60% used",
+          "now": "2026-01-01T11:30:00.000Z"
+        },
+        {
+          "label": "5-hour window",
+          "reading": "18% used",
+          "now": "2026-01-01T11:30:00.000Z"
+        }
+      ],
+      "changes": [
+        {
+          "line": "Fixture: Wrath started F1",
+          "url": null
+        }
+      ],
+      "merges": [
+        {
+          "line": "Fixture: #97 pasting into the composer keeps line breaks",
+          "url": "https://github.com/example/fixture/pull/97"
+        }
+      ],
+      "text": "REPORT fx000002 (fixture)"
+    },
+    "playground/ops/reports/2026-01-01T115800Z.json": {
+      "generatedAt": "2026-01-01T11:58:00.000Z",
+      "hash": "fx000003",
+      "history": "reports",
+      "findings": [
+        {
+          "item": "F4 Fixture: board colours",
+          "state": "waiting on its reviewer",
+          "why": "Fixture: the reviewer has not scored the latest push yet, 18 minutes after it went up",
+          "action": "Lust asked its reviewer to score the new head",
+          "owner": "worker-lust-2",
+          "since": "2026-01-01T11:40:00.000Z"
+        }
+      ],
+      "health": [
+        {
+          "label": "Dashboard",
+          "reading": "up",
+          "now": "2026-01-01T11:58:00.000Z"
+        },
+        {
+          "label": "Live updates",
+          "reading": "connected",
+          "now": "2026-01-01T11:58:00.000Z"
+        },
+        {
+          "label": "Transcript import",
+          "reading": "running",
+          "now": "2026-01-01T11:58:00.000Z"
+        },
+        {
+          "label": "Workers",
+          "reading": "all 3 busy",
+          "now": "2026-01-01T11:58:00.000Z"
+        },
+        {
+          "label": "Memory",
+          "reading": "41% used, Claude sessions 2.1 GB",
+          "now": "2026-01-01T11:58:00.000Z"
+        },
+        {
+          "label": "Swap",
+          "reading": "62% used",
+          "now": "2026-01-01T11:58:00.000Z"
+        },
+        {
+          "label": "5-hour window",
+          "reading": "22% used",
+          "now": "2026-01-01T11:58:00.000Z"
+        }
+      ],
+      "changes": [
+        {
+          "line": "Fixture: #102 now reads In review, 4/5, CI green",
+          "url": "https://github.com/example/fixture/pull/102"
+        },
+        {
+          "line": "Fixture: the Easy lane moved on to F2",
+          "url": null
+        }
+      ],
+      "merges": [
+        {
+          "line": "Fixture: #97 pasting into the composer keeps line breaks",
+          "url": "https://github.com/example/fixture/pull/97"
+        }
+      ],
+      "text": "REPORT fx000003 (fixture)",
+      "fields": {},
+      "seen": {},
+      "sentAt": "2026-01-01T11:58:00.000Z",
+      "sentHash": "fx000003"
+    },
+    "projects/-fixture-playground/11111111-1111-4111-8111-00000000001b.jsonl": [
+      {
+        "agentName": "k3m9px-worker",
+        "sessionId": "11111111-1111-4111-8111-00000000001b",
+        "type": "agent-name"
+      },
+      {
+        "cwd": "/fixture/playground/.claude/worktrees/thread-titles",
+        "entrypoint": "cli",
+        "gitBranch": "feat/thread-titles",
+        "sessionId": "11111111-1111-4111-8111-00000000001b",
+        "timestamp": "2026-01-01T11:40:00.000Z",
+        "type": "user",
+        "uuid": "22222222-2222-4222-8222-00000000001b",
+        "version": "2.1.0",
+        "message": {
+          "content": "<cross-session-message from=\"uds:/fixture/sockets/builder.sock\" from-name=\"builder\">\nFixture task: a thread takes its title from the chat's first ask.\n</cross-session-message>",
+          "role": "user"
+        },
+        "origin": {
+          "body": "Fixture task: a thread takes its title from the chat's first ask.",
+          "from": "uds:/fixture/sockets/builder.sock",
+          "kind": "peer",
+          "name": "builder"
+        }
+      }
+    ],
+    "projects/-fixture-playground/11111111-1111-4111-8111-00000000001c.jsonl": [
+      {
+        "agentName": "q7w8f2-reviewer",
+        "sessionId": "11111111-1111-4111-8111-00000000001c",
+        "type": "agent-name"
+      },
+      {
+        "cwd": "/fixture/playground/.claude/worktrees/review-106",
+        "entrypoint": "cli",
+        "gitBranch": "review-106",
+        "sessionId": "11111111-1111-4111-8111-00000000001c",
+        "timestamp": "2026-01-01T11:45:00.000Z",
+        "type": "user",
+        "uuid": "22222222-2222-4222-8222-00000000001c",
+        "version": "2.1.0",
+        "message": {
+          "content": "<cross-session-message from=\"uds:/fixture/sockets/k3m9px-worker.sock\" from-name=\"k3m9px-worker\">\nFixture task: review #106 round by round until it scores 5/5.\n</cross-session-message>",
+          "role": "user"
+        },
+        "origin": {
+          "body": "Fixture task: review #106 round by round until it scores 5/5.",
+          "from": "uds:/fixture/sockets/k3m9px-worker.sock",
+          "kind": "peer",
+          "name": "k3m9px-worker"
+        }
+      }
+    ],
+    "projects/-fixture-playground/11111111-1111-4111-8111-000000000020.jsonl": [
+      {
+        "agentName": "dispatcher-2",
+        "sessionId": "11111111-1111-4111-8111-000000000020",
+        "type": "agent-name"
+      },
+      {
+        "cwd": "/fixture/playground",
+        "entrypoint": "cli",
+        "sessionId": "11111111-1111-4111-8111-000000000020",
+        "version": "2.1.0",
+        "timestamp": "2026-01-01T08:05:00.000Z",
+        "type": "user",
+        "uuid": "22222222-2222-4222-8222-000000000101",
+        "message": {
+          "content": "Fixture: run beside the first dispatcher and take what it hands you.",
+          "role": "user"
+        },
+        "origin": {
+          "kind": "human"
+        }
+      },
+      {
+        "cwd": "/fixture/playground",
+        "entrypoint": "cli",
+        "sessionId": "11111111-1111-4111-8111-000000000020",
+        "version": "2.1.0",
+        "effort": "high",
+        "timestamp": "2026-01-01T08:06:00.000Z",
+        "type": "assistant",
+        "uuid": "22222222-2222-4222-8222-000000000102",
+        "message": {
+          "content": [
+            {
+              "text": "Fixture: up beside the first dispatcher. Nothing waits on me yet.",
+              "type": "text"
+            }
+          ],
+          "model": "glm-5.3-flash",
+          "role": "assistant",
+          "id": "msg_fixture_0102"
+        }
+      }
+    ],
+    "projects/-fixture-playground/11111111-1111-4111-8111-000000000001/subagents/agent-fixture0002.jsonl": [
+      {
+        "agentId": "fixture0002",
+        "cwd": "/fixture/playground",
+        "isSidechain": true,
+        "sessionId": "11111111-1111-4111-8111-000000000001",
+        "message": {
+          "content": "Fixture: read the dashboard sidebar and say whether the sketch's bubble fits the row.",
+          "role": "user"
+        },
+        "timestamp": "2026-01-01T11:51:01.000Z",
+        "type": "user",
+        "uuid": "22222222-2222-4222-8222-000000000060"
+      },
+      {
+        "agentId": "fixture0002",
+        "cwd": "/fixture/playground",
+        "isSidechain": true,
+        "sessionId": "11111111-1111-4111-8111-000000000001",
+        "message": {
+          "content": [
+            {
+              "id": "toolu_fixture_read_1",
+              "input": {
+                "file_path": "/fixture/playground/web/next/src/components/dashboard/app-sidebar.tsx"
+              },
+              "name": "Read",
+              "type": "tool_use"
+            }
+          ],
+          "model": "claude-haiku-4-5-20251001",
+          "role": "assistant"
+        },
+        "timestamp": "2026-01-01T11:51:05.000Z",
+        "type": "assistant",
+        "uuid": "22222222-2222-4222-8222-000000000061"
+      },
+      {
+        "agentId": "fixture0002",
+        "cwd": "/fixture/playground",
+        "isSidechain": true,
+        "sessionId": "11111111-1111-4111-8111-000000000001",
+        "message": {
+          "content": [
+            {
+              "content": "212        <SidebarMenuBadge>{count}</SidebarMenuBadge>",
+              "tool_use_id": "toolu_fixture_read_1",
+              "type": "tool_result"
+            }
+          ],
+          "role": "user"
+        },
+        "timestamp": "2026-01-01T11:51:10.000Z",
+        "type": "user",
+        "uuid": "22222222-2222-4222-8222-000000000062"
+      },
+      {
+        "agentId": "fixture0002",
+        "cwd": "/fixture/playground",
+        "isSidechain": true,
+        "sessionId": "11111111-1111-4111-8111-000000000001",
+        "message": {
+          "content": [
+            {
+              "text": "The bubble sits in the row's action slot, so the sketch needs no new spacing.",
+              "type": "text"
+            }
+          ],
+          "model": "claude-haiku-4-5-20251001",
+          "role": "assistant"
+        },
+        "timestamp": "2026-01-01T11:51:25.000Z",
+        "type": "assistant",
+        "uuid": "22222222-2222-4222-8222-000000000063"
+      }
+    ],
+    "skills/bug-hunt/SKILL.md": "---\nname: bug-hunt\ndescription: A made-up skill, so the composer's / menu runs past its height and scrolls.\n---\n\nHunt the bug.\n",
+    "skills/daily-notes/SKILL.md": "---\nname: daily-notes\ndescription: A made-up skill, so a fixture stack can send /daily-notes from the composer.\n---\n\nWrite the day's notes.\n",
+    "skills/docs-check/SKILL.md": "---\nname: docs-check\ndescription: A made-up skill, so the composer's / menu runs past its height and scrolls.\n---\n\nCheck the docs.\n",
+    "skills/focus-plan/SKILL.md": "---\nname: focus-plan\ndescription: A made-up skill, so the composer's / menu runs past its height and scrolls.\n---\n\nPlan the focus.\n",
+    "skills/inbox-sweep/SKILL.md": "---\nname: inbox-sweep\ndescription: A made-up skill, so the composer's / menu runs past its height and scrolls.\n---\n\nSweep the inbox.\n",
+    "skills/meeting-prep/SKILL.md": "---\nname: meeting-prep\ndescription: A made-up skill, so the composer's / menu runs past its height and scrolls.\n---\n\nPrepare the meeting.\n",
+    "skills/notes-index/SKILL.md": "---\nname: notes-index\ndescription: A made-up skill another skill calls, so the composer's / menu leaves it out.\nuser-invocable: false\n---\n\nIndex the notes.\n",
+    "skills/pr-summary/SKILL.md": "---\nname: pr-summary\ndescription: A made-up skill, so the composer's / menu runs past its height and scrolls.\n---\n\nSum up the pull request.\n",
+    "skills/retro-notes/SKILL.md": "---\nname: retro-notes\ndescription: A made-up skill, so the composer's / menu runs past its height and scrolls.\n---\n\nWrite the retro.\n",
+    "skills/standup-draft/SKILL.md": "---\nname: standup-draft\ndescription: A made-up skill, so the composer's / menu runs past its height and scrolls.\n---\n\nDraft the standup.\n",
+    "skills/ticket-triage/SKILL.md": "---\nname: ticket-triage\ndescription: A made-up skill, so the composer's / menu runs past its height and scrolls.\n---\n\nTriage the tickets.\n",
+    "skills/week-ahead/SKILL.md": "---\nname: week-ahead\ndescription: A made-up skill, so the composer's / menu runs past its height and scrolls.\n---\n\nPlan the week.\n",
+    "skills/weekly-review/SKILL.md": "---\nname: weekly-review\ndescription: A made-up skill, so the composer's / menu has more than one to filter.\n---\n\nReview the week.\n",
+    "playground/ops/unstick/state.json": {
+      "blocked": [
+        {
+          "kind": "usage-limit",
+          "line": "You've hit your session limit · resets 3pm (UTC)",
+          "name": "planner",
+          "since": "2026-01-01T11:40:00.000Z",
+          "surface": "5F000000-0000-4000-8000-00000000000c",
+          "workspace": "7A000000-0000-4000-8000-00000000000c"
+        }
+      ],
+      "sessions": 12,
+      "unreadable": [],
+      "writtenAt": "2026-12-31T12:00:00.000Z"
+    },
+    "playground/ops/ops-awake.json": {
+      "cycleSeconds": 3600,
+      "job": "ops-awake",
+      "lastBeatAt": "2026-01-01T11:59:00.000Z",
+      "lastResult": "ok",
+      "pid": 900040,
+      "startedAt": "2026-01-01T08:00:00.000Z"
+    },
+    "playground/ops/ops-changelog.json": {
+      "cycleSeconds": 3600,
+      "job": "ops-changelog",
+      "lastBeatAt": "2026-01-01T11:59:00.000Z",
+      "lastResult": "ok",
+      "pid": 900041,
+      "startedAt": "2026-01-01T08:00:00.000Z"
+    },
+    "playground/ops/ops-machine.json": {
+      "cycleSeconds": 3600,
+      "job": "ops-machine",
+      "lastBeatAt": "2026-01-01T11:59:00.000Z",
+      "lastResult": "ok",
+      "pid": 900044,
+      "startedAt": "2026-01-01T08:00:00.000Z"
+    },
+    "playground/ops/ops-merge-train.json": {
+      "cycleSeconds": 3600,
+      "job": "ops-merge-train",
+      "lastBeatAt": "2026-01-01T11:59:00.000Z",
+      "lastResult": "ok",
+      "pid": 900045,
+      "startedAt": "2026-01-01T08:00:00.000Z"
+    },
+    "playground/ops/ops-merge-watch.json": {
+      "cycleSeconds": 3600,
+      "job": "ops-merge-watch",
+      "lastBeatAt": "2026-01-01T11:59:00.000Z",
+      "lastResult": "ok",
+      "pid": 900046,
+      "startedAt": "2026-01-01T08:00:00.000Z"
+    },
+    "playground/ops/ops-slack-watch.json": {
+      "cycleSeconds": 300,
+      "job": "ops-slack-watch",
+      "lastBeatAt": "2026-01-01T11:59:00.000Z",
+      "lastResult": "ok",
+      "pid": 900047,
+      "startedAt": "2026-01-01T08:00:00.000Z"
+    },
+    "playground/ops/ops-sweep.json": {
+      "cycleSeconds": 3600,
+      "job": "ops-sweep",
+      "lastBeatAt": "2026-01-01T11:59:00.000Z",
+      "lastResult": "roster read failed",
+      "pid": 900049,
+      "startedAt": "2026-01-01T08:00:00.000Z"
+    },
+    "playground/ops/ops-tickets.json": {
+      "cycleSeconds": 3600,
+      "job": "ops-tickets",
+      "lastBeatAt": "2026-01-01T11:59:00.000Z",
+      "lastResult": "ok",
+      "pid": 900050,
+      "startedAt": "2026-01-01T08:00:00.000Z"
+    },
+    "playground/ops/ops-unstick.json": {
+      "cycleSeconds": 3600,
+      "job": "ops-unstick",
+      "lastBeatAt": "2026-01-01T11:59:00.000Z",
+      "lastResult": "ok",
+      "pid": 900051,
+      "startedAt": "2026-01-01T08:00:00.000Z"
+    },
+    "playground/ops/ops-usage.json": {
+      "cycleSeconds": 3600,
+      "job": "ops-usage",
+      "lastBeatAt": "2026-01-01T11:59:00.000Z",
+      "lastResult": "ok",
+      "pid": 900052,
+      "startedAt": "2026-01-01T08:00:00.000Z"
+    },
+    "sessions/900019.json": {
+      "cwd": "/fixture/playground/.claude/worktrees/canary",
+      "kind": "interactive",
+      "messagingSocketPath": "/fixture/sockets/runner-calm-dial.sock",
+      "name": "runner-calm-dial",
+      "pid": 900019,
+      "procStart": "Thu Jan  1 08:00:00 2026",
+      "sessionId": "11111111-1111-4111-8111-000000000014",
+      "startedAt": 1767254820000,
+      "status": "busy"
+    },
+    "sessions/900018.json": {
+      "cwd": "/fixture/playground/.claude/worktrees/canary",
+      "kind": "interactive",
+      "messagingSocketPath": "/fixture/sockets/runner-quiet-lamp.sock",
+      "name": "runner-quiet-lamp",
+      "pid": 900018,
+      "procStart": "Thu Jan  1 08:00:00 2026",
+      "sessionId": "11111111-1111-4111-8111-000000000015",
+      "startedAt": 1767254820000,
+      "status": "busy"
+    },
+    "projects/-fixture-playground/11111111-1111-4111-8111-000000000014.jsonl": [
+      {
+        "agentName": "runner-calm-dial",
+        "sessionId": "11111111-1111-4111-8111-000000000014",
+        "type": "agent-name"
+      },
+      {
+        "cwd": "/fixture/playground/.claude/worktrees/canary",
+        "entrypoint": "cli",
+        "sessionId": "11111111-1111-4111-8111-000000000014",
+        "timestamp": "2026-01-01T08:07:00.000Z",
+        "type": "user",
+        "uuid": "22222222-2222-4222-8222-0000000003101",
+        "version": "2.1.0",
+        "message": {
+          "content": "<cross-session-message from=\"uds:/fixture/sockets/ops.sock\" from-name=\"ops\">\nFixture task: keep each session's transcript read.\n</cross-session-message>",
+          "role": "user"
+        },
+        "origin": {
+          "body": "Fixture task: keep each session's transcript read.",
+          "from": "uds:/fixture/sockets/ops.sock",
+          "kind": "peer",
+          "name": "ops"
+        }
+      },
+      {
+        "cwd": "/fixture/playground/.claude/worktrees/canary",
+        "entrypoint": "cli",
+        "sessionId": "11111111-1111-4111-8111-000000000014",
+        "timestamp": "2026-01-01T10:59:00.000Z",
+        "type": "assistant",
+        "uuid": "22222222-2222-4222-8222-0000000003102",
+        "version": "2.1.0",
+        "message": {
+          "content": [
+            {
+              "id": "toolu_fixture_310",
+              "input": {
+                "command": "git -C /fixture/playground/.claude/worktrees/canary pull --ff-only",
+                "description": "Pull the newest canary"
+              },
+              "name": "Bash",
+              "type": "tool_use"
+            }
+          ],
+          "model": "claude-opus-5-5",
+          "role": "assistant",
+          "id": "msg_fixture_310",
+          "usage": {
+            "cache_creation": {
+              "ephemeral_1h_input_tokens": 0,
+              "ephemeral_5m_input_tokens": 9250
+            },
+            "cache_creation_input_tokens": 9250,
+            "cache_read_input_tokens": 249000,
+            "input_tokens": 33,
+            "output_tokens": 1245
+          }
+        }
+      }
+    ],
+    "projects/-fixture-playground/11111111-1111-4111-8111-000000000015.jsonl": [
+      {
+        "agentName": "runner-quiet-lamp",
+        "sessionId": "11111111-1111-4111-8111-000000000015",
+        "type": "agent-name"
+      },
+      {
+        "cwd": "/fixture/playground/.claude/worktrees/canary",
+        "entrypoint": "cli",
+        "sessionId": "11111111-1111-4111-8111-000000000015",
+        "timestamp": "2026-01-01T08:07:00.000Z",
+        "type": "user",
+        "uuid": "22222222-2222-4222-8222-0000000003111",
+        "version": "2.1.0",
+        "message": {
+          "content": "<cross-session-message from=\"uds:/fixture/sockets/ops.sock\" from-name=\"ops\">\nFixture task: post the morning usage note.\n</cross-session-message>",
+          "role": "user"
+        },
+        "origin": {
+          "body": "Fixture task: post the morning usage note.",
+          "from": "uds:/fixture/sockets/ops.sock",
+          "kind": "peer",
+          "name": "ops"
+        }
+      },
+      {
+        "cwd": "/fixture/playground/.claude/worktrees/canary",
+        "entrypoint": "cli",
+        "sessionId": "11111111-1111-4111-8111-000000000015",
+        "timestamp": "2026-01-01T10:59:00.000Z",
+        "type": "assistant",
+        "uuid": "22222222-2222-4222-8222-0000000003112",
+        "version": "2.1.0",
+        "message": {
+          "content": [
+            {
+              "id": "toolu_fixture_311",
+              "input": {
+                "command": "git -C /fixture/playground/.claude/worktrees/canary pull --ff-only",
+                "description": "Pull the newest canary"
+              },
+              "name": "Bash",
+              "type": "tool_use"
+            }
+          ],
+          "model": "claude-opus-5-5",
+          "role": "assistant",
+          "id": "msg_fixture_311",
+          "usage": {
+            "cache_creation": {
+              "ephemeral_1h_input_tokens": 0,
+              "ephemeral_5m_input_tokens": 9250
+            },
+            "cache_creation_input_tokens": 9250,
+            "cache_read_input_tokens": 249000,
+            "input_tokens": 33,
+            "output_tokens": 1245
+          }
+        }
+      }
+    ]
+  },
+  "git": {
+    "/fixture/playground": {
+      "branch": "canary",
+      "repo": "example/fixture"
+    },
+    "/fixture/playground/.claude/worktrees/sidebar-spacing": {
+      "branch": "fix/sidebar-spacing",
+      "repo": "example/fixture"
+    },
+    "/fixture/playground/.claude/worktrees/board-colours": {
+      "branch": "feat/board-colours",
+      "repo": "example/fixture"
+    },
+    "/fixture/playground/.claude/worktrees/composer-paste": {
+      "branch": "fix/composer-paste",
+      "repo": "example/fixture"
+    },
+    "/fixture/playground/.claude/worktrees/canary": {
+      "branch": "canary",
+      "repo": "example/fixture"
+    },
+    "/fixture/playground/.claude/worktrees/review-lust": {
+      "branch": "canary",
+      "repo": "example/fixture"
+    },
+    "/fixture/playground/.claude/worktrees/test-lust": {
+      "branch": "canary",
+      "repo": "example/fixture"
+    },
+    "/fixture/scratch": {
+      "branch": null,
+      "repo": null
+    },
+    "/fixture/playground/.claude/worktrees/old-ghost": {
+      "branch": "canary",
+      "repo": "example/fixture"
+    }
+  },
+  "merged": {
+    "example/fixture": [
+      {
+        "comments": {
+          "nodes": [
+            {
+              "body": "## ReviewBot · round 1: 4/5 at 1a2b3c4 · 0 blocking, 1 should-fix, 0 nits"
+            },
+            {
+              "body": "## ReviewBot · round 2: 5/5 at 5d6e7f8 · 0 blocking, 0 should-fix, 0 nits"
+            }
+          ]
+        },
+        "createdAt": "2026-01-01T09:10:00.000Z",
+        "files": {
+          "nodes": [
+            {
+              "path": "web/next/src/components/fixture/composer.tsx"
+            },
+            {
+              "path": "README.md"
+            }
+          ]
+        },
+        "headRefName": "fix/composer-paste",
+        "mergedAt": "2026-01-01T10:40:00.000Z",
+        "number": 97,
+        "title": "fix(composer): keep a pasted line break in the message",
+        "updatedAt": "2026-01-01T10:40:00.000Z",
+        "url": "https://github.com/example/fixture/pull/97"
+      }
+    ]
+  },
+  "origin": "https://github.com/example/fixture.git",
+  "processes": {
+    "900001": {
+      "command": "claude -n dispatcher",
+      "start": "Thu Jan  1 08:00:00 2026"
+    },
+    "900017": {
+      "command": "claude -n dispatcher-2",
+      "start": "Thu Jan  1 08:05:00 2026"
+    },
+    "900002": {
+      "command": "claude -n builder",
+      "start": "Thu Jan  1 08:00:00 2026"
+    },
+    "900003": {
+      "command": "claude -n ops",
+      "start": "Thu Jan  1 08:00:00 2026"
+    },
+    "900004": {
+      "command": "claude -n worker-greed",
+      "start": "Thu Jan  1 08:00:00 2026"
+    },
+    "900005": {
+      "command": "claude -n worker-lust-2",
+      "start": "Thu Jan  1 08:00:00 2026"
+    },
+    "900006": {
+      "command": "claude -n worker-sloth",
+      "start": "Thu Jan  1 08:00:00 2026"
+    },
+    "900007": {
+      "command": "claude -n runner-pride",
+      "start": "Thu Jan  1 08:00:00 2026"
+    },
+    "900008": {
+      "command": "claude -n h4n8zt-reviewer",
+      "start": "Thu Jan  1 08:00:00 2026"
+    },
+    "900009": {
+      "command": "claude -n p9c3wx-tester",
+      "start": "Thu Jan  1 08:00:00 2026"
+    },
+    "900010": {
+      "command": "claude -n scratch-demo",
+      "start": "Thu Jan  1 08:00:00 2026"
+    },
+    "900011": {
+      "command": "/usr/libexec/fixture-helper",
+      "start": "Thu Jan  1 08:00:00 2026"
+    },
+    "900012": {
+      "command": "claude -n planner",
+      "start": "Thu Jan  1 08:00:00 2026"
+    },
+    "900014": {
+      "command": "claude -n r6t2dv-tester",
+      "start": "Thu Jan  1 08:00:00 2026"
+    },
+    "900015": {
+      "command": "claude -n b7k2mq-reviewer",
+      "start": "Thu Jan  1 08:00:00 2026"
+    },
+    "900016": {
+      "command": "claude -n worker-glm-flash",
+      "start": "Thu Jan  1 08:00:00 2026"
+    },
+    "900021": {
+      "command": "claude -n k3m9px-worker",
+      "start": "Thu Jan  1 08:00:00 2026"
+    },
+    "900022": {
+      "command": "claude -n q7w8f2-reviewer",
+      "start": "Thu Jan  1 08:00:00 2026"
+    },
+    "900013": {
+      "command": "claude -n worker-bright-lark",
+      "start": "Thu Jan  1 07:30:00 2026"
+    },
+    "900030": {
+      "command": "python3 ops/loop.py ops-checks",
+      "start": "Thu Jan  1 08:00:00 2026"
+    },
+    "900031": {
+      "command": "python3 ops/loop.py ops-dashboard",
+      "start": "Thu Jan  1 08:00:00 2026"
+    },
+    "900033": {
+      "command": "python3 ops/loop.py ops-report",
+      "start": "Thu Jan  1 08:00:00 2026"
+    },
+    "900040": {
+      "command": "python3 ops/loop.py ops-awake",
+      "start": "Thu Jan  1 08:00:00 2026"
+    },
+    "900041": {
+      "command": "python3 ops/loop.py ops-changelog",
+      "start": "Thu Jan  1 08:00:00 2026"
+    },
+    "900044": {
+      "command": "python3 ops/loop.py ops-machine",
+      "start": "Thu Jan  1 08:00:00 2026"
+    },
+    "900045": {
+      "command": "python3 ops/loop.py ops-merge-train",
+      "start": "Thu Jan  1 08:00:00 2026"
+    },
+    "900046": {
+      "command": "python3 ops/loop.py ops-merge-watch",
+      "start": "Thu Jan  1 08:00:00 2026"
+    },
+    "900047": {
+      "command": "python3 ops/loop.py ops-slack-watch",
+      "start": "Thu Jan  1 08:00:00 2026"
+    },
+    "900049": {
+      "command": "python3 ops/loop.py ops-sweep",
+      "start": "Thu Jan  1 08:00:00 2026"
+    },
+    "900050": {
+      "command": "python3 ops/loop.py ops-tickets",
+      "start": "Thu Jan  1 08:00:00 2026"
+    },
+    "900051": {
+      "command": "python3 ops/loop.py ops-unstick",
+      "start": "Thu Jan  1 08:00:00 2026"
+    },
+    "900052": {
+      "command": "python3 ops/loop.py ops-usage",
+      "start": "Thu Jan  1 08:00:00 2026"
+    },
+    "900019": {
+      "command": "claude -n runner-calm-dial",
+      "start": "Thu Jan  1 08:00:00 2026"
+    },
+    "900018": {
+      "command": "claude -n runner-quiet-lamp",
+      "start": "Thu Jan  1 08:00:00 2026"
+    }
+  },
+  "pulls": {
+    "https://github.com/example/fixture/pull/101": {
+      "comments": {
+        "nodes": [
+          {
+            "body": "## ReviewBot · round 2: 4/5 at abc1234 · 0 blocking, 1 should-fix, 0 nits"
+          }
+        ]
+      },
+      "commits": {
+        "nodes": [
+          {
+            "commit": {
+              "statusCheckRollup": {
+                "state": "SUCCESS"
+              }
+            }
+          }
+        ]
+      },
+      "headRefOid": "abc1234abc1234abc1234abc1234abc1234abc12",
+      "isDraft": false,
+      "number": 101,
+      "state": "OPEN",
+      "title": "Give each Board status its own colour",
+      "updatedAt": "2026-01-01T11:50:00.000Z",
+      "url": "https://github.com/example/fixture/pull/101"
+    },
+    "https://github.com/example/fixture/pull/102": {
+      "comments": {
+        "nodes": []
+      },
+      "commits": {
+        "nodes": [
+          {
+            "commit": {
+              "statusCheckRollup": {
+                "state": "PENDING"
+              }
+            }
+          }
+        ]
+      },
+      "headRefOid": "abc1234abc1234abc1234abc1234abc1234abc12",
+      "isDraft": true,
+      "number": 102,
+      "state": "OPEN",
+      "title": "Tighten the sidebar's row spacing",
+      "updatedAt": "2026-01-01T11:35:00.000Z",
+      "url": "https://github.com/example/fixture/pull/102"
+    },
+    "https://github.com/example/fixture/pull/97": {
+      "comments": {
+        "nodes": []
+      },
+      "commits": {
+        "nodes": [
+          {
+            "commit": {
+              "statusCheckRollup": {
+                "state": "SUCCESS"
+              }
+            }
+          }
+        ]
+      },
+      "headRefOid": "abc1234abc1234abc1234abc1234abc1234abc12",
+      "isDraft": false,
+      "number": 97,
+      "state": "MERGED",
+      "title": "Keep a pasted image's file name",
+      "updatedAt": "2026-01-01T10:00:00.000Z",
+      "url": "https://github.com/example/fixture/pull/97"
+    },
+    "example/fixture#feat/board-colours": {
+      "comments": {
+        "nodes": [
+          {
+            "body": "## ReviewBot · round 2: 4/5 at abc1234 · 0 blocking, 1 should-fix, 0 nits"
+          }
+        ]
+      },
+      "commits": {
+        "nodes": [
+          {
+            "commit": {
+              "statusCheckRollup": {
+                "state": "SUCCESS"
+              }
+            }
+          }
+        ]
+      },
+      "headRefOid": "abc1234abc1234abc1234abc1234abc1234abc12",
+      "isDraft": false,
+      "number": 101,
+      "state": "OPEN",
+      "title": "Give each Board status its own colour",
+      "updatedAt": "2026-01-01T11:50:00.000Z",
+      "url": "https://github.com/example/fixture/pull/101"
+    },
+    "example/fixture#fix/composer-paste": {
+      "comments": {
+        "nodes": []
+      },
+      "commits": {
+        "nodes": [
+          {
+            "commit": {
+              "statusCheckRollup": {
+                "state": "SUCCESS"
+              }
+            }
+          }
+        ]
+      },
+      "headRefOid": "abc1234abc1234abc1234abc1234abc1234abc12",
+      "isDraft": false,
+      "number": 97,
+      "state": "MERGED",
+      "title": "Keep a pasted image's file name",
+      "updatedAt": "2026-01-01T10:00:00.000Z",
+      "url": "https://github.com/example/fixture/pull/97"
+    },
+    "example/fixture#fix/kettle-timer": {
+      "comments": {
+        "nodes": []
+      },
+      "commits": {
+        "nodes": [
+          {
+            "commit": {
+              "statusCheckRollup": {
+                "state": "FAILURE"
+              }
+            }
+          }
+        ]
+      },
+      "headRefOid": "abc1234abc1234abc1234abc1234abc1234abc12",
+      "isDraft": true,
+      "number": 103,
+      "state": "OPEN",
+      "title": "Keep the kettle timer's last setting",
+      "updatedAt": "2026-01-01T11:20:00.000Z",
+      "url": "https://github.com/example/fixture/pull/103"
+    },
+    "example/fixture#fix/sidebar-spacing": {
+      "comments": {
+        "nodes": []
+      },
+      "commits": {
+        "nodes": [
+          {
+            "commit": {
+              "statusCheckRollup": {
+                "state": "PENDING"
+              }
+            }
+          }
+        ]
+      },
+      "headRefOid": "abc1234abc1234abc1234abc1234abc1234abc12",
+      "isDraft": true,
+      "number": 102,
+      "state": "OPEN",
+      "title": "Tighten the sidebar's row spacing",
+      "updatedAt": "2026-01-01T11:35:00.000Z",
+      "url": "https://github.com/example/fixture/pull/102"
+    }
+  },
+  "system": {
+    "cores": 10,
+    "disk": {
+      "freeBytes": 210000000000,
+      "totalBytes": 994000000000
+    },
+    "load": [3.1, 3.4, 3.6],
+    "probes": {
+      "containerStats": "{\"ID\":\"f1x7ure0db01\",\"MemUsage\":\"48.2MiB / 7.6GiB\",\"Name\":\"playground-board-colours-db\"}\n",
+      "containers": "{\"ID\":\"f1x7ure0db01\",\"Names\":\"playground-board-colours-db\",\"Ports\":\"127.0.0.1:54321->5432/tcp\"}\n",
+      "cwds": "p900001\nfcwd\nn/fixture/playground\np900002\nfcwd\nn/fixture/playground\np900003\nfcwd\nn/fixture/playground\np900004\nfcwd\nn/fixture/playground/.claude/worktrees/sidebar-spacing\np900005\nfcwd\nn/fixture/playground/.claude/worktrees/board-colours\np900006\nfcwd\nn/fixture/playground/.claude/worktrees/composer-paste\np900007\nfcwd\nn/fixture/playground/.claude/worktrees/canary\np900008\nfcwd\nn/fixture/playground/.claude/worktrees/review-lust\np900009\nfcwd\nn/fixture/playground/.claude/worktrees/test-lust\np900010\nfcwd\nn/fixture/scratch\np900011\nfcwd\nn/fixture/playground/.claude/worktrees/old-ghost\np900012\nfcwd\nn/fixture/playground\np900050\nfcwd\nn/fixture/playground/.claude/worktrees/board-colours\np900051\nfcwd\nn/fixture/playground/.claude/worktrees/board-colours/api/hono\np900052\nfcwd\nn/fixture/playground/.claude/worktrees/board-colours/web/next\n",
+      "dockerHost": "\"unix:///fixture/orbstack/docker.sock\"\n",
+      "memory": "Mach Virtual Memory Statistics: (page size of 16384 bytes)\nPages free:                               61000.\nPages active:                            700000.\nAnonymous pages:                         880000.\nPages purgeable:                          24000.\nPages wired down:                        190000.\nPages occupied by compressor:            140000.\n",
+      "processes": "900100 1 40000 12:00.00\n900001 900100 390000 11:12.34\n900002 900100 400000 12:12.34\n900003 900100 410000 13:12.34\n900004 900100 420000 14:12.34\n900005 900100 430000 15:12.34\n900006 900100 440000 16:12.34\n900007 900100 450000 17:12.34\n900008 900100 460000 18:12.34\n900009 900100 470000 19:12.34\n900010 900100 480000 20:12.34\n900011 900100 490000 21:12.34\n900012 900100 380000 10:12.34\n900021 900100 490000 21:12.34\n900022 900100 500000 22:12.34\n900050 900005 60000 0:40.00\n900051 900050 210000 3:10.00\n900052 900050 640000 9:30.00\n900020 1 90000 1:00.00\n900090 1 1800000 40:00.00\n",
+      "socketHolder": "p900090\n",
+      "sockets": "p900051\nf20\nn127.0.0.1:4101\nf21\nn127.0.0.1:60001->127.0.0.1:54321\np900052\nf22\nn127.0.0.1:3101\n",
+      "sysctl": "kern.memorystatus_level: 41\nkern.memorystatus_vm_pressure_level: 1\nvm.swapusage: total = 2048.00M  used = 640.00M  free = 1408.00M  (encrypted)\n"
+    },
+    "totalBytes": 34359738368
+  },
+  "threads": [
+    {
+      "createdAt": "2026-01-01T08:00:00.000Z",
+      "id": "k7mq",
+      "messages": ["22222222-2222-4222-8222-000000000001", "22222222-2222-4222-8222-000000000002"],
+      "pinnedAt": "2026-01-01T08:05:00.000Z",
+      "session": "11111111-1111-4111-8111-000000000001",
+      "title": "Run the dashboard for the day",
+      "updatedAt": "2026-01-01T08:02:00.000Z"
+    },
+    {
+      "archivedAt": "2026-01-01T11:40:00.000Z",
+      "createdAt": "2026-01-01T11:30:00.000Z",
+      "id": "h8tv",
+      "lastReadAt": "2026-01-01T11:32:00.000Z",
+      "messages": ["22222222-2222-4222-8222-000000000003", "22222222-2222-4222-8222-000000000004"],
+      "session": "11111111-1111-4111-8111-000000000001",
+      "title": "Watch for the 5/5",
+      "updatedAt": "2026-01-01T11:31:00.000Z"
+    },
+    {
+      "createdAt": "2026-01-01T11:48:00.000Z",
+      "id": "b2rt",
+      "lastReadAt": "2026-01-01T11:49:30.000Z",
+      "messages": [
+        "22222222-2222-4222-8222-000000000005",
+        "22222222-2222-4222-8222-000000000006",
+        "22222222-2222-4222-8222-000000000055"
+      ],
+      "session": "11111111-1111-4111-8111-000000000001",
+      "title": "Sidebar sketch",
+      "updatedAt": "2026-01-01T11:52:00.000Z"
+    },
+    {
+      "createdAt": "2026-01-01T11:53:00.000Z",
+      "id": "dx4h",
+      "lastReadAt": "2026-01-01T11:55:30.000Z",
+      "messages": [
+        "22222222-2222-4222-8222-000000000056",
+        "22222222-2222-4222-8222-000000000057",
+        "22222222-2222-4222-8222-000000000058"
+      ],
+      "session": "11111111-1111-4111-8111-000000000001",
+      "title": "Pick a spinner",
+      "updatedAt": "2026-01-01T11:55:00.000Z"
+    },
+    {
+      "createdAt": "2026-01-01T11:56:00.000Z",
+      "id": "p9wn",
+      "messages": ["22222222-2222-4222-8222-000000000059"],
+      "session": "11111111-1111-4111-8111-000000000001",
+      "title": "The day so far",
+      "updatedAt": "2026-01-01T11:56:00.000Z"
+    },
+    {
+      "createdAt": "2026-01-01T11:57:00.000Z",
+      "id": "f3cz",
+      "lastReadAt": "2026-01-01T11:58:30.000Z",
+      "messages": [
+        "22222222-2222-4222-8222-000000000060",
+        "22222222-2222-4222-8222-000000000061",
+        "22222222-2222-4222-8222-000000000062"
+      ],
+      "session": "11111111-1111-4111-8111-000000000001",
+      "title": "Three files for the board",
+      "updatedAt": "2026-01-01T11:58:00.000Z"
+    },
+    {
+      "createdAt": "2026-01-01T07:00:00.000Z",
+      "id": "m5gs",
+      "messages": [],
+      "session": "11111111-1111-4111-8111-000000000001",
+      "title": "Plan the week",
+      "updatedAt": "2026-01-01T07:00:00.000Z"
+    }
+  ],
+  "update": {
+    "behind": 3,
+    "branch": "canary",
+    "newest": {
+      "at": "2026-01-01T10:40:00.000Z",
+      "title": "feat: a new filter on the Linear board"
+    },
+    "pulled": false,
+    "upstream": "canary"
+  },
+  "work": [
+    {
+      "baseRef": {
+        "branchProtectionRule": { "requiredApprovingReviewCount": 1 },
+        "rules": { "nodes": [] }
+      },
+      "baseRefName": "main",
+      "commits": {
+        "nodes": [{ "commit": { "statusCheckRollup": { "state": "SUCCESS" } } }]
+      },
+      "isDraft": false,
+      "latestOpinionatedReviews": { "nodes": [{ "state": "APPROVED" }] },
+      "mergeStateStatus": "CLEAN",
+      "mergeable": "MERGEABLE",
+      "number": 412,
+      "repository": { "nameWithOwner": "example/web" },
+      "reviewDecision": "APPROVED",
+      "title": "Show the delivery window on the order page",
+      "updatedAt": "2026-01-01T09:10:00.000Z",
+      "url": "https://github.com/example/web/pull/412"
+    },
+    {
+      "baseRef": {
+        "branchProtectionRule": { "requiredApprovingReviewCount": 2 },
+        "rules": { "nodes": [] }
+      },
+      "baseRefName": "main",
+      "commits": {
+        "nodes": [{ "commit": { "statusCheckRollup": { "state": "SUCCESS" } } }]
+      },
+      "isDraft": false,
+      "latestOpinionatedReviews": { "nodes": [{ "state": "APPROVED" }] },
+      "mergeStateStatus": "CLEAN",
+      "mergeable": "MERGEABLE",
+      "number": 88,
+      "repository": { "nameWithOwner": "example/api" },
+      "reviewDecision": "REVIEW_REQUIRED",
+      "title": "Retry the invoice export once on a timeout",
+      "updatedAt": "2026-01-01T08:20:00.000Z",
+      "url": "https://github.com/example/api/pull/88"
+    },
+    {
+      "baseRef": {
+        "branchProtectionRule": { "requiredApprovingReviewCount": 1 },
+        "rules": { "nodes": [] }
+      },
+      "baseRefName": "main",
+      "commits": {
+        "nodes": [{ "commit": { "statusCheckRollup": { "state": "FAILURE" } } }]
+      },
+      "isDraft": false,
+      "latestOpinionatedReviews": { "nodes": [{ "state": "APPROVED" }] },
+      "mergeStateStatus": "CLEAN",
+      "mergeable": "MERGEABLE",
+      "number": 405,
+      "repository": { "nameWithOwner": "example/web" },
+      "reviewDecision": "APPROVED",
+      "title": "Keep the basket when the session refreshes",
+      "updatedAt": "2026-01-01T11:30:00.000Z",
+      "url": "https://github.com/example/web/pull/405"
+    },
+    {
+      "baseRef": {
+        "branchProtectionRule": { "requiredApprovingReviewCount": 1 },
+        "rules": { "nodes": [] }
+      },
+      "baseRefName": "develop",
+      "commits": {
+        "nodes": [{ "commit": { "statusCheckRollup": { "state": "SUCCESS" } } }]
+      },
+      "isDraft": false,
+      "latestOpinionatedReviews": { "nodes": [{ "state": "APPROVED" }] },
+      "mergeStateStatus": "BEHIND",
+      "mergeable": "MERGEABLE",
+      "number": 91,
+      "repository": { "nameWithOwner": "example/api" },
+      "reviewDecision": "APPROVED",
+      "title": "Add the stock count to the product feed",
+      "updatedAt": "2026-01-01T10:05:00.000Z",
+      "url": "https://github.com/example/api/pull/91"
+    },
+    {
+      "baseRef": {
+        "branchProtectionRule": { "requiredApprovingReviewCount": 1 },
+        "rules": { "nodes": [] }
+      },
+      "baseRefName": "main",
+      "commits": {
+        "nodes": [{ "commit": { "statusCheckRollup": { "state": "SUCCESS" } } }]
+      },
+      "isDraft": true,
+      "latestOpinionatedReviews": { "nodes": [] },
+      "mergeStateStatus": "DRAFT",
+      "mergeable": "MERGEABLE",
+      "number": 419,
+      "repository": { "nameWithOwner": "example/web" },
+      "reviewDecision": "REVIEW_REQUIRED",
+      "title": "Draft the new checkout steps",
+      "updatedAt": "2026-01-01T11:50:00.000Z",
+      "url": "https://github.com/example/web/pull/419"
+    },
+    {
+      "baseRef": {
+        "branchProtectionRule": { "requiredApprovingReviewCount": 1 },
+        "rules": { "nodes": [] }
+      },
+      "baseRefName": "main",
+      "commits": {
+        "nodes": [{ "commit": { "statusCheckRollup": { "state": "SUCCESS" } } }]
+      },
+      "isDraft": false,
+      "latestOpinionatedReviews": { "nodes": [] },
+      "mergeStateStatus": "DIRTY",
+      "mergeable": "CONFLICTING",
+      "number": 86,
+      "repository": { "nameWithOwner": "example/api" },
+      "reviewDecision": "CHANGES_REQUESTED",
+      "title": "Rename the shipping zones",
+      "updatedAt": "2025-12-31T16:00:00.000Z",
+      "url": "https://github.com/example/api/pull/86"
+    }
+  ]
+}

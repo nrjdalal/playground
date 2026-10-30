@@ -1,0 +1,7 @@
+{
+  "sha256": {
+    "darwin-arm64": "fb77c2232a05a8035421382c894392f4174e4e38a18e48af3dd0290157c3a7e2",
+    "darwin-x64": "5fb0a908ec7f6745e3e245738b06bfad56c46391c391ab3c0955fbead01f1369"
+  },
+  "version": "0.9.5"
+}

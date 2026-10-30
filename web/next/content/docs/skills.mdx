@@ -1,0 +1,49 @@
+---
+slug: /docs/skills
+title: Skills and orgs
+description: Which skills a session gets, where they come from, and how an org adds its own.
+---
+
+# Skills and orgs
+
+A skill is a folder with a `SKILL.md` that tells a session how to do one kind of work.
+Playground gives each session one set of skills, chosen by the repo it works in.
+
+## Where skills come from
+
+| Scope      | What it holds                                                                                                                                                                                                        |
+| ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| your login | your own skills, in your login's extension                                                                                                                                                                           |
+| an org     | an org's own skills and its overrides, in its extension                                                                                                                                                              |
+| core       | `skills/playground` (Playground's own skills), `skills/zerostarter` (the starter the app is built on) and `extensions/core` (core's own skills, the factory's playbook among them, and the upstream skills it keeps) |
+
+A session gets its skills as one plugin, never as links in `~/.claude/skills`, since a skill there would take a name over every plugin's.
+Each session Playground starts loads a set written for its repo the moment it starts, so a skill an extension adds reaches the next session with no install (`playground orgs resolve`).
+A session you start yourself gets the home set, `ws-home@ws`, which `scripts/link-skills.sh` installs for your user and renews on each run (`playground orgs home`); `scripts/link-skills.sh` also removes any link in `~/.claude/skills` at a name the home set ships.
+`.agents/skills`, `.claude/skills` and `.github/skills` all link to `skills/zerostarter`, so an agent in this repo reads the starter's skills from the place its tool looks.
+
+The upstream skills in `extensions/core/skills` change only through `bun run vendor:upstream`, and a drift test holds them byte for byte to the commit `extensions/core/upstream/SOURCE` names.
+Their license is upstream's, in `extensions/core/upstream/LICENSE`, and core's `NOTICE` names them; the root `NOTICE` covers only this repo's own code.
+
+## Orgs
+
+An org is a set of rules, guard lists and skills for the repos of one GitHub organisation, kept outside this repo with the org's own settings.
+
+- `ext.links` names the GitHub orgs whose repos read each extension, lowercase, such as `{"acme": ["acme-labs"]}`, or `*` for every repo.
+- `ext.order` names the extensions in the order they are read, first wins; your login's comes first when the list leaves it out.
+
+## Which skill wins
+
+A skill resolves by its folder's name, from the first scope that holds it, and only that copy loads:
+
+1. each scope in `ext.order`'s order, your login's first when the list leaves it out, an extension kept only when `ext.links` links it to the repo's GitHub owner or to every repo (`*`), so an org can override a skill in its own repos;
+2. core: `skills/playground`, then `skills/zerostarter`, then `extensions/core/skills`.
+
+By default, with no `ext.order` set, that is your login's scope, then the linked extensions, then core.
+
+A skill takes a built-in command's name over the built-in, but never an alias's: a skill named `review` never runs, since `/review` is the alias of `/code-review`. A test refuses a skill in `skills/playground` or `skills/zerostarter` named after an alias, and a session's set leaves out an extension's skill named after one, naming it.
+
+## Adding a skill
+
+A Playground skill lands by pull request to this repo.
+An org's skill is an item in its extension: `playground ext put <org> skill <name> <folder> --reason "<why>"` writes it under `proposed/`, and sessions load it once it is accepted ([Review](/docs/extensions#review)).

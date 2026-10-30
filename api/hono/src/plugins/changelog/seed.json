@@ -1,0 +1,293 @@
+{
+  "merges": {
+    "from": 45,
+    "lines": {
+      "45": {
+        "text": "The sidebar opens with Dashboard, and the old name leaves the screens."
+      },
+      "46": {
+        "text": "Asks show in the asking agent's chat, with a count bubble on its sidebar row."
+      },
+      "48": {
+        "text": "Test databases listen on this machine only."
+      },
+      "49": {
+        "text": "Files you attach stay in a private folder on this machine."
+      },
+      "50": {
+        "kind": "rule",
+        "text": "Workers take names in alphabetical order, and your asks go first in the queue."
+      },
+      "51": {
+        "text": "Dev stacks start with one command, and start faster."
+      },
+      "52": {
+        "text": "A Sessions page lists every session, past and live, with its full log."
+      },
+      "53": {
+        "text": "A sent message shows as pending until it arrives; chats load no outside images."
+      },
+      "54": {
+        "text": "Statuses start with a capital, closed agents show Ended, and Next up follows the queue."
+      },
+      "55": {
+        "kind": "rule",
+        "text": "No agent may stop a process by its name."
+      },
+      "56": {
+        "text": "Workers and runners sort by status, then by their latest message to a manager."
+      },
+      "57": {
+        "text": "The Linear board merges Ask and Next step into one Next column."
+      },
+      "58": {
+        "text": "Only one part of the app may drive cmux, and tests hold it to that."
+      },
+      "59": {
+        "text": "The Linear app shows as Board in the sidebar."
+      },
+      "60": {
+        "text": "A commit runs its own worktree's checks, not another worktree's."
+      },
+      "61": {
+        "text": "A dev stack refuses a detached checkout or a database that is not its own."
+      },
+      "62": {
+        "text": "Two dependencies are updated to close known security problems."
+      },
+      "63": {
+        "text": "The Board says when it last checked Linear."
+      },
+      "64": {
+        "text": "Each working worker shows its ETA, in the sidebar and on the Dashboard."
+      },
+      "66": {
+        "text": "A new session's first message shows without a reload."
+      },
+      "67": {
+        "text": "A GitHub comment that would publish your npm packages is refused."
+      },
+      "68": {
+        "text": "A dev stack left behind by a closed session can now be stopped."
+      },
+      "69": {
+        "text": "A dev stack refuses to start where cmux cannot answer it."
+      },
+      "70": {
+        "text": "Attach files by paperclip, paste or drop; they show as chips in the chat."
+      },
+      "74": {
+        "text": "Agents' pickers can be answered from the API; approvals stay off for now."
+      },
+      "75": {
+        "text": "Board rows get actions: Begin, Investigate, Check owner, Continue and Hide."
+      },
+      "76": {
+        "text": "Load older pages back through a worker's whole history."
+      },
+      "78": {
+        "text": "Sessions opens from the user menu; slash commands show as the command run."
+      },
+      "79": {
+        "text": "A Templates app shows every message the skills send."
+      },
+      "80": {
+        "text": "Ticket checks stop asking for permission on git commands."
+      },
+      "81": {
+        "text": "A System panel shows how many more workers this machine can run."
+      },
+      "82": {
+        "text": "Answer an agent's pickers from its chat; permission and plan cards stay read-only."
+      },
+      "88": {
+        "text": "Closed agents no longer show as live or Waiting on you."
+      },
+      "89": {
+        "text": "1Password asks for your fingerprint once an hour, not every time."
+      },
+      "92": {
+        "text": "Templates moves to the user menu, beside Sessions."
+      },
+      "94": {
+        "text": "The Board app is renamed Linear."
+      },
+      "95": {
+        "text": "Screenshots on PRs show a made-up factory, never your real sessions."
+      },
+      "96": {
+        "text": "A Usage app shows spend by agent, model, hour and merged PR."
+      },
+      "97": {
+        "text": "The Linear app gets filters: Backlog, Triage, In progress, In review and Done."
+      },
+      "98": {
+        "text": "The API reference, docs and internal docs are now served."
+      },
+      "99": {
+        "text": "Agents cannot file a Linear ticket without your yes."
+      },
+      "100": {
+        "text": "The sidebar opens with System readings; rows show PR, ticket, status and model."
+      },
+      "102": {
+        "text": "Chat messages show times, keep line breaks and keep links readable."
+      },
+      "103": {
+        "text": "Every Dashboard table follows the console's table: one toolbar, plain text, no emoji."
+      },
+      "104": {
+        "text": "The vault and database query skills share one cached 1Password unlock."
+      },
+      "106": {
+        "text": "The name reads Playground; rows list only running processes and every ops job."
+      },
+      "107": {
+        "text": "Each agent turn shows as one message, with thinking and tool calls folded."
+      },
+      "108": {
+        "text": "Nothing about Playground can be written into a guarded org's tickets, PRs or Slack."
+      },
+      "109": {
+        "text": "A Plan page under Apps shows what each lane builds next."
+      },
+      "110": {
+        "text": "The Linear status template no longer names an internal tool."
+      },
+      "112": {
+        "text": "The Plan page gets a Report view: what is going on and why."
+      },
+      "113": {
+        "text": "Playground sits at the top of the sidebar, and the Dashboard opens its chat."
+      },
+      "115": {
+        "text": "System readings always show, each green, orange or red by its own levels."
+      },
+      "116": {
+        "text": "Links in the chat open directly, with no pop-up."
+      },
+      "117": {
+        "text": "A merge command refuses any PR that has not passed every check."
+      },
+      "118": {
+        "text": "Waiting on you clears the moment you answer a picker."
+      },
+      "119": {
+        "text": "A Previews page shows the images and animations agents make for you."
+      },
+      "121": {
+        "text": "Agent replies read as full-width text; only your messages are bubbles."
+      },
+      "122": {
+        "text": "The message box grows as you type."
+      },
+      "123": {
+        "text": "The chat fills the page, and a send scrolls your message to the top."
+      },
+      "124": {
+        "text": "Page titles are smaller, so the Dashboard uses four text sizes."
+      },
+      "125": {
+        "text": "The sidebar paints its final layout on first load."
+      },
+      "126": {
+        "text": "The sidebar and the Dashboard use the same icon for the same state."
+      },
+      "127": {
+        "text": "Every loading spinner is one softly pulsing dot."
+      },
+      "128": {
+        "text": "Plan times read as time from now, with the clock on hover."
+      },
+      "129": {
+        "kind": "rule",
+        "text": "Agents that work together open side by side in one workspace."
+      },
+      "130": {
+        "text": "Apps show as small icon squares with a count in the corner."
+      },
+      "132": {
+        "text": "The sidebar no longer jumps when it loads."
+      },
+      "135": {
+        "text": "Numbers in tables line up on the right."
+      },
+      "136": {
+        "text": "The Dashboard reads what an open chat's agent is doing, live."
+      },
+      "139": {
+        "text": "The sidebar opens with the Playground wordmark and a health mark over the readings."
+      },
+      "140": {
+        "text": "Every write from the Dashboard is checked, a new app's included."
+      },
+      "141": {
+        "text": "A merge never re-runs checks that already passed."
+      },
+      "142": {
+        "text": "Your messages are grey bubbles; agent names sit inline."
+      }
+    }
+  },
+  "rules": {
+    "at": "2026-10-06T18:29:00Z",
+    "lines": [
+      {
+        "key": "only-dispatcher",
+        "text": "You talk only to Playground; every other session reports up the chain."
+      },
+      {
+        "key": "two-leads",
+        "text": "There are two leads: the Builder runs the builds, and Ops runs ops."
+      },
+      {
+        "key": "lifecycle",
+        "text": "A worker ends when its chore is done; Playground and the leads never close."
+      },
+      {
+        "key": "ops-scripts",
+        "text": "Ops scripts replace the runner sessions for the jobs that run all the time."
+      },
+      {
+        "key": "opus-xhigh",
+        "text": "Every session runs Opus at xhigh effort, with permissions bypassed."
+      },
+      {
+        "key": "reviewer-session",
+        "text": "Each PR gets its own reviewer session, which reviews every push until 5/5."
+      },
+      {
+        "key": "tester-session",
+        "text": "Each UI PR gets a tester session that drives it in a browser."
+      },
+      {
+        "key": "ab-tests",
+        "text": "Small tasks run as A/B tests, to find which way works better."
+      },
+      {
+        "key": "full-resources",
+        "text": "Seven workers run at full speed; new work stops at 90% of the weekly limit."
+      },
+      {
+        "key": "ask-is-a-task",
+        "text": "Each thing you ask for is its own task."
+      },
+      {
+        "key": "linear-check-free",
+        "text": "The Linear ticket check costs $0: a script reads Linear, with no model."
+      },
+      {
+        "key": "no-tickets",
+        "text": "No Linear ticket is filed without your yes, and there are none for Playground."
+      },
+      {
+        "key": "classified",
+        "text": "Playground is classified: nothing about it goes into a guarded org's work."
+      },
+      {
+        "key": "send-when-asked",
+        "text": "A message you ask for goes at once, except to a teammate."
+      }
+    ]
+  }
+}

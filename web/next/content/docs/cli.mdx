@@ -1,0 +1,184 @@
+---
+slug: /docs/cli
+title: The playground command
+description: Start, view, check, update, add to and remove Playground from your terminal.
+---
+
+# The playground command
+
+`playground` starts Playground from your terminal and opens the Dashboard. Your sessions run in herdr, and `playground view` shows them. Run it from any terminal. The Dashboard and its background jobs run in herdr too. `playground --help`, or `--help` after any command, lists every command. A word a command does not take, such as `playground ext list skills`, is refused before the command runs: it exits 2 and prints the command's usage, so a typo never reads as success. The `ask`, `changelog`, `ingest`, `queues` and `thread` commands, `playground picker`'s reason and `playground ext search`'s words pass on whole.
+
+## Install
+
+The [installer](/docs/install) sets the command up. In a checkout you cloned yourself, run `scripts/link-skills.sh` once instead. Either way `playground` is linked into `~/.bun/bin`, which a new terminal puts on your `PATH`, under that name alone. Check it with `command -v playground`.
+
+## Start: `playground`
+
+`playground` starts only what is down, then opens the Dashboard in your browser:
+
+1. **herdr**: it starts each herdr server that is down, on the herdr version the repo pins, and brings back the sessions that ran there. It prints `ops-herdr: started factory` for each one it started, or `ops-herdr: all were up: factory, probes` when none was down. When herdr cannot start, it says why and goes on with the rest.
+2. **The Dashboard**: when it does not answer, it starts every background job that is not healthy, the Dashboard and the session follower among them, each in herdr's Ops workspace. They keep running when you close your terminal.
+3. **The dispatcher**: when no session has the dispatcher's name (the setting `sessions.names`' dispatcher, `dispatcher` by default), it starts it as `playground dispatcher` does (below), and goes on when that start is refused.
+4. It waits for the Dashboard to answer, then opens it. The first start can take a few minutes, so every 10 seconds it prints how long it has waited, as `Waiting for the Dashboard's API to answer… 1m 20s`, and once the Dashboard answers it prints `The Dashboard answered after 2m 10s`. When the Dashboard's background job exits while it waits, it stops within half a minute and says so, and when the job stops checking in, it stops once the job has been silent for three of its minutes, rather than waiting the whole 15 minutes. Its last line reminds you that `playground view` shows your sessions.
+
+When a step fails, the run ends with a **Left for you** list naming each step that failed and why, such as `The dispatcher didn't start: spawn.sh refuses dispatcher: …`, and exits 1.
+
+When everything already runs, it only opens the Dashboard. Run it as often as you like.
+
+On a fresh install, the first `playground` first cuts the Dashboard's own checkout (`.claude/worktrees/desk`) and installs it; the Dashboard then opens with **Let's check this Mac** in its chat. Before that first start, a command that runs in the Dashboard's checkout says `playground: no Dashboard checkout yet; run playground once to set it up` and stops.
+
+## Start the dispatcher: `playground dispatcher`
+
+`playground dispatcher` starts the dispatcher, the session you talk with, in a herdr workspace of its own. It takes nothing.
+Its brief is `brief-<dispatcher>.md` in the data folder, written once from `scripts/briefs/dispatcher.md` when it is missing, so your own edits to it stay.
+It exits 0 once the dispatcher starts, 3 when a session already holds the dispatcher's name (it starts nothing), and 1 with spawn.sh's reason when a gate refuses the start.
+
+## View your sessions: `playground view`
+
+`playground view` opens the factory's herdr server in your terminal, where your sessions run, so you never type a herdr path or setting. It takes nothing. When the server is down it says so: run `playground` to start it. Test sessions (probes) run on a server of their own, which this view leaves out.
+
+## Check: `playground status`
+
+One line for each part, for example:
+
+```text
+herdr factory: up, 12 sessions
+herdr probes: down
+Dashboard web: up
+Dashboard API: up
+Session follower: running
+Dispatcher on Claude: running
+GLM: not set up
+```
+
+Each herdr server shows whether it is up and how many sessions it holds, first, so it shows even when the Dashboard cannot be read. Each dispatcher shows by what it runs on (Claude or GLM). `GLM: not set up` means no GLM key is saved. `playground status` starts and stops nothing.
+
+## Update: `playground update`
+
+`playground update` brings your checkout up to the newest release, then moves the Dashboard to the newest commit of the branch it follows. It runs, in order, and stops at the first step that fails, naming it:
+
+1. It fetches `origin/main` and fast-forwards your checkout onto it. A checkout with commits of its own cannot fast-forward, so it stops there and changes nothing.
+2. It runs `scripts/link-skills.sh`, so the home skill set takes a new or renamed skill.
+3. It installs the dependencies when `bun.lock` or a `package.json` changed, and builds the shared packages when one of them changed.
+4. It restarts each background job whose code changed.
+5. It moves the Dashboard to the newest build, printing each step:
+
+```text
+Building…
+Switching…
+Updated to 3f9a2c1
+```
+
+When the newest commit is the one running, it prints `Already up to date at <sha>`. When the new one fails its checks, the Dashboard goes back to the one it ran before: it prints `Going back…`, then `Failed: <reason>; back on <sha>`, or `going back to <sha> failed too` in place of `back on <sha>`. When the new one changed the database it stays on it, and the line says so. A commit that failed before is not tried again: it prints `Failed: <sha> failed its roll before`. Run `playground` first if the Dashboard is not running.
+
+`playground update --to <tag>` moves your checkout to that release instead, back or on, with the same link, install, build and restart steps, and leaves the Dashboard as it is, since it rolls on its own. A checkout with commits of its own stops before anything moves. `playground doctor` shows the release it is held at, and a plain `playground update` moves it on to the newest again.
+
+## Check your install: `playground doctor`
+
+`playground doctor` prints one line per thing Playground needs: `ok`, `MISSING` with the command that fixes it, or `optional`. It checks the tools on your `PATH` (`bun`, `claude`, `docker`, `gh`, `git`, `node` at 20.9 or newer and `python3`, with `uv` optional), your GitHub login (optional; without it syncing your extensions is off, and the line says so), the data folder it reads (`~/.playground`, or the one `PLAYGROUND_DATA_DIR` names), Playground's own herdr (`MISSING` with `playground herdr pin` as its fix when it is missing or changed, naming a herdr of your own on your `PATH`, which it leaves alone), that every link into your checkout points at a file that is there, the release your checkout is at and how far behind `origin/main` it is, and on a Mac that portless's proxy is running for the Dashboard's local address (`MISSING` with running the installer again as its fix) and that each background job you turned on is loaded. It exits with an error when anything is `MISSING`, and changes nothing.
+
+## Put herdr back: `playground herdr pin`
+
+`playground herdr pin` downloads the herdr version Playground pins for your Mac (Apple silicon or Intel) from herdr's GitHub release, checks it against the SHA-256 written in Playground, and only then keeps it at `~/.playground/bin/herdr`. A download that does not match is refused, naming both sums, and nothing is installed. When the copy already matches, it changes nothing. `--check` only reads the copy and exits 1 when it is missing or changed; `--asset <file>` installs from a file you downloaded instead. A herdr on your `PATH` is yours: Playground never runs it.
+
+## Show the version: `playground version`
+
+`playground version` prints your checkout's tag and commit, your login scope's last commit in the extensions, which new sessions read (`none rendered` until there is one), and your Claude Code version.
+
+## Move a machine onto Playground: `playground migrate`
+
+`playground migrate --archive <checkout> --pre-squash <sha> --org <org>` runs once, on a machine that ran the factory before Playground. First it moves the old data folder in `~/.claude` to `~/.playground` and leaves each old name as a link to it, so a path written before the switch still reads. It reads each value the old tree held from the archive checkout, at its `canary` (or `--old <rev>`) and at the pre-squash commit, and writes it into your login's scope: the settings and the release owners' list. Your own rules come with your private extension, so it reads none. The managers' session names come from this machine's roster, `ext.order` puts your login first and the org `--org` gives after it, `ext.links` links your login to every repo and the org's extension to the org's repos and every repo (or, when your login's scope holds the older `orgs.map` and `orgs.always`, links each owner `orgs.map` names to its org and each `orgs.always` org to every repo), `factory.archiveRepo` is the archive checkout's GitHub origin, and `factory.repo` and `factory.publicRepo` are this checkout's. It also brings the hand-made skills into the org's scope, unless that scope's clone already holds them. A value already set stays as it is, so a second run changes nothing. Then it moves the machine itself, so run it with the Dashboard's job stopped. Every old name it moves comes from the migration table the archive checkout holds at the pre-squash commit (its `.github/notes/migrate/table.json`): each renamed job takes its new name in `jobs.json` and in your settings, the dropped jobs leave `jobs.json`, every job's path into an old data folder points into `~/.playground`, the old script copies are copied into the data folder's `archive/` folder and then deleted, the state folder and files the table lists move to their new names, and each variable your shell profiles and LaunchAgents set under an old name takes its new one, with the old file kept beside it as `<file>.pre-migrate`. Last, whatever the other steps did, it runs `playground herdr pin`, which puts Playground's own herdr in place. `--dry-run` prints what each step would write and downloads nothing. A step that finds no value names the file it read, the other steps still run, and the command exits 1.
+
+## Remove: `playground uninstall`
+
+`playground uninstall` stops and removes each background job that runs from your checkout or the data folder, stops the Dashboard, removes the home skill set (`ws-home@ws`) and its `ws` marketplace from Claude Code when it lists them, and removes every link into your checkout: the skills, the command and the links in the data folder. It keeps the data folder (`~/.playground`) and the Dashboard's database, and says so. When the Dashboard does not stop, it says so with the reason, removes the rest, and exits with an error. `playground uninstall --purge` removes those two as well, after you type `purge` to confirm; any other answer removes nothing. The checkout itself stays: delete its folder yourself when you no longer want it.
+
+## Add a session: `playground add`
+
+`playground add` starts a session through `scripts/spawn.sh`, so every check `spawn.sh` makes applies: the number of sessions, the machine's load and memory, your usage, and a name already in use. When a check refuses, `playground add` prints the reason and exits with an error. One start runs at a time: a second one while another runs is refused, so try it again once the first ends.
+
+- `playground add` starts a worker under a fresh name, and `--kind runner` starts a runner instead. `playground add worker-otter` uses your name, which starts with its kind (`worker-` or `runner-`). A worker needs `--title "<title>"`, a plain title of up to 40 characters saying what it does, which the sidebar shows. A runner takes its name as its title and no `--title`. Add `--brief <file>` for its first brief (a file under `~/.playground`, by its name there or its full path), `--model <id>` for its Claude model, or `--backend glm` to run it on GLM. With no brief, the new session tells its lead that it is up and waits for a task.
+- `playground add --dispatcher --backend glm` starts a second dispatcher on GLM, so it keeps working when your Claude usage runs out. It prints `Started a second dispatcher on GLM`. It runs on GLM alone, since a second dispatcher on Claude needs a second Claude account.
+
+Starting a manager (`--manager`) is not ready yet; it says so and starts nothing.
+
+## Keep a page: `playground page`
+
+`playground page <file.html> --title "<title>" --by <session> [--for <session>]` keeps an HTML page an agent made, so it outlives the browser tab that showed it.
+It copies the file into the previews folder (`~/.playground/previews`) under its own name, with `-2`, `-3` added when the name is taken, saves the title beside it, records who made it (`--by`) and for whom (`--for`) in `pages.jsonl` there, and opens the copy.
+The page then shows on the [Pages](/docs/agents#pages) tab of both sessions and of your chat, and in the Previews app.
+It refuses a file that is not an HTML page, and a `--by` or `--for` that names no session on the roster.
+
+## Wait for stuck alerts: `playground alerts-wait`
+
+`playground alerts-wait <name>` waits until a session that `<name>` manages gets stuck, prints the alert, and exits.
+It wakes on the stuck alerts a session's own hook sends; the 5-minute reminder to the dispatcher and the alert for a session quiet 15 minutes come by the relay alone.
+A manager keeps it running as a background task and starts it again after each alert, so it hears in a second or two rather than waiting for the relay.
+
+## Answer a permission prompt: `playground picker`
+
+`playground picker <session> allow <key>` or `playground picker <session> deny <key> "<reason>"` is how a manager answers the permission prompt a session it runs is stuck on, once that session's alert reaches it with the command and its key.
+`allow` presses Yes, once, in the session's own pane after reading that the pane's prompt shows that command; `deny` presses No and sends the session the reason, so it can try a simpler way.
+Each answer is a line in `ops/picker.log` under `~/.playground`, naming who answered, the session and the start of the command.
+It refuses anyone but the session's manager or the primary dispatcher, a deny with no reason, a session that is not running, a dispatcher's own prompt, a key that no prompt showing matches, and a prompt that may be another waiting call's, as a subagent's file or URL prompt always is while its parent waits.
+For that last one, the manager denies it by hand with Escape and sends the session the reason, or takes it to the dispatcher.
+
+## Read the rules: `playground rules`
+
+`playground rules` prints the standing rules a factory session starts with, each by its first line, with your settings' values in place of each `{key}`.
+`playground rules <name>` prints one rule whole, its what and why, the same way; a name of two words takes a hyphen (`playground rules local-page`).
+When you, an org and Playground each hold a rule of that name, yours is the one it prints.
+
+## Change a setting: `playground settings`
+
+`playground settings list`, `get <key>`, `why <key>`, `set <key> <value> --reason "<why>"` and `reset <key> --reason "<why>"` read and change your settings in your extensions folder, with no Dashboard needed.
+Every change needs its reason, and `--scope` sets it for an org (its name) or for you (your GitHub login, the default).
+[Settings and extensions](/docs/extensions#settings) has each command and how a scope wins.
+`playground settings import-jobs <jobs.json>` brings a hand-kept `jobs.json` into settings once, at the switch; [Ops jobs](/docs/jobs) has the rest.
+
+## Use your extensions: `playground ext`
+
+`playground ext list` names your extensions in order, core last, with each one's repo, linked orgs and item counts; with `--scope` or `--kind` it lists items. `show`, `put`, `why`, `diff` and `search` read your extensions and put an item's next revision, from a file, a skill's folder or standard input, with its reason and any `--attach` files, as one commit in its scope.
+`playground ext init [--yes | --dry-run]` reuses your private repo, or makes one once you answer `y` (`--yes` off a terminal), and clones your login's folder from it (`--dry-run` prints the login, the repo and whether it exists, making nothing), and `playground ext sync [<scope>]` syncs each scope with its repo now ([Your private repos](/docs/backup#your-private-repos)).
+`playground ext add <name> [<owner/name>] [--yes]` does the same for another extension, asking the same way before it makes a repo: it clones `<login>/playground-<name>` (or the repo you name, which it records in `ext.repos`) into its folder, keeps any files already there, and puts it last in `ext.order`, linked to no org until you link it; core is read-only, so `ext add core` exits 2.
+`playground ext add <name> [<owner/name>] --dry-run` makes nothing and prints, as JSON, the repo it would use, whether it is on GitHub yet (a public one is refused) and how many entries its `skills/` holds.
+`playground ext order <name>...` puts the names given first, `ext link <name> <org|*>` and `ext unlink <name> <org|*>` choose whose repos read an extension (`*` is every repo), and `ext remove <name>` takes one out of all three keys while its folder stays.
+`playground ext export <folder>` clones every scope into a new folder, and `playground ext import <folder> [--dry-run]` brings one back, showing what it would change first with `--dry-run`.
+`playground ext import --from-tree <folder>` puts each guard's list file in the folder into your login's lists ([How sessions read it](/docs/extensions#how-sessions-read-it)).
+`playground ext score`, `accept` and `reject` judge a proposal with a reason ([Review](/docs/extensions#review)).
+[Settings and extensions](/docs/extensions#extensions) and [Export, import and backup](/docs/backup) have each command.
+`playground ext` and `playground settings` write the folders themselves, so they need no Dashboard running; a usage error exits 2 and a refused write exits 1, with its reason.
+
+## Accounts: `playground accounts`
+
+`playground accounts list` prints each account the factory spends, a row of the `usage.accounts` setting: its provider, its email or label, whether the Keychain keeps its secret, and its last 5-hour and week reading. It never prints a token or a key.
+`playground accounts add --provider claude --email <email>` prints 3 steps (open the sign-in link in a private or guest window, sign in with the account to add, paste the code the page shows), runs `claude setup-token` in your terminal, then asks you to paste the token it printed, with no echo, and keeps it in the Keychain under `usage.keychainService` by that email.
+`playground accounts add --provider glm --label <label>` asks for a Z.ai key the same way and keeps it under `models.glmKeychainService` by that label; `spawn.sh --backend glm --account <label>` runs on it, and the first GLM row is the default.
+Adding an account that is already listed replaces its secret and leaves its row as it is.
+`playground accounts remove <email|label>` drops the row and its Keychain item.
+
+## Skill sets: `playground orgs`
+
+`playground orgs resolve --repo <folder>` writes the one skill set a session in that folder loads and prints its folder; spawning a session runs it, so you rarely need to.
+`playground orgs home` writes the home set, the one a session you start yourself gets, and installs it in Claude Code for your user; `scripts/link-skills.sh` runs it.
+`playground ext which <skill> [--repo <folder> | --org <org>]` prints the folder of the copy of a skill a session in that folder, or in a repo of that org, loads, so a job can run a skill's script from whichever scope holds it.
+`playground ext why <skill> [--repo <folder> | --org <org>]` prints that copy with its scope and each scope whose copy it shadows.
+[Skills and orgs](/docs/skills#which-skill-wins) has the order a skill is taken in.
+
+## Scripts: `playground ask`, `changelog`, `ingest`, `queues` and `thread`
+
+Each runs the package script of the same name in the Dashboard's checkout, the one on branch `live.branch`, passing on every word after it, so `playground ask get #i12` is `bun run ask get #i12` there. The Dashboard's checkout holds the address of the database the Dashboard shows, so an item posted this way reaches your Inbox from any folder.
+
+- `playground ask` posts an item to the [Inbox](/docs/inbox), reads its answer and closes it.
+- `playground changelog` adds rows to the Changelog from GitHub's merges and versions, or a line by hand.
+- `playground ingest` reads every Claude Code session Playground has run (every one on this machine with `PLAYGROUND_CMUX_SESSIONS=true`) into the Dashboard's database; `--follow` keeps reading, and `status` says how far it is.
+- `playground queues` prints the merge queue and the work queue.
+- `playground thread` opens, routes, renames and lists the Inbox's threads.
+
+## Troubleshooting
+
+- **`factory is not running`** from `playground view`: run `playground`, which starts it, then `playground view` again.
+- **`playground: no Dashboard checkout yet; run playground once to set it up`**: the Dashboard runs from a checkout of its own, on the branch the `live.branch` setting names, which a fresh install has not made yet. Run `playground`, which makes it and installs it, then run the command again.
+- **`ops-dashboard's supervisor is not running`** or **`ops-dashboard's heartbeat is … old`** while `playground` waits: the Dashboard's background job stopped, so the Dashboard will not come up. Read `ops/dashboard/supervisor.log` under `~/.playground` for why, then run `playground` again.
+- **`the Dashboard did not answer within 15 minutes`**: its background job is still running but the Dashboard never answered. Read the same log, then run `playground` again.
+- **`the Dashboard's supervisor is paused`**: someone paused updates on purpose. Remove the file the message names, then run `playground update` again.

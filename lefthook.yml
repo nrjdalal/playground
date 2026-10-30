@@ -1,0 +1,82 @@
+# Hooks run the committing worktree's own lefthook (git runs them from its root), not a removed installer's, and fail loudly without node_modules; bun runs it, as the npm wrapper wants node
+lefthook: bun node_modules/.bin/lefthook
+
+pre-commit:
+  piped: true
+  commands:
+    conflict-markers:
+      # before lint-staged, whose formatter can rewrite a staged conflict marker into Markdown that reads clean
+      priority: 1
+      run: bun --no-env-file packages/scripts/src/conflict-markers.ts
+    skills-manager:
+      priority: 1
+      glob:
+        - "skills/zerostarter/**/*.md"
+        - ".github/scripts/skills-manager.ts"
+      run: bun .github/scripts/skills-manager.ts && git add AGENTS.md
+    lint-staged:
+      priority: 2
+      run: bunx lint-staged --verbose
+      stage_fixed: true
+    agents-rules:
+      # the rule test pins each ALWAYS rule by its opening words; its own glob, so a Markdown-only commit still runs it
+      glob:
+        - ".agents/dashboard/*.md"
+        - "AGENTS.md"
+        - "CLAUDE.md"
+        - "tests/AGENTS.test.ts"
+      run: bun run test:file tests/AGENTS.test.ts
+    docs-wrap:
+      # after lint-staged's formatter, so it reads the docs as they are committed: one sentence per line, none over the limit
+      priority: 3
+      glob:
+        - ".agents/dashboard/*.md"
+        - ".agents/skill-trial.md"
+        - ".agents/testing.md"
+        - "AGENTS.md"
+        - "CLAUDE.md"
+        - "docs/playground/playbook.md"
+        - "packages/scripts/src/docs-wrap/*.ts"
+        - "scripts/README.md"
+        - "scripts/hooks/README.md"
+        - "extensions/core/skills/playbook/*.md"
+        - "web/next/content/docs/dashboard.mdx"
+      run: bun --no-env-file packages/scripts/src/docs-wrap/cli.ts --check
+    dev-stack:
+      # the build below rebuilds packages/* under this checkout's running `bun run dev` and hangs it, so the commit waits for the stack to stop
+      priority: 3
+      exclude:
+        - "*.md"
+        - "tests/*.py"
+      run: bun --no-env-file api/hono/src/bin/dev-running.ts
+    env-keys:
+      # before the build, which fails on a short .env one key at a time; this names every key it lacks at once (its own build of @packages/env makes the dist it reads on a fresh worktree)
+      priority: 4
+      exclude:
+        - "*.md"
+        - "tests/*.py"
+      run: TURBO_CACHE_DIR="${TURBO_CACHE_DIR:-$HOME/.cache/turbo/playground}" bunx turbo run build --filter=@packages/env --output-logs=errors-only && bun packages/scripts/src/env-keys.ts
+    build:
+      # docs and Python tests feed no build; lefthook skips the step when every staged file matches (its * crosses folders); in a worktree it waits for a run slot as commit-<worktree>
+      exclude:
+        - "*.md"
+        - "tests/*.py"
+      run: TURBO_CACHE_DIR="${TURBO_CACHE_DIR:-$HOME/.cache/turbo/playground}" bun --no-env-file packages/scripts/src/commit-slot.ts bun run build
+
+commit-msg:
+  commands:
+    commitlint:
+      run: bunx commitlint --edit {1}
+    co-authored-by:
+      # AGENTS.md's Commits rule; commitlint's trailer-exists matches case-sensitively, so it would miss Co-Authored-By
+      run: "if grep -iq '^co-authored-by:' {1}; then echo 'AGENTS.md: no Co-authored-by trailer, in any case' >&2; exit 1; fi"
+
+pre-push:
+  commands:
+    audit:
+      # GHSA-vfj7-8cjw-p6xm: braces has no patched release, and only dev tooling (shadcn, globby) reaches it
+      run: bun audit --audit-level high --ignore GHSA-vfj7-8cjw-p6xm
+      only:
+        - ref: canary
+    ensure-branches:
+      run: bun .github/scripts/ensure-remote-branches.ts {1}

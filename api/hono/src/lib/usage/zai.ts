@@ -1,0 +1,69 @@
+import { join } from "node:path"
+
+import { z } from "zod"
+
+import { dataDir } from "@/lib/sessions/paths"
+
+// The Z.ai GLM plan's credit windows, written by the ops-zai-usage job (packages/scripts/src/ops-zai-usage) every 5 minutes, temp file then rename. The endpoint is undocumented and can change without notice, so the file is checked here and one that fails its shape is no usage. The dashboard only reads it.
+export const zaiPath = (): string => join(dataDir(), "zai-usage.json")
+
+// The job runs every 5 minutes, so a file this old means it has stopped and its numbers are stale.
+export const ZAI_STALE_MS = 10 * 60 * 1000
+
+const windowSchema = z.object({
+  cap: z.number().positive(),
+  resetsAt: z.string().nullable(),
+  used: z.number().nonnegative(),
+})
+
+const usageSchema = z.object({
+  windows: z.object({
+    fiveHour: windowSchema.nullable(),
+    week: windowSchema.nullable(),
+  }),
+  writtenAt: z.string(),
+})
+
+export type ZaiWindow = z.infer<typeof windowSchema>
+
+export type ZaiUsage = {
+  fiveHour: ZaiWindow | null
+  stale: boolean
+  week: ZaiWindow | null
+  writtenAt: string
+}
+
+// Pure: the file's text as the two credit windows, or null when it holds neither, no time it was written, or a shape the job does not write.
+export function zaiUsageOf(text: string, now: Date): ZaiUsage | null {
+  let file: unknown
+  try {
+    file = JSON.parse(text)
+  } catch {
+    return null
+  }
+  const parsed = usageSchema.safeParse(file)
+  if (!parsed.success) return null
+  const { fiveHour, week } = parsed.data.windows
+  const { writtenAt } = parsed.data
+  const written = Date.parse(writtenAt)
+  if (Number.isNaN(written) || (!fiveHour && !week)) return null
+  return {
+    fiveHour,
+    stale: now.getTime() - written > ZAI_STALE_MS,
+    week,
+    writtenAt: new Date(written).toISOString(),
+  }
+}
+
+// The report's problem line for a file the job stopped writing; a missing file is no problem, since a machine with no GLM plan has none.
+export const zaiProblem = (zai: ZaiUsage | null): string | null =>
+  zai?.stale ? `The GLM credit windows are stale: last written ${zai.writtenAt}` : null
+
+// The file as zaiUsageOf reads it; a missing or unreadable one is no usage.
+export async function readZaiUsage(path = zaiPath(), now = new Date()): Promise<ZaiUsage | null> {
+  try {
+    return zaiUsageOf(await Bun.file(path).text(), now)
+  } catch {
+    return null
+  }
+}

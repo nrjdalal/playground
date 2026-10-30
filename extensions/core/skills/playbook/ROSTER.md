@@ -1,0 +1,75 @@
+# Roster
+
+`~/.playground/roster.json` (in `$PLAYGROUND_DATA_DIR` when it is set) is the factory's record of every session: its kind, role, task, short title, ETA, where its work went and its last report.
+The dashboard reads it through `api/hono/src/lib/dashboard/roster.ts`: the sidebar each agent's title and, on a working, fixing or stuck worker's hover, the time left to its ETA, and the dashboard every agent's title, task, branch, pull request and last report for its Agents table, an `ended` status as Ended,
+and the backlog entries still waiting (from `backlogNext` on, less those `backlogTaken` lists) as its Next up list, `Fix: ` entries first, then `<owner>: ` entries, then the rest, each oldest first.
+`scripts/roster.ts` in the main checkout is its only writer: atomic writes, `updatedAt` and `lastReportAt` stamped from the UTC clock, titles cut to 40 characters with any trailing `(#N)` dropped, since the PR is linked on its own.
+
+The dispatcher or the lead that starts a session, dispatches to it, hears its report or ends it writes that change, at that moment; workers and runners report and leave the writing to their lead.
+`scripts/spawn.sh` writes what it knows as it starts a session, whoever runs it: its `kind`, its `workspace`, a column's `surface`, a worker's or checker's `title`, a checker's `worker=` and, for an entry that holds neither a task nor a pr, a `task`: its brief's file name, else its role and name (`probe probe-api`).
+A new probe's `title` defaults to `Probe: <name>` and a new runner's to its own name while its entry holds none, so neither row reads its first ask.
+Each lead's sweep ends its own down agents, and Ops keeps the rest of the file in order.
+
+Run each row as `bun <main checkout>/scripts/roster.ts <row>` (`$PLAYGROUND_REPO` names the main checkout in a session spawn.sh started):
+
+| When                          | Row                                                                                                                                                                                                                                                         |
+| ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A session starts              | `assign <name> "<title>" "<task>"`, `<title>` the one spawn.sh wrote, beside the `workspace` spawn.sh wrote, adding `surface=surface:N` (from `cmux tree`) for a workspace spawn, since spawn.sh records a column's alone                                   |
+| A respawned session starts    | `set <name> status=working`, adding `surface=surface:N` (from `cmux tree`) for a workspace spawn, beside the refs spawn.sh wrote, so the entry's `pr`, `branch` and `eta` carry over (a cmux restore respawn)                                               |
+| A worker spawns a checker     | `assign <checker> "<title>" "<task>" pr=<PR url>`, `<title>` the `Review: ` or `Test: ` one spawn.sh wrote, beside the `workspace`, `surface` and `worker=` spawn.sh wrote, so the dashboard nests the checker under its worker                             |
+| A checker takes another PR    | `assign <checker> "Review: <its new worker's title>" "<task>" worker=<worker> pr=<PR url>` (`Test: ` for a tester), adding `repo=<owner/name>` for a repo other than the factory's (`factory.repo`), which moves its worker, pr, repo and title in one step |
+| A worker takes an item        | `set <name> size=<small\|medium\|big>`, plan.json's `size` for its item (a work-org ticket medium unless its lead says), which its runs and its checkers' count in load units ([rules/slots.md](../../rules/slots.md))                                      |
+| A runner takes another job    | `set <runner> task="<every job, each with its log and health check>"`                                                                                                                                                                                       |
+| A runner's cadence is set     | `set <runner> schedule=always`, or `schedule="<5-field cron>"` (`"0 5 * * *"`), which its Dashboard row ends with (`every day at 5:00 AM`)                                                                                                                  |
+| It sends an ETA               | `set <name> eta=<iso>`                                                                                                                                                                                                                                      |
+| It opens a PR                 | `set <name> pr=<PR url> branch=<branch> repo=<owner/name>`                                                                                                                                                                                                  |
+| It reports                    | `report <name> "<one line>" eta=<iso>`, the ETA the report carried                                                                                                                                                                                          |
+| Its PR merges                 | `report <name> "merged <sha>" eta=`, which clears its ETA                                                                                                                                                                                                   |
+| It ends                       | `report <name> "<why it ended>" status=ended`; a herdr session's `spawn.sh close` has already set `ended`, so its report is `report <name> "<why it ended>"`                                                                                                |
+| It posts an Inbox decision    | `set <name> asks="<every open id, space-separated>"`                                                                                                                                                                                                        |
+| It acts on one no longer open | `set <name> asks="<the open ids left>"`                                                                                                                                                                                                                     |
+| A task waits for a slot       | `backlog "<task>"`, with `<owner>: ` or `Fix: ` in front of a priority task (below)                                                                                                                                                                         |
+| An entry's issue is filed     | `backlog-done <index> <issue>`, the entry's 0-based index in `backlog`, which marks it filed; then tell the builder its index (below)                                                                                                                       |
+
+- `surface` is the session's own split and `workspace` the workspace that holds it ([SESSIONS.md](SESSIONS.md#spawn)): a worker's checkers and probes share their worker's `workspace`, each with a `surface` of its own, and the managers share the `Managers` workspace.
+  Every command aimed at one session names both.
+  A session started before the `surface` key has a `workspace` alone until its next restart.
+- `assign` clears the previous task's `pr`, `branch`, `repo`, `ticket`, report and `eta`, so an agent's next chore starts clean.
+  A new task on an agent holding a `pr` goes through `assign`: `set` refuses `task=` there, naming `assign`; `set <name> title=<title>` renames the row and leaves its `pr`, `branch` and `repo` alone.
+  A checker's `pr` or `worker` moves only through `assign`, given both `worker=` and `pr=`: `set` and `report` refuse any move of either, and `assign` one given alone, naming `assign`, since a checker left on its old worker keeps that worker's ended row in the sidebar.
+- `status` takes one word from `scripts/roster-statuses.json`: a `live` word while the session runs, a `finished` one once it stops, which ops-report reads so it never calls a finished session down.
+  Progress text goes through `report <name> "<text>"` as `lastReport`: `set`, `report` and `assign` refuse any other `status`, naming `report`, and a row already holding text keeps it until its next `status=`.
+- `pr` holds the PR's full URL, since the dashboard and code-review-loop's recovery scan read no other form.
+  A bare number (`1561`, or the same with a leading `#`) is expanded to `https://github.com/<repo>/pull/<n>`, `<repo>` being the same call's `repo=`, else the entry's, else `factory.repo`; any other value is refused.
+- `eta` is the UTC time a worker last told its lead it expects its chore done (the **eta** rule).
+  The lead writes the worker's own time, since the dashboard counts down to it and shows nothing once it passes; a worker that has sent none has none.
+  A runner carries none.
+- `kind` says what a session is, whatever its name: `worker`, `researcher`, `reviewer`, `tester`, `runner` or `probe`, or a manager's `builder` (`builder`), `ops` (`ops`), `planner` (`planner`), `optimizer` or `dispatcher` (the dispatcher, dispatcher-2).
+  spawn.sh writes it at every start and reads it on a resume, and the dashboard, the hooks, the optimizer and the Usage app read it before the name's prefix, so a name such as `k3v9q2-reviewer` places as its kind says.
+  An off-list kind is refused.
+  The role follows from the kind when the agent is first written (`manager` for builder, dispatcher, ops, optimizer and planner, `runner` for runner, `worker` for the rest), else from the name's kind (`kindOfName`: `k3m9px-runner` and `runner-*` are `runner`, `x7mh4d-builder` is `manager`), and a name with no kind is `manager` for `dispatcher` and `worker` for the rest.
+  `backfill` gives each entry with no kind the one its name's prefix gives, once.
+- `who <kind>` prints the session holding a manager kind's seat (`builder`, `ops`, `planner`, `optimizer`), writing nothing: of the entries of that kind (its `kind`, else its name's, an `<id>-<kind>` suffix or today's name), the newest whose status is not `ended`, `parked` or `starting`, else the newest `starting` one, else today's name (`builder`, `ops`, `planner`, `optimizer`).
+- `who dispatcher [1|2]` prints the dispatcher holding a slot the same way, 1 the primary (Alpha, the default) and 2 the second (Bravo), by the entry's `slot` (spawn.sh writes `slot=2` for a second dispatcher it opens), else today's name's slot, else the first; else the dispatcher or dispatcher-2.
+  It takes the slot's number, never its label.
+  Each reader of a manager goes through it or its rule (`managerOf` in `packages/config/src/kinds.ts`): spawn.sh's reports-to, notify.sh's default and kind words, and the backlog marks below.
+  Write "your builder" in a brief and resolve it with `who builder` when you send it.
+- A runner under another name (a headless job such as `linear-auto`) is recorded with `kind=runner` on its `assign`, which places it as a runner whatever its name.
+- A new name needs a task, since the dashboard's schema drops an agent with none: `set` and `report` refuse a name the roster lacks unless `task=` gives one, and `assign` gives it as its third word.
+- A name is lowercase words joined by `-`, spawn.sh's word shape: `set`, `report` and `assign` refuse any other, naming it, before they read or write the roster.
+- The backlog only grows until roster.ts can take an entry off it, so the builder (`who builder`, `builder` today) keeps two marks on its own entry, where the dashboard reads them: `backlogNext` (0-based, 0 when unset), below which every entry is settled, and `backlogTaken`, the space-separated indices at or past it that are settled already (dispatched, folded into a lane or dropped).
+  A priority entry is marked by its prefix alone: `Fix: ` for a fix to live breakage or security, `<owner>: ` (the owner's name, `PLAYGROUND_OWNER_NAME`) for a task that quotes the owner's own words asking for it.
+  When a slot opens:
+  1. Among the entries at or past `backlogNext` that `backlogTaken` does not list, take the oldest `Fix: ` entry ready to dispatch, else the oldest work-org entry (a work-org ticket, which stays outside the lanes); with neither, take the next item of the first lane, in `plan.json`'s order, that has no worker and is not `listedOnly` ([DISPATCH.md](DISPATCH.md)).
+     The Planner folds every other entry, Playground's own work, into a lane, a `<owner>: ` entry ahead of the factory's own, and tells the Builder each index it folds, which is settled then.
+     A task still waiting on something stays for a later slot or fold.
+  2. Add each index taken or folded to `backlogTaken`, then move `backlogNext` past every leading entry that `backlogTaken` lists or that is no task at all (a note), and drop the indices below it from `backlogTaken`: `set <builder> backlogNext=<n> backlogTaken="<indices>"`.
+     A builder respawned under a new name writes both marks on its own entry with its first `set`.
+
+  An entry dispatched any other way (out of turn by the dispatcher, or as a runner job by Ops), or dropped as done or obsolete, is settled the same way: whoever settles it tells the builder its index, and the builder, the marks' only writer, adds it to `backlogTaken` and makes step 2's move.
+
+  An entry whose issue is filed is settled too, since its work lives in the issue now: `backlog-done` puts `[#<issue>] ` in front of it, which also takes a `Fix: ` or `<owner>: ` entry out of Next up's priority groups, and whoever runs it tells the builder its index the same way.
+
+- `asks` on the dispatcher's or a lead's entry lists the Inbox decisions it posted and has not yet acted on.
+  A read mark (`bun run --cwd <dashboard checkout> ask get <id> --ack`) says an answer reached the asker, not that it was acted on, so the list stays; a go closes only with `bun run ask ack <id> --link <url>` or `--no-link "<why>"` once carried out (the **ask** rule).
+- Pass no `updatedAt` or `lastReportAt`: roster.ts stamps them.

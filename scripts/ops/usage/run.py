@@ -1,0 +1,229 @@
+#!/usr/bin/env python3
+"""ops-usage: the usage windows of the account the factory spends into ~/.playground/usage.json, every 5 minutes, so the dashboard's
+footer and tooltip read the account the sessions really run on, never a stale one.
+
+The stored login (Claude Code's keychain item "Claude Code-credentials") is read from the endpoint Claude Code's /usage reads
+(api.anthropic.com/api/oauth/usage) into usage/stored-login.json, which login-flip.py reads, and into usage-<local part>.json beside
+usage.json, the file the dashboard's Week tooltip reads. It never refreshes that token (a refresh
+rotates the refresh token Claude Code holds); an expired one waits for Claude Code to refresh it.
+While login-flip.json names a `factory` account other than the stored login (the factory's sessions run on that account's token,
+spawn.sh --account), usage.json holds that account's limits instead: login-flip's own reading of it, from one 1-token call's
+rate-limit headers (a setup-token's inference scope cannot read /usage), taken here when login-flip's is 14 minutes old or more and
+shared through login-flip.json, so the two never probe the same account twice in that time. usage.json then adds `readAt` (when the
+limits were measured), `source` "token/ratelimit-headers" and `storedLogin` (the stored login's account and week). Remove `factory`
+from login-flip.json when the factory moves back to the stored login. login-flip.json's `accounts` lists every account the factory's
+sessions spend into; each is probed the same way, and usage.json's `accounts` holds each fresh week reading, which week-marks.py sums.
+usage.json's `rotation` is login-flip.json's: `pool`, each account login-flip.py switches between (its TARGETS), whether its plan ends, when, and the day of the month a renewing one renews.
+usage.json keeps the shape the dashboard reads (rate_limits.{five_hour,seven_day}.{used_percentage,resets_at}, writtenAt), plus account
+and source. No model call but that probe. One instance (flock).
+"""
+import datetime, fcntl, json, os, subprocess, sys, time, urllib.request
+
+HERE = os.path.expanduser("~/.playground/ops/usage")  # the state folder by name, so a run by its repo path still reads the live state
+OPS = os.path.dirname(HERE)
+OUT = os.path.join(os.path.dirname(OPS), "usage.json")
+STORED = os.path.join(HERE, "stored-login.json")
+FLIP = os.path.join(HERE, "login-flip.json")
+CYCLE = 300
+PROBE_EVERY, FRESH_FOR = 840, 1800
+API = "https://api.anthropic.com/api/oauth"
+STARTED = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+sys.path.insert(0, OPS)
+from beat import beat, setting  # noqa: E402
+
+PROBE_MODEL, SERVICE = setting("models.probe"), setting("usage.keychainService")
+
+lock = open(os.path.join(HERE, "run.lock"), "w")
+try:
+    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+except OSError:
+    sys.exit("ops-usage is already running")
+
+
+def iso(t):
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(t))
+
+
+def write(path, data):
+    tmp = f"{path}.{os.getpid()}.tmp"
+    with open(tmp, "w") as f:
+        json.dump(data, f)
+    os.replace(tmp, path)
+
+
+def oauth():
+    r = subprocess.run(["security", "find-generic-password", "-a", os.environ.get("USER", ""), "-s", "Claude Code-credentials", "-w"], capture_output=True, text=True, timeout=15)
+    if r.returncode:
+        raise RuntimeError("no Claude Code credentials in the keychain")
+    return json.loads(r.stdout).get("claudeAiOauth") or {}
+
+
+def get(path, token):
+    req = urllib.request.Request(f"{API}/{path}", headers={"Authorization": f"Bearer {token}", "anthropic-beta": "oauth-2025-04-20", "Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=20) as r:
+        return json.load(r)
+
+
+def window(w):
+    if not isinstance(w, dict) or not isinstance(w.get("utilization"), (int, float)):
+        return None
+    resets = w.get("resets_at")
+    return {"used_percentage": w["utilization"], "resets_at": int(datetime.datetime.fromisoformat(resets).timestamp()) if resets else None}
+
+
+def stored_login():
+    o = oauth()
+    if o.get("expiresAt", 0) / 1000 < time.time():
+        raise RuntimeError("access token expired; waiting for Claude Code to refresh it")
+    # the account is read every cycle, with the token it goes with: the owner switches logins, and a cached email names the wrong account
+    account = (get("profile", o["accessToken"]).get("account") or {}).get("email")
+    u = get("usage", o["accessToken"])
+    limits = {k: window(u.get(k)) for k in ("five_hour", "seven_day")}
+    limits = {k: v for k, v in limits.items() if v}
+    if not limits:
+        raise RuntimeError("usage answered with no five_hour or seven_day window")
+    return {"account": account, "rate_limits": limits, "source": "oauth/usage", "writtenAt": iso(time.time())}
+
+
+def write_stored(stored):
+    """The stored login's reading also lands in usage-<local part>.json beside usage.json, account-watch.py's file, which the Week tooltip reads; a failed read writes nothing, so the file keeps its last good reading."""
+    account = stored.get("account")
+    if account:
+        write(os.path.join(os.path.dirname(OPS), f"usage-{account.split('@')[0]}.json"), stored)
+
+
+def probe(email):
+    """login-flip.py's probe: one 1-token call to models.probe as that account's token, whose rate-limit headers give its 5-hour and week use.
+    The token goes from the Keychain into the request header and nowhere else."""
+    r = subprocess.run(["security", "find-generic-password", "-s", SERVICE, "-a", email, "-w"], capture_output=True, text=True, timeout=15)
+    if r.returncode:
+        return None
+    body = json.dumps({"model": PROBE_MODEL, "max_tokens": 1, "system": "You are Claude Code, Anthropic's official CLI for Claude.",
+                       "messages": [{"role": "user", "content": "hi"}]}).encode()
+    req = urllib.request.Request("https://api.anthropic.com/v1/messages", data=body, headers={
+        "Authorization": "Bearer " + r.stdout.strip(), "anthropic-version": "2023-06-01",
+        "anthropic-beta": "oauth-2025-04-20,claude-code-20250219", "content-type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            h = resp.headers
+    except Exception as e:
+        h = getattr(e, "headers", None)
+    if not h or h.get("anthropic-ratelimit-unified-7d-utilization") is None:
+        return None
+    f = lambda k: float(h.get(f"anthropic-ratelimit-unified-{k}") or 0)
+    return {"five": round(f("5h-utilization") * 100), "fiveReset": f("5h-reset"), "week": round(f("7d-utilization") * 100), "weekReset": f("7d-reset")}
+
+
+def flip_file():
+    try:
+        return json.load(open(FLIP))
+    except (OSError, ValueError):
+        return None
+
+
+def seen(flip, email, now):
+    """login-flip.json's reading of one account, probed again when it is PROBE_EVERY old, so login-flip.py and this job share one probe."""
+    s = (flip.get("seen") or {}).get(email) or {}
+    if now - s.get("at", 0) >= PROBE_EVERY:
+        got = probe(email)
+        if got:
+            s = dict(got, at=now, via="token")
+            flip = json.load(open(FLIP))  # login-flip.py may have written since; keep its keys, set only this reading
+            flip.setdefault("seen", {})[email] = s
+            write(FLIP, flip)
+    return s
+
+
+def accounts_reading():
+    """Each account in login-flip.json's `accounts` (every account the factory's sessions spend into) with a fresh week reading."""
+    flip, now, out = flip_file() or {}, time.time(), {}
+    for email in flip.get("accounts") or []:
+        s = seen(flip, email, now)
+        if now - s.get("at", 0) < FRESH_FOR and s.get("week") is not None and s.get("weekReset"):
+            out[email] = {"readAt": iso(s["at"]), "week": s["week"], "weekReset": int(s["weekReset"])}
+    return out
+
+
+def rotation(flip):
+    """login-flip.json's `rotation`, {pool: [{account, ending, endsAt, renewsOn}]}, or None when it is not that shape."""
+    got = flip.get("rotation")
+    pool = got.get("pool") if isinstance(got, dict) else None
+    entry = lambda e: isinstance(e, dict) and isinstance(e.get("account"), str) and isinstance(e.get("ending"), bool) and (e.get("endsAt") is None or isinstance(e["endsAt"], str)) and (e.get("renewsOn") is None or (type(e["renewsOn"]) is int and 1 <= e["renewsOn"] <= 31))
+    return {"pool": [{"account": e["account"], "ending": e["ending"], "endsAt": e.get("endsAt"), "renewsOn": e.get("renewsOn")} for e in pool]} if isinstance(pool, list) and all(map(entry, pool)) else None
+
+
+def factory_reading(stored, flip):
+    """usage.json's data for login-flip.json's `factory` account, when that is not the stored login; else None."""
+    factory = flip.get("factory")
+    if not factory or (stored and factory == stored["account"]):
+        return None
+    now = time.time()
+    s = seen(flip, factory, now)
+    if now - s.get("at", 0) >= FRESH_FOR or s.get("week") is None:
+        raise RuntimeError(f"no reading of {factory} under {FRESH_FOR // 60} minutes old")
+    limits = {"five_hour": {"used_percentage": s.get("five"), "resets_at": int(s["fiveReset"]) if s.get("fiveReset") else None},
+              "seven_day": {"used_percentage": s["week"], "resets_at": int(s["weekReset"]) if s.get("weekReset") else None}}
+    data = {"account": factory, "rate_limits": limits, "readAt": iso(s["at"]), "source": "token/ratelimit-headers", "writtenAt": iso(now)}
+    if stored:
+        data["storedLogin"] = {"account": stored["account"], "week": (stored["rate_limits"].get("seven_day") or {}).get("used_percentage")}
+    return data
+
+
+while True:
+    problems, stored, data = [], None, None
+    try:
+        stored = stored_login()
+        write(STORED, stored)
+        write_stored(stored)
+    except Exception as e:
+        problems.append(f"stored login: {type(e).__name__}: {e}")
+    flip = flip_file() or {}
+    try:
+        data = factory_reading(stored, flip)
+    except Exception as e:
+        problems.append(f"factory account: {type(e).__name__}: {e}")
+    data = data or stored
+    if data:
+        try:
+            accounts = accounts_reading()
+            if accounts:
+                data["accounts"] = accounts
+        except Exception as e:
+            problems.append(f"accounts: {type(e).__name__}: {e}")
+        pool = rotation(flip)
+        if pool:
+            data["rotation"] = pool
+        write(OUT, data)
+        account, limits = data["account"], data["rate_limits"]
+        # The factory's accounts, usage.accounts read each cycle so a change lands with no restart: marks and alerts count these alone.
+        # The week marks themselves (90, 97, 98%) and the day's 40% live in usage/week-marks.py, which Ops' tick relays.
+        try:
+            FACTORY = {a["email"] for a in setting("usage.accounts") if a.get("provider", "claude") == "claude"}
+        except SystemExit as e:
+            problems.append(f"usage.accounts: {e}")
+            FACTORY = set()
+        week = (limits.get("seven_day") or {}).get("used_percentage")
+        if isinstance(week, (int, float)) and account in FACTORY:
+            marks = os.path.join(HERE, "week-marks.json")
+            try:
+                told = json.load(open(marks))
+            except (OSError, ValueError):
+                told = {}
+            key = f"{account}:{(limits.get('seven_day') or {}).get('resets_at')}"
+            json.dump(told, open(marks, "w"))
+            # the outbox needs a session to relay it; the marks also go to ops/alerts-usage.json, which ops-unstick folds into alerts-pending.json
+            crossed = sorted(told.get(key, []))
+            out = [{"at": data["writtenAt"], "kind": "usage", "line": f"week usage at {week:g}% ({account}), past {crossed[-1]}%", "name": "usage", "since": data["writtenAt"]}] if crossed else []
+            # dispatcher, 8 Oct: the 5-hour window at 90% or more, while it lasts, so the Builder slows spawns before the cap
+            five = limits.get("five_hour") or {}
+            if isinstance(five.get("used_percentage"), (int, float)) and five["used_percentage"] >= 90:
+                at = time.strftime("%H:%MZ", time.gmtime(five["resets_at"])) if isinstance(five.get("resets_at"), (int, float)) else "unknown"
+                out.append({"at": data["writtenAt"], "kind": "usage-5h", "line": f"5-hour window at {five['used_percentage']:g}% ({account}), resets {at}: slow spawns", "name": "usage", "since": data["writtenAt"]})
+            write(os.path.join(OPS, "alerts-usage.json"), {"alerts": out, "writtenAt": data["writtenAt"]})
+    detail = f"{data['account']}: 5h {data['rate_limits'].get('five_hour', {}).get('used_percentage')}%, 7d {data['rate_limits'].get('seven_day', {}).get('used_percentage')}%" if data else ""
+    # an expired stored token is expected while every session runs on another account's token, so only a missing factory reading fails
+    result = "ok" if data and not any(p.startswith("factory") for p in problems) else ("error: " + "; ".join(problems))[:120]
+    if data and problems:
+        detail += " (" + "; ".join(problems)[:200] + ")"
+    beat("ops-usage", os.getpid(), STARTED, CYCLE, result, {"detail": detail})
+    time.sleep(CYCLE)

@@ -1,0 +1,32 @@
+{
+  "name": "@packages/scripts",
+  "version": "0.0.1",
+  "private": true,
+  "bin": {
+    "playground": "./src/playground/cli.ts"
+  },
+  "type": "module",
+  "scripts": {
+    "check-types": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@packages/config": "workspace:*",
+    "@packages/env": "workspace:*",
+    "@packages/redis": "workspace:*",
+    "@packages/settings": "workspace:*",
+    "@types/bun": "catalog:",
+    "@types/fontkit": "catalog:",
+    "@types/node": "catalog:",
+    "fontkit": "catalog:",
+    "nanoid": "catalog:",
+    "remark-gfm": "catalog:",
+    "remark-mdx": "catalog:",
+    "remark-parse": "catalog:",
+    "tldts": "catalog:",
+    "ts-morph": "catalog:",
+    "typescript": "catalog:",
+    "unified": "catalog:",
+    "wawoff2": "catalog:",
+    "zod": "catalog:"
+  }
+}

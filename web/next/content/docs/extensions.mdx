@@ -1,0 +1,208 @@
+---
+slug: /docs/extensions
+title: Settings and extensions
+description: Where your own values, rules and skills live, and how to change them with one command.
+---
+
+# Settings and extensions
+
+Playground keeps the code public and your own values private.
+Your values (people, repos, channels, models, limits) and your own rules, skills and notes live in your extensions, git folders in your data folder, never in the code.
+
+## Settings
+
+Every knob is a typed key with a default, read where it is used, so a change takes effect on the next read with no restart.
+
+```bash
+playground settings list                                    # every key with its default, then each value set
+playground settings get <key> [--org <org>]                 # its value, as an org or you read it
+playground settings why <key>                               # every change to it, with its reason
+playground settings set <key> <value> --reason "<why>" [--scope <scope>]
+playground settings reset <key> --reason "<why>" [--scope <scope>]
+playground settings import-jobs <jobs.json> [--launch-agents <dir>] [--scope <scope>] [--dry-run]   # once, at the switch: see Ops jobs
+```
+
+- A setting is set at a scope: your GitHub login (the default) or an org's name, each its own folder in `~/.playground/extensions/` holding a `settings.json`.
+  Your value wins over your org's, your org's over Playground's own in `core`, and `core`'s over the key's default.
+  `core` is read-only here: it changes by a pull request to the Playground repo.
+- A value that reads as JSON (`3`, `true`, `["a","b"]`) is stored as JSON; anything else is stored as text.
+- Every change is one git commit in its scope's folder: its message is the reason, its author who made it (`--by <name>`, `owner` by default), so `why` is that folder's `git log`, and you can read it by hand with `git -C ~/.playground/extensions/<scope> log -p settings.json`.
+- `policy.json` at the folder's root holds the settings every session reads, rebuilt on each change.
+- A machine with no settings of its own runs on the defaults.
+
+### The keys
+
+| Key                         | Default                                                   | What reads it                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| --------------------------- | --------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `battery.alert`             | `5`                                                       | the battery check, which posts its red alert at this percent while the Mac runs on battery                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `battery.ask`               | `10`                                                      | the battery check, which posts its orange ask at this percent while the Mac runs on battery                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `channel.skipUser`          | none                                                      | the channel watch, which relays every post but this Slack member's own                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `channel.slackId`           | none                                                      | the channel watch, which relays the shared channel's posts to the dispatcher and reads nothing until it is set                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `checks.outsideAuthors`     | none                                                      | Checks, which runs a PR by one of these GitHub logins from outside the factory only at a head the Builder gave its go                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `clock.ownerZone`           | `UTC`                                                     | the **clock** rule, whose times shown to you read in this IANA time zone, the Inbox's Snooze times, and `playground migrate`, which seeds it                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `context.window`            | `400000`                                                  | the **context** rule, which names the window, in tokens, every session compacts itself in                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `ext.links`                 | `{}`                                                      | the skill set, the settings and the rules hook, which read an extension in a repo of an org it links (`*` for every repo), and the guards (the leak guard, spawn.sh's GLM gate and folder trust, run-slot's priority and the worktree sweep), which keep each org it links                                                                                                                                                                                                                                                                                                  |
+| `ext.order`                 | `[]`                                                      | the skill set, the settings and the rules hook, which read the linked extensions in this order, first wins, your login's first when the list leaves it out, and core last                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `ext.repos`                 | `{}`                                                      | the nightly sync, which pushes each scope to `<login>/playground-<scope>` unless this names another repository                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `factory.archiveRepo`       | unset                                                     | the leak guard and the trace count, which treat a link to it as private history                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `factory.publicRepo`        | unset                                                     | the leak guard, which refuses private text in a write there, and reads past its name: the public repository, set by migrate or at setup; unset, the guard keeps the one it used before this key                                                                                                                                                                                                                                                                                                                                                                             |
+| `factory.repo`              | unset: the checkout's `origin`                            | the merge gates (GitGuardian's check is needed there), Checks, and the roster, which links a bare PR number into it; with neither set, the merge gates and the roster refuse, naming the key                                                                                                                                                                                                                                                                                                                                                                                |
+| `gates.glmLoad5Max`         | `30`                                                      | spawn.sh's capacity gate: the load5 a GLM session starts under                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `gates.glmSwapinsMax`       | `100`                                                     | spawn.sh's capacity gate: the swap-ins a second a GLM session starts under                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `gates.memoryFreeMin`       | `8`                                                       | spawn.sh's capacity gate: the free memory share, in percent, a Claude session starts at or over                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `gates.smallReserve`        | `0.25`                                                    | spawn.sh's capacity gate: the share of the load line kept for small items                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `gates.startsWindow`        | `300`                                                     | spawn.sh's capacity gate: the seconds a start counts toward the load                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `github.pollMinutes`        | `5`                                                       | the **github** rule, which names the fewest minutes between two polls of one pull request by a session                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `glm.readOnlyLoad5`         | `15`                                                      | the **glm** rule, which names the 5-minute load average above which a GLM session may not install, commit or push                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `jobs.<name>`               | each job's own                                            | the ops runner ([Ops jobs](/docs/jobs)), and Checks' and the merge train's loops, which run every `schedule.every` seconds                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `live.branch`               | `live/dashboard`                                          | the live dashboard's checkout, whose stack reads this machine and which ops-dashboard rolls to canary                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `live.container`            | `playground-dashboard-db`                                 | the live dashboard's database container, which every stack off its checkout refuses                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `models.checker`            | `claude-opus-5-5`                                         | spawn.sh: the model a reviewer or a tester runs on, and the one `--model` it takes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `models.claude`             | the four Claude models                                    | spawn.sh and `playground add`: the models `--model` takes; adding one is one `playground settings set`                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `models.default`            | `claude-opus-5-5`                                         | spawn.sh: the model a session runs on when its start names none                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `models.glm`                | `glm-5.3-flash`                                           | spawn.sh: the model a `--backend glm` session runs on, every model Claude Code asks for mapped to it                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `models.glmKeychainService` | `playground-glm`                                          | spawn.sh and `playground status`: the Keychain service each GLM row's key is kept under, by its label                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `models.probe`              | `claude-haiku-4-5`                                        | the usage scripts, which send each account one 1-token call to this model to read its 5-hour and week use                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `owner.names`               | none                                                      | the inbox gate, which refuses a manager's stop on a line that addresses the owner by one of these names or handles and asks for an action                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `paths.codeRoot`            | unset: the checkout's folder                              | `spawn.sh`, which answers Claude's folder trust prompt for a session under it and moves a session off the Desktop into it                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `release.hours`             | `4`                                                       | the **release** rule, which names the hours of merging after which Ops ships `canary` to `main`, whatever the count                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `release.merges`            | `3`                                                       | the **release** rule, which names the user-facing merges since the last ship at which Ops ships `canary` to `main`                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `sessions.aliases`          | none                                                      | spawn.sh: a manager's old session name, mapped to its kind, which still starts and resumes it                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `sessions.names`            | the role words: `builder`, `dispatcher`, `ops`, `planner` | spawn.sh: the name each manager kind starts under; the second dispatcher takes the dispatcher's with `-2`                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `slack.linkConverter`       | none                                                      | the Inbox, whose refusal of an archives Slack link, and a draft's instructions, name this command for rewriting a link to its app form                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `slack.sendServer`          | none                                                      | the Inbox, which names this MCP server when the dispatcher sends a Slack message for a poster that has ended; your Slack tool when unset                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `slots.modelBound`          | `2`                                                       | run-slot, which lets this many runs that mostly wait on a model (`--model-bound`, such as a parity replay) hold a slot at once, apart from the CPU slots                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `tickets.tracker`           | `the tracker`                                             | the **tickets** rule, which names the issue tracker inside its sentence, such as Linear                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `unstick.escalateMinutes`   | `5`                                                       | the **unstick** rule, which names the minutes a session stays stuck with no turn before ops-session-resume tells the primary dispatcher                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `usage.accounts`            | none                                                      | the usage scripts and the login flip: each account the factory spends, any number of each provider. A Claude row is keyed by its `email`, in the order the factory moves between them, with its plan's `ends` (`null` until known) and `endsFirst`, or its billing day `renews`, `nearLimit` for the near-limit marks, and its `weekReset` (`{"hour", "weekday"}`, UTC) for a reading that gives none; a GLM row (`"provider": "glm"`) is keyed by its `label`, the Keychain item under `models.glmKeychainService` that holds its key. A row may give a `label` either way |
+| `usage.keychainService`     | `playground-claude-oauth`                                 | spawn.sh's `--account` and the usage probes, which read each account's long-lived token from the macOS Keychain item under this service and the account's email                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `usage.switchAccount`       | unset                                                     | the ops tick, which tells Ops once this account's week reaches 98%, and both dispatchers and both leads at 100%, so the factory moves off it                                                                                                                                                                                                                                                                                                                                                                                                                                |
+
+A repository is written `owner/name`.
+While `factory.publicRepo` and `factory.archiveRepo` are unset, the leak guard and the trace count use the repositories they used before these keys.
+
+## Extensions
+
+Your extensions hold your own items besides settings, each under a scope, a kind and a key:
+
+- a scope is your GitHub login, an org, or `core`, Playground's own, which ships with the checkout and takes no write;
+- `doc`, `learning`, `rule` and `template` hold a body of text, and a `script` holds a body or, put from a folder, its files;
+- `skill` holds a skill's folder, file by file;
+- `list` holds a JSON value, such as a guard list.
+
+```bash
+playground ext list [--scope <scope>] [--kind <kind>]
+playground ext show <scope> <kind> <key> [--rev <sha>]
+playground ext put <scope> <kind> <key> <path> --reason "<why>" [--attach <file>]...
+playground ext search <words> [--kind <kind>]
+playground ext import-scripts <ops-folder> <job>... --org <org> [--dry-run]   # once, at the switch: see Ops jobs
+```
+
+- `list` names every scope's items, `core`'s among them marked `readOnly`, and passes over a folder's `.gitkeep`.
+- `put` writes the item's next revision from a file, from a folder for a `skill` or a `script`, or from standard input with `-`, as one commit in its scope.
+- A `list` revision lands accepted.
+  Any other kind lands under `proposed/`, for review, unless you write it from the dashboard yourself.
+- `--attach` takes a file, repeated for more, kept under `attachments/` by the hash of its bytes; a file over 50 MB is refused.
+- `search` reads each scope's accepted items, line by line, at most 50 lines.
+- A value that looks like a secret (a token or a key) is refused: an extension keeps a secret's name, such as its Keychain item, never its value.
+
+## Which scope wins
+
+A session reads its scopes in one order: `ext.order`'s, with your login's first when the list leaves it out, each extension kept only when `ext.links` links it to the org that owns the repo it runs in or to every repo (`*`), then `core`. By default, with no `ext.order` set, that is your login's, then the linked extensions, then `core`.
+
+- A skill, a rule or another item resolves by its name: the first scope in that order that holds the name wins, so your copy shadows the org's and the org's shadows core's.
+- A setting resolves key by key in the same order, then falls to the key's default.
+- A list is the union of every scope's copy, so a guard reads every entry any scope adds.
+  Arrays join item by item and objects key by key, while a single value such as the terms' `probe` keeps the first scope's, and core is read last, so an org's list holds only the items it adds and leaves each single value to core.
+
+`playground ext which <skill> [--repo <dir> | --org <org>]` prints the copy a session in that folder (or a repo of that org) loads, and `playground ext why <skill> [--repo <dir> | --org <org>]` prints it with its scope and each scope whose copy it shadows.
+
+## A Playground skill is an Agent Skill
+
+Each skill in an extension is an [Agent Skill](https://agentskills.io/specification): a folder holding a `SKILL.md` whose frontmatter gives the two required fields, `name` (the folder's name) and `description` (what it does and when to use it), with reference files under `references/`, runnable code under `scripts/` and static files under `assets/`.
+The Claude Code keys a skill needs beside the spec's (`hooks`, `disable-model-invocation`, `user-invocable`, `argument-hint`, a fork's `context`, `disallowed-tools` and `background`) stay where Claude Code reads them, and the skills check refuses any other key.
+
+## From the terminal
+
+`playground ext` and `playground settings` read and write the folders themselves, so they need no dashboard running; the dashboard's own calls take the same lock, so two writes never land at once.
+
+## How sessions read it
+
+Sessions and their guards read files, never the database, so a stopped database changes nothing for a running session.
+They read the extensions, `extensions/` in the data folder: one git folder per scope, your GitHub login's and each org's, beside two files every write derives at the root.
+
+- `<scope>/settings.json`, the settings set at that scope.
+- Each accepted item in its scope's folder: `rules/<key>.md`, `skills/<key>/` with the skill's files, `lists/<key>.json`, `scripts/<key>/` for a script added from a folder, and the same for docs, learnings and templates.
+- `policy.json` at the root, the settings as a session with no org reads them and as each org's session does.
+- `hooks/<list>.json` at the root, each guard's list: every scope's `lists/<list>.json` together, yours, each org's and core's.
+- `login` at the root, the login `playground ext init` wrote, which names your own scope.
+
+`core`, Playground's own scope, is read from `extensions/core/` in your checkout and never written.
+Each write lands in its scope's folder as one commit whose author is who asked and whose message is the reason, so `git -C <data folder>/extensions/<scope> log` lists that scope's history.
+Each file is written under a temp name and renamed into place, so a session never reads a half-written file.
+The root existing is what says a machine has extensions, so a machine with them never falls back to the lists in its checkout.
+
+A root that lacks a guard's list refuses that guard's calls, so a guard never runs without its list.
+On a new machine, seed the guards' lists from the checkout:
+
+```bash
+playground ext import --from-tree extensions/core/lists   # the guards' list files, into your login's lists
+```
+
+A script reads a file of the extensions through their reader, a path at the root or under a scope:
+
+```bash
+bun packages/scripts/src/playground/rendered.ts hooks/release-owners.json
+```
+
+| Exit | Meaning                                                              |
+| ---- | -------------------------------------------------------------------- |
+| 0    | It prints the file's path.                                           |
+| 2    | The extensions lack the file; the refusal names how to write it.     |
+| 3    | This machine has no extensions, so the script takes its own default. |
+
+A script reads one setting the same way, as JSON, its default when this machine has no extensions, exit 2 when the set cannot be trusted:
+
+```bash
+bun packages/scripts/src/playground/setting.ts factory.repo   # "owner/name"
+```
+
+## A worked example
+
+An org's extension is a private repo under its owner's GitHub login, `<login>/playground-<org>`, cloned to `extensions/<org>/`, so a session in one of the org's repos loads its skills beside core's and its lists join every guard's.
+
+- `skills/<name>/`: the org's skills, each with its own `tests/`, which the repo's `bun run test` runs.
+- `rules/channel.md` and `lists/glm-refused-sources.json`: one rule and one guard list.
+- `settings.json` as `{}`, so the org runs on the defaults until it sets a key.
+- A pre-commit hook that runs gitleaks, so no secret lands in a commit.
+
+`playground ext list --scope <org> --kind skill` names its skills.
+
+## Review
+
+A setting changes at once with its reason, and so does a list.
+A new revision of prose (a rule, a skill, a doc, a learning, a script or a template) written from the terminal lands under `proposed/`, and sessions keep reading the accepted one until it is accepted; your own edits from the dashboard apply at once.
+A revision is the commit that wrote it, named by its sha.
+
+```bash
+playground ext score <scope> <kind> <key> <sha> <0-5> --reason "<why>" --by <reviewer>
+playground ext accept <scope> <kind> <key> <sha> --reason "<why>"
+playground ext reject <scope> <kind> <key> <sha> --reason "<why>"
+```
+
+- A score below 5 is recorded as a commit of its own and leaves the proposal for a later revision or another score; a 5 accepts it.
+- An accepted proposal moves out of `proposed/` over the accepted copy, and sessions read it at once.
+- `accept` is your own call, so it takes no `--by` but yours, and `reject` removes the proposal.
+- Each judges only the proposal the sha names: one rewritten since is refused, so read it again first.
+- Each decision is a commit whose trailers name the verdict, the score and the reviewer, so `playground ext why` lists it beside each revision.
+- Every call from the terminal acts as you, so the name given with `--by` is recorded for the history, not checked.
+
+## History
+
+```bash
+playground ext why <scope> <kind> <key>                         # every commit that wrote or judged it, with its reason
+playground ext why <skill> [--repo <dir> | --org <org>]         # the copy a session loads, and each scope it shadows
+playground ext diff <scope> <kind> <key> --from <sha> --to <sha>
+```
+
+Export, import and the nightly sync with your private repos are on [Export, import and backup](/docs/backup).

@@ -1,0 +1,26 @@
+onboarding = false
+
+[update]
+manifest_check = false
+version_check = false
+
+[keys]
+prefix = "ctrl+alt+b"
+
+[server]
+headless_cols = 120
+headless_rows = 40
+
+[ui.sound]
+enabled = false
+
+[session]
+resume_agents_on_restore = false
+startup_per_agent_delay_ms = 1000
+
+[advanced]
+scrollback_limit_bytes = 2000000
+
+[experimental]
+allow_nested = false
+pane_history = false

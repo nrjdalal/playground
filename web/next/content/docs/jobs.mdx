@@ -1,0 +1,57 @@
+---
+slug: /docs/jobs
+title: Ops jobs
+description: The background jobs Playground runs, how to turn each one on, and where their launchd files go.
+---
+
+# Ops jobs
+
+Playground's background work runs as ops jobs: the Dashboard's supervisor, the sweeps, the merge train, the usage reads and the rest.
+Each job is a setting, `jobs.<name>` (`ops-merge-train` is `jobs.opsMergeTrain`), whose value is the whole job: whether it is on, its schedule, its command or launchd program, and why it is paused.
+A fresh install has every job off but `jobs.opsDashboard`, the Dashboard's own, which serves first run's checks and every settings write.
+
+## Turn a job on
+
+Read the job, change `enabled` to `true`, and set it back with a reason:
+
+```bash
+playground settings get jobs.opsSweep
+playground settings set jobs.opsSweep '<the job, with "enabled": true>' --reason "<why>" [--scope <scope>]
+```
+
+Your login's value wins over your org's, as for every setting, so a job you turn on or off holds whatever your org set.
+Moving a schedule or pausing a job with `pausedFor` is the same kind of write.
+
+## How a change reaches the runner
+
+At the top of every pass, the ops runner (`scripts/ops/up.py`) renders the jobs from your extensions into `<data>/ops/jobs.json` and writes a plist for each launchd job that is on into `<data>/ops/launch-agents`.
+A machine with no extensions keeps its own `jobs.json`.
+When that render cannot be trusted, the runner keeps the last `jobs.json` and writes why to `<data>/ops/up.log`.
+A job the registry does not know, such as one of your own scripts, stays in `jobs.json` as it is.
+Each `script` item an org holds as a folder is installed into `<data>/ops/<key>/` in the same pass, beside the state its job keeps there, which the render never touches.
+
+launchd reads `~/Library/LaunchAgents`, not `<data>/ops/launch-agents`: at the switch to settings, each rendered plist is copied into `~/Library/LaunchAgents` and loaded with one `launchctl bootstrap` per plist, by its own label, in place of the plists kept by hand.
+
+## Bring an existing jobs.json in
+
+A machine that ran its jobs from a hand-kept `jobs.json` brings them into settings once, at the switch:
+
+```bash
+playground settings import-jobs <jobs.json> [--launch-agents <dir>] [--scope <scope>] [--dry-run]
+```
+
+Each job the registry knows becomes its `jobs.<name>` setting at your login's scope (or `--scope`), on unless `jobs.json` disabled it, with a launchd job's program and folder read from its plist in `--launch-agents` (`~/Library/LaunchAgents` by default).
+`--dry-run` prints what it would set and writes nothing.
+Every other job is listed as kept, and stays in `jobs.json`.
+
+## Bring your own scripts in
+
+A script your jobs run from a folder of its own (a runner, its helpers and the config it reads) becomes a `script` of your org once, at the switch:
+
+```bash
+playground ext import-scripts <ops-folder> <job>... --org <org> [--dry-run]
+```
+
+Each folder named becomes `<org>/scripts/<job>/` in your extensions: its top-level `.py`, `.sh` and `.json` files, but `state.json` and `watch.json`.
+The run prints everything it leaves in the folder by name, so a dry run shows what stays behind.
+A change to the script or its config is then a new revision, put with `playground ext put`, and the next pass installs it.

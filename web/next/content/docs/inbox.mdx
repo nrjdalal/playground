@@ -1,0 +1,163 @@
+---
+slug: /docs/inbox
+title: Inbox
+description: Decisions, drafts and updates, and how to answer them.
+---
+
+# Inbox
+
+The Inbox holds what your sessions need from you, and what happened that you should know.
+It sits in the half beside every dashboard page: beside your chat on `/dashboard`, and on any other page next to a square for your chat.
+It opens there first, under the Inbox square in the small bar at the bottom of that half (on a phone, the bar at the bottom of the page).
+On a wide screen that bar hides until you move the pointer near the bottom of the half, or press Tab into it; a short handle marks where it comes back, with a dot while something is new.
+Untick **Auto-hide tab bar** at the top of the user menu to keep it shown, with room left under each pane; this browser remembers the choice.
+
+## What it holds
+
+Each item is a card of one of three kinds:
+
+- **Decision**: something a session will do only with your yes, such as a question only you can answer, a Slack message, a ship to main, a new Linear ticket, a delete, a database change or a spend.
+  The card shows exactly what happens when you approve it.
+- **Draft**: a Slack message or a Linear comment, ready to send in your name.
+  The card shows its words, and Open thread shows where it goes.
+- **Update**: an outcome you should know, such as a merge, a ship, an alert, a finding or a decision.
+
+The list shows what needs you first, then unread updates, then the rest from the last week, each part newest first.
+The Inbox square counts what needs you and came since you last looked at the Inbox, so opening the Inbox clears it.
+
+The Inbox is six rows, each opened or closed by a click:
+
+- **Inbox** holds the list and shows how many it holds, and reads gray when it is empty. It starts open.
+- **In progress** holds what you answered in chat, five minutes on, while the session carries it out.
+- **Snoozed** holds what you put away until a time.
+- **Archived** holds what you set aside for later.
+- **Done** holds what is settled.
+- **Preview** opens a small browser for active development, there even when the Inbox is empty (see [Preview](#preview)). It starts closed.
+
+Each row but Preview shows how many it holds; a row reads gray while it is empty, and Done reads gray once you have read all of it, though it still opens.
+An empty row ends in a small circle, and a row with something in it in an arrow that points down while it is open.
+An archived item has its own **Dismiss**, and the check on the Archived row dismisses them all; either sends them to Done.
+The check on the Done row marks everything in Done read, and goes once it is all read.
+A row's heading stays at the top while you scroll through it.
+
+## Read a card
+
+The line at the top of a card gives its kind, the session that posted it and its id, such as `#i41`, and ends at the right with a check and one time: when it was posted, or once a decision or draft changes (your answer, its delivery, the session closing or editing it), or the session edits an update, when it was updated.
+It reads **Updated** in blue when that change came since you last looked at the Inbox.
+
+The icon beside the title is the item's state, drawn like an agent's status icon:
+
+| Icon         | Means                                             |
+| ------------ | ------------------------------------------------- |
+| Orange eye   | It waits on you.                                  |
+| Blue spinner | Your answer is being carried out.                 |
+| Green check  | It is done, with a green link to where it landed. |
+| Red error    | Your answer failed to send.                       |
+| Gray circle  | It was denied, discarded, archived or closed.     |
+| Dot          | An update you have not read.                      |
+
+## Answer a decision
+
+A session's request in its own words shows as your chat shows a message, so code in it reads highlighted, with a Copy button.
+A drawing keeps its lines whole, its text shrinking to fit the card.
+A Slack message shows exactly as it will be sent.
+
+- **Approve** tells the session to carry it out.
+- **Deny** tells it not to.
+
+Some decisions name what Approve does and what Deny does, one line each.
+That card shows the two as choices: press 1 or 2, or click one, then **Send**.
+
+Every open decision and draft ends in an **Add an optional comment** box above its buttons.
+Anything you would change goes there: what you type goes to the session with whatever you answer, and the answered card shows it as Your note.
+
+A decision can carry pictures, shown as square previews in a grid of four by four under its words: up to sixteen, or fifteen and a tile saying how many more.
+Click one to see it full screen over the page, blurred and dimmed behind it, one at a time, with nothing else on screen.
+The arrow keys or a swipe move between them, the arrows going round from the last to the first, and Esc closes the view.
+Move the pointer to the bottom edge or the thin pill there, press Tab, or on a phone tap the picture, and a bar rises with the arrows, where you are, such as 2 / 6, the picture's name, Open in new tab and X; the top-right corner shows an X too.
+A before and an after picture of the same thing show as one, side by side, Before on the left and After on the right.
+When they are the only files, the card shows them at its full width, Before above After.
+A bar at the top picks how they show: **Before** or **After** alone, **Side** (the first view) side by side at a divider you drag, or **Slider**, one over the other with a line you drag or move with the left and right arrow keys; the up and down arrow keys move to the picture before or after.
+Click a picture to zoom in where you clicked, drag to look around, and click again to zoom out; on a phone a tap shows or hides the bar instead.
+
+Besides pictures, a decision can carry an HTML page, a markdown file, a code file or a PDF, each a tile with its icon and name.
+An HTML page that is the only file shows live in the card, with a button in its corner that opens it full screen.
+A page runs only inside the view: its own keys work there, the arrows included, so a slide deck moves through its slides, Esc still closes the view, and a link in it opens in a new tab.
+An arrow the page does nothing with moves on to the next file.
+A markdown file reads like a chat message, code shows highlighted, and a PDF opens in the browser's own viewer.
+
+## Send a draft
+
+A reply to a Slack conversation shows **So far** first: one short line for each message that led up to it, who said it and the gist, oldest first.
+Your words follow under **Your reply**.
+A Slack decision shows the same lines above the message it sends.
+
+Change the words where they stand, then:
+
+- **Send** sends it as it reads.
+  Cmd+Enter or Ctrl+Enter in the box does the same.
+- **Draft** saves a Slack message in Slack's Drafts & Sent, for you to finish and send yourself.
+  A Linear comment has no Draft, since Linear has no drafts.
+- **Discard** drops it.
+
+A draft shows upfront where it will land, or why it has no link yet.
+
+## After you answer
+
+Your answer goes to the session that posted the item, and that session carries it out.
+The Dashboard itself sends nothing.
+
+Until the session confirms it, the card reads what is happening, such as Sending in Slack…, Saving a Slack draft… or Being carried out.
+Once confirmed, the card links to where it landed, such as Open thread for a Slack message.
+A Draft that Slack refused, because that conversation already holds one, reads in gray Draft not saved, with the reason.
+
+When your answer cannot reach the session, the card stays in the list in red, reading Send failed with the reason.
+When nothing reached the session yet, **Retry** sends it again.
+When part of it may have reached the session already, it reads Send unconfirmed and has no Retry, so it is never sent twice.
+A card with no Retry offers Dismiss alone.
+
+## Put an item away
+
+**Snooze**, the zzz button, puts a decision or draft away until a time.
+Pick one of the times it offers, each shown with its day and time in IST, or Pick a time… for a day and time of your own.
+The item moves to Snoozed and leaves the count until then, then comes back as new.
+
+**Archive**, the archive-box button, sets a decision aside for later: it is neither a yes nor a no.
+Whatever is already under way keeps going, and the session does not ask about it again until you bring it up.
+The item moves to Archived.
+
+**Mark as read**, the single check at the right end of a card's top line, marks an item you have not read yet as seen and answers nothing: the card stays as it is, still waiting on your answer if it asks one, and the check turns into a gray double check.
+
+**Dismiss** moves an update, or a decision or draft you have answered, a reply in chat included, to Done at once.
+An update you dismiss counts as read.
+**Mark all as read**, the check at the right of the first row, marks everything on screen you have not read as seen, answering nothing; each stays in the list as it is, and the check turns into a gray double check, All read.
+
+An item you answered moves to Done as soon as the session that posted it says it is done, unless you archived it.
+An answer still being carried out, or an update you read, moves to Done by itself after ten minutes.
+
+## Preview
+
+Under Done sits **Preview**, the last row, closed until you open it.
+Opened, it turns the rest of the pane into a small browser for active development.
+Pick one of your running stacks, or one of the 8 newest pages from Previews, or type an address.
+It loads only a `.localhost` address or a Previews page, and it remembers the last address you opened.
+Reload and Open in a new tab sit at the end of its address bar.
+
+## Chat about it
+
+Click **Chat about it**, the button at the right end of a card, to talk about it.
+Your chat opens with Replying to #i41 above the box, and the message you send carries the id.
+Typing `re #i41` anywhere in a message does the same.
+
+A reply counts as acting on the item.
+It leaves the list and the count at once, and its card reads You replied, with your words, and that the session is on it, until the session closes it.
+
+## While you look
+
+The list holds still while you read it.
+An item that arrives meanwhile waits behind a pill on the line above the list, such as **1 new update**.
+Click it to put what waits at the top.
+
+When cards move anyway, the buttons on each card that moved pause for 1 second, so a click meant for another card lands on none.
+
+A session that posted a decision or draft you have not acted on reads Waiting on your inbox in the sidebar while it is idle, with an orange eye (see [Agents](/docs/agents)).

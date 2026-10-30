@@ -1,0 +1,13 @@
+// Type-checks the tests of root-level files (lefthook.yml); each subject's tests below have their own config.
+{
+  "compilerOptions": {
+    "target": "ESNext",
+    "module": "Preserve",
+    "moduleResolution": "bundler",
+    "types": ["bun"],
+    "strict": true,
+    "skipLibCheck": true,
+    "noEmit": true
+  },
+  "include": ["*.ts"]
+}

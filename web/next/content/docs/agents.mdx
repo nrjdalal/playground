@@ -1,0 +1,82 @@
+---
+slug: /docs/agents
+title: Agents
+description: "What each agent is doing: its status icon and pages."
+---
+
+# Agents
+
+Every Claude Code session the Dashboard can see is an agent, listed in the sidebar by its group (see [Dashboard](/docs/dashboard#sidebar)).
+Each agent shows by its plain name: `worker-gluttony` reads Gluttony, `k3m9px-worker` reads K3m9px, and a manager reads its role, under any name its roster kind, `sessions.names` or `sessions.aliases` gives it: `builder` reads Builder and `ops` Ops. The dispatchers read Alpha and Bravo.
+
+## Open an agent
+
+Click an agent's row to open its own view.
+On the left is its stream, from the top of the page, read-only: you message only your dispatchers.
+On the right are the [Inbox](/docs/inbox), your chat with the dispatcher (its square named by its label, such as Alpha), and the agent's Pages, three squares in the small bar at the bottom of that half.
+Drag the divider to resize the two halves; let go near the middle and it snaps there.
+On a phone, the bar at the bottom of the page holds the agent's own stream first, then the Inbox, your chat with the dispatcher and Pages.
+
+## Pull requests
+
+The Pull requests tab is parked: it has no square in the bar until it is built again.
+`playground queues` still prints Playground's merge queue and your work queue as Markdown.
+
+## Pages
+
+The Pages tab keeps every page an agent made for you (a report, a comparison, a mock), so closing the browser tab that first showed it loses nothing.
+It lists the pages the agent made and the pages made for it, newest first; beside your chat it lists every page.
+Each row shows the page's title, who made it, whom it was made for and when; click it to open the page in a new tab.
+A page saved again under the same name with a number on the end, such as `report-2`, is one row that opens the newest; its **versions** menu opens an older one.
+The page opens as it was saved, with its styles, images and own scripts, so a deck's keys and tabs work; it fetches nothing from outside itself and cannot read the Dashboard's cookies.
+An agent keeps a page with [`playground page`](/docs/cli#keep-a-page-playground-page), which also puts it in the Previews app.
+
+## Status icons
+
+Every agent's row has one icon on the left.
+Its shape says what the agent is doing, and its colour says whether anyone needs to act: red needs you, orange is on its way, blue works, green is done, gray rests.
+When more than one state fits, the most urgent one shows.
+
+| Icon                   | State                | Means                                                                                                  | What to do                                                                                                       |
+| ---------------------- | -------------------- | ------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------- |
+| Red alarm              | Stuck                | A question, permission request, plan or login screen holds it. Your dispatcher's reads Waiting on you. | Answer a question on its card in its view; answer a permission request, plan or login in the session's terminal. |
+| Gray pause bars        | Paused · usage limit | The account's usage limit holds it.                                                                    | Nothing: it carries on after the reset. Hover for when that is.                                                  |
+| Green check            | Merged               | Its pull request merged.                                                                               | Nothing.                                                                                                         |
+| Red power              | Down                 | Its session went without being closed.                                                                 | Look at its terminal, and start it again if its work is not done.                                                |
+| Gray power             | Ended                | Its session was closed on purpose.                                                                     | Nothing.                                                                                                         |
+| Red error              | Failing              | Its last turn ended in an API error.                                                                   | Read the error in its view, then look at its terminal.                                                           |
+| Red clock              | No progress          | It is busy, but nothing new is in its log for 30 minutes.                                              | Look at its terminal: it may be hung.                                                                            |
+| Orange spinner         | Fixing               | It works on review findings or failing CI.                                                             | Nothing.                                                                                                         |
+| Blue spinner           | Working              | It works on its task.                                                                                  | Nothing.                                                                                                         |
+| Orange eye             | Waiting              | It is idle while something it started is still open. Hover its title for what, such as your inbox.     | Nothing, unless it reads Waiting on your inbox: answer that item.                                                |
+| Orange person or group | Waiting on approvals | Its pull request still needs one approval, or two or more.                                             | Get its pull request approved on GitHub.                                                                         |
+| Green zz               | Ready                | Its pull request scored 5/5 on its latest commit, CI is green or absent, and no approval is missing.   | Nothing: it can merge.                                                                                           |
+| Gray circled pause     | Parked               | Its pull request is held on purpose, or it was parked.                                                 | Hover for why.                                                                                                   |
+| Gray circle            | Idle                 | Nothing runs and nothing waits.                                                                        | Nothing.                                                                                                         |
+
+A reviewer or tester uses the same icons, and reads Done, with a green check, once its verdict stands.
+While a researcher, reviewer, tester or worker is working or fixing, its spinner gives way to its task's icon in the same colour: a globe, an eye, a test tube or a hammer.
+A short pause between two steps does not change the icon, but Stuck shows at once.
+While live sessions cannot be read, the rows dim and their spinners stop.
+
+The status table on `/dashboard/system` uses the same icons and words.
+
+## A row's words
+
+Each row is one line: the agent's task title, with its ticket, pull request number and role word before it, such as `ENG-262#73 Reviewer`; a worker's row leaves its role word out, `ENG-262#73`.
+At its right end are the model's maker, Anthropic or Z.ai, and the effort its latest reply ran with, each naming itself on hover.
+A row with checks or tasks under it shows its arrow in the effort's place while you hover or focus it, while it is open, and always on a phone.
+On a narrow sidebar the title cuts from its end.
+
+A pull request's number takes a colour: red while CI fails, orange in review, gray for a draft not reviewed yet or a closed one, green when Ready or merged.
+
+Hover a row's title for its full words, one line each: its name, its title whole, its model, effort and state with what the state holds, **Draft** while its box holds a message you have not sent, its pull request's state in words and, while a worker works or is stuck, the time left to its ETA.
+
+## What runs under a row
+
+A chevron on a row opens what runs under it: its reviewers and testers, its subagents and its background processes.
+A process shows only while it runs, by what it does (the description its agent gave it), else by its command.
+A finished subagent stays for half an hour.
+A row with nothing to list has no chevron.
+
+A stuck reviewer or tester keeps its worker's row closed: the worker's row shows the red alarm instead, with the stuck one named in its tooltip.

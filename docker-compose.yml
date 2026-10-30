@@ -1,0 +1,31 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: api/hono/Dockerfile
+      secrets:
+        - dotenv
+    env_file:
+      - .env
+    environment:
+      - HONO_HOSTNAME=0.0.0.0
+      - INTERNAL_API_URL=http://api:4000
+    ports:
+      - "127.0.0.1:4000:4000"
+
+  web:
+    build:
+      context: .
+      dockerfile: web/next/Dockerfile
+      secrets:
+        - dotenv
+    env_file:
+      - .env
+    environment:
+      - INTERNAL_API_URL=http://api:4000
+    ports:
+      - "127.0.0.1:3000:3000"
+
+secrets:
+  dotenv:
+    file: .env

@@ -1,0 +1,33 @@
+name: audit-canary
+
+on:
+  # a PR's audit fails only on what it adds, so canary's own advisories surface here, as one bump issue
+  push:
+    branches: ["canary"]
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  audit-canary:
+    name: Audit canary
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+
+      - name: Audit and keep the bump issue
+        # the same level and ignore list as the Audit step in hosted-check-build.yml
+        run: bun packages/scripts/src/audit-canary.ts --audit-level high --ignore GHSA-vfj7-8cjw-p6xm
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

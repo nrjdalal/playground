@@ -1,0 +1,70 @@
+---
+slug: /docs/troubleshooting
+title: Troubleshooting
+description: What to do when something does not start or stops.
+---
+
+# Troubleshooting
+
+Each entry starts with what you see, then what to do.
+For a message from the `playground` command itself, see [CLI](/docs/cli#troubleshooting).
+
+`playground` starts the Dashboard in herdr's Ops workspace, so most messages below do not show in your terminal.
+When `playground status` reads **Dashboard API: down**, the Dashboard's server does not answer: read the end of its log, `~/.playground/ops/dashboard/dev.log`, for the line that says why, then find that line here.
+After each fix, run `playground` again: it starts what is down.
+
+## Docker is not running
+
+The Dashboard keeps its data in a Postgres container on your Mac, so it starts only while Docker (or OrbStack) runs.
+On a first run, **Start a local container** on the Database row of **Let's check this Mac** makes that container with pglaunch, and it listens on every interface with pglaunch's own credentials (user, password and database `postgres`), so anyone who can reach this Mac on its port can read and change it ([Install](/docs/install#the-dashboards-database)).
+
+- **Docker is not running** on the Database row: start Docker or OrbStack, then click **Start a local container** again.
+- **`<.env path>` already names a database (POSTGRES_URL)** on the Database row: `.env` already holds a database address, which setup never overwrites.
+  Restart `bun run dev` to use it, or empty that line to have setup make a new one.
+- **pglaunch printed no database address** on the Database row: pglaunch could not start the container, and the row shows what it printed.
+  Fix what it names, then click **Start a local container** again.
+- **Postgres in `<container>` did not start in 30 seconds** on the Database row: the container started, but its database did not answer.
+  Click **Start a local container** again, which reuses that container; if it fails again, remove it with `docker rm -f -v <container>`, which deletes its data.
+- **`docker ps failed`** or **`docker inspect failed`**: Docker is not answering.
+  Start Docker or OrbStack.
+- **`docker is not on PATH`**: install Docker or OrbStack, or put `docker` on your PATH.
+- **`no single running Docker container publishes port <port>`**: no running container publishes the database's port, or more than one does.
+  Run `docker ps -a` to see each container and its ports.
+  Start the Dashboard's database container if it has stopped (`docker start <name>`), or stop the other container that publishes the same port.
+  A started container can come back on a new port: read it with `docker port <name> 5432` and put that port in `POSTGRES_URL` in `.env`.
+
+## herdr is not running
+
+Your sessions run in herdr, which `playground` starts, and `playground view` opens them in any terminal.
+
+- **Sessions can't be read** on the Dashboard: run `playground`, which starts herdr first.
+- **herdr factory: down** or **herdr probes: down** in `playground status`: run `playground`, which starts herdr first.
+- **`MISSING herdr`** in `playground doctor`, or **`herdr at <path> cannot be read`** in the log: Playground's own herdr is missing or changed (a `herdr update` changes it). Run `playground herdr pin`, which puts the pinned version back.
+- **`herdr-pin: <asset> <version> has sha256 <got>, not the pinned <want>; nothing was installed`**: the download is not the release Playground pins, so nothing was installed. Run `playground herdr pin` again; when it repeats, the release changed upstream and the pin needs a PR.
+
+## A port is in use
+
+- **`Port <number> is already in use`** in the log: another program holds the port every local Playground address goes through.
+  Run `lsof -ti tcp:<number>`, with the number from that line, to see which process holds it.
+  If it is an older Playground proxy, stop it with `bunx portless proxy stop`; that stops every Playground stack on this Mac until it starts again.
+- **`portless's proxy is not running, and starting it on port 443 needs sudo`** when you run `bun run dev`: this Mac has no Playground proxy yet.
+  Run the installer again in a terminal (`bash ~/playground/install.sh`), which sets it up with your Mac's password, or in the main folder run `sudo node_modules/.bin/portless service install`, which asks for your password, then `node_modules/.bin/portless trust`, and run `bun run dev` again.
+  Or run `PORTLESS=0 bun run dev`, which serves the app on fixed ports instead.
+- **`a stack already runs in this checkout`** when you run `bun run dev` yourself: the Dashboard already runs from this folder.
+  Use the one that runs, or stop it with `bun run dev:stop` first.
+
+## A session paused on its usage limit
+
+A session that reached its account's usage limit shows **Paused · usage limit** with gray pause bars in the sidebar (see [Agents](/docs/agents#status-icons)).
+Hover its row for when the limit resets.
+It does not need you and is not listed under Needs you.
+
+When Claude Code said it would continue automatically, the session carries on by itself once the limit resets.
+Otherwise, a session that Playground started gets a message to carry on a minute after the reset when `jobs.opsSessionResume` is on ([Turn a job on](/docs/jobs#turn-a-job-on)); until then, and for any other session, open its terminal and send it a message.
+If the limit still shows after its reset time, its row turns **Stuck**: open its terminal and send it a message to carry on.
+
+## A setting from before the rename
+
+Every setting the app and its scripts read from the environment starts with `PLAYGROUND_`.
+A `.env` file or a shell that still sets an older `DESK_*` name, the same ending after `DESK_` in place of `PLAYGROUND_`, keeps working: Playground reads the older name whenever the new one is unset, and the new one wins when both are set.
+Rename it in your `.env` when it suits you.

@@ -1,0 +1,59 @@
+---
+slug: /docs/backup
+title: Export, import and backup
+description: Take your settings and extensions to a new machine, and keep each scope in sync with a private repo on GitHub.
+---
+
+# Export, import and backup
+
+Everything that is yours in Playground, your settings and your extensions, exports to one folder and imports back from it, and each scope syncs with its own private repo on GitHub.
+
+## Export
+
+```bash
+playground ext export <folder>
+```
+
+It clones each scope's git folder into `<folder>/<scope>`, its history with it, into a new, empty folder, and refuses one that holds anything, so no old file stays beside the new ones.
+Secrets travel only as the names of their Keychain items or environment keys, since an extension refuses a secret's value.
+
+## Import
+
+```bash
+playground ext import <folder> --dry-run   # what it would change, scope by scope
+playground ext import <folder>             # apply it
+```
+
+- A scope this machine lacks is cloned from the folder.
+- A scope whose history the folder carries on fast-forwards to it.
+- Any other scope takes the folder's files as one commit, with the reason and you as its author.
+- A file that looks like a secret refuses the whole import, naming it, and `core` is refused, since it ships with the checkout.
+
+## Your private repos
+
+```bash
+playground ext init
+```
+
+It reads your login from the GitHub CLI and reuses your private `<login>/playground-<login>` repo, or, when there is none, says the repo it would make under your account (private, with issues, wiki and projects off) and makes it once you answer `y`; off a terminal it makes one only with `--yes`. A public one is refused.
+Your login's folder in `~/.playground/extensions/` becomes its clone: cloned from it when it already holds commits, else started with it as origin and a first commit holding an empty `settings.json`, so the first sync has something to push.
+A second run changes nothing. The installer runs it for you when the GitHub CLI is signed in, asking on your terminal first when the repo does not exist yet; with no terminal it makes none and puts `playground ext init` on its **Left for you** list.
+In the app, **Set up settings** on the Settings page does the same for you: it names the repo it reuses or makes in a confirm, and sets it up once you confirm.
+
+- Each scope in `~/.playground/extensions/` (your login, and each org) is its own git folder, synced with its own private repo: `<login>/playground-<scope>`, unless the setting `ext.repos` names another (`{"acme": "acme/playground-shared"}`).
+- Once you turn its job on (`jobs.opsExtSync`, off on a fresh install, [Ops jobs](/docs/jobs#turn-a-job-on)), each night at 02:30 every scope is pulled with a rebase and then pushed, with its whole history, so the repo's `git log` is the scope's.
+  A scope with no repo stays on your machine, and one with no commit yet is skipped.
+- A secrets scan runs before each push (the extensions' own secret shapes on every file, and gitleaks over the history when it is installed), and a hit stops that scope's push, naming the file and the kind of secret.
+- `playground ext sync [<scope>]` syncs now.
+- With no GitHub login, syncing stays off and `playground doctor` says so.
+
+## A new machine
+
+Install Playground with the GitHub CLI signed in to the same account ([Install](/docs/install)).
+Its `playground ext init` finds your repo and clones your login's folder from it, with your settings and their history, and your sessions read them from the first start.
+An org's scope comes back from an export, with `playground ext import <folder>`.
+
+## What is not backed up
+
+Only your extensions sync and export.
+Session transcripts, the Inbox, the Changelog and everything else in the Dashboard's database, and your sign-in data, stay on your machine.

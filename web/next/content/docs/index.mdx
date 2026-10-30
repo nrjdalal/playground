@@ -1,0 +1,53 @@
+---
+slug: /docs
+title: Overview
+description: What Playground is, what you need and where to start.
+---
+
+# Overview
+
+Playground runs the Claude Code sessions on your Mac as a factory, with a Dashboard to watch and steer it.
+You talk to one session, the dispatcher, and it hands each ask to the managers and workers that own it ([The factory](/docs/factory)).
+The Dashboard shows what every session is doing, what waits on you, and what they made.
+
+Playground runs on your Mac only.
+It reads every session's transcript, so it is never put on a server.
+
+## What it does
+
+- **Your chat**: talk to your dispatcher, send it files, and run its skills from the `/` menu ([Dashboard](/docs/dashboard)).
+- **Your Inbox**: answer the decisions and drafts your sessions post, and read their updates ([Inbox](/docs/inbox)).
+- **Your agents**: see each session's status at a glance, with its pages ([Agents](/docs/agents)).
+- **The factory**: managers route and plan the work, and workers build it, each in a worktree of its own ([The factory](/docs/factory)).
+- **Skills**: every session gets Playground's skills, and an org adds its own ([Skills and orgs](/docs/skills)).
+- **Your settings and extensions**: your own values, rules and skills in one place, taken to a new machine or synced with your private repos each night once that job is on ([Settings and extensions](/docs/extensions), [Export, import and backup](/docs/backup)).
+- **Apps**: the Changelog, beside every page ([Dashboard](/docs/dashboard#apps)).
+- **The `playground` command**: start, check, update and remove Playground from any terminal ([The playground command](/docs/cli)).
+
+## What you need
+
+- A Mac and a Claude account: the installer signs Claude Code in.
+- A GitHub account: your settings, your list of Claude accounts among them, live in a private repo under its login ([Where to start](#where-to-start), step 3).
+- Nothing else: the installer installs every tool that is missing, `bun`, `docker`, `gh`, `git`, `node` and `python3` among them, and lists what it cannot do ([Install](/docs/install#what-it-installs)).
+- herdr, the terminal your sessions run in, which `playground` starts.
+
+## Where to start
+
+1. Install Playground with one command ([Install](/docs/install)).
+   It starts Playground when it finishes; after that, `playground` in any terminal starts whatever is down and opens the Dashboard ([The playground command](/docs/cli#start-playground)).
+2. On a first run, the Dashboard's chat opens with **Let's check this Mac**: each thing Playground needs, marked ✓ there, ✗ missing, ○ optional or – waiting on another check.
+   A missing one the app can set up has a button that does it for you, such as **Install Docker**, **Start a local container** for the database (made with pglaunch), or **Sign in to GitHub**, which shows a one-time code and **Open GitHub**; Homebrew and portless say in plain words what they need.
+   Click **Re-check** after a fix. Once nothing is missing, click **Continue**, which makes you this Mac's owner and signs you in, with no password; every later visit signs you back in.
+   When every check passes, Playground remembers it, and every later start skips the checks.
+3. The same chat then lists the steps left, each ticked once done:
+   1. **GitHub**: signed in.
+   2. **Settings**: click **Set up settings**, which keeps your settings in your private repo ([Your private repos](/docs/backup#your-private-repos)).
+   3. **Claude account**: add the account your sessions run on ([Add an account](/docs/settings#add-an-account)).
+   4. **Start Alpha**: starts your dispatcher, the session you talk to.
+
+   Install does the first two when it can, and its **Left for you** list names each one it could not.
+   Settings does not list Claude Code's own sign-in by itself: add that account there like any other, and Settings marks it **Logged in**.
+
+4. Once your dispatcher runs, its chat takes the steps' place in the same pane: send it a message.
+
+When something does not start, see [Troubleshooting](/docs/troubleshooting).

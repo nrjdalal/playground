@@ -1,0 +1,2 @@
+mattpocock/skills e484a8095543718ced436b9b49a8160ed4554000 skills/engineering/pr
+agents/openai.yaml is left out: it is Codex's display metadata, which Claude Code does not read.
