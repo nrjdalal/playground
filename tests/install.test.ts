@@ -701,6 +701,16 @@ describe("install.sh", () => {
     expect(code).toBe(0)
   })
 
+  test("an older bun ahead of ~/.bun/bin on the login PATH gets a startup line, last and once, that puts ~/.bun/bin first in a new terminal", () => {
+    const { bin, home, rc, run } = setup({ oldBun: "1.3.14" })
+    const env = { PATH: `${bin}:${join(home, ".bun/bin")}:${sys}` }
+    const line = `export PATH="${home}/.bun/bin:$PATH" # Playground: bun ${WANTED_BUN} ahead of ${bin}/bun`
+    expect(run({ env }).code).toBe(0)
+    expect(rc()?.trimEnd().endsWith(line)).toBe(true)
+    expect(run({ env }).code).toBe(0)
+    expect(rc()?.split("# Playground: bun").length).toBe(2)
+  })
+
   test("a bun at package.json's version takes no upgrade", () => {
     const { calls, code } = setup().run()
     expect(calls).not.toContain("bun.sh/install")
