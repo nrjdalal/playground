@@ -65,7 +65,7 @@ Run `playground update` (`packages/scripts/src/playground/update.ts`) in a run s
 
 It runs each step below and stops at the first that fails, naming it:
 
-1. Fetch and fast-forward onto `origin/main`, since `pull --ff-only origin main` there fails with "Cannot fast-forward to multiple branches".
+1. Fetch and fast-forward onto `origin/main`, since `pull --ff-only origin main` there fails with "Cannot fast-forward to multiple branches". A checkout on another branch with a clean tree moves to `main` at `origin/main` first, and a dirty one stops here.
 2. `link-skills.sh`, before anything else, since every later step and every ops job reads `~/.playground`, which it links to `~/.playground` on a machine holding only the old folder.
 3. Install when the merge changed `bun.lock` or a `package.json`, with `--ignore-scripts`, since the postinstall's `deps-manager.ts` can rewrite a `package.json` there (v0.0.141's pull left a newly added `nanoid` uninstalled, so `bun run name` failed).
 4. Build `packages/*` when the merge changed a package with a `dist` (`packages/scripts` runs from source, so a change there alone builds nothing), since the `playground` command imports their `dist`, with env validation off, since the main checkout has no `.env`.
