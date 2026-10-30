@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, test } from "bun:test"
-import { mkdtempSync, rmSync } from "node:fs"
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -197,5 +197,36 @@ describe("homeDataDir", () => {
         if (value === undefined) delete process.env[key]
         else process.env[key] = value
     }
+  })
+})
+
+// A first start reads live.branch before any setting has written policy.json, as when ext init stopped after making the extensions root.
+describe("liveBranch before a first setting", () => {
+  const withData = (data: string, read: () => void) => {
+    const saved = process.env.PLAYGROUND_DATA_DIR
+    try {
+      process.env.PLAYGROUND_DATA_DIR = data
+      read()
+    } finally {
+      if (saved === undefined) delete process.env.PLAYGROUND_DATA_DIR
+      else process.env.PLAYGROUND_DATA_DIR = saved
+    }
+  }
+
+  test("a data folder with no extensions root reads the default branch", () => {
+    withData(join(dir, "no-root"), () => expect(liveBranch()).toBe("live/dashboard"))
+  })
+
+  test("an extensions root with no policy.json reads the default branch", () => {
+    const data = join(dir, "root-only")
+    mkdirSync(join(data, "extensions"), { recursive: true })
+    withData(data, () => expect(liveBranch()).toBe("live/dashboard"))
+  })
+
+  test("a policy.json that does not parse is still refused", () => {
+    const data = join(dir, "bad-policy")
+    mkdirSync(join(data, "extensions"), { recursive: true })
+    writeFileSync(join(data, "extensions", "policy.json"), "{")
+    withData(data, () => expect(() => liveBranch()).toThrow("does not parse"))
   })
 })
