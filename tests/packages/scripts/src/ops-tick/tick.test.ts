@@ -200,13 +200,12 @@ describe("tick", () => {
     "ALERT 98 pride@example.com: week at 98%, past 98%",
   ].join("\n")
 
-  test(`routes each alert as the old tick did: usage marks and train waits to the builder, a switch due and near-limit lines to ${OLD.dispatcher}`, async () => {
+  test(`routes each alert as the old tick did: usage marks to the builder, a switch due and near-limit lines to ${OLD.dispatcher}`, async () => {
     const { ctx, runs, sent } = fake(scratch(), at(13, 3), {
       "load-report.py": "load5 16.5\n  worker-a: 300% CPU\n  cmux app: 90% CPU\n  other: 10% CPU",
       "login-flip.py": "switch due: move to pride@",
       "near-limit.py": "ALERT 5h acme@: 5-hour window at 86%\nweek passed 80% on pride@",
       "vm.loadavg": "{ 12.00 16.50 9.00 }",
-      "wait-check.py": "ALERT train has waited 16 minutes for a run slot",
       "week-marks.py": MARKS,
     })
     await beat("tick").run(ctx)
@@ -219,7 +218,6 @@ describe("tick", () => {
         text: "load5 16.5: load5 16.5 worker-a: 300% CPU cmux app: 90% CPU other: 10% CPU",
         to: "builder",
       },
-      { text: "ALERT train has waited 16 minutes for a run slot", to: "builder" },
       { text: "ALERT 5h acme@: 5-hour window at 86%", to: "builder" },
       { text: "week passed 80% on pride@", to: "dispatcher" },
     ])

@@ -41,7 +41,7 @@ Abridged from [its file](../../extensions/core/skills/pr/SKILL.md):
 <tickets, issues it closes, docs, related PRs>
 ```
 
-The first TL;DR bullet is load-bearing: the Changelog reads a merge's line from it, and the body gate in `bun run pr:merge` and the merge train reads the body against the template it sits in.
+The first TL;DR bullet is load-bearing: the Changelog reads a merge's line from it, and the body gate in `bun run pr:merge` and merge-on-ready reads the body against the template it sits in.
 
 ## Common questions
 

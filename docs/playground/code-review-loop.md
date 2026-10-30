@@ -53,9 +53,8 @@ A reviewer session keeps nothing it cannot read back: the skill's `state.py` ask
 - On a collaborator's org PR whose review ask came to you, the session that posts your review replies to the ask right after, in the same DM or thread, with what you approved and any blocking note.
 - A reviewer agrees with an author's reply only once it has reproduced the author's reason with one command, named in its reply.
 - A 5/5 verdict says the fresh full read found nothing blocking or should-fix and `bun run check-types` ran green; a red run is a blocking finding.
-- The reviewer posts the 5/5 verdict and its `Review • 5/5` label first, then asks the Builder for the go with `ready CI`, which labels the PR for GitHub Actions, and for a dashboard PR lets Checks pick up a head whose newest verdict reads 5/5; their green is the next gate, never an input to the score.
+- The reviewer posts the 5/5 verdict and its `Review • 5/5` label; GitHub's two checks green at the head are the next gate, never an input to the score.
 - A round left with only nits scores 5/5: the reviewer lists them, or hands the small edit over as a patch, so a nit the worker leaves sends no PR through another test round.
-- A merge of `canary` that is not clean gets the reviewer's short read-only look, which posts a stamp with an `agent-review` check: green when nothing CI covers changed meaning, wait when it did ([pr-merge's README](../../packages/scripts/src/pr-merge/README.md) has the stamp).
 - A PR body with no `test:skills` result in it is a nit, since GitHub Actions runs the suite at the head.
 - When the ticket carries samples, the verdict holds a samples table, and a sample left unhandled holds the score down.
 - A PR that changes a skill, an agent guide or a docs page has its writing judged against writing-for-agents in the verdict, beside the code.

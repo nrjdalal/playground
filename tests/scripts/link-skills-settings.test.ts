@@ -149,22 +149,12 @@ describe("link-skills.sh links the playground command and its brief templates", 
     expect(kept).toHaveLength(1)
   })
 
-  test("a first run links each Checks script into ~/.playground/ops/checks (#1665)", async () => {
-    const { home, repo } = setup()
-    expect((await run(repo, home)).code).toBe(0)
-    for (const script of ["checks.py", "go.py", "outside.py", "parallel.py"])
-      expect(readlinkSync(join(home, ".playground", "ops", "checks", script))).toBe(
-        join(repo, "scripts", "ops", "checks", script),
-      )
-  })
-
   test("a first run links each merge-train and usage script into ~/.playground/ops (#1733)", async () => {
     const { home, repo } = setup()
     expect((await run(repo, home)).code).toBe(0)
     for (const script of [
       "beat.py",
       "merge-train/run.py",
-      "merge-train/wait-check.py",
       "usage/account-watch.py",
       "usage/glm-credits.py",
       "usage/login-flip.py",
@@ -177,7 +167,7 @@ describe("link-skills.sh links the playground command and its brief templates", 
       )
   })
 
-  // checks.py and merge-train/run.py queue their lines through ops/notify.sh, and a linked script's call of a sibling by name finds it in the state folder only if a link put it there.
+  // merge-train/run.py queues its lines through ops/notify.sh, and a linked script's call of a sibling by name finds it in the state folder only if a link put it there.
   test("every ops script a linked script joins onto OPS by name is linked too (PG-2457)", async () => {
     const { home, repo } = setup()
     expect((await run(repo, home)).code).toBe(0)

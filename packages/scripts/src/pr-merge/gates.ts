@@ -1,17 +1,9 @@
-// The gates a Playground PR passes before it merges. Every gate comment is posted as the repo's owner (the reviewer, the tester, Checks and ops-checks-go all post through gh under the owner's account), so a gate reads only comments posted under that account, and nobody else can post a verdict and merge. CI is the stamp (stamp.ts): one template every tester writes, read at the head or carried to it past clean canary merges and the reviewer's look.
+// The gates a Playground PR passes before it merges. Every verdict comment is posted as the repo's owner (the reviewer posts through gh under the owner's account), so a gate reads only comments posted under that account, and nobody else can post a verdict and merge. CI is GitHub's own check runs on the head, REQUIRED_CHECKS among them.
 
-import {
-  atHead,
-  CHECKS,
-  sourcesOf,
-  verdictsOf,
-  type GateName,
-  type Verdict,
-} from "@packages/config/verdicts"
+import { atHead, verdictsOf, type GateName, type Verdict } from "@packages/config/verdicts"
 
 import { bodyRefusal } from "./body"
 import type { Lost } from "./lost"
-import { JOB_CHECKS, ranSuite, statusOf, type Stamp, type StampRead } from "./stamp"
 
 export { atHead, verdictOf, verdictsOf } from "@packages/config/verdicts"
 export type { GateName, Verdict } from "@packages/config/verdicts"
@@ -31,22 +23,8 @@ export type Comment = { author: string; body: string; createdAt: string; url?: s
 
 export type Gate = { detail: string; name: string; ok: boolean }
 
-// A PR has UI when its diff touches web/next/, its docs pages included, so it needs a tester's drive.
-export const hasUi = (files: string[]): boolean =>
-  files.some((file) => file.startsWith("web/next/"))
-
-// The dashboard's code, which only verify's stack and browser check: Checks runs verify for a PR that touches it, and a PR that touches none needs no Checks; DASHBOARD_PATHS in scripts/ops/checks/checks.py is the same list, which a test holds equal.
-export const DASHBOARD_PATHS = [
-  "api/hono/",
-  "packages/auth/",
-  "packages/config/",
-  "packages/db/",
-  "packages/env/",
-  "web/next/",
-]
-
-export const touchesDashboard = (files: string[]): boolean =>
-  files.some((file) => DASHBOARD_PATHS.some((path) => file.startsWith(path)))
+// GitHub's jobs every head runs (.github/workflows), by their check names: pr:merge needs each one's newest run on the head finished and passed.
+export const REQUIRED_CHECKS = ["Audit, Lint, and Build", "test"]
 
 export type PrFacts = {
   // How many commits canary has that the head lacks: 0 is up to date, NaN when gh's answer did not read as a count.
@@ -59,11 +37,9 @@ export type PrFacts = {
   // origin/canary now, and the tree of the head merged with it (git merge-tree --write-tree); mergeTree is null when they conflict or it could not be read.
   canary: string
   mergeTree: string | null
-  // The stamps on canary's tip, the net after each batch: a red one stops every merge, and why they could not be read fails it; absent in a test that skips the gate.
-  canaryStamps?: Stamp[] | string
   // The files the head's merge with canary conflicts in, null when it merged clean or could not be read; left out where no merge was read.
   conflicts?: string[] | null
-  // The head's GitHub checks; none while GitHub Actions is off, or while the PR lacks the Cloud CI label that starts them.
+  // The head's GitHub checks.
   checks: Check[]
   comments: Comment[]
   draft: boolean
@@ -76,8 +52,6 @@ export type PrFacts = {
   // The PR's number.
   n: number
   owner: string
-  // The stamp the walk back from the head reads (stamp.ts), or why it could not be read.
-  stamp: StampRead | string
   state: string
 }
 
@@ -137,12 +111,19 @@ export function newestRuns(checks: Check[]): Check[] {
   return [...newest.values()]
 }
 
-// Pure: the head's GitHub checks as one gate: every check's newest run finished and passed, or none reported (GitHub Actions off). gitGuardian refuses a head with no GitGuardian check.
+// Pure: the head's GitHub checks as one gate: every check's newest run finished and passed, each required name among them. gitGuardian refuses a head with no GitGuardian check.
 export function ciGate(
   all: Check[],
-  { gitGuardian = false }: { gitGuardian?: boolean } = {},
+  { gitGuardian = false, required = [] }: { gitGuardian?: boolean; required?: string[] } = {},
 ): Gate {
   const checks = newestRuns(all)
+  const missing = required.filter((name) => !checks.some((check) => check.name === name))
+  if (missing.length > 0)
+    return {
+      detail: `no ${missing.join(" or ")} check on the head yet: GitHub runs it on every push`,
+      name: "ci",
+      ok: false,
+    }
   if (gitGuardian && !checks.some(isGitGuardian)) {
     return {
       detail:
@@ -171,7 +152,7 @@ export function ciGate(
   return { detail: `not passed: ${names.join(", ")}`, name: "ci", ok: false }
 }
 
-// Pure: the up-to-date gate: a head with everything on canary, or one behind it that merges with canary clean, since a clean merge carries its stamp; a conflict needs canary merged in and the reviewer's look.
+// Pure: the up-to-date gate: a head with everything on canary, or one behind it that merges with canary clean; a conflict needs canary merged in, which takes a fresh run and review at the new head.
 function upToDate(facts: PrFacts): Gate {
   const sha7 = facts.head.slice(0, 7)
   const name = "up to date"
@@ -181,12 +162,12 @@ function upToDate(facts: PrFacts): Gate {
   const behind = `${BASE} has ${facts.aheadBy} commit${facts.aheadBy === 1 ? "" : "s"} ${sha7} lacks`
   return facts.mergeTree
     ? {
-        detail: `${behind}; it merges clean with ${BASE} ${facts.canary.slice(0, 7)}, which carries its stamp`,
+        detail: `${behind}; it merges clean with ${BASE} ${facts.canary.slice(0, 7)}`,
         name,
         ok: true,
       }
     : {
-        detail: `${behind} and conflicts with it; merge ${BASE} in, and the reviewer's look stamps the merge`,
+        detail: `${behind} and conflicts with it; merge ${BASE} in, then the new head needs its checks and a 5/5`,
         name,
         ok: false,
       }
@@ -230,7 +211,7 @@ export function mergeLine(
   return `${at}: its merge with ${canary} could not be read`
 }
 
-// Pure: whether the merge path marks this draft ready: the owner's own draft whose every other gate in gates passes. gates is what the caller judges: pr:merge every gate, a train all but the stamp and up to date.
+// Pure: whether the merge path marks this draft ready: the owner's own draft whose every other gate in gates passes.
 export const marksReady = (facts: PrFacts, gates: Gate[]): boolean =>
   facts.draft &&
   facts.author.toLowerCase() === facts.owner.toLowerCase() &&
@@ -242,93 +223,15 @@ export const withReadyDraft = (facts: PrFacts, gates: Gate[], detail: string): G
     ? gates.map((gate) => (gate.name === "ready" ? { ...gate, detail, ok: true } : gate))
     : gates
 
-// Pure: the stamp gate: green merges, once a diff touching dashboard code (DASHBOARD_PATHS) also passed Checks' verify; wait waits for CI; red, or no stamp, is not ready.
-function stampGate(read: StampRead | string, files: string[]): Gate {
-  const name = "stamp"
-  if (typeof read === "string")
-    return { detail: `could not read the stamp: ${read}`, name, ok: false }
-  if (!read.status || !read.at) return { detail: `no stamp: ${read.why}`, name, ok: false }
-  const at = read.at.slice(0, 7)
-  const lines = read.stamps
-    .map((stamp) => `${stamp.status} @ ${at} · ${sourcesOf(stamp)}`)
-    .join(", ")
-  if (read.status !== "green")
-    return {
-      detail: `${lines}: ${read.status === "wait" ? "waiting for CI" : "red, so not ready"}`,
-      name,
-      ok: false,
-    }
-  if (touchesDashboard(files) && !read.passed.includes(CHECKS.verify))
-    return {
-      detail: `${lines}, but no green stamp passed ✓ verify (from Checks, for dashboard code)`,
-      name,
-      ok: false,
-    }
-  return { detail: lines, name, ok: true }
-}
-
-// Pure: the suite gate: a green stamp on the walk passed every check GitHub's jobs run, so no PR merges on Checks' verify alone; a train's land waives it once its step's own stamp ran them all.
-function suiteGate(read: StampRead | string): Gate {
-  const name = "suite"
-  const missing = Object.values(JOB_CHECKS)
-    .flat()
-    .filter((check) => typeof read === "string" || !read.passed.includes(check))
-  return missing.length === 0
-    ? { detail: "a green stamp passed every check GitHub's jobs run", name, ok: true }
-    : {
-        detail: `no green stamp passed ${missing.join(", ")}: GitHub's jobs run them (ask your lead for bun run ci:go <n> <sha7>)`,
-        name,
-        ok: false,
-      }
-}
-
-// Pure: the tester gate: a diff touching web/next/ needs a green stamp that passed the tester's drive; a train keeps it, since a train's run drives no page.
-function testerGate(read: StampRead | string, files: string[]): Gate {
-  const name = "tester"
-  if (!hasUi(files)) return { detail: "no web/next/ in the diff", name, ok: true }
-  return typeof read !== "string" && read.passed.includes(CHECKS.drive)
-    ? { detail: `a green stamp passed ✓ ${CHECKS.drive}`, name, ok: true }
-    : {
-        detail: `no green stamp passed ✓ ${CHECKS.drive} (from a tester, for web/next/)`,
-        name,
-        ok: false,
-      }
-}
-
-// Pure: the net: canary's own run after each batch stamps its tip, and a red one stops every merge but the fix: a PR whose head holds canary's tip and whose own run passed every check GitHub's jobs run on that head, so its squash is the tree that ran green.
-function canaryGate(facts: PrFacts, stamps: Stamp[] | string): Gate {
-  const c7 = facts.canary.slice(0, 7)
-  if (typeof stamps === "string")
-    return { detail: `could not read ${BASE} ${c7}'s stamps: ${stamps}`, name: BASE, ok: false }
-  if (stamps.length === 0 || statusOf(stamps) !== "red")
-    return { detail: `${BASE} ${c7} is not stamped red`, name: BASE, ok: true }
-  const read = typeof facts.stamp === "string" ? undefined : facts.stamp
-  return facts.aheadBy === 0 && read?.at === facts.head && ranSuite(read.stamps)
-    ? {
-        detail: `${BASE} ${c7} is stamped red, and this head holds it and ran green, so it fixes it`,
-        name: BASE,
-        ok: true,
-      }
-    : {
-        detail: `${BASE} ${c7} is stamped red, so every merge waits for the fix: a PR that merges ${BASE} in and runs green on its head`,
-        name: BASE,
-        ok: false,
-      }
-}
-
-// Pure: the newest review on the head, or on the nearest commit it reaches past clean canary merges and the reviewer's looks, which carry the 5/5 as they carry the stamp.
+// Pure: the newest review on the head.
 function reviewGate(facts: PrFacts): Gate {
-  const reach = typeof facts.stamp === "string" ? [] : facts.stamp.reach
-  for (const head of reach.length > 0 ? reach : [facts.head]) {
-    const review = verdictsAt({ ...facts, head }).get("review")
-    if (!review) continue
-    const from = atHead(review.at, facts.head) ? "" : `, carried from ${review.at.slice(0, 7)}`
+  const review = verdictsAt(facts).get("review")
+  if (review)
     return {
-      detail: review.pass ? `${review.text}${from}` : `newest review is not a pass: ${review.text}`,
+      detail: review.pass ? review.text : `newest review is not a pass: ${review.text}`,
       name: "review",
       ok: review.pass,
     }
-  }
   return {
     detail: `missing 5/5 review (## ReviewBot · round <n>: 5/5 at <sha7>) at ${facts.head.slice(0, 7)} from ${facts.owner}`,
     name: "review",
@@ -366,8 +269,7 @@ export function gatesOf(facts: PrFacts, { gitGuardian, outsideAuthor }: GateOpti
     upToDate(facts),
     keepsCanary(facts.lost),
   ]
-  if (facts.canaryStamps !== undefined) gates.push(canaryGate(facts, facts.canaryStamps))
-  gates.push(ciGate(facts.checks, { gitGuardian }))
+  gates.push(ciGate(facts.checks, { gitGuardian, required: REQUIRED_CHECKS }))
   if (facts.body !== undefined) {
     const why = bodyRefusal(facts.body)
     gates.push(
@@ -376,11 +278,6 @@ export function gatesOf(facts: PrFacts, { gitGuardian, outsideAuthor }: GateOpti
         : { detail: "the PR template", name: "body", ok: true },
     )
   }
-  gates.push(
-    reviewGate(facts),
-    stampGate(facts.stamp, facts.files),
-    suiteGate(facts.stamp),
-    testerGate(facts.stamp, facts.files),
-  )
+  gates.push(reviewGate(facts))
   return gates
 }

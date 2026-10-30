@@ -73,11 +73,6 @@ export const JOBS: Record<string, Job> = {
     description: "Syncs new canary merges and main versions into the Changelog every 5 minutes.",
     schedule: { every: 300 },
   }),
-  "ops-checks-go": terminal("ops-checks-go", "python3 -I {checkout}/scripts/ops/checks/go.py", {
-    description: "Runs Checks on each gated PR scored 5/5 at its head, in merge-queue order.",
-    needsCmux: false,
-    schedule: { every: 120 },
-  }),
   // The one job on by default: the Dashboard serves first run and every settings write, so a store with no row for it, or no store, keeps it running. It runs from the Dashboard's checkout, since its supervisor rolls the checkout it runs in and refuses any other branch.
   "ops-dashboard": terminal("ops-dashboard", "{dashboard}/scripts/ops/dashboard/run.sh", {
     cwd: "{dashboard}",

@@ -51,12 +51,11 @@ Done when every agent of yours is working, has reported, or has had its state ac
 ## 4. Run the recovery scan and chase stalled PRs (the Builder)
 
 The Builder runs code-review-loop's [recovery scan](../code-review-loop/SKILL.md#the-recovery-scan) and acts on every row it leaves, and chases at once each `pr-stalled` entry in `~/.playground/ops/alerts-pending.json`:
-an open the dispatcher's or a work-org PR of ours with no new commit, verdict or comment for 30 minutes (after one sat two hours unnoticed) that is truly stuck (a conflict, no tester stamp, or every gate green and still unmerged).
-ops-report writes them to `ops/alerts-prs.json` and ops-unstick folds that in; a PR held on purpose, whose body or newest comment says held or parked or which carries a park or hold label, is left out, and so is one waiting only on the merge train, a held train or its Checks turn.
-A train that holds a PR 60 minutes or more goes to Ops.
+an open the dispatcher's or a work-org PR of ours with no new commit, verdict or comment for 30 minutes (after one sat two hours unnoticed) that is truly stuck (a conflict, or every gate green and still unmerged).
+ops-report writes them to `ops/alerts-prs.json` and ops-unstick folds that in; a PR held on purpose, whose body or newest comment says held or parked or which carries a park or hold label, is left out, and so is one waiting only on its checks or merge-on-ready.
 
-Every clean-or-conflict call (a conflict above, a go on a head behind canary) comes from a tool that reads git's exit code, never a tree line read by eye: `bun run pr:train forecast` for the queue, `bun run pr:merge <n> --explain` for one PR, whose first line says whether its head merges clean with canary now and as which tree,
-or the files it conflicts in (a go given on a conflicting head).
+Every clean-or-conflict call (a conflict above, a head behind canary) comes from a tool that reads git's exit code, never a tree line read by eye: `bun run pr:train forecast` for the queue, `bun run pr:merge <n> --explain` for one PR, whose first line says whether its head merges clean with canary now and as which tree,
+or the files it conflicts in.
 
 Done when every row the recovery scan leaves and every stalled PR is acted on.
 
