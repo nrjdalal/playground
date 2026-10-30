@@ -371,13 +371,17 @@ const code =
                                     ? await orgsCommand(rest, orgsIo(REPO, dataDir()))
                                     : command === "accounts"
                                       ? await runAccounts(rest, accountsIo(dataDir()))
-                                      : command === "herdr" && rest[0] === "pin"
-                                        ? await (
-                                            await import("./herdr-pin")
-                                          ).runHerdrPin(rest.slice(1))
-                                        : VERBS.includes(command)
-                                          ? await verb(command, rest)
-                                          : fail(
-                                              `no command ${command}; playground --help lists them`,
-                                            )
+                                      : command === "herdr" && rest[0] === "stop"
+                                        ? (await opsHerdr(["stop-all"]).exited) === 0
+                                          ? 0
+                                          : 1
+                                        : command === "herdr" && rest[0] === "pin"
+                                          ? await (
+                                              await import("./herdr-pin")
+                                            ).runHerdrPin(rest.slice(1))
+                                          : VERBS.includes(command)
+                                            ? await verb(command, rest)
+                                            : fail(
+                                                `no command ${command}; playground --help lists them`,
+                                              )
 process.exit(code)

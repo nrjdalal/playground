@@ -46,6 +46,7 @@ describe("bare dispatcher", () => {
     python3: string,
     more: Record<string, string> = {},
     files: Record<string, string> = {},
+    words: string[] = [],
   ) => {
     // dispatcher finds its repo by realpath, which on macOS puts /private before tmpdir's /var
     const root = mkdtempSync(join(realpathSync(dir), "bare-"))
@@ -85,7 +86,7 @@ describe("bare dispatcher", () => {
     }
     for (const [path, text] of Object.entries(files)) await Bun.write(join(repo, path), text)
     const child = Bun.spawn(
-      [process.execPath, "--no-env-file", join(src, "playground", "cli.ts")],
+      [process.execPath, "--no-env-file", join(src, "playground", "cli.ts"), ...words],
       {
         env: { HOME: root, PATH: `${bin}:${dirname(process.execPath)}:/usr/bin:/bin` },
         stderr: "pipe",
@@ -151,6 +152,24 @@ describe("bare dispatcher", () => {
     expect(err).toContain(`playground: ${refusal}\n`)
     expect(err).not.toContain("Traceback")
     expect(out).toEndWith(`Left for you:\n  - The dispatcher didn't start: ${refusal}\n`)
+  }, 15_000)
+
+  // The servers Playground started had no stop of the user's own, so a pair that restored another herdr setup's layout stayed up
+  test("herdr stop hands ops-herdr its stop-all, which reaches only the sockets in Playground's herdr folder, and keeps its exit", async () => {
+    const log = join(mkdtempSync(join(realpathSync(dir), "log-")), "log")
+    writeFileSync(log, "")
+    const { child } = await dispatcher(
+      "exit 0",
+      {},
+      {
+        "packages/scripts/src/ops-herdr/cli.ts": `import { appendFileSync } from "node:fs"\nappendFileSync(${JSON.stringify(log)}, \`ops-herdr \${process.argv.slice(2).join(" ")}\\n\`)\nconsole.log("ops-herdr: stopped playground")\nprocess.exit(1)\n`,
+      },
+      ["herdr", "stop"],
+    )
+    const code = await child.exited
+    expect(readFileSync(log, "utf8")).toBe("ops-herdr stop-all\n")
+    expect(await new Response(child.stdout).text()).toBe("ops-herdr: stopped playground\n")
+    expect(code).toBe(1)
   }, 15_000)
 })
 

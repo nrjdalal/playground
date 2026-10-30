@@ -1,5 +1,5 @@
 import { closeSync, openSync } from "node:fs"
-import { mkdir } from "node:fs/promises"
+import { mkdir, readdir } from "node:fs/promises"
 import { homedir } from "node:os"
 import { join } from "node:path"
 
@@ -13,6 +13,7 @@ import {
   envReport,
   type Found,
   herdrDir,
+  leftOverLines,
   owedFile,
   pinFor,
   pinProblem,
@@ -22,11 +23,13 @@ import {
   serverEnv,
   serverNames,
   serverStatusLines,
+  socketServers,
   startOnce,
+  stateDir,
   stopRefusal,
 } from "./herdr"
 
-// bun run ops:herdr [run]: the job, which starts each herdr session that is down, runs spawn.sh restore for each server it has started, and beats every minute; start: the same once, for `bun run dev` and the dispatcher, naming each server it started; status: one line a server, for playground status; stop <session>: a stop, refused while a pane is live, and stop default: herdr's own default server, refused while a pane runs an agent; attach <session>: a client on the pinned binary and config, for playground view; env-check: run inside a pane, names and lengths only.
+// bun run ops:herdr [run]: the job, which starts each herdr session that is down, runs spawn.sh restore for each server it has started, and beats every minute; start: the same once, for `bun run dev` and the dispatcher, naming each server it started; status: one line a server, for playground status; stop <session>: a stop, refused while a pane is live, and stop default: herdr's own default server, refused while a pane runs an agent; stop-all: every server on a socket in the herdr folder, for playground herdr stop; attach <session>: a client on the pinned binary and config, for playground view; env-check: run inside a pane, names and lengths only.
 const env = process.env
 const dir = herdrDir(env)
 const pin = pinFor(env)
@@ -96,7 +99,7 @@ const start = async (session: string): Promise<string | null> => {
 }
 
 const log = async (session: string): Promise<string | null> => {
-  const file = Bun.file(join(homedir(), ".config/herdr/sessions", session, "herdr-server.log"))
+  const file = Bun.file(join(stateDir(homedir(), session), "herdr-server.log"))
   return (await file.exists()) ? file.slice(-262_144).text() : null
 }
 
@@ -203,10 +206,35 @@ if (command === "stop") {
   process.exit(stop.exitCode)
 }
 
+if (command === "stop-all") {
+  const servers = socketServers(await readdir(dir).catch(() => []))
+  let failed = false
+  let stopped = 0
+  for (const session of servers) {
+    if (!(await running(session))) continue
+    const stop = herdr(session, ["server", "stop"])
+    failed ||= stop.exitCode !== 0
+    stopped++
+    console.log(
+      stop.exitCode === 0
+        ? `ops-herdr: stopped ${session}`
+        : `ops-herdr: ${session} would not stop: ${stop.stderr.toString().trim() || `exit ${stop.exitCode}`}`,
+    )
+  }
+  if (stopped === 0) console.log(`ops-herdr: no herdr server runs on a socket in ${dir}`)
+  process.exit(failed ? 1 : 0)
+}
+
 if (command === "start") {
   await installChecked()
   const { lines, ok } = await startOnce(deps)
-  for (const line of lines) console.log(`ops-herdr: ${line}`)
+  const old = socketServers(await readdir(dir).catch(() => [])).filter(
+    (name) => !sessions.includes(name),
+  )
+  const up: string[] = []
+  for (const name of old) if (await running(name)) up.push(name)
+  for (const line of [...lines, ...leftOverLines(old, sessions, up, dir)])
+    console.log(`ops-herdr: ${line}`)
   process.exit(ok ? 0 : 1)
 }
 

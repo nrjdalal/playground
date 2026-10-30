@@ -281,9 +281,11 @@ function scratchWorld(args: Word[], local: Map<string, Text>, env: Env): string 
   if (
     unreadable(session) ||
     !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(session.value) ||
-    ["default", "factory", "probes", ...servers].includes(session.value)
+    ["default", "factory", "playground", "playground-probes", "probes", ...servers].includes(
+      session.value,
+    )
   )
-    return "a scratch herdr call whose HERDR_SESSION is not a word of its own: herdr keeps a server's state under ~/.config/herdr/sessions/<name>, so default and the factory's servers (factory, probes) stay theirs"
+    return "a scratch herdr call whose HERDR_SESSION is not a word of its own: herdr keeps a server's state under ~/.config/herdr/sessions/<name>, so default, Playground's servers (playground, playground-probes) and the factory's (factory, probes) stay theirs"
   if (args.some((a) => MOVES.test(a.value)))
     return "a scratch herdr call with --session, --machine or --remote, which moves it off the scratch socket"
   const [head] = herdrWords(args)

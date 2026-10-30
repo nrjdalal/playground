@@ -11,8 +11,12 @@ import { assetOf, herdrPath, PIN_SOURCE, pinnedSum } from "./pin"
 
 export const CYCLE_SECONDS = 60
 
-// Two separate herdr servers: factory for every session, probes for drills and upgrades.
-export const HERDR_SESSIONS = ["factory", "probes"]
+// Two separate herdr servers: playground for every session, playground-probes for drills and upgrades. herdr keeps a server's state, its saved layout and logs included, under ~/.config/herdr/sessions/<name> (measured on 0.9.5: HERDR_HOME and XDG_STATE_HOME move none of it, and XDG_CONFIG_HOME, which would, reaches every pane), so the names are Playground's own and never a name another herdr setup on the Mac uses, such as factory or probes.
+export const HERDR_SESSIONS = ["playground", "playground-probes"]
+
+// Where herdr keeps a server's state, read by the job for its log.
+export const stateDir = (home: string, session: string): string =>
+  join(home, ".config", "herdr", "sessions", session)
 
 export type Pin = { path: string; sha256: string; tag: string; version: string }
 export type Found = { sha256: string; version: string }
@@ -58,6 +62,28 @@ const BASICS = ["HOME", "LANG", "LOGNAME", "PATH", "SHELL", "TERM", "USER"] as c
 
 // herdr's own default server, on ~/.config/herdr/herdr.sock, which no factory job starts; ops:herdr reaches it only to stop it.
 export const DEFAULT_SERVER = "default"
+
+// The servers on sockets in Playground's own herdr folder, read from its file names: each <name>.sock whose name is a word and not herdr's default, a client's socket (<name>-client.sock, measured on 0.9.5) left out, so a stop reaches only the servers this folder holds, whatever their names.
+export const socketServers = (files: string[]): string[] =>
+  files
+    .filter((file) => file.endsWith(".sock") && !file.endsWith("-client.sock"))
+    .map((file) => file.slice(0, -".sock".length))
+    .filter((name) => WORD.test(name) && name !== DEFAULT_SERVER)
+    .toSorted()
+
+// A line for each server still running on a socket in the folder under a name the job no longer starts, such as factory and probes from before Playground's servers took names of their own: left running, since a stop ends its sessions, and named with the command that stops it.
+export const leftOverLines = (
+  servers: string[],
+  sessions: string[],
+  up: string[],
+  dir: string,
+): string[] =>
+  servers
+    .filter((name) => !sessions.includes(name) && up.includes(name))
+    .map(
+      (name) =>
+        `Left for you: herdr server ${name} still runs from an older Playground in ${dir}, beside the current ones; playground herdr stop stops every server there, then playground starts the current ones`,
+    )
 
 // This uid's account name and login shell as /usr/bin/dscl reads them, for a start from a GUI app or env -i: Bun's userInfo() takes them from USER and SHELL, else "unknown" (measured on 1.4.3), macOS has an account named unknown whose shell is /usr/bin/false, and herdr refuses every pane of a server whose SHELL it cannot find. PLAYGROUND_DSCL names a fake dscl inside the test sandbox alone.
 function account(env: Record<string, string | undefined>): { name?: string; shell?: string } {
