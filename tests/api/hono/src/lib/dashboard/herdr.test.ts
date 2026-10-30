@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs"
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -800,6 +800,36 @@ describe("herdrServers and readScreen", () => {
       { name: "c", socket: "/h/c.sock" },
     ])
   })
+})
+
+// A dispatcher on a server v0.0.2 started as factory stayed off the board after the rename to playground, while Start counted it from the registry and said it was already running
+test("herdrServers also names each server socket an older Playground left in its folder, unless PLAYGROUND_HERDR_SESSIONS names them", () => {
+  const home = mkdtempSync(join(tmpdir(), "herdr-old-"))
+  cleanups.push(() => rmSync(home, { force: true, recursive: true }))
+  const dir = join(home, ".playground", "herdr")
+  mkdirSync(dir, { recursive: true })
+  for (const file of [
+    "factory.sock",
+    "factory-client.sock",
+    "default.sock",
+    "playground.sock",
+    "probes.sock",
+    "factory.out",
+  ])
+    writeFileSync(join(dir, file), "")
+  expect(herdrServers({ HOME: home }).map((s) => s.name)).toEqual([
+    "playground",
+    "playground-probes",
+    "factory",
+    "probes",
+  ])
+  expect(herdrServers({ HOME: home }).at(2)).toEqual({
+    name: "factory",
+    socket: join(dir, "factory.sock"),
+  })
+  expect(
+    herdrServers({ HOME: home, PLAYGROUND_HERDR_SESSIONS: "playground" }).map((s) => s.name),
+  ).toEqual(["playground"])
 })
 
 describe("herdrEvents", () => {
