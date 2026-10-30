@@ -261,11 +261,13 @@ export function due(records: SessionState[], sent: Set<string>, now: Date): Sess
   )
 }
 
+// Each session's record, in session id order, since readdir's order is the filesystem's own (APFS, ext4 and tmpfs each list a folder differently) and the lines a pass queues follow it.
 async function records(dir: string): Promise<SessionState[]> {
   const files = await readdir(dir).catch(() => [] as string[])
   const read = await Promise.all(
     files
       .filter((file) => file.endsWith(".json"))
+      .toSorted()
       .map((file) =>
         Bun.file(join(dir, file))
           .text()
