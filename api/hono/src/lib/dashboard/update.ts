@@ -19,16 +19,34 @@ export type Update = {
 
 export type UpdateRead = { problem: string | null; update: Update | null }
 
-// Pure: the branch a checkout's branch follows on origin. The live dashboard's branch runs canary's latest head.
-export function upstreamOf(branch: string | null, live = livePair().branch): Upstream | null {
+// Pure: the branch a checkout's branch follows on origin. The live dashboard's branch follows the branch the install cloned (`cloned`, clonedBranch()): main, the shipped line, for every public install, and canary only for a checkout cloned on canary on purpose.
+export function upstreamOf(
+  branch: string | null,
+  live = livePair().branch,
+  cloned: string | null = null,
+): Upstream | null {
   if (branch === "main") return "main"
-  if (branch === "canary" || branch === live) return "canary"
+  if (branch === "canary") return "canary"
+  if (branch === live) return cloned === "canary" ? "canary" : "main"
   return null
 }
 
+// The branch of the checkout the install cloned: the repo's first worktree, whichever worktree `root` is, null on a detached HEAD or where git cannot say. supervisor.sh's roll reads the same: the first `branch` line of `git worktree list --porcelain`.
+export function clonedBranch(root: string): string | null {
+  const read = Bun.spawnSync(["git", "worktree", "list", "--porcelain"], {
+    cwd: root,
+    stderr: "ignore",
+    stdin: "ignore",
+    timeout: 5_000,
+  })
+  if (read.exitCode !== 0) return null
+  const first = read.stdout.toString().split("\n\n")[0] ?? ""
+  return /^branch refs\/heads\/(.+)$/m.exec(first)?.[1] ?? null
+}
+
 export type UpdateGit = {
-  // The checkout's branch and HEAD as the build starts, read once; null with no git checkout.
-  start: () => { branch: string | null; head: string | null } | null
+  // The checkout's branch, the branch the install cloned and HEAD as the build starts, read once; null with no git checkout.
+  start: () => { branch: string | null; cloned?: string | null; head: string | null } | null
   // Fetches origin/<upstream>, then counts what `start`'s head lacks of it, and whether the HEAD on disk now holds all of it.
   compare: (
     upstream: Upstream,
@@ -66,9 +84,9 @@ export class UpdateCheck {
   private async check(): Promise<void> {
     // A build with no checkout, a named branch that follows neither main nor canary, or a detached HEAD has nothing to check, which is not a fault: it says nothing. A HEAD that cannot be read is a fault, checked first unless the branch is named and follows neither.
     if (!this.started) return
-    const { branch, head } = this.started
+    const { branch, cloned = null, head } = this.started
     const live = livePair().branch
-    const upstream = upstreamOf(branch, live)
+    const upstream = upstreamOf(branch, live, cloned)
     if (branch && !upstream) return
     if (!head) {
       this.last = { problem: "Update check: the checkout's HEAD cannot be read", update: null }
@@ -128,7 +146,8 @@ const headOf = (root: string): string | null => {
 
 // A checkout's git: a fetch of the one branch it follows, which moves only origin/<upstream>, never the working tree.
 export const gitOf = (root: string | null): UpdateGit => ({
-  start: () => (root ? { branch: branchOf(root), head: headOf(root) } : null),
+  start: () =>
+    root ? { branch: branchOf(root), cloned: clonedBranch(root), head: headOf(root) } : null,
   compare: async (upstream, head) => {
     if (!root) throw new Error("this build has no git checkout")
     const ref = `origin/${upstream}`
