@@ -261,6 +261,28 @@ describe("one cycle", () => {
     expect(lines.map((line) => JSON.parse(line).to)).toEqual(["worker-brave-otter", OLD.builder])
   })
 
+  test("the lines go in session id order, whatever order the folder lists the records in", async () => {
+    const { config, outbox } = setup()
+    for (const id of ["c", "d"])
+      writeFileSync(
+        join(config, "playground", "session-state", `${id}.json`),
+        JSON.stringify(limited(id)),
+      )
+    const named = {
+      a: "worker-ash",
+      b: "worker-birch",
+      c: "worker-cedar",
+      d: "worker-dogwood",
+    } as Record<string, string>
+    expect(await cycle({ configDir: config, live: sessions(named), now: after(GRACE_MS) })).toEqual(
+      { result: "ok", resumed: 4 },
+    )
+    const lines = (await readFile(join(outbox, "ops-session-resume.jsonl"), "utf8"))
+      .trim()
+      .split("\n")
+    expect(lines.map((line) => JSON.parse(line).to)).toEqual(Object.values(named))
+  })
+
   test("a limit Claude Code announced it continues gets no line; one with no notice does", async () => {
     const { config, outbox } = setup()
     const project = join(config, "projects", "-w")
