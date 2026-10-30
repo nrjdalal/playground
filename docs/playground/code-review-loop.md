@@ -63,4 +63,4 @@ A reviewer session keeps nothing it cannot read back: the skill's `state.py` ask
 
 ## Where it fits
 
-[playbook](./playbook.md)'s **gate** names it: a reviewer session, spawned by the PR's worker, scores through code-review-loop, then waits for the Builder's go and for local CI: GitHub Actions' `Audit, Lint, and Build` and `test` green at the head, which run on every push to the pull request, and which stand for Checks too when the diff touches no dashboard code. The Builder's sweep runs its recovery scan. It leans on core's `code-review` for the two axes; for an org's PR the **classified** rule holds, so its comments carry only the `ReviewBot` name.
+[playbook](./playbook.md)'s **gate** names it: a reviewer session, spawned by the PR's worker, scores through code-review-loop, then the PR waits for GitHub Actions' `Audit, Lint, and Build` and `test` green at the head, which run on every push to the pull request. The Builder's sweep runs its recovery scan. It leans on core's `code-review` for the two axes; for an org's PR the **classified** rule holds, so its comments carry only the `ReviewBot` name.
