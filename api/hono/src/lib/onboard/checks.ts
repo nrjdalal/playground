@@ -2,6 +2,7 @@ import { homedir } from "node:os"
 import { join } from "node:path"
 
 import { site } from "@packages/config/site"
+import { dataDirOf } from "@packages/env/data-dir"
 
 import { type DashboardSource, currentSource, readFixtureMachine } from "@/lib/dashboard/fixture"
 import { proxyRefusal } from "@/lib/dev/proxy"
@@ -95,7 +96,7 @@ export const COMMANDS = {
   caTrusted: (ca: string) => ["security", "verify-cert", "-c", ca, "-L", "-p", "ssl"],
   dockerInfo: () => ["docker", "info", "--format", "{{.ServerVersion}}"],
   ghLogin: () => ["gh", "auth", "status", "--active", "-h", "github.com"],
-  version: (tool: Tool) => [tool, "--version"],
+  version: (tool: string) => [tool, "--version"],
 } as const
 
 // Where Homebrew puts brew on Apple silicon and on Intel, read when the API's PATH holds neither.
@@ -127,9 +128,13 @@ const okRow = (name: string, need: string | null, detail: string): Check => ({
   status: "ok",
 })
 
+// Playground's own herdr, which install pins at the data folder's bin/herdr, off PATH; ops-herdr's pin.json names this same path (pinFor).
+const pinnedHerdr = (env: Env): string => join(dataDirOf({}, env.HOME || homedir()), "bin", "herdr")
+
 const toolCheck = async (
   [tool, required, need, install, note]: (typeof TOOLS)[number],
   reader: Reader,
+  env: Env,
 ): Promise<Check> => {
   const missing = (detail: string, action: Action | null, why: string): Check => ({
     action,
@@ -139,7 +144,9 @@ const toolCheck = async (
     note: why,
     status: required ? "MISSING" : "optional",
   })
-  if (!reader.has(tool)) return missing("not found", install, note)
+  // herdr's row reads the pinned copy first, which is the one every session runs, then PATH
+  const bin = tool === "herdr" && reader.exists(pinnedHerdr(env)) ? pinnedHerdr(env) : tool
+  if (bin === tool && !reader.has(tool)) return missing("not found", install, note)
   const ok = (detail: string) => okRow(tool, need, detail)
   // cmux runs only through the dashboard's cmux.ts, so its row reads PATH alone.
   if (tool === "cmux") return ok("installed")
@@ -154,7 +161,7 @@ const toolCheck = async (
     }
     return ok(versionOf(info.stdout) ?? "running")
   }
-  const version = versionOf((await reader.run([...COMMANDS.version(tool)])).stdout)
+  const version = versionOf((await reader.run([...COMMANDS.version(bin)])).stdout)
   if (tool === "node" && version && tooOld(version)) {
     return missing(
       `${version}, needs ${NODE_MIN.join(".")} or newer`,
@@ -273,7 +280,7 @@ export async function onboardChecks({
   const rows =
     source.kind === "live"
       ? await Promise.all([
-          ...TOOLS.map((tool) => toolCheck(tool, reader)),
+          ...TOOLS.map((tool) => toolCheck(tool, reader, env)),
           homebrewCheck(reader),
           portlessCheck(reader, env),
           settingsCheck(login),
