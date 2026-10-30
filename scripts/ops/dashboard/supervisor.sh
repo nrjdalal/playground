@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # The live dashboard's supervisor: one background task of runner-pride's cmux session that keeps the dashboard stack and
 # the session follower running as its own children (so both stay descendants of a cmux terminal), and rolls them
-# to every new origin/canary head end to end: stop both by their recorded process groups, reset to it, install, build or
+# to every new head of the branch upstream.sh names end to end: stop both by their recorded process groups, reset to it, install, build or
 # migrate when the merge needs it, start dev, check it, start the follower, check it. Each roll, outage or anomaly
 # appends one line to results.log (a refused roll a second, naming its refusal), which wakes the runner to report it. It signals only processes it started.
-# It runs origin/canary's latest head (the owner's rule: the running app is always canary latest, never one-off hashes or branches
-# or worktrees). A head that fails its roll is remembered in bad-builds and never rolled again (one dev refused to start for its own settings, on its third refusal), and the dashboard falls back to the head it ran
+# It runs the latest head of the branch its main checkout sits on (upstream.sh: main for an install, canary for a checkout kept on canary), never one-off hashes or branches
+# or worktrees. A head that fails its roll is remembered in bad-builds and never rolled again (one dev refused to start for its own settings, on its third refusal), and the dashboard falls back to the head it ran
 # before. A file named paused in its state folder (ops/dashboard) stops every roll (restarts of a dead stack still run): touch it before a
 # restart by hand, remove it after.
 # It runs in the dashboard's checkout (run.sh's working directory), and stops its stack on SIGHUP, SIGTERM, or once run.sh has exited and left it to launchd.
@@ -22,7 +22,7 @@ INGLOG="$DATA/dashboard-ingest.log"
 OPS=$(dirname "$D")
 BAD="$S/bad-builds"
 # 12 Oct (the owner saw "Network request failed" errors on the API grow frequent; five rolls 16:21-16:59Z each restarted the API):
-# every roll, a canary move included, waits ROLL_GAP after the last and for OWNER_IDLE with no owner action (a dashboard message or an Inbox
+# every roll, an upstream move included, waits ROLL_GAP after the last and for OWNER_IDLE with no owner action (a dashboard message or an Inbox
 # answer), batching what lands meanwhile, or ROLL_GAP alone when the owner's idle cannot be read while the dashboard's Postgres runs (roll_due); a file named roll-now in its state folder (ops/dashboard) rolls at once, for a fix to live breakage
 # or `playground update`, and with nothing to roll to it logs CURRENT, or SKIP for a head in bad-builds, and is removed
 ROLL_GAP=1800 OWNER_IDLE=300 ASKS=$DATA/asks
@@ -52,12 +52,15 @@ stop_all() {
 # the dashboard's URLs as portless names them for this checkout, read at every check, since portless's proxy can move (http on 1355 to https on 443)
 dashboard_urls() { WEB=$(bunx portless get playground) && API=$(bunx portless get api.playground); }
 # Up to 90 tries, a second apart, for the dashboard's health to answer, its URLs read afresh each try: before portless's proxy runs, portless get names its default port
+# The branch the dashboard rolls to, read once at start, and its head on origin, read each time
+UPSTREAM=$("$D/upstream.sh")
+upstream_head() { git ls-remote origin "refs/heads/$UPSTREAM" 2>/dev/null | cut -f1; }
 wait_dashboard() { local i; for i in $(seq 1 90); do dashboard_urls && curl -sf "$API/api/health" > /dev/null 2>&1 && return 0; sleep 1; done; return 1; }
 alive() { kill -0 "$(cat "$S/$1.pid" 2>/dev/null)" 2>/dev/null; }
 # an importer holds the follower's lock: a follower an earlier supervisor left running counts, so this one's "another importer holds the lock" exit is no outage; the status read gets HELD_WAIT seconds, then is stopped by its own process group (set -m gives it one), so a wedged docker child under it goes too, and exits 2, holder unknown, so a wedged Docker or database never freezes the loop
 follower_held() { local p i; bun api/hono/src/bin/dashboard-ingest.ts status > /dev/null 2>&1 & p=$!; for i in $(seq 1 "${HELD_WAIT:-20}"); do kill -0 "$p" 2>/dev/null || { wait "$p" && return 0 || return 1; }; sleep 1; done; kill -- -"$p" 2>/dev/null; wait "$p" 2>/dev/null; return 2; }
 
-# Dev up and checked: health answers, verify passes against origin/canary, approvals stay off. Prints one summary.
+# Dev up and checked: health answers, verify passes against HEAD, approvals stay off. Prints one summary.
 # every verify check but pages, one call each (verify takes one check per call): the pages check opens /dashboard/apps/changelog,
 # which marks the changelog read for LocalAgent, the owner's account, so each roll cleared the owner's +1 (fixed since, 7 Oct)
 # signin, ws and system sign in through the agent route, which only a checkout whose .env turns AGENT_SIGNIN_ENABLED on serves; a person's checkout starts it blank from .env.example, so there health and map are the checks
@@ -121,7 +124,7 @@ roll_up() {   # start dev and the follower, check both, and report one line; ret
   t=$(date -u +%Y-%m-%dT%H:%M:%S); start_follower; fol=$(check_follower "$t"); local fok=$?
   if [ $dok -eq 0 ] && [ $fok -eq 0 ]; then result "$tag $sha PASS $dev $fol"; return 0; else result "$tag $sha FAIL $dev $fol"; return 1; fi
 }
-# The owner's rule: restart the app every time something merges into canary, so the change is visible at once
+# The owner's rule: restart the app every time something lands on the upstream, so the change is visible at once
 tell_dispatcher() { NOTIFY_TO=dispatcher "$OPS/notify.sh" dashboard "$1"; }
 
 # The dashboard's database container, by the rule bun run ingest proves (the one running container publishing POSTGRES_URL's port on loopback alone), read with this checkout's own code and .env, and written to dashboard-db for procs.sh's drain (empty when none); a failed lookup logs its reason once, when it starts failing
@@ -205,9 +208,9 @@ fall_back() {
   roll_up "FALLBACK" && tell_dispatcher "Dashboard roll to ${1:0:7} $failed; fell back to $(git rev-parse --short HEAD)" || tell_dispatcher "Dashboard roll to ${1:0:7} $failed and the fallback to ${2:0:7} failed too; ops is on it"
   "$OPS/notify.sh" dashboard "roll to ${1:0:7} failed; fell back to ${2:0:7}"
 }
-# At start: go on with the roll the last supervisor handed on, or else move to canary's head when it is new and not in bad-builds, and start
+# At start: go on with the roll the last supervisor handed on, or else move to the upstream's head when it is new and not in bad-builds, and start
 boot() {
-  local was canary out mig pulled
+  local was upstream out mig pulled
   # a handed-on roll is the checkout's own copy's to finish, so a copy outside it hands on again and leaves the file
   [ -s "$S/reload" ] && ! [ "$D" -ef "$WT/scripts/ops/dashboard" ] && { say "handing the pending roll on to $WT/scripts/ops/dashboard/"; exit 75; }
   if take_reload; then
@@ -220,9 +223,9 @@ boot() {
     return
   fi
   was=$(git rev-parse HEAD)
-  canary=$(git ls-remote origin refs/heads/canary 2>/dev/null | cut -f1)
-  if [ ! -e "$S/paused" ] && [ -n "$canary" ] && [ "$canary" != "$was" ] && ! grep -qx "$canary" "$BAD" 2>/dev/null; then
-    pull_to "$canary" && [ "$pulled" -ne 0 ] && { finish_roll START "$canary" "$was" "$mig" "$pulled"; return; }
+  upstream=$(upstream_head)
+  if [ ! -e "$S/paused" ] && [ -n "$upstream" ] && [ "$upstream" != "$was" ] && ! grep -qx "$upstream" "$BAD" 2>/dev/null; then
+    pull_to "$upstream" && [ "$pulled" -ne 0 ] && { finish_roll START "$upstream" "$was" "$mig" "$pulled"; return; }
   fi
   reload_if "$was" START
   roll_up START
@@ -241,11 +244,11 @@ while true; do
     [ -z "${paused_said:-}" ] && say "paused: no rolls while $S/paused exists" && paused_said=1
   else
     paused_said=
-    head=$(git ls-remote origin refs/heads/canary 2>/dev/null | cut -f1)
+    head=$(upstream_head)
     now=$(date +%s)
-    if [ -n "$head" ] && [ "$head" != "$target" ]; then say "canary moved: ${target:0:7} -> ${head:0:7}"; target=$head; fi
+    if [ -n "$head" ] && [ "$head" != "$target" ]; then say "$UPSTREAM moved: ${target:0:7} -> ${head:0:7}"; target=$head; fi
     if [ -n "$head" ] && [ -n "$target" ] && [ "$target" != "$running" ] && ! grep -qx "$target" "$BAD" 2>/dev/null; then
-      why="canary ${head:0:7}"
+      why="$UPSTREAM ${head:0:7}"
       if [ -e "$S/roll-now" ]; then
         rm -f "$S/roll-now"; say "roll-now: rolling to ${target:0:7} at once"
         roll_to "$target" "$why (roll-now)"; held_said=

@@ -294,6 +294,8 @@ const c2 = git(wt, "rev-parse", "HEAD")
 const stubs = `S=${state} WT=${wt} OPS=${scratch}/ops BAD=${state}/bad-builds LOG=${state}/supervisor.log DEVLOG=${state}/dev.log
 say() { :; }; result() { echo "result $*" >> ${calls}; }; stop_all() { :; }; tell_dispatcher() { echo "tell $1" >> ${calls}; }
 roll_up() { echo "roll_up $1" >> ${calls}; [ "$1" = START ] || [ "$1" = FALLBACK ]; }
+UPSTREAM=canary
+${fn("upstream_head")}
 ${block("dev_reason")}
 ${block("reload_if")}
 ${fn("take_reload")}
@@ -771,5 +773,31 @@ describe("the supervisor's verify", () => {
 
   test("runs every check where agent sign-in is on", async () => {
     expect(await verifyChecks("true")).toEqual(["health", "signin", "ws", "system", "map"])
+  })
+})
+
+// upstream_head as the supervisor runs it, in a clone of an origin whose main and canary hold different heads
+describe("the supervisor's roll target", () => {
+  test("is the head of the branch upstream.sh names on origin, never canary's alone", async () => {
+    const origin = join(scratch, "roll-origin")
+    git(scratch, "init", "-q", "-b", "main", origin)
+    git(origin, "commit", "-q", "--allow-empty", "-m", "main")
+    git(origin, "checkout", "-q", "-b", "canary")
+    git(origin, "commit", "-q", "--allow-empty", "-m", "canary")
+    const head = (ref: string) => git(origin, "rev-parse", ref)
+    const clone = join(scratch, "roll-clone")
+    git(scratch, "clone", "-q", origin, clone)
+    expect(script).not.toContain("refs/heads/canary")
+    for (const branch of ["main", "canary"]) {
+      const proc = Bun.spawn(
+        ["bash", "-c", `UPSTREAM=${branch}\n${fn("upstream_head")}\nupstream_head`],
+        {
+          cwd: clone,
+          stdout: "pipe",
+        },
+      )
+      expect(await proc.exited).toBe(0)
+      expect((await new Response(proc.stdout).text()).trim()).toBe(head(branch))
+    }
   })
 })
