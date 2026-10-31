@@ -338,7 +338,7 @@ export type RollOutcome =
   | { phase: "building" | "going back" | "switching" }
   | { done: string; ok: boolean }
 
-// Where the dashboard's supervisor is in the roll `playground update` asked for, from the lines its log and results log gained since. A failed roll goes back to the build before, and is done once that FALLBACK lands, unless it ran a migration.
+// Where the dashboard's supervisor is in the roll `playground update` asked for, from the lines its log and results log gained since. A failed roll goes back to the build before, and is done once that FALLBACK lands, unless it ran a migration or its build failed before the stop.
 export const rollOutcome = (log: string[], results: string[]): RollOutcome => {
   let failed: string | undefined
   for (const line of results) {
@@ -365,6 +365,8 @@ export const rollOutcome = (log: string[], results: string[]): RollOutcome => {
     if (roll?.[3] === "PASS") return { done: `Updated to ${roll[2]}`, ok: true }
     if (!roll) continue
     failed = roll[4] || "the roll failed"
+    // a build that failed before the stop stopped nothing, so no fallback follows
+    if (failed.startsWith("build before the stop:")) return { done: `Failed: ${failed}`, ok: false }
     if (/\bmigrate\b/.test(roll[1]))
       return {
         done: `Failed: ${failed}; it changed the database, so the Dashboard stays on ${roll[2]}`,
