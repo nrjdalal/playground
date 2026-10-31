@@ -72,23 +72,25 @@ const usageOf = (data: string, row: Account, firstGlm: string | undefined): stri
       : "no reading yet"
   }
   if (accountKey(row) !== firstGlm) return "no reading: the usage job reads the first GLM key"
-  const file = json(join(data, "zai-usage.json")) as {
-    balance?: { seenAt?: unknown }
+  const read = json(join(data, "zai-usage.json"))
+  const file = (read && typeof read === "object" ? read : null) as {
+    balance?: { empty?: unknown; seenAt?: unknown }
     error?: unknown
     errorAt?: unknown
     windows?: Record<string, unknown>
   } | null
-  // as the sidebar reads it (zaiUsageOf): a failed read is no reading, and an empty balance spends both windows
+  // the job's two marks as the sidebar reads them: its error is no reading, and an empty balance spends both windows
   if (file && "error" in file) return `no reading: the usage read failed at ${String(file.errorAt)}`
+  const spent = file?.balance?.empty === true
   const windows = file?.windows
   const share = (name: string) => {
     const window = windows?.[name] as { cap?: unknown; used?: unknown } | undefined
     if (typeof window?.used !== "number" || typeof window.cap !== "number" || window.cap <= 0)
       return "?"
-    return percent(file?.balance ? 100 : (window.used / window.cap) * 100)
+    return percent(spent ? 100 : (window.used / window.cap) * 100)
   }
-  const empty = file?.balance ? `, the balance empty since ${String(file.balance.seenAt)}` : ""
-  return windows ? `5h ${share("fiveHour")}, week ${share("week")}${empty}` : "no reading yet"
+  const emptyNote = spent ? `, the balance empty since ${String(file?.balance?.seenAt)}` : ""
+  return windows ? `5h ${share("fiveHour")}, week ${share("week")}${emptyNote}` : "no reading yet"
 }
 
 export async function accountsCommand(words: string[], io: AccountsIo): Promise<number> {
