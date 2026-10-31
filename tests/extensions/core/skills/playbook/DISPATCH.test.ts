@@ -17,4 +17,21 @@ describe("DISPATCH.md", () => {
       "an org's in that org's extension repo and a person's in their login extension ([ADR 0016](",
     )
   })
+
+  test("a stacked child merges its parent's branch once, when the parent scores 5/5 or merges, with its measured case", async () => {
+    const text = await Bun.file(DISPATCH).text()
+    const line =
+      text.split("\n").find((l) => l.includes("merges its parent's branch in once")) ?? ""
+    expect(line).toContain("once, when the parent scores 5/5 or merges")
+    expect(line).toContain("and `canary` only when it needs it")
+    expect(line).toContain("four times in 59 minutes while the parent sat at 3/5")
+  })
+
+  test("a lane's item aims at about 1,000 changed lines, a bigger diff splitting off canary, with its measured case", async () => {
+    const text = await Bun.file(DISPATCH).text()
+    const line = text.split("\n").find((l) => l.includes("aims at about 1,000 changed lines")) ?? ""
+    expect(line).toContain("splits the rest into a new PR off `canary`")
+    expect(line).toContain("rather than stacking a third level")
+    expect(line).toContain("9,089 lines")
+  })
 })
