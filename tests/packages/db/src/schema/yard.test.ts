@@ -136,4 +136,46 @@ describe.skipIf(!dockerUp())("Yard's tables", () => {
       ...(await db`select device, login, user_id from yard_message where channel_id = ${id}`),
     ]).toEqual([{ device: "studio", login: "cy", user_id: null }])
   })
+
+  test("deleting a user takes the invites they made, asked for or redeemed", async () => {
+    for (const id of ["di", "ed", "flo"])
+      await db`insert into "user" (id, name, email) values (${id}, ${id}, ${`${id}@example.com`})`
+    await db`insert into yard_invite (id, made_by, status) values (${crypto.randomUUID()}, ${"di"}, ${"open"})`
+    await db`insert into yard_invite (id, requested_by, status) values (${crypto.randomUUID()}, ${"ed"}, ${"requested"})`
+    await db`insert into yard_invite (id, made_by, redeemed_by, status) values (${crypto.randomUUID()}, ${"ada"}, ${"flo"}, ${"redeemed"})`
+    await db`delete from "user" where id in ${db(["di", "ed", "flo"])}`
+    expect(Number((await db`select count(*) from yard_invite`)[0].count)).toBe(0)
+  })
+})
+
+// A reference to a user that outlives the account (set null) keeps the account's login on its row, so the row never turns anonymous.
+test("every Yard table with a set-null user reference keeps a login beside it", async () => {
+  const journal = await Bun.file(join(MIGRATIONS, "meta/_journal.json")).json()
+  const { idx } = journal.entries.at(-1) as { idx: number }
+  const snapshot = await Bun.file(
+    join(MIGRATIONS, `meta/${String(idx).padStart(4, "0")}_snapshot.json`),
+  ).json()
+  const anonymous = Object.values(
+    snapshot.tables as Record<
+      string,
+      {
+        columns: Record<string, unknown>
+        foreignKeys: Record<
+          string,
+          { columnsFrom: string[]; onDelete: string; tableFrom: string; tableTo: string }
+        >
+      }
+    >,
+  ).flatMap(({ columns, foreignKeys }) =>
+    Object.values(foreignKeys)
+      .filter(
+        (fk) =>
+          fk.tableFrom.startsWith("yard_") &&
+          fk.tableTo === "user" &&
+          fk.onDelete === "set null" &&
+          !("login" in columns),
+      )
+      .map((fk) => `${fk.tableFrom}.${fk.columnsFrom.join()}`),
+  )
+  expect(anonymous).toEqual([])
 })

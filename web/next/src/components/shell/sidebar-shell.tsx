@@ -1,8 +1,8 @@
 import { site } from "@packages/config/site"
 import { cn } from "cn"
 import { cookies } from "next/headers"
-import Link from "next/link"
 
+import { BrandLink } from "@/components/shell/brand-link"
 import { SidebarAdaptive } from "@/components/shell/sidebar-adaptive"
 import { SidebarFloatingTrigger } from "@/components/shell/sidebar-floating-trigger"
 import { SidebarToggleRail } from "@/components/shell/sidebar-toggle-rail"
@@ -20,6 +20,7 @@ export async function SidebarShell({
   homeHref = "/dashboard",
   header,
   mark,
+  opensPreview,
   stats,
   nav,
   footer,
@@ -29,6 +30,7 @@ export async function SidebarShell({
   homeHref?: string
   header?: React.ReactNode
   mark?: React.ReactNode
+  opensPreview?: boolean
   stats?: React.ReactNode
   nav?: React.ReactNode
   footer: React.ReactNode
@@ -51,8 +53,9 @@ export async function SidebarShell({
                   "@min-[238px]:[&:not(:has([data-slot=badge]))]:grid-cols-[minmax(0,1fr)_auto_auto]",
               )}
             >
-              <Link
+              <BrandLink
                 href={homeHref}
+                opensPreview={opensPreview}
                 className="col-start-1 row-start-1 flex min-w-0 items-center gap-2 py-2 pr-1 pl-1.5 font-bold"
               >
                 <span className={badge ? "shrink-0" : "min-w-0 truncate"}>{site.name}</span>
@@ -61,7 +64,7 @@ export async function SidebarShell({
                     <span className="truncate">{badge}</span>
                   </Badge>
                 )}
-              </Link>
+              </BrandLink>
               {stats && (
                 <div
                   className={cn(

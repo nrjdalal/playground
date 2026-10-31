@@ -47,8 +47,12 @@ export const probeDb = async (
   }
 }
 
-// What the body says about the machine the stack reads: its source, and the sidebar's dispatcher rows.
-export type HealthMachine = { dashboard: DashboardSource["kind"]; dispatcherSlots: number }
+// What the body says about the machine the stack reads: its source, the sidebar's dispatcher rows, and the branch while the checkout runs as a Vibeground.
+export type HealthMachine = {
+  dashboard: DashboardSource["kind"]
+  dispatcherSlots: number
+  vibe: string | null
+}
 
 // The /api/health body: the fields it always carried, plus the database's state and an overall message that degrades when it cannot be reached, and the machine's word, which the web's server render reads with it. It reads no machine itself, so the hosted build serves it too.
 export const healthBody = async (
@@ -62,7 +66,7 @@ export const healthBody = async (
       version: string
     }
 > => {
-  const [checked, { dashboard, dispatcherSlots }] = await Promise.all([
+  const [checked, { dashboard, dispatcherSlots, vibe }] = await Promise.all([
     probeDb(database, withinMs),
     machine,
   ])
@@ -74,5 +78,6 @@ export const healthBody = async (
     environment: env.NODE_ENV,
     message: checked.state === "ok" ? "ok" : "degraded",
     version: getBuildVersion(),
+    vibe,
   }
 }

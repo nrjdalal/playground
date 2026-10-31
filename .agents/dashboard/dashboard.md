@@ -111,7 +111,9 @@
     Any other branch, a detached HEAD or a build with no checkout reports `null` and adds nothing to `problems`, since a feature branch is not a fault; a HEAD that cannot be read on `main`, `canary` or `live.branch`, or with no branch at all, or a failed fetch, reports `null` with the reason in `problems`.
     A fixture stack fetches nothing: it reports the fixture's `update` (the shipped one 3 behind on canary).
   - `usage`: the usage windows (`five_hour`, `seven_day`: used share and reset time), read by `api/hono/src/lib/usage/window.ts` from `~/.playground/usage.json`, stale past 10 minutes.
-    The ops-usage job (`scripts/ops/usage/run.py`, run through its link in `~/.playground/ops/usage/`) writes it every 5 minutes, from the stored login's `/api/oauth/usage` or from the factory account's rate-limit headers while login-flip names one (a temp file, then a rename); the dashboard only reads the file.
+    The ops-usage job (`scripts/ops/usage/run.py`, run through its link in `~/.playground/ops/usage/`) writes it every 5 minutes (a temp file, then a rename); the dashboard only reads the file.
+    It reads the factory account's rate-limit headers while login-flip names one (the stored login's `/api/oauth/usage` when that factory is the stored login), else the first account the Dashboard's Add a Claude account keeps (`usage.accounts`, its token under `usage.keychainService`) through the same headers,
+    else the stored login's `/api/oauth/usage` (Claude Code's own `Claude Code-credentials` Keychain item).
     A write can hold one window and not the other, since the job leaves out a window the endpoint gives no numbers for (a reset one stays in, at 0 with no reset time),
     so the sampler remembers each window it read (`withSeen` over `seenWindows`, kept on `globalThis` so a `bun --hot` reload keeps it) and shows a window the file lacks as the last one it saw, with `seenAt` (when that file was written), never a number it did not read,
     and nothing while it has seen none since the API started.

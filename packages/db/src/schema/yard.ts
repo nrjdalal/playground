@@ -28,7 +28,7 @@ const id = () =>
     .primaryKey()
     .$defaultFn(() => crypto.randomUUID())
 
-// A single-use way in, for one GitHub login or, with for_login null, for whoever redeems it first: a member's request waits as requested, with no code, until the owner's web session makes it open; the code is stored only as its hash.
+// A single-use way in, for one GitHub login or, with for_login null, for whoever redeems it first: a member's request waits as requested, with no code, until the owner's web session makes it open; the code is stored only as its hash; it goes with the account that made, asked for or redeemed it, since a week-long way in has no history worth keeping.
 export const yardInvite = pgTable(
   "yard_invite",
   {
@@ -37,13 +37,16 @@ export const yardInvite = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     expiresAt: timestamp("expires_at", { withTimezone: true }),
     forLogin: text("for_login"),
-    madeBy: text("made_by").references(() => user.id, { onDelete: "set null" }),
+    madeBy: text("made_by").references(() => user.id, { onDelete: "cascade" }),
     redeemedAt: timestamp("redeemed_at", { withTimezone: true }),
-    redeemedBy: text("redeemed_by").references(() => user.id, { onDelete: "set null" }),
-    requestedBy: text("requested_by").references(() => user.id, { onDelete: "set null" }),
+    redeemedBy: text("redeemed_by").references(() => user.id, { onDelete: "cascade" }),
+    requestedBy: text("requested_by").references(() => user.id, { onDelete: "cascade" }),
     status: text("status", { enum: INVITE_STATUSES }).notNull(),
   },
-  (table) => [oneOf("yard_invite_status_check", "status", INVITE_STATUSES)],
+  (table) => [
+    index("yard_invite_requested_by_idx").on(table.requestedBy),
+    oneOf("yard_invite_status_check", "status", INVITE_STATUSES),
+  ],
 )
 
 // A named channel, or a DM named dm:<user id>:<user id> with the two ids sorted, so both sides open the same one; post_rule owner lets only the owner rung post (#releases).
@@ -52,7 +55,6 @@ export const yardChannel = pgTable(
   {
     id: id(),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-    createdBy: text("created_by").references(() => user.id, { onDelete: "set null" }),
     kind: text("kind", { enum: CHANNEL_KINDS }).notNull(),
     name: text("name").notNull().unique(),
     postRule: text("post_rule", { enum: POST_RULES }).default("members").notNull(),

@@ -15,7 +15,7 @@ It runs the files in parallel (`packages/scripts/src/test-sandbox.ts`: `bun test
 A test runs beside the others when it shares nothing with them: it binds port 0, starts its containers unnamed or named per process, and takes its scratch folders from `mkdtemp`; one that cannot joins `SERIAL`.
 So does one that rebuilds a package or moves a file other tests read, since a worker beside it would read the half-built file, and one that hangs only beside other workers.
 In the parallel pass each test gets 30s where bun gives 5s, since a test runs slower beside other workers; a test's own timeout wins, so read it first.
-A parallel pass still running at its deadline (`TEST_PARALLEL_DEADLINE_MS`, 20 minutes, which the runner box's `suite.sh` raises) is killed and fails, naming the files its workers still held, since bun's own timeout cannot stop synchronous code; the run's first line names the deadline it holds.
+A parallel pass still running at its deadline (`TEST_PARALLEL_DEADLINE_MS`, 20 minutes, which the runner box's `suite.sh` raises and GitHub's Audit job lowers to 10, inside its own 20-minute `timeout-minutes`) is killed and fails, naming the files its workers still held, since bun's own timeout cannot stop synchronous code; the run's first line names the deadline it holds.
 `tests/` is fork-excluded, so the root script no-ops where the directory is absent.
 
 ## Traps
@@ -32,6 +32,8 @@ No end-to-end suite exists: `bun run test:e2e` matches no file.
 
 The new-user gate is the one end-to-end run: `bun run gate:new-user <sha>` (`packages/scripts/src/new-user-gate/`) installs that sha the way `curl | bash` does, in a scratch HOME under `/tmp/pg-gate-<sha7>` with stand-ins for claude, gh, cmux, brew, security and sudo (`stubs.ts`), its own portless proxy on port 14155, and a pglaunch stand-in that publishes its container on loopback alone.
 Before the install it checks that the box's zsh, plain and login, finds every stand-in in the box's stubs folder, and stops with exit 2 naming each one it finds elsewhere, so no job the box starts reaches a real binary.
+Its claude runs a scripted session (`claude.ts`) for each launch spawn.sh makes: the dispatcher hands the typed task to the builder, the builder to a worker, and the worker runs `gh pr create`, calling no model.
+The ops-usage job reads made-up usage windows from the box (`PLAYGROUND_USAGE_API`), so Usage shows a reading on a made-up login, once the installed sha's `scripts/ops/usage/run.py` reads that variable.
 It then checks the seven steps a new user meets (the install's finish, first run's database click, Alpha on the Dashboard, a routed task opening a PR, Usage, the Scripts group, the roll following main), prints PASS, FAIL or INCONCLUSIVE for each, and leaves a screenshot per step and the box's logs in `/tmp/pg-gate-<sha7>-shots` after removing the box, its processes and its container.
 Before the install it waits up to 10 minutes for this Mac's load to fall under the line spawn.sh's load gate holds a dispatcher's start to, and says how long it waited.
 The box sets `PLAYGROUND_LOAD_MULT=10` (`BOX_LOAD_MULT`, printed at the start), so the host's other sessions never hold a start there, since the gate checks what a new user meets on a quiet Mac.

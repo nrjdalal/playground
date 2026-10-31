@@ -128,9 +128,7 @@ export const createChannel = async (
   const id = crypto.randomUUID()
   try {
     await db.transaction(async (tx) => {
-      await tx
-        .insert(yardChannel)
-        .values({ createdBy: caller.id, id, kind: "channel", name, topic })
+      await tx.insert(yardChannel).values({ id, kind: "channel", name, topic })
       await tx.insert(yardMember).values({ channelId: id, userId: caller.id })
     })
   } catch (error) {
@@ -159,7 +157,7 @@ export const openDm = async (db: Database, caller: Caller, login: string): Promi
   await db.transaction(async (tx) => {
     await tx
       .insert(yardChannel)
-      .values({ createdBy: caller.id, id: crypto.randomUUID(), kind: "dm", name })
+      .values({ id: crypto.randomUUID(), kind: "dm", name })
       .onConflictDoNothing()
     const [row] = await tx
       .select({ id: yardChannel.id })

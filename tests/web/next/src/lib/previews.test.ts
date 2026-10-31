@@ -2,9 +2,17 @@ import { describe, expect, test } from "bun:test"
 
 import type { Preview } from "../../../../../api/hono/src/lib/apps/previews"
 import {
+  doneMessage,
   loadable,
+  OPEN_PREVIEW,
+  openPreview,
+  previewClick,
   previewUrl,
+  stackGroups,
   startAddress,
+  stoppedIn,
+  takeMove,
+  takePreview,
   topicCounts,
   topicGroups,
 } from "../../../../../web/next/src/lib/previews"
@@ -97,5 +105,141 @@ describe("startAddress", () => {
       "https://desk.playground.localhost/",
     )
     expect(startAddress(null, [], api)).toBe("")
+  })
+
+  test("a stopped worktree, with no URL, is passed over for the first running one", () => {
+    expect(startAddress(null, [{ url: null }, ...stacks], api)).toBe(
+      "https://desk.playground.localhost/",
+    )
+    expect(startAddress(null, [{ url: null }], api)).toBe("")
+  })
+})
+
+// the owner: "this preview thingy should be vibeground, working on multiple projects, or worktrees and things"
+describe("stackGroups", () => {
+  const stack = (
+    project: string,
+    branch: string | null,
+    url: string | null,
+    session: string | null = null,
+  ) => ({
+    branch,
+    name: "folder",
+    path: `/${project}/${branch}`,
+    project,
+    session,
+    url,
+  })
+
+  test("one group a project in the list's order, each worktree its branch and session, a stopped one its path, to start it", () => {
+    expect(
+      stackGroups([
+        stack("playground", "canary", "https://playground.localhost", "dispatcher"),
+        stack("playground", "feat/b", null),
+        stack("yard", null, "https://folder.yard.localhost"),
+      ]),
+    ).toEqual([
+      {
+        items: [
+          { label: "canary · dispatcher", value: "https://playground.localhost" },
+          { label: "feat/b · stopped", value: "stopped:/playground/feat/b" },
+        ],
+        project: "playground",
+      },
+      {
+        items: [{ label: "folder", value: "https://folder.yard.localhost" }],
+        project: "yard",
+      },
+    ])
+  })
+
+  test("a Vibeground started and not serving yet reads starting, so the pane offers Stop and never a second Start", () => {
+    const booting = { ...stack("playground", "feat/c", null), vibe: true }
+    expect(stackGroups([booting])[0]?.items).toEqual([
+      { label: "feat/c · starting", value: "stopped:/playground/feat/c" },
+    ])
+  })
+})
+
+// the owner: "also clicking on Playground logo should switch it to vibeground"
+describe("openPreview", () => {
+  test("the brand's click asks for the Preview row once, so an Inbox that mounts after it still opens it, and one that mounts later does not", () => {
+    const heard: string[] = []
+    const listen = () => heard.push("open")
+    globalThis.window ??= globalThis as unknown as Window & typeof globalThis
+    window.addEventListener(OPEN_PREVIEW, listen)
+    openPreview(null)
+    window.removeEventListener(OPEN_PREVIEW, listen)
+    expect(heard).toEqual(["open"])
+    expect(takePreview()).toBe(true)
+    expect(takePreview()).toBe(false)
+  })
+
+  // a phone shows one tab, and a move to another page resets it to the page's own, which hid the Inbox the brand opened
+  test("a click that moves the page asks the aside for the Inbox once, at the first address past the one it left", () => {
+    globalThis.window ??= globalThis as unknown as Window & typeof globalThis
+    openPreview("/dashboard/sessions")
+    expect(takeMove("/dashboard/sessions")).toBe(false)
+    expect(takeMove("/dashboard")).toBe(true)
+    expect(takeMove("/dashboard/system")).toBe(false)
+    openPreview(null)
+    expect(takeMove("/dashboard/system")).toBe(false)
+    takePreview()
+  })
+
+  // a click from /dashboard?worker=<the dispatcher> keeps the aside's `where`, so a move judged by `where` stayed armed and pulled a later page change to the Inbox
+  test("a move that keeps the aside's session is spent by its own address change, so a later page change keeps its tab", () => {
+    globalThis.window ??= globalThis as unknown as Window & typeof globalThis
+    openPreview("/dashboard?worker=d")
+    expect(takeMove("/dashboard")).toBe(true)
+    expect(takeMove("/dashboard?worker=b")).toBe(false)
+    takePreview()
+  })
+
+  test("a plain click opens the row, moving the page unless it is already home; a modified click opens a tab and leaves the row alone", () => {
+    const click = { altKey: false, button: 0, ctrlKey: false, metaKey: false, shiftKey: false }
+    const home = { pathname: "/dashboard", search: "" }
+    expect(previewClick(click, "/dashboard", home)).toEqual({ from: null })
+    expect(
+      previewClick(click, "/dashboard", { pathname: "/dashboard/sessions", search: "" }),
+    ).toEqual({ from: "/dashboard/sessions" })
+    expect(
+      previewClick(click, "/dashboard", { pathname: "/dashboard", search: "?worker=a" }),
+    ).toEqual({ from: "/dashboard?worker=a" })
+    expect(previewClick({ ...click, metaKey: true }, "/dashboard", home)).toBeNull()
+    expect(previewClick({ ...click, button: 1 }, "/dashboard", home)).toBeNull()
+  })
+})
+
+// Done hands the work back for review, never merged; it goes to the dispatcher, the one session the owner's messages reach, which routes it to the worktree's session
+describe("doneMessage", () => {
+  test("names the worktree, branch and session, pushes to its open PR or opens one into its parent, and never merges", () => {
+    const text = doneMessage({ branch: "feat/rooms", path: "/w/rooms", session: "rooms-worker" })
+    expect(text).toContain("feat/rooms")
+    expect(text).toContain("/w/rooms")
+    expect(text).toContain("rooms-worker")
+    expect(text).toContain("push it to the branch's open PR")
+    expect(text).toContain("only when none is open")
+    expect(text).toContain("Do not merge")
+  })
+
+  test("a worktree no session works in says so", () => {
+    expect(doneMessage({ branch: "main", path: "/w/yard", session: null })).toContain(
+      "no session works in it",
+    )
+  })
+})
+
+describe("stoppedIn", () => {
+  test("marks the stopped worktree stopped in the cached list, so the pane shows Start rather than reopening its old address", () => {
+    const stacks: { path: string; url: string | null; vibe: boolean }[] = [
+      { path: "/w/a", url: "https://a.localhost", vibe: true },
+      { path: "/w/b", url: "https://b.localhost", vibe: false },
+    ]
+    expect(stoppedIn(stacks, "/w/a")).toEqual([
+      { path: "/w/a", url: null, vibe: false },
+      { path: "/w/b", url: "https://b.localhost", vibe: false },
+    ])
+    expect(stacks[0]?.url).toBe("https://a.localhost")
   })
 })

@@ -46,7 +46,9 @@ const head = Bun.spawnSync(["git", "rev-parse", "--short", "HEAD"], {
 })
 // `bun run dev:stop` proves a recorded launcher by its working directory, so it runs from the checkout's root however it was started.
 process.chdir(ROOT)
-const args = process.argv.slice(2)
+// --serve runs the apps' serve task, the production build the live dashboard's supervisor made (PLAYGROUND_BUILD), where dev runs their dev servers; every check before it is the same
+const serving = process.argv.includes("--serve")
+const args = process.argv.slice(2).filter((arg) => arg !== "--serve")
 const { env, notes } = devEnv(process.env, head.exitCode === 0 ? head.stdout.toString().trim() : "")
 for (const note of notes) console.error(`dev: ${note}`)
 
@@ -178,11 +180,14 @@ if (!dry) {
   }
 }
 
-const turbo = Bun.spawn([process.env.DEV_TURBO_BIN || TURBO, "run", "dev", ...args], {
-  cwd: ROOT,
-  env: wrote ? fixtureStackEnv(env, wrote) : herdrOnly ? herdrAloneEnv(env) : env,
-  stdio: ["inherit", "inherit", "inherit"],
-})
+const turbo = Bun.spawn(
+  [process.env.DEV_TURBO_BIN || TURBO, "run", serving ? "serve" : "dev", ...args],
+  {
+    cwd: ROOT,
+    env: wrote ? fixtureStackEnv(env, wrote) : herdrOnly ? herdrAloneEnv(env) : env,
+    stdio: ["inherit", "inherit", "inherit"],
+  },
+)
 // The launcher re-records the stack's task groups every few seconds while it runs, by parentage alone: a launcher killed with no stop leaves them behind, and dev:stop and the next start's claim end or name them by the record. The stack's first seconds may hold no task yet, so the tick rewrites as tasks appear.
 if (!dry) {
   reconcile = setInterval(() => {

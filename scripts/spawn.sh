@@ -6,7 +6,7 @@ set -euo pipefail
 # closed, unless three gates pass in order (a move runs the usage gate alone),
 # the first failure naming its gate and its reading, every pass and refusal
 # logged as one JSON line in ~/.playground/ops/capacity.jsonl, where the
-# load gate reads the starts of the last 5 minutes back. No count of live sessions holds a spawn, so
+# load gate reads the starts of the last 5 minutes back, with each slots.peers folder's own log's. No count of live sessions holds a spawn, so
 # the gates cap nothing but the machine's own room:
 #   1. load, max(load1, load5) plus those starts under the core count (sysctl
 #      hw.ncpu) times PLAYGROUND_LOAD_MULT (default 1.0), each start weighing
@@ -351,23 +351,25 @@ else:
     readings["load_mult"] = mult
     cap = cores * mult
     starts = 0
-    try:
-        with open(log_path) as f:
-            for line in f:
-                try:
-                    row = json.loads(line)
-                except ValueError:
-                    continue
-                if not isinstance(row, dict) or row.get("verdict") != "pass":
-                    continue
-                try:
-                    if (now - from_iso(row["at"])).total_seconds() <= gates["startsWindow"]:
-                        weight = (row.get("readings") or {}).get("units") if isinstance(row.get("readings"), dict) else None
-                        starts += weight / 2 if weight in (1, 2, 3) else 1
-                except (KeyError, TypeError, ValueError):
-                    continue
-    except OSError:
-        pass
+    # this factory's starts, then each peer's (slots.peers) from its own log, read only, since the load average lags a start on either side
+    for path in [log_path] + [os.path.join(p, "capacity.jsonl") for p in gates["peers"] if isinstance(p, str)]:
+        try:
+            with open(path) as f:
+                for line in f:
+                    try:
+                        row = json.loads(line)
+                    except ValueError:
+                        continue
+                    if not isinstance(row, dict) or row.get("verdict") != "pass":
+                        continue
+                    try:
+                        if (now - from_iso(row["at"])).total_seconds() <= gates["startsWindow"]:
+                            weight = (row.get("readings") or {}).get("units") if isinstance(row.get("readings"), dict) else None
+                            starts += weight / 2 if weight in (1, 2, 3) else 1
+                    except (KeyError, TypeError, ValueError):
+                        continue
+        except OSError:
+            pass
     readings["starts"] = starts
     # gates.smallReserve of the cap stays for small items, so a big plan never blocks the small ones
     keep = 0 if size == "small" else cap * gates["smallReserve"]
@@ -642,7 +644,9 @@ MODEL_SETTINGS=$(env $UNSET "$BUN" "$REPO/packages/scripts/src/playground/settin
   read -r SESSION_NAMES; read -r SESSION_ALIASES; read -r WINDOW
 } <<<"$MODEL_SETTINGS"
 SESSION_KINDS=$(python3 -I -c 'import json, sys; n, a = map(json.loads, sys.argv[1:3]); [print(*row) for row in [(v, k) for k, v in n.items()] + [(n["dispatcher"] + "-2", "dispatcher")] + list(a.items())]' "$SESSION_NAMES" "$SESSION_ALIASES")
-GATES="{\"glmLoad5Max\": $GLM_LOAD5_MAX, \"glmSwapinsMax\": $GLM_SWAPINS_MAX, \"memoryFreeMin\": $MEMORY_FREE_MIN, \"smallReserve\": $SMALL_RESERVE, \"startsWindow\": $STARTS_WINDOW}"
+# slots.peers, the ops folders of the other factories on this machine, whose starts the load gate counts beside this one's; none when unread
+PEERS=$(setting slots.peers) || PEERS=; [ -n "$PEERS" ] || PEERS="[]"
+GATES="{\"glmLoad5Max\": $GLM_LOAD5_MAX, \"glmSwapinsMax\": $GLM_SWAPINS_MAX, \"memoryFreeMin\": $MEMORY_FREE_MIN, \"peers\": $PEERS, \"smallReserve\": $SMALL_RESERVE, \"startsWindow\": $STARTS_WINDOW}"
 MODELS=$(printf '%s\n' $CLAUDE_MODELS | awk '{ m[NR] = $0 } END { for (i = 1; i <= NR; i++) printf "%s%s", m[i], (i < NR - 1 ? ", " : i == NR - 1 ? " or " : "") }')
 CLAUDE_MODEL=
 RESUME_BRIEF=

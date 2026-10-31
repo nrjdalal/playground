@@ -65,7 +65,8 @@ const bunJob = (name: string) =>
 // The jobs Playground ships, each off until the owner turns it on but the Dashboard's own; A to Z.
 export const JOBS: Record<string, Job> = {
   "ops-awake": terminal("ops-awake", `${bunJob("ops-awake")} --data {data}`, {
-    description: "Keeps the Mac awake on AC power with caffeinate, display and lock unchanged.",
+    description:
+      "Keeps the Mac awake on AC power and on battery with caffeinate, display and lock unchanged.",
     needsCmux: false,
     schedule: { always: true },
   }),

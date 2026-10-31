@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 
 import {
+  opsLine,
   pausedOps,
   scriptCount,
   scriptsRail,
@@ -74,10 +75,17 @@ describe("the Scripts group", () => {
   })
 
   test("on the collapsed rail it is one icon, red while a script it lists fails or is down, a paused one aside", () => {
-    expect(scriptsRail(rows)).toEqual({ broken: true, words: "Scripts 3 · 2 not running" })
+    expect(scriptsRail(rows)).toEqual({ broken: true, words: "Scripts 3 · 2 failing or down" })
     expect(scriptsRail([job("ops-a"), job("ops-d", { paused: true, status: "down" })])).toEqual({
       broken: false,
       words: "Scripts 1",
     })
+  })
+
+  test("a Waiting script, with nothing to read yet, is not broken: the rail stays calm and the collapsed group hides it", () => {
+    const waiting = [job("ops-a"), job("ops-usage", { reason: "no account", status: "waiting" })]
+    expect(scriptsRail(waiting)).toEqual({ broken: false, words: "Scripts 2" })
+    expect(scriptsShown(waiting, false)).toEqual([])
+    expect(opsLine(waiting[1]!, 0)).toBe("Waiting: no account")
   })
 })

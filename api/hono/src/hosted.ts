@@ -25,8 +25,8 @@ app.use("*", async (_, next) => {
 app
   .basePath("/api")
   .get("/health", async (c) =>
-    // the local health body's shape, so the web reads one; the hosted web draws no dispatcher rows, so the count is the default 1
-    c.json({ data: await healthBody({ dashboard: "hosted", dispatcherSlots: 1 }) }),
+    // the local health body's shape, so the web reads one; the hosted web draws no dispatcher rows, so the count is the default 1, and a deploy is never a Vibeground
+    c.json({ data: await healthBody({ dashboard: "hosted", dispatcherSlots: 1, vibe: null }) }),
   )
   .route("/auth", authRouter)
   .route("/v1/yard", yardRouter)
