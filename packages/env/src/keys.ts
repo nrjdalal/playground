@@ -30,6 +30,8 @@ export const apiHono = {
     PLAYGROUND_HOSTED: process.env.PLAYGROUND_HOSTED,
     PLAYGROUND_SDK_PERMISSION_MODE: process.env.PLAYGROUND_SDK_PERMISSION_MODE,
     PLAYGROUND_SDK_PROBE_DIR: process.env.PLAYGROUND_SDK_PROBE_DIR,
+    YARD_API_URL: process.env.YARD_API_URL,
+    YARD_WEB_URL: process.env.YARD_WEB_URL,
   },
   server: {
     NODE_ENV,
@@ -64,6 +66,9 @@ export const apiHono = {
       .enum(["acceptEdits", "bypassPermissions", "default", "plan"])
       .default("bypassPermissions"),
     PLAYGROUND_SDK_PROBE_DIR: z.string().optional(),
+    // the hosted Yard this Playground reads and posts to with the Mac's token: its API, and its web for the approve page; unset, Yard stays off here
+    YARD_API_URL: z.url().optional(),
+    YARD_WEB_URL: z.url().optional(),
   },
 }
 

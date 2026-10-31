@@ -124,6 +124,7 @@ describe.skipIf(!dockerUp())("Yard's routes on the hosted build", () => {
       cookieWriteNoOrigin: 403,
       created: 201,
       held: "pending",
+      me: { login: "bo", owner: false },
       noAuth: 401,
       ottVerify: 404,
       posted: [201, "sent"],

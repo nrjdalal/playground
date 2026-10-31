@@ -103,6 +103,8 @@
     "PLAYGROUND_SDK_PROBE_DIR",
     "POSTGRES_URL",
     "REDIS_URL",
+    "YARD_API_URL",
+    "YARD_WEB_URL",
     // Client variables
     "NEXT_PUBLIC_API_URL",
     "NEXT_PUBLIC_APP_URL",

@@ -1,4 +1,5 @@
 import { site } from "@packages/config/site"
+import { db } from "@packages/db"
 import { getBuildVersion } from "@packages/env"
 import { env } from "@packages/env/api-hono"
 import { describeRoute, openAPIRouteHandler, resolver } from "hono-openapi"
@@ -12,6 +13,8 @@ import { startSdkProbe } from "@/lib/dashboard/sdk"
 import { globalErrorResponses } from "@/lib/error"
 import { DB_TIMEOUT_MS, healthData } from "@/lib/health"
 import { createServer, upgradeWebSocket } from "@/lib/server"
+import { yardClient } from "@/lib/yard/client"
+import { startYardPoll } from "@/lib/yard/inbound"
 import { requireFeature } from "@/middlewares"
 import {
   accountsRouter,
@@ -28,6 +31,7 @@ import {
   settingsRouter,
   v1Router,
   waitlistRouter,
+  localYardRouter,
 } from "@/routers"
 import { mountOldPaths, OLD_PATHS_DOC } from "@/routers/old-paths"
 
@@ -170,6 +174,7 @@ socket.addEventListener("message", (event) => {
   .route("/v1/inbox", inboxRouter)
   .route("/v1/sessions", sessionsRouter)
   .route("/v1/settings", settingsRouter)
+  .route("/v1/yard", localYardRouter)
   .route("/v1", v1Router)
   .route("/waitlist", waitlistRouter)
   // Gate both the OpenAPI document and the Scalar UI on apiDocs; the UI fetches the spec, so gating only the UI would leave the full spec public.
@@ -267,6 +272,9 @@ keepSweeping()
 
 // The session the dashboard hosts on the Agent SDK, when PLAYGROUND_SDK_PROBE_DIR names its folder.
 startSdkProbe()
+
+// Yard's mentions of the owner into the Inbox, once a minute, when YARD_API_URL names a hosted Yard.
+startYardPoll(db, yardClient)
 
 mountOldPaths(routes, {
   apps: appsRouter,

@@ -176,6 +176,8 @@ export const draftSchema = z.strictObject({
 export const OUTCOMES = ["alert", "decision", "finding", "merged", "shipped"] as const
 
 export const updateSchema = z.strictObject({
+  // a page the owner approves on in the browser, where a session never can: a pending Yard post's approve page
+  approve: link,
   attachments: z.array(attachmentSchema).min(1).max(MAX_INBOX_ATTACHMENTS).optional(),
   link,
   outcome: z.enum(OUTCOMES),

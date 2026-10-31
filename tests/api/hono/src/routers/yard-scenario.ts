@@ -26,6 +26,7 @@ out.ottVerify = (
 out.tokenList = await (
   await fetch(`${api}/channels`, { headers: bearer(process.env.BO_TOKEN!) })
 ).json()
+out.me = (await (await fetch(`${api}/me`, { headers: bearer(process.env.BO_TOKEN!) })).json()).data
 out.tokenOnWebOnly = await status("/tokens", { headers: bearer(process.env.BO_TOKEN!) })
 out.cookieWriteNoOrigin = await status("/channels", { body: "{}", headers: json, method: "POST" })
 const made = await fetch(`${api}/channels`, {

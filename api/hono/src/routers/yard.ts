@@ -90,6 +90,19 @@ const fanOut = async (caller: store.Caller, message: z.infer<typeof messageSchem
 
 // Yard's routes, which only the hosted build mounts (hosted.ts), each on the member rung or the narrower one it names.
 export const yardRouter = new Hono<{ Variables: YardVariables }>()
+  // who a token or a session belongs to, so the local Playground knows which @login is its owner's
+  .get(
+    "/me",
+    doc(
+      "Who you are on Yard: your login, and whether you are its owner",
+      z.object({ login: z.string(), owner: z.boolean() }),
+    ),
+    member,
+    (c) => {
+      const { login, owner } = c.get("caller")
+      return c.json({ data: { login, owner } })
+    },
+  )
   .get(
     "/channels",
     doc(
