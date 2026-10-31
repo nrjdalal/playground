@@ -11,7 +11,11 @@ const LIST = {
   names: ["Quilla", "Marsh", "Tobin"],
   slackIds: ["U0FAKE1234", "C0FAKE9876"],
 }
-const REPOS = { archive: "octo/archive", owner: ["octo"], public: ["qmarsh/playground"] }
+const REPOS = {
+  archive: "octo/archive",
+  owner: ["octo"],
+  public: ["qmarsh/playground", "qmarsh/playground-yard"],
+}
 const { swap } = swapper(LIST, REPOS)
 
 describe("the swap pass", () => {
@@ -62,9 +66,9 @@ describe("the swap pass", () => {
     )
   })
 
-  test("a value inside a longer word, and the public repository, stay", () => {
-    expect(swap("Quillan, tbells, qmarsh/playground").text).toBe(
-      "Quillan, tbells, qmarsh/playground",
+  test("a value inside a longer word, and each public repository, stay", () => {
+    expect(swap("Quillan, tbells, qmarsh/playground, qmarsh/playground-yard").text).toBe(
+      "Quillan, tbells, qmarsh/playground, qmarsh/playground-yard",
     )
   })
 

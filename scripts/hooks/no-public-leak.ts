@@ -56,7 +56,7 @@ const policy = (list: PublicList, repos: Repos): Policy => ({
   guard: "no-public-leak",
   guarded: (repo) => repos.public.includes(`${repo.owner}/${repo.repo}`.toLowerCase()),
   hosts: false,
-  place: "the public repository",
+  place: "a public repository",
   what: "private text",
   why: `Everything written to ${repos.public.join(" or ")} is public once the repository is, and stays cached after, so it names no person, company or private record.`,
 })
