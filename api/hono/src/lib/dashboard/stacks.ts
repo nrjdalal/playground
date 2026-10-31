@@ -180,12 +180,14 @@ export async function readStacks(): Promise<Stack[]> {
       worktrees.map((worktree) => worktree.path),
     )
     return worktrees
-      .map(({ url, ...worktree }) => {
+      .map(({ branch, path, project, url }): Stack => {
         const own = url?.replace("$WEB", env.HONO_TRUSTED_ORIGINS[0] ?? "") ?? null
         return {
-          ...worktree,
-          name: own ? (new URL(own).hostname.split(".")[0] ?? "") : basename(worktree.path),
-          session: owners.get(worktree.path) ?? null,
+          branch,
+          name: own ? (new URL(own).hostname.split(".")[0] ?? "") : basename(path),
+          path,
+          project,
+          session: owners.get(path) ?? null,
           url: own,
         }
       })
