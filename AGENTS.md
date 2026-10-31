@@ -157,7 +157,7 @@ Start with `codebase-map` to orient, then load the task skill that fits.
 ## Playground
 
 This repo is also Playground, whose own skills live under `skills/`.
-It stays private, since skills name colleagues' handles and internal repos.
+The repo is public: write every file in it by the Commits section's people rule, naming no person, handle or internal repo, as `no-public-leak` (below) holds its pull requests, issues and comments to.
 ZeroStarter's rules above govern Playground too; this section adds its own.
 
 - Skills live in two folders under `skills/`: `playground/` holds the factory's own (each one **promoted**), and `zerostarter/` the starter's, which `.agents/skills` links to.

@@ -360,7 +360,7 @@ Playground installs into $DIR. Outside it, it writes only in:
 Every ops job starts off but the Dashboard's own and the usage read, so nothing goes into $HOME/Library/LaunchAgents.
 EOF
 
-  # While the repo is private a clone goes through the gh login; with none, git clones it over https. Either clones main, the shipped branch, whatever the repo's default is.
+  # A clone goes through the gh login when there is one, else git clones it over https. Either clones main, the shipped branch, whatever the repo's default is.
   # A checkout left on another branch, such as one cloned while canary was the default, moves to main first, when it holds no uncommitted changes.
   if [ -d "$DIR/.git" ]; then
     git -C "$DIR" fetch -q origin main
