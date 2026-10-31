@@ -44,10 +44,23 @@ mkdirSync(BARE_CONFIG, { recursive: true })
 const PLUGIN_CONFIG = join(BASE, "plugin-config")
 const PLUGIN = join(BASE, "plugin-cache", "ws-home")
 make(join(PLUGIN, "skills", SKILL, "SKILL.md"))
-make(
-  join(PLUGIN_CONFIG, "plugins", "installed_plugins.json"),
-  JSON.stringify({ plugins: { "ws-home@ws": [{ installPath: PLUGIN, scope: "user" }] } }),
-)
+const plugged = (name: string, installs: Record<string, unknown>[], enabled: unknown = true) => {
+  const config = join(BASE, name)
+  make(
+    join(config, "plugins", "installed_plugins.json"),
+    JSON.stringify({
+      plugins: { "ws-home@ws": installs.map((i) => ({ installPath: PLUGIN, ...i })) },
+    }),
+  )
+  make(join(config, "settings.json"), JSON.stringify({ enabledPlugins: { "ws-home@ws": enabled } }))
+  mkdirSync(join(config, "playground"), { recursive: true })
+  return config
+}
+make(join(PLUGIN_CONFIG, "plugins", "installed_plugins.json"), "{}")
+const USER_PLUGIN = plugged("plugin-user", [{ scope: "user" }])
+const DISABLED_PLUGIN = plugged("plugin-disabled", [{ scope: "user" }], false)
+const PROJECT_PLUGIN = plugged("plugin-project", [{ projectPath: REPO, scope: "project" }])
+const ELSEWHERE_PLUGIN = plugged("plugin-elsewhere", [{ projectPath: OTHER, scope: "project" }])
 const LINKED = join(BASE, "linked-skills")
 mkdirSync(LINKED, { recursive: true })
 mkdirSync(join(REPO, "skills", "playground"), { recursive: true })
@@ -304,17 +317,32 @@ describe("every other write runs", () => {
 })
 
 describe("an installed plugin's copy counts as installed, so retiring the user-scope copy keeps the hook armed", () => {
-  test("a write waits while only an installed plugin carries the skill", async () => {
-    const id = session()
-    const plugged = (input: Record<string, unknown>) => event(input, PLUGIN_CONFIG)
-    expect(
-      await plugged({
+  const attempt = (config: string) =>
+    event(
+      {
         hook_event_name: "PreToolUse",
-        session_id: id,
+        session_id: session(),
         tool_input: { content: "x", file_path: join(REPO, "AGENTS.md") },
         tool_name: "Write",
-      }),
-    ).toContain("writing-first hook refuses")
+      },
+      config,
+    )
+
+  test("a user install enabled in the settings: the refusal names its scoped copy", async () => {
+    const reason = (await attempt(USER_PLUGIN)) ?? ""
+    expect(reason).toContain(`Call the Skill tool with skill "ws-home:${SKILL}"`)
+  })
+
+  test("a project's install, for the folder the session runs in", async () => {
+    expect(await attempt(PROJECT_PLUGIN)).toContain(`skill "ws-home:${SKILL}"`)
+  })
+
+  test.each([
+    ["a disabled install", DISABLED_PLUGIN],
+    ["another project's install", ELSEWHERE_PLUGIN],
+    ["no plugins listed", PLUGIN_CONFIG],
+  ])("none for %s, so the write runs", async (_, config) => {
+    expect(await attempt(config)).toBeUndefined()
   })
 })
 

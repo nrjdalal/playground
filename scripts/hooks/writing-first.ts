@@ -101,24 +101,47 @@ async function scoped(path: string, env: Environment): Promise<boolean> {
   )
 }
 
-// every installed plugin's folder, so a plugin's copy counts once the user-scope one is retired
-const plugins = (env: Environment): string[] => {
-  try {
-    const listed = JSON.parse(
-      readFileSync(join(configDir(env), "plugins", "installed_plugins.json"), "utf8"),
-    ) as { plugins?: Record<string, { installPath?: unknown }[]> }
-    return Object.values(listed.plugins ?? {})
-      .flat()
-      .flatMap((install) => (typeof install?.installPath === "string" ? [install.installPath] : []))
-  } catch {
-    return []
+// each plugin Claude Code loads here: a user install enabled in the user settings, or a project's install for the folder the session runs in
+const plugins = (env: Environment, cwd: string | undefined): { name: string; path: string }[] => {
+  const read = (file: string): unknown => {
+    try {
+      return JSON.parse(readFileSync(join(configDir(env), file), "utf8"))
+    } catch {
+      return undefined
+    }
   }
+  const listed = read(join("plugins", "installed_plugins.json")) as
+    | {
+        plugins?: Record<
+          string,
+          { installPath?: unknown; projectPath?: unknown; scope?: unknown }[]
+        >
+      }
+    | undefined
+  const enabled = (
+    read("settings.json") as { enabledPlugins?: Record<string, unknown> } | undefined
+  )?.enabledPlugins
+  return Object.entries(listed?.plugins ?? {}).flatMap(([key, installs]) =>
+    (Array.isArray(installs) ? installs : []).flatMap((install) => {
+      if (typeof install?.installPath !== "string") return []
+      const loads =
+        install.scope === "user"
+          ? enabled?.[key] === true
+          : typeof install.projectPath === "string" &&
+            !!cwd &&
+            !relative(install.projectPath, cwd).startsWith("..")
+      return loads ? [{ name: key.split("@")[0], path: install.installPath }] : []
+    }),
+  )
 }
 
-const installed = (env: Environment, cwd: string | undefined) =>
-  [configDir(env), ...(cwd ? [join(cwd, ".claude")] : []), ...plugins(env)].some((dir) =>
-    existsSync(join(dir, "skills", SKILL, "SKILL.md")),
-  )
+// the name a session loads the skill by, bare for a skills folder's copy, scoped for a plugin's, or none when no copy is installed
+const loadable = (env: Environment, cwd: string | undefined): string | undefined => {
+  const has = (dir: string) => existsSync(join(dir, "skills", SKILL, "SKILL.md"))
+  if ([configDir(env), ...(cwd ? [join(cwd, ".claude")] : [])].some(has)) return SKILL
+  const plugin = plugins(env, cwd).find((p) => has(p.path))
+  return plugin && `${plugin.name}:${SKILL}`
+}
 
 async function mark(input: Input, env: Environment) {
   const file = markOf(input, env)
@@ -139,10 +162,12 @@ async function judge(input: Input, env: Environment): Promise<string | undefined
   if (typeof target !== "string" || !file) return
   const cwd = typeof input.cwd === "string" ? input.cwd : undefined
   const path = real(resolve(cwd ?? "/", target))
-  if (!(await scoped(path, env)) || existsSync(file) || !installed(env, cwd)) return
+  if (!(await scoped(path, env)) || existsSync(file)) return
+  const name = loadable(env, cwd)
+  if (!name) return
   const who =
     typeof input.agent_id === "string" && input.agent_id ? "this subagent" : "this session"
-  return `writing-first hook refuses this ${String(input.tool_name)} to ${target}: it is an agent-facing doc, and ${who} has not loaded ${SKILL} since its last compaction. Call the Skill tool with skill "${SKILL}", follow it, then retry this write (playbook's **writing** rule).`
+  return `writing-first hook refuses this ${String(input.tool_name)} to ${target}: it is an agent-facing doc, and ${who} has not loaded ${SKILL} since its last compaction. Call the Skill tool with skill "${name}", follow it, then retry this write (playbook's **writing** rule).`
 }
 
 // Fails open: input it cannot read, or an error, lets the call run, so a fault here never blocks every write.

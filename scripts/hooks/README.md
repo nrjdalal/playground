@@ -331,5 +331,6 @@ Their tests are `bun run test:file tests/scripts/hooks`.
   ZeroStarter's skills under `skills/zerostarter/`, which `.agents/skills/` links to and which a path reaches with its links resolved (one whose `source` names a tool, not a repository, is vendored and left out), `.agents/dashboard/`, `.agents/*.md` (not `.agents/adr/`),
   the root `AGENTS.md` and `CLAUDE.md`, `scripts/README.md` and `scripts/hooks/README.md`, and `docs/`; and anywhere, a handoff under the data folder's `handoffs/`.
   A Skill call or a typed `/writing-for-agents`, bare or a plugin's or folder's scoped copy (`ws-home:writing-for-agents`), leaves a mark under the data folder's `writing-first/`, a subagent's apart from its parent's, since a subagent's hook input carries its parent's session id beside its own `agent_id`; a compaction clears the session's marks.
-  With the skill installed nowhere (the config folder's `skills/`, the checkout's `.claude/skills/`, or an installed plugin `plugins/installed_plugins.json` lists) it lets every write through, and it fails open.
+  With the skill installed nowhere (the config folder's `skills/`, the checkout's `.claude/skills/`, or a plugin `plugins/installed_plugins.json` lists, installed for the user and enabled in the user settings or installed for the session's project) it lets every write through, and it fails open.
+  Its refusal names the copy to load, the bare name for a skills folder's, `<plugin>:writing-for-agents` for a plugin's.
   Its tests are in `bun run test:file tests/scripts/hooks` too.
