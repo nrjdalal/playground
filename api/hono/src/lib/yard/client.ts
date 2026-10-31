@@ -89,6 +89,11 @@ export const yardClient = (base: string, token: string, request: YardFetch = fet
           method: "POST",
         },
       ),
+    waiting: (since: string) =>
+      call(
+        `/waiting?${new URLSearchParams({ since })}`,
+        z.object({ held: z.array(messageSchema), mentions: z.array(messageSchema) }),
+      ),
   }
 }
 

@@ -115,6 +115,33 @@ describe.skipIf(!dockerUp())("Yard's store", () => {
       expect([after.unread, after.mentions]).toEqual([0, 0])
     })
 
+    test("waiting lists every sent mention of a member since a time, a thread's reply included, and their own held posts, oldest first", async () => {
+      const { id } = await both("waiting")
+      const since = new Date(Date.now() - 1000).toISOString()
+      const top = await send(web("ada", true), id, { kind: "question", text: "@bo can you look?" })
+      await send(web("ada", true), id, { kind: "text", text: "no mention, @bob is someone else" })
+      const reply = await send(web("ada", true), id, {
+        kind: "answer",
+        parent: top.id,
+        text: "@bo and this reply",
+      })
+      await send(token("ada", true), id, { kind: "steps", text: "@bo held, not sent" })
+      await send(web("bo"), id, { kind: "text", text: "@bo my own" })
+      const held = await send(token("bo"), id, { kind: "steps", text: "run the suite" })
+      // other tests post to bo's other channels in the same second, so this reads this channel's alone
+      const here = <T extends { channel: string }>(messages: T[]) =>
+        messages.filter((m) => m.channel === id)
+      const found = await store.waiting(db, web("bo"), { since })
+      expect(here(found.mentions).map((m) => m.id)).toEqual([top.id, reply.id])
+      expect(found.mentions.find((m) => m.id === reply.id)?.parent).toBe(top.id)
+      expect(here(found.held).map((m) => m.id)).toEqual([held.id])
+      expect(await store.waiting(db, web("bo"), { since: held.at })).toEqual({
+        held: [],
+        mentions: [],
+      })
+      expect((await store.waiting(db, web("di"), { since })).mentions).toEqual([])
+    })
+
     test("a name already taken is a conflict", async () => {
       await store.createChannel(db, web("bo"), { name: "taken" })
       await expect(store.createChannel(db, web("di"), { name: "taken" })).rejects.toMatchObject({

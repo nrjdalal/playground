@@ -26,11 +26,15 @@ export type Card = {
 const place = (channel: Channel) =>
   channel.kind === "dm" ? `a DM with @${channel.peer?.login ?? channel.name}` : `#${channel.name}`
 
-// The message's words and links as one fenced block, its fence longer than any run of tildes inside, so nothing in it renders as markdown.
+// The message's sender line, words and links as one fenced block, its fence longer than any run of tildes inside, so nothing a member wrote, their token's name included, renders as markdown.
 export const untrusted = (message: Message, channel: Channel): string => {
-  const body = [message.text, ...(message.links ?? [])].join("\n")
+  const body = [
+    `@${message.from.login} (${message.from.device}) in ${place(channel)}, as ${message.kind}:`,
+    message.text,
+    ...(message.links ?? []),
+  ].join("\n")
   const fence = "~".repeat(Math.max(3, ...[...body.matchAll(/~+/g)].map((m) => m[0].length + 1)))
-  return `@${message.from.login} (${message.from.device}) in ${place(channel)}, as ${message.kind}:\n\n${fence}text\n${body}\n${fence}`
+  return `${fence}text\n${body}\n${fence}`
 }
 
 // Whether an inbound message calls on the owner, decided by its channel's kind, so a new kind (`self`, for remote work) adds one branch here.
@@ -51,12 +55,12 @@ export const inboundCard = (message: Message, channel: Channel, login: string): 
   }
 }
 
-// The Inbox card for the owner's own post that Yard holds pending: its Approve opens Yard's approve page in the browser, since a token never approves.
-export const pendingCard = (message: Message, channel: Channel, web: string): Card => ({
+// The Inbox card for the owner's own post that Yard holds pending, from this Mac's sidebar, its terminal or any of their devices: its Approve opens Yard's approve page in the browser, since a token never approves.
+export const pendingCard = (message: Message, channel: Channel, web: string | undefined): Card => ({
   from: YARD_FROM,
   kind: "update",
   preview: {
-    approve: new URL(approvePath(message.id), web).href,
+    ...(web ? { approve: new URL(approvePath(message.id), web).href } : {}),
     outcome: "decision",
     text: untrusted(message, channel),
   },
@@ -74,46 +78,53 @@ export const postCard = async (db: Database, card: Card): Promise<void> => {
   })
 }
 
-type Marks = Record<string, string>
-
-// The newest message time this Playground has carded per channel, in the data folder, so a restart never cards a mention twice.
+// The newest time this Playground has carded, in the data folder, so a restart never cards a message twice.
 const marksFile = () => join(dataDir(), "yard", "mentions.json")
 
-export async function pollMentions(
+const saveMark = async (file: string, since: string) => {
+  mkdirSync(dirname(file), { recursive: true })
+  await Bun.write(file, `${JSON.stringify({ since })}\n`)
+}
+
+// Cards what waits on the owner since the last mark, oldest first: each mention, a thread's reply included, and each post of theirs Yard holds. It saves the mark after each card, so a failed post retries from the first one not carded. The first run only sets the mark.
+export async function pollWaiting(
   client: YardClient,
   post: (card: Card) => Promise<void>,
+  web: string | undefined,
   file = marksFile(),
   now = new Date(),
 ): Promise<number> {
-  const { login } = await client.me()
   const stored = Bun.file(file)
-  const first = !(await stored.exists())
-  const marks: Marks = first ? {} : await stored.json().catch(() => ({}))
-  let carded = 0
-  for (const channel of await client.channels()) {
-    const since = marks[channel.id] ?? (first ? now.toISOString() : new Date(0).toISOString())
-    if (channel.mentions === 0 || first) {
-      marks[channel.id] =
-        channel.lastMessageAt && channel.lastMessageAt > since ? channel.lastMessageAt : since
-      continue
-    }
-    const { messages } = await client.messages(channel.id, { limit: 100 })
-    for (const message of messages.filter((m) => m.at > since)) {
-      const card = inboundCard(message, channel, login)
-      if (card) {
-        await post(card)
-        carded++
-      }
-      if (message.at > (marks[channel.id] ?? since)) marks[channel.id] = message.at
-    }
-    marks[channel.id] ??= since
+  const mark = (await stored.exists())
+    ? ((await stored.json().catch(() => ({}))) as { since?: unknown }).since
+    : undefined
+  if (typeof mark !== "string") {
+    await saveMark(file, now.toISOString())
+    return 0
   }
-  mkdirSync(dirname(file), { recursive: true })
-  await Bun.write(file, `${JSON.stringify(marks)}\n`)
+  const { held, mentions } = await client.waiting(mark)
+  if (!held.length && !mentions.length) return 0
+  const { login } = await client.me()
+  const channels = new Map((await client.channels()).map((channel) => [channel.id, channel]))
+  const due = [
+    ...held.map((message) => ({ held: true, message })),
+    ...mentions.map((message) => ({ held: false, message })),
+  ].sort((a, b) => a.message.at.localeCompare(b.message.at))
+  let carded = 0
+  for (const { held, message } of due) {
+    const channel = channels.get(message.channel)
+    const card =
+      channel && (held ? pendingCard(message, channel, web) : inboundCard(message, channel, login))
+    if (card) {
+      await post(card)
+      carded++
+    }
+    await saveMark(file, message.at)
+  }
   return carded
 }
 
-// Polls Yard for mentions once a minute while the local API runs with YARD_API_URL set and a token in the Keychain; a failed poll waits for the next.
+// Polls Yard once a minute while the local API runs with YARD_API_URL set and a token in the Keychain; a failed poll waits for the next.
 export function startYardPoll(
   db: Database,
   client: (base: string, token: string) => YardClient,
@@ -126,9 +137,13 @@ export function startYardPoll(
     try {
       const token = await keychain().read()
       if (token && env.YARD_API_URL)
-        await pollMentions(client(env.YARD_API_URL, token), (card) => postCard(db, card))
+        await pollWaiting(
+          client(env.YARD_API_URL, token),
+          (card) => postCard(db, card),
+          env.YARD_WEB_URL,
+        )
     } catch (error) {
-      console.error("[yard] mention poll failed", error)
+      console.error("[yard] poll failed", error)
     } finally {
       running = false
     }

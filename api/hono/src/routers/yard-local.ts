@@ -1,6 +1,5 @@
 import { sValidator } from "@hono/standard-validator"
 import type { Session } from "@packages/auth"
-import { db } from "@packages/db"
 import { env } from "@packages/env/api-hono"
 import { channelSchema, messageSchema } from "@packages/message"
 import { Hono } from "hono"
@@ -15,7 +14,6 @@ import {
   validationErrorResponses,
 } from "@/lib/error"
 import { pageSchema, postSchema, yardClient } from "@/lib/yard/client"
-import { postCard } from "@/lib/yard/inbound"
 import { keychain } from "@/lib/yard/keychain"
 import { localYard } from "@/lib/yard/local"
 import { authMiddleware, guardWrites, requireConsoleRole, requireLoopback } from "@/middlewares"
@@ -44,10 +42,8 @@ const doc = (description: string, data: z.ZodType, refusals: object[] = []) =>
 
 const yard = localYard({
   api: env.YARD_API_URL,
-  card: (card) => postCard(db, card),
   client: yardClient,
   keychain: keychain(),
-  web: env.YARD_WEB_URL,
 })
 
 // The local Playground's Yard (lib/yard/local.ts): the hosted Yard's channels, DMs and messages read and posted with the Mac's token, on the dashboard's owner rung over loopback, so the local sidebar shows them; with YARD_API_URL unset or no token, each answers 404.
@@ -56,14 +52,6 @@ export const localYardRouter = new Hono<{ Variables: Session }>()
   .use("/*", requireLoopback)
   .use("/*", authMiddleware)
   .use("/*", requireConsoleRole("owner"))
-  .get(
-    "/status",
-    doc(
-      "Whether this Playground reads a hosted Yard: set up (YARD_API_URL), signed in (a working token in the Keychain) and as whom",
-      z.object({ login: z.string().nullable(), setUp: z.boolean(), signedIn: z.boolean() }),
-    ),
-    async (c) => c.json({ data: await yard.status() }),
-  )
   .get(
     "/channels",
     doc(

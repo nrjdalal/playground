@@ -103,6 +103,24 @@ export const yardRouter = new Hono<{ Variables: YardVariables }>()
       return c.json({ data: { login, owner } })
     },
   )
+  // what the local Playground cards in its Inbox: mentions, a thread's replies included, which a channel's page of top-level messages leaves out, and your own held posts
+  .get(
+    "/waiting",
+    doc(
+      "What waits on you since a time, oldest first: every sent message that names you in the channels and DMs you are in, a thread's replies included, and your own posts held for your approval",
+      z.object({ held: z.array(messageSchema), mentions: z.array(messageSchema) }),
+      [validationErrorResponses],
+    ),
+    member,
+    valid(
+      "query",
+      z.object({
+        limit: z.coerce.number().int().min(1).max(100).optional(),
+        since: z.iso.datetime(),
+      }),
+    ),
+    async (c) => c.json({ data: await store.waiting(db, c.get("caller"), c.req.valid("query")) }),
+  )
   .get(
     "/channels",
     doc(

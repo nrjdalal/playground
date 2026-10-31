@@ -5,7 +5,6 @@ import type { Channel, Message } from "../../../../../../packages/message/src/in
 process.env.BETTER_AUTH_SECRET ||= "yard-local-test-secret-not-for-use-anywhere"
 const { localYard } = await import("../../../../../../api/hono/src/lib/yard/local")
 const { YardError } = await import("../../../../../../api/hono/src/lib/yard/client")
-type Card = import("../../../../../../api/hono/src/lib/yard/inbound").Card
 type YardClient = import("../../../../../../api/hono/src/lib/yard/client").YardClient
 type Keychain = import("../../../../../../api/hono/src/lib/yard/keychain").Keychain
 
@@ -35,11 +34,9 @@ const posted = (status: Message["status"]): Message => ({
 const setUp = (
   over: { api?: string; token?: string | null; post?: () => Promise<Message> } = {},
 ) => {
-  const cards: Card[] = []
   const tokens: string[] = []
   const yard = localYard({
     api: "api" in over ? over.api : "https://api.yard.example",
-    card: async (card) => void cards.push(card),
     client: (_, token) => {
       tokens.push(token)
       return {
@@ -51,9 +48,8 @@ const setUp = (
     keychain: {
       read: async () => ("token" in over ? over.token : "yard_mac"),
     } as unknown as Keychain,
-    web: "https://yard.example",
   })
-  return { cards, tokens, yard }
+  return { tokens, yard }
 }
 
 const refusal = (run: Promise<unknown>) =>
@@ -80,17 +76,11 @@ describe("the local Yard routes", () => {
     expect(tokens).toEqual(["yard_mac"])
   })
 
-  test("a post Yard holds pending puts one Inbox card up with Approve; a sent one puts none", async () => {
-    const sent = setUp()
-    await sent.yard.post("c1", { kind: "text", text: "hi" })
-    expect(sent.cards).toEqual([])
+  test("a post returns what Yard answered, a held one included, which the poll cards", async () => {
     const held = setUp({ post: async () => posted("pending") })
     expect((await held.yard.post("c1", { kind: "steps", text: "run it" })).message.status).toBe(
       "pending",
     )
-    expect(held.cards.map((c) => c.preview.approve)).toEqual([
-      "https://yard.example/yard/approve/m1",
-    ])
   })
 
   test("a token Yard no longer takes reads as signed out", async () => {
@@ -100,14 +90,5 @@ describe("the local Yard routes", () => {
       },
     })
     expect((await refusal(yard.post("c1", { kind: "text", text: "hi" })))?.[0]).toBe(404)
-  })
-
-  test("status says set up, signed in and as whom", async () => {
-    expect(await setUp().yard.status()).toEqual({ login: "owner", setUp: true, signedIn: true })
-    expect(await setUp({ api: undefined }).yard.status()).toEqual({
-      login: null,
-      setUp: false,
-      signedIn: false,
-    })
   })
 })

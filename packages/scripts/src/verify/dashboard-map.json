@@ -421,10 +421,6 @@
       "use": "The board over REST, for an agent or curl; the dashboard's pages read it from the WebSocket's workers frame instead."
     },
     {
-      "route": "GET /api/v1/yard/status",
-      "use": "Whether Yard is set up on this Mac and who its token signs in as, the same check `playground yard channels` makes first."
-    },
-    {
       "route": "PATCH /api/v1/threads/:id",
       "use": "Marks a thread read or unread, renames, pins, unpins or archives it, from the sidebar's Threads row menu on every dashboard page; a thread's view marks it read as it opens."
     },

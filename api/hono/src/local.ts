@@ -26,12 +26,12 @@ import {
   extensionsRouter,
   extRouter,
   inboxRouter,
+  localYardRouter,
   onboardRouter,
   sessionsRouter,
   settingsRouter,
   v1Router,
   waitlistRouter,
-  localYardRouter,
 } from "@/routers"
 import { mountOldPaths, OLD_PATHS_DOC } from "@/routers/old-paths"
 

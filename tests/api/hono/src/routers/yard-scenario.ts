@@ -27,6 +27,16 @@ out.tokenList = await (
   await fetch(`${api}/channels`, { headers: bearer(process.env.BO_TOKEN!) })
 ).json()
 out.me = (await (await fetch(`${api}/me`, { headers: bearer(process.env.BO_TOKEN!) })).json()).data
+out.waiting = [
+  (
+    await (
+      await fetch(`${api}/waiting?since=2026-01-01T00:00:00.000Z`, {
+        headers: bearer(process.env.BO_TOKEN!),
+      })
+    ).json()
+  ).data,
+  await status("/waiting?since=yesterday", { headers: bearer(process.env.BO_TOKEN!) }),
+]
 out.tokenOnWebOnly = await status("/tokens", { headers: bearer(process.env.BO_TOKEN!) })
 out.cookieWriteNoOrigin = await status("/channels", { body: "{}", headers: json, method: "POST" })
 const made = await fetch(`${api}/channels`, {

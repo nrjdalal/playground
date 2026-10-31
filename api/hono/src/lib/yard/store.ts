@@ -68,6 +68,9 @@ export const toMessage = (row: MessageRow): Message => ({
   text: row.text,
 })
 
+// A Postgres pattern for a message that names @login, as tier.ts's mentionsOf reads one: not inside a word, an email or a longer login.
+const mentionPattern = (login: string) => `(^|[^\\w@])@${login}([^\\w-]|$)`
+
 // Every channel and DM a caller sees, each with its unread and mention counts since the caller last read it: every channel, joined or not, and the DMs the caller is in.
 export const channels = async (db: Database, caller: Caller, id?: string): Promise<Channel[]> => {
   const rows = await db.execute<{
@@ -88,7 +91,7 @@ export const channels = async (db: Database, caller: Caller, id?: string): Promi
         and x.user_id is distinct from ${caller.id} and x.at > coalesce(m.last_read_at, m.joined_at) and ${live("x")}) as unread,
       (select count(*)::int from yard_message x where x.channel_id = c.id and x.status = 'sent'
         and x.user_id is distinct from ${caller.id} and x.at > coalesce(m.last_read_at, m.joined_at)
-        and x.text ~* ${`(^|[^\\w@])@${caller.login}([^\\w-]|$)`} and ${live("x")}) as mentions,
+        and x.text ~* ${mentionPattern(caller.login)} and ${live("x")}) as mentions,
       case when c.kind = 'dm' then (
         select json_build_object('id', u.id, 'image', u.image, 'login', u.login, 'name', u.name)
         from yard_member o join "user" u on u.id = o.user_id
@@ -212,6 +215,47 @@ export const messages = async (
     .orderBy(desc(yardMessage.at), desc(yardMessage.id))
     .limit(limit + 1)
   return { hasMore: rows.length > limit, messages: rows.slice(0, limit).reverse().map(toMessage) }
+}
+
+// What waits on the caller since a time, oldest first, which the local Playground cards in its Inbox: every sent message that names them in a channel or DM they are in, a thread's reply included, from when they joined it, and their own posts held for their approval. Each `at` compares at the millisecond a message carries it in, so a mark taken from a message never returns it again.
+export const waiting = async (
+  db: Database,
+  caller: Caller,
+  { limit = 100, since }: { limit?: number; since: string },
+): Promise<{ held: Message[]; mentions: Message[] }> => {
+  const after = new Date(since)
+  const mentions = await db
+    .select({ message: yardMessage })
+    .from(yardMessage)
+    .innerJoin(
+      yardMember,
+      and(eq(yardMember.channelId, yardMessage.channelId), eq(yardMember.userId, caller.id)),
+    )
+    .where(
+      and(
+        eq(yardMessage.status, "sent"),
+        sql`${yardMessage.userId} is distinct from ${caller.id}`,
+        sql`date_trunc('milliseconds', ${yardMessage.at}) > greatest(${after}, ${yardMember.joinedAt})`,
+        sql`${yardMessage.text} ~* ${mentionPattern(caller.login)}`,
+        live(),
+      ),
+    )
+    .orderBy(asc(yardMessage.at), asc(yardMessage.id))
+    .limit(limit)
+  const held = await db
+    .select()
+    .from(yardMessage)
+    .where(
+      and(
+        eq(yardMessage.userId, caller.id),
+        eq(yardMessage.status, "pending"),
+        sql`date_trunc('milliseconds', ${yardMessage.at}) > ${after}`,
+        live(),
+      ),
+    )
+    .orderBy(asc(yardMessage.at), asc(yardMessage.id))
+    .limit(limit)
+  return { held: held.map(toMessage), mentions: mentions.map((row) => toMessage(row.message)) }
 }
 
 // The owner's #i6 limits: a login posts once a second and 200 times a day, and a channel takes 60 posts an hour.
