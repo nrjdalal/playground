@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 // The gate's scripted claude, which the box's claude stand-in runs for a launch that names its session (-n): it stays up as a live session (Claude's registry file at its pid, its transcript under ~/.claude/projects, its state reported to herdr as claude's), draws the input box and ready mark spawn.sh and the Dashboard read, and plays one routed task by its role: the dispatcher, on its first typed message, hands the task to a brief and starts the builder; the builder starts a worker on it; the worker opens its PR through gh, which the box's gh stand-in logs. It calls no model.
-import { appendFileSync, mkdirSync, rmSync, writeFileSync } from "node:fs"
+import { appendFileSync, mkdirSync, rmSync } from "node:fs"
 import { join } from "node:path"
 
 export type Launch = { model: string; name: string; prompt: string; sessionId: string }
@@ -156,9 +156,8 @@ const main = async () => {
     draw()
   }
 
-  mkdirSync(join(claude, "sessions"), { recursive: true })
   mkdirSync(join(transcript, ".."), { recursive: true })
-  writeFileSync(
+  await Bun.write(
     registry,
     JSON.stringify({
       cwd,
@@ -191,9 +190,7 @@ const main = async () => {
       entry("user", text)
       if (role === "dispatcher" && !routed) {
         routed = true
-        mkdirSync(join(data, "handoffs"), { recursive: true })
-        writeFileSync(join(data, TASK), `${text}\n`)
-        void act(true)
+        void Bun.write(join(data, TASK), `${text}\n`).then(() => act(true))
       }
     }
     draw()
