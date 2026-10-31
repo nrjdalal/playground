@@ -1112,6 +1112,26 @@ describe("another factory's runs (slots.peers)", () => {
 })
 
 // localci and the merge train take their slots themselves; they ask run-slot.sh, so an off-switch reaches them too (18 Oct: localci took slot 3 past run-slot.3-off)
+// R3-2, 31 Oct: ops-unstick's slot-stuck alert named the oldest ticket, which can rank behind by design
+describe("head", () => {
+  test("prints the ticket the queue serves next, a medium one ahead of an older big one, and changes nothing", async () => {
+    const m = machine()
+    m.ticket(1, "worker-big", "s2 23 3 big")
+    m.ticket(2, "worker-m", "s2 22 2 medium")
+    const before = m.tickets().sort()
+    const run = Bun.spawnSync(["bash", SCRIPT, "head"], { cwd: m.root, env: m.env() })
+    expect([run.exitCode, run.stdout.toString()]).toEqual([0, `2-${process.pid}-worker-m\n`])
+    expect(m.tickets().sort()).toEqual(before)
+    expect(existsSync(join(m.ops, "run-slot.runs.log"))).toBe(false)
+  })
+
+  test("exits 2 on an extra argument", async () => {
+    const m = machine()
+    const run = Bun.spawnSync(["bash", SCRIPT, "head", "x"], { cwd: m.root, env: m.env() })
+    expect([run.exitCode, run.stdout.toString()]).toEqual([2, ""])
+  })
+})
+
 describe("can-take", () => {
   test("a slot its off-switch closes", async () => {
     const m = machine({ off: ["run-slot.3-off"] })

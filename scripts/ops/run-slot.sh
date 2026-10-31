@@ -196,6 +196,13 @@ fi
 # session's reserve) fit, else 1, so a script that takes its slot itself reads them as every run here does (ops-unstick does; localci and
 # the merge train still take theirs by their own mkdir for now); it reads neither the queue nor run-slot.priority
 CAN_TAKE=
+# run-slot.sh head: prints the queue's head, the ticket first_waiter names (<ns>-<pid>-<who>), or nothing, so ops-unstick watches the waiter the queue serves next rather than the oldest
+HEAD_ONLY=
+if [ "${1:-}" = head ]; then
+  [ $# -eq 1 ] || { echo "usage: run-slot.sh head" >&2; exit 2; }
+  HEAD_ONLY=1 CAN_TAKE=run-slot
+  set -- ops-unstick -- true
+fi
 if [ "${1:-}" = can-take ]; then
   [ $# -eq 3 ] || { echo "usage: run-slot.sh can-take <slot> <who>" >&2; exit 2; }
   case "$2" in run-slot|run-slot-2|run-slot-3|run-slot-4) CAN_TAKE=$2 ;; *) echo "run-slot.sh: no slot $2" >&2; exit 2 ;; esac
@@ -728,6 +735,7 @@ fi
 
 # slots.peers, one folder a line, read once here since held_units runs in a subshell; a reader that cannot answer counts no peer
 PEERS=$(setting slots.peers 2>/dev/null | python3 -I -c 'import json, sys; [print(p) for p in json.load(sys.stdin) if isinstance(p, str)]' 2>/dev/null)
+[ -n "$HEAD_ONLY" ] && { first_waiter; exit 0; }
 
 if [ -n "$CAN_TAKE" ]; then
   reclaim "$OPS/$CAN_TAKE"

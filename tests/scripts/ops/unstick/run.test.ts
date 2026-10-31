@@ -538,7 +538,8 @@ describe("an account move", () => {
 
 // review round 1: under the load units a waiter for units that are not free waits beside a free run-slot by design
 describe("the slot-stuck alert", () => {
-  const queue = (held: boolean) => {
+  // older: a big ticket older than the medium one, which the window has tracked; took: a start of run-slot in the runs log inside the window
+  const queue = (held: boolean, { older = false, took = false } = {}) => {
     const config = scratch()
     const ops = join(config, "playground", "ops")
     const bin = join(config, "bin")
@@ -557,9 +558,16 @@ describe("the slot-stuck alert", () => {
         `worker-big ${process.pid} 2026-10-18T19:00:00Z 3 big\n`,
       )
     }
-    writeFileSync(join(ops, "run-slot.waiters", `1-${process.pid}-worker-m`), "s2 22 2 medium\n")
+    writeFileSync(join(ops, "run-slot.waiters", `2-${process.pid}-worker-m`), "s2 22 2 medium\n")
+    if (older)
+      writeFileSync(join(ops, "run-slot.waiters", `1-${process.pid}-worker-big`), "s2 23 3 big\n")
     const now = Date.now() / 1000
-    const state = { slot_free: { since: now - 200, ticket: `1${process.pid}` } }
+    if (took)
+      writeFileSync(
+        join(ops, "run-slot.runs.log"),
+        `${new Date((now - 60) * 1000).toISOString().slice(0, 19)}Z start worker-x 4242 run-slot waited=3s\n`,
+      )
+    const state = { slot_free: { since: now - 200, ticket: `${older ? 1 : 2}${process.pid}` } }
     return callWith(
       { PATH: `${bin}:${process.env.PATH}`, RUN_SLOT_SIZE: "medium" },
       config,
@@ -577,6 +585,16 @@ describe("the slot-stuck alert", () => {
 
   test("stays quiet while the waiter's units are not free", async () => {
     expect(await queue(true)).toBeNull()
+  })
+
+  // 31 Oct: both alerts named a big session's ticket, the oldest, which ranks behind a newer medium one by design
+  test("watches the queue's head, so an older big ticket behind a newer medium one fires nothing", async () => {
+    expect(await queue(false, { older: true })).toBeNull()
+  })
+
+  // 31 Oct: two samples 2 minutes apart read free while the runs log shows run-slot taken 5 times between them
+  test("stays quiet when the runs log shows run-slot taken inside the window", async () => {
+    expect(await queue(false, { took: true })).toBeNull()
   })
 })
 
