@@ -250,7 +250,7 @@ function refuse(what: string, target: Target, detail: string, fix: string): stri
 }
 
 const REWORD =
-  'Write "ship" or "publish step" instead, or leave the comment out. For a file or rule whose name holds the word, cite it as "the ship rule" with its line number, and attach a patch as a file rather than quoting it.'
+  'Write "ship" or "publish step" instead, or leave the comment out. For a file or rule whose name holds the word, name it by what it is, such as "the ship rule" or "the comment hook", with its line number; for a patch that holds it, attach the patch with `gh pr comment --attach <file>#<alt>`, its file name and alt text free of the word.'
 
 async function judge(
   what: string,
