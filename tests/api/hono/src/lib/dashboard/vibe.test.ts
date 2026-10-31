@@ -321,6 +321,47 @@ describe("Stop", () => {
     expect(existsSync(path)).toBe(true)
   })
 
+  test("a second Stop from another tab is refused while the first holds the record, so the worktree's own .env stays", async () => {
+    const path = worktree("two-stops", "OWN=1\n")
+    await startVibe(path, fake([stack(path)]).deps)
+    let release = () => {}
+    const held = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const first = fake([stack(path, { vibe: true })], {
+      stop: async () => {
+        await held
+        return { code: 0, stderr: "", stdout: "" }
+      },
+    })
+    const stopping = stopVibe(path, first.deps)
+    await Bun.sleep(5)
+    const second = fake([stack(path, { vibe: true })])
+    expect(await stopVibe(path, second.deps).catch((error: Error) => error.message)).toContain(
+      "already stopping",
+    )
+    expect(second.docker).toEqual([])
+    release()
+    await stopping
+    expect(readFileSync(join(path, ".env"), "utf8")).toBe("OWN=1\n")
+    expect(existsSync(join(path, ".env.vibe-saved"))).toBe(false)
+    expect(existsSync(join(path, ".turbo/vibe.json"))).toBe(false)
+  })
+
+  test("a Stop that fails lets the next Stop try", async () => {
+    const path = worktree("stop-retry", "OWN=2\n")
+    await startVibe(path, fake([stack(path)]).deps)
+    const refused = fake([stack(path, { vibe: true })], {
+      stop: async () => ({ code: 1, stderr: "dev:stop: something went wrong\n", stdout: "" }),
+    })
+    expect(await stopVibe(path, refused.deps).catch((error: Error) => error.message)).toContain(
+      "dev:stop refused",
+    )
+    await stopVibe(path, fake([stack(path, { vibe: true })]).deps)
+    expect(readFileSync(join(path, ".env"), "utf8")).toBe("OWN=2\n")
+    expect(existsSync(join(path, ".turbo/vibe.json"))).toBe(false)
+  })
+
   test("Stop while the copy still seeds removes it and leaves the worktree's own .env alone", async () => {
     const path = worktree("stop-early", "MINE=1\n")
     let release = () => {}
