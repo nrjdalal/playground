@@ -125,6 +125,14 @@ if issue:
 done("medium")
 PY
 }
+# run-slot.sh box-off: print, one word a line, each precondition of the runner-box route (below) that fails, for ops-sweep's box-route-off finding, since a run otherwise falls back to this Mac without a word; nothing when the route can fire
+if [ "${1:-}" = box-off ]; then
+  [ -x "$OPS/runner-host/ci.sh" ] || echo no-ci-sh
+  [ -e "${RUNNER_HOST_KEY:-$HOME/.ssh/playground_runner}" ] || echo no-ssh-key
+  switch_on runner-host/off && echo runner-host-off
+  switch_on runner-host/slot-off && echo slot-off
+  exit 0
+fi
 # run-slot.sh clear-stale: remove each slot's leftover holder (and its directory) whose pid is dead, or whose directory is already gone,
 # and each slot directory with no holder line that is 2 hours old.
 # Sessions call this instead of a bare rm under ~/.claude, which raises Claude Code's delete prompt even in bypass mode (dispatcher, 12 Oct).
