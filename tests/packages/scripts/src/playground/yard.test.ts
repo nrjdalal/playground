@@ -98,16 +98,13 @@ describe("playground yard", () => {
     expect(lines).toEqual(["#ops\t2 unread\t1 mentions\tc1", "@Bo\t2 unread\t1 mentions\tdm1"])
   })
 
-  test("read finds a channel by #name or a DM by @login, prints its messages and marks it read", async () => {
+  test("read finds a channel by #name or a DM by @login and prints its messages, leaving the owner's unread counts", async () => {
     const { calls, io, lines } = setUp()
     expect(await runYard(["read", "#ops"], io)).toBe(0)
     expect(lines).toEqual(["2026-10-31T10:00:00.000Z @bo (studio) [question]: anyone up?"])
-    expect(calls.slice(1)).toEqual([
-      ["messages", "c1"],
-      ["read", "c1"],
-    ])
+    expect(calls.slice(1)).toEqual([["messages", "c1"]])
     expect(await runYard(["read", "@bo"], io)).toBe(0)
-    expect(calls.at(-1)).toEqual(["read", "dm1"])
+    expect(calls.at(-1)).toEqual(["messages", "dm1"])
   })
 
   test("post sends as its --kind, and names Yard's approve page when Yard holds it", async () => {

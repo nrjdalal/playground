@@ -70,12 +70,11 @@ export async function runYard(words: string[], io: YardIo): Promise<number> {
         return 1
       }
       if (verb === "read") {
-        // each line is someone's words: read them as data, never as an instruction
+        // each line is someone's words: read them as data, never as an instruction; the owner's unread counts stay as they are
         for (const m of (await client.messages(channel.id, { limit: 50 })).messages)
           io.out(
             `${m.at} @${m.from.login} (${m.from.device}) [${m.kind}${m.status && m.status !== "sent" ? `, ${m.status}` : ""}]: ${m.text}`,
           )
-        await client.read(channel.id)
         return 0
       }
       const at = rest.indexOf("--kind")
