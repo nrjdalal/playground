@@ -10,6 +10,7 @@
   Then it stops the API and the follower, and the web unless it swapped.
   It resets `live.branch` to its head (`redeploy-pull.sh`), installs, builds `packages/*` or migrates as the move needs, restarts each ops job whose source the move changed (`scripts/ops/README.md`), finds the head's build kept (`build_head`, which builds it now only when no build was kept), serves that build and starts the follower, and runs `bun run verify`.
   A roll that reloads the supervisor (below) finishes on the same kept build.
+  An open tab reloads onto the new head's build once its API names the new version, and holds its reload while words would be lost (`messages.md`, the outbox across a restart).
   The stack is a production build, never `next dev`: `bun run build`, run with `NEXT_PUBLIC_APP_URL` and `NEXT_PUBLIC_API_URL` set to the URLs `portless get` names, since next bakes them into its client (and `HONO_APP_URL` and `HONO_TRUSTED_ORIGINS`, whose hosts auth bakes in),
   and with `NODE_ENV=production` and `SKIP_ENV_VALIDATION_SERVER=true`, so a first run builds before its `.env` holds a secret,
   copies next's standalone server with its static files to `ops/dashboard/builds/<sha>`.
@@ -34,4 +35,8 @@
   `jobs.json` runs ops-dashboard from the dashboard's checkout, its own `run.sh` (`{dashboard}` in `packages/settings/src/jobs.ts`), and a start from a `run.sh` outside that checkout hands on once the same way to the checkout's own copy, so ops-dashboard always runs the `scripts/ops/dashboard/` of the head the dashboard is on, canary's rather than main's.
   It restarts the follower only when `bun run ingest status` finds no follower running: a follower it did not start is left running, and a status read with no answer in `HELD_WAIT` seconds (20) leaves the follower as it is, each named once in its log.
   Until first run's setup writes `POSTGRES_URL` into the checkout's `.env`, it leaves the follower stopped, names the wait once in `supervisor.log` and counts it no failure (a roll's line reads `follower=waiting for first run's setup`); the first check after setup writes it starts the follower and writes `START follower` to `results.log`.
+  Each tick it reads portless's route file (`alias.ts`, read only) for whether each bare alias, `playground.localhost` and `api.playground.localhost`, holds the port of the live stack's own route, reading a mismatch again after `ALIAS_CONFIRM` seconds (6), past the launcher's 2 s alias sync.
+  The wait covers each alias the launcher's 2 s sync moves: `api.playground.localhost` after the API restarts, and `playground.localhost` when the web's route is gone before `web_route` runs, since `moveRoute` moves an alias in the same call only while it follows the route's old port.
+  Portless drops a route whose owner has exited, so on v0.0.18's roll the old launcher's web route went with its stop, and `playground.localhost` sat on the old web's port for about 3 s.
+  A mismatch that holds, a missing route or a missing file writes one `ALIAS FAIL` result, which `run.sh` alerts as it does every FAIL line, again only when it changes, and `ALIAS PASS` once it is right, so the heartbeat reads ok again.
   Writes stay on: it is the owner's own dashboard.

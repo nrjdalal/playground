@@ -37,6 +37,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { Textarea } from "@/components/ui/textarea"
 import { toast } from "@/components/ui/toast"
 import { agentLabel } from "@/lib/agent-label"
+import { HOLDS_RELOAD } from "@/lib/build-reload"
 import {
   isAnswered,
   needsYouAnchor,
@@ -181,7 +182,13 @@ export function NeedsYouCard({
   const actions = !readOnly || item.questions.length > 1
 
   return (
-    <Card size="sm" id={needsYouAnchor(item.id)} data-slot="needs-you-card" className="scroll-mt-4">
+    <Card
+      size="sm"
+      id={needsYouAnchor(item.id)}
+      data-slot="needs-you-card"
+      {...{ [HOLDS_RELOAD]: "" }}
+      className="scroll-mt-4"
+    >
       <CardHeader>
         <CardTitle id={titleId}>{item.title}</CardTitle>
         {item.context && <CardDescription className="text-xs">{item.context}</CardDescription>}
