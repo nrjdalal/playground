@@ -243,7 +243,7 @@ describe("the supervisor's follower check", () => {
     expect(script).toContain("gave no answer in ${HELD_WAIT:-20}s; not restarting it")
     expect(script).toContain('say "follower: another importer holds the lock')
     expect(script).toContain("  elif ! alive dashboard-ingest; then\n    held_said_f=")
-    expect(script).toContain("  else\n    held_said_f=\n  fi\ndone")
+    expect(script).toContain("  else\n    held_said_f=\n  fi\n  check_aliases\ndone")
   })
 })
 
@@ -1239,7 +1239,7 @@ describe("the follower before first run's setup (#31)", () => {
 say() { echo "say $*" >> ${calls}; }; result() { echo "result $*" >> ${calls}; }
 start_dev() { :; }; check_dev() { echo dev=up; }; stop_all() { :; }; dev_down() { :; }
 start_follower() { echo start_follower >> ${calls}; }; check_follower() { echo follower=running; }
-follower_held() { return 1; }; alive() { [ "$1" = dashboard-dev ] || [ "$1" = dashboard-web ]; }; build_head() { :; }; keep_builds() { :; }
+follower_held() { return 1; }; alive() { [ "$1" = dashboard-dev ] || [ "$1" = dashboard-web ]; }; build_head() { :; }; keep_builds() { :; }; check_aliases() { :; }
 dashboard_urls() { :; }; ensure_web() { :; }
 ${fn("setup_pending") ?? ""}
 ${script.slice(script.indexOf("\nroll_up() {") + 1, script.indexOf("\n}\n", script.indexOf("\nroll_up() {")) + 2)}
@@ -1298,5 +1298,86 @@ ${script.slice(script.indexOf("\nroll_up() {") + 1, script.indexOf("\n}\n", scri
     const lines = await sup("roll_up START", URL_LINE)
     expect(lines[0]).toBe("start_follower")
     expect(lines[1]).toMatch(/^result START \w+ PASS dev=up follower=running$/)
+  })
+})
+
+// A route file of portless's shape in the test's own folder, never the real ~/.portless: each host and its port.
+const routesDir = join(scratch, "portless")
+const routesFile = join(routesDir, "routes.json")
+const routes = (pairs: [string, number][]) =>
+  Bun.write(
+    routesFile,
+    JSON.stringify(pairs.map(([hostname, port]) => ({ hostname, pid: 0, port }))),
+  )
+const LIVE_ROUTES: [string, number][] = [
+  ["desk.playground.localhost", 4842],
+  ["playground.localhost", 4842],
+  ["desk.api.playground.localhost", 4843],
+  ["api.playground.localhost", 4843],
+]
+describe("the supervisor's alias check", () => {
+  const state = join(scratch, "alias-state")
+  const ops = join(scratch, "alias-ops")
+  const right = join(scratch, "right.json")
+  // Runs check_aliases as the supervisor's loop does, in one shell, with a stand-in notify.sh; the route file starts with playground.localhost on the wrong port, and body says when it is put right. Returns the results and the alerts.
+  const ticks = async (body: string, confirm: number) => {
+    rmSync(state, { force: true, recursive: true })
+    rmSync(join(ops, "sent"), { force: true })
+    await Bun.write(join(ops, "notify.sh"), `#!/bin/sh\necho "$1 $2" >> "${join(ops, "sent")}"\n`)
+    chmodSync(join(ops, "notify.sh"), 0o755)
+    await Bun.write(join(state, "results.log"), "")
+    await Bun.write(answer, "https://desk.NAME.localhost\n")
+    await routes(LIVE_ROUTES)
+    await Bun.write(right, Bun.file(routesFile))
+    await routes(
+      LIVE_ROUTES.map(([host, port]) => [host, host === "playground.localhost" ? 4851 : port]),
+    )
+    const proc = run(
+      `D=${join(root, "scripts", "ops", "dashboard")} OPS=${ops} RESULTS=${join(state, "results.log")} LOG=${join(state, "supervisor.log")} PORTLESS_STATE_DIR=${routesDir} ALIAS_CONFIRM=${confirm} FIX="cp ${right} ${routesFile}"\n${fn("say")}\n${fn("result")}\n${fn("dashboard_urls")}\n${fn("read_aliases")}\n${fn("check_aliases")}\n${body}\ntrue`,
+    )
+    expect(await proc.exited).toBe(0)
+    const results = (await Bun.file(join(state, "results.log")).text()).trim()
+    const sent = await Bun.file(join(ops, "sent"))
+      .text()
+      .catch(() => "")
+    return { results: results ? results.split("\n") : [], sent: sent.trim() }
+  }
+
+  test("writes one ALIAS FAIL result when an alias stays wrong, none while it stays so, an ALIAS PASS once it is right, and no alert of its own", async () => {
+    const { results, sent } = await ticks(
+      "check_aliases; check_aliases; $FIX; check_aliases; check_aliases",
+      0,
+    )
+    expect(results).toHaveLength(2)
+    expect(results[0]).toContain(
+      "ALIAS FAIL playground.localhost points at port 4851, but the live stack's desk.playground.localhost is on 4842",
+    )
+    expect(results[1]).toContain(
+      "ALIAS PASS playground.localhost and api.playground.localhost hold the live stack's ports 4842 and 4843",
+    )
+    // run.sh's notify_new alerts each new FAIL line, so the check sends none itself
+    expect(sent).toBe("")
+  })
+
+  // on v0.0.18's roll the old launcher's web route went with its stop, so moveRoute left playground.localhost on the old web's port for about 3 s until the launcher's 2 s sync moved it, as that sync moves api.playground.localhost after the API restarts, so a check landing then alerted on a roll
+  test("reads a mismatch again after ALIAS_CONFIRM seconds and stays quiet when the launcher's sync has put the alias right meanwhile", async () => {
+    const { results, sent } = await ticks("(sleep 0.5; $FIX) & check_aliases; wait", 2)
+    expect(results).toEqual([])
+    expect(sent).toBe("")
+  })
+
+  test("reads a missing route file once, with no wait, and names it", async () => {
+    const started = Date.now()
+    const { results } = await ticks(`rm -f ${routesFile}; check_aliases`, 5)
+    expect(Date.now() - started).toBeLessThan(4000)
+    expect(results).toHaveLength(1)
+    expect(results[0]).toContain(`ALIAS FAIL no route file at ${routesFile}`)
+  })
+
+  test("runs on every tick of the loop, and only reads the route file", async () => {
+    const loop = script.slice(script.indexOf("while true; do"))
+    expect(loop).toContain("check_aliases")
+    const reader = await Bun.file(join(root, "scripts", "ops", "dashboard", "alias.ts")).text()
+    expect(reader).not.toMatch(/Bun\.write|writeFile|\.kill\(|process\.kill|spawn/)
   })
 })
