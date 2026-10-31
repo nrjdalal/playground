@@ -19,6 +19,8 @@ export type Stack = {
   project: string
   session: string | null
   url: string | null
+  // started from the Preview pane on a copy of the live database (lib/dashboard/vibe.ts), so the pane offers Stop
+  vibe: boolean
 }
 
 export type Worktree = { branch: string | null; path: string; project: string }
@@ -57,16 +59,21 @@ const byPlace = (a: Stack, b: Stack) =>
   (a.branch ?? "\uffff").localeCompare(b.branch ?? "\uffff") ||
   a.name.localeCompare(b.name)
 
-// Pure: every worktree, running where a web route belongs to a process group its stack's record names, then each web route no worktree claims under its app's name; by project, then branch, A to Z.
+// A Vibeground's record in its worktree, naming its copy's container.
+export const VIBE_RECORD = ".turbo/vibe.json"
+
+// Pure: every worktree, running where a web route belongs to a process group its stack's record names, a Vibeground where its path is in vibes, then each web route no worktree claims under its app's name; by project, then branch, A to Z.
 export function stacksOf({
   records,
   routes,
   sessions,
+  vibes = new Set(),
   worktrees,
 }: {
   records: ReadonlyMap<string, readonly number[]>
   routes: unknown
   sessions: readonly { cwd: string; name: string }[]
+  vibes?: ReadonlySet<string>
   worktrees: readonly Worktree[]
 }): Stack[] {
   const web = webRoutes(routes)
@@ -87,6 +94,7 @@ export function stacksOf({
       project,
       session: owners.get(path) ?? null,
       url: route ? `https://${route.hostname}` : null,
+      vibe: vibes.has(path),
     }
   })
   for (const route of web.filter((r) => !claimed.has(r))) {
@@ -98,6 +106,7 @@ export function stacksOf({
       project: labels.at(-2) ?? "",
       session: null,
       url: `https://${route.hostname}`,
+      vibe: false,
     })
   }
   return stacks.toSorted(byPlace)
@@ -180,7 +189,7 @@ export async function readStacks(): Promise<Stack[]> {
       worktrees.map((worktree) => worktree.path),
     )
     return worktrees
-      .map(({ branch, path, project, url }): Stack => {
+      .map(({ branch, path, project, url, vibe }): Stack => {
         const own = url?.replace("$WEB", env.HONO_TRUSTED_ORIGINS[0] ?? "") ?? null
         return {
           branch,
@@ -189,6 +198,7 @@ export async function readStacks(): Promise<Stack[]> {
           project,
           session: owners.get(path) ?? null,
           url: own,
+          vibe: vibe ?? false,
         }
       })
       .toSorted(byPlace)
@@ -207,6 +217,9 @@ export async function readStacks(): Promise<Stack[]> {
     records: new Map(worktrees.map((worktree) => [worktree.path, groupsOf(worktree.path)])),
     routes,
     sessions,
+    vibes: new Set(
+      worktrees.flatMap(({ path }) => (existsSync(join(path, VIBE_RECORD)) ? [path] : [])),
+    ),
     worktrees,
   })
 }
