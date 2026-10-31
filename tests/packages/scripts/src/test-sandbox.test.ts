@@ -34,6 +34,30 @@ test("a parallel pass past its deadline fails, naming the file still running", a
   expect(Date.now() - started).toBeLessThan(10_000)
 }, 20_000)
 
+// A stub's subshell that loops writing (a bare wait did so on GitHub's runner, 31 Oct) outlives bun's own kill of its test, so only the deadline's stop of the whole group ends it
+test("the deadline also stops a child a stuck test leaves looping, so the run ends and the loop stops writing", async () => {
+  const beat = join(DIR, "beat")
+  writeFileSync(
+    join(DIR, "looping.test.ts"),
+    `import { test } from "bun:test"\ntest("looping", async () => { Bun.spawn(["bash", "-c", "f() { while :; do date +%s%N > ${beat}; echo loop >&2; sleep 0.05; done; }; x=$(f)"]); await Bun.sleep(60_000) }, 60_000)\n`,
+  )
+  const started = Date.now()
+  const run = Bun.spawn(["bun", SCRIPT, "./looping.test.ts"], {
+    cwd: DIR,
+    env: { ...process.env, TEST_PARALLEL_DEADLINE_MS: "3000" },
+    stderr: "pipe",
+    stdout: "ignore",
+    timeout: 10_000,
+  })
+  const [stderr] = await Promise.all([new Response(run.stderr).text(), run.exited])
+  expect(run.signalCode).toBeNull()
+  expect(stderr).toContain("still running: looping.test.ts")
+  expect(Date.now() - started).toBeLessThan(10_000)
+  const last = await Bun.file(beat).text()
+  await Bun.sleep(500)
+  expect(await Bun.file(beat).text()).toBe(last)
+}, 20_000)
+
 test("a test in the parallel pass runs past bun's 5s default", async () => {
   writeFileSync(
     join(DIR, "busy.test.ts"),
