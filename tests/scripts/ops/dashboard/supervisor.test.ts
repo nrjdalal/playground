@@ -892,9 +892,11 @@ bun() {
   esac
 }
 alive() { kill -0 "$(cat "$S/$1.pid" 2>/dev/null)" 2>/dev/null; }
-web_up() { echo "web $1 $(echo "$2" | cut -c1-7)" >> ${keptCalls}; grep -qx "$2" "${kept}/web-fails" 2>/dev/null && return 1
+web_up() { echo "web $1 $(echo "$2" | cut -c1-7)" >> ${keptCalls}
+  grep -qx "$2" "${kept}/web-fails" 2>/dev/null && { web_why="the web exited"; return 1; }
+  grep -qx "$2" "${kept}/web-silent" 2>/dev/null && { web_why="the web was still silent at 60s"; return 2; }
   local port=$(( $(cat "$S/ports" 2>/dev/null || echo 5000) + 1 )); echo $port > "$S/ports"; echo $port > "$S/$1.port"; echo $$ > "$S/$1.pid"; echo "$2" > "$S/$1.sha"; }
-web_route() { echo "route $1" >> ${keptCalls}; }
+web_route() { echo "route $1" >> ${keptCalls}; [ ! -e "${kept}/route-refused" ] || { web_why="the web's route was refused"; return 2; }; }
 web_stop() { [ ! -e "$S/$1.pid" ] || echo "web-stop $1 $(cut -c1-7 "$S/$1.sha" 2>/dev/null)" >> ${keptCalls}; rm -f "$S/$1.pid" "$S/$1.sha"; }
 ROUTE_SETTLE=0
 check_dev() { local p i; p=$(cat "$S/dashboard-dev.pid"); for i in $(seq 1 100); do kill -0 "$p" 2>/dev/null || break; sleep 0.05; done; listed verify-fails && { echo "verify=FAIL"; return 1; }; echo "verify=PASS"; }
@@ -1172,10 +1174,50 @@ describe("the supervisor's web swap (#122)", () => {
     const lines = await keptLines(/^(web|stop|say web)/)
     expect(lines.slice(0, 4)).toEqual([
       `web dashboard-web-next ${short(c2)}`,
-      `say web ${short(c2)} did not take over; stopping both as before`,
+      `say web ${short(c2)} did not take over (the web exited); stopping both as before`,
       "stop",
       `web-stop dashboard-web ${short(c1)}`,
     ])
+  })
+
+  test("a web the head broke fails the roll as a bad build, and the fallback serves the head before's web", async () => {
+    fresh()
+    expect((await keptRun("roll_up START", c1)).code).toBe(0)
+    await Bun.write(join(kept, "web-fails"), `${c2}\n`)
+    rmSync(keptCalls)
+    expect((await keptRun(`finish_roll "ROLL canary" ${c2} ${c1} ""`, c2)).code).toBe(0)
+    expect(await keptLines(/^result /)).toEqual([
+      `result ROLL canary ${short(c2)} FAIL web: the web exited`,
+      `result FALLBACK ${short(c1)} PASS verify=PASS follower=running`,
+    ])
+    expect(await Bun.file(join(kept, "bad-builds")).text()).toBe(`${c2}\n`)
+  })
+
+  test("a web the machine kept from starting is a refusal, no bad build, so the head is tried again", async () => {
+    fresh()
+    expect((await keptRun("roll_up START", c1)).code).toBe(0)
+    await Bun.write(join(kept, "web-silent"), `${c2}\n`)
+    rmSync(keptCalls)
+    expect((await keptRun(`finish_roll "ROLL canary" ${c2} ${c1} ""`, c2)).code).toBe(0)
+    expect(await keptLines(/^result /)).toEqual([
+      `result ROLL canary ${short(c2)} FAIL web: the web was still silent at 60s`,
+      `result ROLL canary ${short(c2)} FAIL dev refusing: the web was still silent at 60s (not the head's, no bad build)`,
+      `result FALLBACK ${short(c1)} PASS verify=PASS follower=running`,
+    ])
+    expect(existsSync(join(kept, "bad-builds"))).toBe(false)
+  })
+
+  test("a refused route keeps the old web serving, and the start that meets it is a refusal too", async () => {
+    fresh()
+    await prebuiltRun(
+      `${started(c1)}; touch ${join(kept, "route-refused")}; roll_to ${c2} canary; echo "$running"`,
+      c1,
+    )
+    expect(await keptLines(/^say web .*did not take over/)).toEqual([
+      `say web ${short(c2)} did not take over (the web's route was refused); stopping both as before`,
+    ])
+    expect(existsSync(join(kept, "dashboard-web-next.pid"))).toBe(false)
+    expect(existsSync(join(kept, "bad-builds"))).toBe(false)
   })
 
   test("the API serves alone, since the web runs on its own", () => {

@@ -325,8 +325,8 @@ def workspaces():
     return found
 
 
-# the dashboard's jobs, each a pid file procs.sh reads: the follower first, then the API and the web
-JOBS = ("dashboard-ingest", "dashboard-dev", "dashboard-web")
+# the dashboard's jobs, each a pid file procs.sh reads: the follower first, then the API, a swap's next web and the web
+JOBS = ("dashboard-ingest", "dashboard-dev", "dashboard-web-next", "dashboard-web")
 
 
 def stop_dashboard():

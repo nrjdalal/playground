@@ -99,37 +99,45 @@ start_follower() {
   bash "$D/start-ingest.sh" &
   echo $! > "$S/dashboard-ingest.pid"; say "follower started, pid $!"
 }
-# The web: next's standalone server from the head's kept build ($2), started as job $1 on a port of its own, through the same portless.ts env the serve task gave it; ready once it answers on that port, within 60s
+# The web: next's standalone server from the head's kept build ($2), started as job $1 on a port of its own, with the env packages/scripts/src/portless.ts gives the serve task; ready once / answers 2xx or 3xx, within 60s
+# It returns 1 for the head's fault (its web exited, or answered only errors) and 2 for the machine's (no free port, the port taken, a web still silent at 60s), and names which in web_why
 web_up() {
-  local job=$1 sha=$2 port i
-  port=$(bun --no-env-file -e 'const s = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: () => new Response() }); console.log(s.port); s.stop(true)') || return 1
+  local job=$1 sha=$2 port i code=000
+  port=$(bun --no-env-file -e 'const s = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: () => new Response() }); console.log(s.port); s.stop(true)') || { web_why="no free port for the web"; return 2; }
   (cd web/next && PORTLESS_URL=$WEB PORT=$port HOSTNAME=127.0.0.1 exec bun ../../packages/scripts/src/portless.ts bun "$S/builds/$sha/web/web/next/server.js") > "$S/$job.log" 2>&1 &
   echo $! > "$S/$job.pid"; echo "$port" > "$S/$job.port"; echo "$sha" > "$S/$job.sha"
   for i in $(seq 1 60); do
-    curl -s -o /dev/null "http://127.0.0.1:$port/" && { "$D/procs.sh" record "$job" >> "$LOG" 2>&1; say "web ${sha:0:7} up on :$port, pid $(cat "$S/$job.pid")"; return 0; }
+    code=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$port/")
+    case "$code" in 2*|3*) "$D/procs.sh" record "$job" >> "$LOG" 2>&1; say "web ${sha:0:7} up on :$port, pid $(cat "$S/$job.pid")"; return 0 ;; esac
     alive "$job" || break; sleep 1
   done
-  say "web ${sha:0:7} never answered on :$port: $(tail -1 "$S/$job.log" | cut -c1-200)"; return 1
+  if alive "$job"; then
+    [ "$code" = 000 ] && { web_why="the web ${sha:0:7} was still silent on :$port at 60s"; return 2; }
+    web_why="the web ${sha:0:7} answered only $code"; return 1
+  fi
+  grep -q EADDRINUSE "$S/$job.log" 2>/dev/null && { web_why="the web's port :$port was taken"; return 2; }
+  web_why="the web ${sha:0:7} exited: $(tail -1 "$S/$job.log" | cut -c1-200)"; return 1
 }
-# The web's portless route to port $1, owned by run.sh ($PPID, which a reload keeps), so moving it from one web to the next is one write and the old web's exit leaves it
-web_route() { bun "$WT/api/hono/src/bin/web-route.ts" "$WEB" "$1" "$PPID" >> "$LOG" 2>&1; }
+# The web's portless route, and its bare alias, to port $1, owned by run.sh ($PPID, which a reload keeps), so moving it from one web to the next is one write and the old web's exit leaves it; a refusal (another live process holds the name) is the machine's
+web_route() { bun "$WT/api/hono/src/bin/web-route.ts" "$WEB" "$1" "$PPID" >> "$LOG" 2>&1 || { web_why="the web's route was refused (see supervisor.log)"; return 2; }; }
 serving_web() { alive dashboard-web && [ "$(cat "$S/dashboard-web.sha" 2>/dev/null)" = "$1" ]; }
-web_stop() { "$D/procs.sh" stop "$1" >> "$LOG" 2>&1; rm -f "$S/$1.sha"; }
-stop_web() { web_stop dashboard-web; }
-# The head's web ($1) serving and routed: the one that serves it already is kept (a swap, or a reload's), else a new one starts in the old one's place
+web_stop() { local rc=0; "$D/procs.sh" stop "$1" >> "$LOG" 2>&1 || rc=1; rm -f "$S/$1.pid" "$S/$1.port" "$S/$1.sha"; return $rc; }
+stop_web() { web_stop dashboard-web-next; web_stop dashboard-web; }
+# The head's web ($1) serving and routed: the one that serves it already is kept (a swap, or a reload's), else a new one starts in the old one's place; returns web_up's or web_route's 1 or 2
 ensure_web() {
-  serving_web "$1" || { stop_web; web_up dashboard-web "$1" || return 1; }
-  web_route "$(cat "$S/dashboard-web.port")"
+  local rc
+  serving_web "$1" || { stop_web; web_up dashboard-web "$1" || { rc=$?; say "$web_why"; return $rc; }; }
+  web_route "$(cat "$S/dashboard-web.port")" || { say "$web_why"; return 2; }
 }
-# A roll's web with no gap: the target's ($1) starts beside the serving one, the route moves to it, and the old one stops once the proxy has read the move; returns 1, the old one serving, when no web of this supervisor's serves or the new one never answers
+# A roll's web with no gap: the target's ($1) starts beside the serving one, the route moves to it, and the old one stops once the proxy has read the move; returns 1, the old one serving, when no web of this supervisor's serves or the new one does not take over
 swap_web() {
   local sha=$1
   alive dashboard-web || return 1
   if ! web_up dashboard-web-next "$sha" || ! web_route "$(cat "$S/dashboard-web-next.port")"; then
-    web_stop dashboard-web-next; say "web ${sha:0:7} did not take over; stopping both as before"; return 1
+    web_stop dashboard-web-next; say "web ${sha:0:7} did not take over ($web_why); stopping both as before"; return 1
   fi
   sleep "${ROUTE_SETTLE:-3}"
-  web_stop dashboard-web
+  web_stop dashboard-web || say "the old web outlived its stop (see supervisor.log)"
   local f; for f in pid port sha procs log; do [ ! -e "$S/dashboard-web-next.$f" ] || mv "$S/dashboard-web-next.$f" "$S/dashboard-web.$f"; done
   say "web swapped to ${sha:0:7} on :$(cat "$S/dashboard-web.port") with no stop"
 }
@@ -217,7 +225,12 @@ roll_up() {   # build the head when it has no build, start it and the follower, 
   sha=$(git rev-parse --short HEAD)
   # a failed build leaves no dev log of its own, so finish_roll never reads the last stack's refusal as this head's
   built=$(build_head) || { : > "$DEVLOG"; result "$tag $sha FAIL build: $built"; return 1; }
-  dashboard_urls; ensure_web "$(git rev-parse HEAD)" || { : > "$DEVLOG"; result "$tag $sha FAIL web: never answered (see supervisor.log)"; return 1; }
+  # a web the head broke fails the roll as a bad build; the machine's fault writes the refusal line finish_roll reads, so the head is tried again
+  dashboard_urls; ensure_web "$(git rev-parse HEAD)"; local wrc=$?
+  if [ $wrc -ne 0 ]; then
+    if [ $wrc -eq 2 ]; then echo "dev: refusing to start: $web_why" > "$DEVLOG"; else : > "$DEVLOG"; fi
+    result "$tag $sha FAIL web: $web_why"; return 1
+  fi
   start_dev; dev=$(check_dev); local dok=$?
   local fok=0
   if setup_pending; then
@@ -245,7 +258,7 @@ owner_idle() {
 # a roll is due once ROLL_GAP has passed ($1 seconds since the last) and the owner has been idle OWNER_IDLE ($2), or the owner's idle cannot be read while the dashboard's Postgres runs ($3 is up), so a canary move never waits on a reading; with the container down a roll would fail its database proof, so it holds
 roll_due() { [ "$1" -ge $ROLL_GAP ] && { [ -n "$2" ] && [ "$2" -ge $OWNER_IDLE ] || { [ -z "$2" ] && [ "$3" = up ]; }; }; }
 dashboard_db() { dashboard_container > /dev/null && echo up || echo down; }
-# When the running code (from head $1, or a copy outside this checkout) differs from the checkout's scripts/ops/dashboard/, write the roll to $S/reload (the head, tag $2, then $3-$5 for finish_roll) and exit 75 with the stack down, so run.sh execs the checkout's own copy
+# When the running code (from head $1, or a copy outside this checkout) differs from the checkout's scripts/ops/dashboard/, write the roll to $S/reload (the head, tag $2, then $3-$5 for finish_roll) and exit 75 with the API and the follower down (a swapped web keeps serving), so run.sh execs the checkout's own copy
 reload_if() {
   [ "$D" -ef "$WT/scripts/ops/dashboard" ] && git diff --quiet "$1" HEAD -- scripts/ops/dashboard/ && return 0
   printf '%s\n' "$(git rev-parse HEAD)" "$2" "${3:-}" "${4:-}" "${5:-}" > "$S/reload"

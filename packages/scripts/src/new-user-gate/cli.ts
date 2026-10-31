@@ -355,7 +355,7 @@ const clean = (box: string, home: string) => {
     } catch {}
   }
   const procs = join(checkout, "scripts", "ops", "dashboard", "procs.sh")
-  for (const job of ["dashboard-dev", "dashboard-ingest", "dashboard-web"])
+  for (const job of ["dashboard-dev", "dashboard-ingest", "dashboard-web", "dashboard-web-next"])
     if (existsSync(procs)) run(["bash", procs, "stop", job], { env })
   run([join(REPO, "node_modules", ".bin", "portless"), "proxy", "stop"], {
     env: { ...process.env, HOME: home },

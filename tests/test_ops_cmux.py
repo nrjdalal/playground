@@ -209,7 +209,7 @@ case "$1 $2" in
 esac
 exit 0
 """,
-    "curl": "#!/bin/bash\necho '{\"version\":\"test\"}'\n",
+    "curl": "#!/bin/bash\ncase \"$*\" in *http_code*) echo 307 ;; *) echo '{\"version\":\"test\"}' ;; esac\n",
     "docker": "#!/bin/bash\necho 0\n",
     "cmux": "#!/bin/bash\nexit 1\n",
     "claude": "#!/bin/bash\nexit 1\n",

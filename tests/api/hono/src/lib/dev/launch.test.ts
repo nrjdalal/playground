@@ -215,6 +215,46 @@ describe("moveRoute", () => {
     ])
   })
 
+  test("moves the live dashboard's bare alias with its route, so the uptime check's URL follows the swap at once", async () => {
+    const folder = state("alias", [
+      { hostname: "desk.playground.localhost", pid: process.pid, port: 4950 },
+      { hostname: "playground.localhost", pid: 0, port: 4950 },
+    ])
+    expect(moveRoute("desk.playground.localhost", 5011, process.pid, folder)).toEqual({
+      failed: [],
+      wrote: ["playground.localhost -> 5011"],
+    })
+    expect(await routesIn(folder)).toMatchObject([
+      { hostname: "desk.playground.localhost", port: 5011 },
+      { hostname: "playground.localhost", pid: 0, port: 5011 },
+    ])
+  })
+
+  test("leaves a bare alias that follows another stack, as a worktree's probe must never take the live dashboard's", async () => {
+    const folder = state("others", [
+      { hostname: "feat.playground.localhost", pid: process.pid, port: 4111 },
+      { hostname: "desk.playground.localhost", pid: process.pid, port: 4950 },
+      { hostname: "playground.localhost", pid: 0, port: 4950 },
+    ])
+    expect(moveRoute("feat.playground.localhost", 5011, process.pid, folder)).toEqual({
+      failed: [],
+      wrote: [],
+    })
+    expect(
+      (await routesIn(folder)).find((route) => route.hostname === "playground.localhost"),
+    ).toMatchObject({ port: 4950 })
+  })
+
+  test("writes no alias for a host whose bare name is no dashboard's", async () => {
+    const folder = state("other", [
+      { hostname: "desk.example.localhost", pid: process.pid, port: 4950 },
+    ])
+    expect(moveRoute("desk.example.localhost", 5011, process.pid, folder)).toEqual({
+      failed: [],
+      wrote: [],
+    })
+  })
+
   test("refuses a route another live process holds, and leaves it as it was", async () => {
     const other = Bun.spawn(["sleep", "30"])
     try {
