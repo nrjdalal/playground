@@ -15,6 +15,7 @@ import {
 
 const channel = (over: Partial<YardChannel> = {}): YardChannel => ({
   id: "c1",
+  joined: true,
   kind: "channel",
   lastMessageAt: null,
   mentions: 0,
@@ -48,9 +49,10 @@ describe("socketUrl", () => {
 })
 
 describe("the sidebar's rows", () => {
-  test("split into Channels and Direct messages, each in the API's order", () => {
+  test("split into the joined Channels and every Direct message, each in the API's order", () => {
     const random = channel({ id: "c2", name: "random" })
-    expect(yardGroups([channel(), dm, random])).toEqual({
+    const unjoined = channel({ id: "c3", joined: false, name: "builds" })
+    expect(yardGroups([channel(), dm, unjoined, random])).toEqual({
       channels: [channel(), random],
       dms: [dm],
     })

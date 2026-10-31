@@ -6,6 +6,7 @@ import { countLabel } from "@/components/dashboard/count-badge"
 // A channel or DM as GET /api/v1/yard/channels gives it (H3's contract): a DM names its other member in peer, a channel has none.
 export type YardChannel = {
   id: string
+  joined: boolean
   kind: "channel" | "dm"
   lastMessageAt: string | null
   mentions: number
@@ -36,9 +37,9 @@ export const approveHref = (message: Pick<YardMessage, "id">, hosted: boolean) =
 export const channelTitle = (channel: Pick<YardChannel, "kind" | "name" | "peer">) =>
   channel.kind === "dm" ? (channel.peer?.login ?? "Direct message") : `#${channel.name}`
 
-// The sidebar's two groups, each in the API's order.
+// The sidebar's two groups, each in the API's order: the channels you have joined (the API lists every one), and every DM.
 export const yardGroups = (channels: YardChannel[]) => ({
-  channels: channels.filter((channel) => channel.kind === "channel"),
+  channels: channels.filter((channel) => channel.kind === "channel" && channel.joined),
   dms: channels.filter((channel) => channel.kind === "dm"),
 })
 
