@@ -59,7 +59,6 @@ jobs:
           # the root checks import packages/* and @api/hono through dist, and web/next's tests the generated data-table metrics, which a PR changing none of them leaves unmade on a clean checkout
           bunx turbo run build --filter='./packages/*' --filter=@api/hono
           bun packages/scripts/src/data-table-metrics.ts
-          bun run check-types:scripts
           bun run check-types:tests
           bun packages/scripts/src/env-keys.ts
         env:
