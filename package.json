@@ -23,6 +23,7 @@
     "dev": "bun --no-env-file api/hono/src/bin/dev-running.ts start && bun --no-env-file packages/scripts/src/verify/prebuild.ts api && bun --no-env-file api/hono/src/bin/dev.ts",
     "dev:stop": "bun --no-env-file api/hono/src/bin/dev-stop.ts",
     "devtools": "turbo devtools",
+    "dm": "bun --no-env-file packages/scripts/src/dm/cli.ts",
     "docs:wrap": "bun packages/scripts/src/docs-wrap/cli.ts",
     "format": "oxfmt",
     "format:check": "oxfmt --check",
