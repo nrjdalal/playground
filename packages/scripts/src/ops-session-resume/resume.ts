@@ -168,7 +168,7 @@ export function interruptedAfter(transcript: string, at: string): boolean {
   return false
 }
 
-async function transcriptTail(configDir: string, sessionId: string): Promise<string> {
+export async function transcriptTail(configDir: string, sessionId: string): Promise<string> {
   const path = await transcriptPathOf(configDir, sessionId)
   if (!path) return ""
   const file = Bun.file(path)
@@ -206,7 +206,7 @@ export const stuckEscalation = (
 }
 
 // Pure: the time of the transcript's newest user or assistant entry, which stateNow() reads a stuck record against.
-function newestTurnAt(transcript: string): string | null {
+export function newestTurnAt(transcript: string): string | null {
   for (const line of transcript.split("\n").reverse()) {
     try {
       const entry = JSON.parse(line) as { timestamp?: unknown; type?: unknown }

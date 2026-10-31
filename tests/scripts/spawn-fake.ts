@@ -192,6 +192,7 @@ const VALUED = [
   "--account",
   "--backend",
   "--brief",
+  "--effort",
   "--model",
   "--reports-to",
   "--runtime",

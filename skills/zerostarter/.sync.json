@@ -86,8 +86,8 @@
   },
   "skills-manager": {
     "ref": "main",
-    "upstream": "7e24e43c5649",
-    "written": "90c918f8b294"
+    "upstream": "9c4659f4f23d",
+    "written": "179f48d73d89"
   },
   "ui-verify": {
     "ref": "main",

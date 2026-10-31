@@ -33,15 +33,15 @@ export const socketUrl = (env: { NEXT_PUBLIC_API_URL: string }, token: string) =
 // A closed socket's next try waits 2s, doubling with each try that fails to a minute, so a tab whose socket keeps failing settles at one try a minute.
 export const retryDelay = (tries: number) => Math.min(2_000 * 2 ** tries, 60_000)
 
-// A message that arrives twice, from the socket and a post's own answer, stays once, at the end.
-export const upsertMessage = (list: Message[], message: Message) => [
-  ...list.filter((row) => row.id !== message.id),
-  message,
-]
+// A message that arrives twice, from the socket and a post's own answer, stays once, in the API's order by its time (a post approved later moves to the time it was sent).
+export const upsertMessage = (list: Message[], message: Message) =>
+  [...list.filter((row) => row.id !== message.id), message].sort((a, b) => a.at.localeCompare(b.at))
 
 // The hosted app opens a channel under /yard; the local dashboard opens it in its own chat pane.
 export const channelHref = (channel: Pick<YardChannel, "id">, hosted: boolean) =>
-  hosted ? `/yard/c/${channel.id}` : `/dashboard/yard/${channel.id}`
+  hosted
+    ? `/yard/c/${encodeURIComponent(channel.id)}`
+    : `/dashboard/yard/${encodeURIComponent(channel.id)}`
 
 // Approving needs Yard's own web session, so a local stack, which serves no /yard page, links nowhere.
 export const approveHref = (message: Pick<YardMessage, "id">, hosted: boolean) =>
@@ -55,6 +55,12 @@ export const yardGroups = (channels: YardChannel[]) => ({
   channels: channels.filter((channel) => channel.kind === "channel" && channel.joined),
   dms: channels.filter((channel) => channel.kind === "dm"),
 })
+
+// Where /yard lands: the sidebar's first row, a joined channel, else a DM, never a channel you have not joined, whose messages the API refuses you.
+export const landingChannel = (channels: YardChannel[]) => {
+  const { channels: joined, dms } = yardGroups(channels)
+  return joined[0] ?? dms[0] ?? null
+}
 
 // A row's badge: its unread count as the Threads rows read it, in the mention colour while any of them names you, and none once read.
 export const yardBadge = (channel: Pick<YardChannel, "mentions" | "unread">) =>

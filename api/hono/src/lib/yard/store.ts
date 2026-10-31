@@ -127,6 +127,9 @@ export const createChannel = async (
   caller: Caller,
   { name, topic }: { name: string; topic?: string },
 ): Promise<Channel> => {
+  // the redeem's channels are made by the first redeem alone, so a member who named one first cannot set #releases open to every member
+  if (JOINED_ON_REDEEM.some((channel) => channel.name === name))
+    throw new ApiError(409, "CONFLICT", `#${name} is kept for Yard's own channel`)
   await take(db, `writes:${caller.id}`, "hour", WRITES_HOUR)
   const id = crypto.randomUUID()
   try {
@@ -361,16 +364,17 @@ export const ownMessage = async (db: Database, caller: Caller, id: string): Prom
   return toMessage(row)
 }
 
-// Sends or denies one of the caller's pending messages, stamping decided_at; a message already decided is a conflict.
+// Sends or denies one of the caller's pending messages, stamping decided_at, and on send moving its time to the send, so a member who read the channel meanwhile counts it as unread; a message already decided is a conflict.
 export const decide = async (
   db: Database,
   caller: Caller,
   id: string,
   status: "denied" | "sent",
 ): Promise<Message> => {
+  const now = new Date()
   const [row] = await db
     .update(yardMessage)
-    .set({ decidedAt: new Date(), status })
+    .set(status === "sent" ? { at: now, decidedAt: now, status } : { decidedAt: now, status })
     .where(
       and(
         eq(yardMessage.id, id),
@@ -580,13 +584,16 @@ export const redeemInvite = async (db: Database, caller: Caller, code: string) =
   return { member: true as const }
 }
 
-// Who a message's frame reaches: every member of its channel once it is sent, its sender alone while it is pending or denied.
+// Who a message's frame reaches: every member of its channel who still holds the member rung once it is sent, so a banned member's open socket hears nothing, and its sender alone while it is pending or denied.
 export const audienceOf = async (db: Database, caller: Caller, message: Message) =>
   message.status === "sent"
     ? (
         await db
-          .select({ userId: yardMember.userId })
+          .select({ banned: user.banned, id: user.id, role: user.role })
           .from(yardMember)
+          .innerJoin(user, eq(user.id, yardMember.userId))
           .where(eq(yardMember.channelId, message.channel))
-      ).map((row) => row.userId)
+      )
+        .filter((row) => reachesConsole(row, "member"))
+        .map((row) => row.id)
     : [caller.id]

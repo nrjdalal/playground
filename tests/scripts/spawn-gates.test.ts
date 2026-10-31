@@ -118,7 +118,9 @@ describe("the capacity gate refuses and spawns nothing", () => {
       CAPACITY_JSONL: `${fresh}\n`,
     })
     expect(lagged.code).not.toBe(0)
-    expect(lagged.err).toContain("and 14 started in the last 5 minutes, at or over the 15 cores")
+    expect(lagged.err).toContain(
+      "and 14 started in the last 5 minutes, at or over 13.125: the 15 cores",
+    )
     const old = [...Array(14)]
       .map((_, k) =>
         JSON.stringify({ at: minutesAgo(6 + k), gate: null, readings: {}, verdict: "pass" }),
@@ -230,7 +232,7 @@ describe("the capacity gate refuses and spawns nothing", () => {
       CAPACITY_JSONL: `${fresh}\nnot json\n`,
     })
     expect(r.code).not.toBe(0)
-    expect(r.err).toContain("and 14 started in the last 5 minutes, at or over the 15 cores")
+    expect(r.err).toContain("and 14 started in the last 5 minutes, at or over 13.125: the 15 cores")
   })
 
   // Load is weighed by size, so a big plan never blocks small runs: small, medium and big weigh 1, 2 and 3.
@@ -261,6 +263,28 @@ describe("the capacity gate refuses and spawns nothing", () => {
           verdict: "pass",
         }),
       ])
+    })
+
+    // a PR's first review waited a median 47 minutes, so a checker takes the band a small worker keeps back, and every other small start keeps today's line
+    test.each<{ args: string[]; passes: boolean }>([
+      { args: ["column", "reviewer", "reviewer-x", "worker-x", "w1:p2", "r.md"], passes: true },
+      { args: ["column", "tester", "tester-x", "worker-x", "w1:p2", "r.md"], passes: true },
+      {
+        args: ["column", "probe", "probe-x", "ops", "w1:p2", "p.md", "--size", "small"],
+        passes: true,
+      },
+      {
+        args: ["column", "lead", OLD.planner, OLD.dispatcher, "w1:p2", "h.md", "--size", "small"],
+        passes: true,
+      },
+      { args: ["worker", "worker-brave-otter", "b.md", "--size", "small"], passes: false },
+    ])("a checker takes the cap a small worker keeps back: $args.1", async ({ args, passes }) => {
+      const r = await spawn(args, [], { FAKE_LOAD5: "14.00" })
+      if (passes) return expect(r.code, r.err).toBe(0)
+      expect(r.code).not.toBe(0)
+      expect(r.err).toContain(
+        "at or over 13.125: the 15 cores, less the 1.875 kept for checkers (gates.reviewReserve; this start is a small worker)",
+      )
     })
 
     test("the roster's size counts when --size is not given", async () => {
@@ -305,7 +329,9 @@ describe("the capacity gate refuses and spawns nothing", () => {
         CAPACITY_JSONL: `${starts(3)}\n`,
       })
       expect(heavy.code).not.toBe(0)
-      expect(heavy.err).toContain("and 15 started in the last 5 minutes, at or over the 15 cores")
+      expect(heavy.err).toContain(
+        "and 15 started in the last 5 minutes, at or over 13.125: the 15 cores",
+      )
     })
 
     test("--size takes small, medium or big alone", async () => {
@@ -482,7 +508,9 @@ describe("the capacity gate refuses and spawns nothing", () => {
         const alone = await spawn(args, [])
         expect(alone.code, alone.err).toBe(0)
         const r = await spawn(args, [], withGates({ "slots.peers": [peer] }))
-        expect(r.err).toContain("and 14 started in the last 5 minutes, at or over the 15 cores")
+        expect(r.err).toContain(
+          "and 14 started in the last 5 minutes, at or over 13.125: the 15 cores",
+        )
         expect(readFileSync(join(peer, "capacity.jsonl"), "utf8")).toBe(`${fresh}\n`)
       } finally {
         rmSync(peer, { force: true, recursive: true })
@@ -498,7 +526,9 @@ describe("the capacity gate refuses and spawns nothing", () => {
         ...env,
         CAPACITY_JSONL: `${older}\n`,
       })
-      expect(r.err).toContain("and 14 started in the last 10 minutes, at or over the 15 cores")
+      expect(r.err).toContain(
+        "and 14 started in the last 10 minutes, at or over 13.125: the 15 cores",
+      )
     })
   })
 
@@ -874,6 +904,100 @@ describe("the capacity gate refuses and spawns nothing", () => {
     )
   })
 
+  // login-flip.json's split shares accounts it probes with no usage-<name>.json, each reading in its `seen` (#85)
+  const probedFiles =
+    (seen: Record<string, object>, shares: Record<string, number>) =>
+    (home: string): void => {
+      const dir = join(home, ".playground", "ops", "usage")
+      mkdirSync(dir, { recursive: true })
+      writeFileSync(
+        join(dir, "login-flip.json"),
+        JSON.stringify({ seen, split: { at: Date.now() / 1000, shares } }),
+      )
+    }
+  const probed = (week: number, minutes = 10) => ({
+    at: Date.now() / 1000 - minutes * 60,
+    five: 5,
+    fiveReset: Date.now() / 1000 + 3600,
+    via: "token",
+    week,
+    weekReset: Date.now() / 1000 + 5 * 86_400,
+  })
+
+  test("a bare spawn whose own login is over its pace starts on an account login-flip probes, by its share in the split (#85)", async () => {
+    const r = await spawn(
+      ["worker", "worker-brave-otter", "b.md"],
+      [],
+      { USAGE_JSON: weekAt(98) },
+      script,
+      undefined,
+      probedFiles({ "probed@example.com": probed(20) }, { "probed@example.com": 0.5 }),
+    )
+    expect(r.code).toBe(0)
+    expect(r.out).toContain(
+      "no --account, so it starts on probed@example.com, next in the account split (50% of new sessions): its week is at 20% (login-flip.json seen)",
+    )
+    expect(launchOf(r)).toContain("-a probed@example.com -w")
+  })
+
+  test("a probed reading with no 5-hour window passes on its week, and one whose 5-hour window is at 95% does not (#85)", async () => {
+    const run = (five: number | null) =>
+      spawn(
+        ["worker", "worker-brave-otter", "b.md"],
+        [],
+        { USAGE_JSON: weekAt(98) },
+        script,
+        undefined,
+        probedFiles(
+          {
+            "probed@example.com": {
+              ...probed(20),
+              five,
+              fiveReset: five === null ? null : Date.now() / 1000 + 3600,
+            },
+          },
+          { "probed@example.com": 0.5 },
+        ),
+      )
+    const none = await run(null)
+    expect(none.code).toBe(0)
+    expect(launchOf(none)).toContain("-a probed@example.com -w")
+    expect((await run(95)).code).not.toBe(0)
+  })
+
+  test("a probed reading 60 minutes old is not followed, and the refusal names its age (#85)", async () => {
+    const r = await spawn(
+      ["worker", "worker-brave-otter", "b.md"],
+      [],
+      { USAGE_JSON: weekAt(98) },
+      script,
+      undefined,
+      probedFiles({ "probed@example.com": probed(20, 61) }, { "probed@example.com": 0.5 }),
+    )
+    expect(r.code).not.toBe(0)
+    expect(r.err).toContain(
+      "probed@example.com (login-flip.json seen): login-flip.json seen was written 61 minutes ago (writtenAt), 60 is its limit",
+    )
+  })
+
+  test("a stale usage-<name>.json leaves the same account's fresh probed reading in the pick (#85)", async () => {
+    const r = await spawn(
+      ["worker", "worker-brave-otter", "b.md"],
+      [],
+      { USAGE_JSON: weekAt(98) },
+      script,
+      undefined,
+      (h) => {
+        loginFiles({ "usage-probed.json": login("probed@example.com", 20, minutesAgo(90)) })(h)
+        probedFiles({ "probed@example.com": probed(20) }, { "probed@example.com": 0.5 })(h)
+      },
+    )
+    expect(r.code).toBe(0)
+    expect(r.out).toContain(
+      "no --account, so it starts on probed@example.com, next in the account split (50% of new sessions): its week is at 20% (login-flip.json seen)",
+    )
+  })
+
   test("a bare spawn refuses when every login is over the gate, naming each one's reading", async () => {
     const r = await spawn(
       ["worker", "worker-brave-otter", "b.md"],
@@ -1112,14 +1236,14 @@ describe("the capacity gate refuses and spawns nothing", () => {
     },
   )
 
-  test("a usage.json without five_hour reads the window as reset and passes", async () => {
+  test("a usage.json without five_hour is an account with no 5-hour limit, read as none rather than 0%, and passes (#85)", async () => {
     const raw = JSON.stringify(usage({ rate_limits: { seven_day: usage().rate_limits.seven_day } }))
     const r = await spawn(["worker", "worker-brave-otter", "b.md"], [], { USAGE_JSON: raw })
     expect(r.code).toBe(0)
     expect(logOf(r)).toEqual([
       expect.objectContaining({
         verdict: "pass",
-        readings: expect.objectContaining({ fiveHour: 0, week: 20 }),
+        readings: expect.objectContaining({ fiveHour: "none", week: 20 }),
       }),
     ])
   })

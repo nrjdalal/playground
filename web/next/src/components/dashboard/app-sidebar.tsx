@@ -68,6 +68,7 @@ import { useDashboard } from "@/components/dashboard/dashboard"
 import { StatusIcon } from "@/components/dashboard/worker-light"
 import { Hint, OFF_FOCUSABLE } from "@/components/hint"
 import { GroupCount } from "@/components/shell/group-count"
+import { ROW_BOX } from "@/components/shell/row-box"
 import type { MenuUpdate } from "@/components/shell/sidebar-user-menu"
 import { Button } from "@/components/ui/button"
 import {
@@ -404,7 +405,7 @@ function UsageBlock({ reading }: { reading: Reading }) {
           </span>
           <span>{row.name}</span>
           <span className="text-right font-mono tabular-nums">
-            {row.used === null ? "-" : `${row.used}%`}
+            {row.none ? "none" : row.used === null ? "-" : `${row.used}%`}
           </span>
           <UsageBar row={row} />
           <span className="font-mono tabular-nums">{row.reset}</span>
@@ -1861,9 +1862,6 @@ function useSidebarSource(allowed: boolean): SidebarSource {
   })
 }
 
-// A row's box, which the session, ops and roster rows and the placeholder share: the stock 32px with no padding above or below, so a script's 14px and 12px lines (26px) sit 3px from each edge; the collapsed rail's own size-8! and p-2! still win there.
-export const ROW_BOX = "h-8 py-0"
-
 // A script's second line, never wrapping: short of room it cuts with … from the end, the tail first, and never the state (Inbox #i546). The state sits in a box that does not shrink, so the tail gives way first.
 function SecondLine({
   className,
@@ -2171,7 +2169,7 @@ const isRosterAgent = (agent: Agent): boolean =>
   agent.role === "worker" &&
   !checkerOf(agent.name, agent.kind)
 
-// Sidebar-nav slot: your threads, then every live session but the dispatchers (the header's, DashboardDispatchers), grouped by role into Orchestrators, Subagents (each reviewer and tester nested under its worker, a gone worker's under its muted roster row), AI Runners, Scripts (the ops jobs jobs.json does not pause, which have no session, collapsed until opened) and Other (each by status, as orderByStatus sets), each label with how many sessions it holds. Orchestrators, Subagents, AI Runners and Scripts always show, and Other follows while a probe or a session outside the factory's names is live; until the board is read they show the stored sidebar, muted, or nothing yet (useSidebarSource), so the first live frame replaces rows of the same count and order rather than moving any.
+// Sidebar-nav slot: your threads, then every live session but the dispatchers (the header's, DashboardDispatchers), grouped by role into Orchestrators, Subagents (each reviewer and tester nested under its worker, a gone worker's under its muted roster row), AI Runners, Scripts (the ops jobs jobs.json does not pause, which have no session, collapsed until opened) and Other (each by status, as orderByStatus sets), each label with how many sessions it holds. Orchestrators, Subagents, AI Runners and Scripts always show, and Other follows while a probe or a session outside the factory's names is live; until the board is read they show the stored sidebar, muted, or nothing yet (useSidebarSource), so the first live frame replaces rows of the same count and order rather than moving any. Yard's Channels and Direct messages (YardGroups) close the nav, each while it has rows.
 export function DashboardNav() {
   const { allowed, board, selected } = useDashboard()
   const source = useSidebarSource(allowed)

@@ -8,6 +8,7 @@ import {
   channelHref,
   channelTitle,
   inviteRequests,
+  landingChannel,
   messagesQuery,
   retryDelay,
   socketUrl,
@@ -86,15 +87,22 @@ describe("retryDelay", () => {
 })
 
 describe("upsertMessage", () => {
-  test("keeps a message that arrives twice once, at the end", () => {
-    const one = message({ id: "m1", text: "first" })
-    const two = message({ id: "m2" })
-    expect(
-      upsertMessage([one, two], { ...one, text: "again" }).map((row) => [row.id, row.text]),
-    ).toEqual([
-      ["m2", two.text],
+  test("keeps a message that arrives twice once, in time order", () => {
+    const early = message({ at: "2026-10-31T09:00:00Z", id: "m1", text: "first" })
+    const late = message({ at: "2026-10-31T10:00:00Z", id: "m2" })
+    const again = { ...early, text: "again" }
+    expect(upsertMessage([early, late], again).map((row) => [row.id, row.text])).toEqual([
       ["m1", "again"],
+      ["m2", late.text],
     ])
+    expect(upsertMessage([early], late).map((row) => row.id)).toEqual(["m1", "m2"])
+  })
+
+  test("moves a post approved later to the time it was sent, as the API stamps it", () => {
+    const held = message({ at: "2026-10-31T09:00:00Z", id: "m1", status: "pending" })
+    const late = message({ at: "2026-10-31T10:00:00Z", id: "m2" })
+    const sent = { ...held, at: "2026-10-31T11:00:00Z", status: "sent" as const }
+    expect(upsertMessage([held, late], sent).map((row) => row.id)).toEqual(["m2", "m1"])
   })
 })
 
@@ -116,6 +124,11 @@ describe("the sidebar's rows", () => {
   test("a row opens under /yard on the hosted app and in the dashboard's chat pane locally", () => {
     expect(channelHref(dm, true)).toBe("/yard/c/d1")
     expect(channelHref(dm, false)).toBe("/dashboard/yard/d1")
+  })
+
+  test("a channel's id is escaped in its link, as the approve and invite paths escape theirs", () => {
+    expect(channelHref({ id: "../tokens" }, true)).toBe("/yard/c/..%2Ftokens")
+    expect(channelHref({ id: "../tokens" }, false)).toBe("/dashboard/yard/..%2Ftokens")
   })
 
   test("a pending post links to its approve page on the hosted app alone, since a local stack serves no /yard page", () => {
@@ -144,6 +157,17 @@ describe("who reaches the hosted app", () => {
 
   test("a member, an admin and the owner reach the app", () => {
     for (const role of ["member", "admin", "owner"]) expect(yardGate({ role })).toBe("app")
+  })
+})
+
+describe("landingChannel", () => {
+  test("lands on the first joined channel, past one you have not joined, else the first DM, else nowhere", () => {
+    const open = channel({ id: "c0", joined: false, name: "lobby" })
+    const general = channel({ id: "c1" })
+    const dm = channel({ id: "d1", kind: "dm", name: "dm:u1:u2" })
+    expect(landingChannel([open, general, dm])?.id).toBe("c1")
+    expect(landingChannel([open, dm])?.id).toBe("d1")
+    expect(landingChannel([open])).toBeNull()
   })
 })
 

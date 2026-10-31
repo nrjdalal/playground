@@ -23,7 +23,6 @@ import {
   nextDue,
   resultOf,
   runner,
-  sweepRepos,
   switchAccount,
   turboPrune,
 } from "../../../../../packages/scripts/src/ops-tick/tick"
@@ -57,17 +56,21 @@ const fake = (
   now: Date,
   outputs: Record<string, string> = {},
   fails: string[] = [],
+  exits: Record<string, number> = {},
 ) => {
   const runs: string[][] = []
+  const inputs: string[] = []
   const sent: { text: string; to: string }[] = []
   const ctx: Context = {
     now,
     ops,
     repo: "/repo",
-    run: async (argv) => {
+    run: async (argv, _timeoutMs, stdin) => {
       runs.push(argv)
+      if (stdin) inputs.push(stdin)
       const key = Object.keys(outputs).find((k) => argv.join(" ").includes(k))
-      return { code: 0, out: key ? outputs[key]! : "" }
+      const exit = Object.keys(exits).find((k) => argv.join(" ").includes(k))
+      return { code: exit ? exits[exit]! : 0, out: key ? outputs[key]! : "" }
     },
     send: async (to, text) => {
       if (fails.some((word) => text.includes(word))) throw new Error("notify.sh exited 1")
@@ -75,12 +78,25 @@ const fake = (
       return true
     },
   }
-  return { ctx, runs, sent }
+  return { ctx, inputs, runs, sent }
 }
 
 const beat = (name: string) => BEATS.find((b) => b.name === name)!
 
 const QUIET_LOAD = { "vm.loadavg": "{ 2.10 3.40 4.00 }" }
+
+// ps's lines as the load report reads them: CPU, pid, command
+const PS =
+  "  300.0  4242 /Users/acme/.bun/bin/bun\n   90.0   311 /Applications/cmux.app/Contents/MacOS/cmux\n   10.0   12 launchd\n    0.0  1 kernel_task\n    0.0  2 idle"
+
+// bun run ask new's output, the posted item's id on a line of its own
+const ASKED = {
+  "ask new":
+    "$ bun api/hono/src/bin/dashboard-ask.ts new\nf167b6b9-f570-4f15-a4b4-eb15b8c4876f\n#i601\n",
+}
+
+// The Inbox alerts a beat posted, by their titles
+const alertTitles = (inputs: string[]) => inputs.map((input) => JSON.parse(input).title)
 
 describe("up", () => {
   test("runs ops-up every 5 minutes and tells ops each line it prints once, until the line changes (#1275)", async () => {
@@ -201,10 +217,11 @@ describe("tick", () => {
   ].join("\n")
 
   test(`routes each alert as the old tick did: usage marks to the builder, a switch due and near-limit lines to ${OLD.dispatcher}`, async () => {
-    const { ctx, runs, sent } = fake(scratch(), at(13, 3), {
-      "load-report.py": "load5 16.5\n  worker-a: 300% CPU\n  cmux app: 90% CPU\n  other: 10% CPU",
+    const { ctx, inputs, sent } = fake(scratch(), at(13, 3), {
+      ...ASKED,
       "login-flip.py": "switch due: move to pride@",
       "near-limit.py": "ALERT 5h acme@: 5-hour window at 86%\nweek passed 80% on pride@",
+      "pcpu=": PS,
       "vm.loadavg": "{ 12.00 16.50 9.00 }",
       "week-marks.py": MARKS,
     })
@@ -215,15 +232,31 @@ describe("tick", () => {
       { text: `usage: ${MARKS.split("\n")[0]}`, to: "builder" },
       { text: "switch due: move to pride@", to: "dispatcher" },
       {
-        text: "load5 16.5: load5 16.5 worker-a: 300% CPU cmux app: 90% CPU other: 10% CPU",
+        text: "load5 16.5: bun pid 4242: 300% CPU cmux pid 311: 90% CPU launchd pid 12: 10% CPU kernel_task pid 1: 0% CPU",
         to: "builder",
       },
       { text: "ALERT 5h acme@: 5-hour window at 86%", to: "builder" },
       { text: "week passed 80% on pride@", to: "dispatcher" },
     ])
-    const alerts = runs.filter((argv) => argv.some((a) => a.endsWith("inbox-alert.py")))
-    expect(alerts.map((argv) => argv.at(-1))).toEqual([
-      "ALERT 98 pride@example.com: week at 98%, past 98%",
+    expect(alertTitles(inputs)).toEqual(["ALERT 98 pride@example.com: week at 98%, past 98%"])
+  })
+
+  test("an Inbox alert that fails to post is named to the builder, and its line still goes", async () => {
+    const { ctx, sent } = fake(
+      scratch(),
+      at(13, 3),
+      { ...QUIET_LOAD, "ask new": "error: the dashboard is down\n", "week-marks.py": MARKS },
+      [],
+      { "ask new": 1 },
+    )
+    await beat("tick").run(ctx)
+    expect(sent.slice(0, 3)).toEqual([
+      { text: "ALERT 90 acme@example.com: week at 91%, past 90%", to: "builder" },
+      {
+        text: "Inbox alert not posted: bun run ask new: error: the dashboard is down",
+        to: "builder",
+      },
+      { text: "ALERT 98 pride@example.com: week at 98%, past 98%", to: "builder" },
     ])
   })
 
@@ -233,7 +266,12 @@ describe("tick", () => {
     const first = fake(
       ops,
       at(13, 3),
-      { ...QUIET_LOAD, "near-limit.py": "week passed 80% on pride@", "week-marks.py": MARKS },
+      {
+        ...QUIET_LOAD,
+        ...ASKED,
+        "near-limit.py": "week passed 80% on pride@",
+        "week-marks.py": MARKS,
+      },
       ["ALERT 98"],
     )
     await Promise.all(cycle(first.ctx, state, [beat("tick")]))
@@ -242,7 +280,7 @@ describe("tick", () => {
       `usage: ${MARKS.split("\n")[0]}`,
       "week passed 80% on pride@",
     ])
-    expect(first.runs.some((argv) => argv.some((a) => a.endsWith("inbox-alert.py")))).toBe(true)
+    expect(alertTitles(first.inputs)).toEqual(["ALERT 98 pride@example.com: week at 98%, past 98%"])
     expect(resultOf(state)).toBe("tick: send to builder failed: notify.sh exited 1")
     const next = fake(ops, at(13, 18), QUIET_LOAD)
     await Promise.all(cycle(next.ctx, state, [beat("tick")]))
@@ -256,7 +294,7 @@ describe("tick", () => {
     const ops = scratch()
     const jobs = runner()
     const busy = (load5: number) => ({
-      "load-report.py": "worker-a: 300% CPU",
+      "pcpu=": "  300.0  4242 bun",
       "vm.loadavg": `{ 12.00 ${load5}.00 9.00 }`,
     })
     for (const [i, hour] of [13, 14, 15, 16, 17].entries()) {
@@ -266,18 +304,18 @@ describe("tick", () => {
     }
     const { ctx, sent } = fake(ops, at(18, 18), busy(25))
     await Promise.all(cycle(ctx, jobs, [beat("tick")]))
-    expect(sent).toEqual([{ text: "load5 25: worker-a: 300% CPU", to: "builder" }])
+    expect(sent).toEqual([{ text: "load5 25: bun pid 4242: 300% CPU", to: "builder" }])
     expect(resultOf(jobs)).toBe("ok")
   })
 
   test("a quiet run sends nothing and posts no Inbox alert", async () => {
-    const { ctx, runs, sent } = fake(scratch(), at(13, 18), {
+    const { ctx, inputs, sent } = fake(scratch(), at(13, 18), {
       ...QUIET_LOAD,
       "week-marks.py": "acme@example.com: week 40%",
     })
     await beat("tick").run(ctx)
     expect(sent).toEqual([])
-    expect(runs.some((argv) => argv.some((a) => a.endsWith("inbox-alert.py")))).toBe(false)
+    expect(inputs).toEqual([])
   })
 })
 
@@ -668,16 +706,6 @@ describe("switch watch, in the tick", () => {
 })
 
 describe("the beats that send no line", () => {
-  test("the planner sweep runs its script and keeps the output", async () => {
-    const ops = scratch()
-    const { ctx, runs, sent } = fake(ops, at(13, 17), { "sweep.py": "PILEUP 3" })
-    await beat("planner-sweep").run(ctx)
-    expect(runs.map((argv) => argv.join(" "))).toEqual([
-      `python3 -I ${join(ops, "..", "planner", "sweep.py")}`,
-    ])
-    expect(sent).toEqual([])
-  })
-
   test("GLM credits writes one log line from ops-zai-usage's file while its beat is fresh", async () => {
     const ops = scratch()
     const now = at(13, 43)
@@ -753,44 +781,12 @@ describe("the beats that send no line", () => {
 
 describe("the optimizer's beats", () => {
   test.each([
-    ["optimizer-flow", "optimizer flow"],
-    ["optimizer-burn", "optimizer burn check"],
     ["optimizer-tick", "optimizer tick"],
     ["optimizer-daily", "optimizer daily"],
   ])("%s sends its words to the optimizer", async (name, words) => {
     const { ctx, sent } = fake(scratch(), at(14, 7))
     await beat(name).run(ctx)
     expect(sent).toEqual([{ text: words, to: "optimizer" }])
-  })
-
-  test("the worktree sweep sends the optimizer the stale list, never --remove, and nothing when none is stale", async () => {
-    const stale = fake(scratch(), at(14, 17), { "optimizer/sweep.py": "stale: pg-1 (merged)" })
-    await beat("worktree-sweep").run(stale.ctx)
-    expect(stale.sent).toEqual([
-      { text: "Worktree sweep (dry): stale: pg-1 (merged)", to: "optimizer" },
-    ])
-    expect(stale.runs[0]!.includes("--remove")).toBe(false)
-    expect(stale.runs[0]).toContain("/repo")
-    const quiet = fake(scratch(), at(16, 17))
-    await beat("worktree-sweep").run(quiet.ctx)
-    expect(quiet.sent).toEqual([])
-  })
-
-  test("the worktree sweep sends every line of a long stale list, each send within notify.sh's 400 characters (#1450)", async () => {
-    const stale = Array.from(
-      { length: 50 },
-      (_, i) =>
-        `  stale /Users/acme-dev/acme-dev/${OLD.dispatcher}/.claude/worktrees/lm-${1000 + i}-some-chore lm-${1000 + i}`,
-    )
-    const out = [
-      `/Users/acme-dev/acme-dev/${OLD.dispatcher}: 90 worktrees, 50 stale; kept: {'roster': 30}`,
-      ...stale,
-    ].join("\n")
-    const { ctx, sent } = fake(scratch(), at(14, 17), { "optimizer/sweep.py": out })
-    await beat("worktree-sweep").run(ctx)
-    const got = sent.flatMap((s) => s.text.replace(/^Worktree sweep \(dry\): /, "").split("\n"))
-    expect(got).toEqual(out.split("\n").map((line) => line.trimEnd()))
-    expect(sent.every((s) => s.to === "optimizer" && s.text.length <= 400)).toBe(true)
   })
 })
 
@@ -1131,12 +1127,14 @@ describe("relay watch", () => {
     )
   }
 
-  // A context whose runs answer wait.py's peek and bun run ask by argv, recording each bun run ask call with its stdin.
+  // A context whose runs answer bun run ask, recording each call with its stdin; a "pending" peek leaves a line in a queue past cursor.json's offset for drain.ts's peek to read, any other leaves none.
   const watch = (ops: string, now: Date, peek: string, code = 0) => {
+    const queue = join(ops, "outbox", "ops-unstick.jsonl")
+    if (peek.startsWith("pending")) writeFileSync(queue, `${JSON.stringify({ text: "x" })}\n`)
+    else rmSync(queue, { force: true })
     const asks: { argv: string[]; stdin?: string }[] = []
     const { ctx, sent } = fake(ops, now)
     ctx.run = async (argv, _timeoutMs, stdin) => {
-      if (argv.join(" ").includes("wait.py")) return { code: 0, out: peek }
       asks.push({ argv, stdin })
       return { code, out: `$ bun api/hono/src/bin/dashboard-ask.ts new\n${ID}\n#i601\n` }
     }
@@ -1245,10 +1243,7 @@ describe("relay watch", () => {
     await beat("relay-watch").run(watch(ops, at(14, 30), "pending: ops-unstick.jsonl").ctx)
     outbox(ops, at(14, 38))
     const gone = watch(ops, at(14, 40), "timeout")
-    gone.ctx.run = async (argv) =>
-      argv.join(" ").includes("wait.py")
-        ? { code: 0, out: "timeout" }
-        : { code: 1, out: `dashboard-ask: no inbox item ${ID}\n` }
+    gone.ctx.run = async () => ({ code: 1, out: `dashboard-ask: no inbox item ${ID}\n` })
     await beat("relay-watch").run(gone.ctx)
     expect(existsSync(join(ops, "tick", "relay-watch.json"))).toBe(false)
     await beat("relay-watch").run(watch(ops, at(15, 0), "pending: ops-unstick.jsonl").ctx)
@@ -1327,13 +1322,30 @@ test("the switch watch reads no account on a machine with no extensions, so it s
   rmSync(data, { force: true, recursive: true })
 })
 
-test("the worktree sweep takes each git checkout in the home folder's folder for an org ext.links guards, and none with no extensions", async () => {
-  const ops = scratch()
-  const home = mkdtempSync(join(tmpdir(), "ops-tick-home-"))
-  dirs.push(home)
-  for (const dir of ["acme-co/web/.git", "acme-co/notes", "other/api/.git"])
-    mkdirSync(join(home, dir), { recursive: true })
-  expect(await sweepRepos(ops, home)).toEqual([])
-  storeWith(join(ops, ".."), {}, { "ext.links": { acme: ["acme-co"] } })
-  expect(await sweepRepos(ops, home)).toEqual([join(home, "acme-co", "web")])
+// 31 Oct: tick ran five helpers no checkout held, and the beats' stubs above passed, so their alerts never fired on a real machine.
+describe("every script a beat runs", () => {
+  const REPO = join(import.meta.dir, "../../../../..")
+  // where each base tick.ts joins from lives in a checkout: the ops folder is scripts/ops, linked into the data folder by link-skills.sh
+  const BASES: Record<string, string> = {
+    "ctx.ops": join(REPO, "scripts", "ops"),
+    "ctx.repo": REPO,
+    outbox: join(REPO, "scripts", "ops", "outbox"),
+  }
+  const source = readFileSync(join(REPO, "packages/scripts/src/ops-tick/tick.ts"), "utf8")
+  const scripts = [
+    ...[...source.matchAll(/join\((ctx\.ops|ctx\.repo|outbox)((?:, "[^"]+")+)\)/g)].map(
+      ([, base, rest]) =>
+        join(BASES[base!]!, ...[...rest!.matchAll(/"([^"]+)"/g)].map((m) => m[1]!)),
+    ),
+    ...[...source.matchAll(/python\(ctx, "([^"]+)"/g)].map(([, path]) =>
+      join(BASES["ctx.ops"]!, path!),
+    ),
+  ].filter((path) => /\.(py|sh|ts)$/.test(path))
+
+  test("is a file in the repo", () => {
+    expect(scripts.length).toBeGreaterThan(0)
+    expect(
+      scripts.filter((path) => !existsSync(path)).map((path) => path.slice(REPO.length + 1)),
+    ).toEqual([])
+  })
 })

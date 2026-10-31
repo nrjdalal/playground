@@ -6,7 +6,7 @@ description: Start, view, check, update, add to and remove Playground from your 
 
 # The playground command
 
-`playground` starts Playground from your terminal and opens the Dashboard. Your sessions run in herdr, and `playground view` shows them. Run it from any terminal. The Dashboard and its background jobs run in herdr too. `playground --help`, or `--help` after any command, lists every command. A word a command does not take, such as `playground ext list skills`, is refused before the command runs: it exits 2 and prints the command's usage, so a typo never reads as success. The `ask`, `changelog`, `ingest`, `queues` and `thread` commands, `playground picker`'s reason and `playground ext search`'s words pass on whole.
+`playground` starts Playground from your terminal and opens the Dashboard. Your sessions run in herdr, and `playground view` shows them. Run it from any terminal. The Dashboard and its background jobs run in herdr too. `playground --help`, or `--help` after any command, lists every command. A word a command does not take, such as `playground ext list skills`, is refused before the command runs: it exits 2 and prints the command's usage, so a typo never reads as success. The `ask`, `changelog`, `dm`, `ingest`, `queues` and `thread` commands, `playground picker`'s reason and `playground ext search`'s words pass on whole.
 
 ## Install
 
@@ -34,10 +34,11 @@ It sets up first what the installer and `playground` would have, so the Dashboar
 Its brief is `brief-<dispatcher>.md` in the data folder, written once from `scripts/briefs/dispatcher.md` when it is missing, so your own edits to it stay.
 It exits 0 once the dispatcher starts, 3 when a session already holds the dispatcher's name (it starts nothing), and 1 with spawn.sh's reason when a gate refuses the start, or herdr's when herdr cannot come up.
 
-## Start a manager: `playground planner`, `playground builder`, `playground ops`
+## Start a manager: `playground planner`, `playground builder`, `playground ops`, `playground optimizer`
 
 Each starts that manager as `playground dispatcher` starts the dispatcher, in a herdr workspace of its own, its brief written once from `scripts/briefs/<manager>.md`.
-The dispatcher runs it the first time it routes work to that manager, so no manager sits idle on your usage.
+The dispatcher runs the Planner, the Builder and Ops the first time it routes work to each, so no manager sits idle on your usage.
+It runs the Optimizer at its own start: the Optimizer runs a retro after each ship to `main` and once a day, on the timed beats the factory sends it.
 It exits 0 once the manager starts, 3 when it already runs (it starts nothing), and 1 with spawn.sh's reason when a gate refuses the start.
 
 ## View your sessions: `playground view`
@@ -184,12 +185,13 @@ Adding an account that is already listed replaces its secret and leaves its row 
 `playground ext why <skill> [--repo <folder> | --org <org>]` prints that copy with its scope and each scope whose copy it shadows.
 [Skills and orgs](/docs/skills#which-skill-wins) has the order a skill is taken in.
 
-## Scripts: `playground ask`, `changelog`, `ingest`, `queues` and `thread`
+## Scripts: `playground ask`, `changelog`, `dm`, `ingest`, `queues` and `thread`
 
 Each runs the package script of the same name in the Dashboard's checkout, the one on branch `live.branch`, passing on every word after it, so `playground ask get #i12` is `bun run ask get #i12` there. The Dashboard's checkout holds the address of the database the Dashboard shows, so an item posted this way reaches your Inbox from any folder.
 
 - `playground ask` posts an item to the [Inbox](/docs/inbox), reads its answer and closes it.
 - `playground changelog` adds rows to the Changelog from GitHub's merges and versions, or a line by hand.
+- `playground dm send <file>` posts the reply in the file, named by its absolute path, to your own Slack DM in Slack mode, framed, and records each post so the DM watch tells it from your messages.
 - `playground ingest` reads every Claude Code session Playground has run (every one on this machine with `PLAYGROUND_CMUX_SESSIONS=true`) into the Dashboard's database; `--follow` keeps reading, and `status` says how far it is.
 - `playground queues` prints the merge queue and the work queue.
 - `playground thread` opens, routes, renames and lists the Inbox's threads.

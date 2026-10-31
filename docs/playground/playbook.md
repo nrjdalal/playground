@@ -6,23 +6,24 @@ It lives in the repo rather than in one session's memory, so every session loads
 
 ## When to reach for it
 
-| You are, or you are about to                                                               | It gives you                                                                   |
-| ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------ |
-| the dispatcher, the Planner, the Builder, Ops, a worker, reviewer, tester, runner or probe | your role, who you report to and the rules you keep                            |
-| Spawn, brief, rename, check or end a session                                               | the lifecycle (`LIFECYCLE.md`) and the cmux and herdr commands (`SESSIONS.md`) |
-| Update Claude Code                                                                         | the update steps in `LIFECYCLE.md`                                             |
-| Route a new ask, or run a lead's sweep                                                     | `DISPATCH.md` and `SWEEP.md`                                                   |
-| Merge a Playground PR, or release `canary` to `main`                                       | the **gate** rule (`bun run pr:merge <n>`, `bun run pr:train`) and **release** |
-| Comment or review on one of the owner's repos                                              | the **comments** rule                                                          |
-| Touch the live dashboard or the roster                                                     | the **dashboard** and **roster** rules (`ROSTER.md`)                           |
-| Ask the owner something, or pass on his override                                           | the **ask** and **override** rules                                             |
-| File a Linear ticket                                                                       | the **tickets** rule                                                           |
-| Write anything an org sees                                                                 | the **classified** rule                                                        |
-| Post in the factory's channel, or take an ask from there                                   | the **channel** rule (`CHANNEL.md`)                                            |
-| Stop a process                                                                             | the **signal** rule                                                            |
-| Hand off a build, a read or research                                                       | the **workers** rule                                                           |
-| Run long, spawn a reviewer again, or wait on something                                     | the **context**, **rounds** and **polling** rules                              |
-| Write a skill, an agent guide, a docs page, a handoff or a brief                           | the **writing** rule                                                           |
+| You are, or you are about to                                                                              | It gives you                                                                   |
+| --------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| the dispatcher, the Planner, the Builder, Ops, the Optimizer, a worker, reviewer, tester, runner or probe | your role, who you report to and the rules you keep                            |
+| Spawn, brief, rename, check or end a session                                                              | the lifecycle (`LIFECYCLE.md`) and the cmux and herdr commands (`SESSIONS.md`) |
+| Update Claude Code                                                                                        | the update steps in `LIFECYCLE.md`                                             |
+| Route a new ask, or run a lead's sweep                                                                    | `DISPATCH.md` and `SWEEP.md`                                                   |
+| Answer the owner's DM while Slack mode is on                                                              | `DISPATCH.md`'s Slack mode and `playground dm send`                            |
+| Merge a Playground PR, or release `canary` to `main`                                                      | the **gate** rule (`bun run pr:merge <n>`, `bun run pr:train`) and **release** |
+| Comment or review on one of the owner's repos                                                             | the **comments** rule                                                          |
+| Touch the live dashboard or the roster                                                                    | the **dashboard** and **roster** rules (`ROSTER.md`)                           |
+| Ask the owner something, or pass on his override                                                          | the **ask** and **override** rules                                             |
+| File a Linear ticket                                                                                      | the **tickets** rule                                                           |
+| Write anything an org sees                                                                                | the **classified** rule                                                        |
+| Post in the factory's channel, or take an ask from there                                                  | the **channel** rule (`CHANNEL.md`)                                            |
+| Stop a process                                                                                            | the **signal** rule                                                            |
+| Hand off a build, a read or research                                                                      | the **workers** rule                                                           |
+| Run long, spawn a reviewer again, or wait on something                                                    | the **context**, **rounds** and **polling** rules                              |
+| Write a skill, an agent guide, a docs page, a handoff or a brief                                          | the **writing** rule                                                           |
 
 A factory session reaches for it on its own, and every brief tells the new session to load it.
 A session outside the factory has no reason to.
@@ -40,6 +41,7 @@ A test holds `SKILL.md` under 14,000 characters, its pointer to the rules folder
 
 The dispatcher keeps the owner's conversation and the Inbox, and routes each task by role: a new ask goes from the dispatcher to the Planner, which researches it, orders it and writes the plan, and stays free for the next ask, since its research goes to read-only research workers;
 then to the Builder, whose workers build, review and merge it; then to Ops, which ships it, rolls the dashboard and watches the machine.
+The Optimizer runs retros over everything the factory did and routes each lesson to the dispatcher as a fix, parking later ideas in its icebox, and never builds.
 Each manager is found by what it does, its kind (the builder, ops, the planner and the optimizer), not by a fixed name, so a manager started again under a new name gets its reports, its alerts and the Dashboard's place for it at once:
 `roster.ts who builder` prints whoever holds the builder's seat, and every script, hook and Dashboard read that looks for a manager follows the same rule, falling back to today's names.
 Four routes skip the planner, which hears after: two fast lanes (a live break or a tiny fix the owner points at, straight to the Builder; a machine or ops incident, straight to Ops), a backlog fix a free slot takes, and a task the owner calls priority.
@@ -139,13 +141,15 @@ Like the ticket guard, a hook that cannot start lets the call through, and the r
   spawn.sh starts nothing in cmux: it refuses `--runtime cmux` and a column started beside a cmux surface, and a session that ran in cmux resumes in herdr.
   Claude's folder trust and MCP prompts are answered for it only under the code root (`paths.codeRoot`, else the folder that holds the main checkout) and `~/<org>` for each org `ext.links` guards; anywhere else it waits for the owner.
   A probe on a herdr server with no pane yet opens in a workspace of its own (`spawn.sh probe`), and when herdr refuses to open one, spawn.sh shows herdr's own reason.
-  After a herdr server restarts, the factory's or the probes', its ops job runs `spawn.sh restore` for it, which brings back every herdr session that ran on that server and the roster has not ended, parked or paused, one that never got its first message included, on the account its start named, else the login with the most room, and the model it started with, and skips any still running.
+  After a herdr server restarts, the factory's or the probes', its ops job runs `spawn.sh restore` for it, which brings back every herdr session that ran on that server and the roster has not ended, parked or paused, one that never got its first message included,
+  on the account its start named, else the login with the most room, the model it started with and an effort other than high, and skips any still running.
   A factory session can only read from herdr: the `no-raw-spawn` hook refuses any herdr call that types into, closes or speaks for another pane, since herdr lets anything on the machine control it.
   The one exception is a scratch herdr server the session starts for a test, its socket in the session's own temporary folder, which it can drive through that socket alone, but never to start Claude.
   So a herdr session ends through `spawn.sh close <name>`, which closes only the pane spawn.sh opened under that name, never the caller's own, and marks the session ended on the roster.
   A live cmux session moves to herdr with `spawn.sh move <name>`: it skips the memory and load checks, since the copy it closes frees what the new one takes, keeps the usage check, closes the cmux surface only after every check passes, and resumes the session in herdr once the old process has exited.
 - A new session's name reads like `k3m9px-worker`: a new 6-letter id, then what the session is, so no name is ever used twice, and its checkers get ids of their own, as `b7k2mq-reviewer` and `h4n8zt-tester`.
-- Every session runs at high effort, on `models.default` (Opus) unless it was started on GLM or with spawn.sh's `--model` naming another of `models.claude`, and every subagent it starts for work runs on Sonnet unless its call names a model,
+- Every session starts at high effort; another effort is the owner's choice alone, which a lead sets with spawn.sh's `--effort` at a start or a resume, on the owner's word relayed in the **override** shape.
+- Every session runs on `models.default` (Opus) unless it was started on GLM or with spawn.sh's `--model` naming another of `models.claude`, and every subagent it starts for work runs on Sonnet unless its call names a model,
   from the factory settings' `CLAUDE_CODE_SUBAGENT_MODEL=sonnet` (the owner approved #i492, 17 Oct; on GLM the alias maps to GLM), so a brief or subagent call that needs Opus names `model: opus`.
 - A suggestion, from anyone, is tested before a session acts on it or repeats it.
 - No worker is spawned while the System panel reads No room, and the panel's idle line stays empty: no worker's dev stack idles 15 minutes.

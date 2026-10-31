@@ -39,6 +39,15 @@ export const tokenNameSchema = device.refine(
   `${WEB_DEVICE} is the browser's name, not a token's`,
 )
 
+// A GitHub login as Yard takes one for a DM or an invite, checked alike by the API and the web's forms.
+export const githubLoginSchema = z
+  .string()
+  .trim()
+  .regex(/^[a-z\d](?:[a-z\d-]{0,38})$/i, "a GitHub login")
+
+// An invite code as a newcomer types it, the one shape the redeem route takes.
+export const inviteCodeSchema = z.string().trim().min(1, "the invite code").max(64)
+
 // One message as the server stores and sends it: the server stamps from and at; channel is the channel's id, parent the message a reply answers, and a message with no status is sent.
 export const messageSchema = z.object({
   at: z.iso.datetime(),

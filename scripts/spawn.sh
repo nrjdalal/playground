@@ -12,10 +12,10 @@ set -euo pipefail
 #      hw.ncpu) times PLAYGROUND_LOAD_MULT (default 1.0), each start weighing
 #      half its item's load units (small 1, medium 2, big 3: --size, else small
 #      for a reviewer or tester, else what `ops/run-slot.sh size <name>` reads),
-#      and a quarter of that cap kept for small items, so a big plan never
-#      blocks a small one; a load over that line reads the CPU's busy cores
-#      (top -l 2 -n 0) too, and refuses only when they and the starts are over
-#      it as well, or when top cannot be read
+#      and a quarter of that cap kept for small items, so a big plan never blocks a small one,
+#      a small worker keeping an eighth in its place for the reviewers and testers; a load over that
+#      line reads the CPU's busy cores (top -l 2 -n 0) too, and refuses only when they and the starts
+#      are over it as well, or when top cannot be read
 #   2. memory, pressure level 1 or 2 (kern.memorystatus_vm_pressure_level) and
 #      free at 8% or more (kern.memorystatus_level)
 #   A GLM session takes its own load and memory gate in place of both:
@@ -23,8 +23,8 @@ set -euo pipefail
 #   3. usage, the launching backend's own window: Claude reads usage.json
 #      (5-hour under 90%, the week within 14.3 points a day of pace, floored at one day's share, readings
 #      no older than 15 minutes; one never written, as on a fresh install before ops-usage first runs, passes,
-#      its row reading it unread) and each other login's usage-<name>.json (the
-#      same checks, readings no older than 60 minutes); with no --account it
+#      its row reading it unread; a missing 5-hour window is an account with no 5-hour limit, read as none) and each other login's
+#      usage-<name>.json or reading in login-flip.json's seen (the same checks, readings no older than 60 minutes); with no --account it
 #      starts on the passing login next in the account split, else the one with the lowest week, naming it, and refuses
 #      only when every login is over, its pick kept off the resume record's exec line so a restore picks afresh; --account skips the usage
 #      check, since the other login's usage is not this machine's, but refuses a week a reading names at 100%; GLM reads zai-usage.json
@@ -42,9 +42,9 @@ set -euo pipefail
 #   spawn.sh probe     <name> <reports-to> <brief>     in herdr alone: its own workspace, this checkout, for a server with no pane to split beside
 #   spawn.sh manager   <dispatcher|second dispatcher|optimizer|builder|ops|planner> <brief>   its own workspace in the main checkout's .claude/worktrees/leads: the first dispatcher (sessions.names' dispatcher), which works with the owner and reports to no session; the second dispatcher (Inbox #i520), sessions.names' dispatcher with -2 or an <id>-dispatcher it records as slot=2, on --backend glm or --account <a second account>; the optimizer (optimizer, an <id>-optimizer, or a session the roster gives the optimizer kind) and the builder, ops and planner (playground <manager> starts each), leads; these report to the first dispatcher
 #   spawn.sh resume    <name> <dir> [session-id]        reopens a closed session: in herdr in the pane herdr kept under its label while that pane holds no agent, else in a workspace of its own; with no session id, only in a folder it ran in; a <dir> in the Desktop folder resumes in the same tree under the code root, its transcript copied there when a session id is given; with no code root it resumes in the Desktop folder itself
-#   spawn.sh restore                                    resumes every herdr session whose resume record (~/.playground/resume) names it on the server PLAYGROUND_HERDR_SESSION names (playground by default) and that the roster has not ended, parked or paused, each through `spawn.sh resume` and its gate with the --account its start was given and the --model it started with; a live one is skipped, and one restore runs at a time
+#   spawn.sh restore                                    resumes every herdr session whose resume record (~/.playground/resume) names it on the server PLAYGROUND_HERDR_SESSION names (playground by default) and that the roster has not ended, parked or paused, each through `spawn.sh resume` and its gate with the --account its start was given, the --model it started with and an --effort other than high; a live one is skipped, and one restore runs at a time
 #   spawn.sh close     <name>                           closes the herdr pane spawn.sh opened for <name>, by the label it set, on the server its resume record names; it refuses any other pane and your own, and ends its roster row once the pane closes
-#   spawn.sh move      <name>                           takes the live cmux session holding <name> to herdr: every check and the usage gate run but the load and memory gates, since the copy it closes frees what the new one takes; only then it closes the session's cmux surface (its workspace when that was the last surface), waits up to 30s (PLAYGROUND_MOVE_WAIT seconds) for its process to exit, and resumes it in herdr by its session id. It takes --model, --account and --brief as a resume does, --backend for a session with no pin, and --runtime herdr alone; a session cmux holds no record of at its pid is left alone, and a session cannot move itself: its lead moves it
+#   spawn.sh move      <name>                           takes the live cmux session holding <name> to herdr: every check and the usage gate run but the load and memory gates, since the copy it closes frees what the new one takes; only then it closes the session's cmux surface (its workspace when that was the last surface), waits up to 30s (PLAYGROUND_MOVE_WAIT seconds) for its process to exit, and resumes it in herdr by its session id. It takes --model, --effort, --account and --brief as a resume does, --backend for a session with no pin, and --runtime herdr alone; a session cmux holds no record of at its pid is left alone, and a session cannot move itself: its lead moves it
 #   --size <small|medium|big>  with any mode but restore or close, anywhere among its words: the item's size the load gate counts, in place of small for a reviewer or tester and the one ops/run-slot.sh size reads from the roster and plan.json for the rest
 #   --check            with any mode but restore or close, anywhere among its words: run every check and gate but the live-name one, print "ok: <name> can start" ("can move" for a move) and start or close nothing
 #   --brief <file>     with resume alone, anywhere among its words: the resumed session's first prompt has it read ~/.playground/<file>; without it, a resume's first prompt has it act on the after-resume hook's instruction
@@ -53,6 +53,7 @@ set -euo pipefail
 #   --backend claude   the same places: the session runs on Claude (the default; named to set its pin on a fresh start)
 #     The backend is recorded at the start in ~/.playground/backends/<name> and carried on its resume: a resume takes no --backend while a pin stands, and refuses with no pin and none given, or with a pin that reads as neither glm nor claude.
 #   --model <id>       with any mode but restore or close, anywhere among its words: the Claude model, one of models.claude (claude-opus-5-5, claude-fable-5-1, claude-sonnet-5-5 and claude-haiku-5-5 by default), else models.default (claude-opus-5-5); never on GLM, which maps every model itself, and a reviewer or a tester runs on models.checker (claude-opus-5-5) alone. Nothing records it: a resume takes it afresh, so a resume with no --model runs on models.default.
+#   --effort <level>   with any mode but restore or close, anywhere among its words: the session's effort, one of low, medium, high, xhigh or max, high by default; the resume record keeps one other than high, so a restore runs at the same effort, and a resume with none runs at high.
 #   --title "<title>"  with worker or a reviewer's or tester's column, anywhere among its words: the plain title the sidebar reads the session by, up to 40 characters; a worker needs one, and a checker with none takes "Review: " or "Test: " before its worker's roster title
 #   --reports-to <session>  with worker alone, anywhere among its words: the session it reports to, named in its first prompt in place of the builder
 #   --in <dir>         with worker alone, anywhere among its words: the folder the worker runs in, in place of this checkout: an existing folder under the code root (paths.codeRoot) or under ~/<org> for an org ext.links guards, any other refused
@@ -62,7 +63,7 @@ set -euo pipefail
 #     The runtime is recorded at the start in ~/.playground/runtimes/<name>; a resume whose pin reads cmux opens in herdr and rewrites the pin.
 #
 # <name> is lowercase words joined by hyphens that give its kind: a new one from `bun run name <kind>` (<id>-<kind>), an old `<kind>-<words>` one, or a manager's own; the mode gives the kind, and a name that gives none or another is refused, but on a resume.
-# <brief> is a file under ~/.playground. Every session runs at high effort,
+# <brief> is a file under ~/.playground. Every session runs at high effort unless --effort names another,
 # on models.default unless --model names another of models.claude, or on models.glm with --backend glm. The first dispatcher reports to no one: its <reports-to> is the lead that briefs it.
 # Each start lands in the roster.
 
@@ -115,7 +116,8 @@ usage() {
   if [ $# -gt 0 ]; then
     printf 'spawn.sh: %s\n' "$1" >&2
   fi
-  sed -n '34,59p' "$0" | sed 's/^# \{0,1\}//' >&2
+  # every mode's line through the runtime record's, found by its first and next lines so an added line never cuts it
+  awk '/^#   spawn\.sh /{p = 1} /^# <name> is/{exit} p' "$0" | sed 's/^# \{0,1\}//' >&2
   exit 2
 }
 refuse() {
@@ -231,7 +233,7 @@ PY
 own_config() { if [ -n "$UNSET" ]; then echo "$HOME/.claude.json"; else echo "${CLAUDE_CONFIG_DIR:-$HOME}/.claude.json"; fi; }
 gate_capacity() {
   verdict=$(
-    python3 -I - "$DATA" "$ACCOUNT" "$BACKEND" "${CLAUDE_CONFIG_DIR:-$HOME/.claude}" "$(own_config)" "${CHECK:+check}" "$MOVE_PID" "$GATES" $ITEM <<'PY'
+    python3 -I - "$DATA" "$ACCOUNT" "$BACKEND" "${CLAUDE_CONFIG_DIR:-$HOME/.claude}" "$(own_config)" "${CHECK:+check}" "$MOVE_PID" "$GATES" $ITEM "$ROLE" <<'PY'
 import datetime as dt
 import glob
 import json
@@ -240,7 +242,7 @@ import os
 import subprocess
 import sys
 
-data_dir, account, backend, config_dir, own_config, check, move, gates, size, units = sys.argv[1:11]
+data_dir, account, backend, config_dir, own_config, check, move, gates, size, units, role = sys.argv[1:12]
 log_path = os.path.join(data_dir, "ops", "capacity.jsonl")
 units = int(units)
 gates = json.loads(gates)
@@ -371,8 +373,9 @@ else:
         except OSError:
             pass
     readings["starts"] = starts
-    # gates.smallReserve of the cap stays for small items, so a big plan never blocks the small ones
-    keep = 0 if size == "small" else cap * gates["smallReserve"]
+    # the reserves nest: a start that is not small keeps gates.smallReserve for small items, so a big plan never blocks the small ones, and a small worker keeps gates.reviewReserve for the checkers, which start small
+    share = (gates["reviewReserve"] if role == "worker" else 0) if size == "small" else gates["smallReserve"]
+    keep = cap * share
     readings["reserve"] = keep
     # the load average counts the sessions' many short-lived processes (load 24 on 15 cores at 55% idle, 22 Oct), so a load over the line reads the CPU's busy cores too, against the same line held at the cores' count, and refuses only when both are over
     if readings["load5"] + starts >= cap - keep:
@@ -384,7 +387,7 @@ else:
             pass
         readings["cpu_idle"] = idle
         cpu_cap = min(cap, cores)
-        cpu_line = cpu_cap - (0 if size == "small" else cpu_cap * gates["smallReserve"])
+        cpu_line = cpu_cap - cpu_cap * share
         if idle is not None:
             readings["cpu_busy"] = round(cores * (100 - idle) / 100, 2)
         if idle is None or readings["cpu_busy"] + starts >= cpu_line:
@@ -393,7 +396,7 @@ else:
                 if mult != 1
                 else f"the {cores} cores"
             )
-            at = f"at or over {at}" if not keep else f"at or over {cap - keep:g}: {at}, less the {keep:g} kept for small items (this start is {size})"
+            at = f"at or over {at}" if not keep else f"at or over {cap - keep:g}: {at}, less the {keep:g} kept for {'checkers (gates.reviewReserve; this start is a small worker)' if size == 'small' else f'small items (this start is {size})'}"
             cpu = (
                 "it cannot read the CPU use (top), so the load alone decides"
                 if idle is None
@@ -500,9 +503,9 @@ else:
         five = rate.get("five_hour")
         five_hour = five.get("used_percentage") if isinstance(five, dict) else None
         if isinstance(five_hour, bool) or not isinstance(five_hour, (int, float)):
-            five_hour = 0  # the ops-usage job leaves out a window it read no numbers for, so a missing one reads as 0, as a reset one does
-        seen["fiveHour"] = five_hour
-        if five_hour >= 90:
+            five_hour = None  # no 5-hour window: an account Anthropic gives no 5-hour limit, so none, never 0%
+        seen["fiveHour"] = "none" if five_hour is None else five_hour
+        if five_hour is not None and five_hour >= 90:
             try:
                 reset = f"{from_iso(five['resets_at']):%H:%M} UTC"
             except (KeyError, TypeError, ValueError):
@@ -520,7 +523,7 @@ else:
         return seen, None
 
     # this machine's own login (usage.json, which ops-usage writes every 5 minutes) and each other login with a usage-<name>.json,
-    # which the optimizer's spare watch writes; another login's week moves slowly, so its reading holds for an hour.
+    # which ops-usage writes for the stored login and account-watch.py <email>, run by hand, for another; another login's week moves slowly, so its reading holds for an hour.
     usage, detail = load("usage.json")
     own = usage.get("account") if isinstance(usage, dict) else None
     writer = "The ops-usage job writes it every 5 minutes; wait for its next run and try again."
@@ -555,8 +558,28 @@ else:
         email = other.get("account") if isinstance(other, dict) else None
         if not isinstance(email, str) or not email or email.lower() in known:
             continue
-        seen, detail = judge(name, other, 60, "The optimizer's spare watch writes it every 5 minutes while it runs.")
+        seen, detail = judge(name, other, 60, "ops-usage writes the stored login's every 5 minutes, and account-watch.py <email>, run by hand, another account's.")
         logins.append((email, name, email, seen, detail))
+        # a refused file leaves the account open to its login-flip reading below
+        if detail is None:
+            known.add(email.lower())
+    # each account login-flip probes, from its reading in login-flip.json's seen, so the split's accounts reach the pick with no usage-<name>.json of their own
+    try:
+        with open(os.path.join(data_dir, "ops", "usage", "login-flip.json")) as f:
+            flip_seen = json.load(f).get("seen") or {}
+    except Exception:
+        flip_seen = {}
+    for email, s in sorted(flip_seen.items()) if isinstance(flip_seen, dict) else []:
+        if not isinstance(email, str) or "@" not in email or email.lower() in known or not isinstance(s, dict):
+            continue
+        rate = {"seven_day": {"used_percentage": s.get("week"), "resets_at": s.get("weekReset")}}
+        if isinstance(s.get("five"), (int, float)):
+            rate["five_hour"] = {"used_percentage": s["five"], "resets_at": s.get("fiveReset")}
+        name = "login-flip.json seen"
+        seen, detail = judge(name, {"rate_limits": rate, "writtenAt": s.get("at")}, 60, "login-flip.py probes it each ops tick.")
+        logins.append((email, name, email, seen, detail))
+        if detail is None:
+            known.add(email.lower())
     passing = [login for login in logins if login[4] is None]
     if not passing:
         readings.update(logins[0][3])
@@ -628,7 +651,7 @@ PY
   esac
 }
 
-# --account, --backend, --model, --brief, --reports-to, --title, --in and --check may sit anywhere among the words; the rest are the mode's.
+# --account, --backend, --model, --effort, --brief, --reports-to, --title, --in and --check may sit anywhere among the words; the rest are the mode's.
 ACCOUNT=
 PICKED=
 BACKEND=
@@ -636,19 +659,20 @@ GLM_ACCOUNT=
 GLM_GIVEN=
 # The models a session runs on (models.*) and the capacity gate's lines (gates.*) are settings, each in the docs' list of keys, so changing one is a settings write, never an edit here.
 MODEL_SETTINGS=$(env $UNSET "$BUN" "$REPO/packages/scripts/src/playground/setting.ts" --text models.claude models.default models.checker models.glm models.glmKeychainService \
-  gates.glmLoad5Max gates.glmSwapinsMax gates.memoryFreeMin gates.smallReserve gates.startsWindow sessions.names sessions.aliases context.window 2>&1) ||
+  gates.glmLoad5Max gates.glmSwapinsMax gates.memoryFreeMin gates.reviewReserve gates.smallReserve gates.startsWindow sessions.names sessions.aliases context.window 2>&1) ||
   { echo "spawn.sh refuses: it cannot read the model and gate settings: $MODEL_SETTINGS" >&2; exit 1; }
 {
   read -r CLAUDE_MODELS; read -r DEFAULT_MODEL; read -r CHECKER_MODEL; read -r GLM_ID; read -r GLM_KEYCHAIN
-  read -r GLM_LOAD5_MAX; read -r GLM_SWAPINS_MAX; read -r MEMORY_FREE_MIN; read -r SMALL_RESERVE; read -r STARTS_WINDOW
+  read -r GLM_LOAD5_MAX; read -r GLM_SWAPINS_MAX; read -r MEMORY_FREE_MIN; read -r REVIEW_RESERVE; read -r SMALL_RESERVE; read -r STARTS_WINDOW
   read -r SESSION_NAMES; read -r SESSION_ALIASES; read -r WINDOW
 } <<<"$MODEL_SETTINGS"
 SESSION_KINDS=$(python3 -I -c 'import json, sys; n, a = map(json.loads, sys.argv[1:3]); [print(*row) for row in [(v, k) for k, v in n.items()] + [(n["dispatcher"] + "-2", "dispatcher")] + list(a.items())]' "$SESSION_NAMES" "$SESSION_ALIASES")
 # slots.peers, the ops folders of the other factories on this machine, whose starts the load gate counts beside this one's; none when unread
 PEERS=$(setting slots.peers) || PEERS=; [ -n "$PEERS" ] || PEERS="[]"
-GATES="{\"glmLoad5Max\": $GLM_LOAD5_MAX, \"glmSwapinsMax\": $GLM_SWAPINS_MAX, \"memoryFreeMin\": $MEMORY_FREE_MIN, \"peers\": $PEERS, \"smallReserve\": $SMALL_RESERVE, \"startsWindow\": $STARTS_WINDOW}"
+GATES="{\"glmLoad5Max\": $GLM_LOAD5_MAX, \"glmSwapinsMax\": $GLM_SWAPINS_MAX, \"memoryFreeMin\": $MEMORY_FREE_MIN, \"peers\": $PEERS, \"reviewReserve\": $REVIEW_RESERVE, \"smallReserve\": $SMALL_RESERVE, \"startsWindow\": $STARTS_WINDOW}"
 MODELS=$(printf '%s\n' $CLAUDE_MODELS | awk '{ m[NR] = $0 } END { for (i = 1; i <= NR; i++) printf "%s%s", m[i], (i < NR - 1 ? ", " : i == NR - 1 ? " or " : "") }')
 CLAUDE_MODEL=
+EFFORT=
 RESUME_BRIEF=
 REPORTS_TO=
 TITLE_ARG=
@@ -673,6 +697,11 @@ while [ $# -gt 0 ]; do
     [ $# -ge 2 ] && [ -n "$2" ] && [ -z "$CLAUDE_MODEL" ] || usage "--model takes one of $MODELS, once"
     case "$2" in --*) usage "--model needs a value; \"$2\" starts with --" ;; esac
     CLAUDE_MODEL=$2
+    shift 2
+  elif [ "$1" = --effort ]; then
+    [ $# -ge 2 ] && [ -n "$2" ] && [ -z "$EFFORT" ] || usage "--effort takes one of low, medium, high, xhigh or max, once"
+    case "$2" in --*) usage "--effort needs a value; \"$2\" starts with --" ;; esac
+    EFFORT=$2
     shift 2
   elif [ "$1" = --reports-to ]; then
     [ $# -ge 2 ] && [ -n "$2" ] && [ -z "$REPORTS_TO" ] || usage "--reports-to takes a session name, once"
@@ -761,7 +790,7 @@ MODE=${1:-}
 # herdr 0.9.5 keeps a resume command only from a source that holds the pane through report-agent, and then shows that source's state in place of its own (measured: a 14s turn read idle throughout), so restore reruns the sessions spawn.sh itself listed, with ops-herdr's resume_agents_on_restore off. Each goes through resume, so the gate and the live-name check judge it, and a live one is left as it is.
 if [ "$MODE" = restore ]; then
   NAME=restore
-  [ $# -eq 0 ] && [ -z "$CHECK$ACCOUNT$BACKEND$CLAUDE_MODEL$RESUME_BRIEF$RUNTIME$SIZE" ] || usage "restore takes no other words"
+  [ $# -eq 0 ] && [ -z "$CHECK$ACCOUNT$BACKEND$CLAUDE_MODEL$EFFORT$RESUME_BRIEF$RUNTIME$SIZE" ] || usage "restore takes no other words"
   # One restore at a time: ops-herdr's start and its job's next cycle can both run one, and two resumes of a name both pass the live-name check until its claude writes its registry file, so it would start twice. The lock is a symlink naming its holder's pid and start time, so a holder that died, or a pid macOS handed on, frees it.
   LOCK="$RESUME_DIR/.restore.lock"
   holder() { echo $(LC_ALL=C TZ=UTC ps -o pid=,lstart= -p "$1" 2>/dev/null); }
@@ -815,7 +844,7 @@ for file in sorted(os.listdir(folder)) if os.path.isdir(folder) else []:
         and words[2:4] == ["resume", name]
         and len(extras) % 2 == 0
         and sorted(set(keys)) == sorted(keys)
-        and set(keys) <= {"--account", "--model"}
+        and set(keys) <= {"--account", "--effort", "--model"}
         and not any("\t" in w or "\n" in w for w in words)
     ):
         print("\t".join(words[3:]))
@@ -839,7 +868,7 @@ fi
 # A factory session closes a herdr session's pane only here, since the no-raw-spawn hook refuses herdr's own pane close: herdr's socket has no access control. It closes only a pane spawn.sh opened, by the label it set, on the server the session's resume record names, and ends the session's roster row once the pane closes, leaving the pins and the record as they are, so a resume, which sets the row back to starting, can reopen it.
 if [ "$MODE" = close ]; then
   NAME=${1:-close}
-  [ $# -eq 1 ] && [ -z "$CHECK$ACCOUNT$BACKEND$CLAUDE_MODEL$RESUME_BRIEF$RUNTIME$SIZE" ] || usage "close takes a session's name alone"
+  [ $# -eq 1 ] && [ -z "$CHECK$ACCOUNT$BACKEND$CLAUDE_MODEL$EFFORT$RESUME_BRIEF$RUNTIME$SIZE" ] || usage "close takes a session's name alone"
   word "$NAME" || refuse "a name is lowercase words joined by hyphens"
   [ "$(cat "$DATA/runtimes/$NAME" 2>/dev/null)" = herdr ] ||
     refuse "its runtime pin ($SHOWN/runtimes/$NAME) does not read herdr, so spawn.sh did not open it in herdr"
@@ -1154,6 +1183,10 @@ fi
 if [ "$KIND" = dispatcher ] && { { [ "$MODE" = manager ] && [ -z "$FIRST" ]; } || second_dispatcher "$NAME" || [ "$(roster_field "$NAME" slot)" = 2 ]; } && [ "$BACKEND" != glm ] && [ -z "$ACCOUNT" ]; then
   refuse "$NAME, the second dispatcher, runs on --backend glm, or on Claude with --account <email>, a second account: on this machine's own login it would run out with the first"
 fi
+case "${EFFORT:-high}" in
+  low | medium | high | xhigh | max) ;;
+  *) refuse "--effort takes low, medium, high, xhigh or max, not $EFFORT" ;;
+esac
 [ -z "$CLAUDE_MODEL" ] || case " $CLAUDE_MODELS " in
   *" $CLAUDE_MODEL "*) ;;
   *) refuse "--model takes $MODELS, not $CLAUDE_MODEL" ;;
@@ -1277,7 +1310,7 @@ os.replace(tmp, dst)
 PY
 SETTINGS=$BUILT
 # The factory's sessions run in bypass mode, passed here so it never rests on the machine's own settings: a session in another mode holds every cross-session message for approval.
-FLAGS="--model $MODEL --effort high --settings $SETTINGS --dangerously-skip-permissions"
+FLAGS="--model $MODEL --effort ${EFFORT:-high} --settings $SETTINGS --dangerously-skip-permissions"
 # The skills: one merged plugin per session, from the login's scope, its repo's org, core, then each always org's new names, loaded in place by --plugin-dir, from the data folder this launch reads (under inscope ~/.claude's, not the workspace's); the resolver writes it fresh on every spawn, so a skill `playground ext add` puts in an extension reaches the next session with no install. A column runs in this checkout.
 SKILLS_REPO=${DIR:-$REPO}
 [ "$MODE" = column ] && SKILLS_REPO=$REPO
@@ -1386,6 +1419,7 @@ if [ -n "$MOVE_PID" ]; then
   by_hand="$(printf %q "$MAIN/scripts/spawn.sh") resume $(printf '%q ' "$NAME" "$DIR" "$SESSION")--runtime herdr"
   [ -z "$ACCOUNT$GLM_GIVEN" ] || by_hand+=" --account $(printf %q "$ACCOUNT$GLM_GIVEN")"
   [ -z "$CLAUDE_MODEL" ] || by_hand+=" --model $(printf %q "$CLAUDE_MODEL")"
+  [ -z "$EFFORT" ] || by_hand+=" --effort $(printf %q "$EFFORT")"
   [ -z "$PIN_GIVEN" ] || by_hand+=" --backend $(printf %q "$BACKEND")"
   [ -z "$BRIEF" ] || by_hand+=" --brief $(printf %q "$BRIEF")"
   if ! closed=$(CMUX_QUIET=1 cmux close-surface --workspace "$MOVE_WORKSPACE" --surface "$MOVE_SURFACE" --force 2>&1); then
@@ -1460,12 +1494,13 @@ except (ValueError, KeyError, TypeError):
   fi
   rm -f -- "$said_file"
   echo "herdr pane $PANE workspace $ws"
-  # The session's resume record, which spawn.sh restore reads after a server's restart, written once herdr runs the session. It is the one resume that brings it back, with the --account its start was given and the model it started with, and never a token.
+  # The session's resume record, which spawn.sh restore reads after a server's restart, written once herdr runs the session. It is the one resume that brings it back, with the --account its start was given, the model it started with and an effort other than high, and never a token.
   record="exec $(printf %q "$MAIN/scripts/spawn.sh") resume $(printf '%q ' "$NAME" "$CWD" "$SID")"
   # A login the usage gate picked stays off the exec line, so a restore picks afresh, and on the account line, which ops-unstick and no-headless-login read.
   [ -n "$ACCOUNT" ] && [ -z "$PICKED" ] && record+="--account $ACCOUNT "
   [ -n "$GLM_GIVEN" ] && record+="--account $GLM_GIVEN "
   [ -n "$CLAUDE_MODEL" ] && record+="--model $CLAUDE_MODEL "
+  [ -n "$EFFORT" ] && [ "$EFFORT" != high ] && record+="--effort $EFFORT "
   account_line=
   [ -n "$ACCOUNT" ] && account_line="# account: $ACCOUNT"$'\n'
   (umask 077 && printf '#!/bin/bash\n# spawn.sh writes this at every herdr start and resume; spawn.sh restore reads its exec line and the server it ran on.\n# server: %s\n%s%s\n' "$HERDR_SESSION_NAME" "$account_line" "${record% }" > "$RESUME_DIR/$NAME.sh" && chmod 700 "$RESUME_DIR/$NAME.sh") ||

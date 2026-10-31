@@ -5,14 +5,14 @@ import { useEffect } from "react"
 
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
 import { config } from "@/lib/config"
-import { channelHref } from "@/lib/yard"
+import { channelHref, landingChannel } from "@/lib/yard"
 import { useYardChannels } from "@/lib/yard-api"
 
-// /yard opens the first channel; with none yet, it says so.
+// /yard opens the sidebar's first row; with none yet, it says so.
 export function YardHome() {
   const { data } = useYardChannels()
   const router = useRouter()
-  const first = data?.[0]
+  const first = data ? landingChannel(data) : null
   useEffect(() => {
     if (first) router.replace(channelHref(first, config.hosted))
   }, [first, router])

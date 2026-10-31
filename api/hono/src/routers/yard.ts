@@ -5,6 +5,8 @@ import { db } from "@packages/db"
 import { env } from "@packages/env/api-hono"
 import {
   channelSchema,
+  githubLoginSchema,
+  inviteCodeSchema,
   MAX_TEXT,
   MESSAGE_KINDS,
   messageSchema,
@@ -25,7 +27,7 @@ import {
 } from "@/lib/error"
 import { upgradeWebSocket } from "@/lib/server"
 import { type YardVariables, yardCaller } from "@/lib/yard/caller"
-import { join, leave, publish } from "@/lib/yard/socket"
+import { join, publish } from "@/lib/yard/socket"
 import * as store from "@/lib/yard/store"
 
 // The validation envelope for a body or a query, so a refusal is the API's one 400 VALIDATION_ERROR.
@@ -35,14 +37,19 @@ const valid = <T extends z.ZodType>(target: "json" | "query", schema: T) =>
       throw new ApiError(400, "VALIDATION_ERROR", "Invalid input", { issues: result.error })
   })
 
-// A route's OpenAPI entry: its { data } shape and the refusals it can answer with.
-const doc = (description: string, data: z.ZodType, refusals: object[] = []) =>
+// A route's OpenAPI entry: its { data } shape, the refusals it can answer with, and 201 for a route that makes a row.
+const doc = (
+  description: string,
+  data: z.ZodType,
+  refusals: object[] = [],
+  status: 200 | 201 = 200,
+) =>
   describeRoute({
     tags: ["Yard"],
     description,
     responses: {
-      200: {
-        description: "OK",
+      [status]: {
+        description: status === 201 ? "Created" : "OK",
         content: { "application/json": { schema: resolver(z.object({ data })) } },
       },
       ...authErrorResponses,
@@ -69,11 +76,6 @@ const inviteSchema = z.object({
   status: z.enum(["open", "redeemed", "requested", "revoked"]),
 })
 
-const login = z
-  .string()
-  .trim()
-  .regex(/^[a-z\d](?:[a-z\d-]{0,38})$/i, "a GitHub login")
-
 // The hosted web's origin, the one a socket opens from; with HONO_WEB_URL unset, no socket opens, while the other routes still serve.
 const webOrigin = env.HONO_WEB_URL ? new URL(env.HONO_WEB_URL).origin : null
 
@@ -82,11 +84,14 @@ const web = yardCaller({ web: true })
 const owner = yardCaller({ rung: "owner", web: true })
 
 // Sends a message's frame to whoever may read it: its channel once sent, its sender alone while it waits or after a deny.
-// A stored post answers as stored whatever the fan-out does, so a client's retry never posts it twice; a failed publish is logged.
-const fanOut = async (caller: store.Caller, message: z.infer<typeof messageSchema>) =>
-  publish(await store.audienceOf(db, caller, message), { message, type: "message" }).catch(
-    (error) => console.error("[yard] fan-out failed", error),
-  )
+// A stored post answers as stored whatever the fan-out does, so a client's retry never posts it twice; a failed fan-out is logged.
+const fanOut = async (caller: store.Caller, message: z.infer<typeof messageSchema>) => {
+  try {
+    await publish(await store.audienceOf(db, caller, message), { message, type: "message" })
+  } catch (error) {
+    console.error("[yard] fan-out failed", error)
+  }
+}
 
 // Yard's routes, which only the hosted build mounts (hosted.ts), each on the member rung or the narrower one it names.
 export const yardRouter = new Hono<{ Variables: YardVariables }>()
@@ -133,10 +138,12 @@ export const yardRouter = new Hono<{ Variables: YardVariables }>()
   )
   .post(
     "/channels",
-    doc("Creates a channel, which its creator joins", z.object({ channel: channelSchema }), [
-      validationErrorResponses,
-      conflictErrorResponses,
-    ]),
+    doc(
+      "Creates a channel, which its creator joins",
+      z.object({ channel: channelSchema }),
+      [validationErrorResponses, conflictErrorResponses],
+      201,
+    ),
     member,
     valid(
       "json",
@@ -171,7 +178,7 @@ export const yardRouter = new Hono<{ Variables: YardVariables }>()
       [validationErrorResponses, notFoundErrorResponses],
     ),
     member,
-    valid("json", z.object({ login })),
+    valid("json", z.object({ login: githubLoginSchema })),
     async (c) =>
       c.json({
         data: { channel: await store.openDm(db, c.get("caller"), c.req.valid("json").login) },
@@ -204,6 +211,7 @@ export const yardRouter = new Hono<{ Variables: YardVariables }>()
       "Posts a message; a token's tier-two post waits as pending until your signed-in browser approves it",
       z.object({ message: messageSchema }),
       [validationErrorResponses, notFoundErrorResponses],
+      201,
     ),
     member,
     valid(
@@ -235,7 +243,9 @@ export const yardRouter = new Hono<{ Variables: YardVariables }>()
       const caller = c.get("caller")
       const channel = c.req.param("id")
       const read = await store.markRead(db, caller, channel, c.req.valid("json").at)
-      await publish([caller.id], { channel, lastReadAt: read.lastReadAt, type: "read" })
+      await publish([caller.id], { channel, lastReadAt: read.lastReadAt, type: "read" }).catch(
+        (error) => console.error("[yard] read fan-out failed", error),
+      )
       return c.json({ data: read })
     },
   )
@@ -285,6 +295,7 @@ export const yardRouter = new Hono<{ Variables: YardVariables }>()
       "Makes a token; its secret is shown this once",
       z.object({ token: tokenSchema.extend({ secret: z.string() }) }),
       [validationErrorResponses, conflictErrorResponses],
+      201,
     ),
     web,
     valid("json", z.object({ name: tokenNameSchema })),
@@ -314,15 +325,18 @@ export const yardRouter = new Hono<{ Variables: YardVariables }>()
   )
   .post(
     "/invites",
-    doc("Makes an invite; its code is shown this once", z.object({ invite: inviteSchema }), [
-      validationErrorResponses,
-    ]),
+    doc(
+      "Makes an invite; its code is shown this once",
+      z.object({ invite: inviteSchema }),
+      [validationErrorResponses],
+      201,
+    ),
     owner,
     valid(
       "json",
       z.object({
         expiresInDays: z.number().int().min(1).max(30).optional(),
-        forLogin: login.optional(),
+        forLogin: githubLoginSchema.optional(),
       }),
     ),
     async (c) =>
@@ -333,11 +347,14 @@ export const yardRouter = new Hono<{ Variables: YardVariables }>()
   )
   .post(
     "/invites/request",
-    doc("Asks the owner to let a GitHub login in", z.object({ invite: inviteSchema }), [
-      validationErrorResponses,
-    ]),
+    doc(
+      "Asks the owner to let a GitHub login in",
+      z.object({ invite: inviteSchema }),
+      [validationErrorResponses],
+      201,
+    ),
     web,
-    valid("json", z.object({ forLogin: login })),
+    valid("json", z.object({ forLogin: githubLoginSchema })),
     async (c) =>
       c.json(
         {
@@ -383,7 +400,7 @@ export const yardRouter = new Hono<{ Variables: YardVariables }>()
       [validationErrorResponses, notFoundErrorResponses],
     ),
     yardCaller({ rung: "user", web: true }),
-    valid("json", z.object({ code: z.string().trim().min(1).max(64) })),
+    valid("json", z.object({ code: inviteCodeSchema })),
     async (c) =>
       c.json({ data: await store.redeemInvite(db, c.get("caller"), c.req.valid("json").code) }),
   )
@@ -423,9 +440,13 @@ export const yardRouter = new Hono<{ Variables: YardVariables }>()
     },
     upgradeWebSocket((c) => {
       const id = c.get("caller").id
+      // join's own close, kept from onOpen, since onClose's context is a new object
+      let leave = () => {}
       return {
-        onClose: (_, socket) => leave(id, socket),
-        onOpen: (_, socket) => join(id, socket),
+        onClose: () => leave(),
+        onOpen: (_, socket) => {
+          leave = join(id, socket)
+        },
       }
     }),
   )

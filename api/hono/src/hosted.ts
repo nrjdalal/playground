@@ -22,7 +22,7 @@ app.use("*", async (_, next) => {
   return next()
 })
 
-app
+const routes = app
   .basePath("/api")
   .get("/health", async (c) =>
     // the local health body's shape, so the web reads one; the hosted web draws no dispatcher rows, so the count is the default 1, and a deploy is never a Vibeground
@@ -30,6 +30,9 @@ app
   )
   .route("/auth", authRouter)
   .route("/v1/yard", yardRouter)
+
+// The hosted build's RPC type, as AppType is the local dashboard's, so a client of the hosted API reaches Yard's routes typed.
+export type HostedAppType = typeof routes
 
 // On Vercel an http.Server that never listens (lib/server.ts), with the WebSocket upgrade on it.
 export default createServer(app)

@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, test } from "bun:test"
-import { chmodSync, mkdtempSync, realpathSync, rmSync } from "node:fs"
+import { chmodSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -70,4 +70,21 @@ test("procs.sh reads its state folder in the data folder PLAYGROUND_DATA_DIR nam
   })
   expect(await proc.exited).toBe(0)
   expect(await Bun.file(execs).text()).toContain("exec acme-db psql")
+})
+
+// its usage is its whole leading comment block, lines added to the header included, and no code line after it
+test("an unknown verb prints the header and stops before the code", () => {
+  const [shebang, ...rest] = readFileSync(procs, "utf8").split("\n")
+  const header = ["# A line added to the header.", "# And a second one.", ...rest]
+  const copy = join(scratch, "procs.sh")
+  writeFileSync(copy, [shebang, ...header].join("\n"))
+  const r = Bun.spawnSync(["bash", copy, "nope", "web"], {
+    env: { ...process.env, CLAUDE_CONFIG_DIR: join(scratch, "config") },
+  })
+  const block = header.slice(
+    0,
+    header.findIndex((line) => !line.startsWith("#")),
+  )
+  expect(r.exitCode).toBe(2)
+  expect(r.stdout.toString()).toBe(`${block.join("\n")}\n`)
 })

@@ -52,3 +52,20 @@ describe("the sidebar's channel reads", () => {
     expect(channelsEvery(true, null)).toBe(false)
   })
 })
+
+describe("an id in a path", () => {
+  test("is escaped, so an id from a URL reaches no other route", async () => {
+    answer("open")
+    await yardApi.approveInvite("../tokens")
+    expect(calls[0]?.url).toBe(`${config.api.url}/api/v1/yard/invites/..%2Ftokens/approve`)
+  })
+})
+
+describe("the live socket", () => {
+  test("adds a channel's own messages to its list, and leaves a reply to its thread", async () => {
+    const source = await Bun.file(
+      new URL("../../../../../web/next/src/lib/yard-api.ts", import.meta.url),
+    ).text()
+    expect(source).toContain('frame.type === "message" && frame.message && !frame.message.parent')
+  })
+})

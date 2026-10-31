@@ -6,6 +6,7 @@ import { join } from "node:path"
 import { loadFixture, writeFixture } from "../../../../../../api/hono/src/lib/dashboard/fixture"
 import {
   addAccount,
+  hasGlmAccount,
   listAccounts,
   removeAccount,
 } from "../../../../../../api/hono/src/lib/store/accounts"
@@ -124,6 +125,21 @@ describe("Settings' accounts on a stack that reads this machine", () => {
     ])
     expect(argvs()).toContain("argv find-generic-password -s playground-glm -a zai")
     expect(logged()).not.toContain(" -w playground")
+  })
+
+  test("hasGlmAccount reads a GLM row in usage.accounts without the Keychain", () => {
+    const data = fresh()
+    expect(hasGlmAccount(data)).toBe(false)
+    addAccount(
+      { email: "made-up@example.test", provider: "claude", token: TOKEN },
+      who("add"),
+      data,
+    )
+    expect(hasGlmAccount(data)).toBe(false)
+    addAccount({ label: "zai", provider: "glm", token: GLM_KEY }, who("add"), data)
+    writeFileSync(log, "")
+    expect(hasGlmAccount(data)).toBe(true)
+    expect(logged()).toBe("")
   })
 
   test("an account listed already, or a row its schema refuses, stores nothing", () => {

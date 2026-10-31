@@ -58,30 +58,41 @@ export type YardToken = {
   revokedAt: string | null
 }
 
+// An id goes into a path escaped, since a page's id comes from its URL and a message's text is untrusted.
+const segment = encodeURIComponent
+
 export const yardApi = {
   approve: (id: string) =>
-    yard<{ message: YardMessage }>(`/messages/${id}/approve`, { method: "POST" }),
+    yard<{ message: YardMessage }>(`/messages/${segment(id)}/approve`, { method: "POST" }),
   approveInvite: (id: string) =>
-    yard<{ invite: YardInvite }>(`/invites/${id}/approve`, { method: "POST" }),
+    yard<{ invite: YardInvite }>(`/invites/${segment(id)}/approve`, { method: "POST" }),
   channels: () => yard<{ channels: YardChannel[] }>("/channels"),
   createToken: (name: string) =>
     yard<{ token: YardToken & { secret: string } }>("/tokens", { body: { name }, method: "POST" }),
-  deny: (id: string) => yard<{ message: YardMessage }>(`/messages/${id}/deny`, { method: "POST" }),
+  deny: (id: string) =>
+    yard<{ message: YardMessage }>(`/messages/${segment(id)}/deny`, { method: "POST" }),
   denyInvite: (id: string) =>
-    yard<{ invite: YardInvite }>(`/invites/${id}/deny`, { method: "POST" }),
+    yard<{ invite: YardInvite }>(`/invites/${segment(id)}/deny`, { method: "POST" }),
   invites: () => yard<{ invites: YardInvite[] }>("/invites"),
-  message: (id: string) => yard<{ message: YardMessage }>(`/messages/${id}`),
+  message: (id: string) => yard<{ message: YardMessage }>(`/messages/${segment(id)}`),
   messages: (channel: string) =>
-    yard<{ hasMore: boolean; messages: YardMessage[] }>(`/channels/${channel}/messages`),
+    yard<{ hasMore: boolean; messages: YardMessage[] }>(`/channels/${segment(channel)}/messages`),
   post: (channel: string, body: { kind: (typeof MESSAGE_KINDS)[number]; text: string }) =>
-    yard<{ message: YardMessage }>(`/channels/${channel}/messages`, { body, method: "POST" }),
+    yard<{ message: YardMessage }>(`/channels/${segment(channel)}/messages`, {
+      body,
+      method: "POST",
+    }),
   read: (channel: string) =>
-    yard<{ lastReadAt: string }>(`/channels/${channel}/read`, { body: {}, method: "POST" }),
+    yard<{ lastReadAt: string }>(`/channels/${segment(channel)}/read`, {
+      body: {},
+      method: "POST",
+    }),
   redeem: (code: string) =>
     yard<{ member: true }>("/invites/redeem", { body: { code }, method: "POST" }),
   requestInvite: (forLogin: string) =>
     yard<{ invite: unknown }>("/invites/request", { body: { forLogin }, method: "POST" }),
-  revokeToken: (id: string) => yard<{ token: YardToken }>(`/tokens/${id}`, { method: "DELETE" }),
+  revokeToken: (id: string) =>
+    yard<{ token: YardToken }>(`/tokens/${segment(id)}`, { method: "DELETE" }),
   tokens: () => yard<{ tokens: YardToken[] }>("/tokens"),
 }
 
@@ -102,7 +113,7 @@ export const useYardChannels = () =>
 export const useYardMessages = (channel: string) =>
   useQuery(messagesQuery(channel, async () => (await yardApi.messages(channel)).messages ?? []))
 
-// One socket per signed-in tab: each frame lands in the query cache, and a closed socket (Vercel closes one at 800s) opens again with a fresh one-time token, backing off while it keeps failing, then reads again what it may have missed (catchUp). A refused token read (signed out) stops it.
+// One socket per signed-in tab: each frame lands in the query cache, and a closed socket (Vercel closes one at 800s) opens again with a fresh one-time token, backing off while it keeps failing, then reads again what it may have missed (catchUp). A token read refused as signed out (401 or 403) stops it, and any other failure backs off.
 export function useYardSocket() {
   const client = useQueryClient()
   useEffect(() => {
@@ -122,7 +133,7 @@ export function useYardSocket() {
         const response = await fetch(`${config.api.url}/api/auth/one-time-token/generate`, {
           credentials: "include",
         })
-        if (response.status >= 400 && response.status < 500) return
+        if (response.status === 401 || response.status === 403) return
         if (!response.ok) return again()
         const { token } = (await response.json()) as { token: string }
         if (stopped) return
@@ -134,7 +145,8 @@ export function useYardSocket() {
         }
         socket.onmessage = (event) => {
           const frame = JSON.parse(String(event.data)) as { message?: YardMessage; type: string }
-          if (frame.type === "message" && frame.message) {
+          // a reply lives in its parent's thread, which the channel's list leaves out
+          if (frame.type === "message" && frame.message && !frame.message.parent) {
             const message = frame.message
             client.setQueryData<YardMessage[]>(messagesKey(message.channel), (list) =>
               list ? upsertMessage(list, message) : list,

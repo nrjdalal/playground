@@ -17,7 +17,7 @@ permissions:
 
 jobs:
   auto-check-build:
-    name: Audit, Lint, and Build
+    name: Lint and Build
     timeout-minutes: 20
     runs-on: ubuntu-latest
     steps:
@@ -25,6 +25,93 @@ jobs:
         uses: actions/checkout@v7
         with:
           fetch-depth: 0
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+
+      - name: Cache turbo
+        uses: actions/cache@v4
+        with:
+          path: .turbo/cache
+          key: turbo-${{ runner.os }}-${{ github.sha }}
+          restore-keys: turbo-${{ runner.os }}-
+
+      - name: Install dependencies
+        run: bun install --ignore-scripts
+
+      # audit.ts tries again when npm's advisories endpoint hangs or answers 5xx, and fails only on an advisory this PR adds over its base
+      - name: Audit
+        # GHSA-vfj7-8cjw-p6xm: braces has no patched release, and only dev tooling (shadcn, globby) reaches it
+        run: bun packages/scripts/src/audit.ts --audit-level high --ignore GHSA-vfj7-8cjw-p6xm --new-over origin/${{ github.base_ref }}
+
+      - name: Format, Lint, Check-types, and Build
+        run: |
+          bun run format:check
+          bun run lint
+          # turbo's tasks for the packages this PR changes and those that depend on them alone, from its cache otherwise
+          bunx turbo run check-types build --filter='...[origin/${{ github.base_ref }}]'
+          # the root checks import packages/* and @api/hono through dist, and web/next's tests the generated data-table metrics, which a PR changing none of them leaves unmade on a clean checkout
+          bunx turbo run build --filter='./packages/*' --filter=@api/hono
+          bun packages/scripts/src/data-table-metrics.ts
+          bun run check-types:tests
+          bun packages/scripts/src/env-keys.ts
+        env:
+          NODE_ENV: production
+          SKIP_ENV_VALIDATION: true
+
+  # the suite's shards, by tests/timings.json with the last passing run's shard timings merged over it: test-shards.ts gives as many as its budget needs
+  shards:
+    name: Shards
+    timeout-minutes: 20
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+
+      # the newest passing run from a branch of this repo, since a fork's run could upload any timings; with no run or no shard timings, test-timings.ts keeps the committed file
+      - name: Merge the last passing run's shard timings
+        run: |
+          run=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/auto-check-build.yml/runs?status=success&per_page=30" --jq "[.workflow_runs[] | select(.head_repository.full_name == \"$GITHUB_REPOSITORY\")][0].id // empty") || true
+          if [ -n "$run" ]; then gh run download "$run" --repo "$GITHUB_REPOSITORY" --pattern 'timings-*' --dir "$RUNNER_TEMP/timings" || echo "run $run kept no shard timings"; fi
+          bun packages/scripts/src/test-timings.ts "$RUNNER_TEMP/timings"
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - id: plan
+        run: echo "matrix=$(bun packages/scripts/src/test-shards.ts matrix)" >> "$GITHUB_OUTPUT"
+
+      # each shard splits by the same merged timings, so the shards' files add up to the suite once
+      - name: Keep the split's timings
+        uses: actions/upload-artifact@v7
+        with:
+          name: shard-plan
+          path: tests/timings.json
+          retention-days: 7
+
+  suite:
+    name: Suite (${{ matrix.shard }})
+    needs: shards
+    timeout-minutes: 20
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ${{ fromJSON(needs.shards.outputs.matrix) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
@@ -45,25 +132,45 @@ jobs:
       - name: Install dependencies
         run: bun install --ignore-scripts
 
-      # audit.ts tries again when npm's advisories endpoint hangs or answers 5xx, and fails only on an advisory this PR adds over its base
-      - name: Audit
-        # GHSA-vfj7-8cjw-p6xm: braces has no patched release, and only dev tooling (shadcn, globby) reaches it
-        run: bun packages/scripts/src/audit.ts --audit-level high --ignore GHSA-vfj7-8cjw-p6xm --new-over origin/${{ github.base_ref }}
+      - name: Take the split's timings
+        uses: actions/download-artifact@v8
+        with:
+          name: shard-plan
+          path: tests
 
-      - name: Format, Lint, Check-types, Test, and Build
+      # what `bun run test` builds first, then this shard's files alone through the same sandbox, so its hang deadline holds in each shard
+      - name: Test this shard
         run: |
-          bun run format:check
-          bun run lint
-          # turbo's tasks for the packages this PR changes and those that depend on them alone, from its cache otherwise
-          bunx turbo run check-types build --filter='...[origin/${{ github.base_ref }}]'
-          # the root checks import packages/* and @api/hono through dist, and web/next's tests the generated data-table metrics, which a PR changing none of them leaves unmade on a clean checkout
           bunx turbo run build --filter='./packages/*' --filter=@api/hono
           bun packages/scripts/src/data-table-metrics.ts
-          bun run check-types:scripts
-          bun run check-types:tests
-          bun run test
+          bun packages/scripts/src/test-shards.ts files ${{ matrix.shard }} > "$RUNNER_TEMP/shard-files"
+          NODE_ENV=test xargs bun packages/scripts/src/test-sandbox.ts < "$RUNNER_TEMP/shard-files"
         env:
           NODE_ENV: production
           SKIP_ENV_VALIDATION: true
           # the suite's parallel pass names the file it hangs in at its deadline, which lands well inside the job's 20 minutes
           TEST_PARALLEL_DEADLINE_MS: 600000
+          # the parallel pass writes each file's time into tests/timings.json, which the next run's Shards job merges
+          TEST_TIMINGS_UPDATE: 1
+
+      - name: Gather this shard's timings
+        run: mkdir -p "$RUNNER_TEMP/timings" && cp tests/timings.json "$RUNNER_TEMP/shard-files" "$RUNNER_TEMP/timings/"
+
+      - name: Keep this shard's timings
+        uses: actions/upload-artifact@v7
+        with:
+          name: timings-${{ matrix.shard }}
+          path: ${{ runner.temp }}/timings
+          retention-days: 7
+
+  # the gate's check name (REQUIRED_CHECKS in pr-merge/gates.ts): one result, green only when the lint and build job and every shard passed
+  audit-lint-build:
+    name: Audit, Lint, and Build
+    needs: [auto-check-build, suite]
+    if: ${{ !cancelled() }}
+    timeout-minutes: 20
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo "lint and build: ${{ needs.auto-check-build.result }}, suite: ${{ needs.suite.result }}"
+          [ "${{ needs.auto-check-build.result }}" = success ] && [ "${{ needs.suite.result }}" = success ]
