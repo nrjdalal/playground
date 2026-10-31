@@ -875,7 +875,7 @@ listed() { grep -qx "$(git rev-parse HEAD)" "${kept}/$1" 2>/dev/null; }
 bun() {
   case "$1 $2" in
     "run build") echo "build $(git rev-parse --short HEAD)" >> ${keptCalls}
-      echo "envs \${HONO_APP_URL:-} \${HONO_TRUSTED_ORIGINS:-} \${NEXT_PUBLIC_API_URL:-} \${NEXT_PUBLIC_APP_URL:-} \${SKIP_ENV_VALIDATION_SERVER:-}" >> ${keptCalls}
+      echo "envs \${HONO_APP_URL:-} \${HONO_TRUSTED_ORIGINS:-} \${NEXT_PUBLIC_API_URL:-} \${NEXT_PUBLIC_APP_URL:-} \${NODE_ENV:-} \${SKIP_ENV_VALIDATION_SERVER:-}" >> ${keptCalls}
       listed build-fails && { echo "Error: next build failed"; return 1; }
       mkdir -p web/next/.next/standalone/web/next web/next/.next/static api/hono/bundle
       git rev-parse HEAD > web/next/.next/standalone/web/next/server.js; git rev-parse HEAD > api/hono/bundle/main.mjs ;;
@@ -932,7 +932,7 @@ describe("the supervisor's production build", () => {
   test("a build reads the Dashboard's URLs and needs no server secret, since a first run's .env holds none yet", async () => {
     fresh()
     expect((await keptRun("roll_up START", c2)).code).toBe(0)
-    expect(await keptLines(/^envs /)).toEqual([`envs ${API} ${WEB} ${API} ${WEB} true`])
+    expect(await keptLines(/^envs /)).toEqual([`envs ${API} ${WEB} ${API} ${WEB} production true`])
   })
 
   test("a failed build fails the roll, lists the head in bad-builds and serves the head before's kept build, building nothing more", async () => {
