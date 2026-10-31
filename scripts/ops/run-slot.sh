@@ -518,6 +518,24 @@ held_units() {
     case "$u" in 1|2|3) ;; *) u=2 ;; esac
     total=$((total + u))
   done
+  echo $((total + $(peer_units)))
+}
+# Another factory on this machine (slots.peers, its ops folders) holds its own run slots, so each live holder of one counts its units here
+# too, read the way held_units reads ours but never reclaimed or written, since the folder is that factory's (ops, 31 Oct: the two pools
+# together took load1 to 77 and swap to 7.6 GB)
+peer_units() {
+  local d s line u total=0
+  while IFS= read -r d; do
+    [ -n "$d" ] || continue
+    for s in run-slot run-slot-2 run-slot-3 run-slot-4; do
+      [ -d "$d/$s" ] || continue
+      line=$(cat "$d/$s.holder" 2>/dev/null)
+      stale "$d/$s" "$line" && continue
+      u=$(printf '%s' "$line" | cut -d' ' -f4)
+      case "$u" in 1|2|3) ;; *) u=2 ;; esac
+      total=$((total + u))
+    done
+  done <<< "$PEERS"
   echo "$total"
 }
 capacity() {
@@ -650,6 +668,9 @@ if [ -n "$KIND" ]; then
   rlog end "rc=$code ran=$(($(date +%s) - TOOK))s"
   exit "$code"
 fi
+
+# slots.peers, one folder a line, read once here since held_units runs in a subshell; a reader that cannot answer counts no peer
+PEERS=$(setting slots.peers 2>/dev/null | python3 -I -c 'import json, sys; [print(p) for p in json.load(sys.stdin) if isinstance(p, str)]' 2>/dev/null)
 
 if [ -n "$CAN_TAKE" ]; then
   reclaim "$OPS/$CAN_TAKE"

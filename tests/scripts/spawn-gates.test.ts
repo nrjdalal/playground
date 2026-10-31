@@ -1,5 +1,14 @@
 import { describe, expect, setDefaultTimeout, test } from "bun:test"
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs"
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs"
+import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { SOURCES, sourceIn } from "../glm-refused-sources"
@@ -459,6 +468,22 @@ describe("the capacity gate refuses and spawns nothing", () => {
       expect(r.err).toContain(
         "at or over 7.5: the 15 cores, less the 7.5 kept for small items (this start is medium)",
       )
+    })
+
+    // ops, 31 Oct: another factory's starts on this Mac never reached this gate, and the two together took load1 to 77
+    test("slots.peers counts another factory's starts from its own log beside this one's", async () => {
+      const peer = mkdtempSync(join(tmpdir(), "peer-ops-"))
+      const fresh = [...Array(14)]
+        .map(() => JSON.stringify({ at: minutesAgo(1), gate: null, readings: {}, verdict: "pass" }))
+        .join("\n")
+      writeFileSync(join(peer, "capacity.jsonl"), `${fresh}\n`)
+      const args = ["worker", "worker-brave-otter", "b.md", "--size", "small"]
+      const alone = await spawn(args, [])
+      expect(alone.code, alone.err).toBe(0)
+      const r = await spawn(args, [], withGates({ "slots.peers": [peer] }))
+      expect(r.err).toContain("and 14 started in the last 5 minutes, at or over the 15 cores")
+      expect(readFileSync(join(peer, "capacity.jsonl"), "utf8")).toBe(`${fresh}\n`)
+      rmSync(peer, { force: true, recursive: true })
     })
 
     test("gates.startsWindow moves how long a start counts", async () => {
