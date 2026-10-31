@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test"
-import { chmodSync, existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs"
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { sandbox } from "../../../../packages/scripts/src/sandbox"
@@ -20,6 +21,29 @@ const childZone = (overrides: Record<string, string> = {}) => {
     rmSync(scratch, { force: true, recursive: true })
   }
 }
+
+// a child's uv run --python 3.13 in a fresh scratch home downloaded a 66 MB CPython, which under load ran past the unstick tests' timeouts
+test("the sandbox keeps uv's Pythons and cache the real home's, read before the swap", () => {
+  const real = mkdtempSync(join(tmpdir(), "sandbox-real-uv-"))
+  const parent = { HOME: process.env.HOME, PATH: process.env.PATH }
+  writeFileSync(
+    join(real, "uv"),
+    `#!/bin/sh\ncase "$1" in cache) echo "$HOME/uv-cache" ;; python) echo "$HOME/uv-python" ;; esac\n`,
+  )
+  chmodSync(join(real, "uv"), 0o755)
+  Object.assign(process.env, { HOME: real, PATH: `${real}:${parent.PATH}` })
+  const { env, scratch } = sandbox()
+  Object.assign(process.env, parent)
+  try {
+    expect([env.UV_CACHE_DIR, env.UV_PYTHON_INSTALL_DIR]).toEqual([
+      join(real, "uv-cache"),
+      join(real, "uv-python"),
+    ])
+  } finally {
+    rmSync(real, { force: true, recursive: true })
+    rmSync(scratch, { force: true, recursive: true })
+  }
+})
 
 test("a child spawned in the sandbox reads UTC whatever the parent's zone", () => {
   expect(childZone()).toBe("UTC")

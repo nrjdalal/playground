@@ -4,6 +4,7 @@
 
 A bare `bun test` from the repo root stops at `tests/require-sandbox.ts`, which `bunfig.toml` preloads, since only `test-sandbox.ts` gives a test a scratch home in place of the real one; bun reads `bunfig.toml` from the folder it runs in, so a run from a subfolder goes unguarded.
 That sandbox (`packages/scripts/src/sandbox.ts`) also sets `TZ=UTC`, so a test's children read one zone on the Mac and the runner box; a test of code that reads local time gives its child its own `TZ`.
+It keeps uv's Pythons and cache the real home's (`UV_PYTHON_INSTALL_DIR` and `UV_CACHE_DIR`, read before it swaps HOME), so a child's `uv run --python 3.13` finds its Python in place of downloading one.
 It also puts a fake `claude` and a fake `gh` first on PATH, each exiting 99 with a line naming the sandbox, so no test starts a session or reaches GitHub; a test that needs `gh`'s output puts its own fake ahead of the sandbox's on PATH.
 Run from a folder with none of the env files `bun test` loads (`.env`, `.env.test` and `.env.test.local`, never `.env.local`), such as a skill-only worktree, `test-sandbox.ts` sets `SKIP_ENV_VALIDATION=true` for its tests unless the caller set it, so one whose import validates the env still runs there.
 
@@ -31,6 +32,7 @@ Call `environmentManager.setIsServer(() => false)` (exported by `@tanstack/react
 measured in the parallel pass, a 50 ms interval fetched 8 times in 400 ms with it and once without, and a file run after it in the same worker, its restore removed, still read `isServer()` as true,
 since each file loads its modules afresh.
 Else test the query's options themselves (`inboxPolling()` in `tests/web/next/src/lib/tab-dot.test.ts`), or time the query in a child process that sets `window` before it loads query-core.
+A test that builds a child's env from scratch rather than from `process.env` passes `UV_PYTHON_INSTALL_DIR` and `UV_CACHE_DIR` through (`drive()` in `tests/scripts/ops/unstick/run.test.ts`), since a child's `uv run --python 3.13` without them downloads a 66 MB CPython into the scratch home, and on a slow network each case's download outlasts its 30s and starts again in the next.
 `Bun.which(name)` reads the PATH the process started with, so code under test that looks a tool up that way runs the real tool wherever one is installed and misses a stub the test prepends to `process.env.PATH`: look it up with `Bun.which(name, { PATH: process.env.PATH ?? "" })` (`packages/scripts/src/ops-ext-sync/sync.ts`), or take the lookup as a dependency the test passes in.
 
 ## End-to-end tests

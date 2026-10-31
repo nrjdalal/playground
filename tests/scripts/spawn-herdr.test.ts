@@ -683,6 +683,88 @@ describe("--runtime herdr opens the session in herdr (#909)", () => {
   })
 })
 
+describe("--effort sets the session's effort, high by default (#180)", () => {
+  test("a start with no --effort launches at high and records no --effort", async () => {
+    const r = await spawn(
+      ["worker", "worker-x", "b.md", "--runtime", "herdr"],
+      [],
+      {},
+      undefined,
+      undefined,
+      herdrPin(),
+    )
+    expect(r.code).toBe(0)
+    expect(launchOf(r)).toContain(" --effort high ")
+    expect(execLine(r, "worker-x")).not.toContain("--effort")
+  })
+
+  test("a start with --effort xhigh launches at xhigh, and its resume record keeps it", async () => {
+    const r = await spawn(
+      ["worker", "worker-x", "b.md", "--runtime", "herdr", "--effort", "xhigh"],
+      [],
+      {},
+      undefined,
+      undefined,
+      herdrPin(),
+    )
+    expect(r.code).toBe(0)
+    expect(launchOf(r)).toContain(" --effort xhigh ")
+    expect(launchOf(r)).not.toContain("--effort high")
+    const sid = launchOf(r).match(SID)?.[1] ?? ""
+    expect(execLine(r, "worker-x")).toBe(
+      `exec spawn.sh resume worker-x ${root} ${sid} --effort xhigh`,
+    )
+  })
+
+  test("a restore resumes a record's --effort at that effort", async () => {
+    const sid = "eeeeeeee-0000-4000-8000-000000000005"
+    const r = await spawn(["restore"], [], {}, undefined, undefined, (home) => {
+      herdrPin()(home)
+      for (const dir of ["resume", "runtimes", "backends"])
+        mkdirSync(lw(home, dir), { recursive: true })
+      writeFileSync(
+        lw(home, "resume", "worker-e.sh"),
+        `#!/bin/bash\nexec /x/scripts/spawn.sh resume worker-e ${root} ${sid} --effort xhigh\n`,
+      )
+      writeFileSync(lw(home, "runtimes", "worker-e"), "herdr\n")
+      writeFileSync(lw(home, "backends", "worker-e"), "claude\n")
+      transcript(home, sid)
+    })
+    expect(r.out).toBe("restored worker-e\n")
+    expect(launchOf(r)).toContain(
+      `--resume ${sid} -n worker-e --model claude-opus-5-5 --effort xhigh `,
+    )
+    expect(execLine(r, "worker-e")).toBe(
+      `exec spawn.sh resume worker-e ${root} ${sid} --effort xhigh`,
+    )
+  })
+
+  test.each([
+    {
+      args: ["--effort", "extreme"],
+      said: "--effort takes low, medium, high, xhigh or max, not extreme",
+    },
+    { args: ["--effort"], said: "--effort takes one of low, medium, high, xhigh or max, once" },
+    { args: ["--effort", "--title"], said: "--effort needs a value" },
+    {
+      args: ["--effort", "high", "--effort", "max"],
+      said: "--effort takes one of low, medium, high, xhigh or max, once",
+    },
+  ])("$args is refused before herdr runs", async ({ args, said }) => {
+    const r = await spawn(
+      ["worker", "worker-x", "b.md", "--runtime", "herdr", ...args],
+      [],
+      {},
+      undefined,
+      undefined,
+      herdrPin(),
+    )
+    expect(r.code).not.toBe(0)
+    expect(placing(r)).toEqual([])
+    expect(r.err).toContain(said)
+  })
+})
+
 describe("with no --runtime, a start opens in herdr whatever its spawner's terminal (#1484)", () => {
   test("from herdr, outside cmux, it opens in herdr", async () => {
     const r = await spawn(
