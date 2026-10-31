@@ -52,7 +52,7 @@ describe.skipIf(!dockerUp())("Yard's tables", () => {
         "--> statement-breakpoint",
       ))
         if (statement.trim()) await db.unsafe(statement)
-    for (const id of ["ada", "bo"])
+    for (const id of ["ada", "bo", "cy"])
       await db`insert into "user" (id, name, email) values (${id}, ${id}, ${`${id}@example.com`})`
   }, 60_000)
 
@@ -70,8 +70,8 @@ describe.skipIf(!dockerUp())("Yard's tables", () => {
     return row.id as string
   }
 
-  const post = (channelId: string, text: string, status = "sent") =>
-    db`insert into yard_message (id, channel_id, device, kind, status, text, user_id) values (${crypto.randomUUID()}, ${channelId}, ${"studio"}, ${"text"}, ${status}, ${text}, ${"ada"})`
+  const post = (channelId: string, text: string, status = "sent", userId = "ada") =>
+    db`insert into yard_message (id, channel_id, device, kind, login, status, text, user_id) values (${crypto.randomUUID()}, ${channelId}, ${"studio"}, ${"text"}, ${userId}, ${status}, ${text}, ${userId})`
 
   // What a member reads in a channel: every sent message, and their own pending ones.
   const visible = async (channelId: string, reader: string) =>
@@ -111,7 +111,7 @@ describe.skipIf(!dockerUp())("Yard's tables", () => {
     expect(
       await refusal(
         () =>
-          db`insert into yard_message (id, channel_id, device, kind, text, user_id) values (${crypto.randomUUID()}, ${id}, ${"studio"}, ${"shout"}, ${"hi"}, ${"ada"})`,
+          db`insert into yard_message (id, channel_id, device, kind, login, text, user_id) values (${crypto.randomUUID()}, ${id}, ${"studio"}, ${"shout"}, ${"ada"}, ${"hi"}, ${"ada"})`,
       ),
     ).toContain("yard_message_kind_check")
     expect(await refusal(() => post(id, "hi", "lost"))).toContain("yard_message_status_check")
@@ -126,5 +126,14 @@ describe.skipIf(!dockerUp())("Yard's tables", () => {
     ["ada-cy", "dm"],
   ])("a channel named %s of kind %s is refused", async (name, kind) => {
     expect(await refusal(() => channel(name, kind))).toContain("yard_channel_dm_name_check")
+  })
+
+  test("deleting a user keeps their messages, attributed by login and device", async () => {
+    const id = await channel("random", "channel")
+    await post(id, "from cy", "sent", "cy")
+    await db`delete from "user" where id = ${"cy"}`
+    expect([
+      ...(await db`select device, login, user_id from yard_message where channel_id = ${id}`),
+    ]).toEqual([{ device: "studio", login: "cy", user_id: null }])
   })
 })

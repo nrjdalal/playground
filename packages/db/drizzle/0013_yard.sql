@@ -43,10 +43,11 @@ CREATE TABLE "yard_message" (
 	"device" text NOT NULL,
 	"kind" text NOT NULL,
 	"links" jsonb,
+	"login" text NOT NULL,
 	"parent_id" text,
 	"status" text DEFAULT 'sent' NOT NULL,
 	"text" text NOT NULL,
-	"user_id" text NOT NULL,
+	"user_id" text,
 	CONSTRAINT "yard_message_kind_check" CHECK (kind in ('answer', 'bug', 'fix', 'log', 'notice', 'question', 'steps', 'text')),
 	CONSTRAINT "yard_message_status_check" CHECK (status in ('denied', 'pending', 'sent')),
 	CONSTRAINT "yard_message_text_check" CHECK (char_length("yard_message"."text") between 1 and 4000)
@@ -78,7 +79,7 @@ ALTER TABLE "yard_member" ADD CONSTRAINT "yard_member_channel_id_yard_channel_id
 ALTER TABLE "yard_member" ADD CONSTRAINT "yard_member_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "yard_message" ADD CONSTRAINT "yard_message_channel_id_yard_channel_id_fk" FOREIGN KEY ("channel_id") REFERENCES "public"."yard_channel"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "yard_message" ADD CONSTRAINT "yard_message_parent_id_yard_message_id_fk" FOREIGN KEY ("parent_id") REFERENCES "public"."yard_message"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "yard_message" ADD CONSTRAINT "yard_message_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "yard_message" ADD CONSTRAINT "yard_message_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "yard_token" ADD CONSTRAINT "yard_token_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 CREATE INDEX "yard_member_user_idx" ON "yard_member" USING btree ("user_id");--> statement-breakpoint
 CREATE INDEX "yard_message_channel_status_at_idx" ON "yard_message" USING btree ("channel_id","status","at");--> statement-breakpoint

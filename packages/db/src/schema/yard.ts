@@ -84,7 +84,7 @@ export const yardMember = pgTable(
   ],
 )
 
-// One message as @packages/message shapes it: device is the token's name, or web for a post from the browser; parent makes it a reply in a thread; a tier-two post waits as pending, seen by its sender alone, until the owner's web session sends or denies it at decided_at.
+// One message as @packages/message shapes it: login and device are its from, kept as text so a removed member's messages stay attributed once user_id goes null; device is the token's name, or web for a post from the browser; parent makes it a reply in a thread; a tier-two post waits as pending, seen by its sender alone, until the sender's web session sends or denies it at decided_at.
 export const yardMessage = pgTable(
   "yard_message",
   {
@@ -97,14 +97,13 @@ export const yardMessage = pgTable(
     device: text("device").notNull(),
     kind: text("kind", { enum: MESSAGE_KINDS }).notNull(),
     links: jsonValue("links").$type<string[]>(),
+    login: text("login").notNull(),
     parentId: text("parent_id").references((): AnyPgColumn => yardMessage.id, {
       onDelete: "cascade",
     }),
     status: text("status", { enum: MESSAGE_STATUSES }).default("sent").notNull(),
     text: text("text").notNull(),
-    userId: text("user_id")
-      .notNull()
-      .references(() => user.id, { onDelete: "cascade" }),
+    userId: text("user_id").references(() => user.id, { onDelete: "set null" }),
   },
   (table) => [
     oneOf("yard_message_kind_check", "kind", MESSAGE_KINDS),
