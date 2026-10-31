@@ -961,7 +961,9 @@ describe("ci.sh web", () => {
     expect(near("web")).toBe(2)
     expect(near("web", "HEAD")).toBe(2)
   })
+})
 
+describe("usage", () => {
   // each prints its whole leading comment block as its usage, a line added to the header included, and no code line after it
   test.each(["ci.sh", "host.sh"])(
     "%s with no arguments prints its header and stops before its code",
@@ -975,7 +977,7 @@ describe("ci.sh web", () => {
           [shebang, "# A line added to the header.", ...rest].join("\n"),
         )
         const r = Bun.spawnSync(["bash", join(copy, name)], {
-          env: { HOME: tmpdir(), PATH: "/usr/bin:/bin", RUNNER_HOST: "203.0.113.7" },
+          env: { HOME: copy, PATH: "/usr/bin:/bin", RUNNER_HOST: "203.0.113.7" },
         })
         const header = ["# A line added to the header.", ...rest]
         const block = header.slice(
