@@ -47,11 +47,18 @@ describe("futureNowTimes", () => {
     expect(futureNowTimes("now 3:40 am", NOW, "UTC")).toEqual(['"now 3:40 am": 357 min ahead'])
     expect(futureNowTimes("now 9:50 pm", NOW, "UTC")).toEqual(['"now 9:50 pm": 7 min ahead'])
     expect(futureNowTimes("now 9:50 pm", NOW, "Asia/Kolkata")).toEqual([])
+    expect(futureNowTimes("now: 10:30 pm UTC, measured = 22:30Z", NOW, "UTC")).toEqual([
+      '"now: 10:30 pm UTC": 47 min ahead',
+      '"measured = 22:30Z": 47 min ahead',
+    ])
   })
 
-  test("passes an ETA, a time within the slack, a past one and one just before midnight", () => {
+  test("passes an ETA, one after now included, a time within the slack, a past one, one 12 hours back and one just before midnight", () => {
     const eta = { text: "ETA 11:30 pm UTC, finish 2026-11-01T02:00:00Z" }
     expect(futureNowTimes(eta, NOW, "UTC")).toEqual([])
+    expect(futureNowTimes("Merging now, ETA 11:30 pm UTC", NOW, "UTC")).toEqual([])
+    expect(futureNowTimes("Done now, next run 11:00 pm UTC", NOW, "UTC")).toEqual([])
+    expect(futureNowTimes("measured 9:43 am UTC", NOW, "UTC")).toEqual([])
     expect(futureNowTimes("measured 9:44 pm UTC", NOW, "UTC")).toEqual([])
     expect(futureNowTimes("measured 9:10 pm UTC", NOW, "UTC")).toEqual([])
     expect(

@@ -54,13 +54,17 @@ const strings = (value: unknown): string[] =>
         ? Object.values(value).flatMap(strings)
         : []
 
-// "measured" or "now", then within a few words a time: an ISO one, or a clock time with am/pm or a 24-hour one, each with an optional zone (IST, UTC or Z).
-const STAMPED =
-  /\b(?:measured|now)\b[^\n]{0,16}?(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})|\b\d{1,2}:\d{2}(?:\s?(?:am|pm))?(?:\s?(?:IST|UTC|Z))?)/gi
+const ZONES = Object.keys(ZONE_ALIASES).join("|")
 
-const CLOCK = /^(\d{1,2}):(\d{2})(?:\s?(am|pm))?(?:\s?(IST|UTC|Z))?$/i
+// "measured" or "now", then a time right after it (or after an at, a colon, a comma or an equals sign), so an ETA later in the sentence passes: an ISO time, or a clock time with am/pm or a 24-hour one, each with an optional zone.
+const STAMPED = new RegExp(
+  `\\b(?:measured|now)\\b(?:\\s*[:,=]|\\s+at)?\\s*(\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}(?::\\d{2}(?:\\.\\d+)?)?(?:Z|[+-]\\d{2}:\\d{2})|\\b\\d{1,2}:\\d{2}(?:\\s?(?:am|pm))?(?:\\s?(?:${ZONES}))?)`,
+  "gi",
+)
 
-// How far a time in text runs ahead of now, in ms: an ISO time by its own moment, a clock time against the same zone's clock now, within 12 hours either way, so one just before midnight is a past one.
+const CLOCK = new RegExp(`^(\\d{1,2}):(\\d{2})(?:\\s?(am|pm))?(?:\\s?(${ZONES}))?$`, "i")
+
+// How far a time in text runs ahead of now, in ms: an ISO time by its own moment, a clock time against the same zone's clock now, within 12 hours either way, so one just before midnight or exactly 12 hours back is a past one.
 const aheadBy = (time: string, now: Date, zone: string): number | null => {
   const iso = Date.parse(time)
   if (time.includes("-") && !Number.isNaN(iso)) return iso - now.getTime()
@@ -73,7 +77,7 @@ const aheadBy = (time: string, now: Date, zone: string): number | null => {
   const clock = wallClock(now, named ? ZONE_ALIASES[named.toUpperCase()]! : zone)
   let minutes = hour * 60 + Number(m) - (clock.hour * 60 + clock.minute)
   if (minutes > 12 * 60) minutes -= 24 * 60
-  if (minutes <= -12 * 60) minutes += 24 * 60
+  if (minutes < -12 * 60) minutes += 24 * 60
   return minutes * 60 * 1000
 }
 
