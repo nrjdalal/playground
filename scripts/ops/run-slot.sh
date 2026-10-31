@@ -465,7 +465,36 @@ free() {
   [ -n "$TICKET" ] && rm -f "$TICKET"
 }
 trap 'free' EXIT
-trap '[ -n "$CHILD" ] && kill -TERM -- "-$CHILD" 2>/dev/null; wait "$CHILD" 2>/dev/null; exit 143' TERM INT HUP
+trap '[ -n "$CHILD" ] && kill -TERM -- "-$CHILD" 2>/dev/null; wait "$CHILD" 2>/dev/null; [ -n "$CHILD" ] && reap "$CHILD"; exit 143' TERM INT HUP
+
+# stops what is left in the command's process group once the command has ended (31 Oct: a suite's bun test worker outlived it by 5 hours,
+# reparented to launchd): TERM, then KILL after 3 seconds, each pid logged with its command line; the group is run-slot's own, so its caller is never in it
+reap() {
+  local left i
+  left=$(ps -A -o pid=,pgid=,command= | awk -v g="$1" '$2 == g { $2 = ""; print }')
+  [ -n "$left" ] || return 0
+  printf '%s\n' "$left" | while read -r pid cmd; do rlog reap "pid=$pid $cmd"; done
+  kill -TERM -- "-$1" 2>/dev/null
+  for i in $(seq 15); do
+    ps -A -o pgid= | awk -v g="$1" '$1 == g { found = 1 } END { exit !found }' || return 0
+    sleep 0.2
+  done
+  kill -KILL -- "-$1" 2>/dev/null
+}
+
+# runs the command as the leader of a process group of its own (macOS has no setsid(1)), so a dev stack it starts can be stopped by bun run dev:stop
+# and reap stops what it leaves; exits with the command's code
+run_command() {
+  local code
+  python3 -I -c 'import os, sys; os.setsid(); os.nice(int(os.environ.get("RUN_SLOT_NICE", "10"))); os.execvp(sys.argv[1], sys.argv[1:])' "$@" <&3 3<&- &
+  CHILD=$!
+  wait "$CHILD"
+  code=$?
+  reap "$CHILD"
+  CHILD=""
+  rlog end "rc=$code ran=$(($(date +%s) - TOOK))s"
+  exit "$code"
+}
 
 reclaim() {
   # $1 is a slot directory that mkdir found taken: free it when its holder line ($2 of stale) has gone stale; the line and the directory are
@@ -619,13 +648,7 @@ if [ -n "$MODEL_BOUND" ]; then
   echo "$WHO $$ $(date -u +%FT%TZ) 0 model" > "$SLOT.holder"
   echo "run-slot.sh: $WHO holds $(basename "$SLOT")" >&2
   TOOK=$(date +%s); rlog start "$(basename "$SLOT") waited=$((TOOK - ASKED))s"
-  python3 -I -c 'import os, sys; os.setsid(); os.nice(int(os.environ.get("RUN_SLOT_NICE", "10"))); os.execvp(sys.argv[1], sys.argv[1:])' "$@" <&3 3<&- &
-  CHILD=$!
-  wait "$CHILD"
-  code=$?
-  CHILD=""
-  rlog end "rc=$code ran=$(($(date +%s) - TOOK))s"
-  exit "$code"
+  run_command "$@"
 fi
 KIND=$(quick_kind "$@")
 if [ -n "$KIND" ]; then
@@ -658,13 +681,7 @@ if [ -n "$KIND" ]; then
   echo "$WHO $$ $(date -u +%FT%TZ)" > "$SLOT.holder"
   echo "run-slot.sh: $WHO holds run-slot-$KIND" >&2
   TOOK=$(date +%s); rlog start "run-slot-$KIND waited=$((TOOK - ASKED))s"
-  python3 -I -c 'import os, sys; os.setsid(); os.nice(int(os.environ.get("RUN_SLOT_NICE", "10"))); os.execvp(sys.argv[1], sys.argv[1:])' "$@" <&3 3<&- &
-  CHILD=$!
-  wait "$CHILD"
-  code=$?
-  CHILD=""
-  rlog end "rc=$code ran=$(($(date +%s) - TOOK))s"
-  exit "$code"
+  run_command "$@"
 fi
 
 # slots.peers, one folder a line, read once here since held_units runs in a subshell; a reader that cannot answer counts no peer
@@ -733,11 +750,4 @@ done
 [ -n "$SLOT" ] || exit 143
 echo "run-slot.sh: $WHO holds $(basename "$SLOT")" >&2
 TOOK=$(date +%s); rlog start "$(basename "$SLOT") waited=$((TOOK - ASKED))s"
-# the command leads a process group of its own (macOS has no setsid(1)), so a dev stack it starts can be stopped by bun run dev:stop
-python3 -I -c 'import os, sys; os.setsid(); os.nice(int(os.environ.get("RUN_SLOT_NICE", "10"))); os.execvp(sys.argv[1], sys.argv[1:])' "$@" <&3 3<&- &
-CHILD=$!
-wait "$CHILD"
-code=$?
-CHILD=""
-rlog end "rc=$code ran=$(($(date +%s) - TOOK))s"
-exit "$code"
+run_command "$@"

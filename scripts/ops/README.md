@@ -33,6 +33,7 @@ How run-slot runs the factory's **slots** rule (`extensions/core/rules/slots.md`
 - `git fetch`, `git rebase` and a `git merge` that finishes by itself run light, outside run-slot, since lefthook.yml has no merge hook; one sent through run-slot anyway takes `run-slot-commit`.
   Commit through `run-slot.sh <your name> -- git commit ...`, which holds `run-slot-commit` and builds under it; a plain `git commit` in a worktree joins the full queue through `packages/scripts/src/commit-slot.ts` as `commit-<worktree folder>`, a wait that can pass the Bash tool's 10 minutes, so run a plain one in the background.
   env-keys' build of `@packages/env` stays bare.
+- The command leads a process group of its own, which never holds run-slot's caller; once the command ends, run-slot stops what is left in that group (TERM, then KILL after 3 seconds) and writes a `reap` line in `run-slot.runs.log` for each pid with its command line, so a test runner's worker that outlives its suite is caught at once.
 - A tester that waits for a phase has the run touch a flag file and waits for the file, never `tail -F <log> | grep -m1`, which keeps running after its match; it reads the flag once more before it goes idle while it holds a slot.
 - A tester drives at any load, since run-slot queues only its heavy runs.
 - To count the kernel's idle kills across a load spike: `/usr/bin/log show --last 5m --predicate 'eventMessage CONTAINS "killing_idle_process"' | grep -c 'memorystatus: killing_idle_process'`, with `--start '<YYYY-MM-DD HH:MM:SS>' --end '<...>'` for a spike that has passed.
