@@ -150,6 +150,13 @@ describe("stackGroups", () => {
       },
     ])
   })
+
+  test("a Vibeground started and not serving yet reads starting, so the pane offers Stop and never a second Start", () => {
+    const booting = { ...stack("playground", "feat/c", null), vibe: true }
+    expect(stackGroups([booting])[0]?.items).toEqual([
+      { label: "feat/c · starting", value: "stopped:/playground/feat/c" },
+    ])
+  })
 })
 
 // the owner: "also clicking on Playground logo should switch it to vibeground"

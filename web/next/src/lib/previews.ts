@@ -46,7 +46,7 @@ export const startAddress = (
 // A stopped worktree's picker value, its path after this prefix, so picking it offers Start.
 export const STOPPED = "stopped:"
 
-// Pure: the picker's stacks, one group a project in the list's order (by project, then branch), each running one its URL and a stopped one its path after STOPPED, labelled by its branch, else its name, and the session working in it.
+// Pure: the picker's stacks, one group a project in the list's order (by project, then branch), each running one its URL and a stopped one its path after STOPPED, labelled by its branch, else its name, the session working in it, and a Vibeground started and not serving yet as starting.
 export const stackGroups = (
   stacks: readonly {
     branch: string | null
@@ -55,11 +55,16 @@ export const stackGroups = (
     project: string
     session: string | null
     url: string | null
+    vibe?: boolean
   }[],
 ) => {
   const groups = new Map<string, { label: string; value: string }[]>()
   for (const stack of stacks) {
-    const label = [stack.branch ?? stack.name, stack.session, !stack.url && "stopped"]
+    const label = [
+      stack.branch ?? stack.name,
+      stack.session,
+      !stack.url && (stack.vibe ? "starting" : "stopped"),
+    ]
       .filter(Boolean)
       .join(" · ")
     const items = groups.get(stack.project) ?? []
