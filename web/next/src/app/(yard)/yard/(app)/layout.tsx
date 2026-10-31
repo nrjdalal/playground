@@ -22,7 +22,7 @@ export default async function YardAppLayout({ children }: { children: React.Reac
     <SidebarShell
       homeHref="/yard"
       nav={<YardGroups />}
-      footer={<YardFooter login={session?.user.name ?? ""} />}
+      footer={<YardFooter login={session?.user.login ?? session?.user.name ?? ""} />}
     >
       <YardLive />
       {children}

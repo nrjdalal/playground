@@ -82,6 +82,32 @@ describe("Yard's pages, hosted alone", () => {
     expect(body.split("\n")[1]?.trim()).toBe("hostedPagesOnly(config.hosted)")
   })
 
+  test("the app's layout sends a signed-out visit home and a user without an invite to the invite page, before it draws the shell", async () => {
+    const source = await Bun.file(join(YARD, "yard/(app)/layout.tsx")).text()
+    const body = source.slice(source.indexOf("export default async function YardAppLayout"))
+    const shell = body.indexOf("<SidebarShell")
+    expect(shell).toBeGreaterThan(0)
+    for (const line of [
+      'if (gate === "sign-in") redirect("/")',
+      'if (gate === "invite") redirect("/yard/invite")',
+    ]) {
+      expect(body.indexOf(line)).toBeGreaterThan(0)
+      expect(body.indexOf(line)).toBeLessThan(shell)
+    }
+  })
+
+  test("the invite page sends a signed-out visit home and a member on to the app, before its form", async () => {
+    const source = await Bun.file(join(YARD, "yard/invite/page.tsx")).text()
+    const form = source.indexOf("<InviteGate")
+    for (const line of [
+      'if (gate === "sign-in") redirect("/")',
+      'if (gate === "app") redirect("/yard")',
+    ]) {
+      expect(source.indexOf(line)).toBeGreaterThan(0)
+      expect(source.indexOf(line)).toBeLessThan(form)
+    }
+  })
+
   test("the hosted web renders no Inbox aside, so no Preview row", () => {
     const reached = reach(filesUnder(YARD))
     expect(reached).toContain("components/yard/yard-groups.tsx")

@@ -93,6 +93,12 @@ describe("TranscriptMessage", () => {
     expect(html).toContain("[thread:k7mq]")
   })
 
+  test("plain text from outside Playground, a Yard message, keeps a leading marker as words, with no chip to a thread of ours", () => {
+    const html = render({ plain: true, text: "[thread:k7mq] from another member" })
+    expect(html).not.toContain("/dashboard/threads/")
+    expect(html).toContain("[thread:k7mq] from another member")
+  })
+
   test("a message of files alone has no bubble", () => {
     expect(render({ text: "  ", variant: "default" })).not.toContain('data-slot="bubble"')
   })

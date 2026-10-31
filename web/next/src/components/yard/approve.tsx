@@ -7,13 +7,14 @@ import { TranscriptMessage } from "@/components/transcript-message"
 import { Button } from "@/components/ui/button"
 import { toast } from "@/components/ui/toast"
 import { FromLine } from "@/components/yard/channel-view"
+import { YARD_KEY } from "@/lib/yard"
 import { yardApi } from "@/lib/yard-api"
 
 // A tier-two post waits until its sender's own signed-in web session sends it or denies it here, after reading what it says; a token never can. An Inbox card's Approve opens this page.
 export function Approve({ id }: { id: string }) {
   const { data: message, error } = useQuery({
     queryFn: async () => (await yardApi.message(id)).message,
-    queryKey: ["yard", "message", id],
+    queryKey: [...YARD_KEY, "message", id],
   })
   const [decided, setDecided] = useState<string | null>(null)
   const decide = async (choice: "approve" | "deny") => {
@@ -34,6 +35,7 @@ export function Approve({ id }: { id: string }) {
         <TranscriptMessage
           at={message.at}
           now={new Date()}
+          plain
           text={message.text}
           variant="muted"
           who={<FromLine message={message} />}

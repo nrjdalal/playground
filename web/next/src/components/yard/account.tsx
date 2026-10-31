@@ -13,7 +13,7 @@ import { toast } from "@/components/ui/toast"
 import { inviteRequests } from "@/lib/yard"
 import { INVITES_KEY, TOKENS_KEY, yardApi } from "@/lib/yard-api"
 
-// Account and tokens: each token is a device's way to post without a browser, named for that device (never "web"), its secret shown once. The owner also sees the invite requests waiting on them.
+// Account and tokens: each token is a device's way to post without a browser, named for that device (never "web"), its secret shown once. A member asks the owner to let someone in here, and the owner sees those requests.
 export function Account({ role }: { role: string | null | undefined }) {
   const client = useQueryClient()
   const { data: tokens } = useQuery({
@@ -104,7 +104,7 @@ export function Account({ role }: { role: string | null | undefined }) {
           <li className="text-muted-foreground px-3 py-2 text-xs">No tokens yet.</li>
         )}
       </ul>
-      {roleAtLeast(role, "owner") && <InviteRequests />}
+      {roleAtLeast(role, "owner") ? <InviteRequests /> : <RequestInvite />}
     </main>
   )
 }
@@ -132,5 +132,52 @@ function InviteRequests() {
         )}
       </ul>
     </section>
+  )
+}
+
+// A member asks the owner to let a GitHub login in; the request waits on the owner's approval, from this web session alone, as a token never asks.
+function RequestInvite() {
+  const [login, setLogin] = useState("")
+  const [sent, setSent] = useState<string | null>(null)
+  const request = async () => {
+    const forLogin = login.trim()
+    if (!forLogin) return
+    try {
+      await yardApi.requestInvite(forLogin)
+      setSent(forLogin)
+      setLogin("")
+    } catch (error) {
+      toast.add({ title: (error as Error).message, type: "error" })
+    }
+  }
+  return (
+    <form
+      onSubmit={(event) => {
+        event.preventDefault()
+        void request()
+      }}
+    >
+      <FieldGroup>
+        <Field>
+          <FieldLabel htmlFor="invite-login">Ask to let someone in, by GitHub login</FieldLabel>
+          <div className="flex gap-2">
+            <Input
+              id="invite-login"
+              onChange={(event) => setLogin(event.target.value)}
+              placeholder="octocat"
+              value={login}
+            />
+            <Button disabled={!login.trim()} type="submit">
+              Ask
+            </Button>
+          </div>
+          {sent && (
+            <p className="text-muted-foreground text-xs">
+              Asked for {sent}. It waits on the owner&apos;s approval.
+            </p>
+          )}
+        </Field>
+      </FieldGroup>
+    </form>
   )
 }

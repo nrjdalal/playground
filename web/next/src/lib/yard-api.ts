@@ -1,5 +1,6 @@
 "use client"
 
+import { env } from "@packages/env/web-next"
 import type { MESSAGE_KINDS } from "@packages/message"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect } from "react"
@@ -11,8 +12,9 @@ import {
   catchUp,
   messagesKey,
   messagesQuery,
-  SOCKET_ROUTE,
+  retryDelay,
   socketUrl,
+  upsertMessage,
   YARD_KEY,
   YARD_ROUTE,
   type YardChannel,
@@ -95,24 +97,33 @@ export const useYardChannels = () =>
 export const useYardMessages = (channel: string) =>
   useQuery(messagesQuery(channel, async () => (await yardApi.messages(channel)).messages ?? []))
 
-// One socket per signed-in tab: each frame lands in the query cache, and a closed socket (Vercel closes one at 800s) opens again with a fresh one-time token, then reads again what it may have missed (catchUp).
-export function useYardSocket(enabled: boolean) {
+// One socket per signed-in tab: each frame lands in the query cache, and a closed socket (Vercel closes one at 800s) opens again with a fresh one-time token, backing off while it keeps failing, then reads again what it may have missed (catchUp). A refused token read (signed out) stops it.
+export function useYardSocket() {
   const client = useQueryClient()
   useEffect(() => {
-    if (!enabled) return
     let socket: WebSocket | null = null
     let stopped = false
     let retry: ReturnType<typeof setTimeout> | undefined
     let opened = false
+    let tries = 0
+    const again = () => {
+      if (stopped) return
+      retry = setTimeout(open, retryDelay(tries))
+      tries += 1
+    }
     const open = async () => {
       try {
+        // the token read goes through config.api.url, which carries the session cookie; the socket goes to the API's own host
         const response = await fetch(`${config.api.url}/api/auth/one-time-token/generate`, {
           credentials: "include",
         })
+        if (response.status >= 400 && response.status < 500) return
+        if (!response.ok) return again()
         const { token } = (await response.json()) as { token: string }
         if (stopped) return
-        socket = new WebSocket(socketUrl(config.api.url, SOCKET_ROUTE, token))
+        socket = new WebSocket(socketUrl(env, token))
         socket.onopen = () => {
+          tries = 0
           if (opened) void catchUp(client)
           opened = true
         }
@@ -121,16 +132,14 @@ export function useYardSocket(enabled: boolean) {
           if (frame.type === "message" && frame.message) {
             const message = frame.message
             client.setQueryData<YardMessage[]>(messagesKey(message.channel), (list) =>
-              list ? [...list.filter((m) => m.id !== message.id), message] : list,
+              list ? upsertMessage(list, message) : list,
             )
           }
           void client.invalidateQueries({ queryKey: CHANNELS_KEY })
         }
-        socket.onclose = () => {
-          if (!stopped) retry = setTimeout(open, 2_000)
-        }
+        socket.onclose = again
       } catch {
-        if (!stopped) retry = setTimeout(open, 5_000)
+        again()
       }
     }
     void open()
@@ -139,5 +148,5 @@ export function useYardSocket(enabled: boolean) {
       clearTimeout(retry)
       socket?.close()
     }
-  }, [client, enabled])
+  }, [client])
 }

@@ -6,6 +6,7 @@ import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { useState } from "react"
 
+import { GroupCount } from "@/components/shell/group-count"
 import {
   SidebarGroup,
   SidebarGroupLabel,
@@ -20,7 +21,7 @@ import { isPlainClick } from "@/lib/threads"
 import { channelHref, channelTitle, type YardChannel, yardBadge, yardGroups } from "@/lib/yard"
 import { useYardChannels } from "@/lib/yard-api"
 
-// The Channels and Direct messages groups, read from the API's Yard router; each is absent while it has no rows, and both while the stack has no Yard. Each collapses as the Scripts group does, its label the toggle, open to start.
+// The Channels and Direct messages groups, read from the API's Yard router; each is absent while it has no rows, and both while the stack has no Yard. Each collapses as the Scripts group does, its label the toggle, open to start, and counts its rows.
 export function YardGroups() {
   const { data } = useYardChannels()
   const [channelsOpen, setChannelsOpen] = useState(true)
@@ -37,6 +38,7 @@ export function YardGroups() {
           >
             Channels
             <Chevron open={channelsOpen} />
+            <GroupCount count={channels.length} />
           </SidebarGroupLabel>
           {channelsOpen && <YardRows rows={channels} />}
         </SidebarGroup>
@@ -46,6 +48,7 @@ export function YardGroups() {
           <SidebarGroupLabel className="w-full pl-2.5" render={toggle(dmsOpen, setDmsOpen)}>
             Direct messages
             <Chevron open={dmsOpen} />
+            <GroupCount count={dms.length} />
           </SidebarGroupLabel>
           {dmsOpen && <YardRows rows={dms} />}
         </SidebarGroup>

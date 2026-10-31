@@ -14,6 +14,9 @@ export const MESSAGE_KINDS = [
 
 export const MAX_TEXT = 4000
 
+// How long a message is kept before the API's daily sweep deletes it (the owner's #i6); the web says so on an empty channel.
+export const RETENTION_DAYS = 90
+
 // A message's state: sent to the channel, or a tier-two post pending its sender's approval, or denied.
 export const MESSAGE_STATUSES = ["denied", "pending", "sent"] as const
 

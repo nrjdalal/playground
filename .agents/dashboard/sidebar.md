@@ -219,14 +219,14 @@
   its hover gives its name and job id, what it does (`OPS_DOES`), its state with the reason and its last beat, and, when its schedule's `every` differs from its heartbeat's `cycleSeconds`, both (`problem`).
   A script row opens nothing.
   Every group label ends with one number at its right, ZeroSDK's `countCell`, muted with tabular digits (`GroupCount`):
-  Orchestrators and Subagents count the sessions their rows hold, each nested reviewer and tester included, so a checker under a gone worker's muted roster row counts once (`heldCount` in `web/next/src/lib/dashboard.ts`); AI Runners and Other count their sessions, and Scripts the jobs it lists, the paused ones it hides left out (`scriptCount`).
+  Orchestrators and Subagents count the sessions their rows hold, each nested reviewer and tester included, so a checker under a gone worker's muted roster row counts once (`heldCount` in `web/next/src/lib/dashboard.ts`); AI Runners and Other count their sessions, Scripts the jobs it lists, the paused ones it hides left out (`scriptCount`), and Yard's two groups their rows.
   On Scripts and Other the chevron follows the label's word, so every count keeps the right-hand column.
   A manager's row reads its role word alone (`Ops`, in place of 22 Oct's names), its raw name, model and state in its tooltip, and a dispatcher's state keeps its label (`Alpha · Waiting on you`).
   An AI runner's tooltip adds when it runs, from the roster's `schedule` (`always` or a 5-field cron; `Opus 5.5 high · Working · every day at 5:00 AM`).
   See the glossary's Dispatcher, Manager, Worker and Runner.
 - Yard's two groups, **Channels** then **Direct messages** (`YardGroups` in `web/next/src/components/yard/yard-groups.tsx`), close the nav, after Other, so their arrival moves no row above them; the hosted build's sidebar holds them alone.
   They read `GET /api/v1/yard/channels` (`useYardChannels` in `web/next/src/lib/yard-api.ts`), on the hosted API or locally through the Yard routes that hold the Mac's token, and each is absent with no rows, both on a stack with no Yard (the read's 404).
-  Each collapses as Scripts does, its label the toggle with the chevron after its word, open to start, and carries no count.
+  Each collapses as Scripts does, its label the toggle with the chevron after its word, open to start, and its `GroupCount` counts its rows.
   Each row is a Threads row's shape: the stock 32px row, a `#` icon or a person's, `#name` or the other member's login cut at its end, its full title as its tooltip, and its unread count in `SidebarMenuBadge` (`countLabel`, `99+` past 99), in the mention colour (`bg-destructive`) while any of them names you, absent once read (`yardBadge` in `web/next/src/lib/yard.ts`).
   A click opens the channel in the chat pane (`channelHref`: `/dashboard/yard/<id>` locally, `/yard/c/<id>` hosted), whose view marks it read.
 - The Console's user menu, in its sidebar footer, names this Mac over the Claude account the usage readings reflect (with sign-in going); the Dashboard's, the aside toolbar's square, shows this Mac's initials, with a green dot while an update waits, and opens the same items (`UserMenuItems`), under Auto-hide tab bar on a wide screen:
