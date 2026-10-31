@@ -1115,6 +1115,17 @@ describe("a manager starts in a workspace of its own, in the leads worktree", ()
     expect(r.err).toContain("spawn.sh manager")
   })
 
+  test("the usage prints whole: every mode from worker, every option to the runtime record's line, and --effort (#180)", async () => {
+    const r = await spawn(["manager", "optimizer"], [])
+    const lines = r.err
+      .trimEnd()
+      .split("\n")
+      .filter((l) => !l.startsWith("spawn.sh: "))
+    expect(lines[0]).toStartWith("  spawn.sh worker ")
+    expect(r.err).toContain("  --effort <level> ")
+    expect(lines.at(-1)).toStartWith("    The runtime is recorded at the start")
+  })
+
   // The optimizer is a manager that reports to OLD.dispatcher and runs on Claude (brief-optimizer.md), so it starts as a lead.
   test("the optimizer starts as a lead on Claude, reporting to the dispatcher", async () => {
     const r = await spawn(["manager", "optimizer", "brief-optimizer.md"], others(3))

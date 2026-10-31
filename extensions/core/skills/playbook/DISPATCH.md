@@ -91,6 +91,7 @@ The steps to spawn and brief a session are in [SESSIONS.md](SESSIONS.md#spawn), 
   An `idle` line names worker stacks to stop: tell those workers.
   A `problems` line naming the sampler's lost timer goes to Ops, since only the dashboard's runner restarts the live dashboard's API (**dashboard**).
 - When the gate refuses, queue the task (`roster.ts backlog`) and say so, unless the owner calls it priority (below); only a task ready to dispatch goes in the backlog, though one can come to wait on something there.
+  Ready means its brief exists: a worker's order and a backlog entry each carry the brief's path, written when the item is queued.
   The owner's own asks go ahead of the chores the factory proposed, and a fix for live breakage or security goes ahead of both: the Planner folds his asks and the other entries into the lanes, his asks first, and a slot that opens takes what ROSTER.md's step 1 names ([ROSTER.md](ROSTER.md)).
 - A task the owner calls priority starts now: in the same turn, when the slots are full or `verify system` reads No room, close the lowest-priority worker at a safe point (a WIP commit, a handoff ([SESSIONS.md](SESSIONS.md#write-a-handoff)), closed as [SESSIONS.md](SESSIONS.md#end) End says),
   which frees its room so spawn.sh passes (at the load cap, wait for the load to fall), and spawn the task's worker; past the gate only the owner starts a session, from his own terminal, whose sessions load no factory hook, or a PR changes the gate.
