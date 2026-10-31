@@ -94,7 +94,8 @@ export async function stuckOf(
   return null
 }
 
-if (import.meta.main) {
+// one pass, no retry: its errors as one plain line, which the beat's failure alert reads
+const main = async () => {
   const token = process.env.SLACK_TOKEN
   if (!token) throw new Error("SLACK_TOKEN is unset: run it through vault.py run -e")
   const dir = dataDirOf(process.env)
@@ -115,3 +116,9 @@ if (import.meta.main) {
     tellOps: (text) => sendAs("unstick", true)("ops", text),
   })
 }
+
+if (import.meta.main)
+  await main().catch((error: Error) => {
+    console.error(`error: ${error.message}`)
+    process.exit(1)
+  })

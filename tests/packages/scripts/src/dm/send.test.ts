@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import { join } from "node:path"
 
 import { send } from "../../../../../packages/scripts/src/dm/send"
 import { ownerMessages, PLAYGROUND, USER } from "../../../../../packages/scripts/src/dm/slack"
@@ -97,5 +98,22 @@ describe("ownerMessages", () => {
       { subtype: "channel_join", text: "joined", ts: "7", user: OWNER },
     ]
     expect(ownerMessages(read, OWNER).map((m) => m.text)).toEqual(["first", "second"])
+  })
+})
+
+describe("send.ts as dm send runs it", () => {
+  test("with no token, it exits 1 with one plain error line", async () => {
+    const script = join(import.meta.dir, "../../../../../packages/scripts/src/dm/send.ts")
+    const env: Record<string, string | undefined> = { ...process.env }
+    delete env.SLACK_TOKEN
+    const child = Bun.spawn([process.execPath, script, "/nonexistent/body.md"], {
+      env,
+      stderr: "pipe",
+    })
+    const [err, code] = await Promise.all([new Response(child.stderr).text(), child.exited])
+    expect(code).toBe(1)
+    expect(err).toBe(
+      "error: usage: SLACK_TOKEN=<token> send.ts <file>, run by playground dm send\n",
+    )
   })
 })

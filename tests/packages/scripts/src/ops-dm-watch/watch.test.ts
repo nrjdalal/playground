@@ -130,3 +130,26 @@ describe("stuckOf", () => {
     })
   })
 })
+
+describe("watch.ts as the beat runs it", () => {
+  test("with no token, as when vault cannot read 1Password, one pass exits 1 with one plain error line and calls nothing", async () => {
+    const script = join(
+      import.meta.dir,
+      "../../../../../packages/scripts/src/ops-dm-watch/watch.ts",
+    )
+    const env: Record<string, string | undefined> = {
+      ...process.env,
+      PLAYGROUND_DATA_DIR: scratch(),
+    }
+    delete env.SLACK_TOKEN
+    const child = Bun.spawn([process.execPath, script], { env, stderr: "pipe", stdout: "pipe" })
+    const [out, err, code] = await Promise.all([
+      new Response(child.stdout).text(),
+      new Response(child.stderr).text(),
+      child.exited,
+    ])
+    expect(code).toBe(1)
+    expect(out).toBe("")
+    expect(err).toBe("error: SLACK_TOKEN is unset: run it through vault.py run -e\n")
+  })
+})

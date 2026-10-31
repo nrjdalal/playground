@@ -25,7 +25,7 @@ export async function send({ body, channel, leak, owner, slack }: Io): Promise<s
   const [before, latest] = await history(slack, { channel, limit: "2" })
   const last = latest ?? before
   // our last reply's USER line becomes this reply's PLAYGROUND line only while it is still the DM's latest message; a lone PLAYGROUND line a repair left opens this reply as it is
-  let mark = last?.ts
+  let mark: string | undefined = last?.ts
   if (ours(last, owner, USER) || ours(last, owner, PLAYGROUND)) {
     if (last!.text === USER)
       await call(slack, "chat.update", { channel, text: PLAYGROUND, ts: last!.ts })
@@ -57,7 +57,8 @@ export const leakOf = (channel: string) => (body: string) =>
     }),
   )
 
-if (import.meta.main) {
+// its errors as one plain line, which dm send's caller reads whole
+const main = async () => {
   const file = process.argv[2]
   const token = process.env.SLACK_TOKEN
   if (!file || !token)
@@ -76,3 +77,9 @@ if (import.meta.main) {
   })
   console.log(`dm send: posted, body at ${ts}`)
 }
+
+if (import.meta.main)
+  await main().catch((error: Error) => {
+    console.error(`error: ${error.message}`)
+    process.exit(1)
+  })
