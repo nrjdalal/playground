@@ -9,6 +9,7 @@ import {
   runStart,
   runStatus,
   statusLines,
+  usageOf,
   VIEW_HINT,
   dashboardBeatOf,
   waitOutcome,
@@ -535,6 +536,13 @@ describe("playground view", () => {
     expect(
       extraWordRefusal(["picker", "k3m9px-worker", "deny", "0a1b2c3d", "use", "mv"]),
     ).toBeNull()
+  })
+
+  test("yard post takes its words unquoted, as runYard joins them", () => {
+    expect(extraWordRefusal(["yard", "post", "ops", "the", "suite", "is", "green"])).toBeNull()
+    expect(extraWordRefusal(["yard", "read", "ops", "now"])).toBe(
+      "playground yard read takes no now\n" + usageOf("yard"),
+    )
   })
 
   test("sweep takes exactly its lead's name", () => {

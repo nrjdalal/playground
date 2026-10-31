@@ -45,9 +45,10 @@ describe("an invite request's page", () => {
 })
 
 describe("the sidebar's channel reads", () => {
-  test("read again every 30s on a local stack while Yard answers, and stop on a refusal or hosted", () => {
-    expect(channelsEvery(false, false)).toBe(30_000)
-    expect(channelsEvery(false, true)).toBe(false)
-    expect(channelsEvery(true, false)).toBe(false)
+  test("read again every 30s on a local stack, through a passing error, and stop on a 404 or hosted", () => {
+    expect(channelsEvery(false, null)).toBe(30_000)
+    expect(channelsEvery(false, { code: "UPSTREAM_ERROR" })).toBe(30_000)
+    expect(channelsEvery(false, { code: "NOT_FOUND" })).toBe(false)
+    expect(channelsEvery(true, null)).toBe(false)
   })
 })

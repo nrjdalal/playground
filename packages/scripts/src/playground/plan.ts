@@ -158,7 +158,7 @@ export const WORDS: Record<string, number | "rest"> = {
   "yard channels": 0,
   "yard login": 0,
   "yard logout": 0,
-  "yard post": 2,
+  "yard post": "rest",
   "yard read": 1,
 }
 

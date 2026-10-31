@@ -85,16 +85,16 @@ export const yardApi = {
   tokens: () => yard<{ tokens: YardToken[] }>("/tokens"),
 }
 
-// The sidebar's channels and DMs; a stack with no Yard (the local routes absent) reads an error, and the groups stay away.
-// Pure: how often the sidebar reads its channels again. Locally no socket runs, so its counts read every 30s while Yard answers; the hosted socket pushes them, and a refusal (Yard off or signed out, a 404) stops the reads.
-export const channelsEvery = (hosted: boolean, failed: boolean): number | false =>
-  hosted || failed ? false : 30_000
+// Pure: how often the sidebar reads its channels again. Locally no socket runs, so its counts read every 30s, through a passing error too; the hosted socket pushes them, and a refusal (Yard off or signed out, a 404) stops the reads.
+export const channelsEvery = (hosted: boolean, error: unknown): number | false =>
+  hosted || (error as { code?: string } | null)?.code === "NOT_FOUND" ? false : 30_000
 
+// The sidebar's channels and DMs; a stack with no Yard (the local routes absent) reads an error, and the groups stay away.
 export const useYardChannels = () =>
   useQuery({
     queryFn: async () => (await yardApi.channels()).channels ?? [],
     queryKey: CHANNELS_KEY,
-    refetchInterval: (query) => channelsEvery(config.hosted, query.state.error !== null),
+    refetchInterval: (query) => channelsEvery(config.hosted, query.state.error),
     retry: (count, error) =>
       (error as { code?: string }).code !== "NOT_FOUND" && queryRetry(count, error),
   })
