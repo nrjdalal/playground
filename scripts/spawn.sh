@@ -987,10 +987,11 @@ case "$MODE" in
     esac
     [ "$KIND" = dispatcher ] && { [ "$NAME" = "$TO" ] || { [ "$(session_kind "$NAME")" = dispatcher ] && ! second_dispatcher "$NAME"; }; } && FIRST=1 TO=
     DIR="${PLAYGROUND_REPO:-$MAIN}/.claude/worktrees/leads"
-    # A fresh checkout has no leads worktree until its first manager start cuts one on canary (a local canary, set to track origin's when it tracks nothing, else one tracking origin's), as the factory's own is: ops-tick's canary-pull keeps it current, and a manager's bare git calls land in its own tree, never the main checkout. Its install follows at once, since a manager runs bun run from it and canary-pull installs only after a pull that changes the lockfile.
+    # A fresh checkout has no leads worktree until its first manager start cuts one as branch leads from origin's copy of the branch the checkout was cloned on, tracking it: canary only for a checkout cloned on canary on purpose, else main, so a public install's managers run what it shipped. A branch of its own, since the checkout holds its branch already, and a manager's bare git calls land in its own tree, never the main checkout. Its install follows at once, since a manager runs bun run from it.
     if [ ! -e "$DIR" ]; then
-      made=$(git -C "${PLAYGROUND_REPO:-$MAIN}" worktree add -q "$DIR" canary 2>&1) || refuse "git worktree add $DIR canary failed, so there is no leads worktree to open in: ${made%%$'\n'*}"
-      git -C "$DIR" rev-parse -q --verify '@{upstream}' >/dev/null 2>&1 || git -C "$DIR" branch -q --set-upstream-to=origin/canary >/dev/null 2>&1 || true
+      base=main
+      [ "$(git -C "${PLAYGROUND_REPO:-$MAIN}" symbolic-ref -q --short HEAD 2>/dev/null)" = canary ] && base=canary
+      made=$(git -C "${PLAYGROUND_REPO:-$MAIN}" worktree add -q --track -B leads "$DIR" "origin/$base" 2>&1) || refuse "git worktree add $DIR origin/$base failed, so there is no leads worktree to open in: ${made%%$'\n'*}"
       made=$(bash "$REPO/scripts/ops/run-slot.sh" "$NAME" -- "$BUN" install --frozen-lockfile --ignore-scripts --cwd "$DIR" 2>&1) || { git -C "${PLAYGROUND_REPO:-$MAIN}" worktree remove --force "$DIR" >/dev/null 2>&1; refuse "bun install in the new leads worktree $DIR failed, so it is removed for the next start to cut again: ${made##*$'\n'}"; }
     fi
     [ -d "$DIR" ] || refuse "$DIR is not a folder"

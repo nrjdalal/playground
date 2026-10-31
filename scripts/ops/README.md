@@ -75,7 +75,7 @@ While one stands, `playground sweep ops` lists it once an hour with its age, exp
 ## When a job restarts onto new code
 
 A move of the dashboard's checkout or the main checkout restarts each ops job whose own source the move changed: `packages/scripts/src/ops-restart/cli.ts <checkout> <old sha> <new sha>` runs at the end of `dashboard/redeploy-pull.sh` and in the `release` skill's step 5.
-ops-tick's canary pull calls none, since it moves only the worktrees on `canary`, and no job runs from one.
+ops-tick's canary pull calls none, since it moves only the worktrees on `canary` and the leads worktree, and no job runs from one.
 A job's entry is the first path in its `jobs.json` command, or in its launchd plist's arguments, and only a job whose entry, followed through its links, sits in the moved checkout counts: ops-checks-go, ops-merge-train and ops-usage, whose entries link into `scripts/ops/`, are picked, while a job run from a file of the state folder's own is never picked.
 Its source is the entry's folder, each repo file the entry imports (TypeScript's relative imports followed through, a Python module beside it or one folder up) and each `@packages/<name>` it imports, whole, with each workspace package that package depends on.
 Each picked job is stopped by its heartbeat's pid, only while that pid's command line still holds the entry, and waited on up to 60s.

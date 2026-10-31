@@ -30,6 +30,9 @@ const fail = (message: string, code = 1): never => {
 
 const errorText = (err: unknown) => (err instanceof Error ? err.message : String(err))
 
+// A filesystem error carries the call that failed; anything else status meets comes from the database
+const fromFiles = (err: unknown) => err instanceof Error && "syscall" in err
+
 // Which importer holds the lock on this database, by the application_name it set on the connection holding it.
 const holderOf = async (lock: SQL): Promise<string | null> => {
   const [row] = await lock`
@@ -107,7 +110,11 @@ if (mode === "status") {
   try {
     process.exit((await status(db, lock)) ? 0 : 1)
   } catch (err) {
-    fail(`the database is not ready (${errorText(err)}); is the latest migration applied?`)
+    fail(
+      fromFiles(err)
+        ? `could not read the transcripts under ${projectsDir()} (${errorText(err)})`
+        : `the database is not ready (${errorText(err)}); is the latest migration applied?`,
+    )
   }
 }
 

@@ -162,4 +162,66 @@ describe.skipIf(!dockerUp())("the bun run ingest CLI", () => {
     expect(log).toContain("stopped by SIGTERM")
     expect(cli(["status"]).code).toBe(1)
   }, 30_000)
+
+  // a config folder Claude Code has run no session in yet: no projects folder under it
+  const freshConfig = () => {
+    const fresh = mkdtempSync(join(tmpdir(), "dashboard-ingest-fresh-"))
+    return { env: { ...env(), CLAUDE_CONFIG_DIR: fresh }, fresh }
+  }
+
+  test("before Claude Code's first session makes the projects folder, status reads no transcripts and blames no database", () => {
+    const { env: freshEnv, fresh } = freshConfig()
+    try {
+      const status = Bun.spawnSync([process.execPath, CLI, "status"], {
+        cwd: fresh,
+        env: freshEnv,
+        stderr: "pipe",
+        stdout: "pipe",
+      })
+      const said = status.stdout.toString() + status.stderr.toString()
+      expect(said).not.toContain("database is not ready")
+      expect(said).toContain("0 never read")
+      expect(status.exitCode).toBe(1)
+    } finally {
+      rmSync(fresh, { force: true, recursive: true })
+    }
+  })
+
+  test("before Claude Code's first session makes the projects folder, the follower waits for it, then reads it", async () => {
+    const { env: freshEnv, fresh } = freshConfig()
+    const session = "66666666-7777-4888-9999-aaaaaaaaaaaa"
+    try {
+      const follower = Bun.spawn([process.execPath, CLI, "--follow"], {
+        cwd: fresh,
+        env: freshEnv,
+        stderr: "pipe",
+        stdout: "pipe",
+      })
+      const reader = follower.stdout.getReader()
+      let log = ""
+      while (!log.includes("following")) {
+        const { done, value } = await reader.read()
+        if (done) break
+        log += new TextDecoder().decode(value)
+      }
+      expect(log).toContain("yet; waiting for Claude Code's first session")
+      expect(log).toContain("following")
+
+      mkdirSync(join(fresh, "projects", "-repo"), { recursive: true })
+      writeFileSync(
+        join(fresh, "projects", "-repo", `${session}.jsonl`),
+        line("f1", "first") + line("f2", "second"),
+      )
+      const stored = async () =>
+        (await admin`select count(*)::int as n from claude_entry where session_id = ${session}`)[0]
+          .n as number
+      for (let i = 0; i < 40 && (await stored()) < 2; i++) await Bun.sleep(250)
+      expect(await stored()).toBe(2)
+
+      follower.kill("SIGTERM")
+      expect(await follower.exited).toBe(0)
+    } finally {
+      rmSync(fresh, { force: true, recursive: true })
+    }
+  }, 30_000)
 })

@@ -883,7 +883,7 @@ bun() {
   esac
 }
 check_dev() { wait; listed verify-fails && { echo "verify=FAIL"; return 1; }; echo "verify=PASS"; }
-start_follower() { :; }; check_follower() { echo "follower=running"; }
+start_follower() { :; }; check_follower() { echo "follower=running"; }; setup_pending() { return 1; }
 ${fn("behind")}
 ${block("dev_reason")}
 ${block("reload_if")}
@@ -986,5 +986,74 @@ describe("the supervisor's production build", () => {
       "passed",
     ])
     expect(await Bun.file(join(builds, "passed")).text()).toBe("c\n")
+  })
+})
+
+// First run's setup writes POSTGRES_URL into the checkout's .env; until then the follower, which validates it at once, would exit on every tick (#31).
+describe("the follower before first run's setup (#31)", () => {
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), "supervisor-setup-")))
+  afterAll(() => rmSync(dir, { force: true, recursive: true }))
+  const calls = join(dir, "calls")
+  const env = join(dir, ".env")
+  const loop = script.slice(
+    script.indexOf("  if ! alive dashboard-dev; then\n"),
+    script.indexOf("\ndone\n", script.indexOf("  if ! alive dashboard-dev; then\n")),
+  )
+  const stubs = `WT=${dir} S=${dir}
+say() { echo "say $*" >> ${calls}; }; result() { echo "result $*" >> ${calls}; }
+start_dev() { :; }; check_dev() { echo dev=up; }; stop_all() { :; }; dev_down() { :; }
+start_follower() { echo start_follower >> ${calls}; }; check_follower() { echo follower=running; }
+follower_held() { return 1; }; alive() { [ "$1" = dashboard-dev ]; }; build_head() { :; }; keep_builds() { :; }
+${fn("setup_pending") ?? ""}
+${script.slice(script.indexOf("\nroll_up() {") + 1, script.indexOf("\n}\n", script.indexOf("\nroll_up() {")) + 2)}
+`
+  const sup = async (body: string, dotenv: string) => {
+    rmSync(calls, { force: true })
+    await Bun.write(env, dotenv)
+    const { POSTGRES_URL: _, ...rest } = process.env
+    const proc = Bun.spawn(["bash", "-c", `${stubs}\n${body}`], {
+      cwd: wt,
+      env: rest,
+      stdout: "pipe",
+    })
+    expect(await proc.exited).toBe(0)
+    return (
+      await Bun.file(calls)
+        .text()
+        .catch(() => "")
+    )
+      .trim()
+      .split("\n")
+  }
+  const URL_LINE = "POSTGRES_URL=postgresql://postgres:pw@127.0.0.1:1/playground\n"
+
+  test("a roll leaves the follower stopped and passes, saying it waits, while the .env names no POSTGRES_URL", async () => {
+    const lines = await sup("roll_up START", 'NODE_ENV=local\nPOSTGRES_URL=""\n')
+    expect(lines).not.toContain("start_follower")
+    expect(lines).toHaveLength(2)
+    expect(lines[0]).toMatch(/^say follower: waiting for first run's setup/)
+    expect(lines[1]).toMatch(
+      /^result START \w+ PASS dev=up follower=waiting for first run's setup$/,
+    )
+  })
+
+  test("the loop waits with one line and no DOWN or FAIL, then starts the follower on the first tick after setup writes the URL", async () => {
+    const lines = await sup(
+      `for tick in 1 2 3 4; do\n[ $tick = 3 ] && echo "${URL_LINE.trim()}" >> ${env}\n[ $tick = 4 ] && alive() { :; }\n${loop}\ndone`,
+      "NODE_ENV=local\n",
+    )
+    expect(lines.filter((line) => /DOWN|FAIL/.test(line))).toEqual([])
+    expect(lines).toEqual([
+      expect.stringMatching(/^say follower: waiting for first run's setup/),
+      "say follower: first run's setup wrote POSTGRES_URL; starting it",
+      "start_follower",
+      "result START follower follower=running",
+    ])
+  })
+
+  test("with POSTGRES_URL set, a roll starts the follower as before", async () => {
+    const lines = await sup("roll_up START", URL_LINE)
+    expect(lines[0]).toBe("start_follower")
+    expect(lines[1]).toMatch(/^result START \w+ PASS dev=up follower=running$/)
   })
 })
