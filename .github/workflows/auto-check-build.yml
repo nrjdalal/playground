@@ -18,6 +18,7 @@ permissions:
 jobs:
   auto-check-build:
     name: Audit, Lint, and Build
+    timeout-minutes: 20
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -64,3 +65,5 @@ jobs:
         env:
           NODE_ENV: production
           SKIP_ENV_VALIDATION: true
+          # the suite's parallel pass names the file it hangs in at its deadline, which lands well inside the job's 20 minutes
+          TEST_PARALLEL_DEADLINE_MS: 600000
