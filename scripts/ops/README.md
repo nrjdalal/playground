@@ -17,7 +17,7 @@ The factory's ops scripts, moving here from `~/.playground/ops`. The code lives 
 
 ## run-slot
 
-How run-slot runs the factory's **slots** rule (`extensions/core/rules/slots.md`), beside its row above.
+How run-slot runs the factory's **slots** rule (`extensions/core/rules/slots.md`), beside its entry above.
 
 - Slots open one to four as the load allows, each giving 2 load units; a run counts its item's size, small 1, medium 2 and big 3, and `run-slot.sh size <your name>` prints yours: `RUN_SLOT_SIZE`, else small for a `commit-<worktree>` pre-commit build, else your roster entry's `size` or your worker's, else plan.json's item for your branch's issue, else medium.
 - A quarter of the units, at least 1, stays for small runs, the work org's runs and the runs that gate a merge.
@@ -42,7 +42,7 @@ How run-slot runs the factory's **slots** rule (`extensions/core/rules/slots.md`
 
 ## ops-unstick
 
-How ops-unstick runs its part of the factory's **unstick** rule (`extensions/core/rules/unstick.md`), beside its row above; the session-state hook's part is in [the hooks README](../hooks/README.md#session-state).
+How ops-unstick runs its part of the factory's **unstick** rule (`extensions/core/rules/unstick.md`), beside its entry above; the session-state hook's part is in [the hooks README](../hooks/README.md#session-state).
 
 - A pass reads every live session's screen, cmux's and herdr's (`herdr pane read --source visible`), then sleeps 120s, and reads a screen only once its transcript has been quiet 60s (`QUIET_READ`), so a block lands 2 to 5 minutes after it appears.
 - An API-error stop no hook recorded gets one resume line after 2 minutes idle and a line to its lead, and the lead again 10 minutes on; a stop on autocompact thrashing names small reads, and a fresh start from the brief if it thrashes again.
