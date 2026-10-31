@@ -495,6 +495,13 @@ with tempfile.TemporaryDirectory() as repo:
     check("tests/uses-old.test.ts" in touched(repo)[1], "10k a renamed file's old path still selects the test importing it")
 
 with tempfile.TemporaryDirectory() as repo:
+    scratch_repo(repo, {"docs/page.md": "x\n", "tests/packages/scripts/src/trace-count/count.test.ts": 'import { tree } from "./count"\n'})
+    write(repo, {"docs/page.md": "y\n"})
+    git(repo, "commit", "-qam", "a docs line")
+    check("tests/packages/scripts/src/trace-count/count.test.ts" in touched(repo)[1],
+          "10p the trace ratchet's test, which counts the repo through count.ts's git ls-files, is listed for any change")
+
+with tempfile.TemporaryDirectory() as repo:
     scratch_repo(repo, {
         "pyproject.toml": "[project]\n",
         "src/pkg/integrations/street/form.py": "x\n",

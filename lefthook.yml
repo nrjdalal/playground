@@ -42,6 +42,18 @@ pre-commit:
         - "extensions/core/skills/playbook/*.md"
         - "web/next/content/docs/dashboard.mdx"
       run: bun --no-env-file packages/scripts/src/docs-wrap/cli.ts --check
+    trace-count:
+      # the trace ratchet's test, which CI runs and which went red there on pull requests whose local runs passed; it reads git's files, a staged one included, and a commit of images alone skips it
+      priority: 3
+      exclude:
+        - "*.gif"
+        - "*.ico"
+        - "*.jpeg"
+        - "*.jpg"
+        - "*.png"
+        - "*.webp"
+        - "*.woff2"
+      run: bun run test:file tests/packages/scripts/src/trace-count/count.test.ts
     dev-stack:
       # the build below rebuilds packages/* under this checkout's running `bun run dev` and hangs it, so the commit waits for the stack to stop
       priority: 3
