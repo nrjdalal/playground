@@ -16,6 +16,7 @@ import {
   saveManagersOrder,
   useAgents,
 } from "@/lib/agents"
+import { useBuildReload } from "@/lib/build-reload"
 import { useDashboardChats, type DashboardChats, type Outbox } from "@/lib/chat"
 import {
   dispatcherOf,
@@ -92,6 +93,8 @@ export function DashboardProvider({
   children: React.ReactNode
 }) {
   const socket = useDashboardSocket(allowed)
+  // after a roll serves a new build, an open tab reloads onto it once (the production build has no dev socket)
+  useBuildReload()
   const { approvals, connected, dispatcher, dispatchers, generation, problem, subscribe, watch } =
     socket
   // The one poller of the inbox, here because the provider is always mounted (on a narrow screen the sidebar unmounts while it is closed); every surface that shows it reads its cache.
