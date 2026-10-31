@@ -21,6 +21,8 @@ Agent-fired: a session loads it before every `playground ask new`, and the owner
 | A draft, or a Slack or ticket decision       | the message or ticket itself, in its own shape |
 | A secret ask                                 | its key and sink alone, under a plain title    |
 
+The kind also decides how the card closes. A decision or a draft the session decided another way is settled. An alert update that fixed itself is resolved. Any other update stays as posted until you read or dismiss it, so a card the session will replace, such as a mock's first version, is edited in place.
+
 ## The card it writes for
 
 ```
