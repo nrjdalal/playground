@@ -57,10 +57,13 @@ How ops-unstick runs its part of the factory's **unstick** rule (`extensions/cor
 
 How to read an account's week for the factory's **usage** rule (`extensions/core/rules/usage.md`).
 
-- The readings are the rows `week-marks.py` appends to `ops/usage/` on each ops tick, each `{t, week, reset, account}`: `week-samples.jsonl` for the account the Claude login holds, and `account-samples.jsonl` for every other account in usage.json's `accounts`.
+- The readings are the rows `week-marks.py` appends to `ops/usage/` on each ops tick, each `{t, week, reset, account}`: `week-samples.jsonl` for usage.json's account, the one the factory spends, while `usage.accounts` lists it, and `account-samples.jsonl` for every other account in usage.json's `accounts`.
+  An account's rows move from one file to the other as the factory moves onto it or off it, so read an account by its `account` field across both files.
   The move's time comes from the move itself, as the session that made it reported it.
 - The pace is the gain in `week` from the first reading at or after the move to the latest, divided by the hours between them, once those readings span 3 hours or more, since each is a whole percent; set the time it reaches 90% against the same rows' `reset`.
-- The report's table is each account's latest reading, `login-flip.json`'s `seen` (`five` and `week`, their resets `fiveReset` and `weekReset`, and `at`, when it was read); `playground accounts list` prints the two percents for each Claude account, and the report marks an account read more than 15 minutes ago stale with its age.
+- The report's table is each account's latest reading: `login-flip.json`'s `seen` for each account `usage.accounts` lists (`five` and `week`, their resets `fiveReset` and `weekReset`, and `at`), and `stored-login.json` (its `rate_limits` and `writtenAt`) for the stored login.
+  For usage.json's own account read through `/usage`, `seen`'s `at` is login-flip's run time rather than the read, so take that account's age from usage.json's `writtenAt`.
+  `playground accounts list` prints the two percents for each Claude account, and the report marks an account read more than 15 minutes ago stale with its age.
 
 ## Ops switches
 
