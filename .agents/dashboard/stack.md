@@ -28,7 +28,7 @@
   reusing the URL it prints when that name already runs, `docker exec <container> pg_isready -U postgres` for up to 30 s, `provenLocal()`, the migrations,
   and the URL written into `.env` at 0600 while its `POSTGRES_URL` is empty.
   It mounts no named volume, so `docker rm -f -v` takes the data with the container, and a failed step leaves the container running, so Try again reuses it through pglaunch's name match.
-  Once it is done, `firstRun()` loads `index.ts` in the same process and serves it from then on, so setup's routes answer 404 with no restart; the built bundle serves `index.ts` alone.
+  Once it is done, `firstRun()` loads `index.ts` in the same process and serves it from then on, so setup's routes answer 404 with no restart; the Docker bundle serves `index.ts` alone, and the Vercel bundle (`build:vercel`) `hosted.ts` alone.
   `@packages/db` builds with no `POSTGRES_URL`, checking it only when set, and `@packages/env`'s db keys read it when the schema is built rather than when the module loads, so the app `firstRun()` loads takes the URL setup set.
   On the web, first run lives on `/dashboard`: its layout (`web/next/src/app/(protected)/layout.tsx`) reads `GET /api/setup` before any session read, and while it answers 200 (setup) or no session exists renders the first-run pane (`web/next/src/components/first-run/first-run.tsx`) in place of the dashboard,
   asking no more once it answers 404 (`readSetup`, `gateOf` and `firstRunView` in `web/next/src/lib/first-run.ts`).
