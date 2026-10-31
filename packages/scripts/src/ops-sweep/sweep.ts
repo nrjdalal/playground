@@ -297,7 +297,7 @@ export async function lateReviewers(
 
 // A live worker's PG branch whose head is NO_PR_AFTER seconds old with no PR in any state: one line to the worker's lead, once per head, since CI runs only on a PR into canary, so a lead can plan around a run that never started. The branch is the one its row records at first push (playbook's ROSTER.md); a row holding a pr, or one whose status is not live, is not read, and one GraphQL read covers every branch.
 export async function prlessBranches(ctx: Context, agents: Json[]): Promise<string[]> {
-  const workers = new Map<string, string>()
+  const workerOf = new Map<string, string>()
   for (const a of agents)
     if (
       (STATUSES.live as string[]).includes(String(a.status)) &&
@@ -305,15 +305,15 @@ export async function prlessBranches(ctx: Context, agents: Json[]): Promise<stri
       kindOf(String(a.name), a.kind) === "worker" &&
       /^pg-\d+/i.test(String(a.branch ?? ""))
     )
-      workers.set(String(a.branch), String(a.name))
-  if (!workers.size) return []
+      workerOf.set(String(a.branch), String(a.name))
+  if (!workerOf.size) return []
   let repo: string
   try {
     repo = await (ctx.factory ?? (() => factoryRepoOf()))()
   } catch {
     return ["branch-check-unreadable"]
   }
-  const branches = [...workers.keys()]
+  const branches = [...workerOf.keys()]
   const [owner, name] = repo.split("/")
   const query = `{ repository(owner: "${owner}", name: "${name}") { ${branches.map((b, i) => `b${i}: ref(qualifiedName: ${JSON.stringify(`refs/heads/${b}`)}) { associatedPullRequests { totalCount } target { ... on Commit { committedDate oid } } }`).join(" ")} } }`
   const r = await ctx.run(["gh", "api", "graphql", "-f", `query=${query}`], { timeoutMs: 60_000 })
@@ -338,7 +338,7 @@ export async function prlessBranches(ctx: Context, agents: Json[]): Promise<stri
     if (!committed || now - committed < NO_PR_AFTER) continue
     keep[branch] = oid
     if (told[branch] === oid) continue
-    const worker = workers.get(branch)!
+    const worker = workerOf.get(branch)!
     const text = `Branch ${branch} (${worker}): its head ${oid.slice(0, 7)} is ${Math.floor((now - committed) / 60)}m old and has no PR, so no CI runs on it. Open its draft PR so CI runs.`
     await ctx.run(notifyArgv(ctx, text), {
       env: { ...process.env, NOTIFY_TO: await leadName(ctx.ops, worker) },

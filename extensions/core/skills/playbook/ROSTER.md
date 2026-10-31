@@ -5,7 +5,7 @@ The dashboard reads it through `api/hono/src/lib/dashboard/roster.ts`: the sideb
 and the backlog entries still waiting (from `backlogNext` on, less those `backlogTaken` lists) as its Next up list, `Fix: ` entries first, then `<owner>: ` entries, then the rest, each oldest first.
 `scripts/roster.ts` in the main checkout is its only writer: atomic writes, `updatedAt` and `lastReportAt` stamped from the UTC clock, titles cut to 40 characters with any trailing `(#N)` dropped, since the PR is linked on its own.
 
-The dispatcher or the lead that starts a session, dispatches to it, hears its report or ends it writes that change, at that moment; workers and runners report and leave the writing to their lead, but for a worker's branch, which the worker writes itself at its first push (It pushes its branch, below), since no report carries it before its PR opens.
+The dispatcher or the lead that starts a session, dispatches to it, hears its report or ends it writes that change, at that moment; workers and runners report and leave the writing to their lead, except a worker's branch, which the worker writes itself at its first push (It pushes its branch, below), since no report carries it before its PR opens.
 `scripts/spawn.sh` writes what it knows as it starts a session, whoever runs it: its `kind`, its `workspace`, a column's `surface`, a worker's or checker's `title`, a checker's `worker=` and, for an entry that holds neither a task nor a pr, a `task`: its brief's file name, else its role and name (`probe probe-api`).
 A new probe's `title` defaults to `Probe: <name>` and a new runner's to its own name while its entry holds none, so neither row reads its first ask.
 Each lead's sweep ends its own down agents, and Ops keeps the rest of the file in order.

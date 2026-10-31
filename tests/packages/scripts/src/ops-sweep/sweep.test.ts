@@ -464,6 +464,27 @@ describe("prlessBranches", () => {
     )
   })
 
+  test("tells the lead again when the branch's head moves and still has no PR (#234)", async () => {
+    const { ctx } = setup()
+    const told: string[] = []
+    let reply = answer([{ age: 20, prs: 0 }])
+    ctx.factory = async () => "acme/app"
+    ctx.run = async (argv) => {
+      if (argv[1] === "/repo/scripts/ops/notify.sh") told.push(argv[3]!)
+      return { code: 0, err: "", out: argv[0] === "gh" ? reply : "" }
+    }
+    const agents = [
+      { kind: "builder", name: "builder" },
+      { branch: "PG-234-branch-no-pr", kind: "worker", name: "abcdef-worker", status: "working" },
+    ]
+    roster(ctx, agents)
+    await prlessBranches(ctx, agents)
+    reply = reply.replace("c0ffee0", "beef000")
+    await prlessBranches(ctx, agents)
+    await prlessBranches(ctx, agents)
+    expect(told.map((line) => line.split(" ")[5])).toEqual(["c0ffee0", "beef000"])
+  })
+
   test("stays quiet with a PR in any state, a head under 15 minutes, or a branch not on GitHub (#234)", async () => {
     expect((await sweep(answer([{ age: 30, prs: 1 }]))).told).toEqual([])
     expect((await sweep(answer([{ age: 14, prs: 0 }]))).told).toEqual([])
