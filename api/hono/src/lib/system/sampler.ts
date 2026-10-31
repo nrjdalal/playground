@@ -20,6 +20,7 @@ import { readRoster, type RosterAgent } from "@/lib/dashboard/roster"
 import { updateCheck, type Update } from "@/lib/dashboard/update"
 import { recordsProblem, unstickProblem } from "@/lib/dashboard/workers"
 import { ownRegistered } from "@/lib/sessions/own"
+import { hasGlmAccount } from "@/lib/store/accounts"
 import { idleLineOf, PER_WORKER, roomOf, type IdleStack, type Limit } from "@/lib/system/capacity"
 import { footprintOf, type Container, type Session, type Stack } from "@/lib/system/footprint"
 import {
@@ -131,6 +132,8 @@ export type Readings = {
   cwds: Map<number, string>
   disk: { freeBytes: number; totalBytes: number } | null
   docker: { containers: Container[]; problem: string | null; vmPid: number | null }
+  // Whether usage.accounts holds a GLM row, without which the GLM windows are a file left behind and show nowhere.
+  glmAccount: boolean
   load: [number, number, number]
   problems: string[]
   procs: Proc[]
@@ -324,7 +327,7 @@ export function compose(
     sampledAt: point.at,
     update: readings.update,
     usage: readings.usage,
-    zai: readings.zai,
+    zai: readings.glmAccount ? readings.zai : null,
   }
   // A sample whose ps failed read no process, so the CPU times of the last that did carry on, and the next one's shares span both intervals rather than charging each process its whole life.
   const read = procs.length > 0
@@ -442,6 +445,7 @@ export async function read(): Promise<Readings> {
             problem: stats.status === "rejected" ? problemOf("docker stats", stats.reason) : null,
             vmPid: await vmOf(procs),
           },
+    glmAccount: hasGlmAccount(),
     load: made?.load ?? (loadavg() as [number, number, number]),
     problems,
     procs,

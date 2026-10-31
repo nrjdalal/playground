@@ -55,6 +55,7 @@
   The screen reader hears the same rows as words.
   They sit on the first live dispatcher not on GLM (`usageSlot`, `isGlmModel` in `web/next/src/lib/model-label.ts`; a reply not read yet counts as Claude's).
   GLM's week and 5-hour window show the same way (`DispatcherUsage` with `provider="zai"`), each its credits' share of `zai-usage.json` (the system report's `zai`, `readZaiUsage` in `api/hono/src/lib/usage/zai.ts`) judged by the same `READING_LEVELS` and pace (`zaiReadings` in `web/next/src/lib/system.ts`),
+  and only while `usage.accounts` holds a GLM row (`hasGlmAccount` in `api/hono/src/lib/store/accounts.ts`): without one the sampler leaves the report's `zai` null, so a `zai-usage.json` left behind draws nothing,
   its name and words saying GLM, and screen readers hearing GLM usage;
   a file older than `ZAI_STALE_MS` shows each window's last share gray and dimmed, its hover saying stale and when it was last seen.
   They sit on the first live GLM dispatcher's row, gray outlines there until a GLM reading, as Claude's are before a sample; with none live, while a GLM reading is there, on the second dispatcher's row when it does not carry Claude's, Not running or live on Claude, led by Z.ai's mark (`ZaiLogo`, `logo`) on any row not GLM's own;
