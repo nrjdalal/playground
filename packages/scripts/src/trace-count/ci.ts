@@ -4,7 +4,7 @@ import { join } from "node:path"
 
 import { checkSetting } from "@packages/settings"
 
-import { isPublicList, publicListPath } from "./kinds"
+import { isPublicList, LIST_KEYS, publicListPath } from "./kinds"
 
 // Runs trace-count in CI, where no data folder holds its private inputs: each comes from a repository secret, is written into a scratch data folder, and is never printed.
 const SECRETS = ["FACTORY_ARCHIVE_REPO", "NO_PUBLIC_LEAK_LIST", "OWNER_NAMES"] as const
@@ -41,6 +41,11 @@ try {
 }
 if (!isPublicList(list))
   refuse("NO_PUBLIC_LEAK_LIST is not no-public-leak's list, a JSON object of string arrays")
+const empty = LIST_KEYS.filter((key) => !list[key].length)
+if (empty.length)
+  refuse(
+    `NO_PUBLIC_LEAK_LIST holds no entry under ${empty.join(", ")}, so those kinds would count nothing`,
+  )
 
 const data = mkdtempSync(join(tmpdir(), "trace-count-ci-"))
 try {

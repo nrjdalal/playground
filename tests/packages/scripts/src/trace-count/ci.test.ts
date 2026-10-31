@@ -70,6 +70,17 @@ describe("trace-count in CI (PG-112)", () => {
     expect(err).not.toContain("qzx")
   })
 
+  test("a list with an empty key exits 2 naming the key, never echoing the rest", () => {
+    const { code, err } = run({
+      FACTORY_ARCHIVE_REPO: ARCHIVE,
+      NO_PUBLIC_LEAK_LIST: JSON.stringify({ ...JSON.parse(LIST), slackIds: [] }),
+      OWNER_NAMES: "qzxowner",
+    })
+    expect(code).toBe(2)
+    expect(err).toContain("trace-count ci: NO_PUBLIC_LEAK_LIST holds no entry under slackIds")
+    expect(err).not.toContain("madeupname")
+  })
+
   test("a list that is not no-public-leak's shape exits 2, never echoing it", () => {
     const { code, err } = run({
       FACTORY_ARCHIVE_REPO: ARCHIVE,
