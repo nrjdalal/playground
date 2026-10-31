@@ -178,7 +178,7 @@ Their tests are `bun run test:file tests/scripts/hooks`.
   `bun run trace-count` counts each kind in `kinds.ts` over the tree (git's files, or every file but installs and build output where no `.git` is), past the live names `LIVE_NAMES` keeps for the switch's migration.
   Its `ownerName` kind counts the owner's names (`owner.names`, then the owner part of `factory.archiveRepo`, read from the settings at run time), a quote set against the owner and anyone's dated quote; `companyName` counts the company's name, and `lightWords` a factory or old skill word glued into a longer one.
   It reads past the lockfiles too (`bun.lock`, `package-lock.json`), whose integrity hashes can spell a list value by chance.
-  It fails when a count is over `packages/scripts/src/trace-count/counts.json`, and so does `tests/packages/scripts/src/trace-count/count.test.ts`, which `bun run test` runs; `--write` lowers each count a trace-out brought down.
+  It fails when a count is over `packages/scripts/src/trace-count/counts.json`, and so does `tests/packages/scripts/src/trace-count/count.test.ts`, which `bun run test` runs and pre-commit's `trace-count` step runs on every commit but one of images and fonts alone, over every tracked and untracked file as it stands on disk, staged or not; `--write` lowers each count a trace-out brought down.
   It exits 2, naming the fix, when no-public-leak's list (`extensions/hooks/no-public-leak.json` in the data folder) is missing or a key of it is empty, or when `owner.names` or `factory.archiveRepo` is unset, since those kinds would count nothing; the test counts the kinds that read neither alone.
 
 ## no-linear-ticket
@@ -330,6 +330,7 @@ Their tests are `bun run test:file tests/scripts/hooks`.
   Agent-facing means, in a checkout holding `extensions/core/skills/playbook/SKILL.md` (so every worktree matches and another repository's checkout does not), anything under `skills/`,
   ZeroStarter's skills under `skills/zerostarter/`, which `.agents/skills/` links to and which a path reaches with its links resolved (one whose `source` names a tool, not a repository, is vendored and left out), `.agents/dashboard/`, `.agents/*.md` (not `.agents/adr/`),
   the root `AGENTS.md` and `CLAUDE.md`, `scripts/README.md` and `scripts/hooks/README.md`, and `docs/`; and anywhere, a handoff under the data folder's `handoffs/`.
-  A Skill call or a typed `/writing-for-agents` leaves a mark under the data folder's `writing-first/`, a subagent's apart from its parent's, since a subagent's hook input carries its parent's session id beside its own `agent_id`; a compaction clears the session's marks.
-  With the skill not installed it lets every write through, and it fails open.
+  A Skill call or a typed `/writing-for-agents`, bare or a plugin's or folder's scoped copy (`ws-home:writing-for-agents`), leaves a mark under the data folder's `writing-first/`, a subagent's apart from its parent's, since a subagent's hook input carries its parent's session id beside its own `agent_id`; a compaction clears the session's marks.
+  With the skill installed nowhere (the config folder's `skills/`, the checkout's `.claude/skills/`, or a plugin `plugins/installed_plugins.json` lists, installed for the user and enabled in the user settings or installed for the session's project) it lets every write through, and it fails open.
+  Its refusal names the bare skill or the scoped name the session's skill list shows, since a factory session loads its org's set through `--plugin-dir` under a name the hook cannot see.
   Its tests are in `bun run test:file tests/scripts/hooks` too.

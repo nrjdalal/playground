@@ -1,12 +1,17 @@
 import { describe, expect, test } from "bun:test"
 import { join } from "node:path"
 
-import { loader4, RESTORE, SMALL_TEXT, smallText } from "../../../.github/scripts/shadcn-customize"
-import { CenterSpinner, PulseDot, Spinner } from "../../../web/next/src/components/ui/spinner"
+import {
+  loader4,
+  RESTORE,
+  SMALL_TEXT,
+  smallText,
+} from "../../../../packages/scripts/src/shadcn-customize"
+import { CenterSpinner, PulseDot, Spinner } from "../../../../web/next/src/components/ui/spinner"
 
 // React and Remix Icon resolve from the web app's own packages, which this directory cannot see; the calls the test makes are typed here rather than through a path into node_modules.
 type Node = unknown
-const web = join(import.meta.dir, "../../../web/next")
+const web = join(import.meta.dir, "../../../../web/next")
 const { createElement } = (await import(Bun.resolveSync("react", web))) as {
   createElement: (type: unknown, props?: unknown) => Node
 }
@@ -99,7 +104,7 @@ describe("shadcn-customize", () => {
 
   test("leaves no off-scale text in the primitives it patches", async () => {
     for (const file of SMALL_TEXT) {
-      const text = await Bun.file(join(import.meta.dir, "../../..", file)).text()
+      const text = await Bun.file(join(import.meta.dir, "../../../..", file)).text()
       expect(text).not.toMatch(/text-\[[\d.]+(?:rem|px)\]/)
     }
   })

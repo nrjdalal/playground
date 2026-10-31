@@ -1182,15 +1182,12 @@ def docker_check(state, timeout=20):
 # only while run-slot.sh's can-take says that waiter could take run-slot now, since under the load units a waiter for units that are not
 # free waits beside a free run-slot by design (a review's round 1)
 def slot_stuck(state, now_t):
-    q, first = os.path.join(OPS, "run-slot.waiters"), None
-    for t in sorted(os.listdir(q)) if os.path.isdir(q) else []:
-        parts = t.split("-", 2)
-        if len(parts) == 3 and alive(parts[1]):
-            first = parts
-            break
+    env = os.environ | {"RUN_SLOT_OPS": OPS}
+    head = subprocess.run(["bash", os.path.join(CODE, "run-slot.sh"), "head"], env=env, capture_output=True, text=True, timeout=30).stdout.strip()
+    first = head.split("-", 2) if head.count("-") >= 2 else None
     held = os.path.isdir(os.path.join(OPS, "run-slot"))
     sf = state.get("slot_free") or {}
-    if not first or held:
+    if not first or held or taken_since(sf.get("since", now_t)):
         state["slot_free"] = None
         return None
     if sf.get("ticket") != first[0] + first[1]:
@@ -1198,11 +1195,23 @@ def slot_stuck(state, now_t):
         return None
     if now_t - sf["since"] < 120:
         return None
-    can = subprocess.run(["bash", os.path.join(CODE, "run-slot.sh"), "can-take", "run-slot", first[2]], env=os.environ | {"RUN_SLOT_OPS": OPS}, capture_output=True, timeout=30)
+    can = subprocess.run(["bash", os.path.join(CODE, "run-slot.sh"), "can-take", "run-slot", first[2]], env=env, capture_output=True, timeout=30)
     if can.returncode != 0:
         return None
-    line = f"run-slot free for {int(now_t - sf['since'])}s while {first[2]} (pid {first[1]}) waits first, could take it and takes nothing; its run-slot.sh may be a pre-edit copy: have it stop its own wait and re-queue"
+    line = f"run-slot free for {int(now_t - sf['since'])}s while {first[2]} (pid {first[1]}) heads the queue, could take it and takes nothing"
     return {"at": now(), "kind": "slot-stuck", "line": line, "name": first[2], "since": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(sf["since"]))}
+
+
+# whether run-slot.runs.log shows run-slot taken at or after since, a sample of the window that found it held between this job's own reads, 2 minutes apart
+def taken_since(since):
+    try:
+        with open(os.path.join(OPS, "run-slot.runs.log"), "rb") as f:
+            f.seek(max(0, os.fstat(f.fileno()).st_size - 200_000))
+            lines = f.read().decode(errors="replace").splitlines()
+    except OSError:
+        return False
+    at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(since))
+    return any(len(p) > 4 and p[1] == "start" and p[4] == "run-slot" and p[0] >= at for p in (l.split(" ") for l in lines))
 
 
 def main():

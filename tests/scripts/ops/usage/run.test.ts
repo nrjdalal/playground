@@ -158,7 +158,8 @@ def urlopen(req, timeout=None):
     url = req.full_url
     calls.append(url)
     if url.startswith("http://127.0.0.1:9/"):
-        raise urllib.error.HTTPError(url, 200, "ok", {"anthropic-ratelimit-unified-5h-utilization": "0.2", "anthropic-ratelimit-unified-5h-reset": "4000000000", "anthropic-ratelimit-unified-7d-utilization": "0.3", "anthropic-ratelimit-unified-7d-reset": "4000000000"}, io.BytesIO(b"{}"))
+        five = {} if "/no-5h/" in url else {"anthropic-ratelimit-unified-5h-utilization": "0.95" if "/hot-5h/" in url else "0.2", "anthropic-ratelimit-unified-5h-reset": "4000000000"}
+        raise urllib.error.HTTPError(url, 200, "ok", dict(five, **{"anthropic-ratelimit-unified-7d-utilization": "0.3", "anthropic-ratelimit-unified-7d-reset": "4000000000"}), io.BytesIO(b"{}"))
     if url.endswith("/api/oauth/profile"):
         return io.BytesIO(json.dumps({"account": {"email": "stored@example.org"}}).encode())
     if url.endswith("/api/oauth/usage"):
@@ -223,7 +224,11 @@ const cycle = async (
       return null
     }
   }
-  return { beat: read("ops/beat.json"), usage: read("usage.json") }
+  return {
+    alerts: read("ops/alerts-usage.json"),
+    beat: read("ops/beat.json"),
+    usage: read("usage.json"),
+  }
 }
 
 test("on a fresh install whose only account came through the Dashboard, usage.json holds that account's week and the job reads ok", async () => {
@@ -280,4 +285,74 @@ test("a Keychain that refuses the read, not one missing the login, fails rather 
   expect(beat.result).toBe(
     "error: stored login: RuntimeError: security exited 51 reading Claude Code's credentials",
   )
+})
+
+test("an account whose probe answers with no 5-hour headers has no 5-hour window in usage.json, never a 0% one (#85)", async () => {
+  const { beat, usage } = await cycle("no-five-hour", {
+    added: ["added@example.org"],
+    login: false,
+    probeUrl: "http://127.0.0.1:9/no-5h/v1/messages",
+  })
+  expect(beat.result).toBe("ok")
+  expect(usage.rate_limits.five_hour).toBeUndefined()
+  expect(usage.rate_limits.seven_day).toEqual({ used_percentage: 30, resets_at: 4_000_000_000 })
+  expect(beat.detail).toStartWith("added@example.org: 5h none, 7d 30%")
+})
+
+// #152: alerts-usage.json carries a week alert for each factory account past a mark, the spares in usage.json's `accounts` included, each naming its account
+test("week alerts name each factory account past a mark, a spare's included, and skip an account outside usage.accounts (#152)", () => {
+  const home = join(scratch, "week-alerts")
+  mkdirSync(join(home, ".playground", "ops", "usage"), { recursive: true })
+  const read = `
+import json, sys, types
+sys.modules["beat"] = types.SimpleNamespace(beat=lambda *a, **k: None, setting=lambda key: "made-up")
+src = open(sys.argv[1]).read()
+ns = {"__name__": "run_under_test"}
+exec(compile(src[: src.index("\\nwhile True:")], sys.argv[1], "exec"), ns)
+data = {"account": "login@example.org", "rate_limits": {"seven_day": {"used_percentage": 50}}, "writtenAt": "2026-10-31T13:00:00Z",
+        "accounts": {"login@example.org": {"week": 50}, "spare@example.org": {"week": 97.5}, "other@example.org": {"week": 99}}}
+print(json.dumps([a["line"] for a in ns["week_alerts"](data, ["login@example.org", "spare@example.org"])]))
+`
+  const env: Record<string, string | undefined> = { ...process.env, HOME: home }
+  delete env.CLAUDE_CONFIG_DIR
+  const child = Bun.spawnSync(["python3", "-I", "-c", read, script], { env })
+  expect(child.stderr.toString()).toBe("")
+  expect(JSON.parse(child.stdout.toString())).toEqual([
+    "week usage at 97.5% (spare@example.org), past 97%",
+  ])
+})
+
+// #170: the leads' sweep keys an alert by its kind and name, so each account's alert names that account, or a second account's is hidden while the first one stands
+test("two factory accounts past a week mark give two alerts with their own kind and name (#170)", () => {
+  const home = join(scratch, "week-alert-names")
+  mkdirSync(join(home, ".playground", "ops", "usage"), { recursive: true })
+  const read = `
+import json, sys, types
+sys.modules["beat"] = types.SimpleNamespace(beat=lambda *a, **k: None, setting=lambda key: "made-up")
+src = open(sys.argv[1]).read()
+ns = {"__name__": "run_under_test"}
+exec(compile(src[: src.index("\\nwhile True:")], sys.argv[1], "exec"), ns)
+data = {"account": "login@example.org", "rate_limits": {"seven_day": {"used_percentage": 92}}, "writtenAt": "2026-10-31T13:00:00Z",
+        "accounts": {"spare@example.org": {"week": 97.5}}}
+print(json.dumps([f"{a['kind']} {a['name']}" for a in ns["week_alerts"](data, ["login@example.org", "spare@example.org"])]))
+`
+  const env: Record<string, string | undefined> = { ...process.env, HOME: home }
+  delete env.CLAUDE_CONFIG_DIR
+  const child = Bun.spawnSync(["python3", "-I", "-c", read, script], { env })
+  expect(child.stderr.toString()).toBe("")
+  expect(JSON.parse(child.stdout.toString())).toEqual([
+    "usage login@example.org",
+    "usage spare@example.org",
+  ])
+})
+
+test("the 5-hour alert names its account (#170)", async () => {
+  const { alerts } = await cycle("hot-5h", {
+    added: ["added@example.org"],
+    login: false,
+    probeUrl: "http://127.0.0.1:9/hot-5h/v1/messages",
+  })
+  expect(alerts.alerts.map((a: { kind: string; name: string }) => `${a.kind} ${a.name}`)).toEqual([
+    "usage-5h added@example.org",
+  ])
 })
