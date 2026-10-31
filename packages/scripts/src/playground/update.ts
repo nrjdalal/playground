@@ -37,6 +37,17 @@ export const runUpdate = async (
     return false
   }
   const old = (await git("rev-parse", "HEAD")).out.trim()
+  // a checkout left on another branch, such as one cloned while canary was the default, moves to main when its tree is clean, so the merge below lands on main
+  const onMain = async () => {
+    const branch = (await git("branch", "--show-current")).out.trim()
+    if (branch === "main") return { code: 0, out: "" }
+    const clean = await git("diff", "--quiet", "HEAD")
+    if (clean.code !== 0) return clean
+    log(
+      `playground update: on ${branch || "a detached HEAD"}, not main, so moving to main at origin/main`,
+    )
+    return git("checkout", "-q", "-B", "main", "origin/main")
+  }
   const steps: [string, () => ReturnType<Run>][] = to
     ? [
         ["fetch origin main and its tags", () => git("fetch", "-q", "--tags", "origin", "main")],
@@ -48,6 +59,7 @@ export const runUpdate = async (
       ]
     : [
         ["fetch origin main", () => git("fetch", "-q", "origin", "main")],
+        ["move to main, on a tree with no uncommitted changes", onMain],
         ["merge --ff-only origin/main", () => git("merge", "--ff-only", "-q", "origin/main")],
       ]
   for (const [name, step] of steps)

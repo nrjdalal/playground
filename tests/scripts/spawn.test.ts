@@ -1061,17 +1061,14 @@ describe("a manager starts in a workspace of its own, in the leads worktree", ()
     expect(r.err).toContain(`a live session already holds the name ${OLD.dispatcher}-2 (pid 4100)`)
   })
 
-  test.each([
-    { label: "a lead", name: OLD.builder },
-    { label: "a worker", name: "worker-brave-otter" },
-  ])("a manager of another name is refused: $label", async ({ name }) => {
-    const r = await spawn(["manager", name, "b.md", "--backend", "glm"], [])
+  test("a manager of another name is refused: a worker", async () => {
+    const r = await spawn(["manager", "worker-brave-otter", "b.md", "--backend", "glm"], [])
     expect(r.code).toBe(1)
     expect(placing(r)).toEqual([])
     expect(r.err).toContain(
-      "a manager in a workspace of its own is the first dispatcher (sessions.names' dispatcher), the second (an <id>-dispatcher, or sessions.names' dispatcher with -2) or the optimizer",
+      "a manager in a workspace of its own is the first dispatcher (sessions.names' dispatcher), the second (an <id>-dispatcher, or sessions.names' dispatcher with -2), the optimizer, the builder, ops or the planner",
     )
-    expect(r.err).toContain("roster.ts set <name> kind=optimizer")
+    expect(r.err).toContain("roster.ts set <name> kind=<kind>")
   })
 
   test.each([

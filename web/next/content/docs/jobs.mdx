@@ -8,7 +8,7 @@ description: The background jobs Playground runs, how to turn each one on, and w
 
 Playground's background work runs as ops jobs: the Dashboard's supervisor, the sweeps, the merge train, the usage reads and the rest.
 Each job is a setting, `jobs.<name>` (`ops-merge-train` is `jobs.opsMergeTrain`), whose value is the whole job: whether it is on, its schedule, its command or launchd program, and why it is paused.
-A fresh install has every job off but `jobs.opsDashboard`, the Dashboard's own, which serves first run's checks and every settings write.
+A fresh install has every job off but two: `jobs.opsDashboard`, the Dashboard's own, which serves first run's checks and every settings write, and `jobs.opsUsage`, which reads your Claude login's 5-hour and week usage every 5 minutes, so the Dashboard shows them with no setting.
 
 ## Turn a job on
 

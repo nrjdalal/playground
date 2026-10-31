@@ -62,7 +62,8 @@ export function AddAccountDialog({
 }: {
   children?: React.ReactNode
   disabled?: boolean
-  onAdded: () => void
+  // the account just kept, by its email (a Claude account) or its label (a GLM key)
+  onAdded: (account: { email: string | null; provider: string }) => void
   trigger?: React.ReactElement
 }) {
   const [open, setOpen] = React.useState(false)
@@ -110,7 +111,7 @@ export function AddAccountDialog({
         ),
         type: "success",
       })
-      onAdded()
+      onAdded(outcome.account)
     },
   })
 

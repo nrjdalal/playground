@@ -78,7 +78,7 @@ Outside its own folder it writes in these places, besides the tools' own install
 - `/Library/LaunchDaemons/sh.portless.proxy.plist`: portless's proxy service, installed with sudo, and its certificate in the System keychain; the proxy keeps its own files in `~/.portless`.
 - Your shell's startup file (`~/.zshrc` for zsh, `~/.bashrc` for bash): one line for each tool folder it put on your `PATH` (Homebrew's `shellenv`, `~/.bun/bin`, `~/.local/bin`), added once. For any other shell it prints the lines for you to add. Open a new terminal, or run `source ~/.zshrc`, to pick them up.
 
-Every background job starts off but the Dashboard's own ([Ops jobs](/docs/jobs)), so the installer adds nothing to `~/Library/LaunchAgents`.
+Every background job starts off but the Dashboard's own and the usage read ([Ops jobs](/docs/jobs)), so the installer adds nothing to `~/Library/LaunchAgents`.
 
 ## The Dashboard's database
 
@@ -89,5 +89,6 @@ Keep the Mac on a network you trust, or block the port in its firewall.
 ## Run it again
 
 Every step checks before it acts, so running the command again changes nothing on a working install, and puts back a link that went missing.
+A checkout left on another branch, such as `canary`, moves to `main` at the newest release, when it holds no uncommitted changes; with uncommitted changes the run stops and names the branch.
 To update an install, run `playground update` ([CLI](/docs/cli)).
 To check one, run `playground doctor`; to remove one, `playground uninstall`, which also takes the home skill set and its `ws` marketplace back out of Claude Code.

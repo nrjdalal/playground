@@ -19,23 +19,25 @@ const fill = {
   path: "/usr/bin:/bin",
 }
 
+const ON_BY_DEFAULT = ["ops-dashboard", "ops-usage"]
+
 describe("the job registry", () => {
-  test("each shipped job is a jobs.<camelName> setting, off by default but the Dashboard's", () => {
+  test("each shipped job is a jobs.<camelName> setting, off by default but the Dashboard's and the usage read", () => {
     expect(jobKey("ops-merge-train")).toBe("jobs.opsMergeTrain")
     const keys = settingFields().map(({ key }) => key)
     for (const [name, job] of Object.entries(JOBS)) {
       expect(keys).toContain(jobKey(name))
-      expect([name, job.enabled]).toEqual([name, name === "ops-dashboard"])
+      expect([name, job.enabled]).toEqual([name, ON_BY_DEFAULT.includes(name)])
     }
     expect(Object.keys(JOBS)).toEqual([...Object.keys(JOBS)].sort())
   })
 
-  test("a fresh install renders every job paused but the Dashboard's, with its placeholders filled", () => {
+  test("a fresh install renders every job paused but the Dashboard's and the usage read, with its placeholders filled", () => {
     const { jobs, plists } = renderJobs({}, [], fill)
     expect(jobs.map((job) => job.name)).toEqual(Object.keys(JOBS))
-    expect(jobs.filter((job) => job.disabled !== true).map((job) => job.name)).toEqual([
-      "ops-dashboard",
-    ])
+    expect(jobs.filter((job) => job.disabled !== true).map((job) => job.name)).toEqual(
+      ON_BY_DEFAULT,
+    )
     expect(jobs.find((job) => job.name === "ops-sweep")).toMatchObject({
       command: "/b/bun --no-env-file /c/packages/scripts/src/ops-sweep/cli.ts",
       cwd: "/c",

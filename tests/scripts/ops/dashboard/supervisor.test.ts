@@ -272,6 +272,11 @@ await Bun.write(
   `#!/bin/sh\nif [ "$1" = "$(cat ${pullStops} 2>/dev/null)" ]; then exit 128; fi\ngit reset -q --hard "$1"\nif [ "$1" = "$(head -1 ${pullPrints} 2>/dev/null)" ]; then sed 1d ${pullPrints}; fi\nif [ "$1" = "$(head -1 ${pullFails} 2>/dev/null)" ]; then sed 1d ${pullFails}; exit 1; fi\n`,
 )
 await Bun.write(join(dashboardDir, "procs.sh"), "#!/bin/sh\n")
+await Bun.write(
+  join(dashboardDir, "net-git.sh"),
+  Bun.file(join(root, "scripts", "ops", "dashboard", "net-git.sh")),
+)
+chmodSync(join(dashboardDir, "net-git.sh"), 0o755)
 await Bun.write(join(dashboardDir, "x"), "0\n")
 await Bun.write(join(state, ".keep"), "")
 await Bun.write(join(scratch, "ops", "notify.sh"), "#!/bin/sh\n")
@@ -294,6 +299,9 @@ const c2 = git(wt, "rev-parse", "HEAD")
 const stubs = `S=${state} WT=${wt} OPS=${scratch}/ops BAD=${state}/bad-builds LOG=${state}/supervisor.log DEVLOG=${state}/dev.log
 say() { :; }; result() { echo "result $*" >> ${calls}; }; stop_all() { :; }; tell_dispatcher() { echo "tell $1" >> ${calls}; }
 roll_up() { echo "roll_up $1" >> ${calls}; [ "$1" = START ] || [ "$1" = FALLBACK ]; }
+UPSTREAM=canary
+${fn("upstream_head")}
+${fn("behind")}
 ${block("dev_reason")}
 ${block("reload_if")}
 ${fn("take_reload")}
@@ -412,6 +420,19 @@ describe("the supervisor's reload (#1330)", () => {
     const started = await sup(`boot; git rev-parse HEAD`, c0)
     expect(started.out).toBe(c0)
     expect(await Bun.file(calls).text()).toBe("roll_up START\n")
+  })
+
+  test("a start whose upstream head is behind the running head holds there, with no pull and no bad-builds entry, as main behind a checkout rolled on canary", async () => {
+    clean()
+    rmSync(calls, { force: true })
+    rmSync(join(state, "bad-builds"), { force: true })
+    canaryAt(c1)
+    const started = await sup(`say() { echo "say $*" >> ${calls}; }; boot; git rev-parse HEAD`, c2)
+    expect(started.out).toBe(c2)
+    expect(await Bun.file(calls).text()).toBe(
+      `say canary ${c1.slice(0, 7)} is behind the running head ${c2.slice(0, 7)}; waiting\nroll_up START\n`,
+    )
+    expect(await Bun.file(join(state, "bad-builds")).exists()).toBe(false)
   })
 
   test("a roll from the loop hands on with 75 when it changed scripts/ops/dashboard/, before it starts the new head, and finishes in place when it did not", async () => {
@@ -744,4 +765,94 @@ describe("the loop's DOWN dev reason (#1356)", () => {
     expect(await proc.exited).toBe(0)
     expect(await new Response(proc.stdout).text()).toBe("")
   })
+})
+
+// verify_dashboard with stand-ins for bun and git, run in a checkout whose .env holds the given AGENT_SIGNIN_ENABLED line: the checks it runs, in order
+const verifyChecks = async (signIn: string) => {
+  const dir = join(scratch, `verify-${signIn || "blank"}`)
+  const calls = join(dir, "calls")
+  await Bun.write(join(dir, ".env"), `NODE_ENV=local\nAGENT_SIGNIN_ENABLED=${signIn}\n`)
+  await Bun.write(join(dir, "bin", "bun"), `#!/bin/sh\necho "$3" >> ${calls}\n`)
+  await Bun.write(join(dir, "bin", "git"), "#!/bin/sh\necho abc123\n")
+  chmodSync(join(dir, "bin", "bun"), 0o755)
+  chmodSync(join(dir, "bin", "git"), 0o755)
+  const body = `dashboard_urls() { WEB=https://web.test API=https://api.test; }\n${block("verify_dashboard")}\nverify_dashboard`
+  const proc = Bun.spawn(["bash", "-c", body], {
+    cwd: dir,
+    env: { ...process.env, PATH: `${join(dir, "bin")}:${process.env.PATH}` },
+  })
+  expect(await proc.exited).toBe(0)
+  return (await Bun.file(calls).text()).trim().split("\n")
+}
+
+describe("the supervisor's verify", () => {
+  test("leaves out the signed-in checks on a checkout with agent sign-in off, as a person's .env starts it", async () => {
+    expect(await verifyChecks("")).toEqual(["health", "map"])
+  })
+
+  test("runs every check where agent sign-in is on", async () => {
+    expect(await verifyChecks("true")).toEqual(["health", "signin", "ws", "system", "map"])
+  })
+})
+
+// upstream_head as the supervisor runs it, in a clone of an origin whose main and canary hold different heads
+describe("the supervisor's roll target", () => {
+  test("is the head of the branch upstream.sh names on origin, never canary's alone", async () => {
+    const origin = join(scratch, "roll-origin")
+    git(scratch, "init", "-q", "-b", "main", origin)
+    git(origin, "commit", "-q", "--allow-empty", "-m", "main")
+    git(origin, "checkout", "-q", "-b", "canary")
+    git(origin, "commit", "-q", "--allow-empty", "-m", "canary")
+    const head = (ref: string) => git(origin, "rev-parse", ref)
+    const clone = join(scratch, "roll-clone")
+    git(scratch, "clone", "-q", origin, clone)
+    expect(script).not.toContain("refs/heads/canary")
+    for (const branch of ["main", "canary"]) {
+      const proc = Bun.spawn(
+        [
+          "bash",
+          "-c",
+          `D=${join(root, "scripts", "ops", "dashboard")} LOG=${join(scratch, "roll.log")} UPSTREAM=${branch}\n${fn("upstream_head")}\nupstream_head`,
+        ],
+        {
+          cwd: clone,
+          stdout: "pipe",
+        },
+      )
+      expect(await proc.exited).toBe(0)
+      expect((await new Response(proc.stdout).text()).trim()).toBe(head(branch))
+    }
+  })
+
+  test("is empty within the limit when git never answers, the line logged and the hung git stopped by its own process group", async () => {
+    const dir = join(scratch, "hung-git")
+    const pid = join(dir, "pid")
+    await Bun.write(join(dir, "bin", "git"), `#!/bin/sh\necho $$ > ${pid}\nsleep 600\n`)
+    chmodSync(join(dir, "bin", "git"), 0o755)
+    const log = join(dir, "supervisor.log")
+    const started = Date.now()
+    const proc = Bun.spawn(
+      [
+        "bash",
+        "-c",
+        `D=${join(root, "scripts", "ops", "dashboard")} LOG=${log} UPSTREAM=main\n${fn("upstream_head")}\nupstream_head`,
+      ],
+      {
+        env: {
+          ...process.env,
+          NET_GIT_LIMIT: "1",
+          PATH: `${join(dir, "bin")}:${process.env.PATH}`,
+        },
+        stdout: "pipe",
+      },
+    )
+    expect(await proc.exited).toBe(0)
+    expect(Date.now() - started).toBeLessThan(10_000)
+    expect((await new Response(proc.stdout).text()).trim()).toBe("")
+    expect(await Bun.file(log).text()).toBe(
+      "net-git: git ls-remote gave no answer in 1s, so it was stopped\n",
+    )
+    const stub = Number((await Bun.file(pid).text()).trim())
+    expect(() => process.kill(stub, 0)).toThrow()
+  }, 15_000)
 })
