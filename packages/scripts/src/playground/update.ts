@@ -1,6 +1,8 @@
 // playground update: the release skill's step 5 as one script, then the Dashboard's roll.
 import { join } from "node:path"
 
+import { CORE_SKILLS } from "./orgs"
+
 // A step's argv run to its end; `show` streams its output to the terminal instead of keeping it.
 export type Run = (argv: string[], show?: boolean) => Promise<{ code: number; out: string }>
 
@@ -21,9 +23,8 @@ export const updateSteps = (changed: string[]) => ({
   // a long-lived checker runs the skill text it loaded, so each changed skill is named for its reload
   skills: [
     ...new Set(
-      changed.flatMap(
-        (path) =>
-          path.match(/^(?:extensions\/core\/skills|skills\/zerostarter)\/([^/]+)\//)?.[1] ?? [],
+      changed.flatMap((path) =>
+        CORE_SKILLS.flatMap((root) => path.match(new RegExp(`^${root}/([^/]+)/`))?.[1] ?? []),
       ),
     ),
   ].sort(),
@@ -86,7 +87,7 @@ export const runUpdate = async (
   const { build, install, skills } = updateSteps(changed)
   if (skills.length)
     log(
-      `playground update: skills changed: ${skills.join(", ")}; tell the lead of each live checker to have it load each one again with the Skill tool`,
+      `playground update: skills changed: ${skills.join(", ")}; a session that loaded one runs its old text until it loads it again`,
     )
   const turbo = join(repo, "node_modules", ".bin", "turbo")
   const restart = join(repo, "packages", "scripts", "src", "ops-restart", "cli.ts")

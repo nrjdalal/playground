@@ -66,7 +66,7 @@ Each herdr server shows whether it is up and how many sessions it holds, first, 
 `playground update` brings your checkout up to the newest release, then moves the Dashboard to the newest commit of the branch it follows. It runs, in order, and stops at the first step that fails, naming it:
 
 1. It fetches `origin/main` and fast-forwards your checkout onto it. A checkout left on another branch, such as `canary`, moves to `main` first when it holds no uncommitted changes, and the update says so; with uncommitted changes it stops there and changes nothing. A checkout with commits of its own on `main` cannot fast-forward, so it stops there too.
-2. It runs `scripts/link-skills.sh`, so the home skill set takes a new or renamed skill.
+2. It runs `scripts/link-skills.sh`, so the home skill set takes a new or renamed skill, and prints `skills changed: <names>` when the update changed a skill, since a session that loaded one runs its old text until it loads it again.
 3. It installs the dependencies when `bun.lock` or a `package.json` changed, and builds the shared packages when one of them changed.
 4. It restarts each background job whose code changed.
 5. It moves the Dashboard to the newest build, printing each step; `Building…` lasts while the Dashboard is down for its production build, which can take a few minutes:

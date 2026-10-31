@@ -28,9 +28,10 @@ describe("updateSteps", () => {
         "extensions/core/skills/code-review-loop/SKILL.md",
         "skills/zerostarter/ui-verify/SKILL.md",
         "skills/playground/README.md",
+        "skills/playground/inbox/SKILL.md",
         "extensions/core/rules/ci.md",
       ]).skills,
-    ).toEqual(["code-review-loop", "pr", "ui-verify"])
+    ).toEqual(["code-review-loop", "inbox", "pr", "ui-verify"])
     expect(updateSteps(["README.md"]).skills).toEqual([])
   })
 
@@ -82,7 +83,7 @@ describe("runUpdate", () => {
     ])
   })
 
-  test("a merge that changed a skill names it and asks for each live checker's reload; one that changed none says nothing of skills", async () => {
+  test("a merge that changed a skill names it and says a session that loaded it runs its old text; one that changed none says nothing of skills", async () => {
     const said: string[] = []
     const { run } = fakeRun({
       diff: { out: "extensions/core/skills/pr/SKILL.md\nskills/zerostarter/dev/SKILL.md\n" },
@@ -96,7 +97,7 @@ describe("runUpdate", () => {
       ),
     ).toBe(0)
     expect(said).toContain(
-      "playground update: skills changed: dev, pr; tell the lead of each live checker to have it load each one again with the Skill tool",
+      "playground update: skills changed: dev, pr; a session that loaded one runs its old text until it loads it again",
     )
     const quietSaid: string[] = []
     expect(
