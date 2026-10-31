@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Guidance for AI coding agents working in this repository, a Bun monorepo: the `web/next` app, the `api/hono` service, and shared `packages/*` (auth, config, db, env, redis), with build-only tooling in `packages/scripts`.
+Guidance for AI coding agents working in this repository, a Bun monorepo: the `web/next` app, the `api/hono` service, and shared `packages/*` (auth, config, db, env, message, redis, settings), with build-only tooling in `packages/scripts`.
 The canonical starter also carries the `packages/cli` npm binary and the `tests/` suite, neither of which a fork takes; this guide and every skill ship to a fork whole, rebranded to its name.
 Start each task with the `codebase-map` skill to orient, then load the task skill that fits (see [Skills](#skills)).
 
