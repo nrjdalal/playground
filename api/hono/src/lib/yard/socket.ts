@@ -27,33 +27,69 @@ export const join = (userId: string, socket: Socket) => {
   }
 }
 
+// A socket that throws on send (one closing under it) is skipped, so the rest still get the frame.
 const sendHere = (userIds: string[], frame: Frame) => {
   const data = JSON.stringify(frame)
-  for (const id of userIds) for (const socket of open.get(id) ?? []) socket.send(data)
+  for (const id of userIds)
+    for (const socket of open.get(id) ?? [])
+      try {
+        socket.send(data)
+      } catch (error) {
+        console.error("[yard] socket send failed", error)
+      }
 }
 
-// A command to a Redis that has dropped fails at once rather than queueing, and a fan-out waits 2 s at most for one that never connected, so a post never hangs on it (a client retrying a hung post would post twice).
-const OPTIONS = { connectionTimeout: 2000, enableOfflineQueue: false }
+// A command to a Redis that has dropped fails at once rather than queueing, and a fan-out waits 2 s at most for one that never connected, so a post never hangs on it (a client retrying a hung post would post twice); Bun's own reconnect is off, since it never sends SUBSCRIBE again.
+const OPTIONS = { autoReconnect: false, connectionTimeout: 2000, enableOfflineQueue: false }
 const FAN_OUT_MS = 2000
+const RETRY_MS = 1000
 
-// With KV_URL set, every instance subscribes to one Redis channel, so a post on one instance reaches a socket held by another, and a failed connect is tried again on the next join or publish; without it, the instance's own sockets alone.
+// With KV_URL set, every instance subscribes to one Redis channel, so a post on one instance reaches a socket held by another; without it, the instance's own sockets alone.
 let publisher: Promise<RedisClient> | null = null
-const connect = (url: string) => {
-  publisher ??= (async () => {
-    const subscriber = new RedisClient(url, OPTIONS)
+let retry: ReturnType<typeof setTimeout> | null = null
+
+// One subscriber and one publisher per instance; when either drops, or a connect fails partway, both close, and the pair is built again on the next join or publish, or after RETRY_MS while a socket is open.
+const connect = (url: string): Promise<RedisClient> => {
+  if (publisher) return publisher
+  const clients: RedisClient[] = []
+  let live = true
+  const client = (): RedisClient => {
+    const one = new RedisClient(url, OPTIONS)
+    one.onclose = drop
+    clients.push(one)
+    return one
+  }
+  const drop = () => {
+    if (!live) return
+    live = false
+    publisher = null
+    for (const one of clients) one.close()
+    if (open.size > 0)
+      retry ??= setTimeout(() => {
+        retry = null
+        connect(url).catch((error) => console.error("[yard] socket resubscribe failed", error))
+      }, RETRY_MS)
+  }
+  const attempt: Promise<RedisClient> = (async () => {
+    const subscriber = client()
     await subscriber.connect()
     await subscriber.subscribe(CHANNEL, (raw) => {
       const { frame, userIds } = JSON.parse(String(raw)) as { frame: Frame; userIds: string[] }
       sendHere(userIds, frame)
     })
-    const client = new RedisClient(url, OPTIONS)
-    await client.connect()
-    return client
+    const sender = client()
+    await sender.connect()
+    if (!live) {
+      for (const one of clients) one.close()
+      throw new Error("Redis dropped while the socket connected")
+    }
+    return sender
   })().catch((error) => {
-    publisher = null
+    drop()
     throw error
   })
-  return publisher
+  publisher = attempt
+  return attempt
 }
 
 // Sends a frame to every open socket of the members named.

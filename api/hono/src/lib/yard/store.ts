@@ -524,13 +524,16 @@ export const redeemInvite = async (db: Database, caller: Caller, code: string) =
   return { member: true as const }
 }
 
-// Who a message's frame reaches: every member of its channel once it is sent, its sender alone while it is pending or denied.
+// Who a message's frame reaches: every member of its channel who still holds the member rung once it is sent, so a banned member's open socket hears nothing, and its sender alone while it is pending or denied.
 export const audienceOf = async (db: Database, caller: Caller, message: Message) =>
   message.status === "sent"
     ? (
         await db
-          .select({ userId: yardMember.userId })
+          .select({ banned: user.banned, id: user.id, role: user.role })
           .from(yardMember)
+          .innerJoin(user, eq(user.id, yardMember.userId))
           .where(eq(yardMember.channelId, message.channel))
-      ).map((row) => row.userId)
+      )
+        .filter((row) => reachesConsole(row, "member"))
+        .map((row) => row.id)
     : [caller.id]
