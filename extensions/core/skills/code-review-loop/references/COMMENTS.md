@@ -26,6 +26,15 @@ Then, in this order:
 A round on a base merge alone says so in one line under the header (`Base merge only: the PR's own work is unchanged since <sha7>.`), keeping the PR's standing score.
 
 With each verdict, set the PR's `Review • <s>/5` label and remove any other `Review • ` label, over REST as the verdict posts (`gh api repos/<repo>/issues/<n>/labels -f 'labels[]=Review • <s>/5'`, then `gh api -X DELETE repos/<repo>/issues/<n>/labels/<label>` for each other, its name URL-encoded: `Review%20%E2%80%A2%203%2F5`), so the labels carry the newest score alone.
+First give the label its score's color, which creates it when missing and recolors it otherwise, so it never lands in GitHub's gray: `gh label create 'Review • <s>/5' -R <repo> --color <hex> --force`, `<hex>` being the table's color without its `#`.
+
+| Label          | Color     |
+| -------------- | --------- |
+| `Review • 5/5` | `#22c55e` |
+| `Review • 4/5` | `#f97316` |
+| `Review • 3/5` | `#ef4444` |
+| `Review • 2/5` | `#ef4444` |
+| `Review • 1/5` | `#ef4444` |
 
 ## Inline findings
 
