@@ -10,6 +10,7 @@ import {
   previewUrl,
   stackGroups,
   startAddress,
+  stoppedIn,
   takeMove,
   takePreview,
   topicCounts,
@@ -226,5 +227,19 @@ describe("doneMessage", () => {
     expect(doneMessage({ branch: "main", path: "/w/yard", session: null })).toContain(
       "no session works in it",
     )
+  })
+})
+
+describe("stoppedIn", () => {
+  test("marks the stopped worktree stopped in the cached list, so the pane shows Start rather than reopening its old address", () => {
+    const stacks: { path: string; url: string | null; vibe: boolean }[] = [
+      { path: "/w/a", url: "https://a.localhost", vibe: true },
+      { path: "/w/b", url: "https://b.localhost", vibe: false },
+    ]
+    expect(stoppedIn(stacks, "/w/a")).toEqual([
+      { path: "/w/a", url: null, vibe: false },
+      { path: "/w/b", url: "https://b.localhost", vibe: false },
+    ])
+    expect(stacks[0]?.url).toBe("https://a.localhost")
   })
 })

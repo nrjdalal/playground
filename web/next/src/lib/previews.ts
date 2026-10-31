@@ -74,6 +74,13 @@ export const stackGroups = (
   return [...groups].map(([project, items]) => ({ items, project }))
 }
 
+// Pure: the list as it reads once the worktree at path has stopped, so the pane shows its Start panel at once, before the refetch lands, rather than reopening the address the cached list still holds.
+export const stoppedIn = <T extends { path: string | null; url: string | null; vibe?: boolean }>(
+  stacks: readonly T[],
+  path: string,
+): T[] =>
+  stacks.map((stack) => (stack.path === path ? { ...stack, url: null, vibe: false } : stack))
+
 // The brand's click opens the Inbox's Preview row: the aside turns to the Inbox, and the Inbox, now or once it mounts, opens the row; a click that moves the page also asks the aside, once, for the Inbox at the first address past the one it left, after the move resets its tab.
 export const OPEN_PREVIEW = "dashboard:open-preview"
 let previewWanted = false
