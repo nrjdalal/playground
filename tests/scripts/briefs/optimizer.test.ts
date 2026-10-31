@@ -18,8 +18,9 @@ test("its retro runs on ops-tick's two beats, reads the table script, and keeps 
   expect(text).toContain("--log-failed")
 })
 
-test("a first retro with no state file has a since and a ship to start from", () => {
+test("a first retro with no state file has a since and a ship to start from, and the next starts where this one's table read", () => {
   expect(text).toContain("With no state file")
+  expect(text).toContain("`lastRetroEnd` as step 4's mark")
 })
 
 test("the daily beat's threshold sits under its own day, and its reads go through REST as the github rule says", () => {
