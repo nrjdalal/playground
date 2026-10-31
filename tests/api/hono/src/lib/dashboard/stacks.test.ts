@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, test } from "bun:test"
-import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -154,7 +154,7 @@ describe("reading git's own files", () => {
     const root = realpathSync(mkdtempSync(join(tmpdir(), "stacks-")))
     dirs.push(root)
     const main = join(root, "yard")
-    Bun.spawnSync(["mkdir", "-p", join(main, "web")])
+    mkdirSync(join(main, "web"), { recursive: true })
     git(main, "init", "-q", "-b", "main")
     git(main, "remote", "add", "origin", "https://github.com/someone/yard.git")
     writeFileSync(join(main, "a"), "a")

@@ -5,9 +5,11 @@ import {
   loadable,
   OPEN_PREVIEW,
   openPreview,
+  previewClick,
   previewUrl,
   stackGroups,
   startAddress,
+  takeMove,
   takePreview,
   topicCounts,
   topicGroups,
@@ -157,10 +159,35 @@ describe("openPreview", () => {
     const listen = () => heard.push("open")
     globalThis.window ??= globalThis as unknown as Window & typeof globalThis
     window.addEventListener(OPEN_PREVIEW, listen)
-    openPreview()
+    openPreview(false)
     window.removeEventListener(OPEN_PREVIEW, listen)
     expect(heard).toEqual(["open"])
     expect(takePreview()).toBe(true)
     expect(takePreview()).toBe(false)
+  })
+
+  // a phone shows one tab, and a move to another page resets it to the page's own, which hid the Inbox the brand opened
+  test("a click that moves the page asks the aside for the Inbox once, after the move's reset", () => {
+    globalThis.window ??= globalThis as unknown as Window & typeof globalThis
+    openPreview(true)
+    expect(takeMove()).toBe(true)
+    expect(takeMove()).toBe(false)
+    openPreview(false)
+    expect(takeMove()).toBe(false)
+    takePreview()
+  })
+
+  test("a plain click opens the row, moving the page unless it is already home; a modified click opens a tab and leaves the row alone", () => {
+    const click = { altKey: false, button: 0, ctrlKey: false, metaKey: false, shiftKey: false }
+    const home = { pathname: "/dashboard", search: "" }
+    expect(previewClick(click, "/dashboard", home)).toEqual({ moves: false })
+    expect(
+      previewClick(click, "/dashboard", { pathname: "/dashboard/sessions", search: "" }),
+    ).toEqual({ moves: true })
+    expect(
+      previewClick(click, "/dashboard", { pathname: "/dashboard", search: "?worker=a" }),
+    ).toEqual({ moves: true })
+    expect(previewClick({ ...click, metaKey: true }, "/dashboard", home)).toBeNull()
+    expect(previewClick({ ...click, button: 1 }, "/dashboard", home)).toBeNull()
   })
 })
