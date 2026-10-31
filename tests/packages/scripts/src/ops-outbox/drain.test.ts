@@ -132,6 +132,14 @@ describe("pending", () => {
     expect(await pending(dir)).toEqual([])
   })
 
+  test("an empty cursor.json: each queue with a whole line, read from its start as drain reads it", async () => {
+    const dir = scratch()
+    writeFileSync(join(dir, Q), rec("2026-10-23T07:00:00Z", "dashboard", "kept"))
+    writeFileSync(join(dir, "cursor.json"), "")
+    expect(await pending(dir)).toEqual([Q])
+    expect((await drain(dir)).map((r) => r.text)).toEqual(["kept"])
+  })
+
   test("a cursor past a file cut shorter: the file, read again from its start", async () => {
     const dir = scratch()
     writeFileSync(join(dir, Q), rec("2026-10-19T05:33:19Z", "dashboard", "a long old line"))

@@ -51,7 +51,7 @@ export async function pending(outbox: string): Promise<string[]> {
     .text()
     .catch(() => null)
   if (raw === null) return []
-  const cursor: Record<string, number> = JSON.parse(raw)
+  const cursor: Record<string, number> = raw ? JSON.parse(raw) : {}
   const waiting: string[] = []
   for (const file of (await readdir(outbox).catch(() => []))
     .filter((f) => /^ops-.+\.jsonl$/.test(f))
