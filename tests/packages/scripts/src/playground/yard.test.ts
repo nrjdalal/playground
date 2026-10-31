@@ -120,6 +120,7 @@ describe("playground yard", () => {
     expect(held.calls.at(-1)).toEqual(["post", "c1", { kind: "steps", text: "run it" }])
     expect(held.lines).toEqual(["Held for your approval: https://yard.example/yard/approve/m9"])
     expect(await runYard(["post", "ops", "x", "--kind", "shout"], held.io)).toBe(2)
+    expect(await runYard(["post", "ops", "--kind", "steps"], held.io)).toBe(2)
   })
 
   test("says what is missing: no Yard set up, no token, no such channel", async () => {
@@ -131,5 +132,12 @@ describe("playground yard", () => {
     expect(out.lines).toEqual(["err: No Yard token on this Mac: run playground yard login"])
     const lost = setUp()
     expect(await runYard(["read", "#nope"], lost.io)).toBe(1)
+    const slow = setUp({
+      me: async () => {
+        throw new DOMException("The operation timed out.", "TimeoutError")
+      },
+    })
+    expect(await runYard(["login"], slow.io)).toBe(1)
+    expect(slow.lines).toEqual(["err: Yard: The operation timed out."])
   })
 })

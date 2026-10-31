@@ -88,6 +88,10 @@ export async function runYard(words: string[], io: YardIo): Promise<number> {
         .slice(1)
         .filter((_, i) => at === -1 || (i + 1 !== at && i + 1 !== at + 1))
         .join(" ")
+      if (!text.trim()) {
+        io.err(USAGE)
+        return 2
+      }
       const message = await client.post(channel.id, {
         kind: kind as (typeof MESSAGE_KINDS)[number],
         text,
@@ -100,9 +104,10 @@ export async function runYard(words: string[], io: YardIo): Promise<number> {
       return 0
     }
   } catch (error) {
-    if (!(error instanceof YardError)) throw error
+    // a refusal, a timeout or a token the Keychain will not keep each read as one line, never a stack
+    if (!(error instanceof Error)) throw error
     io.err(
-      error.status === 401
+      error instanceof YardError && error.status === 401
         ? "Yard refused the token: run playground yard login"
         : `Yard: ${error.message}`,
     )
