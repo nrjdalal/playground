@@ -1,5 +1,6 @@
 import { afterAll, describe, expect, test } from "bun:test"
 import {
+  chmodSync,
   existsSync,
   lstatSync,
   mkdirSync,
@@ -330,6 +331,119 @@ describe("Stop", () => {
     expect(readFileSync(join(path, ".env"), "utf8")).toBe("OLD=3\n")
     expect(existsSync(join(path, ".turbo/vibe.json"))).toBe(false)
     expect(existsSync(path)).toBe(true)
+  })
+
+  test("a second Stop from another tab is refused while the first holds the record, so the worktree's own .env stays", async () => {
+    const path = worktree("two-stops", "OWN=1\n")
+    await startVibe(path, fake([stack(path)]).deps)
+    let release = () => {}
+    const held = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const first = fake([stack(path, { vibe: true })], {
+      stop: async () => {
+        await held
+        return { code: 0, stderr: "", stdout: "" }
+      },
+    })
+    const stopping = stopVibe(path, first.deps)
+    await Bun.sleep(5)
+    const second = fake([stack(path, { vibe: true })])
+    expect(await stopVibe(path, second.deps).catch((error: Error) => error.message)).toContain(
+      "already stopping",
+    )
+    expect(second.docker).toEqual([])
+    release()
+    await stopping
+    expect(readFileSync(join(path, ".env"), "utf8")).toBe("OWN=1\n")
+    expect(existsSync(join(path, ".env.vibe-saved"))).toBe(false)
+    expect(existsSync(join(path, ".turbo/vibe.json"))).toBe(false)
+  })
+
+  test("a Stop that fails lets the next Stop try", async () => {
+    const path = worktree("stop-retry", "OWN=2\n")
+    await startVibe(path, fake([stack(path)]).deps)
+    const refused = fake([stack(path, { vibe: true })], {
+      stop: async () => ({ code: 1, stderr: "dev:stop: something went wrong\n", stdout: "" }),
+    })
+    expect(await stopVibe(path, refused.deps).catch((error: Error) => error.message)).toContain(
+      "dev:stop refused",
+    )
+    await stopVibe(path, fake([stack(path, { vibe: true })]).deps)
+    expect(readFileSync(join(path, ".env"), "utf8")).toBe("OWN=2\n")
+    expect(existsSync(join(path, ".turbo/vibe.json"))).toBe(false)
+  })
+
+  test("a stopping mark 10 minutes old, a Stop the API never finished, is taken over by the next Stop", async () => {
+    const path = worktree("stop-stale", "OWN=3\n")
+    await startVibe(path, fake([stack(path)]).deps)
+    const record = JSON.parse(readFileSync(join(path, ".turbo/vibe.json"), "utf8"))
+    const marked = (minutes: number) =>
+      writeFileSync(
+        join(path, ".turbo/vibe.json"),
+        JSON.stringify({
+          ...record,
+          started: new Date(Date.now() - minutes * 60_000).toISOString(),
+          stopping: true,
+        }),
+      )
+    marked(9)
+    expect(
+      await stopVibe(path, fake([stack(path, { vibe: true })]).deps).catch(
+        (error: Error) => error.message,
+      ),
+    ).toContain("already stopping")
+    marked(11)
+    await stopVibe(path, fake([stack(path, { vibe: true })]).deps)
+    expect(readFileSync(join(path, ".env"), "utf8")).toBe("OWN=3\n")
+    expect(existsSync(join(path, ".turbo/vibe.json"))).toBe(false)
+  })
+
+  test("a Stop that fails after it put the .env back never puts it back again", async () => {
+    const path = worktree("stop-tail", "OWN=4\n")
+    await startVibe(path, fake([stack(path)]).deps)
+    const locked = join(path, ".turbo/vibe-data/locked")
+    mkdirSync(locked, { recursive: true })
+    writeFileSync(join(locked, "file"), "x")
+    chmodSync(locked, 0o500)
+    const failed = await stopVibe(path, fake([stack(path, { vibe: true })]).deps).catch(
+      (error: Error) => error.message,
+    )
+    chmodSync(locked, 0o700)
+    expect(failed).toBeString()
+    expect(readFileSync(join(path, ".env"), "utf8")).toBe("OWN=4\n")
+    await stopVibe(path, fake([stack(path, { vibe: true })]).deps)
+    expect(readFileSync(join(path, ".env"), "utf8")).toBe("OWN=4\n")
+    expect(existsSync(join(path, ".turbo/vibe.json"))).toBe(false)
+  })
+
+  test("a Stop whose stale mark another Stop took over leaves the .env that Stop put back", async () => {
+    const path = worktree("stop-takeover", "OWN=5\n")
+    await startVibe(path, fake([stack(path)]).deps)
+    let release = () => {}
+    const held = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const hung = stopVibe(
+      path,
+      fake([stack(path, { vibe: true })], {
+        stop: async () => {
+          await held
+          return { code: 0, stderr: "", stdout: "" }
+        },
+      }).deps,
+    )
+    await Bun.sleep(5)
+    const record = JSON.parse(readFileSync(join(path, ".turbo/vibe.json"), "utf8"))
+    writeFileSync(
+      join(path, ".turbo/vibe.json"),
+      JSON.stringify({ ...record, started: new Date(Date.now() - 11 * 60_000).toISOString() }),
+    )
+    await stopVibe(path, fake([stack(path, { vibe: true })]).deps)
+    expect(readFileSync(join(path, ".env"), "utf8")).toBe("OWN=5\n")
+    release()
+    await hung
+    expect(readFileSync(join(path, ".env"), "utf8")).toBe("OWN=5\n")
   })
 
   test("Stop while the copy still seeds removes it and leaves the worktree's own .env alone", async () => {
