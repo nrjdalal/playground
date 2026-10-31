@@ -10,6 +10,7 @@
   Then it stops the API and the follower, and the web unless it swapped.
   It resets `live.branch` to its head (`redeploy-pull.sh`), installs, builds `packages/*` or migrates as the move needs, restarts each ops job whose source the move changed (`scripts/ops/README.md`), finds the head's build kept (`build_head`, which builds it now only when no build was kept), serves that build and starts the follower, and runs `bun run verify`.
   A roll that reloads the supervisor (below) finishes on the same kept build.
+  An open tab reloads onto the new head's build once its API names the new version, and holds its reload while words would be lost (`messages.md`, the outbox across a restart).
   The stack is a production build, never `next dev`: `bun run build`, run with `NEXT_PUBLIC_APP_URL` and `NEXT_PUBLIC_API_URL` set to the URLs `portless get` names, since next bakes them into its client (and `HONO_APP_URL` and `HONO_TRUSTED_ORIGINS`, whose hosts auth bakes in),
   and with `NODE_ENV=production` and `SKIP_ENV_VALIDATION_SERVER=true`, so a first run builds before its `.env` holds a secret,
   copies next's standalone server with its static files to `ops/dashboard/builds/<sha>`.
