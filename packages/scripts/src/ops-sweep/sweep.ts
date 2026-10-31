@@ -31,8 +31,8 @@ type Json = Record<string, unknown>
 export const HEADROOM = 85
 export const IDLE_DB_AFTER = 7200
 export const IDLE_DB_GAP = 900
-export const REVIEWER_LATE = 1200
 export const PRUNE_EVERY = 21600
+export const REVIEWER_LATE = 1200
 export const STALE_EVERY = 14_400
 
 const IDLE_SQL =
