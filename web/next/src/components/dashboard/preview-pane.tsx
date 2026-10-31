@@ -144,9 +144,12 @@ export function PreviewPane() {
     go(`${stoppedStack.url}/`)
   }, [waiting, stoppedStack?.url])
   const page = address.startsWith(PREVIEW_PREFIX)
+  // the stack the address is on, the longest URL it starts with
   const shown = page
     ? undefined
-    : stacks.data?.find((stack) => stack.url && address.startsWith(`${stack.url}/`))
+    : stacks.data
+        ?.filter((stack) => stack.url && address.startsWith(`${stack.url}/`))
+        .toSorted((a, b) => (b.url?.length ?? 0) - (a.url?.length ?? 0))[0]
   const picked = page ? address : stopped ? `${STOPPED}${stopped}` : (shown?.url ?? "")
   const stoppedName = stoppedStack?.branch ?? stoppedStack?.name ?? "This worktree"
 
