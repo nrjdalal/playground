@@ -180,7 +180,8 @@ Their tests are `bun run test:file tests/scripts/hooks`.
   It reads past the lockfiles too (`bun.lock`, `package-lock.json`), whose integrity hashes can spell a list value by chance.
   It fails when a count is over `packages/scripts/src/trace-count/counts.json`, and so does `tests/packages/scripts/src/trace-count/count.test.ts`, which `bun run test` runs; `--write` lowers each count a trace-out brought down.
   It exits 2, naming the fix, when no-public-leak's list (`extensions/hooks/no-public-leak.json` in the data folder) is missing or a key of it is empty, or when `owner.names` or `factory.archiveRepo` is unset, since those kinds would count nothing; the test counts the kinds that read neither alone.
-  CI's `Audit, Lint, and Build` job runs it whole through `packages/scripts/src/trace-count/ci.ts`, which writes a scratch data folder from three repository secrets (`FACTORY_ARCHIVE_REPO`, `NO_PUBLIC_LEAK_LIST` as the list's JSON, `OWNER_NAMES` split on commas or spaces) and exits 2 naming each one unset, so the job reads red until all three are set;
+  CI's `Audit, Lint, and Build` job runs it whole through `packages/scripts/src/trace-count/ci.ts`, which writes a scratch data folder from three repository secrets (`FACTORY_ARCHIVE_REPO`, `NO_PUBLIC_LEAK_LIST` as the list's JSON, `OWNER_NAMES` split on commas or spaces) and exits 2 naming each one unset or mis-shaped, never its value,
+  so the job reads red until all three are set in their settings' shapes;
   its tests are `bun run test:file tests/packages/scripts/src/trace-count/ci.test.ts`.
 
 ## no-linear-ticket
