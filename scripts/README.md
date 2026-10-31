@@ -40,6 +40,8 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
   `--model <id>` picks the Claude model for a start or a resume, one of the `models.claude` setting, else `models.default` (the docs list each key and its default).
   It is refused for any other id, an empty or missing value, on GLM, which maps every model itself, and for a reviewer or tester (a column of either, or a resume of a `reviewer-` or `tester-` session) on anything but `models.checker`, which a checker runs on with no `--model`,
   since its verdict gates a merge; nothing records it, so a resume takes it afresh and one with no `--model` runs on `models.default`.
+  `--effort <level>` sets a start's or a resume's effort, one of low, medium, high, xhigh or max, high with none; it is refused for any other value, an empty or missing value, given twice, and with restore or close.
+  The resume record keeps an effort other than high on its exec line, so a restore runs at the same effort, and a resume with no `--effort` runs at high.
   `--title "<title>"` gives a start the plain title the sidebar reads it by, up to 40 characters: a `worker` is refused without one, and a reviewer's or tester's column with none takes `Review: ` or `Test: ` before its worker's roster title, keeps the title its row already holds, or is refused.
   A probe keeps its words-only default and a new runner takes its name, and every other mode refuses it, a resume, a close, a move and a restore included.
   Keep a worker's title to 32 characters, so its checkers' titles show whole.
@@ -55,7 +57,8 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
   With no `--runtime`, every start and resume opens in herdr whatever its spawner's terminal, and spawn.sh starts nothing in cmux: it refuses `--runtime cmux` and a column anchored on a cmux `surface:N`.
   A start records its runtime in `~/.playground/runtimes/<name>`, and a resume whose pin reads `cmux` opens in herdr and rewrites the pin.
   herdr 0.9.5 keeps no resume command a custom agent reports (measured: never in its session file, nothing resumed after a restart), so each herdr session's `~/.playground/resume/<name>.sh` is the factory's own list, written once herdr runs the session:
-  a `# server: <name>` line naming the server it runs on, a `# account: <email>` line naming the account it runs on, a usage-gate pick included, which ops-unstick reads, and one `exec <main checkout>/scripts/spawn.sh resume <name> <dir> <session id>` line with the `--account` its start was given (never a usage-gate pick) and the `--model` it started with, never a token.
+  a `# server: <name>` line naming the server it runs on, a `# account: <email>` line naming the account it runs on, a usage-gate pick included, which ops-unstick reads,
+  and one `exec <main checkout>/scripts/spawn.sh resume <name> <dir> <session id>` line with the `--account` its start was given (never a usage-gate pick), the `--model` it started with and an `--effort` other than high, never a token.
   `spawn.sh restore` reads both, taking no other option, and resumes each session on the server `PLAYGROUND_HERDR_SESSION` names (`playground` by default; a record with no server line is playground's) not ended, parked or paused in the roster, through the gate, in the restored pane holding its label;
   a live one is skipped (the live-name refusal exits 3), and each resume of a herdr session stamps its run in `<name>.ran`.
   `spawn.sh close <name>`, taking no other word, ends a herdr session for the one it reports to: it closes the one pane labelled with the name on the server its resume record names, refuses a runtime pin that is not herdr, a missing record, no pane or two carrying the label, and the caller's own pane;
