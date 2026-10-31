@@ -979,7 +979,6 @@ describe("a command that never exits is refused", () => {
     })
 })
 
-// localci and the merge train take their slots themselves; they ask run-slot.sh, so an off-switch reaches them too (18 Oct: localci took slot 3 past run-slot.3-off)
 // ops, 31 Oct: another factory's pool on this Mac never saw this one's, and the two together took load1 to 77 and swap to 7.6 GB
 describe("another factory's runs (slots.peers)", () => {
   // a peer's ops folder holding run-slot with a holder line whose pid is `pid`
@@ -1016,6 +1015,7 @@ describe("another factory's runs (slots.peers)", () => {
   })
 })
 
+// localci and the merge train take their slots themselves; they ask run-slot.sh, so an off-switch reaches them too (18 Oct: localci took slot 3 past run-slot.3-off)
 describe("can-take", () => {
   test("a slot its off-switch closes", async () => {
     const m = machine({ off: ["run-slot.3-off"] })

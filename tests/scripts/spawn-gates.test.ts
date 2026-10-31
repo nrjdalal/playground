@@ -478,12 +478,15 @@ describe("the capacity gate refuses and spawns nothing", () => {
         .join("\n")
       writeFileSync(join(peer, "capacity.jsonl"), `${fresh}\n`)
       const args = ["worker", "worker-brave-otter", "b.md", "--size", "small"]
-      const alone = await spawn(args, [])
-      expect(alone.code, alone.err).toBe(0)
-      const r = await spawn(args, [], withGates({ "slots.peers": [peer] }))
-      expect(r.err).toContain("and 14 started in the last 5 minutes, at or over the 15 cores")
-      expect(readFileSync(join(peer, "capacity.jsonl"), "utf8")).toBe(`${fresh}\n`)
-      rmSync(peer, { force: true, recursive: true })
+      try {
+        const alone = await spawn(args, [])
+        expect(alone.code, alone.err).toBe(0)
+        const r = await spawn(args, [], withGates({ "slots.peers": [peer] }))
+        expect(r.err).toContain("and 14 started in the last 5 minutes, at or over the 15 cores")
+        expect(readFileSync(join(peer, "capacity.jsonl"), "utf8")).toBe(`${fresh}\n`)
+      } finally {
+        rmSync(peer, { force: true, recursive: true })
+      }
     })
 
     test("gates.startsWindow moves how long a start counts", async () => {

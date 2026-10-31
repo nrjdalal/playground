@@ -520,9 +520,7 @@ held_units() {
   done
   echo $((total + $(peer_units)))
 }
-# Another factory on this machine (slots.peers, its ops folders) holds its own run slots, so each live holder of one counts its units here
-# too, read the way held_units reads ours but never reclaimed or written, since the folder is that factory's (ops, 31 Oct: the two pools
-# together took load1 to 77 and swap to 7.6 GB)
+# each live holder of another factory's run slots (slots.peers) counts its units here, read only, since that folder is theirs (ops, 31 Oct: the two pools took load1 to 77)
 peer_units() {
   local d s line u total=0
   while IFS= read -r d; do
