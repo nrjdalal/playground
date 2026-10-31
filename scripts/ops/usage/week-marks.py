@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """week-marks.py: the week's marks per account, and the day's spend, across the factory's accounts (13 Oct: no daily cap,
-"work if machine allows"). Reads ops-usage's usage.json, which names the account the Claude login holds,
-keeps its own samples per account, and prints one status line plus:
-  ALERT <90|97|98> ...   once per account and week reset, when that account's week passes the mark
-  ALERT 5h ...           once per 5-hour window, when it passes 85%
+"work if machine allows"). Reads ops-usage's usage.json, which names the account the Claude login holds and, in `accounts`,
+each other account's week, keeps its own samples per account, and prints one status line plus:
+  ALERT <90|97|98> <account> ...   once per account and week reset, when that account's week passes the mark: the logged-in
+                                   account's, and each account in `accounts` that usage.accounts lists
+  ALERT 5h ...                     once per 5-hour window of the logged-in account, when it passes 85%
 Each other account in usage.json's `accounts` is sampled into account-samples.jsonl, and the status line adds their combined %/h. It sends nothing:
 Ops' tick relays the alerts."""
 import calendar, json, os, sys, time
@@ -48,8 +49,9 @@ def sample(path, t, account, used, reset):
 
 rows, rate = sample(samples, now, account, used, reset)
 # the pace across every account ops-usage reads (login-flip.json's `accounts`), since the spares' budget is one %/h for all of them
-others = [sample(others_samples, calendar.timegm(time.strptime(r["readAt"], "%Y-%m-%dT%H:%M:%SZ")), a, r["week"], r["weekReset"])[1] for a, r in (u.get("accounts") or {}).items() if a != account]
-pace = [rate, *others]
+spares = {a: r for a, r in (u.get("accounts") or {}).items() if a != account}
+others = {a: sample(others_samples, calendar.timegm(time.strptime(r["readAt"], "%Y-%m-%dT%H:%M:%SZ")), a, r["week"], r["weekReset"])[1] for a, r in spares.items()}
+pace = [rate, *others.values()]
 combined = f"; combined {'?' if None in pace else f'{sum(pace):.1f}'}%/h across {len(pace)} accounts" if others else ""
 # the IST day: 18:30Z to 18:30Z
 day_start = now - ((now - 18.5 * 3600) % 86400)
@@ -61,14 +63,16 @@ try:
     sent = json.load(open(sent_path))
 except (OSError, ValueError):
     sent = {}
-key = f"{account}:{round(reset / 3600)}"
-eta = lambda mark: "" if not rate or rate <= 0 or used >= mark else f", {mark}% in ~{(mark - used) / rate:.1f}h"
+eta = lambda mark, used=used, rate=rate: "" if not rate or rate <= 0 or used >= mark else f", {mark}% in ~{(mark - used) / rate:.1f}h"
 print(f"{account}: week {used:g}% (resets {time.strftime('%a %H:%MZ', time.gmtime(reset))}), rate {'?' if rate is None else f'{rate:.1f}'}%/h{eta(90)}{eta(98)}; today {spent:g}% spent, on pace for {projected:.0f}% (no daily cap){combined}")
 drain_tail = "; nothing parks: at 100% Bravo switches the factory to the next account (#i823)"
-for mark in (90, 97, 98):
-    if used >= mark and mark not in sent.get(key, []):
-        sent.setdefault(key, []).append(mark)
-        print(f"ALERT {mark} {account}: week at {used:g}%, past {mark}%, burning {'?' if rate is None else f'{rate:.1f}'}%/h over the last hour" + {90: eta(98), 97: eta(98) + drain_tail, 98: drain_tail}[mark])
+# the logged-in account first, then each spare usage.accounts lists, each keyed by its own week reset
+for who, week_used, week_reset, pct_h in [(account, used, reset, rate), *((a, r["week"], r["weekReset"], others[a]) for a, r in spares.items() if a in FACTORY)]:
+    key = f"{who}:{round(week_reset / 3600)}"
+    for mark in (90, 97, 98):
+        if week_used >= mark and mark not in sent.get(key, []):
+            sent.setdefault(key, []).append(mark)
+            print(f"ALERT {mark} {who}: week at {week_used:g}%, past {mark}%, burning {'?' if pct_h is None else f'{pct_h:.1f}'}%/h over the last hour" + {90: eta(98, week_used, pct_h), 97: eta(98, week_used, pct_h) + drain_tail, 98: drain_tail}[mark])
 # no ALERT day: the owner lifted the daily cap (relayed by builder, 13 Oct 04:35Z: two memberships, and the machine allows the work); the line above still shows today's spend
 five = u["rate_limits"].get("five_hour") or {}
 fkey = f"5h:{account}:{round((five.get('resets_at') or 0) / 3600)}"
