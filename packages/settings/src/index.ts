@@ -1,6 +1,5 @@
 export * from "@/accounts"
 export * from "@/channel"
-export * from "@/checks"
 export * from "@/content"
 export * from "@/diff"
 export * from "@/ext"

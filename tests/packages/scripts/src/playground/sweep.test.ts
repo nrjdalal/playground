@@ -1,6 +1,5 @@
 import { afterAll, describe, expect, test } from "bun:test"
 import {
-  appendFileSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -23,14 +22,10 @@ afterAll(() => rmSync(root, { force: true, recursive: true }))
 
 const NOW = new Date("2026-10-23T12:00:00Z")
 
-// A data folder holding a checks.log, alerts, an empty queue and a roster, as the ops jobs leave them.
+// A data folder holding alerts, an empty queue and a roster, as the ops jobs leave them.
 const folder = (agents: unknown[] = []) => {
   const dir = mkdtempSync(join(root, "data-"))
-  mkdirSync(join(dir, "ops", "checks"), { recursive: true })
-  writeFileSync(
-    join(dir, "ops", "checks", "checks.log"),
-    "2026-10-23T09:00:00Z #1 @ abc1234: pass\n",
-  )
+  mkdirSync(join(dir, "ops"), { recursive: true })
   writeFileSync(join(dir, "ops", "alerts-pending.json"), JSON.stringify({ alerts: [] }))
   writeFileSync(join(dir, "merge-queue.json"), JSON.stringify({ queue: [] }))
   writeFileSync(join(dir, "roster.json"), JSON.stringify({ agents }))
@@ -43,26 +38,6 @@ describe("playground sweep", () => {
     const dir = folder()
     expect(await sweep(dir)).toEqual(["quiet"])
     expect(await sweep(dir)).toEqual(["quiet"])
-  })
-
-  test("a new Checks line prints once, and a line still being written waits for the next sweep", async () => {
-    const dir = folder()
-    const log = join(dir, "ops", "checks", "checks.log")
-    await sweep(dir)
-    appendFileSync(log, "2026-10-23T11:00:00Z #2 @ def5678: pass\n2026-10-23T11:01:00Z lane chk-")
-    expect(await sweep(dir)).toEqual(["checks: 2026-10-23T11:00:00Z #2 @ def5678: pass"])
-    expect(await sweep(dir)).toEqual(["quiet"])
-    appendFileSync(log, "1: #3 @ 9abcdef\n")
-    expect(await sweep(dir)).toEqual(["checks: 2026-10-23T11:01:00Z lane chk-1: #3 @ 9abcdef"])
-  })
-
-  test("a first sweep taken while a line is being written prints that line whole once it ends", async () => {
-    const dir = folder()
-    const log = join(dir, "ops", "checks", "checks.log")
-    appendFileSync(log, "2026-10-23T11:01:00Z lane chk-")
-    expect(await sweep(dir)).toEqual(["quiet"])
-    appendFileSync(log, "1: #3 @ 9abcdef\n")
-    expect(await sweep(dir)).toEqual(["checks: 2026-10-23T11:01:00Z lane chk-1: #3 @ 9abcdef"])
   })
 
   test("a passed ETA of the lead's own row prints once, and another lead's row never", async () => {

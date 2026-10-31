@@ -48,7 +48,6 @@ describe("defineSettings", () => {
       "battery.ask",
       "channel.skipUser",
       "channel.slackId",
-      "checks.outsideAuthors",
       "clock.ownerZone",
       "context.window",
       "ext.links",

@@ -1,14 +1,14 @@
 # Sweep (leads)
 
 Each lead sweeps its own agents every 15 minutes, from a session cron job kept running as [SESSIONS.md](SESSIONS.md#keep-the-sweep-running) says.
-The cron is the backstop: every event a lead acts on already reaches it as a message (Checks lines, a worker's ready CI, ops-report's alerts), and each turn re-reads the lead's whole context, so the Builder's sweep spends one call while nothing has changed, and Ops' adds only step 2's reads (Inbox #i706).
+The cron is the backstop: every event a lead acts on already reaches it as a message (a worker's ready CI, ops-report's alerts), and each turn re-reads the lead's whole context, so the Builder's sweep spends one call while nothing has changed, and Ops' adds only step 2's reads (Inbox #i706).
 A sweep is the lead's one look at its sessions between turns: it finds each agent's state and acts on it, so nothing waits unseen.
 Work the steps in order.
 
 ## 1. Read what changed
 
 Run `playground sweep <your name>`.
-It prints only what changed since your last sweep, one line each: a new Checks line, a new alert from `ops/alerts-pending.json`, the merge queue when it changes, load5 (the third field of `sysctl -n vm.loadavg`) crossing 15, the single-slot flag turning on or off, each of your roster rows whose ETA has passed, and for Ops, once an hour, each ops switch on with its age and reason;
+It prints only what changed since your last sweep, one line each: a new alert from `ops/alerts-pending.json`, the merge queue when it changes, load5 (the third field of `sysctl -n vm.loadavg`) crossing 15, the single-slot flag turning on or off, each of your roster rows whose ETA has passed, and for Ops, once an hour, each ops switch on with its age and reason;
 its cursor is `sweep/<your name>.json` in the data folder.
 For each `switch on:` line, Ops checks whether its reason still holds: one that does is set again with a fresh reason through `run-slot.sh set`, and any other is lifted by moving it to `<name>.lifted-<ts>` ([scripts/ops/README.md](../../../../scripts/ops/README.md#ops-switches)).
 When it prints `quiet`, the Builder's sweep ends there, and Ops' goes on to step 2 and ends after it.
@@ -51,12 +51,11 @@ Done when every agent of yours is working, has reported, or has had its state ac
 ## 4. Run the recovery scan and chase stalled PRs (the Builder)
 
 The Builder runs code-review-loop's [recovery scan](../code-review-loop/SKILL.md#the-recovery-scan) and acts on every row it leaves, and chases at once each `pr-stalled` entry in `~/.playground/ops/alerts-pending.json`:
-an open the dispatcher's or a work-org PR of ours with no new commit, verdict or comment for 30 minutes (after one sat two hours unnoticed) that is truly stuck (a conflict, no tester stamp, or every gate green and still unmerged).
-ops-report writes them to `ops/alerts-prs.json` and ops-unstick folds that in; a PR held on purpose, whose body or newest comment says held or parked or which carries a park or hold label, is left out, and so is one waiting only on the merge train, a held train or its Checks turn.
-A train that holds a PR 60 minutes or more goes to Ops.
+an open the dispatcher's or a work-org PR of ours with no new commit, verdict or comment for 30 minutes (after one sat two hours unnoticed) that is truly stuck (a conflict, or every gate green and still unmerged).
+ops-report writes them to `ops/alerts-prs.json` and ops-unstick folds that in; a PR held on purpose, whose body or newest comment says held or parked or which carries a park or hold label, is left out, and so is one waiting only on its checks or merge-on-ready.
 
-Every clean-or-conflict call (a conflict above, a go on a head behind canary) comes from a tool that reads git's exit code, never a tree line read by eye: `bun run pr:train forecast` for the queue, `bun run pr:merge <n> --explain` for one PR, whose first line says whether its head merges clean with canary now and as which tree,
-or the files it conflicts in (a go given on a conflicting head).
+Every clean-or-conflict call (a conflict above, a head behind canary) comes from a tool that reads git's exit code, never a tree line read by eye: `bun run pr:train forecast` for the queue, `bun run pr:merge <n> --explain` for one PR, whose first line says whether its head merges clean with canary now and as which tree,
+or the files it conflicts in.
 
 Done when every row the recovery scan leaves and every stalled PR is acted on.
 

@@ -155,59 +155,6 @@ describe("idleDbs", () => {
     expect(calls.some((c) => c.argv[0] === "docker" && c.argv[1] === "exec")).toBe(false)
     expect(read(join(sweep, "idle-db.json"))).toEqual({ "playground-dispatcher-db": 0 })
   })
-
-  test("skips a Checks lane's database while a run holds its lane lock, and starts its clock again after", async () => {
-    const { calls, ctx, ops, sweep } = setup({
-      [DOCKER_PS]: { out: "playground-chk-9-db\nplayground-chk-10-db\nplayground-chk-11-db\n" },
-      [DASHBOARD_DB]: { out: "playground-dispatcher-db\n" },
-      [psql("playground-chk-9-db")]: { out: "0\n" },
-      [psql("playground-chk-10-db")]: { out: "0\n" },
-      [psql("playground-chk-11-db")]: { out: "0\n" },
-    })
-    mkdirSync(join(ops, "checks"))
-    writeFileSync(join(ops, "checks", "lane-chk-10.lock"), "")
-    const lock = join(ops, "checks", "lane-chk-9.lock")
-    // A run's hold, as parallel.py takes it: an exclusive flock from another process, kept until it exits.
-    const holder = Bun.spawn(
-      [
-        "bun",
-        "-e",
-        `const { dlopen, FFIType } = require("bun:ffi"); const fs = require("node:fs"); const libc = dlopen(process.platform === "darwin" ? "libc.dylib" : "libc.so.6", { flock: { args: [FFIType.i32, FFIType.i32], returns: FFIType.i32 } }); if (libc.symbols.flock(fs.openSync(process.argv[1], "a"), 2) !== 0) process.exit(1); console.log("held"); setInterval(() => {}, 1000)`,
-        lock,
-      ],
-      { stdout: "pipe" },
-    )
-    const reader = holder.stdout.getReader()
-    expect(new TextDecoder().decode((await reader.read()).value)).toContain("held")
-    const first = NOW / 1000 - IDLE_DB_AFTER
-    const all = {
-      "playground-chk-10-db": first,
-      "playground-chk-11-db": first,
-      "playground-chk-9-db": first,
-    }
-    idleState(sweep, all)
-    try {
-      expect(await idleDbs(ctx)).toEqual([
-        "idle-db:playground-chk-10-db",
-        "idle-db:playground-chk-11-db",
-      ])
-      expect(calls.some((c) => c.argv.join(" ").startsWith(psql("playground-chk-9-db")))).toBe(
-        false,
-      )
-      expect(read(join(sweep, "idle-db.json"))).toEqual({
-        "playground-chk-10-db": first,
-        "playground-chk-11-db": first,
-      })
-    } finally {
-      holder.kill()
-      await holder.exited
-    }
-    expect(await idleDbs(ctx)).toEqual([
-      "idle-db:playground-chk-10-db",
-      "idle-db:playground-chk-11-db",
-    ])
-    expect(read(join(sweep, "idle-db.json"))["playground-chk-9-db"]).toBe(NOW / 1000)
-  })
 })
 
 describe("check", () => {

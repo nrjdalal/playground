@@ -69,7 +69,6 @@ const OLD = {
     "const LINE = String.raw`^\\s*(?:@?(?:alex|octo-owner)\\s*[,:])`\n",
   "scripts/hooks/no-release-comment.ts": 'const GUARDED_OWNERS = new Set(["octo-owner"])\n',
   "packages/scripts/src/ops-tick/tick.ts": 'export const SWITCH_ACCOUNT = "b@example.com"\n',
-  "scripts/ops/checks/outside.py": 'OUTSIDE = {"outside-dev"}\n',
   "scripts/watch/channel.ts": 'const CHANNEL = "C0MADEUP01"\nconst SKIP = "U0MADEUP02"\n',
   "scripts/ops/usage/account-watch.py":
     'r = subprocess.run(["security", "find-generic-password", "-s", "acme-claude-oauth", "-a", email, "-w"])\n',
@@ -174,7 +173,6 @@ const USAGE =
 const SETTINGS: [string, unknown, string][] = [
   ["channel.skipUser", "U0MADEUP02", "scripts/watch/channel.ts at canary"],
   ["channel.slackId", "C0MADEUP01", "scripts/watch/channel.ts at canary"],
-  ["checks.outsideAuthors", ["outside-dev"], "scripts/ops/checks/outside.py at canary"],
   ["clock.ownerZone", "Europe/Lisbon", `${OLD_TREE_PATHS.endOfDayScan} at canary`],
   ["ext.links", { [LOGIN]: ["*"], [ORG]: ["*", ORG] }, "--org"],
   ["ext.order", [LOGIN, ORG], "--org"],

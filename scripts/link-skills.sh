@@ -67,17 +67,13 @@ link_file "$REPO/scripts/briefs/brief-rush.md" "$RUSH"
 link_file "$REPO/packages/scripts/src/playground/cli.ts" "$HOME/.bun/bin/playground"
 # run-slot.sh keeps its state in the state folder (ops/run-slot*) beside the link, so every heavy run follows the checkout's copy
 link_file "$REPO/scripts/ops/run-slot.sh" "$HOME/.playground/ops/run-slot.sh"
-# The Checks lane's scripts read their folder through a path that keeps the link, so their state (checks.log, go.log, the lane locks) stays in ops/checks
-for script in checks.py go.py outside.py parallel.py; do
-  link_file "$REPO/scripts/ops/checks/$script" "$HOME/.playground/ops/checks/$script"
-done
 BEAT="$HOME/.playground/ops/beat.py"
 if [ -f "$BEAT" ] && [ ! -L "$BEAT" ]; then
   mv "$BEAT" "$BEAT.replaced-$(date -u +%Y%m%dT%H%M%SZ)"
   echo "moved aside $BEAT: a copy the scripts' checkout() lookup lacks"
 fi
-# The merge train's and usage's scripts name their state folders by path, so their state stays there whichever path runs them; beat.py is the module they import for the heartbeat and the checkout, and notify.sh the line the Checks lane and the merge train queue their alerts through
-for script in beat.py merge-train/run.py merge-train/wait-check.py notify.sh usage/account-watch.py usage/glm-credits.py usage/login-flip.py usage/near-limit.py usage/run.py usage/week-marks.py; do
+# The merge train's and usage's scripts name their state folders by path, so their state stays there whichever path runs them; beat.py is the module they import for the heartbeat and the checkout, and notify.sh the line the merge train queues its alerts through
+for script in beat.py merge-train/run.py notify.sh usage/account-watch.py usage/glm-credits.py usage/login-flip.py usage/near-limit.py usage/run.py usage/week-marks.py; do
   link_file "$REPO/scripts/ops/$script" "$HOME/.playground/ops/$script"
 done
 # The home skill set, written from this checkout and the extensions and installed at user scope as ws-home@ws (playground orgs home), so a pull's skills reach the next session started by hand

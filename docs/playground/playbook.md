@@ -71,11 +71,11 @@ A session ends when the one it reports to closes its column, never the others; t
 A finished worker, reviewer or tester also ends by itself: right after its PR merges, and from a check every 5 minutes, while one with work left unsaved stays open and its lead gets a `Not ended` line saying why.
 Sessions already running move at their next restart, so nothing is closed just to re-arrange it.
 
-The leads keep watch with a sweep: every 15 minutes each one runs `playground sweep`, which prints only what changed since its last sweep (new Checks lines, alerts, the merge queue, the load, ETAs that have passed, and for Ops, once an hour, each ops switch still on with its reason) or `quiet`,
+The leads keep watch with a sweep: every 15 minutes each one runs `playground sweep`, which prints only what changed since its last sweep (new alerts, the merge queue, the load, ETAs that have passed, and for Ops, once an hour, each ops switch still on with its reason) or `quiet`,
 and on news it checks its own agents for a picker waiting, a permission prompt, silence with no report, or a session gone, and acts on it.
 A stuck session tells its manager at once: the manager allows a permission prompt when the command is needed and otherwise denies it with a simpler way to do it (`playground picker`), and a session still stuck after 5 minutes goes to Playground; what only the owner can answer becomes a decision in Playground's Inbox, since he reads the Inbox rather than every chat.
 A worker silent for an hour after a review round, with no push and no report, is asked why, and a bug it found outside its chore becomes an issue of its own at once rather than a detour, unless it blocks the PR.
-The Builder also chases any open PR of the factory's that has seen no commit, verdict or comment for 30 minutes and is truly stuck, not just waiting its turn on the merge train.
+The Builder also chases any open PR of the factory's that has seen no commit, verdict or comment for 30 minutes and is truly stuck, not just waiting its turn on merge-on-ready.
 An ops job reminds the poster of every answer of the owner's in the Inbox that its poster has not confirmed within 15 minutes, whether it failed to reach the session or reached it and was never carried out, and a lead hears only when that poster is down, so an answer he gave is never left undone.
 An agent confirms a go only with a link to where it landed (the Slack message, the pull request, the Linear ticket) or a reason there is none, and every draft or decision that will post somewhere names that place before he answers.
 No factory session blocks on him: one that posted a decision carries on or ends its turn, and reads Waiting on your inbox, in orange, until he answers; Playground itself is always free, running nothing long and waiting on nothing.
@@ -179,14 +179,13 @@ Like the ticket guard, a hook that cannot start lets the call through, and the r
 - No brief agrees in advance to raising a ratchet, or loosening any check whose own rule says it never rises: that call goes to the rule's owner, on the PR or directly, before the code relies on it.
 - Every Linear ticket a factory session files traces to an Inbox decision the owner approved, and none names Playground.
 - No guarded org's ticket, PR, commit, branch, comment or Slack message names Playground, a lead, a factory session or the live dashboard.
-- Every Playground PR merges through `bun run pr:merge <n>` or a merge train (`bun run pr:train`), so none lands unless the repo's owner opened it (an outside author's only on the Builder's go, with `--outside-author <login>`), nor while Ops' held list names it,
+- Every Playground PR merges through `bun run pr:merge <n>` or merge-on-ready (`bun run pr:train ready`), so none lands unless the repo's owner opened it (an outside author's only on the Builder's word, with `--outside-author <login>`), nor while Ops' held list names it,
   nor while a merge of `canary` inside it dropped lines `canary` added (the `keeps canary` gate in [pr-merge's README](../../packages/scripts/src/pr-merge/README.md); a factory hook also refuses `-s ours` and `-X ours`),
-  nor without a 5/5 and a green stamp, the one comment every check posts (passing Checks' `verify` where the diff touches the dashboard's code, and the tester's `agent-drive` where it has UI), and green GitHub checks with GitGuardian's among them.
-  A clean `canary` merge carries the stamp and the 5/5, a merge that is not clean takes the reviewer's short look, and a red stamp on `canary`'s tip stops every merge but the fix, which merges `canary` in and runs green;
-  a train lands only on the tree its own stamp passed.
-  Merges go one at a time, under the factory's merge lock, which pr:merge and a train's land take themselves.
+  nor without a 5/5 and GitHub's `Audit, Lint, and Build` and `test` checks green at its head, with GitGuardian's among the checks.
+  A merge of `canary` makes a new head, which needs its own checks and 5/5.
+  Merges go one at a time, under the factory's merge lock, which pr:merge takes itself.
   A wrong refusal goes to the Builder, the only one who merges by hand, on an override.
-- A lead that overrules a reviewer's FAIL or a red stamp says so on the PR, in one `Lead ruling:` line with the evidence and the issue the fault moved to, so the next reviewer reads the FAIL as settled; the merge still waits for a fresh verdict at the head, or the Builder's merge by hand.
+- A lead that overrules a reviewer's FAIL says so on the PR, in one `Lead ruling:` line with the evidence and the issue the fault moved to, so the next reviewer reads the FAIL as settled; the merge still waits for a fresh verdict at the head, or the Builder's merge by hand.
 - No session but the dashboard's runner restarts the live dashboard.
 - No session, and no fork or sub-agent one runs, stops a process it did not start: the **signal** rule.
   The one handover is a dev stack whose starting session has gone, which `bun run dev:stop` ends in its worktree from the launcher's own record, never the live dashboard's without `--live-dashboard`.

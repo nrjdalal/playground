@@ -577,8 +577,12 @@ const STAR_REEXPORT =
 // The factory's own tool that answers a cmux session's Feed permission, `playground picker`, as run.py's Python reads cmux beside the app; it builds its two argvs itself and reaches no dashboard code.
 const CMUX_TOOLS = new Set(["packages/scripts/src/playground/picker.ts"])
 
-// Files that name cmux only as a value and spawn nothing: the ops job registry, whose runtime field takes "cmux", and onboarding's checks, whose cmux row reads PATH alone.
-const CMUX_VALUES = new Set(["api/hono/src/lib/onboard/checks.ts", "packages/settings/src/jobs.ts"])
+// Files that name cmux only as a value and spawn nothing: the ops job registry, whose runtime field takes "cmux", onboarding's checks, whose cmux row reads PATH alone, and the new-user gate's stand-ins, where it names a file the gate writes.
+const CMUX_VALUES = new Set([
+  "api/hono/src/lib/onboard/checks.ts",
+  "packages/scripts/src/new-user-gate/stubs.ts",
+  "packages/settings/src/jobs.ts",
+])
 
 // Each source file, other than cmux.ts and CMUX_TOOLS, that names cmux as an argv, runs a cmux command line where it can spawn, or borrows cmux.ts's argv builders.
 const crossings = (files: Record<string, string>): string[] =>
