@@ -58,6 +58,9 @@ const drive = async (
       HOME: process.env.HOME,
       PATH: process.env.PATH,
       TZ: "UTC",
+      // the sandbox's real-home uv folders, so uv finds its Python 3.13 rather than downloading one into the scratch home
+      UV_CACHE_DIR: process.env.UV_CACHE_DIR,
+      UV_PYTHON_INSTALL_DIR: process.env.UV_PYTHON_INSTALL_DIR,
       ...env,
     },
     stderr: "pipe",
