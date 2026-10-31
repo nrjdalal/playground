@@ -19,7 +19,8 @@ import {
 } from "@/components/ui/input-group"
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { toast } from "@/components/ui/toast"
-import { canPost, channelTitle, type YardChannel, type YardMessage } from "@/lib/yard"
+import { config } from "@/lib/config"
+import { approveHref, canPost, channelTitle, type YardChannel, type YardMessage } from "@/lib/yard"
 import {
   CHANNELS_KEY,
   messagesKey,
@@ -94,15 +95,23 @@ export function FromLine({ message }: { message: YardMessage }) {
 
 // A tier-two post waits, seen by its sender alone, until that sender's signed-in web session approves it; a denied one stays with them, marked.
 function Status({ message }: { message: YardMessage }) {
-  if (message.status === "pending")
+  if (message.status === "pending") {
+    const href = approveHref(message, config.hosted)
     return (
       <p className="text-muted-foreground mt-1 text-xs">
-        Waiting for your approval ·{" "}
-        <Link className="underline" href={`/yard/approve/${message.id}`}>
-          Review
-        </Link>
+        {href ? (
+          <>
+            Waiting for your approval ·{" "}
+            <Link className="underline" href={href}>
+              Review
+            </Link>
+          </>
+        ) : (
+          "Waiting for your approval on Yard's web"
+        )}
       </p>
     )
+  }
   if (message.status === "denied")
     return <p className="text-muted-foreground mt-1 text-xs">Denied: only you can see it</p>
   return null

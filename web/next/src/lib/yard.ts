@@ -29,6 +29,10 @@ export const socketUrl = (api: string, route: string, token: string) =>
 export const channelHref = (channel: Pick<YardChannel, "id">, hosted: boolean) =>
   hosted ? `/yard/c/${channel.id}` : `/dashboard/yard/${channel.id}`
 
+// Approving needs Yard's own web session, so a local stack, which serves no /yard page, links nowhere.
+export const approveHref = (message: Pick<YardMessage, "id">, hosted: boolean) =>
+  hosted ? `/yard/approve/${message.id}` : null
+
 export const channelTitle = (channel: Pick<YardChannel, "kind" | "name" | "peer">) =>
   channel.kind === "dm" ? (channel.peer?.login ?? "Direct message") : `#${channel.name}`
 

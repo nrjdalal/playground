@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 
 import {
+  approveHref,
   canPost,
   channelHref,
   channelTitle,
@@ -63,6 +64,11 @@ describe("the sidebar's rows", () => {
   test("a row opens under /yard on the hosted app and in the dashboard's chat pane locally", () => {
     expect(channelHref(dm, true)).toBe("/yard/c/d1")
     expect(channelHref(dm, false)).toBe("/dashboard/yard/d1")
+  })
+
+  test("a pending post links to its approve page on the hosted app alone, since a local stack serves no /yard page", () => {
+    expect(approveHref({ id: "m4" }, true)).toBe("/yard/approve/m4")
+    expect(approveHref({ id: "m4" }, false)).toBeNull()
   })
 
   test("the badge is absent once read, the count past 99 reads 99+, and a mention marks it", () => {
