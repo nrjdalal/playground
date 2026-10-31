@@ -558,7 +558,7 @@ else:
         seen, detail = judge(name, other, 60, "The optimizer's spare watch writes it every 5 minutes while it runs.")
         logins.append((email, name, email, seen, detail))
         known.add(email.lower())
-    # each account login-flip probes, from its reading in login-flip.json's seen, so the split's accounts reach the pick with no usage-<name>.json of their own (#85)
+    # each account login-flip probes, from its reading in login-flip.json's seen, so the split's accounts reach the pick with no usage-<name>.json of their own
     try:
         with open(os.path.join(data_dir, "ops", "usage", "login-flip.json")) as f:
             flip_seen = json.load(f).get("seen") or {}
