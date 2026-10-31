@@ -57,9 +57,10 @@ How ops-unstick runs its part of the factory's **unstick** rule (`extensions/cor
 
 How to read an account's week for the factory's **usage** rule (`extensions/core/rules/usage.md`).
 
-- The readings are the `<account> week` rows of `~/.playground/ops/optimizer/spare-history.jsonl`, one line per pass, and the move's time comes from the move itself, as the session that made it reported it.
-- The pace is the gain in `seven_day.used_percentage` from the first reading at or after the move to the latest, divided by the hours between them, once those readings span 3 hours or more, since each is a whole percent; set the time it reaches 90% against the same account's `seven_day.resets_at`.
-- `~/.playground/ops/optimizer/usage_table.py`, kept outside the repo, prints the report's table from every `~/.playground/usage-*.json` and ops-usage's `ops/usage/stored-login.json`, the fresher reading per account: each account's 5-hour and week percent, week reset and read time, an account read more than 15 minutes ago marked stale with its age.
+- The readings are the rows `week-marks.py` appends to `ops/usage/` on each ops tick, each `{t, week, reset, account}`: `week-samples.jsonl` for the account the Claude login holds, and `account-samples.jsonl` for every other account in usage.json's `accounts`.
+  The move's time comes from the move itself, as the session that made it reported it.
+- The pace is the gain in `week` from the first reading at or after the move to the latest, divided by the hours between them, once those readings span 3 hours or more, since each is a whole percent; set the time it reaches 90% against the same rows' `reset`.
+- The report's table is each account's latest reading, `login-flip.json`'s `seen` (`five` and `week`, their resets `fiveReset` and `weekReset`, and `at`, when it was read); `playground accounts list` prints the two percents for each Claude account, and the report marks an account read more than 15 minutes ago stale with its age.
 
 ## Ops switches
 
