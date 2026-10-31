@@ -24,10 +24,10 @@ export const schemaOptions = {
       roles: Object.fromEntries(CONSOLE_ROLES.map((role) => [role, userAc])),
     }),
   ],
-  // The app's own columns on user, declared here so the generated schema carries them. login is the GitHub login a hosted (Yard) sign-in stamps, which Yard's messages, mentions and invites name, unique since a sign-in first takes it from any stale holder (index.ts's releaseLogin); null on a local stack. roleSetAt is stamped by every deliberate rung change, never accepted from a client and never returned to one.
+  // The app's own columns on user, declared here so the generated schema carries them. login is the GitHub login a hosted (Yard) sign-in stamps, which Yard's messages, mentions and invites name, taking input so GitHub's profile reaches the row, while index.ts's stampLogin keeps it to GitHub's sign-in alone and unique; null on a local stack. roleSetAt is stamped by every deliberate rung change, never accepted from a client and never returned to one.
   user: {
     additionalFields: {
-      login: { input: false, required: false, returned: true, type: "string", unique: true },
+      login: { input: true, required: false, returned: true, type: "string", unique: true },
       roleSetAt: { input: false, required: false, returned: false, type: "date" },
     },
   },

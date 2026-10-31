@@ -9,6 +9,7 @@ const API = join(ROOT, "api/hono")
 const HOSTED = join(API, "src/hosted.ts")
 const MIGRATIONS = join(ROOT, "packages/db/drizzle")
 const SCENARIO = join(import.meta.dir, "yard-scenario.ts")
+const GITHUB = join(import.meta.dir, "yard-github.ts")
 const WEB = "http://127.0.0.1:3000"
 const PASSWORD = crypto.randomUUID()
 
@@ -143,15 +144,16 @@ describe.skipIf(!dockerUp())("Yard's routes on the hosted build", () => {
     ])
   })
 
-  test("a sign-in's login moves to its new holder: any other account still carrying it lets it go", async () => {
-    await sql`insert into "user" (id, name, email, login, role) values ('old', 'old', 'old@example.com', 'Taken', 'member')`
-    const run = child(
-      `await (await import("@packages/auth")).releaseLogin({ login: "taken" }); process.exit(0)`,
-      { POSTGRES_URL: url },
-    )
-    expect(run.code).toBe(0)
-    const [row] = await sql`select login from "user" where id = 'old'`
-    expect(row.login).toBeNull()
+  test("GitHub's sign-in stamps the login and takes it from a stale holder, and no client sets one", async () => {
+    await sql`insert into "user" (id, name, email, login, role) values ('old', 'old', ${["old", "example.com"].join("@")}, 'Taken', 'member')`
+    const run = child(await Bun.file(GITHUB).text(), { GH_LOGIN: "taken", POSTGRES_URL: url })
+    expect(run.err).not.toContain("error:")
+    expect(JSON.parse(last(run.out))).toMatchObject({ callback: 302, update: 200 })
+    // the new holder keeps GitHub's login through its own update-user, and the stale holder has let it go
+    const [stale] = await sql`select login from "user" where id = 'old'`
+    const [fresh] =
+      await sql`select login from "user" where email = ${["new", "example.com"].join("@")}`
+    expect([stale.login, fresh.login]).toEqual([null, "taken"])
   })
 
   test("the socket upgrades on the Vercel export, a server that never listened", async () => {

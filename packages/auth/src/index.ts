@@ -11,7 +11,7 @@ import {
   verification,
 } from "@packages/db"
 import { env } from "@packages/env/auth"
-import { betterAuth } from "better-auth"
+import { betterAuth, type GenericEndpointContext } from "better-auth"
 import { drizzleAdapter } from "better-auth/adapters/drizzle"
 import { oneTimeToken } from "better-auth/plugins"
 import { sql } from "drizzle-orm"
@@ -75,8 +75,14 @@ const socialProviders =
       }
     : undefined
 
-// A GitHub login moves to whoever holds it now: before a sign-in stamps one, any other account still carrying it (a renamed handle, since taken) lets it go, so user.login stays unique.
-export const releaseLogin = async (data: Record<string, unknown>) => {
+// user.login is GitHub's alone: Better Auth passes a profile field into the user row only when the field takes input, so this hook keeps a login on GitHub's sign-in callback and drops it from every other write (update-user), so no client sets one. Before the callback stamps a login, any other account still carrying it (a renamed handle, since taken) lets it go, so user.login stays unique.
+export const stampLogin = async (
+  data: Record<string, unknown>,
+  context: GenericEndpointContext | null,
+) => {
+  if (!("login" in data)) return
+  if (context?.path !== "/callback/:id" || context.params?.id !== "github")
+    return { data: { login: undefined } }
   if (typeof data.login === "string")
     await db
       .update(user)
@@ -113,7 +119,7 @@ export const auth = betterAuth({
   },
   databaseHooks: {
     session: { create: { before: grantConsoleAccessOnSignIn } },
-    user: { create: { before: releaseLogin }, update: { before: releaseLogin } },
+    user: { create: { before: stampLogin }, update: { before: stampLogin } },
   },
   ...schemaOptions,
   // oneTimeToken mints a single-use, 3-minute token for a signed-in session, which the hosted web hands Yard's socket in its URL, since the API's host never sees the web's cookie: kept hashed, and its verify sets no cookie. It adds no table (it keeps tokens in verification), so it sits beside the schema's plugins rather than among them.
