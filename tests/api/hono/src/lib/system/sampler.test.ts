@@ -65,6 +65,7 @@ const readings = (cpu: { a: number; run: number }): Readings => ({
     problem: null,
     vmPid: 4313,
   },
+  glmAccount: true,
   load: [11.7, 10.6, 9.1],
   problems: [],
   procs: [
@@ -156,6 +157,16 @@ describe("compose", () => {
     expect(report.capacity.idle).toEqual({ bytes: 0, line: null, ready: false, stacks: [] })
     expect(report.sampledAt).toBe("2026-10-06T08:00:00.000Z")
     expect(report.zai).toEqual(ZAI)
+  })
+
+  test("with no GLM row in usage.accounts the report carries no GLM windows, though a file is left behind", () => {
+    const { report } = compose(
+      { ...readings({ a: 0, run: 0 }), glmAccount: false },
+      freshState(T0),
+      T0,
+      checkouts,
+    )
+    expect(report.zai).toBeNull()
   })
 
   test("a worker's stack under 1% of a core for 15 minutes is idle and offered up; a runner's never is", () => {
