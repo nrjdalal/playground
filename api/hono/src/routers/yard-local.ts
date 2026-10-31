@@ -24,13 +24,18 @@ const valid = <T extends z.ZodType>(target: "json" | "query", schema: T) =>
       throw new ApiError(400, "VALIDATION_ERROR", "Invalid input", { issues: result.error })
   })
 
-const doc = (description: string, data: z.ZodType, refusals: object[] = []) =>
+const doc = (
+  description: string,
+  data: z.ZodType,
+  refusals: object[] = [],
+  status: 200 | 201 = 200,
+) =>
   describeRoute({
     tags: ["Yard"],
     description,
     responses: {
-      200: {
-        description: "OK",
+      [status]: {
+        description: status === 201 ? "Created" : "OK",
         content: { "application/json": { schema: resolver(z.object({ data })) } },
       },
       ...authErrorResponses,
@@ -76,6 +81,7 @@ export const localYardRouter = new Hono<{ Variables: Session }>()
       "Posts a message as this Mac; one Yard holds pending puts an Inbox card up whose Approve opens Yard's approve page",
       z.object({ message: messageSchema }),
       [validationErrorResponses],
+      201,
     ),
     valid("json", postSchema),
     async (c) => c.json({ data: await yard.post(c.req.param("id"), c.req.valid("json")) }, 201),
