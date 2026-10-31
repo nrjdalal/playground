@@ -467,7 +467,7 @@ const draftRefused = (item: InboxItem): boolean => {
 export function itemState(item: InboxItem): ItemState {
   if (sendFailed(item)) return "failed"
   if (needsYou(item)) return "open"
-  // a secret he provided is done once every environment took it, and failed while any did not
+  // a secret he provided is done once every environment took it, and failed while any did not, a dismiss included, so the record stays
   const provided = chosen(item)
   if (provided?.choice === "provided") {
     if (!provided.results) return "sending"

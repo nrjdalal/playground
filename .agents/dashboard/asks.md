@@ -53,7 +53,8 @@
   Colour says what an item is and where it stands, as the sidebar's lights do: its kind's on its icon alone (a decision `warning`, a draft `info`, an update `success`, an alert `destructive`), the card's own edges plain, no thick coloured border,
   and its state as the sidebar's Worker Lights draw the state that means the same, beside its title and in its result line's colour (`itemState`, `inboxLight` in `web/next/src/lib/inbox.ts`, its icon and tone read from `statusIcon` in `web/next/src/lib/status-icons.ts`, the one table),
   the kind icon sitting in the band and that light in a leading column centred on the title's first line (`LEAD` in `components/dashboard/inbox.tsx`):
-  the orange eye while a decision or draft waits on the owner, the blue spinner while a go is being carried out (turning only where motion is allowed), the green check once its poster closed it, the result link green too, or once every environment took a secret, the red error when it failed to send or a secret's sink refused it, until the owner dismisses it, and the gray circle once denied,
+  the orange eye while a decision or draft waits on the owner, the blue spinner while a go is being carried out (turning only where motion is allowed), the green check once its poster closed it, the result link green too, or once every environment took a secret, the red error when it failed to send, until the owner dismisses it, or when a secret's sink refused it, which stays as its record,
+  and the gray circle once denied,
   discarded, set aside (`cleared`), settled or read,
   or a failed send dismissed;
   an unread update keeps its dot.
