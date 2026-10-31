@@ -165,3 +165,19 @@ describe("an ask's file is read only from the dashboard's own page on this machi
     expect((await read(trusted(), peer("127.0.0.1"))).status).toBe(401)
   })
 })
+
+// writes.md's hosted rule: Yard's writes, which hosted.ts alone mounts, take a trusted origin and the member rung, with no loopback check, since the hosted build serves the network.
+describe("Yard's writes take a trusted origin and no loopback", () => {
+  const yard = found.find((f) => f.file === "yard.ts")!
+
+  test.each(writesOf(yard.router).map((r) => [r.method, r.path] as const))(
+    "%s %s refuses another origin before the session is read, and asks a trusted one off this machine for a session",
+    async (method, path) => {
+      const route = { handler: null, method, path }
+      const refused = await send(yard.router, route, "http://evil.localhost", peer("203.0.113.9"))
+      expect(refused.status).toBe(403)
+      expect(await refused.text()).toContain("Untrusted origin")
+      expect((await send(yard.router, route, trusted(), peer("203.0.113.9"))).status).toBe(401)
+    },
+  )
+})

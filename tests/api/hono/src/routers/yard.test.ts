@@ -1,10 +1,22 @@
-import { describe, expect, test } from "bun:test"
+import { afterAll, beforeAll, describe, expect, test } from "bun:test"
+import { createHash } from "node:crypto"
 import { join, resolve } from "node:path"
 
-const API = resolve(import.meta.dir, "../../../../../api/hono")
-const HOSTED = join(API, "src/hosted.ts")
+import { SQL } from "bun"
 
-// A child Bun in the API's folder, so its tsconfig's @/ resolves, on the hosted build's environment: the hosted switch and the Vercel adapter are read once, when their modules load.
+const ROOT = resolve(import.meta.dir, "../../../../..")
+const API = join(ROOT, "api/hono")
+const HOSTED = join(API, "src/hosted.ts")
+const MIGRATIONS = join(ROOT, "packages/db/drizzle")
+const SCENARIO = join(import.meta.dir, "yard-scenario.ts")
+const WEB = "http://127.0.0.1:3000"
+const PASSWORD = crypto.randomUUID()
+
+const dockerUp = (): boolean =>
+  Bun.which("docker") !== null &&
+  Bun.spawnSync(["docker", "info"], { stderr: "ignore", stdout: "ignore" }).exitCode === 0
+
+// A child Bun in the API's folder, so its tsconfig's @/ resolves, on the hosted build's environment: the hosted switch, the Vercel adapter and the database URL are read once, when their modules load.
 const child = (script: string, env: Record<string, string>) => {
   const run = Bun.spawnSync(["bun", "-e", script], {
     cwd: API,
@@ -15,11 +27,12 @@ const child = (script: string, env: Record<string, string>) => {
       GITHUB_CLIENT_ID: "yard-test-client",
       GITHUB_CLIENT_SECRET: "yard-test-client-secret",
       HONO_APP_URL: "http://127.0.0.1:4000",
-      HONO_TRUSTED_ORIGINS: "http://127.0.0.1:3000",
+      HONO_TRUSTED_ORIGINS: WEB,
+      HONO_WEB_URL: WEB,
       NODE_ENV: "test",
       PLAYGROUND_HOSTED: "1",
       PORT: "0",
-      POSTGRES_URL: "postgres://postgres:pw@127.0.0.1:9/postgres",
+      YARD_HOSTED: HOSTED,
       ...env,
     },
     stderr: "pipe",
@@ -29,25 +42,110 @@ const child = (script: string, env: Record<string, string>) => {
   return { code: run.exitCode, err: run.stderr.toString(), out: run.stdout.toString() }
 }
 
-// Opens Yard's socket on the hosted export and prints the first event last, after the request log: open once the upgrade answers 101, else error.
-const opens = (serve: string) =>
-  `const exported = (await import(${JSON.stringify(HOSTED)})).default; const port = await (${serve})(exported); const socket = new WebSocket("ws://127.0.0.1:" + port + "/api/v1/yard/socket"); socket.onopen = () => { console.log("open"); process.exit(0) }; socket.onerror = () => { console.log("error"); process.exit(1) }`
+// The last line a child printed, after the request log.
+const last = (out: string) => out.trim().split("\n").at(-1) ?? ""
 
-describe("Yard's socket", () => {
-  test("upgrades on the Vercel export, a server that never listened", () => {
-    const run = child(
-      opens(
-        `async (server) => { await new Promise((done) => server.listen(0, "127.0.0.1", done)); return server.address().port }`,
-      ),
-      { VERCEL: "1" },
-    )
-    expect(run.err).not.toContain("error:")
-    expect(run.out.trim().split("\n").at(-1)).toBe("open")
+// A one-time token as Better Auth's plugin keeps it, hashed, pointing at a live session.
+const ottHash = (token: string) => createHash("sha256").update(token).digest("base64url")
+
+describe.skipIf(!dockerUp())("Yard's routes on the hosted build", () => {
+  let container = ""
+  let sql: SQL
+  let url = ""
+
+  // Mints a one-time token for a member's session, as GET /api/auth/one-time-token/generate would.
+  const ott = async (userId: string) => {
+    const token = crypto.randomUUID()
+    const session = crypto.randomUUID()
+    const later = new Date(Date.now() + 600_000)
+    await sql`insert into session (id, token, user_id, expires_at, updated_at) values (${session}, ${session}, ${userId}, ${later}, now())`
+    await sql`insert into verification (id, identifier, value, expires_at) values (${crypto.randomUUID()}, ${`one-time-token:${ottHash(token)}`}, ${session}, ${later})`
+    return token
+  }
+
+  beforeAll(async () => {
+    container = Bun.spawnSync([
+      "docker",
+      "run",
+      "-d",
+      "--rm",
+      "-e",
+      `POSTGRES_PASSWORD=${PASSWORD}`,
+      "-p",
+      "127.0.0.1::5432",
+      "postgres:18-alpine",
+    ])
+      .stdout.toString()
+      .trim()
+    const port = Bun.spawnSync(["docker", "port", container, "5432/tcp"])
+      .stdout.toString()
+      .trim()
+      .split(":")
+      .at(-1)
+    url = `postgres://postgres:${PASSWORD}@127.0.0.1:${port}/postgres`
+    for (let i = 0; i < 60; i++) {
+      try {
+        sql = new SQL(url, { max: 1 })
+        await sql`select 1`
+        break
+      } catch {
+        await Bun.sleep(500)
+      }
+    }
+    const journal = await Bun.file(join(MIGRATIONS, "meta/_journal.json")).json()
+    for (const { tag } of journal.entries as { tag: string }[])
+      for (const statement of (await Bun.file(join(MIGRATIONS, `${tag}.sql`)).text()).split(
+        "--> statement-breakpoint",
+      ))
+        if (statement.trim()) await sql.unsafe(statement)
+    for (const id of ["bo", "di"]) {
+      await sql`insert into "user" (id, name, email, login, role) values (${id}, ${id}, ${`${id}@example.com`}, ${id}, 'member')`
+      await sql`insert into yard_token (id, hash, name, user_id) values (${crypto.randomUUID()}, ${createHash("sha256").update(`yard_${id}`).digest("hex")}, ${"studio"}, ${id})`
+    }
+  }, 60_000)
+
+  afterAll(async () => {
+    await sql?.close()
+    if (container)
+      Bun.spawnSync(["docker", "rm", "-fv", container], { stderr: "ignore", stdout: "ignore" })
   })
 
-  test("upgrades on Bun.serve, the shape a local or Docker run takes", () => {
-    const run = child(opens(`async (shape) => Bun.serve(shape).port`), {})
+  test("refuse what they should, take a token's calls, and push a sent message to a member's socket", async () => {
+    const run = child(await Bun.file(SCENARIO).text(), {
+      BO_TOKEN: "yard_bo",
+      DI_OTT: await ott("di"),
+      DI_TOKEN: "yard_di",
+      POSTGRES_URL: url,
+    })
     expect(run.err).not.toContain("error:")
-    expect(run.out.trim().split("\n").at(-1)).toBe("open")
+    const out = JSON.parse(last(run.out))
+    expect(out).toMatchObject({
+      cookieWriteNoOrigin: 403,
+      created: 201,
+      held: "pending",
+      noAuth: 401,
+      posted: [201, "sent"],
+      socket: "open",
+      socketNoOrigin: 403,
+      socketNoToken: 401,
+      tokenOnWebOnly: 403,
+    })
+    expect(out.tokenList.data.channels).toEqual([])
+    expect(out.frames).toEqual([
+      {
+        message: expect.objectContaining({
+          from: { device: "studio", login: "bo" },
+          text: "anyone up?",
+        }),
+        type: "message",
+      },
+    ])
+  })
+
+  test("the socket upgrades on the Vercel export, a server that never listened", async () => {
+    const script = `const server = (await import(${JSON.stringify(HOSTED)})).default; await new Promise((done) => server.listen(0, "127.0.0.1", done)); const socket = new WebSocket("ws://127.0.0.1:" + server.address().port + "/api/v1/yard/socket?token=${await ott("bo")}", { headers: { origin: ${JSON.stringify(WEB)} } }); socket.onopen = () => { console.log("open"); process.exit(0) }; socket.onerror = () => { console.log("error"); process.exit(1) }`
+    const run = child(script, { POSTGRES_URL: url, VERCEL: "1" })
+    expect(run.err).not.toContain("error:")
+    expect(last(run.out)).toBe("open")
   })
 })
