@@ -874,6 +874,57 @@ describe("the capacity gate refuses and spawns nothing", () => {
     )
   })
 
+  // login-flip.json's split shares accounts it probes with no usage-<name>.json, each reading in its `seen` (#85)
+  const probedFiles =
+    (seen: Record<string, object>, shares: Record<string, number>) =>
+    (home: string): void => {
+      const dir = join(home, ".playground", "ops", "usage")
+      mkdirSync(dir, { recursive: true })
+      writeFileSync(
+        join(dir, "login-flip.json"),
+        JSON.stringify({ seen, split: { at: Date.now() / 1000, shares } }),
+      )
+    }
+  const probed = (week: number, minutes = 10) => ({
+    at: Date.now() / 1000 - minutes * 60,
+    five: 5,
+    fiveReset: Date.now() / 1000 + 3600,
+    via: "token",
+    week,
+    weekReset: Date.now() / 1000 + 5 * 86_400,
+  })
+
+  test("a bare spawn whose own login is over its pace starts on an account login-flip probes, by its share in the split (#85)", async () => {
+    const r = await spawn(
+      ["worker", "worker-brave-otter", "b.md"],
+      [],
+      { USAGE_JSON: weekAt(98) },
+      script,
+      undefined,
+      probedFiles({ "probed@example.com": probed(20) }, { "probed@example.com": 0.5 }),
+    )
+    expect(r.code).toBe(0)
+    expect(r.out).toContain(
+      "no --account, so it starts on probed@example.com, next in the account split (50% of new sessions): its week is at 20% (login-flip.json seen)",
+    )
+    expect(launchOf(r)).toContain("-a probed@example.com -w")
+  })
+
+  test("a probed reading 60 minutes old is not followed, and the refusal names its age (#85)", async () => {
+    const r = await spawn(
+      ["worker", "worker-brave-otter", "b.md"],
+      [],
+      { USAGE_JSON: weekAt(98) },
+      script,
+      undefined,
+      probedFiles({ "probed@example.com": probed(20, 61) }, { "probed@example.com": 0.5 }),
+    )
+    expect(r.code).not.toBe(0)
+    expect(r.err).toContain(
+      "probed@example.com (login-flip.json seen): login-flip.json seen was written 61 minutes ago (writtenAt), 60 is its limit",
+    )
+  })
+
   test("a bare spawn refuses when every login is over the gate, naming each one's reading", async () => {
     const r = await spawn(
       ["worker", "worker-brave-otter", "b.md"],
@@ -1112,14 +1163,14 @@ describe("the capacity gate refuses and spawns nothing", () => {
     },
   )
 
-  test("a usage.json without five_hour reads the window as reset and passes", async () => {
+  test("a usage.json without five_hour is an account with no 5-hour limit, read as none rather than 0%, and passes (#85)", async () => {
     const raw = JSON.stringify(usage({ rate_limits: { seven_day: usage().rate_limits.seven_day } }))
     const r = await spawn(["worker", "worker-brave-otter", "b.md"], [], { USAGE_JSON: raw })
     expect(r.code).toBe(0)
     expect(logOf(r)).toEqual([
       expect.objectContaining({
         verdict: "pass",
-        readings: expect.objectContaining({ fiveHour: 0, week: 20 }),
+        readings: expect.objectContaining({ fiveHour: "none", week: 20 }),
       }),
     ])
   })

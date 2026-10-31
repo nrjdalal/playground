@@ -23,8 +23,8 @@ set -euo pipefail
 #   3. usage, the launching backend's own window: Claude reads usage.json
 #      (5-hour under 90%, the week within 14.3 points a day of pace, floored at one day's share, readings
 #      no older than 15 minutes; one never written, as on a fresh install before ops-usage first runs, passes,
-#      its row reading it unread) and each other login's usage-<name>.json (the
-#      same checks, readings no older than 60 minutes); with no --account it
+#      its row reading it unread; a missing 5-hour window is an account with no 5-hour limit, read as none) and each other login's
+#      usage-<name>.json or reading in login-flip.json's seen (the same checks, readings no older than 60 minutes); with no --account it
 #      starts on the passing login next in the account split, else the one with the lowest week, naming it, and refuses
 #      only when every login is over, its pick kept off the resume record's exec line so a restore picks afresh; --account skips the usage
 #      check, since the other login's usage is not this machine's, but refuses a week a reading names at 100%; GLM reads zai-usage.json
@@ -500,9 +500,9 @@ else:
         five = rate.get("five_hour")
         five_hour = five.get("used_percentage") if isinstance(five, dict) else None
         if isinstance(five_hour, bool) or not isinstance(five_hour, (int, float)):
-            five_hour = 0  # the ops-usage job leaves out a window it read no numbers for, so a missing one reads as 0, as a reset one does
-        seen["fiveHour"] = five_hour
-        if five_hour >= 90:
+            five_hour = None  # no 5-hour window: an account Anthropic gives no 5-hour limit, as a verified Ultra one, so none, never 0%
+        seen["fiveHour"] = "none" if five_hour is None else five_hour
+        if five_hour is not None and five_hour >= 90:
             try:
                 reset = f"{from_iso(five['resets_at']):%H:%M} UTC"
             except (KeyError, TypeError, ValueError):
@@ -557,6 +557,23 @@ else:
             continue
         seen, detail = judge(name, other, 60, "The optimizer's spare watch writes it every 5 minutes while it runs.")
         logins.append((email, name, email, seen, detail))
+        known.add(email.lower())
+    # each account login-flip probes, from its reading in login-flip.json's seen, so the split's accounts reach the pick with no usage-<name>.json of their own (#85)
+    try:
+        with open(os.path.join(data_dir, "ops", "usage", "login-flip.json")) as f:
+            flip_seen = json.load(f).get("seen") or {}
+    except Exception:
+        flip_seen = {}
+    for email, s in sorted(flip_seen.items()) if isinstance(flip_seen, dict) else []:
+        if not isinstance(email, str) or "@" not in email or email.lower() in known or not isinstance(s, dict):
+            continue
+        rate = {"seven_day": {"used_percentage": s.get("week"), "resets_at": s.get("weekReset")}}
+        if isinstance(s.get("five"), (int, float)):
+            rate["five_hour"] = {"used_percentage": s["five"], "resets_at": s.get("fiveReset")}
+        name = "login-flip.json seen"
+        seen, detail = judge(name, {"rate_limits": rate, "writtenAt": s.get("at")}, 60, "login-flip.py probes it each ops tick.")
+        logins.append((email, name, email, seen, detail))
+        known.add(email.lower())
     passing = [login for login in logins if login[4] is None]
     if not passing:
         readings.update(logins[0][3])
