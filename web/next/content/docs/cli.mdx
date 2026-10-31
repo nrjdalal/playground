@@ -115,8 +115,9 @@ Starting a manager (`--manager`) is not ready yet; it says so and starts nothing
 
 ## Keep a page: `playground page`
 
-`playground page <file.html> --title "<title>" --by <session> [--for <session>]` keeps an HTML page an agent made, so it outlives the browser tab that showed it.
-It copies the file into the previews folder (`~/.playground/previews`) under its own name, with `-2`, `-3` added when the name is taken, saves the title beside it, records who made it (`--by`) and for whom (`--for`) in `pages.jsonl` there, and opens the copy.
+`playground page <file.html> --title "<title>" --by <session> [--for <session>]` keeps an HTML page an agent made for you.
+It copies the file into the previews folder (`~/.playground/previews`) under its own name, with `-2`, `-3` added when the name is taken, saves the title beside it, records who made it (`--by`) and for whom (`--for`) in `pages.jsonl` there, and prints the copy's path.
+It opens nothing on your screen: the agent sends you the page as an Inbox card, and you read it in the Inbox's viewer.
 The page then shows on the [Pages](/docs/agents#pages) tab of both sessions and of your chat, and in the Previews app.
 It refuses a file that is not an HTML page, and a `--by` or `--for` that names no session on the roster.
 

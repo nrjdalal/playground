@@ -146,7 +146,7 @@ export function PageList({
   )
 }
 
-// An agent's Pages tab: the pages it made with playground page or that were made for it, newest first, every page on the dispatcher's view, so a page outlives the browser tab that first showed it.
+// An agent's Pages tab: the pages it made with playground page or that were made for it, newest first, every page on the dispatcher's view, so a page stays after its Inbox card is answered.
 export function Pages({ all, session }: { all: boolean; session: string }) {
   const now = useNow()
   const { data, error, isPending } = useQuery({
