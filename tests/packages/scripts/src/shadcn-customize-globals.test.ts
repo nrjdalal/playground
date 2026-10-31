@@ -9,9 +9,9 @@ import {
   NO_FOCUS_RING,
   noFocusRing,
   SCROLLBARS_HIDDEN,
-} from "../../../.github/scripts/shadcn-customize"
+} from "../../../../packages/scripts/src/shadcn-customize"
 
-const css = await Bun.file(join(import.meta.dir, "../../../web/next/src/app/globals.css")).text()
+const css = await Bun.file(join(import.meta.dir, "../../../../web/next/src/app/globals.css")).text()
 
 describe("shadcn-customize's globals.css patch", () => {
   test("globals.css hides every native scrollbar, and the sync puts the rule back on init's shape", () => {

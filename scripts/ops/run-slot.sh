@@ -362,14 +362,37 @@ quick_kind() {
   [ -z "$kind" ] && ran_short "$@" && kind=quick
   echo "$kind"
 }
-# a light run, whatever its session's size: a quick kind, a bun install or add, or a filtered turbo run (retro 3, 31 Oct: a big session's 2s git push and 1s bun install each waited over 1,290s for the age bump)
+# whether turbo's dry run, in the run's checkout and with its env words, finds every check-types task and the builds under it cached; a dry run that fails or takes over 10 s counts as not cached (retro 5, 31 Oct: the dry run takes about 0.2 s, while 88 of 226 check-types runs ended in 10 s or less and waited 19,953 s, and the rest ran up to 190 s)
+types_cached() {
+  local a vars=()
+  for a in "$@"; do case "$a" in env) continue ;; *=*) vars+=("$a") ;; *) break ;; esac; done
+  (cd "$(box_dir "$@")" 2>/dev/null && python3 -I - ${vars[@]+"${vars[@]}"} 2>/dev/null <<'PY'
+import json, os, signal, subprocess, sys
+env = dict(os.environ, **dict(v.split("=", 1) for v in sys.argv[1:]))
+p = subprocess.Popen(["bun", "run", "turbo", "run", "check-types", "--dry=json"], env=env, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, start_new_session=True)
+try:
+    out, _ = p.communicate(timeout=10)
+except subprocess.TimeoutExpired:
+    os.killpg(p.pid, signal.SIGKILL)
+    p.wait()
+    sys.exit(1)
+tasks = [t for t in json.loads(out)["tasks"] if t.get("command") != "<NONEXISTENT>"]
+sys.exit(0 if p.returncode == 0 and tasks and all(t["cache"]["status"] == "HIT" for t in tasks) else 1)
+PY
+  )
+}
+# a light run, whatever its session's size: a quick kind, a bun install or add, a filtered turbo run, a plain tsc, or a check-types whose work is cached (retro 3, 31 Oct: a big session's 2s git push and 1s bun install each waited over 1,290s for the age bump)
 light_run() {
   [ -n "$(quick_kind "$@")" ] && return
-  local a first="" turbo="" filter=""
-  for a in "$@"; do case "$a" in env|*=*) continue ;; esac; first=$a; break; done
+  local a first="" next="" turbo="" filter="" types=""
+  for a in "$@"; do case "$a" in env|*=*) continue ;; esac; [ -z "$first" ] && first=$a && continue; next=$a; break; done
+  # the 4 bare bunx tsc runs in the runs log each ran 1 s or less, while an sh -c holding a build and then tsc ran up to 152 s, so only the bare program counts (retro 5, 31 Oct)
+  [ "$(basename "$first")" = tsc ] && return
   case "$(basename "$first")" in bun|bunx) ;; *) return 1 ;; esac
-  for a in "$@"; do case "$a" in install|add) return 0 ;; turbo) turbo=1 ;; --filter|--filter=*|-F) filter=1 ;; esac; done
-  [ -n "$turbo" ] && [ -n "$filter" ]
+  [ "$(basename "$first")" = bunx ] && [ "$next" = tsc ] && return
+  for a in "$@"; do case "$a" in install|add) return 0 ;; turbo) turbo=1 ;; --filter|--filter=*|-F) filter=1 ;; check-types) types=1 ;; esac; done
+  [ -n "$turbo" ] && [ -n "$filter" ] && return
+  [ -n "$types" ] && types_cached "$@"
 }
 CORES=$(sysctl -n hw.ncpu 2>/dev/null || echo 8)
 # one line when a Mac run asks, takes its slot and ends, so a run's wait sits beside its run time (optimizer, 19 Oct)

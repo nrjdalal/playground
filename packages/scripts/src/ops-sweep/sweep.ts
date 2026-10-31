@@ -210,13 +210,13 @@ const pullOf = (pr: unknown, repo: string): number | undefined => {
   return m ? Number(m[1]) : undefined
 }
 
-// A worker's PR whose head has been ready (its checks green) REVIEWER_LATE seconds with no review round (a ReviewBot verdict at any head) and no live session for the reviewer the roster names on it: one line to the worker's lead, once per head, since a reviewer started late or by hand left heads ready for over an hour.
+// A worker's PR whose head has been ready (its checks green) REVIEWER_LATE seconds with no review round (a ReviewBot verdict at any head) and no live session for the reviewer the roster names on it: one line to the worker's lead, once per head, since a reviewer started late or by hand left heads ready for over an hour. A parked row waits by design, as the runner check below reads it.
 export async function lateReviewers(
   ctx: Context,
   agents: Json[],
   live: Map<string, string>,
 ): Promise<string[]> {
-  const open = agents.filter((a) => a.status !== "ended")
+  const open = agents.filter((a) => a.status !== "ended" && a.status !== "parked")
   if (!open.some((a) => a.pr && kindOf(String(a.name), a.kind) === "worker")) return []
   let repo: string
   try {

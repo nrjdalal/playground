@@ -48,6 +48,7 @@ How the Dashboard shows each role, how a session is named and when a dev stack r
 - A message opens with its content, never with your own name, since the Dashboard shows the sender.
   Read [rules/voice.md](../../rules/voice.md) before you name a session or list PR status for the owner.
 - A session's effort, model, permission mode and settings are the owner's: tell him which pane to type into, rather than asking a running session to change its own.
+  The one path past a pane is effort: a lead starts or resumes a session at another effort with spawn.sh's `--effort`, on the owner's word relayed in the **override** shape (SESSIONS.md).
 
 ## Standing rules
 
