@@ -1,10 +1,16 @@
-import { describe, expect, test } from "bun:test"
+import { afterAll, describe, expect, test } from "bun:test"
+import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 
 import {
   leftForYou,
   report,
+  strayStandIns,
   usageWords,
+  zshStartup,
 } from "../../../../../packages/scripts/src/new-user-gate/cli"
+import { stubs } from "../../../../../packages/scripts/src/new-user-gate/stubs"
 
 describe("the new-user gate's reads", () => {
   test("reads install.sh's Left for you lines, and none from a clean finish", () => {
@@ -32,5 +38,28 @@ describe("the new-user gate's reads", () => {
         { detail: "no usage reading", name: "Usage shows", ok: false },
       ]),
     ).toBe("PASS 1. curl | bash exits 0\nFAIL 2. Usage shows: no usage reading\n1 of 2 passed")
+  })
+})
+
+describe("the gate's stand-ins preflight", () => {
+  const box = realpathSync(mkdtempSync(join(tmpdir(), "gate-preflight-")))
+  afterAll(() => rmSync(box, { force: true, recursive: true }))
+  const home = join(box, "h")
+  mkdirSync(join(box, "stubs"), { recursive: true })
+  mkdirSync(home, { recursive: true })
+  const names = Object.keys(stubs(box, ""))
+  for (const [name, text] of Object.entries(stubs(box, ""))) {
+    writeFileSync(join(box, "stubs", name), text)
+    chmodSync(join(box, "stubs", name), 0o755)
+  }
+
+  test("with no startup files, the box's zsh finds security outside the stubs folder, and the preflight names it", () => {
+    const stray = strayStandIns(box, home, names)
+    expect(stray.filter((line) => /^-l?c security\b/.test(line))).toHaveLength(2)
+  })
+
+  test("with the box's startup files, every stand-in resolves to the stubs folder in a plain and a login zsh", () => {
+    for (const rc of [".zshenv", ".zprofile"]) writeFileSync(join(home, rc), zshStartup(box))
+    expect(strayStandIns(box, home, names)).toEqual([])
   })
 })
