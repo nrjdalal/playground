@@ -389,6 +389,21 @@ describe("rollOutcome", () => {
   const FAILED =
     "2026-10-18T02:03:00Z ROLL canary def5678 (roll-now) def5678 FAIL dev=DOWN (dev: refusing to start: x)"
 
+  // a build that fails before the stop leaves the Dashboard as it was, so no fallback follows (#122)
+  test("reads a build that failed before the stop as failed at once, still on the head it served", () => {
+    expect(
+      rollOutcome(
+        [],
+        [
+          "2026-10-18T02:03:00Z ROLL canary def5678 (roll-now) def5678 FAIL build before the stop: Error: next build failed; still serving abc1234",
+        ],
+      ),
+    ).toEqual({
+      done: "Failed: build before the stop: Error: next build failed; still serving abc1234",
+      ok: false,
+    })
+  })
+
   test("reads a failing roll as going back until the fallback's result lands", () => {
     expect(rollOutcome([], [FAILED])).toEqual({ phase: "going back" })
   })
