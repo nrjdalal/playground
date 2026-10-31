@@ -13,7 +13,7 @@
   the update message, a sent row action, the prompt's answer, the mode, the Vibeground's start or stop, its hand-back message to the dispatcher and the managers' order.
   A thread view's opening (asks.md's Threads) and a sidebar thread's menu's Mark as read or unread, Pin or Unpin, Archive and Rename's Save are the confirmation for the thread's change.
   Behind portless the API's peer is always the proxy on loopback, so in portless LAN mode a LAN client passes `requireLoopback` and only the owner session stops it; keep LAN mode off while the dashboard runs.
-  Under `PLAYGROUND_HOSTED=1` Yard's writes take the `member` rung with no `requireLoopback`, and a browser's write `requireTrustedOrigin`, while a `yard_` token's write takes none, since a token carries no cookie a page could send, on the owner's "infact I think yard should be as is playground, just a server and deployed version of it" (stack.md's hosted rule).
+  Under `PLAYGROUND_HOSTED=1` Yard's writes take the `member` rung with no `requireLoopback`, and a browser's write `requireTrustedOrigin`, while a `yard_` token's write takes none, since a token carries no cookie a page could send (stack.md's hosted rule).
 - ALWAYS: Test a dashboard write on a fixture stack, where it lands in the fixture's scratch copy.
   Only a test that must reach a real cmux session uses a live-reads stack opted in to cmux's sessions (`PLAYGROUND_LIVE_READS=true` and `PLAYGROUND_CMUX_SESSIONS=true` in the worktree's `.env`), never for a screenshot, and against a throwaway session, never a real one:
   spawn a probe named `probe-<what>` (spawn.sh takes it as a probe's name, and the `-2` one below as well) as a column beside its spawner (playbook's SESSIONS.md,
