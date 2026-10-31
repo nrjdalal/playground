@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 
 import type { Preview } from "../../../../../api/hono/src/lib/apps/previews"
 import {
+  doneMessage,
   loadable,
   OPEN_PREVIEW,
   openPreview,
@@ -162,5 +163,16 @@ describe("openPreview", () => {
     expect(heard).toEqual(["open"])
     expect(takePreview()).toBe(true)
     expect(takePreview()).toBe(false)
+  })
+})
+
+// the owner's Yard try, need 4: Done hands the work back to the worktree's session, which pushes it for review and never merges
+describe("doneMessage", () => {
+  test("names the branch, pushes to its open PR or opens one into its parent, and never merges", () => {
+    const text = doneMessage("feat/rooms")
+    expect(text).toContain("feat/rooms")
+    expect(text).toContain("push it to this branch's open PR")
+    expect(text).toContain("only when none is open")
+    expect(text).toContain("Do not merge")
   })
 })

@@ -14,7 +14,7 @@ import { SQL } from "bun"
 import { drizzle } from "drizzle-orm/bun-sql"
 import { migrate as drizzleMigrate } from "drizzle-orm/bun-sql/migrator"
 
-import { fixtureVibe, readsLive } from "@/lib/dashboard/fixture"
+import { branchOf, checkoutRoot, fixtureVibe, readsLive } from "@/lib/dashboard/fixture"
 import { readStacks, type Stack, VIBE_RECORD } from "@/lib/dashboard/stacks"
 import {
   CONTAINER_LIST,
@@ -133,6 +133,13 @@ export const vibeEnv = (example: string, url: string, secret: string): string =>
     ["PLAYGROUND_LIVE_READS", "true"],
     ["POSTGRES_URL", url],
   ].reduce((text, [key, value]) => setKey(text, key!, value!), example)
+
+// This checkout's branch while it runs as a Vibeground (the launcher's record in its .turbo), else null, for the badge its own pages wear.
+export const ownVibe = (
+  root: string | null = checkoutRoot(),
+  has: (path: string) => boolean = existsSync,
+  branch: (root: string) => string | null = branchOf,
+): string | null => (root && has(join(root, VIBE_RECORD)) ? branch(root) : null)
 
 // Pure: the API's environment cut to what a Vibeground's commands need.
 export const childEnv = (env: Record<string, string | undefined>): Record<string, string> =>

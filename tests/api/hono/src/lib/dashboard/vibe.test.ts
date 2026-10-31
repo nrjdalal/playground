@@ -8,6 +8,7 @@ const {
   copyName,
   dumpArgv,
   loadRefusal,
+  ownVibe,
   restoreArgv,
   setKey,
   startRefusal,
@@ -140,6 +141,16 @@ describe("the pure parts", () => {
     expect(
       startRefusal(stack(path, { branch: "a/b/c-of-another-branch" }), LIVE, yes, yes),
     ).toBeNull()
+  })
+})
+
+// the owner: "the badge reads Vibeground with its branch", so a Vibeground's own tab never reads as the live dashboard
+describe("ownVibe", () => {
+  test("a checkout names its branch while the launcher's record is in its .turbo, else null", () => {
+    const branch = () => "feat/rooms"
+    expect(ownVibe("/w", (path) => path === "/w/.turbo/vibe.json", branch)).toBe("feat/rooms")
+    expect(ownVibe("/w", () => false, branch)).toBeNull()
+    expect(ownVibe(null, () => true, branch)).toBeNull()
   })
 })
 

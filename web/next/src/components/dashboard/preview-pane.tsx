@@ -1,9 +1,17 @@
 "use client"
 
-import { RiExternalLinkLine, RiPlayLine, RiRefreshLine, RiStopCircleLine } from "@remixicon/react"
+import {
+  RiCheckDoubleLine,
+  RiExternalLinkLine,
+  RiPlayLine,
+  RiRefreshLine,
+  RiStopCircleLine,
+} from "@remixicon/react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { type FormEvent, useEffect, useLayoutEffect, useRef, useState } from "react"
 
+import { useDashboard } from "@/components/dashboard/dashboard"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
@@ -17,6 +25,7 @@ import {
 } from "@/components/ui/select"
 import { config } from "@/lib/config"
 import {
+  doneMessage,
   fetchPreviews,
   loadable,
   PREVIEWS_QUERY_KEY,
@@ -26,6 +35,7 @@ import {
   STOPPED,
 } from "@/lib/previews"
 import { fetchStacks, STACKS_QUERY_KEY, startStack, stopStack } from "@/lib/stacks"
+import { vibeLabel } from "@/lib/test-data"
 
 const URL_KEY = "dashboard.preview.url.v1"
 const PREVIEW_PREFIX = previewUrl(config.api.url, "")
@@ -47,7 +57,7 @@ const scrollerOf = (el: HTMLElement | null): HTMLElement | null => {
   return null
 }
 
-// The Inbox's Preview row: a picker of every project's worktrees on this machine, by project, and the pages agents leave in Previews, an address, reload and open in a new tab, and the page live in a frame that fills the pane below; a stopped worktree picked offers Start, which runs it as a Vibeground on a copy of the live data, and a running Vibeground offers Stop.
+// The Inbox's Preview row: a picker of every project's worktrees on this machine, by project, and the pages agents leave in Previews, an address, reload and open in a new tab, and the page live in a frame that fills the pane below; a stopped worktree picked offers Start, which runs it as a Vibeground on a copy of the live data, and a running Vibeground wears its badge and offers Stop, and Done, which hands the work back to the session in its worktree.
 export function PreviewPane() {
   const [address, setAddress] = useState("")
   const [typed, setTyped] = useState("")
@@ -57,6 +67,9 @@ export function PreviewPane() {
   // a picked stopped worktree's path, and whether Start has run and its stack is not serving yet
   const [stopped, setStopped] = useState<string | null>(null)
   const [waiting, setWaiting] = useState(false)
+  // the worktree whose session Done last told, so the strip says it went
+  const [handed, setHanded] = useState<string | null>(null)
+  const { outbox } = useDashboard()
   const box = useRef<HTMLDivElement>(null)
   const queryClient = useQueryClient()
   const stacks = useQuery({
@@ -247,6 +260,35 @@ export function PreviewPane() {
           <RiExternalLinkLine />
         </Button>
       </form>
+      {shown?.vibe && shown.branch && (
+        <div className="flex min-h-7 items-center gap-1.5 pb-2 text-xs">
+          <Badge variant="secondary" className="min-w-0 shrink justify-start">
+            <span className="truncate">{vibeLabel(shown.branch)}</span>
+          </Badge>
+          <span className="text-muted-foreground min-w-0 flex-1 truncate">
+            {handed === shown.path
+              ? `Sent to ${shown.session}`
+              : shown.session
+                ? null
+                : "No session works in this worktree"}
+          </span>
+          {/* the owner's own click alone sends it, to the session working in the worktree, through the outbox as his chat does */}
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-7 shrink-0 text-xs"
+            disabled={!shown.session}
+            onClick={() => {
+              outbox.send(shown.session!, { attachments: [], text: doneMessage(shown.branch!) })
+              setHanded(shown.path)
+            }}
+          >
+            <RiCheckDoubleLine />
+            Done
+          </Button>
+        </div>
+      )}
       {stop.error && (
         <p className="text-destructive pb-2 text-xs select-text">{stop.error.message}</p>
       )}

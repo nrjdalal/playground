@@ -28,8 +28,8 @@
   The header's site name links to `/dashboard` and opens the Inbox tab with its Preview row open (`BrandLink` in `web/next/src/components/shell/brand-link.tsx`, the shell's `opensPreview`; asks.md).
   The machine at a glance sits on the sidebar header's name row: GitHub at the row's right end, in the toggle's old place, through the shell's `mark` slot (`DashboardMark`, `GithubMark`),
   and the system icons (`headerIcons()`, `SystemIcons` and `DashboardStats` in the same file, through the shell's `stats` slot) between the name and GitHub, 4px apart.
-  The icons keep that place only while the row shows no Test data badge and is 238px or wider, the room for the name, all four readings with disk at orange and GitHub (measured), so the layout follows the row and never a reading (`SidebarShell`'s `:has` rule and container query);
-  otherwise, beside a fixture stack's Test data badge or in a sidebar squeezed below its stock 16rem (verify's 11rem), they take a centred line of their own under the row.
+  The icons keep that place only while the row shows no badge (Test data, or a Vibeground's) and is 238px or wider, the room for the name, all four readings with disk at orange and GitHub (measured), so the layout follows the row and never a reading (`SidebarShell`'s `:has` rule and container query);
+  otherwise, beside either badge or in a sidebar squeezed below its stock 16rem (verify's 11rem), they take a centred line of their own under the row.
   A reading of three digits (memory at 100%) can need a few px past that room, and then the name truncates with its ellipsis while the rows below stay put.
   The icons are memory, the 5-minute load and swap, in three fixed 12px slots from first paint, server render included, then disk only while it is orange or red, on a line that keeps its 20px height, so the rows below never move when a sample lands or disk crosses its level,
   while the centred icons slide aside as their numbers arrive.

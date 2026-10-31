@@ -82,6 +82,10 @@ export const takePreview = (): boolean => {
   return wanted
 }
 
+// Pure: what Done sends, on the owner's click, to the session working in a Vibeground's worktree: hand the work back for review, never merged.
+export const doneMessage = (branch: string): string =>
+  `Done in the Vibeground on ${branch}: commit what is left, then push it to this branch's open PR, or open a PR into the branch this one came from only when none is open. Do not merge it.`
+
 // Pure: each topic once, in the order its newest preview comes (the list is newest first), with how many previews it holds.
 export function topicCounts(previews: Preview[]): Map<string, number> {
   const counts = new Map<string, number>()
