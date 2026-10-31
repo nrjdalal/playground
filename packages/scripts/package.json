@@ -12,6 +12,7 @@
   "devDependencies": {
     "@packages/config": "workspace:*",
     "@packages/env": "workspace:*",
+    "@packages/message": "workspace:*",
     "@packages/redis": "workspace:*",
     "@packages/settings": "workspace:*",
     "@types/bun": "catalog:",
