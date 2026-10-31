@@ -117,6 +117,9 @@ Sessions that work together share a workspace as full-height columns ([SESSIONS.
   `playground update` touches ops-dashboard's `roll-now`, and `playground status` only reads, ops-herdr's `status` lines among its own.
   `playground sweep <lead>` reads what changed since that lead's last sweep and prints it, or `quiet`, writing only its cursor, `sweep/<lead>.json` in the data folder ([SWEEP.md](SWEEP.md)).
 - **Probes** need the ok of their spawner's lead, open as a column in their spawner's workspace, and their spawner closes them by their surface the moment the test is done.
+- **The Optimizer** is started by the dispatcher at its own start, with `playground optimizer`, and runs a retro after each ship to `main` and once a day, by the steps in its brief, `scripts/briefs/optimizer.md`.
+  On ops-tick's `optimizer tick` (every 2 hours) it runs one once a ship has landed since the last, and on `optimizer daily` once no retro has run for 20 hours, so no day passes without one.
+  It stays open between retros, so each beat finds it, and Ops resumes it after a Claude Code update ([Updating Claude Code](#updating-claude-code)).
 - **the dispatcher, the Planner, the Builder and Ops** stay open: they never close, except to be respawned with their settings after a cmux restore (below), to be resumed onto a new binary when Claude Code updates ([Updating Claude Code](#updating-claude-code)),
   or from a handoff ([SESSIONS.md](SESSIONS.md#write-a-handoff)) when their guidance changes (a rewritten brief or standing rule their running context contradicts, which the dispatcher names when it sends the change, or Ops when the change is to the dispatcher's own guidance):
   Ops respawns the dispatcher, the Planner and the Builder, the dispatcher respawns Ops, and no two managers restart at once, Ops first and alone when a change reaches it and another, and never as an Inbox item.
