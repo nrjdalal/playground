@@ -950,6 +950,24 @@ describe("the capacity gate refuses and spawns nothing", () => {
     )
   })
 
+  test("a stale usage-<name>.json leaves the same account's fresh probed reading in the pick (#85)", async () => {
+    const r = await spawn(
+      ["worker", "worker-brave-otter", "b.md"],
+      [],
+      { USAGE_JSON: weekAt(98) },
+      script,
+      undefined,
+      (h) => {
+        loginFiles({ "usage-probed.json": login("probed@example.com", 20, minutesAgo(90)) })(h)
+        probedFiles({ "probed@example.com": probed(20) }, { "probed@example.com": 0.5 })(h)
+      },
+    )
+    expect(r.code).toBe(0)
+    expect(r.out).toContain(
+      "no --account, so it starts on probed@example.com, next in the account split (50% of new sessions): its week is at 20% (login-flip.json seen)",
+    )
+  })
+
   test("a bare spawn refuses when every login is over the gate, naming each one's reading", async () => {
     const r = await spawn(
       ["worker", "worker-brave-otter", "b.md"],

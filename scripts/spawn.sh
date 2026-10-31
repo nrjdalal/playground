@@ -557,7 +557,9 @@ else:
             continue
         seen, detail = judge(name, other, 60, "The optimizer's spare watch writes it every 5 minutes while it runs.")
         logins.append((email, name, email, seen, detail))
-        known.add(email.lower())
+        # a refused file leaves the account open to its login-flip reading below
+        if detail is None:
+            known.add(email.lower())
     # each account login-flip probes, from its reading in login-flip.json's seen, so the split's accounts reach the pick with no usage-<name>.json of their own
     try:
         with open(os.path.join(data_dir, "ops", "usage", "login-flip.json")) as f:
@@ -573,7 +575,8 @@ else:
         name = "login-flip.json seen"
         seen, detail = judge(name, {"rate_limits": rate, "writtenAt": s.get("at")}, 60, "login-flip.py probes it each ops tick.")
         logins.append((email, name, email, seen, detail))
-        known.add(email.lower())
+        if detail is None:
+            known.add(email.lower())
     passing = [login for login in logins if login[4] is None]
     if not passing:
         readings.update(logins[0][3])
