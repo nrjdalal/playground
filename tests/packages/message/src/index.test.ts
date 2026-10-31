@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test"
 
 import {
+  approvePath,
+  invitePath,
   MAX_TEXT,
   MESSAGE_KINDS,
   messageSchema,
@@ -74,5 +76,12 @@ describe("tokenNameSchema", () => {
 
   test("refuses the browser's name", () => {
     expect(tokenNameSchema.safeParse(WEB_DEVICE).success).toBe(false)
+  })
+})
+
+describe("the hosted web's approve pages", () => {
+  test("a pending message and an invite request each have one path, its id escaped", () => {
+    expect(approvePath("m4")).toBe("/yard/approve/m4")
+    expect(invitePath("i 1/2")).toBe("/yard/invites/i%201%2F2")
   })
 })

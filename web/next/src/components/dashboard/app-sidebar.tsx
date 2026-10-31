@@ -106,6 +106,7 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar"
 import { toast } from "@/components/ui/toast"
+import { YardGroups } from "@/components/yard/yard-groups"
 import { agentLabel, chatLabel, kindWord, labelOf } from "@/lib/agent-label"
 import {
   checksOpen,
@@ -2299,6 +2300,8 @@ export function DashboardNav() {
           </SidebarGroup>
         ),
       )}
+      {/* Yard's Channels and Direct messages last, so their arrival moves no row above them */}
+      <YardGroups />
     </>
   )
 }
