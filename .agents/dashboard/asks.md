@@ -1,7 +1,7 @@
 - Playground's Inbox is what the factory posts for the owner: a decision to approve, a draft to send, or an update to read.
   It replaced the asks (their JSON files, locks, in-chat cards and `/dashboard/asks`) and the old approval channel.
   It is one table, `inbox_item` (`packages/db/src/schema/inbox.ts`), in the dashboard's local Postgres, read and written through `api/hono/src/lib/dashboard/inbox.ts`, whose zod schemas check each kind's payload,
-  and served by `/api/v1/inbox` (`GET` the list, `POST /api/v1/inbox/:id/answer`, `POST /api/v1/inbox/:id/retry`, `POST /api/v1/inbox/dismiss`, `POST /api/v1/inbox/read`, `POST /api/v1/inbox/:id/schedule`, and `GET /api/v1/inbox/attachments/:id` for an ask's or a read-only update's files).
+  and served by `/api/v1/inbox` (`GET` the list, `POST /api/v1/inbox/:id/answer`, `POST /api/v1/inbox/:id/retry`, `POST /api/v1/inbox/dismiss`, `POST /api/v1/inbox/read`, `POST /api/v1/inbox/:id/schedule`, `POST /api/v1/inbox/:id/secret` for a secret ask's value (below), and `GET /api/v1/inbox/attachments/:id` for an ask's or a read-only update's files).
   It shows first in the aside window beside every dashboard page (`DashboardAside` in `web/next/src/components/dashboard/dashboard-aside.tsx`, drawn once by `web/next/src/app/(protected)/dashboard/layout.tsx`, so the Inbox and the chat are on every page and only the session panes differ by view),
   in stock Tabs whose squares float centred over the bottom of that half in the table's selection-bar look (`FLOATING_BAR`), one icon square a tab, `APP_SQUARE`'s shape (`iconTab` in `web/next/src/components/dashboard/dashboard-aside.tsx`), in one row that scrolls sideways once the squares outgrow it (`TAB_BAR`),
   above every layer a pane holds, since the panes stack in an isolated layer of their own (`PANES`, since a table's sticky header once painted over the bar),
@@ -151,10 +151,10 @@
   ```
 
   `kind` is `decision` (left out, it is one), `draft` or `update`; `from` is the posting session's name as the Dashboard shows it, since the answer is typed into that session; `title` is one line.
-  A decision's `preview` is one of seven, each what Approve does, written in ELI5 / ASD-STE100 plain words: `ask` (`text`, what its poster does on Approve, for a decision no other shape fits: a production port, a work request from outside the chain, its text naming the session asking and the work it wants, or a step only the owner can take, its text the step,
+  A decision's `preview` is one of eight, each what Approve does but the `secret` ask (below), written in ELI5 / ASD-STE100 plain words: `ask` (`text`, what its poster does on Approve, for a decision no other shape fits: a production port, a work request from outside the chain, its text naming the session asking and the work it wants, or a step only the owner can take, its text the step,
   Approve meaning done and Deny meaning the owner can't, or a grilling batch, its text each open question numbered with its recommended answer, Approve taking them all and the owner's Note giving his own by number;
   with optional `approve` and `deny` labels, one line each, which the owner's card shows as two choices under its text, the quoted block, when both are there, and optional `attachments`, below), `slack` (`to`, `text`),
-  `ship` (`sha`, `prs` of `{number, title}`), `ticket` (`team`, `title`, `body`), `delete` (`what`, `why`), `schema` (`shape`) or `budget` (`amount`, `why`); a decision with none is refused.
+  `ship` (`sha`, `prs` of `{number, title}`), `ticket` (`team`, `title`, `body`), `delete` (`what`, `why`), `schema` (`shape`), `budget` (`amount`, `why`) or `secret` (`key`, `sink`); a decision with none is refused.
   An `ask`'s `attachments`, and a read-only update's, are up to 20 files on this Mac, each `{src, kind?, label?, group?}`: `src` an absolute path, never a URL; `kind` one of `code`, `doc`, `html`, `image` or `pdf`,
   read from the extension when left out (`KIND_OF_EXTENSION` in `api/hono/src/lib/dashboard/inbox-attachments.ts`); `label` `before` or `after`; `group` a one-line section heading.
   `bun run ask edit <id|#iN>` (`editItem()`) takes the same JSON as `new` and replaces the item's `title` and `preview`, its files copied the same way, bumping `updatedAt` and `version`, so one card carries a progress to its end;
@@ -222,6 +222,24 @@
   `bun run ask stale [--minutes 15] [--since <iso>]` prints one line for each answer of the owner's (not a settle) given since `--since` (default 24 hours ago) and at least `--minutes` ago with no `ackedAt` (a go not closed with its link or why, anything else not read), its delivery pending, failed or typed into the session alike, but for a failed one the owner dismissed,
   which the owner chose not to send (`staleItems`; an answer delivered before acks were stamped, `ACKS_STAMPED_FROM`, is not listed, since it may have been acked with no stamp, while one never delivered still is, and a go delivered before then, read through bun run ask or typed into its session, reads as closed):
   ops-sweep reminds each live poster on it every 30 minutes, and a lead hears of a poster that is down (playbook's Sweep).
+- A `secret` ask asks the owner for a value (a client secret, an API key) that goes straight to one sink and is kept nowhere: no row, log line, transcript, response, error or argv holds it.
+  Its `key` is the environment variable's name and its `sink` one of the allowlist in code, `secretSinkSchema` in `api/hono/src/lib/dashboard/inbox.ts`, today Vercel alone: `{type: "vercel", project, scope, environments}`, each environment of `development`, `preview` and `production` named once.
+  Its card shows what Submit does, a masked field and Submit, Enter submitting too, with no comment box, Archive or Chat about it, so nothing else invites the value; Snooze stays.
+  Submit posts `{value, seen}` to `POST /api/v1/inbox/:id/secret`, which `provideSecret()` claims in one write that holds only while the item is open at the version read, so the sink runs once, then hands the value on stdin to `vercel env add <key> --environment <env> --project <project> --scope <scope> --yes`, once an environment in order,
+  from the temp folder with its output dropped (`spawnSink` in `api/hono/src/lib/dashboard/secret-sink.ts`, stopped after 60 seconds).
+  Only a stack that reads the live machine runs the sink; a fixture or test stack runs nothing and records exit 0 (`runSink`).
+  The item turns `provided`, its answer `{at, choice: "provided", results: [{environment, exitCode}]}` (`exitCode` null once stopped, 127 when `vercel` could not start), and its poster is typed `Provided at <at>`, each environment's exit status and the `bun run ask get --ack` that closes it, which `bun run ask stale` chases until it does.
+  The card reads `Provided at <time>` with each exit status, green once every environment took it, red while any did not; a value the sink refused takes a new ask.
+
+  ```bash
+  bun run ask new <<'EOF'
+  {"from": "dispatcher", "title": "Client secret for the web app",
+   "preview": {"type": "secret", "key": "GITHUB_CLIENT_SECRET",
+               "sink": {"type": "vercel", "project": "web-app", "scope": "acme",
+                        "environments": ["production", "preview", "development"]}}}
+  EOF
+  ```
+
 - The ask's shape: an `ask` decision's text reads the way chat talks to the owner, in three parts, top to bottom:
   1. A picture of the point: a diff or code block for a code change, before and after pictures for a UI change (as `attachments` with the smart viewer), an ASCII flow in a code block for a plain decision.
      Keep each code or ASCII line within `ASK_CODE_COLUMNS` characters, the drawing width the card paragraph above names, whose source (`packages/config/src/inbox.ts`) gives the card width and character width it comes from.
