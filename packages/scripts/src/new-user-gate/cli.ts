@@ -90,11 +90,6 @@ const prep = (box: string, sha: string) => {
     chmodSync(join(box, "stubs", name), 0o755)
   }
   writeFileSync(join(box, "tty"), "y\n")
-  const reading = usageReading(process.env.USER ?? "", Date.now())
-  writeFileSync(join(box, "keychain"), reading.keychain)
-  mkdirSync(join(box, "usage-api"))
-  writeFileSync(join(box, "usage-api", "profile"), JSON.stringify(reading.profile))
-  writeFileSync(join(box, "usage-api", "usage"), JSON.stringify(reading.usage))
   for (const rc of [".zshenv", ".zprofile"]) writeFileSync(join(home, rc), zshStartup(box))
   writeFileSync(join(box, "proxy-up"), "")
   const node = dirname(
@@ -131,6 +126,15 @@ const prep = (box: string, sha: string) => {
   if (pushed.code !== 0) throw new Error(`could not push ${sha} into the box: ${pushed.err.trim()}`)
   run(["git", "-C", join(box, "source.git"), "symbolic-ref", "HEAD", "refs/heads/main"])
   run(["git", "clone", "-q", "-b", "pinned", join(box, "source.git"), join(home, "playground")])
+  // the made-up stored login goes in only where ops-usage reads PLAYGROUND_USAGE_API, since an older run.py would send it to Claude's usage read
+  const usageJob = join(home, "playground", "scripts", "ops", "usage", "run.py")
+  if (existsSync(usageJob) && readFileSync(usageJob, "utf8").includes("PLAYGROUND_USAGE_API")) {
+    const reading = usageReading(process.env.USER ?? "", Date.now())
+    writeFileSync(join(box, "keychain"), reading.keychain)
+    mkdirSync(join(box, "usage-api"))
+    writeFileSync(join(box, "usage-api", "profile"), JSON.stringify(reading.profile))
+    writeFileSync(join(box, "usage-api", "usage"), JSON.stringify(reading.usage))
+  }
   const proxy = run(
     [
       join(REPO, "node_modules", ".bin", "portless"),
