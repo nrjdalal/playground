@@ -343,6 +343,37 @@ describe("Stop", () => {
     expect(f.launched).toEqual([])
   })
 
+  test("a Stop whose dev:stop is still pending when Start's migrate ends wins: Start never launches, and the .env stays the worktree's own", async () => {
+    const path = worktree("stop-race", "MINE=1\n")
+    let migrated = () => {}
+    const migrating = new Promise<void>((resolve) => {
+      migrated = resolve
+    })
+    let stopped = () => {}
+    const stopping = new Promise<void>((resolve) => {
+      stopped = resolve
+    })
+    const f = fake([stack(path)], { migrate: () => migrating })
+    const running = startVibe(path, f.deps).catch((error: Error) => error.message)
+    await Bun.sleep(5)
+    const stop = fake([stack(path, { vibe: true })], {
+      stop: async () => {
+        await stopping
+        return { code: 0, stderr: "", stdout: "" }
+      },
+    })
+    const stopping2 = stopVibe(path, stop.deps)
+    await Bun.sleep(5)
+    migrated()
+    expect(await running).toContain("stopped while it started")
+    stopped()
+    await stopping2
+    expect(f.launched).toEqual([])
+    expect(readFileSync(join(path, ".env"), "utf8")).toBe("MINE=1\n")
+    expect(existsSync(join(path, ".env.vibe-saved"))).toBe(false)
+    expect(existsSync(join(path, ".turbo/vibe.json"))).toBe(false)
+  })
+
   test("the first Start's cleanup leaves the second Start's copy and record alone", async () => {
     const path = worktree("restart", "MINE=1\n")
     let release = () => {}

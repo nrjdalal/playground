@@ -444,6 +444,13 @@ export async function stopVibe(path: string, deps: Deps = DEPS): Promise<void> {
   if (!deps.readsLive()) return fixtureVibe(path, false)
   const record = readVibe(stack.path)
   if (!record) throw new VibeError(`${VIBE_RECORD} in that worktree does not name its copy`)
+  // Stop claims the record before its first await, so a Start still seeding fails its next check and leaves the cleanup to this Stop; a Start past its last check has already written env: true, read above
+  writeRecord(stack.path, {
+    container: record.container,
+    env: record.env,
+    id: crypto.randomUUID(),
+    started: new Date().toISOString(),
+  })
   const stopped = await deps.stop(stack.path, join(stack.path, DATA))
   const said = `${stopped.stdout}\n${stopped.stderr}`
   if (stopped.code !== 0 && !/no stack is recorded/.test(said)) {
