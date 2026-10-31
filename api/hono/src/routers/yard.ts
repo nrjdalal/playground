@@ -35,8 +35,7 @@ const valid = <T extends z.ZodType>(target: "json" | "query", schema: T) =>
       throw new ApiError(400, "VALIDATION_ERROR", "Invalid input", { issues: result.error })
   })
 
-// A route's OpenAPI entry: its { data } shape and the refusals it can answer with.
-// A route that makes a row answers 201, and its doc says so.
+// A route's OpenAPI entry: its { data } shape, the refusals it can answer with, and 201 for a route that makes a row.
 const doc = (
   description: string,
   data: z.ZodType,
@@ -88,8 +87,7 @@ const web = yardCaller({ web: true })
 const owner = yardCaller({ rung: "owner", web: true })
 
 // Sends a message's frame to whoever may read it: its channel once sent, its sender alone while it waits or after a deny.
-// A stored post answers as stored whatever the fan-out does, so a client's retry never posts it twice; a failed publish is logged.
-// The write has committed before a fan-out runs, so a fan-out that fails is logged and the request still answers what it wrote.
+// A stored post answers as stored whatever the fan-out does, so a client's retry never posts it twice; a failed fan-out is logged.
 const fanOut = async (caller: store.Caller, message: z.infer<typeof messageSchema>) => {
   try {
     await publish(await store.audienceOf(db, caller, message), { message, type: "message" })
@@ -413,6 +411,7 @@ export const yardRouter = new Hono<{ Variables: YardVariables }>()
     },
     upgradeWebSocket((c) => {
       const id = c.get("caller").id
+      // join's own close, kept from onOpen, since onClose's context is a new object
       let leave = () => {}
       return {
         onClose: () => leave(),
