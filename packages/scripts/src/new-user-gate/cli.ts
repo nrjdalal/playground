@@ -1,9 +1,11 @@
 #!/usr/bin/env bun
-// The new-user gate: a fresh scratch HOME installs Playground at a given sha the way `curl | bash` does, then each step a new user meets is checked in turn, printed PASS or FAIL and screenshotted; it exits 1 when any step fails.
+// The new-user gate: a fresh scratch HOME installs Playground at a given sha the way `curl | bash` does, then each step a new user meets is checked in turn, printed PASS, FAIL or INCONCLUSIVE and screenshotted; it exits 1 when any step does not pass.
 // Usage: bun run gate:new-user <tag|sha> [--box <dir>] [--keep], or --clean <dir> for a box a --keep run left. The box (default /tmp/pg-gate-<sha7>, short since herdr's socket path must fit 104 bytes) holds the HOME, the stand-ins, a bare source repo and the screenshots.
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { dirname, join, resolve } from "node:path"
+
+import { gateSettings, SCHEMA_VERSION } from "@packages/settings"
 
 import { GATE_LABEL, stubs } from "./stubs"
 
@@ -12,17 +14,51 @@ const PROXY_PORT = "14155"
 const INSTALL_LIMIT_S = 1200
 const ROUTE_WAIT_MS = 180_000
 const SCRIPTS_WAIT_MS = 150_000
+const ROOM_WAIT_MS = 600_000
+// The box's PLAYGROUND_LOAD_MULT: the gate checks what a new user meets on a quiet Mac, so spawn.sh's load gate in the box allows this many times the cores and the host's other sessions never hold a start; its memory and usage gates stay as they are.
+export const BOX_LOAD_MULT = 10
 
-export type Step = { detail: string; name: string; ok: boolean; shot?: string }
+// A step is inconclusive when it failed while spawn.sh's capacity gate refused a start, since that gate reads this Mac, not the build.
+export type Step = {
+  detail: string
+  inconclusive?: boolean
+  name: string
+  ok: boolean
+  shot?: string
+}
 
-// Pure: the report a run prints, a PASS or FAIL line per step with its detail, then the count.
-export const report = (steps: Step[]): string =>
-  [
+// Pure: the report a run prints, a PASS, FAIL or INCONCLUSIVE line per step with its detail, then the count.
+export const report = (steps: Step[]): string => {
+  const unsure = steps.filter((s) => s.inconclusive).length
+  return [
     ...steps.map(
-      (s, i) => `${s.ok ? "PASS" : "FAIL"} ${i + 1}. ${s.name}${s.detail ? `: ${s.detail}` : ""}`,
+      (s, i) =>
+        `${s.ok ? "PASS" : s.inconclusive ? "INCONCLUSIVE" : "FAIL"} ${i + 1}. ${s.name}${s.detail ? `: ${s.detail}` : ""}`,
     ),
-    `${steps.filter((s) => s.ok).length} of ${steps.length} passed`,
+    `${steps.filter((s) => s.ok).length} of ${steps.length} passed${unsure ? `, ${unsure} inconclusive` : ""}`,
   ].join("\n")
+}
+
+// Pure: each start spawn.sh's capacity gate refused at or after since, from the lines of its capacity.jsonl, as `<gate> gate: <its words>`.
+export const capacityRefusals = (log: string, since: string): string[] =>
+  log.split("\n").flatMap((line) => {
+    try {
+      const row = JSON.parse(line) as {
+        at?: unknown
+        detail?: unknown
+        gate?: unknown
+        verdict?: unknown
+      }
+      return row.verdict === "refused" && typeof row.at === "string" && row.at >= since
+        ? [`${row.gate} gate: ${row.detail}`]
+        : []
+    } catch {
+      return []
+    }
+  })
+
+// A second-precision UTC time, as capacity.jsonl writes its rows' at.
+const isoNow = () => `${new Date().toISOString().slice(0, 19)}Z`
 
 // Pure: the words the dispatcher row's usage says to a screen reader, or null when it shows no reading.
 export const usageWords = (text: string): string | null => {
@@ -45,9 +81,9 @@ export const leftForYou = (out: string): string[] => {
     .map((line) => line.slice(4))
 }
 
-// Pure: the box's .zshenv and .zprofile. Every zsh the stack's jobs start reads .zshenv, and a login one has path_helper reorder PATH after it, so .zprofile puts the stand-ins first again; a Claude account's profile read goes to a closed loopback port, so the made-up token never leaves the Mac.
+// Pure: the box's .zshenv and .zprofile. Every zsh the stack's jobs start reads .zshenv, and a login one has path_helper reorder PATH after it, so .zprofile puts the stand-ins first again; a Claude account's profile read goes to a closed loopback port, so the made-up token never leaves the Mac; and spawn.sh's load gate takes BOX_LOAD_MULT.
 export const zshStartup = (box: string): string =>
-  `export PATH="${join(box, "stubs")}:$PATH"\nexport PLAYGROUND_PROFILE_URL=http://127.0.0.1:9/profile\n`
+  `export PATH="${join(box, "stubs")}:$PATH"\nexport PLAYGROUND_PROFILE_URL=http://127.0.0.1:9/profile\nexport PLAYGROUND_LOAD_MULT=${BOX_LOAD_MULT}\n`
 
 // Each stand-in that the box's zsh, plain and login, finds anywhere but the box's stubs folder, as `mode name path`; a job the box starts runs in one of the two, so an empty list means none of them reaches the real binary.
 export const strayStandIns = (box: string, home: string, names: string[]): string[] =>
@@ -160,6 +196,7 @@ const install = async (box: string, home: string, path: string): Promise<string>
       INSTALL_TTY: join(box, "tty"),
       LOGNAME: process.env.USER ?? "",
       PATH: path,
+      PLAYGROUND_LOAD_MULT: String(BOX_LOAD_MULT),
       PORTLESS_SYNC_HOSTS: "0",
       SHELL: "/bin/zsh",
       TERM: "dumb",
@@ -242,13 +279,56 @@ const waitFor = async (ok: () => boolean, ms: number) => {
   return ok()
 }
 
-const step = async (steps: Step[], name: string, check: () => Promise<Omit<Step, "name">>) => {
+// A failed step whose time saw spawn.sh's capacity gate refuse a start in the box (capacity, its log) is inconclusive, and names the refusal.
+const step = async (
+  steps: Step[],
+  name: string,
+  check: () => Promise<Omit<Step, "name">>,
+  capacity: { log: string; since: string },
+) => {
+  let got: Step
   try {
-    steps.push({ name, ...(await check()) })
+    got = { name, ...(await check()) }
   } catch (error) {
-    steps.push({ detail: (error as Error).message, name, ok: false })
+    got = { detail: (error as Error).message, name, ok: false }
   }
+  const held =
+    !got.ok && existsSync(capacity.log)
+      ? capacityRefusals(readFileSync(capacity.log, "utf8"), capacity.since)
+      : []
+  steps.push(
+    held.length
+      ? {
+          ...got,
+          detail: `spawn.sh's capacity gate refused a start (${held.at(-1)})`,
+          inconclusive: true,
+        }
+      : got,
+  )
   console.log(report(steps).split("\n").at(-2))
+}
+
+// Waits up to ROOM_WAIT_MS for this Mac's load to fall under the line spawn.sh's load gate holds a dispatcher's start to, and says how long it waited.
+const waitForRoom = async () => {
+  const cores = Number(run(["sysctl", "-n", "hw.ncpu"]).out.trim())
+  const mult = Number(process.env.PLAYGROUND_LOAD_MULT) || 1
+  const line =
+    cores *
+    mult *
+    (1 - gateSettings.get({ schemaVersion: SCHEMA_VERSION, values: {} }, "gates.smallReserve"))
+  const load = () => {
+    const fields = run(["sysctl", "-n", "vm.loadavg"]).out.split(/\s+/).filter(Boolean)
+    return Math.max(Number(fields[1]), Number(fields[2]))
+  }
+  if (!(load() >= line)) return
+  const started = Date.now()
+  console.log(
+    `gate: load ${load().toFixed(2)} is at or over the box's line ${line}; waiting up to ${ROOM_WAIT_MS / 60_000} minutes`,
+  )
+  const fell = await waitFor(() => load() < line, ROOM_WAIT_MS)
+  console.log(
+    `gate: waited ${Math.round((Date.now() - started) / 1000)}s; load ${load().toFixed(2)} ${fell ? "is under" : "is still at or over"} ${line}`,
+  )
 }
 
 // Stops what the box started, each by its own handle: herdr's servers (whose panes run the ops jobs) through ops-herdr's own stop, the supervisor by the pid its job wrote, the dashboard's stack by the process groups procs.sh recorded, the box's proxy through portless, and the gate's containers by the names its label lists.
@@ -315,6 +395,7 @@ const main = async (args: string[]) => {
     : `/tmp/pg-gate-${full.slice(0, 7)}`
   const keep = args.includes("--keep")
   const steps: Step[] = []
+  await waitForRoom()
   const { home, path } = prep(box, full)
   const stray = strayStandIns(box, home, Object.keys(stubs(box, "")))
   if (stray.length) {
@@ -327,11 +408,20 @@ const main = async (args: string[]) => {
   const desk = join(home, "playground", ".claude", "worktrees", "desk")
   const browser = new Browser(join(box, "shots"))
   console.log(`gate: ${full.slice(0, 10)} in ${box}`)
+  console.log(
+    `gate: the box sets PLAYGROUND_LOAD_MULT=${BOX_LOAD_MULT}, so spawn.sh's load gate there is relaxed to ${BOX_LOAD_MULT}x the cores; its memory and usage gates are not`,
+  )
+  // each step is judged against the capacity refusals since the one before it ended, the first since before the install
+  const capacity = { log: join(home, ".playground", "ops", "capacity.jsonl"), since: isoNow() }
+  const check = async (name: string, judge: () => Promise<Omit<Step, "name">>) => {
+    await step(steps, name, judge, capacity)
+    capacity.since = isoNow()
+  }
   try {
     const out = await install(box, home, path)
     // the bare name the live checkout aliases, as a new user opens it, on the box's own proxy
     const web = `http://playground.localhost:${PROXY_PORT}`
-    await step(steps, "curl | bash exits 0 with no Left for you", async () => {
+    await check("curl | bash exits 0 with no Left for you", async () => {
       const left = leftForYou(out)
       const code = Number(/install\.sh exit (\d+)/.exec(out)?.[1] ?? -1)
       browser.cmd("open", `${web}/dashboard`)
@@ -345,7 +435,7 @@ const main = async (args: string[]) => {
         shot: browser.shot("1-install"),
       }
     })
-    await step(steps, "first run starts the database with one click", async () => {
+    await check("first run starts the database with one click", async () => {
       browser.cmd("find", "role", "button", "click", "--name", "Start the database")
       const env = join(desk, ".env")
       const saved = await waitFor(
@@ -359,7 +449,7 @@ const main = async (args: string[]) => {
         shot: browser.shot("2-database"),
       }
     })
-    await step(steps, "the Dashboard shows Alpha", async () => {
+    await check("the Dashboard shows Alpha", async () => {
       browser.cmd("open", `${web}/dashboard`)
       // first run's Continue makes and signs in the owner once every needed check passes; a click before the page hydrates does nothing, so it is clicked again until the dashboard shows
       let firstRun = false
@@ -380,8 +470,7 @@ const main = async (args: string[]) => {
         shot: browser.shot("3-alpha"),
       }
     })
-    await step(
-      steps,
+    await check(
       "Alpha routes one small task: a manager starts and a worker opens a PR",
       async () => {
         browser.cmd("find", "text", "Alpha", "click")
@@ -428,7 +517,7 @@ const main = async (args: string[]) => {
         }
       },
     )
-    await step(steps, "Usage shows", async () => {
+    await check("Usage shows", async () => {
       browser.cmd("open", `${web}/dashboard`)
       browser.cmd("wait", "--load", "networkidle")
       const words = usageWords(browser.text())
@@ -438,7 +527,7 @@ const main = async (args: string[]) => {
         shot: browser.shot("5-usage"),
       }
     })
-    await step(steps, "the Scripts group has no Failing row", async () => {
+    await check("the Scripts group has no Failing row", async () => {
       // the supervisor checks its follower each 30s, so a row that failed before the database started has a few ticks to clear
       // a read can land before the sidebar renders, so the last read that shows the group is the one judged
       let text = ""
@@ -465,7 +554,7 @@ const main = async (args: string[]) => {
         shot: browser.shot("6-scripts"),
       }
     })
-    await step(steps, "the Dashboard follows main", async () => {
+    await check("the Dashboard follows main", async () => {
       const upstream = run(["bash", join(desk, "scripts", "ops", "dashboard", "upstream.sh")], {
         cwd: desk,
       }).out.trim()
