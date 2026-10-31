@@ -66,7 +66,7 @@ function YardRows({ rows }: { rows: YardChannel[] }) {
       {rows.map((row) => {
         const title = channelTitle(row)
         const badge = yardBadge(row)
-        const tip = badge ? `${title} · ${row.unread} unread` : title
+        const tip = badge ? `${title} · ${badge.label} unread` : title
         return (
           <SidebarMenuItem key={row.id}>
             <SidebarMenuButton
