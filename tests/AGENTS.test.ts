@@ -144,6 +144,18 @@ describe("AGENTS.md", () => {
     )
   })
 
+  test("the tracking rule files an org's or a person's work in that extension's repo (PG-83)", async () => {
+    const text = await Bun.file(join(ROOT, "AGENTS.md")).text()
+    const lines = text.split("\n")
+    const at = lines.findIndex((l) => l.includes("Track Playground's work as GitHub issues"))
+    expect(at).toBeGreaterThan(-1)
+    const line = `${lines[at]}\n${lines[at + 1]}`
+    expect(line).toContain(
+      "The repo tracks the factory's own work alone, since an org's work goes in that org's extension repo and a person's in their login extension",
+    )
+    expect(line).toContain("[ADR 0016]")
+  })
+
   test("CLAUDE.md is AGENTS.md, so both load the same rules", async () => {
     expect(await Bun.file(join(ROOT, "CLAUDE.md")).text()).toBe(
       await Bun.file(join(ROOT, "AGENTS.md")).text(),
