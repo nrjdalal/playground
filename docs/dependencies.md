@@ -7,7 +7,7 @@
 
 ## Catalog ranges
 
-Every `catalog` entry uses a caret range, and `.github/scripts/deps-manager.ts` enforces it on `postinstall`:
+Every `catalog` entry uses a caret range, and `packages/scripts/src/deps-manager.ts` enforces it on `postinstall`:
 
 - An exact version (`1.2.3`), a partial (`4.7`, `5`) or a tilde (`~1.2.3`) is rewritten to a caret, and each change is printed under `[INFO] Normalized catalog ranges to caret`.
 - Normalization runs _after_ the auto-move step, so a spec promoted into the catalog from a workspace dep is caught in the same run. That matters because `bun add` writes a workspace dep, and `bun add -E` writes an exact one.
@@ -18,7 +18,7 @@ Rewriting a spec after resolution leaves `bun.lock` holding the old spec string 
 
 Note that a caret on a prerelease widens it more than it may look: `^2.0.14-beta.1` admits `2.0.14-beta.2` and every later `2.x`. A prerelease is the one spec most often pinned on purpose, so if an exact prerelease matters, record the reason here before the rule rewrites it.
 
-The rule has **no opt-out**, so no pin survives an install, whatever reason is recorded here. Pinning something deliberately means changing the rule itself in `.github/scripts/deps-manager.ts`, for example adding an allowlist it skips, and writing down why in this file. That was left out on purpose: there is nothing to exempt today, and an unused config key is worse than adding one when a real case appears.
+The rule has **no opt-out**, so no pin survives an install, whatever reason is recorded here. Pinning something deliberately means changing the rule itself in `packages/scripts/src/deps-manager.ts`, for example adding an allowlist it skips, and writing down why in this file. That was left out on purpose: there is nothing to exempt today, and an unused config key is worse than adding one when a real case appears.
 
 Enforcement is only partial by design. Specs the rule cannot convert are reported and the script still exits 0, so a compound range such as `>=4.4.3 <5` survives an install with nothing but a line of `postinstall` output. Failing the install instead would block work for a range that may be perfectly deliberate, so the auto-convertible half is enforced and the rest is advisory.
 
@@ -58,7 +58,7 @@ An advisory with no patched version anywhere cannot be cleared by updating it, b
 
 - **Advisory:** high: stack-exhaustion denial of service through deeply nested brace patterns. Affects `braces <=3.0.3`, which is every published version; the advisory lists no patched version.
 - **Why an ignore:** there is nothing to update to or override with. `braces@3.0.3` is the latest release, and every parent's latest still reaches it through `micromatch@4.0.8`: `shadcn@4.21.1` depends on `fast-glob` directly, and `globby@16.2.4` on both `fast-glob` and `micromatch`. The `ts-morph` path under `shadcn` would clear at `ts-morph@28` (its `@ts-morph/common` moved to `tinyglobby`), but `shadcn` still declares `ts-morph ^26` and its own `fast-glob`, so the tree keeps the copy either way.
-- **Risk:** negligible. The only consumers are dev tooling: the `shadcn` CLI behind `bun run shadcn:update`, and `globby` in `.github/scripts/deps-manager.ts`, which globs the fixed pattern `**/package.json` on install. Neither takes a pattern from untrusted input, and nothing the api bundle or the web app ships imports the chain.
+- **Risk:** negligible. The only consumers are dev tooling: the `shadcn` CLI behind `bun run shadcn:update`, and `globby` in `packages/scripts/src/deps-manager.ts`, which globs the fixed pattern `**/package.json` on install. Neither takes a pattern from untrusted input, and nothing the api bundle or the web app ships imports the chain.
 - **Exit criteria:** drop the ignore once `braces` publishes a patched version (then a normal `bun audit fix` or refresh lifts it), or once neither `shadcn` nor `globby` resolves `micromatch`.
 
 ## Retired overrides

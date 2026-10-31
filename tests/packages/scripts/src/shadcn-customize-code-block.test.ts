@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { join } from "node:path"
 
-const root = join(import.meta.dir, "../../..")
+const root = join(import.meta.dir, "../../../..")
 
 // A transcript's fenced code is highlighted by shadcn's own code-block highlighter, which a sync now keeps verbatim from the registry.
 describe("shadcn-customize", () => {

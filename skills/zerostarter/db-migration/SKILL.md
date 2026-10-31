@@ -61,7 +61,7 @@ Done when `docker port` prints a `127.0.0.1:` line and the worktree's `.env` nam
 bun run db:migrate
 ```
 
-This is local or ad-hoc only. The dashboard is never deployed, so ZeroStarter's deploy-time auto-apply (`.github/scripts/migrate-on-deploy.ts`) never runs here; the runner hosting the live dashboard runs `bun run db:migrate` in its checkout after a reset that brings a migration (the dev skill's "The live dashboard's build").
+This is local or ad-hoc only. The dashboard is never deployed, so ZeroStarter's deploy-time auto-apply (`packages/scripts/src/migrate-on-deploy.ts`) never runs here; the runner hosting the live dashboard runs `bun run db:migrate` in its checkout after a reset that brings a migration (the dev skill's "The live dashboard's build").
 
 ## 5. Make the running stack see it
 

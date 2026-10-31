@@ -70,8 +70,12 @@ describe("the real workflows", () => {
     const gate: string[] = []
     for (const name of files) {
       const text = await read(name)
-      const parsed = Bun.YAML.parse(text) as { on?: { pull_request?: unknown } } | null
-      if (!parsed?.on?.pull_request) continue
+      const parsed = Bun.YAML.parse(text) as {
+        on?: { pull_request?: { types?: string[] } | null }
+      } | null
+      const pr = parsed?.on?.pull_request
+      // auto-release fires once a pull request into main has closed, so it checks no pull request
+      if (!pr || pr.types?.join() === "closed") continue
       gate.push(name)
       expect(runnerProblems(name, text)).toEqual([])
     }
