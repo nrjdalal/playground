@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 
 import type { Preview } from "../../../../../api/hono/src/lib/apps/previews"
 import {
+  doneMessage,
   loadable,
   OPEN_PREVIEW,
   openPreview,
@@ -9,6 +10,7 @@ import {
   previewUrl,
   stackGroups,
   startAddress,
+  stoppedIn,
   takeMove,
   takePreview,
   topicCounts,
@@ -129,7 +131,7 @@ describe("stackGroups", () => {
     url,
   })
 
-  test("one group a project in the list's order, each worktree its branch and session, a stopped one disabled", () => {
+  test("one group a project in the list's order, each worktree its branch and session, a stopped one its path, to start it", () => {
     expect(
       stackGroups([
         stack("playground", "canary", "https://playground.localhost", "dispatcher"),
@@ -139,15 +141,22 @@ describe("stackGroups", () => {
     ).toEqual([
       {
         items: [
-          { disabled: false, label: "canary · dispatcher", value: "https://playground.localhost" },
-          { disabled: true, label: "feat/b · stopped", value: "stopped:/playground/feat/b" },
+          { label: "canary · dispatcher", value: "https://playground.localhost" },
+          { label: "feat/b · stopped", value: "stopped:/playground/feat/b" },
         ],
         project: "playground",
       },
       {
-        items: [{ disabled: false, label: "folder", value: "https://folder.yard.localhost" }],
+        items: [{ label: "folder", value: "https://folder.yard.localhost" }],
         project: "yard",
       },
+    ])
+  })
+
+  test("a Vibeground started and not serving yet reads starting, so the pane offers Stop and never a second Start", () => {
+    const booting = { ...stack("playground", "feat/c", null), vibe: true }
+    expect(stackGroups([booting])[0]?.items).toEqual([
+      { label: "feat/c · starting", value: "stopped:/playground/feat/c" },
     ])
   })
 })
@@ -199,5 +208,38 @@ describe("openPreview", () => {
     ).toEqual({ from: "/dashboard?worker=a" })
     expect(previewClick({ ...click, metaKey: true }, "/dashboard", home)).toBeNull()
     expect(previewClick({ ...click, button: 1 }, "/dashboard", home)).toBeNull()
+  })
+})
+
+// Done hands the work back for review, never merged; it goes to the dispatcher, the one session the owner's messages reach, which routes it to the worktree's session
+describe("doneMessage", () => {
+  test("names the worktree, branch and session, pushes to its open PR or opens one into its parent, and never merges", () => {
+    const text = doneMessage({ branch: "feat/rooms", path: "/w/rooms", session: "rooms-worker" })
+    expect(text).toContain("feat/rooms")
+    expect(text).toContain("/w/rooms")
+    expect(text).toContain("rooms-worker")
+    expect(text).toContain("push it to the branch's open PR")
+    expect(text).toContain("only when none is open")
+    expect(text).toContain("Do not merge")
+  })
+
+  test("a worktree no session works in says so", () => {
+    expect(doneMessage({ branch: "main", path: "/w/yard", session: null })).toContain(
+      "no session works in it",
+    )
+  })
+})
+
+describe("stoppedIn", () => {
+  test("marks the stopped worktree stopped in the cached list, so the pane shows Start rather than reopening its old address", () => {
+    const stacks: { path: string; url: string | null; vibe: boolean }[] = [
+      { path: "/w/a", url: "https://a.localhost", vibe: true },
+      { path: "/w/b", url: "https://b.localhost", vibe: false },
+    ]
+    expect(stoppedIn(stacks, "/w/a")).toEqual([
+      { path: "/w/a", url: null, vibe: false },
+      { path: "/w/b", url: "https://b.localhost", vibe: false },
+    ])
+    expect(stacks[0]?.url).toBe("https://a.localhost")
   })
 })

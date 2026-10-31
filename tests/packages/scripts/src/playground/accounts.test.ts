@@ -170,6 +170,14 @@ describe("playground accounts", () => {
     )
   })
 
+  test("list reads a reading with no 5-hour window as none, never ?", async () => {
+    writeFileSync(
+      join(data, "ops", "usage", "login-flip.json"),
+      JSON.stringify({ seen: { "one@example.test": { five: null, week: 40 } } }),
+    )
+    expect((await run(["list"])).out).toContain("claude one@example.test: kept, 5h none, week 40%")
+  })
+
   test("a folder ext init made, with no policy.json written yet, lists no accounts and adds one", async () => {
     const fresh = join(scratch, "fresh")
     mkdirSync(join(fresh, "extensions", "made-up-me"), { recursive: true })

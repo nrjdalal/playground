@@ -5,7 +5,7 @@ The commands for each start and end are in [SESSIONS.md](SESSIONS.md), and every
 
 ## Roles on the Dashboard
 
-The dashboard lists the dispatcher and dispatcher-2 in the sidebar's header, above the session groups, lists the Planner and both leads under Orchestrators, A to Z by roster title or in the order the owner dragged them into,
+The dashboard lists the dispatcher and dispatcher-2 in the sidebar's header, above the session groups, lists the Planner, both leads and the Optimizer under Orchestrators, A to Z by roster title or in the order the owner dragged them into,
 nests each checker under the worker whose PR it checks (by the `worker` key on the checker's roster entry, set at spawn, else its `pr`, else its name: `reviewer-sloth-2-sendtop` under `worker-sloth-2`),
 and puts probes in Other, where they never wait on the owner.
 Each row reads by a plain name with no @: a manager by its role word alone (Builder, Ops, Planner, Optimizer), a worker by its ticket and pull request with no role word (`ENG-1591#1598`), else its title, and a reviewer,
