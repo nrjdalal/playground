@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 // The new-user gate: a fresh scratch HOME installs Playground at a given sha the way `curl | bash` does, then each step a new user meets is checked in turn, printed PASS or FAIL and screenshotted; it exits 1 when any step fails.
-// Usage: bun run gate:new-user <sha> [--box <dir>] [--keep]. The box (default /tmp/pg-gate-<sha7>, short since herdr's socket path must fit 104 bytes) holds the HOME, the stand-ins, a bare source repo and the screenshots.
+// Usage: bun run gate:new-user <tag|sha> [--box <dir>] [--keep], or --clean <dir> for a box a --keep run left. The box (default /tmp/pg-gate-<sha7>, short since herdr's socket path must fit 104 bytes) holds the HOME, the stand-ins, a bare source repo and the screenshots.
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { dirname, join, resolve } from "node:path"
@@ -56,7 +56,7 @@ const realBin = (name: string) => {
   return found
 }
 
-// A box at sha: the HOME, the stand-ins first on PATH, a bare source.git holding sha as pinned beside origin's main and canary (HEAD main, as GitHub's), its clone at HOME/playground where install.sh finds it, and the box's own portless proxy on a high port with no TLS, so the box's stack never routes through this Mac's proxy.
+// A box at sha: the HOME, the stand-ins first on PATH, a bare source.git holding sha as pinned and as main, as a ship leaves it, beside origin's canary (HEAD main, as GitHub's), its clone at HOME/playground where install.sh finds it, and the box's own portless proxy on a high port with no TLS, so the box's stack never routes through this Mac's proxy.
 const prep = (box: string, sha: string) => {
   const home = join(box, "h")
   rmSync(box, { force: true, recursive: true })
@@ -102,7 +102,7 @@ const prep = (box: string, sha: string) => {
       "--no-verify",
       join(box, "source.git"),
       `${sha}:refs/heads/pinned`,
-      "refs/remotes/origin/main:refs/heads/main",
+      `${sha}:refs/heads/main`,
       "refs/remotes/origin/canary:refs/heads/canary",
     ],
     { cwd: REPO },
@@ -161,6 +161,27 @@ const install = async (box: string, home: string, path: string): Promise<string>
   ])
   writeFileSync(join(box, "install.log"), `${out}\n${err}\ninstall.sh exit ${code}\n`)
   return `${out}\n${err}\ninstall.sh exit ${code}`
+}
+
+// Adds a Claude account through the Dashboard's own Add, on the stand-ins: setup-token is the repo's made-up one and the Keychain a file in the box; null once the file holds the token, else why not. A commit with no PLAYGROUND_PROFILE_URL would send the made-up token to Claude's profile read, so the gate adds none there.
+const addAccount = (browser: Browser, box: string, home: string): string | null => {
+  const setup = join(home, "playground", "api", "hono", "src", "lib", "accounts", "claude-setup.ts")
+  if (!existsSync(setup) || !readFileSync(setup, "utf8").includes("PLAYGROUND_PROFILE_URL"))
+    return "Alpha waits on a Claude account, which this commit cannot add without a profile read off the Mac (it predates PLAYGROUND_PROFILE_URL)"
+  browser.cmd("find", "role", "button", "click", "--name", "Add a Claude account")
+  browser.cmd("find", "label", "Email of the account to add", "fill", "gate@example.com")
+  browser.cmd("find", "role", "button", "click", "--name", "Open sign-in")
+  browser.cmd("wait", "3000")
+  browser.cmd("find", "label", "Code", "fill", "gate-code")
+  browser.cmd("find", "role", "button", "click", "--name", "Add account")
+  const keychain = join(box, "keychain")
+  const kept =
+    Bun.spawnSync([
+      "sh",
+      "-c",
+      `for i in $(seq 1 30); do grep -q gate@example.com "${keychain}" 2>/dev/null && exit 0; sleep 1; done; exit 1`,
+    ]).exitCode === 0
+  return kept ? null : "Add account kept no token in the stand-in Keychain within 30s"
 }
 
 // One agent-browser session for the run, its screenshots in the box.
@@ -250,9 +271,13 @@ const clean = (box: string, home: string) => {
 }
 
 const main = async (args: string[]) => {
+  if (args[0] === "--clean" && args[1]) {
+    clean(resolve(args[1]), join(resolve(args[1]), "h"))
+    return 0
+  }
   const sha = args.find((a) => !a.startsWith("--"))
   if (!sha) {
-    console.error("usage: bun run gate:new-user <sha> [--box <dir>] [--keep]")
+    console.error("usage: bun run gate:new-user <tag|sha> [--box <dir>] [--keep] | --clean <dir>")
     return 2
   }
   // a tag reads from origin, since a checkout can hold a stale local tag of the same name
@@ -336,22 +361,26 @@ const main = async (args: string[]) => {
       "Alpha routes one small task: a manager starts and a worker opens a PR",
       async () => {
         browser.cmd("find", "text", "Alpha", "click")
-        // Alpha's chat opens once it runs; until then its pane names the step it waits on
-        const lines = browser
-          .text()
-          .split("\n")
-          .map((line) => line.trim())
-        const down = lines.indexOf("Alpha is not running")
-        if (down >= 0) {
-          const waiting = lines
-            .slice(down + 1)
-            .find((line, i, rest) => /^\d+$/.test(rest[i - 1] ?? ""))
+        // Alpha's chat opens once it runs; until then its pane names the step it waits on, the first numbered one
+        const waitsOn = () => {
+          const text = browser.text()
+          const at = text.indexOf("Alpha is not running")
+          return at < 0
+            ? null
+            : (/\n\s*\d+\s*\n\s*([^\n]+)/.exec(text.slice(at))?.[1]?.trim() ?? "")
+        }
+        if (waitsOn() === "Claude account") {
+          const added = addAccount(browser, box, home)
+          if (added) return { detail: added, ok: false, shot: browser.shot("4-route") }
+          await waitFor(() => waitsOn() === null, 60_000)
+        }
+        const waiting = waitsOn()
+        if (waiting !== null)
           return {
             detail: `Alpha is not running${waiting ? `; it waits on ${waiting}` : ""}`,
             ok: false,
             shot: browser.shot("4-route"),
           }
-        }
         browser.cmd("find", "role", "textbox", "fill", "Add a line to the README saying hello")
         browser.cmd("press", "Enter")
         const calls = join(box, "calls.log")
@@ -417,7 +446,7 @@ const main = async (args: string[]) => {
   } finally {
     browser.close()
     console.log(report(steps))
-    if (keep) console.log(`gate: kept ${box}`)
+    if (keep) console.log(`gate: kept ${box}; bun run gate:new-user --clean ${box} removes it`)
     else {
       const shots = join(dirname(box), `${box.split("/").at(-1)}-shots`)
       rmSync(shots, { force: true, recursive: true })
