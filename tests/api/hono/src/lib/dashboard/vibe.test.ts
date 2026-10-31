@@ -1,10 +1,20 @@
 import { afterAll, describe, expect, test } from "bun:test"
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 const {
   childEnv,
+  copyData,
   copyName,
   dumpArgv,
   loadRefusal,
@@ -55,7 +65,7 @@ const fake = (stacks: Stack[], over: Partial<Deps> = {}) => {
   const copied: string[] = []
   const migrated: string[] = []
   const deps: Deps = {
-    copyData: (to) => {
+    copyData: (_from, to) => {
       copied.push(to)
     },
     docker: async (args, env) => {
@@ -333,6 +343,57 @@ describe("Stop", () => {
     expect(f.launched).toEqual([])
   })
 
+  test("the first Start's cleanup leaves the second Start's copy and record alone", async () => {
+    const path = worktree("restart", "MINE=1\n")
+    let release = () => {}
+    const held = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const first = fake([stack(path)], {
+      pipe: async () => {
+        await held
+        return { bytes: 1, error: "psql exited 2: the copy went away" }
+      },
+    })
+    const running = startVibe(path, first.deps).catch((error: Error) => error.message)
+    await Bun.sleep(5)
+    await stopVibe(path, fake([stack(path, { vibe: true })]).deps)
+    const second = fake([stack(path)])
+    await startVibe(path, second.deps)
+    const before = first.docker.length
+    release()
+    expect(await running).toContain("the copy went away")
+    expect(existsSync(join(path, ".turbo/vibe.json"))).toBe(true)
+    expect(first.docker.slice(before).map((c) => c.args)).not.toContainEqual([
+      "rm",
+      "-fv",
+      copyName(path),
+    ])
+  })
+
+  test("a Start stopped while its copy boots ends at the next try, before it seeds", async () => {
+    const path = worktree("stop-boot")
+    let release = () => {}
+    const held = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const f = fake([stack(path)], {
+      docker: async (args) => {
+        if (args[0] === "ps")
+          return { code: 0, stderr: "", stdout: `${LIVE.database}-sY08\trunning\n` }
+        if (args.includes("pg_isready")) return { code: 1, stderr: "", stdout: "" }
+        return { code: 0, stderr: "", stdout: "" }
+      },
+      wait: () => held,
+    })
+    const running = startVibe(path, f.deps).catch((error: Error) => error.message)
+    await Bun.sleep(5)
+    await stopVibe(path, fake([stack(path, { vibe: true })]).deps)
+    release()
+    expect(await running).toContain("stopped while it started")
+    expect(f.pipes).toEqual([])
+  })
+
   test("refuses a stack it did not start", async () => {
     const path = worktree("not-vibe")
     const f = fake([stack(path, { url: "https://w" })])
@@ -340,5 +401,29 @@ describe("Stop", () => {
       "no Vibeground",
     )
     expect(f.docker).toEqual([])
+  })
+})
+
+describe("the data folder's copy", () => {
+  test("copies folders, files and symlinks, and leaves out sockets and the parts a Vibeground never reads", async () => {
+    const from = join(dir, "data-live")
+    const to = join(dir, "data-copy")
+    mkdirSync(join(from, "herdr"), { recursive: true })
+    mkdirSync(join(from, "archive"), { recursive: true })
+    writeFileSync(join(from, "roster.json"), "{}\n")
+    writeFileSync(join(from, "herdr", "config.toml"), "x = 1\n")
+    writeFileSync(join(from, "archive", "old.jsonl"), "{}\n")
+    symlinkSync("roster.json", join(from, "link.json"))
+    const socket = Bun.listen({ socket: { data() {} }, unix: join(from, "herdr", "s.sock") })
+    try {
+      copyData(from, to)
+    } finally {
+      socket.stop(true)
+    }
+    expect(readFileSync(join(to, "roster.json"), "utf8")).toBe("{}\n")
+    expect(readFileSync(join(to, "herdr", "config.toml"), "utf8")).toBe("x = 1\n")
+    expect(lstatSync(join(to, "link.json")).isSymbolicLink()).toBe(true)
+    expect(existsSync(join(to, "herdr", "s.sock"))).toBe(false)
+    expect(existsSync(join(to, "archive"))).toBe(false)
   })
 })

@@ -1,6 +1,7 @@
 import {
   cpSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   openSync,
   readdirSync,
@@ -34,7 +35,7 @@ const LOG = ".turbo/vibe-dev.log"
 const SAVED_ENV = ".env.vibe-saved"
 // the stack's own data folder, a clone of the live one, so its settings and store edits stay in the copy
 const DATA = ".turbo/vibe-data"
-// the live data folder's parts a Vibeground never reads: the transcript archive, the ops binaries, database dumps and debug logs, 19 GB of the folder's whole
+// the live data folder's parts a Vibeground never reads: the transcript archive, the ops binaries, database dumps and debug logs
 const DATA_LEFT = new Set(["archive", "bin", "debug", "dumps"])
 const MIGRATIONS = "packages/db/drizzle"
 const DUMP_TIMEOUT_MS = 5 * 60_000
@@ -53,8 +54,8 @@ export type Pipe = (
 ) => Promise<{ bytes: number; error: string | null }>
 
 export type Deps = {
-  // clones the live data folder into the one named, but its parts in DATA_LEFT
-  copyData: (to: string) => void
+  // clones the data folder from into the one named to, but its parts in DATA_LEFT
+  copyData: (from: string, to: string) => void
   // docker's own argv, its first word dropped
   docker: Run
   // starts `bun run dev` in the worktree, in its own process group, logging to the file named, on the data folder named
@@ -226,12 +227,21 @@ const migrate = async (url: string, folder: string) => {
   }
 }
 
-const copyData = (to: string) => {
-  const from = dataDir()
+// Folders, files and symlinks alone, since a socket (herdr's, in the live folder) cannot be copied and belongs to the process serving it.
+const copyable = (path: string): boolean => {
+  const kind = lstatSync(path)
+  return kind.isDirectory() || kind.isFile() || kind.isSymbolicLink()
+}
+
+export const copyData = (from: string, to: string) => {
   mkdirSync(to, { recursive: true })
   for (const part of readdirSync(from)) {
     if (DATA_LEFT.has(part)) continue
-    cpSync(join(from, part), join(to, part), { recursive: true, verbatimSymlinks: true })
+    cpSync(join(from, part), join(to, part), {
+      filter: copyable,
+      recursive: true,
+      verbatimSymlinks: true,
+    })
   }
 }
 
@@ -327,7 +337,13 @@ export async function startVibe(path: string, deps: Deps = DEPS): Promise<Seeded
   const record = join(path, VIBE_RECORD)
   if (existsSync(record)) throw new VibeError("that worktree is already started; Stop it first")
   const copy = copyName(path)
-  writeRecord(path, { container: copy, env: false, started: new Date().toISOString() })
+  // this Start's own id: a Stop takes the record and a later Start writes its own, so after each await this one goes on, and cleans up, only while the record is still its own
+  const id = crypto.randomUUID()
+  writeRecord(path, { container: copy, env: false, id, started: new Date().toISOString() })
+  const owns = () => readVibe(path)?.id === id
+  const still = () => {
+    if (!owns()) throw new VibeError("it was stopped while it started")
+  }
   const password = deps.secret()
   const envFile = join(path, ".env")
   const saved = join(path, SAVED_ENV)
@@ -335,7 +351,9 @@ export async function startVibe(path: string, deps: Deps = DEPS): Promise<Seeded
   let wrote = false
   try {
     const live = await liveContainer(deps)
+    still()
     await deps.docker(["rm", "-fv", copy])
+    still()
     const ran = await deps.docker(
       [
         "run",
@@ -354,6 +372,7 @@ export async function startVibe(path: string, deps: Deps = DEPS): Promise<Seeded
     let ready = false
     for (let tries = 0; tries < READY_TRIES && !ready; tries++) {
       if (tries > 0) await deps.wait(1_000)
+      still()
       ready =
         (await deps.docker(["exec", copy, "pg_isready", "-h", "127.0.0.1", "-U", "postgres"]))
           .code === 0
@@ -361,13 +380,14 @@ export async function startVibe(path: string, deps: Deps = DEPS): Promise<Seeded
     if (!ready) throw new VibeError(`Postgres in ${copy} did not start in ${READY_TRIES} seconds`)
     const port = (await deps.docker(["port", copy, "5432"])).stdout.match(/127\.0\.0\.1:(\d+)/)?.[1]
     if (!port) throw new VibeError(`${copy} published no loopback port`)
+    still()
     const seeded = await deps.pipe(dumpArgv(live), restoreArgv(copy), DUMP_TIMEOUT_MS)
     if (seeded.error) throw new VibeError(`the copy could not be seeded: ${seeded.error}`)
     const url = `postgresql://postgres:${password}@127.0.0.1:${port}/postgres`
+    still()
     await deps.migrate(url, join(path, MIGRATIONS))
-    // a Stop while it seeded took the record with the copy
-    if (!existsSync(record)) throw new VibeError("it was stopped while it started")
-    deps.copyData(join(path, DATA))
+    still()
+    deps.copyData(dataDir(), join(path, DATA))
     if (existsSync(envFile) && !existsSync(saved)) renameSync(envFile, saved)
     wrote = true
     writeFileSync(
@@ -375,20 +395,23 @@ export async function startVibe(path: string, deps: Deps = DEPS): Promise<Seeded
       vibeEnv(readFileSync(join(path, ".env.example"), "utf8"), url, deps.secret()),
       { mode: 0o600 },
     )
-    writeRecord(path, { container: copy, env: true, started: new Date().toISOString() })
+    writeRecord(path, { container: copy, env: true, id, started: new Date().toISOString() })
     deps.launch(path, join(path, LOG), join(path, DATA))
     return { bytes: seeded.bytes, ms: Date.now() - started }
   } catch (error) {
-    await deps.docker(["rm", "-fv", copy])
-    rmSync(record, { force: true })
-    rmSync(join(path, DATA), { force: true, recursive: true })
-    if (wrote) restoreEnv(path)
+    // a Stop already took this Start's copy and record, and a later Start's are its own
+    if (owns()) {
+      await deps.docker(["rm", "-fv", copy])
+      rmSync(record, { force: true })
+      rmSync(join(path, DATA), { force: true, recursive: true })
+      if (wrote) restoreEnv(path)
+    }
     throw error instanceof VibeError ? error : new VibeError(String(error))
   }
 }
 
-// The record: the copy's container, and whether Start has put its .env in place yet, so a Stop while it seeds leaves the worktree's own .env alone.
-type VibeRecord = { container: string; env: boolean; started: string }
+// The record: the copy's container, whether Start has put its .env in place yet, so a Stop while it seeds leaves the worktree's own .env alone, and the id of the Start that wrote it.
+type VibeRecord = { container: string; env: boolean; id: string; started: string }
 const writeRecord = (path: string, record: VibeRecord) =>
   writeFileSync(join(path, VIBE_RECORD), `${JSON.stringify(record)}\n`)
 
@@ -399,14 +422,15 @@ const restoreEnv = (path: string) => {
   else rmSync(join(path, ".env"), { force: true })
 }
 
-const readVibe = (path: string): { container: string; env: boolean } | null => {
+const readVibe = (path: string): { container: string; env: boolean; id: unknown } | null => {
   try {
     const record = JSON.parse(readFileSync(join(path, VIBE_RECORD), "utf8")) as {
       container?: unknown
       env?: unknown
+      id?: unknown
     }
     return typeof record.container === "string"
-      ? { container: record.container, env: record.env !== false }
+      ? { container: record.container, env: record.env !== false, id: record.id }
       : null
   } catch {
     return null
