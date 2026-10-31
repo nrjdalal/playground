@@ -120,7 +120,7 @@ export type SystemReport = {
   // How far this build is behind the branch its checkout follows, null when that cannot be read (the reason is in problems) or before the first check.
   update: Update | null
   usage: Usage | null
-  // The GLM plan's credit windows, which the sidebar shows on a dispatcher row of their own; null on a machine with no GLM plan.
+  // The GLM plan's credit windows, which the sidebar shows on a dispatcher row of their own; null while usage.accounts holds no GLM row or no file was read.
   zai: ZaiUsage | null
 }
 
