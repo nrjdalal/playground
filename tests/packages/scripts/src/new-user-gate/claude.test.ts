@@ -13,6 +13,7 @@ import {
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
+import { kindOfName } from "../../../../../packages/config/src/kinds"
 import {
   launchOf,
   screenOf,
@@ -91,12 +92,16 @@ describe("stepOf", () => {
     ])
   })
 
+  test("the builder names its worker so spawn.sh reads its kind from the name", () => {
+    expect(kindOfName(stepOf("lead", { ...at, typed: false })![3]!)).toBe("worker")
+  })
+
   test("the builder starts a worker on the handed task, and the worker opens its PR", () => {
     expect(stepOf("lead", { ...at, typed: false })).toEqual([
       "bash",
       "/r/scripts/spawn.sh",
       "worker",
-      "gate-worker",
+      "g8tw7k-worker",
       "handoffs/gate-task.md",
       "--title",
       "the routed task",

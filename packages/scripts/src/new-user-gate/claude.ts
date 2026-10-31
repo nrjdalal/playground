@@ -56,6 +56,9 @@ export const typedOf = (held: string, keys: string): { held: string; sent: strin
 // The task the dispatcher hands on, a brief under the data folder (spawn.sh takes a brief's path from there).
 const TASK = "handoffs/gate-task.md"
 
+// The worker the builder starts, an `<id>-worker` name spawn.sh reads the kind from; one fixed id serves, since every box is a fresh HOME no session has used.
+const WORKER = "g8tw7k-worker"
+
 // Pure: the one step a session takes in the routed task, by the role spawn.sh started it as, or null when that role waits; a dispatcher acts on a typed message alone, the rest on their start.
 export const stepOf = (
   role: string,
@@ -68,7 +71,7 @@ export const stepOf = (
       "bash",
       join(repo, "scripts", "spawn.sh"),
       "worker",
-      "gate-worker",
+      WORKER,
       TASK,
       "--title",
       "the routed task",
