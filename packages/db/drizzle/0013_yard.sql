@@ -79,6 +79,7 @@ ALTER TABLE "yard_message" ADD CONSTRAINT "yard_message_channel_id_yard_channel_
 ALTER TABLE "yard_message" ADD CONSTRAINT "yard_message_parent_id_yard_message_id_fk" FOREIGN KEY ("parent_id") REFERENCES "public"."yard_message"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "yard_message" ADD CONSTRAINT "yard_message_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "yard_token" ADD CONSTRAINT "yard_token_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+CREATE INDEX "yard_invite_requested_by_idx" ON "yard_invite" USING btree ("requested_by");--> statement-breakpoint
 CREATE INDEX "yard_member_user_idx" ON "yard_member" USING btree ("user_id");--> statement-breakpoint
 CREATE INDEX "yard_message_channel_status_at_idx" ON "yard_message" USING btree ("channel_id","status","at");--> statement-breakpoint
 CREATE INDEX "yard_message_parent_idx" ON "yard_message" USING btree ("parent_id");--> statement-breakpoint

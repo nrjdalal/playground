@@ -44,7 +44,10 @@ export const yardInvite = pgTable(
     requestedBy: text("requested_by").references(() => user.id, { onDelete: "cascade" }),
     status: text("status", { enum: INVITE_STATUSES }).notNull(),
   },
-  (table) => [oneOf("yard_invite_status_check", "status", INVITE_STATUSES)],
+  (table) => [
+    index("yard_invite_requested_by_idx").on(table.requestedBy),
+    oneOf("yard_invite_status_check", "status", INVITE_STATUSES),
+  ],
 )
 
 // A named channel, or a DM named dm:<user id>:<user id> with the two ids sorted, so both sides open the same one; post_rule owner lets only the owner rung post (#releases).
