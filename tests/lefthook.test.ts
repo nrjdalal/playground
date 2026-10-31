@@ -235,7 +235,7 @@ test("the pre-commit env-keys step runs before the build and stops it on a short
   }
   const { build, "dev-stack": devStack, "env-keys": envKeys } = config["pre-commit"].commands
   expect(envKeys).toBeDefined()
-  expect(String(envKeys!.run)).toEndWith("bun packages/scripts/src/env-keys.ts")
+  expect(String(envKeys!.run)).toEndWith("bun packages/scripts/src/env-keys.ts POSTGRES_URL")
   // after the dev-stack guard, since its own build of @packages/env would rebuild dist under a running stack
   expect(envKeys!.priority as number).toBeGreaterThan(devStack!.priority as number)
   expect(envKeys!.exclude).toEqual(build!.exclude)

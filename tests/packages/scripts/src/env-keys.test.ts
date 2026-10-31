@@ -4,9 +4,14 @@ import { join } from "node:path"
 const ROOT = join(import.meta.dir, "../../../..")
 
 // A shell value forced empty stays empty over any .env, so the gap holds wherever the suite runs.
-const envKeys = (extra: Record<string, string>) =>
+const envKeys = (extra: Record<string, string>, optional: string[] = []) =>
   Bun.spawnSync(
-    [process.execPath, "--no-env-file", join(ROOT, "packages/scripts/src/env-keys.ts")],
+    [
+      process.execPath,
+      "--no-env-file",
+      join(ROOT, "packages/scripts/src/env-keys.ts"),
+      ...optional,
+    ],
     {
       cwd: ROOT,
       env: {
@@ -36,12 +41,16 @@ test("names NODE_ENV under SKIP_ENV_VALIDATION alone, as the apps' own validatio
   expect(run.exitCode).toBe(1)
 })
 
-test("accepts POSTGRES_URL left empty, as first run's setup serves with it empty", () => {
-  const run = envKeys({
-    BETTER_AUTH_SECRET: "a".repeat(64),
-    NODE_ENV: "development",
-    POSTGRES_URL: "",
-  })
+const FIRST_RUN = { BETTER_AUTH_SECRET: "a".repeat(64), NODE_ENV: "development", POSTGRES_URL: "" }
+
+test("accepts POSTGRES_URL left empty when named, as pre-commit names it for first run's setup", () => {
+  const run = envKeys(FIRST_RUN, ["POSTGRES_URL"])
   expect(run.stderr.toString()).not.toContain("POSTGRES_URL")
   expect(run.exitCode).toBe(0)
+})
+
+test("still refuses POSTGRES_URL left empty when not named, as `bun run test` runs it", () => {
+  const run = envKeys(FIRST_RUN)
+  expect(run.stderr.toString()).toContain("POSTGRES_URL")
+  expect(run.exitCode).toBe(1)
 })
