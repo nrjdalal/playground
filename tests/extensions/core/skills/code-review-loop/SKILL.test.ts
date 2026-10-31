@@ -20,6 +20,19 @@ describe("code-review-loop keeps its reviewer for the merge (#1067)", () => {
     expect(await page()).toContain("on a local merge with canary")
   })
 
+  test("green CI at the head stands in for the local touched-tests run while canary changed none of the PR's files (PG-124)", async () => {
+    const last = (await skill()).split("## The last 5/5")[1]?.split("\n## ")[0] ?? ""
+    const stand = last.split("**CI stands in**")[1]?.split("\n")[0] ?? ""
+    expect(stand).toContain("head sha equal to `<head>`")
+    expect(stand).toContain("`HEAD is now at <merge> Merge <head> into <base>`")
+    expect(stand).toContain("`git -C <clone> diff --name-only <base> origin/canary`")
+    expect(stand).toContain("`touched tests: PR CI green at <sha7> on canary <base7>: <run link>`")
+    expect(stand).toContain("the local run stays as written")
+    expect(await page()).toContain(
+      "cites that run's link in place of a local run of the touched tests",
+    )
+  })
+
   test("a PR that adds or changes a repo scanner gets the local merge whatever canary changed (#1959)", async () => {
     const last = (await skill()).split("## The last 5/5")[1]?.split("\n## ")[0] ?? ""
     expect(last).toContain(
