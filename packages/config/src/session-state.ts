@@ -6,7 +6,7 @@ export const SESSION_STATES = ["failed", "idle", "stuck", "usage-limit", "workin
 
 export type SessionStateName = (typeof SESSION_STATES)[number]
 
-// agentId: the subagent whose prompt it is, when a subagent asked. reason: why a session is stuck (permission, question, plan, elicitation, login) or failed (StopFailure's error). resetsAt: when a usage limit lifts, when the hook could read it. tool: the tool a permission prompt asks about.
+// agentId: the subagent whose prompt it is, when a subagent asked. reason: why a session is stuck (permission, question, plan, elicitation, login) or failed (StopFailure's error, or balance for Z.ai's empty balance, its 429 [1113]). resetsAt: when a usage limit lifts, when the hook could read it. tool: the tool a permission prompt asks about.
 export const sessionStateSchema = z.object({
   agentId: z.string().min(1).optional(),
   at: z.iso.datetime(),
