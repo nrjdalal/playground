@@ -32,15 +32,72 @@ export const loadable = (address: string, apiUrl: string): boolean => {
   }
 }
 
-// Pure: the address the Preview frame opens on: the one kept for this browser while it is loadable, else the first stack's root, else none.
+// Pure: the address the Preview frame opens on: the one kept for this browser while it is loadable, else the first running stack's root, else none.
 export const startAddress = (
   kept: string | null,
-  stacks: readonly { url: string }[],
+  stacks: readonly { url: string | null }[],
   apiUrl: string,
 ): string => {
   if (kept && loadable(kept, apiUrl)) return kept
-  const first = stacks[0]
-  return first ? `${first.url}/` : ""
+  const first = stacks.find((stack) => stack.url)?.url
+  return first ? `${first}/` : ""
+}
+
+// Pure: the picker's stacks, one group a project in the list's order (by project, then branch), each running one its URL and a stopped one disabled, labelled by its branch, else its name, and the session working in it.
+export const stackGroups = (
+  stacks: readonly {
+    branch: string | null
+    name: string
+    path: string | null
+    project: string
+    session: string | null
+    url: string | null
+  }[],
+) => {
+  const groups = new Map<string, { disabled: boolean; label: string; value: string }[]>()
+  for (const stack of stacks) {
+    const label = [stack.branch ?? stack.name, stack.session, !stack.url && "stopped"]
+      .filter(Boolean)
+      .join(" · ")
+    const items = groups.get(stack.project) ?? []
+    items.push({ disabled: !stack.url, label, value: stack.url ?? `stopped:${stack.path}` })
+    groups.set(stack.project, items)
+  }
+  return [...groups].map(([project, items]) => ({ items, project }))
+}
+
+// The brand's click opens the Inbox's Preview row: the aside turns to the Inbox, and the Inbox, now or once it mounts, opens the row; a click that moves the page also asks the aside, once, for the Inbox at the first address past the one it left, after the move resets its tab.
+export const OPEN_PREVIEW = "dashboard:open-preview"
+let previewWanted = false
+let previewFrom: string | null = null
+export const openPreview = (from: string | null): void => {
+  previewWanted = true
+  previewFrom = from
+  window.dispatchEvent(new Event(OPEN_PREVIEW))
+}
+export const takePreview = (): boolean => {
+  const wanted = previewWanted
+  previewWanted = false
+  return wanted
+}
+export const takeMove = (at: string): boolean => {
+  if (previewFrom === null || at === previewFrom) return false
+  previewFrom = null
+  return true
+}
+
+// Pure: what the brand's click does: a plain click opens the row, leaving the address it is at (from) unless it is already at the link's own address; a modified or other-button click opens a tab, so it opens nothing here (null).
+export const previewClick = (
+  click: { altKey: boolean; button: number; ctrlKey: boolean; metaKey: boolean; shiftKey: boolean },
+  href: string,
+  at: { pathname: string; search: string },
+): { from: string | null } | null => {
+  if (click.button !== 0 || click.altKey || click.ctrlKey || click.metaKey || click.shiftKey) {
+    return null
+  }
+  const search = new URLSearchParams(at.search).toString()
+  const from = `${at.pathname}${search ? `?${search}` : ""}`
+  return { from: from === href ? null : from }
 }
 
 // Pure: each topic once, in the order its newest preview comes (the list is newest first), with how many previews it holds.

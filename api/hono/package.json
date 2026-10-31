@@ -14,6 +14,8 @@
     "check-types": "tsc --noEmit",
     "dev": "portless",
     "dev:app": "concurrently \"tsdown --watch\" \"bun ../../.github/scripts/portless.ts bun --hot src/main.ts\"",
+    "serve": "portless --script serve:app",
+    "serve:app": "bun ../../.github/scripts/portless.ts bun --no-install src/main.ts",
     "start": "bun --no-install bundle/index.mjs"
   },
   "dependencies": {

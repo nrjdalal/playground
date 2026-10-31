@@ -276,7 +276,7 @@ describe("chaseStale", () => {
 })
 
 describe("opsDown", () => {
-  test("names a job whose script is not running, a failing beat, a stale one and an unreadable one", async () => {
+  test("names a job whose script is not running, a failing beat, a stale one and an unreadable one, never a waiting one", async () => {
     const { ctx, ops } = setup({
       "ps -ax": { out: "" },
     })
@@ -305,6 +305,12 @@ describe("opsDown", () => {
       job: "ops-off",
       lastBeatAt: at(9999),
       lastResult: "x",
+    })
+    write(join(ops, "ops-wait.json"), {
+      cycleSeconds: 60,
+      job: "ops-wait",
+      lastBeatAt: at(30),
+      lastResult: "waiting: nothing to read yet",
     })
     writeFileSync(join(ops, "ops-torn.json"), "{")
     expect((await opsDown(ctx)).sort()).toEqual([

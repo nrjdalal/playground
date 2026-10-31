@@ -270,6 +270,17 @@ export const fixtureSchema = z.object({
     .optional(),
   // The owner's made-up open pull requests in the work org, as the work queue's search answers them (lib/dashboard/work-queue.ts); a stack shows them once WORK_GITHUB_ORG is set.
   work: z.array(json).optional(),
+  // The made-up worktrees the Inbox's Preview row lists (lib/dashboard/stacks.ts), each its stack's URL while it runs, `$WEB` naming this stack's own web URL so its link opens in a tab, else null.
+  worktrees: z
+    .array(
+      z.object({
+        branch: z.string().nullable(),
+        path: z.string().min(1),
+        project: z.string().min(1),
+        url: z.string().nullable(),
+      }),
+    )
+    .optional(),
 })
 
 export type Fixture = z.infer<typeof fixtureSchema>
@@ -420,6 +431,7 @@ export function writeFixture(fixture: Fixture, dir: string, now = new Date()): v
     threads: at(fixture.threads ?? []),
     update: at(fixture.update ?? null),
     work: at(fixture.work ?? []),
+    worktrees: fixture.worktrees ?? [],
   })
   writeEntry(join(fresh, STAMP), { writtenAt: now.toISOString() })
   const old = `${target}.old-${process.pid}`
@@ -480,6 +492,7 @@ export type FixtureMachine = {
   threads?: NonNullable<Fixture["threads"]>
   update?: Fixture["update"] | null
   work?: NonNullable<Fixture["work"]>
+  worktrees?: NonNullable<Fixture["worktrees"]>
 }
 
 const readJson = <T>(path: string): T => JSON.parse(readFileSync(path, "utf8")) as T
