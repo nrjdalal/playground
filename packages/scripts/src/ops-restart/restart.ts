@@ -76,7 +76,8 @@ export const sourceOf = (checkout: string, file: string): string[] => {
     if (!/\.tsx?$/.test(path)) return
     for (const { path: spec } of new Bun.Transpiler({
       loader: path.endsWith(".tsx") ? "tsx" : "ts",
-    }).scanImports(text)) {
+      // Bun's scan throws on a leading shebang line, so that line goes first
+    }).scanImports(text.replace(/^#!.*/, ""))) {
       const ws = spec.match(/^@packages\/([^/]+)/)
       if (ws) pkg(ws[1]!)
       else if (spec.startsWith(".")) {

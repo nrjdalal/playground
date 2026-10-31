@@ -186,6 +186,17 @@ describe("restart", () => {
     ])
   })
 
+  test("an entry that starts with a shebang is still scanned for its imports", async () => {
+    const w = world(["packages/scripts/src/write-atomic.ts"])
+    put(
+      w.co,
+      "packages/scripts/src/ops-sweep/cli.ts",
+      '#!/usr/bin/env bun\nimport { writeAtomic } from "../write-atomic"\nwriteAtomic()\n',
+    )
+    await w.pass()
+    expect(w.kills()).toEqual(["kill -TERM 101"])
+  })
+
   test("a move changing nothing a job runs restarts none", async () => {
     const w = world([
       "README.md",
