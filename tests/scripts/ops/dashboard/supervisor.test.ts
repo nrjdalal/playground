@@ -867,7 +867,7 @@ const keptCalls = join(kept, "calls")
 const builds = join(kept, "builds")
 const WEB = "https://playground.localhost"
 const API = "https://api.playground.localhost"
-// bun stands in for bun run build (writing next's standalone server and its static files, or failing for a head build-fails lists) and for the stack's start, recording which build it serves; check_dev waits for that start and fails for a head verify-fails lists
+// bun stands in for bun run build (writing next's standalone server and its static files, or failing for a head build-fails lists) and for the stack's start, recording which build it serves; check_dev waits for that start by its pid file and fails for a head verify-fails lists, never by a bare wait, which inside roll_up's $(check_dev) waits on a job that is not its child and looped without end on GitHub's runner
 const keptStubs = `S=${kept} WT=${wt} OPS=${scratch}/ops BAD=${kept}/bad-builds LOG=${kept}/supervisor.log DEVLOG=${kept}/dev.log
 say() { echo "say $*" >> ${keptCalls}; }; result() { echo "result $*" >> ${keptCalls}; }; stop_all() { :; }; tell_dispatcher() { :; }
 dashboard_urls() { WEB=${WEB}; API=${API}; }
@@ -883,7 +883,7 @@ bun() {
     "run dev") echo "dev" >> ${keptCalls} ;;
   esac
 }
-check_dev() { wait; listed verify-fails && { echo "verify=FAIL"; return 1; }; echo "verify=PASS"; }
+check_dev() { local p i; p=$(cat "$S/dashboard-dev.pid"); for i in $(seq 1 100); do kill -0 "$p" 2>/dev/null || break; sleep 0.05; done; listed verify-fails && { echo "verify=FAIL"; return 1; }; echo "verify=PASS"; }
 start_follower() { :; }; check_follower() { echo "follower=running"; }; setup_pending() { return 1; }
 ${fn("behind")}
 ${block("dev_reason")}
@@ -914,7 +914,6 @@ const fresh = () => {
 }
 const short = (sha: string) => sha.slice(0, 7)
 
-// Each roll_up case takes 15s: past bun's 5s default, bun stops the case's bash with SIGTERM, and the Audit job's load read that as roll_up exiting 143
 describe("the supervisor's production build", () => {
   test("a start builds the head into its own folder and serves that build, never dev", async () => {
     fresh()
@@ -928,13 +927,13 @@ describe("the supervisor's production build", () => {
     expect(await keptLines(/^result /)).toEqual([
       `result START ${short(c2)} PASS verify=PASS follower=running`,
     ])
-  }, 15_000)
+  })
 
   test("a build reads the Dashboard's URLs and needs no server secret, since a first run's .env holds none yet", async () => {
     fresh()
     expect((await keptRun("roll_up START", c2)).code).toBe(0)
     expect(await keptLines(/^envs /)).toEqual([`envs ${API} ${WEB} ${API} ${WEB} production true`])
-  }, 15_000)
+  })
 
   test("a failed build fails the roll, lists the head in bad-builds and serves the head before's kept build, building nothing more", async () => {
     fresh()
@@ -949,7 +948,7 @@ describe("the supervisor's production build", () => {
       `result FALLBACK ${short(c1)} PASS verify=PASS follower=running`,
     ])
     expect(await Bun.file(join(kept, "bad-builds")).text()).toBe(`${c2}\n`)
-  }, 15_000)
+  })
 
   test("a verify that fails after a roll falls back to the head before's kept build without building it again", async () => {
     fresh()
@@ -966,7 +965,7 @@ describe("the supervisor's production build", () => {
       `result ROLL canary ${short(c2)} FAIL verify=FAIL follower=running`,
       `result FALLBACK ${short(c1)} PASS verify=PASS follower=running`,
     ])
-  }, 15_000)
+  })
 
   test("a kept build made for other URLs is built again, with one line naming both, since next bakes them into its client", async () => {
     fresh()
@@ -981,7 +980,7 @@ describe("the supervisor's production build", () => {
       `say rebuilding ${short(c1)}: its build was for http://playground.localhost:1355 http://api.playground.localhost:1355, the Dashboard is now on ${WEB} ${API}`,
     ])
     expect(await keptLines(/^(build|serve)/)).toEqual([`build ${short(c1)}`, `serve ${c1}`])
-  }, 15_000)
+  })
 
   test("a pass keeps its own build and the last one that passed before it, and removes the rest", async () => {
     fresh()
