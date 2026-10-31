@@ -1,23 +1,29 @@
-import { describe, expect, test } from "bun:test"
+import { afterAll, describe, expect, test } from "bun:test"
+import { mkdtempSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { send } from "../../../../../packages/scripts/src/dm/send"
-import { ownerMessages, PLAYGROUND, USER } from "../../../../../packages/scripts/src/dm/slack"
+import {
+  ownerMessages,
+  PLAYGROUND,
+  readSent,
+  USER,
+} from "../../../../../packages/scripts/src/dm/slack"
 import { DM, fakeDm, OWNER } from "./fake-dm"
 
+const dirs: string[] = []
+afterAll(() => {
+  for (const dir of dirs) rmSync(dir, { force: true, recursive: true })
+})
 const pass = async () => undefined
-let recorded: string[] = []
-const io = (slack: ReturnType<typeof fakeDm>["slack"], body = "the body") => {
-  recorded = []
-  return {
-    body,
-    channel: DM,
-    leak: pass,
-    owner: OWNER,
-    record: async (ts: string) => recorded.push(ts),
-    slack,
-  }
+// each send's data folder, a scratch one, where its record and lock live
+const io = (slack: ReturnType<typeof fakeDm>["slack"], body = "the body", into?: string) => {
+  const dir = into ?? mkdtempSync(join(tmpdir(), "dm-send-"))
+  dirs.push(dir)
+  return { body, channel: DM, dir, leak: pass, owner: OWNER, slack }
 }
+const recorded = async (dir: string) => [...(await readSent(dir))]
 const marks = (dm: ReturnType<typeof fakeDm>) =>
   dm.calls.filter((c) => c.method === "conversations.mark").map((c) => c.params.ts)
 const edits = (dm: ReturnType<typeof fakeDm>) => dm.calls.filter((c) => c.method === "chat.update")
@@ -62,7 +68,8 @@ describe("dm send", () => {
         dm.add("wait, one more thing")
       }
     })
-    await send(io(dm.slack))
+    const repaired = io(dm.slack)
+    await send(repaired)
     expect(dm.texts()).toEqual([
       "status?",
       PLAYGROUND,
@@ -70,10 +77,9 @@ describe("dm send", () => {
       "wait, one more thing",
       PLAYGROUND,
     ])
-    expect(ownerMessages(dm.messages, OWNER, new Set(recorded)).map((m) => m.text)).toEqual([
-      "status?",
-      "wait, one more thing",
-    ])
+    expect(
+      ownerMessages(dm.messages, OWNER, await readSent(repaired.dir)).map((m) => m.text),
+    ).toEqual(["status?", "wait, one more thing"])
     const next = fakeDm(dm.messages.map((m) => ({ ...m })))
     await send(io(next.slack, "the answer"))
     expect(next.texts().slice(3)).toEqual(["wait, one more thing", PLAYGROUND, "the answer", USER])
@@ -81,12 +87,9 @@ describe("dm send", () => {
 
   test("a body no-playground-leak refuses posts nothing and names the refusal", async () => {
     const dm = fakeDm([{ text: "hi", ts: "1000.000100", user: OWNER }])
-    const refused = send({
-      ...io(dm.slack),
-      leak: async () => "no-playground-leak hook refused it",
-    })
-    expect(refused).rejects.toThrow("no-playground-leak hook refused it")
-    await refused.catch(() => {})
+    await expect(
+      send({ ...io(dm.slack), leak: async () => "no-playground-leak hook refused it" }),
+    ).rejects.toThrow("no-playground-leak hook refused it")
     expect(dm.calls).toEqual([])
   })
 })
@@ -96,8 +99,9 @@ describe("dm send's record", () => {
     const dm = fakeDm([{ text: "hi", ts: "1000.000100", user: OWNER }], (text) => {
       if (text === USER) throw new Error("ratelimited")
     })
-    await expect(send(io(dm.slack))).rejects.toThrow("ratelimited")
-    expect(recorded).toEqual([dm.messages[1]!.ts, dm.messages[2]!.ts])
+    const failed = io(dm.slack)
+    await expect(send(failed)).rejects.toThrow("ratelimited")
+    expect(await recorded(failed.dir)).toEqual([dm.messages[1]!.ts, dm.messages[2]!.ts])
     expect(dm.texts()).toEqual(["hi", PLAYGROUND, "the body"])
   })
 
@@ -106,8 +110,27 @@ describe("dm send's record", () => {
       { text: "hi", ts: "1000.000100", user: OWNER },
       { text: USER, ts: "1001.000100", user: OWNER },
     ])
-    await send(io(dm.slack))
-    expect(recorded).toEqual(["1001.000100", dm.messages[2]!.ts, dm.messages[3]!.ts])
+    const reused = io(dm.slack)
+    await send(reused)
+    expect(await recorded(reused.dir)).toEqual([
+      "1001.000100",
+      dm.messages[2]!.ts,
+      dm.messages[3]!.ts,
+    ])
+  })
+})
+
+describe("two sends at once", () => {
+  test("the second waits for the first, so the frames stay whole, nothing is repaired and every post is recorded", async () => {
+    const dm = fakeDm([{ text: "hi", ts: "1000.000100", user: OWNER }])
+    const first = io(dm.slack, "one")
+    await Promise.all([send(first), send(io(dm.slack, "two", first.dir))])
+    // either may take the lock first, so the bodies' order is open and the frame's is not
+    const [a, b] = [dm.texts()[2], dm.texts()[4]].sort()
+    expect(dm.texts()).toEqual(["hi", PLAYGROUND, dm.texts()[2], PLAYGROUND, dm.texts()[4], USER])
+    expect([a, b]).toEqual(["one", "two"])
+    expect(edits(dm).map((c) => c.params.text)).toEqual([PLAYGROUND])
+    expect(await recorded(first.dir)).toEqual(dm.messages.slice(1).map((m) => m.ts))
   })
 })
 

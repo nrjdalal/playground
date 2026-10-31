@@ -5,7 +5,7 @@ import { parseSessionState, sessionStateDir, stateNow } from "@packages/config/s
 import { configDirOf, dataDirOf } from "@packages/env/data-dir"
 import { readPolicy, slackSettings } from "@packages/settings"
 
-import { history, ownerMessages, readSent, type Slack, slackOf } from "../dm/slack"
+import { history, ownerMessages, PLAYGROUND, readSent, type Slack, slackOf } from "../dm/slack"
 import { sendAs } from "../ops-job/job"
 import { liveSessions, newestTurnAt, transcriptTail } from "../ops-session-resume/resume"
 import { writeAtomic } from "../write-atomic"
@@ -33,7 +33,7 @@ type Io = {
 
 const reply = "Answer through playground dm send <file>."
 
-// One pass: each new owner message to the dispatcher in full; one with no reply (a post of ours after it) in 3 minutes, or any while the dispatcher has read stuck or failed for 3 minutes, to Bravo as well, and Ops told of the stuck dispatcher once per record.
+// One pass: each new owner message to the dispatcher in full; one with no reply (a post of ours after it, other than the lone PLAYGROUND line a mid-send repair leaves) in 3 minutes, or any while the dispatcher has read stuck or failed for 3 minutes, to Bravo as well, and Ops told of the stuck dispatcher once per record.
 export async function watch({ channel, dir, now, owner, send, slack, stuck, tellOps }: Io) {
   const path = join(dir, STATE)
   await mkdir(dir, { recursive: true })
@@ -51,7 +51,8 @@ export async function watch({ channel, dir, now, owner, send, slack, stuck, tell
     state.handed.push({ at: now, text: m.text ?? "", ts: m.ts })
   }
   const blocked = await stuck()
-  const replied = (ts: string) => read.some((m) => sent.has(m.ts) && Number(m.ts) > Number(ts))
+  const replied = (ts: string) =>
+    read.some((m) => sent.has(m.ts) && m.text !== PLAYGROUND && Number(m.ts) > Number(ts))
   let toBravo = false
   for (const h of state.handed) {
     if (h.bravo || replied(h.ts) || (now - h.at < WAIT_S && !blocked)) continue

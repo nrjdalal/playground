@@ -1,3 +1,4 @@
+import { mkdir, rm, stat } from "node:fs/promises"
 import { join } from "node:path"
 
 import { writeAtomic } from "../write-atomic"
@@ -47,6 +48,34 @@ export const readSent = async (dir: string): Promise<Set<string>> =>
   )
 export const recordSent = async (dir: string, ts: string) =>
   writeAtomic(join(dir, SENT), JSON.stringify([...(await readSent(dir)), ts].slice(-KEEP)))
+
+// One dm send at a time per data folder, so two never interleave their frames or lose a record: a lock folder taken by mkdir and held for the whole send; one older than LOCK_STALE_MS is a dead send's and is taken over.
+const LOCK_STALE_MS = 120_000
+export async function locked<T>(dir: string, fn: () => Promise<T>): Promise<T> {
+  const path = join(dir, "dm-send.lock")
+  await mkdir(dir, { recursive: true })
+  const until = Date.now() + LOCK_STALE_MS + 30_000
+  for (;;) {
+    try {
+      await mkdir(path)
+      break
+    } catch (error) {
+      if ((error as { code?: string }).code !== "EEXIST") throw error
+      const since = await stat(path).then(
+        (s) => Date.now() - s.mtimeMs,
+        () => 0,
+      )
+      if (since > LOCK_STALE_MS) await rm(path, { force: true, recursive: true })
+      else if (Date.now() > until) throw new Error("another dm send holds its lock")
+      else await Bun.sleep(100)
+    }
+  }
+  try {
+    return await fn()
+  } finally {
+    await rm(path, { force: true, recursive: true })
+  }
+}
 
 // Pure, over messages oldest first: the owner's own messages, each one dm send did not post and neither frame line.
 export const ownerMessages = (messages: Message[], owner: string, sent: Set<string>) =>

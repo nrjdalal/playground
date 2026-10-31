@@ -6,7 +6,9 @@ import {
   call,
   history,
   type Message,
+  locked,
   PLAYGROUND,
+  readSent,
   recordSent,
   type Slack,
   slackOf,
@@ -16,19 +18,24 @@ import {
 type Io = {
   body: string
   channel: string
+  dir: string
   leak: (body: string) => Promise<string | undefined>
   owner: string
-  record: (ts: string) => Promise<unknown>
   slack: Slack
 }
 
 const ours = (m: Message | undefined, owner: string, text: string) =>
   m?.user === owner && !m.subtype && m.text === text
 
-// One reply to the owner in three posts, one at a time so they land in order: the PLAYGROUND line, the body, the USER line. It refuses a body no-playground-leak refuses, posting nothing.
-export async function send({ body, channel, leak, owner, record, slack }: Io): Promise<string> {
+// One reply to the owner in three posts, one at a time so they land in order: the PLAYGROUND line, the body, the USER line. It refuses a body no-playground-leak refuses, posting nothing, and holds the data folder's send lock throughout, so two sends never interleave.
+export async function send({ body, channel, dir, leak, owner, slack }: Io): Promise<string> {
   const refusal = await leak(body)
   if (refusal) throw new Error(refusal)
+  return locked(dir, () => frame({ body, channel, dir, owner, slack }))
+}
+
+async function frame({ body, channel, dir, owner, slack }: Omit<Io, "leak">): Promise<string> {
+  const record = (ts: string) => recordSent(dir, ts)
   // each post is recorded as it lands, so a send that fails partway leaves the watch the record of what it did post
   const post = async (text: string) => {
     const { ts } = await call(slack, "chat.postMessage", { channel, text })
@@ -55,7 +62,8 @@ export async function send({ body, channel, leak, owner, record, slack }: Io): P
     latest: userTs,
     oldest: bodyTs,
   })
-  if (between.some((m) => m.user === owner && !m.subtype)) {
+  const sent = await readSent(dir)
+  if (between.some((m) => m.user === owner && !m.subtype && !sent.has(m.ts))) {
     await call(slack, "chat.update", { channel, text: `${body}\n${USER}`, ts: bodyTs })
     await call(slack, "chat.update", { channel, text: PLAYGROUND, ts: userTs })
   }
@@ -83,13 +91,12 @@ const main = async () => {
   const channel = slackSettings.get(policy.settings, "slack.dmChannel")
   const owner = slackSettings.get(policy.settings, "slack.dmOwner")
   if (!channel || !owner) throw new Error("slack.dmChannel and slack.dmOwner must both be set")
-  const dir = dataDirOf(process.env)
   const ts = await send({
     body: (await Bun.file(file).text()).trimEnd(),
     channel,
+    dir: dataDirOf(process.env),
     leak: leakOf(channel),
     owner,
-    record: (at) => recordSent(dir, at),
     slack: slackOf(token),
   })
   console.log(`dm send: posted, body at ${ts}`)

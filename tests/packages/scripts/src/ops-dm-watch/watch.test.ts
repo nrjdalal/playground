@@ -69,9 +69,22 @@ describe("the DM watch", () => {
     const answered = fakeDm([{ text: "quick one", ts: "1000.000100", user: OWNER }])
     const a = harness(answered)
     await a.pass(1010)
-    await a.ours(PLAYGROUND)
+    await a.ours("our answer")
     await a.pass(1250)
     expect(a.sent.map((s) => s.to)).toEqual(["dispatcher"])
+  })
+
+  test("the lone PLAYGROUND line a mid-send repair leaves is no reply, so the owner's message still goes to dispatcher-2", async () => {
+    const dm = fakeDm([{ text: "status?", ts: "1000.000100", user: OWNER }])
+    const w = harness(dm)
+    await w.ours(PLAYGROUND)
+    await w.ours(`the body\n${USER}`)
+    dm.add("wait, one more thing")
+    await w.ours(PLAYGROUND)
+    await w.pass(1010)
+    await w.pass(1250)
+    expect(w.sent.map((s) => s.to)).toEqual(["dispatcher", "dispatcher", "dispatcher-2"])
+    expect(w.sent[2]!.text).toContain("wait, one more thing")
   })
 
   test("while the dispatcher has read stuck for 3 minutes, a new message goes to dispatcher-2 at once and Ops hears it once", async () => {
