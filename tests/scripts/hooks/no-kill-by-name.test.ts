@@ -35,6 +35,14 @@ describe("a signal sent by name or pattern is refused, with the way out", () => 
     "pid=$(pgrep -f watch); kill $pid",
     "sh -c 'pkill node'",
     'bash -c "kill \\$(pgrep -f watch)"',
+    'xargs kill <<< "$(pgrep -f watch)"',
+    "xargs kill <<< $(pgrep -f watch)",
+    "cat <(pgrep -f watch) | xargs kill",
+    "while read p; do kill $p; done < <(pgrep -f watch)",
+    "(pgrep -f watch) | xargs kill",
+    "{ pgrep -f watch; } | xargs kill",
+    "pgrep -f watch | xargs -I{} sh -c 'kill {}'",
+    "ps -ef | grep watch | awk '{print $2}' | xargs kill",
   ])("%s", async (command) => {
     const reason = await bash(command)
     expect(reason).toContain("no-kill-by-name hook refuses")
@@ -62,8 +70,18 @@ describe("a signal to a pid you hold, and a read, pass", () => {
     "echo pkill node",
     "git log --grep=pkill",
     "grep -rn killall scripts",
+    "PID=$(cat x.pid); ps -p $PID >/dev/null && kill $PID",
+    "sleep 60 & pid=$!; ps -p $pid; kill $pid",
+    "ps -o pid= -p 1234 && kill 1234",
+    "command -v pkill",
+    "pkill --help",
+    "killall -V",
   ])("%s", async (command) => {
     expect(await bash(command)).toBeUndefined()
+  })
+
+  test("a kill beside a search says to run the stop in a call of its own", async () => {
+    expect(await bash("pid=$(pgrep -f watch); kill $pid")).toContain("in a Bash call of its own")
   })
 
   test("leaves another tool alone", async () => {

@@ -135,12 +135,13 @@ Their tests are `bun run test:file tests/scripts/hooks`.
 
 ## no-kill-by-name
 
-- A factory session signals only processes it started, by their own handle (the **signal** rule): `scripts/hooks/no-kill-by-name.ts`, registered beside no-stash, refuses `pkill`, `killall` and `fuser -k`, and a `kill` fed by `pgrep`, `pidof`, `lsof`, `ps` or `fuser`, <!-- kill-check: names only -->
-  through a command substitution (`kill $(pgrep -f watch)`, or `pid=$(pgrep x); kill $pid`) or a pipe into xargs (`lsof -t -i :3000 | xargs kill`), in a chain, a pipe or `sh -c` alike, <!-- kill-check: names only -->
+- A factory session signals only processes it started, by their own handle (the **signal** rule): `scripts/hooks/no-kill-by-name.ts`, registered after no-headless-login, refuses `pkill`, `killall` and `fuser -k`, <!-- kill-check: names only -->
+  and, in a call that searches with `pgrep`, `pidof`, `lsof`, `fuser` or `ps` (but `ps -p <pid>`), a `kill` run by xargs or given a pid the hook cannot read, in a chain, a pipe, a loop, a group or `sh -c` alike,
   since a name, pattern or port matches the live dashboard and every worker's stack (31 Oct: a session ran `pkill -f` on its own watcher, and only `tests/test_kill_by_name.py`, which reads the repo's text, guarded it). <!-- kill-check: names only -->
-  Its reason gives the way out: `TaskStop` for a background task, `bun run dev:stop` for a dev stack, `kill <pid>` for a pid the session spawned and holds.
-  `kill <pid>`, `kill -<sig> <pid>`, `kill $!`, `kill %1` and `kill $(cat <pid file>)` run, and so does each selector alone (`pgrep -f x`, `lsof -i :3000`).
-  It fails open, and its tests are in `bun run test:file tests/scripts/hooks` too.
+  It reads the whole call for a search before it judges a kill, since a loop's `done < <(pgrep …)` comes after the kill it feeds, and it reads the `-I` string xargs hands a shell it starts as such a pid.
+  Its reason gives the way out: `TaskStop` for a background task, `bun run dev:stop` for a dev stack, `kill <pid>` for a pid the session spawned and holds, in a Bash call of its own when the call also searches.
+  `kill <pid>`, `kill -<sig> <pid>`, `kill $!`, `kill %1`, `kill $(cat <pid file>)` and a liveness check before it (`ps -p $PID && kill $PID`) run, and so do each search alone (`pgrep -f x`, `lsof -i :3000`), `command -v pkill` and `pkill --help`. <!-- kill-check: names only -->
+  It fails open, and its tests are in `bun run test:file tests/scripts/hooks` too; `tests/test_kill_by_name.py` skips the hook and its test, which hold the refused commands as data.
 
 ## no-playground-leak
 
