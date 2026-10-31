@@ -886,6 +886,7 @@ bun() {
       mkdir -p web/next/.next/standalone/web/next web/next/.next/static
       git rev-parse HEAD > web/next/.next/standalone/web/next/server.js ;;
     "run serve") echo "serve $(basename "\${PLAYGROUND_BUILD:-none}")" >> ${keptCalls} ;;
+    "install --frozen-lockfile") ! listed install-fails ;;
     "run dev") echo "dev" >> ${keptCalls} ;;
   esac
 }
@@ -1031,6 +1032,7 @@ describe("the supervisor's build before the stop (#122)", () => {
       "stop",
       `serve ${c2}`,
     ])
+    expect(await keptLines(/^envs /)).toEqual([`envs ${API} ${WEB} ${API} ${WEB} production true`])
     expect(await keptLines(/^result /)).toEqual([
       `result ROLL canary ${short(c2)} PASS verify=PASS follower=running`,
     ])
@@ -1065,11 +1067,31 @@ describe("the supervisor's build before the stop (#122)", () => {
     expect(worktrees()).toBe(1)
   })
 
+  test("an install that fails in the staging worktree is the machine's fault, so the roll builds after the stop and no bad-builds entry is made", async () => {
+    fresh()
+    await Bun.write(join(kept, "install-fails"), `${c2}\n`)
+    const rolled = await prebuiltRun(`running=${c1}; roll_to ${c2} canary; echo "$running"`, c1)
+    expect(rolled).toEqual({ code: 0, out: c2 })
+    expect(await keptLines(/^(build|stop|serve)/)).toEqual([
+      "stop",
+      `build ${short(c2)}`,
+      `serve ${c2}`,
+    ])
+    expect(await keptLines(/^say .*building after the stop/)).toEqual([
+      `say the staging worktree's install for ${short(c2)} failed; building after the stop`,
+    ])
+    expect(existsSync(join(kept, "bad-builds"))).toBe(false)
+    expect(existsSync(join(kept, "staging"))).toBe(false)
+    expect(worktrees()).toBe(1)
+  })
+
   test("a roll that reloads the supervisor finishes on the build made before the stop", async () => {
     fresh()
     clean()
     expect((await prebuiltRun(`running=${c0}; roll_to ${c1} canary`, c0)).code).toBe(75)
     expect(await keptLines(/^(build|stop)/)).toEqual([`build ${short(c1)}`, "stop"])
+    expect(existsSync(join(kept, "staging"))).toBe(false)
+    expect(worktrees()).toBe(1)
     expect((await keptRun(`finish_roll "ROLL canary" ${c1} ${c0} ""`, c1)).code).toBe(0)
     expect(await keptLines(/^(build|stop|serve)/)).toEqual([
       `build ${short(c1)}`,

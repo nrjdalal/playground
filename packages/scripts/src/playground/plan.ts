@@ -374,7 +374,7 @@ export const rollOutcome = (log: string[], results: string[]): RollOutcome => {
       }
   }
   if (failed !== undefined) return { phase: "going back" }
-  // the supervisor stops the Dashboard and builds the head after its roll-now line, so the roll reads as building until the head is built, or starts on a build it kept, and only then as switching
+  // the supervisor builds the head after its roll-now line, before it stops the Dashboard or, for a head that migrates, after, so the roll reads as building until the head is built, or starts on a build it kept, and only then as switching
   const rolling = log.findIndex((line) => line.includes("roll-now: rolling to"))
   const starting = log.findIndex(
     (line, at) => at > rolling && / (built \w+ in |dev started)/.test(line),

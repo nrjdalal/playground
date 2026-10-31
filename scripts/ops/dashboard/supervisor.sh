@@ -36,8 +36,7 @@ branch=$(git symbolic-ref --short HEAD 2>/dev/null)
 say() { echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) $*" >> "$LOG"; }
 result() { echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) $*" >> "$RESULTS"; say "RESULT $*"; }
 
-# The head's production build, kept in $S/builds/<sha> outside the checkout: made by bun run build when it is missing, or when it was built for other URLs, since next bakes NEXT_PUBLIC_APP_URL and NEXT_PUBLIC_API_URL into its client and auth bakes HONO_APP_URL's host; NODE_ENV and SKIP_ENV_VALIDATION_SERVER let it build before first run writes its .env, whose values the stack reads at its start; a failure prints its last error line
-# $1 is the tree it builds, the checkout by default, or prebuild's staging worktree
+# The head's production build, kept in $S/builds/<sha> outside the checkout: made by bun run build when it is missing, or when it was built for other URLs, since next bakes NEXT_PUBLIC_APP_URL and NEXT_PUBLIC_API_URL into its client and auth bakes HONO_APP_URL's host; NODE_ENV and SKIP_ENV_VALIDATION_SERVER let it build before first run writes its .env, whose values the stack reads at its start; a failure prints its last error line; $1 is the tree it builds, the checkout by default, or prebuild's staging worktree
 build_head() {
   local src=${1:-.} sha dir was started out
   sha=$(git -C "$src" rev-parse HEAD); dir=$S/builds/$sha
@@ -60,8 +59,7 @@ build_head() {
   rm -rf "$dir"; mv "$dir.tmp" "$dir"
   say "built ${sha:0:7} in $(( $(date +%s) - started ))s, $(du -sh "$dir" | cut -f1)"
 }
-# Before a roll stops anything: build the target ($1, the roll tagged $2) into $S/builds/<sha> from a detached staging worktree while the old stack serves, so build_head finds it kept after the stop
-# A target that migrates, or whose commit cannot be had here, builds after the stop as before; a build that fails lists the target in bad-builds and returns 1 with nothing stopped; the staging worktree goes either way
+# Before a roll stops anything: build the target ($1, the roll tagged $2) into $S/builds/<sha> from a detached staging worktree while the old stack serves, so build_head finds it kept after the stop; a target that migrates, whose commit cannot be had here, or whose staging worktree or install fails, builds after the stop as before; a build that fails lists the target in bad-builds and returns 1 with nothing stopped; the staging worktree goes either way
 prebuild() {
   local target=$1 tag=$2 stage=$S/staging built rc=0
   "$D/net-git.sh" fetch -q origin >> "$LOG" 2>&1
@@ -70,15 +68,18 @@ prebuild() {
   rm -rf "$stage"; git worktree prune
   git worktree add -q --detach "$stage" "$target" >> "$LOG" 2>&1 || { say "the staging worktree for ${target:0:7} failed; building after the stop"; rm -rf "$stage"; return 0; }
   # node_modules as an APFS clone of the checkout's, then an install for what the move changed and each workspace's own links; .env as the checkout's, which bun run build loads
-  { [ ! -d node_modules ] || cp -cR node_modules "$stage/"; } >> "$LOG" 2>&1
+  if ! { { [ ! -d node_modules ] || cp -cR node_modules "$stage/"; } && (cd "$stage" && bun install --frozen-lockfile --ignore-scripts); } >> "$LOG" 2>&1; then
+    say "the staging worktree's install for ${target:0:7} failed; building after the stop"
+    git worktree remove --force "$stage" >> "$LOG" 2>&1 || rm -rf "$stage"; git worktree prune
+    return 0
+  fi
   [ ! -f .env ] || cp .env "$stage/.env"
-  (cd "$stage" && bun install --frozen-lockfile --ignore-scripts) >> "$LOG" 2>&1
   say "building ${target:0:7} before the stop, from $stage"
   built=$(build_head "$stage") || rc=1
   git worktree remove --force "$stage" >> "$LOG" 2>&1 || rm -rf "$stage"; git worktree prune
   [ $rc -eq 0 ] && return 0
   echo "$target" >> "$BAD"
-  result "$tag ${target:0:7} FAIL build before the stop: $built; still serving $(git rev-parse --short HEAD)"
+  result "$tag ${target:0:7} FAIL build before the stop: ${built:-no error line; see supervisor.log}; still serving $(git rev-parse --short HEAD)"
   tell_dispatcher "Dashboard roll to ${target:0:7} FAILED its build; nothing stopped, still on $(git rev-parse --short HEAD)"
   return 1
 }
@@ -220,7 +221,7 @@ pull_to() {
   echo "$out" | grep -qx migrate && mig=migrate
   if [ "$pulled" -ne 0 ] && [ "$(git rev-parse HEAD)" != "$(git rev-parse -q --verify "$1^{commit}")" ]; then result "ANOMALY pull to ${1:0:7} failed before it moved (exit $pulled); staying on $(git rev-parse --short HEAD)"; return 1; fi
 }
-# Stop, move the checkout to $1, start, check; falls back to the head it ran before when the roll fails (never after a migration).
+# Build $1 while the old stack serves (prebuild), then stop, move the checkout to $1, start, check; falls back to the head it ran before when the roll fails (never after a migration).
 roll_to() {
   local target=$1 why=$2 prev out notes mig tag pulled
   prebuild "$target" "ROLL $why" || return 0
