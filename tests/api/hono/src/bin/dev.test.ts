@@ -436,3 +436,30 @@ describe("the launcher's signals", () => {
     expect(await proc.exited).toBe(0)
   }, 30_000)
 })
+
+// The live dashboard's supervisor serves its production build through `bun run serve`: the same launcher, which runs turbo's serve task in place of dev
+describe("the launcher's --serve", () => {
+  const dir = mkdtempSync(join(tmpdir(), "dev-serve-"))
+  const standIn = join(dir, "turbo")
+  writeFileSync(standIn, `#!/bin/sh\necho "$*" >> "${join(dir, "argv")}"\n`)
+  chmodSync(standIn, 0o755)
+  afterAll(() => rmSync(dir, { force: true, recursive: true }))
+
+  test("runs turbo's serve task for --serve, its other arguments passed on, and dev without it", async () => {
+    for (const args of [["--serve", "--dry=json"], ["--dry=json"]]) {
+      const proc = Bun.spawn(["bun", "--no-env-file", LAUNCHER, ...args], {
+        cwd: ROOT,
+        env: { ...process.env, DEV_TURBO_BIN: standIn },
+        stderr: "ignore",
+        stdin: "ignore",
+        stdout: "ignore",
+        timeout: 20_000,
+      })
+      expect(await proc.exited).toBe(0)
+    }
+    expect((await Bun.file(join(dir, "argv")).text()).trim().split("\n")).toEqual([
+      "run serve --dry=json",
+      "run dev --dry=json",
+    ])
+  }, 45_000)
+})
