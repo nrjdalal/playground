@@ -369,13 +369,12 @@ export const rollOutcome = (log: string[], results: string[]): RollOutcome => {
       }
   }
   if (failed !== undefined) return { phase: "going back" }
-  // the supervisor builds the head after its roll-now line (build_head's building and built lines), so a build of a few minutes reads as building, never as a stalled switch
+  // the supervisor stops the Dashboard and builds the head after its roll-now line, so the roll reads as building until the head is built, or starts on a build it kept, and only then as switching
   const rolling = log.findIndex((line) => line.includes("roll-now: rolling to"))
-  const building = log.findLastIndex((line) => / building \w+ for /.test(line))
-  const built = log.findLastIndex((line) => / built \w+ in /.test(line))
-  return {
-    phase: rolling >= 0 && !(building > rolling && built < building) ? "switching" : "building",
-  }
+  const starting = log.findIndex(
+    (line, at) => at > rolling && / (built \w+ in |dev started)/.test(line),
+  )
+  return { phase: rolling >= 0 && starting > rolling ? "switching" : "building" }
 }
 
 // ops-dashboard's heartbeat as read at one poll: its age, its cycle and whether its pid is alive.

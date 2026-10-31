@@ -255,13 +255,7 @@ const roll = async (): Promise<number> => {
     }
     if (outcome.phase !== shown) {
       shown = outcome.phase
-      console.log(
-        outcome.phase === "switching"
-          ? "Switching…"
-          : outcome.phase === "building"
-            ? "Building…"
-            : "Going back…",
-      )
+      console.log(outcome.phase === "switching" ? "Switching…" : "Going back…")
     }
     await pause(2000)
   }
