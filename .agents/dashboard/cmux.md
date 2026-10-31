@@ -64,7 +64,7 @@
 - ALWAYS: Run the System panel's commands only through `api/hono/src/lib/system/probe.ts`, which the dashboard's start-time read (`starts`) shares: `COMMANDS` holds each one's fixed argv (`sysctl`, `vm_stat`, `ps`, `lsof`, `docker ps`, `docker stats --no-stream`, `docker context inspect`), all reads run without a shell, and `commandOf()` lets a probe take only a whole-number uid,
   a non-empty list of whole-number pids or an absolute socket path.
   `memory_pressure` stays off the list (its `-l` simulates pressure, and `kern.memorystatus_level` is the free share it prints), and `sysctl` is never handed a `name=value`.
-  `tests/api/hono/src/lib/spawn-allowlist.test.ts` fails when a file outside the 15 it names starts a process anywhere under the api's `lib/`, so a new reading arrives as a `COMMANDS` entry.
+  `tests/api/hono/src/lib/spawn-allowlist.test.ts` fails when a file outside those it names starts a process anywhere under the api's `lib/`, so a new reading arrives as a `COMMANDS` entry.
   There are four exceptions.
   `cmuxHeld()` in `cmux.ts` runs its own `ps -axo pid=,ppid=,lstart=,comm=`, since `probe()` answers from the fixture in a process whose own source is one, as the launcher in a worktree is, and the launcher must read the live machine.
   The second is the update check the System report carries (`api/hono/src/lib/dashboard/update.ts`), whose `git fetch` of the one branch the checkout follows is not a read, so it and the `git rev-list`, `git log` and `git rev-parse` reads beside it stay out of `COMMANDS`: it runs git with no shell, a fixed argv and no argument from a request.

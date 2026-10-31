@@ -127,7 +127,7 @@ describe("stackGroups", () => {
     url,
   })
 
-  test("one group a project in the list's order, each worktree its branch and session, a stopped one disabled", () => {
+  test("one group a project in the list's order, each worktree its branch and session, a stopped one its path, to start it", () => {
     expect(
       stackGroups([
         stack("playground", "canary", "https://playground.localhost", "dispatcher"),
@@ -137,13 +137,13 @@ describe("stackGroups", () => {
     ).toEqual([
       {
         items: [
-          { disabled: false, label: "canary · dispatcher", value: "https://playground.localhost" },
-          { disabled: true, label: "feat/b · stopped", value: "stopped:/playground/feat/b" },
+          { label: "canary · dispatcher", value: "https://playground.localhost" },
+          { label: "feat/b · stopped", value: "stopped:/playground/feat/b" },
         ],
         project: "playground",
       },
       {
-        items: [{ disabled: false, label: "folder", value: "https://folder.yard.localhost" }],
+        items: [{ label: "folder", value: "https://folder.yard.localhost" }],
         project: "yard",
       },
     ])

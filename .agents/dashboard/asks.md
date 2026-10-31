@@ -41,7 +41,9 @@
   its row muted once none is unread, as an empty one is, though it still opens to its history, full again on hover or while open ("Why at 0 is it not muted like others?").
   Under Done sits the Preview row, its icon and name with no count, starting shut and there in an empty Inbox too: opened, `PreviewPane` in `web/next/src/components/dashboard/preview-pane.tsx` fills the pane below it with a frame down to the pane's bottom edge.
   Its picker lists every project's worktrees on this machine, one group a project (`GET /api/v1/stacks`, `readStacks()` in `api/hono/src/lib/dashboard/stacks.ts`): the projects are this checkout's and each live session's folder's, their worktrees read from git's own files, each labelled by its branch and the session working in it,
-  running where a portless route's process group is one its stack's record (`.turbo/dev.pgid`) names and stopped (shown, not picked) otherwise; a web stack no worktree claims lists under its app's name, and a fixture stack lists the fixture's made-up `worktrees`.
+  running where a portless route's process group is one its stack's record (`.turbo/dev.pgid`) names and stopped otherwise; a web stack no worktree claims lists under its app's name, and a fixture stack lists the fixture's made-up `worktrees`.
+  A stopped worktree picked shows Start in the frame, which starts it as a Vibeground (`POST /api/v1/stacks/start`, `startVibe()` in `api/hono/src/lib/dashboard/vibe.ts`, stack.md) and opens it once it serves, and a running Vibeground (`vibe` in the list, its `.turbo/vibe.json`) shows Stop in the bar (`POST /api/v1/stacks/stop`);
+  a fixture stack marks its made-up worktree running or stopped in the scratch copy.
   The 8 newest Previews pages follow, which load sandboxed with no script.
   A stack's link opens in a new tab with the bar's open-out button, where it works as itself on its own sign-in; the sidebar's brand opens the Inbox tab with this row open (`openPreview()` in `web/next/src/lib/previews.ts`).
   Its address field loads only a `.localhost` stack or a Previews page (`loadable()` in `web/next/src/lib/previews.ts`), and the last address is kept in localStorage.

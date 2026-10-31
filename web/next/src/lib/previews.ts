@@ -43,7 +43,10 @@ export const startAddress = (
   return first ? `${first}/` : ""
 }
 
-// Pure: the picker's stacks, one group a project in the list's order (by project, then branch), each running one its URL and a stopped one disabled, labelled by its branch, else its name, and the session working in it.
+// A stopped worktree's picker value, its path after this prefix, so picking it offers Start.
+export const STOPPED = "stopped:"
+
+// Pure: the picker's stacks, one group a project in the list's order (by project, then branch), each running one its URL and a stopped one its path after STOPPED, labelled by its branch, else its name, and the session working in it.
 export const stackGroups = (
   stacks: readonly {
     branch: string | null
@@ -54,13 +57,13 @@ export const stackGroups = (
     url: string | null
   }[],
 ) => {
-  const groups = new Map<string, { disabled: boolean; label: string; value: string }[]>()
+  const groups = new Map<string, { label: string; value: string }[]>()
   for (const stack of stacks) {
     const label = [stack.branch ?? stack.name, stack.session, !stack.url && "stopped"]
       .filter(Boolean)
       .join(" · ")
     const items = groups.get(stack.project) ?? []
-    items.push({ disabled: !stack.url, label, value: stack.url ?? `stopped:${stack.path}` })
+    items.push({ label, value: stack.url ?? `${STOPPED}${stack.path}` })
     groups.set(stack.project, items)
   }
   return [...groups].map(([project, items]) => ({ items, project }))
