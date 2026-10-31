@@ -1247,15 +1247,17 @@ export async function staleItems(
   return rows.map(toItem)
 }
 
-// Every item still open (a decision or draft not yet answered, a snoozed one and one answered in chat included), oldest first, one sender's alone when from is given: what a session reads before it posts, so it names an open item on the same thing rather than posting it twice (`bun run ask open`).
+// Every item still open (a decision or draft not yet answered, a snoozed one and one answered in chat included, until it moves to Done), oldest first, one sender's alone when from is given: what a session reads before it posts, so it names an open item on the same thing rather than posting it twice (`bun run ask open`).
 export async function openItems(db: Database, from?: string): Promise<InboxItem[]> {
   const rows = await db
     .select()
     .from(inboxItem)
     .where(
-      from === undefined
-        ? eq(inboxItem.status, "open")
-        : and(eq(inboxItem.status, "open"), eq(inboxItem.from, from)),
+      and(
+        eq(inboxItem.status, "open"),
+        sql`${inboxItem.answer} ->> 'dismissedAt' is null`,
+        from === undefined ? undefined : eq(inboxItem.from, from),
+      ),
     )
     .orderBy(inboxItem.ref)
   return rows.map(toItem)
