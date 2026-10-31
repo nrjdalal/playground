@@ -11,9 +11,9 @@
       "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/package.json"],
       "outputs": ["dist/**"]
     },
-    // web's build also writes .generated/ at the repo root, which a bare check-types:tests reads, so a cached replay restores it too
+    // web's build also writes .generated/ at the repo root, which a bare check-types:tests reads, so a cached replay restores it too; it waits for web's check-types, whose tsc reads the .next/types next build deletes and rewrites
     "@web/next#build": {
-      "dependsOn": ["^build"],
+      "dependsOn": ["^build", "check-types"],
       "outputs": [
         ".next/**",
         "!.next/cache/**",
