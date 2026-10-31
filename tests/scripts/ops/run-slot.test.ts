@@ -1425,11 +1425,6 @@ describe("a model-bound run", () => {
 
 // 31 Oct: a suite's `bun test --isolate` worker outlived its suite by 5 hours at 50% CPU, reparented to launchd once the suite's own process exited
 describe("what the command leaves in its process group", () => {
-  // the test started each loop, so it stops each by its own pid whatever run-slot did, a timed-out run's included
-  const loops: number[] = []
-  afterAll(() => {
-    for (const pid of loops) if (alive(pid)) process.kill(pid, "SIGKILL")
-  })
   const alive = (pid: number) => {
     try {
       process.kill(pid, 0)
@@ -1464,9 +1459,10 @@ describe("what the command leaves in its process group", () => {
     const out = await new Response(p.stdout).text()
     const code = await p.exited
     const pid = Number(readFileSync(pidFile, "utf8"))
-    loops.push(pid)
     // read at once after run-slot has ended, so a loop it left reads alive
     const left = alive(pid)
+    // the test started the loop, so a loop left alive is stopped by its own pid at once, before that pid could pass to another process
+    if (left) process.kill(pid, "SIGKILL")
     return { code, left, log: readFileSync(join(m.ops, "run-slot.runs.log"), "utf8"), out, pid }
   }
 
