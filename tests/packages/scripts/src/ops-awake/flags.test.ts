@@ -3,47 +3,20 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import {
-  flagsOf,
-  launchdAwakeOf,
-  lidSleepOf,
-} from "../../../../../packages/scripts/src/ops-awake/flags"
+import { flagsOf, lidSleepOf } from "../../../../../packages/scripts/src/ops-awake/flags"
 
 const scratch = mkdtempSync(join(tmpdir(), "ops-awake-flags-"))
 afterAll(() => rmSync(scratch, { force: true, recursive: true }))
 
+// #i19: -s and -i keep the system awake on AC power and on battery; -d and -u stay off, so the display still sleeps and locks.
 describe("flagsOf", () => {
-  test("holds -dimsu by default and -dimu when the machine sleeps with its lid shut", () => {
-    expect(flagsOf(false)).toEqual(["-dimsu"])
-    expect(flagsOf(true)).toEqual(["-dimu"])
-  })
-})
-
-// launchctl is stubbed: no test reads this Mac's launchd.
-describe("launchdAwakeOf", () => {
-  test("asks launchctl for com.playground.ops-awake in this user's gui domain and reads loaded from exit 0", async () => {
-    const asks: string[][] = []
-    const awake = await launchdAwakeOf(async (argv) => {
-      asks.push(argv)
-      return { code: 0, out: "" }
-    })
-    expect(awake.state).toBe("loaded")
-    expect(awake.code).toBe(0)
-    expect(asks).toEqual([
-      ["launchctl", "print", `gui/${process.getuid?.() ?? 0}/com.playground.ops-awake`],
-    ])
+  test.each([false, true])("holds no -d or -u, lid sleep %p", (lidSleep) => {
+    expect(flagsOf(lidSleep).join(" ")).not.toMatch(/-[a-z]*[du]/)
   })
 
-  test("launchctl's not-found exit (113) reads absent and keeps the job allowed to start", async () => {
-    const awake = await launchdAwakeOf(async () => ({ code: 113, out: "Could not find service" }))
-    expect(awake.state).toBe("absent")
-  })
-
-  test("any other exit reads failed, its code and output carried for the caller's reason", async () => {
-    const awake = await launchdAwakeOf(async () => ({ code: 3, out: "some usage error" }))
-    expect(awake.state).toBe("failed")
-    expect(awake.code).toBe(3)
-    expect(awake.out).toBe("some usage error")
+  test("holds -s -i by default, and -i alone when the machine sleeps with its lid shut", () => {
+    expect(flagsOf(false)).toEqual(["-s", "-i"])
+    expect(flagsOf(true)).toEqual(["-i"])
   })
 })
 
