@@ -15,7 +15,7 @@ An `ask` decision renders its text as markdown, with its attachments under it: e
 - A draft, a `slack` decision or a `ticket` decision is the message or ticket itself, so it keeps that text's own shape and takes steps 4, 7 and 8.
 - A `secret` ask carries only its key and sink, which the card words itself: its title takes step 4, then step 8; the value itself is the owner's to type into the card, so it appears nowhere in the item.
 
-Pick the kind by how its card closes (asks.md's `settle` and `resolve` lines): you settle a decision or a draft you decided another way, you resolve an alert update that has fixed itself, and every other update stays open until the owner dismisses it, so a card you will replace (a mock's first version) takes `bun run ask edit` before that.
+Pick the kind by how its card closes (asks.md's `settle` and `resolve` lines): you settle a decision or a draft you decided another way, you resolve an alert update that has fixed itself, and every other update stays in the list, editable, until the owner dismisses it, so a card you will replace (a mock's first version) takes `bun run ask edit` before that.
 
 ## Steps
 
