@@ -3,6 +3,7 @@
 import { MAX_TEXT, MESSAGE_KINDS, RETENTION_DAYS } from "@packages/message"
 import { RiArrowUpLine } from "@remixicon/react"
 import { useQueryClient } from "@tanstack/react-query"
+import { cn } from "cn"
 import Link from "next/link"
 import { useEffect, useState } from "react"
 
@@ -77,7 +78,8 @@ export function ChannelView({ id, role }: { id: string; role: string | null | un
           </TranscriptMessage>
         ))}
       </div>
-      <div className="px-4 pb-4">
+      {/* on a hosted phone the shell's floating Menu sits 64 to 96px up the right edge (SidebarFloatingTrigger), so the composer rests 8px above it; the dashboard draws no such button */}
+      <div className={cn("px-4 pb-4", config.hosted && "max-md:pb-26")}>
         {canPost(channel, role) ? (
           <YardComposer channel={channel} />
         ) : (

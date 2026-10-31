@@ -97,7 +97,7 @@ export const useYardChannels = () =>
 export const useYardMessages = (channel: string) =>
   useQuery(messagesQuery(channel, async () => (await yardApi.messages(channel)).messages ?? []))
 
-// One socket per signed-in tab: each frame lands in the query cache, and a closed socket (Vercel closes one at 800s) opens again with a fresh one-time token, backing off while it keeps failing, then reads again what it may have missed (catchUp). A refused token read (signed out) stops it.
+// One socket per signed-in tab: each frame lands in the query cache, and a closed socket (Vercel closes one at 800s) opens again with a fresh one-time token, backing off while it keeps failing, then reads again what it may have missed (catchUp). A token read refused as signed out (401 or 403) stops it, and any other failure backs off.
 export function useYardSocket() {
   const client = useQueryClient()
   useEffect(() => {
@@ -117,7 +117,7 @@ export function useYardSocket() {
         const response = await fetch(`${config.api.url}/api/auth/one-time-token/generate`, {
           credentials: "include",
         })
-        if (response.status >= 400 && response.status < 500) return
+        if (response.status === 401 || response.status === 403) return
         if (!response.ok) return again()
         const { token } = (await response.json()) as { token: string }
         if (stopped) return
