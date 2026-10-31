@@ -109,7 +109,7 @@ The command (`playground picker`) by which a session's manager answers one permi
 The Planner's session, a manager: it does every research, deep dive, comparison and plan, through read-only research workers the Builder dispatches, and never builds, so it stays free for the next ask. It keeps the roadmap, `~/.playground/bundles/plan.json`, whose lanes the Builder dispatches from ([playbook](./extensions/core/skills/playbook/SKILL.md)).
 
 **Icebox**:
-The Optimizer's parking place for an idea a retro found but nothing needs yet, one GitHub issue (#119) it keeps and reads at each retro; an idea leaves it for a `PG-<n>` issue of its own once a lead schedules it.
+The Optimizer's parking place for an idea a retro found but nothing needs yet, one GitHub issue it keeps and reads at each retro; an idea leaves it for a `PG-<n>` issue of its own once a lead schedules it.
 
 **Retro**:
 The Optimizer's look back over what the factory did: what slowed it, what it cost and what went wrong, each lesson turned into a fix routed through the dispatcher, or parked in the icebox.

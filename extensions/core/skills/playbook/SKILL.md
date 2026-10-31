@@ -26,7 +26,7 @@ The rest is reference in the files beside it, each read at the moment [Where the
 | Planner    | Planner, `planner` today       | every research, comparison and plan, through research workers; the roadmap, `plan.json`'s lanes; never builds                   | 1              |
 | Lead       | Builder, `builder` today       | the build side: workers from `plan.json`'s lanes, their briefs, plan review, merge order, the review and CI gates               | 1              |
 | Lead       | Ops, `ops` today               | ops: the runners, the live dashboard, the release, cleanup of probes, worktrees and caches, roster and inbox upkeep             | 1              |
-| Optimizer  | Optimizer, `optimizer` today   | retros over everything the factory did, each lesson routed as a fix through the dispatcher; the icebox (#119); never builds     | 1              |
+| Optimizer  | Optimizer, `optimizer` today   | retros over everything the factory did, each lesson routed as a fix through the dispatcher; the icebox; never builds            | 1              |
 | Worker     | `<id>-worker`                  | one bounded chore: a bundle, a fix, a review loop, an investigation                                                             | as room allows |
 | Checker    | `<id>-reviewer`, `<id>-tester` | its worker's PR: the reviewer scores it through code-review-loop, the tester drives it; spawned by that worker, reporting to it | 2 per worker   |
 | Runner     | `<id>-runner`                  | long-running jobs: dev servers, watch loops, the live dashboard                                                                 | as room allows |
