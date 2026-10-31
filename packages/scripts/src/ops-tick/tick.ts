@@ -1,9 +1,9 @@
 import { appendFile, lstat, mkdir, readdir, stat, unlink } from "node:fs/promises"
 import { homedir } from "node:os"
-import { join } from "node:path"
+import { basename, join } from "node:path"
 
 import { dispatcherOf, kindOf, managerKindOfName, managerOf } from "@packages/config/kinds"
-import { accountSettings, guardedOrgs, readPolicy } from "@packages/settings"
+import { accountSettings, readPolicy } from "@packages/settings"
 
 import {
   sweep as autoEndSweep,
@@ -11,6 +11,7 @@ import {
   liveDeps,
 } from "../../../../scripts/ops/optimizer/auto_end"
 import { liveInput } from "../../../../scripts/ops/optimizer/idle_sessions"
+import { pending } from "../ops-outbox/drain"
 import { writeAtomic } from "../write-atomic"
 import { dashboardWatch } from "./dashboard-watch"
 
@@ -109,12 +110,43 @@ const rollGate = async (ctx: Context) => {
     await Bun.write(told, "")
 }
 
+// The four processes using the most CPU, each `<command> pid <pid>: <cpu>% CPU`, so a load line names what to look at.
+const loadReport = async (ctx: Context): Promise<string[]> =>
+  lines((await ctx.run(["ps", "-A", "-o", "pcpu=,pid=,comm="])).out)
+    .map((line) => line.trim().match(/^([\d.]+)\s+(\d+)\s+(.+)$/))
+    .filter((m): m is RegExpMatchArray => m !== null)
+    .map(([, cpu, pid, command]) => ({ command: basename(command!), cpu: Number(cpu), pid }))
+    .sort((a, b) => b.cpu - a.cpu)
+    .slice(0, 4)
+    .map(({ command, cpu, pid }) => `${command} pid ${pid}: ${Math.round(cpu)}% CPU`)
+
+// Posts one Inbox alert update under the ops manager's name with bun run ask, and answers its item's id.
+const postAlert = async (ctx: Context, title: string): Promise<{ by: string; id: string }> => {
+  const roster = (await readJson(join(ctx.ops, "..", "roster.json")).catch(() => null)) as {
+    agents?: unknown
+  } | null
+  const by = managerOf(roster?.agents, "ops")
+  const posted = await ctx.run(
+    ["bun", "run", "--cwd", ctx.repo, "ask", "new"],
+    120_000,
+    JSON.stringify({ from: by, kind: "update", preview: { outcome: "alert" }, title }),
+  )
+  const id = lines(posted.out)
+    .map((l) => l.trim())
+    .find((l) => /^[0-9a-f-]{36}$/.test(l))
+  if (posted.code !== 0 || !id) throw new Error(`bun run ask new: ${lines(posted.out).at(-1)}`)
+  return { by, id }
+}
+
 // The usage marks, the login flip, the load, the train's slot wait and the near-limit marks, each routed as the old tick routed it.
 const tick = async (ctx: Context) => {
   const marks = lines((await python(ctx, "usage/week-marks.py", false)).out)
   for (const line of marks.filter((l) => l.includes("ALERT"))) {
+    // an alert that fails to post is named to the builder beside its line, which prints once a week and so goes out either way
     if (/ALERT 9[78]\b/.test(line))
-      await ctx.run(["python3", "-I", join(ctx.ops, "inbox-alert.py"), line])
+      await postAlert(ctx, line).catch((error: Error) =>
+        ctx.send("builder", `Inbox alert not posted: ${error.message}`),
+      )
     await ctx.send("builder", line)
   }
   if (ctx.now.getMinutes() === 3 && marks[0]) await ctx.send("builder", `usage: ${marks[0]}`, true)
@@ -122,8 +154,7 @@ const tick = async (ctx: Context) => {
   if (flip.includes("switch due")) await ctx.send("dispatcher", flip)
   const [, load5 = 0] = await loadOf(ctx)
   if (load5 > 15) {
-    const report = lines((await python(ctx, "unstick/load-report.py", false)).out).slice(0, 4)
-    await ctx.send("builder", `load5 ${load5}: ${report.map((l) => l.trim()).join(" ")}`, true)
+    await ctx.send("builder", `load5 ${load5}: ${(await loadReport(ctx)).join(" ")}`, true)
   }
   for (const line of lines((await python(ctx, "usage/near-limit.py")).out))
     await ctx.send(line.includes("ALERT") ? "builder" : "dispatcher", line)
@@ -435,19 +466,6 @@ const glmCredits = async (ctx: Context) => {
   )
 }
 
-// The other checkouts whose worktrees the sweep lists: each git checkout in the home folder's folder for an org ext.links guards in the data folder's policy, none while it is unset or the policy cannot be read.
-export const sweepRepos = async (ops: string, home = homedir()): Promise<string[]> => {
-  const read = await readPolicy(join(ops, ".."))
-  const repos: string[] = []
-  for (const org of read.refusal === undefined ? guardedOrgs(read.settings.values) : []) {
-    const names = await readdir(join(home, org)).catch(() => [] as string[])
-    for (const name of names.sort())
-      if ((await stat(join(home, org, name, ".git")).catch(() => null))?.isDirectory())
-        repos.push(join(home, org, name))
-  }
-  return repos
-}
-
 // The shared turbo cache's entries last modified over 7 days ago, removed once a week; a missing or unreadable folder logs and removes nothing.
 const TURBO_CACHE = join(homedir(), ".cache", "turbo", "playground")
 export const turboPrune =
@@ -489,37 +507,6 @@ export const turboPrune =
     await mkdir(join(ctx.ops, "log"), { recursive: true })
     await appendFile(join(ctx.ops, "log", "turbo-prune.log"), `${isoSeconds(ctx.now)} ${line}\n`)
   }
-
-// The worktrees past the factory's stale rule, listed and never removed: the optimizer gives the remove.
-const worktreeSweep = async (ctx: Context) => {
-  const { out } = await ctx.run(
-    [
-      join(ctx.ops, "run-slot.sh"),
-      "ops-tick",
-      "--",
-      "uv",
-      "run",
-      "--python",
-      "3.13",
-      "python",
-      "-I",
-      join(ctx.ops, "optimizer", "sweep.py"),
-      ctx.repo,
-      ...(await sweepRepos(ctx.ops)),
-    ],
-    60 * 60_000,
-  )
-  const head = "Worktree sweep (dry): "
-  // notify.sh cuts each line at 400 characters, so the list goes in as many sends as it takes, each of whole lines
-  const room = 400 - head.length
-  const sends: string[] = []
-  for (const line of lines(out)) {
-    const last = sends.length - 1
-    if (last >= 0 && sends[last]!.length + 1 + line.length <= room) sends[last] += `\n${line}`
-    else sends.push(line)
-  }
-  for (const text of sends) await ctx.send("optimizer", `${head}${text}`, true)
-}
 
 const words = (text: string) => async (ctx: Context) => void (await ctx.send("optimizer", text))
 
@@ -592,7 +579,7 @@ const relayMovedAt = async (outbox: string): Promise<number> => {
 
 type RelayWatch = { at?: string; by?: string; id?: string; pendingSince?: string }
 
-// The ops relay's watch from outside it: wait.py's own peek (which moves nothing) is timed from the first cycle it reads pending, and one Inbox alert update is posted straight to the dashboard with bun run ask, under the ops manager's name, once a line has waited two cycles with no cursor of the relay's moving since, since the relay rewrites its cursors only when a line is pending; the alert is resolved once a cursor moves after it, or when its item is gone; its id is kept in tick/relay-watch.json, so it is posted once a stop.
+// The ops relay's watch from outside it: drain.ts's pending peek (which moves nothing) is timed from the first cycle it reads pending, and one Inbox alert update is posted straight to the dashboard with bun run ask, under the ops manager's name, once a line has waited two cycles with no cursor of the relay's moving since, since the relay rewrites its cursors only when a line is pending; the alert is resolved once a cursor moves after it, or when its item is gone; its id is kept in tick/relay-watch.json, so it is posted once a stop.
 const relayWatch = async (ctx: Context) => {
   const outbox = join(ctx.ops, "outbox")
   const statePath = join(ctx.ops, "tick", "relay-watch.json")
@@ -618,8 +605,7 @@ const relayWatch = async (ctx: Context) => {
     await unlink(statePath)
     return
   }
-  const peek = (await ctx.run(["python3", "-I", join(outbox, "wait.py"), "--max", "0"])).out.trim()
-  if (!peek.startsWith("pending:")) {
+  if ((await pending(outbox)).length === 0) {
     if (state) await unlink(statePath)
     return
   }
@@ -629,25 +615,10 @@ const relayWatch = async (ctx: Context) => {
     return
   }
   if (ctx.now.getTime() - since < 2 * RELAY_CYCLE_MS) return
-  const roster = (await readJson(join(ctx.ops, "..", "roster.json")).catch(() => null)) as {
-    agents?: unknown
-  } | null
-  const by = managerOf(roster?.agents, "ops")
-  const item = {
-    from: by,
-    kind: "update",
-    preview: { outcome: "alert" },
-    title: `The ops relay is down: no ops line has gone out ${moved ? `since ${isoSeconds(new Date(moved))}` : "with no run on record"}. Resume ${RELAY}.`,
-  }
-  const posted = await ctx.run(
-    ["bun", "run", "--cwd", ctx.repo, "ask", "new"],
-    120_000,
-    JSON.stringify(item),
+  const { by, id } = await postAlert(
+    ctx,
+    `The ops relay is down: no ops line has gone out ${moved ? `since ${isoSeconds(new Date(moved))}` : "with no run on record"}. Resume ${RELAY}.`,
   )
-  const id = lines(posted.out)
-    .map((l) => l.trim())
-    .find((l) => /^[0-9a-f-]{36}$/.test(l))
-  if (posted.code !== 0 || !id) throw new Error(`bun run ask new: ${lines(posted.out).at(-1)}`)
   await writeAtomic(
     statePath,
     JSON.stringify({ at: ctx.now.toISOString(), by, id, pendingSince: state?.pendingSince }),
@@ -662,29 +633,9 @@ export const BEATS: Beat[] = [
   { cron: "5,15,25,35,45,55 * * * *", name: "usage-limit-watch", run: limitWatch, to: "builder" },
   { cron: "7,37 * * * *", name: "sweep", run: sweep, to: "the session's lead, ops, dispatcher" },
   { cron: "*/5 * * * *", name: "auto-end", run: autoEnd(), to: "the session's lead" },
-  {
-    cron: "17,47 * * * *",
-    name: "planner-sweep",
-    run: async (ctx) =>
-      void (await ctx.run(["python3", "-I", join(ctx.ops, "..", "planner", "sweep.py")])),
-    to: "nobody: its output is kept",
-  },
   { cron: "43 * * * *", name: "glm-credits", run: glmCredits, to: "ops/log/glm-credits.log" },
-  {
-    cron: "12,27,42,57 * * * *",
-    name: "optimizer-flow",
-    run: words("optimizer flow"),
-    to: "optimizer",
-  },
-  {
-    cron: "45 * * * *",
-    name: "optimizer-burn",
-    run: words("optimizer burn check"),
-    to: "optimizer",
-  },
   { cron: "7 */2 * * *", name: "optimizer-tick", run: words("optimizer tick"), to: "optimizer" },
   { cron: "13 21 * * *", name: "optimizer-daily", run: words("optimizer daily"), to: "optimizer" },
-  { cron: "17 */2 * * *", name: "worktree-sweep", run: worktreeSweep, to: "optimizer" },
   { cron: "29 3 * * 0", name: "turbo-prune", run: turboPrune(), to: "ops/log/turbo-prune.log" },
   { cron: "*/5 * * * *", name: "canary-pull", run: canaryPull, to: "ops, once a failed pull" },
   { cron: "*/5 * * * *", name: "relay-watch", run: relayWatch, to: "the Inbox, by bun run ask" },

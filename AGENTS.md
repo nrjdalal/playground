@@ -41,7 +41,7 @@ Start each task with the `codebase-map` skill to orient, then load the task skil
 - ALWAYS: Put every test under the repo-root `tests/` directory, mirroring the path of the file it covers (`api/hono/src/lib/dashboard/account.ts` is tested by `tests/api/hono/src/lib/dashboard/account.test.ts`).
   One `bun run test` runs the suite and `bun run test:file <paths>` runs some of it, skipping the build; a package never carries its own `test/` directory or `test` script.
   Read [.agents/testing.md](./.agents/testing.md) before you write or run a test: the sandbox, the parallel pass and `SERIAL`, its traps.
-- ALWAYS: Put a new build or tooling script in `packages/scripts/src/`, not `.github/scripts/`, and declare the dependencies it imports on that package.
+- ALWAYS: Put a new build or tooling script in `packages/scripts/src/`, and declare the dependencies it imports on that package.
   It is a real workspace package, so `turbo prune` carries it into the Docker build without an extra COPY.
 - ALWAYS: TypeScript under Bun for every script and test; the allowlist in `tests/python-allowlist.test.ts` holds the Python files still waiting for their port, and a new one fails the test.
 - ALWAYS: Prefer a Bun-native API when the file runs under Bun and one exists (`Bun.file`, `Bun.write`, `Bun.spawn`); otherwise use a Node built-in with the `node:` protocol prefix (`import { join } from "node:path"`, `require("node:fs")`), never the bare specifier.
@@ -53,7 +53,7 @@ Start each task with the `codebase-map` skill to orient, then load the task skil
   Everything else, a row's own fields included, is plain A→Z with `id` in its alphabetical place rather than hoisted.
   Sorting the subject too would put it in a different position on every endpoint, which is the drift this rule exists to prevent.
 - ALWAYS: Version every root `catalog` entry with a caret range (`^1.2.3`), never an exact pin or a tilde.
-  `.github/scripts/deps-manager.ts` rewrites exact and tilde specs on `postinstall`, including specs it promotes into the catalog from a workspace dep, and reports the rest (wildcards, dist-tags, compound ranges) for a manual fix.
+  `packages/scripts/src/deps-manager.ts` rewrites exact and tilde specs on `postinstall`, including specs it promotes into the catalog from a workspace dep, and reports the rest (wildcards, dist-tags, compound ranges) for a manual fix.
   There is no opt-out: no pin survives an install, so pinning deliberately means changing the rule in that script and recording why in `docs/dependencies.md`.
 - Do not comment unnecessarily.
   Only comment if it is absolutely necessary.
@@ -114,7 +114,9 @@ On a worktree's stack the dashboard then shows the fixture's made-up sessions un
 ## Skills
 
 ZeroStarter's skills live in `skills/zerostarter`, which `.agents/skills` (the path ZeroStarter's CLI syncs through), `.claude/skills` and `.github/skills` link to, so every agent tool reads the same files.
-A ZeroStarter sync also overlays `lefthook.yml` with the starter's and drops the docs this repo adds to the docs-wrap job's glob, so after one, restore each until `tests/lefthook.test.ts` passes.
+A ZeroStarter sync also overlays `lefthook.yml` with the starter's and drops the docs this repo adds to the docs-wrap job's glob, so after one, restore each until `tests/lefthook.test.ts` passes, then run `bun node_modules/.bin/lefthook install`, since the sync's own install rewrote the shared `.git/hooks` outside run-slot.
+Its publish-step files (`auto-release.yml`, `changelog.config.json`, `release-version.ts`, `changelog-manager.ts`, the `changelogen` catalog entry) stay out, since they commit and tag on `canary`.
+In `skills/zerostarter/.sync.json`, each skill that takes the update keeps the entry the sync wrote, so `skills-manager.ts --outdated` reads it as synced rather than edited here.
 Each is a `SKILL.md` with a `description` trigger and a literal procedure; only the description is scanned until a skill matches.
 Start with `codebase-map` to orient, then load the task skill that fits.
 **Custom** skills are maintained in this repo; **vendored** skills are copied verbatim from an upstream project (re-vendor to update, do not hand-edit).
@@ -221,7 +223,7 @@ ZeroStarter's rules above govern Playground too; this section adds its own.
   - `no-glm-heavy-path` keeps a GLM session's commits and pushes off the heavy paths, and holds its installs, clones, commits and pushes while load5 is over 15 (playbook's **glm**).
   - `no-headless-login` refuses a factory session's `claude -p` that sets no `CLAUDE_CODE_OAUTH_TOKEN`, and its `PLAYGROUND_ROLE` when its environment lacks one: run it in the shape its reason gives.
   - `no-mac-web-build` refuses a web image build on the Mac while the live dashboard's Postgres runs in its Docker VM: build it on the box with `ci.sh web HEAD`.
-  - `no-main-checkout` refuses a build, test, commit, write or git move in the main checkout: run it in your own worktree, with `git -C <your worktree>`.
+  - `no-main-checkout` refuses a build, test, commit, write or git move in the main checkout: run it in your own worktree, with `git -C <your worktree>` or `cd <worktree> && …` in one command, since a failed command leaves the Bash tool's shell in its old folder without a word.
   - `no-manager-subagent` refuses a manager the Agent and Workflow tools: start a worker through `scripts/spawn.sh` and brief it.
   - `no-off-palette-label` refuses any session's GitHub label create or edit whose color is not a Tailwind 500, and a create with no color: give one of the 22 hexes its reason names.
   - `no-ours-merge` refuses a merge or pull with the ours strategy or option: run `git merge origin/canary` and resolve each conflict with both sides' meaning.
@@ -253,13 +255,13 @@ Its rules live in one file per topic under `.agents/dashboard/`, and a change to
 Each topic below names when to read its file, and each ALWAYS line is that file's rule in short: the file holds it whole, with its reasons.
 When a dashboard rule's meaning changes, its ALWAYS line here changes with it.
 
-- Stack: read `.agents/dashboard/stack.md` before you change how `bun run dev` starts, which machine a stack reads, the fixture (`api/hono/src/fixtures/dashboard.json`), the dashboard's data folder, the organisation's config (`packages/config/src/org.ts`), the hosted build or Yard's routes, or the `claude_*` tables.
+- Stack: read `.agents/dashboard/stack.md` before you change how `bun run dev` starts, which machine a stack reads, the fixture, the dashboard's data folder, the organisation's config (`packages/config/src/org.ts`), the hosted build or the `claude_*` tables.
   - ALWAYS: Start it (`bun run dev`) as a process of a cmux terminal, or as a background task of an agent session in one, never detached with `( … &)` or `nohup`.
   - ALWAYS: Serve first run's setup with none of the app's database or auth code loaded: with `POSTGRES_URL` empty, `api/hono/src/main.ts` serves `firstRun()`'s setup routes, `GET /api/v1/onboard/checks`, the first run's fix routes and a `setup: true` `GET /api/health` alone until Start a local container finishes, whose database is pglaunch's as is.
   - ALWAYS: A person's stack reads their own machine, while factory, test and `PLAYGROUND_FIXTURE` stacks read the fixture, the live dashboard's checkout reads the live machine and a hosted build reads none, as `dashboardSource()` in `api/hono/src/lib/dashboard/fixture.ts` decides.
   - ALWAYS: Keep it on loopback: the API, `next dev` and the live dashboard's built next server bind 127.0.0.1, and the dashboard is never deployed.
     The hosted build is the one exception (stack.md's hosted rule): under `PLAYGROUND_HOSTED=1` it deploys, mounting only sign-in, health and Yard's routes (`api/hono/src/hosted.ts`).
-  - ALWAYS: Keep the hosted build to its allowlist: `api/hono/src/index.ts` imports `hosted.ts` (sign-in, health and Yard) under `PLAYGROUND_HOSTED=1` and `local.ts` otherwise, and fails closed: `hosted.ts` without the flag, and a local build on Vercel, refuse to start.
+  - ALWAYS: Keep the hosted build to its allowlist: `api/hono/src/index.ts` imports `hosted.ts` under `PLAYGROUND_HOSTED=1` and `local.ts` otherwise, and fails closed: `hosted.ts` without the flag, and a local build on Vercel, refuse to start.
   - ALWAYS: Stop `bun run dev` before running `bun run build`, `bun run check-types` or `bun run test`, or committing, in the same worktree.
   - ALWAYS: Keep the dashboard on the owner rung: every route and the WebSocket pass `requireConsoleRole("owner")`, but first run's setup routes, which serve before any user exists.
     Under `PLAYGROUND_HOSTED=1` Yard's routes take the `member` rung instead (stack.md's hosted rule).
@@ -279,7 +281,7 @@ When a dashboard rule's meaning changes, its ALWAYS line here changes with it.
   - ALWAYS: Send a message from the web through the dashboard's outbox (`useDashboard().outbox`), not `sendMessage` alone.
 - Writes: read `.agents/dashboard/writes.md` before you change a dashboard write or a `bun run verify` check, and before you add, move or remove a dashboard page, a sidebar group or an owner-rung API route.
   - ALWAYS: Guard every dashboard write with `requireTrustedOrigin` and `requireLoopback` (`api/hono/src/middlewares/dashboard.ts`) before the session is read, then the owner rung; first run's writes, with no session yet, take `requireThisMachine` in place of the rung.
-    Under `PLAYGROUND_HOSTED=1` Yard's writes take the `member` rung with no `requireLoopback`, and a browser's write `requireTrustedOrigin` while a `yard_` token's write takes none (writes.md).
+    Under `PLAYGROUND_HOSTED=1` Yard's writes take the `member` rung, no `requireLoopback`, and `requireTrustedOrigin` on a browser's write alone (writes.md).
   - ALWAYS: Test a dashboard write on a fixture stack, and reach a real cmux session only from a live-reads stack opted in to cmux's sessions, against a throwaway probe.
   - ALWAYS: Verify dashboard work with `bun run verify` (`--help` lists its checks) rather than a script of your own.
   - ALWAYS: Keep the dashboard map current.
@@ -304,7 +306,8 @@ The owner does not review Playground PRs: the review loop is the gate ([ADR 0004
    The Changelog (`api/hono/src/plugins/changelog/sources.ts`) reads a body's `Outcome:` line, else the TL;DR's first bullet or a prose TL;DR's first sentence.
    Before the review's round 1, settle in your own pass what a round should never spend its turn on (most late findings were docs, skill, body and wording ones): run doc-sync over the change, give each touched doc and skill a writing-for-agents read (a completion criterion on every step, positive phrasing, reference disclosed into sibling files, one meaning in one place),
    and fill the template above; the reviewer still judges everything.
-   Done when the body's Evidence names each touched doc and skill with its check, and doc-sync's result, before the review's round 1 opens.
+   When the diff adds a member to an enumerated kind (a status, a type, a choice, a button), grep the repo for the wording of every list that names that kind's members (`git grep -n "Archive, Snooze"`) and update each hit: one such grep once found what six review rounds had found piece by piece.
+   Done when the body's Evidence names each touched doc and skill with its check, doc-sync's result and each list grep with its hits, before the review's round 1 opens.
 2. Have a reviewer agent other than its author (a session started for the review, working in its own scratch clone, whose brief carries the signal rule from The factory, above) score it out of 5 through the [code-review-loop](./extensions/core/skills/code-review-loop/SKILL.md) skill, and fix what it finds, until it scores 5/5 on the latest head,
    GitHub Actions' `Audit, Lint, and Build` and `test` are green there, and nothing is left you would change.
 3. Mark it ready at 5/5 and merge it with `bun run pr:merge <n>`, or let merge-on-ready land it (`bun run pr:train ready`): the only ways a Playground PR reaches `canary`.

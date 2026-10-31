@@ -115,6 +115,14 @@ describe.skipIf(!dockerUp())("Yard's store", () => {
       expect([after.unread, after.mentions]).toEqual([0, 0])
     })
 
+    test("a member cannot make #general or #releases before the first redeem does, so #releases stays the owner's", async () => {
+      for (const name of ["general", "releases"])
+        await expect(store.createChannel(db, web("bo"), { name })).rejects.toMatchObject({
+          message: `#${name} is kept for Yard's own channel`,
+          status: 409,
+        })
+    })
+
     test("a name already taken is a conflict", async () => {
       await store.createChannel(db, web("bo"), { name: "taken" })
       await expect(store.createChannel(db, web("di"), { name: "taken" })).rejects.toMatchObject({
@@ -234,6 +242,40 @@ describe.skipIf(!dockerUp())("Yard's store", () => {
       expect(
         await store.audienceOf(db, web("bo"), await store.ownMessage(db, web("bo"), held.id)),
       ).toEqual(expect.arrayContaining(["ada", "bo"]))
+    })
+  })
+
+  describe("audience", () => {
+    // a sent message's frame went to every row of the channel's members, so a banned member's open socket kept hearing the channel
+    test("a sent message reaches the channel's members on the member rung, a ban or a lost rung takes a member out until it is undone, and a pending one reaches its sender alone", async () => {
+      const channel = await both("audience")
+      await store.joinChannel(db, web("di"), channel.id)
+      const sent = await send(web("ada", true), channel.id, { kind: "text", text: "hello" })
+      const audience = async () => (await store.audienceOf(db, web("ada", true), sent)).sort()
+      expect(await audience()).toEqual(["ada", "bo", "di"])
+      await sql`update "user" set banned = true where id = 'di'`
+      expect(await audience()).toEqual(["ada", "bo"])
+      await sql`update "user" set banned = false where id = 'di'`
+      expect(await audience()).toEqual(["ada", "bo", "di"])
+      await sql`update "user" set role = 'user' where id = 'di'`
+      expect(await audience()).toEqual(["ada", "bo"])
+      await sql`update "user" set role = 'member' where id = 'di'`
+      const held = await send(token("bo"), channel.id, { kind: "fix", text: "patch" })
+      expect(await store.audienceOf(db, token("bo"), held)).toEqual(["bo"])
+    })
+  })
+
+  describe("approving after a read", () => {
+    // a sent message kept the time it was held, so a mention approved after the member had read the channel never counted as unread
+    test("a held mention approved after the member read the channel counts as unread and as a mention", async () => {
+      const { id } = await both("late")
+      const held = await send(token("bo"), id, { kind: "text", text: "@ada take a look" })
+      expect(held.status).toBe("pending")
+      await store.markRead(db, web("ada", true), id)
+      await Bun.sleep(5)
+      await store.decide(db, web("bo"), held.id, "sent")
+      const channel = (await store.channels(db, web("ada", true))).find((c) => c.id === id)!
+      expect([channel.unread, channel.mentions]).toEqual([1, 1])
     })
   })
 

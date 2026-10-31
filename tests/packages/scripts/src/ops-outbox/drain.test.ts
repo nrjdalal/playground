@@ -11,7 +11,7 @@ import {
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { drain } from "../../../../../packages/scripts/src/ops-outbox/drain"
+import { drain, pending } from "../../../../../packages/scripts/src/ops-outbox/drain"
 
 const dirs: string[] = []
 afterAll(() => {
@@ -95,5 +95,57 @@ describe("drain", () => {
     writeFileSync(join(dir, "ops-dashboard.jsonl"), rec("2026-10-19T05:33:19Z", "dashboard", "old"))
     await expect(drain(dir)).rejects.toThrow("relay.py")
     expect(existsSync(join(dir, "cursor.json"))).toBe(false)
+  })
+})
+
+// pending() names the queues the next drain() would send from, and moves nothing, so each case reads it and then drains
+describe("pending", () => {
+  const Q = "ops-dashboard.jsonl"
+
+  test("no cursor yet: none, as a first drain sends nothing", async () => {
+    const dir = scratch()
+    writeFileSync(join(dir, Q), rec("2026-10-19T05:33:19Z", "dashboard", "old"))
+    expect(await pending(dir)).toEqual([])
+    expect(existsSync(join(dir, "cursor.json"))).toBe(false)
+    expect(await drain(dir)).toEqual([])
+  })
+
+  test("a cursor at the end: none", async () => {
+    const dir = scratch()
+    writeFileSync(join(dir, Q), rec("2026-10-19T05:33:19Z", "dashboard", "old"))
+    await drain(dir)
+    expect(await pending(dir)).toEqual([])
+    expect(await drain(dir)).toEqual([])
+  })
+
+  test("a half-written line: none, until its newline lands", async () => {
+    const dir = scratch()
+    writeFileSync(join(dir, Q), rec("2026-10-19T05:33:19Z", "dashboard", "old"))
+    await drain(dir)
+    appendFileSync(join(dir, Q), '{"at": "2026-10-23T07:03')
+    expect(await pending(dir)).toEqual([])
+    expect(await drain(dir)).toEqual([])
+    appendFileSync(join(dir, Q), `:00Z", "job": "dashboard", "text": "c", "to": "ops"}\n`)
+    expect(await pending(dir)).toEqual([Q])
+    expect(await pending(dir)).toEqual([Q])
+    expect((await drain(dir)).map((r) => r.text)).toEqual(["c"])
+    expect(await pending(dir)).toEqual([])
+  })
+
+  test("an empty cursor.json: each queue with a whole line, read from its start as drain reads it", async () => {
+    const dir = scratch()
+    writeFileSync(join(dir, Q), rec("2026-10-23T07:00:00Z", "dashboard", "kept"))
+    writeFileSync(join(dir, "cursor.json"), "")
+    expect(await pending(dir)).toEqual([Q])
+    expect((await drain(dir)).map((r) => r.text)).toEqual(["kept"])
+  })
+
+  test("a cursor past a file cut shorter: the file, read again from its start", async () => {
+    const dir = scratch()
+    writeFileSync(join(dir, Q), rec("2026-10-19T05:33:19Z", "dashboard", "a long old line"))
+    await drain(dir)
+    writeFileSync(join(dir, Q), rec("2026-10-23T07:00:00Z", "dashboard", "new"))
+    expect(await pending(dir)).toEqual([Q])
+    expect((await drain(dir)).map((r) => r.text)).toEqual(["new"])
   })
 })

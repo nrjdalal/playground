@@ -4,6 +4,7 @@ import {
   type Account,
   accountKey,
   accountSettings,
+  accountsOf,
   checkSetting,
   hasSecret,
   loginOf,
@@ -74,6 +75,12 @@ const NO_LOGIN = {
   ok: false,
   status: 409,
 } as const
+
+// Whether usage.accounts holds a GLM row, read without the Keychain, so the sampler can ask it every sample.
+export const hasGlmAccount = (data = dataDir()): boolean => {
+  const settings = loginSettings(data)?.settings
+  return Boolean(settings && accountsOf(accountSettings.get(settings, KEY), "glm").length)
+}
 
 export const listAccounts = (data = dataDir()): AccountRow[] => {
   const settings = loginSettings(data)?.settings

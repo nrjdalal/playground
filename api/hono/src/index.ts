@@ -14,3 +14,4 @@ const served = entry === "hosted" ? await import("@/hosted") : await import("@/l
 export const app = served.app
 export default served.default
 export type * from "@/local"
+export type { HostedAppType } from "@/hosted"
