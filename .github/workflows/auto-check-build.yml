@@ -50,6 +50,14 @@ jobs:
         # GHSA-vfj7-8cjw-p6xm: braces has no patched release, and only dev tooling (shadcn, globby) reaches it
         run: bun packages/scripts/src/audit.ts --audit-level high --ignore GHSA-vfj7-8cjw-p6xm --new-over origin/${{ github.base_ref }}
 
+      # its inputs hold the private text it counts, so they come from secrets, and it fails while any is unset
+      - name: Trace count
+        run: bun packages/scripts/src/trace-count/ci.ts
+        env:
+          FACTORY_ARCHIVE_REPO: ${{ secrets.FACTORY_ARCHIVE_REPO }}
+          NO_PUBLIC_LEAK_LIST: ${{ secrets.NO_PUBLIC_LEAK_LIST }}
+          OWNER_NAMES: ${{ secrets.OWNER_NAMES }}
+
       - name: Format, Lint, Check-types, Test, and Build
         run: |
           bun run format:check
