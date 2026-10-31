@@ -1,6 +1,7 @@
 import { afterAll, describe, expect, setDefaultTimeout, test } from "bun:test"
 import {
   chmodSync,
+  cpSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -960,6 +961,36 @@ describe("ci.sh web", () => {
     expect(near("web")).toBe(2)
     expect(near("web", "HEAD")).toBe(2)
   })
+})
+
+describe("usage", () => {
+  // each prints its whole leading comment block as its usage, a line added to the header included, and no code line after it
+  test.each(["ci.sh", "host.sh"])(
+    "%s with no arguments prints its header and stops before its code",
+    (name) => {
+      const copy = mkdtempSync(join(tmpdir(), "runner-usage-"))
+      try {
+        cpSync(DIR, copy, { recursive: true })
+        const [shebang, ...rest] = readFileSync(join(DIR, name), "utf8").split("\n")
+        writeFileSync(
+          join(copy, name),
+          [shebang, "# A line added to the header.", ...rest].join("\n"),
+        )
+        const r = Bun.spawnSync(["bash", join(copy, name)], {
+          env: { HOME: copy, PATH: "/usr/bin:/bin", RUNNER_HOST: "203.0.113.7" },
+        })
+        const header = ["# A line added to the header.", ...rest]
+        const block = header.slice(
+          0,
+          header.findIndex((line) => !line.startsWith("#")),
+        )
+        expect(r.exitCode).toBe(2)
+        expect(r.stderr.toString()).toBe(`${block.join("\n")}\n`)
+      } finally {
+        rmSync(copy, { force: true, recursive: true })
+      }
+    },
+  )
 })
 
 const FULLTIME = "fullTime > gives the date and the seconds, for a hover"

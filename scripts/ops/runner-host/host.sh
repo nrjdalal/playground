@@ -14,7 +14,7 @@ repo() {
 }
 KEY=${RUNNER_HOST_KEY:-$HOME/.ssh/playground_runner}
 
-usage() { sed -n '2,6p' "$0" >&2; exit 2; }
+usage() { sed -n '2,/^[^#]/{/^#/p;}' "$0" >&2; exit 2; }
 if [ "${1:-}" = drift ] && [ $# -le 2 ]; then
   LIVE=${PLAYGROUND_DATA_DIR:-$HOME/.playground}/ops/runner-host
   differs=0

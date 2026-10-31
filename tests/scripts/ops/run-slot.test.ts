@@ -550,6 +550,61 @@ describe("a ticket's units come from the run, not its session's size", () => {
   test("and so does a full turbo build", async () => {
     expect(await ahead(["bunx", "turbo", "run", "build"])).toBe(false)
   })
+
+  test("a big session's bunx tsc goes ahead", async () => {
+    expect(await ahead(["bunx", "tsc", "--noEmit", "-p", "api/hono"])).toBe(true)
+  })
+
+  test("but an sh -c that builds and then runs tsc keeps the session's size", async () => {
+    expect(
+      await ahead([
+        "sh",
+        "-c",
+        'bunx turbo run build --filter=@api/hono^...; bunx tsc --noEmit; touch "$0"',
+      ]),
+    ).toBe(false)
+  })
+
+  // the dry run's answer in the checkout --cwd names, printed only under the run's own NODE_ENV word, or a dry run that hangs
+  const typeCheck = async (statuses: string[] | "hang") => {
+    const m = machine()
+    const checkout = join(m.root, "wt")
+    mkdirSync(checkout)
+    const tasks = [{ cache: { status: "MISS" }, command: "<NONEXISTENT>" }].concat(
+      statuses === "hang" ? [] : statuses.map((status) => ({ cache: { status }, command: "tsc" })),
+    )
+    writeFileSync(join(checkout, "dry.json"), JSON.stringify({ tasks }))
+    const dry =
+      statuses === "hang" ? "exec sleep 60" : '[ "$NODE_ENV" = production ] && cat dry.json; exit 0'
+    writeFileSync(
+      join(m.bin, "bun"),
+      `#!/bin/bash\ncase " $* " in *" --dry=json "*) ${dry} ;; esac\ntouch "\${@: -1}"\n`,
+    )
+    chmodSync(join(m.bin, "bun"), 0o755)
+    m.ticket(1, "worker-m", "s2 22 2 medium")
+    const run = m.start("worker-big", { RUN_SLOT_SIZE: "big" }, SCRIPT, [
+      "env",
+      "NODE_ENV=production",
+      "bun",
+      "run",
+      "--cwd",
+      checkout,
+      "check-types",
+    ])
+    return (await run.saw(WAITING)) ? !(await run.waits()) : run.ran()
+  }
+
+  test("a big session's check-types whose every task is cached goes ahead", async () => {
+    expect(await typeCheck(["HIT", "HIT"])).toBe(true)
+  })
+
+  test("but one with a task to run keeps the session's size", async () => {
+    expect(await typeCheck(["HIT", "MISS"])).toBe(false)
+  })
+
+  test("and so does one whose dry run hangs past 10 s", async () => {
+    expect(await typeCheck("hang")).toBe(false)
+  })
 })
 
 // dispatcher, 19 Oct: Checks on a PR in the ready line (merge-queue.json's entries with a readyAt) goes first, by goAt then readyAt
@@ -1162,7 +1217,7 @@ describe("can-take", () => {
 
 // dispatcher, 18 Oct: a committed test, type check, lint or build runs on the runner host through ci.sh exec, and falls back to a slot here
 describe("the runner host", () => {
-  // A stub ci.sh that logs its arguments and exits with `rc`, and a stub bun that logs what the Mac ran, answering the settings reader with nothing.
+  // A stub ci.sh that logs its arguments and exits with `rc`, and a stub bun that logs what the Mac ran, answering the settings reader and a check-types dry run with nothing.
   const box = (rc: number, off?: string) => {
     const m = machine()
     const host = join(m.ops, "runner-host")
@@ -1175,7 +1230,7 @@ describe("the runner host", () => {
     chmodSync(join(host, "ci.sh"), 0o755)
     writeFileSync(
       join(m.bin, "bun"),
-      `#!/bin/bash\ncase "$1" in */setting.ts) exit 0 ;; esac\necho "$*" >> ${join(m.root, "mac")}\n`,
+      `#!/bin/bash\ncase "$1 $*" in */setting.ts*|*" --dry=json"*) exit 0 ;; esac\necho "$*" >> ${join(m.root, "mac")}\n`,
     )
     chmodSync(join(m.bin, "bun"), 0o755)
     const read = (path: string) => (existsSync(path) ? readFileSync(path, "utf8") : "")

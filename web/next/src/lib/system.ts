@@ -380,7 +380,6 @@ const singleUsage = (usage: Usage | null, now: number): Reading[] => {
       ),
     )
   } else if (usage?.fiveHourNone) {
-    // an account with no 5-hour window: fresh, judging nothing, never 0% or a failed read's outline
     const state = `no 5-hour window on this account${readWords}`
     readings.push({
       key: "fiveHour",

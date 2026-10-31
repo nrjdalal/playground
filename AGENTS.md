@@ -114,7 +114,9 @@ On a worktree's stack the dashboard then shows the fixture's made-up sessions un
 ## Skills
 
 ZeroStarter's skills live in `skills/zerostarter`, which `.agents/skills` (the path ZeroStarter's CLI syncs through), `.claude/skills` and `.github/skills` link to, so every agent tool reads the same files.
-A ZeroStarter sync also overlays `lefthook.yml` with the starter's and drops the docs this repo adds to the docs-wrap job's glob, so after one, restore each until `tests/lefthook.test.ts` passes.
+A ZeroStarter sync also overlays `lefthook.yml` with the starter's and drops the docs this repo adds to the docs-wrap job's glob, so after one, restore each until `tests/lefthook.test.ts` passes, then run `bun node_modules/.bin/lefthook install`, since the sync's own install rewrote the shared `.git/hooks` outside run-slot.
+Its publish-step files (`auto-release.yml`, `changelog.config.json`, `release-version.ts`, `changelog-manager.ts`, the `changelogen` catalog entry) stay out, since they commit and tag on `canary`.
+In `skills/zerostarter/.sync.json`, each skill that takes the update keeps the entry the sync wrote, so `skills-manager.ts --outdated` reads it as synced rather than edited here.
 Each is a `SKILL.md` with a `description` trigger and a literal procedure; only the description is scanned until a skill matches.
 Start with `codebase-map` to orient, then load the task skill that fits.
 **Custom** skills are maintained in this repo; **vendored** skills are copied verbatim from an upstream project (re-vendor to update, do not hand-edit).
@@ -221,7 +223,7 @@ ZeroStarter's rules above govern Playground too; this section adds its own.
   - `no-glm-heavy-path` keeps a GLM session's commits and pushes off the heavy paths, and holds its installs, clones, commits and pushes while load5 is over 15 (playbook's **glm**).
   - `no-headless-login` refuses a factory session's `claude -p` that sets no `CLAUDE_CODE_OAUTH_TOKEN`, and its `PLAYGROUND_ROLE` when its environment lacks one: run it in the shape its reason gives.
   - `no-mac-web-build` refuses a web image build on the Mac while the live dashboard's Postgres runs in its Docker VM: build it on the box with `ci.sh web HEAD`.
-  - `no-main-checkout` refuses a build, test, commit, write or git move in the main checkout: run it in your own worktree, with `git -C <your worktree>`.
+  - `no-main-checkout` refuses a build, test, commit, write or git move in the main checkout: run it in your own worktree, with `git -C <your worktree>` or `cd <worktree> && …` in one command, since a failed command leaves the Bash tool's shell in its old folder without a word.
   - `no-manager-subagent` refuses a manager the Agent and Workflow tools: start a worker through `scripts/spawn.sh` and brief it.
   - `no-off-palette-label` refuses any session's GitHub label create or edit whose color is not a Tailwind 500, and a create with no color: give one of the 22 hexes its reason names.
   - `no-ours-merge` refuses a merge or pull with the ours strategy or option: run `git merge origin/canary` and resolve each conflict with both sides' meaning.
@@ -259,7 +261,7 @@ When a dashboard rule's meaning changes, its ALWAYS line here changes with it.
   - ALWAYS: A person's stack reads their own machine, while factory, test and `PLAYGROUND_FIXTURE` stacks read the fixture, the live dashboard's checkout reads the live machine and a hosted build reads none, as `dashboardSource()` in `api/hono/src/lib/dashboard/fixture.ts` decides.
   - ALWAYS: Keep it on loopback: the API, `next dev` and the live dashboard's built next server bind 127.0.0.1, and the dashboard is never deployed.
     The hosted build is the one exception (stack.md's hosted rule): under `PLAYGROUND_HOSTED=1` it deploys, mounting only sign-in, health and Yard's routes (`api/hono/src/hosted.ts`).
-  - ALWAYS: Keep the hosted build to its allowlist: `api/hono/src/index.ts` imports `hosted.ts` (sign-in, health and Yard) under `PLAYGROUND_HOSTED=1` and `local.ts` otherwise, and fails closed: `hosted.ts` without the flag, and a local build on Vercel, refuse to start.
+  - ALWAYS: Keep the hosted build to its allowlist: `api/hono/src/index.ts` imports `hosted.ts` under `PLAYGROUND_HOSTED=1` and `local.ts` otherwise, and fails closed: `hosted.ts` without the flag, and a local build on Vercel, refuse to start.
   - ALWAYS: Stop `bun run dev` before running `bun run build`, `bun run check-types` or `bun run test`, or committing, in the same worktree.
   - ALWAYS: Keep the dashboard on the owner rung: every route and the WebSocket pass `requireConsoleRole("owner")`, but first run's setup routes, which serve before any user exists.
     Under `PLAYGROUND_HOSTED=1` Yard's routes take the `member` rung instead (stack.md's hosted rule).
@@ -304,7 +306,8 @@ The owner does not review Playground PRs: the review loop is the gate ([ADR 0004
    The Changelog (`api/hono/src/plugins/changelog/sources.ts`) reads a body's `Outcome:` line, else the TL;DR's first bullet or a prose TL;DR's first sentence.
    Before the review's round 1, settle in your own pass what a round should never spend its turn on (most late findings were docs, skill, body and wording ones): run doc-sync over the change, give each touched doc and skill a writing-for-agents read (a completion criterion on every step, positive phrasing, reference disclosed into sibling files, one meaning in one place),
    and fill the template above; the reviewer still judges everything.
-   Done when the body's Evidence names each touched doc and skill with its check, and doc-sync's result, before the review's round 1 opens.
+   When the diff adds a member to an enumerated kind (a status, a type, a choice, a button), grep the repo for the wording of every list that names that kind's members (`git grep -n "Archive, Snooze"`) and update each hit: one such grep once found what six review rounds had found piece by piece.
+   Done when the body's Evidence names each touched doc and skill with its check, doc-sync's result and each list grep with its hits, before the review's round 1 opens.
 2. Have a reviewer agent other than its author (a session started for the review, working in its own scratch clone, whose brief carries the signal rule from The factory, above) score it out of 5 through the [code-review-loop](./extensions/core/skills/code-review-loop/SKILL.md) skill, and fix what it finds, until it scores 5/5 on the latest head,
    GitHub Actions' `Audit, Lint, and Build` and `test` are green there, and nothing is left you would change.
 3. Mark it ready at 5/5 and merge it with `bun run pr:merge <n>`, or let merge-on-ready land it (`bun run pr:train ready`): the only ways a Playground PR reaches `canary`.
