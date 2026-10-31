@@ -122,18 +122,18 @@ describe("stacksOf", () => {
     expect(
       stacksOf({
         records: new Map(),
-        routes: [{ childPgid: 5, hostname: "desk.lightman.localhost", pid: 4 }],
+        routes: [{ childPgid: 5, hostname: "feat-rooms.yard.localhost", pid: 4 }],
         sessions: [],
         worktrees: [],
       }),
     ).toEqual([
       {
         branch: null,
-        name: "desk",
+        name: "feat-rooms",
         path: null,
-        project: "lightman",
+        project: "yard",
         session: null,
-        url: "https://desk.lightman.localhost",
+        url: "https://feat-rooms.yard.localhost",
       },
     ])
   })
