@@ -59,7 +59,8 @@ export const yardChannel = pgTable(
     postRule: text("post_rule", { enum: POST_RULES }).default("members").notNull(),
     topic: text("topic"),
   },
-  () => [
+  (table) => [
+    check("yard_channel_dm_name_check", sql`(${table.kind} = 'dm') = (${table.name} like 'dm:%')`),
     oneOf("yard_channel_kind_check", "kind", CHANNEL_KINDS),
     oneOf("yard_channel_post_rule_check", "post_rule", POST_RULES),
   ],
@@ -118,7 +119,7 @@ export const yardMessage = pgTable(
   ],
 )
 
-// An API token, stored only as its hash and shown once; revoking sets revoked_at, so a revoked token's next call reads 401.
+// An API token, stored only as its hash and shown once; revoking sets revoked_at, so a revoked token's next call reads 401; a name is unique per user, so a post's device names one of its sender's tokens.
 export const yardToken = pgTable(
   "yard_token",
   {

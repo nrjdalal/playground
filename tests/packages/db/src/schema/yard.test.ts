@@ -7,7 +7,7 @@ import { MAX_TEXT } from "../../../../../packages/message/src/index"
 
 // Yard's tables as the migration chain builds them, on a throwaway Postgres in Docker published on 127.0.0.1 only, with made-up users. Skipped where Docker is not running.
 const MIGRATIONS = join(import.meta.dir, "../../../../../packages/db/drizzle")
-const PASSWORD = "yard-schema-test"
+const PASSWORD = crypto.randomUUID()
 
 const dockerUp = (): boolean =>
   Bun.which("docker") !== null &&
@@ -56,7 +56,8 @@ describe.skipIf(!dockerUp())("Yard's tables", () => {
       await db`insert into "user" (id, name, email) values (${id}, ${id}, ${`${id}@example.com`})`
   }, 60_000)
 
-  afterAll(() => {
+  afterAll(async () => {
+    await db?.close()
     if (container)
       Bun.spawnSync(["docker", "rm", "-fv", container], { stderr: "ignore", stdout: "ignore" })
   })
@@ -94,27 +95,36 @@ describe.skipIf(!dockerUp())("Yard's tables", () => {
     expect(await visible(id, "bo")).toEqual([])
   })
 
-  // A write the database refuses, awaited so the query runs.
-  const refused = async (write: () => PromiseLike<unknown>) => {
+  // The message of the error a write is refused with, awaited so the query runs, or null when it is taken.
+  const refusal = async (write: () => PromiseLike<unknown>) => {
     try {
       await write()
-      return false
-    } catch {
-      return true
+      return null
+    } catch (error) {
+      return (error as Error).message
     }
   }
 
   test("a channel kind, a message kind or status it does not know, and text past the limit are refused", async () => {
     const id = await channel("bugs", "channel")
-    expect(await refused(() => channel("x", "group"))).toBe(true)
+    expect(await refusal(() => channel("x", "group"))).toContain("yard_channel_kind_check")
     expect(
-      await refused(
+      await refusal(
         () =>
           db`insert into yard_message (id, channel_id, device, kind, text, user_id) values (${crypto.randomUUID()}, ${id}, ${"studio"}, ${"shout"}, ${"hi"}, ${"ada"})`,
       ),
-    ).toBe(true)
-    expect(await refused(() => post(id, "hi", "lost"))).toBe(true)
-    expect(await refused(() => post(id, "a".repeat(MAX_TEXT + 1)))).toBe(true)
-    expect(await refused(() => post(id, "a".repeat(MAX_TEXT)))).toBe(false)
+    ).toContain("yard_message_kind_check")
+    expect(await refusal(() => post(id, "hi", "lost"))).toContain("yard_message_status_check")
+    expect(await refusal(() => post(id, "a".repeat(MAX_TEXT + 1)))).toContain(
+      "yard_message_text_check",
+    )
+    expect(await refusal(() => post(id, "a".repeat(MAX_TEXT)))).toBeNull()
+  })
+
+  test.each([
+    ["dm:ada:cy", "channel"],
+    ["ada-cy", "dm"],
+  ])("a channel named %s of kind %s is refused", async (name, kind) => {
+    expect(await refusal(() => channel(name, kind))).toContain("yard_channel_dm_name_check")
   })
 })

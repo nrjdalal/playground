@@ -27,6 +27,15 @@ describe("messageSchema", () => {
     expect(messageSchema.safeParse({ ...bare, kind: "text" }).success).toBe(true)
   })
 
+  test.each(["javascript:alert(1)", "data:text/html,hi", "file:///etc/passwd"])(
+    "refuses the link %s",
+    (link) => {
+      expect(messageSchema.safeParse({ ...message, kind: "text", links: [link] }).success).toBe(
+        false,
+      )
+    },
+  )
+
   test(`takes text of ${MAX_TEXT} characters and refuses one past it`, () => {
     expect(
       messageSchema.safeParse({ ...message, kind: "text", text: "a".repeat(MAX_TEXT) }).success,

@@ -7,6 +7,7 @@ CREATE TABLE "yard_channel" (
 	"post_rule" text DEFAULT 'members' NOT NULL,
 	"topic" text,
 	CONSTRAINT "yard_channel_name_unique" UNIQUE("name"),
+	CONSTRAINT "yard_channel_dm_name_check" CHECK (("yard_channel"."kind" = 'dm') = ("yard_channel"."name" like 'dm:%')),
 	CONSTRAINT "yard_channel_kind_check" CHECK (kind in ('channel', 'dm')),
 	CONSTRAINT "yard_channel_post_rule_check" CHECK (post_rule in ('members', 'owner'))
 );
