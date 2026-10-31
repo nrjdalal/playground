@@ -250,7 +250,7 @@ function refuse(what: string, target: Target, detail: string, fix: string): stri
 }
 
 const REWORD =
-  'Write "ship" or "publish step" instead, or leave the comment out. For a file or rule whose name holds the word, name it by what it is, such as "the ship rule" or "the comment hook", with its line number; for a patch that holds it, attach the patch with `gh pr comment --attach <file>#<alt>`, its file name and alt text free of the word.'
+  'Write "ship" or "publish step" instead, or leave the comment out. For a file or rule whose name holds the word, name it by what it is, such as "the ship rule" or "the comment hook", with its line number; for a patch that holds it, write the patch to a file in your scratchpad, send its absolute path to the PR\'s worker by SendMessage, and say in the comment that a patch went to the author, since gh\'s `--attach` uploads only images and video.'
 
 async function judge(
   what: string,
