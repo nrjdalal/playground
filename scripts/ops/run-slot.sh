@@ -362,8 +362,7 @@ quick_kind() {
   [ -z "$kind" ] && ran_short "$@" && kind=quick
   echo "$kind"
 }
-# whether turbo's dry run, in the run's checkout and with its env words, finds every check-types task and the builds under it cached; a dry run that fails or takes over 10 s counts as not cached
-# (retro 5, 31 Oct: the dry run takes about 0.2 s, while 88 of 226 check-types runs ended in 10 s or less and waited 19,953 s, and the rest ran up to 190 s)
+# whether turbo's dry run, in the run's checkout and with its env words, finds every check-types task and the builds under it cached; a dry run that fails or takes over 10 s counts as not cached (retro 5, 31 Oct: the dry run takes about 0.2 s, while 88 of 226 check-types runs ended in 10 s or less and waited 19,953 s, and the rest ran up to 190 s)
 types_cached() {
   local a vars=()
   for a in "$@"; do case "$a" in env) continue ;; *=*) vars+=("$a") ;; *) break ;; esac; done
@@ -387,7 +386,7 @@ light_run() {
   [ -n "$(quick_kind "$@")" ] && return
   local a first="" next="" turbo="" filter="" types=""
   for a in "$@"; do case "$a" in env|*=*) continue ;; esac; [ -z "$first" ] && first=$a && continue; next=$a; break; done
-  # a tsc or bunx tsc ran 13 s at most in the runs log, while an sh -c holding a build and then tsc ran up to 152 s, so only the bare program counts (retro 5, 31 Oct)
+  # the 4 bare bunx tsc runs in the runs log each ran 1 s or less, while an sh -c holding a build and then tsc ran up to 152 s, so only the bare program counts (retro 5, 31 Oct)
   [ "$(basename "$first")" = tsc ] && return
   case "$(basename "$first")" in bun|bunx) ;; *) return 1 ;; esac
   [ "$(basename "$first")" = bunx ] && [ "$next" = tsc ] && return
