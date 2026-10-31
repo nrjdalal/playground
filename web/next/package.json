@@ -8,6 +8,8 @@
     "check-types": "rm -rf .next/dev/types && next typegen && bun ../../.github/scripts/docs.ts && bun ../../packages/scripts/src/data-table-metrics.ts && fumadocs-mdx && tsc --noEmit",
     "dev": "portless",
     "dev:app": "bun ../../.github/scripts/docs.ts && bun ../../packages/scripts/src/data-table-metrics.ts && bun ../../.github/scripts/portless.ts next dev --hostname 127.0.0.1",
+    "serve": "portless --script serve:app",
+    "serve:app": "bun ../../.github/scripts/portless.ts sh -c 'HOSTNAME=127.0.0.1 exec bun \"$PLAYGROUND_BUILD/web/web/next/server.js\"'",
     "start": "HOSTNAME=127.0.0.1 bun .next/standalone/web/next/server.js"
   },
   "dependencies": {
