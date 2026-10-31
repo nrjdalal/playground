@@ -26,6 +26,10 @@ A new test file needs no timing to run; a hand run of `bun run test:timings` on 
 `bun test` also loads the working directory's `.env` into `process.env`, so a test that hands `...process.env` to a child and writes a scratch `.env` for it drops each key that file sets, since the inherited value wins over the file.
 An `expect(...).rejects` or `.resolves` is awaited or returned, or is the body of an arrow helper whose every call is, since in bun:test one that is not passes while checking nothing; `tests/async-expect.test.ts` fails on any that is not.
 A Bun SQL query is a lazy thenable that runs only when awaited, and `await expect(sqlQuery).rejects` never runs it, holding a sandbox worker to its deadline with no output: await the query in a helper and assert on the error's message (`refusal()` in `tests/api/hono/src/lib/store/store-db.test.ts`).
+React Query's `refetchInterval` never fires under `bun test`, with real or fake timers: query-core (5.104.5) reads `isServer` as `typeof window === "undefined"` once at load, and its observer sets no refetch timer while `isServer()` is true.
+Call `environmentManager.setIsServer(() => false)` (exported by `@tanstack/react-query`) in `beforeAll` and `environmentManager.setIsServer(() => true)` in `afterAll`: measured in the parallel pass, a 50 ms interval fetched 8 times in 400 ms with it and once without, and a file run after it in the same worker, its restore removed, still read `isServer()` as true,
+since each file loads its modules afresh.
+Else test the query's options themselves (`inboxPolling()` in `tests/web/next/src/lib/tab-dot.test.ts`), or time the query in a child process that sets `window` before it loads query-core.
 `Bun.which(name)` reads the PATH the process started with, so code under test that looks a tool up that way runs the real tool wherever one is installed and misses a stub the test prepends to `process.env.PATH`: look it up with `Bun.which(name, { PATH: process.env.PATH ?? "" })` (`packages/scripts/src/ops-ext-sync/sync.ts`), or take the lookup as a dependency the test passes in.
 
 ## End-to-end tests
