@@ -186,6 +186,7 @@ export const API_SETTINGS = [
   "PLAYGROUND_CMUX_SESSIONS",
   "PLAYGROUND_FIXTURE",
   "PLAYGROUND_FIXTURE_DIR",
+  "PLAYGROUND_HOSTED",
   "PLAYGROUND_LIVE_READS",
   "PLAYGROUND_ROLE",
   "NODE_ENV",
@@ -286,9 +287,10 @@ const FIX: Record<GuardFailure, string> = {
   vanished: "Docker is up, so run `bun run dev` again",
 }
 
-// What the stack's dashboard reads, and the rule of dashboardSource's that chose it: the live machine, or the fixture the launcher writes for it. A live dashboard reads herdr alone (`cmux: false`) unless it opts in to cmux's sessions (`reason` null), or when cmux would not answer it while cmux held no live factory session (`reason` says why).
+// What the stack's dashboard reads, and the rule of dashboardSource's that chose it: the live machine, the fixture the launcher writes for it, or, on a stack of the hosted build, nothing. A live dashboard reads herdr alone (`cmux: false`) unless it opts in to cmux's sessions (`reason` null), or when cmux would not answer it while cmux held no live factory session (`reason` says why).
 export type Dashboard =
   | { fixture: Fixture; kind: "fixture"; rule: DashboardRule }
+  | { kind: "hosted" }
   | { cmux: false; kind: "live"; reason: string | null; rule: DashboardRule }
   | { cmux: true; kind: "live"; rule: DashboardRule }
 
@@ -396,11 +398,14 @@ export async function preflight(
   if (!read.ok) return refuse(`the API's settings could not be read: ${read.error}`)
   const source = dashboardSource({ branch, env: read.settings, root })
   if (source.kind === "refused") return refuse(source.reason)
-  let dashboard: Dashboard = { cmux: true, kind: "live", rule: source.rule }
+  let dashboard: Dashboard =
+    source.kind === "hosted" ? { kind: "hosted" } : { cmux: true, kind: "live", rule: source.rule }
   if (source.kind === "fixture") {
     const loaded = loadFixture(source.file)
     if (!loaded.ok) return refuse(`${loaded.error}; ${FIXTURE_FIX}`)
     dashboard = { fixture: loaded.fixture, kind: "fixture", rule: source.rule }
+  } else if (source.kind === "hosted") {
+    // the hosted build reads no machine: no fixture to write and no cmux to reach
   } else if (!cmuxSessions(read.settings.PLAYGROUND_CMUX_SESSIONS)) {
     dashboard = { cmux: false, kind: "live", reason: null, rule: source.rule }
   } else {

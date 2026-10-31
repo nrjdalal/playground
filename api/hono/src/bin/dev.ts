@@ -128,8 +128,12 @@ if (!dry) {
     Object.assign(env, dashboard)
     aliasPairs = dashboardAliasPairs(prefixOf(checkout.branch) ?? "")
   }
-  console.error(`dev: dashboard source matched ${DASHBOARD_RULES[checked.dashboard.rule]}`)
-  if (checked.dashboard.kind === "fixture") {
+  if (checked.dashboard.kind === "hosted") {
+    console.error(
+      "dev: the hosted build (PLAYGROUND_HOSTED): the API mounts only sign-in, health and Yard, and reads no machine",
+    )
+  } else if (checked.dashboard.kind === "fixture") {
+    console.error(`dev: dashboard source matched ${DASHBOARD_RULES[checked.dashboard.rule]}`)
     const scratch = fixtureDir({ PLAYGROUND_FIXTURE_DIR: settings.PLAYGROUND_FIXTURE_DIR })
     try {
       writeFixture(checked.dashboard.fixture, scratch)
@@ -142,6 +146,7 @@ if (!dry) {
       `dev: dashboard reads the fixture written to ${scratch}, test data: no cmux, no ~/.claude; its writes land there and go when the stack stops`,
     )
   } else {
+    console.error(`dev: dashboard source matched ${DASHBOARD_RULES[checked.dashboard.rule]}`)
     console.error(
       "dev: dashboard reads this machine's own sessions, every real one included: take no screenshots of this stack",
     )

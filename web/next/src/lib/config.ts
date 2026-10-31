@@ -29,4 +29,7 @@ export const config = {
     url: getClientApiUrl(),
     internalUrl: getInternalApiUrl(),
   },
+
+  // Playground's hosted build (Yard): the dashboard's local pages answer 404 (proxy.ts) and sign-in is GitHub's
+  hosted: env.NEXT_PUBLIC_PLAYGROUND_HOSTED,
 } as const

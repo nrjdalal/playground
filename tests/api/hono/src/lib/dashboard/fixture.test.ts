@@ -65,6 +65,27 @@ describe("dashboardSource", () => {
   const source = (branch: string | null, env: Record<string, string> = {}, root: string = ROOT) =>
     dashboardSource({ branch, env, root })
 
+  test("rule 0: a hosted build reads no machine, whatever else is set", () => {
+    const anything: Record<string, string>[] = [
+      {},
+      { PLAYGROUND_LIVE_READS: "1" },
+      { PLAYGROUND_FIXTURE: "mine.json" },
+      { PLAYGROUND_ROLE: "worker" },
+      { NODE_ENV: "test" },
+      { CLAUDECODE: "1" },
+    ]
+    for (const env of anything) {
+      for (const branch of [LIVE_DASHBOARD_BRANCH, "feat/a", null]) {
+        expect(source(branch, { ...env, PLAYGROUND_HOSTED: "1" }, OWN)).toEqual({ kind: "hosted" })
+        expect(source(branch, { ...env, PLAYGROUND_HOSTED: "true" }, FACTORY)).toEqual({
+          kind: "hosted",
+        })
+      }
+    }
+    expect(source("feat/a", { PLAYGROUND_HOSTED: "0" }, OWN)).toEqual({ kind: "live", rule: "own" })
+    expect(() => ensureFixture({ kind: "hosted" })).toThrow("reads no machine")
+  })
+
   test("rule 1: the live dashboard's checkout reads the live machine, and never a fixture", () => {
     expect(source(LIVE_DASHBOARD_BRANCH)).toEqual({ kind: "live", rule: "live-branch" })
     expect(source(LIVE_DASHBOARD_BRANCH, { PLAYGROUND_LIVE_READS: "1" })).toEqual({
@@ -877,6 +898,27 @@ describe("the shipped fixture's pulls", () => {
         number: Number(agent.pr!.split("/").at(-1)),
       })
     }
+  })
+})
+
+describe("configDir on a hosted source", () => {
+  const keep = ["PLAYGROUND_FIXTURE_DIR", "PLAYGROUND_HOSTED", "PLAYGROUND_LIVE_READS"].map(
+    (name) => [name, process.env[name]] as const,
+  )
+  const scratch = mkdtempSync(join(tmpdir(), "hosted-config-"))
+  afterAll(() => {
+    for (const [name, value] of keep)
+      if (value === undefined) delete process.env[name]
+      else process.env[name] = value
+    rmSync(scratch, { force: true, recursive: true })
+  })
+
+  test("names the fixture's unwritten folder and writes nothing, live reads asked for or not", () => {
+    process.env.PLAYGROUND_FIXTURE_DIR = scratch
+    process.env.PLAYGROUND_HOSTED = "1"
+    process.env.PLAYGROUND_LIVE_READS = "1"
+    expect(configDir()).toBe(join(scratch, "claude"))
+    expect(readdirSync(scratch)).toEqual([])
   })
 })
 

@@ -30,21 +30,21 @@ Read `AGENTS.md` first for the rules (the dashboard app's are in `.agents/dashbo
 Types flow downhill, so a change ripples predictably:
 
 ```
-packages/db/src/schema  →  api/hono/src/routers  →  api/hono/src/index.ts (AppType)  →  web/next/src/lib/api/client.ts  →  app / components
+packages/db/src/schema  →  api/hono/src/routers  →  api/hono/src/local.ts (AppType)  →  web/next/src/lib/api/client.ts  →  app / components
 ```
 
 To add a field end to end: edit and migrate the schema, then select and return it in the router. Every `apiClient` call site is retyped automatically, and the compiler becomes your worklist of what still must change.
 
 ## Entry points (read these first)
 
-- `api/hono/src/index.ts`, the `.route()` chain and `export type AppType`, the whole API shape in one file.
+- `api/hono/src/local.ts`, the `.route()` chain and `export type AppType`, the whole local API shape in one file; `index.ts` serves it, or `hosted.ts` (sign-in, health and Yard) under `PLAYGROUND_HOSTED=1`.
 - `web/next/src/app/layout.tsx`, the web root.
 - `packages/config/src/site.ts`, brand identity and injectable content.
 
 ## Fast find
 
 ```bash
-rg -n "\.route\(" api/hono/src/index.ts               # every mounted router
+rg -n "\.route\(" api/hono/src/local.ts               # every mounted router
 rg -n "export const \w+Router" api/hono/src/routers   # every router definition
 ls packages/db/src/schema                             # every schema file (tables)
 rg -n "apiClient\." web/next/src                      # every API call site

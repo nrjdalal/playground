@@ -68,7 +68,7 @@ export const exampleRouter = new Hono().post(
 ## 2. Wire it
 
 - Export the router from `api/hono/src/routers/index.ts`.
-- Mount it with `.route("/<name>", exampleRouter)` in `api/hono/src/index.ts`, inside the `routes` chain before the openapi/docs handlers, or RPC types will not include it.
+- Mount it with `.route("/<name>", exampleRouter)` in `api/hono/src/local.ts`, inside the `routes` chain before the openapi/docs handlers, or RPC types will not include it.
   A dashboard router mounts under `/v1` (`.route("/v1/<name>", exampleRouter)`), before `v1Router`, so its write guards run before the session read; a moved path keeps answering through `mountOldPaths` (`api/hono/src/routers/old-paths.ts`), which the OpenAPI document leaves out.
 
 ## 3. Restart the stack and test
@@ -136,7 +136,7 @@ A capability the owner may keep or remove is an experiment, so it is a plugin, a
 
 ## WebSocket routes
 
-For a live server-to-client stream instead of polling, upgrade a `GET` with `upgradeWebSocket` (`api/hono/src/index.ts`). The socket owner differs by host: on Bun (local, Docker) it is `hono/bun` with the shared `websocket` handler next to `fetch` in the `Bun.serve()` export; on Vercel it is the Node adapter (`@hono/node-server` + `ws`) exporting the http server, the setup Vercel documents for Hono. That host branching (adapter + server export) lives in `@/lib/server`, picked at boot from `process.env.VERCEL`, so a new WS route just imports `upgradeWebSocket` from there and registers. `/api/health/ws` is the reference: a snapshot on connect, then a heartbeat every 5s.
+For a live server-to-client stream instead of polling, upgrade a `GET` with `upgradeWebSocket` (`api/hono/src/local.ts`). The socket owner differs by host: on Bun (local, Docker) it is `hono/bun` with the shared `websocket` handler next to `fetch` in the `Bun.serve()` export; on Vercel it is the Node adapter (`@hono/node-server` + `ws`) exporting the http server, the setup Vercel documents for Hono. That host branching (adapter + server export) lives in `@/lib/server`, picked at boot from `process.env.VERCEL`, so a new WS route just imports `upgradeWebSocket` from there and registers. `/api/health/ws` is the reference: a snapshot on connect, then a heartbeat every 5s.
 
 - The typed client reaches it with `apiClient.health.ws.$ws()`, a standard `WebSocket` pointed at the API base (`http` becomes `ws`).
 - Frames are not RPC-typed: `ws.send()` takes a raw string and `$ws()` returns a plain `WebSocket`. Parse defensively and read only the fields you need; do not hand-maintain a shared payload type RPC cannot derive.

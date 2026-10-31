@@ -188,7 +188,7 @@ describe("driftProblems", () => {
       "web/next/src/components/ui/button.tsx",
       `<SidebarGroupLabel>Kit</SidebarGroupLabel>`,
     )
-    await write("api/hono/src/index.ts", `.route("/v1", dashboardRouter)`)
+    await write("api/hono/src/local.ts", `.route("/v1", dashboardRouter)`)
     await write("api/hono/src/routers/index.ts", `export * from "@/routers/dashboard"`)
     await write(
       "api/hono/src/routers/dashboard.ts",
