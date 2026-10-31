@@ -105,8 +105,9 @@ export async function forecast(ctx: Context): Promise<Record<string, number>> {
   try {
     const rl = JSON.parse(await Bun.file(join(ctx.data, "usage.json")).text()).rate_limits
     s = {
-      f5: rl.five_hour.used_percentage,
-      r5: rl.five_hour.resets_at,
+      // an account with no 5-hour window (usage.json leaves it out) projects its week alone
+      f5: rl.five_hour?.used_percentage,
+      r5: rl.five_hour?.resets_at,
       r7: rl.seven_day.resets_at,
       s7: rl.seven_day.used_percentage,
       t: Math.floor(seconds(ctx)),

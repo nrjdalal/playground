@@ -351,6 +351,20 @@ describe("forecast", () => {
     })
     expect(await forecast(ctx)).toEqual({})
   })
+
+  test("an account with no 5-hour window still has its week projected", async () => {
+    const { ctx, sweep } = setup()
+    const t = NOW / 1000
+    const r7 = t + 86400
+    write(join(ctx.data, "usage.json"), {
+      rate_limits: { seven_day: { resets_at: r7, used_percentage: 40 } },
+    })
+    writeFileSync(
+      join(sweep, "usage-samples.jsonl"),
+      `${JSON.stringify({ r7, s7: 39, t: t - 3600 })}\n`,
+    )
+    expect(await forecast(ctx)).toEqual({ "7d": 64 })
+  })
 })
 
 describe("pass", () => {
