@@ -182,3 +182,38 @@ test("an account usage.accounts does not list counts nothing", () => {
   )
   expect(status(home)).toStartWith("other@example.test: not a factory account; nothing counted")
 })
+
+// #152: a spare account's own week crosses the marks too, once per its own week reset, while the logged-in account sits below them
+test("a spare account at 97% alerts once per its week reset, with the logged-in account below 90% (#152)", () => {
+  const now = Date.now() / 1000
+  const spare = (weekReset: number) => ({
+    "spare@example.test": { readAt: iso(now), week: 97, weekReset },
+  })
+  const home = setup("spare-97", 50, 20, spare(now + 172800))
+  const marks = () => {
+    const env: Record<string, string | undefined> = {
+      ...process.env,
+      HOME: home,
+      PATH: `${join(home, "bin")}:${process.env.PATH}`,
+    }
+    delete env.CLAUDE_CONFIG_DIR
+    const child = Bun.spawnSync(["python3", "-I", script], { env })
+    expect(child.exitCode).toBe(0)
+    return child.stdout
+      .toString()
+      .split("\n")
+      .filter((line) => line.startsWith("ALERT"))
+      .map((line) => line.split(" ").slice(0, 3).join(" "))
+  }
+  expect(marks()).toEqual(["ALERT 90 spare@example.test:", "ALERT 97 spare@example.test:"])
+  expect(marks()).toEqual([])
+  const usage = join(home, ".playground", "usage.json")
+  writeFileSync(
+    usage,
+    JSON.stringify({
+      ...JSON.parse(readFileSync(usage, "utf8")),
+      accounts: spare(now + 172800 + 7 * 86400),
+    }),
+  )
+  expect(marks()).toEqual(["ALERT 90 spare@example.test:", "ALERT 97 spare@example.test:"])
+})
