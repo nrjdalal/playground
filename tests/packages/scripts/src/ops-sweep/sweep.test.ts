@@ -24,6 +24,7 @@ import {
   maybePrune,
   opsDown,
   pass,
+  prlessBranches,
   type Run,
 } from "../../../../../packages/scripts/src/ops-sweep/sweep"
 
@@ -406,6 +407,100 @@ describe("lateReviewers", () => {
 
   test("a GraphQL answer it cannot read is reviewer-check-unreadable", async () => {
     expect((await late("not json")).found).toEqual(["reviewer-check-unreadable"])
+  })
+})
+
+describe("prlessBranches", () => {
+  const minutesAgo = (m: number) => new Date(NOW - m * 60_000).toISOString()
+  // each branch as GitHub's GraphQL answers it, by its alias: its head pushed `pushed` minutes ago with `open` open PRs, or null when the branch is not on GitHub
+  const answer = (branches: (null | { open: number; pushed: number })[]) =>
+    JSON.stringify({
+      data: {
+        repository: Object.fromEntries(
+          branches.map((b, i) => [
+            `b${i}`,
+            b && {
+              associatedPullRequests: { totalCount: b.open },
+              target: {
+                committedDate: minutesAgo(b.pushed),
+                oid: `c0ffee${i}aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`,
+              },
+            },
+          ]),
+        ),
+      },
+    })
+  const sweep = async (
+    reply: string,
+    rows: Record<string, unknown>[] = [
+      { branch: "PG-234-branch-no-pr", kind: "worker", name: "abcdef-worker", status: "working" },
+    ],
+  ) => {
+    const { ctx } = setup()
+    const told: Call[] = []
+    const queries: string[] = []
+    ctx.factory = async () => "acme/app"
+    ctx.run = async (argv, options = {}) => {
+      if (argv[1] === "/repo/scripts/ops/notify.sh") told.push({ argv, env: options.env })
+      if (argv[0] === "gh") queries.push(argv.join(" "))
+      return { code: 0, err: "", out: argv[0] === "gh" ? reply : "" }
+    }
+    const agents = [{ kind: "builder", name: "builder" }, ...rows]
+    roster(ctx, agents)
+    const found = await prlessBranches(ctx, agents)
+    const again = told.length
+    await prlessBranches(ctx, agents)
+    return { again, found, queries, told }
+  }
+
+  test("tells the worker's lead once per head when its PG branch's head is 15 minutes old with no open PR (#234)", async () => {
+    const { again, found, told } = await sweep(answer([{ open: 0, pushed: 16 }]))
+    expect(found).toEqual([])
+    expect(again).toBe(1)
+    expect(told).toHaveLength(1)
+    expect(told[0]!.env?.NOTIFY_TO).toBe("builder")
+    expect(told[0]!.argv[3]).toBe(
+      "Branch PG-234-branch-no-pr (abcdef-worker): its head c0ffee0 was pushed 16m ago and has no open PR, so no CI runs on it. Open its draft PR so CI runs.",
+    )
+  })
+
+  test("stays quiet with an open PR, a head under 15 minutes, a branch not on GitHub, or an ended or parked row (#234)", async () => {
+    expect((await sweep(answer([{ open: 1, pushed: 30 }]))).told).toEqual([])
+    expect((await sweep(answer([{ open: 0, pushed: 14 }]))).told).toEqual([])
+    expect((await sweep(answer([null]))).told).toEqual([])
+    for (const status of ["ended", "parked"]) {
+      const { queries, told } = await sweep(answer([{ open: 0, pushed: 30 }]), [
+        { branch: "PG-234-branch-no-pr", kind: "worker", name: "abcdef-worker", status },
+      ])
+      expect(told).toEqual([])
+      expect(queries).toEqual([])
+    }
+  })
+
+  test("reads every worker's PG branch in one GraphQL call, and no other branch (#234)", async () => {
+    const { queries, told } = await sweep(
+      answer([
+        { open: 0, pushed: 20 },
+        { open: 0, pushed: 40 },
+      ]),
+      [
+        { branch: "PG-234-branch-no-pr", kind: "worker", name: "abcdef-worker", status: "working" },
+        { branch: "pg-235-other", kind: "worker", name: "ghjkmn-worker", status: "working" },
+        { branch: "fix-not-tracked", kind: "worker", name: "pqrstv-worker", status: "working" },
+      ],
+    )
+    expect(queries).toHaveLength(2)
+    expect(queries[0]).toContain('b0: ref(qualifiedName: "refs/heads/PG-234-branch-no-pr")')
+    expect(queries[0]).toContain('b1: ref(qualifiedName: "refs/heads/pg-235-other")')
+    expect(queries[0]).not.toContain("fix-not-tracked")
+    expect(told.map((c) => c.argv[3]!.split(":")[0])).toEqual([
+      "Branch PG-234-branch-no-pr (abcdef-worker)",
+      "Branch pg-235-other (ghjkmn-worker)",
+    ])
+  })
+
+  test("a GraphQL answer it cannot read is branch-check-unreadable (#234)", async () => {
+    expect((await sweep("not json")).found).toEqual(["branch-check-unreadable"])
   })
 })
 
