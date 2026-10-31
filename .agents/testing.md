@@ -27,8 +27,8 @@ No workflow commits the merged times, since a change reaches `canary` only throu
 
 ## Traps
 
-A test file is the smallest piece a shard takes, and its cases run one after another, so a file whose every case starts a subprocess (`spawn.sh` under `tests/scripts/spawn-fake.ts`, about 0.5s a case, measured) grows by that much with every case it gains.
-Keep each such file under 60s on GitHub, since a file is the floor under its shard's time, by splitting it by `describe` into files of their own (`tests/scripts/spawn-*.test.ts`), with their shared helpers in the fake.
+A test file is the smallest piece a shard takes, and its cases run one after another, so a file whose every case starts a subprocess (`spawn.sh` under `tests/scripts/spawn-fake.ts`, about 0.5s a case, measured, or `run-slot.sh` under `tests/scripts/ops/run-slot-fake.ts`) grows by that much with every case it gains.
+Keep each such file under 60s on GitHub, since a file is the floor under its shard's time, by splitting it by `describe` into files of their own (`tests/scripts/spawn-*.test.ts`, `tests/scripts/ops/run-slot-*.test.ts`), with their shared helpers in the fake.
 `bun test` also loads the working directory's `.env` into `process.env`, so a test that hands `...process.env` to a child and writes a scratch `.env` for it drops each key that file sets, since the inherited value wins over the file.
 An `expect(...).rejects` or `.resolves` is awaited or returned, or is the body of an arrow helper whose every call is, since in bun:test one that is not passes while checking nothing; `tests/async-expect.test.ts` fails on any that is not.
 A Bun SQL query is a lazy thenable that runs only when awaited, and `await expect(sqlQuery).rejects` never runs it, holding a sandbox worker to its deadline with no output: await the query in a helper and assert on the error's message (`refusal()` in `tests/api/hono/src/lib/store/store-db.test.ts`).
