@@ -50,14 +50,6 @@ jobs:
         # GHSA-vfj7-8cjw-p6xm: braces has no patched release, and only dev tooling (shadcn, globby) reaches it
         run: bun packages/scripts/src/audit.ts --audit-level high --ignore GHSA-vfj7-8cjw-p6xm --new-over origin/${{ github.base_ref }}
 
-      # its inputs hold the private text it counts, so they come from secrets, and it fails while any is unset
-      - name: Trace count
-        run: bun packages/scripts/src/trace-count/ci.ts
-        env:
-          FACTORY_ARCHIVE_REPO: ${{ secrets.FACTORY_ARCHIVE_REPO }}
-          NO_PUBLIC_LEAK_LIST: ${{ secrets.NO_PUBLIC_LEAK_LIST }}
-          OWNER_NAMES: ${{ secrets.OWNER_NAMES }}
-
       - name: Format, Lint, Check-types, Test, and Build
         run: |
           bun run format:check
@@ -75,3 +67,12 @@ jobs:
           SKIP_ENV_VALIDATION: true
           # the suite's parallel pass names the file it hangs in at its deadline, which lands well inside the job's 20 minutes
           TEST_PARALLEL_DEADLINE_MS: 600000
+
+      # its inputs hold the private text it counts, so they come from secrets, and it fails while any is unset; last, and after any red step, so its result hides no other
+      - name: Trace count
+        if: ${{ !cancelled() }}
+        run: bun packages/scripts/src/trace-count/ci.ts
+        env:
+          FACTORY_ARCHIVE_REPO: ${{ secrets.FACTORY_ARCHIVE_REPO }}
+          NO_PUBLIC_LEAK_LIST: ${{ secrets.NO_PUBLIC_LEAK_LIST }}
+          OWNER_NAMES: ${{ secrets.OWNER_NAMES }}
