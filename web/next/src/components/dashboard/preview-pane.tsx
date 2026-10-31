@@ -21,6 +21,7 @@ import {
   loadable,
   PREVIEWS_QUERY_KEY,
   previewUrl,
+  stackGroups,
   startAddress,
 } from "@/lib/previews"
 import { fetchStacks, STACKS_QUERY_KEY } from "@/lib/stacks"
@@ -45,7 +46,7 @@ const scrollerOf = (el: HTMLElement | null): HTMLElement | null => {
   return null
 }
 
-// The Inbox's Preview row: a picker of the machine's dev stacks and the pages agents leave in Previews, an address, reload and open in a new tab, and the page live in a frame that fills the pane below.
+// The Inbox's Preview row: a picker of every project's worktrees on this machine, by project, each running one's stack and a stopped one shown, and the pages agents leave in Previews, an address, reload and open in a new tab, and the page live in a frame that fills the pane below.
 export function PreviewPane() {
   const [address, setAddress] = useState("")
   const [typed, setTyped] = useState("")
@@ -62,7 +63,8 @@ export function PreviewPane() {
       label: preview.page?.title ?? preview.caption ?? preview.name,
       value: previewUrl(config.api.url, preview.name),
     }))
-  const stackItems = (stacks.data ?? []).map((stack) => ({ label: stack.name, value: stack.url }))
+  const groups = stackGroups(stacks.data ?? [])
+  const stackItems = groups.flatMap((group) => group.items)
 
   const show = (next: string) => {
     setAddress(next)
@@ -111,7 +113,7 @@ export function PreviewPane() {
   const page = address.startsWith(PREVIEW_PREFIX)
   const picked = page
     ? address
-    : (stacks.data?.find((stack) => address.startsWith(`${stack.url}/`))?.url ?? "")
+    : (stacks.data?.find((stack) => stack.url && address.startsWith(`${stack.url}/`))?.url ?? "")
 
   return (
     <div className="flex flex-col pb-3">
@@ -133,14 +135,22 @@ export function PreviewPane() {
             <SelectValue placeholder="Pick a stack" className="truncate" />
           </SelectTrigger>
           <SelectContent align="start" alignItemWithTrigger={false} className="max-h-72 w-72">
-            <SelectGroup>
-              <SelectLabel>Stacks</SelectLabel>
-              {stackItems.map((item) => (
-                <SelectItem key={item.value} value={item.value} className="text-xs">
-                  <span className="truncate">{item.label}</span>
-                </SelectItem>
-              ))}
-            </SelectGroup>
+            {/* each project's worktrees, a stopped one shown but not picked */}
+            {groups.map((group) => (
+              <SelectGroup key={group.project}>
+                <SelectLabel>{group.project}</SelectLabel>
+                {group.items.map((item) => (
+                  <SelectItem
+                    key={item.value}
+                    value={item.value}
+                    disabled={item.disabled}
+                    className="text-xs"
+                  >
+                    <span className="truncate">{item.label}</span>
+                  </SelectItem>
+                ))}
+              </SelectGroup>
+            ))}
             {pages.length > 0 && (
               <SelectGroup>
                 <SelectLabel>Previews</SelectLabel>

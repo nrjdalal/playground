@@ -120,8 +120,8 @@ describe("the configured people in a headline", () => {
   })
 
   test("a listed name matches only whole, so a longer word holding it stays", () => {
-    expect(headlineWith("Soren", "The Waleeds and Alwaleed rows stay, and Soren's goes.")).toBe(
-      "The Waleeds and Alwaleed rows stay, and a teammate's goes.",
+    expect(headlineWith("Soren", "The Sorens and Asoren rows stay, and Soren's goes.")).toBe(
+      "The Sorens and Asoren rows stay, and a teammate's goes.",
     )
   })
 
@@ -240,10 +240,10 @@ describe("the configured people in a headline", () => {
   test("an address holding a listed name only inside a longer word stays as written", () => {
     expect(
       headlinesWith("Soren,Ana", [
-        "Mail ofwaleed@example.com for access.",
+        "Mail ofsoren@example.com for access.",
         "Mail banana@example.com for access.",
       ]),
-    ).toEqual(["Mail ofwaleed@example.com for access.", "Mail banana@example.com for access."])
+    ).toEqual(["Mail ofsoren@example.com for access.", "Mail banana@example.com for access."])
   })
 
   test("empty entries in the list match nothing", () => {
@@ -279,9 +279,9 @@ describe("the configured people in a headline", () => {
     )
   })
 
-  test("a digit continues a word, so a listed Soren inside Waleed2 stays", () => {
-    expect(headlineWith("Soren", "Waleed2 asked and Soren agreed.")).toBe(
-      "Waleed2 asked and a teammate agreed.",
+  test("a digit continues a word, so a listed Soren inside Soren2 stays", () => {
+    expect(headlineWith("Soren", "Soren2 asked and Soren agreed.")).toBe(
+      "Soren2 asked and a teammate agreed.",
     )
   })
 
