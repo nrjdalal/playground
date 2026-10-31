@@ -14,10 +14,12 @@ const CHANNEL = "yard"
 // The sockets open on this instance, by the member they belong to.
 const open = new Map<string, Set<Socket>>()
 
+// With KV_URL set, the first join subscribes, so a socket hears posts from other instances before its own instance has posted.
 export const join = (userId: string, socket: Socket) => {
   const set = open.get(userId) ?? new Set()
   set.add(socket)
   open.set(userId, set)
+  if (env.KV_URL) connect(env.KV_URL).catch(() => {})
 }
 
 export const leave = (userId: string, socket: Socket) => {
@@ -31,7 +33,7 @@ const sendHere = (userIds: string[], frame: Frame) => {
 }
 
 // With KV_URL set, every instance subscribes to one Redis channel, so a post on one instance reaches a socket held by another; without it, the instance's own sockets alone, as one local process has.
-// The publisher is kept only once the subscribe has succeeded, so an instance never publishes while it cannot deliver to its own sockets; a failed connect is tried again on the next publish.
+// The publisher is kept only once the subscribe has succeeded, so an instance never publishes while it cannot deliver to its own sockets; a failed connect is tried again on the next join or publish.
 let publisher: Promise<RedisClient> | null = null
 const connect = (url: string) => {
   publisher ??= (async () => {
