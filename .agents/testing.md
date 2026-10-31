@@ -4,6 +4,7 @@
 
 A bare `bun test` from the repo root stops at `tests/require-sandbox.ts`, which `bunfig.toml` preloads, since only `test-sandbox.ts` gives a test a scratch home in place of the real one; bun reads `bunfig.toml` from the folder it runs in, so a run from a subfolder goes unguarded.
 That sandbox (`packages/scripts/src/sandbox.ts`) also sets `TZ=UTC`, so a test's children read one zone on the Mac and the runner box; a test of code that reads local time gives its child its own `TZ`.
+It keeps uv's Pythons and cache the real home's (`UV_PYTHON_INSTALL_DIR` and `UV_CACHE_DIR`, read before it swaps HOME), so a child's `uv run --python 3.13` finds its Python in place of downloading one.
 It also puts a fake `claude` and a fake `gh` first on PATH, each exiting 99 with a line naming the sandbox, so no test starts a session or reaches GitHub; a test that needs `gh`'s output puts its own fake ahead of the sandbox's on PATH.
 Run from a folder with none of the env files `bun test` loads (`.env`, `.env.test` and `.env.test.local`, never `.env.local`), such as a skill-only worktree, `test-sandbox.ts` sets `SKIP_ENV_VALIDATION=true` for its tests unless the caller set it, so one whose import validates the env still runs there.
 
@@ -26,6 +27,7 @@ A new test file needs no timing to run; a hand run of `bun run test:timings` on 
 `bun test` also loads the working directory's `.env` into `process.env`, so a test that hands `...process.env` to a child and writes a scratch `.env` for it drops each key that file sets, since the inherited value wins over the file.
 An `expect(...).rejects` or `.resolves` is awaited or returned, or is the body of an arrow helper whose every call is, since in bun:test one that is not passes while checking nothing; `tests/async-expect.test.ts` fails on any that is not.
 A Bun SQL query is a lazy thenable that runs only when awaited, and `await expect(sqlQuery).rejects` never runs it, holding a sandbox worker to its deadline with no output: await the query in a helper and assert on the error's message (`refusal()` in `tests/api/hono/src/lib/store/store-db.test.ts`).
+A test that builds a child's env from scratch rather than from `process.env` passes `UV_PYTHON_INSTALL_DIR` and `UV_CACHE_DIR` through (`drive()` in `tests/scripts/ops/unstick/run.test.ts`), since a child's `uv run --python 3.13` without them downloads a 66 MB CPython into the scratch home, and on a slow network each case's download outlasts its 30s and starts again in the next.
 `Bun.which(name)` reads the PATH the process started with, so code under test that looks a tool up that way runs the real tool wherever one is installed and misses a stub the test prepends to `process.env.PATH`: look it up with `Bun.which(name, { PATH: process.env.PATH ?? "" })` (`packages/scripts/src/ops-ext-sync/sync.ts`), or take the lookup as a dependency the test passes in.
 
 ## End-to-end tests
