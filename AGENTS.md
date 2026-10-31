@@ -16,6 +16,8 @@ Start each task with the `codebase-map` skill to orient, then load the task skil
   See the `db-migration` skill.
 - ALWAYS: Point local database work at a disposable container of the worktree's own, published on loopback alone: `docker run -d --name playground-<worktree>-db -e POSTGRES_PASSWORD=<pw> -p 127.0.0.1::5432 postgres:alpine`, then `docker port playground-<worktree>-db 5432` for its port.
   One exception: first run's pglaunch database, on all interfaces as the owner chose (`.agents/dashboard/stack.md`).
+  A second: a Vibeground's copy, which the owner chose to hold real data, so a Vibeground shows real rows while its database changes stay in a copy that is thrown away.
+  Its container is seeded by one `pg_dump` inside the live dashboard's container, the only read of the live database, and its branch's migrations run on the copy alone (`api/hono/src/lib/dashboard/vibe.ts`); its real rows stay out of every screenshot and PR, and only the owner's own clicks start or stop one.
   Set the URL in the worktree's own `.env`, started from `.env.example` rather than copied from another checkout, and never point it at the live dashboard's database.
   Playground has no shared database, but the live dashboard's local Postgres (the one its `POSTGRES_URL` names) holds every real session and transcript, so a migration or a rename applied there breaks the running dashboard.
   Seed fake rows; real rows must never reach a screenshot or a PR.
