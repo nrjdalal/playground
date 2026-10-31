@@ -24,10 +24,10 @@ port=$(docker port "$c" 5432 | head -1 | sed 's/.*://')
 echo "name \\"$c :$port\\" started"
 echo "postgres://postgres:postgres@localhost:$port/postgres"
 `,
-  // a launch that names its session runs the scripted one (claude.ts), any other call answers at once
+  // a launch that names its session runs the scripted one (claude.ts), any other call answers at once; HERDR_AGENT is herdr's wrapper hint, so it reads the bun process as claude's foreground process
   claude: `${logged(box, "claude")}[ "$1" = setup-token ] && exec bun "${box}/h/playground/api/hono/src/fixtures/setup-token.ts" setup-token
 [ "$1 $2" = "auth status" ] && { echo '{"loggedIn": true}'; exit 0; }
-exec bun "${join(import.meta.dir, "claude.ts")}" "$@"
+HERDR_AGENT=claude exec bun "${join(import.meta.dir, "claude.ts")}" "$@"
 `,
   cmux: `${logged(box, "cmux")}exit 1\n`,
   gh: `${logged(box, "gh")}case "$1 $2" in
