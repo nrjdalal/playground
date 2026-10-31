@@ -12,10 +12,10 @@ set -euo pipefail
 #      hw.ncpu) times PLAYGROUND_LOAD_MULT (default 1.0), each start weighing
 #      half its item's load units (small 1, medium 2, big 3: --size, else small
 #      for a reviewer or tester, else what `ops/run-slot.sh size <name>` reads),
-#      and a quarter of that cap kept for small items, so a big plan never
-#      blocks a small one; a load over that line reads the CPU's busy cores
-#      (top -l 2 -n 0) too, and refuses only when they and the starts are over
-#      it as well, or when top cannot be read
+#      and a quarter of that cap kept for small items, so a big plan never blocks a small one,
+#      a small worker keeping an eighth in its place for the reviewers and testers; a load over that
+#      line reads the CPU's busy cores (top -l 2 -n 0) too, and refuses only when they and the starts
+#      are over it as well, or when top cannot be read
 #   2. memory, pressure level 1 or 2 (kern.memorystatus_vm_pressure_level) and
 #      free at 8% or more (kern.memorystatus_level)
 #   A GLM session takes its own load and memory gate in place of both:
@@ -23,8 +23,8 @@ set -euo pipefail
 #   3. usage, the launching backend's own window: Claude reads usage.json
 #      (5-hour under 90%, the week within 14.3 points a day of pace, floored at one day's share, readings
 #      no older than 15 minutes; one never written, as on a fresh install before ops-usage first runs, passes,
-#      its row reading it unread) and each other login's usage-<name>.json (the
-#      same checks, readings no older than 60 minutes); with no --account it
+#      its row reading it unread; a missing 5-hour window is an account with no 5-hour limit, read as none) and each other login's
+#      usage-<name>.json or reading in login-flip.json's seen (the same checks, readings no older than 60 minutes); with no --account it
 #      starts on the passing login next in the account split, else the one with the lowest week, naming it, and refuses
 #      only when every login is over, its pick kept off the resume record's exec line so a restore picks afresh; --account skips the usage
 #      check, since the other login's usage is not this machine's, but refuses a week a reading names at 100%; GLM reads zai-usage.json
@@ -231,7 +231,7 @@ PY
 own_config() { if [ -n "$UNSET" ]; then echo "$HOME/.claude.json"; else echo "${CLAUDE_CONFIG_DIR:-$HOME}/.claude.json"; fi; }
 gate_capacity() {
   verdict=$(
-    python3 -I - "$DATA" "$ACCOUNT" "$BACKEND" "${CLAUDE_CONFIG_DIR:-$HOME/.claude}" "$(own_config)" "${CHECK:+check}" "$MOVE_PID" "$GATES" $ITEM <<'PY'
+    python3 -I - "$DATA" "$ACCOUNT" "$BACKEND" "${CLAUDE_CONFIG_DIR:-$HOME/.claude}" "$(own_config)" "${CHECK:+check}" "$MOVE_PID" "$GATES" $ITEM "$ROLE" <<'PY'
 import datetime as dt
 import glob
 import json
@@ -240,7 +240,7 @@ import os
 import subprocess
 import sys
 
-data_dir, account, backend, config_dir, own_config, check, move, gates, size, units = sys.argv[1:11]
+data_dir, account, backend, config_dir, own_config, check, move, gates, size, units, role = sys.argv[1:12]
 log_path = os.path.join(data_dir, "ops", "capacity.jsonl")
 units = int(units)
 gates = json.loads(gates)
@@ -371,8 +371,9 @@ else:
         except OSError:
             pass
     readings["starts"] = starts
-    # gates.smallReserve of the cap stays for small items, so a big plan never blocks the small ones
-    keep = 0 if size == "small" else cap * gates["smallReserve"]
+    # the reserves nest: a start that is not small keeps gates.smallReserve for small items, so a big plan never blocks the small ones, and a small worker keeps gates.reviewReserve for the checkers, which start small
+    share = (gates["reviewReserve"] if role == "worker" else 0) if size == "small" else gates["smallReserve"]
+    keep = cap * share
     readings["reserve"] = keep
     # the load average counts the sessions' many short-lived processes (load 24 on 15 cores at 55% idle, 22 Oct), so a load over the line reads the CPU's busy cores too, against the same line held at the cores' count, and refuses only when both are over
     if readings["load5"] + starts >= cap - keep:
@@ -384,7 +385,7 @@ else:
             pass
         readings["cpu_idle"] = idle
         cpu_cap = min(cap, cores)
-        cpu_line = cpu_cap - (0 if size == "small" else cpu_cap * gates["smallReserve"])
+        cpu_line = cpu_cap - cpu_cap * share
         if idle is not None:
             readings["cpu_busy"] = round(cores * (100 - idle) / 100, 2)
         if idle is None or readings["cpu_busy"] + starts >= cpu_line:
@@ -393,7 +394,7 @@ else:
                 if mult != 1
                 else f"the {cores} cores"
             )
-            at = f"at or over {at}" if not keep else f"at or over {cap - keep:g}: {at}, less the {keep:g} kept for small items (this start is {size})"
+            at = f"at or over {at}" if not keep else f"at or over {cap - keep:g}: {at}, less the {keep:g} kept for {'checkers (gates.reviewReserve; this start is a small worker)' if size == 'small' else f'small items (this start is {size})'}"
             cpu = (
                 "it cannot read the CPU use (top), so the load alone decides"
                 if idle is None
@@ -500,9 +501,9 @@ else:
         five = rate.get("five_hour")
         five_hour = five.get("used_percentage") if isinstance(five, dict) else None
         if isinstance(five_hour, bool) or not isinstance(five_hour, (int, float)):
-            five_hour = 0  # the ops-usage job leaves out a window it read no numbers for, so a missing one reads as 0, as a reset one does
-        seen["fiveHour"] = five_hour
-        if five_hour >= 90:
+            five_hour = None  # no 5-hour window: an account Anthropic gives no 5-hour limit, so none, never 0%
+        seen["fiveHour"] = "none" if five_hour is None else five_hour
+        if five_hour is not None and five_hour >= 90:
             try:
                 reset = f"{from_iso(five['resets_at']):%H:%M} UTC"
             except (KeyError, TypeError, ValueError):
@@ -557,6 +558,26 @@ else:
             continue
         seen, detail = judge(name, other, 60, "The optimizer's spare watch writes it every 5 minutes while it runs.")
         logins.append((email, name, email, seen, detail))
+        # a refused file leaves the account open to its login-flip reading below
+        if detail is None:
+            known.add(email.lower())
+    # each account login-flip probes, from its reading in login-flip.json's seen, so the split's accounts reach the pick with no usage-<name>.json of their own
+    try:
+        with open(os.path.join(data_dir, "ops", "usage", "login-flip.json")) as f:
+            flip_seen = json.load(f).get("seen") or {}
+    except Exception:
+        flip_seen = {}
+    for email, s in sorted(flip_seen.items()) if isinstance(flip_seen, dict) else []:
+        if not isinstance(email, str) or "@" not in email or email.lower() in known or not isinstance(s, dict):
+            continue
+        rate = {"seven_day": {"used_percentage": s.get("week"), "resets_at": s.get("weekReset")}}
+        if isinstance(s.get("five"), (int, float)):
+            rate["five_hour"] = {"used_percentage": s["five"], "resets_at": s.get("fiveReset")}
+        name = "login-flip.json seen"
+        seen, detail = judge(name, {"rate_limits": rate, "writtenAt": s.get("at")}, 60, "login-flip.py probes it each ops tick.")
+        logins.append((email, name, email, seen, detail))
+        if detail is None:
+            known.add(email.lower())
     passing = [login for login in logins if login[4] is None]
     if not passing:
         readings.update(logins[0][3])
@@ -636,17 +657,17 @@ GLM_ACCOUNT=
 GLM_GIVEN=
 # The models a session runs on (models.*) and the capacity gate's lines (gates.*) are settings, each in the docs' list of keys, so changing one is a settings write, never an edit here.
 MODEL_SETTINGS=$(env $UNSET "$BUN" "$REPO/packages/scripts/src/playground/setting.ts" --text models.claude models.default models.checker models.glm models.glmKeychainService \
-  gates.glmLoad5Max gates.glmSwapinsMax gates.memoryFreeMin gates.smallReserve gates.startsWindow sessions.names sessions.aliases context.window 2>&1) ||
+  gates.glmLoad5Max gates.glmSwapinsMax gates.memoryFreeMin gates.reviewReserve gates.smallReserve gates.startsWindow sessions.names sessions.aliases context.window 2>&1) ||
   { echo "spawn.sh refuses: it cannot read the model and gate settings: $MODEL_SETTINGS" >&2; exit 1; }
 {
   read -r CLAUDE_MODELS; read -r DEFAULT_MODEL; read -r CHECKER_MODEL; read -r GLM_ID; read -r GLM_KEYCHAIN
-  read -r GLM_LOAD5_MAX; read -r GLM_SWAPINS_MAX; read -r MEMORY_FREE_MIN; read -r SMALL_RESERVE; read -r STARTS_WINDOW
+  read -r GLM_LOAD5_MAX; read -r GLM_SWAPINS_MAX; read -r MEMORY_FREE_MIN; read -r REVIEW_RESERVE; read -r SMALL_RESERVE; read -r STARTS_WINDOW
   read -r SESSION_NAMES; read -r SESSION_ALIASES; read -r WINDOW
 } <<<"$MODEL_SETTINGS"
 SESSION_KINDS=$(python3 -I -c 'import json, sys; n, a = map(json.loads, sys.argv[1:3]); [print(*row) for row in [(v, k) for k, v in n.items()] + [(n["dispatcher"] + "-2", "dispatcher")] + list(a.items())]' "$SESSION_NAMES" "$SESSION_ALIASES")
 # slots.peers, the ops folders of the other factories on this machine, whose starts the load gate counts beside this one's; none when unread
 PEERS=$(setting slots.peers) || PEERS=; [ -n "$PEERS" ] || PEERS="[]"
-GATES="{\"glmLoad5Max\": $GLM_LOAD5_MAX, \"glmSwapinsMax\": $GLM_SWAPINS_MAX, \"memoryFreeMin\": $MEMORY_FREE_MIN, \"peers\": $PEERS, \"smallReserve\": $SMALL_RESERVE, \"startsWindow\": $STARTS_WINDOW}"
+GATES="{\"glmLoad5Max\": $GLM_LOAD5_MAX, \"glmSwapinsMax\": $GLM_SWAPINS_MAX, \"memoryFreeMin\": $MEMORY_FREE_MIN, \"peers\": $PEERS, \"reviewReserve\": $REVIEW_RESERVE, \"smallReserve\": $SMALL_RESERVE, \"startsWindow\": $STARTS_WINDOW}"
 MODELS=$(printf '%s\n' $CLAUDE_MODELS | awk '{ m[NR] = $0 } END { for (i = 1; i <= NR; i++) printf "%s%s", m[i], (i < NR - 1 ? ", " : i == NR - 1 ? " or " : "") }')
 CLAUDE_MODEL=
 RESUME_BRIEF=

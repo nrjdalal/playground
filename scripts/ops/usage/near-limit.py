@@ -42,9 +42,11 @@ def probe(email):
     if not h or h.get("anthropic-ratelimit-unified-7d-utilization") is None:
         return None
     f = lambda k: float(h.get(f"anthropic-ratelimit-unified-{k}") or 0)
-    got = {"five": round(f("5h-utilization") * 100), "fiveReset": f("5h-reset"), "week": round(f("7d-utilization") * 100), "weekReset": f("7d-reset")}
+    # no 5-hour headers: an account with no 5-hour window, so none, never 0%, as login-flip.py's probe reads it
+    five = h.get("anthropic-ratelimit-unified-5h-utilization") is not None
+    got = {"five": round(f("5h-utilization") * 100) if five else None, "fiveReset": f("5h-reset") if five else None, "week": round(f("7d-utilization") * 100), "weekReset": f("7d-reset")}
     if h.get("anthropic-ratelimit-unified-status") == "rejected":
-        got["limitedUntil"] = got["weekReset"] if got["week"] >= 100 or got["five"] < 100 else got["fiveReset"]
+        got["limitedUntil"] = got["weekReset"] if got["week"] >= 100 or (got["five"] or 0) < 100 else got["fiveReset"]
     return got
 
 

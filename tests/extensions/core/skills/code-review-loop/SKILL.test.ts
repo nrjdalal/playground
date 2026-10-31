@@ -20,6 +20,27 @@ describe("code-review-loop keeps its reviewer for the merge (#1067)", () => {
     expect(await page()).toContain("on a local merge with canary")
   })
 
+  test("green CI at the head stands in for the local touched-tests run while canary changed none of the PR's files (PG-124)", async () => {
+    const last = (await skill()).split("## The last 5/5")[1]?.split("\n## ")[0] ?? ""
+    const stand = last.split("**CI stands in**")[1]?.split("\n")[0] ?? ""
+    expect(stand).toContain("head sha equal to `<head>`")
+    expect(stand).toContain("`HEAD is now at <sha> Merge <head> into <run base>`")
+    expect(stand).toContain("`git -C <clone> diff --name-only <run base> origin/canary`")
+    expect(stand).toContain("a repo scanner or a data file one reads")
+    expect(stand).toContain(
+      "`touched tests: PR CI green at <sha7> on canary <run base7>: <run link>`",
+    )
+    expect(stand).toContain("the local run stays as written")
+    expect(last).toContain(
+      "on a local merge with `origin/canary`, unless CI stands in for them (below)",
+    )
+    expect(last).toContain("The merge also runs, unless CI stands in for it,")
+    expect(last.split("**Done when**")[1] ?? "").toContain("or CI stood in for them at the head")
+    expect(await page()).toContain(
+      "cites that run's link in place of a local run of the touched tests",
+    )
+  })
+
   test("a PR that adds or changes a repo scanner gets the local merge whatever canary changed (#1959)", async () => {
     const last = (await skill()).split("## The last 5/5")[1]?.split("\n## ")[0] ?? ""
     expect(last).toContain(
@@ -84,9 +105,13 @@ describe("code-review-loop's touched tests come from the diff (#1104, #1525)", (
       join(root, "extensions/core/skills/code-review-loop/scripts/state.py"),
     ).text()
     for (const file of [
+      "tests/packages/scripts/src/parity/record.test.ts",
+      "tests/packages/scripts/src/trace-count/count.test.ts",
       "tests/packages/scripts/src/verify/dashboard-map.test.ts",
+      "tests/packages/scripts/src/verify/prebuild.test.ts",
       "tests/scripts/hooks/no-bare-slack-link.test.ts",
       "tests/scripts/hooks/no-playground-leak.test.ts",
+      "tests/skills/built-in-names.test.ts",
     ])
       expect(script).toContain(file)
     expect(script).toContain("GIT_GREP = ")
@@ -112,5 +137,23 @@ describe("code-review-loop posts on fresh checks (#1657)", () => {
     expect(body).toContain("Right before the verdict posts, read the head's checks again")
     expect(body).toContain("each check red there is a blocking finding")
     expect(done).toContain("the head's checks were read again right before the verdict posted")
+  })
+})
+
+// The owner's choice: green for 5/5, orange for 4/5, red for 3/5 or less, each a Tailwind 500 that no-off-palette-label lets through
+describe("the Review label carries its score's color (PG-157)", () => {
+  const comments = () =>
+    Bun.file(join(root, "extensions/core/skills/code-review-loop/references/COMMENTS.md")).text()
+
+  test("COMMENTS.md's table maps every score to its Tailwind 500, and the reviewer sets it before the label", async () => {
+    const { TAILWIND_500 } = await import(join(root, "scripts/hooks/no-off-palette-label.ts"))
+    const text = await comments()
+    const rows = [...text.matchAll(/^\| `Review • (\d)\/5` +\| `#([0-9a-f]{6})` +\|$/gm)].map(
+      ([, score, color]) => [Number(score), color],
+    )
+    const want = (score: number) =>
+      score === 5 ? TAILWIND_500.green : score === 4 ? TAILWIND_500.orange : TAILWIND_500.red
+    expect(rows).toEqual([5, 4, 3, 2, 1].map((score) => [score, want(score)]))
+    expect(text).toContain("gh label create 'Review • <s>/5' -R <repo> --color <hex> --force")
   })
 })

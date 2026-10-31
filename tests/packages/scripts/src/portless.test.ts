@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 
-import { overridesFor } from "../../../.github/scripts/portless"
+import { overridesFor } from "../../../../packages/scripts/src/portless"
 
 describe("overridesFor", () => {
   test("tells a worktree's apps their own branch-prefixed names", () => {

@@ -15,12 +15,14 @@ It runs the files in parallel (`packages/scripts/src/test-sandbox.ts`: `bun test
 A test runs beside the others when it shares nothing with them: it binds port 0, starts its containers unnamed or named per process, and takes its scratch folders from `mkdtemp`; one that cannot joins `SERIAL`.
 So does one that rebuilds a package or moves a file other tests read, since a worker beside it would read the half-built file, and one that hangs only beside other workers.
 In the parallel pass each test gets 30s where bun gives 5s, since a test runs slower beside other workers; a test's own timeout wins, so read it first.
-A parallel pass still running at its deadline (`TEST_PARALLEL_DEADLINE_MS`, 20 minutes, which the runner box's `suite.sh` raises and GitHub's Audit job lowers to 10, inside its own 20-minute `timeout-minutes`) is killed and fails, naming the files its workers still held, since bun's own timeout cannot stop synchronous code; the run's first line names the deadline it holds.
+A parallel pass still running at its deadline (`TEST_PARALLEL_DEADLINE_MS`, 20 minutes, which the runner box's `suite.sh` raises and each of GitHub's shards lowers to 10, inside its own 20-minute `timeout-minutes`) is killed and fails, naming the files its workers still held, since bun's own timeout cannot stop synchronous code; the run's first line names the deadline it holds.
+GitHub runs the suite as shards rather than one run: `packages/scripts/src/test-shards.ts` packs the files longest first into as many shards as its budget of recorded file time (`BUDGET_MS`) needs, by `tests/timings.json`, where a file with none weighs the mean.
+Each shard runs its own files through `test-sandbox.ts`, and the `Audit, Lint, and Build` check is green only when every shard and the lint and build job passed.
+A new test file needs no timing to run; a hand run of `bun run test:timings` on `canary`, committed, keeps the timings current until CI refreshes them, so the shards stay even as files grow.
 `tests/` is fork-excluded, so the root script no-ops where the directory is absent.
 
 ## Traps
 
-Note `bun test` skips dot-directories, which is why `.github/scripts` tests live under `tests/github/scripts/`.
 `bun test` also loads the working directory's `.env` into `process.env`, so a test that hands `...process.env` to a child and writes a scratch `.env` for it drops each key that file sets, since the inherited value wins over the file.
 An `expect(...).rejects` or `.resolves` is awaited or returned, or is the body of an arrow helper whose every call is, since in bun:test one that is not passes while checking nothing; `tests/async-expect.test.ts` fails on any that is not.
 A Bun SQL query is a lazy thenable that runs only when awaited, and `await expect(sqlQuery).rejects` never runs it, holding a sandbox worker to its deadline with no output: await the query in a helper and assert on the error's message (`refusal()` in `tests/api/hono/src/lib/store/store-db.test.ts`).

@@ -47,7 +47,7 @@ export const PORTLESS = { PORTLESS_SYNC_HOSTS: "0" }
 // The bare names the live dashboard takes beside its own `desk.`-prefixed names, as portless names their hosts.
 const BARE_HOSTS = ["api.playground.localhost", "playground.localhost"]
 
-// What the live dashboard's stack is told beyond any other's: that the bare names are its too, so the API trusts the bare web origin (.github/scripts/portless.ts). Its own URLs stay its `desk.`-prefixed names, so it works whatever the aliases hold.
+// What the live dashboard's stack is told beyond any other's: that the bare names are its too, so the API trusts the bare web origin (packages/scripts/src/portless.ts). Its own URLs stay its `desk.`-prefixed names, so it works whatever the aliases hold.
 export const dashboardEnv = (
   { branch }: Checkout,
   liveDashboard: LiveDashboard = livePair(),

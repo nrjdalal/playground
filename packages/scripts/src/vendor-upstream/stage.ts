@@ -17,6 +17,7 @@ export type Vendored = { ok: true; files: number } | { ok: false; mismatches: st
 // The upstream skills core keeps, the ones in use; `pr` is core's own version, so upstream's is not taken.
 export const UPSTREAM_SKILLS = [
   "code-review",
+  "codebase-design",
   "diagnosing-bugs",
   "domain-modeling",
   "handoff",

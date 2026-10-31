@@ -160,7 +160,7 @@ export const READING_LEVELS: Record<LevelKey, ReadingLevels> = {
   week: { critical: 90, unit: "%", warn: 70 },
 }
 
-// One account's row in a combined window's tooltip: its share as a 10-cell bar in its level's colour, its next reset, and its status, exhausted or its pace.
+// One account's row in a combined window's tooltip: its share as a 10-cell bar in its level's colour, its next reset, and its status, exhausted or its pace; none marks a 5-hour row for an account that has no 5-hour window.
 export type UsageRow = {
   account: string
   cells: number
@@ -168,6 +168,7 @@ export type UsageRow = {
   exhausted: boolean
   level: Health
   name: string
+  none?: true
   reset: string
   stale: boolean
   status: string
@@ -378,6 +379,19 @@ const singleUsage = (usage: Usage | null, now: number): Reading[] => {
         fiveHour.seenAt,
       ),
     )
+  } else if (usage?.fiveHourNone) {
+    // an account with no 5-hour window: fresh, judging nothing, never 0% or a failed read's outline
+    const state = `no 5-hour window on this account${readWords}`
+    readings.push({
+      key: "fiveHour",
+      level: "green",
+      measure: "none",
+      name: NAME_OF.fiveHour,
+      reasons: [],
+      state,
+      title: `${NAME_OF.fiveHour} none, ${state}`,
+      value: "none",
+    })
   } else if (fiveHour) {
     const used = Math.round(fiveHour.usedPercent)
     const phrase = `5-hour window ${used}% used`
@@ -523,6 +537,7 @@ export function usageRows(key: "fiveHour" | "week", report: UsageReport, now: nu
             ? "green"
             : (levelOf(key, own.used, `${account} ${own.used}%`).hit?.level ?? "green"),
         name: account.split("@")[0]!,
+        ...(key === "fiveHour" && usage.fiveHourNone && { none: true as const }),
         reset: own.resetsAt === null ? "-" : slotLabel(own.resetsAt),
         stale: usage.stale,
         status,
@@ -566,7 +581,7 @@ const BLOCK_NAME = { fiveHour: "5-hour", week: "Week" } as const
 
 const rowWords = (r: UsageRow) =>
   [
-    `${r.name}${r.current ? " (current)" : ""} ${r.used === null ? "not read" : `${r.used}%`}`,
+    `${r.name}${r.current ? " (current)" : ""} ${r.none ? "none" : r.used === null ? "not read" : `${r.used}%`}`,
     r.reset !== "-" && `resets ${r.reset}`,
     r.status,
     r.stale && "stale",
@@ -574,18 +589,22 @@ const rowWords = (r: UsageRow) =>
     .filter(Boolean)
     .join(", ")
 
-// Pure: one window combined across every account: its figure and colour the fresh accounts' mean share, judged against READING_LEVELS, a stale account left out of both and dimmed in the hover; with none fresh, the last shares' mean, gray, judging nothing, and - when no account reads the window. Its hover is one row an account (usageRows) under how much room the pool has left, the week's adding when each plan ends or renews.
+// Pure: one window combined across every account: its figure and colour the fresh accounts' mean share, judged against READING_LEVELS, a stale account and one with no such window left out of both and dimmed in the hover; with none fresh, the last shares' mean, gray, judging nothing, "none" when no fresh account has the window, and - when no account reads it. Its hover is one row an account (usageRows) under how much room the pool has left, the week's adding when each plan ends or renews.
 const joinedUsage = (key: "fiveHour" | "week", report: UsageReport, now: number): Reading => {
   const name = NAME_OF[key]
   const rows = usageRows(key, report, now)
   const fresh = rows.flatMap((r) => (r.stale || r.used === null ? [] : [r.used]))
   const read = rows.flatMap((r) => (r.used === null ? [] : [r.used]))
   const judged = fresh.length ? judgedMean(key, name, fresh) : null
+  const current = rows.filter((r) => !r.stale)
+  const none = !judged && current.length > 0 && current.every((r) => r.none)
   const state =
     judged?.state ??
-    (report.accounts.every((a) => a.usage.stale)
-      ? "every account stale"
-      : "no fresh account reads it")
+    (none
+      ? "no fresh account has one"
+      : report.accounts.every((a) => a.usage.stale)
+        ? "every account stale"
+        : "no fresh account reads it")
   const measure = `${BLOCK_NAME[key]} · room left ${roomLeft(rows)}`
   const renews = key === "week" ? renewRows(rows, report, now) : undefined
   return {
@@ -596,7 +615,7 @@ const joinedUsage = (key: "fiveHour" | "week", report: UsageReport, now: number)
     reasons: judged?.hit ? [judged.hit.reason] : [],
     ...(renews && { renews }),
     rows,
-    ...(judged ? {} : { stale: true as const }),
+    ...(judged || none ? {} : { stale: true as const }),
     state,
     title: [
       `${name} ${state}`,
@@ -606,7 +625,7 @@ const joinedUsage = (key: "fiveHour" | "week", report: UsageReport, now: number)
         ? [`Renews: ${renews.map((r) => `${r.name} ${r.words}`).join(", ")}`]
         : []),
     ].join("; "),
-    value: read.length ? String(meanOf(fresh.length ? fresh : read)) : "-",
+    value: none ? "none" : read.length ? String(meanOf(fresh.length ? fresh : read)) : "-",
   }
 }
 

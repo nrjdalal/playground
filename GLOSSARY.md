@@ -103,13 +103,19 @@ A lead's regular check of its own agents, for a picker waiting, a permission pro
 The dispatcher's own session: it routes each task by role, a new ask through the Planner and then a lead (the Builder or Ops), a fast lane straight to a lead, and holds no task of its own, so the sidebar lists it in its header, above the session groups, with no group title, and `/dashboard` opens its chat. The live dashboard itself belongs to a runner ([playbook](./extensions/core/skills/playbook/SKILL.md)).
 
 **Manager**:
-A session that manages under the dispatcher: the Planner, the Builder and Ops, by default `planner`, `builder` and `ops` by name, or any agent the dispatcher's roster gives the manager role. The dashboard lists managers under Orchestrators, below the dispatcher rows in the sidebar's header, with their tasks, A to Z by roster title until the owner drags them into an order of the owner's choosing. The factory's rules call the Builder and Ops leads (Lead).
+A session that manages under the dispatcher: the Planner, the Builder, Ops and the Optimizer, by default `planner`, `builder`, `ops` and `optimizer` by name, or any agent the dispatcher's roster gives the manager role. The dashboard lists managers under Orchestrators, below the dispatcher rows in the sidebar's header, with their tasks, A to Z by roster title until the owner drags them into an order of the owner's choosing. The factory's rules call the Builder and Ops leads (Lead).
 
 **Picker**:
 The command (`playground picker`) by which a session's manager answers one permission prompt: it allows or denies only the call the session's stuck alert named, keyed to that call (packages/scripts/src/playground/picker.ts).
 
 **Planner**:
 The Planner's session, a manager: it does every research, deep dive, comparison and plan, through read-only research workers the Builder dispatches, and never builds, so it stays free for the next ask. It keeps the roadmap, `~/.playground/bundles/plan.json`, whose lanes the Builder dispatches from ([playbook](./extensions/core/skills/playbook/SKILL.md)).
+
+**Icebox**:
+The Optimizer's parking place for an idea a retro found but nothing needs yet, one GitHub issue it keeps and reads at each retro; an idea leaves it for a `PG-<n>` issue of its own once a lead schedules it.
+
+**Retro**:
+The Optimizer's look back over what the factory did: what slowed it, what it cost and what went wrong, each lesson turned into a fix routed through the dispatcher, or parked in the icebox.
 
 **Brief**:
 The file that spawns a session and binds it: the task, its steps and its Done-when, passed to `scripts/spawn.sh` as a path, from the templates in `scripts/briefs/` ([SESSIONS.md](./extensions/core/skills/playbook/SESSIONS.md#spawn)).
@@ -128,6 +134,9 @@ A dedicated long-running session named `<id>-runner`, or `runner-<adjective>-<no
 
 **Roster**:
 The file the dispatcher keeps of the agents it dispatched (`~/.playground/roster.json`): each one's kind, role, task, short title, ETA and where its work went. The dashboard reads it for its Agents table, its Next up list (the roster's backlog still waiting) and its sidebar's titles and ETAs; the dispatcher and the leads write it, only through `scripts/roster.ts`.
+
+**Slack mode**:
+The owner is away and the owner's own Slack DM is the owner's remote access: the `slack.mode` setting, on until the owner turns it off. While it is on, ops-dm-watch hands each owner message in the DM to the dispatcher, to the second dispatcher too when no reply lands in 3 minutes or the dispatcher is stuck, and nudges the dispatcher for an update every 15 minutes; every reply goes through `playground dm send` ([DISPATCH.md](./extensions/core/skills/playbook/DISPATCH.md#slack-mode)).
 
 **Slot**:
 One turn at a heavy run on this machine: `~/.playground/ops/run-slot.sh <name> -- <command>` takes a run slot by mkdir and gives it back however the run ends ([playbook](./extensions/core/skills/playbook/SKILL.md), the **slots** rule).

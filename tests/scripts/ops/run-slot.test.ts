@@ -130,9 +130,15 @@ esac
   const tickets = () =>
     existsSync(join(ops, "run-slot.waiters")) ? readdirSync(join(ops, "run-slot.waiters")) : []
   // Starts `touch <marker>` through run-slot (or the copy at `script`) in the background, reading its stderr as it comes. Each check waits on an event (the run's exit, a line it prints), never a wall-clock budget, so a loaded runner only makes it slower.
-  const start = (who: string, extra: Record<string, string> = {}, script = SCRIPT) => {
+  // command: the words before the marker, which a fake bin in the machine's bin folder touches; touch by default
+  const start = (
+    who: string,
+    extra: Record<string, string> = {},
+    script = SCRIPT,
+    command = ["touch"],
+  ) => {
     const marker = join(root, `ran-${who}-${Math.random()}`)
-    const p = Bun.spawn(["bash", script, who, "--", "touch", marker], {
+    const p = Bun.spawn(["bash", script, who, "--", ...command, marker], {
       cwd: root,
       env: env(extra),
       stderr: "pipe",
@@ -505,6 +511,47 @@ describe("the queue's order", () => {
   })
 })
 
+// retro 3, 31 Oct: a big session's 2s git push and 1s bun install each waited over 1,290s, ranked by the session's size until the age bump
+describe("a ticket's units come from the run, not its session's size", () => {
+  // whether a big session's command goes ahead of an older medium waiter's ticket
+  const ahead = async (command: string[]) => {
+    const m = machine()
+    for (const bin of ["bun", "bunx"]) {
+      writeFileSync(join(m.bin, bin), '#!/bin/bash\ntouch "${@: -1}"\n')
+      chmodSync(join(m.bin, bin), 0o755)
+    }
+    m.ticket(1, "worker-m", "s2 22 2 medium")
+    const run = m.start("worker-big", { RUN_SLOT_SIZE: "big" }, SCRIPT, command)
+    return (await run.saw(WAITING)) ? !(await run.waits()) : run.ran()
+  }
+
+  test("a big session's bun install goes ahead of an older medium bun run test", async () => {
+    expect(await ahead(["bun", "install"])).toBe(true)
+  })
+
+  test("and so does its filtered turbo run", async () => {
+    expect(
+      await ahead([
+        "env",
+        "NODE_ENV=production",
+        "bunx",
+        "turbo",
+        "run",
+        "build",
+        "--filter=@packages/db",
+      ]),
+    ).toBe(true)
+  })
+
+  test("but its bun run test keeps the session's size", async () => {
+    expect(await ahead(["bun", "run", "test"])).toBe(false)
+  })
+
+  test("and so does a full turbo build", async () => {
+    expect(await ahead(["bunx", "turbo", "run", "build"])).toBe(false)
+  })
+})
+
 // dispatcher, 19 Oct: Checks on a PR in the ready line (merge-queue.json's entries with a readyAt) goes first, by goAt then readyAt
 describe("the ready line", () => {
   const line = (goAt7: string, goAt8: string) => ({
@@ -670,7 +717,10 @@ describe("a node_modules clone waits while clone-off stands", () => {
 // A fake git and bun on PATH touch their last argument, so a run through run-slot shows whether it ran while a big run holds the queue's units.
 describe("a quick run takes its own slot past a full queue", () => {
   // Runs argv through run-slot past a full queue and says whether it ran: once it ends, or once it prints the queue's waiting line, when it is stopped (an event, never a clock, so a loaded runner only makes it slower)
-  const quick = async (argv: string[]) => {
+  // ran: the seconds each earlier run of the same command took, oldest first, as run-slot.runs.log records them
+  // the slot the last quick() run took, from its runs log's start line
+  let took = ""
+  const quick = async (argv: string[], ran: number[] = []) => {
     const m = machine({ off: ["run-slot.3-off", "run-slot.4-off"] })
     m.hold("run-slot", 3, "big")
     for (const bin of ["bun", "git"]) {
@@ -678,6 +728,15 @@ describe("a quick run takes its own slot past a full queue", () => {
       chmodSync(join(m.bin, bin), 0o755)
     }
     const marker = join(m.root, "a.test.ts")
+    writeFileSync(
+      join(m.ops, "run-slot.runs.log"),
+      ran
+        .map(
+          (s, i) =>
+            `2026-10-31T10:00:0${i}Z ask worker-q ${900 + i} ${[...argv, marker].join(" ")}\n2026-10-31T10:00:0${i}Z ask worker-r ${800 + i} bun run lint\n2026-10-31T10:01:0${i}Z end worker-r ${800 + i} rc=0 ran=1s\n2026-10-31T10:01:0${i}Z end worker-q ${900 + i} rc=0 ran=${s}s\n`,
+        )
+        .join(""),
+    )
     const p = Bun.spawn(["bash", SCRIPT, "worker-q", "--", ...argv, marker], {
       cwd: m.root,
       env: m.env({ RUN_SLOT_SIZE: "medium" }),
@@ -692,6 +751,11 @@ describe("a quick run takes its own slot past a full queue", () => {
     })()
     while (!ended && !err.match(WAITING)) await Bun.sleep(20)
     if (!ended) await stop(p)
+    took =
+      readFileSync(join(m.ops, "run-slot.runs.log"), "utf8")
+        .split("\n")
+        .find((l) => l.split(" ")[1] === "start" && l.split(" ")[2] === "worker-q")
+        ?.split(" ")[4] ?? ""
     return existsSync(marker)
   }
 
@@ -724,6 +788,38 @@ describe("a quick run takes its own slot past a full queue", () => {
 
   test("but not another bun run script", async () => {
     expect(await quick(["bun", "run", "build"])).toBe(false)
+  })
+
+  // retro 2, 31 Oct: 408 of 686 CPU-lane runs ended in 10 s or less and queued 2,004 min against 17 min of running
+  // a plain install also runs past this queue now, as a light run in run-slot-2, so the slot it took is the check
+  test("bun install --ignore-scripts", async () => {
+    expect(await quick(["bun", "install", "--ignore-scripts"])).toBe(true)
+    expect(took).toBe("run-slot-quick")
+  })
+
+  // a light run of 1 unit, it fits the slot the big holder leaves, but through the queue
+  test("but a bun install that runs its scripts takes a queue slot", async () => {
+    await quick(["bun", "install"])
+    expect(took).toBe("run-slot-2")
+  })
+
+  test("git push", async () => {
+    expect(await quick(["git", "-C", "x", "push", "-u", "origin"])).toBe(true)
+    expect(took).toBe("run-slot-commit")
+  })
+
+  test("a command whose last 3 runs each ended in 10 s or less", async () => {
+    expect(await quick(["bun", "run", "build"], [400, 2, 10, 3])).toBe(true)
+    expect(took).toBe("run-slot-quick")
+  })
+
+  test("but not one with 2 runs on record", async () => {
+    expect(await quick(["bun", "run", "build"], [2, 3])).toBe(false)
+  })
+
+  // the bound on a long run after short ones: it holds the one quick slot, and its own time sends the next run of its command back to the queue
+  test("nor one whose last run took over 10 s", async () => {
+    expect(await quick(["bun", "run", "build"], [2, 3, 4, 11])).toBe(false)
   })
 
   // ops, 20 Oct: with slot-off, a 5-file run that ran 1s waited 52 min behind suites
@@ -1016,6 +1112,26 @@ describe("another factory's runs (slots.peers)", () => {
 })
 
 // localci and the merge train take their slots themselves; they ask run-slot.sh, so an off-switch reaches them too (18 Oct: localci took slot 3 past run-slot.3-off)
+// R3-2, 31 Oct: ops-unstick's slot-stuck alert named the oldest ticket, which can rank behind by design
+describe("head", () => {
+  test("prints the ticket the queue serves next, a medium one ahead of an older big one, and changes nothing", async () => {
+    const m = machine()
+    m.ticket(1, "worker-big", "s2 23 3 big")
+    m.ticket(2, "worker-m", "s2 22 2 medium")
+    const before = m.tickets().sort()
+    const run = Bun.spawnSync(["bash", SCRIPT, "head"], { cwd: m.root, env: m.env() })
+    expect([run.exitCode, run.stdout.toString()]).toEqual([0, `2-${process.pid}-worker-m\n`])
+    expect(m.tickets().sort()).toEqual(before)
+    expect(existsSync(join(m.ops, "run-slot.runs.log"))).toBe(false)
+  })
+
+  test("exits 2 on an extra argument", async () => {
+    const m = machine()
+    const run = Bun.spawnSync(["bash", SCRIPT, "head", "x"], { cwd: m.root, env: m.env() })
+    expect([run.exitCode, run.stdout.toString()]).toEqual([2, ""])
+  })
+})
+
 describe("can-take", () => {
   test("a slot its off-switch closes", async () => {
     const m = machine({ off: ["run-slot.3-off"] })
@@ -1424,6 +1540,24 @@ describe("a model-bound run", () => {
 })
 
 // 31 Oct: a suite's `bun test --isolate` worker outlived its suite by 5 hours at 50% CPU, reparented to launchd once the suite's own process exited
+// review round 1: a run stopped by a signal logged no end, so ran_short never saw it run long and kept its line on the quick slot
+test("a run stopped by TERM logs its end with rc=143 and how long it ran", async () => {
+  const m = machine()
+  // the command touches the marker, its $0, once it runs, so TERM lands while run-slot waits on it
+  const run = m.start("worker-t", { RUN_SLOT_SIZE: "small" }, SCRIPT, [
+    "bash",
+    "-c",
+    'touch "$0"; sleep 30',
+  ])
+  while (!existsSync(run.marker)) await Bun.sleep(20)
+  run.p.kill("SIGTERM")
+  await run.p.exited
+  const end = readFileSync(join(m.ops, "run-slot.runs.log"), "utf8")
+    .split("\n")
+    .find((l) => l.split(" ")[1] === "end" && l.split(" ")[2] === "worker-t")
+  expect(end).toMatch(/ rc=143 ran=\d+s$/)
+})
+
 describe("what the command leaves in its process group", () => {
   const alive = (pid: number) => {
     try {
@@ -1483,5 +1617,33 @@ describe("what the command leaves in its process group", () => {
     const r = await leaves()
     expect(r.out).toBe("caller-alive 7\n")
     expect(r.code).toBe(0)
+  })
+})
+
+describe("box-off", () => {
+  // run-slot.sh box-off's words for a scratch state folder, the ssh key at a path of its own
+  const boxOff = async (m: ReturnType<typeof machine>, key: string) => {
+    const p = Bun.spawn(["bash", SCRIPT, "box-off"], {
+      env: m.env({ RUNNER_HOST_KEY: key }),
+      stdout: "pipe",
+    })
+    expect(await p.exited).toBe(0)
+    return (await new Response(p.stdout).text()).split("\n").filter(Boolean)
+  }
+
+  test("names each precondition of the runner-box route that fails, and nothing once every one holds (#129)", async () => {
+    const m = machine()
+    const key = join(m.ops, "a-key")
+    expect(await boxOff(m, key)).toEqual(["no-ci-sh", "no-ssh-key"])
+    mkdirSync(join(m.ops, "runner-host"))
+    writeFileSync(join(m.ops, "runner-host", "ci.sh"), "#!/bin/bash\n")
+    chmodSync(join(m.ops, "runner-host", "ci.sh"), 0o755)
+    writeFileSync(key, "")
+    expect(await boxOff(m, key)).toEqual([])
+    writeFileSync(join(m.ops, "runner-host", "off"), "")
+    expect(await boxOff(m, key)).toEqual(["runner-host-off"])
+    rmSync(join(m.ops, "runner-host", "off"))
+    writeFileSync(join(m.ops, "runner-host", "slot-off"), "")
+    expect(await boxOff(m, key)).toEqual(["slot-off"])
   })
 })
