@@ -508,6 +508,23 @@ describe("--runtime herdr opens the session in herdr (#909)", () => {
     ])
   })
 
+  // playground planner, builder and ops start their managers this way, the first time the dispatcher routes work to each.
+  test.each(["builder", "ops", "planner"])(
+    "manager %s opens that lead in a workspace of its own",
+    async (name) => {
+      const r = await spawn(
+        ["manager", name, "b.md", "--runtime", "herdr"],
+        [],
+        { FAKE_SCREENS: "ready" },
+        undefined,
+        undefined,
+        herdrPin(),
+      )
+      expect(r.err).not.toContain("a manager in a workspace of its own is")
+      expect(r.code).toBe(0)
+    },
+  )
+
   // a narrow column cuts the status line, "⏵⏵ bypass permissions" at 27 columns and "⏵⏵" at 12 (measured, 24 Oct), and herdr matches one row at a time.
   test.each(["cut", "bare"])(
     "a narrow column's %s status line is ready, and no key is sent",

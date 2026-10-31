@@ -34,6 +34,12 @@ It sets up first what the installer and `playground` would have, so the Dashboar
 Its brief is `brief-<dispatcher>.md` in the data folder, written once from `scripts/briefs/dispatcher.md` when it is missing, so your own edits to it stay.
 It exits 0 once the dispatcher starts, 3 when a session already holds the dispatcher's name (it starts nothing), and 1 with spawn.sh's reason when a gate refuses the start, or herdr's when herdr cannot come up.
 
+## Start a manager: `playground planner`, `playground builder`, `playground ops`
+
+Each starts that manager as `playground dispatcher` starts the dispatcher, in a herdr workspace of its own, its brief written once from `scripts/briefs/<manager>.md`.
+The dispatcher runs it the first time it routes work to that manager, so no manager sits idle on your usage.
+It exits 0 once the manager starts, 3 when it already runs (it starts nothing), and 1 with spawn.sh's reason when a gate refuses the start.
+
 ## View your sessions: `playground view`
 
 `playground view` opens the factory's herdr server in your terminal, where your sessions run, so you never type a herdr path or setting. It takes nothing. When the server is down it says so: run `playground` to start it. Test sessions (probes) run on a server of their own, which this view leaves out.
