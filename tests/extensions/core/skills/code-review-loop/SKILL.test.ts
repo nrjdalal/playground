@@ -24,10 +24,18 @@ describe("code-review-loop keeps its reviewer for the merge (#1067)", () => {
     const last = (await skill()).split("## The last 5/5")[1]?.split("\n## ")[0] ?? ""
     const stand = last.split("**CI stands in**")[1]?.split("\n")[0] ?? ""
     expect(stand).toContain("head sha equal to `<head>`")
-    expect(stand).toContain("`HEAD is now at <merge> Merge <head> into <base>`")
-    expect(stand).toContain("`git -C <clone> diff --name-only <base> origin/canary`")
-    expect(stand).toContain("`touched tests: PR CI green at <sha7> on canary <base7>: <run link>`")
+    expect(stand).toContain("`HEAD is now at <merge> Merge <head> into <run base>`")
+    expect(stand).toContain("`git -C <clone> diff --name-only <run base> origin/canary`")
+    expect(stand).toContain("a repo scanner or a data file one reads")
+    expect(stand).toContain(
+      "`touched tests: PR CI green at <sha7> on canary <run base7>: <run link>`",
+    )
     expect(stand).toContain("the local run stays as written")
+    expect(last).toContain(
+      "on a local merge with `origin/canary`, unless CI stands in for them (below)",
+    )
+    expect(last).toContain("The merge also runs, unless CI stands in for it,")
+    expect(last.split("**Done when**")[1] ?? "").toContain("or CI stood in for them at the head")
     expect(await page()).toContain(
       "cites that run's link in place of a local run of the touched tests",
     )
