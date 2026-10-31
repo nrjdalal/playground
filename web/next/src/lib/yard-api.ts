@@ -60,7 +60,7 @@ export const yardApi = {
 // The sidebar's channels and DMs; a stack with no Yard (the local routes absent) reads an error, and the groups stay away.
 export const useYardChannels = () =>
   useQuery({
-    queryFn: async () => (await yardApi.channels()).channels,
+    queryFn: async () => (await yardApi.channels()).channels ?? [],
     queryKey: CHANNELS_KEY,
     retry: (count, error) =>
       (error as { code?: string }).code !== "NOT_FOUND" && queryRetry(count, error),
@@ -68,7 +68,7 @@ export const useYardChannels = () =>
 
 export const useYardMessages = (channel: string) =>
   useQuery({
-    queryFn: async () => (await yardApi.messages(channel)).messages,
+    queryFn: async () => (await yardApi.messages(channel)).messages ?? [],
     queryKey: messagesKey(channel),
   })
 
