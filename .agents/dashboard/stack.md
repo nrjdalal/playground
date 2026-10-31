@@ -51,7 +51,7 @@
   the ops jobs' heartbeats, ops-unstick's state holding the Planner on the usage limit alone, its writtenAt a year ahead so it never reads stale), git,
   pull requests and the Usage app's merged ones,
   the process start times the registry check compares, the System panel's probes, the update check's answer (`update`, so the user menu's green dot and its Update now show with nothing fetched), a made-up Claude account (`account`, the main login: the user menu shows it when `usage.json` names no login, and its usage file leads the accounts' order),
-  the owner's made-up threads (`threads`, which `bun run ingest` writes into the database), and a made-up `origin` remote,
+  the owner's made-up threads (`threads`, which `bun run ingest` writes into the database), the made-up worktrees Preview lists (`worktrees`, each with its branch, project and path, its `url` null while stopped and `$WEB` naming the stack's own web URL), and a made-up `origin` remote,
   which the sidebar header's GitHub icon links to as its pull requests page, each time moved to now as it is written.
   A burn check on the Usage app bumps `writtenAt` in both `usage.json` and `usage-<name>.json`, since a row older than 10 minutes reads stale, and changes the signed-in account's own `usage-<name>.json` along with `usage.json`: the row's share reads the account's own file, and the burn reads `usage.json`.
   Its people, org and tickets are made up too: its owner is a made-up person, its Linear workspace `example`, its team key `FIX`, and `fixture.test.ts` refuses the real owner, org and team keys it once held.
