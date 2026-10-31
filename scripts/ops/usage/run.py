@@ -14,7 +14,8 @@ limits were measured), `source` "token/ratelimit-headers" and `storedLogin` (the
 from login-flip.json when the factory moves back to the stored login. login-flip.json's `accounts` lists every account the factory's
 sessions spend into; each is probed the same way, and usage.json's `accounts` holds each fresh week reading, which week-marks.py sums.
 ops/alerts-usage.json holds, while each lasts, one alert per factory account whose week is past 90, 97 or 98% (usage.json's account
-and each in its `accounts`), naming the account, and the logged-in account's 5-hour window at 90% or more; ops-unstick folds it in.
+and each in its `accounts`), and the logged-in account's 5-hour window at 90% or more; ops-unstick folds it in.
+Each alert's `name` is its account, since the leads' sweep keys an alert by its kind and name.
 While login-flip.json names no `factory`, each Claude account the Dashboard's Add a Claude account keeps (usage.accounts, its
 setup-token under usage.keychainService) comes before the stored login: usage.json holds the first one's probe reading, since the
 dispatcher's sessions run on it, and the stored login's only when none of them reads. With neither a stored login nor an added account, the job beats "waiting", not an error.
@@ -167,7 +168,7 @@ def week_alerts(data, factory):
     for account, week in weeks.items():
         crossed = [m for m in (90, 97, 98) if isinstance(week, (int, float)) and week >= m]
         if account in factory and crossed:
-            out.append({"at": data["writtenAt"], "kind": "usage", "line": f"week usage at {week:g}% ({account}), past {crossed[-1]}%", "name": "usage", "since": data["writtenAt"]})
+            out.append({"at": data["writtenAt"], "kind": "usage", "line": f"week usage at {week:g}% ({account}), past {crossed[-1]}%", "name": account, "since": data["writtenAt"]})
     return out
 
 
@@ -264,7 +265,7 @@ while True:
             five = limits.get("five_hour") or {}
             if isinstance(five.get("used_percentage"), (int, float)) and five["used_percentage"] >= 90:
                 at = time.strftime("%H:%MZ", time.gmtime(five["resets_at"])) if isinstance(five.get("resets_at"), (int, float)) else "unknown"
-                out.append({"at": data["writtenAt"], "kind": "usage-5h", "line": f"5-hour window at {five['used_percentage']:g}% ({account}), resets {at}: slow spawns", "name": "usage", "since": data["writtenAt"]})
+                out.append({"at": data["writtenAt"], "kind": "usage-5h", "line": f"5-hour window at {five['used_percentage']:g}% ({account}), resets {at}: slow spawns", "name": account, "since": data["writtenAt"]})
         write(os.path.join(OPS, "alerts-usage.json"), {"alerts": out, "writtenAt": data["writtenAt"]})
     five = data and data["rate_limits"].get("five_hour", {}).get("used_percentage")
     detail = f"{data['account']}: 5h {'none' if five is None else f'{five}%'}, 7d {data['rate_limits'].get('seven_day', {}).get('used_percentage')}%" if data else ""
