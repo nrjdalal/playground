@@ -14,6 +14,7 @@ api/hono/         # backend (Hono): routers, middlewares, the AppType export
 web/next/         # frontend (Next.js App Router): app/, components/, lib/, content/
 packages/auth/    # Better Auth instance
 packages/db/      # Drizzle schema + client
+packages/message/ # the Yard message schema (Zod) the server and every client parse
 packages/redis/   # the lock store on Bun's Redis client (REDIS_URL), the merge lock's holder
 packages/env/     # type-safe env, one validated entry per consumer
 packages/config/  # TS base, tsdown factory, and site.ts (brand identity)
