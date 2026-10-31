@@ -317,14 +317,18 @@ test("the pre-commit rule test runs when the rules change, and a broken pin refu
   try {
     expect(git("init", "-q")).toMatchObject({ code: 0 })
     for (const file of files) await Bun.write(join(dir, file), Bun.file(join(ROOT, file)))
-    // AGENTS.md sits one character under tests/AGENTS.test.ts's budget, the most a commit may leave it at
-    const budget = Number(
-      /const BUDGET = ([\d_]+)/
-        .exec(await Bun.file(join(ROOT, "tests/AGENTS.test.ts")).text())![1]!
-        .replaceAll("_", ""),
-    )
+    // AGENTS.md sits one character under tests/AGENTS.test.ts's limit, MARGIN of BUDGET, the most a commit may leave it at
+    const rule = await Bun.file(join(ROOT, "tests/AGENTS.test.ts")).text()
+    const budget = Number(/const BUDGET = ([\d_]+)/.exec(rule)![1]!.replaceAll("_", ""))
+    const limit = Math.floor(budget * Number(/const MARGIN = ([\d.]+)/.exec(rule)![1]!))
     const agents = await Bun.file(join(dir, "AGENTS.md")).text()
-    await Bun.write(join(dir, "AGENTS.md"), `${agents}${"x".repeat(budget - 1 - agents.length)}`)
+    const room = limit - 1 - agents.length
+    expect(
+      room >= 0
+        ? ""
+        : `AGENTS.md holds ${agents.length} chars, over the limit of ${limit} from BUDGET ${budget}`,
+    ).toBe("")
+    await Bun.write(join(dir, "AGENTS.md"), `${agents}${"x".repeat(room)}`)
     // CLAUDE.md is a link to AGENTS.md, as in the repo, so a commit stages AGENTS.md alone
     symlinkSync("AGENTS.md", join(dir, "CLAUDE.md"))
     // the rule test runs through bun run test:file, so the scratch repo takes that script, pointed at this repo's sandbox
