@@ -425,6 +425,7 @@ type VibeRecord = {
   started: string
   stopping?: boolean
 }
+const STOP_STALE_MS = 10 * 60_000
 const writeRecord = (path: string, record: VibeRecord) =>
   writeFileSync(join(path, VIBE_RECORD), `${JSON.stringify(record)}\n`)
 
@@ -437,12 +438,13 @@ const restoreEnv = (path: string) => {
 
 const readVibe = (
   path: string,
-): { container: string; env: boolean; id: unknown; stopping: boolean } | null => {
+): { container: string; env: boolean; id: unknown; started: unknown; stopping: boolean } | null => {
   try {
     const record = JSON.parse(readFileSync(join(path, VIBE_RECORD), "utf8")) as {
       container?: unknown
       env?: unknown
       id?: unknown
+      started?: unknown
       stopping?: unknown
     }
     return typeof record.container === "string"
@@ -450,6 +452,7 @@ const readVibe = (
           container: record.container,
           env: record.env !== false,
           id: record.id,
+          started: record.started,
           stopping: record.stopping === true,
         }
       : null
@@ -465,8 +468,12 @@ export async function stopVibe(path: string, deps: Deps = DEPS): Promise<void> {
   if (!deps.readsLive()) return fixtureVibe(path, false)
   const record = readVibe(stack.path)
   if (!record) throw new VibeError(`${VIBE_RECORD} in that worktree does not name its copy`)
-  // a second Stop, from another tab, would put the .env back a second time and remove the worktree's own
-  if (record.stopping) throw new VibeError("that Vibeground is already stopping")
+  // a second Stop, from another tab, would put the .env back a second time and remove the worktree's own; a mark older than STOP_STALE_MS is a Stop the API never finished
+  if (record.stopping && Date.now() - Date.parse(String(record.started)) < STOP_STALE_MS) {
+    throw new VibeError(
+      "that Vibeground is already stopping; a Stop stuck 10 minutes can run again",
+    )
+  }
   // Stop claims the record before its first await, so a Start still seeding fails its next check and leaves the cleanup to this Stop; a Start past its last check has already written env: true, read above
   const claim = {
     container: record.container,
@@ -492,12 +499,12 @@ export async function stopVibe(path: string, deps: Deps = DEPS): Promise<void> {
     if (removed.code !== 0) {
       throw new VibeError(`docker rm -fv ${record.container}: ${removed.stderr.trim()}`)
     }
+    if (record.env) restoreEnv(stack.path)
+    rmSync(join(stack.path, DATA), { force: true, recursive: true })
+    rmSync(join(stack.path, VIBE_RECORD), { force: true })
   } catch (error) {
     // a Stop that failed lets the next one try
     if (readVibe(stack.path)?.id === claim.id) writeRecord(stack.path, claim)
     throw error
   }
-  if (record.env) restoreEnv(stack.path)
-  rmSync(join(stack.path, DATA), { force: true, recursive: true })
-  rmSync(join(stack.path, VIBE_RECORD), { force: true })
 }

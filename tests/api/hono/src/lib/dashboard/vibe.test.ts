@@ -373,6 +373,31 @@ describe("Stop", () => {
     expect(existsSync(join(path, ".turbo/vibe.json"))).toBe(false)
   })
 
+  test("a stopping mark 10 minutes old, a Stop the API never finished, is taken over by the next Stop", async () => {
+    const path = worktree("stop-stale", "OWN=3\n")
+    await startVibe(path, fake([stack(path)]).deps)
+    const record = JSON.parse(readFileSync(join(path, ".turbo/vibe.json"), "utf8"))
+    const marked = (minutes: number) =>
+      writeFileSync(
+        join(path, ".turbo/vibe.json"),
+        JSON.stringify({
+          ...record,
+          started: new Date(Date.now() - minutes * 60_000).toISOString(),
+          stopping: true,
+        }),
+      )
+    marked(9)
+    expect(
+      await stopVibe(path, fake([stack(path, { vibe: true })]).deps).catch(
+        (error: Error) => error.message,
+      ),
+    ).toContain("already stopping")
+    marked(11)
+    await stopVibe(path, fake([stack(path, { vibe: true })]).deps)
+    expect(readFileSync(join(path, ".env"), "utf8")).toBe("OWN=3\n")
+    expect(existsSync(join(path, ".turbo/vibe.json"))).toBe(false)
+  })
+
   test("Stop while the copy still seeds removes it and leaves the worktree's own .env alone", async () => {
     const path = worktree("stop-early", "MINE=1\n")
     let release = () => {}
