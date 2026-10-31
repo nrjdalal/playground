@@ -23,6 +23,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { roleLabel } from "@/lib/agent-label"
 import { config } from "@/lib/config"
 import {
   doneMessage,
@@ -57,7 +58,7 @@ const scrollerOf = (el: HTMLElement | null): HTMLElement | null => {
   return null
 }
 
-// The Inbox's Preview row: a picker of every project's worktrees on this machine, by project, and the pages agents leave in Previews, an address, reload and open in a new tab, and the page live in a frame that fills the pane below; a stopped worktree picked offers Start, which runs it as a Vibeground on a copy of the live data, and a running Vibeground wears its badge and offers Stop, and Done, which hands the work back to the session in its worktree.
+// The Inbox's Preview row: a picker of every project's worktrees on this machine, by project, and the pages agents leave in Previews, an address, reload and open in a new tab, and the page live in a frame that fills the pane below; a stopped worktree picked offers Start, which runs it as a Vibeground on a copy of the live data, and a running Vibeground wears its badge and offers Stop, and Done, which asks the dispatcher to have the work in its worktree pushed for review.
 export function PreviewPane() {
   const [address, setAddress] = useState("")
   const [typed, setTyped] = useState("")
@@ -69,7 +70,7 @@ export function PreviewPane() {
   const [waiting, setWaiting] = useState(false)
   // the worktree whose session Done last told, so the strip says it went
   const [handed, setHanded] = useState<string | null>(null)
-  const { outbox } = useDashboard()
+  const { dispatcher, outbox } = useDashboard()
   const box = useRef<HTMLDivElement>(null)
   const queryClient = useQueryClient()
   const stacks = useQuery({
@@ -266,21 +267,26 @@ export function PreviewPane() {
             <span className="truncate">{vibeLabel(shown.branch)}</span>
           </Badge>
           <span className="text-muted-foreground min-w-0 flex-1 truncate">
-            {handed === shown.path
-              ? `Sent to ${shown.session}`
-              : shown.session
-                ? null
-                : "No session works in this worktree"}
+            {handed === shown.path && dispatcher
+              ? `Sent to ${roleLabel(dispatcher) ?? dispatcher}`
+              : null}
           </span>
-          {/* the owner's own click alone sends it, to the session working in the worktree, through the outbox as his chat does */}
+          {/* the owner's own click alone sends it, to the dispatcher through the outbox as his chat does, which routes it to the worktree's session */}
           <Button
             type="button"
             size="sm"
             variant="outline"
             className="h-7 shrink-0 text-xs"
-            disabled={!shown.session}
+            disabled={!dispatcher || !shown.path}
             onClick={() => {
-              outbox.send(shown.session!, { attachments: [], text: doneMessage(shown.branch!) })
+              outbox.send(dispatcher!, {
+                attachments: [],
+                text: doneMessage({
+                  branch: shown.branch!,
+                  path: shown.path!,
+                  session: shown.session,
+                }),
+              })
               setHanded(shown.path)
             }}
           >

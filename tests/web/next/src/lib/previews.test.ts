@@ -166,13 +166,21 @@ describe("openPreview", () => {
   })
 })
 
-// the owner's Yard try, need 4: Done hands the work back to the worktree's session, which pushes it for review and never merges
+// the owner's Yard try, need 4: Done hands the work back for review, never merged; it goes to the dispatcher, the one session the owner's messages reach (phase 2a), which routes it to the worktree's session
 describe("doneMessage", () => {
-  test("names the branch, pushes to its open PR or opens one into its parent, and never merges", () => {
-    const text = doneMessage("feat/rooms")
+  test("names the worktree, branch and session, pushes to its open PR or opens one into its parent, and never merges", () => {
+    const text = doneMessage({ branch: "feat/rooms", path: "/w/rooms", session: "rooms-worker" })
     expect(text).toContain("feat/rooms")
-    expect(text).toContain("push it to this branch's open PR")
+    expect(text).toContain("/w/rooms")
+    expect(text).toContain("rooms-worker")
+    expect(text).toContain("push it to the branch's open PR")
     expect(text).toContain("only when none is open")
     expect(text).toContain("Do not merge")
+  })
+
+  test("a worktree no session works in says so", () => {
+    expect(doneMessage({ branch: "main", path: "/w/yard", session: null })).toContain(
+      "no session works in it",
+    )
   })
 })
