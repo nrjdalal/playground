@@ -417,6 +417,8 @@ test("commit-msg takes a ticket scope in either case and refuses a Co-authored-b
   try {
     expect(run(["git", "init", "-q"])).toMatchObject({ code: 0 })
     symlinkSync(join(ROOT, "node_modules"), join(dir, "node_modules"))
+    // the pg-scope step runs packages/scripts/src/commit-scope.ts by its path in the checkout
+    symlinkSync(join(ROOT, "packages"), join(dir, "packages"))
     const { commitlint } = await Bun.file(join(ROOT, "package.json")).json()
     await Bun.write(join(dir, "package.json"), JSON.stringify({ commitlint }))
     // JSON is YAML, so the steps go in as lefthook read them

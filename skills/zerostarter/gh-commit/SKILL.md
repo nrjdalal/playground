@@ -42,7 +42,7 @@ git commit -m "<type>(<scope>): <subject>"
 | **Subject** | Imperative, lowercase, no period. The commit-msg hook rejects a header over 100 chars or a capitalized subject (`subject-case`).                                                          |
 | **Body**    | Optional; explain "why", not "what". Wrap lines at 100 (the hook rejects longer).                                                                                                       |
 
-Leave out a `Co-authored-by` trailer (repo rule): the commit-msg hook refuses one in any case, whatever an attribution reminder asks. It also runs commitlint (`@commitlint/config-conventional`). Pre-commit runs these steps in order, and the first that fails stops the commit:
+Leave out a `Co-authored-by` trailer (repo rule): the commit-msg hook refuses one in any case, whatever an attribution reminder asks. It also runs commitlint (`@commitlint/config-conventional`), and `pg-scope`, which refuses a `(PG-<n>)` scope that names another item than the branch's `PG-<n>-` prefix, naming both; commit it on that item's branch. Pre-commit runs these steps in order, and the first that fails stops the commit:
 
 1. `conflict-markers` refuses a staged `<<<<<<<` or `>>>>>>>` line, named by file and line, before the formatter can rewrite it into Markdown that reads clean.
 2. `skills-manager` regenerates the AGENTS.md skills tables when a skill changed.
