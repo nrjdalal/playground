@@ -19,9 +19,8 @@ import {
 
 const web = join(import.meta.dir, "../../../../../web/next")
 const { QueryClient } = (await import(Bun.resolveSync("@tanstack/react-query", web))) as {
-  QueryClient: new () => {
+  QueryClient: new () => Parameters<typeof catchUp>[0] & {
     getQueryState: (key: readonly unknown[]) => { isInvalidated: boolean } | undefined
-    invalidateQueries: (filters: { queryKey: readonly unknown[] }) => Promise<void>
     setQueryData: (key: readonly unknown[], data: unknown) => void
   }
 }

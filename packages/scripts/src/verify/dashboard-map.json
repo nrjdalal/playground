@@ -308,12 +308,7 @@
       "title": "Thread"
     },
     {
-      "api": [
-        "GET /api/v1/yard/channels",
-        "GET /api/v1/yard/channels/:id/messages",
-        "POST /api/v1/yard/channels/:id/messages",
-        "POST /api/v1/yard/channels/:id/read"
-      ],
+      "api": [],
       "reach": ["Sidebar Channels or Direct messages: a row opens /dashboard/yard/<id>"],
       "route": "/dashboard/yard/[id]",
       "shows": [
