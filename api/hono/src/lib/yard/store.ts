@@ -222,8 +222,7 @@ const shownAt = sql<string>`date_trunc('milliseconds', coalesce(${yardMessage.de
 
 export type Waiting = { held: boolean; message: Message; shownAt: string }
 
-// What waits on the caller since a time, which the local Playground cards in its Inbox, oldest first by when it showed: every sent message that names them in a channel or DM they are in, a thread's reply included, from when they joined it, and their own posts held for their approval.
-// Each list reads at most limit rows; when one comes back full, both stop at the earlier of the full lists' last time, so a mark taken from the last item skips no row either list left out.
+// What waits on the caller since a time, which the local Playground cards in its Inbox, oldest first by when it showed: every sent message that names them in a channel or DM they are in, a thread's reply included, from when they joined it, and their own posts held for their approval; each list reads at most limit rows, and when one comes back full both stop at the earlier of the full lists' last time, so a mark taken from the last item skips no row either list left out.
 export const waiting = async (
   db: Database,
   caller: Caller,

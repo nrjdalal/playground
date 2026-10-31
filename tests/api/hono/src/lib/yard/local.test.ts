@@ -83,6 +83,20 @@ describe("the local Yard routes", () => {
     )
   })
 
+  test("Yard's rate limit and size refusals pass on as themselves, never a server fault", async () => {
+    for (const status of [409, 413, 429]) {
+      const { yard } = setUp({
+        post: async () => {
+          throw new YardError(status, "said Yard")
+        },
+      })
+      expect(await refusal(yard.post("c1", { kind: "text", text: "hi" }))).toEqual([
+        status,
+        "said Yard",
+      ])
+    }
+  })
+
   test("a token Yard no longer takes reads as signed out", async () => {
     const { yard } = setUp({
       post: async () => {

@@ -1,6 +1,7 @@
+import type { ContentfulStatusCode } from "hono/utils/http-status"
 import type { z } from "zod"
 
-import { ApiError } from "@/lib/error"
+import { ApiError, type ErrorCode } from "@/lib/error"
 import { type pageSchema, type postSchema, type YardClient, YardError } from "@/lib/yard/client"
 import type { Keychain } from "@/lib/yard/keychain"
 
@@ -16,13 +17,22 @@ export type LocalYardDeps = {
 const OFF = "Yard is not set up on this Playground: set YARD_API_URL"
 const SIGNED_OUT = "Yard has no token on this Mac: sign in with playground yard login"
 
+// The Yard refusals the local API passes on as its own, so the composer says what Yard said; any other is a 502.
+const PASSED: Partial<Record<number, ErrorCode>> = {
+  400: "VALIDATION_ERROR",
+  403: "FORBIDDEN",
+  404: "NOT_FOUND",
+  409: "CONFLICT",
+  413: "PAYLOAD_TOO_LARGE",
+  429: "TOO_MANY_REQUESTS",
+}
+
 // A Yard refusal as the local API's own, so the web reads one envelope: Yard's 401 means the Keychain's token no longer works.
 const relay = (error: unknown): never => {
   if (!(error instanceof YardError)) throw error
   if (error.status === 401) throw new ApiError(404, "NOT_FOUND", SIGNED_OUT)
-  if (error.status === 403) throw new ApiError(403, "FORBIDDEN", error.message)
-  if (error.status === 404) throw new ApiError(404, "NOT_FOUND", error.message)
-  if (error.status === 400) throw new ApiError(400, "VALIDATION_ERROR", error.message)
+  const code = PASSED[error.status]
+  if (code) throw new ApiError(error.status as ContentfulStatusCode, code, error.message)
   throw new ApiError(502, "INTERNAL_SERVER_ERROR", `Yard: ${error.message}`)
 }
 

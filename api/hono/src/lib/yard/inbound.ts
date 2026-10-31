@@ -72,10 +72,11 @@ export const postCard = async (db: Database, card: Card): Promise<void> => {
   const posted = await postItem(db, card)
   if (posted.ok) return
   const { text: _, ...rest } = card.preview
-  await postItem(db, {
+  const bare = await postItem(db, {
     ...card,
     preview: { ...rest, text: "Its words are not shown here: open Yard to read them." },
   })
+  if (!bare.ok) console.error(`[yard] the Inbox refused the card "${card.title}"`)
 }
 
 // The newest time this Playground has carded, in the data folder, so a restart never cards a message twice.
