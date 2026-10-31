@@ -20,6 +20,7 @@ import { sessionOrUnavailable, UNAVAILABLE } from "@/lib/auth/session"
 import { config } from "@/lib/config"
 import { gateOf, readSetup } from "@/lib/first-run"
 import { dispatcherSlotsOf, readHealth } from "@/lib/health"
+import { localPagesOnly } from "@/lib/local-pages"
 import { thisMachine } from "@/lib/machine"
 import { tabTitle, testDataBadge } from "@/lib/test-data"
 
@@ -35,6 +36,7 @@ export async function generateMetadata(): Promise<Metadata> {
 let normal = false
 
 export default async function Layout({ children }: { children: React.ReactNode }) {
+  localPagesOnly(config.hosted)
   // First run comes before any session read: with no database the API serves only its setup routes, so the first-run pane stands in for the dashboard.
   if (!normal) {
     const gate = gateOf(await readSetup(config.api.internalUrl || config.api.url))

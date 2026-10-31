@@ -11,7 +11,7 @@
   the update message, a sent row action, the prompt's answer, the mode and the managers' order.
   A thread view's opening (asks.md's Threads) and a sidebar thread's menu's Mark as read or unread, Pin or Unpin, Archive and Rename's Save are the confirmation for the thread's change.
   Behind portless the API's peer is always the proxy on loopback, so in portless LAN mode a LAN client passes `requireLoopback` and only the owner session stops it; keep LAN mode off while the dashboard runs.
-  Under `PLAYGROUND_HOSTED=1` Yard's writes take `requireTrustedOrigin` and the `member` rung, with no `requireLoopback`, on the owner's "infact I think yard should be as is playground, just a server and deployed version of it" (stack.md's Hosted).
+  Under `PLAYGROUND_HOSTED=1` Yard's writes take `requireTrustedOrigin` and the `member` rung, with no `requireLoopback`, on the owner's "infact I think yard should be as is playground, just a server and deployed version of it" (stack.md's hosted rule).
   A write made with a `yard_` bearer token carries no cookie a page could send for it, so it takes the rung alone (`yardCaller` in `api/hono/src/lib/yard/caller.ts`); `tests/api/hono/src/routers/guards.test.ts` walks every Yard write.
 - ALWAYS: Test a dashboard write on a fixture stack, where it lands in the fixture's scratch copy.
   Only a test that must reach a real cmux session uses a live-reads stack opted in to cmux's sessions (`PLAYGROUND_LIVE_READS=true` and `PLAYGROUND_CMUX_SESSIONS=true` in the worktree's `.env`), never for a screenshot, and against a throwaway session, never a real one:

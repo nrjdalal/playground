@@ -404,11 +404,9 @@ export async function preflight(
     const loaded = loadFixture(source.file)
     if (!loaded.ok) return refuse(`${loaded.error}; ${FIXTURE_FIX}`)
     dashboard = { fixture: loaded.fixture, kind: "fixture", rule: source.rule }
-  } else if (source.kind === "hosted") {
-    // the hosted build reads no machine: no fixture to write and no cmux to reach
-  } else if (!cmuxSessions(read.settings.PLAYGROUND_CMUX_SESSIONS)) {
+  } else if (source.kind === "live" && !cmuxSessions(read.settings.PLAYGROUND_CMUX_SESSIONS)) {
     dashboard = { cmux: false, kind: "live", reason: null, rule: source.rule }
-  } else {
+  } else if (source.kind === "live") {
     const reach = await attach()
     if (reach.state !== "attached") {
       const fix = UNATTACHED[reach.state](reach.detail)
