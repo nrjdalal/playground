@@ -249,7 +249,8 @@ function refuse(what: string, target: Target, detail: string, fix: string): stri
   return `no-release-comment hook refused ${what} on ${target.label}: ${detail}. On a guarded owner's repos an owner comment containing "release" in any case publishes to npm, and gh and the GitHub MCP post as that owner. ${fix}`
 }
 
-const REWORD = 'Write "ship" or "publish step" instead, or leave the comment out.'
+const REWORD =
+  'Write "ship" or "publish step" instead, or leave the comment out. For a file or rule whose name holds the word, cite it as "the ship rule" with its line number, and attach a patch as a file rather than quoting it.'
 
 async function judge(
   what: string,

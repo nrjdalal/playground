@@ -144,6 +144,15 @@ describe("a gh comment on a guarded owner's repo that contains the word is refus
     expect(reason).toContain('its text contains "release"')
     expect(reason).toContain('Write "ship" or "publish step" instead')
   })
+
+  test("a comment naming the ship rule's file is told the way out: cite it as the ship rule with its line, and attach a patch as a file", async () => {
+    const reason = await bash(
+      'gh pr comment 12 --body "Per extensions/core/rules/release.md:1, ship at three merges"',
+    )
+    expect(reason).toContain('its text contains "release"')
+    expect(reason).toContain('cite it as "the ship rule" with its line number')
+    expect(reason).toContain("attach a patch as a file")
+  })
 })
 
 describe("a gh comment on a guarded owner's repo whose text the hook cannot read is refused", () => {
