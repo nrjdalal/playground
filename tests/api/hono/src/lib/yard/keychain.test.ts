@@ -9,11 +9,13 @@ import {
 // A fake `security`, so no test reaches the real Keychain.
 const fake = (answer: { code: number; stdout?: string }) => {
   const calls: string[][] = []
-  const run: Run = async (argv) => {
+  const inputs: (string | undefined)[] = []
+  const run: Run = async (argv, input) => {
     calls.push(argv)
+    inputs.push(input)
     return { code: answer.code, stderr: "", stdout: answer.stdout ?? "" }
   }
-  return { calls, store: keychain(run, "owner") }
+  return { calls, inputs, store: keychain(run, "owner") }
 }
 
 describe("the Mac's Yard token in the Keychain", () => {
@@ -30,20 +32,14 @@ describe("the Mac's Yard token in the Keychain", () => {
     expect(await fake({ code: 0, stdout: "hunter2" }).store.read()).toBeNull()
   })
 
-  test("writes a Yard token in place, and refuses anything else", async () => {
-    const { calls, store } = fake({ code: 0 })
-    await store.write("yard_new")
-    expect(calls[0]).toEqual([
-      "security",
-      "add-generic-password",
-      "-U",
-      "-s",
-      KEYCHAIN_SERVICE,
-      "-a",
-      "owner",
-      "-w",
-      "yard_new",
+  test("writes a Yard token in place through stdin, never in an argv, and refuses anything else", async () => {
+    const { calls, inputs, store } = fake({ code: 0 })
+    await store.write("yard_new-Token_1")
+    expect(calls).toEqual([["security", "-i"]])
+    expect(inputs).toEqual([
+      `add-generic-password -U -s "${KEYCHAIN_SERVICE}" -a "owner" -w "yard_new-Token_1"\n`,
     ])
-    expect(store.write("not a token")).rejects.toThrow("starts yard_")
+    await expect(store.write("not a token")).rejects.toThrow("starts yard_")
+    await expect(store.write('yard_a" -w "x')).rejects.toThrow("starts yard_")
   })
 })
