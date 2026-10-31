@@ -521,7 +521,7 @@ else:
         return seen, None
 
     # this machine's own login (usage.json, which ops-usage writes every 5 minutes) and each other login with a usage-<name>.json,
-    # which the optimizer's spare watch writes; another login's week moves slowly, so its reading holds for an hour.
+    # which ops-usage writes for the stored login and account-watch.py <email> for another; another login's week moves slowly, so its reading holds for an hour.
     usage, detail = load("usage.json")
     own = usage.get("account") if isinstance(usage, dict) else None
     writer = "The ops-usage job writes it every 5 minutes; wait for its next run and try again."
@@ -556,7 +556,7 @@ else:
         email = other.get("account") if isinstance(other, dict) else None
         if not isinstance(email, str) or not email or email.lower() in known:
             continue
-        seen, detail = judge(name, other, 60, "The optimizer's spare watch writes it every 5 minutes while it runs.")
+        seen, detail = judge(name, other, 60, "ops-usage writes the stored login's every 5 minutes, and account-watch.py <email> another account's.")
         logins.append((email, name, email, seen, detail))
         # a refused file leaves the account open to its login-flip reading below
         if detail is None:
