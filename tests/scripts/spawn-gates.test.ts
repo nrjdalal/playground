@@ -910,6 +910,31 @@ describe("the capacity gate refuses and spawns nothing", () => {
     expect(launchOf(r)).toContain("-a probed@example.com -w")
   })
 
+  test("a probed reading with no 5-hour window passes on its week, and one whose 5-hour window is at 95% does not (#85)", async () => {
+    const run = (five: number | null) =>
+      spawn(
+        ["worker", "worker-brave-otter", "b.md"],
+        [],
+        { USAGE_JSON: weekAt(98) },
+        script,
+        undefined,
+        probedFiles(
+          {
+            "probed@example.com": {
+              ...probed(20),
+              five,
+              fiveReset: five === null ? null : Date.now() / 1000 + 3600,
+            },
+          },
+          { "probed@example.com": 0.5 },
+        ),
+      )
+    const none = await run(null)
+    expect(none.code).toBe(0)
+    expect(launchOf(none)).toContain("-a probed@example.com -w")
+    expect((await run(95)).code).not.toBe(0)
+  })
+
   test("a probed reading 60 minutes old is not followed, and the refusal names its age (#85)", async () => {
     const r = await spawn(
       ["worker", "worker-brave-otter", "b.md"],

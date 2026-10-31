@@ -122,7 +122,7 @@ def probe(email):
     if not h or h.get("anthropic-ratelimit-unified-7d-utilization") is None:
         return None
     f = lambda k: float(h.get(f"anthropic-ratelimit-unified-{k}") or 0)
-    # no 5-hour headers: an account with no 5-hour limit (a verified Ultra one), so none, never 0%
+    # no 5-hour headers: an account with no 5-hour limit, so none, never 0%
     five = h.get("anthropic-ratelimit-unified-5h-utilization") is not None
     return {"five": round(f("5h-utilization") * 100) if five else None, "fiveReset": f("5h-reset") if five else None, "week": round(f("7d-utilization") * 100), "weekReset": f("7d-reset")}
 

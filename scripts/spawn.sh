@@ -500,7 +500,7 @@ else:
         five = rate.get("five_hour")
         five_hour = five.get("used_percentage") if isinstance(five, dict) else None
         if isinstance(five_hour, bool) or not isinstance(five_hour, (int, float)):
-            five_hour = None  # no 5-hour window: an account Anthropic gives no 5-hour limit, as a verified Ultra one, so none, never 0%
+            five_hour = None  # no 5-hour window: an account Anthropic gives no 5-hour limit, so none, never 0%
         seen["fiveHour"] = "none" if five_hour is None else five_hour
         if five_hour is not None and five_hour >= 90:
             try:
