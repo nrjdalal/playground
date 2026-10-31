@@ -499,7 +499,13 @@ export async function stopVibe(path: string, deps: Deps = DEPS): Promise<void> {
     if (removed.code !== 0) {
       throw new VibeError(`docker rm -fv ${record.container}: ${removed.stderr.trim()}`)
     }
-    if (record.env) restoreEnv(stack.path)
+    // a Stop that took the stale mark over has put the .env back already, and a second restore would remove the worktree's own
+    if (readVibe(stack.path)?.id !== claim.id) return
+    if (record.env) {
+      restoreEnv(stack.path)
+      claim.env = false
+      writeRecord(stack.path, { ...claim, stopping: true })
+    }
     rmSync(join(stack.path, DATA), { force: true, recursive: true })
     rmSync(join(stack.path, VIBE_RECORD), { force: true })
   } catch (error) {

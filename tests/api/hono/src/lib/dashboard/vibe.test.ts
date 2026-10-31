@@ -1,5 +1,6 @@
 import { afterAll, describe, expect, test } from "bun:test"
 import {
+  chmodSync,
   existsSync,
   lstatSync,
   mkdirSync,
@@ -396,6 +397,53 @@ describe("Stop", () => {
     await stopVibe(path, fake([stack(path, { vibe: true })]).deps)
     expect(readFileSync(join(path, ".env"), "utf8")).toBe("OWN=3\n")
     expect(existsSync(join(path, ".turbo/vibe.json"))).toBe(false)
+  })
+
+  test("a Stop that fails after it put the .env back never puts it back again", async () => {
+    const path = worktree("stop-tail", "OWN=4\n")
+    await startVibe(path, fake([stack(path)]).deps)
+    const locked = join(path, ".turbo/vibe-data/locked")
+    mkdirSync(locked, { recursive: true })
+    writeFileSync(join(locked, "file"), "x")
+    chmodSync(locked, 0o500)
+    const failed = await stopVibe(path, fake([stack(path, { vibe: true })]).deps).catch(
+      (error: Error) => error.message,
+    )
+    chmodSync(locked, 0o700)
+    expect(failed).toBeString()
+    expect(readFileSync(join(path, ".env"), "utf8")).toBe("OWN=4\n")
+    await stopVibe(path, fake([stack(path, { vibe: true })]).deps)
+    expect(readFileSync(join(path, ".env"), "utf8")).toBe("OWN=4\n")
+    expect(existsSync(join(path, ".turbo/vibe.json"))).toBe(false)
+  })
+
+  test("a Stop whose stale mark another Stop took over leaves the .env that Stop put back", async () => {
+    const path = worktree("stop-takeover", "OWN=5\n")
+    await startVibe(path, fake([stack(path)]).deps)
+    let release = () => {}
+    const held = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const hung = stopVibe(
+      path,
+      fake([stack(path, { vibe: true })], {
+        stop: async () => {
+          await held
+          return { code: 0, stderr: "", stdout: "" }
+        },
+      }).deps,
+    )
+    await Bun.sleep(5)
+    const record = JSON.parse(readFileSync(join(path, ".turbo/vibe.json"), "utf8"))
+    writeFileSync(
+      join(path, ".turbo/vibe.json"),
+      JSON.stringify({ ...record, started: new Date(Date.now() - 11 * 60_000).toISOString() }),
+    )
+    await stopVibe(path, fake([stack(path, { vibe: true })]).deps)
+    expect(readFileSync(join(path, ".env"), "utf8")).toBe("OWN=5\n")
+    release()
+    await hung
+    expect(readFileSync(join(path, ".env"), "utf8")).toBe("OWN=5\n")
   })
 
   test("Stop while the copy still seeds removes it and leaves the worktree's own .env alone", async () => {
