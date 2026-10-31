@@ -12,6 +12,7 @@ It lives in the repo rather than in one session's memory, so every session loads
 | Spawn, brief, rename, check or end a session                                               | the lifecycle (`LIFECYCLE.md`) and the cmux and herdr commands (`SESSIONS.md`) |
 | Update Claude Code                                                                         | the update steps in `LIFECYCLE.md`                                             |
 | Route a new ask, or run a lead's sweep                                                     | `DISPATCH.md` and `SWEEP.md`                                                   |
+| Answer the owner's DM while Slack mode is on                                               | `DISPATCH.md`'s Slack mode and `playground dm send`                            |
 | Merge a Playground PR, or release `canary` to `main`                                       | the **gate** rule (`bun run pr:merge <n>`, `bun run pr:train`) and **release** |
 | Comment or review on one of the owner's repos                                              | the **comments** rule                                                          |
 | Touch the live dashboard or the roster                                                     | the **dashboard** and **roster** rules (`ROSTER.md`)                           |
