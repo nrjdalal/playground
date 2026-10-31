@@ -13,14 +13,18 @@ const WAY_OUT =
 const refuse = (what: string, beside = "") =>
   `no-kill-by-name hook refuses ${what}: a name, pattern or port matches the live dashboard and every worker's stack, not only your own process. ${WAY_OUT}${beside}`
 
-// `command -v pkill` and `pkill --help` only read
-const readsOnly = (cmd: Command, args: Word[]) =>
-  cmd.words.some(
-    (w, i) => program(w.value) === "command" && /^-[vV]$/.test(cmd.words[i + 1]?.value ?? ""),
-  ) ||
-  (args.length > 0 && args.every((a) => READS_ONLY.has(a.value)))
+// `command -v pkill` and `pkill --help` only read; `command -v` counts only before the program, since pkill's own -v inverts its match
+const readsOnly = (cmd: Command, first: Word | undefined, args: Word[]) => {
+  const before = cmd.words.slice(0, first ? cmd.words.indexOf(first) : 0)
+  return (
+    before.some(
+      (w, i) => program(w.value) === "command" && /^-[vV]$/.test(before[i + 1]?.value ?? ""),
+    ) ||
+    (args.length > 0 && args.every((a) => READS_ONLY.has(a.value)))
+  )
+}
 
-// ps given a pid (-p, --pid, -q) checks that one process, which is the way out's own liveness check
+// ps given a pid (-p, -q, --pid, --quick-pid) checks that one process, which is the way out's own liveness check
 const isSearch = (name: string, args: Word[]) =>
   SEARCHES.has(name) &&
   !(
@@ -45,8 +49,8 @@ async function inspect(raw: string) {
   })
   // a pid xargs hands a shell it starts arrives as the -I string (`xargs -I{} sh -c 'kill {}'`)
   const handed = lexed.commands.flatMap((c) => parse(c).xargs?.replace || [])
-  const visit: Visit = async (cmd, { args, name, xargs }) => {
-    if (BY_NAME.has(name) && !readsOnly(cmd, args)) return refuse(name)
+  const visit: Visit = async (cmd, { args, first, name, xargs }) => {
+    if (BY_NAME.has(name) && !readsOnly(cmd, first, args)) return refuse(name)
     if (name === "fuser" && args.some((a) => /^-\w*k|^--kill\b/.test(a.value)))
       return refuse("fuser -k")
     if (name !== "kill" || !search) return
