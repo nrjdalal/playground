@@ -5,12 +5,12 @@ const rule = () =>
   Bun.file(join(import.meta.dir, "../../../../extensions/core/rules/release.md")).text()
 
 describe("the release rule (PG-213)", () => {
-  test("has Ops pass playground update's changed skills to every lead, for each live checker's reload", async () => {
+  test("its glance line has Ops send every lead the skills playground update names, for each live checker's reload", async () => {
     const text = await rule()
-    expect(text).toContain(
-      "When `playground update` prints `skills changed:`, Ops sends each lead those names",
+    expect(text.split("\n")[0]).toEndWith(
+      "and sends each lead the skills `playground update` names as changed.",
     )
-    expect(text).toContain("has each of its live checkers load them again")
+    expect(text).toContain("Each lead has its live checkers load those skills again")
     expect(text).toContain("each changed skill's name has reached every lead")
   })
 })
