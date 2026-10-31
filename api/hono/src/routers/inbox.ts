@@ -171,6 +171,28 @@ export const inboxRouter = new Hono<{ Variables: Session }>()
     },
   )
   .post(
+    "/:id/schedule",
+    describeRoute({
+      tags: ["Inbox"],
+      description:
+        "Push an open decision or draft out of the inbox and its count until a time, when it asks again; answering it or replying to it in chat wakes it at once",
+      responses: {
+        200: { description: "OK" },
+        ...validationErrorResponses,
+        ...authErrorResponses,
+        ...forbiddenErrorResponses,
+        ...notFoundErrorResponses,
+        ...conflictErrorResponses,
+      },
+    }),
+    sValidator("json", scheduleInputSchema, invalid),
+    async (c) => {
+      const result = await scheduleItem(db, c.req.param("id"), c.req.valid("json").at)
+      if (!result.ok) throw new ApiError(STATUS[result.code], result.code, result.message)
+      return c.json({ data: result.item })
+    },
+  )
+  .post(
     "/:id/secret",
     describeRoute({
       tags: ["Inbox"],
@@ -194,28 +216,6 @@ export const inboxRouter = new Hono<{ Variables: Session }>()
         dispatcher: DISPATCHER,
         run: runSink,
       })
-      if (!result.ok) throw new ApiError(STATUS[result.code], result.code, result.message)
-      return c.json({ data: result.item })
-    },
-  )
-  .post(
-    "/:id/schedule",
-    describeRoute({
-      tags: ["Inbox"],
-      description:
-        "Push an open decision or draft out of the inbox and its count until a time, when it asks again; answering it or replying to it in chat wakes it at once",
-      responses: {
-        200: { description: "OK" },
-        ...validationErrorResponses,
-        ...authErrorResponses,
-        ...forbiddenErrorResponses,
-        ...notFoundErrorResponses,
-        ...conflictErrorResponses,
-      },
-    }),
-    sValidator("json", scheduleInputSchema, invalid),
-    async (c) => {
-      const result = await scheduleItem(db, c.req.param("id"), c.req.valid("json").at)
       if (!result.ok) throw new ApiError(STATUS[result.code], result.code, result.message)
       return c.json({ data: result.item })
     },
