@@ -19,7 +19,9 @@ In the parallel pass each test gets 30s where bun gives 5s, since a test runs sl
 A parallel pass still running at its deadline (`TEST_PARALLEL_DEADLINE_MS`, 20 minutes, which the runner box's `suite.sh` raises and each of GitHub's shards lowers to 10, inside its own 20-minute `timeout-minutes`) is killed and fails, naming the files its workers still held, since bun's own timeout cannot stop synchronous code; the run's first line names the deadline it holds.
 GitHub runs the suite as shards rather than one run: `packages/scripts/src/test-shards.ts` packs the files longest first into as many shards as its budget of recorded file time (`BUDGET_MS`) needs, by `tests/timings.json`, where a file with none weighs the mean.
 Each shard runs its own files through `test-sandbox.ts`, and the `Audit, Lint, and Build` check is green only when every shard and the lint and build job passed.
-A new test file needs no timing to run; a hand run of `bun run test:timings` on `canary`, committed, keeps the timings current until CI refreshes them, so the shards stay even as files grow.
+A new test file needs no timing to run, and the split follows the suite with no hand run: each shard keeps its files' times as the run artifact `timings-<n>` (`TEST_TIMINGS_UPDATE`), and the Shards job merges the newest passing run's over `tests/timings.json` before it splits (`packages/scripts/src/test-timings.ts`), every shard splitting by that one merged file.
+Only a run from a branch of this repo counts, since a fork's run could upload any times; with none to read, the split keeps the committed file.
+No workflow commits the merged times, since a change reaches `canary` only through `pr:merge`, so the committed file stays a seed that `bun run test:timings`, committed in any PR, refreshes.
 `tests/` is fork-excluded, so the root script no-ops where the directory is absent.
 
 ## Traps
