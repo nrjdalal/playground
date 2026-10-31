@@ -124,6 +124,7 @@ describe.skipIf(!dockerUp())("Yard's routes on the hosted build", () => {
       created: 201,
       held: "pending",
       noAuth: 401,
+      ottVerify: 404,
       posted: [201, "sent"],
       socket: "open",
       socketNoOrigin: 403,
@@ -140,6 +141,17 @@ describe.skipIf(!dockerUp())("Yard's routes on the hosted build", () => {
         type: "message",
       },
     ])
+  })
+
+  test("a sign-in's login moves to its new holder: any other account still carrying it lets it go", async () => {
+    await sql`insert into "user" (id, name, email, login, role) values ('old', 'old', 'old@example.com', 'Taken', 'member')`
+    const run = child(
+      `await (await import("@packages/auth")).releaseLogin({ login: "taken" }); process.exit(0)`,
+      { POSTGRES_URL: url },
+    )
+    expect(run.code).toBe(0)
+    const [row] = await sql`select login from "user" where id = 'old'`
+    expect(row.login).toBeNull()
   })
 
   test("the socket upgrades on the Vercel export, a server that never listened", async () => {

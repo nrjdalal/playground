@@ -82,6 +82,7 @@ describe.skipIf(!dockerUp())("Yard's store", () => {
       ["bo", "member"],
       ["cy", "user"],
       ["di", "member"],
+      ["ed", "member"],
     ])
       await sql`insert into "user" (id, name, email, login, role) values (${id}, ${id}, ${`${id}@example.com`}, ${id}, ${role})`
     db = createDatabase(url)
@@ -161,21 +162,21 @@ describe.skipIf(!dockerUp())("Yard's store", () => {
       ])
     })
 
-    test("a token's first DM message and its mention wait; its next plain message sends", async () => {
+    test("a token's DM posts wait until the DM has a sent message, a denied opener included; a mention waits after", async () => {
       const { id } = await store.openDm(db, web("ada", true), "di")
-      expect((await send(token("ada", true), id, { kind: "text", text: "hi" })).status).toBe(
-        "pending",
-      )
-      expect((await send(token("ada", true), id, { kind: "text", text: "there" })).status).toBe(
-        "sent",
-      )
-      expect((await send(token("ada", true), id, { kind: "text", text: "@di see" })).status).toBe(
-        "pending",
-      )
+      const status = async (text: string) =>
+        (await send(token("ada", true), id, { kind: "text", text })).status
+      const opener = await send(token("ada", true), id, { kind: "text", text: "hi" })
+      expect([opener.status, await status("there")]).toEqual(["pending", "pending"])
+      await store.decide(db, web("ada", true), opener.id, "denied")
+      expect(await status("still there")).toBe("pending")
+      const next = await send(token("ada", true), id, { kind: "text", text: "hello" })
+      await store.decide(db, web("ada", true), next.id, "sent")
+      expect([await status("now plain"), await status("@di see")]).toEqual(["sent", "pending"])
     })
 
     test("an owner-only channel takes the owner alone, and holds the owner's token post", async () => {
-      const { id } = await both("releases")
+      const { id } = await both("owner-only")
       await sql`update yard_channel set post_rule = 'owner' where id = ${id}`
       await expect(send(web("bo"), id, { kind: "notice", text: "shipped" })).rejects.toMatchObject({
         status: 403,
@@ -248,9 +249,21 @@ describe.skipIf(!dockerUp())("Yard's store", () => {
         "old question",
       ])
       await expect(store.ownMessage(db, web("bo"), gone.id)).rejects.toMatchObject({ status: 404 })
+      await expect(
+        send(web("bo"), id, { kind: "answer", parent: gone.id, text: "reviving" }),
+      ).rejects.toMatchObject({ status: 404 })
       expect(await sweepOnceADay(db)).toBe(true)
       const left = await sql`select text from yard_message where channel_id = ${id} order by text`
       expect([...left].map((row) => row.text)).toEqual(["fresh answer", "old question"].sort())
+    })
+  })
+
+  test("a pending post past retention can be neither sent nor denied", async () => {
+    const { id } = await both("retention-pending")
+    const held = await send(token("bo"), id, { kind: "steps", text: "run it" })
+    await sql`update yard_message set at = ${new Date(cutoff().getTime() - 86_400_000)} where id = ${held.id}`
+    await expect(store.decide(db, web("bo"), held.id, "sent")).rejects.toMatchObject({
+      status: 404,
     })
   })
 
@@ -262,6 +275,23 @@ describe.skipIf(!dockerUp())("Yard's store", () => {
         status: 429,
       })
       expect(await take(db, "post:test", "second", 1, now + 1000)).toBe(1)
+    })
+
+    test("a post on the owner's limits refuses a login's second post in one second", async () => {
+      const channel = await store.createChannel(db, web("ed"), { name: "limits" })
+      // starts just after a second begins, so both posts fall in one window
+      await Bun.sleep(1010 - (Date.now() % 1000))
+      await store.post(db, web("ed"), channel.id, { kind: "text", text: "go" })
+      await expect(
+        store.post(db, web("ed"), channel.id, { kind: "text", text: "again" }),
+      ).rejects.toMatchObject({ status: 429 })
+    })
+
+    test("a member's token, invite and channel writes stop at the hour's cap", async () => {
+      for (let i = 1; i < store.WRITES_HOUR; i++) await store.createToken(db, web("ed"), `t${i}`)
+      await expect(store.createToken(db, web("ed"), "one-more")).rejects.toMatchObject({
+        status: 429,
+      })
     })
   })
 
@@ -281,7 +311,7 @@ describe.skipIf(!dockerUp())("Yard's store", () => {
   })
 
   describe("invites", () => {
-    test("an invite for a login lets that login in once, as a member in #general", async () => {
+    test("an invite for a login lets that login in once, as a member in #general and the owner-only #releases", async () => {
       const invite = await store.createInvite(db, web("ada", true), { forLogin: "CY" })
       await expect(store.redeemInvite(db, web("di"), invite.code)).rejects.toMatchObject({
         status: 404,
@@ -294,9 +324,13 @@ describe.skipIf(!dockerUp())("Yard's store", () => {
       })
       const [row] = await sql`select role from "user" where id = 'cy'`
       expect(row.role).toBe("member")
-      expect(
-        (await store.channels(db, web("cy"))).find((c) => c.name === store.GENERAL)?.joined,
-      ).toBe(true)
+      const joined = (await store.channels(db, web("cy"))).filter((c) => c.joined)
+      expect(joined.map((c) => [c.name, c.postRule])).toEqual(
+        expect.arrayContaining([
+          ["general", "members"],
+          ["releases", "owner"],
+        ]),
+      )
     })
 
     test("a member's request has no code until the owner opens it; the member sees their own requests alone", async () => {

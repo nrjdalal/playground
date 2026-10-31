@@ -14,6 +14,7 @@ import { env } from "@packages/env/auth"
 import { betterAuth } from "better-auth"
 import { drizzleAdapter } from "better-auth/adapters/drizzle"
 import { oneTimeToken } from "better-auth/plugins"
+import { sql } from "drizzle-orm"
 
 import { grantConsoleAccessOnSignIn } from "@/allowlist"
 import { cookieConfig, localhostHost, type ParsedHost } from "@/lib/utils"
@@ -74,6 +75,15 @@ const socialProviders =
       }
     : undefined
 
+// A GitHub login moves to whoever holds it now: before a sign-in stamps one, any other account still carrying it (a renamed handle, since taken) lets it go, so user.login stays unique.
+export const releaseLogin = async (data: Record<string, unknown>) => {
+  if (typeof data.login === "string")
+    await db
+      .update(user)
+      .set({ login: null })
+      .where(sql`lower(${user.login}) = ${data.login.toLowerCase()}`)
+}
+
 export const auth = betterAuth({
   baseURL: webOrigin ?? env.HONO_APP_URL,
   trustedOrigins: env.HONO_TRUSTED_ORIGINS,
@@ -103,13 +113,18 @@ export const auth = betterAuth({
   },
   databaseHooks: {
     session: { create: { before: grantConsoleAccessOnSignIn } },
+    user: { create: { before: releaseLogin }, update: { before: releaseLogin } },
   },
   ...schemaOptions,
-  // oneTimeToken mints a single-use, 3-minute token for a signed-in session, which the hosted web hands Yard's socket in its URL, since the API's host never sees the web's cookie: kept hashed, and its verify sets no cookie, since only the socket verifies one. It adds no table (it keeps tokens in verification), so it sits beside the schema's plugins rather than among them.
+  // oneTimeToken mints a single-use, 3-minute token for a signed-in session, which the hosted web hands Yard's socket in its URL, since the API's host never sees the web's cookie: kept hashed, and its verify sets no cookie. It adds no table (it keeps tokens in verification), so it sits beside the schema's plugins rather than among them.
   plugins: [
     ...schemaOptions.plugins,
     oneTimeToken({ disableSetSessionCookie: true, storeToken: "hashed" }),
   ],
+  // Only Yard's socket verifies a one-time token, in process (auth.api, which disabledPaths leaves open), since the plugin's own verify route answers the token's session to whoever holds it; a local stack, with no socket, mints none either. Registered on every build, so the plugin's types reach auth.api.
+  disabledPaths: env.PLAYGROUND_HOSTED
+    ? ["/one-time-token/verify"]
+    : ["/one-time-token/generate", "/one-time-token/verify"],
   advanced: {
     // The environment name-prefix isolates cookie names across envs; it applies independent of the cookie-mode switch below (a private-suffix env would still want it).
     ...(cookiePrefix && { cookiePrefix }),

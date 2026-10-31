@@ -1,5 +1,6 @@
 import { createHash, randomBytes } from "node:crypto"
 
+import { reachesConsole } from "@packages/auth/access"
 import {
   type Database,
   user,
@@ -16,6 +17,8 @@ import { ApiError } from "@/lib/error"
 import { live, take } from "@/lib/yard/limits"
 import { heldBecause } from "@/lib/yard/tier"
 
+type YardChannel = typeof yardChannel.$inferSelect
+
 // Who is calling: a member signed in on the web, or one of their tokens, whose name is the device a post carries.
 export type Caller = {
   device: string
@@ -25,8 +28,14 @@ export type Caller = {
   via: "token" | "web"
 }
 
-// The channel every member joins on redeeming an invite.
-export const GENERAL = "general"
+// The channels every member joins on redeeming an invite: #general, where every member posts, and #releases, where the owner rung alone posts.
+export const JOINED_ON_REDEEM = [
+  { name: "general", postRule: "members" },
+  { name: "releases", postRule: "owner" },
+] as const
+
+// The token, invite and channel writes a member makes in an hour.
+export const WRITES_HOUR = 20
 
 export const hashOf = (secret: string): string => createHash("sha256").update(secret).digest("hex")
 
@@ -115,7 +124,7 @@ export const createChannel = async (
   caller: Caller,
   { name, topic }: { name: string; topic?: string },
 ): Promise<Channel> => {
-  await take(db, `writes:${caller.id}`, "hour", 20)
+  await take(db, `writes:${caller.id}`, "hour", WRITES_HOUR)
   const id = crypto.randomUUID()
   try {
     await db.transaction(async (tx) => {
@@ -141,10 +150,10 @@ export const joinChannel = async (db: Database, caller: Caller, id: string): Pro
 // The DM between the caller and another member, named by both user ids sorted so either side opens the same row.
 export const openDm = async (db: Database, caller: Caller, login: string): Promise<Channel> => {
   const [peer] = await db
-    .select({ id: user.id, role: user.role })
+    .select({ banned: user.banned, id: user.id, role: user.role })
     .from(user)
     .where(sql`lower(${user.login}) = ${login.toLowerCase()}`)
-  if (!peer || !["admin", "member", "owner"].includes(peer.role ?? "")) throw notFound("Member")
+  if (!peer || !reachesConsole(peer, "member")) throw notFound("Member")
   if (peer.id === caller.id) throw new ApiError(400, "BAD_REQUEST", "A DM is between two members")
   const name = `dm:${[caller.id, peer.id].sort().join(":")}`
   await db.transaction(async (tx) => {
@@ -169,7 +178,7 @@ export const openDm = async (db: Database, caller: Caller, login: string): Promi
 }
 
 // The channel, when the caller is a member of it; a channel the caller is not in reads as missing.
-const memberOf = async (db: Database, caller: Caller, id: string) => {
+const memberOf = async (db: Database, caller: Caller, id: string): Promise<YardChannel> => {
   const [row] = await db
     .select({ channel: yardChannel })
     .from(yardChannel)
@@ -210,6 +219,29 @@ export const messages = async (
 // The owner's #i6 limits: a login posts once a second and 200 times a day, and a channel takes 60 posts an hour.
 export const POST_LIMITS = { channelHour: 60, loginDay: 200, loginSecond: 1 } as const
 
+// What one channel kind checks before a post: whether the caller may post there, and what decides a token's hold. A later kind (a self channel) adds its own.
+const POST_RULES: Record<
+  YardChannel["kind"],
+  (db: Database, caller: Caller, channel: YardChannel) => Promise<{ firstInDm: boolean }>
+> = {
+  channel: async (_db, caller, channel) => {
+    if (channel.postRule === "owner" && !caller.owner)
+      throw new ApiError(403, "FORBIDDEN", `Only the owner posts in #${channel.name}`)
+    return { firstInDm: false }
+  },
+  // A token's post waits while the DM has no sent message, so a held or denied opener lets nothing through after it.
+  dm: async (db, _caller, channel) => ({
+    firstInDm:
+      (
+        await db
+          .select({ id: yardMessage.id })
+          .from(yardMessage)
+          .where(and(eq(yardMessage.channelId, channel.id), eq(yardMessage.status, "sent")))
+          .limit(1)
+      ).length === 0,
+  }),
+}
+
 export const post = async (
   db: Database,
   caller: Caller,
@@ -218,13 +250,13 @@ export const post = async (
   limits: Record<keyof typeof POST_LIMITS, number> = POST_LIMITS,
 ): Promise<Message> => {
   const channel = await memberOf(db, caller, channelId)
-  if (channel.postRule === "owner" && !caller.owner)
-    throw new ApiError(403, "FORBIDDEN", `Only the owner posts in #${channel.name}`)
+  const { firstInDm } = await POST_RULES[channel.kind](db, caller, channel)
   if (body.parent) {
+    // a thread past retention is gone, so a reply cannot bring it back before the sweep removes it
     const [parent] = await db
       .select({ channelId: yardMessage.channelId, parentId: yardMessage.parentId })
       .from(yardMessage)
-      .where(eq(yardMessage.id, body.parent))
+      .where(and(eq(yardMessage.id, body.parent), live()))
     if (parent?.channelId !== channelId) throw notFound("Parent message")
     // Threads are one level deep, a first message and its replies, so retention reads a thread's newest message in one step.
     if (parent.parentId)
@@ -233,15 +265,6 @@ export const post = async (
   await take(db, `post:${caller.login}`, "second", limits.loginSecond)
   await take(db, `post:${caller.login}`, "day", limits.loginDay)
   await take(db, `channel:${channelId}`, "hour", limits.channelHour)
-  const firstInDm =
-    channel.kind === "dm" &&
-    (
-      await db
-        .select({ id: yardMessage.id })
-        .from(yardMessage)
-        .where(eq(yardMessage.channelId, channelId))
-        .limit(1)
-    ).length === 0
   const held = heldBecause({ ...body, firstInDm, postRule: channel.postRule, via: caller.via })
   const [row] = await db
     .insert(yardMessage)
@@ -262,7 +285,8 @@ export const post = async (
 
 export const markRead = async (db: Database, caller: Caller, channelId: string, at?: string) => {
   await memberOf(db, caller, channelId)
-  const lastReadAt = at ? new Date(at) : new Date()
+  const now = new Date()
+  const lastReadAt = at && new Date(at) < now ? new Date(at) : now
   await db
     .update(yardMember)
     .set({ lastReadAt })
@@ -295,6 +319,7 @@ export const decide = async (
         eq(yardMessage.id, id),
         eq(yardMessage.userId, caller.id),
         eq(yardMessage.status, "pending"),
+        live(),
       ),
     )
     .returning()
@@ -323,7 +348,7 @@ export const tokens = async (db: Database, caller: Caller) =>
 // A new token: its secret, yard_ and 32 random characters, is returned this once and kept only as its hash.
 export const createToken = async (db: Database, caller: Caller, name: string) => {
   tokenNameSchema.parse(name)
-  await take(db, `writes:${caller.id}`, "hour", 20)
+  await take(db, `writes:${caller.id}`, "hour", WRITES_HOUR)
   const value = secret("yard_")
   try {
     const [row] = await db
@@ -378,6 +403,9 @@ const inviteCode = (): string =>
 
 const DAY_MS = 86_400_000
 
+// How long an invite stays open when its maker names no other span, and when the owner opens a request.
+const INVITE_DAYS = 7
+
 // The owner sees every invite; a member sees the requests they made.
 export const invites = async (db: Database, caller: Caller) => {
   const rows = await db
@@ -392,9 +420,9 @@ export const invites = async (db: Database, caller: Caller) => {
 export const createInvite = async (
   db: Database,
   caller: Caller,
-  { expiresInDays = 7, forLogin }: { expiresInDays?: number; forLogin?: string },
+  { expiresInDays = INVITE_DAYS, forLogin }: { expiresInDays?: number; forLogin?: string },
 ) => {
-  await take(db, `writes:${caller.id}`, "hour", 20)
+  await take(db, `writes:${caller.id}`, "hour", WRITES_HOUR)
   const code = inviteCode()
   const [row] = await db
     .insert(yardInvite)
@@ -410,7 +438,7 @@ export const createInvite = async (
 }
 
 export const requestInvite = async (db: Database, caller: Caller, forLogin: string) => {
-  await take(db, `writes:${caller.id}`, "hour", 20)
+  await take(db, `writes:${caller.id}`, "hour", WRITES_HOUR)
   const [row] = await db
     .insert(yardInvite)
     .values({ forLogin: forLogin.toLowerCase(), requestedBy: caller.id, status: "requested" })
@@ -432,7 +460,7 @@ export const decideInvite = async (
       code
         ? {
             codeHash: hashOf(code),
-            expiresAt: new Date(Date.now() + 7 * DAY_MS),
+            expiresAt: new Date(Date.now() + INVITE_DAYS * DAY_MS),
             madeBy: caller.id,
             status: "open",
           }
@@ -456,7 +484,7 @@ export const decideInvite = async (
   return { ...inviteOut(row, requester?.login ?? null), ...(code ? { code } : {}) }
 }
 
-// Redeems an open, unexpired invite meant for the caller (or for anyone): the caller takes the member rung, unless already above it, and joins #general.
+// Redeems an open, unexpired invite meant for the caller (or for anyone): the caller takes the member rung, unless already above it, and joins #general and #releases.
 export const redeemInvite = async (db: Database, caller: Caller, code: string) => {
   const now = new Date()
   await db.transaction(async (tx) => {
@@ -477,18 +505,20 @@ export const redeemInvite = async (db: Database, caller: Caller, code: string) =
       .update(user)
       .set({ role: "member", roleSetAt: now })
       .where(and(eq(user.id, caller.id), or(isNull(user.role), eq(user.role, "user"))))
-    await tx
-      .insert(yardChannel)
-      .values({ id: crypto.randomUUID(), kind: "channel", name: GENERAL })
-      .onConflictDoNothing()
-    const [general] = await tx
-      .select({ id: yardChannel.id })
-      .from(yardChannel)
-      .where(eq(yardChannel.name, GENERAL))
-    await tx
-      .insert(yardMember)
-      .values({ channelId: general!.id, userId: caller.id })
-      .onConflictDoNothing()
+    for (const { name, postRule } of JOINED_ON_REDEEM) {
+      await tx
+        .insert(yardChannel)
+        .values({ id: crypto.randomUUID(), kind: "channel", name, postRule })
+        .onConflictDoNothing()
+      const [channel] = await tx
+        .select({ id: yardChannel.id })
+        .from(yardChannel)
+        .where(eq(yardChannel.name, name))
+      await tx
+        .insert(yardMember)
+        .values({ channelId: channel!.id, userId: caller.id })
+        .onConflictDoNothing()
+    }
   })
   return { member: true as const }
 }

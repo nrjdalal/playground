@@ -16,6 +16,13 @@ const upgrade = {
 
 const out: Record<string, unknown> = {}
 out.noAuth = await status("/channels")
+out.ottVerify = (
+  await fetch(`http://127.0.0.1:${server.port}/api/auth/one-time-token/verify`, {
+    body: JSON.stringify({ token: "any" }),
+    headers: { ...json, origin: web },
+    method: "POST",
+  })
+).status
 out.tokenList = await (
   await fetch(`${api}/channels`, { headers: bearer(process.env.BO_TOKEN!) })
 ).json()

@@ -9,6 +9,7 @@ import {
   MESSAGE_KINDS,
   messageSchema,
   tokenNameSchema,
+  WEB_DEVICE,
 } from "@packages/message"
 import { Hono } from "hono"
 import { describeRoute, resolver } from "hono-openapi"
@@ -73,13 +74,19 @@ const login = z
   .trim()
   .regex(/^[a-z\d](?:[a-z\d-]{0,38})$/i, "a GitHub login")
 
+// The hosted web's origin, the one a socket opens from; with HONO_WEB_URL unset, no socket opens, while the other routes still serve.
+const webOrigin = env.HONO_WEB_URL ? new URL(env.HONO_WEB_URL).origin : null
+
 const member = yardCaller()
 const web = yardCaller({ web: true })
 const owner = yardCaller({ rung: "owner", web: true })
 
 // Sends a message's frame to whoever may read it: its channel once sent, its sender alone while it waits or after a deny.
+// A stored post answers as stored whatever the fan-out does, so a client's retry never posts it twice; a failed publish is logged.
 const fanOut = async (caller: store.Caller, message: z.infer<typeof messageSchema>) =>
-  publish(await store.audienceOf(db, caller, message), { message, type: "message" })
+  publish(await store.audienceOf(db, caller, message), { message, type: "message" }).catch(
+    (error) => console.error("[yard] fan-out failed", error),
+  )
 
 // Yard's routes, which only the hosted build mounts (hosted.ts), each on the member rung or the narrower one it names.
 export const yardRouter = new Hono<{ Variables: YardVariables }>()
@@ -339,7 +346,7 @@ export const yardRouter = new Hono<{ Variables: YardVariables }>()
   .post(
     "/invites/redeem",
     doc(
-      "Redeems an invite: you take the member rung and join #general",
+      "Redeems an invite: you take the member rung and join #general and #releases",
       z.object({ member: z.literal(true) }),
       [validationErrorResponses, notFoundErrorResponses],
     ),
@@ -351,8 +358,18 @@ export const yardRouter = new Hono<{ Variables: YardVariables }>()
   // The socket: the web opens it straight to the API's host with a one-time token from its own proxy, since the API never sees the web's cookie; it checks the Origin is the hosted web's and the member rung, then pushes frames.
   .get(
     "/socket",
+    describeRoute({
+      description:
+        'Opens a member\'s socket with a one-time token from /api/auth/one-time-token/generate, from the hosted web\'s Origin alone. The server sends JSON frames and reads none: { type: "message", message } for a message the member may read, and { type: "read", channel, lastReadAt } for a read the member made elsewhere.',
+      responses: {
+        101: { description: "Switching Protocols: the socket is open" },
+        ...authErrorResponses,
+        ...forbiddenErrorResponses,
+      },
+      tags: ["Yard"],
+    }),
     async (c, next) => {
-      if (!env.HONO_WEB_URL || c.req.header("origin") !== env.HONO_WEB_URL)
+      if (!webOrigin || c.req.header("origin") !== webOrigin)
         throw new ApiError(403, "FORBIDDEN", "The socket opens from the hosted web alone")
       const token = c.req.query("token")
       if (!token) throw new ApiError(401, "UNAUTHORIZED", "Unauthorized")
@@ -364,7 +381,7 @@ export const yardRouter = new Hono<{ Variables: YardVariables }>()
       if (!user?.login || !reachesConsole(user, "member"))
         throw new ApiError(401, "UNAUTHORIZED", "Unauthorized")
       c.set("caller", {
-        device: "web",
+        device: WEB_DEVICE,
         id: user.id,
         login: user.login,
         owner: reachesConsole(user, "owner"),
