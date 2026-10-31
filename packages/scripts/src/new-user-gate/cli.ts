@@ -45,6 +45,28 @@ export const leftForYou = (out: string): string[] => {
     .map((line) => line.slice(4))
 }
 
+// Pure: the box's .zshenv and .zprofile. Every zsh the stack's jobs start reads .zshenv, and a login one has path_helper reorder PATH after it, so .zprofile puts the stand-ins first again; a Claude account's profile read goes to a closed loopback port, so the made-up token never leaves the Mac.
+export const zshStartup = (box: string): string =>
+  `export PATH="${join(box, "stubs")}:$PATH"\nexport PLAYGROUND_PROFILE_URL=http://127.0.0.1:9/profile\n`
+
+// Each stand-in that the box's zsh, plain and login, finds anywhere but the box's stubs folder, as `mode name path`; a job the box starts runs in one of the two, so an empty list means none of them reaches the real binary.
+export const strayStandIns = (box: string, home: string, names: string[]): string[] =>
+  ["-c", "-lc"].flatMap((mode) =>
+    Bun.spawnSync(
+      ["zsh", mode, `for n in ${names.join(" ")}; do print -r -- "$n $(whence -p $n)"; done`],
+      { env: { HOME: home, PATH: "/usr/bin:/bin:/usr/sbin:/sbin" }, stderr: "ignore" },
+    )
+      .stdout.toString()
+      .split("\n")
+      .filter(Boolean)
+      .filter((line) => !line.slice(line.indexOf(" ") + 1).startsWith(`${join(box, "stubs")}/`))
+      .map((line) => `${mode} ${line}`),
+  )
+
+// Pure: whether a page's text shows the sidebar's Scripts group, whose header reads the word and its count.
+export const scriptsGroup = (text: string): boolean =>
+  text.split("\n").some((line) => /^Scripts(\s*\d+)?$/.test(line.trim()))
+
 const run = (argv: string[], opts: { cwd?: string; env?: Record<string, string> } = {}) => {
   const out = Bun.spawnSync(argv, { cwd: opts.cwd, env: opts.env, stderr: "pipe", stdout: "pipe" })
   return { code: out.exitCode, err: out.stderr.toString(), out: out.stdout.toString() }
@@ -68,13 +90,7 @@ const prep = (box: string, sha: string) => {
     chmodSync(join(box, "stubs", name), 0o755)
   }
   writeFileSync(join(box, "tty"), "y\n")
-  // every zsh the stack's jobs start reads .zshenv, and a login one has path_helper reorder PATH after it, so .zprofile puts the stand-ins first again
-  // and a Claude account's profile read goes to a closed loopback port, so the made-up token never leaves the Mac
-  for (const rc of [".zshenv", ".zprofile"])
-    writeFileSync(
-      join(home, rc),
-      `export PATH="${join(box, "stubs")}:$PATH"\nexport PLAYGROUND_PROFILE_URL=http://127.0.0.1:9/profile\n`,
-    )
+  for (const rc of [".zshenv", ".zprofile"]) writeFileSync(join(home, rc), zshStartup(box))
   writeFileSync(join(box, "proxy-up"), "")
   const node = dirname(
     Bun.spawnSync(["realpath", realBin("node")])
@@ -300,6 +316,14 @@ const main = async (args: string[]) => {
   const keep = args.includes("--keep")
   const steps: Step[] = []
   const { home, path } = prep(box, full)
+  const stray = strayStandIns(box, home, Object.keys(stubs(box, "")))
+  if (stray.length) {
+    clean(box, home)
+    console.error(
+      `gate: the box's zsh reaches past a stand-in, so a job could call the real one:\n${stray.join("\n")}`,
+    )
+    return 2
+  }
   const desk = join(home, "playground", ".claude", "worktrees", "desk")
   const browser = new Browser(join(box, "shots"))
   console.log(`gate: ${full.slice(0, 10)} in ${box}`)
@@ -416,16 +440,17 @@ const main = async (args: string[]) => {
     })
     await step(steps, "the Scripts group has no Failing row", async () => {
       // the supervisor checks its follower each 30s, so a row that failed before the database started has a few ticks to clear
+      // a read can land before the sidebar renders, so the last read that shows the group is the one judged
       let text = ""
-      const scripts = () => text.split("\n").map((line) => line.trim())
       await waitFor(() => {
         browser.cmd("open", `${web}/dashboard`)
         browser.cmd("wait", "--load", "networkidle")
-        text = browser.text()
-        return scripts().includes("Scripts") && !/\bFailing\b/.test(text)
+        const read = browser.text()
+        if (scriptsGroup(read) || !text) text = read
+        return scriptsGroup(read) && !/\bFailing\b/.test(read)
       }, SCRIPTS_WAIT_MS)
       const failing = text.split("\n").filter((line) => /\bFailing\b/.test(line))
-      const listed = scripts().includes("Scripts")
+      const listed = scriptsGroup(text)
       const results = join(home, ".playground", "ops", "dashboard", "results.log")
       const last = existsSync(results)
         ? readFileSync(results, "utf8").trim().split("\n").at(-1)?.slice(21, 200)
@@ -469,6 +494,8 @@ const main = async (args: string[]) => {
         join(logs, "results.log"),
         join(logs, "dev.log"),
         join(home, ".playground", "dashboard-ingest.log"),
+        join(home, ".playground", "ops", "ops-dashboard.json"),
+        join(home, ".playground", "ops", "ops-usage.json"),
       ])
         if (existsSync(file)) run(["cp", file, shots])
       clean(box, home)
