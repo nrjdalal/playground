@@ -156,8 +156,8 @@ Ops runs an update when the owner asks for one:
 
 2. Note what `claude --version` prints, then run `claude update`.
    **Done when** `claude --version` prints a newer version than the one you noted.
-3. Resume each named session on the list onto the new binary, one at a time: close it by [SESSIONS.md](SESSIONS.md#end), then run its resume record, `bash ~/.playground/resume/<name>.sh`, which resumes it with the `--account` its start was given and the model it started with ([SESSIONS.md](SESSIONS.md#spawn) says how a resume picks a login).
-   A session with no record resumes with `"${PLAYGROUND_REPO:?}/scripts/spawn.sh" resume <name> <folder> <session-id>`, adding the `--model` its line shows when it runs on Claude, and `--account` with the account it started on when that is a second account ([SESSIONS.md](SESSIONS.md#spawn)).
+3. Resume each named session on the list onto the new binary, one at a time: close it by [SESSIONS.md](SESSIONS.md#end), then run its resume record, `bash ~/.playground/resume/<name>.sh`, which resumes it with the `--account` its start was given, the model it started with and an effort other than high ([SESSIONS.md](SESSIONS.md#spawn) says how a resume picks a login).
+   A session with no record resumes with `"${PLAYGROUND_REPO:?}/scripts/spawn.sh" resume <name> <folder> <session-id>`, adding the `--model` its line shows when it runs on Claude, `--effort` with the effort it runs at when that is not high, and `--account` with the account it started on when that is a second account ([SESSIONS.md](SESSIONS.md#spawn)).
    The managers go in [Starts and ends](#starts-and-ends)'s order, Ops first: Ops sends the dispatcher the list's path and asks for its own resume, and once Ops runs again the dispatcher tells it to carry on at step 3.
    Ops also does dispatcher-2 and optimizer; the Builder does its workers, Ops its runners, each worker its checkers, each spawner its probes, and the owner his own; Ops sends `$LIST`'s path to each session that resumes others.
    A session that ended on its own since step 1, its roster row `ended` with a report saying why, stays ended.
