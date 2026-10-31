@@ -34,10 +34,13 @@ me = spec["seen"][spec["on"]]
 limits = {"five_hour": {"used_percentage": me.get("five", 0), "resets_at": me.get("fiveReset")}}
 if "week" in me:
     limits["seven_day"] = {"used_percentage": me["week"], "resets_at": me.get("weekReset")}
-json.dump({"account": email[spec["on"]], "rate_limits": limits}, open(os.path.join(folder, "stored-login.json"), "w"))
+if spec.get("probeRead"):
+    json.dump({"account": email[spec["on"]], "rate_limits": limits, "source": "token/ratelimit-headers"}, open(os.path.expanduser("~/.playground/usage.json"), "w"))
+else:
+    json.dump({"account": email[spec["on"]], "rate_limits": limits}, open(os.path.join(folder, "stored-login.json"), "w"))
 path = os.path.join(folder, "login-flip.json")
 state = json.load(open(path)) if os.path.exists(path) else {}
-state["seen"] = dict(state.get("seen") or {}, **{email[k]: dict({"five": 0, "at": spec["now"]}, **v) for k, v in spec["seen"].items() if k != spec["on"]})
+state["seen"] = dict(state.get("seen") or {}, **{email[k]: dict({"five": 0, "at": spec["now"]}, **v) for k, v in spec["seen"].items() if k != spec["on"] or spec.get("probeRead")})
 if not spec.get("keepDue"):
     state.pop("due", None)
 if spec.get("factory"):
@@ -54,7 +57,8 @@ noEnd = [name[e] for e in re.findall(r"login flip: (\\S+)'s plan ends but usage.
 written = json.load(open(ns["STATE"]))
 pool = [dict(e, account=name[e["account"]]) for e in written["rotation"]["pool"]]
 split = {name[k]: v for k, v in written["split"]["shares"].items()}
-print(json.dumps({"noEnd": noEnd, "pool": pool, "split": split, "target": target}))
+seenAt = {name[k]: v.get("at") for k, v in written["seen"].items()}
+print(json.dumps({"noEnd": noEnd, "pool": pool, "seenAt": seenAt, "split": split, "target": target}))
 `
 
 const at = (iso: string) => Date.parse(iso) / 1000
@@ -67,6 +71,7 @@ const SUN_1700 = at("2026-11-01T17:00:00Z")
 const LATER = at("2026-11-10T12:00:00Z")
 
 type Reading = {
+  at?: number
   five?: number
   fiveReset?: number
   limitedUntil?: number
@@ -90,13 +95,14 @@ const flip = (
   home?: string,
   factory?: string,
   keepDue = false,
+  probeRead = false,
 ) => {
   const env: Record<string, string | undefined> = {
     ...process.env,
     HOME: home ?? mkdtempSync(join(scratch, "home-")),
   }
   delete env.CLAUDE_CONFIG_DIR
-  const spec = JSON.stringify({ accounts: ACCOUNTS, factory, keepDue, now, on, seen })
+  const spec = JSON.stringify({ accounts: ACCOUNTS, factory, keepDue, now, on, probeRead, seen })
   const child = Bun.spawnSync(["python3", "-I", "-c", harness, script, spec], { env })
   expect(child.stderr.toString()).toBe("")
   return JSON.parse(child.stdout.toString().trim())
@@ -305,4 +311,18 @@ test("spent by the split, an ending account reaches 100% before its end, and pri
   }
   expect(spentAt).not.toBeNull()
   expect(spentAt as number).toBeLessThanOrEqual(end - 2 * 3600)
+})
+
+test("with no stored login, a usage.json run.py took from an account's probe leaves that account's reading time as it was, so run.py probes it again on time", () => {
+  const readAt = TONIGHT - 600
+  const { seenAt } = flip(
+    "ND",
+    { ...spent, ND: { at: readAt, week: 40, weekReset: TUE_1000 } },
+    TONIGHT,
+    undefined,
+    undefined,
+    false,
+    true,
+  )
+  expect(seenAt.ND).toBe(readAt)
 })

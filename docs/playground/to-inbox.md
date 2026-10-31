@@ -19,6 +19,7 @@ Agent-fired: a session loads it before every `playground ask new`, and the owner
 | A plain update, or a ship or schema decision | its fields alone, under a plain title          |
 | A delete or budget decision                  | its why as plain lines, one fact each          |
 | A draft, or a Slack or ticket decision       | the message or ticket itself, in its own shape |
+| A secret ask                                 | its key and sink alone, under a plain title    |
 
 ## The card it writes for
 

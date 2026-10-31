@@ -81,9 +81,9 @@ export const leftForYou = (out: string): string[] => {
     .map((line) => line.slice(4))
 }
 
-// Pure: the box's .zshenv and .zprofile. Every zsh the stack's jobs start reads .zshenv, and a login one has path_helper reorder PATH after it, so .zprofile puts the stand-ins first again; a Claude account's profile read goes to a closed loopback port, so the made-up token never leaves the Mac; and spawn.sh's load gate takes BOX_LOAD_MULT.
+// Pure: the box's .zshenv and .zprofile. Every zsh the stack's jobs start reads .zshenv, and a login one has path_helper reorder PATH after it, so .zprofile puts the stand-ins first again; a Claude account's profile read and ops-usage's probe go to a closed loopback port, so those two reads never send the made-up token off the Mac; and spawn.sh's load gate takes BOX_LOAD_MULT.
 export const zshStartup = (box: string): string =>
-  `export PATH="${join(box, "stubs")}:$PATH"\nexport PLAYGROUND_PROFILE_URL=http://127.0.0.1:9/profile\nexport PLAYGROUND_LOAD_MULT=${BOX_LOAD_MULT}\n`
+  `export PATH="${join(box, "stubs")}:$PATH"\nexport PLAYGROUND_PROFILE_URL=http://127.0.0.1:9/profile\nexport PLAYGROUND_PROBE_URL=http://127.0.0.1:9/v1/messages\nexport PLAYGROUND_LOAD_MULT=${BOX_LOAD_MULT}\n`
 
 // Each stand-in that the box's zsh, plain and login, finds anywhere but the box's stubs folder, as `mode name path`; a job the box starts runs in one of the two, so an empty list means none of them reaches the real binary.
 export const strayStandIns = (box: string, home: string, names: string[]): string[] =>
