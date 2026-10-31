@@ -24,6 +24,7 @@ import {
   maybePrune,
   opsDown,
   pass,
+  prlessBranches,
   type Run,
 } from "../../../../../packages/scripts/src/ops-sweep/sweep"
 
@@ -406,6 +407,147 @@ describe("lateReviewers", () => {
 
   test("a GraphQL answer it cannot read is reviewer-check-unreadable", async () => {
     expect((await late("not json")).found).toEqual(["reviewer-check-unreadable"])
+  })
+})
+
+describe("prlessBranches", () => {
+  const minutesAgo = (m: number) => new Date(NOW - m * 60_000).toISOString()
+  // each branch as GitHub's GraphQL answers it, by its alias: its head committed `age` minutes ago with `prs` PRs in any state, or null when the branch is not on GitHub
+  const answer = (branches: (null | { age: number; prs: number })[]) =>
+    JSON.stringify({
+      data: {
+        repository: Object.fromEntries(
+          branches.map((b, i) => [
+            `b${i}`,
+            b && {
+              associatedPullRequests: { totalCount: b.prs },
+              target: {
+                committedDate: minutesAgo(b.age),
+                oid: `c0ffee${i}aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`,
+              },
+            },
+          ]),
+        ),
+      },
+    })
+  const sweep = async (
+    reply: string,
+    rows: Record<string, unknown>[] = [
+      { branch: "PG-234-branch-no-pr", kind: "worker", name: "abcdef-worker", status: "working" },
+    ],
+  ) => {
+    const { ctx } = setup()
+    const told: Call[] = []
+    const queries: string[] = []
+    ctx.factory = async () => "acme/app"
+    ctx.run = async (argv, options = {}) => {
+      if (argv[1] === "/repo/scripts/ops/notify.sh") told.push({ argv, env: options.env })
+      if (argv[0] === "gh") queries.push(argv.join(" "))
+      return { code: 0, err: "", out: argv[0] === "gh" ? reply : "" }
+    }
+    const agents = [{ kind: "builder", name: "builder" }, ...rows]
+    roster(ctx, agents)
+    const found = await prlessBranches(ctx, agents)
+    const again = told.length
+    await prlessBranches(ctx, agents)
+    return { again, found, queries, told }
+  }
+
+  test("tells the worker's lead once per head when its PG branch's head is 15 minutes old with no PR (#234)", async () => {
+    const { again, found, told } = await sweep(answer([{ age: 16, prs: 0 }]))
+    expect(found).toEqual([])
+    expect(again).toBe(1)
+    expect(told).toHaveLength(1)
+    expect(told[0]!.env?.NOTIFY_TO).toBe("builder")
+    expect(told[0]!.argv[3]).toBe(
+      "Branch PG-234-branch-no-pr (abcdef-worker): its head c0ffee0 is 16m old and has no PR, so no CI runs on it. Open its draft PR so CI runs.",
+    )
+  })
+
+  test("tells the lead again when the branch's head moves and still has no PR (#234)", async () => {
+    const { ctx } = setup()
+    const told: string[] = []
+    let reply = answer([{ age: 20, prs: 0 }])
+    ctx.factory = async () => "acme/app"
+    ctx.run = async (argv) => {
+      if (argv[1] === "/repo/scripts/ops/notify.sh") told.push(argv[3]!)
+      return { code: 0, err: "", out: argv[0] === "gh" ? reply : "" }
+    }
+    const agents = [
+      { kind: "builder", name: "builder" },
+      { branch: "PG-234-branch-no-pr", kind: "worker", name: "abcdef-worker", status: "working" },
+    ]
+    roster(ctx, agents)
+    await prlessBranches(ctx, agents)
+    reply = reply.replace("c0ffee0", "beef000")
+    await prlessBranches(ctx, agents)
+    await prlessBranches(ctx, agents)
+    expect(told.map((line) => line.split(" ")[5])).toEqual(["c0ffee0", "beef000"])
+  })
+
+  test("stays quiet with a PR in any state, a head under 15 minutes, or a branch not on GitHub (#234)", async () => {
+    expect((await sweep(answer([{ age: 30, prs: 1 }]))).told).toEqual([])
+    expect((await sweep(answer([{ age: 14, prs: 0 }]))).told).toEqual([])
+    expect((await sweep(answer([null]))).told).toEqual([])
+  })
+
+  test("reads no row holding a pr, as a merged one does, and none whose status is not live (#234)", async () => {
+    const merged = await sweep(answer([{ age: 30, prs: 0 }]), [
+      {
+        branch: "PG-227-conventions-tighten",
+        kind: "worker",
+        name: "abcdef-worker",
+        pr: "https://github.com/acme/app/pull/230",
+        status: "working",
+      },
+    ])
+    expect(merged.queries).toEqual([])
+    expect(merged.told).toEqual([])
+    expect(
+      (
+        await sweep(answer([{ age: 30, prs: 0 }]), [
+          {
+            branch: "PG-234-branch-no-pr",
+            kind: "worker",
+            name: "abcdef-worker",
+            status: "waiting",
+          },
+        ])
+      ).told,
+    ).toHaveLength(1)
+    for (const status of ["done", "ended", "merged", "parked"]) {
+      const { queries, told } = await sweep(answer([{ age: 30, prs: 0 }]), [
+        { branch: "PG-234-branch-no-pr", kind: "worker", name: "abcdef-worker", status },
+      ])
+      expect(told).toEqual([])
+      expect(queries).toEqual([])
+    }
+  })
+
+  test("reads every worker's PG branch in one GraphQL call, and no other branch (#234)", async () => {
+    const { queries, told } = await sweep(
+      answer([
+        { age: 20, prs: 0 },
+        { age: 40, prs: 0 },
+      ]),
+      [
+        { branch: "PG-234-branch-no-pr", kind: "worker", name: "abcdef-worker", status: "working" },
+        { branch: "pg-235-other", kind: "worker", name: "ghjkmn-worker", status: "working" },
+        { branch: "fix-not-tracked", kind: "worker", name: "pqrstv-worker", status: "working" },
+      ],
+    )
+    expect(queries).toHaveLength(2)
+    expect(queries[0]).toContain('b0: ref(qualifiedName: "refs/heads/PG-234-branch-no-pr")')
+    expect(queries[0]).toContain('b1: ref(qualifiedName: "refs/heads/pg-235-other")')
+    expect(queries[0]).not.toContain("fix-not-tracked")
+    expect(told.map((c) => c.argv[3]!.split(":")[0])).toEqual([
+      "Branch PG-234-branch-no-pr (abcdef-worker)",
+      "Branch pg-235-other (ghjkmn-worker)",
+    ])
+  })
+
+  test("a GraphQL answer it cannot read is branch-check-unreadable (#234)", async () => {
+    expect((await sweep("not json")).found).toEqual(["branch-check-unreadable"])
   })
 })
 
