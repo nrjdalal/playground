@@ -1,5 +1,5 @@
 // Hook on PreToolUse (Edit, MultiEdit, Skill, Write), UserPromptSubmit and SessionStart: refuses a write to an agent-facing doc until the session has loaded writing-for-agents (playbook's **writing** rule).
-import { existsSync, readdirSync, readFileSync, realpathSync, unlinkSync } from "node:fs"
+import { existsSync, readdirSync, realpathSync, unlinkSync } from "node:fs"
 import { homedir } from "node:os"
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path"
 
@@ -101,16 +101,16 @@ async function scoped(path: string, env: Environment): Promise<boolean> {
   )
 }
 
-// each plugin Claude Code loads here: a user install enabled in the user settings, or a project's install for the folder the session runs in
-const plugins = (env: Environment, cwd: string | undefined): string[] => {
-  const read = (file: string): unknown => {
+// each plugin installed and enabled for the user, or installed for the session's project
+const plugins = async (env: Environment, cwd: string | undefined): Promise<string[]> => {
+  const read = async (file: string): Promise<unknown> => {
     try {
-      return JSON.parse(readFileSync(join(configDir(env), file), "utf8"))
+      return await Bun.file(join(configDir(env), file)).json()
     } catch {
       return undefined
     }
   }
-  const listed = read(join("plugins", "installed_plugins.json")) as
+  const listed = (await read(join("plugins", "installed_plugins.json"))) as
     | {
         plugins?: Record<
           string,
@@ -119,7 +119,7 @@ const plugins = (env: Environment, cwd: string | undefined): string[] => {
       }
     | undefined
   const enabled = (
-    read("settings.json") as { enabledPlugins?: Record<string, unknown> } | undefined
+    (await read("settings.json")) as { enabledPlugins?: Record<string, unknown> } | undefined
   )?.enabledPlugins
   return Object.entries(listed?.plugins ?? {}).flatMap(([key, installs]) =>
     (Array.isArray(installs) ? installs : []).flatMap((install) => {
@@ -135,9 +135,9 @@ const plugins = (env: Environment, cwd: string | undefined): string[] => {
   )
 }
 
-const installed = (env: Environment, cwd: string | undefined) =>
-  [configDir(env), ...(cwd ? [join(cwd, ".claude")] : []), ...plugins(env, cwd)].some((dir) =>
-    existsSync(join(dir, "skills", SKILL, "SKILL.md")),
+const installed = async (env: Environment, cwd: string | undefined) =>
+  [configDir(env), ...(cwd ? [join(cwd, ".claude")] : []), ...(await plugins(env, cwd))].some(
+    (dir) => existsSync(join(dir, "skills", SKILL, "SKILL.md")),
   )
 
 async function mark(input: Input, env: Environment) {
@@ -160,7 +160,7 @@ async function judge(input: Input, env: Environment): Promise<string | undefined
   const cwd = typeof input.cwd === "string" ? input.cwd : undefined
   const path = real(resolve(cwd ?? "/", target))
   if (!(await scoped(path, env)) || existsSync(file)) return
-  if (!installed(env, cwd)) return
+  if (!(await installed(env, cwd))) return
   const who =
     typeof input.agent_id === "string" && input.agent_id ? "this subagent" : "this session"
   return `writing-first hook refuses this ${String(input.tool_name)} to ${target}: it is an agent-facing doc, and ${who} has not loaded ${SKILL} since its last compaction. Call the Skill tool with skill "${SKILL}", or the scoped name your skill list shows for it (such as "ws-home:${SKILL}"), follow it, then retry this write (playbook's **writing** rule).`
