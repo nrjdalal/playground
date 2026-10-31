@@ -13,9 +13,9 @@ shared through login-flip.json, so the two never probe the same account twice in
 limits were measured), `source` "token/ratelimit-headers" and `storedLogin` (the stored login's account and week). Remove `factory`
 from login-flip.json when the factory moves back to the stored login. login-flip.json's `accounts` lists every account the factory's
 sessions spend into; each is probed the same way, and usage.json's `accounts` holds each fresh week reading, which week-marks.py sums.
-Each Claude account the Dashboard's Add a Claude account keeps (usage.accounts, its setup-token under usage.keychainService) comes
-before the stored login: usage.json holds the first one's probe reading, since the dispatcher's sessions run on it, and the stored
-login's only when none of them reads. With neither a stored login nor an added account, the job beats "waiting", not an error.
+While login-flip.json names no `factory`, each Claude account the Dashboard's Add a Claude account keeps (usage.accounts, its
+setup-token under usage.keychainService) comes before the stored login: usage.json holds the first one's probe reading, since the
+dispatcher's sessions run on it, and the stored login's only when none of them reads. With neither a stored login nor an added account, the job beats "waiting", not an error.
 usage.json's `rotation` is login-flip.json's: `pool`, each account login-flip.py switches between (its TARGETS), whether its plan ends, when, and the day of the month a renewing one renews.
 usage.json keeps the shape the dashboard reads (rate_limits.{five_hour,seven_day}.{used_percentage,resets_at}, writtenAt), plus account
 and source. No model call but that probe. One instance (flock).
