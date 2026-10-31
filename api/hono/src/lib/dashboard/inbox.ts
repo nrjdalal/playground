@@ -1011,9 +1011,13 @@ export async function provideSecret(
     results.push({ environment, exitCode: await run(sinkArgv(key, sink, environment), value) })
   }
   const answer: InboxProvided = { at, choice: "provided", results }
+  // merged key by key, so a poster's read that landed while the sink ran keeps its close
   const [row] = await db
     .update(inboxItem)
-    .set({ answer, version: sql`${inboxItem.version} + 1` })
+    .set({
+      answer: sql`${inboxItem.answer} || jsonb_build_object('results', (${JSON.stringify(results)}::text)::jsonb)`,
+      version: sql`${inboxItem.version} + 1`,
+    })
     .where(eq(inboxItem.id, id))
     .returning()
   const item = toItem(row ?? claimed)

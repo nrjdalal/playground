@@ -2498,6 +2498,24 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       expect(JSON.stringify([one, two])).not.toContain(VALUE)
     })
 
+    test("keeps a poster's close that lands while the sink runs", async () => {
+      const posted = await post(decision(SECRET))
+      const run = async () => {
+        const claimed = await store.getItem(db, posted.id)
+        if (claimed) await store.readAnswer(db, claimed)
+        return 0
+      }
+      const provided = await store.provideSecret(db, posted.id, { value: VALUE }, { actor, run })
+      expect(provided.ok && provided.item.answer).toMatchObject({
+        ackedAt: expect.any(String),
+        choice: "provided",
+        results: [
+          { environment: "production", exitCode: 0 },
+          { environment: "preview", exitCode: 0 },
+        ],
+      })
+    })
+
     test("is refused on any other item, and the item takes no other answer", async () => {
       const ask = await post(decision(PREVIEWS.ask))
       const sink = stub()
