@@ -68,6 +68,7 @@ import { useDashboard } from "@/components/dashboard/dashboard"
 import { StatusIcon } from "@/components/dashboard/worker-light"
 import { Hint, OFF_FOCUSABLE } from "@/components/hint"
 import { GroupCount } from "@/components/shell/group-count"
+import { ROW_BOX } from "@/components/shell/row-box"
 import type { MenuUpdate } from "@/components/shell/sidebar-user-menu"
 import { Button } from "@/components/ui/button"
 import {
@@ -1860,9 +1861,6 @@ function useSidebarSource(allowed: boolean): SidebarSource {
     workers,
   })
 }
-
-// A row's box, which the session, ops and roster rows and the placeholder share: the stock 32px with no padding above or below, so a script's 14px and 12px lines (26px) sit 3px from each edge; the collapsed rail's own size-8! and p-2! still win there.
-export const ROW_BOX = "h-8 py-0"
 
 // A script's second line, never wrapping: short of room it cuts with … from the end, the tail first, and never the state (Inbox #i546). The state sits in a box that does not shrink, so the tail gives way first.
 function SecondLine({

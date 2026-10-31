@@ -59,34 +59,40 @@ export type YardToken = {
 }
 
 // An id goes into a path escaped, since a page's id comes from its URL and a message's text is untrusted.
-const at = encodeURIComponent
+const segment = encodeURIComponent
 
 export const yardApi = {
   approve: (id: string) =>
-    yard<{ message: YardMessage }>(`/messages/${at(id)}/approve`, { method: "POST" }),
+    yard<{ message: YardMessage }>(`/messages/${segment(id)}/approve`, { method: "POST" }),
   approveInvite: (id: string) =>
-    yard<{ invite: YardInvite }>(`/invites/${at(id)}/approve`, { method: "POST" }),
+    yard<{ invite: YardInvite }>(`/invites/${segment(id)}/approve`, { method: "POST" }),
   channels: () => yard<{ channels: YardChannel[] }>("/channels"),
   createToken: (name: string) =>
     yard<{ token: YardToken & { secret: string } }>("/tokens", { body: { name }, method: "POST" }),
   deny: (id: string) =>
-    yard<{ message: YardMessage }>(`/messages/${at(id)}/deny`, { method: "POST" }),
+    yard<{ message: YardMessage }>(`/messages/${segment(id)}/deny`, { method: "POST" }),
   denyInvite: (id: string) =>
-    yard<{ invite: YardInvite }>(`/invites/${at(id)}/deny`, { method: "POST" }),
+    yard<{ invite: YardInvite }>(`/invites/${segment(id)}/deny`, { method: "POST" }),
   invites: () => yard<{ invites: YardInvite[] }>("/invites"),
-  message: (id: string) => yard<{ message: YardMessage }>(`/messages/${at(id)}`),
+  message: (id: string) => yard<{ message: YardMessage }>(`/messages/${segment(id)}`),
   messages: (channel: string) =>
-    yard<{ hasMore: boolean; messages: YardMessage[] }>(`/channels/${at(channel)}/messages`),
+    yard<{ hasMore: boolean; messages: YardMessage[] }>(`/channels/${segment(channel)}/messages`),
   post: (channel: string, body: { kind: (typeof MESSAGE_KINDS)[number]; text: string }) =>
-    yard<{ message: YardMessage }>(`/channels/${at(channel)}/messages`, { body, method: "POST" }),
+    yard<{ message: YardMessage }>(`/channels/${segment(channel)}/messages`, {
+      body,
+      method: "POST",
+    }),
   read: (channel: string) =>
-    yard<{ lastReadAt: string }>(`/channels/${at(channel)}/read`, { body: {}, method: "POST" }),
+    yard<{ lastReadAt: string }>(`/channels/${segment(channel)}/read`, {
+      body: {},
+      method: "POST",
+    }),
   redeem: (code: string) =>
     yard<{ member: true }>("/invites/redeem", { body: { code }, method: "POST" }),
   requestInvite: (forLogin: string) =>
     yard<{ invite: unknown }>("/invites/request", { body: { forLogin }, method: "POST" }),
   revokeToken: (id: string) =>
-    yard<{ token: YardToken }>(`/tokens/${at(id)}`, { method: "DELETE" }),
+    yard<{ token: YardToken }>(`/tokens/${segment(id)}`, { method: "DELETE" }),
   tokens: () => yard<{ tokens: YardToken[] }>("/tokens"),
 }
 
@@ -134,7 +140,8 @@ export function useYardSocket() {
         }
         socket.onmessage = (event) => {
           const frame = JSON.parse(String(event.data)) as { message?: YardMessage; type: string }
-          if (frame.type === "message" && frame.message) {
+          // a reply lives in its parent's thread, which the channel's list leaves out
+          if (frame.type === "message" && frame.message && !frame.message.parent) {
             const message = frame.message
             client.setQueryData<YardMessage[]>(messagesKey(message.channel), (list) =>
               list ? upsertMessage(list, message) : list,

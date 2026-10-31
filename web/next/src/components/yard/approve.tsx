@@ -3,11 +3,9 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
 
-import { TranscriptMessage } from "@/components/transcript-message"
 import { Button } from "@/components/ui/button"
 import { toast } from "@/components/ui/toast"
-import { FromLine } from "@/components/yard/channel-view"
-import { MessageLinks } from "@/components/yard/message-links"
+import { YardMessageView } from "@/components/yard/channel-view"
 import { YARD_KEY } from "@/lib/yard"
 import { yardApi } from "@/lib/yard-api"
 
@@ -35,18 +33,7 @@ export function Approve({ id }: { id: string }) {
       {error && (
         <p className="text-muted-foreground text-sm">No waiting message of yours has this link.</p>
       )}
-      {message && (
-        <TranscriptMessage
-          at={message.at}
-          now={new Date()}
-          plain
-          text={message.text}
-          variant="muted"
-          who={<FromLine message={message} />}
-        >
-          <MessageLinks links={message.links} />
-        </TranscriptMessage>
-      )}
+      {message && <YardMessageView message={message} now={new Date()} />}
       {message && status === "pending" ? (
         <div className="flex gap-2">
           <Button onClick={() => void decide("approve")}>Approve and send</Button>

@@ -43,10 +43,12 @@ describe("a Yard message's links", () => {
     expect(render([])).toBe("")
   })
 
-  test("the channel view and the approve page both show them", async () => {
-    for (const file of ["channel-view.tsx", "approve.tsx"]) {
-      const source = await Bun.file(join(web, "src/components/yard", file)).text()
-      expect(source).toContain("<MessageLinks links={message.links} />")
-    }
+  test("the channel view and the approve page both show them, through the one message view", async () => {
+    const read = (file: string) => Bun.file(join(web, "src/components/yard", file)).text()
+    const view = await read("channel-view.tsx")
+    const body = view.slice(view.indexOf("export function YardMessageView"))
+    expect(body.slice(0, body.indexOf("\n}\n"))).toContain("<MessageLinks links={message.links} />")
+    expect(view).toContain("<YardMessageView key={message.id}")
+    expect(await read("approve.tsx")).toContain("<YardMessageView message={message}")
   })
 })

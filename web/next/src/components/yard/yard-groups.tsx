@@ -7,6 +7,7 @@ import { usePathname } from "next/navigation"
 import { useState } from "react"
 
 import { GroupCount } from "@/components/shell/group-count"
+import { ROW_BOX } from "@/components/shell/row-box"
 import {
   SidebarGroup,
   SidebarGroupLabel,
@@ -89,7 +90,7 @@ function YardRows({ rows }: { rows: YardChannel[] }) {
               isActive={pathname === channelHref(row, config.hosted)}
               tooltip={{ children: tip, hidden: false }}
               aria-description={tip}
-              className="h-8 py-0"
+              className={ROW_BOX}
             >
               {row.kind === "dm" ? <RiUserLine /> : <RiHashtag />}
               <span className="truncate text-xs">{title}</span>

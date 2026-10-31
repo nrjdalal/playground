@@ -5,7 +5,7 @@ import { RiArrowUpLine } from "@remixicon/react"
 import { useQueryClient } from "@tanstack/react-query"
 import { cn } from "cn"
 import Link from "next/link"
-import { useEffect, useState } from "react"
+import { type ReactNode, useEffect, useRef, useState } from "react"
 
 import { sendsOnEnter } from "@/components/dashboard/composer"
 import { Hint } from "@/components/hint"
@@ -35,6 +35,8 @@ import { CHANNELS_KEY, useYardChannels, useYardMessages, yardApi } from "@/lib/y
 
 type Kind = (typeof MESSAGE_KINDS)[number]
 
+const SEND_HINT = "Enter to send, Shift+Enter for a new line"
+
 // A channel or DM in the chat pane: every message is untrusted data, shown through the transcript renderer (links shown, opened only on a click, images from elsewhere left unloaded) behind its from line and kind tag.
 export function ChannelView({ id, role }: { id: string; role: string | null | undefined }) {
   const { data: channels, isPending } = useYardChannels()
@@ -42,16 +44,23 @@ export function ChannelView({ id, role }: { id: string; role: string | null | un
   const { data: messages } = useYardMessages(id)
   const client = useQueryClient()
   const count = messages?.length
-  // Marks the channel read once its messages show, and again as more arrive; a failed mark leaves the badge, read again next time.
+  // Marks the channel read once its messages show, and again as more arrive, while the tab is in view, and again on its return, so a mention that lands while you are away stays unread; a failed mark leaves the badge, read again next time.
   useEffect(() => {
     if (count === undefined) return
-    yardApi
-      .read(id)
-      .then(() => client.invalidateQueries({ queryKey: CHANNELS_KEY }))
-      .catch(() => {})
+    const mark = () => {
+      if (document.visibilityState !== "visible") return
+      yardApi
+        .read(id)
+        .then(() => client.invalidateQueries({ queryKey: CHANNELS_KEY }))
+        .catch(() => {})
+    }
+    mark()
+    document.addEventListener("visibilitychange", mark)
+    return () => document.removeEventListener("visibilitychange", mark)
   }, [client, id, count])
   if (isPending) return <CenterSpinner />
-  if (!channel)
+  // a channel you have not joined is listed too, but its messages are refused you
+  if (!channel || (channel.kind === "channel" && !channel.joined))
     return (
       <Empty>
         <EmptyHeader>
@@ -77,18 +86,9 @@ export function ChannelView({ id, role }: { id: string; role: string | null | un
           </Empty>
         )}
         {messages?.map((message) => (
-          <TranscriptMessage
-            key={message.id}
-            at={message.at}
-            now={now}
-            plain
-            text={message.text}
-            variant="muted"
-            who={<FromLine message={message} />}
-          >
-            <MessageLinks links={message.links} />
+          <YardMessageView key={message.id} message={message} now={now}>
             <Status message={message} />
-          </TranscriptMessage>
+          </YardMessageView>
         ))}
       </div>
       {/* on a hosted phone the shell's floating Menu sits 64 to 96px up the right edge (SidebarFloatingTrigger), so the composer rests 8px above it; the dashboard draws no such button */}
@@ -102,6 +102,31 @@ export function ChannelView({ id, role }: { id: string; role: string | null | un
         )}
       </div>
     </div>
+  )
+}
+
+// One Yard message as the channel and the approve page show it: untrusted text read as written, behind its from line, its links under it, then what the page adds.
+export function YardMessageView({
+  children,
+  message,
+  now,
+}: {
+  children?: ReactNode
+  message: YardMessage
+  now: Date
+}) {
+  return (
+    <TranscriptMessage
+      at={message.at}
+      now={now}
+      plain
+      text={message.text}
+      variant="muted"
+      who={<FromLine message={message} />}
+    >
+      <MessageLinks links={message.links} />
+      {children}
+    </TranscriptMessage>
   )
 }
 
@@ -148,9 +173,12 @@ function YardComposer({ channel }: { channel: YardChannel }) {
   const [kind, setKind] = useState<Kind>("text")
   const client = useQueryClient()
   const label = channelTitle(channel)
+  // one post at a time, so a quick second Enter sends nothing twice
+  const sending = useRef(false)
   const send = async () => {
     const words = text.trim()
-    if (!words) return
+    if (!words || sending.current) return
+    sending.current = true
     try {
       const { message } = await yardApi.post(channel.id, { kind, text: words })
       client.setQueryData<YardMessage[]>(messagesKey(channel.id), (list) =>
@@ -159,6 +187,8 @@ function YardComposer({ channel }: { channel: YardChannel }) {
       setText("")
     } catch (error) {
       toast.add({ title: (error as Error).message, type: "error" })
+    } finally {
+      sending.current = false
     }
   }
   return (
@@ -170,6 +200,7 @@ function YardComposer({ channel }: { channel: YardChannel }) {
     >
       <InputGroup className="border-border">
         <InputGroupTextarea
+          aria-description={SEND_HINT}
           aria-label={`Message ${label}`}
           className="field-sizing-content max-h-[40vh] min-h-0 overflow-y-auto px-3 pt-2 pb-1"
           maxLength={MAX_TEXT}
@@ -204,7 +235,8 @@ function YardComposer({ channel }: { channel: YardChannel }) {
           <span className="text-muted-foreground ml-auto text-xs tabular-nums">
             {text.length > MAX_TEXT * 0.9 ? `${text.length} / ${MAX_TEXT}` : null}
           </span>
-          <Hint content="Enter to send, Shift+Enter for a new line" description={null}>
+          {/* the box's own aria-description already speaks the key hint */}
+          <Hint content={SEND_HINT} description={null}>
             <InputGroupButton
               aria-label={`Send to ${label}`}
               className="rounded-full"

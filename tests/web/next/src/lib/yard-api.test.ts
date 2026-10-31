@@ -51,3 +51,12 @@ describe("an id in a path", () => {
     expect(calls[0]?.url).toBe(`${config.api.url}/api/v1/yard/invites/..%2Ftokens/approve`)
   })
 })
+
+describe("the live socket", () => {
+  test("adds a channel's own messages to its list, and leaves a reply to its thread", async () => {
+    const source = await Bun.file(
+      new URL("../../../../../web/next/src/lib/yard-api.ts", import.meta.url),
+    ).text()
+    expect(source).toContain('frame.type === "message" && frame.message && !frame.message.parent')
+  })
+})
