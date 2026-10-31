@@ -9,6 +9,7 @@ import {
   previewUrl,
   stackGroups,
   startAddress,
+  stoppedIn,
   takeMove,
   takePreview,
   topicCounts,
@@ -129,7 +130,7 @@ describe("stackGroups", () => {
     url,
   })
 
-  test("one group a project in the list's order, each worktree its branch and session, a stopped one disabled", () => {
+  test("one group a project in the list's order, each worktree its branch and session, a stopped one its path, to start it", () => {
     expect(
       stackGroups([
         stack("playground", "canary", "https://playground.localhost", "dispatcher"),
@@ -139,15 +140,22 @@ describe("stackGroups", () => {
     ).toEqual([
       {
         items: [
-          { disabled: false, label: "canary · dispatcher", value: "https://playground.localhost" },
-          { disabled: true, label: "feat/b · stopped", value: "stopped:/playground/feat/b" },
+          { label: "canary · dispatcher", value: "https://playground.localhost" },
+          { label: "feat/b · stopped", value: "stopped:/playground/feat/b" },
         ],
         project: "playground",
       },
       {
-        items: [{ disabled: false, label: "folder", value: "https://folder.yard.localhost" }],
+        items: [{ label: "folder", value: "https://folder.yard.localhost" }],
         project: "yard",
       },
+    ])
+  })
+
+  test("a Vibeground started and not serving yet reads starting, so the pane offers Stop and never a second Start", () => {
+    const booting = { ...stack("playground", "feat/c", null), vibe: true }
+    expect(stackGroups([booting])[0]?.items).toEqual([
+      { label: "feat/c · starting", value: "stopped:/playground/feat/c" },
     ])
   })
 })
@@ -199,5 +207,19 @@ describe("openPreview", () => {
     ).toEqual({ from: "/dashboard?worker=a" })
     expect(previewClick({ ...click, metaKey: true }, "/dashboard", home)).toBeNull()
     expect(previewClick({ ...click, button: 1 }, "/dashboard", home)).toBeNull()
+  })
+})
+
+describe("stoppedIn", () => {
+  test("marks the stopped worktree stopped in the cached list, so the pane shows Start rather than reopening its old address", () => {
+    const stacks: { path: string; url: string | null; vibe: boolean }[] = [
+      { path: "/w/a", url: "https://a.localhost", vibe: true },
+      { path: "/w/b", url: "https://b.localhost", vibe: false },
+    ]
+    expect(stoppedIn(stacks, "/w/a")).toEqual([
+      { path: "/w/a", url: null, vibe: false },
+      { path: "/w/b", url: "https://b.localhost", vibe: false },
+    ])
+    expect(stacks[0]?.url).toBe("https://a.localhost")
   })
 })
