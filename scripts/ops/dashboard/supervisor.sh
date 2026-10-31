@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # The live dashboard's supervisor: one background task of runner-pride's cmux session that keeps the dashboard stack and
-# the session follower running as its own children (so both stay descendants of a cmux terminal), and rolls them
-# to every new head of the branch upstream.sh names end to end: build it while the old stack serves (prebuild, from a staging worktree, unless it migrates), stop both by their recorded process groups, reset to it, install, build or
+# the session follower running as its own children (so both stay descendants of a cmux terminal), the web beside them, and rolls them
+# to every new head of the branch upstream.sh names end to end: build it while the old stack serves (prebuild, from a staging worktree, unless it migrates), swap the web to that build with no stop (swap_web), stop the API and the follower by their recorded process groups, reset to it, install, build or
 # migrate when the merge needs it, take its build (build_head, kept per head in $S/builds) and serve it, check it, start the follower, check it. Each roll, outage or anomaly
 # appends one line to results.log (a refused roll a second, naming its refusal), which wakes the runner to report it. It signals only processes it started.
 # It runs the latest head of the branch its main checkout sits on (upstream.sh: main for an install, canary for a checkout kept on canary), never one-off hashes or branches
@@ -62,6 +62,7 @@ build_head() {
 # Before a roll stops anything: build the target ($1, the roll tagged $2) into $S/builds/<sha> from a detached staging worktree while the old stack serves, so build_head finds it kept after the stop; a target that migrates, whose commit cannot be had here, or whose staging worktree or install fails, builds after the stop as before; a build that fails lists the target in bad-builds and returns 1 with nothing stopped; the staging worktree goes either way
 prebuild() {
   local target=$1 tag=$2 stage=$S/staging built rc=0
+  prebuilt=
   drop_stage() { git worktree remove --force "$stage" >> "$LOG" 2>&1 || rm -rf "$stage"; git worktree prune; }
   "$D/net-git.sh" fetch -q origin >> "$LOG" 2>&1
   git cat-file -e "$target^{commit}" 2>/dev/null || { say "no commit ${target:0:7} here yet; building after the stop"; return 0; }
@@ -77,7 +78,7 @@ prebuild() {
   say "building ${target:0:7} before the stop, from $stage"
   built=$(build_head "$stage") || rc=1
   drop_stage
-  [ $rc -eq 0 ] && return 0
+  [ $rc -eq 0 ] && { prebuilt=1; return 0; }
   echo "$target" >> "$BAD"
   result "$tag ${target:0:7} FAIL build before the stop: ${built:-no error line; see supervisor.log}; still serving $(git rev-parse --short HEAD)"
   tell_dispatcher "Dashboard roll to ${target:0:7} FAILED its build; nothing stopped, still on $(git rev-parse --short HEAD)"
@@ -89,18 +90,55 @@ keep_builds() {
   for d in "$S/builds"/*/; do d=$(basename "$d"); [ "$d" = "$1" ] || [ "$d" = "$before" ] || rm -rf "${S:?}/builds/$d"; done
   [ "$before" = "$1" ] || echo "$1" > "$S/builds/passed"
 }
+# The API alone, from the checkout's source, under the dev launcher; the web runs on its own (web_up)
 start_dev() {
-  PLAYGROUND_BUILD=$S/builds/$(git rev-parse HEAD) bun run serve --ui stream > "$DEVLOG" 2>&1 &
+  PLAYGROUND_BUILD=$S/builds/$(git rev-parse HEAD) bun run serve --filter=@api/hono --ui stream > "$DEVLOG" 2>&1 &
   echo $! > "$S/dashboard-dev.pid"; say "dev started, pid $!"
 }
 start_follower() {
   bash "$D/start-ingest.sh" &
   echo $! > "$S/dashboard-ingest.pid"; say "follower started, pid $!"
 }
+# The web: next's standalone server from the head's kept build ($2), started as job $1 on a port of its own, through the same portless.ts env the serve task gave it; ready once it answers on that port, within 60s
+web_up() {
+  local job=$1 sha=$2 port i
+  port=$(bun --no-env-file -e 'const s = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: () => new Response() }); console.log(s.port); s.stop(true)') || return 1
+  (cd web/next && PORTLESS_URL=$WEB PORT=$port HOSTNAME=127.0.0.1 exec bun ../../packages/scripts/src/portless.ts bun "$S/builds/$sha/web/web/next/server.js") > "$S/$job.log" 2>&1 &
+  echo $! > "$S/$job.pid"; echo "$port" > "$S/$job.port"; echo "$sha" > "$S/$job.sha"
+  for i in $(seq 1 60); do
+    curl -s -o /dev/null "http://127.0.0.1:$port/" && { "$D/procs.sh" record "$job" >> "$LOG" 2>&1; say "web ${sha:0:7} up on :$port, pid $(cat "$S/$job.pid")"; return 0; }
+    alive "$job" || break; sleep 1
+  done
+  say "web ${sha:0:7} never answered on :$port: $(tail -1 "$S/$job.log" | cut -c1-200)"; return 1
+}
+# The web's portless route to port $1, owned by run.sh ($PPID, which a reload keeps), so moving it from one web to the next is one write and the old web's exit leaves it
+web_route() { bun "$WT/api/hono/src/bin/web-route.ts" "$WEB" "$1" "$PPID" >> "$LOG" 2>&1; }
+serving_web() { alive dashboard-web && [ "$(cat "$S/dashboard-web.sha" 2>/dev/null)" = "$1" ]; }
+web_stop() { "$D/procs.sh" stop "$1" >> "$LOG" 2>&1; rm -f "$S/$1.sha"; }
+stop_web() { web_stop dashboard-web; }
+# The head's web ($1) serving and routed: the one that serves it already is kept (a swap, or a reload's), else a new one starts in the old one's place
+ensure_web() {
+  serving_web "$1" || { stop_web; web_up dashboard-web "$1" || return 1; }
+  web_route "$(cat "$S/dashboard-web.port")"
+}
+# A roll's web with no gap: the target's ($1) starts beside the serving one, the route moves to it, and the old one stops once the proxy has read the move; returns 1, the old one serving, when no web of this supervisor's serves or the new one never answers
+swap_web() {
+  local sha=$1
+  alive dashboard-web || return 1
+  if ! web_up dashboard-web-next "$sha" || ! web_route "$(cat "$S/dashboard-web-next.port")"; then
+    web_stop dashboard-web-next; say "web ${sha:0:7} did not take over; stopping both as before"; return 1
+  fi
+  sleep "${ROUTE_SETTLE:-3}"
+  web_stop dashboard-web
+  local f; for f in pid port sha procs log; do [ ! -e "$S/dashboard-web-next.$f" ] || mv "$S/dashboard-web-next.$f" "$S/dashboard-web.$f"; done
+  say "web swapped to ${sha:0:7} on :$(cat "$S/dashboard-web.port") with no stop"
+}
+# Stop the follower and the API, and the web too unless $1 is keep-web (a roll whose web has swapped already)
 stop_all() {
   dashboard_container > /dev/null
   "$D/procs.sh" stop dashboard-ingest >> "$LOG" 2>&1
   "$D/procs.sh" stop dashboard-dev >> "$LOG" 2>&1
+  [ "${1:-}" = keep-web ] || stop_web
 }
 # the dashboard's URLs as portless names them for this checkout, read at every check, since portless's proxy can move (http on 1355 to https on 443)
 dashboard_urls() { WEB=$(bunx portless get playground) && API=$(bunx portless get api.playground); }
@@ -179,6 +217,7 @@ roll_up() {   # build the head when it has no build, start it and the follower, 
   sha=$(git rev-parse --short HEAD)
   # a failed build leaves no dev log of its own, so finish_roll never reads the last stack's refusal as this head's
   built=$(build_head) || { : > "$DEVLOG"; result "$tag $sha FAIL build: $built"; return 1; }
+  dashboard_urls; ensure_web "$(git rev-parse HEAD)" || { : > "$DEVLOG"; result "$tag $sha FAIL web: never answered (see supervisor.log)"; return 1; }
   start_dev; dev=$(check_dev); local dok=$?
   local fok=0
   if setup_pending; then
@@ -221,11 +260,12 @@ pull_to() {
   echo "$out" | grep -qx migrate && mig=migrate
   if [ "$pulled" -ne 0 ] && [ "$(git rev-parse HEAD)" != "$(git rev-parse -q --verify "$1^{commit}")" ]; then result "ANOMALY pull to ${1:0:7} failed before it moved (exit $pulled); staying on $(git rev-parse --short HEAD)"; return 1; fi
 }
-# Build $1 while the old stack serves (prebuild), then stop, move the checkout to $1, start, check; falls back to the head it ran before when the roll fails (never after a migration).
+# Build $1 while the old stack serves (prebuild) and swap the web to it (swap_web), then stop, move the checkout to $1, start, check; falls back to the head it ran before when the roll fails (never after a migration).
 roll_to() {
   local target=$1 why=$2 prev out notes mig tag pulled
   prebuild "$target" "ROLL $why" || return 0
-  stop_all
+  local keep=; [ -n "$prebuilt" ] && dashboard_urls && swap_web "$target" && keep=keep-web
+  stop_all $keep
   if [ -n "$("$D/procs.sh" left dashboard-dev)$("$D/procs.sh" left dashboard-ingest)" ]; then result "ANOMALY stop left processes alive; not rolling"; return 1; fi
   prev=$running
   if ! pull_to "$target"; then roll_up RESTART; last_roll=$(date +%s); return; fi
@@ -338,6 +378,9 @@ while true; do
   fi
   if ! alive dashboard-dev; then
     result "DOWN dev: $(dev_down)"
+    stop_all; roll_up RESTART
+  elif ! alive dashboard-web; then
+    result "DOWN web: $(tail -1 "$S/dashboard-web.log" 2>/dev/null | cut -c1-200)"
     stop_all; roll_up RESTART
   elif ! alive dashboard-ingest && setup_pending; then
     [ -n "${waiting_f:-}" ] || { say "follower: waiting for first run's setup, which writes POSTGRES_URL; not starting it"; waiting_f=1; }

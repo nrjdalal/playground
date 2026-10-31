@@ -185,7 +185,10 @@ STUBS = {
     "bun": """#!/bin/bash
 case "$*" in
   "run build") mkdir -p web/next/.next/standalone/web/next web/next/.next/static ;;
-  "run serve --ui stream") sleep 1000 & sleep 1000 & wait ;;
+  "run serve --filter=@api/hono --ui stream") sleep 1000 & sleep 1000 & wait ;;
+  "--no-env-file -e "*) echo 50001 ;;
+  *"portless.ts bun "*) exec sleep 1000 ;;
+  *"web-route.ts "*) exit 0 ;;
   "run ingest --follow") echo "$(date -u +%Y-%m-%dT%H:%M:%S).000Z following"; exec sleep 1000 ;;
   "run ingest status") echo "follower: running"; echo "transcripts read: 0"; echo "entries: 0" ;;
   "run verify "*) echo "ok" ;;
@@ -196,6 +199,7 @@ esac
     "git": """#!/bin/bash
 [ -n "$STUB_GIT_LOG" ] && echo "$*" >> "$STUB_GIT_LOG"
 while [ "$1" = -c ]; do shift 2; done
+[ "$1" = -C ] && shift 2
 [ "$1" = symbolic-ref ] && { echo "${STUB_BRANCH:-live/dashboard}"; exit 0; }
 case "$1 $2" in
   "merge-base --is-ancestor") exit 1 ;;
@@ -215,7 +219,7 @@ exit 0
 def recorded(state):
     """{pid: pgid} of the stack's processes procs.sh recorded."""
     found = {}
-    for job in ("dashboard-dev", "dashboard-ingest"):
+    for job in ("dashboard-dev", "dashboard-ingest", "dashboard-web"):
         try:
             for line in open(os.path.join(state, f"{job}.procs")):
                 pid, pgid = line.split()[:2]

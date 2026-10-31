@@ -15,7 +15,7 @@ stop() {
   trap '' TERM INT HUP
   echo "$(date -u +%FT%TZ) stopping: $1"
   kill -TERM -- "-$watch" 2>/dev/null; kill -TERM -- "-$sup" 2>/dev/null; wait "$sup" "$watch"
-  "$D/procs.sh" stop dashboard-ingest; "$D/procs.sh" stop dashboard-dev
+  "$D/procs.sh" stop dashboard-ingest; "$D/procs.sh" stop dashboard-dev; "$D/procs.sh" stop dashboard-web
   python3 -I "$OPS/beat.py" ops-dashboard $$ "$started" 60 "loop exited: $1"
   [ "$1" = TERM ] || "$OPS/notify.sh" dashboard "ops-dashboard stopped its stack ($1); up.py starts it again under the running cmux"
   exit 0

@@ -325,15 +325,19 @@ def workspaces():
     return found
 
 
+# the dashboard's jobs, each a pid file procs.sh reads: the follower first, then the API and the web
+JOBS = ("dashboard-ingest", "dashboard-dev", "dashboard-web")
+
+
 def stop_dashboard():
     """Wait for the old dashboard stack's recorded groups to go, stopping what is left through procs.sh (never by name)."""
     procs = os.path.join(HERE, "dashboard", "procs.sh")
     for _ in range(40):
-        if not run([procs, "left", "dashboard-dev"])[1].strip() and not run([procs, "left", "dashboard-ingest"])[1].strip():
+        if not any(run([procs, "left", job])[1].strip() for job in JOBS):
             return
         time.sleep(1)
-    run([procs, "stop", "dashboard-ingest"], 60)
-    run([procs, "stop", "dashboard-dev"], 60)
+    for job in JOBS:
+        run([procs, "stop", job], 60)
 
 
 GRID = "Ops"  # every ops job runs as a split in this one workspace

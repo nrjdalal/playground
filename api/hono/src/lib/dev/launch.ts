@@ -79,6 +79,11 @@ export const syncAliases = (
   return { failed, wrote }
 }
 
+// Points a route at a port, owned by a pid that outlives each server behind it (the live dashboard's run.sh), so the supervisor moves its web from one server to the next in one write; a route another live process holds is refused, portless's own conflict, never forced.
+export const moveRoute = (host: string, port: number, owner: number, dir = portlessDir()): void => {
+  new RouteStore(dir).addRoute(host, port, owner)
+}
+
 // The bare names held in portless's routes, by an alias or a running stack.
 export const heldBareHosts = (dir = portlessDir()): string[] =>
   new RouteStore(dir)

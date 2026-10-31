@@ -30,6 +30,7 @@ import {
   isDryRun,
   mainCheckoutOf,
   livePair,
+  moveRoute,
   othersLiveDashboard,
   PORTLESS,
   preflight,
@@ -184,6 +185,49 @@ describe("syncAliases", () => {
     expect(synced.failed).toHaveLength(1)
     expect(synced.failed[0]).toStartWith("playground.localhost: ")
     expect((await routesIn(folder))["playground.localhost"]).toBe(4300)
+  })
+})
+
+describe("moveRoute", () => {
+  const dir = mkdtempSync(join(tmpdir(), "dev-move-"))
+  afterAll(() => rmSync(dir, { force: true, recursive: true }))
+  const state = (name: string, list: { hostname: string; pid: number; port: number }[]) => {
+    mkdirSync(join(dir, name), { recursive: true })
+    writeFileSync(join(dir, name, "routes.json"), JSON.stringify(list))
+    return join(dir, name)
+  }
+  const routesIn = async (folder: string) =>
+    (await Bun.file(join(folder, "routes.json")).json()) as {
+      hostname: string
+      pid: number
+      port: number
+    }[]
+
+  test("moves the web's route to the next server's port in one write, under the same owner", async () => {
+    const folder = state("same", [
+      { hostname: "desk.api.playground.localhost", pid: process.pid, port: 4237 },
+      { hostname: "desk.playground.localhost", pid: process.pid, port: 4950 },
+    ])
+    moveRoute("desk.playground.localhost", 5011, process.pid, folder)
+    expect(await routesIn(folder)).toMatchObject([
+      { hostname: "desk.api.playground.localhost", pid: process.pid, port: 4237 },
+      { hostname: "desk.playground.localhost", pid: process.pid, port: 5011 },
+    ])
+  })
+
+  test("refuses a route another live process holds, and leaves it as it was", async () => {
+    const other = Bun.spawn(["sleep", "30"])
+    try {
+      const folder = state("held", [
+        { hostname: "desk.playground.localhost", pid: other.pid, port: 4950 },
+      ])
+      expect(() => moveRoute("desk.playground.localhost", 5011, process.pid, folder)).toThrow()
+      expect(await routesIn(folder)).toMatchObject([
+        { hostname: "desk.playground.localhost", pid: other.pid, port: 4950 },
+      ])
+    } finally {
+      other.kill()
+    }
   })
 })
 
