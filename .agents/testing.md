@@ -15,7 +15,10 @@ It runs the files in parallel (`packages/scripts/src/test-sandbox.ts`: `bun test
 A test runs beside the others when it shares nothing with them: it binds port 0, starts its containers unnamed or named per process, and takes its scratch folders from `mkdtemp`; one that cannot joins `SERIAL`.
 So does one that rebuilds a package or moves a file other tests read, since a worker beside it would read the half-built file, and one that hangs only beside other workers.
 In the parallel pass each test gets 30s where bun gives 5s, since a test runs slower beside other workers; a test's own timeout wins, so read it first.
-A parallel pass still running at its deadline (`TEST_PARALLEL_DEADLINE_MS`, 20 minutes, which the runner box's `suite.sh` raises and GitHub's Audit job lowers to 10, inside its own 20-minute `timeout-minutes`) is killed and fails, naming the files its workers still held, since bun's own timeout cannot stop synchronous code; the run's first line names the deadline it holds.
+A parallel pass still running at its deadline (`TEST_PARALLEL_DEADLINE_MS`, 20 minutes, which the runner box's `suite.sh` raises and each of GitHub's shards lowers to 10, inside its own 20-minute `timeout-minutes`) is killed and fails, naming the files its workers still held, since bun's own timeout cannot stop synchronous code; the run's first line names the deadline it holds.
+GitHub runs the suite as shards rather than one run: `packages/scripts/src/test-shards.ts` packs the files longest first into as many shards as its budget needs, about 3 minutes of a shard's wall time, by `tests/timings.json`, where a file with none weighs the mean.
+Each shard runs its own files through `test-sandbox.ts`, and the `Audit, Lint, and Build` check is green only when every shard and the lint and build job passed.
+A new test file needs no timing to run; `bun run test:timings` on `canary` refreshes them, so the shards stay even as files grow.
 `tests/` is fork-excluded, so the root script no-ops where the directory is absent.
 
 ## Traps
