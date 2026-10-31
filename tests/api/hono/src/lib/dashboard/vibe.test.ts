@@ -178,7 +178,7 @@ describe("the pure parts", () => {
   })
 })
 
-// the owner: "the badge reads Vibeground with its branch", so a Vibeground's own tab never reads as the live dashboard
+// the badge reads Vibeground with its branch, so a Vibeground's own tab never reads as the live dashboard
 describe("ownVibe", () => {
   test("a checkout names its branch while the launcher's record is in its .turbo, else null", () => {
     const branch = () => "feat/rooms"

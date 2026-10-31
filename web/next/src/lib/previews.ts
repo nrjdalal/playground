@@ -115,7 +115,7 @@ export const previewClick = (
   return { from: from === href ? null : from }
 }
 
-// Pure: what Done sends the dispatcher on the owner's click, the one session his messages reach (the message route's phase 2a), which routes it to the session in the Vibeground's worktree: hand the work back for review, never merged.
+// Pure: what Done sends the dispatcher on the owner's click, the one session his messages reach, which routes it to the session in the Vibeground's worktree: hand the work back for review, never merged.
 export const doneMessage = (vibe: {
   branch: string
   path: string
