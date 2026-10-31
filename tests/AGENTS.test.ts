@@ -161,4 +161,20 @@ describe("AGENTS.md", () => {
       await Bun.file(join(ROOT, "AGENTS.md")).text(),
     )
   })
+
+  test("a canary merge runs the changed-term grep for what the incoming commits changed, with its measured case", async () => {
+    const lines = (await Bun.file(join(ROOT, "AGENTS.md")).text()).split("\n")
+    const at = lines.findIndex((l) => l.includes("After you merge `canary` into the branch"))
+    const line = lines[at] ?? ""
+    expect(
+      lines.filter((l) => l.includes("After you merge `canary` into the branch")),
+    ).toHaveLength(1)
+    expect(lines[at - 1]).toContain(
+      "run the changed-term grep for each term whose meaning the diff changes",
+    )
+    expect(line).toContain("`git log -p <old base>..origin/canary`")
+    expect(line).toContain("the PR's own changed docs")
+    expect(line).toContain("before you ask for the next round")
+    expect(line).toContain("two docs-only rounds")
+  })
 })
