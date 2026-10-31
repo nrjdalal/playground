@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, test } from "bun:test"
-import { chmodSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from "node:fs"
+import { chmodSync, existsSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -867,7 +867,7 @@ const keptCalls = join(kept, "calls")
 const builds = join(kept, "builds")
 const WEB = "https://playground.localhost"
 const API = "https://api.playground.localhost"
-// bun stands in for bun run build (writing next's standalone server, its static files and the API's bundle, or failing for a head build-fails lists) and for the stack's start, recording which build it serves; check_dev waits for that start and fails for a head verify-fails lists
+// bun stands in for bun run build (writing next's standalone server and its static files, or failing for a head build-fails lists) and for the stack's start, recording which build it serves; check_dev waits for that start and fails for a head verify-fails lists
 const keptStubs = `S=${kept} WT=${wt} OPS=${scratch}/ops BAD=${kept}/bad-builds LOG=${kept}/supervisor.log DEVLOG=${kept}/dev.log
 say() { echo "say $*" >> ${keptCalls}; }; result() { echo "result $*" >> ${keptCalls}; }; stop_all() { :; }; tell_dispatcher() { :; }
 dashboard_urls() { WEB=${WEB}; API=${API}; }
@@ -877,8 +877,8 @@ bun() {
     "run build") echo "build $(git rev-parse --short HEAD)" >> ${keptCalls}
       echo "envs \${HONO_APP_URL:-} \${HONO_TRUSTED_ORIGINS:-} \${NEXT_PUBLIC_API_URL:-} \${NEXT_PUBLIC_APP_URL:-} \${NODE_ENV:-} \${SKIP_ENV_VALIDATION_SERVER:-}" >> ${keptCalls}
       listed build-fails && { echo "Error: next build failed"; return 1; }
-      mkdir -p web/next/.next/standalone/web/next web/next/.next/static api/hono/bundle
-      git rev-parse HEAD > web/next/.next/standalone/web/next/server.js; git rev-parse HEAD > api/hono/bundle/main.mjs ;;
+      mkdir -p web/next/.next/standalone/web/next web/next/.next/static
+      git rev-parse HEAD > web/next/.next/standalone/web/next/server.js ;;
     "run serve") echo "serve $(basename "\${PLAYGROUND_BUILD:-none}")" >> ${keptCalls} ;;
     "run dev") echo "dev" >> ${keptCalls} ;;
   esac
@@ -923,7 +923,7 @@ describe("the supervisor's production build", () => {
     expect(await Bun.file(join(builds, c2, "web", "web", "next", "server.js")).text()).toBe(
       `${c2}\n`,
     )
-    expect(await Bun.file(join(builds, c2, "api", "main.mjs")).text()).toBe(`${c2}\n`)
+    expect(existsSync(join(builds, c2, "api"))).toBe(false)
     expect(await keptLines(/^result /)).toEqual([
       `result START ${short(c2)} PASS verify=PASS follower=running`,
     ])

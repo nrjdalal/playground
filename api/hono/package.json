@@ -9,13 +9,13 @@
   "types": "./dist/index.d.mts",
   "exports": "./dist/index.mjs",
   "scripts": {
-    "build": "tsdown && bun build dist/index.mjs --outfile bundle/index.mjs --target bun --minify --env disable && bun build dist/main.mjs --outfile bundle/main.mjs --target bun --minify --env disable && cp dist/scalar.js bundle/scalar.js",
+    "build": "tsdown && bun build dist/index.mjs --outfile bundle/index.mjs --target bun --minify --env disable && cp dist/scalar.js bundle/scalar.js",
     "build:vercel": "tsdown && bun build dist/index.mjs --outfile vercel-bundle/index.mjs --target bun --minify --env disable --external hono && cp dist/scalar.js vercel-bundle/scalar.js",
     "check-types": "tsc --noEmit",
     "dev": "portless",
     "dev:app": "concurrently \"tsdown --watch\" \"bun ../../.github/scripts/portless.ts bun --hot src/main.ts\"",
     "serve": "portless --script serve:app",
-    "serve:app": "bun ../../.github/scripts/portless.ts bun --no-install \"$PLAYGROUND_BUILD/api/main.mjs\"",
+    "serve:app": "bun ../../.github/scripts/portless.ts bun --no-install src/main.ts",
     "start": "bun --no-install bundle/index.mjs"
   },
   "dependencies": {

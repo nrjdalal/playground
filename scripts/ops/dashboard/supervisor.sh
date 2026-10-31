@@ -55,7 +55,7 @@ build_head() {
   # next's standalone server leaves .next/static and public for its host to copy beside it
   cp -R web/next/.next/standalone "$dir.tmp/web" && mkdir -p "$dir.tmp/web/web/next/.next" && cp -R web/next/.next/static "$dir.tmp/web/web/next/.next/static" &&
     { [ ! -d web/next/public ] || cp -R web/next/public "$dir.tmp/web/web/next/public"; } &&
-    cp -R api/hono/bundle "$dir.tmp/api" && echo "$WEB $API" > "$dir.tmp/urls" || { echo "copying the build to $dir failed"; return 1; }
+    echo "$WEB $API" > "$dir.tmp/urls" || { echo "copying the build to $dir failed"; return 1; }
   rm -rf "$dir"; mv "$dir.tmp" "$dir"
   say "built ${sha:0:7} in $(( $(date +%s) - started ))s, $(du -sh "$dir" | cut -f1)"
 }
