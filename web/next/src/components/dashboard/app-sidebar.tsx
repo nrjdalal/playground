@@ -67,6 +67,7 @@ import { countLabel } from "@/components/dashboard/count-badge"
 import { useDashboard } from "@/components/dashboard/dashboard"
 import { StatusIcon } from "@/components/dashboard/worker-light"
 import { Hint, OFF_FOCUSABLE } from "@/components/hint"
+import { GroupCount } from "@/components/shell/group-count"
 import type { MenuUpdate } from "@/components/shell/sidebar-user-menu"
 import { Button } from "@/components/ui/button"
 import {
@@ -1260,15 +1261,6 @@ function RosterRow({
         </SidebarMenuSub>
       )}
     </SidebarMenuItem>
-  )
-}
-
-// A group label's count, at its right as ZeroSDK's countCell: how many sessions the group holds (heldCount), or the jobs Scripts lists, muted with tabular digits.
-export function GroupCount({ count }: { count: number }) {
-  return (
-    <span data-slot="group-count" className="ml-auto flex w-4 justify-center tabular-nums">
-      {count}
-    </span>
   )
 }
 

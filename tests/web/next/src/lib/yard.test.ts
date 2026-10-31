@@ -9,9 +9,11 @@ import {
   channelTitle,
   inviteRequests,
   messagesQuery,
-  SOCKET_ROUTE,
+  retryDelay,
   socketUrl,
+  upsertMessage,
   type YardChannel,
+  type YardMessage,
   yardBadge,
   yardGate,
   yardGroups,
@@ -46,17 +48,53 @@ const dm = channel({
   peer: { id: "u2", image: null, login: "octocat", name: "Octo Cat" },
 })
 
+const message = (over: Partial<YardMessage> = {}): YardMessage => ({
+  at: "2026-10-31T09:00:00Z",
+  channel: "c1",
+  from: { device: "macbook", login: "octo-sample" },
+  id: "m1",
+  kind: "text",
+  text: "hello",
+  ...over,
+})
+
 describe("socketUrl", () => {
-  test("turns the API's https into wss and carries the token in the query", () => {
-    expect(socketUrl("https://api.example.test", SOCKET_ROUTE, "a b/c")).toBe(
+  test("opens on the API's own host, even where the browser's calls go through the web's /api rewrite, which forwards no upgrade", () => {
+    const env = {
+      NEXT_PUBLIC_API_URL: "https://api.example.test",
+      NEXT_PUBLIC_APP_URL: "https://web.example.test",
+      NEXT_PUBLIC_IS_PRIVATE: "true",
+    }
+    expect(socketUrl(env, "a b/c")).toBe(
       "wss://api.example.test/api/v1/yard/socket?token=a%20b%2Fc",
     )
   })
 
   test("turns a local http API into ws", () => {
-    expect(socketUrl("http://127.0.0.1:4000", SOCKET_ROUTE, "t")).toBe(
+    expect(socketUrl({ NEXT_PUBLIC_API_URL: "http://127.0.0.1:4000" }, "t")).toBe(
       "ws://127.0.0.1:4000/api/v1/yard/socket?token=t",
     )
+  })
+})
+
+describe("retryDelay", () => {
+  test("waits 2s, doubling with each failed try, to a minute at most", () => {
+    expect([0, 1, 2, 3, 4, 5, 9].map(retryDelay)).toEqual([
+      2_000, 4_000, 8_000, 16_000, 32_000, 60_000, 60_000,
+    ])
+  })
+})
+
+describe("upsertMessage", () => {
+  test("keeps a message that arrives twice once, at the end", () => {
+    const one = message({ id: "m1", text: "first" })
+    const two = message({ id: "m2" })
+    expect(
+      upsertMessage([one, two], { ...one, text: "again" }).map((row) => [row.id, row.text]),
+    ).toEqual([
+      ["m2", two.text],
+      ["m1", "again"],
+    ])
   })
 })
 

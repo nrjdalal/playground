@@ -26,9 +26,18 @@ export const messagesQuery = (channel: string, read: () => Promise<Message[]>) =
 })
 export const SOCKET_ROUTE = `${YARD_ROUTE}/socket`
 
-// The socket goes straight to the API host, since the web's /api rewrite does not forward an upgrade; the one-time token rides the query, as a browser's WebSocket sets no header.
-export const socketUrl = (api: string, route: string, token: string) =>
-  `${api.replace(/^http/, "ws")}${route}?token=${encodeURIComponent(token)}`
+// The socket opens on the API's own host, NEXT_PUBLIC_API_URL, never config.api.url, which on a public hosting suffix is the web's origin behind its /api rewrite, and the rewrite forwards no upgrade; the one-time token rides the query, as a browser's WebSocket sets no header.
+export const socketUrl = (env: { NEXT_PUBLIC_API_URL: string }, token: string) =>
+  `${env.NEXT_PUBLIC_API_URL.replace(/^http/, "ws")}${SOCKET_ROUTE}?token=${encodeURIComponent(token)}`
+
+// A closed socket's next try waits 2s, doubling with each try that fails to a minute, so a tab whose socket keeps failing settles at one try a minute.
+export const retryDelay = (tries: number) => Math.min(2_000 * 2 ** tries, 60_000)
+
+// A message that arrives twice, from the socket and a post's own answer, stays once, at the end.
+export const upsertMessage = (list: Message[], message: Message) => [
+  ...list.filter((row) => row.id !== message.id),
+  message,
+]
 
 // The hosted app opens a channel under /yard; the local dashboard opens it in its own chat pane.
 export const channelHref = (channel: Pick<YardChannel, "id">, hosted: boolean) =>

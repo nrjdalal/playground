@@ -1,6 +1,6 @@
 "use client"
 
-import { MAX_TEXT, MESSAGE_KINDS } from "@packages/message"
+import { MAX_TEXT, MESSAGE_KINDS, RETENTION_DAYS } from "@packages/message"
 import { RiArrowUpLine } from "@remixicon/react"
 import { useQueryClient } from "@tanstack/react-query"
 import Link from "next/link"
@@ -25,6 +25,7 @@ import {
   canPost,
   channelTitle,
   messagesKey,
+  upsertMessage,
   type YardChannel,
   type YardMessage,
 } from "@/lib/yard"
@@ -37,9 +38,15 @@ export function ChannelView({ id, role }: { id: string; role: string | null | un
   const channel = useYardChannels().data?.find((row) => row.id === id)
   const { data: messages } = useYardMessages(id)
   const client = useQueryClient()
+  const count = messages?.length
+  // Marks the channel read once its messages show, and again as more arrive; a failed mark leaves the badge, read again next time.
   useEffect(() => {
-    void yardApi.read(id).then(() => client.invalidateQueries({ queryKey: CHANNELS_KEY }))
-  }, [client, id, messages?.length])
+    if (count === undefined) return
+    yardApi
+      .read(id)
+      .then(() => client.invalidateQueries({ queryKey: CHANNELS_KEY }))
+      .catch(() => {})
+  }, [client, id, count])
   if (!channel) return null
   const now = new Date()
   return (
@@ -53,7 +60,7 @@ export function ChannelView({ id, role }: { id: string; role: string | null | un
           <Empty>
             <EmptyHeader>
               <EmptyTitle>No messages yet</EmptyTitle>
-              <EmptyDescription>Messages stay for 90 days.</EmptyDescription>
+              <EmptyDescription>Messages stay for {RETENTION_DAYS} days.</EmptyDescription>
             </EmptyHeader>
           </Empty>
         )}
@@ -62,6 +69,7 @@ export function ChannelView({ id, role }: { id: string; role: string | null | un
             key={message.id}
             at={message.at}
             now={now}
+            plain
             text={message.text}
             variant="muted"
             who={<FromLine message={message} />}
@@ -130,7 +138,7 @@ function YardComposer({ channel }: { channel: YardChannel }) {
     try {
       const { message } = await yardApi.post(channel.id, { kind, text: words })
       client.setQueryData<YardMessage[]>(messagesKey(channel.id), (list) =>
-        list ? [...list.filter((m) => m.id !== message.id), message] : [message],
+        upsertMessage(list ?? [], message),
       )
       setText("")
     } catch (error) {
