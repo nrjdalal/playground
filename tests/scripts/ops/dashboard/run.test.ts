@@ -38,6 +38,12 @@ describe("the dashboard's heartbeat result", () => {
     ).toBe("ok")
   })
 
+  test("reads ok once the follower's first start after first run's setup is healthy", async () => {
+    expect(
+      await resultOf("2026-10-19T05:05:41Z START follower follower=running follower: running"),
+    ).toBe("ok")
+  })
+
   test("names a follower restart that failed", async () => {
     expect(await resultOf("2026-10-19T05:05:41Z FAIL follower follower=down")).toBe(
       "FAIL follower follower=down",
