@@ -20,6 +20,20 @@ describe("updateSteps", () => {
     expect(updateSteps(["README.md", "package.json.bak"]).install).toBe(false)
   })
 
+  test("the skills a merge changed are named once each, A to Z, a long-lived checker running each only once it loads it again", () => {
+    expect(
+      updateSteps([
+        "extensions/core/skills/pr/SKILL.md",
+        "extensions/core/skills/code-review-loop/scripts/state.py",
+        "extensions/core/skills/code-review-loop/SKILL.md",
+        "skills/zerostarter/ui-verify/SKILL.md",
+        "skills/playground/README.md",
+        "extensions/core/rules/ci.md",
+      ]).skills,
+    ).toEqual(["code-review-loop", "pr", "ui-verify"])
+    expect(updateSteps(["README.md"]).skills).toEqual([])
+  })
+
   test("a package with a dist changed builds; packages/scripts runs from source", () => {
     expect(updateSteps(["packages/db/src/schema/claude.ts"]).build).toBe(true)
     expect(updateSteps(["packages/scripts/src/playground/update.ts"]).build).toBe(false)
@@ -66,6 +80,34 @@ describe("runUpdate", () => {
         "HEAD",
       ],
     ])
+  })
+
+  test("a merge that changed a skill names it and asks for each live checker's reload; one that changed none says nothing of skills", async () => {
+    const said: string[] = []
+    const { run } = fakeRun({
+      diff: { out: "extensions/core/skills/pr/SKILL.md\nskills/zerostarter/dev/SKILL.md\n" },
+    })
+    expect(
+      await runUpdate(
+        repo,
+        run,
+        async () => 0,
+        (l) => said.push(l),
+      ),
+    ).toBe(0)
+    expect(said).toContain(
+      "playground update: skills changed: dev, pr; tell the lead of each live checker to have it load each one again with the Skill tool",
+    )
+    const quietSaid: string[] = []
+    expect(
+      await runUpdate(
+        repo,
+        fakeRun().run,
+        async () => 0,
+        (l) => quietSaid.push(l),
+      ),
+    ).toBe(0)
+    expect(quietSaid.some((l) => l.includes("skills changed"))).toBe(false)
   })
 
   test("a changed lockfile and package install and build before the restart", async () => {
