@@ -36,7 +36,7 @@ branch=$(git symbolic-ref --short HEAD 2>/dev/null)
 say() { echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) $*" >> "$LOG"; }
 result() { echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) $*" >> "$RESULTS"; say "RESULT $*"; }
 
-# The head's production build, kept in $S/builds/<sha> outside the checkout: made by bun run build when it is missing, or when it was built for other URLs, since next bakes NEXT_PUBLIC_APP_URL and NEXT_PUBLIC_API_URL into its client; a failure prints its last error line
+# The head's production build, kept in $S/builds/<sha> outside the checkout: made by bun run build when it is missing, or when it was built for other URLs, since next bakes NEXT_PUBLIC_APP_URL and NEXT_PUBLIC_API_URL into its client and auth bakes HONO_APP_URL's host; SKIP_ENV_VALIDATION_SERVER lets it build before first run writes BETTER_AUTH_SECRET, which the stack reads at its start; a failure prints its last error line
 build_head() {
   local sha dir was started out
   sha=$(git rev-parse HEAD); dir=$S/builds/$sha
@@ -47,7 +47,7 @@ build_head() {
     say "rebuilding ${sha:0:7}: its build was for ${was:-no URLs}, the Dashboard is now on $WEB $API"
   fi
   say "building ${sha:0:7} for $WEB $API"; started=$(date +%s)
-  if ! out=$(NEXT_PUBLIC_APP_URL=$WEB NEXT_PUBLIC_API_URL=$API bun run build 2>&1); then
+  if ! out=$(HONO_APP_URL=$API HONO_TRUSTED_ORIGINS=$WEB NEXT_PUBLIC_API_URL=$API NEXT_PUBLIC_APP_URL=$WEB SKIP_ENV_VALIDATION_SERVER=true bun run build 2>&1); then
     echo "$out" >> "$LOG"
     echo "$out" | grep -E 'error|Error|ERR' | tail -1 | cut -c1-200; return 1
   fi
