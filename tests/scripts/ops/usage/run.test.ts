@@ -117,8 +117,7 @@ test("the stored login's reading lands in usage-<local part>.json beside usage.j
   })
 })
 
-// run.py whole, for one cycle, under a scratch HOME: a stand-in beat module in its ops folder records the beat and ends the run, and
-// swaps urllib's urlopen for made-up answers, so no call leaves the Mac; a stand-in `security` holds the Keychain
+// run.py whole, for one cycle, under a scratch HOME: a stand-in beat module in its ops folder records the beat and ends the run, and swaps urllib's urlopen for made-up answers, so no call leaves the Mac; a stand-in `security` holds the Keychain
 const beatModule = (settings: object) => `
 import io, json, os, sys, urllib.error, urllib.request
 calls = []

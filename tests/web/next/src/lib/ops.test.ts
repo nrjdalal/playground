@@ -75,7 +75,7 @@ describe("the Scripts group", () => {
   })
 
   test("on the collapsed rail it is one icon, red while a script it lists fails or is down, a paused one aside", () => {
-    expect(scriptsRail(rows)).toEqual({ broken: true, words: "Scripts 3 · 2 not running" })
+    expect(scriptsRail(rows)).toEqual({ broken: true, words: "Scripts 3 · 2 failing or down" })
     expect(scriptsRail([job("ops-a"), job("ops-d", { paused: true, status: "down" })])).toEqual({
       broken: false,
       words: "Scripts 1",

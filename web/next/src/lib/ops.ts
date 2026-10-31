@@ -68,13 +68,15 @@ export const scriptCount = (rows: OpsRow[]): number => shownOps(rows).length
 // Pure: a script that should run and does not, Failing or Down; a Waiting one has nothing to read yet, so it is not broken.
 export const isBroken = (row: OpsRow): boolean => row.status === "down" || row.status === "failing"
 
-// Pure: the Scripts group on the collapsed rail, one icon: red while any script it lists is failing or down, its words the label's count and how many are not running.
+// Pure: the Scripts group on the collapsed rail, one icon: red while any script it lists is failing or down, its words the label's count and how many are failing or down.
 export const scriptsRail = (rows: OpsRow[]): { broken: boolean; words: string } => {
   const count = scriptCount(rows)
-  const down = shownOps(rows).filter(isBroken).length
+  const broken = shownOps(rows).filter(isBroken).length
   return {
-    broken: down > 0,
-    words: [`Scripts ${count}`, down > 0 && `${down} not running`].filter(Boolean).join(" · "),
+    broken: broken > 0,
+    words: [`Scripts ${count}`, broken > 0 && `${broken} failing or down`]
+      .filter(Boolean)
+      .join(" · "),
   }
 }
 
