@@ -1,6 +1,12 @@
 import { describe, expect, test } from "bun:test"
 
-import { tabTitle, TEST_DATA, testDataBadge } from "../../../../../web/next/src/lib/test-data"
+import {
+  tabTitle,
+  TEST_DATA,
+  testDataBadge,
+  vibeBadge,
+  vibeLabel,
+} from "../../../../../web/next/src/lib/test-data"
 
 describe("testDataBadge", () => {
   test("a fixture stack wears the Test data badge", () => {
@@ -19,6 +25,22 @@ describe("testDataBadge", () => {
       "fixture",
     ]) {
       expect(testDataBadge(health)).toBeUndefined()
+    }
+  })
+})
+
+describe("vibeBadge", () => {
+  test("a Vibeground wears Vibeground with its branch", () => {
+    expect(vibeLabel("feat/rooms")).toBe("Vibeground · feat/rooms")
+    expect(vibeBadge({ data: { dashboard: "live", vibe: "feat/rooms" } })).toBe(
+      "Vibeground · feat/rooms",
+    )
+    expect(tabTitle(vibeLabel("feat/rooms"))).toBe("Vibeground · feat/rooms | Playground")
+  })
+
+  test("any other stack and a failed read wear none", () => {
+    for (const health of [{ data: { dashboard: "live", vibe: null } }, { data: {} }, null, "x"]) {
+      expect(vibeBadge(health)).toBeUndefined()
     }
   })
 })

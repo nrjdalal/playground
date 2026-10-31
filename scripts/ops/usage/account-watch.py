@@ -31,11 +31,14 @@ if not h or h.get("anthropic-ratelimit-unified-7d-utilization") is None:
     sys.exit(f"{email}: no rate-limit headers in the answer")
 f = lambda k: float(h.get(f"anthropic-ratelimit-unified-{k}") or 0)
 now = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-out = {"account": email, "rate_limits": {"five_hour": {"used_percentage": round(f("5h-utilization") * 100, 3), "resets_at": int(f("5h-reset"))},
-       "seven_day": {"used_percentage": round(f("7d-utilization") * 100, 3), "resets_at": int(f("7d-reset"))}},
-       "status": h.get("anthropic-ratelimit-unified-status"), "source": "token/ratelimit-headers", "writtenAt": now}
+rate = {"seven_day": {"used_percentage": round(f("7d-utilization") * 100, 3), "resets_at": int(f("7d-reset"))}}
+# an account with no 5-hour limit sends no 5h headers, so its reading omits five_hour, as usage.json's does
+if h.get("anthropic-ratelimit-unified-5h-utilization") is not None:
+    rate["five_hour"] = {"used_percentage": round(f("5h-utilization") * 100, 3), "resets_at": int(f("5h-reset"))}
+out = {"account": email, "rate_limits": rate, "status": h.get("anthropic-ratelimit-unified-status"), "source": "token/ratelimit-headers", "writtenAt": now}
 tmp = OUT + ".tmp"
 json.dump(out, open(tmp, "w"))
 os.replace(tmp, OUT)
 rl = out["rate_limits"]
-print(f"{email}: 5h {rl['five_hour']['used_percentage']}% week {rl['seven_day']['used_percentage']}% ({out['status']}) -> {OUT}")
+five = f"{rl['five_hour']['used_percentage']}%" if "five_hour" in rl else "none"
+print(f"{email}: 5h {five} week {rl['seven_day']['used_percentage']}% ({out['status']}) -> {OUT}")

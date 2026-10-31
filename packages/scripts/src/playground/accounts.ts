@@ -66,7 +66,10 @@ const usageOf = (data: string, row: Account, firstGlm: string | undefined): stri
       seen?: Record<string, { five?: unknown; week?: unknown }>
     }
     const seen = flip?.seen?.[accountKey(row)]
-    return seen ? `5h ${percent(seen.five)}, week ${percent(seen.week)}` : "no reading yet"
+    // a null five is an account with no 5-hour window
+    return seen
+      ? `5h ${seen.five === null ? "none" : percent(seen.five)}, week ${percent(seen.week)}`
+      : "no reading yet"
   }
   if (accountKey(row) !== firstGlm) return "no reading: the usage job reads the first GLM key"
   const windows = (json(join(data, "zai-usage.json")) as { windows?: Record<string, unknown> })
