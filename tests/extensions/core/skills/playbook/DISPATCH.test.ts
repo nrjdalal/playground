@@ -22,7 +22,7 @@ describe("DISPATCH.md", () => {
     const text = await Bun.file(DISPATCH).text()
     const line =
       text.split("\n").find((l) => l.includes("merges its parent's branch in once")) ?? ""
-    expect(line).toContain("once the parent scores 5/5 or merges")
+    expect(line).toContain("once, when the parent scores 5/5 or merges")
     expect(line).toContain("and `canary` only when it needs it")
     expect(line).toContain("four times in 59 minutes while the parent sat at 3/5")
   })

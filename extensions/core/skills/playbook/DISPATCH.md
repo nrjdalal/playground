@@ -68,7 +68,7 @@ The steps to spawn and brief a session are in [SESSIONS.md](SESSIONS.md#spawn), 
   The worker cutting the child runs the stack test before the child's PR opens: `git merge-tree --write-tree --merge-base <the parent's merge base with canary> <parent> <child>` coming back clean, since the bare two-head form takes the child's descent from the parent as its merge base and so can never conflict,
   while the two heads' adjacent hunks still conflict once the parent squash-merges onto `canary`.
   A stack holds the child behind its parent: the lead sends Ops the hold line **gate**'s hold paragraph names, for the child's PR, and Ops removes it on the lead's word once the parent has merged, so a ready child never lands its parent's lines first.
-  The child merges its parent's branch in once, once the parent scores 5/5 or merges, and `canary` only when it needs it (a conflict, or a change it builds on), since every merge is a new head its reviewer scores again (measured, 31 Oct: one child merged its parent four times in 59 minutes while the parent sat at 3/5).
+  The child merges its parent's branch in once, when the parent scores 5/5 or merges, and `canary` only when it needs it (a conflict, or a change it builds on), since every merge is a new head its reviewer scores again (measured, 31 Oct: one child merged its parent four times in 59 minutes while the parent sat at 3/5).
   Anything else bundles the items into one PR or sequences them one PR after the other.
   A PR whose GitHub base is the parent's branch is the other stack shape, the one **github**'s stacked-base line governs.
   A single task goes out alone when it takes a route that skips the Planner (above).

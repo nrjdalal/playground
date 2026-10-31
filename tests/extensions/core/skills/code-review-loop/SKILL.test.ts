@@ -224,7 +224,9 @@ describe("code-review-loop's round 1 greps each changed term", () => {
     expect(step).toContain(
       "the changed-term grep (`git grep -l <term>` over the agent-facing docs) for each term whose meaning the diff changes",
     )
-    expect(step).toContain("each as `file:line`")
+    expect(step).toContain(
+      "file every list or doc either leaves behind as one such finding, each as `file:line`",
+    )
     expect(step).toContain("7 rounds")
     expect(step.split("**Done when**")[1] ?? "").toContain(
       "its changed-term grep for each term whose meaning it changes",
