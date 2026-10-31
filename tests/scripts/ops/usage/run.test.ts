@@ -141,7 +141,13 @@ def beat(job, pid, started, cycle, result, extra=None):
 
 const cycle = async (
   name: string,
-  opts: { added: string[]; login: boolean; probeUrl?: string },
+  opts: {
+    added: string[]
+    factory?: string
+    login: boolean
+    loginExit?: number
+    probeUrl?: string
+  },
 ) => {
   const home = join(scratch, name)
   const ops = join(home, ".playground", "ops")
@@ -157,12 +163,14 @@ const cycle = async (
     "usage.keychainService": "made-up-service",
   }
   writeFileSync(join(ops, "beat.py"), beatModule(settings))
+  if (opts.factory)
+    writeFileSync(join(ops, "usage", "login-flip.json"), JSON.stringify({ factory: opts.factory }))
   const login = JSON.stringify({
     claudeAiOauth: { accessToken: "made-up", expiresAt: 4_000_000_000_000 },
   })
   writeFileSync(
     join(stubs, "security"),
-    `#!/bin/sh\ncase "$*" in\n  *Claude\\ Code-credentials*) ${opts.login ? `echo '${login}'` : "exit 44"} ;;\n  *made-up-service*) echo made-up-token ;;\n  *) exit 44 ;;\nesac\n`,
+    `#!/bin/sh\ncase "$*" in\n  *Claude\\ Code-credentials*) ${opts.login ? `echo '${login}'` : `exit ${opts.loginExit ?? 44}`} ;;\n  *made-up-service*) echo made-up-token ;;\n  *) exit 44 ;;\nesac\n`,
     { mode: 0o755 },
   )
   const env: Record<string, string | undefined> = {
@@ -221,4 +229,22 @@ test("with no account at all, the job beats waiting, not an error, and writes no
   const { beat, usage } = await cycle("none", { added: [], login: false })
   expect(beat.result).toBe("waiting: no Claude account yet; add one in the Dashboard")
   expect(usage).toBeNull()
+})
+
+test("while login-flip names the stored login as the factory, usage.json follows that login and no added account is probed", async () => {
+  const { beat, usage } = await cycle("factory-is-stored", {
+    added: ["added@example.org"],
+    factory: "stored@example.org",
+    login: true,
+  })
+  expect(beat.result).toBe("ok")
+  expect(beat.calls).not.toContain("http://127.0.0.1:9/v1/messages")
+  expect(usage.account).toBe("stored@example.org")
+})
+
+test("a Keychain that refuses the read, not one missing the login, fails rather than waits", async () => {
+  const { beat } = await cycle("locked", { added: [], login: false, loginExit: 51 })
+  expect(beat.result).toBe(
+    "error: stored login: RuntimeError: security exited 51 reading Claude Code's credentials",
+  )
 })

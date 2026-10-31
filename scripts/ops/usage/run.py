@@ -61,8 +61,11 @@ class NoLogin(RuntimeError):
 
 def oauth():
     r = subprocess.run(["security", "find-generic-password", "-a", os.environ.get("USER", ""), "-s", "Claude Code-credentials", "-w"], capture_output=True, text=True, timeout=15)
-    if r.returncode:
+    # 44 is security's item-not-found; a locked or denied Keychain is a failure, not a missing login
+    if r.returncode == 44:
         raise NoLogin("no Claude Code credentials in the keychain")
+    if r.returncode:
+        raise RuntimeError(f"security exited {r.returncode} reading Claude Code's credentials")
     return json.loads(r.stdout).get("claudeAiOauth") or {}
 
 
@@ -218,7 +221,8 @@ while True:
         data = factory_reading(stored, flip)
     except Exception as e:
         problems.append(f"factory account: {type(e).__name__}: {e}")
-    if not data:
+    # a factory login-flip names, the stored login included, is the account the sessions run on, so the added ones are read only while it names none
+    if not data and not flip.get("factory"):
         try:
             data = added_reading(stored, flip, FACTORY)
         except Exception as e:
