@@ -1,5 +1,9 @@
 373a4f26e6cfa3617778397945bb069d9cb184bc skills/code-review/SKILL.md
 9076774ba327f49068db9273feceda03bfe940fa skills/code-review/agents/openai.yaml
+cd94075cfd754d147555c5d747a16431ed4c7dd8 skills/codebase-design/DEEPENING.md
+d0990138c35c800bd821289a73115e52680c1620 skills/codebase-design/DESIGN-IT-TWICE.md
+3f63c8146dd2604b419c929e9876b90c30d410e9 skills/codebase-design/SKILL.md
+3180715edb37f6e96bec42f92f00169faa8886ef skills/codebase-design/agents/openai.yaml
 d039541ddd1c46e6ddbd662fe99d49b686fc5e12 skills/diagnosing-bugs/SKILL.md
 a13a755a77634ce61a649a3a0d905a66d3865b35 skills/diagnosing-bugs/agents/openai.yaml
 243198464a8401a7ba1d63b3708fa43c3d067665 skills/diagnosing-bugs/scripts/hitl-loop.template.sh
