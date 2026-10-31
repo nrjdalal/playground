@@ -128,7 +128,7 @@ export type Swapper = {
   swap: (text: string) => { counts: Partial<Record<Kind, number>>; text: string }
 }
 
-// One pass over a text: the public repository is read past as the count reads it, each Linear key takes its team's stand-in and keeps its number, and every other value takes its stand-in; the longest value wins where two overlap.
+// One pass over a text: each public repository is read past as the count reads it, each Linear key takes its team's stand-in and keeps its number, and every other value takes its stand-in; the longest value wins where two overlap.
 export function swapper(list: PublicList, repos: Repos = UNSET_REPOS): Swapper {
   const stands = new Map<string, { kind: Kind; stand: string }>()
   const teams = [...new Set(list.linearKeys.map((key) => key.toLowerCase()))].sort()
@@ -151,7 +151,7 @@ export function swapper(list: PublicList, repos: Repos = UNSET_REPOS): Swapper {
     .sort(byLength)
     .map(escape)
   const alternatives = [
-    `(${escape(repos.public)})`,
+    `(${[...repos.public].sort(byLength).map(escape).join("|")})`,
     keys.length ? `(?<![a-z\\d])(${keys.join("|")})-(?=\\d+(?![a-z\\d]))` : "(?!)",
     values.length ? `(?<![a-z\\d])(${values.join("|")})(?![a-z\\d])` : "(?!)",
   ]

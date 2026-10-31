@@ -26,6 +26,7 @@
     "docs:wrap": "bun packages/scripts/src/docs-wrap/cli.ts",
     "format": "oxfmt",
     "format:check": "oxfmt --check",
+    "gate:new-user": "bun packages/scripts/src/new-user-gate/cli.ts",
     "ingest": "bun api/hono/src/bin/dashboard-ingest.ts",
     "linear:read": "bun --no-env-file packages/scripts/src/linear-read/cli.ts",
     "lint": "oxlint",

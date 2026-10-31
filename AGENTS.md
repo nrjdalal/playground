@@ -223,7 +223,7 @@ ZeroStarter's rules above govern Playground too; this section adds its own.
   - `no-manager-subagent` refuses a manager the Agent and Workflow tools: start a worker through `scripts/spawn.sh` and brief it.
   - `no-off-palette-label` refuses any session's GitHub label create or edit whose color is not a Tailwind 500, and a create with no color: give one of the 22 hexes its reason names.
   - `no-ours-merge` refuses a merge or pull with the ours strategy or option: run `git merge origin/canary` and resolve each conflict with both sides' meaning.
-  - `no-public-leak` refuses a write to the public repository (a pull request, issue, review or comment) that holds a name, a handle, a company term, a Slack id, a Linear key, an email, an `LM-<n>` or an archive link, naming the kind and never the text: say it in plain words.
+  - `no-public-leak` refuses a write to a public repository (a pull request, issue, review or comment) that holds a name, a handle, a company term, a Slack id, a Linear key, an email, an `LM-<n>` or an archive link, naming the kind and never the text: say it in plain words.
   - `no-prompt-stop` refuses the `rm` or `rmdir` shapes Claude Code stops on: a target with two or more parts starting with an unguarded variable (write `${VAR:?}` or a literal path), and a name directly in `/` (use `$TMPDIR` or your scratchpad).
   - `no-stash` refuses a stash that could take another worktree's work, and `agent-browser close --all`.
   - `no-unslotted-run` refuses a heavy run in a worktree (an install, a `node_modules` clone, a build, a type check, a suite) outside `~/.playground/ops/run-slot.sh`.
