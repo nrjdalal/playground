@@ -243,7 +243,7 @@ describe("the supervisor's follower check", () => {
     expect(script).toContain("gave no answer in ${HELD_WAIT:-20}s; not restarting it")
     expect(script).toContain('say "follower: another importer holds the lock')
     expect(script).toContain("  elif ! alive dashboard-ingest; then\n    held_said_f=")
-    expect(script).toContain("  else\n    held_said_f=\n  fi\ndone")
+    expect(script).toContain("  else\n    held_said_f=\n  fi\n  check_aliases\ndone")
   })
 })
 
@@ -1130,7 +1130,7 @@ describe("the follower before first run's setup (#31)", () => {
 say() { echo "say $*" >> ${calls}; }; result() { echo "result $*" >> ${calls}; }
 start_dev() { :; }; check_dev() { echo dev=up; }; stop_all() { :; }; dev_down() { :; }
 start_follower() { echo start_follower >> ${calls}; }; check_follower() { echo follower=running; }
-follower_held() { return 1; }; alive() { [ "$1" = dashboard-dev ]; }; build_head() { :; }; keep_builds() { :; }
+follower_held() { return 1; }; alive() { [ "$1" = dashboard-dev ]; }; build_head() { :; }; keep_builds() { :; }; check_aliases() { :; }
 ${fn("setup_pending") ?? ""}
 ${script.slice(script.indexOf("\nroll_up() {") + 1, script.indexOf("\n}\n", script.indexOf("\nroll_up() {")) + 2)}
 `
@@ -1182,5 +1182,112 @@ ${script.slice(script.indexOf("\nroll_up() {") + 1, script.indexOf("\n}\n", scri
     const lines = await sup("roll_up START", URL_LINE)
     expect(lines[0]).toBe("start_follower")
     expect(lines[1]).toMatch(/^result START \w+ PASS dev=up follower=running$/)
+  })
+})
+
+// A route file of portless's shape in the test's own folder, never the real ~/.portless: each host and its port.
+const routesDir = join(scratch, "portless")
+const routesFile = join(routesDir, "routes.json")
+const routes = (pairs: [string, number][]) =>
+  Bun.write(
+    routesFile,
+    JSON.stringify(pairs.map(([hostname, port]) => ({ hostname, pid: 0, port }))),
+  )
+const LIVE_ROUTES: [string, number][] = [
+  ["desk.playground.localhost", 4842],
+  ["playground.localhost", 4842],
+  ["desk.api.playground.localhost", 4843],
+  ["api.playground.localhost", 4843],
+]
+const alias = async (file = routesFile) => {
+  const proc = Bun.spawn(
+    [
+      "bun",
+      "--no-env-file",
+      join(root, "scripts", "ops", "dashboard", "alias.ts"),
+      file,
+      "https://desk.playground.localhost",
+      "https://desk.api.playground.localhost",
+    ],
+    { stderr: "pipe", stdout: "pipe" },
+  )
+  const [out, code] = await Promise.all([new Response(proc.stdout).text(), proc.exited])
+  return { code, out: out.trim() }
+}
+
+describe("the supervisor's alias check", () => {
+  test("passes while each bare alias holds the port of the live stack's own route", async () => {
+    await routes(LIVE_ROUTES)
+    expect(await alias()).toEqual({
+      code: 0,
+      out: "playground.localhost and api.playground.localhost hold the live stack's ports 4842 and 4843",
+    })
+  })
+
+  // on 31 Oct a probe moved playground.localhost to its own web for about 2 s, twice, and nothing checked or alerted
+  test("names both ports when a bare alias points somewhere else", async () => {
+    await routes(
+      LIVE_ROUTES.map(([host, port]) => [host, host === "playground.localhost" ? 4851 : port]),
+    )
+    expect(await alias()).toEqual({
+      code: 1,
+      out: "playground.localhost points at port 4851, but the live stack's desk.playground.localhost is on 4842",
+    })
+  })
+
+  test("names a missing route as its own case, never a pass", async () => {
+    await routes(LIVE_ROUTES.filter(([host]) => host !== "playground.localhost"))
+    expect(await alias()).toEqual({
+      code: 1,
+      out: `no route for playground.localhost in ${routesFile}`,
+    })
+    await routes(LIVE_ROUTES.filter(([host]) => host !== "desk.api.playground.localhost"))
+    expect((await alias()).out).toBe(`no route for desk.api.playground.localhost in ${routesFile}`)
+  })
+
+  test("names a missing or unreadable route file as its own case, never a pass", async () => {
+    expect(await alias(join(scratch, "nowhere", "routes.json"))).toEqual({
+      code: 1,
+      out: `no route file at ${join(scratch, "nowhere", "routes.json")}`,
+    })
+    await Bun.write(routesFile, "{not json")
+    expect(await alias()).toEqual({ code: 1, out: `the route file ${routesFile} is not JSON` })
+  })
+
+  test("writes one ANOMALY result and one alert when an alias goes wrong, none while it stays so, and one result when it is right again", async () => {
+    const state = join(scratch, "alias-state")
+    const ops = join(scratch, "alias-ops")
+    await Bun.write(join(ops, "notify.sh"), `#!/bin/sh\necho "$1 $2" >> "${join(ops, "sent")}"\n`)
+    chmodSync(join(ops, "notify.sh"), 0o755)
+    await Bun.write(join(state, "results.log"), "")
+    await Bun.write(answer, "https://desk.NAME.localhost\n")
+    await routes(LIVE_ROUTES)
+    const right = join(scratch, "right.json")
+    await Bun.write(right, Bun.file(routesFile))
+    await routes(
+      LIVE_ROUTES.map(([host, port]) => [host, host === "playground.localhost" ? 4851 : port]),
+    )
+    const proc = run(
+      `D=${join(root, "scripts", "ops", "dashboard")} OPS=${ops} RESULTS=${join(state, "results.log")} LOG=${join(state, "supervisor.log")} PORTLESS_STATE_DIR=${routesDir}\n${fn("say")}\n${fn("result")}\n${fn("dashboard_urls")}\n${fn("check_aliases")}\ncheck_aliases; check_aliases; cp ${right} ${routesFile}; check_aliases; check_aliases; true`,
+    )
+    expect(await proc.exited).toBe(0)
+    const results = (await Bun.file(join(state, "results.log")).text()).trim().split("\n")
+    expect(results).toHaveLength(2)
+    expect(results[0]).toContain(
+      "ANOMALY alias: playground.localhost points at port 4851, but the live stack's desk.playground.localhost is on 4842",
+    )
+    expect(results[1]).toContain(
+      "ALIAS ok again: playground.localhost and api.playground.localhost hold the live stack's ports 4842 and 4843",
+    )
+    expect((await Bun.file(join(ops, "sent")).text()).trim()).toBe(
+      "dashboard alias: playground.localhost points at port 4851, but the live stack's desk.playground.localhost is on 4842",
+    )
+  })
+
+  test("runs on every tick of the loop, and only reads the route file", async () => {
+    const loop = script.slice(script.indexOf("while true; do"))
+    expect(loop).toContain("check_aliases")
+    const reader = await Bun.file(join(root, "scripts", "ops", "dashboard", "alias.ts")).text()
+    expect(reader).not.toMatch(/Bun\.write|writeFile|\.kill\(|process\.kill|spawn/)
   })
 })
