@@ -34,10 +34,11 @@ It sets up first what the installer and `playground` would have, so the Dashboar
 Its brief is `brief-<dispatcher>.md` in the data folder, written once from `scripts/briefs/dispatcher.md` when it is missing, so your own edits to it stay.
 It exits 0 once the dispatcher starts, 3 when a session already holds the dispatcher's name (it starts nothing), and 1 with spawn.sh's reason when a gate refuses the start, or herdr's when herdr cannot come up.
 
-## Start a manager: `playground planner`, `playground builder`, `playground ops`
+## Start a manager: `playground planner`, `playground builder`, `playground ops`, `playground optimizer`
 
 Each starts that manager as `playground dispatcher` starts the dispatcher, in a herdr workspace of its own, its brief written once from `scripts/briefs/<manager>.md`.
-The dispatcher runs it the first time it routes work to that manager, so no manager sits idle on your usage.
+The dispatcher runs the Planner, the Builder and Ops the first time it routes work to each, so no manager sits idle on your usage.
+It runs the Optimizer at its own start: the Optimizer runs a retro after each ship to `main` and once a day, on the timed beats the factory sends it.
 It exits 0 once the manager starts, 3 when it already runs (it starts nothing), and 1 with spawn.sh's reason when a gate refuses the start.
 
 ## View your sessions: `playground view`

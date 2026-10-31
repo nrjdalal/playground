@@ -634,18 +634,6 @@ export const BEATS: Beat[] = [
   { cron: "7,37 * * * *", name: "sweep", run: sweep, to: "the session's lead, ops, dispatcher" },
   { cron: "*/5 * * * *", name: "auto-end", run: autoEnd(), to: "the session's lead" },
   { cron: "43 * * * *", name: "glm-credits", run: glmCredits, to: "ops/log/glm-credits.log" },
-  {
-    cron: "12,27,42,57 * * * *",
-    name: "optimizer-flow",
-    run: words("optimizer flow"),
-    to: "optimizer",
-  },
-  {
-    cron: "45 * * * *",
-    name: "optimizer-burn",
-    run: words("optimizer burn check"),
-    to: "optimizer",
-  },
   { cron: "7 */2 * * *", name: "optimizer-tick", run: words("optimizer tick"), to: "optimizer" },
   { cron: "13 21 * * *", name: "optimizer-daily", run: words("optimizer daily"), to: "optimizer" },
   { cron: "29 3 * * 0", name: "turbo-prune", run: turboPrune(), to: "ops/log/turbo-prune.log" },

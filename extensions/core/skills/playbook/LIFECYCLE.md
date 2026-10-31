@@ -118,6 +118,9 @@ Sessions that work together share a workspace as full-height columns ([SESSIONS.
   `playground update` touches ops-dashboard's `roll-now`, and `playground status` only reads, ops-herdr's `status` lines among its own.
   `playground sweep <lead>` reads what changed since that lead's last sweep and prints it, or `quiet`, writing only its cursor, `sweep/<lead>.json` in the data folder ([SWEEP.md](SWEEP.md)).
 - **Probes** need the ok of their spawner's lead, open as a column in their spawner's workspace, and their spawner closes them by their surface the moment the test is done.
+- **The Optimizer** is started by the dispatcher at its own start, with `playground optimizer`, and runs a retro after each ship to `main` and once a day, by the steps in its brief, `scripts/briefs/optimizer.md`.
+  On ops-tick's `optimizer tick` (every 2 hours) it runs one once a ship has landed since the last, and on `optimizer daily` once no retro has run for 20 hours, so no day passes without one.
+  It stays open between retros, so each beat finds it, and Ops resumes it after a Claude Code update ([Updating Claude Code](#updating-claude-code)).
 - **the dispatcher, the Planner, the Builder and Ops** stay open: they never close, except to be respawned with their settings after a cmux restore (below), to be resumed onto a new binary when Claude Code updates ([Updating Claude Code](#updating-claude-code)),
   or from a handoff ([SESSIONS.md](SESSIONS.md#write-a-handoff)) when their guidance changes (a rewritten brief or standing rule their running context contradicts, which the dispatcher names when it sends the change, or Ops when the change is to the dispatcher's own guidance):
   Ops respawns the dispatcher, the Planner and the Builder, the dispatcher respawns Ops, and no two managers restart at once, Ops first and alone when a change reaches it and another, and never as an Inbox item.
@@ -157,8 +160,8 @@ Ops runs an update when the owner asks for one:
 
 2. Note what `claude --version` prints, then run `claude update`.
    **Done when** `claude --version` prints a newer version than the one you noted.
-3. Resume each named session on the list onto the new binary, one at a time: close it by [SESSIONS.md](SESSIONS.md#end), then run its resume record, `bash ~/.playground/resume/<name>.sh`, which resumes it with the `--account` its start was given and the model it started with ([SESSIONS.md](SESSIONS.md#spawn) says how a resume picks a login).
-   A session with no record resumes with `"${PLAYGROUND_REPO:?}/scripts/spawn.sh" resume <name> <folder> <session-id>`, adding the `--model` its line shows when it runs on Claude, and `--account` with the account it started on when that is a second account ([SESSIONS.md](SESSIONS.md#spawn)).
+3. Resume each named session on the list onto the new binary, one at a time: close it by [SESSIONS.md](SESSIONS.md#end), then run its resume record, `bash ~/.playground/resume/<name>.sh`, which resumes it with the `--account` its start was given, the model it started with and an effort other than high ([SESSIONS.md](SESSIONS.md#spawn) says how a resume picks a login).
+   A session with no record resumes with `"${PLAYGROUND_REPO:?}/scripts/spawn.sh" resume <name> <folder> <session-id>`, adding the `--model` its line shows when it runs on Claude, `--effort` with the effort it runs at when that is not high, and `--account` with the account it started on when that is a second account ([SESSIONS.md](SESSIONS.md#spawn)).
    The managers go in [Starts and ends](#starts-and-ends)'s order, Ops first: Ops sends the dispatcher the list's path and asks for its own resume, and once Ops runs again the dispatcher tells it to carry on at step 3.
    Ops also does dispatcher-2 and optimizer; the Builder does its workers, Ops its runners, each worker its checkers, each spawner its probes, and the owner his own; Ops sends `$LIST`'s path to each session that resumes others.
    A session that ended on its own since step 1, its roster row `ended` with a report saying why, stays ended.

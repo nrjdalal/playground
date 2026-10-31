@@ -42,9 +42,9 @@ set -euo pipefail
 #   spawn.sh probe     <name> <reports-to> <brief>     in herdr alone: its own workspace, this checkout, for a server with no pane to split beside
 #   spawn.sh manager   <dispatcher|second dispatcher|optimizer|builder|ops|planner> <brief>   its own workspace in the main checkout's .claude/worktrees/leads: the first dispatcher (sessions.names' dispatcher), which works with the owner and reports to no session; the second dispatcher (Inbox #i520), sessions.names' dispatcher with -2 or an <id>-dispatcher it records as slot=2, on --backend glm or --account <a second account>; the optimizer (optimizer, an <id>-optimizer, or a session the roster gives the optimizer kind) and the builder, ops and planner (playground <manager> starts each), leads; these report to the first dispatcher
 #   spawn.sh resume    <name> <dir> [session-id]        reopens a closed session: in herdr in the pane herdr kept under its label while that pane holds no agent, else in a workspace of its own; with no session id, only in a folder it ran in; a <dir> in the Desktop folder resumes in the same tree under the code root, its transcript copied there when a session id is given; with no code root it resumes in the Desktop folder itself
-#   spawn.sh restore                                    resumes every herdr session whose resume record (~/.playground/resume) names it on the server PLAYGROUND_HERDR_SESSION names (playground by default) and that the roster has not ended, parked or paused, each through `spawn.sh resume` and its gate with the --account its start was given and the --model it started with; a live one is skipped, and one restore runs at a time
+#   spawn.sh restore                                    resumes every herdr session whose resume record (~/.playground/resume) names it on the server PLAYGROUND_HERDR_SESSION names (playground by default) and that the roster has not ended, parked or paused, each through `spawn.sh resume` and its gate with the --account its start was given, the --model it started with and an --effort other than high; a live one is skipped, and one restore runs at a time
 #   spawn.sh close     <name>                           closes the herdr pane spawn.sh opened for <name>, by the label it set, on the server its resume record names; it refuses any other pane and your own, and ends its roster row once the pane closes
-#   spawn.sh move      <name>                           takes the live cmux session holding <name> to herdr: every check and the usage gate run but the load and memory gates, since the copy it closes frees what the new one takes; only then it closes the session's cmux surface (its workspace when that was the last surface), waits up to 30s (PLAYGROUND_MOVE_WAIT seconds) for its process to exit, and resumes it in herdr by its session id. It takes --model, --account and --brief as a resume does, --backend for a session with no pin, and --runtime herdr alone; a session cmux holds no record of at its pid is left alone, and a session cannot move itself: its lead moves it
+#   spawn.sh move      <name>                           takes the live cmux session holding <name> to herdr: every check and the usage gate run but the load and memory gates, since the copy it closes frees what the new one takes; only then it closes the session's cmux surface (its workspace when that was the last surface), waits up to 30s (PLAYGROUND_MOVE_WAIT seconds) for its process to exit, and resumes it in herdr by its session id. It takes --model, --effort, --account and --brief as a resume does, --backend for a session with no pin, and --runtime herdr alone; a session cmux holds no record of at its pid is left alone, and a session cannot move itself: its lead moves it
 #   --size <small|medium|big>  with any mode but restore or close, anywhere among its words: the item's size the load gate counts, in place of small for a reviewer or tester and the one ops/run-slot.sh size reads from the roster and plan.json for the rest
 #   --check            with any mode but restore or close, anywhere among its words: run every check and gate but the live-name one, print "ok: <name> can start" ("can move" for a move) and start or close nothing
 #   --brief <file>     with resume alone, anywhere among its words: the resumed session's first prompt has it read ~/.playground/<file>; without it, a resume's first prompt has it act on the after-resume hook's instruction
@@ -53,6 +53,7 @@ set -euo pipefail
 #   --backend claude   the same places: the session runs on Claude (the default; named to set its pin on a fresh start)
 #     The backend is recorded at the start in ~/.playground/backends/<name> and carried on its resume: a resume takes no --backend while a pin stands, and refuses with no pin and none given, or with a pin that reads as neither glm nor claude.
 #   --model <id>       with any mode but restore or close, anywhere among its words: the Claude model, one of models.claude (claude-opus-5-5, claude-fable-5-1, claude-sonnet-5-5 and claude-haiku-5-5 by default), else models.default (claude-opus-5-5); never on GLM, which maps every model itself, and a reviewer or a tester runs on models.checker (claude-opus-5-5) alone. Nothing records it: a resume takes it afresh, so a resume with no --model runs on models.default.
+#   --effort <level>   with any mode but restore or close, anywhere among its words: the session's effort, one of low, medium, high, xhigh or max, high by default; the resume record keeps one other than high, so a restore runs at the same effort, and a resume with none runs at high.
 #   --title "<title>"  with worker or a reviewer's or tester's column, anywhere among its words: the plain title the sidebar reads the session by, up to 40 characters; a worker needs one, and a checker with none takes "Review: " or "Test: " before its worker's roster title
 #   --reports-to <session>  with worker alone, anywhere among its words: the session it reports to, named in its first prompt in place of the builder
 #   --in <dir>         with worker alone, anywhere among its words: the folder the worker runs in, in place of this checkout: an existing folder under the code root (paths.codeRoot) or under ~/<org> for an org ext.links guards, any other refused
@@ -62,7 +63,7 @@ set -euo pipefail
 #     The runtime is recorded at the start in ~/.playground/runtimes/<name>; a resume whose pin reads cmux opens in herdr and rewrites the pin.
 #
 # <name> is lowercase words joined by hyphens that give its kind: a new one from `bun run name <kind>` (<id>-<kind>), an old `<kind>-<words>` one, or a manager's own; the mode gives the kind, and a name that gives none or another is refused, but on a resume.
-# <brief> is a file under ~/.playground. Every session runs at high effort,
+# <brief> is a file under ~/.playground. Every session runs at high effort unless --effort names another,
 # on models.default unless --model names another of models.claude, or on models.glm with --backend glm. The first dispatcher reports to no one: its <reports-to> is the lead that briefs it.
 # Each start lands in the roster.
 
@@ -115,7 +116,8 @@ usage() {
   if [ $# -gt 0 ]; then
     printf 'spawn.sh: %s\n' "$1" >&2
   fi
-  sed -n '34,59p' "$0" | sed 's/^# \{0,1\}//' >&2
+  # every mode's line through the runtime record's, found by its first and next lines so an added line never cuts it
+  awk '/^#   spawn\.sh /{p = 1} /^# <name> is/{exit} p' "$0" | sed 's/^# \{0,1\}//' >&2
   exit 2
 }
 refuse() {
@@ -525,7 +527,7 @@ else:
         return seen, None
 
     # this machine's own login (usage.json, which ops-usage writes every 5 minutes) and each other login with a usage-<name>.json,
-    # which the optimizer's spare watch writes; another login's week moves slowly, so its reading holds for an hour.
+    # which ops-usage writes for the stored login and account-watch.py <email>, run by hand, for another; another login's week moves slowly, so its reading holds for an hour.
     usage, detail = load("usage.json")
     own = usage.get("account") if isinstance(usage, dict) else None
     writer = "The ops-usage job writes it every 5 minutes; wait for its next run and try again."
@@ -560,7 +562,7 @@ else:
         email = other.get("account") if isinstance(other, dict) else None
         if not isinstance(email, str) or not email or email.lower() in known:
             continue
-        seen, detail = judge(name, other, 60, "The optimizer's spare watch writes it every 5 minutes while it runs.")
+        seen, detail = judge(name, other, 60, "ops-usage writes the stored login's every 5 minutes, and account-watch.py <email>, run by hand, another account's.")
         logins.append((email, name, email, seen, detail))
         # a refused file leaves the account open to its login-flip reading below
         if detail is None:
@@ -653,7 +655,7 @@ PY
   esac
 }
 
-# --account, --backend, --model, --brief, --reports-to, --title, --in and --check may sit anywhere among the words; the rest are the mode's.
+# --account, --backend, --model, --effort, --brief, --reports-to, --title, --in and --check may sit anywhere among the words; the rest are the mode's.
 ACCOUNT=
 PICKED=
 BACKEND=
@@ -674,6 +676,7 @@ PEERS=$(setting slots.peers) || PEERS=; [ -n "$PEERS" ] || PEERS="[]"
 GATES="{\"glmLoad5Max\": $GLM_LOAD5_MAX, \"glmSwapinsMax\": $GLM_SWAPINS_MAX, \"memoryFreeMin\": $MEMORY_FREE_MIN, \"peers\": $PEERS, \"reviewReserve\": $REVIEW_RESERVE, \"smallReserve\": $SMALL_RESERVE, \"startsWindow\": $STARTS_WINDOW}"
 MODELS=$(printf '%s\n' $CLAUDE_MODELS | awk '{ m[NR] = $0 } END { for (i = 1; i <= NR; i++) printf "%s%s", m[i], (i < NR - 1 ? ", " : i == NR - 1 ? " or " : "") }')
 CLAUDE_MODEL=
+EFFORT=
 RESUME_BRIEF=
 REPORTS_TO=
 TITLE_ARG=
@@ -698,6 +701,11 @@ while [ $# -gt 0 ]; do
     [ $# -ge 2 ] && [ -n "$2" ] && [ -z "$CLAUDE_MODEL" ] || usage "--model takes one of $MODELS, once"
     case "$2" in --*) usage "--model needs a value; \"$2\" starts with --" ;; esac
     CLAUDE_MODEL=$2
+    shift 2
+  elif [ "$1" = --effort ]; then
+    [ $# -ge 2 ] && [ -n "$2" ] && [ -z "$EFFORT" ] || usage "--effort takes one of low, medium, high, xhigh or max, once"
+    case "$2" in --*) usage "--effort needs a value; \"$2\" starts with --" ;; esac
+    EFFORT=$2
     shift 2
   elif [ "$1" = --reports-to ]; then
     [ $# -ge 2 ] && [ -n "$2" ] && [ -z "$REPORTS_TO" ] || usage "--reports-to takes a session name, once"
@@ -786,7 +794,7 @@ MODE=${1:-}
 # herdr 0.9.5 keeps a resume command only from a source that holds the pane through report-agent, and then shows that source's state in place of its own (measured: a 14s turn read idle throughout), so restore reruns the sessions spawn.sh itself listed, with ops-herdr's resume_agents_on_restore off. Each goes through resume, so the gate and the live-name check judge it, and a live one is left as it is.
 if [ "$MODE" = restore ]; then
   NAME=restore
-  [ $# -eq 0 ] && [ -z "$CHECK$ACCOUNT$BACKEND$CLAUDE_MODEL$RESUME_BRIEF$RUNTIME$SIZE" ] || usage "restore takes no other words"
+  [ $# -eq 0 ] && [ -z "$CHECK$ACCOUNT$BACKEND$CLAUDE_MODEL$EFFORT$RESUME_BRIEF$RUNTIME$SIZE" ] || usage "restore takes no other words"
   # One restore at a time: ops-herdr's start and its job's next cycle can both run one, and two resumes of a name both pass the live-name check until its claude writes its registry file, so it would start twice. The lock is a symlink naming its holder's pid and start time, so a holder that died, or a pid macOS handed on, frees it.
   LOCK="$RESUME_DIR/.restore.lock"
   holder() { echo $(LC_ALL=C TZ=UTC ps -o pid=,lstart= -p "$1" 2>/dev/null); }
@@ -840,7 +848,7 @@ for file in sorted(os.listdir(folder)) if os.path.isdir(folder) else []:
         and words[2:4] == ["resume", name]
         and len(extras) % 2 == 0
         and sorted(set(keys)) == sorted(keys)
-        and set(keys) <= {"--account", "--model"}
+        and set(keys) <= {"--account", "--effort", "--model"}
         and not any("\t" in w or "\n" in w for w in words)
     ):
         print("\t".join(words[3:]))
@@ -864,7 +872,7 @@ fi
 # A factory session closes a herdr session's pane only here, since the no-raw-spawn hook refuses herdr's own pane close: herdr's socket has no access control. It closes only a pane spawn.sh opened, by the label it set, on the server the session's resume record names, and ends the session's roster row once the pane closes, leaving the pins and the record as they are, so a resume, which sets the row back to starting, can reopen it.
 if [ "$MODE" = close ]; then
   NAME=${1:-close}
-  [ $# -eq 1 ] && [ -z "$CHECK$ACCOUNT$BACKEND$CLAUDE_MODEL$RESUME_BRIEF$RUNTIME$SIZE" ] || usage "close takes a session's name alone"
+  [ $# -eq 1 ] && [ -z "$CHECK$ACCOUNT$BACKEND$CLAUDE_MODEL$EFFORT$RESUME_BRIEF$RUNTIME$SIZE" ] || usage "close takes a session's name alone"
   word "$NAME" || refuse "a name is lowercase words joined by hyphens"
   [ "$(cat "$DATA/runtimes/$NAME" 2>/dev/null)" = herdr ] ||
     refuse "its runtime pin ($SHOWN/runtimes/$NAME) does not read herdr, so spawn.sh did not open it in herdr"
@@ -1179,6 +1187,10 @@ fi
 if [ "$KIND" = dispatcher ] && { { [ "$MODE" = manager ] && [ -z "$FIRST" ]; } || second_dispatcher "$NAME" || [ "$(roster_field "$NAME" slot)" = 2 ]; } && [ "$BACKEND" != glm ] && [ -z "$ACCOUNT" ]; then
   refuse "$NAME, the second dispatcher, runs on --backend glm, or on Claude with --account <email>, a second account: on this machine's own login it would run out with the first"
 fi
+case "${EFFORT:-high}" in
+  low | medium | high | xhigh | max) ;;
+  *) refuse "--effort takes low, medium, high, xhigh or max, not $EFFORT" ;;
+esac
 [ -z "$CLAUDE_MODEL" ] || case " $CLAUDE_MODELS " in
   *" $CLAUDE_MODEL "*) ;;
   *) refuse "--model takes $MODELS, not $CLAUDE_MODEL" ;;
@@ -1302,7 +1314,7 @@ os.replace(tmp, dst)
 PY
 SETTINGS=$BUILT
 # The factory's sessions run in bypass mode, passed here so it never rests on the machine's own settings: a session in another mode holds every cross-session message for approval.
-FLAGS="--model $MODEL --effort high --settings $SETTINGS --dangerously-skip-permissions"
+FLAGS="--model $MODEL --effort ${EFFORT:-high} --settings $SETTINGS --dangerously-skip-permissions"
 # The skills: one merged plugin per session, from the login's scope, its repo's org, core, then each always org's new names, loaded in place by --plugin-dir, from the data folder this launch reads (under inscope ~/.claude's, not the workspace's); the resolver writes it fresh on every spawn, so a skill `playground ext add` puts in an extension reaches the next session with no install. A column runs in this checkout.
 SKILLS_REPO=${DIR:-$REPO}
 [ "$MODE" = column ] && SKILLS_REPO=$REPO
@@ -1411,6 +1423,7 @@ if [ -n "$MOVE_PID" ]; then
   by_hand="$(printf %q "$MAIN/scripts/spawn.sh") resume $(printf '%q ' "$NAME" "$DIR" "$SESSION")--runtime herdr"
   [ -z "$ACCOUNT$GLM_GIVEN" ] || by_hand+=" --account $(printf %q "$ACCOUNT$GLM_GIVEN")"
   [ -z "$CLAUDE_MODEL" ] || by_hand+=" --model $(printf %q "$CLAUDE_MODEL")"
+  [ -z "$EFFORT" ] || by_hand+=" --effort $(printf %q "$EFFORT")"
   [ -z "$PIN_GIVEN" ] || by_hand+=" --backend $(printf %q "$BACKEND")"
   [ -z "$BRIEF" ] || by_hand+=" --brief $(printf %q "$BRIEF")"
   if ! closed=$(CMUX_QUIET=1 cmux close-surface --workspace "$MOVE_WORKSPACE" --surface "$MOVE_SURFACE" --force 2>&1); then
@@ -1485,12 +1498,13 @@ except (ValueError, KeyError, TypeError):
   fi
   rm -f -- "$said_file"
   echo "herdr pane $PANE workspace $ws"
-  # The session's resume record, which spawn.sh restore reads after a server's restart, written once herdr runs the session. It is the one resume that brings it back, with the --account its start was given and the model it started with, and never a token.
+  # The session's resume record, which spawn.sh restore reads after a server's restart, written once herdr runs the session. It is the one resume that brings it back, with the --account its start was given, the model it started with and an effort other than high, and never a token.
   record="exec $(printf %q "$MAIN/scripts/spawn.sh") resume $(printf '%q ' "$NAME" "$CWD" "$SID")"
   # A login the usage gate picked stays off the exec line, so a restore picks afresh, and on the account line, which ops-unstick and no-headless-login read.
   [ -n "$ACCOUNT" ] && [ -z "$PICKED" ] && record+="--account $ACCOUNT "
   [ -n "$GLM_GIVEN" ] && record+="--account $GLM_GIVEN "
   [ -n "$CLAUDE_MODEL" ] && record+="--model $CLAUDE_MODEL "
+  [ -n "$EFFORT" ] && [ "$EFFORT" != high ] && record+="--effort $EFFORT "
   account_line=
   [ -n "$ACCOUNT" ] && account_line="# account: $ACCOUNT"$'\n'
   (umask 077 && printf '#!/bin/bash\n# spawn.sh writes this at every herdr start and resume; spawn.sh restore reads its exec line and the server it ran on.\n# server: %s\n%s%s\n' "$HERDR_SESSION_NAME" "$account_line" "${record% }" > "$RESUME_DIR/$NAME.sh" && chmod 700 "$RESUME_DIR/$NAME.sh") ||
