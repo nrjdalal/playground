@@ -59,7 +59,7 @@ const TASK = "handoffs/gate-task.md"
 // The worker the builder starts, an `<id>-worker` name spawn.sh reads the kind from; one fixed id serves, since every box is a fresh HOME no session has used.
 const WORKER = "g8tw7k-worker"
 
-// Pure: the one step a session takes in the routed task, by the role spawn.sh started it as, or null when that role waits; a dispatcher acts on a typed message alone, the rest on their start.
+// Pure: the one step a session takes in the routed task, by the role spawn.sh started it as (lead for every manager but the dispatcher, and the builder is the one lead the gate starts), or null when that role waits; a dispatcher acts on a typed message alone, the rest on their start.
 export const stepOf = (
   role: string,
   { data, repo, typed }: { data: string; repo: string; typed: boolean },
