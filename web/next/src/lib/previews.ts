@@ -46,7 +46,7 @@ export const startAddress = (
 // A stopped worktree's picker value, its path after this prefix, so picking it offers Start.
 export const STOPPED = "stopped:"
 
-// Pure: the picker's stacks, one group a project in the list's order (by project, then branch), each running one its URL and a stopped one its path after STOPPED, labelled by its branch, else its name, and the session working in it.
+// Pure: the picker's stacks, one group a project in the list's order (by project, then branch), each running one its URL and a stopped one its path after STOPPED, labelled by its branch, else its name, the session working in it, and a Vibeground started and not serving yet as starting.
 export const stackGroups = (
   stacks: readonly {
     branch: string | null
@@ -55,11 +55,16 @@ export const stackGroups = (
     project: string
     session: string | null
     url: string | null
+    vibe?: boolean
   }[],
 ) => {
   const groups = new Map<string, { label: string; value: string }[]>()
   for (const stack of stacks) {
-    const label = [stack.branch ?? stack.name, stack.session, !stack.url && "stopped"]
+    const label = [
+      stack.branch ?? stack.name,
+      stack.session,
+      !stack.url && (stack.vibe ? "starting" : "stopped"),
+    ]
       .filter(Boolean)
       .join(" · ")
     const items = groups.get(stack.project) ?? []
@@ -69,17 +74,38 @@ export const stackGroups = (
   return [...groups].map(([project, items]) => ({ items, project }))
 }
 
-// The brand's click opens the Inbox's Preview row: the aside turns to the Inbox, and the Inbox, now or once it mounts, opens the row.
+// The brand's click opens the Inbox's Preview row: the aside turns to the Inbox, and the Inbox, now or once it mounts, opens the row; a click that moves the page also asks the aside, once, for the Inbox at the first address past the one it left, after the move resets its tab.
 export const OPEN_PREVIEW = "dashboard:open-preview"
 let previewWanted = false
-export const openPreview = (): void => {
+let previewFrom: string | null = null
+export const openPreview = (from: string | null): void => {
   previewWanted = true
+  previewFrom = from
   window.dispatchEvent(new Event(OPEN_PREVIEW))
 }
 export const takePreview = (): boolean => {
   const wanted = previewWanted
   previewWanted = false
   return wanted
+}
+export const takeMove = (at: string): boolean => {
+  if (previewFrom === null || at === previewFrom) return false
+  previewFrom = null
+  return true
+}
+
+// Pure: what the brand's click does: a plain click opens the row, leaving the address it is at (from) unless it is already at the link's own address; a modified or other-button click opens a tab, so it opens nothing here (null).
+export const previewClick = (
+  click: { altKey: boolean; button: number; ctrlKey: boolean; metaKey: boolean; shiftKey: boolean },
+  href: string,
+  at: { pathname: string; search: string },
+): { from: string | null } | null => {
+  if (click.button !== 0 || click.altKey || click.ctrlKey || click.metaKey || click.shiftKey) {
+    return null
+  }
+  const search = new URLSearchParams(at.search).toString()
+  const from = `${at.pathname}${search ? `?${search}` : ""}`
+  return { from: from === href ? null : from }
 }
 
 // Pure: what Done sends the dispatcher on the owner's click, the one session his messages reach (the message route's phase 2a), which routes it to the session in the Vibeground's worktree: hand the work back for review, never merged.

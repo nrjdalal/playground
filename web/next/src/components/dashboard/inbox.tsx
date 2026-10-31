@@ -16,6 +16,7 @@ import {
   RiExternalLinkLine,
   RiGitMergeLine,
   RiInboxLine,
+  RiKey2Line,
   RiMoneyDollarCircleLine,
   RiProgress4Line,
   RiQuestionAnswerLine,
@@ -123,6 +124,7 @@ import {
   outcomeLine,
   pickedAt,
   pinnedView,
+  provideSecret,
   reopenable,
   reopenKey,
   resultLink,
@@ -150,6 +152,7 @@ const DECISION_ICONS: Record<InboxPreview["type"], RemixiconComponentType> = {
   budget: RiMoneyDollarCircleLine,
   delete: RiDeleteBinLine,
   schema: RiTableLine,
+  secret: RiKey2Line,
   ship: RiShipLine,
   slack: RiSlackLine,
   ticket: RiTicketLine,
@@ -499,6 +502,14 @@ function Preview({ item }: { item: Extract<InboxItem, { kind: "decision" }> }) {
           <p className="break-words whitespace-pre-wrap">Why: {preview.why}</p>
         </>
       )
+    case "secret":
+      return (
+        <p>
+          On Submit, the value goes to <code className="font-mono">{preview.key}</code> in Vercel
+          project <code className="font-mono">{preview.sink.project}</code> ({preview.sink.scope})
+          for {preview.sink.environments.join(", ")}. It is kept nowhere.
+        </p>
+      )
   }
 }
 
@@ -684,6 +695,11 @@ export function InboxCard({
   }
   const [pick, setPick] = useState<Side | null>(null)
   const [note, setNote] = useState("")
+  // a secret ask's value, held only until Submit hands it on, then cleared
+  const [secret, setSecret] = useState("")
+  const secretKey =
+    item.kind === "decision" && item.preview.type === "secret" ? item.preview.key : null
+  const secretAsk = secretKey !== null
   const titleId = useId()
   const settle = async (write: () => Promise<unknown>) => {
     setPending(true)
@@ -699,6 +715,11 @@ export function InboxCard({
   }
   const onAnswer: Answer = (action, text) =>
     settle(() => answerItem(item, action, text, note.trim() || undefined))
+  const onProvide = () => {
+    const value = secret
+    setSecret("")
+    return settle(() => provideSecret(item, value))
+  }
   // Schedule's picked time, drawn as its own footer line, since the card's right group never wraps
   const [picking, setPicking] = useState(false)
   const [day, setDay] = useState<Date | undefined>()
@@ -755,6 +776,7 @@ export function InboxCard({
   // a labelled ask's footer sits in the form beside its Submit while it is open; every other card's answers from outside it
   const footerInForm = labels !== null && outcome === null
   const draftReady = item.kind === "draft" && outcome === null && !busy && draft.trim() !== ""
+  const secretReady = secretAsk && outcome === null && !busy && secret.trim() !== ""
   // what Approve does, the card's description while it is open, or what a read-only update shows
   const preview =
     outcome !== null ? null : item.kind === "decision" ? (
@@ -765,6 +787,27 @@ export function InboxCard({
   const body =
     outcome !== null ? null : labels ? (
       <AskChoices busy={busy} labels={labels} paused={paused} pick={pick} setPick={setPick} />
+    ) : secretAsk ? (
+      // masked, never saved by the browser, and a key here stays in the field; Enter submits
+      <Input
+        aria-label={`Value for ${secretKey}`}
+        autoComplete="new-password"
+        className={BOX}
+        data-1p-ignore
+        data-lpignore="true"
+        disabled={busy}
+        placeholder="Paste the value"
+        spellCheck={false}
+        type="password"
+        value={secret}
+        onChange={(event) => setSecret(event.target.value)}
+        onKeyDown={(event) => {
+          event.stopPropagation()
+          if (event.key !== "Enter") return
+          event.preventDefault()
+          if (secretReady) void onProvide()
+        }}
+      />
     ) : item.kind === "draft" ? (
       <div className="flex flex-col gap-3 text-sm">
         <SoFar thread={item.preview.thread} />
@@ -841,6 +884,20 @@ export function InboxCard({
           </Button>
         </Hint>
       )
+    ) : secretAsk ? (
+      <Hint content={held}>
+        <Button
+          size="sm"
+          variant="outline"
+          className={SIDE_TONES.approve}
+          {...hold}
+          disabled={!secretReady}
+          onClick={() => void onProvide()}
+        >
+          <RiSendPlaneLine data-icon="inline-start" />
+          Submit
+        </Button>
+      </Hint>
     ) : item.kind === "decision" ? (
       labels ? null : (
         // a labelled ask's Send is the form's own Submit; no card takes Edit, since the note carries any change
@@ -926,7 +983,7 @@ export function InboxCard({
   const right = (
     <div className="ml-auto flex shrink-0 gap-2">
       {/* Archive sets the ask aside on the Archived shelf, its icon the shelf's; a draft's own red Discard already says no, so it stays off drafts */}
-      {!done && !folded && outcome === null && item.kind === "decision" && (
+      {!done && !folded && outcome === null && item.kind === "decision" && !secretAsk && (
         <Hint
           content={
             held ??
@@ -970,7 +1027,8 @@ export function InboxCard({
         </Hint>
       )}
       {reopens && <Reopen open={reopened} setOpen={setReopened} />}
-      <ChatAbout item={item} />
+      {/* an open secret ask offers no chat, so its value is never typed where a transcript keeps it */}
+      {!(secretAsk && outcome === null) && <ChatAbout item={item} />}
     </div>
   )
 
@@ -1181,7 +1239,7 @@ export function InboxCard({
           </CardHeader>
           {body && <CardContent>{body}</CardContent>}
           {/* the card's last block before its buttons: his note, which goes with whatever he answers */}
-          {outcome === null && item.kind !== "update" && !folded && (
+          {outcome === null && item.kind !== "update" && !secretAsk && !folded && (
             // the same gap-2 above it as between the choices
             <CardContent className="mt-[calc(--spacing(2)-var(--card-spacing))]">
               <NoteBox

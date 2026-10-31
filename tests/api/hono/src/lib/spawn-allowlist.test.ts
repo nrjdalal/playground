@@ -14,6 +14,7 @@ const ALLOWLIST = [
   "dashboard/fixture.ts",
   "dashboard/repo.ts",
   "dashboard/restart.ts",
+  "dashboard/secret-sink.ts",
   "dashboard/update.ts",
   "dashboard/vibe.ts",
   "dev/launch.ts",

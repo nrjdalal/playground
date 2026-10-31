@@ -1,10 +1,20 @@
 import { afterAll, describe, expect, test } from "bun:test"
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 const {
   childEnv,
+  copyData,
   copyName,
   dumpArgv,
   loadRefusal,
@@ -52,7 +62,13 @@ const fake = (stacks: Stack[], over: Partial<Deps> = {}) => {
   const docker: { args: string[]; env?: Record<string, string> }[] = []
   const pipes: { from: string[]; to: string[] }[] = []
   const launched: string[] = []
+  const launchData: string[] = []
+  const copied: string[] = []
+  const migrated: string[] = []
   const deps: Deps = {
+    copyData: (_from, to) => {
+      copied.push(to)
+    },
     docker: async (args, env) => {
       docker.push({ args, env })
       if (args[0] === "ps")
@@ -64,10 +80,15 @@ const fake = (stacks: Stack[], over: Partial<Deps> = {}) => {
       if (args[0] === "port") return { code: 0, stderr: "", stdout: "127.0.0.1:41234\n" }
       return { code: 0, stderr: "", stdout: "" }
     },
-    launch: (path) => launched.push(path),
+    launch: (path, _log, data) => {
+      launched.push(path)
+      launchData.push(data)
+    },
     live: () => LIVE,
     load5: () => 4,
-    migrate: async () => {},
+    migrate: async (url) => {
+      migrated.push(url)
+    },
     pipe: async (from, to) => {
       pipes.push({ from, to })
       return { bytes: 2048, error: null }
@@ -79,7 +100,7 @@ const fake = (stacks: Stack[], over: Partial<Deps> = {}) => {
     wait: async () => {},
     ...over,
   }
-  return { deps, docker, launched, pipes }
+  return { copied, deps, docker, launchData, launched, migrated, pipes }
 }
 
 const argvs = (f: ReturnType<typeof fake>) => [
@@ -88,8 +109,13 @@ const argvs = (f: ReturnType<typeof fake>) => [
 ]
 
 describe("the pure parts", () => {
-  test("the copy's name comes from the worktree's folder, made safe", () => {
-    expect(copyName("/a/.claude/worktrees/yard rooms")).toBe("playground-vibe-yard-rooms-db")
+  test("the copy's name comes from the worktree's folder, made safe, and its whole path, so two folders of one name in two repos never share one", () => {
+    expect(copyName("/a/.claude/worktrees/yard rooms")).toMatch(
+      /^playground-vibe-yard-rooms-[0-9a-f]{8}-db$/,
+    )
+    expect(copyName("/a/.claude/worktrees/rooms")).not.toBe(copyName("/b/.claude/worktrees/rooms"))
+    expect(copyName("/a/.claude/worktrees/a b")).not.toBe(copyName("/a/.claude/worktrees/a-b"))
+    expect(copyName("/a/.claude/worktrees/rooms")).toBe(copyName("/a/.claude/worktrees/rooms"))
   })
 
   test("the dump is pg_dump alone inside the live container, keeping claude_* empty, with no password", () => {
@@ -124,9 +150,15 @@ describe("the pure parts", () => {
     expect(setKey("A=1", "B", "$2")).toBe("A=1\nB=$2\n")
   })
 
-  test("a command keeps the same user's HOME and PATH and drops the live stack's settings", () => {
+  test("a command keeps the same user's HOME and PATH and drops the live stack's settings, its data folder included", () => {
     expect(
-      childEnv({ HOME: "/h", PATH: "/bin", POSTGRES_URL: "postgres://live", USER: "me" }),
+      childEnv({
+        HOME: "/h",
+        PATH: "/bin",
+        PLAYGROUND_DATA_DIR: "/live/data",
+        POSTGRES_URL: "postgres://live",
+        USER: "me",
+      }),
     ).toEqual({ HOME: "/h", PATH: "/bin", USER: "me" })
   })
 
@@ -135,6 +167,8 @@ describe("the pure parts", () => {
     const yes = () => true
     expect(startRefusal(undefined, LIVE, yes, yes)).toContain("no worktree")
     expect(startRefusal(stack(path, { url: "https://x" }), LIVE, yes, yes)).toContain("already")
+    // started and still booting: no URL yet, its record there
+    expect(startRefusal(stack(path, { vibe: true }), LIVE, yes, yes)).toContain("Stop it first")
     expect(startRefusal(stack(path, { branch: LIVE.branch }), LIVE, yes, yes)).toContain("live")
     expect(startRefusal(stack(path), LIVE, () => false, yes)).toContain("linked worktree")
     expect(startRefusal(stack(path), LIVE, yes, () => false)).toContain("not a Playground")
@@ -158,8 +192,15 @@ describe("Start", () => {
   test("runs an existing branch on a seeded copy, its own migrations, and its own .env", async () => {
     const path = worktree("start", "OLD=1\n")
     const migrated: string[] = []
-    const f = fake([stack(path)], { migrate: async (_, folder) => void migrated.push(folder) })
+    const urls: string[] = []
+    const f = fake([stack(path)], {
+      migrate: async (url, folder) => {
+        urls.push(url)
+        migrated.push(folder)
+      },
+    })
     const seeded = await startVibe(path, f.deps)
+    expect(urls).toEqual([`postgresql://postgres:${PASSWORD}@127.0.0.1:41234/postgres`])
     expect(seeded.bytes).toBe(2048)
     expect(f.pipes).toEqual([
       { from: dumpArgv(`${LIVE.database}-sY08`), to: restoreArgv(copyName(path)) },
@@ -173,6 +214,9 @@ describe("Start", () => {
       copyName(path),
     )
     expect(f.launched).toEqual([path])
+    // settings and store edits stay in the copy: the stack's data folder is its own clone in .turbo
+    expect(f.copied).toEqual([join(path, ".turbo/vibe-data")])
+    expect(f.launchData).toEqual([join(path, ".turbo/vibe-data")])
     const run = f.docker.find((call) => call.args[0] === "run")
     expect(run?.args).toContain("127.0.0.1::5432")
     expect(run?.env).toEqual({ POSTGRES_PASSWORD: PASSWORD })
@@ -186,6 +230,38 @@ describe("Start", () => {
     const touching = argvs(f).filter((argv) => argv.includes(live))
     expect(touching).toEqual([dumpArgv(live)])
     expect(argvs(f).some((argv) => argv.some((word) => word.includes(PASSWORD)))).toBe(false)
+    // the migration and the .env name the copy, on the port docker gave it, never the live database
+    expect(f.migrated).toEqual([`postgresql://postgres:${PASSWORD}@127.0.0.1:41234/postgres`])
+    const env = readFileSync(join(path, ".env"), "utf8")
+    expect(env.match(/^POSTGRES_URL=.*$/m)?.[0]).toBe(
+      `POSTGRES_URL=postgresql://postgres:${PASSWORD}@127.0.0.1:41234/postgres`,
+    )
+    expect(env).not.toContain(LIVE.database)
+  })
+
+  // a re-pick while it boots offered Start again, whose docker rm -fv took the booting copy
+  test("a second Start while the first still seeds is refused before it touches docker", async () => {
+    const path = worktree("twice")
+    let release = () => {}
+    const held = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const first = fake([stack(path)], {
+      pipe: async () => {
+        await held
+        return { bytes: 1, error: null }
+      },
+    })
+    const running = startVibe(path, first.deps)
+    await Bun.sleep(5)
+    const second = fake([stack(path)])
+    expect(await startVibe(path, second.deps).catch((error: Error) => error.message)).toContain(
+      "Stop it first",
+    )
+    expect(second.docker).toEqual([])
+    release()
+    await running
+    expect(first.launched).toEqual([path])
   })
 
   test("a failed dump removes the copy and leaves the worktree's .env as it was", async () => {
@@ -219,7 +295,8 @@ describe("Start", () => {
 
   test("the load gate and a missing live database refuse before any container starts", async () => {
     const path = worktree("gated")
-    const busy = fake([stack(path), stack("/x", { url: "https://y", vibe: true })], {
+    // a Vibeground still booting (no URL yet) holds the one-at-a-time line too
+    const busy = fake([stack(path), stack("/x", { vibe: true })], {
       load5: () => 20,
     })
     expect(await startVibe(path, busy.deps).catch((error: Error) => error.message)).toContain(
@@ -255,6 +332,79 @@ describe("Stop", () => {
     expect(existsSync(path)).toBe(true)
   })
 
+  test("Stop while the copy still seeds removes it and leaves the worktree's own .env alone", async () => {
+    const path = worktree("stop-early", "MINE=1\n")
+    let release = () => {}
+    const held = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const f = fake([stack(path)], {
+      pipe: async () => {
+        await held
+        return { bytes: 1, error: "psql exited 2: the copy went away" }
+      },
+    })
+    const running = startVibe(path, f.deps).catch((error: Error) => error.message)
+    await Bun.sleep(5)
+    await stopVibe(path, fake([stack(path, { vibe: true })]).deps)
+    expect(readFileSync(join(path, ".env"), "utf8")).toBe("MINE=1\n")
+    release()
+    expect(await running).toContain("the copy went away")
+    expect(readFileSync(join(path, ".env"), "utf8")).toBe("MINE=1\n")
+    expect(f.launched).toEqual([])
+  })
+
+  test("the first Start's cleanup leaves the second Start's copy and record alone", async () => {
+    const path = worktree("restart", "MINE=1\n")
+    let release = () => {}
+    const held = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const first = fake([stack(path)], {
+      pipe: async () => {
+        await held
+        return { bytes: 1, error: "psql exited 2: the copy went away" }
+      },
+    })
+    const running = startVibe(path, first.deps).catch((error: Error) => error.message)
+    await Bun.sleep(5)
+    await stopVibe(path, fake([stack(path, { vibe: true })]).deps)
+    const second = fake([stack(path)])
+    await startVibe(path, second.deps)
+    const before = first.docker.length
+    release()
+    expect(await running).toContain("the copy went away")
+    expect(existsSync(join(path, ".turbo/vibe.json"))).toBe(true)
+    expect(first.docker.slice(before).map((c) => c.args)).not.toContainEqual([
+      "rm",
+      "-fv",
+      copyName(path),
+    ])
+  })
+
+  test("a Start stopped while its copy boots ends at the next try, before it seeds", async () => {
+    const path = worktree("stop-boot")
+    let release = () => {}
+    const held = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const f = fake([stack(path)], {
+      docker: async (args) => {
+        if (args[0] === "ps")
+          return { code: 0, stderr: "", stdout: `${LIVE.database}-sY08\trunning\n` }
+        if (args.includes("pg_isready")) return { code: 1, stderr: "", stdout: "" }
+        return { code: 0, stderr: "", stdout: "" }
+      },
+      wait: () => held,
+    })
+    const running = startVibe(path, f.deps).catch((error: Error) => error.message)
+    await Bun.sleep(5)
+    await stopVibe(path, fake([stack(path, { vibe: true })]).deps)
+    release()
+    expect(await running).toContain("stopped while it started")
+    expect(f.pipes).toEqual([])
+  })
+
   test("refuses a stack it did not start", async () => {
     const path = worktree("not-vibe")
     const f = fake([stack(path, { url: "https://w" })])
@@ -262,5 +412,29 @@ describe("Stop", () => {
       "no Vibeground",
     )
     expect(f.docker).toEqual([])
+  })
+})
+
+describe("the data folder's copy", () => {
+  test("copies folders, files and symlinks, and leaves out sockets and the parts a Vibeground never reads", async () => {
+    const from = join(dir, "data-live")
+    const to = join(dir, "data-copy")
+    mkdirSync(join(from, "herdr"), { recursive: true })
+    mkdirSync(join(from, "archive"), { recursive: true })
+    writeFileSync(join(from, "roster.json"), "{}\n")
+    writeFileSync(join(from, "herdr", "config.toml"), "x = 1\n")
+    writeFileSync(join(from, "archive", "old.jsonl"), "{}\n")
+    symlinkSync("roster.json", join(from, "link.json"))
+    const socket = Bun.listen({ socket: { data() {} }, unix: join(from, "herdr", "s.sock") })
+    try {
+      copyData(from, to)
+    } finally {
+      socket.stop(true)
+    }
+    expect(readFileSync(join(to, "roster.json"), "utf8")).toBe("{}\n")
+    expect(readFileSync(join(to, "herdr", "config.toml"), "utf8")).toBe("x = 1\n")
+    expect(lstatSync(join(to, "link.json")).isSymbolicLink()).toBe(true)
+    expect(existsSync(join(to, "herdr", "s.sock"))).toBe(false)
+    expect(existsSync(join(to, "archive"))).toBe(false)
   })
 })

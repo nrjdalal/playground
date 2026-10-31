@@ -156,7 +156,9 @@ export async function opsDown(ctx: Context): Promise<string[]> {
       if (disabled.has(String(b.job))) continue
       const at = Date.parse(String(b.lastBeatAt))
       if (Number.isNaN(at)) throw new Error("lastBeatAt")
-      if (b.lastResult !== "ok") out.push(`ops-failing:${b.job}`)
+      // a waiting: beat has nothing to read yet, as opsRowOf reads it, so it is no failure
+      if (b.lastResult !== "ok" && !String(b.lastResult).startsWith("waiting: "))
+        out.push(`ops-failing:${b.job}`)
       if (ctx.now() - at > 3 * Number(b.cycleSeconds ?? 60) * 1000) out.push(`ops-stale:${b.job}`)
     } catch {
       out.push(`ops-beat-unreadable:${file}`)

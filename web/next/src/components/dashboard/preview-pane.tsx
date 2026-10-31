@@ -76,7 +76,9 @@ export function PreviewPane() {
   const stacks = useQuery({
     queryFn: fetchStacks,
     queryKey: STACKS_QUERY_KEY,
-    refetchInterval: waiting ? 3_000 : false,
+    // a Vibeground booting, this pane's own Start or one the list shows started, is read every 3s until it serves
+    refetchInterval: (query) =>
+      waiting || query.state.data?.some((stack) => stack.vibe && !stack.url) ? 3_000 : false,
   })
   const refresh = () => queryClient.invalidateQueries({ queryKey: STACKS_QUERY_KEY })
   const start = useMutation({
@@ -151,12 +153,12 @@ export function PreviewPane() {
     go(typed.trim())
   }
   const stoppedStack = stopped ? stacks.data?.find((stack) => stack.path === stopped) : undefined
-  // once a started worktree serves, the frame opens it
+  // once a started worktree serves, the frame opens it, one started before a re-pick or a fold too
   useEffect(() => {
-    if (!waiting || !stoppedStack?.url) return
+    if (!stoppedStack?.url || !(waiting || stoppedStack.vibe)) return
     setWaiting(false)
     go(`${stoppedStack.url}/`)
-  }, [waiting, stoppedStack?.url])
+  }, [waiting, stoppedStack?.url, stoppedStack?.vibe])
   const page = address.startsWith(PREVIEW_PREFIX)
   // the stack the address is on, the longest URL it starts with
   const shown = page
@@ -166,6 +168,8 @@ export function PreviewPane() {
         .toSorted((a, b) => (b.url?.length ?? 0) - (a.url?.length ?? 0))[0]
   const picked = page ? address : stopped ? `${STOPPED}${stopped}` : (shown?.url ?? "")
   const stoppedName = stoppedStack?.branch ?? stoppedStack?.name ?? "This worktree"
+  // started, by this pane or before a re-pick or a fold, and not serving yet: the list's record, so Stop shows and Start never runs twice
+  const booting = Boolean(stoppedStack?.vibe)
 
   return (
     <div className="flex flex-col pb-3">
@@ -318,20 +322,35 @@ export function PreviewPane() {
           <div className="grid size-full place-items-center p-4 text-center text-xs">
             <div className="flex max-w-72 flex-col items-center gap-2">
               <p className="text-muted-foreground">
-                {waiting || start.isPending
+                {waiting || booting || start.isPending
                   ? `Starting ${stoppedName} on a copy of your data. Its log is .turbo/vibe-dev.log in the worktree.`
                   : `${stoppedName} is stopped. Start runs it as it stands, on a copy of your data.`}
               </p>
-              {!waiting && (
+              {booting && stopped ? (
                 <Button
                   size="sm"
                   variant="outline"
-                  disabled={start.isPending}
-                  onClick={() => start.mutate(stopped)}
+                  disabled={stop.isPending}
+                  onClick={() => {
+                    setWaiting(false)
+                    stop.mutate(stopped)
+                  }}
                 >
-                  <RiPlayLine />
-                  Start
+                  <RiStopCircleLine />
+                  Stop
                 </Button>
+              ) : (
+                !waiting && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={start.isPending}
+                    onClick={() => start.mutate(stopped)}
+                  >
+                    <RiPlayLine />
+                    Start
+                  </Button>
+                )
               )}
               {start.error && <p className="text-destructive select-text">{start.error.message}</p>}
             </div>

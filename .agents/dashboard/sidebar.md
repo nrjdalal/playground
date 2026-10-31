@@ -25,7 +25,8 @@
   The sidebar has no toggle button: the rail along its edge and Cmd+B (Ctrl+B) collapse and expand it.
   The rail takes the toggle as its own click (`SidebarToggleRail` in `web/next/src/components/shell/sidebar-toggle-rail.tsx`), since its tooltip's trigger replaces the click `SidebarRail` builds in, which once left the rail doing nothing.
   The docs' sidebar draws it too, a test fails on any other file that draws `SidebarRail`, and `bun run verify rail` clicks it on `/dashboard` and `/docs`.
-  The header's site name links to `/dashboard` and opens the Inbox tab with its Preview row open (`BrandLink` in `web/next/src/components/shell/brand-link.tsx`, the shell's `opensPreview`; asks.md).
+  The header's site name links to `/dashboard` and opens the Inbox tab with its Preview row open, on a phone too once the move to `/dashboard` resets its tab (`takeMove()`, judged by the address the click left, since `/dashboard?worker=<the dispatcher>` keeps the aside's session),
+  while a modified click only opens a new tab (`BrandLink` in `web/next/src/components/shell/brand-link.tsx`, `previewClick()` in `web/next/src/lib/previews.ts`, the shell's `opensPreview`; asks.md).
   The machine at a glance sits on the sidebar header's name row: GitHub at the row's right end, in the toggle's old place, through the shell's `mark` slot (`DashboardMark`, `GithubMark`),
   and the system icons (`headerIcons()`, `SystemIcons` and `DashboardStats` in the same file, through the shell's `stats` slot) between the name and GitHub, 4px apart.
   The icons keep that place only while the row shows no badge (Test data, or a Vibeground's) and is 238px or wider, the room for the name, all four readings with disk at orange and GitHub (measured), so the layout follows the row and never a reading (`SidebarShell`'s `:has` rule and container query);
@@ -206,15 +207,15 @@
   AI Runners holds the runner sessions alone.
   Scripts, after it, lists the ops jobs Ops runs as scripts with no Claude session, A to Z, collapsed until its label is clicked, so the jobs never read as a crowd of runners, a Failing or Down script still showing, in red,
   under the collapsed label (`scriptsShown` in `web/next/src/lib/ops.ts`; its open state lives in `DashboardProvider`, as Other's does).
-  On the collapsed rail the group is one icon (`scriptsRail`), red while any script it lists is failing or down, its tooltip the label's count and how many are not running; a click opens the sidebar on the scripts.
+  On the collapsed rail the group is one icon (`scriptsRail`), red while any script it lists is failing or down, its tooltip the label's count and how many are failing or down; a click opens the sidebar on the scripts.
   They are read by `GET /api/v1/ops` from the heartbeat each writes to `~/.playground/ops/<job>.json` (`api/hono/src/lib/dashboard/ops.ts`, zod-checked, read-only): every `ops-*.json` there is a job, so a new one (ops-report, ops-sweep) shows with no code change,
   while `report.json` and `alerts.log` beside them are not jobs, which is why they show in no runner row.
   Ops' `playground/ops/jobs.json` beside them lists every job, each with its `schedule` (`{"every": <seconds>}`, `{"cron": "<5 fields>"}` or `{"always": true}`): one it marks `disabled` is paused and left out of the sidebar (`shownOps`, since a listed job that cannot run reads as down), a row still, heartbeat or not,
   so the System page's Paused table holds it, and one it expects to run with no heartbeat file reads as Down; a Down job's mark is red, since a listed job should be running.
-  Each row has two lines: its plain name (`RUNNER_NAMES`, else its id without `ops-`, in words) truncates on its first line, and its second is `SecondLine`, its state `Script · <state>` never cut, red while it is not running:
+  Each row has two lines: its plain name (`RUNNER_NAMES`, else its id without `ops-`, in words) truncates on its first line, and its second is `SecondLine`, its state `Script · <state>` never cut, red while it is failing or down and muted while it is running or waiting:
   `Script · <state>`, then when it runs (`whenWords` in `web/next/src/lib/ops.ts`, from `scheduleWords` in `@packages/config/schedule`) and the model it calls when `jobs.json` marks it `callsModel` (its name, or AI when none is named; `Calls <model>` on hover and to screen readers), the tail cut first;
   the reason a job fails or is down is its hover and screen-reader text.
-  Its state is Running while its last result is ok and it beat within three cycles, Failing with its last result otherwise, Down with the reason when its file is malformed, its loop has exited, its process is gone or it has not beaten for three cycles;
+  Its state is Running while its last result is ok and it beat within three cycles, Waiting, muted, while its last result starts `waiting: ` (ops-usage with no Claude account yet), Failing with its last result otherwise, Down with the reason when its file is malformed, its loop has exited, its process is gone or it has not beaten for three cycles;
   its hover gives its name and job id, what it does (`OPS_DOES`), its state with the reason and its last beat, and, when its schedule's `every` differs from its heartbeat's `cycleSeconds`, both (`problem`).
   A script row opens nothing.
   Every group label ends with one number at its right, ZeroSDK's `countCell`, muted with tabular digits (`GroupCount`):

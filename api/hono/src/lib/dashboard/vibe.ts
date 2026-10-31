@@ -1,6 +1,10 @@
 import {
+  cpSync,
   existsSync,
+  lstatSync,
+  mkdirSync,
   openSync,
+  readdirSync,
   readFileSync,
   renameSync,
   rmSync,
@@ -23,25 +27,21 @@ import {
   type LiveDashboard,
   livePair,
 } from "@/lib/dev/live-dashboard"
+import { dataDir } from "@/lib/sessions/paths"
 
 // A Vibeground: a worktree's own stack started from the Preview pane on a copy of the live database, seeded by one pg_dump read of it, the copy's only touch of the live one; Stop ends the stack and removes the copy, keeping the worktree. Every command is a fixed argv built here from a listed worktree's path, never from a request's words.
 
 const LOG = ".turbo/vibe-dev.log"
 const SAVED_ENV = ".env.vibe-saved"
+// the stack's own data folder, a clone of the live one, so its settings and store edits stay in the copy
+const DATA = ".turbo/vibe-data"
+// the live data folder's parts a Vibeground never reads: the transcript archive, the ops binaries, database dumps and debug logs
+const DATA_LEFT = new Set(["archive", "bin", "debug", "dumps"])
 const MIGRATIONS = "packages/db/drizzle"
 const DUMP_TIMEOUT_MS = 5 * 60_000
 const READY_TRIES = 60
 // the environment a Vibeground's commands get from the API's own, so the live stack's settings (its database above all) never reach the copy, while the same user's HOME keeps its Keychain and tools
-const KEPT_ENV = [
-  "HOME",
-  "LANG",
-  "LOGNAME",
-  "PATH",
-  "PLAYGROUND_DATA_DIR",
-  "SHELL",
-  "TMPDIR",
-  "USER",
-]
+const KEPT_ENV = ["HOME", "LANG", "LOGNAME", "PATH", "SHELL", "TMPDIR", "USER"]
 
 export class VibeError extends Error {}
 
@@ -54,10 +54,12 @@ export type Pipe = (
 ) => Promise<{ bytes: number; error: string | null }>
 
 export type Deps = {
+  // clones the data folder from into the one named to, but its parts in DATA_LEFT
+  copyData: (from: string, to: string) => void
   // docker's own argv, its first word dropped
   docker: Run
-  // starts `bun run dev` in the worktree, in its own process group, logging to the file named
-  launch: (path: string, log: string) => void
+  // starts `bun run dev` in the worktree, in its own process group, logging to the file named, on the data folder named
+  launch: (path: string, log: string, data: string) => void
   live: () => LiveDashboard
   load5: () => number
   migrate: (url: string, folder: string) => Promise<void>
@@ -66,16 +68,16 @@ export type Deps = {
   readsLive: () => boolean
   secret: () => string
   stacks: () => Promise<Stack[]>
-  // `bun run dev:stop` in the worktree
-  stop: (path: string) => Promise<RunResult>
+  // `bun run dev:stop` in the worktree, on the data folder named
+  stop: (path: string, data: string) => Promise<RunResult>
   wait: (ms: number) => Promise<void>
 }
 
 export type Seeded = { bytes: number; ms: number }
 
-// Pure: the copy's container, the worktree's folder name made safe, so two worktrees never share one.
+// Pure: the copy's container, the worktree's folder name made safe and a hash of its whole path, so two worktrees, of one folder name in two repos included, never share one.
 export const copyName = (path: string): string =>
-  `playground-vibe-${basename(path).replace(/[^a-zA-Z0-9_.-]/g, "-")}-db`
+  `playground-vibe-${basename(path).replace(/[^a-zA-Z0-9_.-]/g, "-")}-${new Bun.CryptoHasher("sha256").update(path).digest("hex").slice(0, 8)}-db`
 
 // Pure: the one command that reads the live database: pg_dump inside its container over the local socket, so no password or URL is in it; claude_* tables keep their shape and leave their rows, the transcripts.
 export const dumpArgv = (live: string): string[] => [
@@ -154,6 +156,7 @@ export const startRefusal = (
 ): string | null => {
   if (!stack?.path) return "no worktree on this machine is at that path"
   if (stack.url) return `${stack.branch ?? stack.name} is already running`
+  if (stack.vibe) return `${stack.branch ?? stack.name} is already started; Stop it first`
   if (stack.branch === live.branch) return "that worktree is the live dashboard's own"
   if (!stack.branch) return "that worktree has no branch checked out"
   if (!linked(stack.path)) return "Start runs a linked worktree, never a checkout's own folder"
@@ -231,12 +234,30 @@ const migrate = async (url: string, folder: string) => {
   }
 }
 
-const launch = (path: string, log: string) => {
+// Folders, files and symlinks alone, since a socket (herdr's, in the live folder) cannot be copied and belongs to the process serving it.
+const copyable = (path: string): boolean => {
+  const kind = lstatSync(path)
+  return kind.isDirectory() || kind.isFile() || kind.isSymbolicLink()
+}
+
+export const copyData = (from: string, to: string) => {
+  mkdirSync(to, { recursive: true })
+  for (const part of readdirSync(from)) {
+    if (DATA_LEFT.has(part)) continue
+    cpSync(join(from, part), join(to, part), {
+      filter: copyable,
+      recursive: true,
+      verbatimSymlinks: true,
+    })
+  }
+}
+
+const launch = (path: string, log: string, data: string) => {
   const out = openSync(log, "a")
   const child = Bun.spawn([process.execPath, "run", "dev", "--ui", "stream"], {
     cwd: path,
     detached: true,
-    env: childEnv(process.env),
+    env: { ...childEnv(process.env), PLAYGROUND_DATA_DIR: data },
     stderr: out,
     stdin: "ignore",
     stdout: out,
@@ -244,10 +265,10 @@ const launch = (path: string, log: string) => {
   child.unref()
 }
 
-const stop = async (path: string): Promise<RunResult> => {
+const stop = async (path: string, data: string): Promise<RunResult> => {
   const child = Bun.spawn([process.execPath, "run", "dev:stop"], {
     cwd: path,
-    env: childEnv(process.env),
+    env: { ...childEnv(process.env), PLAYGROUND_DATA_DIR: data },
     stderr: "pipe",
     stdin: "ignore",
     stdout: "pipe",
@@ -261,6 +282,7 @@ const stop = async (path: string): Promise<RunResult> => {
 }
 
 export const DEPS: Deps = {
+  copyData,
   docker: run("docker"),
   launch,
   live: () => livePair(),
@@ -316,17 +338,29 @@ export async function startVibe(path: string, deps: Deps = DEPS): Promise<Seeded
       deps.live(),
       linked,
       existsSync,
-    ) ?? loadRefusal(deps.load5(), stacks.filter((s) => s.vibe && s.url).length)
+    ) ?? loadRefusal(deps.load5(), stacks.filter((s) => s.vibe).length)
   if (refused) throw new VibeError(refused)
-  const live = await liveContainer(deps)
+  // the record claims the worktree before anything awaits, so a second Start, a re-pick's while this one seeds included, is refused above and never removes this copy
+  const record = join(path, VIBE_RECORD)
+  if (existsSync(record)) throw new VibeError("that worktree is already started; Stop it first")
   const copy = copyName(path)
+  // this Start's own id: a Stop takes the record and a later Start writes its own, so after each await this one goes on, and cleans up, only while the record is still its own
+  const id = crypto.randomUUID()
+  writeRecord(path, { container: copy, env: false, id, started: new Date().toISOString() })
+  const owns = () => readVibe(path)?.id === id
+  const still = () => {
+    if (!owns()) throw new VibeError("it was stopped while it started")
+  }
   const password = deps.secret()
   const envFile = join(path, ".env")
   const saved = join(path, SAVED_ENV)
   const started = Date.now()
   let wrote = false
   try {
+    const live = await liveContainer(deps)
+    still()
     await deps.docker(["rm", "-fv", copy])
+    still()
     const ran = await deps.docker(
       [
         "run",
@@ -345,6 +379,7 @@ export async function startVibe(path: string, deps: Deps = DEPS): Promise<Seeded
     let ready = false
     for (let tries = 0; tries < READY_TRIES && !ready; tries++) {
       if (tries > 0) await deps.wait(1_000)
+      still()
       ready =
         (await deps.docker(["exec", copy, "pg_isready", "-h", "127.0.0.1", "-U", "postgres"]))
           .code === 0
@@ -352,10 +387,14 @@ export async function startVibe(path: string, deps: Deps = DEPS): Promise<Seeded
     if (!ready) throw new VibeError(`Postgres in ${copy} did not start in ${READY_TRIES} seconds`)
     const port = (await deps.docker(["port", copy, "5432"])).stdout.match(/127\.0\.0\.1:(\d+)/)?.[1]
     if (!port) throw new VibeError(`${copy} published no loopback port`)
+    still()
     const seeded = await deps.pipe(dumpArgv(live), restoreArgv(copy), DUMP_TIMEOUT_MS)
     if (seeded.error) throw new VibeError(`the copy could not be seeded: ${seeded.error}`)
     const url = `postgresql://postgres:${password}@127.0.0.1:${port}/postgres`
+    still()
     await deps.migrate(url, join(path, MIGRATIONS))
+    still()
+    deps.copyData(dataDir(), join(path, DATA))
     if (existsSync(envFile) && !existsSync(saved)) renameSync(envFile, saved)
     wrote = true
     writeFileSync(
@@ -363,19 +402,25 @@ export async function startVibe(path: string, deps: Deps = DEPS): Promise<Seeded
       vibeEnv(readFileSync(join(path, ".env.example"), "utf8"), url, deps.secret()),
       { mode: 0o600 },
     )
-    writeFileSync(
-      join(path, VIBE_RECORD),
-      `${JSON.stringify({ container: copy, started: new Date().toISOString() })}\n`,
-    )
-    deps.launch(path, join(path, LOG))
+    writeRecord(path, { container: copy, env: true, id, started: new Date().toISOString() })
+    deps.launch(path, join(path, LOG), join(path, DATA))
     return { bytes: seeded.bytes, ms: Date.now() - started }
   } catch (error) {
-    await deps.docker(["rm", "-fv", copy])
-    rmSync(join(path, VIBE_RECORD), { force: true })
-    if (wrote) restoreEnv(path)
+    // a Stop already took this Start's copy and record, and a later Start's are its own
+    if (owns()) {
+      await deps.docker(["rm", "-fv", copy])
+      rmSync(record, { force: true })
+      rmSync(join(path, DATA), { force: true, recursive: true })
+      if (wrote) restoreEnv(path)
+    }
     throw error instanceof VibeError ? error : new VibeError(String(error))
   }
 }
+
+// The record: the copy's container, whether Start has put its .env in place yet, so a Stop while it seeds leaves the worktree's own .env alone, and the id of the Start that wrote it.
+type VibeRecord = { container: string; env: boolean; id: string; started: string }
+const writeRecord = (path: string, record: VibeRecord) =>
+  writeFileSync(join(path, VIBE_RECORD), `${JSON.stringify(record)}\n`)
 
 // The worktree's own .env back as it was before Start, or none when it had none.
 const restoreEnv = (path: string) => {
@@ -384,12 +429,16 @@ const restoreEnv = (path: string) => {
   else rmSync(join(path, ".env"), { force: true })
 }
 
-const readVibe = (path: string): { container: string } | null => {
+const readVibe = (path: string): { container: string; env: boolean; id: unknown } | null => {
   try {
     const record = JSON.parse(readFileSync(join(path, VIBE_RECORD), "utf8")) as {
       container?: unknown
+      env?: unknown
+      id?: unknown
     }
-    return typeof record.container === "string" ? { container: record.container } : null
+    return typeof record.container === "string"
+      ? { container: record.container, env: record.env !== false, id: record.id }
+      : null
   } catch {
     return null
   }
@@ -402,7 +451,7 @@ export async function stopVibe(path: string, deps: Deps = DEPS): Promise<void> {
   if (!deps.readsLive()) return fixtureVibe(path, false)
   const record = readVibe(stack.path)
   if (!record) throw new VibeError(`${VIBE_RECORD} in that worktree does not name its copy`)
-  const stopped = await deps.stop(stack.path)
+  const stopped = await deps.stop(stack.path, join(stack.path, DATA))
   const said = `${stopped.stdout}\n${stopped.stderr}`
   if (stopped.code !== 0 && !/no stack is recorded/.test(said)) {
     throw new VibeError(
@@ -418,6 +467,7 @@ export async function stopVibe(path: string, deps: Deps = DEPS): Promise<void> {
   if (removed.code !== 0) {
     throw new VibeError(`docker rm -fv ${record.container}: ${removed.stderr.trim()}`)
   }
-  restoreEnv(stack.path)
+  if (record.env) restoreEnv(stack.path)
+  rmSync(join(stack.path, DATA), { force: true, recursive: true })
   rmSync(join(stack.path, VIBE_RECORD), { force: true })
 }

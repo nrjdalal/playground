@@ -17,7 +17,7 @@ Untick **Auto-hide tab bar** at the top of the user menu to keep it shown, with 
 Each item is a card of one of three kinds:
 
 - **Decision**: something a session will do only with your yes, such as a question only you can answer, a Slack message, a ship to main, a new Linear ticket, a delete, a database change or a spend.
-  The card shows exactly what happens when you approve it.
+  The card shows exactly what happens when you approve it, except a secret ask, which takes a value instead (see Give a secret).
 - **Draft**: a Slack message or a Linear comment, ready to send in your name.
   The card shows its words, and Open thread shows where it goes.
 - **Update**: an outcome you should know, such as a merge, a ship, an alert, a finding or a decision.
@@ -52,7 +52,7 @@ The icon beside the title is the item's state, drawn like an agent's status icon
 | Orange eye   | It waits on you.                                  |
 | Blue spinner | Your answer is being carried out.                 |
 | Green check  | It is done, with a green link to where it landed. |
-| Red error    | Your answer failed to send.                       |
+| Red error    | Your answer failed to send, or a secret failed.   |
 | Gray circle  | It was denied, discarded, archived or closed.     |
 | Dot          | An update you have not read.                      |
 
@@ -85,6 +85,16 @@ An HTML page that is the only file shows live in the card, with a button in its 
 A page runs only inside the view: its own keys work there, the arrows included, so a slide deck moves through its slides, Esc still closes the view, and a link in it opens in a new tab.
 An arrow the page does nothing with moves on to the next file.
 A markdown file reads like a chat message, code shows highlighted, and a PDF opens in the browser's own viewer.
+
+## Give a secret
+
+A session that needs a value only you hold, such as a client secret or an API key, asks for it as a **Secret** card.
+The card names the variable and where the value goes: a Vercel project and its environments.
+Paste the value into the masked box, then press **Submit** or Enter.
+
+The value goes straight to that project, once for each environment, and is kept nowhere: not in the Inbox, the chat, a log or the session.
+The card then shows only when you gave it and how each environment went, green when every one took it and red when one did not.
+A secret card has no comment box, no Archive and no Reply, so the value never lands in a chat.
 
 ## Send a draft
 
@@ -139,14 +149,14 @@ An answer still being carried out, or an update you read, moves to Done by itsel
 
 Under Done sits **Preview**, the last row, closed until you open it; clicking Playground at the top of the sidebar opens it too.
 Opened, it turns the rest of the pane into a small browser for active development.
-Its list shows every worktree of every project on this Mac, grouped by project, each by its branch and the session working in it.
+Its list shows every worktree of this app and of each project a running session works in, grouped by project, each by its branch and the session working in it.
 Pick a running one, or one of the 8 newest pages from Previews, or type an address.
-
 It loads only a `.localhost` address or a Previews page, and it remembers the last address you opened.
 Reload and Open in a new tab sit at the end of its address bar: a new tab opens the worktree's own app, where it works with its own sign-in.
 
 Pick a stopped one and click **Start** to run it as a Vibeground: its branch as it stands, on a copy of your data, so you see real data while its database changes stay in the copy.
-It opens here once it is up, a minute or so.
+The copy is taken when you click Start, so the Vibeground's sidebar shows your sessions as they were then.
+It opens here once it is up, a minute or so; until then it reads Starting, with a **Stop** of its own.
 **Stop**, in the bar while a Vibeground is open, stops it and drops its copy; the worktree stays.
 Under the bar, an open Vibeground wears a **Vibeground** badge with its branch, which its own tab wears too beside Playground and in its title.
 **Done** there asks Alpha, your chat, to have the session working in that worktree push the work to its branch's open PR, or open one into the branch it came from when none is open; it never merges.

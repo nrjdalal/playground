@@ -13,6 +13,7 @@ An `ask` decision renders its text as markdown, with its attachments under it: e
 - An update with no `text`, or a `ship` or `schema` decision, carries only its fields, which the card lays out itself: its title takes step 3, then steps 6 and 7.
 - A `delete` or `budget` decision's `why` is free text, shown as written: it takes steps 2 and 3 as plain lines, one fact each, then steps 6 and 7.
 - A draft, a `slack` decision or a `ticket` decision is the message or ticket itself, so it keeps that text's own shape and takes steps 3, 6 and 7.
+- A `secret` ask carries only its key and sink, which the card words itself: its title takes step 3, then step 7; the value itself is the owner's to type into the card, so it appears nowhere in the item.
 
 ## Steps
 

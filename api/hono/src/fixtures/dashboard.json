@@ -3728,7 +3728,7 @@
           "workspace": "workspace:12"
         },
         {
-          "branch": "LM-7-row-wrap",
+          "branch": "FIX-7-row-wrap",
           "eta": "2026-01-01T13:30:00.000Z",
           "kind": "worker",
           "lastReport": "Fixture report: rows wrap whole",
