@@ -24,7 +24,7 @@ describe("code-review-loop keeps its reviewer for the merge (#1067)", () => {
     const last = (await skill()).split("## The last 5/5")[1]?.split("\n## ")[0] ?? ""
     const stand = last.split("**CI stands in**")[1]?.split("\n")[0] ?? ""
     expect(stand).toContain("head sha equal to `<head>`")
-    expect(stand).toContain("`HEAD is now at <merge> Merge <head> into <run base>`")
+    expect(stand).toContain("`HEAD is now at <sha> Merge <head> into <run base>`")
     expect(stand).toContain("`git -C <clone> diff --name-only <run base> origin/canary`")
     expect(stand).toContain("a repo scanner or a data file one reads")
     expect(stand).toContain(
