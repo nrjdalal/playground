@@ -47,7 +47,7 @@ const readVersion = async (): Promise<string | null> => {
   return versionOf(await response.json())
 }
 
-// The attribute on an element whose typed words live in its fields alone (an Inbox card's reply, comment and draft), so a reload waits on them; the composer keeps its own draft, and the app fills a field such as the preview's Address itself.
+// The attribute on an element whose typed words live in its fields alone (an Inbox card's reply, comment and draft, a NeedsYouCard's answer), so a reload waits on them; a dialog's few words are left to retype; the composer keeps its own draft, and the app fills a field such as the preview's Address itself.
 export const HOLDS_RELOAD = "data-holds-reload"
 
 // Pure: whether a field the owner typed into still shows words a reload would lose (atRisk: inside HOLDS_RELOAD), focused or not; one emptied, or gone with its card, lets the reload go.
