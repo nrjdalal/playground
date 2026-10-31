@@ -35,3 +35,13 @@ test("names NODE_ENV under SKIP_ENV_VALIDATION alone, as the apps' own validatio
   expect(run.stderr.toString()).toContain("NODE_ENV")
   expect(run.exitCode).toBe(1)
 })
+
+test("accepts POSTGRES_URL left empty, as first run's setup serves with it empty", () => {
+  const run = envKeys({
+    BETTER_AUTH_SECRET: "a".repeat(64),
+    NODE_ENV: "development",
+    POSTGRES_URL: "",
+  })
+  expect(run.stderr.toString()).not.toContain("POSTGRES_URL")
+  expect(run.exitCode).toBe(0)
+})
