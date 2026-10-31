@@ -3,6 +3,8 @@ import { join } from "node:path"
 
 import { kindOf, placedKindOf } from "@packages/config/kinds"
 
+import { leadName } from "../ops-session-resume/resume"
+import { factoryRepoOf } from "../playground/setting"
 import { writeAtomic } from "../write-atomic"
 
 export type Run = (
@@ -10,11 +12,12 @@ export type Run = (
   options?: { cwd?: string; env?: Record<string, string | undefined>; timeoutMs?: number },
 ) => Promise<{ code: number; err: string; out: string }>
 
-// cfg is Claude Code's config folder, data the factory's folder in it, ops the ops jobs' state, dashboard the live dashboard's checkout, main the main checkout and repo the checkout this job runs from.
+// cfg is Claude Code's config folder, data the factory's folder in it, ops the ops jobs' state, dashboard the live dashboard's checkout, main the main checkout, repo the checkout this job runs from, and factory the factory's GitHub repository (factory.repo by default).
 export type Context = {
   cfg: string
   data: string
   dashboard: string
+  factory?: () => Promise<string>
   load: () => number
   main: string
   now: () => number
@@ -28,6 +31,7 @@ type Json = Record<string, unknown>
 export const HEADROOM = 85
 export const IDLE_DB_AFTER = 7200
 export const IDLE_DB_GAP = 900
+export const REVIEWER_LATE = 1200
 export const PRUNE_EVERY = 21600
 export const STALE_EVERY = 14_400
 
@@ -199,6 +203,96 @@ export async function chaseStale(ctx: Context, live: Map<string, string>): Promi
   return out
 }
 
+const pullOf = (pr: unknown, repo: string): number | undefined => {
+  const m =
+    /^#?(\d+)$/.exec(String(pr ?? "").trim()) ??
+    new RegExp(`github\\.com/${repo}/pull/(\\d+)$`, "i").exec(String(pr ?? ""))
+  return m ? Number(m[1]) : undefined
+}
+
+// A worker's PR whose head has been ready (its checks green) REVIEWER_LATE seconds with no review round (a ReviewBot verdict at any head) and no live session for the reviewer the roster names on it: one line to the worker's lead, once per head, since a reviewer started late or by hand left heads ready for over an hour.
+export async function lateReviewers(
+  ctx: Context,
+  agents: Json[],
+  live: Map<string, string>,
+): Promise<string[]> {
+  const open = agents.filter((a) => a.status !== "ended")
+  if (!open.some((a) => a.pr && kindOf(String(a.name), a.kind) === "worker")) return []
+  let repo: string
+  try {
+    repo = (await (ctx.factory ?? (() => factoryRepoOf()))()).toLowerCase()
+  } catch {
+    return ["reviewer-check-unreadable"]
+  }
+  const workers = new Map<number, string>()
+  for (const a of open) {
+    const n = pullOf(a.pr, repo)
+    if (n !== undefined && kindOf(String(a.name), a.kind) === "worker")
+      workers.set(n, String(a.name))
+  }
+  if (!workers.size) return []
+  const fields =
+    "state headRefOid comments(last: 100) { nodes { body } } commits(last: 1) { nodes { commit { statusCheckRollup { state contexts(first: 100) { nodes { ... on CheckRun { completedAt } ... on StatusContext { createdAt } } } } } } }"
+  const [owner, name] = repo.split("/")
+  const query = `{ repository(owner: "${owner}", name: "${name}") { ${[...workers.keys()].map((n) => `p${n}: pullRequest(number: ${n}) { ${fields} }`).join(" ")} } }`
+  const r = await ctx.run(["gh", "api", "graphql", "-f", `query=${query}`], { timeoutMs: 60_000 })
+  let pulls: Record<string, Json | null>
+  try {
+    pulls = JSON.parse(r.out).data.repository
+  } catch {
+    return ["reviewer-check-unreadable"]
+  }
+  const path = join(here(ctx), "reviewer-told.json")
+  const told = (await readJson<Record<string, string>>(path, {})) ?? {}
+  const keep: Record<string, string> = {}
+  const now = seconds(ctx)
+  for (const [n, worker] of workers) {
+    const pr = pulls?.[`p${n}`] as {
+      comments?: { nodes?: { body?: string }[] }
+      commits?: {
+        nodes?: {
+          commit?: {
+            statusCheckRollup?: {
+              contexts?: { nodes?: { completedAt?: string; createdAt?: string }[] }
+              state?: string
+            }
+          }
+        }[]
+      }
+      headRefOid?: string
+      state?: string
+    } | null
+    if (!pr || pr.state !== "OPEN" || !pr.headRefOid) continue
+    if (told[n] === pr.headRefOid) keep[n] = pr.headRefOid
+    const rollup = pr.commits?.nodes?.[0]?.commit?.statusCheckRollup
+    if (rollup?.state !== "SUCCESS") continue
+    const readyAt = Math.max(
+      0,
+      ...(rollup.contexts?.nodes ?? []).map(
+        (c) => Date.parse(c.completedAt ?? c.createdAt ?? "") / 1000 || 0,
+      ),
+    )
+    if (!readyAt || now - readyAt < REVIEWER_LATE) continue
+    if ((pr.comments?.nodes ?? []).some((c) => /^## ReviewBot · round /.test(c.body ?? "")))
+      continue
+    const reviewers = open.filter(
+      (a) => kindOf(String(a.name), a.kind) === "reviewer" && pullOf(a.pr, repo) === n,
+    )
+    if (reviewers.some((a) => live.has(String(a.name)))) continue
+    if (keep[n] === pr.headRefOid) continue
+    keep[n] = pr.headRefOid
+    const minutes = Math.floor((now - readyAt) / 60)
+    const named = reviewers.map((a) => String(a.name)).join(", ")
+    const text = `PR #${n} (${worker}): its head ${pr.headRefOid.slice(0, 7)} has been ready ${minutes}m with no review round and ${named ? `no live session for ${named}` : "no reviewer on the roster"}. Start its reviewer, or ask ${worker} to.`
+    await ctx.run(notifyArgv(ctx, text), {
+      env: { ...process.env, NOTIFY_TO: await leadName(ctx.ops, worker) },
+      timeoutMs: 60_000,
+    })
+  }
+  await writeAtomic(path, JSON.stringify(keep))
+  return []
+}
+
 // run-slot's runner-box route, which falls back to this Mac without a word: one finding naming each precondition run-slot.sh box-off reports failing (no-ci-sh, no-ssh-key, runner-host-off, slot-off).
 export async function boxRoute(ctx: Context): Promise<string[]> {
   const r = await ctx.run([join(ctx.ops, "run-slot.sh"), "box-off"], { timeoutMs: 60_000 })
@@ -257,7 +351,7 @@ export async function idleDbs(ctx: Context): Promise<string[]> {
   return out
 }
 
-// One read of runners, probes, the managers' asks, unclosed answers, the ops jobs, idle databases, the runner-box route and the usage forecast.
+// One read of runners, probes, the managers' asks, unclosed answers, the ops jobs, idle databases, the runner-box route, late reviewers and the usage forecast.
 export async function check(ctx: Context): Promise<string[]> {
   let roster: Json
   try {
@@ -314,6 +408,7 @@ export async function check(ctx: Context): Promise<string[]> {
   found.push(...(await opsDown(ctx)))
   found.push(...(await idleDbs(ctx)))
   found.push(...(await boxRoute(ctx)))
+  found.push(...(await lateReviewers(ctx, agents, live)))
   const projected = Object.values(await forecast(ctx))
   if (projected.length) found.push(projected.some((v) => v > HEADROOM) ? "no-headroom" : "headroom")
   return found

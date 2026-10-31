@@ -20,6 +20,7 @@ import {
   IDLE_DB_AFTER,
   IDLE_DB_GAP,
   idleDbs,
+  lateReviewers,
   maybePrune,
   opsDown,
   pass,
@@ -313,6 +314,83 @@ describe("boxRoute", () => {
     expect(await route({ out: "slot-off\n" })).toEqual(["box-route-off:slot-off"])
     expect(await route({ out: "" })).toEqual([])
     expect(await route({ code: 2 })).toEqual(["box-route-unreadable"])
+  })
+})
+
+describe("lateReviewers", () => {
+  const minutesAgo = (m: number) => new Date(NOW - m * 60_000).toISOString()
+  // one PR as GitHub's GraphQL answers it: open, its head's checks in the rollup state given, the last finishing `ready` minutes ago, and the comments given
+  const answer = (ready: number, comments: string[] = [], state = "SUCCESS") =>
+    JSON.stringify({
+      data: {
+        repository: {
+          p145: {
+            comments: { nodes: comments.map((body) => ({ body })) },
+            commits: {
+              nodes: [
+                {
+                  commit: {
+                    statusCheckRollup: {
+                      contexts: {
+                        nodes: [
+                          { completedAt: minutesAgo(ready + 5) },
+                          { completedAt: minutesAgo(ready) },
+                        ],
+                      },
+                      state,
+                    },
+                  },
+                },
+              ],
+            },
+            headRefOid: "b9861d6aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            state: "OPEN",
+          },
+        },
+      },
+    })
+  const late = async (reply: string, live: [string, string][] = [], reviewer = true) => {
+    const { ctx } = setup()
+    const told: Call[] = []
+    ctx.factory = async () => "acme/app"
+    ctx.run = async (argv, options = {}) => {
+      if (argv[1] === "/repo/scripts/ops/notify.sh") told.push({ argv, env: options.env })
+      return { code: 0, err: "", out: argv[0] === "gh" ? reply : "" }
+    }
+    const agents = [
+      { kind: "builder", name: "builder" },
+      { kind: "worker", name: "abcdef-worker", pr: "https://github.com/acme/app/pull/145" },
+      ...(reviewer ? [{ kind: "reviewer", name: "ghjkmn-reviewer", pr: "145" }] : []),
+    ]
+    roster(ctx, agents)
+    const found = await lateReviewers(ctx, agents, new Map(live))
+    const again = told.length
+    await lateReviewers(ctx, agents, new Map(live))
+    return { again, found, told }
+  }
+
+  test("tells the worker's lead once per head when a head ready 20 minutes has no round and no live reviewer (#129)", async () => {
+    const { again, found, told } = await late(answer(21))
+    expect(found).toEqual([])
+    expect(again).toBe(1)
+    expect(told).toHaveLength(1)
+    expect(told[0]!.env?.NOTIFY_TO).toBe("builder")
+    expect(told[0]!.argv[3]).toBe(
+      "PR #145 (abcdef-worker): its head b9861d6 has been ready 21m with no review round and no live session for ghjkmn-reviewer. Start its reviewer, or ask abcdef-worker to.",
+    )
+    const none = await late(answer(21), [], false)
+    expect(none.told[0]!.argv[3]).toContain("no reviewer on the roster")
+  })
+
+  test("stays quiet before 20 minutes, after a review round, with a live reviewer, or while the checks are not green (#129)", async () => {
+    expect((await late(answer(19))).told).toEqual([])
+    expect((await late(answer(30, ["## ReviewBot · round 1: 3/5 at 1234567"]))).told).toEqual([])
+    expect((await late(answer(30), [["ghjkmn-reviewer", "busy"]])).told).toEqual([])
+    expect((await late(answer(30, [], "PENDING"))).told).toEqual([])
+  })
+
+  test("a GraphQL answer it cannot read is reviewer-check-unreadable", async () => {
+    expect((await late("not json")).found).toEqual(["reviewer-check-unreadable"])
   })
 })
 
