@@ -23,7 +23,6 @@ import {
 } from "./gates"
 import { heldPath, readHeld } from "./held"
 import { lostLines } from "./lost"
-import { readsOf, stampAt, stampsAt, stampsIn } from "./stamp"
 
 export type RunResult = { code: number; stderr: string; stdout: string }
 
@@ -95,24 +94,7 @@ export async function readQueue(path: string): Promise<number[]> {
     .filter((n) => Number.isInteger(n) && n > 0)
 }
 
-// Every go, one JSON line each, beside the merge queue under the merge lock's folder.
-export const goLogPath = (): string => join(lockRootOf(), "ops", "gos.jsonl")
-
-// The PR and head each line of the go log names; none when the log is missing, a line that does not read skipped.
-export async function loggedHeads(path: string): Promise<{ pr: number; sha: string }[]> {
-  const file = Bun.file(path)
-  if (!(await file.exists())) return []
-  return (await file.text()).split("\n").flatMap((line) => {
-    try {
-      const { pr, sha } = JSON.parse(line) as { pr?: unknown; sha?: unknown }
-      return typeof pr === "number" && typeof sha === "string" ? [{ pr, sha }] : []
-    } catch {
-      return []
-    }
-  })
-}
-
-// canary now, and the tree of the head merged with it, which ops-checks names when it checked that merge: from this checkout's git, after fetching canary and the PR's head. A merge that conflicts has no tree (null), and names its files.
+// canary now, and the tree of the head merged with it: from this checkout's git, after fetching canary and the PR's head. A merge that conflicts has no tree (null), and names its files.
 async function mergeOf(
   git: Run,
   n: number,
@@ -195,7 +177,7 @@ async function filesOf(run: Run, repo: string, n: number): Promise<string[]> {
     .filter(Boolean)
 }
 
-// Everything the gates read about one PR, from gh: its state, head and base, the files its diff touches, every comment with its author, how far canary is ahead of its head, its merge with canary now, the stamp the walk back from its head reads, and the stamps on canary's tip.
+// Everything the gates read about one PR, from gh: its state, head and base, the files its diff touches, every comment with its author, how far canary is ahead of its head, and its merge with canary now.
 export async function factsOf(
   run: Run,
   repo: string,
@@ -230,21 +212,12 @@ export async function factsOf(
   const owner = repo.split("/")[0] ?? ""
   const { canary, conflicts, mergeTree } = await mergeOf(git, n, view.headRefOid)
   const lost = await lostLines(git, `origin/${BASE}`, view.headRefOid, mergeTree)
-  const stamp = await stampAt(view.headRefOid, comments, owner, readsOf(git)).catch(
-    (error: Error) => error.message,
-  )
-  // the net: canary's run stamps its tip in a commit comment; one that does not read fails the gate
-  const canaryStamps = await commitCommentsOf(run, repo, canary).then(
-    (said) => stampsAt(stampsIn(said, owner), canary),
-    (error: Error) => error.message,
-  )
   return {
     aheadBy: /^\d+$/.test(ahead) ? Number(ahead) : Number.NaN,
     author: view.author?.login ?? "",
     base: view.baseRefName,
     body: view.body,
     canary,
-    canaryStamps,
     checks: view.statusCheckRollup ?? [],
     comments,
     conflicts,
@@ -256,14 +229,9 @@ export async function factsOf(
     mergeTree,
     n,
     owner,
-    stamp,
     state: view.state,
   }
 }
-
-// Every comment on one commit, with its author: canary's run stamps canary's tip there.
-export const commitCommentsOf = (run: Run, repo: string, sha: string): Promise<Comment[]> =>
-  listComments(run, `repos/${repo}/commits/${sha}/comments`)
 
 // A GitHub server error, which a second try at the same head may get past.
 export const isServerError = (stderr: string): boolean =>

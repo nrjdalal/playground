@@ -14,31 +14,22 @@ at that head and the head is up to date with canary:
   held          ~/.playground/ops/report/held-prs.json does not list it (or
                 PLAYGROUND_HELD_PRS); a file that does not read holds every PR
   base          it merges into canary
-  up to date    canary has no commit the head lacks, or the head merges with canary clean,
-                which carries its stamp; a conflict needs canary merged in and the look
+  up to date    canary has no commit the head lacks, or the head merges with canary clean;
+                a conflict needs canary merged in, then checks and a 5/5 at the new head
   keeps canary  no merge of canary into the PR dropped a line canary added that git's own
                 merge keeps and the squash still lacks, in a file that merges clean (a
                 merge with -s ours drops them); blank lines, moves and rewrites pass, and
                 it names each file and merge
-  canary        canary's tip holds no red stamp (canary's own run after each batch, posted
-                as a commit comment on it); a red one stops every merge
-  ci            every GitHub check on the head finished and passed (none reported passes);
-                on factory.repo (the checkout's origin when unset) the head must carry a
+  ci            every GitHub check on the head finished and passed, "Audit, Lint, and
+                Build" and "test" among them; on factory.repo (the checkout's origin when unset) the head must carry a
                 GitGuardian check, since a head it never started on ran no secret scan
   body          the PR body is the PR template the Changelog reads
-  review        ## ReviewBot · round <n>: 5/5 at <sha7>, at the head or at a commit it
-                reaches past clean canary merges and the reviewer's looks
-  stamp         the stamp (bun run stamp --help): green, at the head or carried to it past
-                clean canary merges (git merges the two parents to the merge's own tree with
-                no conflict) and the reviewer's looks; a dashboard-code PR (web/next/,
-                api/hono/, packages/{auth,config,db,env}/) also needs a green stamp passing
-                verify (Checks), and a web/next/ PR one passing agent-drive (a tester); wait
-                waits for CI, and red or no stamp is not ready
+  review        ## ReviewBot · round <n>: 5/5 at <sha7>, at the head
 
-A gate reads only comments the repo's owner wrote; the newest stamp of a kind on a commit
-wins, so a red after a green refuses.
+A gate reads only comments the repo's owner wrote; the newest review at the head wins, so a
+lower score after a 5/5 refuses.
 
-A merge train (bun run pr:train --help) merges a batch of gated PRs in one run.
+Merge-on-ready (bun run pr:train ready) merges the first gated PR in queue order.
 
 It merges under the factory's merge lock (~/.playground/merge.lock, or
 PLAYGROUND_MERGE_LOCK_DIR): one merge into canary at a time, every gate read inside it, and

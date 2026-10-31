@@ -30,26 +30,7 @@ const whoOf = async (kind: string): Promise<string> => {
   return /^[a-z0-9-]+$/.test(name) ? name : LEADS[kind]!
 }
 
-// The open PRs, one REST read every 5 minutes (the factory's **github** rule), so a merged PR still in the ready line raises nothing; a failed read keeps the last answer, and none judges every entry.
-let open: Set<number> | undefined
-let openAt = 0
-const openPrs = (): Set<number> | undefined => {
-  if (Date.now() - openAt < 5 * 60_000) return open
-  openAt = Date.now()
-  const out = Bun.spawnSync([
-    "gh",
-    "api",
-    "repos/{owner}/{repo}/pulls?state=open&per_page=100",
-    "--paginate",
-    "--jq",
-    ".[].number",
-  ])
-  if (out.exitCode === 0)
-    open = new Set(out.stdout.toString().split("\n").filter(Boolean).map(Number))
-  return open
-}
-
-const once = async () => cycle({ data, open: openPrs(), procs: procs(), whoOf })
+const once = async () => cycle({ data, procs: procs(), whoOf })
 
 if (process.argv.includes("--once")) {
   const { alerted, result } = await once()

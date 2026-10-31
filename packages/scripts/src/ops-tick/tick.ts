@@ -125,8 +125,6 @@ const tick = async (ctx: Context) => {
     const report = lines((await python(ctx, "unstick/load-report.py", false)).out).slice(0, 4)
     await ctx.send("builder", `load5 ${load5}: ${report.map((l) => l.trim()).join(" ")}`, true)
   }
-  const wait = (await python(ctx, "merge-train/wait-check.py")).out.trim()
-  if (wait) await ctx.send("builder", wait)
   for (const line of lines((await python(ctx, "usage/near-limit.py")).out))
     await ctx.send(line.includes("ALERT") ? "builder" : "dispatcher", line)
   await switchWatch(ctx)
