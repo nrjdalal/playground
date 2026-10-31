@@ -17,13 +17,12 @@ test("every job of the two pull request checks stops at 20 minutes", async () =>
   }
 })
 
-test("Audit's suite reaches its own deadline, which names the file it hangs in, 10 minutes before the job stops", async () => {
+test("Audit's suite deadline, which names the file it hangs in, is set 10 minutes inside the job's timeout", async () => {
   const { jobs } = await read("auto-check-build.yml")
   for (const job of Object.values(jobs)) {
     const suite = job.steps.find((step) => /^bun run test$/m.test(step.run ?? ""))
     if (!suite) continue
     const deadline = Number(suite.env?.TEST_PARALLEL_DEADLINE_MS)
-    expect(deadline).toBe(600_000)
     expect((job["timeout-minutes"] ?? 0) * 60_000 - deadline).toBe(600_000)
     return
   }

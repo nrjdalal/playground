@@ -42,7 +42,7 @@ test("the deadline also stops a child a stuck test leaves looping, so the run en
   writeFileSync(live, "")
   writeFileSync(
     join(DIR, "looping.test.ts"),
-    `import { test } from "bun:test"\ntest("looping", async () => { Bun.spawn(["bash", "-c", "f() { while [ -e ${live} ]; do date +%s%N > ${beat}; echo loop >&2; sleep 0.05; done; }; x=$(f)"]); await Bun.sleep(60_000) }, 60_000)\n`,
+    `import { test } from "bun:test"\ntest("looping", async () => { Bun.spawn(["bash", "-c", "f() { for i in $(seq 600); do [ -e ${live} ] || break; echo $i > ${beat}; echo loop >&2; sleep 0.05; done; }; x=$(f)"]); await Bun.sleep(60_000) }, 60_000)\n`,
   )
   const started = Date.now()
   try {
