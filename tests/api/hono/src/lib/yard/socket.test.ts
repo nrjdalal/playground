@@ -51,7 +51,7 @@ describe.skipIf(!dockerUp())("Yard's socket across instances", () => {
       Bun.spawnSync(["docker", "rm", "-fv", container], { stderr: "ignore", stdout: "ignore" })
   })
 
-  // round 7 of the review: a quiet instance subscribed only on its own first publish, so its sockets missed every post from another instance
+  // a quiet instance once subscribed only on its own first publish, so its sockets missed every post from another instance
   test("a socket on an instance that has never posted gets a post from another", async () => {
     const listener = Bun.spawn(
       [

@@ -38,7 +38,7 @@ To add a field end to end: edit and migrate the schema, then select and return i
 
 ## Entry points (read these first)
 
-- `api/hono/src/local.ts`, the `.route()` chain and `export type AppType`, the whole local API shape in one file; `index.ts` serves it, or `hosted.ts` (sign-in, health and Yard) under `PLAYGROUND_HOSTED=1`.
+- `api/hono/src/local.ts`, the `.route()` chain and `export type AppType`, the whole local API shape in one file; `index.ts` serves it, or `hosted.ts` (sign-in, health and Yard, typed by `HostedAppType`) under `PLAYGROUND_HOSTED=1`.
 - `web/next/src/app/layout.tsx`, the web root.
 - `packages/config/src/site.ts`, brand identity and injectable content.
 

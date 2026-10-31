@@ -201,7 +201,7 @@ describe("the hosted entry's import graph", () => {
   })
 })
 
-// round 7 of the review: index.ts gave the local dashboard's RPC type alone, so a client of the hosted API reached Yard's routes untyped; check-types fails here when the route leaves the type
+// index.ts once gave the local dashboard's RPC type alone, so a client of the hosted API reached Yard's routes untyped; check-types fails here when the route leaves the type
 test("the hosted RPC type names Yard's routes", () => {
   const client = hc<HostedAppType>("http://127.0.0.1")
   expect(typeof client.api.v1.yard.channels.$get).toBe("function")
