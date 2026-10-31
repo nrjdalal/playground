@@ -1,3 +1,3 @@
-Every time you write (roster, inbox item, report) comes from `date -u +%FT%TZ` and stays UTC; a time shown to the owner reads in {clock.ownerZone}, am/pm.
-A time read from the clock at the moment of writing never drifts, and one zone in storage keeps every comparison sound.
-Done when every stored or machine-sent time you wrote is UTC from `date -u`, and every time you showed the owner reads in that zone.
+Every time you write (roster, inbox item, report) comes from `date -u +%FT%TZ` and stays UTC; a time shown to the owner reads in {clock.ownerZone}, am/pm; in `bun run ask` text write `{now}`, which ask fills with the time it posts at.
+A time read from the clock at the moment of writing never drifts, and one zone in storage keeps every comparison sound; ask and plan.json's reader refuse a measured or now time ahead of the clock, since a typed one ran ahead.
+Done when every stored or machine-sent time you wrote is UTC from `date -u`, every time you showed the owner reads in that zone, and every now-time in `bun run ask` text is `{now}`.

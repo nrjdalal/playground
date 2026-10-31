@@ -587,6 +587,31 @@ describe.skipIf(!dockerUp())("the bun run ask CLI", () => {
     rmSync(dir, { force: true, recursive: true })
   })
 
+  test("new and edit fill {now} with the time they post at, and refuse a measured or now time ahead of the clock, passing an ETA", async () => {
+    const update = (text: string) => ({
+      from: "worker-envy",
+      preview: { text, type: "ask" },
+      title: "Clock",
+    })
+    const clock = /\d{1,2}:\d{2} (?:am|pm) \S+/
+    const { id } = await post(update("measured {now}"))
+    expect(JSON.parse((await cli(["get", id])).stdout).preview.text).toMatch(
+      new RegExp(`^measured ${clock.source}$`),
+    )
+    expect((await cli(["edit", id], JSON.stringify(update("now {now}")))).code).toBe(0)
+    expect(JSON.parse((await cli(["get", id])).stdout).preview.text).toMatch(
+      new RegExp(`^now ${clock.source}$`),
+    )
+    const ahead = new Date(Date.now() + 30 * 60 * 1000).toISOString()
+    for (const args of [["new"], ["edit", id]]) {
+      const refused = await cli(args, JSON.stringify(update(`measured ${ahead}`)))
+      expect(refused.code).toBe(1)
+      expect(refused.stderr).toContain("ahead of the clock")
+      expect(refused.stderr).toContain("{now}")
+    }
+    expect((await cli(["new"], JSON.stringify(update(`ETA ${ahead}`)))).code).toBe(0)
+  })
+
   test("new --thread files the item under that thread, and refuses a thread that does not exist", async () => {
     const admin = new SQL(url, { max: 1 })
     await admin`insert into thread (id, title) values ('t4sk', 'Ship the threads store')`

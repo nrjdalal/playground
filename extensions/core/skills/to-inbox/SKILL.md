@@ -49,7 +49,7 @@ An `ask` decision renders its text as markdown, with its attachments under it: e
    - It says one thing.
    - Its verb is active: "I merge the PR", never "the PR is merged".
    - It speaks in the first person singular, "I", never "we" or the session's name: the poster's "I" in an ask, the owner's in a draft or a `slack` decision, which goes out in his voice (asks.md).
-   - Each word keeps one meaning across the item, and a time reads in IST, am/pm ("9:30 pm IST").
+   - Each word keeps one meaning across the item, and a time reads in IST, am/pm ("9:30 pm IST"); a now-time is `{now}`, which `bun run ask` fills with the time it posts at.
 
 5. **Callout.** When one fact must not be missed, put it in one GitHub callout after the bullets. Done when the item holds one callout or none.
 
