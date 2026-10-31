@@ -49,4 +49,13 @@ describe("SESSIONS.md", () => {
     expect(line).toContain("each edit after it as a commit of its own")
     expect(line).toContain("an edit inside a merge as blocking")
   })
+
+  test("has a worker's brief put the lifecycle table in a long-lived connection's Evidence before round 1", async () => {
+    const text = await Bun.file(SESSIONS).text()
+    const line = text.split("\n").find((l) => l.includes("lifecycle table")) ?? ""
+    expect(line).toContain(
+      "a long-lived connection (a socket, a pub/sub subscriber, a retrying client)",
+    )
+    expect(line).toContain("in its Evidence before round 1")
+  })
 })

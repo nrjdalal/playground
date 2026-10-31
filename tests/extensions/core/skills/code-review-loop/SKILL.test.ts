@@ -204,3 +204,16 @@ describe("a diff holding a long-lived connection is reviewed by a lifecycle tabl
     )
   })
 })
+
+describe("code-review-loop runs its newest text every round (PG-213)", () => {
+  test("step 1 opens by loading the skill again, and its Done when checks it", async () => {
+    const recover = (await skill()).match(/^1\. \*\*Recover\.\*\*.*$/m)?.[0] ?? ""
+    expect(recover).toStartWith(
+      "1. **Recover.** Call the Skill tool with `code-review-loop` again, so the round runs this skill's newest text.",
+    )
+    expect(recover.split("**Done when**")[1] ?? "").toContain(
+      "loaded code-review-loop again this round",
+    )
+    expect(await page()).toContain("loads the skill again at the start of every round")
+  })
+})
