@@ -294,10 +294,16 @@ await Bun.write(join(wt, "README"), "r\n")
 git(wt, "add", "README")
 git(wt, "commit", "-qm", "c2")
 const c2 = git(wt, "rev-parse", "HEAD")
+// c3 adds a migration, so a roll to it keeps today's build after the stop
+await Bun.write(join(wt, "packages", "db", "drizzle", "0001_x.sql"), "create table x (id int);\n")
+git(wt, "add", "packages")
+git(wt, "commit", "-qm", "c3")
+const c3 = git(wt, "rev-parse", "HEAD")
 
 // roll_up passes START and FALLBACK and fails every roll, so finish_roll falls back; result records each line results.log would get
 const stubs = `S=${state} WT=${wt} OPS=${scratch}/ops BAD=${state}/bad-builds LOG=${state}/supervisor.log DEVLOG=${state}/dev.log
 say() { :; }; result() { echo "result $*" >> ${calls}; }; stop_all() { :; }; tell_dispatcher() { echo "tell $1" >> ${calls}; }
+prebuild() { :; }
 roll_up() { echo "roll_up $1" >> ${calls}; [ "$1" = START ] || [ "$1" = FALLBACK ]; }
 UPSTREAM=canary
 ${fn("upstream_head")}
@@ -993,6 +999,84 @@ describe("the supervisor's production build", () => {
       "passed",
     ])
     expect(await Bun.file(join(builds, "passed")).text()).toBe("c\n")
+  })
+})
+
+// A roll builds its target before it stops anything: prebuild builds the target from a detached staging worktree into $S/builds/<sha> while the old stack serves, and roll_up then finds that build kept
+const prebuilt = `${keptStubs}
+stop_all() { echo stop >> ${keptCalls}; }
+${block("pull_to")}
+${block("prebuild")}
+${block("roll_to")}
+`
+const prebuiltRun = async (body: string, at: string) => {
+  git(wt, "reset", "-q", "--hard", at)
+  git(wt, "worktree", "prune")
+  const proc = Bun.spawn(["bash", "-c", `D=${dashboardDir}\n${prebuilt}\n${body}`], {
+    cwd: wt,
+    stdout: "pipe",
+  })
+  const code = await proc.exited
+  return { code, out: (await new Response(proc.stdout).text()).trim() }
+}
+const worktrees = () => git(wt, "worktree", "list").split("\n").length
+
+describe("the supervisor's build before the stop (#122)", () => {
+  test("a roll builds its target from a staging worktree before it stops anything, then serves that build without building again", async () => {
+    fresh()
+    const rolled = await prebuiltRun(`running=${c1}; roll_to ${c2} canary; echo "$running"`, c1)
+    expect(rolled).toEqual({ code: 0, out: c2 })
+    expect(await keptLines(/^(build|stop|serve)/)).toEqual([
+      `build ${short(c2)}`,
+      "stop",
+      `serve ${c2}`,
+    ])
+    expect(await keptLines(/^result /)).toEqual([
+      `result ROLL canary ${short(c2)} PASS verify=PASS follower=running`,
+    ])
+    expect(existsSync(join(kept, "staging"))).toBe(false)
+    expect(worktrees()).toBe(1)
+  })
+
+  test("a failed build lists the target in bad-builds and stops nothing, the staging worktree removed", async () => {
+    fresh()
+    await Bun.write(join(kept, "build-fails"), `${c2}\n`)
+    const rolled = await prebuiltRun(`running=${c1}; roll_to ${c2} canary; echo "$running"`, c1)
+    expect(rolled).toEqual({ code: 0, out: c1 })
+    expect(git(wt, "rev-parse", "HEAD")).toBe(c1)
+    expect(await keptLines(/^(build|stop|serve)/)).toEqual([`build ${short(c2)}`])
+    expect(await keptLines(/^result /)).toEqual([
+      `result ROLL canary ${short(c2)} FAIL build before the stop: Error: next build failed; still serving ${short(c1)}`,
+    ])
+    expect(await Bun.file(join(kept, "bad-builds")).text()).toBe(`${c2}\n`)
+    expect(existsSync(join(kept, "staging"))).toBe(false)
+    expect(worktrees()).toBe(1)
+  })
+
+  test("a target that migrates skips the build before the stop and builds after it, as before", async () => {
+    fresh()
+    const rolled = await prebuiltRun(`running=${c2}; roll_to ${c3} canary; echo "$running"`, c2)
+    expect(rolled).toEqual({ code: 0, out: c3 })
+    expect(await keptLines(/^(build|stop|serve)/)).toEqual([
+      "stop",
+      `build ${short(c3)}`,
+      `serve ${c3}`,
+    ])
+    expect(worktrees()).toBe(1)
+  })
+
+  test("a roll that reloads the supervisor finishes on the build made before the stop", async () => {
+    fresh()
+    clean()
+    expect((await prebuiltRun(`running=${c0}; roll_to ${c1} canary`, c0)).code).toBe(75)
+    expect(await keptLines(/^(build|stop)/)).toEqual([`build ${short(c1)}`, "stop"])
+    expect((await keptRun(`finish_roll "ROLL canary" ${c1} ${c0} ""`, c1)).code).toBe(0)
+    expect(await keptLines(/^(build|stop|serve)/)).toEqual([
+      `build ${short(c1)}`,
+      "stop",
+      `serve ${c1}`,
+    ])
+    clean()
   })
 })
 

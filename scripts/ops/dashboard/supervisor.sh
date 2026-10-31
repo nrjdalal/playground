@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # The live dashboard's supervisor: one background task of runner-pride's cmux session that keeps the dashboard stack and
 # the session follower running as its own children (so both stay descendants of a cmux terminal), and rolls them
-# to every new head of the branch upstream.sh names end to end: stop both by their recorded process groups, reset to it, install, build or
-# migrate when the merge needs it, build it (build_head, kept per head in $S/builds) and serve the build, check it, start the follower, check it. Each roll, outage or anomaly
+# to every new head of the branch upstream.sh names end to end: build it while the old stack serves (prebuild, from a staging worktree, unless it migrates), stop both by their recorded process groups, reset to it, install, build or
+# migrate when the merge needs it, take its build (build_head, kept per head in $S/builds) and serve it, check it, start the follower, check it. Each roll, outage or anomaly
 # appends one line to results.log (a refused roll a second, naming its refusal), which wakes the runner to report it. It signals only processes it started.
 # It runs the latest head of the branch its main checkout sits on (upstream.sh: main for an install, canary for a checkout kept on canary), never one-off hashes or branches
 # or worktrees. A head that fails its roll is remembered in bad-builds and never rolled again (one dev refused to start for its own settings, on its third refusal), and the dashboard falls back to the head it ran
@@ -37,9 +37,10 @@ say() { echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) $*" >> "$LOG"; }
 result() { echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) $*" >> "$RESULTS"; say "RESULT $*"; }
 
 # The head's production build, kept in $S/builds/<sha> outside the checkout: made by bun run build when it is missing, or when it was built for other URLs, since next bakes NEXT_PUBLIC_APP_URL and NEXT_PUBLIC_API_URL into its client and auth bakes HONO_APP_URL's host; NODE_ENV and SKIP_ENV_VALIDATION_SERVER let it build before first run writes its .env, whose values the stack reads at its start; a failure prints its last error line
+# $1 is the tree it builds, the checkout by default, or prebuild's staging worktree
 build_head() {
-  local sha dir was started out
-  sha=$(git rev-parse HEAD); dir=$S/builds/$sha
+  local src=${1:-.} sha dir was started out
+  sha=$(git -C "$src" rev-parse HEAD); dir=$S/builds/$sha
   dashboard_urls || { echo "bunx portless get failed"; return 1; }
   if [ -d "$dir" ]; then
     was=$(cat "$dir/urls" 2>/dev/null)
@@ -47,17 +48,39 @@ build_head() {
     say "rebuilding ${sha:0:7}: its build was for ${was:-no URLs}, the Dashboard is now on $WEB $API"
   fi
   say "building ${sha:0:7} for $WEB $API"; started=$(date +%s)
-  if ! out=$(HONO_APP_URL=$API HONO_TRUSTED_ORIGINS=$WEB NEXT_PUBLIC_API_URL=$API NEXT_PUBLIC_APP_URL=$WEB NODE_ENV=production SKIP_ENV_VALIDATION_SERVER=true bun run build 2>&1); then
+  if ! out=$(cd "$src" && HONO_APP_URL=$API HONO_TRUSTED_ORIGINS=$WEB NEXT_PUBLIC_API_URL=$API NEXT_PUBLIC_APP_URL=$WEB NODE_ENV=production SKIP_ENV_VALIDATION_SERVER=true bun run build 2>&1); then
     echo "$out" >> "$LOG"
     echo "$out" | grep -E 'error|Error|ERR' | tail -1 | cut -c1-200; return 1
   fi
   rm -rf "$dir.tmp"; mkdir -p "$dir.tmp"
   # next's standalone server leaves .next/static and public for its host to copy beside it
-  cp -R web/next/.next/standalone "$dir.tmp/web" && mkdir -p "$dir.tmp/web/web/next/.next" && cp -R web/next/.next/static "$dir.tmp/web/web/next/.next/static" &&
-    { [ ! -d web/next/public ] || cp -R web/next/public "$dir.tmp/web/web/next/public"; } &&
+  cp -R "$src/web/next/.next/standalone" "$dir.tmp/web" && mkdir -p "$dir.tmp/web/web/next/.next" && cp -R "$src/web/next/.next/static" "$dir.tmp/web/web/next/.next/static" &&
+    { [ ! -d "$src/web/next/public" ] || cp -R "$src/web/next/public" "$dir.tmp/web/web/next/public"; } &&
     echo "$WEB $API" > "$dir.tmp/urls" || { echo "copying the build to $dir failed"; return 1; }
   rm -rf "$dir"; mv "$dir.tmp" "$dir"
   say "built ${sha:0:7} in $(( $(date +%s) - started ))s, $(du -sh "$dir" | cut -f1)"
+}
+# Before a roll stops anything: build the target ($1, the roll tagged $2) into $S/builds/<sha> from a detached staging worktree while the old stack serves, so build_head finds it kept after the stop
+# A target that migrates, or whose commit cannot be had here, builds after the stop as before; a build that fails lists the target in bad-builds and returns 1 with nothing stopped; the staging worktree goes either way
+prebuild() {
+  local target=$1 tag=$2 stage=$S/staging built rc=0
+  "$D/net-git.sh" fetch -q origin >> "$LOG" 2>&1
+  git cat-file -e "$target^{commit}" 2>/dev/null || { say "no commit ${target:0:7} here yet; building after the stop"; return 0; }
+  git diff --quiet HEAD "$target" -- packages/db/drizzle/ || { say "${target:0:7} migrates; building after the stop"; return 0; }
+  rm -rf "$stage"; git worktree prune
+  git worktree add -q --detach "$stage" "$target" >> "$LOG" 2>&1 || { say "the staging worktree for ${target:0:7} failed; building after the stop"; rm -rf "$stage"; return 0; }
+  # node_modules as an APFS clone of the checkout's, then an install for what the move changed and each workspace's own links; .env as the checkout's, which bun run build loads
+  { [ ! -d node_modules ] || cp -cR node_modules "$stage/"; } >> "$LOG" 2>&1
+  [ ! -f .env ] || cp .env "$stage/.env"
+  (cd "$stage" && bun install --frozen-lockfile --ignore-scripts) >> "$LOG" 2>&1
+  say "building ${target:0:7} before the stop, from $stage"
+  built=$(build_head "$stage") || rc=1
+  git worktree remove --force "$stage" >> "$LOG" 2>&1 || rm -rf "$stage"; git worktree prune
+  [ $rc -eq 0 ] && return 0
+  echo "$target" >> "$BAD"
+  result "$tag ${target:0:7} FAIL build before the stop: $built; still serving $(git rev-parse --short HEAD)"
+  tell_dispatcher "Dashboard roll to ${target:0:7} FAILED its build; nothing stopped, still on $(git rev-parse --short HEAD)"
+  return 1
 }
 # After a pass: keep this head's build and the last one that passed before it, for the next fallback, and remove the rest
 keep_builds() {
@@ -200,6 +223,7 @@ pull_to() {
 # Stop, move the checkout to $1, start, check; falls back to the head it ran before when the roll fails (never after a migration).
 roll_to() {
   local target=$1 why=$2 prev out notes mig tag pulled
+  prebuild "$target" "ROLL $why" || return 0
   stop_all
   if [ -n "$("$D/procs.sh" left dashboard-dev)$("$D/procs.sh" left dashboard-ingest)" ]; then result "ANOMALY stop left processes alive; not rolling"; return 1; fi
   prev=$running
