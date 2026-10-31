@@ -497,7 +497,7 @@ const dashboardRoutes = new Hono<{ Variables: Session }>()
     describeRoute({
       tags: ["Dashboard"],
       description:
-        "The ops jobs that run as scripts with no Claude session, A to Z: one for each `ops/ops-*.json` heartbeat in the data folder (`report.json` and `alerts.log` beside them are not jobs), so a new job shows with no code change: what each does (null for a job the API does not describe), its status (`running`; `failing` with its last result; `down` when its file is malformed, its loop has exited, its process is gone or it has not beaten for three cycles, with the reason), its last beat, and `paused`: true for a job `ops/jobs.json` marks disabled, which the sidebar leaves out and the System page lists as Paused. A job jobs.json expects to run with no heartbeat file is `down`. Beside those, `callsModel` and `model`, the marks jobs.json gives each job: the sidebar shows a model label, or AI, on a job marked callsModel. Read-only.",
+        "The ops jobs that run as scripts with no Claude session, A to Z: one for each `ops/ops-*.json` heartbeat in the data folder (`report.json` and `alerts.log` beside them are not jobs), so a new job shows with no code change: what each does (null for a job the API does not describe), its status (`running`; `waiting` with the reason after `waiting: ` in its last result, when it has nothing to read yet; `failing` with its last result; `down` when its file is malformed, its loop has exited, its process is gone or it has not beaten for three cycles, with the reason), its last beat, and `paused`: true for a job `ops/jobs.json` marks disabled, which the sidebar leaves out and the System page lists as Paused. A job jobs.json expects to run with no heartbeat file is `down`. Beside those, `callsModel` and `model`, the marks jobs.json gives each job: the sidebar shows a model label, or AI, on a job marked callsModel. Read-only.",
       responses: { 200: { description: "OK" }, ...authErrorResponses },
     }),
     async (c) => c.json({ data: await readOps() }),
@@ -507,10 +507,10 @@ const dashboardRoutes = new Hono<{ Variables: Session }>()
     describeRoute({
       tags: ["Dashboard"],
       description:
-        "The web stacks portless serves on this machine, A to Z, each its name (its host's first label) and its https URL, for the Inbox's Preview row: API hosts and aliases left out, and none on a fixture stack. Read-only.",
+        "Every worktree of every project this machine works in (this checkout's and each live session's folder's, read from git's own files), by project, then branch, A to Z, for the Inbox's Preview row: each its branch (null when detached), its name (its host's first label while it runs, else its folder's), its path, its project (the origin's repository name), the session working in it (null when none), and its stack's https URL while `bun run dev` serves it, from the portless route whose process group its stack's record names, else null; then each web stack portless serves that no worktree claims, under its app's name, with no path, branch or session. API hosts and aliases are left out, and a fixture stack lists the fixture's made-up worktrees. Read-only.",
       responses: { 200: { description: "OK" }, ...authErrorResponses },
     }),
-    (c) => c.json({ data: readStacks() }),
+    async (c) => c.json({ data: await readStacks() }),
   )
   .get(
     "/system",

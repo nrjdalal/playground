@@ -22,13 +22,15 @@ import { keepAttachments } from "@/lib/dashboard/inbox-attachments"
 import { livePair, othersLiveDashboard } from "@/lib/dev/launch"
 import { checkoutMismatch, locate, prove } from "@/lib/sessions/guard"
 
-// The one way into Playground's Inbox: `bun run ask new < item.json` posts a decision, a draft or an update and prints its id (its #iN tag on stderr); `edit <id|#iN> < item.json` replaces the poster's own open item's title and preview in place, checked as new checks it; `get <id|#iN>` prints the item, the owner's answer included once given, and `--ack` marks that answer read, so the Dashboard shows it reached the poster, closing a deny, a clear or a discard; `ack <id>` closes it once carried out, a go with `--link` (where it landed) or `--no-link "<why>"`; `settle <id>` closes the poster's own open item once it is decided another way; `resolve <id> --by <you>` closes the poster's own alert update once it has resolved itself; `stale` lists the answers no poster has closed, for ops-sweep; `example <kind>` prints an ask to start from, and `new` hints at that shape when an ask is one block of prose or holds a code line too wide for the card. See `.agents/dashboard/asks.md` for the fields.
+// The one way into Playground's Inbox: `bun run ask new < item.json` posts a decision, a draft or an update and prints its id (its #iN tag on stderr); `edit <id|#iN> < item.json` replaces the poster's own open item's title and preview in place, checked as new checks it; `get <id|#iN>` prints the item, the owner's answer included once given, and `--ack` marks that answer read, so the Dashboard shows it reached the poster, closing a deny, a clear, a discard or a provided secret; `ack <id>` closes it once carried out, a go with `--link` (where it landed) or `--no-link "<why>"`; `settle <id>` closes the poster's own open item once it is decided another way; `resolve <id> --by <you>` closes the poster's own alert update once it has resolved itself; `stale` lists the answers no poster has closed, for ops-sweep; `example <kind>` prints an ask to start from, and `new` hints at that shape when an ask is one block of prose or holds a code line too wide for the card. See `.agents/dashboard/asks.md` for the fields.
 const USAGE = `usage: bun run ask new [--thread <id>] < item.json
                                                 posts an inbox item from JSON on stdin, prints its id
                                                 options and approve/deny labels go in plain words (ELI5, ASD-STE100)
                                                 an ask's attachments name files on this Mac by absolute path
                                                 an update with text and attachments is a read-only card: it shows
                                                 them as an ask does, with no Approve or Deny
+                                                a secret ask names a key and a sink (Vercel alone); the owner's
+                                                value goes to the sink, and get shows only when and each exit status
                                                 --thread files it under that thread (bun run thread)
        bun run ask edit <id|#iN> < item.json
                                                 replaces your own open item's title, preview and attachments
@@ -40,7 +42,7 @@ const USAGE = `usage: bun run ask new [--thread <id>] < item.json
                                                 then what Approve does (.agents/dashboard/asks.md, The ask's shape),
                                                 or a Slack message led by its thread so far
        bun run ask get <id|#iN> [--ack]    prints the item, answer included; --ack marks an answer read
-                                                (and closes a deny, a clear or a discard, which reading carries out)
+                                                (and closes a deny, a clear, a discard or a provided secret, which reading carries out)
        bun run ask ack <id|#iN> [--link <https url> [--label "Filed ABC-123"] | --no-link "<why>"]
                                                 closes the answer once carried out; a go (approve, draft, edit, send)
                                                 needs --link, where it landed (the Slack message, PR, issue or

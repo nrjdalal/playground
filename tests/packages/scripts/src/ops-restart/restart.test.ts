@@ -186,6 +186,29 @@ describe("restart", () => {
     ])
   })
 
+  test("an entry that starts with a shebang is still scanned for its imports", async () => {
+    const w = world(["packages/scripts/src/write-atomic.ts"])
+    put(
+      w.co,
+      "packages/scripts/src/ops-sweep/cli.ts",
+      '#!/usr/bin/env bun\nimport { writeAtomic } from "../write-atomic"\nwriteAtomic()\n',
+    )
+    await w.pass()
+    expect(w.kills()).toEqual(["kill -TERM 101"])
+  })
+
+  test("a job whose source imports a shebang file lists that file's own imports", async () => {
+    const w = world(["packages/scripts/src/beat.ts"])
+    put(
+      w.co,
+      "packages/scripts/src/write-atomic.ts",
+      '#!/usr/bin/env bun\nimport { beat } from "./beat"\nexport const writeAtomic = () => beat()\n',
+    )
+    put(w.co, "packages/scripts/src/beat.ts", "export const beat = () => {}\n")
+    await w.pass()
+    expect(w.kills()).toEqual(["kill -TERM 101"])
+  })
+
   test("a move changing nothing a job runs restarts none", async () => {
     const w = world([
       "README.md",
