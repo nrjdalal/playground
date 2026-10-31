@@ -56,6 +56,7 @@ const fake = (
   now: Date,
   outputs: Record<string, string> = {},
   fails: string[] = [],
+  exits: Record<string, number> = {},
 ) => {
   const runs: string[][] = []
   const inputs: string[] = []
@@ -68,7 +69,8 @@ const fake = (
       runs.push(argv)
       if (stdin) inputs.push(stdin)
       const key = Object.keys(outputs).find((k) => argv.join(" ").includes(k))
-      return { code: 0, out: key ? outputs[key]! : "" }
+      const exit = Object.keys(exits).find((k) => argv.join(" ").includes(k))
+      return { code: exit ? exits[exit]! : 0, out: key ? outputs[key]! : "" }
     },
     send: async (to, text) => {
       if (fails.some((word) => text.includes(word))) throw new Error("notify.sh exited 1")
@@ -237,6 +239,25 @@ describe("tick", () => {
       { text: "week passed 80% on pride@", to: "dispatcher" },
     ])
     expect(alertTitles(inputs)).toEqual(["ALERT 98 pride@example.com: week at 98%, past 98%"])
+  })
+
+  test("an Inbox alert that fails to post is named to the builder, and its line still goes", async () => {
+    const { ctx, sent } = fake(
+      scratch(),
+      at(13, 3),
+      { ...QUIET_LOAD, "ask new": "error: the dashboard is down\n", "week-marks.py": MARKS },
+      [],
+      { "ask new": 1 },
+    )
+    await beat("tick").run(ctx)
+    expect(sent.slice(0, 3)).toEqual([
+      { text: "ALERT 90 acme@example.com: week at 91%, past 90%", to: "builder" },
+      {
+        text: "Inbox alert not posted: bun run ask new: error: the dashboard is down",
+        to: "builder",
+      },
+      { text: "ALERT 98 pride@example.com: week at 98%, past 98%", to: "builder" },
+    ])
   })
 
   test("a failed send mid-beat posts the Inbox alert, keeps the beat's other sends, is named on the heartbeat and goes again at the next run", async () => {

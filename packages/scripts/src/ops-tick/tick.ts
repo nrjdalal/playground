@@ -142,7 +142,11 @@ const postAlert = async (ctx: Context, title: string): Promise<{ by: string; id:
 const tick = async (ctx: Context) => {
   const marks = lines((await python(ctx, "usage/week-marks.py", false)).out)
   for (const line of marks.filter((l) => l.includes("ALERT"))) {
-    if (/ALERT 9[78]\b/.test(line)) await postAlert(ctx, line)
+    // an alert that fails to post is named to the builder beside its line, which prints once a week and so goes out either way
+    if (/ALERT 9[78]\b/.test(line))
+      await postAlert(ctx, line).catch((error: Error) =>
+        ctx.send("builder", `Inbox alert not posted: ${error.message}`),
+      )
     await ctx.send("builder", line)
   }
   if (ctx.now.getMinutes() === 3 && marks[0]) await ctx.send("builder", `usage: ${marks[0]}`, true)
