@@ -118,7 +118,9 @@ describe("the capacity gate refuses and spawns nothing", () => {
       CAPACITY_JSONL: `${fresh}\n`,
     })
     expect(lagged.code).not.toBe(0)
-    expect(lagged.err).toContain("and 14 started in the last 5 minutes, at or over the 15 cores")
+    expect(lagged.err).toContain(
+      "and 14 started in the last 5 minutes, at or over 13.125: the 15 cores",
+    )
     const old = [...Array(14)]
       .map((_, k) =>
         JSON.stringify({ at: minutesAgo(6 + k), gate: null, readings: {}, verdict: "pass" }),
@@ -230,7 +232,7 @@ describe("the capacity gate refuses and spawns nothing", () => {
       CAPACITY_JSONL: `${fresh}\nnot json\n`,
     })
     expect(r.code).not.toBe(0)
-    expect(r.err).toContain("and 14 started in the last 5 minutes, at or over the 15 cores")
+    expect(r.err).toContain("and 14 started in the last 5 minutes, at or over 13.125: the 15 cores")
   })
 
   // Load is weighed by size, so a big plan never blocks small runs: small, medium and big weigh 1, 2 and 3.
@@ -261,6 +263,28 @@ describe("the capacity gate refuses and spawns nothing", () => {
           verdict: "pass",
         }),
       ])
+    })
+
+    // a PR's first review waited a median 47 minutes, so a checker takes the band a small worker keeps back, and every other small start keeps today's line
+    test.each<{ args: string[]; passes: boolean }>([
+      { args: ["column", "reviewer", "reviewer-x", "worker-x", "w1:p2", "r.md"], passes: true },
+      { args: ["column", "tester", "tester-x", "worker-x", "w1:p2", "r.md"], passes: true },
+      {
+        args: ["column", "probe", "probe-x", "ops", "w1:p2", "p.md", "--size", "small"],
+        passes: true,
+      },
+      {
+        args: ["column", "lead", OLD.planner, OLD.dispatcher, "w1:p2", "h.md", "--size", "small"],
+        passes: true,
+      },
+      { args: ["worker", "worker-brave-otter", "b.md", "--size", "small"], passes: false },
+    ])("a checker takes the cap a small worker keeps back: $args.1", async ({ args, passes }) => {
+      const r = await spawn(args, [], { FAKE_LOAD5: "14.00" })
+      if (passes) return expect(r.code, r.err).toBe(0)
+      expect(r.code).not.toBe(0)
+      expect(r.err).toContain(
+        "at or over 13.125: the 15 cores, less the 1.875 kept for checkers (gates.reviewReserve; this start is a small worker)",
+      )
     })
 
     test("the roster's size counts when --size is not given", async () => {
@@ -305,7 +329,9 @@ describe("the capacity gate refuses and spawns nothing", () => {
         CAPACITY_JSONL: `${starts(3)}\n`,
       })
       expect(heavy.code).not.toBe(0)
-      expect(heavy.err).toContain("and 15 started in the last 5 minutes, at or over the 15 cores")
+      expect(heavy.err).toContain(
+        "and 15 started in the last 5 minutes, at or over 13.125: the 15 cores",
+      )
     })
 
     test("--size takes small, medium or big alone", async () => {
@@ -482,7 +508,9 @@ describe("the capacity gate refuses and spawns nothing", () => {
         const alone = await spawn(args, [])
         expect(alone.code, alone.err).toBe(0)
         const r = await spawn(args, [], withGates({ "slots.peers": [peer] }))
-        expect(r.err).toContain("and 14 started in the last 5 minutes, at or over the 15 cores")
+        expect(r.err).toContain(
+          "and 14 started in the last 5 minutes, at or over 13.125: the 15 cores",
+        )
         expect(readFileSync(join(peer, "capacity.jsonl"), "utf8")).toBe(`${fresh}\n`)
       } finally {
         rmSync(peer, { force: true, recursive: true })
@@ -498,7 +526,9 @@ describe("the capacity gate refuses and spawns nothing", () => {
         ...env,
         CAPACITY_JSONL: `${older}\n`,
       })
-      expect(r.err).toContain("and 14 started in the last 10 minutes, at or over the 15 cores")
+      expect(r.err).toContain(
+        "and 14 started in the last 10 minutes, at or over 13.125: the 15 cores",
+      )
     })
   })
 

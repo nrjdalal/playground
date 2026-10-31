@@ -7,11 +7,13 @@ test("each gate key defaults to the line spawn.sh holds a start to today", () =>
   expect(gateSettings.get(unset, "gates.glmLoad5Max")).toBe(30)
   expect(gateSettings.get(unset, "gates.glmSwapinsMax")).toBe(100)
   expect(gateSettings.get(unset, "gates.memoryFreeMin")).toBe(8)
+  expect(gateSettings.get(unset, "gates.reviewReserve")).toBe(0.125)
   expect(gateSettings.get(unset, "gates.smallReserve")).toBe(0.25)
   expect(gateSettings.get(unset, "gates.startsWindow")).toBe(300)
 })
 
 test("a line no gate can hold is refused", () => {
+  expect(checkSetting("gates.reviewReserve", 1).ok).toBe(false)
   expect(checkSetting("gates.smallReserve", 1).ok).toBe(false)
   expect(checkSetting("gates.memoryFreeMin", 101).ok).toBe(false)
   expect(checkSetting("gates.startsWindow", 0).ok).toBe(false)

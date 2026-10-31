@@ -61,6 +61,7 @@ describe("defineSettings", () => {
       "gates.glmLoad5Max",
       "gates.glmSwapinsMax",
       "gates.memoryFreeMin",
+      "gates.reviewReserve",
       "gates.smallReserve",
       "gates.startsWindow",
       "github.pollMinutes",
