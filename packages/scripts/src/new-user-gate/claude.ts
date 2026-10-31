@@ -115,7 +115,7 @@ const main = async () => {
         uuid: crypto.randomUUID(),
       })}\n`,
     )
-  // herdr's custom reporter route, as the session-state hook reports a real session: claude, the kind agent.prompt types into
+  // herdr's custom reporter route, as the session-state hook reports a real session: claude, the kind agent.prompt types into; every child is detached, since herdr holds the agent to the pane's foreground process and a child in its group would take that place, leaving the pane unpromptable once the child exits (agent_not_ready, measured in the gate)
   const report = (state: "idle" | "release" | "working") => {
     if (env.HERDR_ENV !== "1" || !env.HERDR_BIN_PATH || !env.HERDR_PANE_ID) return
     const seq = String(Math.floor((performance.timeOrigin + performance.now()) * 1000))
@@ -124,15 +124,22 @@ const main = async () => {
       state === "release"
         ? ["release-agent", env.HERDR_PANE_ID, ...source]
         : ["report-agent", env.HERDR_PANE_ID, ...source, "--state", state]
-    Bun.spawnSync([env.HERDR_BIN_PATH, "pane", ...args, "--seq", seq], {
+    Bun.spawn([env.HERDR_BIN_PATH, "pane", ...args, "--seq", seq], {
+      detached: true,
       stdio: ["ignore", "ignore", "ignore"],
-    })
+    }).unref()
   }
   const act = async (typed: boolean) => {
     const argv = stepOf(role, { data, repo, typed })
     if (!argv) return
     report("working")
-    const child = Bun.spawn(argv, { cwd, stderr: "pipe", stdin: "ignore", stdout: "pipe" })
+    const child = Bun.spawn(argv, {
+      cwd,
+      detached: true,
+      stderr: "pipe",
+      stdin: "ignore",
+      stdout: "pipe",
+    })
     const [out, err, code] = await Promise.all([
       new Response(child.stdout).text(),
       new Response(child.stderr).text(),
