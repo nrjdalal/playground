@@ -375,6 +375,19 @@ describe("rollOutcome", () => {
     })
   })
 
+  // an alias check's line can land between a roll-now and its roll, and is no verdict on the roll
+  test("passes over the alias check's lines to the roll's own", () => {
+    expect(
+      rollOutcome(
+        [],
+        [
+          "2026-10-31T21:00:00Z ALIAS FAIL playground.localhost points at port 4851, but the live stack's desk.playground.localhost is on 4842",
+          "2026-10-31T21:00:30Z ROLL canary abc1234 abc1234 PASS version=0.0.18 verify=PASS",
+        ],
+      ),
+    ).toEqual({ done: "Updated to abc1234", ok: true })
+  })
+
   test("reads a passing roll as updated, with its sha", () => {
     expect(
       rollOutcome(
