@@ -12,11 +12,10 @@ set -euo pipefail
 #      hw.ncpu) times PLAYGROUND_LOAD_MULT (default 1.0), each start weighing
 #      half its item's load units (small 1, medium 2, big 3: --size, else small
 #      for a reviewer or tester, else what `ops/run-slot.sh size <name>` reads),
-#      and a quarter of that cap kept for small items, so a big plan never
-#      blocks a small one, a small worker keeping an eighth in its place for
-#      the reviewers and testers; a load over that line reads the CPU's busy cores
-#      (top -l 2 -n 0) too, and refuses only when they and the starts are over
-#      it as well, or when top cannot be read
+#      and a quarter of that cap kept for small items, so a big plan never blocks a small one,
+#      a small worker keeping an eighth in its place for the reviewers and testers; a load over that
+#      line reads the CPU's busy cores (top -l 2 -n 0) too, and refuses only when they and the starts
+#      are over it as well, or when top cannot be read
 #   2. memory, pressure level 1 or 2 (kern.memorystatus_vm_pressure_level) and
 #      free at 8% or more (kern.memorystatus_level)
 #   A GLM session takes its own load and memory gate in place of both:
