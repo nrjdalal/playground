@@ -9,7 +9,7 @@ Your worktrees are `.claude/worktrees/test-__PR__` at the head and `.claude/work
 ## Rules
 
 - Your drive counts for CI only, never in place of the reviewer's 5/5, since the owner's rule is "nothing merge ever without 5/5".
-- Drive only head `__SHA7__`: a new commit needs a new drive, since a verdict names one sha and carries only across a clean canary merge.
+- Drive only head `__SHA7__`: a new commit needs a new drive, since a verdict names one sha and carries only across a clean canary merge. Roll your stack's worktree onto the new head on its own branch, by dev's Stale-route trap.
 - Post shots and your verdict only, and make no commit on the PR you drive, since a tester checks code it did not write.
 - You drive at any load: run-slot queues only your heavy runs.
 

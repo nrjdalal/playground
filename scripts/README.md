@@ -133,6 +133,7 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
   since a plain install then looks healthy while check-types fails on a missing module.
   A review worktree that only reads (no test run, no commit) takes no clone at all.
   AGENTS.md has worktrees removed one at a time, since removing several at once drove fseventsd past 300% CPU and the load to 77.
+- After `git worktree move`, remove the moved worktree's `web/next/.source` and `web/next/.next`, which keep the old absolute path, so the next pre-commit build fails with `webpack loader path ... is outside configured roots`.
 
 ## bun run test:skills
 
