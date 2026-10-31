@@ -70,6 +70,9 @@ commit-msg:
     co-authored-by:
       # AGENTS.md's Commits rule; commitlint's trailer-exists matches case-sensitively, so it would miss Co-Authored-By
       run: "if grep -iq '^co-authored-by:' {1}; then echo 'AGENTS.md: no Co-authored-by trailer, in any case' >&2; exit 1; fi"
+    pg-scope:
+      # a (PG-<n>) scope names the branch's own PG-<n>- item, since a commit made on another item's branch conflicts there later
+      run: bun packages/scripts/src/commit-scope.ts {1}
 
 pre-push:
   commands:
