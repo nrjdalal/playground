@@ -17,6 +17,7 @@ const windowSchema = z.object({
 })
 
 const usageSchema = z.object({
+  balance: z.object({ empty: z.literal(true), seenAt: z.string() }).optional(),
   windows: z.object({
     fiveHour: windowSchema.nullable(),
     week: windowSchema.nullable(),
@@ -33,7 +34,11 @@ export type ZaiUsage = {
   writtenAt: string
 }
 
-// Pure: the file's text as the two credit windows, or null when it holds neither, no time it was written, or a shape the job does not write.
+// A window spent to its cap, as an empty balance reads.
+const spent = (window: ZaiWindow | null): ZaiWindow | null =>
+  window && { ...window, used: window.cap }
+
+// Pure: the file's text as the two credit windows, both spent while the job marks the balance empty, or null when it holds neither, no time it was written, a failed read (its error), or a shape the job does not write.
 export function zaiUsageOf(text: string, now: Date): ZaiUsage | null {
   let file: unknown
   try {
@@ -41,9 +46,12 @@ export function zaiUsageOf(text: string, now: Date): ZaiUsage | null {
   } catch {
     return null
   }
+  if (file && typeof file === "object" && "error" in file) return null
   const parsed = usageSchema.safeParse(file)
   if (!parsed.success) return null
-  const { fiveHour, week } = parsed.data.windows
+  const empty = parsed.data.balance !== undefined
+  const fiveHour = empty ? spent(parsed.data.windows.fiveHour) : parsed.data.windows.fiveHour
+  const week = empty ? spent(parsed.data.windows.week) : parsed.data.windows.week
   const { writtenAt } = parsed.data
   const written = Date.parse(writtenAt)
   if (Number.isNaN(written) || (!fiveHour && !week)) return null

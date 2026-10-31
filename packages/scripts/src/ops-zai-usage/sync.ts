@@ -1,3 +1,6 @@
+import { readdir, readFile } from "node:fs/promises"
+import { join } from "node:path"
+
 import { writeAtomic } from "../write-atomic"
 
 // ops-zai-usage: the GLM plan's credit windows from Z.ai's quota endpoint, written for spawn.sh's usage gate, whose GLM branch reads the file. One endpoint caller: everything else reads the file this job writes. The endpoint is undocumented (measured 2026-10-16) and answers 200 even when it fails, so success is the body's code and success flags.
@@ -65,23 +68,53 @@ export async function zaiQuota(key: string, fetchImpl: typeof fetch = fetch): Pr
   throw new Error(`Z.ai ${res.status}: code ${String(body.code ?? "?")}`.replaceAll(key, "***"))
 }
 
-// One run: "ok" once the file is written, else why not, leaving the last file as it was.
+// How long a GLM session's empty-balance failure holds the balance empty; once it lapses, spawn.sh lets one GLM start try again, and a balance still empty fails that start and sets it afresh.
+export const BALANCE_HOLD_MS = 60 * 60 * 1000
+
+// The newest empty-balance failure (reason "balance", which the session-state hook writes for Z.ai's 429 [1113]) within the hold, or null; the quota endpoint keeps answering with low use while the balance is empty (31 Oct), so a GLM session's own error is the one source.
+export async function emptyBalanceAt(stateDir: string, now = new Date()): Promise<string | null> {
+  const names = await readdir(stateDir).catch(() => [] as string[])
+  let newest: string | null = null
+  for (const name of names.filter((n) => n.endsWith(".json"))) {
+    const record = await readFile(join(stateDir, name), "utf8")
+      .then((text) => JSON.parse(text) as { at?: unknown; reason?: unknown })
+      .catch(() => null)
+    const at = typeof record?.at === "string" ? Date.parse(record.at) : Number.NaN
+    if (record?.reason !== "balance" || Number.isNaN(at) || now.getTime() - at > BALANCE_HOLD_MS)
+      continue
+    if (!newest || at > Date.parse(newest)) newest = new Date(at).toISOString()
+  }
+  return newest
+}
+
+// One run: "ok" once the file is written, else why not, written as the file's error over its last windows, so the sidebar draws no GLM readings from a read that failed.
 export async function cycle(
   read: () => Promise<unknown>,
   path: string,
   now = new Date(),
+  balance: () => Promise<string | null> = async () => null,
 ): Promise<string> {
   try {
     const data = (await read()) as { limits?: unknown } | null
     const windows = windowsOf(data?.limits)
     if (!windows) throw new Error("no credit window in the answer")
+    const seenAt = await balance()
     await writeAtomic(
       path,
-      `${JSON.stringify({ windows, writtenAt: now.toISOString() }, null, 2)}\n`,
+      `${JSON.stringify({ ...(seenAt ? { balance: { empty: true, seenAt } } : {}), windows, writtenAt: now.toISOString() }, null, 2)}\n`,
     )
     return "ok"
   } catch (err) {
-    return err instanceof Error ? err.message : String(err)
+    const error = err instanceof Error ? err.message : String(err)
+    const last = await readFile(path, "utf8")
+      .then((text) => JSON.parse(text) as Record<string, unknown>)
+      .catch(() => ({}))
+    const { windows, writtenAt } = last as { windows?: unknown; writtenAt?: unknown }
+    await writeAtomic(
+      path,
+      `${JSON.stringify({ error, errorAt: now.toISOString(), ...(windows ? { windows, writtenAt } : {}) }, null, 2)}\n`,
+    ).catch(() => {})
+    return error
   }
 }
 

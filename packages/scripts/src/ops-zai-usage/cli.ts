@@ -3,7 +3,7 @@ import { join } from "node:path"
 import { dataDir } from "@packages/env/data-dir"
 import { accountSettings, accountsOf, modelSettings, readPolicy } from "@packages/settings"
 
-import { beat, cycle, CYCLE_SECONDS, zaiQuota } from "./sync"
+import { beat, cycle, CYCLE_SECONDS, emptyBalanceAt, zaiQuota } from "./sync"
 
 // The Z.ai key, the first GLM row of usage.accounts by its label, is read from the Keychain inside this process and goes only into the request header: it never reaches a log, a file or an argument list.
 const data = dataDir()
@@ -20,9 +20,10 @@ const key = async (): Promise<string> => {
   return out.exitCode === 0 ? out.stdout.toString().trim() : ""
 }
 const read = async (): Promise<unknown> => zaiQuota(await key())
+const balance = () => emptyBalanceAt(join(data, "session-state"))
 
 if (process.argv.includes("--once")) {
-  const result = await cycle(read, usagePath)
+  const result = await cycle(read, usagePath, new Date(), balance)
   console.log(`ops-zai-usage: ${result}`)
   process.exit(result === "ok" ? 0 : 1)
 }
@@ -37,7 +38,7 @@ const pulse = (result: string) =>
 const run = async () => {
   if (reading) return
   reading = true
-  lastResult = await cycle(read, usagePath)
+  lastResult = await cycle(read, usagePath, new Date(), balance)
   reading = false
   console.log(`${new Date().toISOString()} ${lastResult}`)
   await pulse(lastResult)

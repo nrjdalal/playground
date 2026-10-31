@@ -23,6 +23,31 @@ describe("zaiUsageOf", () => {
     })
   })
 
+  test("reads an empty balance as both windows spent, whatever the quota endpoint said", () => {
+    const empty = JSON.parse(SAMPLE) as Record<string, unknown>
+    empty.balance = { empty: true, seenAt: "2026-10-16T14:40:00.000Z" }
+    expect(zaiUsageOf(JSON.stringify(empty), now)).toMatchObject({
+      fiveHour: { cap: 28000, used: 28000 },
+      week: { cap: 140000, used: 140000 },
+    })
+  })
+
+  test("reads no usage while the job reports a failed read, so the sidebar draws no GLM readings", () => {
+    const failed = JSON.parse(SAMPLE) as Record<string, unknown>
+    failed.error = "Z.ai 401: code 1001"
+    failed.errorAt = "2026-10-16T15:04:00.000Z"
+    expect(zaiUsageOf(JSON.stringify(failed), now)).toBeNull()
+    expect(
+      zaiUsageOf(
+        JSON.stringify({
+          error: "no credit window in the answer",
+          errorAt: "2026-10-16T15:04:00.000Z",
+        }),
+        now,
+      ),
+    ).toBeNull()
+  })
+
   test("marks the file stale past ten minutes", () => {
     expect(ZAI_STALE_MS).toBe(10 * 60 * 1000)
     expect(zaiUsageOf(SAMPLE, now)?.stale).toBe(false)
