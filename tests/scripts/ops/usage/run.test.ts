@@ -125,7 +125,8 @@ def urlopen(req, timeout=None):
     url = req.full_url
     calls.append(url)
     if url.startswith("http://127.0.0.1:9/"):
-        raise urllib.error.HTTPError(url, 200, "ok", {"anthropic-ratelimit-unified-5h-utilization": "0.2", "anthropic-ratelimit-unified-5h-reset": "4000000000", "anthropic-ratelimit-unified-7d-utilization": "0.3", "anthropic-ratelimit-unified-7d-reset": "4000000000"}, io.BytesIO(b"{}"))
+        five = {} if "/no-5h/" in url else {"anthropic-ratelimit-unified-5h-utilization": "0.2", "anthropic-ratelimit-unified-5h-reset": "4000000000"}
+        raise urllib.error.HTTPError(url, 200, "ok", dict(five, **{"anthropic-ratelimit-unified-7d-utilization": "0.3", "anthropic-ratelimit-unified-7d-reset": "4000000000"}), io.BytesIO(b"{}"))
     if url.endswith("/api/oauth/profile"):
         return io.BytesIO(json.dumps({"account": {"email": "stored@example.org"}}).encode())
     if url.endswith("/api/oauth/usage"):
@@ -247,4 +248,15 @@ test("a Keychain that refuses the read, not one missing the login, fails rather 
   expect(beat.result).toBe(
     "error: stored login: RuntimeError: security exited 51 reading Claude Code's credentials",
   )
+})
+
+test("an account whose probe answers with no 5-hour headers has no 5-hour window in usage.json, never a 0% one (#85)", async () => {
+  const { beat, usage } = await cycle("no-five-hour", {
+    added: ["added@example.org"],
+    login: false,
+    probeUrl: "http://127.0.0.1:9/no-5h/v1/messages",
+  })
+  expect(beat.result).toBe("ok")
+  expect(usage.rate_limits.five_hour).toBeUndefined()
+  expect(usage.rate_limits.seven_day).toEqual({ used_percentage: 30, resets_at: 4_000_000_000 })
 })

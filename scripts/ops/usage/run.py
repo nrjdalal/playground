@@ -122,7 +122,9 @@ def probe(email):
     if not h or h.get("anthropic-ratelimit-unified-7d-utilization") is None:
         return None
     f = lambda k: float(h.get(f"anthropic-ratelimit-unified-{k}") or 0)
-    return {"five": round(f("5h-utilization") * 100), "fiveReset": f("5h-reset"), "week": round(f("7d-utilization") * 100), "weekReset": f("7d-reset")}
+    # no 5-hour headers: an account with no 5-hour limit (a verified Ultra one), so none, never 0%
+    five = h.get("anthropic-ratelimit-unified-5h-utilization") is not None
+    return {"five": round(f("5h-utilization") * 100) if five else None, "fiveReset": f("5h-reset") if five else None, "week": round(f("7d-utilization") * 100), "weekReset": f("7d-reset")}
 
 
 def flip_file():
@@ -181,8 +183,9 @@ def fresh(s, now):
 
 def probed(account, s, stored, now):
     """usage.json's data from one account's probe reading, naming the stored login beside it when there is one."""
-    limits = {"five_hour": {"used_percentage": s.get("five"), "resets_at": int(s["fiveReset"]) if s.get("fiveReset") else None},
-              "seven_day": {"used_percentage": s["week"], "resets_at": int(s["weekReset"]) if s.get("weekReset") else None}}
+    limits = {"seven_day": {"used_percentage": s["week"], "resets_at": int(s["weekReset"]) if s.get("weekReset") else None}}
+    if s.get("five") is not None:
+        limits["five_hour"] = {"used_percentage": s["five"], "resets_at": int(s["fiveReset"]) if s.get("fiveReset") else None}
     data = {"account": account, "rate_limits": limits, "readAt": iso(s["at"]), "source": "token/ratelimit-headers", "writtenAt": iso(now)}
     if stored:
         data["storedLogin"] = {"account": stored["account"], "week": (stored["rate_limits"].get("seven_day") or {}).get("used_percentage")}
