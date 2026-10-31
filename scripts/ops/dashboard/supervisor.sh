@@ -59,7 +59,7 @@ upstream_head() { "$D/net-git.sh" ls-remote origin "refs/heads/$UPSTREAM" 2>>"$L
 behind() { git merge-base --is-ancestor "$1" HEAD 2>/dev/null; }
 wait_dashboard() { local i; for i in $(seq 1 90); do dashboard_urls && curl -sf "$API/api/health" > /dev/null 2>&1 && return 0; sleep 1; done; return 1; }
 alive() { kill -0 "$(cat "$S/$1.pid" 2>/dev/null)" 2>/dev/null; }
-# first run's setup has not written the database yet: no POSTGRES_URL in the environment or this checkout's .env, so the follower, which validates it as it starts, waits rather than exiting on every tick (#31)
+# first run's setup has not written the database yet: no POSTGRES_URL in the environment or this checkout's .env, so the follower, which validates it as it starts, waits rather than exiting on every tick
 setup_pending() { [ -z "${POSTGRES_URL:-}" ] && ! grep -qE "^POSTGRES_URL=[\"']?[^\"'[:space:]]" "$WT/.env" 2>/dev/null; }
 # an importer holds the follower's lock: a follower an earlier supervisor left running counts, so this one's "another importer holds the lock" exit is no outage; the status read gets HELD_WAIT seconds, then is stopped by its own process group (set -m gives it one), so a wedged docker child under it goes too, and exits 2, holder unknown, so a wedged Docker or database never freezes the loop
 follower_held() { local p i; bun api/hono/src/bin/dashboard-ingest.ts status > /dev/null 2>&1 & p=$!; for i in $(seq 1 "${HELD_WAIT:-20}"); do kill -0 "$p" 2>/dev/null || { wait "$p" && return 0 || return 1; }; sleep 1; done; kill -- -"$p" 2>/dev/null; wait "$p" 2>/dev/null; return 2; }
