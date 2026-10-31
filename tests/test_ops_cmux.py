@@ -184,7 +184,8 @@ def test_unguarded(scratch):
 STUBS = {
     "bun": """#!/bin/bash
 case "$*" in
-  "run dev --ui stream") sleep 1000 & sleep 1000 & wait ;;
+  "run build") mkdir -p web/next/.next/standalone/web/next web/next/.next/static ;;
+  "run serve --ui stream") sleep 1000 & sleep 1000 & wait ;;
   "run ingest --follow") echo "$(date -u +%Y-%m-%dT%H:%M:%S).000Z following"; exec sleep 1000 ;;
   "run ingest status") echo "follower: running"; echo "transcripts read: 0"; echo "entries: 0" ;;
   "run verify "*) echo "ok" ;;
