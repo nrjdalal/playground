@@ -41,6 +41,32 @@ describe("code-review-loop keeps its reviewer for the merge (#1067)", () => {
     )
   })
 
+  test("CI still running at the head is waited on, not raced by a local run, while canary changed none of the PR's files (#166)", async () => {
+    const last = (await skill()).split("## The last 5/5")[1]?.split("\n## ")[0] ?? ""
+    const stand = last.split("**CI stands in**")[1]?.split("\n")[0] ?? ""
+    expect(stand).toContain(
+      "While those checks still run at `<head>` and canary has changed none of the PR's files",
+    )
+    expect(stand).toContain(
+      "`gh api repos/<owner>/<repo>/commits/<head>/check-runs` at playbook's **github** rule's pace (`github.pollMinutes`)",
+    )
+    expect(stand).toContain("queue them only when a stand-in condition fails or a check goes red")
+    expect(await page()).toContain("waits for CI still running at the head")
+  })
+
+  test("green CI at the head stands in for check-types, but not for a file packages/scripts imports from outside it (#166)", async () => {
+    const last = (await skill()).split("## The last 5/5")[1]?.split("\n## ")[0] ?? ""
+    expect(last).toContain(
+      "CI stands in (below) for check-types on the same two conditions as for the touched tests",
+    )
+    expect(last).toContain(
+      "The local run stays when the diff changes a file outside `packages/scripts` that one of its sources imports by relative path",
+    )
+    expect(last.split("**Done when**")[1] ?? "").toContain(
+      "check-types ran green or CI stood in for it",
+    )
+  })
+
   test("a PR that adds or changes a repo scanner gets the local merge whatever canary changed (#1959)", async () => {
     const last = (await skill()).split("## The last 5/5")[1]?.split("\n## ")[0] ?? ""
     expect(last).toContain(
