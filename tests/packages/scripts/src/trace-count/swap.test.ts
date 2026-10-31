@@ -11,7 +11,7 @@ const LIST = {
   names: ["Quilla", "Marsh", "Tobin"],
   slackIds: ["U0FAKE1234", "C0FAKE9876"],
 }
-const REPOS = { archive: "octo/archive", owner: ["octo"], public: "qmarsh/playground" }
+const REPOS = { archive: "octo/archive", owner: ["octo"], public: ["qmarsh/playground"] }
 const { swap } = swapper(LIST, REPOS)
 
 describe("the swap pass", () => {

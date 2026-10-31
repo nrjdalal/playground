@@ -127,11 +127,11 @@ describe("the trace count", () => {
     expect(count([{ path: "tests/a.ts", text: `"${LIST.slackIds[0]}"` }], LIST).slackIds).toBe(1)
   })
 
-  test("reads past a live name the migration moves, the public repository's name and the seed's left-out paths", () => {
+  test("reads past a live name the migration moves, the public repositories' names and the seed's left-out paths", () => {
     const counts = count([
       {
         path: "a.ts",
-        text: `const db = "${OLD_NAME.dispatcher}-desk-db"\nsee ${UNSET_REPOS.public}`,
+        text: `const db = "${OLD_NAME.dispatcher}-desk-db"\nsee ${UNSET_REPOS.public.join(" and ")}`,
       },
       { path: "packages/scripts/src/trace-count/counts.json", text: `#123 ${OLD_NAME.dispatcher}` },
       { path: "packages/scripts/src/trace-count/kept.json", text: "#456" },

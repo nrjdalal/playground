@@ -17,8 +17,8 @@ export const factorySettings = defineSettings({
   "factory.publicRepo": {
     default: "",
     description:
-      "The public repository: no-public-leak refuses a write there that holds private text, and the trace ratchet reads past its own name.",
-    schema: repo,
+      "The public repository, or a list of them: no-public-leak refuses a write to one that holds private text, and the trace ratchet reads past each one's own name.",
+    schema: z.union([repo, z.array(repo)]),
   },
   "factory.repo": {
     default: "",

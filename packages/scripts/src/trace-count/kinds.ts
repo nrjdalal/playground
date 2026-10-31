@@ -7,18 +7,19 @@ import { dataDir } from "../../../env/src/data-dir"
 
 type Environment = Record<string, string | undefined>
 
-// Today's public repository, which the guard and the ratchet read while factory.publicRepo is unset; the switch sets it, and this goes.
-const TODAY_PUBLIC = "nrjdalal/playground"
+// Today's public repositories, the factory's and Yard's, which the guard and the ratchet read while factory.publicRepo is unset; the switch sets it, and this goes.
+const TODAY_PUBLIC = ["nrjdalal/playground", "nrjdalal/playground-yard"]
 
 // The repositories, and the owner's names (owner.names, then the archive's owner), read from the settings at run time so no private name is written in the tree; an unset archive is empty, which leaves its links unmeasured.
-export type Repos = { archive: string; owner: string[]; public: string }
+export type Repos = { archive: string; owner: string[]; public: string[] }
 export const reposOf = (settings: Settings): Repos => {
   const archive = factorySettings.get(settings, "factory.archiveRepo").toLowerCase()
   const archiveOwner = archive ? [archive.split("/")[0]!] : []
+  const set = [factorySettings.get(settings, "factory.publicRepo")].flat().filter(Boolean)
   return {
     archive,
     owner: [...new Set([...ownerSettings.get(settings, "owner.names"), ...archiveOwner])],
-    public: factorySettings.get(settings, "factory.publicRepo").toLowerCase() || TODAY_PUBLIC,
+    public: set.length ? set.map((repo) => repo.toLowerCase()) : TODAY_PUBLIC,
   }
 }
 // The repositories with neither key set, as a machine with no store reads them.
@@ -133,6 +134,9 @@ export function patterns(list: PublicList, repos: Repos): [Kind, RegExp][] {
   return all.filter((kind): kind is [Kind, RegExp] => kind[1] !== undefined)
 }
 
-// The public repository's own name holds its owner's handle and names nothing private, so it is read past.
+// A public repository's own name holds its owner's handle and names nothing private, so it is read past.
 export const readPast = (text: string, repos: Repos): string =>
-  text.replace(new RegExp(`(?<![\\w.-])${escape(repos.public)}(?![\\w.-])`, "gi"), "")
+  text.replace(
+    new RegExp(`(?<![\\w.-])(?:${repos.public.map(escape).join("|")})(?![\\w.-])`, "gi"),
+    "",
+  )
