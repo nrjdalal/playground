@@ -1,25 +1,19 @@
 import { describe, expect, test } from "bun:test"
-import { join } from "node:path"
 
 import {
   atHead,
   ciGate,
-  DASHBOARD_PATHS,
   gatesOf,
-  hasUi,
   marksReady,
-  touchesDashboard,
+  REQUIRED_CHECKS,
   withReadyDraft,
   type Comment,
   type PrFacts,
 } from "../../../../../packages/scripts/src/pr-merge/gates"
-import type { Stamp, StampRead } from "../../../../../packages/scripts/src/pr-merge/stamp"
-import { trainGates } from "../../../../../packages/scripts/src/pr-merge/train"
 import { SKILL_BODY } from "./bodies"
 import "./scratch-config"
-import { SUITE, suiteChecks } from "./suite"
+import { greenChecks } from "./suite"
 
-const ROOT = join(import.meta.dir, "..", "..", "..", "..", "..")
 const HEAD = "69a6a4c5e6caf46c4abda6a89de4ce6f3b309e88"
 const OLD = "5740ceaa347f9c0f4e5a2f109f433e7838468b1f"
 const CANARY = "6f3db1ea4cb7ea4072e0d5454da0026c89635cab"
@@ -35,32 +29,12 @@ const said = (body: string, author = "acme"): Comment => ({
 const review = (sha = HEAD, score = 5) =>
   said(`## ReviewBot · round 2: ${score}/5 at ${sha.slice(0, 7)} · 0 blocking\n\nAll good.`)
 
-// A stamp as the parser gives it, with no text: the readers take the object.
-const stamp = (patch: Partial<Stamp> = {}): Stamp => ({
-  at: HEAD.slice(0, 7),
-  checks: suiteChecks("123"),
-  commit: HEAD.slice(0, 7),
-  createdAt: new Date(Date.UTC(2026, 9, 6, 19, 0, clock++)).toISOString(),
-  status: "green",
-  ...patch,
-})
-
-const green = (patch: Partial<StampRead> = {}): StampRead => ({
-  at: HEAD,
-  passed: SUITE,
-  reach: [HEAD],
-  stamps: [stamp()],
-  status: "green",
-  why: "",
-  ...patch,
-})
-
 const facts = (patch: Partial<PrFacts> = {}): PrFacts => ({
   aheadBy: 0,
   author: "acme",
   base: "canary",
   canary: CANARY,
-  checks: [],
+  checks: greenChecks(),
   comments: [review()],
   draft: false,
   files: ["packages/scripts/src/pr-merge/gates.ts", "AGENTS.md"],
@@ -70,7 +44,6 @@ const facts = (patch: Partial<PrFacts> = {}): PrFacts => ({
   mergeTree: TREE,
   n: 7,
   owner: "acme",
-  stamp: green(),
   state: "OPEN",
   ...patch,
 })
@@ -80,27 +53,12 @@ const failing = (patch: Partial<PrFacts>) =>
     .filter((gate) => !gate.ok)
     .map((gate) => gate.name)
 
-describe("atHead, hasUi and touchesDashboard", () => {
+describe("atHead", () => {
   test("a verdict names the head by a prefix of seven or more characters", () => {
     expect(atHead("69a6a4c", HEAD)).toBe(true)
     expect(atHead(HEAD, HEAD)).toBe(true)
     expect(atHead("69a6a4", HEAD)).toBe(false)
     expect(atHead("5740cea", HEAD)).toBe(false)
-  })
-
-  test("a PR has UI when its diff touches web/next/, and dashboard code on any dashboard path", () => {
-    expect(hasUi(["web/next/src/app/page.tsx"])).toBe(true)
-    expect(hasUi(["AGENTS.md", "tests/web/next/src/lib/x.test.ts", "api/hono/src/x.ts"])).toBe(
-      false,
-    )
-    expect(touchesDashboard(["api/hono/src/x.ts"])).toBe(true)
-    expect(touchesDashboard(["packages/scripts/src/x.ts", "tests/api/hono/x.test.ts"])).toBe(false)
-  })
-
-  test("touchesDashboard names the paths Checks' DASHBOARD_PATHS does", async () => {
-    const py = await Bun.file(join(ROOT, "scripts/ops/checks/checks.py")).text()
-    const tuple = /^DASHBOARD_PATHS = \((.*)\)$/m.exec(py)?.[1] ?? ""
-    expect([...tuple.matchAll(/"([^"]+)"/g)].map((m) => m[1])).toEqual(DASHBOARD_PATHS)
   })
 })
 
@@ -129,22 +87,18 @@ describe("gatesOf", () => {
     expect(gatesOf(facts({ author: "ACME" })).find((g) => g.name === "author")?.ok).toBe(true)
   })
 
-  test("a review at an earlier head the walk does not reach, or by anyone else, does not count", () => {
+  test("a review at an earlier head, or by anyone else, does not count", () => {
     expect(failing({ comments: [review(OLD)] })).toEqual(["review"])
     expect(failing({ comments: [said(review().body, "someone-else")] })).toEqual(["review"])
     expect(failing({ comments: [review(), review(HEAD, 3)] })).toEqual(["review"])
   })
 
-  test("a review carries across what the walk reaches: clean canary merges and review greens", () => {
-    const gates = gatesOf(facts({ comments: [review(OLD)], stamp: green({ reach: [HEAD, OLD] }) }))
-    expect(gates.find((g) => g.name === "review")).toMatchObject({ ok: true })
-    expect(gates.find((g) => g.name === "review")?.detail).toContain("carried from 5740cea")
-  })
-
-  test("behind canary, a clean merge carries the stamp and a conflict waits for the look", () => {
+  test("behind canary, a head that merges clean passes, and a conflict waits for canary merged in", () => {
     const clean = gatesOf(facts({ aheadBy: 2 })).find((gate) => gate.name === "up to date")
     expect(clean).toMatchObject({ ok: true })
-    expect(clean?.detail).toContain("which carries its stamp")
+    expect(clean?.detail).toBe(
+      "canary has 2 commits 69a6a4c lacks; it merges clean with canary 6f3db1e",
+    )
     const conflict = gatesOf(facts({ aheadBy: 2, mergeTree: null })).find(
       (gate) => gate.name === "up to date",
     )
@@ -209,10 +163,10 @@ describe("gatesOf", () => {
     })
   })
 
-  test("the head's GitHub checks must all have finished and passed; none reported passes", () => {
+  test("the head's GitHub checks must all have finished and passed", () => {
     expect(ciGate([])).toEqual({ detail: "no checks reported", name: "ci", ok: true })
     const passed = [
-      { conclusion: "SUCCESS", name: "test", status: "COMPLETED" },
+      ...greenChecks(),
       { conclusion: "SKIPPED", name: "deploy", status: "COMPLETED" },
       { context: "ci/legacy", state: "SUCCESS" },
     ]
@@ -229,6 +183,17 @@ describe("gatesOf", () => {
       ok: false,
     })
     expect(failing({ checks: red })).toEqual(["ci"])
+  })
+
+  test("a head missing a required GitHub job refuses, naming it, until GitHub runs it", () => {
+    expect(REQUIRED_CHECKS).toEqual(["Audit, Lint, and Build", "test"])
+    expect(failing({ checks: [] })).toEqual(["ci"])
+    const onlyTest = greenChecks().filter((check) => check.name === "test")
+    expect(gatesOf(facts({ checks: onlyTest })).find((g) => g.name === "ci")).toEqual({
+      detail: "no Audit, Lint, and Build check on the head yet: GitHub runs it on every push",
+      name: "ci",
+      ok: false,
+    })
   })
 
   test("an older cancelled run beside a newer pass of the same check passes", () => {
@@ -264,110 +229,6 @@ describe("gatesOf", () => {
   })
 })
 
-describe("the stamp gate", () => {
-  const detail = (patch: Partial<PrFacts>, name = "stamp") =>
-    gatesOf(facts(patch)).find((gate) => gate.name === name)?.detail
-
-  test("no stamp, or one that did not read, is not ready, saying why", () => {
-    const none: StampRead = { passed: [], reach: [HEAD], stamps: [], why: "69a6a4c has no stamp" }
-    expect(failing({ stamp: none })).toEqual(["stamp", "suite"])
-    expect(detail({ stamp: none })).toBe("no stamp: 69a6a4c has no stamp")
-    expect(failing({ stamp: "the parents of 69a6a4c did not read" })).toEqual(["stamp", "suite"])
-  })
-
-  test("wait waits for CI and red is not ready", () => {
-    const wait = green({
-      stamps: [
-        stamp({ checks: { "agent-review": { source: "agent", status: "fail" } }, status: "wait" }),
-      ],
-      status: "wait",
-    })
-    expect(failing({ stamp: wait })).toEqual(["stamp"])
-    expect(detail({ stamp: wait })).toContain("waiting for CI")
-    const red = green({ stamps: [stamp({ status: "red" })], status: "red" })
-    expect(detail({ stamp: red })).toContain("red, so not ready")
-  })
-
-  test("a dashboard-code PR needs a green stamp that passed verify, and a web/next/ PR the tester's drive", () => {
-    const dashboard = ["api/hono/src/routers/dashboard.ts"]
-    expect(failing({ files: dashboard })).toEqual(["stamp"])
-    expect(detail({ files: dashboard })).toContain("✓ verify (from Checks, for dashboard code)")
-    expect(failing({ files: dashboard, stamp: green({ passed: [...SUITE, "verify"] }) })).toEqual(
-      [],
-    )
-    const ui = ["web/next/src/components/dashboard/app-sidebar.tsx"]
-    expect(failing({ files: ui, stamp: green({ passed: [...SUITE, "verify"] }) })).toEqual([
-      "tester",
-    ])
-    expect(
-      detail({ files: ui, stamp: green({ passed: [...SUITE, "verify"] }) }, "tester"),
-    ).toContain("✓ agent-drive (from a tester, for web/next/)")
-    expect(
-      failing({ files: ui, stamp: green({ passed: [...SUITE, "agent-drive", "verify"] }) }),
-    ).toEqual([])
-  })
-
-  test("a train keeps the tester gate: a web/next/ PR with no drive stays off it", () => {
-    const ui = ["web/next/src/components/dashboard/app-sidebar.tsx"]
-    const held = (patch: Partial<PrFacts>) =>
-      trainGates(gatesOf(facts(patch)))
-        .filter((gate) => !gate.ok)
-        .map((gate) => gate.name)
-    expect(held({ files: ui, stamp: green({ passed: [...SUITE, "verify"] }) })).toEqual(["tester"])
-    expect(held({ files: ui, stamp: green({ passed: [...SUITE, "agent-drive"] }) })).toEqual([])
-  })
-
-  test("the suite gate: a stamp from Checks' verify alone, with GitHub's jobs skipped, is not ready", () => {
-    const dashboard = ["api/hono/src/routers/dashboard.ts"]
-    const checksOnly = green({ passed: ["health", "pr-body", "verify"] })
-    expect(failing({ files: dashboard, stamp: checksOnly })).toEqual(["suite"])
-    expect(detail({ files: dashboard, stamp: checksOnly }, "suite")).toContain(
-      "no green stamp passed audit",
-    )
-    expect(failing({ files: dashboard, stamp: green({ passed: [...SUITE, "verify"] }) })).toEqual(
-      [],
-    )
-  })
-
-  test("a train rides without the suite, and lands without it only on a step stamp that ran it", () => {
-    const short = (patch: Partial<PrFacts>, suite: boolean) =>
-      trainGates(gatesOf(facts(patch)), suite)
-        .filter((gate) => !gate.ok)
-        .map((gate) => gate.name)
-    const none: StampRead = { passed: [], reach: [HEAD], stamps: [], why: "none" }
-    expect(short({ stamp: none }, true)).toEqual([])
-    expect(short({ stamp: none }, false)).toEqual(["suite"])
-  })
-
-  test("a red canary stops every merge", () => {
-    const red = [stamp({ at: CANARY.slice(0, 7), status: "red" })]
-    expect(failing({ aheadBy: 2, canaryStamps: red })).toEqual(["canary"])
-    expect(failing({ canaryStamps: [] })).toEqual([])
-    expect(failing({ canaryStamps: [stamp({ at: CANARY.slice(0, 7) })] })).toEqual([])
-  })
-
-  test("canary's stamps that did not read fail the canary gate, naming the error", () => {
-    const facts_ = facts({ canaryStamps: "HTTP 502: Bad Gateway" })
-    const gate = gatesOf(facts_).find((g) => g.name === "canary")
-    expect(gate).toMatchObject({ ok: false })
-    expect(gate?.detail).toContain("HTTP 502: Bad Gateway")
-  })
-
-  test("a red canary lets through the fix: a head holding canary that ran every job's check green", () => {
-    const red = [stamp({ at: CANARY.slice(0, 7), status: "red" })]
-    const ran = green()
-    expect(failing({ aheadBy: 0, canaryStamps: red, stamp: ran })).toEqual([])
-    expect(failing({ aheadBy: 1, canaryStamps: red, stamp: ran })).toContain("canary")
-    // a head whose own stamp is Checks' verify alone, over a commit that ran the suite, ran nothing new
-    const verifyOnly = green({
-      stamps: [stamp({ checks: { verify: { source: "local", status: "pass" } } })],
-    })
-    expect(failing({ aheadBy: 0, canaryStamps: red, stamp: verifyOnly })).toEqual(["canary"])
-    const carried = green({ at: "0".repeat(40), passed: SUITE })
-    expect(failing({ aheadBy: 0, canaryStamps: red, stamp: carried })).toEqual(["canary"])
-  })
-})
-
 describe("marking a draft ready", () => {
   test("the owner's draft whose every other gate passes is marked ready; a failing one is not", () => {
     const draft = facts({ draft: true })
@@ -375,7 +236,7 @@ describe("marking a draft ready", () => {
     expect(withReadyDraft(draft, gatesOf(draft), "marked").find((g) => g.name === "ready")).toEqual(
       { detail: "marked", name: "ready", ok: true },
     )
-    const red = facts({ draft: true, stamp: green({ status: "red" }) })
+    const red = facts({ comments: [review(HEAD, 3)], draft: true })
     expect(marksReady(red, gatesOf(red))).toBe(false)
     expect(marksReady(facts({ author: "someone", draft: true }), [])).toBe(false)
   })
@@ -389,14 +250,14 @@ describe("a head with no finished GitGuardian check", () => {
       .map((gate) => gate.name)
 
   test("refuses on a guarded repo, and passes once GitGuardian has passed at the head", () => {
-    expect(guarded({ checks: [] })).toEqual(["ci"])
-    expect(guarded({ checks: [passed] })).toEqual([])
-    expect(failing({ checks: [] })).toEqual([])
+    expect(guarded({})).toEqual(["ci"])
+    expect(guarded({ checks: [...greenChecks(), passed] })).toEqual([])
+    expect(failing({})).toEqual([])
   })
 
   test("a GitGuardian check still running refuses ci", () => {
     const running = { conclusion: "", name: "GitGuardian Security Checks", status: "IN_PROGRESS" }
-    const gates = gatesOf(facts({ checks: [running] }), { gitGuardian: true })
+    const gates = gatesOf(facts({ checks: [...greenChecks(), running] }), { gitGuardian: true })
     expect(gates.filter((g) => !g.ok).map((g) => g.name)).toEqual(["ci"])
   })
 })

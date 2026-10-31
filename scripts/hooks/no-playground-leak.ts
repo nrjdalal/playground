@@ -323,7 +323,7 @@ const READ_TOOL =
   /^(?:download|extract|fetch|get|list|read|search)_|_(?:history|info|list|read|replies|search|unreads)$/
 const INNER = new Set(["curl", "gh", "git"])
 // A Bash command naming none of these is left alone before any parsing; $'...' can spell any word, so it always counts.
-const MAYBE = /curl|gh|git|stamp/i
+const MAYBE = /curl|gh|git/i
 // What an internal error still refuses: a call to a guarded org's tool or a writing command.
 const WRITE_CALL = /\b(?:curl|gh|git)\b|github|linear|slack/i
 
@@ -399,14 +399,6 @@ const leak: Visit = async (cmd, parsed, env) => {
   if (name === "git" || (first?.unknown && (head === "commit" || head === "push")))
     return policy.git ? git(args, cmd, env) : undefined
   if (name === "curl") return curl(args, cmd, env, xargs)
-  if (
-    name === "bun" &&
-    args
-      .slice(0, 3)
-      .map((a) => a.value)
-      .join(" ") === "run stamp post"
-  )
-    return stamp(args.slice(3), env, parsed.local)
   if (PRINTERS.has(name)) return
   // A wrapper the reader does not know (`vault run -- gh ...`, `uv run git ...`) runs the command after it.
   const at = args.findIndex((a) => INNER.has(program(a.value)))
@@ -474,18 +466,6 @@ async function gh(
     env,
     positionals,
   )
-}
-
-// `bun run stamp post` posts the stamp through gh api inside its script, so the hook reads its free text itself: each --check's comment and the --remark.
-const STAMP_TAKES = new Set(["--check", "--pr", "--remark", "--repo"])
-function stamp(rest: Word[], env: Env, local: Map<string, Text>): Promise<string | undefined> {
-  const { flags } = parseFlags(rest, STAMP_TAKES)
-  const texts = flags
-    .filter((f) => f.name === "--check" || f.name === "--remark")
-    .map((f) => f.value ?? unknown(`${f.name} with no value`))
-  const repos = flags.filter((f) => f.name === "--repo").map((f) => f.value && repoOf(f.value))
-  const candidates = repos.length > 0 ? repos : implicitRepos(env, local)
-  return judge("bun run stamp post", decide(candidates), texts, env)
 }
 
 // A gh write whose repository comes from a value the hook cannot read (-R $R, GH_REPO=$R, repos/$R) or a directory it lost (a cd, popd or env -C it cannot follow) may write to a guarded org, so it is refused before its text is judged.

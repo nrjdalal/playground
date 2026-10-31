@@ -176,15 +176,6 @@ export const SEEDS = (
     type: "setting",
   },
   {
-    key: "checks.outsideAuthors",
-    read: {
-      at: "old",
-      path: "scripts/ops/checks/outside.py",
-      take: (text) => pySet(text, "OUTSIDE"),
-    },
-    type: "setting",
-  },
-  {
     key: "clock.ownerZone",
     read: {
       at: "old",

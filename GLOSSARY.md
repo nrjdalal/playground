@@ -79,7 +79,7 @@ A choice whose undoing costs real rows, real money or someone else's trust, such
 A choice that can be undone: a design, an order, the scope inside an ask the owner approved. The factory picks it and records it in an ADR or on the issue, telling the owner with an Inbox update only when it changes what the owner sees or does ([ADR 0012](./.agents/adr/0012-the-factory-decides-two-way-doors.md)).
 
 **Gate**:
-The set of verdicts a PR's head must hold before pr:merge or a train's land squashes it: code-review-loop's 5/5 and a green stamp, which passed `verify` when it touches the dashboard's code and the tester's `agent-drive` on a `web/next/` diff ([playbook](./extensions/core/skills/playbook/SKILL.md), the **gate** rule).
+The set of verdicts a PR's head must hold before pr:merge squashes it: code-review-loop's 5/5 and GitHub's `Audit, Lint, and Build` and `test` checks green ([playbook](./extensions/core/skills/playbook/SKILL.md), the **gate** rule).
 
 **Lead**:
 One of the two managers under the dispatcher that run the floor (the dashboard's and the roster's Manager): the Builder leads the workers, Ops the runners and the ops jobs. Every worker and runner reports to exactly one lead, and the leads report to the dispatcher ([playbook](./extensions/core/skills/playbook/SKILL.md)).

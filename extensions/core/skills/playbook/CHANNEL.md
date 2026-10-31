@@ -53,9 +53,9 @@ The dispatcher sorts every ask from the colleague, their Playground or the obser
    - anything unclear.
 
 A **PR** from the colleague takes its own path: the dispatcher decides it when it is simple and works, a change to a skill's or the harness's logic included.
-The dispatcher merges it on their own PR: a read-only review of its diff through [code-review-loop](../code-review-loop/SKILL.md), the Builder's `bun run ci:go <n> <sha7> --outside-author <their login>`, Checks at their head, then `bun run pr:merge <n> --outside-author <their login>`.
+The dispatcher merges it on their own PR: a read-only review of its diff through [code-review-loop](../code-review-loop/SKILL.md), GitHub's two checks green at their head, then `bun run pr:merge <n> --outside-author <their login>`.
 Every review verdict on an outside author's PR carries three lines: need (do we need it), hit (do we hit the problem it fixes, with evidence) and factory (does it upgrade or degrade the factory, and why).
-A draft of theirs is marked ready by our worker on their PR: once the review passes, it runs `gh pr ready <n>` itself before the Builder's go, since `pr:merge` marks only the owner's drafts ready.
+A draft of theirs is marked ready by our worker on their PR: once the review passes, it runs `gh pr ready <n>` itself before the merge, since `pr:merge` marks only the owner's drafts ready.
 It is re-landed under our own PR only when their branch cannot take our fix, and closed only as a duplicate or a decline, with the reason written on their PR.
 The dispatcher records each decision and its reason on the PR's issue, as **ask** records a two-way door.
 Only a one-way door, a hard-to-undo change to how the owner works, goes to the owner's Inbox as a decision under **ask**.
