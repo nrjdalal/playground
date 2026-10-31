@@ -4,6 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import {
+  capacityRefusals,
   leftForYou,
   report,
   scriptsGroup,
@@ -49,6 +50,51 @@ describe("the new-user gate's reads", () => {
         { detail: "no usage reading", name: "Usage shows", ok: false },
       ]),
     ).toBe("PASS 1. curl | bash exits 0\nFAIL 2. Usage shows: no usage reading\n1 of 2 passed")
+  })
+})
+
+describe("a step failed on spawn.sh's capacity gate", () => {
+  // two rows as spawn.sh's gate_capacity writes them to capacity.jsonl: a pass, then the load refusal a box met at load 26.9
+  const log = [
+    JSON.stringify({
+      at: "2026-10-31T01:30:00Z",
+      detail: "",
+      gate: "",
+      readings: { load5: 9.1 },
+      verdict: "pass",
+    }),
+    JSON.stringify({
+      at: "2026-10-31T01:31:05Z",
+      detail:
+        "max(load1, load5) is 26.90 and 0 started in the last 5 minutes, at or over 11.25: 15, the 15 cores at PLAYGROUND_LOAD_MULT 1, less the 3.75 kept for small items (this start is medium); the CPU is 80% busy (top), 12 of the 15 cores, which with the starts is at or over 11.25 too. Wait for it to fall, or close a session that is done, and run it again.",
+      gate: "load",
+      readings: { load5: 26.9 },
+      verdict: "refused",
+    }),
+    "not json",
+  ].join("\n")
+
+  test("names each refusal since the step began, by its gate and its words, and none from before it", () => {
+    expect(capacityRefusals(log, "2026-10-31T01:31:00Z")).toEqual([
+      expect.stringMatching(/^load gate: max\(load1, load5\) is 26\.90 .* at or over 11\.25/),
+    ])
+    expect(capacityRefusals(log, "2026-10-31T01:32:00Z")).toEqual([])
+  })
+
+  test("reads INCONCLUSIVE, not FAIL, and counts it apart", () => {
+    expect(
+      report([
+        { detail: "", name: "curl | bash exits 0", ok: true },
+        {
+          detail: "spawn.sh's capacity gate refused a start (load gate: …)",
+          inconclusive: true,
+          name: "Alpha routes",
+          ok: false,
+        },
+      ]),
+    ).toBe(
+      "PASS 1. curl | bash exits 0\nINCONCLUSIVE 2. Alpha routes: spawn.sh's capacity gate refused a start (load gate: …)\n1 of 2 passed, 1 inconclusive",
+    )
   })
 })
 
