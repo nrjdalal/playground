@@ -1,12 +1,26 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test"
 import { join, resolve } from "node:path"
 
+import { join as hold, publish } from "../../../../../../api/hono/src/lib/yard/socket"
+
 const API = resolve(import.meta.dir, "../../../../../../api/hono")
 const SOCKET = join(API, "src/lib/yard/socket.ts")
 
 const dockerUp = (): boolean =>
   Bun.which("docker") !== null &&
   Bun.spawnSync(["docker", "info"], { stderr: "ignore", stdout: "ignore" }).exitCode === 0
+
+// hono/bun hands onClose a new context for the same socket, so a close that looked the socket up by its context removed nothing and closed sockets piled up
+describe("Yard's socket on one instance", () => {
+  test("the close join returns removes that socket alone, and the member's other socket still gets a post", async () => {
+    const got: string[] = []
+    const leave = hold("cy", { send: (data) => got.push(`first ${data}`) })
+    hold("cy", { send: (data) => got.push(`second ${data}`) })
+    leave()
+    await publish(["cy"], { channel: "c1", lastReadAt: "2026-10-31T00:00:00.000Z", type: "read" })
+    expect(got.map((line) => line.split(" ")[0])).toEqual(["second"])
+  })
+})
 
 // Two API instances on one throwaway Redis, each a child Bun in the API's folder, so its tsconfig's @/ resolves and KV_URL is read as its module loads.
 describe.skipIf(!dockerUp())("Yard's socket across instances", () => {

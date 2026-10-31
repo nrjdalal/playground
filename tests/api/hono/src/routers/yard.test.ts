@@ -144,6 +144,13 @@ describe.skipIf(!dockerUp())("Yard's routes on the hosted build", () => {
     ])
   })
 
+  // a fan-out runs after the write has committed, so one that fails must not turn the answer into a 500
+  test("a post and a read answer what they wrote while KV_URL's Redis refuses every command", async () => {
+    const script = `const redis = Bun.listen({ hostname: "127.0.0.1", port: 0, socket: { data: (socket) => { socket.write("-ERR refused\\r\\n") } } }); process.env.KV_URL = "redis://127.0.0.1:" + redis.port; const server = Bun.serve((await import(process.env.YARD_HOSTED)).default); const api = "http://127.0.0.1:" + server.port + "/api/v1/yard"; const headers = { authorization: "Bearer yard_bo", "content-type": "application/json" }; const made = await fetch(api + "/channels", { body: JSON.stringify({ name: "quiet" }), headers, method: "POST" }); const { id } = (await made.json()).data.channel; const posted = await fetch(api + "/channels/" + id + "/messages", { body: JSON.stringify({ kind: "text", text: "hello" }), headers, method: "POST" }); const read = await fetch(api + "/channels/" + id + "/read", { body: "{}", headers, method: "POST" }); console.log(JSON.stringify([made.status, posted.status, read.status])); process.exit(0)`
+    const run = child(script, { POSTGRES_URL: url })
+    expect(JSON.parse(last(run.out))).toEqual([201, 201, 200])
+  })
+
   test("GitHub's sign-in stamps the login and takes it from a stale holder, and no client sets one", async () => {
     await sql`insert into "user" (id, name, email, login, role) values ('old', 'old', ${["old", "example.com"].join("@")}, 'Taken', 'member')`
     const run = child(await Bun.file(GITHUB).text(), { GH_LOGIN: "taken", POSTGRES_URL: url })

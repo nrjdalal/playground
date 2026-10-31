@@ -124,6 +124,9 @@ export const createChannel = async (
   caller: Caller,
   { name, topic }: { name: string; topic?: string },
 ): Promise<Channel> => {
+  // the redeem's channels are made by the first redeem alone, so a member who named one first cannot set #releases open to every member
+  if (JOINED_ON_REDEEM.some((channel) => channel.name === name))
+    throw new ApiError(409, "CONFLICT", `#${name} is kept for Yard's own channel`)
   await take(db, `writes:${caller.id}`, "hour", WRITES_HOUR)
   const id = crypto.randomUUID()
   try {

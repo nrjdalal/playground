@@ -14,17 +14,18 @@ const CHANNEL = "yard"
 // The sockets open on this instance, by the member they belong to.
 const open = new Map<string, Set<Socket>>()
 
+// Holds a socket open for its member and returns what removes it, so the close removes the very object the open added (hono/bun hands onClose a new context, which matched none).
 // With KV_URL set, the first join subscribes, so a socket hears posts from other instances before its own instance has posted.
 export const join = (userId: string, socket: Socket) => {
   const set = open.get(userId) ?? new Set()
   set.add(socket)
   open.set(userId, set)
-  if (env.KV_URL) connect(env.KV_URL).catch(() => {})
-}
-
-export const leave = (userId: string, socket: Socket) => {
-  open.get(userId)?.delete(socket)
-  if (open.get(userId)?.size === 0) open.delete(userId)
+  if (env.KV_URL)
+    connect(env.KV_URL).catch((error) => console.error("[yard] socket subscribe failed", error))
+  return () => {
+    set.delete(socket)
+    if (set.size === 0 && open.get(userId) === set) open.delete(userId)
+  }
 }
 
 const sendHere = (userIds: string[], frame: Frame) => {

@@ -115,6 +115,14 @@ describe.skipIf(!dockerUp())("Yard's store", () => {
       expect([after.unread, after.mentions]).toEqual([0, 0])
     })
 
+    test("a member cannot make #general or #releases before the first redeem does, so #releases stays the owner's", async () => {
+      for (const name of ["general", "releases"])
+        await expect(store.createChannel(db, web("bo"), { name })).rejects.toMatchObject({
+          message: `#${name} is kept for Yard's own channel`,
+          status: 409,
+        })
+    })
+
     test("a name already taken is a conflict", async () => {
       await store.createChannel(db, web("bo"), { name: "taken" })
       await expect(store.createChannel(db, web("di"), { name: "taken" })).rejects.toMatchObject({
