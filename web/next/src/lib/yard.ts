@@ -33,7 +33,7 @@ export const socketUrl = (env: { NEXT_PUBLIC_API_URL: string }, token: string) =
 // A closed socket's next try waits 2s, doubling with each try that fails to a minute, so a tab whose socket keeps failing settles at one try a minute.
 export const retryDelay = (tries: number) => Math.min(2_000 * 2 ** tries, 60_000)
 
-// A message that arrives twice, from the socket and a post's own answer, stays once, in the API's order by its time (a post approved later keeps the time it was made).
+// A message that arrives twice, from the socket and a post's own answer, stays once, in the API's order by its time (a post approved later moves to the time it was sent).
 export const upsertMessage = (list: Message[], message: Message) =>
   [...list.filter((row) => row.id !== message.id), message].sort((a, b) => a.at.localeCompare(b.at))
 

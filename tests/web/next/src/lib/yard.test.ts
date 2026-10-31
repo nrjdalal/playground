@@ -87,15 +87,22 @@ describe("retryDelay", () => {
 })
 
 describe("upsertMessage", () => {
-  test("keeps a message that arrives twice once, in time order, so a post approved later stays where it was made", () => {
+  test("keeps a message that arrives twice once, in time order", () => {
     const early = message({ at: "2026-10-31T09:00:00Z", id: "m1", text: "first" })
     const late = message({ at: "2026-10-31T10:00:00Z", id: "m2" })
-    const approved = { ...early, text: "again" }
-    expect(upsertMessage([early, late], approved).map((row) => [row.id, row.text])).toEqual([
+    const again = { ...early, text: "again" }
+    expect(upsertMessage([early, late], again).map((row) => [row.id, row.text])).toEqual([
       ["m1", "again"],
       ["m2", late.text],
     ])
     expect(upsertMessage([early], late).map((row) => row.id)).toEqual(["m1", "m2"])
+  })
+
+  test("moves a post approved later to the time it was sent, as the API stamps it", () => {
+    const held = message({ at: "2026-10-31T09:00:00Z", id: "m1", status: "pending" })
+    const late = message({ at: "2026-10-31T10:00:00Z", id: "m2" })
+    const sent = { ...held, at: "2026-10-31T11:00:00Z", status: "sent" as const }
+    expect(upsertMessage([held, late], sent).map((row) => row.id)).toEqual(["m2", "m1"])
   })
 })
 
