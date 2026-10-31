@@ -1599,3 +1599,31 @@ describe("what the command leaves in its process group", () => {
     expect(r.code).toBe(0)
   })
 })
+
+describe("box-off", () => {
+  // run-slot.sh box-off's words for a scratch state folder, the ssh key at a path of its own
+  const boxOff = async (m: ReturnType<typeof machine>, key: string) => {
+    const p = Bun.spawn(["bash", SCRIPT, "box-off"], {
+      env: m.env({ RUNNER_HOST_KEY: key }),
+      stdout: "pipe",
+    })
+    expect(await p.exited).toBe(0)
+    return (await new Response(p.stdout).text()).split("\n").filter(Boolean)
+  }
+
+  test("names each precondition of the runner-box route that fails, and nothing once every one holds (#129)", async () => {
+    const m = machine()
+    const key = join(m.ops, "a-key")
+    expect(await boxOff(m, key)).toEqual(["no-ci-sh", "no-ssh-key"])
+    mkdirSync(join(m.ops, "runner-host"))
+    writeFileSync(join(m.ops, "runner-host", "ci.sh"), "#!/bin/bash\n")
+    chmodSync(join(m.ops, "runner-host", "ci.sh"), 0o755)
+    writeFileSync(key, "")
+    expect(await boxOff(m, key)).toEqual([])
+    writeFileSync(join(m.ops, "runner-host", "off"), "")
+    expect(await boxOff(m, key)).toEqual(["runner-host-off"])
+    rmSync(join(m.ops, "runner-host", "off"))
+    writeFileSync(join(m.ops, "runner-host", "slot-off"), "")
+    expect(await boxOff(m, key)).toEqual(["slot-off"])
+  })
+})
