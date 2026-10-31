@@ -4,7 +4,9 @@ import { join } from "node:path"
 import { ASK_CODE_COLUMNS } from "@packages/config/inbox"
 import { createDatabase } from "@packages/db"
 import { env } from "@packages/env/db"
+import { readPolicyOrDefaults, ruleSettings } from "@packages/settings"
 
+import { fillNow, futureNowTimes, NOW, ownerTime } from "@/lib/dashboard/ask-clock"
 import { ASK_EXAMPLES, isAskExampleKind, shapeHints } from "@/lib/dashboard/ask-shape"
 import { branchOf, checkoutRoot, readsLive } from "@/lib/dashboard/fixture"
 import {
@@ -22,6 +24,7 @@ import {
 import { keepAttachments } from "@/lib/dashboard/inbox-attachments"
 import { livePair, othersLiveDashboard } from "@/lib/dev/launch"
 import { checkoutMismatch, locate, prove } from "@/lib/sessions/guard"
+import { dataDir } from "@/lib/sessions/paths"
 
 // The one way into Playground's Inbox: `bun run ask new < item.json` posts a decision, a draft or an update and prints its id (its #iN tag on stderr); `edit <id|#iN> < item.json` replaces the poster's own open item's title and preview in place, checked as new checks it; `open [--from <session>]` lists the open items, oldest first, so a poster names one on the same thing rather than posting it twice; `get <id|#iN>` prints the item, the owner's answer included once given, and `--ack` marks that answer read, so the Dashboard shows it reached the poster, closing a deny, a clear, a discard or a provided secret; `ack <id>` closes it once carried out, a go with `--link` (where it landed) or `--no-link "<why>"`; `settle <id>` closes the poster's own open item once it is decided another way; `resolve <id> --by <you>` closes the poster's own alert update once it has resolved itself; `stale` lists the answers no poster has closed, for ops-sweep; `example <kind>` prints an ask to start from, and `new` hints at that shape when an ask is one block of prose or holds a code line too wide for the card. See `.agents/dashboard/asks.md` for the fields.
 const USAGE = `usage: bun run ask new [--thread <id>] < item.json
@@ -163,6 +166,19 @@ if (command === "new" || command === "edit") {
   } catch {
     fail("stdin is not JSON")
   }
+  // a "now" in an item is the clock's: a measured or now time ahead of it is refused, and {now} is filled with the time it posts at, in the owner's zone (clock.md)
+  const policy = readPolicyOrDefaults(dataDir())
+  const zone = ruleSettings.get(
+    policy.refusal === undefined ? policy.settings : { schemaVersion: 1, values: {} },
+    "clock.ownerZone",
+  )
+  const now = new Date()
+  const ahead = futureNowTimes(input, now, zone)
+  if (ahead.length > 0)
+    fail(
+      `a "measured" or "now" time runs ahead of the clock, ${ownerTime(now, zone)}: ${ahead.join("; ")}; write ${NOW}, which ask fills with the time it posts at`,
+    )
+  input = fillNow(input, now, zone)
   for (const hint of shapeHints(input)) {
     console.error(
       hint.kind === "prose"
