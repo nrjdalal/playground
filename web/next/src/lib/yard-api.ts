@@ -7,11 +7,21 @@ import { useEffect } from "react"
 import { unwrap } from "@/lib/api/client"
 import { config } from "@/lib/config"
 import { queryRetry } from "@/lib/query"
-import { SOCKET_ROUTE, socketUrl, YARD_ROUTE, type YardChannel, type YardMessage } from "@/lib/yard"
+import {
+  catchUp,
+  messagesKey,
+  messagesQuery,
+  SOCKET_ROUTE,
+  socketUrl,
+  YARD_KEY,
+  YARD_ROUTE,
+  type YardChannel,
+  type YardMessage,
+} from "@/lib/yard"
 
-export const CHANNELS_KEY = ["yard", "channels"] as const
-export const messagesKey = (channel: string) => ["yard", "messages", channel] as const
-export const TOKENS_KEY = ["yard", "tokens"] as const
+export const CHANNELS_KEY = [...YARD_KEY, "channels"] as const
+export const INVITES_KEY = [...YARD_KEY, "invites"] as const
+export const TOKENS_KEY = [...YARD_KEY, "tokens"] as const
 
 // Every read and write goes to the API's Yard router with the session's cookie: the hosted API's own, or locally the routes that hold the Mac's Yard token.
 async function yard<T>(path: string, init?: { body?: unknown; method?: string }): Promise<T> {
@@ -27,6 +37,17 @@ async function yard<T>(path: string, init?: { body?: unknown; method?: string })
   return data as T
 }
 
+// An invite as the API sends it: an invite request names who asked and for whom, and its code comes back once, when the owner opens it.
+export type YardInvite = {
+  code?: string
+  createdAt: string
+  expiresAt: string | null
+  forLogin: string | null
+  id: string
+  requestedBy: { login: string } | null
+  status: "open" | "redeemed" | "requested" | "revoked"
+}
+
 export type YardToken = {
   createdAt: string
   id: string
@@ -38,10 +59,15 @@ export type YardToken = {
 export const yardApi = {
   approve: (id: string) =>
     yard<{ message: YardMessage }>(`/messages/${id}/approve`, { method: "POST" }),
+  approveInvite: (id: string) =>
+    yard<{ invite: YardInvite }>(`/invites/${id}/approve`, { method: "POST" }),
   channels: () => yard<{ channels: YardChannel[] }>("/channels"),
   createToken: (name: string) =>
     yard<{ token: YardToken & { secret: string } }>("/tokens", { body: { name }, method: "POST" }),
   deny: (id: string) => yard<{ message: YardMessage }>(`/messages/${id}/deny`, { method: "POST" }),
+  denyInvite: (id: string) =>
+    yard<{ invite: YardInvite }>(`/invites/${id}/deny`, { method: "POST" }),
+  invites: () => yard<{ invites: YardInvite[] }>("/invites"),
   message: (id: string) => yard<{ message: YardMessage }>(`/messages/${id}`),
   messages: (channel: string) =>
     yard<{ hasMore: boolean; messages: YardMessage[] }>(`/channels/${channel}/messages`),
@@ -67,12 +93,9 @@ export const useYardChannels = () =>
   })
 
 export const useYardMessages = (channel: string) =>
-  useQuery({
-    queryFn: async () => (await yardApi.messages(channel)).messages ?? [],
-    queryKey: messagesKey(channel),
-  })
+  useQuery(messagesQuery(channel, async () => (await yardApi.messages(channel)).messages ?? []))
 
-// One socket per signed-in tab: each frame lands in the query cache, and a closed socket (Vercel closes one at 800s) opens again with a fresh one-time token.
+// One socket per signed-in tab: each frame lands in the query cache, and a closed socket (Vercel closes one at 800s) opens again with a fresh one-time token, then reads again what it may have missed (catchUp).
 export function useYardSocket(enabled: boolean) {
   const client = useQueryClient()
   useEffect(() => {
@@ -80,6 +103,7 @@ export function useYardSocket(enabled: boolean) {
     let socket: WebSocket | null = null
     let stopped = false
     let retry: ReturnType<typeof setTimeout> | undefined
+    let opened = false
     const open = async () => {
       try {
         const response = await fetch(`${config.api.url}/api/auth/one-time-token/generate`, {
@@ -88,6 +112,10 @@ export function useYardSocket(enabled: boolean) {
         const { token } = (await response.json()) as { token: string }
         if (stopped) return
         socket = new WebSocket(socketUrl(config.api.url, SOCKET_ROUTE, token))
+        socket.onopen = () => {
+          if (opened) void catchUp(client)
+          opened = true
+        }
         socket.onmessage = (event) => {
           const frame = JSON.parse(String(event.data)) as { message?: YardMessage; type: string }
           if (frame.type === "message" && frame.message) {

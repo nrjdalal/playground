@@ -1,10 +1,14 @@
 import { describe, expect, test } from "bun:test"
+import { join } from "node:path"
 
 import {
   approveHref,
   canPost,
+  catchUp,
   channelHref,
   channelTitle,
+  inviteRequests,
+  messagesQuery,
   SOCKET_ROUTE,
   socketUrl,
   type YardChannel,
@@ -12,6 +16,15 @@ import {
   yardGate,
   yardGroups,
 } from "../../../../../web/next/src/lib/yard"
+
+const web = join(import.meta.dir, "../../../../../web/next")
+const { QueryClient } = (await import(Bun.resolveSync("@tanstack/react-query", web))) as {
+  QueryClient: new () => {
+    getQueryState: (key: readonly unknown[]) => { isInvalidated: boolean } | undefined
+    invalidateQueries: (filters: { queryKey: readonly unknown[] }) => Promise<void>
+    setQueryData: (key: readonly unknown[], data: unknown) => void
+  }
+}
 
 const channel = (over: Partial<YardChannel> = {}): YardChannel => ({
   id: "c1",
@@ -103,5 +116,43 @@ describe("canPost", () => {
     expect(canPost(releases, "member")).toBe(false)
     expect(canPost(releases, "owner")).toBe(true)
     expect(canPost(channel(), "member")).toBe(true)
+  })
+})
+
+describe("catchUp", () => {
+  test("marks every Yard read stale, so a reopened socket's missed messages are read again", async () => {
+    const client = new QueryClient()
+    client.setQueryData(["yard", "channels"], [])
+    client.setQueryData(["yard", "messages", "c1"], [])
+    client.setQueryData(["session"], {})
+    await catchUp(client)
+    expect(client.getQueryState(["yard", "channels"])?.isInvalidated).toBe(true)
+    expect(client.getQueryState(["yard", "messages", "c1"])?.isInvalidated).toBe(true)
+    expect(client.getQueryState(["session"])?.isInvalidated).toBe(false)
+  })
+})
+
+describe("the open channel's messages", () => {
+  // React Query schedules no interval where there is no window (its isServer), so a fake-timer run here would need a global window, which a test beside others may not set; this holds the options it reads, and React Query's own tests hold the timing.
+  test("are read again every 30 seconds while the tab shows, so a message the socket missed shows within that", () => {
+    const query = messagesQuery("c1", async () => [])
+    expect(query.queryKey).toEqual(["yard", "messages", "c1"])
+    expect(query.refetchInterval).toBe(30_000)
+    expect("refetchIntervalInBackground" in query).toBe(false)
+  })
+})
+
+describe("inviteRequests", () => {
+  test("keeps the requests that wait on the owner, in the API's order", () => {
+    const invite = (id: string, status: "open" | "redeemed" | "requested" | "revoked") => ({
+      createdAt: "2026-10-31T00:00:00Z",
+      expiresAt: null,
+      forLogin: "octo-sample",
+      id,
+      requestedBy: { login: "lark-sample" },
+      status,
+    })
+    const list = [invite("a", "requested"), invite("b", "open"), invite("c", "requested")]
+    expect(inviteRequests(list).map((row) => row.id)).toEqual(["a", "c"])
   })
 })

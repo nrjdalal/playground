@@ -1,5 +1,7 @@
 import { Account } from "@/components/yard/account"
+import { auth } from "@/lib/auth"
 
-export default function Page() {
-  return <Account />
+export default async function Page() {
+  const session = await auth.api.getSession()
+  return <Account role={session?.user.role} />
 }

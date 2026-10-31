@@ -20,14 +20,15 @@ import {
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { toast } from "@/components/ui/toast"
 import { config } from "@/lib/config"
-import { approveHref, canPost, channelTitle, type YardChannel, type YardMessage } from "@/lib/yard"
 import {
-  CHANNELS_KEY,
+  approveHref,
+  canPost,
+  channelTitle,
   messagesKey,
-  useYardChannels,
-  useYardMessages,
-  yardApi,
-} from "@/lib/yard-api"
+  type YardChannel,
+  type YardMessage,
+} from "@/lib/yard"
+import { CHANNELS_KEY, useYardChannels, useYardMessages, yardApi } from "@/lib/yard-api"
 
 type Kind = (typeof MESSAGE_KINDS)[number]
 

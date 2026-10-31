@@ -1,17 +1,20 @@
 "use client"
 
-import { tokenNameSchema } from "@packages/message"
+import { roleAtLeast } from "@packages/auth/access"
+import { invitePath, tokenNameSchema } from "@packages/message"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
+import Link from "next/link"
 import { useState } from "react"
 
 import { Button } from "@/components/ui/button"
 import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { toast } from "@/components/ui/toast"
-import { TOKENS_KEY, yardApi } from "@/lib/yard-api"
+import { inviteRequests } from "@/lib/yard"
+import { INVITES_KEY, TOKENS_KEY, yardApi } from "@/lib/yard-api"
 
-// Account and tokens: each token is a device's way to post without a browser, named for that device (never "web"), its secret shown once.
-export function Account() {
+// Account and tokens: each token is a device's way to post without a browser, named for that device (never "web"), its secret shown once. The owner also sees the invite requests waiting on them.
+export function Account({ role }: { role: string | null | undefined }) {
   const client = useQueryClient()
   const { data: tokens } = useQuery({
     queryFn: async () => (await yardApi.tokens()).tokens,
@@ -101,6 +104,33 @@ export function Account() {
           <li className="text-muted-foreground px-3 py-2 text-xs">No tokens yet.</li>
         )}
       </ul>
+      {roleAtLeast(role, "owner") && <InviteRequests />}
     </main>
+  )
+}
+
+// Each member's request to let someone in, opening its own page to approve or deny it.
+function InviteRequests() {
+  const { data: requests } = useQuery({
+    queryFn: async () => inviteRequests((await yardApi.invites()).invites),
+    queryKey: INVITES_KEY,
+  })
+  return (
+    <section className="flex flex-col gap-2">
+      <h2 className="text-sm font-medium">Invite requests</h2>
+      <ul className="divide-y rounded-md border text-sm">
+        {requests?.map((invite) => (
+          <li key={invite.id}>
+            <Link className="hover:bg-muted flex px-3 py-2" href={invitePath(invite.id)}>
+              {invite.requestedBy?.login ?? "A member"} asks to let {invite.forLogin ?? "someone"}{" "}
+              in
+            </Link>
+          </li>
+        ))}
+        {requests?.length === 0 && (
+          <li className="text-muted-foreground px-3 py-2 text-xs">None waiting.</li>
+        )}
+      </ul>
+    </section>
   )
 }
