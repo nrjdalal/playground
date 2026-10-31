@@ -67,6 +67,29 @@ export function zaiUsageOf(text: string, now: Date): ZaiUsage | null {
 export const zaiProblem = (zai: ZaiUsage | null): string | null =>
   zai?.stale ? `The GLM credit windows are stale: last written ${zai.writtenAt}` : null
 
+const failureSchema = z.object({ error: z.string(), errorAt: z.string() })
+
+// Pure: the report's problem line for a read the job wrote as failed (its error and errorAt), or null; zaiUsageOf reads that file as no usage, so this line is the one trace of it.
+export function zaiFailureOf(text: string): string | null {
+  try {
+    const parsed = failureSchema.safeParse(JSON.parse(text))
+    return parsed.success
+      ? `The GLM usage read failed at ${parsed.data.errorAt}: ${parsed.data.error}`
+      : null
+  } catch {
+    return null
+  }
+}
+
+// The file's failed read as zaiFailureOf names it; a missing or unreadable file is none.
+export async function readZaiFailure(path = zaiPath()): Promise<string | null> {
+  try {
+    return zaiFailureOf(await Bun.file(path).text())
+  } catch {
+    return null
+  }
+}
+
 // The file as zaiUsageOf reads it; a missing or unreadable one is no usage.
 export async function readZaiUsage(path = zaiPath(), now = new Date()): Promise<ZaiUsage | null> {
   try {

@@ -457,7 +457,7 @@ elif backend == "glm":
     balance = zai.get("balance") if isinstance(zai, dict) else None
     if isinstance(balance, dict) and balance.get("empty") is True:
         readings["balance"] = "empty"
-        refuse("usage", f"the GLM balance is empty (zai-usage.json balance, a GLM session's 429 [1113] at {balance.get('seenAt', 'an unread time')}). Top it up at Z.ai: the gate lets one GLM start try again an hour after that failure.")
+        refuse("usage", f"the GLM balance is empty (zai-usage.json balance, a GLM session's 429 [1113] at {balance.get('seenAt', 'an unread time')}). Top it up at Z.ai: the gate lets GLM starts try again an hour after that failure.")
     if five_pct is None:
         refuse("usage", "zai-usage.json holds no five-hour window")
     readings["fiveHour"] = five_pct

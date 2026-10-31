@@ -1,5 +1,6 @@
 import { join } from "node:path"
 
+import { sessionStateDir } from "@packages/config/session-state"
 import { dataDir } from "@packages/env/data-dir"
 import { accountSettings, accountsOf, modelSettings, readPolicy } from "@packages/settings"
 
@@ -20,7 +21,7 @@ const key = async (): Promise<string> => {
   return out.exitCode === 0 ? out.stdout.toString().trim() : ""
 }
 const read = async (): Promise<unknown> => zaiQuota(await key())
-const balance = () => emptyBalanceAt(join(data, "session-state"))
+const balance = () => emptyBalanceAt(sessionStateDir(data))
 
 if (process.argv.includes("--once")) {
   const result = await cycle(read, usagePath, new Date(), balance)

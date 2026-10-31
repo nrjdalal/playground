@@ -1,7 +1,12 @@
 import { describe, expect, test } from "bun:test"
 import { join } from "node:path"
 
-import { ZAI_STALE_MS, zaiProblem, zaiUsageOf } from "../../../../../../api/hono/src/lib/usage/zai"
+import {
+  ZAI_STALE_MS,
+  zaiFailureOf,
+  zaiProblem,
+  zaiUsageOf,
+} from "../../../../../../api/hono/src/lib/usage/zai"
 
 const SAMPLE = JSON.stringify({
   windows: {
@@ -112,5 +117,21 @@ describe("zaiProblem", () => {
     )
     expect(zaiProblem(zaiUsageOf(SAMPLE, new Date("2026-10-16T15:05:00.000Z")))).toBeNull()
     expect(zaiProblem(null)).toBeNull()
+  })
+})
+
+describe("zaiFailureOf", () => {
+  test("names a read the job wrote as failed, which zaiUsageOf reads as no usage", () => {
+    const failed = JSON.stringify({
+      ...JSON.parse(SAMPLE),
+      error: "Z.ai 500: code ?",
+      errorAt: "2026-10-16T15:05:00.000Z",
+    })
+    expect(zaiUsageOf(failed, new Date("2026-10-16T15:06:00.000Z"))).toBeNull()
+    expect(zaiFailureOf(failed)).toBe(
+      "The GLM usage read failed at 2026-10-16T15:05:00.000Z: Z.ai 500: code ?",
+    )
+    expect(zaiFailureOf(SAMPLE)).toBeNull()
+    expect(zaiFailureOf("not json")).toBeNull()
   })
 })

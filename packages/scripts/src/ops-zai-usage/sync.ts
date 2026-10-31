@@ -1,5 +1,7 @@
-import { readdir, readFile } from "node:fs/promises"
+import { readdir } from "node:fs/promises"
 import { join } from "node:path"
+
+import { parseSessionState } from "@packages/config/session-state"
 
 import { writeAtomic } from "../write-atomic"
 
@@ -68,7 +70,7 @@ export async function zaiQuota(key: string, fetchImpl: typeof fetch = fetch): Pr
   throw new Error(`Z.ai ${res.status}: code ${String(body.code ?? "?")}`.replaceAll(key, "***"))
 }
 
-// How long a GLM session's empty-balance failure holds the balance empty; once it lapses, spawn.sh lets one GLM start try again, and a balance still empty fails that start and sets it afresh.
+// How long a GLM session's empty-balance failure holds the balance empty; once it lapses, spawn.sh lets GLM starts try again, and a balance still empty fails the next one and sets it afresh.
 export const BALANCE_HOLD_MS = 60 * 60 * 1000
 
 // The newest empty-balance failure (reason "balance", which the session-state hook writes for Z.ai's 429 [1113]) within the hold, or null; the quota endpoint keeps answering with low use while the balance is empty (31 Oct), so a GLM session's own error is the one source.
@@ -76,10 +78,10 @@ export async function emptyBalanceAt(stateDir: string, now = new Date()): Promis
   const names = await readdir(stateDir).catch(() => [] as string[])
   let newest: string | null = null
   for (const name of names.filter((n) => n.endsWith(".json"))) {
-    const record = await readFile(join(stateDir, name), "utf8")
-      .then((text) => JSON.parse(text) as { at?: unknown; reason?: unknown })
-      .catch(() => null)
-    const at = typeof record?.at === "string" ? Date.parse(record.at) : Number.NaN
+    const record = await Bun.file(join(stateDir, name))
+      .text()
+      .then(parseSessionState, () => null)
+    const at = record ? Date.parse(record.at) : Number.NaN
     if (record?.reason !== "balance" || Number.isNaN(at) || now.getTime() - at > BALANCE_HOLD_MS)
       continue
     if (!newest || at > Date.parse(newest)) newest = new Date(at).toISOString()
@@ -106,14 +108,17 @@ export async function cycle(
     return "ok"
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err)
-    const last = await readFile(path, "utf8")
+    const last = await Bun.file(path)
+      .text()
       .then((text) => JSON.parse(text) as Record<string, unknown>)
       .catch(() => ({}))
     const { windows, writtenAt } = last as { windows?: unknown; writtenAt?: unknown }
     await writeAtomic(
       path,
       `${JSON.stringify({ error, errorAt: now.toISOString(), ...(windows ? { windows, writtenAt } : {}) }, null, 2)}\n`,
-    ).catch(() => {})
+    ).catch((writeErr: unknown) =>
+      console.error(`ops-zai-usage: could not write the error: ${String(writeErr)}`),
+    )
     return error
   }
 }
