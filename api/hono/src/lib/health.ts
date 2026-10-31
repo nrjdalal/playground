@@ -4,6 +4,7 @@ import { env } from "@packages/env/api-hono"
 import { sql } from "drizzle-orm"
 
 import { currentSource } from "@/lib/dashboard/fixture"
+import { ownVibe } from "@/lib/dashboard/vibe"
 import { readDispatcherSlots } from "@/lib/dashboard/workers"
 
 // How long /api/health waits for its `select 1`, so a database that hung (8 Oct: Docker stopped answering for 42 minutes) degrades the route within about this instead of leaving it saying ok. It sits under the web's 2s abort on this route (web/next/src/lib/health.ts), so the API answers before the page gives up.
@@ -48,7 +49,7 @@ export const probeDb = async (
   }
 }
 
-// The /api/health body: the fields it always carried, plus the database's state and an overall message that degrades when it cannot be reached, and the sidebar's dispatcher rows, which the web's server render reads with it.
+// The /api/health body: the fields it always carried, plus the database's state and an overall message that degrades when it cannot be reached, the sidebar's dispatcher rows, which the web's server render reads with it, and the branch while this checkout runs as a Vibeground.
 export const healthData = async (
   database: Database = db,
   withinMs: number = DB_TIMEOUT_MS,
@@ -60,6 +61,7 @@ export const healthData = async (
   environment: (typeof env)["NODE_ENV"]
   message: "ok" | "degraded"
   version: string
+  vibe: string | null
 }> => {
   const [checked, dispatcherSlots] = await Promise.all([
     probeDb(database, withinMs),
@@ -73,5 +75,6 @@ export const healthData = async (
     environment: env.NODE_ENV,
     message: checked.state === "ok" ? "ok" : "degraded",
     version: getBuildVersion(),
+    vibe: ownVibe(),
   }
 }
