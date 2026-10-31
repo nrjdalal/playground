@@ -23,7 +23,6 @@ A new test file needs no timing to run; a hand run of `bun run test:timings` on 
 
 ## Traps
 
-Note `bun test` skips dot-directories, which is why `.github/scripts` tests live under `tests/github/scripts/`.
 `bun test` also loads the working directory's `.env` into `process.env`, so a test that hands `...process.env` to a child and writes a scratch `.env` for it drops each key that file sets, since the inherited value wins over the file.
 An `expect(...).rejects` or `.resolves` is awaited or returned, or is the body of an arrow helper whose every call is, since in bun:test one that is not passes while checking nothing; `tests/async-expect.test.ts` fails on any that is not.
 A Bun SQL query is a lazy thenable that runs only when awaited, and `await expect(sqlQuery).rejects` never runs it, holding a sandbox worker to its deadline with no output: await the query in a helper and assert on the error's message (`refusal()` in `tests/api/hono/src/lib/store/store-db.test.ts`).

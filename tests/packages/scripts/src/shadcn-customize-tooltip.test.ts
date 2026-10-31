@@ -7,9 +7,9 @@ import {
   plainKbd,
   TOOLTIP,
   TOOLTIP_GLASS,
-} from "../../../.github/scripts/shadcn-customize"
+} from "../../../../packages/scripts/src/shadcn-customize"
 
-const REPO = join(import.meta.dir, "../../..")
+const REPO = join(import.meta.dir, "../../../..")
 const ours = await Bun.file(join(REPO, TOOLTIP)).text()
 const ARROW =
   '\n          <TooltipPrimitive.Arrow className="bg-foreground fill-foreground size-2.5" />'
