@@ -44,7 +44,9 @@ describe("code-review-loop keeps its reviewer for the merge (#1067)", () => {
   test("CI still running at the head is waited on, not raced by a local run, while canary changed none of the PR's files (R7-1)", async () => {
     const last = (await skill()).split("## The last 5/5")[1]?.split("\n## ")[0] ?? ""
     const stand = last.split("**CI stands in**")[1]?.split("\n")[0] ?? ""
-    expect(stand).toContain("`gh pr checks <n> --watch`")
+    expect(stand).toContain(
+      "`gh api repos/<owner>/<repo>/commits/<head>/check-runs` at most every 5 minutes",
+    )
     expect(stand).toContain("queue them only when a stand-in condition fails or a check goes red")
     expect(await page()).toContain("waits for CI still running at the head")
   })
