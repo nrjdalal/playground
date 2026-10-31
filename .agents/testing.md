@@ -28,3 +28,7 @@ A Bun SQL query is a lazy thenable that runs only when awaited, and `await expec
 ## End-to-end tests
 
 No end-to-end suite exists: `bun run test:e2e` matches no file.
+
+The new-user gate is the one end-to-end run: `bun run gate:new-user <sha>` (`packages/scripts/src/new-user-gate/`) installs that sha the way `curl | bash` does, in a scratch HOME under `/tmp/pg-gate-<sha7>` with stand-ins for claude, gh, cmux, brew and sudo (`stubs.ts`), its own portless proxy on port 14155, and a pglaunch stand-in that publishes its container on loopback alone.
+It then checks the seven steps a new user meets (the install's finish, first run's database click, Alpha on the Dashboard, a routed task opening a PR, Usage, the Scripts group, the roll following main), prints PASS or FAIL for each, and leaves a screenshot per step and the box's logs in `/tmp/pg-gate-<sha7>-shots` after removing the box, its processes and its container.
+Run it through run-slot before each ship (the release skill's step 1); it exits 1 when a step fails.

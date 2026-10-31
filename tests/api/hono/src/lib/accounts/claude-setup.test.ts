@@ -15,6 +15,7 @@ import { join } from "node:path"
 import {
   CODE_WAIT_MS,
   openPrivate,
+  profileUrl,
   startSetup,
   submitCode,
   urlOf,
@@ -408,5 +409,14 @@ describe("urlOf", () => {
 
   test("a link wrapped at 80 columns is not read as whole, which is why the pty is made wider than any link", () => {
     expect(urlOf(`${url.slice(0, 80)}\n${url.slice(80)}\n`)).not.toBe(url)
+  })
+})
+
+describe("profileUrl", () => {
+  test("is Claude's own profile read, or PLAYGROUND_PROFILE_URL where the new-user gate sets it", () => {
+    expect(profileUrl({})).toBe("https://api.anthropic.com/api/oauth/profile")
+    expect(profileUrl({ PLAYGROUND_PROFILE_URL: "http://127.0.0.1:9/profile" })).toBe(
+      "http://127.0.0.1:9/profile",
+    )
   })
 })
