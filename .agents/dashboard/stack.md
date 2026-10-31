@@ -51,7 +51,7 @@
   the ops jobs' heartbeats, ops-unstick's state holding the Planner on the usage limit alone, its writtenAt a year ahead so it never reads stale), git,
   pull requests and the Usage app's merged ones,
   the process start times the registry check compares, the System panel's probes, the update check's answer (`update`, so the user menu's green dot and its Update now show with nothing fetched), a made-up Claude account (`account`, the main login: the user menu shows it when `usage.json` names no login, and its usage file leads the accounts' order),
-  the owner's made-up threads (`threads`, which `bun run ingest` writes into the database), and a made-up `origin` remote,
+  the owner's made-up threads (`threads`, which `bun run ingest` writes into the database), the made-up worktrees Preview lists (`worktrees`, each with its branch, project and path, its `url` null while stopped and `$WEB` naming the stack's own web URL), and a made-up `origin` remote,
   which the sidebar header's GitHub icon links to as its pull requests page, each time moved to now as it is written.
   A burn check on the Usage app bumps `writtenAt` in both `usage.json` and `usage-<name>.json`, since a row older than 10 minutes reads stale, and changes the signed-in account's own `usage-<name>.json` along with `usage.json`: the row's share reads the account's own file, and the burn reads `usage.json`.
   Its people, org and tickets are made up too: its owner is a made-up person, its Linear workspace `example`, its team key `FIX`, and `fixture.test.ts` refuses the real owner, org and team keys it once held.
@@ -62,7 +62,7 @@
   `/api/health` names the source in `dashboard` (`fixture`, `live` or `refused`), and `bun run verify screenshots` refuses any stack but a fixture one.
   A fixture stack is data-free and open to any session, agents included, but for one opt-in exception: with `PLAYGROUND_SDK_PROBE_DIR` set, it hosts `probe-sdk`, a real throwaway session on this user's own login (messages.md), listed beside the fixture's sessions, its view showing only its own turns;
   `tests/api/hono/src/lib/dashboard/fixture.test.ts` holds a fixture process to no cmux call and no socket connection, and `tests/web/next/src/lib/dashboard.test.ts` the shipped fixture to every sidebar group; a test that drives the live paths against scratch files opts in through `tests/live-reads.ts`.
-- ALWAYS: Keep it on loopback: the API binds `HONO_HOSTNAME` (127.0.0.1), `next dev` binds 127.0.0.1, and the dashboard is never deployed, since it reads every session's transcript.
+- ALWAYS: Keep it on loopback: the API binds `HONO_HOSTNAME` (127.0.0.1), `next dev` and the live dashboard's built next server (`HOSTNAME=127.0.0.1` in `web/next`'s `serve:app`) bind 127.0.0.1, and the dashboard is never deployed, since it reads every session's transcript.
 - ALWAYS: Stop `bun run dev` before running `bun run build`, `bun run check-types` or `bun run test`, or committing, in the same worktree.
   They rebuild `packages/*` (a commit through its pre-commit build), and a rebuild deletes the `dist` the running servers import; pre-commit's `dev-stack` step (`api/hono/src/bin/dev-running.ts`) refuses a commit while the launcher's record names a stack still running there.
 - ALWAYS: Keep the dashboard on the owner rung: every route and the WebSocket pass `requireConsoleRole("owner")`, but first run's setup routes, which serve before any user exists (the setup rule above).

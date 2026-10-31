@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, test } from "bun:test"
-import { chmodSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from "node:fs"
+import { chmodSync, existsSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -857,6 +857,145 @@ describe("the supervisor's roll target", () => {
   }, 15_000)
 })
 
+// The production build: roll_up builds the head into $S/builds/<sha> once, serves that build, and a fallback serves the head before's kept build without building it again
+const upto = (name: string) => {
+  const at = script.indexOf(`\n${name}() {`) + 1
+  return script.slice(at, script.indexOf("\n}\n", at) + 2)
+}
+const kept = join(scratch, "kept")
+const keptCalls = join(kept, "calls")
+const builds = join(kept, "builds")
+const WEB = "https://playground.localhost"
+const API = "https://api.playground.localhost"
+// bun stands in for bun run build (writing next's standalone server and its static files, or failing for a head build-fails lists) and for the stack's start, recording which build it serves; check_dev waits for that start by its pid file and fails for a head verify-fails lists, never by a bare wait, which inside roll_up's $(check_dev) waits on a job that is not its child and looped without end on GitHub's runner
+const keptStubs = `S=${kept} WT=${wt} OPS=${scratch}/ops BAD=${kept}/bad-builds LOG=${kept}/supervisor.log DEVLOG=${kept}/dev.log
+say() { echo "say $*" >> ${keptCalls}; }; result() { echo "result $*" >> ${keptCalls}; }; stop_all() { :; }; tell_dispatcher() { :; }
+dashboard_urls() { WEB=${WEB}; API=${API}; }
+listed() { grep -qx "$(git rev-parse HEAD)" "${kept}/$1" 2>/dev/null; }
+bun() {
+  case "$1 $2" in
+    "run build") echo "build $(git rev-parse --short HEAD)" >> ${keptCalls}
+      echo "envs \${HONO_APP_URL:-} \${HONO_TRUSTED_ORIGINS:-} \${NEXT_PUBLIC_API_URL:-} \${NEXT_PUBLIC_APP_URL:-} \${NODE_ENV:-} \${SKIP_ENV_VALIDATION_SERVER:-}" >> ${keptCalls}
+      listed build-fails && { echo "Error: next build failed"; return 1; }
+      mkdir -p web/next/.next/standalone/web/next web/next/.next/static
+      git rev-parse HEAD > web/next/.next/standalone/web/next/server.js ;;
+    "run serve") echo "serve $(basename "\${PLAYGROUND_BUILD:-none}")" >> ${keptCalls} ;;
+    "run dev") echo "dev" >> ${keptCalls} ;;
+  esac
+}
+check_dev() { local p i; p=$(cat "$S/dashboard-dev.pid"); for i in $(seq 1 100); do kill -0 "$p" 2>/dev/null || break; sleep 0.05; done; listed verify-fails && { echo "verify=FAIL"; return 1; }; echo "verify=PASS"; }
+start_follower() { :; }; check_follower() { echo "follower=running"; }; setup_pending() { return 1; }
+${fn("behind")}
+${block("dev_reason")}
+${block("reload_if")}
+${block("finish_roll")}
+${block("fall_back")}
+${upto("build_head")}
+${upto("keep_builds")}
+${upto("start_dev")}
+${upto("roll_up")}
+`
+const keptRun = async (body: string, at: string) => {
+  git(wt, "reset", "-q", "--hard", at)
+  const proc = Bun.spawn(["bash", "-c", `D=${dashboardDir}\n${keptStubs}\n${body}`], {
+    cwd: wt,
+    stdout: "pipe",
+  })
+  const code = await proc.exited
+  return { code, out: (await new Response(proc.stdout).text()).trim() }
+}
+const keptLines = async (want: RegExp) =>
+  (await Bun.file(keptCalls).exists())
+    ? (await Bun.file(keptCalls).text()).split("\n").filter((line) => want.test(line))
+    : []
+const fresh = () => {
+  rmSync(kept, { force: true, recursive: true })
+  Bun.spawnSync(["mkdir", "-p", kept])
+}
+const short = (sha: string) => sha.slice(0, 7)
+
+describe("the supervisor's production build", () => {
+  test("a start builds the head into its own folder and serves that build, never dev", async () => {
+    fresh()
+    expect((await keptRun("roll_up START", c2)).code).toBe(0)
+    expect(await keptLines(/^(build|serve|dev)/)).toEqual([`build ${short(c2)}`, `serve ${c2}`])
+    expect(await Bun.file(join(builds, c2, "urls")).text()).toBe(`${WEB} ${API}\n`)
+    expect(await Bun.file(join(builds, c2, "web", "web", "next", "server.js")).text()).toBe(
+      `${c2}\n`,
+    )
+    expect(existsSync(join(builds, c2, "api"))).toBe(false)
+    expect(await keptLines(/^result /)).toEqual([
+      `result START ${short(c2)} PASS verify=PASS follower=running`,
+    ])
+  })
+
+  test("a build reads the Dashboard's URLs and needs no server secret, since a first run's .env holds none yet", async () => {
+    fresh()
+    expect((await keptRun("roll_up START", c2)).code).toBe(0)
+    expect(await keptLines(/^envs /)).toEqual([`envs ${API} ${WEB} ${API} ${WEB} production true`])
+  })
+
+  test("a failed build fails the roll, lists the head in bad-builds and serves the head before's kept build, building nothing more", async () => {
+    fresh()
+    expect((await keptRun("roll_up START", c1)).code).toBe(0)
+    await Bun.write(join(kept, "build-fails"), `${c2}\n`)
+    rmSync(keptCalls)
+    expect((await keptRun(`finish_roll "ROLL canary" ${c2} ${c1} ""`, c2)).code).toBe(0)
+    expect(git(wt, "rev-parse", "HEAD")).toBe(c1)
+    expect(await keptLines(/^(build|serve|dev)/)).toEqual([`build ${short(c2)}`, `serve ${c1}`])
+    expect(await keptLines(/^result /)).toEqual([
+      `result ROLL canary ${short(c2)} FAIL build: Error: next build failed`,
+      `result FALLBACK ${short(c1)} PASS verify=PASS follower=running`,
+    ])
+    expect(await Bun.file(join(kept, "bad-builds")).text()).toBe(`${c2}\n`)
+  })
+
+  test("a verify that fails after a roll falls back to the head before's kept build without building it again", async () => {
+    fresh()
+    expect((await keptRun("roll_up START", c1)).code).toBe(0)
+    await Bun.write(join(kept, "verify-fails"), `${c2}\n`)
+    rmSync(keptCalls)
+    expect((await keptRun(`finish_roll "ROLL canary" ${c2} ${c1} ""`, c2)).code).toBe(0)
+    expect(await keptLines(/^(build|serve|dev)/)).toEqual([
+      `build ${short(c2)}`,
+      `serve ${c2}`,
+      `serve ${c1}`,
+    ])
+    expect(await keptLines(/^result /)).toEqual([
+      `result ROLL canary ${short(c2)} FAIL verify=FAIL follower=running`,
+      `result FALLBACK ${short(c1)} PASS verify=PASS follower=running`,
+    ])
+  })
+
+  test("a kept build made for other URLs is built again, with one line naming both, since next bakes them into its client", async () => {
+    fresh()
+    expect((await keptRun("roll_up START", c1)).code).toBe(0)
+    await Bun.write(
+      join(builds, c1, "urls"),
+      "http://playground.localhost:1355 http://api.playground.localhost:1355\n",
+    )
+    rmSync(keptCalls)
+    expect((await keptRun("roll_up START", c1)).code).toBe(0)
+    expect(await keptLines(/^say rebuilding/)).toEqual([
+      `say rebuilding ${short(c1)}: its build was for http://playground.localhost:1355 http://api.playground.localhost:1355, the Dashboard is now on ${WEB} ${API}`,
+    ])
+    expect(await keptLines(/^(build|serve)/)).toEqual([`build ${short(c1)}`, `serve ${c1}`])
+  })
+
+  test("a pass keeps its own build and the last one that passed before it, and removes the rest", async () => {
+    fresh()
+    for (const name of ["a", "b", "c"]) Bun.spawnSync(["mkdir", "-p", join(builds, name)])
+    await Bun.write(join(builds, "passed"), "b\n")
+    expect((await keptRun("keep_builds c", c2)).code).toBe(0)
+    expect(Bun.spawnSync(["ls", builds]).stdout.toString().trim().split("\n")).toEqual([
+      "b",
+      "c",
+      "passed",
+    ])
+    expect(await Bun.file(join(builds, "passed")).text()).toBe("c\n")
+  })
+})
+
 // First run's setup writes POSTGRES_URL into the checkout's .env; until then the follower, which validates it at once, would exit on every tick (#31).
 describe("the follower before first run's setup (#31)", () => {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), "supervisor-setup-")))
@@ -871,7 +1010,7 @@ describe("the follower before first run's setup (#31)", () => {
 say() { echo "say $*" >> ${calls}; }; result() { echo "result $*" >> ${calls}; }
 start_dev() { :; }; check_dev() { echo dev=up; }; stop_all() { :; }; dev_down() { :; }
 start_follower() { echo start_follower >> ${calls}; }; check_follower() { echo follower=running; }
-follower_held() { return 1; }; alive() { [ "$1" = dashboard-dev ]; }
+follower_held() { return 1; }; alive() { [ "$1" = dashboard-dev ]; }; build_head() { :; }; keep_builds() { :; }
 ${fn("setup_pending") ?? ""}
 ${script.slice(script.indexOf("\nroll_up() {") + 1, script.indexOf("\n}\n", script.indexOf("\nroll_up() {")) + 2)}
 `

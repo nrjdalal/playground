@@ -3728,7 +3728,7 @@
           "workspace": "workspace:12"
         },
         {
-          "branch": "LM-7-row-wrap",
+          "branch": "FIX-7-row-wrap",
           "eta": "2026-01-01T13:30:00.000Z",
           "kind": "worker",
           "lastReport": "Fixture report: rows wrap whole",
@@ -5424,6 +5424,28 @@
       "title": "Rename the shipping zones",
       "updatedAt": "2025-12-31T16:00:00.000Z",
       "url": "https://github.com/example/api/pull/86"
+    }
+  ],
+  "worktrees": [
+    { "branch": "canary", "path": "/fixture/playground", "project": "playground", "url": "$WEB" },
+    {
+      "branch": "feat/board-colours",
+      "path": "/fixture/playground/.claude/worktrees/board-colours",
+      "project": "playground",
+      "url": null
+    },
+    {
+      "branch": "fix/sidebar-spacing",
+      "path": "/fixture/playground/.claude/worktrees/sidebar-spacing",
+      "project": "playground",
+      "url": "https://fix-sidebar-spacing.playground.localhost"
+    },
+    { "branch": "main", "path": "/fixture/yard", "project": "yard", "url": null },
+    {
+      "branch": "feat/rooms",
+      "path": "/fixture/yard/.claude/worktrees/rooms",
+      "project": "yard",
+      "url": "https://feat-rooms.yard.localhost"
     }
   ]
 }
