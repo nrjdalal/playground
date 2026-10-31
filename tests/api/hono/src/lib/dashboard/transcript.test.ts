@@ -835,6 +835,23 @@ describe("factsOf", () => {
     expect(factsOf(reply).failed).toBe(false)
   })
 
+  test("loginExpired while the newest reply is Claude Code's expired-login error, cleared by the next reply", () => {
+    const expired = assistant([{ type: "text", text: "Login expired · Please run /login" }], {
+      isApiErrorMessage: true,
+    })
+    const overloaded = assistant([{ type: "text", text: "API Error: overloaded" }], {
+      isApiErrorMessage: true,
+    })
+    const reply = assistant([{ type: "text", text: "back" }])
+    expect(factsOf(expired).loginExpired).toBe(true)
+    expect(factsOf([expired, reply].join("\n")).loginExpired).toBe(false)
+    expect(factsOf(overloaded).loginExpired).toBe(false)
+    // the words alone, in a reply that is no API error, are only text
+    expect(factsOf(assistant([{ type: "text", text: "Please run /login" }])).loginExpired).toBe(
+      false,
+    )
+  })
+
   test("the newest reply's model and effort, skipping a synthetic reply and a subagent's lines", () => {
     const text = [
       assistant([], { effort: "medium" }),

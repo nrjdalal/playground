@@ -75,6 +75,7 @@ import {
 } from "@/components/dashboard/chat-scroll"
 import { composerId } from "@/components/dashboard/composer"
 import { useDashboard, type DashboardStream } from "@/components/dashboard/dashboard"
+import { LoginExpired } from "@/components/dashboard/login-expired"
 import { NeedsYouCard } from "@/components/dashboard/needs-you-card"
 import { ScrollBar } from "@/components/dashboard/scroll-bar"
 import { CopyMessage, FooterAction, StatusFooter } from "@/components/dashboard/status-mark"
@@ -1245,7 +1246,9 @@ export function WorkerStream({
   const lost = lostPrompt(worker, dispatcher)
   return (
     <>
-      {lost ? (
+      {worker.loginExpired ? (
+        <LoginExpired label={chatLabel(worker, dispatcher)} worker={worker} />
+      ) : lost ? (
         <Alert variant={lost.onYou ? "destructive" : "default"} className="mt-3 mb-4">
           <AlertTitle>{lost.title}</AlertTitle>
           <AlertDescription>

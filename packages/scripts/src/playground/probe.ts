@@ -113,7 +113,10 @@ export const webUp = (urls: Urls | null): Promise<boolean> =>
   urls ? answers(urls.web, (status) => status < 400) : Promise.resolve(false)
 
 // The live sessions holding a dispatcher's name: a registry file whose pid runs with the start time the file records, as spawn.sh counts them.
-export const liveDispatchers = (): Dispatcher[] => {
+export const liveDispatchers = (): Dispatcher[] => liveSessions((name) => slotOfName(name) !== null)
+
+// The live sessions whose name keep takes, counted as liveDispatchers counts them.
+export const liveSessions = (keep: (name: string) => boolean): Dispatcher[] => {
   const folder = join(configDir(), "sessions")
   const found = new Map<number, string>()
   let files: string[] = []
@@ -128,7 +131,7 @@ export const liveDispatchers = (): Dispatcher[] => {
     if (!/^\d+\.json$/.test(file)) continue
     try {
       const data = JSON.parse(readFileSync(join(folder, file), "utf8"))
-      if (typeof data?.name === "string" && slotOfName(data.name) !== null)
+      if (typeof data?.name === "string" && keep(data.name))
         entries.push({
           name: data.name,
           pid: Number.parseInt(file, 10),

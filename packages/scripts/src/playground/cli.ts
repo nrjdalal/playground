@@ -3,12 +3,13 @@ import { existsSync, realpathSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
 
-import { getSessionNames, setSessionNames } from "@packages/config/kinds"
+import { getSessionNames, type NamedKind, setSessionNames } from "@packages/config/kinds"
 import { configDirOf, dataDir } from "@packages/env/data-dir"
 import { modelSettings, readPolicyOrDefaults, readSessionNames } from "@packages/settings"
 
 import { accountsIo, runAccounts } from "./accounts"
 import { doctor, report } from "./doctor"
+import { pinHere } from "./herdr-pin"
 import { orgsCommand, orgsIo } from "./orgs"
 import { keepPage, pageArgs } from "./page"
 import {
@@ -36,7 +37,7 @@ import {
   dashboardUrls,
   homeDataDir,
   linesSince,
-  liveDispatchers,
+  liveSessions,
   NO_CHECKOUT,
   opsDashboard,
   probe,
@@ -63,14 +64,15 @@ const fail = (message: string, code = 1): never => {
 const pause = (ms: number) => Bun.sleep(ms)
 const briefExists = (brief: string): boolean => existsSync(join(HOME_DATA, brief))
 
-// playground dispatcher, and the bare start's dispatcher step: 0 started, 3 already running, 1 refused with spawn.sh's reason.
-const dispatcher = async (): Promise<{ code: number; message: string }> => {
+// playground dispatcher, planner, builder or ops, and the bare start's dispatcher step: 0 started, 3 already running, 1 refused with spawn.sh's reason.
+const manager = async (kind: NamedKind): Promise<{ code: number; message: string }> => {
+  const name = getSessionNames().names[kind]
   const result = await startDispatcher({
     data: HOME_DATA,
-    live: liveDispatchers().map((d) => d.name),
-    name: getSessionNames().names.dispatcher,
+    live: liveSessions((live) => live === name).map((d) => d.name),
+    name,
     spawn: SPAWN,
-    template: join(REPO, "scripts", "briefs", "dispatcher.md"),
+    template: join(REPO, "scripts", "briefs", `${kind}.md`),
   })
   if (result.code === 0) console.log(result.message)
   else console.error(`playground: ${result.message}`)
@@ -96,6 +98,46 @@ const opsHerdr = (args: string[]) =>
   Bun.spawn([process.execPath, "--no-env-file", OPS_HERDR, ...args], {
     stdio: ["inherit", "inherit", "inherit"],
   })
+
+// A step run to its end with its output kept: null when it exits 0, else its last line, from the stream it names its failures on first.
+const stepFailed = async (argv: string[], first: "stderr" | "stdout"): Promise<string | null> => {
+  const child = Bun.spawn(argv, { stderr: "pipe", stdin: "ignore", stdout: "pipe" })
+  const [stdout, stderr, code] = await Promise.all([
+    new Response(child.stdout).text(),
+    new Response(child.stderr).text(),
+    child.exited,
+  ])
+  const last = (text: string) => text.trim().split("\n").at(-1)
+  const second = first === "stdout" ? stderr : stdout
+  return code === 0
+    ? null
+    : last(first === "stdout" ? stdout : stderr) || last(second) || `${argv.at(-1)} exited ${code}`
+}
+
+// The files install's linking step puts in the state folder that a dispatcher's start reads: spawn.sh builds every session's settings from factory-settings.json, and the sessions it starts run heavy work through run-slot.sh and brief their workers from the templates.
+const LINKED = ["factory-settings.json", "handoffs/new-worker.md", "ops/run-slot.sh"]
+
+// playground dispatcher's setup, which install and the bare start give a machine and Start <dispatcher> on a fresh install has not: install's linking step when a file it links is missing, the pinned herdr installed as install.sh installs it, which downloads nothing when the copy is already pinned, then one pass of ops-herdr's start, which writes the pin and config and brings the servers up, since spawn.sh starts none; null once each is in place, else the line that says why not.
+const setUp = async (): Promise<string | null> => {
+  const state = join(process.env.HOME || homedir(), ".playground")
+  if (!LINKED.every((file) => existsSync(join(state, file)))) {
+    const failed = await stepFailed(["bash", join(REPO, "scripts", "link-skills.sh")], "stderr")
+    if (failed) return failed
+  }
+  const pinned = await pinHere()
+  if (pinned.code !== 0) return pinned.line
+  return stepFailed([process.execPath, "--no-env-file", OPS_HERDR, "start"], "stdout")
+}
+
+// The managers the dispatcher starts the first time it routes work to one, so none sits idle on the user's usage.
+const MANAGERS: NamedKind[] = ["builder", "dispatcher", "ops", "planner"]
+
+const managerAlone = async (kind: NamedKind): Promise<number> => {
+  const unready = await setUp()
+  if (unready === null) return (await manager(kind)).code
+  console.error(`playground: ${unready}`)
+  return 1
+}
 
 // Loaded only for sweep, since sweep.ts reaches past this folder into ops-tick.
 const sweep = async (lead: string): Promise<number> => {
@@ -137,7 +179,7 @@ const dashboard = async (): Promise<number> => {
       if (jobs !== 0) failed.push(`The Dashboard's jobs didn't start: up.py exited ${jobs}`)
     } else if (step === "dispatcher") {
       console.log(`Starting ${getSessionNames().names.dispatcher}…`)
-      const started = await dispatcher()
+      const started = await manager("dispatcher")
       if (started.code !== 0) failed.push(`The dispatcher didn't start: ${started.message}`)
     } else if (step === "wait") {
       const ready = urls ?? dashboardUrls(checkout)
@@ -326,8 +368,8 @@ const code =
           ? await update(rest[1])
           : command === "add"
             ? await add(rest)
-            : command === "dispatcher"
-              ? (await dispatcher()).code
+            : MANAGERS.includes(command as NamedKind)
+              ? await managerAlone(command as NamedKind)
               : command === "page"
                 ? page(rest)
                 : command === "view"
