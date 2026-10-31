@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import type { Channel, Message } from "@packages/message"
+import type { Channel, Message } from "../../../../../../packages/message/src/index"
 
 process.env.BETTER_AUTH_SECRET ||= "yard-inbound-test-secret-not-for-use-anywhere"
 const { inboundCard, pendingCard, pollMentions, untrusted } =

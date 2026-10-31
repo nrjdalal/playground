@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 
-import type { Channel, Message } from "@packages/message"
+import type { Channel, Message } from "../../../../../../packages/message/src/index"
 
 process.env.BETTER_AUTH_SECRET ||= "yard-local-test-secret-not-for-use-anywhere"
 const { localYard } = await import("../../../../../../api/hono/src/lib/yard/local")
