@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test"
 
 import { config } from "../../../../../web/next/src/lib/config"
-import { yardApi } from "../../../../../web/next/src/lib/yard-api"
+import { channelsEvery, yardApi } from "../../../../../web/next/src/lib/yard-api"
 
 const real = globalThis.fetch
 afterEach(() => {
@@ -41,5 +41,13 @@ describe("an invite request's page", () => {
         url: `${config.api.url}/api/v1/yard/invites/i1/deny`,
       },
     ])
+  })
+})
+
+describe("the sidebar's channel reads", () => {
+  test("read again every 30s on a local stack while Yard answers, and stop on a refusal or hosted", () => {
+    expect(channelsEvery(false, false)).toBe(30_000)
+    expect(channelsEvery(false, true)).toBe(false)
+    expect(channelsEvery(true, false)).toBe(false)
   })
 })
