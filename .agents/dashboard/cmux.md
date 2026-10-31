@@ -65,7 +65,7 @@
   a non-empty list of whole-number pids or an absolute socket path.
   `memory_pressure` stays off the list (its `-l` simulates pressure, and `kern.memorystatus_level` is the free share it prints), and `sysctl` is never handed a `name=value`.
   `tests/api/hono/src/lib/spawn-allowlist.test.ts` fails when a file outside those it names starts a process anywhere under the api's `lib/`, so a new reading arrives as a `COMMANDS` entry.
-  There are five exceptions.
+  There are six exceptions.
   `cmuxHeld()` in `cmux.ts` runs its own `ps -axo pid=,ppid=,lstart=,comm=`, since `probe()` answers from the fixture in a process whose own source is one, as the launcher in a worktree is, and the launcher must read the live machine.
   The second is the update check the System report carries (`api/hono/src/lib/dashboard/update.ts`), whose `git fetch` of the one branch the checkout follows is not a read, so it and the `git rev-list`, `git log` and `git rev-parse` reads beside it stay out of `COMMANDS`: it runs git with no shell, a fixed argv and no argument from a request.
   The third is first run's Start a local container, the Database row's fix (`api/hono/src/lib/setup/container.ts`, stack.md), whose `docker run`, `docker exec` and `docker rm -f -v` are not reads: it runs docker with no shell and a fixed argv, the container's name from the checkout's path and never from a request, the password in the child's environment alone, and reads back only the port,
@@ -74,5 +74,6 @@
   each step killed by its own handle past its bound and given only the variables in `PASSED` (a proxy's included), so the API's settings and tokens reach no installer.
   gh's sign-in answers Enter to its Authenticate Git prompt, since the settings repo's push needs git to use it, and says so in the fix's lines.
   A fixture stack runs `api/hono/src/fixtures/fix.ts` in their place.
-  The fifth is a Vibeground's Start and Stop (`api/hono/src/lib/dashboard/vibe.ts`, stack.md), whose `docker run`, `docker exec`, `docker rm -fv`, `bun run dev` and `bun run dev:stop` are not reads: each runs with no shell and a fixed argv, the worktree's path from the listed stacks and never from a request's words, the copy's password in the child's environment alone,
+  The fifth is a secret ask's sink (`api/hono/src/lib/dashboard/secret-sink.ts`, asks.md), whose `vercel env add` is a write: it runs with no shell, an argv built only from the item's checked key, project and scope, the value on its stdin alone, its output dropped and only what `vercel` needs in its environment (`sinkEnv`), and a fixture or test stack runs nothing in its place.
+  The sixth is a Vibeground's Start and Stop (`api/hono/src/lib/dashboard/vibe.ts`, stack.md), whose `docker run`, `docker exec`, `docker rm -fv`, `bun run dev` and `bun run dev:stop` are not reads: each runs with no shell and a fixed argv, the worktree's path from the listed stacks and never from a request's words, the copy's password in the child's environment alone,
   and the live database touched only by `pg_dump` inside its own container.

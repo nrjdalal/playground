@@ -155,6 +155,7 @@ import {
 } from "@/lib/model-label"
 import { needsYouAnchor, sessionWaiting, targetNeedsYou } from "@/lib/needs-you"
 import {
+  isBroken,
   opsLine,
   opsParts,
   scriptCount,
@@ -1064,11 +1065,12 @@ function SessionRowView({
   )
 }
 
-// An ops job keeps its own three lights, drawn from the one map: the blue spinner while it runs, the red error while it fails, the red power mark once it is down.
+// An ops job keeps its own four lights, drawn from the one map: the blue spinner while it runs, the waiting mark while it has nothing to read yet, the red error while it fails, the red power mark once it is down.
 const OPS_STATE = {
   down: "down",
   failing: "failing",
   running: "working",
+  waiting: "waiting",
 } as const
 
 // One script under Scripts: an ops job with no Claude session behind it, so its row opens nothing and says the rest on hover. Its plain name truncates on its first line; Script, its state, when it runs and the model it calls, or AI, when jobs.json marks it callsModel, make the second, which cuts from its end and never the state. The hover adds its job id, what it does, its reason and last beat, and a schedule that disagrees with its heartbeat. A Failing or Down script reads red, since a listed job should run.
@@ -1109,7 +1111,7 @@ export function OpsJobRow({
         <span className="grid min-w-0 flex-1">
           <span className="truncate text-xs leading-3.5">{row.name}</span>
           <SecondLine
-            className={row.status === "running" ? "text-muted-foreground" : "text-destructive"}
+            className={isBroken(row) ? "text-destructive" : "text-muted-foreground"}
             state={`Script\u00a0· ${status}`}
             tail={
               when || model ? (
