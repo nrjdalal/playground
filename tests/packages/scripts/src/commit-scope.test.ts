@@ -23,6 +23,7 @@ describe("scopeRefusal", () => {
     expect(scopeRefusal("fix(spawn): a thing (pg-85)", "pg-85-bare-pick")).toBeUndefined()
     expect(scopeRefusal("fix(spawn): a thing (PG-12)", "feat/dashboard-prod-build")).toBeUndefined()
     expect(scopeRefusal("fix(spawn): a thing", "PG-85-bare-pick")).toBeUndefined()
+    expect(scopeRefusal('Revert "feat(x): y (PG-12)" (PG-85)', "PG-85-undo")).toBeUndefined()
     expect(scopeRefusal("fix(spawn): a thing (PG-12)", "")).toBeUndefined()
   })
 })
