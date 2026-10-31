@@ -34,7 +34,8 @@ done
 DATA="$HOME/.playground"
 for dir in "$HOME/.bun/bin" "$DATA" "$DATA/handoffs" "$DATA/ops" "$DATA"/ops/*/; do
   dir="${dir%/}"
-  [ -d "$dir" ] && [ ! -L "$dir" ] || continue
+  case "$dir" in "$DATA"/ops/*) [ ! -L "$dir" ] || continue ;; esac
+  [ -d "$dir" ] || continue
   for link in "$dir"/*; do
     [ -L "$link" ] && [ ! -e "$link" ] || continue
     case "$(readlink "$link")" in
