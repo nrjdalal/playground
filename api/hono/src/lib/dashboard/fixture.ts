@@ -158,10 +158,11 @@ export const fixtureDir = (env: Record<string, string | undefined> = process.env
 // The fixture's Claude Code config folder, which stands in for ~/.claude on a fixture stack.
 export const fixtureConfigDir = (dir = fixtureDir()): string => join(dir, "claude")
 
-// The Claude Code config folder this process reads: the live one only on a live source, the fixture's on a fixture source (written first when missing), and the fixture's unwritten one on a refused source, so a stack refused for its settings reads nothing real either.
+// The Claude Code config folder this process reads: the live one only on a live source, the fixture's on a fixture source (written first when missing), and the fixture's unwritten one on a refused source, so a stack refused for its settings reads nothing real either. The live one is where spawn.sh's sessions register: under inscope (INSCOPE_CCD) spawn.sh starts them from ~/.claude, as the CLI's probe.ts reads them, so the board never reads inscope's own folder and misses a dispatcher the CLI sees.
 export function configDir(): string {
   const source = currentSource()
-  if (source.kind === "live") return process.env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude")
+  if (source.kind === "live")
+    return (!process.env.INSCOPE_CCD && process.env.CLAUDE_CONFIG_DIR) || join(homedir(), ".claude")
   return fixtureConfigDir(source.kind === "fixture" ? ensureFixture(source) : fixtureDir())
 }
 

@@ -5,7 +5,6 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
-  renameSync,
   rmSync,
   writeFileSync,
 } from "node:fs"
@@ -389,7 +388,8 @@ describe("the launcher's signals", () => {
   test("refuses on its checks, not on the gaps module a checkout's own build makes", async () => {
     const built = join(ROOT, "packages/env/dist/gaps.mjs")
     const aside = join(dir, "gaps.mjs.dev-test")
-    renameSync(built, aside)
+    copyFileSync(built, aside)
+    rmSync(built)
     try {
       const record = join(dir, "prebuilt.pgid")
       const env = launcherEnv({ POSTGRES_URL: "postgres://u:p@db.example.com:5432/postgres" })
@@ -414,7 +414,10 @@ describe("the launcher's signals", () => {
     } finally {
       if (existsSync(aside)) {
         if (existsSync(built)) rmSync(aside)
-        else renameSync(aside, built)
+        else {
+          copyFileSync(aside, built)
+          rmSync(aside)
+        }
       }
     }
   }, 60_000)

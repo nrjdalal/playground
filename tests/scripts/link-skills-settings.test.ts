@@ -251,17 +251,19 @@ describe("link-skills.sh turns rerere off for the checkout", () => {
 
 // Playground's skills reach a session as a plugin, and a personal skill takes a bare name over any plugin's, so no link stays in ~/.claude/skills at a name the home set ships: inscope's link at pr would otherwise run upstream's copy, while its other links stay. The resolver reads the real checkout's core, so the names are core's own.
 describe("link-skills.sh leaves no personal skill at a name playground's set ships", () => {
-  test("a link at a name the set ships goes, from this repo or another tool, and other tools' links stay", async () => {
+  // the set is written from the checkout orgs.ts runs from, the real one here, so a link into it is Playground's own
+  test("a link into Playground's checkout at a name the set ships goes, and another tool's links stay, at a shipped name too", async () => {
     const { home, repo } = setup()
     const skills = join(home, ".claude", "skills")
     const cache = join(home, "inscope-cache")
-    for (const name of ["archify", "pr", "tdd"]) mkdirSync(join(cache, name), { recursive: true })
+    for (const name of ["archify", "pr"]) mkdirSync(join(cache, name), { recursive: true })
     mkdirSync(skills, { recursive: true })
-    for (const name of ["archify", "pr", "tdd"]) symlinkSync(join(cache, name), join(skills, name))
+    for (const name of ["archify", "pr"]) symlinkSync(join(cache, name), join(skills, name))
+    symlinkSync(join(root, "extensions", "core", "skills", "tdd"), join(skills, "tdd"))
     symlinkSync(join(repo, "skills", "playground", "gone"), join(skills, "gone"))
     expect((await run(repo, home)).code).toBe(0)
-    expect(readdirSync(skills)).toEqual(["archify"])
-    expect(readlinkSync(join(skills, "archify"))).toBe(join(cache, "archify"))
+    expect(readdirSync(skills).sort()).toEqual(["archify", "pr"])
+    expect(readlinkSync(join(skills, "pr"))).toBe(join(cache, "pr"))
   })
 
   test("a real folder at a name the set ships is left alone and named", async () => {

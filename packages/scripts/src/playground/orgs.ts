@@ -6,13 +6,15 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
+  readlinkSync,
+  realpathSync,
   renameSync,
   rmSync,
   statSync,
   writeFileSync,
 } from "node:fs"
 import { homedir } from "node:os"
-import { dirname, join, relative } from "node:path"
+import { dirname, isAbsolute, join, relative, resolve } from "node:path"
 
 import { configDirOf, dataDir } from "@packages/env/data-dir"
 import {
@@ -215,7 +217,27 @@ const resolveSet = async (
   return { plugin: writePlugin(io.data, resolved.plan.own ?? "home", resolved.winners) }
 }
 
-// The home set at user scope, through a directory marketplace, ws, in <data>/orgs: Claude Code installs a copy, so a later run moves the entry to the new folder and updates it. A link in the personal skills folder at a name the set ships goes first, since it would take the name; a real folder there is left alone and named, exit 1.
+// A path as written and as resolved, so a checkout reached through a symlinked folder (/tmp, /private/tmp) still matches.
+const pathsOf = (path: string): string[] => {
+  try {
+    return [path, realpathSync(path)]
+  } catch {
+    return [path]
+  }
+}
+
+const within = (path: string, root: string): boolean => {
+  const rel = relative(root, path)
+  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel))
+}
+
+// Whether a personal link points into Playground's own checkout, which link-skills.sh made and the home set now replaces; a link anywhere else (inscope's cache, another checkout) is the user's own.
+const linksIntoCheckout = (path: string, checkout: string): boolean => {
+  const target = resolve(dirname(path), readlinkSync(path))
+  return pathsOf(target).some((t) => pathsOf(checkout).some((root) => within(t, root)))
+}
+
+// The home set at user scope, through a directory marketplace, ws, in <data>/orgs: Claude Code installs a copy, so a later run moves the entry to the new folder and updates it. A link in the personal skills folder at a name the set ships into Playground's own checkout goes first, since it would take the name; a link elsewhere is the user's and stays, named in one line; a real folder there is left alone and named, exit 1.
 const installHome = (io: OrgsIo, plugin: string): number => {
   let code = 0
   for (const name of readdirSync(join(plugin, "skills"))) {
@@ -226,7 +248,11 @@ const installHome = (io: OrgsIo, plugin: string): number => {
     } catch {
       continue
     }
-    if (link) {
+    if (link && !linksIntoCheckout(path, io.checkout)) {
+      io.out(
+        `kept the personal link ${name}: it points outside Playground, so it takes the name over the home skill set's ${name}`,
+      )
+    } else if (link) {
       rmSync(path)
       io.out(`removed the personal link ${name}: the home skill set ships it`)
     } else {

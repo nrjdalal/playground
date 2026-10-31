@@ -89,6 +89,14 @@ export const sourceOf = (checkout: string, file: string): string[] => {
   return [...found]
 }
 
+const beatPid = (ops: string, job: Job) => {
+  try {
+    return Number(JSON.parse(readFileSync(join(ops, `${job.heartbeat}.json`), "utf8")).pid) || 0
+  } catch {
+    return 0
+  }
+}
+
 const holds = async (run: Run, pid: number, file: string) =>
   (await run(["ps", "-o", "command=", "-p", String(pid)])).out.includes(file)
 
@@ -102,7 +110,7 @@ const stop = async (run: Run, pid: number, file: string, sleep: (ms: number) => 
   return !(await holds(run, pid, file))
 }
 
-// After a checkout moved from one head to another, TERM each running ops job whose source the move changed, by its heartbeat's pid, then start the herdr and cmux ones again with one up.py pass; launchd starts its own.
+// After a checkout moved from one head to another, render jobs.json from the settings with the new code, TERM each running ops job whose source the move changed, by its heartbeat's pid, then start the herdr and cmux ones again, and any the new code turns on that runs nowhere yet, with one up.py pass; launchd starts its own.
 export const restart = async (opts: {
   checkout: string
   from: string
@@ -117,6 +125,19 @@ export const restart = async (opts: {
   if (diff.code !== 0 || !changed.length) return []
   const list = join(ops, "jobs.json")
   if (!existsSync(list)) return [`no ${list}, so no job to restart`]
+  // up.py's own render, so a job whose default the move turned on reads as on; a refused render keeps the last jobs.json
+  await run([
+    process.execPath,
+    "--no-env-file",
+    join(checkout, "packages", "scripts", "src", "playground", "jobs.ts"),
+    "render",
+    "--data",
+    dirname(ops),
+    "--jobs",
+    list,
+    "--launch-agents",
+    join(ops, "launch-agents"),
+  ])
   const jobs = (JSON.parse(readFileSync(list, "utf8")) as { jobs: Job[] }).jobs
   const lines: string[] = []
   const stopped: Job[] = []
@@ -130,10 +151,7 @@ export const restart = async (opts: {
     const source = sourceOf(checkout, real)
     if (!changed.some((f) => source.some((s) => (s.endsWith("/") ? f.startsWith(s) : f === s))))
       continue
-    let pid = 0
-    try {
-      pid = Number(JSON.parse(readFileSync(join(ops, `${job.heartbeat}.json`), "utf8")).pid) || 0
-    } catch {}
+    const pid = beatPid(ops, job)
     if (!(pid > 1 && (await holds(run, pid, file))))
       lines.push(
         `${job.name}: source changed, but no running copy of ${file} holds its heartbeat's pid; left alone`,
@@ -144,7 +162,20 @@ export const restart = async (opts: {
     } else lines.push(`${job.name}: source changed, but pid ${pid} still runs after 60s`)
   }
   const ours = stopped.filter((job) => !job.launchd)
-  if (!ours.length) return lines
+  if (!ours.length) {
+    const down: Job[] = []
+    for (const job of jobs) {
+      if (job.disabled || kept(job) || job.launchd || !job.command) continue
+      const pid = beatPid(ops, job)
+      if (!(pid > 1 && (await run(["ps", "-p", String(pid)])).code === 0)) down.push(job)
+    }
+    if (!down.length) return lines
+    const up = await run(["python3", "-I", join(checkout, "scripts", "ops", "up.py")])
+    lines.push(
+      `${down.map((job) => job.name).join(", ")}: on, but not running; up.py exited ${up.code}${up.out.trim() ? `: ${up.out.trim()}` : ""}`,
+    )
+    return lines
+  }
   // up.py skips a job it started within GRACE (10 minutes), so --restarted drops each stopped job's start under its lock, and the pass judges it by its health
   const up = await run([
     "python3",
