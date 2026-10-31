@@ -494,12 +494,16 @@ with tempfile.TemporaryDirectory() as repo:
     git(repo, "commit", "-qm", "rename")
     check("tests/uses-old.test.ts" in touched(repo)[1], "10k a renamed file's old path still selects the test importing it")
 
+WALKERS = ("tests/packages/scripts/src/parity/record.test.ts", "tests/packages/scripts/src/trace-count/count.test.ts",
+           "tests/packages/scripts/src/verify/prebuild.test.ts", "tests/skills/built-in-names.test.ts")
 with tempfile.TemporaryDirectory() as repo:
-    scratch_repo(repo, {"docs/page.md": "x\n", "tests/packages/scripts/src/trace-count/count.test.ts": 'import { tree } from "./count"\n'})
+    scratch_repo(repo, {"docs/page.md": "x\n", **{path: 'import { walk } from "./source"\n' for path in WALKERS}})
     write(repo, {"docs/page.md": "y\n"})
     git(repo, "commit", "-qam", "a docs line")
-    check("tests/packages/scripts/src/trace-count/count.test.ts" in touched(repo)[1],
-          "10p the trace ratchet's test, which counts the repo through count.ts's git ls-files, is listed for any change")
+    listed = touched(repo)[1]
+    check(set(WALKERS) <= set(listed),
+          "10p each test whose imported source walks the repo (git ls-files, Bun.Glob, readdirSync) is listed for any change",
+          [p for p in WALKERS if p not in listed])
 
 with tempfile.TemporaryDirectory() as repo:
     scratch_repo(repo, {

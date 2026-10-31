@@ -359,9 +359,10 @@ SCAN_TS = r"ls-files|Bun\.Glob|new Glob\(|readdirSync|readdir\("
 GIT_GREP = re.compile(r"""\bgit["'`]?(?:[\s,\[]+(?:["']?-[\w-]+["']?|\$?\{?[\w.$]+\}?|["'][^"'\n]*["'])){0,3}?[\s,\[]+["'`]?grep\b""")
 SCAN_PY = r"rglob\(|\.glob\(|os\.walk|read_text\("
 # Tests whose imported source scans the repo, so no grep of their own text finds them
-SCANS_THROUGH_SOURCE = ("tests/packages/scripts/src/trace-count/count.test.ts",
-                        "tests/packages/scripts/src/verify/dashboard-map.test.ts", "tests/scripts/hooks/no-bare-slack-link.test.ts",
-                        "tests/scripts/hooks/no-playground-leak.test.ts")
+SCANS_THROUGH_SOURCE = ("tests/packages/scripts/src/parity/record.test.ts", "tests/packages/scripts/src/trace-count/count.test.ts",
+                        "tests/packages/scripts/src/verify/dashboard-map.test.ts", "tests/packages/scripts/src/verify/prebuild.test.ts",
+                        "tests/scripts/hooks/no-bare-slack-link.test.ts", "tests/scripts/hooks/no-playground-leak.test.ts",
+                        "tests/skills/built-in-names.test.ts")
 # A prompt template, and the tests that pin a built prompt's digest, which name no template's path
 TEMPLATE = re.compile(r"^src/(.+/)?templates/[^/]+\.md$")
 DIGEST_PIN = r"sha256\(.*prompt|DIGEST"
