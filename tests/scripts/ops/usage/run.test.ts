@@ -116,3 +116,36 @@ test("the stored login's reading lands in usage-<local part>.json beside usage.j
     noNone: true,
   })
 })
+
+test("PLAYGROUND_USAGE_API moves the stored login's reads to its own answers, as the new-user gate's box gives them", () => {
+  const api = join(scratch, "api")
+  mkdirSync(api, { recursive: true })
+  writeFileSync(join(api, "profile"), JSON.stringify({ account: { email: "gate@example.com" } }))
+  writeFileSync(
+    join(api, "usage"),
+    JSON.stringify({ seven_day: { resets_at: "2026-11-05T00:00:00+00:00", utilization: 10 } }),
+  )
+  const read = `
+import json, sys, types
+sys.modules["beat"] = types.SimpleNamespace(beat=lambda *a, **k: None, setting=lambda key: "made-up")
+src = open(sys.argv[1]).read()
+ns = {"__name__": "run_under_test"}
+exec(compile(src[: src.index("\\nwhile True:")], sys.argv[1], "exec"), ns)
+ns["oauth"] = lambda: {"accessToken": "made-up", "expiresAt": 4102444800000}
+print(json.dumps(ns["stored_login"]()))
+`
+  const home = join(scratch, "api-home")
+  mkdirSync(join(home, ".playground", "ops", "usage"), { recursive: true })
+  const env: Record<string, string | undefined> = {
+    ...process.env,
+    HOME: home,
+    PLAYGROUND_USAGE_API: `file://${api}`,
+  }
+  delete env.CLAUDE_CONFIG_DIR
+  const child = Bun.spawnSync(["python3", "-I", "-c", read, script], { env })
+  expect(child.stderr.toString()).toBe("")
+  expect(JSON.parse(child.stdout.toString())).toMatchObject({
+    account: "gate@example.com",
+    rate_limits: { seven_day: { resets_at: 1793836800, used_percentage: 10 } },
+  })
+})
