@@ -6,6 +6,7 @@ import { join } from "node:path"
 import { SQL } from "bun"
 
 import {
+  ACTIONS,
   answerInputSchema,
   checkAnswer,
   deliveryText,
@@ -16,6 +17,9 @@ import {
   inboxOrder,
   isGo,
   savesDraft,
+  secretInputSchema,
+  type SecretSink,
+  sinkArgv,
 } from "../../../../../../api/hono/src/lib/dashboard/inbox"
 
 const CHANNEL = "https://app.slack.com/client/T0000000000/C0MADEUP01"
@@ -762,6 +766,70 @@ describe("the list", () => {
   })
 })
 
+const SECRET = {
+  key: "GITHUB_CLIENT_SECRET",
+  sink: {
+    environments: ["production", "preview"],
+    project: "api-made-up",
+    scope: "made-up-team",
+    type: "vercel",
+  },
+  type: "secret",
+}
+
+describe("a secret ask (PG-59)", () => {
+  test("names its key and a sink from the allowlist, with each environment once", () => {
+    expect(inboxInputSchema.safeParse(decision(SECRET)).success).toBe(true)
+    const refused = (sink: object, key = SECRET.key) =>
+      inboxInputSchema.safeParse(decision({ ...SECRET, key, sink: { ...SECRET.sink, ...sink } }))
+        .success
+    // a sink outside the allowlist in code
+    expect(refused({ type: "netlify" })).toBe(false)
+    expect(refused({ command: "sh -c 'cat > /tmp/x'" })).toBe(false)
+    // a name that would read as a flag, or holds a space, never reaches argv
+    expect(refused({ project: "--token=x" })).toBe(false)
+    expect(refused({ scope: "made up" })).toBe(false)
+    expect(refused({ environments: [] })).toBe(false)
+    expect(refused({ environments: ["production", "production"] })).toBe(false)
+    expect(refused({ environments: ["staging"] })).toBe(false)
+    expect(refused({}, "NOT A KEY")).toBe(false)
+    expect(refused({}, "-e")).toBe(false)
+  })
+
+  test("runs one vercel env add an environment, the value never in its argv", () => {
+    const sink = SECRET.sink as SecretSink
+    expect(sinkArgv(SECRET.key, sink, "preview")).toEqual([
+      "vercel",
+      "env",
+      "add",
+      "GITHUB_CLIENT_SECRET",
+      "--environment",
+      "preview",
+      "--project",
+      "api-made-up",
+      "--scope",
+      "made-up-team",
+      "--yes",
+    ])
+  })
+
+  test("takes no Approve, Deny, Archive or Edit: its value comes through Submit alone", () => {
+    const open = { kind: "decision", preview: SECRET, status: "open" } as const
+    for (const action of ACTIONS) {
+      expect(checkAnswer(open as never, { action, text: "made-up-value" }), action).toHaveProperty(
+        "message",
+      )
+    }
+  })
+
+  test("the value is text, trimmed, and never empty", () => {
+    expect(secretInputSchema.safeParse({ value: "  made-up  " }).data?.value).toBe("made-up")
+    expect(secretInputSchema.safeParse({ value: "   " }).success).toBe(false)
+    expect(secretInputSchema.safeParse({}).success).toBe(false)
+    expect(secretInputSchema.safeParse({ extra: 1, value: "made-up" }).success).toBe(false)
+  })
+})
+
 // The store against a throwaway Postgres in Docker published on 127.0.0.1 only, migrated as the dashboard's is, so the table's own rules hold. Skipped where Docker is not running.
 const MIGRATIONS = join(import.meta.dir, "../../../../../../packages/db/drizzle")
 // made at run time, so no password is ever written into the repo
@@ -776,6 +844,7 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
   let store: typeof import("../../../../../../api/hono/src/lib/dashboard/inbox")
   let db: ReturnType<typeof import("../../../../../../packages/db/dist/index.mjs").createDatabase>
   const actor = { email: "owner@local.host", id: "owner" }
+  let url = ""
 
   beforeAll(async () => {
     container = Bun.spawnSync([
@@ -796,7 +865,7 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       .trim()
       .split(":")
       .at(-1)
-    const url = `postgres://postgres:${PASSWORD}@127.0.0.1:${port}/postgres`
+    url = `postgres://postgres:${PASSWORD}@127.0.0.1:${port}/postgres`
     let admin: SQL | null = null
     for (let i = 0; i < 60; i++) {
       try {
@@ -2317,5 +2386,134 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
         since: new Date("2026-10-07T10:00:00.000Z"),
       }),
     ).toEqual([])
+  })
+
+  describe("a secret ask's Submit (PG-59)", () => {
+    const VALUE = `made-up-secret-${crypto.randomUUID()}`
+
+    // every row of every table in the database, as text, so a test can say the value is in none
+    const everyRow = async (): Promise<string> => {
+      const reader = new SQL(url, { max: 1 })
+      try {
+        const tables: { tablename: string }[] =
+          await reader`select tablename from pg_tables where schemaname = 'public'`
+        const rows: string[] = []
+        for (const { tablename } of tables) {
+          const dumped: { row: string }[] = await reader.unsafe(
+            `select t::text as row from "${tablename}" t`,
+          )
+          rows.push(...dumped.map((r) => r.row))
+        }
+        return rows.join("\n")
+      } finally {
+        await reader.close()
+      }
+    }
+
+    // what the stubbed sink was handed: its argv and its stdin, per call
+    const stub = (exitCodes: (number | null)[] = []) => {
+      const calls: { argv: string[]; stdin: string }[] = []
+      const run = async (argv: string[], stdin: string) => {
+        calls.push({ argv, stdin })
+        return exitCodes[calls.length - 1] ?? 0
+      }
+      return { calls, run }
+    }
+
+    test("hands the value to the sink on stdin once an environment, and keeps only when and each exit status", async () => {
+      const posted = await post({ ...decision(SECRET), from: "dispatcher" })
+      const sink = stub([0, 1])
+      const sent: Delivery[] = []
+      const logged: string[] = []
+      const console_ = { error: console.error, log: console.log, warn: console.warn }
+      for (const name of ["error", "log", "warn"] as const)
+        console[name] = (...args: unknown[]) => void logged.push(args.map(String).join(" "))
+      const at = new Date("2026-10-31T01:00:00.000Z")
+      let provided: Awaited<ReturnType<typeof store.provideSecret>>
+      try {
+        provided = await store.provideSecret(
+          db,
+          posted.id,
+          { seen: posted.updatedAt, value: VALUE },
+          {
+            actor,
+            deliver: async (delivery) => {
+              sent.push(delivery)
+              return { at: at.toISOString(), ok: true, sessionId: "s1" }
+            },
+            now: at,
+            run: sink.run,
+          },
+        )
+      } finally {
+        Object.assign(console, console_)
+      }
+      expect(provided.ok).toBe(true)
+      expect(sink.calls.map((call) => call.stdin)).toEqual([VALUE, VALUE])
+      expect(sink.calls.map((call) => call.argv[5])).toEqual(["production", "preview"])
+      for (const call of sink.calls) expect(call.argv.join(" ")).not.toContain(VALUE)
+      if (!provided.ok) return
+      expect(provided.item.status).toBe("provided")
+      expect(provided.item.answer).toEqual({
+        at: at.toISOString(),
+        choice: "provided",
+        results: [
+          { environment: "production", exitCode: 0 },
+          { environment: "preview", exitCode: 1 },
+        ],
+      })
+      // the poster is told when and each status, and never the value
+      expect(sent).toHaveLength(1)
+      expect(sent[0]?.to).toBe("dispatcher")
+      expect(sent[0]?.text).toContain("production: exit 0")
+      expect(sent[0]?.text).toContain("preview: exit 1")
+      expect(sent[0]?.text).not.toContain(VALUE)
+      expect(JSON.stringify(provided.item)).not.toContain(VALUE)
+      expect(logged.join("\n")).not.toContain(VALUE)
+      expect(await everyRow()).not.toContain(VALUE)
+      expect(await everyRow()).toContain(posted.id)
+      // the poster's read closes it, as a deny's read does
+      const read = await store.readAnswer(db, provided.item)
+      expect(read.answer).toMatchObject({ ackedAt: expect.any(String), choice: "provided" })
+    })
+
+    test("runs once: a second Submit, or one on words changed since, is refused and runs nothing", async () => {
+      const posted = await post(decision(SECRET))
+      const sink = stub()
+      const deps = { actor, run: sink.run }
+      const stale = await store.provideSecret(
+        db,
+        posted.id,
+        { seen: "2026-01-01T00:00:00.000Z", value: VALUE },
+        deps,
+      )
+      expect(stale).toMatchObject({ code: "CONFLICT", ok: false })
+      expect(sink.calls).toHaveLength(0)
+      const [one, two] = await Promise.all([
+        store.provideSecret(db, posted.id, { value: VALUE }, deps),
+        store.provideSecret(db, posted.id, { value: VALUE }, deps),
+      ])
+      expect([one.ok, two.ok].sort()).toEqual([false, true])
+      expect(sink.calls).toHaveLength(2)
+      expect(JSON.stringify([one, two])).not.toContain(VALUE)
+    })
+
+    test("is refused on any other item, and the item takes no other answer", async () => {
+      const ask = await post(decision(PREVIEWS.ask))
+      const sink = stub()
+      const refused = await store.provideSecret(
+        db,
+        ask.id,
+        { value: VALUE },
+        { actor, run: sink.run },
+      )
+      expect(refused).toMatchObject({ code: "VALIDATION_ERROR", ok: false })
+      expect(sink.calls).toHaveLength(0)
+      const secret = await post(decision(SECRET))
+      expect(await store.answerItem(db, secret.id, { action: "approve" }, { actor })).toMatchObject(
+        { ok: false },
+      )
+      expect((await store.getItem(db, secret.id))?.status).toBe("open")
+    })
   })
 })

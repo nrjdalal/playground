@@ -29,6 +29,8 @@ const USAGE = `usage: bun run ask new [--thread <id>] < item.json
                                                 an ask's attachments name files on this Mac by absolute path
                                                 an update with text and attachments is a read-only card: it shows
                                                 them as an ask does, with no Approve or Deny
+                                                a secret ask names a key and a sink (Vercel alone); the owner's
+                                                value goes to the sink, and get shows only when and each exit status
                                                 --thread files it under that thread (bun run thread)
        bun run ask edit <id|#iN> < item.json
                                                 replaces your own open item's title, preview and attachments

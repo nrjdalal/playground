@@ -90,6 +90,42 @@ const items = [
   item({ answer: { at: "x", choice: "approve" }, kind: "decision", ref: 12, status: "approved" }),
 ]
 
+describe("a secret ask (PG-59)", () => {
+  const preview = {
+    key: "GITHUB_CLIENT_SECRET",
+    sink: { environments: ["production", "preview"], project: "p", scope: "s", type: "vercel" },
+    type: "secret",
+  }
+  const asked = item({ kind: "decision", preview } as never)
+  const provided = (results?: { environment: string; exitCode: number | null }[]) =>
+    item({
+      answer: { at: "2026-10-31T01:00:00.000Z", choice: "provided", results },
+      kind: "decision",
+      preview,
+      status: "provided",
+    } as never)
+
+  test("needs you while open, then reads only when it was provided and each exit status", () => {
+    expect(kindWord(asked)).toBe("Secret")
+    expect(needsYou(asked)).toBe(true)
+    const line = outcomeLine(
+      provided([
+        { environment: "production", exitCode: 0 },
+        { environment: "preview", exitCode: null },
+      ]),
+    )
+    expect(line).toStartWith("Provided at ")
+    expect(line).toEndWith(" · production: exit 0 · preview: stopped")
+    expect(needsYou(provided([]))).toBe(false)
+  })
+
+  test("is done once every environment took it, failed while any did not, sending until its sink ran", () => {
+    expect(itemState(provided([{ environment: "production", exitCode: 0 }]))).toBe("done")
+    expect(itemState(provided([{ environment: "production", exitCode: 1 }]))).toBe("failed")
+    expect(itemState(provided())).toBe("sending")
+  })
+})
+
 describe("the inbox's counts", () => {
   test("what needs you: open decisions and drafts, and unread updates", () => {
     expect(items.filter(needsYou).map((i) => i.ref)).toEqual([41, 40, 44])

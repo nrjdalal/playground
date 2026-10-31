@@ -121,7 +121,46 @@ const soFar = z
   .max(12)
   .optional()
 
-// What Approve does, one shape per kind of approval the owner keeps (playbook's ask rule): a Slack message, a ship of canary, a new Linear ticket, a delete, a schema, a budget, or a plain ask, whose words say what its poster does on Approve, for a decision no other shape fits (a production port, a work request from outside the chain, or a step only he can take, such as plugging in the Mac, where Approve means done and Deny means he can't). An ask may label each side in ELI5 / ASD-STE100, one line; the card then shows its text as the quoted block above the two labelled options.
+// A name that goes into a sink's argv: never empty, never read as a flag, no space.
+const argName = z
+  .string()
+  .max(LIMITS.name)
+  .regex(/^[a-z0-9][a-z0-9._-]*$/, "Must be a lowercase name: letters, digits, dot, dash")
+
+export const SECRET_ENVIRONMENTS = ["development", "preview", "production"] as const
+
+// Where a secret ask's value goes, the allowlist in code: Vercel alone, `vercel env add` once an environment for one project.
+export const secretSinkSchema = z.strictObject({
+  environments: z
+    .array(z.enum(SECRET_ENVIRONMENTS))
+    .min(1)
+    .refine((list) => new Set(list).size === list.length, "Name each environment once"),
+  project: argName,
+  scope: argName,
+  type: z.literal("vercel"),
+})
+
+export type SecretSink = z.infer<typeof secretSinkSchema>
+
+// Pure: the one command a sink runs for an environment; the value goes on its stdin alone, so it is never in an argv a process list shows.
+export const sinkArgv = (key: string, sink: SecretSink, environment: string): string[] => [
+  "vercel",
+  "env",
+  "add",
+  key,
+  "--environment",
+  environment,
+  "--project",
+  sink.project,
+  "--scope",
+  sink.scope,
+  "--yes",
+]
+
+// Runs a sink's argv with the value on its stdin and returns its exit code: null once stopped at its time limit, 127 when it could not start. secret-sink.ts holds the real one; a test passes its own.
+export type SinkRun = (argv: string[], stdin: string) => Promise<number | null>
+
+// What Approve does, one shape per kind of approval the owner keeps (playbook's ask rule): a Slack message, a ship of canary, a new Linear ticket, a delete, a schema, a budget, or a plain ask, whose words say what its poster does on Approve, for a decision no other shape fits (a production port, a work request from outside the chain, or a step only he can take, such as plugging in the Mac, where Approve means done and Deny means he can't). An ask may label each side in ELI5 / ASD-STE100, one line; the card then shows its text as the quoted block above the two labelled options. A secret asks for a value instead of a yes, which goes straight to its sink and is kept nowhere.
 export const previewSchema = z.discriminatedUnion("type", [
   z.strictObject({
     approve: oneLine(LIMITS.line).optional(),
@@ -157,6 +196,14 @@ export const previewSchema = z.discriminatedUnion("type", [
   z.strictObject({ type: z.literal("delete"), what: words, why: words }),
   z.strictObject({ shape: words, type: z.literal("schema") }),
   z.strictObject({ amount: oneLine(LIMITS.name), type: z.literal("budget"), why: words }),
+  z.strictObject({
+    key: z
+      .string()
+      .max(LIMITS.name)
+      .regex(/^[A-Za-z_][A-Za-z0-9_]*$/, "Must be an environment variable's name"),
+    sink: secretSinkSchema,
+    type: z.literal("secret"),
+  }),
 ])
 
 const link = z
@@ -250,6 +297,7 @@ export type InboxStatus =
   | "done"
   | "drafted"
   | "open"
+  | "provided"
   | "sent"
 
 export const ACTIONS = ["approve", "clear", "deny", "discard", "draft", "edit", "send"] as const
@@ -323,6 +371,19 @@ export const saidOf = (text: string): string | undefined => {
 // The poster cleared its own alert update (`bun run ask resolve`), which had resolved itself: read, so nothing was left for him to dismiss.
 export type InboxResolved = { at: string; by: string; choice: "resolved"; note?: string }
 
+// A secret ask he answered with its value, which went to its sink and is kept nowhere: when, and each environment's exit status (null: stopped at its time limit), written once the sink has run; its poster's read closes it.
+export type InboxProvided = {
+  ackedAt?: string
+  at: string
+  choice: "provided"
+  dismissedAt?: string
+  link?: string
+  linkLabel?: string
+  results?: SinkResult[]
+}
+
+export type SinkResult = { environment: string; exitCode: number | null }
+
 // An open decision or draft he pushed out of his list until a time (Schedule); it asks again once the time passes.
 export type InboxScheduled = { snoozedUntil: string }
 
@@ -345,7 +406,9 @@ type Common = {
   version: number
 }
 
-type Answered = { answer: InboxAnswer | InboxReplied | InboxScheduled | InboxSettled | null }
+type Answered = {
+  answer: InboxAnswer | InboxProvided | InboxReplied | InboxScheduled | InboxSettled | null
+}
 
 export type InboxItem =
   | (Common & Answered & { kind: "decision"; preview: InboxPreview })
@@ -419,6 +482,9 @@ function answerOf(
   if (item.kind === "update") return { message: "An update is read, not answered" }
   if (item.status !== "open") return { message: "This item is already answered" }
   if (item.kind === "decision") {
+    if (item.preview.type === "secret") {
+      return { message: "A secret ask takes its value through its Submit alone" }
+    }
     // Clear: neither a yes nor a no; he has set the talk aside and will pick it up later, while whatever is already moving keeps moving
     if (action === "clear") return { answer: { choice: action }, status: "cleared" }
     if (action === "approve") return { answer: { choice: action }, status: "approved" }
@@ -485,11 +551,42 @@ function answerWords(
 
 // Pure: what the dispatcher is typed when the poster has ended, so the item's kind and exact words travel with the answer. A go is carried out in the poster's place; a deny, a clear or a discard has nothing to carry out, only an item to close.
 export function relayText(item: InboxItem, answer: Omit<InboxAnswer, "at">): string {
+  return relayWith(item, isGo(answer.choice), deliveryText(item, answer))
+}
+
+function relayWith(item: InboxItem, go: boolean, text: string): string {
   const words = "text" in item.preview ? item.preview.text : JSON.stringify(item.preview)
-  const lead = isGo(answer.choice)
+  const lead = go
     ? `${item.from} has ended, so you carry this out in its place: a sent Slack message goes out through ${slack("slack.sendServer") || "your Slack tool"} (never the claude.ai connector), a Slack draft is saved with slack_send_message_draft as below, and you bun run ask ack the item with where it landed (bun run ask get shows its link).`
     : `${item.from} has ended, so nothing is carried out: close the item with bun run ask get ${itemTag(item.ref)} --ack.`
-  return `${lead} ${deliveryText(item, answer)}\nKind: ${item.kind}\nPreview text:\n${words}`
+  return `${lead} ${text}\nKind: ${item.kind}\nPreview text:\n${words}`
+}
+
+// Pure: an exit status in words: its code, or stopped at its time limit.
+const exitWords = (code: number | null): string =>
+  code === null ? "stopped at its time limit" : `exit ${code}`
+
+// Pure: what is typed into the poster of a secret ask he answered: when, and each environment's exit status; the value never, since only the sink was handed it.
+export function providedText(
+  item: Pick<InboxItem, "id" | "ref" | "title">,
+  answer: Pick<InboxProvided, "at" | "results">,
+): string {
+  const results = (answer.results ?? [])
+    .map((result) => `${result.environment}: ${exitWords(result.exitCode)}`)
+    .join("; ")
+  return `Inbox ${itemTag(item.ref)} (${item.id}) "${item.title}": Provided at ${answer.at}. ${results || "No sink ran"}. Close it with bun run ask get ${itemTag(item.ref)} --ack.`
+}
+
+// Pure: the words for the poster and, once it has ended, for the dispatcher, for any answer that is typed.
+const textsOf = (
+  item: InboxItem,
+  answer: Omit<InboxAnswer, "at"> | InboxProvided,
+): { relay: string; text: string } => {
+  if (answer.choice === "provided") {
+    const text = providedText(item, answer)
+    return { relay: relayWith(item, false, text), text }
+  }
+  return { relay: relayText(item, answer), text: deliveryText(item, answer) }
 }
 
 // Pure: an answer that did not reach its poster, which asks him to retry it or dismiss it.
@@ -544,6 +641,7 @@ const toItem = (row: Row): InboxItem =>
       (row.answer as
         | InboxAnswer
         | InboxDismissed
+        | InboxProvided
         | InboxReplied
         | InboxResolved
         | InboxScheduled
@@ -752,7 +850,12 @@ export async function answerItem(
   const answered = toItem(row)
   if (!deliver) return { item: answered, ok: true }
   return {
-    item: await send(db, answered, checked.answer, { actor, deliver, dispatcher, now }),
+    item: await send(db, answered, textsOf(answered, checked.answer), {
+      actor,
+      deliver,
+      dispatcher,
+      now,
+    }),
     ok: true,
   }
 }
@@ -761,7 +864,7 @@ export async function answerItem(
 async function send(
   db: Database,
   item: InboxItem,
-  answer: Omit<InboxAnswer, "at">,
+  { relay, text }: { relay: string; text: string },
   {
     actor,
     deliver,
@@ -769,13 +872,9 @@ async function send(
     now,
   }: { actor: ActivityActor; deliver: Deliver; dispatcher?: string; now: Date },
 ): Promise<InboxItem> {
-  let delivery = await attempt(deliver, { actor, text: deliveryText(item, answer), to: item.from })
+  let delivery = await attempt(deliver, { actor, text, to: item.from })
   if (dispatcher && item.from !== dispatcher && posterGone(delivery)) {
-    delivery = await attempt(deliver, {
-      actor,
-      text: relayText(item, answer),
-      to: dispatcher,
-    })
+    delivery = await attempt(deliver, { actor, text: relay, to: dispatcher })
   }
   return (await recordDelivery(db, item.id, delivery, now)) ?? item
 }
@@ -847,8 +946,80 @@ export async function retryDelivery(
     )
     .returning()
   if (!row) return { code: "CONFLICT", message: "This item changed; try again", ok: false }
+  const item = toItem(row)
   return {
-    item: await send(db, toItem(row), current.answer, { actor, deliver, dispatcher, now }),
+    item: await send(db, item, textsOf(item, current.answer), { actor, deliver, dispatcher, now }),
+    ok: true,
+  }
+}
+
+// What the card posts for a secret ask: the value, and seen, the updatedAt of the card he answered. The value is held in memory for the sink's run alone.
+export const SECRET_MAX_CHARS = 64 * 1024
+export const secretInputSchema = z.strictObject({
+  seen: z.iso.datetime().optional(),
+  value: z.string().trim().min(1).max(SECRET_MAX_CHARS),
+})
+
+// Hands his value for a secret ask to its sink, once an environment on stdin, and records only when and each exit status: in one write that holds only while the item is open at the version read, so a double click or a second tab runs the sink once, then the results, then a delivery to its poster as an answer's. The value is in no row, delivery, refusal or return.
+export async function provideSecret(
+  db: Database,
+  id: string,
+  { seen, value }: z.output<typeof secretInputSchema>,
+  {
+    actor,
+    deliver,
+    dispatcher,
+    now = new Date(),
+    run,
+  }: { actor: ActivityActor; deliver?: Deliver; dispatcher?: string; now?: Date; run: SinkRun },
+): Promise<{ item: InboxItem; ok: true } | Refused> {
+  const current = await getItem(db, id)
+  if (!current || current.id !== id) return NOT_FOUND
+  if (current.kind !== "decision" || current.preview.type !== "secret") {
+    return { code: "VALIDATION_ERROR", message: "Only a secret ask takes a value", ok: false }
+  }
+  const { key, sink } = current.preview
+  if (seen !== undefined && seen !== current.updatedAt) {
+    return {
+      code: "CONFLICT",
+      message: "This item changed since you read it; read it again",
+      ok: false,
+    }
+  }
+  const at = now.toISOString()
+  const [claimed] = await db
+    .update(inboxItem)
+    .set({
+      answer: { at, choice: "provided" } satisfies InboxProvided,
+      delivery: { status: "pending" },
+      readAt: sql`coalesce(${inboxItem.readAt}, ${now})`,
+      status: "provided",
+      updatedAt: now,
+      version: sql`${inboxItem.version} + 1`,
+    })
+    .where(
+      and(
+        eq(inboxItem.id, id),
+        eq(inboxItem.status, "open"),
+        eq(inboxItem.version, current.version),
+      ),
+    )
+    .returning()
+  if (!claimed) return { code: "CONFLICT", message: "This item is already answered", ok: false }
+  const results: SinkResult[] = []
+  for (const environment of sink.environments) {
+    results.push({ environment, exitCode: await run(sinkArgv(key, sink, environment), value) })
+  }
+  const answer: InboxProvided = { at, choice: "provided", results }
+  const [row] = await db
+    .update(inboxItem)
+    .set({ answer, version: sql`${inboxItem.version} + 1` })
+    .where(eq(inboxItem.id, id))
+    .returning()
+  const item = toItem(row ?? claimed)
+  if (!deliver) return { item, ok: true }
+  return {
+    item: await send(db, item, textsOf(item, answer), { actor, deliver, dispatcher, now }),
     ok: true,
   }
 }

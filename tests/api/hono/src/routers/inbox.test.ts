@@ -78,6 +78,34 @@ describe("scheduling an item", () => {
   })
 })
 
+describe("a secret ask's Submit (PG-59)", () => {
+  test("is a write, guarded like an answer, and no refusal echoes the value", async () => {
+    const value = `made-up-secret-${crypto.randomUUID()}`
+    const submit = (headers: Record<string, string>, server?: ReturnType<typeof peer>) =>
+      inboxRouter.request(
+        "http://127.0.0.1/0b9c6f1e-1111-4111-8111-000000000001/secret",
+        {
+          body: JSON.stringify({ value }),
+          headers: { "content-type": "application/json", ...headers },
+          method: "POST",
+        },
+        server,
+      )
+    const refusals = [
+      await submit({ origin: "http://evil.localhost" }, peer("127.0.0.1")),
+      await submit({ origin: trusted() }, peer("192.168.1.20")),
+      await submit({ origin: trusted() }),
+    ]
+    for (const refused of refusals) {
+      expect(refused.status).toBe(403)
+      expect(await refused.text()).not.toContain(value)
+    }
+    const unsigned = await submit({ origin: trusted() }, peer("127.0.0.1"))
+    expect(unsigned.status).toBe(401)
+    expect(await unsigned.text()).not.toContain(value)
+  })
+})
+
 describe("marking updates read", () => {
   test("is a write, guarded like an answer", async () => {
     const read = (headers: Record<string, string>, server?: ReturnType<typeof peer>) =>

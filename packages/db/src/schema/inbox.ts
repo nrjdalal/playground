@@ -22,7 +22,7 @@ export const inboxItem = pgTable("inbox_item", {
   readAt: timestamp("read_at", { withTimezone: true }),
   // Its short id, shown as #i<ref>: a sequence, so it is stable and never reused.
   ref: integer("ref").generatedAlwaysAsIdentity().unique().notNull(),
-  // open, approved, cleared, denied, sent, drafted, discarded or done.
+  // open, approved, cleared, denied, sent, drafted, discarded, provided (a secret ask's value went to its sink) or done.
   status: text("status").notNull(),
   // The thread the item belongs to, if any; unindexed, since nothing reads items by thread yet and the table is small enough for a thread delete to scan it.
   threadId: text("thread_id").references(() => thread.id, { onDelete: "set null" }),
