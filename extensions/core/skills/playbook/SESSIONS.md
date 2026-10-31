@@ -192,9 +192,9 @@ Done when `ListAgents` shows the session busy on the brief and the roster shows 
 
 ## Write a handoff
 
-A handoff, for a respawn, a parked chore or a priority close, counts as written only once `ls -l <path>` prints its file, and the report that names it quotes that line.
+A handoff, for a respawn, a parked chore or a priority close, counts as written only once `TZ=UTC ls -l <path>` prints its file, and the report that names it quotes that line.
 A hook can refuse the write and leave nothing on disk, so a session whose write a hook refused answers the hook and retries the same write before it reports.
-Done when `ls -l <path>` prints the file and the report quotes that line.
+Done when `TZ=UTC ls -l <path>` prints the file and the report quotes that line.
 
 ## Rename
 
