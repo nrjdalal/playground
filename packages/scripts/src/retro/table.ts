@@ -5,6 +5,7 @@ import { factoryRepoOf } from "../playground/setting"
 
 export const QUERY = `query ($q: String!, $after: String) {
   search(query: $q, type: ISSUE, first: 100, after: $after) {
+    issueCount
     pageInfo { hasNextPage endCursor }
     nodes {
       ... on PullRequest {
@@ -32,7 +33,11 @@ export type Pr = {
   title: string
 }
 
-export type Page = { nodes: Pr[]; pageInfo: { endCursor: string | null; hasNextPage: boolean } }
+export type Page = {
+  issueCount?: number
+  nodes: Pr[]
+  pageInfo: { endCursor: string | null; hasNextPage: boolean }
+}
 
 export const searchOf = (repo: string, since: string): string =>
   `repo:${repo} is:pr updated:>=${since}`
@@ -55,7 +60,7 @@ const clock = (iso: string | null | undefined) => iso?.slice(11, 16) ?? "-"
 export const rowsOf = (prs: Pr[], owner: string, now: Date): string[] => {
   const sorted = [...prs].sort((a, b) => a.number - b.number)
   return [
-    "pr\tstate\tfirst\tmerged\tmins\tcommits\tfp\trounds\tscores\ttests\ttitle",
+    "pr\tstate\tfirst\tmerged\ttook\tcommits\tfp\trounds\tscores\ttests\ttitle",
     ...sorted.map((p) => {
       const first = p.firstCommit.nodes[0]?.commit.authoredDate
       const end = p.mergedAt ?? now.toISOString()
@@ -95,6 +100,7 @@ if (import.meta.main) {
     process.exit(2)
   }
   const repo = await factoryRepoOf()
+  let found = 0
   const prs = await readAll(async (after) => {
     const gh = Bun.spawnSync(
       [
@@ -110,11 +116,15 @@ if (import.meta.main) {
       { stderr: "pipe", stdout: "pipe" },
     )
     const answer = gh.exitCode === 0 ? JSON.parse(gh.stdout.toString()) : null
+    if (answer?.errors) console.error(JSON.stringify(answer.errors))
     if (!answer?.data?.search) {
-      console.error(gh.stderr.toString().trim() || JSON.stringify(answer?.errors ?? answer))
+      console.error(gh.stderr.toString().trim() || JSON.stringify(answer))
       process.exit(1)
     }
+    found = answer.data.search.issueCount ?? found
     return answer.data.search as Page
   })
   console.log(rowsOf(prs, repo.split("/")[0]!, new Date()).join("\n"))
+  // GitHub's search returns at most 1000 results, so a since that far back reads short
+  if (found > prs.length) console.log(`read ${prs.length} of ${found} PRs: give a later --since`)
 }

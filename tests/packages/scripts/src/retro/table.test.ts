@@ -36,7 +36,7 @@ const pr = (over: Partial<Pr> = {}): Pr => ({
 
 test("a merged PR reads its first commit to merge, commits, force pushes, the owner's review rounds and tester passes of tester verdicts", () => {
   expect(rowsOf([pr()], "acme", NOW)).toEqual([
-    "pr\tstate\tfirst\tmerged\tmins\tcommits\tfp\trounds\tscores\ttests\ttitle",
+    "pr\tstate\tfirst\tmerged\ttook\tcommits\tfp\trounds\tscores\ttests\ttitle",
     "12\tM\t10:00\t11:30\t90m\tc4\tfp1\tr2\t[1:3 2:5]\tt1/2\tfix(PG-12): a title",
   ])
 })

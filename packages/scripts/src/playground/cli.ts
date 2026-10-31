@@ -132,7 +132,7 @@ const setUp = async (): Promise<string | null> => {
   return stepFailed([process.execPath, "--no-env-file", OPS_HERDR, "start"], "stdout")
 }
 
-// The managers the dispatcher starts: each lead the first time it routes work to one, so none sits idle on the user's usage, and the optimizer at its own start, since ops-tick's beats bring its retros.
+// The managers a playground verb starts: the dispatcher, which starts the Planner, the Builder and Ops the first time it routes work to each, so none sits idle on the user's usage, and the optimizer when the dispatcher itself starts, since ops-tick's beats bring its retros.
 const MANAGERS: ManagerVerb[] = ["builder", "dispatcher", "ops", "optimizer", "planner"]
 
 const managerAlone = async (kind: ManagerVerb): Promise<number> => {

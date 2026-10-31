@@ -236,7 +236,7 @@ describe("bare dispatcher", () => {
         expect(code).toBe(0)
       }, 30_000)
 
-      // The dispatcher starts each manager the first time it routes work to it, so no manager sits idle on the user's usage.
+      // The dispatcher starts each lead the first time it routes work to it, so none sits idle on the user's usage, and the optimizer when it starts.
       for (const kind of ["builder", "ops", "optimizer", "planner"])
         test(`playground ${kind} starts the ${kind} through spawn.sh, its brief from scripts/briefs/${kind}.md`, async () => {
           const { code, ran } = await run({ binary: true, opsHerdr: "", words: [kind] })
