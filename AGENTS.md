@@ -213,28 +213,9 @@ ZeroStarter's rules above govern Playground too; this section adds its own.
 - A factory session starts another only through `scripts/spawn.sh`, whose capacity gate, backends, models, runtimes, resume and restore are in [scripts/README.md](./scripts/README.md#spawnsh): read it before you change spawn.sh or when it refuses a start you did not expect;
   `no-raw-spawn` refuses a cmux call that opens a claude session, and every herdr call but a read or one to a scratch world of the session's own.
 - The herdr servers belong to one ops job, `bun run ops:herdr`, on the binary and config its `pin.json` names ([scripts/README.md](./scripts/README.md#the-herdr-servers)), read before you change that job or herdr's pinned binary or config.
-- The factory's hooks, each in full under its name in [scripts/hooks/README.md](./scripts/hooks/README.md), which a session reads before it changes a hook, its tests or its registration, or when a hook refuses a call it did not expect;
-  five more registered hooks are named in the lines above, each with its own pointer to its text (`no-bare-slack-link`, `no-playground-leak`, `no-linear-ticket`, `no-raw-spawn`, `no-release-comment`), and the rest are these:
-  - `.claude/settings.json` registers every hook `scripts/factory-settings.json` does under the same command string, byte for byte, so a session cmux restores without its settings keeps its guards and runs each once.
-  - `after-compact` tells a factory session that has just compacted to load playbook again and reread its roster entry, open Inbox items and PRs.
-  - `after-resume` tells a resumed factory session to re-arm its loops, crons and watches, and re-send each message unanswered in the 10 minutes before the restart.
-  - `no-chat-question`, the Stop hook of the dispatcher and the leads, refuses a final reply that asks the owner for a decision or an action unless it names an open `#iN`: name the one already open on the same thing, or else post it with `bun run ask new`.
-  - `no-env-dump` refuses printing the environment (`env` with no command, `printenv`, a bare `set`, `declare`, `export` or `typeset`), since it holds tokens.
-  - `no-false-green` refuses bun given `--opt <value>` before its `run` or `test`, and a test run (bun's, or pytest, ty or ruff) piped on with no `pipefail` or pipe status, so a red run reads red.
-  - `no-glm-heavy-path` keeps a GLM session's commits and pushes off the heavy paths, and holds its installs, clones, commits and pushes while load5 is over 15 (playbook's **glm**).
-  - `no-headless-login` refuses a factory session's `claude -p` that sets no `CLAUDE_CODE_OAUTH_TOKEN`, and its `PLAYGROUND_ROLE` when its environment lacks one: run it in the shape its reason gives.
-  - `no-mac-web-build` refuses a web image build on the Mac while the live dashboard's Postgres runs in its Docker VM: build it on the box with `ci.sh web HEAD`.
-  - `no-main-checkout` refuses a build, test, commit, write or git move in the main checkout: run it in your own worktree, with `git -C <your worktree>` or `cd <worktree> && …` in one command, since a failed command leaves the Bash tool's shell in its old folder without a word.
-  - `no-manager-subagent` refuses a manager the Agent and Workflow tools: start a worker through `scripts/spawn.sh` and brief it.
-  - `no-off-palette-label` refuses any session's GitHub label create or edit whose color is not a Tailwind 500, and a create with no color: give one of the 22 hexes its reason names.
-  - `no-ours-merge` refuses a merge or pull with the ours strategy or option: run `git merge origin/canary` and resolve each conflict with both sides' meaning.
-  - `no-public-leak` refuses a write to a public repository (a pull request, issue, review or comment) that holds a name, a handle, a company term, a Slack id, a Linear key, an email, an `LM-<n>` or an archive link, naming the kind and never the text: say it in plain words.
-  - `no-prompt-stop` refuses the `rm` or `rmdir` shapes Claude Code stops on: a target with two or more parts starting with an unguarded variable (write `${VAR:?}` or a literal path), and a name directly in `/` (use `$TMPDIR` or your scratchpad).
-  - `no-stash` refuses a stash that could take another worktree's work, and `agent-browser close --all`.
-  - `no-unslotted-run` refuses a heavy run in a worktree (an install, a `node_modules` clone, a build, a type check, a suite) outside `~/.playground/ops/run-slot.sh`.
-  - `rules` gives a factory session its standing rules at every start.
-  - `session-state` writes every session's state to the data folder's `session-state/<session id>.json`, which ops-session-resume and the Dashboard read, and tells a factory session's manager the moment it writes `stuck` or `failed`.
-  - `writing-first` refuses a factory session's write to an agent-facing doc until it has loaded writing-for-agents since its last compaction: load it with the Skill tool, then retry.
+- The factory's hooks: read a hook's section of [scripts/hooks/README.md](./scripts/hooks/README.md) before you change it, its tests or its registration, and when it refuses a call you did not expect, since the README holds each one in full and its reason names the fix.
+  Five have their own lines above (`no-bare-slack-link`, `no-linear-ticket`, `no-playground-leak`, `no-raw-spawn`, `no-release-comment`);
+  the rest are `after-compact`, `after-resume`, `no-chat-question`, `no-env-dump`, `no-false-green`, `no-glm-heavy-path`, `no-headless-login`, `no-mac-web-build`, `no-main-checkout`, `no-manager-subagent`, `no-off-palette-label`, `no-ours-merge`, `no-prompt-stop`, `no-public-leak`, `no-stash`, `no-unslotted-run`, `rules`, `session-state` and `writing-first`.
 
 ### The factory
 
