@@ -312,7 +312,7 @@ test("the pre-commit rule test runs when the rules change, and a broken pin refu
   const unpin = (text: string) =>
     text.replace("- ALWAYS: Do every change in its", "- ALWAYS: Do each change in its")
   const addLine = (text: string) => `${text}\nOne more plain line.\n`
-  // a same-length edit, so an AGENTS.md just under the budget still passes
+  // a same-length edit, so an AGENTS.md just under the limit still passes
   const sameLength = (text: string) => text.replace("AI coding agents", "AI-coding agents")
   try {
     expect(git("init", "-q")).toMatchObject({ code: 0 })
