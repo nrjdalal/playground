@@ -39,7 +39,7 @@ jobs:
       - name: Install zsh
         run: sudo apt-get update && sudo apt-get install -y zsh
 
-      - name: Install dependencies (the lat check runs the locked lat-core from node_modules)
+      - name: Install dependencies
         run: bun install --frozen-lockfile --ignore-scripts
 
       - name: bun run test:skills (each step in the steps list of packages/scripts/src/test-skills.ts)
