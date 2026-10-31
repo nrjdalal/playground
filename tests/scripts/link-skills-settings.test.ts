@@ -315,3 +315,35 @@ describe("link-skills.sh and the names from before the rename", () => {
     expect(readdirSync(join(home, ".claude", "skills"))).toEqual([])
   })
 })
+
+// A pull that removes a linked file leaves its link dangling, which doctor names MISSING: the next run clears it.
+describe("link-skills.sh prunes the links a pull left dangling", () => {
+  test("a dead link into the checkout goes, while a live one and a dead one elsewhere stay", async () => {
+    const { home, repo } = setup()
+    const ops = join(home, ".playground", "ops")
+    mkdirSync(join(ops, "checks"), { recursive: true })
+    mkdirSync(join(home, ".bun", "bin"), { recursive: true })
+    const dead = join(ops, "checks", "checks.py")
+    const deadTop = join(home, ".playground", "gone.md")
+    const deadBin = join(home, ".bun", "bin", "gone")
+    const live = join(ops, "checks", "live.json")
+    const elsewhere = join(ops, "checks", "elsewhere.py")
+    symlinkSync(join(repo, "scripts", "ops", "checks", "checks.py"), dead)
+    symlinkSync(join(repo, "gone.md"), deadTop)
+    symlinkSync(join(repo, "scripts", "gone"), deadBin)
+    symlinkSync(join(repo, "scripts", "factory-settings.json"), live)
+    symlinkSync(join(scratch, "nowhere", "elsewhere.py"), elsewhere)
+    const { code } = await run(repo, home)
+    expect(code).toBe(0)
+    const isLink = (path: string) => {
+      try {
+        return lstatSync(path).isSymbolicLink()
+      } catch {
+        return false
+      }
+    }
+    expect([dead, deadTop, deadBin].filter(isLink)).toEqual([])
+    expect(readlinkSync(live)).toBe(join(repo, "scripts", "factory-settings.json"))
+    expect(readlinkSync(elsewhere)).toBe(join(scratch, "nowhere", "elsewhere.py"))
+  })
+})

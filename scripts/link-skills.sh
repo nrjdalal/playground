@@ -30,6 +30,19 @@ for link in "$DEST"/*; do
   esac
 done
 
+# A link into this checkout whose file a pull removed goes, in the folders doctor reads (linksInto in packages/scripts/src/playground/links.ts); a live one, and every link elsewhere, stays
+DATA="$HOME/.playground"
+for dir in "$HOME/.bun/bin" "$DATA" "$DATA/handoffs" "$DATA/ops" "$DATA"/ops/*/; do
+  dir="${dir%/}"
+  [ -d "$dir" ] && [ ! -L "$dir" ] || continue
+  for link in "$dir"/*; do
+    [ -L "$link" ] && [ ! -e "$link" ] || continue
+    case "$(readlink "$link")" in
+      "$REPO"/*) rm "$link"; echo "removed dead link $link" ;;
+    esac
+  done
+done
+
 # Links the factory's settings, which every factory session is spawned with
 # (--settings), so a pull updates its hooks too. A real file there is left alone.
 SETTINGS="$HOME/.playground/factory-settings.json"
