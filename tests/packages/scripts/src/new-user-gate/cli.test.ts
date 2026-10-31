@@ -73,4 +73,11 @@ describe("the gate's stand-ins preflight", () => {
     for (const rc of [".zshenv", ".zprofile"]) writeFileSync(join(home, rc), zshStartup(box))
     expect(strayStandIns(box, home, names)).toEqual([])
   })
+
+  test("the box's startup sends the profile read and ops-usage's probe to a closed loopback port", () => {
+    expect(zshStartup(box)).toContain("export PLAYGROUND_PROFILE_URL=http://127.0.0.1:9/profile\n")
+    expect(zshStartup(box)).toContain(
+      "export PLAYGROUND_PROBE_URL=http://127.0.0.1:9/v1/messages\n",
+    )
+  })
 })
