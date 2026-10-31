@@ -544,11 +544,7 @@ const dashboardRoutes = new Hono<{ Variables: Session }>()
       },
     }),
     vibeLimiter,
-    sValidator("json", vibeSchema, (result) => {
-      if (!result.success) {
-        throw new ApiError(400, "VALIDATION_ERROR", "Invalid input", { issues: result.error })
-      }
-    }),
+    sValidator("json", vibeSchema, invalidInput),
     async (c) => {
       try {
         return c.json({ data: await startVibe(c.req.valid("json").path) })
@@ -580,11 +576,7 @@ const dashboardRoutes = new Hono<{ Variables: Session }>()
       },
     }),
     vibeLimiter,
-    sValidator("json", vibeSchema, (result) => {
-      if (!result.success) {
-        throw new ApiError(400, "VALIDATION_ERROR", "Invalid input", { issues: result.error })
-      }
-    }),
+    sValidator("json", vibeSchema, invalidInput),
     async (c) => {
       try {
         await stopVibe(c.req.valid("json").path)
