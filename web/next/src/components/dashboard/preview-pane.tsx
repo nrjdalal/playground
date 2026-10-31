@@ -24,6 +24,7 @@ import {
   stackGroups,
   startAddress,
   STOPPED,
+  stoppedIn,
 } from "@/lib/previews"
 import { fetchStacks, STACKS_QUERY_KEY, startStack, stopStack } from "@/lib/stacks"
 
@@ -77,6 +78,9 @@ export function PreviewPane() {
   const stop = useMutation({
     mutationFn: stopStack,
     onSuccess: (_, path) => {
+      queryClient.setQueryData<Awaited<ReturnType<typeof fetchStacks>>>(STACKS_QUERY_KEY, (data) =>
+        data ? stoppedIn(data, path) : data,
+      )
       show("")
       setStopped(path)
       void refresh()
