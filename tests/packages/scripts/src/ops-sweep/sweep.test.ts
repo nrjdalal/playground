@@ -12,6 +12,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import {
+  boxRoute,
   chaseStale,
   check,
   type Context,
@@ -269,9 +270,49 @@ describe("chaseStale", () => {
     expect(calls.filter((c) => c.argv[1] === "/repo/scripts/ops/notify.sh")).toHaveLength(1)
   })
 
+  test("reports an unclosed answer once, stays quiet on it for 4 hours, then reports it again (#129)", async () => {
+    const { calls, ctx } = setup({ [STALE]: { out: lines } })
+    const live = new Map([["builder", "busy"]])
+    const told = () => calls.filter((c) => c.argv[1] === "/repo/scripts/ops/notify.sh").length
+    const at = (minutes: number) => {
+      ctx.now = () => NOW + minutes * 60_000
+      return chaseStale(ctx, live)
+    }
+    await at(0)
+    await at(5)
+    await at(60)
+    await at(239)
+    expect(told()).toBe(1)
+    await at(240)
+    expect(told()).toBe(2)
+  })
+
   test("a failed read is stale-unreadable", async () => {
     const { ctx } = setup({ [STALE]: { code: 1 } })
     expect(await chaseStale(ctx, new Map())).toEqual(["stale-unreadable"])
+  })
+})
+
+describe("boxRoute", () => {
+  const route = async (reply: { code?: number; out?: string }) => {
+    const { ctx, ops } = setup()
+    const argvs: string[][] = []
+    ctx.run = async (argv) => {
+      argvs.push(argv)
+      return { code: reply.code ?? 0, err: "", out: reply.out ?? "" }
+    }
+    const found = await boxRoute(ctx)
+    expect(argvs).toEqual([[join(ops, "run-slot.sh"), "box-off"]])
+    return found
+  }
+
+  test("names each failing precondition run-slot.sh box-off prints in one finding, and none when the route can fire (#129)", async () => {
+    expect(await route({ out: "no-ci-sh\nno-ssh-key\n" })).toEqual([
+      "box-route-off:no-ci-sh,no-ssh-key",
+    ])
+    expect(await route({ out: "slot-off\n" })).toEqual(["box-route-off:slot-off"])
+    expect(await route({ out: "" })).toEqual([])
+    expect(await route({ code: 2 })).toEqual(["box-route-unreadable"])
   })
 })
 

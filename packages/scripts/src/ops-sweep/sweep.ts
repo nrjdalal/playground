@@ -29,7 +29,7 @@ export const HEADROOM = 85
 export const IDLE_DB_AFTER = 7200
 export const IDLE_DB_GAP = 900
 export const PRUNE_EVERY = 21600
-export const STALE_EVERY = 1800
+export const STALE_EVERY = 14_400
 
 const IDLE_SQL =
   "select count(*) from pg_stat_activity where backend_type = 'client backend' and pid <> pg_backend_pid()"
@@ -167,7 +167,7 @@ export async function opsDown(ctx: Context): Promise<string[]> {
   return out
 }
 
-// Each answer of the owner's that its poster has not closed within 15 minutes (bun run ask stale): a live poster gets one outbox line, again every STALE_EVERY seconds while it stays open; a poster with no live session is a finding.
+// Each answer of the owner's that its poster has not closed within 15 minutes (bun run ask stale): a live poster gets one outbox line, then at most one every STALE_EVERY seconds (4 hours) while it stays open, by the item's tag in stale-told.json; a poster with no live session is a finding.
 export async function chaseStale(ctx: Context, live: Map<string, string>): Promise<string[]> {
   const r = await ctx.run(dashboardAsk(ctx, "stale", "--minutes", "15"))
   if (r.code) return ["stale-unreadable"]
@@ -196,6 +196,14 @@ export async function chaseStale(ctx: Context, live: Map<string, string>): Promi
   }
   await writeAtomic(path, JSON.stringify(keep))
   return out
+}
+
+// run-slot's runner-box route, which falls back to this Mac without a word: one finding naming each precondition run-slot.sh box-off reports failing (no-ci-sh, no-ssh-key, runner-host-off, slot-off).
+export async function boxRoute(ctx: Context): Promise<string[]> {
+  const r = await ctx.run([join(ctx.ops, "run-slot.sh"), "box-off"], { timeoutMs: 60_000 })
+  if (r.code) return ["box-route-unreadable"]
+  const why = r.out.split(/\s+/).filter(Boolean)
+  return why.length ? [`box-route-off:${why.join(",")}`] : []
 }
 
 // The dashboard database's container, the one publishing POSTGRES_URL's port from the dashboard's own .env, so it runs under any name; undefined when none passes.
@@ -248,7 +256,7 @@ export async function idleDbs(ctx: Context): Promise<string[]> {
   return out
 }
 
-// One read of runners, probes, the managers' asks, unclosed answers, the ops jobs, idle databases and the usage forecast.
+// One read of runners, probes, the managers' asks, unclosed answers, the ops jobs, idle databases, the runner-box route and the usage forecast.
 export async function check(ctx: Context): Promise<string[]> {
   let roster: Json
   try {
@@ -304,6 +312,7 @@ export async function check(ctx: Context): Promise<string[]> {
   found.push(...(await chaseStale(ctx, live)))
   found.push(...(await opsDown(ctx)))
   found.push(...(await idleDbs(ctx)))
+  found.push(...(await boxRoute(ctx)))
   const projected = Object.values(await forecast(ctx))
   if (projected.length) found.push(projected.some((v) => v > HEADROOM) ? "no-headroom" : "headroom")
   return found
