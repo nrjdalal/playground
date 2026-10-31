@@ -1,8 +1,11 @@
-// The retro's per-PR table: every factory PR updated since a time, read in one batched GraphQL search, one tab-separated row each, from its first commit to its merge (or now), with its commits, force pushes, review rounds and their scores, and tester reports.
+// The retro's per-PR table: every factory PR updated since a time, read through GraphQL's search a page at a time, one tab-separated row each, from its first commit to its merge (or now), with its commits, force pushes, review rounds and their scores, and tester verdicts, each verdict read as the merge gate reads it.
+import { verdictOf } from "@packages/config/verdicts"
+
 import { factoryRepoOf } from "../playground/setting"
 
-export const QUERY = `query ($q: String!) {
-  search(query: $q, type: ISSUE, first: 100) {
+export const QUERY = `query ($q: String!, $after: String) {
+  search(query: $q, type: ISSUE, first: 100, after: $after) {
+    pageInfo { hasNextPage endCursor }
     nodes {
       ... on PullRequest {
         number
@@ -11,7 +14,7 @@ export const QUERY = `query ($q: String!) {
         mergedAt
         firstCommit: commits(first: 1) { nodes { commit { authoredDate } } }
         allCommits: commits { totalCount }
-        comments(first: 100) { nodes { body } }
+        comments(first: 100) { totalCount nodes { author { login } body } }
         timelineItems(itemTypes: [HEAD_REF_FORCE_PUSHED_EVENT], first: 1) { totalCount }
       }
     }
@@ -20,7 +23,7 @@ export const QUERY = `query ($q: String!) {
 
 export type Pr = {
   allCommits: { totalCount: number }
-  comments: { nodes: { body: string }[] }
+  comments: { nodes: { author: { login: string } | null; body: string }[]; totalCount: number }
   firstCommit: { nodes: { commit: { authoredDate: string } }[] }
   mergedAt: string | null
   number: number
@@ -29,25 +32,38 @@ export type Pr = {
   title: string
 }
 
+export type Page = { nodes: Pr[]; pageInfo: { endCursor: string | null; hasNextPage: boolean } }
+
 export const searchOf = (repo: string, since: string): string =>
   `repo:${repo} is:pr updated:>=${since}`
 
-const ROUND = /^## ReviewBot · round (\d+): (\d)\/5/
+// Every page of the search, each read from the last one's end, so no PR past the first hundred is left out.
+export const readAll = async (read: (after: string | null) => Promise<Page>): Promise<Pr[]> => {
+  const prs: Pr[] = []
+  let after: string | null = null
+  do {
+    const page = await read(after)
+    prs.push(...page.nodes)
+    after = page.pageInfo.hasNextPage ? page.pageInfo.endCursor : null
+  } while (after)
+  return prs
+}
+
 const clock = (iso: string | null | undefined) => iso?.slice(11, 16) ?? "-"
 
-// Pure: the table's header and one row per PR, by number.
-export const rowsOf = (prs: Pr[], now: Date): string[] => [
-  "pr\tstate\tfirst\tmerged\tmins\tcommits\tfp\trounds\tscores\ttests\ttitle",
-  ...[...prs]
-    .sort((a, b) => a.number - b.number)
-    .map((p) => {
+// Pure: the table's header, one row per PR by number, then a line for each PR whose comments ran past one read, since its later verdicts are missing from its row. Only the owner's comments count, as the merge gate counts them.
+export const rowsOf = (prs: Pr[], owner: string, now: Date): string[] => {
+  const sorted = [...prs].sort((a, b) => a.number - b.number)
+  return [
+    "pr\tstate\tfirst\tmerged\tmins\tcommits\tfp\trounds\tscores\ttests\ttitle",
+    ...sorted.map((p) => {
       const first = p.firstCommit.nodes[0]?.commit.authoredDate
       const end = p.mergedAt ?? now.toISOString()
-      const scores = p.comments.nodes
-        .map((c) => ROUND.exec(c.body))
-        .filter((m) => m !== null)
-        .map((m) => `${m[1]}:${m[2]}`)
-      const tests = p.comments.nodes.filter((c) => c.body.startsWith("## TesterBot")).length
+      const verdicts = p.comments.nodes
+        .filter((c) => c.author?.login.toLowerCase() === owner.toLowerCase())
+        .flatMap((c) => verdictOf(c.body) ?? [])
+      const reviews = verdicts.filter((v) => v.gate === "review")
+      const tests = verdicts.filter((v) => v.gate === "tester")
       return [
         p.number,
         p.state[0],
@@ -56,13 +72,20 @@ export const rowsOf = (prs: Pr[], now: Date): string[] => [
         first ? `${Math.round((Date.parse(end) - Date.parse(first)) / 60_000)}m` : "-",
         `c${p.allCommits.totalCount}`,
         `fp${p.timelineItems.totalCount}`,
-        `r${scores.length}`,
-        `[${scores.join(" ")}]`,
-        `t${tests}`,
+        `r${reviews.length}`,
+        `[${reviews.map((v) => `${v.round}:${v.score}`).join(" ")}]`,
+        `t${tests.filter((v) => v.pass).length}/${tests.length}`,
         p.title.slice(0, 60),
       ].join("\t")
     }),
-]
+    ...sorted
+      .filter((p) => p.comments.totalCount > p.comments.nodes.length)
+      .map(
+        (p) =>
+          `#${p.number}: read ${p.comments.nodes.length} of ${p.comments.totalCount} comments, so later verdicts are missing from its row`,
+      ),
+  ]
+}
 
 if (import.meta.main) {
   const at = process.argv.indexOf("--since")
@@ -71,22 +94,27 @@ if (import.meta.main) {
     console.error("usage: table.ts --since <ISO 8601 time>")
     process.exit(2)
   }
-  const gh = Bun.spawnSync(
-    [
-      "gh",
-      "api",
-      "graphql",
-      "-f",
-      `query=${QUERY}`,
-      "-f",
-      `q=${searchOf(await factoryRepoOf(), since)}`,
-    ],
-    { stderr: "pipe", stdout: "pipe" },
-  )
-  if (gh.exitCode !== 0) {
-    console.error(gh.stderr.toString().trim())
-    process.exit(1)
-  }
-  const nodes = JSON.parse(gh.stdout.toString()).data.search.nodes as Pr[]
-  console.log(rowsOf(nodes, new Date()).join("\n"))
+  const repo = await factoryRepoOf()
+  const prs = await readAll(async (after) => {
+    const gh = Bun.spawnSync(
+      [
+        "gh",
+        "api",
+        "graphql",
+        "-f",
+        `query=${QUERY}`,
+        "-f",
+        `q=${searchOf(repo, since)}`,
+        ...(after ? ["-f", `after=${after}`] : []),
+      ],
+      { stderr: "pipe", stdout: "pipe" },
+    )
+    const answer = gh.exitCode === 0 ? JSON.parse(gh.stdout.toString()) : null
+    if (!answer?.data?.search) {
+      console.error(gh.stderr.toString().trim() || JSON.stringify(answer?.errors ?? answer))
+      process.exit(1)
+    }
+    return answer.data.search as Page
+  })
+  console.log(rowsOf(prs, repo.split("/")[0]!, new Date()).join("\n"))
 }
