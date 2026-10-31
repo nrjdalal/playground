@@ -2,7 +2,7 @@
 """beat.py <job> <pid> <startedAt> <cycleSeconds> <lastResult> [extra JSON]: write the job's heartbeat, ops/<job>.json, atomically.
 Imported, it also holds checkout(), the one place the ops scripts name the main checkout.
 
-The dashboard reads it: Running while lastResult is "ok" and lastBeatAt is fresh, Failing when lastResult is anything else,
+The dashboard reads it: Running while lastResult is "ok" and lastBeatAt is fresh, Waiting while it starts "waiting: " (the reason after it), Failing when lastResult is anything else,
 Down when lastBeatAt is older than 3 x cycleSeconds, the pid is gone or the file is missing.
 """
 import json, os, shutil, subprocess, sys, time

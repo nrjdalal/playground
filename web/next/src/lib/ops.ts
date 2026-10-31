@@ -33,6 +33,7 @@ export const OPS_LABELS: Record<OpsStatus, string> = {
   down: "Down",
   failing: "Failing",
   running: "Running",
+  waiting: "Waiting",
 }
 
 // Pure: an ops row's second line in parts: its status, the reason when it has one, and when it last beat, which the sidebar draws apart so the reason alone gives way to the row's width.
@@ -64,16 +65,21 @@ export const whenWords = (schedule: OpsRow["schedule"]): string | null => {
 // Pure: the Scripts label's count: the jobs it lists, so the paused ones, which it leaves out, are not counted.
 export const scriptCount = (rows: OpsRow[]): number => shownOps(rows).length
 
-// Pure: the Scripts group on the collapsed rail, one icon: red while any script it lists is failing or down, its words the label's count and how many are not running.
+// Pure: a script that should run and does not, Failing or Down; a Waiting one has nothing to read yet, so it is not broken.
+export const isBroken = (row: OpsRow): boolean => row.status === "down" || row.status === "failing"
+
+// Pure: the Scripts group on the collapsed rail, one icon: red while any script it lists is failing or down, its words the label's count and how many are failing or down.
 export const scriptsRail = (rows: OpsRow[]): { broken: boolean; words: string } => {
   const count = scriptCount(rows)
-  const down = shownOps(rows).filter((row) => row.status !== "running").length
+  const broken = shownOps(rows).filter(isBroken).length
   return {
-    broken: down > 0,
-    words: [`Scripts ${count}`, down > 0 && `${down} not running`].filter(Boolean).join(" · "),
+    broken: broken > 0,
+    words: [`Scripts ${count}`, broken > 0 && `${broken} failing or down`]
+      .filter(Boolean)
+      .join(" · "),
   }
 }
 
 // Pure: the scripts the group shows: every job it lists while open; collapsed, only those failing or down, so nothing broken hides.
 export const scriptsShown = (rows: OpsRow[], open: boolean): OpsRow[] =>
-  shownOps(rows).filter((row) => open || row.status !== "running")
+  shownOps(rows).filter((row) => open || isBroken(row))

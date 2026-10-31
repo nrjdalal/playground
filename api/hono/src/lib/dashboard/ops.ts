@@ -92,7 +92,7 @@ export const heartbeatSchema = z.object({
 
 export type Heartbeat = z.infer<typeof heartbeatSchema>
 
-export type OpsStatus = "down" | "failing" | "running"
+export type OpsStatus = "down" | "failing" | "running" | "waiting"
 
 // One job as its row shows it: its plain name, whether it calls a model and which, what it does, its status, the reason when it is not running, when it last beat, whether jobs.json pauses it, its schedule from jobs.json, and a problem when that schedule and its heartbeat disagree.
 export type OpsRow = {
@@ -117,7 +117,7 @@ const EXITED = /^(supervisor exited|loop exited)/
 // What jobs.json says a job calls, beside its pause mark.
 export type JobCalls = { callsModel: boolean; model: string | null }
 
-// Pure: a job's row from its heartbeat file's text (null when the file is missing) and whether its pid is still running (null when that could not be read). Down when the file is missing, does not read or names another job, the loop has exited, the pid is gone or the last beat is older than STALE_CYCLES cycles; Failing when the last result is not ok; else Running.
+// Pure: a job's row from its heartbeat file's text (null when the file is missing) and whether its pid is still running (null when that could not be read). Down when the file is missing, does not read or names another job, the loop has exited, the pid is gone or the last beat is older than STALE_CYCLES cycles; Waiting when the last result starts `waiting: ` (a job with nothing to read yet, the reason after it); Failing when it is anything else but ok; else Running.
 export function opsRowOf(
   job: string,
   text: string | null,
@@ -172,6 +172,8 @@ export function opsRowOf(
   if (now - Date.parse(beat.lastBeatAt) > STALE_CYCLES * beat.cycleSeconds * 1000) {
     return down(`No beat for over ${STALE_CYCLES * beat.cycleSeconds}s`)
   }
+  const waiting = /^waiting: (.+)/.exec(beat.lastResult)?.[1]
+  if (waiting) return { ...row, lastBeatAt, problem, reason: waiting, status: "waiting" }
   if (beat.lastResult !== "ok") {
     return {
       ...row,
