@@ -25,7 +25,7 @@ Sessions run in bypass-permissions mode, yet some commands still prompt (`rm`, a
    Start it in the background that way, the one way a factory session starts another:
    the factory's `no-raw-spawn` hook refuses a cmux call whose command runs claude (a new workspace, split, pane or surface, a respawn, a layout, a surface's command after `--`), one that opens, forks, restores or wakes a Claude agent or saved session, a `claude --resume` or `--continue`, and every herdr call but its reads (`get`, `list`, `read`, `agent wait`, `pane wait-output` and the like)
    and a scratch world's of the session's own ([scripts/README.md](../../../../scripts/README.md#spawnsh)),
-   naming the script.
+   naming the script; type every program by its literal name, since one held in a variable (`$V integration add`) reads as herdr when a herdr command group follows it.
    It holds the machine's room in code (the owner: "It's not about the slot at all.
    It's about how many cores we are using."), through a capacity gate that refuses, failing closed, unless three checks pass in order, the first failure naming its gate and its reading, and counts no live sessions or workers (the owner, 18 Oct: "don't cap anything"; Ops watches the live board for the risk of a cmux that stopped answering at 49 live sessions and load5 97):
    the higher of load1 and load5 (the third field of `sysctl -n vm.loadavg`), plus the starts of the last 5 minutes (`gates.startsWindow`), its own and each `slots.peers` folder's, each weighing half its item's load units, under the core count (`sysctl hw.ncpu`) times `PLAYGROUND_LOAD_MULT` (default 1.0),
