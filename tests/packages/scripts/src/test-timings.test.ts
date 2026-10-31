@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { refresh } from "../../../../packages/scripts/src/test-timings"
+import { refresh, type Shard } from "../../../../packages/scripts/src/test-timings"
 
 const SCRIPT = join(import.meta.dir, "../../../../packages/scripts/src/test-timings.ts")
 const all = () => true
@@ -11,7 +11,7 @@ const all = () => true
 describe("refresh", () => {
   test("a shard's own files take its fresh timing, and a file no shard timed keeps its old one", () => {
     const base = { "tests/a.test.ts": 100, "tests/b.test.ts": 200, "tests/serial.test.ts": 50 }
-    const shards = [
+    const shards: Shard[] = [
       {
         files: ["./tests/a.test.ts", "./tests/serial.test.ts"],
         timings: { "tests/a.test.ts": 140, "tests/b.test.ts": 999 },
