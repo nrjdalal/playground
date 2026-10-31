@@ -64,7 +64,7 @@ A reviewer session keeps nothing it cannot read back: the skill's `state.py` ask
 - When the ticket carries samples, the verdict holds a samples table, and a sample left unhandled holds the score down.
 - A PR that changes a skill, an agent guide or a docs page has its writing judged against writing-for-agents in the verdict, beside the code.
 - A FAIL a lead overruled on the PR (`Lead ruling:`) no longer counts against the score, once the issue the ruling names exists.
-- The recovery scan lists no unscored PR held by a worker without a live reviewer, and no PR as lost: every open PR is held by an agent, parked by a plan, or another author's for the Builder to triage.
+- The recovery scan lists no unscored PR held by a worker without a live reviewer, and no PR as lost: every open PR is held by an agent (its roster row, or a live worker `plan.json` gives it), parked by a plan (`plan.json` or a plans file), or another author's for the Builder to triage.
 
 ## Where it fits
 

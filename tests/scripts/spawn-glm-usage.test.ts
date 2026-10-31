@@ -54,6 +54,16 @@ describe("the capacity gate refuses and spawns nothing", () => {
       "the usage gate holds it: zai-usage.json holds no five-hour window",
     ],
     [
+      "an empty GLM balance, which a GLM session's own error reported",
+      () => ({
+        ZAI_USAGE_JSON: JSON.stringify({
+          ...zai(1400, 7000),
+          balance: { empty: true, seenAt: "2026-10-31T02:05:11.819Z" },
+        }),
+      }),
+      "the usage gate holds it: the GLM balance is empty (zai-usage.json balance, a GLM session's 429 [1113] at 2026-10-31T02:05:11.819Z)",
+    ],
+    [
       "the meter's beat names no cycle length",
       () => ({ ZAI_HEARTBEAT_JSON: JSON.stringify(beat({ cycleSeconds: 0 })) }),
       "it cannot read ops-zai-usage.json (does not read)",

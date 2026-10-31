@@ -28,7 +28,7 @@ set -euo pipefail
 #      starts on the passing login next in the account split, else the one with the lowest week, naming it, and refuses
 #      only when every login is over, its pick kept off the resume record's exec line so a restore picks afresh; --account skips the usage
 #      check, since the other login's usage is not this machine's, but refuses a week a reading names at 100%; GLM reads zai-usage.json
-#      (the 5-hour window under 95% of its credits, with no week check, valid only
+#      (the 5-hour window under 95% of its credits, with no week check, and no empty balance (its `balance`), valid only
 #      while the zai usage job's last beat is ok and within 3 cycles)
 # It also refuses a name a live session holds, since Claude Code would start the
 # new one under a generated name. Every launch is in bypass mode, and drops
@@ -454,6 +454,10 @@ elif backend == "glm":
         five_pct = pct(five["used"], five["cap"])
     except (KeyError, TypeError):
         five_pct = None
+    balance = zai.get("balance") if isinstance(zai, dict) else None
+    if isinstance(balance, dict) and balance.get("empty") is True:
+        readings["balance"] = "empty"
+        refuse("usage", f"the GLM balance is empty (zai-usage.json balance, a GLM session's 429 [1113] at {balance.get('seenAt', 'an unread time')}). Top it up at Z.ai: the gate lets GLM starts try again an hour after that failure.")
     if five_pct is None:
         refuse("usage", "zai-usage.json holds no five-hour window")
     readings["fiveHour"] = five_pct

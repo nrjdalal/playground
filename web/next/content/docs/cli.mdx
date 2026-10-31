@@ -163,7 +163,7 @@ Every change needs its reason, and `--scope` sets it for an org (its name) or fo
 
 ## Accounts: `playground accounts`
 
-`playground accounts list` prints each account the factory spends, a row of the `usage.accounts` setting: its provider, its email or label, whether the Keychain keeps its secret, and its last 5-hour and week reading. It never prints a token or a key.
+`playground accounts list` prints each account the factory spends, a row of the `usage.accounts` setting: its provider, its email or label, whether the Keychain keeps its secret, and its last 5-hour and week reading. A GLM key reads both windows at 100% while its balance is empty, naming since when, and no reading after a failed usage read, as the sidebar shows them. It never prints a token or a key.
 `playground accounts add --provider claude --email <email>` prints 3 steps (open the sign-in link in a private or guest window, sign in with the account to add, paste the code the page shows), runs `claude setup-token` in your terminal, then asks you to paste the token it printed, with no echo, and keeps it in the Keychain under `usage.keychainService` by that email.
 `playground accounts add --provider glm --label <label>` asks for a Z.ai key the same way and keeps it under `models.glmKeychainService` by that label; `spawn.sh --backend glm --account <label>` runs on it, and the first GLM row is the default.
 Adding an account that is already listed replaces its secret and leaves its row as it is.
