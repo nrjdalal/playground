@@ -914,6 +914,7 @@ const fresh = () => {
 }
 const short = (sha: string) => sha.slice(0, 7)
 
+// Each roll_up case takes 15s: past bun's 5s default, bun stops the case's bash with SIGTERM, and the Audit job's load read that as roll_up exiting 143
 describe("the supervisor's production build", () => {
   test("a start builds the head into its own folder and serves that build, never dev", async () => {
     fresh()
@@ -927,13 +928,13 @@ describe("the supervisor's production build", () => {
     expect(await keptLines(/^result /)).toEqual([
       `result START ${short(c2)} PASS verify=PASS follower=running`,
     ])
-  })
+  }, 15_000)
 
   test("a build reads the Dashboard's URLs and needs no server secret, since a first run's .env holds none yet", async () => {
     fresh()
     expect((await keptRun("roll_up START", c2)).code).toBe(0)
     expect(await keptLines(/^envs /)).toEqual([`envs ${API} ${WEB} ${API} ${WEB} production true`])
-  })
+  }, 15_000)
 
   test("a failed build fails the roll, lists the head in bad-builds and serves the head before's kept build, building nothing more", async () => {
     fresh()
@@ -948,7 +949,7 @@ describe("the supervisor's production build", () => {
       `result FALLBACK ${short(c1)} PASS verify=PASS follower=running`,
     ])
     expect(await Bun.file(join(kept, "bad-builds")).text()).toBe(`${c2}\n`)
-  })
+  }, 15_000)
 
   test("a verify that fails after a roll falls back to the head before's kept build without building it again", async () => {
     fresh()
@@ -965,7 +966,7 @@ describe("the supervisor's production build", () => {
       `result ROLL canary ${short(c2)} FAIL verify=FAIL follower=running`,
       `result FALLBACK ${short(c1)} PASS verify=PASS follower=running`,
     ])
-  })
+  }, 15_000)
 
   test("a kept build made for other URLs is built again, with one line naming both, since next bakes them into its client", async () => {
     fresh()
@@ -980,7 +981,7 @@ describe("the supervisor's production build", () => {
       `say rebuilding ${short(c1)}: its build was for http://playground.localhost:1355 http://api.playground.localhost:1355, the Dashboard is now on ${WEB} ${API}`,
     ])
     expect(await keptLines(/^(build|serve)/)).toEqual([`build ${short(c1)}`, `serve ${c1}`])
-  })
+  }, 15_000)
 
   test("a pass keeps its own build and the last one that passed before it, and removes the rest", async () => {
     fresh()
