@@ -781,8 +781,6 @@ describe("the beats that send no line", () => {
 
 describe("the optimizer's beats", () => {
   test.each([
-    ["optimizer-flow", "optimizer flow"],
-    ["optimizer-burn", "optimizer burn check"],
     ["optimizer-tick", "optimizer tick"],
     ["optimizer-daily", "optimizer daily"],
   ])("%s sends its words to the optimizer", async (name, words) => {

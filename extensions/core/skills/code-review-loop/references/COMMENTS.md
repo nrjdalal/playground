@@ -25,6 +25,8 @@ Then, in this order:
 
 A round on a base merge alone says so in one line under the header (`Base merge only: the PR's own work is unchanged since <sha7>.`), keeping the PR's standing score.
 
+Fill the verdict file's blanks with Edit or Write, each fill a call of its own, and right before the post grep the file for every slot the template above holds (`grep -nE '<(r|s|sha7|b|f|k)>' <file>`, plus any slot of your own, such as `<checks>`), posting only when it prints nothing: one verdict posted with its checks slot still in it, after the hook that refuses the publish-step word stopped the one call that both filled the slot with sed and posted a reply.
+
 With each verdict, first give its `Review • <s>/5` label its score's color, which creates the label when missing and recolors it otherwise: `gh label create 'Review • <s>/5' -R <repo> --color <hex> --force`, `<hex>` being the table's color without its `#`, written in the command itself.
 Then set the PR's `Review • <s>/5` label and remove any other `Review • ` label, over REST as the verdict posts (`gh api repos/<repo>/issues/<n>/labels -f 'labels[]=Review • <s>/5'`, then `gh api -X DELETE repos/<repo>/issues/<n>/labels/<label>` for each other, its name URL-encoded: `Review%20%E2%80%A2%203%2F5`), so the labels carry the newest score alone.
 

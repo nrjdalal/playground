@@ -19,7 +19,8 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
   naming it, and refuses only when every login is over, naming each one's reading;
   a bare start runs on the login in Claude Code's config (`.claude.json`'s `oauthAccount.emailAddress`), so while `usage.json` reads another account, the factory's, that login is judged by `ops/usage/stored-login.json` (ops-usage's full reading of it, written in the last 15 minutes and naming that login, else it fails)
   and the factory account counts as another login, reached by `--account`;
-  `--account` skips it, since the other login's usage is not this machine's, but refuses a week a reading names at 100% until its `resets_at`) or GLM's from `zai-usage.json` (the 5-hour window under 95% of its credits, with no week check, since its credits run on the 5-hour window alone), only while the ops-zai-usage job's last beat is ok and within 3 cycles,
+  `--account` skips it, since the other login's usage is not this machine's, but refuses a week a reading names at 100% until its `resets_at`) or GLM's from `zai-usage.json` (the 5-hour window under 95% of its credits, with no week check, since its credits run on the 5-hour window alone, and no empty `balance`, which an hour after the failure that set it lets GLM starts try again),
+  only while the ops-zai-usage job's last beat is ok and within 3 cycles,
   so every GLM spawn refuses until `bun run ops:zai-usage` has beaten once).
   A GLM session takes its own load and memory gate in place of the load and memory checks above: load5 (the third field of `sysctl -n vm.loadavg`) under 30 (`gates.glmLoad5Max`), memory pressure level 1, and swap-ins under 100/s (`gates.glmSwapinsMax`, `vm_stat -c 2 1`'s last second), so it starts while Claude's gate holds; Claude's gate stays as above.
   Every pass and refusal is one line in `~/.playground/ops/capacity.jsonl`, which the load check counts its starts from, a refusal's carrying the words it printed as `detail`.
@@ -49,7 +50,7 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
   `--in <dir>` starts a `worker` in that folder in place of this checkout: an existing folder under the code root (`paths.codeRoot`) or under `~/<org>` for an org `ext.links` guards, the folders whose trust prompt spawn.sh answers; any other folder, and every other mode, is refused.
   `spawn.sh column` opens a split right of the herdr pane it names and names a manager once;
   `spawn.sh manager` opens the first dispatcher, `sessions.names`' dispatcher, on this machine's own login, reporting to no session (`playground dispatcher` runs it), the second dispatcher, a dispatcher's name with `-2` (from `sessions.names` or `sessions.aliases`) or an `<id>-dispatcher` it records as `slot=2` (on `--backend glm`, or on Claude with a second account's `--account`),
-  the optimizer, `optimizer` or an `<id>-optimizer` (or a session the roster gives the optimizer kind), or the builder, ops or the planner by `sessions.names` (`playground builder`, `playground ops` and `playground planner` run it), each in a workspace of its own, in the leads worktree,
+  the optimizer, `optimizer` (`playground optimizer` runs it) or an `<id>-optimizer` (or a session the roster gives the optimizer kind), or the builder, ops or the planner by `sessions.names` (`playground builder`, `playground ops` and `playground planner` run it), each in a workspace of its own, in the leads worktree,
   which the first such start cuts and installs when the checkout has none: branch leads, tracking origin's copy of the checkout's branch (canary for a checkout on canary, else main), which ops-tick's canary pull keeps current;
   `spawn.sh probe` (in herdr alone) opens a probe in a herdr workspace of its own, for a server with no pane to split beside, and a herdr refusal quotes herdr's own error.
   `--runtime herdr` opens the session in herdr: on the playground server under `~/.playground/herdr`, by the binary its `pin.json` names, refused when that file's sha256 or `--version` differs or the server is not running; a workspace labelled with the name, or for a column a split right of the herdr pane it names (its spawner's own is `$HERDR_PANE_ID`);
@@ -132,6 +133,7 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
   since a plain install then looks healthy while check-types fails on a missing module.
   A review worktree that only reads (no test run, no commit) takes no clone at all.
   AGENTS.md has worktrees removed one at a time, since removing several at once drove fseventsd past 300% CPU and the load to 77.
+- After `git worktree move`, remove the moved worktree's `web/next/.source` and `web/next/.next`, which keep the old absolute path, so the next pre-commit build fails with `webpack loader path ... is outside configured roots`.
 
 ## bun run test:skills
 
