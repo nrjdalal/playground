@@ -7,7 +7,7 @@ import { MAX_TEXT } from "../../../../../packages/message/src/index"
 
 // Yard's tables as the migration chain builds them, on a throwaway Postgres in Docker published on 127.0.0.1 only, with made-up users. Skipped where Docker is not running.
 const MIGRATIONS = join(import.meta.dir, "../../../../../packages/db/drizzle")
-const PASSWORD = "yard-schema-test"
+const PASSWORD = crypto.randomUUID()
 
 const dockerUp = (): boolean =>
   Bun.which("docker") !== null &&
@@ -52,11 +52,12 @@ describe.skipIf(!dockerUp())("Yard's tables", () => {
         "--> statement-breakpoint",
       ))
         if (statement.trim()) await db.unsafe(statement)
-    for (const id of ["ada", "bo"])
+    for (const id of ["ada", "bo", "cy"])
       await db`insert into "user" (id, name, email) values (${id}, ${id}, ${`${id}@example.com`})`
   }, 60_000)
 
-  afterAll(() => {
+  afterAll(async () => {
+    await db?.close()
     if (container)
       Bun.spawnSync(["docker", "rm", "-fv", container], { stderr: "ignore", stdout: "ignore" })
   })
@@ -69,8 +70,8 @@ describe.skipIf(!dockerUp())("Yard's tables", () => {
     return row.id as string
   }
 
-  const post = (channelId: string, text: string, status = "sent") =>
-    db`insert into yard_message (id, channel_id, device, kind, status, text, user_id) values (${crypto.randomUUID()}, ${channelId}, ${"studio"}, ${"text"}, ${status}, ${text}, ${"ada"})`
+  const post = (channelId: string, text: string, status = "sent", userId = "ada") =>
+    db`insert into yard_message (id, channel_id, device, kind, login, status, text, user_id) values (${crypto.randomUUID()}, ${channelId}, ${"studio"}, ${"text"}, ${userId}, ${status}, ${text}, ${userId})`
 
   // What a member reads in a channel: every sent message, and their own pending ones.
   const visible = async (channelId: string, reader: string) =>
@@ -94,27 +95,45 @@ describe.skipIf(!dockerUp())("Yard's tables", () => {
     expect(await visible(id, "bo")).toEqual([])
   })
 
-  // A write the database refuses, awaited so the query runs.
-  const refused = async (write: () => PromiseLike<unknown>) => {
+  // The message of the error a write is refused with, awaited so the query runs, or null when it is taken.
+  const refusal = async (write: () => PromiseLike<unknown>) => {
     try {
       await write()
-      return false
-    } catch {
-      return true
+      return null
+    } catch (error) {
+      return (error as Error).message
     }
   }
 
   test("a channel kind, a message kind or status it does not know, and text past the limit are refused", async () => {
     const id = await channel("bugs", "channel")
-    expect(await refused(() => channel("x", "group"))).toBe(true)
+    expect(await refusal(() => channel("x", "group"))).toContain("yard_channel_kind_check")
     expect(
-      await refused(
+      await refusal(
         () =>
-          db`insert into yard_message (id, channel_id, device, kind, text, user_id) values (${crypto.randomUUID()}, ${id}, ${"studio"}, ${"shout"}, ${"hi"}, ${"ada"})`,
+          db`insert into yard_message (id, channel_id, device, kind, login, text, user_id) values (${crypto.randomUUID()}, ${id}, ${"studio"}, ${"shout"}, ${"ada"}, ${"hi"}, ${"ada"})`,
       ),
-    ).toBe(true)
-    expect(await refused(() => post(id, "hi", "lost"))).toBe(true)
-    expect(await refused(() => post(id, "a".repeat(MAX_TEXT + 1)))).toBe(true)
-    expect(await refused(() => post(id, "a".repeat(MAX_TEXT)))).toBe(false)
+    ).toContain("yard_message_kind_check")
+    expect(await refusal(() => post(id, "hi", "lost"))).toContain("yard_message_status_check")
+    expect(await refusal(() => post(id, "a".repeat(MAX_TEXT + 1)))).toContain(
+      "yard_message_text_check",
+    )
+    expect(await refusal(() => post(id, "a".repeat(MAX_TEXT)))).toBeNull()
+  })
+
+  test.each([
+    ["dm:ada:cy", "channel"],
+    ["ada-cy", "dm"],
+  ])("a channel named %s of kind %s is refused", async (name, kind) => {
+    expect(await refusal(() => channel(name, kind))).toContain("yard_channel_dm_name_check")
+  })
+
+  test("deleting a user keeps their messages, attributed by login and device", async () => {
+    const id = await channel("random", "channel")
+    await post(id, "from cy", "sent", "cy")
+    await db`delete from "user" where id = ${"cy"}`
+    expect([
+      ...(await db`select device, login, user_id from yard_message where channel_id = ${id}`),
+    ]).toEqual([{ device: "studio", login: "cy", user_id: null }])
   })
 })
