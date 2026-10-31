@@ -1,4 +1,4 @@
-// PreToolUse hook for the factory's sessions (role.ts), registered in both settings files: refuses a write to the public repository (a pull request, an issue, a review or a comment, through gh, gh api, curl or the GitHub MCP) whose text holds a name, a handle, a company term, a Slack id or a Linear key from its list, or an email address, an archive issue key or an archive link, since everything written there is public once the repository is. Its reason names the kind of text, never the text; it reads every write as no-playground-leak does, through that guard's engine, and each kind as the trace ratchet counts it (packages/scripts/src/trace-count/kinds.ts).
+// PreToolUse hook for the factory's sessions (role.ts), registered in both settings files: refuses a write to a public repository (a pull request, an issue, a review or a comment, through gh, gh api, curl or the GitHub MCP) whose text holds a name, a handle, a company term, a Slack id or a Linear key from its list, or an email address, an archive issue key or an archive link, since everything written there is public once the repository is. Its reason names the kind of text, never the text; it reads every write as no-playground-leak does, through that guard's engine, and each kind as the trace ratchet counts it (packages/scripts/src/trace-count/kinds.ts).
 import "../../packages/env/src/aliases"
 import { dataDir } from "../../packages/env/src/data-dir"
 import {
@@ -54,11 +54,11 @@ const policy = (list: PublicList, repos: Repos): Policy => ({
   find: finder(list, repos),
   git: false,
   guard: "no-public-leak",
-  guarded: (repo) => `${repo.owner}/${repo.repo}`.toLowerCase() === repos.public,
+  guarded: (repo) => repos.public.includes(`${repo.owner}/${repo.repo}`.toLowerCase()),
   hosts: false,
-  place: "the public repository",
+  place: "a public repository",
   what: "private text",
-  why: `Everything written to ${repos.public} is public once the repository is, and stays cached after, so it names no person, company or private record.`,
+  why: `Everything written to ${repos.public.join(" or ")} is public once the repository is, and stays cached after, so it names no person, company or private record.`,
 })
 
 // Fails closed on its list, which only the store holds (lists.ts), and on a store it cannot read for the repositories (factory.publicRepo and factory.archiveRepo), and, as no-playground-leak, only on a call that may write.
