@@ -72,7 +72,7 @@ curl -sf --retry 60 --retry-delay 1 --retry-connrefused "$API/api/health" > /dev
 
 This worktree's apps re-register with the proxy on restart. Done when the previously-NOT_FOUND route responds.
 
-Stop the stack before you commit: pre-commit's build rebuilds `packages/*` under it and hangs it, so pre-commit refuses while the stack runs. The web's build and check-types clear `web/next/.next/dev/types` first, which `next dev` writes for the pages it served, so a stack stopped mid-write (`TS1128`) or a branch switch away from a page (`TS2307`) leaves no stale type behind; check-types also runs `next typegen` to rewrite `.next/types` for this branch.
+Stop the stack before you commit: pre-commit's build rebuilds `packages/*` under it and hangs it, so pre-commit refuses while the stack runs. The web's build and check-types clear `web/next/.next/dev/types` first, which `next dev` writes for the pages it served, so a stack stopped mid-write (`TS1128`) or a branch switch away from a page (`TS2307`) leaves no stale type behind; check-types also runs `next typegen` to rewrite `.next/types` for this branch, and turbo runs web's build after it (`@web/next#build` depends on `check-types`), since `next build` deletes and rewrites the `.next/types` its tsc reads.
 
 Restart the same way after changing `@packages/*` exports the API consumes: they resolve to built dist, so run `bunx turbo run build --filter=@packages/<name>` first.
 

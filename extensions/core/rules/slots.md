@@ -10,4 +10,4 @@ A slot is for a short run: run-slot refuses a command that never exits, so a dev
 A queued run reads the worktree as it stands when its slot frees, so its result is for the head it ran on, which `git rev-parse HEAD` names once it starts.
 Before you name what drove a load spike, count the kernel's idle kills across it, since runnable processes can drive the load while the CPU idles.
 A script that may be running changes only by moving a new file over it, since bash reads a running script as it goes.
-scripts/ops/README.md holds the how: its run-slot.sh row and its run-slot, Ops switches and runner-host sections.
+scripts/ops/README.md holds the how: its run-slot.sh entry and its run-slot, Ops switches and runner-host sections.

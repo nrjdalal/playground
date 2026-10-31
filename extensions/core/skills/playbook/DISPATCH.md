@@ -103,3 +103,17 @@ The steps to spawn and brief a session are in [SESSIONS.md](SESSIONS.md#spawn), 
   A finding about a skill goes to the Builder as a chore, worked through AGENTS.md's "Findings from other sessions".
 
 Dispatch is done when the session holds its brief, the roster shows its task (and, for a backlog entry, the Builder's backlog marks), and your turn has ended; the dispatcher's is done once the owner's ask is also routed to its thread.
+
+## Slack mode
+
+While the `slack.mode` setting is on, the owner is away and reads only the owner's own Slack DM, so the DM is the owner's chat with the factory.
+ops-dm-watch reads the DM each minute and sends each new owner message to the dispatcher in full; one with no reply in 3 minutes, or any while the dispatcher has read stuck or failed for 3 minutes, goes to the second dispatcher too, and Ops hears of the stuck dispatcher.
+
+1. Answer every owner message the job hands you, even a one-word one: write the reply to a file and run `playground dm send <absolute path>`.
+   The second dispatcher answers only what the job hands it, the same way, and routes nothing.
+   Done when the command prints `dm send: posted`.
+2. At each 15-minute line from the job, post the owner an update on the factory's work the same way.
+   Done when the update is posted, or nothing has changed since the last one and the reply says so.
+
+`dm send` posts the frame (the PLAYGROUND line, the body, the USER line, one at a time, one send at a time under a lock in the data folder), turns our last USER line into this reply's PLAYGROUND line only while it is the DM's latest message, repairs an owner message that landed mid-send, marks the DM unread from the message before its first post, and refuses a body no-playground-leak refuses.
+Post to the DM through `dm send` alone: it records each post it makes, and the job tells our posts from the owner's by that record, so a post made any other way reads as the owner's.
