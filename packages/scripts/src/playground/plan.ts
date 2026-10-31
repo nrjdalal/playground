@@ -24,7 +24,7 @@ export const HELP = `playground            start herdr's servers that are down a
 playground view       open the ${VIEW_SERVER} herdr server, where the sessions run, in this terminal
 playground dispatcher start the dispatcher in a herdr workspace of its own, its brief written once from scripts/briefs/dispatcher.md into the data folder as brief-<dispatcher>.md: exit 0 started, 3 already running, 1 refused with spawn.sh's reason
 playground planner | builder | ops | optimizer
-                      start that manager as playground dispatcher starts the dispatcher, its brief from scripts/briefs/<manager>.md; the dispatcher runs it the first time it routes work there
+                      start that manager as playground dispatcher starts the dispatcher, its brief from scripts/briefs/<manager>.md; the dispatcher runs it the first time it routes work there, and the optimizer at its own start
 playground status     one line each for the terminal, the Dashboard, the follower, each dispatcher, GLM and each herdr server
 playground sweep <lead>
                       what changed since that lead's last sweep (alerts, the merge queue, load5 crossing 15, the single-slot flag, its rows' passed ETAs), or quiet
