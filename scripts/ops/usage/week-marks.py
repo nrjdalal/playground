@@ -21,9 +21,8 @@ account = u.get("account") or "?"
 # Nothing parks: at 100% Bravo switches the factory to the next account (#i823).
 ACCOUNTS = {a["email"]: a.get("weekReset") for a in setting("usage.accounts") if a.get("provider", "claude") == "claude"}
 FACTORY = tuple(ACCOUNTS)
-if account not in FACTORY:
-    print(f"{account}: not a factory account; nothing counted (the factory runs on {', '.join(FACTORY)})")
-    raise SystemExit(0)
+# a logged-in account usage.accounts does not list is not counted, while each listed spare still is
+counted = account in FACTORY
 week = u["rate_limits"]["seven_day"]
 now, used, reset = time.time(), week["used_percentage"], week.get("resets_at")
 if not reset and ACCOUNTS.get(account):
@@ -47,7 +46,7 @@ def sample(path, t, account, used, reset):
     return rows, (hour[-1]["week"] - hour[0]["week"]) / (hour[-1]["t"] - hour[0]["t"]) * 3600 if len(hour) >= 2 and hour[-1]["t"] - hour[0]["t"] >= 900 else None
 
 
-rows, rate = sample(samples, now, account, used, reset)
+rows, rate = sample(samples, now, account, used, reset) if counted else ([], None)
 # the pace across every account ops-usage reads (login-flip.json's `accounts`), since the spares' budget is one %/h for all of them
 spares = {a: r for a, r in (u.get("accounts") or {}).items() if a != account}
 others = {a: sample(others_samples, calendar.timegm(time.strptime(r["readAt"], "%Y-%m-%dT%H:%M:%SZ")), a, r["week"], r["weekReset"])[1] for a, r in spares.items()}
@@ -64,10 +63,13 @@ try:
 except (OSError, ValueError):
     sent = {}
 eta = lambda mark, used=used, rate=rate: "" if not rate or rate <= 0 or used >= mark else f", {mark}% in ~{(mark - used) / rate:.1f}h"
-print(f"{account}: week {used:g}% (resets {time.strftime('%a %H:%MZ', time.gmtime(reset))}), rate {'?' if rate is None else f'{rate:.1f}'}%/h{eta(90)}{eta(98)}; today {spent:g}% spent, on pace for {projected:.0f}% (no daily cap){combined}")
+if not counted:
+    print(f"{account}: not a factory account; nothing counted (the factory runs on {', '.join(FACTORY)})")
+else:
+    print(f"{account}: week {used:g}% (resets {time.strftime('%a %H:%MZ', time.gmtime(reset))}), rate {'?' if rate is None else f'{rate:.1f}'}%/h{eta(90)}{eta(98)}; today {spent:g}% spent, on pace for {projected:.0f}% (no daily cap){combined}")
 drain_tail = "; nothing parks: at 100% Bravo switches the factory to the next account (#i823)"
 # the logged-in account first, then each spare usage.accounts lists, each keyed by its own week reset
-for who, week_used, week_reset, pct_h in [(account, used, reset, rate), *((a, r["week"], r["weekReset"], others[a]) for a, r in spares.items() if a in FACTORY)]:
+for who, week_used, week_reset, pct_h in [*([(account, used, reset, rate)] if counted else []), *((a, r["week"], r["weekReset"], others[a]) for a, r in spares.items() if a in FACTORY)]:
     key = f"{who}:{round(week_reset / 3600)}"
     for mark in (90, 97, 98):
         if week_used >= mark and mark not in sent.get(key, []):
@@ -76,7 +78,7 @@ for who, week_used, week_reset, pct_h in [(account, used, reset, rate), *((a, r[
 # no ALERT day: the owner lifted the daily cap (relayed by builder, 13 Oct 04:35Z: two memberships, and the machine allows the work); the line above still shows today's spend
 five = u["rate_limits"].get("five_hour") or {}
 fkey = f"5h:{account}:{round((five.get('resets_at') or 0) / 3600)}"
-if (five.get("used_percentage") or 0) >= 85 and fkey not in sent:
+if counted and (five.get("used_percentage") or 0) >= 85 and fkey not in sent:
     sent[fkey] = [85]
     print(f"ALERT 5h {account}: 5-hour window at {five['used_percentage']:g}%, past 85%, resets {time.strftime('%H:%MZ', time.gmtime(five['resets_at']))}")
 json.dump(sent, open(sent_path, "w"))
