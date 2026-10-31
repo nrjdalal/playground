@@ -3,6 +3,8 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
 
+import { PageHeader } from "@/components/shell/page-header"
+import { PageShell } from "@/components/shell/page-shell"
 import { Button } from "@/components/ui/button"
 import { toast } from "@/components/ui/toast"
 import { YardMessageView } from "@/components/yard/channel-view"
@@ -28,28 +30,33 @@ export function Approve({ id }: { id: string }) {
   }
   const status = decided ?? message?.status ?? "sent"
   return (
-    <main className="mx-auto flex w-full max-w-xl flex-col gap-4 px-4 py-6">
-      <h1 className="text-lg font-semibold">Approve a waiting message</h1>
-      {error && (
-        <p className="text-muted-foreground text-sm">
-          {(error as { code?: string }).code === "NOT_FOUND"
-            ? "No waiting message of yours has this link."
-            : `It could not be read: ${error.message}`}
-        </p>
-      )}
-      {message && <YardMessageView message={message} now={new Date()} />}
-      {message && status === "pending" ? (
-        <div className="flex gap-2">
-          <Button onClick={() => void decide("approve")}>Approve and send</Button>
-          <Button onClick={() => void decide("deny")} variant="outline">
-            Deny
-          </Button>
-        </div>
-      ) : message ? (
-        <p className="text-sm">
-          {status === "denied" ? "Denied: it stays with you alone." : "Sent."}
-        </p>
-      ) : null}
-    </main>
+    <PageShell size="sm">
+      <PageHeader
+        title="Approve a waiting message"
+        description="Read a held message, then send it or deny it."
+      />
+      <div className="flex flex-col gap-4">
+        {error && (
+          <p className="text-muted-foreground text-sm">
+            {(error as { code?: string }).code === "NOT_FOUND"
+              ? "No waiting message of yours has this link."
+              : `It could not be read: ${error.message}`}
+          </p>
+        )}
+        {message && <YardMessageView message={message} now={new Date()} />}
+        {message && status === "pending" ? (
+          <div className="flex gap-2">
+            <Button onClick={() => void decide("approve")}>Approve and send</Button>
+            <Button onClick={() => void decide("deny")} variant="outline">
+              Deny
+            </Button>
+          </div>
+        ) : message ? (
+          <p className="text-sm">
+            {status === "denied" ? "Denied: it stays with you alone." : "Sent."}
+          </p>
+        ) : null}
+      </div>
+    </PageShell>
   )
 }

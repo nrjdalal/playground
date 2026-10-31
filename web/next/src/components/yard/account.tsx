@@ -8,6 +8,8 @@ import Link from "next/link"
 import { useState } from "react"
 import { z } from "zod"
 
+import { PageHeader } from "@/components/shell/page-header"
+import { PageShell } from "@/components/shell/page-shell"
 import { Button } from "@/components/ui/button"
 import { Empty, EmptyDescription, EmptyHeader } from "@/components/ui/empty"
 import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field"
@@ -47,78 +49,83 @@ export function Account({ role }: { role: string | null | undefined }) {
     }
   }
   return (
-    <main className="mx-auto flex w-full max-w-xl flex-col gap-6 px-4 py-6">
-      <h1 className="text-lg font-semibold">Account and tokens</h1>
-      <form
-        onSubmit={(event) => {
-          event.preventDefault()
-          void form.handleSubmit()
-        }}
-      >
-        <FieldGroup>
-          <form.Field name="name">
-            {(field) => {
-              const isInvalid = !field.state.meta.isValid
-              return (
-                <Field data-invalid={isInvalid}>
-                  <FieldLabel htmlFor="token-name">New token, named for its device</FieldLabel>
-                  <div className="flex gap-2">
-                    <Input
-                      aria-invalid={isInvalid}
-                      id="token-name"
-                      name={field.name}
-                      onBlur={field.handleBlur}
-                      onChange={(event) => field.handleChange(event.target.value)}
-                      placeholder="macbook"
-                      value={field.state.value}
-                    />
-                    <Button disabled={!field.state.value.trim()} type="submit">
-                      Create
-                    </Button>
-                  </div>
-                  {isInvalid && <FieldError errors={field.state.meta.errors} />}
-                </Field>
-              )
-            }}
-          </form.Field>
-        </FieldGroup>
-      </form>
-      {secret && (
-        <div className="bg-muted rounded-md p-3 text-xs">
-          <p className="mb-1 font-medium">Copy it now: it is shown this once.</p>
-          <code className="break-all">{secret}</code>
-        </div>
-      )}
-      {tokens?.length === 0 ? (
-        <None>No tokens yet.</None>
-      ) : (
-        <ul className="divide-y rounded-md border text-sm">
-          {tokens?.map((token) => (
-            <li key={token.id} className="flex items-center gap-3 px-3 py-2">
-              <span className="font-medium">{token.name}</span>
-              <span className="text-muted-foreground text-xs">
-                {token.revokedAt
-                  ? "Revoked"
-                  : token.lastUsedAt
-                    ? `Last used ${new Date(token.lastUsedAt).toLocaleString()}`
-                    : "Never used"}
-              </span>
-              {!token.revokedAt && (
-                <Button
-                  className="ml-auto"
-                  onClick={() => void revoke(token.id)}
-                  size="sm"
-                  variant="outline"
-                >
-                  Revoke
-                </Button>
-              )}
-            </li>
-          ))}
-        </ul>
-      )}
-      {roleAtLeast(role, "owner") ? <InviteRequests /> : <RequestInvite />}
-    </main>
+    <PageShell size="sm">
+      <PageHeader
+        title="Account and tokens"
+        description="Your devices' tokens, and who you let into Yard."
+      />
+      <div className="flex flex-col gap-6">
+        <form
+          onSubmit={(event) => {
+            event.preventDefault()
+            void form.handleSubmit()
+          }}
+        >
+          <FieldGroup>
+            <form.Field name="name">
+              {(field) => {
+                const isInvalid = !field.state.meta.isValid
+                return (
+                  <Field data-invalid={isInvalid}>
+                    <FieldLabel htmlFor="token-name">New token, named for its device</FieldLabel>
+                    <div className="flex gap-2">
+                      <Input
+                        aria-invalid={isInvalid}
+                        id="token-name"
+                        name={field.name}
+                        onBlur={field.handleBlur}
+                        onChange={(event) => field.handleChange(event.target.value)}
+                        placeholder="macbook"
+                        value={field.state.value}
+                      />
+                      <Button disabled={!field.state.value.trim()} type="submit">
+                        Create
+                      </Button>
+                    </div>
+                    {isInvalid && <FieldError errors={field.state.meta.errors} />}
+                  </Field>
+                )
+              }}
+            </form.Field>
+          </FieldGroup>
+        </form>
+        {secret && (
+          <div className="bg-muted rounded-md p-3 text-xs">
+            <p className="mb-1 font-medium">Copy it now: it is shown this once.</p>
+            <code className="break-all">{secret}</code>
+          </div>
+        )}
+        {tokens?.length === 0 ? (
+          <None>No tokens yet.</None>
+        ) : (
+          <ul className="divide-y rounded-md border text-sm">
+            {tokens?.map((token) => (
+              <li key={token.id} className="flex items-center gap-3 px-3 py-2">
+                <span className="font-medium">{token.name}</span>
+                <span className="text-muted-foreground text-xs">
+                  {token.revokedAt
+                    ? "Revoked"
+                    : token.lastUsedAt
+                      ? `Last used ${new Date(token.lastUsedAt).toLocaleString()}`
+                      : "Never used"}
+                </span>
+                {!token.revokedAt && (
+                  <Button
+                    className="ml-auto"
+                    onClick={() => void revoke(token.id)}
+                    size="sm"
+                    variant="outline"
+                  >
+                    Revoke
+                  </Button>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+        {roleAtLeast(role, "owner") ? <InviteRequests /> : <RequestInvite />}
+      </div>
+    </PageShell>
   )
 }
 

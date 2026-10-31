@@ -4,6 +4,8 @@ import { roleAtLeast } from "@packages/auth/access"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
 
+import { PageHeader } from "@/components/shell/page-header"
+import { PageShell } from "@/components/shell/page-shell"
 import { Button } from "@/components/ui/button"
 import { toast } from "@/components/ui/toast"
 import { INVITES_KEY, yardApi, type YardInvite } from "@/lib/yard-api"
@@ -29,10 +31,15 @@ export function InviteRequest({ id, role }: { id: string; role: string | null | 
   }
   const shown = decided ?? invite
   return (
-    <main className="mx-auto flex w-full max-w-xl flex-col gap-4 px-4 py-6">
-      <h1 className="text-lg font-semibold">Approve an invite request</h1>
-      <RequestState decide={decide} isPending={isPending} owner={owner} shown={shown} />
-    </main>
+    <PageShell size="sm">
+      <PageHeader
+        title="Approve an invite request"
+        description="Let a GitHub login into Yard, or turn it away."
+      />
+      <div className="flex flex-col gap-4">
+        <RequestState decide={decide} isPending={isPending} owner={owner} shown={shown} />
+      </div>
+    </PageShell>
   )
 }
 

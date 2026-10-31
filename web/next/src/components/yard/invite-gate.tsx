@@ -9,9 +9,10 @@ import { Button } from "@/components/ui/button"
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { toast } from "@/components/ui/toast"
+import { authClient } from "@/lib/auth/client"
 import { yardApi } from "@/lib/yard-api"
 
-// Yard is invite-only: a signed-in user with no invite enters the code a member's request got approved, and joins.
+// Yard is invite-only: a signed-in user with no invite enters the code a member's request got approved, and joins, or logs out, since this page sits outside the app's sidebar and its footer menu.
 export function InviteGate() {
   const router = useRouter()
   const form = useForm({
@@ -72,6 +73,22 @@ export function InviteGate() {
           </form.Subscribe>
         </FieldGroup>
       </form>
+      <Button
+        className="self-start"
+        onClick={async () => {
+          try {
+            await authClient.signOut()
+            router.push("/")
+          } catch {
+            toast.add({ title: "Failed to sign out. Please try again.", type: "error" })
+          }
+        }}
+        size="sm"
+        type="button"
+        variant="ghost"
+      >
+        Log out
+      </Button>
     </main>
   )
 }
