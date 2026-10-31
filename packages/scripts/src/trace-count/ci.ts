@@ -9,7 +9,7 @@ import { isPublicList, publicListPath } from "./kinds"
 // Runs trace-count in CI, where no data folder holds its private inputs: each comes from a repository secret, is written into a scratch data folder, and is never printed.
 const SECRETS = ["FACTORY_ARCHIVE_REPO", "NO_PUBLIC_LEAK_LIST", "OWNER_NAMES"] as const
 
-const refuse = (why: string): never => {
+function refuse(why: string): never {
   console.error(`trace-count ci: ${why}`)
   process.exit(2)
 }
