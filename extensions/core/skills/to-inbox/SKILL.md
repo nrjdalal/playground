@@ -64,7 +64,7 @@ An `ask` decision renders its text as markdown, with its attachments under it: e
 
 6. **Fake data.** Read the text and every attachment once more. Done when no part holds a token, a customer detail or a real database row, and a demo's or screenshot's names and rows are made up.
 
-7. **Post.** Post it with `bun run ask new`, as asks.md says, and read stderr. Done when `bun run ask` prints the item's id and no shape hint; on a hint, the item has already posted, so fix what the hint names and replace it in place with `bun run ask edit <id> < item.json`, until edit prints no hint.
+7. **Post.** Run `bun run ask open` first: when an open item asks the same thing, name its `#iN` and stop here. Otherwise post it with `bun run ask new`, as asks.md says, and read stderr. Done when you have named the open item, or `bun run ask` prints the new item's id and no shape hint; on a hint, the item has already posted, so fix what the hint names and replace it in place with `bun run ask edit <id> < item.json`, until edit prints no hint.
 
 ## Example
 

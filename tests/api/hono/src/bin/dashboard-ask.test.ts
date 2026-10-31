@@ -438,6 +438,34 @@ describe.skipIf(!dockerUp())("the bun run ask CLI", () => {
     expect((await cli(["stale", "--minutes", "soon"])).stderr).toContain("whole number")
   })
 
+  // a session had no way to see what was already open before it posted, so two sessions posted the same question twice
+  test("open lists each open item oldest first, never an answered or settled one, and --from keeps one sender's", async () => {
+    const titled = (from: string, title: string) => post({ ...DECISION, from, title })
+    const first = await titled("worker-open-a", "Ship the first open question?")
+    const answered = await titled("worker-open-a", "Ship the answered question?")
+    const second = await titled("worker-open-b", "Ship the second open question?")
+    const settled = await titled("worker-open-b", "Ship the settled question?")
+    await answer(answered.id)
+    expect((await cli(["settle", settled.id])).code).toBe(0)
+    const listed = async (args: string[]) => {
+      const result = await cli(["open", ...args])
+      expect(result.code).toBe(0)
+      return result.stdout
+    }
+    const all = await listed([])
+    const firstLine = `${first.tag} decision from worker-open-a · Ship the first open question?`
+    const secondLine = `${second.tag} decision from worker-open-b · Ship the second open question?`
+    expect(all).toContain(firstLine)
+    expect(all).toContain(secondLine)
+    expect(all.indexOf(firstLine)).toBeLessThan(all.indexOf(secondLine))
+    expect(all).not.toContain(answered.tag + " ")
+    expect(all).not.toContain(settled.tag + " ")
+    const fromA = await listed(["--from", "worker-open-a"])
+    expect(fromA).toContain(firstLine)
+    expect(fromA).not.toContain("worker-open-b")
+    expect(await listed(["--from", "worker-nobody"])).toBe("")
+  })
+
   test("resolve closes the poster's own alert update; another session, a non-alert item and an unknown id are refused (#658)", async () => {
     const alertPost = {
       from: "worker-envy",
@@ -550,6 +578,8 @@ describe.skipIf(!dockerUp())("the bun run ask CLI", () => {
       ["settle", "x", "--note", "a", "--note", "b"],
       ["new", "--thread"],
       ["new", "--board", "t4sk"],
+      ["open", "--from"],
+      ["open", "--since", "x"],
     ]) {
       const result = await cli(args)
       expect(result.code).toBe(2)
