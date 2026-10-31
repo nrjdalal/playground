@@ -259,4 +259,5 @@ test("an account whose probe answers with no 5-hour headers has no 5-hour window
   expect(beat.result).toBe("ok")
   expect(usage.rate_limits.five_hour).toBeUndefined()
   expect(usage.rate_limits.seven_day).toEqual({ used_percentage: 30, resets_at: 4_000_000_000 })
+  expect(beat.detail).toStartWith("added@example.org: 5h none, 7d 30%")
 })

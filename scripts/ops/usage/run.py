@@ -262,7 +262,8 @@ while True:
                 at = time.strftime("%H:%MZ", time.gmtime(five["resets_at"])) if isinstance(five.get("resets_at"), (int, float)) else "unknown"
                 out.append({"at": data["writtenAt"], "kind": "usage-5h", "line": f"5-hour window at {five['used_percentage']:g}% ({account}), resets {at}: slow spawns", "name": "usage", "since": data["writtenAt"]})
             write(os.path.join(OPS, "alerts-usage.json"), {"alerts": out, "writtenAt": data["writtenAt"]})
-    detail = f"{data['account']}: 5h {data['rate_limits'].get('five_hour', {}).get('used_percentage')}%, 7d {data['rate_limits'].get('seven_day', {}).get('used_percentage')}%" if data else ""
+    five = data and data["rate_limits"].get("five_hour", {}).get("used_percentage")
+    detail = f"{data['account']}: 5h {'none' if five is None else f'{five}%'}, 7d {data['rate_limits'].get('seven_day', {}).get('used_percentage')}%" if data else ""
     # an expired stored token is expected while every session runs on another account's token, so only a missing factory reading fails; with no account at all, the job waits for one
     if data and not any(p.startswith("factory") for p in problems):
         result = "ok"
