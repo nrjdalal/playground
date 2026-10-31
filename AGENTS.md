@@ -179,6 +179,7 @@ ZeroStarter's rules above govern Playground too; this section adds its own.
 - ALWAYS: Land everything you learn in this repo, as a PR or a line to your lead (playbook's **memory** rule), so every session works better from what one learned.
   Claude Code's auto-memory (`~/.claude/projects/*/memory`) stays off: `.claude/settings.json` and `scripts/factory-settings.json` set `autoMemoryEnabled` to false, and `tests/scripts/factory-settings.test.ts` holds both to it; [ADR 0009](./.agents/adr/0009-learnings-live-in-the-repo.md) records why.
 - ALWAYS: Track Playground's work as GitHub issues on the repo `factory.repo` names, so every item carries a number: an item's ID is `PG-<issue number>`, its branch `PG-<n>-<slug>`, its PR scope `(PG-<n>)`, and the issue stays open until the PR that says `Closes #<n>` merges.
+  It tracks the factory's own work alone, since an org's work goes in that org's extension repo and a person's in their login extension ([ADR 0016](./.agents/adr/0016-playground-is-generic-with-a-small-core.md)).
   The key is written uppercase, and branch and title readers take either case; macOS ignores case, so a new branch never reuses an old one's number and slug in the other case.
   Research and findings go in issues too, labelled `research`, with no customer data, production numbers or secrets.
   For Playground this replaces the Working notes' "closed once captured": an issue stays open while its work is live, and its `doc plan-<slug>` item still holds the plan.
