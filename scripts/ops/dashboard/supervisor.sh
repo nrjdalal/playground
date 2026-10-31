@@ -59,6 +59,8 @@ upstream_head() { "$D/net-git.sh" ls-remote origin "refs/heads/$UPSTREAM" 2>>"$L
 behind() { git merge-base --is-ancestor "$1" HEAD 2>/dev/null; }
 wait_dashboard() { local i; for i in $(seq 1 90); do dashboard_urls && curl -sf "$API/api/health" > /dev/null 2>&1 && return 0; sleep 1; done; return 1; }
 alive() { kill -0 "$(cat "$S/$1.pid" 2>/dev/null)" 2>/dev/null; }
+# first run's setup has not written the database yet: no POSTGRES_URL in the environment or this checkout's .env, so the follower, which validates it as it starts, waits rather than exiting on every tick
+setup_pending() { [ -z "${POSTGRES_URL:-}" ] && ! grep -qE "^POSTGRES_URL=[\"']?[^\"'[:space:]]" "$WT/.env" 2>/dev/null; }
 # an importer holds the follower's lock: a follower an earlier supervisor left running counts, so this one's "another importer holds the lock" exit is no outage; the status read gets HELD_WAIT seconds, then is stopped by its own process group (set -m gives it one), so a wedged docker child under it goes too, and exits 2, holder unknown, so a wedged Docker or database never freezes the loop
 follower_held() { local p i; bun api/hono/src/bin/dashboard-ingest.ts status > /dev/null 2>&1 & p=$!; for i in $(seq 1 "${HELD_WAIT:-20}"); do kill -0 "$p" 2>/dev/null || { wait "$p" && return 0 || return 1; }; sleep 1; done; kill -- -"$p" 2>/dev/null; wait "$p" 2>/dev/null; return 2; }
 
@@ -123,7 +125,12 @@ roll_up() {   # start dev and the follower, check both, and report one line; ret
   local tag=$1 sha dev fol t
   sha=$(git rev-parse --short HEAD)
   start_dev; dev=$(check_dev); local dok=$?
-  t=$(date -u +%Y-%m-%dT%H:%M:%S); start_follower; fol=$(check_follower "$t"); local fok=$?
+  local fok=0
+  if setup_pending; then
+    fol="follower=waiting for first run's setup"; say "follower: waiting for first run's setup, which writes POSTGRES_URL; not starting it"; waiting_f=1
+  else
+    t=$(date -u +%Y-%m-%dT%H:%M:%S); start_follower; fol=$(check_follower "$t"); fok=$?
+  fi
   if [ $dok -eq 0 ] && [ $fok -eq 0 ]; then result "$tag $sha PASS $dev $fol"; return 0; else result "$tag $sha FAIL $dev $fol"; return 1; fi
 }
 # The owner's rule: restart the app every time something lands on the upstream, so the change is visible at once
@@ -276,13 +283,19 @@ while true; do
   if ! alive dashboard-dev; then
     result "DOWN dev: $(dev_down)"
     stop_all; roll_up RESTART
+  elif ! alive dashboard-ingest && setup_pending; then
+    [ -n "${waiting_f:-}" ] || { say "follower: waiting for first run's setup, which writes POSTGRES_URL; not starting it"; waiting_f=1; }
   elif ! alive dashboard-ingest && { follower_held; held=$?; [ $held -ne 1 ]; }; then
     # a holder this supervisor did not start keeps its own code across rolls, so it is named once each time it appears; a status read past its wait leaves the follower as it is, since a restart would wait on the same database
     [ "${held_said_f:-}" = $held ] || { [ $held -eq 0 ] && say "follower: another importer holds the lock, a process this supervisor did not start; leaving it" || say "follower: bun run ingest status gave no answer in ${HELD_WAIT:-20}s; not restarting it"; held_said_f=$held; }
   elif ! alive dashboard-ingest; then
     held_said_f=
-    result "DOWN follower: $(tail -2 "$INGLOG" | tr '\n' ' ' | cut -c1-200)"
-    t=$(date -u +%Y-%m-%dT%H:%M:%S); start_follower; fol=$(check_follower "$t") && result "RESTART follower $fol" || result "FAIL follower $fol"
+    if [ -n "${waiting_f:-}" ]; then
+      waiting_f=; say "follower: first run's setup wrote POSTGRES_URL; starting it"; step=START
+    else
+      result "DOWN follower: $(tail -2 "$INGLOG" | tr '\n' ' ' | cut -c1-200)"; step=RESTART
+    fi
+    t=$(date -u +%Y-%m-%dT%H:%M:%S); start_follower; fol=$(check_follower "$t") && result "$step follower $fol" || result "FAIL follower $fol"
   else
     held_said_f=
   fi

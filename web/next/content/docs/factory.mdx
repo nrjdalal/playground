@@ -72,7 +72,7 @@ Each list is read at every call, and it fails closed:
 A machine has extensions once its data folder holds the `extensions/` folder ([Settings and extensions](/docs/extensions)).
 A broken list refuses only the calls its guard checks, so the rest of your work runs on.
 
-One guard keeps the public repository clean: a pull request, issue, review, comment or stamp there is refused when it holds a person's name, a handle, a company term, a Slack id, a ticket key, an email address or a link into the old private repository.
+One guard keeps the public repository clean: a pull request, issue, review or comment there is refused when it holds a person's name, a handle, a company term, a Slack id, a ticket key, an email address or a link into the old private repository.
 Its refusal names the kind of text, never the text, and says how to put it in plain words.
 
 ## Traces
@@ -89,4 +89,4 @@ So new comments, docs and tests are written in plain words, and the counts only 
 
 Each change is made in a worktree of its own, branched from the latest `canary`, and opened as a draft pull request.
 A reviewer session other than its author scores it out of 5, round by round, and the author fixes what it finds until it scores 5 on the latest commit with the checks green.
-Then it merges with `bun run pr:merge <n>`, or a merge train lands it, the only two ways a change reaches `canary`.
+Then it merges with `bun run pr:merge <n>`, or merge-on-ready lands it, the only two ways a change reaches `canary`.
