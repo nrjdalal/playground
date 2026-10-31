@@ -13,6 +13,8 @@ shared through login-flip.json, so the two never probe the same account twice in
 limits were measured), `source` "token/ratelimit-headers" and `storedLogin` (the stored login's account and week). Remove `factory`
 from login-flip.json when the factory moves back to the stored login. login-flip.json's `accounts` lists every account the factory's
 sessions spend into; each is probed the same way, and usage.json's `accounts` holds each fresh week reading, which week-marks.py sums.
+ops/alerts-usage.json holds, while each lasts, one alert per factory account whose week is past 90, 97 or 98% (usage.json's account
+and each in its `accounts`), naming the account, and the logged-in account's 5-hour window at 90% or more; ops-unstick folds it in.
 While login-flip.json names no `factory`, each Claude account the Dashboard's Add a Claude account keeps (usage.accounts, its
 setup-token under usage.keychainService) comes before the stored login: usage.json holds the first one's probe reading, since the
 dispatcher's sessions run on it, and the stored login's only when none of them reads. With neither a stored login nor an added account, the job beats "waiting", not an error.
@@ -157,6 +159,18 @@ def accounts_reading():
     return out
 
 
+def week_alerts(data, factory):
+    """One standing alert per factory account whose week is past a mark (90, 97, 98%), naming the account and its highest mark: the logged-in account's, and each in usage.json's `accounts`. week-marks.py, which Ops' tick relays, raises each mark once."""
+    weeks = {data["account"]: (data["rate_limits"].get("seven_day") or {}).get("used_percentage")}
+    weeks.update({a: r.get("week") for a, r in (data.get("accounts") or {}).items() if a not in weeks})
+    out = []
+    for account, week in weeks.items():
+        crossed = [m for m in (90, 97, 98) if isinstance(week, (int, float)) and week >= m]
+        if account in factory and crossed:
+            out.append({"at": data["writtenAt"], "kind": "usage", "line": f"week usage at {week:g}% ({account}), past {crossed[-1]}%", "name": "usage", "since": data["writtenAt"]})
+    return out
+
+
 def rotation(flip):
     """login-flip.json's `rotation`, {pool: [{account, ending, endsAt, renewsOn}]}, or None when it is not that shape."""
     got = flip.get("rotation")
@@ -243,25 +257,15 @@ while True:
             data["rotation"] = pool
         write(OUT, data)
         account, limits = data["account"], data["rate_limits"]
-        # The week marks themselves (90, 97, 98%) and the day's 40% live in usage/week-marks.py, which Ops' tick relays.
-        week = (limits.get("seven_day") or {}).get("used_percentage")
-        if isinstance(week, (int, float)) and account in FACTORY:
-            marks = os.path.join(HERE, "week-marks.json")
-            try:
-                told = json.load(open(marks))
-            except (OSError, ValueError):
-                told = {}
-            key = f"{account}:{(limits.get('seven_day') or {}).get('resets_at')}"
-            json.dump(told, open(marks, "w"))
-            # the outbox needs a session to relay it; the marks also go to ops/alerts-usage.json, which ops-unstick folds into alerts-pending.json
-            crossed = sorted(told.get(key, []))
-            out = [{"at": data["writtenAt"], "kind": "usage", "line": f"week usage at {week:g}% ({account}), past {crossed[-1]}%", "name": "usage", "since": data["writtenAt"]}] if crossed else []
+        # the outbox needs a session to relay it; the marks also go to ops/alerts-usage.json, which ops-unstick folds into alerts-pending.json
+        out = week_alerts(data, FACTORY)
+        if account in FACTORY:
             # dispatcher, 8 Oct: the 5-hour window at 90% or more, while it lasts, so the Builder slows spawns before the cap
             five = limits.get("five_hour") or {}
             if isinstance(five.get("used_percentage"), (int, float)) and five["used_percentage"] >= 90:
                 at = time.strftime("%H:%MZ", time.gmtime(five["resets_at"])) if isinstance(five.get("resets_at"), (int, float)) else "unknown"
                 out.append({"at": data["writtenAt"], "kind": "usage-5h", "line": f"5-hour window at {five['used_percentage']:g}% ({account}), resets {at}: slow spawns", "name": "usage", "since": data["writtenAt"]})
-            write(os.path.join(OPS, "alerts-usage.json"), {"alerts": out, "writtenAt": data["writtenAt"]})
+        write(os.path.join(OPS, "alerts-usage.json"), {"alerts": out, "writtenAt": data["writtenAt"]})
     five = data and data["rate_limits"].get("five_hour", {}).get("used_percentage")
     detail = f"{data['account']}: 5h {'none' if five is None else f'{five}%'}, 7d {data['rate_limits'].get('seven_day', {}).get('used_percentage')}%" if data else ""
     # an expired stored token is expected while every session runs on another account's token, so only a missing factory reading fails; with no account at all, the job waits for one
