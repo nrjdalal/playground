@@ -6,6 +6,9 @@ const ROOT = join(import.meta.dir, "..")
 // AGENTS.md plus every file it imports, in chars: what every session loads before its first turn, set at 43,531 plus 5%.
 const BUDGET = 45_700
 
+// The test goes red at this share of BUDGET, which keeps 3% of it free for PRs that pass alone and merge together.
+const MARGIN = 0.97
+
 // Every ALWAYS rule by its first five words: each keeps its line in AGENTS.md, so it loads into every session, while a dashboard rule's full text stays in its topic file.
 const ALWAYS = [
   "Do every change in its",
@@ -124,8 +127,17 @@ describe("AGENTS.md", () => {
     expect(lost).toEqual([])
   })
 
-  test("AGENTS.md and its imports load under BUDGET chars", async () => {
-    expect((await loaded(join(ROOT, "AGENTS.md"))).join("").length).toBeLessThan(BUDGET)
+  test("AGENTS.md and its imports load under MARGIN of BUDGET chars", async () => {
+    const size = (await loaded(join(ROOT, "AGENTS.md"))).join("").length
+    const limit = Math.floor(BUDGET * MARGIN)
+    const topics = [".agents/*.md", ".agents/dashboard/*.md"]
+      .flatMap((pattern) => [...new Bun.Glob(pattern).scanSync({ cwd: ROOT })])
+      .sort()
+    expect(
+      size < limit
+        ? ""
+        : `AGENTS.md and its imports load ${size} chars, at or over ${limit}, ${MARGIN * 100}% of BUDGET ${BUDGET}: move reference out of AGENTS.md into the topic file it belongs to (${topics.join(", ")}), leaving a pointer`,
+    ).toBe("")
   })
 
   test("every hook .claude/settings.json registers is named in AGENTS.md (#2242)", async () => {
