@@ -75,7 +75,6 @@
     "tests/web/next/src/lib/data-table-layout.test.ts": 548,
     "tests/packages/scripts/src/playground/page.test.ts": 536,
     "tests/packages/scripts/src/verify/prebuild.test.ts": 535,
-    "tests/lat.md/where-to-edit.test.ts": 482,
     "tests/api/hono/src/lib/dashboard/deliver.test.ts": 453,
     "tests/api/hono/src/lib/dashboard/terminal.test.ts": 443,
     "tests/api/hono/src/middlewares/rate-limiter.test.ts": 433,
