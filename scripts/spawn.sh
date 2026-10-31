@@ -231,7 +231,7 @@ PY
 own_config() { if [ -n "$UNSET" ]; then echo "$HOME/.claude.json"; else echo "${CLAUDE_CONFIG_DIR:-$HOME}/.claude.json"; fi; }
 gate_capacity() {
   verdict=$(
-    python3 -I - "$DATA" "$ACCOUNT" "$BACKEND" "${CLAUDE_CONFIG_DIR:-$HOME/.claude}" "$(own_config)" "${CHECK:+check}" "$MOVE_PID" "$GATES" $ITEM <<'PY'
+    python3 -I - "$DATA" "$ACCOUNT" "$BACKEND" "${CLAUDE_CONFIG_DIR:-$HOME/.claude}" "$(own_config)" "${CHECK:+check}" "$MOVE_PID" "$GATES" $ITEM "$ROLE" <<'PY'
 import datetime as dt
 import glob
 import json
@@ -240,7 +240,7 @@ import os
 import subprocess
 import sys
 
-data_dir, account, backend, config_dir, own_config, check, move, gates, size, units = sys.argv[1:11]
+data_dir, account, backend, config_dir, own_config, check, move, gates, size, units, role = sys.argv[1:12]
 log_path = os.path.join(data_dir, "ops", "capacity.jsonl")
 units = int(units)
 gates = json.loads(gates)
@@ -371,8 +371,9 @@ else:
         except OSError:
             pass
     readings["starts"] = starts
-    # gates.smallReserve of the cap stays for small items, so a big plan never blocks the small ones
-    keep = 0 if size == "small" else cap * gates["smallReserve"]
+    # the reserves nest: a start that is not small keeps gates.smallReserve for small items, so a big plan never blocks the small ones, and a small worker keeps gates.reviewReserve for the checkers, which start small
+    share = (gates["reviewReserve"] if role == "worker" else 0) if size == "small" else gates["smallReserve"]
+    keep = cap * share
     readings["reserve"] = keep
     # the load average counts the sessions' many short-lived processes (load 24 on 15 cores at 55% idle, 22 Oct), so a load over the line reads the CPU's busy cores too, against the same line held at the cores' count, and refuses only when both are over
     if readings["load5"] + starts >= cap - keep:
@@ -384,7 +385,7 @@ else:
             pass
         readings["cpu_idle"] = idle
         cpu_cap = min(cap, cores)
-        cpu_line = cpu_cap - (0 if size == "small" else cpu_cap * gates["smallReserve"])
+        cpu_line = cpu_cap * (1 - share)
         if idle is not None:
             readings["cpu_busy"] = round(cores * (100 - idle) / 100, 2)
         if idle is None or readings["cpu_busy"] + starts >= cpu_line:
@@ -393,7 +394,7 @@ else:
                 if mult != 1
                 else f"the {cores} cores"
             )
-            at = f"at or over {at}" if not keep else f"at or over {cap - keep:g}: {at}, less the {keep:g} kept for small items (this start is {size})"
+            at = f"at or over {at}" if not keep else f"at or over {cap - keep:g}: {at}, less the {keep:g} kept for {'checkers (gates.reviewReserve; this start is a small worker)' if size == 'small' else f'small items (this start is {size})'}"
             cpu = (
                 "it cannot read the CPU use (top), so the load alone decides"
                 if idle is None
@@ -656,17 +657,17 @@ GLM_ACCOUNT=
 GLM_GIVEN=
 # The models a session runs on (models.*) and the capacity gate's lines (gates.*) are settings, each in the docs' list of keys, so changing one is a settings write, never an edit here.
 MODEL_SETTINGS=$(env $UNSET "$BUN" "$REPO/packages/scripts/src/playground/setting.ts" --text models.claude models.default models.checker models.glm models.glmKeychainService \
-  gates.glmLoad5Max gates.glmSwapinsMax gates.memoryFreeMin gates.smallReserve gates.startsWindow sessions.names sessions.aliases context.window 2>&1) ||
+  gates.glmLoad5Max gates.glmSwapinsMax gates.memoryFreeMin gates.reviewReserve gates.smallReserve gates.startsWindow sessions.names sessions.aliases context.window 2>&1) ||
   { echo "spawn.sh refuses: it cannot read the model and gate settings: $MODEL_SETTINGS" >&2; exit 1; }
 {
   read -r CLAUDE_MODELS; read -r DEFAULT_MODEL; read -r CHECKER_MODEL; read -r GLM_ID; read -r GLM_KEYCHAIN
-  read -r GLM_LOAD5_MAX; read -r GLM_SWAPINS_MAX; read -r MEMORY_FREE_MIN; read -r SMALL_RESERVE; read -r STARTS_WINDOW
+  read -r GLM_LOAD5_MAX; read -r GLM_SWAPINS_MAX; read -r MEMORY_FREE_MIN; read -r REVIEW_RESERVE; read -r SMALL_RESERVE; read -r STARTS_WINDOW
   read -r SESSION_NAMES; read -r SESSION_ALIASES; read -r WINDOW
 } <<<"$MODEL_SETTINGS"
 SESSION_KINDS=$(python3 -I -c 'import json, sys; n, a = map(json.loads, sys.argv[1:3]); [print(*row) for row in [(v, k) for k, v in n.items()] + [(n["dispatcher"] + "-2", "dispatcher")] + list(a.items())]' "$SESSION_NAMES" "$SESSION_ALIASES")
 # slots.peers, the ops folders of the other factories on this machine, whose starts the load gate counts beside this one's; none when unread
 PEERS=$(setting slots.peers) || PEERS=; [ -n "$PEERS" ] || PEERS="[]"
-GATES="{\"glmLoad5Max\": $GLM_LOAD5_MAX, \"glmSwapinsMax\": $GLM_SWAPINS_MAX, \"memoryFreeMin\": $MEMORY_FREE_MIN, \"peers\": $PEERS, \"smallReserve\": $SMALL_RESERVE, \"startsWindow\": $STARTS_WINDOW}"
+GATES="{\"glmLoad5Max\": $GLM_LOAD5_MAX, \"glmSwapinsMax\": $GLM_SWAPINS_MAX, \"memoryFreeMin\": $MEMORY_FREE_MIN, \"peers\": $PEERS, \"reviewReserve\": $REVIEW_RESERVE, \"smallReserve\": $SMALL_RESERVE, \"startsWindow\": $STARTS_WINDOW}"
 MODELS=$(printf '%s\n' $CLAUDE_MODELS | awk '{ m[NR] = $0 } END { for (i = 1; i <= NR; i++) printf "%s%s", m[i], (i < NR - 1 ? ", " : i == NR - 1 ? " or " : "") }')
 CLAUDE_MODEL=
 RESUME_BRIEF=

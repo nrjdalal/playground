@@ -19,6 +19,12 @@ export const gateSettings = defineSettings({
     description: "The free memory share, in percent, a Claude session starts at or over.",
     schema: z.number().int().min(0).max(100),
   },
+  "gates.reviewReserve": {
+    default: 0.125,
+    description:
+      "The share of the load gate's line a small worker keeps back for reviewers and testers, so a held review starts first; kept under gates.smallReserve.",
+    schema: z.number().min(0).lt(1),
+  },
   "gates.smallReserve": {
     default: 0.25,
     description:
