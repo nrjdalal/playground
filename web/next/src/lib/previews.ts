@@ -69,17 +69,38 @@ export const stackGroups = (
   return [...groups].map(([project, items]) => ({ items, project }))
 }
 
-// The brand's click opens the Inbox's Preview row: the aside turns to the Inbox, and the Inbox, now or once it mounts, opens the row.
+// The brand's click opens the Inbox's Preview row: the aside turns to the Inbox, and the Inbox, now or once it mounts, opens the row; a click that moves the page also asks the aside, once, for the Inbox at the first address past the one it left, after the move resets its tab.
 export const OPEN_PREVIEW = "dashboard:open-preview"
 let previewWanted = false
-export const openPreview = (): void => {
+let previewFrom: string | null = null
+export const openPreview = (from: string | null): void => {
   previewWanted = true
+  previewFrom = from
   window.dispatchEvent(new Event(OPEN_PREVIEW))
 }
 export const takePreview = (): boolean => {
   const wanted = previewWanted
   previewWanted = false
   return wanted
+}
+export const takeMove = (at: string): boolean => {
+  if (previewFrom === null || at === previewFrom) return false
+  previewFrom = null
+  return true
+}
+
+// Pure: what the brand's click does: a plain click opens the row, leaving the address it is at (from) unless it is already at the link's own address; a modified or other-button click opens a tab, so it opens nothing here (null).
+export const previewClick = (
+  click: { altKey: boolean; button: number; ctrlKey: boolean; metaKey: boolean; shiftKey: boolean },
+  href: string,
+  at: { pathname: string; search: string },
+): { from: string | null } | null => {
+  if (click.button !== 0 || click.altKey || click.ctrlKey || click.metaKey || click.shiftKey) {
+    return null
+  }
+  const search = new URLSearchParams(at.search).toString()
+  const from = `${at.pathname}${search ? `?${search}` : ""}`
+  return { from: from === href ? null : from }
 }
 
 // Pure: each topic once, in the order its newest preview comes (the list is newest first), with how many previews it holds.

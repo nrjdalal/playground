@@ -5,9 +5,11 @@ import {
   loadable,
   OPEN_PREVIEW,
   openPreview,
+  previewClick,
   previewUrl,
   stackGroups,
   startAddress,
+  takeMove,
   takePreview,
   topicCounts,
   topicGroups,
@@ -157,10 +159,45 @@ describe("openPreview", () => {
     const listen = () => heard.push("open")
     globalThis.window ??= globalThis as unknown as Window & typeof globalThis
     window.addEventListener(OPEN_PREVIEW, listen)
-    openPreview()
+    openPreview(null)
     window.removeEventListener(OPEN_PREVIEW, listen)
     expect(heard).toEqual(["open"])
     expect(takePreview()).toBe(true)
     expect(takePreview()).toBe(false)
+  })
+
+  // a phone shows one tab, and a move to another page resets it to the page's own, which hid the Inbox the brand opened
+  test("a click that moves the page asks the aside for the Inbox once, at the first address past the one it left", () => {
+    globalThis.window ??= globalThis as unknown as Window & typeof globalThis
+    openPreview("/dashboard/sessions")
+    expect(takeMove("/dashboard/sessions")).toBe(false)
+    expect(takeMove("/dashboard")).toBe(true)
+    expect(takeMove("/dashboard/system")).toBe(false)
+    openPreview(null)
+    expect(takeMove("/dashboard/system")).toBe(false)
+    takePreview()
+  })
+
+  // a click from /dashboard?worker=<the dispatcher> keeps the aside's `where`, so a move judged by `where` stayed armed and pulled a later page change to the Inbox
+  test("a move that keeps the aside's session is spent by its own address change, so a later page change keeps its tab", () => {
+    globalThis.window ??= globalThis as unknown as Window & typeof globalThis
+    openPreview("/dashboard?worker=d")
+    expect(takeMove("/dashboard")).toBe(true)
+    expect(takeMove("/dashboard?worker=b")).toBe(false)
+    takePreview()
+  })
+
+  test("a plain click opens the row, moving the page unless it is already home; a modified click opens a tab and leaves the row alone", () => {
+    const click = { altKey: false, button: 0, ctrlKey: false, metaKey: false, shiftKey: false }
+    const home = { pathname: "/dashboard", search: "" }
+    expect(previewClick(click, "/dashboard", home)).toEqual({ from: null })
+    expect(
+      previewClick(click, "/dashboard", { pathname: "/dashboard/sessions", search: "" }),
+    ).toEqual({ from: "/dashboard/sessions" })
+    expect(
+      previewClick(click, "/dashboard", { pathname: "/dashboard", search: "?worker=a" }),
+    ).toEqual({ from: "/dashboard?worker=a" })
+    expect(previewClick({ ...click, metaKey: true }, "/dashboard", home)).toBeNull()
+    expect(previewClick({ ...click, button: 1 }, "/dashboard", home)).toBeNull()
   })
 })

@@ -13,7 +13,7 @@ import {
 } from "@remixicon/react"
 import { cn } from "cn"
 import Link from "next/link"
-import { usePathname } from "next/navigation"
+import { usePathname, useSearchParams } from "next/navigation"
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react"
 import type { GroupImperativeHandle } from "react-resizable-panels"
 
@@ -49,7 +49,7 @@ import { inboxTarget, inboxView, useInbox } from "@/lib/inbox"
 import { feedNeeds, useNeedsYouTarget } from "@/lib/needs-you"
 import { moveOldKeys } from "@/lib/old-keys"
 import { sentSince } from "@/lib/outbox"
-import { OPEN_PREVIEW } from "@/lib/previews"
+import { OPEN_PREVIEW, takeMove } from "@/lib/previews"
 import { useReply } from "@/lib/reply"
 import { inboxMark, newInInboxCount, useMark, useTabVisible, writeMark } from "@/lib/tab-dot"
 import { useAppUnread } from "@/plugins/registry"
@@ -263,6 +263,14 @@ export function DashboardAside({ children }: { children: ReactNode }) {
     window.addEventListener(OPEN_PREVIEW, open)
     return () => window.removeEventListener(OPEN_PREVIEW, open)
   }, [])
+  // a brand click that moved the page ends on the Inbox, once the move has reset a phone's tab to the page; judged by the address, which every move changes, where `where` can stay
+  const search = useSearchParams().toString()
+  const at = `${pathname}${search ? `?${search}` : ""}`
+  useEffect(() => {
+    if (!takeMove(at)) return
+    setTab("inbox")
+    setSide("inbox")
+  }, [at])
   // a link to an inbox item (a Waiting on your inbox badge, Playground's row) opens the Inbox tab, where the list scrolls to it
   useNeedsYouTarget(Boolean(inbox.data), (anchor) => {
     if (inboxTarget(anchor, inbox.data?.items ?? [])) {
