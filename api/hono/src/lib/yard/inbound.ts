@@ -86,7 +86,7 @@ const saveMark = async (file: string, since: string) => {
   await Bun.write(file, `${JSON.stringify({ since })}\n`)
 }
 
-// Cards what waits on the owner since the last mark, oldest first: each mention, a thread's reply included, and each post of theirs Yard holds. It saves the mark after each card, so a failed post retries from the first one not carded. The first run only sets the mark.
+// Cards what waits on the owner since the last mark, oldest first by when it showed: each mention, a thread's reply or an approved held post included, and each post of theirs Yard holds. It saves the mark after each card, so a failed post retries from the first one not carded. The first run only sets the mark.
 export async function pollWaiting(
   client: YardClient,
   post: (card: Card) => Promise<void>,
@@ -102,16 +102,12 @@ export async function pollWaiting(
     await saveMark(file, now.toISOString())
     return 0
   }
-  const { held, mentions } = await client.waiting(mark)
-  if (!held.length && !mentions.length) return 0
+  const due = await client.waiting(mark)
+  if (!due.length) return 0
   const { login } = await client.me()
   const channels = new Map((await client.channels()).map((channel) => [channel.id, channel]))
-  const due = [
-    ...held.map((message) => ({ held: true, message })),
-    ...mentions.map((message) => ({ held: false, message })),
-  ].sort((a, b) => a.message.at.localeCompare(b.message.at))
   let carded = 0
-  for (const { held, message } of due) {
+  for (const { held, message, shownAt } of due) {
     const channel = channels.get(message.channel)
     const card =
       channel && (held ? pendingCard(message, channel, web) : inboundCard(message, channel, login))
@@ -119,7 +115,7 @@ export async function pollWaiting(
       await post(card)
       carded++
     }
-    await saveMark(file, message.at)
+    await saveMark(file, shownAt)
   }
   return carded
 }
@@ -129,19 +125,16 @@ export function startYardPoll(
   db: Database,
   client: (base: string, token: string) => YardClient,
 ): void {
-  if (!env.YARD_API_URL) return
+  const api = env.YARD_API_URL
+  if (!api) return
   let running = false
   const tick = async () => {
     if (running) return
     running = true
     try {
       const token = await keychain().read()
-      if (token && env.YARD_API_URL)
-        await pollWaiting(
-          client(env.YARD_API_URL, token),
-          (card) => postCard(db, card),
-          env.YARD_WEB_URL,
-        )
+      if (token)
+        await pollWaiting(client(api, token), (card) => postCard(db, card), env.YARD_WEB_URL)
     } catch (error) {
       console.error("[yard] poll failed", error)
     } finally {

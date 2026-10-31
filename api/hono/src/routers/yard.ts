@@ -107,19 +107,20 @@ export const yardRouter = new Hono<{ Variables: YardVariables }>()
   .get(
     "/waiting",
     doc(
-      "What waits on you since a time, oldest first: every sent message that names you in the channels and DMs you are in, a thread's replies included, and your own posts held for your approval",
-      z.object({ held: z.array(messageSchema), mentions: z.array(messageSchema) }),
+      "What waits on you since a time, oldest first by when it showed: every sent message that names you in the channels and DMs you are in, a thread's replies included, and your own posts held for your approval; take the last item's shownAt as the next since",
+      z.object({
+        items: z.array(
+          z.object({ held: z.boolean(), message: messageSchema, shownAt: z.iso.datetime() }),
+        ),
+      }),
       [validationErrorResponses],
     ),
     member,
-    valid(
-      "query",
-      z.object({
-        limit: z.coerce.number().int().min(1).max(100).optional(),
-        since: z.iso.datetime(),
+    valid("query", z.object({ since: z.iso.datetime() })),
+    async (c) =>
+      c.json({
+        data: { items: await store.waiting(db, c.get("caller"), c.req.valid("query")) },
       }),
-    ),
-    async (c) => c.json({ data: await store.waiting(db, c.get("caller"), c.req.valid("query")) }),
   )
   .get(
     "/channels",

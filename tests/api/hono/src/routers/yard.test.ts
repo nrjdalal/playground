@@ -132,7 +132,7 @@ describe.skipIf(!dockerUp())("Yard's routes on the hosted build", () => {
       socketNoOrigin: 403,
       socketNoToken: 401,
       tokenOnWebOnly: 403,
-      waiting: [{ held: [], mentions: [] }, 400],
+      waiting: [{ items: [] }, 400],
     })
     expect(out.tokenList.data.channels).toEqual([])
     expect(out.frames).toEqual([

@@ -129,17 +129,59 @@ describe.skipIf(!dockerUp())("Yard's store", () => {
       await send(web("bo"), id, { kind: "text", text: "@bo my own" })
       const held = await send(token("bo"), id, { kind: "steps", text: "run the suite" })
       // other tests post to bo's other channels in the same second, so this reads this channel's alone
-      const here = <T extends { channel: string }>(messages: T[]) =>
-        messages.filter((m) => m.channel === id)
-      const found = await store.waiting(db, web("bo"), { since })
-      expect(here(found.mentions).map((m) => m.id)).toEqual([top.id, reply.id])
-      expect(found.mentions.find((m) => m.id === reply.id)?.parent).toBe(top.id)
-      expect(here(found.held).map((m) => m.id)).toEqual([held.id])
-      expect(await store.waiting(db, web("bo"), { since: held.at })).toEqual({
-        held: [],
-        mentions: [],
-      })
-      expect((await store.waiting(db, web("di"), { since })).mentions).toEqual([])
+      const here = async (from: string) =>
+        (await store.waiting(db, web("bo"), { since: from }))
+          .filter((item) => item.message.channel === id)
+          .map((item) => [item.held, item.message.id])
+      expect(await here(since)).toEqual([
+        [false, top.id],
+        [false, reply.id],
+        [true, held.id],
+      ])
+      const last = (await store.waiting(db, web("bo"), { since })).at(-1)!.shownAt
+      expect(await here(last)).toEqual([])
+      expect(
+        (await store.waiting(db, web("di"), { since })).filter((i) => i.message.channel === id),
+      ).toEqual([])
+    })
+
+    test("a mention held, then approved after a later mark, still waits, from when it was sent", async () => {
+      const { id } = await both("approved-later")
+      const asked = await send(token("ada", true), id, { kind: "question", text: "@bo approve me" })
+      expect(asked.status).toBe("pending")
+      await Bun.sleep(5)
+      await send(web("ada", true), id, { kind: "text", text: "@bo a later one" })
+      const mark = (await store.waiting(db, web("bo"), { since: asked.at }))
+        .filter((i) => i.message.channel === id)
+        .at(-1)!.shownAt
+      await store.decide(db, web("ada", true), asked.id, "sent")
+      const after = (await store.waiting(db, web("bo"), { since: mark })).filter(
+        (i) => i.message.channel === id,
+      )
+      expect(after.map((i) => i.message.id)).toEqual([asked.id])
+      expect(after[0]!.shownAt > mark).toBe(true)
+    })
+
+    test("a full list stops both lists at its last time, so the next since skips nothing", async () => {
+      const channel = await store.createChannel(db, web("ada", true), { name: "full" })
+      await store.joinChannel(db, web("ed"), channel.id)
+      const since = new Date(Date.now() - 1000).toISOString()
+      const mention = async (text: string) => {
+        await Bun.sleep(3)
+        return (await send(web("ada", true), channel.id, { kind: "text", text })).id
+      }
+      const early = [await mention("@ed 0"), await mention("@ed 1"), await mention("@ed 2")]
+      await Bun.sleep(3)
+      const held = (await send(token("ed"), channel.id, { kind: "steps", text: "run it" })).id
+      const late = await mention("@ed 3")
+      // the three mentions fill their list, so the held post after them waits for the next read
+      const first = await store.waiting(db, web("ed"), { limit: 3, since })
+      expect(first.map((i) => i.message.id)).toEqual(early)
+      const next = await store.waiting(db, web("ed"), { limit: 3, since: first.at(-1)!.shownAt })
+      expect(next.map((i) => [i.held, i.message.id])).toEqual([
+        [true, held],
+        [false, late],
+      ])
     })
 
     test("a name already taken is a conflict", async () => {

@@ -106,7 +106,7 @@ describe("what bun run ask takes", () => {
     }
   })
 
-  test("an update may carry an approve page the owner opens in the browser, https alone", () => {
+  test("an update may carry an approve page the owner opens in the browser, a web link alone", () => {
     const update = (approve: string) =>
       inboxInputSchema.safeParse({
         from: "Yard",

@@ -217,15 +217,21 @@ export const messages = async (
   return { hasMore: rows.length > limit, messages: rows.slice(0, limit).reverse().map(toMessage) }
 }
 
-// What waits on the caller since a time, oldest first, which the local Playground cards in its Inbox: every sent message that names them in a channel or DM they are in, a thread's reply included, from when they joined it, and their own posts held for their approval. Each `at` compares at the millisecond a message carries it in, so a mark taken from a message never returns it again.
+// When a message showed to others, at the millisecond: a held post shows when its sender sends it, so an approved mention counts from then, never from when it was written.
+const shownAt = sql<string>`date_trunc('milliseconds', coalesce(${yardMessage.decidedAt}, ${yardMessage.at}))`
+
+export type Waiting = { held: boolean; message: Message; shownAt: string }
+
+// What waits on the caller since a time, which the local Playground cards in its Inbox, oldest first by when it showed: every sent message that names them in a channel or DM they are in, a thread's reply included, from when they joined it, and their own posts held for their approval.
+// Each list reads at most limit rows; when one comes back full, both stop at the earlier of the full lists' last time, so a mark taken from the last item skips no row either list left out.
 export const waiting = async (
   db: Database,
   caller: Caller,
   { limit = 100, since }: { limit?: number; since: string },
-): Promise<{ held: Message[]; mentions: Message[] }> => {
+): Promise<Waiting[]> => {
   const after = new Date(since)
   const mentions = await db
-    .select({ message: yardMessage })
+    .select({ message: yardMessage, shownAt })
     .from(yardMessage)
     .innerJoin(
       yardMember,
@@ -235,27 +241,37 @@ export const waiting = async (
       and(
         eq(yardMessage.status, "sent"),
         sql`${yardMessage.userId} is distinct from ${caller.id}`,
-        sql`date_trunc('milliseconds', ${yardMessage.at}) > greatest(${after}, ${yardMember.joinedAt})`,
+        sql`${shownAt} > greatest(${after}, ${yardMember.joinedAt})`,
         sql`${yardMessage.text} ~* ${mentionPattern(caller.login)}`,
         live(),
       ),
     )
-    .orderBy(asc(yardMessage.at), asc(yardMessage.id))
+    .orderBy(shownAt, asc(yardMessage.id))
     .limit(limit)
   const held = await db
-    .select()
+    .select({ message: yardMessage, shownAt })
     .from(yardMessage)
     .where(
       and(
         eq(yardMessage.userId, caller.id),
         eq(yardMessage.status, "pending"),
-        sql`date_trunc('milliseconds', ${yardMessage.at}) > ${after}`,
+        sql`${shownAt} > ${after}`,
         live(),
       ),
     )
-    .orderBy(asc(yardMessage.at), asc(yardMessage.id))
+    .orderBy(shownAt, asc(yardMessage.id))
     .limit(limit)
-  return { held: held.map(toMessage), mentions: mentions.map((row) => toMessage(row.message)) }
+  const at = (row: { shownAt: string | Date }) => new Date(row.shownAt).toISOString()
+  const cuts = [mentions, held]
+    .filter((rows) => rows.length === limit)
+    .map((rows) => at(rows.at(-1)!))
+  const cut = cuts.sort()[0]
+  return [
+    ...held.map((row) => ({ held: true, message: toMessage(row.message), shownAt: at(row) })),
+    ...mentions.map((row) => ({ held: false, message: toMessage(row.message), shownAt: at(row) })),
+  ]
+    .filter((item) => !cut || item.shownAt <= cut)
+    .sort((a, b) => a.shownAt.localeCompare(b.shownAt) || a.message.id.localeCompare(b.message.id))
 }
 
 // The owner's #i6 limits: a login posts once a second and 200 times a day, and a channel takes 60 posts an hour.

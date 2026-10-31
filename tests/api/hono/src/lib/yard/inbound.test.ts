@@ -101,7 +101,7 @@ describe("the owner's own pending post", () => {
 })
 
 describe("the poll", () => {
-  // A fake hosted Yard whose /waiting answers what the real one does: every mention after since, a reply included, and the owner's held posts, oldest first.
+  // A fake hosted Yard whose /waiting answers what the real one does: every mention after since, a reply included, and the owner's held posts, oldest first by when each showed.
   const client = (channels: Channel[], mentions: Message[], held: Message[] = []) => {
     const asked: string[] = []
     return {
@@ -111,10 +111,12 @@ describe("the poll", () => {
         me: async () => ({ login: "owner", owner: true }),
         waiting: async (since: string) => (
           asked.push(since),
-          {
-            held: held.filter((m) => m.at > since),
-            mentions: mentions.filter((m) => m.at > since),
-          }
+          [
+            ...held.map((message) => ({ held: true, message, shownAt: message.at })),
+            ...mentions.map((message) => ({ held: false, message, shownAt: message.at })),
+          ]
+            .filter((item) => item.shownAt > since)
+            .sort((a, b) => a.shownAt.localeCompare(b.shownAt))
         ),
       } as unknown as YardClient,
     }
