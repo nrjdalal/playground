@@ -40,7 +40,7 @@ sup=$!
 ) &
 watch=$!
 echo "$(date -u +%FT%TZ) dashboard supervisor pid $sup, watch pid $watch"
-dashboard_result() { tail -1 "$S/results.log" | awk '{ if ($0 ~ / PASS / || $2 == "CURRENT" || ($2 == "RESTART" && $3 == "follower")) print "ok"; else { $1=""; print substr($0, 2, 100) } }'; }
+dashboard_result() { tail -1 "$S/results.log" | awk '{ if ($0 ~ / PASS / || $2 == "CURRENT" || (($2 == "RESTART" || $2 == "START") && $3 == "follower")) print "ok"; else { $1=""; print substr($0, 2, 100) } }'; }
 notify_new() {
   m=$(wc -l < "$S/results.log")
   if [ "$m" -gt "$n" ]; then
