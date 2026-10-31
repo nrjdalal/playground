@@ -38,6 +38,7 @@ How run-slot runs the factory's **slots** rule (`extensions/core/rules/slots.md`
 - To count the kernel's idle kills across a load spike: `/usr/bin/log show --last 5m --predicate 'eventMessage CONTAINS "killing_idle_process"' | grep -c 'memorystatus: killing_idle_process'`, with `--start '<YYYY-MM-DD HH:MM:SS>' --end '<...>'` for a spike that has passed.
   The full path matters, since zsh's `log` is a builtin, and so does the full phrase, since macOS also logs each `log show` with its predicate.
 - run-slot's slots open by the load alone, where spawn.sh's load gate also reads the CPU's busy cores.
+- Another factory on this machine runs its own pool, so `slots.peers` lists its ops folders: each live holder of their `run-slot` to `run-slot-4` counts its units in `held_units` (2 for a line with none), and a holder whose pid has died counts nothing; run-slot reads those folders only, never reclaiming or writing there.
 - run-slot warns when one argument after `--` is a list of existing paths zsh did not word-split, naming the fix (`${=VAR}` in zsh, or xargs), and the run goes ahead.
 
 ## ops-unstick
