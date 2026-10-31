@@ -89,7 +89,7 @@ describe("the DM watch job", () => {
     settle({ ...SET, "slack.mode": true })
     const locked = {
       code: 1,
-      out: 'vault: the note "LightPass" in the Employee vault could not be read: is 1Password unlocked and op signed in?\n',
+      out: 'vault: the note "Vault" in the Employee vault could not be read: is 1Password unlocked and op signed in?\n',
     }
     const none = fake(locked, {
       code: 1,
