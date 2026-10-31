@@ -1,5 +1,5 @@
 // Hook on PreToolUse (Edit, MultiEdit, Skill, Write), UserPromptSubmit and SessionStart: refuses a write to an agent-facing doc until the session has loaded writing-for-agents (playbook's **writing** rule).
-import { existsSync, readdirSync, realpathSync, unlinkSync } from "node:fs"
+import { existsSync, readdirSync, readFileSync, realpathSync, unlinkSync } from "node:fs"
 import { homedir } from "node:os"
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path"
 
@@ -23,7 +23,9 @@ type Input = {
 
 const WRITES = new Set(["Edit", "MultiEdit", "Write"])
 const ID = /^[\w-]+$/
-const TYPED = new RegExp(`^\\s*/${SKILL}(?:\\s|$)`)
+// the bare name, or a plugin's or a folder's scoped copy (`ws-home:writing-for-agents`)
+const LOADS = new RegExp(`^(?:[\\w./-]+:)?${SKILL}$`)
+const TYPED = new RegExp(`^\\s*/(?:[\\w./-]+:)?${SKILL}(?:\\s|$)`)
 // a checkout is the factory's when it holds the factory's own skill, in core or in either folder an older worktree's branch may have, so a worktree matches and another org's repository does not
 const FACTORY_MARKERS = [
   join("extensions", "core", "skills", "playbook", "SKILL.md"),
@@ -99,8 +101,22 @@ async function scoped(path: string, env: Environment): Promise<boolean> {
   )
 }
 
+// every installed plugin's folder, so a plugin's copy counts once the user-scope one is retired
+const plugins = (env: Environment): string[] => {
+  try {
+    const listed = JSON.parse(
+      readFileSync(join(configDir(env), "plugins", "installed_plugins.json"), "utf8"),
+    ) as { plugins?: Record<string, { installPath?: unknown }[]> }
+    return Object.values(listed.plugins ?? {})
+      .flat()
+      .flatMap((install) => (typeof install?.installPath === "string" ? [install.installPath] : []))
+  } catch {
+    return []
+  }
+}
+
 const installed = (env: Environment, cwd: string | undefined) =>
-  [configDir(env), ...(cwd ? [join(cwd, ".claude")] : [])].some((dir) =>
+  [configDir(env), ...(cwd ? [join(cwd, ".claude")] : []), ...plugins(env)].some((dir) =>
     existsSync(join(dir, "skills", SKILL, "SKILL.md")),
   )
 
@@ -139,7 +155,8 @@ export async function check(
     if (typeof input !== "object" || input === null) return
     const event = input.hook_event_name
     if (event === "PreToolUse" && input.tool_name === "Skill") {
-      if (input.tool_input?.skill === SKILL) await mark(input, env)
+      const skill = input.tool_input?.skill
+      if (typeof skill === "string" && LOADS.test(skill)) await mark(input, env)
       return
     }
     if (event === "UserPromptSubmit") {

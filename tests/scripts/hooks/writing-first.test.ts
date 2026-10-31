@@ -40,6 +40,14 @@ make(join(CONFIG, "skills", SKILL, "SKILL.md"))
 mkdirSync(join(CONFIG, "playground"), { recursive: true })
 const BARE_CONFIG = join(BASE, "bare-config")
 mkdirSync(BARE_CONFIG, { recursive: true })
+// a config folder whose only copy is an installed plugin's, as once the user-scope copy is retired
+const PLUGIN_CONFIG = join(BASE, "plugin-config")
+const PLUGIN = join(BASE, "plugin-cache", "ws-home")
+make(join(PLUGIN, "skills", SKILL, "SKILL.md"))
+make(
+  join(PLUGIN_CONFIG, "plugins", "installed_plugins.json"),
+  JSON.stringify({ plugins: { "ws-home@ws": [{ installPath: PLUGIN, scope: "user" }] } }),
+)
 const LINKED = join(BASE, "linked-skills")
 mkdirSync(LINKED, { recursive: true })
 mkdirSync(join(REPO, "skills", "playground"), { recursive: true })
@@ -149,9 +157,43 @@ describe("loading the skill lets the session write", () => {
     expect(await write(id, join(REPO, "AGENTS.md"))).toContain("writing-first hook refuses")
   })
 
-  test("another skill loads nothing", async () => {
+  for (const skill of ["ws-home:writing-for-agents", "apps/web:writing-for-agents"])
+    test(`through a scoped copy, ${skill}`, async () => {
+      const id = session()
+      await load(id, { tool_input: { skill } })
+      expect(await write(id, join(REPO, "AGENTS.md"))).toBeUndefined()
+    })
+
+  test("through a typed scoped /ws-home:writing-for-agents", async () => {
     const id = session()
-    await load(id, { tool_input: { skill: "code-review" } })
+    await event({
+      hook_event_name: "UserPromptSubmit",
+      prompt: `/ws-home:${SKILL} tighten this`,
+      session_id: id,
+    })
+    expect(await write(id, join(REPO, "AGENTS.md"))).toBeUndefined()
+  })
+
+  for (const skill of [
+    "code-review",
+    "writing-for-agents-x",
+    "x:writing-for-agents-y",
+    "x-writing-for-agents",
+    "ws-home:",
+  ])
+    test(`another skill loads nothing: ${skill}`, async () => {
+      const id = session()
+      await load(id, { tool_input: { skill } })
+      expect(await write(id, join(REPO, "AGENTS.md"))).toContain("writing-first hook refuses")
+    })
+
+  test("a typed near miss loads nothing", async () => {
+    const id = session()
+    await event({
+      hook_event_name: "UserPromptSubmit",
+      prompt: `/x:${SKILL}-y now`,
+      session_id: id,
+    })
     expect(await write(id, join(REPO, "AGENTS.md"))).toContain("writing-first hook refuses")
   })
 
@@ -258,6 +300,21 @@ describe("every other write runs", () => {
         PLAYGROUND_DATA_DIR: join(CONFIG, "playground"),
       }),
     ).toBeUndefined()
+  })
+})
+
+describe("an installed plugin's copy counts as installed, so retiring the user-scope copy keeps the hook armed", () => {
+  test("a write waits while only an installed plugin carries the skill", async () => {
+    const id = session()
+    const plugged = (input: Record<string, unknown>) => event(input, PLUGIN_CONFIG)
+    expect(
+      await plugged({
+        hook_event_name: "PreToolUse",
+        session_id: id,
+        tool_input: { content: "x", file_path: join(REPO, "AGENTS.md") },
+        tool_name: "Write",
+      }),
+    ).toContain("writing-first hook refuses")
   })
 })
 
