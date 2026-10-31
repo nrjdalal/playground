@@ -412,17 +412,17 @@ describe("lateReviewers", () => {
 
 describe("prlessBranches", () => {
   const minutesAgo = (m: number) => new Date(NOW - m * 60_000).toISOString()
-  // each branch as GitHub's GraphQL answers it, by its alias: its head pushed `pushed` minutes ago with `open` open PRs, or null when the branch is not on GitHub
-  const answer = (branches: (null | { open: number; pushed: number })[]) =>
+  // each branch as GitHub's GraphQL answers it, by its alias: its head committed `age` minutes ago with `prs` PRs in any state, or null when the branch is not on GitHub
+  const answer = (branches: (null | { age: number; prs: number })[]) =>
     JSON.stringify({
       data: {
         repository: Object.fromEntries(
           branches.map((b, i) => [
             `b${i}`,
             b && {
-              associatedPullRequests: { totalCount: b.open },
+              associatedPullRequests: { totalCount: b.prs },
               target: {
-                committedDate: minutesAgo(b.pushed),
+                committedDate: minutesAgo(b.age),
                 oid: `c0ffee${i}aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`,
               },
             },
@@ -453,23 +453,49 @@ describe("prlessBranches", () => {
     return { again, found, queries, told }
   }
 
-  test("tells the worker's lead once per head when its PG branch's head is 15 minutes old with no open PR (#234)", async () => {
-    const { again, found, told } = await sweep(answer([{ open: 0, pushed: 16 }]))
+  test("tells the worker's lead once per head when its PG branch's head is 15 minutes old with no PR (#234)", async () => {
+    const { again, found, told } = await sweep(answer([{ age: 16, prs: 0 }]))
     expect(found).toEqual([])
     expect(again).toBe(1)
     expect(told).toHaveLength(1)
     expect(told[0]!.env?.NOTIFY_TO).toBe("builder")
     expect(told[0]!.argv[3]).toBe(
-      "Branch PG-234-branch-no-pr (abcdef-worker): its head c0ffee0 was pushed 16m ago and has no open PR, so no CI runs on it. Open its draft PR so CI runs.",
+      "Branch PG-234-branch-no-pr (abcdef-worker): its head c0ffee0 is 16m old and has no PR, so no CI runs on it. Open its draft PR so CI runs.",
     )
   })
 
-  test("stays quiet with an open PR, a head under 15 minutes, a branch not on GitHub, or an ended or parked row (#234)", async () => {
-    expect((await sweep(answer([{ open: 1, pushed: 30 }]))).told).toEqual([])
-    expect((await sweep(answer([{ open: 0, pushed: 14 }]))).told).toEqual([])
+  test("stays quiet with a PR in any state, a head under 15 minutes, or a branch not on GitHub (#234)", async () => {
+    expect((await sweep(answer([{ age: 30, prs: 1 }]))).told).toEqual([])
+    expect((await sweep(answer([{ age: 14, prs: 0 }]))).told).toEqual([])
     expect((await sweep(answer([null]))).told).toEqual([])
-    for (const status of ["ended", "parked"]) {
-      const { queries, told } = await sweep(answer([{ open: 0, pushed: 30 }]), [
+  })
+
+  test("reads no row holding a pr, as a merged one does, and none whose status is not live (#234)", async () => {
+    const merged = await sweep(answer([{ age: 30, prs: 0 }]), [
+      {
+        branch: "PG-227-conventions-tighten",
+        kind: "worker",
+        name: "abcdef-worker",
+        pr: "https://github.com/acme/app/pull/230",
+        status: "working",
+      },
+    ])
+    expect(merged.queries).toEqual([])
+    expect(merged.told).toEqual([])
+    expect(
+      (
+        await sweep(answer([{ age: 30, prs: 0 }]), [
+          {
+            branch: "PG-234-branch-no-pr",
+            kind: "worker",
+            name: "abcdef-worker",
+            status: "waiting",
+          },
+        ])
+      ).told,
+    ).toHaveLength(1)
+    for (const status of ["done", "ended", "merged", "parked"]) {
+      const { queries, told } = await sweep(answer([{ age: 30, prs: 0 }]), [
         { branch: "PG-234-branch-no-pr", kind: "worker", name: "abcdef-worker", status },
       ])
       expect(told).toEqual([])
@@ -480,8 +506,8 @@ describe("prlessBranches", () => {
   test("reads every worker's PG branch in one GraphQL call, and no other branch (#234)", async () => {
     const { queries, told } = await sweep(
       answer([
-        { open: 0, pushed: 20 },
-        { open: 0, pushed: 40 },
+        { age: 20, prs: 0 },
+        { age: 40, prs: 0 },
       ]),
       [
         { branch: "PG-234-branch-no-pr", kind: "worker", name: "abcdef-worker", status: "working" },

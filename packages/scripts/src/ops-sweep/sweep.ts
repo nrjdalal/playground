@@ -3,6 +3,7 @@ import { join } from "node:path"
 
 import { kindOf, placedKindOf } from "@packages/config/kinds"
 
+import STATUSES from "../../../../scripts/roster-statuses.json"
 import { leadName } from "../ops-session-resume/resume"
 import { factoryRepoOf } from "../playground/setting"
 import { writeAtomic } from "../write-atomic"
@@ -294,13 +295,13 @@ export async function lateReviewers(
   return []
 }
 
-// A worker's PG branch whose head is NO_PR_AFTER seconds old with no open PR: one line to the worker's lead, once per head, since CI runs only on a PR into canary, so a lead can plan around a run that never started. One GraphQL read covers every branch; an ended or parked row is not read.
+// A live worker's PG branch whose head is NO_PR_AFTER seconds old with no PR in any state: one line to the worker's lead, once per head, since CI runs only on a PR into canary, so a lead can plan around a run that never started. The branch is the one its row records at first push (playbook's ROSTER.md); a row holding a pr, or one whose status is not live, is not read, and one GraphQL read covers every branch.
 export async function prlessBranches(ctx: Context, agents: Json[]): Promise<string[]> {
   const workers = new Map<string, string>()
   for (const a of agents)
     if (
-      a.status !== "ended" &&
-      a.status !== "parked" &&
+      (STATUSES.live as string[]).includes(String(a.status)) &&
+      !a.pr &&
       kindOf(String(a.name), a.kind) === "worker" &&
       /^pg-\d+/i.test(String(a.branch ?? ""))
     )
@@ -314,7 +315,7 @@ export async function prlessBranches(ctx: Context, agents: Json[]): Promise<stri
   }
   const branches = [...workers.keys()]
   const [owner, name] = repo.split("/")
-  const query = `{ repository(owner: "${owner}", name: "${name}") { ${branches.map((b, i) => `b${i}: ref(qualifiedName: ${JSON.stringify(`refs/heads/${b}`)}) { associatedPullRequests(states: OPEN) { totalCount } target { ... on Commit { committedDate oid } } }`).join(" ")} } }`
+  const query = `{ repository(owner: "${owner}", name: "${name}") { ${branches.map((b, i) => `b${i}: ref(qualifiedName: ${JSON.stringify(`refs/heads/${b}`)}) { associatedPullRequests { totalCount } target { ... on Commit { committedDate oid } } }`).join(" ")} } }`
   const r = await ctx.run(["gh", "api", "graphql", "-f", `query=${query}`], { timeoutMs: 60_000 })
   let refs: Record<string, Json | null>
   try {
@@ -333,12 +334,12 @@ export async function prlessBranches(ctx: Context, agents: Json[]): Promise<stri
     } | null
     const oid = ref?.target?.oid
     if (!ref || !oid || ref.associatedPullRequests?.totalCount !== 0) continue
-    const pushed = Date.parse(ref.target?.committedDate ?? "") / 1000
-    if (!pushed || now - pushed < NO_PR_AFTER) continue
+    const committed = Date.parse(ref.target?.committedDate ?? "") / 1000
+    if (!committed || now - committed < NO_PR_AFTER) continue
     keep[branch] = oid
     if (told[branch] === oid) continue
     const worker = workers.get(branch)!
-    const text = `Branch ${branch} (${worker}): its head ${oid.slice(0, 7)} was pushed ${Math.floor((now - pushed) / 60)}m ago and has no open PR, so no CI runs on it. Open its draft PR so CI runs.`
+    const text = `Branch ${branch} (${worker}): its head ${oid.slice(0, 7)} is ${Math.floor((now - committed) / 60)}m old and has no PR, so no CI runs on it. Open its draft PR so CI runs.`
     await ctx.run(notifyArgv(ctx, text), {
       env: { ...process.env, NOTIFY_TO: await leadName(ctx.ops, worker) },
       timeoutMs: 60_000,
