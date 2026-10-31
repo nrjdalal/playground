@@ -1,4 +1,4 @@
-import { type FSWatcher, watch } from "node:fs"
+import { existsSync, type FSWatcher, watch } from "node:fs"
 import { join } from "node:path"
 
 import {
@@ -446,8 +446,9 @@ export async function ingestFile(
     : { entries: inserted, id: file.id }
 }
 
-// Every transcript under projects: sessions first, so a subagent finds its parent already read.
+// Every transcript under projects: sessions first, so a subagent finds its parent already read. None before Claude Code's first session makes the folder.
 export async function transcriptPaths(projects: string): Promise<string[]> {
+  if (!existsSync(projects)) return []
   const scan = async (pattern: string) =>
     (await Array.fromAsync(new Glob(pattern).scan({ cwd: projects, onlyFiles: true })))
       .map((rel) => join(projects, rel))
@@ -548,12 +549,26 @@ export function follow(
     )
   }
   let watcher: FSWatcher | null = null
-  try {
-    watcher = watch(projects, { recursive: true }, (_event, name) => {
-      if (name) touched(join(projects, name.toString()))
-    })
-  } catch (err) {
-    report(`watch failed, rescanning only: ${err instanceof Error ? err.message : String(err)}`)
+  const startWatch = () => {
+    try {
+      watcher = watch(projects, { recursive: true }, (_event, name) => {
+        if (name) touched(join(projects, name.toString()))
+      })
+    } catch (err) {
+      report(`watch failed, rescanning only: ${err instanceof Error ? err.message : String(err)}`)
+    }
+  }
+  // On a Mac where Claude Code has not yet run a session there is no projects folder: wait for it, then watch it and read what it holds
+  let waiting: ReturnType<typeof setInterval> | undefined
+  if (existsSync(projects)) startWatch()
+  else {
+    report(`no ${projects} yet; waiting for Claude Code's first session`)
+    waiting = setInterval(() => {
+      if (stopper.aborted || !existsSync(projects)) return
+      clearInterval(waiting)
+      startWatch()
+      void transcriptPaths(projects).then(run)
+    }, THROTTLE_MS)
   }
   const rescan = setInterval(() => {
     if (rescanning || stopper.aborted) return
@@ -589,6 +604,7 @@ export function follow(
     stop: async () => {
       stopper.aborted = true
       watcher?.close()
+      clearInterval(waiting)
       clearInterval(rescan)
       clearInterval(summary)
       for (const timer of timers.values()) clearTimeout(timer)
