@@ -1,7 +1,7 @@
 "use client"
 
 import { roleAtLeast } from "@packages/auth/access"
-import { useQuery } from "@tanstack/react-query"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
 
 import { Button } from "@/components/ui/button"
@@ -16,10 +16,13 @@ export function InviteRequest({ id, role }: { id: string; role: string | null | 
     queryFn: async () => (await yardApi.invites()).invites.find((row) => row.id === id) ?? null,
     queryKey: [...INVITES_KEY, id],
   })
+  const client = useQueryClient()
   const [decided, setDecided] = useState<YardInvite | null>(null)
   const decide = async (choice: "approveInvite" | "denyInvite") => {
     try {
       setDecided((await yardApi[choice](id)).invite)
+      // Account's request list reads again, so the decided one leaves it
+      void client.invalidateQueries({ queryKey: INVITES_KEY })
     } catch (failure) {
       toast.add({ title: (failure as Error).message, type: "error" })
     }

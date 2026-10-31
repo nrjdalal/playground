@@ -1,14 +1,18 @@
 import { site } from "@packages/config/site"
 import { redirect } from "next/navigation"
 
+import { ApiRetry } from "@/components/common/api-retry"
 import { auth } from "@/lib/auth"
+import { sessionOrUnavailable, UNAVAILABLE } from "@/lib/auth/session"
 import { config } from "@/lib/config"
 import { yardGate } from "@/lib/yard"
 
 // The dashboard is the home: a visit with no session gets its first-run pane there. The hosted build has no dashboard pages, so its home is the way in, the navbar's Sign in with GitHub, and a signed-in visit goes on to Yard.
 export default async function Home() {
   if (!config.hosted) redirect("/dashboard")
-  const gate = yardGate((await auth.api.getSession())?.user)
+  const session = await sessionOrUnavailable(() => auth.api.getSession())
+  if (session === UNAVAILABLE) return <ApiRetry />
+  const gate = yardGate(session?.user)
   if (gate === "app") redirect("/yard")
   if (gate === "invite") redirect("/yard/invite")
   return (

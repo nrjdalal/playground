@@ -43,3 +43,11 @@ describe("an invite request's page", () => {
     ])
   })
 })
+
+describe("an id in a path", () => {
+  test("is escaped, so an id from a URL reaches no other route", async () => {
+    answer("open")
+    await yardApi.approveInvite("../tokens")
+    expect(calls[0]?.url).toBe(`${config.api.url}/api/v1/yard/invites/..%2Ftokens/approve`)
+  })
+})

@@ -18,7 +18,9 @@ import {
   InputGroupTextarea,
 } from "@/components/ui/input-group"
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
+import { CenterSpinner } from "@/components/ui/spinner"
 import { toast } from "@/components/ui/toast"
+import { MessageLinks } from "@/components/yard/message-links"
 import { config } from "@/lib/config"
 import {
   approveHref,
@@ -35,7 +37,8 @@ type Kind = (typeof MESSAGE_KINDS)[number]
 
 // A channel or DM in the chat pane: every message is untrusted data, shown through the transcript renderer (links shown, opened only on a click, images from elsewhere left unloaded) behind its from line and kind tag.
 export function ChannelView({ id, role }: { id: string; role: string | null | undefined }) {
-  const channel = useYardChannels().data?.find((row) => row.id === id)
+  const { data: channels, isPending } = useYardChannels()
+  const channel = channels?.find((row) => row.id === id)
   const { data: messages } = useYardMessages(id)
   const client = useQueryClient()
   const count = messages?.length
@@ -47,7 +50,16 @@ export function ChannelView({ id, role }: { id: string; role: string | null | un
       .then(() => client.invalidateQueries({ queryKey: CHANNELS_KEY }))
       .catch(() => {})
   }, [client, id, count])
-  if (!channel) return null
+  if (isPending) return <CenterSpinner />
+  if (!channel)
+    return (
+      <Empty>
+        <EmptyHeader>
+          <EmptyTitle>No such channel</EmptyTitle>
+          <EmptyDescription>It is gone, or you are not in it.</EmptyDescription>
+        </EmptyHeader>
+      </Empty>
+    )
   const now = new Date()
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -74,6 +86,7 @@ export function ChannelView({ id, role }: { id: string; role: string | null | un
             variant="muted"
             who={<FromLine message={message} />}
           >
+            <MessageLinks links={message.links} />
             <Status message={message} />
           </TranscriptMessage>
         ))}
