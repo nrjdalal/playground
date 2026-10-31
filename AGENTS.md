@@ -16,6 +16,8 @@ Start each task with the `codebase-map` skill to orient, then load the task skil
   See the `db-migration` skill.
 - ALWAYS: Point local database work at a disposable container of the worktree's own, published on loopback alone: `docker run -d --name playground-<worktree>-db -e POSTGRES_PASSWORD=<pw> -p 127.0.0.1::5432 postgres:alpine`, then `docker port playground-<worktree>-db 5432` for its port.
   One exception: first run's pglaunch database, on all interfaces as the owner chose (`.agents/dashboard/stack.md`).
+  A second: a Vibeground's copy, which the owner chose to hold real data, so a Vibeground shows real rows while its database changes stay in a copy that is thrown away.
+  Its container is seeded by one `pg_dump` inside the live dashboard's container, the only read of the live database, and its branch's migrations run on the copy alone (`api/hono/src/lib/dashboard/vibe.ts`); its real rows stay out of every screenshot and PR, and only the owner's own clicks start or stop one.
   Set the URL in the worktree's own `.env`, started from `.env.example` rather than copied from another checkout, and never point it at the live dashboard's database.
   Playground has no shared database, but the live dashboard's local Postgres (the one its `POSTGRES_URL` names) holds every real session and transcript, so a migration or a rename applied there breaks the running dashboard.
   Seed fake rows; real rows must never reach a screenshot or a PR.
@@ -157,7 +159,7 @@ Start with `codebase-map` to orient, then load the task skill that fits.
 ## Playground
 
 This repo is also Playground, whose own skills live under `skills/`.
-It stays private, since skills name colleagues' handles and internal repos.
+The repo is public: write every file in it by the Commits section's people rule, naming no person, handle or internal repo, as `no-public-leak` (below) holds its pull requests, issues and comments to.
 ZeroStarter's rules above govern Playground too; this section adds its own.
 
 - Skills live in two folders under `skills/`: `playground/` holds the factory's own (each one **promoted**), and `zerostarter/` the starter's, which `.agents/skills` links to.
@@ -255,7 +257,7 @@ When a dashboard rule's meaning changes, its ALWAYS line here changes with it.
   - ALWAYS: Start it (`bun run dev`) as a process of a cmux terminal, or as a background task of an agent session in one, never detached with `( … &)` or `nohup`.
   - ALWAYS: Serve first run's setup with none of the app's database or auth code loaded: with `POSTGRES_URL` empty, `api/hono/src/main.ts` serves `firstRun()`'s setup routes, `GET /api/v1/onboard/checks`, the first run's fix routes and a `setup: true` `GET /api/health` alone until Start a local container finishes, whose database is pglaunch's as is.
   - ALWAYS: A person's stack reads their own machine, while factory, test and `PLAYGROUND_FIXTURE` stacks read the fixture, the live dashboard's checkout reads the live machine and a hosted build reads none, as `dashboardSource()` in `api/hono/src/lib/dashboard/fixture.ts` decides.
-  - ALWAYS: Keep it on loopback: the API and `next dev` bind 127.0.0.1, and the dashboard is never deployed.
+  - ALWAYS: Keep it on loopback: the API, `next dev` and the live dashboard's built next server bind 127.0.0.1, and the dashboard is never deployed.
     The hosted build is the one exception, on the owner's "infact I think yard should be as is playground, just a server and deployed version of it": under `PLAYGROUND_HOSTED=1` it deploys, mounting only sign-in, health and Yard's routes (`api/hono/src/hosted.ts`).
   - ALWAYS: Keep the hosted build to its allowlist: `api/hono/src/index.ts` imports `hosted.ts` (sign-in, health and Yard) under `PLAYGROUND_HOSTED=1` and `local.ts` otherwise, and fails closed: `hosted.ts` without the flag, and a local build on Vercel, refuse to start.
   - ALWAYS: Stop `bun run dev` before running `bun run build`, `bun run check-types` or `bun run test`, or committing, in the same worktree.

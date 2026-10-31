@@ -270,6 +270,18 @@ export const fixtureSchema = z.object({
     .optional(),
   // The owner's made-up open pull requests in the work org, as the work queue's search answers them (lib/dashboard/work-queue.ts); a stack shows them once WORK_GITHUB_ORG is set.
   work: z.array(json).optional(),
+  // The made-up worktrees the Inbox's Preview row lists (lib/dashboard/stacks.ts), each its stack's URL while it runs, `$WEB` naming this stack's own web URL so its link opens in a tab, else null.
+  worktrees: z
+    .array(
+      z.object({
+        branch: z.string().nullable(),
+        path: z.string().min(1),
+        project: z.string().min(1),
+        url: z.string().nullable(),
+        vibe: z.boolean().optional(),
+      }),
+    )
+    .optional(),
 })
 
 export type Fixture = z.infer<typeof fixtureSchema>
@@ -420,6 +432,7 @@ export function writeFixture(fixture: Fixture, dir: string, now = new Date()): v
     threads: at(fixture.threads ?? []),
     update: at(fixture.update ?? null),
     work: at(fixture.work ?? []),
+    worktrees: fixture.worktrees ?? [],
   })
   writeEntry(join(fresh, STAMP), { writtenAt: now.toISOString() })
   const old = `${target}.old-${process.pid}`
@@ -480,6 +493,7 @@ export type FixtureMachine = {
   threads?: NonNullable<Fixture["threads"]>
   update?: Fixture["update"] | null
   work?: NonNullable<Fixture["work"]>
+  worktrees?: NonNullable<Fixture["worktrees"]>
 }
 
 const readJson = <T>(path: string): T => JSON.parse(readFileSync(path, "utf8")) as T
@@ -528,6 +542,19 @@ export const screenOf = (state: FixtureCmux, surface: string): string => {
 
 const sessionOnSurface = (state: FixtureCmux, surface: string) =>
   state.sessions.find((s) => str(s.surface_id) === surface && s.stored_pid_exists === true)
+
+// A Vibeground's Start or Stop on a fixture stack: its made-up worktree runs on this stack's own dashboard, a path of its own so the pane tells it from `$WEB`, or stops, in the scratch copy alone.
+export function fixtureVibe(path: string, running: boolean, dir = ensureFixture()): void {
+  const file = join(dir, "machine.json")
+  const state = readJson<FixtureMachine>(file)
+  state.worktrees = (state.worktrees ?? []).map((worktree) =>
+    worktree.path === path
+      ? { ...worktree, url: running ? "$WEB/dashboard" : null, vibe: running }
+      : worktree,
+  )
+  writeFileSync(`${file}.tmp`, JSON.stringify(state, null, 2), { mode: 0o600 })
+  renameSync(`${file}.tmp`, file)
+}
 
 // What cmux's reads answer on a fixture stack, from the fixture's own state: sessions, workspaces, the Feed, and a session's screen. Any other read is one the fixture does not hold.
 export function fixtureRead(args: readonly string[], dir = ensureFixture()): string {

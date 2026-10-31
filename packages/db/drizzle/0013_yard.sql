@@ -1,7 +1,6 @@
 CREATE TABLE "yard_channel" (
 	"id" text PRIMARY KEY NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
-	"created_by" text,
 	"kind" text NOT NULL,
 	"name" text NOT NULL,
 	"post_rule" text DEFAULT 'members' NOT NULL,
@@ -71,16 +70,16 @@ CREATE TABLE "yard_token" (
 	CONSTRAINT "yard_token_hash_unique" UNIQUE("hash")
 );
 --> statement-breakpoint
-ALTER TABLE "yard_channel" ADD CONSTRAINT "yard_channel_created_by_user_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."user"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "yard_invite" ADD CONSTRAINT "yard_invite_made_by_user_id_fk" FOREIGN KEY ("made_by") REFERENCES "public"."user"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "yard_invite" ADD CONSTRAINT "yard_invite_redeemed_by_user_id_fk" FOREIGN KEY ("redeemed_by") REFERENCES "public"."user"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "yard_invite" ADD CONSTRAINT "yard_invite_requested_by_user_id_fk" FOREIGN KEY ("requested_by") REFERENCES "public"."user"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "yard_invite" ADD CONSTRAINT "yard_invite_made_by_user_id_fk" FOREIGN KEY ("made_by") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "yard_invite" ADD CONSTRAINT "yard_invite_redeemed_by_user_id_fk" FOREIGN KEY ("redeemed_by") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "yard_invite" ADD CONSTRAINT "yard_invite_requested_by_user_id_fk" FOREIGN KEY ("requested_by") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "yard_member" ADD CONSTRAINT "yard_member_channel_id_yard_channel_id_fk" FOREIGN KEY ("channel_id") REFERENCES "public"."yard_channel"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "yard_member" ADD CONSTRAINT "yard_member_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "yard_message" ADD CONSTRAINT "yard_message_channel_id_yard_channel_id_fk" FOREIGN KEY ("channel_id") REFERENCES "public"."yard_channel"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "yard_message" ADD CONSTRAINT "yard_message_parent_id_yard_message_id_fk" FOREIGN KEY ("parent_id") REFERENCES "public"."yard_message"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "yard_message" ADD CONSTRAINT "yard_message_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "yard_token" ADD CONSTRAINT "yard_token_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+CREATE INDEX "yard_invite_requested_by_idx" ON "yard_invite" USING btree ("requested_by");--> statement-breakpoint
 CREATE INDEX "yard_member_user_idx" ON "yard_member" USING btree ("user_id");--> statement-breakpoint
 CREATE INDEX "yard_message_channel_status_at_idx" ON "yard_message" USING btree ("channel_id","status","at");--> statement-breakpoint
 CREATE INDEX "yard_message_parent_idx" ON "yard_message" USING btree ("parent_id");--> statement-breakpoint

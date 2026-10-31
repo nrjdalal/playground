@@ -47,6 +47,7 @@ type Setup = {
   load5?: number
   mergeQueue?: unknown
   off?: string[]
+  peers?: string[]
   plan?: unknown
   pressure?: number
   roster?: unknown
@@ -59,6 +60,7 @@ const machine = ({
   load5 = load1,
   mergeQueue,
   off = [],
+  peers = [],
   plan,
   pressure = 1,
   roster,
@@ -88,10 +90,10 @@ esac
 `,
   )
   chmodSync(join(bin, "sysctl"), 0o755)
-  // the settings reader answers factory.repo and the guarded orgs as a store that sets them would, and every other key as the real one does
+  // the settings reader answers factory.repo, the guarded orgs and slots.peers as a store that sets them would, and every other key as the real one does
   writeFileSync(
     join(bin, "bun"),
-    `#!/bin/bash\n[ "$2" = factory.repo ] && { echo '"acme/app"'; exit 0; }\n[ "$2" = --guarded-orgs ] && { echo '["acme-co"]'; exit 0; }\nexec ${process.execPath} "$@"\n`,
+    `#!/bin/bash\n[ "$2" = factory.repo ] && { echo '"acme/app"'; exit 0; }\n[ "$2" = --guarded-orgs ] && { echo '["acme-co"]'; exit 0; }\n[ "$2" = slots.peers ] && { echo '${JSON.stringify(peers)}'; exit 0; }\nexec ${process.execPath} "$@"\n`,
   )
   chmodSync(join(bin, "bun"), 0o755)
   // SLOW_CHILD puts a slowed python3 in the fake bin folder, which PATH reads first
@@ -977,6 +979,42 @@ describe("a command that never exits is refused", () => {
     })
 })
 
+// ops, 31 Oct: another factory's pool on this Mac never saw this one's, and the two together took load1 to 77 and swap to 7.6 GB
+describe("another factory's runs (slots.peers)", () => {
+  // a peer's ops folder holding run-slot with a holder line whose pid is `pid`
+  const peerHolding = (pid: number) => {
+    const peer = mkdtempSync(join(tmpdir(), "peer-ops-"))
+    dirs.push(peer)
+    mkdirSync(join(peer, "run-slot"))
+    writeFileSync(join(peer, "run-slot.holder"), `b8-worker ${pid} 2026-10-31T00:50:00Z 3 big\n`)
+    return peer
+  }
+
+  test("a medium run waits while a peer's live run holds 3 units", async () => {
+    const peer = peerHolding(process.pid)
+    const m = machine({ off: ["run-slot.3-off", "run-slot.4-off"], peers: [peer] })
+    expect(await m.waits("worker-m", { RUN_SLOT_SIZE: "medium" })).toBe(true)
+    expect(readFileSync(join(peer, "run-slot.holder"), "utf8")).toContain(`${process.pid}`)
+  })
+
+  test("a peer's holder whose pid has died counts nothing, and its folder is left as it is", async () => {
+    const gone = Bun.spawn(["true"])
+    await gone.exited
+    const peer = peerHolding(gone.pid)
+    const m = machine({ off: ["run-slot.3-off", "run-slot.4-off"], peers: [peer] })
+    expect(await m.runs("worker-m", { RUN_SLOT_SIZE: "medium" })).toBe(true)
+    expect(existsSync(join(peer, "run-slot"))).toBe(true)
+    expect(existsSync(join(peer, "run-slot.holder"))).toBe(true)
+  })
+
+  test("can-take counts a peer's units as for any run", async () => {
+    const peer = peerHolding(process.pid)
+    const m = machine({ off: ["run-slot.3-off", "run-slot.4-off"], peers: [peer] })
+    expect(await m.canTake("run-slot", "worker-m", { RUN_SLOT_SIZE: "medium" })).toBe(false)
+    expect(await m.canTake("run-slot", "worker-s", { RUN_SLOT_SIZE: "small" })).toBe(true)
+  })
+})
+
 // localci and the merge train take their slots themselves; they ask run-slot.sh, so an off-switch reaches them too (18 Oct: localci took slot 3 past run-slot.3-off)
 describe("can-take", () => {
   test("a slot its off-switch closes", async () => {
@@ -1008,7 +1046,7 @@ describe("can-take", () => {
 
 // dispatcher, 18 Oct: a committed test, type check, lint or build runs on the runner host through ci.sh exec, and falls back to a slot here
 describe("the runner host", () => {
-  // A stub ci.sh that logs its arguments and exits with `rc`, and a stub bun that logs what the Mac ran.
+  // A stub ci.sh that logs its arguments and exits with `rc`, and a stub bun that logs what the Mac ran, answering the settings reader with nothing.
   const box = (rc: number, off?: string) => {
     const m = machine()
     const host = join(m.ops, "runner-host")
@@ -1019,7 +1057,10 @@ describe("the runner host", () => {
       `#!/bin/bash\necho "$*" >> ${join(host, "calls")}\nexit ${rc}\n`,
     )
     chmodSync(join(host, "ci.sh"), 0o755)
-    writeFileSync(join(m.bin, "bun"), `#!/bin/bash\necho "$*" >> ${join(m.root, "mac")}\n`)
+    writeFileSync(
+      join(m.bin, "bun"),
+      `#!/bin/bash\ncase "$1" in */setting.ts) exit 0 ;; esac\necho "$*" >> ${join(m.root, "mac")}\n`,
+    )
     chmodSync(join(m.bin, "bun"), 0o755)
     const read = (path: string) => (existsSync(path) ? readFileSync(path, "utf8") : "")
     const run = async (argv: string[], extra: Record<string, string> = {}) => {
@@ -1379,5 +1420,68 @@ describe("a model-bound run", () => {
       "run-slot-model-1: cleared a stale holder",
     )
     expect(existsSync(join(m.ops, "run-slot-model-1"))).toBe(false)
+  })
+})
+
+// 31 Oct: a suite's `bun test --isolate` worker outlived its suite by 5 hours at 50% CPU, reparented to launchd once the suite's own process exited
+describe("what the command leaves in its process group", () => {
+  const alive = (pid: number) => {
+    try {
+      process.kill(pid, 0)
+      return true
+    } catch {
+      return false
+    }
+  }
+  // Runs, through run-slot from a calling bash, a command that starts a loop in the background, writes its pid and exits 7; `trap` set to ignore TERM in the loop makes it need the KILL. Returns the caller's stdout, the run's code, the loop's pid and the runs log.
+  const leaves = async (trap = "") => {
+    const m = machine()
+    const pidFile = join(m.root, "loop.pid")
+    const loop = `${trap}while :; do sleep 0.2; done`
+    // the loop's output goes to /dev/null, so a loop left behind never holds the caller's stdout open
+    const command = `bash -c '${loop}' >/dev/null 2>&1 & echo $! > ${pidFile}; exit 7`
+    const p = Bun.spawn(
+      [
+        "bash",
+        "-c",
+        '"$@"; echo "caller-alive $?"',
+        "bash",
+        "bash",
+        SCRIPT,
+        "worker-x",
+        "--",
+        "bash",
+        "-c",
+        command,
+      ],
+      { cwd: m.root, env: m.env(), stdout: "pipe" },
+    )
+    const out = await new Response(p.stdout).text()
+    const code = await p.exited
+    const pid = Number(readFileSync(pidFile, "utf8"))
+    // read at once after run-slot has ended, so a loop it left reads alive
+    const left = alive(pid)
+    // the test started the loop, so a loop left alive is stopped by its own pid at once, before that pid could pass to another process
+    if (left) process.kill(pid, "SIGKILL")
+    return { code, left, log: readFileSync(join(m.ops, "run-slot.runs.log"), "utf8"), out, pid }
+  }
+
+  test("is stopped once the command exits, and logged by pid with its command line", async () => {
+    const r = await leaves()
+    expect(r.left).toBe(false)
+    expect(r.log).toMatch(
+      new RegExp(`reap worker-x \\d+ pid=${r.pid} bash -c while :; do sleep 0\\.2; done`),
+    )
+  })
+
+  test("that ignores TERM, by KILL after the grace", async () => {
+    const r = await leaves('trap "" TERM; ')
+    expect(r.left).toBe(false)
+  })
+
+  test("while run-slot's caller lives on and the command's own exit code comes back", async () => {
+    const r = await leaves()
+    expect(r.out).toBe("caller-alive 7\n")
+    expect(r.code).toBe(0)
   })
 })

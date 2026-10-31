@@ -36,6 +36,9 @@ import {
   type Target,
   THEMES,
   VIEWPORTS,
+  type Warm,
+  warmFetch,
+  warmUp,
 } from "./checks"
 import { NO_ROSTER_SCRIPT, OBSERVER_SCRIPT, SECOND_DOWN_SCRIPT } from "./cls-observer"
 import { EXTENSION_NODE_SCRIPT, extensionNode } from "./extension-node"
@@ -336,6 +339,9 @@ const screenshots = (at: Target, label: Label) =>
     if (!source.ok) return source
     return browse(at, "screenshots", async (browser) => {
       await mkdir(values.out, { recursive: true })
+      // sign-in opens /robots.txt first, so it is warmed first
+      const warm: Warm = { done: new Set(), fetch: warmFetch }
+      await warmUp(warm, at.web, "/robots.txt")
       await browser.signIn(at)
       const results: Result[] = []
       for (const theme of THEMES) {
@@ -343,7 +349,7 @@ const screenshots = (at: Target, label: Label) =>
           for (const route of pageRoutes) {
             results.push(
               ...(await guard(`screenshot ${route}`, () =>
-                screenshot(browser, at, route, viewport, values.out, label, theme),
+                screenshot(browser, at, route, viewport, values.out, label, theme, warm),
               )),
             )
           }

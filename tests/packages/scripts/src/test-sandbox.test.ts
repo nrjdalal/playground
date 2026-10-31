@@ -6,6 +6,7 @@ import { join } from "node:path"
 const SCRIPT = join(import.meta.dir, "../../../../packages/scripts/src/test-sandbox.ts")
 const DIR = mkdtempSync(join(tmpdir(), "test-sandbox-test-"))
 
+// removing DIR also ends the looping child's loop, even when bun drops a timed-out test's body before its finally
 afterAll(() => rmSync(DIR, { force: true, recursive: true }))
 
 test("a parallel pass past its deadline fails, naming the file still running", async () => {
@@ -32,6 +33,36 @@ test("a parallel pass past its deadline fails, naming the file still running", a
   expect(stderr).toContain("stuck.test.ts")
   expect(stderr).not.toMatch(/still running:.*quick\.test\.ts/)
   expect(Date.now() - started).toBeLessThan(10_000)
+}, 20_000)
+
+// A stub's subshell that loops writing (a bare wait did so on GitHub's runner, 31 Oct) outlives bun's own kill of its test, so only the deadline's stop of the whole group ends it
+test("the deadline also stops a child a stuck test leaves looping, so the run ends and the loop stops writing", async () => {
+  const beat = join(DIR, "beat")
+  const live = join(DIR, "live")
+  writeFileSync(live, "")
+  writeFileSync(
+    join(DIR, "looping.test.ts"),
+    `import { test } from "bun:test"\ntest("looping", async () => { Bun.spawn(["bash", "-c", "f() { for i in $(seq 600); do [ -e ${live} ] || break; echo $i > ${beat}; echo loop >&2; sleep 0.05; done; }; x=$(f)"]); await Bun.sleep(60_000) }, 60_000)\n`,
+  )
+  const started = Date.now()
+  try {
+    const run = Bun.spawn(["bun", SCRIPT, "./looping.test.ts"], {
+      cwd: DIR,
+      env: { ...process.env, TEST_PARALLEL_DEADLINE_MS: "5000" },
+      stderr: "pipe",
+      stdout: "ignore",
+      timeout: 12_000,
+    })
+    const [stderr] = await Promise.all([new Response(run.stderr).text(), run.exited])
+    expect(run.signalCode).toBeNull()
+    expect(stderr).toContain("still running: looping.test.ts")
+    expect(Date.now() - started).toBeLessThan(12_000)
+    const last = await Bun.file(beat).text()
+    await Bun.sleep(500)
+    expect(await Bun.file(beat).text()).toBe(last)
+  } finally {
+    rmSync(live, { force: true })
+  }
 }, 20_000)
 
 test("a test in the parallel pass runs past bun's 5s default", async () => {

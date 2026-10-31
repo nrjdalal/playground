@@ -94,7 +94,8 @@ except (OSError, ValueError):
 now = time.time()
 seen = state.setdefault("seen", {})
 current = state.get("factory") or acct  # the account the factory's sessions run on (spawn.sh --account), else the stored login
-if acct in ACCOUNTS:
+# a usage.json run.py took from a probe already came from seen, and stamping it again would stop run.py's next probe
+if acct in ACCOUNTS and u.get("source") != "token/ratelimit-headers":
     last, seen[acct] = seen.get(acct) or {}, {"at": now}
     for key, win in (("five", five), ("week", week)):  # a window the reading lacks keeps its last one, so a short read is no switch
         fresh = win.get("used_percentage") is not None
