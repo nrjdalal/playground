@@ -58,6 +58,9 @@ export function PreviewPane() {
   // a picked stopped worktree's path, and whether Start has run and its stack is not serving yet
   const [stopped, setStopped] = useState<string | null>(null)
   const [waiting, setWaiting] = useState(false)
+  // the worktree picked now, so a Start that answers after a re-pick leaves the new pick alone
+  const picking = useRef(stopped)
+  picking.current = stopped
   const box = useRef<HTMLDivElement>(null)
   const queryClient = useQueryClient()
   const stacks = useQuery({
@@ -70,8 +73,8 @@ export function PreviewPane() {
   const refresh = () => queryClient.invalidateQueries({ queryKey: STACKS_QUERY_KEY })
   const start = useMutation({
     mutationFn: startStack,
-    onSuccess: () => {
-      setWaiting(true)
+    onSuccess: (_, path) => {
+      if (picking.current === path) setWaiting(true)
       void refresh()
     },
   })
