@@ -451,7 +451,7 @@ const carriedOut = (item: InboxItem): boolean => {
   )
 }
 
-// Where an item stands, which its card's colour says: open while it needs him, sending while a go or a chat reply is being carried out, done once its poster closed it, failed when the answer did not reach its poster, closed once denied, discarded, settled, read, a Draft Slack refused, or a failure he dismissed.
+// Where an item stands, which its card's colour says: open while it needs him, sending while a go or a chat reply is being carried out, done once its poster closed it or every environment took a secret, failed when the answer did not reach its poster or a secret's sink refused it, closed once denied, discarded, settled, read, a Draft Slack refused, or a failure he dismissed.
 export type ItemState = "closed" | "done" | "failed" | "open" | "sending"
 
 // Pure: a Draft its poster closed with no link, which only Slack refusing it leaves (draft_already_exists), so nothing was saved.
