@@ -308,13 +308,12 @@ const add = async (args: string[]): Promise<number> => {
   return 0
 }
 
-// playground page: the page kept in the data folder the dashboard reads (PLAYGROUND_DATA_DIR's when set, so a test stack's fixture folder can be named), then opened.
+// playground page: the page kept in the data folder the dashboard reads (PLAYGROUND_DATA_DIR's when set, so a test stack's fixture folder can be named), and never opened: it reaches the owner as an Inbox card's html attachment.
 const page = (args: string[]): number => {
   const parsed = pageArgs(args)
   if ("error" in parsed) return fail(parsed.error)
   const kept = keepPage(parsed, dataDir())
   if ("error" in kept) return fail(kept.error)
-  Bun.spawnSync(["open", kept.path])
   console.log(`Kept ${kept.path}`)
   return 0
 }
