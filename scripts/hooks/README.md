@@ -162,12 +162,13 @@ Their tests are `bun run test:file tests/scripts/hooks`.
 
 ## no-public-leak
 
-- ALWAYS: Write the public repository's pull requests, issues, reviews and comments in plain words, naming no person, company or private record, since everything written there is public once the repository is and stays cached after.
-  `scripts/hooks/no-public-leak.ts`, registered in both settings files, refuses a write to the public repository (`factory.publicRepo`, or `TODAY_PUBLIC` in trace-count's `kinds.ts` while unset) whose text holds a name, a handle, a company term, a Slack id or a Linear key from its list, or any email address, `LM-<n>` key or link into the archive repository (`factory.archiveRepo`).
+- ALWAYS: Write each public repository's pull requests, issues, reviews and comments in plain words, naming no person, company or private record, since everything written there is public once the repository is and stays cached after.
+  `scripts/hooks/no-public-leak.ts`, registered in both settings files, refuses a write to a public repository (`factory.publicRepo`, one or a list, or while unset `TODAY_PUBLIC` in trace-count's `kinds.ts`, the factory's and Yard's)
+  whose text holds a name, a handle, a company term, a Slack id or a Linear key from its list, or any email address, `LM-<n>` key or link into the archive repository (`factory.archiveRepo`).
   An extensions root whose policy.json it cannot read for those two refuses the write, as a list it cannot trust does.
   Its reason names the kind and the plain-words fix, never the text.
   It reads every write through no-playground-leak's engine (`inspectAs` with its own `Policy`), so the shapes it reads are that guard's gh, `gh api`, curl and GitHub MCP writes; git commits and pushes, Linear and Slack are outside it.
-  The repository's own name, which holds its owner's handle, is read past.
+  Each public repository's own name, which holds its owner's handle, is read past.
   Its kinds are `packages/scripts/src/trace-count/kinds.ts`, which the trace ratchet counts too, and its list is read as [Guard lists](#guard-lists) says; on a fresh clone with no list, the list-free kinds still refuse.
   Its tests are `bun run test:file tests/scripts/hooks/no-public-leak.test.ts`.
 
