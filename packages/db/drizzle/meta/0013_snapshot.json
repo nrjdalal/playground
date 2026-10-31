@@ -1,5 +1,5 @@
 {
-  "id": "2807ab1e-0810-4454-b1b3-62c4be4c8601",
+  "id": "97b2f720-def7-4a5a-beef-fb9e4d7611dc",
   "prevId": "433be565-b190-4fd6-8597-1986044fbb97",
   "version": "7",
   "dialect": "postgresql",
@@ -2105,7 +2105,23 @@
           "notNull": true
         }
       },
-      "indexes": {},
+      "indexes": {
+        "yard_invite_requested_by_idx": {
+          "name": "yard_invite_requested_by_idx",
+          "columns": [
+            {
+              "expression": "requested_by",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
       "foreignKeys": {
         "yard_invite_made_by_user_id_fk": {
           "name": "yard_invite_made_by_user_id_fk",
