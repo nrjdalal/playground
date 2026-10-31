@@ -32,15 +32,51 @@ export const loadable = (address: string, apiUrl: string): boolean => {
   }
 }
 
-// Pure: the address the Preview frame opens on: the one kept for this browser while it is loadable, else the first stack's root, else none.
+// Pure: the address the Preview frame opens on: the one kept for this browser while it is loadable, else the first running stack's root, else none.
 export const startAddress = (
   kept: string | null,
-  stacks: readonly { url: string }[],
+  stacks: readonly { url: string | null }[],
   apiUrl: string,
 ): string => {
   if (kept && loadable(kept, apiUrl)) return kept
-  const first = stacks[0]
-  return first ? `${first.url}/` : ""
+  const first = stacks.find((stack) => stack.url)?.url
+  return first ? `${first}/` : ""
+}
+
+// Pure: the picker's stacks, one group a project in the list's order (by project, then branch), each running one its URL and a stopped one disabled, labelled by its branch, else its name, and the session working in it.
+export const stackGroups = (
+  stacks: readonly {
+    branch: string | null
+    name: string
+    path: string | null
+    project: string
+    session: string | null
+    url: string | null
+  }[],
+) => {
+  const groups = new Map<string, { disabled: boolean; label: string; value: string }[]>()
+  for (const stack of stacks) {
+    const label = [stack.branch ?? stack.name, stack.session, !stack.url && "stopped"]
+      .filter(Boolean)
+      .join(" · ")
+    const items = groups.get(stack.project) ?? []
+    items.push({ disabled: !stack.url, label, value: stack.url ?? `stopped:${stack.path}` })
+    groups.set(stack.project, items)
+  }
+  return [...groups].map(([project, items]) => ({ items, project }))
+}
+
+// The brand's click opens the Inbox's Preview row: the aside turns to the Inbox, and the Inbox, now or once it mounts, opens the row.
+export const OPEN_PREVIEW = "dashboard:open-preview"
+let previewWanted = false
+export const openPreview = (): void => {
+  previewWanted = true
+  window.dispatchEvent(new Event(OPEN_PREVIEW))
+}
+export const takePreview = (): boolean => {
+  const wanted = previewWanted
+  previewWanted = false
+  return wanted
 }
 
 // Pure: each topic once, in the order its newest preview comes (the list is newest first), with how many previews it holds.

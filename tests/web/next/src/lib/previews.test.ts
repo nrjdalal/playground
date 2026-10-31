@@ -3,8 +3,12 @@ import { describe, expect, test } from "bun:test"
 import type { Preview } from "../../../../../api/hono/src/lib/apps/previews"
 import {
   loadable,
+  OPEN_PREVIEW,
+  openPreview,
   previewUrl,
+  stackGroups,
   startAddress,
+  takePreview,
   topicCounts,
   topicGroups,
 } from "../../../../../web/next/src/lib/previews"
@@ -97,5 +101,66 @@ describe("startAddress", () => {
       "https://desk.playground.localhost/",
     )
     expect(startAddress(null, [], api)).toBe("")
+  })
+
+  test("a stopped worktree, with no URL, is passed over for the first running one", () => {
+    expect(startAddress(null, [{ url: null }, ...stacks], api)).toBe(
+      "https://desk.playground.localhost/",
+    )
+    expect(startAddress(null, [{ url: null }], api)).toBe("")
+  })
+})
+
+// the owner: "this preview thingy should be vibeground, working on multiple projects, or worktrees and things"
+describe("stackGroups", () => {
+  const stack = (
+    project: string,
+    branch: string | null,
+    url: string | null,
+    session: string | null = null,
+  ) => ({
+    branch,
+    name: "folder",
+    path: `/${project}/${branch}`,
+    project,
+    session,
+    url,
+  })
+
+  test("one group a project in the list's order, each worktree its branch and session, a stopped one disabled", () => {
+    expect(
+      stackGroups([
+        stack("playground", "canary", "https://playground.localhost", "dispatcher"),
+        stack("playground", "feat/b", null),
+        stack("yard", null, "https://folder.yard.localhost"),
+      ]),
+    ).toEqual([
+      {
+        items: [
+          { disabled: false, label: "canary · dispatcher", value: "https://playground.localhost" },
+          { disabled: true, label: "feat/b · stopped", value: "stopped:/playground/feat/b" },
+        ],
+        project: "playground",
+      },
+      {
+        items: [{ disabled: false, label: "folder", value: "https://folder.yard.localhost" }],
+        project: "yard",
+      },
+    ])
+  })
+})
+
+// the owner: "also clicking on Playground logo should switch it to vibeground"
+describe("openPreview", () => {
+  test("the brand's click asks for the Preview row once, so an Inbox that mounts after it still opens it, and one that mounts later does not", () => {
+    const heard: string[] = []
+    const listen = () => heard.push("open")
+    globalThis.window ??= globalThis as unknown as Window & typeof globalThis
+    window.addEventListener(OPEN_PREVIEW, listen)
+    openPreview()
+    window.removeEventListener(OPEN_PREVIEW, listen)
+    expect(heard).toEqual(["open"])
+    expect(takePreview()).toBe(true)
+    expect(takePreview()).toBe(false)
   })
 })

@@ -49,6 +49,7 @@ import { inboxTarget, inboxView, useInbox } from "@/lib/inbox"
 import { feedNeeds, useNeedsYouTarget } from "@/lib/needs-you"
 import { moveOldKeys } from "@/lib/old-keys"
 import { sentSince } from "@/lib/outbox"
+import { OPEN_PREVIEW } from "@/lib/previews"
 import { useReply } from "@/lib/reply"
 import { inboxMark, newInInboxCount, useMark, useTabVisible, writeMark } from "@/lib/tab-dot"
 import { useAppUnread } from "@/plugins/registry"
@@ -253,6 +254,15 @@ export function DashboardAside({ children }: { children: ReactNode }) {
     if (seen.current && sentSince(seen.current, his)) setTab(home ? "page" : "chat")
     seen.current = new Set(his.map((m) => m.id))
   }, [home, primary?.name, outbox.messages])
+  // the brand's click opens the Inbox tab, whose Preview row it opens (openPreview)
+  useEffect(() => {
+    const open = () => {
+      setTab("inbox")
+      setSide("inbox")
+    }
+    window.addEventListener(OPEN_PREVIEW, open)
+    return () => window.removeEventListener(OPEN_PREVIEW, open)
+  }, [])
   // a link to an inbox item (a Waiting on your inbox badge, Playground's row) opens the Inbox tab, where the list scrolls to it
   useNeedsYouTarget(Boolean(inbox.data), (anchor) => {
     if (inboxTarget(anchor, inbox.data?.items ?? [])) {

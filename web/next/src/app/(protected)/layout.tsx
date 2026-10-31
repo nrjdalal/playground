@@ -83,6 +83,7 @@ export default async function Layout({ children }: { children: React.ReactNode }
       <SidebarShell
         badge={badge}
         mark={<DashboardMark />}
+        opensPreview
         stats={<DashboardStats />}
         header={<DashboardDispatchers rows={dispatcherSlotsOf(await readHealth())} />}
         nav={<DashboardNav />}

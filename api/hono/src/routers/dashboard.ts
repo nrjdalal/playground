@@ -507,10 +507,10 @@ const dashboardRoutes = new Hono<{ Variables: Session }>()
     describeRoute({
       tags: ["Dashboard"],
       description:
-        "The web stacks portless serves on this machine, A to Z, each its name (its host's first label) and its https URL, for the Inbox's Preview row: API hosts and aliases left out, and none on a fixture stack. Read-only.",
+        "Every worktree of every project this machine works in (this checkout's and each live session's folder's, read from git's own files), by project, then branch, A to Z, for the Inbox's Preview row: each its branch (null when detached), its name (its host's first label while it runs, else its folder's), its path, its project (the origin's repository name), the session working in it (null when none), and its stack's https URL while `bun run dev` serves it, from the portless route whose process group its stack's record names, else null; then each web stack portless serves that no worktree claims, under its app's name, with no path, branch or session. API hosts and aliases are left out, and a fixture stack lists the fixture's made-up worktrees. Read-only.",
       responses: { 200: { description: "OK" }, ...authErrorResponses },
     }),
-    (c) => c.json({ data: readStacks() }),
+    async (c) => c.json({ data: await readStacks() }),
   )
   .get(
     "/system",

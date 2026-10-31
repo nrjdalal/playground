@@ -139,6 +139,7 @@ import {
   useInbox,
 } from "@/lib/inbox"
 import { needsYouAnchor, useNeedsYouTarget } from "@/lib/needs-you"
+import { OPEN_PREVIEW, takePreview } from "@/lib/previews"
 import { setReply, useReply, useTypedReply } from "@/lib/reply"
 import { iconTone, type ShownState, statusIcon } from "@/lib/status-icons"
 import { inboxMark, readMark } from "@/lib/tab-dot"
@@ -1418,6 +1419,16 @@ export function Inbox({ viewing }: { viewing: boolean }) {
   const below = useRef<HTMLDivElement>(null)
   const [listOpen, setListOpen] = useState<boolean>(FOLDS_OPEN.open)
   const [shelvesOpen, setShelvesOpen] = useState<string[]>([])
+  // the brand's click opens the Preview row, whether it came before this mounted or after
+  useEffect(() => {
+    const open = () => {
+      if (takePreview())
+        setShelvesOpen((keys) => (keys.includes("Preview") ? keys : [...keys, "Preview"]))
+    }
+    open()
+    window.addEventListener(OPEN_PREVIEW, open)
+    return () => window.removeEventListener(OPEN_PREVIEW, open)
+  }, [])
   const taken = useRef(0)
   const pillButton = useRef<HTMLButtonElement>(null)
   const take = () => {
