@@ -102,7 +102,7 @@ async function scoped(path: string, env: Environment): Promise<boolean> {
 }
 
 // each plugin Claude Code loads here: a user install enabled in the user settings, or a project's install for the folder the session runs in
-const plugins = (env: Environment, cwd: string | undefined): { name: string; path: string }[] => {
+const plugins = (env: Environment, cwd: string | undefined): string[] => {
   const read = (file: string): unknown => {
     try {
       return JSON.parse(readFileSync(join(configDir(env), file), "utf8"))
@@ -130,18 +130,15 @@ const plugins = (env: Environment, cwd: string | undefined): { name: string; pat
           : typeof install.projectPath === "string" &&
             !!cwd &&
             !relative(install.projectPath, cwd).startsWith("..")
-      return loads ? [{ name: key.split("@")[0], path: install.installPath }] : []
+      return loads ? [install.installPath] : []
     }),
   )
 }
 
-// the name a session loads the skill by, bare for a skills folder's copy, scoped for a plugin's, or none when no copy is installed
-const loadable = (env: Environment, cwd: string | undefined): string | undefined => {
-  const has = (dir: string) => existsSync(join(dir, "skills", SKILL, "SKILL.md"))
-  if ([configDir(env), ...(cwd ? [join(cwd, ".claude")] : [])].some(has)) return SKILL
-  const plugin = plugins(env, cwd).find((p) => has(p.path))
-  return plugin && `${plugin.name}:${SKILL}`
-}
+const installed = (env: Environment, cwd: string | undefined) =>
+  [configDir(env), ...(cwd ? [join(cwd, ".claude")] : []), ...plugins(env, cwd)].some((dir) =>
+    existsSync(join(dir, "skills", SKILL, "SKILL.md")),
+  )
 
 async function mark(input: Input, env: Environment) {
   const file = markOf(input, env)
@@ -163,11 +160,10 @@ async function judge(input: Input, env: Environment): Promise<string | undefined
   const cwd = typeof input.cwd === "string" ? input.cwd : undefined
   const path = real(resolve(cwd ?? "/", target))
   if (!(await scoped(path, env)) || existsSync(file)) return
-  const name = loadable(env, cwd)
-  if (!name) return
+  if (!installed(env, cwd)) return
   const who =
     typeof input.agent_id === "string" && input.agent_id ? "this subagent" : "this session"
-  return `writing-first hook refuses this ${String(input.tool_name)} to ${target}: it is an agent-facing doc, and ${who} has not loaded ${SKILL} since its last compaction. Call the Skill tool with skill "${name}", follow it, then retry this write (playbook's **writing** rule).`
+  return `writing-first hook refuses this ${String(input.tool_name)} to ${target}: it is an agent-facing doc, and ${who} has not loaded ${SKILL} since its last compaction. Call the Skill tool with skill "${SKILL}", or the scoped name your skill list shows for it (such as "ws-home:${SKILL}"), follow it, then retry this write (playbook's **writing** rule).`
 }
 
 // Fails open: input it cannot read, or an error, lets the call run, so a fault here never blocks every write.

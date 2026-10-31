@@ -133,6 +133,9 @@ describe("an agent-facing doc waits for writing-for-agents", () => {
   test("the refusal names the fix", async () => {
     const reason = (await write(session(), join(REPO, "AGENTS.md"))) ?? ""
     expect(reason).toContain(`Call the Skill tool with skill "${SKILL}"`)
+    expect(reason).toContain(
+      `or the scoped name your skill list shows for it (such as "ws-home:${SKILL}")`,
+    )
     expect(reason).toContain("then retry")
     expect(reason).toContain("AGENTS.md")
     // a compaction clears the mark, so a refused session knows the load is wanted again
@@ -328,13 +331,11 @@ describe("an installed plugin's copy counts as installed, so retiring the user-s
       config,
     )
 
-  test("a user install enabled in the settings: the refusal names its scoped copy", async () => {
-    const reason = (await attempt(USER_PLUGIN)) ?? ""
-    expect(reason).toContain(`Call the Skill tool with skill "ws-home:${SKILL}"`)
-  })
-
-  test("a project's install, for the folder the session runs in", async () => {
-    expect(await attempt(PROJECT_PLUGIN)).toContain(`skill "ws-home:${SKILL}"`)
+  test.each([
+    ["a user install enabled in the settings", USER_PLUGIN],
+    ["a project's install, for the folder the session runs in", PROJECT_PLUGIN],
+  ])("%s: the write waits", async (_, config) => {
+    expect(await attempt(config)).toContain("writing-first hook refuses")
   })
 
   test.each([

@@ -332,5 +332,5 @@ Their tests are `bun run test:file tests/scripts/hooks`.
   the root `AGENTS.md` and `CLAUDE.md`, `scripts/README.md` and `scripts/hooks/README.md`, and `docs/`; and anywhere, a handoff under the data folder's `handoffs/`.
   A Skill call or a typed `/writing-for-agents`, bare or a plugin's or folder's scoped copy (`ws-home:writing-for-agents`), leaves a mark under the data folder's `writing-first/`, a subagent's apart from its parent's, since a subagent's hook input carries its parent's session id beside its own `agent_id`; a compaction clears the session's marks.
   With the skill installed nowhere (the config folder's `skills/`, the checkout's `.claude/skills/`, or a plugin `plugins/installed_plugins.json` lists, installed for the user and enabled in the user settings or installed for the session's project) it lets every write through, and it fails open.
-  Its refusal names the copy to load, the bare name for a skills folder's, `<plugin>:writing-for-agents` for a plugin's.
+  Its refusal names the bare skill or the scoped name the session's skill list shows, since a factory session loads its org's set through `--plugin-dir` under a name the hook cannot see.
   Its tests are in `bun run test:file tests/scripts/hooks` too.
