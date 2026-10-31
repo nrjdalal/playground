@@ -6,8 +6,21 @@ import type { SinkRun } from "@/lib/dashboard/inbox"
 // A sink that waits on a prompt is stopped after this long, so a Submit never hangs.
 const SINK_TIMEOUT_MS = 60_000
 
-// The sink's whole environment: what vercel needs to find itself, its login and a proxy, so the API's own secrets stay out of it.
-const PASSED = ["HOME", "HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY", "PATH"]
+// The sink's whole environment: what vercel needs to find itself, its login, a proxy and a custom CA, so the API's own secrets stay out of it.
+const PASSED = [
+  "ALL_PROXY",
+  "HOME",
+  "HTTPS_PROXY",
+  "HTTP_PROXY",
+  "NODE_EXTRA_CA_CERTS",
+  "NO_PROXY",
+  "PATH",
+  "SSL_CERT_FILE",
+  "all_proxy",
+  "http_proxy",
+  "https_proxy",
+  "no_proxy",
+]
 
 export const sinkEnv = (from: Record<string, string | undefined> = process.env) =>
   Object.fromEntries(
