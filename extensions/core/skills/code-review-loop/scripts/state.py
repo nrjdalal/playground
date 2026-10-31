@@ -73,12 +73,48 @@ def roster_path():
     return os.path.join(data_dir(), "roster.json")
 
 
+def pr_url(repo, n):
+    return re.compile(rf"^https://github\.com/{re.escape(repo)}/pull/{n}(?:[/?#]|$)", re.I)
+
+
+def live_agents(roster):
+    return [a for a in (roster or {}).get("agents", [])
+            if isinstance(a, dict) and a.get("status") != "ended" and isinstance(a.get("name"), str)]
+
+
 def holders(roster, repo, n):
     """The roster's agents not ended whose `pr` is this PR: who holds it now."""
-    url = re.compile(rf"^https://github\.com/{re.escape(repo)}/pull/{n}(?:[/?#]|$)", re.I)
-    return sorted(a["name"] for a in (roster or {}).get("agents", [])
-                  if isinstance(a, dict) and isinstance(a.get("pr"), str) and url.match(a["pr"])
-                  and a.get("status") != "ended" and isinstance(a.get("name"), str))
+    url = pr_url(repo, n)
+    return sorted(a["name"] for a in live_agents(roster) if isinstance(a.get("pr"), str) and url.match(a["pr"]))
+
+
+def plan_path():
+    return os.environ.get("PLAYGROUND_PLAN_PATH") or os.path.join(data_dir(), "bundles", "plan.json")
+
+
+def read_plan():
+    """plan.json's lane items, where the Planner gives a worker each of its PRs; none when it is missing or unreadable."""
+    try:
+        with open(plan_path()) as f:
+            plan = json.load(f)
+    except (OSError, ValueError):
+        return []
+    lanes = plan.get("lanes") if isinstance(plan, dict) else None
+    return [item for lane in (lanes if isinstance(lanes, list) else []) if isinstance(lane, dict)
+            for item in (lane.get("items") if isinstance(lane.get("items"), list) else []) if isinstance(item, dict)]
+
+
+def plan_naming(plan, repo, n):
+    """plan.json's items whose `pr` is this PR."""
+    url = pr_url(repo, n)
+    return [i for i in plan if isinstance(i, dict) and isinstance(i.get("pr"), str) and url.match(i["pr"])]
+
+
+def plan_holders(roster, plan, repo, n):
+    """The live agents plan.json's items for this PR name as `worker`, read by its first word, since a worker may carry a note (`rzrzf8-worker (D)`)."""
+    live = {a["name"] for a in live_agents(roster)}
+    words = ((i.get("worker") or "").split() if isinstance(i.get("worker"), str) else [] for i in plan_naming(plan, repo, n))
+    return sorted({w[0] for w in words if w and w[0] in live})
 
 
 def plans_dir():
@@ -108,14 +144,14 @@ def plans_naming(plans, n):
     return [name for name, text in plans.items() if mention.search(text)]
 
 
-def holder_tag(roster, plans, repo, n, author=None, me=None):
-    """Who holds the PR: its agents, else the Builder's triage for another author's, else the plan that parks it, else `lost`."""
-    held = holders(roster, repo, n)
+def holder_tag(roster, plans, repo, n, author=None, me=None, plan=()):
+    """Who holds the PR: its agents (the roster's, and the live workers plan.json gives it), else the Builder's triage for another author's, else the plan that parks it (plan.json, then the plans files), else `lost`."""
+    held = sorted(set(holders(roster, repo, n)) | set(plan_holders(roster, plan, repo, n)))
     if held:
         return ", ".join(held), False
     if author and me and author != me:
         return f"outside author {author}: the builder triages (a colleague's: the dispatcher decides per CHANNEL.md's Triage; another's app PR: read-only review then the gate; skills/factory: closed)", False
-    named = plans_naming(plans, n)
+    named = (["plan.json"] if plan_naming(plan, repo, n) else []) + plans_naming(plans, n)
     if not named:
         return "no agent, in no plan: lost", True
     return f"no agent; parked in {named[0]}{f' (+{len(named) - 1})' if len(named) > 1 else ''}", False
@@ -336,10 +372,11 @@ def cmd_scan(repo):
     if problem:
         print(problem)
     plans = read_plans()
+    plan = read_plan()
     rows = sorted((scan_row(pr, me) for pr in prs), key=lambda r: r["number"])
     lost = 0
     for r in rows:
-        tag, is_lost = holder_tag(roster, plans, repo, r["number"], r["author"], me)
+        tag, is_lost = holder_tag(roster, plans, repo, r["number"], r["author"], me, plan)
         lost += is_lost
         print(f"#{r['number']} {r['head']} {r['status']}{' draft' if r['draft'] else ''} [{tag}]: {r['title']}")
     unscored = [r for r in rows if not r["status"].startswith("SCORED")]
