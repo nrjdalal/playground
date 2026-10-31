@@ -9,7 +9,6 @@ import { useEffect, useState } from "react"
 import { sendsOnEnter } from "@/components/dashboard/composer"
 import { Hint } from "@/components/hint"
 import { TranscriptMessage } from "@/components/transcript-message"
-import { Badge } from "@/components/ui/badge"
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
 import {
   InputGroup,
@@ -97,7 +96,9 @@ export function FromLine({ message }: { message: YardMessage }) {
     <span className="inline-flex items-center gap-1.5">
       {message.from.login}
       <span className="text-muted-foreground font-normal">{message.from.device}</span>
-      {message.kind !== "text" && <Badge variant="outline">{message.kind}</Badge>}
+      {message.kind !== "text" && (
+        <span className="text-muted-foreground font-normal">{message.kind}</span>
+      )}
     </span>
   )
 }
