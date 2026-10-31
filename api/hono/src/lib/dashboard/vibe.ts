@@ -495,6 +495,8 @@ export async function stopVibe(path: string, deps: Deps = DEPS): Promise<void> {
         }`,
       )
     }
+    // a Stop that took the stale mark over during dev:stop has removed the copy, and a later Start may have made a new one under the same name
+    if (readVibe(stack.path)?.id !== claim.id) return
     const removed = await deps.docker(["rm", "-fv", record.container])
     if (removed.code !== 0) {
       throw new VibeError(`docker rm -fv ${record.container}: ${removed.stderr.trim()}`)
