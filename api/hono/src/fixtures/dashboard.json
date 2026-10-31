@@ -5425,5 +5425,27 @@
       "updatedAt": "2025-12-31T16:00:00.000Z",
       "url": "https://github.com/example/api/pull/86"
     }
+  ],
+  "worktrees": [
+    { "branch": "canary", "path": "/fixture/playground", "project": "playground", "url": "$WEB" },
+    {
+      "branch": "feat/board-colours",
+      "path": "/fixture/playground/.claude/worktrees/board-colours",
+      "project": "playground",
+      "url": null
+    },
+    {
+      "branch": "fix/sidebar-spacing",
+      "path": "/fixture/playground/.claude/worktrees/sidebar-spacing",
+      "project": "playground",
+      "url": "https://fix-sidebar-spacing.playground.localhost"
+    },
+    { "branch": "main", "path": "/fixture/yard", "project": "yard", "url": null },
+    {
+      "branch": "feat/rooms",
+      "path": "/fixture/yard/.claude/worktrees/rooms",
+      "project": "yard",
+      "url": "https://feat-rooms.yard.localhost"
+    }
   ]
 }

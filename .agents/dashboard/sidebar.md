@@ -25,6 +25,8 @@
   The sidebar has no toggle button: the rail along its edge and Cmd+B (Ctrl+B) collapse and expand it.
   The rail takes the toggle as its own click (`SidebarToggleRail` in `web/next/src/components/shell/sidebar-toggle-rail.tsx`), since its tooltip's trigger replaces the click `SidebarRail` builds in, which once left the rail doing nothing.
   The docs' sidebar draws it too, a test fails on any other file that draws `SidebarRail`, and `bun run verify rail` clicks it on `/dashboard` and `/docs`.
+  The header's site name links to `/dashboard` and opens the Inbox tab with its Preview row open, on a phone too once the move to `/dashboard` resets its tab (`takeMove()`, judged by the address the click left, since `/dashboard?worker=<the dispatcher>` keeps the aside's session),
+  while a modified click only opens a new tab (`BrandLink` in `web/next/src/components/shell/brand-link.tsx`, `previewClick()` in `web/next/src/lib/previews.ts`, the shell's `opensPreview`; asks.md).
   The machine at a glance sits on the sidebar header's name row: GitHub at the row's right end, in the toggle's old place, through the shell's `mark` slot (`DashboardMark`, `GithubMark`),
   and the system icons (`headerIcons()`, `SystemIcons` and `DashboardStats` in the same file, through the shell's `stats` slot) between the name and GitHub, 4px apart.
   The icons keep that place only while the row shows no Test data badge and is 238px or wider, the room for the name, all four readings with disk at orange and GitHub (measured), so the layout follows the row and never a reading (`SidebarShell`'s `:has` rule and container query);
