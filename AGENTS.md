@@ -247,7 +247,7 @@ Playground's sessions run as a factory: the dispatcher manages, the Builder lead
   A pattern matches the live dashboard and every worker's stack.
   A port is no narrower: whoever holds portless's proxy port is the proxy every worktree routes through, the live dashboard's included.
   Stop a background task with `TaskStop`, a dev stack whose starting session has gone with `bun run dev:stop` (it signals only the process groups of the launcher its checkout recorded), and a child you spawned through its own pid or process group; every brief you write carries this rule.
-  `tests/test_kill_by_name.py` fails on a kill by name, pattern or port anywhere in the repo's text.
+  The `no-kill-by-name` hook refuses one in a factory session's command, and `tests/test_kill_by_name.py` fails on one anywhere in the repo's text.
 
 ### The dashboard app
 
