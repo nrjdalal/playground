@@ -1,9 +1,13 @@
 import { afterAll, describe, expect, test } from "bun:test"
-import { existsSync, mkdtempSync, rmSync } from "node:fs"
+import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { runSink, spawnSink } from "../../../../../../api/hono/src/lib/dashboard/secret-sink"
+import {
+  runSink,
+  sinkEnv,
+  spawnSink,
+} from "../../../../../../api/hono/src/lib/dashboard/secret-sink"
 
 const scratch = mkdtempSync(join(tmpdir(), "secret-sink-"))
 afterAll(() => rmSync(scratch, { force: true, recursive: true }))
@@ -39,6 +43,17 @@ describe("the secret's sink process (PG-59)", () => {
   test("a stack that does not read the live machine runs no process and reads 0", async () => {
     const out = join(scratch, "fixture")
     expect(await runSink([process.execPath, STUB, out, "1"], VALUE)).toBe(0)
-    expect(existsSync(`${out}.stdin`)).toBe(false)
+    expect(await Bun.file(`${out}.stdin`).exists()).toBe(false)
+  })
+
+  test("gets only what vercel needs from the API's environment, never its secrets", () => {
+    const env = sinkEnv({
+      BETTER_AUTH_SECRET: "made-up-auth",
+      HOME: "/home/made-up",
+      PATH: "/usr/bin",
+      POSTGRES_URL: "postgres://made-up",
+      VERCEL_TOKEN: "made-up-token",
+    })
+    expect(env).toEqual({ HOME: "/home/made-up", PATH: "/usr/bin", VERCEL_TOKEN: "made-up-token" })
   })
 })

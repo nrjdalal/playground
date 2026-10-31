@@ -790,8 +790,10 @@ export function InboxCard({
       // masked, never saved by the browser, and a key here stays in the field; Enter submits
       <Input
         aria-label={`Value for ${secretKey}`}
-        autoComplete="off"
+        autoComplete="new-password"
         className={BOX}
+        data-1p-ignore
+        data-lpignore="true"
         disabled={busy}
         placeholder="Paste the value"
         spellCheck={false}

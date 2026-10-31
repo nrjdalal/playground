@@ -74,4 +74,4 @@
   each step killed by its own handle past its bound and given only the variables in `PASSED` (a proxy's included), so the API's settings and tokens reach no installer.
   gh's sign-in answers Enter to its Authenticate Git prompt, since the settings repo's push needs git to use it, and says so in the fix's lines.
   A fixture stack runs `api/hono/src/fixtures/fix.ts` in their place.
-  The fifth is a secret ask's sink (`api/hono/src/lib/dashboard/secret-sink.ts`, asks.md), whose `vercel env add` is a write: it runs with no shell, an argv built only from the item's checked key, project and scope, the value on its stdin alone and its output dropped, and a fixture or test stack runs nothing in its place.
+  The fifth is a secret ask's sink (`api/hono/src/lib/dashboard/secret-sink.ts`, asks.md), whose `vercel env add` is a write: it runs with no shell, an argv built only from the item's checked key, project and scope, the value on its stdin alone, its output dropped and only what `vercel` needs in its environment (`sinkEnv`), and a fixture or test stack runs nothing in its place.

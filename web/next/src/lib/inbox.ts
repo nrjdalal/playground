@@ -538,7 +538,7 @@ export function outcomeLine(item: InboxItem): string | null {
   if (item.answer.choice === "provided") {
     const results = (item.answer.results ?? []).map(
       (result) =>
-        `${result.environment}: ${result.exitCode === null ? "stopped" : `exit ${result.exitCode}`}`,
+        `${result.environment}: ${result.exitCode === null ? "stopped by a signal" : `exit ${result.exitCode}`}`,
     )
     return [`Provided at ${fullTime(item.answer.at)}`, ...results].join(" · ")
   }

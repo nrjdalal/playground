@@ -125,9 +125,12 @@ const soFar = z
 const argName = z
   .string()
   .max(LIMITS.name)
-  .regex(/^[a-z0-9][a-z0-9._-]*$/, "Must be a lowercase name: letters, digits, dot, dash")
+  .regex(
+    /^[a-z0-9][a-z0-9._-]*$/,
+    "Must be a lowercase name: letters, digits, dot, dash, underscore",
+  )
 
-export const SECRET_ENVIRONMENTS = ["development", "preview", "production"] as const
+const SECRET_ENVIRONMENTS = ["development", "preview", "production"] as const
 
 // Where a secret ask's value goes, the allowlist in code: Vercel alone, `vercel env add` once an environment for one project.
 export const secretSinkSchema = z.strictObject({
@@ -157,7 +160,7 @@ export const sinkArgv = (key: string, sink: SecretSink, environment: string): st
   "--yes",
 ]
 
-// Runs a sink's argv with the value on its stdin and returns its exit code: null once stopped at its time limit, 127 when it could not start. secret-sink.ts holds the real one; a test passes its own.
+// Runs a sink's argv with the value on its stdin and returns its exit code: null once stopped by a signal (its time limit's included), 127 when it could not start. secret-sink.ts holds the real one; a test passes its own.
 export type SinkRun = (argv: string[], stdin: string) => Promise<number | null>
 
 // What Approve does, one shape per kind of approval the owner keeps (playbook's ask rule): a Slack message, a ship of canary, a new Linear ticket, a delete, a schema, a budget, or a plain ask, whose words say what its poster does on Approve, for a decision no other shape fits (a production port, a work request from outside the chain, or a step only he can take, such as plugging in the Mac, where Approve means done and Deny means he can't). An ask may label each side in ELI5 / ASD-STE100, one line; the card then shows its text as the quoted block above the two labelled options. A secret asks for a value instead of a yes, which goes straight to its sink and is kept nowhere.
@@ -371,7 +374,7 @@ export const saidOf = (text: string): string | undefined => {
 // The poster cleared its own alert update (`bun run ask resolve`), which had resolved itself: read, so nothing was left for him to dismiss.
 export type InboxResolved = { at: string; by: string; choice: "resolved"; note?: string }
 
-// A secret ask he answered with its value, which went to its sink and is kept nowhere: when, and each environment's exit status (null: stopped at its time limit), written once the sink has run; its poster's read closes it.
+// A secret ask he answered with its value, which went to its sink and is kept nowhere: when, and each environment's exit status (null: stopped by a signal), written once the sink has run; its poster's read closes it.
 export type InboxProvided = {
   ackedAt?: string
   at: string
@@ -562,12 +565,12 @@ function relayWith(item: InboxItem, go: boolean, text: string): string {
   return `${lead} ${text}\nKind: ${item.kind}\nPreview text:\n${words}`
 }
 
-// Pure: an exit status in words: its code, or stopped at its time limit.
+// Pure: an exit status in words: its code, or stopped by a signal.
 const exitWords = (code: number | null): string =>
-  code === null ? "stopped at its time limit" : `exit ${code}`
+  code === null ? "stopped by a signal" : `exit ${code}`
 
 // Pure: what is typed into the poster of a secret ask he answered: when, and each environment's exit status; the value never, since only the sink was handed it.
-export function providedText(
+function providedText(
   item: Pick<InboxItem, "id" | "ref" | "title">,
   answer: Pick<InboxProvided, "at" | "results">,
 ): string {
@@ -954,7 +957,7 @@ export async function retryDelivery(
 }
 
 // What the card posts for a secret ask: the value, and seen, the updatedAt of the card he answered. The value is held in memory for the sink's run alone.
-export const SECRET_MAX_CHARS = 64 * 1024
+const SECRET_MAX_CHARS = 64 * 1024
 export const secretInputSchema = z.strictObject({
   seen: z.iso.datetime().optional(),
   value: z.string().trim().min(1).max(SECRET_MAX_CHARS),

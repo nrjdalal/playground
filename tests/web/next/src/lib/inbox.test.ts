@@ -115,7 +115,7 @@ describe("a secret ask (PG-59)", () => {
       ]),
     )
     expect(line).toStartWith("Provided at ")
-    expect(line).toEndWith(" · production: exit 0 · preview: stopped")
+    expect(line).toEndWith(" · production: exit 0 · preview: stopped by a signal")
     expect(needsYou(provided([]))).toBe(false)
   })
 
