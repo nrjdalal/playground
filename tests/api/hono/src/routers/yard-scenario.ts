@@ -64,3 +64,5 @@ await Bun.sleep(200)
 out.frames = frames
 console.log(JSON.stringify(out))
 process.exit(0)
+
+export {}

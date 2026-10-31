@@ -4,7 +4,7 @@ import { join } from "node:path"
 import { SQL } from "bun"
 
 process.env.BETTER_AUTH_SECRET ||= "yard-store-test-secret-not-for-use-anywhere"
-const { createDatabase } = await import("../../../../../../packages/db/src/index")
+const { createDatabase } = await import("../../../../../../packages/db/dist/index.mjs")
 const store = await import("../../../../../../api/hono/src/lib/yard/store")
 const { cutoff, sweepOnceADay, take } =
   await import("../../../../../../api/hono/src/lib/yard/limits")
