@@ -3,7 +3,11 @@ import { chmodSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSy
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { GATE_LABEL, stubs } from "../../../../../packages/scripts/src/new-user-gate/stubs"
+import {
+  GATE_LABEL,
+  stubs,
+  usageReading,
+} from "../../../../../packages/scripts/src/new-user-gate/stubs"
 
 const box = realpathSync(mkdtempSync(join(tmpdir(), "gate-stubs-")))
 afterAll(() => rmSync(box, { force: true, recursive: true }))
@@ -60,5 +64,26 @@ describe("the gate's gh stand-in", () => {
     expect(call("gh", "api", "user").out).toBe("gate-user\n")
     expect(call("gh", "pr", "create", "--fill").code).toBe(0)
     expect(readFileSync(join(box, "calls.log"), "utf8")).toContain("gh pr create --fill")
+  })
+})
+
+describe("the gate's claude stand-in", () => {
+  test("answers a call that names no session at once, as an install's checks make it", () => {
+    expect(call("claude", "auth", "status")).toEqual({ code: 0, out: '{"loggedIn": true}\n' })
+    expect(call("claude", "--version").code).toBe(0)
+  })
+})
+
+describe("usageReading", () => {
+  test("seeds a stored login in the Keychain file and answers usage with both windows resetting after now", () => {
+    const now = Date.parse("2026-10-31T00:00:00Z")
+    const reading = usageReading("gate", now)
+    const [service, account, secret] = reading.keychain.trimEnd().split("\t")
+    expect([service, account]).toEqual(["Claude Code-credentials", "gate"])
+    expect(JSON.parse(secret!).claudeAiOauth.expiresAt).toBeGreaterThan(now)
+    expect(reading.usage).toEqual({
+      five_hour: { resets_at: "2026-10-31T03:00:00+00:00", utilization: 5 },
+      seven_day: { resets_at: "2026-11-05T00:00:00+00:00", utilization: 10 },
+    })
   })
 })

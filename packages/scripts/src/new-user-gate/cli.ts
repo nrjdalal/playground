@@ -7,7 +7,7 @@ import { dirname, join, resolve } from "node:path"
 
 import { gateSettings, SCHEMA_VERSION } from "@packages/settings"
 
-import { GATE_LABEL, stubs } from "./stubs"
+import { GATE_LABEL, stubs, usageReading } from "./stubs"
 
 const REPO = resolve(import.meta.dir, "../../../..")
 const PROXY_PORT = "14155"
@@ -81,9 +81,9 @@ export const leftForYou = (out: string): string[] => {
     .map((line) => line.slice(4))
 }
 
-// Pure: the box's .zshenv and .zprofile. Every zsh the stack's jobs start reads .zshenv, and a login one has path_helper reorder PATH after it, so .zprofile puts the stand-ins first again; a Claude account's profile read and ops-usage's probe go to a closed loopback port, so those two reads never send the made-up token off the Mac; and spawn.sh's load gate takes BOX_LOAD_MULT.
+// Pure: the box's .zshenv and .zprofile. Every zsh the stack's jobs start reads .zshenv, and a login one has path_helper reorder PATH after it, so .zprofile puts the stand-ins first again; a Claude account's profile read and ops-usage's probe go to a closed loopback port and ops-usage's stored-login reads to the box's usage reading, so no made-up token leaves the Mac; and spawn.sh's load gate takes BOX_LOAD_MULT.
 export const zshStartup = (box: string): string =>
-  `export PATH="${join(box, "stubs")}:$PATH"\nexport PLAYGROUND_PROFILE_URL=http://127.0.0.1:9/profile\nexport PLAYGROUND_PROBE_URL=http://127.0.0.1:9/v1/messages\nexport PLAYGROUND_LOAD_MULT=${BOX_LOAD_MULT}\n`
+  `export PATH="${join(box, "stubs")}:$PATH"\nexport PLAYGROUND_PROFILE_URL=http://127.0.0.1:9/profile\nexport PLAYGROUND_PROBE_URL=http://127.0.0.1:9/v1/messages\nexport PLAYGROUND_LOAD_MULT=${BOX_LOAD_MULT}\nexport PLAYGROUND_USAGE_API=file://${join(box, "usage-api")}\n`
 
 // Each stand-in that the box's zsh, plain and login, finds anywhere but the box's stubs folder, as `mode name path`; a job the box starts runs in one of the two, so an empty list means none of them reaches the real binary.
 export const strayStandIns = (box: string, home: string, names: string[]): string[] =>
@@ -162,6 +162,15 @@ const prep = (box: string, sha: string) => {
   if (pushed.code !== 0) throw new Error(`could not push ${sha} into the box: ${pushed.err.trim()}`)
   run(["git", "-C", join(box, "source.git"), "symbolic-ref", "HEAD", "refs/heads/main"])
   run(["git", "clone", "-q", "-b", "pinned", join(box, "source.git"), join(home, "playground")])
+  // the made-up stored login goes in only where ops-usage reads PLAYGROUND_USAGE_API, since an older run.py would send it to Claude's usage read
+  const usageJob = join(home, "playground", "scripts", "ops", "usage", "run.py")
+  if (existsSync(usageJob) && readFileSync(usageJob, "utf8").includes("PLAYGROUND_USAGE_API")) {
+    const reading = usageReading(process.env.USER ?? "", Date.now())
+    writeFileSync(join(box, "keychain"), reading.keychain)
+    mkdirSync(join(box, "usage-api"))
+    writeFileSync(join(box, "usage-api", "profile"), JSON.stringify(reading.profile))
+    writeFileSync(join(box, "usage-api", "usage"), JSON.stringify(reading.usage))
+  }
   const proxy = run(
     [
       join(REPO, "node_modules", ".bin", "portless"),
@@ -498,7 +507,7 @@ const main = async (args: string[]) => {
           return {
             detail:
               waiting === "Start Alpha"
-                ? "Alpha is not running 60s after Start Alpha: the stand-in claude exits at once, so a live Alpha needs a scripted session"
+                ? "Alpha is not running 60s after Start Alpha"
                 : `Alpha is not running${waiting ? `; it waits on ${waiting}` : ""}`,
             ok: false,
             shot: browser.shot("4-route"),
