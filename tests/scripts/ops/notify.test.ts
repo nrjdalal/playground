@@ -107,7 +107,7 @@ test("NOTIFY_MAC shows the line as one macOS banner, and a line without it shows
   ).toHaveLength(1)
 })
 
-// The worktree sweep's sends are multi-line and within 400, so the flatten must keep the length for its cut to keep the names whole.
+// A multi-line send within 400 characters keeps its length through the flatten, so its cut keeps every name whole.
 test("a multi-line line within 400 characters goes whole, each newline one space", async () => {
   const text = Array.from(
     { length: 3 },
