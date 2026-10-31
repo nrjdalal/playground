@@ -101,23 +101,26 @@ describe("the owner's own pending post", () => {
 })
 
 describe("the poll", () => {
-  // A fake hosted Yard whose /waiting answers what the real one does: every mention after since, a reply included, and the owner's held posts, oldest first by when each showed.
+  // A fake hosted Yard whose /waiting answers what the real one does: every mention past the mark, a reply included, and the owner's held posts, oldest first by when each showed, then by id.
   const client = (channels: Channel[], mentions: Message[], held: Message[] = []) => {
-    const asked: string[] = []
+    const asked: { after?: string; since: string }[] = []
     return {
       asked,
       yard: {
         channels: async () => channels,
         me: async () => ({ login: "owner", owner: true }),
-        waiting: async (since: string) => (
-          asked.push(since),
-          [
+        waiting: async (mark: { after?: string; since: string }) => {
+          asked.push(mark)
+          const key = (shownAt: string, id = "") => `${shownAt} ${id}`
+          return [
             ...held.map((message) => ({ held: true, message, shownAt: message.at })),
             ...mentions.map((message) => ({ held: false, message, shownAt: message.at })),
           ]
-            .filter((item) => item.shownAt > since)
-            .sort((a, b) => a.shownAt.localeCompare(b.shownAt))
-        ),
+            .filter(
+              (item) => key(item.shownAt, item.message.id) > key(mark.since, mark.after ?? "~"),
+            )
+            .sort((a, b) => (key(a.shownAt, a.message.id) < key(b.shownAt, b.message.id) ? -1 : 1))
+        },
       } as unknown as YardClient,
     }
   }
@@ -134,7 +137,7 @@ describe("the poll", () => {
     const reply = message({ at: "2026-10-31T10:00:00.000Z", id: "m2", parent: "m0" })
     const later = client([channel()], [old, reply])
     expect(await pollWaiting(later.yard, post, WEB, file)).toBe(1)
-    expect(later.asked).toEqual(["2026-10-31T09:30:00.000Z"])
+    expect(later.asked).toEqual([{ since: "2026-10-31T09:30:00.000Z" }])
     expect(await pollWaiting(later.yard, post, WEB, file)).toBe(0)
     expect(cards.map((c) => c.title)).toEqual(["@bo mentioned you in #ops"])
   })
@@ -197,5 +200,29 @@ describe("the poll", () => {
     expect(await pollWaiting(yard, post, WEB, file)).toBe(1)
     expect(posted).toHaveLength(2)
     expect(posted[1]).toBe(untrusted(b, channel()))
+  })
+  test("a failed post in the millisecond of the one before it still cards on the next poll, the mark holding its id", async () => {
+    const file = join(DIR, "marks-tie.json")
+    await pollWaiting(
+      client([channel()], []).yard,
+      async () => {},
+      WEB,
+      file,
+      new Date("2026-10-31T09:00:00Z"),
+    )
+    const a = message({ at: "2026-10-31T10:00:00.000Z", id: "a" })
+    const b = message({ at: "2026-10-31T10:00:00.000Z", id: "b" })
+    const { asked, yard } = client([channel()], [a, b])
+    const posted: string[] = []
+    let down = true
+    const post = async (card: Card) => {
+      if (down && posted.length === 1) throw new Error("down")
+      posted.push(card.preview.text)
+    }
+    await expect(pollWaiting(yard, post, WEB, file)).rejects.toThrow("down")
+    down = false
+    expect(await pollWaiting(yard, post, WEB, file)).toBe(1)
+    expect(asked.at(-1)).toEqual({ after: "a", since: "2026-10-31T10:00:00.000Z" })
+    expect(posted).toEqual([untrusted(a, channel()), untrusted(b, channel())])
   })
 })

@@ -27,7 +27,7 @@ export const pageSchema = z.strictObject({
   parent: z.string().min(1).optional(),
 })
 
-// One thing that waits on the owner: a mention, or a post of theirs Yard holds, with when it showed, the next poll's since.
+// One thing that waits on the owner: a mention, or a post of theirs Yard holds, with when it showed, which with its message's id is the next poll's mark.
 const waitingSchema = z.object({
   held: z.boolean(),
   message: messageSchema,
@@ -96,10 +96,10 @@ export const yardClient = (base: string, token: string, request: YardFetch = fet
           method: "POST",
         },
       ),
-    waiting: async (since: string) =>
+    waiting: async ({ after, since }: { after?: string; since: string }) =>
       (
         await call(
-          `/waiting?${new URLSearchParams({ since })}`,
+          `/waiting?${new URLSearchParams(after ? { after, since } : { since })}`,
           z.object({ items: z.array(waitingSchema) }),
         )
       ).items,

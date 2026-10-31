@@ -184,6 +184,27 @@ describe.skipIf(!dockerUp())("Yard's store", () => {
       ])
     })
 
+    test("rows in one millisecond on either side of a full list's limit all wait, the next read going on from the last id", async () => {
+      const channel = await store.createChannel(db, web("ada", true), { name: "tie" })
+      await store.joinChannel(db, web("ed"), channel.id)
+      const ids: string[] = []
+      for (const text of ["@ed a", "@ed b", "@ed c"])
+        ids.push((await send(web("ada", true), channel.id, { kind: "text", text })).id)
+      // an hour ahead, so no other test's row falls between since and the three
+      const tied = new Date(Date.now() + 3_600_000)
+      await sql`update yard_message set at = ${tied} where id in ${sql(ids)}`
+      const since = new Date(tied.getTime() - 1).toISOString()
+      const here = (items: { message: { id: string } }[]) => items.map((i) => i.message.id)
+      const first = await store.waiting(db, web("ed"), { limit: 2, since })
+      const last = first.at(-1)!
+      const next = await store.waiting(db, web("ed"), {
+        after: last.message.id,
+        limit: 2,
+        since: last.shownAt,
+      })
+      expect([...here(first), ...here(next)].sort()).toEqual([...ids].sort())
+    })
+
     test("a name already taken is a conflict", async () => {
       await store.createChannel(db, web("bo"), { name: "taken" })
       await expect(store.createChannel(db, web("di"), { name: "taken" })).rejects.toMatchObject({

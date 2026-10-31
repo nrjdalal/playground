@@ -82,9 +82,11 @@ export const postCard = async (db: Database, card: Card): Promise<void> => {
 // The newest time this Playground has carded, in the data folder, so a restart never cards a message twice.
 const marksFile = () => join(dataDir(), "yard", "mentions.json")
 
-const saveMark = async (file: string, since: string) => {
+type Mark = { after?: string; since: string }
+
+const saveMark = async (file: string, mark: Mark) => {
   mkdirSync(dirname(file), { recursive: true })
-  await Bun.write(file, `${JSON.stringify({ since })}\n`)
+  await Bun.write(file, `${JSON.stringify(mark)}\n`)
 }
 
 // Cards what waits on the owner since the last mark, oldest first by when it showed: each mention, a thread's reply or an approved held post included, and each post of theirs Yard holds. It saves the mark after each card, so a failed post retries from the first one not carded. The first run only sets the mark.
@@ -96,14 +98,14 @@ export async function pollWaiting(
   now = new Date(),
 ): Promise<number> {
   const stored = Bun.file(file)
-  const mark = (await stored.exists())
-    ? ((await stored.json().catch(() => ({}))) as { since?: unknown }).since
-    : undefined
-  if (typeof mark !== "string") {
-    await saveMark(file, now.toISOString())
+  const { after, since } = (await stored.exists())
+    ? ((await stored.json().catch(() => ({}))) as { after?: unknown; since?: unknown })
+    : {}
+  if (typeof since !== "string") {
+    await saveMark(file, { since: now.toISOString() })
     return 0
   }
-  const due = await client.waiting(mark)
+  const due = await client.waiting(typeof after === "string" ? { after, since } : { since })
   if (!due.length) return 0
   const { login } = await client.me()
   const channels = new Map((await client.channels()).map((channel) => [channel.id, channel]))
@@ -116,7 +118,7 @@ export async function pollWaiting(
       await post(card)
       carded++
     }
-    await saveMark(file, shownAt)
+    await saveMark(file, { after: message.id, since: shownAt })
   }
   return carded
 }

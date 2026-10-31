@@ -107,7 +107,7 @@ export const yardRouter = new Hono<{ Variables: YardVariables }>()
   .get(
     "/waiting",
     doc(
-      "What waits on you since a time, oldest first by when it showed: every sent message that names you in the channels and DMs you are in, a thread's replies included, and your own posts held for your approval; take the last item's shownAt as the next since",
+      "What waits on you past a mark, oldest first by when it showed, then by id: every sent message that names you in the channels and DMs you are in, a thread's replies included, and your own posts held for your approval; take the last item's shownAt as the next since and its message's id as the next after",
       z.object({
         items: z.array(
           z.object({ held: z.boolean(), message: messageSchema, shownAt: z.iso.datetime() }),
@@ -116,7 +116,7 @@ export const yardRouter = new Hono<{ Variables: YardVariables }>()
       [validationErrorResponses],
     ),
     member,
-    valid("query", z.object({ since: z.iso.datetime() })),
+    valid("query", z.object({ after: z.string().min(1).optional(), since: z.iso.datetime() })),
     async (c) =>
       c.json({
         data: { items: await store.waiting(db, c.get("caller"), c.req.valid("query")) },
