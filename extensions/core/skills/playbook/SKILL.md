@@ -60,7 +60,7 @@ Cite a rule by its name, in bold; read it whole with `playground rules <name>` w
 - [LIFECYCLE.md](LIFECYCLE.md): when each kind of session starts and ends, the ops jobs, and how Claude Code updates.
   Read it before you start, close or respawn a session, remove a worktree, or update Claude Code.
 - [DISPATCH.md](DISPATCH.md): how the dispatcher, the Planner and the leads route a new ask, bundle work and fill the slots.
-  Read it when you are one of them and an ask arrives.
+  Read it when you are one of them and an ask arrives, or when Slack mode is on and the owner's DM speaks to you.
 - [SWEEP.md](SWEEP.md): the leads' sweep, step by step.
   Read it at each sweep.
 - [SESSIONS.md](SESSIONS.md): the commands to spawn, brief, rename, check and end a session, and the headless run that writes Notion for a session with no Notion tools.
