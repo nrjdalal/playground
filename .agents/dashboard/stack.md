@@ -71,7 +71,7 @@
   `/`, which redirects to `/dashboard` locally, is the hosted build's way in, the navbar's Sign in with GitHub, and sends a signed-in visit on to `/yard`.
   Yard's own pages, `/yard/**` (a channel at `/yard/c/<id>`, Account and tokens, the approve page and the invite page), are the mirror: their layout answers a local stack with the app's 404 (`hostedPagesOnly`), and on the hosted build they gate on the session, a signed-out visit going home and a `user` below the `member` rung to `/yard/invite` (`yardGate` in `web/next/src/lib/yard.ts`).
   The hosted web draws no Inbox aside, so no Preview row, since the pane reads machine stacks whose routes the hosted API never mounts; `tests/web/next/src/lib/local-pages.test.ts` holds `/yard`'s import graph clear of the aside.
-  `tests/api/hono/src/hosted.test.ts` holds the mounted routes to the allowlist and the hosted import graph to no local-only package, machine-reading folder or node server.
+  `tests/api/hono/src/hosted.test.ts` holds the mounted routes to the allowlist and the hosted import graph to no local-only package or machine-reading folder.
 - ALWAYS: Stop `bun run dev` before running `bun run build`, `bun run check-types` or `bun run test`, or committing, in the same worktree.
   They rebuild `packages/*` (a commit through its pre-commit build), and a rebuild deletes the `dist` the running servers import; pre-commit's `dev-stack` step (`api/hono/src/bin/dev-running.ts`) refuses a commit while the launcher's record names a stack still running there.
 - ALWAYS: Keep the dashboard on the owner rung: every route and the WebSocket pass `requireConsoleRole("owner")`, but first run's setup routes, which serve before any user exists (the setup rule above).

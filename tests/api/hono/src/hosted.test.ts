@@ -127,7 +127,16 @@ const resolveFile = (base: string): string | null =>
     (file) => existsSync(file) && statSync(file).isFile(),
   ) ?? null
 
-// Every API file the entry reaches through runtime imports, static or dynamic (type-only imports are erased), and every package it names.
+// The src folder a file's @/ alias points into: the API's, or the workspace package's it sits in.
+const srcOf = (file: string) => file.match(/^(.*\/packages\/[^/]+\/src)\//)?.[1] ?? SRC
+
+// A workspace package's import, @packages/<name>[/<sub>], as the source file its export builds from.
+const packageFile = (path: string) => {
+  const [, name, sub] = path.match(/^@packages\/([^/]+)(?:\/(.+))?$/) ?? []
+  return name ? resolveFile(join(ROOT, "packages", name, "src", sub ?? "index")) : null
+}
+
+// Every file the entry reaches through runtime imports, static or dynamic (type-only imports are erased), into the workspace packages too, with every package it names; an API file is named from api/hono/src, a package's from the repo root.
 const importGraph = (entry: string) => {
   const files = new Set<string>()
   const packages = new Set<string>()
@@ -138,23 +147,25 @@ const importGraph = (entry: string) => {
     files.add(file)
     for (const { path } of transpiler.scanImports(readFileSync(file, "utf8"))) {
       if (path.startsWith("node:") || path === "bun") continue
+      const parts = path.split("/")
+      if (!path.startsWith("@/") && !path.startsWith(".")) {
+        packages.add(path.startsWith("@") ? parts.slice(0, 2).join("/") : parts[0]!)
+        if (!path.startsWith("@packages/")) continue
+      }
       const local = path.startsWith("@/")
-        ? join(SRC, path.slice(2))
+        ? join(srcOf(file), path.slice(2))
         : path.startsWith(".")
           ? resolve(dirname(file), path)
           : null
-      if (!local) {
-        const parts = path.split("/")
-        packages.add(path.startsWith("@") ? parts.slice(0, 2).join("/") : parts[0]!)
-        continue
-      }
-      const found = resolveFile(local)
+      const found = local ? resolveFile(local) : packageFile(path)
       if (!found)
-        throw new Error(`${relative(SRC, file)} imports ${path}, which resolves to no file`)
-      if (found.startsWith(SRC) && /\.tsx?$/.test(found)) queue.push(found)
+        throw new Error(`${relative(ROOT, file)} imports ${path}, which resolves to no file`)
+      if (/\.tsx?$/.test(found)) queue.push(found)
     }
   }
-  return { files: [...files].map((file) => relative(SRC, file)), packages: [...packages] }
+  const named = (file: string) =>
+    file.startsWith(`${SRC}/`) ? relative(SRC, file) : relative(ROOT, file)
+  return { files: [...files].map(named), packages: [...packages] }
 }
 
 describe("the hosted entry's import graph", () => {
@@ -179,5 +190,10 @@ describe("the hosted entry's import graph", () => {
     const whole = importGraph(join(SRC, "local.ts"))
     expect(whole.packages).toContain("@anthropic-ai/claude-agent-sdk")
     expect(whole.files.some((file) => file.startsWith("lib/dashboard/"))).toBe(true)
+  })
+
+  test("walks into the workspace packages, so a local-only import behind one turns it red", () => {
+    expect(graph.files).toContain("packages/auth/src/index.ts")
+    expect(graph.files).toContain("packages/db/src/index.ts")
   })
 })
