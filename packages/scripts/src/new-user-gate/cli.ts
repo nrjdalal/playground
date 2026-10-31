@@ -361,23 +361,32 @@ const main = async (args: string[]) => {
       "Alpha routes one small task: a manager starts and a worker opens a PR",
       async () => {
         browser.cmd("find", "text", "Alpha", "click")
-        // Alpha's chat opens once it runs; until then its pane names the step it waits on, the first numbered one
+        // Alpha's chat opens once it runs; until then its pane names the step it waits on, the first numbered one, or offers Start Alpha once every step is done
         const waitsOn = () => {
           const text = browser.text()
           const at = text.indexOf("Alpha is not running")
-          return at < 0
-            ? null
-            : (/\n\s*\d+\s*\n\s*([^\n]+)/.exec(text.slice(at))?.[1]?.trim() ?? "")
+          if (at < 0) return null
+          // the pane alone, which ends on its System line, since the panes beside it hold counts too
+          const pane = text.slice(at).split("Every agent's state")[0]!
+          const step = /\n\s*\d+\s*\n\s*([^\n]+)/.exec(pane)?.[1]?.trim()
+          return step ?? (pane.includes("Start Alpha") ? "Start Alpha" : "")
         }
         if (waitsOn() === "Claude account") {
           const added = addAccount(browser, box, home)
           if (added) return { detail: added, ok: false, shot: browser.shot("4-route") }
+          await waitFor(() => waitsOn() !== "Claude account", 30_000)
+        }
+        if (waitsOn() === "Start Alpha") {
+          browser.clickEnabled("Start Alpha")
           await waitFor(() => waitsOn() === null, 60_000)
         }
         const waiting = waitsOn()
         if (waiting !== null)
           return {
-            detail: `Alpha is not running${waiting ? `; it waits on ${waiting}` : ""}`,
+            detail:
+              waiting === "Start Alpha"
+                ? "Alpha is not running 60s after Start Alpha: the stand-in claude exits at once, so a live Alpha needs a scripted session"
+                : `Alpha is not running${waiting ? `; it waits on ${waiting}` : ""}`,
             ok: false,
             shot: browser.shot("4-route"),
           }
