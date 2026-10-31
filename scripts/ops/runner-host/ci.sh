@@ -153,7 +153,7 @@ if [ "${1:-}" = exec ]; then
   output "$res"
 fi
 
-[ $# -eq 1 ] || { sed -n '2,9p' "$0" >&2; exit 2; }
+[ $# -eq 1 ] || { sed -n '2,/^[^#]/{/^#/p;}' "$0" >&2; exit 2; }
 TREE=$(git rev-parse --verify --quiet "$1^{tree}") || { echo "ci.sh: $1 is not a commit or tree here" >&2; exit 2; }
 new_run "$TREE"
 upload . "$TREE"

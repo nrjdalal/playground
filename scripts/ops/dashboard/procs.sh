@@ -84,5 +84,5 @@ case "${1:-}" in
   record) record ;;
   stop) stop ;;
   left) alive ;;
-  *) sed -n 2,9p "$0"; exit 2 ;;
+  *) sed -n '2,/^[^#]/{/^#/p;}' "$0"; exit 2 ;;
 esac
