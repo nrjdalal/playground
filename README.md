@@ -88,4 +88,6 @@ Playground registers no self-hosted runner, since a fork's pull request could th
 
 ## Maintaining
 
-The rules are in [AGENTS.md](./AGENTS.md), which CLAUDE.md links to. [`lat.md/`](./lat.md/where-to-edit.md) maps each kind of change to the file or symbol to edit, and `bun run test:skills` fails when one of its links no longer resolves.
+The rules are in [AGENTS.md](./AGENTS.md), which CLAUDE.md links to.
+
+Not for public use. All rights reserved. Use at your own risk.

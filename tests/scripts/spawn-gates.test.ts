@@ -1438,7 +1438,7 @@ describe("it fails closed when it cannot read the machine", () => {
 describe("it refuses what it cannot spawn safely", () => {
   test.each([
     ["no mode", []],
-    ["an unknown mode", ["manager", OLD.builder, "b.md"]],
+    ["an unknown mode", ["launch", "worker-a", "b.md"]],
     ["a worker whose name reads as another kind", ["worker", "k3m9px-reviewer", "b.md"]],
     ["a worker under a manager's name", ["worker", OLD.builder, "b.md"]],
     [

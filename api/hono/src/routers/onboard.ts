@@ -99,6 +99,18 @@ const fixAnswer = (status: 200 | 202) => ({
   },
 })
 
+// The one owner a browser is signed in as, or the refusal in plain words: none yet, or more than one, which no request can tell apart.
+const theOwner = (found: string[]): string => {
+  if (found.length === 1) return found[0]!
+  throw new ApiError(
+    409,
+    "CONFLICT",
+    found.length === 0
+      ? "No owner yet; finish onboarding first"
+      : `This Mac has more than one owner, so ${site.name} cannot tell which one to sign in: from a browser still signed in as one, open the Console's Users page and make the other an admin`,
+  )
+}
+
 export const onboardRoutes = (deps: OnboardDeps) => {
   const runner = deps.fixes ?? shared
   const ownerOnceMade = createMiddleware(async (c, next) =>
@@ -142,15 +154,14 @@ export const onboardRoutes = (deps: OnboardDeps) => {
       "/finish",
       describeRoute({
         tags: ["Onboarding"],
-        description: "Makes the owner and signs this browser in, only while no owner exists.",
+        description:
+          "Makes the owner and signs this browser in; once the owner is made, signs this browser in as it, so Continue goes on to the board; refused with two owners.",
         responses: { ...ok, ...forbiddenErrorResponses, ...conflictErrorResponses },
       }),
       requireThisMachine,
       async (c) => {
-        if ((await deps.owners()).length > 0) {
-          throw new ApiError(409, "CONFLICT", "An owner already exists; sign in instead")
-        }
-        await deps.signIn(c, await deps.createOwner())
+        const found = await deps.owners()
+        await deps.signIn(c, found.length === 0 ? await deps.createOwner() : theOwner(found))
         return c.json({ data: { signedIn: true as const } })
       },
     )
@@ -163,17 +174,7 @@ export const onboardRoutes = (deps: OnboardDeps) => {
       }),
       requireThisMachine,
       async (c) => {
-        const found = await deps.owners()
-        if (found.length !== 1) {
-          throw new ApiError(
-            409,
-            "CONFLICT",
-            found.length === 0
-              ? "No owner yet; finish onboarding first"
-              : `This Mac has more than one owner, so ${site.name} cannot tell which one to sign in: from a browser still signed in as one, open the Console's Users page and make the other an admin`,
-          )
-        }
-        await deps.signIn(c, found[0]!)
+        await deps.signIn(c, theOwner(await deps.owners()))
         return c.json({ data: { signedIn: true as const } })
       },
     )

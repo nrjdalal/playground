@@ -1,4 +1,5 @@
 import "@packages/env/aliases"
+import { readdirSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
 
@@ -22,7 +23,7 @@ import { claudeDir, dataDir, transcriptPath } from "@/lib/sessions/paths"
 
 type Json = Record<string, unknown>
 
-// The servers Playground runs: PLAYGROUND_HERDR_SESSIONS names them (playground and playground-probes), each serving its socket at <PLAYGROUND_HERDR_DIR>/<name>.sock, the dir herdr in the data folder, ~/.playground, unless set, following HOME and never CLAUDE_CONFIG_DIR or PLAYGROUND_DATA_DIR as ops-herdr serves them, so a session on another login reads the same servers. A stack that does not read this machine reads no herdr server.
+// The servers Playground runs: PLAYGROUND_HERDR_SESSIONS names them (playground and playground-probes, plus the folder's other server sockets while it is blank), each serving its socket at <PLAYGROUND_HERDR_DIR>/<name>.sock, the dir herdr in the data folder, ~/.playground, unless set, following HOME and never CLAUDE_CONFIG_DIR or PLAYGROUND_DATA_DIR as ops-herdr serves them, so a session on another login reads the same servers. A stack that does not read this machine reads no herdr server.
 export type HerdrServer = { name: string; socket: string }
 
 const SERVER_NAME = /^[a-z0-9][a-z0-9_-]*$/
@@ -33,11 +34,25 @@ export const herdrServers = (
   if (!readsLive()) return []
   const dir =
     envValue(env, "PLAYGROUND_HERDR_DIR") || join(dataDirOf({}, env.HOME || homedir()), "herdr")
-  return (envValue(env, "PLAYGROUND_HERDR_SESSIONS") || "playground,playground-probes")
-    .split(",")
-    .map((name) => name.trim())
+  const named = envValue(env, "PLAYGROUND_HERDR_SESSIONS")
+  const names = (named || "playground,playground-probes").split(",").map((name) => name.trim())
+  if (!named) names.push(...leftOver(dir).filter((name) => !names.includes(name)))
+  return names
     .filter((name) => SERVER_NAME.test(name))
     .map((name) => ({ name, socket: join(dir, `${name}.sock`) }))
+}
+
+// Every other server socket in the folder, by ops-herdr's socketServers rule (a <name>.sock, never a client's <name>-client.sock nor herdr's default), so a session on a server an older Playground started under another name, factory or probes before the rename, still shows while that server runs, as the CLI's Start already counts it.
+const leftOver = (dir: string): string[] => {
+  try {
+    return readdirSync(dir)
+      .filter((file) => file.endsWith(".sock") && !file.endsWith("-client.sock"))
+      .map((file) => file.slice(0, -".sock".length))
+      .filter((name) => name !== "default")
+      .toSorted()
+  } catch {
+    return []
+  }
 }
 
 // A herdr session's surface on the board, `herdr:<server>:<pane id>` (herdr:playground:w2:p1; herdr numbers past 9 in letters, wA:p1), since pane ids repeat across servers. A pane's id changes when it moves, and every board reads it afresh, so the surface always names where the session is now.

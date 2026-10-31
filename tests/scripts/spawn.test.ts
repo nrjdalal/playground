@@ -915,42 +915,44 @@ describe("a manager starts in a workspace of its own, in the leads worktree", ()
     expect(r.exitCode).toBe(0)
     return r.stdout.toString().trim()
   }
-  // The factory's checkout as a fresh install leaves it: a clone on main of an origin that also has canary, with no local canary and no leads worktree yet; seed is where a later push to origin's canary is made.
-  const checkout = (home: string) => {
-    const seed = join(home, "seed")
-    mkdirSync(seed, { recursive: true })
-    git(seed, "init", "-q", "-b", "main")
-    git(seed, "commit", "-q", "--allow-empty", "-m", "seed")
-    git(seed, "branch", "canary")
-    git(home, "init", "-q", "--bare", join(home, "origin.git"))
-    git(seed, "push", "-q", join(home, "origin.git"), "main", "canary")
-    git(home, "clone", "-q", join(home, "origin.git"), join(home, "code", "factory"))
-  }
+  // The factory's checkout as a fresh install leaves it: a clone on main of an origin that also has canary (none with canary: false), with no local canary and no leads worktree yet, or a clone on canary; seed is where a later push to origin is made.
+  const checkoutOf =
+    ({ canary = true, on = "main" }: { canary?: boolean; on?: string } = {}) =>
+    (home: string) => {
+      const seed = join(home, "seed")
+      mkdirSync(seed, { recursive: true })
+      git(seed, "init", "-q", "-b", "main")
+      git(seed, "commit", "-q", "--allow-empty", "-m", "seed")
+      if (canary) git(seed, "branch", "canary")
+      git(home, "init", "-q", "--bare", join(home, "origin.git"))
+      git(seed, "push", "-q", join(home, "origin.git"), "main", ...(canary ? ["canary"] : []))
+      git(home, "clone", "-q", "-b", on, join(home, "origin.git"), join(home, "code", "factory"))
+    }
+  const checkout = checkoutOf()
   // The installs the fake bun was handed, through the repo's own run-slot.
   const installs = (home: string) =>
     existsSync(join(home, "bun-install.log"))
       ? readFileSync(join(home, "bun-install.log"), "utf8").trim().split("\n")
       : []
 
-  // A fresh checkout's first dispatcher start was refused, since nothing had made the leads worktree yet; it is cut on canary, the branch ops-tick's canary-pull keeps current, as the factory's own leads is.
+  // A fresh checkout's first manager start cuts the leads worktree from the branch the checkout was cloned on, main for a public install, so its managers run what it shipped rather than canary.
   test.each(managers)(
-    "$label with no leads worktree cuts one on canary, tracking origin's, and starts in it",
+    "$label with no leads worktree cuts one from main, tracking origin's, and starts in it",
     async ({ args }) => {
       const r = await spawn(args, [], { NO_LEADS: "1" }, undefined, undefined, checkout)
       expect(r.err).not.toContain("is not a folder")
       expect(r.code).toBe(0)
       expect(opened(r)).toContain(leads(r.home))
       expect(readFileSync(join(leads(r.home), ".git"), "utf8")).toStartWith("gitdir: ")
-      expect(git(leads(r.home), "symbolic-ref", "HEAD")).toBe("refs/heads/canary")
-      expect(git(leads(r.home), "rev-parse", "--abbrev-ref", "@{upstream}")).toBe("origin/canary")
+      expect(git(leads(r.home), "symbolic-ref", "HEAD")).toBe("refs/heads/leads")
+      expect(git(leads(r.home), "rev-parse", "--abbrev-ref", "@{upstream}")).toBe("origin/main")
       expect(installs(r.home)).toEqual([
         `install --frozen-lockfile --ignore-scripts --cwd ${leads(r.home)}`,
       ])
-      // canary-pull's own fast-forward then moves it to origin's newer canary.
+      // a fast-forward pull then moves it to origin's newer main.
       const seed = join(r.home, "seed")
-      git(seed, "checkout", "-q", "canary")
       git(seed, "commit", "-q", "--allow-empty", "-m", "newer")
-      git(seed, "push", "-q", join(r.home, "origin.git"), "canary")
+      git(seed, "push", "-q", join(r.home, "origin.git"), "main")
       git(leads(r.home), "pull", "--ff-only", "-q")
       expect(git(leads(r.home), "rev-parse", "HEAD")).toBe(git(seed, "rev-parse", "HEAD"))
     },
@@ -988,8 +990,40 @@ describe("a manager starts in a workspace of its own, in the leads worktree", ()
     ])
   })
 
-  // A local canary made by hand tracks nothing, so canary-pull's fast-forward would fail on it.
-  test("a local canary with no upstream is cut and set to track origin's", async () => {
+  // A public install clones main alone, so a cut from canary had no branch to take.
+  test.each(["optimizer", "builder"])(
+    "a clone of an origin with main alone cuts the leads worktree from main: %s",
+    async (name) => {
+      const r = await spawn(
+        ["manager", name, "b.md"],
+        [],
+        { NO_LEADS: "1" },
+        undefined,
+        undefined,
+        checkoutOf({ canary: false }),
+      )
+      expect(r.err).not.toContain("invalid reference")
+      expect(r.code).toBe(0)
+      expect(git(leads(r.home), "rev-parse", "--abbrev-ref", "@{upstream}")).toBe("origin/main")
+    },
+  )
+
+  test("a checkout cloned on canary on purpose cuts the leads worktree from canary", async () => {
+    const r = await spawn(
+      ["manager", "optimizer", "b.md"],
+      [],
+      { NO_LEADS: "1" },
+      undefined,
+      undefined,
+      checkoutOf({ on: "canary" }),
+    )
+    expect(r.code).toBe(0)
+    expect(git(leads(r.home), "symbolic-ref", "HEAD")).toBe("refs/heads/leads")
+    expect(git(leads(r.home), "rev-parse", "--abbrev-ref", "@{upstream}")).toBe("origin/canary")
+  })
+
+  // A cut whose install failed removes the worktree and leaves its branch, which the next cut takes again from origin's.
+  test("a leads branch an earlier cut left is reset to origin's main and tracks it", async () => {
     const r = await spawn(
       ["manager", "optimizer", "b.md"],
       [],
@@ -998,11 +1032,11 @@ describe("a manager starts in a workspace of its own, in the leads worktree", ()
       undefined,
       (home) => {
         checkout(home)
-        git(join(home, "code", "factory"), "branch", "--no-track", "canary", "origin/canary")
+        git(join(home, "code", "factory"), "branch", "--no-track", "leads", "origin/main")
       },
     )
     expect(r.code).toBe(0)
-    expect(git(leads(r.home), "rev-parse", "--abbrev-ref", "@{upstream}")).toBe("origin/canary")
+    expect(git(leads(r.home), "rev-parse", "--abbrev-ref", "@{upstream}")).toBe("origin/main")
   })
 
   test.each(managers)(
@@ -1061,17 +1095,14 @@ describe("a manager starts in a workspace of its own, in the leads worktree", ()
     expect(r.err).toContain(`a live session already holds the name ${OLD.dispatcher}-2 (pid 4100)`)
   })
 
-  test.each([
-    { label: "a lead", name: OLD.builder },
-    { label: "a worker", name: "worker-brave-otter" },
-  ])("a manager of another name is refused: $label", async ({ name }) => {
-    const r = await spawn(["manager", name, "b.md", "--backend", "glm"], [])
+  test("a manager of another name is refused: a worker", async () => {
+    const r = await spawn(["manager", "worker-brave-otter", "b.md", "--backend", "glm"], [])
     expect(r.code).toBe(1)
     expect(placing(r)).toEqual([])
     expect(r.err).toContain(
-      "a manager in a workspace of its own is the first dispatcher (sessions.names' dispatcher), the second (an <id>-dispatcher, or sessions.names' dispatcher with -2) or the optimizer",
+      "a manager in a workspace of its own is the first dispatcher (sessions.names' dispatcher), the second (an <id>-dispatcher, or sessions.names' dispatcher with -2), the optimizer, the builder, ops or the planner",
     )
-    expect(r.err).toContain("roster.ts set <name> kind=optimizer")
+    expect(r.err).toContain("roster.ts set <name> kind=<kind>")
   })
 
   test.each([
