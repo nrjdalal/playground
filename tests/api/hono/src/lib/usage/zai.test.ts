@@ -1,7 +1,12 @@
 import { describe, expect, test } from "bun:test"
 import { join } from "node:path"
 
-import { ZAI_STALE_MS, zaiProblem, zaiUsageOf } from "../../../../../../api/hono/src/lib/usage/zai"
+import {
+  ZAI_STALE_MS,
+  zaiFailureOf,
+  zaiProblem,
+  zaiUsageOf,
+} from "../../../../../../api/hono/src/lib/usage/zai"
 
 const SAMPLE = JSON.stringify({
   windows: {
@@ -21,6 +26,31 @@ describe("zaiUsageOf", () => {
       week: { cap: 140000, resetsAt: "2026-10-19T00:00:00.000Z", used: 39900 },
       writtenAt: "2026-10-16T15:00:00.000Z",
     })
+  })
+
+  test("reads an empty balance as both windows spent, whatever the quota endpoint said", () => {
+    const empty = JSON.parse(SAMPLE) as Record<string, unknown>
+    empty.balance = { empty: true, seenAt: "2026-10-16T14:40:00.000Z" }
+    expect(zaiUsageOf(JSON.stringify(empty), now)).toMatchObject({
+      fiveHour: { cap: 28000, used: 28000 },
+      week: { cap: 140000, used: 140000 },
+    })
+  })
+
+  test("reads no usage while the job reports a failed read, so the sidebar draws no GLM readings", () => {
+    const failed = JSON.parse(SAMPLE) as Record<string, unknown>
+    failed.error = "Z.ai 401: code 1001"
+    failed.errorAt = "2026-10-16T15:04:00.000Z"
+    expect(zaiUsageOf(JSON.stringify(failed), now)).toBeNull()
+    expect(
+      zaiUsageOf(
+        JSON.stringify({
+          error: "no credit window in the answer",
+          errorAt: "2026-10-16T15:04:00.000Z",
+        }),
+        now,
+      ),
+    ).toBeNull()
   })
 
   test("marks the file stale past ten minutes", () => {
@@ -87,5 +117,21 @@ describe("zaiProblem", () => {
     )
     expect(zaiProblem(zaiUsageOf(SAMPLE, new Date("2026-10-16T15:05:00.000Z")))).toBeNull()
     expect(zaiProblem(null)).toBeNull()
+  })
+})
+
+describe("zaiFailureOf", () => {
+  test("names a read the job wrote as failed, which zaiUsageOf reads as no usage", () => {
+    const failed = JSON.stringify({
+      ...JSON.parse(SAMPLE),
+      error: "Z.ai 500: code ?",
+      errorAt: "2026-10-16T15:05:00.000Z",
+    })
+    expect(zaiUsageOf(failed, new Date("2026-10-16T15:06:00.000Z"))).toBeNull()
+    expect(zaiFailureOf(failed)).toBe(
+      "The GLM usage read failed at 2026-10-16T15:05:00.000Z: Z.ai 500: code ?",
+    )
+    expect(zaiFailureOf(SAMPLE)).toBeNull()
+    expect(zaiFailureOf("not json")).toBeNull()
   })
 })
