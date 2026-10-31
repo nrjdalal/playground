@@ -17,7 +17,7 @@ permissions:
 
 jobs:
   auto-check-build:
-    name: Audit, Lint, and Build
+    name: Lint and Build
     timeout-minutes: 20
     runs-on: ubuntu-latest
     steps:
@@ -50,7 +50,7 @@ jobs:
         # GHSA-vfj7-8cjw-p6xm: braces has no patched release, and only dev tooling (shadcn, globby) reaches it
         run: bun packages/scripts/src/audit.ts --audit-level high --ignore GHSA-vfj7-8cjw-p6xm --new-over origin/${{ github.base_ref }}
 
-      - name: Format, Lint, Check-types, Test, and Build
+      - name: Format, Lint, Check-types, and Build
         run: |
           bun run format:check
           bun run lint
@@ -61,9 +61,83 @@ jobs:
           bun packages/scripts/src/data-table-metrics.ts
           bun run check-types:scripts
           bun run check-types:tests
-          bun run test
+          bun packages/scripts/src/env-keys.ts
+        env:
+          NODE_ENV: production
+          SKIP_ENV_VALIDATION: true
+
+  # the suite's shards, by tests/timings.json: test-shards.ts gives as many as its budget needs
+  shards:
+    name: Shards
+    timeout-minutes: 20
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+
+      - id: plan
+        run: echo "matrix=$(bun packages/scripts/src/test-shards.ts matrix)" >> "$GITHUB_OUTPUT"
+
+  suite:
+    name: Suite (${{ matrix.shard }})
+    needs: shards
+    timeout-minutes: 20
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ${{ fromJSON(needs.shards.outputs.matrix) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+
+      # the spawn gates' fake pane types its command into zsh, which ubuntu-latest lacks
+      - name: Install zsh
+        run: sudo apt-get update -q && sudo apt-get install -y -q zsh
+
+      - name: Cache turbo
+        uses: actions/cache@v4
+        with:
+          path: .turbo/cache
+          key: turbo-${{ runner.os }}-${{ github.sha }}
+          restore-keys: turbo-${{ runner.os }}-
+
+      - name: Install dependencies
+        run: bun install --ignore-scripts
+
+      # what `bun run test` builds first, then this shard's files alone through the same sandbox, so its hang deadline holds in each shard
+      - name: Test this shard
+        run: |
+          bunx turbo run build --filter='./packages/*' --filter=@api/hono
+          bun packages/scripts/src/data-table-metrics.ts
+          bun packages/scripts/src/test-shards.ts files ${{ matrix.shard }} > "$RUNNER_TEMP/shard-files"
+          NODE_ENV=test xargs bun packages/scripts/src/test-sandbox.ts < "$RUNNER_TEMP/shard-files"
         env:
           NODE_ENV: production
           SKIP_ENV_VALIDATION: true
           # the suite's parallel pass names the file it hangs in at its deadline, which lands well inside the job's 20 minutes
           TEST_PARALLEL_DEADLINE_MS: 600000
+
+  # the gate's check name (REQUIRED_CHECKS in pr-merge/gates.ts): one result, green only when the lint and build job and every shard passed
+  audit-lint-build:
+    name: Audit, Lint, and Build
+    needs: [auto-check-build, suite]
+    if: always()
+    timeout-minutes: 20
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo "lint and build: ${{ needs.auto-check-build.result }}, suite: ${{ needs.suite.result }}"
+          [ "${{ needs.auto-check-build.result }}" = success ] && [ "${{ needs.suite.result }}" = success ]
