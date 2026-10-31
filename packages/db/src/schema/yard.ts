@@ -1,4 +1,4 @@
-import { MAX_TEXT, MESSAGE_KINDS } from "@packages/message"
+import { MAX_TEXT, MESSAGE_KINDS, MESSAGE_STATUSES } from "@packages/message"
 import { sql } from "drizzle-orm"
 import {
   type AnyPgColumn,
@@ -21,7 +21,6 @@ const oneOf = (name: string, column: string, values: readonly string[]) =>
 
 export const CHANNEL_KINDS = ["channel", "dm"] as const
 export const INVITE_STATUSES = ["open", "redeemed", "requested", "revoked"] as const
-export const MESSAGE_STATUSES = ["denied", "pending", "sent"] as const
 export const POST_RULES = ["members", "owner"] as const
 
 const id = () =>
@@ -59,7 +58,8 @@ export const yardChannel = pgTable(
     postRule: text("post_rule", { enum: POST_RULES }).default("members").notNull(),
     topic: text("topic"),
   },
-  () => [
+  (table) => [
+    check("yard_channel_dm_name_check", sql`(${table.kind} = 'dm') = (${table.name} like 'dm:%')`),
     oneOf("yard_channel_kind_check", "kind", CHANNEL_KINDS),
     oneOf("yard_channel_post_rule_check", "post_rule", POST_RULES),
   ],
@@ -83,7 +83,7 @@ export const yardMember = pgTable(
   ],
 )
 
-// One message as @packages/message shapes it: device is the token's name, or web for a post from the browser; parent makes it a reply in a thread; a tier-two post waits as pending, seen by its sender alone, until the owner's web session sends or denies it at decided_at.
+// One message as @packages/message shapes it: login and device are its from, kept as text so a removed member's messages stay attributed once user_id goes null; device is the token's name, or web for a post from the browser; parent makes it a reply in a thread; a tier-two post waits as pending, seen by its sender alone, until the sender's web session sends or denies it at decided_at.
 export const yardMessage = pgTable(
   "yard_message",
   {
@@ -96,14 +96,13 @@ export const yardMessage = pgTable(
     device: text("device").notNull(),
     kind: text("kind", { enum: MESSAGE_KINDS }).notNull(),
     links: jsonValue("links").$type<string[]>(),
+    login: text("login").notNull(),
     parentId: text("parent_id").references((): AnyPgColumn => yardMessage.id, {
       onDelete: "cascade",
     }),
     status: text("status", { enum: MESSAGE_STATUSES }).default("sent").notNull(),
     text: text("text").notNull(),
-    userId: text("user_id")
-      .notNull()
-      .references(() => user.id, { onDelete: "cascade" }),
+    userId: text("user_id").references(() => user.id, { onDelete: "set null" }),
   },
   (table) => [
     oneOf("yard_message_kind_check", "kind", MESSAGE_KINDS),
@@ -118,7 +117,7 @@ export const yardMessage = pgTable(
   ],
 )
 
-// An API token, stored only as its hash and shown once; revoking sets revoked_at, so a revoked token's next call reads 401.
+// An API token, stored only as its hash and shown once; revoking sets revoked_at, so a revoked token's next call reads 401; a name is unique per user, so a post's device names one of its sender's tokens.
 export const yardToken = pgTable(
   "yard_token",
   {

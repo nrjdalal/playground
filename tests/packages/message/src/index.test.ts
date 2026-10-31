@@ -27,6 +27,22 @@ describe("messageSchema", () => {
     expect(messageSchema.safeParse({ ...bare, kind: "text" }).success).toBe(true)
   })
 
+  test.each(["javascript:alert(1)", "data:text/html,hi", "file:///etc/passwd"])(
+    "refuses the link %s",
+    (link) => {
+      expect(messageSchema.safeParse({ ...message, kind: "text", links: [link] }).success).toBe(
+        false,
+      )
+    },
+  )
+
+  test("refuses more than 10 links, and a device name past 64 characters", () => {
+    const links = Array.from({ length: 11 }, (_, i) => `https://example.com/${i}`)
+    expect(messageSchema.safeParse({ ...message, kind: "text", links }).success).toBe(false)
+    const from = { device: "d".repeat(65), login: "octocat" }
+    expect(messageSchema.safeParse({ ...message, from, kind: "text" }).success).toBe(false)
+  })
+
   test(`takes text of ${MAX_TEXT} characters and refuses one past it`, () => {
     expect(
       messageSchema.safeParse({ ...message, kind: "text", text: "a".repeat(MAX_TEXT) }).success,

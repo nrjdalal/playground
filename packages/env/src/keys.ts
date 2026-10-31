@@ -21,6 +21,8 @@ export const apiHono = {
     HONO_RATE_LIMIT: process.env.HONO_RATE_LIMIT,
     HONO_RATE_LIMIT_WINDOW_MS: process.env.HONO_RATE_LIMIT_WINDOW_MS,
     HONO_TRUSTED_ORIGINS: polyfillServer(process.env.HONO_TRUSTED_ORIGINS, "https://polyfill.url"),
+    HONO_WEB_URL: process.env.HONO_WEB_URL,
+    KV_URL: process.env.KV_URL,
     PLAYGROUND_APPROVALS_ENABLED: process.env.PLAYGROUND_APPROVALS_ENABLED,
     PLAYGROUND_CMUX_SESSIONS: process.env.PLAYGROUND_CMUX_SESSIONS,
     PLAYGROUND_DISPATCHER: process.env.PLAYGROUND_DISPATCHER,
@@ -51,6 +53,8 @@ export const apiHono = {
       .string()
       .transform((s) => s.split(",").map((v) => v.trim().replace(/\/$/, "")))
       .pipe(z.array(z.url())),
+    HONO_WEB_URL: z.url().optional(),
+    KV_URL: z.url().optional(),
     PLAYGROUND_APPROVALS_ENABLED: z.stringbool().default(false),
     PLAYGROUND_CMUX_SESSIONS: z.stringbool().default(false),
     PLAYGROUND_DISPATCHER: z.string().optional(),

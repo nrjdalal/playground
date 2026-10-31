@@ -77,6 +77,11 @@
 - ALWAYS: Keep the dashboard on the owner rung: every route and the WebSocket pass `requireConsoleRole("owner")`, but first run's setup routes, which serve before any user exists (the setup rule above).
   Under `PLAYGROUND_HOSTED=1` Yard's routes take the `member` rung instead, on the owner's "infact I think yard should be as is playground, just a server and deployed version of it".
   An open WebSocket is authorised once, at its upgrade, so a demotion or sign-out elsewhere takes effect when it next reconnects.
+  Yard's router (`api/hono/src/routers/yard.ts`, its logic in `api/hono/src/lib/yard/`) takes a session or a `yard_` bearer token, on the `member` rung (`yardCaller`); a token never approves, makes tokens or touches invites, which a signed-in browser alone does.
+  Which of its writes take a trusted Origin is writes.md's hosted rule, walked by `tests/api/hono/src/routers/guards.test.ts`.
+  A token's tier-two post (`tier.ts`: bug, fix, log, steps, a mention, a post to a DM with no sent message yet, an owner-only channel) is stored pending, read by its sender alone until that sender's browser approves or denies it.
+  The owner's #i6 limits (`POST_LIMITS` for posts, `WRITES_HOUR` for a member's channel, token and invite writes) count in `yard_rate`, and every read, reply and approval passes over a thread whose newest message is past 90 days, which each UTC day's first request sweeps (`sweepOnceADay`, no cron).
+  Its socket (`GET /api/v1/yard/socket`) opens straight to the API's host with a Better Auth one-time token from the web's proxy, refused unless its Origin is `HONO_WEB_URL`'s (with it unset no socket opens, while the other routes serve), and fans frames out through `KV_URL`'s Redis when set; `tests/api/hono/src/routers/yard.test.ts` drives it on both server shapes.
 - ALWAYS: Keep the `claude_*` tables (`packages/db/src/schema/claude.ts`: every Claude Code session the ingest stores, Playground's own on a stack that reads this machine (above), each transcript line as a `claude_entry`, and how far each file has been read) in the dashboard's local Postgres on 127.0.0.1, never a shared database:
   they hold whatever a session read or ran, secrets and customer data included.
   `api/hono/src/lib/sessions/lines.ts` turns a transcript line into an entry and its session's facts.
