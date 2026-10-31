@@ -1,4 +1,6 @@
-// The stand-ins a gate box puts first on PATH, so a new user's install runs end to end with no real claude, gh, cmux, brew, launchctl, Keychain, sudo or GUI call; every call is logged to calls.log, and gh's repos are bare repos under the box's remote folder. docker is the real one, and bunx is real but for pglaunch, whose stand-in starts a container published on loopback alone.
+// The stand-ins a gate box puts first on PATH, so a new user's install runs end to end with no real claude, gh, cmux, brew, launchctl, Keychain, sudo or GUI call; every call is logged to calls.log, and gh's repos are bare repos under the box's remote folder. docker is the real one, and bunx is real but for pglaunch, whose stand-in starts a container published on loopback alone. claude, launched with a session name, runs the scripted session in claude.ts.
+
+import { join } from "node:path"
 
 // The suffix the pglaunch stand-in gives its container, 4 letters as pglaunch's own, so the live dashboard's name rule reads it as first run's.
 export const GATE_SUFFIX = "gate"
@@ -22,9 +24,10 @@ port=$(docker port "$c" 5432 | head -1 | sed 's/.*://')
 echo "name \\"$c :$port\\" started"
 echo "postgres://postgres:postgres@localhost:$port/postgres"
 `,
+  // a launch that names its session runs the scripted one (claude.ts), any other call answers at once
   claude: `${logged(box, "claude")}[ "$1" = setup-token ] && exec bun "${box}/h/playground/api/hono/src/fixtures/setup-token.ts" setup-token
-[ "$1 $2" = "auth status" ] && echo '{"loggedIn": true}'
-exit 0
+[ "$1 $2" = "auth status" ] && { echo '{"loggedIn": true}'; exit 0; }
+exec bun "${join(import.meta.dir, "claude.ts")}" "$@"
 `,
   cmux: `${logged(box, "cmux")}exit 1\n`,
   gh: `${logged(box, "gh")}case "$1 $2" in
@@ -75,4 +78,17 @@ fi
 handle "$@"
 `,
   sudo: `${logged(box, "sudo")}exit 1\n`,
+})
+
+// An ISO time as Python 3.9's fromisoformat reads it, with no fraction and no Z.
+const iso = (at: number) => new Date(at).toISOString().replace(/\.\d+Z$/, "+00:00")
+
+// Pure: the box's usage reading at now, which the ops-usage job reads as it reads Claude's: a made-up stored login in the Keychain file, and the profile and usage answers it reads through PLAYGROUND_USAGE_API from the box's files, a 5-hour window at 5% and a week at 10%, each resetting after now.
+export const usageReading = (user: string, now: number) => ({
+  keychain: `Claude Code-credentials\t${user}\t${JSON.stringify({ claudeAiOauth: { accessToken: "made-up", expiresAt: now + 30 * 86_400_000 } })}\n`,
+  profile: { account: { email: "gate@example.com" } },
+  usage: {
+    five_hour: { resets_at: iso(now + 3 * 3_600_000), utilization: 5 },
+    seven_day: { resets_at: iso(now + 5 * 86_400_000), utilization: 10 },
+  },
 })

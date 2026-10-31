@@ -26,7 +26,7 @@ STORED = os.path.join(HERE, "stored-login.json")
 FLIP = os.path.join(HERE, "login-flip.json")
 CYCLE = 300
 PROBE_EVERY, FRESH_FOR = 840, 1800
-API = "https://api.anthropic.com/api/oauth"
+API = os.environ.get("PLAYGROUND_USAGE_API") or "https://api.anthropic.com/api/oauth"  # the new-user gate points it at made-up readings in its box, so its made-up login never leaves the Mac
 STARTED = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 sys.path.insert(0, OPS)
 from beat import beat, setting  # noqa: E402

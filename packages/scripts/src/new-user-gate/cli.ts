@@ -5,7 +5,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync }
 import { homedir } from "node:os"
 import { dirname, join, resolve } from "node:path"
 
-import { GATE_LABEL, stubs } from "./stubs"
+import { GATE_LABEL, stubs, usageReading } from "./stubs"
 
 const REPO = resolve(import.meta.dir, "../../../..")
 const PROXY_PORT = "14155"
@@ -45,9 +45,9 @@ export const leftForYou = (out: string): string[] => {
     .map((line) => line.slice(4))
 }
 
-// Pure: the box's .zshenv and .zprofile. Every zsh the stack's jobs start reads .zshenv, and a login one has path_helper reorder PATH after it, so .zprofile puts the stand-ins first again; a Claude account's profile read goes to a closed loopback port, so the made-up token never leaves the Mac.
+// Pure: the box's .zshenv and .zprofile. Every zsh the stack's jobs start reads .zshenv, and a login one has path_helper reorder PATH after it, so .zprofile puts the stand-ins first again; a Claude account's profile read goes to a closed loopback port and the ops-usage job's reads to the box's usage reading, so no made-up token leaves the Mac.
 export const zshStartup = (box: string): string =>
-  `export PATH="${join(box, "stubs")}:$PATH"\nexport PLAYGROUND_PROFILE_URL=http://127.0.0.1:9/profile\n`
+  `export PATH="${join(box, "stubs")}:$PATH"\nexport PLAYGROUND_PROFILE_URL=http://127.0.0.1:9/profile\nexport PLAYGROUND_USAGE_API=file://${join(box, "usage-api")}\n`
 
 // Each stand-in that the box's zsh, plain and login, finds anywhere but the box's stubs folder, as `mode name path`; a job the box starts runs in one of the two, so an empty list means none of them reaches the real binary.
 export const strayStandIns = (box: string, home: string, names: string[]): string[] =>
@@ -90,6 +90,11 @@ const prep = (box: string, sha: string) => {
     chmodSync(join(box, "stubs", name), 0o755)
   }
   writeFileSync(join(box, "tty"), "y\n")
+  const reading = usageReading(process.env.USER ?? "", Date.now())
+  writeFileSync(join(box, "keychain"), reading.keychain)
+  mkdirSync(join(box, "usage-api"))
+  writeFileSync(join(box, "usage-api", "profile"), JSON.stringify(reading.profile))
+  writeFileSync(join(box, "usage-api", "usage"), JSON.stringify(reading.usage))
   for (const rc of [".zshenv", ".zprofile"]) writeFileSync(join(home, rc), zshStartup(box))
   writeFileSync(join(box, "proxy-up"), "")
   const node = dirname(
@@ -409,7 +414,7 @@ const main = async (args: string[]) => {
           return {
             detail:
               waiting === "Start Alpha"
-                ? "Alpha is not running 60s after Start Alpha: the stand-in claude exits at once, so a live Alpha needs a scripted session"
+                ? "Alpha is not running 60s after Start Alpha"
                 : `Alpha is not running${waiting ? `; it waits on ${waiting}` : ""}`,
             ok: false,
             shot: browser.shot("4-route"),
