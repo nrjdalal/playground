@@ -15,7 +15,7 @@ export const JOBS_FILE = "jobs.json"
 
 // What each job does, in one line for its row's hover; a job not named here shows none.
 export const OPS_DOES: Record<string, string> = {
-  "ops-awake": "Keeps this Mac awake on power",
+  "ops-awake": "Keeps this Mac awake on power and on battery",
   "ops-changelog": "Adds new merges to the Changelog",
   "ops-channel-watch": "Passes each new or edited factory channel post to Playground",
   "ops-checks": "Runs each open pull request's checks",
