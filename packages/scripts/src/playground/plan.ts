@@ -369,8 +369,12 @@ export const rollOutcome = (log: string[], results: string[]): RollOutcome => {
       }
   }
   if (failed !== undefined) return { phase: "going back" }
+  // the supervisor builds the head after its roll-now line (build_head's building and built lines), so a build of a few minutes reads as building, never as a stalled switch
+  const rolling = log.findIndex((line) => line.includes("roll-now: rolling to"))
+  const building = log.findLastIndex((line) => / building \w+ for /.test(line))
+  const built = log.findLastIndex((line) => / built \w+ in /.test(line))
   return {
-    phase: log.some((line) => line.includes("roll-now: rolling to")) ? "switching" : "building",
+    phase: rolling >= 0 && !(building > rolling && built < building) ? "switching" : "building",
   }
 }
 

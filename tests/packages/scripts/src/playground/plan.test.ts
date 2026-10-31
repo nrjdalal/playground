@@ -361,6 +361,18 @@ describe("rollOutcome", () => {
     })
   })
 
+  // the Dashboard is down for minutes while the supervisor builds the head, which is no failure and no stalled switch
+  test("reads the head's build after the roll's start as building, and switching once it is built", () => {
+    const log = [
+      "2026-10-18T02:00:00Z roll-now: rolling to abc1234 at once",
+      "2026-10-18T02:00:05Z building abc1234 for https://playground.localhost https://api.playground.localhost",
+    ]
+    expect(rollOutcome(log, [])).toEqual({ phase: "building" })
+    expect(rollOutcome([...log, "2026-10-18T02:02:40Z built abc1234 in 155s, 96M"], [])).toEqual({
+      phase: "switching",
+    })
+  })
+
   test("reads a passing roll as updated, with its sha", () => {
     expect(
       rollOutcome(

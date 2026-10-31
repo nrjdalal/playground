@@ -13,6 +13,8 @@ export default definePackageConfig({
     },
   ],
   env,
+  // main.ts beside index.ts: the live dashboard serves main's bundle, which holds first run's setup mode, while Docker and Vercel serve index's
+  entry: ["src/index.ts", "src/main.ts"],
   getSafeEnv,
   deps: { alwaysBundle: [/^@packages\//], neverBundle: ["bun"] },
 })

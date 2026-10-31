@@ -2,7 +2,7 @@
 # The live dashboard's supervisor: one background task of runner-pride's cmux session that keeps the dashboard stack and
 # the session follower running as its own children (so both stay descendants of a cmux terminal), and rolls them
 # to every new head of the branch upstream.sh names end to end: stop both by their recorded process groups, reset to it, install, build or
-# migrate when the merge needs it, start dev, check it, start the follower, check it. Each roll, outage or anomaly
+# migrate when the merge needs it, build it (build_head, kept per head in $S/builds) and serve the build, check it, start the follower, check it. Each roll, outage or anomaly
 # appends one line to results.log (a refused roll a second, naming its refusal), which wakes the runner to report it. It signals only processes it started.
 # It runs the latest head of the branch its main checkout sits on (upstream.sh: main for an install, canary for a checkout kept on canary), never one-off hashes or branches
 # or worktrees. A head that fails its roll is remembered in bad-builds and never rolled again (one dev refused to start for its own settings, on its third refusal), and the dashboard falls back to the head it ran
@@ -36,8 +36,37 @@ branch=$(git symbolic-ref --short HEAD 2>/dev/null)
 say() { echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) $*" >> "$LOG"; }
 result() { echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) $*" >> "$RESULTS"; say "RESULT $*"; }
 
+# The head's production build, kept in $S/builds/<sha> outside the checkout: made by bun run build when it is missing, or when it was built for other URLs, since next bakes NEXT_PUBLIC_APP_URL and NEXT_PUBLIC_API_URL into its client; a failure prints its last error line
+build_head() {
+  local sha dir was started out
+  sha=$(git rev-parse HEAD); dir=$S/builds/$sha
+  dashboard_urls || { echo "bunx portless get failed"; return 1; }
+  if [ -d "$dir" ]; then
+    was=$(cat "$dir/urls" 2>/dev/null)
+    [ "$was" = "$WEB $API" ] && return 0
+    say "rebuilding ${sha:0:7}: its build was for ${was:-no URLs}, the Dashboard is now on $WEB $API"
+  fi
+  say "building ${sha:0:7} for $WEB $API"; started=$(date +%s)
+  if ! out=$(NEXT_PUBLIC_APP_URL=$WEB NEXT_PUBLIC_API_URL=$API bun run build 2>&1); then
+    echo "$out" >> "$LOG"
+    echo "$out" | grep -E 'error|Error|ERR' | tail -1 | cut -c1-200; return 1
+  fi
+  rm -rf "$dir.tmp"; mkdir -p "$dir.tmp"
+  # next's standalone server leaves .next/static and public for its host to copy beside it
+  cp -R web/next/.next/standalone "$dir.tmp/web" && mkdir -p "$dir.tmp/web/web/next/.next" && cp -R web/next/.next/static "$dir.tmp/web/web/next/.next/static" &&
+    { [ ! -d web/next/public ] || cp -R web/next/public "$dir.tmp/web/web/next/public"; } &&
+    cp -R api/hono/bundle "$dir.tmp/api" && echo "$WEB $API" > "$dir.tmp/urls" || { echo "copying the build to $dir failed"; return 1; }
+  rm -rf "$dir"; mv "$dir.tmp" "$dir"
+  say "built ${sha:0:7} in $(( $(date +%s) - started ))s, $(du -sh "$dir" | cut -f1)"
+}
+# After a pass: keep this head's build and the last one that passed before it, for the next fallback, and remove the rest
+keep_builds() {
+  local before d; before=$(cat "$S/builds/passed" 2>/dev/null)
+  for d in "$S/builds"/*/; do d=$(basename "$d"); [ "$d" = "$1" ] || [ "$d" = "$before" ] || rm -rf "${S:?}/builds/$d"; done
+  [ "$before" = "$1" ] || echo "$1" > "$S/builds/passed"
+}
 start_dev() {
-  bun run dev --ui stream > "$DEVLOG" 2>&1 &
+  PLAYGROUND_BUILD=$S/builds/$(git rev-parse HEAD) bun run serve --ui stream > "$DEVLOG" 2>&1 &
   echo $! > "$S/dashboard-dev.pid"; say "dev started, pid $!"
 }
 start_follower() {
@@ -119,12 +148,14 @@ dev_down() {
   [ -n "$reason" ] || reason=$(printf '%s\n' "$tail" | tail -1)
   printf '%s' "$reason" | cut -c1-360
 }
-roll_up() {   # start dev and the follower, check both, and report one line; returns 0 on PASS
-  local tag=$1 sha dev fol t
+roll_up() {   # build the head when it has no build, start it and the follower, check both, and report one line; returns 0 on PASS
+  local tag=$1 sha dev fol t built
   sha=$(git rev-parse --short HEAD)
+  # a failed build leaves no dev log of its own, so finish_roll never reads the last stack's refusal as this head's
+  built=$(build_head) || { : > "$DEVLOG"; result "$tag $sha FAIL build: $built"; return 1; }
   start_dev; dev=$(check_dev); local dok=$?
   t=$(date -u +%Y-%m-%dT%H:%M:%S); start_follower; fol=$(check_follower "$t"); local fok=$?
-  if [ $dok -eq 0 ] && [ $fok -eq 0 ]; then result "$tag $sha PASS $dev $fol"; return 0; else result "$tag $sha FAIL $dev $fol"; return 1; fi
+  if [ $dok -eq 0 ] && [ $fok -eq 0 ]; then result "$tag $sha PASS $dev $fol"; keep_builds "$(git rev-parse HEAD)"; return 0; else result "$tag $sha FAIL $dev $fol"; return 1; fi
 }
 # The owner's rule: restart the app every time something lands on the upstream, so the change is visible at once
 tell_dispatcher() { NOTIFY_TO=dispatcher "$OPS/notify.sh" dashboard "$1"; }

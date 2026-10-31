@@ -64,6 +64,12 @@
       "persistent": true,
       "cache": false
     },
+    // the live dashboard's production stack: each app serves the build the supervisor kept (PLAYGROUND_BUILD), so nothing builds first
+    "serve": {
+      "passThroughEnv": ["GIT_SHA", "PLAYGROUND_BUILD"],
+      "persistent": true,
+      "cache": false
+    },
     "start": {
       "persistent": true,
       "cache": false
