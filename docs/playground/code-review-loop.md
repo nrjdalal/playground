@@ -28,6 +28,7 @@ A reviewer session keeps nothing it cannot read back: the skill's `state.py` ask
 ## It's working if
 
 - Every verdict's first line reads `## ReviewBot · round <r>: <s>/5 at <sha7>`, at the head it names, and `bun run pr:merge` accepts the last one.
+- Every verdict sets its PR's `Review • <s>/5` label, colored by its score (green for 5/5, orange for 4/5, red below) from the table in `references/COMMENTS.md`, so a label never lands in GitHub's gray.
 - Each finding of a round below 5/5 sits on its line in Files changed as well as in the verdict, while a 5/5's nits sit in the verdict alone, and the threads still open are exactly the findings still open.
 - A push gets its round within a few minutes, announced or not.
 - No verdict stands on stale CI: the reviewer reads the head's checks again right before it posts, and a check gone red since its earlier read is a blocking finding in that verdict.

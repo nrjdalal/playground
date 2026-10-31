@@ -139,3 +139,21 @@ describe("code-review-loop posts on fresh checks (#1657)", () => {
     expect(done).toContain("the head's checks were read again right before the verdict posted")
   })
 })
+
+// The owner's choice: green for 5/5, orange for 4/5, red for 3/5 or less, each a Tailwind 500 that no-off-palette-label lets through
+describe("the Review label carries its score's color (PG-157)", () => {
+  const comments = () =>
+    Bun.file(join(root, "extensions/core/skills/code-review-loop/references/COMMENTS.md")).text()
+
+  test("COMMENTS.md's table maps every score to its Tailwind 500, and the reviewer sets it before the label", async () => {
+    const { TAILWIND_500 } = await import(join(root, "scripts/hooks/no-off-palette-label.ts"))
+    const text = await comments()
+    const rows = [...text.matchAll(/^\| `Review • (\d)\/5` +\| `#([0-9a-f]{6})` +\|$/gm)].map(
+      ([, score, color]) => [Number(score), color],
+    )
+    const want = (score: number) =>
+      score === 5 ? TAILWIND_500.green : score === 4 ? TAILWIND_500.orange : TAILWIND_500.red
+    expect(rows).toEqual([5, 4, 3, 2, 1].map((score) => [score, want(score)]))
+    expect(text).toContain("gh label create 'Review • <s>/5' -R <repo> --color <hex> --force")
+  })
+})
