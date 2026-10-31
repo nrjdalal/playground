@@ -533,6 +533,46 @@ describe("byWeekReset", () => {
   })
 })
 
+// #162: an account with no 5-hour window reads "none", never 0%, stale, or a failed read's outline
+describe("an account with no 5-hour window", () => {
+  const none = (account: string, week: number) => {
+    const a = accountUsage(account, week, 0)
+    return { ...a, usage: { ...a.usage, fiveHour: null, fiveHourNone: true as const } }
+  }
+
+  test("alone, its 5-hour reading is none, fresh and judging nothing", () => {
+    const usage = none("solo@example.com", 30).usage
+    const fiveHour = systemReadings(
+      calm((r) => void (r.usage = usage)),
+      NOW,
+    ).find((r) => r.key === "fiveHour")
+    expect(fiveHour).toMatchObject({ level: "green", value: "none" })
+    expect(fiveHour!.stale).toBeUndefined()
+    expect(fiveHour!.state).toStartWith("no 5-hour window on this account")
+  })
+
+  test("beside a read one, its row reads none and the mean leaves it out", () => {
+    const [, fiveHour] = combinedUsage(
+      withAccounts([accountUsage("a@example.com", 50, 40), none("b@example.com", 30)]),
+      NOW,
+    )
+    expect(fiveHour!.value).toBe("40")
+    expect(fiveHour!.stale).toBeUndefined()
+    const row = fiveHour!.rows!.find((r) => r.name === "b")!
+    expect(row).toMatchObject({ none: true, used: null })
+    expect(fiveHour!.title).toContain("b none")
+  })
+
+  test("when no fresh account has a 5-hour window, the combined figure reads none", () => {
+    const [, fiveHour] = combinedUsage(
+      withAccounts([none("a@example.com", 50), none("b@example.com", 30)]),
+      NOW,
+    )
+    expect(fiveHour).toMatchObject({ level: "green", value: "none" })
+    expect(fiveHour!.stale).toBeUndefined()
+  })
+})
+
 // the owner on the Week tooltip: "You think I can understand anything via this plan with me via ascii?"
 describe("usage rows", () => {
   // an account whose week reads `week` and resets `days` after NOW, its 5-hour window `fiveHour`, resetting in 2 hours
