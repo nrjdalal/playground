@@ -61,7 +61,8 @@ Done when `docker port` prints a `127.0.0.1:` line and the worktree's `.env` nam
 bun run db:migrate
 ```
 
-This is local or ad-hoc only. The dashboard is never deployed, so ZeroStarter's deploy-time auto-apply (`.github/scripts/migrate-on-deploy.ts`) never runs here; the runner hosting the live dashboard runs `bun run db:migrate` in its checkout after a reset that brings a migration (the dev skill's "The live dashboard's build").
+For the dashboard, which is never deployed, this is local or ad-hoc only: the runner hosting the live dashboard runs `bun run db:migrate` in its checkout after a reset that brings a migration (the dev skill's "The live dashboard's build").
+The hosted build (Yard, `PLAYGROUND_HOSTED=1`) is the one deploy: `api/hono/vercel.json` runs ZeroStarter's `.github/scripts/migrate-on-deploy.ts` before `build:vercel`, so a production or `canary` deploy applies pending migrations to the hosted database, while a PR preview skips them.
 
 ## 5. Make the running stack see it
 
