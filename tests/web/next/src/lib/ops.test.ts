@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 
 import {
+  opsLine,
   pausedOps,
   scriptCount,
   scriptsRail,
@@ -79,5 +80,12 @@ describe("the Scripts group", () => {
       broken: false,
       words: "Scripts 1",
     })
+  })
+
+  test("a Waiting script, with nothing to read yet, is not broken: the rail stays calm and the collapsed group hides it", () => {
+    const waiting = [job("ops-a"), job("ops-usage", { reason: "no account", status: "waiting" })]
+    expect(scriptsRail(waiting)).toEqual({ broken: false, words: "Scripts 2" })
+    expect(scriptsShown(waiting, false)).toEqual([])
+    expect(opsLine(waiting[1]!, 0)).toBe("Waiting: no account")
   })
 })

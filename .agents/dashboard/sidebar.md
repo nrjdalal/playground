@@ -213,7 +213,7 @@
   Each row has two lines: its plain name (`RUNNER_NAMES`, else its id without `ops-`, in words) truncates on its first line, and its second is `SecondLine`, its state `Script · <state>` never cut, red while it is not running:
   `Script · <state>`, then when it runs (`whenWords` in `web/next/src/lib/ops.ts`, from `scheduleWords` in `@packages/config/schedule`) and the model it calls when `jobs.json` marks it `callsModel` (its name, or AI when none is named; `Calls <model>` on hover and to screen readers), the tail cut first;
   the reason a job fails or is down is its hover and screen-reader text.
-  Its state is Running while its last result is ok and it beat within three cycles, Failing with its last result otherwise, Down with the reason when its file is malformed, its loop has exited, its process is gone or it has not beaten for three cycles;
+  Its state is Running while its last result is ok and it beat within three cycles, Waiting, muted, while its last result starts `waiting: ` (ops-usage with no Claude account yet), Failing with its last result otherwise, Down with the reason when its file is malformed, its loop has exited, its process is gone or it has not beaten for three cycles;
   its hover gives its name and job id, what it does (`OPS_DOES`), its state with the reason and its last beat, and, when its schedule's `every` differs from its heartbeat's `cycleSeconds`, both (`problem`).
   A script row opens nothing.
   Every group label ends with one number at its right, ZeroSDK's `countCell`, muted with tabular digits (`GroupCount`):

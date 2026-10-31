@@ -1,5 +1,5 @@
 import { afterAll, expect, test } from "bun:test"
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -115,4 +115,111 @@ test("the stored login's reading lands in usage-<local part>.json beside usage.j
     },
     noNone: true,
   })
+})
+
+// run.py whole, for one cycle, under a scratch HOME: a stand-in beat module in its ops folder records the beat and ends the run, and
+// swaps urllib's urlopen for made-up answers, so no call leaves the Mac; a stand-in `security` holds the Keychain
+const beatModule = (settings: object) => `
+import io, json, os, sys, urllib.error, urllib.request
+calls = []
+def urlopen(req, timeout=None):
+    url = req.full_url
+    calls.append(url)
+    if url.startswith("http://127.0.0.1:9/"):
+        raise urllib.error.HTTPError(url, 200, "ok", {"anthropic-ratelimit-unified-5h-utilization": "0.2", "anthropic-ratelimit-unified-5h-reset": "4000000000", "anthropic-ratelimit-unified-7d-utilization": "0.3", "anthropic-ratelimit-unified-7d-reset": "4000000000"}, io.BytesIO(b"{}"))
+    if url.endswith("/api/oauth/profile"):
+        return io.BytesIO(json.dumps({"account": {"email": "stored@example.org"}}).encode())
+    if url.endswith("/api/oauth/usage"):
+        return io.BytesIO(json.dumps({"seven_day": {"utilization": 70, "resets_at": "2026-11-07T00:00:00+00:00"}}).encode())
+    raise OSError("no made-up answer for " + url)
+urllib.request.urlopen = urlopen
+def setting(key):
+    return ${JSON.stringify(settings)}[key]
+def beat(job, pid, started, cycle, result, extra=None):
+    json.dump({"calls": calls, "detail": (extra or {}).get("detail"), "result": result}, open(os.path.join(os.path.dirname(__file__), "beat.json"), "w"))
+    os._exit(0)
+`
+
+const cycle = async (
+  name: string,
+  opts: { added: string[]; login: boolean; probeUrl?: string },
+) => {
+  const home = join(scratch, name)
+  const ops = join(home, ".playground", "ops")
+  const stubs = join(home, "stubs")
+  mkdirSync(join(ops, "usage"), { recursive: true })
+  mkdirSync(stubs, { recursive: true })
+  const settings = {
+    "models.probe": "a-made-up-model",
+    "usage.accounts": [
+      ...opts.added.map((email) => ({ email, provider: "claude" })),
+      { email: "glm-key", provider: "glm" },
+    ],
+    "usage.keychainService": "made-up-service",
+  }
+  writeFileSync(join(ops, "beat.py"), beatModule(settings))
+  const login = JSON.stringify({
+    claudeAiOauth: { accessToken: "made-up", expiresAt: 4_000_000_000_000 },
+  })
+  writeFileSync(
+    join(stubs, "security"),
+    `#!/bin/sh\ncase "$*" in\n  *Claude\\ Code-credentials*) ${opts.login ? `echo '${login}'` : "exit 44"} ;;\n  *made-up-service*) echo made-up-token ;;\n  *) exit 44 ;;\nesac\n`,
+    { mode: 0o755 },
+  )
+  const env: Record<string, string | undefined> = {
+    ...process.env,
+    HOME: home,
+    PATH: `${stubs}:${process.env.PATH}`,
+    PLAYGROUND_PROBE_URL: opts.probeUrl ?? "http://127.0.0.1:9/v1/messages",
+  }
+  delete env.CLAUDE_CONFIG_DIR
+  const child = Bun.spawn(["python3", "-I", script], { env, stderr: "pipe" })
+  await child.exited
+  expect(await new Response(child.stderr).text()).toBe("")
+  const read = (path: string) => {
+    try {
+      return JSON.parse(readFileSync(join(home, ".playground", path), "utf8"))
+    } catch {
+      return null
+    }
+  }
+  return { beat: read("ops/beat.json"), usage: read("usage.json") }
+}
+
+test("on a fresh install whose only account came through the Dashboard, usage.json holds that account's week and the job reads ok", async () => {
+  const { beat, usage } = await cycle("added-only", { added: ["added@example.org"], login: false })
+  expect(beat.result).toBe("ok")
+  expect(beat.calls).toEqual(["http://127.0.0.1:9/v1/messages"])
+  expect(usage.account).toBe("added@example.org")
+  expect(usage.rate_limits.seven_day).toEqual({ used_percentage: 30, resets_at: 4_000_000_000 })
+})
+
+test("with both a Dashboard account and Claude Code's own login, usage.json holds the Dashboard account's, the login named beside it", async () => {
+  const { beat, usage } = await cycle("both", { added: ["added@example.org"], login: true })
+  expect(beat.result).toBe("ok")
+  expect(usage.account).toBe("added@example.org")
+  expect(usage.storedLogin).toEqual({ account: "stored@example.org", week: 70 })
+})
+
+test("when the Dashboard account's probe is refused, usage.json holds Claude Code's own login and the job still reads ok", async () => {
+  const { beat, usage } = await cycle("refused", {
+    added: ["added@example.org"],
+    login: true,
+    probeUrl: "http://127.0.0.1:8/v1/messages",
+  })
+  expect(beat.result).toBe("ok")
+  expect(beat.detail).toContain("added account: RuntimeError: no reading of added@example.org")
+  expect(usage.account).toBe("stored@example.org")
+})
+
+test("with Claude Code's own login alone, usage.json holds its reading, as before", async () => {
+  const { beat, usage } = await cycle("login-only", { added: [], login: true })
+  expect(beat.result).toBe("ok")
+  expect(usage.account).toBe("stored@example.org")
+})
+
+test("with no account at all, the job beats waiting, not an error, and writes no usage.json", async () => {
+  const { beat, usage } = await cycle("none", { added: [], login: false })
+  expect(beat.result).toBe("waiting: no Claude account yet; add one in the Dashboard")
+  expect(usage).toBeNull()
 })
