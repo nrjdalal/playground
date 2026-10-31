@@ -115,6 +115,14 @@ export const previewClick = (
   return { from: from === href ? null : from }
 }
 
+// Pure: what Done sends the dispatcher on the owner's click, the one session his messages reach, which routes it to the session in the Vibeground's worktree: hand the work back for review, never merged.
+export const doneMessage = (vibe: {
+  branch: string
+  path: string
+  session: string | null
+}): string =>
+  `Done in the Vibeground on ${vibe.branch} (${vibe.path}, ${vibe.session ? `worked in by ${vibe.session}` : "no session works in it"}): have its work committed, then push it to the branch's open PR, or open a PR into the branch it came from only when none is open. Do not merge it.`
+
 // Pure: each topic once, in the order its newest preview comes (the list is newest first), with how many previews it holds.
 export function topicCounts(previews: Preview[]): Map<string, number> {
   const counts = new Map<string, number>()

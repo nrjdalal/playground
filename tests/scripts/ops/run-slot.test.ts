@@ -1423,6 +1423,69 @@ describe("a model-bound run", () => {
   })
 })
 
+// 31 Oct: a suite's `bun test --isolate` worker outlived its suite by 5 hours at 50% CPU, reparented to launchd once the suite's own process exited
+describe("what the command leaves in its process group", () => {
+  const alive = (pid: number) => {
+    try {
+      process.kill(pid, 0)
+      return true
+    } catch {
+      return false
+    }
+  }
+  // Runs, through run-slot from a calling bash, a command that starts a loop in the background, writes its pid and exits 7; `trap` set to ignore TERM in the loop makes it need the KILL. Returns the caller's stdout, the run's code, the loop's pid and the runs log.
+  const leaves = async (trap = "") => {
+    const m = machine()
+    const pidFile = join(m.root, "loop.pid")
+    const loop = `${trap}while :; do sleep 0.2; done`
+    // the loop's output goes to /dev/null, so a loop left behind never holds the caller's stdout open
+    const command = `bash -c '${loop}' >/dev/null 2>&1 & echo $! > ${pidFile}; exit 7`
+    const p = Bun.spawn(
+      [
+        "bash",
+        "-c",
+        '"$@"; echo "caller-alive $?"',
+        "bash",
+        "bash",
+        SCRIPT,
+        "worker-x",
+        "--",
+        "bash",
+        "-c",
+        command,
+      ],
+      { cwd: m.root, env: m.env(), stdout: "pipe" },
+    )
+    const out = await new Response(p.stdout).text()
+    const code = await p.exited
+    const pid = Number(readFileSync(pidFile, "utf8"))
+    // read at once after run-slot has ended, so a loop it left reads alive
+    const left = alive(pid)
+    // the test started the loop, so a loop left alive is stopped by its own pid at once, before that pid could pass to another process
+    if (left) process.kill(pid, "SIGKILL")
+    return { code, left, log: readFileSync(join(m.ops, "run-slot.runs.log"), "utf8"), out, pid }
+  }
+
+  test("is stopped once the command exits, and logged by pid with its command line", async () => {
+    const r = await leaves()
+    expect(r.left).toBe(false)
+    expect(r.log).toMatch(
+      new RegExp(`reap worker-x \\d+ pid=${r.pid} bash -c while :; do sleep 0\\.2; done`),
+    )
+  })
+
+  test("that ignores TERM, by KILL after the grace", async () => {
+    const r = await leaves('trap "" TERM; ')
+    expect(r.left).toBe(false)
+  })
+
+  test("while run-slot's caller lives on and the command's own exit code comes back", async () => {
+    const r = await leaves()
+    expect(r.out).toBe("caller-alive 7\n")
+    expect(r.code).toBe(0)
+  })
+})
+
 describe("box-off", () => {
   // run-slot.sh box-off's words for a scratch state folder, the ssh key at a path of its own
   const boxOff = async (m: ReturnType<typeof machine>, key: string) => {

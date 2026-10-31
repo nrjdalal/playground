@@ -21,10 +21,13 @@ import { config } from "@/lib/config"
 import { gateOf, readSetup } from "@/lib/first-run"
 import { dispatcherSlotsOf, readHealth } from "@/lib/health"
 import { thisMachine } from "@/lib/machine"
-import { tabTitle, testDataBadge } from "@/lib/test-data"
+import { tabTitle, testDataBadge, vibeBadge } from "@/lib/test-data"
 
-// The API's word on where the dashboard's data comes from: a fixture stack wears the Test data badge beside the brand and in the tab's title. A read that fails or is slow shows none.
-const readBadge = async () => testDataBadge(await readHealth())
+// The API's word on where the dashboard's data comes from: a fixture stack wears the Test data badge beside the brand and in the tab's title, a Vibeground its own with its branch. A read that fails or is slow shows none.
+const readBadge = async () => {
+  const health = await readHealth()
+  return testDataBadge(health) ?? vibeBadge(health)
+}
 
 export async function generateMetadata(): Promise<Metadata> {
   const badge = await readBadge()

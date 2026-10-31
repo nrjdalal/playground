@@ -8,9 +8,9 @@
   On the web every read shares one QueryClient (`makeQueryClient` in `web/next/src/lib/query.ts`): a 429 keeps the read's last data and retries after 2, 4, 8 and 16 seconds, so its page shows the failure only once the 429s have lasted 30 seconds, while any other failure keeps React Query's three retries and a write is never retried.
   The agents read a message asks for is folded into one per 5 seconds (`AGENTS_MESSAGE_COALESCE_MS`).
   An inbox item's Approve, Deny, Send, Draft, Discard, Clear, Retry, Snooze and a secret ask's Submit, the composer's send, the user menu's Update now, a Feed prompt card's Submit, a pick in the hosted session's mode picker,
-  the Preview row's Start and Stop and a drop of a sidebar Orchestrators row or its menu's Move up, Move down or Reset order are the confirmation for the answer, its put-away, the value's run through its sink,
+  the Preview row's Start, Stop and Done and a drop of a sidebar Orchestrators row or its menu's Move up, Move down or Reset order are the confirmation for the answer, its put-away, the value's run through its sink,
   the message,
-  the update message, a sent row action, the prompt's answer, the mode, the Vibeground's start or stop and the managers' order.
+  the update message, a sent row action, the prompt's answer, the mode, the Vibeground's start or stop, its hand-back message to the dispatcher and the managers' order.
   A thread view's opening (asks.md's Threads) and a sidebar thread's menu's Mark as read or unread, Pin or Unpin, Archive and Rename's Save are the confirmation for the thread's change.
   Behind portless the API's peer is always the proxy on loopback, so in portless LAN mode a LAN client passes `requireLoopback` and only the owner session stops it; keep LAN mode off while the dashboard runs.
 - ALWAYS: Test a dashboard write on a fixture stack, where it lands in the fixture's scratch copy.
