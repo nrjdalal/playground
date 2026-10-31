@@ -105,9 +105,13 @@ describe("code-review-loop's touched tests come from the diff (#1104, #1525)", (
       join(root, "extensions/core/skills/code-review-loop/scripts/state.py"),
     ).text()
     for (const file of [
+      "tests/packages/scripts/src/parity/record.test.ts",
+      "tests/packages/scripts/src/trace-count/count.test.ts",
       "tests/packages/scripts/src/verify/dashboard-map.test.ts",
+      "tests/packages/scripts/src/verify/prebuild.test.ts",
       "tests/scripts/hooks/no-bare-slack-link.test.ts",
       "tests/scripts/hooks/no-playground-leak.test.ts",
+      "tests/skills/built-in-names.test.ts",
     ])
       expect(script).toContain(file)
     expect(script).toContain("GIT_GREP = ")
