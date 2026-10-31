@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 
-import { buildReload, versionOf } from "../../../../../web/next/src/lib/build-reload"
+import { buildReload, holdsText, versionOf } from "../../../../../web/next/src/lib/build-reload"
 
 const at = (current: string | null, extra: Partial<Parameters<typeof buildReload>[0]> = {}) =>
   buildReload({ busy: false, current, loaded: "0.0.1-aaaaaaa", reloadedFor: null, ...extra })
@@ -23,6 +23,14 @@ describe("buildReload", () => {
 
   test("waits while the owner types in a field, so no text is lost", () => {
     expect(at("0.0.1-bbbbbbb", { busy: true })).toBe("wait")
+  })
+})
+
+describe("holdsText", () => {
+  test("holds a failed message, whose bubble alone keeps its words, and nothing a reload resends", () => {
+    expect(holdsText([{ state: "queued" }, { state: "failed" }])).toBe(true)
+    expect(holdsText([{ state: "queued" }, { state: "sending" }, { state: "typed" }])).toBe(false)
+    expect(holdsText([])).toBe(false)
   })
 })
 

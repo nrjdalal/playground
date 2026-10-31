@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query"
 import { useEffect, useRef } from "react"
 
 import { config } from "@/lib/config"
+import type { OutboxMessage } from "@/lib/outbox"
 
 // The version a reload was made for, in this tab's sessionStorage, so a reload that lands on the same mismatch never reloads again.
 export const BUILD_RELOAD_KEY = "dashboard.build.reloadedFor.v1"
@@ -14,7 +15,7 @@ const WAIT_MS = 2_000
 
 export type BuildReload = "reload" | "stay" | "wait"
 
-// Pure: what the page does when the API names version current: it reloads once onto a build other than the one it loaded against (loaded, the API's version at its first read), never twice for one version (reloadedFor), so a version that keeps differing never loops, and waits while the owner types (busy).
+// Pure: what the page does when the API names version current: it reloads once onto a build other than the one it loaded against (loaded, the API's version at its first read), never twice for one version (reloadedFor), so a version that keeps differing never loops, and waits while the owner types or a failed message shows (busy).
 export function buildReload({
   busy,
   current,
@@ -29,6 +30,10 @@ export function buildReload({
   if (!current || !loaded || current === loaded || current === reloadedFor) return "stay"
   return busy ? "wait" : "reload"
 }
+
+// Pure: whether the outbox shows words a reload would lose: a failed message, which waits on the owner's Retry and is never kept in the tab's storage, while a queued or sending one is resent under its own id.
+export const holdsText = (outbox: readonly Pick<OutboxMessage, "state">[]): boolean =>
+  outbox.some((m) => m.state === "failed")
 
 // Pure: the version a /api/health body names, or null for any other body.
 export const versionOf = (body: unknown): string | null => {
@@ -58,8 +63,8 @@ const reloadedFor = (): string | null => {
   }
 }
 
-// Reloads the page once when a roll serves a new build: the live Dashboard's production build has no dev socket, so an open tab would keep its old build against the new API. It reads /api/health every 30s and on focus; the outbox keeps queued messages across the reload in sessionStorage.
-export function useBuildReload(): void {
+// Reloads the page once when a roll serves a new build: the live Dashboard's production build has no dev socket, so an open tab would keep its old build against the new API. It reads /api/health every 30s and on focus; the outbox keeps queued messages across the reload in sessionStorage, and the reload waits while a failed one shows.
+export function useBuildReload(outbox: readonly OutboxMessage[]): void {
   const { data } = useQuery({
     queryKey: BUILD_QUERY_KEY,
     queryFn: readVersion,
@@ -67,6 +72,8 @@ export function useBuildReload(): void {
     retry: false,
   })
   const loaded = useRef<string | null>(null)
+  const held = useRef(false)
+  held.current = holdsText(outbox)
   useEffect(() => {
     if (!data) return
     if (loaded.current === null) {
@@ -75,7 +82,7 @@ export function useBuildReload(): void {
     }
     const check = () => {
       const next = buildReload({
-        busy: typing(),
+        busy: typing() || held.current,
         current: data,
         loaded: loaded.current,
         reloadedFor: reloadedFor(),
