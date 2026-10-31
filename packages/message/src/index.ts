@@ -71,6 +71,3 @@ export const channelSchema = z.object({
 })
 
 export type Channel = z.infer<typeof channelSchema>
-
-// Where the hosted web serves a pending message's approve page, which only a signed-in browser can use (the tier-two rule).
-export const approvePath = (messageId: string) => `/yard/approve/${encodeURIComponent(messageId)}`

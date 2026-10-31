@@ -418,14 +418,6 @@
       "use": "The board over REST, for an agent or curl; the dashboard's pages read it from the WebSocket's workers frame instead."
     },
     {
-      "route": "GET /api/v1/yard/channels",
-      "use": "This Mac's Yard channels and DMs with their unread and mention counts, through the Keychain's token, which the sidebar's Yard groups read on every page; 404 while Yard is off or signed out, which hides them."
-    },
-    {
-      "route": "GET /api/v1/yard/channels/:id/messages",
-      "use": "One Yard channel's messages, a page at a time, which the sidebar's channel view reads; the same messages `playground yard read` prints."
-    },
-    {
       "route": "GET /api/v1/yard/status",
       "use": "Whether Yard is set up on this Mac and who its token signs in as, the same check `playground yard channels` makes first."
     },
@@ -448,14 +440,6 @@
     {
       "route": "POST /api/v1/settings/:key/reset",
       "use": "Puts a setting back to its default at a scope, with a reason, the same write `playground settings reset` makes in the folder itself."
-    },
-    {
-      "route": "POST /api/v1/yard/channels/:id/messages",
-      "use": "Posts the owner's message to a Yard channel as this Mac; a post Yard holds for approval also lands an Inbox update whose Approve opens Yard's approve page."
-    },
-    {
-      "route": "POST /api/v1/yard/channels/:id/read",
-      "use": "Marks a Yard channel read up to its newest message, once the sidebar's channel view shows it."
     },
     {
       "route": "PUT /api/v1/settings/:key",
