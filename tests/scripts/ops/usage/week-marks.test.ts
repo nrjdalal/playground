@@ -247,3 +247,16 @@ test("a listed spare's marks fire while the logged-in account is outside usage.a
   ).toEqual(["ALERT 90 spare@example.test:", "ALERT 97 spare@example.test:"])
   expect(run().filter((line) => line.startsWith("ALERT"))).toEqual([])
 })
+
+test("an unlisted login with only a 5-hour window still lets a listed spare's marks fire", () => {
+  const now = Date.now() / 1000
+  const home = setup("spare-foreign-login-no-week", 50, 20, {
+    "spare@example.test": { readAt: iso(now), week: 97, weekReset: now + 172800 },
+  })
+  const usage = join(home, ".playground", "usage.json")
+  const data = JSON.parse(readFileSync(usage, "utf8"))
+  data.account = "other@example.test"
+  delete data.rate_limits.seven_day
+  writeFileSync(usage, JSON.stringify(data))
+  expect(alerts(home)).toEqual(["ALERT 90", "ALERT 97"])
+})

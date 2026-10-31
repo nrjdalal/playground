@@ -23,7 +23,8 @@ ACCOUNTS = {a["email"]: a.get("weekReset") for a in setting("usage.accounts") if
 FACTORY = tuple(ACCOUNTS)
 # a logged-in account usage.accounts does not list is not counted, while each listed spare still is
 counted = account in FACTORY
-week = u["rate_limits"]["seven_day"]
+# an unlisted login's reading may hold a 5-hour window alone (run.py's stored_login), and it counts nothing
+week = u["rate_limits"]["seven_day"] if counted else u["rate_limits"].get("seven_day") or {"used_percentage": 0}
 now, used, reset = time.time(), week["used_percentage"], week.get("resets_at")
 if not reset and ACCOUNTS.get(account):
     # no reset in the reading: the next one from the account's own day and hour
