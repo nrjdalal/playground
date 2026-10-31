@@ -265,6 +265,20 @@ describe.skipIf(!dockerUp())("Yard's store", () => {
     })
   })
 
+  describe("approving after a read", () => {
+    // a sent message kept the time it was held, so a mention approved after the member had read the channel never counted as unread
+    test("a held mention approved after the member read the channel counts as unread and as a mention", async () => {
+      const { id } = await both("late")
+      const held = await send(token("bo"), id, { kind: "text", text: "@ada take a look" })
+      expect(held.status).toBe("pending")
+      await store.markRead(db, web("ada", true), id)
+      await Bun.sleep(5)
+      await store.decide(db, web("bo"), held.id, "sent")
+      const channel = (await store.channels(db, web("ada", true))).find((c) => c.id === id)!
+      expect([channel.unread, channel.mentions]).toEqual([1, 1])
+    })
+  })
+
   describe("retention", () => {
     test("a thread lives while its newest message is inside 90 days, and reads past it are gone before any sweep", async () => {
       const { id } = await both("retention")

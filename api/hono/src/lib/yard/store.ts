@@ -305,16 +305,17 @@ export const ownMessage = async (db: Database, caller: Caller, id: string): Prom
   return toMessage(row)
 }
 
-// Sends or denies one of the caller's pending messages, stamping decided_at; a message already decided is a conflict.
+// Sends or denies one of the caller's pending messages, stamping decided_at, and on send moving its time to the send, so a member who read the channel meanwhile counts it as unread; a message already decided is a conflict.
 export const decide = async (
   db: Database,
   caller: Caller,
   id: string,
   status: "denied" | "sent",
 ): Promise<Message> => {
+  const now = new Date()
   const [row] = await db
     .update(yardMessage)
-    .set({ decidedAt: new Date(), status })
+    .set(status === "sent" ? { at: now, decidedAt: now, status } : { decidedAt: now, status })
     .where(
       and(
         eq(yardMessage.id, id),
