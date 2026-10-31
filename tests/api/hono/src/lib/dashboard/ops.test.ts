@@ -73,6 +73,22 @@ describe("opsRowOf", () => {
     expect(row).toMatchObject({ reason: "check failing", status: "failing" })
   })
 
+  test("Waiting, not Failing, while its last result says it waits, with the reason after it", () => {
+    const row = opsRowOf(
+      "ops-usage",
+      beat({
+        job: "ops-usage",
+        lastResult: "waiting: no Claude account yet; add one in the Dashboard",
+      }),
+      true,
+      NOW,
+    )
+    expect(row).toMatchObject({
+      reason: "no Claude account yet; add one in the Dashboard",
+      status: "waiting",
+    })
+  })
+
   test("Down by age: no beat for over three cycles", () => {
     const row = opsRowOf(
       "ops-checks",

@@ -85,7 +85,7 @@ export const leftOverLines = (
         `Left for you: herdr server ${name} still runs from an older Playground in ${dir}, beside the current ones; playground herdr stop stops every server there, then playground starts the current ones`,
     )
 
-// This uid's account name and login shell as /usr/bin/dscl reads them, for a start from a GUI app or env -i: Bun's userInfo() takes them from USER and SHELL, else "unknown" (measured on 1.4.3), macOS has an account named unknown whose shell is /usr/bin/false, and herdr refuses every pane of a server whose SHELL it cannot find. PLAYGROUND_DSCL names a fake dscl inside the test sandbox alone.
+// This uid's account name and login shell as /usr/bin/dscl reads them, for a start from a GUI app or env -i: Bun's userInfo() takes them from USER and SHELL, else "unknown" (measured on 1.4.4), macOS has an account named unknown whose shell is /usr/bin/false, and herdr refuses every pane of a server whose SHELL it cannot find. PLAYGROUND_DSCL names a fake dscl inside the test sandbox alone.
 function account(env: Record<string, string | undefined>): { name?: string; shell?: string } {
   const dscl = (env.TEST_SANDBOX_HOME && env.PLAYGROUND_DSCL) || "/usr/bin/dscl"
   const read = (...args: string[]): string => {
