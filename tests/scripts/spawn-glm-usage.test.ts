@@ -176,11 +176,4 @@ describe("the capacity gate refuses and spawns nothing", () => {
       }),
     ])
   })
-
-  test("with no arguments it prints the whole header, the worker line and the pin note included", async () => {
-    const r = await spawn([], [])
-    expect(r.code).toBe(2)
-    expect(r.err).toContain("spawn.sh worker")
-    expect(r.err).toContain("backends/<name>")
-  })
 })

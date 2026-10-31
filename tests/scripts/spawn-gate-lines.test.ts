@@ -10,6 +10,7 @@ import { capacityLog, minutesAgo, placing, spawn } from "./spawn-fake"
 setDefaultTimeout(40_000)
 
 describe("the capacity gate refuses and spawns nothing", () => {
+  // on 22 Oct load 24 on 15 cores read 55% CPU idle, so the gate also reads the CPU's real use, in cores.
   describe("CPU use", () => {
     test("a load over the line passes while the CPU is mostly idle", async () => {
       const r = await spawn(["runner", "runner-x", "b.md", "--size", "small"], [], {
@@ -101,6 +102,7 @@ describe("the capacity gate refuses and spawns nothing", () => {
     })
   })
 
+  // Load is weighed by size, so a big plan never blocks small runs: small, medium and big weigh 1, 2 and 3.
   describe("load units", () => {
     test("a medium start leaves a quarter of the cap for small items", async () => {
       const r = await spawn(["worker", "worker-brave-otter", "b.md"], [], { FAKE_LOAD5: "12.00" })
@@ -206,6 +208,7 @@ describe("the capacity gate refuses and spawns nothing", () => {
     })
   })
 
+  // a GLM session draws no Claude usage, so it starts while memory is normal, swap-ins are under 100/s and load5 is under 30.
   describe("a GLM session's own gate", () => {
     const glm = ["worker", "worker-brave-otter", "b.md", "--backend", "glm"]
     const claude = ["worker", "worker-brave-otter", "b.md"]
@@ -253,6 +256,7 @@ describe("the capacity gate refuses and spawns nothing", () => {
     })
   })
 
+  // The gate's lines are settings: a render set that moves one moves what spawn.sh holds a start to, with no edit to spawn.sh.
   describe("the gate's lines as settings", () => {
     const withGates = (values: Record<string, unknown>) => ({
       SETTINGS_JSON: JSON.stringify(values),

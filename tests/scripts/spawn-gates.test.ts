@@ -90,7 +90,6 @@ describe("the capacity gate refuses and spawns nothing", () => {
     expect(settled.code).toBe(0)
   })
 
-  // on 22 Oct load 24 on 15 cores read 55% CPU idle, so the gate also reads the CPU's real use, in cores.
   test("a malformed line in the log costs itself alone, the starts count reads on", async () => {
     const fresh = [...Array(14)]
       .map(() => JSON.stringify({ at: minutesAgo(1), gate: null, readings: {}, verdict: "pass" }))
@@ -102,7 +101,6 @@ describe("the capacity gate refuses and spawns nothing", () => {
     expect(r.err).toContain("and 14 started in the last 5 minutes, at or over 13.125: the 15 cores")
   })
 
-  // Load is weighed by size, so a big plan never blocks small runs: small, medium and big weigh 1, 2 and 3.
   test("memory pressure away from normal", async () => {
     const r = await spawn(["worker", "worker-brave-otter", "b.md"], [], { FAKE_PRESSURE: "4" })
     expect(r.code).not.toBe(0)
@@ -155,7 +153,6 @@ describe("the capacity gate refuses and spawns nothing", () => {
     )
   })
 
-  // a GLM session draws no Claude usage, so it starts while memory is normal, swap-ins are under 100/s and load5 is under 30.
   test("a free share it cannot read", async () => {
     const r = await spawn(["worker", "worker-brave-otter", "b.md"], [], { FAKE_FREE: "x" })
     expect(r.code).not.toBe(0)
@@ -172,5 +169,10 @@ describe("the capacity gate refuses and spawns nothing", () => {
     )
   })
 
-  // The gate's lines are settings: a render set that moves one moves what spawn.sh holds a start to, with no edit to spawn.sh.
+  test("with no arguments it prints the whole header, the worker line and the pin note included", async () => {
+    const r = await spawn([], [])
+    expect(r.code).toBe(2)
+    expect(r.err).toContain("spawn.sh worker")
+    expect(r.err).toContain("backends/<name>")
+  })
 })
