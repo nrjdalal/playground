@@ -1119,6 +1119,7 @@ describe("pickers go to the manager (PG-2184)", () => {
 // OrbStack hung twice on 27 Oct and the live dashboard lost its database for about 6 minutes each time, until a person restarted it.
 describe("a hung Docker with the live dashboard's db unreachable restarts OrbStack (#2437)", () => {
   // A machine whose `docker info` hangs until `answer()`, whose live dashboard's health reads `db`, and whose orbctl records each call; its state folder carries from one cycle to the next.
+  // The probe gets 2 s, 5 times the 0.4 s an answering probe took at most beside twice the cores in busy loops, and the hang execs its sleep, so the probe's kill ends it and none outlives its case.
   const machine = (db: string) => {
     const config = scratch()
     const bin = join(config, "bin")
@@ -1130,7 +1131,7 @@ describe("a hung Docker with the live dashboard's db unreachable restarts OrbSta
       writeFileSync(join(bin, name), `#!/bin/sh\n${body}\n`)
       chmodSync(join(bin, name), 0o755)
     }
-    script("docker", `if [ -f "${answers}" ]; then echo 28.0.0; else sleep 5; fi`)
+    script("docker", `if [ -f "${answers}" ]; then echo 28.0.0; else exec sleep 10; fi`)
     script("orbctl", `echo "$1" >> "${orbctl}"`)
     script(
       "git",
@@ -1140,7 +1141,7 @@ describe("a hung Docker with the live dashboard's db unreachable restarts OrbSta
     script("curl", `echo '{"data":{"db":"${db}","dashboard":"live","message":"degraded"}}'`)
     const env = { PLAYGROUND_REPO: "/repo", PATH: `${bin}:${process.env.PATH}` }
     const check = (state: Record<string, unknown> = {}) =>
-      drive(env, config, { args: [state, 1], fn: "docker_check", notified: true }) as Promise<{
+      drive(env, config, { args: [state, 2], fn: "docker_check", notified: true }) as Promise<{
         notified: [string, string][]
         result: { kind: string; line: string }[]
       }>
