@@ -111,6 +111,14 @@ test("workspaceImports finds static, dynamic and bare imports of workspace packa
   ).toEqual(["@packages/config/site", "@packages/db", "@packages/auth/access"])
 })
 
+test("workspaceImports scans a source that starts with a shebang, which Bun's scan throws on", () => {
+  expect(
+    workspaceImports([
+      '#!/usr/bin/env bun\nimport { site } from "@packages/config/site"\nexport const x = site',
+    ]),
+  ).toEqual(["@packages/config/site"])
+})
+
 // Two packages alike but for their dist, since Bun caches a resolution for the life of the process.
 test("unbuilt names a package whose exports target is missing, and passes one whose file is there", () => {
   const dir = mkdtempSync(join(tmpdir(), "prebuild-"))
