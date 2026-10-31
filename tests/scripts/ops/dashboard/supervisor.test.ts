@@ -1359,8 +1359,8 @@ describe("the supervisor's alias check", () => {
     expect(sent).toBe("")
   })
 
-  // on v0.0.18's roll, before web_route moved playground.localhost with the web's route, the alias sat on the old web's port for about 3 s until the launcher's 2 s sync moved it, as api.playground.localhost still does, so a check landing then alerted on a roll
-  test("reads a mismatch again after ALIAS_CONFIRM seconds and stays quiet when the alias has been put right meanwhile, as the launcher's sync does for api.playground.localhost", async () => {
+  // on v0.0.18's roll the old launcher's web route went with its stop, so moveRoute left playground.localhost on the old web's port for about 3 s until the launcher's 2 s sync moved it, as that sync moves api.playground.localhost after the API restarts, so a check landing then alerted on a roll
+  test("reads a mismatch again after ALIAS_CONFIRM seconds and stays quiet when the launcher's sync has put the alias right meanwhile", async () => {
     const { results, sent } = await ticks("(sleep 0.5; $FIX) & check_aliases; wait", 2)
     expect(results).toEqual([])
     expect(sent).toBe("")
