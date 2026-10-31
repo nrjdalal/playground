@@ -182,3 +182,81 @@ test("an account usage.accounts does not list counts nothing", () => {
   )
   expect(status(home)).toStartWith("other@example.test: not a factory account; nothing counted")
 })
+
+// #152: a spare account's own week crosses the marks too, once per its own week reset, while the logged-in account sits below them
+test("a spare account at 97% alerts once per its week reset, with the logged-in account below 90% (#152)", () => {
+  const now = Date.now() / 1000
+  const spare = (weekReset: number) => ({
+    "spare@example.test": { readAt: iso(now), week: 97, weekReset },
+  })
+  const home = setup("spare-97", 50, 20, spare(now + 172800))
+  const marks = () => {
+    const env: Record<string, string | undefined> = {
+      ...process.env,
+      HOME: home,
+      PATH: `${join(home, "bin")}:${process.env.PATH}`,
+    }
+    delete env.CLAUDE_CONFIG_DIR
+    const child = Bun.spawnSync(["python3", "-I", script], { env })
+    expect(child.exitCode).toBe(0)
+    return child.stdout
+      .toString()
+      .split("\n")
+      .filter((line) => line.startsWith("ALERT"))
+      .map((line) => line.split(" ").slice(0, 3).join(" "))
+  }
+  expect(marks()).toEqual(["ALERT 90 spare@example.test:", "ALERT 97 spare@example.test:"])
+  expect(marks()).toEqual([])
+  const usage = join(home, ".playground", "usage.json")
+  writeFileSync(
+    usage,
+    JSON.stringify({
+      ...JSON.parse(readFileSync(usage, "utf8")),
+      accounts: spare(now + 172800 + 7 * 86400),
+    }),
+  )
+  expect(marks()).toEqual(["ALERT 90 spare@example.test:", "ALERT 97 spare@example.test:"])
+})
+
+test("a listed spare's marks fire while the logged-in account is outside usage.accounts (#152)", () => {
+  const now = Date.now() / 1000
+  const home = setup("spare-foreign-login", 50, 20, {
+    "spare@example.test": { readAt: iso(now), week: 97, weekReset: now + 172800 },
+  })
+  const usage = join(home, ".playground", "usage.json")
+  writeFileSync(
+    usage,
+    readFileSync(usage, "utf8").replace(
+      '"account":"login@example.test"',
+      '"account":"other@example.test"',
+    ),
+  )
+  const env: Record<string, string | undefined> = {
+    ...process.env,
+    HOME: home,
+    PATH: `${join(home, "bin")}:${process.env.PATH}`,
+  }
+  delete env.CLAUDE_CONFIG_DIR
+  const run = () => Bun.spawnSync(["python3", "-I", script], { env }).stdout.toString().split("\n")
+  const lines = run()
+  expect(lines[0]).toStartWith("other@example.test: not a factory account")
+  expect(
+    lines
+      .filter((line) => line.startsWith("ALERT"))
+      .map((line) => line.split(" ").slice(0, 3).join(" ")),
+  ).toEqual(["ALERT 90 spare@example.test:", "ALERT 97 spare@example.test:"])
+  expect(run().filter((line) => line.startsWith("ALERT"))).toEqual([])
+})
+
+test("an unlisted login with only a 5-hour window still lets a listed spare's marks fire", () => {
+  const now = Date.now() / 1000
+  const home = setup("spare-foreign-login-no-week", 50, 20, {
+    "spare@example.test": { readAt: iso(now), week: 97, weekReset: now + 172800 },
+  })
+  const usage = join(home, ".playground", "usage.json")
+  const data = JSON.parse(readFileSync(usage, "utf8"))
+  data.account = "other@example.test"
+  delete data.rate_limits.seven_day
+  writeFileSync(usage, JSON.stringify(data))
+  expect(alerts(home)).toEqual(["ALERT 90", "ALERT 97"])
+})

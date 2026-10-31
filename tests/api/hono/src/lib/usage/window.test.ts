@@ -91,6 +91,39 @@ describe("usageOf", () => {
   })
 })
 
+describe("an account with no 5-hour window (#162)", () => {
+  const probed = (limits: Record<string, unknown>, source = "token/ratelimit-headers") =>
+    JSON.stringify({ rate_limits: limits, source, writtenAt: "2026-10-06T08:25:00Z" })
+
+  test("a probe reading with a week and no five_hour is no 5-hour window, not a missing read", () => {
+    expect(usageOf(probed({ seven_day: { used_percentage: 21 } }), NOW)).toMatchObject({
+      fiveHour: null,
+      fiveHourNone: true,
+    })
+  })
+
+  test("a /usage reading that lacks five_hour, or a probe that has it, marks nothing", () => {
+    expect(
+      usageOf(probed({ seven_day: { used_percentage: 21 } }, "oauth/usage"), NOW)?.fiveHourNone,
+    ).toBeUndefined()
+    expect(
+      usageOf(
+        probed({ five_hour: { used_percentage: 4 }, seven_day: { used_percentage: 21 } }),
+        NOW,
+      )?.fiveHourNone,
+    ).toBeUndefined()
+  })
+
+  test("withSeen never puts back a 5-hour window the account does not have", () => {
+    const seen = {
+      fiveHour: { resetsAt: null, seenAt: "2026-10-06T08:00:00.000Z", usedPercent: 40 },
+    }
+    expect(
+      withSeen(usageOf(probed({ seven_day: { used_percentage: 21 } }), NOW)!, seen).fiveHour,
+    ).toBeNull()
+  })
+})
+
 describe("withSeen", () => {
   test("a window the file lacks is the last one it held, marked with when that was written; one never seen stays null", () => {
     const seen = {}

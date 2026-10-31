@@ -41,6 +41,8 @@ playground ask <command> ...
                       the Inbox: post an ask, read its answer, close it (bun run ask)
 playground changelog <command> ...
                       add rows to the Changelog from GitHub's merges and versions, or a line by hand (bun run changelog)
+playground dm send <file>
+                      post the reply in <file>, named by its absolute path, to the owner's own DM in its frame, the one way any session posts there (bun run dm)
 playground ingest [--follow | status]
                       read every Claude Code session on this machine into the Dashboard's database (bun run ingest)
 playground queues     print the merge queue and the work queue (bun run queues)
@@ -75,7 +77,7 @@ playground picker <session> allow <key> | deny <key> "<reason>"
                       as the session's manager, answer the permission prompt its stuck alert named by key: allow presses Yes once, deny presses No and sends the session the reason; each answer is a line in ops/picker.log`
 
 // The package scripts playground runs as its own verbs.
-export const VERBS = ["ask", "changelog", "ingest", "queues", "thread"]
+export const VERBS = ["ask", "changelog", "dm", "ingest", "queues", "thread"]
 
 // playground <verb> runs the package script of that name in the Dashboard's checkout, words and all.
 export const verbArgv = (verb: string, words: string[]): string[] => ["run", verb, ...words]

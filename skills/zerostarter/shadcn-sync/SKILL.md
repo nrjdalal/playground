@@ -11,7 +11,7 @@ source: https://github.com/nrjdalal/zerostarter
 
 `bun run shadcn:update` tears the whole `ui/` layer down to the registry and re-applies every local override programmatically. It is **self-reconciling**: a clean tree goes in, a clean tree comes back. The only diff you should ever see is **the residual**, a genuine upstream change to a component.
 
-Under the hood the command is `bash .github/scripts/shadcn-update.sh && bun i`. The script, from `web/next`, runs `rm -rf components.json src/components/ui` -> `shadcn init` -> `shadcn add -a`; then, at repo root, `.github/scripts/shadcn-customize.ts` -> `bun run format` (oxfmt). The trailing `bun i` belongs to the wrapper, not the script: it reconciles the lockfile after `customize.ts` restores it from HEAD.
+Under the hood the command is `bun packages/scripts/src/shadcn-update.ts && bun i`. The script removes `web/next/components.json` and `web/next/src/components/ui`, runs `shadcn init` -> `shadcn add -a` from `web/next`, then, at repo root, `packages/scripts/src/shadcn-customize.ts` -> `bun run format` (oxfmt). The trailing `bun i` belongs to the wrapper, not the script: it reconciles the lockfile after `customize.ts` restores it from HEAD.
 
 ## Procedure
 

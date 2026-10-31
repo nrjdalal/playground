@@ -33,4 +33,9 @@ describe("the Preview pane", () => {
     )
     expect(source).toContain("if (!canLoad(next)) return")
   })
+
+  test("a Start that answers after a re-pick waits only for the worktree it started, never the one picked since", () => {
+    expect(source).toContain("picking.current = stopped")
+    expect(source).toContain("if (picking.current === path) setWaiting(true)")
+  })
 })
