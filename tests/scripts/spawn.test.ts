@@ -991,19 +991,22 @@ describe("a manager starts in a workspace of its own, in the leads worktree", ()
   })
 
   // A public install clones main alone, so a cut from canary had no branch to take.
-  test("a clone of an origin with main alone cuts the leads worktree from main", async () => {
-    const r = await spawn(
-      ["manager", "optimizer", "b.md"],
-      [],
-      { NO_LEADS: "1" },
-      undefined,
-      undefined,
-      checkoutOf({ canary: false }),
-    )
-    expect(r.err).not.toContain("invalid reference")
-    expect(r.code).toBe(0)
-    expect(git(leads(r.home), "rev-parse", "--abbrev-ref", "@{upstream}")).toBe("origin/main")
-  })
+  test.each(["optimizer", "builder"])(
+    "a clone of an origin with main alone cuts the leads worktree from main: %s",
+    async (name) => {
+      const r = await spawn(
+        ["manager", name, "b.md"],
+        [],
+        { NO_LEADS: "1" },
+        undefined,
+        undefined,
+        checkoutOf({ canary: false }),
+      )
+      expect(r.err).not.toContain("invalid reference")
+      expect(r.code).toBe(0)
+      expect(git(leads(r.home), "rev-parse", "--abbrev-ref", "@{upstream}")).toBe("origin/main")
+    },
+  )
 
   test("a checkout cloned on canary on purpose cuts the leads worktree from canary", async () => {
     const r = await spawn(
