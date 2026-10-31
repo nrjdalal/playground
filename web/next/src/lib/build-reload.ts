@@ -55,7 +55,7 @@ const typing = (): boolean => {
   return field instanceof HTMLElement && field.isContentEditable && !!field.textContent?.trim()
 }
 
-const reloadedFor = (): string | null => {
+const storedReload = (): string | null => {
   try {
     return sessionStorage.getItem(BUILD_RELOAD_KEY)
   } catch {
@@ -85,7 +85,7 @@ export function useBuildReload(outbox: readonly OutboxMessage[]): void {
         busy: typing() || held.current,
         current: data,
         loaded: loaded.current,
-        reloadedFor: reloadedFor(),
+        reloadedFor: storedReload(),
       })
       if (next === "reload") {
         try {
