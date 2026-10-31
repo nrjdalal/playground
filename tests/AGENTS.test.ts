@@ -6,7 +6,7 @@ const ROOT = join(import.meta.dir, "..")
 // AGENTS.md plus every file it imports, in chars: what every session loads before its first turn, set at 43,531 plus 5%.
 const BUDGET = 45_700
 
-// The test goes red at this share of BUDGET, so two PRs that each pass alone still pass together at merge.
+// The test goes red at this share of BUDGET, which keeps 3% of it free for PRs that pass alone and merge together.
 const MARGIN = 0.97
 
 // Every ALWAYS rule by its first five words: each keeps its line in AGENTS.md, so it loads into every session, while a dashboard rule's full text stays in its topic file.
