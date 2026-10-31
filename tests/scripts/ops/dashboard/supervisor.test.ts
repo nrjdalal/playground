@@ -886,7 +886,8 @@ bun() {
       mkdir -p web/next/.next/standalone/web/next web/next/.next/static
       git rev-parse HEAD > web/next/.next/standalone/web/next/server.js ;;
     "run serve") echo "serve $(basename "\${PLAYGROUND_BUILD:-none}")" >> ${keptCalls} ;;
-    "install --frozen-lockfile") ! listed install-fails ;;
+    "install --frozen-lockfile") echo "NODE_ENV=\${NODE_ENV:-} SKIP_ENV_VALIDATION=\${SKIP_ENV_VALIDATION:-}" >> ${kept}/installs
+      ! listed install-fails ;;
     "run dev") echo "dev" >> ${keptCalls} ;;
   esac
 }
@@ -1038,6 +1039,19 @@ describe("the supervisor's build before the stop (#122)", () => {
     ])
     expect(existsSync(join(kept, "staging"))).toBe(false)
     expect(worktrees()).toBe(1)
+  })
+
+  test("the staging install runs without the supervisor's NODE_ENV, so bun installs the dev dependencies the build needs", async () => {
+    fresh()
+    rmSync(join(kept, "installs"), { force: true })
+    const rolled = await prebuiltRun(
+      `export NODE_ENV=production SKIP_ENV_VALIDATION=true; running=${c1}; roll_to ${c2} canary; echo "$running"`,
+      c1,
+    )
+    expect(rolled).toEqual({ code: 0, out: c2 })
+    expect((await Bun.file(join(kept, "installs")).text()).split("\n")[0]).toBe(
+      "NODE_ENV= SKIP_ENV_VALIDATION=",
+    )
   })
 
   test("a failed build lists the target in bad-builds and stops nothing, the staging worktree removed", async () => {

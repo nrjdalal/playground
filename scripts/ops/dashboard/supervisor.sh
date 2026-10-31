@@ -62,21 +62,21 @@ build_head() {
 # Before a roll stops anything: build the target ($1, the roll tagged $2) into $S/builds/<sha> from a detached staging worktree while the old stack serves, so build_head finds it kept after the stop; a target that migrates, whose commit cannot be had here, or whose staging worktree or install fails, builds after the stop as before; a build that fails lists the target in bad-builds and returns 1 with nothing stopped; the staging worktree goes either way
 prebuild() {
   local target=$1 tag=$2 stage=$S/staging built rc=0
+  drop_stage() { git worktree remove --force "$stage" >> "$LOG" 2>&1 || rm -rf "$stage"; git worktree prune; }
   "$D/net-git.sh" fetch -q origin >> "$LOG" 2>&1
   git cat-file -e "$target^{commit}" 2>/dev/null || { say "no commit ${target:0:7} here yet; building after the stop"; return 0; }
   git diff --quiet HEAD "$target" -- packages/db/drizzle/ || { say "${target:0:7} migrates; building after the stop"; return 0; }
   rm -rf "$stage"; git worktree prune
-  git worktree add -q --detach "$stage" "$target" >> "$LOG" 2>&1 || { say "the staging worktree for ${target:0:7} failed; building after the stop"; rm -rf "$stage"; return 0; }
+  git worktree add -q --detach "$stage" "$target" >> "$LOG" 2>&1 || { say "the staging worktree for ${target:0:7} failed; building after the stop"; drop_stage; return 0; }
   # node_modules as an APFS clone of the checkout's, then an install for what the move changed and each workspace's own links; .env as the checkout's, which bun run build loads
-  if ! { { [ ! -d node_modules ] || cp -cR node_modules "$stage/"; } && (cd "$stage" && bun install --frozen-lockfile --ignore-scripts); } >> "$LOG" 2>&1; then
+  if ! { { [ ! -d node_modules ] || cp -cR node_modules "$stage/"; } && (cd "$stage" && unset NODE_ENV SKIP_ENV_VALIDATION && bun install --frozen-lockfile --ignore-scripts); } >> "$LOG" 2>&1; then
     say "the staging worktree's install for ${target:0:7} failed; building after the stop"
-    git worktree remove --force "$stage" >> "$LOG" 2>&1 || rm -rf "$stage"; git worktree prune
-    return 0
+    drop_stage; return 0
   fi
   [ ! -f .env ] || cp .env "$stage/.env"
   say "building ${target:0:7} before the stop, from $stage"
   built=$(build_head "$stage") || rc=1
-  git worktree remove --force "$stage" >> "$LOG" 2>&1 || rm -rf "$stage"; git worktree prune
+  drop_stage
   [ $rc -eq 0 ] && return 0
   echo "$target" >> "$BAD"
   result "$tag ${target:0:7} FAIL build before the stop: ${built:-no error line; see supervisor.log}; still serving $(git rev-parse --short HEAD)"
