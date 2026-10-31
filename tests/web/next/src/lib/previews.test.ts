@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 
 import type { Preview } from "../../../../../api/hono/src/lib/apps/previews"
 import {
+  doneMessage,
   loadable,
   OPEN_PREVIEW,
   openPreview,
@@ -207,6 +208,25 @@ describe("openPreview", () => {
     ).toEqual({ from: "/dashboard?worker=a" })
     expect(previewClick({ ...click, metaKey: true }, "/dashboard", home)).toBeNull()
     expect(previewClick({ ...click, button: 1 }, "/dashboard", home)).toBeNull()
+  })
+})
+
+// Done hands the work back for review, never merged; it goes to the dispatcher, the one session the owner's messages reach, which routes it to the worktree's session
+describe("doneMessage", () => {
+  test("names the worktree, branch and session, pushes to its open PR or opens one into its parent, and never merges", () => {
+    const text = doneMessage({ branch: "feat/rooms", path: "/w/rooms", session: "rooms-worker" })
+    expect(text).toContain("feat/rooms")
+    expect(text).toContain("/w/rooms")
+    expect(text).toContain("rooms-worker")
+    expect(text).toContain("push it to the branch's open PR")
+    expect(text).toContain("only when none is open")
+    expect(text).toContain("Do not merge")
+  })
+
+  test("a worktree no session works in says so", () => {
+    expect(doneMessage({ branch: "main", path: "/w/yard", session: null })).toContain(
+      "no session works in it",
+    )
   })
 })
 
