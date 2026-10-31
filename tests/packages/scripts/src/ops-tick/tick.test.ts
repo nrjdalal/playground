@@ -886,6 +886,30 @@ describe("canary pull", () => {
     expect(sent).toEqual([])
   })
 
+  test("fast-forwards a clean leads worktree to the origin branch it tracks, main on a public install", async () => {
+    const w = world()
+    const leads = join(w.repo, ".claude", "worktrees", "public-leads")
+    git(w.repo, "worktree", "add", "-q", "--track", "-B", "leads", leads, "origin/main")
+    git(w.seed, "checkout", "-q", "main")
+    git(
+      w.seed,
+      "-c",
+      "user.name=t",
+      "-c",
+      "user.email=t@t",
+      "commit",
+      "-q",
+      "--allow-empty",
+      "-m",
+      "three",
+    )
+    git(w.seed, "push", "-q", w.origin, "main")
+    const { ctx, sent } = fake(scratch(), at(14, 5))
+    await beat("canary-pull").run({ ...ctx, repo: w.repo, run: realRun })
+    expect(git(leads, "rev-parse", "HEAD")).toBe(git(w.origin, "rev-parse", "main"))
+    expect(sent).toEqual([])
+  })
+
   test("leaves a canary worktree holding an open change as it is, and says nothing", async () => {
     const w = world()
     const before = git(w.leads, "rev-parse", "HEAD")
