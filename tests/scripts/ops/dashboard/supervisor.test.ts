@@ -1199,89 +1199,63 @@ const LIVE_ROUTES: [string, number][] = [
   ["desk.api.playground.localhost", 4843],
   ["api.playground.localhost", 4843],
 ]
-const alias = async (file = routesFile) => {
-  const proc = Bun.spawn(
-    [
-      "bun",
-      "--no-env-file",
-      join(root, "scripts", "ops", "dashboard", "alias.ts"),
-      file,
-      "https://desk.playground.localhost",
-      "https://desk.api.playground.localhost",
-    ],
-    { stderr: "pipe", stdout: "pipe" },
-  )
-  const [out, code] = await Promise.all([new Response(proc.stdout).text(), proc.exited])
-  return { code, out: out.trim() }
-}
-
 describe("the supervisor's alias check", () => {
-  test("passes while each bare alias holds the port of the live stack's own route", async () => {
-    await routes(LIVE_ROUTES)
-    expect(await alias()).toEqual({
-      code: 0,
-      out: "playground.localhost and api.playground.localhost hold the live stack's ports 4842 and 4843",
-    })
-  })
-
-  // on 31 Oct a probe moved playground.localhost to its own web for about 2 s, twice, and nothing checked or alerted
-  test("names both ports when a bare alias points somewhere else", async () => {
-    await routes(
-      LIVE_ROUTES.map(([host, port]) => [host, host === "playground.localhost" ? 4851 : port]),
-    )
-    expect(await alias()).toEqual({
-      code: 1,
-      out: "playground.localhost points at port 4851, but the live stack's desk.playground.localhost is on 4842",
-    })
-  })
-
-  test("names a missing route as its own case, never a pass", async () => {
-    await routes(LIVE_ROUTES.filter(([host]) => host !== "playground.localhost"))
-    expect(await alias()).toEqual({
-      code: 1,
-      out: `no route for playground.localhost in ${routesFile}`,
-    })
-    await routes(LIVE_ROUTES.filter(([host]) => host !== "desk.api.playground.localhost"))
-    expect((await alias()).out).toBe(`no route for desk.api.playground.localhost in ${routesFile}`)
-  })
-
-  test("names a missing or unreadable route file as its own case, never a pass", async () => {
-    expect(await alias(join(scratch, "nowhere", "routes.json"))).toEqual({
-      code: 1,
-      out: `no route file at ${join(scratch, "nowhere", "routes.json")}`,
-    })
-    await Bun.write(routesFile, "{not json")
-    expect(await alias()).toEqual({ code: 1, out: `the route file ${routesFile} is not JSON` })
-  })
-
-  test("writes one ANOMALY result and one alert when an alias goes wrong, none while it stays so, and one result when it is right again", async () => {
-    const state = join(scratch, "alias-state")
-    const ops = join(scratch, "alias-ops")
+  const state = join(scratch, "alias-state")
+  const ops = join(scratch, "alias-ops")
+  const right = join(scratch, "right.json")
+  // Runs check_aliases as the supervisor's loop does, in one shell, with a stand-in notify.sh; the route file starts with playground.localhost on the wrong port, and body says when it is put right. Returns the results and the alerts.
+  const ticks = async (body: string, confirm: number) => {
+    rmSync(state, { force: true, recursive: true })
+    rmSync(join(ops, "sent"), { force: true })
     await Bun.write(join(ops, "notify.sh"), `#!/bin/sh\necho "$1 $2" >> "${join(ops, "sent")}"\n`)
     chmodSync(join(ops, "notify.sh"), 0o755)
     await Bun.write(join(state, "results.log"), "")
     await Bun.write(answer, "https://desk.NAME.localhost\n")
     await routes(LIVE_ROUTES)
-    const right = join(scratch, "right.json")
     await Bun.write(right, Bun.file(routesFile))
     await routes(
       LIVE_ROUTES.map(([host, port]) => [host, host === "playground.localhost" ? 4851 : port]),
     )
     const proc = run(
-      `D=${join(root, "scripts", "ops", "dashboard")} OPS=${ops} RESULTS=${join(state, "results.log")} LOG=${join(state, "supervisor.log")} PORTLESS_STATE_DIR=${routesDir}\n${fn("say")}\n${fn("result")}\n${fn("dashboard_urls")}\n${fn("check_aliases")}\ncheck_aliases; check_aliases; cp ${right} ${routesFile}; check_aliases; check_aliases; true`,
+      `D=${join(root, "scripts", "ops", "dashboard")} OPS=${ops} RESULTS=${join(state, "results.log")} LOG=${join(state, "supervisor.log")} PORTLESS_STATE_DIR=${routesDir} ALIAS_CONFIRM=${confirm} FIX="cp ${right} ${routesFile}"\n${fn("say")}\n${fn("result")}\n${fn("dashboard_urls")}\n${fn("read_aliases")}\n${fn("check_aliases")}\n${body}\ntrue`,
     )
     expect(await proc.exited).toBe(0)
-    const results = (await Bun.file(join(state, "results.log")).text()).trim().split("\n")
+    const results = (await Bun.file(join(state, "results.log")).text()).trim()
+    const sent = await Bun.file(join(ops, "sent"))
+      .text()
+      .catch(() => "")
+    return { results: results ? results.split("\n") : [], sent: sent.trim() }
+  }
+
+  test("writes one ALIAS FAIL result when an alias stays wrong, none while it stays so, an ALIAS PASS once it is right, and no alert of its own", async () => {
+    const { results, sent } = await ticks(
+      "check_aliases; check_aliases; $FIX; check_aliases; check_aliases",
+      0,
+    )
     expect(results).toHaveLength(2)
     expect(results[0]).toContain(
-      "ANOMALY alias: playground.localhost points at port 4851, but the live stack's desk.playground.localhost is on 4842",
+      "ALIAS FAIL playground.localhost points at port 4851, but the live stack's desk.playground.localhost is on 4842",
     )
     expect(results[1]).toContain(
-      "ALIAS ok again: playground.localhost and api.playground.localhost hold the live stack's ports 4842 and 4843",
+      "ALIAS PASS playground.localhost and api.playground.localhost hold the live stack's ports 4842 and 4843",
     )
-    expect((await Bun.file(join(ops, "sent")).text()).trim()).toBe(
-      "dashboard alias: playground.localhost points at port 4851, but the live stack's desk.playground.localhost is on 4842",
-    )
+    // run.sh's notify_new alerts each new FAIL line, so the check sends none itself
+    expect(sent).toBe("")
+  })
+
+  // on v0.0.18's roll the bare alias sat on the old web's port for about 3 s after the new web registered, until the launcher's 2 s sync moved it, so a check landing then alerted on a roll
+  test("reads a mismatch again after ALIAS_CONFIRM seconds and stays quiet when the launcher's sync has put it right meanwhile", async () => {
+    const { results, sent } = await ticks("(sleep 0.5; $FIX) & check_aliases; wait", 2)
+    expect(results).toEqual([])
+    expect(sent).toBe("")
+  })
+
+  test("reads a missing route file once, with no wait, and names it", async () => {
+    const started = Date.now()
+    const { results } = await ticks(`rm -f ${routesFile}; check_aliases`, 5)
+    expect(Date.now() - started).toBeLessThan(4000)
+    expect(results).toHaveLength(1)
+    expect(results[0]).toContain(`ALIAS FAIL no route file at ${routesFile}`)
   })
 
   test("runs on every tick of the loop, and only reads the route file", async () => {
