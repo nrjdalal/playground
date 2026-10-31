@@ -58,7 +58,7 @@
   its name and words saying GLM, and screen readers hearing GLM usage, and only while `usage.accounts` holds a GLM row (`hasGlmAccount` in `api/hono/src/lib/store/accounts.ts`): without one the sampler leaves the report's `zai` null, so a `zai-usage.json` left behind draws nothing;
   a file older than `ZAI_STALE_MS` shows each window's last share gray and dimmed, its hover saying stale and when it was last seen.
   They sit on the first live GLM dispatcher's row, gray outlines there until a GLM reading, as Claude's are before a sample; with none live, while a GLM reading is there, on the second dispatcher's row when it does not carry Claude's, Not running or live on Claude, led by Z.ai's mark (`ZaiLogo`, `logo`) on any row not GLM's own;
-  else nowhere, so a machine with no GLM plan draws none (`glmSlot`).
+  else nowhere, so a machine with no GLM reading draws none (`glmSlot`).
   They never share Claude's row: in the 239px row, Claude's readings, GLM's and the two model icons left its name one letter wide (tester round 1).
   The footer holds the music player alone (`MusicPlayer` in `web/next/src/components/dashboard/music-player.tsx`, the owner's #i959), and the Dashboard's user menu is the last square of the aside toolbar on a wide screen, the sidebar's Menu after it on a phone,
   in view while the rest of the bar waits for the socket's first frame so a dashboard that never connects still opens the sidebar (`MENU_TAB`), and below the owner rung, where no bar draws, the shell's floating Menu stays (`SidebarFloatingTrigger always`; the owner: "on mobile menu can join the toolbar"; `AsideUserMenu` in `components/dashboard/owner-menu.tsx`, after a separator),
