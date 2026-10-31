@@ -98,7 +98,7 @@ jobs:
         with:
           name: shard-plan
           path: tests/timings.json
-          retention-days: 1
+          retention-days: 7
 
   suite:
     name: Suite (${{ matrix.shard }})

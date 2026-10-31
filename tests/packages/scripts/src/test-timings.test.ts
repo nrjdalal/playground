@@ -95,6 +95,50 @@ describe("test-timings.ts <dir>", () => {
     }
   })
 
+  test("a shard whose timings.json will not parse is skipped by name, and the others still merge", async () => {
+    const root = await mkdtemp(join(tmpdir(), "test-timings-"))
+    try {
+      await Bun.write(join(root, "tests/a.test.ts"), "")
+      await Bun.write(join(root, "tests/b.test.ts"), "")
+      await Bun.write(
+        join(root, "tests/timings.json"),
+        JSON.stringify({ version: 1, files: { "tests/a.test.ts": 1, "tests/b.test.ts": 2 } }),
+      )
+      await Bun.write(join(root, "shards/timings-1/shard-files"), "./tests/a.test.ts\n")
+      await Bun.write(join(root, "shards/timings-1/timings.json"), '{"version":1,"files":{"tests/a')
+      await Bun.write(join(root, "shards/timings-2/shard-files"), "./tests/b.test.ts\n")
+      await Bun.write(
+        join(root, "shards/timings-2/timings.json"),
+        JSON.stringify({ version: 1, files: { "tests/b.test.ts": 60 } }),
+      )
+      const run = Bun.spawnSync(["bun", SCRIPT, "shards"], { cwd: root, stderr: "pipe" })
+      expect(run.exitCode).toBe(0)
+      expect(run.stderr.toString()).toContain("shards/timings-1 does not read")
+      expect((await Bun.file(join(root, "tests/timings.json")).json()).files).toEqual({
+        "tests/b.test.ts": 60,
+        "tests/a.test.ts": 1,
+      })
+    } finally {
+      await rm(root, { force: true, recursive: true })
+    }
+  })
+
+  test("with every shard truncated, it keeps the committed tests/timings.json byte for byte", async () => {
+    const root = await mkdtemp(join(tmpdir(), "test-timings-"))
+    try {
+      const seed = JSON.stringify({ version: 1, files: { "tests/a.test.ts": 1 } })
+      await Bun.write(join(root, "tests/timings.json"), seed)
+      await Bun.write(join(root, "shards/timings-1/shard-files"), "./tests/a.test.ts\n")
+      await Bun.write(join(root, "shards/timings-1/timings.json"), '{"version":1,"fi')
+      const run = Bun.spawnSync(["bun", SCRIPT, "shards"], { cwd: root, stderr: "pipe" })
+      expect(run.exitCode).toBe(0)
+      expect(run.stderr.toString()).toContain("keeps the committed timings")
+      expect(await Bun.file(join(root, "tests/timings.json")).text()).toBe(seed)
+    } finally {
+      await rm(root, { force: true, recursive: true })
+    }
+  })
+
   test("with no shard to read, it keeps the committed tests/timings.json and says so", async () => {
     const root = await mkdtemp(join(tmpdir(), "test-timings-"))
     try {

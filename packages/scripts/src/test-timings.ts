@@ -1,5 +1,5 @@
 // test-timings.ts <dir>: merges CI's shard timings in <dir> (one folder per shard, its timings.json and shard-files) over tests/timings.json, so the shard planner splits by the last passing run's times; with no shard there it keeps the committed file.
-import { existsSync, readdirSync } from "node:fs"
+import { existsSync } from "node:fs"
 import { join } from "node:path"
 
 const TIMINGS = "tests/timings.json"
@@ -29,27 +29,51 @@ export function refresh(
   )
 }
 
+// A shard folder's file list and times, or null when either will not read, since one bad artifact must not fail every PR's check
+const readShard = async (folder: string): Promise<Shard | null> => {
+  try {
+    const timings = (await Bun.file(join(folder, "timings.json")).json()).files
+    const files = (await Bun.file(join(folder, "shard-files")).text()).split("\n").filter(Boolean)
+    return typeof timings === "object" && timings !== null ? { files, timings } : null
+  } catch {
+    return null
+  }
+}
+
+const shardFolders = (dir: string) => {
+  try {
+    return [...new Bun.Glob("*/shard-files").scanSync(dir)]
+      .map((path) => join(dir, path, ".."))
+      .sort()
+  } catch {
+    return []
+  }
+}
+
 if (import.meta.main) {
   const dir = process.argv[2]
   if (!dir) {
     console.error("usage: test-timings.ts <dir of shard folders>")
     process.exit(2)
   }
-  const read = async (path: string): Promise<Timings> => (await Bun.file(path).json()).files ?? {}
-  const folders = existsSync(dir)
-    ? readdirSync(dir).filter((name) => existsSync(join(dir, name, "shard-files")))
-    : []
-  if (folders.length === 0) {
+  const shards: Shard[] = []
+  for (const folder of shardFolders(dir)) {
+    const shard = await readShard(folder)
+    if (shard) shards.push(shard)
+    else
+      console.error(
+        `test-timings: ${folder} does not read, so its files keep their committed times`,
+      )
+  }
+  if (shards.length === 0) {
     console.error(`test-timings: no shard in ${dir}, so the split keeps the committed timings`)
     process.exit(0)
   }
-  const shards = await Promise.all(
-    folders.map(async (name) => ({
-      files: (await Bun.file(join(dir, name, "shard-files")).text()).split("\n").filter(Boolean),
-      timings: await read(join(dir, name, "timings.json")),
-    })),
-  )
-  const files = refresh(await read(TIMINGS), shards, existsSync)
+  const committed: Timings = await Bun.file(TIMINGS)
+    .json()
+    .then((json) => json.files ?? {})
+    .catch(() => ({}))
+  const files = refresh(committed, shards, existsSync)
   await Bun.write(TIMINGS, `${JSON.stringify({ version: 1, files }, null, 2)}\n`)
   console.error(`test-timings: ${Object.keys(files).length} files, ${shards.length} shards merged`)
 }
