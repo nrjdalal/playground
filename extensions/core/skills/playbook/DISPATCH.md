@@ -55,6 +55,7 @@ The steps to spawn and brief a session are in [SESSIONS.md](SESSIONS.md#spawn), 
   The Planner groups the open issues and backlog entries that touch one surface into a bundle: sidebar and status, chat and composer, inbox and aside, ops scripts and the merge path, tests and docs, or apps.
   The work org's work stays outside the bundles, one ticket to a worker, as its ticket skill works it.
   A bundle is one worker, one branch, one PR, one review loop and one tester pass per head.
+  A lane's item aims at about 1,000 changed lines or fewer, and a worker whose diff passes that splits the rest into a new PR off `canary` rather than stacking a third level, since each round of a diff too big to read whole finds new blocking issues (measured, 31 Oct: one of 9,089 lines opened with 3 blocking and 10 should-fix findings, and one of 1,241 stayed at 3/5 after 5 rounds).
   The Planner keeps the bundles as `plan.json`'s lanes: one worker a lane, each lane owning its files and naming its test area (`testArea`, the pages and files it touches), the lanes in parallel, each lane's items top to bottom.
   Every estimate a lane or a plan carries names three numbers at the agent's pace, each labelled measured or estimated (**verify**): the build time in hours, the people waits (reviews, the owner's answers) and the gate waits (Checks, review rounds, counted as **eta** counts them), and never human dev-days or weeks (the owner: "The estimates are always not nice...
   Nothing takes 2 to 3 weeks.
@@ -67,6 +68,7 @@ The steps to spawn and brief a session are in [SESSIONS.md](SESSIONS.md#spawn), 
   The worker cutting the child runs the stack test before the child's PR opens: `git merge-tree --write-tree --merge-base <the parent's merge base with canary> <parent> <child>` coming back clean, since the bare two-head form takes the child's descent from the parent as its merge base and so can never conflict,
   while the two heads' adjacent hunks still conflict once the parent squash-merges onto `canary`.
   A stack holds the child behind its parent: the lead sends Ops the hold line **gate**'s hold paragraph names, for the child's PR, and Ops removes it on the lead's word once the parent has merged, so a ready child never lands its parent's lines first.
+  The child merges its parent's branch in once, when the parent scores 5/5 or merges, and `canary` only when it needs it (a conflict, or a change it builds on), since every merge is a new head its reviewer scores again (measured, 31 Oct: one child merged its parent four times in 59 minutes while the parent sat at 3/5).
   Anything else bundles the items into one PR or sequences them one PR after the other.
   A PR whose GitHub base is the parent's branch is the other stack shape, the one **github**'s stacked-base line governs.
   A single task goes out alone when it takes a route that skips the Planner (above).
