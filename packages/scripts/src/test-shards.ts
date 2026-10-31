@@ -1,6 +1,4 @@
 // test-shards.ts matrix | files <shard>: CI's split of the suite into shards by tests/timings.json, each about BUDGET_MS of file time, so the suite's wall time stays near one shard's as it grows.
-import { existsSync, readFileSync } from "node:fs"
-
 // recorded file time per shard: on CI a shard of 3 workers ran 180s of wall time for 335s recorded (the slowest of four, measured), so 300s gives about 160s, inside the 3-minute target
 export const BUDGET_MS = 300_000
 const TIMINGS = "tests/timings.json"
@@ -36,8 +34,9 @@ export function shards(
 
 if (import.meta.main) {
   const [verb, shard] = process.argv.slice(2)
-  const timings: Record<string, number> = existsSync(TIMINGS)
-    ? (JSON.parse(readFileSync(TIMINGS, "utf8")).files ?? {})
+  const file = Bun.file(TIMINGS)
+  const timings: Record<string, number> = (await file.exists())
+    ? ((await file.json()).files ?? {})
     : {}
   const files = [...new Bun.Glob(PATTERN).scanSync(".")].sort()
   const split = shards(timings, files, BUDGET_MS)
