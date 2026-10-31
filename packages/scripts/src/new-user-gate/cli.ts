@@ -69,8 +69,12 @@ const prep = (box: string, sha: string) => {
   }
   writeFileSync(join(box, "tty"), "y\n")
   // every zsh the stack's jobs start reads .zshenv, and a login one has path_helper reorder PATH after it, so .zprofile puts the stand-ins first again
+  // and a Claude account's profile read goes to a closed loopback port, so the made-up token never leaves the Mac
   for (const rc of [".zshenv", ".zprofile"])
-    writeFileSync(join(home, rc), `export PATH="${join(box, "stubs")}:$PATH"\n`)
+    writeFileSync(
+      join(home, rc),
+      `export PATH="${join(box, "stubs")}:$PATH"\nexport PLAYGROUND_PROFILE_URL=http://127.0.0.1:9/profile\n`,
+    )
   writeFileSync(join(box, "proxy-up"), "")
   const node = dirname(
     Bun.spawnSync(["realpath", realBin("node")])
