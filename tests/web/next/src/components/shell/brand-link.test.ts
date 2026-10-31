@@ -20,7 +20,9 @@ describe("the sidebar's brand", () => {
   test("the aside turns to the Inbox, again after a move resets its tab, and the Inbox opens the row, now or once it mounts", async () => {
     const aside = await read("components/dashboard/dashboard-aside.tsx")
     expect(aside).toContain("window.addEventListener(OPEN_PREVIEW, open)")
-    expect(aside).toMatch(/if \(!takeMove\(\)\) return\s+setTab\("inbox"\)/)
+    expect(aside).toMatch(/if \(!takeMove\(at\)\) return\s+setTab\("inbox"\)/)
+    expect(aside).toMatch(/const at = `\$\{pathname\}\$\{search \? `\?\$\{search\}` : ""\}`/)
+    expect(aside).toMatch(/setSide\("inbox"\)\s+\}, \[at\]\)/)
     const inbox = await read("components/dashboard/inbox.tsx")
     expect(inbox).toMatch(/if \(takePreview\(\)\)\s+setShelvesOpen\(/)
   })

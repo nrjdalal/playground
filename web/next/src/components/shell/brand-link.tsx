@@ -23,7 +23,7 @@ export function BrandLink({
       className={className}
       onClick={(event) => {
         const click = opensPreview ? previewClick(event, href, window.location) : null
-        if (click) openPreview(click.moves)
+        if (click) openPreview(click.from)
       }}
     >
       {children}
