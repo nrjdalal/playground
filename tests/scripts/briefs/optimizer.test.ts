@@ -25,5 +25,5 @@ test("a first retro with no state file has a since and a ship to start from", ()
 test("the daily beat's threshold sits under its own day, and its reads go through REST as the github rule says", () => {
   expect(text).toContain("20 hours old or more")
   expect(text).toContain('gh api "repos/{owner}/{repo}/pulls?base=main&state=closed')
-  expect(text).not.toMatch(/gh pr (list|view)/)
+  expect(text).not.toMatch(/gh (issue|pr) (list|view)/)
 })

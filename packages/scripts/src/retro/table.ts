@@ -1,5 +1,5 @@
 // The retro's per-PR table: every factory PR updated since a time, read through GraphQL's search a page at a time, one tab-separated row each, from its first commit to its merge (or now), with its commits, force pushes, review rounds and their scores, and tester verdicts, each verdict read as the merge gate reads it.
-import { verdictOf } from "@packages/config/verdicts"
+import { verdictsOf } from "@packages/config/verdicts"
 
 import { factoryRepoOf } from "../playground/setting"
 
@@ -66,7 +66,7 @@ export const rowsOf = (prs: Pr[], owner: string, now: Date): string[] => {
       const end = p.mergedAt ?? now.toISOString()
       const verdicts = p.comments.nodes
         .filter((c) => c.author?.login.toLowerCase() === owner.toLowerCase())
-        .flatMap((c) => verdictOf(c.body) ?? [])
+        .flatMap((c) => verdictsOf(c.body))
       const reviews = verdicts.filter((v) => v.gate === "review")
       const tests = verdicts.filter((v) => v.gate === "tester")
       return [
