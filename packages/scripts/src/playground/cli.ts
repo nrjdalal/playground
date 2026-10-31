@@ -64,9 +64,12 @@ const fail = (message: string, code = 1): never => {
 const pause = (ms: number) => Bun.sleep(ms)
 const briefExists = (brief: string): boolean => existsSync(join(HOME_DATA, brief))
 
-// playground dispatcher, planner, builder or ops, and the bare start's dispatcher step: 0 started, 3 already running, 1 refused with spawn.sh's reason.
-const manager = async (kind: NamedKind): Promise<{ code: number; message: string }> => {
-  const name = getSessionNames().names[kind]
+// The managers a playground verb starts: the named kinds, and the optimizer, whose name is its kind.
+type ManagerVerb = NamedKind | "optimizer"
+
+// playground dispatcher, planner, builder, ops or optimizer, and the bare start's dispatcher step: 0 started, 3 already running, 1 refused with spawn.sh's reason.
+const manager = async (kind: ManagerVerb): Promise<{ code: number; message: string }> => {
+  const name = kind === "optimizer" ? kind : getSessionNames().names[kind]
   const result = await startDispatcher({
     data: HOME_DATA,
     live: liveSessions((live) => live === name).map((d) => d.name),
@@ -130,9 +133,9 @@ const setUp = async (): Promise<string | null> => {
 }
 
 // The managers the dispatcher starts the first time it routes work to one, so none sits idle on the user's usage.
-const MANAGERS: NamedKind[] = ["builder", "dispatcher", "ops", "planner"]
+const MANAGERS: ManagerVerb[] = ["builder", "dispatcher", "ops", "optimizer", "planner"]
 
-const managerAlone = async (kind: NamedKind): Promise<number> => {
+const managerAlone = async (kind: ManagerVerb): Promise<number> => {
   const unready = await setUp()
   if (unready === null) return (await manager(kind)).code
   console.error(`playground: ${unready}`)
@@ -368,8 +371,8 @@ const code =
           ? await update(rest[1])
           : command === "add"
             ? await add(rest)
-            : MANAGERS.includes(command as NamedKind)
-              ? await managerAlone(command as NamedKind)
+            : MANAGERS.includes(command as ManagerVerb)
+              ? await managerAlone(command as ManagerVerb)
               : command === "page"
                 ? page(rest)
                 : command === "view"

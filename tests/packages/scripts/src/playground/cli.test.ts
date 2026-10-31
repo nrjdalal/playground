@@ -209,7 +209,7 @@ describe("bare dispatcher", () => {
             "packages/scripts/src/ops-herdr/cli.ts": `import { appendFileSync } from "node:fs"\nappendFileSync(${JSON.stringify(log)}, \`ops-herdr \${process.argv.slice(2).join(" ")}\\n\`)\n${opts.opsHerdr}\n`,
             "packages/scripts/src/ops-herdr/pin.json": JSON.stringify(pin),
             ...Object.fromEntries(
-              ["builder", "dispatcher", "ops", "planner"].map((kind) => [
+              ["builder", "dispatcher", "ops", "optimizer", "planner"].map((kind) => [
                 `scripts/briefs/${kind}.md`,
                 `${kind} brief\n`,
               ]),
@@ -237,7 +237,7 @@ describe("bare dispatcher", () => {
       }, 30_000)
 
       // The dispatcher starts each manager the first time it routes work to it, so no manager sits idle on the user's usage.
-      for (const kind of ["builder", "ops", "planner"])
+      for (const kind of ["builder", "ops", "optimizer", "planner"])
         test(`playground ${kind} starts the ${kind} through spawn.sh, its brief from scripts/briefs/${kind}.md`, async () => {
           const { code, ran } = await run({ binary: true, opsHerdr: "", words: [kind] })
           expect(ran).toEqual(["ops-herdr start", `spawn.sh manager ${kind} brief-${kind}.md`])
