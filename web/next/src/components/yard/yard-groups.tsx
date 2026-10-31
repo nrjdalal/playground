@@ -25,42 +25,33 @@ import { useYardChannels } from "@/lib/yard-api"
 // The Channels and Direct messages groups, read from the API's Yard router; each is absent while it has no rows, and both while the stack has no Yard. Each collapses as the Scripts group does, its label the toggle, open to start, and counts its rows.
 export function YardGroups() {
   const { data } = useYardChannels()
-  const [channelsOpen, setChannelsOpen] = useState(true)
-  const [dmsOpen, setDmsOpen] = useState(true)
   if (!data) return null
   const { channels, dms } = yardGroups(data)
   return (
     <>
-      {channels.length > 0 && (
-        <SidebarGroup>
-          <SidebarGroupLabel
-            className="w-full pl-2.5"
-            render={toggle(channelsOpen, setChannelsOpen)}
-          >
-            Channels
-            <Chevron open={channelsOpen} />
-            <GroupCount count={channels.length} />
-          </SidebarGroupLabel>
-          {channelsOpen && <YardRows rows={channels} />}
-        </SidebarGroup>
-      )}
-      {dms.length > 0 && (
-        <SidebarGroup>
-          <SidebarGroupLabel className="w-full pl-2.5" render={toggle(dmsOpen, setDmsOpen)}>
-            Direct messages
-            <Chevron open={dmsOpen} />
-            <GroupCount count={dms.length} />
-          </SidebarGroupLabel>
-          {dmsOpen && <YardRows rows={dms} />}
-        </SidebarGroup>
-      )}
+      <YardGroup label="Channels" rows={channels} />
+      <YardGroup label="Direct messages" rows={dms} />
     </>
   )
 }
 
-const toggle = (open: boolean, setOpen: (open: boolean) => void) => (
-  <button type="button" aria-expanded={open} onClick={() => setOpen(!open)} />
-)
+function YardGroup({ label, rows }: { label: string; rows: YardChannel[] }) {
+  const [open, setOpen] = useState(true)
+  if (rows.length === 0) return null
+  return (
+    <SidebarGroup>
+      <SidebarGroupLabel
+        className="w-full pl-2.5"
+        render={<button type="button" aria-expanded={open} onClick={() => setOpen(!open)} />}
+      >
+        {label}
+        <Chevron open={open} />
+        <GroupCount count={rows.length} />
+      </SidebarGroupLabel>
+      {open && <YardRows rows={rows} />}
+    </SidebarGroup>
+  )
+}
 
 const Chevron = ({ open }: { open: boolean }) => (
   <RiArrowRightSLine className={cn("transition-transform", open && "rotate-90")} />

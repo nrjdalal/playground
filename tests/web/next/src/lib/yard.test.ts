@@ -119,6 +119,11 @@ describe("the sidebar's rows", () => {
     expect(channelHref(dm, false)).toBe("/dashboard/yard/d1")
   })
 
+  test("a channel's id is escaped in its link, as the approve and invite paths escape theirs", () => {
+    expect(channelHref({ id: "../tokens" }, true)).toBe("/yard/c/..%2Ftokens")
+    expect(channelHref({ id: "../tokens" }, false)).toBe("/dashboard/yard/..%2Ftokens")
+  })
+
   test("a pending post links to its approve page on the hosted app alone, since a local stack serves no /yard page", () => {
     expect(approveHref({ id: "m4" }, true)).toBe("/yard/approve/m4")
     expect(approveHref({ id: "m4" }, false)).toBeNull()

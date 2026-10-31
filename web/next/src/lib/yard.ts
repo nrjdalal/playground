@@ -39,7 +39,9 @@ export const upsertMessage = (list: Message[], message: Message) =>
 
 // The hosted app opens a channel under /yard; the local dashboard opens it in its own chat pane.
 export const channelHref = (channel: Pick<YardChannel, "id">, hosted: boolean) =>
-  hosted ? `/yard/c/${channel.id}` : `/dashboard/yard/${channel.id}`
+  hosted
+    ? `/yard/c/${encodeURIComponent(channel.id)}`
+    : `/dashboard/yard/${encodeURIComponent(channel.id)}`
 
 // Approving needs Yard's own web session, so a local stack, which serves no /yard page, links nowhere.
 export const approveHref = (message: Pick<YardMessage, "id">, hosted: boolean) =>

@@ -31,35 +31,62 @@ export function InviteRequest({ id, role }: { id: string; role: string | null | 
   return (
     <main className="mx-auto flex w-full max-w-xl flex-col gap-4 px-4 py-6">
       <h1 className="text-lg font-semibold">Approve an invite request</h1>
-      {!owner ? (
-        <p className="text-muted-foreground text-sm">Only the owner lets someone in.</p>
-      ) : !isPending && !shown ? (
-        <p className="text-muted-foreground text-sm">No invite request has this link.</p>
-      ) : shown ? (
-        <>
-          <p className="text-sm">
-            <span className="font-medium">{shown.requestedBy?.login ?? "A member"}</span> asks to
-            let <span className="font-medium">{shown.forLogin ?? "someone"}</span> in.
-          </p>
-          {shown.status === "requested" ? (
-            <div className="flex gap-2">
-              <Button onClick={() => void decide("approveInvite")}>Approve</Button>
-              <Button onClick={() => void decide("denyInvite")} variant="outline">
-                Deny
-              </Button>
-            </div>
-          ) : shown.status === "revoked" ? (
-            <p className="text-sm">Denied.</p>
-          ) : shown.code ? (
-            <p className="text-sm">
-              Approved. Pass on this code, shown this once:{" "}
-              <code className="bg-muted rounded px-1.5 py-0.5 font-mono">{shown.code}</code>
-            </p>
-          ) : (
-            <p className="text-sm">Approved.</p>
-          )}
-        </>
-      ) : null}
+      <RequestState decide={decide} isPending={isPending} owner={owner} shown={shown} />
     </main>
+  )
+}
+
+// What the page says of the request: who may decide, whether it exists, and where its decision stands.
+function RequestState({
+  decide,
+  isPending,
+  owner,
+  shown,
+}: {
+  decide: (action: "approveInvite" | "denyInvite") => Promise<void>
+  isPending: boolean
+  owner: boolean
+  shown: YardInvite | null | undefined
+}) {
+  if (!owner)
+    return <p className="text-muted-foreground text-sm">Only the owner lets someone in.</p>
+  if (!shown)
+    return isPending ? null : (
+      <p className="text-muted-foreground text-sm">No invite request has this link.</p>
+    )
+  return (
+    <>
+      <p className="text-sm">
+        <span className="font-medium">{shown.requestedBy?.login ?? "A member"}</span> asks to let{" "}
+        <span className="font-medium">{shown.forLogin ?? "someone"}</span> in.
+      </p>
+      <Outcome decide={decide} shown={shown} />
+    </>
+  )
+}
+
+function Outcome({
+  decide,
+  shown,
+}: {
+  decide: (action: "approveInvite" | "denyInvite") => Promise<void>
+  shown: YardInvite
+}) {
+  if (shown.status === "requested")
+    return (
+      <div className="flex gap-2">
+        <Button onClick={() => void decide("approveInvite")}>Approve</Button>
+        <Button onClick={() => void decide("denyInvite")} variant="outline">
+          Deny
+        </Button>
+      </div>
+    )
+  if (shown.status === "revoked") return <p className="text-sm">Denied.</p>
+  if (!shown.code) return <p className="text-sm">Approved.</p>
+  return (
+    <p className="text-sm">
+      Approved. Pass on this code, shown this once:{" "}
+      <code className="bg-muted rounded px-1.5 py-0.5 font-mono">{shown.code}</code>
+    </p>
   )
 }
