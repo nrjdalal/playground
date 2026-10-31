@@ -349,7 +349,12 @@ describe("lateReviewers", () => {
         },
       },
     })
-  const late = async (reply: string, live: [string, string][] = [], reviewer = true) => {
+  const late = async (
+    reply: string,
+    live: [string, string][] = [],
+    reviewer = true,
+    status = "working",
+  ) => {
     const { ctx } = setup()
     const told: Call[] = []
     ctx.factory = async () => "acme/app"
@@ -359,8 +364,13 @@ describe("lateReviewers", () => {
     }
     const agents = [
       { kind: "builder", name: "builder" },
-      { kind: "worker", name: "abcdef-worker", pr: "https://github.com/acme/app/pull/145" },
-      ...(reviewer ? [{ kind: "reviewer", name: "ghjkmn-reviewer", pr: "145" }] : []),
+      {
+        kind: "worker",
+        name: "abcdef-worker",
+        pr: "https://github.com/acme/app/pull/145",
+        status,
+      },
+      ...(reviewer ? [{ kind: "reviewer", name: "ghjkmn-reviewer", pr: "145", status }] : []),
     ]
     roster(ctx, agents)
     const found = await lateReviewers(ctx, agents, new Map(live))
@@ -387,6 +397,11 @@ describe("lateReviewers", () => {
     expect((await late(answer(30, ["## ReviewBot · round 1: 3/5 at 1234567"]))).told).toEqual([])
     expect((await late(answer(30), [["ghjkmn-reviewer", "busy"]])).told).toEqual([])
     expect((await late(answer(30, [], "PENDING"))).told).toEqual([])
+  })
+
+  test("a parked worker's ready head sends nothing, while a working one's still alerts (#175)", async () => {
+    expect((await late(answer(30), [], true, "parked")).told).toEqual([])
+    expect((await late(answer(30), [], true, "working")).told).toHaveLength(1)
   })
 
   test("a GraphQL answer it cannot read is reviewer-check-unreadable", async () => {
