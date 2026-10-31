@@ -47,9 +47,15 @@ const readVersion = async (): Promise<string | null> => {
   return versionOf(await response.json())
 }
 
-// Pure: whether a field the owner typed into still shows words a reload would lose, focused or not (an Inbox reply keeps its words in the card alone); one emptied, or gone with its card, lets the reload go.
-export const holdsTyped = (fields: Iterable<{ isConnected: boolean; text: string }>): boolean => {
-  for (const field of fields) if (field.isConnected && field.text.trim()) return true
+// The attribute on an element whose typed words live in its fields alone (an Inbox card's reply, comment and draft), so a reload waits on them; the composer keeps its own draft, and the app fills a field such as the preview's Address itself.
+export const HOLDS_RELOAD = "data-holds-reload"
+
+// Pure: whether a field the owner typed into still shows words a reload would lose (atRisk: inside HOLDS_RELOAD), focused or not; one emptied, or gone with its card, lets the reload go.
+export const holdsTyped = (
+  fields: Iterable<{ atRisk: boolean; isConnected: boolean; text: string }>,
+): boolean => {
+  for (const field of fields)
+    if (field.atRisk && field.isConnected && field.text.trim()) return true
   return false
 }
 
@@ -73,7 +79,7 @@ const storedReload = (): string | null => {
   }
 }
 
-// Reloads the page once when a roll serves a new build: the live Dashboard's production build has no dev socket, so an open tab would keep its old build against the new API. It reads /api/health every 30s and on focus; the outbox keeps queued messages across the reload in sessionStorage, and the reload waits while a failed one shows or a field holds words the owner typed.
+// Reloads the page once when a roll serves a new build: the live Dashboard's production build has no dev socket, so an open tab would keep its old build against the new API. It reads /api/health every 30s and on focus; the outbox keeps queued messages across the reload in sessionStorage, and the reload waits while a failed one shows or a field inside HOLDS_RELOAD holds words the owner typed.
 export function useBuildReload(outbox: readonly OutboxMessage[]): void {
   const { data } = useQuery({
     queryKey: BUILD_QUERY_KEY,
@@ -106,6 +112,7 @@ export function useBuildReload(outbox: readonly OutboxMessage[]): void {
           held.current ||
           holdsTyped(
             [...typed.current].map((field) => ({
+              atRisk: !!field.closest(`[${HOLDS_RELOAD}]`),
               isConnected: field.isConnected,
               text: textOf(field),
             })),

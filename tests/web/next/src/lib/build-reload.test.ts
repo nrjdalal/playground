@@ -40,20 +40,26 @@ describe("holdsText", () => {
 })
 
 describe("holdsTyped", () => {
-  test("holds a field the owner typed into while it still shows words, focused or not", () => {
-    expect(holdsTyped([{ isConnected: true, text: "a reply left in an Inbox box" }])).toBe(true)
-    expect(
-      holdsTyped([
-        { isConnected: true, text: "  " },
-        { isConnected: true, text: "x" },
-      ]),
-    ).toBe(true)
+  const field = (text: string, extra: { atRisk?: boolean; isConnected?: boolean } = {}) => ({
+    atRisk: true,
+    isConnected: true,
+    text,
+    ...extra,
+  })
+
+  test("holds a typed field whose words live nowhere else, focused or not", () => {
+    expect(holdsTyped([field("a reply left in an Inbox box")])).toBe(true)
+    expect(holdsTyped([field("  "), field("x")])).toBe(true)
   })
 
   test("lets a field go once it is emptied or gone from the page", () => {
-    expect(holdsTyped([{ isConnected: true, text: " \n" }])).toBe(false)
-    expect(holdsTyped([{ isConnected: false, text: "a sent reply's card" }])).toBe(false)
+    expect(holdsTyped([field(" \n")])).toBe(false)
+    expect(holdsTyped([field("a sent reply's card", { isConnected: false })])).toBe(false)
     expect(holdsTyped([])).toBe(false)
+  })
+
+  test("lets a field the app fills or keeps itself go, such as the preview's Address", () => {
+    expect(holdsTyped([field("http://localhost:3000/docs", { atRisk: false })])).toBe(false)
   })
 })
 
