@@ -183,3 +183,24 @@ describe("the Review label carries its score's color (PG-157)", () => {
     expect(text).toContain("gh label create 'Review • <s>/5' -R <repo> --color <hex> --force")
   })
 })
+
+describe("a diff holding a long-lived connection is reviewed by a lifecycle table", () => {
+  test("step 4 asks for the table in the PR's Evidence, one row per path, and scores blocking until it is there", async () => {
+    const step = (await skill()).match(/^4\. \*\*Review on two axes\.\*\*.*$/m)?.[0] ?? ""
+    const line = step.split("**Lifecycle table:**")[1]?.split("**Done when**")[0] ?? ""
+    expect(line).toContain("a socket, a pub/sub subscriber, a retrying client")
+    expect(line).toContain("in the PR's Evidence")
+    expect(line).toContain(
+      "one row per path: connect, a connect that fails partway, a drop, a hang after connect, reconnect and resubscribe, close, and a member who loses access,",
+    )
+    expect(line).toContain("the test that proves it, or the reason the path cannot happen")
+    expect(line).toContain("blocking finding")
+    expect(step.split("**Done when**")[1] ?? "").toContain("lifecycle table")
+  })
+
+  test("the docs page says a long-lived connection's lifecycle table holds the score down", async () => {
+    expect(await page()).toContain(
+      "lifecycle table, one row per path from connect to close, and a missing table holds the score at 3",
+    )
+  })
+})

@@ -30,4 +30,23 @@ describe("SESSIONS.md", () => {
     expect(text).toContain("every other angle-bracket word stays as written for the reader")
     expect(text).toContain("spells it in words (two underscores, NAME, two underscores)")
   })
+
+  test("has a worker's brief open its draft before waiting on CI, and cite a run by its id or link", async () => {
+    const text = await Bun.file(SESSIONS).text()
+    const line =
+      text.split("\n").find((l) => l.includes("opens its draft PR before it waits on CI")) ?? ""
+    expect(line).toContain(
+      "A worker's brief says that CI starts only on a pull request into `canary`",
+    )
+    expect(line).toContain("cites a run by its run id or link")
+  })
+
+  test("has a worker's brief keep a merge of canary plain, each edit after it a commit of its own", async () => {
+    const text = await Bun.file(SESSIONS).text()
+    const line =
+      text.split("\n").find((l) => l.includes("keeps the merge commit a plain merge")) ?? ""
+    expect(line).toContain("merges `canary` or its stack's parent into its PR")
+    expect(line).toContain("each edit after it as a commit of its own")
+    expect(line).toContain("an edit inside a merge as blocking")
+  })
 })
