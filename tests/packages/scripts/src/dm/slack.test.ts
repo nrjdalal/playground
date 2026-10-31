@@ -1,9 +1,10 @@
 import { afterAll, describe, expect, test } from "bun:test"
-import { mkdtempSync, rmSync } from "node:fs"
+import { existsSync, mkdtempSync, rmSync, utimesSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import {
+  locked,
   ownerMessages,
   PLAYGROUND,
   readSent,
@@ -62,5 +63,34 @@ describe("the record of our posts", () => {
     await recordSent(dir, "1.000100")
     await recordSent(dir, "2.000100")
     expect(await readSent(dir)).toEqual(new Set(["1.000100", "2.000100"]))
+  })
+})
+
+describe("the send lock", () => {
+  test("a dead send's lock, past its stale bound, is taken over, and the taken-over send never frees its successor's", async () => {
+    const dir = join(scratch, "lock")
+    const lock = join(dir, "dm-send.lock")
+    const old = new Date(Date.now() - 11 * 60_000)
+    let releaseA = () => {}
+    let insideA = false
+    const a = locked(dir, () => {
+      insideA = true
+      return new Promise<void>((resolve) => (releaseA = resolve))
+    })
+    while (!insideA) await Bun.sleep(10)
+    utimesSync(lock, old, old)
+    let releaseB = () => {}
+    let insideB = false
+    const b = locked(dir, () => {
+      insideB = true
+      return new Promise<void>((resolve) => (releaseB = resolve))
+    })
+    while (!insideB) await Bun.sleep(10)
+    releaseA()
+    await a
+    expect(existsSync(lock)).toBe(true)
+    releaseB()
+    await b
+    expect(existsSync(lock)).toBe(false)
   })
 })

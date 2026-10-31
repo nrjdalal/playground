@@ -1,4 +1,4 @@
-import { mkdir, rm, stat } from "node:fs/promises"
+import { mkdir, rename, rm, stat } from "node:fs/promises"
 import { join } from "node:path"
 
 import { writeAtomic } from "../write-atomic"
@@ -49,15 +49,18 @@ export const readSent = async (dir: string): Promise<Set<string>> =>
 export const recordSent = async (dir: string, ts: string) =>
   writeAtomic(join(dir, SENT), JSON.stringify([...(await readSent(dir)), ts].slice(-KEEP)))
 
-// One dm send at a time per data folder, so two never interleave their frames or lose a record: a lock folder taken by mkdir and held for the whole send; one older than LOCK_STALE_MS is a dead send's and is taken over.
-const LOCK_STALE_MS = 120_000
+// One dm send at a time per data folder, so two never interleave their frames or lose a record: a lock folder taken by mkdir and held for the whole send. A send makes at most nine Slack calls of up to 30 s each, so a lock older than LOCK_STALE_MS is a dead send's and is taken over; each holder writes its own token in the lock and frees it only while the token is still its own, so a taken-over send never frees its successor's.
+const LOCK_STALE_MS = 600_000
 export async function locked<T>(dir: string, fn: () => Promise<T>): Promise<T> {
   const path = join(dir, "dm-send.lock")
+  const owner = join(path, "owner")
+  const token = crypto.randomUUID()
   await mkdir(dir, { recursive: true })
   const until = Date.now() + LOCK_STALE_MS + 30_000
   for (;;) {
     try {
       await mkdir(path)
+      await Bun.write(owner, token)
       break
     } catch (error) {
       if ((error as { code?: string }).code !== "EEXIST") throw error
@@ -65,15 +68,27 @@ export async function locked<T>(dir: string, fn: () => Promise<T>): Promise<T> {
         (s) => Date.now() - s.mtimeMs,
         () => 0,
       )
-      if (since > LOCK_STALE_MS) await rm(path, { force: true, recursive: true })
-      else if (Date.now() > until) throw new Error("another dm send holds its lock")
+      // moved aside before its removal, so a lock another waiter has just taken is never the one removed
+      if (since > LOCK_STALE_MS) {
+        const aside = `${path}.stale-${token}`
+        if (
+          await rename(path, aside).then(
+            () => true,
+            () => false,
+          )
+        )
+          await rm(aside, { force: true, recursive: true })
+      } else if (Date.now() > until) throw new Error("another dm send holds its lock")
       else await Bun.sleep(100)
     }
   }
   try {
     return await fn()
   } finally {
-    await rm(path, { force: true, recursive: true })
+    const held = await Bun.file(owner)
+      .text()
+      .catch(() => "")
+    if (held === token) await rm(path, { force: true, recursive: true })
   }
 }
 
