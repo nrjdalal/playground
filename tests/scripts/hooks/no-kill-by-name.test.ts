@@ -24,6 +24,8 @@ describe("a signal sent by name or pattern is refused, with the way out", () => 
     "timeout 5 pkill node",
     "echo stopping && pkill -f dev",
     "fuser -k 3000/tcp",
+    "fuser --kill 3000/tcp",
+    "pgrep -f watch; kill $!",
     "kill $(pgrep -f watch)",
     'kill -9 "$(pgrep -f watch)"',
     "kill -9 `pidof node`",
@@ -52,6 +54,12 @@ describe("a signal sent by name or pattern is refused, with the way out", () => 
   })
 })
 
+describe("a kill beside a search", () => {
+  test("is told to run the stop in a call of its own", async () => {
+    expect(await bash("pid=$(pgrep -f watch); kill $pid")).toContain("in a Bash call of its own")
+  })
+})
+
 describe("a signal to a pid you hold, and a read, pass", () => {
   test.each([
     "kill 1234",
@@ -76,12 +84,11 @@ describe("a signal to a pid you hold, and a read, pass", () => {
     "command -v pkill",
     "pkill --help",
     "killall -V",
+    "ps -q 1234 && kill 1234",
+    "ps --pid 1234 && kill 1234",
+    "echo 1234 | xargs kill",
   ])("%s", async (command) => {
     expect(await bash(command)).toBeUndefined()
-  })
-
-  test("a kill beside a search says to run the stop in a call of its own", async () => {
-    expect(await bash("pid=$(pgrep -f watch); kill $pid")).toContain("in a Bash call of its own")
   })
 
   test("leaves another tool alone", async () => {
