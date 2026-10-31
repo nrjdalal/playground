@@ -6,6 +6,7 @@ import { join } from "node:path"
 import {
   leftForYou,
   report,
+  scriptsGroup,
   strayStandIns,
   usageWords,
   zshStartup,
@@ -29,6 +30,16 @@ describe("the new-user gate's reads", () => {
     expect(usageWords("Alpha\nClaude usage: No usage windows read\n")).toBeNull()
     expect(usageWords("Alpha\nClaude usage: Not read yet\n")).toBeNull()
     expect(usageWords("Alpha")).toBeNull()
+  })
+
+  test("finds the Scripts group by its header, with or without its count, and not by a row's words", () => {
+    expect(scriptsGroup("Alpha\nScripts\n2\nClaude usage readings")).toBe(true)
+    expect(scriptsGroup("Alpha\nScripts 2\n")).toBe(true)
+    expect(scriptsGroup("Alpha\nScripts2\n")).toBe(true)
+    expect(scriptsGroup("Alpha is not running\nEvery agent's state is on the System page.")).toBe(
+      false,
+    )
+    expect(scriptsGroup("Script · Failing · every minute")).toBe(false)
   })
 
   test("prints PASS or FAIL per step with its detail, then the count", () => {

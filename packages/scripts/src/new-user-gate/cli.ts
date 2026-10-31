@@ -63,6 +63,10 @@ export const strayStandIns = (box: string, home: string, names: string[]): strin
       .map((line) => `${mode} ${line}`),
   )
 
+// Pure: whether a page's text shows the sidebar's Scripts group, whose header reads the word and its count.
+export const scriptsGroup = (text: string): boolean =>
+  text.split("\n").some((line) => /^Scripts(\s*\d+)?$/.test(line.trim()))
+
 const run = (argv: string[], opts: { cwd?: string; env?: Record<string, string> } = {}) => {
   const out = Bun.spawnSync(argv, { cwd: opts.cwd, env: opts.env, stderr: "pipe", stdout: "pipe" })
   return { code: out.exitCode, err: out.stderr.toString(), out: out.stdout.toString() }
@@ -436,16 +440,17 @@ const main = async (args: string[]) => {
     })
     await step(steps, "the Scripts group has no Failing row", async () => {
       // the supervisor checks its follower each 30s, so a row that failed before the database started has a few ticks to clear
+      // a read can land before the sidebar renders, so the last read that shows the group is the one judged
       let text = ""
-      const scripts = () => text.split("\n").map((line) => line.trim())
       await waitFor(() => {
         browser.cmd("open", `${web}/dashboard`)
         browser.cmd("wait", "--load", "networkidle")
-        text = browser.text()
-        return scripts().includes("Scripts") && !/\bFailing\b/.test(text)
+        const read = browser.text()
+        if (scriptsGroup(read) || !text) text = read
+        return scriptsGroup(read) && !/\bFailing\b/.test(read)
       }, SCRIPTS_WAIT_MS)
       const failing = text.split("\n").filter((line) => /\bFailing\b/.test(line))
-      const listed = scripts().includes("Scripts")
+      const listed = scriptsGroup(text)
       const results = join(home, ".playground", "ops", "dashboard", "results.log")
       const last = existsSync(results)
         ? readFileSync(results, "utf8").trim().split("\n").at(-1)?.slice(21, 200)
@@ -489,6 +494,8 @@ const main = async (args: string[]) => {
         join(logs, "results.log"),
         join(logs, "dev.log"),
         join(home, ".playground", "dashboard-ingest.log"),
+        join(home, ".playground", "ops", "ops-dashboard.json"),
+        join(home, ".playground", "ops", "ops-usage.json"),
       ])
         if (existsSync(file)) run(["cp", file, shots])
       clean(box, home)
