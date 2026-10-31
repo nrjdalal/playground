@@ -294,3 +294,26 @@ test("an account whose probe answers with no 5-hour headers has no 5-hour window
   expect(usage.rate_limits.seven_day).toEqual({ used_percentage: 30, resets_at: 4_000_000_000 })
   expect(beat.detail).toStartWith("added@example.org: 5h none, 7d 30%")
 })
+
+// #152: alerts-usage.json carries a week alert for each factory account past a mark, the spares in usage.json's `accounts` included, each naming its account
+test("week alerts name each factory account past a mark, a spare's included, and skip an account outside usage.accounts (#152)", () => {
+  const home = join(scratch, "week-alerts")
+  mkdirSync(join(home, ".playground", "ops", "usage"), { recursive: true })
+  const read = `
+import json, sys, types
+sys.modules["beat"] = types.SimpleNamespace(beat=lambda *a, **k: None, setting=lambda key: "made-up")
+src = open(sys.argv[1]).read()
+ns = {"__name__": "run_under_test"}
+exec(compile(src[: src.index("\\nwhile True:")], sys.argv[1], "exec"), ns)
+data = {"account": "login@example.org", "rate_limits": {"seven_day": {"used_percentage": 50}}, "writtenAt": "2026-10-31T13:00:00Z",
+        "accounts": {"login@example.org": {"week": 50}, "spare@example.org": {"week": 97.5}, "other@example.org": {"week": 99}}}
+print(json.dumps([a["line"] for a in ns["week_alerts"](data, ["login@example.org", "spare@example.org"])]))
+`
+  const env: Record<string, string | undefined> = { ...process.env, HOME: home }
+  delete env.CLAUDE_CONFIG_DIR
+  const child = Bun.spawnSync(["python3", "-I", "-c", read, script], { env })
+  expect(child.stderr.toString()).toBe("")
+  expect(JSON.parse(child.stdout.toString())).toEqual([
+    "week usage at 97.5% (spare@example.org), past 97%",
+  ])
+})
