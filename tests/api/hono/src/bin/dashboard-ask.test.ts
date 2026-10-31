@@ -17,6 +17,7 @@ const MIGRATIONS = join(import.meta.dir, "../../../../../packages/db/drizzle")
 // made at run time, so no password is ever written into the repo
 const PASSWORD = crypto.randomUUID()
 const OPEN = Symbol("a stdin that never closes")
+const DAY = 24 * 60 * 60 * 1000
 const BUN = slowChild("bun")
 // outside the describe, so the folder goes when Docker is down and the describe is skipped
 afterAll(() => {
@@ -91,6 +92,8 @@ describe.skipIf(!dockerUp())("the bun run ask CLI", () => {
   let answer: (id: string) => Promise<void>
   let dismiss: (id: string) => Promise<void>
   let answerRelayed: (id: string) => Promise<{ delivery: unknown }>
+  let reply: (tag: string) => Promise<void>
+  let snooze: (id: string) => Promise<void>
 
   beforeAll(async () => {
     container = Bun.spawnSync([
@@ -131,7 +134,7 @@ describe.skipIf(!dockerUp())("the bun run ask CLI", () => {
       }
     }
     await admin!.close()
-    const { answerItem, dismissItems } =
+    const { answerItem, dismissItems, recordReply, scheduleItem } =
       await import("../../../../../api/hono/src/lib/dashboard/inbox")
     const db = (await import("../../../../../packages/db/dist/index.mjs")).createDatabase(url)
     answer = async (id) => {
@@ -154,6 +157,14 @@ describe.skipIf(!dockerUp())("the bun run ask CLI", () => {
       )
       if (!answered.ok) throw new Error(answered.message)
       return answered.item
+    }
+    reply = async (tag) => {
+      if (!(await recordReply(db, Number(tag.slice(2)), new Date(), "on it")))
+        throw new Error(`${tag} took no reply`)
+    }
+    snooze = async (id) => {
+      const snoozed = await scheduleItem(db, id, new Date(Date.now() + DAY).toISOString())
+      if (!snoozed.ok) throw new Error(snoozed.message)
     }
     dismiss = async (id) => {
       if ((await dismissItems(db, [id])) !== 1) throw new Error(`${id} was not dismissed`)
@@ -438,6 +449,65 @@ describe.skipIf(!dockerUp())("the bun run ask CLI", () => {
     expect((await cli(["stale", "--minutes", "soon"])).stderr).toContain("whole number")
   })
 
+  // a session had no way to see what was already open before it posted, so two sessions posted the same question twice
+  test("open lists each open item oldest first, never an answered or settled one, and --from keeps one sender's", async () => {
+    const titled = (from: string, title: string) => post({ ...DECISION, from, title })
+    const first = await titled("worker-open-a", "Ship the first open question?")
+    const answered = await titled("worker-open-a", "Ship the answered question?")
+    const second = await titled("worker-open-b", "Ship the second open question?")
+    const settled = await titled("worker-open-b", "Ship the settled question?")
+    await answer(answered.id)
+    expect((await cli(["settle", settled.id])).code).toBe(0)
+    const listed = async (args: string[]) => {
+      const result = await cli(["open", ...args])
+      expect(result.code).toBe(0)
+      return result.stdout
+    }
+    const all = await listed([])
+    const firstLine = `${first.tag} decision from worker-open-a · Ship the first open question?`
+    const secondLine = `${second.tag} decision from worker-open-b · Ship the second open question?`
+    expect(all).toContain(firstLine)
+    expect(all).toContain(secondLine)
+    expect(all.indexOf(firstLine)).toBeLessThan(all.indexOf(secondLine))
+    expect(all).not.toContain(answered.tag + " ")
+    expect(all).not.toContain(settled.tag + " ")
+    const fromA = await listed(["--from", "worker-open-a"])
+    expect(fromA).toContain(firstLine)
+    expect(fromA).not.toContain("worker-open-b")
+    expect(await listed(["--from", "worker-nobody"])).toBe("")
+  })
+
+  // a chat-replied item the owner had moved to Done kept its open status, so it still listed as open
+  test("open lists a snoozed item and one replied to in chat until it moves to Done, and never an update", async () => {
+    const snoozed = await post({
+      ...DECISION,
+      from: "worker-open-c",
+      title: "Ship the snoozed one?",
+    })
+    const replied = await post({
+      ...DECISION,
+      from: "worker-open-c",
+      title: "Ship the replied one?",
+    })
+    const update = await post({
+      from: "worker-open-c",
+      kind: "update",
+      preview: { outcome: "merged" },
+      title: "Merged the open list",
+    })
+    await snooze(snoozed.id)
+    await reply(replied.tag)
+    const listed = async () => (await cli(["open", "--from", "worker-open-c"])).stdout
+    const before = await listed()
+    expect(before).toContain(`${snoozed.tag} decision from worker-open-c`)
+    expect(before).toContain(`${replied.tag} decision from worker-open-c`)
+    expect(before).not.toContain(`${update.tag} `)
+    await dismiss(replied.id)
+    const after = await listed()
+    expect(after).toContain(`${snoozed.tag} decision from worker-open-c`)
+    expect(after).not.toContain(`${replied.tag} `)
+  })
+
   test("resolve closes the poster's own alert update; another session, a non-alert item and an unknown id are refused (#658)", async () => {
     const alertPost = {
       from: "worker-envy",
@@ -550,6 +620,8 @@ describe.skipIf(!dockerUp())("the bun run ask CLI", () => {
       ["settle", "x", "--note", "a", "--note", "b"],
       ["new", "--thread"],
       ["new", "--board", "t4sk"],
+      ["open", "--from"],
+      ["open", "--since", "x"],
     ]) {
       const result = await cli(args)
       expect(result.code).toBe(2)

@@ -51,7 +51,7 @@ Leave out a `Co-authored-by` trailer (repo rule): the commit-msg hook refuses on
 5. `docs-wrap` refuses a staged wrapped doc (`PATTERNS` in `packages/scripts/src/docs-wrap/cli.ts`) that holds a line of more than one sentence or one over its limit, reading the docs as lint-staged's formatter left them: run `bun run docs:wrap`; the wrap rule is the `doc-sync` skill's.
 6. `dev-stack` refuses while this worktree's `bun run dev` runs, since the build rebuilds `packages/*` under the stack and hangs it: stop the stack, then commit.
 7. `trace-count` runs the trace ratchet's test (`tests/packages/scripts/src/trace-count/count.test.ts`) on any commit but one of images and fonts alone, and refuses when a count over the working tree rises past `counts.json`: it counts every tracked and untracked file as it stands on disk, staged or not, and names the kind alone. Find the hit in the new text of `git diff HEAD` and in each untracked file `git status --short` lists, then write it in plain words.
-8. `env-keys` names every key `.env` lacks or leaves empty: fill each from `.env.example`.
+8. `env-keys` names every key `.env` lacks or leaves empty, but `POSTGRES_URL`, which first run's setup fills: fill each from `.env.example`.
 9. `build` runs `bun run build` through `packages/scripts/src/commit-slot.ts`: in a factory worktree it waits for a run slot first, and anywhere else (a fork, a plain clone) it builds at once.
 
 `dev-stack`, `env-keys` and `build` skip a commit whose every staged file is Markdown (`*.md`) or a Python file anywhere under `tests/`.

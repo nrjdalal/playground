@@ -891,6 +891,14 @@ bun() {
     "run dev") echo "dev" >> ${keptCalls} ;;
   esac
 }
+alive() { kill -0 "$(cat "$S/$1.pid" 2>/dev/null)" 2>/dev/null; }
+web_up() { echo "web $1 $(echo "$2" | cut -c1-7)" >> ${keptCalls}
+  grep -qx "$2" "${kept}/web-fails" 2>/dev/null && { web_why="the web exited"; return 1; }
+  grep -qx "$2" "${kept}/web-silent" 2>/dev/null && { web_why="the web was still silent at 60s"; return 2; }
+  local port=$(( $(cat "$S/ports" 2>/dev/null || echo 5000) + 1 )); echo $port > "$S/ports"; echo $port > "$S/$1.port"; echo $$ > "$S/$1.pid"; echo "$2" > "$S/$1.sha"; }
+web_route() { echo "route $1" >> ${keptCalls}; [ ! -e "${kept}/route-refused" ] || { web_why="the web's route was refused"; return 2; }; }
+web_stop() { [ ! -e "$S/$1.pid" ] || echo "web-stop $1 $(cut -c1-7 "$S/$1.sha" 2>/dev/null)" >> ${keptCalls}; rm -f "$S/$1.pid" "$S/$1.sha"; }
+ROUTE_SETTLE=0
 check_dev() { local p i; p=$(cat "$S/dashboard-dev.pid"); for i in $(seq 1 100); do kill -0 "$p" 2>/dev/null || break; sleep 0.05; done; listed verify-fails && { echo "verify=FAIL"; return 1; }; echo "verify=PASS"; }
 start_follower() { :; }; check_follower() { echo "follower=running"; }; setup_pending() { return 1; }
 ${fn("behind")}
@@ -901,6 +909,10 @@ ${block("fall_back")}
 ${upto("build_head")}
 ${upto("keep_builds")}
 ${upto("start_dev")}
+${fn("serving_web")}
+${fn("stop_web")}
+${block("ensure_web")}
+${block("swap_web")}
 ${upto("roll_up")}
 `
 const keptRun = async (body: string, at: string) => {
@@ -1116,6 +1128,103 @@ describe("the supervisor's build before the stop (#122)", () => {
   })
 })
 
+// A roll with no migration swaps the web with no gap: the target's web starts beside the serving one from the kept build, the route moves to it, and the old one stops before the API restarts alone
+describe("the supervisor's web swap (#122)", () => {
+  const WEBS = /^(build|web|route|stop|serve)/
+  const started = (at: string) => `roll_up START > /dev/null; rm -f ${keptCalls}; running=${at}`
+
+  test("a roll starts the target's web beside the serving one, moves the route, stops the old web, and only then stops the API", async () => {
+    fresh()
+    const rolled = await prebuiltRun(`${started(c1)}; roll_to ${c2} canary; echo "$running"`, c1)
+    expect(rolled).toEqual({ code: 0, out: c2 })
+    expect(await keptLines(WEBS)).toEqual([
+      `build ${short(c2)}`,
+      `web dashboard-web-next ${short(c2)}`,
+      "route 5002",
+      `web-stop dashboard-web ${short(c1)}`,
+      "stop",
+      "route 5002",
+      `serve ${c2}`,
+    ])
+    expect(await keptLines(/^say web swapped/)).toEqual([
+      `say web swapped to ${short(c2)} on :5002 with no stop`,
+    ])
+    expect(await Bun.file(join(kept, "dashboard-web.sha")).text()).toBe(`${c2}\n`)
+    expect(existsSync(join(kept, "dashboard-web-next.pid"))).toBe(false)
+  })
+
+  test("a target that migrates stops the web with the rest before it moves, as before", async () => {
+    fresh()
+    const rolled = await prebuiltRun(`${started(c2)}; roll_to ${c3} canary; echo "$running"`, c2)
+    expect(rolled).toEqual({ code: 0, out: c3 })
+    expect(await keptLines(WEBS)).toEqual([
+      "stop",
+      `build ${short(c3)}`,
+      `web-stop dashboard-web ${short(c2)}`,
+      `web dashboard-web ${short(c3)}`,
+      "route 5002",
+      `serve ${c3}`,
+    ])
+  })
+
+  test("a target's web that never answers leaves the old one serving until the stop, which then runs as before", async () => {
+    fresh()
+    await Bun.write(join(kept, "web-fails"), `${c2}\n`)
+    await prebuiltRun(`${started(c1)}; roll_to ${c2} canary; echo "$running"`, c1)
+    const lines = await keptLines(/^(web|stop|say web)/)
+    expect(lines.slice(0, 4)).toEqual([
+      `web dashboard-web-next ${short(c2)}`,
+      `say web ${short(c2)} did not take over (the web exited); stopping both as before`,
+      "stop",
+      `web-stop dashboard-web ${short(c1)}`,
+    ])
+  })
+
+  test("a web the head broke fails the roll as a bad build, and the fallback serves the head before's web", async () => {
+    fresh()
+    expect((await keptRun("roll_up START", c1)).code).toBe(0)
+    await Bun.write(join(kept, "web-fails"), `${c2}\n`)
+    rmSync(keptCalls)
+    expect((await keptRun(`finish_roll "ROLL canary" ${c2} ${c1} ""`, c2)).code).toBe(0)
+    expect(await keptLines(/^result /)).toEqual([
+      `result ROLL canary ${short(c2)} FAIL web: the web exited`,
+      `result FALLBACK ${short(c1)} PASS verify=PASS follower=running`,
+    ])
+    expect(await Bun.file(join(kept, "bad-builds")).text()).toBe(`${c2}\n`)
+  })
+
+  test("a web the machine kept from starting is a refusal, no bad build, so the head is tried again", async () => {
+    fresh()
+    expect((await keptRun("roll_up START", c1)).code).toBe(0)
+    await Bun.write(join(kept, "web-silent"), `${c2}\n`)
+    rmSync(keptCalls)
+    expect((await keptRun(`finish_roll "ROLL canary" ${c2} ${c1} ""`, c2)).code).toBe(0)
+    expect(await keptLines(/^result /)).toEqual([
+      `result ROLL canary ${short(c2)} FAIL web: the web was still silent at 60s`,
+      `result ROLL canary ${short(c2)} FAIL dev refusing: the web was still silent at 60s (not the head's, no bad build)`,
+      `result FALLBACK ${short(c1)} PASS verify=PASS follower=running`,
+    ])
+    expect(existsSync(join(kept, "bad-builds"))).toBe(false)
+  })
+
+  test("a refused route keeps the old web serving, and the start that meets it is a refusal too", async () => {
+    fresh()
+    await prebuiltRun(
+      `${started(c1)}; touch ${join(kept, "route-refused")}; roll_to ${c2} canary; echo "$running"`,
+      c1,
+    )
+    expect(await keptLines(/^say web .*did not take over/)).toEqual([
+      `say web ${short(c2)} did not take over (the web's route was refused); stopping both as before`,
+    ])
+    expect(existsSync(join(kept, "dashboard-web-next.pid"))).toBe(false)
+    expect(existsSync(join(kept, "bad-builds"))).toBe(false)
+  })
+
+  test("the API serves alone, since the web runs on its own", () => {
+    expect(script).toContain("bun run serve --filter=@api/hono --ui stream")
+  })
+})
+
 // First run's setup writes POSTGRES_URL into the checkout's .env; until then the follower, which validates it at once, would exit on every tick (#31).
 describe("the follower before first run's setup (#31)", () => {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), "supervisor-setup-")))
@@ -1130,7 +1239,8 @@ describe("the follower before first run's setup (#31)", () => {
 say() { echo "say $*" >> ${calls}; }; result() { echo "result $*" >> ${calls}; }
 start_dev() { :; }; check_dev() { echo dev=up; }; stop_all() { :; }; dev_down() { :; }
 start_follower() { echo start_follower >> ${calls}; }; check_follower() { echo follower=running; }
-follower_held() { return 1; }; alive() { [ "$1" = dashboard-dev ]; }; build_head() { :; }; keep_builds() { :; }
+follower_held() { return 1; }; alive() { [ "$1" = dashboard-dev ] || [ "$1" = dashboard-web ]; }; build_head() { :; }; keep_builds() { :; }
+dashboard_urls() { :; }; ensure_web() { :; }
 ${fn("setup_pending") ?? ""}
 ${script.slice(script.indexOf("\nroll_up() {") + 1, script.indexOf("\n}\n", script.indexOf("\nroll_up() {")) + 2)}
 `
@@ -1176,6 +1286,12 @@ ${script.slice(script.indexOf("\nroll_up() {") + 1, script.indexOf("\n}\n", scri
       "start_follower",
       "result START follower follower=running",
     ])
+  })
+
+  test("a web that died is a DOWN of its own, and the stack starts again", async () => {
+    const lines = await sup(`alive() { [ "$1" != dashboard-web ]; }\n${loop}`, URL_LINE)
+    expect(lines[0]).toMatch(/^result DOWN web: /)
+    expect(lines.at(-1)).toMatch(/^result RESTART \w+ PASS dev=up follower=running$/)
   })
 
   test("with POSTGRES_URL set, a roll starts the follower as before", async () => {
