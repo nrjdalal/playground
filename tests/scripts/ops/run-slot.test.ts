@@ -791,8 +791,10 @@ describe("a quick run takes its own slot past a full queue", () => {
   })
 
   // retro 2, 31 Oct: 408 of 686 CPU-lane runs ended in 10 s or less and queued 2,004 min against 17 min of running
+  // a plain install also runs past this queue now, as a light run in run-slot-2, so the slot it took is the check
   test("bun install --ignore-scripts", async () => {
     expect(await quick(["bun", "install", "--ignore-scripts"])).toBe(true)
+    expect(took).toBe("run-slot-quick")
   })
 
   // a light run of 1 unit, it fits the slot the big holder leaves, but through the queue
@@ -803,10 +805,12 @@ describe("a quick run takes its own slot past a full queue", () => {
 
   test("git push", async () => {
     expect(await quick(["git", "-C", "x", "push", "-u", "origin"])).toBe(true)
+    expect(took).toBe("run-slot-commit")
   })
 
   test("a command whose last 3 runs each ended in 10 s or less", async () => {
     expect(await quick(["bun", "run", "build"], [400, 2, 10, 3])).toBe(true)
+    expect(took).toBe("run-slot-quick")
   })
 
   test("but not one with 2 runs on record", async () => {
