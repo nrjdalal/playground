@@ -46,7 +46,7 @@ Sessions run in bypass-permissions mode, yet some commands still prompt (`rm`, a
    We don't need to wrap them around"): a worker's workspace reads worker | reviewer | tester, and the managers' reads `dispatcher` | `planner` | `builder` | `ops`.
    A session already running stays where it is until its next restart.
    spawn.sh starts each as `env PLAYGROUND_ROLE=<role> claude -n <name> --model claude-opus-5-5 --effort high --settings $HOME/.playground/factory-settings-400k.json --dangerously-skip-permissions`:
-   every session runs at high effort unless it starts with spawn.sh's `--effort` naming another,
+   every session runs at high effort unless the owner names another for it, which spawn.sh's `--effort` sets,
    on `models.default` (Opus) unless it starts with `--model` naming another of `models.claude` (Fable, Sonnet or Haiku by default; spawn.sh refuses any other id, `--model` beside `--backend glm`, and any but `models.checker` (Opus) for a reviewer or tester, whose verdict gates a merge, and records none of them,
    so a resume takes `--model` afresh and one without it runs on Opus) or with `--backend glm` (below) (the owner, 8 Oct: "Don't use Sonnet, use Opus X High for research and everything.
    Don't consider this easy."
