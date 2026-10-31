@@ -210,7 +210,7 @@ describe("openPreview", () => {
   })
 })
 
-// the owner's Yard try, need 4: Done hands the work back for review, never merged; it goes to the dispatcher, the one session the owner's messages reach (phase 2a), which routes it to the worktree's session
+// Done hands the work back for review, never merged; it goes to the dispatcher, the one session the owner's messages reach, which routes it to the worktree's session
 describe("doneMessage", () => {
   test("names the worktree, branch and session, pushes to its open PR or opens one into its parent, and never merges", () => {
     const text = doneMessage({ branch: "feat/rooms", path: "/w/rooms", session: "rooms-worker" })
