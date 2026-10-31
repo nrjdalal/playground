@@ -15,6 +15,8 @@ const INSTALL_LIMIT_S = 1200
 const ROUTE_WAIT_MS = 180_000
 const SCRIPTS_WAIT_MS = 150_000
 const ROOM_WAIT_MS = 600_000
+// The box's PLAYGROUND_LOAD_MULT: the gate checks what a new user meets on a quiet Mac, so spawn.sh's load gate in the box allows this many times the cores and the host's other sessions never hold a start; its memory and usage gates stay as they are.
+export const BOX_LOAD_MULT = 10
 
 // A step is inconclusive when it failed while spawn.sh's capacity gate refused a start, since that gate reads this Mac, not the build.
 export type Step = {
@@ -79,9 +81,9 @@ export const leftForYou = (out: string): string[] => {
     .map((line) => line.slice(4))
 }
 
-// Pure: the box's .zshenv and .zprofile. Every zsh the stack's jobs start reads .zshenv, and a login one has path_helper reorder PATH after it, so .zprofile puts the stand-ins first again; a Claude account's profile read goes to a closed loopback port, so the made-up token never leaves the Mac.
+// Pure: the box's .zshenv and .zprofile. Every zsh the stack's jobs start reads .zshenv, and a login one has path_helper reorder PATH after it, so .zprofile puts the stand-ins first again; a Claude account's profile read goes to a closed loopback port, so the made-up token never leaves the Mac; and spawn.sh's load gate takes BOX_LOAD_MULT.
 export const zshStartup = (box: string): string =>
-  `export PATH="${join(box, "stubs")}:$PATH"\nexport PLAYGROUND_PROFILE_URL=http://127.0.0.1:9/profile\n`
+  `export PATH="${join(box, "stubs")}:$PATH"\nexport PLAYGROUND_PROFILE_URL=http://127.0.0.1:9/profile\nexport PLAYGROUND_LOAD_MULT=${BOX_LOAD_MULT}\n`
 
 // Each stand-in that the box's zsh, plain and login, finds anywhere but the box's stubs folder, as `mode name path`; a job the box starts runs in one of the two, so an empty list means none of them reaches the real binary.
 export const strayStandIns = (box: string, home: string, names: string[]): string[] =>
@@ -194,6 +196,7 @@ const install = async (box: string, home: string, path: string): Promise<string>
       INSTALL_TTY: join(box, "tty"),
       LOGNAME: process.env.USER ?? "",
       PATH: path,
+      PLAYGROUND_LOAD_MULT: String(BOX_LOAD_MULT),
       PORTLESS_SYNC_HOSTS: "0",
       SHELL: "/bin/zsh",
       TERM: "dumb",
@@ -405,6 +408,9 @@ const main = async (args: string[]) => {
   const desk = join(home, "playground", ".claude", "worktrees", "desk")
   const browser = new Browser(join(box, "shots"))
   console.log(`gate: ${full.slice(0, 10)} in ${box}`)
+  console.log(
+    `gate: the box sets PLAYGROUND_LOAD_MULT=${BOX_LOAD_MULT}, so spawn.sh's load gate there is relaxed to ${BOX_LOAD_MULT}x the cores; its memory and usage gates are not`,
+  )
   // each step is judged against the capacity refusals since the one before it ended, the first since before the install
   const capacity = { log: join(home, ".playground", "ops", "capacity.jsonl"), since: isoNow() }
   const check = async (name: string, judge: () => Promise<Omit<Step, "name">>) => {

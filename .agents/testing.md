@@ -34,5 +34,6 @@ The new-user gate is the one end-to-end run: `bun run gate:new-user <sha>` (`pac
 Before the install it checks that the box's zsh, plain and login, finds every stand-in in the box's stubs folder, and stops with exit 2 naming each one it finds elsewhere, so no job the box starts reaches a real binary.
 It then checks the seven steps a new user meets (the install's finish, first run's database click, Alpha on the Dashboard, a routed task opening a PR, Usage, the Scripts group, the roll following main), prints PASS, FAIL or INCONCLUSIVE for each, and leaves a screenshot per step and the box's logs in `/tmp/pg-gate-<sha7>-shots` after removing the box, its processes and its container.
 Before the install it waits up to 10 minutes for this Mac's load to fall under the line spawn.sh's load gate holds a dispatcher's start to, and says how long it waited.
-A step that fails while spawn.sh's capacity gate refused a start in the box (its `capacity.jsonl`) reads INCONCLUSIVE with that refusal, since the gate reads this Mac, not the build.
+The box sets `PLAYGROUND_LOAD_MULT=10` (`BOX_LOAD_MULT`, printed at the start), so the host's other sessions never hold a start there, since the gate checks what a new user meets on a quiet Mac.
+A step that fails while spawn.sh's capacity gate refused a start in the box (its `capacity.jsonl`, now its memory or usage gate) reads INCONCLUSIVE with that refusal, since the gate reads this Mac, not the build.
 Run it through run-slot before each ship (the release skill's step 1); it exits 1 when a step fails.

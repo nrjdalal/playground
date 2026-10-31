@@ -4,6 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import {
+  BOX_LOAD_MULT,
   capacityRefusals,
   leftForYou,
   report,
@@ -113,6 +114,17 @@ describe("the gate's stand-ins preflight", () => {
   test("with no startup files, the box's zsh finds security outside the stubs folder, and the preflight names it", () => {
     const stray = strayStandIns(box, home, names)
     expect(stray.filter((line) => /^-l?c security\b/.test(line))).toHaveLength(2)
+  })
+
+  test("the box's startup relaxes spawn.sh's load gate by BOX_LOAD_MULT, read as a number over 1", () => {
+    const set = Bun.spawnSync(
+      ["zsh", "-c", `${zshStartup(box)}print -r -- $PLAYGROUND_LOAD_MULT`],
+      {
+        env: { HOME: home, PATH: "/usr/bin:/bin" },
+      },
+    )
+    expect(set.stdout.toString().trim()).toBe(String(BOX_LOAD_MULT))
+    expect(BOX_LOAD_MULT).toBeGreaterThan(1)
   })
 
   test("with the box's startup files, every stand-in resolves to the stubs folder in a plain and a login zsh", () => {
