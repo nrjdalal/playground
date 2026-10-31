@@ -75,7 +75,10 @@ function YardRows({ rows }: { rows: YardChannel[] }) {
       {rows.map((row) => {
         const title = channelTitle(row)
         const badge = yardBadge(row)
-        const tip = badge ? `${title} · ${badge.label} unread` : title
+        // the tooltip says a mention in words, so the badge's colour is never its only mark
+        const tip = badge
+          ? `${title} · ${badge.label} unread${badge.mention ? ", mentions you" : ""}`
+          : title
         return (
           <SidebarMenuItem key={row.id}>
             <SidebarMenuButton

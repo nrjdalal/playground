@@ -229,7 +229,7 @@
 - Yard's two groups, **Channels** then **Direct messages** (`YardGroups` in `web/next/src/components/yard/yard-groups.tsx`), close the nav, after Other, so their arrival moves no row above them; the hosted build's sidebar holds them alone.
   They read `GET /api/v1/yard/channels` (`useYardChannels` in `web/next/src/lib/yard-api.ts`), on the hosted API or locally through the Yard routes that hold the Mac's token, and each is absent with no rows, both on a stack with no Yard (the read's 404).
   Each collapses as Scripts does, its label the toggle with the chevron after its word, open to start, and its `GroupCount` counts its rows.
-  Each row is a Threads row's shape: the stock 32px row, a `#` icon or a person's, `#name` or the other member's login cut at its end, its full title as its tooltip (with its unread count while it has one),
+  Each row is a Threads row's shape: the stock 32px row, a `#` icon or a person's, `#name` or the other member's login cut at its end, its full title as its tooltip (with its unread count while it has one, and "mentions you" while one does),
   and its unread count in `SidebarMenuBadge` (`countLabel`, `99+` past 99), in the mention colour (`bg-destructive`) while any of them names you, absent once read (`yardBadge` in `web/next/src/lib/yard.ts`).
   A click opens the channel in the chat pane (`channelHref`: `/dashboard/yard/<id>` locally, `/yard/c/<id>` hosted), whose view marks it read.
 - The Console's user menu, in its sidebar footer, names this Mac over the Claude account the usage readings reflect (with sign-in going); the Dashboard's, the aside toolbar's square, shows this Mac's initials, with a green dot while an update waits, and opens the same items (`UserMenuItems`), under Auto-hide tab bar on a wide screen:
