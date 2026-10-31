@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test"
 
-import { buildReload, holdsText, versionOf } from "../../../../../web/next/src/lib/build-reload"
+import {
+  buildReload,
+  holdsText,
+  holdsTyped,
+  versionOf,
+} from "../../../../../web/next/src/lib/build-reload"
 
 const at = (current: string | null, extra: Partial<Parameters<typeof buildReload>[0]> = {}) =>
   buildReload({ busy: false, current, loaded: "0.0.1-aaaaaaa", reloadedFor: null, ...extra })
@@ -31,6 +36,24 @@ describe("holdsText", () => {
     expect(holdsText([{ state: "queued" }, { state: "failed" }])).toBe(true)
     expect(holdsText([{ state: "queued" }, { state: "sending" }, { state: "typed" }])).toBe(false)
     expect(holdsText([])).toBe(false)
+  })
+})
+
+describe("holdsTyped", () => {
+  test("holds a field the owner typed into while it still shows words, focused or not", () => {
+    expect(holdsTyped([{ isConnected: true, text: "a reply left in an Inbox box" }])).toBe(true)
+    expect(
+      holdsTyped([
+        { isConnected: true, text: "  " },
+        { isConnected: true, text: "x" },
+      ]),
+    ).toBe(true)
+  })
+
+  test("lets a field go once it is emptied or gone from the page", () => {
+    expect(holdsTyped([{ isConnected: true, text: " \n" }])).toBe(false)
+    expect(holdsTyped([{ isConnected: false, text: "a sent reply's card" }])).toBe(false)
+    expect(holdsTyped([])).toBe(false)
   })
 })
 

@@ -15,7 +15,7 @@ const WAIT_MS = 2_000
 
 export type BuildReload = "reload" | "stay" | "wait"
 
-// Pure: what the page does when the API names version current: it reloads once onto a build other than the one it loaded against (loaded, the API's version at its first read), never twice for one version (reloadedFor), so a version that keeps differing never loops, and waits while the owner types or a failed message shows (busy).
+// Pure: what the page does when the API names version current: it reloads once onto a build other than the one it loaded against (loaded, the API's version at its first read), never twice for one version (reloadedFor), so a version that keeps differing never loops, and waits while a field holds typed words or a failed message shows (busy).
 export function buildReload({
   busy,
   current,
@@ -47,13 +47,23 @@ const readVersion = async (): Promise<string | null> => {
   return versionOf(await response.json())
 }
 
-// A field the owner is typing in: the focused input, textarea or editable element while it holds text, which a reload would lose (the composer keeps its draft in localStorage, but the reload still waits until it is sent or emptied).
-const typing = (): boolean => {
-  const field = document.activeElement
-  if (field instanceof HTMLTextAreaElement || field instanceof HTMLInputElement)
-    return field.value.trim() !== ""
-  return field instanceof HTMLElement && field.isContentEditable && !!field.textContent?.trim()
+// Pure: whether a field the owner typed into still shows words a reload would lose, focused or not (an Inbox reply keeps its words in the card alone); one emptied, or gone with its card, lets the reload go.
+export const holdsTyped = (fields: Iterable<{ isConnected: boolean; text: string }>): boolean => {
+  for (const field of fields) if (field.isConnected && field.text.trim()) return true
+  return false
 }
+
+// A field that takes words: a textarea, an editable element, or an input whose type is typed into, never a choice (a checkbox's value reads "on").
+const TEXT_INPUTS = new Set(["email", "password", "search", "tel", "text", "url"])
+const takesWords = (field: EventTarget | null): field is HTMLElement =>
+  field instanceof HTMLTextAreaElement ||
+  (field instanceof HTMLInputElement && TEXT_INPUTS.has(field.type)) ||
+  (field instanceof HTMLElement && !(field instanceof HTMLInputElement) && field.isContentEditable)
+
+const textOf = (field: HTMLElement): string =>
+  field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement
+    ? field.value
+    : (field.textContent ?? "")
 
 const storedReload = (): string | null => {
   try {
@@ -63,7 +73,7 @@ const storedReload = (): string | null => {
   }
 }
 
-// Reloads the page once when a roll serves a new build: the live Dashboard's production build has no dev socket, so an open tab would keep its old build against the new API. It reads /api/health every 30s and on focus; the outbox keeps queued messages across the reload in sessionStorage, and the reload waits while a failed one shows.
+// Reloads the page once when a roll serves a new build: the live Dashboard's production build has no dev socket, so an open tab would keep its old build against the new API. It reads /api/health every 30s and on focus; the outbox keeps queued messages across the reload in sessionStorage, and the reload waits while a failed one shows or a field holds words the owner typed.
 export function useBuildReload(outbox: readonly OutboxMessage[]): void {
   const { data } = useQuery({
     queryKey: BUILD_QUERY_KEY,
@@ -74,6 +84,15 @@ export function useBuildReload(outbox: readonly OutboxMessage[]): void {
   const loaded = useRef<string | null>(null)
   const held = useRef(false)
   held.current = holdsText(outbox)
+  // every field the owner has typed into, by its own input events, since React keeps a controlled field's defaultValue equal to its value
+  const typed = useRef(new Set<HTMLElement>())
+  useEffect(() => {
+    const mark = (event: Event) => {
+      if (takesWords(event.target)) typed.current.add(event.target)
+    }
+    document.addEventListener("input", mark, true)
+    return () => document.removeEventListener("input", mark, true)
+  }, [])
   useEffect(() => {
     if (!data) return
     if (loaded.current === null) {
@@ -81,8 +100,16 @@ export function useBuildReload(outbox: readonly OutboxMessage[]): void {
       return
     }
     const check = () => {
+      for (const field of typed.current) if (!field.isConnected) typed.current.delete(field)
       const next = buildReload({
-        busy: typing() || held.current,
+        busy:
+          held.current ||
+          holdsTyped(
+            [...typed.current].map((field) => ({
+              isConnected: field.isConnected,
+              text: textOf(field),
+            })),
+          ),
         current: data,
         loaded: loaded.current,
         reloadedFor: storedReload(),

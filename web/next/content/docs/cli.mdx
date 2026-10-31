@@ -79,7 +79,7 @@ Updated to 3f9a2c1
 
 When the newest commit is the one running, it prints `Already up to date at <sha>`. When the new one fails its checks, the Dashboard goes back to the one it ran before: it prints `Going back…`, then `Failed: <reason>; back on <sha>`, or `going back to <sha> failed too` in place of `back on <sha>`. When the new one changed the database it stays on it, and the line says so. A commit that failed before is not tried again: it prints `Failed: <sha> failed its roll before`. Run `playground` first if the Dashboard is not running.
 
-A Dashboard tab you have open reloads onto the new build by itself, once, within about 30 seconds of the switch. It waits while you are typing in a box or a message you sent shows as failed, so no words are lost.
+A Dashboard tab you have open reloads onto the new build by itself, once, within about 30 seconds of the switch. It waits while a box you typed in still holds words, such as a reply on an Inbox card, or while a message you sent shows as failed, so no words are lost.
 
 `playground update --to <tag>` moves your checkout to that release instead, back or on, with the same link, install, build and restart steps, and leaves the Dashboard as it is, since it rolls on its own. A checkout with commits of its own stops before anything moves. `playground doctor` shows the release it is held at, and a plain `playground update` moves it on to the newest again.
 
