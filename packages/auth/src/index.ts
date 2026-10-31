@@ -13,6 +13,7 @@ import {
 import { env } from "@packages/env/auth"
 import { betterAuth } from "better-auth"
 import { drizzleAdapter } from "better-auth/adapters/drizzle"
+import { oneTimeToken } from "better-auth/plugins"
 
 import { grantConsoleAccessOnSignIn } from "@/allowlist"
 import { cookieConfig, localhostHost, type ParsedHost } from "@/lib/utils"
@@ -62,7 +63,15 @@ if (env.PLAYGROUND_HOSTED && !(env.GITHUB_CLIENT_ID && env.GITHUB_CLIENT_SECRET)
 }
 const socialProviders =
   env.PLAYGROUND_HOSTED && env.GITHUB_CLIENT_ID && env.GITHUB_CLIENT_SECRET
-    ? { github: { clientId: env.GITHUB_CLIENT_ID, clientSecret: env.GITHUB_CLIENT_SECRET } }
+    ? {
+        github: {
+          clientId: env.GITHUB_CLIENT_ID,
+          clientSecret: env.GITHUB_CLIENT_SECRET,
+          // Every sign-in stamps the GitHub login afresh, so a renamed login follows its account.
+          mapProfileToUser: (profile: { login: string }) => ({ login: profile.login }),
+          overrideUserInfoOnSignIn: true,
+        },
+      }
     : undefined
 
 export const auth = betterAuth({
@@ -96,6 +105,11 @@ export const auth = betterAuth({
     session: { create: { before: grantConsoleAccessOnSignIn } },
   },
   ...schemaOptions,
+  // oneTimeToken mints a single-use, 3-minute token for a signed-in session, which the hosted web hands Yard's socket in its URL, since the API's host never sees the web's cookie: kept hashed, and its verify sets no cookie, since only the socket verifies one. It adds no table (it keeps tokens in verification), so it sits beside the schema's plugins rather than among them.
+  plugins: [
+    ...schemaOptions.plugins,
+    oneTimeToken({ disableSetSessionCookie: true, storeToken: "hashed" }),
+  ],
   advanced: {
     // The environment name-prefix isolates cookie names across envs; it applies independent of the cookie-mode switch below (a private-suffix env would still want it).
     ...(cookiePrefix && { cookiePrefix }),
