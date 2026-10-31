@@ -50,6 +50,7 @@
     "pr:train": "bun packages/scripts/src/verify/prebuild.ts pr-merge && bun --no-env-file packages/scripts/src/pr-merge/train-cli.ts",
     "queues": "bun api/hono/src/bin/dashboard-queues.ts",
     "rename": "bun packages/scripts/src/rename/cli.ts",
+    "serve": "bun --no-env-file api/hono/src/bin/dev-running.ts start && bun --no-env-file packages/scripts/src/verify/prebuild.ts api && bun --no-env-file api/hono/src/bin/dev.ts --serve",
     "shadcn:update": "bash .github/scripts/shadcn-update.sh && bun i",
     "start": "turbo run start",
     "test": "if [ -d tests ]; then turbo run build --filter='./packages/*' && bun packages/scripts/src/env-keys.ts && bun packages/scripts/src/data-table-metrics.ts && NODE_ENV=test bun packages/scripts/src/test-sandbox.ts; fi",
