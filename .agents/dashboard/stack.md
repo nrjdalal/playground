@@ -69,7 +69,7 @@
   On Vercel the export is an `http.Server` that never listens (`createServer` in `lib/server.ts`), since one that has called `listen()`, as `serve()` does, hangs 60s there and answers 500.
   Under `NEXT_PUBLIC_PLAYGROUND_HOSTED=1` the dashboard pages' layout answers every `/dashboard` page with the app's 404 before it reads anything (`localPagesOnly` in `web/next/src/lib/local-pages.ts`), since a Next rewrite to `/404` breaks behind portless, whose `https` origin Next proxies as an external one.
   `/`, which redirects to `/dashboard` locally, is the hosted build's way in, the navbar's Sign in with GitHub.
-  `tests/api/hono/src/hosted.test.ts` holds the mounted routes to the allowlist and the hosted import graph to no local-only package, machine-reading folder or node server.
+  `tests/api/hono/src/hosted.test.ts` holds the mounted routes to the allowlist and the hosted import graph to no local-only package or machine-reading folder.
 - ALWAYS: Stop `bun run dev` before running `bun run build`, `bun run check-types` or `bun run test`, or committing, in the same worktree.
   They rebuild `packages/*` (a commit through its pre-commit build), and a rebuild deletes the `dist` the running servers import; pre-commit's `dev-stack` step (`api/hono/src/bin/dev-running.ts`) refuses a commit while the launcher's record names a stack still running there.
 - ALWAYS: Keep the dashboard on the owner rung: every route and the WebSocket pass `requireConsoleRole("owner")`, but first run's setup routes, which serve before any user exists (the setup rule above).
