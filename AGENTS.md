@@ -253,7 +253,7 @@ Its rules live in one file per topic under `.agents/dashboard/`, and a change to
 Each topic below names when to read its file, and each ALWAYS line is that file's rule in short: the file holds it whole, with its reasons.
 When a dashboard rule's meaning changes, its ALWAYS line here changes with it.
 
-- Stack: read `.agents/dashboard/stack.md` before you change how `bun run dev` starts, which machine a stack reads, the fixture (`api/hono/src/fixtures/dashboard.json`), the dashboard's data folder, the organisation's config (`packages/config/src/org.ts`), the hosted build or Yard's routes, or the `claude_*` tables.
+- Stack: read `.agents/dashboard/stack.md` before you change how `bun run dev` starts, which machine a stack reads, the fixture, the dashboard's data folder, the organisation's config (`packages/config/src/org.ts`), the hosted build or the `claude_*` tables.
   - ALWAYS: Start it (`bun run dev`) as a process of a cmux terminal, or as a background task of an agent session in one, never detached with `( … &)` or `nohup`.
   - ALWAYS: Serve first run's setup with none of the app's database or auth code loaded: with `POSTGRES_URL` empty, `api/hono/src/main.ts` serves `firstRun()`'s setup routes, `GET /api/v1/onboard/checks`, the first run's fix routes and a `setup: true` `GET /api/health` alone until Start a local container finishes, whose database is pglaunch's as is.
   - ALWAYS: A person's stack reads their own machine, while factory, test and `PLAYGROUND_FIXTURE` stacks read the fixture, the live dashboard's checkout reads the live machine and a hosted build reads none, as `dashboardSource()` in `api/hono/src/lib/dashboard/fixture.ts` decides.
@@ -279,7 +279,7 @@ When a dashboard rule's meaning changes, its ALWAYS line here changes with it.
   - ALWAYS: Send a message from the web through the dashboard's outbox (`useDashboard().outbox`), not `sendMessage` alone.
 - Writes: read `.agents/dashboard/writes.md` before you change a dashboard write or a `bun run verify` check, and before you add, move or remove a dashboard page, a sidebar group or an owner-rung API route.
   - ALWAYS: Guard every dashboard write with `requireTrustedOrigin` and `requireLoopback` (`api/hono/src/middlewares/dashboard.ts`) before the session is read, then the owner rung; first run's writes, with no session yet, take `requireThisMachine` in place of the rung.
-    Under `PLAYGROUND_HOSTED=1` Yard's writes take the `member` rung with no `requireLoopback`, and a browser's write `requireTrustedOrigin` while a `yard_` token's write takes none (writes.md).
+    Under `PLAYGROUND_HOSTED=1` Yard's writes take the `member` rung, no `requireLoopback`, and an Origin from a browser alone (writes.md).
   - ALWAYS: Test a dashboard write on a fixture stack, and reach a real cmux session only from a live-reads stack opted in to cmux's sessions, against a throwaway probe.
   - ALWAYS: Verify dashboard work with `bun run verify` (`--help` lists its checks) rather than a script of your own.
   - ALWAYS: Keep the dashboard map current.

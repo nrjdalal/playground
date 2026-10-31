@@ -247,7 +247,7 @@ describe.skipIf(!dockerUp())("Yard's store", () => {
 
   describe("audience", () => {
     // a sent message's frame went to every row of the channel's members, so a banned member's open socket kept hearing the channel
-    test("a sent message reaches the channel's members on the member rung, and a ban or a lost rung takes a member out until it is undone", async () => {
+    test("a sent message reaches the channel's members on the member rung, a ban or a lost rung takes a member out until it is undone, and a pending one reaches its sender alone", async () => {
       const channel = await both("audience")
       await store.joinChannel(db, web("di"), channel.id)
       const sent = await send(web("ada", true), channel.id, { kind: "text", text: "hello" })
@@ -260,6 +260,8 @@ describe.skipIf(!dockerUp())("Yard's store", () => {
       await sql`update "user" set role = 'user' where id = 'di'`
       expect(await audience()).toEqual(["ada", "bo"])
       await sql`update "user" set role = 'member' where id = 'di'`
+      const held = await send(token("bo"), channel.id, { kind: "fix", text: "patch" })
+      expect(await store.audienceOf(db, token("bo"), held)).toEqual(["bo"])
     })
   })
 

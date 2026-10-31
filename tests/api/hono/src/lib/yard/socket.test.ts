@@ -1,7 +1,9 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test"
 import { join, resolve } from "node:path"
 
-import { join as hold, publish } from "../../../../../../api/hono/src/lib/yard/socket"
+// The in-process cases run on one instance with no Redis, whatever KV_URL the runner's .env sets.
+process.env.KV_URL = ""
+const { join: hold, publish } = await import("../../../../../../api/hono/src/lib/yard/socket")
 
 const API = resolve(import.meta.dir, "../../../../../../api/hono")
 const SOCKET = join(API, "src/lib/yard/socket.ts")
@@ -22,9 +24,10 @@ describe("Yard's socket on one instance", () => {
   test("the close join returns removes that socket alone, and the member's other socket still gets a post", async () => {
     const got: string[] = []
     const leave = hold("cy", { send: (data) => got.push(`first ${data}`) })
-    hold("cy", { send: (data) => got.push(`second ${data}`) })
+    const leaveSecond = hold("cy", { send: (data) => got.push(`second ${data}`) })
     leave()
     await publish(["cy"], { channel: "c1", lastReadAt: "2026-10-31T00:00:00.000Z", type: "read" })
+    leaveSecond()
     expect(got.map((line) => line.split(" ")[0])).toEqual(["second"])
   })
 
@@ -43,50 +46,97 @@ describe("Yard's socket on one instance", () => {
   })
 })
 
-// A fake Redis that answers HELLO and SUBSCRIBE on each odd connection and hangs up on each even one, so every connect fails after its subscribe.
-describe("Yard's socket on a Redis that drops its second connection", () => {
+// A fake Redis that answers HELLO and SUBSCRIBE and never PUBLISH, hanging up on each connection hangUp names, counting connections and the most open at once.
+const fakeRedis = (hangUp: (n: number) => boolean) => {
+  const seen = { count: 0, live: 0, most: 0 }
+  const server = Bun.listen<{ held: boolean }>({
+    hostname: "127.0.0.1",
+    port: 0,
+    socket: {
+      close: (socket) => {
+        if (socket.data.held) seen.live--
+      },
+      data: (socket, data) => {
+        const text = data.toString()
+        if (text.includes("HELLO")) socket.write("%1\r\n+server\r\n+redis\r\n")
+        else if (text.includes("SUBSCRIBE"))
+          socket.write(">3\r\n$9\r\nsubscribe\r\n$4\r\nyard\r\n:1\r\n")
+      },
+      open: (socket) => {
+        socket.data = { held: !hangUp(++seen.count) }
+        if (!socket.data.held) return void socket.end()
+        seen.most = Math.max(seen.most, ++seen.live)
+      },
+    },
+  })
+  return { seen, server }
+}
+
+// One instance as a child Bun on the fake Redis, running script after it imports socket.ts's join and publish.
+const instance = async (port: number, script: string) =>
+  Bun.spawn(
+    [
+      "bun",
+      "-e",
+      `const { join, publish } = await import(${JSON.stringify(SOCKET)}); ${script}; process.exit(0)`,
+    ],
+    {
+      cwd: API,
+      env: { ...instanceEnv(), KV_URL: `redis://127.0.0.1:${port}` },
+      stderr: "ignore",
+      stdout: "ignore",
+    },
+  ).exited
+
+describe("Yard's socket on a fake Redis", () => {
   // a connect that failed after its subscribe left the subscriber live, so the next connect added a second and every frame arrived twice
   test("a connect that fails partway closes its subscriber, so one instance never holds two", async () => {
-    let count = 0
-    let live = 0
-    let most = 0
-    const server = Bun.listen<{ subscriber: boolean }>({
-      hostname: "127.0.0.1",
-      port: 0,
-      socket: {
-        close: (socket) => {
-          if (socket.data.subscriber) live--
-        },
-        data: (socket, data) => {
-          const text = data.toString()
-          if (text.includes("HELLO")) socket.write("%1\r\n+server\r\n+redis\r\n")
-          else if (text.includes("SUBSCRIBE"))
-            socket.write(">3\r\n$9\r\nsubscribe\r\n$4\r\nyard\r\n:1\r\n")
-        },
-        open: (socket) => {
-          socket.data = { subscriber: ++count % 2 === 1 }
-          if (!socket.data.subscriber) return void socket.end()
-          most = Math.max(most, ++live)
-        },
-      },
-    })
-    const child = Bun.spawn(
-      [
-        "bun",
-        "-e",
-        `const { join } = await import(${JSON.stringify(SOCKET)}); join("ek", { send() {} }); await Bun.sleep(1500); join("fy", { send() {} }); await Bun.sleep(1500); process.exit(0)`,
-      ],
-      {
-        cwd: API,
-        env: { ...instanceEnv(), KV_URL: `redis://127.0.0.1:${server.port}` },
-        stderr: "ignore",
-        stdout: "ignore",
-      },
-    )
-    expect(await child.exited).toBe(0)
-    server.stop(true)
-    expect(count).toBeGreaterThanOrEqual(4)
-    expect(most).toBe(1)
+    const { seen, server } = fakeRedis((n) => n % 2 === 0)
+    try {
+      expect(
+        await instance(
+          server.port,
+          `join("ek", { send() {} }); await Bun.sleep(1500); join("fy", { send() {} }); await Bun.sleep(1500)`,
+        ),
+      ).toBe(0)
+      expect(seen.count).toBeGreaterThanOrEqual(4)
+      expect(seen.most).toBe(1)
+    } finally {
+      server.stop(true)
+    }
+  }, 30_000)
+
+  // a fan-out past its cap threw but kept the pair, so a Redis that connected and then stopped answering held every post 2 s until the process restarted
+  test("a fan-out past its cap drops the pair, so the next publish connects again", async () => {
+    const { seen, server } = fakeRedis(() => false)
+    try {
+      expect(
+        await instance(
+          server.port,
+          `for (let i = 0; i < 3; i++) await publish(["gy"], { channel: "c1", lastReadAt: "2026-10-31T00:00:00.000Z", type: "read" }).catch(() => {})`,
+        ),
+      ).toBe(0)
+      expect(seen.count).toBeGreaterThanOrEqual(6)
+      expect(seen.most).toBeLessThanOrEqual(2)
+    } finally {
+      server.stop(true)
+    }
+  }, 30_000)
+
+  // the retry connected a new pair after the last socket had left, so an idle instance stayed subscribed
+  test("a retry armed while a socket was open connects nothing once the last socket has left", async () => {
+    const { seen, server } = fakeRedis((n) => n % 2 === 0)
+    try {
+      expect(
+        await instance(
+          server.port,
+          `const leave = join("hy", { send() {} }); await Bun.sleep(300); leave(); await Bun.sleep(2500)`,
+        ),
+      ).toBe(0)
+      expect(seen.count).toBe(2)
+    } finally {
+      server.stop(true)
+    }
   }, 30_000)
 })
 
@@ -94,6 +144,8 @@ describe("Yard's socket on a Redis that drops its second connection", () => {
 describe.skipIf(!dockerUp())("Yard's socket across instances", () => {
   let container = ""
   let url = ""
+  // every listener this describe spawns, killed after it so a failed case leaves no child waiting on its own timer
+  const children: Bun.Subprocess[] = []
 
   const env = () => ({ ...instanceEnv(), KV_URL: url })
 
@@ -123,6 +175,7 @@ describe.skipIf(!dockerUp())("Yard's socket across instances", () => {
   }, 60_000)
 
   afterAll(() => {
+    for (const child of children) child.kill()
     if (container)
       Bun.spawnSync(["docker", "rm", "-fv", container], { stderr: "ignore", stdout: "ignore" })
   })
@@ -137,6 +190,7 @@ describe.skipIf(!dockerUp())("Yard's socket across instances", () => {
       ],
       { cwd: API, env: env(), stderr: "pipe", stdout: "pipe" },
     )
+    children.push(listener)
     const reader = listener.stdout.getReader()
     let out = ""
     while (!out.includes("joined")) {
@@ -172,6 +226,7 @@ describe.skipIf(!dockerUp())("Yard's socket across instances", () => {
       ],
       { cwd: API, env: env(), stderr: "pipe", stdout: "pipe" },
     )
+    children.push(listener)
     const reader = listener.stdout.getReader()
     let out = ""
     while (!out.includes("joined")) {
