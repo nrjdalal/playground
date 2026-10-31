@@ -37,7 +37,7 @@ Read the generated `packages/db/drizzle/NNNN_*.sql`. Done when that SQL, its `me
 
 ## 3. Point at a throwaway database first
 
-**Local work runs against a disposable container of the worktree's own, never the live dashboard's database** (`live.container`, which the live dashboard checkout's `.env` names). It holds every real session and transcript, so a migration applied there lands under the running dashboard, and a column renamed under running code takes that code down. This is not hypothetical: on ZeroStarter's shared database it has happened, and step 0 and this step both exist because of it.
+**Local work runs against a disposable container of the worktree's own, never the live dashboard's database** (`live.container`, which the live dashboard checkout's `.env` names). It holds every real session and transcript, so a migration applied there lands under the running dashboard, and a column renamed under running code takes that code down. This is not hypothetical: on ZeroStarter's shared database it has happened, and step 0 and this step both exist because of it. One read of it is allowed: a Vibeground's Start seeds its own copy with one `pg_dump` inside the live database's container, and its branch's migrations run on that copy alone (`.agents/dashboard/stack.md`).
 
 ```bash
 docker run -d --name playground-<worktree>-db -e POSTGRES_PASSWORD=<pw> -p 127.0.0.1::5432 postgres:alpine

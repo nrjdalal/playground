@@ -83,7 +83,7 @@ describe("stacksOf", () => {
     { branch: null, path: "/y", project: "yard" },
   ]
 
-  test("a worktree runs where a web route's process group is one its stack's record names; the rest are stopped, with no URL", () => {
+  test("a worktree runs where a web route's process group is one its stack's record names, the rest stopped with no URL, and a Vibeground is marked", () => {
     expect(
       stacksOf({
         records: new Map([
@@ -95,6 +95,7 @@ describe("stacksOf", () => {
           { childPgid: 43, hostname: "feat-b.api.playground.localhost", pid: 9 },
         ],
         sessions: [{ cwd: "/p/.claude/worktrees/b", name: "b-worker" }],
+        vibes: new Set(["/p/.claude/worktrees/b"]),
         worktrees,
       }),
     ).toEqual([
@@ -105,6 +106,7 @@ describe("stacksOf", () => {
         project: "playground",
         session: null,
         url: null,
+        vibe: false,
       },
       {
         branch: "feat/b",
@@ -113,8 +115,17 @@ describe("stacksOf", () => {
         project: "playground",
         session: "b-worker",
         url: "https://feat-b.playground.localhost",
+        vibe: true,
       },
-      { branch: null, name: "y", path: "/y", project: "yard", session: null, url: null },
+      {
+        branch: null,
+        name: "y",
+        path: "/y",
+        project: "yard",
+        session: null,
+        url: null,
+        vibe: false,
+      },
     ])
   })
 
@@ -134,6 +145,7 @@ describe("stacksOf", () => {
         project: "yard",
         session: null,
         url: "https://feat-rooms.yard.localhost",
+        vibe: false,
       },
     ])
   })

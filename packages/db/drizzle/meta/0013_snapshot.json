@@ -1,5 +1,5 @@
 {
-  "id": "f71b5ca1-0fde-4202-9e55-a2f7ccc7b826",
+  "id": "2807ab1e-0810-4454-b1b3-62c4be4c8601",
   "prevId": "433be565-b190-4fd6-8597-1986044fbb97",
   "version": "7",
   "dialect": "postgresql",
@@ -1986,12 +1986,6 @@
           "notNull": true,
           "default": "now()"
         },
-        "created_by": {
-          "name": "created_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
         "kind": {
           "name": "kind",
           "type": "text",
@@ -2019,17 +2013,7 @@
         }
       },
       "indexes": {},
-      "foreignKeys": {
-        "yard_channel_created_by_user_id_fk": {
-          "name": "yard_channel_created_by_user_id_fk",
-          "tableFrom": "yard_channel",
-          "tableTo": "user",
-          "columnsFrom": ["created_by"],
-          "columnsTo": ["id"],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        }
-      },
+      "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
         "yard_channel_name_unique": {
@@ -2129,7 +2113,7 @@
           "tableTo": "user",
           "columnsFrom": ["made_by"],
           "columnsTo": ["id"],
-          "onDelete": "set null",
+          "onDelete": "cascade",
           "onUpdate": "no action"
         },
         "yard_invite_redeemed_by_user_id_fk": {
@@ -2138,7 +2122,7 @@
           "tableTo": "user",
           "columnsFrom": ["redeemed_by"],
           "columnsTo": ["id"],
-          "onDelete": "set null",
+          "onDelete": "cascade",
           "onUpdate": "no action"
         },
         "yard_invite_requested_by_user_id_fk": {
@@ -2147,7 +2131,7 @@
           "tableTo": "user",
           "columnsFrom": ["requested_by"],
           "columnsTo": ["id"],
-          "onDelete": "set null",
+          "onDelete": "cascade",
           "onUpdate": "no action"
         }
       },

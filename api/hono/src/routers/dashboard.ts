@@ -87,6 +87,7 @@ import {
   threadMessages,
 } from "@/lib/dashboard/threads"
 import { AGENT_ID_PATTERN, readTail, subagentPath } from "@/lib/dashboard/transcript"
+import { startVibe, stopVibe, VibeError } from "@/lib/dashboard/vibe"
 import { DISPATCHER, DISPATCHERS, listLive } from "@/lib/dashboard/workers"
 import { searchYouTube } from "@/lib/dashboard/youtube-search"
 import {
@@ -136,6 +137,15 @@ export const restartLimiter = createRateLimiter({
   limit: 5,
   windowMs: 60_000,
 })
+
+// A Vibeground's Start seeds a database and starts a stack, its Stop ends one; a person clicks a few a minute at most.
+export const vibeLimiter = createRateLimiter({
+  getUserId: (c) => c.get("session")?.userId,
+  limit: 6,
+  windowMs: 60_000,
+})
+
+const vibeSchema = z.object({ path: z.string().min(1).max(4096) })
 
 // A drag writes the whole order; a run of quick drags stays well under this, which only stops a stuck client.
 export const managersOrderLimiter = createRateLimiter({
@@ -507,10 +517,75 @@ const dashboardRoutes = new Hono<{ Variables: Session }>()
     describeRoute({
       tags: ["Dashboard"],
       description:
-        "Every worktree of every project this machine works in (this checkout's and each live session's folder's, read from git's own files), by project, then branch, A to Z, for the Inbox's Preview row: each its branch (null when detached), its name (its host's first label while it runs, else its folder's), its path, its project (the origin's repository name), the session working in it (null when none), and its stack's https URL while `bun run dev` serves it, from the portless route whose process group its stack's record names, else null; then each web stack portless serves that no worktree claims, under its app's name, with no path, branch or session. API hosts and aliases are left out, and a fixture stack lists the fixture's made-up worktrees. Read-only.",
+        "Every worktree of every project this machine works in (this checkout's and each live session's folder's, read from git's own files), by project, then branch, A to Z, for the Inbox's Preview row: each its branch (null when detached), its name (its host's first label while it runs, else its folder's), its path, its project (the origin's repository name), the session working in it (null when none), and its stack's https URL while `bun run dev` serves it, from the portless route whose process group its stack's record names, else null, and `vibe`, true for a Vibeground `POST /api/v1/stacks/start` started (its `.turbo/vibe.json`); then each web stack portless serves that no worktree claims, under its app's name, with no path, branch or session. API hosts and aliases are left out, and a fixture stack lists the fixture's made-up worktrees. Read-only.",
       responses: { 200: { description: "OK" }, ...authErrorResponses },
     }),
     async (c) => c.json({ data: await readStacks() }),
+  )
+  .post(
+    "/stacks/start",
+    describeRoute({
+      tags: ["Dashboard"],
+      description:
+        "Start a stopped worktree from the Inbox's Preview row as a Vibeground, on the owner's click: `path` names one `GET /api/v1/stacks` lists, a linked worktree of a Playground-shaped checkout (its own `.env.example` and `packages/db/drizzle`) on a branch, run as it stands whatever its parent. It gets a Postgres container of its own on loopback, seeded by one `pg_dump` inside the live database's container (every table, `claude_*` without its rows), the only read of the live database; the branch's own migrations run on the copy; its `.env` starts from its own `.env.example` with the copy's URL and `PLAYGROUND_LIVE_READS=true` (an `.env` already there is kept aside and put back on Stop); then `bun run dev` starts in it as this user, in its own process group. Refused (409) while the 5-minute load is over 30, or over 15 with a Vibeground running, and for a running or already started worktree, the live dashboard's, a checkout's own folder or a non-Playground one; a failed seed removes the copy. A fixture stack marks its made-up worktree running instead. Returns the dump's size and the time taken.",
+      responses: {
+        200: {
+          description: "Started",
+          content: {
+            "application/json": {
+              schema: resolver(z.object({ data: z.object({ bytes: z.number(), ms: z.number() }) })),
+            },
+          },
+        },
+        ...validationErrorResponses,
+        ...authErrorResponses,
+        ...forbiddenErrorResponses,
+        409: errorResponse("CONFLICT", "The worktree cannot start, with the reason"),
+      },
+    }),
+    vibeLimiter,
+    sValidator("json", vibeSchema, invalidInput),
+    async (c) => {
+      try {
+        return c.json({ data: await startVibe(c.req.valid("json").path) })
+      } catch (error) {
+        if (error instanceof VibeError) throw new ApiError(409, "CONFLICT", error.message)
+        throw error
+      }
+    },
+  )
+  .post(
+    "/stacks/stop",
+    describeRoute({
+      tags: ["Dashboard"],
+      description:
+        "Stop a Vibeground on the owner's click: `path` names a worktree `GET /api/v1/stacks` lists with `vibe: true`. Runs `bun run dev:stop` in it, which signals only the process groups its stack recorded, removes its copy's container with `docker rm -fv`, and puts its `.env` back as it was before Start; the worktree stays. Refused (409) for a stack Start did not start. A fixture stack marks its made-up worktree stopped instead.",
+      responses: {
+        200: {
+          description: "Stopped",
+          content: {
+            "application/json": {
+              schema: resolver(z.object({ data: z.object({ stopped: z.literal(true) }) })),
+            },
+          },
+        },
+        ...validationErrorResponses,
+        ...authErrorResponses,
+        ...forbiddenErrorResponses,
+        409: errorResponse("CONFLICT", "The stack cannot stop, with the reason"),
+      },
+    }),
+    vibeLimiter,
+    sValidator("json", vibeSchema, invalidInput),
+    async (c) => {
+      try {
+        await stopVibe(c.req.valid("json").path)
+        return c.json({ data: { stopped: true as const } })
+      } catch (error) {
+        if (error instanceof VibeError) throw new ApiError(409, "CONFLICT", error.message)
+        throw error
+      }
+    },
   )
   .get(
     "/system",

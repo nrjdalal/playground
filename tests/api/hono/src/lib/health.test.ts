@@ -111,6 +111,7 @@ describe.skipIf(!dockerUp())("with the database up", () => {
     expect(data.dashboard).toBe("fixture")
     expect(typeof data.version).toBe("string")
     expect(data.dispatcherSlots).toBeGreaterThanOrEqual(1)
+    expect(data.vibe).toBeNull()
   })
 })
 
@@ -134,6 +135,7 @@ describe("healthData", () => {
       "environment",
       "message",
       "version",
+      "vibe",
     ])
     await closeOf(client)
   })
