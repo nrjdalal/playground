@@ -522,7 +522,7 @@ free() {
   [ -n "$TICKET" ] && rm -f "$TICKET"
 }
 trap 'free' EXIT
-trap '[ -n "$CHILD" ] && kill -TERM -- "-$CHILD" 2>/dev/null; wait "$CHILD" 2>/dev/null; [ -n "$CHILD" ] && reap "$CHILD"; exit 143' TERM INT HUP
+trap '[ -n "$CHILD" ] && kill -TERM -- "-$CHILD" 2>/dev/null; wait "$CHILD" 2>/dev/null; [ -n "$CHILD" ] && { reap "$CHILD"; rlog end "rc=143 ran=$(($(date +%s) - TOOK))s"; }; exit 143' TERM INT HUP
 
 # stops what is left in the command's group once it has ended, TERM then KILL after 3 seconds, logging each pid (a suite's worker once outlived it by 5 hours)
 reap() {

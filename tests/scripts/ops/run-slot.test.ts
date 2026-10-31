@@ -1516,6 +1516,24 @@ describe("a model-bound run", () => {
 })
 
 // 31 Oct: a suite's `bun test --isolate` worker outlived its suite by 5 hours at 50% CPU, reparented to launchd once the suite's own process exited
+// review round 1: a run stopped by a signal logged no end, so ran_short never saw it run long and kept its line on the quick slot
+test("a run stopped by TERM logs its end with rc=143 and how long it ran", async () => {
+  const m = machine()
+  // the command touches the marker, its $0, once it runs, so TERM lands while run-slot waits on it
+  const run = m.start("worker-t", { RUN_SLOT_SIZE: "small" }, SCRIPT, [
+    "bash",
+    "-c",
+    'touch "$0"; sleep 30',
+  ])
+  while (!existsSync(run.marker)) await Bun.sleep(20)
+  run.p.kill("SIGTERM")
+  await run.p.exited
+  const end = readFileSync(join(m.ops, "run-slot.runs.log"), "utf8")
+    .split("\n")
+    .find((l) => l.split(" ")[1] === "end" && l.split(" ")[2] === "worker-t")
+  expect(end).toMatch(/ rc=143 ran=\d+s$/)
+})
+
 describe("what the command leaves in its process group", () => {
   const alive = (pid: number) => {
     try {
