@@ -21,6 +21,7 @@
         "POST /api/v1/inbox/read",
         "POST /api/v1/inbox/:id/retry",
         "POST /api/v1/inbox/:id/schedule",
+        "POST /api/v1/inbox/:id/secret",
         "POST /api/v1/workers/:sessionId/feed/:requestId",
         "POST /api/v1/workers/:sessionId/mode",
         "POST /api/v1/workers/:sessionId/restart",
@@ -50,10 +51,11 @@
         "Above the steps, on a Checkpoint line, Load older pages back through the session's older steps from the database until the start of the session, or says the database has not read that far.",
         "An answered Inbox item keeps one line above its footer saying what he chose and whether it reached its poster, a go reading as still being carried out (Sending in Slack… for a sent draft, Saving a Slack draft… for a Draft) until its poster closes it, then linking where it landed (a Slack link as Open thread) or giving why there is no link, a Draft Slack refused reading, gray, Draft not saved with why.",
         "An Inbox answer that did not reach its poster stays in the list and its count, its result reading Send failed, or Send unconfirmed, with the reason above a footer whose left end holds Retry, which sends it again, and whose right end holds Dismiss, then Reply.",
-        "An Inbox decision previews exactly what Approve does (a Slack message, a ship of canary, a new Linear ticket, a delete, a schema, a budget, or a plain ask saying what its poster does) over Approve and Deny in muted green and red, then an optional comment box that goes with whatever he answers, and on the right Archive, which sets it aside for later (cleared, neither yes nor no, to the Archived row), Snooze and Reply.",
+        "An Inbox decision, except a secret ask, previews exactly what Approve does (a Slack message, a ship of canary, a new Linear ticket, a delete, a schema, a budget, or a plain ask saying what its poster does) over Approve and Deny in muted green and red, then an optional comment box that goes with whatever he answers, and on the right Archive, which sets it aside for later (cleared, neither yes nor no, to the Archived row), Snooze and Reply.",
         "An Inbox decision's plain ask can carry its own Approve and Deny labels, one line each, which his card shows as two choices under its text, the quoted block, when both are there.",
         "An Inbox draft is its Slack message or Linear comment, editable in place, over Send, Draft (a Slack draft alone: its poster saves it in Slack's Drafts & Sent) and Discard, its meta line naming which from its link and linking the thread it replies in as Open thread.",
         "An Inbox item keeps its place while the list is open: one that arrives waits behind a pill at the top (1 new update), which puts what waits on top, newest first, as the list glides down, and a card that moved under him (another left for Done, or the pill was taken) pauses its buttons for 1 second.",
+        "An Inbox secret ask names its key and where its value goes (a Vercel project and its environments) over a masked field and Submit alone, which hands the value to that place and keeps it nowhere, then reads only Provided at its time with each environment's exit status.",
         "An Inbox update is an outcome, bold with a dot while unread, and a click on its title, its tick or its Dismiss marks it read.",
         "Below the owner rung, a lock.",
         "Beside the view, the aside window's tabs, the Inbox first, then on another session's view dispatcher's own chat and composer (Chat), then a square for each app you show, then Pages, then Apps last (on a phone the view's own tab leads them): one plain list of what the factory posted through bun run ask, in priority order (decisions and drafts that need you, then unread updates, then the rest of the week, each newest first), each a card whose band ends in its time and a Mark as read tick and whose footer holds an open card's Approve and Deny (green and red) at its left end and, at its right end, Archive and Snooze (where offered), then Dismiss, then Reply, an open decision or draft taking an optional comment, an answered or settled card's result reading on its own line above the footer; the list and its shelves are rows that open and shut, each with its count: Inbox with Mark all as read, then In progress (a chat reply its poster carries out, five minutes on), Snoozed, Archived and Done, and All caught up over a list with nothing waiting.",
@@ -65,7 +67,7 @@
         "On dispatcher's page, and on probe-sdk's, the session the dashboard hosts on the Agent SDK while PLAYGROUND_SDK_PROBE_DIR names its folder (listed under Other), a composer under the steps sends a message as you, typed into dispatcher's terminal and put on probe-sdk's input (Enter sends, Shift+Enter adds a line), probe-sdk's with a permission-mode menu beside the attach button (Default, Accept edits, Plan or Bypass permissions, the mode also in its sidebar row's tooltip), read-only while approvals are off.",
         "Playground's chat, the dashboard's home: the live session the API gives the dispatcher role under the primary's name (PLAYGROUND_DISPATCHER, dispatcher by default), found by that role, shown as a session's own view below with the composer under its steps, its heading and its composer (Message Alpha) naming it by its label, never a session's name; while it is not live, first run in its place: this Mac's checks until their done mark is written, then one ✓ line over the steps left (GitHub, Settings, a Claude account and Start), with a link to the System page.",
         "Snooze, an icon on an open decision or draft that holds no answer yet (one already put away included), beside its footer's other actions: its fixed times in IST, each beside its day and time (in 30 minutes, in 1 hour, in 3 hours, this evening 18:00 while it is ahead, the next 09:00, Monday 09:00 and next week's same weekday at 09:00) or a day and time he picks, and the item leaves the list and the count until its time, asking again once it has passed, new to the tab's dot again.",
-        "The Inbox is one accordion: its first row reads Inbox and how many items are in the list, 0 included, gray when none, with the new-items pill and an icon Mark all as read on its right, which marks every waiting decision and draft read and every update read, each staying in the list; under it In progress (a chat reply its poster is carrying out, 5 minutes on), Snoozed, Archived and Done rows, each with its count of all it holds and a circle when empty or a chevron, an empty one gray and shut, Archived's and Done's headers each holding a check that dismisses all on that row, and last a Preview row with no count, always there and shut at first, opening onto the preview pane's picker of dev stacks and Previews, its address and the live page; each item's band ends in its time and a check, Mark as read, which only marks it seen.",
+        "The Inbox is one accordion: its first row reads Inbox and how many items are in the list, 0 included, gray when none, with the new-items pill and an icon Mark all as read on its right, which marks every waiting decision and draft read and every update read, each staying in the list; under it In progress (a chat reply its poster is carrying out, 5 minutes on), Snoozed, Archived and Done rows, each with its count of all it holds and a circle when empty or a chevron, an empty one gray and shut, Archived's and Done's headers each holding a check that dismisses all on that row, and last a Preview row with no count, always there and shut at first (the sidebar's brand opens it), opening onto the preview pane's picker of every project's worktrees by project, running and stopped, a stopped one offering Start, a started one not serving yet Starting with Stop, and a running Vibeground Stop, with a strip under the bar wearing its Vibeground badge and branch and Done, which sends dispatcher the fixed hand-back message naming the worktree, its branch and its session, then reads Sent to Alpha, and Previews, its address and the live page; each item's band ends in its time and a check, Mark as read, which only marks it seen.",
         "The second dispatcher's chat (PLAYGROUND_DISPATCHER_SECONDARY, the primary's name plus -2 by default, dispatcher-2), opened from its own row in the sidebar's header: its own view with the composer under its steps, named by its label as the primary's is (Message Bravo), with the aside of any session's view beside it: the Inbox, Playground's chat and its Pages.",
         "Under the steps of every chat, with or without a composer, the Checkpoint bar, one row that stays from first paint: on the left that the session waits on a picker, else how many messages are on their way; on the right Scroll to end while there is more below, up and down arrows to his previous and next message (Alt+Up and Alt+Down), and the Watching / Reading toggle. Watching plays the stream at reading speed, resting at each new message and reading how far behind it is; Reading moves only by his hand and counts what arrived below. His scroll up turns Reading, his own scroll to the end or a click turns Watching, and each chat remembers its mode in this browser.",
         "With ?worker=, that session's own view, read-only but for probe-sdk's, with no header (its label is the page's heading for screen readers alone): its steps as they happen, from the top of the page (what it was asked, then each turn of its own as one message: what it said, its thinking closed to a Thought row, each tool call closed to one row that opens to its input and what it returned (a spinner and its name shimmering while it runs, a warning icon and red when it failed), and a subagent's run as a Task that opens to the subagent's own steps and its report; every agent named by its label, each message headed by its sender and the time it was sent, such as You · 7:37 PM, and keeping its line breaks; a link opens on click with no pop-up, another site's in a new tab, and only http and https links open) with what waits on you inside them: each prompt it left in cmux's Feed as a card where it was asked: a picker answered with its options or the person's own words, a permission request with the tool's whole input and Allow once or Deny, a plan with its text and Start it or Send it back with a note; permission and plan cards are read-only, pointing to the session's terminal (a hosted session's saying it is refused after 10 minutes), while approvals are off (PLAYGROUND_APPROVALS_ENABLED), and only refusing is offered when not all of one could be shown."
@@ -318,8 +320,9 @@
         "A composer under the messages, Playground's box at its sizes with the message's kind in place of the session's mode; an owner-only channel (#releases) shows who posts there in its place for any rung below the owner.",
         "Each message as untrusted data through the transcript renderer, links shown and opened only on a click, images from elsewhere unloaded, behind its from line: the sender's GitHub login, the device it came from and its kind tag, but text's.",
         "One Yard channel or direct message, headed by #name or the other member's login and its topic; opening it marks it read.",
-        "Your own tier-two post waiting for your approval says so, with Review opening its approve page; a denied one stays, seen by you alone."
-      ]
+        "Your own tier-two post waiting for your approval says so, to approve on Yard's web; a denied one stays, seen by you alone."
+      ],
+      "title": "Yard channel"
     }
   ],
   "sidebar": [
@@ -345,7 +348,7 @@
     },
     {
       "label": "Scripts",
-      "shows": "The ops jobs Ops runs as scripts with no session, one for each ops-*.json heartbeat file or job ops/jobs.json lists, A to Z, collapsed until its label is clicked, a Failing or Down one still shown, in red, under the collapsed label, and any job jobs.json marks disabled (paused) left out: each its plain name over Script, its state, when it runs and the model it calls when jobs.json marks it callsModel (its name, or AI when none is named; Calls <model> on hover and to screen readers), red while it is not running, in a 32px row whose second line cuts from its end, never the state (Dashboard updates over Script · Running · every hour), its hover giving its job id, what it does, its reason, its last beat and a schedule its heartbeat disagrees with, opening nothing. Its label ends with how many scripts it lists, the paused ones left out (Scripts 15). Owner rung only."
+      "shows": "The ops jobs Ops runs as scripts with no session, one for each ops-*.json heartbeat file or job ops/jobs.json lists, A to Z, collapsed until its label is clicked, a Failing or Down one still shown, in red, under the collapsed label, and any job jobs.json marks disabled (paused) left out: each its plain name over Script, its state, when it runs and the model it calls when jobs.json marks it callsModel (its name, or AI when none is named; Calls <model> on hover and to screen readers), red while it is Failing or Down and muted while Running or Waiting (nothing to read yet, as ops-usage before any Claude account), in a 32px row whose second line cuts from its end, never the state (Dashboard updates over Script · Running · every hour), its hover giving its job id, what it does, its reason, its last beat and a schedule its heartbeat disagrees with, opening nothing. Its label ends with how many scripts it lists, the paused ones left out (Scripts 15). Owner rung only."
     },
     {
       "label": "Other",
@@ -407,7 +410,7 @@
     },
     {
       "route": "GET /api/v1/stacks",
-      "use": "The web stacks portless serves, which the Inbox's Preview row offers in its picker on every dashboard page's aside rather than one page."
+      "use": "Every project's worktrees on this machine, running or stopped, each Vibeground marked, with the web stacks portless serves, which the Inbox's Preview row offers in its picker on every dashboard page's aside rather than one page."
     },
     {
       "route": "GET /api/v1/threads",
@@ -440,6 +443,14 @@
     {
       "route": "POST /api/v1/settings/:key/reset",
       "use": "Puts a setting back to its default at a scope, with a reason, the same write `playground settings reset` makes in the folder itself."
+    },
+    {
+      "route": "POST /api/v1/stacks/start",
+      "use": "Starts a stopped worktree as a Vibeground on a copy of the live data, from Start in the Inbox's Preview row on every dashboard page's aside."
+    },
+    {
+      "route": "POST /api/v1/stacks/stop",
+      "use": "Stops a Vibeground and removes its copy, keeping the worktree, from Stop in the Inbox's Preview row's bar on every dashboard page's aside."
     },
     {
       "route": "PUT /api/v1/settings/:key",

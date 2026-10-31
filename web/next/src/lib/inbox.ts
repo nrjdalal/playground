@@ -6,6 +6,7 @@ import { apiClient, unwrap } from "@/lib/api/client"
 import { isProbe } from "@/lib/dashboard"
 import { needsYouAnchor } from "@/lib/needs-you"
 import type { ShownState } from "@/lib/status-icons"
+import { fullTime } from "@/lib/time"
 
 export const INBOX_QUERY_KEY = ["inbox"] as const
 
@@ -30,6 +31,18 @@ export async function answerItem(
       json: { action, note, seen: updatedAt, text },
       param: { id },
     }),
+  )
+  if (error) throw new Error(error.message)
+  return data
+}
+
+// A secret ask's value, posted once to its own route and kept nowhere here; seen as an answer's.
+export async function provideSecret(
+  { id, updatedAt }: Pick<InboxItem, "id" | "updatedAt">,
+  value: string,
+) {
+  const { data, error } = await unwrap(
+    apiClient.v1.inbox[":id"].secret.$post({ json: { seen: updatedAt, value }, param: { id } }),
   )
   if (error) throw new Error(error.message)
   return data
@@ -412,6 +425,7 @@ export function kindWord(item: InboxItem): string {
     budget: "Budget",
     delete: "Delete",
     schema: "Schema",
+    secret: "Secret",
     ship: "Ship",
     slack: "Slack",
     ticket: "New ticket",
@@ -437,7 +451,7 @@ const carriedOut = (item: InboxItem): boolean => {
   )
 }
 
-// Where an item stands, which its card's colour says: open while it needs him, sending while a go or a chat reply is being carried out, done once its poster closed it, failed when the answer did not reach its poster, closed once denied, discarded, settled, read, a Draft Slack refused, or a failure he dismissed.
+// Where an item stands, which its card's colour says: open while it needs him, sending while a go or a chat reply is being carried out, done once its poster closed it or every environment took a secret, failed when the answer did not reach its poster or a secret's sink refused it, closed once denied, discarded, settled, read, a Draft Slack refused, or a failure he dismissed.
 export type ItemState = "closed" | "done" | "failed" | "open" | "sending"
 
 // Pure: a Draft its poster closed with no link, which only Slack refusing it leaves (draft_already_exists), so nothing was saved.
@@ -453,6 +467,12 @@ const draftRefused = (item: InboxItem): boolean => {
 export function itemState(item: InboxItem): ItemState {
   if (sendFailed(item)) return "failed"
   if (needsYou(item)) return "open"
+  // a secret he provided is done once every environment took it, and failed while any did not, a dismiss included, so the record stays
+  const provided = chosen(item)
+  if (provided?.choice === "provided") {
+    if (!provided.results) return "sending"
+    return provided.results.every((result) => result.exitCode === 0) ? "done" : "failed"
+  }
   // a chat reply is being carried out by its poster until it is closed, then done
   if (item.kind !== "update" && chosen(item)?.choice === "replied")
     return carriedOut(item) ? "done" : "sending"
@@ -513,6 +533,14 @@ export function outcomeLine(item: InboxItem): string | null {
   if (item.answer.choice === "settled") {
     const by = `Answered by ${agentLabel(item.answer.by)}`
     return item.answer.note ? `${by} · ${item.answer.note}` : by
+  }
+  // when, and each environment's exit status: all a secret's card ever shows of it
+  if (item.answer.choice === "provided") {
+    const results = (item.answer.results ?? []).map(
+      (result) =>
+        `${result.environment}: ${result.exitCode === null ? "stopped by a signal" : `exit ${result.exitCode}`}`,
+    )
+    return [`Provided at ${fullTime(item.answer.at)}`, ...results].join(" · ")
   }
   const who = agentLabel(takenBy(item))
   // being carried out by its poster until it is closed, where the close's link shows in the footer

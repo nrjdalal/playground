@@ -671,6 +671,21 @@ export const SIDEBAR_READY = [
   `innerWidth < 768 || (!!document.querySelector('[data-sidebar="content"] [data-sidebar="menu"][data-agents="ready"]') && !document.querySelector('[data-sidebar="menu"][data-agents="loading"]'))`,
 ]
 
+// The routes a run has fetched once, and how it fetches: a cold next dev compiles a route on its first request, and under load 48 that compile wedged the browser's first open (page_wedged on /robots.txt) until the pages were fetched by hand.
+export type Warm = { done: Set<string>; fetch: (url: string) => Promise<unknown> }
+
+// Up to 2 minutes for one cold compile, then the open goes on regardless, since a warm-up is only a head start.
+export const WARM_MS = 120_000
+export const warmFetch = (url: string): Promise<unknown> =>
+  fetch(url, { signal: AbortSignal.timeout(WARM_MS) }).then((response) => response.arrayBuffer())
+
+// Fetches a route once per run before the browser first opens it; a fetch that fails or times out still lets the open go on.
+export const warmUp = async (warm: Warm, web: string, route: string): Promise<void> => {
+  if (warm.done.has(route)) return
+  warm.done.add(route)
+  await warm.fetch(`${web}${route}`).catch(() => undefined)
+}
+
 // A route READY does not name (a session's own page) is shot once the page settles, as before.
 export const screenshot = async (
   browser: Browser,
@@ -680,8 +695,10 @@ export const screenshot = async (
   out: string,
   label: Label,
   theme: Theme = "light",
+  warm: Warm = { done: new Set(), fetch: warmFetch },
 ): Promise<Result> => {
   const path = join(out, screenshotName(route, viewport, label, theme))
+  await warmUp(warm, web, route)
   await browser.viewport(viewport)
   await browser.run("set", "media", theme)
   await browser.visit(`${web}${route}`)

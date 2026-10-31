@@ -465,7 +465,42 @@ free() {
   [ -n "$TICKET" ] && rm -f "$TICKET"
 }
 trap 'free' EXIT
-trap '[ -n "$CHILD" ] && kill -TERM -- "-$CHILD" 2>/dev/null; wait "$CHILD" 2>/dev/null; exit 143' TERM INT HUP
+trap '[ -n "$CHILD" ] && kill -TERM -- "-$CHILD" 2>/dev/null; wait "$CHILD" 2>/dev/null; [ -n "$CHILD" ] && reap "$CHILD"; exit 143' TERM INT HUP
+
+# stops what is left in the command's group once it has ended, TERM then KILL after 3 seconds, logging each pid (a suite's worker once outlived it by 5 hours)
+reap() {
+  local left
+  left=$(ps -A -o pid=,pgid=,command= | awk -v g="$1" '$2 == g { $2 = ""; print }')
+  [ -n "$left" ] || return 0
+  printf '%s\n' "$left" | while read -r pid cmd; do rlog reap "pid=$pid $cmd"; done
+  kill -TERM -- "-$1" 2>/dev/null
+  gone "$1" && return 0
+  kill -KILL -- "-$1" 2>/dev/null
+  gone "$1"
+}
+
+# whether a process group has emptied within 3 seconds, since a signalled process lingers until the kernel has torn it down
+gone() {
+  local i
+  for i in $(seq 15); do
+    ps -A -o pgid= | awk -v g="$1" '$1 == g { found = 1 } END { exit !found }' || return 0
+    sleep 0.2
+  done
+  return 1
+}
+
+# runs the command as the leader of a process group of its own (macOS has no setsid(1)), which reap stops once it ends, and exits with its code
+run_command() {
+  local code
+  python3 -I -c 'import os, sys; os.setsid(); os.nice(int(os.environ.get("RUN_SLOT_NICE", "10"))); os.execvp(sys.argv[1], sys.argv[1:])' "$@" <&3 3<&- &
+  CHILD=$!
+  wait "$CHILD"
+  code=$?
+  reap "$CHILD"
+  CHILD=""
+  rlog end "rc=$code ran=$(($(date +%s) - TOOK))s"
+  exit "$code"
+}
 
 reclaim() {
   # $1 is a slot directory that mkdir found taken: free it when its holder line ($2 of stale) has gone stale; the line and the directory are
@@ -518,6 +553,22 @@ held_units() {
     case "$u" in 1|2|3) ;; *) u=2 ;; esac
     total=$((total + u))
   done
+  echo $((total + $(peer_units)))
+}
+# each live holder of another factory's run slots (slots.peers) counts its units here, read only, since that folder is theirs (ops, 31 Oct: the two pools took load1 to 77)
+peer_units() {
+  local d s line u total=0
+  while IFS= read -r d; do
+    [ -n "$d" ] || continue
+    for s in run-slot run-slot-2 run-slot-3 run-slot-4; do
+      [ -d "$d/$s" ] || continue
+      line=$(cat "$d/$s.holder" 2>/dev/null)
+      stale "$d/$s" "$line" && continue
+      u=$(printf '%s' "$line" | cut -d' ' -f4)
+      case "$u" in 1|2|3) ;; *) u=2 ;; esac
+      total=$((total + u))
+    done
+  done <<< "$PEERS"
   echo "$total"
 }
 capacity() {
@@ -603,13 +654,7 @@ if [ -n "$MODEL_BOUND" ]; then
   echo "$WHO $$ $(date -u +%FT%TZ) 0 model" > "$SLOT.holder"
   echo "run-slot.sh: $WHO holds $(basename "$SLOT")" >&2
   TOOK=$(date +%s); rlog start "$(basename "$SLOT") waited=$((TOOK - ASKED))s"
-  python3 -I -c 'import os, sys; os.setsid(); os.nice(int(os.environ.get("RUN_SLOT_NICE", "10"))); os.execvp(sys.argv[1], sys.argv[1:])' "$@" <&3 3<&- &
-  CHILD=$!
-  wait "$CHILD"
-  code=$?
-  CHILD=""
-  rlog end "rc=$code ran=$(($(date +%s) - TOOK))s"
-  exit "$code"
+  run_command "$@"
 fi
 KIND=$(quick_kind "$@")
 if [ -n "$KIND" ]; then
@@ -642,14 +687,11 @@ if [ -n "$KIND" ]; then
   echo "$WHO $$ $(date -u +%FT%TZ)" > "$SLOT.holder"
   echo "run-slot.sh: $WHO holds run-slot-$KIND" >&2
   TOOK=$(date +%s); rlog start "run-slot-$KIND waited=$((TOOK - ASKED))s"
-  python3 -I -c 'import os, sys; os.setsid(); os.nice(int(os.environ.get("RUN_SLOT_NICE", "10"))); os.execvp(sys.argv[1], sys.argv[1:])' "$@" <&3 3<&- &
-  CHILD=$!
-  wait "$CHILD"
-  code=$?
-  CHILD=""
-  rlog end "rc=$code ran=$(($(date +%s) - TOOK))s"
-  exit "$code"
+  run_command "$@"
 fi
+
+# slots.peers, one folder a line, read once here since held_units runs in a subshell; a reader that cannot answer counts no peer
+PEERS=$(setting slots.peers 2>/dev/null | python3 -I -c 'import json, sys; [print(p) for p in json.load(sys.stdin) if isinstance(p, str)]' 2>/dev/null)
 
 if [ -n "$CAN_TAKE" ]; then
   reclaim "$OPS/$CAN_TAKE"
@@ -714,11 +756,4 @@ done
 [ -n "$SLOT" ] || exit 143
 echo "run-slot.sh: $WHO holds $(basename "$SLOT")" >&2
 TOOK=$(date +%s); rlog start "$(basename "$SLOT") waited=$((TOOK - ASKED))s"
-# the command leads a process group of its own (macOS has no setsid(1)), so a dev stack it starts can be stopped by bun run dev:stop
-python3 -I -c 'import os, sys; os.setsid(); os.nice(int(os.environ.get("RUN_SLOT_NICE", "10"))); os.execvp(sys.argv[1], sys.argv[1:])' "$@" <&3 3<&- &
-CHILD=$!
-wait "$CHILD"
-code=$?
-CHILD=""
-rlog end "rc=$code ran=$(($(date +%s) - TOOK))s"
-exit "$code"
+run_command "$@"

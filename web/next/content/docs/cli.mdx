@@ -68,7 +68,7 @@ Each herdr server shows whether it is up and how many sessions it holds, first, 
 2. It runs `scripts/link-skills.sh`, so the home skill set takes a new or renamed skill.
 3. It installs the dependencies when `bun.lock` or a `package.json` changed, and builds the shared packages when one of them changed.
 4. It restarts each background job whose code changed.
-5. It moves the Dashboard to the newest build, printing each step:
+5. It moves the Dashboard to the newest build, printing each step; `Building…` lasts while the Dashboard is down for its production build, which can take a few minutes:
 
 ```text
 Building…

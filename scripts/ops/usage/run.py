@@ -13,6 +13,9 @@ shared through login-flip.json, so the two never probe the same account twice in
 limits were measured), `source` "token/ratelimit-headers" and `storedLogin` (the stored login's account and week). Remove `factory`
 from login-flip.json when the factory moves back to the stored login. login-flip.json's `accounts` lists every account the factory's
 sessions spend into; each is probed the same way, and usage.json's `accounts` holds each fresh week reading, which week-marks.py sums.
+While login-flip.json names no `factory`, each Claude account the Dashboard's Add a Claude account keeps (usage.accounts, its
+setup-token under usage.keychainService) comes before the stored login: usage.json holds the first one's probe reading, since the
+dispatcher's sessions run on it, and the stored login's only when none of them reads. With neither a stored login nor an added account, the job beats "waiting", not an error.
 usage.json's `rotation` is login-flip.json's: `pool`, each account login-flip.py switches between (its TARGETS), whether its plan ends, when, and the day of the month a renewing one renews.
 usage.json keeps the shape the dashboard reads (rate_limits.{five_hour,seven_day}.{used_percentage,resets_at}, writtenAt), plus account
 and source. No model call but that probe. One instance (flock).
@@ -26,7 +29,8 @@ STORED = os.path.join(HERE, "stored-login.json")
 FLIP = os.path.join(HERE, "login-flip.json")
 CYCLE = 300
 PROBE_EVERY, FRESH_FOR = 840, 1800
-API = "https://api.anthropic.com/api/oauth"
+API = os.environ.get("PLAYGROUND_USAGE_API") or "https://api.anthropic.com/api/oauth"  # the new-user gate points it at made-up readings in its box, so its made-up login never leaves the Mac
+PROBE_URL = os.environ.get("PLAYGROUND_PROBE_URL") or "https://api.anthropic.com/v1/messages"  # the new-user gate points it at a closed loopback port, so its made-up token never leaves the Mac
 STARTED = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 sys.path.insert(0, OPS)
 from beat import beat, setting  # noqa: E402
@@ -51,10 +55,17 @@ def write(path, data):
     os.replace(tmp, path)
 
 
+class NoLogin(RuntimeError):
+    pass
+
+
 def oauth():
     r = subprocess.run(["security", "find-generic-password", "-a", os.environ.get("USER", ""), "-s", "Claude Code-credentials", "-w"], capture_output=True, text=True, timeout=15)
+    # 44 is security's item-not-found; a locked or denied Keychain is a failure, not a missing login
+    if r.returncode == 44:
+        raise NoLogin("no Claude Code credentials in the keychain")
     if r.returncode:
-        raise RuntimeError("no Claude Code credentials in the keychain")
+        raise RuntimeError(f"security exited {r.returncode} reading Claude Code's credentials")
     return json.loads(r.stdout).get("claudeAiOauth") or {}
 
 
@@ -100,7 +111,7 @@ def probe(email):
         return None
     body = json.dumps({"model": PROBE_MODEL, "max_tokens": 1, "system": "You are Claude Code, Anthropic's official CLI for Claude.",
                        "messages": [{"role": "user", "content": "hi"}]}).encode()
-    req = urllib.request.Request("https://api.anthropic.com/v1/messages", data=body, headers={
+    req = urllib.request.Request(PROBE_URL, data=body, headers={
         "Authorization": "Bearer " + r.stdout.strip(), "anthropic-version": "2023-06-01",
         "anthropic-beta": "oauth-2025-04-20,claude-code-20250219", "content-type": "application/json"})
     try:
@@ -128,7 +139,7 @@ def seen(flip, email, now):
         got = probe(email)
         if got:
             s = dict(got, at=now, via="token")
-            flip = json.load(open(FLIP))  # login-flip.py may have written since; keep its keys, set only this reading
+            flip = json.load(open(FLIP)) if os.path.exists(FLIP) else {}  # login-flip.py may have written since; keep its keys, set only this reading
             flip.setdefault("seen", {})[email] = s
             write(FLIP, flip)
     return s
@@ -159,29 +170,63 @@ def factory_reading(stored, flip):
         return None
     now = time.time()
     s = seen(flip, factory, now)
-    if now - s.get("at", 0) >= FRESH_FOR or s.get("week") is None:
+    if not fresh(s, now):
         raise RuntimeError(f"no reading of {factory} under {FRESH_FOR // 60} minutes old")
+    return probed(factory, s, stored, now)
+
+
+def fresh(s, now):
+    return now - s.get("at", 0) < FRESH_FOR and s.get("week") is not None
+
+
+def probed(account, s, stored, now):
+    """usage.json's data from one account's probe reading, naming the stored login beside it when there is one."""
     limits = {"five_hour": {"used_percentage": s.get("five"), "resets_at": int(s["fiveReset"]) if s.get("fiveReset") else None},
               "seven_day": {"used_percentage": s["week"], "resets_at": int(s["weekReset"]) if s.get("weekReset") else None}}
-    data = {"account": factory, "rate_limits": limits, "readAt": iso(s["at"]), "source": "token/ratelimit-headers", "writtenAt": iso(now)}
+    data = {"account": account, "rate_limits": limits, "readAt": iso(s["at"]), "source": "token/ratelimit-headers", "writtenAt": iso(now)}
     if stored:
         data["storedLogin"] = {"account": stored["account"], "week": (stored["rate_limits"].get("seven_day") or {}).get("used_percentage")}
     return data
 
 
+def added_reading(stored, flip, added):
+    """usage.json's data for the first Claude account the Dashboard added (usage.accounts, its token under usage.keychainService) with a fresh reading, since the dispatcher and its sessions run on it; None when none has one."""
+    now = time.time()
+    for email in added:
+        s = seen(flip, email, now)
+        if fresh(s, now):
+            return probed(email, s, stored, now)
+    if added:
+        raise RuntimeError(f"no reading of {', '.join(added)} under {FRESH_FOR // 60} minutes old")
+    return None
+
+
 while True:
-    problems, stored, data = [], None, None
+    problems, stored, data, no_login = [], None, None, False
+    # The factory's accounts, usage.accounts read each cycle so a change lands with no restart: the Dashboard's Add a Claude account writes them, and marks and alerts count these alone.
+    try:
+        FACTORY = [a["email"] for a in setting("usage.accounts") if a.get("provider", "claude") == "claude"]
+    except SystemExit as e:
+        problems.append(f"usage.accounts: {e}")
+        FACTORY = []
     try:
         stored = stored_login()
         write(STORED, stored)
         write_stored(stored)
     except Exception as e:
+        no_login = isinstance(e, NoLogin)
         problems.append(f"stored login: {type(e).__name__}: {e}")
     flip = flip_file() or {}
     try:
         data = factory_reading(stored, flip)
     except Exception as e:
         problems.append(f"factory account: {type(e).__name__}: {e}")
+    # a factory login-flip names, the stored login included, is the account the sessions run on, so the added ones are read only while it names none
+    if not data and not flip.get("factory"):
+        try:
+            data = added_reading(stored, flip, FACTORY)
+        except Exception as e:
+            problems.append(f"added account: {type(e).__name__}: {e}")
     data = data or stored
     if data:
         try:
@@ -195,13 +240,7 @@ while True:
             data["rotation"] = pool
         write(OUT, data)
         account, limits = data["account"], data["rate_limits"]
-        # The factory's accounts, usage.accounts read each cycle so a change lands with no restart: marks and alerts count these alone.
         # The week marks themselves (90, 97, 98%) and the day's 40% live in usage/week-marks.py, which Ops' tick relays.
-        try:
-            FACTORY = {a["email"] for a in setting("usage.accounts") if a.get("provider", "claude") == "claude"}
-        except SystemExit as e:
-            problems.append(f"usage.accounts: {e}")
-            FACTORY = set()
         week = (limits.get("seven_day") or {}).get("used_percentage")
         if isinstance(week, (int, float)) and account in FACTORY:
             marks = os.path.join(HERE, "week-marks.json")
@@ -221,8 +260,13 @@ while True:
                 out.append({"at": data["writtenAt"], "kind": "usage-5h", "line": f"5-hour window at {five['used_percentage']:g}% ({account}), resets {at}: slow spawns", "name": "usage", "since": data["writtenAt"]})
             write(os.path.join(OPS, "alerts-usage.json"), {"alerts": out, "writtenAt": data["writtenAt"]})
     detail = f"{data['account']}: 5h {data['rate_limits'].get('five_hour', {}).get('used_percentage')}%, 7d {data['rate_limits'].get('seven_day', {}).get('used_percentage')}%" if data else ""
-    # an expired stored token is expected while every session runs on another account's token, so only a missing factory reading fails
-    result = "ok" if data and not any(p.startswith("factory") for p in problems) else ("error: " + "; ".join(problems))[:120]
+    # an expired stored token is expected while every session runs on another account's token, so only a missing factory reading fails; with no account at all, the job waits for one
+    if data and not any(p.startswith("factory") for p in problems):
+        result = "ok"
+    elif no_login and not FACTORY and len(problems) == 1:
+        result = "waiting: no Claude account yet; add one in the Dashboard"
+    else:
+        result = ("error: " + "; ".join(problems))[:120]
     if data and problems:
         detail += " (" + "; ".join(problems)[:200] + ")"
     beat("ops-usage", os.getpid(), STARTED, CYCLE, result, {"detail": detail})

@@ -106,6 +106,11 @@ const { data, error } = await unwrap(apiClient.health.$get())`,
                       example: "ok",
                     }),
                     version: z.string().meta({ example: BUILD_VERSION }),
+                    vibe: z.string().nullable().meta({
+                      description:
+                        "This checkout's branch while it runs as a Vibeground, started from the Inbox's Preview row on a copy of the live data, else null; its pages wear a Vibeground badge with it",
+                      example: null,
+                    }),
                   }),
                 }),
               ),

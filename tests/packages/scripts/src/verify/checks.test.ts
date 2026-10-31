@@ -356,8 +356,75 @@ describe("screenshot", () => {
     }
   }
   const at = { api: "http://api", web: "http://web" }
+  const warmNone = { done: new Set<string>(), fetch: async () => {} }
   const shoot = (browser: Browser) =>
-    screenshot(browser, at, "/dashboard/system", SHOT_VIEWPORTS[0]!, "/tmp/shots", "after")
+    screenshot(
+      browser,
+      at,
+      "/dashboard/system",
+      SHOT_VIEWPORTS[0]!,
+      "/tmp/shots",
+      "after",
+      "light",
+      warmNone,
+    )
+
+  // under load 48 a cold route's first open wedged the browser until the pages were fetched once by hand
+  test("a cold route is fetched once before its first open, so its compile never lands on the browser", async () => {
+    const order: string[] = []
+    class Recording extends FakeBrowser {
+      override async run(...args: string[]): Promise<Record<string, unknown>> {
+        if (args[0] === "open") order.push(`open ${args[1]}`)
+        return super.run(...args)
+      }
+    }
+    const browser = new Recording("late")
+    const warm = {
+      done: new Set<string>(),
+      fetch: async (url: string) => {
+        order.push(`fetch ${url}`)
+      },
+    }
+    for (const theme of ["light", "dark"] as const) {
+      await screenshot(
+        browser,
+        at,
+        "/dashboard/system",
+        SHOT_VIEWPORTS[0]!,
+        "/tmp/shots",
+        "after",
+        theme,
+        warm,
+      )
+    }
+    expect(order).toEqual([
+      "fetch http://web/dashboard/system",
+      "open http://web/dashboard/system",
+      "open http://web/dashboard/system",
+    ])
+  })
+
+  test("a warm-up that fails or hangs still lets the shot go on", async () => {
+    const browser = new FakeBrowser("late")
+    const warm = {
+      done: new Set<string>(),
+      fetch: async () => {
+        throw new Error("connect ECONNREFUSED")
+      },
+    }
+    const result = await screenshot(
+      browser,
+      at,
+      "/dashboard/system",
+      SHOT_VIEWPORTS[0]!,
+      "/tmp/shots",
+      "after",
+      "light",
+      warm,
+    )
+    expect(result.ok).toBe(true)
+    expect(warm.done.has("/dashboard/system")).toBe(true)
+  })
 
   test("every page verify shoots names its ready marker", () => {
     const shot = DASHBOARD_MAP.pages
