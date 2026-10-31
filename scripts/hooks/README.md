@@ -133,6 +133,15 @@ Their tests are `bun run test:file tests/scripts/hooks`.
   A command that only names `claude -p` (in `echo`, `grep` or a heredoc's body) runs, and so do `claude` without `-p`, `--resume` and `--version`.
   It fails open, and its tests are in `bun run test:file tests/scripts/hooks` too.
 
+## no-kill-by-name
+
+- A factory session signals only processes it started, by their own handle (the **signal** rule): `scripts/hooks/no-kill-by-name.ts`, registered beside no-stash, refuses `pkill`, `killall` and `fuser -k`, and a `kill` fed by `pgrep`, `pidof`, `lsof`, `ps` or `fuser`, <!-- kill-check: names only -->
+  through a command substitution (`kill $(pgrep -f watch)`, or `pid=$(pgrep x); kill $pid`) or a pipe into xargs (`lsof -t -i :3000 | xargs kill`), in a chain, a pipe or `sh -c` alike, <!-- kill-check: names only -->
+  since a name, pattern or port matches the live dashboard and every worker's stack (31 Oct: a session ran `pkill -f` on its own watcher, and only `tests/test_kill_by_name.py`, which reads the repo's text, guarded it). <!-- kill-check: names only -->
+  Its reason gives the way out: `TaskStop` for a background task, `bun run dev:stop` for a dev stack, `kill <pid>` for a pid the session spawned and holds.
+  `kill <pid>`, `kill -<sig> <pid>`, `kill $!`, `kill %1` and `kill $(cat <pid file>)` run, and so does each selector alone (`pgrep -f x`, `lsof -i :3000`).
+  It fails open, and its tests are in `bun run test:file tests/scripts/hooks` too.
+
 ## no-playground-leak
 
 - ALWAYS: Keep the factory out of every ticket, PR, commit, branch, comment, Slack message or DM, and file in a guarded org's repo: playbook's **classified** rule, since the factory is the owner's own and stays out of the org's records in any shape.

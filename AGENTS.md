@@ -223,6 +223,7 @@ ZeroStarter's rules above govern Playground too; this section adds its own.
   - `no-false-green` refuses bun given `--opt <value>` before its `run` or `test`, and a test run (bun's, or pytest, ty or ruff) piped on with no `pipefail` or pipe status, so a red run reads red.
   - `no-glm-heavy-path` keeps a GLM session's commits and pushes off the heavy paths, and holds its installs, clones, commits and pushes while load5 is over 15 (playbook's **glm**).
   - `no-headless-login` refuses a factory session's `claude -p` that sets no `CLAUDE_CODE_OAUTH_TOKEN`, and its `PLAYGROUND_ROLE` when its environment lacks one: run it in the shape its reason gives.
+  - `no-kill-by-name` refuses `pkill`, `killall`, `fuser -k` and a `kill` fed by `pgrep`, `pidof`, `lsof`, `ps` or `fuser`: stop a background task with `TaskStop`, a dev stack with `bun run dev:stop`, and a pid you spawned with `kill <pid>`. <!-- kill-check: names only -->
   - `no-mac-web-build` refuses a web image build on the Mac while the live dashboard's Postgres runs in its Docker VM: build it on the box with `ci.sh web HEAD`.
   - `no-main-checkout` refuses a build, test, commit, write or git move in the main checkout: run it in your own worktree, with `git -C <your worktree>` or `cd <worktree> && …` in one command, since a failed command leaves the Bash tool's shell in its old folder without a word.
   - `no-manager-subagent` refuses a manager the Agent and Workflow tools: start a worker through `scripts/spawn.sh` and brief it.
