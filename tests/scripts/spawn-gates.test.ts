@@ -265,10 +265,18 @@ describe("the capacity gate refuses and spawns nothing", () => {
       ])
     })
 
-    // retro 1: a PR's first review waited a median 47 minutes, so a checker takes the band a small worker keeps back
+    // a PR's first review waited a median 47 minutes, so a checker takes the band a small worker keeps back, and every other small start keeps today's line
     test.each<{ args: string[]; passes: boolean }>([
       { args: ["column", "reviewer", "reviewer-x", "worker-x", "w1:p2", "r.md"], passes: true },
       { args: ["column", "tester", "tester-x", "worker-x", "w1:p2", "r.md"], passes: true },
+      {
+        args: ["column", "probe", "probe-x", "ops", "w1:p2", "p.md", "--size", "small"],
+        passes: true,
+      },
+      {
+        args: ["column", "lead", OLD.planner, OLD.dispatcher, "w1:p2", "h.md", "--size", "small"],
+        passes: true,
+      },
       { args: ["worker", "worker-brave-otter", "b.md", "--size", "small"], passes: false },
     ])("a checker takes the cap a small worker keeps back: $args.1", async ({ args, passes }) => {
       const r = await spawn(args, [], { FAKE_LOAD5: "14.00" })

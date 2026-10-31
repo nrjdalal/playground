@@ -13,7 +13,8 @@ set -euo pipefail
 #      half its item's load units (small 1, medium 2, big 3: --size, else small
 #      for a reviewer or tester, else what `ops/run-slot.sh size <name>` reads),
 #      and a quarter of that cap kept for small items, so a big plan never
-#      blocks a small one; a load over that line reads the CPU's busy cores
+#      blocks a small one, a small worker keeping an eighth in its place for
+#      the reviewers and testers; a load over that line reads the CPU's busy cores
 #      (top -l 2 -n 0) too, and refuses only when they and the starts are over
 #      it as well, or when top cannot be read
 #   2. memory, pressure level 1 or 2 (kern.memorystatus_vm_pressure_level) and
@@ -385,7 +386,7 @@ else:
             pass
         readings["cpu_idle"] = idle
         cpu_cap = min(cap, cores)
-        cpu_line = cpu_cap * (1 - share)
+        cpu_line = cpu_cap - cpu_cap * share
         if idle is not None:
             readings["cpu_busy"] = round(cores * (100 - idle) / 100, 2)
         if idle is None or readings["cpu_busy"] + starts >= cpu_line:
