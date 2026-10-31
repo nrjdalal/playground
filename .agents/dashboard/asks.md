@@ -158,7 +158,7 @@
   bun run ask ack <id|#i41> --link https://app.slack.com/client/<team>/<channel>/thread/<channel>-1700000000.000100   # once carried out, a go closes with where (a Slack link in its app.slack.com/client form, which reads Open thread, so no --label), which its card links to by the label, or --no-link "<why>" when it has no page or Slack refused a Draft
   bun run ask edit <id|#i41> < item.json   # the poster replaces its own open item's title and preview in place, checked and its files copied as new does; the card redraws on the next 5s poll
   bun run ask settle <id|#i41> --note "Shipped by hand"   # the poster closes its own open decision or draft, decided another way; an update asks nothing, so settle refuses it
-  bun run ask resolve <id|#i41> --by builder --note "The loop recovered on its own"   # the poster clears its own alert update once it has resolved itself; every other update, a read-only card included, stays in the list, and its poster can still edit it, until the owner dismisses it
+  bun run ask resolve <id|#i41> --by builder --note "The loop recovered on its own"   # the poster clears its own alert update once it has resolved itself; every other update, a read-only card included, stays editable by its poster until the owner dismisses it
   bun run ask stale --minutes 15   # ops-sweep's chase: each answer given in the last 24h (--since <iso> moves that) its poster has not closed within 15 minutes
   ```
 
