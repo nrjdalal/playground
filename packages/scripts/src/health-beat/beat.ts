@@ -31,16 +31,26 @@ const SESSIONS_WITHIN_MS = 2 * 3600_000
 export const memoryPasses = (pressure: number, freePct: number, freeMin: number): boolean =>
   (pressure === 1 || pressure === 2) && freePct >= freeMin
 
+// The zone's own short name (IST, UTC, EDT) over a GMT offset where one locale has it, as the dashboard's ownerTime names it.
+const zoneName = (at: Date, zone: string): string => {
+  const names = ["en-US", "en-IN"].map(
+    (locale) =>
+      new Intl.DateTimeFormat(locale, { timeZone: zone, timeZoneName: "short" })
+        .formatToParts(at)
+        .find((part) => part.type === "timeZoneName")?.value ?? zone,
+  )
+  return names.find((name) => !name.startsWith("GMT")) ?? names[0]!
+}
+
 // Pure: a moment as the owner reads it in their zone, `6:05 pm UTC`.
 const ownerClock = (at: Date, zone: string): string => {
   const parts = new Intl.DateTimeFormat("en-US", {
     hour: "numeric",
     minute: "2-digit",
     timeZone: zone,
-    timeZoneName: "short",
   }).formatToParts(at)
   const part = (type: string) => parts.find((p) => p.type === type)?.value ?? ""
-  return `${part("hour")}:${part("minute")} ${part("dayPeriod").toLowerCase()} ${part("timeZoneName")}`
+  return `${part("hour")}:${part("minute")} ${part("dayPeriod").toLowerCase()} ${zoneName(at, zone)}`
 }
 
 const mark = (warn: boolean) => (warn ? "⚠️" : "✅")
@@ -116,6 +126,7 @@ export const readBeat = async (input: {
       .at(-1) ?? ""
   const idle = /([\d.]+)% idle/.exec(cpu)
   const batt = /(\d+)%; ([^;]+)/.exec((await run(["pmset", "-g", "batt"])).out)
+  const jobs = await readJobs(ops, at)
   return {
     at,
     battery: batt ? { pct: Number(batt[1]), state: batt[2]!.trim() } : null,
@@ -123,8 +134,9 @@ export const readBeat = async (input: {
     freeMin: input.freeMin,
     freePct: machine.freePct,
     idlePct: idle ? Number(idle[1]) : null,
-    ...(await readJobs(ops, at)),
+    late: jobs.late,
     load5: machine.load5,
+    ok: jobs.ok,
     pressure: machine.pressure,
     sessions: await readSessions(data, at),
     zone: input.zone,

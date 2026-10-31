@@ -58,7 +58,7 @@ describe("beatText", () => {
       ].join("\n"),
     )
     expect(beatText(reading({ zone: "Asia/Kolkata" })).split("\n")[0]).toBe(
-      "*Health, 11:35 pm GMT+5:30*",
+      "*Health, 11:35 pm IST*",
     )
   })
 
