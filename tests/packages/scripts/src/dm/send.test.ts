@@ -6,13 +6,18 @@ import { ownerMessages, PLAYGROUND, USER } from "../../../../../packages/scripts
 import { DM, fakeDm, OWNER } from "./fake-dm"
 
 const pass = async () => undefined
-const io = (slack: ReturnType<typeof fakeDm>["slack"], body = "the body") => ({
-  body,
-  channel: DM,
-  leak: pass,
-  owner: OWNER,
-  slack,
-})
+let recorded: string[] = []
+const io = (slack: ReturnType<typeof fakeDm>["slack"], body = "the body") => {
+  recorded = []
+  return {
+    body,
+    channel: DM,
+    leak: pass,
+    owner: OWNER,
+    record: async (ts: string) => recorded.push(ts),
+    slack,
+  }
+}
 const marks = (dm: ReturnType<typeof fakeDm>) =>
   dm.calls.filter((c) => c.method === "conversations.mark").map((c) => c.params.ts)
 const edits = (dm: ReturnType<typeof fakeDm>) => dm.calls.filter((c) => c.method === "chat.update")
@@ -65,7 +70,7 @@ describe("dm send", () => {
       "wait, one more thing",
       PLAYGROUND,
     ])
-    expect(ownerMessages(dm.messages, OWNER).map((m) => m.text)).toEqual([
+    expect(ownerMessages(dm.messages, OWNER, new Set(recorded)).map((m) => m.text)).toEqual([
       "status?",
       "wait, one more thing",
     ])
@@ -86,18 +91,23 @@ describe("dm send", () => {
   })
 })
 
-describe("ownerMessages", () => {
-  test("reads the owner's messages outside our frame, and none from another member", () => {
-    const read = [
-      { text: "first", ts: "1", user: OWNER },
-      { text: PLAYGROUND, ts: "2", user: OWNER },
-      { text: "our body", ts: "3", user: OWNER },
-      { text: USER, ts: "4", user: OWNER },
-      { text: "second", ts: "5", user: OWNER },
-      { text: "a bot", ts: "6", user: "U0OTHER" },
-      { subtype: "channel_join", text: "joined", ts: "7", user: OWNER },
-    ]
-    expect(ownerMessages(read, OWNER).map((m) => m.text)).toEqual(["first", "second"])
+describe("dm send's record", () => {
+  test("records each post as it lands, so a send whose USER post fails leaves its PLAYGROUND line and body on record", async () => {
+    const dm = fakeDm([{ text: "hi", ts: "1000.000100", user: OWNER }], (text) => {
+      if (text === USER) throw new Error("ratelimited")
+    })
+    await expect(send(io(dm.slack))).rejects.toThrow("ratelimited")
+    expect(recorded).toEqual([dm.messages[1]!.ts, dm.messages[2]!.ts])
+    expect(dm.texts()).toEqual(["hi", PLAYGROUND, "the body"])
+  })
+
+  test("a reused USER line is recorded as the PLAYGROUND line it becomes", async () => {
+    const dm = fakeDm([
+      { text: "hi", ts: "1000.000100", user: OWNER },
+      { text: USER, ts: "1001.000100", user: OWNER },
+    ])
+    await send(io(dm.slack))
+    expect(recorded).toEqual(["1001.000100", dm.messages[2]!.ts, dm.messages[3]!.ts])
   })
 })
 

@@ -116,4 +116,4 @@ ops-dm-watch reads the DM each minute and sends each new owner message to the di
    Done when the update is posted, or nothing has changed since the last one and the reply says so.
 
 `dm send` posts the frame (the PLAYGROUND line, the body, the USER line, one at a time), turns our last USER line into this reply's PLAYGROUND line only while it is the DM's latest message, repairs an owner message that landed mid-send, marks the DM unread from the message before its first post, and refuses a body no-playground-leak refuses.
-Post to the DM through `dm send` alone, so every reply keeps the frame the job reads.
+Post to the DM through `dm send` alone: it records each post it makes, and the job tells our posts from the owner's by that record, so a post made any other way reads as the owner's.

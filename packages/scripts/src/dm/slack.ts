@@ -1,5 +1,7 @@
 import { join } from "node:path"
 
+import { writeAtomic } from "../write-atomic"
+
 // The owner's DM, read and written as the owner: every reply is framed by these two lines, byte for byte, so a reader tells our posts from the owner's.
 export const PLAYGROUND = "━━━━━━  PLAYGROUND  ━━━━━━"
 export const USER = "━━━━━━━━  USER   ━━━━━━━━"
@@ -33,19 +35,25 @@ export const call = async (slack: Slack, method: string, params: Record<string, 
 export const history = async (slack: Slack, params: Record<string, string>) =>
   [...((await call(slack, "conversations.history", params)).messages ?? [])].reverse()
 
-// Pure, over messages oldest first: the owner's own messages, each outside our frame, which opens on the PLAYGROUND line and closes on a message ending with the USER line.
-export function ownerMessages(messages: Message[], owner: string): Message[] {
-  const found: Message[] = []
-  let inside = false
-  for (const m of messages) {
-    if (m.user !== owner || m.subtype) continue
-    const text = m.text ?? ""
-    if (text === PLAYGROUND) inside = true
-    else if (text.endsWith(USER)) inside = false
-    else if (!inside) found.push(m)
-  }
-  return found
-}
+// Every ts dm send posts, kept in the data folder: every post is the owner's, so a reader tells ours by this record, never by where a post sits in the frame.
+const SENT = "dm-sent.json"
+const KEEP = 1000
+export const readSent = async (dir: string): Promise<Set<string>> =>
+  new Set(
+    await Bun.file(join(dir, SENT))
+      .json()
+      .then((v: unknown) => (Array.isArray(v) ? v.map(String) : []))
+      .catch(() => []),
+  )
+export const recordSent = async (dir: string, ts: string) =>
+  writeAtomic(join(dir, SENT), JSON.stringify([...(await readSent(dir)), ts].slice(-KEEP)))
+
+// Pure, over messages oldest first: the owner's own messages, each one dm send did not post and neither frame line.
+export const ownerMessages = (messages: Message[], owner: string, sent: Set<string>) =>
+  messages.filter(
+    (m) =>
+      m.user === owner && !m.subtype && !sent.has(m.ts) && m.text !== PLAYGROUND && m.text !== USER,
+  )
 
 // The vault skill's run of a script with the token in its environment alone, as channel-watch runs its own.
 export const underVault = (vault: string, script: string, args: string[]): string[] => [

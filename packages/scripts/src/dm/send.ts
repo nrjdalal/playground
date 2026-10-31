@@ -2,37 +2,52 @@ import { dataDirOf } from "@packages/env/data-dir"
 import { readPolicy, slackSettings } from "@packages/settings"
 
 import { check } from "../../../../scripts/hooks/no-playground-leak"
-import { call, history, type Message, PLAYGROUND, type Slack, slackOf, USER } from "./slack"
+import {
+  call,
+  history,
+  type Message,
+  PLAYGROUND,
+  recordSent,
+  type Slack,
+  slackOf,
+  USER,
+} from "./slack"
 
 type Io = {
   body: string
   channel: string
   leak: (body: string) => Promise<string | undefined>
   owner: string
+  record: (ts: string) => Promise<unknown>
   slack: Slack
 }
 
 const ours = (m: Message | undefined, owner: string, text: string) =>
   m?.user === owner && !m.subtype && m.text === text
 
-const post = async (slack: Slack, channel: string, text: string) =>
-  (await call(slack, "chat.postMessage", { channel, text })).ts!
-
 // One reply to the owner in three posts, one at a time so they land in order: the PLAYGROUND line, the body, the USER line. It refuses a body no-playground-leak refuses, posting nothing.
-export async function send({ body, channel, leak, owner, slack }: Io): Promise<string> {
+export async function send({ body, channel, leak, owner, record, slack }: Io): Promise<string> {
   const refusal = await leak(body)
   if (refusal) throw new Error(refusal)
+  // each post is recorded as it lands, so a send that fails partway leaves the watch the record of what it did post
+  const post = async (text: string) => {
+    const { ts } = await call(slack, "chat.postMessage", { channel, text })
+    await record(ts!)
+    return ts!
+  }
   const [before, latest] = await history(slack, { channel, limit: "2" })
   const last = latest ?? before
   // our last reply's USER line becomes this reply's PLAYGROUND line only while it is still the DM's latest message; a lone PLAYGROUND line a repair left opens this reply as it is
   let mark: string | undefined = last?.ts
   if (ours(last, owner, USER) || ours(last, owner, PLAYGROUND)) {
-    if (last!.text === USER)
+    if (last!.text === USER) {
       await call(slack, "chat.update", { channel, text: PLAYGROUND, ts: last!.ts })
+      await record(last!.ts)
+    }
     mark = latest ? before?.ts : undefined
-  } else await post(slack, channel, PLAYGROUND)
-  const bodyTs = await post(slack, channel, body)
-  const userTs = await post(slack, channel, USER)
+  } else await post(PLAYGROUND)
+  const bodyTs = await post(body)
+  const userTs = await post(USER)
   // an owner message that landed between the body and the USER line: the body ends with the USER line instead, and the USER post opens our reply to it
   const between = await history(slack, {
     channel,
@@ -68,11 +83,13 @@ const main = async () => {
   const channel = slackSettings.get(policy.settings, "slack.dmChannel")
   const owner = slackSettings.get(policy.settings, "slack.dmOwner")
   if (!channel || !owner) throw new Error("slack.dmChannel and slack.dmOwner must both be set")
+  const dir = dataDirOf(process.env)
   const ts = await send({
     body: (await Bun.file(file).text()).trimEnd(),
     channel,
     leak: leakOf(channel),
     owner,
+    record: (at) => recordSent(dir, at),
     slack: slackOf(token),
   })
   console.log(`dm send: posted, body at ${ts}`)

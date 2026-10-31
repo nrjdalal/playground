@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { PLAYGROUND, USER } from "../../../../../packages/scripts/src/dm/slack"
+import { PLAYGROUND, recordSent, USER } from "../../../../../packages/scripts/src/dm/slack"
 import { type Stuck, stuckOf, watch } from "../../../../../packages/scripts/src/ops-dm-watch/watch"
 import { DM, fakeDm, OWNER } from "../dm/fake-dm"
 
@@ -17,7 +17,7 @@ const scratch = () => {
   return dir
 }
 
-// One watch over a fake DM, its passes at the times given, recording every line it sends.
+// One watch over a fake DM, its passes at the times given, recording every line it sends; ours posts as dm send does, its ts in the record.
 const harness = (dm: ReturnType<typeof fakeDm>, stuck: Stuck = null) => {
   const dir = scratch()
   const sent: { text: string; to: string }[] = []
@@ -34,7 +34,8 @@ const harness = (dm: ReturnType<typeof fakeDm>, stuck: Stuck = null) => {
       stuck: async () => blocked,
       tellOps: async (text) => ops.push(text),
     })
-  return { ops, pass, sent, setStuck: (s: Stuck) => (blocked = s) }
+  const ours = async (text: string) => recordSent(dir, dm.add(text).ts)
+  return { ops, ours, pass, sent, setStuck: (s: Stuck) => (blocked = s) }
 }
 
 describe("the DM watch", () => {
@@ -43,9 +44,9 @@ describe("the DM watch", () => {
     const w = harness(dm)
     await w.pass(1010)
     await w.pass(1070)
-    dm.add(PLAYGROUND)
-    dm.add("our answer")
-    dm.add(USER)
+    await w.ours(PLAYGROUND)
+    await w.ours("our answer")
+    await w.ours(USER)
     dm.add("thanks")
     await w.pass(1130)
     expect(w.sent.map((s) => s.to)).toEqual(["dispatcher", "dispatcher"])
@@ -68,7 +69,7 @@ describe("the DM watch", () => {
     const answered = fakeDm([{ text: "quick one", ts: "1000.000100", user: OWNER }])
     const a = harness(answered)
     await a.pass(1010)
-    answered.add(PLAYGROUND)
+    await a.ours(PLAYGROUND)
     await a.pass(1250)
     expect(a.sent.map((s) => s.to)).toEqual(["dispatcher"])
   })
@@ -128,6 +129,40 @@ describe("stuckOf", () => {
       at: "2026-10-31T06:06:00.000Z",
       state: "failed",
     })
+  })
+
+  test("a stuck record its transcript has a newer turn after no longer stands, as stateNow() reads it", async () => {
+    const data = scratch()
+    const config = scratch()
+    mkdirSync(join(config, "sessions"))
+    mkdirSync(join(config, "projects", "a-project"), { recursive: true })
+    mkdirSync(join(data, "session-state"))
+    writeFileSync(
+      join(config, "sessions", "a.json"),
+      JSON.stringify({ name: "dispatcher", pid: process.pid, sessionId: "a" }),
+    )
+    writeFileSync(
+      join(data, "session-state", "a.json"),
+      JSON.stringify({
+        at: "2026-10-31T06:00:00.000Z",
+        event: "Notification",
+        sessionId: "a",
+        state: "stuck",
+      }),
+    )
+    const now = Date.parse("2026-10-31T06:10:00Z") / 1000
+    const turn = (at: string) =>
+      writeFileSync(
+        join(config, "projects", "a-project", "a.jsonl"),
+        `${JSON.stringify({ timestamp: at, type: "assistant" })}\n`,
+      )
+    turn("2026-10-31T05:59:00.000Z")
+    expect(await stuckOf("dispatcher", data, config, now)).toEqual({
+      at: "2026-10-31T06:00:00.000Z",
+      state: "stuck",
+    })
+    turn("2026-10-31T06:01:00.000Z")
+    expect(await stuckOf("dispatcher", data, config, now)).toBeNull()
   })
 })
 

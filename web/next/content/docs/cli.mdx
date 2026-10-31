@@ -6,7 +6,7 @@ description: Start, view, check, update, add to and remove Playground from your 
 
 # The playground command
 
-`playground` starts Playground from your terminal and opens the Dashboard. Your sessions run in herdr, and `playground view` shows them. Run it from any terminal. The Dashboard and its background jobs run in herdr too. `playground --help`, or `--help` after any command, lists every command. A word a command does not take, such as `playground ext list skills`, is refused before the command runs: it exits 2 and prints the command's usage, so a typo never reads as success. The `ask`, `changelog`, `ingest`, `queues` and `thread` commands, `playground picker`'s reason and `playground ext search`'s words pass on whole.
+`playground` starts Playground from your terminal and opens the Dashboard. Your sessions run in herdr, and `playground view` shows them. Run it from any terminal. The Dashboard and its background jobs run in herdr too. `playground --help`, or `--help` after any command, lists every command. A word a command does not take, such as `playground ext list skills`, is refused before the command runs: it exits 2 and prints the command's usage, so a typo never reads as success. The `ask`, `changelog`, `dm`, `ingest`, `queues` and `thread` commands, `playground picker`'s reason and `playground ext search`'s words pass on whole.
 
 ## Install
 
@@ -182,7 +182,7 @@ Each runs the package script of the same name in the Dashboard's checkout, the o
 
 - `playground ask` posts an item to the [Inbox](/docs/inbox), reads its answer and closes it.
 - `playground changelog` adds rows to the Changelog from GitHub's merges and versions, or a line by hand.
-- `playground dm send <file>` posts the reply in the file, named by its absolute path, to your own Slack DM in Slack mode, framed so the DM watch tells it from your messages.
+- `playground dm send <file>` posts the reply in the file, named by its absolute path, to your own Slack DM in Slack mode, framed, and records each post so the DM watch tells it from your messages.
 - `playground ingest` reads every Claude Code session Playground has run (every one on this machine with `PLAYGROUND_CMUX_SESSIONS=true`) into the Dashboard's database; `--follow` keeps reading, and `status` says how far it is.
 - `playground queues` prints the merge queue and the work queue.
 - `playground thread` opens, routes, renames and lists the Inbox's threads.
