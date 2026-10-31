@@ -8,3 +8,16 @@ export async function fetchStacks() {
   if (error) throw new Error(error.message)
   return data
 }
+
+// A stopped worktree started as a Vibeground on a copy of the live database, on the owner's click; a refusal throws its reason.
+export async function startStack(path: string) {
+  const { data, error } = await unwrap(apiClient.v1.stacks.start.$post({ json: { path } }))
+  if (error) throw new Error(error.message)
+  return data
+}
+
+// A Vibeground stopped, its copy removed and its worktree kept.
+export async function stopStack(path: string) {
+  const { error } = await unwrap(apiClient.v1.stacks.stop.$post({ json: { path } }))
+  if (error) throw new Error(error.message)
+}

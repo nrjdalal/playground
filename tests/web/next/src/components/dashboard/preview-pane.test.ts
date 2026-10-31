@@ -12,7 +12,7 @@ describe("the Preview pane", () => {
     expect(source).toContain(
       'const PANE_BUTTON = "text-muted-foreground hover:text-foreground size-7 [&_svg]:size-3.5!"',
     )
-    expect(source.match(/className=\{PANE_BUTTON\}/g)).toHaveLength(2)
+    expect(source.match(/className=\{PANE_BUTTON\}/g)).toHaveLength(3)
   })
 
   test('its frame runs edge to edge and down to the pane\'s bottom, a top border only (the owner: "Make the browser window full width and without circular corners", "This gap at the bottom ... shouldn\'t exist for the preview")', () => {

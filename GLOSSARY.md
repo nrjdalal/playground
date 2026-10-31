@@ -90,6 +90,9 @@ One thing the owner asked about, followed until it is done however many sessions
 **Fixture**:
 A made-up machine the dashboard reads on factory, test and `PLAYGROUND_FIXTURE` stacks: fake sessions in every state, their transcripts, roster and usage, written fresh into a stack's scratch folder when it starts (`api/hono/src/fixtures/dashboard.json`), shown under a Test data badge. A full-page screenshot of a fixture stack carries no real data, so screenshots come from one alone. A person's own clone, the live dashboard's branch and a `PLAYGROUND_LIVE_READS` stack read the live machine ([ADR 0008](./.agents/adr/0008-a-persons-stack-reads-their-own-machine.md)).
 
+**Vibeground**:
+A worktree's own stack the owner starts from the Inbox's Preview row, worked on beside the chat or in a tab of its own: its branch as it stands, on a copy of the live dashboard's database seeded by one `pg_dump`, so it shows real data while its migrations reach the copy alone. Stop removes the copy and keeps the worktree.
+
 **Probe**:
 A throwaway session named `<id>-probe`, or `probe-<what>` when started before, spawned for one test and closed by its spawner the moment the test is done.
 
