@@ -35,7 +35,7 @@ export const messageSchema = z.object({
   from: z.object({ device, login: z.string().min(1) }),
   id: z.string().min(1),
   kind: z.enum(MESSAGE_KINDS),
-  links: z.array(z.url()).optional(),
+  links: z.array(z.url({ protocol: /^https?$/ })).optional(),
   text: z.string().min(1).max(MAX_TEXT),
 })
 

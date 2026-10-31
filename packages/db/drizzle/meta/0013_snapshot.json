@@ -1,5 +1,5 @@
 {
-  "id": "298febaf-dc97-44b7-a667-ab6a78661bb2",
+  "id": "f71b5ca1-0fde-4202-9e55-a2f7ccc7b826",
   "prevId": "433be565-b190-4fd6-8597-1986044fbb97",
   "version": "7",
   "dialect": "postgresql",
@@ -2040,6 +2040,10 @@
       },
       "policies": {},
       "checkConstraints": {
+        "yard_channel_dm_name_check": {
+          "name": "yard_channel_dm_name_check",
+          "value": "(\"yard_channel\".\"kind\" = 'dm') = (\"yard_channel\".\"name\" like 'dm:%')"
+        },
         "yard_channel_kind_check": {
           "name": "yard_channel_kind_check",
           "value": "kind in ('channel', 'dm')"
@@ -2289,6 +2293,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "login": {
+          "name": "login",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
         "parent_id": {
           "name": "parent_id",
           "type": "text",
@@ -2312,7 +2322,7 @@
           "name": "user_id",
           "type": "text",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
         }
       },
       "indexes": {
@@ -2399,7 +2409,7 @@
           "tableTo": "user",
           "columnsFrom": ["user_id"],
           "columnsTo": ["id"],
-          "onDelete": "cascade",
+          "onDelete": "set null",
           "onUpdate": "no action"
         }
       },
