@@ -4,7 +4,7 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises"
 import { dirname, join } from "node:path"
 
 import { managerOf, type RosterKind } from "@packages/config/kinds"
-import { atHead, CHECKS, verdictsOf } from "@packages/config/verdicts"
+import { atHead, verdictsOf } from "@packages/config/verdicts"
 
 import { readFixtureMachine, readsLive } from "@/lib/dashboard/fixture"
 import { heldReason, readHeld } from "@/lib/dashboard/held"
@@ -52,7 +52,7 @@ export type Pull = {
   round: number | null
   score: string | null
   state: "closed" | "merged" | "open"
-  // the newest tester stamp (one with an agent-drive check), when it was given at the head
+  // the newest tester's word (## TesterBot · PASS|FAIL at <sha7>), when it was given at the head
   tester: "fail" | "pass" | null
   title: string
   // when GitHub last saw it change, a push, a comment or a review
@@ -412,16 +412,10 @@ export function verdictOf(bodies: string[]): string | null {
   return hit ? `${hit.score}/5` : null
 }
 
-// Pure: the newest tester's stamp (one with an agent-drive check), when the commit it tested is the PR's head; an older head's verdict says nothing about this one.
+// Pure: the newest tester's word, when the commit it tested is the PR's head; an older head's verdict says nothing about this one.
 export function testerOf(bodies: string[], head: string): "fail" | "pass" | null {
   const hit = verdicts(bodies)
-    .filter(
-      (v) =>
-        v.gate === "stamp" &&
-        v.stamp?.status !== "wait" &&
-        v.stamp?.checks[CHECKS.drive] !== undefined &&
-        atHead(v.at, head),
-    )
+    .filter((v) => v.gate === "tester" && atHead(v.at, head))
     .at(-1)
   if (!hit) return null
   return hit.pass ? "pass" : "fail"
@@ -491,7 +485,7 @@ export function pullOf(node: unknown, poster?: string): Pull | null {
   }
 }
 
-// One GraphQL read per PR: its title, state and last update, the head commit's check rollup, what its approvals and merge stand at, and only its last 30 comments, where a current ReviewBot score and tester stamp sit, so a PR with a long thread costs no more than a short one.
+// One GraphQL read per PR: its title, state and last update, the head commit's check rollup, what its approvals and merge stand at, and only its last 30 comments, where a current ReviewBot score and TesterBot word sit, so a PR with a long thread costs no more than a short one.
 const PULL_FIELDS =
   "fragment P on PullRequest { autoMergeRequest { enabledAt } baseRef { branchProtectionRule { requiredApprovingReviewCount } rules(first: 100) { nodes { parameters { ... on PullRequestParameters { requiredApprovingReviewCount } } } } } comments(last: 30) { nodes { author { login } body createdAt } } commits(last: 1) { nodes { commit { statusCheckRollup { state } } } } headRefOid isDraft latestOpinionatedReviews(first: 20) { nodes { state } } mergeQueueEntry { state } number reviewDecision state title updatedAt url }"
 const BY_BRANCH = `${PULL_FIELDS} query($owner: String!, $name: String!, $branch: String!) { repository(owner: $owner, name: $name) { pullRequests(headRefName: $branch, first: 1, orderBy: { field: CREATED_AT, direction: DESC }) { nodes { ...P } } } viewer { login } }`

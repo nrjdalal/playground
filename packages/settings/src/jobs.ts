@@ -2,7 +2,7 @@ import { z } from "zod"
 
 import { defineSettings } from "@/settings"
 
-// The ops job registry: one setting per job, `jobs.<camelName>`, holding the whole job, so turning a job on, pausing it or moving its schedule is a settings write with a reason, never a PR. The runner renders <data>/ops/jobs.json and each launchd job's plist from it at the top of every pass. A fresh install has every job off but the Dashboard's (ops-dashboard). In a command, cwd or program, {bun}, {checkout} (the install's checkout), {dashboard} (the Dashboard's checkout, on live.branch) and {data} (the data folder) are filled in by the render.
+// The ops job registry: one setting per job, `jobs.<camelName>`, holding the whole job, so turning a job on, pausing it or moving its schedule is a settings write with a reason, never a PR. The runner renders <data>/ops/jobs.json and each launchd job's plist from it at the top of every pass. A fresh install has every job off but the Dashboard's (ops-dashboard) and ops-usage, so the Dashboard shows the account's week with no setting. In a command, cwd or program, {bun}, {checkout} (the install's checkout), {dashboard} (the Dashboard's checkout, on live.branch) and {data} (the data folder) are filled in by the render.
 export const jobSchema = z.strictObject({
   callsModel: z.boolean(),
   // A job a terminal holds (herdr, cmux or auto): its command, run from cwd.
@@ -73,11 +73,6 @@ export const JOBS: Record<string, Job> = {
     description: "Syncs new canary merges and main versions into the Changelog every 5 minutes.",
     schedule: { every: 300 },
   }),
-  "ops-checks-go": terminal("ops-checks-go", "python3 -I {checkout}/scripts/ops/checks/go.py", {
-    description: "Runs Checks on each gated PR scored 5/5 at its head, in merge-queue order.",
-    needsCmux: false,
-    schedule: { every: 120 },
-  }),
   // The one job on by default: the Dashboard serves first run and every settings write, so a store with no row for it, or no store, keeps it running. It runs from the Dashboard's checkout, since its supervisor rolls the checkout it runs in and refuses any other branch.
   "ops-dashboard": terminal("ops-dashboard", "{dashboard}/scripts/ops/dashboard/run.sh", {
     cwd: "{dashboard}",
@@ -137,6 +132,7 @@ export const JOBS: Record<string, Job> = {
   }),
   "ops-usage": terminal("ops-usage", "python3 -I {checkout}/scripts/ops/usage/run.py", {
     description: "Reads the account's usage windows into usage.json every 5 minutes.",
+    enabled: true,
     neverPause: true,
     schedule: { every: 300 },
   }),

@@ -90,11 +90,18 @@ describe("POST /finish", () => {
     expect([created, signedIn]).toEqual([["owner-new"], ["owner-new"]])
   })
 
-  test("with an owner already, makes none and answers 409", async () => {
+  test("with the owner made already, makes none and signs the browser in as it, so Continue goes on to the board", async () => {
     const { app, created, signedIn } = world(["owner-1"])
     const res = await post(app, "/finish")
+    expect([res.status, (await res.json()).data]).toEqual([200, { signedIn: true }])
+    expect([created, signedIn]).toEqual([[], ["owner-1"]])
+  })
+
+  test("with two owners, makes none, signs no one in and answers 409, as sign-in does", async () => {
+    const { app, created, signedIn } = world(["owner-1", "owner-2"])
+    const res = await post(app, "/finish")
     expect(res.status).toBe(409)
-    expect((await res.json()).error.message).toContain("already")
+    expect((await res.json()).error.message).toContain("more than one owner")
     expect([created, signedIn]).toEqual([[], []])
   })
 })

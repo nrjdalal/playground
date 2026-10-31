@@ -776,6 +776,9 @@ def test_up_herdr(scratch):
 def dashboard(scratch, name, how):
     """Start run.sh on scratch, stop it the way how says, and check that its recorded stack, and only that, is gone."""
     config, checkout, env = stub_env(scratch, name)
+    # a dashboard past first run's setup, which wrote its database's URL, so the supervisor starts its follower
+    with open(os.path.join(checkout, ".env"), "w") as f:
+        f.write("POSTGRES_URL=postgresql://postgres:stub@127.0.0.1:1/stub\n")
     state = os.path.join(config, "playground", "ops", "dashboard")
     out = open(os.path.join(scratch, name + ".out"), "w")
     run_sh = os.path.join(OPS, "dashboard", "run.sh")

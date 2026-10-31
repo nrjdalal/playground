@@ -433,7 +433,7 @@ describe("install.sh", () => {
     for (const place of places)
       expect(out.indexOf(join(home, place))).toBeLessThan(out.indexOf("linked "))
     expect(out.indexOf("Claude Code's user settings")).toBeLessThan(out.indexOf("linked "))
-    expect(out).toContain("Every ops job starts off but the Dashboard's own")
+    expect(out).toContain("Every ops job starts off but the Dashboard's own and the usage read")
     expect(out).toContain(`${plist}  portless's proxy service`)
     expect(out.indexOf(plist)).toBeLessThan(out.indexOf("linked "))
     const outside = Object.keys(snapshot(home)).filter(
@@ -699,6 +699,16 @@ describe("install.sh", () => {
     expect(rc()).toContain(".bun/bin")
     expect(out).toContain("playground started")
     expect(code).toBe(0)
+  })
+
+  test("an older bun ahead of ~/.bun/bin on the login PATH gets a startup line, last and once, that puts ~/.bun/bin first in a new terminal", () => {
+    const { bin, home, rc, run } = setup({ oldBun: "1.3.14" })
+    const env = { PATH: `${bin}:${join(home, ".bun/bin")}:${sys}` }
+    const line = `export PATH="${home}/.bun/bin:$PATH" # Playground: bun ${WANTED_BUN} ahead of ${bin}/bun`
+    expect(run({ env }).code).toBe(0)
+    expect(rc()?.trimEnd().endsWith(line)).toBe(true)
+    expect(run({ env }).code).toBe(0)
+    expect(rc()?.split("# Playground: bun").length).toBe(2)
   })
 
   test("a bun at package.json's version takes no upgrade", () => {

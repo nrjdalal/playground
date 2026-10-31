@@ -77,13 +77,14 @@ test("a machine with no store keeps its jobs.json untouched and exits 3", async 
   expect(readFileSync(jobs, "utf8")).toBe('{"jobs":[{"name":"ops-company"}]}\n')
 })
 
-test("a fresh machine, with no store and no jobs.json, gets the registry's defaults: the Dashboard's job alone on", async () => {
+test("a fresh machine, with no store and no jobs.json, gets the registry's defaults: the Dashboard's job and the usage read on", async () => {
   const jobs = join(scratch, "fresh", "ops", "jobs.json")
   const fresh = await run(join(scratch, "fresh"), jobs)
   expect(fresh).toEqual({ code: 0, err: "", out: "jobs: rendered jobs.json" })
   const rendered = JSON.parse(readFileSync(jobs, "utf8")).jobs as Record<string, unknown>[]
   expect(rendered.filter((job) => job.disabled !== true).map((job) => job.name)).toEqual([
     "ops-dashboard",
+    "ops-usage",
   ])
   expect((await run(join(scratch, "fresh"), jobs)).code).toBe(3)
 })
@@ -145,6 +146,7 @@ test("an extensions root that lacks policy.json gets the registry's defaults, as
   const rendered = JSON.parse(readFileSync(jobs, "utf8")).jobs as Record<string, unknown>[]
   expect(rendered.filter((job) => job.disabled !== true).map((job) => job.name)).toEqual([
     "ops-dashboard",
+    "ops-usage",
   ])
 })
 

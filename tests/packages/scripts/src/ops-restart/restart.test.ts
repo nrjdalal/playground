@@ -1,5 +1,13 @@
 import { afterAll, describe, expect, test } from "bun:test"
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 
@@ -251,6 +259,27 @@ describe("restart", () => {
     const elsewhere = world(["scripts/ops/README.md"])
     await elsewhere.pass()
     expect(elsewhere.kills()).toEqual([])
+  })
+
+  test("a job the new code turns on, running nowhere yet, gets one up.py pass after the settings render", async () => {
+    const w = world(["packages/settings/src/jobs.ts"])
+    const list = join(w.ops, "jobs.json")
+    const { jobs } = JSON.parse(readFileSync(list, "utf8")) as { jobs: object[] }
+    const usage = { command: "python3 -I run.py", heartbeat: "ops-usage", name: "ops-usage" }
+    writeFileSync(list, JSON.stringify({ jobs: [...jobs, { ...usage, runtime: "herdr" }] }))
+    const lines = await w.pass()
+    expect(w.runs.find((a) => a.includes("render"))?.slice(-7)).toEqual([
+      "render",
+      "--data",
+      dirname(w.ops),
+      "--jobs",
+      list,
+      "--launch-agents",
+      join(w.ops, "launch-agents"),
+    ])
+    expect(w.kills()).toEqual([])
+    expect(w.ups()).toEqual([["python3", "-I", `${w.co}/scripts/ops/up.py`]])
+    expect(lines.at(-1)).toStartWith("ops-usage: on, but not running; up.py exited 0")
   })
 
   test("a missing jobs.json restarts none, in one line", async () => {

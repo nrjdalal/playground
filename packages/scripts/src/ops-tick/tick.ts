@@ -125,8 +125,6 @@ const tick = async (ctx: Context) => {
     const report = lines((await python(ctx, "unstick/load-report.py", false)).out).slice(0, 4)
     await ctx.send("builder", `load5 ${load5}: ${report.map((l) => l.trim()).join(" ")}`, true)
   }
-  const wait = (await python(ctx, "merge-train/wait-check.py")).out.trim()
-  if (wait) await ctx.send("builder", wait)
   for (const line of lines((await python(ctx, "usage/near-limit.py")).out))
     await ctx.send(line.includes("ALERT") ? "builder" : "dispatcher", line)
   await switchWatch(ctx)
@@ -525,12 +523,14 @@ const worktreeSweep = async (ctx: Context) => {
 
 const words = (text: string) => async (ctx: Context) => void (await ctx.send("optimizer", text))
 
-// Every worktree of the repo's clone on canary, the leads' among them, kept at origin/canary's head, so every session runs on canary rather than the live checkout: a fast-forward pull, never in one holding an open change, a pull that changed bun.lock or a package.json then installing through run-slot as redeploy-pull.sh does and owing that install in tick/canary-pull-owed.json until one exits 0, and a pull or install that fails named to ops once a failure, marked by its words in tick/canary-pull-told.json and cleared once that worktree pulls and owes no install.
+// Every worktree of the repo's clone on canary, and the leads worktree on its leads branch, kept at the head of the origin branch each tracks (canary's, and for leads the branch the install cloned, which spawn.sh's cut sets: main on a public install), so every session runs that line rather than the live checkout: a fast-forward pull, never in one holding an open change, a pull that changed bun.lock or a package.json then installing through run-slot as redeploy-pull.sh does and owing that install in tick/canary-pull-owed.json until one exits 0, and a pull or install that fails named to ops once a failure, marked by its words in tick/canary-pull-told.json and cleared once that worktree pulls and owes no install.
 const canaryPull = async (ctx: Context) => {
   const list = await ctx.run(["git", "-C", ctx.repo, "worktree", "list", "--porcelain"])
   const trees = list.out
     .split("\n\n")
-    .filter((block) => block.split("\n").includes("branch refs/heads/canary"))
+    .filter((block) =>
+      block.split("\n").some((line) => /^branch refs\/heads\/(canary|leads)$/.test(line)),
+    )
     .map((block) => block.split("\n")[0]!.replace(/^worktree /, ""))
   const toldPath = join(ctx.ops, "tick", "canary-pull-told.json")
   const told = ((await readJson(toldPath).catch(() => null)) ?? {}) as Record<string, string>

@@ -199,7 +199,7 @@ at_least() {
 }
 # A bun at least package.json's packageManager names, since bun.lock's format follows it and an older bun cannot install it: else bun's installer puts that version in ~/.bun, which goes first on PATH, so a step's own `bun` and `#!/usr/bin/env bun` find it too. --check only names it.
 ensure_bun() {
-  local want have path fix
+  local want have path fix ahead
   want=$(sed -n 's/^ *"packageManager": *"bun@\([^"]*\)".*/\1/p' "$DIR/package.json" 2>/dev/null)
   [ -n "$want" ] || return 0
   path=$(command -v bun) || return 1
@@ -210,7 +210,15 @@ ensure_bun() {
     on_path "$HOME/.bun/bin" BUN_INSTALL
     PATH="$HOME/.bun/bin:$PATH"
     path="$HOME/.bun/bin/bun"
-    at_least "$("$path" --version 2>/dev/null || true)" "$want" && BUN="$path" && return 0
+    if at_least "$("$path" --version 2>/dev/null || true)" "$want"; then
+      BUN="$path"
+      # A login PATH that names ~/.bun/bin behind another bun keeps that bun first in a new terminal, so a line last in the startup file puts this one ahead of it.
+      ahead=$(PATH="$ORIGINAL_PATH" command -v bun || true)
+      if [ -n "$ahead" ] && [ "$ahead" != "$path" ] && has_on_login_path "$HOME/.bun/bin"; then
+        shell_line "export PATH=\"$HOME/.bun/bin:\$PATH\" # Playground: bun $want ahead of $ahead" "# Playground: bun"
+      fi
+      return 0
+    fi
   fi
   left "bun: $path is ${have:-of no version}, older than $want, which Playground's lockfile needs; run $fix"
   return 1
@@ -349,7 +357,7 @@ Playground installs into $DIR. Outside it, it writes only in:
   $HOME/.playground          the data folder: your extensions, the brief templates, the ops scripts and the skill sets
   Claude Code's user settings  the home skill set, installed with claude plugin install
   $startup  a PATH line for each tool it installs off your PATH, once$service
-Every ops job starts off but the Dashboard's own, so nothing goes into $HOME/Library/LaunchAgents.
+Every ops job starts off but the Dashboard's own and the usage read, so nothing goes into $HOME/Library/LaunchAgents.
 EOF
 
   # While the repo is private a clone goes through the gh login; with none, git clones it over https. Either clones main, the shipped branch, whatever the repo's default is.
