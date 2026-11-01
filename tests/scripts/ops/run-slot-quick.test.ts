@@ -244,6 +244,10 @@ describe("a quick run takes its own slot past a full queue", () => {
     expect(took).toBe("run-slot-quick")
   })
 
+  test("and so does a docs:wrap that ran long", async () => {
+    expect(await quick(["bun", "run", "docs:wrap"], [61, 70, 80])).toBe(false)
+  })
+
   test("and a commit that ran long keeps its own slot", async () => {
     expect(await quick(["git", "commit"], [70, 80, 90])).toBe(true)
     expect(took).toBe("run-slot-commit")
