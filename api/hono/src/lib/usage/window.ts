@@ -142,6 +142,36 @@ const accountIn = (text: string): string | null => {
   }
 }
 
+// Pure: usage.json's accounts map, which ops-usage's accounts_reading() writes for each account the factory spends into, as one usage an account: its week share and reset, no 5-hour reading, read when readAt says; an entry off that shape is left out.
+const mapAccountsOf = (text: string, now: Date): AccountUsage[] => {
+  let file: unknown
+  try {
+    file = JSON.parse(text)
+  } catch {
+    return []
+  }
+  if (!isRecord(file) || !isRecord(file.accounts)) return []
+  return Object.entries(file.accounts).flatMap(([account, entry]) => {
+    if (!account.trim() || !isRecord(entry) || typeof entry.readAt !== "string") return []
+    const read = Date.parse(entry.readAt)
+    const { week, weekReset } = entry
+    if (Number.isNaN(read) || typeof week !== "number" || typeof weekReset !== "number") return []
+    const resetsAt = new Date(weekReset * 1000)
+    if (Number.isNaN(resetsAt.getTime())) return []
+    return [
+      {
+        account: account.trim(),
+        usage: {
+          fiveHour: null,
+          sevenDay: { resetsAt: resetsAt.toISOString(), usedPercent: week },
+          stale: now.getTime() - read > USAGE_STALE_MS,
+          writtenAt: new Date(read).toISOString(),
+        },
+      },
+    ]
+  })
+}
+
 // Pure: the accounts in their fixed order, the main login first (the one Claude Code's config names), then the rest A to Z.
 const accountOrder = (accounts: AccountUsage[], main: string | null): AccountUsage[] => {
   const isMain = (a: AccountUsage) => a.account.toLowerCase() === main?.toLowerCase()
@@ -150,13 +180,14 @@ const accountOrder = (accounts: AccountUsage[], main: string | null): AccountUsa
   )
 }
 
-// Every usage-*.json the ops-usage job writes in the data folder, one per account, and usage.json under the account it names, in accountOrder; a file with no account or no window is left out, and of two naming one account, in any case, the later written stays.
+// Every usage-*.json the ops-usage job writes in the data folder, one per account, usage.json under the account it names, and each account in usage.json's accounts map, in accountOrder; a file with no account or no window is left out, of two files naming one account, in any case, the later written stays, and a map entry takes an account's place only from a stale file written before it, since a file holds the 5-hour window the map lacks.
 export async function readAccountUsages(
   main: string | null,
   dir = dataDir(),
   now = new Date(),
 ): Promise<AccountUsage[]> {
   const accounts = new Map<string, AccountUsage>()
+  const mapped: AccountUsage[] = []
   try {
     const names = [
       "usage.json",
@@ -172,6 +203,13 @@ export async function readAccountUsages(
       const seen = key && accounts.get(key)
       if (account && key && usage && !(seen && seen.usage.writtenAt > usage.writtenAt))
         accounts.set(key, { account, usage })
+      if (name === "usage.json") mapped.push(...mapAccountsOf(text, now))
+    }
+    for (const entry of mapped) {
+      const key = entry.account.toLowerCase()
+      const file = accounts.get(key)
+      if (!file || (file.usage.stale && file.usage.writtenAt < entry.usage.writtenAt))
+        accounts.set(key, entry)
     }
   } catch {
     return []

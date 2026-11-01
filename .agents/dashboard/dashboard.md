@@ -123,9 +123,11 @@
     Its words say stale, give its reset, `reset` once that has passed, and `last seen <when>`: the sidebar's hover with one account, the System page's usage line, and `bun run verify system`'s `(reset <time>; stale, last seen <time>)`.
     A window the file holds ends its words in the sidebar's hover with one account and the System page's usage line with `read <when>`, how long ago the file was written (`writtenAt`), so each reading says how old it is.
     The Usage app with fewer than two accounts reads the file alone.
-  - `accounts`: one usage file per account, each labelled by the `account` it names (`readAccounts()` in `api/hono/src/lib/dashboard/account.ts`, `readAccountUsages()` in `window.ts`), so no account's name lives in code or copy.
+  - `accounts`: one usage reading per account, each labelled by the `account` it names (`readAccounts()` in `api/hono/src/lib/dashboard/account.ts`, `readAccountUsages()` in `window.ts`), so no account's name lives in code or copy.
     Each `usage-<name>.json` beside `usage.json` comes from `scripts/ops/usage/account-watch.py`, or from `run.py` for the stored login (`write_stored`), and `usage.json` counts under the account it names too.
+    So does each account in `usage.json`'s `accounts` map (`accounts_reading()` in `run.py`: its week share and reset, and no 5-hour window), so an account the job reads with no file of its own still lists.
     Of two files naming one account, the later written stays, so a fresh `usage.json` of the main login beats an older `usage-<name>.json` of it.
+    A map entry takes an account's place only from a stale file written before it, since a file holds the 5-hour window the map lacks.
     The main login, the one Claude Code's config names (a fixture stack's made-up `account`, so it never opens the real config), comes first, then the rest A to Z.
     With two or more, the sidebar's readings combine them into one figure each (`combinedUsage()`, `.agents/dashboard/sidebar.md`), and the System page's usage line and the Usage app's windows read each window's room left, `Week · room left 22% · 5-hour · room left 72%` (`joinedLine()`); with fewer, each reads `usage` alone, as before.
     Every list of them the web draws (the System page's account lines and the Usage app's rows) goes soonest week reset first, an account with no week reset last (`byWeekReset()` in `web/next/src/lib/system.ts`); the sidebar's tooltips do too, a passed week reset rolled a week on (`usageRows()`).
