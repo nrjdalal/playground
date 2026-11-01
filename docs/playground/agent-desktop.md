@@ -26,7 +26,7 @@ The session reads the grants with `agent-desktop permissions`, which never promp
 
 - A session on a Mac with no grant stops at its first step and names the permission to grant, rather than trying a command.
 - Your pointer and focus stay where you left them while a session works.
-- The apps on your list, your browser and Slack today, stay as you left them: a session opens, reads and closes none of them.
+- The apps on your list, every web browser and Slack today, stay as you left them: a session opens, reads and closes none of them.
 - PRs, comments and reports describe what a session saw in words, with no snapshot or screenshot attached.
 
 ## Where it fits
