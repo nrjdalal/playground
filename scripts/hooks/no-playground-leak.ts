@@ -485,7 +485,8 @@ const leak: Visit = async (cmd, parsed, env) => {
   const args =
     appended && parsed.args.at(-1) !== XARGS_INPUT ? [...parsed.args, XARGS_INPUT] : parsed.args
   if (policy.anyWrite && changesState(cmd, parsed)) changed = true
-  if (policy.anyWrite && switchesBranch(parsed)) switched = true
+  if (policy.anyWrite && name === "gh" && ghCommand(parsed.args).head.join(" ") === "pr checkout")
+    switched = true
   const head = args[0]?.value ?? ""
   const group = GH_GROUPS.has(head) || (policy.anyWrite && (head === "alias" || head === "repo"))
   if (name === "gh" || (first?.unknown && group)) {
@@ -534,14 +535,8 @@ function changesState(cmd: Command, { args, name }: Parsed): boolean {
   return [...args, ...targets].some((w) => GIT_CONFIG_PATH.test(w.value))
 }
 
-// Under anyWrite, whether a command may switch the checkout's branch: git switch or checkout, or gh pr checkout.
-function switchesBranch({ args, name }: Parsed): boolean {
-  if (name === "gh") return ghCommand(args).head.join(" ") === "pr checkout"
-  if (name !== "git") return false
-  const words = args.map((a) => a.value)
-  const sub = words.find((w, i) => !w.startsWith("-") && !GIT_GLOBALS.has(words[i - 1]))
-  return sub === "switch" || sub === "checkout"
-}
+// Under anyWrite, the git subcommands that may move HEAD to another branch, read in git() after an alias expands.
+const SWITCHES = new Set(["branch", "checkout", "switch", "symbolic-ref"])
 
 // The repositories gh falls back to, none it can trust under anyWrite once an earlier command in the call changed them.
 const implicit = (env: Env, local: Map<string, Text>) =>
@@ -1048,6 +1043,7 @@ async function git(
   const rest = args.slice(k + 1)
   const here = { ...env, cwd: dir }
   if (policy.anyWrite) {
+    if (sub && SWITCHES.has(sub)) switched = true
     const cannot = (detail: string) => refuse("git", decide([]), detail, PLACE_FIX)
     if (aliasSet)
       return cannot(

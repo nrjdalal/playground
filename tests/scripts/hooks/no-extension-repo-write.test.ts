@@ -72,6 +72,7 @@ beforeAll(async () => {
   git(dirs.stale, "config", "branch.dev.pushRemote", EXT)
   dirs.switch = await clone("switch", ["origin", OTHER])
   git(dirs.switch, "config", "branch.feat.remote", EXT)
+  git(dirs.switch, "config", "alias.co", "checkout")
   dirs.alias = await clone("alias", ["origin", OTHER])
   git(dirs.alias, "config", "alias.p", "push")
   git(dirs.alias, "config", "alias.pp", "p --force")
@@ -327,6 +328,17 @@ describe("a push resolves its target the way git does, and one it cannot place i
       [
         "a bare push after gh pr checkout in the same call",
         "gh pr checkout 1 && git push",
+        "switch",
+      ],
+      ["a bare push after a checkout alias in the same call", "git co feat && git push", "switch"],
+      [
+        "a bare push after git symbolic-ref in the same call",
+        "git symbolic-ref HEAD refs/heads/feat && git push",
+        "switch",
+      ],
+      [
+        "a bare push after git branch -m in the same call",
+        "git branch -m feat && git push",
         "switch",
       ],
       [
