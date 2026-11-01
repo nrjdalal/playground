@@ -5,7 +5,7 @@ import { site } from "../../../../packages/config/src/site"
 import { dataDir } from "../../../../packages/env/src/data-dir"
 import { ownerSettings } from "../../../../packages/settings/src/owner"
 import { readPolicy } from "../../../../packages/settings/src/rendered"
-import { OLD } from "../../../old-names"
+import { OLD } from "../../../session-names"
 
 const REPO = join(import.meta.dir, "../../../..")
 

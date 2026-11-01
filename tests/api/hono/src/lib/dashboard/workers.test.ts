@@ -35,8 +35,7 @@ import {
 } from "../../../../../../api/hono/src/lib/dashboard/workers"
 import { setSessionNames } from "../../../../../../packages/config/src/kinds"
 import { inFixture, onLiveDashboard } from "../../../../../dashboard-fixture"
-import { OLD, capital } from "../../../../../old-names"
-import { SEEDED_NAMES } from "../../../../../session-names"
+import { capital, OLD, SEEDED_NAMES } from "../../../../../session-names"
 import { slowChild } from "../../../../../slow-child"
 import {
   permissionItem,
