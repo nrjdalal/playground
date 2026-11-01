@@ -125,10 +125,15 @@ const REFUSED: Row[] = [
   ["git push --delete", `git push --delete ${EXT} old`],
   ["git push behind a wrapper", `env X=1 git push ${EXT} main`],
   ["git push to a remote added in the same call", `git remote add e ${EXT} && git push e main`],
+  ["git push to a remote in a variable", "git push $R main"],
   ["gh api PUT on contents", `gh api -X PUT ${A}/contents/x.md -f message=m -f content=eA==`],
   ["gh api POST on git/refs", `gh api -X POST ${A}/git/refs -f ref=refs/heads/x -f sha=abc`],
   ["gh api PATCH on a ref", `gh api -X PATCH ${A}/git/refs/heads/main -f sha=abc`],
   ["gh api POST on merges", `gh api -X POST ${A}/merges -f base=main -f head=x`],
+  ["gh api POST on git/blobs", `gh api -X POST ${A}/git/blobs -f content=x`],
+  ["gh api POST on git/trees", `gh api -X POST ${A}/git/trees -f base_tree=abc`],
+  ["gh api POST on git/commits", `gh api -X POST ${A}/git/commits -f message=m -f tree=abc`],
+  ["gh api on a repository in a variable", "gh api -X PUT repos/$R/contents/x -f message=m"],
   ["gh api PATCH of the repository", `gh api -X PATCH ${A} -f default_branch=x`],
   [
     "gh api from the clone's {owner}/{repo}",
@@ -155,6 +160,8 @@ const REFUSED: Row[] = [
   ["gh repo unarchive", "gh repo unarchive quillco/playground-notes -y"],
   ["gh repo sync to a destination", "gh repo sync quillco/acme-skills --source acme/tools"],
   ["gh release create", "gh release create v1 -R quillco/acme-skills --notes x"],
+  ["gh release edit", "gh release edit v1 -R quillco/acme-skills --notes x"],
+  ["gh pr merge by -R in a variable", "gh pr merge 1 -R $R"],
   ["curl PUT on contents", `curl -X PUT -d '{}' https://api.github.com/${A}/contents/x`],
   ["curl GET of the repository", `curl https://api.github.com/${A}`],
 ]
@@ -177,7 +184,9 @@ describe("a write to an extension repository's git data or name is refused", () 
     ["delete_file", { branch: "main", message: "m", path: "x.md" }],
     ["merge_pull_request", { pullNumber: 1 }],
     ["create_branch", { branch: "x" }],
+    ["delete_repository", {}],
     ["fork_repository", {}],
+    ["update_pull_request_branch", { pullNumber: 1 }],
   ])("the GitHub MCP's %s", async (name, input) => {
     await refused(tool(name, { owner: "quillco", repo: "acme-skills", ...input }))
     await refused(tool(name, { owner: "QuillCo", repo: "playground-notes", ...input }))
@@ -523,6 +532,7 @@ describe("what it lets through", () => {
         "ext",
       ],
       ["gh api GET", `gh api ${A}/contents/x.md`],
+      ["gh api HEAD", `gh api -X HEAD ${A}/contents/x.md`],
       ["gh api GET of repositories/<id>", "gh api repositories/123"],
       ["gh repo view", "gh repo view quillco/acme-skills"],
       ["gh repo clone", "gh repo clone quillco/acme-skills"],
