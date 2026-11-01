@@ -150,10 +150,10 @@ Their tests are `bun run test:file tests/scripts/hooks`.
   The readers are `[`, `cat`, `cmp`, `diff`, `echo`, `grep`, `head`, `jq`, `ls`, `printf`, `readlink`, `realpath`, `shasum`, `stat`, `tail`, `test` and `wc`;
   `rg` with no `--hostname-bin` or `--pre`; `find` with no `-delete`, `-exec`, `-execdir`, `-fls`, `-fprint`, `-fprint0`, `-fprintf`, `-ok` or `-okdir` action; and git's `blame`, `cat-file`, `diff`, `grep`, `log`, `ls-files`, `rev-parse`, `show` and `status` with no `-c`, `--config-env`, `--exec-path`, `--ext-diff`, `-O`, `--open-files-in-pager`, `--output` or `--textconv`.
   A reader run with `EDITOR`, `GIT_*`, `LESSOPEN`, `PAGER` or `VISUAL` set in the call is judged as any other program, since each makes it run one.
-  Each text that holds a space is judged as a command line of its own, a leading `!` dropped, where a program runs it: a variable the call sets or exports (a pager, `GIT_SSH_COMMAND`, `EDITOR`), and any word of `arch`, `concurrently`, `find`, `flock`, `git` (an alias, `core.sshCommand`, `core.pager`; its words but the message of a `commit` or `tag` that sets no config in the call), `npx`, `rsync`,
-  `screen`, `script`,
-  `ssh` (its remote command, `ProxyCommand`), `tmux` and `watch`, the value after its `=` and an option's attached value included.
-  A shell's `-c`, `eval` and `source` are followed as scripts, and any other program's quoted argument is one word (`awk '$3 ~ /x/'` runs), judged by the rule above; a `commit` or `tag` message is judged for a gated call alone.
+  Each text that holds a space is judged as a command line of its own, a leading `!` dropped, where a program runs it: a variable the call sets or exports (a pager, `GIT_SSH_COMMAND`, `EDITOR`), and each word from the first word that names a runner on, the value after its `=` and an option's attached value included.
+  A runner is a shell, `eval`, `arch`, `concurrently`, `find`, `flock`, `git`, `npx`, `rsync`, `scp`, `screen`, `script`, `sftp`, `ssh`, `tmux` or `watch`, matched by its basename with case dropped and behind any wrapper (`SH -c`, `taskpolicy sh -c`, `bun x watch`); a program word the hook cannot read (`$S -c`) counts as one.
+  git's message after `-m`, a flag cluster ending in it (`-am`) or `--message` is kept out of that read for a `commit` or `tag` that carries no `-c` or `--config-env`, and judged for a gated call alone, since an alias runs every word it gets.
+  A shell's `-c`, `eval` and `source` are also followed as scripts, and any other program's quoted argument is one word (`awk '$3 ~ /x/'` runs), judged by the rule above.
   It refuses any program but a reader run with the root as its folder or, for git, its tree.
   It refuses the `playground` CLI's calls that change what a guard reads, the CLI found by where its word lands: `playground` by name in any case, or by a path that is no folder, or the checkout's `cli.ts` with or without its extension, as any word of a command but a reader's, so behind any wrapper (`bun`, `npx`, `find -exec`, `arch`, `watch`),
   its words followed by the stdin xargs hands it or carried in xargs' `-I` string.
@@ -172,7 +172,7 @@ Their tests are `bun run test:file tests/scripts/hooks`.
   It reads `env -C<dir>` and `env --chdir=<dir>` as the folder the command runs in, as it reads `env -C <dir>`.
   It reads a command's text, so a program whose own code writes the root (a script file run by its path, a binary) and a path it cannot read (built at run time, in a `$(…)` or a variable) pass it.
   A write to a scope's GitHub repository, which `ops:ext-sync` renders into the root, is outside its reach too; [no-extension-repo-write](#no-extension-repo-write) refuses one.
-  A program off that list that runs its argument as a shell line (awk's `system()`) without naming the root literally gets past.
+  A program off the runner list that runs its argument as a shell line (awk's `system()`) without naming the root literally gets past.
   A path through a link into the root with `..` after the link (`echo x > <link>/../f`) is judged as typed, so a write by one passes.
   A `cd` or `pushd` it cannot follow (`cd -`, `cd ~-`, `popd`'s stack, a glob in the folder, a `CDPATH` lookup) leaves the command's folder unread, so a relative write after one passes.
   From a cwd at or above the root (`~`, `~/.playground`), a quoted `(`, `[`, `*`, `?` or `{` reads as a glob there, so a call holding one (`git commit -m "fix(x): y"`) is refused; run it from a worktree.

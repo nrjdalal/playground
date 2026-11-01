@@ -20,6 +20,7 @@ import {
   PRINTERS,
   program,
   run,
+  SHELLS,
   slotWords,
   stdinOf,
   tick,
@@ -148,7 +149,7 @@ function cliCalls(parsed: Parsed, env: Env): Word[][] {
   return words.flatMap((word, at) => (isCli(word, dirs) ? [words.slice(at + 1)] : []))
 }
 
-// Programs that run a word as a shell line: arch's, concurrently's, find's -exec, flock's, npx's package, rsync's -e, screen's, script's -c, ssh's remote command and ProxyCommand, tmux's command and watch's; git runs its -c values (an alias, core.sshCommand, core.pager) and more, so all its words but a message are read too.
+// Programs that run a word as a shell line: arch's, concurrently's, find's -exec, flock's, npx's package, rsync's -e, scp's and sftp's ProxyCommand, screen's, script's -c, ssh's remote command and ProxyCommand, tmux's command and watch's; git runs its -c values (an alias, core.sshCommand, core.pager) and more, so all its words but a message are read too.
 const RUNNERS = new Set([
   "arch",
   "concurrently",
@@ -157,8 +158,10 @@ const RUNNERS = new Set([
   "git",
   "npx",
   "rsync",
+  "scp",
   "screen",
   "script",
+  "sftp",
   "ssh",
   "tmux",
   "watch",
@@ -168,20 +171,28 @@ const KEEPS_MESSAGE = new Set(["commit", "tag"])
 const keepsMessage = (args: Word[], env: Env): boolean =>
   KEEPS_MESSAGE.has(gitCall(args, env).sub ?? "") &&
   !args.some(({ value }) => /^(?:-c|--config-env(?:=|$))/.test(value))
-// git's commit or tag message at a word: the word after -m or --message, or one with the message attached
+// git's commit or tag message at a word: the word after -m, a flag cluster ending in it (-am) or --message, or one with the message attached
 const messageAt = (words: Word[], at: number): string | undefined =>
-  /^(?:-m|--message)$/.test(words[at - 1]?.value ?? "")
+  /^(?:-[a-zA-Z]*m|--message)$/.test(words[at - 1]?.value ?? "")
     ? words[at].value
     : /^(?:-m|--message=)./.test(words[at].value)
       ? words[at].value.replace(/^(?:-m|--message=)/, "")
       : undefined
 
-// Every text of a variable the call sets or exports, or of a runner's word, that holds a space, a leading ! dropped, read as a command line of its own (a pager, GIT_SSH_COMMAND, a git alias, watch's line); any other program's quoted argument (awk's program) stays one word.
+// The runner, shell or eval a word names, by its basename with case dropped, since macOS runs SH as sh
+const runnerOf = (word: Word): string | undefined => {
+  const base = (word.value.split("/").pop() ?? "").toLowerCase()
+  return RUNNERS.has(base) || SHELLS.has(base) || base === "eval" ? base : undefined
+}
+
+// Every text of a variable the call sets or exports, or of a word from the first that names a runner on (behind any wrapper, or a program word the hook cannot read), that holds a space, a leading ! dropped, read as a command line of its own (a pager, GIT_SSH_COMMAND, a git alias, watch's line); any other program's quoted argument (awk's program) stays one word.
 function runsOf(parsed: Parsed, env: Env): string[] {
   const { args, first, local, name } = parsed
   const values = [...local, ...env.vars].flatMap(([, text]) => (text.unknown ? [] : [text.value]))
-  const words = !RUNNERS.has(name) ? [] : first ? [first, ...args] : args
-  const keeps = name === "git" && keepsMessage(args, env)
+  const all = first ? [first, ...args] : args
+  const from = first && marked(name) ? 0 : all.findIndex((word) => runnerOf(word))
+  const words = from < 0 ? [] : all.slice(from)
+  const keeps = runnerOf(words[0] ?? { value: "" }) === "git" && keepsMessage(words.slice(1), env)
   for (const [at, word] of words.entries()) {
     if (keeps && messageAt(words, at) !== undefined) continue
     for (const text of texts(word)) values.push(text.value.replace(/^!/, ""))

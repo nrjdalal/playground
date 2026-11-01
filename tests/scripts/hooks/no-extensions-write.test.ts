@@ -444,8 +444,19 @@ describe("a quoted argument is read as a command line only where a program runs 
   test.each([
     ["awk matching a field to a regex", "awk '$3 ~ /runner/' /dev/null"],
     ["awk matching a field to a string", `awk '$3 ~ "runner"' /dev/null`],
+    ["awk matching a line naming a runner", "awk '/watch/' /dev/null"],
+    ["sed printing a line naming a shell", "sed -n '/sh -c/p' /dev/null"],
   ])("%s runs from the home and the data folder", async (_, command) => {
     for (const cwd of homes) expect(await at(command, cwd)).toBeUndefined()
+  })
+
+  test.each([
+    ["awk with a block matching a line naming a runner", "awk '/watch/ {print}' /dev/null"],
+    ["a commit message naming a removal", "git commit -m 'fix: rm -rf ~ bug'"],
+    ["a commit message after -am naming a removal", "git commit -am 'fix: rm -rf ~ bug'"],
+    ["a tag message naming a removal", "git tag -m 'see rm -rf ~' v1"],
+  ])("%s runs from a worktree", async (_, command) => {
+    expect(await at(command, join(homedir(), "x", ".claude", "worktrees", "y"))).toBeUndefined()
   })
 
   test.each([
@@ -479,12 +490,26 @@ describe("a quoted argument is read as a command line only where a program runs 
       `git -c alias.x='!sh -c "$2"' x -m 'rm -rf ~'`,
     ],
     [
-      "a git alias running the word after -m behind --attr-source commit",
-      `git -c alias.x='!eval "$2"' --attr-source commit x -m 'rm -rf ~'`,
+      "a git alias from the environment running the word after -m behind --attr-source commit",
+      `GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=alias.x GIT_CONFIG_VALUE_0='!eval "$2"' git --attr-source commit x -m 'rm -rf ~'`,
     ],
     ["a commit message under a call that sets config", "git -c x.y=z commit -m 'rm -rf ~'"],
     ["screen's shell removing the home", "screen -dm sh -c 'rm -rf ~'"],
     ["flock's shell removing the home", "flock /tmp/l sh -c 'rm -rf ~'"],
+    ["a shell held in a variable", "S=sh; $S -c 'rm -rf ~'"],
+    ["the user's shell", "$SHELL -c 'rm -rf ~'"],
+    ["ssh held in a variable", "x=ssh; $x host 'rm -rf ~'"],
+    ["watch held in a loop variable", "for p in watch; do $p 'rm -rf ~'; done"],
+    ["a shell in capitals", "SH -c 'rm -rf ~'"],
+    ["watch with a capital", "Watch 'rm -rf ~'"],
+    ["git in capitals running an alias", "GIT -c alias.x='!rm -rf ~' x"],
+    ["taskpolicy's shell", "taskpolicy -b sh -c 'rm -rf ~'"],
+    ["lockf's shell", "lockf -t0 /tmp/l sh -c 'rm -rf ~'"],
+    ["watch through bun x", "bun x watch 'rm -rf ~'"],
+    ["a shell through pnpm exec", "pnpm exec sh -c 'rm -rf ~'"],
+    ["eval through setsid", "setsid eval 'rm -rf ~'"],
+    ["ssh through sshpass", "sshpass -p x ssh h 'rm -rf ~'"],
+    ["scp's ProxyCommand removing the home", "scp -o ProxyCommand='rm -rf ~' a h:b"],
   ])("%s stays refused", async (_, command) => {
     for (const cwd of homes)
       expect(await at(command, cwd)).toContain("no-extensions-write hook refuses")
