@@ -56,6 +56,8 @@ build_head() {
   cp -R "$src/web/next/.next/standalone" "$dir.tmp/web" && mkdir -p "$dir.tmp/web/web/next/.next" && cp -R "$src/web/next/.next/static" "$dir.tmp/web/web/next/.next/static" &&
     { [ ! -d "$src/web/next/public" ] || cp -R "$src/web/next/public" "$dir.tmp/web/web/next/public"; } &&
     echo "$WEB $API" > "$dir.tmp/urls" || { echo "copying the build to $dir failed"; return 1; }
+  # the head's own web launcher, bundled into one file, so the web a roll swaps in runs the target's launcher, not the checkout's older one
+  (cd "$src" && bun build packages/scripts/src/portless.ts --target=bun --outfile="$dir.tmp/launcher.js") >> "$LOG" 2>&1 || say "bundling ${sha:0:7}'s web launcher failed; its web starts through the checkout's"
   rm -rf "$dir"; mv "$dir.tmp" "$dir"
   say "built ${sha:0:7} in $(( $(date +%s) - started ))s, $(du -sh "$dir" | cut -f1)"
 }
@@ -99,12 +101,19 @@ start_follower() {
   bash "$D/start-ingest.sh" &
   echo $! > "$S/dashboard-ingest.pid"; say "follower started, pid $!"
 }
-# The web: next's standalone server from the head's kept build ($2), started as job $1 on a port of its own, with the env packages/scripts/src/portless.ts gives the serve task; ready once / answers 2xx or 3xx, within 60s
+# The web launcher for the build of $1: the head's own, which build_head bundles beside it, else the checkout's packages/scripts/src/portless.ts (a build kept from before the bundle), with a line saying why
+launcher() {
+  [ -f "$S/builds/$1/launcher.js" ] && { echo "$S/builds/$1/launcher.js"; return; }
+  say "the build of ${1:0:7} keeps no launcher; its web starts through the checkout's portless.ts"
+  echo ../../packages/scripts/src/portless.ts
+}
+# The web: next's standalone server from the head's kept build ($2), started as job $1 on a port of its own, with the env the head's launcher gives the serve task; ready once / answers 2xx or 3xx, within 60s
 # It returns 1 for the head's fault (its web exited, or answered only errors) and 2 for the machine's (no free port, the port taken, a web still silent at 60s), and names which in web_why
 web_up() {
-  local job=$1 sha=$2 port i code=000
+  local job=$1 sha=$2 port i code=000 launch
   port=$(bun --no-env-file -e 'const s = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: () => new Response() }); console.log(s.port); s.stop(true)') || { web_why="no free port for the web"; return 2; }
-  (cd web/next && PORTLESS_URL=$WEB PORT=$port HOSTNAME=127.0.0.1 exec bun ../../packages/scripts/src/portless.ts bun "$S/builds/$sha/web/web/next/server.js") > "$S/$job.log" 2>&1 &
+  launch=$(launcher "$sha")
+  (cd web/next && PORTLESS_URL=$WEB PORT=$port HOSTNAME=127.0.0.1 exec bun "$launch" bun "$S/builds/$sha/web/web/next/server.js") > "$S/$job.log" 2>&1 &
   echo $! > "$S/$job.pid"; echo "$port" > "$S/$job.port"; echo "$sha" > "$S/$job.sha"
   for i in $(seq 1 60); do
     code=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$port/")
