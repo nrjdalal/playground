@@ -140,21 +140,29 @@ function checkStatus(name: string, pairs: [string, string][]): void {
     )
 }
 
-// An ETA is a future UTC time as `date -u +%FT%TZ` prints one: a worker once sent the literal placeholder <ETA>. An empty eta= clears it.
+// An ETA is a future UTC time as `date -u +%FT%TZ` prints one: a worker once sent the literal placeholder <ETA>. An empty eta= clears it, and every eta= given is read, since the last one wins.
 function checkEta(pairs: [string, string][]): void {
-  const eta = pairs.find(([k]) => k === "eta")?.[1]
-  if (!eta) return
-  const at = Date.parse(eta)
-  if (
-    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(eta) &&
-    at > Date.now() &&
-    new Date(at).toISOString().startsWith(eta.slice(0, 19))
-  )
-    return
-  throw new Refusal(
-    `roster.ts: eta takes a future UTC time, not ${eta}: an ETA is \`date -u\` plus your estimate, in UTC (date -u +%FT%TZ reads ${now()} now)`,
-    2,
-  )
+  for (const [k, eta] of pairs) {
+    if (k !== "eta" || eta === "") continue
+    const at = Date.parse(eta)
+    if (
+      /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(eta) &&
+      at > Date.now() &&
+      new Date(at).toISOString().startsWith(eta.slice(0, 19))
+    )
+      continue
+    throw new Refusal(
+      `roster.ts: eta takes a future UTC time, not ${eta}: an ETA is \`date -u\` plus your estimate, in UTC (date -u +%FT%TZ reads ${now()} now)`,
+      2,
+    )
+  }
+}
+
+// Every key=value check set, report and assign share.
+function checkPairs(name: string, pairs: [string, string][]): void {
+  checkKind(pairs)
+  checkStatus(name, pairs)
+  checkEta(pairs)
 }
 
 // A checker moved by halves keeps its old worker or pr, and the sidebar nests it under that worker's ended row.
@@ -205,9 +213,7 @@ async function main(argv: string[]): Promise<void> {
     : ""
   if (cmd === "set") {
     const pairs = pairsOf(rest)
-    checkKind(pairs)
-    checkStatus(name!, pairs)
-    checkEta(pairs)
+    checkPairs(name!, pairs)
     const entry = agent(roster, name!, pairs)
     checkRetask(entry, pairs, factoryRepo)
     // A new task on an agent holding a pr would show the old PR beside it, so it goes through assign; a title alone renames the row.
@@ -221,9 +227,7 @@ async function main(argv: string[]): Promise<void> {
     const [text, ...more] = rest
     if (text === undefined) throw new Refusal(USAGE, 2)
     const pairs = pairsOf(more)
-    checkKind(pairs)
-    checkStatus(name!, pairs)
-    checkEta(pairs)
+    checkPairs(name!, pairs)
     const entry = agent(roster, name!, pairs)
     checkRetask(entry, pairs, factoryRepo)
     entry.lastReport = text
@@ -233,9 +237,7 @@ async function main(argv: string[]): Promise<void> {
     const [title, task, ...more] = rest
     if (title === undefined || task === undefined) throw new Refusal(USAGE, 2)
     const pairs = pairsOf(more)
-    checkKind(pairs)
-    checkStatus(name!, pairs)
-    checkEta(pairs)
+    checkPairs(name!, pairs)
     const entry = agent(roster, name!, pairs, task)
     checkRetask(entry, pairs, factoryRepo, true)
     for (const k of ["pr", "branch", "repo", "lastReport", "lastReportAt", "eta", "ticket"])

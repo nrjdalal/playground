@@ -43,6 +43,7 @@ Run each row as `bun <main checkout>/scripts/roster.ts <row>` (`$PLAYGROUND_REPO
 - `pr` holds the PR's full URL, since the dashboard and code-review-loop's recovery scan read no other form.
   A bare number (`1561`, or the same with a leading `#`) is expanded to `https://github.com/<repo>/pull/<n>`, `<repo>` being the same call's `repo=`, else the entry's, else `factory.repo`; any other value is refused.
 - `eta` is the UTC time a worker last told its lead it expects its chore done (the **eta** rule).
+  `set`, `report` and `assign` refuse any `eta=` that is not a future `YYYY-MM-DDTHH:MM:SSZ` time, naming the recipe (`date -u` plus the estimate), and an empty `eta=` clears it.
   The lead writes the worker's own time, since the dashboard counts down to it and shows nothing once it passes; a worker that has sent none has none.
   A runner carries none.
 - `kind` says what a session is, whatever its name: `worker`, `researcher`, `reviewer`, `tester`, `runner` or `probe`, or a manager's `builder` (`builder`), `ops` (`ops`), `planner` (`planner`), `optimizer` or `dispatcher` (the dispatcher, dispatcher-2).

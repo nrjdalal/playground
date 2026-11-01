@@ -414,6 +414,7 @@ describe("eta", () => {
     ["the placeholder", "<ETA>"],
     ["a clock time alone", "13:50Z"],
     ["a time a minute past", inMinutes(-1)],
+    ["a date no calendar holds", "2099-02-30T00:00:00Z"],
   ])("%s is refused by set, report and assign, naming the recipe", async (_case, value) => {
     for (const args of [
       ["set", "worker-greed", `eta=${value}`],
@@ -423,6 +424,15 @@ describe("eta", () => {
       const r = await run(configWith([WITH_PR]), args)
       expect(r.code).toBe(2)
       expect(r.err).toContain("an ETA is `date -u` plus your estimate, in UTC")
+      expect(r.roster).toMatchObject({ agents: [WITH_PR], updatedAt: "2026-10-01T00:00:00Z" })
+    }
+  })
+
+  // apply() writes every pair, the last one winning, so a refused eta= after a good one must not slip through.
+  test("every eta= a call gives is read, so a bad one after a good one or an empty one is refused", async () => {
+    for (const first of [`eta=${inMinutes(60)}`, "eta="]) {
+      const r = await run(configWith([WITH_PR]), ["set", "worker-greed", first, "eta=<ETA>"])
+      expect(r.code).toBe(2)
       expect(r.roster).toMatchObject({ agents: [WITH_PR], updatedAt: "2026-10-01T00:00:00Z" })
     }
   })

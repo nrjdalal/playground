@@ -3,6 +3,6 @@ An ETA to merged lets a lead plan the merge order and tell the owner what is lef
 It counts the build left, each review round, the tester and the Checks queue at their measured times, plus the slip seen so far.
 The lead clears it when the PR merges, and a runner, whose job has no end, sends none.
 Told to the owner, an ETA is time remaining, never a clock time.
-`roster.ts` refuses an `eta=` that is not a future time in that shape, and an empty `eta=` clears it.
+`roster.ts` refuses an `eta=` that is not a future `YYYY-MM-DDTHH:MM:SSZ` time, and an empty `eta=` clears it.
 Done when the worker's roster entry holds the newest ETA it sent, which `roster.ts` took, or none once its PR has merged.
 How the Dashboard shows it is in playbook's ROSTER.md.
