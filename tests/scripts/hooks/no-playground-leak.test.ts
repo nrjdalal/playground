@@ -1158,6 +1158,11 @@ describe("as Claude Code runs it", () => {
     tool_input: { text: OLD.dispatcher },
     tool_name: "mcp__slack-shared__chat_post_message",
   }
+  // The config folder whose list holds the stand-in old names, so a run refuses one.
+  const listed = () => ({
+    CLAUDE_CONFIG_DIR: config,
+    PLAYGROUND_DATA_DIR: join(config, "playground"),
+  })
 
   // CLAUDE_PROJECT_DIR is a folder in no repository, so only PLAYGROUND_REPO can name the checkout
   const away = (home: string, repo: string) => ({
@@ -1171,7 +1176,7 @@ describe("as Claude Code runs it", () => {
     const home = join(scratch, "home")
     await mkdir(home, { recursive: true })
     const [{ command }] = (await entry()).hooks
-    const refused = await hook(command, leaky, away(home, root))
+    const refused = await hook(command, leaky, { ...away(home, root), ...listed() })
     expect(refused.code).toBe(2)
     expect(refused.stderr).toContain("no-playground-leak hook refused")
     const clean = { ...leaky, tool_input: { text: "PR is up" } }
@@ -1187,7 +1192,7 @@ describe("as Claude Code runs it", () => {
 
   test("the script runs on its own", async () => {
     const proc = Bun.spawn(["bun", script], {
-      env: { ...process.env, PLAYGROUND_ROLE: "worker" },
+      env: { ...process.env, ...listed(), PLAYGROUND_ROLE: "worker" },
       stderr: "pipe",
       stdin: new Blob([JSON.stringify(leaky)]),
     })
