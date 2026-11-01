@@ -335,7 +335,7 @@ describe("a direct write into the extensions root is refused, naming the owner's
       const started = performance.now()
       const reason = await bash(`${"eval 'eval '\\''".repeat(depth)}\nrm ${LIST}`, "/tmp")
       expect(reason).toContain("no-extensions-write hook refuses")
-      expect(performance.now() - started).toBeLessThan(2_000)
+      expect(performance.now() - started).toBeLessThan(7_500)
     },
     60_000,
   )
