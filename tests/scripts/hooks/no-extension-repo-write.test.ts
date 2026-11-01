@@ -72,6 +72,10 @@ beforeAll(async () => {
   git(dirs.alias, "config", "alias.pp", "p --force")
   git(dirs.alias, "config", "alias.sh", "!git push")
   git(dirs.alias, "config", "alias.l", "log --oneline")
+  git(dirs.alias, "config", "alias.dq", `push "${EXT}" main`)
+  git(dirs.alias, "config", "alias.sq", "push 'git@github.com:quillco/acme-skills.git' main")
+  git(dirs.alias, "config", "alias.bs", "push https://github.com/quillco/acme\\-skills main")
+  git(dirs.alias, "config", "alias.open", `push "${EXT} main`)
 })
 
 afterAll(async () => {
@@ -208,6 +212,10 @@ describe("a push resolves its target the way git does, and one it cannot place i
       ["B4: a git alias for push", `git p ${EXT} main`, "alias"],
       ["B4: a git alias of an alias", `git pp ${EXT} main`, "alias"],
       ["B4: a ! alias", "git sh", "alias"],
+      ["B4: an alias with a double-quoted URL", "git dq", "alias"],
+      ["B4: an alias with a single-quoted scp URL", "git sq", "alias"],
+      ["B4: an alias with a backslash escape in its URL", "git bs", "alias"],
+      ["B4: an alias with an unclosed quote", "git open", "alias"],
       ["B4: an alias set by -c", `git -c alias.q=push q ${EXT} main`],
       ["B4: a gh alias set", "gh alias set m 'pr merge'"],
       ["B4: a gh alias import", "gh alias import aliases.yml"],

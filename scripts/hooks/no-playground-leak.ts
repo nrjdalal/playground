@@ -860,17 +860,19 @@ async function curl(
 ): Promise<string | undefined> {
   const { flags, positionals } = parseFlags(args, CURL_TAKES)
   const urls = curlUrls(flags, positionals)
-  const globs = !flags.some((f) => f.name === "-g" || f.name === "--globoff")
-  // A Host header, --connect-to, --request-target or --resolve beside a word naming GitHub sends the request somewhere its URL does not name.
-  const redirect = args.some(
-    (a, i) =>
-      /^--(?:connect-to|request-target|resolve)(?:=|$)/.test(a.value) ||
-      ((a.value === "-H" || a.value === "--header") &&
-        /^\s*host\s*:/i.test(args[i + 1]?.value ?? "")) ||
-      /^(?:-H|--header=)\s*host\s*:/i.test(a.value),
-  )
-  if (policy.anyWrite && redirect && args.some((a) => /github/i.test(a.value)))
-    return judge("curl", { label: "a host the call redirects to", where: "unknown" }, [], env)
+  const globs = policy.anyWrite && !flags.some((f) => f.name === "-g" || f.name === "--globoff")
+  if (policy.anyWrite) {
+    // A Host header, --connect-to, --request-target or --resolve beside a word naming GitHub sends the request somewhere its URL does not name.
+    const redirect = args.some(
+      (a, i) =>
+        /^--(?:connect-to|request-target|resolve)(?:=|$)/.test(a.value) ||
+        ((a.value === "-H" || a.value === "--header") &&
+          /^\s*host\s*:/i.test(args[i + 1]?.value ?? "")) ||
+        /^(?:-H|--header=)\s*host\s*:/i.test(a.value),
+    )
+    if (redirect && args.some((a) => /github/i.test(a.value)))
+      return judge("curl", { label: "a host the call redirects to", where: "unknown" }, [], env)
+  }
   const targets = urls.map((u): Target => {
     const value = visible(u.value)
     if (u.unknown || u.reads?.length || value.includes(UNKNOWN) || fromXargs(u, xargs))
@@ -1025,10 +1027,8 @@ async function git(
       if (!alias.unknown) {
         if (alias.value.trim().startsWith("!") || depth > 8)
           return cannot(`its alias ${sub} runs a command the hook does not read`)
-        const words = alias.value
-          .trim()
-          .split(/\s+/)
-          .map((value) => ({ quoted: false, value }))
+        const words = splitCmdline(alias.value)
+        if (!words) return cannot(`its alias ${sub} has an unclosed quote or a trailing backslash`)
         return git([...args.slice(0, k), ...words, ...rest], cmd, env, local, depth + 1)
       }
     }
@@ -1093,6 +1093,34 @@ function builtin(sub: string): boolean {
 }
 
 // A URL git reaches over the network, by owner and name; undefined for a local path, a file:// URL or a remote helper's <transport>::<address>, which the hook cannot place.
+// git's split_cmdline: quotes group and drop, a backslash escapes outside single quotes, and an unclosed quote or a trailing backslash fails the alias.
+function splitCmdline(body: string): Word[] | undefined {
+  const words: Word[] = []
+  let word: string | undefined
+  let quote = ""
+  for (let i = 0; i < body.length; i++) {
+    let c = body[i]
+    if (!quote && /\s/.test(c)) {
+      if (word !== undefined) words.push({ quoted: false, value: word })
+      word = undefined
+      continue
+    }
+    word ??= ""
+    if (!quote && (c === "'" || c === '"')) quote = c
+    else if (c === quote) quote = ""
+    else {
+      if (c === "\\" && quote !== "'") {
+        c = body[++i]
+        if (c === undefined) return
+      }
+      word += c
+    }
+  }
+  if (quote) return
+  if (word !== undefined) words.push({ quoted: false, value: word })
+  return words
+}
+
 function placeUrl(url: string): Repo | undefined {
   if (url.includes("::") || /^file:/i.test(url)) return
   if (/^[a-z][a-z\d+.-]*:\/\//i.test(url) || /^[^/:]+:/.test(url)) return remoteRepo(url)
