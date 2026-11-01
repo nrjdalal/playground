@@ -24,6 +24,10 @@ describe("a git stash that can take another worktree's work is refused", () => {
   test.each([
     ["a bare stash", "git stash"],
     ["a stash inside an array assignment", "arr=($(git stash))"],
+    [
+      "a stash at the end of a printf output past 1 MB that a shell reads",
+      `bash <(printf '#${"x".repeat(1_100)}\\n%s\\n' ${"a ".repeat(1_000)} 'git stash')`,
+    ],
     ["push without a message", "git stash push"],
     ["push with options but no message", "git stash push -u --keep-index"],
     ["an implied push without a message", "git stash -u"],
