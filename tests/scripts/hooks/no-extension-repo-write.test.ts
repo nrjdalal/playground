@@ -337,6 +337,20 @@ describe("a push resolves its target the way git does, and one it cannot place i
         `${"eval ".repeat(300)}gh repo delete --yes`,
         "ext",
       ],
+      [
+        "an ANSI-quoted git behind nesting too deep to read",
+        `${"eval ".repeat(300)}$'\\x67it' push origin main`,
+        "ext",
+      ],
+      [
+        "a backslashed git behind nesting too deep to read",
+        `${"eval ".repeat(300)}g\\it push origin main`,
+        "ext",
+      ],
+      [
+        "xargs -I placing a curl URL that writes",
+        "echo https://example.com | xargs -I{} curl -X POST -d x {}",
+      ],
       ["xargs appending a send-pack URL", `echo ${EXT} main | xargs git send-pack`],
       [
         "xargs appending gh repo delete's repository",
@@ -525,6 +539,10 @@ describe("what it lets through", () => {
       ["a GIT_ variable on a commit", "GIT_EDITOR=true git commit --amend --no-edit"],
       ["a git alias that only reads", "git l", "alias"],
       ["xargs appending files to git add", "echo a b | xargs git add"],
+      [
+        "xargs -I placing a curl URL it only reads",
+        "echo https://example.com | xargs -I{} curl -sL {}",
+      ],
       ["gh pr merge by a variable in another repository's clone", "gh pr merge $N"],
       [
         "gh pr merge by a variable with -R another repository",
@@ -644,6 +662,13 @@ describe("the repositories it guards", () => {
 })
 
 describe("it fails closed", () => {
+  test("a call still being read at its deadline is refused", async () => {
+    const command = `${"git push origin; ".repeat(50)}ls`
+    expect(await run(bash(command))).toBeUndefined()
+    const reason = await check(bash(command), env(stored), 1)
+    expect(reason).toContain("no-extension-repo-write hook refused")
+  })
+
   test("a policy.json that does not parse refuses a write, and a read passes", async () => {
     const broken = await store("broken", {}, "quillco")
     await writeFile(join(broken, "extensions", "policy.json"), "{")

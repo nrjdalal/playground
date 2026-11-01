@@ -9,6 +9,7 @@ import { extensionsDir, loginOf, readPolicy } from "../../packages/settings/src/
 import { remoteRepo } from "./github"
 import { type Hit, inspectAs, type Policy, refusedList } from "./no-playground-leak"
 import { fromFactory } from "./role"
+import { withDeadline } from "./shell"
 
 type Environment = Record<string, string | undefined>
 
@@ -86,6 +87,7 @@ const policy = (repos: Set<string>): Policy => ({
 export async function check(
   raw: string,
   environment: Environment = process.env,
+  budget = 8_000,
 ): Promise<string | undefined> {
   const data = dataDir(environment)
   if (!existsSync(extensionsDir(data))) return
@@ -105,7 +107,8 @@ export async function check(
     )
   }
   if (repos.size === 0) return
-  return inspectAs(policy(repos), raw, environment)
+  // The walk refuses past its deadline, inside the hook's 15s timeout, which would otherwise let the call through.
+  return withDeadline(budget, () => inspectAs(policy(repos), raw, environment))
 }
 
 if (import.meta.main) {

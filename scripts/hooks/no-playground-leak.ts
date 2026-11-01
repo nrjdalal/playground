@@ -16,6 +16,7 @@ import {
   curlData,
   curlUrls,
   type Env,
+  type Flag,
   flagFromXargs,
   fromXargs,
   ghApi,
@@ -26,6 +27,7 @@ import {
   NOT_RUN,
   type Parsed,
   parseFlags,
+  pastDeadline,
   pathOf,
   PRINTERS,
   program,
@@ -36,6 +38,7 @@ import {
   type Text,
   UNKNOWN,
   unknown,
+  unreadable,
   viaXargs,
   visible,
   type Visit,
@@ -475,6 +478,7 @@ const XARGS_INPUT: Word = { quoted: false, unknown: "xargs's input", value: UNKN
 
 const leak: Visit = async (cmd, parsed, env) => {
   const { first, name, xargs } = parsed
+  if (policy.anyWrite) pastDeadline()
   const appended = policy.anyWrite && xargs && xargs.replace === undefined
   const args =
     appended && parsed.args.at(-1) !== XARGS_INPUT ? [...parsed.args, XARGS_INPUT] : parsed.args
@@ -883,7 +887,9 @@ async function curl(
   }
   const targets = urls.map((u): Target => {
     if (u.unknown === XARGS_INPUT.unknown || (policy.anyWrite && fromXargs(u, xargs)))
-      return { label: "a URL xargs supplies from its input", where: "unknown" }
+      return u.unknown || curlWrites(flags)
+        ? { label: "a URL xargs supplies from its input", where: "unknown" }
+        : { label: "", where: "other" }
     const value = visible(u.value)
     if (u.unknown || u.reads?.length || value.includes(UNKNOWN) || fromXargs(u, xargs))
       return { byText: true, label: "a URL the hook cannot read", where: "unknown" }
@@ -923,6 +929,15 @@ async function curl(
     env,
     urls,
   )
+}
+
+// Under anyWrite, whether a curl may write: a method other than GET or HEAD (or one the hook cannot read), a form or an upload, or data -G does not turn into a query.
+function curlWrites(flags: Flag[]): boolean {
+  const method = flags.find((f) => f.name === "-X" || f.name === "--request")?.value
+  if (method && (unreadable(method) || !/^(?:GET|HEAD)$/i.test(method.value))) return true
+  if (flags.some((f) => /^(?:-F|--form(?:-string)?|-T|--upload-file)$/.test(f.name))) return true
+  const get = flags.some((f) => f.name === "-G" || f.name === "--get")
+  return !get && flags.some((f) => /^(?:-d|--data(?:-[a-z]+)?|--json)$/.test(f.name))
 }
 
 // Under anyWrite, where a curl URL lands as curl sends it: its host and path read as a URL reads them, dot segments resolved; a glob curl would expand on a GitHub host, or a URL naming GitHub that does not parse, cannot be placed.
@@ -1375,7 +1390,7 @@ export async function inspectAs(
   } catch (error) {
     const subject = subjectOf(raw)
     // Under anyWrite a call that may write is refused whatever it names, since an error it caused may hide where it writes.
-    const writes = WRITE_CALL.test(subject) || (policy.anyWrite && MAYBE_ANY.test(subject))
+    const writes = WRITE_CALL.test(subject) || (policy.anyWrite && candidate(subject))
     if (!writes || (!policy.anyWrite && !policy.find(subject))) return
     if (policy.anyWrite)
       return `${policy.guard} hook refused this call: it could not read it (${error}), so it cannot tell whether it is ${policy.what}. Split it into plain commands and run them again.`
