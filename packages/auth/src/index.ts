@@ -54,6 +54,17 @@ if (isPrivate && !env.HONO_WEB_URL && nonApiOrigins.length === 0) {
   )
 }
 
+// GitHub sign-in is the hosted build's (Yard's) alone: a member signs in there with GitHub, while a local stack signs its owner in by itself and offers no provider.
+if (env.PLAYGROUND_HOSTED && !(env.GITHUB_CLIENT_ID && env.GITHUB_CLIENT_SECRET)) {
+  throw new Error(
+    "PLAYGROUND_HOSTED needs GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET for its sign-in",
+  )
+}
+const socialProviders =
+  env.PLAYGROUND_HOSTED && env.GITHUB_CLIENT_ID && env.GITHUB_CLIENT_SECRET
+    ? { github: { clientId: env.GITHUB_CLIENT_ID, clientSecret: env.GITHUB_CLIENT_SECRET } }
+    : undefined
+
 export const auth = betterAuth({
   baseURL: webOrigin ?? env.HONO_APP_URL,
   trustedOrigins: env.HONO_TRUSTED_ORIGINS,
@@ -71,6 +82,7 @@ export const auth = betterAuth({
       verification,
     },
   }),
+  ...(socialProviders && { socialProviders }),
   onAPIError: {
     throw: true,
   },
