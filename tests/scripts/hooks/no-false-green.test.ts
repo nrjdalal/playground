@@ -28,6 +28,7 @@ describe("bun with an option whose value is the next word, before run or test, i
     { $label: "an option no list names, before test", command: "bun --conditions dev test x" },
     { $label: "--define before run", command: "bun --define X=1 run test" },
     { $label: "through run-slot", command: `${slot} bun --cwd /w test tests/a.test.ts` },
+    { $label: "through bash run-slot", command: `bash ${slot} bun --cwd /w test tests/a.test.ts` },
     { $label: "inside bash -c", command: "bash -c 'bun --cwd /w run test'" },
     { $label: "run-slot inside bash -c", command: `bash -c '${slot} bun --cwd /w run test'` },
   ])("$label", async ({ command }) => {
@@ -47,6 +48,7 @@ describe("a test run piped with no pipefail is refused, naming the fix", () => {
     { $label: "test:skills into grep", command: "bun run test:skills | grep -c pass" },
     { $label: "check-types into tail", command: "bun run --cwd /w check-types | tail -3" },
     { $label: "through run-slot", command: `${slot} bun run --cwd /w test 2>&1 | tail -5` },
+    { $label: "through sh -e run-slot", command: `sh -e ${slot} bun run --cwd /w test | tail -5` },
     { $label: "inside run-slot's bash -c", command: `${slot} bash -c 'bun test x | tail -5'` },
     { $label: "a shell running a test, piped", command: "bash -c 'bun test x' | tail" },
     { $label: "a shell with -- before its script", command: "bash -c -- 'bun test x' | tail" },

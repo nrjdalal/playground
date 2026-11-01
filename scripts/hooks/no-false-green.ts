@@ -10,6 +10,7 @@ import {
   pythonModule,
   SHELLS,
   shellOperand,
+  shellSlot,
   slotWords,
   UV_TAKES,
   type Word,
@@ -50,6 +51,8 @@ function runsTests(cmd: Command): boolean {
   const { args, name } = parsed
   const slot = slotWords(parsed)
   if (slot) return slot.length === 0 ? false : runsTests({ ...cmd, scope: 0, words: slot })
+  const script = SHELLS.has(name) ? shellSlot(args) : undefined
+  if (script) return runsTests({ ...cmd, scope: 0, words: script })
   if (SHELLS.has(name)) {
     const { inline, operand } = shellOperand(args)
     return inline && operand !== undefined && lex(operand.value).commands.some(runsTests)
@@ -124,9 +127,10 @@ function judgeCommand(cmd: Command, guarded: boolean): string | undefined {
   const parsed = parse(cmd)
   const { args, name } = parsed
   const slot = slotWords(parsed)
-  // a run-slot call with no -- or nothing after it runs nothing, so nothing in it is judged
   if (slot)
     return slot.length === 0 ? undefined : judgeCommand({ ...cmd, scope: 0, words: slot }, guarded)
+  const script = SHELLS.has(name) ? shellSlot(args) : undefined
+  if (script) return judgeCommand({ ...cmd, scope: 0, words: script }, guarded)
   if (SHELLS.has(name)) {
     const { inline, operand } = shellOperand(args)
     const reason = inline && operand ? judge(operand.value, dialect(name)) : undefined

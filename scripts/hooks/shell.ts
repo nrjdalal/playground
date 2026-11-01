@@ -597,6 +597,13 @@ export function slotWords({ args, name }: Parsed): Word[] | undefined {
   return at === -1 ? [] : args.slice(at + 1)
 }
 
+// A shell whose script file is run-slot.sh runs that run-slot call: its words from the script on, the shell's own flags before it dropped, or undefined for any other shell call.
+export function shellSlot(args: Word[]): Word[] | undefined {
+  const { inline, operand } = shellOperand(args)
+  if (inline || !operand || program(operand.value) !== "run-slot.sh") return
+  return args.slice(args.indexOf(operand))
+}
+
 // A hook's judgement of one command, given everything but the shell's own builtins, the shells it starts and eval, which run() follows itself.
 export type Visit = (cmd: Command, parsed: Parsed, env: Env) => Promise<string | undefined>
 
@@ -687,6 +694,8 @@ async function shell(
   visit: Visit,
   builtins: boolean,
 ): Promise<string | undefined> {
+  const slot = shellSlot(args)
+  if (slot) return examine({ ...cmd, words: slot }, env, visit, builtins)
   const { inline, operand } = shellOperand(args)
   if (operand) {
     return inline ? run(lex(operand.value, env.known), subshell(env), visit, builtins) : undefined
