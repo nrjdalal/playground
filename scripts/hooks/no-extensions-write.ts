@@ -247,11 +247,13 @@ function inspect(raw: string, environment: Environment) {
     }
     return reaching.get(folder)
   }
-  // Whether a glob's part in a folder above the root can match a name that reaches the root; a group, zsh's or bash's extglob, and a brace range read as `*`, so only a lone brace or a name that matches none is a plain word.
+  // Whether a glob's part in a folder above the root can match a name that reaches the root; a group, zsh's or bash's extglob, and a brace range read as `*`, so only a lone brace or a name that matches none is a plain word; a `..` anywhere, which the shell climbs from where a link lands, or another glob after the part may land anywhere, so it reaches.
   const reaches = (value: string, at: number, folder: string) => {
     let rest = value.slice(value.lastIndexOf("/", at) + 1)
     for (let was = ""; was !== rest;) [was, rest] = [rest, rest.replace(/[@?+*!]?\([^()]*\)/g, "*")]
-    const glob = new Bun.Glob(rest.split("/")[0]!.replace(/\{[^}]*\.\.[^}]*\}/g, "*"))
+    const [part, ...after] = rest.split("/")
+    if (value.split("/").includes("..") || after.some((step) => GLOB.test(step))) return true
+    const glob = new Bun.Glob(part!.replace(/\{[^}]*\.\.[^}]*\}/g, "*"))
     const names = reachersOf(folder)
     return !names || names.some((name) => glob.match(name))
   }

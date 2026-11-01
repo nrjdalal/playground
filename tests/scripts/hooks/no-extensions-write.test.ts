@@ -497,6 +497,26 @@ describe("text read as a command line judges what a shell would run", () => {
     expect(await bash(command, DATA)).toContain("no-extensions-write hook refuses")
   })
 
+  // a `..` or another glob after a glob's part leaves the folder it matched in, so the part alone cannot say where the path lands
+  test.each([
+    ["a glob climbing back out to the data folder", "rm -rf w*/../.p*", HOME],
+    [
+      "a redirect climbing back out into the root",
+      "echo x > w*/../.playground/extension?/policy.json",
+      HOME,
+    ],
+    ["a glob in the data folder climbing to the root", "rm -rf .playground/h*/../e*", HOME],
+    ["a glob climbing to the root from the data folder", "rm -rf h*/../e*", DATA],
+    ["a glob climbing out to any other folder", "rm -rf w*/../Documents/x", HOME],
+    [
+      "a glob past a link and its `..`, which climbs from where the link lands",
+      "rm -rf store/../e*",
+      HOME,
+    ],
+  ])("%s stays refused", async (_, command, cwd) => {
+    expect(await bash(command, cwd)).toContain("no-extensions-write hook refuses")
+  })
+
   // a glob that matches nothing is left as typed by bash, and stops the call in zsh, so neither writes into the root
   test.each([
     ["a redirect to a glob no entry matches", "echo x > q*", DATA],
