@@ -1,5 +1,5 @@
 import { describe, expect, setDefaultTimeout, test } from "bun:test"
-import { readFileSync, writeFileSync } from "node:fs"
+import { existsSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 
 import { SCRIPT, machine } from "./run-slot-fake"
@@ -67,4 +67,53 @@ describe("slots counts the CPU slots held or open now", () => {
     m.hold("run-slot-4", 2, "medium")
     expect(slots(m)).toEqual([0, "4\n"])
   })
+})
+
+// each subcommand the script dispatches that runs on as a bare `true` is a read: read from the script, so a new one is covered here as it lands
+const reads = [
+  ...readFileSync(SCRIPT, "utf8").matchAll(
+    /^if \[ "\$\{1:-\}" = ([a-z-]+) \]; then\n([\s\S]*?)^fi$/gm,
+  ),
+]
+  .filter(([, , body]) => /^\s*set -- .* -- true$/m.test(body ?? ""))
+  .map(([, name, body]) => {
+    const usage = (body ?? "").match(/usage: run-slot\.sh ([^"]+)"/)?.[1]?.split(" ") ?? [name]
+    const values: Record<string, string> = { "<slot>": "run-slot", "<who>": "worker-probe" }
+    return usage.map((word) => {
+      if (!word.startsWith("<")) return word
+      const value = values[word]
+      if (!value) throw new Error(`run-slot.sh ${name}: give ${word} a value in this test`)
+      return value
+    })
+  })
+
+describe("every read subcommand answers as before when the runs log holds three short true runs", () => {
+  test("the script's reads are found", () => {
+    expect(reads.map((args) => args[0])).toEqual(
+      expect.arrayContaining(["can-take", "head", "slots"]),
+    )
+    // a read written in another shape still counts here, so it fails rather than going untested
+    expect(reads).toHaveLength(
+      readFileSync(SCRIPT, "utf8").match(/set -- .*-- true\b/g)?.length ?? 0,
+    )
+  })
+
+  for (const args of reads)
+    test(`${args.join(" ")} gives its answer and adds no run to the log`, () => {
+      const answer = (short: boolean) => {
+        const m = machine()
+        m.ticket(2, "worker-m", "s2 22 2 medium")
+        if (short) threeShortTrueRuns(m)
+        const log = () =>
+          existsSync(join(m.ops, "run-slot.runs.log"))
+            ? readFileSync(join(m.ops, "run-slot.runs.log"), "utf8")
+            : ""
+        const before = log()
+        const run = Bun.spawnSync(["bash", SCRIPT, ...args], { cwd: m.root, env: m.env() })
+        return [run.exitCode, run.stdout.toString(), log() === before]
+      }
+      const short = answer(true)
+      expect(short).toEqual(answer(false))
+      expect(short[2]).toBe(true)
+    })
 })
