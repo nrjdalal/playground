@@ -115,11 +115,11 @@ Their tests are `bun run test:file tests/scripts/hooks`.
   It refuses a file tool's path in the root, `~` expanded, and a redirect into it, a group's, a subshell's, `exec`'s or a bare one included.
   It refuses any program but a reader that names the root, a path in it, a folder above it (`~/.playground`, `~`) or a glob there, links followed, in any word: the program word, an option's attached value (`-o<path>`, `--out=<path>`), a variable the call sets (`GIT_DIR=<clone>`), or the stdin xargs hands it.
   It refuses any program but a reader whose words or heredoc hold the root's path as text, whole or as seen from a folder above it the command runs in, so an interpreter's script and a commit message that names it are refused alike.
-  The readers are `cat`, `cmp`, `diff`, `echo`, `grep`, `head`, `jq`, `ls`, `printf`, `readlink`, `realpath`, `shasum`, `stat`, `tail`, `test` and `wc`;
-  `rg` with no `--pre`; `find` with no `-delete`, `-exec`, `-execdir`, `-ok`, `-okdir`, `-fls` or `-fprint` action; and git's `blame`, `cat-file`, `diff`, `grep`, `log`, `ls-files`, `rev-parse`, `show` and `status` with no `-c`, `--config-env`, `--exec-path`, `--output`, `-O`, `--open-files-in-pager`, `--ext-diff` or `--textconv`.
-  A reader run with `GIT_*`, `PAGER`, `EDITOR`, `VISUAL` or `LESSOPEN` set in the call is judged as any other program, since each makes it run one.
+  The readers are `[`, `cat`, `cmp`, `diff`, `echo`, `grep`, `head`, `jq`, `ls`, `printf`, `readlink`, `realpath`, `shasum`, `stat`, `tail`, `test` and `wc`;
+  `rg` with no `--pre`; `find` with no `-delete`, `-exec`, `-execdir`, `-ok`, `-okdir`, `-fls`, `-fprint`, `-fprint0` or `-fprintf` action; and git's `blame`, `cat-file`, `diff`, `grep`, `log`, `ls-files`, `rev-parse`, `show` and `status` with no `-c`, `--config-env`, `--exec-path`, `--output`, `-O`, `--open-files-in-pager`, `--ext-diff` or `--textconv`.
+  A reader run with `GIT_*`, `PAGER`, `EDITOR`, `VISUAL` or `LESSOPEN` set in the call is judged as any other program, since each makes it run one, and the command line such a variable or git's `-c` names is judged as a command of its own.
   It refuses any program but a reader run with the root as its folder or, for git, its tree.
-  It refuses the `playground` CLI's calls that change what a guard reads, the CLI found by where its word lands: `playground` by name or path in any case, or the checkout's `cli.ts` with or without its extension, as any word of a command, so behind any wrapper (`bun`, `npx`, `find -exec`, `arch`, `watch`).
+  It refuses the `playground` CLI's calls that change what a guard reads, the CLI found by where its word lands: `playground` by name or path in any case, or the checkout's `cli.ts` with or without its extension, as any word of a command but a reader's, so behind any wrapper (`bun`, `npx`, `find -exec`, `arch`, `watch`).
   Its words split as that command's own parse splits them (`--dry-run` and `--yes` are bare for `ext`, `--dry-run` alone for `settings`):
   `ext put <scope> list`; `ext add`, `import`, `init`, `link`, `order`, `remove`, `sync` and `unlink`, but `--dry-run` on `add`, `import` and `init`; `migrate`; `uninstall --purge`;
   and `settings set` or `reset` of a key a guard reads: `ext.links`, `ext.repos`, `factory.archiveRepo`, `factory.publicRepo`, `glm.readOnlyLoad5`, `live.branch`, `owner.names`, `paths.codeRoot`, `sessions.aliases`, `sessions.names` and `usage.keychainService`.
@@ -127,6 +127,7 @@ Their tests are `bun run test:file tests/scripts/hooks`.
   A command, verb, kind or key word it cannot read, or any such word among the words of `ext put` or `settings set` or `reset`, counts as the write.
   `ext put` of a doc, a rule or any other reviewed kind, every read, `ext score`, `accept` and `reject`, `settings set` of any other key, `settings import-jobs` and writes elsewhere in the data folder (handoffs, the roster) run.
   Its refusal names the one route: the owner types the command in Ops' pane as a `!` command, which runs without hooks; no flag, environment variable, role or note frees a call.
+  It reads every command `scripts/hooks/shell.ts` finds: one inside a `$(…)`, a `${…}` or a `$((…))`, and the script a shell, `source` or `.` reads from a process substitution or `/dev/stdin`.
   It reads a command's text, so a program whose own code writes the root (a script file run by its path, a binary) and a path it cannot read (built at run time, in a `$(…)` or a variable) pass it.
   A write to a scope's GitHub repository, which `ops:ext-sync` renders into the root, is outside its reach too; a guard on those writes is a follow-up of its own.
   It fails open, and its tests are in `bun run test:file tests/scripts/hooks/no-extensions-write.test.ts`.

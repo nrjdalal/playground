@@ -4,7 +4,7 @@ import { basename, isAbsolute, resolve } from "node:path"
 
 // `variable` names the first shell variable a text expands, so a hook can tell `"$HERDR_BIN_PATH"` from any other unknown program.
 export type Text = { reads?: Text[]; unknown?: string; value: string; variable?: string }
-export type Word = Text & { quoted: boolean }
+export type Word = Text & { proc?: Command; quoted: boolean }
 type Redirect = { body?: Text; fd: string; op: string; target?: Word }
 export type Command = {
   detached?: boolean
@@ -304,14 +304,12 @@ function walk(lx: Lexer, scope: number, nested: boolean, inherit?: Command): voi
       nest(lx, piped)
       cmd.group = true
     } else if ((c === "<" || c === ">") && src[lx.i + 1] === "(") {
-      lx.i += 2
-      nest(lx)
-      cmd.words.push({ quoted: false, ...unknown("a process substitution") })
+      cmd.words.push(procSub(lx))
     } else if (redirect) {
       lx.i += redirect[0].length
       while (src[lx.i] === " " || src[lx.i] === "\t") lx.i++
       const [, fd, op] = redirect
-      const target = word(lx)
+      const target = src.startsWith("<(", lx.i) ? procSub(lx) : word(lx)
       const entry: Redirect = { fd, op, target }
       if (op === "<<" || op === "<<-") {
         pending.push({
@@ -335,6 +333,18 @@ function walk(lx: Lexer, scope: number, nested: boolean, inherit?: Command): voi
   }
   heredocs(lx, pending, nested)
   end(";")
+}
+
+// A process substitution, carrying its last command so a shell that reads it as a script can read that command's output.
+function procSub(lx: Lexer): Word {
+  lx.i += 2
+  const from = lx.commands.length
+  nest(lx)
+  return {
+    proc: lx.commands.slice(from).at(-1),
+    quoted: false,
+    ...unknown("a process substitution"),
+  }
 }
 
 function heredocs(lx: Lexer, pending: Pending[], nested: boolean): void {
@@ -446,7 +456,9 @@ function dollar(lx: Lexer): Text {
       ? { value: lx.known[name], variable: name }
       : { ...unknown("a shell variable"), variable: name }
   if (src.startsWith("$((", lx.i)) {
-    lx.i = balanced(src, lx.i + 1, "(", ")")
+    const end = balanced(src, lx.i + 1, "(", ")")
+    inner(lx, src.slice(lx.i + 3, end - 2))
+    lx.i = end
     return unknown("an arithmetic expansion")
   }
   if (next === "(") {
@@ -458,6 +470,7 @@ function dollar(lx: Lexer): Text {
   if (next === "{") {
     const end = balanced(src, lx.i + 1, "{", "}")
     const name = /^\$\{([A-Za-z_]\w*)\}$/.exec(src.slice(lx.i, end))?.[1]
+    inner(lx, src.slice(lx.i + 2, end - 1))
     lx.i = end
     return variable(name)
   }
@@ -472,6 +485,16 @@ function dollar(lx: Lexer): Text {
   }
   lx.i++
   return { value: "$" }
+}
+
+// Lexes an expansion's own text for the substitutions in it, so their commands are read.
+function inner(lx: Lexer, src: string): void {
+  const sub = { ...lx, i: 0, src }
+  while (sub.i < src.length) {
+    const from = sub.i
+    word(sub)
+    if (sub.i === from) sub.i++
+  }
 }
 
 function balanced(src: string, from: number, open: string, close: string): number {
@@ -663,7 +686,15 @@ export async function examine(
     }
     if (builtins) verdict = await visit(cmd, parsed, here)
   } else if (SHELLS.has(name)) verdict = await shell(name, args, cmd, here, visit, builtins)
-  else if (name === "eval") {
+  else if (
+    (name === "source" || name === ".") &&
+    (args[0]?.proc || args[0]?.value === "/dev/stdin")
+  ) {
+    const script = await scriptOf(args[0], cmd, here)
+    verdict = script.unknown
+      ? await visit(cmd, parsed, here)
+      : await run(lex(script.value, env.known), here, visit, builtins)
+  } else if (name === "eval") {
     verdict = await run(lex(args.map((a) => a.value).join(" "), env.known), here, visit, builtins)
   } else verdict = await visit(cmd, parsed, here)
   await record(cmd, name, args, here)
@@ -711,13 +742,17 @@ async function shell(
   const slot = shellSlot(args, name)
   if (slot) return examine({ ...cmd, words: slot }, env, visit, builtins)
   const { inline, operand } = shellOperand(args, name)
-  if (operand) {
-    return inline ? run(lex(operand.value, env.known), subshell(env), visit, builtins) : undefined
-  }
-  const script = await stdinOf(cmd, env)
+  if (operand && inline) return run(lex(operand.value, env.known), subshell(env), visit, builtins)
+  const script = await scriptOf(operand, cmd, env)
   return script.unknown
     ? undefined
     : run(lex(script.value, env.known), subshell(env), visit, builtins)
+}
+
+// A shell's or source's script: stdin with no operand or `/dev/stdin`, a process substitution's output, else unknown.
+async function scriptOf(operand: Word | undefined, cmd: Command, env: Env): Promise<Text> {
+  if (!operand || operand.value === "/dev/stdin") return stdinOf(cmd, env)
+  return operand.proc ? outputOf(operand.proc, env) : unknown("a script file")
 }
 
 async function record(cmd: Command, name: string, args: Word[], env: Env): Promise<void> {
@@ -796,6 +831,7 @@ export async function stdinOf(cmd: Command, env: Env): Promise<Text> {
   const input = cmd.redirects.findLast(
     (r) => (r.fd === "" || r.fd === "0") && r.op.startsWith("<") && r.op !== "<&",
   )
+  if (input?.target?.proc) return outputOf(input.target.proc, env)
   if (input?.op === "<" || input?.op === "<>")
     return input.target ? readPath(input.target, env) : unknown("an input redirect")
   if (input)

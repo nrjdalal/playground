@@ -205,6 +205,31 @@ describe("a direct write into the extensions root is refused, naming the owner's
     expect(await bash(command, CHECKOUT)).toContain("no-extensions-write hook refuses")
   })
 
+  test.each([
+    ["a substitution in ${X:-…}", `echo \${X:-$(touch ${LIST})}`],
+    ["a substitution in ${X:=…}", `: \${X:=$(touch ${LIST})}`],
+    ["a substitution in ${X:+…}", `echo \${X:+$(touch ${LIST})}`],
+    ["a substitution in ${X/a/…}", `echo \${X/a/$(touch ${LIST})}`],
+    ["a substitution in ${X#…}", `echo \${X#$(touch ${LIST})}`],
+    ["a backquote in ${X:-…}", `echo \${X:-\`touch ${LIST}\`}`],
+    ["a substitution in $((…))", `echo $(($(touch ${LIST})+1))`],
+    ["rm -rf of the data folder in ${X:-…}", `echo \${X:-$(rm -rf ${DATA})}`],
+    ["the CLI in ${X:-…}", "echo ${X:-$(playground ext sync)}"],
+    ["bash reading a process substitution", `bash <(echo touch ${LIST})`],
+    ["zsh reading a process substitution", `zsh <(echo touch ${LIST})`],
+    ["source of a process substitution", `source <(echo touch ${LIST})`],
+    [". of a process substitution", `. <(echo touch ${LIST})`],
+    ["sh reading a process substitution as stdin", `sh < <(echo touch ${LIST})`],
+    ["sh -s reading a process substitution as stdin", `sh -s < <(echo touch ${LIST})`],
+    ["bash reading /dev/stdin", `bash /dev/stdin <<< 'touch ${LIST}'`],
+    ["bash reading a heredoc's process substitution", `bash <(cat <<'EOF'\ntouch ${LIST}\nEOF\n)`],
+    ["the CLI as git's pager", "GIT_PAGER='playground ext sync' git log"],
+    ["the CLI as git's -c pager", "git -c core.pager='playground ext sync' log"],
+    ["a write as PAGER", `PAGER='touch ${LIST}' git log`],
+  ])("%s", async (_, command) => {
+    expect(await bash(command)).toContain("no-extensions-write hook refuses")
+  })
+
   test("a Bash call whose cwd is already inside the root runs no writer", async () => {
     expect(await bash("node -e 'x'", SCOPE)).toContain("no-extensions-write hook refuses")
   })
@@ -255,6 +280,13 @@ describe("a read of the root, and writes elsewhere, run", () => {
     ["a glob elsewhere", "rm -rf /tmp/scratch-dir/*"],
     ["a printer naming the root", `echo ${ROOT}`],
     ["tr with a bare slash", "tr / _ < /tmp/x"],
+    ["rg naming the CLI's words", "rg playground settings"],
+    ["grep naming a gated call", `grep -rn "playground ext sync" docs`],
+    ["echo naming a gated call", "echo playground ext sync"],
+    ["a default in ${X:-…}", "echo ${X:-default}"],
+    ["bash reading a process substitution that writes elsewhere", "bash <(echo ls /tmp)"],
+    ["git log with a pager", "GIT_PAGER=cat git log"],
+    ["git -c of a name", "git -c user.name=x commit -m y"],
     [
       "the CLI's render through ext put of a doc",
       "playground ext put login doc audit-x /tmp/a.md --reason why",

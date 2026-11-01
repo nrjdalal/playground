@@ -136,6 +136,21 @@ function cliCalls(parsed: Parsed, env: Env): Word[][] {
   return words.flatMap((word, at) => (isCli(word, dirs) ? [words.slice(at + 1)] : []))
 }
 
+// The command lines a variable in RUNS or git's -c hands the command to run, each read as a command of its own.
+function runsOf(parsed: Parsed, env: Env): string[] {
+  const { args, local, name } = parsed
+  const values = [...local, ...env.vars].flatMap(([key, text]) =>
+    RUNS.test(key) && !text.unknown ? [text.value] : [],
+  )
+  if (name === "git")
+    args.forEach((word, at) => {
+      const value = args[at + 1]?.value
+      if (word.value === "-c" && value && !marked(value))
+        values.push(value.slice(value.indexOf("=") + 1))
+    })
+  return values
+}
+
 // What of a playground call changes what a guard reads, or undefined; its words split as that command's parseWords splits them, and a word the hook cannot read taken as the worst.
 function cliWrite(words: Word[]): string | undefined {
   const [command, verb, ...rest] = words.map((w) => (marked(w.value) ? undefined : w.value))
@@ -246,11 +261,20 @@ function inspect(raw: string, environment: Environment) {
         inRoot(pathOf(r.target, env)),
     )
     if (into?.target) return refuse(`a write to ${pathOf(into.target, env)}`)
-    const write = cliCalls(parsed, env).map(cliWrite).find(Boolean)
+    const reader = !!first && reads(parsed, env)
+    const write = reader ? undefined : cliCalls(parsed, env).map(cliWrite).find(Boolean)
     if (write) return refuse(write)
+    for (const line of runsOf(parsed, env)) {
+      const verdict = await run(
+        lex(line, env.known),
+        { ...env, vars: new Map([...env.vars].filter(([key]) => !RUNS.test(key))) },
+        visit,
+        true,
+      )
+      if (verdict) return verdict
+    }
     // a bare assignment or export with no command: only its redirect writes, and a variable it sets is read where a command runs with it
-    if (!first || EXPORTS.has(name)) return
-    if (reads(parsed, env)) return
+    if (!first || EXPORTS.has(name) || reader) return
     if (inRoot(env.cwd)) return refuse(`${name} run inside ${root}`)
     if (name === "git" && inRoot(gitCall(args, env).cwd)) return refuse(`git on a clone in ${root}`)
     const remover = REMOVERS.has(name)
