@@ -419,6 +419,51 @@ describe("DashboardHub", () => {
     again()
   })
 
+  // FSEvents drops change events under load (6 of 15 at load5 12.8), and a lost one left its line unsent until the session wrote again: every refresh, the 10 s safety one included, reads each open tail again from its offset
+  const opened = async (name: string) => {
+    const { born, stat } = birthtimes()
+    const path = join(dir, name)
+    writeFileSync(path, line("u-0", "there before the hub started"))
+    born(path, Date.now() - 60_000)
+    const { calls, changed, hub } = hubWith(undefined, stat)
+    const frames: DashboardFrame[] = []
+    const leave = hub.subscribe((frame) => frames.push(frame))
+    await until("the hub's first read", () => calls.length === 1)
+    calls[0]?.resolve(live([["s-tail", path]]))
+    await until("the tail's watcher", () => hub.watching === 1)
+    // a second viewer asks for a refresh, as the safety timer does every 10 s
+    const refresh = async () => {
+      const at = calls.length
+      const again = hub.subscribe(() => {})
+      await until("the next read", () => calls.length === at + 1)
+      calls[at]?.resolve(live([["s-tail", path]]))
+      return again
+    }
+    return { changed, frames, leave, path, refresh }
+  }
+
+  test("a line whose change event is lost reaches the board on the next refresh", async () => {
+    const { frames, leave, path, refresh } = await opened("lost.jsonl")
+    appendFileSync(path, line("u-1", "its change event was lost"))
+    const again = await refresh()
+    await until("the lost line", () => sentBy(frames).length === 1)
+    expect(sentBy(frames)).toEqual(["s-tail:its change event was lost"])
+    leave()
+    again()
+  })
+
+  test("a line both its change event and a refresh read is sent once", async () => {
+    const { changed, frames, leave, path, refresh } = await opened("both.jsonl")
+    appendFileSync(path, line("u-1", "read twice, sent once"))
+    changed(path)
+    const again = await refresh()
+    await until("the line", () => sentBy(frames).length === 1)
+    await sleep(UNREREAD_MS)
+    expect(sentBy(frames)).toEqual(["s-tail:read twice, sent once"])
+    leave()
+    again()
+  })
+
   test("where no creation time is kept, a transcript is new when it appears after the hub's first look", async () => {
     const stat = (path: string) => ({ birthtimeMs: 0, size: statSync(path).size })
     const { calls, hub } = hubWith(undefined, stat)
