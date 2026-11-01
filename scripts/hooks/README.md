@@ -282,7 +282,7 @@ Their tests are `bun run test:file tests/scripts/hooks`.
 
 ## no-release-comment
 
-- ALWAYS: In every comment and review body on a repo of the owner's account, this one included, write "ship" or "publish step" where "release" (any case) would go: on 12 of them an owner comment holding the word publishes to npm, and gh and the GitHub MCP post as the owner.
+- ALWAYS: In every comment and review body on a repo whose owner `release-owners.json` lists, write "ship" or "publish step" where "release" (any case) would go: there an owner comment holding the word publishes to npm, and gh and the GitHub MCP post as the owner.
   A session run from this repo has the PreToolUse hook `scripts/hooks/no-release-comment.ts`, registered in both settings files, which refuses such a comment before it posts, and refuses one whose text or repository it cannot read (a GraphQL comment names no repository, so it is always checked).
   To post a body it can read, write it with the Write tool first, then post it in a call of its own with `--body-file` naming that file by its literal absolute path; it cannot read a path built from a variable or a file a heredoc with an expansion writes in the same call, and its refusal then names this recipe, as no-playground-leak's does.
   A GraphQL query and each of its fields reach it only as text written in the command or a file named by its literal absolute path, so it refuses one held in a shell variable (`Q='…'; gh api graphql -f query="$Q"`), and its refusal then names both ways.

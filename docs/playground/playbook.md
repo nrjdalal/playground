@@ -14,7 +14,7 @@ It lives in the repo rather than in one session's memory, so every session loads
 | Route a new ask, or run a lead's sweep                                                                    | `DISPATCH.md` and `SWEEP.md`                                                   |
 | Answer the owner's DM while Slack mode is on                                                              | `DISPATCH.md`'s Slack mode and `playground dm send`                            |
 | Merge a Playground PR, or release `canary` to `main`                                                      | the **gate** rule (`bun run pr:merge <n>`, `bun run pr:train`) and **release** |
-| Comment or review on one of the owner's repos                                                             | the **comments** rule                                                          |
+| Comment or review on a repo whose owner `release-owners.json` lists                                       | the **comments** rule                                                          |
 | Touch the live dashboard or the roster                                                                    | the **dashboard** and **roster** rules (`ROSTER.md`)                           |
 | Ask the owner something, or pass on his override                                                          | the **ask** and **override** rules                                             |
 | File a Linear ticket                                                                                      | the **tickets** rule                                                           |
@@ -170,7 +170,7 @@ Like the ticket guard, a hook that cannot start lets the call through, and the r
   It refuses a request for his own action the same way, such as "you need to", "please", "when you can" or "the owner, plug in the Mac", so a step only he can take goes to his Inbox too.
   A question quoted from someone else, or put to another agent, passes.
   Anything promised to him for later, and any later outcome of something he asked, reaches him as an Inbox update; chat answers only what he is asking now.
-- Every Slack link in the Inbox opens in Slack's app: `playground ask` refuses an archives-style link, and triage-and-implement's `scripts/slack-links.py` rewrites one from the org's workspace (another workspace's is named on stderr, left as it is).
+- Every Slack link in the Inbox opens in Slack's app: `playground ask` refuses an archives-style link, and an org extension's link script rewrites one from the org's workspace (another workspace's is named on stderr, left as it is).
 - Every mention in the Inbox reads as a name (@colleague, @platform-team): `playground ask` refuses Slack's raw tokens (`<@U...>`, `<!subteam^...>`, `<#C...>`, `<!here>`), and the poster resolves each name to its ID when it posts.
 - An ask that has the owner quit, restart, close or stop something says what still depends on it (the owner: "You asked me, and the factory asked me, to quit cmux and then the app was not working.
   Relay the information"): `playground ask` refuses it until it carries `checked`, one line from four checks (the ops jobs, the processes and sessions running under the target, and the Dashboard's health), `none` when nothing does.
