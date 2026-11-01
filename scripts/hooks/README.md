@@ -21,7 +21,8 @@ Their tests are `bun run test:file tests/scripts/hooks`.
 - A guard that reads a list (no-playground-leak's `playground-terms.json` and `slack-cleared.json`, no-release-comment's `release-owners.json` and spawn.sh's GLM gate's `glm-refused-sources.json`, all in core's `extensions/core/lists/`, and no-public-leak's, which only the extensions hold) loads it through `guardList` in `scripts/hooks/lists.ts` inside its check, at every call,
   and fails closed on it:
   on a machine with extensions (its data folder holds `extensions/`) the list comes from `extensions/hooks/<list>.json`, which every list write derives as the union of every scope's `lists/<list>.json` (the login's, each org's, then core's), read by `packages/settings/src/rendered.ts`, and never from this folder.
-  A root that lacks the list refuses the guarded call, naming the file and `playground ext import --from-tree extensions/core/lists`, which seeds it.
+  A root that lacks the list refuses the guarded call, naming the file and `playground ext import --from-tree extensions/core/lists`, which seeds it, for the owner to type in Ops' pane as a `!` command.
+  A factory session writes nothing in the root itself and changes no list or guard setting through the CLI: [no-extensions-write](#no-extensions-write) refuses both, so a list changes only on the owner's own command.
   With no extensions, the list is core's file; with no file either, the guard takes its empty default.
   A list file that is there but empty, malformed or missing a key refuses the guarded call, extensions or not; an explicit empty list (`[]`, or every key empty) is the owner's choice and loads.
   A broken list refuses only the calls its guard checks, so every other call runs.
@@ -92,6 +93,25 @@ Their tests are `bun run test:file tests/scripts/hooks`.
   since the environment holds tokens and the output lands in the transcript (13 Oct: a planning subagent's `env` printed this machine's GitHub and Slack tokens).
   `env VAR=x <command>`, `set -e` and `export VAR=x` run.
   It fails open, and its tests are in `bun run test:file tests/scripts/hooks` too.
+
+## no-extensions-write
+
+- A factory session changes nothing a guard reads to allow or deny a call: `scripts/hooks/no-extensions-write.ts`, registered beside no-main-checkout on Bash and the file tools (Edit, MultiEdit, NotebookEdit and Write), guards the extensions root (`extensionsDir` of the data folder) and every file under it.
+  Each guard reads its list and `policy.json` there, each scope's `lists/` and `settings.json` render into them on the next write (its `git add -A` takes a hand edit along), and a root that is gone sends the guards back to core's smaller lists.
+  It refuses a file tool's path in the root, a redirect into it, and any program but a reader that names a path in it, links followed.
+  The readers are `cat`, `cmp`, `diff`, `grep`, `head`, `jq`, `ls`, `readlink`, `realpath`, `rg`, `shasum`, `stat`, `tail`, `test` and `wc`,
+  `find` with no `-delete`, `-exec`, `-ok` or `-fprint` action, and git's `blame`, `cat-file`, `diff`, `grep`, `log`, `ls-files`, `rev-parse`, `show` and `status` with no `--output`.
+  It refuses any program but a reader run with the root as its folder or, for git, its tree.
+  It refuses `rm`, `rmdir`, `unlink`, `mv`, `rsync` or `find` naming the root's folder or one above it (`rm -rf ~/.playground`, and `mv ~/x ~/` too).
+  It refuses an interpreter (`bun`, `node`, `python3`, `perl`, `sed`, `awk` and the like) whose script or heredoc holds the root's path.
+  It refuses the `playground` CLI's calls that change what a guard reads, called by name, by path or as `bun …/playground/cli.ts`:
+  `ext put <scope> list`; `ext add`, `import`, `init`, `link`, `order`, `remove`, `sync` and `unlink`, but `--dry-run` on `add`, `import` and `init`; `migrate`; `uninstall --purge`;
+  and `settings set` or `reset` of a key a guard reads (`ext.links`, `factory.archiveRepo`, `factory.publicRepo`, `glm.readOnlyLoad5`, `owner.names`, `usage.keychainService`).
+  A command, verb, kind or key word it cannot read counts as the write.
+  `ext put` of a doc, a rule or any other reviewed kind, every read, `ext score`, `accept` and `reject`, `settings set` of any other key, `settings import-jobs` and writes elsewhere in the data folder (handoffs, the roster) run.
+  Its refusal names the one route: the owner types the command in Ops' pane as a `!` command, which runs without hooks; no flag, environment variable, role or note frees a call.
+  It reads a command's text, so a program whose own code writes the root (a script file run by its path, a binary) and a path it cannot read (built at run time, or in a `$(…)`) pass it.
+  It fails open, and its tests are in `bun run test:file tests/scripts/hooks/no-extensions-write.test.ts`.
 
 ## no-false-green
 

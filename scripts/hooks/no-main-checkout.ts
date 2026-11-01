@@ -30,7 +30,7 @@ export function mainCheckout(dir: string): string {
 }
 
 // A path with its nearest existing folder's links followed, so a write through a link into the checkout (link-skills' ~/.claude/skills) is judged where it lands.
-function real(path: string): string {
+export function real(path: string): string {
   const rest: string[] = []
   for (let dir = path; ; dir = dirname(dir)) {
     try {
@@ -43,7 +43,7 @@ function real(path: string): string {
 }
 
 // The file tools' path field
-const FILE_TOOLS: Record<string, string> = {
+export const FILE_TOOLS: Record<string, string> = {
   Edit: "file_path",
   MultiEdit: "file_path",
   NotebookEdit: "notebook_path",
@@ -119,7 +119,7 @@ export function bunCall(
 const GIT_TAKES = new Set(["-c", "--config-env", "--namespace"])
 
 // git's subcommand and its words, and the tree it acts on: the checkout a --git-dir of `<checkout>/.git` names, whose HEAD and index move, else its --work-tree, else the folder its -C options name (each relative to the one before); each counts only before the subcommand.
-function gitCall(
+export function gitCall(
   args: Word[],
   env: Env,
 ): { cwd: string | undefined; rest: string[]; sub: string | undefined } {

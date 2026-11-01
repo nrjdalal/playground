@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import { fileURLToPath } from "node:url"
 
-// The extensions as sessions read them: <data>/extensions, one git clone per scope (the user's login, each org) beside the derived policy.json and hooks/<list>.json, and core, Playground's own, read from the checkout this package runs from. Written only by the API and the CLI. The root existing is what says this machine has extensions. This file imports only node: modules, since every guard loads it at each call.
+// The extensions as sessions read them: <data>/extensions, one git clone per scope (the user's login, each org) beside the derived policy.json and hooks/<list>.json, and core, Playground's own, read from the checkout this package runs from. Written only by the API and the CLI: the no-extensions-write hook refuses a factory session's own write there, and its CLI call that changes what a guard reads. The root existing is what says this machine has extensions. This file imports only node: modules, since every guard loads it at each call.
 
 // The lists a guard reads, by the name its file takes in the root's hooks folder, A to Z; a render refuses a tree that lacks one, so no guard is left without its list.
 export const GUARD_LISTS = [
@@ -43,11 +43,11 @@ export const loginOf = (
 // Where an item lives in its scope's folder, without its extension.
 export const itemPath = (kind: string, key: string): string => `${kind}s/${key}`
 
-// How to write a root file that is missing: the guards' lists from the checkout's list files, any other from the settings that derive it, which need the login ext init writes.
+// How to write a root file that is missing: the guards' lists from the checkout's list files, any other from the settings that derive it, which need the login ext init writes; the owner types either in Ops' pane, since no-extensions-write refuses a factory session's own run.
 export const fixFor = (file: string): string =>
   file.startsWith("hooks/")
-    ? "seed the guards' lists with playground ext import --from-tree extensions/core/lists"
-    : "run playground ext init, then set a setting with playground settings set, which writes it"
+    ? "ask Ops for the owner to seed the guards' lists by typing ! playground ext import --from-tree extensions/core/lists in Ops' pane"
+    : "ask Ops for the owner to type ! playground ext init, then a setting with ! playground settings set, in Ops' pane, which writes it"
 
 export type Read =
   | { path: string; refusal?: undefined }

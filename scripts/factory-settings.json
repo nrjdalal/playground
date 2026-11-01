@@ -155,6 +155,16 @@
         ]
       },
       {
+        "matcher": "^(Bash|Edit|MultiEdit|NotebookEdit|Write)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "R=\"${PLAYGROUND_REPO}\"; [ -n \"$R\" ] || { g=\"$(git -C \"$CLAUDE_PROJECT_DIR\" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)\" && R=\"$(dirname \"$g\")\"; }; [ -n \"$R\" ] && [ \"$R\" != . ] && [ -f \"$R/scripts/hooks/no-extensions-write.ts\" ] || exit 0; cd -P \"$R\" && bun --no-env-file scripts/hooks/no-extensions-write.ts",
+            "timeout": 15
+          }
+        ]
+      },
+      {
         "matcher": "^Bash$",
         "hooks": [
           {

@@ -187,6 +187,7 @@ describe("a hook that guards the factory passes a session with no factory role",
   })
   const cases: [string, object][] = [
     ["no-env-dump", bash("env")],
+    ["no-extensions-write", bash("playground ext put login list x /tmp/l.json --reason y")],
     ["no-false-green", bash("bun test x | tail")],
     // split, since tests/test_kill_by_name.py reads the repo's text for the whole name
     ["no-kill-by-name", bash("p" + "kill node")],
