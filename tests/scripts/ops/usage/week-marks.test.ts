@@ -26,7 +26,7 @@ const script = join(
 const scratch = mkdtempSync(join(tmpdir(), "ops-week-marks-"))
 afterAll(() => rmSync(scratch, { force: true, recursive: true }))
 
-// usage.accounts as a stand-in bun on PATH answers it for the settings reader beat.py runs
+// usage.accounts and clock.ownerZone as a stand-in bun on PATH answers them for the settings reader beat.py runs
 const ACCOUNTS = [{ email: "login@example.test" }, { email: "spare@example.test" }]
 
 // usage.json is read through ~/.claude/acme, a link to ~/.playground as on the Mac, and the marks and samples stay in the state folder
@@ -35,6 +35,7 @@ const setup = (
   week: number,
   fiveHour: number,
   accounts?: Record<string, { readAt: string; week: number; weekReset: number }>,
+  zone = "UTC",
 ) => {
   const home = join(scratch, name)
   mkdirSync(join(home, ".playground", "ops", "usage"), { recursive: true })
@@ -42,7 +43,7 @@ const setup = (
   mkdirSync(join(home, "bin"))
   writeFileSync(
     join(home, "bin", "bun"),
-    `#!/bin/bash\n[ "$2" = usage.accounts ] && echo '${JSON.stringify(ACCOUNTS)}'\n[ "$2" = -e ] && echo '${join(home, ".playground")}'\nexit 0\n`,
+    `#!/bin/bash\n[ "$2" = usage.accounts ] && echo '${JSON.stringify(ACCOUNTS)}'\n[ "$2" = clock.ownerZone ] && echo '${JSON.stringify(zone)}'\n[ "$2" = -e ] && echo '${join(home, ".playground")}'\nexit 0\n`,
   )
   chmodSync(join(home, "bin", "bun"), 0o755)
   const now = Date.now() / 1000
@@ -128,6 +129,36 @@ test("the 97% and 98% alerts say nothing parks and Bravo switches at 100%", () =
     expect(line).not.toMatch(/push WIP|stops now/)
   }
 })
+
+// the zone's last midnight at or before now, in seconds
+const midnight = (zone: string, now: number) => {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    hour: "numeric",
+    hourCycle: "h23",
+    minute: "numeric",
+    second: "numeric",
+    timeZone: zone,
+  }).formatToParts(new Date(now * 1000))
+  const part = (type: string) => Number(parts.find((p) => p.type === type)?.value)
+  return Math.floor(now) - (part("hour") * 3600 + part("minute") * 60 + part("second"))
+}
+
+// a sample a minute before the zone's midnight at 10% and one a minute after at 20%, so the day's spend to 50% is 30 only when the day turns at that midnight
+for (const zone of ["UTC", "Asia/Kolkata"])
+  test(`the day's spend counts from midnight in clock.ownerZone, at ${zone}`, () => {
+    const now = Date.now() / 1000
+    const home = setup(`day-${zone.replace("/", "-")}`, 50, 20, undefined, zone)
+    const start = midnight(zone, now)
+    for (const [t, week] of [
+      [start - 60, 10],
+      [start + 60, 20],
+    ])
+      appendFileSync(
+        samples(home, "week-samples.jsonl"),
+        `${JSON.stringify({ account: "login@example.test", reset: now + 86400, t, week })}\n`,
+      )
+    expect(status(home)).toContain("today 30% spent")
+  })
 
 test("a reading under every mark alerts nothing", () => {
   expect(alerts(setup("low", 40, 20))).toEqual([])

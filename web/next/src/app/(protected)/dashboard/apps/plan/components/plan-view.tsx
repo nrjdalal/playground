@@ -41,10 +41,11 @@ import {
 } from "@/components/ui/empty"
 import { Spinner } from "@/components/ui/spinner"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { useOwnerZone } from "@/hooks/use-owner-zone"
 import { appById } from "@/lib/apps"
 import { useUrlKey } from "@/lib/aside-url"
 import { useNow } from "@/lib/dashboard"
-import { fetchPlan, istTime, PLAN_QUERY_KEY } from "@/lib/plan"
+import { fetchPlan, PLAN_QUERY_KEY, zoneTime } from "@/lib/plan"
 import { fetchReport, REPORT_QUERY_KEY } from "@/lib/report"
 import { SETUP } from "@/lib/setup"
 import { relativeTime } from "@/lib/time"
@@ -146,15 +147,25 @@ function PlanSections({ now, plan }: { now: Date; plan: Plan }) {
 }
 
 // The subtitle: when the plan was groomed, or the app's description until it has read.
-const planSubtitle = (plan: Plan | null | undefined, stale: boolean, now: Date): string =>
+const planSubtitle = (
+  plan: Plan | null | undefined,
+  stale: boolean,
+  now: Date,
+  zone: string | undefined,
+): string =>
   plan
-    ? `${stale ? "Last good read, groomed" : "Groomed"} ${relativeTime(plan.generatedAt, now)}, at ${istTime(plan.generatedAt)} IST`
+    ? `${stale ? "Last good read, groomed" : "Groomed"} ${relativeTime(plan.generatedAt, now)}, at ${zoneTime(plan.generatedAt, zone)}`
     : DESCRIPTION
 
 // The subtitle on the Report tab: when the report was written, or the app's description until it has read.
-const reportSubtitle = (report: OpsReport | null | undefined, stale: boolean, now: Date): string =>
+const reportSubtitle = (
+  report: OpsReport | null | undefined,
+  stale: boolean,
+  now: Date,
+  zone: string | undefined,
+): string =>
   report
-    ? `${stale ? "Last good read, reported" : "Reported"} ${relativeTime(report.generatedAt, now)}, at ${istTime(report.generatedAt)} IST`
+    ? `${stale ? "Last good read, reported" : "Reported"} ${relativeTime(report.generatedAt, now)}, at ${zoneTime(report.generatedAt, zone)}`
     : DESCRIPTION
 
 const VIEWS = ["report", "plan", "board"] as const
@@ -217,10 +228,11 @@ export function PlanView() {
   )
   const plan = useQuery({ enabled: allowed, queryKey: PLAN_QUERY_KEY, queryFn: fetchPlan })
   const report = useQuery({ enabled: allowed, queryKey: REPORT_QUERY_KEY, queryFn: fetchReport })
+  const zone = useOwnerZone()
   const description =
     view !== "report"
-      ? planSubtitle(plan.data?.plan, plan.data?.stale ?? false, now)
-      : reportSubtitle(report.data?.report, report.data?.stale ?? false, now)
+      ? planSubtitle(plan.data?.plan, plan.data?.stale ?? false, now, zone)
+      : reportSubtitle(report.data?.report, report.data?.stale ?? false, now, zone)
   const header = <PageHeader title={TITLE} description={description} />
   if (!allowed) {
     return (

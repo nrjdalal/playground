@@ -7,7 +7,8 @@ each other account's week, keeps its own samples per account, and prints one sta
   ALERT 5h ...                     once per 5-hour window of the logged-in account, when it passes 85%
 Each other account in usage.json's `accounts` is sampled into account-samples.jsonl, and the status line adds their combined %/h. It sends nothing:
 Ops' tick relays the alerts."""
-import calendar, json, os, sys, time
+import calendar, datetime, json, os, sys, time
+from zoneinfo import ZoneInfo
 
 HERE = os.path.expanduser("~/.playground/ops/usage")  # the state folder by name, so a run by its repo path still reads the live state
 sys.path.insert(0, os.path.dirname(HERE))
@@ -53,11 +54,12 @@ spares = {a: r for a, r in (u.get("accounts") or {}).items() if a != account}
 others = {a: sample(others_samples, calendar.timegm(time.strptime(r["readAt"], "%Y-%m-%dT%H:%M:%SZ")), a, r["week"], r["weekReset"])[1] for a, r in spares.items()}
 pace = [rate, *others.values()]
 combined = f"; combined {'?' if None in pace else f'{sum(pace):.1f}'}%/h across {len(pace)} accounts" if others else ""
-# the IST day: 18:30Z to 18:30Z
-day_start = now - ((now - 18.5 * 3600) % 86400)
+# the owner's day, midnight to midnight in clock.ownerZone
+midnight = datetime.datetime.fromtimestamp(now, ZoneInfo(setting("clock.ownerZone"))).replace(hour=0, minute=0, second=0, microsecond=0)
+day_start, day_end = midnight.timestamp(), (midnight + datetime.timedelta(days=1)).timestamp()
 today = [r for r in rows if r["t"] >= day_start]
 spent = used - today[0]["week"] if today else 0.0
-projected = spent + (rate or 0) * (day_start + 86400 - now) / 3600
+projected = spent + (rate or 0) * (day_end - now) / 3600
 sent_path = os.path.join(HERE, "marks-sent.json")
 try:
     sent = json.load(open(sent_path))
