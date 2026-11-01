@@ -377,6 +377,8 @@ const ANY_GH_WRITES = new Map<string, Spec>([
   ["release delete", spec([], [])],
   ["release upload", spec([], [])],
 ])
+// gh api fills these from the checkout's repository.
+const PLACEHOLDER = /^(?::owner|:repo|\{owner\}|\{repo\})$/
 const GH_STATE = new Set(["config set", "repo clone", "repo fork", "repo set-default"])
 const GIT_CONFIG_PATH = /(?:^|\/)\.git(?:\/|$)|\.gitconfig|(?:^|\/)git\/config$/
 const CONFIG_WRITE =
@@ -745,10 +747,11 @@ async function api(
   const value = endpoint.value
   const host = hostTarget(value)
   if (host) return judge(`gh api ${host.label}`, host, texts, env, extras)
-  const path = value
+  const typed = value
     .replace(/^https?:\/\/[^/]+/i, "")
     .replace(/^\/+/, "")
     .replace(/^api\/v3\//, "")
+  const path = policy.anyWrite ? dotless(typed) : typed
   const repo = /^repos\/([^/]+)\/([^/]+)/.exec(path)
   const org = /^orgs\/([^/]+)/.exec(path)
   const what = `gh api ${path.split("?")[0]}`
@@ -761,6 +764,14 @@ async function api(
     return judge(what, { label: "a repository named only by its id", where: "unknown" }, [], env)
   let candidates: (Repo | undefined)[]
   if (fromXargs(endpoint, xargs)) candidates = [undefined]
+  else if (policy.anyWrite && repo && (PLACEHOLDER.test(repo[1]) || PLACEHOLDER.test(repo[2])))
+    candidates = implicit(env, local).map(
+      (r) =>
+        r && {
+          owner: PLACEHOLDER.test(repo[1]) ? r.owner : repo[1],
+          repo: PLACEHOLDER.test(repo[2]) ? r.repo : repo[2],
+        },
+    )
   else if (repo?.[1] === "{owner}") candidates = implicit(env, local)
   else if (repo) candidates = [marked(repo[0]) ? undefined : { owner: repo[1], repo: repo[2] }]
   else if (org) candidates = [marked(org[0]) ? undefined : { owner: org[1], repo: "*" }]
@@ -783,7 +794,7 @@ async function apiDestination(
   const has = (key: string) => fields.some((f) => f.key === key)
   const repo = /^repos\/([^/]+)\/([^/]+)(?:\/(forks|generate|transfer))?$/.exec(route)
   const org = /^orgs\/([^/]+)\/repos$/.exec(route)
-  const fixed = (owner: string) => (owner === "{owner}" || marked(owner) ? "*" : owner)
+  const fixed = (owner: string) => (PLACEHOLDER.test(owner) || marked(owner) ? "*" : owner)
   // A part is a field the call sends, by its key, or a literal owner or name.
   type Part = { key: string } | { value: string }
   const key = (k: string): Part => ({ key: k })
@@ -793,9 +804,10 @@ async function apiDestination(
     dest = [lit(fixed(repo[1])), key("name")]
   else if (method !== "POST") return
   else if (repo?.[3] === "generate") dest = [has("owner") ? key("owner") : lit("*"), key("name")]
-  else if (repo?.[3] === "transfer")
+  else if (repo?.[3] === "transfer") {
+    if (!has("new_name") && PLACEHOLDER.test(repo[2])) return destination(what)
     dest = [key("new_owner"), has("new_name") ? key("new_name") : lit(repo[2])]
-  else if (repo?.[3] === "forks" && has("name"))
+  } else if (repo?.[3] === "forks" && has("name"))
     dest = [has("organization") ? key("organization") : lit("*"), key("name")]
   else if (route === "user/repos") dest = [lit("*"), key("name")]
   else if (org) dest = [lit(fixed(org[1])), key("name")]
@@ -808,6 +820,18 @@ async function apiDestination(
     return read && !read.unknown && !marked(read.value) ? read.value : undefined
   }
   return destination(what, await value(dest[0]), await value(dest[1]))
+}
+
+// A path with its dot segments resolved and empty ones dropped, as a URL reader resolves them, so repos/x/../<owner>/<name> is read where it lands.
+function dotless(path: string): string {
+  const [route, ...query] = path.split(/(?=[?#])/)
+  const kept: string[] = []
+  for (const segment of route.split("/")) {
+    const plain = segment.toLowerCase().replaceAll("%2e", ".")
+    if (plain === "..") kept.pop()
+    else if (plain !== "." && plain !== "") kept.push(segment)
+  }
+  return [kept.join("/"), ...query].join("")
 }
 
 // An issue, label or pull request route, but a pull request's merge or branch update, with no dot segment or escape that could step past it; under anyWrite it is conversation, which passes.
@@ -836,6 +860,17 @@ async function curl(
 ): Promise<string | undefined> {
   const { flags, positionals } = parseFlags(args, CURL_TAKES)
   const urls = curlUrls(flags, positionals)
+  const globs = !flags.some((f) => f.name === "-g" || f.name === "--globoff")
+  // A Host header, --connect-to, --request-target or --resolve beside a word naming GitHub sends the request somewhere its URL does not name.
+  const redirect = args.some(
+    (a, i) =>
+      /^--(?:connect-to|request-target|resolve)(?:=|$)/.test(a.value) ||
+      ((a.value === "-H" || a.value === "--header") &&
+        /^\s*host\s*:/i.test(args[i + 1]?.value ?? "")) ||
+      /^(?:-H|--header=)\s*host\s*:/i.test(a.value),
+  )
+  if (policy.anyWrite && redirect && args.some((a) => /github/i.test(a.value)))
+    return judge("curl", { label: "a host the call redirects to", where: "unknown" }, [], env)
   const targets = urls.map((u): Target => {
     const value = visible(u.value)
     if (u.unknown || u.reads?.length || value.includes(UNKNOWN) || fromXargs(u, xargs))
@@ -844,26 +879,14 @@ async function curl(
     const url = /^[a-z][a-z\d+.-]*:\/\//i.test(value) ? value : `http://${value}`
     const host = hostTarget(url)
     if (host) return host
+    if (policy.anyWrite) return curlTarget(url, globs)
     if (/^https?:\/\/api\.github\.com(?::\d+)?\/graphql(?:[/?#]|$)/i.test(url))
       return {
         byText: true,
         label: "a repository named only by a GraphQL node id",
         where: "unknown",
       }
-    if (policy.anyWrite) {
-      if (/^https?:\/\/api\.github\.com(?::\d+)?\/repositories\//i.test(url))
-        return { label: "a repository named only by its id", where: "unknown" }
-      const web =
-        /^https?:\/\/(?:[^/@]+@)?github\.com(?::\d+)?\/([^/?#]+)\/([^/?#]+?)(?:\.git)?(?:[/?#]|$)/i.exec(
-          url,
-        )
-      if (web) return decide([{ owner: web[1], repo: web[2] }])
-    }
-    const port = policy.anyWrite ? "(?::\\d+)?" : ""
-    const repo = new RegExp(
-      `api\\.github\\.com${port}\\/repos\\/([^/\\s]+)\\/([^/\\s?#]+)`,
-      "i",
-    ).exec(value)
+    const repo = /api\.github\.com\/repos\/([^/\s]+)\/([^/\s?#]+)/i.exec(value)
     return repo ? decide([{ owner: repo[1], repo: repo[2] }]) : { label: "", where: "other" }
   })
   const target =
@@ -888,6 +911,37 @@ async function curl(
     env,
     urls,
   )
+}
+
+// Under anyWrite, where a curl URL lands as curl sends it: its host and path read as a URL reads them, dot segments resolved; a glob curl would expand on a GitHub host, or a URL naming GitHub that does not parse, cannot be placed.
+function curlTarget(url: string, globs: boolean): Target {
+  const cannot: Target = { label: "a URL the hook cannot place", where: "unknown" }
+  const other: Target = { label: "", where: "other" }
+  const host = /^[a-z][a-z\d+.-]*:\/\/(?:[^@/?#]*@)?(\[[^\]]*\]|[^/?#:]*)/i.exec(url)?.[1] ?? ""
+  if (globs && /[{[]/.test(host) && !/^\[[\da-f:.]+\]$/i.test(host)) return cannot
+  let parsed: URL
+  try {
+    parsed = new URL(url)
+  } catch {
+    return /github/i.test(url) ? cannot : other
+  }
+  const name = parsed.hostname.toLowerCase().replace(/\.$/, "")
+  if (!/(?:^|\.)github\.com$/.test(name)) return other
+  if (globs && /[{[]/.test(url)) return cannot
+  const [first, second, third] = parsed.pathname.split("/").filter(Boolean)
+  if (name === "api.github.com" || name === "uploads.github.com") {
+    if (first === "graphql")
+      return {
+        byText: true,
+        label: "a repository named only by a GraphQL node id",
+        where: "unknown",
+      }
+    if (first === "repositories")
+      return { label: "a repository named only by its id", where: "unknown" }
+    return first === "repos" && second && third ? decide([{ owner: second, repo: third }]) : other
+  }
+  if (name !== "github.com" && name !== "www.github.com") return other
+  return first && second ? decide([{ owner: first, repo: second.replace(/\.git$/i, "") }]) : other
 }
 
 // A Slack MCP post to a cleared conversation, its channel and text read at `at`: "" when it passes, why it is refused when a signed conversation's post is not signed, or undefined when it names a conversation not cleared (or, `signedOnly`, one with no signature) or another destination, to be judged as any write to a guarded org.
@@ -1058,18 +1112,32 @@ function pushTarget(remote: Word | undefined, dir: string | undefined): Target {
   }
   const urls = (name: string) =>
     lines(["remote", "get-url", "--push", "--all", name])?.map(placeUrl)
+  const rules = () => lines(["config", "--get-regexp", "^url\\..*\\.(push)?insteadof$"]) ?? []
+  // A literal URL, unknown when an insteadOf or pushInsteadOf rule's prefix matches it.
+  const literal = (url: string) => {
+    const rewritten = rules().some((line) => {
+      const prefix = line.slice(line.indexOf(" ") + 1)
+      return line.includes(" ") && prefix !== "" && url.startsWith(prefix)
+    })
+    return rewritten ? undefined : placeUrl(url)
+  }
   if (!remote) {
     const names = lines(["remote"])
-    return decide(names ? names.flatMap((name) => urls(name) ?? [undefined]) : [undefined])
+    // remote.pushDefault, branch.<b>.pushRemote and branch.<b>.remote pick the push's remote, and each may hold a URL.
+    const keys = lines([
+      "config",
+      "--get-regexp",
+      "^(remote\\.pushdefault|branch\\..*\\.(pushremote|remote))$",
+    ])
+    const picked = (keys ?? [])
+      .map((line) => line.slice(line.indexOf(" ") + 1))
+      .filter((value) => value !== "" && value !== "." && !names?.includes(value))
+    return decide([
+      ...(names ? names.flatMap((name) => urls(name) ?? [undefined]) : [undefined]),
+      ...picked.map(literal),
+    ])
   }
-  const configured = urls(remote.value)
-  if (configured) return decide(configured)
-  const rules = lines(["config", "--get-regexp", "^url\\..*\\.(push)?insteadof$"]) ?? []
-  const rewritten = rules.some((line) => {
-    const prefix = line.slice(line.indexOf(" ") + 1)
-    return line.includes(" ") && prefix !== "" && remote.value.startsWith(prefix)
-  })
-  return decide([rewritten ? undefined : placeUrl(remote.value)])
+  return decide(urls(remote.value) ?? [literal(remote.value)])
 }
 
 // git push publishes the names of the refs it pushes and the messages of every commit the remote does not hold yet.

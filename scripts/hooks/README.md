@@ -116,7 +116,9 @@ Their tests are `bun run test:file tests/scripts/hooks`.
   It reads every write through no-playground-leak's engine with `anyWrite` set (`inspectAs`), which refuses a write to one of them whatever its text, and a write whose target it cannot place.
   Those writes are a `git push`, `send-pack` or `subtree push`, a git alias expanded from its config, a gh or `gh api` write, a curl to one on `api.github.com` or `github.com` (a read included), and a GitHub MCP write.
   Its gh writes include a DELETE, `gh pr merge` and `update-branch`, the publish-step group's `create`, `delete`, `edit` and `upload`, and `gh repo edit`, `rename`, `delete`, `archive`, `unarchive` and `sync <destination>`.
-  It reads a push's target as git does: each push URL of the remote named, `--repo`'s value when none is named, else each push URL of every remote.
+  It reads a push's target as git does: each push URL of the remote named, `--repo`'s value when none is named, else each push URL of every remote and each URL `remote.pushDefault`, `branch.<b>.pushRemote` or `branch.<b>.remote` holds.
+  It reads a `gh api` endpoint and a curl URL where the request lands: dot segments resolved, `{owner}`, `{repo}`, `:owner` and `:repo` filled from the checkout, and curl's host and path read as a URL reads them, `uploads.github.com` with `api.github.com`.
+  It cannot place, so refuses, a curl glob (`{…}`, `[…]`) on a GitHub host without `-g`, and a curl beside a word naming GitHub with a `Host` header, `--connect-to`, `--request-target` or `--resolve`.
   It reads that state when it checks the call, so after an earlier command in the same call changes it, it cannot place a push, an alias run or a write gh places by the checkout, and refuses it with the fix: run the setup in a call of its own first.
   Those changes are a `git config` write, `git remote add`, `remove`, `rename`, `rm` or `set-url`, `git clone`, `init` or `submodule`, `gh repo clone`, `fork` or `set-default`, `gh config set`, and any other command naming a `.git` path or a git config file.
   A config file it reaches only through `include.path` or a link, written in the same call by a command that names neither a `.git` path nor a git config file, is outside its reach.
@@ -128,7 +130,7 @@ Their tests are `bun run test:file tests/scripts/hooks`.
   Its refusal names the one route: the owner types the command in Ops' pane as a `!` command; no flag, environment variable, role or note frees a call.
   It fails closed, as the leak guards do and only on a call that may write, when `policy.json` does not read or no login names the default repositories.
   Outside its reach are a program whose own code pushes or calls the API (a script by its path, `bun run`, a binary), a fork that keeps its source's name, and a gh alias set before it.
-  A GraphQL mutation, which names its repository by node id, and a curl whose URL the run computes are refused only when their text names one of the repositories; a URL in a curl config file (`-K`, `~/.curlrc`) is unread.
+  A GraphQL mutation, which names its repository by node id, and a curl whose URL the run computes are refused only when their text names one of the repositories; a URL in a curl config file (`-K`, `~/.curlrc`) and a redirect a server answers with (`-L`) are unread.
   An `ext.order` name with no clone and no `ext.repos` entry is not guarded, and the sync does not push it either.
   Its tests are `bun run test:file tests/scripts/hooks/no-extension-repo-write.test.ts`.
 

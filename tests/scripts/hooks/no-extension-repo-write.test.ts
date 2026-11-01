@@ -58,6 +58,15 @@ beforeAll(async () => {
   dirs.local = await clone("local", ["origin", join(scratch, "work", "ext")])
   dirs.named = await clone("playground-notes")
   await mkdir(join(dirs.other, "empty"))
+  dirs.pushdefault = await clone("pushdefault", ["origin", OTHER])
+  git(dirs.pushdefault, "config", "remote.pushDefault", `${EXT}.git`)
+  dirs.pushremote = await clone("pushremote", ["origin", OTHER])
+  git(dirs.pushremote, "config", "branch.main.pushRemote", NOTES)
+  dirs.branchremote = await clone("branchremote", ["origin", OTHER])
+  git(dirs.branchremote, "config", "branch.main.remote", EXT)
+  dirs.pdname = await clone("pdname", ["origin", OTHER])
+  git(dirs.pdname, "config", "remote.pushDefault", "origin")
+  dirs.zed = await clone("zed", ["origin", "https://github.com/zed/acme-skills.git"])
   dirs.alias = await clone("alias", ["origin", OTHER])
   git(dirs.alias, "config", "alias.p", "push")
   git(dirs.alias, "config", "alias.pp", "p --force")
@@ -231,6 +240,59 @@ describe("a push resolves its target the way git does, and one it cannot place i
       ],
       ["curl with a port", `curl -X PUT -d x https://api.github.com:443/${A}/contents/x`],
       ["gh pr update-branch", "gh pr update-branch 1 -R quillco/acme-skills"],
+      ["a bare push to remote.pushDefault's URL", "git push", "pushdefault"],
+      ["a bare push to branch.<b>.pushRemote's URL", "git push", "pushremote"],
+      ["a bare push to branch.<b>.remote's URL", "git push", "branchremote"],
+      [
+        "gh api :owner/:repo from the clone",
+        "gh api -X PUT repos/:owner/:repo/contents/x -f message=m",
+        "ext",
+      ],
+      [
+        "gh api {repo} under a literal owner",
+        "gh api -X PUT repos/quillco/{repo}/contents/x -f message=m",
+        "zed",
+      ],
+      [
+        "gh api past a dot segment",
+        "gh api -X PUT repos/x/../quillco/acme-skills/contents/x -f message=m",
+      ],
+      [
+        "curl past a dot segment",
+        "curl -X PUT -d x https://api.github.com/x/../repos/quillco/acme-skills/contents/x",
+      ],
+      [
+        "curl past an escaped dot segment",
+        "curl -X PUT -d x https://api.github.com/x/%2e%2e/repos/quillco/acme-skills/contents/x",
+      ],
+      [
+        "curl to github.com past a dot segment",
+        `curl -X POST --data-binary @p https://github.com/x/../quillco/acme-skills.git/git-receive-pack`,
+      ],
+      [
+        "curl with a {} glob",
+        "curl -X PUT -d x 'https://api.github.com/repos/quillco/{acme-skills}/contents/x'",
+      ],
+      [
+        "curl with a [] glob",
+        "curl -X PUT -d x 'https://api.github.com/repos/quillco/acme-skill[s-s]/contents/x'",
+      ],
+      [
+        "curl with a glob in the host",
+        "curl -X PUT -d x 'https://api.github.{com}/repos/quillco/acme-skills/contents/x'",
+      ],
+      [
+        "curl with --request-target",
+        "curl -X PUT -d x --request-target /repos/quillco/acme-skills/contents/x https://api.github.com/",
+      ],
+      [
+        "curl with a Host header",
+        `curl -X PUT -d x -H "Host: api.github.com" https://140.82.112.6/repos/quillco/acme-skills/contents/x`,
+      ],
+      [
+        "curl to uploads.github.com",
+        "curl -X POST --data-binary @a https://uploads.github.com/repos/quillco/acme-skills/assets",
+      ],
       ["gh's publish-step delete", "gh release delete v1 -y --cleanup-tag -R quillco/acme-skills"],
       ["gh's publish-step upload", "gh release upload v1 x.tgz -R quillco/acme-skills"],
     ]),
@@ -388,6 +450,18 @@ describe("what it lets through", () => {
       ["git config list, then a push", "git config list && git push origin feature"],
       ["a remote listed, then a push", "git remote -v && git push origin feature"],
       ["a push, then a config write", "git push origin feature && git config x.y z"],
+      ["a bare push when remote.pushDefault names a remote", "git push", "pdname"],
+      [
+        "gh api :owner/:repo on issues from the clone",
+        "gh api -X POST repos/:owner/:repo/issues -f title=x",
+        "ext",
+      ],
+      ["curl with a glob to another host", "curl -X POST -d x 'http://localhost:3000/x/{a,b}'"],
+      ["curl to a loopback IPv6 address", "curl -X POST -d x 'http://[::1]:3000/x'"],
+      [
+        "curl with a {} glob and -g",
+        "curl -g -X POST -d x 'https://api.github.com/repos/acme/tools/issues/{1}'",
+      ],
       ["a push by URL to another repository", `git push ${OTHER} feature`],
       ["a literal URL no rewrite matches", `git push ${OTHER} main`, "instead"],
       ["a commit in another clone", "git commit -m 'Fix the export'"],
