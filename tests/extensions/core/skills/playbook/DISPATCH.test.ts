@@ -44,6 +44,9 @@ describe("DISPATCH.md", () => {
     expect(lines[at + 2]).toContain(
       "A sync is done when each PR in the stack has its merged head pushed and its reviewer has posted a verdict at that head",
     )
+    expect(lines[at + 3]).toContain(
+      "The owner's try is the owner's own run of a stack before any PR in it merges",
+    )
   })
 
   test("a lane's item aims at about 1,000 changed lines, a bigger diff splitting off canary, with its measured case", async () => {
