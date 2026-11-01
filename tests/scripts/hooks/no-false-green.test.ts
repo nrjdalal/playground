@@ -126,6 +126,10 @@ describe("a run whose exit status is the test's own runs", () => {
     { $label: "bun --no-env-file test", command: "bun --no-env-file test x" },
     { $label: "a hook script", command: "bun --no-env-file scripts/hooks/no-stash.ts" },
     { $label: "run-slot, no pipe", command: `${slot} bun run --cwd /w test` },
+    {
+      $label: "a test run piped into run-slot with no --, which runs nothing",
+      command: "bun test x | ~/.playground/ops/run-slot.sh worker-x",
+    },
     { $label: "pipefail first", command: "set -o pipefail; bun test x | tail -5" },
     {
       $label: "PIPESTATUS after",
