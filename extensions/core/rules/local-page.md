@@ -1,7 +1,6 @@
 Everything you make for the owner (a page, a report, a doc, a mock) reaches the owner as an Inbox card, shown in the Inbox's viewer and never opened on the owner's screen; a page is kept with `playground page` first, never a claude.ai artifact or a deploy.
 A window that opens on its own takes the owner's screen mid-task, while the Inbox holds each file until the owner reads it, and its viewer shows an `html`, `doc`, `code`, `pdf` or `image` attachment in place.
 A page is a local HTML file in your scratchpad: keep it with `playground page`, which prints `Kept <path>`, then post that kept path as the card's `html` attachment with `bun run ask new`, by the to-inbox skill and `.agents/dashboard/asks.md`: a read-only update for a page the owner only looks at, an ask when it needs an answer.
-`bun run ask` takes an `html` attachment only from the data folder, which holds the previews folder `playground page` writes, so the kept path is the one to attach.
 An artifact publishes under whichever account the session signed in with, which the owner may not reach, so the factory's settings deny the `Artifact` tool to every session.
 `playground page` keeps a copy and records who made it and for whom, so it stays on both sessions' Pages tabs; your brief names the session you report to.
 Every page shows its version in its header ("Version N · <date> · <kind>"), N counting its publishes from 1, and a copy made to share outside drops the label.
