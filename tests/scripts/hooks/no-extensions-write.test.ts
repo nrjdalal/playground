@@ -110,6 +110,9 @@ describe("a direct write into the extensions root is refused, naming the owner's
     ["git -c on a read", `git -C ${SCOPE} -c core.fsmonitor=/tmp/w.sh status`],
     ["GIT_PAGER on a read", `GIT_PAGER=/tmp/w.sh git -C ${SCOPE} log`],
     ["an exported PAGER before a read", `export PAGER=/tmp/w.sh; git -C ${SCOPE} log`],
+    ["a brace word naming the root", `rm -rf ${DATA}/{extensions,x}`],
+    ["GIT_DIR set to a scope's clone", `GIT_DIR=${SCOPE}/.git git reset --hard`],
+    ["GIT_WORK_TREE exported to a scope", `export GIT_WORK_TREE=${SCOPE}; git checkout -- .`],
     ["mv of the data folder above it", `mv ${DATA} /tmp/old-data`],
     ["rsync above it", `rsync -a --delete /tmp/empty/ ${DATA}/`],
     ["sed -i of a list", `sed -i '' 's/Slack//' ${LIST}`],
@@ -140,6 +143,26 @@ describe("a direct write into the extensions root is refused, naming the owner's
     ["through env", `env FOO=1 rm ${LIST}`],
   ])("%s", async (_, command) => {
     const reason = await bash(command)
+    expect(reason).toContain("no-extensions-write hook refuses")
+  })
+
+  test("a script naming the root relative to a cwd above it", async () => {
+    const reason = await bash(
+      `python3.15 -c "open('.playground/extensions/hooks/a.json','w')"`,
+      HOME,
+    )
+    expect(reason).toContain("no-extensions-write hook refuses")
+  })
+
+  test("a heredoc naming the root relative to a cwd above it", async () => {
+    const reason = await bash("python3 - <<'EOF'\nopen('extensions/policy.json','w')\nEOF", DATA)
+    expect(reason).toContain("no-extensions-write hook refuses")
+  })
+
+  test("the CLI behind env -S", async () => {
+    const reason = await bash(
+      `env -S 'bun ${CLI_DIR}/cli.ts' settings set owner.names x --reason r`,
+    )
     expect(reason).toContain("no-extensions-write hook refuses")
   })
 

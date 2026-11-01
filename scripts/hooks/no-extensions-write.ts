@@ -210,15 +210,22 @@ function inspect(raw: string, environment: Environment) {
   const { command } = input
   if (typeof command !== "string") return
   // What a word of a program that is no reader names: a path in the root, a folder above it, a glob there, or the root's path in its text.
+  // the root's path from a cwd above it, which a script may name it by
+  const relative = (env: Env) =>
+    env.cwd && above(env.cwd, false) ? root.slice(real(env.cwd).length + 1) : undefined
+  const holds = (value: string, env: Env) => {
+    const near = relative(env)
+    return value.includes(needle) || (!!near && value.includes(near))
+  }
   const names = (word: Word, env: Env, remover: boolean): string | undefined => {
     for (const text of texts(word)) {
-      if (text.value.includes(needle)) return `${root} in its text`
+      if (holds(text.value, env)) return `${root} in its text`
       const path = pathOf(text, env)
       if (inRoot(path)) return path
       if (above(path, remover)) return `${path}, which holds ${root}`
       const glob = GLOB.exec(text.value)
       if (glob && !marked(text.value)) {
-        const dir = pathOf({ ...text, value: `${text.value.slice(0, glob.index)}x` }, env)
+        const dir = pathOf({ value: `${text.value.slice(0, glob.index)}x` }, env)
         const folder = dir && dirname(dir)
         if (folder && (inRoot(folder) || above(folder, true)))
           return `${text.value}, a glob in ${folder}`
@@ -245,11 +252,15 @@ function inspect(raw: string, environment: Environment) {
     if (inRoot(env.cwd)) return refuse(`${name} run inside ${root}`)
     if (name === "git" && inRoot(gitCall(args, env).cwd)) return refuse(`git on a clone in ${root}`)
     const remover = REMOVERS.has(name)
+    for (const value of [...parsed.local.values(), ...env.vars.values()]) {
+      const named = names({ ...value, quoted: false }, env, remover)
+      if (named) return refuse(`${name} with a variable on ${named}`)
+    }
     for (const word of first ? [first, ...args] : args) {
       const named = names(word, env, remover)
       if (named) return refuse(`${name} on ${named}`)
     }
-    if (cmd.redirects.some((r) => r.body?.value.includes(needle)))
+    if (cmd.redirects.some((r) => r.body && holds(r.body.value, env)))
       return refuse(`${name} with a script that names ${root}`)
     if (xargs) {
       const stdin = await stdinOf(cmd, env)

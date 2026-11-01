@@ -542,7 +542,7 @@ export type Parsed = {
 }
 
 export function parse(cmd: Command): Parsed {
-  const { words } = cmd
+  let { words } = cmd
   const local = new Map<string, Text>()
   const assign = (w: Word) => {
     const eq = w.value.indexOf("=")
@@ -566,7 +566,14 @@ export function parse(cmd: Command): Parsed {
     while (k < words.length) {
       const v = words[k].value
       if (ASSIGN.test(v)) assign(words[k++])
-      else if (wrapper === "env" && (v === "-C" || v === "--chdir")) {
+      // env -S splits its one string into the words it runs
+      else if (wrapper === "env" && (v === "-S" || v === "--split-string") && words[k + 1]) {
+        const split = words[k + 1].value
+          .split(/\s+/)
+          .filter(Boolean)
+          .map((value) => ({ quoted: false, value }))
+        words = [...words.slice(0, k), ...split, ...words.slice(k + 2)]
+      } else if (wrapper === "env" && (v === "-C" || v === "--chdir")) {
         chdir = words[k + 1]
         k += 2
       } else if (xargs && /^(?:-[IiJ]|--replace)/.test(v)) {
