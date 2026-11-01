@@ -1,0 +1,428 @@
+import { afterAll, beforeAll, describe, expect, test } from "bun:test"
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+
+import { check } from "../../../scripts/hooks/no-extension-repo-write"
+import { storeWith } from "./render-set"
+
+// Made-up values: the login quillco, the scope acme synced with quillco/acme-skills by ext.repos, and the scope notes synced with its default name, quillco/playground-notes.
+const EXT = "https://github.com/quillco/acme-skills"
+const NOTES = "git@github.com:quillco/playground-notes.git"
+const OTHER = "https://github.com/acme/tools.git"
+const A = "repos/quillco/acme-skills"
+const NOT_RUN = "none of its commands ran"
+const dirs: Record<string, string> = {}
+let scratch = ""
+let stored = ""
+
+const git = (dir: string, ...args: string[]) => {
+  const proc = Bun.spawnSync(["git", "-C", dir, ...args], { stderr: "pipe" })
+  if (proc.exitCode !== 0) throw new Error(`git ${args.join(" ")}: ${proc.stderr.toString()}`)
+}
+
+async function clone(name: string, ...remotes: [string, string][]) {
+  const dir = join(scratch, "work", name)
+  await mkdir(dir, { recursive: true })
+  git(dir, "init", "-q", "-b", "main")
+  for (const [remote, url] of remotes) git(dir, "remote", "add", remote, url)
+  return dir
+}
+
+async function store(name: string, values: Record<string, unknown>, login?: string) {
+  const data = storeWith(join(scratch, name), {}, values)
+  for (const scope of ["acme", "notes"]) {
+    await mkdir(join(data, "extensions", scope), { recursive: true })
+    git(join(data, "extensions", scope), "init", "-q")
+  }
+  if (login) await writeFile(join(data, "extensions", "login"), `${login}\n`)
+  return data
+}
+
+beforeAll(async () => {
+  scratch = await mkdtemp(join(tmpdir(), "no-extension-repo-write-"))
+  stored = await store("stored", { "ext.repos": { acme: "quillco/acme-skills" } }, "quillco")
+  git(join(stored, "extensions", "acme"), "remote", "add", "origin", `${EXT}-renamed.git`)
+  dirs.ext = await clone("ext", ["origin", `${EXT}.git`])
+  dirs.other = await clone("other", ["origin", OTHER])
+  dirs.pushurl = await clone("pushurl", ["origin", OTHER])
+  git(dirs.pushurl, "remote", "set-url", "--push", "origin", EXT)
+  dirs.multi = await clone("multi", ["origin", OTHER])
+  git(dirs.multi, "remote", "set-url", "--add", "--push", "origin", OTHER)
+  git(dirs.multi, "remote", "set-url", "--add", "--push", "origin", NOTES)
+  dirs.second = await clone("second", ["origin", OTHER], ["mirror", NOTES])
+  dirs.instead = await clone("instead", ["origin", OTHER])
+  git(dirs.instead, "config", `url.${EXT}.insteadOf`, "https://example.com/x")
+  git(dirs.instead, "config", `url.${EXT}.pushInsteadOf`, "https://example.com/y")
+  git(dirs.instead, "remote", "add", "rewritten", "https://example.com/y")
+  dirs.local = await clone("local", ["origin", join(scratch, "work", "ext")])
+  dirs.named = await clone("playground-notes")
+  dirs.alias = await clone("alias", ["origin", OTHER])
+  git(dirs.alias, "config", "alias.p", "push")
+  git(dirs.alias, "config", "alias.pp", "p --force")
+  git(dirs.alias, "config", "alias.sh", "!git push")
+  git(dirs.alias, "config", "alias.l", "log --oneline")
+})
+
+afterAll(async () => {
+  await rm(scratch, { force: true, recursive: true })
+})
+
+const env = (data: string, extra: Record<string, string> = {}) => ({
+  CLAUDE_CONFIG_DIR: scratch,
+  PLAYGROUND_DATA_DIR: data,
+  ...extra,
+})
+const bash = (command: string, cwd = dirs.other) =>
+  JSON.stringify({
+    cwd,
+    hook_event_name: "PreToolUse",
+    tool_input: { command },
+    tool_name: "Bash",
+  })
+const tool = (name: string, input: Record<string, unknown>) =>
+  JSON.stringify({
+    hook_event_name: "PreToolUse",
+    tool_input: input,
+    tool_name: `mcp__github-shared__${name}`,
+  })
+const run = (raw: string, data = stored, extra: Record<string, string> = {}) =>
+  check(raw, env(data, extra))
+const refused = async (raw: string, data = stored, extra: Record<string, string> = {}) => {
+  const reason = await run(raw, data, extra)
+  expect(reason).toContain("no-extension-repo-write hook refused")
+  return reason as string
+}
+
+// Each row: what it is, the command, and the folder it runs in.
+type Row = [string, string, string?]
+const at = (dir: string) => dirs[dir]
+// Every row as three, so bun:test hands the callback no done argument, which would turn an assertion that fails into a timeout.
+const rows = (table: Row[]): [string, string, string][] =>
+  table.map(([name, command, dir = "other"]) => [name, command, dir])
+
+const REFUSED: Row[] = [
+  ["git push by URL", `git push ${EXT} HEAD:main`],
+  ["git push by remote name in a clone", "git push origin main", "ext"],
+  ["git push with no remote in a clone", "git push", "ext"],
+  ["git push in mixed case", "git push https://github.com/QuillCo/Acme-Skills.git main"],
+  ["git push to a scope's default name", `git push ${NOTES} HEAD:main`],
+  ["git push --mirror", `git push --mirror ${EXT}`],
+  ["git push --delete", `git push --delete ${EXT} old`],
+  ["git push behind a wrapper", `env X=1 git push ${EXT} main`],
+  ["git push to a remote added in the same call", `git remote add e ${EXT} && git push e main`],
+  ["gh api PUT on contents", `gh api -X PUT ${A}/contents/x.md -f message=m -f content=eA==`],
+  ["gh api POST on git/refs", `gh api -X POST ${A}/git/refs -f ref=refs/heads/x -f sha=abc`],
+  ["gh api PATCH on a ref", `gh api -X PATCH ${A}/git/refs/heads/main -f sha=abc`],
+  ["gh api POST on merges", `gh api -X POST ${A}/merges -f base=main -f head=x`],
+  ["gh api PATCH of the repository", `gh api -X PATCH ${A} -f default_branch=x`],
+  [
+    "gh api from the clone's {owner}/{repo}",
+    "gh api -X PUT repos/{owner}/{repo}/contents/x -f message=m",
+    "ext",
+  ],
+  ["gh api DELETE on contents", `gh api -X DELETE ${A}/contents/x.md -f message=m -f sha=abc`],
+  ["gh api DELETE on a ref", `gh api -X DELETE ${A}/git/refs/heads/x`],
+  ["gh api DELETE of the repository", `gh api -X DELETE ${A}`],
+  ["gh api PUT on a pull request's merge", `gh api -X PUT ${A}/pulls/1/merge`],
+  [
+    "gh api past a conversation route by ..",
+    `gh api -X POST ${A}/issues/../git/refs -f ref=x -f sha=y`,
+  ],
+  ["gh pr merge by -R", "gh pr merge 1 -R quillco/acme-skills --squash"],
+  ["gh pr merge by URL", `gh pr merge ${EXT}/pull/3 --squash`],
+  ["gh pr merge in a clone", "gh pr merge 3 --squash", "ext"],
+  ["gh repo edit", "gh repo edit quillco/acme-skills --description x --default-branch dev"],
+  ["gh repo edit in a clone", "gh repo edit --visibility public", "ext"],
+  ["gh repo rename by -R", "gh repo rename new -R quillco/acme-skills --yes"],
+  ["gh repo rename in a clone", "gh repo rename new --yes", "ext"],
+  ["gh repo delete", "gh repo delete quillco/acme-skills --yes"],
+  ["gh repo archive", "gh repo archive quillco/acme-skills -y"],
+  ["gh repo unarchive", "gh repo unarchive quillco/playground-notes -y"],
+  ["gh repo sync to a destination", "gh repo sync quillco/acme-skills --source acme/tools"],
+  ["gh release create", "gh release create v1 -R quillco/acme-skills --notes x"],
+  ["curl PUT on contents", `curl -X PUT -d '{}' https://api.github.com/${A}/contents/x`],
+  ["curl GET of the repository", `curl https://api.github.com/${A}`],
+]
+
+describe("a write to an extension repository's git data or name is refused", () => {
+  test.each(rows(REFUSED))("%s", async (_, command, dir) => {
+    const reason = await refused(bash(command, at(dir)))
+    expect(reason).toContain(NOT_RUN)
+  })
+
+  test("its reason names the owner's route and the repository", async () => {
+    const reason = await refused(bash(`git push ${EXT} main`))
+    expect(reason).toContain("quillco/acme-skills")
+    expect(reason).toContain("as a ! command in Ops' pane")
+  })
+
+  test.each([
+    ["create_or_update_file", { content: "x", message: "m", path: "x.md" }],
+    ["push_files", { branch: "main", files: [], message: "m" }],
+    ["delete_file", { branch: "main", message: "m", path: "x.md" }],
+    ["merge_pull_request", { pullNumber: 1 }],
+    ["create_branch", { branch: "x" }],
+    ["fork_repository", {}],
+  ])("the GitHub MCP's %s", async (name, input) => {
+    await refused(tool(name, { owner: "quillco", repo: "acme-skills", ...input }))
+    await refused(tool(name, { owner: "QuillCo", repo: "playground-notes", ...input }))
+  })
+})
+
+describe("a push resolves its target the way git does, and one it cannot place is refused", () => {
+  test.each(
+    rows([
+      ["B1: a remote's push URL", "git push origin main", "pushurl"],
+      ["B1: a remote's second push URL", "git push origin main", "multi"],
+      ["B1: every remote when none is named", "git push", "second"],
+      ["B1: a remote whose URL pushInsteadOf rewrites", "git push rewritten main", "instead"],
+      ["B1: a literal URL insteadOf rewrites", "git push https://example.com/x main", "instead"],
+      [
+        "B1: a literal URL pushInsteadOf rewrites",
+        "git push https://example.com/y main",
+        "instead",
+      ],
+      ["B2: --git-dir", `git --git-dir=${"/x"}/.git push origin main`],
+      ["B2: --git-dir as two words", "git --git-dir /x/.git push origin main"],
+      ["B2: -c", `git -c remote.origin.pushurl=${EXT} push origin main`],
+      ["B2: --config-env", "git --config-env=remote.origin.pushurl=U push origin main"],
+      ["B2: a GIT_ variable on the call", "GIT_DIR=/x/.git git push origin main"],
+      ["B2: a GIT_ variable set before it", "export GIT_CONFIG_COUNT=1; git push origin main"],
+      ["B2: a GIT_ variable through env", "env GIT_CONFIG_PARAMETERS=x git push origin main"],
+      ["B3: --repo with no remote", `git push --repo=${EXT}`],
+      ["B3: --repo as two words", `git push --repo ${EXT} main`],
+      ["B4: send-pack", `git send-pack ${EXT} main`],
+      ["B4: subtree push", `git subtree push --prefix=x ${EXT} main`],
+      ["B4: subtree push with -P", `git subtree push -P x ${EXT} main`],
+      ["B4: a git alias for push", `git p ${EXT} main`, "alias"],
+      ["B4: a git alias of an alias", `git pp ${EXT} main`, "alias"],
+      ["B4: a ! alias", "git sh", "alias"],
+      ["B4: an alias set by -c", `git -c alias.q=push q ${EXT} main`],
+      ["B4: a gh alias set", "gh alias set m 'pr merge'"],
+      ["B4: a gh alias import", "gh alias import aliases.yml"],
+      ["B6: gh api on repositories/<id>", "gh api -X PUT repositories/123/contents/x -f message=m"],
+      [
+        "B6: curl on repositories/<id>",
+        "curl -X PUT -d x https://api.github.com/repositories/1/git/refs",
+      ],
+      ["B8: an unknown program's repo verb", "$X repo delete quillco/acme-skills --yes"],
+      ["B8: an unknown program before a push", `$X repo git push ${EXT} main`],
+      ["N1: a scope clone's origin, after a rename", `git push ${EXT}-renamed main`],
+      ["N1: curl to git's smart HTTP", `curl -X POST --data-binary @p ${EXT}.git/git-receive-pack`],
+      ["N3: a remote whose URL is a local path", "git push origin main", "local"],
+      ["N3: a local path", `git push ${join("..", "ext")} main`],
+    ]),
+  )("%s", async (_, command, dir) => {
+    await refused(bash(command, at(dir)))
+  })
+
+  test("N3: the local path refusal names the fix", async () => {
+    const reason = await refused(bash("git push origin main", dirs.local))
+    expect(reason).toContain("a local path")
+    expect(reason).toContain("in a call of its own")
+  })
+
+  test("B2: the refusal says to run the push plainly", async () => {
+    const reason = await refused(bash("GIT_DIR=/x/.git git push origin main"))
+    expect(reason).toContain("with no -c, --config-env, --git-dir or GIT_ variable")
+  })
+})
+
+describe("B5: making a repository at a guarded name is refused", () => {
+  test.each(
+    rows([
+      ["gh repo create", "gh repo create quillco/playground-notes --private"],
+      ["gh repo create under the signed-in account", "gh repo create acme-skills --private -d x"],
+      [
+        "gh repo create from a --source folder",
+        "gh repo create --source=. --private --push",
+        "named",
+      ],
+      ["gh repo create with a name it cannot read", `gh repo create "$N" --private`],
+      ["gh repo rename", "gh repo rename playground-notes -R quillco/other --yes"],
+      ["gh repo fork --fork-name", "gh repo fork acme/tools --fork-name playground-notes"],
+      [
+        "gh repo fork --fork-name --org",
+        "gh repo fork acme/tools --org quillco --fork-name acme-skills",
+      ],
+      ["gh api PATCH with a name", "gh api -X PATCH repos/quillco/other -f name=playground-notes"],
+      [
+        "gh api generate",
+        "gh api -X POST repos/acme/tools/generate -f owner=quillco -f name=acme-skills",
+      ],
+      [
+        "gh api transfer",
+        "gh api -X POST repos/quillco/other/transfer -f new_owner=quillco -f new_name=acme-skills",
+      ],
+      [
+        "gh api forks with a name",
+        "gh api -X POST repos/acme/tools/forks -f name=playground-notes",
+      ],
+      ["gh api user/repos", "gh api -X POST user/repos -f name=playground-notes"],
+      ["gh api orgs/<org>/repos", "gh api -X POST orgs/quillco/repos -f name=acme-skills"],
+      ["gh api with a name it cannot read", `gh api -X POST user/repos -f name="$N"`],
+    ]),
+  )("%s", async (_, command, dir) => {
+    await refused(bash(command, at(dir)))
+  })
+
+  test.each([[{ name: "playground-notes" }], [{ name: "acme-skills", organization: "quillco" }]])(
+    "the GitHub MCP's create_repository %j",
+    async (input) => {
+      await refused(tool("create_repository", input))
+    },
+  )
+
+  test.each(
+    rows([
+      ["gh repo create at another name", "gh repo create quillco/new-thing --private"],
+      [
+        "gh repo create from a template",
+        "gh repo create quillco/new-thing --template quillco/acme-skills",
+      ],
+      ["gh repo fork at another name", "gh repo fork acme/tools --fork-name tools-2"],
+      ["gh api PATCH with no name", "gh api -X PATCH repos/quillco/other -f description=x"],
+      ["gh api user/repos at another name", "gh api -X POST user/repos -f name=new-thing"],
+    ]),
+  )("%s passes", async (_, command, dir) => {
+    expect(await run(bash(command, at(dir)))).toBeUndefined()
+    expect(await run(tool("create_repository", { name: "new-thing" }))).toBeUndefined()
+  })
+})
+
+describe("what it lets through", () => {
+  test.each(
+    rows([
+      ["a push to another repository", "git push origin feature"],
+      ["a push by URL to another repository", `git push ${OTHER} feature`],
+      ["a literal URL no rewrite matches", `git push ${OTHER} main`, "instead"],
+      ["a commit in another clone", "git commit -m 'Fix the export'"],
+      ["a commit in a clone whose remote is a local path", "git commit -m x", "local"],
+      ["a GIT_ variable on a commit", "GIT_EDITOR=true git commit --amend --no-edit"],
+      ["a git alias that only reads", "git l", "alias"],
+      ["gh api GET", `gh api ${A}/contents/x.md`],
+      ["gh api GET of repositories/<id>", "gh api repositories/123"],
+      ["gh repo view", "gh repo view quillco/acme-skills"],
+      ["gh repo clone", "gh repo clone quillco/acme-skills"],
+      ["gh repo fork", "gh repo fork quillco/acme-skills --clone=false"],
+      ["gh repo sync with no destination", "gh repo sync", "ext"],
+      ["gh pr merge on another repository", "gh pr merge 1 -R acme/tools"],
+      [
+        "gh api PUT on another repository",
+        "gh api -X PUT repos/acme/tools/contents/x -f message=m",
+      ],
+      [
+        "curl to another repository",
+        "curl -X PUT -d x https://api.github.com/repos/acme/tools/contents/x",
+      ],
+      [
+        "curl to another repository on github.com",
+        "curl -X POST -d x https://github.com/acme/tools",
+      ],
+      [
+        "curl to a URL it cannot read",
+        `curl -sS -X POST -H "Origin: $WEB" "$API/api/agents/sign-in-as"`,
+      ],
+      [
+        "a GraphQL mutation that names no repository",
+        `gh api graphql -f query='mutation { mergePullRequest(input: {pullRequestId: "P_1"}) { clientMutationId } }'`,
+      ],
+      [
+        "N3: a GraphQL mutation naming a longer name",
+        `gh api graphql -f query='mutation { x(input: {repo: "quillco/acme-skills-archive"}) { y } }'`,
+      ],
+      [
+        "N3: playground ext put of a doc",
+        "playground ext put quillco doc plan-x /tmp/x.md --reason y",
+      ],
+    ]),
+  )("%s", async (_, command, dir) => {
+    expect(await run(bash(command, at(dir)))).toBeUndefined()
+  })
+
+  test("N3: a GraphQL mutation naming an extension repository is refused", async () => {
+    await refused(
+      bash(`gh api graphql -f query='mutation { x(input: {repo: "quillco/acme-skills"}) { y } }'`),
+    )
+  })
+
+  test("the GitHub MCP's reads", async () => {
+    const input = { owner: "quillco", path: "x.md", repo: "acme-skills" }
+    expect(await run(tool("get_file_contents", input))).toBeUndefined()
+  })
+})
+
+describe("B7: issue and pull request conversation on an extension repository passes", () => {
+  const R = "-R quillco/acme-skills"
+  test.each(
+    rows([
+      ["gh issue create", `gh issue create ${R} -t x -b y`],
+      ["gh issue comment", `gh issue comment 1 ${R} -b y`],
+      ["gh issue close", `gh issue close 1 ${R}`],
+      ["gh label create", `gh label create bug ${R}`],
+      ["gh pr create", `gh pr create ${R} -t x -b y -H topic`],
+      ["gh pr comment", `gh pr comment 1 ${R} -b y`],
+      ["gh pr edit", `gh pr edit 1 ${R} -t x`],
+      ["gh pr review", `gh pr review 1 ${R} --approve`],
+      ["gh pr close", `gh pr close 1 ${R}`],
+      ["gh pr reopen", `gh pr reopen 1 ${R}`],
+      ["gh issue comment in a clone", "gh issue comment 1 -b y", "ext"],
+      ["gh api on issues", `gh api -X POST ${A}/issues -f title=x`],
+      ["gh api on an issue's comments", `gh api -X POST ${A}/issues/1/comments -f body=x`],
+      ["gh api on labels", `gh api -X POST ${A}/labels -f name=x`],
+      ["gh api on pulls", `gh api -X POST ${A}/pulls -f title=x -f head=b -f base=main`],
+      ["gh api PATCH on a pull request", `gh api -X PATCH ${A}/pulls/1 -f title=x`],
+    ]),
+  )("%s", async (_, command, dir) => {
+    expect(await run(bash(command, at(dir)))).toBeUndefined()
+  })
+
+  test.each(["add_issue_comment", "issue_write", "create_pull_request", "update_pull_request"])(
+    "the GitHub MCP's %s",
+    async (name) => {
+      const input = { body: "x", owner: "quillco", repo: "acme-skills" }
+      expect(await run(tool(name, input))).toBeUndefined()
+    },
+  )
+})
+
+describe("the repositories it guards", () => {
+  test("N2: the default names under both the environment's login and the login file's", async () => {
+    const other = { PLAYGROUND_LOGIN: "zedco" }
+    await refused(bash("git push https://github.com/zedco/playground-notes main"), stored, other)
+    await refused(bash(`git push ${NOTES} main`), stored, other)
+    expect(
+      await run(bash("git push https://github.com/zedco/playground-acme main"), stored, other),
+    ).toBeUndefined()
+  })
+
+  test("a scope ext.repos names is not guarded under its default name", async () => {
+    expect(
+      await run(bash("git push https://github.com/quillco/playground-acme main")),
+    ).toBeUndefined()
+  })
+
+  test("with no extensions root every call passes", async () => {
+    const bare = join(scratch, "bare")
+    await mkdir(bare, { recursive: true })
+    for (const [, command, dir] of rows(REFUSED))
+      expect(await run(bash(command, at(dir)), bare)).toBeUndefined()
+  })
+})
+
+describe("it fails closed", () => {
+  test("a policy.json that does not parse refuses a write, and a read passes", async () => {
+    const broken = await store("broken", {}, "quillco")
+    await writeFile(join(broken, "extensions", "policy.json"), "{")
+    await refused(bash(`git push ${OTHER} main`), broken)
+    for (const read of ["ls", "cat x.md"]) expect(await run(bash(read), broken)).toBeUndefined()
+  })
+
+  test("a root with no login refuses a write, and a read passes", async () => {
+    const nameless = await store("nameless", {})
+    const reason = await refused(bash(`git push ${OTHER} main`), nameless)
+    expect(reason).toContain("playground ext init")
+    for (const read of ["ls", "cat x.md"]) expect(await run(bash(read), nameless)).toBeUndefined()
+  })
+})

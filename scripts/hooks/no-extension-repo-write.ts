@@ -1,0 +1,109 @@
+// PreToolUse hook for the factory's sessions, loaded from the factory settings file and, for a session cmux restored, the project settings, acting only for a factory session (role.ts): refuses a write that changes an extension repository's git data or name (a git push, a gh or gh api write, a curl, a GitHub MCP write), since the sync pushes each scope's clone to that repository and renders it into every session's store; issue and pull request conversation there passes.
+import "../../packages/env/src/aliases"
+import { existsSync } from "node:fs"
+import { join } from "node:path"
+
+import { dataDir } from "../../packages/env/src/data-dir"
+import { scopesIn } from "../../packages/settings/src/folder"
+import { extensionsDir, loginOf, readPolicy } from "../../packages/settings/src/rendered"
+import { remoteRepo } from "./github"
+import { type Hit, inspectAs, type Policy, refusedList } from "./no-playground-leak"
+import { fromFactory } from "./role"
+
+type Environment = Record<string, string | undefined>
+
+const GUARD = "no-extension-repo-write"
+const OWNER_ROUTE =
+  "Only the owner changes one, typing the command as a ! command in Ops' pane, so tell your lead what it should do."
+const REPO = /^[A-Za-z0-9-]+\/[A-Za-z0-9._-]+$/
+
+// The repositories the sync pushes to, lowercase: each ext.repos value, and <login>/playground-<scope> for each scope clone it does not name, under the environment's login and the login file's.
+function guardedRepos(data: string, values: Record<string, unknown>, environment: Environment) {
+  const given = values["ext.repos"]
+  const named = new Map<string, string>()
+  if (typeof given === "object" && given !== null)
+    for (const [scope, repo] of Object.entries(given))
+      if (typeof repo === "string" && REPO.test(repo)) named.set(scope, repo.toLowerCase())
+  const repos = new Set(named.values())
+  const scopes = scopesIn(data)
+  // A clone's origin, which follows a rename or transfer, since the sync pushes to the URL gh resolves.
+  for (const scope of scopes) {
+    const config = join(extensionsDir(data), scope, ".git", "config")
+    const url = Bun.spawnSync(["git", "config", "--file", config, "--get", "remote.origin.url"], {
+      stderr: "ignore",
+    })
+    const repo = remoteRepo(url.stdout.toString())
+    if (repo) repos.add(`${repo.owner}/${repo.repo}`.toLowerCase())
+  }
+  const unnamed = scopes.filter((scope) => !named.has(scope))
+  if (unnamed.length === 0) return repos
+  const logins = new Set([loginOf(data, environment)])
+  try {
+    logins.add(loginOf(data, {}))
+  } catch {}
+  for (const login of logins)
+    for (const scope of unnamed) repos.add(`${login}/playground-${scope}`.toLowerCase())
+  return repos
+}
+
+// A hit is a whole owner/name, so quillco/acme-skills-archive is not quillco/acme-skills.
+function finder(repos: Set<string>): (text: string) => Hit | undefined {
+  const names = [...repos].map((r) => r.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+  const pattern = new RegExp(`(?<![\\w.-])(?:${names.join("|")})(?:\\.git)?(?![\\w.-])`, "i")
+  return (text) => {
+    const found = pattern.exec(text)?.[0]
+    return found ? { detail: `it names ${found}`, fix: OWNER_ROUTE } : undefined
+  }
+}
+
+const policy = (repos: Set<string>): Policy => ({
+  anyWrite: true,
+  find: finder(repos),
+  git: true,
+  guard: GUARD,
+  // An owner of * is one gh picks itself, the signed-in account, so any guarded repository of that name matches.
+  guarded: (repo) => {
+    const name = repo.repo.replace(/\.git$/i, "").toLowerCase()
+    if (repo.owner !== "*") return repos.has(`${repo.owner.toLowerCase()}/${name}`)
+    return [...repos].some((guarded) => guarded.endsWith(`/${name}`))
+  },
+  hosts: false,
+  place: "an extension repository",
+  what: "a write to an extension repository",
+  why: `The sync renders each extension repository's main into every session's store. ${OWNER_ROUTE}`,
+})
+
+// Passes every call with no extensions root, since nothing is synced; fails closed, as the leak guards do, only on a call that may write, when policy.json or the login does not read.
+export async function check(
+  raw: string,
+  environment: Environment = process.env,
+): Promise<string | undefined> {
+  const data = dataDir(environment)
+  if (!existsSync(extensionsDir(data))) return
+  const read = await readPolicy(data)
+  if (read.refusal !== undefined)
+    return refusedList(
+      raw,
+      `${GUARD} hook refused this call: ${read.refusal}, then run the call again.`,
+    )
+  let repos: Set<string>
+  try {
+    repos = guardedRepos(data, read.settings.values, environment)
+  } catch (error) {
+    return refusedList(
+      raw,
+      `${GUARD} hook refused this call: ${(error as Error).message}, so it cannot name the extension repositories. ${OWNER_ROUTE}`,
+    )
+  }
+  if (repos.size === 0) return
+  return inspectAs(policy(repos), raw, environment)
+}
+
+if (import.meta.main) {
+  const raw = await Bun.stdin.text()
+  const reason = (await fromFactory(raw)) ? await check(raw) : undefined
+  if (reason) {
+    console.error(reason)
+    process.exit(2)
+  }
+}
