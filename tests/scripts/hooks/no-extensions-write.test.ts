@@ -432,6 +432,64 @@ describe("a write by ~ is judged against the home the shell expands it to", () =
   })
 })
 
+// A quoted awk program or commit message holds a space, so the hook reads it as a command line of its own too, as a shell would run it: a word that expands to nothing is dropped, a folder runs nothing, and a glob counts only where it can match the next folder down to the root.
+describe("text read as a command line judges what a shell would run", () => {
+  const real = { HOME: homedir() }
+  const at = (command: string, cwd: string) =>
+    check(JSON.stringify({ cwd, tool_input: { command }, tool_name: "Bash" }), real)
+  const homes = [homedir(), join(homedir(), ".playground")]
+  test.each([
+    ["awk matching a field to a regex", "awk '$3 ~ /runner/' /dev/null"],
+    ["awk matching a field to a string", `awk '$3 ~ "runner"' /dev/null`],
+    ["awk printing a field", "awk '{print $1}' /dev/null"],
+    ["a commit message with a scope", `git commit -m "fix(x): y"`],
+  ])("%s runs from the home and the data folder", async (_, command) => {
+    for (const cwd of homes) expect(await at(command, cwd)).toBeUndefined()
+  })
+
+  test.each([
+    [
+      "awk printing into the root",
+      `awk '{print > "${join(homedir(), ".playground", "extensions", "x")}"}' /dev/null`,
+      "a write to",
+    ],
+    ["touch in the root by ~", "touch ~/.playground/extensions/x", "touch on"],
+    ["watch removing the home", "watch 'rm -rf ~'", "rm on"],
+    ["watch removing by a glob in the data folder", "watch 'rm -rf ~/.playground/ext*'", "rm on"],
+    ["watch with an empty word ahead of rm", "watch '$3 rm -rf ~'", "rm on"],
+    ["watch running the home, its substitution removing it", "watch '~ $(rm -rf ~)'", "rm on"],
+    ["a git alias removing the home", "git -c alias.x='!rm -rf ~' x", "rm on"],
+    [
+      "a git alias running its argument on the home",
+      "git -c alias.x='!$1 ~' x rm",
+      "a program it cannot read on",
+    ],
+    [
+      "ssh's ProxyCommand touching the root",
+      "ssh -o ProxyCommand='touch ~/.playground/extensions/x' h",
+      "no-extensions-write hook refuses",
+    ],
+  ])("%s stays refused, naming its verb", async (_, command, said) => {
+    for (const cwd of homes) expect(await at(command, cwd)).toContain(said)
+  })
+
+  test.each([
+    ["a glob of the data folder", "rm -rf .pl*"],
+    ["a brace of the data folder", "rm -rf {.playground,x}"],
+    ["a zsh group of the data folder", "rm -rf (.playground|x)"],
+    ["a zsh qualifier on every folder", "rm -rf *(/)"],
+  ])("%s from the home stays refused", async (_, command) => {
+    expect(await bash(command)).toContain("no-extensions-write hook refuses")
+  })
+
+  test.each([
+    ["a brace with no pair", "rm -rf {print"],
+    ["a group that names no folder down to the root", "rm -rf fix(x):"],
+  ])("%s from the home runs", async (_, command) => {
+    expect(await bash(command)).toBeUndefined()
+  })
+})
+
 describe("a read of the root, and writes elsewhere, run", () => {
   test.each([
     ["cat of a list", `cat ${LIST}`],

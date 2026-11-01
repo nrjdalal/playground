@@ -75,6 +75,12 @@ const EXPORTS = new Set(["declare", "export", "local", "readonly", "typeset"])
 const REMOVERS = new Set(["find", "mv", "rm", "rmdir", "rsync", "unlink"])
 const DUPLICATE = /^(?:\d+|-)$/
 const GLOB = /[*?[{(]/
+// The scope of a command line a program runs (watch, ssh's ProxyCommand, a git alias), read from a word's text.
+type LineEnv = Env & { line?: true }
+// A line a program runs starts a shell with no arguments, so its positional parameters expand to nothing and the shell drops them; git alone passes an alias its arguments, which stay unknown.
+const POSITIONAL = /\$(?:[1-9@*#]|\{(?:[1-9]\d*|[@*#])\})/g
+const argless = (line: string, runner: string): string =>
+  runner === "git" ? line : line.replace(POSITIONAL, "")
 // Variables that make git or a pager run a program, so a reader with one set is judged as any other program.
 const RUNS = /^(?:EDITOR|GIT_[A-Z_]+|LESSOPEN|PAGER|VISUAL)$/
 const CLI = join("packages", "scripts", "src", "playground", "cli.ts")
@@ -222,6 +228,19 @@ function inspect(raw: string, environment: Environment) {
     const at = real(path)
     return at === sep ? remover : root.startsWith(at + sep)
   }
+  // Whether a glob's part in a folder above the root can match the next folder down to it, a zsh group read as each alternative or none, so a lone brace or a group naming no such folder is a plain word.
+  const reaches = (value: string, at: number, folder: string) => {
+    let rest = value.slice(value.lastIndexOf("/", at) + 1)
+    const alternatives = (_: string, alts: string) =>
+      `{,${alts
+        .split("|")
+        .filter((alt) => !alt.includes("/"))
+        .join(",")}}`
+    for (let was = ""; was !== rest;)
+      [was, rest] = [rest, rest.replace(/\(([^()]*)\)/g, alternatives)]
+    const down = root.slice(real(folder).length).split(sep).find(Boolean) ?? ""
+    return new Bun.Glob(rest.split("/")[0]!).match(down)
+  }
   const file = typeof tool === "string" ? input[FILE_TOOLS[tool]] : undefined
   if (typeof file === "string") {
     const expanded = /^~(?:\/|$)/.test(file) ? join(home, file.slice(1)) : file
@@ -257,7 +276,10 @@ function inspect(raw: string, environment: Environment) {
       if (glob && !marked(text.value)) {
         const dir = pathOf({ value: `${text.value.slice(0, glob.index)}x` }, env)
         const folder = dir && dirname(dir)
-        if (folder && (inRoot(folder) || above(folder, true)))
+        if (
+          folder &&
+          (inRoot(folder) || (above(folder, true) && reaches(text.value, glob.index, folder)))
+        )
           return `${text.value}, a glob in ${folder}`
       }
     }
@@ -277,6 +299,9 @@ function inspect(raw: string, environment: Environment) {
           (GLOB.test(r.target.value) && !!names(r.target, env, true))),
     )
     if (into?.target) return refuse(`a write to ${pathOf(into.target, env)}`)
+    // a line a program runs whose program is a folder runs nothing, so only its redirects, judged above, can write
+    const ran = first && (env as LineEnv).line ? pathOf(first, env) : undefined
+    if (ran && existsSync(ran) && statSync(ran).isDirectory()) return
     const reader = !!first && reads(parsed, env)
     const fed = xargs ? await stdinOf(cmd, env) : undefined
     const stdinWords: Word[] = !fed
@@ -300,24 +325,27 @@ function inspect(raw: string, environment: Environment) {
           : raw
       if (seen.has(line)) continue
       seen.add(line)
-      const verdict = await run(lex(line, env.known), { ...env, vars: new Map() }, visit, true)
+      const inner: LineEnv = { ...env, line: true, vars: new Map() }
+      const verdict = await run(lex(argless(line, name), env.known), inner, visit, true)
       if (verdict) return verdict
     }
     // a bare assignment or export with no command, or a reader: only its redirect writes, and a variable it sets is read where a command runs with it
     if (!first || EXPORTS.has(name) || reader) return
-    if (inRoot(env.cwd)) return refuse(`${name} run inside ${root}`)
+    // a program word the hook cannot read is named as such, so a refusal always names what runs
+    const verb = name && !marked(name) ? name : "a program it cannot read"
+    if (inRoot(env.cwd)) return refuse(`${verb} run inside ${root}`)
     if (name === "git" && inRoot(gitCall(args, env).cwd)) return refuse(`git on a clone in ${root}`)
     const remover = REMOVERS.has(name)
     for (const value of [...parsed.local.values(), ...env.vars.values()]) {
       const named = names({ ...value, quoted: false }, env, remover)
-      if (named) return refuse(`${name} with a variable on ${named}`)
+      if (named) return refuse(`${verb} with a variable on ${named}`)
     }
     for (const word of [first, ...args]) {
       const named = names(word, env, remover)
-      if (named) return refuse(`${name} on ${named}`)
+      if (named) return refuse(`${verb} on ${named}`)
     }
     if (cmd.redirects.some((r) => r.body && holds(r.body.value, env)))
-      return refuse(`${name} with a script that names ${root}`)
+      return refuse(`${verb} with a script that names ${root}`)
     if (fed) {
       const named =
         !fed.unknown &&
@@ -326,7 +354,7 @@ function inspect(raw: string, environment: Environment) {
           .filter(Boolean)
           .map((value) => names({ quoted: false, value }, env, remover))
           .find(Boolean)
-      if (named) return refuse(`${name} under xargs on ${named}`)
+      if (named) return refuse(`${verb} under xargs on ${named}`)
     }
   }
   const env: Env = {
