@@ -31,10 +31,30 @@ describe("VERCEL.md", () => {
     expect(step).toContain("Invalid numeric literal")
   })
 
-  test("reads an empty vercel logs as unknown and probes a preview instead", async () => {
-    const text = await read("VERCEL.md")
-    const step = text.split("\n").find((l) => l.includes("empty `vercel logs`")) ?? ""
-    expect(step).toContain("0 records")
-    expect(text).toContain("Hono probe")
+  test("reads an empty vercel logs as unknown, names the hang's cause, and probes one difference a preview", async () => {
+    const lines = (await read("VERCEL.md")).split("\n")
+    const logs = lines.find((l) => l.includes("empty `vercel logs`")) ?? ""
+    expect(logs).toContain("0 records")
+    expect(logs).toContain("already called `listen()`")
+    const probe = lines.find((l) => l.includes("Hono probe")) ?? ""
+    expect(probe).toContain(
+      "one difference a preview (an import, the export's shape, a runtime setting)",
+    )
+    const exported = lines.find((l) => l.includes("`createAdaptorServer`")) ?? ""
+    expect(exported).toContain("export it unlistened")
+    expect(exported).toContain("never `serve()`, which calls `listen()` and hangs on Vercel")
+    expect(exported).toContain("62 s")
+    const done = lines.findIndex((l) =>
+      l.includes("Done when the first preview that hangs names that difference"),
+    )
+    expect(done).toBeGreaterThan(lines.indexOf(exported))
+  })
+
+  test("dates only what a record dates: the opening says measured, and the hang step cites its probes' day", async () => {
+    const lines = (await read("VERCEL.md")).split("\n")
+    expect(lines.find((l) => l.startsWith("Three traps"))).toBe(
+      "Three traps one CLI deploy met (measured), each a step at the command it follows.",
+    )
+    expect(lines.find((l) => l.includes("`createAdaptorServer`"))).toContain("measured, 31 Oct")
   })
 })
