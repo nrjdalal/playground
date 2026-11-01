@@ -18,8 +18,6 @@ type Lexer = {
   commands: Command[]
   i: number
   known: Record<string, string>
-  learned?: string
-  learning: boolean
   scope: number
   scopes: number[]
   src: string
@@ -246,60 +244,10 @@ function decode(raw: string): string {
   )
 }
 
-// learnAssignments: the one assignment shape scripts/hooks/README.md's no-release-comment section states becomes known to the command after it, for a hook that judges text; other hooks keep such a variable unknown, as their refusals of a variable wrapper or a variable cd need.
-export function lex(
-  src: string,
-  known: Record<string, string> = {},
-  learnAssignments = false,
-): Lexed {
-  const lx: Lexer = {
-    commands: [],
-    i: 0,
-    known: { ...known },
-    learning: learnAssignments,
-    scope: 0,
-    scopes: [-1],
-    src,
-  }
+export function lex(src: string, known: Record<string, string> = {}): Lexed {
+  const lx: Lexer = { commands: [], i: 0, known, scope: 0, scopes: [-1], src }
   list(lx, 0, false)
   return { commands: lx.commands, scopes: lx.scopes }
-}
-
-// The words that open a compound command or a zsh short loop, after which the hook learns no assignment.
-const COMPOUND = new Set(["case", "for", "foreach", "function", "repeat", "select"])
-// What could run code before the reader or run it again: a trap, a function or alias definition, eval, source, a subshell, an expansion, or IFS.
-const UNSAFE =
-  /[$`]|\bIFS\b|\b(?:alias|eval|function|source|trap)\b|\bTRAP[A-Z]|\(\s*\)|(?:^|[\s;&|])\.(?:\s|$)/
-
-// The one call shape the publish-word guard reads, as scripts/hooks/README.md's no-release-comment section states: only cd before Q='literal', then "$Q" in the very next command; everything else stays unknown.
-function learn(lx: Lexer, cmd: Command, raws: string[], sure: boolean, top: boolean): void {
-  if (!lx.learning && lx.learned === undefined) return
-  if (cmd.words.length === 0 && cmd.redirects.length === 0 && !cmd.group) return
-  if (lx.learned !== undefined) {
-    forget(lx)
-    return
-  }
-  const shape = /^([A-Za-z_]\w*)='([^']+)'$/.exec(raws.length === 1 ? raws[0] : "")
-  const simple = top && !cmd.detached && !cmd.group && !cmd.stdin
-  if (!shape || !sure || !simple) {
-    const head = cmd.words[0]
-    if (!simple || head?.quoted || head?.value !== "cd") lx.learning = false
-    return
-  }
-  lx.learning = false
-  const [, name, value] = shape
-  const rest = lx.src.split(`"$${name}"`).join("")
-  const mentions = rest.match(new RegExp(`${name}(?!\\w)`, "g"))?.length ?? 0
-  if (mentions !== 1 || UNSAFE.test(rest.replace(raws[0], ""))) return
-  lx.known[name] = value
-  lx.learned = name
-}
-
-// Drops what the hook learned, once the reader ends or a loop, block or subshell starts.
-function forget(lx: Lexer): void {
-  if (lx.learned !== undefined) delete lx.known[lx.learned]
-  lx.learned = undefined
-  lx.learning = false
 }
 
 // A subshell or a substitution is a scope of its own, so a cd inside it stays inside it.
@@ -322,17 +270,12 @@ function walk(lx: Lexer, scope: number, nested: boolean, inherit?: Command): voi
   const pending: Pending[] = []
   const fresh = (): Command => ({ redirects: [], scope, stdin: inherit, words: [] })
   let cmd = fresh()
-  let raws: string[] = []
-  let after = ";"
   // A pipeline's commands and a backgrounded one run in subshells: a cd there leaves the shell where it was.
   const end = (op: string) => {
     const done = cmd
     const pipe = op === "|" || op === "|&"
     if (pipe || op === "&") done.detached = true
     if (done.words.length > 0 || done.redirects.length > 0 || done.group) lx.commands.push(done)
-    learn(lx, done, raws, scope === 0 && !nested && after === ";", scope === 0 && !nested)
-    after = op
-    raws = []
     cmd = fresh()
     if (pipe) {
       cmd.stdin = done
@@ -356,7 +299,6 @@ function walk(lx: Lexer, scope: number, nested: boolean, inherit?: Command): voi
       if (nested) return
     } else if (c === "(") {
       lx.i++
-      forget(lx)
       const piped = cmd.words.length === 0 && cmd.redirects.length === 0 ? cmd.stdin : undefined
       end(";")
       nest(lx, piped)
@@ -387,13 +329,7 @@ function walk(lx: Lexer, scope: number, nested: boolean, inherit?: Command): voi
       end(op)
     } else {
       const from = lx.i
-      const w = word(lx)
-      cmd.words.push(w)
-      raws.push(src.slice(from, lx.i))
-      // A loop or block can run its words again after its body sets the variable again, so it reads no learned value.
-      if (cmd.words.length === 1 && !w.quoted && (RESERVED.has(w.value) || COMPOUND.has(w.value))) {
-        forget(lx)
-      }
+      cmd.words.push(word(lx))
       if (lx.i === from) lx.i++
     }
   }
@@ -482,7 +418,7 @@ function double(lx: Lexer): Text {
     if (c === "\\") {
       if (next !== "\n") out.value += '$`"\\'.includes(next) ? next : c + next
       lx.i += 2
-    } else if (c === "$") merge(out, dollar(lx, true))
+    } else if (c === "$") merge(out, dollar(lx))
     else if (c === "`") merge(out, backtick(lx))
     else {
       out.value += c
@@ -502,19 +438,13 @@ function ansi(lx: Lexer): Text {
   return { value: decode(raw) }
 }
 
-// quoted: inside double quotes, where the shell neither splits nor globs what a variable holds.
-function dollar(lx: Lexer, quoted = false): Text {
+function dollar(lx: Lexer): Text {
   const { src } = lx
-  const start = lx.i
   const next = src[lx.i + 1] ?? ""
-  const variable = (name: string | undefined): Text => {
-    const value = name === undefined ? undefined : lx.known[name]
-    // A learned value is read only as a whole "$Q", which the shell neither splits, globs nor modifies.
-    const whole = quoted && src[start - 1] === '"' && src[lx.i] === '"'
-    return value !== undefined && (whole || name !== lx.learned)
-      ? { value, variable: name }
+  const variable = (name: string | undefined): Text =>
+    name !== undefined && lx.known[name] !== undefined
+      ? { value: lx.known[name], variable: name }
       : { ...unknown("a shell variable"), variable: name }
-  }
   if (src.startsWith("$((", lx.i)) {
     lx.i = balanced(src, lx.i + 1, "(", ")")
     return unknown("an arithmetic expansion")

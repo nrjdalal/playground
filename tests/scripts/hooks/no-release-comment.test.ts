@@ -652,15 +652,17 @@ gh api graphql -f query="$QUERY"`,
     ],
     ["a clean body", 'gh api repos/qmarsh/demo/issues/1/comments -f body="ship it"'],
     [
-      "a GraphQL query held in a variable set earlier in the command",
-      `Q='query { viewer { login } }'; gh api graphql -f query="$Q"`,
-    ],
-    [
-      "a GraphQL query with variables held in a variable set after a cd",
-      `cd /tmp; Q='query($n: Int!) { viewer { repositories(first: $n) { totalCount } } }'; gh api graphql -f query="$Q" -F n=5`,
+      "a GraphQL query with variables written in the command itself",
+      `gh api graphql -f query='query($n: Int!) { viewer { repositories(first: $n) { totalCount } } }' -F n=5`,
     ],
   ])("allows %s", async (_, command) => {
     expect(await bash(command)).toBeUndefined()
+  })
+
+  test("refuses a GraphQL query held in a variable with a reason that names the query written in the command itself", async () => {
+    const reason = await bash(`Q='query { viewer { login } }'; gh api graphql -f query="$Q"`)
+    expect(reason).toContain("the hook cannot read its text")
+    expect(reason).toContain("Write the query in the command itself, not in a variable")
   })
 })
 
