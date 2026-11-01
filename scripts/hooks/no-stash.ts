@@ -15,10 +15,11 @@ import {
   type Xargs,
 } from "./shell"
 
-// git's own options before its subcommand that take the next word as their value.
+// git's own options before its subcommand that take the next word as their value (git 2.56), and --exec-path, whose bare form prints git's folder and exits, so the word after it never runs.
 const GIT_TAKES = new Set([
   "-C",
   "-c",
+  "--attr-source",
   "--config-env",
   "--exec-path",
   "--git-dir",
