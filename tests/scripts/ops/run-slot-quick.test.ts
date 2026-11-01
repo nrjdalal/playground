@@ -227,6 +227,23 @@ describe("a quick run takes its own slot past a full queue", () => {
     expect(await quick(["bun", "run", "build"], [2, 3, 4, 11])).toBe(false)
   })
 
+  // 1 Nov: a two-file test:file line ran 37, 36, 33, 39, 421 and 226 s back to back in the one quick slot, and the quick lane's waiters waited 63 min in the hour from 12:00Z
+  test("a quick-rule line whose last 3 runs each took over 60 s goes to the queue", async () => {
+    expect(await quick(["bun", "run", "test:file", "b.test.ts"], [39, 421, 226, 61])).toBe(false)
+  })
+
+  test("but one with a short run among its last 3 still takes quick", async () => {
+    expect(await quick(["bun", "run", "test:file", "b.test.ts"], [37, 36, 33, 39, 421, 226])).toBe(
+      true,
+    )
+    expect(took).toBe("run-slot-quick")
+  })
+
+  test("and a commit that ran long keeps its own slot", async () => {
+    expect(await quick(["git", "commit"], [70, 80, 90])).toBe(true)
+    expect(took).toBe("run-slot-commit")
+  })
+
   // ops, 20 Oct: with slot-off, a 5-file run that ran 1s waited 52 min behind suites
   test("bun test naming one test file", async () => {
     expect(await quick(["env", "X=1", "bun", "test"])).toBe(true)
