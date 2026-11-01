@@ -43,7 +43,7 @@
   the week then the 5-hour window, each a `size-3` icon and its number in mono with tabular digits at its own width, in its level's colour, its own tooltip its words, and screen readers hearing both once; two gray outlines with no numbers before a sample, after a failed read or once sampling has stopped;
   an account with no 5-hour window (a probe reading with a week and no `five_hour`, `fiveHourNone` in `api/hono/src/lib/usage/window.ts`) shows its 5-hour reading as `none`, green and fresh, never 0%, stale or an outline;
   hidden on the collapsed rail with the row's title.
-  With two or more account files (`accounts`, `.agents/dashboard/dashboard.md`), each reading is one combined figure, the plain mean of the fresh accounts' shares out of 100 (`63` for `97+88+76+31+23`), from `combinedUsage()` in `web/next/src/lib/system.ts` (one combined figure with each account's own reading on hover).
+  With two or more accounts (`accounts`, `.agents/dashboard/dashboard.md`), each reading is one combined figure, the plain mean of the fresh accounts' shares out of 100 (`63` for `97+88+76+31+23`), from `combinedUsage()` in `web/next/src/lib/system.ts` (one combined figure with each account's own reading on hover).
   The mean is plain because no usage file carries its limit's size to weight it by.
   The readings stay `shrink-0`, so the model's name beside them is never cut.
   Its colour judges that mean against `READING_LEVELS`, so a stale account never moves the figure or its colour; with no fresh share, every account stale or no account reading the window, the reading shows the last shares' mean gray and judges nothing, its words saying which, `none` when every fresh account has no 5-hour window, and `-` when no account reads the window at all.

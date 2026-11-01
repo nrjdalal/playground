@@ -10,6 +10,8 @@ import {
   pythonModule,
   SHELLS,
   shellOperand,
+  shellSlot,
+  slotWords,
   UV_TAKES,
   type Word,
 } from "./shell"
@@ -33,7 +35,6 @@ const EXECS = new Set(["bunx", "npx", "pnpx"])
 const TEST_BINS = new Set(["jest", "vitest"])
 const PY_TOOLS = new Set(["pytest", "ruff", "ty"])
 const TEST_SCRIPT = /^(?:check-types|test)(?::|$)/
-const SLOT = "run-slot.sh"
 
 const positionals = (args: Word[]): string[] => {
   const out: string[] = []
@@ -45,20 +46,15 @@ const positionals = (args: Word[]): string[] => {
   return out
 }
 
-// The command run-slot.sh runs: the words after its `--`.
-const slotted = (cmd: Command, args: Word[]): Command | undefined => {
-  const at = args.findIndex((a) => a.value === "--")
-  return at === -1 ? undefined : { ...cmd, scope: 0, words: args.slice(at + 1) }
-}
-
 function runsTests(cmd: Command): boolean {
-  const { args, name } = parse(cmd)
-  if (name === SLOT) {
-    const inner = slotted(cmd, args)
-    return inner !== undefined && runsTests(inner)
-  }
+  const parsed = parse(cmd)
+  const { args, name } = parsed
+  const slot = slotWords(parsed)
+  if (slot) return slot.length === 0 ? false : runsTests({ ...cmd, scope: 0, words: slot })
   if (SHELLS.has(name)) {
-    const { inline, operand } = shellOperand(args)
+    const script = shellSlot(args, name)
+    if (script) return runsTests({ ...cmd, scope: 0, words: script })
+    const { inline, operand } = shellOperand(args, name)
     return inline && operand !== undefined && lex(operand.value).commands.some(runsTests)
   }
   // uvx names a tool at a version as ruff@latest
@@ -128,13 +124,15 @@ function judge(script: string, shell: Dialect): string | undefined {
 }
 
 function judgeCommand(cmd: Command, guarded: boolean): string | undefined {
-  const { args, name } = parse(cmd)
-  if (name === SLOT) {
-    const inner = slotted(cmd, args)
-    return inner && judgeCommand(inner, guarded)
-  }
+  const parsed = parse(cmd)
+  const { args, name } = parsed
+  const slot = slotWords(parsed)
+  if (slot)
+    return slot.length === 0 ? undefined : judgeCommand({ ...cmd, scope: 0, words: slot }, guarded)
   if (SHELLS.has(name)) {
-    const { inline, operand } = shellOperand(args)
+    const script = shellSlot(args, name)
+    if (script) return judgeCommand({ ...cmd, scope: 0, words: script }, guarded)
+    const { inline, operand } = shellOperand(args, name)
     const reason = inline && operand ? judge(operand.value, dialect(name)) : undefined
     if (reason) return reason
   }

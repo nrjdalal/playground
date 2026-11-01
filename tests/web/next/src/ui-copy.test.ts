@@ -5,9 +5,10 @@ import { site } from "../../../../packages/config/src/site"
 import { dataDir } from "../../../../packages/env/src/data-dir"
 import { ownerSettings } from "../../../../packages/settings/src/owner"
 import { readPolicy } from "../../../../packages/settings/src/rendered"
-import { OLD } from "../../../old-names"
 
 const REPO = join(import.meta.dir, "../../../..")
+// The old product handle and a lead's old name, built at run time: the scans below look for them in the app's real copy, so a stand-in would scan for nothing.
+const OLD = { builder: ["light", "kid"].join(""), dispatcher: ["light", "man"].join("") }
 
 // Names that keep the old word for now (the UI says Dashboard; routes and commands may stay): API paths (an old one alone, as old-paths.ts mounts it, included), the desk.* names stored before the rename (activity ids and browser keys), module paths (by alias or relative), the live desk's branch, the fixture's folder and the page's `data-desk-page` attribute.
 const NAMES = [

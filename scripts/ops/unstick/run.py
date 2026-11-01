@@ -510,6 +510,19 @@ def org_owners():
     return ORGS
 
 
+# every slot run-slot.sh takes, in its clear-stale list's order, the CPU slots first as its held_units lists them, which tests hold these to; each model slot is found by its name
+CPU_SLOTS = ("run-slot", "run-slot-2", "run-slot-3", "run-slot-4")
+SLOTS = (*CPU_SLOTS, "run-slot-commit", "run-slot-clone", "run-slot-quick")
+
+
+def slot_names():
+    try:
+        models = sorted({m.group(1) for m in (re.match(r"^(run-slot-model-[0-9]+)(\.holder)?$", f) for f in os.listdir(OPS)) if m})
+    except OSError:
+        models = []
+    return [*SLOTS, *models]
+
+
 def heavy_jobs(rows=None):
     if rows is None:
         rows = subprocess.run(["ps", "-A", "-o", "pid=,ppid=,command="], capture_output=True, text=True, timeout=20).stdout.splitlines()
@@ -519,7 +532,7 @@ def heavy_jobs(rows=None):
         if len(parts) == 3 and parts[0].isdigit():
             parent[parts[0]], cmds[parts[0]] = parts[1], parts[2]
     holders = set()
-    for name in ("run-slot", "run-slot-2", "run-slot-3"):
+    for name in slot_names():
         try:
             if os.path.isdir(os.path.join(OPS, name)):
                 holders.add(open(os.path.join(OPS, name + ".holder")).read().split()[1])
@@ -555,6 +568,18 @@ def heavy_jobs(rows=None):
         # inside a slot when run-slot.sh (the holder pid) is one of its ancestors
         jobs.append({"inside": bool(holders & set(chain)), "kind": "dev stack" if "dev.ts" in cmd else "suite", "pid": pid, "where": where})
     return jobs
+
+
+# the cap is one per CPU slot held or open now, which run-slot.sh's `slots` counts by its own load rules and off-switches; a read that fails allows every CPU slot, so the pass's outside-slot alerts still go
+def heavy_cap():
+    try:
+        out = subprocess.run(["bash", os.path.join(CODE, "run-slot.sh"), "slots"], env=os.environ | {"RUN_SLOT_OPS": OPS}, capture_output=True, text=True, timeout=30).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        out = ""
+    if out.isdigit():
+        return int(out)
+    log(f"run-slot.sh slots gave no count ({out!r}), so the heavy-job cap reads {len(CPU_SLOTS)}")
+    return len(CPU_SLOTS)
 
 
 def slot_alerts(jobs, cap, at):
@@ -858,7 +883,8 @@ def slot_idle_alerts(state, now_t):
             pass
         cmd[parts[0]] = parts[3] if len(parts) > 3 else ""
     prev, cur, out = state.get("slot_idle", {}), {}, []
-    for slot in ("run-slot", "run-slot-2", "run-slot-3"):
+    # the CPU slots alone: a commit, clone, quick or model slot's run can wait at 0% CPU by design
+    for slot in CPU_SLOTS:
         try:
             who, pid = open(os.path.join(OPS, f"{slot}.holder")).read().split()[:2]
         except (OSError, ValueError):
@@ -1090,9 +1116,7 @@ def cycle(state):
         log(f"memory check failed: {type(e).__name__}: {e}")
     try:
         jobs = heavy_jobs()
-        # the cap is three while slot 3 is open (load under 12) or held, else two
-        cap = 3 if (os.getloadavg()[0] < 12 or os.path.isdir(os.path.join(OPS, "run-slot-3"))) else 2
-        alerts += slot_alerts(jobs, cap, now())
+        alerts += slot_alerts(jobs, heavy_cap(), now())
         state["heavy"] = len(jobs)
     except Exception as e:
         log(f"heavy-jobs check failed: {type(e).__name__}: {e}")

@@ -26,9 +26,8 @@ import {
   switchAccount,
   turboPrune,
 } from "../../../../../packages/scripts/src/ops-tick/tick"
-import { OLD } from "../../../../old-names"
 import { storeWith } from "../../../../scripts/hooks/render-set"
-import { OLD_AS_NAMES, SEEDED_NAMES } from "../../../../session-names"
+import { OLD, OLD_AS_NAMES, SEEDED_NAMES } from "../../../../session-names"
 
 // A machine whose sessions.names keep the old names, which this file's fallbacks name.
 beforeAll(() => setSessionNames(OLD_AS_NAMES))

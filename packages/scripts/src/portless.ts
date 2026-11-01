@@ -1,5 +1,6 @@
-// Derives each app's public URLs from portless's PORTLESS_URL (worktree branch included) and injects them before spawning the real dev command; a transparent pass-through when PORTLESS_URL is unset (PORTLESS=0, CI).
+// Derives each app's public URLs from portless's PORTLESS_URL (worktree branch included) and injects them, with portless's CA, before spawning the real dev command; a transparent pass-through when PORTLESS_URL is unset (PORTLESS=0, CI).
 import "../../env/src/aliases"
+import { portlessCa } from "./portless-ca"
 
 // Toggle the adjacent `api.` label (it sits just before the two base labels) to get the sibling app's host. Assumes the two-app `<name>` / `api.<name>` naming from the package.json `portless.name`s (convert.ts keeps forks in sync) and a single-label worktree prefix; a branch literally named `api` would be misread as the api host. Update this if that scheme changes.
 export function deriveUrls(portlessUrl: string): { web: string; api: string } {
@@ -41,8 +42,13 @@ if (import.meta.main) {
   }
 
   const portlessUrl = process.env.PORTLESS_URL
+  // portless's CA too, so an app's server fetches to its https sibling verify: the dashboard supervisor's production web had none, and each render waited out readSession's 20 s.
+  const ca = portlessUrl ? portlessCa() : null
   const overrides = portlessUrl
-    ? overridesFor(portlessUrl, process.env.PLAYGROUND_BARE_NAMES === "1")
+    ? {
+        ...overridesFor(portlessUrl, process.env.PLAYGROUND_BARE_NAMES === "1"),
+        ...(ca ? { NODE_EXTRA_CA_CERTS: ca } : {}),
+      }
     : {}
 
   const proc = Bun.spawn(cmd, {

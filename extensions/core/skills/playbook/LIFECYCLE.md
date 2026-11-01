@@ -88,7 +88,7 @@ Sessions that work together share a workspace as full-height columns ([SESSIONS.
   ops-changelog (`bun run changelog sync`, `4-59/5 * * * *`, skipped quietly while a `bun run changelog seed` runs) runs from the live dashboard's checkout, as its runner's cron did:
   skipped with a line to ops while load5 (the third field of `sysctl -n vm.loadavg`) passes 12 or memory pressure reads critical, never overlapping, its output appended to `dashboard-changelog.log` in the data folder, and a failure sent to ops with its last 5 lines.
   ops-channel-watch is the factory channel's watch: a quick pass every 3 minutes and a full one, which also relays edits, at minutes 7 and 37, each new post sent to the dispatcher as one outbox line; each pass runs `watch.ts` under `vault.py run -e SLACK_TOKEN=local.slack.channel_token`, so the token reaches only that process, and a failure goes to ops once per kind until a pass succeeds.
-  Add ops-changelog this way only on a Mac whose `jobs.json` has no job by that name, and ops-channel-watch only on the Mac of the person whose Slack id `watch.ts` skips (`SKIP`).
+  Add ops-changelog this way only on a Mac whose `jobs.json` has no job by that name, and ops-channel-watch only on the Mac of the Slack member the `channel.skipUser` setting names, since the watch relays every post but that member's own.
   ops-dm-watch (`jobs.opsDmWatch`, off by default) is the owner's DM watch in Slack mode (DISPATCH.md's Slack mode): each minute, while `slack.mode` is on and `slack.dmChannel` and `slack.dmOwner` are set, it runs `watch.ts` under `vault.py run -e SLACK_TOKEN=local.slack.channel_token`,
   which sends each new owner message to the dispatcher in full and to dispatcher-2 when none is answered in 3 minutes or the dispatcher's session state has read stuck or failed for 3 minutes, telling Ops of that once through ops-unstick's outbox;
   every 15 minutes it tells the dispatcher to post an update, and a failure goes to ops once per kind until a pass succeeds.
@@ -137,7 +137,7 @@ After a restart, a PR body is pulled back with `gh pr view <n> --json body -q .b
 
 Every start and every end, with its reason, lands in the roster the moment it happens (**roster**).
 
-A session takes its skills from the copy written when it started (`~/.playground/orgs/<set>/<hash>/`), so after a ship a live session reads each changed skill's files from the folder `playground update` names in the main checkout (**release**).
+A session takes its skills from the copy written when it started (`~/.playground/orgs/<set>/<hash>/`), so after any `playground update` that prints `skills changed`, a ship or the user menu's Update now alike, the session that ran it sends each lead the folders that line names in the main checkout, and a live session reads each changed skill's files there (**release**).
 
 ## Updating Claude Code
 

@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 
 import { join } from "node:path"
 
 import { sourceIn, SOURCES } from "../glm-refused-sources"
-import { OLD } from "../old-names"
+import { OLD } from "../session-names"
 import {
   FACTORY_SETTINGS,
   launchAfterRm,

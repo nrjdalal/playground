@@ -590,6 +590,20 @@ export function parse(cmd: Command): Parsed {
   }
 }
 
+// run-slot.sh runs the words after its -- as the command: those words (none when it has no --), or undefined for any other command, so a hook that calls it reads a slotted command as the command itself.
+export function slotWords({ args, name }: Parsed): Word[] | undefined {
+  if (name !== "run-slot.sh") return
+  const at = args.findIndex((a) => a.value === "--")
+  return at === -1 ? [] : args.slice(at + 1)
+}
+
+// A shell whose script file is run-slot.sh runs that run-slot call: its words from the script on, the shell's own flags before it dropped, or undefined for any other shell call.
+export function shellSlot(args: Word[], shell: string): Word[] | undefined {
+  const { inline, operand } = shellOperand(args, shell)
+  if (inline || !operand || program(operand.value) !== "run-slot.sh") return
+  return args.slice(args.indexOf(operand))
+}
+
 // A hook's judgement of one command, given everything but the shell's own builtins, the shells it starts and eval, which run() follows itself.
 export type Visit = (cmd: Command, parsed: Parsed, env: Env) => Promise<string | undefined>
 
@@ -640,7 +654,7 @@ export async function examine(
       env.vars.set(w.value.slice(0, eq), slice(w, eq + 1))
     }
     if (builtins) verdict = await visit(cmd, parsed, here)
-  } else if (SHELLS.has(name)) verdict = await shell(args, cmd, here, visit, builtins)
+  } else if (SHELLS.has(name)) verdict = await shell(name, args, cmd, here, visit, builtins)
   else if (name === "eval") {
     verdict = await run(lex(args.map((a) => a.value).join(" "), env.known), here, visit, builtins)
   } else verdict = await visit(cmd, parsed, here)
@@ -661,12 +675,17 @@ async function cdTarget(args: Word[], env: Env): Promise<string | undefined> {
   }
 }
 
+// A shell's options that take the next word as their value; -O and +O take one in bash and sh alone, since zsh's take none.
+const SHELL_TAKES = new Set(["-o", "+o", "--init-file", "--rcfile"])
+const BASH_TAKES = new Set([...SHELL_TAKES, "-O", "+O"])
+
 // A shell's first operand, and whether -c makes it the script's text rather than a script file's name; no operand means the shell reads its script from stdin.
-export function shellOperand(args: Word[]): { inline: boolean; operand?: Word } {
+export function shellOperand(args: Word[], shell: string): { inline: boolean; operand?: Word } {
+  const takes = shell === "bash" || shell === "sh" ? BASH_TAKES : SHELL_TAKES
   let inline = false
   for (let k = 0; k < args.length; k++) {
     const v = args[k].value
-    if (v === "-o" || v === "+o") k++
+    if (takes.has(v)) k++
     else if (/^[-+][A-Za-z]+$/.test(v)) inline ||= v.startsWith("-") && v.includes("c")
     else if (!v.startsWith("--")) return { inline, operand: args[k] }
   }
@@ -674,13 +693,16 @@ export function shellOperand(args: Word[]): { inline: boolean; operand?: Word } 
 }
 
 async function shell(
+  name: string,
   args: Word[],
   cmd: Command,
   env: Env,
   visit: Visit,
   builtins: boolean,
 ): Promise<string | undefined> {
-  const { inline, operand } = shellOperand(args)
+  const slot = shellSlot(args, name)
+  if (slot) return examine({ ...cmd, words: slot }, env, visit, builtins)
+  const { inline, operand } = shellOperand(args, name)
   if (operand) {
     return inline ? run(lex(operand.value, env.known), subshell(env), visit, builtins) : undefined
   }

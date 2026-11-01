@@ -282,12 +282,24 @@ describe("code-review-loop checks its own fixes and a repo scanner's landing (PG
     expect(step.split("**Done when**")[1] ?? "").toContain(
       "each waiting 5/5's head has a `merge-tree` check against the newest `origin/canary`",
     )
+    expect(step).toContain(
+      "On a stack held at 5/5 until the owner's try, that verdict is one trigger of a canary sync (playbook's DISPATCH.md, its line \"A stack held at 5/5 until the owner's try\")",
+    )
+    expect(step).toContain(
+      "each canary move runs only this `merge-tree` check on its waiting 5/5s, leaving the stale-text check above and the scanning-test merge below to the round at the sync before the try",
+    )
+    expect(step.split("**Done when**")[1] ?? "").toContain(
+      "a held stack's waiting 5/5 keeping its scanning-test merge and its stale-text check for the round at the sync before the try",
+    )
     const last = text.split("## The last 5/5")[1]?.split("\n## ")[0] ?? ""
     expect(last).toContain(
       "First `git -C <clone> merge-tree --write-tree <head> origin/canary`: a conflict there is a blocking finding, which goes to the worker with the merge",
     )
     expect(await page()).toContain(
       "also checks each waiting 5/5's head for a merge conflict with canary",
+    )
+    expect(await page()).toContain(
+      "On a stack held at 5/5 until the owner's try, that verdict is one signal to sync it with canary",
     )
   })
 })
