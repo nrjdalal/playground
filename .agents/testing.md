@@ -38,6 +38,8 @@ measured in the parallel pass, a 50 ms interval fetched 8 times in 400 ms with i
 since each file loads its modules afresh.
 Else test the query's options themselves (`inboxPolling()` in `tests/web/next/src/lib/tab-dot.test.ts`), or time the query in a child process that sets `window` before it loads query-core.
 A test that builds a child's env from scratch rather than from `process.env` passes `UV_PYTHON_INSTALL_DIR` and `UV_CACHE_DIR` through (`drive()` in `tests/scripts/ops/unstick/run.test.ts`), since a child's `uv run --python 3.13` without them downloads a 66 MB CPython into the scratch home, and on a slow network each case's download outlasts its 30s and starts again in the next.
+A case that waits on `fs.watch` waits on macOS's FSEvents, which at load5 13 dropped 6 of 15 changes to a file and delayed the rest by up to 4s.
+Have the case fire the change itself through an injected watcher (`hubWith`'s `changed` in `tests/api/hono/src/lib/dashboard/hub.test.ts`), or shorten the rescan that catches a missed change (`INGEST_RESCAN_MS` in `tests/api/hono/src/bin/dashboard-ingest.test.ts`).
 `Bun.which(name)` reads the PATH the process started with, so code under test that looks a tool up that way runs the real tool wherever one is installed and misses a stub the test prepends to `process.env.PATH`: look it up with `Bun.which(name, { PATH: process.env.PATH ?? "" })` (`packages/scripts/src/ops-ext-sync/sync.ts`), or take the lookup as a dependency the test passes in.
 
 ## End-to-end tests
