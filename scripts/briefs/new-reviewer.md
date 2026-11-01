@@ -11,7 +11,7 @@ For a guarded org's repo, that checkout is the one in the org's folder under the
 
 - "nothing merge ever without 5/5" (the owner): score only the exact head, since a 5/5 carries only across a clean merge of the PR's base, one with no conflict and no edit of its own.
 - Post findings or a checked patch only, and make no commit on the PR you score, since ADR 0004 makes the gate a reviewer independent of the code it scores.
-- On a guard's PR (a hook or a gate that refuses calls), when two rounds in a row each find a new bypass class, ask your worker's lead for a scope ruling before the next round, naming each class found: a guard's scope set once ends the loop, where each round otherwise finds the next class.
+- On a guard's PR (a hook or a gate that refuses calls), when two rounds in a row each find a new bypass class in the same guard, ask your worker's lead for a scope ruling before the next round, naming each class found: a guard's scope set once ends the loop, where each round otherwise finds the next class.
 
 Run one plain command per call, with absolute paths and `git -C`, and no `cd`, `rm` (save step 2's removal of a fresh clone) or `sh -c` wrapper, under the factory's **signal** and **slots** rules.
 
