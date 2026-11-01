@@ -584,10 +584,10 @@ async function gh(
     texts.push(unknown(`what xargs puts in place of ${xargs?.replace}`))
   }
   const flagged = repos.map((r) => (fromXargs(r, xargs) ? undefined : repoOf(r)))
-  // A positional the hook cannot read may be a pull request URL, which picks the repository; under anyWrite a shell value is placed as a number is, by -R or the checkout, while xargs input stays unplaced.
+  // A positional the hook cannot read may be a pull request URL, which picks the repository; under anyWrite a shell value or the input a plain xargs appends is placed as a number is, by -R or the checkout, while an xargs -I string stays unplaced.
   const urls = positionals.flatMap((p) => {
-    if (fromXargs(p, xargs) || p === XARGS_INPUT) return [undefined]
-    if (p.unknown || p.reads?.length || p.value.includes(UNKNOWN))
+    if (fromXargs(p, xargs)) return [undefined]
+    if (p === XARGS_INPUT || p.unknown || p.reads?.length || p.value.includes(UNKNOWN))
       return policy.anyWrite ? [] : [undefined]
     return PR_URL.test(p.value) ? [repoOf(p)] : []
   })
@@ -735,6 +735,11 @@ async function api(
 ): Promise<string | undefined> {
   const request = await ghApi(args, cmd, env, xargs)
   if (!request || ["GET", "HEAD"].includes(request.method)) return
+  // Under anyWrite, a plain xargs before a gh api with no method, field or input of its own reads, since only the words it appends make it a write.
+  if (policy.anyWrite && xargs && !xargs.replace) {
+    const method = args.some((a) => /^(?:-X|--method)/.test(a.value))
+    if (!method && request.fields.length === 1 && request.inputs.length === 0) return
+  }
   if (request.method === "DELETE" && !policy.anyWrite) return
   const { endpoint, fields, inputs } = request
   const posted = (f: { key: string }) =>
@@ -1042,13 +1047,10 @@ async function git(
         return cannot(
           `it runs ${sub}, which -c, --config-env, --git-dir or a GIT_ variable may define as an alias`,
         )
-      if (!dir)
-        return cannot(
-          `it runs ${sub}, which may be an alias, in a checkout the hook cannot resolve`,
-        )
       if (changed)
         return cannot(`it runs ${sub}, which an earlier command in the call may define as an alias`)
-      const alias = gitText(dir, ["config", "--get", `alias.${sub}`], `alias ${sub}`)
+      // In a checkout the hook cannot resolve, only the global and system configs, which git reads from /, can define the alias.
+      const alias = gitText(dir ?? "/", ["config", "--get", `alias.${sub}`], `alias ${sub}`)
       if (!alias.unknown) {
         if (alias.value.trim().startsWith("!") || depth > 8)
           return cannot(`its alias ${sub} runs a command the hook does not read`)
@@ -1176,12 +1178,12 @@ function pushTarget(remote: Word | undefined, dir: string | undefined): Target {
   }
   if (!remote) {
     const names = lines(["remote"])
-    // remote.pushDefault, branch.<b>.pushRemote and branch.<b>.remote pick the push's remote, and each may hold a URL.
-    const keys = lines([
-      "config",
-      "--get-regexp",
-      "^(remote\\.pushdefault|branch\\..*\\.(pushremote|remote))$",
-    ])
+    // remote.pushDefault and the current branch's pushRemote and remote pick the push's remote, and each may hold a URL; another branch's do not.
+    const branch = lines(["symbolic-ref", "--short", "HEAD"])?.[0]
+    const current = branch
+      ? `|branch\\.${branch.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\.(pushremote|remote)`
+      : ""
+    const keys = lines(["config", "--get-regexp", `^(remote\\.pushdefault${current})$`])
     const picked = (keys ?? [])
       .map((line) => line.slice(line.indexOf(" ") + 1))
       .filter((value) => value !== "" && value !== "." && !names?.includes(value))
