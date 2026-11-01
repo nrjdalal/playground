@@ -12,11 +12,16 @@ describe("VERCEL.md", () => {
     expect(lines[at + 1]).toContain("Read it before you run any `vercel` command")
   })
 
-  test("drops the pulled .env.local right after vercel link or vercel integration add", async () => {
-    const step =
-      (await read("VERCEL.md")).split("\n").find((l) => l.includes("`rm -f .env.local`")) ?? ""
-    expect(step).toContain("right after `vercel link` or `vercel integration add`")
-    expect(step).toContain("development env")
+  test("keeps the integration's env off disk with --no-env-pull, and drops .env.local right after vercel link alone", async () => {
+    const lines = (await read("VERCEL.md")).split("\n")
+    const flag =
+      lines.find((l) => l.includes("`vercel integration add <name> --no-env-pull`")) ?? ""
+    expect(flag).toContain("development env")
+    expect(flag).toContain("vercel 65.8.0")
+    const drop = lines.find((l) => l.includes("`rm -f .env.local`")) ?? ""
+    expect(drop).toContain("right after `vercel link`,")
+    expect(drop).not.toContain("vercel integration add")
+    expect(drop).toContain("65.8.0")
   })
 
   test("reads vercel api through its JSON alone", async () => {
