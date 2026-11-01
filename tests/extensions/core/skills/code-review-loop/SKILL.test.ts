@@ -247,7 +247,7 @@ describe("code-review-loop checks its own fixes and a repo scanner's landing (PG
   test("step 5 runs the checks a patch's files call for before posting it with the results (R11-1: #61, #186, #212, #246)", async () => {
     const step = (await skill()).match(/^5\. \*\*Hand small fixes over\.\*\*.*$/m)?.[0] ?? ""
     expect(step).toContain(
-      "apply it in `<clone>` and run the checks its files call for (`bun run docs:wrap --check` on a wrapped doc, the test that pins the wording, `bun run test:file` on the file's mirrored test)",
+      "a wording you suggest in a finding included, and run the checks its files call for (`bun run docs:wrap --check` on a wrapped doc, the test that pins the wording, `bun run test:file` on the file's mirrored test)",
     )
     expect(step).toContain("post the patch or wording with those results")
     expect(step.split("**Done when**")[1] ?? "").toContain("its checks' results posted with it")
