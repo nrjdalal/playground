@@ -41,7 +41,7 @@ describe("VERCEL.md", () => {
       "one difference a preview (an import, the export's shape, a runtime setting)",
     )
     expect(probe).toContain(
-      "(12 probes in about 16 minutes, about 1.5 minutes a probe, measured from their deploys' createdAt)",
+      "(12 probes in about 16 minutes, measured from their deploys' createdAt)",
     )
     expect(probe).not.toContain("about 2 minutes each")
     const exported = lines.find((l) => l.includes("`createAdaptorServer`")) ?? ""
@@ -62,8 +62,12 @@ describe("VERCEL.md", () => {
   test("scopes the hang to the deploys the probes measured", async () => {
     const exported =
       (await read("VERCEL.md")).split("\n").find((l) => l.includes("`createAdaptorServer`")) ?? ""
-    expect(exported).toContain("every deploy built on 31 Oct hung an export already listening")
-    expect(exported).toContain("one of the same code built on 24 Oct still answered 200 that day")
+    expect(exported).toContain(
+      "all 8 probe deploys built on 31 Oct whose export already listened hung",
+    )
+    expect(exported).toContain(
+      "a deploy of the same code built on 24 Oct still answered 200 on 31 Oct",
+    )
   })
 
   test("dates only what a record dates: the opening says measured, and the hang step cites its probes' day", async () => {
