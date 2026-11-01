@@ -60,14 +60,20 @@ describe("movesTheBoard", () => {
   })
 })
 
-type Deferred = { promise: Promise<Live>; resolve: (live: Live) => void }
+type Deferred = {
+  promise: Promise<Live>
+  reject: (err: Error) => void
+  resolve: (live: Live) => void
+}
 
 const deferred = (): Deferred => {
+  let reject: (err: Error) => void = () => {}
   let resolve: (live: Live) => void = () => {}
-  const promise = new Promise<Live>((r) => {
+  const promise = new Promise<Live>((r, j) => {
+    reject = j
     resolve = r
   })
-  return { promise, resolve }
+  return { promise, reject, resolve }
 }
 
 const worker = (name: string): Worker => ({
@@ -415,6 +421,65 @@ describe("DashboardHub", () => {
       "s-fresh:the first prompt",
       "s-before:said after the tail began",
     ])
+    leave()
+    again()
+  })
+
+  // a lost change event left its line unsent until the session wrote again: every refresh reads each open tail again from its offset
+  const opened = async (name: string) => {
+    const { born, stat } = birthtimes()
+    const path = join(dir, name)
+    writeFileSync(path, line("u-0", "there before the hub started"))
+    born(path, Date.now() - 60_000)
+    const { calls, changed, hub } = hubWith(undefined, stat)
+    const frames: DashboardFrame[] = []
+    const leave = hub.subscribe((frame) => frames.push(frame))
+    await until("the hub's first read", () => calls.length === 1)
+    calls[0]?.resolve(live([["s-tail", path]]))
+    await until("the tail's watcher", () => hub.watching === 1)
+    // a second viewer asks for a refresh, as the safety timer does every 10 s; `answer` settles its sessions read
+    const refresh = async (answer = (call: Deferred) => call.resolve(live([["s-tail", path]]))) => {
+      const at = calls.length
+      const again = hub.subscribe(() => {})
+      await until("the next read", () => calls.length === at + 1)
+      const call = calls[at]
+      if (call) answer(call)
+      return again
+    }
+    return { changed, frames, leave, path, refresh }
+  }
+
+  test("a line whose change event is lost reaches the board on the next refresh", async () => {
+    const { frames, leave, path, refresh } = await opened("lost.jsonl")
+    appendFileSync(path, line("u-1", "its change event was lost"))
+    const again = await refresh()
+    await until("the lost line", () => sentBy(frames).length === 1)
+    expect(sentBy(frames)).toEqual(["s-tail:its change event was lost"])
+    leave()
+    again()
+  })
+
+  test("a line whose change event is lost reaches the board on a refresh whose sessions read fails", async () => {
+    const { frames, leave, path, refresh } = await opened("failed.jsonl")
+    appendFileSync(path, line("u-1", "read on a failed refresh"))
+    const again = await refresh((call) => call.reject(new Error("cmux is down")))
+    await until("the lost line", () => sentBy(frames).length === 1)
+    expect(sentBy(frames)).toEqual(["s-tail:read on a failed refresh"])
+    leave()
+    again()
+  })
+
+  test("a line both its change event and a refresh read is sent once", async () => {
+    const { changed, frames, leave, path, refresh } = await opened("both.jsonl")
+    appendFileSync(path, line("u-1", "read twice, sent once"))
+    // the event fires in the tick the refresh's read lands, so its tail read is still reading when the refresh's starts
+    const again = await refresh((call) => {
+      call.resolve(live([["s-tail", path]]))
+      changed(path)
+    })
+    await until("the line", () => sentBy(frames).length > 0)
+    await sleep(UNREREAD_MS)
+    expect(sentBy(frames)).toEqual(["s-tail:read twice, sent once"])
     leave()
     again()
   })
