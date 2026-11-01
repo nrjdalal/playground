@@ -574,9 +574,6 @@ const BUILDERS = new RegExp(`\\b(?:${BUILDER_NAMES.join("|")})\\b`)
 const STAR_REEXPORT =
   /\bexport\s*\*\s*(?:as\s+[\w$]+\s*)?from\s*["'][^"']*\/cmux(?:\.[cm]?[jt]sx?)?["']/
 
-// The factory's own tool that answers a cmux session's Feed permission, `playground picker`, as run.py's Python reads cmux beside the app; it builds its two argvs itself and reaches no dashboard code.
-const CMUX_TOOLS = new Set(["packages/scripts/src/playground/picker.ts"])
-
 // Files that name cmux only as a value and spawn nothing: the ops job registry, whose runtime field takes "cmux", onboarding's checks, whose cmux row reads PATH alone, and the new-user gate's stand-ins, where it names a file the gate writes.
 const CMUX_VALUES = new Set([
   "api/hono/src/lib/onboard/checks.ts",
@@ -584,11 +581,11 @@ const CMUX_VALUES = new Set([
   "packages/settings/src/jobs.ts",
 ])
 
-// Each source file, other than cmux.ts and CMUX_TOOLS, that names cmux as an argv, runs a cmux command line where it can spawn, or borrows cmux.ts's argv builders.
+// Each source file, other than cmux.ts, that names cmux as an argv, runs a cmux command line where it can spawn, or borrows cmux.ts's argv builders.
 const crossings = (files: Record<string, string>): string[] =>
   Object.entries(files)
     .filter(([path, source]) => {
-      if (path === CMUX || CMUX_TOOLS.has(path)) return false
+      if (path === CMUX) return false
       if (CMUX_VALUES.has(path) && !SPAWNS.test(source)) return false
       const code = codeOf(path, source)
       const bare = code.replace(SPECIFIER, "")
@@ -783,41 +780,19 @@ describe("a refused source", () => {
   })
 })
 
-// Text typed into a pane lands as a user turn and reads as the owner's, and nothing may speak for the owner, so only cmux.ts's write() types, for the owner's own clicks; sessions talk through SendMessage. Escape types no text, so it is the one key a procedure may press, on a permission prompt or the usage-limit dialog; `playground picker` alone also presses Yes on a permission prompt (below).
+// Text typed into a pane lands as a user turn and reads as the owner's, and nothing may speak for the owner, so only cmux.ts's write() types, for the owner's own clicks; sessions talk through SendMessage. A script's key into a herdr pane is held below, to run.py's Escape and `playground picker`.
 const PANE_TYPING = [
   /(?:^|[^\w-])[$"'{]*[\w./~-]*cmux\b[}"']?(?:\s+--?[\w-]+(?:=\S+)?)*\s+send(?:-key)?\s+(?!(?:or|and)\b)[^\s`]/i,
   /["']cmux["']\s*,\s*["']send(?:-key)?["']/i,
   /\bsend-key\s+--?\w/i,
 ]
-// Each line allowed to name a key send, matched whole: SESSIONS.md's Escape on a permission prompt (**voice**), run.py's Escape, which clears the usage-limit dialog and presses nothing on a permission prompt (**unstick**), and run.py's `send-key --help` read, which types nothing.
-const ESCAPE_ONLY = [
-  {
-    line: /^cmux send-key --workspace workspace:N --surface surface:N escape$/,
-    path: "extensions/core/skills/playbook/SESSIONS.md",
-  },
-  {
-    line: /^r = subprocess\.run\(\["cmux", "send-key", "--help"\], capture_output=True, text=True, timeout=20\)$/,
-    path: "scripts/ops/unstick/run.py",
-  },
-  {
-    line: /^args = \["cmux", "send-key", \*\(\["--force"\] if can_force\(\) else \[\]\), "--workspace", s\["workspace_id"\], "--surface", s\["surface_id"\], "escape"\]$/,
-    path: "scripts/ops/unstick/run.py",
-  },
-]
-const escapeOnly = (path: string, line: string): boolean =>
-  ESCAPE_ONLY.some((allowed) => allowed.path === path && allowed.line.test(line.trim()))
-
 // Each text file, other than cmux.ts, with a line that types into a pane.
 const paneTypers = (files: Record<string, string>): string[] =>
   Object.entries(files)
     .filter(
       ([path, text]) =>
         path !== CMUX &&
-        text
-          .split("\n")
-          .some(
-            (line) => PANE_TYPING.some((typing) => typing.test(line)) && !escapeOnly(path, line),
-          ),
+        text.split("\n").some((line) => PANE_TYPING.some((typing) => typing.test(line))),
     )
     .map(([path]) => path)
 
@@ -836,11 +811,10 @@ describe("typing into a pane", () => {
       const text = await file.text()
       if (!text.includes("\0")) files[path] = text
     }
-    for (const { path } of ESCAPE_ONLY) expect(Object.keys(files)).toContain(path)
     expect(paneTypers(files)).toEqual([])
   })
 
-  test("a command, a script's argv or a key types; prose about the rule and Escape on a prompt do not", () => {
+  test("a command, a script's argv or a key, Escape included, types; prose about the rule does not", () => {
     const typing = {
       "argv.py": 'subprocess.run(["cmux", "send", "--surface", s, text])',
       "doc.md": 'cmux send --workspace workspace:N --surface surface:N "/rename x"',
@@ -849,9 +823,9 @@ describe("typing into a pane", () => {
       "quoted.sh": 'cmux send "hello"',
       "variable.sh": '"$CMUX" send-key --surface "$S" Enter',
       "variabletext.sh": '"$CMUX" send --surface "$S" "hi"',
-      [ESCAPE_ONLY[0]!.path]: "cmux send-key --workspace workspace:N --surface surface:N Enter",
-      [ESCAPE_ONLY[1]!.path]:
-        'args = ["cmux", "send-key", *(["--force"] if can_force() else []), "--workspace", s["workspace_id"], "--surface", s["surface_id"], "Enter"]',
+      "escape.md": "cmux send-key --workspace workspace:N --surface surface:N escape",
+      "escape.py":
+        'args = ["cmux", "send-key", "--force", "--workspace", s["workspace_id"], "--surface", s["surface_id"], "escape"]',
     }
     const clear = {
       "prose.md": "nothing types into a pane: no `cmux send` or `send-key`, and no deliver()",
@@ -859,15 +833,6 @@ describe("typing into a pane", () => {
       [CMUX]: 'return ["cmux", "send-key", "--surface", write.surface, "--", write.key]',
     }
     expect(paneTypers({ ...typing, ...clear }).sort()).toEqual(Object.keys(typing).sort())
-    expect(
-      paneTypers({
-        [ESCAPE_ONLY[0]!.path]: "cmux send-key --workspace workspace:N --surface surface:N escape",
-        [ESCAPE_ONLY[1]!.path]: [
-          '        r = subprocess.run(["cmux", "send-key", "--help"], capture_output=True, text=True, timeout=20)',
-          '        args = ["cmux", "send-key", *(["--force"] if can_force() else []), "--workspace", s["workspace_id"], "--surface", s["surface_id"], "escape"]',
-        ].join("\n"),
-      }),
-    ).toEqual([])
   })
 })
 

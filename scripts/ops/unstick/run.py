@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """ops-unstick: no factory session sits blocked unseen .
 
-Every CYCLE seconds it reads the screen of every live Claude Code session cmux runs (`cmux sessions list`, then `cmux read-screen` per surface)
-and herdr runs (`herdr pane list`, then `herdr pane read --source visible` per pane), cmux only while Claude's registry holds a live
-session, not a headless run, that no herdr pane does (cmux_may_hold), and matches the blocking states: the
+Every CYCLE seconds it reads the screen of every live Claude Code session herdr runs (`herdr pane list`, then
+`herdr pane read --source visible` per pane), and matches the blocking states: the
 usage-limit dialog, a permission prompt, a picker (AskUserQuestion, plan approval), the folder-trust and MCP-server dialogs, and
 "Please run /login". The usage-limit dialog alone is answered, with Escape, and only while the usage file of the account the session's
 resume record names, else the machine's own login, says it has room (and was written in the last 15 minutes: room());
@@ -111,13 +110,6 @@ def log(line):
         print(line)
 
 
-def cmux(args, timeout=20):
-    r = subprocess.run(["cmux", *args], capture_output=True, text=True, timeout=timeout)
-    if r.returncode:
-        raise RuntimeError(f"cmux {args[0]}: {(r.stderr or r.stdout).strip()[:120]}")
-    return r.stdout
-
-
 def herdr(server, args, timeout=20):
     env = os.environ | {"HERDR_CONFIG_PATH": os.path.join(HERDR_DIR, "config.toml"), "HERDR_SESSION": server, "HERDR_SOCKET_PATH": os.path.join(HERDR_DIR, f"{server}.sock")}
     r = subprocess.run([HERDR, *args], capture_output=True, text=True, timeout=timeout, env=env)
@@ -173,13 +165,13 @@ def alert_to(name, transcript):
     return "dispatcher"
 
 
-def prompt_answer(name, sid, lines, herdr=False):
+def prompt_answer(name, sid, lines):
     """How the manager answers a permission prompt read off the screen (answerOf in packages/scripts/src/playground/prompt.ts): `playground picker` by
     the key of the waiting call the prompt shows, a subagent's included, so a prompt whose hook record a later Stop replaced still gets a key; else
-    the one route left, a close and a resume on a herdr pane. "" when the table cannot run."""
+    the one route left, a close and a resume of its herdr pane's session. "" when the table cannot run."""
     bun = shutil.which("bun") or os.path.expanduser("~/.bun/bin/bun")
     try:
-        r = subprocess.run([bun, "--no-env-file", PROMPT, "answer", name, sid or "", *(["herdr"] if herdr else [])], input="\n".join(lines), capture_output=True, text=True, timeout=20)
+        r = subprocess.run([bun, "--no-env-file", PROMPT, "answer", name, sid or ""], input="\n".join(lines), capture_output=True, text=True, timeout=20)
         return r.stdout.strip() if r.returncode == 0 else ""
     except (OSError, subprocess.TimeoutExpired):
         return ""
@@ -244,34 +236,16 @@ def limit_alert(name, line, transcript=None):
         notify(msg, to=to)
 
 
-_FORCE = None
-
-
-def can_force():
-    """cmux 0.65 refuses a key sent into a pane on a question or dialog unless --force; 0.64 has no such flag. Read once a process, from send-key's own help (dispatcher, 14 Oct: planner sat on a permission prompt and the Escape was refused)."""
-    global _FORCE
-    if _FORCE is None:
-        r = subprocess.run(["cmux", "send-key", "--help"], capture_output=True, text=True, timeout=20)
-        _FORCE = "--force" in (r.stdout + r.stderr)
-    return _FORCE
-
-
 def escape(s, name, why):
-    """Press Escape in one session's own surface; log every attempt with cmux's answer, and alert dispatcher when cmux refuses it."""
-    if s.get("herdr"):
-        via = "herdr"
-        try:
-            r = subprocess.CompletedProcess([], 0, herdr(s["herdr"], ["pane", "send-keys", s["pane"], "esc"]), "")
-        except (OSError, RuntimeError, subprocess.TimeoutExpired) as e:
-            r = subprocess.CompletedProcess([], 1, "", str(e))
-    else:
-        via = "cmux"
-        args = ["cmux", "send-key", *(["--force"] if can_force() else []), "--workspace", s["workspace_id"], "--surface", s["surface_id"], "escape"]
-        r = subprocess.run(args, capture_output=True, text=True, timeout=20)
+    """Press Escape in one session's own herdr pane; log every attempt with herdr's answer, and alert the session's manager when herdr refuses it."""
+    try:
+        r = subprocess.CompletedProcess([], 0, herdr(s["herdr"], ["pane", "send-keys", s["pane"], "esc"]), "")
+    except (OSError, RuntimeError, subprocess.TimeoutExpired) as e:
+        r = subprocess.CompletedProcess([], 1, "", str(e))
     answer = " ".join((r.stdout + r.stderr).split())[:200] or "no output"
-    log(f"{name}: Escape for {why}{' (--force)' if via == 'cmux' and can_force() else ''} through {via}: exit {r.returncode}: {answer}")
+    log(f"{name}: Escape for {why} through herdr: exit {r.returncode}: {answer}")
     if r.returncode:
-        notify(f"ops-unstick: {via} refused the Escape on {name} ({why}): {answer}", to=alert_to(name, s.get("transcript_path")))
+        notify(f"ops-unstick: herdr refused the Escape on {name} ({why}): {answer}", to=alert_to(name, s.get("transcript_path")))
         return False, answer
     return True, answer
 
@@ -299,7 +273,7 @@ def name_of(s):
 
 
 def herdr_sessions():
-    """Every pane on the factory's herdr servers whose foreground process is claude, in the shape cmux's sessions take: its surface is
+    """Every pane on the factory's herdr servers whose foreground process is claude, as the cycle reads it: its surface is
     `herdr:<server>:<pane id>`, the form the Dashboard is to read, its argv stands for the launch arguments, and the registry entry at its pid,
     once SessionStart wrote one, gives the session id and transcript."""
     cfg = os.environ.get("CLAUDE_CONFIG_DIR", os.path.expanduser("~/.claude"))
@@ -336,89 +310,8 @@ def herdr_panes(server, cfg):
     return out
 
 
-# A start as `ps -o lstart=` prints it under C (`Mon Oct  5 23:37:23 2026`), the one shape a registry procStart is compared in (peers.ts).
-LSTART = re.compile(r"^[A-Z][a-z]{2} [A-Z][a-z]{2} +\d{1,2} \d{2}:\d{2}:\d{2} \d{4}$")
-
-
-def cmux_may_hold(found):
-    """Whether cmux may run a session: one live in Claude's registry, any but a headless run (entrypoint sdk-cli, as spawn.sh reads it),
-    its procStart the pid's start now, that no herdr pane in `found` holds. Read with no cmux call, so a factory all on herdr asks cmux nothing;
-    a registry file that does not read, a ps that cannot run, or a procStart not in lstart's shape (peers.ts's rule) counts as yes, and cmux is
-    asked as before. A session under another Claude config folder is not in this registry."""
-    entries = {}
-    for path in glob.glob(os.path.join(os.environ.get("CLAUDE_CONFIG_DIR", os.path.expanduser("~/.claude")), "sessions", "*.json")):
-        pid = os.path.basename(path)[:-5]
-        if not pid.isdigit():
-            continue
-        try:
-            d = json.load(open(path))
-        except (OSError, ValueError):
-            return True
-        if isinstance(d, dict) and d.get("entrypoint") != "sdk-cli":
-            entries[pid] = d
-    pids = sorted(set(entries) - {s["pid"] for s in found})
-    if not pids:
-        return False
-    try:
-        out = subprocess.run(["ps", "-o", "pid=,lstart=", "-p", ",".join(pids)], capture_output=True, text=True, timeout=20, env=os.environ | {"LC_ALL": "C", "TZ": "UTC"}).stdout
-    except (OSError, subprocess.TimeoutExpired):
-        return True
-    starts = {p[0]: " ".join(p[1].split()) for p in (l.split(None, 1) for l in out.splitlines()) if len(p) == 2}
-    for pid in pids:
-        start = entries[pid].get("procStart")
-        if pid in starts and (not isinstance(start, str) or not LSTART.match(start) or " ".join(start.split()) == starts[pid]):
-            return True
-    return False
-
-
-def sessions():
-    """cmux's sessions and herdr's; cmux is asked only while it may hold one, and its failing fails the cycle only when herdr runs no session either."""
-    found = herdr_sessions()
-    if not cmux_may_hold(found):
-        return found
-    try:
-        return cmux_sessions() + found
-    except (OSError, RuntimeError, ValueError, subprocess.TimeoutExpired):
-        if found:
-            return found
-        raise
-
-
-def cmux_sessions():
-    """Every terminal surface in cmux's tree (every window, every pane, so a session sharing a workspace counts) whose tty runs Claude Code,
-    with its pid, name and transcript; cmux's session list can name a workspace the surface has left, so the tree is the map."""
-    tree = json.loads(cmux(["tree", "--all", "--json", "--id-format", "both"], 30))
-    ps = subprocess.run(["ps", "-A", "-o", "pid=,tty=,comm="], capture_output=True, text=True, timeout=20).stdout
-    by_tty = {}
-    for row in ps.splitlines():
-        parts = row.split(None, 2)
-        if len(parts) == 3 and os.path.basename(parts[2].strip()) == "claude":
-            by_tty.setdefault(parts[1], parts[0])
-    try:
-        listed = {str(x.get("pid")): x for x in json.loads(cmux(["sessions", "list", "--json", "--limit", "500"], 30)).get("sessions", [])}
-    except (RuntimeError, ValueError):
-        listed = {}
-    out = []
-    for w in tree.get("windows", []):
-        for ws in w.get("workspaces", []):
-            for pane in ws.get("panes", []):
-                for sf in pane.get("surfaces", []):
-                    tty = (sf.get("tty") or "").removeprefix("/dev/")
-                    pid = by_tty.get(tty)
-                    if sf.get("type") != "terminal" or not pid:
-                        continue
-                    x = listed.get(pid, {})
-                    out.append({"launch_arguments": x.get("launch_arguments"), "pid": pid, "session_id": x.get("session_id") or f"tty-{tty}",
-                                "surface_id": sf.get("id") or sf["ref"], "surface_ref": sf["ref"], "title": re.sub(r"^\W+\s*", "", sf.get("title") or ""), "transcript_path": x.get("transcript_path"),
-                                "workspace_id": ws.get("id") or ws["ref"]})
-    return out
-
-
 def screen(s):
-    if s.get("herdr"):
-        text = herdr(s["herdr"], ["pane", "read", s["pane"], "--source", "visible"])
-    else:
-        text = cmux(["read-screen", "--workspace", s["workspace_id"], "--surface", s["surface_id"]])
+    text = herdr(s["herdr"], ["pane", "read", s["pane"], "--source", "visible"])
     return [l for l in text.splitlines()][-BOTTOM:]
 
 
@@ -1021,7 +914,7 @@ def shutdown_alert(names):
 
 
 def cycle(state):
-    live = sessions()
+    live = herdr_sessions()
     blocks, now_t, cleared = {}, time.time(), []
     mover = moving(now_t)
     kinds = roster_kinds()
@@ -1089,7 +982,7 @@ def cycle(state):
             blocks[key]["alerted"] = now_t
             msg = f"{name} is blocked on a {kind} prompt, waiting {ago(since)}: {line}"
             if kind == "permission":
-                msg = f"{msg} {prompt_answer(name, s['session_id'], lines, bool(s.get('herdr')))}".rstrip()
+                msg = f"{msg} {prompt_answer(name, s['session_id'], lines)}".rstrip()
             if kind == "usage-limit":
                 limit_alert(name, line, s.get("transcript_path"))
             else:
