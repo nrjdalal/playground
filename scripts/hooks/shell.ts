@@ -18,6 +18,8 @@ type Lexer = {
   commands: Command[]
   i: number
   known: Record<string, string>
+  learned: string[]
+  learning: boolean
   scope: number
   scopes: number[]
   src: string
@@ -244,10 +246,46 @@ function decode(raw: string): string {
   )
 }
 
-export function lex(src: string, known: Record<string, string> = {}): Lexed {
-  const lx: Lexer = { commands: [], i: 0, known, scope: 0, scopes: [-1], src }
+// learn: a literal assignment earlier in the command becomes known to the words after it (learn(), below), for a hook that judges text; other hooks keep such a variable unknown, as their refusals of a variable wrapper or a variable cd need.
+export function lex(src: string, known: Record<string, string> = {}, learn = false): Lexed {
+  const lx: Lexer = {
+    commands: [],
+    i: 0,
+    known: { ...known },
+    learned: [],
+    learning: learn,
+    scope: 0,
+    scopes: [-1],
+    src,
+  }
   list(lx, 0, false)
   return { commands: lx.commands, scopes: lx.scopes }
+}
+
+// A bare assignment of a non-empty literal the shell surely runs (at the top level, after a ; or a newline, unpiped, before any compound command, eval or source) becomes known to the words after it, when the command names that variable nowhere else.
+function learn(lx: Lexer, cmd: Command, raws: string[], sure: boolean): void {
+  const head = cmd.words[0]
+  if (head && !head.quoted && (RESERVED.has(head.value) || head.value === "function")) {
+    lx.learning = false
+  }
+  if (["eval", "source", "."].includes(parse(cmd).name)) {
+    for (const name of lx.learned) delete lx.known[name]
+    lx.learning = false
+  }
+  const bare =
+    cmd.words.length > 0 && raws.length === cmd.words.length && raws.every((r) => ASSIGN.test(r))
+  if (!sure || !lx.learning || cmd.detached || cmd.group || cmd.stdin || !bare) return
+  cmd.words.forEach((w, k) => {
+    const eq = w.value.indexOf("=")
+    const name = w.value.slice(0, eq)
+    const value = w.value.slice(eq + 1)
+    if (value === "" || w.unknown || w.reads?.length || marked(value) || raws[k].includes("~"))
+      return
+    const mentions = lx.src.match(new RegExp(`(?<![\\w$])(?<!\\$\\{)${name}(?!\\w)`, "g"))
+    if (mentions?.length !== 1) return
+    lx.known[name] = value
+    lx.learned.push(name)
+  })
 }
 
 // A subshell or a substitution is a scope of its own, so a cd inside it stays inside it.
@@ -270,12 +308,17 @@ function walk(lx: Lexer, scope: number, nested: boolean, inherit?: Command): voi
   const pending: Pending[] = []
   const fresh = (): Command => ({ redirects: [], scope, stdin: inherit, words: [] })
   let cmd = fresh()
+  let raws: string[] = []
+  let after = ";"
   // A pipeline's commands and a backgrounded one run in subshells: a cd there leaves the shell where it was.
   const end = (op: string) => {
     const done = cmd
     const pipe = op === "|" || op === "|&"
     if (pipe || op === "&") done.detached = true
     if (done.words.length > 0 || done.redirects.length > 0 || done.group) lx.commands.push(done)
+    learn(lx, done, raws, scope === 0 && !nested && after === ";")
+    after = op
+    raws = []
     cmd = fresh()
     if (pipe) {
       cmd.stdin = done
@@ -330,6 +373,7 @@ function walk(lx: Lexer, scope: number, nested: boolean, inherit?: Command): voi
     } else {
       const from = lx.i
       cmd.words.push(word(lx))
+      raws.push(src.slice(from, lx.i))
       if (lx.i === from) lx.i++
     }
   }

@@ -367,7 +367,7 @@ async function inspect(
       process: environment,
       vars: new Map(),
     }
-    return run(lex(command, env.known), env, comment)
+    return run(lex(command, env.known, true), env, comment)
   }
   if (typeof tool === "string" && MCP_COMMENT.test(tool)) return mcp(tool, input)
 }

@@ -548,6 +548,21 @@ describe("gh api", () => {
       "gh api graphql -F query=@missing.graphql -f body=release",
       "guarded",
     ],
+    [
+      "a GraphQL mutation held in a variable set earlier in the command",
+      `Q='mutation { addComment(input: {subjectId: "I_1", body: "release"}) { clientMutationId } }'; gh api graphql -f query="$Q"`,
+      "other",
+    ],
+    [
+      "a GraphQL query held in a variable set in a subshell",
+      `(Q='query { viewer { login } }'); gh api graphql -f query="$Q"`,
+      "other",
+    ],
+    [
+      "a GraphQL query held in a variable set in a pipeline",
+      `Q='query { viewer { login } }' | cat; gh api graphql -f query="$Q"`,
+      "other",
+    ],
   ] as const)("refuses %s", async (_, command, dir) => {
     expect(await bash(command, where(dir))).toContain("no-release-comment hook refused")
   })
@@ -562,6 +577,10 @@ describe("gh api", () => {
       'gh api graphql -f query=\'query { repository(owner: "qmarsh", name: "demo") { releases(last: 1) { nodes { tagName } } } }\'',
     ],
     ["a clean body", 'gh api repos/qmarsh/demo/issues/1/comments -f body="ship it"'],
+    [
+      "a GraphQL query held in a variable set earlier in the command",
+      `Q='query { viewer { login } }'; gh api graphql -f query="$Q"`,
+    ],
   ])("allows %s", async (_, command) => {
     expect(await bash(command)).toBeUndefined()
   })
