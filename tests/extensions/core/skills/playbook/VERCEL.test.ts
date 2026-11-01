@@ -49,4 +49,12 @@ describe("VERCEL.md", () => {
     )
     expect(done).toBeGreaterThan(lines.indexOf(exported))
   })
+
+  test("dates only what a record dates: the opening says measured, and the hang step cites its probes' day", async () => {
+    const lines = (await read("VERCEL.md")).split("\n")
+    expect(lines.find((l) => l.startsWith("Three traps"))).toBe(
+      "Three traps one CLI deploy met (measured), each a step at the command it follows.",
+    )
+    expect(lines.find((l) => l.includes("`createAdaptorServer`"))).toContain("measured, 31 Oct")
+  })
 })
