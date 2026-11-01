@@ -304,6 +304,15 @@ describe(`a Acme write holding a ${OLD.dispatcher} term is refused`, () => {
     expect(reason).toContain("a factory term")
   })
 
+  // no-extension-repo-write reads `repo` as a gh verb after an unknown program, which must leave this verdict as it is
+  test("an unknown program's words before a git push still carry it to the push", async () => {
+    const reason = await bash(
+      `$X repo git push https://github.com/acme-blue/app.git HEAD:${OLD.dispatcher}`,
+    )
+    expect(reason).toContain("no-playground-leak hook refused git push")
+    expect(reason).toContain("a factory term")
+  })
+
   test("git push of HEAD carries the branch it names on the remote", async () => {
     expect(await bash("git push -u origin HEAD", dirs.named)).toContain(`"${OLD.builder}"`)
     expect(await bash("git push origin @", dirs.named)).toContain(`"${OLD.builder}"`)

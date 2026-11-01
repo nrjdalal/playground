@@ -467,7 +467,7 @@ describe("a git command that moves the main checkout's HEAD, index or files is r
     ["worktree list", "git worktree list"],
     ["a worktree's end", "git worktree remove .claude/worktrees/x"],
     ["a branch's end", "git branch -D fix-x"],
-    ["a branch list", "git branch --list 'lm-*'"],
+    ["a branch list", "git branch --list 'vx-*'"],
     ["stash list", "git stash list"],
     ["a dry clean", "git clean -n"],
     ["a dry add", "git add -n -A"],

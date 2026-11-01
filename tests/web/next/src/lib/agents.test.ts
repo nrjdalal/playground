@@ -982,7 +982,7 @@ describe("ticketOf", () => {
   test("the roster's ticket, else the one its branch names (the API's branchTicket)", () => {
     expect(ticketOf(agent("worker-a", { branchTicket: "PG-12", ticket: "NOVA-5" }))).toBe("NOVA-5")
     expect(ticketOf(agent("worker-a", { branchTicket: "PG-12" }))).toBe("PG-12")
-    expect(ticketOf(agent("worker-a", { branch: "lm-ui-menu" }))).toBeNull()
+    expect(ticketOf(agent("worker-a", { branch: "vx-ui-menu" }))).toBeNull()
     expect(ticketOf(null)).toBeNull()
   })
 

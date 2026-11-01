@@ -107,7 +107,7 @@ describe("up", () => {
     await up.run(first.ctx)
     expect(first.runs).toEqual([["python3", "-I", "/repo/scripts/ops/up.py"]])
     expect(first.sent).toEqual([{ text: said, to: "ops" }])
-    const failed = "could not start ops-dashboard in cmux (process gone); see up.log"
+    const failed = "could not start ops-dashboard in herdr (process gone); see up.log"
     const again = fake(ops, at(13, 10), { "up.py": `${said}\n${failed}` })
     await up.run(again.ctx)
     expect(again.sent).toEqual([{ text: failed, to: "ops" }])
