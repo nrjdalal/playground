@@ -88,6 +88,26 @@ describe("a build, a test run, lefthook, turbo or a file write in the main check
     ],
     ["a build through run-slot", "~/.playground/ops/run-slot.sh w -- bun run build"],
     ["a write through run-slot", "~/.playground/ops/run-slot.sh w -- sed -i 's/a/b/' notes.txt"],
+    ["a commit through bash run-slot", "bash ~/.playground/ops/run-slot.sh w -- git commit -m x"],
+    ["a build through sh -e run-slot", "sh -e ~/.playground/ops/run-slot.sh w -- bun run build"],
+    ["a commit in zsh -O -c, whose -O takes no value", "zsh -O -c 'git commit -m x'"],
+    ["a commit in zsh -c -O, whose -O takes no value", "zsh -c -O 'git commit -m x'"],
+    [
+      "a commit through bash -O run-slot",
+      "bash -O extglob ~/.playground/ops/run-slot.sh w -- git commit -m x",
+    ],
+    [
+      "a commit through bash +O run-slot",
+      "bash +O extglob ~/.playground/ops/run-slot.sh w -- git commit -m x",
+    ],
+    [
+      "a commit through bash --rcfile run-slot",
+      "bash --rcfile /tmp/rc ~/.playground/ops/run-slot.sh w -- git commit -m x",
+    ],
+    [
+      "a commit through bash --init-file run-slot",
+      "bash --init-file /tmp/rc ~/.playground/ops/run-slot.sh w -- git commit -m x",
+    ],
     ["inside a shell it starts", "bash -c 'lefthook run pre-commit'"],
     [
       "lefthook started by bun, as lefthook.yml spells it",
@@ -291,6 +311,8 @@ describe("what keeps the main checkout up to date, or only reads it, runs", () =
       `~/.playground/ops/run-slot.sh w -- env K=V git -C ${WORKTREE} commit -m x`,
     ],
     ["run-slot with no command", "~/.playground/ops/run-slot.sh w"],
+    ["a read through bash run-slot", "bash ~/.playground/ops/run-slot.sh w -- git status --short"],
+    ["another script through bash", "bash scripts/other.sh w -- git commit -m x"],
     ["curl to stdout", "curl -sS https://example.com"],
     ["curl to stdout by -o -", "curl -sS -o - https://example.com"],
     ["turbo in a worktree by its --cwd", "turbo run build --cwd .claude/worktrees/a"],
