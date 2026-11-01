@@ -142,6 +142,40 @@ const accountIn = (text: string): string | null => {
   }
 }
 
+// ops-usage keeps a map entry while its reading is under FRESH_FOR (scripts/ops/usage/run.py) and probes each account again only every PROBE_EVERY (840 s), so an entry the job still writes is up to this old.
+const MAP_FRESH_MS = 30 * 60 * 1000
+
+// Pure: usage.json's accounts map, which ops-usage's accounts_reading() writes for each account the factory spends into, as one reading per account: its week share and reset and no 5-hour reading, read when readAt says. It is stale when usage.json itself is (the job stopped writing the map) or its reading is past MAP_FRESH_MS; an entry off that shape is left out.
+const mapAccountsOf = (text: string, now: Date): AccountUsage[] => {
+  let file: unknown
+  try {
+    file = JSON.parse(text)
+  } catch {
+    return []
+  }
+  if (!isRecord(file) || !isRecord(file.accounts) || typeof file.writtenAt !== "string") return []
+  const written = Date.parse(file.writtenAt)
+  if (Number.isNaN(written)) return []
+  const fileStale = now.getTime() - written > USAGE_STALE_MS
+  return Object.entries(file.accounts).flatMap(([account, entry]) => {
+    if (!account.trim() || !isRecord(entry) || typeof entry.readAt !== "string") return []
+    const read = Date.parse(entry.readAt)
+    const sevenDay = windowOf({ resets_at: entry.weekReset, used_percentage: entry.week })
+    if (Number.isNaN(read) || !sevenDay?.resetsAt) return []
+    return [
+      {
+        account: account.trim(),
+        usage: {
+          fiveHour: null,
+          sevenDay,
+          stale: fileStale || now.getTime() - read > MAP_FRESH_MS,
+          writtenAt: new Date(read).toISOString(),
+        },
+      },
+    ]
+  })
+}
+
 // Pure: the accounts in their fixed order, the main login first (the one Claude Code's config names), then the rest A to Z.
 const accountOrder = (accounts: AccountUsage[], main: string | null): AccountUsage[] => {
   const isMain = (a: AccountUsage) => a.account.toLowerCase() === main?.toLowerCase()
@@ -150,13 +184,14 @@ const accountOrder = (accounts: AccountUsage[], main: string | null): AccountUsa
   )
 }
 
-// Every usage-*.json the ops-usage job writes in the data folder, one per account, and usage.json under the account it names, in accountOrder; a file with no account or no window is left out, and of two naming one account, in any case, the later written stays.
+// Every usage-*.json the ops-usage job writes in the data folder, one per account, usage.json under the account it names, and each account in usage.json's accounts map, in accountOrder; a file with no account or no window is left out. Of two readings of one account, in any case, the later written stays, but a map entry beats a file only when the file is stale, since a file holds the 5-hour window the map lacks.
 export async function readAccountUsages(
   main: string | null,
   dir = dataDir(),
   now = new Date(),
 ): Promise<AccountUsage[]> {
   const accounts = new Map<string, AccountUsage>()
+  const mapped: AccountUsage[] = []
   try {
     const names = [
       "usage.json",
@@ -172,6 +207,13 @@ export async function readAccountUsages(
       const seen = key && accounts.get(key)
       if (account && key && usage && !(seen && seen.usage.writtenAt > usage.writtenAt))
         accounts.set(key, { account, usage })
+      if (name === names[0]) mapped.push(...mapAccountsOf(text, now))
+    }
+    for (const entry of mapped) {
+      const key = entry.account.toLowerCase()
+      const file = accounts.get(key)
+      if (!file || (file.usage.stale && file.usage.writtenAt < entry.usage.writtenAt))
+        accounts.set(key, entry)
     }
   } catch {
     return []
