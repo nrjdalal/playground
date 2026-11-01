@@ -232,6 +232,11 @@ describe("a quick run takes its own slot past a full queue", () => {
     expect(await quick(["bun", "run", "test:file", "b.test.ts"], [39, 421, 226, 61])).toBe(false)
   })
 
+  test("but one whose last 3 runs each took exactly 60 s still takes quick", async () => {
+    expect(await quick(["bun", "run", "test:file", "b.test.ts"], [60, 60, 60])).toBe(true)
+    expect(took).toBe("run-slot-quick")
+  })
+
   test("but one with a short run among its last 3 still takes quick", async () => {
     expect(await quick(["bun", "run", "test:file", "b.test.ts"], [37, 36, 33, 39, 421, 226])).toBe(
       true,
