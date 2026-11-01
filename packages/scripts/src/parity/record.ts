@@ -8,7 +8,7 @@ type Kind = { docs: string[]; settings: string[]; values: string[] }
 
 const SKILL = "playbook/SKILL.md"
 
-// The factory's standing rules: each is its own file under core's rules/, which the SessionStart rules hook renders, and SKILL.md keeps the glance line of a rule still waiting in a scope's own folder.
+// The factory's standing rules: each is its own file under core's rules/ or an extension's rules/, whose glance the SessionStart rules hook renders, and SKILL.md points at them with no glance of its own.
 const FACTORY = [SKILL, "core/rules/"]
 
 // Where each factory input lived before core took it, read when a tree lacks it, so a tree from before the move records the same ids.
