@@ -192,10 +192,10 @@ if [ "${1:-}" = set ]; then
   echo "run-slot.sh: $path is on until $ends"
   exit 0
 fi
+# every read subcommand below sets CAN_TAKE, so quick_kind never sends its bare true down the quick lane (run-slot-can-take.test.ts runs each)
 # run-slot.sh can-take <slot> <who>: exit 0 when that slot is free, its off-switches and load rules open it, and the load units (with that
 # session's reserve) fit, else 1, so a script that takes its slot itself reads them as every run here does (ops-unstick does; localci and
 # the merge train still take theirs by their own mkdir for now); it reads neither the queue nor run-slot.priority
-# every read subcommand below sets CAN_TAKE, so quick_kind never sends its bare true down the quick lane (run-slot-can-take.test.ts runs each)
 CAN_TAKE=
 # run-slot.sh head: prints the queue's head, the ticket first_waiter names (<ns>-<pid>-<who>), or nothing, so ops-unstick watches the waiter the queue serves next rather than the oldest
 HEAD_ONLY=

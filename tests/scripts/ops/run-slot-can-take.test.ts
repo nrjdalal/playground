@@ -92,10 +92,14 @@ describe("every read subcommand answers as before when the runs log holds three 
     expect(reads.map((args) => args[0])).toEqual(
       expect.arrayContaining(["can-take", "head", "slots"]),
     )
+    // a read written in another shape still counts here, so it fails rather than going untested
+    expect(reads).toHaveLength(
+      readFileSync(SCRIPT, "utf8").match(/set -- .*-- true\b/g)?.length ?? 0,
+    )
   })
 
   for (const args of reads)
-    test(`${args.join(" ")} prints its answer and adds no run to the log`, () => {
+    test(`${args.join(" ")} gives its answer and adds no run to the log`, () => {
       const answer = (short: boolean) => {
         const m = machine()
         m.ticket(2, "worker-m", "s2 22 2 medium")
@@ -108,7 +112,8 @@ describe("every read subcommand answers as before when the runs log holds three 
         const run = Bun.spawnSync(["bash", SCRIPT, ...args], { cwd: m.root, env: m.env() })
         return [run.exitCode, run.stdout.toString(), log() === before]
       }
-      expect(answer(true)).toEqual(answer(false))
-      expect(answer(true)[2]).toBe(true)
+      const short = answer(true)
+      expect(short).toEqual(answer(false))
+      expect(short[2]).toBe(true)
     })
 })
