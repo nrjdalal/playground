@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # The live dashboard's ops job outside any Claude session: supervisor.sh (dev + follower as its children, rolls each canary
 # merge), the off-loopback Docker watch, and a notifier that tells Ops (notify.sh) only about a FAIL,
-# DOWN or ANOMALY line in results.log, a watch alert, or the supervisor exiting. Run it as a cmux terminal's command, from the dashboard's
-# checkout. It follows its terminal: on SIGHUP, or once its parent has exited (the terminal is gone, as when cmux quits), it stops its
-# stack by the recorded process groups (procs.sh, never by name), so a detached stack never keeps the portless names cmux then refuses.
+# DOWN or ANOMALY line in results.log, a watch alert, or the supervisor exiting. up.py runs it as a herdr pane's command, from the dashboard's
+# checkout. It follows its terminal: on SIGHUP, or once its parent has exited (the pane is gone, as when its server stops), it stops its
+# stack by the recorded process groups (procs.sh, never by name), so a detached stack never keeps the portless names.
 D=$(cd "$(dirname "$0")" && pwd); OPS=$(dirname "$D")
 # The data folder, as packages/env/src/data-dir.ts resolves it: PLAYGROUND_DATA_DIR, else ~/.playground
 DATA=${PLAYGROUND_DATA_DIR:-$HOME/.playground}
@@ -17,7 +17,7 @@ stop() {
   kill -TERM -- "-$watch" 2>/dev/null; kill -TERM -- "-$sup" 2>/dev/null; wait "$sup" "$watch"
   "$D/procs.sh" stop dashboard-ingest; "$D/procs.sh" stop dashboard-dev; "$D/procs.sh" stop dashboard-web-next; "$D/procs.sh" stop dashboard-web
   python3 -I "$OPS/beat.py" ops-dashboard $$ "$started" 60 "loop exited: $1"
-  [ "$1" = TERM ] || "$OPS/notify.sh" dashboard "ops-dashboard stopped its stack ($1); up.py starts it again under the running cmux"
+  [ "$1" = TERM ] || "$OPS/notify.sh" dashboard "ops-dashboard stopped its stack ($1); up.py starts it again in herdr"
   exit 0
 }
 trap 'stop TERM' TERM INT
@@ -51,7 +51,7 @@ notify_new() {
 # One block, read whole before it runs, so a roll that rewrites this file never breaks the lines bash would read next
 {
   while kill -0 "$sup" 2>/dev/null; do
-    # a pid's parent changes only when that parent has exited (cmux quit, its terminal closed): launchd, or a subreaper, adopts it
+    # a pid's parent changes only when that parent has exited (its herdr pane closed): launchd, or a subreaper, adopts it
     parent=$(ps -o ppid= -p $$ | tr -d ' '); [ -n "$parent" ] && [ "$parent" != "$PPID" ] && stop "terminal gone"
     python3 -I "$OPS/beat.py" ops-dashboard $$ "$started" 60 "$(dashboard_result)"
     # a background sleep and wait, so a signal runs its trap at once rather than after the sleep
