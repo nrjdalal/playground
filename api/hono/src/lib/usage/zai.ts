@@ -17,6 +17,7 @@ const windowSchema = z.object({
 })
 
 const usageSchema = z.object({
+  balance: z.object({ empty: z.literal(true), seenAt: z.string() }).optional(),
   windows: z.object({
     fiveHour: windowSchema.nullable(),
     week: windowSchema.nullable(),
@@ -33,7 +34,11 @@ export type ZaiUsage = {
   writtenAt: string
 }
 
-// Pure: the file's text as the two credit windows, or null when it holds neither, no time it was written, or a shape the job does not write.
+// A window spent to its cap, as an empty balance reads.
+const spent = (window: ZaiWindow | null): ZaiWindow | null =>
+  window && { ...window, used: window.cap }
+
+// Pure: the file's text as the two credit windows, both spent while the job marks the balance empty, or null when it holds neither, no time it was written, a failed read (its error), or a shape the job does not write.
 export function zaiUsageOf(text: string, now: Date): ZaiUsage | null {
   let file: unknown
   try {
@@ -41,9 +46,12 @@ export function zaiUsageOf(text: string, now: Date): ZaiUsage | null {
   } catch {
     return null
   }
+  if (file && typeof file === "object" && "error" in file) return null
   const parsed = usageSchema.safeParse(file)
   if (!parsed.success) return null
-  const { fiveHour, week } = parsed.data.windows
+  const empty = parsed.data.balance !== undefined
+  const fiveHour = empty ? spent(parsed.data.windows.fiveHour) : parsed.data.windows.fiveHour
+  const week = empty ? spent(parsed.data.windows.week) : parsed.data.windows.week
   const { writtenAt } = parsed.data
   const written = Date.parse(writtenAt)
   if (Number.isNaN(written) || (!fiveHour && !week)) return null
@@ -58,6 +66,29 @@ export function zaiUsageOf(text: string, now: Date): ZaiUsage | null {
 // The report's problem line for a file the job stopped writing; a missing file is no problem, since a machine with no GLM plan has none.
 export const zaiProblem = (zai: ZaiUsage | null): string | null =>
   zai?.stale ? `The GLM credit windows are stale: last written ${zai.writtenAt}` : null
+
+const failureSchema = z.object({ error: z.string(), errorAt: z.string() })
+
+// Pure: the report's problem line for a read the job wrote as failed (its error and errorAt), or null; zaiUsageOf reads that file as no usage, so this line is the one trace of it.
+export function zaiFailureOf(text: string): string | null {
+  try {
+    const parsed = failureSchema.safeParse(JSON.parse(text))
+    return parsed.success
+      ? `The GLM usage read failed at ${parsed.data.errorAt}: ${parsed.data.error}`
+      : null
+  } catch {
+    return null
+  }
+}
+
+// The file's failed read as zaiFailureOf names it; a missing or unreadable file is none.
+export async function readZaiFailure(path = zaiPath()): Promise<string | null> {
+  try {
+    return zaiFailureOf(await Bun.file(path).text())
+  } catch {
+    return null
+  }
+}
 
 // The file as zaiUsageOf reads it; a missing or unreadable one is no usage.
 export async function readZaiUsage(path = zaiPath(), now = new Date()): Promise<ZaiUsage | null> {

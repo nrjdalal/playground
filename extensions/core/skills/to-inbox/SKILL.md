@@ -8,16 +8,19 @@ license: Complete terms in the repository's NOTICE
 
 An Inbox card is read in seconds, in the aside's narrow column. This skill makes each item **glanceable**: the owner sees the point first, then the facts, then what Approve does. The item's shape (its picture, its bullets and its two choices, in that order), its width rule and the `bun run ask` commands live in asks.md's "The ask's shape" ([.agents/dashboard/asks.md](../../../../.agents/dashboard/asks.md)); this skill picks the picture and writes the words.
 
-An `ask` decision renders its text as markdown, with its attachments under it: every step applies. The read-only card, an update carrying an ask's `text` and `attachments`, renders the same with no Approve or Deny: post it for something the owner only looks at (a table, a preview), and it takes every step but 5. Every other kind shows plain text, exactly as it goes out, so it takes fewer steps:
+An `ask` decision renders its text as markdown, with its attachments under it: every step applies. The read-only card, an update carrying an ask's `text` and `attachments`, renders the same with no Approve or Deny: post it for something the owner only looks at (a table, a preview), and it takes every step but 6. Every other kind shows plain text, exactly as it goes out, so it takes fewer steps, step 1 always first:
 
-- An update with no `text`, or a `ship` or `schema` decision, carries only its fields, which the card lays out itself: its title takes step 3, then steps 6 and 7.
-- A `delete` or `budget` decision's `why` is free text, shown as written: it takes steps 2 and 3 as plain lines, one fact each, then steps 6 and 7.
-- A draft, a `slack` decision or a `ticket` decision is the message or ticket itself, so it keeps that text's own shape and takes steps 3, 6 and 7.
-- A `secret` ask carries only its key and sink, which the card words itself: its title takes step 3, then step 7; the value itself is the owner's to type into the card, so it appears nowhere in the item.
+- An update with no `text`, or a `ship` or `schema` decision, carries only its fields, which the card lays out itself: its title takes step 4, then steps 7 and 8.
+- A `delete` or `budget` decision's `why` is free text, shown as written: it takes steps 3 and 4 as plain lines, one fact each, then steps 7 and 8.
+- A draft, a `slack` decision or a `ticket` decision is the message or ticket itself, so it keeps that text's own shape and takes steps 4, 7 and 8.
+- A `secret` ask carries only its key and sink, which the card words itself: its title takes step 4, then step 8; the value itself is the owner's to type into the card, so it appears nowhere in the item.
+
+Pick the kind by how its card closes (asks.md's `settle` and `resolve` lines): you settle a decision or a draft you decided another way, you resolve an alert update that has fixed itself, and every other update stays editable until the owner dismisses it, so a card you will replace (a mock's first version) takes `bun run ask edit` before that.
 
 ## Steps
 
-1. **Picture.** Pick the one picture asks.md's shape leads with, within its `ASK_CODE_COLUMNS` rule. Attachments always show under the text, so an item with one keeps its text to the bullets. Done when the text's first block is that picture, or the item's first attachment is.
+1. **Already open?** Run `bun run ask open` before you write anything (asks.md). Done when no open item asks the same thing, or you have named that item's `#iN` in chat and stopped here.
+2. **Picture.** Pick the one picture asks.md's shape leads with, within its `ASK_CODE_COLUMNS` rule. Attachments always show under the text, so an item with one keeps its text to the bullets. Done when the text's first block is that picture, or the item's first attachment is.
 
    Beside asks.md's diff, ASCII flow and before and after pair, two more fit:
 
@@ -28,7 +31,7 @@ An `ask` decision renders its text as markdown, with its attachments under it: e
 
    Mermaid is to render once the Inbox takes it; until then, draw the flow in ASCII.
 
-2. **Bullets.** Write three to five of asks.md's bullets, one fact each, each led by one emoji: the legend's when one fits, else any emoji that names the fact, as asks.md's worked examples do (🧪, 🖼️). Done when no bullet holds two facts.
+3. **Bullets.** Write three to five of asks.md's bullets, one fact each, each led by one emoji: the legend's when one fits, else any emoji that names the fact, as asks.md's worked examples do (🧪, 🖼️). Done when no bullet holds two facts.
 
    | Emoji | Marks                      |
    | ----- | -------------------------- |
@@ -43,14 +46,14 @@ An `ask` decision renders its text as markdown, with its attachments under it: e
 
    A decision that needs more than one answer asks them as numbered questions, the most important first, one idea each, with a one-line why only where a question could be misread.
 
-3. **Plain words.** Write every sentence in ASD-STE100 Simplified Technical English, in the words of `GLOSSARY.md`. Done when each sentence passes all five:
+4. **Plain words.** Write every sentence in ASD-STE100 Simplified Technical English, in the words of `GLOSSARY.md`. Done when each sentence passes all five:
    - It is 20 words or fewer.
    - It says one thing.
    - Its verb is active: "I merge the PR", never "the PR is merged".
    - It speaks in the first person singular, "I", never "we" or the session's name: the poster's "I" in an ask, the owner's in a draft or a `slack` decision, which goes out in his voice (asks.md).
-   - Each word keeps one meaning across the item, and a time reads in IST, am/pm ("9:30 pm IST").
+   - Each word keeps one meaning across the item, and a time reads in IST, am/pm ("9:30 pm IST"); a now-time is `{now}`, which `bun run ask` fills with the time it posts at.
 
-4. **Callout.** When one fact must not be missed, put it in one GitHub callout after the bullets. Done when the item holds one callout or none.
+5. **Callout.** When one fact must not be missed, put it in one GitHub callout after the bullets. Done when the item holds one callout or none.
 
    | Callout          | For                                       |
    | ---------------- | ----------------------------------------- |
@@ -60,11 +63,11 @@ An `ask` decision renders its text as markdown, with its attachments under it: e
    | `> [!NOTE]`      | context the choice depends on             |
    | `> [!TIP]`       | a faster way the owner may like           |
 
-5. **Choices.** Write asks.md's `approve` and `deny` labels in the same plain words. Done when each label starts with a verb.
+6. **Choices.** Write asks.md's `approve` and `deny` labels in the same plain words. Done when each label starts with a verb.
 
-6. **Fake data.** Read the text and every attachment once more. Done when no part holds a token, a customer detail or a real database row, and a demo's or screenshot's names and rows are made up.
+7. **Fake data.** Read the text and every attachment once more. Done when no part holds a token, a customer detail or a real database row, and a demo's or screenshot's names and rows are made up.
 
-7. **Post.** Post it with `bun run ask new`, as asks.md says, and read stderr. Done when `bun run ask` prints the item's id and no shape hint; on a hint, the item has already posted, so fix what the hint names and replace it in place with `bun run ask edit <id> < item.json`, until edit prints no hint.
+8. **Post.** Post it with `bun run ask new`, as asks.md says, and read stderr. Done when `bun run ask` prints the item's id and no shape hint; on a hint, the item has already posted, so fix what the hint names and replace it in place with `bun run ask edit <id> < item.json`, until edit prints no hint.
 
 ## Example
 

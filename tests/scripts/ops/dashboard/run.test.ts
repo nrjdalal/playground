@@ -38,6 +38,20 @@ describe("the dashboard's heartbeat result", () => {
     ).toBe("ok")
   })
 
+  // the alias check's lines sit last in results.log between rolls, so its PASS reads ok and its FAIL reads as failing
+  test("reads ok once the bare aliases hold the live ports again, and failing while one does not", async () => {
+    expect(
+      await resultOf(
+        "2026-10-31T21:00:00Z ALIAS PASS playground.localhost and api.playground.localhost hold the live stack's ports 4842 and 4843",
+      ),
+    ).toBe("ok")
+    expect(
+      await resultOf(
+        "2026-10-31T21:00:00Z ALIAS FAIL playground.localhost points at port 4851, but the live stack's desk.playground.localhost is on 4842",
+      ),
+    ).toStartWith("ALIAS FAIL playground.localhost points at port 4851")
+  })
+
   test("reads ok once the follower's first start after first run's setup is healthy", async () => {
     expect(
       await resultOf("2026-10-19T05:05:41Z START follower follower=running follower: running"),

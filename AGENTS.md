@@ -179,6 +179,7 @@ ZeroStarter's rules above govern Playground too; this section adds its own.
 - ALWAYS: Land everything you learn in this repo, as a PR or a line to your lead (playbook's **memory** rule), so every session works better from what one learned.
   Claude Code's auto-memory (`~/.claude/projects/*/memory`) stays off: `.claude/settings.json` and `scripts/factory-settings.json` set `autoMemoryEnabled` to false, and `tests/scripts/factory-settings.test.ts` holds both to it; [ADR 0009](./.agents/adr/0009-learnings-live-in-the-repo.md) records why.
 - ALWAYS: Track Playground's work as GitHub issues on the repo `factory.repo` names, so every item carries a number: an item's ID is `PG-<issue number>`, its branch `PG-<n>-<slug>`, its PR scope `(PG-<n>)`, and the issue stays open until the PR that says `Closes #<n>` merges.
+  The repo tracks the factory's own work alone, since an org's work goes in that org's extension repo and a person's in their login extension ([ADR 0016](./.agents/adr/0016-playground-is-generic-with-a-small-core.md)).
   The key is written uppercase, and branch and title readers take either case; macOS ignores case, so a new branch never reuses an old one's number and slug in the other case.
   Research and findings go in issues too, labelled `research`, with no customer data, production numbers or secrets.
   For Playground this replaces the Working notes' "closed once captured": an issue stays open while its work is live, and its `doc plan-<slug>` item still holds the plan.
@@ -212,28 +213,9 @@ ZeroStarter's rules above govern Playground too; this section adds its own.
 - A factory session starts another only through `scripts/spawn.sh`, whose capacity gate, backends, models, runtimes, resume and restore are in [scripts/README.md](./scripts/README.md#spawnsh): read it before you change spawn.sh or when it refuses a start you did not expect;
   `no-raw-spawn` refuses a cmux call that opens a claude session, and every herdr call but a read or one to a scratch world of the session's own.
 - The herdr servers belong to one ops job, `bun run ops:herdr`, on the binary and config its `pin.json` names ([scripts/README.md](./scripts/README.md#the-herdr-servers)), read before you change that job or herdr's pinned binary or config.
-- The factory's hooks, each in full under its name in [scripts/hooks/README.md](./scripts/hooks/README.md), which a session reads before it changes a hook, its tests or its registration, or when a hook refuses a call it did not expect;
-  five more registered hooks are named in the lines above, each with its own pointer to its text (`no-bare-slack-link`, `no-playground-leak`, `no-linear-ticket`, `no-raw-spawn`, `no-release-comment`), and the rest are these:
-  - `.claude/settings.json` registers every hook `scripts/factory-settings.json` does under the same command string, byte for byte, so a session cmux restores without its settings keeps its guards and runs each once.
-  - `after-compact` tells a factory session that has just compacted to load playbook again and reread its roster entry, open Inbox items and PRs.
-  - `after-resume` tells a resumed factory session to re-arm its loops, crons and watches, and re-send each message unanswered in the 10 minutes before the restart.
-  - `no-chat-question`, the Stop hook of the dispatcher and the leads, refuses a final reply that asks the owner for a decision or an action unless it names an open `#iN`: name the one already open on the same thing, or else post it with `bun run ask new`.
-  - `no-env-dump` refuses printing the environment (`env` with no command, `printenv`, a bare `set`, `declare`, `export` or `typeset`), since it holds tokens.
-  - `no-false-green` refuses bun given `--opt <value>` before its `run` or `test`, and a test run (bun's, or pytest, ty or ruff) piped on with no `pipefail` or pipe status, so a red run reads red.
-  - `no-glm-heavy-path` keeps a GLM session's commits and pushes off the heavy paths, and holds its installs, clones, commits and pushes while load5 is over 15 (playbook's **glm**).
-  - `no-headless-login` refuses a factory session's `claude -p` that sets no `CLAUDE_CODE_OAUTH_TOKEN`, and its `PLAYGROUND_ROLE` when its environment lacks one: run it in the shape its reason gives.
-  - `no-mac-web-build` refuses a web image build on the Mac while the live dashboard's Postgres runs in its Docker VM: build it on the box with `ci.sh web HEAD`.
-  - `no-main-checkout` refuses a build, test, commit, write or git move in the main checkout: run it in your own worktree, with `git -C <your worktree>` or `cd <worktree> && …` in one command, since a failed command leaves the Bash tool's shell in its old folder without a word.
-  - `no-manager-subagent` refuses a manager the Agent and Workflow tools: start a worker through `scripts/spawn.sh` and brief it.
-  - `no-off-palette-label` refuses any session's GitHub label create or edit whose color is not a Tailwind 500, and a create with no color: give one of the 22 hexes its reason names.
-  - `no-ours-merge` refuses a merge or pull with the ours strategy or option: run `git merge origin/canary` and resolve each conflict with both sides' meaning.
-  - `no-public-leak` refuses a write to a public repository (a pull request, issue, review or comment) that holds a name, a handle, a company term, a Slack id, a Linear key, an email, an `LM-<n>` or an archive link, naming the kind and never the text: say it in plain words.
-  - `no-prompt-stop` refuses the `rm` or `rmdir` shapes Claude Code stops on: a target with two or more parts starting with an unguarded variable (write `${VAR:?}` or a literal path), and a name directly in `/` (use `$TMPDIR` or your scratchpad).
-  - `no-stash` refuses a stash that could take another worktree's work, and `agent-browser close --all`.
-  - `no-unslotted-run` refuses a heavy run in a worktree (an install, a `node_modules` clone, a build, a type check, a suite) outside `~/.playground/ops/run-slot.sh`.
-  - `rules` gives a factory session its standing rules at every start.
-  - `session-state` writes every session's state to the data folder's `session-state/<session id>.json`, which ops-session-resume and the Dashboard read, and tells a factory session's manager the moment it writes `stuck` or `failed`.
-  - `writing-first` refuses a factory session's write to an agent-facing doc until it has loaded writing-for-agents since its last compaction: load it with the Skill tool, then retry.
+- The factory's hooks: read a hook's section of [scripts/hooks/README.md](./scripts/hooks/README.md) before you change it, its tests or its registration, and when it refuses a call you did not expect, since the README holds each one in full and its reason names the fix.
+  Five have their own lines above (`no-bare-slack-link`, `no-linear-ticket`, `no-playground-leak`, `no-raw-spawn`, `no-release-comment`);
+  the rest are `after-compact`, `after-resume`, `no-chat-question`, `no-env-dump`, `no-false-green`, `no-glm-heavy-path`, `no-headless-login`, `no-kill-by-name`, `no-mac-web-build`, `no-main-checkout`, `no-manager-subagent`, `no-off-palette-label`, `no-ours-merge`, `no-prompt-stop`, `no-public-leak`, `no-stash`, `no-unslotted-run`, `rules`, `session-state` and `writing-first`.
 
 ### The factory
 
@@ -245,7 +227,7 @@ Playground's sessions run as a factory: the dispatcher manages, the Builder lead
   A pattern matches the live dashboard and every worker's stack.
   A port is no narrower: whoever holds portless's proxy port is the proxy every worktree routes through, the live dashboard's included.
   Stop a background task with `TaskStop`, a dev stack whose starting session has gone with `bun run dev:stop` (it signals only the process groups of the launcher its checkout recorded), and a child you spawned through its own pid or process group; every brief you write carries this rule.
-  `tests/test_kill_by_name.py` fails on a kill by name, pattern or port anywhere in the repo's text.
+  The `no-kill-by-name` hook refuses a kill by name, pattern or port in a factory session's command, and `tests/test_kill_by_name.py` fails on one anywhere in the repo's text.
 
 ### The dashboard app
 
@@ -307,7 +289,10 @@ The owner does not review Playground PRs: the review loop is the gate ([ADR 0004
    Before the review's round 1, settle in your own pass what a round should never spend its turn on (most late findings were docs, skill, body and wording ones): run doc-sync over the change, give each touched doc and skill a writing-for-agents read (a completion criterion on every step, positive phrasing, reference disclosed into sibling files, one meaning in one place),
    and fill the template above; the reviewer still judges everything.
    When the diff adds a member to an enumerated kind (a status, a type, a choice, a button), grep the repo for the wording of every list that names that kind's members (`git grep -n "Archive, Snooze"`) and update each hit: one such grep once found what six review rounds had found piece by piece.
-   Done when the body's Evidence names each touched doc and skill with its check, doc-sync's result and each list grep with its hits, before the review's round 1 opens.
+   As part of that doc-sync pass, run the changed-term grep for each term whose meaning the diff changes (a behaviour, a rule, what a command does): `git grep -l <term>` over the agent-facing docs, then update every hit still describing the old meaning, since one PR took 7 rounds when each round found one more doc that did.
+   After you merge `canary` into the branch, run that grep for what the incoming commits changed: list each term whose meaning they changed (`git log -p HEAD^1..HEAD^2` while the merge commit is `HEAD`), grep the PR's own changed docs for each,
+   and fix every line still describing the old meaning in a commit after the merge before you ask for the next round, since one PR spent two docs-only rounds, about 24 minutes, on lines a merged change had made stale; done when no line of the PR's docs describes a meaning those commits changed.
+   Done when the body's Evidence names each touched doc and skill with its check, doc-sync's result and each list grep and changed-term grep with its hits, before the review's round 1 opens.
 2. Have a reviewer agent other than its author (a session started for the review, working in its own scratch clone, whose brief carries the signal rule from The factory, above) score it out of 5 through the [code-review-loop](./extensions/core/skills/code-review-loop/SKILL.md) skill, and fix what it finds, until it scores 5/5 on the latest head,
    GitHub Actions' `Audit, Lint, and Build` and `test` are green there, and nothing is left you would change.
 3. Mark it ready at 5/5 and merge it with `bun run pr:merge <n>`, or let merge-on-ready land it (`bun run pr:train ready`): the only ways a Playground PR reaches `canary`.

@@ -64,12 +64,14 @@ describe("docs:wrap", () => {
   test("reads only the files it names", async () => {
     const dir = root()
     writeFileSync(join(dir, "README.md"), "One. Two.\n")
+    writeFileSync(join(dir, "docs/playground/pr.md"), "One.\n")
     expect(await files(dir)).toEqual([
       ".agents/dashboard/a.md",
       ".agents/skill-trial.md",
       ".agents/testing.md",
       "AGENTS.md",
-      "docs/playground/playbook.md",
+      "docs/playground/a.md",
+      "docs/playground/pr.md",
       "scripts/README.md",
       "scripts/hooks/README.md",
       "extensions/core/skills/playbook/a.md",

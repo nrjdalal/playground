@@ -1247,6 +1247,22 @@ export async function staleItems(
   return rows.map(toItem)
 }
 
+// Every item still open (a decision or draft not yet answered, a snoozed one and one answered in chat included, until it moves to Done), oldest first, one sender's alone when from is given: what a session reads before it posts, so it names an open item on the same thing rather than posting it twice (`bun run ask open`).
+export async function openItems(db: Database, from?: string): Promise<InboxItem[]> {
+  const rows = await db
+    .select()
+    .from(inboxItem)
+    .where(
+      and(
+        eq(inboxItem.status, "open"),
+        sql`${inboxItem.answer} ->> 'dismissedAt' is null`,
+        from === undefined ? undefined : eq(inboxItem.from, from),
+      ),
+    )
+    .orderBy(inboxItem.ref)
+  return rows.map(toItem)
+}
+
 // Moves the answered decisions and drafts, those he replied to in chat included, and the updates named to Done at once, recording when inside their answer, so no column is added, and marks an update read, keeping when it was read; an open decision or draft asks something of him and is left.
 export async function dismissItems(db: Database, ids: string[], now = new Date()): Promise<number> {
   if (ids.length === 0) return 0

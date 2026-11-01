@@ -35,7 +35,7 @@ pre-commit:
         - ".agents/testing.md"
         - "AGENTS.md"
         - "CLAUDE.md"
-        - "docs/playground/playbook.md"
+        - "docs/playground/*.md"
         - "packages/scripts/src/docs-wrap/*.ts"
         - "scripts/README.md"
         - "scripts/hooks/README.md"
@@ -67,7 +67,7 @@ pre-commit:
       exclude:
         - "*.md"
         - "tests/*.py"
-      run: TURBO_CACHE_DIR="${TURBO_CACHE_DIR:-$HOME/.cache/turbo/playground}" bunx turbo run build --filter=@packages/env --output-logs=errors-only && bun packages/scripts/src/env-keys.ts
+      run: TURBO_CACHE_DIR="${TURBO_CACHE_DIR:-$HOME/.cache/turbo/playground}" bunx turbo run build --filter=@packages/env --output-logs=errors-only && bun packages/scripts/src/env-keys.ts POSTGRES_URL
     build:
       # docs and Python tests feed no build; lefthook skips the step when every staged file matches (its * crosses folders); in a worktree it waits for a run slot as commit-<worktree>
       exclude:
