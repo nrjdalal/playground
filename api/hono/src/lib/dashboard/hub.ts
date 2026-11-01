@@ -132,6 +132,8 @@ export class DashboardHub {
       readScreen?: (surface: string) => Promise<string>
       refreshTimeoutMs?: number
       stat?: (path: string) => { birthtimeMs: number; size: number }
+      // Watches one transcript for changes, fs.watch unless a test fires the change itself: FSEvents drops a file's change under load.
+      watch?: (path: string, onChange: () => void) => Pick<FSWatcher, "close">
     } = { events: true, listLive, pace: { due: readDue, onRead, refreshGapMs: REFRESH_GAP_MS } },
   ) {
     this.activity = new ActivityWatch({
@@ -163,7 +165,7 @@ export class DashboardHub {
       path: string
       reading: Promise<void>
       unnamed: string | null
-      watcher: FSWatcher
+      watcher: Pick<FSWatcher, "close">
     }
   >()
   private last: DashboardFrame | null = null
@@ -397,7 +399,7 @@ export class DashboardHub {
         const fresh = birthtimeMs > 0 ? birthtimeMs >= this.startedAt : this.scanned
         // A new transcript is read from as far back as a view's own history read reaches, so one that starts large (a forked session copies its conversation into a new file) costs one bounded read.
         const offset = fresh ? Math.max(0, size - TAIL_BYTES) : size
-        const watcher = watch(path, () => this.queueRead(sessionId))
+        const watcher = (this.deps.watch ?? watch)(path, () => this.queueRead(sessionId))
         this.tails.set(sessionId, {
           midLine: offset > 0 && offset < size,
           offset,

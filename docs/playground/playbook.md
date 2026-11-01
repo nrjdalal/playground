@@ -1,7 +1,7 @@
 ## What it does
 
 `playbook` holds the operating rules of Playground's factory, the Claude Code sessions cmux or herdr runs on the owner's behalf: who does what, who reports to whom, how sessions start and end, how the leads keep watch,
-and the standing rules (override, gate, comments, release, dashboard, clock, eta, roster, ask, tickets, classified, channel, signal, main, zerosdk, voice, terminal, local page, correction, upstream, verify, memory, writing, ci, slots, unstick, usage, glm, battery, context, rounds, polling, github, workers, meetings).
+and the standing rules (override, gate, comments, release, dashboard, clock, eta, roster, ask, tickets, classified, signal, main, voice, terminal, local page, correction, upstream, verify, memory, writing, ci, slots, unstick, usage, glm, battery, context, rounds, polling, github, workers, meetings).
 It lives in the repo rather than in one session's memory, so every session loads the same rules.
 
 ## When to reach for it
@@ -19,7 +19,7 @@ It lives in the repo rather than in one session's memory, so every session loads
 | Ask the owner something, or pass on his override                                                          | the **ask** and **override** rules                                             |
 | File a Linear ticket                                                                                      | the **tickets** rule                                                           |
 | Write anything an org sees                                                                                | the **classified** rule                                                        |
-| Post in the factory's channel, or take an ask from there                                                  | the **channel** rule (`CHANNEL.md`)                                            |
+| Post in the factory's channel, or take an ask from there                                                  | the channel's lists and triage (`CHANNEL.md`)                                  |
 | Run a `vercel` command, a deploy among them                                                               | the Vercel CLI's three traps (`VERCEL.md`)                                     |
 | Stop a process                                                                                            | the **signal** rule                                                            |
 | Hand off a build, a read or research                                                                      | the **workers** rule                                                           |
@@ -33,10 +33,10 @@ A session outside the factory has no reason to.
 
 `SKILL.md` is the part every session keeps in view: the roles, the chain, and under **Standing rules** a pointer to where the rules live, short enough to fit inside what Claude Code re-attaches after a compaction (its first 5,000 tokens, within a budget that can drop an older skill whole).
 Each rule is its own intent file, `extensions/core/rules/<name>.md`: its first line is the glance, the lines after it its what and why, with each value a `{key}` slot.
-A rule that belongs to the owner alone (**zerosdk**) sits in its scope's own `skills/<scope>/rules/` until the switch imports it into the extensions, and keeps its glance line in `SKILL.md` until then.
+A rule that belongs to one login alone lives in that login extension's own `rules/`, and the `rules` hook shows its glance under "Your own rules:".
 The lifecycle, dispatch and sweep are in `LIFECYCLE.md`, `DISPATCH.md` and `SWEEP.md`, each read when its moment comes.
 At every session start, resume and compaction the `rules` hook puts each rule file's glance in front of the session, its slots filled with this machine's settings (`playground rules <name>` prints one whole), and after a compaction a second hook tells it to load the skill again, so the rules arrive even when the skill was dropped.
-A test holds `SKILL.md` under 14,000 characters, its pointer to the rules folder, and its glance lines to the rules that wait in a scope's own folder.
+A test holds `SKILL.md` under 14,000 characters and its pointer to the rules folder; another holds the rule list above to the files in `extensions/core/rules/`.
 
 ## The shape
 
@@ -53,6 +53,7 @@ and an ask with no marker gets a thread through `playground thread` (each Inbox 
 Work goes out in bundles: the Planner groups the issues that touch one surface, such as the sidebar or the chat, into one bundle, and a bundle is one worker, one PR, one review loop and one tester pass per head, its tester driving only the pages and files the bundle touches.
 Two pieces of work that depend on each other in meaning stack only for no line overlap: the test is a merge-tree of the two heads against the parent's merge base with canary, and the child holds behind its parent until the parent merges.
 A stacked child merges its parent's branch in once, when the parent scores 5/5 or merges, since every merge is a head its reviewer scores again.
+A stack held at 5/5 until the owner's try syncs with canary only on a conflict, plus once before the try, and each sync's round cites CI where CI can stand in for the local run, since every sync re-scores every PR in the stack.
 A worker that merges canary or a stack's parent in keeps that merge plain and commits each edit after it on its own, since review scores an edit inside a merge as blocking.
 A lane's item aims at about 1,000 changed lines or fewer, and a bigger diff splits off canary as a new PR, since a diff too big to read whole finds new blocking issues every round.
 Anything else bundles into one PR or sequences one PR after the other.
@@ -156,7 +157,7 @@ Like the ticket guard, a hook that cannot start lets the call through, and the r
 - Every session starts at high effort; another effort is the owner's choice alone, which a lead sets with spawn.sh's `--effort` at a start or a resume, on the owner's word relayed in the **override** shape.
 - Every session runs on `models.default` (Opus) unless it was started on GLM or with spawn.sh's `--model` naming another of `models.claude`, and every subagent it starts for work runs on Sonnet unless its call names a model,
   from the factory settings' `CLAUDE_CODE_SUBAGENT_MODEL=sonnet` (the owner approved #i492, 17 Oct; on GLM the alias maps to GLM), so a brief or subagent call that needs Opus names `model: opus`.
-- A suggestion, from anyone, is tested before a session acts on it or repeats it.
+- A suggestion, from anyone, is tested before a session acts on it or repeats it, and a decision that claims no change for this machine or the owner's setup cites the command and output that measured it.
 - No worker is spawned while the System panel reads No room, and the panel's idle line stays empty: no worker's dev stack idles 15 minutes.
 - Of the choices the factory could make itself, only the one-way doors reach the owner's Inbox as decisions: a Slack message to anyone but a developer (a collaborator writing code in an org's repo, about that work), a new ticket, an irreversible delete or another breaking change, a breaking schema change, an org's database change on one environment, and budget.
   A production bug's port, a request for work from a session outside the chain and a step only he can take (plug in the Mac, log in, add a key; Approve means done and Deny means he can't, and a secret value he holds goes to a Vercel project through a secret ask, whose card hands it straight to its sink, or anywhere else where the item says, 1Password or a file,
