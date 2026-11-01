@@ -227,7 +227,7 @@ describe("code-review-loop's round 1 greps each changed term", () => {
   test("step 4 runs the changed-term grep in round 1, names its finding's shape and its Done when, with its measured case", async () => {
     const step = (await skill()).match(/^4\. \*\*Review on two axes\.\*\*.*$/m)?.[0] ?? ""
     expect(step).toContain(
-      "the changed-term grep (`git grep -l <term>` over the agent-facing docs) for each term whose meaning the diff changes",
+      "the changed-term grep (`git grep -l <term>` over the agent-facing and web docs) for each term whose meaning the diff changes",
     )
     expect(step).toContain(
       "file every list or doc either leaves behind as one such finding, each as `file:line`",
@@ -237,12 +237,13 @@ describe("code-review-loop's round 1 greps each changed term", () => {
       "its changed-term grep for each term whose meaning it changes",
     )
     expect(await page()).toContain("each term whose meaning the diff changes")
+    expect(await page()).toContain("greps the agent-facing and web docs")
   })
 
   test("AGENTS.md's pre-review pass runs the same grep before round 1", async () => {
     const agents = await Bun.file(join(root, "AGENTS.md")).text()
     const line = agents.split("\n").find((l) => l.includes("changed-term grep")) ?? ""
-    expect(line).toContain("`git grep -l <term>`")
+    expect(line).toContain("`git grep -l <term>` over the agent-facing and web docs")
     expect(line).toContain("each term whose meaning the diff changes")
     expect(agents).toContain("each list grep and changed-term grep with its hits")
   })
