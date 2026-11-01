@@ -68,13 +68,19 @@ const headed = () =>
   `${GUARD} hook refused this agent-desktop call: it carries --headed, whose physical input moves the owner's own pointer and focus. --headed is the owner's alone, so ${OWNER}.`
 
 const listed = (app: string) =>
-  `${GUARD} hook refused this agent-desktop call: it targets ${app}, an app on the desktop-owner-apps guard list of the owner's own apps. Leave it alone; when the task needs it, ${OWNER}, or ask the owner to have Ops take ${app} off the list in the owner's login extension. No setting or file a session writes frees it.`
+  `${GUARD} hook refused this agent-desktop call: it targets ${app}, an app on the desktop-owner-apps guard list of the owner's own apps. Leave it alone; when the task needs it, ${OWNER}, or ask the owner to have Ops take ${app} off the list in the owner's login extension. No flag, environment variable, export, env or write in the same call frees it; the list is Ops' to change, and a session that edits it or runs agent-desktop under another name breaks the rule.`
 
 const unread = (what: string) =>
   `${GUARD} hook refused this agent-desktop call: it cannot read ${what} before the command runs, so it cannot tell whether the call carries --headed or targets an app on the desktop-owner-apps list. Write the agent-desktop command's every word literally as a command of its own, or ${OWNER}.`
 
 const front = (sub: string) =>
   `${GUARD} hook refused this agent-desktop call: ${sub} with no --app acts on the app in front, which may be one of the owner's own. Name the app with --app <App>, or act on a ref a snapshot of that app gave.`
+
+const SCRIPT_IN_CALL =
+  "a script file in a call that names agent-desktop, since the call may change it"
+
+// A list refusal's reason alone, without the fix a session could run itself, since the list is Ops' to write.
+const reasonOf = (refusal: string) => refusal.split(/: seed the guards'|\. Restore the file/)[0]
 
 const appName = (value: string) =>
   (value.split("/").filter(Boolean).pop() ?? "")
@@ -121,7 +127,9 @@ function lister(environment: Environment) {
   return () =>
     (loaded ??= guardList(GUARD, "desktop-owner-apps", isStrings, [], environment).then((l) =>
       l.refusal
-        ? { refusal: `${l.refusal} The list is Ops' to write: ask your lead to route it to Ops.` }
+        ? {
+            refusal: `${reasonOf(l.refusal)}. The list is Ops' to write: ask your lead to route it to Ops, then run the call again.`,
+          }
         : { apps: new Set((l.list ?? []).map(appName)) },
     ))
 }
@@ -174,9 +182,7 @@ async function judgeText(
     if (INTERPRETERS.has(name) && args.some((a) => MENTION.test(a.value)))
       return unread(`what ${name} runs`)
     if (name === "source" || name === "." || first?.value.includes("/"))
-      return unread(
-        "a script file in a call that names agent-desktop, since the call may change it",
-      )
+      return unread(SCRIPT_IN_CALL)
   }
   return run(lexed, env, visit)
 }
@@ -189,8 +195,7 @@ async function script(
   apps: ReturnType<typeof lister>,
   depth: number,
 ): Promise<string | undefined> {
-  if (mention)
-    return unread("a script file in a call that names agent-desktop, since the call may change it")
+  if (mention) return unread(SCRIPT_IN_CALL)
   const text = await readPath(path, env)
   if (text.unknown || !MENTION.test(text.value) || depth > 2) return
   return judgeText(text.value, env.cwd, apps, depth + 1)

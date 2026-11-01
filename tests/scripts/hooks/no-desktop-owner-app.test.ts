@@ -121,6 +121,25 @@ describe("a session's own way out is refused", () => {
   })
 })
 
+// The documented limits of a text hook, pinned so the boundary stays visible: a follow-up write guard on the guard lists would close the first.
+describe("what the hook does not reach", () => {
+  test("a list edited in an earlier call is honoured", async () => {
+    const edited = storeWith(join(scratch, "edited"), {
+      "desktop-owner-apps.json": '["Helium", "Slack"]',
+    })
+    expect(await bash("agent-desktop snapshot --app Slack", edited)).toContain("hook refused")
+    storeWith(edited, { "desktop-owner-apps.json": '["Helium"]' })
+    expect(await bash("agent-desktop snapshot --app Slack", edited)).toBeUndefined()
+  })
+
+  test.each([
+    ["a program word in a variable", '"$AD" click @s8f3k2p9:e5 --headed'],
+    ["a renamed copy of the binary", "/abs/ad snapshot --app Slack"],
+  ])("%s, in a call that never names agent-desktop, passes", async (_, command) => {
+    expect(await bash(command)).toBeUndefined()
+  })
+})
+
 describe("what the hook cannot read is refused", () => {
   test.each([
     ["an app in a variable", `A=Slack; agent-desktop snapshot --app "$A"`],
@@ -184,6 +203,7 @@ describe("passes", () => {
     const reason = await bash("agent-desktop snapshot --app Finder", missing)
     expect(reason).toContain("hooks/desktop-owner-apps.json")
     expect(reason).toContain("route it to Ops")
+    expect(reason).not.toContain("ext import")
   })
 
   test("a call that is not agent-desktop never reads the list", async () => {
