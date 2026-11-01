@@ -64,8 +64,8 @@ export const beatText = (r: Reading): string => {
   const stuck = (r.sessions.stuck ?? 0) + (r.sessions.failed ?? 0)
   return [
     `*Health, ${ownerClock(r.at, r.zone)}*`,
-    `🏷️ Version: ${r.running.version}`,
-    `🏗️ Build: ${r.running.build}`,
+    `🏷️ Main checkout: ${r.running.version}`,
+    `🏗️ Dashboard: ${r.running.build}`,
     `${mark(r.load5 > LOAD_WARN)} Mac: load ${r.load5.toFixed(0)} on ${r.cores} cores, ${r.idlePct === null ? "?" : r.idlePct.toFixed(0)}% CPU idle`,
     `${mark(!memoryOk)} Memory: pressure ${r.pressure} (${PRESSURE_NAMES[r.pressure] ?? "unknown"}), ${r.freePct}% free${memoryOk ? "" : ", so spawn's gate refuses a Claude start"}`,
     `${mark(stuck > 0)} Sessions: ${r.sessions.working ?? 0} working, ${r.sessions.idle ?? 0} idle, ${stuck} stuck`,
