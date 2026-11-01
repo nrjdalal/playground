@@ -21,7 +21,9 @@ import {
   run,
   slotWords,
   stdinOf,
+  tick,
   type Visit,
+  withDeadline,
   UNKNOWN,
   type Word,
 } from "./shell"
@@ -122,6 +124,7 @@ const SWITCHES: Record<string, string[]> = {
 
 // Whether a word is the playground CLI: the command by name in any case, as macOS's filesystem reads it, or by a path that is no folder, or the checkout's cli.ts, with or without its extension, links followed.
 function isCli(word: Word, dirs: (string | undefined)[]): boolean {
+  tick()
   if (marked(word.value) || word.value.startsWith("-")) return false
   const paths = dirs.map((dir) => pathOf(word, { cwd: dir } as Env))
   if (program(word.value).toLowerCase() === "playground")
@@ -244,6 +247,7 @@ function inspect(raw: string, environment: Environment) {
     return judged.get(key)
   }
   const judge = (word: Word, env: Env, remover: boolean): string | undefined => {
+    tick()
     for (const text of texts(word)) {
       if (holds(text.value, env)) return `${root} in its text`
       const path = pathOf(text, env)
@@ -330,7 +334,6 @@ function inspect(raw: string, environment: Environment) {
     files: new Map(),
     known: knownVariables(command, environment, directory),
     process: environment,
-    until: performance.now() + 10_000,
     vars: new Map(),
   }
   return run(lex(command, env.known), env, visit, true)
@@ -340,9 +343,10 @@ function inspect(raw: string, environment: Environment) {
 export async function check(
   raw: string,
   environment: Environment = process.env,
+  budget = 10_000,
 ): Promise<string | undefined> {
   try {
-    return await inspect(raw, environment)
+    return await withDeadline(budget, async () => inspect(raw, environment))
   } catch (error) {
     if (error instanceof RangeError) return refuse(TOO_LONG)
   }

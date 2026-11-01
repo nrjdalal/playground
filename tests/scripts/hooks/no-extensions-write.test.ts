@@ -381,6 +381,18 @@ describe("a direct write into the extensions root is refused, naming the owner's
     expect(await bash(command, "/tmp")).toContain("no-extensions-write hook refuses")
   })
 
+  test("a slow lex refuses at the walk's deadline, whatever made it slow", async () => {
+    const command = `echo ${"a(".repeat(20_000)}${")".repeat(20_000)}`
+    const started = performance.now()
+    const reason = await check(
+      JSON.stringify({ cwd: "/tmp", tool_input: { command }, tool_name: "Bash" }),
+      ENV,
+      50,
+    )
+    expect(reason).toContain("split it into shorter calls")
+    expect(performance.now() - started).toBeLessThan(250)
+  })
+
   test("a Bash call whose cwd is already inside the root runs no writer", async () => {
     expect(await bash("node -e 'x'", SCOPE)).toContain("no-extensions-write hook refuses")
   })

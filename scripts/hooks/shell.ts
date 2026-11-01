@@ -30,8 +30,6 @@ export type Env = {
   files: Map<string, Text>
   known: Record<string, string>
   process: Record<string, string | undefined>
-  // the performance.now() past which the walk throws a RangeError, and of a walk that throws one on a script over 128 KB, for a hook that must answer inside its timeout
-  until?: number
   vars: Map<string, Text>
 }
 export type Flag = { name: string; value?: Word }
@@ -49,15 +47,31 @@ const MAX_BYTES = 1_048_576
 const MAX_SCRIPT = 131_072
 const LARGE = "a text too large to read"
 
-// A walk with a budget (Env.until) stops with a RangeError past its time, so a hook answers inside its timeout.
-function spend(env: Env): void {
-  if (env.until !== undefined && performance.now() > env.until)
-    throw new RangeError("past the hook's time")
+// The performance.now() past which every lex, expansion and walk step throws a RangeError, set by a hook that must answer inside its timeout.
+let deadline: number | undefined
+
+// Runs body with a deadline budget ms away, so any slow route through the lexer or the walk refuses, whatever made it slow.
+export async function withDeadline<T>(budget: number, body: () => Promise<T>): Promise<T> {
+  const outer = deadline
+  deadline = performance.now() + budget
+  try {
+    return await body()
+  } finally {
+    deadline = outer
+  }
 }
 
-// A script a shell, eval or source reads, held under a budget to the size of a command the hook reads.
+let steps = 0
+
+// The one choke point every lex, expansion and walk step passes through; it reads the clock once every 1024 steps, so a tight loop pays for a counter alone.
+export function tick(): void {
+  if (deadline === undefined || ++steps % 1024 !== 0) return
+  if (performance.now() > deadline) throw new RangeError("past the hook's time")
+}
+
+// A script a shell, eval or source reads, held under a deadline to the size of a command the hook reads.
 function lexScript(value: string, env: Env): Lexed {
-  if (env.until !== undefined && value.length > MAX_SCRIPT)
+  if (deadline !== undefined && value.length > MAX_SCRIPT)
     throw new RangeError("a script too large to read")
   return lex(value, env.known)
 }
@@ -320,6 +334,7 @@ function walk(lx: Lexer, scope: number, nested: boolean, inherit?: Command): voi
     }
   }
   while (lx.i < src.length) {
+    tick()
     const c = src[lx.i]
     const redirect = REDIRECT.exec(src.slice(lx.i, lx.i + 8))
     if (c === " " || c === "\t") lx.i++
@@ -401,6 +416,7 @@ function heredocs(lx: Lexer, pending: Pending[], nested: boolean): void {
   for (const doc of pending.splice(0)) {
     const lines: string[] = []
     while (lx.i < lx.src.length) {
+      tick()
       const start = lx.i
       const newline = lx.src.indexOf("\n", start)
       const stop = newline === -1 ? lx.src.length : newline
@@ -437,6 +453,7 @@ function word(lx: Lexer): Word {
     lx.i < src.length &&
     (!BREAK.has(src[lx.i]) || (src[lx.i] === "(" && lx.i > start && src[lx.i + 1] !== ")"))
   ) {
+    tick()
     const c = src[lx.i]
     const next = src[lx.i + 1] ?? ""
     if (c === "(") {
@@ -508,6 +525,7 @@ function ansi(lx: Lexer): Text {
 }
 
 function dollar(lx: Lexer): Text {
+  tick()
   const { src } = lx
   const next = src[lx.i + 1] ?? ""
   const variable = (name: string | undefined): Text =>
@@ -550,6 +568,7 @@ function dollar(lx: Lexer): Text {
 function inner(lx: Lexer, src: string): void {
   const sub = { ...lx, i: 0, src }
   while (sub.i < src.length) {
+    tick()
     const from = sub.i
     if ((src[sub.i] === "<" || src[sub.i] === ">") && src[sub.i + 1] === "(") procSub(sub)
     else word(sub)
@@ -560,6 +579,7 @@ function inner(lx: Lexer, src: string): void {
 function balanced(src: string, from: number, open: string, close: string): number {
   let depth = 0
   for (let i = from; i < src.length; i++) {
+    tick()
     const c = src[i]
     if (c === "\\") i++
     else if (c === "'") {
@@ -754,7 +774,7 @@ export async function examine(
   visit: Visit,
   builtins: boolean,
 ): Promise<string | undefined> {
-  spend(env)
+  tick()
   const parsed = parse(cmd)
   const { args, chdir, local, name } = parsed
   const here: Env = chdir ? { ...env, cwd: pathOf(chdir, env) } : env
@@ -859,7 +879,7 @@ async function scriptOf(operand: Word | undefined, cmd: Command, env: Env): Prom
       : operand.procs
         ? await outputs(operand.procs, env)
         : unknown("a script file")
-  if (env.until !== undefined && script.unknown === LARGE) throw new RangeError(LARGE)
+  if (deadline !== undefined && script.unknown === LARGE) throw new RangeError(LARGE)
   return script
 }
 
@@ -893,7 +913,7 @@ async function existing(path: string, env: Env): Promise<Text> {
 }
 
 async function outputOf(cmd: Command, env: Env): Promise<Text> {
-  spend(env)
+  tick()
   const { args, name } = parse(cmd)
   if (name === "") {
     if (cmd.inner) return outputs(cmd.inner(), env)
@@ -909,7 +929,7 @@ async function outputOf(cmd: Command, env: Env): Promise<Text> {
     const parts: Text[] = []
     let size = 0
     for (const [k, s] of sources.entries()) {
-      spend(env)
+      tick()
       const part =
         s.value !== "-"
           ? await readPath(s, env)
@@ -955,7 +975,7 @@ function printf([format = "", ...args]: string[]): string {
 }
 
 export async function stdinOf(cmd: Command, env: Env): Promise<Text> {
-  spend(env)
+  tick()
   return held(await stdinText(cmd, env))
 }
 
