@@ -38,7 +38,9 @@ describe("DISPATCH.md", () => {
   test("a lane's or a stack's file set and an overlap check read each PR's whole list through the paginated read, since gh pr view stops at 100", async () => {
     const lines = (await Bun.file(DISPATCH).text()).split("\n")
     const lanes = lines.findIndex((l) => l.includes("each lane owning its files"))
-    const line = lines[lanes + 1] ?? ""
+    const at = lines.findIndex((l) => l.includes("every overlap check between open PRs"))
+    expect(at).toBeGreaterThan(lanes)
+    const line = lines[at] ?? ""
     expect(line).toContain("a stack's")
     expect(line).toContain("overlap")
     expect(line).toContain(

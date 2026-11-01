@@ -19,16 +19,26 @@ describe("GITHUB-BULK-READS.md", () => {
     expect(line).toContain("refetched page 1 554 times")
   })
 
-  test("reads a PR's whole file list through the paginated REST read beside the --paginate line, since gh pr view stops at 100", async () => {
-    const lines = (await Bun.file(PAGE).text()).split("\n")
-    const paginate = lines.findIndex((l) => l.includes("rename the variable `$endCursor`"))
-    const line =
-      lines.slice(paginate + 1, paginate + 3).find((l) => l.includes("pulls/<n>/files")) ?? ""
+  test("a PR whose files overflow reads its whole list through the paginated REST read, then several such PRs one aliased query, before step 3's Done when", async () => {
+    const text = await Bun.file(PAGE).text()
+    const rest = text.indexOf("reads its whole list through REST")
+    const line = text.slice(rest, text.indexOf("\n", rest))
     expect(line).toContain(
       "`gh api --paginate repos/<owner>/<repo>/pulls/<n>/files --jq '.[].filename'`",
     )
     expect(line).toContain("`gh pr view <n> --json files` stops at 100")
     expect(line).toContain("100 of its 143 files")
+    const several = text.indexOf("When several PRs' files say `hasNextPage`")
+    const done = text.indexOf("Done when the sweep holds every PR")
+    expect(text.indexOf("rename the variable `$endCursor`")).toBeLessThan(rest)
+    expect(rest).toBeLessThan(several)
+    expect(several).toBeLessThan(done)
+    const query = text.slice(several, done)
+    expect(query).toContain("repository(owner: $owner, name: $name)")
+    expect(query).toContain("pr169: pullRequest(number: 169)")
+    expect(query).toContain('files(first: 100, after: "<its endCursor>")')
+    expect(query).toContain("endCursor")
+    expect(query).toContain("path")
   })
 
   test("the sweep's files connection carries its cursor, and step 2 says how to read the rest", async () => {
