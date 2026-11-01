@@ -249,7 +249,7 @@ When a dashboard rule's meaning changes, its ALWAYS line here changes with it.
   - ALWAYS: Keep the `claude_*` tables (`packages/db/src/schema/claude.ts`: each stored session's transcript, line by line, Playground's own alone unless the stack opts in) in the dashboard's local Postgres on 127.0.0.1, never a shared database.
   - ALWAYS: Read an organisation's own values from `packages/config/src/org.ts`, and every file the dashboard keeps outside the database from its data folder, `dataDir()`.
 - Cmux: read `.agents/dashboard/cmux.md` before you change a cmux or herdr call, how a session counts as live, the board's read pacing or the System panel's commands.
-  - ALWAYS: Route every cmux call through `api/hono/src/lib/dashboard/cmux.ts`, which takes only the reads in `READ_COMMANDS`, one session's own writes and `reply()`'s answer to one pending Feed prompt; the factory's `playground picker` alone answers a manager's session's Feed permission itself.
+  - ALWAYS: Route every cmux call through `api/hono/src/lib/dashboard/cmux.ts`, which takes only the reads in `READ_COMMANDS`, one session's own writes and `reply()`'s answer to one pending Feed prompt.
   - ALWAYS: Route every herdr call through `api/hono/src/lib/dashboard/herdr.ts`, the dashboard's second terminal beside cmux.
   - ALWAYS: Count a cmux record as a live session only through `liveRecords()`, and keep the read of every record paced as `workers.ts` paces it.
   - ALWAYS: Run the System panel's commands only through `api/hono/src/lib/system/probe.ts`, whose `COMMANDS` holds each one's fixed argv.

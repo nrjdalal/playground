@@ -2,7 +2,6 @@ import { describe, expect, test } from "bun:test"
 
 import { type PickerDeps, runPicker } from "../../../../../packages/scripts/src/playground/picker"
 import { callKey } from "../../../../../packages/scripts/src/stuck-alert"
-import { PERMISSION_ID, permissionItem } from "../../../../api/hono/src/lib/dashboard/feed-fixtures"
 import { OLD } from "../../../../session-names"
 
 const SESSION = "d9d2ef1a-a7b9-4ecb-a758-087576d79391"
@@ -37,16 +36,10 @@ const AGENTS = [
   { kind: "worker", name: "k3m9px-worker" },
 ]
 
-// A herdr server holding the session's pane (or none), a cmux Feed, and a recorder for every press, log line and queued message.
+// A herdr server holding the session's pane (or, elsewhere, another claude's alone), and a recorder for every herdr call, log line and queued message.
 const fake = (
-  where: "cmux" | "herdr",
-  {
-    by = "m4n7pq-builder",
-    feedInput = JSON.stringify({ command: "rm -rf build" }) as unknown,
-    screen = PERMISSION,
-    sticky = false,
-    transcript = call("t1", "rm -rf build"),
-  } = {},
+  where: "elsewhere" | "herdr",
+  { by = "m4n7pq-builder", screen = PERMISSION, transcript = call("t1", "rm -rf build") } = {},
 ) => {
   const calls: string[][] = []
   const logged: string[] = []
@@ -54,26 +47,6 @@ const fake = (
   const deps: PickerDeps = {
     agents: AGENTS,
     by,
-    cmux: async (args) => {
-      calls.push(["cmux", ...args])
-      if (args[1] === "feed.list") {
-        const workstream = `claude:${Buffer.from(SESSION).toString("base64")}`
-        return JSON.stringify({
-          items:
-            where === "cmux" && (sticky || !calls.some((call) => call[2]?.endsWith(".reply")))
-              ? [
-                  {
-                    kind: "permissionRequest",
-                    request_id: "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA",
-                    tool_input: feedInput,
-                    workstream_id: workstream,
-                  },
-                ]
-              : [],
-        })
-      }
-      return "{}"
-    },
     herdr: async (server, args) => {
       calls.push(["herdr", server, ...args])
       if (args[1] === "list") return JSON.stringify({ result: { panes: [{ pane_id: "w1:p2" }] } })
@@ -101,8 +74,7 @@ const fake = (
     servers: ["factory"],
     transcript: async () => transcript,
   }
-  const presses = () =>
-    calls.filter((call) => call.includes("send-keys") || call[2]?.endsWith(".reply"))
+  const presses = () => calls.filter((call) => call.includes("send-keys"))
   return { calls, deps, logged, presses, queued }
 }
 
@@ -304,52 +276,21 @@ describe("playground picker (PG-2184)", () => {
     expect(presses()).toHaveLength(1)
   })
 
-  test("on cmux it answers the session's pending Feed permission for the keyed call once, or denies it", async () => {
-    for (const [answer, mode, ...words] of [
-      ["allow", "once"],
-      ["deny", "deny", "use mv"],
+  test("a session in no herdr pane gets no key and no other answer, and nothing is logged", async () => {
+    const { calls, deps, logged, presses, queued } = fake("elsewhere")
+    for (const args of [
+      ["k3m9px-worker", "allow", KEY],
+      ["k3m9px-worker", "deny", KEY, "use mv"],
     ]) {
-      const { deps, logged, presses } = fake("cmux", { transcript: "" })
-      expect((await runPicker(["k3m9px-worker", answer!, KEY, ...words], deps)).code).toBe(0)
-      expect(presses()).toEqual([
-        [
-          "cmux",
-          "rpc",
-          "feed.permission.reply",
-          JSON.stringify({ mode, request_id: "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA" }),
-        ],
-      ])
-      expect(logged[0]).toStartWith(
-        `2026-10-26T05:00:00Z m4n7pq-builder ${answer} k3m9px-worker via cmux: rm -rf build`,
-      )
+      const result = await runPicker(args, deps)
+      expect(result).toEqual({
+        code: 1,
+        out: "k3m9px-worker runs in no herdr pane; nothing was pressed",
+      })
     }
-  })
-
-  test("answers a Feed item in cmux's own shape, its tool_input a JSON string, by the key of the command inside it", async () => {
-    const { deps } = fake("cmux", { transcript: "" })
-    const replies: string[][] = []
-    deps.cmux = async (args) => {
-      if (args[1] === "feed.list")
-        return JSON.stringify({ items: replies.length ? [] : [permissionItem(SESSION)] })
-      replies.push(args)
-      return "{}"
-    }
-    const key = callKey({ command: "touch /tmp/scratch/denied-marker" })
-    expect((await runPicker(["k3m9px-worker", "allow", key], deps)).out).toBe(
-      "2026-10-26T05:00:00Z m4n7pq-builder allow k3m9px-worker via cmux: touch /tmp/scratch/denied-marker",
-    )
-    expect(replies).toEqual([
-      ["rpc", "feed.permission.reply", JSON.stringify({ mode: "once", request_id: PERMISSION_ID })],
-    ])
-  })
-
-  test("a cmux reply the Feed still holds afterwards is not logged as answered", async () => {
-    const { deps, logged } = fake("cmux", { sticky: true, transcript: "" })
-    const result = await runPicker(["k3m9px-worker", "allow", KEY], deps)
-    expect(result.code).toBe(1)
-    expect(result.out).toContain("still holds the prompt")
-    expect(result.out).toContain("by hand with Escape")
-    expect(logged).toEqual([])
+    expect(presses()).toEqual([])
+    expect(calls.every(([tool]) => tool === "herdr")).toBe(true)
+    expect([logged, queued]).toEqual([[], []])
   })
 
   test("a waiting call the screen cannot judge (an MCP tool's) beside the keyed one gets no key", async () => {
@@ -442,13 +383,6 @@ describe("playground picker (PG-2184)", () => {
       if (action === "leave") expect(result.out).toContain("shows no permission prompt")
       if (action === "refuse") expect(result.out).toContain("may be another waiting call's")
     })
-
-  test("a cmux Feed permission for another command is not answered", async () => {
-    const { deps, presses } = fake("cmux", { feedInput: JSON.stringify({ command: "rm -rf /" }) })
-    const result = await runPicker(["k3m9px-worker", "allow", KEY], deps)
-    expect(result.code).toBe(1)
-    expect(presses()).toEqual([])
-  })
 
   test("only the session's manager or the primary dispatcher answers: not the session itself, another session, or an unknown caller", async () => {
     for (const by of ["k3m9px-worker", "x7c2vb-worker", "unknown"]) {
