@@ -103,6 +103,53 @@ describe.skipIf(!dockerUp())("Yard's store", () => {
     return channel
   }
 
+  // first in the file, so #general and #releases do not exist yet when it runs
+  describe("Yard's own channels, joined on a member's first list", () => {
+    const own = async (userId?: string) =>
+      userId
+        ? await sql`select c.name, count(*)::int as n from yard_member m join yard_channel c on c.id = m.channel_id where m.user_id = ${userId} and c.name in ('general', 'releases') group by c.name order by c.name`
+        : await sql`select name, post_rule, count(*)::int as n from yard_channel where name in ('general', 'releases') group by name, post_rule order by name`
+
+    test("two first lists at once make one #general and one #releases, each listing caller joined", async () => {
+      const [ada, bo] = await Promise.all([
+        store.channels(db, web("ada", true)),
+        store.channels(db, web("bo")),
+      ])
+      for (const list of [ada, bo])
+        expect(list.filter((c) => c.joined).map((c) => [c.name, c.postRule])).toEqual(
+          expect.arrayContaining([
+            ["general", "members"],
+            ["releases", "owner"],
+          ]),
+        )
+      expect([...(await own())]).toEqual([
+        { n: 1, name: "general", post_rule: "members" },
+        { n: 1, name: "releases", post_rule: "owner" },
+      ])
+    })
+
+    test("a second list adds no row or membership", async () => {
+      await store.channels(db, web("ada", true))
+      await store.channels(db, web("ada", true))
+      expect([...(await own())].map((r: { n: number }) => r.n)).toEqual([1, 1])
+      expect([...(await own("ada"))]).toEqual([
+        { n: 1, name: "general" },
+        { n: 1, name: "releases" },
+      ])
+    })
+
+    test("joins the caller alone: a member who has not listed is in neither", async () => {
+      expect([...(await own("ed"))]).toEqual([])
+    })
+
+    test("#releases stays the owner's: a member's post there is refused", async () => {
+      const releases = (await store.channels(db, web("bo"))).find((c) => c.name === "releases")!
+      await expect(
+        send(web("bo"), releases.id, { kind: "text", text: "can I post here?" }),
+      ).rejects.toMatchObject({ status: 403 })
+    })
+  })
+
   describe("channels", () => {
     test("count a member's unread and mentions since they last read, and a read clears them", async () => {
       const { id } = await both("unread")

@@ -126,6 +126,7 @@ describe.skipIf(!dockerUp())("Yard's routes on the hosted build", () => {
       held: "pending",
       me: { login: "bo", owner: false },
       noAuth: 401,
+      ownChannelsAfterNoAuth: 0,
       ottVerify: 404,
       posted: [201, "sent"],
       socket: "open",
@@ -134,7 +135,12 @@ describe.skipIf(!dockerUp())("Yard's routes on the hosted build", () => {
       tokenOnWebOnly: 403,
       waiting: [{ items: [] }, 400],
     })
-    expect(out.tokenList.data.channels).toEqual([])
+    expect(
+      out.tokenList.data.channels.map((c: { joined: boolean; name: string }) => [c.name, c.joined]),
+    ).toEqual([
+      ["general", true],
+      ["releases", true],
+    ])
     expect(out.frames).toEqual([
       {
         message: expect.objectContaining({

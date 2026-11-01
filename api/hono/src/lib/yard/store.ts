@@ -71,8 +71,41 @@ export const toMessage = (row: MessageRow): Message => ({
 // A Postgres pattern for a message that names @login, as tier.ts's mentionsOf reads one: not inside a word, an email or a longer login.
 const mentionPattern = (login: string) => `(^|[^\\w@])@${login}([^\\w-]|$)`
 
+// Makes #general and #releases once and joins the member to both: the name's unique constraint and on-conflict-do-nothing inserts keep two at once to one row each.
+const joinOwnChannels = async (tx: Pick<Database, "insert" | "select">, userId: string) => {
+  for (const { name, postRule } of JOINED_ON_REDEEM) {
+    await tx
+      .insert(yardChannel)
+      .values({ id: crypto.randomUUID(), kind: "channel", name, postRule })
+      .onConflictDoNothing()
+    const [channel] = await tx
+      .select({ id: yardChannel.id })
+      .from(yardChannel)
+      .where(eq(yardChannel.name, name))
+    await tx.insert(yardMember).values({ channelId: channel!.id, userId }).onConflictDoNothing()
+  }
+}
+
 // Every channel and DM a caller sees, each with its unread and mention counts since the caller last read it: every channel, joined or not, and the DMs the caller is in.
+// A member in neither of Yard's own channels joins both on a list, since the owner reaches Yard with no invite to redeem.
 export const channels = async (db: Database, caller: Caller, id?: string): Promise<Channel[]> => {
+  if (!id) {
+    const [inOne] = await db
+      .select({ id: yardMember.channelId })
+      .from(yardMember)
+      .innerJoin(yardChannel, eq(yardChannel.id, yardMember.channelId))
+      .where(
+        and(
+          eq(yardMember.userId, caller.id),
+          inArray(
+            yardChannel.name,
+            JOINED_ON_REDEEM.map((channel) => channel.name),
+          ),
+        ),
+      )
+      .limit(1)
+    if (!inOne) await joinOwnChannels(db, caller.id)
+  }
   const rows = await db.execute<{
     id: string
     joined: boolean
@@ -566,20 +599,7 @@ export const redeemInvite = async (db: Database, caller: Caller, code: string) =
       .update(user)
       .set({ role: "member", roleSetAt: now })
       .where(and(eq(user.id, caller.id), or(isNull(user.role), eq(user.role, "user"))))
-    for (const { name, postRule } of JOINED_ON_REDEEM) {
-      await tx
-        .insert(yardChannel)
-        .values({ id: crypto.randomUUID(), kind: "channel", name, postRule })
-        .onConflictDoNothing()
-      const [channel] = await tx
-        .select({ id: yardChannel.id })
-        .from(yardChannel)
-        .where(eq(yardChannel.name, name))
-      await tx
-        .insert(yardMember)
-        .values({ channelId: channel!.id, userId: caller.id })
-        .onConflictDoNothing()
-    }
+    await joinOwnChannels(tx, caller.id)
   })
   return { member: true as const }
 }
