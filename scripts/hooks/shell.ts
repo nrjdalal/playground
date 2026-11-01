@@ -246,7 +246,7 @@ function decode(raw: string): string {
   )
 }
 
-// learnAssignments: a literal assignment earlier in the command becomes known to the command after it (learn(), below), for a hook that judges text; other hooks keep such a variable unknown, as their refusals of a variable wrapper or a variable cd need.
+// learnAssignments: the one assignment shape scripts/hooks/README.md's no-release-comment section states becomes known to the command after it, for a hook that judges text; other hooks keep such a variable unknown, as their refusals of a variable wrapper or a variable cd need.
 export function lex(
   src: string,
   known: Record<string, string> = {},
@@ -269,7 +269,7 @@ export function lex(
 // The words that open a compound command or a zsh short loop, after which the hook learns no assignment.
 const COMPOUND = new Set(["case", "for", "foreach", "function", "repeat", "select"])
 
-// A bare assignment of a non-empty literal the shell surely runs (at the top level, after a ; or a newline, unpiped, before any compound command) becomes known to the first command after it that is not an assignment, when the command names that variable nowhere but in a plain $Q or ${Q} read; that command's end forgets it.
+// The one shape the publish-word guard reads, as scripts/hooks/README.md's no-release-comment section states: Q='literal' alone, then "$Q" in the very next command; everything else stays unknown.
 function learn(lx: Lexer, cmd: Command, raws: string[], sure: boolean, top: boolean): void {
   if (!lx.learning && lx.learned.length === 0) return
   if (cmd.words.length === 0 && cmd.redirects.length === 0 && !cmd.group) return
@@ -277,28 +277,22 @@ function learn(lx: Lexer, cmd: Command, raws: string[], sure: boolean, top: bool
   if (head && !head.quoted && (RESERVED.has(head.value) || COMPOUND.has(head.value))) {
     lx.learning = false
   }
-  const bare =
-    cmd.words.length > 0 && raws.length === cmd.words.length && raws.every((r) => ASSIGN.test(r))
-  if (!bare) {
+  if (lx.learned.length > 0) {
     if (top) forget(lx)
     return
   }
-  if (!sure || !lx.learning || cmd.detached || cmd.group || cmd.stdin) return
-  cmd.words.forEach((w, k) => {
-    const eq = w.value.indexOf("=")
-    const name = w.value.slice(0, eq)
-    const value = w.value.slice(eq + 1)
-    if (value === "" || w.unknown || w.reads?.length || marked(value) || raws[k].includes("~"))
-      return
-    const all = lx.src.match(new RegExp(`${name}(?!\\w)`, "g"))?.length ?? 0
-    const reads = lx.src.match(new RegExp(`\\$${name}(?!\\w)|\\$\\{${name}\\}`, "g"))?.length ?? 0
-    if (all - reads !== 1) return
-    lx.known[name] = value
-    lx.learned.push(name)
-  })
+  const shape = /^([A-Za-z_]\w*)='([^']+)'$/.exec(raws.length === 1 ? raws[0] : "")
+  if (!shape || !sure || !lx.learning || cmd.detached || cmd.group || cmd.stdin) return
+  const [, name, value] = shape
+  const read = `"$${name}"`
+  const rest = lx.src.split(read).join("")
+  const mentions = rest.match(new RegExp(`${name}(?!\\w)`, "g"))?.length ?? 0
+  if (mentions !== 1 || /[$`]|IFS/.test(rest)) return
+  lx.known[name] = value
+  lx.learned.push(name)
 }
 
-// Drops what the hook learned and learns nothing more, at a command or an expansion that could assign a variable in a way the hook cannot follow.
+// Drops what the hook learned and learns nothing more, once the command after the assignment ends.
 function forget(lx: Lexer): void {
   for (const name of lx.learned) delete lx.known[name]
   lx.learned = []
@@ -502,16 +496,17 @@ function ansi(lx: Lexer): Text {
 // quoted: inside double quotes, where the shell neither splits nor globs what a variable holds.
 function dollar(lx: Lexer, quoted = false): Text {
   const { src } = lx
+  const start = lx.i
   const next = src[lx.i + 1] ?? ""
   const variable = (name: string | undefined): Text => {
     const value = name === undefined ? undefined : lx.known[name]
-    const split = !quoted && name !== undefined && lx.learned.includes(name)
-    return value !== undefined && !(split && !/^[\w%+,./:=@-]*$/.test(value))
+    // A learned value is read only as a whole "$Q", which the shell neither splits, globs nor modifies.
+    const whole = quoted && src[start - 1] === '"' && src[lx.i] === '"'
+    return value !== undefined && (whole || !lx.learned.includes(name ?? ""))
       ? { value, variable: name }
       : { ...unknown("a shell variable"), variable: name }
   }
   if (src.startsWith("$((", lx.i)) {
-    forget(lx)
     lx.i = balanced(src, lx.i + 1, "(", ")")
     return unknown("an arithmetic expansion")
   }
@@ -524,7 +519,6 @@ function dollar(lx: Lexer, quoted = false): Text {
   if (next === "{") {
     const end = balanced(src, lx.i + 1, "{", "}")
     const name = /^\$\{([A-Za-z_]\w*)\}$/.exec(src.slice(lx.i, end))?.[1]
-    if (name === undefined) forget(lx)
     lx.i = end
     return variable(name)
   }

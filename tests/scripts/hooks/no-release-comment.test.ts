@@ -586,6 +586,16 @@ describe("gh api", () => {
       "other",
     ],
     [
+      "a mutation a zsh modifier makes from a variable that reads as a query",
+      `Q='mutation { addCXomment(input: {subjectId: "I_1", body: "ship"}) { clientMutationId } }'; gh api graphql -f query="$Q:s/X//"`,
+      "other",
+    ],
+    [
+      "a GraphQL query in a variable read unquoted after IFS is set",
+      `IFS=:; Q='query { viewer { login } }:--input:/abs/mutation.json'; gh api graphql -f query=$Q`,
+      "other",
+    ],
+    [
       "a GraphQL query in a variable set in a case branch",
       `case b in a) Q='query { viewer { login } }';; esac; gh api graphql -f query="$Q"`,
       "other",
