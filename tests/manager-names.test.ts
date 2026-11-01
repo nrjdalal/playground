@@ -1,9 +1,16 @@
 import { expect, test } from "bun:test"
 import { join } from "node:path"
 
-import { OLD, OLD_SECOND } from "./old-names"
-
 const ROOT = join(import.meta.dir, "..")
+
+// The managers' real old names, built at run time: these tests scan the repo for them, so a stand-in would scan for nothing.
+const OLD = {
+  builder: ["light", "kid"].join(""),
+  dispatcher: ["light", "man"].join(""),
+  ops: ["light", "boy"].join(""),
+  planner: ["light", "plan"].join(""),
+}
+const OLD_SECOND = `${OLD.dispatcher}-2`
 
 // the factory names each manager by its role, never by an old session name.
 const OLD_NAME = new RegExp(

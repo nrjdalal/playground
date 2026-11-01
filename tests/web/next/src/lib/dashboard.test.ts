@@ -43,7 +43,7 @@ import {
 } from "../../../../../web/next/src/lib/dashboard"
 import { modelName } from "../../../../../web/next/src/lib/model-label"
 import { inFixture, onLiveDashboard } from "../../../../dashboard-fixture"
-import { OLD } from "../../../../old-names"
+import { OLD } from "../../../../session-names"
 
 const entry = (id: string, at: string, text = id): Entry => ({
   at,
@@ -357,7 +357,10 @@ describe("nestCheckers", () => {
   })
 
   test("Orchestrators keep the given order even when one waits on Merritt, while Subagents still wait-sort", () => {
-    const ranked = { ...facts, group: (row: Row) => (row.name.startsWith("light") ? 0 : 1) }
+    const ranked = {
+      ...facts,
+      group: (row: Row) => (new Set<string>(Object.values(OLD)).has(row.name) ? 0 : 1),
+    }
     const rows = nestCheckers(
       [
         r(OLD.builder),

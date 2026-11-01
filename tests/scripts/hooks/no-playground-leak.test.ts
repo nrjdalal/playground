@@ -4,7 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { check, skillNames } from "../../../scripts/hooks/no-playground-leak"
-import { OLD } from "../../old-names"
+import { OLD } from "../../session-names"
 import { storeWith } from "./render-set"
 
 const root = join(import.meta.dir, "..", "..", "..")
@@ -69,13 +69,18 @@ beforeAll(async () => {
   await Bun.write(join(scratch, "broken", "playground", "roster.json"), "{ not json")
   lists = join(scratch, "lists")
   await mkdir(lists)
-  // The repo's terms, plus a made-up org's own words, as that org's extension adds them.
+  // The repo's terms, plus the stand-in old names a machine's own list holds and a made-up org's own words, as that org's extension adds them.
   const terms = await Bun.file(
     join(root, "extensions", "core", "lists", "playground-terms.json"),
   ).json()
   await Bun.write(
     join(lists, "playground-terms.json"),
-    JSON.stringify({ ...terms, everyday: [...terms.everyday, "acme", "acme-blue"] }),
+    JSON.stringify({
+      ...terms,
+      aliases: [...terms.aliases, OLD.builder, OLD.ops, OLD.planner],
+      everyday: [...terms.everyday, "acme", "acme-blue"],
+      names: [...terms.names, OLD.dispatcher],
+    }),
   )
   await Bun.write(
     join(lists, "slack-cleared.json"),
@@ -1153,6 +1158,11 @@ describe("as Claude Code runs it", () => {
     tool_input: { text: OLD.dispatcher },
     tool_name: "mcp__slack-shared__chat_post_message",
   }
+  // The config folder whose list holds the stand-in old names, so a run refuses one.
+  const listed = () => ({
+    CLAUDE_CONFIG_DIR: config,
+    PLAYGROUND_DATA_DIR: join(config, "playground"),
+  })
 
   // CLAUDE_PROJECT_DIR is a folder in no repository, so only PLAYGROUND_REPO can name the checkout
   const away = (home: string, repo: string) => ({
@@ -1166,7 +1176,7 @@ describe("as Claude Code runs it", () => {
     const home = join(scratch, "home")
     await mkdir(home, { recursive: true })
     const [{ command }] = (await entry()).hooks
-    const refused = await hook(command, leaky, away(home, root))
+    const refused = await hook(command, leaky, { ...away(home, root), ...listed() })
     expect(refused.code).toBe(2)
     expect(refused.stderr).toContain("no-playground-leak hook refused")
     const clean = { ...leaky, tool_input: { text: "PR is up" } }
@@ -1182,7 +1192,7 @@ describe("as Claude Code runs it", () => {
 
   test("the script runs on its own", async () => {
     const proc = Bun.spawn(["bun", script], {
-      env: { ...process.env, PLAYGROUND_ROLE: "worker" },
+      env: { ...process.env, ...listed(), PLAYGROUND_ROLE: "worker" },
       stderr: "pipe",
       stdin: new Blob([JSON.stringify(leaky)]),
     })
