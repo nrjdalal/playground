@@ -9,8 +9,7 @@ type Redirect = { body?: Text; fd: string; op: string; target?: Word }
 export type Command = {
   detached?: boolean
   group?: boolean
-  inner?: Command[]
-  opened?: boolean
+  inner?: () => Command[]
   redirects: Redirect[]
   scope: number
   stdin?: Command
@@ -31,6 +30,8 @@ export type Env = {
   files: Map<string, Text>
   known: Record<string, string>
   process: Record<string, string | undefined>
+  // the time past which examine throws a RangeError, for a hook that must answer inside its timeout
+  until?: number
   vars: Map<string, Text>
 }
 export type Flag = { name: string; value?: Word }
@@ -47,7 +48,7 @@ export const NOT_RUN =
 const MAX_BYTES = 1_048_576
 
 const BREAK = new Set([" ", "\t", "\n", ";", "&", "|", "<", ">", "(", ")"])
-const REDIRECT = /^(\d*|&)(<<<|<<-|<<|<>|<&|>&|>>|>\||<|>)/
+const REDIRECT = /^(\d*|&)(<<<|<<-|<<|<>|<&|>&!?|>>[!|]?|>[!|]|<|>)/
 const RESERVED = new Set([
   "!",
   "{",
@@ -272,20 +273,28 @@ function walk(lx: Lexer, scope: number, nested: boolean, inherit?: Command): voi
   const pending: Pending[] = []
   const fresh = (): Command => ({ redirects: [], scope, stdin: inherit, words: [] })
   let cmd = fresh()
+  const opens: number[] = []
   // A pipeline's commands and a backgrounded one run in subshells: a cd there leaves the shell where it was.
   const end = (op: string) => {
     const done = cmd
     const pipe = op === "|" || op === "|&"
     const brace = (c: Command, value: string) => c.words[0]?.value === value && !c.words[0].quoted
     if (brace(done, "}")) {
-      const open = lx.commands.findLastIndex((c) => c.scope === scope && brace(c, "{") && !c.opened)
-      if (open >= 0) {
-        lx.commands[open].opened = true
-        done.inner = topLevel(lx.commands.slice(open), scope)
+      const open = opens.pop()
+      if (open !== undefined) {
+        const { commands } = lx
+        const close = commands.length
+        done.inner = () => topLevel(commands.slice(open, close), scope)
       }
     }
     if (pipe || op === "&") done.detached = true
-    if (done.words.length > 0 || done.redirects.length > 0 || done.group) lx.commands.push(done)
+    if (done.words.length > 0 || done.redirects.length > 0 || done.group) {
+      for (const w of done.words) {
+        if (w.value !== "{" || w.quoted) break
+        opens.push(lx.commands.length)
+      }
+      lx.commands.push(done)
+    }
     cmd = fresh()
     if (pipe) {
       cmd.stdin = done
@@ -315,13 +324,16 @@ function walk(lx: Lexer, scope: number, nested: boolean, inherit?: Command): voi
       const scope = lx.scopes.length
       nest(lx, piped)
       cmd.group = true
-      cmd.inner = topLevel(lx.commands.slice(from), scope)
+      const members = topLevel(lx.commands.slice(from), scope)
+      cmd.inner = () => members
     } else if ((c === "<" || c === ">") && src[lx.i + 1] === "(") {
       cmd.words.push(procSub(lx))
     } else if (redirect) {
       lx.i += redirect[0].length
       while (src[lx.i] === " " || src[lx.i] === "\t") lx.i++
-      const [, fd, op] = redirect
+      const [, fd] = redirect
+      // zsh's >! and >>! override noclobber as >| does
+      const op = redirect[2].replace(/!$/, "|").replace(/^(>[>&])\|$/, "$1")
       const target = src.startsWith("<(", lx.i) ? procSub(lx) : word(lx)
       const entry: Redirect = { fd, op, target }
       if (op === "<<" || op === "<<-") {
@@ -681,6 +693,25 @@ export async function run(
   visit: Visit,
   builtins = false,
 ): Promise<string | undefined> {
+  // each script a shell, eval or source reads holds its text until it returns, so a deep chain of them can outgrow the hook's memory and time
+  if (running >= MAX_RUNS) throw new RangeError("scripts nested too deep")
+  running++
+  try {
+    return await runAll(lexed, env, visit, builtins)
+  } finally {
+    running--
+  }
+}
+
+let running = 0
+const MAX_RUNS = 256
+
+async function runAll(
+  lexed: Lexed,
+  env: Env,
+  visit: Visit,
+  builtins: boolean,
+): Promise<string | undefined> {
   const envs = new Map<number, Env>([[0, env]])
   const envOf = (scope: number): Env => {
     const found = envs.get(scope)
@@ -705,6 +736,8 @@ export async function examine(
   visit: Visit,
   builtins: boolean,
 ): Promise<string | undefined> {
+  if (env.until !== undefined && performance.now() > env.until)
+    throw new RangeError("past the hook's time")
   const parsed = parse(cmd)
   const { args, chdir, local, name } = parsed
   const here: Env = chdir ? { ...env, cwd: pathOf(chdir, env) } : env
@@ -838,7 +871,7 @@ async function existing(path: string, env: Env): Promise<Text> {
 async function outputOf(cmd: Command, env: Env): Promise<Text> {
   const { args, name } = parse(cmd)
   if (name === "") {
-    if (cmd.inner) return outputs(cmd.inner, env)
+    if (cmd.inner) return outputs(cmd.inner(), env)
     return cmd.group || cmd.words.some((w) => GROUPING.has(w.value) && !w.quoted)
       ? unknown("the output of a command group")
       : { value: "" }

@@ -72,6 +72,15 @@ describe("a git stash that can take another worktree's work is refused", () => {
   })
 })
 
+describe("a long run of closing braces", () => {
+  test("ahead of a stash is read inside the hook's time", async () => {
+    const started = performance.now()
+    const reason = await bash(`${"ls; }\n".repeat(60_000)}git stash`)
+    expect(reason).toBeDefined()
+    expect(performance.now() - started).toBeLessThan(5_000)
+  }, 20_000)
+})
+
 describe("a stash found by name or SHA, and every other call, runs", () => {
   test.each([
     ["list", "git stash list"],

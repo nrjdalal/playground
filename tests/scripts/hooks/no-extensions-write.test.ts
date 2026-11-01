@@ -282,6 +282,12 @@ describe("a direct write into the extensions root is refused, naming the owner's
     ["a redirect into a [ ] glob", `echo '{}' > ${DATA}/extensio[n]s/policy.json`],
     ["a redirect into a ? glob", `echo '{}' > ${DATA}/extensio?s/policy.json`],
     ["a redirect into a * glob", `echo '{}' > ${DATA}/ext*/policy.json`],
+    ["zsh's >! redirect", `echo '[]' >! ${LIST}`],
+    ["zsh's >>! redirect", `echo '[]' >>! ${LIST}`],
+    [
+      "a one-line nested group's output piped into sh",
+      `{ { echo 'rm ${LIST}'; }; echo true; } | sh`,
+    ],
     ["rm of a zsh ( ) glob", `rm -rf ${DATA}/extensio(n)s`],
     ["env -C attached to a scope", `env -C${SCOPE} git reset --hard`],
     ["env --chdir= to a scope", `env --chdir=${SCOPE} git reset --hard`],
@@ -315,6 +321,24 @@ describe("a direct write into the extensions root is refused, naming the owner's
     const reason = await bash(`echo ${"${a:-".repeat(30_000)}${"}".repeat(30_000)}`, "/tmp")
     expect(reason).toContain("split it into shorter calls")
   })
+
+  test("a long run of closing braces ahead of the CLI is read inside the hook's time", async () => {
+    const started = performance.now()
+    const reason = await bash(`${"ls; }\n".repeat(21_000)}playground ext sync`, "/tmp")
+    expect(reason).toContain("no-extensions-write hook refuses")
+    expect(performance.now() - started).toBeLessThan(1_000)
+  }, 20_000)
+
+  test.each([300, 8_000])(
+    "an eval chain %d deep ahead of a write is refused inside the hook's time",
+    async (depth) => {
+      const started = performance.now()
+      const reason = await bash(`${"eval 'eval '\\''".repeat(depth)}\nrm ${LIST}`, "/tmp")
+      expect(reason).toContain("no-extensions-write hook refuses")
+      expect(performance.now() - started).toBeLessThan(2_000)
+    },
+    60_000,
+  )
 
   test("a Bash call whose cwd is already inside the root runs no writer", async () => {
     expect(await bash("node -e 'x'", SCOPE)).toContain("no-extensions-write hook refuses")
