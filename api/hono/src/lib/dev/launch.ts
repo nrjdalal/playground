@@ -79,6 +79,25 @@ export const syncAliases = (
   return { failed, wrote }
 }
 
+// Points a route at a port, owned by a pid that outlives each server behind it (the live dashboard's run.sh), so the supervisor moves its web from one server to the next in one write; a route another live process holds is refused, portless's own conflict, never forced.
+// Its bare alias moves with it only while that alias follows this route (it held the route's old port), as the launcher's 2s sync would, so another stack's alias is never taken.
+export const moveRoute = (
+  host: string,
+  port: number,
+  owner: number,
+  dir = portlessDir(),
+): { failed: string[]; wrote: string[] } => {
+  const store = new RouteStore(dir)
+  const before = store.loadRoutes()
+  const was = before.find((route) => route.hostname === host)?.port
+  store.addRoute(host, port, owner)
+  const bare = host.slice(host.indexOf(".") + 1)
+  const alias = before.find((route) => route.hostname === bare && route.pid === 0)
+  if (!BARE_HOSTS.includes(bare) || was === undefined || alias?.port !== was)
+    return { failed: [], wrote: [] }
+  return syncAliases([[host, bare]], dir)
+}
+
 // The bare names held in portless's routes, by an alias or a running stack.
 export const heldBareHosts = (dir = portlessDir()): string[] =>
   new RouteStore(dir)

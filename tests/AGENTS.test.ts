@@ -6,6 +6,9 @@ const ROOT = join(import.meta.dir, "..")
 // AGENTS.md plus every file it imports, in chars: what every session loads before its first turn, set at 43,531 plus 5%.
 const BUDGET = 45_700
 
+// The test goes red at this share of BUDGET, which keeps 3% of it free for PRs that pass alone and merge together.
+const MARGIN = 0.97
+
 // Every ALWAYS rule by its first five words: each keeps its line in AGENTS.md, so it loads into every session, while a dashboard rule's full text stays in its topic file.
 const ALWAYS = [
   "Do every change in its",
@@ -124,8 +127,17 @@ describe("AGENTS.md", () => {
     expect(lost).toEqual([])
   })
 
-  test("AGENTS.md and its imports load under BUDGET chars", async () => {
-    expect((await loaded(join(ROOT, "AGENTS.md"))).join("").length).toBeLessThan(BUDGET)
+  test("AGENTS.md and its imports load under MARGIN of BUDGET chars", async () => {
+    const size = (await loaded(join(ROOT, "AGENTS.md"))).join("").length
+    const limit = Math.floor(BUDGET * MARGIN)
+    const topics = [".agents/*.md", ".agents/dashboard/*.md"]
+      .flatMap((pattern) => [...new Bun.Glob(pattern).scanSync({ cwd: ROOT })])
+      .sort()
+    expect(
+      size < limit
+        ? ""
+        : `AGENTS.md and its imports load ${size} chars, at or over ${limit}, ${MARGIN * 100}% of BUDGET ${BUDGET}: move reference out of AGENTS.md into the topic file it belongs to (${topics.join(", ")}), leaving a pointer`,
+    ).toBe("")
   })
 
   test("every hook .claude/settings.json registers is named in AGENTS.md (#2242)", async () => {
@@ -144,9 +156,40 @@ describe("AGENTS.md", () => {
     )
   })
 
+  test("the tracking rule files an org's or a person's work in that extension's repo (PG-83)", async () => {
+    const text = await Bun.file(join(ROOT, "AGENTS.md")).text()
+    const lines = text.split("\n")
+    const at = lines.findIndex((l) => l.includes("Track Playground's work as GitHub issues"))
+    expect(at).toBeGreaterThan(-1)
+    const line = `${lines[at]}\n${lines[at + 1]}`
+    expect(line).toContain(
+      "The repo tracks the factory's own work alone, since an org's work goes in that org's extension repo and a person's in their login extension",
+    )
+    expect(line).toContain("[ADR 0016]")
+  })
+
   test("CLAUDE.md is AGENTS.md, so both load the same rules", async () => {
     expect(await Bun.file(join(ROOT, "CLAUDE.md")).text()).toBe(
       await Bun.file(join(ROOT, "AGENTS.md")).text(),
+    )
+  })
+
+  test("a canary merge runs the changed-term grep for what the incoming commits changed, with its measured case", async () => {
+    const lines = (await Bun.file(join(ROOT, "AGENTS.md")).text()).split("\n")
+    const at = lines.findIndex((l) => l.includes("After you merge `canary` into the branch"))
+    const line = `${lines[at]}\n${lines[at + 1]}`
+    expect(
+      lines.filter((l) => l.includes("After you merge `canary` into the branch")),
+    ).toHaveLength(1)
+    expect(lines[at - 1]).toContain(
+      "run the changed-term grep for each term whose meaning the diff changes",
+    )
+    expect(line).toContain("`git log -p HEAD^1..HEAD^2` while the merge commit is `HEAD`")
+    expect(line).toContain("the PR's own changed docs")
+    expect(line).toContain("before you ask for the next round")
+    expect(line).toContain("two docs-only rounds")
+    expect(line).toContain(
+      "done when no line of the PR's docs describes a meaning those commits changed",
     )
   })
 })

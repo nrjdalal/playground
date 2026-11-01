@@ -46,10 +46,14 @@ Each manager is found by what it does, its kind (the builder, ops, the planner a
 `roster.ts who builder` prints whoever holds the builder's seat, and every script, hook and Dashboard read that looks for a manager follows the same rule, falling back to today's names.
 Four routes skip the planner, which hears after: two fast lanes (a live break or a tiny fix the owner points at, straight to the Builder; a machine or ops incident, straight to Ops), a backlog fix a free slot takes, and a task the owner calls priority.
 An org's work skips it too and stays outside the planner's lanes.
+An issue goes in the repo where its work lives: this repo for the factory's own, an org's extension repo for that org's, and a person's login extension for their own tools ([ADR 0016](../../.agents/adr/0016-playground-is-generic-with-a-small-core.md)).
 As it routes an ask, the dispatcher routes it to a thread of its own, so the Dashboard can show his chat grouped by what he asked: a message that opens with a thread's marker, `[thread:<id>]`, routes there as it is read, so the dispatcher opens each reply and update about that ask with the same marker and asks a peer to open its report with it,
 and an ask with no marker gets a thread through `playground thread` (each Inbox item about it goes to the same one).
 Work goes out in bundles: the Planner groups the issues that touch one surface, such as the sidebar or the chat, into one bundle, and a bundle is one worker, one PR, one review loop and one tester pass per head, its tester driving only the pages and files the bundle touches.
 Two pieces of work that depend on each other in meaning stack only for no line overlap: the test is a merge-tree of the two heads against the parent's merge base with canary, and the child holds behind its parent until the parent merges.
+A stacked child merges its parent's branch in once, when the parent scores 5/5 or merges, since every merge is a head its reviewer scores again.
+A worker that merges canary or a stack's parent in keeps that merge plain and commits each edit after it on its own, since review scores an edit inside a merge as blocking.
+A lane's item aims at about 1,000 changed lines or fewer, and a bigger diff splits off canary as a new PR, since a diff too big to read whole finds new blocking issues every round.
 Anything else bundles into one PR or sequences one PR after the other.
 A worker is spawned for one chore and ends when the chore is done, so the room it held fills again as work finishes: a fix for live breakage or security first, then a queued org ticket, else the next item of the planner's first lane with no worker, where his own asks sit ahead of the chores the factory proposed.
 Before a lead spawns a worker it reads the machine's room, the Dashboard's System panel through `bun run verify system`, so the factory grows as far as the Mac allows, counting every membership rather than holding for usage.

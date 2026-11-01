@@ -183,3 +183,62 @@ describe("the Review label carries its score's color (PG-157)", () => {
     expect(text).toContain("gh label create 'Review • <s>/5' -R <repo> --color <hex> --force")
   })
 })
+
+describe("a diff holding a long-lived connection is reviewed by a lifecycle table", () => {
+  test("step 4 asks for the table in the PR's Evidence, one row per path, and scores blocking until it is there", async () => {
+    const step = (await skill()).match(/^4\. \*\*Review on two axes\.\*\*.*$/m)?.[0] ?? ""
+    const line = step.split("**Lifecycle table:**")[1]?.split("**Done when**")[0] ?? ""
+    expect(line).toContain("a socket, a pub/sub subscriber, a retrying client")
+    expect(line).toContain("in the PR's Evidence")
+    expect(line).toContain(
+      "one row per path: connect, a connect that fails partway, a drop, a hang after connect, reconnect and resubscribe, close, and a member who loses access,",
+    )
+    expect(line).toContain("the test that proves it, or the reason the path cannot happen")
+    expect(line).toContain("blocking finding")
+    expect(step.split("**Done when**")[1] ?? "").toContain("lifecycle table")
+  })
+
+  test("the docs page says a long-lived connection's lifecycle table holds the score down", async () => {
+    expect(await page()).toContain(
+      "lifecycle table, one row per path from connect to close, and a missing table holds the score at 3",
+    )
+  })
+})
+
+describe("code-review-loop runs its newest text every round (PG-213)", () => {
+  test("step 1 opens by loading the skill again, and its Done when checks it", async () => {
+    const recover = (await skill()).match(/^1\. \*\*Recover\.\*\*.*$/m)?.[0] ?? ""
+    expect(recover).toStartWith(
+      "1. **Recover.** Call the Skill tool with `code-review-loop` again, so the round runs this skill's newest text.",
+    )
+    expect(recover.split("**Done when**")[1] ?? "").toContain(
+      "loaded code-review-loop again this round",
+    )
+    expect(await page()).toContain("loads the skill again at the start of every round")
+  })
+})
+
+describe("code-review-loop's round 1 greps each changed term", () => {
+  test("step 4 runs the changed-term grep in round 1, names its finding's shape and its Done when, with its measured case", async () => {
+    const step = (await skill()).match(/^4\. \*\*Review on two axes\.\*\*.*$/m)?.[0] ?? ""
+    expect(step).toContain(
+      "the changed-term grep (`git grep -l <term>` over the agent-facing docs) for each term whose meaning the diff changes",
+    )
+    expect(step).toContain(
+      "file every list or doc either leaves behind as one such finding, each as `file:line`",
+    )
+    expect(step).toContain("7 rounds")
+    expect(step.split("**Done when**")[1] ?? "").toContain(
+      "its changed-term grep for each term whose meaning it changes",
+    )
+    expect(await page()).toContain("each term whose meaning the diff changes")
+  })
+
+  test("AGENTS.md's pre-review pass runs the same grep before round 1", async () => {
+    const agents = await Bun.file(join(root, "AGENTS.md")).text()
+    const line = agents.split("\n").find((l) => l.includes("changed-term grep")) ?? ""
+    expect(line).toContain("`git grep -l <term>`")
+    expect(line).toContain("each term whose meaning the diff changes")
+    expect(agents).toContain("each list grep and changed-term grep with its hits")
+  })
+})

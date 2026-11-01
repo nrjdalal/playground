@@ -3,6 +3,7 @@ import { join } from "node:path"
 
 import { kindOf, placedKindOf } from "@packages/config/kinds"
 
+import STATUSES from "../../../../scripts/roster-statuses.json"
 import { leadName } from "../ops-session-resume/resume"
 import { factoryRepoOf } from "../playground/setting"
 import { writeAtomic } from "../write-atomic"
@@ -31,6 +32,7 @@ type Json = Record<string, unknown>
 export const HEADROOM = 85
 export const IDLE_DB_AFTER = 7200
 export const IDLE_DB_GAP = 900
+export const NO_PR_AFTER = 900
 export const PRUNE_EVERY = 21600
 export const REVIEWER_LATE = 1200
 export const STALE_EVERY = 14_400
@@ -293,6 +295,60 @@ export async function lateReviewers(
   return []
 }
 
+// A live worker's PG branch whose head is NO_PR_AFTER seconds old with no PR in any state: one line to the worker's lead, once per head, since CI runs only on a PR into canary, so a lead can plan around a run that never started. The branch is the one its row records at first push (playbook's ROSTER.md); a row holding a pr, or one whose status is not live, is not read, and one GraphQL read covers every branch.
+export async function prlessBranches(ctx: Context, agents: Json[]): Promise<string[]> {
+  const workerOf = new Map<string, string>()
+  for (const a of agents)
+    if (
+      (STATUSES.live as string[]).includes(String(a.status)) &&
+      !a.pr &&
+      kindOf(String(a.name), a.kind) === "worker" &&
+      /^pg-\d+/i.test(String(a.branch ?? ""))
+    )
+      workerOf.set(String(a.branch), String(a.name))
+  if (!workerOf.size) return []
+  let repo: string
+  try {
+    repo = await (ctx.factory ?? (() => factoryRepoOf()))()
+  } catch {
+    return ["branch-check-unreadable"]
+  }
+  const branches = [...workerOf.keys()]
+  const [owner, name] = repo.split("/")
+  const query = `{ repository(owner: "${owner}", name: "${name}") { ${branches.map((b, i) => `b${i}: ref(qualifiedName: ${JSON.stringify(`refs/heads/${b}`)}) { associatedPullRequests { totalCount } target { ... on Commit { committedDate oid } } }`).join(" ")} } }`
+  const r = await ctx.run(["gh", "api", "graphql", "-f", `query=${query}`], { timeoutMs: 60_000 })
+  let refs: Record<string, Json | null>
+  try {
+    refs = JSON.parse(r.out).data.repository
+  } catch {
+    return ["branch-check-unreadable"]
+  }
+  const path = join(here(ctx), "branch-told.json")
+  const told = (await readJson<Record<string, string>>(path, {})) ?? {}
+  const keep: Record<string, string> = {}
+  const now = seconds(ctx)
+  for (const [i, branch] of branches.entries()) {
+    const ref = refs?.[`b${i}`] as {
+      associatedPullRequests?: { totalCount?: number }
+      target?: { committedDate?: string; oid?: string }
+    } | null
+    const oid = ref?.target?.oid
+    if (!ref || !oid || ref.associatedPullRequests?.totalCount !== 0) continue
+    const committed = Date.parse(ref.target?.committedDate ?? "") / 1000
+    if (!committed || now - committed < NO_PR_AFTER) continue
+    keep[branch] = oid
+    if (told[branch] === oid) continue
+    const worker = workerOf.get(branch)!
+    const text = `Branch ${branch} (${worker}): its head ${oid.slice(0, 7)} is ${Math.floor((now - committed) / 60)}m old and has no PR, so no CI runs on it. Open its draft PR so CI runs.`
+    await ctx.run(notifyArgv(ctx, text), {
+      env: { ...process.env, NOTIFY_TO: await leadName(ctx.ops, worker) },
+      timeoutMs: 60_000,
+    })
+  }
+  await writeAtomic(path, JSON.stringify(keep))
+  return []
+}
+
 // run-slot's runner-box route, which falls back to this Mac without a word: one finding naming each precondition run-slot.sh box-off reports failing (no-ci-sh, no-ssh-key, runner-host-off, slot-off).
 export async function boxRoute(ctx: Context): Promise<string[]> {
   const r = await ctx.run([join(ctx.ops, "run-slot.sh"), "box-off"], { timeoutMs: 60_000 })
@@ -351,7 +407,7 @@ export async function idleDbs(ctx: Context): Promise<string[]> {
   return out
 }
 
-// One read of runners, probes, the managers' asks, unclosed answers, the ops jobs, idle databases, the runner-box route, late reviewers and the usage forecast.
+// One read of runners, probes, the managers' asks, unclosed answers, the ops jobs, idle databases, the runner-box route, late reviewers, branches with no PR and the usage forecast.
 export async function check(ctx: Context): Promise<string[]> {
   let roster: Json
   try {
@@ -409,6 +465,7 @@ export async function check(ctx: Context): Promise<string[]> {
   found.push(...(await idleDbs(ctx)))
   found.push(...(await boxRoute(ctx)))
   found.push(...(await lateReviewers(ctx, agents, live)))
+  found.push(...(await prlessBranches(ctx, agents)))
   const projected = Object.values(await forecast(ctx))
   if (projected.length) found.push(projected.some((v) => v > HEADROOM) ? "no-headroom" : "headroom")
   return found
