@@ -9,17 +9,19 @@ source: https://github.com/nrjdalal/zerostarter
 One Bun + Turborepo monorepo: two deployable apps over shared packages. Imports use `@api/hono`, `@packages/*`, and the `@/` alias, never deep relative paths.
 
 ```
-.generated/       # repo-root home for build-time generated assets (gitignored)
-api/hono/         # backend (Hono): routers, middlewares, the AppType export
-web/next/         # frontend (Next.js App Router): app/, components/, lib/, content/
-packages/auth/    # Better Auth instance
-packages/db/      # Drizzle schema + client
-packages/redis/   # the lock store on Bun's Redis client (REDIS_URL), the merge lock's holder
-packages/env/     # type-safe env, one validated entry per consumer
-packages/config/  # TS base, tsdown factory, and site.ts (brand identity)
-packages/scripts/ # build-only bun tooling (auth-schema, data-table-metrics, generate-env, lock, pr-merge, verify); every new script lands here, never bundled
-packages/cli/     # the zerostarter scaffolding CLI (canonical repo only; init strips it)
-tests/            # the whole suite, mirroring each subject's path; *.e2e.test.ts drive a running stack (canonical repo only; forks take no tests)
+.generated/        # repo-root home for build-time generated assets (gitignored)
+api/hono/          # backend (Hono): routers, middlewares, the AppType export
+web/next/          # frontend (Next.js App Router): app/, components/, lib/, content/
+packages/auth/     # Better Auth instance
+packages/db/       # Drizzle schema + client
+packages/message/  # the Yard message schema (Zod) the server and every client parse
+packages/redis/    # the lock store on Bun's Redis client (REDIS_URL), the merge lock's holder
+packages/settings/ # Playground's typed settings, the factory's items store and its jobs, read by the hooks and ops scripts
+packages/env/      # type-safe env, one validated entry per consumer
+packages/config/   # TS base, tsdown factory, and site.ts (brand identity)
+packages/scripts/  # build-only bun tooling (auth-schema, data-table-metrics, generate-env, lock, pr-merge, verify); every new script lands here, never bundled
+packages/cli/      # the zerostarter scaffolding CLI (canonical repo only; init strips it)
+tests/             # the whole suite, mirroring each subject's path; *.e2e.test.ts drive a running stack (canonical repo only; forks take no tests)
 ```
 
 Read `AGENTS.md` first for the rules (the dashboard app's are in `.agents/dashboard/<topic>.md`: AGENTS.md holds each ALWAYS rule in one line and a pointer naming when to read its file); `curl "$(bunx portless get playground)/llms-full.txt"` dumps the whole codebase as one context file.
