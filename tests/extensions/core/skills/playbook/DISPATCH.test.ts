@@ -34,4 +34,19 @@ describe("DISPATCH.md", () => {
     expect(line).toContain("rather than stacking a third level")
     expect(line).toContain("9,089 lines")
   })
+
+  test("a lane's or a stack's file set and an overlap check read each PR's whole list through the paginated read, since gh pr view stops at 100", async () => {
+    const lines = (await Bun.file(DISPATCH).text()).split("\n")
+    const lanes = lines.findIndex((l) => l.includes("each lane owning its files"))
+    const at = lines.findIndex((l) => l.includes("every overlap check between open PRs"))
+    expect(at).toBeGreaterThan(lanes)
+    const line = lines[at] ?? ""
+    expect(line).toContain("a stack's")
+    expect(line).toContain("overlap")
+    expect(line).toContain(
+      "`gh api --paginate repos/<owner>/<repo>/pulls/<n>/files --jq '.[].filename'`",
+    )
+    expect(line).toContain("`gh pr view <n> --json files` stops at 100")
+    expect(line).toContain("100 of its 143 files")
+  })
 })
