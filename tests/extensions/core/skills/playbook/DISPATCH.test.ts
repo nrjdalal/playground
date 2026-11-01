@@ -71,4 +71,17 @@ describe("DISPATCH.md", () => {
     expect(line).toContain("`gh pr view <n> --json files` stops at 100")
     expect(line).toContain("100 of its 143 files")
   })
+
+  test("a decision that claims no change for this machine cites its measurement, with its measured case (PG-308)", async () => {
+    const lines = (await Bun.file(DISPATCH).text()).split("\n")
+    const at = lines.findIndex((l) =>
+      l.includes("a design choice goes in `~/.playground/bundles/decisions.md`"),
+    )
+    const line = lines[at + 1] ?? ""
+    expect(line).toContain(
+      "A decision that claims no change for this machine or for the owner's setup cites its measurement",
+    )
+    expect(line).toContain("the command run and its output")
+    expect(line).toContain("once nearly let a web build run beside the live dashboard's Postgres")
+  })
 })
