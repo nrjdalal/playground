@@ -568,6 +568,12 @@ describe("a read of the root, and writes elsewhere, run", () => {
         `bun -e 'for (const i of (l.items??[])) { const s=String(i.status??""); if (/^(done|merged|closed)/i.test(s)) continue }' /tmp/plan.json`,
         cwd,
       ],
+      [
+        "a gh -q filter with jq interpolations",
+        where,
+        `gh pr view 436 --json state,title,additions,deletions -q '.state+" "+.title+" +\\(.additions)/-\\(.deletions)"'`,
+        cwd,
+      ],
     ]),
   ])("%s with a quoted glob runs from %s", async (_, _where, command, cwd) => {
     expect(await bash(command, cwd)).toBeUndefined()
