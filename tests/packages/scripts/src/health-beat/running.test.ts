@@ -94,7 +94,7 @@ const DEV = [
 const MAIN = { code: 0, out: "main\n" }
 const SHA = { version: "0.0.1-1a1291d" }
 
-describe("buildOf, the main checkout's branch, the live Dashboard's web and its /api/health", () => {
+describe("buildOf, the Dashboard checkout's branch, the live Dashboard's web and its /api/health", () => {
   test("a branch's build, as a /builds/<sha>/ path in the route's tree, at the version /api/health reports", () => {
     expect(buildOf({ branch: MAIN, health: SHA, ps: PROD, root: 99085 })).toBe(
       "main build, at 1a1291d",
@@ -170,7 +170,7 @@ describe("buildOf, the main checkout's branch, the live Dashboard's web and its 
     )
   })
 
-  test("an unreadable branch, kind or version prints unknown with the reason, never a guess", () => {
+  test("an unreadable kind or version prints unknown with the reason, and an unreadable branch is left out, never a guess", () => {
     expect(
       buildOf({
         branch: MAIN,
@@ -198,7 +198,7 @@ describe("buildOf, the main checkout's branch, the live Dashboard's web and its 
       }),
     ).toBe("main build, at 1a1291d")
     expect(buildOf({ branch: { code: 0, out: "" }, health: SHA, ps: PROD, root: 99085 })).toBe(
-      "unknown branch (detached HEAD) build, at 1a1291d",
+      "build, at 1a1291d",
     )
     expect(
       buildOf({
@@ -207,7 +207,10 @@ describe("buildOf, the main checkout's branch, the live Dashboard's web and its 
         ps: PROD,
         root: 99085,
       }),
-    ).toBe("unknown branch (git branch: fatal: not a git repository) build, at 1a1291d")
+    ).toBe("build, at 1a1291d")
+    expect(buildOf({ health: SHA, port: 58008, ps: PROD, root: 800 })).toBe(
+      "unknown (neither a /builds/<sha>/ path nor next dev runs under pid 800 or on port 58008), at 1a1291d",
+    )
   })
 })
 
@@ -219,10 +222,13 @@ describe("readRunning", () => {
   }
   const git = {
     ancestor: 1,
+    branches: {} as Record<string, string>,
+    cwd: "/desk/web/next",
     mainTag: { code: 1, out: "" },
     tags: {} as Record<string, string>,
   }
   const asks: string[][] = []
+  const branchReads: string[] = []
   const run = (ps: string) => async (argv: string[]) => {
     if (argv[0] === "git") asks.push(argv.slice(3))
     if (argv.includes("--long")) return { code: 0, out: "v0.0.23-1-g8b6438a\n" }
@@ -232,7 +238,10 @@ describe("readRunning", () => {
       const tag = git.tags[argv.at(-1)!]
       return tag ? { code: 0, out: `${tag}\n` } : { code: 128, out: "fatal: no tag\n" }
     }
-    if (argv.includes("branch")) return { code: 0, out: "main\n" }
+    if (argv.includes("branch")) branchReads.push(argv[2]!)
+    if (argv.includes("branch")) return { code: 0, out: `${git.branches[argv[2]!] ?? "main"}\n` }
+    if (argv[0] === "lsof" && argv.includes("cwd"))
+      return { code: 0, out: `p${argv[3]}\nfcwd\nn${git.cwd}\n` }
     if (argv[0] === "ps") return { code: 0, out: ps }
     if (argv[0] === "lsof" && listening[argv[2]!]) return { code: 0, out: listening[argv[2]!] }
     return { code: 1, out: "" }
@@ -260,6 +269,41 @@ describe("readRunning", () => {
       version: "v0.0.23 + 1 local commit (8b6438a)",
     })
     expect(asked).toEqual(["http://127.0.0.1:4459/api/health"])
+  })
+
+  test("names the Dashboard's branch from its own checkout, the working folder of the process serving it, when the main checkout is on another", async () => {
+    git.branches = { "/desk/web/next": "dashboard", "/repo": "main" }
+    branchReads.length = 0
+    try {
+      const got = await readRunning({
+        health: async () => ({ version: "0.0.1-1a1291d" }),
+        portless: routes([
+          { hostname: "dashboard.playground.localhost", pid: 99085, port: 58008 },
+          { hostname: "playground.localhost", pid: 0, port: 58008 },
+          { hostname: "api.playground.localhost", pid: 0, port: 4459 },
+        ]),
+        repo: "/repo",
+        run: run(PROD),
+      })
+      expect(got.build).toBe(
+        "dashboard build, at 1a1291d (version unknown: git describe: fatal: no tag)",
+      )
+      expect(branchReads).toEqual(["/desk/web/next"])
+      git.cwd = ""
+      const unread = await readRunning({
+        health: async () => ({ version: "0.0.1-1a1291d" }),
+        portless: routes([
+          { hostname: "playground.localhost", pid: 99085, port: 58008 },
+          { hostname: "api.playground.localhost", pid: 0, port: 4459 },
+        ]),
+        repo: "/repo",
+        run: run(PROD),
+      })
+      expect(unread.build).toBe("build, at 1a1291d (version unknown: git describe: fatal: no tag)")
+    } finally {
+      git.branches = {}
+      git.cwd = "/desk/web/next"
+    }
   })
 
   test("names main's latest tag when the checkout is behind it, and the tag at the Dashboard's sha", async () => {
@@ -345,7 +389,7 @@ describe("readRunning", () => {
       run: run(PROD),
     })
     expect(none.build).toBe(
-      "main, unknown (portless has no route for playground.localhost), at unknown (portless has no route for api.playground.localhost)",
+      "unknown (portless has no route for playground.localhost), at unknown (portless has no route for api.playground.localhost)",
     )
     const orphan = await readRunning({
       health: async () => ({ reason: "/api/health did not answer: refused" }),
@@ -357,7 +401,7 @@ describe("readRunning", () => {
       run: run(PROD),
     })
     expect(orphan.build).toBe(
-      "main, unknown (no running stack holds playground.localhost's port 58008), at unknown (/api/health did not answer: refused)",
+      "unknown (no running stack holds playground.localhost's port 58008), at unknown (/api/health did not answer: refused)",
     )
   })
 })

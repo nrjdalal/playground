@@ -201,7 +201,7 @@ describe("readBeat", () => {
       pressure: 1,
       running: {
         build:
-          "unknown branch (git branch: no output), unknown (portless has no route for playground.localhost), at unknown (portless has no route for api.playground.localhost)",
+          "unknown (portless has no route for playground.localhost), at unknown (portless has no route for api.playground.localhost)",
         version: "unknown (git describe: no output)",
       },
       sessions: { idle: 1, stuck: 1, working: 2 },

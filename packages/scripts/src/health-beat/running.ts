@@ -2,7 +2,7 @@ import { join } from "node:path"
 
 import type { Run } from "../ops-tick/tick"
 
-// What this install runs, read and never acted on: the main checkout's version beside main's latest tag, and its branch's build or dev server as the live Dashboard serves it, at the sha its /api/health reports and that sha's tag.
+// What this install runs, read and never acted on: the main checkout's version beside main's latest tag, and the live Dashboard's build or dev server with its own checkout's branch, at the sha its /api/health reports and that sha's tag.
 
 export type Running = { build: string; version: string }
 export type Health = { reason: string } | { version: string }
@@ -35,16 +35,11 @@ export const checkoutOf = (input: {
     : version
 }
 
-// Pure: `git branch --show-current`, which prints nothing on a detached HEAD.
-const branchOf = ({ code, out }: Answer): string => {
-  if (code !== 0) return `unknown branch (git branch: ${firstLine(out) || "no output"})`
-  return firstLine(out) || "unknown branch (detached HEAD)"
-}
-
-// Pure: the branch, then the process trees under root and under each pid listening on the route's port, from `ps -A -o pid=,ppid=,command=`, read as a build when a command runs from a /builds/<sha>/ path and as a dev server when one runs next dev, then /api/health's version, its sha alone when it ends in one.
+// Pure: the Dashboard checkout's `git branch --show-current`, then the process trees under root and under each pid listening on the route's port, from `ps -A -o pid=,ppid=,command=`, read as a build when a command runs from a /builds/<sha>/ path and as a dev server when one runs next dev, then /api/health's version, its sha alone when it ends in one.
 // The listeners matter on a supervised stack: its run.sh owns the route so a web swap is one write, while the web it starts runs with ppid 1 on the route's port.
+// A branch that is not read, fails or is a detached HEAD leaves the branch word out, since the main checkout's branch says nothing of the Dashboard's.
 export const buildOf = (input: {
-  branch: Answer
+  branch?: Answer
   health: Health
   listeners?: number[]
   port?: number
@@ -65,15 +60,23 @@ export const buildOf = (input: {
       ? `${sha ?? input.health.version}${tag}`
       : `unknown (${input.health.reason})`
   const kind = kindOf(input)
-  const branch = branchOf(input.branch)
-  return `${"kind" in kind ? `${branch} ${kind.kind}` : `${branch}, unknown (${kind.unknown})`}, at ${version}`
+  const branch =
+    input.branch?.code === 0 && firstLine(input.branch.out) ? firstLine(input.branch.out) : ""
+  const what =
+    "kind" in kind
+      ? `${branch} ${kind.kind}`.trim()
+      : branch
+        ? `${branch}, unknown (${kind.unknown})`
+        : `unknown (${kind.unknown})`
+  return `${what}, at ${version}`
 }
 
 // The sha /api/health's version ends in, when it ends in one.
 const shaOf = (health: Health): string | undefined =>
   "version" in health ? /-([0-9a-f]{7,40})$/.exec(health.version)?.[1] : undefined
 
-const kindOf = ({
+// Pure: the build or dev server under root or a listener, with the pid of the first process that shows it, whose working folder is the Dashboard's checkout.
+export const kindOf = ({
   listeners = [],
   port,
   ps,
@@ -85,7 +88,7 @@ const kindOf = ({
   ps: string
   root: number | null
   why?: string
-}): { kind: string } | { unknown: string } => {
+}): { kind: string; pid: number } | { unknown: string } => {
   if (root === null) return { unknown: why }
   const rows = ps
     .split("\n")
@@ -102,10 +105,11 @@ const kindOf = ({
         grew = true
       }
   }
-  const commands = rows.filter((row) => tree.has(row.pid)).map((row) => row.command)
-  if (commands.some((command) => /\/builds\/[0-9a-f]{7,40}\//.test(command)))
-    return { kind: "build" }
-  if (commands.some((command) => /\bnext dev\b/.test(command))) return { kind: "dev server" }
+  const inTree = rows.filter((row) => tree.has(row.pid))
+  const built = inTree.find((row) => /\/builds\/[0-9a-f]{7,40}\//.test(row.command))
+  if (built) return { kind: "build", pid: built.pid }
+  const dev = inTree.find((row) => /\bnext dev\b/.test(row.command))
+  if (dev) return { kind: "dev server", pid: dev.pid }
   return {
     unknown: `neither a /builds/<sha>/ path nor next dev runs under pid ${root}${port === undefined ? "" : ` or on port ${port}`}`,
   }
@@ -164,7 +168,14 @@ const listenersOn = async (run: Run, port: number): Promise<number[]> =>
     .filter((line) => /^\d+$/.test(line.trim()))
     .map(Number)
 
-// Reads the two lines' values once: up to five git reads of the main checkout (its describe and branch, main's latest tag and whether HEAD holds it, the Dashboard sha's tag), portless's routes, one ps read, one lsof read of the web's port and one GET.
+// A process's working folder, from lsof's `n` field; undefined when lsof cannot read it.
+const cwdOf = async (run: Run, pid: number): Promise<string | undefined> =>
+  (await run(["lsof", "-a", "-p", String(pid), "-d", "cwd", "-Fn"])).out
+    .split("\n")
+    .find((line) => line.startsWith("n/"))
+    ?.slice(1)
+
+// Reads the two lines' values once: up to four git reads of the main checkout (its describe, main's latest tag and whether HEAD holds it, the Dashboard sha's tag), portless's routes, one ps read, lsof reads of the web's port and its process's working folder, the branch of that folder's checkout, and one GET.
 export const readRunning = async (input: {
   health?: (url: string) => Promise<Health>
   portless: string
@@ -181,16 +192,21 @@ export const readRunning = async (input: {
   const git = (...args: string[]) => run(["git", "-C", repo, ...args])
   const mainTag = await git("describe", "--tags", "--abbrev=0", "origin/main")
   const sha = shaOf(health)
+  const web = {
+    listeners: "root" in owner ? await listenersOn(run, owner.port) : [],
+    port: "root" in owner ? owner.port : undefined,
+    ps: "root" in owner ? (await run(["ps", "-A", "-o", "pid=,ppid=,command="])).out : "",
+    root: "root" in owner ? owner.root : null,
+    why: "why" in owner ? owner.why : undefined,
+  }
+  const kind = kindOf(web)
+  const cwd = "pid" in kind ? await cwdOf(run, kind.pid) : undefined
   return {
     build: buildOf({
-      branch: await git("branch", "--show-current"),
+      ...web,
+      branch: cwd ? await run(["git", "-C", cwd, "branch", "--show-current"]) : undefined,
       health,
-      listeners: "root" in owner ? await listenersOn(run, owner.port) : [],
-      port: "root" in owner ? owner.port : undefined,
-      ps: "root" in owner ? (await run(["ps", "-A", "-o", "pid=,ppid=,command="])).out : "",
-      root: "root" in owner ? owner.root : null,
       tag: sha ? await git("describe", "--tags", "--abbrev=0", sha) : undefined,
-      why: "why" in owner ? owner.why : undefined,
     }),
     version: checkoutOf({
       ancestor:
