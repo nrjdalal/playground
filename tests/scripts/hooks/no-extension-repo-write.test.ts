@@ -255,6 +255,23 @@ describe("a push resolves its target the way git does, and one it cannot place i
       ],
       ["config set alias, then the alias", `git config alias.zz push && git zz ${EXT} main`],
       [
+        "a config write ending in list, then the alias",
+        `git config alias.p push list && git p ${EXT} main`,
+      ],
+      [
+        "a config write ending in get, then a push",
+        `git config remote.origin.pushurl ${EXT} get && git push origin main`,
+      ],
+      [
+        "git config set, then a push",
+        `git config set remote.origin.pushurl ${EXT} && git push origin main`,
+      ],
+      ["git config edit, then a push", "git config edit && git push origin main"],
+      [
+        "remote -v set-url, then a push",
+        `git remote -v set-url --push origin ${EXT} && git push origin main`,
+      ],
+      [
         "an alias written to .git/config, then the alias",
         `printf '[alias] zz = push' >> .git/config && git zz ${EXT} main`,
       ],
@@ -364,6 +381,11 @@ describe("what it lets through", () => {
         "git config --get remote.origin.url && git push origin feature",
       ],
       ["a config read by key, then a push", "git config user.name && git push origin feature"],
+      [
+        "git config get, then a push",
+        "git config get remote.origin.url && git push origin feature",
+      ],
+      ["git config list, then a push", "git config list && git push origin feature"],
       ["a remote listed, then a push", "git remote -v && git push origin feature"],
       ["a push, then a config write", "git push origin feature && git config x.y z"],
       ["a push by URL to another repository", `git push ${OTHER} feature`],

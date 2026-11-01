@@ -381,8 +381,7 @@ const GH_STATE = new Set(["config set", "repo clone", "repo fork", "repo set-def
 const GIT_CONFIG_PATH = /(?:^|\/)\.git(?:\/|$)|\.gitconfig|(?:^|\/)git\/config$/
 const CONFIG_WRITE =
   /^--(?:add|edit|remove-section|rename-section|replace-all|unset|unset-all)$|^-e$/
-const CONFIG_READ =
-  /^(?:get|list)$|^--(?:get|get-all|get-color|get-colorbool|get-regexp|get-urlmatch|list)$|^-l$/
+const CONFIG_READ = /^--(?:get|get-all|get-color|get-colorbool|get-regexp|get-urlmatch|list)$|^-l$/
 const CONFIG_TAKES = new Set(["--blob", "--default", "-f", "--file", "--type"])
 let changed = false
 let builtins: Set<string> | undefined
@@ -504,11 +503,17 @@ function changesState(cmd: Command, { args, name }: Parsed): boolean {
     const k = words.findIndex((w, i) => !w.startsWith("-") && !GIT_GLOBALS.has(words[i - 1]))
     const [sub, ...rest] = k === -1 ? [] : words.slice(k)
     if (sub === "clone" || sub === "init" || sub === "submodule") return true
-    if (sub === "remote") return ["add", "remove", "rename", "rm", "set-url"].includes(rest[0])
+    const verb = rest.find((w) => !w.startsWith("-"))
+    if (sub === "remote") return ["add", "remove", "rename", "rm", "set-url"].includes(verb ?? "")
     if (sub !== "config") return false
-    if (rest.some((w) => CONFIG_WRITE.test(w))) return true
-    if (rest.some((w) => CONFIG_READ.test(w))) return false
-    return parseFlags(args.slice(k + 1), CONFIG_TAKES).positionals.length > 1
+    // get and list are verbs only as the first word, since `git config <key> <value> list` sets the key
+    const { flags, positionals } = parseFlags(args.slice(k + 1), CONFIG_TAKES)
+    const first = positionals[0]?.value ?? ""
+    if (flags.some((f) => CONFIG_WRITE.test(f.name))) return true
+    if (first === "get" || first === "list") return false
+    if (["edit", "remove-section", "rename-section", "set", "unset"].includes(first)) return true
+    if (flags.some((f) => CONFIG_READ.test(f.name))) return false
+    return positionals.length > 1
   }
   const targets = cmd.redirects.flatMap((r) => (r.target ? [r.target] : []))
   return [...args, ...targets].some((w) => GIT_CONFIG_PATH.test(w.value))
