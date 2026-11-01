@@ -297,6 +297,10 @@ describe("a direct write into the extensions root is refused, naming the owner's
     ["rm of a glob in the home that matches the data folder", "rm -rf .p*"],
     ["rm of a glob held in a quoted variable", 'X=".playground/ext*"; rm -rf $X'],
     ["rm of a brace that makes the root's name", "rm -rf .playground/{x,extensions}"],
+    ["rm of a glob that matches a link to the root", "rm -rf st*/hooks"],
+    ["rm of a glob with a .. after it", "rm -rf w*/../.playground/extensions"],
+    ["rm of an extglob in the data folder", "rm -rf .playground/@(extensions)"],
+    ["rm of a negated extglob in the data folder", "rm -rf .playground/!(handoffs)"],
     ["env -C attached to a scope", `env -C${SCOPE} git reset --hard`],
     ["env --chdir= to a scope", `env --chdir=${SCOPE} git reset --hard`],
   ])("%s", async (_, command) => {
@@ -510,7 +514,6 @@ describe("a read of the root, and writes elsewhere, run", () => {
     ["a git author name with a space", "GIT_AUTHOR_NAME='A B' git log"],
     ["a pager with an option", "GIT_PAGER='less -R' git log"],
     ["a commit message with an unbalanced quote", `git commit -m "it's fine"`],
-    ["a glob in the home that cannot name the data folder", "rm -rf big-*"],
     [
       "the CLI's render through ext put of a doc",
       "playground ext put login doc audit-x /tmp/a.md --reason why",

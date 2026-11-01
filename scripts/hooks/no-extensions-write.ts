@@ -255,13 +255,6 @@ function inspect(raw: string, environment: Environment) {
     const at = realOf(path)
     return at === sep ? remover : root.startsWith(at + sep)
   }
-  // Whether a glob in a folder above the root can name the next folder down to it: a glob matches only names that start with its literal text, but a brace can make any name.
-  const reaches = (value: string, glob: number, folder: string) => {
-    const at = realOf(folder)
-    const next = root.slice(at === sep ? 1 : at.length + 1).split(sep)[0]
-    const literal = value.slice(value.lastIndexOf("/", glob - 1) + 1, glob)
-    return value.slice(glob).includes("{") || next.toLowerCase().startsWith(literal.toLowerCase())
-  }
   const file = typeof tool === "string" ? input[FILE_TOOLS[tool]] : undefined
   if (typeof file === "string") {
     const expanded = /^~(?:\/|$)/.test(file) ? join(home, file.slice(1)) : file
@@ -297,10 +290,7 @@ function inspect(raw: string, environment: Environment) {
       if (glob !== -1 && !marked(text.value)) {
         const dir = pathOf({ value: `${text.value.slice(0, glob)}x` }, env)
         const folder = dir && dirname(dir)
-        if (
-          folder &&
-          (inRoot(folder) || (above(folder, true) && reaches(text.value, glob, folder)))
-        )
+        if (folder && (inRoot(folder) || above(folder, true)))
           return `${text.value}, a glob in ${folder}`
       }
     }

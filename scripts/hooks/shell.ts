@@ -994,7 +994,7 @@ async function outputOf(cmd: Command, env: Env): Promise<Text> {
   const values = await Promise.all(args.map((a) => resolveText(a, env)))
   const hidden = values.find((v) => v.unknown)
   if (hidden) return hidden
-  if (name === "printf") return { value: printf(values.map((v) => v.value)) }
+  if (name === "printf") return held({ value: printf(values.map((v) => v.value)) })
   let k = 0
   while (k < values.length && /^-[neE]+$/.test(values[k].value)) k++
   return {
