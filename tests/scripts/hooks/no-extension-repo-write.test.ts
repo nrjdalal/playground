@@ -597,6 +597,7 @@ describe("what it lets through", () => {
         "gh pr list --json number -q '.[].number' | xargs -n1 gh pr merge --squash",
       ],
       ["git absorb in a checkout the hook cannot read", "cd $X && git absorb"],
+      ["git -C absorb in a checkout the hook cannot read", "git -C $X absorb"],
       [
         "xargs -I placing a curl URL it only reads",
         "echo https://example.com | xargs -I{} curl -sL {}",
@@ -727,6 +728,7 @@ describe("an alias in a config the hook can read", () => {
     process.env.GIT_CONFIG_GLOBAL = global
     try {
       await refused(bash("cd $X && git absorb"))
+      await refused(bash("git -C $X absorb"))
     } finally {
       if (before === undefined) delete process.env.GIT_CONFIG_GLOBAL
       else process.env.GIT_CONFIG_GLOBAL = before
