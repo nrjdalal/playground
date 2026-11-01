@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url"
 
 // The lists a guard reads, by the name its file takes in the root's hooks folder, A to Z; a render refuses a tree that lacks one, so no guard is left without its list.
 export const GUARD_LISTS = [
+  "desktop-owner-apps",
   "glm-refused-sources",
   "no-public-leak",
   "playground-terms",

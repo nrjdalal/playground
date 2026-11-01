@@ -12,13 +12,14 @@ Their tests are `bun run test:file tests/scripts/hooks`.
   since Claude Code runs a handler defined in both files once only when the two commands match byte for byte (measured on Claude Code 2.1.302: one space apart, it runs twice; `tests/scripts/hooks-abs-path.test.ts` holds every hook in both files to it).
   That one command finds the checkout with no `$HOME` in it: `$PLAYGROUND_REPO`, which spawn.sh's launch exports as its main checkout, else the main checkout git names for `$CLAUDE_PROJECT_DIR` (`--git-common-dir`, so a session in a worktree runs the main checkout's guards); when neither names a folder holding the hook's script, it runs nothing and exits 0.
   A headless scan run from outside the checkout exports `PLAYGROUND_REPO` as the factory's checkout and passes `--settings` naming that checkout's `scripts/factory-settings.json`, so its guards run rather than exit 0: the board scan's loop takes the checkout from `beat.py`'s `checkout()`, the end-of-day scan's `scan.sh` from its own path.
-  Two factory hooks act for every session: session-state writes every session's state, since the Dashboard is to show them all, and no-off-palette-label guards every session's labels, since the label rule covers any label.
+  Three factory hooks act for every session: session-state writes every session's state, since the Dashboard is to show them all, no-off-palette-label guards every session's labels, since the label rule covers any label, and no-desktop-owner-app guards every session's agent-desktop calls, since the owner's pointer and apps are the same whichever session drives them.
   Every other factory hook acts for a factory session alone, `PLAYGROUND_ROLE` or else its name in Claude Code's registry, placed by the roster's `kind` for that name and then by the factory's names (`scripts/hooks/role.ts`), so a session the owner opens in the factory's checkout passes them untouched.
   Claude Code loads project settings from the session's own folder alone, so a factory session restored where they lack the hooks (another checkout, an older one, a subfolder) is respawned with its settings (playbook's SESSIONS.md), and `scripts/ops/up.py --sessions`, which reads each session's command line and its own folder's `.claude/settings.json`, names each one.
 
 ## Guard lists
 
-- A guard that reads a list (no-playground-leak's `playground-terms.json` and `slack-cleared.json`, no-release-comment's `release-owners.json` and spawn.sh's GLM gate's `glm-refused-sources.json`, all in core's `extensions/core/lists/`, and no-public-leak's, which only the extensions hold) loads it through `guardList` in `scripts/hooks/lists.ts` inside its check, at every call,
+- A guard that reads a list (no-desktop-owner-app's `desktop-owner-apps.json`, no-playground-leak's `playground-terms.json` and `slack-cleared.json`, no-release-comment's `release-owners.json` and spawn.sh's GLM gate's `glm-refused-sources.json`, all in core's `extensions/core/lists/`, and no-public-leak's,
+  which only the extensions hold) loads it through `guardList` in `scripts/hooks/lists.ts` inside its check, at every call,
   and fails closed on it:
   on a machine with extensions (its data folder holds `extensions/`) the list comes from `extensions/hooks/<list>.json`, which every list write derives as the union of every scope's `lists/<list>.json` (the login's, each org's, then core's), read by `packages/settings/src/rendered.ts`, and never from this folder.
   A root that lacks the list refuses the guarded call, naming the file and `playground ext import --from-tree extensions/core/lists`, which seeds it.
@@ -85,6 +86,19 @@ Their tests are `bun run test:file tests/scripts/hooks`.
   When no named item reads open, one it cannot read included, the reply fails closed, the reason saying what each item read as.
   It judges the hook input's `last_assistant_message`, since the transcript can lag the turn's last message (ADR 0001), and fails open on an input it cannot read, as a hook that cannot start or times out does.
   Its tests are in `bun run test:file tests/scripts/hooks` too.
+
+## no-desktop-owner-app
+
+- agent-desktop runs headless and leaves the owner's own apps alone: `scripts/hooks/no-desktop-owner-app.ts`, registered beside no-headless-login and acting for every session, refuses an `agent-desktop` call that carries `--headed`, since headed input moves the owner's own pointer and focus.
+  It also refuses one that targets an app on the `desktop-owner-apps` guard list ([Guard lists](#guard-lists)): an `--app` value, or a `launch` or `close-app` target, matched without case and with or without `.app` or a path before it.
+  Core's list is empty, and the owner's login extension holds the owner's apps, which Ops adds and removes on the owner's word.
+  It reads the list and nothing else, so no environment variable, `export`, `env` or file a session writes frees a call; this replaces an `AGENT_DESKTOP_ALLOW` route first planned for it, on the dispatcher's word.
+  Its refusal names the two ways out: the owner runs the command with the `!` prefix in the owner's own pane, which runs outside the hooks, or has Ops take the app off the list.
+  It refuses what it cannot read, as a call that may hide either: a word built from a variable or a substitution, the program in a variable, arguments xargs appends, `batch`, `--window-id`, `notification-action`, an interpreter's code that names agent-desktop, and a script file run in a call that names agent-desktop.
+  A command that acts on the app in front when no `--app` names one (`snapshot`, `find`, `screenshot`, `press`, the window and notification commands) needs an `--app`; `snapshot` and `find` under a `--root` ref, and every ref action, pass, since the snapshot that gave the ref was checked.
+  It reads agent-desktop behind `bash -c`, a pipe into a shell, `env` and the other wrappers `scripts/hooks/shell.ts` knows, `run-slot.sh --`, `npx`, `bunx` and `find -exec`, and a script file the call runs, by its text.
+  It loads the list only for a call that runs agent-desktop, and fails closed on it; it fails open on a call it cannot parse.
+  Its tests are `bun run test:file tests/scripts/hooks/no-desktop-owner-app.test.ts`.
 
 ## no-env-dump
 
