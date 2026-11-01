@@ -134,6 +134,57 @@ describe("parsePlan", () => {
   })
 })
 
+// A "now" stamp is the clock's: one typed ahead (plan.json's generatedAt read 01:22Z at 00:43Z, 31 Oct) is refused, while an ETA or a finish, future by design, reads.
+describe("parsePlan refuses a now stamp ahead of the clock", () => {
+  const now = new Date("2026-10-06T18:40:00Z")
+  const ahead = "2026-10-06T18:45:00Z"
+
+  test("a generatedAt ahead is no plan, named, and one within the slack reads", () => {
+    expect(parsePlan(JSON.stringify({ ...plan(), generatedAt: ahead }), now)).toEqual({
+      plan: null,
+      problems: [`generatedAt: ${ahead} is ahead of the clock`],
+    })
+    expect(
+      parsePlan(JSON.stringify({ ...plan(), generatedAt: "2026-10-06T18:41:30Z" }), now).plan,
+    ).not.toBeNull()
+  })
+
+  test("an inFlight since or a doneToday at ahead costs that stamp alone, named", () => {
+    const value = plan()
+    value.inFlight[0] = { ...value.inFlight[0]!, since: ahead } as (typeof value.inFlight)[0]
+    value.doneToday[0] = { ...value.doneToday[0]!, at: ahead }
+    const { plan: read, problems } = parsePlan(JSON.stringify(value), now)
+    expect(read?.inFlight.map((row) => [row.id, row.since])).toEqual([["19", undefined]])
+    expect(read?.doneToday.map((row) => [row.pr, row.at])).toEqual([["#106", undefined]])
+    expect(problems).toEqual([
+      `doneToday.0.at: ${ahead} is ahead of the clock (ignored)`,
+      `inFlight.0.since: ${ahead} is ahead of the clock (ignored)`,
+    ])
+  })
+
+  test("a decision's at ahead is named", () => {
+    const { plan: read, problems } = parsePlan(
+      JSON.stringify({
+        ...plan(),
+        decisions: [{ at: "2026-10-06T18:00:00Z" }, { at: ahead, id: "d2" }],
+      }),
+      now,
+    )
+    expect(read).not.toBeNull()
+    expect(problems).toEqual([`decisions.1.at: ${ahead} is ahead of the clock`])
+  })
+
+  test("an inFlight eta and a lane item's start and finish ahead read, as they are future by design", () => {
+    const { plan: read, problems } = parsePlan(
+      JSON.stringify(plan()),
+      new Date("2026-10-06T18:35:00Z"),
+    )
+    expect(problems).toEqual([])
+    expect(read?.inFlight[0]?.eta).toBe("2026-10-06T19:57:00Z")
+    expect(read?.lanes[0]?.items[0]?.finish).toBe("2026-10-06T20:51:00+00:00")
+  })
+})
+
 describe("readPlan", () => {
   test("a missing file is no plan and no problem", async () => {
     expect(await readPlan(join(dir, "missing.json"))).toEqual({

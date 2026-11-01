@@ -1,6 +1,8 @@
 // playground update: the release skill's step 5 as one script, then the Dashboard's roll.
 import { join } from "node:path"
 
+import { CORE_SKILLS } from "./orgs"
+
 // A step's argv run to its end; `show` streams its output to the terminal instead of keeping it.
 export type Run = (argv: string[], show?: boolean) => Promise<{ code: number; out: string }>
 
@@ -18,6 +20,14 @@ export const updateSteps = (changed: string[]) => ({
     (path) => path.startsWith("packages/") && !path.startsWith("packages/scripts/"),
   ),
   install: changed.some((path) => /(^|\/)(bun\.lock|package\.json)$/.test(path)),
+  // a long-lived checker runs the skill text it loaded, so each changed skill is named for its reload
+  skills: [
+    ...new Set(
+      changed.flatMap((path) =>
+        CORE_SKILLS.flatMap((root) => path.match(new RegExp(`^${root}/([^/]+)/`))?.[1] ?? []),
+      ),
+    ),
+  ].sort(),
 })
 
 // With a tag, the checkout's main is moved to that release instead, back or on, and the Dashboard, which rolls on its own branch, is left as it is; a plain update later moves it on to origin/main again.
@@ -74,7 +84,11 @@ export const runUpdate = async (
   ]
   if (!(await shown(linkSkills))) return 1
   const changed = (await git("diff", "--name-only", old, "HEAD")).out.split("\n").filter(Boolean)
-  const { build, install } = updateSteps(changed)
+  const { build, install, skills } = updateSteps(changed)
+  if (skills.length)
+    log(
+      `playground update: skills changed: ${skills.join(", ")}; a session that loaded one runs its old text until it loads it again`,
+    )
   const turbo = join(repo, "node_modules", ".bin", "turbo")
   const restart = join(repo, "packages", "scripts", "src", "ops-restart", "cli.ts")
   const after: [string, string[]][] = []

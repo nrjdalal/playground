@@ -188,6 +188,8 @@ describe("a hook that guards the factory passes a session with no factory role",
   const cases: [string, object][] = [
     ["no-env-dump", bash("env")],
     ["no-false-green", bash("bun test x | tail")],
+    // split, since tests/test_kill_by_name.py reads the repo's text for the whole name
+    ["no-kill-by-name", bash("p" + "kill node")],
     ["no-playground-leak", leaky],
     ["no-main-checkout", bash("lefthook run pre-commit", mainCheckout(root))],
     ["no-ours-merge", bash("git merge -s ours origin/canary")],

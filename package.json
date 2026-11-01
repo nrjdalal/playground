@@ -27,6 +27,7 @@
     "format": "oxfmt",
     "format:check": "oxfmt --check",
     "gate:new-user": "bun packages/scripts/src/new-user-gate/cli.ts",
+    "health-beat": "bun packages/scripts/src/health-beat/cli.ts",
     "ingest": "bun api/hono/src/bin/dashboard-ingest.ts",
     "linear:read": "bun --no-env-file packages/scripts/src/linear-read/cli.ts",
     "lint": "oxlint",

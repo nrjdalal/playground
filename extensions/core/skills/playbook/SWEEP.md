@@ -37,7 +37,7 @@ For every agent of yours that `ListAgents` lists, or the roster shows with a sta
 - **Silent**: a worker with no push and no report to you for 60 minutes after a review round (one worker chased a side bug for 3.5 hours unreported).
   Ask it why, then record its answer in the roster or redirect it.
 - **Off scope**: a worker chasing a bug outside its chore.
-  Have it file the bug as its own issue at once (an issue on the factory's repo; a work-org ticket goes up the chain under **tickets**) and go back to its chore, unless the bug blocks its PR.
+  Have it file the bug as its own issue at once (an issue in the repo where the bug's work lives, by [ADR 0016](../../../../.agents/adr/0016-playground-is-generic-with-a-small-core.md); a work-org ticket goes up the chain under **tickets**) and go back to its chore, unless the bug blocks its PR.
 - **Down**: `ListAgents` lists no session by that name.
   Close what is left of it ([End](SESSIONS.md#end): by its surface, or by its workspace when it is the last one there), end it in the roster with the reason, and re-dispatch its chore when one is unfinished.
 - **Done**: its roster entry reads `ended`, or its PR has merged and its final report is in, and its session is still live.

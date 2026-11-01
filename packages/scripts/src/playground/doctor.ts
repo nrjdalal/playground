@@ -84,7 +84,7 @@ export const linkChecks = (links: Link[], repo: string, exists: (path: string) =
   const gone = links.filter(({ target }) => !exists(target))
   if (gone.length === 0) return [check("links", true, true, "", `${links.length} into ${repo}`)]
   return gone.map(({ path, target }): Check => ({
-    detail: `fix: ${target} is gone; run scripts/link-skills.sh`,
+    detail: `fix: ${target} is gone; run scripts/link-skills.sh, which removes the link`,
     name: `link ${path}`,
     status: "MISSING",
   }))

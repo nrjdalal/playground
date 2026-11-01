@@ -1,6 +1,6 @@
 # Writing docs pages
 
-Every promoted skill has a human-facing page at `docs/playground/<name>.md`. It orients a person around one skill (what it is, when to reach for it, where it fits), so it explains the why and leaves the steps to `SKILL.md`. Re-sync it whenever the skill is added, renamed, or changes behaviour. No H1. Write one sentence per line, as `bun run docs:wrap` writes the pages on its list.
+Every promoted skill has a human-facing page at `docs/playground/<name>.md`. It orients a person around one skill (what it is, when to reach for it, where it fits), so it explains the why and leaves the steps to `SKILL.md`. Re-sync it whenever the skill is added, renamed, or changes behaviour. No H1. Write one sentence per line: `bun run docs:wrap` rewraps every page here, and its pre-commit check refuses a page that breaks the rule.
 
 Sections, in this order:
 
