@@ -46,7 +46,7 @@ Standing lines:
 - At about 150K context, write your next step and ask for a fresh session.
 - Plain commands, one per call. No cd, no rm, no sh -c, bash -c or zsh -c, and no sleep-polling.
 - Signal only processes you started. Stop your stack with bun run dev:stop.
-- In every comment on a repo of the owner's account, write "ship" or "publish step", never the other word.
+- In every comment on a repo whose owner `release-owners.json` lists, write "ship" or "publish step", never the other word.
 - Never use AskUserQuestion.
 
 - When you close a reviewer, tester or probe of yours, or one closes itself, end it in the roster the same moment: `python3 ~/.playground/roster.py set <name> status=ended`. A closed checker left as working shows as STUCK.

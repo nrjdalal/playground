@@ -155,6 +155,7 @@ def notify(text, to="dispatcher"):
 
 
 STUCK_ALERT = os.path.join(os.path.dirname(os.path.dirname(CODE)), "packages", "scripts", "src", "stuck-alert.ts")
+PROMPT = os.path.join(os.path.dirname(STUCK_ALERT), "playground", "prompt.ts")
 
 
 def alert_to(name, transcript):
@@ -170,6 +171,18 @@ def alert_to(name, transcript):
     except (OSError, subprocess.TimeoutExpired):
         pass
     return "dispatcher"
+
+
+def prompt_answer(name, sid, lines):
+    """How the manager answers a permission prompt read off the screen (answerOf in packages/scripts/src/playground/prompt.ts): `playground picker` by
+    the key of the waiting call the prompt shows, a subagent's included, so a prompt whose hook record a later Stop replaced still gets a key; else
+    the one route left. "" when the table cannot run."""
+    bun = shutil.which("bun") or os.path.expanduser("~/.bun/bin/bun")
+    try:
+        r = subprocess.run([bun, "--no-env-file", PROMPT, "answer", name, sid or ""], input="\n".join(lines), capture_output=True, text=True, timeout=20)
+        return r.stdout.strip() if r.returncode == 0 else ""
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
 
 
 def hook_owned(sid):
@@ -1075,6 +1088,8 @@ def cycle(state):
         if now_t - blocks[key]["alerted"] >= REALERT and not held_for_move(kind, mover) and not (kind != "usage-limit" and hook_owned(s["session_id"])):
             blocks[key]["alerted"] = now_t
             msg = f"{name} is blocked on a {kind} prompt, waiting {ago(since)}: {line}"
+            if kind == "permission":
+                msg = f"{msg} {prompt_answer(name, s['session_id'], lines)}".rstrip()
             if kind == "usage-limit":
                 limit_alert(name, line, s.get("transcript_path"))
             else:

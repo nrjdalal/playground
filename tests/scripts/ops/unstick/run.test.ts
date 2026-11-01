@@ -12,6 +12,8 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { HERDR_SESSIONS } from "../../../../packages/scripts/src/ops-herdr/herdr"
+import { refusalOf } from "../../../../packages/scripts/src/playground/prompt"
+import { callKey, transcriptOf } from "../../../../packages/scripts/src/stuck-alert"
 import { OLD_NAMES } from "../../../session-names"
 import { storeWith } from "../../hooks/render-set"
 
@@ -687,6 +689,62 @@ describe("block alerts", () => {
       "builder",
       "dispatcher",
     ])
+  })
+})
+
+// A subagent's prompt whose hook record a later Stop replaced reaches ops-unstick's screen alone, which read no key off it (PG-385).
+describe("a permission prompt read off the screen", () => {
+  const SESSION = "d9d2ef1a-a7b9-4ecb-a758-087576d79391"
+  const COMMAND = "mkdir -p /tmp/spec && cd /tmp/spec"
+  const DASHES = "╌".repeat(27)
+  const screenOf = (command: string) => [
+    `⏺ Bash(${command})`,
+    "─".repeat(27),
+    " Bash command",
+    DASHES,
+    ` │ ${command}`,
+    DASHES,
+    "",
+    " Do you want to proceed?",
+    " ❯ 1. Yes",
+    "   2. Yes, and don't ask again for mkdir commands",
+    "   3. No, and tell Claude what to do differently (esc)",
+  ]
+  const line = (type: string, part: Record<string, unknown>) =>
+    JSON.stringify({ message: { content: [part] }, type })
+  // The session's own transcript, its turn ended, and a subagent's beside it whose Bash call waits on the prompt.
+  const transcripts = (config: string) => {
+    const dir = join(config, "projects", "-repo")
+    mkdirSync(join(dir, SESSION, "subagents"), { recursive: true })
+    writeFileSync(
+      join(dir, `${SESSION}.jsonl`),
+      `${line("assistant", { id: "t1", input: { prompt: "Spec read" }, name: "Agent", type: "tool_use" })}\n${line("user", { tool_use_id: "t1", type: "tool_result" })}\n`,
+    )
+    writeFileSync(
+      join(dir, SESSION, "subagents", "agent-a7d782.jsonl"),
+      `${line("assistant", { id: "t2", input: { command: COMMAND }, name: "Bash", type: "tool_use" })}\n`,
+    )
+  }
+
+  test("carries the key of the subagent's waiting call, which picker's allow accepts", async () => {
+    const config = scratch()
+    transcripts(config)
+    const screen = screenOf(COMMAND)
+    const answer = String(await call(config, "prompt_answer", "k3m9px-worker", SESSION, screen))
+    const key = /playground picker k3m9px-worker allow ([0-9a-f]{8})/.exec(answer)?.[1] ?? ""
+    expect(key).toBe(callKey({ command: COMMAND }))
+    const transcript = await transcriptOf(config, SESSION)
+    expect(refusalOf("k3m9px-worker", screen.join("\n"), transcript, key)).toBe("")
+  })
+
+  test("names the route left when no waiting call is surely its own", async () => {
+    const config = scratch()
+    transcripts(config)
+    expect(
+      await call(config, "prompt_answer", "k3m9px-worker", SESSION, screenOf("rm -rf /tmp/spec")),
+    ).toBe(
+      "playground picker cannot answer it, since no waiting call is surely its own: tell dispatcher, for the owner to answer it in the pane.",
+    )
   })
 })
 

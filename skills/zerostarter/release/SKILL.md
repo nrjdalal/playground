@@ -26,6 +26,35 @@ Run the new-user gate on it, `bun run gate:new-user "$CANARY"` (`.agents/testing
 
 Done when `CANARY` holds the SHA you mean to ship and the gate's PASS and FAIL list for it is in hand. When `canary` moves before step 3, read it again.
 
+## Rehearse an invitee's update
+
+When the candidate changes the update path anything in the ship's step 5 runs (`update.ts` itself, `link-skills.sh`, an ops job, the Dashboard roll), rehearse the update an invitee runs, from the last tag to the candidate, before the ship's step 3: a machine whose own checkout cannot take the update yet still gets the proof. The whole rehearsal lives in one scratch folder, and nothing outside it changes. A `--to` run stops before the Dashboard roll, which `playground update` reaches only without a tag, and with no `jobs.json` in the throwaway data folder its ops-restart step restarts nothing, so the rehearsal proves the checkout-side path: the fetch, the tag checkout, `link-skills.sh`, the install and the build. The roll proves itself on a dashboard stack of its own; an ops job's restart, on the machine that holds the jobs.
+
+a. **Mirror.** Give the rehearsal an origin of its own: clone the repository bare into the scratch folder, then clone that mirror and, in the clone, fetch the pinned `$CANARY` from the repository, merge it into `main` with `--no-ff` (the merge commit a ship makes), tag the merge with the tag this ship will cut, and push `main` and the tag to the mirror.
+   Done when the mirror's `main` holds the merge commit, the tag names it, and the repository holds neither.
+
+b. **Contain.** Run every later command under `env -i`, so the run inherits nothing from the real environment, `PLAYGROUND_REPO` included, with `HOME` at a throwaway folder inside the scratch folder.
+   Put `PATH` together for the run: the stub folder first, then the throwaway `HOME`'s `.bun/bin`, then a folder holding the real `bun`, `bunx` and `node` alone, the runtimes the install, the build and the `playground` command run on (`bunx` since `bun install` runs the checkout's `prepare` script), then the system basics; the real `HOME`'s own bin stays off `PATH`, since its `playground` link points at the real checkout.
+   Put a stub on `PATH` for each side-effecting tool the update can call, one that logs each call and refuses; read `update.ts`, `ops-restart/cli.ts` and what they call for the list.
+   Leave `claude` off `PATH` altogether: `link-skills`' `orgs home` step waits for an absent `claude` and fails a stub that refuses.
+   Record the before-state (listings and checksums) of everything outside the scratch folder the update could reach, the home folder's bins and links among them, before any install runs.
+   Done when every tool on the list is stubbed or absent, and the before-state is saved.
+
+c. **Invitee.** Clone from the mirror, check out the last tag on `main`, and install and build inside the containment, running the install and build steps of an invitee's install from the clone, since `install.sh` itself stops without `claude`:
+
+   ```bash
+   bun install --frozen-lockfile
+   env NODE_ENV=production SKIP_ENV_VALIDATION=true node_modules/.bin/turbo run build --filter='./packages/*'
+   bash scripts/link-skills.sh   # links this clone's playground command into the throwaway HOME's bin, already on PATH
+   ```
+
+   Done when `playground doctor` from the clone, still contained, reads `held at <last tag>, N commits behind origin/main`.
+
+d. **Update.** Run `playground update --to <tag>`, then `playground doctor`, still contained.
+   Done when the update exits 0, doctor's version line reads `at <tag>`, and the MISSING lines are only the containment's own and the machine's own gaps: `claude` off `PATH`, `docker` and `gh` left off it, the pinned `herdr` the throwaway `HOME` lacks, and the `portless proxy` line where no proxy serves 443, while every need the update itself runs on reads ok (`bun`, `git` and `node`, with `python3` from the system basics); the after-state reads unchanged against the before-state, and each stub's log names the calls the real machine would have taken. A step that fails names its caller: when a stub took that call, the update needs it, so contain that call another way (a flag, an env) and run the rehearsal again.
+
+The rehearsal's result goes into the ship PR's body beside the new-user gate's PASS and FAIL list.
+
 ## 2. Open the ship PR
 
 Write the body to a file first. It opens with two or three plain sentences the owner reads first, then `## What ships`, one line per PR since the last tag (`gh release view --json tagName --jq .tagName` names it).

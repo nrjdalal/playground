@@ -889,6 +889,7 @@ bun() {
     "install --frozen-lockfile") echo "NODE_ENV=\${NODE_ENV:-} SKIP_ENV_VALIDATION=\${SKIP_ENV_VALIDATION:-}" >> ${kept}/installs
       ! listed install-fails ;;
     "run dev") echo "dev" >> ${keptCalls} ;;
+    "build packages/scripts/src/portless.ts") echo "launcher $(git rev-parse --short HEAD)" > "\${4#--outfile=}" ;;
   esac
 }
 alive() { kill -0 "$(cat "$S/$1.pid" 2>/dev/null)" 2>/dev/null; }
@@ -947,6 +948,12 @@ describe("the supervisor's production build", () => {
     expect(await keptLines(/^result /)).toEqual([
       `result START ${short(c2)} PASS verify=PASS follower=running`,
     ])
+  })
+
+  test("a build keeps its head's own web launcher beside it, bundled into one file", async () => {
+    fresh()
+    expect((await keptRun("roll_up START", c2)).code).toBe(0)
+    expect(await Bun.file(join(builds, c2, "launcher.js")).text()).toBe(`launcher ${short(c2)}\n`)
   })
 
   test("a build reads the Dashboard's URLs and needs no server secret, since a first run's .env holds none yet", async () => {
@@ -1051,6 +1058,13 @@ describe("the supervisor's build before the stop (#122)", () => {
     ])
     expect(existsSync(join(kept, "staging"))).toBe(false)
     expect(worktrees()).toBe(1)
+  })
+
+  test("the target's build keeps the target's own web launcher, bundled in the staging worktree while the checkout is still on the head before", async () => {
+    fresh()
+    const rolled = await prebuiltRun(`running=${c1}; roll_to ${c2} canary; echo "$running"`, c1)
+    expect(rolled).toEqual({ code: 0, out: c2 })
+    expect(await Bun.file(join(builds, c2, "launcher.js")).text()).toBe(`launcher ${short(c2)}\n`)
   })
 
   test("the staging install runs without the supervisor's NODE_ENV, so bun installs the dev dependencies the build needs", async () => {
@@ -1222,6 +1236,48 @@ describe("the supervisor's web swap (#122)", () => {
 
   test("the API serves alone, since the web runs on its own", () => {
     expect(script).toContain("bun run serve --filter=@api/hono --ui stream")
+  })
+})
+
+// The real web_up and swap_web: a stand-in bun on PATH records the launcher the new web is exec'd through, and curl answers 200 at once
+describe("the web a swap starts runs the target head's launcher", () => {
+  const swapped = async (withLauncher: boolean) => {
+    fresh()
+    const bin = join(kept, "bin")
+    const cwd = join(kept, "checkout")
+    Bun.spawnSync(["mkdir", "-p", bin, join(cwd, "web", "next"), join(builds, c2)])
+    await Bun.write(join(bin, "bun"), `#!/bin/sh\necho "launch $1" >> ${keptCalls}\n`)
+    chmodSync(join(bin, "bun"), 0o755)
+    if (withLauncher) await Bun.write(join(builds, c2, "launcher.js"), "")
+    await Bun.write(join(kept, "dashboard-web.pid"), `${process.pid}\n`)
+    const proc = Bun.spawn(
+      [
+        "bash",
+        "-c",
+        `D=${dashboardDir} S=${kept} LOG=${kept}/supervisor.log WEB=${WEB} ROUTE_SETTLE=0
+say() { echo "say $*" >> ${keptCalls}; }; bun() { echo 5101; }; curl() { echo 200; }
+alive() { [ "$1" = dashboard-web ]; }; web_route() { :; }; web_stop() { :; }
+${upto("launcher")}
+${upto("web_up")}
+${block("swap_web")}
+swap_web ${c2}`,
+      ],
+      { cwd, env: { ...process.env, PATH: `${bin}:${process.env.PATH}` }, stdout: "pipe" },
+    )
+    expect(await proc.exited).toBe(0)
+    for (let i = 0; i < 200 && (await keptLines(/^launch /)).length === 0; i++) await Bun.sleep(25)
+    return keptLines(/^(launch|say the build)/)
+  }
+
+  test("through the launcher kept with the target's build", async () => {
+    expect(await swapped(true)).toEqual([`launch ${join(builds, c2, "launcher.js")}`])
+  })
+
+  test("through the checkout's portless.ts, with a line saying why, for a build that keeps none", async () => {
+    expect(await swapped(false)).toEqual([
+      `say the build of ${short(c2)} keeps no launcher; its web starts through the checkout's portless.ts`,
+      "launch ../../packages/scripts/src/portless.ts",
+    ])
   })
 })
 
