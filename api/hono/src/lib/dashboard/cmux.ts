@@ -152,6 +152,8 @@ const offLive = (): "fixture" | null => {
   const source = currentSource()
   if (source.kind === "live") return null
   if (source.kind === "refused") throw new ApiError(503, "SOURCE_REFUSED", source.reason)
+  if (source.kind === "hosted")
+    throw new ApiError(503, "SOURCE_REFUSED", "the hosted build reads no machine")
   return "fixture"
 }
 

@@ -10,7 +10,7 @@
   "exports": "./dist/index.mjs",
   "scripts": {
     "build": "tsdown && bun build dist/index.mjs --outfile bundle/index.mjs --target bun --minify --env disable && cp dist/scalar.js bundle/scalar.js",
-    "build:vercel": "tsdown && bun build dist/index.mjs --outfile vercel-bundle/index.mjs --target bun --minify --env disable --external hono && cp dist/scalar.js vercel-bundle/scalar.js",
+    "build:vercel": "tsdown && bun build dist/hosted.mjs --outfile vercel-bundle/index.mjs --target bun --minify --env disable --external hono",
     "check-types": "tsc --noEmit",
     "dev": "portless",
     "dev:app": "concurrently \"tsdown --watch\" \"bun ../../packages/scripts/src/portless.ts bun --hot src/main.ts\"",
@@ -27,6 +27,7 @@
     "@packages/config": "workspace:*",
     "@packages/db": "workspace:*",
     "@packages/env": "workspace:*",
+    "@packages/message": "workspace:*",
     "@packages/settings": "workspace:*",
     "@scalar/api-reference": "catalog:",
     "@scalar/hono-api-reference": "catalog:",

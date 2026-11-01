@@ -160,7 +160,7 @@ export const dashboardRoutes = async (root: string): Promise<{ file: string; rou
 
 export type ApiRoutes = { owner: Set<string>; served: Set<string> }
 
-// Every route the API's routers serve, as "METHOD /api/<mount><path>", from where index.ts mounts each router, where a mounted router mounts another in turn (the apps router mounts the plugin registry, which mounts each plugin), and the routes each one chains. `owner` holds every route of a router that names the owner rung anywhere, or that sits under one that does, so a router gating it per route or in a combined .use() is over-checked rather than skipped. Only a call chained on new Hono() or starting a line counts, so a handler's c.get("user") or (await headers()).get("x") is no route.
+// Every route the API's routers serve, as "METHOD /api/<mount><path>", from where local.ts mounts each router, where a mounted router mounts another in turn (the apps router mounts the plugin registry, which mounts each plugin), and the routes each one chains. `owner` holds every route of a router that names the owner rung anywhere, or that sits under one that does, so a router gating it per route or in a combined .use() is over-checked rather than skipped. Only a call chained on new Hono() or starting a line counts, so a handler's c.get("user") or (await headers()).get("x") is no route.
 export const apiRoutesOf = (index: string, routers: string[]): ApiRoutes => {
   const mountRe = /\.route\(\s*"([^"]+)",\s*(\w+)\s*\)/g
   const ownerRe = /requireConsoleRole\(\s*"owner"\s*\)/
@@ -206,7 +206,7 @@ export const apiRoutesOf = (index: string, routers: string[]): ApiRoutes => {
 
 // The routers' sources: every file under routers/, the plugin registry and each plugin's router.
 const apiRoutes = async (root: string): Promise<ApiRoutes> => {
-  const index = await Bun.file(join(root, API_SRC, "index.ts")).text()
+  const index = await Bun.file(join(root, API_SRC, "local.ts")).text()
   const routers: string[] = []
   for (const pattern of ["routers/*.ts", "plugins/registry.ts", "plugins/*/router.ts"]) {
     for await (const file of new Glob(pattern).scan({ cwd: join(root, API_SRC) })) {

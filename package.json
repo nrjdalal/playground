@@ -74,6 +74,7 @@
     "@types/node": "catalog:",
     "@viz-js/viz": "catalog:",
     "globby": "catalog:",
+    "hono": "catalog:",
     "lefthook": "catalog:",
     "lint-staged": "catalog:",
     "oxfmt": "catalog:",
