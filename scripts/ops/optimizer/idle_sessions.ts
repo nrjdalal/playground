@@ -206,7 +206,7 @@ export async function collect(input: CollectInput): Promise<Row[]> {
       const prs = await sessionPrs(input, name, worker, d.sessionId)
       const states = await Promise.all(prs.map((url) => prState(url)))
       refs = states.flatMap((s) => (s?.ref ? [s.ref] : []))
-      // The PR that merged last, by its merged_at (a tie, or a cached state without one, keeps the later in the list), so an older linked PR never names the merge.
+      // The PR that merged last, by its merged_at, so an older linked PR never names the merge: a state cached without one sorts oldest, and a tie keeps the later in the list.
       let newest: number | undefined
       states.forEach((s, i) => {
         if (
