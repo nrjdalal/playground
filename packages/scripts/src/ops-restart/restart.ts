@@ -2,6 +2,8 @@ import { existsSync, readFileSync, realpathSync, statSync } from "node:fs"
 import { homedir } from "node:os"
 import { dirname, join, relative } from "node:path"
 
+import { withoutShebang } from "../shebang"
+
 export type Run = (argv: string[]) => Promise<{ code: number; out: string }>
 
 type Job = {
@@ -74,10 +76,9 @@ export const sourceOf = (checkout: string, file: string): string[] => {
       return
     }
     if (!/\.tsx?$/.test(path)) return
-    // Bun's scan throws on a leading shebang line, so it drops that line first
     for (const { path: spec } of new Bun.Transpiler({
       loader: path.endsWith(".tsx") ? "tsx" : "ts",
-    }).scanImports(text.replace(/^#!.*/, ""))) {
+    }).scanImports(withoutShebang(text))) {
       const ws = spec.match(/^@packages\/([^/]+)/)
       if (ws) pkg(ws[1]!)
       else if (spec.startsWith(".")) {

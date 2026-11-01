@@ -19,7 +19,8 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
   naming it, and refuses only when every login is over, naming each one's reading;
   a bare start runs on the login in Claude Code's config (`.claude.json`'s `oauthAccount.emailAddress`), so while `usage.json` reads another account, the factory's, that login is judged by `ops/usage/stored-login.json` (ops-usage's full reading of it, written in the last 15 minutes and naming that login, else it fails)
   and the factory account counts as another login, reached by `--account`;
-  `--account` skips it, since the other login's usage is not this machine's, but refuses a week a reading names at 100% until its `resets_at`) or GLM's from `zai-usage.json` (the 5-hour window under 95% of its credits, with no week check, since its credits run on the 5-hour window alone), only while the ops-zai-usage job's last beat is ok and within 3 cycles,
+  `--account` skips it, since the other login's usage is not this machine's, but refuses a week a reading names at 100% until its `resets_at`) or GLM's from `zai-usage.json` (the 5-hour window under 95% of its credits, with no week check, since its credits run on the 5-hour window alone, and no empty `balance`, which an hour after the failure that set it lets GLM starts try again),
+  only while the ops-zai-usage job's last beat is ok and within 3 cycles,
   so every GLM spawn refuses until `bun run ops:zai-usage` has beaten once).
   A GLM session takes its own load and memory gate in place of the load and memory checks above: load5 (the third field of `sysctl -n vm.loadavg`) under 30 (`gates.glmLoad5Max`), memory pressure level 1, and swap-ins under 100/s (`gates.glmSwapinsMax`, `vm_stat -c 2 1`'s last second), so it starts while Claude's gate holds; Claude's gate stays as above.
   Every pass and refusal is one line in `~/.playground/ops/capacity.jsonl`, which the load check counts its starts from, a refusal's carrying the words it printed as `detail`.
@@ -40,6 +41,8 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
   `--model <id>` picks the Claude model for a start or a resume, one of the `models.claude` setting, else `models.default` (the docs list each key and its default).
   It is refused for any other id, an empty or missing value, on GLM, which maps every model itself, and for a reviewer or tester (a column of either, or a resume of a `reviewer-` or `tester-` session) on anything but `models.checker`, which a checker runs on with no `--model`,
   since its verdict gates a merge; nothing records it, so a resume takes it afresh and one with no `--model` runs on `models.default`.
+  `--effort <level>` sets a start's or a resume's effort, one of low, medium, high, xhigh or max, high with none; it is refused for any other value, an empty or missing value, given twice, and with restore or close.
+  The resume record keeps an effort other than high on its exec line, so a restore runs at the same effort, and a resume with no `--effort` runs at high.
   `--title "<title>"` gives a start the plain title the sidebar reads it by, up to 40 characters: a `worker` is refused without one, and a reviewer's or tester's column with none takes `Review: ` or `Test: ` before its worker's roster title, keeps the title its row already holds, or is refused.
   A probe keeps its words-only default and a new runner takes its name, and every other mode refuses it, a resume, a close, a move and a restore included.
   Keep a worker's title to 32 characters, so its checkers' titles show whole.
@@ -47,7 +50,7 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
   `--in <dir>` starts a `worker` in that folder in place of this checkout: an existing folder under the code root (`paths.codeRoot`) or under `~/<org>` for an org `ext.links` guards, the folders whose trust prompt spawn.sh answers; any other folder, and every other mode, is refused.
   `spawn.sh column` opens a split right of the herdr pane it names and names a manager once;
   `spawn.sh manager` opens the first dispatcher, `sessions.names`' dispatcher, on this machine's own login, reporting to no session (`playground dispatcher` runs it), the second dispatcher, a dispatcher's name with `-2` (from `sessions.names` or `sessions.aliases`) or an `<id>-dispatcher` it records as `slot=2` (on `--backend glm`, or on Claude with a second account's `--account`),
-  the optimizer, `optimizer` or an `<id>-optimizer` (or a session the roster gives the optimizer kind), or the builder, ops or the planner by `sessions.names` (`playground builder`, `playground ops` and `playground planner` run it), each in a workspace of its own, in the leads worktree,
+  the optimizer, `optimizer` (`playground optimizer` runs it) or an `<id>-optimizer` (or a session the roster gives the optimizer kind), or the builder, ops or the planner by `sessions.names` (`playground builder`, `playground ops` and `playground planner` run it), each in a workspace of its own, in the leads worktree,
   which the first such start cuts and installs when the checkout has none: branch leads, tracking origin's copy of the checkout's branch (canary for a checkout on canary, else main), which ops-tick's canary pull keeps current;
   `spawn.sh probe` (in herdr alone) opens a probe in a herdr workspace of its own, for a server with no pane to split beside, and a herdr refusal quotes herdr's own error.
   `--runtime herdr` opens the session in herdr: on the playground server under `~/.playground/herdr`, by the binary its `pin.json` names, refused when that file's sha256 or `--version` differs or the server is not running; a workspace labelled with the name, or for a column a split right of the herdr pane it names (its spawner's own is `$HERDR_PANE_ID`);
@@ -55,7 +58,8 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
   With no `--runtime`, every start and resume opens in herdr whatever its spawner's terminal, and spawn.sh starts nothing in cmux: it refuses `--runtime cmux` and a column anchored on a cmux `surface:N`.
   A start records its runtime in `~/.playground/runtimes/<name>`, and a resume whose pin reads `cmux` opens in herdr and rewrites the pin.
   herdr 0.9.5 keeps no resume command a custom agent reports (measured: never in its session file, nothing resumed after a restart), so each herdr session's `~/.playground/resume/<name>.sh` is the factory's own list, written once herdr runs the session:
-  a `# server: <name>` line naming the server it runs on, a `# account: <email>` line naming the account it runs on, a usage-gate pick included, which ops-unstick reads, and one `exec <main checkout>/scripts/spawn.sh resume <name> <dir> <session id>` line with the `--account` its start was given (never a usage-gate pick) and the `--model` it started with, never a token.
+  a `# server: <name>` line naming the server it runs on, a `# account: <email>` line naming the account it runs on, a usage-gate pick included, which ops-unstick reads,
+  and one `exec <main checkout>/scripts/spawn.sh resume <name> <dir> <session id>` line with the `--account` its start was given (never a usage-gate pick), the `--model` it started with and an `--effort` other than high, never a token.
   `spawn.sh restore` reads both, taking no other option, and resumes each session on the server `PLAYGROUND_HERDR_SESSION` names (`playground` by default; a record with no server line is playground's) not ended, parked or paused in the roster, through the gate, in the restored pane holding its label;
   a live one is skipped (the live-name refusal exits 3), and each resume of a herdr session stamps its run in `<name>.ran`.
   `spawn.sh close <name>`, taking no other word, ends a herdr session for the one it reports to: it closes the one pane labelled with the name on the server its resume record names, refuses a runtime pin that is not herdr, a missing record, no pane or two carrying the label, and the caller's own pane;
@@ -69,6 +73,7 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
   a read verb (`current`, `edges`, `get`, `layout`, `list`, `neighbor`, `process-info`, `read`, `status`) and the reads `agent explain`, `agent wait`, `api snapshot`, `pane wait-output` and the like, and refuses the rest, a bare `herdr`, a call carrying `HERDR_SESSION` or `HERDR_SOCKET_PATH` or an assignment or `export` of either (herdr exports both into every pane),
   every `server` verb but `server agent-manifests`, a connecting program (`nc`, `python`, `socat` and the like) naming a herdr socket (a relative `.sock` path read from the folder the command runs in) or `$HERDR_SOCKET_PATH`, a Unix socket it cannot read as the target of `nc` (a `U` in any short-flag cluster, or ncat's `--unixsock`) or `curl --unix-socket` or `--abstract-unix-socket`,
   any socat address it cannot read, and `npx skills add herdrdev/herdr`.
+  So type every program by its literal name: one held in a variable is a program it cannot read even when assigned a literal just before (`V=vercel; $V integration add acme`, a `for` loop's word, `$VERCEL_BIN agent run`), and `visit()`'s line `if (first && (first.unknown || marked(first.value)))` judges it as herdr when a herdr command group follows.
   A scratch herdr world of the session's own, for a test or a probe, runs past those reads when the call carries both `HERDR_SESSION` and `HERDR_SOCKET_PATH` itself, before herdr or through `env` (an `export` or a plain assignment stays refused), herdr is typed by its name or path (a program it cannot read takes no carve-out), and every one of these holds:
   the socket is a literal absolute path under the session's own `TMPDIR` (`getconf DARWIN_USER_TEMP_DIR`, which spawn.sh's launch file sets), so it never names the factory's servers' under `~/.playground/herdr` or herdr's default (the path's text is read, links unfollowed, as the scope line below allows);
   the session is a word (`lm-probe`) other than `default`, Playground's `playground` and `playground-probes`, the factory's `factory` and `probes`, or a `PLAYGROUND_HERDR_SESSIONS` name, since herdr keeps a server's state under `~/.config/herdr/sessions/<session>`;
@@ -117,6 +122,7 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
   and each ops script it names into `~/.playground/ops/`;
   for the rename it links `~/.playground` to the old data folder where only that exists,
   all pointing into the main checkout, so a pull there updates the factory's hooks and the command.
+- Before it links, it removes each link into the checkout whose file a pull removed, in the folders `playground doctor` reads (`linksInto` in `packages/scripts/src/playground/links.ts`), so a link doctor names MISSING clears on the next run; a live link, and every link that points elsewhere, stays.
 - Beside its links, `scripts/link-skills.sh` sets `rerere.enabled false` in the checkout's config, which every worktree reads.
   Every worktree shares one `.git/rr-cache`, and git runs rerere wherever that folder exists while the setting is unset, so a merge in one worktree replayed a resolution another had recorded, printing `using previous resolution` over a file its author never read.
   The folder stays in place, and a merge now stops on each conflict for its author to resolve.
@@ -129,6 +135,7 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
   since a plain install then looks healthy while check-types fails on a missing module.
   A review worktree that only reads (no test run, no commit) takes no clone at all.
   AGENTS.md has worktrees removed one at a time, since removing several at once drove fseventsd past 300% CPU and the load to 77.
+- After `git worktree move`, remove the moved worktree's `web/next/.source` and `web/next/.next`, which keep the old absolute path, so the next pre-commit build fails with `webpack loader path ... is outside configured roots`.
 
 ## bun run test:skills
 

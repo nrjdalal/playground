@@ -22,7 +22,7 @@ import {
   usagePath,
   type UsageWindow,
 } from "@/lib/usage/window"
-import { readZaiUsage, type ZaiUsage, zaiProblem } from "@/lib/usage/zai"
+import { readZaiFailure, readZaiUsage, type ZaiUsage, zaiProblem } from "@/lib/usage/zai"
 
 // What the Usage app shows: the usage windows with a forecast, and every assistant call in the claude_* tables over the last 7 days as tokens and API-equivalent dollars, by agent, session, model and hour, then each merged PR's cost. Read-only. Each message counts once, from its last line (highest seq), as the importer's own totals do.
 
@@ -655,21 +655,28 @@ export async function usageProblem(
 
 export async function usageReport(now = new Date()): Promise<UsageReport> {
   const weekStart = now.getTime() - WEEK_MS
-  const [accounts, usage, zai, { buckets, prBuckets, prSessions, sessions }, { roster }] =
-    await Promise.all([
-      readAccounts(),
-      readUsage(),
-      readZaiUsage(),
-      weekReads("week"),
-      readRoster(),
-    ])
+  const [
+    accounts,
+    usage,
+    zai,
+    zaiFailure,
+    { buckets, prBuckets, prSessions, sessions },
+    { roster },
+  ] = await Promise.all([
+    readAccounts(),
+    readUsage(),
+    readZaiUsage(),
+    readZaiFailure(),
+    weekReads("week"),
+    readRoster(),
+  ])
   const links = rosterLinks(roster)
   const summary = summarize(buckets, sessions, now, links)
   const problems = [...summary.problems]
   const usageLine = await usageProblem(usage)
   if (usageLine) problems.push(usageLine)
-  const zaiStale = zaiProblem(zai)
-  if (zaiStale) problems.push(zaiStale)
+  const zaiLine = zaiFailure ?? zaiProblem(zai)
+  if (zaiLine) problems.push(zaiLine)
   const cal = summary.calibration
   if (cal && cal.claudeCodeUsd > 0) {
     const gap = Math.abs(cal.usd - cal.claudeCodeUsd) / cal.claudeCodeUsd

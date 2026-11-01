@@ -37,14 +37,14 @@ For every agent of yours that `ListAgents` lists, or the roster shows with a sta
 - **Silent**: a worker with no push and no report to you for 60 minutes after a review round (one worker chased a side bug for 3.5 hours unreported).
   Ask it why, then record its answer in the roster or redirect it.
 - **Off scope**: a worker chasing a bug outside its chore.
-  Have it file the bug as its own issue at once (an issue on the factory's repo; a work-org ticket goes up the chain under **tickets**) and go back to its chore, unless the bug blocks its PR.
+  Have it file the bug as its own issue at once (an issue in the repo where the bug's work lives, by [ADR 0016](../../../../.agents/adr/0016-playground-is-generic-with-a-small-core.md); a work-org ticket goes up the chain under **tickets**) and go back to its chore, unless the bug blocks its PR.
 - **Down**: `ListAgents` lists no session by that name.
   Close what is left of it ([End](SESSIONS.md#end): by its surface, or by its workspace when it is the last one there), end it in the roster with the reason, and re-dispatch its chore when one is unfinished.
 - **Done**: its roster entry reads `ended`, or its PR has merged and its final report is in, and its session is still live.
   Ending is automatic ([End](SESSIONS.md#end)); act on its `Not ended` line, then close it by hand, its checkers first.
 
 When spawn.sh's load gate refuses a worker's new checker, give that PR to a reviewer already running (a done worker's, before you close it) as another PR in its own rounds, reporting to that PR's worker, since a running reviewer adds no load.
-Move its roster row in the same step, by [ROSTER.md](ROSTER.md)'s `A checker takes another PR` row, so the sidebar nests it under its new worker.
+Move its roster row in the same step, by [ROSTER.md](ROSTER.md)'s `A checker takes another PR` row, so the sidebar nests it under its new worker and run-slot ranks its runs by that worker's size (a stale row once queued a reviewer's install 1,211 s for a 0 s run).
 With no reviewer running, that PR's checker is **held**: the worker reports the refusal to you, and you hold the PR on your list, since a refused start leaves only a `capacity.jsonl` row that names no session.
 When a slot opens, the held checker starts in it ahead of any dispatch ([ROSTER.md](ROSTER.md)'s step 1): tell its worker to spawn it again.
 Done when each held checker's roster row reads `working`.

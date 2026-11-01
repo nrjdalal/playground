@@ -2,6 +2,8 @@ import "@packages/env/aliases"
 import { realpathSync } from "node:fs"
 import { join } from "node:path"
 
+import { withoutShebang } from "../shebang"
+
 // verify, pr:merge and the dev launcher reach each workspace package through its built dist, which a fresh worktree lacks, and which a pulled change can outgrow by adding an export; it builds them only then, since a rebuild cleans the dist a running stack in this worktree imports (`bun run dev` refuses before this runs while one does). A dist that exists but lacks an export counts as unbuilt; any other stale dist is left as it is.
 const VERIFY = import.meta.dir
 const SRC = join(VERIFY, "..")
@@ -18,7 +20,7 @@ export const workspaceImports = (sources: string[]): string[] => [
   ...new Set(
     sources.flatMap((source) =>
       transpiler
-        .scanImports(source)
+        .scanImports(withoutShebang(source))
         .map(({ path }) => path)
         .filter((path) => path.startsWith("@packages/")),
     ),

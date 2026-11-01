@@ -192,6 +192,7 @@ const VALUED = [
   "--account",
   "--backend",
   "--brief",
+  "--effort",
   "--model",
   "--reports-to",
   "--runtime",
@@ -365,6 +366,31 @@ export async function spawn(
   }
 }
 export type Spawned = Awaited<ReturnType<typeof spawn>>
+// A usage.json whose week is at week%, its 5-hour window at fiveHour%, daysIn days into the week.
+export const weekAt = (week: number, fiveHour = 10, daysIn = 2) =>
+  JSON.stringify(
+    usage({
+      rate_limits: {
+        five_hour: {
+          used_percentage: fiveHour,
+          resets_at: new Date(Date.now() + 3_600_000).toISOString(),
+        },
+        seven_day: {
+          used_percentage: week,
+          resets_at: new Date(Date.now() + (7 - daysIn) * 86_400_000).toISOString(),
+        },
+      },
+    }),
+  )
+// A whole-second time a day out, for usage-pace-off-until, and the UTC form a pass line names.
+export const offUntil = new Date(Math.floor(Date.now() / 1000 + 86_400) * 1000)
+export const offUntilUtc = `${offUntil.toISOString().slice(0, 19)}Z`
+// The capacity gate's log of a spawn's home, one verdict a line.
+export const capacityLog = (r: { home: string }) =>
+  (readFileSync(join(r.home, ".playground", "ops", "capacity.jsonl"), "utf8") || "")
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => JSON.parse(line))
 
 // The typed line names a launch file (macOS types at most 1,024 bytes into a pane), so what the launch holds is the file's text. Each spawn runs in a home of its own, so its launch folder holds the one file.
 export const launchOf = (r: { home: string }): string => {
