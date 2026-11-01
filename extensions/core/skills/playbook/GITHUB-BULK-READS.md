@@ -61,6 +61,7 @@ A single PR's read stays REST.
    ```
 
 3. Feed each page's `pageInfo.endCursor` back as `$cursor` until `hasNextPage` is false.
+   To let `gh api graphql --paginate` page it for you, rename the variable `$endCursor` and keep `pageInfo { hasNextPage endCursor }`, since `--paginate` fills only that name (`gh api --help`): a sweep that kept `$cursor` under `--paginate` refetched page 1 554 times and spent 50 GraphQL points (measured).
    Done when the sweep holds every PR the filters name and nothing was read twice.
 
 On a refused call, wait for the reset the rule names and retry nothing before it: the probe's `remaining` is the budget, and a sweep that would outspend it waits or narrows its filters first.
