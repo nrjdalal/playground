@@ -87,7 +87,7 @@ packages/<name>/
 }
 ```
 
-Add one `exports` entry per `entry` file. `tsdown.config.ts` uses the shared helper, which validates env in `build:prepare`, emits tsc dts, and minifies: A package that ships more than one entry lists them all in `definePackageConfig({ entry: [...] })`, `src/index.ts` included, because the option replaces the default rather than extending it; `@packages/auth` is the worked example, with `src/access.ts` as a second entry so the web can import the pure rules without the auth runtime.
+Add one `exports` entry per `entry` file. `tsdown.config.ts` uses the shared helper, which validates env in `build:prepare`, emits tsc dts, and minifies: A package that ships more than one entry lists them all in `definePackageConfig({ entry: [...] })`, `src/index.ts` included, because the option replaces the default rather than extending it; `@packages/auth` is the worked example, with `src/access.ts` as a second entry so the web can import the pure rules without the auth runtime. When the package has a `tsconfig.build.json`, the helper builds its declarations from it instead of `tsconfig.json`, since tsgo emits a declaration for every file its tsconfig includes and writes one for a file outside the package beside that file's source; `api/hono` keeps one that includes its top-level entries alone (`src/*.ts`), so a `src/bin` script that imports from `packages/` leaves nothing there.
 
 ```ts
 import { definePackageConfig } from "@packages/config/tsdown"
