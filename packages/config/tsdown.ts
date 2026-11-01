@@ -1,5 +1,3 @@
-import { existsSync } from "node:fs"
-
 import { type CopyEntry, defineConfig } from "tsdown"
 
 type BundleDeps = {
@@ -18,8 +16,10 @@ export function definePackageConfig(options: {
   deps?: BundleDeps
   // The entry list for a package that ships more than one, replacing rather than adding to the default, so a caller listing extras restates src/index.ts too.
   entry?: string[]
+  // The tsconfig the declaration step reads in place of tsconfig.json: tsgo emits a declaration for every file its tsconfig includes, and writes one for a file outside the package beside that file's source.
+  tsconfig?: string
 }) {
-  const { name, env, getSafeEnv, copy, define, deps, entry } = options
+  const { name, env, getSafeEnv, copy, define, deps, entry, tsconfig } = options
 
   return [
     defineConfig({
@@ -33,8 +33,7 @@ export function definePackageConfig(options: {
         },
       },
       minify: true,
-      // A package's tsconfig.build.json scopes the declaration step: tsgo emits a declaration for every file its tsconfig includes, and writes one for a file outside the package beside that file's source.
-      ...(existsSync("tsconfig.build.json") ? { tsconfig: "tsconfig.build.json" } : {}),
+      ...(tsconfig ? { tsconfig } : {}),
     }),
   ]
 }

@@ -1,28 +1,23 @@
 import { expect, test } from "bun:test"
-import { mkdtempSync, writeFileSync } from "node:fs"
-import { tmpdir } from "node:os"
 import { join } from "node:path"
+
+import { definePackageConfig } from "../../../packages/config/tsdown"
 
 const ROOT = join(import.meta.dir, "../../..")
 
-// definePackageConfig's tsconfig, read in a child whose cwd is the package folder, as tsdown loads a package's config.
-const tsconfigIn = (cwd: string): unknown => {
-  const child = Bun.spawnSync(
-    [
-      process.execPath,
-      "-e",
-      `const { definePackageConfig } = await import(${JSON.stringify(join(ROOT, "packages/config/tsdown.ts"))}); console.log(JSON.stringify(definePackageConfig({ name: "x", env: {}, getSafeEnv: () => {} })[0].tsconfig ?? null))`,
-    ],
-    { cwd, stderr: "pipe", stdout: "pipe" },
-  )
-  return JSON.parse(child.stdout.toString())
-}
+const config = (tsconfig?: string) =>
+  definePackageConfig({
+    env: {},
+    getSafeEnv: () => {},
+    name: "x",
+    ...(tsconfig ? { tsconfig } : {}),
+  })[0]!
 
-test("a package with a tsconfig.build.json builds its declarations from it, else from tsdown's own pick (PG-294)", () => {
-  const dir = mkdtempSync(join(tmpdir(), "tsdown-tsconfig-"))
-  expect(tsconfigIn(dir)).toBeNull()
-  writeFileSync(join(dir, "tsconfig.build.json"), "{}")
-  expect(tsconfigIn(dir)).toBe("tsconfig.build.json")
+test("a package that names a tsconfig builds its declarations from it, else from tsdown's own pick (PG-294)", async () => {
+  expect(config().tsconfig).toBeUndefined()
+  expect(config("tsconfig.build.json").tsconfig).toBe("tsconfig.build.json")
+  const api = await Bun.file(join(ROOT, "api/hono/tsdown.config.ts")).text()
+  expect(api).toContain('tsconfig: "tsconfig.build.json",')
 })
 
 // tsgo emits a declaration for every file its tsconfig includes and writes one for a file outside the package beside its source, so the API's declaration step includes its top-level entries alone, never a src/bin script that imports from packages/.
