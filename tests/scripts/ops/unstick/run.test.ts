@@ -1088,6 +1088,52 @@ describe("ops-unstick's slot alerts", () => {
       await call(scratch(), "heavy_jobs", [devRow("999421", "desk"), devRow("999422", "canary")]),
     ).toEqual([])
   })
+
+  // a slotted commit's pre-commit suite: run-slot.sh holds the slot, git commit runs under it, and the suite under that
+  const held = (slot: string) => {
+    const config = scratch()
+    const ops = join(config, "playground", "ops")
+    mkdirSync(join(ops, slot), { recursive: true })
+    writeFileSync(join(ops, `${slot}.holder`), "worker-x 999441 2026-11-01T13:00:00Z 1 small\n")
+    return config
+  }
+  const committing = (holder: string) => [
+    `  ${holder}      1 bash /x/.playground/ops/run-slot.sh worker-x -- git commit`,
+    `  999442 ${holder} git commit`,
+    "  999443 999442 bun run test:file tests/AGENTS.test.ts /x/.claude/worktrees/pg-334-x",
+  ]
+
+  for (const slot of ["run-slot-commit", "run-slot-model-2"])
+    test(`a suite under ${slot}'s holder reads as inside a slot`, async () => {
+      expect(await call(held(slot), "heavy_jobs", committing("999441"))).toEqual([
+        { inside: true, kind: "suite", pid: "999443", where: "pg-334-x" },
+      ])
+    })
+
+  test("a suite with no slot holder in its chain is still outside", async () => {
+    const jobs = await call(held("run-slot-commit"), "heavy_jobs", committing("999444"))
+    expect(jobs).toEqual([{ inside: false, kind: "suite", pid: "999443", where: "pg-334-x" }])
+    expect(await call(scratch(), "slot_alerts", jobs, 2, at)).toHaveLength(1)
+  })
+
+  test("the slots read are run-slot.sh's own, each model slot by its name", async () => {
+    const script = readFileSync(
+      join(import.meta.dir, "../../../../scripts/ops/run-slot.sh"),
+      "utf8",
+    )
+    const fixed = script
+      .match(/^\s*for s in ((?:run-slot\S* )+)\$\(ls "\$OPS"/m)?.[1]
+      ?.trim()
+      .split(" ")
+    expect(fixed?.length).toBeGreaterThan(0)
+    const config = held("run-slot-model-2")
+    writeFileSync(join(config, "playground", "ops", "run-slot-model-10.holder"), "")
+    expect(await call(config, "slot_names")).toEqual([
+      ...(fixed ?? []),
+      "run-slot-model-10",
+      "run-slot-model-2",
+    ])
+  })
 })
 
 // ops-unstick routes a block to the session's manager and presses nothing on a permission prompt; a block the session's own hook recorded is that hook's to route.
