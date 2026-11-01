@@ -114,7 +114,7 @@ Their tests are `bun run test:file tests/scripts/hooks`.
 - A factory session changes nothing a guard reads to allow or deny a call: `scripts/hooks/no-extensions-write.ts`, registered beside no-main-checkout on Bash and the file tools (Edit, MultiEdit, NotebookEdit and Write), guards the extensions root (`extensionsDir` of the data folder) and every file under it.
   Each guard reads its list and `policy.json` there, each scope's `lists/` and `settings.json` render into them on the next write (its `git add -A` takes a hand edit along), and a root that is gone sends the guards back to core's smaller lists.
   It refuses a file tool's path in the root, `~` expanded, and a redirect into it, a group's, a subshell's, `exec`'s, a shell's, `eval`'s, `source`'s, `.`'s, `cd`'s, `pushd`'s, `popd`'s or a bare one included, and zsh's `>!` and `>>!` with them.
-  It refuses any program but a reader that names the root, a path in it, a folder above it (`~/.playground`, `~`) or a glob there (`*`, `?`, `[…]`, `{…}` or zsh's `(…)`, in a redirect's target too) that can match the next folder down to the root, links followed, in any word:
+  It refuses any program but a reader that names the root, a path in it, a folder above it (`~/.playground`, `~`) or a glob there (`*`, `?`, `[…]`, `{…}` or zsh's `(…)`, in a redirect's target too) that can reach the root, by the next folder down's name or by an entry the folder holds (a group or bash's extglob read as `*`), links followed, in any word:
   the program word, an option's attached value (`-o<path>`, `--out=<path>`), a variable the call sets (`GIT_DIR=<clone>`), or the stdin xargs hands it.
   It refuses any program but a reader whose words or heredoc hold the root's path as text, whole or as seen from a folder above it the command runs in, so an interpreter's script and a commit message that names it are refused alike, as is a commit message or an inline body that names a gated call (`playground ext sync`); write such text to a file and pass the file.
   The readers are `[`, `cat`, `cmp`, `diff`, `echo`, `grep`, `head`, `jq`, `ls`, `printf`, `readlink`, `realpath`, `shasum`, `stat`, `tail`, `test` and `wc`;
@@ -142,7 +142,7 @@ Their tests are `bun run test:file tests/scripts/hooks`.
   A write to a scope's GitHub repository, which `ops:ext-sync` renders into the root, is outside its reach too; a guard on those writes is a follow-up of its own.
   A path through a link into the root with `..` after the link (`echo x > <link>/../f`) is judged as typed, so a write by one passes.
   A `cd` or `pushd` it cannot follow (`cd -`, `cd ~-`, `popd`'s stack, a glob in the folder, a `CDPATH` lookup) leaves the command's folder unread, so a relative write after one passes.
-  From a cwd at or above the root (`~`, `~/.playground`), a quoted glob that can match the next folder down reads as a glob there, so a call holding one (`git commit -m "see *"`) is refused; run it from a worktree.
+  From a cwd at or above the root (`~`, `~/.playground`), a quoted glob that can reach the root reads as a glob there, so a call holding one (`git commit -m "see *"`) is refused; run it from a worktree.
   It fails open on any other error, and its tests are in `bun run test:file tests/scripts/hooks/no-extensions-write.test.ts`.
 
 ## no-false-green

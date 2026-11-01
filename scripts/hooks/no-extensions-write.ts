@@ -228,18 +228,20 @@ function inspect(raw: string, environment: Environment) {
     const at = real(path)
     return at === sep ? remover : root.startsWith(at + sep)
   }
-  // Whether a glob's part in a folder above the root can match the next folder down to it, a zsh group read as each alternative or none, so a lone brace or a group naming no such folder is a plain word.
+  // Whether a glob's part in a folder above the root can reach it: by the name of the next folder down, or by an entry the folder holds, links followed; a group, zsh's or bash's extglob, and a brace range read as `*`, so only a lone brace or a name that matches neither is a plain word.
   const reaches = (value: string, at: number, folder: string) => {
     let rest = value.slice(value.lastIndexOf("/", at) + 1)
-    const alternatives = (_: string, alts: string) =>
-      `{,${alts
-        .split("|")
-        .filter((alt) => !alt.includes("/"))
-        .join(",")}}`
-    for (let was = ""; was !== rest;)
-      [was, rest] = [rest, rest.replace(/\(([^()]*)\)/g, alternatives)]
-    const down = root.slice(real(folder).length).split(sep).find(Boolean) ?? ""
-    return new Bun.Glob(rest.split("/")[0]!).match(down)
+    for (let was = ""; was !== rest;) [was, rest] = [rest, rest.replace(/[@?+*!]?\([^()]*\)/g, "*")]
+    const glob = new Bun.Glob(rest.split("/")[0]!.replace(/\{[^}]*\.\.[^}]*\}/g, "*"))
+    if (glob.match(root.slice(real(folder).length).split(sep).find(Boolean) ?? "")) return true
+    try {
+      for (const name of glob.scanSync({ cwd: folder, dot: true, onlyFiles: false }))
+        if (inRoot(join(folder, name)) || above(join(folder, name), true)) return true
+      return false
+    } catch {
+      // a folder that is not there holds nothing to match; one that cannot be read may hold anything
+      return existsSync(folder)
+    }
   }
   const file = typeof tool === "string" ? input[FILE_TOOLS[tool]] : undefined
   if (typeof file === "string") {

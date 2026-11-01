@@ -23,6 +23,9 @@ const BIG = [join(HOME, "big-a"), join(HOME, "big-b")]
 for (const file of BIG) writeFileSync(file, "x".repeat(900_000))
 mkdirSync(join(WORK, "playground"), { recursive: true })
 symlinkSync(ROOT, LINK)
+// Links whose names no glob of the root's own names matches: one to the root in the data folder, one to the data folder in the home.
+symlinkSync(ROOT, join(DATA, "store"))
+symlinkSync(DATA, join(HOME, "pg"))
 afterAll(() => rmSync(HOME, { force: true, recursive: true }))
 
 const ENV = { HOME }
@@ -478,8 +481,20 @@ describe("text read as a command line judges what a shell would run", () => {
     ["a brace of the data folder", "rm -rf {.playground,x}"],
     ["a zsh group of the data folder", "rm -rf (.playground|x)"],
     ["a zsh qualifier on every folder", "rm -rf *(/)"],
+    ["a glob through a link to the data folder", "rm -rf p*/extensions/x"],
+    ["bash's extglob @() of the data folder", "shopt -s extglob; rm -rf @(.playground)"],
+    ["bash's extglob +() of the data folder", "shopt -s extglob; rm -rf +(.playground)"],
+    ["bash's extglob ?() of the data folder", "shopt -s extglob; rm -rf ?(.playground)"],
+    ["bash's extglob !() of every other name", "shopt -s extglob; rm -rf !(x)"],
   ])("%s from the home stays refused", async (_, command) => {
     expect(await bash(command)).toContain("no-extensions-write hook refuses")
+  })
+
+  test.each([
+    ["rm of a glob through a link to the root", "rm -rf s*/"],
+    ["a redirect through a glob of a link to the root", "echo x > s*/policy.json"],
+  ])("%s from the data folder stays refused", async (_, command) => {
+    expect(await bash(command, DATA)).toContain("no-extensions-write hook refuses")
   })
 
   test.each([
