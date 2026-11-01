@@ -737,29 +737,12 @@ describe("a permission prompt read off the screen", () => {
     expect(refusalOf("k3m9px-worker", screen.join("\n"), transcript, key)).toBe("")
   })
 
-  test("names the route left when no waiting call is surely its own", async () => {
-    const config = scratch()
-    transcripts(config)
-    expect(
-      await call(config, "prompt_answer", "k3m9px-worker", SESSION, screenOf("rm -rf /tmp/spec")),
-    ).toBe(
-      "playground picker cannot answer it, since no waiting call is surely its own: tell dispatcher, for the owner to answer it in the pane.",
-    )
-  })
-
-  // no-raw-spawn refuses the dispatcher's herdr call too, so a herdr pane's route left is a close and a resume by session id
-  test("names the close and resume on herdr when no waiting call is surely its own", async () => {
+  // no-raw-spawn refuses the dispatcher's herdr call too, so the route left is a close and a resume by session id
+  test("names the close and resume when no waiting call is surely its own", async () => {
     const config = scratch()
     transcripts(config)
     const answer = String(
-      await call(
-        config,
-        "prompt_answer",
-        "k3m9px-worker",
-        SESSION,
-        screenOf("rm -rf /tmp/spec"),
-        true,
-      ),
+      await call(config, "prompt_answer", "k3m9px-worker", SESSION, screenOf("rm -rf /tmp/spec")),
     )
     expect(answer).toContain("spawn.sh close k3m9px-worker")
     expect(answer).toContain("~/.playground/resume/k3m9px-worker.sh")
@@ -767,20 +750,15 @@ describe("a permission prompt read off the screen", () => {
   })
 })
 
-// with every session on herdr, a cycle asks cmux nothing. The test's own process stands in for a live claude: its pid is alive and ps gives its start.
-describe("with no session live in cmux", () => {
+// ops-unstick reads herdr alone (#419): the source test below holds run.py to no cmux command, and these read herdr's panes.
+describe("the session read", () => {
   const pid = String(process.pid)
-  const started = Bun.spawnSync(["ps", "-o", "lstart=", "-p", pid], {
-    env: { ...process.env, LC_ALL: "C", TZ: "UTC" },
-  })
-    .stdout.toString()
-    .trim()
   const script = (path: string, body: string): void => {
     writeFileSync(path, `#!/bin/sh\n${body}\n`)
     chmodSync(path, 0o755)
   }
-  // A cmux that fails every call and records it, and a herdr server whose one pane runs claude at `held` (none when null).
-  const machine = (held: string | null, registry: Record<string, unknown>[]) => {
+  // A herdr server whose one pane runs claude at `held` (none when null).
+  const machine = (held: string | null) => {
     const config = scratch()
     const bin = join(config, "bin")
     const herdrDir = join(config, "herdr")
@@ -788,78 +766,61 @@ describe("with no session live in cmux", () => {
     mkdirSync(herdrDir)
     mkdirSync(join(config, "sessions"))
     writeFileSync(join(herdrDir, "factory.sock"), "")
-    const calls = join(config, "cmux-calls")
-    script(join(bin, "cmux"), `echo "$*" >> "${calls}"\nexit 1`)
     const panes = held ? '[{"pane_id":"p1","workspace_id":"w1"}]' : "[]"
     const info = `{"result":{"process_info":{"foreground_processes":[{"argv":["claude"],"name":"claude","pid":${held}}]}}}`
     script(
       join(bin, "herdr"),
       `case "$1 $2" in\n"pane list") echo '{"result":{"panes":${panes}}}' ;;\n"pane process-info") echo '${info}' ;;\n*) exit 1 ;;\nesac`,
     )
-    for (const entry of registry)
-      writeFileSync(join(config, "sessions", `${entry.pid}.json`), JSON.stringify(entry))
+    // Claude's registry entry at the pane's pid, which gives the session's id.
+    writeFileSync(
+      join(config, "sessions", `${pid}.json`),
+      JSON.stringify({
+        entrypoint: "cli",
+        pid: Number(pid),
+        sessionId: "0b9e8f1a-2c3d-4e5f-8a9b-0c1d2e3f4a5b",
+      }),
+    )
     const env = {
       PLAYGROUND_HERDR_DIR: herdrDir,
       PLAYGROUND_HERDR_SESSIONS: "factory",
       HERDR_BIN_PATH: join(bin, "herdr"),
       PATH: `${bin}:${process.env.PATH}`,
     }
-    return { calls, config, env }
+    return { config, env }
   }
-  const session = (entry: Record<string, unknown> = {}) => ({
-    entrypoint: "cli",
-    pid: Number(pid),
-    procStart: started,
-    sessionId: "0b9e8f1a-2c3d-4e5f-8a9b-0c1d2e3f4a5b",
-    ...entry,
-  })
 
-  test("reads herdr's sessions and makes no cmux call while herdr holds every live one", async () => {
-    const { calls, config, env } = machine(pid, [session()])
-    const found = (await callWith(env, config, "sessions")) as { herdr: string; pid: string }[]
-    expect(found.map((s) => [s.herdr, s.pid])).toEqual([["factory", pid]])
-    expect(existsSync(calls)).toBe(false)
+  test("reads herdr's sessions with the registry's session id", async () => {
+    const { config, env } = machine(pid)
+    const found = (await callWith(env, config, "herdr_sessions")) as {
+      herdr: string
+      pid: string
+      session_id: string
+    }[]
+    expect(found.map((s) => [s.herdr, s.pid, s.session_id])).toEqual([
+      ["factory", pid, "0b9e8f1a-2c3d-4e5f-8a9b-0c1d2e3f4a5b"],
+    ])
   })
 
   test("runs the pinned herdr in HOME's data folder when HERDR_BIN_PATH is unset", async () => {
-    const { config, env } = machine(pid, [session()])
+    const { config, env } = machine(pid)
     const { HERDR_BIN_PATH: bin, ...rest } = env
     const home = scratch()
     mkdirSync(join(home, ".playground", "bin"), { recursive: true })
     script(join(home, ".playground", "bin", "herdr"), readFileSync(bin, "utf8"))
-    const found = (await callWith({ ...rest, HOME: home }, config, "sessions")) as { pid: string }[]
+    const found = (await callWith({ ...rest, HOME: home }, config, "herdr_sessions")) as {
+      pid: string
+    }[]
     expect(found.map((s) => s.pid)).toEqual([pid])
   })
 
-  test("makes no cmux call, and fails nothing, with no session live anywhere", async () => {
-    const { calls, config, env } = machine(null, [])
-    expect(await callWith(env, config, "sessions")).toEqual([])
-    expect(existsSync(calls)).toBe(false)
+  test("reads no session and fails nothing while the registry's live session runs in no herdr pane", async () => {
+    const { config, env } = machine(null)
+    expect(await callWith(env, config, "herdr_sessions")).toEqual([])
   })
 
-  test("asks cmux in doubt: a procStart in another shape, or an entry naming no entrypoint", async () => {
-    for (const entry of [{ procStart: "2026-10-19T00:00:00Z" }, { entrypoint: undefined }]) {
-      const { config, env } = machine(null, [session(entry)])
-      expect(await callWith(env, config, "cmux_may_hold", []), JSON.stringify(entry)).toBe(true)
-    }
-  })
-
-  test("asks cmux once a live interactive session is in no herdr pane", async () => {
-    const { calls, config, env } = machine(null, [session()])
-    expect(await callWith(env, config, "cmux_may_hold", [])).toBe(true)
-    await expect(callWith(env, config, "sessions")).rejects.toThrow("cmux tree")
-    expect(readFileSync(calls, "utf8")).toStartWith("tree --all")
-  })
-
-  test("counts no headless run, no ended session and no pid handed on", async () => {
-    for (const entry of [
-      { entrypoint: "sdk-cli" },
-      { pid: 999_999 },
-      { procStart: "Thu Jan  1 00:00:00 1970" },
-    ]) {
-      const { config, env } = machine(null, [session(entry)])
-      expect(await callWith(env, config, "cmux_may_hold", []), JSON.stringify(entry)).toBe(false)
-    }
+  test("run.py names no cmux command, so a cycle, its reads and its Escape run on herdr alone", () => {
+    expect(readFileSync(RUN_PY, "utf8")).not.toMatch(/["']cmux["']/)
   })
 })
 

@@ -1009,7 +1009,6 @@ case "$MODE" in
     [ $# -eq 3 ] || usage
     ROLE=probe KIND=probe NAME=$1 TO=$2 BRIEF=$3
     word "$TO" || refuse "it reports to a session name, not $TO"
-    [ "$RUNTIME" = herdr ] || refuse "a probe opens a workspace of its own in herdr alone; in cmux it opens as a column beside its spawner"
     DIR=$REPO
     ;;
   manager)
@@ -1243,25 +1242,6 @@ case "$SIZE" in
 esac
 case "$ITEM" in "small 1" | "medium 2" | "big 3") ;; *) ITEM="medium 2" ;; esac
 gate_capacity
-# Read before --check exits, so a column whose anchor has gone refuses at --check rather than at the start.
-if [ "$MODE" = column ] && [ "$RUNTIME" = cmux ]; then
-  # The column opens right of its surface wherever that surface lives, so the holder workspace is read from cmux's whole tree, not from the calling session's.
-  tree=$(CMUX_QUIET=1 cmux tree --json --all) || refuse "it cannot read cmux's tree (cmux tree)"
-  ws=$(printf '%s' "$tree" | python3 -I -c 'import json, sys
-try:
-    d = json.load(sys.stdin)
-    for w in d.get("windows") or []:
-        for space in w.get("workspaces") or []:
-            for pane in space.get("panes") or []:
-                for s in pane.get("surfaces") or []:
-                    if s.get("ref") == sys.argv[1]:
-                        print(space.get("ref") or "")
-                        raise SystemExit(0)
-    print("")
-except (ValueError, AttributeError, TypeError):
-    raise SystemExit(1)' "$SURFACE") || refuse "it cannot read cmux's tree (cmux tree)"
-  [ -n "$ws" ] || refuse "$SURFACE is in no workspace cmux holds"
-fi
 if [ "$RUNTIME" = herdr ]; then
   # herdr names an agent by [a-z][a-z0-9_-]{0,31}, so a longer name could never name the session's agent there.
   [ "${#NAME}" -le 32 ] || refuse "herdr names an agent with at most 32 characters, and $NAME has ${#NAME}"
@@ -1360,8 +1340,7 @@ else
     REPORT=
   fi
   PROMPT="You are $NAME, $WHO. $READ$BINDS$REPORT"
-  COMMAND="$LAUNCH -n $NAME $FLAGS \"$PROMPT\""
-  [ "$RUNTIME" = herdr ] && COMMAND="$LAUNCH --session-id $SID -n $NAME $FLAGS \"$PROMPT\""
+  COMMAND="$LAUNCH --session-id $SID -n $NAME $FLAGS \"$PROMPT\""
 fi
 # The pane's shell runs this text, so the whole launch goes in a subshell: a failed Keychain read's exit ends only that, the message stays on the pane, and tk dies with it.
 COMMAND="($COMMAND)"
@@ -1513,22 +1492,6 @@ except (ValueError, KeyError, TypeError):
   [ "$MODE" = resume ] || (umask 077 && printf '%s\n' "$PROMPT" > "$RESUME_DIR/$NAME.prompt") ||
     echo "spawn.sh: $NAME started, but its prompt record write failed, so a restore before its first turn starts it without its brief" >&2
   herdr_answer || true
-  # The roster's workspace and surface are cmux's (workspace:N, surface:N), so a herdr session records neither; its pane's label carries its name.
-  ws= surface=
-elif [ "$MODE" = column ]; then
-  # A column otherwise starts in its workspace's folder, which can be a checkout Claude Code has never started in, where the session stops on a dialog no session may approve; this script's own checkout is the one its spawner starts sessions in every day.
-  out=$(CMUX_QUIET=1 cmux new-split right --workspace "$ws" --surface "$SURFACE" --command "cd '$REPO' && bash '$LAUNCH_FILE'" --focus false || true)
-else
-  out=$(CMUX_QUIET=1 cmux new-workspace --name "$NAME" --cwd "$DIR" --command "bash '$LAUNCH_FILE'" --focus false || true)
-fi
-if [ "$RUNTIME" = cmux ]; then
-  [ -n "$out" ] || {
-    rm -f -- "$LAUNCH_FILE"
-    refuse "cmux opened no session for $NAME (no answer from cmux), so nothing was started and no pin was written"
-  }
-  echo "$out"
-  ws=$(grep -o 'workspace:[0-9]*' <<<"$out" | head -1 || true)
-  surface=$(grep -o 'surface:[0-9]*' <<<"$out" | head -1 || true)
 fi
 
 # The pin lands only once herdr has the session; a healed resume records the backend it was given.
@@ -1544,17 +1507,15 @@ fi
 set -- set "$NAME" "kind=$KIND"
 # A resume, or a start that reuses an ended name, runs the session again, so a row close ended reads starting once more; a live row keeps its status.
 [ "$(roster_field "$NAME" status)" = ended ] && set -- "$@" "status=starting"
-[ -n "$ws" ] && set -- "$@" "workspace=$ws"
 # A moved session no longer has the cmux workspace its entry names; an empty value removes the key.
 [ -n "$MOVE_PID" ] && set -- "$@" "workspace="
 # A second dispatcher started under an <id>-dispatcher name records its slot, which roster.ts who dispatcher 2 reads; a dispatcher's name with -2 holds slot 2 by its name.
 [ "$MODE" = manager ] && [ "$KIND" = dispatcher ] && [ -z "$FIRST" ] && ! second_dispatcher "$NAME" && set -- "$@" "slot=2"
 if [ "$MODE" = column ]; then
-  [ -n "$surface" ] && set -- "$@" "surface=$surface"
   [[ $ROLE =~ ^(reviewer|tester)$ ]] && { [ "$(kind_of_name "$TO")" = worker ] || [ "$(roster_kind "$TO")" = worker ]; } && set -- "$@" "worker=$TO"
 else
-  # A session in a workspace of its own records the surface cmux gave it, or clears a column's old one, which would name a closed surface.
-  set -- "$@" "surface=$surface"
+  # The roster's surface is a cmux one (surface:N), which a herdr session never has, so a session in a workspace of its own clears a column's old one; its pane's label carries its name.
+  set -- "$@" "surface="
 fi
 # set keeps an entry's work for a respawned session, and creates a new one.
 roster() { said=$(env $UNSET "$BUN" "$ROSTER" "$@" 2>&1 >/dev/null); }

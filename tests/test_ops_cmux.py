@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """scripts/ops after the 13 Oct cmux restarts (#542): the dashboard follows cmux.
 
-- up.py counts a cmux job healthy only under the running cmux app: a job a restart left under launchd is not (fake process tables).
+- up.py starts every terminal job in herdr, a job stored as cmux or auto included, and counts one whose pid runs under cmux unhealthy (fake process tables).
 - ops-dashboard's run.sh and supervisor.sh stop their recorded process groups on SIGHUP and once their parent is gone, and nothing else: each
   runs on scratch state with stub git, bun, curl, docker, cmux and claude, so its stack is a few sleeps this test starts, never the dashboard.
   Started from the repo's copy, run.sh execs the checkout's own once at its first start (#1330), so the scratch checkout holds a copy of scripts/ops.
@@ -92,33 +92,14 @@ def test_up(scratch):
         json.dump({"job": "ops-x", "pid": me, "startedAt": now, "lastBeatAt": now, "lastResult": "ok", "cycleSeconds": 60}, f)
     job = {"name": "ops-x", "heartbeat": "ops-x", "needsCmux": True, "runtime": "cmux"}
     under = {me: (400, "/bin/bash"), 400: (300, "/bin/zsh"), 300: (100, "/usr/bin/login"), 100: (1, CMUX), 1: (0, "/sbin/launchd")}
-    check(up.healthy(job, under, 100) == (True, "ok"), "up: a job whose ancestry reaches the running cmux is healthy")
+    ok, why = up.healthy(job, under)
+    check(not ok and "runs under cmux" in why, "up: a job stored as cmux whose pid runs under the cmux app is unhealthy, so it moves to herdr", why)
+    check(not up.healthy({**job, "runtime": "auto"}, under)[0], "up: so is a job stored as auto")
     orphan = {me: (1, "/bin/bash"), 200: (1, CMUX), 1: (0, "/sbin/launchd")}
-    ok, why = up.healthy(job, orphan, 200)
-    check(not ok and "not under the running cmux" in why, "up: a job left under launchd by a cmux restart is unhealthy", why)
-    other = {me: (100, "/bin/bash"), 100: (1, CMUX), 200: (1, CMUX), 1: (0, "/sbin/launchd")}
-    check(not up.healthy(job, other, 200)[0], "up: a job under another cmux app is unhealthy")
+    check(up.healthy(job, orphan) == (True, "ok"), "up: a job stored as cmux whose pid runs outside cmux is healthy")
     cli = {me: (100, "/Applications/cmux.app/Contents/Resources/bin/cmux"), 100: (1, "/bin/zsh"), 200: (1, CMUX)}
-    check(not up.healthy(job, cli, 200)[0], "up: the cmux CLI above a job does not count as the cmux app")
-    check(up.healthy({**job, "needsCmux": False}, orphan, 200)[0], "up: a launchd job is judged by its heartbeat alone")
-
-
-def test_key(scratch):
-    config = os.path.join(scratch, "key")
-    os.makedirs(config)
-    up = load("up_key", os.path.join(OPS, "up.py"), config)
-    ops = os.path.expanduser("~/.playground/ops/sweep/sweep.py")
-    check(up.key_of({"command": "python3 -I ~/.playground/ops/sweep/sweep.py no-headroom"}) == ops, "up: a job keys by its path under /ops/", up.key_of({"command": f"python3 -I {ops} no-headroom"}))
-    folder = os.path.join(scratch, "key", "packages", "scripts", "src", "ops-sweep")
-    os.makedirs(folder)
-    open(os.path.join(folder, "cli.ts"), "w").close()
-    key = up.key_of({"command": f"bun --no-env-file {folder}/cli.ts no-headroom"})
-    check(key == "/src/ops-sweep/", "up: a Bun job with no word under /ops/ keys by its script's folder (its last two names), never by bun, which every Ops title could hold", key)
-    missing = up.key_of({"command": f"bun --no-env-file {scratch}/absent/packages/scripts/src/ops-sweep/cli.ts no-headroom"})
-    check(missing == "/src/ops-sweep/", "up: a Bun job whose script is not on disk yet still keys by its folder, never by bun", missing)
-    absolute = up.key_of({"command": f"{os.path.expanduser('~/.bun/bin/bun')} {folder}/cli.ts"})
-    check(absolute == "/src/ops-sweep/", "up: a Bun job that names bun by its absolute path still keys by its script's folder", absolute)
-
+    check(up.healthy(job, cli)[0], "up: the cmux CLI above a job does not count as the cmux app")
+    check(up.healthy({"name": "ops-x", "heartbeat": "ops-x", "launchd": "com.x.ops-x"}, under)[0], "up: a launchd job is judged by its heartbeat alone")
 
 def test_unguarded(scratch):
     config = os.path.join(scratch, "unguarded")
@@ -389,21 +370,21 @@ def test_up_orphan(scratch):
         with open(os.path.join(state, "jobs.json"), "w") as f:
             json.dump({"jobs": jobs}, f)
         me = os.getpid()
-        procs = {me: (100, "/bin/bash"), 100: (1, CMUX), orphan: (1, "/bin/sleep"), kept.pid: (100, "/bin/bash"), daemon.pid: (1, "/bin/sleep"), 1: (0, "/sbin/launchd")}
+        procs = {me: (1, "/bin/bash"), 100: (1, CMUX), orphan: (100, "/bin/sleep"), kept.pid: (1, "/bin/bash"), daemon.pid: (100, "/bin/sleep"), 1: (0, "/sbin/launchd")}
         # ops-late's holder started after the snapshot was read, so the table lacks it
         holders = {"ops-orphan": orphan, "ops-kept": kept.pid, "ops-late": late.pid, "ops-fresh": fresh.pid, "ops-daemon": daemon.pid}
         started = []
         up.ptable.table = lambda: procs
         up.once.running = lambda name, marker: holders[name]
-        up.workspaces = lambda: {}
-        up.start = lambda job, existing: started.append(job["name"])
+        up.herdr = lambda: ("/x/herdr", "")
+        up.start = lambda job: started.append(job["name"])
         up.up(True)
-        check(not alive(orphan), "up: a holder outside the running cmux is stopped")
-        check(started == ["ops-orphan"], "up: that job is started again, and the one under cmux is left alone", repr(started))
-        check(kept.poll() is None, "up: the holder under the running cmux still runs")
+        check(not alive(orphan), "up: a holder of a job stored as cmux that runs under cmux is stopped")
+        check(started == ["ops-orphan"], "up: that job is started again, and the one outside cmux is left alone", repr(started))
+        check(kept.poll() is None, "up: the holder outside cmux still runs")
         check(late.poll() is None, "up: a holder the process snapshot lacks is left running")
         check(fresh.poll() is None, "up: a holder the snapshot lacks, with no heartbeat yet, is left running")
-        check(daemon.poll() is None, "up: a launchd job's holder outside cmux is only reported, never stopped")
+        check(daemon.poll() is None, "up: a launchd job's holder under cmux is only reported, never stopped")
     finally:
         if alive(orphan):
             os.kill(orphan, signal.SIGKILL)
@@ -460,21 +441,6 @@ print(json.dumps({"result": out}))
 
 CMUX_STUB = """#!/bin/bash
 echo "$*" >> "$STUB_CMUX_LOG"
-if [ -n "$STUB_CMUX_FAIL" ] && [ "$1" = new-split ]; then
-  [ -n "$CMUX_QUIET" ] || echo "cmux: 'new-split' is now an alias for 'cmux pane split'." >&2
-  echo "Error: ERROR: Access denied - only processes started inside cmux can connect; this pass ran from a terminal cmux did not start" >&2
-  exit 1
-fi
-case "$1" in
-  list-workspaces) echo "  workspace:7 Ops" ;;
-  list-panes) echo "  pane:1" ;;
-  list-pane-surfaces) [ -n "$STUB_CMUX_TITLE" ] && echo "  surface:5 $STUB_CMUX_TITLE" ;;
-esac
-exit 0
-"""
-
-OSASCRIPT_STUB = """#!/bin/bash
-echo "$*" >> "$STUB_OSASCRIPT_LOG"
 """
 
 
@@ -501,7 +467,7 @@ def test_up_herdr(scratch):
     bins = os.path.join(scratch, "herdr-bin")
     for d in (state, pins, bins):
         os.makedirs(d)
-    for name, body in (("herdr", HERDR_STUB), ("cmux", CMUX_STUB), ("osascript", OSASCRIPT_STUB)):
+    for name, body in (("herdr", HERDR_STUB), ("cmux", CMUX_STUB)):
         with open(os.path.join(bins, name), "w") as f:
             f.write(body)
         os.chmod(os.path.join(bins, name), 0o755)
@@ -512,11 +478,10 @@ def test_up_herdr(scratch):
     open(sock, "w").close()
     herdr_state = os.path.join(scratch, "herdr-state.json")
     cmux_log = os.path.join(scratch, "cmux.log")
-    banners = os.path.join(scratch, "osascript.log")
-    saved = {k: os.environ.get(k) for k in ("PATH", "PLAYGROUND_HERDR_DIR", "PLAYGROUND_HERDR_SESSION", "STUB_HERDR_STATE", "STUB_CMUX_LOG", "STUB_CMUX_TITLE", "STUB_HERDR_DOWN", "STUB_HERDR_RUN_FAIL", "STUB_CMUX_FAIL", "CMUX_SOCKET_PATH", "STUB_OSASCRIPT_LOG")}
-    os.environ.update(PATH=f"{bins}:{os.environ['PATH']}", PLAYGROUND_HERDR_DIR=pins, STUB_HERDR_STATE=herdr_state, STUB_CMUX_LOG=cmux_log, STUB_OSASCRIPT_LOG=banners)
-    for k in ("PLAYGROUND_HERDR_SESSION", "STUB_CMUX_TITLE"):
-        os.environ.pop(k, None)
+    saved = {k: os.environ.get(k) for k in ("PATH", "PLAYGROUND_HERDR_DIR", "PLAYGROUND_HERDR_SESSION", "STUB_HERDR_STATE", "STUB_CMUX_LOG", "STUB_HERDR_DOWN", "STUB_HERDR_RUN_FAIL", "CMUX_SOCKET_PATH")}
+    os.environ.update(PATH=f"{bins}:{os.environ['PATH']}", PLAYGROUND_HERDR_DIR=pins, STUB_HERDR_STATE=herdr_state, STUB_CMUX_LOG=cmux_log)
+    os.environ.pop("PLAYGROUND_HERDR_SESSION", None)
+    open(cmux_log, "w").close()
     up = load("up_herdr", os.path.join(OPS, "up.py"), config)
     me = os.getpid()
     procs = {me: (100, "/bin/bash"), 100: (1, CMUX), 1: (0, "/sbin/launchd")}
@@ -558,7 +523,7 @@ def test_up_herdr(scratch):
         split = next((c["args"] for c in st["calls"] if c["args"][:2] == ["pane", "split"]), [])
         check(len(st["workspaces"]) == 1 and b.get("workspace_id") == a.get("workspace_id") and b.get("beside") == a.get("pane_id") and "right" in split,
               "up: a second herdr job splits right beside the Ops pane", json.dumps(st))
-        check(up.in_grid(job("ops-b", runtime="herdr"), {}, up.herdr()[0]) and not up.in_grid(job("ops-c", runtime="herdr"), {}, up.herdr()[0]),
+        check(up.in_grid(job("ops-b", runtime="herdr"), up.herdr()[0]) and not up.in_grid(job("ops-c", runtime="herdr"), up.herdr()[0]),
               "up: in_grid finds a herdr job's pane by its label")
 
         # a pane whose run fails is closed, and the log names the step
@@ -583,171 +548,70 @@ def test_up_herdr(scratch):
             return pid
 
         in_cmux = holder("ops-move", 100)
-        os.environ["STUB_CMUX_TITLE"] = f"python3 -I once.py ops-move python3 {folder}/ops-move/run.py"
-        check(up.healthy(job("ops-move"), procs, 100)[0], "up: as a cmux job, its copy under cmux is healthy")
-        check(not up.healthy(job("ops-move", runtime="herdr"), procs, 100)[0], "up: once its runtime is herdr, that copy is not")
-        pass_with([job("ops-move", runtime="herdr")])
+        check(not up.healthy(job("ops-move"), procs)[0], "up: a job stored as cmux, its copy under cmux is not healthy")
+        pass_with([job("ops-move")])
         st = herdr_st()
         moved = next((p for p in st["panes"] if p.get("label") == "ops-move"), {})
         check(wait_for(lambda: not alive(in_cmux), 5), "up: cmux to herdr stops the copy under cmux by its recorded pid")
         check("ops-move" in moved.get("run", ""), "up: and starts the job in herdr", json.dumps(st["panes"]))
-        check("close-surface --surface surface:5 --workspace workspace:7" in open(cmux_log).read(), "up: and closes its old cmux surface")
 
-        # and back: herdr to cmux stops the copy in herdr, closes its pane and starts it in cmux
-        in_herdr = holder("ops-move", 1)
-        os.environ["STUB_CMUX_TITLE"] = "another job"
-        open(cmux_log, "w").close()
-        pass_with([job("ops-move")])
-        st = herdr_st()
-        check(wait_for(lambda: not alive(in_herdr), 5), "up: herdr to cmux stops the copy in herdr by its recorded pid")
-        check(not any(p.get("label") == "ops-move" for p in st["panes"]), "up: and closes its herdr pane", json.dumps(st["panes"]))
-        check(re.search(r"^new-split right --workspace workspace:7 .*once\.py ops-move ", open(cmux_log).read(), re.M) is not None,
-              "up: and starts it as a cmux split in Ops", open(cmux_log).read())
-
-        # auto: cmux while cmux holds a live Claude session, herdr once it holds none
-        os.makedirs(os.path.join(config, "sessions"), exist_ok=True)
-        with open(os.path.join(config, "sessions", "555.json"), "w") as f:
-            json.dump({"name": "dispatcher-5e", "pid": 555}, f)
-        procs[555] = (100, "/usr/local/bin/claude")
-        check(up.cmux_held(procs), "up: a registry session whose pid runs under the cmux app means cmux holds a session")
-        os.environ["STUB_CMUX_TITLE"] = "another job"
-        open(cmux_log, "w").close()
+        # a job stored as auto starts in herdr, and its copy under the pinned herdr's server is left there
         pass_with([job("ops-auto", runtime="auto")])
-        check(re.search(r"^new-split right --workspace workspace:7 .*once\.py ops-auto ", open(cmux_log).read(), re.M) is not None
-              and not any(p.get("label") == "ops-auto" for p in herdr_st()["panes"]),
-              "up: an auto job starts in cmux while cmux holds a session", open(cmux_log).read())
-        procs[555] = (1, "/usr/local/bin/claude")
-        check(not up.cmux_held(procs), "up: a registry session outside cmux means cmux holds none")
-        # a crashed session's file whose pid macOS gave to a process under cmux holds nothing, as the dashboard's cmuxHeldOf() reads it
-        reused = os.path.join(config, "sessions", "556.json")
-        with open(reused, "w") as f:
-            json.dump({"name": "worker-crashed", "pid": 556, "sessionId": "abc", "procStart": "Mon Oct  5 23:37:23 2026"}, f)
-        procs[556] = (100, "/usr/local/bin/claude")
-        real_starts = up.ptable.starts
-        try:
-            up.ptable.starts = lambda pids: {556: "Tue Oct 6 01:00:00 2026"}
-            check(not up.cmux_held(procs), "up: a registry file whose procStart differs from its pid's start holds nothing")
-            up.ptable.starts = lambda pids: {556: "Mon Oct 5 23:37:23 2026"}
-            check(up.cmux_held(procs), "up: a registry file whose procStart matches its pid's start holds cmux")
-            up.ptable.starts = lambda pids: None
-            check(up.cmux_held(procs), "up: when ps cannot give the starts, the registry's pid decides")
-        finally:
-            up.ptable.starts = real_starts
-            os.remove(reused)
-            del procs[556]
-        check(not up.cmux_held({me: (1, "/bin/bash")}), "up: with no cmux app running, cmux holds none")
-        check(up.cmux_held({}), "up: a process table that cannot be read counts as held")
-        open(cmux_log, "w").close()
-        pass_with([job("ops-auto", runtime="auto")])
-        check(any(p.get("label") == "ops-auto" for p in herdr_st()["panes"]) and "new-split" not in open(cmux_log).read(),
-              "up: an auto job starts in herdr once cmux holds no session, with no hand step", json.dumps(herdr_st()["panes"]))
-        in_cmux = holder("ops-auto-kept", 100)
-        open(cmux_log, "w").close()
+        check(any(p.get("label") == "ops-auto" for p in herdr_st()["panes"]), "up: a job stored as auto starts in herdr", json.dumps(herdr_st()["panes"]))
+        procs[200] = (1, os.path.join(bins, "herdr"))
+        in_herdr = holder("ops-auto-kept", 200)
         calls = len(herdr_st()["calls"])
         pass_with([job("ops-auto-kept", runtime="auto")])
-        check(alive(in_cmux) and len(herdr_st()["calls"]) == calls and not re.search(r"new-split|close", open(cmux_log).read()),
-              "up: an auto job healthy under cmux is left there when cmux holds no session")
-        procs[555] = (100, "/usr/local/bin/claude")
-        in_herdr = holder("ops-auto-there", 1)
-        open(cmux_log, "w").close()
-        pass_with([job("ops-auto-there", runtime="auto")])
-        check(wait_for(lambda: not alive(in_herdr), 5) and re.search(r"^new-split right --workspace workspace:7 .*once\.py ops-auto-there ", open(cmux_log).read(), re.M) is not None,
-              "up: an auto job healthy in herdr moves back to cmux once cmux holds a session", open(cmux_log).read())
-        orphan = holder("ops-auto-orphan", 1)
-        open(cmux_log, "w").close()
-        pass_with([job("ops-auto-orphan", runtime="auto")])
-        check(wait_for(lambda: not alive(orphan), 5) and "once.py ops-auto-orphan " in open(cmux_log).read(),
-              "up: an auto job a cmux restart left under launchd is stopped and started in cmux, not read as healthy")
+        check(alive(in_herdr) and len(herdr_st()["calls"]) == calls, "up: a job stored as auto, healthy in herdr, is left there")
 
-        # while cmux holds no session, an auto job's copy counts only under the pinned herdr's server or a cmux, never as a launchd orphan
-        procs[555] = (1, "/usr/local/bin/claude")
-        procs[200] = (1, os.path.join(bins, "herdr"))
-        holder("ops-auto-server", 200)
-        check(up.healthy(up.placed(job("ops-auto-server", runtime="auto"), False), procs, 100)[0],
-              "up: an auto job under the pinned herdr's server is healthy while cmux holds no session")
-        lost = holder("ops-auto-lost", 1)
-        check(not up.healthy(up.placed(job("ops-auto-lost", runtime="auto"), False), procs, 100)[0],
-              "up: an auto job under launchd is not healthy while cmux holds no session")
-        pass_with([job("ops-auto-lost", runtime="auto")])
-        check(wait_for(lambda: not alive(lost), 5) and any(p.get("label") == "ops-auto-lost" for p in herdr_st()["panes"]),
-              "up: and is stopped by its recorded pid and started in herdr", json.dumps(herdr_st()["panes"]))
-
-        # --once-per-cmux counts a cmux launch done only once a pass found cmux holding a session
+        # --once-per-cmux, an old ~/.zshrc hook's call, runs no pass and leaves no marker
         cmux_sock = os.path.join(scratch, "cmux-launch")
         open(cmux_sock, "w").close()
         os.environ["CMUX_SOCKET_PATH"] = cmux_sock
-        mark = os.path.join(state, "up.cmux")
         with open(os.path.join(state, "jobs.json"), "w") as f:
-            json.dump({"jobs": [job("ops-auto-server", runtime="auto")]}, f)
+            json.dump({"jobs": [job("ops-once", runtime="herdr")]}, f)
+        calls = len(herdr_st()["calls"])
         argv = sys.argv
         try:
             sys.argv = ["up.py", "--once-per-cmux"]
             up.main()
-            check(not os.path.exists(mark), "up: a once-per-cmux pass with cmux holding no session leaves the launch to the next terminal")
-            procs[555] = (100, "/usr/local/bin/claude")
-            up.main()
-            check(os.path.exists(mark), "up: a once-per-cmux pass with cmux holding a session marks the launch done")
         finally:
             sys.argv = argv
+        check(len(herdr_st()["calls"]) == calls and not os.path.exists(os.path.join(state, "up.cmux")), "up: --once-per-cmux runs no pass and leaves no marker")
 
         # a pass that prints: a job with no runtime opens in herdr, and the jobs after it still run
-        open(cmux_log, "w").close()
         bare = {k: v for k, v in job("ops-noruntime").items() if k != "runtime"}
         printed = pass_with([bare, job("ops-after", runtime="herdr")], quiet=False)
-        check("started ops-noruntime in herdr (no heartbeat)" in printed and "started ops-after in herdr" in printed and any(p.get("label") == "ops-noruntime" for p in herdr_st()["panes"]) and "new-split" not in open(cmux_log).read(),
+        check("started ops-noruntime in herdr (no heartbeat)" in printed and "started ops-after in herdr" in printed and any(p.get("label") == "ops-noruntime" for p in herdr_st()["panes"]),
               "up: a job with no runtime prints as started in herdr, and the jobs after it still run", printed)
 
-        # a failed start logs cmux's whole answer, past its alias notice, and waits out no GRACE
-        os.environ["STUB_CMUX_FAIL"] = "1"
-        open(cmux_log, "w").close()
+        # a failed start logs herdr's whole answer and waits out no GRACE
+        os.environ["STUB_HERDR_RUN_FAIL"] = "1"
         pass_with([job("ops-refused")])
         up.up(True)
-        del os.environ["STUB_CMUX_FAIL"]
+        del os.environ["STUB_HERDR_RUN_FAIL"]
         logged = [l for l in open(up.LOG).read().splitlines() if "started ops-refused" in l]
-        check(len(logged) == 2 and logged[-1].endswith("this pass ran from a terminal cmux did not start") and "alias" not in logged[-1],
-              "up: a failed start logs cmux's whole answer with no alias notice", logged[-1:])
-        check(open(cmux_log).read().count("new-split") == 2, "up: a failed start is tried again on the next pass, with no GRACE wait")
+        check(len(logged) == 2 and logged[-1].endswith("pane run refused"), "up: a failed start logs herdr's whole answer", logged[-1:])
 
         # the printed line holds no heartbeat age, so ops-tick's once-only dedupe holds for a start that keeps failing
-        os.environ["STUB_CMUX_FAIL"] = "1"
+        os.environ["STUB_HERDR_RUN_FAIL"] = "1"
         said = []
         for minutes in (7, 12):
             beat = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - minutes * 60))
             with open(os.path.join(state, "ops-stale.json"), "w") as f:
                 json.dump({"job": "ops-stale", "pid": me, "startedAt": beat, "lastBeatAt": beat, "lastResult": "ok", "cycleSeconds": 60}, f)
             said.append(pass_with([job("ops-stale")], quiet=False))
-        del os.environ["STUB_CMUX_FAIL"]
+        del os.environ["STUB_HERDR_RUN_FAIL"]
         check(said[0] == said[1] and "could not start ops-stale" in said[0] and "m old" not in said[0], "up: the printed line leaves out the heartbeat's age", said)
 
-        # a pass outside cmux leaves a cmux job and says why
+        # a pass outside cmux starts a job stored as cmux in herdr
         outside = {k: v for k, v in procs.items()}
         outside[me] = (1, "/bin/bash")
         up.ptable.table = lambda: outside
-        open(cmux_log, "w").close()
-        far = [pass_with([job("ops-far")], quiet=False), pass_with([job("ops-far")], quiet=False)]
+        far = pass_with([job("ops-far")], quiet=False)
         up.ptable.table = lambda: procs
-        check("new-split" not in open(cmux_log).read() and "not starting it in cmux: this pass runs outside cmux" in open(up.LOG).read(),
-              "up: a pass outside cmux logs a cmux job it would start and leaves it")
-        check(far[0] == far[1] and "ops-far is down, and this pass runs outside cmux, which answers only its own terminals" in far[0],
-              "up: and prints the same line each pass, so ops hears it once", far)
-
-        # a pass outside cmux tells ops of an auto job left outside cmux while cmux holds a session, logging it once
-        out_pid = holder("ops-auto-out", 200)
-        outside[out_pid] = procs[out_pid]
-        outside[555] = (100, "/usr/local/bin/claude")
-        up.ptable.table = lambda: outside
-        try:
-            said = [pass_with([job("ops-auto-out", runtime="auto")], quiet=False)]
-            again = io.StringIO()
-            with contextlib.redirect_stdout(again):
-                up.up(False)
-            said.append(again.getvalue())
-        finally:
-            up.ptable.table = lambda: procs
-        line = "ops-auto-out runs outside cmux while cmux holds a factory session; a pass inside cmux moves it back, so open a cmux terminal"
-        check(all(line in out for out in said), "up: a pass outside cmux prints an auto job left outside cmux while cmux holds a session", said)
-        check(open(up.LOG).read().count(line) == 1, "up: and logs it once")
-        check(open(banners).read().count(line) == 1, "up: and shows it as one macOS banner, through the osascript stub")
+        check("started ops-far in herdr" in far and any(p.get("label") == "ops-far" for p in herdr_st()["panes"]), "up: a pass outside cmux starts a job stored as cmux in herdr", far)
+        check(open(cmux_log).read() == "", "up: and no pass calls cmux", open(cmux_log).read())
 
         # a missing server socket refuses a herdr start and stops nothing
         os.remove(sock)
@@ -869,7 +733,6 @@ def main():
     with tempfile.TemporaryDirectory() as scratch:
         test_cfg(scratch)
         test_up(scratch)
-        test_key(scratch)
         test_up_orphan(scratch)
         test_up_herdr_names(scratch)
         test_up_herdr(scratch)
