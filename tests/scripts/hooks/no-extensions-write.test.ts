@@ -298,6 +298,10 @@ describe("a direct write into the extensions root is refused, naming the owner's
     ["rm of a glob held in a quoted variable", 'X=".playground/ext*"; rm -rf $X'],
     ["rm of a brace that makes the root's name", "rm -rf .playground/{x,extensions}"],
     ["rm of a glob that matches a link to the root", "rm -rf st*/hooks"],
+    ["rm of a bare glob that matches a link to the root", "rm -rf s*/"],
+    ["a redirect through a glob that matches a link to the root", "echo x > s*/policy.json"],
+    ["cp through a glob that matches a link to the root", "cp /etc/hosts s*/policy.json"],
+    ["rm of a ksh glob in the home", "setopt kshglob\nrm -rf +(.playground)"],
     ["rm of a glob with a .. after it", "rm -rf w*/../.playground/extensions"],
     ["rm of an extglob in the data folder", "rm -rf .playground/@(extensions)"],
     ["rm of a negated extglob in the data folder", "rm -rf .playground/!(handoffs)"],
@@ -362,6 +366,11 @@ describe("a direct write into the extensions root is refused, naming the owner's
     [
       "a printf escape format over many arguments",
       `printf '%s${"\\\\x41".repeat(16_000)}' ${"x ".repeat(3_000)}> /tmp/nxw-p`,
+      false,
+    ],
+    [
+      "a 64 KB printf format over 30000 arguments",
+      `printf '${"%s".padEnd(64_000, "a")}' ${"x ".repeat(30_000)}> /tmp/nxw-p`,
       false,
     ],
   ])(

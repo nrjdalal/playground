@@ -4,7 +4,7 @@ import { basename, isAbsolute, resolve } from "node:path"
 
 // `variable` names the first shell variable a text expands, so a hook can tell `"$HERDR_BIN_PATH"` from any other unknown program.
 export type Text = { reads?: Text[]; unknown?: string; value: string; variable?: string }
-// `glob` is where the first character the shell expands as a glob stands unquoted in a word the lexer read, -1 when none does; a word built elsewhere has none, so its whole text is searched.
+// `glob` is where the first character the shell expands as a glob stands unquoted in a word the lexer read, -1 when none does; unset on a word built elsewhere, whose whole text is then searched, and on a slice that cut its first glob off, since another may follow.
 export type Word = Text & { glob?: number; procs?: Command[]; quoted: boolean }
 type Redirect = { body?: Text; fd: string; op: string; target?: Word }
 export type Command = {
@@ -731,7 +731,7 @@ export function parse(cmd: Command): Parsed {
         take()
         chdir = take()
       } else if (wrapper === "env" && /^(?:-C|--chdir=)./.test(v)) {
-        chdir = { ...w, value: v.replace(/^(?:-C|--chdir=)/, "") }
+        chdir = slice(w, v.startsWith("-C") ? 2 : "--chdir=".length)
         take()
       } else if (xargs && /^(?:-[IiJ]|--replace)/.test(v)) {
         const attached = /^(?:-[IiJ]|--replace=?)(.*)$/.exec(v)?.[1] ?? ""
@@ -994,7 +994,10 @@ async function outputOf(cmd: Command, env: Env): Promise<Text> {
   const values = await Promise.all(args.map((a) => resolveText(a, env)))
   const hidden = values.find((v) => v.unknown)
   if (hidden) return hidden
-  if (name === "printf") return held({ value: printf(values.map((v) => v.value)) })
+  if (name === "printf") {
+    const out = printf(values.map((v) => v.value))
+    return deadline !== undefined && out.length > MAX_BYTES ? unknown(LARGE) : { value: out }
+  }
   let k = 0
   while (k < values.length && /^-[neE]+$/.test(values[k].value)) k++
   return {
@@ -1005,7 +1008,7 @@ async function outputOf(cmd: Command, env: Env): Promise<Text> {
   }
 }
 
-// printf reuses its format while arguments remain; a pass that takes none ends it, and so does an output past what the hook holds.
+// printf reuses its format while arguments remain; a pass that takes none ends it, and under a deadline so does an output past what the hook holds, which the walk then holds as unknown; a hook with no deadline reads the whole output.
 function printf([format = "", ...args]: string[]): string {
   const conversion = /%(?:%|[-+ #0']*(?:[1-9]\d*)?(?:\.\d+)?([a-zA-Z]))/g
   const pattern = decode(format)
@@ -1019,7 +1022,8 @@ function printf([format = "", ...args]: string[]): string {
       const value = args[k++] ?? ""
       return kind === "b" ? decode(value) : value
     })
-    if (k === before || k >= args.length || out.length > MAX_BYTES) return out
+    if (k === before || k >= args.length || (deadline !== undefined && out.length > MAX_BYTES))
+      return out
   }
 }
 

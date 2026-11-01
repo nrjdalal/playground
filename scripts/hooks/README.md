@@ -134,13 +134,14 @@ Their tests are `bun run test:file tests/scripts/hooks`.
   It reads every command `scripts/hooks/shell.ts` finds: one inside a `$(…)`, a `${…}`, a `$((…))` or an array assignment's `(…)`, and the script a shell, `source` or `.` reads from a process substitution, a group's output or `/dev/stdin`, every command that prints part of it included, and the parts it can read of a script it reads only in part (a group holding a `curl`).
   It judges each command line, each word and each variable once per call, so a deep nest or a long list of variables ends well inside the hook's timeout, and it refuses, each time naming the fix (split it into shorter calls), a call whose lexing or walk runs past 10 s
   (a deadline checked at every lex, expansion and walk step, its clock read once every 1024 steps, so any slow route is refused), a command over 128 KB, whose lexing could outlast the timeout, one nested too deep for its stack, and a chain of scripts a shell,
-  `eval` or `source` reads 256 or more deep, and such a script over 128 KB, or over 1 MB as text a command printed or wrote in the call, which it holds as unknown elsewhere.
+  `eval` or `source` reads 256 or more deep, and such a script over 128 KB, or over 1 MB as text a command printed or wrote in the call, which it holds as unknown elsewhere, and an `xargs -I` line over 128 KB once its stdin is filled in.
   It runs its check in a Worker (`scripts/hooks/no-extensions-write-worker.ts`) and refuses from the main thread when the Worker has not answered in 12 s, so a single step the deadline cannot interrupt (a regex, a copy) cannot hold it past its 15 s timeout; this costs about 10 ms a call.
   It reads `env -C<dir>` and `env --chdir=<dir>` as the folder the command runs in, as it reads `env -C <dir>`.
   It reads a command's text, so a program whose own code writes the root (a script file run by its path, a binary) and a path it cannot read (built at run time, in a `$(…)` or a variable) pass it.
   A write to a scope's GitHub repository, which `ops:ext-sync` renders into the root, is outside its reach too; a guard on those writes is a follow-up of its own.
   A path through a link into the root with `..` after the link (`echo x > <link>/../f`) is judged as typed, so a write by one passes.
   A `cd` or `pushd` it cannot follow (`cd -`, `cd ~-`, `popd`'s stack, a glob in the folder, a `CDPATH` lookup) leaves the command's folder unread, so a relative write after one passes.
+  A text that holds a space is read again as a command line, where its quoted glob characters stand unquoted, so from a cwd at or above the root (`~`, `~/.playground`) a call such as `git commit -m "fix(x): y"` is refused; run it from a worktree.
   It fails open on any other error, and its tests are in `bun run test:file tests/scripts/hooks/no-extensions-write.test.ts`.
 
 ## no-false-green

@@ -297,9 +297,12 @@ function inspect(raw: string, environment: Environment) {
   }
   const seen = new Set<string>()
   // where each scope's variables were read to for their lines, and judged to for each cwd and remover, so each variable is read once rather than once a command
-  const varsRead = new WeakMap<Map<string, Text>, number>()
-  const varsJudged = new WeakMap<Map<string, Text>, Map<string, number>>()
-  const since = (vars: Map<string, Text>, cursors: Map<string, number>, key: string): Text[] => {
+  type Cursors = WeakMap<Map<string, Text>, Map<string, number>>
+  const varsRead: Cursors = new WeakMap()
+  const varsJudged: Cursors = new WeakMap()
+  const since = (store: Cursors, vars: Map<string, Text>, key: string): Text[] => {
+    const cursors = store.get(vars) ?? new Map<string, number>()
+    store.set(vars, cursors)
     const [keys, next] = varsSince(vars, cursors.get(key))
     cursors.set(key, next)
     return keys.flatMap((k) => vars.get(k) ?? [])
@@ -335,12 +338,7 @@ function inspect(raw: string, environment: Environment) {
           .find(Boolean)
     if (write) return refuse(write)
     // a command with no program runs nothing that reads the environment, so only its own assignments count
-    let vars: Text[] = []
-    if (!reader && first) {
-      const [keys, next] = varsSince(env.vars, varsRead.get(env.vars))
-      varsRead.set(env.vars, next)
-      vars = keys.flatMap((k) => env.vars.get(k) ?? [])
-    }
+    const vars = !reader && first ? since(varsRead, env.vars, "") : []
     for (const raw of reader ? [] : runsOf(parsed, vars)) {
       const line =
         xargs?.replace && fed ? filled(raw, xargs.replace, fed.unknown ? UNKNOWN : fed.value) : raw
@@ -354,9 +352,7 @@ function inspect(raw: string, environment: Environment) {
     if (inRoot(env.cwd)) return refuse(`${name} run inside ${root}`)
     if (name === "git" && inRoot(gitCall(args, env).cwd)) return refuse(`git on a clone in ${root}`)
     const remover = REMOVERS.has(name)
-    const cursors = varsJudged.get(env.vars) ?? new Map<string, number>()
-    varsJudged.set(env.vars, cursors)
-    const scope = since(env.vars, cursors, `${env.cwd}\0${remover}`)
+    const scope = since(varsJudged, env.vars, `${env.cwd}\0${remover}`)
     for (const value of [...parsed.local.values(), ...scope]) {
       // a variable's value is globbed where it is used unquoted, whatever quoted it where it was set
       const named = names({ ...value, glob: undefined, quoted: false }, env, remover)
