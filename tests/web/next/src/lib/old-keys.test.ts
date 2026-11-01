@@ -1,7 +1,9 @@
 import { describe, expect, test } from "bun:test"
 
-import { moveOldKeys } from "../../../../../web/next/src/lib/old-keys"
-import { OLD } from "../../../../old-names"
+import { moveOldKeys, OLD_KEYS } from "../../../../../web/next/src/lib/old-keys"
+
+// The old key each new key moves from, read from the move itself.
+const oldKey = (key: string) => Object.keys(OLD_KEYS).find((old) => OLD_KEYS[old] === key)!
 
 const storage = (entries: Record<string, string>) => {
   const map = new Map(Object.entries(entries))
@@ -15,7 +17,7 @@ const storage = (entries: Record<string, string>) => {
 
 describe("the browser keys from before the rename", () => {
   test("an old key's value moves to its new key, and the old key goes", () => {
-    const s = storage({ "desk.paste-log": "[1]", [`${OLD.dispatcher}:music:volume`]: "40" })
+    const s = storage({ "desk.paste-log": "[1]", [oldKey("playground:music:volume")]: "40" })
     moveOldKeys(s)
     expect(Object.fromEntries(s.map)).toEqual({
       "dashboard.paste-log": "[1]",
@@ -24,7 +26,7 @@ describe("the browser keys from before the rename", () => {
   })
 
   test("a value the new key already holds wins, and a second move changes nothing", () => {
-    const s = storage({ "playground:seen:inbox": "new", [`${OLD.dispatcher}:seen:inbox`]: "old" })
+    const s = storage({ "playground:seen:inbox": "new", [oldKey("playground:seen:inbox")]: "old" })
     moveOldKeys(s)
     moveOldKeys(s)
     expect(Object.fromEntries(s.map)).toEqual({ "playground:seen:inbox": "new" })

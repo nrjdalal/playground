@@ -590,6 +590,13 @@ export function parse(cmd: Command): Parsed {
   }
 }
 
+// run-slot.sh runs the words after its -- as the command: those words (none when it has no --), or undefined for any other command, so a hook that calls it reads a slotted command as the command itself.
+export function slotWords({ args, name }: Parsed): Word[] | undefined {
+  if (name !== "run-slot.sh") return
+  const at = args.findIndex((a) => a.value === "--")
+  return at === -1 ? [] : args.slice(at + 1)
+}
+
 // A hook's judgement of one command, given everything but the shell's own builtins, the shells it starts and eval, which run() follows itself.
 export type Visit = (cmd: Command, parsed: Parsed, env: Env) => Promise<string | undefined>
 

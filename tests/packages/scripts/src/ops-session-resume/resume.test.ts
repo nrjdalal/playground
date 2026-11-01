@@ -33,8 +33,7 @@ import {
 import { callKey } from "../../../../../packages/scripts/src/stuck-alert"
 import { writeRoot } from "../../../../../packages/settings/src/folder"
 import { extensionsDir } from "../../../../../packages/settings/src/rendered"
-import { OLD } from "../../../../old-names"
-import { OLD_AS_NAMES, SEEDED_NAMES } from "../../../../session-names"
+import { OLD, OLD_AS_NAMES, SEEDED_NAMES } from "../../../../session-names"
 
 // A machine whose sessions.names keep the old names, which this file's fallbacks name.
 beforeAll(() => setSessionNames(OLD_AS_NAMES))

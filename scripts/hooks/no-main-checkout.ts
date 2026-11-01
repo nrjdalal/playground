@@ -1,15 +1,17 @@
-// PreToolUse hook: refuses a build, a test run, lefthook, turbo (but for the packages build a pull needs, run with env validation off), a git command that moves HEAD, the index or the files (but for the release skill's step 5 fast-forward; a worker's hard reset there ran another branch's code under every hook for 3.5 minutes) or a file write (a Bash command's, or a Write, Edit, MultiEdit or NotebookEdit) in the main checkout, which every installed skill follows and so stays clean (a reviewer's `lefthook run pre-commit` from the Bash tool's default cwd rebuilt packages' dist and wrote .turbo/runs there).
+// PreToolUse hook: refuses a build, a test run, lefthook, turbo (but for the packages build a pull needs, run with env validation off), a git command that moves HEAD, the index or the files (but for the release skill's step 5 fast-forward and the keep reset off a stray local commit; a worker's hard reset there ran another branch's code under every hook for 3.5 minutes) or a file write (a Bash command's, or a Write, Edit, MultiEdit or NotebookEdit), run-slot.sh's command read as typed bare, in the main checkout, which every installed skill follows and so stays clean (a reviewer's `lefthook run pre-commit` from the Bash tool's default cwd rebuilt packages' dist and wrote .turbo/runs there).
 import { readFileSync, realpathSync } from "node:fs"
 import { basename, dirname, join, resolve, sep } from "node:path"
 
 import { fromFactory } from "./role"
 import {
   type Env,
+  examine,
   knownVariables,
   lex,
   pathOf,
   program,
   run,
+  slotWords,
   type Text,
   type Visit,
   type Word,
@@ -168,14 +170,30 @@ const APPLY_READS = new Set(["--check", "--numstat", "--stat", "--summary"])
 // The release skill's step 5 moves the main checkout by this fast-forward alone.
 const STEP_FIVE = /^(?:-q |--quiet )?--ff-only (?:-q |--quiet )?origin\/main$/
 const GIT_FIX =
-  "it moves the HEAD, index or files of the main checkout, which every installed skill, hook and ops job runs from. Name your own tree on every git call, git -C <your worktree> ..., after git -C <your worktree> rev-parse --show-toplevel names it; the main checkout moves only by the release skill's step 5, git -C <main checkout> fetch -q origin main && git -C <main checkout> merge --ff-only -q origin/main, and a worktree is made under .claude/worktrees/ by git worktree add."
+  "it moves the HEAD, index or files of the main checkout, which every installed skill, hook and ops job runs from. Name your own tree on every git call, git -C <your worktree> ..., after git -C <your worktree> rev-parse --show-toplevel names it; the main checkout moves only by the release skill's step 5, git -C <main checkout> fetch -q origin main && git -C <main checkout> merge --ff-only -q origin/main, a stray local commit on its main goes by git -C <main checkout> reset --keep origin/main while its tree is clean, and a worktree is made under .claude/worktrees/ by git worktree add."
 
-// Whether a git subcommand and its words move HEAD, the index or the files: stash's list and show, clean's dry run and apply's checks only read.
+// The one reset the main checkout takes, back to origin/main from its own main with the tree clean and every commit it drops (origin/main..main) on no remote, so it removes only a stray local commit nobody else holds; --keep refuses to drop uncommitted work too.
+function keepReset(sub: string | undefined, rest: string[], cwd: string | undefined): boolean {
+  if (sub !== "reset" || rest.join(" ") !== "--keep origin/main" || !cwd) return false
+  const git = (...args: string[]) => {
+    const read = Bun.spawnSync(["git", "-C", cwd, ...args], { stderr: "ignore", stdout: "pipe" })
+    return read.exitCode === 0 ? read.stdout.toString() : undefined
+  }
+  if (git("symbolic-ref", "-q", "HEAD")?.trim() !== "refs/heads/main") return false
+  if (git("status", "--porcelain") !== "") return false
+  const dropped = git("rev-list", "origin/main..main")
+  return (
+    dropped !== undefined && dropped === git("rev-list", "origin/main..main", "--not", "--remotes")
+  )
+}
+
+// Whether a git subcommand and its words move HEAD, the index or the files: stash's list and show, add's and clean's dry runs and apply's checks only read.
 function gitMoves(sub: string, rest: string[]): boolean {
   if (GIT_MOVES.has(sub)) return true
   if (sub === "merge") return !STEP_FIVE.test(rest.join(" "))
   if (sub === "stash") return !["list", "show"].includes(rest[0] ?? "push")
   if (sub === "clean") return !rest.some((w) => w === "--dry-run" || /^-[a-z]*n/.test(w))
+  if (sub === "add") return !rest.some((w) => w === "--dry-run" || /^-[a-zA-Z]*n/.test(w))
   if (sub === "apply") return rest.includes("--apply") || !rest.some((w) => APPLY_READS.has(w))
   if (sub === "branch") return rest.some((w) => w === "--force" || /^-[a-zA-Z]*f/.test(w))
   return false
@@ -240,6 +258,7 @@ function runs(
   if (name === "git") {
     const { cwd, rest, sub } = gitCall(args, env)
     if (sub === "commit") return { cwd, what: "git commit, which runs lefthook's pre-commit" }
+    if (keepReset(sub, rest, cwd)) return
     return sub && gitMoves(sub, rest) ? { cwd, fix: GIT_FIX, what: `git ${sub}` } : undefined
   }
   if (name !== "bun") return
@@ -261,9 +280,77 @@ function runs(
     return { cwd, what: `bun ${words.join(" ")}` }
 }
 
+// How sed and perl read each flag letter that is more than a switch: edit (in place, -i and BSD sed's -I), script (carries the script) and value, each holding the rest of its word, else the next word; rest, holding the rest of its word alone; digits, holding the octal or x-hex digits after it, then reading on
+type Letter = "digits" | "edit" | "rest" | "script" | "value"
+const LETTERS: Record<string, Record<string, Letter>> = {
+  perl: {
+    "0": "digits",
+    C: "rest",
+    D: "rest",
+    E: "script",
+    F: "rest",
+    I: "rest",
+    M: "rest",
+    V: "rest",
+    d: "rest",
+    e: "script",
+    i: "edit",
+    l: "digits",
+    m: "rest",
+    x: "rest",
+  },
+  sed: { I: "edit", e: "script", f: "script", i: "edit", l: "value" },
+}
+// sed's long options with a value, after an = or as the next word
+const SED_VALUES = new Set(["--expression", "--file", "--line-length"])
+// a word BSD sed's bare -i or -I takes as its backup suffix: empty, or a dot and a name
+const BSD_SUFFIX = /^(\.[\w.-]*)?$/
+
+// The files sed -i or perl -i edits in place (none without -i): every positional, but the first when no script flag gave the script.
+function inPlace(name: string, args: Word[]): Word[] {
+  const letters = LETTERS[name]
+  if (!letters) return []
+  let edits = false
+  let scripted = false
+  const positionals: Word[] = []
+  for (let k = 0; k < args.length; k++) {
+    const v = args[k].value
+    if (v === "--") {
+      positionals.push(...args.slice(k + 1))
+      break
+    }
+    if (name === "sed" && v.startsWith("--")) {
+      const flag = v.split("=")[0]
+      if (flag === "--in-place") edits = true
+      else if (SED_VALUES.has(flag)) {
+        scripted ||= flag !== "--line-length"
+        if (!v.includes("=")) k++
+      }
+    } else if (/^-[^-]/.test(v)) {
+      for (let j = 1; j < v.length; j++) {
+        const kind = letters[v[j]]
+        const rest = v.slice(j + 1)
+        if (kind === "digits") j += /^(x[0-9A-Fa-f]*|[0-7]*)/.exec(rest)![0].length
+        else if (kind === "edit") {
+          edits = true
+          if (name === "sed" && rest === "" && BSD_SUFFIX.test(args[k + 1]?.value ?? "-")) k++
+          break
+        } else if (kind === "script" || kind === "value") {
+          scripted ||= kind === "script"
+          if (rest === "") k++
+          break
+        } else if (kind === "rest") break
+      }
+    } else if (!v.startsWith("-")) positionals.push(args[k])
+  }
+  if (!edits) return []
+  return scripted ? positionals : positionals.slice(1)
+}
+
 // The files a command writes by name, besides its redirects.
 function writes(name: string, args: Word[]): Word[] {
   const positionals = args.filter((a) => !a.value.startsWith("-"))
+  if (name === "sed" || name === "perl") return inPlace(name, args)
   if (name === "touch" || name === "tee") return positionals
   if (name === "cp" || name === "mv") return positionals.slice(-1)
   if (name !== "curl") return []
@@ -296,7 +383,11 @@ function inspect(raw: string, environment: Record<string, string | undefined>, m
   if (tool !== "Bash") return
   const { command } = input
   if (typeof command !== "string") return
-  const visit: Visit = async (cmd, { args, local, name }, env) => {
+  const visit: Visit = async (cmd, parsed, env) => {
+    const slot = slotWords(parsed)
+    if (slot)
+      return slot.length === 0 ? undefined : examine({ ...cmd, words: slot }, env, visit, false)
+    const { args, local, name } = parsed
     const ran = runs(name, args, local, env)
     if (ran && inMain(ran.cwd)) return refuse(ran.what, ran.fix)
     const targets = [

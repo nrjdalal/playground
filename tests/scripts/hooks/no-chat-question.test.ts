@@ -10,11 +10,12 @@ import {
   readStatus,
   REASON,
 } from "../../../scripts/hooks/no-chat-question"
-import { OLD, capital } from "../../old-names"
-import { OLD_NAMES } from "../../session-names"
+import { capital, OLD, OLD_NAMES } from "../../session-names"
 import { storeWith } from "./render-set"
 
 const script = join(import.meta.dir, "..", "..", "..", "scripts", "hooks", "no-chat-question.ts")
+// A lead's old name as the hook's own agent pattern spells it (agentOf), built at run time; a stand-in from sessions.aliases is not one the pattern knows.
+const LEAD = ["light", "kid"].join("")
 
 // A config folder whose roster holds a builder under a new name, so no case reads this machine's roster.
 const config = mkdtempSync(join(tmpdir(), "no-chat-question-"))
@@ -106,15 +107,9 @@ describe("a manager's reply that asks Quilla a decision is refused until it is i
     ["an ask under a list", "Done:\n- merged #472\n\nShould I ship it."],
     ["a question addressed to Quilla by @", "@Quilla, should I ship it?"],
     ["a question addressed to his handle", "@qmarsh: can we merge it?"],
-    [
-      "an ask after a colleague's words",
-      `${capital(OLD.builder)} said it's ready: should I ship it.`,
-    ],
-    [
-      "an ask after a colleague's sentence",
-      `${capital(OLD.builder)} says: it's ready. Should I ship it?`,
-    ],
-    ["an ask after a line to an agent", `- ${OLD.builder}: done. Should I ship it?`],
+    ["an ask after a colleague's words", `${capital(LEAD)} said it's ready: should I ship it.`],
+    ["an ask after a colleague's sentence", `${capital(LEAD)} says: it's ready. Should I ship it?`],
+    ["an ask after a line to an agent", `- ${LEAD}: done. Should I ship it?`],
     ["a hyphened word that names no session (PG-1644)", "well-known, should I ship it?"],
     ["a six-letter word that names no session (PG-1644)", "Rhythm: should I ship it?"],
     [
@@ -132,12 +127,9 @@ describe("a manager's reply that asks Quilla a decision is refused until it is i
     ["an ended row's name as chat shows it (PG-1644)", "Dashboard: should I restart it?"],
     [
       "an ask to Quilla after one to an agent",
-      `${capital(OLD.builder)}, ship #500. Quilla, should I also delete the table?`,
+      `${capital(LEAD)}, ship #500. Quilla, should I also delete the table?`,
     ],
-    [
-      "an ask after what was sent to an agent",
-      `Sent ${OLD.builder}: the plan. Can we merge it tonight?`,
-    ],
+    ["an ask after what was sent to an agent", `Sent ${LEAD}: the plan. Can we merge it tonight?`],
     ["a markdown heading over facts", "## Why did CI fail?\n- the lock was held\n- it is free now"],
     ["a bold heading over a line", "**1. Start the four Labs-port tickets now?**\nThey are ready."],
     ["say a quoted phrase", 'Say "ship now" and it goes out tonight.'],
@@ -146,15 +138,12 @@ describe("a manager's reply that asks Quilla a decision is refused until it is i
     ["should we", "Should we hold the train until morning."],
     ["let me know which", "Let me know which one goes first."],
     ["your pick", "Your pick: Brave Otter or Calm Heron."],
-    ["a status bullet with a comma-joined ask", `- ${OLD.builder}: idle, want me to start lane B?`],
+    ["a status bullet with a comma-joined ask", `- ${LEAD}: idle, want me to start lane B?`],
     ["a worker's status bullet with an ask", "- worker-x: blocked, should it wait?"],
-    ["a numbered status bullet with an ask", `1. ${OLD.builder}: idle, want me to start lane B?`],
+    ["a numbered status bullet with an ask", `1. ${LEAD}: idle, want me to start lane B?`],
     ["say a backticked word", "Say `go` to ship it."],
-    ["an ask after a semicolon to an agent", `${OLD.builder}: done; should I ship?`],
-    [
-      "an ask to Quilla after a semicolon",
-      `${OLD.builder}, hold the train; Quilla, should I ship?`,
-    ],
+    ["an ask after a semicolon to an agent", `${LEAD}: done; should I ship?`],
+    ["an ask to Quilla after a semicolon", `${LEAD}, hold the train; Quilla, should I ship?`],
     ["a question mark before a comma", "Ship it?, or wait"],
     ["its own ask, one", "One ask: should I ship it?"],
     ["its own ask, my", "My ask: can we merge tonight?"],
@@ -209,9 +198,9 @@ describe("a manager's reply that asks Quilla a decision is refused until it is i
     ["a bare imperative addressed to Quilla", "Quilla, plug in the Mac."],
     ["a bare imperative addressed to @Quilla", "@Quilla: paste the token in 1Password."],
     ["a bare imperative addressed to his handle", "- @qmarsh, approve the OAuth app."],
-    ["an action after a line to an agent", `${OLD.builder}: done. You need to log in again.`],
+    ["an action after a line to an agent", `${LEAD}: done. You need to log in again.`],
     ["a verb ending in s addressed to Quilla", "Quilla, press Approve on the card."],
-    ["pass addressed to Quilla", `Quilla, pass the key to ${OLD.builder}.`],
+    ["pass addressed to Quilla", `Quilla, pass the key to ${LEAD}.`],
     ["please at the end", "Reload the tab, please."],
     ["a need under don't, which still asks", "Don't you need to log in."],
     ["it yourself, not right after you can", "You can now withdraw it yourself."],
@@ -276,15 +265,15 @@ describe("what passes", () => {
     ["a quoted question with straight quotes", 'Niven said: "should I take DUNE-2186?"'],
     ["a question that says where it was asked", "Avery asks in Slack: can we merge?"],
     ["a blockquoted question", "From the thread:\n> Can we apply it to dev?"],
-    ["a question to another agent", `@${capital(OLD.builder)}, can we take #500 next?`],
-    ["a question to a lead by name", `${OLD.builder}: should I hold the train?`],
-    ["a question to a lead by name, comma", `${OLD.builder}, should I hold the train?`],
-    ["a question sent to an agent", `Sent ${OLD.builder}: can we take #500 next?`],
+    ["a question to another agent", `@${capital(LEAD)}, can we take #500 next?`],
+    ["a question to a lead by name", `${LEAD}: should I hold the train?`],
+    ["a question to a lead by name, comma", `${LEAD}, should I hold the train?`],
+    ["a question sent to an agent", `Sent ${LEAD}: can we take #500 next?`],
     ["a bold colleague's label", "**Avery asks:** can we ship tonight?"],
-    ["a bold agent's label", `**${OLD.builder}:** can we take #500?`],
-    ["a question to an agent with to", `To ${OLD.builder}: should it wait for canary?`],
-    ["a question I asked an agent", `I asked ${OLD.builder}: should it wait for canary?`],
-    ["a sentence to an agent with a dot inside", `Sent ${OLD.builder}: bump to v1.2, then merge?`],
+    ["a bold agent's label", `**${LEAD}:** can we take #500?`],
+    ["a question to an agent with to", `To ${LEAD}: should it wait for canary?`],
+    ["a question I asked an agent", `I asked ${LEAD}: should it wait for canary?`],
+    ["a sentence to an agent with a dot inside", `Sent ${LEAD}: bump to v1.2, then merge?`],
     ["a question asked of a worker", "Asked worker-brave-otter: should it wait for canary?"],
     ["a question asked of an id-named worker", "Asked k3m9px-worker: should it wait for canary?"],
     ["a question to an id-named reviewer by name", "k3m9px-reviewer, is the test red?"],
@@ -315,11 +304,11 @@ describe("what passes", () => {
       "1. Add the column.\n2. Paste the shot on the PR.\n3. Switch the flag.",
     ],
     ["a heading with a bare verb", "## Approve flow\n- the card shows Approve and Deny"],
-    ["waiting on your inbox", `${capital(OLD.builder)} · Waiting on your inbox`],
+    ["waiting on your inbox", `${capital(LEAD)} · Waiting on your inbox`],
     ["past tense: you approved", "You approved #i41, so it shipped."],
     ["past tense: you asked", "You asked for the totals; they are below."],
     ["a backticked command", "The runner logs `please wait` while it builds."],
-    ["please to another agent", `${OLD.builder}, please rebase #500.`],
+    ["please to another agent", `${LEAD}, please rebase #500.`],
     ["please inside a quote", 'Avery said: "please merge it tonight."'],
     ["an -ed verb before it yourself", "You fixed it yourself last night."],
     ["a status addressed to Quilla", "Quilla, both PRs merged."],
