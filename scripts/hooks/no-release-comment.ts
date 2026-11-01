@@ -1,4 +1,4 @@
-// PreToolUse hook: refuses a GitHub comment or review on a repo of an owner release-owners.json names whose text contains "release" (any case), since on 12 of those repos an owner comment with that word publishes to npm, and gh and the GitHub MCP post as that owner.
+// PreToolUse hook: refuses a GitHub comment or review on a repo of an owner release-owners.json names whose text contains "release" (any case), since there an owner comment with that word publishes to npm, and gh and the GitHub MCP post as that owner.
 import { join } from "node:path"
 
 import { coreDir } from "../../packages/settings/src/rendered"

@@ -192,6 +192,7 @@ if [ "${1:-}" = set ]; then
   echo "run-slot.sh: $path is on until $ends"
   exit 0
 fi
+# every read subcommand below sets CAN_TAKE, so quick_kind never sends its bare true down the quick lane (run-slot-can-take.test.ts runs each)
 # run-slot.sh can-take <slot> <who>: exit 0 when that slot is free, its off-switches and load rules open it, and the load units (with that
 # session's reserve) fit, else 1, so a script that takes its slot itself reads them as every run here does (ops-unstick does; localci and
 # the merge train still take theirs by their own mkdir for now); it reads neither the queue nor run-slot.priority
@@ -355,19 +356,25 @@ quick_rule() {
     case "$t" in " test" | " run test:file") [ "$n" -ge 1 ] && [ "$n" -le 3 ] && echo quick ;; esac
   fi
 }
-# whether the last 3 runs of this exact command line in run-slot.runs.log each ended in 10 s or less (retro 2, 31 Oct: 408 of 686 CPU-lane runs did, and queued 2,004 min against 17 min of running)
-ran_short() {
-  tail -n 20000 "$OPS/run-slot.runs.log" 2>/dev/null | RUN_LINE="$*" awk '
+# whether each of the last 3 runs of this exact command line in run-slot.runs.log ran over $2 s ($1 over) or $2 s or less ($1 within); the words after them are the line
+ran_last3() {
+  local side=$1 bound=$2; shift 2
+  tail -n 20000 "$OPS/run-slot.runs.log" 2>/dev/null | RUN_LINE="$*" BOUND=$bound SIDE=$side awk '
     $2 == "ask" { c = $0; for (k = 0; k < 4; k++) sub(/^[^ ]+ /, "", c); line[$4] = c; next }
     $2 == "end" && line[$4] == ENVIRON["RUN_LINE"] { delete line[$4]; for (i = 5; i <= NF; i++) if ($i ~ /^ran=[0-9]+s$/) r[++n] = substr($i, 5) + 0 }
-    END { if (n < 3) exit 1; for (i = n - 2; i <= n; i++) if (r[i] > 10) exit 1 }'
+    END { if (n < 3) exit 1; for (i = n - 2; i <= n; i++) if ((r[i] > ENVIRON["BOUND"] + 0) != (ENVIRON["SIDE"] == "over")) exit 1 }'
 }
-# the slot a command takes outside the queue: its rule's, else quick when it ran short its last 3 times, so a long run after short ones holds the one quick slot and sends the next back to the queue
+# each of the last 3 ended in 10 s or less (retro 2, 31 Oct: 408 of 686 CPU-lane runs did, and queued 2,004 min against 17 min of running)
+ran_short() { ran_last3 within 10 "$@"; }
+# each of the last 3 ran over 60 s (1 Nov: a two-file test:file line ran 39, 421 and 226 s back to back in the one quick slot, and the quick lane's waiters waited 63 min in the hour from 12:00Z)
+ran_long() { ran_last3 over 60 "$@"; }
+# the slot a command takes outside the queue: its rule's, else quick when it ran short its last 3 times, so a long run after short ones holds the one quick slot and sends the next back to the queue; a line the rule calls quick that ran long its last 3 times goes to the queue, since its file count says nothing of its time
 quick_kind() {
   # a read command takes no slot and runs a bare true, so three short true runs in the log would take can-take and head down the quick lane, past their own exits (issue 285)
   [ -n "$CAN_TAKE" ] && return
   local kind
   kind=$(quick_rule "$@")
+  [ "$kind" = quick ] && ran_long "$@" && kind=""
   [ -z "$kind" ] && ran_short "$@" && kind=quick
   echo "$kind"
 }

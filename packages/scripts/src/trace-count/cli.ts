@@ -30,6 +30,8 @@ files (tests, the API's fixtures, the replay fixtures) a made-up stand-in.
 Exits 2 when no-public-leak's list is missing or a key of it is empty, or when
 factory.archiveRepo or owner.names is unset, since their kinds would count nothing.`
 
+const NOT_COUNTED = `trace-count: nothing was counted; bun run test:file tests/packages/scripts/src/trace-count/count.test.ts counts the kinds that need no list or settings, and the list, owner and archive kinds count only here, once the line above is fixed`
+
 const { values } = parseArgs({
   options: {
     help: { short: "h", type: "boolean" },
@@ -47,6 +49,7 @@ const root = join(import.meta.dir, "..", "..", "..", "..")
 const policy = await readPolicy(dataDir())
 if (policy.refusal !== undefined) {
   console.error(`trace-count: ${policy.refusal}`)
+  console.error(NOT_COUNTED)
   process.exit(2)
 }
 const LIST_KINDS = new Set(["companies", "handles", "linearKeys", "names", "slackIds"])
@@ -59,6 +62,7 @@ const files = await tree(root)
 const read = await list(publicListPath())
 if ("refusal" in read) {
   console.error(`trace-count: ${read.refusal}`)
+  console.error(NOT_COUNTED)
   process.exit(2)
 }
 const publicList = read.list
@@ -71,6 +75,7 @@ if (unset.length) {
   console.error(
     `trace-count: ${unset.join(" and ")} ${unset.length > 1 ? "are" : "is"} unset, so ownerName and archiveLinks would miss the owner's names and the archive's links: ask Ops for the owner to set ${unset.length > 1 ? "them" : "it"} by typing ! playground settings set in Ops' pane`,
   )
+  console.error(NOT_COUNTED)
   process.exit(2)
 }
 if (values.report) {

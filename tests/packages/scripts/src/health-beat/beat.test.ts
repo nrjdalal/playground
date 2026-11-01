@@ -27,6 +27,7 @@ const reading = (over: Partial<Reading> = {}): Reading => ({
   load5: 6.4,
   ok: 9,
   pressure: 1,
+  running: { build: "main build, at 1a1291d", version: "v0.0.23 + 1 local commit (8b6438a)" },
   sessions: { idle: 3, working: 5 },
   zone: "UTC",
   ...over,
@@ -47,10 +48,12 @@ describe("memoryPasses, spawn.sh's memory gate", () => {
 })
 
 describe("beatText", () => {
-  test("prints the header in the owner's zone, then the Mac, memory, sessions, ops jobs and battery", () => {
+  test("prints the header in the owner's zone, then the version and build, the Mac, memory, sessions, ops jobs and battery", () => {
     expect(beatText(reading())).toBe(
       [
         "*Health, 6:05 pm UTC*",
+        "🏷️ Version: v0.0.23 + 1 local commit (8b6438a)",
+        "🏗️ Build: main build, at 1a1291d",
         "✅ Mac: load 6 on 12 cores, 41% CPU idle",
         "✅ Memory: pressure 1 (normal), 64% free",
         "✅ Sessions: 5 working, 3 idle, 0 stuck",
@@ -65,7 +68,7 @@ describe("beatText", () => {
 
   test("warns on memory only when spawn's gate would refuse a start", () => {
     const memory = (pressure: number, freePct: number) =>
-      beatText(reading({ freePct, pressure })).split("\n")[2]
+      beatText(reading({ freePct, pressure })).split("\n")[4]
     expect(memory(2, 8)).toBe("✅ Memory: pressure 2 (warning), 8% free")
     expect(memory(1, 7)).toBe(
       "⚠️ Memory: pressure 1 (normal), 7% free, so spawn's gate refuses a Claude start",
@@ -85,17 +88,17 @@ describe("beatText", () => {
         sessions: { failed: 1, stuck: 1, working: 2 },
       }),
     ).split("\n")
-    expect(lines[1]).toBe("⚠️ Mac: load 16 on 12 cores, ?% CPU idle")
-    expect(lines[3]).toBe("⚠️ Sessions: 2 working, 0 idle, 2 stuck")
-    expect(lines[4]).toBe("⚠️ Ops jobs: 9 ok, late: ops-sweep, ops-tick")
-    expect(lines[5]).toBe("🔋 ?")
+    expect(lines[3]).toBe("⚠️ Mac: load 16 on 12 cores, ?% CPU idle")
+    expect(lines[5]).toBe("⚠️ Sessions: 2 working, 0 idle, 2 stuck")
+    expect(lines[6]).toBe("⚠️ Ops jobs: 9 ok, late: ops-sweep, ops-tick")
+    expect(lines[7]).toBe("🔋 ?")
   })
 
   test("warns on an ops job that is down, beside any late one", () => {
-    expect(beatText(reading({ down: ["ops-never"] })).split("\n")[4]).toBe(
+    expect(beatText(reading({ down: ["ops-never"] })).split("\n")[6]).toBe(
       "⚠️ Ops jobs: 9 ok, down: ops-never",
     )
-    expect(beatText(reading({ down: ["ops-never"], late: ["ops-tick"] })).split("\n")[4]).toBe(
+    expect(beatText(reading({ down: ["ops-never"], late: ["ops-tick"] })).split("\n")[6]).toBe(
       "⚠️ Ops jobs: 9 ok, late: ops-tick, down: ops-never",
     )
   })
@@ -175,7 +178,15 @@ describe("readBeat", () => {
         }
       return { code: 1, out: "" }
     }
-    const got = await readBeat({ at: AT, data, freeMin: 8, run, zone: "UTC" })
+    const got = await readBeat({
+      at: AT,
+      data,
+      freeMin: 8,
+      portless: join(scratch, "no-portless"),
+      repo: join(scratch, "repo"),
+      run,
+      zone: "UTC",
+    })
     expect(got).toEqual({
       at: AT,
       battery: { pct: 72, state: "discharging" },
@@ -188,6 +199,11 @@ describe("readBeat", () => {
       load5: 4.2,
       ok: 1,
       pressure: 1,
+      running: {
+        build:
+          "unknown branch (git branch: no output), unknown (portless has no route for playground.localhost), at unknown (portless has no route for api.playground.localhost)",
+        version: "unknown (git describe: no output)",
+      },
       sessions: { idle: 1, stuck: 1, working: 2 },
       zone: "UTC",
     })

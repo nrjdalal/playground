@@ -5,8 +5,9 @@ import { parseSessionState, sessionStateDir } from "@packages/config/session-sta
 
 import { readMachine } from "../ops-machine/machine"
 import type { Run } from "../ops-tick/tick"
+import { type Health, readRunning, type Running } from "./running"
 
-// health-beat: the owner's health beat as text, the Mac, its memory, the sessions, the ops jobs and the battery, read once and printed; the session that runs the beat posts it.
+// health-beat: the owner's health beat as text, what the install runs, the Mac, its memory, the sessions, the ops jobs and the battery, read once and printed; the session that runs the beat posts it.
 
 export type Reading = {
   at: Date
@@ -20,6 +21,7 @@ export type Reading = {
   load5: number
   ok: number
   pressure: number
+  running: Running
   sessions: Record<string, number>
   zone: string
 }
@@ -62,6 +64,8 @@ export const beatText = (r: Reading): string => {
   const stuck = (r.sessions.stuck ?? 0) + (r.sessions.failed ?? 0)
   return [
     `*Health, ${ownerClock(r.at, r.zone)}*`,
+    `🏷️ Version: ${r.running.version}`,
+    `🏗️ Build: ${r.running.build}`,
     `${mark(r.load5 > LOAD_WARN)} Mac: load ${r.load5.toFixed(0)} on ${r.cores} cores, ${r.idlePct === null ? "?" : r.idlePct.toFixed(0)}% CPU idle`,
     `${mark(!memoryOk)} Memory: pressure ${r.pressure} (${PRESSURE_NAMES[r.pressure] ?? "unknown"}), ${r.freePct}% free${memoryOk ? "" : ", so spawn's gate refuses a Claude start"}`,
     `${mark(stuck > 0)} Sessions: ${r.sessions.working ?? 0} working, ${r.sessions.idle ?? 0} idle, ${stuck} stuck`,
@@ -115,11 +119,14 @@ const readJobs = async (
   return { down, late, ok }
 }
 
-// Reads everything the beat prints, once: the Mac's load and memory through ops-machine's read, the CPU's idle share from top, and the battery from pmset.
+// Reads everything the beat prints, once: what the install runs through running.ts, the Mac's load and memory through ops-machine's read, the CPU's idle share from top, and the battery from pmset.
 export const readBeat = async (input: {
   at: Date
   data: string
   freeMin: number
+  health?: (url: string) => Promise<Health>
+  portless: string
+  repo: string
   run: Run
   zone: string
 }): Promise<Reading> => {
@@ -147,6 +154,12 @@ export const readBeat = async (input: {
     load5: machine.load5,
     ok: jobs.ok,
     pressure: machine.pressure,
+    running: await readRunning({
+      health: input.health,
+      portless: input.portless,
+      repo: input.repo,
+      run,
+    }),
     sessions: await readSessions(data, at),
     zone: input.zone,
   }

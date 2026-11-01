@@ -14,7 +14,7 @@ It lives in the repo rather than in one session's memory, so every session loads
 | Route a new ask, or run a lead's sweep                                                                    | `DISPATCH.md` and `SWEEP.md`                                                   |
 | Answer the owner's DM while Slack mode is on                                                              | `DISPATCH.md`'s Slack mode and `playground dm send`                            |
 | Merge a Playground PR, or release `canary` to `main`                                                      | the **gate** rule (`bun run pr:merge <n>`, `bun run pr:train`) and **release** |
-| Comment or review on one of the owner's repos                                                             | the **comments** rule                                                          |
+| Comment or review on a repo whose owner `release-owners.json` lists                                       | the **comments** rule                                                          |
 | Touch the live dashboard or the roster                                                                    | the **dashboard** and **roster** rules (`ROSTER.md`)                           |
 | Ask the owner something, or pass on his override                                                          | the **ask** and **override** rules                                             |
 | File a Linear ticket                                                                                      | the **tickets** rule                                                           |
@@ -170,7 +170,7 @@ Like the ticket guard, a hook that cannot start lets the call through, and the r
   It refuses a request for his own action the same way, such as "you need to", "please", "when you can" or "the owner, plug in the Mac", so a step only he can take goes to his Inbox too.
   A question quoted from someone else, or put to another agent, passes.
   Anything promised to him for later, and any later outcome of something he asked, reaches him as an Inbox update; chat answers only what he is asking now.
-- Every Slack link in the Inbox opens in Slack's app: `playground ask` refuses an archives-style link, and triage-and-implement's `scripts/slack-links.py` rewrites one from the org's workspace (another workspace's is named on stderr, left as it is).
+- Every Slack link in the Inbox opens in Slack's app: `playground ask` refuses an archives-style link, and an org extension's link script rewrites one from the org's workspace (another workspace's is named on stderr, left as it is).
 - Every mention in the Inbox reads as a name (@colleague, @platform-team): `playground ask` refuses Slack's raw tokens (`<@U...>`, `<!subteam^...>`, `<#C...>`, `<!here>`), and the poster resolves each name to its ID when it posts.
 - An ask that has the owner quit, restart, close or stop something says what still depends on it (the owner: "You asked me, and the factory asked me, to quit cmux and then the app was not working.
   Relay the information"): `playground ask` refuses it until it carries `checked`, one line from four checks (the ops jobs, the processes and sessions running under the target, and the Dashboard's health), `none` when nothing does.
@@ -183,7 +183,7 @@ Like the ticket guard, a hook that cannot start lets the call through, and the r
 - Each PR has one reviewer session across all its rounds, and from round 2 it reads only what changed since its last score, plus the findings still open.
 - Leads wait on a message, a background task's notification, their sweep or an ops job, rather than a `sleep` loop or a repeated `gh` read.
 - A changed draft reaches the owner through its Inbox item, never as a second Slack draft for an item he has already sent.
-- No session polls a PR more often than every 5 minutes, and reads and comment posts go through GitHub's REST API where they can, so the shared GraphQL quota lasts the hour; a sweep over many PRs is the exception, one batched GraphQL query ([GITHUB-BULK-READS.md](../../extensions/core/skills/playbook/GITHUB-BULK-READS.md)).
+- No session polls a PR more often than every 5 minutes, and reads and comment posts go through GitHub's REST API where they can, so the shared GraphQL quota lasts the hour; a sweep over many PRs is the exception, one batched GraphQL query ([GITHUB-BULK-READS.md](../../extensions/core/skills/playbook/GITHUB-BULK-READS.md), which also holds the read of canary's own checks).
 - A check that needs a PR's whole file list (an overlap with another PR, a stack's files) reads it page by page, since the plain read stops at 100 files without saying so.
 - No session writes Claude Code memory: every learning arrives as a PR to this repo.
 - Every skill, agent guide, docs page, handoff and brief a session writes reads as writing-for-agents shapes it: lean, each step ending on a completion criterion, phrased as what to do, a hook turns back a factory session's write to one until it has loaded the skill,
