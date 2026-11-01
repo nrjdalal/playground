@@ -67,6 +67,8 @@ Cite a rule by its name, in bold; read it whole with `playground rules <name>` w
 - [SESSIONS.md](SESSIONS.md): the commands to spawn, brief, rename, check and end a session, and the headless run that writes Notion for a session with no Notion tools.
 - [ROSTER.md](ROSTER.md): what to write to the roster, and when.
 - [CHANNEL.md](CHANNEL.md): the factory channel's lists, limits and triage.
+- [VERCEL.md](VERCEL.md): the Vercel CLI's traps: the env `vercel link` and `vercel integration add` pull, `vercel api`'s first line and an empty `vercel logs`.
+  Read it before you run any `vercel` command.
 
 ## Keep the skills learning
 
