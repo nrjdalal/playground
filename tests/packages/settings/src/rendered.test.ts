@@ -51,7 +51,7 @@ test("core reads from the checkout's own extensions/core, beside no link", async
 test("a root that lacks the file refuses, so a guard fails closed, and an empty root is never none", async () => {
   mkdirSync(extensionsDir(data("bad")), { recursive: true })
   expect((await readRendered(data("bad"), "hooks/b.json")).refusal).toBe(
-    `the extensions root (${extensionsDir(data("bad"))}) holds no hooks/b.json: seed the guards' lists with playground ext import --from-tree extensions/core/lists`,
+    `the extensions root (${extensionsDir(data("bad"))}) holds no hooks/b.json: ask Ops for the owner to seed the guards' lists by typing ! playground ext import --from-tree extensions/core/lists in Ops' pane`,
   )
 })
 

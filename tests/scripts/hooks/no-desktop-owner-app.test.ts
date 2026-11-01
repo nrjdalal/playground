@@ -4,6 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { check } from "../../../scripts/hooks/no-desktop-owner-app"
+import { check as extensionsWrite } from "../../../scripts/hooks/no-extensions-write"
 import { storeWith } from "./render-set"
 
 let scratch = ""
@@ -82,6 +83,7 @@ describe("an app on the list", () => {
     const reason = await bash("agent-desktop snapshot --app Slack")
     expect(reason).toContain("! prefix")
     expect(reason).toContain("take Slack off")
+    expect(reason).toContain("with a ! command Ops prepares")
   })
 
   test("passes once the list no longer holds it", async () => {
@@ -123,13 +125,22 @@ describe("a session's own way out is refused", () => {
   })
 })
 
-// The documented limits of a text hook, pinned so the boundary stays visible: a follow-up write guard on the guard lists would close the first.
+// The documented limits of a text hook, pinned so the boundary stays visible; no-extensions-write refuses the list edit this hook would honour.
 describe("what the hook does not reach", () => {
-  test("a list edited in an earlier call is honoured", async () => {
+  test("a list changed between calls is honoured, and a session's edit of it is no-extensions-write's to refuse", async () => {
     const edited = storeWith(join(scratch, "edited"), {
       "desktop-owner-apps.json": '["Helium", "Slack"]',
     })
     expect(await bash("agent-desktop snapshot --app Slack", edited)).toContain("hook refused")
+    const list = join(edited, "extensions", "hooks", "desktop-owner-apps.json")
+    const write = JSON.stringify({
+      cwd: scratch,
+      tool_input: { command: `echo '["Helium"]' > ${list}` },
+      tool_name: "Bash",
+    })
+    expect(await extensionsWrite(write, { PLAYGROUND_DATA_DIR: edited })).toContain(
+      "no-extensions-write hook refuses",
+    )
     storeWith(edited, { "desktop-owner-apps.json": '["Helium"]' })
     expect(await bash("agent-desktop snapshot --app Slack", edited)).toBeUndefined()
   })
@@ -206,7 +217,7 @@ describe("passes", () => {
     const missing = storeWith(join(scratch, "missing"), {})
     const reason = await bash("agent-desktop snapshot --app Finder", missing)
     expect(reason).toContain("hooks/desktop-owner-apps.json")
-    expect(reason).toContain("route it to Ops")
+    expect(reason).toContain("have Ops prepare it for the owner")
     expect(reason).not.toContain("ext import")
   })
 

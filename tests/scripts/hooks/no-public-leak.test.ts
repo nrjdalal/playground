@@ -209,7 +209,9 @@ describe("it fails closed on its list", () => {
     const reason = await run(write, storeWith(data("lacks"), {}))
     expect(reason).toContain("no-public-leak hook refused this call:")
     expect(reason).toContain("holds no hooks/no-public-leak.json")
-    expect(reason).toContain("playground ext import --from-tree extensions/core/lists")
+    expect(reason).toContain(
+      "! playground ext import --from-tree extensions/core/lists in Ops' pane",
+    )
   })
 
   test("an empty store folder refuses a write", async () => {
