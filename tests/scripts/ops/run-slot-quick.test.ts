@@ -338,6 +338,19 @@ describe("the quick slot holds while load5 is at or over the load line", () => {
     expect(await run.ran()).toBe(true)
   })
 
+  // bash 5.2 can drop a loop while it parses the TERM trap, so the check after the wait stops a run the loop let through over the line: here the loop's look reads 21 and the check's reads 30
+  test("a quick run the wait lets through while load5 is over the line stops unrun", async () => {
+    const m = loaded(21)
+    const reads = join(m.root, "reads")
+    writeFileSync(
+      join(m.bin, "sysctl"),
+      `#!/bin/bash\ncase "$2" in\n  hw.ncpu) echo 15 ;;\n  vm.loadavg) echo x >> ${reads}; [ "$(wc -l < ${reads})" -le 1 ] && l=21 || l=30; echo "{ 2.00 $l.00 $l.00 }" ;;\n  kern.memorystatus_level) echo 80 ;;\n  kern.memorystatus_vm_pressure_level) echo 1 ;;\nesac\n`,
+    )
+    const run = m.start("worker-q", {}, undefined, ["bun", "run", "docs:wrap"])
+    expect(await run.p.exited).toBe(143)
+    expect(existsSync(run.marker)).toBe(false)
+  })
+
   test("a commit takes its slot at load5 30, as before", async () => {
     const m = loaded(30)
     const run = m.start("worker-q", {}, undefined, ["git", "commit"])
