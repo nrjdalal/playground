@@ -41,6 +41,7 @@ export const checkoutOf = (input: {
 export const buildOf = (input: {
   branch?: Answer
   health: Health
+  kind?: ReturnType<typeof kindOf>
   listeners?: number[]
   port?: number
   ps: string
@@ -54,20 +55,15 @@ export const buildOf = (input: {
       ? ""
       : input.tag.code === 0 && firstLine(input.tag.out)
         ? ` (${firstLine(input.tag.out)})`
-        : ` (version unknown: git describe: ${firstLine(input.tag.out) || "no output"})`
+        : ` (tag unknown: git describe: ${firstLine(input.tag.out) || "no output"})`
   const version =
     "version" in input.health
       ? `${sha ?? input.health.version}${tag}`
       : `unknown (${input.health.reason})`
-  const kind = kindOf(input)
+  const kind = input.kind ?? kindOf(input)
   const branch =
     input.branch?.code === 0 && firstLine(input.branch.out) ? firstLine(input.branch.out) : ""
-  const what =
-    "kind" in kind
-      ? `${branch} ${kind.kind}`.trim()
-      : branch
-        ? `${branch}, unknown (${kind.unknown})`
-        : `unknown (${kind.unknown})`
+  const what = "kind" in kind ? `${branch} ${kind.kind}`.trim() : `unknown (${kind.unknown})`
   return `${what}, at ${version}`
 }
 
@@ -175,7 +171,28 @@ const cwdOf = async (run: Run, pid: number): Promise<string | undefined> =>
     .find((line) => line.startsWith("n/"))
     ?.slice(1)
 
-// Reads the two lines' values once: up to four git reads of the main checkout (its describe, main's latest tag and whether HEAD holds it, the Dashboard sha's tag), portless's routes, one ps read, lsof reads of the web's port and its process's working folder, the branch of that folder's checkout, and one GET.
+// The Dashboard's own checkout: the working folder of the process that shows the kind, else of its parent, up to 3 steps, since next's standalone server.js moves into its build folder, which is in no repo, while the launcher above it works in the checkout.
+const checkoutUp = async (
+  run: Run,
+  ps: string,
+  pid: number,
+): Promise<{ branch: Answer; folder: string } | undefined> => {
+  const parent = new Map(
+    ps
+      .split("\n")
+      .map((line) => /^\s*(\d+)\s+(\d+)\s/.exec(line))
+      .filter((row) => row !== null)
+      .map(([, child, ppid]) => [Number(child), Number(ppid)] as const),
+  )
+  for (let at = pid, step = 0; at > 1 && step < 3; at = parent.get(at) ?? 0, step++) {
+    const folder = await cwdOf(run, at)
+    const branch = folder ? await run(["git", "-C", folder, "branch", "--show-current"]) : undefined
+    if (folder && branch?.code === 0) return { branch, folder }
+  }
+  return undefined
+}
+
+// Reads the two lines' values once: three git reads of the main checkout (its describe, main's latest tag and whether HEAD holds it), portless's routes, one ps read, lsof reads of the web's port and of up to 3 working folders up its process chain, the branch and the sha's tag in the Dashboard's checkout (the tag in the main checkout when none is found), and one GET.
 export const readRunning = async (input: {
   health?: (url: string) => Promise<Health>
   portless: string
@@ -200,13 +217,24 @@ export const readRunning = async (input: {
     why: "why" in owner ? owner.why : undefined,
   }
   const kind = kindOf(web)
-  const cwd = "pid" in kind ? await cwdOf(run, kind.pid) : undefined
+  const dashboard = "pid" in kind ? await checkoutUp(run, web.ps, kind.pid) : undefined
   return {
     build: buildOf({
       ...web,
-      branch: cwd ? await run(["git", "-C", cwd, "branch", "--show-current"]) : undefined,
+      branch: dashboard?.branch,
       health,
-      tag: sha ? await git("describe", "--tags", "--abbrev=0", sha) : undefined,
+      kind,
+      tag: sha
+        ? await run([
+            "git",
+            "-C",
+            dashboard?.folder ?? repo,
+            "describe",
+            "--tags",
+            "--abbrev=0",
+            sha,
+          ])
+        : undefined,
     }),
     version: checkoutOf({
       ancestor:
