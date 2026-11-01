@@ -5,7 +5,7 @@ pre-commit:
   piped: true
   commands:
     main-checkout:
-      # first: a commit in the factory's main checkout, the one link-skills.sh links run-slot.sh from, is refused whatever wrapper, shell or cwd made it, behind the no-main-checkout hook; any other clone commits as before
+      # at priority 1, so it stops the commit before lint-staged or the build runs: a commit in the factory's main checkout, the one link-skills.sh links run-slot.sh from, is refused whatever wrapper, shell or cwd made it, behind the no-main-checkout hook; any other clone commits as before
       priority: 1
       run: >-
         case "$(readlink -f "$HOME/.playground/ops/run-slot.sh" 2>/dev/null)" in "$(git rev-parse --show-toplevel)/scripts/ops/run-slot.sh") echo "main-checkout: this is the factory's main checkout; commit in a worktree under .claude/worktrees/ (AGENTS.md, Workflow)" >&2; exit 1;; esac

@@ -1,4 +1,4 @@
-// PreToolUse hook: refuses a build, a test run, lefthook, turbo (but for the packages build a pull needs, run with env validation off), a git command that moves HEAD, the index or the files (but for the release skill's step 5 fast-forward and the keep reset off a stray local commit; a worker's hard reset there ran another branch's code under every hook for 3.5 minutes) or a file write, run-slot.sh's command read as typed bare (a Bash command's, or a Write, Edit, MultiEdit or NotebookEdit) in the main checkout, which every installed skill follows and so stays clean (a reviewer's `lefthook run pre-commit` from the Bash tool's default cwd rebuilt packages' dist and wrote .turbo/runs there).
+// PreToolUse hook: refuses a build, a test run, lefthook, turbo (but for the packages build a pull needs, run with env validation off), a git command that moves HEAD, the index or the files (but for the release skill's step 5 fast-forward and the keep reset off a stray local commit; a worker's hard reset there ran another branch's code under every hook for 3.5 minutes) or a file write (a Bash command's, or a Write, Edit, MultiEdit or NotebookEdit), run-slot.sh's command read as typed bare, in the main checkout, which every installed skill follows and so stays clean (a reviewer's `lefthook run pre-commit` from the Bash tool's default cwd rebuilt packages' dist and wrote .turbo/runs there).
 import { readFileSync, realpathSync } from "node:fs"
 import { basename, dirname, join, resolve, sep } from "node:path"
 
@@ -280,17 +280,15 @@ function runs(
     return { cwd, what: `bun ${words.join(" ")}` }
 }
 
-// sed's and perl's options whose next word is their value, and which of those is the script
-const EDIT_TAKES: Record<string, Set<string>> = {
-  perl: new Set(["-E", "-e"]),
-  sed: new Set(["--expression", "--file", "--line-length", "-e", "-f", "-l"]),
-}
-const SCRIPT = new Set(["--expression", "--file", "-E", "-e", "-f"])
+// The flag letters, per tool, that carry the script (sed's -e and -f, perl's -e and -E); each, like sed's -l, holds the rest of its word, else the next word
+const SCRIPT_LETTERS: Record<string, string> = { perl: "Ee", sed: "ef" }
+// sed's long options with a value, after an = or as the next word
+const SED_VALUES = new Set(["--expression", "--file", "--line-length"])
 
-// The files sed -i or perl -i edits in place (none without -i): every positional, but the first when no -e or -f gave the script; BSD sed's -i takes an empty suffix as its own word.
+// The files sed -i or perl -i edits in place (none without -i): every positional, but the first when no script flag gave the script; -i holds the rest of its word as a backup suffix, BSD sed's takes an empty one as its own word, and perl's -0, -I, -M and -m hold the rest of theirs.
 function inPlace(name: string, args: Word[]): Word[] {
-  const takes = EDIT_TAKES[name]
-  if (!takes) return []
+  const script = SCRIPT_LETTERS[name]
+  if (script === undefined) return []
   let edits = false
   let scripted = false
   const positionals: Word[] = []
@@ -300,20 +298,28 @@ function inPlace(name: string, args: Word[]): Word[] {
       positionals.push(...args.slice(k + 1))
       break
     }
-    if (takes.has(v)) {
-      scripted ||= SCRIPT.has(v)
-      k++
-    } else if (name === "sed" && (v === "--in-place" || v.startsWith("--in-place="))) edits = true
-    // perl's -M, -m and -I hold a module or a folder, never -i
-    else if (/^-[^-]/.test(v) && !(name === "perl" && /^-[MmI]/.test(v))) {
-      if (/^-[A-Za-z0-9]*i/.test(v)) {
-        edits = true
-        if (name === "sed" && v === "-i" && args[k + 1]?.value === "") k++
+    if (name === "sed" && v.startsWith("--")) {
+      const flag = v.split("=")[0]
+      if (flag === "--in-place") edits = true
+      else if (SED_VALUES.has(flag)) {
+        scripted ||= flag !== "--line-length"
+        if (!v.includes("=")) k++
       }
-      // a flag group ending in the script's flag (-pe, -ne) takes the next word as the script
-      if (/^-[A-Za-z0-9]+[eEf]$/.test(v)) {
-        scripted = true
-        k++
+    } else if (/^-[^-]/.test(v)) {
+      for (let j = 1; j < v.length; j++) {
+        const letter = v[j]
+        const attached = j + 1 < v.length
+        if (letter === "i") {
+          edits = true
+          if (name === "sed" && !attached && args[k + 1]?.value === "") k++
+          break
+        }
+        if (name === "perl" && "0IMm".includes(letter)) break
+        if (script.includes(letter) || (name === "sed" && letter === "l")) {
+          scripted ||= script.includes(letter)
+          if (!attached) k++
+          break
+        }
       }
     } else if (!v.startsWith("-")) positionals.push(args[k])
   }

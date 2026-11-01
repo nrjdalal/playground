@@ -72,6 +72,11 @@ describe("a build, a test run, lefthook, turbo or a file write in the main check
     ["sed with -i among its flags", "sed -Ei 's/a/b/' notes.txt"],
     ["perl -pi -e", "perl -pi -e 's/a/b/' notes.txt"],
     ["perl -i past its other flags", "perl -0777 -i -pe 's/a/b/' notes.txt"],
+    ["sed -i past a flag group ending in E", "sed -nE -i 's/a/b/' notes.txt"],
+    ["sed -i with its script attached to -e, quoted", "sed -i -e's/a/b/' notes.txt"],
+    ["sed -i with its script attached to -e", "sed -i -es/a/b/ notes.txt"],
+    ["sed --in-place with --expression=", "sed --in-place --expression=s/a/b/ notes.txt"],
+    ["sed --in-place with --file=", "sed --in-place --file=edit.sed notes.txt"],
     ["git add, which moves the index", "git add -A"],
     [
       "a commit through run-slot, as #299's ran",
