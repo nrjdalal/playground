@@ -882,8 +882,8 @@ async function curl(
       return judge("curl", { label: "a host the call redirects to", where: "unknown" }, [], env)
   }
   const targets = urls.map((u): Target => {
-    if (u.unknown === XARGS_INPUT.unknown)
-      return { label: "a URL xargs appends from its input", where: "unknown" }
+    if (u.unknown === XARGS_INPUT.unknown || (policy.anyWrite && fromXargs(u, xargs)))
+      return { label: "a URL xargs supplies from its input", where: "unknown" }
     const value = visible(u.value)
     if (u.unknown || u.reads?.length || value.includes(UNKNOWN) || fromXargs(u, xargs))
       return { byText: true, label: "a URL the hook cannot read", where: "unknown" }
@@ -1374,7 +1374,11 @@ export async function inspectAs(
     return await inspect(raw, environment)
   } catch (error) {
     const subject = subjectOf(raw)
-    if (!WRITE_CALL.test(subject) || !policy.find(subject)) return
+    // Under anyWrite a call that may write is refused whatever it names, since an error it caused may hide where it writes.
+    const writes = WRITE_CALL.test(subject) || (policy.anyWrite && MAYBE_ANY.test(subject))
+    if (!writes || (!policy.anyWrite && !policy.find(subject))) return
+    if (policy.anyWrite)
+      return `${policy.guard} hook refused this call: it could not read it (${error}), so it cannot tell whether it is ${policy.what}. Split it into plain commands and run them again.`
     return `${policy.guard} hook could not read this call (${error}), which may carry ${policy.what} to ${policy.place}, so it refuses it. Split it into plain commands and run them again.`
   }
 }

@@ -310,6 +310,24 @@ describe("a push resolves its target the way git does, and one it cannot place i
         `echo ${EXT}/pull/1 | xargs -I{} gh pr merge {}`,
       ],
       ["xargs appending a push's URL", `echo ${EXT} main | xargs git push`],
+      [
+        "xargs -I placing a curl URL",
+        "echo https://api.github.com/repos/quillco/acme-skills/contents/x | xargs -I{} curl -X PUT -d x {}",
+      ],
+      [
+        "xargs -I placing a receive-pack URL",
+        `echo ${EXT}.git/git-receive-pack | xargs -I{} curl -X POST --data-binary @p {}`,
+      ],
+      [
+        "a push behind nesting too deep to read",
+        `${"eval ".repeat(300)}git push origin main`,
+        "ext",
+      ],
+      [
+        "gh repo delete behind nesting too deep to read",
+        `${"eval ".repeat(300)}gh repo delete --yes`,
+        "ext",
+      ],
       ["xargs appending a send-pack URL", `echo ${EXT} main | xargs git send-pack`],
       [
         "xargs appending gh repo delete's repository",
