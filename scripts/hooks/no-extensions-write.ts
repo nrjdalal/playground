@@ -69,7 +69,7 @@ const EXPORTS = new Set(["declare", "export", "local", "readonly", "typeset"])
 // Programs that remove or move what they name, so naming a folder above the root takes the root with it, and the guards fall back to core's smaller lists.
 const REMOVERS = new Set(["find", "mv", "rm", "rmdir", "rsync", "unlink"])
 const DUPLICATE = /^(?:\d+|-)$/
-const GLOB = /[*?[{]/
+const GLOB = /[*?[{(]/
 // Variables that make git or a pager run a program, so a reader with one set is judged as any other program.
 const RUNS = /^(?:EDITOR|GIT_[A-Z_]+|LESSOPEN|PAGER|VISUAL)$/
 const CLI = join("packages", "scripts", "src", "playground", "cli.ts")
@@ -79,7 +79,7 @@ function reads(parsed: Parsed, env: Env): boolean {
   const { args, local, name } = parsed
   if ([...local.keys(), ...env.vars.keys()].some((key) => RUNS.test(key))) return false
   if (READERS.has(name) || PRINTERS.has(name)) return true
-  if (name === "rg") return !args.some((a) => /^--(?:hostname-bin|pre)/.test(a.value))
+  if (name === "rg") return !args.some((a) => /^--(?:hostname-bin|pre)(?:=|$)/.test(a.value))
   if (name === "find") return !args.some((a) => FIND_ACTS.test(a.value))
   if (name !== "git") return false
   const { rest, sub } = gitCall(args, env)
@@ -95,6 +95,7 @@ function reads(parsed: Parsed, env: Env): boolean {
 // The settings keys a guard reads to allow or deny a call, A to Z: the hooks' (no-chat-question, no-glm-heavy-path, no-headless-login, no-playground-leak, no-public-leak, and role.ts, which places a session in the factory), spawn.sh's code root, and ext.repos, which names the repository each scope syncs from.
 export const GUARD_KEYS = new Set([
   "ext.links",
+  "ext.order",
   "ext.repos",
   "factory.archiveRepo",
   "factory.publicRepo",
@@ -231,7 +232,13 @@ function inspect(raw: string, environment: Environment) {
     return value.includes(needle) || (!!near && value.includes(near))
   }
   // What a word of a program that is no reader names: a path in the root, a folder above it, a glob there, or the root's path in its text.
+  const judged = new Map<string, string | undefined>()
   const names = (word: Word, env: Env, remover: boolean): string | undefined => {
+    const key = `${remover}\0${env.cwd}\0${word.value}`
+    if (!judged.has(key)) judged.set(key, judge(word, env, remover))
+    return judged.get(key)
+  }
+  const judge = (word: Word, env: Env, remover: boolean): string | undefined => {
     for (const text of texts(word)) {
       if (holds(text.value, env)) return `${root} in its text`
       const path = pathOf(text, env)
@@ -247,7 +254,12 @@ function inspect(raw: string, environment: Environment) {
     }
   }
   const seen = new Set<string>()
+  const deadline = performance.now() + 10_000
   const visit: Visit = async (cmd: Command, parsed, env) => {
+    if (performance.now() > deadline)
+      return refuse(
+        "a command too long to read inside the hook's time: split it into shorter calls",
+      )
     const slot = slotWords(parsed)
     if (slot)
       return slot.length === 0 ? undefined : examine({ ...cmd, words: slot }, env, visit, false)
@@ -257,7 +269,8 @@ function inspect(raw: string, environment: Environment) {
         r.target &&
         ([">", ">>", ">|", "<>"].includes(r.op) ||
           (r.op === ">&" && !DUPLICATE.test(r.target.value))) &&
-        inRoot(pathOf(r.target, env)),
+        (inRoot(pathOf(r.target, env)) ||
+          (GLOB.test(r.target.value) && !!names(r.target, env, true))),
     )
     if (into?.target) return refuse(`a write to ${pathOf(into.target, env)}`)
     const reader = !!first && reads(parsed, env)
@@ -286,7 +299,7 @@ function inspect(raw: string, environment: Environment) {
       const verdict = await run(lex(line, env.known), { ...env, vars: new Map() }, visit, true)
       if (verdict) return verdict
     }
-    // a bare assignment or export with no command: only its redirect writes, and a variable it sets is read where a command runs with it
+    // a bare assignment or export with no command, or a reader: only its redirect writes, and a variable it sets is read where a command runs with it
     if (!first || EXPORTS.has(name) || reader) return
     if (inRoot(env.cwd)) return refuse(`${name} run inside ${root}`)
     if (name === "git" && inRoot(gitCall(args, env).cwd)) return refuse(`git on a clone in ${root}`)
@@ -295,17 +308,16 @@ function inspect(raw: string, environment: Environment) {
       const named = names({ ...value, quoted: false }, env, remover)
       if (named) return refuse(`${name} with a variable on ${named}`)
     }
-    for (const word of first ? [first, ...args] : args) {
+    for (const word of [first, ...args]) {
       const named = names(word, env, remover)
       if (named) return refuse(`${name} on ${named}`)
     }
     if (cmd.redirects.some((r) => r.body && holds(r.body.value, env)))
       return refuse(`${name} with a script that names ${root}`)
-    if (xargs) {
-      const stdin = await stdinOf(cmd, env)
+    if (fed) {
       const named =
-        !stdin.unknown &&
-        stdin.value
+        !fed.unknown &&
+        fed.value
           .split(/\s+/)
           .filter(Boolean)
           .map((value) => names({ quoted: false, value }, env, remover))

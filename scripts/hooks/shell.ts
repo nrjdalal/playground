@@ -354,7 +354,7 @@ function topLevel(cmds: Command[], scope: number): Command[] {
   return cmds.filter((c) => !fed.has(c) && c.scope === scope)
 }
 
-// A process substitution, carrying its last command so a shell that reads it as a script can read that command's output.
+// A process substitution, carrying the commands whose output leaves it, so a shell that reads it as a script can read that output.
 function procSub(lx: Lexer): Word {
   lx.i += 2
   const from = lx.commands.length
@@ -403,10 +403,18 @@ function word(lx: Lexer): Word {
   const start = lx.i
   const out: Word = { quoted: false, value: "" }
   let bare = ""
-  while (lx.i < src.length && !BREAK.has(src[lx.i])) {
+  while (
+    lx.i < src.length &&
+    (!BREAK.has(src[lx.i]) || (src[lx.i] === "(" && lx.i > start && src[lx.i + 1] !== ")"))
+  ) {
     const c = src[lx.i]
     const next = src[lx.i + 1] ?? ""
-    if (c === "\\") {
+    if (c === "(") {
+      const end = balanced(src, lx.i, "(", ")")
+      out.value += src.slice(lx.i, end)
+      bare += src.slice(lx.i, end)
+      lx.i = end
+    } else if (c === "\\") {
       out.quoted = true
       if (next !== "\n") out.value += next
       lx.i += 2
@@ -623,6 +631,9 @@ export function parse(cmd: Command): Parsed {
       } else if (wrapper === "env" && (v === "-C" || v === "--chdir")) {
         chdir = words[k + 1]
         k += 2
+      } else if (wrapper === "env" && /^(?:-C|--chdir=)./.test(v)) {
+        chdir = { ...words[k], value: v.replace(/^(?:-C|--chdir=)/, "") }
+        k++
       } else if (xargs && /^(?:-[IiJ]|--replace)/.test(v)) {
         const attached = /^(?:-[IiJ]|--replace=?)(.*)$/.exec(v)?.[1] ?? ""
         const separate = v === "-I" || v === "-J"
@@ -696,7 +707,7 @@ export async function examine(
   const { args, chdir, local, name } = parsed
   const here: Env = chdir ? { ...env, cwd: pathOf(chdir, env) } : env
   let verdict: string | undefined
-  const followed = SHELLS.has(name) || ["cd", "eval", "popd", "pushd", "source", "."].includes(name)
+  const followed = SHELLS.has(name) || [".", "cd", "eval", "popd", "pushd", "source"].includes(name)
   if (followed && builtins && cmd.redirects.length > 0) {
     const bare = { ...cmd, words: [] }
     verdict = await visit(bare, parse(bare), here)

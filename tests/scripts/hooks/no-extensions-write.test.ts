@@ -277,12 +277,26 @@ describe("a direct write into the extensions root is refused, naming the owner's
     ["a group's output piped into sh", `{ echo 'rm ${LIST}'; echo true; } | sh`],
     ["a subshell's output piped into sh", `( echo 'rm ${LIST}'; echo true ) | sh`],
     ["rg with --hostname-bin", `rg --hostname-bin /tmp/w.sh x ${ROOT}`],
+    ["settings set of ext.order", "playground settings set ext.order login --reason r"],
+    ["settings reset of ext.order", "playground settings reset ext.order --reason r"],
+    ["a redirect into a [ ] glob", `echo '{}' > ${DATA}/extensio[n]s/policy.json`],
+    ["a redirect into a ? glob", `echo '{}' > ${DATA}/extensio?s/policy.json`],
+    ["a redirect into a * glob", `echo '{}' > ${DATA}/ext*/policy.json`],
+    ["rm of a zsh ( ) glob", `rm -rf ${DATA}/extensio(n)s`],
+    ["env -C attached to a scope", `env -C${SCOPE} git reset --hard`],
+    ["env --chdir= to a scope", `env --chdir=${SCOPE} git reset --hard`],
   ])("%s", async (_, command) => {
     expect(await bash(command)).toContain("no-extensions-write hook refuses")
   })
 
   test("a deep harmless nest ahead of the CLI is judged before the hook's timeout", async () => {
     const reason = await bash(`${nest(16, "true")}; playground ext sync`)
+    expect(reason).toContain("no-extensions-write hook refuses")
+  }, 10_000)
+
+  test("many variables ahead of a write are judged before the hook's timeout", async () => {
+    const vars = Array.from({ length: 800 }, (_, i) => `V${i}=x${i}`).join("; ")
+    const reason = await bash(`${vars}; ${": ; ".repeat(800)}rm -rf ${ROOT}`)
     expect(reason).toContain("no-extensions-write hook refuses")
   }, 10_000)
 
@@ -349,6 +363,7 @@ describe("a read of the root, and writes elsewhere, run", () => {
       `gh pr comment 1 --body "run playground settings set ui.theme dark"`,
     ],
     ["rg of a gated call", "rg 'playground ext sync'"],
+    ["rg with --pre-glob alone", "rg --pre-glob '*.gz' x /tmp"],
     ["a git author name with a space", "GIT_AUTHOR_NAME='A B' git log"],
     ["a pager with an option", "GIT_PAGER='less -R' git log"],
     ["a commit message with an unbalanced quote", `git commit -m "it's fine"`],
@@ -596,6 +611,11 @@ describe("the gated keys are every key the guards read", () => {
     }
     expect(named.length).toBeGreaterThan(5)
     expect(named.filter((hit) => !GUARD_KEYS.has(hit.split(": ")[1]!))).toEqual([])
+  })
+
+  test("ext.order, which orders the extensions every guard reads, is gated", async () => {
+    expect(await read("packages/settings/src/settings.ts")).toContain('values["ext.order"]')
+    expect(GUARD_KEYS.has("ext.order")).toBe(true)
   })
 
   test("spawn.sh's code root is gated", async () => {
