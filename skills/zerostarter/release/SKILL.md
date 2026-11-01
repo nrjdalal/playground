@@ -26,6 +26,22 @@ Run the new-user gate on it, `bun run gate:new-user "$CANARY"` (`.agents/testing
 
 Done when `CANARY` holds the SHA you mean to ship and the gate's PASS and FAIL list for it is in hand. When `canary` moves before step 3, read it again.
 
+## Rehearse an invitee's update
+
+When the candidate changes the update path anything in step 5 runs (`update.ts` itself, `link-skills.sh`, an ops job, the Dashboard roll), rehearse the update an invitee runs, from the last tag to the candidate, before step 3: a machine whose own checkout cannot take the update yet still gets the proof. The whole rehearsal lives in one scratch folder, and nothing outside it changes.
+
+1. **Mirror.** Give the rehearsal an origin of its own: clone the repository bare into the scratch folder, then clone that mirror and, in the clone, fetch the pinned `$CANARY` from the repository, merge it into `main` with `--no-ff` (the merge commit a ship makes), tag the merge with the tag this ship will cut, and push `main` and the tag to the mirror.
+   Done when the mirror's `main` holds the merge commit, the tag names it, and the repository holds neither.
+
+2. **Invitee.** Clone from the mirror, check out the last tag on `main`, and install and build as an invitee's install does (`install.sh`, or its install and build steps alone).
+   Done when `playground doctor` from that clone reads `version at <last tag>`.
+
+3. **Contain.** Run every later command under `env -i`, with `PATH` holding the throwaway `HOME`'s bin, the system basics, and the stub folder, `HOME` at a throwaway folder inside the scratch folder, and no `PLAYGROUND_REPO`, so every tool reads the invitee clone as its checkout and keeps its data folder inside the throwaway `HOME`; record the before-state (listings and checksums) of everything outside the scratch folder the update could reach. Put a stub on `PATH` for each side-effecting tool the update can call, one that logs each call and refuses (read `update.ts`, `ops-restart/cli.ts` and what they call for the list), and leave `claude` off `PATH` altogether: `link-skills`' `orgs home` step waits for an absent `claude` and fails a stub that refuses.
+   Done when every tool on the list is stubbed or absent and the before-state is saved.
+
+4. **Update.** Run `playground update --to <tag>`, then `playground doctor`, still contained.
+   Done when the update exits 0 and doctor's version line names the new tag with no MISSING line, the after-state reads unchanged against the before-state, and each stub's log names the calls the real machine would have taken. A step that fails names its caller: when a stub took that call, the update needs it, so contain that call another way (a flag, an env) and run the rehearsal again.
+
 ## 2. Open the ship PR
 
 Write the body to a file first. It opens with two or three plain sentences the owner reads first, then `## What ships`, one line per PR since the last tag (`gh release view --json tagName --jq .tagName` names it).
