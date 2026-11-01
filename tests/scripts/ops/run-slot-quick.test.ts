@@ -362,3 +362,12 @@ describe("the quick slot holds while load5 is at or over the load line", () => {
     expect(await machine({ load1: 30 }).clones("node_modules")).toBe(true)
   })
 })
+
+// a command's first word past env and VAR=x can be an option: env -i made each basename print "illegal option -- i", eight lines a run
+describe("a command whose first word past env is an option", () => {
+  test("runs with no basename error", async () => {
+    const run = machine().start("worker-e", {}, undefined, ["env", "-i", "touch"])
+    expect(await run.ran()).toBe(true)
+    expect(await run.saw(/basename/g)).toBe(false)
+  })
+})
