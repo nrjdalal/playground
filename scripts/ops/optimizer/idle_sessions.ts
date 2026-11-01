@@ -47,6 +47,7 @@ export type RosterEntry = {
 export type PrState = {
   head: string
   mergeSha?: string
+  mergedAt?: string
   ref?: string
   state: string
   verdicts: string[]
@@ -55,6 +56,7 @@ export type PrState = {
 export type Row = {
   kind: string | null
   lead?: string
+  mergedPr?: string
   name: string
   quiet: number
   refs: string[]
@@ -192,6 +194,7 @@ export async function collect(input: CollectInput): Promise<Row[]> {
     const checker = kind === "reviewer" || kind === "tester"
     const worker = checker ? workerOf(name, r.worker) : undefined
     let refs: string[] = []
+    let mergedPr: string | undefined
     let sha: string | undefined
     if (checker || kind === "worker") {
       if (
@@ -203,7 +206,19 @@ export async function collect(input: CollectInput): Promise<Row[]> {
       const prs = await sessionPrs(input, name, worker, d.sessionId)
       const states = await Promise.all(prs.map((url) => prState(url)))
       refs = states.flatMap((s) => (s?.ref ? [s.ref] : []))
-      sha = states.findLast((s) => s?.mergeSha)?.mergeSha
+      // The PR that merged last, by its merged_at (a tie, or a cached state without one, keeps the later in the list), so an older linked PR never names the merge.
+      let newest: number | undefined
+      states.forEach((s, i) => {
+        if (
+          s?.mergeSha &&
+          (newest === undefined || (s.mergedAt ?? "") >= (states[newest]?.mergedAt ?? ""))
+        )
+          newest = i
+      })
+      if (newest !== undefined) {
+        mergedPr = PR_URL.exec(prs[newest] ?? "")?.[2]
+        sha = states[newest]?.mergeSha
+      }
       const done = states.every((s) => s !== null && (s.state === "merged" || s.state === "closed"))
       const how = states.some((s) => s?.state === "merged") ? "merged" : "closed"
       // A worker only while its roster holds a pr: one with none sits between chores, since assign clears it.
@@ -224,6 +239,7 @@ export async function collect(input: CollectInput): Promise<Row[]> {
     rows.push({
       kind,
       lead: r.lead ?? (worker ? roster[worker]?.lead : undefined),
+      mergedPr,
       name,
       quiet,
       refs,
@@ -335,6 +351,7 @@ export async function prStateLive(
     at: now,
     head: pr.head.sha,
     mergeSha: (pr.merged_at && pr.merge_commit_sha) || undefined,
+    mergedAt: pr.merged_at || undefined,
     ref: pr.head.ref,
     state,
     verdicts,
