@@ -263,9 +263,20 @@ Allow presses Yes once in a herdr pane whose prompt shows that call, a subagent'
 Each answer is a line in `ops/picker.log`: the time, the manager, the answer, the session and the command's first 120 characters.
 Done when it prints that line; it refuses any caller but the session's manager or the primary dispatcher, a deny with no reason, a dispatcher's session, and a key no waiting call or shown prompt matches, which means the prompt changed: wait for its next alert.
 An ops-unstick alert that says picker cannot answer the prompt found no waiting call surely its own: take it to the dispatcher.
-On herdr it also refuses a prompt that may be another waiting call's, as a subagent's file or URL prompt always is while its parent waits: deny that one by hand with Escape (below) and a `SendMessage` of the reason, or take it to the dispatcher.
+On herdr it also refuses a prompt that may be another waiting call's, as a subagent's file or URL prompt always is while its parent waits.
+A herdr pane takes no key from your hand, since `no-raw-spawn` refuses every herdr call but a read, so end that prompt by a close and a resume under the session's name, or take it to the dispatcher, for the owner to answer it in the pane:
 
-By hand, Escape is the one key a session presses in another's pane: it types no text, so it says nothing in the owner's name (the pane-typing test in `tests/api/hono/src/lib/dashboard/cmux.test.ts` allows this line alone).
+```bash
+"${PLAYGROUND_REPO:?}/scripts/spawn.sh" close <session>
+# the resume line ~/.playground/resume/<session>.sh holds, with the reason added as its brief
+"${PLAYGROUND_REPO:?}/scripts/spawn.sh" resume <session> <dir> <session id> --account <its account> --brief <a file of the reason and the simpler shape to run>
+```
+
+The session comes back by its session id with its transcript, and the prompted call never runs.
+Done when the session works again from its brief.
+
+On cmux, a prompt picker refuses is denied by hand with Escape and a `SendMessage` of the reason, or taken to the dispatcher.
+By hand, Escape is the one key a session presses in another's cmux pane: it types no text, so it says nothing in the owner's name (the pane-typing test in `tests/api/hono/src/lib/dashboard/cmux.test.ts` allows this line alone).
 
 ```bash
 cmux send-key --workspace workspace:N --surface surface:N escape
