@@ -537,3 +537,47 @@ test("the pre-commit build waits for a run slot through commit-slot, env-keys' s
   expect(String(build!.run)).toBe(`${CACHE}${SLOT}bun run build`)
   expect(String(envKeys!.run)).toStartWith(`${CACHE}bunx turbo run build `)
 })
+
+// lefthook on this repo's own main-checkout step, in a scratch repo with a linked worktree: a commit in the checkout itself is refused whatever command made it, and one in the worktree goes through
+test("the pre-commit main-checkout step refuses a commit in the main checkout and passes in a worktree", async () => {
+  const config = Bun.YAML.parse(await Bun.file(join(ROOT, "lefthook.yml")).text()) as {
+    "pre-commit": { commands: Record<string, Record<string, unknown>>; piped?: boolean }
+  }
+  const { "conflict-markers": markers, "main-checkout": main } = config["pre-commit"].commands
+  expect(main).toBeDefined()
+  expect(main!.priority as number).toBeLessThanOrEqual(markers!.priority as number)
+  const dir = mkdtempSync(join(tmpdir(), "lefthook-main-"))
+  const [checkout, worktree] = [join(dir, "main"), join(dir, "main/.claude/worktrees/w")]
+  const run = (cwd: string, argv: string[]) => {
+    const result = Bun.spawnSync(argv, { cwd, env: SCRATCH_ENV, stdin: "ignore" })
+    return { code: result.exitCode, out: result.stdout.toString() + result.stderr.toString() }
+  }
+  const git = (cwd: string, ...args: string[]) =>
+    run(cwd, ["git", "-c", "user.name=t", "-c", "user.email=t@t", ...args])
+  // a staged file, since lefthook skips a command when nothing is staged
+  const hook = async (cwd: string) => {
+    await Bun.write(join(cwd, "x.txt"), "x")
+    expect(git(cwd, "add", "x.txt")).toMatchObject({ code: 0 })
+    return run(cwd, ["bun", join(ROOT, LEFTHOOK_BIN), "run", "pre-commit"])
+  }
+  try {
+    mkdirSync(checkout)
+    expect(git(checkout, "init", "-q", "-b", "main")).toMatchObject({ code: 0 })
+    await Bun.write(
+      join(checkout, "lefthook.yml"),
+      JSON.stringify({ "pre-commit": { commands: { "main-checkout": main } } }),
+    )
+    expect(git(checkout, "add", "lefthook.yml")).toMatchObject({ code: 0 })
+    expect(git(checkout, "commit", "-q", "--no-verify", "-m", "config")).toMatchObject({ code: 0 })
+    expect(git(checkout, "worktree", "add", "-q", "-b", "w", worktree)).toMatchObject({ code: 0 })
+
+    const refused = await hook(checkout)
+    expect(refused.code).not.toBe(0)
+    expect(refused.out).toContain("the main checkout")
+    mkdirSync(join(checkout, "sub"))
+    expect((await hook(join(checkout, "sub"))).code).not.toBe(0)
+    expect(await hook(worktree)).toMatchObject({ code: 0 })
+  } finally {
+    rmSync(dir, { force: true, recursive: true })
+  }
+}, 60_000)

@@ -4,6 +4,11 @@ lefthook: bun node_modules/.bin/lefthook
 pre-commit:
   piped: true
   commands:
+    main-checkout:
+      # first: a commit in the main checkout (its root is its common git dir's parent) is refused whatever wrapper, shell or cwd made it, behind the no-main-checkout hook
+      priority: 1
+      run: >-
+        test "$(git rev-parse --show-toplevel)" != "$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")" || { echo "main-checkout: this is the main checkout; commit in a worktree under .claude/worktrees/ (AGENTS.md, Workflow)" >&2; exit 1; }
     conflict-markers:
       # before lint-staged, whose formatter can rewrite a staged conflict marker into Markdown that reads clean
       priority: 1
