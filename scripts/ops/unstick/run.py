@@ -570,6 +570,18 @@ def heavy_jobs(rows=None):
     return jobs
 
 
+# the cap is one per CPU slot held or open now, which run-slot.sh's `slots` counts by its own load rules and off-switches; a read that fails allows every CPU slot, so the pass's outside-slot alerts still go
+def heavy_cap():
+    try:
+        out = subprocess.run(["bash", os.path.join(CODE, "run-slot.sh"), "slots"], env=os.environ | {"RUN_SLOT_OPS": OPS}, capture_output=True, text=True, timeout=30).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        out = ""
+    if out.isdigit():
+        return int(out)
+    log(f"run-slot.sh slots gave no count ({out!r}), so the heavy-job cap reads {len(CPU_SLOTS)}")
+    return len(CPU_SLOTS)
+
+
 def slot_alerts(jobs, cap, at):
     """outside-slot for a suite or build with no run-slot holder above it; a dev stack holds no slot (run-slot refuses `bun run dev`) and a
     self-hosted runner's CI job takes none, so neither raises one, but each still counts toward the cap."""
@@ -1104,9 +1116,7 @@ def cycle(state):
         log(f"memory check failed: {type(e).__name__}: {e}")
     try:
         jobs = heavy_jobs()
-        # the cap is three while slot 3 is open (load under 12) or held, else two
-        cap = 3 if (os.getloadavg()[0] < 12 or os.path.isdir(os.path.join(OPS, "run-slot-3"))) else 2
-        alerts += slot_alerts(jobs, cap, now())
+        alerts += slot_alerts(jobs, heavy_cap(), now())
         state["heavy"] = len(jobs)
     except Exception as e:
         log(f"heavy-jobs check failed: {type(e).__name__}: {e}")

@@ -1,5 +1,5 @@
 import { describe, expect, setDefaultTimeout, test } from "bun:test"
-import { writeFileSync } from "node:fs"
+import { readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 
 import { SCRIPT, machine } from "./run-slot-fake"
@@ -27,11 +27,44 @@ describe("a read command while the runs log holds three short true runs", () => 
     expect(await m.canTake("run-slot", "worker-probe")).toBe(false)
   })
 
+  test("slots still counts the CPU slots and adds no run to the log", () => {
+    const m = machine()
+    threeShortTrueRuns(m)
+    const log = readFileSync(join(m.ops, "run-slot.runs.log"), "utf8")
+    const run = Bun.spawnSync(["bash", SCRIPT, "slots"], { cwd: m.root, env: m.env() })
+    expect([run.exitCode, run.stdout.toString()]).toEqual([0, "4\n"])
+    expect(readFileSync(join(m.ops, "run-slot.runs.log"), "utf8")).toBe(log)
+  })
+
   test("head still names the waiter it named before", () => {
     const m = machine()
     threeShortTrueRuns(m)
     m.ticket(2, "worker-m", "s2 22 2 medium")
     const run = Bun.spawnSync(["bash", SCRIPT, "head"], { cwd: m.root, env: m.env() })
     expect([run.exitCode, run.stdout.toString()]).toEqual([0, `2-${process.pid}-worker-m\n`])
+  })
+})
+
+// ops-unstick's heavy-job cap reads this count, so four slots run-slot opens never read as over the cap
+describe("slots counts the CPU slots held or open now", () => {
+  const slots = (m: ReturnType<typeof machine>) => {
+    const run = Bun.spawnSync(["bash", SCRIPT, "slots"], { cwd: m.root, env: m.env() })
+    return [run.exitCode, run.stdout.toString()]
+  }
+
+  test("all four while load1 is under 12", () => {
+    expect(slots(machine())).toEqual([0, "4\n"])
+  })
+
+  test("run-slot.4-off closes the fourth", () => {
+    expect(slots(machine({ off: ["run-slot.4-off"] }))).toEqual([0, "3\n"])
+  })
+
+  test("load1 at 12 closes the third and fourth, and a holder keeps each", () => {
+    const m = machine({ load1: 12 })
+    expect(slots(m)).toEqual([0, "2\n"])
+    m.hold("run-slot-3", 2, "medium")
+    m.hold("run-slot-4", 2, "medium")
+    expect(slots(m)).toEqual([0, "4\n"])
   })
 })

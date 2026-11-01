@@ -203,6 +203,13 @@ if [ "${1:-}" = head ]; then
   HEAD_ONLY=1 CAN_TAKE=run-slot
   set -- ops-unstick -- true
 fi
+# run-slot.sh slots: prints how many of run-slot to run-slot-4 are held or open now by the load rules and off-switches, the heavy-job cap ops-unstick reads
+SLOTS_ONLY=
+if [ "${1:-}" = slots ]; then
+  [ $# -eq 1 ] || { echo "usage: run-slot.sh slots" >&2; exit 2; }
+  SLOTS_ONLY=1 CAN_TAKE=run-slot
+  set -- ops-unstick -- true
+fi
 if [ "${1:-}" = can-take ]; then
   [ $# -eq 3 ] || { echo "usage: run-slot.sh can-take <slot> <who>" >&2; exit 2; }
   case "$2" in run-slot|run-slot-2|run-slot-3|run-slot-4) CAN_TAKE=$2 ;; *) echo "run-slot.sh: no slot $2" >&2; exit 2 ;; esac
@@ -774,6 +781,7 @@ fi
 # slots.peers, one folder a line, read once here since held_units runs in a subshell; a reader that cannot answer counts no peer
 PEERS=$(setting slots.peers 2>/dev/null | python3 -I -c 'import json, sys; [print(p) for p in json.load(sys.stdin) if isinstance(p, str)]' 2>/dev/null)
 [ -n "$HEAD_ONLY" ] && { first_waiter; exit 0; }
+[ -n "$SLOTS_ONLY" ] && { echo $(($(capacity) / 2)); exit 0; }
 
 if [ -n "$CAN_TAKE" ]; then
   reclaim "$OPS/$CAN_TAKE"

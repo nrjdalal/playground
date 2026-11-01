@@ -500,7 +500,11 @@ describe("a chained commit or push", () => {
     expect(await bash(`${slot} bash -c 'cd ${dir} && git push origin HEAD'`, DIR)).toContain(
       "web/next/a.ts",
     )
+    expect(await bash(`bash ${slot} git commit -a -m x`, dir)).toContain("web/next/a.ts")
+    expect(await bash(`zsh -f ${slot} git push origin HEAD`, dir)).toContain("web/next/a.ts")
     expect(await bash(`${slot} git status`, dir)).toBeUndefined()
+    expect(await bash(`bash ${slot} git status`, dir)).toBeUndefined()
+    expect(await bash("bash scripts/other.sh worker-x -- git commit -a -m x", dir)).toBeUndefined()
   })
 })
 
@@ -599,6 +603,7 @@ describe("a GLM session while load5 is over 15", () => {
     { $label: "yarn upgrade", command: "yarn upgrade" },
     { $label: "yarn global add", command: "yarn global add turbo" },
     { $label: "an install through run-slot", command: `${slot} bun install` },
+    { $label: "an install through bash run-slot", command: `bash ${slot} bun install` },
     { $label: "a node_modules clone", command: "cp -cR /w/a/node_modules /w/b/" },
     {
       $label: "a node_modules clone by ditto",

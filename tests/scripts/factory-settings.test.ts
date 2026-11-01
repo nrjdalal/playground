@@ -40,6 +40,7 @@ describe("a session cmux restored in a dispatcher checkout keeps the factory's h
 
   test.each([
     "no-bare-slack-link",
+    "no-desktop-owner-app",
     "no-env-dump",
     "no-extensions-write",
     "no-false-green",
