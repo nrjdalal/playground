@@ -66,7 +66,7 @@ Run `playground update` (`packages/scripts/src/playground/update.ts`) in a run s
 ```
 
 It runs each step below and stops at the first that fails, naming it.
-Steps 3 to 5 read what changed since the commit the last finished update reached, which it records in `~/.playground/ops/update-head` once step 5 passes, so a run after one cut short (a crash, a killed terminal, a failed step) still installs, builds and restarts what that merge changed; with no record yet, they read from `HEAD` at the run's start.
+Steps 2 to 5 read what changed since the commit the last finished update reached, which it records in the data folder's `ops/update-head` once step 5 passes, so a run after one cut short (a crash, a killed terminal, a failed step) still installs, builds and restarts what that merge changed; with no record yet, they read from `HEAD` at the run's start, which it records before step 1 moves the checkout.
 
 1. Fetch and fast-forward onto `origin/main`, since `pull --ff-only origin main` there fails with "Cannot fast-forward to multiple branches". A checkout on another branch with a clean tree moves to `main` at `origin/main` first, and a dirty one stops here.
 2. `link-skills.sh`, before anything else, since every later step and every ops job reads `~/.playground`, which it links to `~/.playground` on a machine holding only the old folder; when the merge changed a skill, `playground update` then prints `skills changed:` with each one's folder in the checkout, which you send every lead, for each live checker to read the new text there (the `release` rule says why).
