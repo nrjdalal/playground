@@ -151,7 +151,6 @@ function gitCall(
 
 // these subcommands move HEAD, the index or the files, whatever their words
 const GIT_MOVES = new Set([
-  "add",
   "am",
   "bisect",
   "checkout",
@@ -188,12 +187,13 @@ function keepReset(sub: string | undefined, rest: string[], cwd: string | undefi
   )
 }
 
-// Whether a git subcommand and its words move HEAD, the index or the files: stash's list and show, clean's dry run and apply's checks only read.
+// Whether a git subcommand and its words move HEAD, the index or the files: stash's list and show, add's and clean's dry runs and apply's checks only read.
 function gitMoves(sub: string, rest: string[]): boolean {
   if (GIT_MOVES.has(sub)) return true
   if (sub === "merge") return !STEP_FIVE.test(rest.join(" "))
   if (sub === "stash") return !["list", "show"].includes(rest[0] ?? "push")
   if (sub === "clean") return !rest.some((w) => w === "--dry-run" || /^-[a-z]*n/.test(w))
+  if (sub === "add") return !rest.some((w) => w === "--dry-run" || /^-[a-zA-Z]*n/.test(w))
   if (sub === "apply") return rest.includes("--apply") || !rest.some((w) => APPLY_READS.has(w))
   if (sub === "branch") return rest.some((w) => w === "--force" || /^-[a-zA-Z]*f/.test(w))
   return false
@@ -280,15 +280,36 @@ function runs(
     return { cwd, what: `bun ${words.join(" ")}` }
 }
 
-// The flag letters, per tool, that carry the script (sed's -e and -f, perl's -e and -E); each, like sed's -l, holds the rest of its word, else the next word
-const SCRIPT_LETTERS: Record<string, string> = { perl: "Ee", sed: "ef" }
+// How sed and perl read each flag letter that is more than a switch: edit (in place, -i and BSD sed's -I), script (carries the script) and value, each holding the rest of its word, else the next word; rest, holding the rest of its word alone; digits, holding the octal or x-hex digits after it, then reading on
+type Letter = "digits" | "edit" | "rest" | "script" | "value"
+const LETTERS: Record<string, Record<string, Letter>> = {
+  perl: {
+    "0": "digits",
+    C: "rest",
+    D: "rest",
+    E: "script",
+    F: "rest",
+    I: "rest",
+    M: "rest",
+    V: "rest",
+    d: "rest",
+    e: "script",
+    i: "edit",
+    l: "digits",
+    m: "rest",
+    x: "rest",
+  },
+  sed: { I: "edit", e: "script", f: "script", i: "edit", l: "value" },
+}
 // sed's long options with a value, after an = or as the next word
 const SED_VALUES = new Set(["--expression", "--file", "--line-length"])
+// a word BSD sed's bare -i or -I takes as its backup suffix: empty, or a dot and a name
+const BSD_SUFFIX = /^(\.[\w.-]*)?$/
 
-// The files sed -i or perl -i edits in place (none without -i): every positional, but the first when no script flag gave the script; -i holds the rest of its word as a backup suffix, BSD sed's takes an empty one as its own word, and perl's -0, -I, -M and -m hold the rest of theirs.
+// The files sed -i or perl -i edits in place (none without -i): every positional, but the first when no script flag gave the script.
 function inPlace(name: string, args: Word[]): Word[] {
-  const script = SCRIPT_LETTERS[name]
-  if (script === undefined) return []
+  const letters = LETTERS[name]
+  if (!letters) return []
   let edits = false
   let scripted = false
   const positionals: Word[] = []
@@ -307,19 +328,18 @@ function inPlace(name: string, args: Word[]): Word[] {
       }
     } else if (/^-[^-]/.test(v)) {
       for (let j = 1; j < v.length; j++) {
-        const letter = v[j]
-        const attached = j + 1 < v.length
-        if (letter === "i") {
+        const kind = letters[v[j]]
+        const rest = v.slice(j + 1)
+        if (kind === "digits") j += /^(x[0-9A-Fa-f]*|[0-7]*)/.exec(rest)![0].length
+        else if (kind === "edit") {
           edits = true
-          if (name === "sed" && !attached && args[k + 1]?.value === "") k++
+          if (name === "sed" && rest === "" && BSD_SUFFIX.test(args[k + 1]?.value ?? "-")) k++
           break
-        }
-        if (name === "perl" && "0IMm".includes(letter)) break
-        if (script.includes(letter) || (name === "sed" && letter === "l")) {
-          scripted ||= script.includes(letter)
-          if (!attached) k++
+        } else if (kind === "script" || kind === "value") {
+          scripted ||= kind === "script"
+          if (rest === "") k++
           break
-        }
+        } else if (kind === "rest") break
       }
     } else if (!v.startsWith("-")) positionals.push(args[k])
   }

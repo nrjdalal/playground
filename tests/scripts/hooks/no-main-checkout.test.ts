@@ -77,6 +77,10 @@ describe("a build, a test run, lefthook, turbo or a file write in the main check
     ["sed -i with its script attached to -e", "sed -i -es/a/b/ notes.txt"],
     ["sed --in-place with --expression=", "sed --in-place --expression=s/a/b/ notes.txt"],
     ["sed --in-place with --file=", "sed --in-place --file=edit.sed notes.txt"],
+    ["perl -i after -0 in one flag group", "perl -0pi -e 's/a/b/' notes.txt"],
+    ["perl -i after -0's digits in one flag group", "perl -0777pi -e 's/a/b/' notes.txt"],
+    ["BSD sed -I with a suffix word", "sed -I .bak 's/a/b/' notes.txt"],
+    ["BSD sed -I with an empty suffix", "sed -I '' 's/a/b/' notes.txt"],
     ["git add, which moves the index", "git add -A"],
     [
       "a commit through run-slot, as #299's ran",
@@ -278,6 +282,9 @@ describe("what keeps the main checkout up to date, or only reads it, runs", () =
     ["sed -i, BSD's, on a file outside it", "sed -i '' 's/a/b/' /tmp/x"],
     ["perl -pi -e on a file outside it", "perl -pi -e 's/a/b/' /tmp/x"],
     ["perl with a module holding an i, no -i", "perl -Mstrict scripts/x.pl notes.txt"],
+    ["perl -C holding an i, no -i", "perl -Ci -ne 'print' notes.txt"],
+    ["perl -F holding an i, no -i", "perl -Fi -lane 'print' notes.txt"],
+    ["BSD sed -i with a suffix word, on a file outside it", "sed -i .bak 's/a/b/' /tmp/x"],
     ["a read through run-slot", "~/.playground/ops/run-slot.sh w -- git status --short"],
     [
       "a commit through run-slot in a worktree by git -C",
@@ -441,6 +448,8 @@ describe("a git command that moves the main checkout's HEAD, index or files is r
     ["a branch list", "git branch --list 'lm-*'"],
     ["stash list", "git stash list"],
     ["a dry clean", "git clean -n"],
+    ["a dry add", "git add -n -A"],
+    ["a dry add, by its long name", "git add --dry-run ."],
     ["apply --check", "git apply --check /tmp/x.patch"],
   ])("%s in the main checkout runs", async (_name, command) => {
     expect(await bash(command)).toBeUndefined()
