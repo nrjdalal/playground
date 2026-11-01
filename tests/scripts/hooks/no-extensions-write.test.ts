@@ -536,6 +536,29 @@ describe("a read of the root, and writes elsewhere, run", () => {
     ["a commit message", "the data folder", 'git commit -m "fix(x): y"', DATA],
     ["an awk program", "the home", "awk '{print $1}' /dev/null", HOME],
     ["an awk program", "the data folder", "awk '{print $1}' /dev/null", DATA],
+    ...[
+      ["a worktree", WORK],
+      ["the home", HOME],
+    ].flatMap(([where, cwd]) => [
+      [
+        "an awk regex from /",
+        where,
+        `awk 'NR>=1320 && NR<=1591 && /^(if|elif|else|fi)|^  (if|elif|else|fi)/ {print NR": "$0}' scripts/spawn.sh | cut -c1-160`,
+        cwd,
+      ],
+      [
+        "a sed address from /",
+        where,
+        `grep -n -E "^ {0,2}(if |elif |else$|fi$)" scripts/spawn.sh | sed -n '/^13[2-9][0-9]:\\|^1[45][0-9][0-9]:/p' | cut -c1-160`,
+        cwd,
+      ],
+      [
+        "a sed address from / with * ? and braces",
+        where,
+        "sed -n '/^a*b/p; /^a?b/p; /^{a,b}/p' x",
+        cwd,
+      ],
+    ]),
   ])("%s with a quoted glob runs from %s", async (_, _where, command, cwd) => {
     expect(await bash(command, cwd)).toBeUndefined()
   })
