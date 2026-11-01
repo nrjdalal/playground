@@ -267,7 +267,8 @@ const roll = async (): Promise<number> => {
 }
 
 // playground update [--to <tag>]: the release skill's step 5 on this checkout (update.ts), then the roll.
-const update = (to?: string): Promise<number> => runUpdate(REPO, spawnRun, roll, console.log, to)
+const update = (to?: string): Promise<number> =>
+  runUpdate(REPO, spawnRun, roll, console.log, to, join(dataDir(), "ops", "update-head"))
 
 // playground uninstall: the install's links, LaunchAgents and the Dashboard's stack (uninstall.ts); --purge, after asking, the data folder and the database too. The database's name is loaded only here, since it lives in the API's tree.
 const uninstallAll = async (purge: boolean): Promise<number> => {

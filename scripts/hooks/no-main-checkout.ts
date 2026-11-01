@@ -63,7 +63,7 @@ const DUPLICATE = /^(?:\d+|-)$/
 // The one turbo call the main checkout runs, after a pull that changes packages/ (the release skill's step 5): its CLI imports their dist
 const PACKAGES_BUILD = ["run", "build", "--filter=./packages/*"]
 const BUILD_FIX =
-  "the main checkout has no .env, so the packages' env checks fail. Run it as the release skill's step 5 types it, env NODE_ENV=production SKIP_ENV_VALIDATION=true <main checkout>/node_modules/.bin/turbo run build --filter='./packages/*' --cwd <main checkout>."
+  "the main checkout has no .env, so the packages' env checks fail. Run it as playground update's build step types it, env NODE_ENV=production SKIP_ENV_VALIDATION=true <main checkout>/node_modules/.bin/turbo run build --filter='./packages/*' --cwd <main checkout>."
 
 // Whether turbo's words are that build alone, wherever its --cwd points.
 function packagesBuild(args: Word[]): boolean {

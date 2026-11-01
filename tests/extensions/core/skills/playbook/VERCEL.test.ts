@@ -31,10 +31,50 @@ describe("VERCEL.md", () => {
     expect(step).toContain("Invalid numeric literal")
   })
 
-  test("reads an empty vercel logs as unknown and probes a preview instead", async () => {
-    const text = await read("VERCEL.md")
-    const step = text.split("\n").find((l) => l.includes("empty `vercel logs`")) ?? ""
-    expect(step).toContain("0 records")
-    expect(text).toContain("Hono probe")
+  test("reads an empty vercel logs as unknown, names the hang's cause, and probes one difference a preview", async () => {
+    const lines = (await read("VERCEL.md")).split("\n")
+    const logs = lines.find((l) => l.includes("empty `vercel logs`")) ?? ""
+    expect(logs).toContain("0 records")
+    expect(logs).toContain("already called `listen()`")
+    const probe = lines.find((l) => l.includes("Hono probe")) ?? ""
+    expect(probe).toContain(
+      "one difference a preview (an import, the export's shape, a runtime setting)",
+    )
+    expect(probe).toContain(
+      "(12 probes in about 16 minutes, measured from their deploys' createdAt)",
+    )
+    expect(probe).not.toContain("about 2 minutes each")
+    const exported = lines.find((l) => l.includes("`createAdaptorServer`")) ?? ""
+    expect(exported).toContain("export it unlistened")
+    expect(exported).toContain("never `serve()`, which calls `listen()`")
+    expect(exported).not.toContain("hangs on Vercel")
+    const figures = lines.find((l) => l.includes("`listen(3000)`")) ?? ""
+    expect(figures).toContain(
+      "that `http.createServer()` server hung 62 s once it had called `listen(3000)`",
+    )
+    expect(figures).not.toContain("the same server")
+    const done = lines.findIndex((l) =>
+      l.includes("Done when the first preview that hangs names that difference"),
+    )
+    expect(done).toBeGreaterThan(lines.indexOf(figures))
+  })
+
+  test("scopes the hang to the deploys the probes measured", async () => {
+    const exported =
+      (await read("VERCEL.md")).split("\n").find((l) => l.includes("`createAdaptorServer`")) ?? ""
+    expect(exported).toContain(
+      "all 8 probe deploys built on 31 Oct whose export already listened hung",
+    )
+    expect(exported).toContain(
+      "a deploy of the same code built on 24 Oct still answered 200 on 31 Oct",
+    )
+  })
+
+  test("dates only what a record dates: the opening says measured, and the hang step cites its probes' day", async () => {
+    const lines = (await read("VERCEL.md")).split("\n")
+    expect(lines.find((l) => l.startsWith("Three traps"))).toBe(
+      "Three traps one CLI deploy met (measured), each a step at the command it follows.",
+    )
+    expect(lines.find((l) => l.includes("`listen(3000)`"))).toContain("measured, 31 Oct")
   })
 })

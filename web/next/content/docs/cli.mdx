@@ -81,6 +81,8 @@ When the newest commit is the one running, it prints `Already up to date at <sha
 
 A Dashboard tab you have open reloads onto the new build by itself, once, within about 30 seconds of the switch, or when you come back to a tab that was in the background. It waits while a reply you typed on an Inbox card, or an answer to a session's question, is still unsent, or while a message you sent shows as failed, so those words are kept.
 
+If an update stops partway, after your checkout has moved (a crash, a closed terminal, a step that failed), run `playground update` again: it still installs, builds and restarts what the release changed, since it compares against the commit the last finished update reached, or where the first update with no record started, which it keeps in the data folder's `ops/update-head`.
+
 `playground update --to <tag>` moves your checkout to that release instead, back or on, with the same link, install, build and restart steps, and leaves the Dashboard as it is, since it rolls on its own. A checkout with commits of its own stops before anything moves. `playground doctor` shows the release it is held at, and a plain `playground update` moves it on to the newest again.
 
 ## Check your install: `playground doctor`
