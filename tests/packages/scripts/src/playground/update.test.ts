@@ -440,12 +440,13 @@ test("a run cut short after its fast-forward with no record yet is finished by t
   const checkout = join(scratch, "first-checkout")
   git(scratch, "clone", "-q", origin, checkout)
   const one = git(checkout, "rev-parse", "HEAD")
+  const lines: string[] = []
   const update = () =>
     runUpdate(
       checkout,
       spawnRun,
       async () => 0,
-      () => {},
+      (line) => lines.push(line),
       undefined,
       done,
     )
@@ -454,6 +455,9 @@ test("a run cut short after its fast-forward with no record yet is finished by t
   git(origin, "commit", "-q", "-m", "two")
   writeFileSync(cut, "")
   expect(await update()).toBe(1)
+  expect(lines).toContain(
+    `playground update: no ${done} yet and no fast-forward onto origin/main in the reflog, so it reads what changed since HEAD, ${one.slice(0, 7)}`,
+  )
   rmSync(cut)
   expect(await update()).toBe(0)
   expect(readFileSync(marks, "utf8")).toBe(`restart ${one} HEAD\n`)

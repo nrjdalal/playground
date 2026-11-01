@@ -59,9 +59,11 @@ export const runUpdate = async (
           .find((line) => line.endsWith(" merge origin/main: Fast-forward"))
           ?.split(" ")[0] ?? "")
       : ""
-  if (merged && merged !== head)
+  if (done && !recorded)
     log(
-      `playground update: no ${done} yet, so it reads what changed since the reflog's last fast-forward onto origin/main, ${merged.slice(0, 7)}`,
+      merged
+        ? `playground update: no ${done} yet, so it reads what changed since the reflog's last fast-forward onto origin/main, ${merged.slice(0, 7)}`
+        : `playground update: no ${done} yet and no fast-forward onto origin/main in the reflog, so it reads what changed since HEAD, ${head.slice(0, 7)}`,
     )
   const old =
     recorded && (await git("cat-file", "-e", `${recorded}^{commit}`)).code === 0
