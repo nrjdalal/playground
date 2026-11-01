@@ -42,6 +42,7 @@ describe("a session cmux restored in a dispatcher checkout keeps the factory's h
     "no-bare-slack-link",
     "no-desktop-owner-app",
     "no-env-dump",
+    "no-extension-repo-write",
     "no-extensions-write",
     "no-false-green",
     "no-glm-heavy-path",

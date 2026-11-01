@@ -47,7 +47,11 @@ beforeAll(async () => {
     }),
   )
   // A machine past the switch, so a hook that reads the names places the old ones too.
-  storeWith(join(config, "playground"), {}, { "sessions.aliases": OLD_NAMES })
+  storeWith(
+    join(config, "playground"),
+    {},
+    { "ext.repos": { acme: "quillco/acme-skills" }, "sessions.aliases": OLD_NAMES },
+  )
 })
 
 afterAll(async () => {
@@ -187,6 +191,7 @@ describe("a hook that guards the factory passes a session with no factory role",
   })
   const cases: [string, object][] = [
     ["no-env-dump", bash("env")],
+    ["no-extension-repo-write", bash("gh repo delete quillco/acme-skills --yes")],
     ["no-extensions-write", bash("playground ext put login list x /tmp/l.json --reason y")],
     ["no-false-green", bash("bun test x | tail")],
     // split, since tests/test_kill_by_name.py reads the repo's text for the whole name
