@@ -22,6 +22,7 @@ import {
   slotWords,
   stdinOf,
   type Visit,
+  UNKNOWN,
   type Word,
 } from "./shell"
 
@@ -78,7 +79,7 @@ function reads(parsed: Parsed, env: Env): boolean {
   const { args, local, name } = parsed
   if ([...local.keys(), ...env.vars.keys()].some((key) => RUNS.test(key))) return false
   if (READERS.has(name) || PRINTERS.has(name)) return true
-  if (name === "rg") return !args.some((a) => a.value.startsWith("--pre"))
+  if (name === "rg") return !args.some((a) => /^--(?:hostname-bin|pre)/.test(a.value))
   if (name === "find") return !args.some((a) => FIND_ACTS.test(a.value))
   if (name !== "git") return false
   const { rest, sub } = gitCall(args, env)
@@ -115,12 +116,15 @@ const SWITCHES: Record<string, string[]> = {
   settings: ["--dry-run"],
 }
 
-// Whether a word is the playground CLI: the command by name or path in any case, as macOS's filesystem reads it (not a folder of that name), or the checkout's cli.ts, with or without its extension, links followed.
+// Whether a word is the playground CLI: the command by name in any case, as macOS's filesystem reads it, or by a path that is no folder, or the checkout's cli.ts, with or without its extension, links followed.
 function isCli(word: Word, dirs: (string | undefined)[]): boolean {
   if (marked(word.value) || word.value.startsWith("-")) return false
   const paths = dirs.map((dir) => pathOf(word, { cwd: dir } as Env))
   if (program(word.value).toLowerCase() === "playground")
-    return !paths.some((path) => !!path && existsSync(path) && statSync(path).isDirectory())
+    return (
+      !word.value.includes("/") ||
+      !paths.some((path) => !!path && existsSync(path) && statSync(path).isDirectory())
+    )
   const cli = (sep + CLI).toLowerCase()
   return paths.some(
     (path) => !!path && [path, `${path}.ts`].some((at) => real(at).toLowerCase().endsWith(cli)),
@@ -242,6 +246,7 @@ function inspect(raw: string, environment: Environment) {
       }
     }
   }
+  const seen = new Set<string>()
   const visit: Visit = async (cmd: Command, parsed, env) => {
     const slot = slotWords(parsed)
     if (slot)
@@ -256,9 +261,28 @@ function inspect(raw: string, environment: Environment) {
     )
     if (into?.target) return refuse(`a write to ${pathOf(into.target, env)}`)
     const reader = !!first && reads(parsed, env)
-    const write = reader ? undefined : cliCalls(parsed, env).map(cliWrite).find(Boolean)
+    const fed = xargs ? await stdinOf(cmd, env) : undefined
+    const stdinWords: Word[] = !fed
+      ? []
+      : fed.unknown
+        ? [{ quoted: false, value: UNKNOWN }]
+        : fed.value
+            .split(/\s+/)
+            .filter(Boolean)
+            .map((value) => ({ quoted: false, value }))
+    const write = reader
+      ? undefined
+      : cliCalls(parsed, env)
+          .map((words) => cliWrite(xargs?.replace ? words : [...words, ...stdinWords]))
+          .find(Boolean)
     if (write) return refuse(write)
-    for (const line of reader ? [] : runsOf(parsed, env)) {
+    for (const raw of reader ? [] : runsOf(parsed, env)) {
+      const line =
+        xargs?.replace && fed
+          ? raw.replaceAll(xargs.replace, fed.unknown ? UNKNOWN : fed.value)
+          : raw
+      if (seen.has(line)) continue
+      seen.add(line)
       const verdict = await run(lex(line, env.known), { ...env, vars: new Map() }, visit, true)
       if (verdict) return verdict
     }

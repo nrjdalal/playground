@@ -4,11 +4,13 @@ import { basename, isAbsolute, resolve } from "node:path"
 
 // `variable` names the first shell variable a text expands, so a hook can tell `"$HERDR_BIN_PATH"` from any other unknown program.
 export type Text = { reads?: Text[]; unknown?: string; value: string; variable?: string }
-export type Word = Text & { proc?: Command; quoted: boolean }
+export type Word = Text & { procs?: Command[]; quoted: boolean }
 type Redirect = { body?: Text; fd: string; op: string; target?: Word }
 export type Command = {
   detached?: boolean
   group?: boolean
+  inner?: Command[]
+  opened?: boolean
   redirects: Redirect[]
   scope: number
   stdin?: Command
@@ -274,6 +276,14 @@ function walk(lx: Lexer, scope: number, nested: boolean, inherit?: Command): voi
   const end = (op: string) => {
     const done = cmd
     const pipe = op === "|" || op === "|&"
+    const brace = (c: Command, value: string) => c.words[0]?.value === value && !c.words[0].quoted
+    if (brace(done, "}")) {
+      const open = lx.commands.findLastIndex((c) => c.scope === scope && brace(c, "{") && !c.opened)
+      if (open >= 0) {
+        lx.commands[open].opened = true
+        done.inner = topLevel(lx.commands.slice(open), scope)
+      }
+    }
     if (pipe || op === "&") done.detached = true
     if (done.words.length > 0 || done.redirects.length > 0 || done.group) lx.commands.push(done)
     cmd = fresh()
@@ -301,8 +311,11 @@ function walk(lx: Lexer, scope: number, nested: boolean, inherit?: Command): voi
       lx.i++
       const piped = cmd.words.length === 0 && cmd.redirects.length === 0 ? cmd.stdin : undefined
       end(";")
+      const from = lx.commands.length
+      const scope = lx.scopes.length
       nest(lx, piped)
       cmd.group = true
+      cmd.inner = topLevel(lx.commands.slice(from), scope)
     } else if ((c === "<" || c === ">") && src[lx.i + 1] === "(") {
       cmd.words.push(procSub(lx))
     } else if (redirect) {
@@ -335,13 +348,20 @@ function walk(lx: Lexer, scope: number, nested: boolean, inherit?: Command): voi
   end(";")
 }
 
+// The commands of one scope whose output leaves it, so not piped into another.
+function topLevel(cmds: Command[], scope: number): Command[] {
+  const fed = new Set(cmds.map((c) => c.stdin))
+  return cmds.filter((c) => !fed.has(c) && c.scope === scope)
+}
+
 // A process substitution, carrying its last command so a shell that reads it as a script can read that command's output.
 function procSub(lx: Lexer): Word {
   lx.i += 2
   const from = lx.commands.length
+  const scope = lx.scopes.length
   nest(lx)
   return {
-    proc: lx.commands.slice(from).at(-1),
+    procs: topLevel(lx.commands.slice(from), scope),
     quoted: false,
     ...unknown("a process substitution"),
   }
@@ -564,6 +584,9 @@ export type Parsed = {
   xargs: Xargs
 }
 
+// env's split-string option, attached or not, with the text it carries attached
+const SPLIT = /^(?:-[0iv]*S|--split-string(?:=|$))(.*)$/
+
 export function parse(cmd: Command): Parsed {
   let { words } = cmd
   const local = new Map<string, Text>()
@@ -590,8 +613,8 @@ export function parse(cmd: Command): Parsed {
       const v = words[k].value
       if (ASSIGN.test(v)) assign(words[k++])
       // env -S splits its one string into the words it runs
-      else if (wrapper === "env" && /^(?:-[0iv]*S|--split-string(?:=|$))/.test(v)) {
-        const attached = /^(?:-[0iv]*S|--split-string=?)(.*)$/.exec(v)?.[1] ?? ""
+      else if (wrapper === "env" && SPLIT.test(v)) {
+        const attached = SPLIT.exec(v)?.[1] ?? ""
         const split = (attached || words[k + 1]?.value || "")
           .split(/\s+/)
           .filter(Boolean)
@@ -673,6 +696,12 @@ export async function examine(
   const { args, chdir, local, name } = parsed
   const here: Env = chdir ? { ...env, cwd: pathOf(chdir, env) } : env
   let verdict: string | undefined
+  const followed = SHELLS.has(name) || ["cd", "eval", "popd", "pushd", "source", "."].includes(name)
+  if (followed && builtins && cmd.redirects.length > 0) {
+    const bare = { ...cmd, words: [] }
+    verdict = await visit(bare, parse(bare), here)
+    if (verdict) return verdict
+  }
   if (name === "") {
     for (const [key, value] of local) env.vars.set(key, value)
     if (builtins) verdict = await visit(cmd, parsed, here)
@@ -685,10 +714,11 @@ export async function examine(
       env.vars.set(w.value.slice(0, eq), slice(w, eq + 1))
     }
     if (builtins) verdict = await visit(cmd, parsed, here)
-  } else if (SHELLS.has(name)) verdict = await shell(name, args, cmd, here, visit, builtins)
+  } else if (SHELLS.has(name))
+    verdict = await shell(name, args, cmd, here, visit, builtins, parsed.xargs)
   else if (
     (name === "source" || name === ".") &&
-    (args[0]?.proc || args[0]?.value === "/dev/stdin")
+    (args[0]?.procs || args[0]?.value === "/dev/stdin")
   ) {
     const script = await scriptOf(args[0], cmd, here)
     verdict = script.unknown
@@ -738,11 +768,19 @@ async function shell(
   env: Env,
   visit: Visit,
   builtins: boolean,
+  xargs?: Xargs,
 ): Promise<string | undefined> {
   const slot = shellSlot(args, name)
   if (slot) return examine({ ...cmd, words: slot }, env, visit, builtins)
   const { inline, operand } = shellOperand(args, name)
-  if (operand && inline) return run(lex(operand.value, env.known), subshell(env), visit, builtins)
+  if (operand && inline) {
+    let script = operand.value
+    if (xargs?.replace && script.includes(xargs.replace)) {
+      const fed = await stdinOf(cmd, env)
+      script = script.replaceAll(xargs.replace, fed.unknown ? UNKNOWN : fed.value.trim())
+    }
+    return run(lex(script, env.known), subshell(env), visit, builtins)
+  }
   const script = await scriptOf(operand, cmd, env)
   return script.unknown
     ? undefined
@@ -752,7 +790,12 @@ async function shell(
 // A shell's or source's script: stdin with no operand or `/dev/stdin`, a process substitution's output, else unknown.
 async function scriptOf(operand: Word | undefined, cmd: Command, env: Env): Promise<Text> {
   if (!operand || operand.value === "/dev/stdin") return stdinOf(cmd, env)
-  return operand.proc ? outputOf(operand.proc, env) : unknown("a script file")
+  return operand.procs ? outputs(operand.procs, env) : unknown("a script file")
+}
+
+// The output of a list of commands run in order, unknown when any part is.
+async function outputs(cmds: Command[], env: Env): Promise<Text> {
+  return join(await Promise.all(cmds.map((c) => outputOf(c, env))))
 }
 
 async function record(cmd: Command, name: string, args: Word[], env: Env): Promise<void> {
@@ -782,6 +825,7 @@ async function existing(path: string, env: Env): Promise<Text> {
 async function outputOf(cmd: Command, env: Env): Promise<Text> {
   const { args, name } = parse(cmd)
   if (name === "") {
+    if (cmd.inner) return outputs(cmd.inner, env)
     return cmd.group || cmd.words.some((w) => GROUPING.has(w.value) && !w.quoted)
       ? unknown("the output of a command group")
       : { value: "" }
@@ -831,7 +875,7 @@ export async function stdinOf(cmd: Command, env: Env): Promise<Text> {
   const input = cmd.redirects.findLast(
     (r) => (r.fd === "" || r.fd === "0") && r.op.startsWith("<") && r.op !== "<&",
   )
-  if (input?.target?.proc) return outputOf(input.target.proc, env)
+  if (input?.target?.procs) return outputs(input.target.procs, env)
   if (input?.op === "<" || input?.op === "<>")
     return input.target ? readPath(input.target, env) : unknown("an input redirect")
   if (input)

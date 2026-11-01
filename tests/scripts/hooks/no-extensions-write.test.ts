@@ -18,6 +18,8 @@ writeFileSync(LIST, '["Slack"]\n')
 writeFileSync(join(ROOT, "policy.json"), "{}\n")
 writeFileSync(join(SCOPE, "lists", "release-owners.json"), "[]\n")
 const LINK = join(HOME, "store")
+const WORK = join(HOME, "work")
+mkdirSync(join(WORK, "playground"), { recursive: true })
 symlinkSync(ROOT, LINK)
 afterAll(() => rmSync(HOME, { force: true, recursive: true }))
 
@@ -35,6 +37,11 @@ const bash = (command: string, cwd = HOME) =>
     }),
     ENV,
   )
+
+// A harmless git alias nest of the given depth around an inner command line, each level double-quoted.
+const escape = (text: string) => text.replace(/[\\"$`]/g, (c) => `\\${c}`)
+const nest = (depth: number, inner: string): string =>
+  depth === 0 ? inner : `git -c alias.x="!${escape(nest(depth - 1, inner))}" x`
 
 const tool = (tool_name: string, input: Record<string, unknown>) =>
   check(
@@ -249,9 +256,35 @@ describe("a direct write into the extensions root is refused, naming the owner's
       `git commit -m "docs: the hook refuses playground ext sync now"`,
     ],
     ["a write after a word with an unbalanced quote", `git commit -m "it's"; rm -rf ${ROOT}`],
+    [
+      "the CLI by name from a cwd holding a folder named playground",
+      `cd ${WORK} && playground ext sync`,
+    ],
+    ["the CLI by name under env -C to such a folder", `env -C ${WORK} playground ext sync`],
+    ["the CLI's words from xargs' stdin", "printf 'ext sync' | xargs playground"],
+    ["the CLI's words from xargs' here-string", `xargs playground <<< "ext sync"`],
+    [
+      "the CLI's words through xargs -I into sh -c",
+      "printf 'ext sync' | xargs -I{} sh -c 'playground {}'",
+    ],
+    ["a redirect on bash -c", `bash -c true > ${LIST}`],
+    ["a redirect on eval", `eval true > ${LIST}`],
+    ["a redirect on cd", `cd /tmp > ${LIST}`],
+    [
+      "a process substitution whose first command prints the script",
+      `bash <(echo 'rm ${LIST}'; echo true)`,
+    ],
+    ["a group's output piped into sh", `{ echo 'rm ${LIST}'; echo true; } | sh`],
+    ["a subshell's output piped into sh", `( echo 'rm ${LIST}'; echo true ) | sh`],
+    ["rg with --hostname-bin", `rg --hostname-bin /tmp/w.sh x ${ROOT}`],
   ])("%s", async (_, command) => {
     expect(await bash(command)).toContain("no-extensions-write hook refuses")
   })
+
+  test("a deep harmless nest ahead of the CLI is judged before the hook's timeout", async () => {
+    const reason = await bash(`${nest(16, "true")}; playground ext sync`)
+    expect(reason).toContain("no-extensions-write hook refuses")
+  }, 10_000)
 
   test("a Bash call whose cwd is already inside the root runs no writer", async () => {
     expect(await bash("node -e 'x'", SCOPE)).toContain("no-extensions-write hook refuses")
