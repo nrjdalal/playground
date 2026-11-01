@@ -35,7 +35,7 @@ Done when every command in the session runs headless.
 
 ## 4. Leave the owner's apps alone
 
-Name only apps off the owner's list in a snapshot, act, launch or close, matching a name in any case and with or without `.app`. Read the list with `bun "$PLAYGROUND_REPO/packages/scripts/src/playground/guard-list.ts" no-desktop-owner-app desktop-owner-apps`, which prints it as JSON. On any answer that is not a printed list (an exit 2, an unset `$PLAYGROUND_REPO`, no `bun`), **stop** and tell your manager, since there is no list to trust. The owner's login extension fills the list, an app joins or leaves it only by the owner's own `!` command, which Ops prepares, and the `no-desktop-owner-app` hook refuses a command that names a listed app, its refusal naming the two routes: the owner runs the command with `!`, or the owner takes the app off the list with a `!` command Ops prepares.
+Name only apps off the owner's list in a snapshot, act, launch or close, matching a name in any case and with or without `.app`. Read the list with `bun "$PLAYGROUND_REPO/packages/scripts/src/playground/guard-list.ts" no-desktop-owner-app desktop-owner-apps`, which prints it as JSON. On any answer that is not a printed list (an exit 2, an unset `$PLAYGROUND_REPO`, no `bun`), **stop** and tell your manager, since there is no list to trust. The owner's login extension fills the list, which changes only by the owner's own `!` command that Ops prepares; the `no-desktop-owner-app` hook refuses a command that names a listed app, its refusal naming the two routes: the owner runs the command with `!`, or takes the app off the list.
 
 Done when every app the session's commands name is off the list the reader printed.
 

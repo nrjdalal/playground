@@ -178,6 +178,33 @@ describe("a direct write into the extensions root is refused, naming the owner's
     expect(reason).toContain("no-extensions-write hook refuses")
   })
 
+  test.each([
+    ["a group's redirect", `{ echo '[]'; } > ${LIST}`],
+    ["a subshell's redirect", `( echo '[]' ) > ${LIST}`],
+    ["a bare redirect", `> ${LIST}`],
+    ["exec's redirect", `exec > ${LIST}`],
+  ])("%s", async (_, command) => {
+    expect(await bash(command)).toContain("no-extensions-write hook refuses")
+  })
+
+  test.each([
+    [
+      "bun --cwd to the CLI's folder, from the checkout",
+      "bun --cwd packages/scripts/src/playground cli.ts ext put login list x /tmp/l.json --reason y",
+    ],
+    ["the command's name in upper case", "PLAYGROUND ext put login list x /tmp/l.json --reason y"],
+    [
+      "the CLI behind find -exec",
+      "find /tmp -maxdepth 0 -exec playground ext put login list x /tmp/l.json --reason y ';'",
+    ],
+    ["the CLI behind arch", "arch -arm64 playground settings set owner.names x --reason r"],
+    ["the CLI behind watch", "watch playground ext sync"],
+    ["the CLI behind npm exec", "npm exec -- playground ext sync"],
+    ["settings set of ext.repos", "playground settings set ext.repos '{}' --reason r"],
+  ])("%s", async (_, command) => {
+    expect(await bash(command, CHECKOUT)).toContain("no-extensions-write hook refuses")
+  })
+
   test("a Bash call whose cwd is already inside the root runs no writer", async () => {
     expect(await bash("node -e 'x'", SCOPE)).toContain("no-extensions-write hook refuses")
   })

@@ -63,14 +63,14 @@ const GIT_READS = new Set([
   "show",
   "status",
 ])
+// The builtins run() hands visit with no command of their own.
+const EXPORTS = new Set(["declare", "export", "local", "readonly", "typeset"])
 // Programs that remove or move what they name, so naming a folder above the root takes the root with it, and the guards fall back to core's smaller lists.
 const REMOVERS = new Set(["find", "mv", "rm", "rmdir", "rsync", "unlink"])
 const DUPLICATE = /^(?:\d+|-)$/
 const GLOB = /[*?[{]/
 // Variables that make git or a pager run a program, so a reader with one set is judged as any other program.
 const RUNS = /^(?:EDITOR|GIT_[A-Z_]+|LESSOPEN|PAGER|VISUAL)$/
-// Runners whose words can name the CLI's file.
-const RUNNERS = new Set(["bun", "bunx", "deno", "node", "npx", "tsx"])
 const CLI = join("packages", "scripts", "src", "playground", "cli.ts")
 
 // Whether a command only reads what it names: a reader with no option or variable that makes it run a program.
@@ -91,9 +91,10 @@ function reads(parsed: Parsed, env: Env): boolean {
   )
 }
 
-// The settings keys a guard reads to allow or deny a call, A to Z: the hooks' (no-chat-question, no-glm-heavy-path, no-headless-login, no-playground-leak, no-public-leak, and role.ts, which places a session in the factory) and spawn.sh's code root.
+// The settings keys a guard reads to allow or deny a call, A to Z: the hooks' (no-chat-question, no-glm-heavy-path, no-headless-login, no-playground-leak, no-public-leak, and role.ts, which places a session in the factory), spawn.sh's code root, and ext.repos, which names the repository each scope syncs from.
 export const GUARD_KEYS = new Set([
   "ext.links",
+  "ext.repos",
   "factory.archiveRepo",
   "factory.publicRepo",
   "glm.readOnlyLoad5",
@@ -114,25 +115,25 @@ const SWITCHES: Record<string, string[]> = {
   settings: ["--dry-run"],
 }
 
-// Whether a word is the playground CLI: the command by name or path (not a folder of that name), or the checkout's cli.ts, with or without its extension, links followed.
+// Whether a word is the playground CLI: the command by name or path in any case, as macOS's filesystem reads it (not a folder of that name), or the checkout's cli.ts, with or without its extension, links followed.
 function isCli(word: Word, dirs: (string | undefined)[]): boolean {
-  if (marked(word.value)) return false
-  return dirs.some((dir) => {
-    const path = pathOf(word, { cwd: dir } as Env)
-    if (program(word.value) === "playground")
-      return !path || !existsSync(path) || !statSync(path).isDirectory()
-    return !!path && [path, `${path}.ts`].some((at) => real(at).endsWith(sep + CLI))
-  })
+  if (marked(word.value) || word.value.startsWith("-")) return false
+  const paths = dirs.map((dir) => pathOf(word, { cwd: dir } as Env))
+  if (program(word.value).toLowerCase() === "playground")
+    return !paths.some((path) => !!path && existsSync(path) && statSync(path).isDirectory())
+  const cli = (sep + CLI).toLowerCase()
+  return paths.some(
+    (path) => !!path && [path, `${path}.ts`].some((at) => real(at).toLowerCase().endsWith(cli)),
+  )
 }
 
-// The words after the playground CLI, however it is called: its program word, or any word a runner (bun, node, npx) is handed.
-function cliWords(parsed: Parsed, env: Env): Word[] | undefined {
+// The words after each word of a command that is the playground CLI, so the CLI behind any wrapper (bun, npx, find -exec, arch, watch) is read as typed bare.
+function cliCalls(parsed: Parsed, env: Env): Word[][] {
   const { args, first, name } = parsed
-  if (!first) return
+  if (!first) return []
   const words = [first, ...args]
   const dirs = [env.cwd, name === "bun" ? bunCall(args, env).cwd : undefined]
-  const at = (RUNNERS.has(name) ? words : [first]).findIndex((w) => isCli(w, dirs))
-  return at === -1 ? undefined : words.slice(at + 1)
+  return words.flatMap((word, at) => (isCli(word, dirs) ? [words.slice(at + 1)] : []))
 }
 
 // What of a playground call changes what a guard reads, or undefined; its words split as that command's parseWords splits them, and a word the hook cannot read taken as the worst.
@@ -209,7 +210,6 @@ function inspect(raw: string, environment: Environment) {
   if (tool !== "Bash") return
   const { command } = input
   if (typeof command !== "string") return
-  // What a word of a program that is no reader names: a path in the root, a folder above it, a glob there, or the root's path in its text.
   // the root's path from a cwd above it, which a script may name it by
   const relative = (env: Env) =>
     env.cwd && above(env.cwd, false) ? root.slice(real(env.cwd).length + 1) : undefined
@@ -217,6 +217,7 @@ function inspect(raw: string, environment: Environment) {
     const near = relative(env)
     return value.includes(needle) || (!!near && value.includes(near))
   }
+  // What a word of a program that is no reader names: a path in the root, a folder above it, a glob there, or the root's path in its text.
   const names = (word: Word, env: Env, remover: boolean): string | undefined => {
     for (const text of texts(word)) {
       if (holds(text.value, env)) return `${root} in its text`
@@ -245,9 +246,10 @@ function inspect(raw: string, environment: Environment) {
         inRoot(pathOf(r.target, env)),
     )
     if (into?.target) return refuse(`a write to ${pathOf(into.target, env)}`)
-    const cli = cliWords(parsed, env)
-    const write = cli && cliWrite(cli)
+    const write = cliCalls(parsed, env).map(cliWrite).find(Boolean)
     if (write) return refuse(write)
+    // a bare assignment or export with no command: only its redirect writes, and a variable it sets is read where a command runs with it
+    if (!first || EXPORTS.has(name)) return
     if (reads(parsed, env)) return
     if (inRoot(env.cwd)) return refuse(`${name} run inside ${root}`)
     if (name === "git" && inRoot(gitCall(args, env).cwd)) return refuse(`git on a clone in ${root}`)
@@ -281,7 +283,7 @@ function inspect(raw: string, environment: Environment) {
     process: environment,
     vars: new Map(),
   }
-  return run(lex(command, env.known), env, visit)
+  return run(lex(command, env.known), env, visit, true)
 }
 
 // Fails open: an error on any call lets it run, so a reader bug cannot block every Bash command or write.
