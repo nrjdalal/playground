@@ -73,7 +73,7 @@ The steps to spawn and brief a session are in [SESSIONS.md](SESSIONS.md#spawn), 
   A stack held at 5/5 until the owner's try syncs with `canary` only when GitHub reads a PR in it as conflicting or code-review-loop's step 8 finds a conflict, plus once more before the try, never on a schedule, since each sync is a new head on every PR in the stack (measured, 1 Nov: its three reviewers ran 6,774 s of local tests in 5 hours of syncs, then 0 s in the 3 hours after).
   Each sync's round waits on CI at the synced head and cites it where code-review-loop's The last 5/5 lets CI stand in, since the sync itself merged `canary`.
   A sync is done when each PR in the stack has its merged head pushed and its reviewer has posted a verdict at that head.
-  The owner's try is the owner's own run of a stack before any PR in it merges, which the lead names with its time.
+  The owner's try is the owner's own run of a stack before any PR in it merges, which the lead names with its time to each reviewer in the stack, so each knows its waiting 5/5 is held and which sync comes before the try.
   Anything else bundles the items into one PR or sequences them one PR after the other.
   A PR whose GitHub base is the parent's branch is the other stack shape, the one **github**'s stacked-base line governs.
   A single task goes out alone when it takes a route that skips the Planner (above).

@@ -45,7 +45,7 @@ describe("DISPATCH.md", () => {
       "A sync is done when each PR in the stack has its merged head pushed and its reviewer has posted a verdict at that head",
     )
     expect(lines[at + 3]).toContain(
-      "The owner's try is the owner's own run of a stack before any PR in it merges",
+      "The owner's try is the owner's own run of a stack before any PR in it merges, which the lead names with its time to each reviewer in the stack, so each knows its waiting 5/5 is held and which sync comes before the try",
     )
   })
 
