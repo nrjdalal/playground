@@ -179,18 +179,30 @@ const messageAt = (words: Word[], at: number): string | undefined =>
       ? words[at].value.replace(/^(?:-m|--message=)/, "")
       : undefined
 
-// The runner, shell or eval a word names, by its basename with case dropped, since macOS runs SH as sh
+// The runner, shell or eval a word names, by its basename with case dropped, since macOS runs SH as sh; a word bash expands by a glob or a brace (`/bin/s?`, `{sh,-c}`) may name any, but a quoted text with a space (awk's program) names none
 const runnerOf = (word: Word): string | undefined => {
+  if (/[*?[{]/.test(word.value) && !(word.quoted && /\s/.test(word.value))) return "a glob"
   const base = (word.value.split("/").pop() ?? "").toLowerCase()
   return RUNNERS.has(base) || SHELLS.has(base) || base === "eval" ? base : undefined
 }
 
-// Every text of a variable the call sets or exports, or of a word from the first that names a runner on (behind any wrapper, or a program word the hook cannot read), that holds a space, a leading ! dropped, read as a command line of its own (a pager, GIT_SSH_COMMAND, a git alias, watch's line); any other program's quoted argument (awk's program) stays one word.
-function runsOf(parsed: Parsed, env: Env): string[] {
+// The names a command defines as functions (`f() {`, `function f`), anywhere in its text, a shell's script included, since a call of one may run any line
+const definedFunctions = (command: string): Set<string> =>
+  new Set(
+    [...command.matchAll(/(?:\bfunction\s+([\w.:-]+)|([\w.:-]+)\s*\(\s*\))/g)].map((m) =>
+      (m[1] ?? m[2]).toLowerCase(),
+    ),
+  )
+
+// Every text of a variable the call sets or exports, or of a word from the first that names a runner on (behind any wrapper, or a program word the hook cannot read or a function the command defines), that holds a space, a leading ! dropped, read as a command line of its own (a pager, GIT_SSH_COMMAND, a git alias, watch's line); any other program's quoted argument (awk's program) stays one word.
+function runsOf(parsed: Parsed, env: Env, functions: Set<string>): string[] {
   const { args, first, local, name } = parsed
   const values = [...local, ...env.vars].flatMap(([, text]) => (text.unknown ? [] : [text.value]))
   const all = first ? [first, ...args] : args
-  const from = first && marked(name) ? 0 : all.findIndex((word) => runnerOf(word))
+  const from =
+    first && (marked(name) || functions.has(name.toLowerCase()))
+      ? 0
+      : all.findIndex((word) => runnerOf(word))
   const words = from < 0 ? [] : all.slice(from)
   const keeps = runnerOf(words[0] ?? { value: "" }) === "git" && keepsMessage(words.slice(1), env)
   for (const [at, word] of words.entries()) {
@@ -255,6 +267,7 @@ function inspect(raw: string, environment: Environment) {
   const root = real(extensionsDir(dataDir(environment)))
   const home = environment.HOME || homedir()
   const needle = root.startsWith(real(home) + sep) ? root.slice(real(home).length) : root
+  const functions = definedFunctions(typeof input.command === "string" ? input.command : "")
   const inRoot = (path: string | undefined) => {
     if (path === undefined) return false
     const at = real(path)
@@ -337,7 +350,7 @@ function inspect(raw: string, environment: Environment) {
           .map((words) => cliWrite(xargs?.replace ? words : [...words, ...stdinWords]))
           .find(Boolean)
     if (write) return refuse(write)
-    for (const raw of reader ? [] : runsOf(parsed, env)) {
+    for (const raw of reader ? [] : runsOf(parsed, env, functions)) {
       const line =
         xargs?.replace && fed
           ? raw.replaceAll(xargs.replace, fed.unknown ? UNKNOWN : fed.value)
