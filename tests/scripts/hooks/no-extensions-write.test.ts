@@ -478,6 +478,11 @@ describe("a quoted argument is read as a command line only where a program runs 
       "a git alias's sh -c running the word after -m",
       `git -c alias.x='!sh -c "$2"' x -m 'rm -rf ~'`,
     ],
+    [
+      "a git alias running the word after -m behind --attr-source commit",
+      `git -c alias.x='!eval "$2"' --attr-source commit x -m 'rm -rf ~'`,
+    ],
+    ["a commit message under a call that sets config", "git -c x.y=z commit -m 'rm -rf ~'"],
     ["screen's shell removing the home", "screen -dm sh -c 'rm -rf ~'"],
     ["flock's shell removing the home", "flock /tmp/l sh -c 'rm -rf ~'"],
   ])("%s stays refused", async (_, command) => {

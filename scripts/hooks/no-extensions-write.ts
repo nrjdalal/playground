@@ -163,8 +163,11 @@ const RUNNERS = new Set([
   "tmux",
   "watch",
 ])
-// git's commit and tag keep a message as text, and no alias can take their names; an alias runs every word it gets
+// git's commit and tag keep a message as text, and no alias can take their names; an alias runs every word it gets, and a call that sets config may define one, so its message is read
 const KEEPS_MESSAGE = new Set(["commit", "tag"])
+const keepsMessage = (args: Word[], env: Env): boolean =>
+  KEEPS_MESSAGE.has(gitCall(args, env).sub ?? "") &&
+  !args.some(({ value }) => /^(?:-c|--config-env(?:=|$))/.test(value))
 // git's commit or tag message at a word: the word after -m or --message, or one with the message attached
 const messageAt = (words: Word[], at: number): string | undefined =>
   /^(?:-m|--message)$/.test(words[at - 1]?.value ?? "")
@@ -178,7 +181,7 @@ function runsOf(parsed: Parsed, env: Env): string[] {
   const { args, first, local, name } = parsed
   const values = [...local, ...env.vars].flatMap(([, text]) => (text.unknown ? [] : [text.value]))
   const words = !RUNNERS.has(name) ? [] : first ? [first, ...args] : args
-  const keeps = name === "git" && KEEPS_MESSAGE.has(gitCall(args, env).sub ?? "")
+  const keeps = name === "git" && keepsMessage(args, env)
   for (const [at, word] of words.entries()) {
     if (keeps && messageAt(words, at) !== undefined) continue
     for (const text of texts(word)) values.push(text.value.replace(/^!/, ""))
@@ -334,9 +337,7 @@ function inspect(raw: string, environment: Environment) {
       if (verdict) return verdict
     }
     // a git message is text, no line git runs, but one naming a gated call is refused all the same
-    for (const message of name === "git" &&
-    !reader &&
-    KEEPS_MESSAGE.has(gitCall(args, env).sub ?? "")
+    for (const message of name === "git" && !reader && keepsMessage(args, env)
       ? args.flatMap((_, at) => messageAt(args, at) ?? [])
       : []) {
       const write = lex(message, env.known)

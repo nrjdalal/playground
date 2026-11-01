@@ -138,7 +138,7 @@ export function bunCall(
 }
 
 // git's options before its subcommand that take the next word as their value
-const GIT_TAKES = new Set(["-c", "--config-env", "--namespace"])
+const GIT_TAKES = new Set(["--attr-source", "-c", "--config-env", "--namespace"])
 
 // git's subcommand and its words, and the tree it acts on: the checkout a --git-dir of `<checkout>/.git` names, whose HEAD and index move, else its --work-tree, else the folder its -C options name (each relative to the one before); each counts only before the subcommand.
 export function gitCall(
