@@ -146,7 +146,7 @@ async function judgeText(
   for (const cmd of lexed.commands) {
     const { args, name } = parse(cmd)
     if (!SHELLS.has(name)) continue
-    const { inline, operand } = shellOperand(args)
+    const { inline, operand } = shellOperand(args, name)
     if (operand && !inline) {
       const verdict = await script(operand, env, mention, apps, depth)
       if (verdict) return verdict
