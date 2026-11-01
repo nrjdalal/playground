@@ -40,14 +40,34 @@ describe("VERCEL.md", () => {
     expect(probe).toContain(
       "one difference a preview (an import, the export's shape, a runtime setting)",
     )
+    expect(probe).toContain(
+      "(12 probes in about 16 minutes, measured from their deploys' createdAt)",
+    )
+    expect(probe).not.toContain("about 2 minutes each")
     const exported = lines.find((l) => l.includes("`createAdaptorServer`")) ?? ""
     expect(exported).toContain("export it unlistened")
-    expect(exported).toContain("never `serve()`, which calls `listen()` and hangs on Vercel")
-    expect(exported).toContain("62 s")
+    expect(exported).toContain("never `serve()`, which calls `listen()`")
+    expect(exported).not.toContain("hangs on Vercel")
+    const figures = lines.find((l) => l.includes("`listen(3000)`")) ?? ""
+    expect(figures).toContain(
+      "that `http.createServer()` server hung 62 s once it had called `listen(3000)`",
+    )
+    expect(figures).not.toContain("the same server")
     const done = lines.findIndex((l) =>
       l.includes("Done when the first preview that hangs names that difference"),
     )
-    expect(done).toBeGreaterThan(lines.indexOf(exported))
+    expect(done).toBeGreaterThan(lines.indexOf(figures))
+  })
+
+  test("scopes the hang to the deploys the probes measured", async () => {
+    const exported =
+      (await read("VERCEL.md")).split("\n").find((l) => l.includes("`createAdaptorServer`")) ?? ""
+    expect(exported).toContain(
+      "all 8 probe deploys built on 31 Oct whose export already listened hung",
+    )
+    expect(exported).toContain(
+      "a deploy of the same code built on 24 Oct still answered 200 on 31 Oct",
+    )
   })
 
   test("dates only what a record dates: the opening says measured, and the hang step cites its probes' day", async () => {
@@ -55,6 +75,6 @@ describe("VERCEL.md", () => {
     expect(lines.find((l) => l.startsWith("Three traps"))).toBe(
       "Three traps one CLI deploy met (measured), each a step at the command it follows.",
     )
-    expect(lines.find((l) => l.includes("`createAdaptorServer`"))).toContain("measured, 31 Oct")
+    expect(lines.find((l) => l.includes("`listen(3000)`"))).toContain("measured, 31 Oct")
   })
 })
