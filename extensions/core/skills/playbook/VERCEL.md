@@ -11,6 +11,7 @@ Three traps one CLI deploy met (measured), each a step at the command it follows
    Done when jq prints the object.
 3. **Probe a function that answers nothing.**
    Read an empty `vercel logs` as unknown: it returned 0 records for a function that hung about 60 s at its default export, a Node server that had already called `listen()`, so it shows neither a request nor its absence.
-   Deploy a minimal Hono probe, one route that returns a word, to a preview, then move it toward the real handler one difference a preview (an import, the export's shape, a runtime setting), about 2 minutes each, since that found the hang's cause faster than the logs did.
-   For a Node server export, export it unlistened: `createAdaptorServer` from `@hono/node-server`, never `serve()`, which calls `listen()` and hangs on Vercel (an unlistened `http.createServer()` and `createAdaptorServer()` each answered 200 in 1.2 s, and the same server after `listen(3000)` hung 62 s, measured, 31 Oct).
+   Deploy a minimal Hono probe, one route that returns a word, to a preview, then move it toward the real handler one difference a preview (an import, the export's shape, a runtime setting), since that found the hang's cause faster than the logs did (12 probes in about 16 minutes, about 1.5 minutes a probe, measured from their deploys' createdAt).
+   For a Node server export, export it unlistened: `createAdaptorServer` from `@hono/node-server`, never `serve()`, which calls `listen()`, since every deploy built on 31 Oct hung an export already listening, and one of the same code built on 24 Oct still answered 200 that day.
+   An unlistened `http.createServer()` and `createAdaptorServer()` each answered 200 in 1.2 s, and that `http.createServer()` server hung 62 s once it had called `listen(3000)` (measured, 31 Oct).
    Done when the first preview that hangs names that difference.
