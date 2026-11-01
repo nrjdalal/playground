@@ -5,7 +5,7 @@ Every `SKILL.md` is one of two kinds, split by who can reach it:
 - **User-invoked**: only the human typing its name. Set `disable-model-invocation: true` in the frontmatter. The `description` is a one-line summary for a person browsing slash commands. A typed invocation arms its hooks, and a worker that Reads a skill with no `hooks:` follows the step its brief names ([DISPATCH.md](../extensions/core/skills/playbook/DISPATCH.md)).
 - **Model-invoked**: the default, reachable by the model or the user. The `description` is model-facing: front-load the leading word, and give each distinct trigger one phrase.
 
-The test: could the agent usefully reach for this skill on its own? `triage-and-implement` is model-invoked, because an agent asked to fix a ticket should load it. Its keep-going loop starts only on a typed `/triage-and-implement` (see [ADR 0001](./adr/0001-the-ticket-skill-keeps-going-through-a-skill-stop-hook.md)).
+The test: could the agent usefully reach for this skill on its own? `code-review-loop` is model-invoked, its frontmatter setting no `disable-model-invocation`, because a session asked to review or re-review a PR should load it.
 
 When one skill needs another, it says so as an instruction: `Call the Skill tool with "<name>"`, one skill per call.
 
