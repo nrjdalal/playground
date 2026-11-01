@@ -7,7 +7,7 @@ const CLI = join(import.meta.dir, "../../../../../packages/scripts/src/playgroun
 const dir = mkdtempSync(join(tmpdir(), "dispatcher-page-"))
 afterAll(() => rmSync(dir, { force: true, recursive: true }))
 
-// A scratch config folder whose roster lists two sessions, and an open that writes what it was given, so nothing opens in a browser.
+// A scratch config folder whose roster lists two sessions, and an open that writes what it was given, so a call to open leaves a file the test checks for.
 const setup = async () => {
   const root = mkdtempSync(join(dir, "run-"))
   const config = join(root, "claude")
@@ -40,7 +40,7 @@ const setup = async () => {
 }
 
 describe("playground page (#1850)", () => {
-  test("copies the page, writes its caption, appends its line, opens the copy, and takes a free name on a clash", async () => {
+  test("copies the page, writes its caption, appends its line, opens nothing, and takes a free name on a clash", async () => {
     const { opened, page, previews, root } = await setup()
     const file = join(root, "lookup.html")
     await Bun.write(file, "<!doctype html><title>Lookup</title>")
@@ -61,9 +61,7 @@ describe("playground page (#1850)", () => {
       { by: "planner", file: "lookup-2.html", for: null, title: "Again" },
     ])
     expect(Number.isNaN(Date.parse(lines[0].at))).toBe(false)
-    expect(readFileSync(opened, "utf8")).toBe(
-      `${join(previews, "lookup.html")}\n${join(previews, "lookup-2.html")}\n`,
-    )
+    expect(existsSync(opened)).toBe(false)
   })
 
   test("refuses a file that is not HTML and a --by or --for the roster does not list", async () => {

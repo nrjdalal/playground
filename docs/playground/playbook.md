@@ -204,7 +204,8 @@ Like the ticket guard, a hook that cannot start lets the call through, and the r
   A hook refuses each of those there, naming the fix, while its upkeep (a pull, a fetch, rebuilding the shared packages with env validation off after a pull that changes them, relinking the skills) and reads run.
 - Nothing types into another session's pane in the owner's name: sessions and ops alerts reach a session through `SendMessage` (the **voice** rule), and the dashboard types only for his own clicks.
   A test fails on any other caller of the dashboard's `deliver()` and on any text in the repo that types into a pane, Escape on the usage-limit dialog and a manager's `playground picker` on a permission prompt aside.
-- A page for the owner (a report, a comparison, a mock, a diagram) is a local HTML file in the session's scratchpad, kept and opened in his browser with `playground page` (the **local page** rule), since a claude.ai artifact publishes under whichever account the session holds; it then stays on the Pages tab of the session's view, of the one it was made for and of the dispatcher's.
+- A page for the owner (a report, a comparison, a mock, a diagram) is a local HTML file in the session's scratchpad, kept with `playground page` and posted as an Inbox card's `html` attachment, so the Inbox's viewer shows it and nothing opens on the owner's screen (the **local page** rule), since a claude.ai artifact publishes under whichever account the session holds.
+  The page then stays on the Pages tab of the session's view, of the one it was made for and of the dispatcher's.
   Every page's header shows its version, "Version N · <date> · <kind>", always, and a copy made to share outside drops the label.
   The factory's settings deny the `Artifact` tool, and a test fails without the deny.
 

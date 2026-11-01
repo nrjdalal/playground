@@ -29,7 +29,7 @@ playground status     one line each for the terminal, the Dashboard, the followe
 playground sweep <lead>
                       what changed since that lead's last sweep (alerts, the merge queue, load5 crossing 15, the single-slot flag, its rows' passed ETAs), or quiet
 playground page <file.html> --title "<title>" --by <session> [--for <session>]
-                      keep a page for the Dashboard: copy it into the previews folder under a free name, with its title as its caption and a line in pages.jsonl, then open the copy; it shows on the Pages tab of --by's view, of --for's and of the dispatcher's
+                      keep a page for the Dashboard: copy it into the previews folder under a free name, with its title as its caption and a line in pages.jsonl, and print the copy's path for an Inbox card's html attachment (bun run ask new), opening nothing; it shows on the Pages tab of --by's view, of --for's and of the dispatcher's
 playground update [--to <tag>]
                       fast-forward this checkout onto origin/main, re-run link-skills.sh, install when a lockfile or package.json changed, build packages/* when one with a dist changed, restart the ops jobs whose source changed, then roll the Dashboard to the newest build: Building, Switching, then Updated to <sha7> or Failed: <reason>; --to moves the checkout to that release instead, back or on, and leaves the Dashboard as it is
 playground doctor     one line per need, as ok, MISSING with its fix, or optional: the tools, the data folder, the pinned herdr, the links into this checkout, the release it is at, and each ops job launchd should hold
