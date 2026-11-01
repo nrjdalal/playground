@@ -28,19 +28,31 @@ Done when `CANARY` holds the SHA you mean to ship and the gate's PASS and FAIL l
 
 ## Rehearse an invitee's update
 
-When the candidate changes the update path anything in step 5 runs (`update.ts` itself, `link-skills.sh`, an ops job, the Dashboard roll), rehearse the update an invitee runs, from the last tag to the candidate, before step 3: a machine whose own checkout cannot take the update yet still gets the proof. The whole rehearsal lives in one scratch folder, and nothing outside it changes.
+When the candidate changes the update path anything in the ship's step 5 runs (`update.ts` itself, `link-skills.sh`, an ops job, the Dashboard roll), rehearse the update an invitee runs, from the last tag to the candidate, before the ship's step 3: a machine whose own checkout cannot take the update yet still gets the proof. The whole rehearsal lives in one scratch folder, and nothing outside it changes. A `--to` run stops before the Dashboard roll, which `playground update` reaches only without a tag, so the rehearsal proves the rest of the path; a candidate whose update-path change is only the roll proves itself on a dashboard stack of its own.
 
-1. **Mirror.** Give the rehearsal an origin of its own: clone the repository bare into the scratch folder, then clone that mirror and, in the clone, fetch the pinned `$CANARY` from the repository, merge it into `main` with `--no-ff` (the merge commit a ship makes), tag the merge with the tag this ship will cut, and push `main` and the tag to the mirror.
+a. **Mirror.** Give the rehearsal an origin of its own: clone the repository bare into the scratch folder, then clone that mirror and, in the clone, fetch the pinned `$CANARY` from the repository, merge it into `main` with `--no-ff` (the merge commit a ship makes), tag the merge with the tag this ship will cut, and push `main` and the tag to the mirror.
    Done when the mirror's `main` holds the merge commit, the tag names it, and the repository holds neither.
 
-2. **Invitee.** Clone from the mirror, check out the last tag on `main`, and install and build as an invitee's install does (`install.sh`, or its install and build steps alone).
-   Done when `playground doctor` from that clone reads `version at <last tag>`.
+b. **Contain.** Run every later command under `env -i`, so the run inherits nothing from the real environment, `PLAYGROUND_REPO` included, with `PATH` holding the stub folder first, then the throwaway `HOME`'s bin and the system basics, and `HOME` at a throwaway folder inside the scratch folder.
+   Put a stub on `PATH` for each side-effecting tool the update can call, one that logs each call and refuses; read `update.ts`, `ops-restart/cli.ts` and what they call for the list.
+   Leave `claude` off `PATH` altogether: `link-skills`' `orgs home` step waits for an absent `claude` and fails a stub that refuses.
+   Record the before-state (listings and checksums) of everything outside the scratch folder the update could reach, the home folder's bins and links among them, before any install runs.
+   Done when every tool on the list is stubbed or absent, and the before-state is saved.
 
-3. **Contain.** Run every later command under `env -i`, with `PATH` holding the throwaway `HOME`'s bin, the system basics, and the stub folder, `HOME` at a throwaway folder inside the scratch folder, and no `PLAYGROUND_REPO`, so every tool reads the invitee clone as its checkout and keeps its data folder inside the throwaway `HOME`; record the before-state (listings and checksums) of everything outside the scratch folder the update could reach. Put a stub on `PATH` for each side-effecting tool the update can call, one that logs each call and refuses (read `update.ts`, `ops-restart/cli.ts` and what they call for the list), and leave `claude` off `PATH` altogether: `link-skills`' `orgs home` step waits for an absent `claude` and fails a stub that refuses.
-   Done when every tool on the list is stubbed or absent and the before-state is saved.
+c. **Invitee.** Clone from the mirror, check out the last tag on `main`, and install and build inside the containment, running the install and build steps of an invitee's install from the clone, since `install.sh` itself stops without `claude`:
 
-4. **Update.** Run `playground update --to <tag>`, then `playground doctor`, still contained.
-   Done when the update exits 0 and doctor's version line names the new tag with no MISSING line, the after-state reads unchanged against the before-state, and each stub's log names the calls the real machine would have taken. A step that fails names its caller: when a stub took that call, the update needs it, so contain that call another way (a flag, an env) and run the rehearsal again.
+   ```bash
+   bun install --frozen-lockfile
+   env NODE_ENV=production SKIP_ENV_VALIDATION=true node_modules/.bin/turbo run build --filter='./packages/*'
+   bash scripts/link-skills.sh   # links this clone's playground command into the throwaway HOME's bin, already on PATH
+   ```
+
+   Done when `playground doctor` from the clone, still contained, reads `held at <last tag>, N commits behind origin/main`.
+
+d. **Update.** Run `playground update --to <tag>`, then `playground doctor`, still contained.
+   Done when the update exits 0, doctor's version line reads `at <tag>`, and every MISSING line names the containment's own doing (`claude`, or a tool a stub stands in for), so no need of the update itself reads MISSING; the after-state reads unchanged against the before-state, and each stub's log names the calls the real machine would have taken. A step that fails names its caller: when a stub took that call, the update needs it, so contain that call another way (a flag, an env) and run the rehearsal again.
+
+The rehearsal's result goes into the ship PR's body beside the new-user gate's PASS and FAIL list.
 
 ## 2. Open the ship PR
 
