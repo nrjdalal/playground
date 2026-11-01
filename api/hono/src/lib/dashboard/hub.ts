@@ -368,7 +368,9 @@ export class DashboardHub {
         }
       }
       if (generation !== this.generation || this.listeners.size === 0) return
+      // a failed read leaves every tail open, so each is read again as on a good one
       if (live) this.syncTails(live.transcripts)
+      else for (const sessionId of this.tails.keys()) this.queueRead(sessionId)
       this.live = live
       this.activity.update(working(live))
       this.last = frame
@@ -391,7 +393,7 @@ export class DashboardHub {
       this.tails.delete(sessionId)
     }
     for (const [sessionId, path] of transcripts) {
-      // FSEvents drops change events under load (6 of 15 at load5 12.8), so every refresh, the 10 s safety one included, reads an open tail again from its offset; a read with nothing past the offset ends at once.
+      // a lost change event leaves its lines past the offset, so a refresh reads an open tail again (cmux.md); a read with nothing past the offset ends at once.
       if (this.tails.has(sessionId)) {
         this.queueRead(sessionId)
         continue
