@@ -30,6 +30,10 @@ const judgeable = (input: Record<string, unknown>): boolean =>
 export const BY_HAND =
   "deny it by hand with Escape and SendMessage the session the reason, or take it to the dispatcher"
 
+// no-raw-spawn refuses a key into a herdr pane from any session, the dispatcher included, so a close and a resume is the route left.
+const herdrRoute = (name: string): string =>
+  `close the session with spawn.sh close ${name}, then run the spawn.sh resume line ~/.playground/resume/${name}.sh holds with --brief <a file under ~/.playground of the reason and the simpler shape> added, so it resumes under its name by its session id and the prompted call never runs`
+
 function matchOf(dialog: string[], input: Record<string, unknown>): "strong" | "weak" | null {
   const flat = (text: string) => text.replace(/[\s│]+/g, "")
   const text = flat(dialog.join(""))
@@ -62,7 +66,7 @@ export function refusalOf(name: string, screen: string, transcript: string, key:
   return others.some(
     (other) => callKey(other) !== key && (!judgeable(other) || matchOf(dialog, other)),
   )
-    ? `${name}'s prompt may be another waiting call's (a subagent's file or URL prompt always is, while its parent waits); nothing was pressed: ${BY_HAND}`
+    ? `${name}'s prompt may be another waiting call's (a subagent's file or URL prompt always is, while its parent waits); nothing was pressed: ${herdrRoute(name)}`
     : ""
 }
 
@@ -73,14 +77,20 @@ export const promptKey = (screen: string, transcript: string): string | null =>
     .find((key) => !refusalOf("", screen, transcript, key)) ?? null
 
 // Pure: how ops-unstick's alert has the manager answer a permission prompt it read off a screen: picker's lines by the key of the waiting call the prompt shows, else the route left.
-export const answerOf = (name: string, key: string | null): string =>
+export const answerOf = (name: string, key: string | null, herdr = false): string =>
   key
     ? pickerLines(name, key)
-    : "playground picker cannot answer it, since no waiting call is surely its own: tell dispatcher, for the owner to answer it in the pane."
+    : `playground picker cannot answer it, since no waiting call is surely its own: ${herdr ? herdrRoute(name) : "tell dispatcher, for the owner to answer it in the pane"}.`
 
-// `bun prompt.ts answer <name> <session id>`, the screen on stdin: prints answerOf() for the permission prompt that screen shows, for ops-unstick's screen backstop.
+// `bun prompt.ts answer <name> <session id> [herdr]`, the screen on stdin: prints answerOf() for the permission prompt that screen shows, on a herdr pane with herdr, for ops-unstick's screen backstop.
 if (import.meta.main && process.argv[2] === "answer") {
-  const [name = "", sessionId = ""] = process.argv.slice(3)
+  const [name = "", sessionId = "", runtime = ""] = process.argv.slice(3)
   const transcript = await transcriptOf(configDirOf(process.env), sessionId)
-  console.log(answerOf(name, transcript ? promptKey(await Bun.stdin.text(), transcript) : null))
+  console.log(
+    answerOf(
+      name,
+      transcript ? promptKey(await Bun.stdin.text(), transcript) : null,
+      runtime === "herdr",
+    ),
+  )
 }

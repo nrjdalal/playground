@@ -201,6 +201,11 @@ describe("playground picker (PG-2184)", () => {
     const result = await runPicker(["k3m9px-worker", "allow", callKey({ command: "ls" })], deps)
     expect(result.code).toBe(1)
     expect(result.out).toContain("may be another waiting call's")
+    // no-raw-spawn refuses a hand key in a herdr pane, so the route left is a close and a resume by session id
+    expect(result.out).toContain("spawn.sh close k3m9px-worker")
+    expect(result.out).toContain("~/.playground/resume/k3m9px-worker.sh")
+    expect(result.out).not.toContain("Escape")
+    expect(result.out).not.toContain("dispatcher")
     expect(presses()).toEqual([])
   })
 
@@ -343,6 +348,7 @@ describe("playground picker (PG-2184)", () => {
     const result = await runPicker(["k3m9px-worker", "allow", KEY], deps)
     expect(result.code).toBe(1)
     expect(result.out).toContain("still holds the prompt")
+    expect(result.out).toContain("by hand with Escape")
     expect(logged).toEqual([])
   })
 
