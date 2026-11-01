@@ -31,12 +31,14 @@ export const updateSteps = (changed: string[]) => ({
 })
 
 // With a tag, the checkout's main is moved to that release instead, back or on, and the Dashboard, which rolls on its own branch, is left as it is; a plain update later moves it on to origin/main again.
+// `done` holds the commit the last finished update reached, so a run after one cut short past its fast-forward still installs, builds and restarts what that merge changed.
 export const runUpdate = async (
   repo: string,
   run: Run,
   roll: () => Promise<number>,
   log: (line: string) => void = console.log,
   to?: string,
+  done?: string,
 ): Promise<number> => {
   const git = (...args: string[]) => run(["git", "-C", repo, ...args])
   // a step whose output the terminal shows, named before it runs and again when it fails
@@ -46,7 +48,11 @@ export const runUpdate = async (
     log(`playground update: ${name} failed; fix it and run playground update again`)
     return false
   }
-  const old = (await git("rev-parse", "HEAD")).out.trim()
+  const head = (await git("rev-parse", "HEAD")).out.trim()
+  const recorded =
+    done && (await Bun.file(done).exists()) ? (await Bun.file(done).text()).trim() : ""
+  const old =
+    recorded && (await git("cat-file", "-e", `${recorded}^{commit}`)).code === 0 ? recorded : head
   // a checkout left on another branch, such as one cloned while canary was the default, moves to main when its tree is clean, so the merge below lands on main
   const onMain = async () => {
     const branch = (await git("branch", "--show-current")).out.trim()
@@ -114,6 +120,7 @@ export const runUpdate = async (
     ])
   after.push(["ops-restart", [process.execPath, "--no-env-file", restart, repo, old, "HEAD"]])
   for (const step of after) if (!(await shown(step))) return 1
+  if (done) await Bun.write(done, (await git("rev-parse", "HEAD")).out)
   if (!to) return roll()
   log(
     `playground update: at ${to}; the Dashboard rolls on its own, and playground update moves on to origin/main`,
