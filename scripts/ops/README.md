@@ -104,7 +104,7 @@ A box run stops with its caller.
 As the unit starts, `ci.sh` prints `ci.sh: ci-<run> started on the box; ci.sh cancel <run> stops it` on stderr, and a TERM, INT or HUP to `ci.sh` stops the unit too.
 To stop a run of your own whose `ci.sh` has gone, or one queued by mistake, run `~/.playground/ops/runner-host/ci.sh cancel <run>` with the id from that line; it takes only a run id and prints the unit's state after, done when that reads `inactive`.
 A run whose `ci.sh` died past any trap (a SIGKILL, a restart) stops itself: every poll touches `/srv/ci/<run>.beat`, and suite.sh stops the unit, queued or running, once that heartbeat is 11 minutes old, just past the 10 minutes `ci.sh` waits on a box that does not answer.
-Every ssh of every `ci.sh` rides one connection per user (`ControlMaster=auto`, `ControlPersist=60`, its socket `~/.ssh/lm-%C`), so a poll costs the box no new handshake.
+Every ssh of every `ci.sh` rides one connection per user (`ControlMaster=auto`, `ControlPersist=60`, its socket `~/.ssh/pg-%C`), so a poll costs the box no new handshake.
 ssh refuses a socket path past 86 bytes, so on a `$HOME` over 37 characters every `ci.sh` call exits 255 and the run falls back to the Mac.
 
 A web image build goes there alone through `ci.sh web <rev>`, the route `no-mac-web-build` names while a runner host is set ([why](../hooks/README.md#no-mac-web-build)).

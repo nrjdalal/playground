@@ -226,7 +226,7 @@ Their tests are `bun run test:file tests/scripts/hooks`.
 
 - ALWAYS: Write each public repository's pull requests, issues, reviews and comments in plain words, naming no person, company or private record, since everything written there is public once the repository is and stays cached after.
   `scripts/hooks/no-public-leak.ts`, registered in both settings files, refuses a write to a public repository (`factory.publicRepo`, one or a list, or while unset `TODAY_PUBLIC` in trace-count's `kinds.ts`, the factory's and Yard's)
-  whose text holds a name, a handle, a company term, a Slack id or a Linear key from its list, or any email address, `LM-<n>` key or link into the archive repository (`factory.archiveRepo`).
+  whose text holds a name, a handle, a company term, a Slack id or a Linear key from its list, or any email address or link into the archive repository (`factory.archiveRepo`).
   An extensions root whose policy.json it cannot read for those two refuses the write, as a list it cannot trust does.
   Its reason names the kind and the plain-words fix, never the text.
   It reads every write through no-playground-leak's engine (`inspectAs` with its own `Policy`), so the shapes it reads are that guard's gh, `gh api`, curl and GitHub MCP writes; git commits and pushes, Linear and Slack are outside it.
@@ -236,7 +236,7 @@ Their tests are `bun run test:file tests/scripts/hooks`.
 
 ## The trace ratchet
 
-- ALWAYS: Write a new comment, doc or test in plain words, with no issue number (`#NNN`, `LM-<n>`) or old session name: the number belongs in the commit scope and the pull request body.
+- ALWAYS: Write a new comment, doc or test in plain words, with no issue number (`#NNN`, or a ticket key from the list) or old session name: the number belongs in the commit scope and the pull request body.
   `bun run trace-count` counts each kind in `kinds.ts` over the tree (git's files, or every file but installs and build output where no `.git` is), past the live names `LIVE_NAMES` keeps for the switch's migration.
   Its `ownerName` kind counts the owner's names (`owner.names`, then the owner part of `factory.archiveRepo`, read from the settings at run time), a quote set against the owner and anyone's dated quote; `companyName` counts the company's name, and `lightWords` a factory or old skill word glued into a longer one.
   It reads past the lockfiles too (`bun.lock`, `package-lock.json`), whose integrity hashes can spell a list value by chance.
