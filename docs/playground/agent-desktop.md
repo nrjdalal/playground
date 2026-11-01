@@ -26,11 +26,11 @@ The session reads the grants with `agent-desktop permissions`, which never promp
 
 - A session on a Mac with no grant stops at its first step and names the permission to grant, rather than trying a command.
 - Your pointer and focus stay where you left them while a session works.
-- The apps on your list, every web browser and Slack today, stay as you left them: a session opens, reads and closes none of them.
+- The apps on your list stay as you left them: a session opens, reads and closes none of them.
 - PRs, comments and reports describe what a session saw in words, with no snapshot or screenshot attached.
 
 ## Where it fits
 
 A core skill beside [agent-browser](../../skills/zerostarter/agent-browser/SKILL.md), its browser sibling from the same upstream.
-The skill holds two rules itself until the `no-desktop-owner-app` hook is registered to refuse them too: `--headed`, and any command naming an app on your list.
+The `no-desktop-owner-app` hook refuses the skill's two rules in every session, `--headed` and any command naming an app on your list, and its refusal names the two routes past it: you run the command with `!`, or Ops takes the app off your list.
 A session trying it before it merges follows [.agents/skill-trial.md](../../.agents/skill-trial.md).
