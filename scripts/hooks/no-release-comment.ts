@@ -170,6 +170,7 @@ async function api(
       { guarded: true, label: "a repository named only by a GraphQL node id" },
       [...fields.map((f) => f.text), ...inputs],
       env,
+      INLINE_QUERY,
     )
   }
   const path = endpoint.value
@@ -249,6 +250,12 @@ function refuse(what: string, target: Target, detail: string, fix: string): stri
   return `no-release-comment hook refused ${what} on ${target.label}: ${detail}. On a guarded owner's repos an owner comment containing "release" in any case publishes to npm, and gh and the GitHub MCP post as that owner. ${fix}`
 }
 
+const READABLE =
+  "Put the text in the command itself, or write the text to a file with the Write tool first, then run the command again in a call of its own that names that file by its literal absolute path (--body-file /abs/body.md)."
+
+const INLINE_QUERY =
+  "Write the query and each of its fields in the command itself, not in a variable: gh api graphql -f query='query { viewer { login } }'. For a long one, write it to a file with the Write tool first and pass it by its literal absolute path (-F query=@/abs/query.graphql, -F body=@/abs/body.md)."
+
 const REWORD =
   'Write "ship" or "publish step" instead, or leave the comment out. For a file or rule whose name holds the word, name it by what it is, such as "the ship rule" or "the comment hook", with its line number; for a patch that holds it, write the patch to a file in your scratchpad, send its absolute path to the PR\'s worker by SendMessage, and say in the comment that a patch went to the author, since gh\'s `--attach` uploads only images and video.'
 
@@ -257,6 +264,7 @@ async function judge(
   target: Target,
   bodies: Text[],
   env: Env,
+  fix = READABLE,
 ): Promise<string | undefined> {
   if (!target.guarded) return
   const texts = await Promise.all(bodies.map((b) => resolveText(b, env)))
@@ -268,7 +276,7 @@ async function judge(
       what,
       target,
       `the hook cannot read its text before the command runs (it comes from ${hidden.unknown})`,
-      "Put the text in the command itself, or write the text to a file with the Write tool first, then run the command again in a call of its own that names that file by its literal absolute path (--body-file /abs/body.md).",
+      fix,
     )
   }
 }

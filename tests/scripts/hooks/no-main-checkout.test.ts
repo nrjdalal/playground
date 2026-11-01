@@ -65,6 +65,29 @@ describe("a build, a test run, lefthook, turbo or a file write in the main check
     ["mv into it", "mv /tmp/a b.txt"],
     ["touch", "touch stray"],
     ["tee", "echo hi | tee stray"],
+    ["sed -i, BSD's, as #299's stray edit ran", "sed -i '' 's/a/b/' scripts/ops/run-slot.sh"],
+    ["sed -i, GNU's", "sed -i 's/a/b/' notes.txt"],
+    ["sed -i with a suffix", "sed -i.bak 's/a/b/' notes.txt"],
+    ["sed --in-place past -e", "sed --in-place -e 's/a/b/' notes.txt"],
+    ["sed with -i among its flags", "sed -Ei 's/a/b/' notes.txt"],
+    ["perl -pi -e", "perl -pi -e 's/a/b/' notes.txt"],
+    ["perl -i past its other flags", "perl -0777 -i -pe 's/a/b/' notes.txt"],
+    ["sed -i past a flag group ending in E", "sed -nE -i 's/a/b/' notes.txt"],
+    ["sed -i with its script attached to -e, quoted", "sed -i -e's/a/b/' notes.txt"],
+    ["sed -i with its script attached to -e", "sed -i -es/a/b/ notes.txt"],
+    ["sed --in-place with --expression=", "sed --in-place --expression=s/a/b/ notes.txt"],
+    ["sed --in-place with --file=", "sed --in-place --file=edit.sed notes.txt"],
+    ["perl -i after -0 in one flag group", "perl -0pi -e 's/a/b/' notes.txt"],
+    ["perl -i after -0's digits in one flag group", "perl -0777pi -e 's/a/b/' notes.txt"],
+    ["BSD sed -I with a suffix word", "sed -I .bak 's/a/b/' notes.txt"],
+    ["BSD sed -I with an empty suffix", "sed -I '' 's/a/b/' notes.txt"],
+    ["git add, which moves the index", "git add -A"],
+    [
+      "a commit through run-slot, as #299's ran",
+      "~/.playground/ops/run-slot.sh w -- env NODE_ENV=production SKIP_ENV_VALIDATION=true git commit -q -F /tmp/m.txt",
+    ],
+    ["a build through run-slot", "~/.playground/ops/run-slot.sh w -- bun run build"],
+    ["a write through run-slot", "~/.playground/ops/run-slot.sh w -- sed -i 's/a/b/' notes.txt"],
     ["inside a shell it starts", "bash -c 'lefthook run pre-commit'"],
     [
       "lefthook started by bun, as lefthook.yml spells it",
@@ -131,6 +154,8 @@ describe("a build, a test run, lefthook, turbo or a file write in the main check
     ["git -C", `git -C ${MAIN} commit -m x`],
     ["a redirect into it by its path", `echo x > ${MAIN}/stray.txt`],
     ["cp into it by its path", `cp a ${MAIN}/b`],
+    ["sed -i on a file in it by its path", `sed -i 's/a/b/' ${MAIN}/scripts/ops/run-slot.sh`],
+    ["a commit through run-slot by git -C", `run-slot.sh w -- git -C ${MAIN} commit -m x`],
     ["a cd into it by a path that climbs", `cd ${WORKTREE}/../../.. && bun run build`],
     ["a redirect into it by a path that climbs", `echo x > ${WORKTREE}/../../../stray.txt`],
   ])("from a worktree, %s", async (_name, command) => {
@@ -252,6 +277,20 @@ describe("what keeps the main checkout up to date, or only reads it, runs", () =
     ["stderr into stdout", "git status 2>&1"],
     ["a write outside it", "echo hi > /tmp/x"],
     ["cp out of it", "cp README.md /tmp/readme"],
+    ["sed with no -i, to stdout", "sed -n 's/a/b/p' notes.txt"],
+    ["sed -i, GNU's, on a file outside it", "sed -i 's/a/b/' /tmp/x"],
+    ["sed -i, BSD's, on a file outside it", "sed -i '' 's/a/b/' /tmp/x"],
+    ["perl -pi -e on a file outside it", "perl -pi -e 's/a/b/' /tmp/x"],
+    ["perl with a module holding an i, no -i", "perl -Mstrict scripts/x.pl notes.txt"],
+    ["perl -C holding an i, no -i", "perl -Ci -ne 'print' notes.txt"],
+    ["perl -F holding an i, no -i", "perl -Fi -lane 'print' notes.txt"],
+    ["BSD sed -i with a suffix word, on a file outside it", "sed -i .bak 's/a/b/' /tmp/x"],
+    ["a read through run-slot", "~/.playground/ops/run-slot.sh w -- git status --short"],
+    [
+      "a commit through run-slot in a worktree by git -C",
+      `~/.playground/ops/run-slot.sh w -- env K=V git -C ${WORKTREE} commit -m x`,
+    ],
+    ["run-slot with no command", "~/.playground/ops/run-slot.sh w"],
     ["curl to stdout", "curl -sS https://example.com"],
     ["curl to stdout by -o -", "curl -sS -o - https://example.com"],
     ["turbo in a worktree by its --cwd", "turbo run build --cwd .claude/worktrees/a"],
@@ -409,9 +448,91 @@ describe("a git command that moves the main checkout's HEAD, index or files is r
     ["a branch list", "git branch --list 'lm-*'"],
     ["stash list", "git stash list"],
     ["a dry clean", "git clean -n"],
+    ["a dry add", "git add -n -A"],
+    ["a dry add, by its long name", "git add --dry-run ."],
     ["apply --check", "git apply --check /tmp/x.patch"],
   ])("%s in the main checkout runs", async (_name, command) => {
     expect(await bash(command)).toBeUndefined()
+  })
+})
+
+describe("git reset --keep origin/main, the one way back from a stray local commit on the main checkout's main", () => {
+  const scratch = mkdtempSync(join(tmpdir(), "no-main-checkout-reset-"))
+  afterAll(() => rmSync(scratch, { force: true, recursive: true }))
+  const AS = {
+    ...process.env,
+    GIT_AUTHOR_EMAIL: "t@example.com",
+    GIT_AUTHOR_NAME: "t",
+    GIT_COMMITTER_EMAIL: "t@example.com",
+    GIT_COMMITTER_NAME: "t",
+  }
+  const git = (cwd: string, ...args: string[]) => {
+    const run = Bun.spawnSync(["git", ...args], { cwd, env: AS, stderr: "pipe", stdout: "pipe" })
+    if (run.exitCode !== 0) throw new Error(run.stderr.toString())
+  }
+  // A main checkout on main one local commit over origin/main, which no remote holds; each state is its own repo.
+  const repo = (name: string, setup?: (main: string) => void) => {
+    const origin = join(scratch, `${name}-origin.git`)
+    const main = join(scratch, name)
+    git(scratch, "init", "-q", "--bare", "-b", "main", origin)
+    git(scratch, "clone", "-q", origin, main)
+    git(main, "commit", "-q", "--allow-empty", "-m", "shipped")
+    git(main, "push", "-q", "origin", "main")
+    writeFileSync(join(main, "run-slot.sh"), "stray\n")
+    git(main, "add", "run-slot.sh")
+    git(main, "commit", "-q", "-m", "stray")
+    setup?.(main)
+    return main
+  }
+  const reset = (main: string, command: string) =>
+    check(
+      JSON.stringify({
+        cwd: main,
+        hook_event_name: "PreToolUse",
+        tool_input: { command },
+        tool_name: "Bash",
+      }),
+      { HOME: "/u" },
+      main,
+    )
+
+  const stray = repo("stray")
+  test.each([
+    ["by git -C", `git -C ${stray} reset --keep origin/main`],
+    ["by a cd into it", `cd ${stray} && git reset --keep origin/main`],
+    ["from its own folder", "git reset --keep origin/main"],
+  ])("runs %s, with the tree clean and the commit on no remote", async (_name, command) => {
+    expect(await reset(stray, command)).toBeUndefined()
+  })
+
+  test.each([
+    ["--hard", "git reset --hard origin/main"],
+    ["--soft", "git reset --soft origin/main"],
+    ["--mixed", "git reset --mixed origin/main"],
+    ["a bare reset", "git reset origin/main"],
+    ["another target", "git reset --keep HEAD~1"],
+    ["--keep with another flag", "git reset --keep -q origin/main"],
+  ])("refuses %s", async (_name, command) => {
+    expect(await reset(stray, command)).toContain("no-main-checkout hook refuses git reset")
+  })
+
+  test.each([
+    ["a dirty tree", repo("dirty", (main) => writeFileSync(join(main, "run-slot.sh"), "edit\n"))],
+    ["an untracked file", repo("untracked", (main) => writeFileSync(join(main, "new.txt"), "x\n"))],
+    [
+      "a commit another remote holds",
+      repo("pushed", (main) => {
+        const mirror = join(scratch, "pushed-mirror.git")
+        git(scratch, "init", "-q", "--bare", "-b", "main", mirror)
+        git(main, "remote", "add", "mirror", mirror)
+        git(main, "push", "-q", "mirror", "main")
+      }),
+    ],
+    ["another branch", repo("branch", (main) => git(main, "checkout", "-q", "-b", "other"))],
+  ])("refuses it with %s", async (_name, main) => {
+    expect(await reset(main, "git reset --keep origin/main")).toContain(
+      "no-main-checkout hook refuses git reset",
+    )
   })
 })
 
