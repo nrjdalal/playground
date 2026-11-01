@@ -99,13 +99,13 @@ Done when the reset has passed and the retried call answers.
 
 ## Reading canary's own checks
 
-The suite and the build run only on `pull_request` (`auto-test.yml`, `auto-check-build.yml`), so every such run `gh run list --branch canary` lists belongs to the open canary-into-main PR.
+The suite and the build run only on `pull_request` (`auto-test.yml`, `auto-check-build.yml`), so every such run `gh run list --branch canary` lists belongs to a canary-into-main PR.
 The bot opens that PR, so its `opened` runs are **held runs**: zero jobs, waiting for an approval nobody gives, and reported as `failure` once that PR merges.
 A held run is no failure: an audit of canary's runs over 25 hours on 31 Oct and 1 Nov found 21 red runs, 20 of them held runs, and one real break (measured).
 `gh run list --limit 100` reached back only 3 of those 25 hours, so a window's list pages the REST read below.
 
 - **Canary now**: read the check runs on the open canary-into-main PR's head, which hold no held run.
-  A head that has only held runs shows its push checks alone (`Audit canary`, the PR's own creation); its suite and build have no reading at that head until the next push to canary.
+  A head that has only held runs shows its push checks alone (`Audit canary` and `Auto create PR to merge canary into main`); its suite and build have no reading at that head until the next push to canary.
   Done when every check on the head has a conclusion.
 
   ```bash
