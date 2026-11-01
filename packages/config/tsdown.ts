@@ -1,3 +1,5 @@
+import { existsSync } from "node:fs"
+
 import { type CopyEntry, defineConfig } from "tsdown"
 
 type BundleDeps = {
@@ -31,6 +33,8 @@ export function definePackageConfig(options: {
         },
       },
       minify: true,
+      // A package's tsconfig.build.json scopes the declaration step: tsgo emits a declaration for every file its tsconfig includes, and writes one for a file outside the package beside that file's source.
+      ...(existsSync("tsconfig.build.json") ? { tsconfig: "tsconfig.build.json" } : {}),
     }),
   ]
 }
