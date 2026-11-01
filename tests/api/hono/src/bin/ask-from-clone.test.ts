@@ -1,7 +1,9 @@
 import { afterAll, expect, test } from "bun:test"
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+
+import { dashboardCheckout } from "../../../../../packages/scripts/src/playground/probe"
 
 // A user install's clone root, a git repo whose Dashboard's checkout is the worktree on live.branch, holding the .env, and a stand-in ask there that prints what it reached, so no database is touched.
 const CLI = join(import.meta.dir, "../../../../../api/hono/src/bin/dashboard-ask.ts")
@@ -36,7 +38,7 @@ const standIn = (path: string, env: string | null = `POSTGRES_URL=${URL}\n`) => 
   )
   writeFileSync(
     join(path, "reached.ts"),
-    'console.log(`reached ${process.env.POSTGRES_URL} ${process.argv.slice(2).join(" ")}`)\n',
+    'console.log(`reached ${process.env.POSTGRES_URL} ${process.argv.slice(2).join(" ")}`)\nconsole.error(`at ${process.cwd()}`)\n',
   )
   return path
 }
@@ -92,6 +94,22 @@ test("from the clone root with no POSTGRES_URL, ask runs as the checkout on live
   expect(run.exitCode).toBe(0)
 })
 
+// ask-from-clone.ts scans git's worktrees itself, since the API's build would write .d.ts files into packages/scripts/src if it imported probe.ts, so the scan is held to dashboardCheckout() here.
+test("hands off to the very checkout dashboardCheckout() finds, and to none where it finds none", () => {
+  const saved = process.env.PLAYGROUND_DATA_DIR
+  process.env.PLAYGROUND_DATA_DIR = data
+  try {
+    const found = dashboardCheckout(live)
+    expect(found).not.toBeNull()
+    expect(ask(live, {}).stderr.toString()).toContain(`at ${realpathSync(found!)}\n`)
+    expect(dashboardCheckout(unset)).toBeNull()
+    expect(ask(unset, {}).stdout.toString()).not.toContain("reached")
+  } finally {
+    if (saved === undefined) delete process.env.PLAYGROUND_DATA_DIR
+    else process.env.PLAYGROUND_DATA_DIR = saved
+  }
+})
+
 test("with no worktree on live.branch, ask stays in the clone root, a desk folder on another branch included", () => {
   stays(ask(unset, {}))
 })
@@ -113,7 +131,7 @@ test("a policy.json that does not parse means no hand-off, so ask's own guard re
   expect(run.stdout.toString()).not.toContain("reached")
   expect(run.stderr.toString()).toContain("policy.json does not parse")
   expect(run.stderr.toString()).toContain("live-dashboard.ts")
-  expect(run.stderr.toString()).not.toContain("probe.ts")
+  expect(run.stderr.toString()).not.toContain("ask-from-clone.ts")
 })
 
 test("a POSTGRES_URL already set keeps ask in the checkout it runs from", () => {
