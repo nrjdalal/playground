@@ -532,10 +532,12 @@ describe("a read of the root, and writes elsewhere, run", () => {
   })
 
   test.each([
-    ["the home", HOME],
-    ["the data folder", DATA],
-  ])("a commit message with a quoted glob from %s", async (_, cwd) => {
-    expect(await bash('git commit -m "fix(x): y"', cwd)).toBeUndefined()
+    ["a commit message", "the home", 'git commit -m "fix(x): y"', HOME],
+    ["a commit message", "the data folder", 'git commit -m "fix(x): y"', DATA],
+    ["an awk program", "the home", "awk '{print $1}' /dev/null", HOME],
+    ["an awk program", "the data folder", "awk '{print $1}' /dev/null", DATA],
+  ])("%s with a quoted glob runs from %s", async (_, _where, command, cwd) => {
+    expect(await bash(command, cwd)).toBeUndefined()
   })
 
   test("a reader inside the root", async () => {
