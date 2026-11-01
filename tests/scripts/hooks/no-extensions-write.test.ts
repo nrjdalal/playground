@@ -510,6 +510,13 @@ describe("a quoted argument is read as a command line only where a program runs 
     ["eval through setsid", "setsid eval 'rm -rf ~'"],
     ["ssh through sshpass", "sshpass -p x ssh h 'rm -rf ~'"],
     ["scp's ProxyCommand removing the home", "scp -o ProxyCommand='rm -rf ~' a h:b"],
+    ["a shell named by a ? glob", "/bin/s? -c 'rm -rf ~'"],
+    ["a shell named by a bracket glob", "/bin/[s]h -c 'rm -rf ~'"],
+    ["a shell and its -c from a brace", "{sh,-c} 'rm -rf ~'"],
+    ["a shell from a brace with an empty member", "{sh,} -c 'rm -rf ~'"],
+    ["a globbed shell behind taskpolicy", "taskpolicy -b /bin/s? -c 'rm -rf ~'"],
+    ["a braced shell behind env", "env {sh,-c} 'rm -rf ~'"],
+    ["a braced shell in bash -c's script", `bash -c "{sh,-c} 'rm -rf ~'"`],
   ])("%s stays refused", async (_, command) => {
     for (const cwd of homes)
       expect(await at(command, cwd)).toContain("no-extensions-write hook refuses")
