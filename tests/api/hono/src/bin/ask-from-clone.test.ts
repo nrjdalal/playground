@@ -27,9 +27,9 @@ const clone = (name: string) => {
   return root
 }
 
-const checkout = (root: string, path: string, branch: string) => {
-  git(root, "worktree", "add", "-q", "-b", branch, path)
-  writeFileSync(join(path, ".env"), `POSTGRES_URL=${URL}\n`)
+// The stand-in ask a checkout runs, and its .env (none when env is null).
+const standIn = (path: string, env: string | null = `POSTGRES_URL=${URL}\n`) => {
+  if (env !== null) writeFileSync(join(path, ".env"), env)
   writeFileSync(
     join(path, "package.json"),
     JSON.stringify({ scripts: { ask: `${process.execPath} reached.ts` } }),
@@ -41,6 +41,11 @@ const checkout = (root: string, path: string, branch: string) => {
   return path
 }
 
+const checkout = (root: string, path: string, branch: string, env?: string | null) => {
+  git(root, "worktree", "add", "-q", "-b", branch, path)
+  return standIn(path, env)
+}
+
 // The live checkout sits outside .claude/worktrees/desk, where a fresh install would first cut it.
 const live = clone("live")
 checkout(live, join(scratch, "dashboard-elsewhere"), "live/dashboard")
@@ -50,6 +55,20 @@ git(live, "worktree", "add", "-q", "-b", "worker", worker)
 // A desk folder on another branch, so no worktree is on live.branch.
 const unset = clone("unset")
 checkout(unset, join(unset, ".claude", "worktrees", "desk"), "not-live")
+
+// A live worktree with no .env.
+const bare = clone("bare")
+checkout(bare, join(scratch, "dashboard-bare"), "live/dashboard", null)
+
+// A clone root that is itself on live.branch, with a .env that sets no POSTGRES_URL.
+const self = clone("self")
+git(self, "checkout", "-q", "-b", "live/dashboard")
+standIn(self, "PLAYGROUND_UNUSED=1\n")
+
+// A data folder whose policy.json does not parse.
+const broken = join(scratch, "broken")
+mkdirSync(join(broken, "extensions"), { recursive: true })
+writeFileSync(join(broken, "extensions", "policy.json"), "{")
 
 const ask = (cwd: string, env: Record<string, string | undefined>, ...args: string[]) => {
   const { POSTGRES_URL: _, ...rest } = process.env
@@ -79,6 +98,22 @@ test("with no worktree on live.branch, ask stays in the clone root, a desk folde
 
 test("from a worktree other than the clone root, ask stays in it", () => {
   stays(ask(worker, {}))
+})
+
+test("a live worktree with no .env takes no hand-off", () => {
+  stays(ask(bare, {}))
+})
+
+test("a clone root on live.branch itself takes no hand-off to itself", () => {
+  stays(ask(self, {}))
+})
+
+test("a policy.json that does not parse means no hand-off, so ask's own guard refuses it", () => {
+  const run = ask(live, { PLAYGROUND_DATA_DIR: broken })
+  expect(run.stdout.toString()).not.toContain("reached")
+  expect(run.stderr.toString()).toContain("policy.json does not parse")
+  expect(run.stderr.toString()).toContain("live-dashboard.ts")
+  expect(run.stderr.toString()).not.toContain("probe.ts")
 })
 
 test("a POSTGRES_URL already set keeps ask in the checkout it runs from", () => {
