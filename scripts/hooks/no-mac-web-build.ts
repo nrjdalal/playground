@@ -77,8 +77,21 @@ const SERVICE_TAKES = new Set([
 // docker inspect is killed past this, well inside the hook's registered 15s, since a hook past its limit lets the call through and a Docker VM wedged by memory is the case this hook is for; a second later the read gives up even on pipes the killed process left open.
 export const INSPECT_TIMEOUT_MS = 8_000
 const WEB_DOCKERFILE = "web/next/Dockerfile"
-const ROUTE =
-  "Build the web image on the box instead: commit, then from the checkout run bash ~/.playground/ops/runner-host/ci.sh web HEAD, which builds HEAD's tree there and never on the Mac. The api image still builds here (docker compose build api)."
+const API_HERE = "The api image still builds here (docker compose build api)."
+const BOX_ROUTE = `Build the web image on the box instead: commit, then from the checkout run bash ~/.playground/ops/runner-host/ci.sh web HEAD, which builds HEAD's tree there and never on the Mac. ${API_HERE}`
+const NO_HOST_ROUTE = `No runner host is set (RUNNER_HOST, or the data folder's ops/runner-host/ip), so there is no box to build it on, and the live dashboard's Postgres stays up: set one up (scripts/ops/runner-host/host.sh setup <ip>, then write its address to that ip file), or build the web image on a machine with no live dashboard running. ${API_HERE}`
+
+// Whether a runner host is set, read as ci.sh's IP= line and its address check read it: RUNNER_HOST, else the data folder's ops/runner-host/ip with its trailing newlines stripped as $(cat) strips them, holding an IPv4 address.
+async function hasRunnerHost(environment: Record<string, string | undefined>): Promise<boolean> {
+  const ip =
+    environment.RUNNER_HOST ||
+    (
+      await Bun.file(join(dataDirOf(environment), "ops", "runner-host", "ip"))
+        .text()
+        .catch(() => "")
+    ).replace(/\n+$/, "")
+  return /^[0-9]{1,3}(\.[0-9]{1,3}){3}$/.test(ip)
+}
 
 // The words after the options that `takes` names, with each value skipped; an attached value (--file=x) is one word.
 function positionals(args: Word[], takes: Set<string>): Word[] {
@@ -150,8 +163,9 @@ async function dashboardRuns(
   what: string,
   environment: Record<string, string | undefined>,
 ): Promise<string | undefined> {
-  const cannot = (why: string) =>
-    `no-mac-web-build hook refuses ${what}: ${why}, so it cannot tell whether the live dashboard's Postgres runs in this Mac's Docker VM, where a web image build's memory takes the VM's out-of-memory killer to the dashboard's database. ${ROUTE}`
+  const route = async () => ((await hasRunnerHost(environment)) ? BOX_ROUTE : NO_HOST_ROUTE)
+  const cannot = async (why: string) =>
+    `no-mac-web-build hook refuses ${what}: ${why}, so it cannot tell whether the live dashboard's Postgres runs in this Mac's Docker VM, where a web image build's memory takes the VM's out-of-memory killer to the dashboard's database. ${await route()}`
   let name: string
   try {
     name = (
@@ -186,7 +200,7 @@ async function dashboardRuns(
   if (code === 0 && out.trim() === "false") return
   if (code !== 0 && /no such (?:object|container)/i.test(err)) return
   if (code === 0 && out.trim() === "true")
-    return `no-mac-web-build hook refuses ${what}: the live dashboard's Postgres (${name}) runs in this Mac's Docker VM, and a web image build peaks past the VM's memory, so its out-of-memory killer takes the dashboard's database. ${ROUTE}`
+    return `no-mac-web-build hook refuses ${what}: the live dashboard's Postgres (${name}) runs in this Mac's Docker VM, and a web image build peaks past the VM's memory, so its out-of-memory killer takes the dashboard's database. ${await route()}`
   return cannot(
     `docker inspect ${name} answered ${(err || out).trim().slice(0, 200) || `exit ${code}`}`,
   )

@@ -104,7 +104,7 @@ A run whose `ci.sh` died past any trap (a SIGKILL, a restart) stops itself: ever
 Every ssh of every `ci.sh` rides one connection per user (`ControlMaster=auto`, `ControlPersist=60`, its socket `~/.ssh/lm-%C`), so a poll costs the box no new handshake.
 ssh refuses a socket path past 86 bytes, so on a `$HOME` over 37 characters every `ci.sh` call exits 255 and the run falls back to the Mac.
 
-A web image build goes there alone through `ci.sh web <rev>`, the route `no-mac-web-build` names ([why](../hooks/README.md#no-mac-web-build)).
+A web image build goes there alone through `ci.sh web <rev>`, the route `no-mac-web-build` names while a runner host is set ([why](../hooks/README.md#no-mac-web-build)).
 It uploads `<rev>`'s tree as `ci.sh <rev>` does, and suite.sh's web mode takes every slot alone, so it waits for every suite to end.
 It prints the build's output and exits with its code, or 255 when the box cannot take it, and nothing falls back to the Mac: commit what it should build first, since only a commit's tree goes.
 
