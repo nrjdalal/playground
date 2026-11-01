@@ -460,6 +460,12 @@ describe("a quoted argument is read as a command line only where a program runs 
     ["git add of a glob", "git add docs/*.md"],
     ["cat of a brace", "cat {a,b}.txt"],
     ["rm of a glob outside the root", "rm -f build/*.tmp"],
+    ["grep of spaced text through a glob", "grep -rn 'foo bar' docs/*.md"],
+    ["cp of a glob into a spaced folder", "cp docs/*.md 'out dir'"],
+    [
+      "a commit of a glob pathspec with a message naming a removal",
+      "git commit docs/*.md -m 'fix: rm -rf ~ bug'",
+    ],
   ])("%s runs from a worktree", async (_, command) => {
     expect(await at(command, join(homedir(), "x", ".claude", "worktrees", "y"))).toBeUndefined()
   })
