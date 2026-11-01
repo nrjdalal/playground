@@ -78,6 +78,32 @@ function matchOf(dialog: string[], input: Record<string, unknown>): "strong" | "
     : null
 }
 
+// Pure: why picker presses no key for this call on a pane showing this screen, or "" when the prompt is the call's own.
+export function refusalOf(name: string, screen: string, transcript: string, key: string): string {
+  const call = pendingCalls(transcript).find((input) => callKey(input) === key)
+  if (!call) return `${name} has no call waiting with key ${key}; nothing was pressed`
+  const dialog = dialogOf(screen)
+  if (!dialog) return `${name}'s pane shows no permission prompt; nothing was pressed`
+  const match = matchOf(dialog, call)
+  if (!match) return `${name}'s prompt is not for the call with key ${key}; nothing was pressed`
+  // Only a strong match rules out a waiting parent's own prompt, which draws no dashed box.
+  const others = pendingCalls(
+    transcript,
+    match === "strong" ? (tool) => !PARENTS.has(tool as string) : undefined,
+  )
+  return others.some(
+    (other) => callKey(other) !== key && (!judgeable(other) || matchOf(dialog, other)),
+  )
+    ? `${name}'s prompt may be another waiting call's (a subagent's file or URL prompt always is, while its parent waits); nothing was pressed: ${BY_HAND}`
+    : ""
+}
+
+// Pure: the key picker answers the prompt on this screen by, a waiting call's, subagents' included, else null.
+export const promptKey = (screen: string, transcript: string): string | null =>
+  pendingCalls(transcript)
+    .map(callKey)
+    .find((key) => !refusalOf("", screen, transcript, key)) ?? null
+
 type Pane = { pane: string; server: string }
 
 const json = (text: string): Record<string, any> => {
@@ -144,26 +170,9 @@ export async function runPicker(
   let judged: unknown = call
   const pane = await paneOf(session.pid, deps)
   if (pane) {
-    if (!call) return refuse(`${name} has no call waiting with key ${key}; nothing was pressed`)
     const screen = await deps.herdr(pane.server, ["pane", "read", pane.pane, "--source", "visible"])
-    const dialog = dialogOf(screen)
-    if (!dialog) return refuse(`${name}'s pane shows no permission prompt; nothing was pressed`)
-    const match = matchOf(dialog, call)
-    if (!match)
-      return refuse(`${name}'s prompt is not for the call with key ${key}; nothing was pressed`)
-    // Only a strong match rules out a waiting parent's own prompt, which draws no dashed box.
-    const others = pendingCalls(
-      transcript,
-      match === "strong" ? (tool) => !PARENTS.has(tool as string) : undefined,
-    )
-    if (
-      others.some(
-        (other) => callKey(other) !== key && (!judgeable(other) || matchOf(dialog, other)),
-      )
-    )
-      return refuse(
-        `${name}'s prompt may be another waiting call's (a subagent's file or URL prompt always is, while its parent waits); nothing was pressed: ${BY_HAND}`,
-      )
+    const refusal = refusalOf(name, screen, transcript, key)
+    if (refusal) return refuse(refusal)
     await deps.herdr(pane.server, [
       "pane",
       "send-keys",

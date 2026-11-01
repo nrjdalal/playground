@@ -62,6 +62,12 @@ export function callOf(input: unknown): string {
 export const pickerLines = (name: string, key: string): string =>
   `Allow it if it is needed: playground picker ${name} allow ${key}. Else deny it with a simpler shape: playground picker ${name} deny ${key} "<the simpler shape>".`
 
+// Pure: how ops-unstick's alert has the manager answer a permission prompt it read off a screen: picker's lines by the key of the waiting call the prompt shows, else the one route left.
+export const answerOf = (name: string, key: string | null): string =>
+  key
+    ? pickerLines(name, key)
+    : "playground picker cannot answer it, since no waiting call matches it: tell dispatcher, for the owner to answer it in the pane."
+
 // Pure: the key a permission alert gives its call, so `playground picker` answers only the call its manager read: the first 8 hex of the call's sha256.
 export const callKey = (input: unknown): string =>
   new Bun.CryptoHasher("sha256").update(callOf(input)).digest("hex").slice(0, 8)
@@ -301,4 +307,12 @@ if (import.meta.main && process.argv[2] === "manager") {
     new Set(live.keys()),
   )
   if (to) console.log(to)
+}
+
+// `bun stuck-alert.ts answer <name> <session id>`, the screen on stdin: prints answerOf() for the permission prompt that screen shows, for ops-unstick's screen backstop.
+if (import.meta.main && process.argv[2] === "answer") {
+  const { promptKey } = await import("./playground/picker")
+  const [name = "", sessionId = ""] = process.argv.slice(3)
+  const transcript = await transcriptOf(configDirOf(process.env), sessionId)
+  console.log(answerOf(name, transcript ? promptKey(await Bun.stdin.text(), transcript) : null))
 }
