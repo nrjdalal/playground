@@ -2,10 +2,6 @@ import { describe, expect, test } from "bun:test"
 
 import { lex } from "../../../scripts/hooks/shell"
 
-// The last word of the last command, as the hooks read it.
-const last = (src: string, known: Record<string, string> = {}) =>
-  lex(src, known, true).commands.at(-1)?.words.at(-1)
-
 describe("lex reads a single-quoted literal that the very next command reads as a whole quoted variable", () => {
   test.each([
     [
@@ -18,6 +14,12 @@ describe("lex reads a single-quoted literal that the very next command reads as 
     ["read twice", `Q='x'; echo "$Q" "$Q"`, "x"],
     ["as a flag's value", `Q='x'; echo -f query="$Q"`, "query=x"],
     ["in a command that pipes on", `Q='x'; echo "$Q" | cat`, "x"],
+    ["after a cd", `cd /tmp; Q='x'; echo "$Q"`, "x"],
+    [
+      "holding a $ and a keyword of its own",
+      `Q='query($n: Int) { source }'; echo "$Q"`,
+      "query($n: Int) { source }",
+    ],
   ])("%s", (_, src, value) => {
     const word = lex(src, {}, true)
       .commands.find((c) => c.words[0]?.value === "echo")
@@ -63,8 +65,25 @@ describe("lex reads a single-quoted literal that the very next command reads as 
     ["in a call with an arithmetic expansion", `Q='x'; echo "$((1))" "$Q"`],
     ["in a call with a substitution", "Q='x'; echo `date` \"$Q\""],
     ["in a call that sets IFS", `IFS=:; Q='x'; echo "$Q"`],
+    ["after a command other than cd", `true; Q='x'; echo "$Q"`],
+    ["after a cd that pipes", `cd /tmp | cat; Q='x'; echo "$Q"`],
+    ["after a trap", `trap 'typeset QU""ERY=y' DEBUG; QUERY='x'; echo "$QUERY"`],
+    ["after a zsh TRAPDEBUG", `TRAPDEBUG() { typeset QU""ERY=y }; QUERY='x'; echo "$QUERY"`],
+    [
+      "in a call that defines an alias",
+      `cd /tmp; QUERY='x'; echo "$QUERY"; alias e='typeset QU""ERY=y'`,
+    ],
+    ["read in a while condition", `Q='x'; while echo "$Q"; do :; done`],
+    ["read in an until condition", `Q='x'; until echo "$Q"; do :; done`],
+    ["read in a zsh repeat body", `Q='x'; repeat 2 { echo "$Q" }`],
+    ["read in a subshell", `Q='x'; (echo "$Q")`],
+    ["read in a brace group", `Q='x'; { echo "$Q"; }`],
   ])("leaves a variable %s unknown", (_, src) => {
-    expect(last(src)?.unknown).toBe("a shell variable")
+    const reads = lex(src, {}, true)
+      .commands.flatMap((c) => c.words)
+      .filter((w) => w.variable === "Q" || w.variable === "QUERY")
+    expect(reads.length).toBeGreaterThan(0)
+    for (const w of reads) expect(w.unknown).toBe("a shell variable")
   })
 
   test.each([

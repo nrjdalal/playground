@@ -601,6 +601,33 @@ describe("gh api", () => {
       "other",
     ],
     [
+      "a GraphQL query read in a while condition whose body sets the variable to a mutation",
+      `QUERY='query { viewer { login } }'; while gh api graphql -f query="$QUERY"; do typeset QU""ERY='${MUTATION}'; done`,
+      "other",
+    ],
+    [
+      "a GraphQL query read in an until condition whose body sets the variable to a mutation",
+      `QUERY='query { viewer { login } }'; until ! gh api graphql -f query="$QUERY"; do typeset QU""ERY='${MUTATION}'; done`,
+      "other",
+    ],
+    [
+      "a GraphQL query read in a zsh repeat body that sets the variable to a mutation",
+      `QUERY='query { viewer { login } }'; repeat 2 { gh api graphql -f query="$QUERY"; typeset QU""ERY='${MUTATION}' }`,
+      "other",
+    ],
+    [
+      "a GraphQL query read in a DEBUG trap that sets the variable to a mutation",
+      `trap 'typeset QU""ERY=${MUTATION}' DEBUG; QUERY='query { viewer { login } }'; gh api graphql -f query="$QUERY"`,
+      "other",
+    ],
+    [
+      "a GraphQL query read in an alias that sets the variable to a mutation",
+      `alias gh='typeset QU""ERY=${MUTATION}; command gh'
+QUERY='query { viewer { login } }'
+gh api graphql -f query="$QUERY"`,
+      "other",
+    ],
+    [
       "a GraphQL query in a variable set in a case branch",
       `case b in a) Q='query { viewer { login } }';; esac; gh api graphql -f query="$Q"`,
       "other",
@@ -627,6 +654,10 @@ describe("gh api", () => {
     [
       "a GraphQL query held in a variable set earlier in the command",
       `Q='query { viewer { login } }'; gh api graphql -f query="$Q"`,
+    ],
+    [
+      "a GraphQL query with variables held in a variable set after a cd",
+      `cd /tmp; Q='query($n: Int!) { viewer { repositories(first: $n) { totalCount } } }'; gh api graphql -f query="$Q" -F n=5`,
     ],
   ])("allows %s", async (_, command) => {
     expect(await bash(command)).toBeUndefined()

@@ -267,31 +267,35 @@ export function lex(
 
 // The words that open a compound command or a zsh short loop, after which the hook learns no assignment.
 const COMPOUND = new Set(["case", "for", "foreach", "function", "repeat", "select"])
+// What could run code before the reader or run it again: a trap, a function or alias definition, eval, source, a subshell, an expansion, or IFS.
+const UNSAFE =
+  /[$`]|\bIFS\b|\b(?:alias|eval|function|source|trap)\b|\bTRAP[A-Z]|\(\s*\)|(?:^|[\s;&|])\.(?:\s|$)/
 
-// The one shape the publish-word guard reads, as scripts/hooks/README.md's no-release-comment section states: Q='literal' alone, then "$Q" in the very next command; everything else stays unknown.
+// The one call shape the publish-word guard reads, as scripts/hooks/README.md's no-release-comment section states: only cd before Q='literal', then "$Q" in the very next command; everything else stays unknown.
 function learn(lx: Lexer, cmd: Command, raws: string[], sure: boolean, top: boolean): void {
   if (!lx.learning && lx.learned === undefined) return
   if (cmd.words.length === 0 && cmd.redirects.length === 0 && !cmd.group) return
-  const head = cmd.words[0]
-  if (head && !head.quoted && (RESERVED.has(head.value) || COMPOUND.has(head.value))) {
-    lx.learning = false
-  }
   if (lx.learned !== undefined) {
-    if (top) forget(lx)
+    forget(lx)
     return
   }
   const shape = /^([A-Za-z_]\w*)='([^']+)'$/.exec(raws.length === 1 ? raws[0] : "")
-  if (!shape || !sure || cmd.detached || cmd.group || cmd.stdin) return
+  const simple = top && !cmd.detached && !cmd.group && !cmd.stdin
+  if (!shape || !sure || !simple) {
+    const head = cmd.words[0]
+    if (!simple || head?.quoted || head?.value !== "cd") lx.learning = false
+    return
+  }
+  lx.learning = false
   const [, name, value] = shape
-  const read = `"$${name}"`
-  const rest = lx.src.split(read).join("")
+  const rest = lx.src.split(`"$${name}"`).join("")
   const mentions = rest.match(new RegExp(`${name}(?!\\w)`, "g"))?.length ?? 0
-  if (mentions !== 1 || /[$`]|IFS|\bfunction\b/.test(rest)) return
+  if (mentions !== 1 || UNSAFE.test(rest.replace(raws[0], ""))) return
   lx.known[name] = value
   lx.learned = name
 }
 
-// Drops what the hook learned and learns nothing more, once the command after the assignment ends.
+// Drops what the hook learned, once the reader ends or a loop, block or subshell starts.
 function forget(lx: Lexer): void {
   if (lx.learned !== undefined) delete lx.known[lx.learned]
   lx.learned = undefined
@@ -352,6 +356,7 @@ function walk(lx: Lexer, scope: number, nested: boolean, inherit?: Command): voi
       if (nested) return
     } else if (c === "(") {
       lx.i++
+      forget(lx)
       const piped = cmd.words.length === 0 && cmd.redirects.length === 0 ? cmd.stdin : undefined
       end(";")
       nest(lx, piped)
@@ -382,8 +387,13 @@ function walk(lx: Lexer, scope: number, nested: boolean, inherit?: Command): voi
       end(op)
     } else {
       const from = lx.i
-      cmd.words.push(word(lx))
+      const w = word(lx)
+      cmd.words.push(w)
       raws.push(src.slice(from, lx.i))
+      // A loop or block can run its words again after its body sets the variable again, so it reads no learned value.
+      if (cmd.words.length === 1 && !w.quoted && (RESERVED.has(w.value) || COMPOUND.has(w.value))) {
+        forget(lx)
+      }
       if (lx.i === from) lx.i++
     }
   }
