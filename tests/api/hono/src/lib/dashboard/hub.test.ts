@@ -618,15 +618,22 @@ describe("DashboardHub", () => {
     })
     const frames: DashboardFrame[] = []
     const leave = hub.subscribe((frame) => frames.push(frame))
-    await until("the hub's first read", () => calls.length === 1)
-    calls[0]?.resolve(live([["s-real", path]]))
-    await until("the tail", () => hub.watching === 1)
-    for (let i = 0; sentBy(frames).length === 0; i++) {
-      appendFileSync(path, line(`r-${i}`, "seen through fs.watch"))
-      await sleep(500)
+    try {
+      await until("the hub's first read", () => calls.length === 1)
+      calls[0]?.resolve(live([["s-real", path]]))
+      await until("the tail", () => hub.watching === 1)
+      // inside the case's 20s, so a watcher that never reports fails on its own message
+      const deadline = Date.now() + 15_000
+      for (let i = 0; sentBy(frames).length === 0; i++) {
+        if (Date.now() > deadline)
+          throw new Error("timed out waiting for fs.watch to report a change")
+        appendFileSync(path, line(`r-${i}`, "seen through fs.watch"))
+        await sleep(500)
+      }
+      expect(sentBy(frames)[0]).toBe("s-real:seen through fs.watch")
+    } finally {
+      leave()
     }
-    expect(sentBy(frames)[0]).toBe("s-real:seen through fs.watch")
-    leave()
   })
 
   test("the snapshot is the newest live list while anyone watches, and none after a failure or once all leave", async () => {

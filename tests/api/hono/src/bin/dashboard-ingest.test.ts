@@ -170,6 +170,41 @@ describe.skipIf(!dockerUp())("the bun run ingest CLI", () => {
     }
   }, 30_000)
 
+  // The one follower case on the real watcher: the rescan stays at its 30s default, past this case's deadline, so only a change the watcher reports can store the row. FSEvents can drop a change under load, so it appends again until one lands.
+  test("a follower stores a line the watcher reports, before any rescan", async () => {
+    const session = "77777777-8888-4999-aaaa-bbbbbbbbbbbb"
+    const follower = Bun.spawn([process.execPath, CLI, "--follow"], {
+      cwd: home,
+      env: { ...env(), INGEST_RESCAN_MS: "" },
+      stderr: "pipe",
+      stdout: "pipe",
+    })
+    try {
+      const reader = follower.stdout.getReader()
+      let log = ""
+      while (!log.includes("following")) {
+        const { done, value } = await reader.read()
+        if (done) break
+        log += new TextDecoder().decode(value)
+      }
+      const watched = join(home, "projects", "-repo", `${session}.jsonl`)
+      const stored = async () =>
+        (await admin`select count(*)::int as n from claude_entry where session_id = ${session}`)[0]
+          .n as number
+      const deadline = Date.now() + 20_000
+      for (let i = 0; (await stored()) === 0; i++) {
+        if (Date.now() > deadline)
+          throw new Error("timed out waiting for the watcher to report a change")
+        appendFileSync(watched, line(`w${i}`, "seen through the watcher"))
+        await Bun.sleep(500)
+      }
+      expect(await stored()).toBeGreaterThan(0)
+    } finally {
+      follower.kill()
+      await follower.exited
+    }
+  }, 30_000)
+
   // a config folder Claude Code has run no session in yet: no projects folder under it
   const freshConfig = () => {
     const fresh = mkdtempSync(join(tmpdir(), "dashboard-ingest-fresh-"))
