@@ -146,6 +146,10 @@ export const risen = (now: Counts, baseline: Counts): string[] =>
     ]
   })
 
+// The refusal for the risen lines, naming the fix where a kind has one.
+export const refusal = (over: string[]): string =>
+  `trace-count: a count rose; write the new text in plain words${over.some((line) => line.startsWith("issueRefs:")) ? "; describe the case in words; a doc cites no issue number" : ""}:\n${over.join("\n")}`
+
 // The baseline with each measured kind lowered to its count; a kind this run did not measure keeps its count.
 export const lowered = (now: Counts, baseline: Counts): Counts =>
   Object.fromEntries(

@@ -12,6 +12,7 @@ import {
   type Kept,
   list,
   lowered,
+  refusal,
   risen,
   stale,
   tree,
@@ -196,6 +197,15 @@ describe("the ratchet", () => {
     expect(risen({ emails: 2 }, { emails: 3 })).toEqual([])
   })
 
+  test("a risen issueRefs count names its fix, and another kind keeps the plain reason", () => {
+    expect(refusal(risen({ emails: 2, issueRefs: 4 }, { emails: 3, issueRefs: 3 }))).toBe(
+      "trace-count: a count rose; write the new text in plain words; describe the case in words; a doc cites no issue number:\nissueRefs: 4 in the tree, counts.json allows 3",
+    )
+    expect(refusal(risen({ emails: 4 }, { emails: 3 }))).toBe(
+      "trace-count: a count rose; write the new text in plain words:\nemails: 4 in the tree, counts.json allows 3",
+    )
+  })
+
   test("writing lowers each measured kind and keeps one this run did not measure", () => {
     expect(lowered({ emails: 2, issueRefs: 3 }, { emails: 3, issueRefs: 3, names: 9 })).toEqual({
       emails: 2,
@@ -207,7 +217,8 @@ describe("the ratchet", () => {
   test("no count in the tree, less the kept hits, is over counts.json", async () => {
     const baseline = (await Bun.file(COUNTS).json()) as Counts
     const kept = (await Bun.file(KEPT).json()) as Kept[]
-    expect(risen(count(await tree(root), undefined, undefined, kept), baseline)).toEqual([])
+    const over = risen(count(await tree(root), undefined, undefined, kept), baseline)
+    expect(over.length ? refusal(over) : "").toBe("")
   })
 })
 
