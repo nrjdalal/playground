@@ -112,19 +112,22 @@ Their tests are `bun run test:file tests/scripts/hooks`.
 
 - A factory session changes nothing a guard reads to allow or deny a call: `scripts/hooks/no-extensions-write.ts`, registered beside no-main-checkout on Bash and the file tools (Edit, MultiEdit, NotebookEdit and Write), guards the extensions root (`extensionsDir` of the data folder) and every file under it.
   Each guard reads its list and `policy.json` there, each scope's `lists/` and `settings.json` render into them on the next write (its `git add -A` takes a hand edit along), and a root that is gone sends the guards back to core's smaller lists.
-  It refuses a file tool's path in the root, a redirect into it, and any program but a reader that names a path in it, links followed.
-  The readers are `cat`, `cmp`, `diff`, `grep`, `head`, `jq`, `ls`, `readlink`, `realpath`, `rg`, `shasum`, `stat`, `tail`, `test` and `wc`,
-  `find` with no `-delete`, `-exec`, `-ok` or `-fprint` action, and git's `blame`, `cat-file`, `diff`, `grep`, `log`, `ls-files`, `rev-parse`, `show` and `status` with no `--output`.
+  It refuses a file tool's path in the root, `~` expanded, and a redirect into it.
+  It refuses any program but a reader that names the root, a path in it, a folder above it (`~/.playground`, `~`) or a glob there, links followed, in any word: the program word, an option's attached value (`-o<path>`, `--out=<path>`), or the stdin xargs hands it.
+  It refuses any program but a reader whose words or heredoc hold the root's path as text, so an interpreter's script and a commit message that names it are refused alike.
+  The readers are `cat`, `cmp`, `diff`, `echo`, `grep`, `head`, `jq`, `ls`, `printf`, `readlink`, `realpath`, `shasum`, `stat`, `tail`, `test` and `wc`;
+  `rg` with no `--pre`; `find` with no `-delete`, `-exec`, `-ok` or `-fprint` action; and git's `blame`, `cat-file`, `diff`, `grep`, `log`, `ls-files`, `rev-parse`, `show` and `status` with no `-c`, `--config-env`, `--output`, `-O`, `--ext-diff` or `--textconv`.
+  A reader run with `GIT_*`, `PAGER`, `EDITOR`, `VISUAL` or `LESSOPEN` set in the call is judged as any other program, since each makes it run one.
   It refuses any program but a reader run with the root as its folder or, for git, its tree.
-  It refuses `rm`, `rmdir`, `unlink`, `mv`, `rsync` or `find` naming the root's folder or one above it (`rm -rf ~/.playground`, and `mv ~/x ~/` too).
-  It refuses an interpreter (`bun`, `node`, `python3`, `perl`, `sed`, `awk` and the like) whose script or heredoc holds the root's path.
-  It refuses the `playground` CLI's calls that change what a guard reads, called by name, by path or as `bun …/playground/cli.ts`:
+  It refuses the `playground` CLI's calls that change what a guard reads, the CLI found by where its word lands: `playground` by name or path, or the checkout's `cli.ts` with or without its extension, run directly or handed to `bun`, `node` or `npx` past any option.
+  Its words split as that command's own parse splits them (`--dry-run` and `--yes` are bare for `ext`, `--dry-run` alone for `settings`):
   `ext put <scope> list`; `ext add`, `import`, `init`, `link`, `order`, `remove`, `sync` and `unlink`, but `--dry-run` on `add`, `import` and `init`; `migrate`; `uninstall --purge`;
-  and `settings set` or `reset` of a key a guard reads (`ext.links`, `factory.archiveRepo`, `factory.publicRepo`, `glm.readOnlyLoad5`, `owner.names`, `usage.keychainService`).
-  A command, verb, kind or key word it cannot read counts as the write.
+  and `settings set` or `reset` of a key a guard reads: `ext.links`, `factory.archiveRepo`, `factory.publicRepo`, `glm.readOnlyLoad5`, `live.branch`, `owner.names`, `paths.codeRoot`, `sessions.aliases`, `sessions.names` and `usage.keychainService`.
+  A test holds that list to every key a hook names, and to spawn.sh's `paths.codeRoot`; spawn.sh's `gates.*` stay open, as capacity tuning Ops adjusts in normal upkeep.
+  A command, verb, kind or key word it cannot read, or any such word among the words of `ext put` or `settings set` or `reset`, counts as the write.
   `ext put` of a doc, a rule or any other reviewed kind, every read, `ext score`, `accept` and `reject`, `settings set` of any other key, `settings import-jobs` and writes elsewhere in the data folder (handoffs, the roster) run.
   Its refusal names the one route: the owner types the command in Ops' pane as a `!` command, which runs without hooks; no flag, environment variable, role or note frees a call.
-  It reads a command's text, so a program whose own code writes the root (a script file run by its path, a binary) and a path it cannot read (built at run time, or in a `$(…)`) pass it.
+  It reads a command's text, so a program whose own code writes the root (a script file run by its path, a binary) and a path it cannot read (built at run time, in a `$(…)` or a variable) pass it.
   It fails open, and its tests are in `bun run test:file tests/scripts/hooks/no-extensions-write.test.ts`.
 
 ## no-false-green

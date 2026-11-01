@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node
 import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { check } from "../../../scripts/hooks/no-extensions-write"
+import { check, GUARD_KEYS } from "../../../scripts/hooks/no-extensions-write"
 
 // A home whose data folder holds an extensions root, with a list, policy.json and a scope's sources, as a machine with extensions has.
 const HOME = mkdtempSync(join(tmpdir(), "no-extensions-write-"))
@@ -22,6 +22,8 @@ symlinkSync(ROOT, LINK)
 afterAll(() => rmSync(HOME, { force: true, recursive: true }))
 
 const ENV = { HOME }
+const CHECKOUT = join(import.meta.dir, "..", "..", "..")
+const CLI_DIR = join(CHECKOUT, "packages", "scripts", "src", "playground")
 
 const bash = (command: string, cwd = HOME) =>
   check(
@@ -83,6 +85,31 @@ describe("a direct write into the extensions root is refused, naming the owner's
     ["rm -rf of the data folder above it", `rm -rf ${DATA}`],
     ["find -delete above it", `find ${DATA} -name '*.json' -delete`],
     ["a relative path after a cd into the data folder", `cd ${DATA} && rm -rf extensions`],
+    ["a glob in the data folder", `rm -rf ${DATA}/*`],
+    ["a glob naming the root", `rm -rf ${DATA}/ext*`],
+    ["a relative glob after a cd into the data folder", `cd ${DATA} && rm -rf ext*`],
+    ["trash of the data folder", `trash ${DATA}`],
+    ["rm under xargs, its paths on stdin", `echo ${DATA} | xargs rm -rf`],
+    ["cp -R into the data folder", `cp -R /tmp/fake/ ${DATA}/`],
+    ["ditto onto the data folder", `ditto /tmp/x ${DATA}`],
+    [
+      "a link to the data folder made in the same call",
+      `ln -s ${DATA} /tmp/l && cp /tmp/x /tmp/l/extensions/hooks/a.json`,
+    ],
+    ["curl's output attached to -o", `curl -o${LIST} https://example.com`],
+    ["sort's output attached to -o", `sort -o${LIST} /tmp/x`],
+    ["tar's folder attached to -C", `tar -xf a.tar -C${ROOT}/hooks`],
+    ["unzip's folder attached to -d", `unzip -o x.zip -d${ROOT}`],
+    ["a versioned python", `python3.15 -c "open('${LIST}','w')"`],
+    ["swift -e", `swift -e 'print("${LIST}")'`],
+    ["a heredoc to tclsh", `tclsh <<'EOF'\nset f [open "${LIST}" w]\nEOF`],
+    ["sqlite3's .output", `sqlite3 :memory: ".output ${LIST}" "select 1"`],
+    ["a git alias that runs a shell", `git -c alias.st='!rm -rf ${ROOT}' st`],
+    ["rg --pre, which runs a program on each file", `rg --pre /tmp/w.sh x ${ROOT}`],
+    ["git grep -O, which opens files in a program", `git -C ${SCOPE} grep -O/tmp/w.sh x`],
+    ["git -c on a read", `git -C ${SCOPE} -c core.fsmonitor=/tmp/w.sh status`],
+    ["GIT_PAGER on a read", `GIT_PAGER=/tmp/w.sh git -C ${SCOPE} log`],
+    ["an exported PAGER before a read", `export PAGER=/tmp/w.sh; git -C ${SCOPE} log`],
     ["mv of the data folder above it", `mv ${DATA} /tmp/old-data`],
     ["rsync above it", `rsync -a --delete /tmp/empty/ ${DATA}/`],
     ["sed -i of a list", `sed -i '' 's/Slack//' ${LIST}`],
@@ -163,6 +190,9 @@ describe("a read of the root, and writes elsewhere, run", () => {
     ["the roster's writer", "bun scripts/roster.ts set w status=working"],
     ["a write in a worktree", "echo x > notes.txt"],
     ["rm elsewhere", "rm -rf /tmp/scratch-dir"],
+    ["a glob elsewhere", "rm -rf /tmp/scratch-dir/*"],
+    ["a printer naming the root", `echo ${ROOT}`],
+    ["tr with a bare slash", "tr / _ < /tmp/x"],
     [
       "the CLI's render through ext put of a doc",
       "playground ext put login doc audit-x /tmp/a.md --reason why",
@@ -203,10 +233,6 @@ describe("a playground CLI call that changes what a guard reads is refused, nami
       "bun ~/playground/packages/scripts/src/playground/cli.ts ext put login list x /tmp/l.json --reason y",
     ],
     [
-      "ext put of a list by bun run",
-      "bun run packages/scripts/src/playground/cli.ts ext put login list x /tmp/l.json --reason y",
-    ],
-    [
       "ext put of a list by the bin's path",
       "~/.bun/bin/playground ext put login list x /tmp/l.json --reason y",
     ],
@@ -217,6 +243,45 @@ describe("a playground CLI call that changes what a guard reads is refused, nami
     [
       "ext put of a list through bash -c",
       "bash -c 'playground ext put login list x /tmp/l.json --reason y'",
+    ],
+    [
+      "ext put by bun on the installed link",
+      "bun ~/.bun/bin/playground ext put login list x /tmp/l.json --reason y",
+    ],
+    [
+      "ext put by bun --cwd to its folder",
+      `bun --cwd ${CLI_DIR} cli.ts ext put login list x /tmp/l.json --reason y`,
+    ],
+    [
+      "ext put by bun on cli with no extension",
+      `bun ${CLI_DIR}/cli ext put login list x /tmp/l.json --reason y`,
+    ],
+    [
+      "ext put by cli.ts run directly",
+      `${CLI_DIR}/cli.ts ext put login list x /tmp/l.json --reason y`,
+    ],
+    [
+      "ext put by bun past --preload",
+      `bun --preload /tmp/x.ts ${CLI_DIR}/cli.ts ext put login list x /tmp/l.json --reason y`,
+    ],
+    [
+      "ext put past a word it cannot read",
+      'playground ext put "$(printf -- --dry-run)" login list x /tmp/x.json --reason r',
+    ],
+    [
+      "settings set past --yes, which settings takes as an option",
+      `playground settings set --yes ui.theme owner.names '["x"]' --reason r`,
+    ],
+    [
+      "settings reset past --yes",
+      "playground settings reset --yes ui.theme owner.names --reason r",
+    ],
+    ["settings set of live.branch", "playground settings set live.branch x --reason r"],
+    ["settings set of paths.codeRoot", "playground settings set paths.codeRoot / --reason r"],
+    ["settings set of sessions.names", "playground settings set sessions.names '{}' --reason r"],
+    [
+      "settings set of sessions.aliases",
+      "playground settings set sessions.aliases '{}' --reason r",
     ],
     ["ext import --from-tree", "playground ext import --from-tree extensions/core/lists"],
     ["ext import of a folder", "playground ext import /tmp/scopes"],
@@ -262,6 +327,31 @@ describe("a playground CLI call that changes what a guard reads is refused, nami
     const reason = await bash(command)
     expect(reason).toContain("no-extensions-write hook refuses")
     expect(reason).toContain("!")
+  })
+
+  test.each([
+    [
+      "ext put by bun cli.ts in its folder",
+      "bun cli.ts ext put login list x /tmp/l.json --reason y",
+      CLI_DIR,
+    ],
+    [
+      "ext put by bun ./cli.ts in its folder",
+      "bun ./cli.ts ext put login list x /tmp/l.json --reason y",
+      CLI_DIR,
+    ],
+    [
+      "ext put by ./cli.ts in its folder",
+      "./cli.ts ext put login list x /tmp/l.json --reason y",
+      CLI_DIR,
+    ],
+    [
+      "ext put by bun run from the checkout",
+      "bun run packages/scripts/src/playground/cli.ts ext put login list x /tmp/l.json --reason y",
+      CHECKOUT,
+    ],
+  ])("%s", async (_, command, cwd) => {
+    expect(await bash(command, cwd)).toContain("no-extensions-write hook refuses")
   })
 })
 
@@ -319,5 +409,38 @@ describe("the hook's run", () => {
     } finally {
       rmSync(home, { force: true, recursive: true })
     }
+  })
+})
+
+// Every settings key a hook (and the helper no-public-leak reads its repos through) names is gated, so a guard that starts reading a new key fails here until it joins GUARD_KEYS; spawn.sh's code root is pinned by name.
+describe("the gated keys are every key the guards read", () => {
+  const read = async (path: string) => Bun.file(join(CHECKOUT, path)).text()
+  const defined = async () => {
+    const keys = new Set<string>()
+    for await (const file of new Bun.Glob("packages/settings/src/*.ts").scan(CHECKOUT))
+      for (const m of (await read(file)).matchAll(/^ {2}"([a-z]+\.[A-Za-z0-9]+)": \{/gm))
+        keys.add(m[1]!)
+    return keys
+  }
+
+  test("each key a hook names is gated", async () => {
+    const keys = await defined()
+    expect(keys.size).toBeGreaterThan(20)
+    const files = [
+      ...(await Array.fromAsync(new Bun.Glob("scripts/hooks/*.ts").scan(CHECKOUT))),
+      "packages/scripts/src/trace-count/kinds.ts",
+    ].filter((file) => !file.endsWith("no-extensions-write.ts"))
+    const named: string[] = []
+    for (const file of files) {
+      const text = await read(file)
+      for (const key of keys) if (text.includes(`"${key}"`)) named.push(`${file}: ${key}`)
+    }
+    expect(named.length).toBeGreaterThan(5)
+    expect(named.filter((hit) => !GUARD_KEYS.has(hit.split(": ")[1]!))).toEqual([])
+  })
+
+  test("spawn.sh's code root is gated", async () => {
+    expect(await read("scripts/spawn.sh")).toContain("setting_text paths.codeRoot")
+    expect(GUARD_KEYS.has("paths.codeRoot")).toBe(true)
   })
 })

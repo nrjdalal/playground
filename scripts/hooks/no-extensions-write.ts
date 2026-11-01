@@ -1,5 +1,7 @@
 // PreToolUse hook: refuses a factory session's write into the extensions root, where every guard's list, policy.json and each scope's sources live, and its playground CLI call that changes what a guard reads to allow or deny a call, so no session edits a list in one call and makes the guarded call in the next.
-import { resolve, sep } from "node:path"
+import { existsSync, statSync } from "node:fs"
+import { homedir } from "node:os"
+import { dirname, join, resolve, sep } from "node:path"
 
 import { dataDir } from "../../packages/env/src/data-dir"
 import { extensionsDir } from "../../packages/settings/src/rendered"
@@ -12,9 +14,13 @@ import {
   knownVariables,
   lex,
   marked,
+  type Parsed,
   pathOf,
+  PRINTERS,
+  program,
   run,
   slotWords,
+  stdinOf,
   type Visit,
   type Word,
 } from "./shell"
@@ -26,7 +32,7 @@ const ROUTE =
 
 const refuse = (what: string) => `no-extensions-write hook refuses ${what}: ${ROUTE}`
 
-// Programs that only read what they name.
+// Programs that only read what they name; rg, find and git read only without the options below that run a program.
 const READERS = new Set([
   "[",
   "cat",
@@ -38,7 +44,6 @@ const READERS = new Set([
   "ls",
   "readlink",
   "realpath",
-  "rg",
   "shasum",
   "stat",
   "tail",
@@ -60,56 +65,77 @@ const GIT_READS = new Set([
 ])
 // Programs that remove or move what they name, so naming a folder above the root takes the root with it, and the guards fall back to core's smaller lists.
 const REMOVERS = new Set(["find", "mv", "rm", "rmdir", "rsync", "unlink"])
-// Programs whose script text can name the root inside one word.
-const INTERPRETERS = new Set([
-  "awk",
-  "bun",
-  "deno",
-  "gawk",
-  "node",
-  "osascript",
-  "perl",
-  "php",
-  "python",
-  "python3",
-  "ruby",
-  "sed",
-])
 const DUPLICATE = /^(?:\d+|-)$/
+const GLOB = /[*?[{]/
+// Variables that make git or a pager run a program, so a reader with one set is judged as any other program.
+const RUNS = /^(?:EDITOR|GIT_[A-Z_]+|LESSOPEN|PAGER|VISUAL)$/
+// Runners whose words can name the CLI's file.
+const RUNNERS = new Set(["bun", "bunx", "deno", "node", "npx", "tsx"])
+const CLI = join("packages", "scripts", "src", "playground", "cli.ts")
 
-function reads(name: string, args: Word[], env: Env): boolean {
-  if (READERS.has(name)) return true
+// Whether a command only reads what it names: a reader with no option or variable that makes it run a program.
+function reads(parsed: Parsed, env: Env): boolean {
+  const { args, local, name } = parsed
+  if ([...local.keys(), ...env.vars.keys()].some((key) => RUNS.test(key))) return false
+  if (READERS.has(name) || PRINTERS.has(name)) return true
+  if (name === "rg") return !args.some((a) => a.value.startsWith("--pre"))
   if (name === "find") return !args.some((a) => FIND_ACTS.test(a.value))
   if (name !== "git") return false
   const { rest, sub } = gitCall(args, env)
-  return !!sub && GIT_READS.has(sub) && !rest.some((w) => w.startsWith("--output"))
+  const before = args.slice(0, args.length - rest.length - 1).map((a) => a.value)
+  return (
+    !!sub &&
+    GIT_READS.has(sub) &&
+    !before.some((w) => w === "-c" || /^--(?:config-env|exec-path)/.test(w)) &&
+    !rest.some((w) => /^(?:--output|-O|--open-files-in-pager|--ext-diff|--textconv)/.test(w))
+  )
 }
 
-// The settings keys a guard reads to allow or deny a call, A to Z (no-chat-question, no-glm-heavy-path, no-headless-login, no-playground-leak, no-public-leak).
-const GUARD_KEYS = new Set([
+// The settings keys a guard reads to allow or deny a call, A to Z: the hooks' (no-chat-question, no-glm-heavy-path, no-headless-login, no-playground-leak, no-public-leak, and role.ts, which places a session in the factory) and spawn.sh's code root.
+export const GUARD_KEYS = new Set([
   "ext.links",
   "factory.archiveRepo",
   "factory.publicRepo",
   "glm.readOnlyLoad5",
+  "live.branch",
   "owner.names",
+  "paths.codeRoot",
+  "sessions.aliases",
+  "sessions.names",
   "usage.keychainService",
 ])
 // ext verbs that change a scope's lists or settings, or which scopes the lists and policy.json render from
 const EXT_WRITES = new Set(["add", "import", "init", "link", "order", "remove", "sync", "unlink"])
 // the ext verbs whose --dry-run writes nothing
 const EXT_DRY = new Set(["add", "import", "init"])
-const SWITCHES = new Set(["--dry-run", "--yes"])
-
-// The words after the playground CLI, however it is called: by name or path, or bun running its cli.ts.
-function cliWords(name: string, args: Word[], env: Env): Word[] | undefined {
-  if (name === "playground") return args
-  if (name !== "bun") return
-  const { at, words } = bunCall(args, env)
-  const target = words[0] === "run" ? words[1] : words[0]
-  return target?.endsWith("playground/cli.ts") ? args.slice(at + 1) : undefined
+// Each command's bare switches, as its parseWords call names them; every other -- word takes the next word as its value.
+const SWITCHES: Record<string, string[]> = {
+  ext: ["--dry-run", "--yes"],
+  settings: ["--dry-run"],
 }
 
-// What of a playground call changes what a guard reads, or undefined; its options split as the CLI's parseWords splits them, a word the hook cannot read taken as the worst.
+// Whether a word is the playground CLI: the command by name or path (not a folder of that name), or the checkout's cli.ts, with or without its extension, links followed.
+function isCli(word: Word, dirs: (string | undefined)[]): boolean {
+  if (marked(word.value)) return false
+  return dirs.some((dir) => {
+    const path = pathOf(word, { cwd: dir } as Env)
+    if (program(word.value) === "playground")
+      return !path || !existsSync(path) || !statSync(path).isDirectory()
+    return !!path && [path, `${path}.ts`].some((at) => real(at).endsWith(sep + CLI))
+  })
+}
+
+// The words after the playground CLI, however it is called: its program word, or any word a runner (bun, node, npx) is handed.
+function cliWords(parsed: Parsed, env: Env): Word[] | undefined {
+  const { args, first, name } = parsed
+  if (!first) return
+  const words = [first, ...args]
+  const dirs = [env.cwd, name === "bun" ? bunCall(args, env).cwd : undefined]
+  const at = (RUNNERS.has(name) ? words : [first]).findIndex((w) => isCli(w, dirs))
+  return at === -1 ? undefined : words.slice(at + 1)
+}
+
+// What of a playground call changes what a guard reads, or undefined; its words split as that command's parseWords splits them, and a word the hook cannot read taken as the worst.
 function cliWrite(words: Word[]): string | undefined {
   const [command, verb, ...rest] = words.map((w) => (marked(w.value) ? undefined : w.value))
   if (command === undefined)
@@ -119,29 +145,42 @@ function cliWrite(words: Word[]): string | undefined {
     return words.some((w) => w.value === "--purge")
       ? "playground uninstall --purge, which removes the data folder"
       : undefined
-  if (command !== "ext" && command !== "settings") return
+  const switches = SWITCHES[command]
+  if (!switches) return
+  if (verb === undefined) return `playground ${command} with a verb it cannot read`
+  const unread = rest.includes(undefined)
   const positional: (string | undefined)[] = []
   let dry = false
   for (let k = 0; k < rest.length; k++) {
     const word = rest[k]
-    if (word !== undefined && SWITCHES.has(word)) dry ||= word === "--dry-run"
+    if (word !== undefined && switches.includes(word)) dry ||= word === "--dry-run"
     else if (word?.startsWith("--")) k++
     else positional.push(word)
   }
   if (command === "settings") {
     if (verb !== "set" && verb !== "reset") return
     const key = positional[0]
-    return key === undefined || GUARD_KEYS.has(key)
-      ? `playground settings ${verb} of ${key ?? "a key it cannot read"}, a key a guard reads`
+    if (unread || key === undefined) return `playground settings ${verb} with a word it cannot read`
+    return GUARD_KEYS.has(key)
+      ? `playground settings ${verb} of ${key}, a key a guard reads`
       : undefined
   }
-  if (verb === undefined) return "playground ext with a verb it cannot read"
   if (verb === "put")
-    return positional[1] === "list" || (positional[1] === undefined && positional.length > 1)
-      ? "playground ext put of a list, which renders into a guard's list"
+    return unread || positional[1] === "list"
+      ? "playground ext put of a list, or with a word it cannot read, which may render into a guard's list"
       : undefined
   if (EXT_WRITES.has(verb) && !(dry && EXT_DRY.has(verb)))
     return `playground ext ${verb}, which changes what the guards' lists and policy.json render from`
+}
+
+// The texts a word may name a path by: the word, the value after an =, and the rest after a one-letter option (-o<path>, -C<dir>).
+const texts = (word: Word): Word[] => {
+  const v = word.value
+  const out = [word]
+  const eq = v.indexOf("=")
+  if (eq > 0) out.push({ ...word, value: v.slice(eq + 1) })
+  if (/^-[A-Za-z]./.test(v)) out.push({ ...word, value: v.slice(2) })
+  return out
 }
 
 function inspect(raw: string, environment: Environment) {
@@ -149,29 +188,48 @@ function inspect(raw: string, environment: Environment) {
   const input = (toolInput ?? {}) as Record<string, unknown>
   const directory = typeof cwd === "string" ? cwd : undefined
   const root = real(extensionsDir(dataDir(environment)))
-  const home = environment.HOME
-  const needle = home && root.startsWith(real(home) + sep) ? root.slice(real(home).length) : root
+  const home = environment.HOME || homedir()
+  const needle = root.startsWith(real(home) + sep) ? root.slice(real(home).length) : root
   const inRoot = (path: string | undefined) => {
     if (path === undefined) return false
     const at = real(path)
     return at === root || at.startsWith(root + sep)
   }
-  const above = (path: string | undefined) => {
+  // a folder that holds the root, but the filesystem's own root, which only a remover names to harm
+  const above = (path: string | undefined, remover: boolean) => {
     if (path === undefined) return false
     const at = real(path)
-    return at === sep || root.startsWith(at + sep)
+    return at === sep ? remover : root.startsWith(at + sep)
   }
   const file = typeof tool === "string" ? input[FILE_TOOLS[tool]] : undefined
-  if (typeof file === "string")
-    return inRoot(resolve(directory ?? "", file)) ? refuse(`a write to ${file}`) : undefined
+  if (typeof file === "string") {
+    const expanded = /^~(?:\/|$)/.test(file) ? join(home, file.slice(1)) : file
+    return inRoot(resolve(directory ?? "", expanded)) ? refuse(`a write to ${file}`) : undefined
+  }
   if (tool !== "Bash") return
   const { command } = input
   if (typeof command !== "string") return
+  // What a word of a program that is no reader names: a path in the root, a folder above it, a glob there, or the root's path in its text.
+  const names = (word: Word, env: Env, remover: boolean): string | undefined => {
+    for (const text of texts(word)) {
+      if (text.value.includes(needle)) return `${root} in its text`
+      const path = pathOf(text, env)
+      if (inRoot(path)) return path
+      if (above(path, remover)) return `${path}, which holds ${root}`
+      const glob = GLOB.exec(text.value)
+      if (glob && !marked(text.value)) {
+        const dir = pathOf({ ...text, value: `${text.value.slice(0, glob.index)}x` }, env)
+        const folder = dir && dirname(dir)
+        if (folder && (inRoot(folder) || above(folder, true)))
+          return `${text.value}, a glob in ${folder}`
+      }
+    }
+  }
   const visit: Visit = async (cmd: Command, parsed, env) => {
     const slot = slotWords(parsed)
     if (slot)
       return slot.length === 0 ? undefined : examine({ ...cmd, words: slot }, env, visit, false)
-    const { args, name } = parsed
+    const { args, first, name, xargs } = parsed
     const into = cmd.redirects.find(
       (r) =>
         r.target &&
@@ -180,28 +238,30 @@ function inspect(raw: string, environment: Environment) {
         inRoot(pathOf(r.target, env)),
     )
     if (into?.target) return refuse(`a write to ${pathOf(into.target, env)}`)
-    const cli = cliWords(name, args, env)
+    const cli = cliWords(parsed, env)
     const write = cli && cliWrite(cli)
     if (write) return refuse(write)
-    if (reads(name, args, env)) return
+    if (reads(parsed, env)) return
     if (inRoot(env.cwd)) return refuse(`${name} run inside ${root}`)
     if (name === "git" && inRoot(gitCall(args, env).cwd)) return refuse(`git on a clone in ${root}`)
-    for (const word of args) {
-      const eq = word.value.indexOf("=")
-      const paths = [pathOf(word, env)]
-      if (eq > 0) paths.push(pathOf({ ...word, value: word.value.slice(eq + 1) }, env))
-      const named = paths.find(inRoot)
+    const remover = REMOVERS.has(name)
+    for (const word of first ? [first, ...args] : args) {
+      const named = names(word, env, remover)
       if (named) return refuse(`${name} on ${named}`)
-      const holder = REMOVERS.has(name) && paths.find(above)
-      if (holder) return refuse(`${name} on ${holder}, which holds ${root}`)
     }
-    if (
-      INTERPRETERS.has(name) &&
-      [...args, ...cmd.redirects.flatMap((r) => (r.body ? [r.body] : []))].some((t) =>
-        t.value.includes(needle),
-      )
-    )
+    if (cmd.redirects.some((r) => r.body?.value.includes(needle)))
       return refuse(`${name} with a script that names ${root}`)
+    if (xargs) {
+      const stdin = await stdinOf(cmd, env)
+      const named =
+        !stdin.unknown &&
+        stdin.value
+          .split(/\s+/)
+          .filter(Boolean)
+          .map((value) => names({ quoted: false, value }, env, remover))
+          .find(Boolean)
+      if (named) return refuse(`${name} under xargs on ${named}`)
+    }
   }
   const env: Env = {
     cwd: directory,
