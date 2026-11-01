@@ -325,13 +325,13 @@ quick_rule() {
   local a first=""
   # the command's first word past env and VAR=x, as box_fits finds it (optimizer, 19 Oct: a commit run as env NODE_ENV=... git commit waited 14 min in the queue)
   for a in "$@"; do case "$a" in env|*=*) continue ;; esac; first=$a; break; done
-  if [ "$(basename "$first")" = git ]; then
+  if [ "$(basename -- "$first")" = git ]; then
     # a merge or pull runs no pre-commit build (lefthook.yml has no merge hook), so it ends in seconds (optimizer, 20 Oct: a 1s git merge waited 26.6 min behind suites)
     # a push runs only the pre-push hook's seconds (retro 2, 31 Oct: git push queued 205 min in a day)
     for a in "$@"; do case "$a" in commit|merge|pull|push) echo commit; return ;; esac; done
-  elif [ "$(basename "$first")" = cp ]; then
+  elif [ "$(basename -- "$first")" = cp ]; then
     for a in "$@"; do a=${a%/.}; case "${a%/}" in node_modules|*/node_modules) echo clone; return ;; esac; done
-  elif [ "$(basename "$first")" = bun ]; then
+  elif [ "$(basename -- "$first")" = bun ]; then
     # a bun test or bun run test:file naming 1 to 3 test files, nothing else, takes run-slot-quick, with --cwd=<p> anywhere or a bare --cwd after run or test, since bun misreads one before the subcommand (scripts/hooks/README.md's no-false-green; ops, 20 Oct: with slot-off, a 5-file run that ran 1s waited 52 min behind suites; PG-2158)
     # bun run docs:wrap and format:check never run past seconds (run-slot.runs.log, 20 Oct: max 2s and 9s), so they take run-slot-quick too
     for a in "$@"; do case "$a" in docs:wrap|format:check) echo quick; return ;; esac; done
@@ -389,9 +389,9 @@ light_run() {
   local a first="" next="" turbo="" filter="" types=""
   for a in "$@"; do case "$a" in env|*=*) continue ;; esac; [ -z "$first" ] && first=$a && continue; next=$a; break; done
   # the 4 bare bunx tsc runs in the runs log each ran 1 s or less, while an sh -c holding a build and then tsc ran up to 152 s, so only the bare program counts (retro 5, 31 Oct)
-  [ "$(basename "$first")" = tsc ] && return
-  case "$(basename "$first")" in bun|bunx) ;; *) return 1 ;; esac
-  [ "$(basename "$first")" = bunx ] && [ "$next" = tsc ] && return
+  [ "$(basename -- "$first")" = tsc ] && return
+  case "$(basename -- "$first")" in bun|bunx) ;; *) return 1 ;; esac
+  [ "$(basename -- "$first")" = bunx ] && [ "$next" = tsc ] && return
   for a in "$@"; do case "$a" in install|add) return 0 ;; turbo) turbo=1 ;; --filter|--filter=*|-F) filter=1 ;; check-types) types=1 ;; esac; done
   [ -n "$turbo" ] && [ -n "$filter" ] && return
   [ -n "$types" ] && types_cached "$@"
