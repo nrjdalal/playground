@@ -1,6 +1,7 @@
 // The Bash reader the PreToolUse hooks share: it lexes a command and walks it as the shell would run it, reading the heredocs, files and substitutions it can see and marking the rest unknown.
+import { realpathSync } from "node:fs"
 import { homedir } from "node:os"
-import { basename, isAbsolute, resolve } from "node:path"
+import { basename, dirname, isAbsolute, resolve } from "node:path"
 
 // `variable` names the first shell variable a text expands, so a hook can tell `"$HERDR_BIN_PATH"` from any other unknown program.
 export type Text = { reads?: Text[]; unknown?: string; value: string; variable?: string }
@@ -25,11 +26,15 @@ type Lexer = {
 }
 type Lexed = { commands: Command[]; scopes: number[] }
 type Pending = { delim: string; quoted: boolean; redirect: Redirect; strip: boolean }
+// `old` is OLDPWD, `stack` the folders pushd left below the current one (empty when unset, null when the hook cannot tell), and `unheld` a hook's verdict on a shell or eval whose script holds a part it cannot read.
 export type Env = {
   cwd?: string
   files: Map<string, Text>
   known: Record<string, string>
+  old?: string
   process: Record<string, string | undefined>
+  stack?: (string | undefined)[] | null
+  unheld?: (name: string) => string | undefined
   vars: Map<string, Text>
 }
 export type Flag = { name: string; value?: Word }
@@ -818,10 +823,12 @@ export async function examine(
   if (name === "") {
     for (const [key, value] of local) setVar(env.vars, key, value)
     if (builtins) verdict = await visit(cmd, parsed, here)
-  } else if (name === "cd" || name === "pushd") {
-    env.cwd = cmd.detached ? undefined : await cdTarget(args, env)
-  } else if (name === "popd") env.cwd = undefined
-  else if (EXPORTS.has(name)) {
+  } else if (name === "cd" || name === "pushd" || name === "popd") {
+    // a glob in the folder is judged as any program's words are, since it may land anywhere it matches
+    if (name !== "popd" && args.some((a) => globAt(a) !== -1))
+      verdict = await visit(cmd, parsed, here)
+    await moveDir(name, args, env, local, !!cmd.detached)
+  } else if (EXPORTS.has(name)) {
     for (const w of args.filter((a) => ASSIGN.test(a.value))) {
       const eq = w.value.indexOf("=")
       setVar(env.vars, w.value.slice(0, eq), slice(w, eq + 1))
@@ -835,21 +842,96 @@ export async function examine(
   ) {
     const script = await scriptOf(args[0], cmd, here)
     verdict =
+      (unheld(script) ? here.unheld?.(name) : undefined) ??
       (script.unknown ? await visit(cmd, parsed, here) : undefined) ??
       (await run(lexScript(known(script), env), here, visit, builtins))
   } else if (name === "eval") {
-    verdict = await run(lexScript(args.map((a) => a.value).join(" "), env), here, visit, builtins)
+    const script = args.map((a) => a.value).join(" ")
+    verdict =
+      (args.some(unheld) ? here.unheld?.(name) : undefined) ??
+      (await run(lexScript(script, env), here, visit, builtins))
   } else verdict = await visit(cmd, parsed, here)
   await record(cmd, name, args, here)
   return verdict
 }
 
-// The directory a cd lands in; undefined when the hook cannot tell, or the cd would fail and leave the shell where it was.
-async function cdTarget(args: Word[], env: Env): Promise<string | undefined> {
+// Where cd, pushd and popd leave the shell, OLDPWD and the directory stack kept as bash keeps them; a pushd or popd of +N or -N turns the list of the current folder and the stack, and one that would fail leaves both as they are.
+async function moveDir(
+  name: string,
+  args: Word[],
+  env: Env,
+  local: Map<string, Text>,
+  detached: boolean,
+): Promise<void> {
+  const from = env.cwd
+  const stack = env.stack === undefined ? [] : env.stack
+  const go = (to: string | undefined, below: (string | undefined)[] | null) => {
+    env.old = to === undefined ? undefined : from
+    env.cwd = to
+    env.stack = below
+  }
+  if (detached) return go(undefined, null)
+  const words = args.map((a) => a.value)
+  if (name !== "cd" && words.some((v) => /^-[A-Za-z]*n/.test(v))) return void (env.stack = null)
+  const turn = words.find((v) => /^[+-]\d+$/.test(v))
+  const operand = args.some((a) => !/^-./.test(a.value) || /^[+-]\d+$/.test(a.value))
+  if (name === "cd" || (name === "pushd" && operand && turn === undefined)) {
+    const to = await cdTarget(args, env, local)
+    return go(to, name === "cd" ? stack : stack && [from, ...stack])
+  }
+  if (!stack) return go(undefined, null)
+  const list = [from, ...stack]
+  const n = Number(turn?.slice(1) ?? (name === "pushd" ? 1 : 0))
+  const at = turn?.startsWith("-") ? list.length - 1 - n : n
+  if (at < 0 || at >= list.length || list.length < 2) return
+  if (name === "pushd") {
+    const turned =
+      turn === undefined
+        ? [list[1], list[0], ...list.slice(2)]
+        : [...list.slice(at), ...list.slice(0, at)]
+    return at === 0 ? undefined : go(turned[0], turned.slice(1))
+  }
+  const rest = list.filter((_, k) => k !== at)
+  if (at === 0) return go(rest[0], rest.slice(1))
+  env.stack = rest.slice(1)
+}
+
+// The directory a cd lands in: OLDPWD for - and ~-, a CDPATH folder that holds it, else the folder read as typed, a link's .. stepping back up it as cd does; undefined when the hook cannot tell, or the cd would fail and leave the shell where it was.
+async function cdTarget(
+  args: Word[],
+  env: Env,
+  local: Map<string, Text>,
+): Promise<string | undefined> {
   const dir = args.find((a) => !(a.value.startsWith("-") && a.value.length > 1))
   if (!dir) return homedir()
-  const path = dir.value === "-" ? undefined : pathOf(dir, env)
-  if (!path) return undefined
+  if (dir.unknown || dir.reads?.length || dir.value === "") return undefined
+  if (dir.value === "-") return env.old && directory(env.old)
+  const value = expandDirs(dir, env)
+  if (value === undefined) return undefined
+  if (isAbsolute(value)) return directory(resolve(value))
+  const inherited: Text | undefined =
+    env.process.CDPATH === undefined ? undefined : { value: env.process.CDPATH }
+  const cdpath = local.get("CDPATH") ?? env.vars.get("CDPATH") ?? inherited
+  if (cdpath && !/^\.\.?(?:\/|$)/.test(value)) {
+    if (cdpath.unknown || cdpath.reads?.length) return undefined
+    for (const entry of cdpath.value.split(":")) {
+      if (!isAbsolute(entry) && !env.cwd) return undefined
+      const found = await directory(resolve(env.cwd ?? "", entry || ".", value))
+      if (found) return found
+    }
+  }
+  return env.cwd ? directory(resolve(env.cwd, value)) : undefined
+}
+
+// A text with ~- and ~+ expanded as the shell expands them, to OLDPWD and the current folder; undefined when the hook cannot tell that folder.
+function expandDirs(text: Text, env: Env): string | undefined {
+  const tilde = (text as Partial<Word>).quoted ? null : /^~([-+])(?=\/|$)/.exec(text.value)
+  if (!tilde) return text.value
+  const base = tilde[1] === "-" ? env.old : env.cwd
+  return base && base + text.value.slice(2)
+}
+
+const directory = async (path: string): Promise<string | undefined> => {
   try {
     return (await Bun.file(path).stat()).isDirectory() ? path : undefined
   } catch {
@@ -892,11 +974,24 @@ async function shell(
       const fed = await stdinOf(cmd, env)
       script = filled(script, xargs.replace, fed.unknown ? UNKNOWN : fed.value.trim())
     }
+    if (unheld({ ...operand, value: script })) {
+      const verdict = env.unheld?.(name)
+      if (verdict) return verdict
+    }
     return run(lexScript(script, env), subshell(env), visit, builtins)
   }
   const script = await scriptOf(operand, cmd, env)
+  // a script file read by its path is the file's own code, which no hook reads
+  if (unheld(script) && (!operand || operand.value === "/dev/stdin" || operand.procs)) {
+    const verdict = env.unheld?.(name)
+    if (verdict) return verdict
+  }
   return run(lexScript(known(script), env), subshell(env), visit, builtins)
 }
+
+// Whether a script holds a part the hook cannot read: a `$(…)`'s output, a `curl`'s, a variable set by one.
+const unheld = (text: Text): boolean =>
+  !!text.unknown || !!text.reads?.length || text.value.includes(UNKNOWN)
 
 // A script's parts the hook can read, each part it cannot read (a `curl`'s output in a group) taken as a line break, so the rest is still walked.
 const known = (script: Text): string => script.value.replaceAll(UNKNOWN, "\n")
@@ -1042,8 +1137,30 @@ export async function resolveText(text: Text, env: Env): Promise<Text> {
 
 export function pathOf(text: Text, env: Env): string | undefined {
   if (text.unknown || text.reads?.length || text.value === "") return undefined
-  if (isAbsolute(text.value)) return text.value
-  return env.cwd ? resolve(env.cwd, text.value) : undefined
+  const value = expandDirs(text, env)
+  if (value === undefined) return undefined
+  const path = isAbsolute(value) ? value : env.cwd && `${env.cwd}/${value}`
+  if (!path) return undefined
+  if (!/(?:^|\/)\.\.(?:\/|$)/.test(path)) return isAbsolute(value) ? path : resolve(path)
+  // the kernel resolves each link before a .. after it steps up, where resolve() would fold the .. into the link's own folder
+  let at = "/"
+  for (const part of path.split("/")) {
+    if (part === "" || part === ".") continue
+    if (part !== "..") at = at === "/" ? `/${part}` : `${at}/${part}`
+    else {
+      tick()
+      at = dirname(realOr(at))
+    }
+  }
+  return at
+}
+
+const realOr = (path: string): string => {
+  try {
+    return realpathSync(path)
+  } catch {
+    return path
+  }
 }
 
 // Reads a regular file of at most MAX_BYTES; undefined when there is no file at the path.

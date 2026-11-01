@@ -117,6 +117,7 @@ export const GUARD_KEYS = new Set([
   "ext.repos",
   "factory.archiveRepo",
   "factory.publicRepo",
+  "factory.repo",
   "glm.readOnlyLoad5",
   "live.branch",
   "owner.names",
@@ -199,9 +200,10 @@ function cliWrite(words: Word[]): string | undefined {
       ? `playground settings ${verb} of ${key}, a key a guard reads`
       : undefined
   }
-  if (verb === "put")
+  // an accept or a score of 5 moves a list's proposal over the accepted copy, which renders into the guards' lists, as a put of one does
+  if (verb === "put" || verb === "accept" || verb === "score")
     return unread || positional[1] === "list"
-      ? "playground ext put of a list, or with a word it cannot read, which may render into a guard's list"
+      ? `playground ext ${verb} of a list, or with a word it cannot read, which may render into a guard's list`
       : undefined
   if (EXT_WRITES.has(verb) && !(dry && EXT_DRY.has(verb)))
     return `playground ext ${verb}, which changes what the guards' lists and policy.json render from`
@@ -344,13 +346,7 @@ function inspect(raw: string, environment: Environment) {
     if (cmd.redirects.some((r) => r.body && holds(r.body.value, env)))
       return refuse(`${name} with a script that names ${root}`)
     if (fed) {
-      const named =
-        !fed.unknown &&
-        fed.value
-          .split(/\s+/)
-          .filter(Boolean)
-          .map((value) => names({ quoted: false, value }, env, remover))
-          .find(Boolean)
+      const named = !fed.unknown && stdinWords.map((w) => names(w, env, remover)).find(Boolean)
       if (named) return refuse(`${name} under xargs on ${named}`)
     }
   }
@@ -359,6 +355,10 @@ function inspect(raw: string, environment: Environment) {
     files: new Map(),
     known: knownVariables(command, environment, directory),
     process: environment,
+    stack: [],
+    // a guard-list write may rest on a script it cannot read, so only one it reads whole runs
+    unheld: (name) =>
+      refuse(`${name} of a script it cannot read whole (a $(…)'s or a curl's output)`),
     vars: new Map(),
   }
   return run(lex(command, env.known), env, visit, true)

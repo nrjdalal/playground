@@ -8,6 +8,17 @@ Every bypass form a review has found stays refused through a widening: each is a
 `no-raw-spawn` guards `scripts/spawn.sh`, so its text sits in [the spawn.sh section of scripts/README.md](../README.md#spawnsh).
 Their tests are `bun run test:file tests/scripts/hooks`.
 
+## The shared Bash reader
+
+- `scripts/hooks/shell.ts` lexes a Bash command and walks it as the shell runs it, for every hook that reads Bash, so each line below holds for each of them.
+  It reads every command inside a `$(…)`, a `${…}`, a `$((…))` or an array assignment's `(…)`, and the script a shell, `source` or `.` reads from a process substitution, a group's output or `/dev/stdin`, every command that prints part of it included, and the parts it can read of a script it reads only in part (a group holding a `curl`).
+  It follows the folder a command runs in through `cd`, `pushd` and `popd`, with OLDPWD (`cd -`, `~-`) and the directory stack (`pushd +N`, `popd -N`) kept as bash keeps them, a `CDPATH` the call sets, exports or inherits, and `env -C <dir>`, `env -C<dir>` and `env --chdir=<dir>`.
+  A `cd` or `pushd` with a glob in its folder is handed to the hook as any program's words are, and one it cannot follow leaves the folder unread.
+  It resolves a link before a `..` after it steps up, as the kernel opens a path, and a `cd` folds `..` as typed, as the shell's own `cd` does.
+  Under a hook's deadline it stops at a chain of scripts a shell, `eval` or `source` reads 256 or more deep, such a script over 128 KB and an `xargs -I` line over 128 KB once its stdin is filled in, and it holds as unknown text over 1 MB that a command printed or wrote, printf's output included.
+  A hook that sets `unheld` on its `Env` gives the verdict on a shell, `source` or `eval` whose script holds a part the reader cannot read; a script file run by its path is the file's own code, which no hook reads.
+  Its tests are in `bun run test:file tests/scripts/hooks`.
+
 ## Registered in both settings files
 
 - cmux restores a session after a restart without its `--settings` or `PLAYGROUND_ROLE`, so `.claude/settings.json` registers every PreToolUse hook `scripts/factory-settings.json` does, with the same matcher and the same command string,
@@ -152,7 +163,7 @@ Their tests are `bun run test:file tests/scripts/hooks`.
 
 - A factory session changes nothing a guard reads to allow or deny a call: `scripts/hooks/no-extensions-write.ts`, registered beside no-main-checkout on Bash and the file tools (Edit, MultiEdit, NotebookEdit and Write), guards the extensions root (`extensionsDir` of the data folder) and every file under it.
   Each guard reads its list and `policy.json` there, each scope's `lists/` and `settings.json` render into them on the next write (its `git add -A` takes a hand edit along), and a root that is gone sends the guards back to core's smaller lists.
-  It refuses a file tool's path in the root, `~` expanded, and a redirect into it, a group's, a subshell's, `exec`'s, a shell's, `eval`'s, `source`'s, `.`'s, `cd`'s, `pushd`'s, `popd`'s or a bare one included, and zsh's `>!` and `>>!` with them.
+  It refuses a file tool's path in the root, `~` expanded, and a redirect into it, `.`'s, `cd`'s, `eval`'s, `exec`'s, `popd`'s, `pushd`'s and `source`'s, a group's, a shell's, a subshell's or a bare one included, and zsh's `>!` and `>>!` with them.
   It refuses any program but a reader that names the root, a path in it, a folder above it (`~/.playground`, `~`) or a glob there (`*`, `?`, `[…]`, `{…}` or zsh's `(…)`, in a redirect's target too), links followed, in any word: the program word, an option's attached value (`-o<path>`, `--out=<path>`), a variable the call sets (`GIT_DIR=<clone>`), or the stdin xargs hands it.
   It refuses any program but a reader whose words or heredoc hold the root's path as text, whole or as seen from a folder above it the command runs in, so an interpreter's script and a commit message that names it are refused alike, as is a commit message or an inline body that names a gated call (`playground ext sync`); write such text to a file and pass the file.
   The readers are `[`, `cat`, `cmp`, `diff`, `echo`, `grep`, `head`, `jq`, `ls`, `printf`, `readlink`, `realpath`, `shasum`, `stat`, `tail`, `test` and `wc`;
@@ -163,22 +174,19 @@ Their tests are `bun run test:file tests/scripts/hooks`.
   It refuses the `playground` CLI's calls that change what a guard reads, the CLI found by where its word lands: `playground` by name in any case, or by a path that is no folder, or the checkout's `cli.ts` with or without its extension, as any word of a command but a reader's, so behind any wrapper (`bun`, `npx`, `find -exec`, `arch`, `watch`),
   its words followed by the stdin xargs hands it or carried in xargs' `-I` string.
   Its words split as that command's own parse splits them (`--dry-run` and `--yes` are bare for `ext`, `--dry-run` alone for `settings`):
-  `ext put <scope> list`; `ext add`, `import`, `init`, `link`, `order`, `remove`, `sync` and `unlink`, but `--dry-run` on `add`, `import` and `init`; `migrate`; `uninstall --purge`;
-  and `settings set` or `reset` of a key a guard reads: `ext.links`, `ext.order`, `ext.repos`, `factory.archiveRepo`, `factory.publicRepo`, `glm.readOnlyLoad5`, `live.branch`, `owner.names`, `paths.codeRoot`, `sessions.aliases`, `sessions.names` and `usage.keychainService`.
-  A test holds that list to every key a hook names, to `ext.order`, which orders the extensions every guard reads, and to spawn.sh's `paths.codeRoot`; spawn.sh's `gates.*` stay open, as capacity tuning Ops adjusts in normal upkeep.
+  `ext put`, `accept` and `score` of `<scope> list`; `ext add`, `import`, `init`, `link`, `order`, `remove`, `sync` and `unlink`, but `--dry-run` on `add`, `import` and `init`; `migrate`; `uninstall --purge`;
+  and `settings set` or `reset` of a key a guard reads: `ext.links`, `ext.order`, `ext.repos`, `factory.archiveRepo`, `factory.publicRepo`, `factory.repo`, `glm.readOnlyLoad5`, `live.branch`, `owner.names`, `paths.codeRoot`, `sessions.aliases`, `sessions.names` and `usage.keychainService`.
+  A test holds that list to every key a hook names, to `ext.order`, which orders the extensions every guard reads, to `factory.repo`, which decides where pr:merge needs GitGuardian's check, and to spawn.sh's `paths.codeRoot`; spawn.sh's `gates.*` stay open, as capacity tuning Ops adjusts in normal upkeep.
   A command, verb, kind or key word it cannot read, or any such word among the words of `ext put` or `settings set` or `reset`, counts as the write.
-  `ext put` of a doc, a rule or any other reviewed kind, every read, `ext score`, `accept` and `reject`, `settings set` of any other key, `settings import-jobs` and writes elsewhere in the data folder (handoffs, the roster) run.
+  `ext put`, `accept` and `score` of a doc, a rule or any other reviewed kind, every read, `ext reject`, `settings set` of any other key, `settings import-jobs` and writes elsewhere in the data folder (handoffs, the roster) run.
   Its refusal names the one route: the owner types the command as a `!` command in the dispatcher's terminal window, which runs without hooks and which the dispatcher hands the owner when a session tells its lead; no flag, environment variable, role or note frees a call.
-  It reads every command `scripts/hooks/shell.ts` finds: one inside a `$(…)`, a `${…}`, a `$((…))` or an array assignment's `(…)`, and the script a shell, `source` or `.` reads from a process substitution, a group's output or `/dev/stdin`, every command that prints part of it included, and the parts it can read of a script it reads only in part (a group holding a `curl`).
+  It reads every command [the shared Bash reader](#the-shared-bash-reader) finds, in the folder the reader follows.
   It judges each command line and each word once per call, and each variable once per scope and folder, so a deep nest or a long list of variables ends well inside the hook's timeout, and it refuses, each time naming the fix (split it into shorter calls), a call whose lexing or walk runs past 10 s
-  (a deadline checked at every lex, expansion and walk step, its clock read once every 1024 steps, so any slow route is refused), a command over 128 KB, whose lexing could outlast the timeout, one nested too deep for its stack, and a chain of scripts a shell,
-  `eval` or `source` reads 256 or more deep, and such a script over 128 KB, or over 1 MB as text a command printed or wrote in the call, which it holds as unknown elsewhere, and an `xargs -I` line over 128 KB once its stdin is filled in.
+  (a deadline checked at every lex, expansion and walk step, its clock read once every 1024 steps, so any slow route is refused), a command over 128 KB, whose lexing could outlast the timeout, one nested too deep for its stack, and each script the shared reader finds too deep or too large to read.
   It runs its check in a Worker (`scripts/hooks/no-extensions-write-worker.ts`) and refuses from the main thread when the Worker has not answered in 12 s, so a single step the deadline cannot interrupt (a regex, a copy) cannot hold it past its 15 s timeout; this costs about 10 ms a call.
-  It reads `env -C<dir>` and `env --chdir=<dir>` as the folder the command runs in, as it reads `env -C <dir>`.
   It reads a command's text, so a program whose own code writes the root (a script file run by its path, a binary) and a path it cannot read (built at run time, in a `$(…)` or a variable) pass it.
+  It refuses a shell, `source` or `eval` whose script, from a pipe, a process substitution or `eval`'s words, holds a part it cannot read (a `$(…)`'s or a `curl`'s output, `curl … | sh`), since a guard-list write may rest on it; a read of such a value runs.
   A write to a scope's GitHub repository, which `ops:ext-sync` renders into the root, is outside its reach too; [no-extension-repo-write](#no-extension-repo-write) refuses one.
-  A path through a link into the root with `..` after the link (`echo x > <link>/../f`) is judged as typed, so a write by one passes.
-  A `cd` or `pushd` it cannot follow (`cd -`, `cd ~-`, `popd`'s stack, a glob in the folder, a `CDPATH` lookup) leaves the command's folder unread, so a relative write after one passes.
   From a cwd at or above the root (`~`, `~/.playground`), a quoted `(`, `[`, `*`, `?` or `{` reads as a glob there, so a call holding one (`git commit -m "fix(x): y"`, `awk '{print $1}' f`) is refused; run it from a worktree.
   A quoted regex that starts at `/` reads its glob characters as a glob in `/`, which holds the root, so `sed -n '/^a*b/p' f` and `awk '$1 ~ /^(a|b)/' f` are refused from any folder; run such a script from a file (`awk -f <file>`, `sed -f <file>`).
   A gh `-q` filter that holds a jq interpolation is refused from the home (`-q '"\(.a)"'`), and from any folder once it holds a space and a `/` after the `(` (`-q '.a+" +\(.a)/-\(.b)"'`); pipe the JSON to jq, a reader, instead (`gh … --json <fields> | jq -r '<filter>'`).
