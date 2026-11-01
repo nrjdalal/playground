@@ -231,10 +231,6 @@ Their tests are `bun run test:file tests/scripts/hooks`.
   whose tree it reads from a `--git-dir` of `<checkout>/.git`, else `--work-tree`, else the cwd after every `-C` in turn, naming the fix: `git -C <your worktree>`, after `git -C <your worktree> rev-parse --show-toplevel` names it.
   The one reset it lets through is exactly `git reset --keep origin/main`, on the main checkout's `main`, while `git status --porcelain` is empty and no remote-tracking ref holds any commit of `origin/main..main`.
   It is the way back from a stray local commit there, which `playground update`'s fast-forward stops on, since `--keep` keeps uncommitted work and the check keeps every commit someone else holds.
-  The backstop behind it is `lefthook.yml`'s pre-commit step `main-checkout`, at priority 1 so it stops the commit before lint-staged or the build.
-  It refuses a commit whose `git rev-parse --show-toplevel` is the factory's main checkout, the one `~/.playground/ops/run-slot.sh` links into (`scripts/link-skills.sh` makes that link), whatever wrapper, shell or cwd made it, since this hook reads a command's text and the step reads where the commit lands.
-  A worktree and every other clone, a person's own included, commit as before.
-  A ship's pull is a fast-forward and runs no pre-commit, and the step's test is in `tests/lefthook.test.ts`.
   A worker's shell lands there when it changes into the main checkout to run spawn.sh, so the factory's docs run spawn.sh by its absolute path (a bare `git reset --hard` there once ran every installed skill and hook off another branch for 3.5 minutes).
   Run a worktree's commands as `git -C <your worktree>` or `cd <worktree> && …` in one command, since a failed command leaves the Bash tool's shell in its old folder without a word.
   It judges each path where it lands, its nearest existing folder's links followed, so a write through a link link-skills.sh made (`~/.claude/skills/<name>`, `~/.playground/factory-settings.json`) is refused too, while the data folder's own files (handoffs, the roster) and a worktree reached through a link run.
@@ -243,6 +239,10 @@ Their tests are `bun run test:file tests/scripts/hooks`.
   That build needs `NODE_ENV` set and `SKIP_ENV_VALIDATION=true`, on its line, exported or in the session, since the main checkout has no `.env` and the packages' env checks fail without them, so a bare one is refused with the line `playground update`'s build step runs.
   It fails open.
   Its tests are in `bun run test:file tests/scripts/hooks`.
+  The backstop behind it is `lefthook.yml`'s pre-commit step `main-checkout`, alone at priority 1 so it runs first, before any step that writes (lefthook runs a tie in any order).
+  It refuses a commit whose `git rev-parse --show-toplevel` is the factory's main checkout, the one `~/.playground/ops/run-slot.sh` links into (`scripts/link-skills.sh` makes that link), whatever wrapper, shell or cwd made it, since this hook reads a command's text and the step reads where the commit lands.
+  A worktree and every other clone, a person's own included, commit as before.
+  A ship's pull is a fast-forward and runs no pre-commit, and the step's test is in `tests/lefthook.test.ts`.
 
 ## no-manager-subagent
 

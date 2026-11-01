@@ -543,9 +543,15 @@ test("the pre-commit main-checkout step refuses a commit in the factory's main c
   const config = Bun.YAML.parse(await Bun.file(join(ROOT, "lefthook.yml")).text()) as {
     "pre-commit": { commands: Record<string, Record<string, unknown>> }
   }
-  const { "conflict-markers": markers, "main-checkout": main } = config["pre-commit"].commands
+  const {
+    "conflict-markers": markers,
+    "main-checkout": main,
+    "skills-manager": skills,
+  } = config["pre-commit"].commands
   expect(main).toBeDefined()
-  expect(main!.priority as number).toBeLessThanOrEqual(markers!.priority as number)
+  // alone first, since lefthook runs a tie in any order and skills-manager writes AGENTS.md
+  expect(main!.priority as number).toBeLessThan(markers!.priority as number)
+  expect(main!.priority as number).toBeLessThan(skills!.priority as number)
   const dir = realpathSync(mkdtempSync(join(tmpdir(), "lefthook-main-")))
   const [factory, home, clone] = ["playground", "home", "clone"].map((name) => join(dir, name)) as [
     string,
