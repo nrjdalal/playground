@@ -391,7 +391,11 @@ export class DashboardHub {
       this.tails.delete(sessionId)
     }
     for (const [sessionId, path] of transcripts) {
-      if (this.tails.has(sessionId)) continue
+      // FSEvents drops change events under load (6 of 15 at load5 12.8), so every refresh, the 10 s safety one included, reads an open tail again from its offset; a read with nothing past the offset ends at once.
+      if (this.tails.has(sessionId)) {
+        this.queueRead(sessionId)
+        continue
+      }
       try {
         // stat before watch, so a file gone between the two leaves no watcher behind.
         const { birthtimeMs, size } = (this.deps.stat ?? statSync)(path)
