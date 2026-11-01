@@ -33,7 +33,7 @@ When the candidate changes the update path anything in the ship's step 5 runs (`
 a. **Mirror.** Give the rehearsal an origin of its own: clone the repository bare into the scratch folder, then clone that mirror and, in the clone, fetch the pinned `$CANARY` from the repository, merge it into `main` with `--no-ff` (the merge commit a ship makes), tag the merge with the tag this ship will cut, and push `main` and the tag to the mirror.
    Done when the mirror's `main` holds the merge commit, the tag names it, and the repository holds neither.
 
-b. **Contain.** Run every later command under `env -i`, so the run inherits nothing from the real environment, `PLAYGROUND_REPO` included, with `PATH` holding the stub folder first, then the throwaway `HOME`'s bin and the system basics, and `HOME` at a throwaway folder inside the scratch folder.
+b. **Contain.** Run every later command under `env -i`, so the run inherits nothing from the real environment, `PLAYGROUND_REPO` included, with `PATH` holding the stub folder first, then the throwaway `HOME`'s bin, then a folder holding the real `bun` and `node` alone, the runtimes the install, the build and the `playground` command run on, then the system basics; the real `HOME`'s own bin stays off `PATH`, since its `playground` link points at the real checkout. `HOME` sits at a throwaway folder inside the scratch folder.
    Put a stub on `PATH` for each side-effecting tool the update can call, one that logs each call and refuses; read `update.ts`, `ops-restart/cli.ts` and what they call for the list.
    Leave `claude` off `PATH` altogether: `link-skills`' `orgs home` step waits for an absent `claude` and fails a stub that refuses.
    Record the before-state (listings and checksums) of everything outside the scratch folder the update could reach, the home folder's bins and links among them, before any install runs.
@@ -50,7 +50,7 @@ c. **Invitee.** Clone from the mirror, check out the last tag on `main`, and ins
    Done when `playground doctor` from the clone, still contained, reads `held at <last tag>, N commits behind origin/main`.
 
 d. **Update.** Run `playground update --to <tag>`, then `playground doctor`, still contained.
-   Done when the update exits 0, doctor's version line reads `at <tag>`, and every MISSING line names the containment's own doing (`claude`, or a tool a stub stands in for), so no need of the update itself reads MISSING; the after-state reads unchanged against the before-state, and each stub's log names the calls the real machine would have taken. A step that fails names its caller: when a stub took that call, the update needs it, so contain that call another way (a flag, an env) and run the rehearsal again.
+   Done when the update exits 0, doctor's version line reads `at <tag>`, and the MISSING lines are only the containment's own: `claude` off `PATH`, `docker`, `gh` and `python3` left off it, and the pinned `herdr` the throwaway `HOME` lacks, while every need the update itself runs on (`bun`, `git`, `node`) reads ok; the after-state reads unchanged against the before-state, and each stub's log names the calls the real machine would have taken. A step that fails names its caller: when a stub took that call, the update needs it, so contain that call another way (a flag, an env) and run the rehearsal again.
 
 The rehearsal's result goes into the ship PR's body beside the new-user gate's PASS and FAIL list.
 
