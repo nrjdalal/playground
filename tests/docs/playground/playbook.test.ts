@@ -11,5 +11,5 @@ test("playbook.md's standing rules list names exactly the rule files in extensio
   const files = readdirSync(join(root, "extensions/core/rules"))
     .filter((file) => file.endsWith(".md"))
     .map((file) => file.replace(/\.md$/, ""))
-  expect([...named].sort()).toEqual([...files].sort())
+  expect(named.sort()).toEqual(files.sort())
 })

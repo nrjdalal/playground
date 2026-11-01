@@ -36,7 +36,7 @@ Each rule is its own intent file, `extensions/core/rules/<name>.md`: its first l
 A rule that belongs to one login alone lives in that login extension's own `rules/`, and the `rules` hook shows its glance under "Your own rules:".
 The lifecycle, dispatch and sweep are in `LIFECYCLE.md`, `DISPATCH.md` and `SWEEP.md`, each read when its moment comes.
 At every session start, resume and compaction the `rules` hook puts each rule file's glance in front of the session, its slots filled with this machine's settings (`playground rules <name>` prints one whole), and after a compaction a second hook tells it to load the skill again, so the rules arrive even when the skill was dropped.
-A test holds `SKILL.md` under 14,000 characters, its pointer to the rules folder and its glance lines to the rules that wait in a scope's own folder; another holds the rule list above to the files in `extensions/core/rules/`.
+A test holds `SKILL.md` under 14,000 characters and its pointer to the rules folder; another holds the rule list above to the files in `extensions/core/rules/`.
 
 ## The shape
 
