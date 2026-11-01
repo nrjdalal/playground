@@ -8,11 +8,12 @@ Your desktop is your own screen, so the skill keeps every session headless, away
 
 A session loads it on its own before any `agent-desktop` command, or when a task needs a desktop app driven.
 
-| Case                                                          | What the skill does                                                                                                                             |
-| ------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| The binary is missing, or a macOS grant is not given          | Stops, and tells its manager the one action: Ops installs it, or you grant the permission in System Settings                                    |
-| Both are in place                                             | Loads the binary's own docs (`skills get desktop`, `skills get platform`), then works headless                                                  |
-| The task would touch one of your own apps, or need `--headed` | Leaves the app alone, and hands `--headed` to you as one command to run with `!`; the `no-desktop-owner-app` hook refuses both in every session |
+| Case                                                 | What the skill does                                                                                          |
+| ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| The binary is missing, or a macOS grant is not given | Stops, and tells its manager the one action: Ops installs it, or you grant the permission in System Settings |
+| Both are in place                                    | Loads the binary's own docs (`skills get desktop`, `skills get platform`), then works headless               |
+| The task would touch one of your own apps            | Leaves the app alone                                                                                         |
+| The task needs `--headed`                            | Hands it to you as one command to run with `!`                                                               |
 
 ## The grants
 
@@ -25,11 +26,11 @@ The session reads the grants with `agent-desktop permissions`, which never promp
 
 - A session on a Mac with no grant stops at its first step and names the permission to grant, rather than trying a command.
 - Your pointer and focus stay where you left them while a session works.
-- The apps on your list, your browser and Slack today, stay as you left them: a session opens, reads and closes none of them, and one comes off the list only when Ops edits your login extension on your word.
+- The apps on your list, your browser and Slack today, stay as you left them: a session opens, reads and closes none of them.
 - PRs, comments and reports describe what a session saw in words, with no snapshot or screenshot attached.
 
 ## Where it fits
 
 A core skill beside [agent-browser](../../skills/zerostarter/agent-browser/SKILL.md), its browser sibling from the same upstream.
-The `no-desktop-owner-app` hook holds two of its rules as refusals: `--headed`, and any command naming an app on your list.
+The skill holds two rules itself until the `no-desktop-owner-app` hook is registered to refuse them too: `--headed`, and any command naming an app on your list.
 A session trying it before it merges follows [.agents/skill-trial.md](../../.agents/skill-trial.md).

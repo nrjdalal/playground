@@ -29,21 +29,21 @@ Done when both have printed in this session.
 
 ## 3. Stay headless
 
-Use the default headless mode. `--headed` sends physical pointer and key events, which move the owner's own pointer and focus, so it is the owner's alone: when a task needs it, tell your manager the one command for the owner to run with `!`. The `no-desktop-owner-app` hook refuses `--headed` in every session.
+Use the default headless mode. `--headed` sends physical pointer and key events, which move the owner's own pointer and focus, so it is the owner's alone: when a task needs it, tell your manager the one command for the owner to run with `!`. This skill holds that rule itself, and the `no-desktop-owner-app` hook refuses `--headed` once it is registered.
 
 Done when every command in the session runs headless.
 
 ## 4. Leave the owner's apps alone
 
-Every app in the owner's `desktop-owner-apps` guard list stays untouched: no snapshot, act, launch or close names it. The owner's login extension fills the list (the owner's browser and Slack today), an app leaves it only when Ops edits that extension on the owner's word, and the `no-desktop-owner-app` hook refuses a command that names a listed app.
+Name only apps off the owner's list in a snapshot, act, launch or close. Read the list from Playground's checkout with `bun packages/scripts/src/playground/guard-list.ts no-desktop-owner-app desktop-owner-apps`, which prints it as JSON; while it exits 2 (no hook reads the list yet), the list is the owner's browser and Slack. The owner's login extension fills the list, an app leaves it only when Ops edits that extension on the owner's word, and the `no-desktop-owner-app` hook refuses a command that names a listed app once it is registered.
 
-Done when every app the session's commands name is off the list.
+Done when every app the session's commands name is off the list the reader printed, or off the owner's browser and Slack while the reader exits 2.
 
 ## 5. Keep desktop content private
 
 A snapshot, screenshot, clipboard read, trace or command output can hold whatever is on the owner's desktop. Keep each one in your session's scratchpad, and describe results in words wherever they go out: a commit, PR, issue, comment, Inbox item, Slack post or report carries words alone, with no snapshot, screenshot or quoted desktop text. Delete the scratchpad copies when the task ends.
 
-Done when every outward write describes desktop results in words alone, and the scratchpad copies are deleted.
+Done when no outward write holds a desktop artifact, its path or quoted desktop text, and the scratchpad copies are deleted.
 
 ## Keep the skills learning
 
