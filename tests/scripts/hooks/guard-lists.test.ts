@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
+import { count } from "../../../packages/scripts/src/trace-count/count"
 import { isStrings, loadList, storeMarker } from "../../../scripts/hooks/lists"
 import { check as leakCheck } from "../../../scripts/hooks/no-playground-leak"
 import { check as releaseCheck } from "../../../scripts/hooks/no-release-comment"
@@ -116,6 +117,14 @@ describe("no-playground-leak fails closed on its lists", () => {
   test("a stranger's clone reads the checkout's lists", async () => {
     const dir = await lists("leak-clone", good)
     expect(await run(write("built by quillmark"), dir, stranger)).toContain('"quillmark"')
+  })
+
+  test("core's own terms list holds no old factory name and still loads, its aliases kept as an empty key", async () => {
+    const text = await Bun.file(join(coreLists, "playground-terms.json")).text()
+    expect(count([{ path: "playground-terms.json", text }]).oldNames).toBe(0)
+    expect(JSON.parse(text).aliases).toEqual([])
+    expect(await run(write("fixes the export button"), coreLists, stranger)).toBeUndefined()
+    expect(await run(write("see roster.json"), coreLists, stranger)).toContain('"roster.json"')
   })
 
   for (const [shape, terms, cleared, file] of [
