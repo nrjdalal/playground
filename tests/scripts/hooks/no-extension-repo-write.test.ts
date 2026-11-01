@@ -70,6 +70,7 @@ beforeAll(async () => {
   dirs.stale = await clone("stale", ["origin", OTHER])
   git(dirs.stale, "config", "branch.old.remote", "gone")
   git(dirs.stale, "config", "branch.dev.pushRemote", EXT)
+  await mkdir(join(dirs.stale, "sub"))
   dirs.switch = await clone("switch", ["origin", OTHER])
   git(dirs.switch, "config", "branch.feat.remote", EXT)
   git(dirs.switch, "config", "alias.co", "checkout")
@@ -332,6 +333,8 @@ describe("a push resolves its target the way git does, and one it cannot place i
       ],
       ["a bare push after a checkout alias in the same call", "git co feat && git push", "switch"],
       ["a bare push after any other git command", "git status && git push", "stale"],
+      ["a bare push after a cd", "cd sub && git push", "stale"],
+      ["a bare push by git -C", "git -C sub push", "stale"],
       ["a bare push after git rebase onto a branch", "git rebase main feat && git push", "switch"],
       [
         "a bare push after git add and commit",

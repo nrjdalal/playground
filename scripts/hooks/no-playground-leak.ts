@@ -389,9 +389,10 @@ const CONFIG_WRITE =
 const CONFIG_READ = /^--(?:get|get-all|get-color|get-colorbool|get-regexp|get-urlmatch|list)$|^-l$/
 const CONFIG_TAKES = new Set(["--blob", "--default", "-f", "--file", "--type"])
 let changed = false
-// Under anyWrite, whether the call has run a git or gh command, a cd, or a program the hook cannot name, and whether one ran before the command being read, which may have moved the branch a bare push reads its remote from.
+// Under anyWrite, whether the call has run a git or gh command or a program the hook cannot name, and whether one ran before the command being read, which may have moved the branch a bare push reads its remote from; and the folder the call starts in.
 let moved = false
 let movedBefore = false
+let startCwd: string | undefined
 let builtins: Set<string> | undefined
 const MCP_TOOL = /^mcp__(.+?)__(.+)$/
 const READ_TOOL =
@@ -538,8 +539,8 @@ function changesState(cmd: Command, { args, name }: Parsed): boolean {
   return [...args, ...targets].some((w) => GIT_CONFIG_PATH.test(w.value))
 }
 
-// Under anyWrite, the programs after which a bare push reads every branch's remote keys, since any of them may move HEAD or the checkout.
-const MOVERS = new Set(["cd", "gh", "git", "popd", "pushd"])
+// Under anyWrite, the programs after which a bare push reads every branch's remote keys, since any of them may move HEAD.
+const MOVERS = new Set(["gh", "git"])
 
 // The repositories gh falls back to, none it can trust under anyWrite once an earlier command in the call changed them.
 const implicit = (env: Env, local: Map<string, Text>) =>
@@ -1188,9 +1189,10 @@ function pushTarget(remote: Word | undefined, dir: string | undefined): Target {
   }
   if (!remote) {
     const names = lines(["remote"])
-    // remote.pushDefault and the current branch's pushRemote and remote pick the push's remote, and each may hold a URL; after another git or gh command, a cd or an unnamed program earlier in the call, any branch's may.
+    // remote.pushDefault and the current branch's pushRemote and remote pick the push's remote, and each may hold a URL; after another git or gh command or an unnamed program earlier in the call, or in a folder other than the one the call starts in (a cd, git -C), any branch's may.
     const branch = lines(["symbolic-ref", "--short", "HEAD"])?.[0]
-    const name = movedBefore ? ".*" : branch?.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+    const name =
+      movedBefore || dir !== startCwd ? ".*" : branch?.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
     const current = name ? `|branch\\.${name}\\.(pushremote|remote)` : ""
     const keys = lines(["config", "--get-regexp", `^(remote\\.pushdefault${current})$`])
     const picked = (keys ?? [])
@@ -1398,6 +1400,7 @@ export async function inspectAs(
   changed = false
   moved = false
   movedBefore = false
+  startCwd = undefined
   try {
     return await inspect(raw, environment)
   } catch (error) {
@@ -1438,6 +1441,7 @@ async function inspect(raw: string, environment: Environment): Promise<string | 
       : undefined
   }
   const { cwd, tool_input: toolInput, tool_name: tool } = payload as Record<string, unknown>
+  startCwd = typeof cwd === "string" ? cwd : undefined
   const input =
     typeof toolInput === "object" && toolInput !== null
       ? (toolInput as Record<string, unknown>)
