@@ -82,7 +82,9 @@ export async function sweep(input: CollectInput, deps: EndDeps): Promise<Line[]>
   for (const row of await collect(input)) {
     const why = endsOn(row)
     if (!why) continue
-    const sha = row.sha ? `, merged as ${row.sha.slice(0, 7)}` : ""
+    const sha = row.sha
+      ? `, ${row.mergedPr ? `#${row.mergedPr} ` : ""}merged as ${row.sha.slice(0, 7)}`
+      : ""
     out.push(...(await endOne(row, `${why}${sha}`, deps)))
   }
   return out
