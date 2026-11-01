@@ -499,7 +499,6 @@ describe("files and variables", () => {
   })
 })
 
-// A GraphQL comment whose body holds the word, which the hook refuses wherever its text comes from.
 const MUTATION = `mutation { addComment(input: {subjectId: "I_1", body: "release"}) { clientMutationId } }`
 
 describe("gh api", () => {
@@ -586,7 +585,7 @@ describe("gh api", () => {
       "other",
     ],
     [
-      "a mutation a zsh modifier makes from a variable that reads as a query",
+      "a mutation a zsh modifier makes from a variable",
       `Q='mutation { addCXomment(input: {subjectId: "I_1", body: "ship"}) { clientMutationId } }'; gh api graphql -f query="$Q:s/X//"`,
       "other",
     ],
@@ -596,7 +595,7 @@ describe("gh api", () => {
       "other",
     ],
     [
-      "a GraphQL query read in a function whose variable a spelling the hook cannot count sets before it runs",
+      "a GraphQL query read in a function body after typeset sets the variable to a mutation",
       `QUERY='query { viewer { login } }'; function f { gh api graphql -f query="$QUERY"; }; typeset QU""ERY='${MUTATION}'; f`,
       "other",
     ],
@@ -662,7 +661,9 @@ gh api graphql -f query="$QUERY"`,
   test("refuses a GraphQL query held in a variable with a reason that names the query written in the command itself", async () => {
     const reason = await bash(`Q='query { viewer { login } }'; gh api graphql -f query="$Q"`)
     expect(reason).toContain("the hook cannot read its text")
-    expect(reason).toContain("Write the query in the command itself, not in a variable")
+    expect(reason).toContain(
+      "Write the query and each of its fields in the command itself, not in a variable",
+    )
   })
 })
 

@@ -253,9 +253,8 @@ function refuse(what: string, target: Target, detail: string, fix: string): stri
 const READABLE =
   "Put the text in the command itself, or write the text to a file with the Write tool first, then run the command again in a call of its own that names that file by its literal absolute path (--body-file /abs/body.md)."
 
-// The hook never reads a shell variable's value, so a GraphQL query in one is refused, and the way out is the query written in the command itself.
 const INLINE_QUERY =
-  "Write the query in the command itself, not in a variable: gh api graphql -f query='query { viewer { login } }'. For a long query, write it to a file with the Write tool first and pass it by its literal absolute path (-F query=@/abs/query.graphql)."
+  "Write the query and each of its fields in the command itself, not in a variable: gh api graphql -f query='query { viewer { login } }'. For a long one, write it to a file with the Write tool first and pass it by its literal absolute path (-F query=@/abs/query.graphql, -F body=@/abs/body.md)."
 
 const REWORD =
   'Write "ship" or "publish step" instead, or leave the comment out. For a file or rule whose name holds the word, name it by what it is, such as "the ship rule" or "the comment hook", with its line number; for a patch that holds it, write the patch to a file in your scratchpad, send its absolute path to the PR\'s worker by SendMessage, and say in the comment that a patch went to the author, since gh\'s `--attach` uploads only images and video.'
