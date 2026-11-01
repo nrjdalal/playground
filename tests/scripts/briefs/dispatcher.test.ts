@@ -16,9 +16,14 @@ test("the dispatcher reads the Dashboard by /api/health and the Inbox by bun run
   const text = await Bun.file(join(import.meta.dir, "../../../scripts/briefs/dispatcher.md")).text()
   const step = text.match(/^2\. .*$/m)?.[0] ?? ""
   expect(step).toContain(
-    '`curl -sS "$(cd "${PLAYGROUND_REPO:?}/.claude/worktrees/desk" && bunx portless get api.playground)/api/health"`',
+    '`R="${PLAYGROUND_REPO:-$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")}"`',
   )
-  expect(step).toContain('`bun run --cwd "${PLAYGROUND_REPO:?}" ask open`')
+  expect(step).toContain("a session the Dashboard hosts gets no `PLAYGROUND_REPO`")
+  expect(step).toContain(
+    '`curl -sS "$(cd "$R/.claude/worktrees/desk" && bunx portless get api.playground)/api/health"`',
+  )
+  expect(step).toContain('`bun run --cwd "$R" ask open`')
+  expect(step).toContain("When `$R/.claude/worktrees/desk` is missing")
   expect(step).toContain("Report each by that command's output alone")
   expect(step).toContain("Done when your first report quotes each command's result")
 })
