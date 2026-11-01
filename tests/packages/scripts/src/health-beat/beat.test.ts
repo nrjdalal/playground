@@ -134,6 +134,8 @@ describe("readBeat", () => {
           { disabled: true, name: "ops-off" },
           { name: "ops-never" },
           { name: "ops-broken" },
+          { name: "ops-empty" },
+          { disabled: true, name: "ops-paused" },
         ],
       }),
     )
@@ -151,6 +153,7 @@ describe("readBeat", () => {
     beat("ops-flow", 60, "error: boom")
     beat("ops-off", 99_999)
     writeFileSync(join(ops, "ops-broken.json"), "not json")
+    writeFileSync(join(ops, "ops-empty.json"), "[]")
     const sysctl: Record<string, string> = {
       "hw.ncpu": "12",
       "kern.memorystatus_level": "7",
@@ -177,7 +180,7 @@ describe("readBeat", () => {
       at: AT,
       battery: { pct: 72, state: "discharging" },
       cores: 12,
-      down: ["ops-never", "ops-broken"],
+      down: ["ops-never", "ops-broken", "ops-empty"],
       freeMin: 8,
       freePct: 7,
       idlePct: 60.5,

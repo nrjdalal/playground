@@ -91,7 +91,7 @@ const readSessions = async (data: string, at: Date): Promise<Record<string, numb
   return counts
 }
 
-// Each job in ops/jobs.json not marked disabled: down with no readable heartbeat, as the Dashboard's ops.ts calls it, ok while its last result is ok and its beat is under three cycles (at least 10 minutes) old, else late.
+// Each job in ops/jobs.json not marked disabled: down with no readable heartbeat or one with no lastBeatAt, as the Dashboard's ops.ts calls it, ok while its last result is ok and its beat is under three cycles (at least 10 minutes) old, else late.
 const readJobs = async (
   ops: string,
   at: Date,
@@ -103,7 +103,7 @@ const readJobs = async (
   for (const job of Array.isArray(jobs) ? (jobs as Record<string, unknown>[]) : []) {
     if (job.disabled === true) continue
     const beat = await readJson(join(ops, `${String(job.heartbeat ?? job.name)}.json`))
-    if (!beat) {
+    if (!beat || typeof beat.lastBeatAt !== "string") {
       down.push(String(job.name))
       continue
     }
