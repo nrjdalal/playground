@@ -140,7 +140,7 @@ describe("runUpdate", () => {
     ])
   })
 
-  test("a run after one cut short past its fast-forward diffs from the commit the last finished update reached, and records the new one once its steps pass (#271)", async () => {
+  test("a run after one cut short past its fast-forward diffs from the commit the last finished update reached, and records the new one once its steps pass", async () => {
     const done = join(scratch, "fake-update-head")
     writeFileSync(done, "old\n")
     const { calls, run } = fakeRun({
@@ -256,7 +256,7 @@ test("runUpdate fast-forwards a real checkout onto origin/main and runs its own 
   expect(readFileSync(marks, "utf8")).toBe(`linked\nrestart ${old} HEAD\n`)
 })
 
-test("a real update cut short after its fast-forward is finished by the next run, which restarts from the commit the last finished update reached (#271)", async () => {
+test("a real update cut short after its fast-forward is finished by the next run, which restarts from the commit the last finished update reached", async () => {
   const env = { GIT_CONFIG_NOSYSTEM: "1", HOME: scratch, PATH: process.env.PATH }
   const git = (cwd: string, ...args: string[]) =>
     Bun.spawnSync(["git", "-c", "user.name=t", "-c", "user.email=t@t", ...args], { cwd, env })
@@ -415,4 +415,46 @@ describe("runUpdate on a checkout left on another branch", () => {
     )
     expect(readFileSync(join(checkout, "README.md"), "utf8")).toBe("mine\n")
   })
+})
+
+test("a run cut short after its fast-forward with no record yet is finished by the next run, which restarts from where the first one started", async () => {
+  const env = { GIT_CONFIG_NOSYSTEM: "1", HOME: scratch, PATH: process.env.PATH }
+  const git = (cwd: string, ...args: string[]) =>
+    Bun.spawnSync(["git", "-c", "user.name=t", "-c", "user.email=t@t", ...args], { cwd, env })
+      .stdout.toString()
+      .trim()
+  const origin = join(scratch, "first-origin")
+  const marks = join(scratch, "first-marks")
+  const cut = join(scratch, "first-cut")
+  const done = join(scratch, "first-update-head")
+  mkdirSync(join(origin, "scripts"), { recursive: true })
+  mkdirSync(join(origin, "packages", "scripts", "src", "ops-restart"), { recursive: true })
+  writeFileSync(join(origin, "scripts", "link-skills.sh"), "true\n")
+  writeFileSync(
+    join(origin, "packages", "scripts", "src", "ops-restart", "cli.ts"),
+    `const fs = require("node:fs"); if (fs.existsSync(${JSON.stringify(cut)})) process.exit(1); fs.appendFileSync(${JSON.stringify(marks)}, "restart " + process.argv.slice(3).join(" ") + "\\n")\n`,
+  )
+  git(scratch, "init", "-q", "-b", "main", origin)
+  git(origin, "add", ".")
+  git(origin, "commit", "-q", "-m", "one")
+  const checkout = join(scratch, "first-checkout")
+  git(scratch, "clone", "-q", origin, checkout)
+  const one = git(checkout, "rev-parse", "HEAD")
+  const update = () =>
+    runUpdate(
+      checkout,
+      spawnRun,
+      async () => 0,
+      () => {},
+      undefined,
+      done,
+    )
+  writeFileSync(join(origin, "README.md"), "two\n")
+  git(origin, "add", ".")
+  git(origin, "commit", "-q", "-m", "two")
+  writeFileSync(cut, "")
+  expect(await update()).toBe(1)
+  rmSync(cut)
+  expect(await update()).toBe(0)
+  expect(readFileSync(marks, "utf8")).toBe(`restart ${one} HEAD\n`)
 })

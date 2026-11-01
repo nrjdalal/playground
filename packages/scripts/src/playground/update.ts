@@ -31,7 +31,7 @@ export const updateSteps = (changed: string[]) => ({
 })
 
 // With a tag, the checkout's main is moved to that release instead, back or on, and the Dashboard, which rolls on its own branch, is left as it is; a plain update later moves it on to origin/main again.
-// `done` holds the commit the last finished update reached, so a run after one cut short past its fast-forward still installs, builds and restarts what that merge changed.
+// `done` holds the commit the last finished update reached, or where a run with no record started, so a run after one cut short past its fast-forward still installs, builds and restarts what that merge changed.
 export const runUpdate = async (
   repo: string,
   run: Run,
@@ -53,6 +53,7 @@ export const runUpdate = async (
     done && (await Bun.file(done).exists()) ? (await Bun.file(done).text()).trim() : ""
   const old =
     recorded && (await git("cat-file", "-e", `${recorded}^{commit}`)).code === 0 ? recorded : head
+  if (done && old !== recorded) await Bun.write(done, `${old}\n`)
   // a checkout left on another branch, such as one cloned while canary was the default, moves to main when its tree is clean, so the merge below lands on main
   const onMain = async () => {
     const branch = (await git("branch", "--show-current")).out.trim()
