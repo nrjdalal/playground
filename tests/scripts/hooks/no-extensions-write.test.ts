@@ -455,6 +455,11 @@ describe("a quoted argument is read as a command line only where a program runs 
     ["a commit message naming a removal", "git commit -m 'fix: rm -rf ~ bug'"],
     ["a commit message after -am naming a removal", "git commit -am 'fix: rm -rf ~ bug'"],
     ["a tag message naming a removal", "git tag -m 'see rm -rf ~' v1"],
+    ["ls of a glob", "ls *.md"],
+    ["grep through a glob", "grep -n foo src/*.ts"],
+    ["git add of a glob", "git add docs/*.md"],
+    ["cat of a brace", "cat {a,b}.txt"],
+    ["rm of a glob outside the root", "rm -f build/*.tmp"],
   ])("%s runs from a worktree", async (_, command) => {
     expect(await at(command, join(homedir(), "x", ".claude", "worktrees", "y"))).toBeUndefined()
   })
@@ -521,7 +526,7 @@ describe("a quoted argument is read as a command line only where a program runs 
     ["a function that runs its argument by sh -c", `f() { sh -c "$1"; }; f 'rm -rf ~'`],
     ["a function by the function keyword", `function f { eval "$@"; }; f 'rm -rf ~'`],
   ])("%s stays refused", async (_, command) => {
-    for (const cwd of homes)
+    for (const cwd of [...homes, join(homedir(), "x", ".claude", "worktrees", "y")])
       expect(await at(command, cwd)).toContain("no-extensions-write hook refuses")
   })
 
