@@ -29,15 +29,15 @@ Done when both have printed in this session.
 
 ## 3. Stay headless
 
-Use the default headless mode. `--headed` sends physical pointer and key events, which move the owner's own pointer and focus, so it is the owner's alone: when a task needs it, tell your manager the one command for the owner to run with `!`. This skill holds that rule itself, and the `no-desktop-owner-app` hook refuses `--headed` once it is registered.
+Use the default headless mode. `--headed` sends physical pointer and key events, which move the owner's own pointer and focus, so it is the owner's alone: when a task needs it, tell your manager the one command for the owner to run with `!`. The `no-desktop-owner-app` hook refuses `--headed` in every session, and its refusal names that same route.
 
 Done when every command in the session runs headless.
 
 ## 4. Leave the owner's apps alone
 
-Name only apps off the owner's list in a snapshot, act, launch or close, matching a name in any case and with or without `.app`. Read the list with `bun "$PLAYGROUND_REPO/packages/scripts/src/playground/guard-list.ts" no-desktop-owner-app desktop-owner-apps`, which prints it as JSON. While it exits 2 with `no guard list desktop-owner-apps` (the list is not registered yet), the list is every web browser and Slack, and an app you cannot place counts as a browser. On any other answer that is not a printed list (another exit 2, an unset `$PLAYGROUND_REPO`, no `bun`), **stop** and tell your manager, since there is no list to trust. The owner's login extension fills the list, an app leaves it only when Ops edits that extension on the owner's word, and the `no-desktop-owner-app` hook refuses a command that names a listed app once it is registered.
+Name only apps off the owner's list in a snapshot, act, launch or close, matching a name in any case and with or without `.app`. Read the list with `bun "$PLAYGROUND_REPO/packages/scripts/src/playground/guard-list.ts" no-desktop-owner-app desktop-owner-apps`, which prints it as JSON. On any answer that is not a printed list (an exit 2, an unset `$PLAYGROUND_REPO`, no `bun`), **stop** and tell your manager, since there is no list to trust. The owner's login extension fills the list, an app leaves it only when Ops edits that extension on the owner's word, and the `no-desktop-owner-app` hook refuses a command that names a listed app, its refusal naming the two routes: the owner runs the command with `!`, or Ops takes the app off the list.
 
-Done when every app the session's commands name is off the list the reader printed, or off every web browser and Slack while the reader answers `no guard list desktop-owner-apps`.
+Done when every app the session's commands name is off the list the reader printed.
 
 ## 5. Keep desktop content private
 
