@@ -1134,6 +1134,42 @@ describe("ops-unstick's slot alerts", () => {
       "run-slot-model-2",
     ])
   })
+
+  test("an idle holder raises slot-idle on each of run-slot.sh's CPU slots alone", async () => {
+    const script = readFileSync(
+      join(import.meta.dir, "../../../../scripts/ops/run-slot.sh"),
+      "utf8",
+    )
+    const cpu = script.match(/^held_units\(\) \{\n[^\n]*\n\s*for s in ([^;]+);/m)?.[1]?.split(" ")
+    expect(cpu?.length).toBeGreaterThan(0)
+    const config = scratch()
+    const ops = join(config, "playground", "ops")
+    const bin = join(config, "bin")
+    mkdirSync(bin)
+    // the holder's one child has used no CPU
+    writeFileSync(
+      join(bin, "ps"),
+      `#!/bin/bash\necho "  999461 ${process.pid} 0:00.00 sleep 900"\n`,
+    )
+    chmodSync(join(bin, "ps"), 0o755)
+    const now = Date.now() / 1000
+    const slots = ["run-slot-commit", "run-slot-clone", "run-slot-quick", "run-slot-model-1"]
+    const state: { slot_idle: Record<string, unknown> } = { slot_idle: {} }
+    for (const slot of [...(cpu ?? []), ...slots]) {
+      mkdirSync(join(ops, slot), { recursive: true })
+      writeFileSync(join(ops, `${slot}.holder`), `worker-x ${process.pid} 2026-11-01T13:00:00Z\n`)
+      state.slot_idle[`${slot}:${process.pid}`] = { cpu: 0, since: now - 1000, told: true }
+    }
+    const alerts = (await callWith(
+      { PATH: `${bin}:${process.env.PATH}` },
+      config,
+      "slot_idle_alerts",
+      state,
+      now,
+    )) as { kind: string; line: string }[]
+    expect(alerts.map((a) => a.line.match(/holds (\S+) with/)?.[1])).toEqual(cpu ?? [])
+    expect(new Set(alerts.map((a) => a.kind))).toEqual(new Set(["slot-idle"]))
+  })
 })
 
 // ops-unstick routes a block to the session's manager and presses nothing on a permission prompt; a block the session's own hook recorded is that hook's to route.
