@@ -148,19 +148,23 @@ function cliCalls(parsed: Parsed, env: Env): Word[][] {
   return words.flatMap((word, at) => (isCli(word, dirs) ? [words.slice(at + 1)] : []))
 }
 
-// Programs that run a word as a shell line: arch's, concurrently's, find's -exec, npx's package, rsync's -e, script's -c, ssh's remote command and ProxyCommand, tmux's command and watch's; git runs its -c values (an alias, core.sshCommand, core.pager) and more, so all its words but a message are read too.
+// Programs that run a word as a shell line: arch's, concurrently's, find's -exec, flock's, npx's package, rsync's -e, screen's, script's -c, ssh's remote command and ProxyCommand, tmux's command and watch's; git runs its -c values (an alias, core.sshCommand, core.pager) and more, so all its words but a message are read too.
 const RUNNERS = new Set([
   "arch",
   "concurrently",
   "find",
+  "flock",
   "git",
   "npx",
   "rsync",
+  "screen",
   "script",
   "ssh",
   "tmux",
   "watch",
 ])
+// git's commit and tag keep a message as text, and no alias can take their names; an alias runs every word it gets
+const KEEPS_MESSAGE = new Set(["commit", "tag"])
 // git's commit or tag message at a word: the word after -m or --message, or one with the message attached
 const messageAt = (words: Word[], at: number): string | undefined =>
   /^(?:-m|--message)$/.test(words[at - 1]?.value ?? "")
@@ -174,9 +178,9 @@ function runsOf(parsed: Parsed, env: Env): string[] {
   const { args, first, local, name } = parsed
   const values = [...local, ...env.vars].flatMap(([, text]) => (text.unknown ? [] : [text.value]))
   const words = !RUNNERS.has(name) ? [] : first ? [first, ...args] : args
+  const keeps = name === "git" && KEEPS_MESSAGE.has(gitCall(args, env).sub ?? "")
   for (const [at, word] of words.entries()) {
-    // a commit or tag message is text git keeps, never a line it runs
-    if (name === "git" && messageAt(words, at) !== undefined) continue
+    if (keeps && messageAt(words, at) !== undefined) continue
     for (const text of texts(word)) values.push(text.value.replace(/^!/, ""))
   }
   return [...new Set(values)].filter((value) => /\s/.test(value) && !marked(value))
@@ -330,7 +334,9 @@ function inspect(raw: string, environment: Environment) {
       if (verdict) return verdict
     }
     // a git message is text, no line git runs, but one naming a gated call is refused all the same
-    for (const message of name === "git" && !reader
+    for (const message of name === "git" &&
+    !reader &&
+    KEEPS_MESSAGE.has(gitCall(args, env).sub ?? "")
       ? args.flatMap((_, at) => messageAt(args, at) ?? [])
       : []) {
       const write = lex(message, env.known)

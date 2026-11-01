@@ -473,6 +473,13 @@ describe("a quoted argument is read as a command line only where a program runs 
     ["rsync's -e removing the home", "rsync -e 'rm -rf ~' a b"],
     ["find's -exec removing the home", "find . -exec sh -c 'rm -rf ~' \\;"],
     ["GIT_SSH_COMMAND removing the home", "GIT_SSH_COMMAND='rm -rf ~' git fetch"],
+    ["a git alias evaluating the word after -m", `git -c alias.x='!eval "$2"' x -m 'rm -rf ~'`],
+    [
+      "a git alias's sh -c running the word after -m",
+      `git -c alias.x='!sh -c "$2"' x -m 'rm -rf ~'`,
+    ],
+    ["screen's shell removing the home", "screen -dm sh -c 'rm -rf ~'"],
+    ["flock's shell removing the home", "flock /tmp/l sh -c 'rm -rf ~'"],
   ])("%s stays refused", async (_, command) => {
     for (const cwd of homes)
       expect(await at(command, cwd)).toContain("no-extensions-write hook refuses")
