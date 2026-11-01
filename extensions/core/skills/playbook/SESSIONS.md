@@ -262,14 +262,14 @@ playground picker <session> deny <key> "<why, and the simpler shape to run inste
 Allow presses Yes once in a herdr pane whose prompt shows that call, a subagent's command included, or answers a cmux session's Feed permission for it once; deny presses No (Escape) or denies it, and the relay sends the session the reason.
 Each answer is a line in `ops/picker.log`: the time, the manager, the answer, the session and the command's first 120 characters.
 Done when it prints that line; it refuses any caller but the session's manager or the primary dispatcher, a deny with no reason, a dispatcher's session, and a key no waiting call or shown prompt matches, which means the prompt changed: wait for its next alert.
-An ops-unstick alert that says picker cannot answer the prompt found no waiting call surely its own: take it to the dispatcher.
+An ops-unstick alert that says picker cannot answer the prompt found no waiting call surely its own: on herdr it names the close and resume below, and on cmux it says to take it to the dispatcher.
 On herdr it also refuses a prompt that may be another waiting call's, as a subagent's file or URL prompt always is while its parent waits.
 A herdr pane takes no key from your hand, since `no-raw-spawn` refuses every herdr call but a read, so end that prompt by a close and a resume under the session's name:
 
 ```bash
 "${PLAYGROUND_REPO:?}/scripts/spawn.sh" close <session>
-# the resume line ~/.playground/resume/<session>.sh holds, with the reason added as its brief
-"${PLAYGROUND_REPO:?}/scripts/spawn.sh" resume <session> <dir> <session id> --account <its account> --brief <a file of the reason and the simpler shape to run>
+# the exec line ~/.playground/resume/<session>.sh holds, whole but its exec, so the session keeps its account, model and effort
+<that line> --brief <a file under ~/.playground of the reason and the simpler shape to run>
 ```
 
 The session comes back by its session id with its transcript, and the prompted call never runs.
