@@ -226,6 +226,29 @@ describe("a direct write into the extensions root is refused, naming the owner's
     ["the CLI as git's pager", "GIT_PAGER='playground ext sync' git log"],
     ["the CLI as git's -c pager", "git -c core.pager='playground ext sync' log"],
     ["a write as PAGER", `PAGER='touch ${LIST}' git log`],
+    ["the CLI as watch's command line", "watch -n1 'playground ext sync'"],
+    ["the CLI as tmux's command line", "tmux new -d 'playground ext sync'"],
+    [
+      "the CLI as sh -c's script under find -exec",
+      "find /tmp -maxdepth 0 -exec sh -c 'playground ext sync' ';'",
+    ],
+    ["the CLI as sh -c's script under arch", "arch -arm64 sh -c 'playground ext sync'"],
+    ["the CLI as ssh's ProxyCommand", "ssh -o ProxyCommand='playground ext sync' host"],
+    ["the CLI as rsync's shell", "rsync -e 'playground ext sync' /tmp/a host:/tmp/b"],
+    ["the CLI as script's command", "script -q -c 'playground ext sync' /dev/null"],
+    ["the CLI as concurrently's command", "npx -y concurrently 'playground ext sync'"],
+    ["the CLI as a git alias", "git -c alias.x='!playground ext sync' x"],
+    ["the CLI as MANPAGER", "MANPAGER='playground ext sync' man ls"],
+    ["the CLI as GH_PAGER", "GH_PAGER='playground ext sync' gh pr view 1"],
+    [
+      "the CLI as git's --config-env pager",
+      "X='playground ext sync' git --config-env=core.pager=X log",
+    ],
+    [
+      "a commit message holding a gated call",
+      `git commit -m "docs: the hook refuses playground ext sync now"`,
+    ],
+    ["a write after a word with an unbalanced quote", `git commit -m "it's"; rm -rf ${ROOT}`],
   ])("%s", async (_, command) => {
     expect(await bash(command)).toContain("no-extensions-write hook refuses")
   })
@@ -287,6 +310,15 @@ describe("a read of the root, and writes elsewhere, run", () => {
     ["bash reading a process substitution that writes elsewhere", "bash <(echo ls /tmp)"],
     ["git log with a pager", "GIT_PAGER=cat git log"],
     ["git -c of a name", "git -c user.name=x commit -m y"],
+    ["a commit message naming ext sync", `git commit -m "fix: read ext sync forms"`],
+    [
+      "a comment naming a settings set no guard reads",
+      `gh pr comment 1 --body "run playground settings set ui.theme dark"`,
+    ],
+    ["rg of a gated call", "rg 'playground ext sync'"],
+    ["a git author name with a space", "GIT_AUTHOR_NAME='A B' git log"],
+    ["a pager with an option", "GIT_PAGER='less -R' git log"],
+    ["a commit message with an unbalanced quote", `git commit -m "it's fine"`],
     [
       "the CLI's render through ext put of a doc",
       "playground ext put login doc audit-x /tmp/a.md --reason why",

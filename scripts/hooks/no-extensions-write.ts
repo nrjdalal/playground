@@ -136,19 +136,13 @@ function cliCalls(parsed: Parsed, env: Env): Word[][] {
   return words.flatMap((word, at) => (isCli(word, dirs) ? [words.slice(at + 1)] : []))
 }
 
-// The command lines a variable in RUNS or git's -c hands the command to run, each read as a command of its own.
+// Every text of a word or a variable that holds a space, a leading ! dropped, read as a command line of its own, since a program may run it (watch, ssh's ProxyCommand, a git alias, a pager).
 function runsOf(parsed: Parsed, env: Env): string[] {
-  const { args, local, name } = parsed
-  const values = [...local, ...env.vars].flatMap(([key, text]) =>
-    RUNS.test(key) && !text.unknown ? [text.value] : [],
-  )
-  if (name === "git")
-    args.forEach((word, at) => {
-      const value = args[at + 1]?.value
-      if (word.value === "-c" && value && !marked(value))
-        values.push(value.slice(value.indexOf("=") + 1))
-    })
-  return values
+  const { args, first, local } = parsed
+  const values = [...local, ...env.vars].flatMap(([, text]) => (text.unknown ? [] : [text.value]))
+  for (const word of first ? [first, ...args] : args)
+    for (const text of texts(word)) values.push(text.value.replace(/^!/, ""))
+  return [...new Set(values)].filter((value) => /\s/.test(value) && !marked(value))
 }
 
 // What of a playground call changes what a guard reads, or undefined; its words split as that command's parseWords splits them, and a word the hook cannot read taken as the worst.
@@ -264,13 +258,8 @@ function inspect(raw: string, environment: Environment) {
     const reader = !!first && reads(parsed, env)
     const write = reader ? undefined : cliCalls(parsed, env).map(cliWrite).find(Boolean)
     if (write) return refuse(write)
-    for (const line of runsOf(parsed, env)) {
-      const verdict = await run(
-        lex(line, env.known),
-        { ...env, vars: new Map([...env.vars].filter(([key]) => !RUNS.test(key))) },
-        visit,
-        true,
-      )
+    for (const line of reader ? [] : runsOf(parsed, env)) {
+      const verdict = await run(lex(line, env.known), { ...env, vars: new Map() }, visit, true)
       if (verdict) return verdict
     }
     // a bare assignment or export with no command: only its redirect writes, and a variable it sets is read where a command runs with it
