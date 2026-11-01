@@ -1066,7 +1066,7 @@ describe("composeWorkers", () => {
         .slice(1, 5)
         .map((w) => w.name)
         .toSorted(),
-    ).toEqual([OLD.ops, OLD.builder, OLD.planner, "planner"])
+    ).toEqual([OLD.ops, OLD.builder, OLD.planner, "planner"].toSorted())
     expect(workers.find((w) => w.name === OLD.builder)?.task).toBe("Run the review queue")
   })
 
