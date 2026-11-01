@@ -45,6 +45,9 @@ describe("--headed", () => {
     ["before the command", "agent-desktop --headed snapshot --app Finder"],
     ["with a value", "agent-desktop hover @s8f3k2p9:e5 --headed=true"],
     ["behind bash -c", `bash -c 'agent-desktop click @s8f3k2p9:e5 --headed'`],
+    ["behind zsh -O -c", `zsh -O -c 'agent-desktop click @s8f3k2p9:e5 --headed'`],
+    // bash's -O takes a shopt name, so the script is the text after -c, not extglob
+    ["behind bash -O extglob -c", `bash -O extglob -c 'agent-desktop click @s8f3k2p9:e5 --headed'`],
     ["behind env", "env agent-desktop click @s8f3k2p9:e5 --headed"],
     ["behind run-slot", "~/.playground/ops/run-slot.sh w -- agent-desktop click @s1:e5 --headed"],
     ["in a pipeline", "echo go | agent-desktop click @s8f3k2p9:e5 --headed | cat"],
