@@ -1,6 +1,6 @@
 ---
 name: to-inbox
-description: "Write an Inbox item the owner reads at a glance: a picture of the point (diff, ASCII, before and after shots, an HTML demo), emoji bullets in ASD-STE100 plain English, one callout, times in IST. Use before every `bun run ask new`: an ask, a draft, an update or a demo."
+description: "Write an Inbox item the owner reads at a glance: a picture of the point (diff, ASCII, before and after shots, an HTML demo), emoji bullets in ASD-STE100 plain English, one callout, times in the owner's zone. Use before every `bun run ask new`: an ask, a draft, an update or a demo."
 license: Complete terms in the repository's NOTICE
 ---
 
@@ -33,25 +33,26 @@ Pick the kind by how its card closes (asks.md's `settle` and `resolve` lines): y
 
 3. **Bullets.** Write three to five of asks.md's bullets, one fact each, each led by one emoji: the legend's when one fits, else any emoji that names the fact, as asks.md's worked examples do (🧪, 🖼️). Done when no bullet holds two facts.
 
-   | Emoji | Marks                      |
-   | ----- | -------------------------- |
-   | 🐛    | the problem                |
-   | ✅    | what is done or tested     |
-   | ⚠️    | a risk                     |
-   | ↩️    | how to undo it             |
-   | 📨    | who asks, or where it goes |
-   | 🕐    | a clock time, in IST       |
-   | ⏱️    | how long it takes          |
-   | 💰    | a cost or a usage figure   |
+   | Emoji | Marks                             |
+   | ----- | --------------------------------- |
+   | 🐛    | the problem                       |
+   | ✅    | what is done or tested            |
+   | ⚠️    | a risk                            |
+   | ↩️    | how to undo it                    |
+   | 📨    | who asks, or where it goes        |
+   | 🕐    | a clock time, in the owner's zone |
+   | ⏱️    | how long it takes                 |
+   | 💰    | a cost or a usage figure          |
 
    A decision that needs more than one answer asks them as numbered questions, the most important first, one idea each, with a one-line why only where a question could be misread.
 
-4. **Plain words.** Write every sentence in ASD-STE100 Simplified Technical English, in the words of `GLOSSARY.md`. Done when each sentence passes all five:
+4. **Plain words.** Write every sentence in ASD-STE100 Simplified Technical English, in the words of `GLOSSARY.md`. Done when each sentence passes all six:
    - It is 20 words or fewer.
    - It says one thing.
    - Its verb is active: "I merge the PR", never "the PR is merged".
    - It speaks in the first person singular, "I", never "we" or the session's name: the poster's "I" in an ask, the owner's in a draft or a `slack` decision, which goes out in his voice (asks.md).
-   - Each word keeps one meaning across the item, and a time reads in IST, am/pm ("9:30 pm IST"); a now-time is `{now}`, which `bun run ask` fills with the time it posts at.
+   - Each word keeps one meaning across the item.
+   - A time reads in the owner's zone (`clock.ownerZone`, which `playground rules clock` prints), am/pm, named by that zone ("9:30 pm UTC"); a now-time is `{now}`, which `bun run ask` fills with the time it posts at.
 
 5. **Callout.** When one fact must not be missed, put it in one GitHub callout after the bullets. Done when the item holds one callout or none.
 
@@ -71,7 +72,7 @@ Pick the kind by how its card closes (asks.md's `settle` and `resolve` lines): y
 
 ## Example
 
-An `ask` decision's text, as its card shows it:
+An `ask` decision's text, as its card shows it to an owner whose `clock.ownerZone` is UTC, the setting's default:
 
 ````markdown
 ```
@@ -84,13 +85,13 @@ Ops ships 3 PRs
 - ✅ Checks pass on all 3 PRs.
 - ⚠️ One PR changes the spawn gate.
 - ↩️ One revert undoes the ship.
-- 🕐 I start at 10:00 pm IST.
+- 🕐 I start at 10:00 pm UTC.
 
 > [!IMPORTANT]
-> I need your yes before 10:00 pm IST.
+> I need your yes before 10:00 pm UTC.
 ````
 
-Approve: `Ship canary to main at 10:00 pm IST`; Deny: `Hold the ship until tomorrow`.
+Approve: `Ship canary to main at 10:00 pm UTC`; Deny: `Hold the ship until tomorrow`.
 
 ## Keep the skills learning
 
