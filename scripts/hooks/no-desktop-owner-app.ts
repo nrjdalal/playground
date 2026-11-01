@@ -120,7 +120,9 @@ function lister(environment: Environment) {
   let loaded: Promise<{ apps?: Set<string>; refusal?: string }> | undefined
   return () =>
     (loaded ??= guardList(GUARD, "desktop-owner-apps", isStrings, [], environment).then((l) =>
-      l.refusal ? { refusal: l.refusal } : { apps: new Set((l.list ?? []).map(appName)) },
+      l.refusal
+        ? { refusal: `${l.refusal} The list is Ops' to write: ask your lead to route it to Ops.` }
+        : { apps: new Set((l.list ?? []).map(appName)) },
     ))
 }
 

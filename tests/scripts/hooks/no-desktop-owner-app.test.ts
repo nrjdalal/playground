@@ -179,6 +179,13 @@ describe("passes", () => {
     expect(await bash("agent-desktop click @s8f3k2p9:e5 --headed", none)).toContain("--headed")
   })
 
+  test("a store whose set lacks the list refuses, naming the file and Ops", async () => {
+    const missing = storeWith(join(scratch, "missing"), {})
+    const reason = await bash("agent-desktop snapshot --app Finder", missing)
+    expect(reason).toContain("hooks/desktop-owner-apps.json")
+    expect(reason).toContain("route it to Ops")
+  })
+
   test("a call that is not agent-desktop never reads the list", async () => {
     const broken = storeWith(join(scratch, "broken"), { "desktop-owner-apps.json": "{" })
     expect(await bash("ls -la", broken)).toBeUndefined()

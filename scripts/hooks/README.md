@@ -97,7 +97,7 @@ Their tests are `bun run test:file tests/scripts/hooks`.
   It refuses what it cannot read, as a call that may hide either: a word built from a variable or a substitution, the program in a variable, arguments xargs appends, `batch`, `--window-id`, `notification-action`, an interpreter's code that names agent-desktop, and a script file run in a call that names agent-desktop.
   A command that acts on the app in front when no `--app` names one (`snapshot`, `find`, `screenshot`, `press`, the window and notification commands) needs an `--app`; `snapshot` and `find` under a `--root` ref, and every ref action, pass, since the snapshot that gave the ref was checked.
   It reads agent-desktop behind `bash -c`, a pipe into a shell, `env` and the other wrappers `scripts/hooks/shell.ts` knows, `run-slot.sh --`, `npx`, `bunx` and `find -exec`, and a script file the call runs, by its text.
-  It loads the list only for a call that runs agent-desktop, and fails closed on it; it fails open on a call it cannot parse.
+  It loads the list only for a call that runs agent-desktop, and fails closed on it, its refusal naming the file and Ops, whose list write fixes it; it fails open on a call it cannot parse.
   Its tests are `bun run test:file tests/scripts/hooks/no-desktop-owner-app.test.ts`.
 
 ## no-env-dump
