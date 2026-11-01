@@ -271,6 +271,17 @@ describe("code-review-loop checks its own fixes and a repo scanner's landing (PG
     expect(await page()).toContain("a test that scans the repo or reads the schema lands on canary")
   })
 
+  test("step 8 runs a waiting scanner PR's touched tests on a local merge at every canary move, whatever landed (#422's CI merge went stale twice)", async () => {
+    const step = (await skill()).match(/^8\. \*\*Report and wait\.\*\*.*$/m)?.[0] ?? ""
+    expect(step).toContain(
+      "A waiting 5/5 whose own diff adds or changes a repo scanner or a data file one reads (The last 5/5's merge rule names them) takes that local merge at every canary move, whatever landed",
+    )
+    expect(step.split("**Done when**")[1] ?? "").toContain(
+      "each waiting 5/5 that adds or changes a repo scanner has run its touched tests on a local merge with the newest `origin/canary`",
+    )
+    expect(await page()).toContain("A waiting 5/5 that adds or changes a repo scanner")
+  })
+
   test("step 8 checks each waiting 5/5 for a merge conflict with canary whenever canary moves (#118 went CONFLICTING under its 5/5)", async () => {
     const text = await skill()
     const step = text.match(/^8\. \*\*Report and wait\.\*\*.*$/m)?.[0] ?? ""
