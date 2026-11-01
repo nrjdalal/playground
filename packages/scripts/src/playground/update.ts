@@ -51,7 +51,7 @@ export const runUpdate = async (
   const head = (await git("rev-parse", "HEAD")).out.trim()
   const recorded =
     done && (await Bun.file(done).exists()) ? (await Bun.file(done).text()).trim() : ""
-  // with no record, the reflog's last fast-forward onto origin/main is where the checkout's last update left it, so a reset made since outside update still reads as changed
+  // with no record, the reflog's last fast-forward merge onto origin/main is where the checkout's last update, or a hand merge, left it, so a reset made since outside update still reads as changed
   const merged =
     done && !recorded
       ? ((await git("reflog", "--format=%H %gs", "HEAD")).out
