@@ -11,14 +11,14 @@ The two lines under the header say what this install runs, each naming the place
 ```
 
 - `Main checkout:` is the main checkout's `git describe --tags`: the tag alone, or the tag with `+ N local commit(s) (<sha>)` when the checkout is ahead of it.
-  `, behind main <tag>` follows when the checkout does not hold `origin/main`'s latest tag, as last fetched; a main tag the beat cannot read leaves it out.
+  `, behind main <tag>` follows when the checkout does not hold `origin/main`'s latest tag, as last fetched; a main tag or an ancestry the beat cannot read leaves it out.
 - `Dashboard:` is the Dashboard checkout's branch, then `build` when the live Dashboard serves a production build or `dev server` when it serves one, then `, at <sha>` from the version its `/api/health` reports, then that sha's tag (the tag at it, or the nearest before it) in brackets.
   The kind comes from the process trees under the stack that holds `playground.localhost`'s port in portless's routes and under each process `lsof` finds listening on that port: a command run from a `/builds/<sha>/` path is a build, and `next dev` is a dev server.
   The listener counts on the live Dashboard, whose supervisor owns the route while the web it starts runs with ppid 1.
-  The branch is read in the Dashboard's checkout: the working folder of the process that shows the kind (`lsof -a -p <pid> -d cwd`), else of its parent, up to 3 steps up, since next's standalone `server.js` moves into its build folder, which is in no repo, while its launcher works in the checkout.
+  The branch is read in the Dashboard's checkout: the working folder of the process that shows the kind (`lsof -a -p <pid> -d cwd`), else of its parent, then of that parent's parent, since next's standalone `server.js` moves into its build folder, which is in no repo, while its launcher works in the checkout.
   A branch it cannot read, or a detached HEAD, leaves the word out.
   The sha comes from `api.playground.localhost`'s port on loopback, and its tag from `git describe --tags --abbrev=0 <sha>` in the Dashboard's checkout, or in the main checkout when that checkout is not found.
-- A value the beat cannot read prints as unknown with its reason, never a guess.
+- Any other value the beat cannot read prints as unknown with its reason, never a guess.
 
 Each read leaves the machine as it was: up to four git reads of the main checkout or the Dashboard's, portless's `routes.json`, one `ps`, `lsof` reads of the web's port and of up to 3 working folders up its process chain, a `git branch` in each and one GET, with no process signalled or selected for any action.
 

@@ -171,7 +171,7 @@ const cwdOf = async (run: Run, pid: number): Promise<string | undefined> =>
     .find((line) => line.startsWith("n/"))
     ?.slice(1)
 
-// The Dashboard's own checkout: the working folder of the process that shows the kind, else of its parent, up to 3 steps, since next's standalone server.js moves into its build folder, which is in no repo, while the launcher above it works in the checkout.
+// The Dashboard's own checkout: the working folder of the process that shows the kind, else of its parent, then of that parent's parent, since next's standalone server.js moves into its build folder, which is in no repo, while the launcher above it works in the checkout.
 const checkoutUp = async (
   run: Run,
   ps: string,
