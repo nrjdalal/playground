@@ -190,6 +190,7 @@ ZeroStarter's rules above govern Playground too; this section adds its own.
 - A new worktree can clone a sibling's `node_modules` in place of a full install, through run-slot ([scripts/README.md](./scripts/README.md#a-worktrees-node_modules)).
   Remove worktrees one at a time, never in parallel, and keep one review worktree across a PR's rounds.
 - Every worktree of a checkout shares one `git stash` list, so a pop can take another worker's entry: set work aside with a commit, and take a before-shot from a separate worktree on `origin/canary`.
+- Commit before a red-first swap, and restore the file with `git checkout HEAD -- <file>`, since `git checkout -- <file>` also drops that file's uncommitted edits: on 1 Nov a worker's restore after a red-first swap took the file's uncommitted edits with it, and the work was redone.
 - Squash a branch with `git reset --soft $(git merge-base HEAD origin/<base>)`, never onto a base that has moved: the soft reset keeps the branch's old copies of whatever the base changed since, and the squash reverts it.
   Check the file list after.
 - When the owner asks to see a draft, a tree or a restructure, show it in chat and change no file until told to apply it.
