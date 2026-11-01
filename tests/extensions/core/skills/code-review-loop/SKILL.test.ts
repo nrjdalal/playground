@@ -270,4 +270,24 @@ describe("code-review-loop checks its own fixes and a repo scanner's landing (PG
     )
     expect(await page()).toContain("a test that scans the repo or reads the schema lands on canary")
   })
+
+  test("step 8 checks each waiting 5/5 for a merge conflict with canary whenever canary moves (#118 went CONFLICTING under its 5/5)", async () => {
+    const text = await skill()
+    const step = text.match(/^8\. \*\*Report and wait\.\*\*.*$/m)?.[0] ?? ""
+    expect(step).toContain(
+      "beside that `diff --stat`, run `git -C <clone> merge-tree --write-tree --name-only <head> origin/canary` on each waiting 5/5's head",
+    )
+    expect(step).toContain("as The last 5/5's merge-tree line scores it")
+    expect(step).toContain("a new verdict that names the conflicted files")
+    expect(step.split("**Done when**")[1] ?? "").toContain(
+      "each waiting 5/5's head has a `merge-tree` check against the newest `origin/canary`",
+    )
+    const last = text.split("## The last 5/5")[1]?.split("\n## ")[0] ?? ""
+    expect(last).toContain(
+      "First `git -C <clone> merge-tree --write-tree <head> origin/canary`: a conflict there is a blocking finding, which goes to the worker with the merge",
+    )
+    expect(await page()).toContain(
+      "also checks each waiting 5/5's head for a merge conflict with canary",
+    )
+  })
 })
