@@ -1,7 +1,7 @@
 # The factory's hooks
 
 Each Claude Code hook in this folder, in full: what it refuses or writes, for whom, and why.
-AGENTS.md keeps one line per hook, and this file holds the text that line stands for.
+AGENTS.md names each hook and points here, and this file holds each one's text.
 Read a hook's section before you change the hook, its tests or its registration, or when it refuses a call you did not expect.
 `no-raw-spawn` guards `scripts/spawn.sh`, so its text sits in [the spawn.sh section of scripts/README.md](../README.md#spawnsh).
 Their tests are `bun run test:file tests/scripts/hooks`.
@@ -63,7 +63,7 @@ Their tests are `bun run test:file tests/scripts/hooks`.
   It acts for `PLAYGROUND_ROLE` `dispatcher`, `lead` or `manager`, else for a session with no role whose name in Claude Code's registry (`$CLAUDE_CONFIG_DIR/sessions/<pid>.json`, matched by the hook input's `session_id`) has a manager's kind in the roster (builder, ops, planner, optimizer or dispatcher, through `rosterRole`)
   or else is a manager's name in the `sessions.names` setting or an old name `sessions.aliases` maps to a manager's kind,
   read through `roleOfName` in `scripts/hooks/role.ts`; workers, checkers, runners and probes report to a lead, so it passes them.
-  When the final reply asks the owner for a decision, it refuses the stop with `name the open #iN on the same thing if one exists (each manager's asks in the roster, read with bun run ask get), else post it with bun run ask new, then say in chat that it's in the inbox as #iN`, so a session reuses the item already posted (a lead once posted a duplicate of the dispatcher's),
+  When the final reply asks the owner for a decision, it refuses the stop with `name the open #iN on the same thing if one exists (bun run ask open lists them), else post it with bun run ask new, then say in chat that it's in the inbox as #iN`, so a session reuses the item already posted (a lead once posted a duplicate of the dispatcher's),
   as `additionalContext` with exit 0 so no Stop hook error shows, on every stop that still asks, `stop_hook_active` included (Claude Code's cap on continuations in a row with no tool call between them bounds it),
   since playbook's **ask** rule keeps his decisions out of chat.
   A decision ask is, in any case and with curly or straight quotes, a `?` closing a sentence (a heading's included), or "can we", "do you want", "if you (still) want", "if you'd rather", "is yours to", "let me know which", "one word answer", "say" told to him and a quoted word (`Say "ship now"`), "say go" or "say yes",
@@ -132,6 +132,16 @@ Their tests are `bun run test:file tests/scripts/hooks`.
   Its reason gives the shape, with the account read from the session's resume record (`~/.playground/resume/<name>.sh`, its `# account:` line, else its `--account`), and the Keychain service from the `usage.keychainService` setting, `playground-claude-oauth` while the policy sets none.
   A command that only names `claude -p` (in `echo`, `grep` or a heredoc's body) runs, and so do `claude` without `-p`, `--resume` and `--version`.
   It fails open, and its tests are in `bun run test:file tests/scripts/hooks` too.
+
+## no-kill-by-name
+
+- A factory session signals only processes it started, by their own handle (the **signal** rule): `scripts/hooks/no-kill-by-name.ts`, registered after no-headless-login, refuses `pkill`, `killall` and `fuser -k`, <!-- kill-check: names only -->
+  and, in a call that searches with `pgrep`, `pidof`, `lsof`, `fuser` or `ps` (but `ps` given a pid by `-p`, `-q`, `--pid` or `--quick-pid`), a `kill` run by xargs or given a pid the hook cannot read, in a chain, a pipe, a loop, a group or `sh -c` alike,
+  since a name, pattern or port matches the live dashboard and every worker's stack (31 Oct: a session ran `pkill -f` on its own watcher, and only `tests/test_kill_by_name.py`, which reads the repo's text, guarded it). <!-- kill-check: names only -->
+  It reads the whole call for a search before it judges a kill, since a loop's `done < <(pgrep …)` comes after the kill it feeds, and it reads the `-I` string xargs hands a shell it starts as such a pid.
+  Its reason gives the way out: `TaskStop` for a background task, `bun run dev:stop` for a dev stack, `kill <pid>` for a pid the session spawned and holds, in a Bash call of its own when the call also searches.
+  `kill <pid>`, `kill -<sig> <pid>`, `kill $!`, `kill %1`, `kill $(cat <pid file>)` and a liveness check before it (`ps -p $PID && kill $PID`) run in a call that searches nothing else, and so do each search alone (`pgrep -f x`, `lsof -i :3000`), `command -v pkill` and `pkill --help`. <!-- kill-check: names only -->
+  It fails open, and its tests are in `bun run test:file tests/scripts/hooks` too; `tests/test_kill_by_name.py` skips the hook and its test, which hold the refused commands as data.
 
 ## no-playground-leak
 
@@ -217,6 +227,7 @@ Their tests are `bun run test:file tests/scripts/hooks`.
   It refuses a git move there too: `am`, `apply` (but `--check`, `--numstat`, `--stat` or `--summary` without `--apply`), `bisect`, `branch -f`, `checkout`, `cherry-pick`, `clean` (but `-n`), `merge`, `mv`, `pull`, `rebase`, `reset`, `restore`, `revert`, `rm`, `stash` (but `list` and `show`), `switch` and `update-ref`,
   whose tree it reads from a `--git-dir` of `<checkout>/.git`, else `--work-tree`, else the cwd after every `-C` in turn, naming the fix: `git -C <your worktree>`, after `git -C <your worktree> rev-parse --show-toplevel` names it.
   A worker's shell lands there when it changes into the main checkout to run spawn.sh, so the factory's docs run spawn.sh by its absolute path (a bare `git reset --hard` there once ran every installed skill and hook off another branch for 3.5 minutes).
+  Run a worktree's commands as `git -C <your worktree>` or `cd <worktree> && …` in one command, since a failed command leaves the Bash tool's shell in its old folder without a word.
   It judges each path where it lands, its nearest existing folder's links followed, so a write through a link link-skills.sh made (`~/.claude/skills/<name>`, `~/.playground/factory-settings.json`) is refused too, while the data folder's own files (handoffs, the roster) and a worktree reached through a link run.
   Reads, `git fetch`, step 5's `git merge --ff-only origin/main` (with `-q` or `--quiet` before or after `--ff-only`), `scripts/link-skills.sh`, `bun install` and `env NODE_ENV=production SKIP_ENV_VALIDATION=true turbo run build --filter='./packages/*'` alone run, as the release skill's step 5 needs:
   the install a pull that changes `bun.lock` or a `package.json` needs, and the build a pull that changes `packages/` needs, since the `playground` command imports their `dist`.
@@ -264,6 +275,8 @@ Their tests are `bun run test:file tests/scripts/hooks`.
   A session run from this repo has the PreToolUse hook `scripts/hooks/no-release-comment.ts`, registered in both settings files, which refuses such a comment before it posts, and refuses one whose text or repository it cannot read (a GraphQL comment names no repository, so it is always checked).
   To post a body it can read, write it with the Write tool first, then post it in a call of its own with `--body-file` naming that file by its literal absolute path; it cannot read a path built from a variable or a file a heredoc with an expansion writes in the same call, and its refusal then names this recipe, as no-playground-leak's does.
   An `--attach` reads only what gh posts, its alt text after `#`, else its file's name, so a path built from a variable (`"$S/after.png#After"`) passes when the variable sits before the alt's first `#`, or, with no `#`, before the name's last `/`.
+  Its refusal gives the way out for a file, rule or patch that holds the word: name the file or rule by what it is ("the ship rule") with its line number, and keep the patch out of the comment.
+  Write the patch to a file in your scratchpad, send its absolute path to the PR's worker by SendMessage, and say in the comment that a patch went to the author, since gh's `--attach` uploads only images and video (gh 2.103.3: "supported: png, jpg, jpeg, gif, webp, svg, mp4, mov, webm").
   It fails closed only on a call that reads as a comment, and a hook that cannot start or times out lets the call through, so it never blocks every Bash call.
   A PR body or a commit message is not a comment.
   The owners it guards are its `release-owners` list, A to Z, read as [Guard lists](#guard-lists) says; core's `release-owners.json` names none, so a fresh clone guards no owner until one is added.
@@ -303,7 +316,7 @@ Their tests are `bun run test:file tests/scripts/hooks`.
   it writes the shape `sessionStateSchema` in `packages/config/src/session-state.ts` checks (`agentId?`, `at`, `event`, `reason?`, `resetsAt?`, `sessionId`, `state`, `tool?`; `state` is `failed`, `idle`, `stuck`, `usage-limit` or `working`), whose `stateNow()` reads a stuck, failed or usage-limit record as over once the transcript holds a turn after it, since an Escape on a prompt fires no hook.
   A prompt is a turn starting, Stop ends it, a PermissionRequest or a permission or elicitation notice is stuck (an AskUserQuestion `question`, an ExitPlanMode `plan`, else `permission`), and the end of that tool from the same agent (PostToolUse, PostToolUseFailure or PermissionDenied) is working again, as is the main agent's first tool after a Stop or a StopFailure but a login,
   since the turn went on (a Stop hook can continue it; any other tool end writes nothing, so the hook after every tool is one file read, about 10ms measured); a notice never replaces a stuck, failed or usage-limit record, nor the permission notice the record a tool end wrote, since it lands after the event that wrote it;
-  and a StopFailure is `stuck` on a login, `usage-limit` with its reset on a usage limit (GLM's text in UTC+8, else Claude's limit line in the transcript), else `failed`.
+  and a StopFailure is `stuck` on a login, `failed` with reason `balance` on Z.ai's empty balance (`[1113]` in its last message, which the zai usage job reads), `usage-limit` with its reset on a usage limit (GLM's text in UTC+8, else Claude's limit line in the transcript), else `failed`.
   Inside herdr (`HERDR_ENV=1`) it also reports the state as herdr's own, `pane report-agent` under the source `custom:playground` as the agent `claude`, the kind herdr's `agent.prompt` types into, with a microsecond `seq`, from a detached child with a 2s timeout, and on SessionEnd hands the pane back (`pane release-agent`), so a pane that outlives claude goes back to herdr's own reading.
   herdr, as cmux does, restores a session without its `--settings` (measured on herdr 0.9.5), so a restored session outside the factory's checkout writes no state and its file goes stale; a reader takes a record as about the moment it was written, never as the session now.
   When it writes `stuck` or `failed` for a factory session, it also queues one line in the ops outbox (`ops-stuck-alert.jsonl`, which the relay sends by SendMessage) for the session's manager alone, by `managerFor()` in `packages/scripts/src/stuck-alert.ts`: the session, its roster task, the reason, the command or question, and its last message (playbook's **unstick**);

@@ -137,6 +137,8 @@
   Run it in the checkout that serves the dashboard, from anywhere with `bun run --cwd <checkout> ask`: any other checkout has its own database, which the live dashboard never shows, and says so on stderr.
   From a user install's clone root with no `POSTGRES_URL`, `bun run ask` runs as the Dashboard's checkout's (`.claude/worktrees/desk`, whose `.env` holds the database), through `api/hono/src/bin/ask-from-clone.ts`.
   A fresh worktree runs it once its `.env` is set up (the `dev` skill's Start) and its shared packages are built (`~/.playground/ops/run-slot.sh <your name> -- bunx turbo run build --filter='./packages/*'`), since a cloned `node_modules` alone leaves `@packages/db` unresolved.
+  Before every `bun run ask new`, run `bun run ask open` and read what is already open: when an open item asks the same thing, name its `#iN` in chat and post nothing, since two sessions once posted one question as two items.
+  It lists a snoozed item and one the owner replied to in chat, since each still asks something, until it moves to Done or its poster closes it.
 
   ```bash
   bun run ask new <<'EOF'   # prints the id on stdout, its tag (#i41) on stderr
@@ -152,11 +154,12 @@
    "preview": {"outcome": "merged", "link": "https://github.com/acme/app/pull/270"}}
   EOF
   bun run ask new --thread <id> < item.json   # routes the item to that thread (bun run thread), refused when no thread has the id
+  bun run ask open --from builder   # each open item, oldest first, one line each: its #iN, kind, sender and title; --from keeps one sender's
   bun run ask get <id|#i41> --ack   # the item, with answer {at, choice, editedText?, link?, linkLabel?, noLink?, ackedAt?} once the owner answers, marked read (which closes a deny, a clear, a discard or a provided secret, not a go)
   bun run ask ack <id|#i41> --link https://app.slack.com/client/<team>/<channel>/thread/<channel>-1700000000.000100   # once carried out, a go closes with where (a Slack link in its app.slack.com/client form, which reads Open thread, so no --label), which its card links to by the label, or --no-link "<why>" when it has no page or Slack refused a Draft
   bun run ask edit <id|#i41> < item.json   # the poster replaces its own open item's title and preview in place, checked and its files copied as new does; the card redraws on the next 5s poll
-  bun run ask settle <id|#i41> --note "Shipped by hand"   # the poster closes its own open item, decided another way
-  bun run ask resolve <id|#i41> --by builder --note "The loop recovered on its own"   # the poster clears its own alert update once it has resolved itself
+  bun run ask settle <id|#i41> --note "Shipped by hand"   # the poster closes its own open decision or draft, decided another way; an update asks nothing, so settle refuses it
+  bun run ask resolve <id|#i41> --by builder --note "The loop recovered on its own"   # the poster clears its own alert update once it has resolved itself; every other update, a read-only card included, stays editable by its poster until the owner dismisses it
   bun run ask stale --minutes 15   # ops-sweep's chase: each answer given in the last 24h (--since <iso> moves that) its poster has not closed within 15 minutes
   ```
 
@@ -167,6 +170,8 @@
   `ship` (`sha`, `prs` of `{number, title}`), `ticket` (`team`, `title`, `body`), `delete` (`what`, `why`), `schema` (`shape`), `budget` (`amount`, `why`) or `secret` (`key`, `sink`); a decision with none is refused.
   An `ask`'s `attachments`, and a read-only update's, are up to 20 files on this Mac, each `{src, kind?, label?, group?}`: `src` an absolute path, never a URL; `kind` one of `code`, `doc`, `html`, `image` or `pdf`,
   read from the extension when left out (`KIND_OF_EXTENSION` in `api/hono/src/lib/dashboard/inbox-attachments.ts`); `label` `before` or `after`; `group` a one-line section heading.
+  `bun run ask new` and `edit` fill each `{now}` in the item's text with the time they post at in the owner's zone (`clock.ownerZone`, `fillNow` in `api/hono/src/lib/dashboard/ask-clock.ts`), and refuse a `measured` or `now` time more than 2 minutes ahead of the clock (`futureNowTimes`), naming it;
+  an ETA or a finish carries neither word and posts, and plan.json's reader refuses its own now-stamps the same way (`.agents/dashboard/apps.md`).
   `bun run ask edit <id|#iN>` (`editItem()`) takes the same JSON as `new` and replaces the item's `title` and `preview`, its files copied the same way, bumping `updatedAt` and `version`, so one card carries a progress to its end;
   an item put away with Snooze edits as an open one, and the card's own answer carries `seen`, the `updatedAt` it showed, which `answerItem` refuses once it no longer matches (`This item changed since you read it`), so Approve never lands on words the owner did not read;
   it refuses another session's item (its `from` differs), a change of `kind`, and an item answered, closed or replied to in chat (a decision or draft not open or holding a reply, an update dismissed or resolved).

@@ -1,6 +1,7 @@
 ## What it does
 
-`setup` gets a machine ready for Playground's skills, such as [code-review-loop](./code-review-loop.md), and for each extension's: an extension's own `scripts/setup/check.sh` runs at the end of the same check. It checks every tool and connection they need, shows one table of what is missing with the fix for each, and with your go-ahead installs what it can.
+`setup` gets a machine ready for Playground's skills, such as [code-review-loop](./code-review-loop.md), and for each extension's: an extension's own `scripts/setup/check.sh` runs at the end of the same check.
+It checks every tool and connection they need, shows one table of what is missing with the fix for each, and with your go-ahead installs what it can.
 
 | Need                                                                                                                     | Used by                                                                               |
 | ------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------- |
@@ -18,7 +19,8 @@ Your Claude and GLM accounts are not part of the check: add each one with Add ac
 
 ## When to reach for it
 
-Type `/setup` once on a new machine, and again whenever a skill stops for a missing tool or connection. The command-line half also runs alone: `extensions/core/skills/setup/scripts/check.sh`, with `--fix` to install.
+Type `/setup` once on a new machine, and again whenever a skill stops for a missing tool or connection.
+The command-line half also runs alone: `extensions/core/skills/setup/scripts/check.sh`, with `--fix` to install.
 
 ## It's working if
 

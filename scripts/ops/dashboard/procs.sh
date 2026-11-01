@@ -77,7 +77,7 @@ stop() {
   echo "$job: stopped, nothing left"; rm -f "$REC"
   # portless keeps a stopped stack's names registered a moment longer, and a start inside that window fails ("already registered by a
   # running process"), as the 12 Oct 13:43Z roll did: give it a few seconds
-  [ "$job" = dashboard-dev ] && sleep 5
+  [ "$job" != dashboard-dev ] || sleep 5
 }
 
 case "${1:-}" in

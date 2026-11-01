@@ -25,7 +25,7 @@ Sessions run in bypass-permissions mode, yet some commands still prompt (`rm`, a
    Start it in the background that way, the one way a factory session starts another:
    the factory's `no-raw-spawn` hook refuses a cmux call whose command runs claude (a new workspace, split, pane or surface, a respawn, a layout, a surface's command after `--`), one that opens, forks, restores or wakes a Claude agent or saved session, a `claude --resume` or `--continue`, and every herdr call but its reads (`get`, `list`, `read`, `agent wait`, `pane wait-output` and the like)
    and a scratch world's of the session's own ([scripts/README.md](../../../../scripts/README.md#spawnsh)),
-   naming the script.
+   naming the script; type every program by its literal name, since one held in a variable (`$V integration add`) reads as herdr when a herdr command group follows it.
    It holds the machine's room in code (the owner: "It's not about the slot at all.
    It's about how many cores we are using."), through a capacity gate that refuses, failing closed, unless three checks pass in order, the first failure naming its gate and its reading, and counts no live sessions or workers (the owner, 18 Oct: "don't cap anything"; Ops watches the live board for the risk of a cmux that stopped answering at 49 live sessions and load5 97):
    the higher of load1 and load5 (the third field of `sysctl -n vm.loadavg`), plus the starts of the last 5 minutes (`gates.startsWindow`), its own and each `slots.peers` folder's, each weighing half its item's load units, under the core count (`sysctl hw.ncpu`) times `PLAYGROUND_LOAD_MULT` (default 1.0),
@@ -35,7 +35,7 @@ Sessions run in bypass-permissions mode, yet some commands still prompt (`rm`, a
    which the dispatcher writes on the owner's go (#i509) and the pass line names, a missing, empty, past or unreadable time leaving the pace on;
    a `usage.json` never written, as on a fresh install before the ops-usage job first runs, passes every start, its pass line reading `unread (usage.json not yet written)`, while one that exists still has to read, be fresh and be under its limits;
    each other login's `usage-<name>.json`, and each account login-flip probes by its reading in `login-flip.json`'s `seen`, takes the same checks, its reading valid for 60 minutes, a missing 5-hour window reading as no 5-hour limit;
-   `--account` skips it, since the other login's usage is not this machine's, but refuses a week a reading names at 100% until its `resets_at`) or GLM's from `zai-usage.json` (the 5-hour window under 95% of its credits, with no week check (the owner, 17 Oct: "Just go full throttle."
+   `--account` skips it, since the other login's usage is not this machine's, but refuses a week a reading names at 100% until its `resets_at`) or GLM's from `zai-usage.json` (the 5-hour window under 95% of its credits and no empty `balance`, with no week check (the owner, 17 Oct: "Just go full throttle."
    and "Based on a 5-hour window"), only while the ops-zai-usage job's last beat is ok and within 3 cycles, so every GLM spawn refuses until `bun run ops:zai-usage` has beaten once).
    A GLM start takes its own load and memory gate in place of the load and memory checks above: load5 (the third field of `sysctl -n vm.loadavg`) under 30 (`gates.glmLoad5Max`), memory pressure level 1, and swap-ins under 100/s (`gates.glmSwapinsMax`, `vm_stat -c 2 1`), so GLM starts while Claude's gate holds.
    Every pass and refusal is one line in `~/.playground/ops/capacity.jsonl`, which the load check counts its starts from, a refusal's carrying the words it printed as `detail`.
@@ -170,8 +170,11 @@ Sessions run in bypass-permissions mode, yet some commands still prompt (`rm`, a
    Done when both are briefed, or the reviewer alone for a PR with no `web/next/` change.
    A worker's brief says that before a push it runs only the touched tests, the list `extensions/core/skills/code-review-loop/scripts/state.py touched-tests <worktree> origin/canary HEAD` writes to a file it checks is non-empty before passing it to xargs (code-review-loop's two steps), and check-types, through run-slot, and leaves the full suite to GitHub Actions,
    whose `Audit, Lint, and Build` and `test` checks gate the head (**ci**).
+   A worker's brief says that a PR holding a long-lived connection (a socket, a pub/sub subscriber, a retrying client) puts code-review-loop's lifecycle table in its Evidence before round 1, one row per path from connect to close.
+   A worker's brief says that CI starts only on a pull request into `canary`, so the worker opens its draft PR before it waits on CI, cites a run by its run id or link, and records its branch on the roster at its first push (ROSTER.md's It pushes its branch), so ops-sweep tells its lead when the branch goes 15 minutes with no PR.
    A worker's brief says that a docs-only worktree still runs `bun install` through run-slot before its first commit, since lefthook's hook runs the worktree's own `node_modules/.bin/lefthook` and the commit stops without it, while a review worktree that only reads needs no install.
    It also says that after a merge of canary that moves a path a test fixture uses, the worker points the fixture's reader at a missing path, confirms each fixture-reading case goes red, then restores the reader with `git checkout --`, since a reader that fails open passes a fixture at the old path.
+   It also says that a worker that merges `canary` or its stack's parent into its PR keeps the merge commit a plain merge, holding its conflict resolutions alone, and lands each edit after it as a commit of its own, since code-review-loop scores an edit inside a merge as blocking, and that a stacked child merges its parent in once, by DISPATCH.md's bundles.
    A lead's instruction or a reviewer's brief leaves any raise of a ratchet, or bend of a check whose own rule says it never rises, to that rule's owner, asked on the PR or directly, before the code relies on it, and lists one as agreed only with the owner's words quoted (23 Oct: a raise a brief listed as agreed reached 5/5, and the code owner blocked it).
    A worker started `--in` another repository takes that folder's MCP tools, so its brief names the capability it needs (search Slack, read Datadog logs) and has the worker find the tool with its own `ToolSearch` (21 Oct: a brief named a Slack tool by the factory's own server, and the worker found it under its folder's server).
    A worker briefs its checker by filling a template: it copies `~/.playground/handoffs/new-reviewer.md`, or `new-tester.md` for a Playground PR, to a file of its own under `~/.playground/`, since the linked template is the main checkout's file, fills each slot and passes that file to spawn.sh as `<brief>`.
@@ -189,9 +192,9 @@ Done when `ListAgents` shows the session busy on the brief and the roster shows 
 
 ## Write a handoff
 
-A handoff, for a respawn, a parked chore or a priority close, counts as written only once `ls -l <path>` prints its file, and the report that names it quotes that line.
+A handoff, for a respawn, a parked chore or a priority close, counts as written only once `TZ=UTC ls -l <path>` prints its file, and the report that names it quotes that line.
 A hook can refuse the write and leave nothing on disk, so a session whose write a hook refused answers the hook and retries the same write before it reports.
-Done when `ls -l <path>` prints the file and the report quotes that line.
+Done when `TZ=UTC ls -l <path>` prints the file and the report quotes that line.
 
 ## Rename
 

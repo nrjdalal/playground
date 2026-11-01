@@ -101,6 +101,14 @@ describe("each hook event becomes the state the session is in", () => {
       ),
       { reason: "rate_limit", state: "failed" },
     ],
+    [
+      "an empty GLM balance, which the zai usage job reads",
+      failure(
+        "rate_limit",
+        "API Error: Request rejected (429) · [1113][Insufficient balance or no resource package. Please recharge.]",
+      ),
+      { reason: "balance", state: "failed" },
+    ],
   ])("%s", async (_, input, expected) => {
     const record = await recordOf(input, NOW)
     expect(record as unknown).toEqual({

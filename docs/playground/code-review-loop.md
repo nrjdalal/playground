@@ -1,10 +1,15 @@
 ## What it does
 
-`code-review-loop` is how a reviewer session scores one PR out of 5, round by round, until nothing but nits is left to change. Each round reads what was asked (the plan item and the brief for a Playground PR, the Linear ticket and its comments for an org's one), reviews the change on two axes, posts a verdict and inline comments, and closes the threads the new head settles.
+`code-review-loop` is how a reviewer session scores one PR out of 5, round by round, until nothing but nits is left to change.
+Each round reads what was asked (the plan item and the brief for a Playground PR, the Linear ticket and its comments for an org's one), reviews the change on two axes, posts a verdict and inline comments, and closes the threads the new head settles.
 
-It treats a review as a **subscription**, not a one-off: every push gets a round, a finding stays open until a round sees it fixed in the code, and a faultless push does not raise the score while anyone's finding is still open. The score is the PR's, never the delta's.
+It treats a review as a **subscription**, not a one-off: every push gets a round, a finding stays open until a round sees it fixed in the code, and a faultless push does not raise the score while anyone's finding is still open.
+The score is the PR's, never the delta's.
 
-It replaces review-bot. What review-bot learned stays; what changed is who runs it: one reviewer session per PR, spawned by the PR's worker once its head is ready, in the same step as its tester, rather than one loop polling every repo in an org.
+The reviewer loads the skill again at the start of every round, so a fix to the skill reaches it at its next round.
+
+It replaces review-bot.
+What review-bot learned stays; what changed is who runs it: one reviewer session per PR, spawned by the PR's worker once its head is ready, in the same step as its tester, rather than one loop polling every repo in an org.
 
 ## When to reach for it
 
@@ -19,11 +24,18 @@ It is model-invoked: a reviewer session loads it from its brief, and you can typ
 
 ## Two axes
 
-The review itself is core's `code-review`, loaded by name and never copied: a **Spec** axis (is this the right thing: every requirement delivered, nothing unasked, and in an org's PR nothing beyond its ticket and the Product team's answers) and a **Standards** axis (is it built well, against AGENTS.md, the skills it touches and the reviewer's brief). A changed skill, agent guide or docs page is also held to core's `writing-for-agents`, which the reviewer loads first, so an agent doc that sprawls or leaves a step with no completion criterion costs the score as code would. The two stay apart in the verdict, so a well-built change that misses the ask cannot hide behind its quality. Its two sub-agents start with no memory of earlier rounds, which is what makes the read before the last 5/5 fresh.
+The review itself is core's `code-review`, loaded by name and never copied: a **Spec** axis (is this the right thing: every requirement delivered, nothing unasked, and in an org's PR nothing beyond its ticket and the Product team's answers) and a **Standards** axis (is it built well, against AGENTS.md, the skills it touches and the reviewer's brief).
+A changed skill, agent guide or docs page is also held to core's `writing-for-agents`, which the reviewer loads first, so an agent doc that sprawls or leaves a step with no completion criterion costs the score as code would.
+The two stay apart in the verdict, so a well-built change that misses the ask cannot hide behind its quality.
+Its two sub-agents start with no memory of earlier rounds, which is what makes the read before the last 5/5 fresh.
 
 ## State lives on the PR
 
-A reviewer session keeps nothing it cannot read back: the skill's `state.py` asks GitHub and git each time for the head, the newest verdict, the open threads and what others said since. So a session that restarts, or a new reviewer taking over, picks up exactly where the last verdict left off, and when GitHub cuts a list at its page size the script says so rather than reading the rest as absent. When the shared GraphQL budget is spent it reads the same facts over REST and says so, marking each review thread's resolution unknown rather than reading it as settled. The same script tells a base merge apart from new work: any commit of the PR's own in the push is new work, and otherwise it compares the PR's own changed lines on each side of the push, because a range diff across a merge of `canary` shows `canary`'s work as the PR's; a conflict resolved by hand that kept both sides reads as a base merge too. Its waiter for the next push polls GitHub's REST API, so a reviewer waiting all afternoon spends none of the GraphQL budget every session shares.
+A reviewer session keeps nothing it cannot read back: the skill's `state.py` asks GitHub and git each time for the head, the newest verdict, the open threads and what others said since.
+So a session that restarts, or a new reviewer taking over, picks up exactly where the last verdict left off, and when GitHub cuts a list at its page size the script says so rather than reading the rest as absent.
+When the shared GraphQL budget is spent it reads the same facts over REST and says so, marking each review thread's resolution unknown rather than reading it as settled.
+The same script tells a base merge apart from new work: any commit of the PR's own in the push is new work, and otherwise it compares the PR's own changed lines on each side of the push, because a range diff across a merge of `canary` shows `canary`'s work as the PR's; a conflict resolved by hand that kept both sides reads as a base merge too.
+Its waiter for the next push polls GitHub's REST API, so a reviewer waiting all afternoon spends none of the GraphQL budget every session shares.
 
 ## It's working if
 
@@ -32,20 +44,24 @@ A reviewer session keeps nothing it cannot read back: the skill's `state.py` ask
 - Each finding of a round below 5/5 sits on its line in Files changed as well as in the verdict, while a 5/5's nits sit in the verdict alone, and the threads still open are exactly the findings still open.
 - A push gets its round within a few minutes, announced or not.
 - Round 1 of a PR that adds a member to a kind (a status, a type, a choice, a button) files every list still naming the kind's old members as one finding, found by one grep for each list's wording, so later rounds spend no turn on lists outside the diff.
+- Round 1 also greps the agent-facing docs for each term whose meaning the diff changes, and files every doc still describing the old meaning as one finding, each by `file:line`, so later rounds spend no turn finding them one at a time.
 - A verdict posts with every blank filled, and a review's sub-agents search inside its clone and the paths its brief names, stopping every background task of theirs before they report.
 - No verdict stands on stale CI: the reviewer reads the head's checks again right before it posts, and a check gone red since its earlier read is a blocking finding in that verdict.
 - A reviewer stays up after its 5/5, its waiter on the head, until the PR merges or stays closed a poll later (Checks closes and reopens a PR to rebuild its merge commit), so a canary move after the score gets its merge round from the same session, not a new one.
 - A reviewer idle 30 minutes with every head scored may be ended by the factory's 5-minute check, and its worker resumes it under the same name on the next push.
 - A 5/5 can go stale with no push and no conflict: each time the reviewer sees canary move, it diffs what landed since each waiting 5/5's canary, checks that PR for any file:line or quoted text in those files, and scores each match again.
-- The touched tests a reviewer runs come from the diff: the test of every file the PR changes, every test file it changes, every test that names or imports one of those files, by its path or from the test's own folder, plus the tests that scan the whole repo; `state.py touched-tests` lists them, and in a Python repo it adds each test that scans a folder holding a changed file and, when a prompt template changes, each test that pins a built prompt's digest.
+- The touched tests a reviewer runs come from the diff: the test of every file the PR changes, every test file it changes, every test that names or imports one of those files, by its path or from the test's own folder, plus the tests that scan the whole repo;
+  `state.py touched-tests` lists them, and in a Python repo it adds each test that scans a folder holding a changed file and, when a prompt template changes, each test that pins a built prompt's digest.
 - When GitHub's `test` and `Audit, Lint, and Build` checks are green at the exact head, and canary has changed none of the PR's files since the base that run merged, the last 5/5 cites that run's link in place of a local run of the touched tests, since CI already ran the whole suite there.
   While those checks still run at the head, with canary unchanged on the PR's files, the reviewer waits for CI still running at the head and cites it, queueing a local run only when a condition fails or a check goes red.
 - On a large app repo, when the touched tests run past about 100 files, green PR CI at the exact head stands as the merge evidence, and the reviewer runs the changed modules' own tests locally.
-- When canary has moved and changed a file the PR changes, or the PR adds or changes a repo scanner, unless CI stands in, the 5/5 verdict names the touched tests it ran on a local merge with canary, since a merge git calls clean can still break; a red run or a conflict there blocks the 5/5. It names that canary from the merge commit itself, since a fetch after the merge would name one the run never merged.
+- When canary has moved and changed a file the PR changes, or the PR adds or changes a repo scanner, unless CI stands in, the 5/5 verdict names the touched tests it ran on a local merge with canary, since a merge git calls clean can still break; a red run or a conflict there blocks the 5/5.
+  It names that canary from the merge commit itself, since a fetch after the merge would name one the run never merged.
 - A dependency-bump PR whose advisory is answered as exactly pinned is scored only after the audit skill's rung 2 read of each parent's newest in-range version, since a parent's range often already carries the fix.
 - A stacked child is scored on its own lines, read from its parent's branch, and a child that fails playbook's stack test is a blocking finding.
 - The touched tests run in one form, `bun --cwd=<clone> run test:file <files>` through run-slot with no `NODE_ENV`, which reads the same on the runner box as on the Mac.
-- Neither side of a review queues a run the other side has already measured at the same head: the result is asked for and cited. A box run's id is `ci-<first 12 of the tree>-<random>`, so a cited run's prefix is checked against the first 12 characters of `git -C <clone> rev-parse <head>^{tree}` before citing.
+- Neither side of a review queues a run the other side has already measured at the same head: the result is asked for and cited.
+  A box run's id is `ci-<first 12 of the tree>-<random>`, so a cited run's prefix is checked against the first 12 characters of `git -C <clone> rev-parse <head>^{tree}` before citing.
 - When a merge with canary moves a path a test fixture uses, the reviewer points the fixture's reader at a missing path and checks each fixture-reading case goes red, since a reader that fails open passes a fixture left at the old path.
 - A claim about one environment of a deploy-config repo reads that environment's values on the branch its ArgoCD app targets, not on the PR's branch.
 - A finding against a rule written in the code, such as a ratchet that never rises, stays blocking when the brief lists the bend as agreed, unless that agreement quotes the rule's owner.
@@ -62,10 +78,13 @@ A reviewer session keeps nothing it cannot read back: the skill's `state.py` ask
 - A round left with only nits scores 5/5: the reviewer lists them, or hands the small edit over as a patch, so a nit the worker leaves sends no PR through another test round.
 - A PR body with no `test:skills` result in it is a nit, since GitHub Actions runs the suite at the head.
 - When the ticket carries samples, the verdict holds a samples table, and a sample left unhandled holds the score down.
+- When the diff holds a long-lived connection (a socket, a pub/sub subscriber, a retrying client), the PR's Evidence holds a lifecycle table, one row per path from connect to close, and a missing table holds the score at 3.
 - A PR that changes a skill, an agent guide or a docs page has its writing judged against writing-for-agents in the verdict, beside the code.
 - A FAIL a lead overruled on the PR (`Lead ruling:`) no longer counts against the score, once the issue the ruling names exists.
-- The recovery scan lists no unscored PR held by a worker without a live reviewer, and no PR as lost: every open PR is held by an agent, parked by a plan, or another author's for the Builder to triage.
+- The recovery scan lists no unscored PR held by a worker without a live reviewer, and no PR as lost: every open PR is held by an agent (its roster row, or a live worker `plan.json` gives it), parked by a plan (`plan.json` or a plans file), or another author's for the Builder to triage.
 
 ## Where it fits
 
-[playbook](./playbook.md)'s **gate** names it: a reviewer session, spawned by the PR's worker, scores through code-review-loop, then the PR waits for GitHub Actions' `Audit, Lint, and Build` and `test` green at the head, which run on every push to the pull request. The Builder's sweep runs its recovery scan. It leans on core's `code-review` for the two axes; for an org's PR the **classified** rule holds, so its comments carry only the `ReviewBot` name.
+[playbook](./playbook.md)'s **gate** names it: a reviewer session, spawned by the PR's worker, scores through code-review-loop, then the PR waits for GitHub Actions' `Audit, Lint, and Build` and `test` green at the head, which run on every push to the pull request.
+The Builder's sweep runs its recovery scan.
+It leans on core's `code-review` for the two axes; for an org's PR the **classified** rule holds, so its comments carry only the `ReviewBot` name.

@@ -223,9 +223,9 @@ describe("a manager's reply that asks Quilla a decision is refused until it is i
 
   test("the reason sends the session to an open item on the same thing before a new one", () => {
     expect(REASON).toBe(
-      "name the open #iN on the same thing if one exists (each manager's asks in the roster, read with bun run ask get), else post it with bun run ask new, then say in chat that it's in the inbox as #iN",
+      "name the open #iN on the same thing if one exists (bun run ask open lists them), else post it with bun run ask new, then say in chat that it's in the inbox as #iN",
     )
-    expect(REASON.indexOf("bun run ask get")).toBeLessThan(REASON.indexOf("bun run ask new"))
+    expect(REASON.indexOf("bun run ask open")).toBeLessThan(REASON.indexOf("bun run ask new"))
   })
 
   test("every manager: the leads by role, a manager by role, and each by its session name", async () => {

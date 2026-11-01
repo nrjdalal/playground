@@ -101,6 +101,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { agentLabel, roleLabel } from "@/lib/agent-label"
 import { apiClient, unwrap } from "@/lib/api/client"
+import { HOLDS_RELOAD } from "@/lib/build-reload"
 import { useNow } from "@/lib/dashboard"
 import {
   answerItem,
@@ -1148,6 +1149,7 @@ export function InboxCard({
   return (
     <Card
       id={needsYouAnchor(item.id)}
+      {...{ [HOLDS_RELOAD]: "" }}
       role="listitem"
       // focusable from script alone, so taking the pill can hand focus to the card it put on top
       tabIndex={-1}

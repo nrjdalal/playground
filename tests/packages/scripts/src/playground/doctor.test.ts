@@ -111,7 +111,8 @@ describe("linkChecks", () => {
     const checks = linkChecks(links, "/repo", (path) => !path.endsWith("gone"))
     expect(checks).toEqual([
       {
-        detail: "fix: /repo/skills/gone is gone; run scripts/link-skills.sh",
+        detail:
+          "fix: /repo/skills/gone is gone; run scripts/link-skills.sh, which removes the link",
         name: "link /h/.claude/skills/gone",
         status: "MISSING",
       },

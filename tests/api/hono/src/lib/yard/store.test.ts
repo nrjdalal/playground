@@ -399,6 +399,15 @@ describe.skipIf(!dockerUp())("Yard's store", () => {
     })
   })
 
+  test("a DM whose only sent message is past retention holds a token's post before any sweep", async () => {
+    const { id } = await store.openDm(db, web("ada", true), "bo")
+    const opener = await send(web("ada", true), id, { kind: "text", text: "long ago" })
+    await sql`update yard_message set at = ${new Date(cutoff().getTime() - 86_400_000)} where id = ${opener.id}`
+    expect((await send(token("ada", true), id, { kind: "text", text: "again" })).status).toBe(
+      "pending",
+    )
+  })
+
   describe("limits", () => {
     test("count in fixed windows and refuse past the limit", async () => {
       const now = Date.UTC(2026, 9, 31, 12, 0, 0)

@@ -170,6 +170,43 @@ describe("playground accounts", () => {
     )
   })
 
+  const WINDOWS = { fiveHour: { cap: 200, used: 6 }, week: { cap: 1000, used: 10 } }
+
+  test("list reads an empty GLM balance as both windows spent, as the sidebar does", async () => {
+    writeFileSync(
+      join(data, "zai-usage.json"),
+      JSON.stringify({
+        balance: { empty: true, seenAt: "2026-10-31T12:00:00.000Z" },
+        windows: WINDOWS,
+      }),
+    )
+    expect((await run(["list"])).out).toContain(
+      "glm spare: kept, 5h 100%, week 100%, the balance empty since 2026-10-31T12:00:00.000Z",
+    )
+  })
+
+  test("list reads a failed usage read as no reading, as the sidebar does", async () => {
+    writeFileSync(
+      join(data, "zai-usage.json"),
+      JSON.stringify({
+        error: "Z.ai 500: code ?",
+        errorAt: "2026-10-31T12:05:00.000Z",
+        windows: WINDOWS,
+      }),
+    )
+    expect((await run(["list"])).out).toContain(
+      "glm spare: kept, no reading: the usage read failed at 2026-10-31T12:05:00.000Z",
+    )
+  })
+
+  test("list reads a usage file that holds no object as no reading yet, and keeps listing", async () => {
+    for (const text of ["5", '"x"', "true"]) {
+      writeFileSync(join(data, "zai-usage.json"), text)
+      expect(await run(["list"])).toMatchObject({ code: 0, err: "" })
+      expect((await run(["list"])).out).toContain("glm spare: kept, no reading yet")
+    }
+  })
+
   test("list reads a reading with no 5-hour window as none, never ?", async () => {
     writeFileSync(
       join(data, "ops", "usage", "login-flip.json"),
