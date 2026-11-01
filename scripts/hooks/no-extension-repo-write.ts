@@ -15,7 +15,7 @@ type Environment = Record<string, string | undefined>
 
 const GUARD = "no-extension-repo-write"
 const OWNER_ROUTE =
-  "Only the owner changes one, typing the command as a ! command in Ops' pane, so tell your lead what it should do."
+  "Only the owner changes one, typing the command as a ! command in the dispatcher's terminal window: tell your lead what it should do, and the dispatcher hands the owner the command."
 const REPO = /^[A-Za-z0-9-]+\/[A-Za-z0-9._-]+$/
 // GitHub decodes a percent escape in a repository's owner or name.
 const decoded = (text: string) =>

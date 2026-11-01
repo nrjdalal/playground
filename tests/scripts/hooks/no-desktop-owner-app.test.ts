@@ -57,7 +57,7 @@ describe("--headed", () => {
     const reason = await bash(command)
     expect(reason).toContain("no-desktop-owner-app hook refused")
     expect(reason).toContain("--headed")
-    expect(reason).toContain("! prefix")
+    expect(reason).toContain("! prefix in the dispatcher's terminal window")
   })
 })
 
@@ -83,7 +83,7 @@ describe("an app on the list", () => {
     const reason = await bash("agent-desktop snapshot --app Slack")
     expect(reason).toContain("! prefix")
     expect(reason).toContain("take Slack off")
-    expect(reason).toContain("with a ! command Ops prepares")
+    expect(reason).toContain("with a ! command the dispatcher hands the owner")
   })
 
   test("passes once the list no longer holds it", async () => {
@@ -213,11 +213,11 @@ describe("passes", () => {
     expect(await bash("agent-desktop click @s8f3k2p9:e5 --headed", none)).toContain("--headed")
   })
 
-  test("a store whose set lacks the list refuses, naming the file and Ops", async () => {
+  test("a store whose set lacks the list refuses, naming the file and the dispatcher's route", async () => {
     const missing = storeWith(join(scratch, "missing"), {})
     const reason = await bash("agent-desktop snapshot --app Finder", missing)
     expect(reason).toContain("hooks/desktop-owner-apps.json")
-    expect(reason).toContain("have Ops prepare it for the owner")
+    expect(reason).toContain("tell your lead, and the dispatcher hands the owner the command")
     expect(reason).not.toContain("ext import")
   })
 
