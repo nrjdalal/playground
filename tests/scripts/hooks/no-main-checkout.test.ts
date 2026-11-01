@@ -90,6 +90,8 @@ describe("a build, a test run, lefthook, turbo or a file write in the main check
     ["a write through run-slot", "~/.playground/ops/run-slot.sh w -- sed -i 's/a/b/' notes.txt"],
     ["a commit through bash run-slot", "bash ~/.playground/ops/run-slot.sh w -- git commit -m x"],
     ["a build through sh -e run-slot", "sh -e ~/.playground/ops/run-slot.sh w -- bun run build"],
+    ["a commit in zsh -O -c, whose -O takes no value", "zsh -O -c 'git commit -m x'"],
+    ["a commit in zsh -c -O, whose -O takes no value", "zsh -c -O 'git commit -m x'"],
     [
       "a commit through bash -O run-slot",
       "bash -O extglob ~/.playground/ops/run-slot.sh w -- git commit -m x",

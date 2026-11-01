@@ -49,6 +49,10 @@ describe("a test run piped with no pipefail is refused, naming the fix", () => {
     { $label: "check-types into tail", command: "bun run --cwd /w check-types | tail -3" },
     { $label: "through run-slot", command: `${slot} bun run --cwd /w test 2>&1 | tail -5` },
     { $label: "through sh -e run-slot", command: `sh -e ${slot} bun run --cwd /w test | tail -5` },
+    {
+      $label: "inside zsh -O -c, whose -O takes no value",
+      command: "zsh -O -c 'bun test x | tail'",
+    },
     { $label: "inside run-slot's bash -c", command: `${slot} bash -c 'bun test x | tail -5'` },
     { $label: "a shell running a test, piped", command: "bash -c 'bun test x' | tail" },
     { $label: "a shell with -- before its script", command: "bash -c -- 'bun test x' | tail" },

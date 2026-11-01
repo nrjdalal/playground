@@ -52,9 +52,9 @@ function runsTests(cmd: Command): boolean {
   const slot = slotWords(parsed)
   if (slot) return slot.length === 0 ? false : runsTests({ ...cmd, scope: 0, words: slot })
   if (SHELLS.has(name)) {
-    const script = shellSlot(args)
+    const script = shellSlot(args, name)
     if (script) return runsTests({ ...cmd, scope: 0, words: script })
-    const { inline, operand } = shellOperand(args)
+    const { inline, operand } = shellOperand(args, name)
     return inline && operand !== undefined && lex(operand.value).commands.some(runsTests)
   }
   // uvx names a tool at a version as ruff@latest
@@ -130,9 +130,9 @@ function judgeCommand(cmd: Command, guarded: boolean): string | undefined {
   if (slot)
     return slot.length === 0 ? undefined : judgeCommand({ ...cmd, scope: 0, words: slot }, guarded)
   if (SHELLS.has(name)) {
-    const script = shellSlot(args)
+    const script = shellSlot(args, name)
     if (script) return judgeCommand({ ...cmd, scope: 0, words: script }, guarded)
-    const { inline, operand } = shellOperand(args)
+    const { inline, operand } = shellOperand(args, name)
     const reason = inline && operand ? judge(operand.value, dialect(name)) : undefined
     if (reason) return reason
   }
