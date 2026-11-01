@@ -341,6 +341,9 @@ describe("no-public-leak's list", () => {
     expect(named.exitCode).toBe(2)
     expect(named.stderr.toString()).toContain("owner.names is unset")
     expect(named.stderr.toString()).toContain("nothing was counted")
+    expect(named.stderr.toString()).toContain(
+      "bun run test:file tests/packages/scripts/src/trace-count/count.test.ts",
+    )
   })
 
   test("a run with no list file exits 2 before it counts", () => {

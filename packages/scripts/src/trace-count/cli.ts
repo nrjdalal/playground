@@ -30,7 +30,7 @@ files (tests, the API's fixtures, the replay fixtures) a made-up stand-in.
 Exits 2 when no-public-leak's list is missing or a key of it is empty, or when
 factory.archiveRepo or owner.names is unset, since their kinds would count nothing.`
 
-const NOT_COUNTED = `trace-count: nothing was counted; the check that counts is count.test.ts: bun run test:file tests/packages/scripts/src/trace-count/count.test.ts`
+const NOT_COUNTED = `trace-count: nothing was counted; bun run test:file tests/packages/scripts/src/trace-count/count.test.ts counts the kinds that need no list or settings, and the list, owner and archive kinds count only here, once the line above is fixed`
 
 const { values } = parseArgs({
   options: {
