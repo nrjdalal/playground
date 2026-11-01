@@ -99,7 +99,7 @@ Their tests are `bun run test:file tests/scripts/hooks`.
   `--opt=value` there, as `bun --cwd=<dir> run test:file <files>` and `bun run --cwd <dir> <script>` work), and a test run (`bun test`, a `test` or `check-types` script, vitest or jest, pytest, ty or ruff, bare, through `uv run`, `uv tool run`, `uvx` or `python -m`,
   through run-slot.sh or a shell's `-c` too) piped into another command while the script holding the pipe sets no `pipefail` and reads no pipe status of its own shell (`PIPESTATUS` in bash, `pipestatus` in zsh, the Bash tool's shell here; a pipefail outside a `bash -c` script never reaches the pipes inside it),
   since the pipeline's exit is its last command's (a red test once read 0 through `| tail`).
-  A run-slot call is read as the words after its `--` (`slotWords` in `scripts/hooks/shell.ts`, shared with no-glm-heavy-path and no-main-checkout), and a call with no `--` runs nothing, so nothing in it is judged.
+  A run-slot call is read as the words after its `--` (`slotWords` in `scripts/hooks/shell.ts`, shared with no-glm-heavy-path and no-main-checkout), and a call with no `--`, or nothing after it, runs nothing (run-slot exits 2 on it), so nothing in it is judged.
   A piped subshell or brace group, `(bun test x) | tail`, is not read.
   It fails open, and its tests are in `bun run test:file tests/scripts/hooks` too.
 
