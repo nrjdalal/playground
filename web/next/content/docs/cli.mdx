@@ -81,7 +81,7 @@ When the newest commit is the one running, it prints `Already up to date at <sha
 
 A Dashboard tab you have open reloads onto the new build by itself, once, within about 30 seconds of the switch, or when you come back to a tab that was in the background. It waits while a reply you typed on an Inbox card, or an answer to a session's question, is still unsent, or while a message you sent shows as failed, so those words are kept.
 
-If an update stops partway, after your checkout has moved (a crash, a closed terminal, a step that failed), run `playground update` again: it still installs, builds and restarts what the release changed, since it compares against the commit the last finished update reached, or where the first update with no record started, which it keeps in the data folder's `ops/update-head`.
+If an update stops partway, after your checkout has moved (a crash, a closed terminal, a step that failed), run `playground update` again: it still installs, builds and restarts what the release changed, since it compares against the commit the last finished update reached, which it keeps in the data folder's `ops/update-head`. With no record there, it compares against the last fast-forward onto `origin/main` in your checkout's git history and says so, or else where that first update started.
 
 `playground update --to <tag>` moves your checkout to that release instead, back or on, with the same link, install, build and restart steps, and leaves the Dashboard as it is, since it rolls on its own. A checkout with commits of its own stops before anything moves. `playground doctor` shows the release it is held at, and a plain `playground update` moves it on to the newest again.
 
@@ -138,7 +138,8 @@ A manager keeps it running as a background task and starts it again after each a
 `allow` presses Yes, once, in the session's own pane after reading that the pane's prompt shows that command; `deny` presses No and sends the session the reason, so it can try a simpler way.
 Each answer is a line in `ops/picker.log` under `~/.playground`, naming who answered, the session and the start of the command.
 It refuses anyone but the session's manager or the primary dispatcher, a deny with no reason, a session that is not running, a dispatcher's own prompt, a key that no prompt showing matches, and a prompt that may be another waiting call's, as a subagent's file or URL prompt always is while its parent waits.
-For that last one, the manager denies it by hand with Escape and sends the session the reason, or takes it to the dispatcher.
+For that last one on cmux, the manager denies it by hand with Escape and sends the session the reason, or takes it to the dispatcher.
+On herdr, whose panes take no key from a session's hand, the manager closes the session with `spawn.sh close` and resumes it under its name by its session id, with the reason as its brief, so the prompted call never runs.
 
 ## Read the rules: `playground rules`
 

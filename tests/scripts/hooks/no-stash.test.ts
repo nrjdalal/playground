@@ -23,6 +23,7 @@ const bash = (command: string) =>
 describe("a git stash that can take another worktree's work is refused", () => {
   test.each([
     ["a bare stash", "git stash"],
+    ["a stash inside an array assignment", "arr=($(git stash))"],
     ["push without a message", "git stash push"],
     ["push with options but no message", "git stash push -u --keep-index"],
     ["an implied push without a message", "git stash -u"],
@@ -69,6 +70,15 @@ describe("a git stash that can take another worktree's work is refused", () => {
     expect(reason).toContain("git worktree add --detach .claude/worktrees/<name> origin/canary")
     expect(reason).toContain("git stash apply <full sha>")
   })
+})
+
+describe("a long run of closing braces", () => {
+  test("ahead of a stash is read inside the hook's time", async () => {
+    const started = performance.now()
+    const reason = await bash(`${"ls; }\n".repeat(60_000)}git stash`)
+    expect(reason).toBeDefined()
+    expect(performance.now() - started).toBeLessThan(5_000)
+  }, 20_000)
 })
 
 describe("a stash found by name or SHA, and every other call, runs", () => {

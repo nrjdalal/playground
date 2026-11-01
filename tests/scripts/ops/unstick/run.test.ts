@@ -746,6 +746,25 @@ describe("a permission prompt read off the screen", () => {
       "playground picker cannot answer it, since no waiting call is surely its own: tell dispatcher, for the owner to answer it in the pane.",
     )
   })
+
+  // no-raw-spawn refuses the dispatcher's herdr call too, so a herdr pane's route left is a close and a resume by session id
+  test("names the close and resume on herdr when no waiting call is surely its own", async () => {
+    const config = scratch()
+    transcripts(config)
+    const answer = String(
+      await call(
+        config,
+        "prompt_answer",
+        "k3m9px-worker",
+        SESSION,
+        screenOf("rm -rf /tmp/spec"),
+        true,
+      ),
+    )
+    expect(answer).toContain("spawn.sh close k3m9px-worker")
+    expect(answer).toContain("~/.playground/resume/k3m9px-worker.sh")
+    expect(answer).not.toContain("dispatcher")
+  })
 })
 
 // with every session on herdr, a cycle asks cmux nothing. The test's own process stands in for a live claude: its pid is alive and ps gives its start.

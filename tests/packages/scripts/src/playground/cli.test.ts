@@ -356,7 +356,7 @@ describe("a fresh machine", () => {
     const said = refused.stderr.toString().trim()
     expect(said.split("\n")).toHaveLength(1)
     expect(said).toStartWith("playground: the extensions' policy.json does not parse (")
-    expect(said).toContain("set a setting with playground settings set")
+    expect(said).toContain("a setting with ! playground settings set")
     const set = run(data, ["settings", "set", "factory.repo", "made-up-me/copy", "--reason", "fix"])
     expect(set.exitCode, set.stderr.toString()).toBe(0)
     expect(

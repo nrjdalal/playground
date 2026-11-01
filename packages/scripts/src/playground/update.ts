@@ -31,7 +31,7 @@ export const updateSteps = (changed: string[]) => ({
 })
 
 // With a tag, the checkout's main is moved to that release instead, back or on, and the Dashboard, which rolls on its own branch, is left as it is; a plain update later moves it on to origin/main again.
-// `done` holds the commit the last finished update reached, or where a run with no record started, so a run after one cut short past its fast-forward still installs, builds and restarts what that merge changed.
+// `done` holds the commit the last finished update reached, or, for a run with no record, the reflog's last fast-forward onto origin/main, else where that run started, so a run after one cut short past its fast-forward still installs, builds and restarts what that merge changed.
 export const runUpdate = async (
   repo: string,
   run: Run,
@@ -51,8 +51,24 @@ export const runUpdate = async (
   const head = (await git("rev-parse", "HEAD")).out.trim()
   const recorded =
     done && (await Bun.file(done).exists()) ? (await Bun.file(done).text()).trim() : ""
+  // with no record, the reflog's last fast-forward merge onto origin/main is where the checkout's last update, or a hand merge, left it, so a reset made since outside update still reads as changed
+  const merged =
+    done && !recorded
+      ? ((await git("reflog", "--format=%H %gs", "HEAD")).out
+          .split("\n")
+          .find((line) => line.endsWith(" merge origin/main: Fast-forward"))
+          ?.split(" ")[0] ?? "")
+      : ""
+  if (done && !recorded)
+    log(
+      merged
+        ? `playground update: no ${done} yet, so it reads what changed since the reflog's last fast-forward onto origin/main, ${merged.slice(0, 7)}`
+        : `playground update: no ${done} yet and no fast-forward onto origin/main in the reflog, so it reads what changed since HEAD, ${head.slice(0, 7)}`,
+    )
   const old =
-    recorded && (await git("cat-file", "-e", `${recorded}^{commit}`)).code === 0 ? recorded : head
+    recorded && (await git("cat-file", "-e", `${recorded}^{commit}`)).code === 0
+      ? recorded
+      : merged || head
   if (done && old !== recorded) await Bun.write(done, `${old}\n`)
   // a checkout left on another branch, such as one cloned while canary was the default, moves to main when its tree is clean, so the merge below lands on main
   const onMain = async () => {
