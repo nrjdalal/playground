@@ -181,7 +181,7 @@ const messageAt = (words: Word[], at: number): string | undefined =>
 
 // The runner, shell or eval a word names, by its basename with case dropped, since macOS runs SH as sh; a word bash expands by a glob or a brace (`/bin/s?`, `{sh,-c}`) may expand to any, and only the spaced texts after it are read, so `ls *.md` runs; a quoted text with a space (awk's program) names none
 const runnerOf = (word: Word): string | undefined => {
-  if (/[*?[{]/.test(word.value) && !(word.quoted && /\s/.test(word.value))) return "a glob"
+  if (GLOB.test(word.value) && !(word.quoted && /\s/.test(word.value))) return "a glob"
   const base = (word.value.split("/").pop() ?? "").toLowerCase()
   return RUNNERS.has(base) || SHELLS.has(base) || base === "eval" ? base : undefined
 }
