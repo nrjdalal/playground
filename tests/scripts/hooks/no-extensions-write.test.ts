@@ -471,7 +471,7 @@ describe("a quoted argument is read as a command line only where a program runs 
     ],
     ["tmux's command removing the home", "tmux new-session 'rm -rf ~'"],
     ["rsync's -e removing the home", "rsync -e 'rm -rf ~' a b"],
-    ["find's -exec removing the home", "find . -exec sh -c 'rm -rf ~' \;"],
+    ["find's -exec removing the home", "find . -exec sh -c 'rm -rf ~' \\;"],
     ["GIT_SSH_COMMAND removing the home", "GIT_SSH_COMMAND='rm -rf ~' git fetch"],
   ])("%s stays refused", async (_, command) => {
     for (const cwd of homes)
