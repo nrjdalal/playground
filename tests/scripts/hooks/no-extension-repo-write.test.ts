@@ -303,6 +303,12 @@ describe("a push resolves its target the way git does, and one it cannot place i
       ],
       ["gh's publish-step delete", "gh release delete v1 -y --cleanup-tag -R quillco/acme-skills"],
       ["gh's publish-step upload", "gh release upload v1 x.tgz -R quillco/acme-skills"],
+      ["gh pr merge by a variable in the extension clone", "gh pr merge $N", "ext"],
+      ["xargs appending gh pr merge's pull request", `echo ${EXT}/pull/1 | xargs gh pr merge`],
+      [
+        "xargs -I placing gh pr merge's pull request",
+        `echo ${EXT}/pull/1 | xargs -I{} gh pr merge {}`,
+      ],
       ["xargs appending a push's URL", `echo ${EXT} main | xargs git push`],
       ["xargs appending a send-pack URL", `echo ${EXT} main | xargs git send-pack`],
       [
@@ -492,6 +498,12 @@ describe("what it lets through", () => {
       ["a GIT_ variable on a commit", "GIT_EDITOR=true git commit --amend --no-edit"],
       ["a git alias that only reads", "git l", "alias"],
       ["xargs appending files to git add", "echo a b | xargs git add"],
+      ["gh pr merge by a variable in another repository's clone", "gh pr merge $N"],
+      [
+        "gh pr merge by a variable with -R another repository",
+        "gh pr merge $N -R acme/tools",
+        "ext",
+      ],
       ["gh api GET", `gh api ${A}/contents/x.md`],
       ["gh api GET of repositories/<id>", "gh api repositories/123"],
       ["gh repo view", "gh repo view quillco/acme-skills"],

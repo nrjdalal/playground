@@ -131,6 +131,7 @@ Their tests are `bun run test:file tests/scripts/hooks`.
   Its refusal names the one route: the owner types the command in Ops' pane as a `!` command; no flag, environment variable, role or note frees a call.
   It fails closed, as the leak guards do and only on a call that may write, when `policy.json` does not read or no login names the default repositories.
   Outside its reach are a program whose own code pushes or calls the API (a script by its path, `bun run`, `bun -e`, `python -c`, a binary, an HTTP client other than curl such as wget or httpie), a fork that keeps its source's name, and a gh alias set before it.
+  A pull request named by a shell value (`gh pr merge $N`) is placed as a number is, by `-R` or the checkout, so a pull request URL held in a variable is outside its reach.
   `gh workflow run`, `gh secret set` and `gh repo deploy-key add` pass, since none writes a branch or the name itself, while their `gh api` routes are refused.
   A GraphQL mutation, which names its repository by node id, and a curl whose URL the run computes are refused only when their text names one of the repositories; a URL in a curl config file (`-K`, `~/.curlrc`) and a redirect a server answers with (`-L`) are unread.
   An `ext.order` name with no clone and no `ext.repos` entry is not guarded, and the sync does not push it either.

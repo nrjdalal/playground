@@ -580,10 +580,11 @@ async function gh(
     texts.push(unknown(`what xargs puts in place of ${xargs?.replace}`))
   }
   const flagged = repos.map((r) => (fromXargs(r, xargs) ? undefined : repoOf(r)))
-  // A positional the hook cannot read may be a pull request URL, which picks the repository.
+  // A positional the hook cannot read may be a pull request URL, which picks the repository; under anyWrite a shell value is placed as a number is, by -R or the checkout, while xargs input stays unplaced.
   const urls = positionals.flatMap((p) => {
-    if (p.unknown || p.reads?.length || p.value.includes(UNKNOWN) || fromXargs(p, xargs))
-      return [undefined]
+    if (fromXargs(p, xargs) || p === XARGS_INPUT) return [undefined]
+    if (p.unknown || p.reads?.length || p.value.includes(UNKNOWN))
+      return policy.anyWrite ? [] : [undefined]
     return PR_URL.test(p.value) ? [repoOf(p)] : []
   })
   const named = [...flagged, ...urls]
