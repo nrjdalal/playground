@@ -302,6 +302,10 @@ describe("a direct write into the extensions root is refused, naming the owner's
     ["a redirect through a glob that matches a link to the root", "echo x > s*/policy.json"],
     ["cp through a glob that matches a link to the root", "cp /etc/hosts s*/policy.json"],
     ["rm of a ksh glob in the home", "setopt kshglob\nrm -rf +(.playground)"],
+    [
+      "awk printing into the root by its path as seen from the home",
+      `awk '{print > ".playground/extensions/policy.json"}' /dev/null`,
+    ],
     ["rm of a glob with a .. after it", "rm -rf w*/../.playground/extensions"],
     ["rm of an extglob in the data folder", "rm -rf .playground/@(extensions)"],
     ["rm of a negated extglob in the data folder", "rm -rf .playground/!(handoffs)"],
