@@ -8,7 +8,7 @@ each other account's week, keeps its own samples per account, and prints one sta
 Each other account in usage.json's `accounts` is sampled into account-samples.jsonl, and the status line adds their combined %/h. It sends nothing:
 Ops' tick relays the alerts."""
 import calendar, datetime, json, os, sys, time
-from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 HERE = os.path.expanduser("~/.playground/ops/usage")  # the state folder by name, so a run by its repo path still reads the live state
 sys.path.insert(0, os.path.dirname(HERE))
@@ -54,8 +54,13 @@ spares = {a: r for a, r in (u.get("accounts") or {}).items() if a != account}
 others = {a: sample(others_samples, calendar.timegm(time.strptime(r["readAt"], "%Y-%m-%dT%H:%M:%SZ")), a, r["week"], r["weekReset"])[1] for a, r in spares.items()}
 pace = [rate, *others.values()]
 combined = f"; combined {'?' if None in pace else f'{sum(pace):.1f}'}%/h across {len(pace)} accounts" if others else ""
-# the owner's day, midnight to midnight in clock.ownerZone
-midnight = datetime.datetime.fromtimestamp(now, ZoneInfo(setting("clock.ownerZone"))).replace(hour=0, minute=0, second=0, microsecond=0)
+# the owner's day, midnight to midnight in clock.ownerZone; a value the setting takes but zoneinfo cannot read (an offset such as +05:30) runs the day in UTC and says so
+owner_zone, unread = setting("clock.ownerZone"), ""
+try:
+    zone = ZoneInfo(owner_zone)
+except (ValueError, ZoneInfoNotFoundError):
+    zone, unread = datetime.timezone.utc, f"; clock.ownerZone {owner_zone} is no zone Python reads, so today runs in UTC"
+midnight = datetime.datetime.fromtimestamp(now, zone).replace(hour=0, minute=0, second=0, microsecond=0)
 day_start, day_end = midnight.timestamp(), (midnight + datetime.timedelta(days=1)).timestamp()
 today = [r for r in rows if r["t"] >= day_start]
 spent = used - today[0]["week"] if today else 0.0
@@ -69,7 +74,7 @@ eta = lambda mark, used=used, rate=rate: "" if not rate or rate <= 0 or used >= 
 if not counted:
     print(f"{account}: not a factory account; nothing counted (the factory runs on {', '.join(FACTORY)})")
 else:
-    print(f"{account}: week {used:g}% (resets {time.strftime('%a %H:%MZ', time.gmtime(reset))}), rate {'?' if rate is None else f'{rate:.1f}'}%/h{eta(90)}{eta(98)}; today {spent:g}% spent, on pace for {projected:.0f}% (no daily cap){combined}")
+    print(f"{account}: week {used:g}% (resets {time.strftime('%a %H:%MZ', time.gmtime(reset))}), rate {'?' if rate is None else f'{rate:.1f}'}%/h{eta(90)}{eta(98)}; today {spent:g}% spent, on pace for {projected:.0f}% (no daily cap){combined}{unread}")
 drain_tail = "; nothing parks: at 100% Bravo switches the factory to the next account (#i823)"
 # the logged-in account first, then each spare usage.accounts lists, each keyed by its own week reset
 for who, week_used, week_reset, pct_h in [*([(account, used, reset, rate)] if counted else []), *((a, r["week"], r["weekReset"], others[a]) for a, r in spares.items() if a in FACTORY)]:

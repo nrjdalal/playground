@@ -154,7 +154,7 @@ const planSubtitle = (
   zone: string | undefined,
 ): string =>
   plan
-    ? `${stale ? "Last good read, groomed" : "Groomed"} ${relativeTime(plan.generatedAt, now)}, at ${zoneTime(plan.generatedAt, zone)}`
+    ? `${stale ? "Last good read, groomed" : "Groomed"} ${relativeTime(plan.generatedAt, now)}${zone ? `, at ${zoneTime(plan.generatedAt, zone)}` : ""}`
     : DESCRIPTION
 
 // The subtitle on the Report tab: when the report was written, or the app's description until it has read.
@@ -165,7 +165,7 @@ const reportSubtitle = (
   zone: string | undefined,
 ): string =>
   report
-    ? `${stale ? "Last good read, reported" : "Reported"} ${relativeTime(report.generatedAt, now)}, at ${zoneTime(report.generatedAt, zone)}`
+    ? `${stale ? "Last good read, reported" : "Reported"} ${relativeTime(report.generatedAt, now)}${zone ? `, at ${zoneTime(report.generatedAt, zone)}` : ""}`
     : DESCRIPTION
 
 const VIEWS = ["report", "plan", "board"] as const

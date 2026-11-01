@@ -160,6 +160,25 @@ for (const zone of ["UTC", "Asia/Kolkata"])
     expect(status(home)).toContain("today 30% spent")
   })
 
+// an offset the setting takes (Intl reads it) but zoneinfo does not still prints the line and its alerts, the day in UTC, and says why
+test("a clock.ownerZone zoneinfo cannot read runs the day in UTC and says so", () => {
+  const now = Date.now() / 1000
+  const home = setup("day-offset", 91, 20, undefined, "+05:30")
+  const start = midnight("UTC", now)
+  for (const [t, week] of [
+    [start - 60, 10],
+    [start + 60, 20],
+  ])
+    appendFileSync(
+      samples(home, "week-samples.jsonl"),
+      `${JSON.stringify({ account: "login@example.test", reset: now + 86400, t, week })}\n`,
+    )
+  const line = status(home)
+  expect(line).toContain("today 71% spent")
+  expect(line).toEndWith("; clock.ownerZone +05:30 is no zone Python reads, so today runs in UTC")
+  expect(alerts(setup("day-offset-alerts", 91, 20, undefined, "+05:30"))).toEqual(["ALERT 90"])
+})
+
 test("a reading under every mark alerts nothing", () => {
   expect(alerts(setup("low", 40, 20))).toEqual([])
 })
