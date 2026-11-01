@@ -265,11 +265,11 @@ def name_of(s):
             return reg["name"]
     except (OSError, ValueError, KeyError):
         pass
-    args = s.get("launch_arguments") or s.get("stored_pid_arguments") or []
+    args = s.get("launch_arguments") or []
     for i, a in enumerate(args[:-1]):
         if a in ("-n", "--name"):
             return args[i + 1]
-    return s.get("title") or f"session {s['session_id'][:8]}"
+    return f"session {s['session_id'][:8]}"
 
 
 def herdr_sessions():
@@ -306,7 +306,7 @@ def herdr_panes(server, cfg):
         found = glob.glob(os.path.join(cfg, "projects", "*", f"{sid}.jsonl")) if sid else []
         surface = f"herdr:{server}:{p['pane_id']}"
         out.append({"herdr": server, "launch_arguments": proc.get("argv"), "pane": p["pane_id"], "pid": pid, "session_id": sid or surface, "surface_id": surface,
-                    "surface_ref": surface, "title": "", "transcript_path": found[0] if found else None, "workspace_id": p.get("workspace_id") or ""})
+                    "transcript_path": found[0] if found else None, "workspace_id": p.get("workspace_id") or ""})
     return out
 
 

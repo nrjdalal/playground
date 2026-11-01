@@ -750,14 +750,14 @@ describe("a permission prompt read off the screen", () => {
   })
 })
 
-// ops-unstick reads herdr alone (#419): a cmux on PATH that records every call stays untouched, a live session in no herdr pane included.
+// ops-unstick reads herdr alone (#419): the source test below holds run.py to no cmux command, and these read herdr's panes.
 describe("the session read", () => {
   const pid = String(process.pid)
   const script = (path: string, body: string): void => {
     writeFileSync(path, `#!/bin/sh\n${body}\n`)
     chmodSync(path, 0o755)
   }
-  // A cmux that fails every call and records it, and a herdr server whose one pane runs claude at `held` (none when null).
+  // A herdr server whose one pane runs claude at `held` (none when null).
   const machine = (held: string | null) => {
     const config = scratch()
     const bin = join(config, "bin")
@@ -766,15 +766,13 @@ describe("the session read", () => {
     mkdirSync(herdrDir)
     mkdirSync(join(config, "sessions"))
     writeFileSync(join(herdrDir, "factory.sock"), "")
-    const calls = join(config, "cmux-calls")
-    script(join(bin, "cmux"), `echo "$*" >> "${calls}"\nexit 1`)
     const panes = held ? '[{"pane_id":"p1","workspace_id":"w1"}]' : "[]"
     const info = `{"result":{"process_info":{"foreground_processes":[{"argv":["claude"],"name":"claude","pid":${held}}]}}}`
     script(
       join(bin, "herdr"),
       `case "$1 $2" in\n"pane list") echo '{"result":{"panes":${panes}}}' ;;\n"pane process-info") echo '${info}' ;;\n*) exit 1 ;;\nesac`,
     )
-    // An interactive session live in Claude's registry, which canary's cmux read took as one cmux may hold.
+    // Claude's registry entry at the pane's pid, which gives the session's id.
     writeFileSync(
       join(config, "sessions", `${pid}.json`),
       JSON.stringify({
@@ -789,17 +787,19 @@ describe("the session read", () => {
       HERDR_BIN_PATH: join(bin, "herdr"),
       PATH: `${bin}:${process.env.PATH}`,
     }
-    return { calls, config, env }
+    return { config, env }
   }
 
-  test("reads herdr's sessions and makes no cmux call", async () => {
-    const { calls, config, env } = machine(pid)
+  test("reads herdr's sessions with the registry's session id", async () => {
+    const { config, env } = machine(pid)
     const found = (await callWith(env, config, "herdr_sessions")) as {
       herdr: string
       pid: string
+      session_id: string
     }[]
-    expect(found.map((s) => [s.herdr, s.pid])).toEqual([["factory", pid]])
-    expect(existsSync(calls)).toBe(false)
+    expect(found.map((s) => [s.herdr, s.pid, s.session_id])).toEqual([
+      ["factory", pid, "0b9e8f1a-2c3d-4e5f-8a9b-0c1d2e3f4a5b"],
+    ])
   })
 
   test("runs the pinned herdr in HOME's data folder when HERDR_BIN_PATH is unset", async () => {
@@ -814,10 +814,9 @@ describe("the session read", () => {
     expect(found.map((s) => s.pid)).toEqual([pid])
   })
 
-  test("reads no session and fails nothing while a live session runs in no herdr pane", async () => {
-    const { calls, config, env } = machine(null)
+  test("reads no session and fails nothing while the registry's live session runs in no herdr pane", async () => {
+    const { config, env } = machine(null)
     expect(await callWith(env, config, "herdr_sessions")).toEqual([])
-    expect(existsSync(calls)).toBe(false)
   })
 
   test("run.py names no cmux command, so a cycle, its reads and its Escape run on herdr alone", () => {
