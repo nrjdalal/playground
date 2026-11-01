@@ -1,5 +1,5 @@
 // playground update: the release skill's step 5 as one script, then the Dashboard's roll.
-import { join } from "node:path"
+import { basename, join } from "node:path"
 
 import { CORE_SKILLS } from "./orgs"
 
@@ -20,14 +20,14 @@ export const updateSteps = (changed: string[]) => ({
     (path) => path.startsWith("packages/") && !path.startsWith("packages/scripts/"),
   ),
   install: changed.some((path) => /(^|\/)(bun\.lock|package\.json)$/.test(path)),
-  // a long-lived checker runs the skill text it loaded, so each changed skill is named for its reload
+  // each changed skill's folder, A to Z by name: a running session's Skill tool serves the copy it started with, so a live session reads the new text from here
   skills: [
     ...new Set(
       changed.flatMap((path) =>
-        CORE_SKILLS.flatMap((root) => path.match(new RegExp(`^${root}/([^/]+)/`))?.[1] ?? []),
+        CORE_SKILLS.flatMap((root) => path.match(new RegExp(`^${root}/[^/]+(?=/)`))?.[0] ?? []),
       ),
     ),
-  ].sort(),
+  ].sort((a, b) => basename(a).localeCompare(basename(b))),
 })
 
 // With a tag, the checkout's main is moved to that release instead, back or on, and the Dashboard, which rolls on its own branch, is left as it is; a plain update later moves it on to origin/main again.
@@ -87,7 +87,7 @@ export const runUpdate = async (
   const { build, install, skills } = updateSteps(changed)
   if (skills.length)
     log(
-      `playground update: skills changed: ${skills.join(", ")}; a session that loaded one runs its old text until it loads it again`,
+      `playground update: skills changed: ${skills.map((folder) => basename(folder)).join(", ")}; a running session's Skill tool serves the copy it started with, so a live session reads each one's files here: ${skills.map((folder) => `${join(repo, folder)}/`).join(", ")}`,
     )
   const turbo = join(repo, "node_modules", ".bin", "turbo")
   const restart = join(repo, "packages", "scripts", "src", "ops-restart", "cli.ts")

@@ -20,7 +20,7 @@ describe("updateSteps", () => {
     expect(updateSteps(["README.md", "package.json.bak"]).install).toBe(false)
   })
 
-  test("the skills a merge changed are named once each, A to Z, a long-lived checker running each only once it loads it again", () => {
+  test("the skills a merge changed are each one folder, once, A to Z by name, for a live session to read the new text from", () => {
     expect(
       updateSteps([
         "extensions/core/skills/pr/SKILL.md",
@@ -31,7 +31,12 @@ describe("updateSteps", () => {
         "skills/playground/inbox/SKILL.md",
         "extensions/core/rules/ci.md",
       ]).skills,
-    ).toEqual(["code-review-loop", "inbox", "pr", "ui-verify"])
+    ).toEqual([
+      "extensions/core/skills/code-review-loop",
+      "skills/playground/inbox",
+      "extensions/core/skills/pr",
+      "skills/zerostarter/ui-verify",
+    ])
     expect(updateSteps(["README.md"]).skills).toEqual([])
   })
 
@@ -83,7 +88,7 @@ describe("runUpdate", () => {
     ])
   })
 
-  test("a merge that changed a skill names it and says a session that loaded it runs its old text; one that changed none says nothing of skills", async () => {
+  test("a merge that changed a skill names it and the folder in the checkout a live session reads it from; one that changed none says nothing of skills", async () => {
     const said: string[] = []
     const { run } = fakeRun({
       diff: { out: "extensions/core/skills/pr/SKILL.md\nskills/zerostarter/dev/SKILL.md\n" },
@@ -97,7 +102,7 @@ describe("runUpdate", () => {
       ),
     ).toBe(0)
     expect(said).toContain(
-      "playground update: skills changed: dev, pr; a session that loaded one runs its old text until it loads it again",
+      `playground update: skills changed: dev, pr; a running session's Skill tool serves the copy it started with, so a live session reads each one's files here: ${repo}/skills/zerostarter/dev/, ${repo}/extensions/core/skills/pr/`,
     )
     const quietSaid: string[] = []
     expect(

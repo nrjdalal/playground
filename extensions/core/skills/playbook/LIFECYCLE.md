@@ -128,6 +128,7 @@ Sessions that work together share a workspace as full-height columns ([SESSIONS.
   The dispatcher spawns a manager under its fixed name when `ListAgents` lists none.
   A fresh the dispatcher session, after a cmux restart, reads the previous the dispatcher transcript and re-checks its open items against the roster and the managers before it answers the owner.
   A session resumed after any restart, an account switch included, re-arms its background tasks and re-sends its unanswered messages first, by the **context** rule ([rules/context.md](../../rules/context.md)), which the `after-resume` hook puts in front of it.
+  A running session's Skill tool serves the skill copy the session started with (`~/.playground/orgs/<set>/<hash>/`), however often it is called, so after a ship a live session reads each changed skill's files from the folder `playground update` names in the main checkout (**release**).
   No session reports Playground as running until its own `ListAgents` lists a session named `dispatcher`; a roster entry, a cmux record or a Dashboard row does not count.
   Ops' sweep has each factory session cmux restored without the factory's hooks respawned with its settings ([SWEEP.md](SWEEP.md)).
 

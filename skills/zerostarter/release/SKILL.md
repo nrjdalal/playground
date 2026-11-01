@@ -68,7 +68,7 @@ Run `playground update` (`packages/scripts/src/playground/update.ts`) in a run s
 It runs each step below and stops at the first that fails, naming it:
 
 1. Fetch and fast-forward onto `origin/main`, since `pull --ff-only origin main` there fails with "Cannot fast-forward to multiple branches". A checkout on another branch with a clean tree moves to `main` at `origin/main` first, and a dirty one stops here.
-2. `link-skills.sh`, before anything else, since every later step and every ops job reads `~/.playground`, which it links to `~/.playground` on a machine holding only the old folder.
+2. `link-skills.sh`, before anything else, since every later step and every ops job reads `~/.playground`, which it links to `~/.playground` on a machine holding only the old folder; when the merge changed a skill, it then prints `skills changed:` with each one's folder in the checkout, which you send every lead, since a running session's Skill tool serves the copy it started with and a live checker reads the new text from that folder.
 3. Install when the merge changed `bun.lock` or a `package.json`, with `--ignore-scripts`, since the postinstall's `deps-manager.ts` can rewrite a `package.json` there (v0.0.141's pull left a newly added `nanoid` uninstalled, so `bun run name` failed).
 4. Build `packages/*` when the merge changed a package with a `dist` (`packages/scripts` runs from source, so a change there alone builds nothing), since the `playground` command imports their `dist`, with env validation off, since the main checkout has no `.env`.
 5. Restart each ops job whose source the merge changed ([ops-restart](../../../scripts/ops/README.md#when-a-job-restarts-onto-new-code)).
@@ -76,7 +76,7 @@ It runs each step below and stops at the first that fails, naming it:
 
 A build that fails part way can leave another package's `dist` cleaned and empty (`packages/redis`, which pr:merge's lock imports, on v0.0.107): after a failed build, fix its cause and run `env NODE_ENV=production SKIP_ENV_VALIDATION=true <main checkout>/node_modules/.bin/turbo run build --filter='./packages/*' --cwd <main checkout>` by hand, since the merge has landed and a second `playground update` sees nothing changed.
 
-Done when the main checkout's `HEAD` equals `origin/main`, `playground update` exits 0, no `ops-restart:` line reads `still runs` or a non-zero `up.py exited`, and every package but `packages/scripts` holds a `dist` with files in it.
+Done when the main checkout's `HEAD` equals `origin/main`, `playground update` exits 0, no `ops-restart:` line reads `still runs` or a non-zero `up.py exited`, every package but `packages/scripts` holds a `dist` with files in it, and each folder a `skills changed:` line names has reached every lead.
 
 ## Notes
 

@@ -206,15 +206,17 @@ describe("a diff holding a long-lived connection is reviewed by a lifecycle tabl
 })
 
 describe("code-review-loop runs its newest text every round (PG-213)", () => {
-  test("step 1 opens by loading the skill again, and its Done when checks it", async () => {
+  test("step 1 opens by reading the skill from the main checkout, and its Done when checks it", async () => {
     const recover = (await skill()).match(/^1\. \*\*Recover\.\*\*.*$/m)?.[0] ?? ""
     expect(recover).toStartWith(
-      "1. **Recover.** Call the Skill tool with `code-review-loop` again, so the round runs this skill's newest text.",
+      "1. **Recover.** Read this skill's newest text from the main checkout with the Read tool, `$PLAYGROUND_REPO/extensions/core/skills/code-review-loop/SKILL.md`",
     )
     expect(recover.split("**Done when**")[1] ?? "").toContain(
-      "loaded code-review-loop again this round",
+      "read code-review-loop's SKILL.md from the main checkout this round",
     )
-    expect(await page()).toContain("loads the skill again at the start of every round")
+    expect(await page()).toContain(
+      "reads the skill's newest text from the main checkout at the start of every round",
+    )
   })
 })
 
