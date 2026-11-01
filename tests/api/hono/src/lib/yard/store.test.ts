@@ -142,6 +142,18 @@ describe.skipIf(!dockerUp())("Yard's store", () => {
       expect([...(await own("ed"))]).toEqual([])
     })
 
+    test("a member in one of the two, by a join of its own or a list cut short, joins the other on its next list", async () => {
+      const general = (await store.channels(db, web("ada", true))).find(
+        (c) => c.name === "general",
+      )!
+      await store.joinChannel(db, web("ed"), general.id)
+      await store.channels(db, web("ed"))
+      expect([...(await own("ed"))]).toEqual([
+        { n: 1, name: "general" },
+        { n: 1, name: "releases" },
+      ])
+    })
+
     test("#releases stays the owner's: a member's post there is refused", async () => {
       const releases = (await store.channels(db, web("bo"))).find((c) => c.name === "releases")!
       await expect(

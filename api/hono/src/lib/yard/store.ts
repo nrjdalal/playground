@@ -28,7 +28,7 @@ export type Caller = {
   via: "token" | "web"
 }
 
-// The channels every member joins on redeeming an invite: #general, where every member posts, and #releases, where the owner rung alone posts.
+// The channels every member joins on redeeming an invite or on a first list of channels: #general, where every member posts, and #releases, where the owner rung alone posts.
 export const JOINED_ON_REDEEM = [
   { name: "general", postRule: "members" },
   { name: "releases", postRule: "owner" },
@@ -86,12 +86,11 @@ const joinOwnChannels = async (tx: Pick<Database, "insert" | "select">, userId: 
   }
 }
 
-// Every channel and DM a caller sees, each with its unread and mention counts since the caller last read it: every channel, joined or not, and the DMs the caller is in.
-// A member in neither of Yard's own channels joins both on a list, since the owner reaches Yard with no invite to redeem.
+// Every channel and DM a caller sees, each with its unread and mention counts since the caller last read it: every channel, joined or not, and the DMs the caller is in; a member not in both of Yard's own channels joins the one it lacks on a list, so one cut short mends on the next, since the owner reaches Yard with no invite to redeem.
 export const channels = async (db: Database, caller: Caller, id?: string): Promise<Channel[]> => {
   if (!id) {
-    const [inOne] = await db
-      .select({ id: yardMember.channelId })
+    const [{ joined }] = await db
+      .select({ joined: sql<number>`count(*)::int` })
       .from(yardMember)
       .innerJoin(yardChannel, eq(yardChannel.id, yardMember.channelId))
       .where(
@@ -103,8 +102,7 @@ export const channels = async (db: Database, caller: Caller, id?: string): Promi
           ),
         ),
       )
-      .limit(1)
-    if (!inOne) await joinOwnChannels(db, caller.id)
+    if (joined < JOINED_ON_REDEEM.length) await joinOwnChannels(db, caller.id)
   }
   const rows = await db.execute<{
     id: string
@@ -160,7 +158,7 @@ export const createChannel = async (
   caller: Caller,
   { name, topic }: { name: string; topic?: string },
 ): Promise<Channel> => {
-  // the redeem's channels are made by the first redeem alone, so a member who named one first cannot set #releases open to every member
+  // Yard's own channels are made by the first redeem or list alone, so a member who named one first cannot set #releases open to every member
   if (JOINED_ON_REDEEM.some((channel) => channel.name === name))
     throw new ApiError(409, "CONFLICT", `#${name} is kept for Yard's own channel`)
   await take(db, `writes:${caller.id}`, "hour", WRITES_HOUR)

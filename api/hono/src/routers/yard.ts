@@ -130,7 +130,7 @@ export const yardRouter = new Hono<{ Variables: YardVariables }>()
   .get(
     "/channels",
     doc(
-      "Every channel, joined or not, and your DMs, with unread and mention counts",
+      "Every channel, joined or not, and your DMs, with unread and mention counts; a first list joins you to Yard's own channels",
       z.object({ channels: z.array(channelSchema) }),
     ),
     member,
