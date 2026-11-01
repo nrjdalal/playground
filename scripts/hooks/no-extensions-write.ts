@@ -352,9 +352,35 @@ export async function check(
   }
 }
 
+// The check run in a Worker and refused when it has not answered by the main thread's timer, so no synchronous step (a regex, a copy) can hold the hook past its timeout.
+export async function guarded(
+  raw: string,
+  environment: Environment = process.env,
+  wait = 12_000,
+  url = new URL("./no-extensions-write-worker.ts", import.meta.url).href,
+): Promise<string | undefined> {
+  const worker = new Worker(url)
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      new Promise<string | undefined>((done) => {
+        worker.onmessage = (event) => done(event.data)
+        worker.onerror = () => done(undefined)
+        worker.postMessage({ environment, raw })
+      }),
+      new Promise<string>((done) => {
+        timer = setTimeout(() => done(refuse(TOO_LONG)), wait)
+      }),
+    ])
+  } finally {
+    clearTimeout(timer)
+    worker.terminate()
+  }
+}
+
 if (import.meta.main) {
   const raw = await Bun.stdin.text()
-  const reason = (await fromFactory(raw)) ? await check(raw) : undefined
+  const reason = (await fromFactory(raw)) ? await guarded(raw) : undefined
   if (reason) {
     console.error(reason)
     process.exit(2)

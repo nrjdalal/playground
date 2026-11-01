@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node
 import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { check, GUARD_KEYS } from "../../../scripts/hooks/no-extensions-write"
+import { check, GUARD_KEYS, guarded } from "../../../scripts/hooks/no-extensions-write"
 
 // A home whose data folder holds an extensions root, with a list, policy.json and a scope's sources, as a machine with extensions has.
 const HOME = mkdtempSync(join(tmpdir(), "no-extensions-write-"))
@@ -666,6 +666,37 @@ describe("a playground CLI call that no guard reads runs", () => {
 })
 
 describe("the hook's run", () => {
+  test("a check in its Worker answers as the check does", async () => {
+    const raw = JSON.stringify({
+      cwd: HOME,
+      tool_input: { command: `rm ${LIST}` },
+      tool_name: "Bash",
+    })
+    expect(await guarded(raw, ENV)).toBe(await check(raw, ENV))
+    const read = JSON.stringify({
+      cwd: HOME,
+      tool_input: { command: `cat ${LIST}` },
+      tool_name: "Bash",
+    })
+    expect(await guarded(read, ENV)).toBeUndefined()
+  })
+
+  test("a single step the deadline cannot interrupt is refused when the main thread's timer fires", async () => {
+    const command = `printf '%s${",".repeat(60)}' '{' ${"x ".repeat(6_000)}| xargs -I @ foo '@ a'; playground ext import x`
+    const raw = JSON.stringify({ cwd: "/tmp", tool_input: { command }, tool_name: "Bash" })
+    const started = performance.now()
+    expect(await guarded(raw, ENV, 1_000)).toContain("split it into shorter calls")
+    expect(performance.now() - started).toBeLessThan(3_000)
+  })
+
+  test("a check that never answers is refused when the main thread's timer fires", async () => {
+    const busy = new URL("./fixtures/busy-worker.ts", import.meta.url).href
+    const started = performance.now()
+    const reason = await guarded("{}", ENV, 300, busy)
+    expect(reason).toContain("split it into shorter calls")
+    expect(performance.now() - started).toBeLessThan(2_000)
+  })
+
   test("it fails open on input it cannot read", async () => {
     expect(await check("not json", ENV)).toBeUndefined()
   })
