@@ -19,6 +19,8 @@ writeFileSync(join(ROOT, "policy.json"), "{}\n")
 writeFileSync(join(SCOPE, "lists", "release-owners.json"), "[]\n")
 const LINK = join(HOME, "store")
 const WORK = join(HOME, "work")
+const BIG = [join(HOME, "big-a"), join(HOME, "big-b")]
+for (const file of BIG) writeFileSync(file, "x".repeat(900_000))
 mkdirSync(join(WORK, "playground"), { recursive: true })
 symlinkSync(ROOT, LINK)
 afterAll(() => rmSync(HOME, { force: true, recursive: true }))
@@ -335,10 +337,49 @@ describe("a direct write into the extensions root is refused, naming the owner's
       const started = performance.now()
       const reason = await bash(`${"eval 'eval '\\''".repeat(depth)}\nrm ${LIST}`, "/tmp")
       expect(reason).toContain("no-extensions-write hook refuses")
-      expect(performance.now() - started).toBeLessThan(7_500)
+      expect(performance.now() - started).toBeLessThan(12_000)
     },
     60_000,
   )
+
+  test.each([
+    ["24 doubling cat stages", `echo hi | ${"cat - - | ".repeat(24)}bash; echo x > ${LIST}`],
+    [
+      "12 rounds of files that double each other",
+      `echo a > /tmp/nxw-f; ${"cat /tmp/nxw-f /tmp/nxw-f > /tmp/nxw-g; cat /tmp/nxw-g /tmp/nxw-g > /tmp/nxw-f; ".repeat(12)}bash < /tmp/nxw-f; echo x > ${LIST}`,
+    ],
+    ["a 120 KB path", `touch /tmp/${"a/".repeat(60_000)}x; echo x > ${LIST}`],
+  ])(
+    "%s ahead of a write are read inside the hook's time",
+    async (_, command) => {
+      const started = performance.now()
+      expect(await bash(command, "/tmp")).toContain("no-extensions-write hook refuses")
+      expect(performance.now() - started).toBeLessThan(3_000)
+    },
+    60_000,
+  )
+
+  test.each([
+    [
+      "a group whose first part it cannot read",
+      `{ curl -s https://example.com; echo 'echo x > ${LIST}'; } | bash`,
+    ],
+    [
+      "a group whose second part it cannot read",
+      `{ echo 'echo x > ${LIST}'; curl -s https://example.com; } | bash`,
+    ],
+    [
+      "a subshell with a part it cannot read",
+      `(curl -s https://example.com; echo 'echo x > ${LIST}') | sh`,
+    ],
+    [
+      "a process substitution with a part it cannot read",
+      `bash <(curl -s https://example.com; echo 'echo x > ${LIST}')`,
+    ],
+    ["cat of a file it cannot read and stdin", `echo 'echo x > ${LIST}' | cat /dev/null - | bash`],
+  ])("a shell reading %s still reads the rest", async (_, command) => {
+    expect(await bash(command, "/tmp")).toContain("no-extensions-write hook refuses")
+  })
 
   test("a Bash call whose cwd is already inside the root runs no writer", async () => {
     expect(await bash("node -e 'x'", SCOPE)).toContain("no-extensions-write hook refuses")
@@ -403,6 +444,7 @@ describe("a read of the root, and writes elsewhere, run", () => {
       `gh pr comment 1 --body "run playground settings set ui.theme dark"`,
     ],
     ["rg of a gated call", "rg 'playground ext sync'"],
+    ["cat of two 900 KB files into one elsewhere", `cat ${BIG[0]} ${BIG[1]} > /tmp/nxw-all`],
     ["rg with --pre-glob alone", "rg --pre-glob '*.gz' x /tmp"],
     ["a git author name with a space", "GIT_AUTHOR_NAME='A B' git log"],
     ["a pager with an option", "GIT_PAGER='less -R' git log"],

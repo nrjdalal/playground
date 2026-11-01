@@ -30,7 +30,7 @@ export type Env = {
   files: Map<string, Text>
   known: Record<string, string>
   process: Record<string, string | undefined>
-  // the time past which examine throws a RangeError, for a hook that must answer inside its timeout
+  // the performance.now() past which the walk throws a RangeError, and of a walk that throws one on a script over 128 KB, for a hook that must answer inside its timeout
   until?: number
   vars: Map<string, Text>
 }
@@ -46,6 +46,24 @@ export const READ = "\u0001"
 export const NOT_RUN =
   "The refusal stopped this whole Bash call, so none of its commands ran: once it is fixed, run again each one you still need."
 const MAX_BYTES = 1_048_576
+const MAX_SCRIPT = 131_072
+const LARGE = "a text too large to read"
+
+// A walk with a budget (Env.until) stops with a RangeError past its time, so a hook answers inside its timeout.
+function spend(env: Env): void {
+  if (env.until !== undefined && performance.now() > env.until)
+    throw new RangeError("past the hook's time")
+}
+
+// A script a shell, eval or source reads, held under a budget to the size of a command the hook reads.
+function lexScript(value: string, env: Env): Lexed {
+  if (env.until !== undefined && value.length > MAX_SCRIPT)
+    throw new RangeError("a script too large to read")
+  return lex(value, env.known)
+}
+
+// A text a command writes or reads from stdin, unknown past the size of a file the hook reads, so a text that doubles stops growing.
+const held = (text: Text): Text => (text.value.length > MAX_BYTES ? unknown(LARGE) : text)
 
 const BREAK = new Set([" ", "\t", "\n", ";", "&", "|", "<", ">", "(", ")"])
 const REDIRECT = /^(\d*|&)(<<<|<<-|<<|<>|<&|>&!?|>>[!|]?|>[!|]|<|>)/
@@ -332,7 +350,7 @@ function walk(lx: Lexer, scope: number, nested: boolean, inherit?: Command): voi
       lx.i += redirect[0].length
       while (src[lx.i] === " " || src[lx.i] === "\t") lx.i++
       const [, fd] = redirect
-      // zsh's >! and >>! override noclobber as >| does
+      // zsh's >!, >>! and >&! override noclobber as >| does
       const op = redirect[2].replace(/!$/, "|").replace(/^(>[>&])\|$/, "$1")
       const target = src.startsWith("<(", lx.i) ? procSub(lx) : word(lx)
       const entry: Redirect = { fd, op, target }
@@ -683,10 +701,10 @@ export function shellSlot(args: Word[], shell: string): Word[] | undefined {
   return args.slice(args.indexOf(operand))
 }
 
-// A hook's judgement of one command, given everything but the shell's own builtins, the shells it starts and eval, which run() follows itself.
+// A hook's judgement of one command, given everything but the shell's own builtins, the shells it starts, eval, and source or . of a process substitution or /dev/stdin, which run() follows itself.
 export type Visit = (cmd: Command, parsed: Parsed, env: Env) => Promise<string | undefined>
 
-// builtins: visit also each bare assignment or wrapper with no command (name "", as a bare `env`) and each declare, export, local, readonly or typeset.
+// builtins: visit also each bare assignment or wrapper with no command (name "", as a bare `env`), each declare, export, local, readonly or typeset, and a bare copy of each followed command that has a redirect.
 export async function run(
   lexed: Lexed,
   env: Env,
@@ -729,15 +747,14 @@ async function runAll(
 
 const subshell = (env: Env): Env => ({ ...env, vars: new Map(env.vars) })
 
-// One command as run() reads it, cd, the shells it starts and eval followed, for a hook that finds a command inside another (a wrapper's words).
+// One command as run() reads it, cd, the shells it starts, eval, and source or . of a process substitution or /dev/stdin followed, for a hook that finds a command inside another (a wrapper's words).
 export async function examine(
   cmd: Command,
   env: Env,
   visit: Visit,
   builtins: boolean,
 ): Promise<string | undefined> {
-  if (env.until !== undefined && performance.now() > env.until)
-    throw new RangeError("past the hook's time")
+  spend(env)
   const parsed = parse(cmd)
   const { args, chdir, local, name } = parsed
   const here: Env = chdir ? { ...env, cwd: pathOf(chdir, env) } : env
@@ -767,11 +784,11 @@ export async function examine(
     (args[0]?.procs || args[0]?.value === "/dev/stdin")
   ) {
     const script = await scriptOf(args[0], cmd, here)
-    verdict = script.unknown
-      ? await visit(cmd, parsed, here)
-      : await run(lex(script.value, env.known), here, visit, builtins)
+    verdict =
+      (script.unknown ? await visit(cmd, parsed, here) : undefined) ??
+      (await run(lexScript(known(script), env), here, visit, builtins))
   } else if (name === "eval") {
-    verdict = await run(lex(args.map((a) => a.value).join(" "), env.known), here, visit, builtins)
+    verdict = await run(lexScript(args.map((a) => a.value).join(" "), env), here, visit, builtins)
   } else verdict = await visit(cmd, parsed, here)
   await record(cmd, name, args, here)
   return verdict
@@ -825,18 +842,25 @@ async function shell(
       const fed = await stdinOf(cmd, env)
       script = script.replaceAll(xargs.replace, fed.unknown ? UNKNOWN : fed.value.trim())
     }
-    return run(lex(script, env.known), subshell(env), visit, builtins)
+    return run(lexScript(script, env), subshell(env), visit, builtins)
   }
   const script = await scriptOf(operand, cmd, env)
-  return script.unknown
-    ? undefined
-    : run(lex(script.value, env.known), subshell(env), visit, builtins)
+  return run(lexScript(known(script), env), subshell(env), visit, builtins)
 }
 
-// A shell's or source's script: stdin with no operand or `/dev/stdin`, a process substitution's output, else unknown.
+// A script's parts the hook can read, each part it cannot read (a `curl`'s output in a group) taken as a line break, so the rest is still walked.
+const known = (script: Text): string => script.value.replaceAll(UNKNOWN, "\n")
+
+// A shell's or source's script: stdin with no operand or `/dev/stdin`, a process substitution's output, else unknown; a walk with a budget throws on one too large to hold.
 async function scriptOf(operand: Word | undefined, cmd: Command, env: Env): Promise<Text> {
-  if (!operand || operand.value === "/dev/stdin") return stdinOf(cmd, env)
-  return operand.procs ? outputs(operand.procs, env) : unknown("a script file")
+  const script =
+    !operand || operand.value === "/dev/stdin"
+      ? await stdinOf(cmd, env)
+      : operand.procs
+        ? await outputs(operand.procs, env)
+        : unknown("a script file")
+  if (env.until !== undefined && script.unknown === LARGE) throw new RangeError(LARGE)
+  return script
 }
 
 // The output of a list of commands run in order, unknown when any part is.
@@ -853,14 +877,14 @@ async function record(cmd: Command, name: string, args: Word[], env: Env): Promi
     const out = stdout
       ? await outputOf(cmd, env)
       : unknown(`what ${name || "a command"} writes to stderr`)
-    env.files.set(path, r.op === ">>" ? join([await existing(path, env), out]) : out)
+    env.files.set(path, held(r.op === ">>" ? join([await existing(path, env), out]) : out))
   }
   if (name !== "tee") return
   const input = await stdinOf(cmd, env)
   const append = args.some((a) => a.value === "-a" || a.value === "--append")
   for (const a of args) {
     const path = a.value.startsWith("-") ? undefined : pathOf(a, env)
-    if (path) env.files.set(path, append ? join([await existing(path, env), input]) : input)
+    if (path) env.files.set(path, held(append ? join([await existing(path, env), input]) : input))
   }
 }
 
@@ -869,6 +893,7 @@ async function existing(path: string, env: Env): Promise<Text> {
 }
 
 async function outputOf(cmd: Command, env: Env): Promise<Text> {
+  spend(env)
   const { args, name } = parse(cmd)
   if (name === "") {
     if (cmd.inner) return outputs(cmd.inner(), env)
@@ -879,11 +904,23 @@ async function outputOf(cmd: Command, env: Env): Promise<Text> {
   if (name === "cat") {
     const sources = args.filter((a) => a.value === "-" || !a.value.startsWith("-"))
     if (sources.length === 0) return stdinOf(cmd, env)
-    return join(
-      await Promise.all(
-        sources.map((s) => (s.value === "-" ? stdinOf(cmd, env) : readPath(s, env))),
-      ),
-    )
+    // the first `-` reads all of stdin, so a later one reads nothing; the sources are read in turn until their text outgrows what the hook holds
+    const first = sources.findIndex((s) => s.value === "-")
+    const parts: Text[] = []
+    let size = 0
+    for (const [k, s] of sources.entries()) {
+      spend(env)
+      const part =
+        s.value !== "-"
+          ? await readPath(s, env)
+          : k === first
+            ? await stdinOf(cmd, env)
+            : { value: "" }
+      size += part.value.length
+      if (size > MAX_BYTES) return unknown(LARGE)
+      parts.push(part)
+    }
+    return join(parts)
   }
   if (name === "tee") return stdinOf(cmd, env)
   if (!PRINTERS.has(name)) return unknown(`the output of ${name}`)
@@ -918,6 +955,11 @@ function printf([format = "", ...args]: string[]): string {
 }
 
 export async function stdinOf(cmd: Command, env: Env): Promise<Text> {
+  spend(env)
+  return held(await stdinText(cmd, env))
+}
+
+async function stdinText(cmd: Command, env: Env): Promise<Text> {
   const input = cmd.redirects.findLast(
     (r) => (r.fd === "" || r.fd === "0") && r.op.startsWith("<") && r.op !== "<&",
   )

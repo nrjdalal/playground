@@ -1,6 +1,6 @@
 // PreToolUse hook: refuses a build, a test run, lefthook, turbo (but for the packages build a pull needs, run with env validation off), a git command that moves HEAD, the index or the files (but for the release skill's step 5 fast-forward and the keep reset off a stray local commit; a worker's hard reset there ran another branch's code under every hook for 3.5 minutes) or a file write (a Bash command's, or a Write, Edit, MultiEdit or NotebookEdit), run-slot.sh's command read as typed bare, in the main checkout, which every installed skill follows and so stays clean (a reviewer's `lefthook run pre-commit` from the Bash tool's default cwd rebuilt packages' dist and wrote .turbo/runs there).
 import { readFileSync, realpathSync } from "node:fs"
-import { basename, dirname, join, resolve, sep } from "node:path"
+import { basename, dirname, isAbsolute, join, normalize, resolve, sep } from "node:path"
 
 import { fromFactory } from "./role"
 import {
@@ -31,14 +31,36 @@ export function mainCheckout(dir: string): string {
 
 // A path with its nearest existing folder's links followed, so a write through a link into the checkout (link-skills' ~/.claude/skills) is judged where it lands.
 export function real(path: string): string {
+  const found = resolved(path)
+  if (found !== undefined || !isAbsolute(path)) return found ?? nearest(path)
+  // a folder exists whenever one below it does, so a binary search over the depth finds the nearest one in a few calls, where a walk up costs time that grows with the square of a long path's length
+  const parts = normalize(path).split(sep).filter(Boolean)
+  let low = 0
+  let high = parts.length - 1
+  while (low < high) {
+    const mid = Math.ceil((low + high) / 2)
+    if (resolved(sep + parts.slice(0, mid).join(sep)) === undefined) high = mid - 1
+    else low = mid
+  }
+  return join(resolved(sep + parts.slice(0, low).join(sep)) ?? sep, ...parts.slice(low))
+}
+
+const resolved = (path: string): string | undefined => {
+  try {
+    return realpathSync(path)
+  } catch {
+    return undefined
+  }
+}
+
+// A relative path's nearest existing folder, walked up from the path.
+function nearest(path: string): string {
   const rest: string[] = []
   for (let dir = path; ; dir = dirname(dir)) {
-    try {
-      return join(realpathSync(dir), ...rest.reverse())
-    } catch {
-      if (dir === dirname(dir)) return path
-      rest.push(basename(dir))
-    }
+    const found = resolved(dir)
+    if (found !== undefined) return join(found, ...rest.reverse())
+    if (dir === dirname(dir)) return path
+    rest.push(basename(dir))
   }
 }
 
