@@ -50,4 +50,15 @@ describe("GITHUB-BULK-READS.md", () => {
     expect(line).toContain("`hasNextPage`")
     expect(line).toContain("step 3")
   })
+
+  test("canary's own checks: the open canary-into-main PR's head now, a past window's runs with a job, and the held run named", async () => {
+    const text = await Bun.file(PAGE).text()
+    const section = text.slice(text.indexOf("## Reading canary's own checks"))
+    expect(section).toContain("**held runs**: zero jobs")
+    expect(section).toContain("A held run is no failure")
+    expect(section).toContain("20 of them held runs, and one real break (measured)")
+    expect(section).toContain("pulls?head=<owner>:canary&base=main&state=open")
+    expect(section).toContain("commits/$sha/check-runs")
+    expect(section).toContain('--jq .total_count)" -gt 0 ]')
+  })
 })

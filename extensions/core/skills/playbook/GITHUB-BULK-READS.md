@@ -96,3 +96,30 @@ On a refused call, wait for the reset the rule names and retry nothing before it
 Wait until the reset the failing call's own `X-RateLimit-Reset` header gives (`gh api -i` prints it), or, when no header came back, each quota's `reset` from `gh api rate_limit`, though that can disagree, and retry nothing before then.
 code-review-loop's `state.py wait` does both.
 Done when the reset has passed and the retried call answers.
+
+## Reading canary's own checks
+
+The suite and the build run only on `pull_request` (`auto-test.yml`, `auto-check-build.yml`), so every such run `gh run list --branch canary` lists belongs to the open canary-into-main PR.
+The bot opens that PR, so its `opened` runs are **held runs**: zero jobs, waiting for an approval nobody gives, and reported as `failure` once that PR merges.
+A held run is no failure: an audit of canary's runs over 25 hours on 31 Oct and 1 Nov found 21 red runs, 20 of them held runs, and one real break (measured).
+`gh run list --limit 100` reached back only 3 of those 25 hours, so a window's list pages the REST read below.
+
+- **Canary now**: read the check runs on the open canary-into-main PR's head, which hold no held run.
+  A head that has only held runs shows its push checks alone (`Audit canary`, the PR's own creation); its suite and build have no reading at that head until the next push to canary.
+  Done when every check on the head has a conclusion.
+
+  ```bash
+  sha=$(gh api "repos/<owner>/<repo>/pulls?head=<owner>:canary&base=main&state=open" --jq '.[0].head.sha')
+  gh api "repos/<owner>/<repo>/commits/$sha/check-runs" --jq '.check_runs[] | [.name, .conclusion] | @tsv'
+  ```
+
+- **A past window**: keep each red run with at least one job, then read its failing step with `gh run view <id> --log-failed`.
+  Done when every red run in the window is kept or set aside as a held run.
+
+  ```bash
+  gh api --paginate "repos/<owner>/<repo>/actions/runs?branch=canary&created=>=<iso>&per_page=100" \
+    --jq '.workflow_runs[] | select(.conclusion == "failure") | .id' |
+    while read -r id; do
+      if [ "$(gh api "repos/<owner>/<repo>/actions/runs/$id/jobs" --jq .total_count)" -gt 0 ]; then echo "$id"; fi
+    done
+  ```
