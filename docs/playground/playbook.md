@@ -20,6 +20,7 @@ It lives in the repo rather than in one session's memory, so every session loads
 | File a Linear ticket                                                                                      | the **tickets** rule                                                           |
 | Write anything an org sees                                                                                | the **classified** rule                                                        |
 | Post in the factory's channel, or take an ask from there                                                  | the **channel** rule (`CHANNEL.md`)                                            |
+| Run a `vercel` command, a deploy among them                                                               | the Vercel CLI's three traps (`VERCEL.md`)                                     |
 | Stop a process                                                                                            | the **signal** rule                                                            |
 | Hand off a build, a read or research                                                                      | the **workers** rule                                                           |
 | Run long, spawn a reviewer again, or wait on something                                                    | the **context**, **rounds** and **polling** rules                              |
