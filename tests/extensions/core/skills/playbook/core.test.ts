@@ -24,11 +24,7 @@ describe("playbook keeps its pointer to the standing rules inside what a compact
     const rules = readRules(CORE_RULES)
     expect(rules.length).toBeGreaterThan(20)
     expect(rules.filter((rule) => !rule.glance).map((rule) => rule.name)).toEqual([])
-    const names = new Set(rules.map((rule) => rule.name))
-    const glanced = [...skill.matchAll(/^- \*\*([a-z]+(?: [a-z]+)*)\*\*:/gm)]
-      .map((m) => m[1])
-      .filter((name) => names.has(name!))
-    expect(glanced).toEqual([])
+    expect([...skill.matchAll(/^- \*\*([a-z]+(?: [a-z]+)*)\*\*:/gm)].map((m) => m[1])).toEqual([])
     expect(readdirSync(skills).filter((scope) => existsSync(join(skills, scope, "rules")))).toEqual(
       [],
     )
