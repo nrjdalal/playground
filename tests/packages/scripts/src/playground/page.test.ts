@@ -7,7 +7,7 @@ const CLI = join(import.meta.dir, "../../../../../packages/scripts/src/playgroun
 const dir = mkdtempSync(join(tmpdir(), "dispatcher-page-"))
 afterAll(() => rmSync(dir, { force: true, recursive: true }))
 
-// A scratch config folder whose roster lists two sessions, and an open that writes what it was given, so a call to open shows.
+// A scratch config folder whose roster lists two sessions, and an open that writes what it was given, so a call to open leaves a file the test checks for.
 const setup = async () => {
   const root = mkdtempSync(join(dir, "run-"))
   const config = join(root, "claude")
