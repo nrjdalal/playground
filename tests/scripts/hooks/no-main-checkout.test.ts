@@ -172,6 +172,7 @@ describe("a build, a test run, lefthook, turbo or a file write in the main check
     ["turbo's --cwd through bun x", `bun x turbo run build --cwd=${MAIN}`],
     ["bun test's own --cwd after test", `bun test --cwd ${MAIN} tests/x.test.ts`],
     ["git -C", `git -C ${MAIN} commit -m x`],
+    ["git -C behind --attr-source's value", `git --attr-source HEAD -C ${MAIN} commit -m x`],
     ["a redirect into it by its path", `echo x > ${MAIN}/stray.txt`],
     ["cp into it by its path", `cp a ${MAIN}/b`],
     ["sed -i on a file in it by its path", `sed -i 's/a/b/' ${MAIN}/scripts/ops/run-slot.sh`],

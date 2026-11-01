@@ -23,6 +23,9 @@ const BIG = [join(HOME, "big-a"), join(HOME, "big-b")]
 for (const file of BIG) writeFileSync(file, "x".repeat(900_000))
 mkdirSync(join(WORK, "playground"), { recursive: true })
 symlinkSync(ROOT, LINK)
+// Links whose names no glob of the root's own names matches: one to the root in the data folder, one to the data folder in the home.
+symlinkSync(ROOT, join(DATA, "store"))
+symlinkSync(DATA, join(HOME, "pg"))
 afterAll(() => rmSync(HOME, { force: true, recursive: true }))
 
 const ENV = { HOME }
@@ -432,6 +435,121 @@ describe("a write by ~ is judged against the home the shell expands it to", () =
   })
 })
 
+// A quoted argument with a space is read as a command line only where a program runs it as one (watch, ssh, tmux, rsync -e, find, git, a variable the call sets); awk's program is one word, still refused when it names the root.
+describe("a quoted argument is read as a command line only where a program runs it", () => {
+  const real = { HOME: homedir() }
+  const at = (command: string, cwd: string) =>
+    check(JSON.stringify({ cwd, tool_input: { command }, tool_name: "Bash" }), real)
+  const homes = [homedir(), join(homedir(), ".playground")]
+  test.each([
+    ["awk matching a field to a regex", "awk '$3 ~ /runner/' /dev/null"],
+    ["awk matching a field to a string", `awk '$3 ~ "runner"' /dev/null`],
+    ["awk matching a line naming a runner", "awk '/watch/' /dev/null"],
+    ["sed printing a line naming a shell", "sed -n '/sh -c/p' /dev/null"],
+  ])("%s runs from the home and the data folder", async (_, command) => {
+    for (const cwd of homes) expect(await at(command, cwd)).toBeUndefined()
+  })
+
+  test.each([
+    ["awk with a block matching a line naming a runner", "awk '/watch/ {print}' /dev/null"],
+    ["a commit message naming a removal", "git commit -m 'fix: rm -rf ~ bug'"],
+    ["a commit message after -am naming a removal", "git commit -am 'fix: rm -rf ~ bug'"],
+    ["a tag message naming a removal", "git tag -m 'see rm -rf ~' v1"],
+  ])("%s runs from a worktree", async (_, command) => {
+    expect(await at(command, join(homedir(), "x", ".claude", "worktrees", "y"))).toBeUndefined()
+  })
+
+  test.each([
+    [
+      "awk printing into the root",
+      `awk '{print > "${join(homedir(), ".playground", "extensions", "x")}"}' /dev/null`,
+    ],
+    [
+      "awk's system() naming the root",
+      `awk 'BEGIN{system("touch ${join(homedir(), ".playground", "extensions", "x")}")}'`,
+    ],
+    ["touch in the root by ~", "touch ~/.playground/extensions/x"],
+    ["watch removing the home", "watch 'rm -rf ~'"],
+    ["watch removing by a glob in the data folder", "watch 'rm -rf ~/.playground/ext*'"],
+    ["watch with an unknown word ahead of rm", "watch '$3 rm -rf ~'"],
+    ["watch running the home, its substitution removing it", "watch '~ $(rm -rf ~)'"],
+    ["a git alias removing the home", "git -c alias.x='!rm -rf ~' x"],
+    ["a git alias running its argument on the home", "git -c alias.x='!$1 ~' x rm"],
+    ["git config setting an alias that removes the home", "git config alias.x '!rm -rf ~'"],
+    [
+      "ssh's ProxyCommand touching the root",
+      "ssh -o ProxyCommand='touch ~/.playground/extensions/x' h",
+    ],
+    ["tmux's command removing the home", "tmux new-session 'rm -rf ~'"],
+    ["rsync's -e removing the home", "rsync -e 'rm -rf ~' a b"],
+    ["find's -exec removing the home", "find . -exec sh -c 'rm -rf ~' \\;"],
+    ["GIT_SSH_COMMAND removing the home", "GIT_SSH_COMMAND='rm -rf ~' git fetch"],
+    ["a git alias evaluating the word after -m", `git -c alias.x='!eval "$2"' x -m 'rm -rf ~'`],
+    [
+      "a git alias's sh -c running the word after -m",
+      `git -c alias.x='!sh -c "$2"' x -m 'rm -rf ~'`,
+    ],
+    [
+      "a git alias from the environment running the word after -m behind --attr-source commit",
+      `GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=alias.x GIT_CONFIG_VALUE_0='!eval "$2"' git --attr-source commit x -m 'rm -rf ~'`,
+    ],
+    ["a commit message under a call that sets config", "git -c x.y=z commit -m 'rm -rf ~'"],
+    ["screen's shell removing the home", "screen -dm sh -c 'rm -rf ~'"],
+    ["flock's shell removing the home", "flock /tmp/l sh -c 'rm -rf ~'"],
+    ["a shell held in a variable", "S=sh; $S -c 'rm -rf ~'"],
+    ["the user's shell", "$SHELL -c 'rm -rf ~'"],
+    ["ssh held in a variable", "x=ssh; $x host 'rm -rf ~'"],
+    ["watch held in a loop variable", "for p in watch; do $p 'rm -rf ~'; done"],
+    ["a shell in capitals", "SH -c 'rm -rf ~'"],
+    ["watch with a capital", "Watch 'rm -rf ~'"],
+    ["git in capitals running an alias", "GIT -c alias.x='!rm -rf ~' x"],
+    ["taskpolicy's shell", "taskpolicy -b sh -c 'rm -rf ~'"],
+    ["lockf's shell", "lockf -t0 /tmp/l sh -c 'rm -rf ~'"],
+    ["watch through bun x", "bun x watch 'rm -rf ~'"],
+    ["a shell through pnpm exec", "pnpm exec sh -c 'rm -rf ~'"],
+    ["eval through setsid", "setsid eval 'rm -rf ~'"],
+    ["ssh through sshpass", "sshpass -p x ssh h 'rm -rf ~'"],
+    ["scp's ProxyCommand removing the home", "scp -o ProxyCommand='rm -rf ~' a h:b"],
+  ])("%s stays refused", async (_, command) => {
+    for (const cwd of homes)
+      expect(await at(command, cwd)).toContain("no-extensions-write hook refuses")
+  })
+
+  test("a refusal names a program it cannot read as such", async () => {
+    expect(await at("git -c alias.x='!$1 ~' x rm", homedir())).toContain(
+      "refuses a program it cannot read on",
+    )
+  })
+
+  test.each([
+    ["a glob of the data folder", "rm -rf .pl*", HOME],
+    ["a brace of the data folder", "rm -rf {.playground,x}", HOME],
+    ["a zsh group of the data folder", "rm -rf (.playground|x)", HOME],
+    ["a zsh qualifier on every folder", "rm -rf *(/)", HOME],
+    ["a glob through a link to the data folder", "rm -rf p*/extensions/x", HOME],
+    ["bash's extglob @() of the data folder", "shopt -s extglob; rm -rf @(.playground)", HOME],
+    ["bash's extglob +() of the data folder", "shopt -s extglob; rm -rf +(.playground)", HOME],
+    ["bash's extglob ?() of the data folder", "shopt -s extglob; rm -rf ?(.playground)", HOME],
+    ["bash's extglob !() of every other name", "shopt -s extglob; rm -rf !(x)", HOME],
+    ["rm of a glob through a link to the root", "rm -rf s*/", DATA],
+    ["a redirect through a glob of a link to the root", "echo x > s*/policy.json", DATA],
+    ["a glob climbing back out to the data folder", "rm -rf w*/../.p*", HOME],
+    [
+      "a redirect climbing back out into the root",
+      "echo x > w*/../.playground/extension?/policy.json",
+      HOME,
+    ],
+    ["a glob in the data folder climbing to the root", "rm -rf .playground/h*/../e*", HOME],
+    ["a glob climbing to the root from the data folder", "rm -rf h*/../e*", DATA],
+    ["a glob climbing out to any other folder", "rm -rf w*/../Documents/x", HOME],
+    ["a glob past a link and its `..`", "rm -rf store/../e*", HOME],
+    ["a redirect to a glob no entry matches", "echo x > q*", DATA],
+    ["rm of a glob no entry matches", "rm -rf q*", HOME],
+  ])("%s stays refused, as every glob above the root is", async (_, command, cwd) => {
+    expect(await bash(command, cwd)).toContain("no-extensions-write hook refuses")
+  })
+})
+
 describe("a read of the root, and writes elsewhere, run", () => {
   test.each([
     ["cat of a list", `cat ${LIST}`],
@@ -682,7 +800,7 @@ describe("the hook's run", () => {
   })
 
   test("a single step the deadline cannot interrupt is refused when the main thread's timer fires", async () => {
-    const command = `printf '%s${",".repeat(60)}' '{' ${"x ".repeat(6_000)}| xargs -I @ foo '@ a'; playground ext import x`
+    const command = `printf '%s${",".repeat(60)}' '{' ${"x ".repeat(6_000)}| xargs -I @ watch '@ a'; playground ext import x`
     const raw = JSON.stringify({ cwd: "/tmp", tool_input: { command }, tool_name: "Bash" })
     const started = performance.now()
     expect(await guarded(raw, ENV, 1_000)).toContain("split it into shorter calls")

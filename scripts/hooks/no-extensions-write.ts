@@ -14,11 +14,13 @@ import {
   knownVariables,
   lex,
   marked,
+  parse,
   type Parsed,
   pathOf,
   PRINTERS,
   program,
   run,
+  SHELLS,
   slotWords,
   stdinOf,
   tick,
@@ -147,12 +149,54 @@ function cliCalls(parsed: Parsed, env: Env): Word[][] {
   return words.flatMap((word, at) => (isCli(word, dirs) ? [words.slice(at + 1)] : []))
 }
 
-// Every text of a word or a variable that holds a space, a leading ! dropped, read as a command line of its own, since a program may run it (watch, ssh's ProxyCommand, a git alias, a pager).
+// Programs that run a word as a shell line: arch's, concurrently's, find's -exec, flock's, npx's package, rsync's -e, scp's and sftp's ProxyCommand, screen's, script's -c, ssh's remote command and ProxyCommand, tmux's command and watch's; git runs its -c values (an alias, core.sshCommand, core.pager) and more, so all its words but a message are read too.
+const RUNNERS = new Set([
+  "arch",
+  "concurrently",
+  "find",
+  "flock",
+  "git",
+  "npx",
+  "rsync",
+  "scp",
+  "screen",
+  "script",
+  "sftp",
+  "ssh",
+  "tmux",
+  "watch",
+])
+// git's commit and tag keep a message as text, and no alias can take their names; an alias runs every word it gets, and a call that sets config may define one, so its message is read
+const KEEPS_MESSAGE = new Set(["commit", "tag"])
+const keepsMessage = (args: Word[], env: Env): boolean =>
+  KEEPS_MESSAGE.has(gitCall(args, env).sub ?? "") &&
+  !args.some(({ value }) => /^(?:-c|--config-env(?:=|$))/.test(value))
+// git's commit or tag message at a word: the word after -m, a flag cluster ending in it (-am) or --message, or one with the message attached
+const messageAt = (words: Word[], at: number): string | undefined =>
+  /^(?:-[a-zA-Z]*m|--message)$/.test(words[at - 1]?.value ?? "")
+    ? words[at].value
+    : /^(?:-m|--message=)./.test(words[at].value)
+      ? words[at].value.replace(/^(?:-m|--message=)/, "")
+      : undefined
+
+// The runner, shell or eval a word names, by its basename with case dropped, since macOS runs SH as sh
+const runnerOf = (word: Word): string | undefined => {
+  const base = (word.value.split("/").pop() ?? "").toLowerCase()
+  return RUNNERS.has(base) || SHELLS.has(base) || base === "eval" ? base : undefined
+}
+
+// Every text of a variable the call sets or exports, or of a word from the first that names a runner on (behind any wrapper, or a program word the hook cannot read), that holds a space, a leading ! dropped, read as a command line of its own (a pager, GIT_SSH_COMMAND, a git alias, watch's line); any other program's quoted argument (awk's program) stays one word.
 function runsOf(parsed: Parsed, env: Env): string[] {
-  const { args, first, local } = parsed
+  const { args, first, local, name } = parsed
   const values = [...local, ...env.vars].flatMap(([, text]) => (text.unknown ? [] : [text.value]))
-  for (const word of first ? [first, ...args] : args)
+  const all = first ? [first, ...args] : args
+  const from = first && marked(name) ? 0 : all.findIndex((word) => runnerOf(word))
+  const words = from < 0 ? [] : all.slice(from)
+  const keeps = runnerOf(words[0] ?? { value: "" }) === "git" && keepsMessage(words.slice(1), env)
+  for (const [at, word] of words.entries()) {
+    if (keeps && messageAt(words, at) !== undefined) continue
     for (const text of texts(word)) values.push(text.value.replace(/^!/, ""))
+  }
   return [...new Set(values)].filter((value) => /\s/.test(value) && !marked(value))
 }
 
@@ -303,21 +347,33 @@ function inspect(raw: string, environment: Environment) {
       const verdict = await run(lex(line, env.known), { ...env, vars: new Map() }, visit, true)
       if (verdict) return verdict
     }
+    // a git message is text, no line git runs, but one naming a gated call is refused all the same
+    for (const message of name === "git" && !reader && keepsMessage(args, env)
+      ? args.flatMap((_, at) => messageAt(args, at) ?? [])
+      : []) {
+      const write = lex(message, env.known)
+        .commands.flatMap((cmd) => cliCalls(parse(cmd), env))
+        .map((words) => cliWrite(words))
+        .find(Boolean)
+      if (write) return refuse(write)
+    }
     // a bare assignment or export with no command, or a reader: only its redirect writes, and a variable it sets is read where a command runs with it
     if (!first || EXPORTS.has(name) || reader) return
-    if (inRoot(env.cwd)) return refuse(`${name} run inside ${root}`)
+    // a program word the hook cannot read is named as such, so a refusal always names what runs
+    const verb = name && !marked(name) ? name : "a program it cannot read"
+    if (inRoot(env.cwd)) return refuse(`${verb} run inside ${root}`)
     if (name === "git" && inRoot(gitCall(args, env).cwd)) return refuse(`git on a clone in ${root}`)
     const remover = REMOVERS.has(name)
     for (const value of [...parsed.local.values(), ...env.vars.values()]) {
       const named = names({ ...value, quoted: false }, env, remover)
-      if (named) return refuse(`${name} with a variable on ${named}`)
+      if (named) return refuse(`${verb} with a variable on ${named}`)
     }
     for (const word of [first, ...args]) {
       const named = names(word, env, remover)
-      if (named) return refuse(`${name} on ${named}`)
+      if (named) return refuse(`${verb} on ${named}`)
     }
     if (cmd.redirects.some((r) => r.body && holds(r.body.value, env)))
-      return refuse(`${name} with a script that names ${root}`)
+      return refuse(`${verb} with a script that names ${root}`)
     if (fed) {
       const named =
         !fed.unknown &&
@@ -326,7 +382,7 @@ function inspect(raw: string, environment: Environment) {
           .filter(Boolean)
           .map((value) => names({ quoted: false, value }, env, remover))
           .find(Boolean)
-      if (named) return refuse(`${name} under xargs on ${named}`)
+      if (named) return refuse(`${verb} under xargs on ${named}`)
     }
   }
   const env: Env = {
