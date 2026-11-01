@@ -149,22 +149,12 @@ describe("link-skills.sh links the playground command and its brief templates", 
     expect(kept).toHaveLength(1)
   })
 
-  test("a first run links each Checks script into ~/.playground/ops/checks (#1665)", async () => {
-    const { home, repo } = setup()
-    expect((await run(repo, home)).code).toBe(0)
-    for (const script of ["checks.py", "go.py", "outside.py", "parallel.py"])
-      expect(readlinkSync(join(home, ".playground", "ops", "checks", script))).toBe(
-        join(repo, "scripts", "ops", "checks", script),
-      )
-  })
-
   test("a first run links each merge-train and usage script into ~/.playground/ops (#1733)", async () => {
     const { home, repo } = setup()
     expect((await run(repo, home)).code).toBe(0)
     for (const script of [
       "beat.py",
       "merge-train/run.py",
-      "merge-train/wait-check.py",
       "usage/account-watch.py",
       "usage/glm-credits.py",
       "usage/login-flip.py",
@@ -177,7 +167,7 @@ describe("link-skills.sh links the playground command and its brief templates", 
       )
   })
 
-  // checks.py and merge-train/run.py queue their lines through ops/notify.sh, and a linked script's call of a sibling by name finds it in the state folder only if a link put it there.
+  // merge-train/run.py queues its lines through ops/notify.sh, and a linked script's call of a sibling by name finds it in the state folder only if a link put it there.
   test("every ops script a linked script joins onto OPS by name is linked too (PG-2457)", async () => {
     const { home, repo } = setup()
     expect((await run(repo, home)).code).toBe(0)
@@ -197,7 +187,6 @@ describe("link-skills.sh links the playground command and its brief templates", 
         /os\.path\.join\(OPS, "([\w.-]+\.(?:sh|py))"\)/g,
       ))
         called.add(match[1]!)
-    expect([...called]).toContain("run-slot.sh")
     expect([...called]).toContain("notify.sh")
     expect([...called].filter((name) => !installed.has(name))).toEqual([])
   })
@@ -324,5 +313,64 @@ describe("link-skills.sh and the names from before the rename", () => {
       symlinkSync(join(repo, "skills", "playground", name), join(home, ".claude", "skills", name))
     expect((await run(repo, home)).code).toBe(0)
     expect(readdirSync(join(home, ".claude", "skills"))).toEqual([])
+  })
+})
+
+// A pull that removes a linked file leaves its link dangling, which doctor names MISSING: the next run clears it.
+describe("link-skills.sh prunes the links a pull left dangling", () => {
+  test("a dead link into the checkout goes, while a live one and a dead one elsewhere stay", async () => {
+    const { home, repo } = setup()
+    const ops = join(home, ".playground", "ops")
+    mkdirSync(join(ops, "checks"), { recursive: true })
+    mkdirSync(join(home, ".bun", "bin"), { recursive: true })
+    const dead = join(ops, "checks", "checks.py")
+    const deadTop = join(home, ".playground", "gone.md")
+    const deadBin = join(home, ".bun", "bin", "gone")
+    const live = join(ops, "checks", "live.json")
+    const elsewhere = join(ops, "checks", "elsewhere.py")
+    symlinkSync(join(repo, "scripts", "ops", "checks", "checks.py"), dead)
+    symlinkSync(join(repo, "gone.md"), deadTop)
+    symlinkSync(join(repo, "scripts", "gone"), deadBin)
+    symlinkSync(join(repo, "scripts", "factory-settings.json"), live)
+    symlinkSync(join(scratch, "nowhere", "elsewhere.py"), elsewhere)
+    const { code } = await run(repo, home)
+    expect(code).toBe(0)
+    const isLink = (path: string) => {
+      try {
+        return lstatSync(path).isSymbolicLink()
+      } catch {
+        return false
+      }
+    }
+    expect([dead, deadTop, deadBin].filter(isLink)).toEqual([])
+    expect(readlinkSync(live)).toBe(join(repo, "scripts", "factory-settings.json"))
+    expect(readlinkSync(elsewhere)).toBe(join(scratch, "nowhere", "elsewhere.py"))
+  })
+
+  test("a data folder reached through a link is pruned too, as doctor reads it, and a linked folder in ops/ is not", async () => {
+    const { home, repo } = setup()
+    const real = join(scratch, `data-${made}`)
+    rmSync(join(home, ".playground"), { force: true, recursive: true })
+    mkdirSync(join(real, "handoffs"), { recursive: true })
+    mkdirSync(join(scratch, `elsewhere-${made}`))
+    mkdirSync(join(real, "ops"))
+    symlinkSync(real, join(home, ".playground"))
+    symlinkSync(join(scratch, `elsewhere-${made}`), join(real, "ops", "linked"))
+    const deadTop = join(real, "gone.md")
+    const deadHandoff = join(real, "handoffs", "gone.md")
+    const inLinked = join(scratch, `elsewhere-${made}`, "gone.py")
+    symlinkSync(join(repo, "gone.md"), deadTop)
+    symlinkSync(join(repo, "scripts", "briefs", "gone.md"), deadHandoff)
+    symlinkSync(join(repo, "scripts", "ops", "gone.py"), inLinked)
+    expect((await run(repo, home)).code).toBe(0)
+    const isLink = (path: string) => {
+      try {
+        return lstatSync(path).isSymbolicLink()
+      } catch {
+        return false
+      }
+    }
+    expect([deadTop, deadHandoff].filter(isLink)).toEqual([])
+    expect(readlinkSync(inLinked)).toBe(join(repo, "scripts", "ops", "gone.py"))
   })
 })

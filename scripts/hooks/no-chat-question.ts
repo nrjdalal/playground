@@ -15,7 +15,7 @@ import { readPolicy } from "../../packages/settings/src/rendered"
 import { loadNames, MANAGER_ROLES, registryName, roleOfName, rosterNames, rosterRole } from "./role"
 
 export const REASON =
-  "name the open #iN on the same thing if one exists (each manager's asks in the roster, read with bun run ask get), else post it with bun run ask new, then say in chat that it's in the inbox as #iN"
+  "name the open #iN on the same thing if one exists (bun run ask open lists them), else post it with bun run ask new, then say in chat that it's in the inbox as #iN"
 
 // git worktree list, then each bun run ask get (all at once), is killed past its limit; one bun run ask get took 5.9s under load.
 const GIT_TIMEOUT_MS = 3000

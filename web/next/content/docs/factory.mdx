@@ -10,17 +10,18 @@ Playground runs your Claude Code sessions as a factory: a few long-lived manager
 
 ## The roles
 
-| Role       | What it does                                                                  | How many       |
-| ---------- | ----------------------------------------------------------------------------- | -------------- |
-| Dispatcher | talks with you, keeps the Inbox and routes each ask to the role that owns it  | 1              |
-| Planner    | researches, compares and plans; it never builds                               | 1              |
-| Builder    | a lead: starts workers, writes their briefs, and holds review and merge order | 1              |
-| Ops        | a lead: runs the background jobs, the live dashboard and each ship            | 1              |
-| Worker     | one bounded chore: a fix, a feature, an investigation                         | as room allows |
-| Reviewer   | scores its worker's pull request out of 5, round by round                     | 1 per worker   |
-| Tester     | drives its worker's change in a real browser                                  | 1 per worker   |
-| Runner     | keeps one long-running job alive, such as a dev server                        | as room allows |
-| Probe      | one throwaway test                                                            | per test       |
+| Role       | What it does                                                                           | How many       |
+| ---------- | -------------------------------------------------------------------------------------- | -------------- |
+| Dispatcher | talks with you, keeps the Inbox and routes each ask to the role that owns it           | 1              |
+| Planner    | researches, compares and plans; it never builds                                        | 1              |
+| Builder    | a lead: starts workers, writes their briefs, and holds review and merge order          | 1              |
+| Ops        | a lead: runs the background jobs, the live dashboard and each ship                     | 1              |
+| Optimizer  | looks back over what the factory did and turns each lesson into a fix; it never builds | 1              |
+| Worker     | one bounded chore: a fix, a feature, an investigation                                  | as room allows |
+| Reviewer   | scores its worker's pull request out of 5, round by round                              | 1 per worker   |
+| Tester     | drives its worker's change in a real browser                                           | 1 per worker   |
+| Runner     | keeps one long-running job alive, such as a dev server                                 | as room allows |
+| Probe      | one throwaway test                                                                     | per test       |
 
 The four managers' session names are a setting, so you can call them what you like.
 
@@ -72,7 +73,7 @@ Each list is read at every call, and it fails closed:
 A machine has extensions once its data folder holds the `extensions/` folder ([Settings and extensions](/docs/extensions)).
 A broken list refuses only the calls its guard checks, so the rest of your work runs on.
 
-One guard keeps the public repository clean: a pull request, issue, review, comment or stamp there is refused when it holds a person's name, a handle, a company term, a Slack id, a ticket key, an email address or a link into the old private repository.
+One guard keeps the public repositories clean, the factory's and that of Yard, the hosted app where Playgrounds talk to each other: a pull request, issue, review or comment there is refused when it holds a person's name, a handle, a company term, a Slack id, a ticket key, an email address or a link into the old private repository.
 Its refusal names the kind of text, never the text, and says how to put it in plain words.
 
 ## Traces
@@ -89,4 +90,4 @@ So new comments, docs and tests are written in plain words, and the counts only 
 
 Each change is made in a worktree of its own, branched from the latest `canary`, and opened as a draft pull request.
 A reviewer session other than its author scores it out of 5, round by round, and the author fixes what it finds until it scores 5 on the latest commit with the checks green.
-Then it merges with `bun run pr:merge <n>`, or a merge train lands it, the only two ways a change reaches `canary`.
+Then it merges with `bun run pr:merge <n>`, or merge-on-ready lands it, the only two ways a change reaches `canary`.

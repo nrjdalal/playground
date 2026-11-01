@@ -17,7 +17,7 @@ import { dirname, join } from "node:path"
 
 import { costOf } from "../../../api/hono/src/lib/usage/prices"
 import { kindOf } from "../../../packages/config/src/kinds"
-import { CHECKS, verdictsOf } from "../../../packages/config/src/verdicts"
+import { verdictsOf } from "../../../packages/config/src/verdicts"
 import { dataDirOf } from "../../../packages/env/src/data-dir"
 
 const CACHE_TTL_S = 300
@@ -328,10 +328,8 @@ export async function prStateLive(
     const comments = (await api(
       `repos/${m[1]}/issues/${m[2]}/comments?per_page=100&page=${page}`,
     )) as { body?: string }[] | null
-    // a checker's verdict: the reviewer's score, or the tester's stamp, the one with an agent-drive check
-    for (const c of comments ?? [])
-      for (const v of verdictsOf(c.body ?? ""))
-        if (v.gate === "review" || v.stamp?.checks[CHECKS.drive]) verdicts.push(v.at)
+    // a checker's verdict: the reviewer's score, or the tester's word
+    for (const c of comments ?? []) for (const v of verdictsOf(c.body ?? "")) verdicts.push(v.at)
   }
   const fresh: CachedState = {
     at: now,

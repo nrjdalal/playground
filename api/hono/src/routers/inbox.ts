@@ -12,9 +12,12 @@ import {
   dismissItems,
   listItems,
   markRead,
+  provideSecret,
   retryDelivery,
   scheduleItem,
+  secretInputSchema,
 } from "@/lib/dashboard/inbox"
+import { runSink } from "@/lib/dashboard/secret-sink"
 import { DISPATCHER } from "@/lib/dashboard/workers"
 import {
   ApiError,
@@ -42,6 +45,13 @@ const invalid = (result: { success: boolean; error?: unknown }) => {
 }
 
 const idsInputSchema = z.strictObject({ ids: z.array(z.string().min(1)).min(1).max(200) })
+
+// A secret's refusal names no field and carries no issue, so nothing of what was typed comes back.
+const invalidSecret = (result: { success: boolean }) => {
+  if (!result.success) {
+    throw new ApiError(400, "VALIDATION_ERROR", "A secret takes one value that is not empty")
+  }
+}
 
 const scheduleInputSchema = z.strictObject({ at: z.iso.datetime() })
 
@@ -178,6 +188,34 @@ export const inboxRouter = new Hono<{ Variables: Session }>()
     sValidator("json", scheduleInputSchema, invalid),
     async (c) => {
       const result = await scheduleItem(db, c.req.param("id"), c.req.valid("json").at)
+      if (!result.ok) throw new ApiError(STATUS[result.code], result.code, result.message)
+      return c.json({ data: result.item })
+    },
+  )
+  .post(
+    "/:id/secret",
+    describeRoute({
+      tags: ["Inbox"],
+      description:
+        "Answer an open secret ask with its value, which goes straight to the ask's sink on stdin, once an environment, and is kept nowhere: the item records only when it was provided and each exit status, and its poster is told that alone",
+      responses: {
+        200: { description: "OK" },
+        ...validationErrorResponses,
+        ...authErrorResponses,
+        ...forbiddenErrorResponses,
+        ...notFoundErrorResponses,
+        ...conflictErrorResponses,
+      },
+    }),
+    sValidator("json", secretInputSchema, invalidSecret),
+    async (c) => {
+      const user = c.get("user")
+      const result = await provideSecret(db, c.req.param("id"), c.req.valid("json"), {
+        actor: { email: user.email, id: user.id },
+        deliver,
+        dispatcher: DISPATCHER,
+        run: runSink,
+      })
       if (!result.ok) throw new ApiError(STATUS[result.code], result.code, result.message)
       return c.json({ data: result.item })
     },

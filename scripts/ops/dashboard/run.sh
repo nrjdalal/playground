@@ -15,7 +15,7 @@ stop() {
   trap '' TERM INT HUP
   echo "$(date -u +%FT%TZ) stopping: $1"
   kill -TERM -- "-$watch" 2>/dev/null; kill -TERM -- "-$sup" 2>/dev/null; wait "$sup" "$watch"
-  "$D/procs.sh" stop dashboard-ingest; "$D/procs.sh" stop dashboard-dev
+  "$D/procs.sh" stop dashboard-ingest; "$D/procs.sh" stop dashboard-dev; "$D/procs.sh" stop dashboard-web-next; "$D/procs.sh" stop dashboard-web
   python3 -I "$OPS/beat.py" ops-dashboard $$ "$started" 60 "loop exited: $1"
   [ "$1" = TERM ] || "$OPS/notify.sh" dashboard "ops-dashboard stopped its stack ($1); up.py starts it again under the running cmux"
   exit 0
@@ -40,7 +40,7 @@ sup=$!
 ) &
 watch=$!
 echo "$(date -u +%FT%TZ) dashboard supervisor pid $sup, watch pid $watch"
-dashboard_result() { tail -1 "$S/results.log" | awk '{ if ($0 ~ / PASS / || $2 == "CURRENT" || ($2 == "RESTART" && $3 == "follower")) print "ok"; else { $1=""; print substr($0, 2, 100) } }'; }
+dashboard_result() { tail -1 "$S/results.log" | awk '{ if ($0 ~ / PASS / || $2 == "CURRENT" || (($2 == "RESTART" || $2 == "START") && $3 == "follower")) print "ok"; else { $1=""; print substr($0, 2, 100) } }'; }
 notify_new() {
   m=$(wc -l < "$S/results.log")
   if [ "$m" -gt "$n" ]; then
@@ -60,7 +60,7 @@ notify_new() {
   done
   wait "$sup"; code=$?
   notify_new
-  # 75: the supervisor rolled onto a head whose scripts/ops/dashboard/ differs from the code running, its stack down, so run that head's own
+  # 75: the supervisor rolled onto a head whose scripts/ops/dashboard/ differs from the code running, its API and follower down, so run that head's own
   if [ "$code" -eq 75 ]; then
     kill -TERM -- "-$watch" 2>/dev/null; wait "$watch"
     python3 -I "$OPS/beat.py" ops-dashboard $$ "$started" 60 "reloading $(git rev-parse --short HEAD)"

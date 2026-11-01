@@ -19,6 +19,12 @@ Agent-fired: a session loads it before every `playground ask new`, and the owner
 | A plain update, or a ship or schema decision | its fields alone, under a plain title          |
 | A delete or budget decision                  | its why as plain lines, one fact each          |
 | A draft, or a Slack or ticket decision       | the message or ticket itself, in its own shape |
+| A secret ask                                 | its key and sink alone, under a plain title    |
+
+The kind also decides how the card closes.
+A decision or a draft the session decided another way is settled.
+An alert update that fixed itself is resolved.
+Any other update stays editable until you dismiss it, so a card the session will replace, such as a mock's first version, is edited in place before then.
 
 ## The card it writes for
 
@@ -40,4 +46,5 @@ Mermaid is to join the pictures; until then a flow is drawn in ASCII.
 ## Where it fits
 
 Every factory session uses it under [playbook](./playbook.md)'s **ask** rule, which decides when an item goes to the owner; `to-inbox` decides how it reads.
+Before it posts, `playground ask open` lists the items already open, so a session names one on the same thing rather than posting it twice.
 `playground ask new` checks the shape and prints a hint when the text runs long with no list, code block or attachment, or when a drawing runs past the card's width (`ASK_CODE_COLUMNS`).

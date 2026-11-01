@@ -22,7 +22,9 @@ gh pr list --base canary --state open   # anything that should ship still open?
 CANARY=$(gh api repos/{owner}/{repo}/branches/canary --jq .commit.sha)
 ```
 
-Done when `CANARY` holds the SHA you mean to ship. When `canary` moves before step 3, read it again.
+Run the new-user gate on it, `bun run gate:new-user "$CANARY"` (`.agents/testing.md`, End-to-end tests), and name each FAIL and INCONCLUSIVE line in the ship PR's body.
+
+Done when `CANARY` holds the SHA you mean to ship and the gate's PASS and FAIL list for it is in hand. When `canary` moves before step 3, read it again.
 
 ## 2. Open the ship PR
 

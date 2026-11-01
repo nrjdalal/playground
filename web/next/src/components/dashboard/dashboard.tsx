@@ -16,6 +16,7 @@ import {
   saveManagersOrder,
   useAgents,
 } from "@/lib/agents"
+import { useBuildReload } from "@/lib/build-reload"
 import { useDashboardChats, type DashboardChats, type Outbox } from "@/lib/chat"
 import {
   dispatcherOf,
@@ -177,6 +178,8 @@ export function DashboardProvider({
     },
     agentLabel,
   )
+  // after a roll serves a new build, an open tab reloads onto it once (the production build has no dev socket)
+  useBuildReload(outbox.messages)
   // The Other group's two toggles, here for the same reason as the inbox: the group leaves the sidebar with its last session, and the sidebar unmounts on a narrow screen, so state kept there would reset. The sidebar and the dashboard's table share them, as they show the one group.
   const [otherOpen, setOtherOpen] = useState(false)
   const [otherShowIdle, setOtherShowIdle] = useState(false)

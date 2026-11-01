@@ -7,6 +7,7 @@
   "ignorePatterns": [
     ".agents/**",
     "extensions/core/skills/code-review/**",
+    "extensions/core/skills/codebase-design/**",
     "extensions/core/skills/diagnosing-bugs/**",
     "extensions/core/skills/domain-modeling/**",
     "extensions/core/skills/handoff/**",

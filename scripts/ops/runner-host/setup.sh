@@ -8,7 +8,7 @@ set -euo pipefail
 [[ "${1:-}" =~ ^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$ ]] || { echo "setup.sh: give the repository as owner/name" >&2; exit 2; }
 REPO_URL=https://github.com/$1
 LABELS=playground
-BUN_VERSION=1.4.3
+BUN_VERSION=1.4.4
 HOME_DIR=/home/runner
 # sized from the host itself: a runner per 2 cores and 6 GB, so 4 cores and 16 GB run two PRs' gates at once (dispatcher, 18 Oct)
 CORES=$(nproc)

@@ -24,13 +24,11 @@ import {
   type Run,
   type RunResult,
 } from "../../../../../packages/scripts/src/pr-merge/merge"
-import { stampText, type StampKeys } from "../../../../../packages/scripts/src/pr-merge/stamp"
 import "./scratch-config"
 import { storeWith } from "../../../../scripts/hooks/render-set"
-import { suiteChecks } from "./suite"
+import { greenChecks } from "./suite"
 
 const HEAD = "69a6a4c5e6caf46c4abda6a89de4ce6f3b309e88"
-const OLD = "5740ceaa347f9c0f4e5a2f109f433e7838468b1f"
 const CANARY = "6f3db1ea4cb7ea4072e0d5454da0026c89635cab"
 const TREE = "1bd05088cad7c561f74d8912abe76184760003d9"
 
@@ -102,41 +100,27 @@ const ok = (stdout: string): RunResult => ({ code: 0, stderr: "", stdout })
 const comment = (body: string, at: string, author = "acme") =>
   JSON.stringify({ author, body, createdAt: at })
 
-// The owner's stamp at sha, as a comment the stub lists.
-const stamped = (sha: string, at: string, patch: Partial<StampKeys> = {}, author = "acme") =>
-  comment(
-    stampText({
-      checks: suiteChecks(),
-      commit: sha,
-      status: "green",
-      ...patch,
-    }),
-    at,
-    author,
-  )
-
 const REVIEWED = comment(
   "## ReviewBot · round 1: 5/5 at 69a6a4c · 0 blocking",
   "2026-10-06T19:00:00Z",
 )
-const PASSING = [REVIEWED, stamped(HEAD, "2026-10-06T19:02:00Z")].join("\n")
+const PASSING = REVIEWED
 
 const GUARDIAN = { name: "GitGuardian Security Checks" }
 const GUARDIAN_PASSED = { ...GUARDIAN, conclusion: "SUCCESS", status: "COMPLETED" }
 const GUARDIAN_RUNNING = { ...GUARDIAN, conclusion: "", status: "IN_PROGRESS" }
 
-// A stubbed gh: each call's arguments are recorded, and the merge's answers come from `merges` in order; onCanary lists the comments on canary's tip, where canary's own run stamps it.
+// A stubbed gh: each call's arguments are recorded, and the merge's answers come from `merges` in order.
 function stub({
   aheadBy = "0",
   author = "acme",
   body = "Closes #112",
-  checks = [GUARDIAN_PASSED] as object[],
+  checks = [...greenChecks(), GUARDIAN_PASSED] as object[],
   draft = false,
   ready = ok(""),
   comments = PASSING,
   files = ["AGENTS.md", "packages/scripts/src/pr-merge/cli.ts"],
   merges = [ok("")],
-  onCanary = "",
   stateAfter = ["MERGED"],
 }: {
   aheadBy?: string
@@ -148,7 +132,6 @@ function stub({
   ready?: RunResult
   files?: string[]
   merges?: RunResult[]
-  onCanary?: string
   stateAfter?: string[]
 } = {}) {
   const calls: string[][] = []
@@ -170,7 +153,6 @@ function stub({
       )
     }
     if (joined.includes("/files")) return ok(files.map((file) => `${file}\n`).join(""))
-    if (joined.includes(`/commits/${CANARY}/comments`)) return ok(onCanary)
     if (joined.includes("/comments")) return ok(comments)
     if (joined.includes("/compare/") && joined.includes("...canary")) return ok(aheadBy)
     if (joined.startsWith("pr comment")) return ok("")
@@ -317,21 +299,22 @@ describe("prMerge", () => {
     expect(merges(calls)).toEqual([])
   })
 
-  test("a head behind canary that merges clean merges on its own stamp, with no new run", async () => {
+  test("a head behind canary that merges clean merges as it is, with no new run", async () => {
     const { calls, run } = stub({ aheadBy: "3" })
     expect(await prMerge(112, { repo: REPO }, run, local())).toMatchObject({ kind: "merged" })
     expect(merges(calls)).toHaveLength(1)
   })
 
-  test("refuses a stamp from anyone but the repo's owner", async () => {
-    const comments = [REVIEWED, stamped(HEAD, "2026-10-06T19:02:00Z", {}, "mallory")].join("\n")
+  test("refuses a review from anyone but the repo's owner", async () => {
+    const comments = comment(
+      "## ReviewBot · round 1: 5/5 at 69a6a4c · 0 blocking",
+      "2026-10-06T19:00:00Z",
+      "mallory",
+    )
     const { calls, run } = stub({ comments })
     const outcome = await prMerge(112, { repo: REPO }, run, local())
     expect(outcome.kind).toBe("refused")
-    expect(outcome.gates.filter((gate) => !gate.ok).map((gate) => gate.name)).toEqual([
-      "stamp",
-      "suite",
-    ])
+    expect(outcome.gates.filter((gate) => !gate.ok).map((gate) => gate.name)).toEqual(["review"])
     expect(merges(calls)).toEqual([])
   })
 
@@ -341,87 +324,6 @@ describe("prMerge", () => {
     expect(outcome.kind).toBe("explained")
     expect(outcome.gates.every((gate) => gate.ok)).toBe(true)
     expect(merges(calls)).toEqual([])
-  })
-
-  test("a clean merge of canary carries the stamp and the review from the commit under it", async () => {
-    const comments = [
-      comment("## ReviewBot · round 1: 5/5 at 5740cea · 0 blocking", "2026-10-06T18:00:00Z"),
-      stamped(OLD, "2026-10-06T18:02:00Z"),
-    ].join("\n")
-    const { calls, run } = stub({ comments })
-    const world = local({ clean: [HEAD], parents: { [HEAD]: [OLD, CANARY], [OLD]: ["p0"] } })
-    const outcome = await prMerge(112, { repo: REPO }, run, world)
-    expect(outcome).toMatchObject({ kind: "merged" })
-    expect(outcome.gates.find((gate) => gate.name === "review")?.detail).toContain(
-      "carried from 5740cea",
-    )
-    expect(merges(calls)).toHaveLength(1)
-  })
-
-  test("a canary merge that is not clean waits for the reviewer's look, and its green stamp merges", async () => {
-    const before = [
-      comment("## ReviewBot · round 1: 5/5 at 5740cea · 0 blocking", "2026-10-06T18:00:00Z"),
-      stamped(OLD, "2026-10-06T18:02:00Z"),
-    ]
-    const world = () => local({ parents: { [HEAD]: [OLD, CANARY], [OLD]: ["p0"] } })
-    const unlooked = stub({ comments: before.join("\n") })
-    const refused = await prMerge(112, { repo: REPO }, unlooked.run, world())
-    expect(refused.kind).toBe("refused")
-    expect(refused.gates.find((gate) => gate.name === "stamp")?.detail).toContain(
-      "69a6a4c has no stamp and is no clean canary merge",
-    )
-    const look = {
-      checks: { "agent-review": { source: "agent", status: "pass" as const } },
-    }
-    const waits = stub({
-      comments: [
-        ...before,
-        stamped(HEAD, "2026-10-06T19:00:00Z", { ...look, status: "wait" }),
-      ].join("\n"),
-    })
-    expect((await prMerge(112, { repo: REPO }, waits.run, world())).kind).toBe("refused")
-    const looked = stub({
-      comments: [...before, stamped(HEAD, "2026-10-06T19:00:00Z", look)].join("\n"),
-    })
-    expect(await prMerge(112, { repo: REPO }, looked.run, world())).toMatchObject({
-      kind: "merged",
-    })
-  })
-
-  test("a dashboard PR needs a green stamp that passed verify, and GitHub's suite beside it", async () => {
-    const files = ["api/hono/src/routers/dashboard.ts"]
-    const plain = stub({ files })
-    const refused = await prMerge(112, { repo: REPO }, plain.run, local())
-    expect(refused.gates.filter((gate) => !gate.ok).map((gate) => gate.name)).toEqual(["stamp"])
-    const verify = { verify: { source: "local", status: "pass" as const } }
-    const checksOnly = stub({
-      comments: [REVIEWED, stamped(HEAD, "2026-10-06T19:02:00Z", { checks: verify })].join("\n"),
-      files,
-    })
-    const alone = await prMerge(112, { repo: REPO }, checksOnly.run, local())
-    expect(alone.gates.filter((gate) => !gate.ok).map((gate) => gate.name)).toEqual(["suite"])
-    const verified = stub({
-      comments: [
-        REVIEWED,
-        stamped(HEAD, "2026-10-06T19:01:00Z", { checks: suiteChecks("1823") }),
-        stamped(HEAD, "2026-10-06T19:02:00Z", { checks: verify }),
-      ].join("\n"),
-      files,
-    })
-    expect(await prMerge(112, { repo: REPO }, verified.run, local())).toMatchObject({
-      kind: "merged",
-    })
-  })
-
-  test("a red stamp on canary's tip stops every merge but the fix, a head holding the tip that ran the suite", async () => {
-    const onCanary = stamped(CANARY, "2026-10-06T19:05:00Z", { status: "red" })
-    const { calls, run } = stub({ aheadBy: "3", onCanary })
-    const outcome = await prMerge(112, { repo: REPO }, run, local())
-    expect(outcome.kind).toBe("refused")
-    expect(outcome.gates.filter((gate) => !gate.ok).map((gate) => gate.name)).toEqual(["canary"])
-    expect(merges(calls)).toEqual([])
-    const fix = stub({ onCanary })
-    expect(await prMerge(112, { repo: REPO }, fix.run, local())).toMatchObject({ kind: "merged" })
   })
 
   test("a GitHub 5xx is tried once more at the same head", async () => {
@@ -473,9 +375,10 @@ describe("a green draft", () => {
   })
 
   test("a draft missing any other gate stays a draft and is refused", async () => {
-    const comments = [
-      comment("## ReviewBot · round 1: 5/5 at 69a6a4c · 0 blocking", "2026-10-06T19:00:00Z"),
-    ].join("\n")
+    const comments = comment(
+      "## ReviewBot · round 1: 4/5 at 69a6a4c · 1 blocking",
+      "2026-10-06T19:00:00Z",
+    )
     for (const missing of [stub({ comments, draft: true }), stub({ aheadBy: "", draft: true })]) {
       const outcome = await prMerge(112, { repo: REPO }, missing.run, local())
       expect(outcome.kind).toBe("refused")
@@ -802,20 +705,20 @@ describe("a head with no finished GitGuardian check", () => {
   })
 
   test("refuses on dispatcher with GitGuardian absent or still running", async () => {
-    for (const checks of [[], [GUARDIAN_RUNNING]]) {
+    for (const checks of [greenChecks(), [...greenChecks(), GUARDIAN_RUNNING]]) {
       const { calls, run } = stub({ checks })
       const outcome = await prMerge(112, { repo: REPO }, run, local())
       expect(outcome.kind).toBe("refused")
       expect(outcome.gates.filter((g) => !g.ok).map((g) => g.name)).toEqual(["ci"])
       expect(merges(calls)).toEqual([])
     }
-    const { run } = stub({ checks: [] })
+    const { run } = stub({ checks: greenChecks() })
     const refused = await prMerge(112, { repo: REPO }, run, local())
     expect(refused.gates.find((g) => g.name === "ci")?.detail).toContain("no GitGuardian check")
   })
 
   test("a repo GitGuardian does not scan needs no check", async () => {
-    const { run } = stub({ checks: [] })
+    const { run } = stub({ checks: greenChecks() })
     const outcome = await prMerge(112, { repo: "acme/other" }, run, local())
     expect(outcome).toMatchObject({ kind: "merged" })
   })

@@ -46,14 +46,7 @@ To see what is missing without changing anything, run it with `--check` (`curl -
 Playground brings its own herdr, the terminal your sessions run in: `playground herdr pin` downloads the version Playground pins, checks it against the pinned SHA-256, and keeps it at `~/.playground/bin/herdr`.
 A herdr you installed yourself stays yours: Playground never runs it, and `playground doctor` names it.
 
-While the Playground repository is private, the URL above does not answer, and the clone needs a GitHub login (`gh auth login`) that can read it.
-Until then, clone it and run the installer from the clone, which then installs into that same folder:
-
-```bash
-gh repo clone nrjdalal/playground ~/playground && bash ~/playground/install.sh
-```
-
-Once it is public, the login is optional for the install, and syncing your extensions with your private repos still needs it.
+A GitHub login (`gh auth login`) is optional for the install, and syncing your extensions with your private repos still needs it.
 
 ## What it does
 

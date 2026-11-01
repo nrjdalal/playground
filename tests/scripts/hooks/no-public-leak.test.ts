@@ -50,9 +50,8 @@ const bash = (command: string) =>
 const run = (raw: string, data = stored) => check(raw, env(data))
 
 const R = "--repo quillco/playground"
-// The repository the guard keeps while factory.publicRepo is unset.
-const UNSET_R = `--repo ${UNSET_REPOS.public}`
-const SHA = "0123456789abcdef0123456789abcdef01234567"
+// The factory's repository, the first the guard keeps while factory.publicRepo is unset.
+const UNSET_R = `--repo ${UNSET_REPOS.public[0]}`
 
 describe("a write to the public repository holding private text is refused", () => {
   test.each([
@@ -70,14 +69,6 @@ describe("a write to the public repository holding private text is refused", () 
     [
       "gh api PATCH to a pull request",
       `gh api -X PATCH repos/quillco/playground/pulls/1 -f title="Quilla Marsh"`,
-    ],
-    [
-      "the stamp's remark",
-      `bun run stamp post ${SHA} pass --pr 1 ${R} --remark "Quilla Marsh drove it"`,
-    ],
-    [
-      "the stamp's check comment",
-      `bun run stamp post ${SHA} pass --pr 1 ${R} --check "agent-drive=pass Quilla Marsh drove it"`,
     ],
   ])("%s", async (_, command) => {
     const reason = await run(bash(command))
@@ -137,10 +128,6 @@ describe("what it lets through", () => {
     ],
     ["a read", `gh pr view 1 ${R}`],
     ["a git commit", `git commit -m "Quilla Marsh"`],
-    [
-      "the stamp in plain words",
-      `bun run stamp post ${SHA} pass --pr 1 ${R} --remark "drove the flow"`,
-    ],
   ])("%s", async (_, command) => {
     expect(await run(bash(command))).toBeUndefined()
   })
@@ -169,6 +156,39 @@ describe("what it lets through", () => {
     expect(
       await run(bash(`gh pr comment 1 ${UNSET_R} --body "Quilla Marsh asked"`), empty),
     ).toContain("a person's name")
+  })
+
+  test("while factory.publicRepo is unset it guards Yard's repository too", async () => {
+    const empty = storeWith(
+      join(scratch, "unset-yard"),
+      { "no-public-leak.json": JSON.stringify(TERMS) },
+      { "factory.publicRepo": "" },
+    )
+    expect(
+      await run(
+        bash(`gh pr comment 1 --repo nrjdalal/playground-yard --body "Quilla Marsh asked"`),
+        empty,
+      ),
+    ).toContain("a person's name")
+  })
+
+  test("factory.publicRepo set to a list guards each, and reads past each one's name", async () => {
+    const both = storeWith(
+      join(scratch, "public-list"),
+      { "no-public-leak.json": JSON.stringify(TERMS) },
+      { "factory.publicRepo": ["quillco/playground", "quillco/yard"] },
+    )
+    const said = `--body "Quilla Marsh asked"`
+    for (const repo of ["quillco/playground", "quillco/yard"])
+      expect(await run(bash(`gh pr comment 1 --repo ${repo} ${said}`), both)).toContain(
+        "a person's name",
+      )
+    expect(
+      await run(
+        bash(`gh pr comment 1 --repo quillco/yard --body "see github.com/quillco/yard/pull/3"`),
+        both,
+      ),
+    ).toBeUndefined()
   })
 
   test("a stranger's clone with no store still refuses the built-in kinds", async () => {

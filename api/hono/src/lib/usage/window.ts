@@ -20,9 +20,10 @@ type PoolEntry = {
 }
 export type Rotation = { pool: PoolEntry[] }
 
-// rotation is set only when the file carries one, so a file with none marks no account's part in it.
+// rotation is set only when the file carries one, so a file with none marks no account's part in it. fiveHourNone marks an account with no 5-hour window at all, as distinct from a 5-hour reading that failed.
 export type Usage = {
   fiveHour: UsageWindow | null
+  fiveHourNone?: true
   rotation?: Rotation
   sevenDay: UsageWindow | null
   stale: boolean
@@ -85,8 +86,12 @@ export function usageOf(text: string, now: Date): Usage | null {
   const sevenDay = windowOf(limits.seven_day)
   if (Number.isNaN(written) || (!fiveHour && !sevenDay)) return null
   const rotation = rotationOf(file.rotation)
+  // the probe's headers carry every window the account has, so a week with no five_hour there is an account with none; the /usage reading drops a window it failed to read, so its gap stays unknown
+  const none =
+    file.source === "token/ratelimit-headers" && sevenDay !== null && !("five_hour" in limits)
   return {
     fiveHour,
+    ...(none && { fiveHourNone: true as const }),
     ...(rotation && { rotation }),
     sevenDay,
     stale: now.getTime() - written > USAGE_STALE_MS,
@@ -105,6 +110,7 @@ export const seenWindows: SeenWindows = (kept[SEEN_KEY] ??= {})
 export function withSeen(usage: Usage, seen: SeenWindows): Usage {
   const window = (key: keyof SeenWindows): UsageWindow | null => {
     const read = usage[key]
+    if (key === "fiveHour" && usage.fiveHourNone) return null
     if (!read) return seen[key] ?? null
     seen[key] = { ...read, seenAt: usage.writtenAt }
     return read

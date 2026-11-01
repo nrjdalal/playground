@@ -5,13 +5,8 @@ import { join } from "node:path"
 const ALLOWLIST = Object.freeze([
   "extensions/core/skills/code-review-loop/scripts/state.py",
   "scripts/ops/beat.py",
-  "scripts/ops/checks/checks.py",
-  "scripts/ops/checks/go.py",
-  "scripts/ops/checks/outside.py",
-  "scripts/ops/checks/parallel.py",
   "scripts/ops/dashboard/watch-stuck.py",
   "scripts/ops/merge-train/run.py",
-  "scripts/ops/merge-train/wait-check.py",
   "scripts/ops/once.py",
   "scripts/ops/ptable.py",
   "scripts/ops/unstick/run.py",

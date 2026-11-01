@@ -18,6 +18,7 @@ permissions:
 jobs:
   auto-test:
     name: test
+    timeout-minutes: 20
     runs-on: ubuntu-latest
     steps:
       - name: Checkout

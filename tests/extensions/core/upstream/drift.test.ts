@@ -53,7 +53,7 @@ describe("the upstream skills in core", () => {
     expect(extra).toEqual([])
   })
 
-  test("MANIFEST holds the 8 kept skills, each named by its frontmatter, and the NOTICE names them with core's pr", () => {
+  test("MANIFEST holds the 9 kept skills, each named by its frontmatter, and the NOTICE names them with core's pr", () => {
     const skills = manifestPaths.filter((path) => /^skills\/[^/]+\/SKILL\.md$/.test(path))
     expect(skills.map((path) => path.split("/")[1]).sort()).toEqual([...UPSTREAM_SKILLS].sort())
     const renamed = skills.flatMap((path) => {
@@ -64,7 +64,24 @@ describe("the upstream skills in core", () => {
     expect(renamed).toEqual([])
     const notice = readFileSync(join(CORE, "NOTICE"), "utf8")
     for (const name of [...UPSTREAM_SKILLS, "pr"]) expect(notice).toContain(name)
-    expect([...UPSTREAM_SKILLS, "pr"]).toHaveLength(9)
+    expect([...UPSTREAM_SKILLS, "pr"]).toHaveLength(10)
+  })
+
+  // tdd calls codebase-design, which only the user scope carried, so a session without that copy found no skill (PG-167)
+  test("every skill a core skill calls by name is a core skill", () => {
+    const called = readdirSync(join(CORE, "skills")).flatMap((name) => {
+      const file = join(CORE, "skills", name, "SKILL.md")
+      if (!existsSync(file)) return []
+      return [...readFileSync(file, "utf8").matchAll(/Skill tool with "([a-z0-9-]+)"/g)].map(
+        ([, skill]) => `${name} -> ${skill}`,
+      )
+    })
+    expect(called.length).toBeGreaterThan(0)
+    expect(
+      called.filter(
+        (call) => !existsSync(join(CORE, "skills", call.split(" -> ")[1]!, "SKILL.md")),
+      ),
+    ).toEqual([])
   })
 
   test("the MIT license travels with the bytes, the NOTICE carries its copyright, and SOURCE names the repo and sha", () => {

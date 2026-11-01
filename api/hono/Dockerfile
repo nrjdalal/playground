@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-FROM oven/bun:1.4.3-alpine AS base
+FROM oven/bun:1.4.4-alpine AS base
 WORKDIR /app
 
 FROM base AS prepare
@@ -7,7 +7,6 @@ COPY . .
 RUN bunx turbo prune @api/hono --docker
 
 FROM base AS builder
-COPY --from=prepare /app/.github/scripts .github/scripts
 COPY --from=prepare /app/out/json/ .
 RUN bun install --frozen-lockfile --ignore-scripts
 COPY --from=prepare /app/out/full/ .

@@ -18,6 +18,7 @@ import {
 
 import { herdrPath, PIN_SOURCE } from "../ops-herdr/pin"
 import { OLD_TREE_PATHS } from "../rename/rules"
+import { TODAY_PUBLIC } from "../trace-count/kinds"
 import { pinHere, type Result } from "./herdr-pin"
 import { moveDataFolder, moveMachine, type Step, TABLE, type Table } from "./migrate-machine"
 import { originRepo } from "./setting"
@@ -175,15 +176,6 @@ export const SEEDS = (
     type: "setting",
   },
   {
-    key: "checks.outsideAuthors",
-    read: {
-      at: "old",
-      path: "scripts/ops/checks/outside.py",
-      take: (text) => pySet(text, "OUTSIDE"),
-    },
-    type: "setting",
-  },
-  {
     key: "clock.ownerZone",
     read: {
       at: "old",
@@ -211,7 +203,11 @@ export const SEEDS = (
   },
   {
     key: "factory.publicRepo",
-    read: { at: "checkoutOrigin", path: "this checkout's origin", take: (repo) => repo },
+    read: {
+      at: "checkoutOrigin",
+      path: "this checkout's origin",
+      take: (repo) => [...new Set([repo.toLowerCase(), ...TODAY_PUBLIC])],
+    },
     type: "setting",
   },
   {

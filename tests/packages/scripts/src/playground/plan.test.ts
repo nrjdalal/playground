@@ -355,10 +355,37 @@ describe("rollOutcome", () => {
     expect(rollOutcome([], [])).toEqual({ phase: "building" })
   })
 
-  test("reads the roll's start as switching", () => {
-    expect(rollOutcome(["2026-10-18T02:00:00Z roll-now: rolling to abc1234 at once"], [])).toEqual({
+  test("reads the roll's start as switching once its stack starts", () => {
+    const rolling = "2026-10-18T02:00:00Z roll-now: rolling to abc1234 at once"
+    expect(rollOutcome([rolling], [])).toEqual({ phase: "building" })
+    expect(rollOutcome([rolling, "2026-10-18T02:00:09Z dev started, pid 4242"], [])).toEqual({
       phase: "switching",
     })
+  })
+
+  // the Dashboard is down for minutes while the supervisor builds the head, which is no failure and no stalled switch
+  test("reads the head's build after the roll's start as building, never failing, and switching once it is built", () => {
+    const log = [
+      "2026-10-18T02:00:00Z roll-now: rolling to abc1234 at once",
+      "2026-10-18T02:00:05Z building abc1234 for https://playground.localhost https://api.playground.localhost",
+    ]
+    expect(rollOutcome(log, [])).toEqual({ phase: "building" })
+    expect(rollOutcome([...log, "2026-10-18T02:02:40Z built abc1234 in 155s, 96M"], [])).toEqual({
+      phase: "switching",
+    })
+  })
+
+  // an alias check's line can land between a roll-now and its roll, and is no verdict on the roll
+  test("passes over the alias check's lines to the roll's own", () => {
+    expect(
+      rollOutcome(
+        [],
+        [
+          "2026-10-31T21:00:00Z ALIAS FAIL playground.localhost points at port 4851, but the live stack's desk.playground.localhost is on 4842",
+          "2026-10-31T21:00:30Z ROLL canary abc1234 abc1234 PASS version=0.0.18 verify=PASS",
+        ],
+      ),
+    ).toEqual({ done: "Updated to abc1234", ok: true })
   })
 
   test("reads a passing roll as updated, with its sha", () => {
@@ -374,6 +401,21 @@ describe("rollOutcome", () => {
 
   const FAILED =
     "2026-10-18T02:03:00Z ROLL canary def5678 (roll-now) def5678 FAIL dev=DOWN (dev: refusing to start: x)"
+
+  // a build that fails before the stop leaves the Dashboard as it was, so no fallback follows (#122)
+  test("reads a build that failed before the stop as failed at once, still on the head it served", () => {
+    expect(
+      rollOutcome(
+        [],
+        [
+          "2026-10-18T02:03:00Z ROLL canary def5678 (roll-now) def5678 FAIL build before the stop: Error: next build failed; still serving abc1234",
+        ],
+      ),
+    ).toEqual({
+      done: "Failed: build before the stop: Error: next build failed; still serving abc1234",
+      ok: false,
+    })
+  })
 
   test("reads a failing roll as going back until the fallback's result lands", () => {
     expect(rollOutcome([], [FAILED])).toEqual({ phase: "going back" })

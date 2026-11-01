@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, statSync } from "node:fs"
+import { readFileSync, statSync } from "node:fs"
 import { loadavg } from "node:os"
 import { join } from "node:path"
 
@@ -21,10 +21,9 @@ export const SWITCHES = [
 ]
 export const SWITCH_HOURS = 4
 
-// What the last sweep saw, kept in the lead's own state file: how far into checks.log it read, the alerts and passed ETAs it printed, the queue line, which side of 15 the load was on, whether the single-slot flag was set and when it last listed the switches on.
+// What the last sweep saw, kept in the lead's own state file: the alerts and passed ETAs it printed, the queue line, which side of 15 the load was on, whether the single-slot flag was set and when it last listed the switches on.
 type SweepState = {
   alerts: string[]
-  checks: number
   etas: string[]
   loadHigh: boolean
   queue: string
@@ -36,7 +35,6 @@ type Switch = { by: string; name: string; reason: string; set: number; until: nu
 
 type Readings = {
   alerts: unknown
-  checks: { lines: string[]; size: number }
   load5: number
   now: Date
   queue: unknown
@@ -69,13 +67,13 @@ const queueLine = (queue: unknown): string => {
   return prs.length ? prs.join(", ") : "empty"
 }
 
-// Pure: the lines this sweep prints and the state to keep. A first sweep compares every reading but checks.log with a calm baseline, so it prints once what stands now.
+// Pure: the lines this sweep prints and the state to keep. A first sweep compares every reading with a calm baseline, so it prints once what stands now.
 function sweep(
   lead: string,
   r: Readings,
   prev: SweepState | null,
 ): { lines: string[]; next: SweepState } {
-  const lines = r.checks.lines.map((line) => `checks: ${line}`)
+  const lines: string[] = []
 
   // An alert is keyed by kind and name alone, since ops-unstick rewrites some kinds' `since` every cycle; one that clears and comes back prints again.
   const alerts = listOf(r.alerts, "alerts").map((a) => {
@@ -139,7 +137,6 @@ function sweep(
     lines,
     next: {
       alerts: alerts.map((a) => a.key),
-      checks: r.checks.size,
       etas: passed.map((p) => p.key),
       loadHigh,
       queue,
@@ -156,9 +153,7 @@ const leadsOf = (roster: unknown): string[] =>
 // A cursor file of another shape counts as no cursor, so the sweep after it starts afresh.
 const isState = (value: unknown): SweepState | null => {
   const v = value as Partial<SweepState> | null
-  return v && Array.isArray(v.alerts) && Array.isArray(v.etas) && typeof v.checks === "number"
-    ? (v as SweepState)
-    : null
+  return v && Array.isArray(v.alerts) && Array.isArray(v.etas) ? (v as SweepState) : null
 }
 
 const readJson = (path: string): unknown => {
@@ -188,15 +183,6 @@ const switchesOn = (ops: string, now: Date): Switch[] =>
     return s.until > now.getTime() ? [s] : []
   })
 
-// The complete lines of checks.log from an offset, and the offset after the last of them, so a line still being written waits for the next sweep.
-const checksSince = (path: string, from: number): { lines: string[]; size: number } => {
-  if (!existsSync(path)) return { lines: [], size: 0 }
-  const bytes = readFileSync(path).subarray(from)
-  const end = bytes.lastIndexOf(10) + 1
-  const lines = bytes.subarray(0, end).toString("utf8").split("\n").filter(Boolean)
-  return { lines, size: from + end }
-}
-
 // `playground sweep <lead>`: one read of what changed since that lead's last sweep (and, for ops' lead, each switch on, once an hour), `quiet` when nothing did, its cursor in sweep/<lead>.json in the data folder.
 export async function runSweep(
   lead: string,
@@ -211,18 +197,11 @@ export async function runSweep(
     throw new Error(`playground sweep takes a lead's name (${leads.join(" or ")}), not ${lead}`)
   const statePath = join(dir, "sweep", `${lead}.json`)
   const prev = isState(readJson(statePath))
-  const log = join(dir, "ops", "checks", "checks.log")
-  const size = existsSync(log) ? statSync(log).size : 0
-  // A first sweep starts at the last complete line, so a line still being written then prints whole later; a log cut shorter than the cursor is read from its start.
-  const checks = prev
-    ? checksSince(log, prev.checks <= size ? prev.checks : 0)
-    : { lines: [], size: checksSince(log, 0).size }
   const switches = switchesOn(join(dir, "ops"), now)
   const { lines, next } = sweep(
     lead,
     {
       alerts: readJson(join(dir, "ops", "alerts-pending.json")),
-      checks,
       load5,
       now,
       queue: readJson(join(dir, "merge-queue.json")),

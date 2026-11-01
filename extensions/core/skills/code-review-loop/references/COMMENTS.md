@@ -1,6 +1,6 @@
 # Comments, inline findings and threads
 
-Every body goes to a file in your scratchpad in one call and is posted in a separate call, with a literal absolute path (the comment-wording hook reads the file, and refuses a path held in a shell variable). Write "ship" or "publish step" where the word for cutting a version would go (the **comments** rule). When the PR's own text holds that word (a line format, a command, a quoted rule), paraphrase it in the comment rather than quote it, as "the grouped prod-deploy line" stood for end-of-day's line on one PR: the hook refuses a quote all the same. Describe the hook as "the hook that refuses the publish-step word", never by its path: the path itself holds the word, and a comment that cites it is refused and lost. Every SHA, time or count in a body or a command's argument (a verdict, an inline review's `commit_id`, a thread reply, a stamp) comes from the command that produces it, copied whole from that command's output, never typed from memory or padded out from a short SHA; step 7's `state.py pr` read then confirms the head the verdict names. A write that times out, errors or is killed may have landed: read the PR's comments, threads or reviews before posting again, and go by what is there.
+Every body goes to a file in your scratchpad in one call and is posted in a separate call, with a literal absolute path (the comment-wording hook reads the file, and refuses a path held in a shell variable). Write "ship" or "publish step" where the word for cutting a version would go (the **comments** rule). When the PR's own text holds that word (a line format, a command, a quoted rule), paraphrase it in the comment rather than quote it, as "the grouped prod-deploy line" stood for end-of-day's line on one PR: the hook refuses a quote all the same. Describe the hook as "the hook that refuses the publish-step word", never by its path: the path itself holds the word, and a comment that cites it is refused and lost. Every SHA, time or count in a body or a command's argument (a verdict, an inline review's `commit_id`, a thread reply) comes from the command that produces it, copied whole from that command's output, never typed from memory or padded out from a short SHA; step 7's `state.py pr` read then confirms the head the verdict names. A write that times out, errors or is killed may have landed: read the PR's comments, threads or reviews before posting again, and go by what is there.
 
 Every session shares one GitHub account, and with it one GraphQL budget (`gh api rate_limit --jq .resources.graphql`). REST has a budget of its own: the verdict and the inline review always post over it (below), and when GraphQL is spent, so does a PR body, with `gh api -X PATCH repos/<repo>/pulls/<n> -F body=@<file>`. With GraphQL spent, `state.py pr` and `scan` read over REST and say so, listing every review thread with its resolution unknown, since only GraphQL knows it: treat each as open until the reset lets you check. Closing threads needs GraphQL and waits for the reset, and the verdict names the threads still open.
 
@@ -25,7 +25,18 @@ Then, in this order:
 
 A round on a base merge alone says so in one line under the header (`Base merge only: the PR's own work is unchanged since <sha7>.`), keeping the PR's standing score.
 
-With each verdict, set the PR's `Review • <s>/5` label and remove any other `Review • ` label, over REST as the verdict posts (`gh api repos/<repo>/issues/<n>/labels -f 'labels[]=Review • <s>/5'`, then `gh api -X DELETE repos/<repo>/issues/<n>/labels/<label>` for each other, its name URL-encoded: `Review%20%E2%80%A2%203%2F5`), so the labels carry the newest score alone.
+Fill the verdict file's blanks with Edit or Write, each fill a call of its own, and right before the post grep the file for every slot the template above holds (`grep -nE '<(r|s|sha7|b|f|k)>' <file>`, plus any slot of your own, such as `<checks>`), posting only when it prints nothing: one verdict posted with its checks slot still in it, after the hook that refuses the publish-step word stopped the one call that both filled the slot with sed and posted a reply.
+
+With each verdict, first give its `Review • <s>/5` label its score's color, which creates the label when missing and recolors it otherwise: `gh label create 'Review • <s>/5' -R <repo> --color <hex> --force`, `<hex>` being the table's color without its `#`, written in the command itself.
+Then set the PR's `Review • <s>/5` label and remove any other `Review • ` label, over REST as the verdict posts (`gh api repos/<repo>/issues/<n>/labels -f 'labels[]=Review • <s>/5'`, then `gh api -X DELETE repos/<repo>/issues/<n>/labels/<label>` for each other, its name URL-encoded: `Review%20%E2%80%A2%203%2F5`), so the labels carry the newest score alone.
+
+| Label          | Color     |
+| -------------- | --------- |
+| `Review • 5/5` | `#22c55e` |
+| `Review • 4/5` | `#f97316` |
+| `Review • 3/5` | `#ef4444` |
+| `Review • 2/5` | `#ef4444` |
+| `Review • 1/5` | `#ef4444` |
 
 ## Inline findings
 

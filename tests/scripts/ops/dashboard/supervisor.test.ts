@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, test } from "bun:test"
-import { chmodSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from "node:fs"
+import { chmodSync, existsSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -243,7 +243,7 @@ describe("the supervisor's follower check", () => {
     expect(script).toContain("gave no answer in ${HELD_WAIT:-20}s; not restarting it")
     expect(script).toContain('say "follower: another importer holds the lock')
     expect(script).toContain("  elif ! alive dashboard-ingest; then\n    held_said_f=")
-    expect(script).toContain("  else\n    held_said_f=\n  fi\ndone")
+    expect(script).toContain("  else\n    held_said_f=\n  fi\n  check_aliases\ndone")
   })
 })
 
@@ -294,10 +294,16 @@ await Bun.write(join(wt, "README"), "r\n")
 git(wt, "add", "README")
 git(wt, "commit", "-qm", "c2")
 const c2 = git(wt, "rev-parse", "HEAD")
+// c3 adds a migration, so a roll to it keeps today's build after the stop
+await Bun.write(join(wt, "packages", "db", "drizzle", "0001_x.sql"), "create table x (id int);\n")
+git(wt, "add", "packages")
+git(wt, "commit", "-qm", "c3")
+const c3 = git(wt, "rev-parse", "HEAD")
 
 // roll_up passes START and FALLBACK and fails every roll, so finish_roll falls back; result records each line results.log would get
 const stubs = `S=${state} WT=${wt} OPS=${scratch}/ops BAD=${state}/bad-builds LOG=${state}/supervisor.log DEVLOG=${state}/dev.log
 say() { :; }; result() { echo "result $*" >> ${calls}; }; stop_all() { :; }; tell_dispatcher() { echo "tell $1" >> ${calls}; }
+prebuild() { :; }
 roll_up() { echo "roll_up $1" >> ${calls}; [ "$1" = START ] || [ "$1" = FALLBACK ]; }
 UPSTREAM=canary
 ${fn("upstream_head")}
@@ -857,6 +863,368 @@ describe("the supervisor's roll target", () => {
   }, 15_000)
 })
 
+// The production build: roll_up builds the head into $S/builds/<sha> once, serves that build, and a fallback serves the head before's kept build without building it again
+const upto = (name: string) => {
+  const at = script.indexOf(`\n${name}() {`) + 1
+  return script.slice(at, script.indexOf("\n}\n", at) + 2)
+}
+const kept = join(scratch, "kept")
+const keptCalls = join(kept, "calls")
+const builds = join(kept, "builds")
+const WEB = "https://playground.localhost"
+const API = "https://api.playground.localhost"
+// bun stands in for bun run build (writing next's standalone server and its static files, or failing for a head build-fails lists) and for the stack's start, recording which build it serves; check_dev waits for that start by its pid file and fails for a head verify-fails lists, never by a bare wait, which inside roll_up's $(check_dev) waits on a job that is not its child and looped without end on GitHub's runner
+const keptStubs = `S=${kept} WT=${wt} OPS=${scratch}/ops BAD=${kept}/bad-builds LOG=${kept}/supervisor.log DEVLOG=${kept}/dev.log
+say() { echo "say $*" >> ${keptCalls}; }; result() { echo "result $*" >> ${keptCalls}; }; stop_all() { :; }; tell_dispatcher() { :; }
+dashboard_urls() { WEB=${WEB}; API=${API}; }
+listed() { grep -qx "$(git rev-parse HEAD)" "${kept}/$1" 2>/dev/null; }
+bun() {
+  case "$1 $2" in
+    "run build") echo "build $(git rev-parse --short HEAD)" >> ${keptCalls}
+      echo "envs \${HONO_APP_URL:-} \${HONO_TRUSTED_ORIGINS:-} \${NEXT_PUBLIC_API_URL:-} \${NEXT_PUBLIC_APP_URL:-} \${NODE_ENV:-} \${SKIP_ENV_VALIDATION_SERVER:-}" >> ${keptCalls}
+      listed build-fails && { echo "Error: next build failed"; return 1; }
+      mkdir -p web/next/.next/standalone/web/next web/next/.next/static
+      git rev-parse HEAD > web/next/.next/standalone/web/next/server.js ;;
+    "run serve") echo "serve $(basename "\${PLAYGROUND_BUILD:-none}")" >> ${keptCalls} ;;
+    "install --frozen-lockfile") echo "NODE_ENV=\${NODE_ENV:-} SKIP_ENV_VALIDATION=\${SKIP_ENV_VALIDATION:-}" >> ${kept}/installs
+      ! listed install-fails ;;
+    "run dev") echo "dev" >> ${keptCalls} ;;
+  esac
+}
+alive() { kill -0 "$(cat "$S/$1.pid" 2>/dev/null)" 2>/dev/null; }
+web_up() { echo "web $1 $(echo "$2" | cut -c1-7)" >> ${keptCalls}
+  grep -qx "$2" "${kept}/web-fails" 2>/dev/null && { web_why="the web exited"; return 1; }
+  grep -qx "$2" "${kept}/web-silent" 2>/dev/null && { web_why="the web was still silent at 60s"; return 2; }
+  local port=$(( $(cat "$S/ports" 2>/dev/null || echo 5000) + 1 )); echo $port > "$S/ports"; echo $port > "$S/$1.port"; echo $$ > "$S/$1.pid"; echo "$2" > "$S/$1.sha"; }
+web_route() { echo "route $1" >> ${keptCalls}; [ ! -e "${kept}/route-refused" ] || { web_why="the web's route was refused"; return 2; }; }
+web_stop() { [ ! -e "$S/$1.pid" ] || echo "web-stop $1 $(cut -c1-7 "$S/$1.sha" 2>/dev/null)" >> ${keptCalls}; rm -f "$S/$1.pid" "$S/$1.sha"; }
+ROUTE_SETTLE=0
+check_dev() { local p i; p=$(cat "$S/dashboard-dev.pid"); for i in $(seq 1 100); do kill -0 "$p" 2>/dev/null || break; sleep 0.05; done; listed verify-fails && { echo "verify=FAIL"; return 1; }; echo "verify=PASS"; }
+start_follower() { :; }; check_follower() { echo "follower=running"; }; setup_pending() { return 1; }
+${fn("behind")}
+${block("dev_reason")}
+${block("reload_if")}
+${block("finish_roll")}
+${block("fall_back")}
+${upto("build_head")}
+${upto("keep_builds")}
+${upto("start_dev")}
+${fn("serving_web")}
+${fn("stop_web")}
+${block("ensure_web")}
+${block("swap_web")}
+${upto("roll_up")}
+`
+const keptRun = async (body: string, at: string) => {
+  git(wt, "reset", "-q", "--hard", at)
+  const proc = Bun.spawn(["bash", "-c", `D=${dashboardDir}\n${keptStubs}\n${body}`], {
+    cwd: wt,
+    stdout: "pipe",
+  })
+  const code = await proc.exited
+  return { code, out: (await new Response(proc.stdout).text()).trim() }
+}
+const keptLines = async (want: RegExp) =>
+  (await Bun.file(keptCalls).exists())
+    ? (await Bun.file(keptCalls).text()).split("\n").filter((line) => want.test(line))
+    : []
+const fresh = () => {
+  rmSync(kept, { force: true, recursive: true })
+  Bun.spawnSync(["mkdir", "-p", kept])
+}
+const short = (sha: string) => sha.slice(0, 7)
+
+describe("the supervisor's production build", () => {
+  test("a start builds the head into its own folder and serves that build, never dev", async () => {
+    fresh()
+    expect((await keptRun("roll_up START", c2)).code).toBe(0)
+    expect(await keptLines(/^(build|serve|dev)/)).toEqual([`build ${short(c2)}`, `serve ${c2}`])
+    expect(await Bun.file(join(builds, c2, "urls")).text()).toBe(`${WEB} ${API}\n`)
+    expect(await Bun.file(join(builds, c2, "web", "web", "next", "server.js")).text()).toBe(
+      `${c2}\n`,
+    )
+    expect(existsSync(join(builds, c2, "api"))).toBe(false)
+    expect(await keptLines(/^result /)).toEqual([
+      `result START ${short(c2)} PASS verify=PASS follower=running`,
+    ])
+  })
+
+  test("a build reads the Dashboard's URLs and needs no server secret, since a first run's .env holds none yet", async () => {
+    fresh()
+    expect((await keptRun("roll_up START", c2)).code).toBe(0)
+    expect(await keptLines(/^envs /)).toEqual([`envs ${API} ${WEB} ${API} ${WEB} production true`])
+  })
+
+  test("a failed build fails the roll, lists the head in bad-builds and serves the head before's kept build, building nothing more", async () => {
+    fresh()
+    expect((await keptRun("roll_up START", c1)).code).toBe(0)
+    await Bun.write(join(kept, "build-fails"), `${c2}\n`)
+    rmSync(keptCalls)
+    expect((await keptRun(`finish_roll "ROLL canary" ${c2} ${c1} ""`, c2)).code).toBe(0)
+    expect(git(wt, "rev-parse", "HEAD")).toBe(c1)
+    expect(await keptLines(/^(build|serve|dev)/)).toEqual([`build ${short(c2)}`, `serve ${c1}`])
+    expect(await keptLines(/^result /)).toEqual([
+      `result ROLL canary ${short(c2)} FAIL build: Error: next build failed`,
+      `result FALLBACK ${short(c1)} PASS verify=PASS follower=running`,
+    ])
+    expect(await Bun.file(join(kept, "bad-builds")).text()).toBe(`${c2}\n`)
+  })
+
+  test("a verify that fails after a roll falls back to the head before's kept build without building it again", async () => {
+    fresh()
+    expect((await keptRun("roll_up START", c1)).code).toBe(0)
+    await Bun.write(join(kept, "verify-fails"), `${c2}\n`)
+    rmSync(keptCalls)
+    expect((await keptRun(`finish_roll "ROLL canary" ${c2} ${c1} ""`, c2)).code).toBe(0)
+    expect(await keptLines(/^(build|serve|dev)/)).toEqual([
+      `build ${short(c2)}`,
+      `serve ${c2}`,
+      `serve ${c1}`,
+    ])
+    expect(await keptLines(/^result /)).toEqual([
+      `result ROLL canary ${short(c2)} FAIL verify=FAIL follower=running`,
+      `result FALLBACK ${short(c1)} PASS verify=PASS follower=running`,
+    ])
+  })
+
+  test("a kept build made for other URLs is built again, with one line naming both, since next bakes them into its client", async () => {
+    fresh()
+    expect((await keptRun("roll_up START", c1)).code).toBe(0)
+    await Bun.write(
+      join(builds, c1, "urls"),
+      "http://playground.localhost:1355 http://api.playground.localhost:1355\n",
+    )
+    rmSync(keptCalls)
+    expect((await keptRun("roll_up START", c1)).code).toBe(0)
+    expect(await keptLines(/^say rebuilding/)).toEqual([
+      `say rebuilding ${short(c1)}: its build was for http://playground.localhost:1355 http://api.playground.localhost:1355, the Dashboard is now on ${WEB} ${API}`,
+    ])
+    expect(await keptLines(/^(build|serve)/)).toEqual([`build ${short(c1)}`, `serve ${c1}`])
+  })
+
+  test("a pass keeps its own build and the last one that passed before it, and removes the rest", async () => {
+    fresh()
+    for (const name of ["a", "b", "c"]) Bun.spawnSync(["mkdir", "-p", join(builds, name)])
+    await Bun.write(join(builds, "passed"), "b\n")
+    expect((await keptRun("keep_builds c", c2)).code).toBe(0)
+    expect(Bun.spawnSync(["ls", builds]).stdout.toString().trim().split("\n")).toEqual([
+      "b",
+      "c",
+      "passed",
+    ])
+    expect(await Bun.file(join(builds, "passed")).text()).toBe("c\n")
+  })
+})
+
+// A roll builds its target before it stops anything: prebuild builds the target from a detached staging worktree into $S/builds/<sha> while the old stack serves, and roll_up then finds that build kept
+const prebuilt = `${keptStubs}
+stop_all() { echo stop >> ${keptCalls}; }
+${block("pull_to")}
+${block("prebuild")}
+${block("roll_to")}
+`
+const prebuiltRun = async (body: string, at: string) => {
+  git(wt, "reset", "-q", "--hard", at)
+  git(wt, "worktree", "prune")
+  const proc = Bun.spawn(["bash", "-c", `D=${dashboardDir}\n${prebuilt}\n${body}`], {
+    cwd: wt,
+    stdout: "pipe",
+  })
+  const code = await proc.exited
+  return { code, out: (await new Response(proc.stdout).text()).trim() }
+}
+const worktrees = () => git(wt, "worktree", "list").split("\n").length
+
+describe("the supervisor's build before the stop (#122)", () => {
+  test("a roll builds its target from a staging worktree before it stops anything, then serves that build without building again", async () => {
+    fresh()
+    const rolled = await prebuiltRun(`running=${c1}; roll_to ${c2} canary; echo "$running"`, c1)
+    expect(rolled).toEqual({ code: 0, out: c2 })
+    expect(await keptLines(/^(build|stop|serve)/)).toEqual([
+      `build ${short(c2)}`,
+      "stop",
+      `serve ${c2}`,
+    ])
+    expect(await keptLines(/^envs /)).toEqual([`envs ${API} ${WEB} ${API} ${WEB} production true`])
+    expect(await keptLines(/^result /)).toEqual([
+      `result ROLL canary ${short(c2)} PASS verify=PASS follower=running`,
+    ])
+    expect(existsSync(join(kept, "staging"))).toBe(false)
+    expect(worktrees()).toBe(1)
+  })
+
+  test("the staging install runs without the supervisor's NODE_ENV, so bun installs the dev dependencies the build needs", async () => {
+    fresh()
+    rmSync(join(kept, "installs"), { force: true })
+    const rolled = await prebuiltRun(
+      `export NODE_ENV=production SKIP_ENV_VALIDATION=true; running=${c1}; roll_to ${c2} canary; echo "$running"`,
+      c1,
+    )
+    expect(rolled).toEqual({ code: 0, out: c2 })
+    expect((await Bun.file(join(kept, "installs")).text()).split("\n")[0]).toBe(
+      "NODE_ENV= SKIP_ENV_VALIDATION=",
+    )
+  })
+
+  test("a failed build lists the target in bad-builds and stops nothing, the staging worktree removed", async () => {
+    fresh()
+    await Bun.write(join(kept, "build-fails"), `${c2}\n`)
+    const rolled = await prebuiltRun(`running=${c1}; roll_to ${c2} canary; echo "$running"`, c1)
+    expect(rolled).toEqual({ code: 0, out: c1 })
+    expect(git(wt, "rev-parse", "HEAD")).toBe(c1)
+    expect(await keptLines(/^(build|stop|serve)/)).toEqual([`build ${short(c2)}`])
+    expect(await keptLines(/^result /)).toEqual([
+      `result ROLL canary ${short(c2)} FAIL build before the stop: Error: next build failed; still serving ${short(c1)}`,
+    ])
+    expect(await Bun.file(join(kept, "bad-builds")).text()).toBe(`${c2}\n`)
+    expect(existsSync(join(kept, "staging"))).toBe(false)
+    expect(worktrees()).toBe(1)
+  })
+
+  test("a target that migrates skips the build before the stop and builds after it, as before", async () => {
+    fresh()
+    const rolled = await prebuiltRun(`running=${c2}; roll_to ${c3} canary; echo "$running"`, c2)
+    expect(rolled).toEqual({ code: 0, out: c3 })
+    expect(await keptLines(/^(build|stop|serve)/)).toEqual([
+      "stop",
+      `build ${short(c3)}`,
+      `serve ${c3}`,
+    ])
+    expect(worktrees()).toBe(1)
+  })
+
+  test("an install that fails in the staging worktree is the machine's fault, so the roll builds after the stop and no bad-builds entry is made", async () => {
+    fresh()
+    await Bun.write(join(kept, "install-fails"), `${c2}\n`)
+    const rolled = await prebuiltRun(`running=${c1}; roll_to ${c2} canary; echo "$running"`, c1)
+    expect(rolled).toEqual({ code: 0, out: c2 })
+    expect(await keptLines(/^(build|stop|serve)/)).toEqual([
+      "stop",
+      `build ${short(c2)}`,
+      `serve ${c2}`,
+    ])
+    expect(await keptLines(/^say .*building after the stop/)).toEqual([
+      `say the staging worktree's install for ${short(c2)} failed; building after the stop`,
+    ])
+    expect(existsSync(join(kept, "bad-builds"))).toBe(false)
+    expect(existsSync(join(kept, "staging"))).toBe(false)
+    expect(worktrees()).toBe(1)
+  })
+
+  test("a roll that reloads the supervisor finishes on the build made before the stop", async () => {
+    fresh()
+    clean()
+    expect((await prebuiltRun(`running=${c0}; roll_to ${c1} canary`, c0)).code).toBe(75)
+    expect(await keptLines(/^(build|stop)/)).toEqual([`build ${short(c1)}`, "stop"])
+    expect(existsSync(join(kept, "staging"))).toBe(false)
+    expect(worktrees()).toBe(1)
+    expect((await keptRun(`finish_roll "ROLL canary" ${c1} ${c0} ""`, c1)).code).toBe(0)
+    expect(await keptLines(/^(build|stop|serve)/)).toEqual([
+      `build ${short(c1)}`,
+      "stop",
+      `serve ${c1}`,
+    ])
+    clean()
+  })
+})
+
+// A roll with no migration swaps the web with no gap: the target's web starts beside the serving one from the kept build, the route moves to it, and the old one stops before the API restarts alone
+describe("the supervisor's web swap (#122)", () => {
+  const WEBS = /^(build|web|route|stop|serve)/
+  const started = (at: string) => `roll_up START > /dev/null; rm -f ${keptCalls}; running=${at}`
+
+  test("a roll starts the target's web beside the serving one, moves the route, stops the old web, and only then stops the API", async () => {
+    fresh()
+    const rolled = await prebuiltRun(`${started(c1)}; roll_to ${c2} canary; echo "$running"`, c1)
+    expect(rolled).toEqual({ code: 0, out: c2 })
+    expect(await keptLines(WEBS)).toEqual([
+      `build ${short(c2)}`,
+      `web dashboard-web-next ${short(c2)}`,
+      "route 5002",
+      `web-stop dashboard-web ${short(c1)}`,
+      "stop",
+      "route 5002",
+      `serve ${c2}`,
+    ])
+    expect(await keptLines(/^say web swapped/)).toEqual([
+      `say web swapped to ${short(c2)} on :5002 with no stop`,
+    ])
+    expect(await Bun.file(join(kept, "dashboard-web.sha")).text()).toBe(`${c2}\n`)
+    expect(existsSync(join(kept, "dashboard-web-next.pid"))).toBe(false)
+  })
+
+  test("a target that migrates stops the web with the rest before it moves, as before", async () => {
+    fresh()
+    const rolled = await prebuiltRun(`${started(c2)}; roll_to ${c3} canary; echo "$running"`, c2)
+    expect(rolled).toEqual({ code: 0, out: c3 })
+    expect(await keptLines(WEBS)).toEqual([
+      "stop",
+      `build ${short(c3)}`,
+      `web-stop dashboard-web ${short(c2)}`,
+      `web dashboard-web ${short(c3)}`,
+      "route 5002",
+      `serve ${c3}`,
+    ])
+  })
+
+  test("a target's web that never answers leaves the old one serving until the stop, which then runs as before", async () => {
+    fresh()
+    await Bun.write(join(kept, "web-fails"), `${c2}\n`)
+    await prebuiltRun(`${started(c1)}; roll_to ${c2} canary; echo "$running"`, c1)
+    const lines = await keptLines(/^(web|stop|say web)/)
+    expect(lines.slice(0, 4)).toEqual([
+      `web dashboard-web-next ${short(c2)}`,
+      `say web ${short(c2)} did not take over (the web exited); stopping both as before`,
+      "stop",
+      `web-stop dashboard-web ${short(c1)}`,
+    ])
+  })
+
+  test("a web the head broke fails the roll as a bad build, and the fallback serves the head before's web", async () => {
+    fresh()
+    expect((await keptRun("roll_up START", c1)).code).toBe(0)
+    await Bun.write(join(kept, "web-fails"), `${c2}\n`)
+    rmSync(keptCalls)
+    expect((await keptRun(`finish_roll "ROLL canary" ${c2} ${c1} ""`, c2)).code).toBe(0)
+    expect(await keptLines(/^result /)).toEqual([
+      `result ROLL canary ${short(c2)} FAIL web: the web exited`,
+      `result FALLBACK ${short(c1)} PASS verify=PASS follower=running`,
+    ])
+    expect(await Bun.file(join(kept, "bad-builds")).text()).toBe(`${c2}\n`)
+  })
+
+  test("a web the machine kept from starting is a refusal, no bad build, so the head is tried again", async () => {
+    fresh()
+    expect((await keptRun("roll_up START", c1)).code).toBe(0)
+    await Bun.write(join(kept, "web-silent"), `${c2}\n`)
+    rmSync(keptCalls)
+    expect((await keptRun(`finish_roll "ROLL canary" ${c2} ${c1} ""`, c2)).code).toBe(0)
+    expect(await keptLines(/^result /)).toEqual([
+      `result ROLL canary ${short(c2)} FAIL web: the web was still silent at 60s`,
+      `result ROLL canary ${short(c2)} FAIL dev refusing: the web was still silent at 60s (not the head's, no bad build)`,
+      `result FALLBACK ${short(c1)} PASS verify=PASS follower=running`,
+    ])
+    expect(existsSync(join(kept, "bad-builds"))).toBe(false)
+  })
+
+  test("a refused route keeps the old web serving, and the start that meets it is a refusal too", async () => {
+    fresh()
+    await prebuiltRun(
+      `${started(c1)}; touch ${join(kept, "route-refused")}; roll_to ${c2} canary; echo "$running"`,
+      c1,
+    )
+    expect(await keptLines(/^say web .*did not take over/)).toEqual([
+      `say web ${short(c2)} did not take over (the web's route was refused); stopping both as before`,
+    ])
+    expect(existsSync(join(kept, "dashboard-web-next.pid"))).toBe(false)
+    expect(existsSync(join(kept, "bad-builds"))).toBe(false)
+  })
+
+  test("the API serves alone, since the web runs on its own", () => {
+    expect(script).toContain("bun run serve --filter=@api/hono --ui stream")
+  })
+})
+
 // First run's setup writes POSTGRES_URL into the checkout's .env; until then the follower, which validates it at once, would exit on every tick (#31).
 describe("the follower before first run's setup (#31)", () => {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), "supervisor-setup-")))
@@ -871,7 +1239,8 @@ describe("the follower before first run's setup (#31)", () => {
 say() { echo "say $*" >> ${calls}; }; result() { echo "result $*" >> ${calls}; }
 start_dev() { :; }; check_dev() { echo dev=up; }; stop_all() { :; }; dev_down() { :; }
 start_follower() { echo start_follower >> ${calls}; }; check_follower() { echo follower=running; }
-follower_held() { return 1; }; alive() { [ "$1" = dashboard-dev ]; }
+follower_held() { return 1; }; alive() { [ "$1" = dashboard-dev ] || [ "$1" = dashboard-web ]; }; build_head() { :; }; keep_builds() { :; }; check_aliases() { :; }
+dashboard_urls() { :; }; ensure_web() { :; }
 ${fn("setup_pending") ?? ""}
 ${script.slice(script.indexOf("\nroll_up() {") + 1, script.indexOf("\n}\n", script.indexOf("\nroll_up() {")) + 2)}
 `
@@ -919,9 +1288,96 @@ ${script.slice(script.indexOf("\nroll_up() {") + 1, script.indexOf("\n}\n", scri
     ])
   })
 
+  test("a web that died is a DOWN of its own, and the stack starts again", async () => {
+    const lines = await sup(`alive() { [ "$1" != dashboard-web ]; }\n${loop}`, URL_LINE)
+    expect(lines[0]).toMatch(/^result DOWN web: /)
+    expect(lines.at(-1)).toMatch(/^result RESTART \w+ PASS dev=up follower=running$/)
+  })
+
   test("with POSTGRES_URL set, a roll starts the follower as before", async () => {
     const lines = await sup("roll_up START", URL_LINE)
     expect(lines[0]).toBe("start_follower")
     expect(lines[1]).toMatch(/^result START \w+ PASS dev=up follower=running$/)
+  })
+})
+
+// A route file of portless's shape in the test's own folder, never the real ~/.portless: each host and its port.
+const routesDir = join(scratch, "portless")
+const routesFile = join(routesDir, "routes.json")
+const routes = (pairs: [string, number][]) =>
+  Bun.write(
+    routesFile,
+    JSON.stringify(pairs.map(([hostname, port]) => ({ hostname, pid: 0, port }))),
+  )
+const LIVE_ROUTES: [string, number][] = [
+  ["desk.playground.localhost", 4842],
+  ["playground.localhost", 4842],
+  ["desk.api.playground.localhost", 4843],
+  ["api.playground.localhost", 4843],
+]
+describe("the supervisor's alias check", () => {
+  const state = join(scratch, "alias-state")
+  const ops = join(scratch, "alias-ops")
+  const right = join(scratch, "right.json")
+  // Runs check_aliases as the supervisor's loop does, in one shell, with a stand-in notify.sh; the route file starts with playground.localhost on the wrong port, and body says when it is put right. Returns the results and the alerts.
+  const ticks = async (body: string, confirm: number) => {
+    rmSync(state, { force: true, recursive: true })
+    rmSync(join(ops, "sent"), { force: true })
+    await Bun.write(join(ops, "notify.sh"), `#!/bin/sh\necho "$1 $2" >> "${join(ops, "sent")}"\n`)
+    chmodSync(join(ops, "notify.sh"), 0o755)
+    await Bun.write(join(state, "results.log"), "")
+    await Bun.write(answer, "https://desk.NAME.localhost\n")
+    await routes(LIVE_ROUTES)
+    await Bun.write(right, Bun.file(routesFile))
+    await routes(
+      LIVE_ROUTES.map(([host, port]) => [host, host === "playground.localhost" ? 4851 : port]),
+    )
+    const proc = run(
+      `D=${join(root, "scripts", "ops", "dashboard")} OPS=${ops} RESULTS=${join(state, "results.log")} LOG=${join(state, "supervisor.log")} PORTLESS_STATE_DIR=${routesDir} ALIAS_CONFIRM=${confirm} FIX="cp ${right} ${routesFile}"\n${fn("say")}\n${fn("result")}\n${fn("dashboard_urls")}\n${fn("read_aliases")}\n${fn("check_aliases")}\n${body}\ntrue`,
+    )
+    expect(await proc.exited).toBe(0)
+    const results = (await Bun.file(join(state, "results.log")).text()).trim()
+    const sent = await Bun.file(join(ops, "sent"))
+      .text()
+      .catch(() => "")
+    return { results: results ? results.split("\n") : [], sent: sent.trim() }
+  }
+
+  test("writes one ALIAS FAIL result when an alias stays wrong, none while it stays so, an ALIAS PASS once it is right, and no alert of its own", async () => {
+    const { results, sent } = await ticks(
+      "check_aliases; check_aliases; $FIX; check_aliases; check_aliases",
+      0,
+    )
+    expect(results).toHaveLength(2)
+    expect(results[0]).toContain(
+      "ALIAS FAIL playground.localhost points at port 4851, but the live stack's desk.playground.localhost is on 4842",
+    )
+    expect(results[1]).toContain(
+      "ALIAS PASS playground.localhost and api.playground.localhost hold the live stack's ports 4842 and 4843",
+    )
+    // run.sh's notify_new alerts each new FAIL line, so the check sends none itself
+    expect(sent).toBe("")
+  })
+
+  // on v0.0.18's roll the old launcher's web route went with its stop, so moveRoute left playground.localhost on the old web's port for about 3 s until the launcher's 2 s sync moved it, as that sync moves api.playground.localhost after the API restarts, so a check landing then alerted on a roll
+  test("reads a mismatch again after ALIAS_CONFIRM seconds and stays quiet when the launcher's sync has put the alias right meanwhile", async () => {
+    const { results, sent } = await ticks("(sleep 0.5; $FIX) & check_aliases; wait", 2)
+    expect(results).toEqual([])
+    expect(sent).toBe("")
+  })
+
+  test("reads a missing route file once, with no wait, and names it", async () => {
+    const started = Date.now()
+    const { results } = await ticks(`rm -f ${routesFile}; check_aliases`, 5)
+    expect(Date.now() - started).toBeLessThan(4000)
+    expect(results).toHaveLength(1)
+    expect(results[0]).toContain(`ALIAS FAIL no route file at ${routesFile}`)
+  })
+
+  test("runs on every tick of the loop, and only reads the route file", async () => {
+    const loop = script.slice(script.indexOf("while true; do"))
+    expect(loop).toContain("check_aliases")
+    const reader = await Bun.file(join(root, "scripts", "ops", "dashboard", "alias.ts")).text()
+    expect(reader).not.toMatch(/Bun\.write|writeFile|\.kill\(|process\.kill|spawn/)
   })
 })
