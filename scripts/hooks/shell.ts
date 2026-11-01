@@ -18,7 +18,7 @@ type Lexer = {
   commands: Command[]
   i: number
   known: Record<string, string>
-  learned: string[]
+  learned?: string
   learning: boolean
   scope: number
   scopes: number[]
@@ -256,7 +256,6 @@ export function lex(
     commands: [],
     i: 0,
     known: { ...known },
-    learned: [],
     learning: learnAssignments,
     scope: 0,
     scopes: [-1],
@@ -271,31 +270,31 @@ const COMPOUND = new Set(["case", "for", "foreach", "function", "repeat", "selec
 
 // The one shape the publish-word guard reads, as scripts/hooks/README.md's no-release-comment section states: Q='literal' alone, then "$Q" in the very next command; everything else stays unknown.
 function learn(lx: Lexer, cmd: Command, raws: string[], sure: boolean, top: boolean): void {
-  if (!lx.learning && lx.learned.length === 0) return
+  if (!lx.learning && lx.learned === undefined) return
   if (cmd.words.length === 0 && cmd.redirects.length === 0 && !cmd.group) return
   const head = cmd.words[0]
   if (head && !head.quoted && (RESERVED.has(head.value) || COMPOUND.has(head.value))) {
     lx.learning = false
   }
-  if (lx.learned.length > 0) {
+  if (lx.learned !== undefined) {
     if (top) forget(lx)
     return
   }
   const shape = /^([A-Za-z_]\w*)='([^']+)'$/.exec(raws.length === 1 ? raws[0] : "")
-  if (!shape || !sure || !lx.learning || cmd.detached || cmd.group || cmd.stdin) return
+  if (!shape || !sure || cmd.detached || cmd.group || cmd.stdin) return
   const [, name, value] = shape
   const read = `"$${name}"`
   const rest = lx.src.split(read).join("")
   const mentions = rest.match(new RegExp(`${name}(?!\\w)`, "g"))?.length ?? 0
-  if (mentions !== 1 || /[$`]|IFS/.test(rest)) return
+  if (mentions !== 1 || /[$`]|IFS|\bfunction\b/.test(rest)) return
   lx.known[name] = value
-  lx.learned.push(name)
+  lx.learned = name
 }
 
 // Drops what the hook learned and learns nothing more, once the command after the assignment ends.
 function forget(lx: Lexer): void {
-  for (const name of lx.learned) delete lx.known[name]
-  lx.learned = []
+  if (lx.learned !== undefined) delete lx.known[lx.learned]
+  lx.learned = undefined
   lx.learning = false
 }
 
@@ -502,7 +501,7 @@ function dollar(lx: Lexer, quoted = false): Text {
     const value = name === undefined ? undefined : lx.known[name]
     // A learned value is read only as a whole "$Q", which the shell neither splits, globs nor modifies.
     const whole = quoted && src[start - 1] === '"' && src[lx.i] === '"'
-    return value !== undefined && (whole || !lx.learned.includes(name ?? ""))
+    return value !== undefined && (whole || name !== lx.learned)
       ? { value, variable: name }
       : { ...unknown("a shell variable"), variable: name }
   }

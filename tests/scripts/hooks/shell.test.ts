@@ -67,6 +67,14 @@ describe("lex reads a single-quoted literal that the very next command reads as 
     expect(last(src)?.unknown).toBe("a shell variable")
   })
 
+  test.each([
+    ["the keyword defines", `Q='x'; function f { echo "$Q"; }; f`],
+    ["the parentheses define", `Q='x'; f() { echo "$Q"; }; f`],
+  ])("leaves a variable read in a function %s unknown, since the body runs later", (_, src) => {
+    const body = lex(src, {}, true).commands.find((c) => c.words.some((w) => w.value === "echo"))
+    expect(body?.words.at(-1)?.unknown).toBe("a shell variable")
+  })
+
   test("learns nothing unless the hook asks it to", () => {
     expect(lex(`Q='x'; echo "$Q"`).commands.at(-1)?.words.at(-1)?.unknown).toBe("a shell variable")
   })

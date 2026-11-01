@@ -596,6 +596,11 @@ describe("gh api", () => {
       "other",
     ],
     [
+      "a GraphQL query read in a function whose variable a spelling the hook cannot count sets before it runs",
+      `QUERY='query { viewer { login } }'; function f { gh api graphql -f query="$QUERY"; }; typeset QU""ERY='${MUTATION}'; f`,
+      "other",
+    ],
+    [
       "a GraphQL query in a variable set in a case branch",
       `case b in a) Q='query { viewer { login } }';; esac; gh api graphql -f query="$Q"`,
       "other",
