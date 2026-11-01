@@ -110,7 +110,7 @@ Sessions that work together share a workspace as full-height columns ([SESSIONS.
   Every job ops starts in a terminal (`runtime: "herdr"` in `~/.playground/ops/jobs.json`) runs as a pane labelled with its name in the Ops workspace on the factory herdr server, by the binary herdr's `pin.json` names,
   skipped while herdr fails spawn.sh's checks (its pin's sha256, its version, its server's socket and that server running).
   A job row stored with the old `cmux` or `auto` runtime reads as `herdr` (`jobSchema` in `packages/settings/src/jobs.ts`), so its copy still under cmux is stopped by its recorded pid and started in herdr on the next pass, from any terminal.
-  `needsCmux` is read and ignored, and leaves the schema one ship later.
+  `needsCmux` is optional, so every stored row loads, and up.py reads it only for a row that names no runtime, where it marks a terminal job; it leaves the schema one ship later.
   A start that fails is logged whole in `up.log` and tried again on the next pass, with no GRACE wait.
   `playground add` starts one session through `spawn.sh` under all its gates, one start at a time (`~/.playground/spawn.lock`), under a name from `bun run name <kind>` or a given name that gives its kind, as spawn.sh asks.
   `playground view` runs ops-herdr's `attach factory`, opening the server the sessions run on, and takes no other word; probes stay on their own server.

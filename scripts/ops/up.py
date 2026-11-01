@@ -101,15 +101,6 @@ def is_dashboard(job):
     return job.get("stop") == "dashboard"
 
 
-def herdr_exes():
-    """The pinned herdr binary's path, as ps prints a server started by it, and its real path; empty when the pin does not read."""
-    try:
-        path = json.load(open(os.path.join(HERDR_DIR, "pin.json")))["path"]
-        return {path, os.path.realpath(path)}
-    except Exception:
-        return set()
-
-
 # The factory-role rule from its one source: the names of the [name, the roster's kind] pairs on stdin that factoryRoleOf places in the factory; kinds.ts imports nothing, so Bun reads it from source as the hooks do
 KINDS = os.path.join(os.path.dirname(os.path.dirname(HERE)), "packages", "config", "src", "kinds.ts")
 # The machine's managers' names (sessions.names and sessions.aliases) are set first, so a manager's name places as the hooks place it; with none readable the role words stand.

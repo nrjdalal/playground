@@ -15,7 +15,7 @@ export const jobSchema = z.strictObject({
   // A job launchd holds: its label, and the program its plist runs from cwd.
   launchd: z.string().min(1).optional(),
   model: z.string().min(1).optional(),
-  // Read and ignored, so every stored row still loads; it leaves the schema one ship later.
+  // Optional, so every stored row still loads; up.py reads it only for a row that names no runtime, where it marks a terminal job. It leaves the schema one ship later.
   needsCmux: z.boolean().optional(),
   neverPause: z.boolean().optional(),
   pausedFor: z.string().optional(),

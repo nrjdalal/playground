@@ -3,7 +3,7 @@
 A process is under cmux when one of its ancestors runs the cmux app's own executable (CMUX_APP, by its exact path, never a name or a
 pattern: the `cmux` CLI is another binary). A job orphaned by a cmux restart has been reparented to launchd, so its chain ends at pid 1.
 """
-import os, subprocess
+import subprocess
 
 CMUX_APP = "/Applications/cmux.app/Contents/MacOS/cmux"
 
@@ -37,23 +37,3 @@ def above(pid, procs, exes):
 def cmux_of(pid, procs):
     """The pid of the cmux app above pid (pid itself included), or None when its chain reaches launchd or leaves the table."""
     return above(pid, procs, {CMUX_APP})
-
-
-def running_cmux(procs):
-    """The pids running the cmux app, lowest first."""
-    return sorted(pid for pid, (_, exe) in procs.items() if exe == CMUX_APP)
-
-
-def starts(pids):
-    """{pid: start} as `ps -o lstart=` prints it under C, spaces made one, for the pids that run; None when ps cannot be run."""
-    try:
-        out = subprocess.run(["ps", "-o", "pid=,lstart=", "-p", ",".join(str(p) for p in pids)], capture_output=True, text=True, timeout=20,
-                             env={**os.environ, "LC_ALL": "C", "TZ": "UTC"}).stdout
-    except Exception:
-        return None
-    found = {}
-    for line in out.splitlines():
-        parts = line.split(None, 1)
-        if len(parts) == 2 and parts[0].isdigit():
-            found[int(parts[0])] = " ".join(parts[1].split())
-    return found
