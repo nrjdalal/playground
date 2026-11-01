@@ -76,7 +76,7 @@ const ask = (cwd: string, env: Record<string, string | undefined>, ...args: stri
   const { POSTGRES_URL: _, ...rest } = process.env
   return Bun.spawnSync([process.execPath, CLI, ...args], {
     cwd,
-    env: { ...rest, PLAYGROUND_DATA_DIR: data, ...env },
+    env: { ...rest, PLAYGROUND_DATA_DIR: data, SKIP_ENV_VALIDATION: "true", ...env },
     stderr: "pipe",
     stdout: "pipe",
   })
