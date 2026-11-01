@@ -458,3 +458,53 @@ test("a run cut short after its fast-forward with no record yet is finished by t
   expect(await update()).toBe(0)
   expect(readFileSync(marks, "utf8")).toBe(`restart ${one} HEAD\n`)
 })
+
+test("with no record, a checkout reset past its last fast-forward reads what changed since that fast-forward, and says so", async () => {
+  const env = { GIT_CONFIG_NOSYSTEM: "1", HOME: scratch, PATH: process.env.PATH }
+  const git = (cwd: string, ...args: string[]) =>
+    Bun.spawnSync(["git", "-c", "user.name=t", "-c", "user.email=t@t", ...args], { cwd, env })
+      .stdout.toString()
+      .trim()
+  const origin = join(scratch, "reset-origin")
+  const marks = join(scratch, "reset-marks")
+  const done = join(scratch, "reset-update-head")
+  mkdirSync(join(origin, "scripts"), { recursive: true })
+  mkdirSync(join(origin, "packages", "scripts", "src", "ops-restart"), { recursive: true })
+  writeFileSync(join(origin, "scripts", "link-skills.sh"), "true\n")
+  writeFileSync(
+    join(origin, "packages", "scripts", "src", "ops-restart", "cli.ts"),
+    `require("node:fs").appendFileSync(${JSON.stringify(marks)}, "restart " + process.argv.slice(3).join(" ") + "\\n")\n`,
+  )
+  git(scratch, "init", "-q", "-b", "main", origin)
+  git(origin, "add", ".")
+  git(origin, "commit", "-q", "-m", "one")
+  const checkout = join(scratch, "reset-checkout")
+  git(scratch, "clone", "-q", origin, checkout)
+  writeFileSync(join(origin, "README.md"), "two\n")
+  git(origin, "add", ".")
+  git(origin, "commit", "-q", "-m", "two")
+  git(checkout, "fetch", "-q", "origin", "main")
+  git(checkout, "merge", "--ff-only", "-q", "origin/main")
+  const two = git(checkout, "rev-parse", "HEAD")
+  writeFileSync(join(origin, "README.md"), "three\n")
+  git(origin, "commit", "-q", "-am", "three")
+  git(checkout, "fetch", "-q", "origin", "main")
+  git(checkout, "reset", "-q", "--keep", "origin/main")
+  const lines: string[] = []
+
+  expect(
+    await runUpdate(
+      checkout,
+      spawnRun,
+      async () => 0,
+      (line) => lines.push(line),
+      undefined,
+      done,
+    ),
+  ).toBe(0)
+  expect(readFileSync(marks, "utf8")).toBe(`restart ${two} HEAD\n`)
+  expect(lines).toContain(
+    `playground update: no ${done} yet, so it reads what changed since the reflog's last fast-forward onto origin/main, ${two.slice(0, 7)}`,
+  )
+  expect(readFileSync(done, "utf8").trim()).toBe(git(checkout, "rev-parse", "HEAD"))
+})
