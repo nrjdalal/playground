@@ -510,6 +510,19 @@ def org_owners():
     return ORGS
 
 
+# every slot run-slot.sh takes, in its clear-stale list's order, the CPU slots first as its held_units lists them, which tests hold these to; each model slot is found by its name
+CPU_SLOTS = ("run-slot", "run-slot-2", "run-slot-3", "run-slot-4")
+SLOTS = (*CPU_SLOTS, "run-slot-commit", "run-slot-clone", "run-slot-quick")
+
+
+def slot_names():
+    try:
+        models = sorted({m.group(1) for m in (re.match(r"^(run-slot-model-[0-9]+)(\.holder)?$", f) for f in os.listdir(OPS)) if m})
+    except OSError:
+        models = []
+    return [*SLOTS, *models]
+
+
 def heavy_jobs(rows=None):
     if rows is None:
         rows = subprocess.run(["ps", "-A", "-o", "pid=,ppid=,command="], capture_output=True, text=True, timeout=20).stdout.splitlines()
@@ -519,7 +532,7 @@ def heavy_jobs(rows=None):
         if len(parts) == 3 and parts[0].isdigit():
             parent[parts[0]], cmds[parts[0]] = parts[1], parts[2]
     holders = set()
-    for name in ("run-slot", "run-slot-2", "run-slot-3"):
+    for name in slot_names():
         try:
             if os.path.isdir(os.path.join(OPS, name)):
                 holders.add(open(os.path.join(OPS, name + ".holder")).read().split()[1])
@@ -858,7 +871,8 @@ def slot_idle_alerts(state, now_t):
             pass
         cmd[parts[0]] = parts[3] if len(parts) > 3 else ""
     prev, cur, out = state.get("slot_idle", {}), {}, []
-    for slot in ("run-slot", "run-slot-2", "run-slot-3"):
+    # the CPU slots alone: a commit, clone, quick or model slot's run can wait at 0% CPU by design
+    for slot in CPU_SLOTS:
         try:
             who, pid = open(os.path.join(OPS, f"{slot}.holder")).read().split()[:2]
         except (OSError, ValueError):
