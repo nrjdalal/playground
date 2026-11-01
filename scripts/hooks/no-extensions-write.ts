@@ -1,7 +1,7 @@
 // PreToolUse hook: refuses a factory session's write into the extensions root, where every guard's list, policy.json and each scope's sources live, and its playground CLI call that changes what a guard reads to allow or deny a call, so no session edits a list in one call and makes the guarded call in the next.
 import { existsSync, statSync } from "node:fs"
 import { homedir } from "node:os"
-import { dirname, join, resolve, sep } from "node:path"
+import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path"
 
 import { dataDir } from "../../packages/env/src/data-dir"
 import { extensionsDir } from "../../packages/settings/src/rendered"
@@ -11,6 +11,9 @@ import {
   type Command,
   type Env,
   examine,
+  filled,
+  globAt,
+  globFrom,
   knownVariables,
   lex,
   marked,
@@ -21,10 +24,12 @@ import {
   run,
   slotWords,
   stdinOf,
+  type Text,
   tick,
   type Visit,
   withDeadline,
   UNKNOWN,
+  varsSince,
   type Word,
 } from "./shell"
 
@@ -74,15 +79,24 @@ const EXPORTS = new Set(["declare", "export", "local", "readonly", "typeset"])
 // Programs that remove or move what they name, so naming a folder above the root takes the root with it, and the guards fall back to core's smaller lists.
 const REMOVERS = new Set(["find", "mv", "rm", "rmdir", "rsync", "unlink"])
 const DUPLICATE = /^(?:\d+|-)$/
-const GLOB = /[*?[{(]/
 // Variables that make git or a pager run a program, so a reader with one set is judged as any other program.
 const RUNS = /^(?:EDITOR|GIT_[A-Z_]+|LESSOPEN|PAGER|VISUAL)$/
 const CLI = join("packages", "scripts", "src", "playground", "cli.ts")
 
+// Whether a scope's variables set one that makes git or a pager run a program, each name read once.
+const varsRun = new WeakMap<Map<string, Text>, [number, boolean]>()
+function runsVariable(vars: Map<string, Text>): boolean {
+  const [cursor, found] = varsRun.get(vars) ?? [undefined, false]
+  const [keys, next] = varsSince(vars, cursor)
+  const now = found || keys.some((key) => RUNS.test(key))
+  varsRun.set(vars, [next, now])
+  return now
+}
+
 // Whether a command only reads what it names: a reader with no option or variable that makes it run a program.
 function reads(parsed: Parsed, env: Env): boolean {
   const { args, local, name } = parsed
-  if ([...local.keys(), ...env.vars.keys()].some((key) => RUNS.test(key))) return false
+  if ([...local.keys()].some((key) => RUNS.test(key)) || runsVariable(env.vars)) return false
   if (READERS.has(name) || PRINTERS.has(name)) return true
   if (name === "rg") return !args.some((a) => /^--(?:hostname-bin|pre)(?:=|$)/.test(a.value))
   if (name === "find") return !args.some((a) => FIND_ACTS.test(a.value))
@@ -123,7 +137,11 @@ const SWITCHES: Record<string, string[]> = {
 }
 
 // Whether a word is the playground CLI: the command by name in any case, as macOS's filesystem reads it, or by a path that is no folder, or the checkout's cli.ts, with or without its extension, links followed.
-function isCli(word: Word, dirs: (string | undefined)[]): boolean {
+function isCli(
+  word: Word,
+  dirs: (string | undefined)[],
+  realOf: (path: string) => string,
+): boolean {
   tick()
   if (marked(word.value) || word.value.startsWith("-")) return false
   const paths = dirs.map((dir) => pathOf(word, { cwd: dir } as Env))
@@ -134,23 +152,23 @@ function isCli(word: Word, dirs: (string | undefined)[]): boolean {
     )
   const cli = (sep + CLI).toLowerCase()
   return paths.some(
-    (path) => !!path && [path, `${path}.ts`].some((at) => real(at).toLowerCase().endsWith(cli)),
+    (path) => !!path && [path, `${path}.ts`].some((at) => realOf(at).toLowerCase().endsWith(cli)),
   )
 }
 
 // The words after each word of a command that is the playground CLI, so the CLI behind any wrapper (bun, npx, find -exec, arch, watch) is read as typed bare.
-function cliCalls(parsed: Parsed, env: Env): Word[][] {
+function cliCalls(parsed: Parsed, env: Env, realOf: (path: string) => string): Word[][] {
   const { args, first, name } = parsed
   if (!first) return []
   const words = [first, ...args]
   const dirs = [env.cwd, name === "bun" ? bunCall(args, env).cwd : undefined]
-  return words.flatMap((word, at) => (isCli(word, dirs) ? [words.slice(at + 1)] : []))
+  return words.flatMap((word, at) => (isCli(word, dirs, realOf) ? [words.slice(at + 1)] : []))
 }
 
-// Every text of a word or a variable that holds a space, a leading ! dropped, read as a command line of its own, since a program may run it (watch, ssh's ProxyCommand, a git alias, a pager).
-function runsOf(parsed: Parsed, env: Env): string[] {
+// Every text of a word or a variable that holds a space, a leading ! dropped, read as a command line of its own, since a program may run it (watch, ssh's ProxyCommand, a git alias, a pager); `vars` is the scope's variables set since their lines were last read.
+function runsOf(parsed: Parsed, vars: Text[]): string[] {
   const { args, first, local } = parsed
-  const values = [...local, ...env.vars].flatMap(([, text]) => (text.unknown ? [] : [text.value]))
+  const values = [...local.values(), ...vars].flatMap((text) => (text.unknown ? [] : [text.value]))
   for (const word of first ? [first, ...args] : args)
     for (const text of texts(word)) values.push(text.value.replace(/^!/, ""))
   return [...new Set(values)].filter((value) => /\s/.test(value) && !marked(value))
@@ -199,8 +217,8 @@ const texts = (word: Word): Word[] => {
   const v = word.value
   const out = [word]
   const eq = v.indexOf("=")
-  if (eq > 0) out.push({ ...word, value: v.slice(eq + 1) })
-  if (/^-[A-Za-z]./.test(v)) out.push({ ...word, value: v.slice(2) })
+  if (eq > 0) out.push({ ...word, glob: globFrom(word.glob, eq + 1), value: v.slice(eq + 1) })
+  if (/^-[A-Za-z]./.test(v)) out.push({ ...word, glob: globFrom(word.glob, 2), value: v.slice(2) })
   return out
 }
 
@@ -208,19 +226,41 @@ function inspect(raw: string, environment: Environment) {
   const { cwd, tool_input: toolInput, tool_name: tool } = JSON.parse(raw) as Record<string, unknown>
   const input = (toolInput ?? {}) as Record<string, unknown>
   const directory = typeof cwd === "string" ? cwd : undefined
+  // each path's real form, read once a check, and a path that is not there read through its folder's, since a script can name thousands of paths and each read costs several calls to the filesystem
+  const reals = new Map<string, string>()
+  const realOf = (path: string): string => {
+    let found = reals.get(path)
+    if (found !== undefined) return found
+    const folder = dirname(path)
+    if (!isAbsolute(path) || folder === path || existsSync(path)) found = real(path)
+    else {
+      const above = reals.get(folder) ?? real(folder)
+      reals.set(folder, above)
+      found = join(above, basename(path))
+    }
+    reals.set(path, found)
+    return found
+  }
   const root = real(extensionsDir(dataDir(environment)))
   const home = environment.HOME || homedir()
   const needle = root.startsWith(real(home) + sep) ? root.slice(real(home).length) : root
   const inRoot = (path: string | undefined) => {
     if (path === undefined) return false
-    const at = real(path)
+    const at = realOf(path)
     return at === root || at.startsWith(root + sep)
   }
   // a folder that holds the root, but the filesystem's own root, which only a remover names to harm
   const above = (path: string | undefined, remover: boolean) => {
     if (path === undefined) return false
-    const at = real(path)
+    const at = realOf(path)
     return at === sep ? remover : root.startsWith(at + sep)
+  }
+  // Whether a glob in a folder above the root can name the next folder down to it: a glob matches only names that start with its literal text, but a brace can make any name.
+  const reaches = (value: string, glob: number, folder: string) => {
+    const at = realOf(folder)
+    const next = root.slice(at === sep ? 1 : at.length + 1).split(sep)[0]
+    const literal = value.slice(value.lastIndexOf("/", glob - 1) + 1, glob)
+    return value.slice(glob).includes("{") || next.toLowerCase().startsWith(literal.toLowerCase())
   }
   const file = typeof tool === "string" ? input[FILE_TOOLS[tool]] : undefined
   if (typeof file === "string") {
@@ -234,7 +274,7 @@ function inspect(raw: string, environment: Environment) {
   if (command.length > 131_072) return refuse(TOO_LONG)
   // the root's path from a cwd above it, which a script may name it by
   const relative = (env: Env) =>
-    env.cwd && above(env.cwd, false) ? root.slice(real(env.cwd).length + 1) : undefined
+    env.cwd && above(env.cwd, false) ? root.slice(realOf(env.cwd).length + 1) : undefined
   const holds = (value: string, env: Env) => {
     const near = relative(env)
     return value.includes(needle) || (!!near && value.includes(near))
@@ -242,7 +282,7 @@ function inspect(raw: string, environment: Environment) {
   // What a word of a program that is no reader names: a path in the root, a folder above it, a glob there, or the root's path in its text.
   const judged = new Map<string, string | undefined>()
   const names = (word: Word, env: Env, remover: boolean): string | undefined => {
-    const key = `${remover}\0${env.cwd}\0${word.value}`
+    const key = `${remover}\0${env.cwd}\0${word.glob}\0${word.value}`
     if (!judged.has(key)) judged.set(key, judge(word, env, remover))
     return judged.get(key)
   }
@@ -253,16 +293,27 @@ function inspect(raw: string, environment: Environment) {
       const path = pathOf(text, env)
       if (inRoot(path)) return path
       if (above(path, remover)) return `${path}, which holds ${root}`
-      const glob = GLOB.exec(text.value)
-      if (glob && !marked(text.value)) {
-        const dir = pathOf({ value: `${text.value.slice(0, glob.index)}x` }, env)
+      const glob = globAt(text)
+      if (glob !== -1 && !marked(text.value)) {
+        const dir = pathOf({ value: `${text.value.slice(0, glob)}x` }, env)
         const folder = dir && dirname(dir)
-        if (folder && (inRoot(folder) || above(folder, true)))
+        if (
+          folder &&
+          (inRoot(folder) || (above(folder, true) && reaches(text.value, glob, folder)))
+        )
           return `${text.value}, a glob in ${folder}`
       }
     }
   }
   const seen = new Set<string>()
+  // where each scope's variables were read to for their lines, and judged to for each cwd and remover, so each variable is read once rather than once a command
+  const varsRead = new WeakMap<Map<string, Text>, number>()
+  const varsJudged = new WeakMap<Map<string, Text>, Map<string, number>>()
+  const since = (vars: Map<string, Text>, cursors: Map<string, number>, key: string): Text[] => {
+    const [keys, next] = varsSince(vars, cursors.get(key))
+    cursors.set(key, next)
+    return keys.flatMap((k) => vars.get(k) ?? [])
+  }
   const visit: Visit = async (cmd: Command, parsed, env) => {
     const slot = slotWords(parsed)
     if (slot)
@@ -274,7 +325,7 @@ function inspect(raw: string, environment: Environment) {
         ([">", ">>", ">|", "<>"].includes(r.op) ||
           (r.op === ">&" && !DUPLICATE.test(r.target.value))) &&
         (inRoot(pathOf(r.target, env)) ||
-          (GLOB.test(r.target.value) && !!names(r.target, env, true))),
+          (globAt(r.target) !== -1 && !!names(r.target, env, true))),
     )
     if (into?.target) return refuse(`a write to ${pathOf(into.target, env)}`)
     const reader = !!first && reads(parsed, env)
@@ -289,15 +340,20 @@ function inspect(raw: string, environment: Environment) {
             .map((value) => ({ quoted: false, value }))
     const write = reader
       ? undefined
-      : cliCalls(parsed, env)
+      : cliCalls(parsed, env, realOf)
           .map((words) => cliWrite(xargs?.replace ? words : [...words, ...stdinWords]))
           .find(Boolean)
     if (write) return refuse(write)
-    for (const raw of reader ? [] : runsOf(parsed, env)) {
+    // a command with no program runs nothing that reads the environment, so only its own assignments count
+    let vars: Text[] = []
+    if (!reader && first) {
+      const [keys, next] = varsSince(env.vars, varsRead.get(env.vars))
+      varsRead.set(env.vars, next)
+      vars = keys.flatMap((k) => env.vars.get(k) ?? [])
+    }
+    for (const raw of reader ? [] : runsOf(parsed, vars)) {
       const line =
-        xargs?.replace && fed
-          ? raw.replaceAll(xargs.replace, fed.unknown ? UNKNOWN : fed.value)
-          : raw
+        xargs?.replace && fed ? filled(raw, xargs.replace, fed.unknown ? UNKNOWN : fed.value) : raw
       if (seen.has(line)) continue
       seen.add(line)
       const verdict = await run(lex(line, env.known), { ...env, vars: new Map() }, visit, true)
@@ -308,8 +364,12 @@ function inspect(raw: string, environment: Environment) {
     if (inRoot(env.cwd)) return refuse(`${name} run inside ${root}`)
     if (name === "git" && inRoot(gitCall(args, env).cwd)) return refuse(`git on a clone in ${root}`)
     const remover = REMOVERS.has(name)
-    for (const value of [...parsed.local.values(), ...env.vars.values()]) {
-      const named = names({ ...value, quoted: false }, env, remover)
+    const cursors = varsJudged.get(env.vars) ?? new Map<string, number>()
+    varsJudged.set(env.vars, cursors)
+    const scope = since(env.vars, cursors, `${env.cwd}\0${remover}`)
+    for (const value of [...parsed.local.values(), ...scope]) {
+      // a variable's value is globbed where it is used unquoted, whatever quoted it where it was set
+      const named = names({ ...value, glob: undefined, quoted: false }, env, remover)
       if (named) return refuse(`${name} with a variable on ${named}`)
     }
     for (const word of [first, ...args]) {

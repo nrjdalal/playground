@@ -21,6 +21,8 @@ const LINK = join(HOME, "store")
 const WORK = join(HOME, "work")
 const BIG = [join(HOME, "big-a"), join(HOME, "big-b")]
 for (const file of BIG) writeFileSync(file, "x".repeat(900_000))
+const WORDS = join(HOME, "words")
+writeFileSync(WORDS, "y ".repeat(400_000))
 mkdirSync(join(WORK, "playground"), { recursive: true })
 symlinkSync(ROOT, LINK)
 afterAll(() => rmSync(HOME, { force: true, recursive: true }))
@@ -291,6 +293,10 @@ describe("a direct write into the extensions root is refused, naming the owner's
       `{ { echo 'rm ${LIST}'; }; echo true; } | sh`,
     ],
     ["rm of a zsh ( ) glob", `rm -rf ${DATA}/extensio(n)s`],
+    ["rm of a glob from the home", "rm -rf .playground/ext*"],
+    ["rm of a glob in the home that matches the data folder", "rm -rf .p*"],
+    ["rm of a glob held in a quoted variable", 'X=".playground/ext*"; rm -rf $X'],
+    ["rm of a brace that makes the root's name", "rm -rf .playground/{x,extensions}"],
     ["env -C attached to a scope", `env -C${SCOPE} git reset --hard`],
     ["env --chdir= to a scope", `env --chdir=${SCOPE} git reset --hard`],
   ])("%s", async (_, command) => {
@@ -330,6 +336,41 @@ describe("a direct write into the extensions root is refused, naming the owner's
     expect(reason).toContain("no-extensions-write hook refuses")
     expect(performance.now() - started).toBeLessThan(1_000)
   }, 20_000)
+
+  // a variable set once, then a program after each, at the cap
+  const variables = (each: string) => {
+    let script = ""
+    for (let i = 0; script.length < 130_000; i++) script += `V${i}=x${i}; ${each}`
+    return `${script}true`
+  }
+  const fill = (head: string, unit: string, tail: string) =>
+    head + unit.repeat(Math.floor((130_000 - head.length - tail.length) / unit.length)) + tail
+  test.each([
+    ["a brace with no close", fill("echo {", ",", ""), false],
+    [
+      "xargs -I over a large stdin",
+      fill(`cat ${WORDS} | xargs -I@ git -c alias.x="!`, "@ ", '" x'),
+      true,
+    ],
+    ["env -S", fill("env -S'", "-S ", "' true"), false],
+    ["distinct variables", variables(""), false],
+    ["distinct variables, each with a program", variables("true; "), false],
+    [
+      "a printf escape format over many arguments",
+      `printf '%s${"\\\\x41".repeat(16_000)}' ${"x ".repeat(3_000)}> /tmp/nxw-p`,
+      false,
+    ],
+  ])(
+    "%s at the command cap is read inside a second",
+    async (_, command, refused) => {
+      const started = performance.now()
+      const reason = await bash(command, "/tmp")
+      if (refused) expect(reason).toContain("split it into shorter calls")
+      else expect(reason).toBeUndefined()
+      expect(performance.now() - started).toBeLessThan(1_000)
+    },
+    60_000,
+  )
 
   test.each([300, 8_000])(
     "an eval chain %d deep ahead of a write is refused inside the hook's time",
@@ -469,12 +510,20 @@ describe("a read of the root, and writes elsewhere, run", () => {
     ["a git author name with a space", "GIT_AUTHOR_NAME='A B' git log"],
     ["a pager with an option", "GIT_PAGER='less -R' git log"],
     ["a commit message with an unbalanced quote", `git commit -m "it's fine"`],
+    ["a glob in the home that cannot name the data folder", "rm -rf big-*"],
     [
       "the CLI's render through ext put of a doc",
       "playground ext put login doc audit-x /tmp/a.md --reason why",
     ],
   ])("%s", async (_, command) => {
     expect(await bash(command)).toBeUndefined()
+  })
+
+  test.each([
+    ["the home", HOME],
+    ["the data folder", DATA],
+  ])("a commit message with a quoted glob from %s", async (_, cwd) => {
+    expect(await bash('git commit -m "fix(x): y"', cwd)).toBeUndefined()
   })
 
   test("a reader inside the root", async () => {
