@@ -262,11 +262,11 @@ playground picker <session> allow <key>
 playground picker <session> deny <key> "<why, and the simpler shape to run instead>"
 ```
 
-Allow presses Yes once in a herdr pane whose prompt shows that call, a subagent's command included, or answers a cmux session's Feed permission for it once; deny presses No (Escape) or denies it, and the relay sends the session the reason.
+Allow presses Yes once in the session's herdr pane while its prompt shows that call, a subagent's command included; deny presses No (Escape), and the relay sends the session the reason.
 Each answer is a line in `ops/picker.log`: the time, the manager, the answer, the session and the command's first 120 characters.
-Done when it prints that line; it refuses any caller but the session's manager or the primary dispatcher, a deny with no reason, a dispatcher's session, and a key no waiting call or shown prompt matches, which means the prompt changed: wait for its next alert.
-An ops-unstick alert that says picker cannot answer the prompt found no waiting call surely its own: on herdr it names the close and resume below, and on cmux it says to take it to the dispatcher.
-On herdr it also refuses a prompt that may be another waiting call's, as a subagent's file or URL prompt always is while its parent waits.
+Done when it prints that line; it refuses any caller but the session's manager or the primary dispatcher, a deny with no reason, a dispatcher's session, a session in no herdr pane, and a key no waiting call or shown prompt matches, which means the prompt changed: wait for its next alert.
+An ops-unstick alert that says picker cannot answer the prompt found no waiting call surely its own, and names the close and resume below.
+Picker also refuses a prompt that may be another waiting call's, as a subagent's file or URL prompt always is while its parent waits.
 A herdr pane takes no key from your hand, since `no-raw-spawn` refuses every herdr call but a read, so end that prompt by a close and a resume under the session's name:
 
 ```bash
@@ -277,16 +277,6 @@ A herdr pane takes no key from your hand, since `no-raw-spawn` refuses every her
 
 The session comes back by its session id with its transcript, and the prompted call never runs.
 Done when the session works again from its brief.
-
-On cmux, a prompt picker refuses is denied by hand with Escape and a `SendMessage` of the reason, or taken to the dispatcher.
-By hand, Escape is the one key a session presses in another's cmux pane: it types no text, so it says nothing in the owner's name (the pane-typing test in `tests/api/hono/src/lib/dashboard/cmux.test.ts` allows this line alone).
-
-```bash
-cmux send-key --workspace workspace:N --surface surface:N escape
-```
-
-Then `SendMessage` the session the plain commands to run in place of the one that prompted.
-Done when `read-screen` shows the prompt gone and the session working.
 
 ## Keep the sweep running
 
@@ -317,20 +307,13 @@ Done when every wait ends on a signal and every gap you name is checked against 
 ## Answer a picker
 
 Sessions in the chain ask by `SendMessage`.
-A picker that shows anyway (a skill's own `AskUserQuestion`) is answered through the Feed:
+A picker that shows anyway (a skill's own `AskUserQuestion`) sits in a herdr pane, which takes no key from your hand, as Answer a permission prompt says:
 
-```bash
-cmux rpc feed.list '{"pending_only":true}'
-cmux rpc feed.question.reply '{"request_id":"<id>","selections":["<label>"]}'
-```
+- When a rule or a sound default decides it, end it by that section's close and resume, with a brief that gives the answer.
+- When only the owner decides it, give the resume brief the choice to post as an Inbox decision (**ask**), so the session carries on.
+- When the owner is answering the picker in that pane or on the Dashboard, leave it to the owner and wait for the session's report.
 
-- One string per question, each an exact option label; a multi-select joins its labels with `, `.
-  An unmatched string goes through as free text, so a typo becomes a real answer.
-- A Feed item maps to its session by the base64 session id at the end of its `workstream_id`: `cmux sessions list --session <id> --json`.
-- `"delivered": true` prints even for a made-up id.
-  Done only when `read-screen` shows the picker gone.
-- The Feed gives up after 120s. After that the picker is the owner's to answer in that pane, where the dashboard shows the session as Stuck (only Playground's own row reads Waiting on you): file nothing, and type nothing, since keys typed into a pane read as his.
-- When the owner is answering the picker in that pane himself, leave it to him and wait for the session's report.
+Done when the session's state record reads `working` with `at` after the resume, or the owner has the picker.
 
 ## End
 

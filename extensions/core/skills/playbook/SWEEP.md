@@ -28,7 +28,7 @@ Done when every probe is in step 3's list, every line `ops:outbox` printed has g
 
 For every agent of yours that `ListAgents` lists, or the roster shows with a status other than `ended`, find which of these it is ([SESSIONS.md](SESSIONS.md#check-a-session) reads a session's state) and act:
 
-- **Waiting** on a picker, which **ask** keeps factory sessions from raising: answer it through the Feed when a rule or a sound default decides it, and have the session post anything only the owner decides to the Inbox; otherwise leave it for the owner in that pane ([SESSIONS.md](SESSIONS.md#answer-a-picker)).
+- **Waiting** on a picker, which **ask** keeps factory sessions from raising: end it by a close and a resume whose brief gives the answer when a rule or a sound default decides it, or has the session post anything only the owner decides to the Inbox; otherwise leave it for the owner in that pane ([SESSIONS.md](SESSIONS.md#answer-a-picker)).
 - **Stuck** on a permission prompt: allow it when the command is needed, else deny it with a simpler shape ([SESSIONS.md](SESSIONS.md#answer-a-permission-prompt), **unstick**).
   When the command's shape prompted (a shell wrapper, a compound one-liner), deny it and have the session rerun it as plain commands.
   When the action itself prompted and you cannot judge it (a delete, a protected path), deny it and post it as an Inbox decision (**ask**).
