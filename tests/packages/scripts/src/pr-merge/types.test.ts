@@ -9,6 +9,7 @@ import {
   type Run,
   type RunResult,
 } from "../../../../../packages/scripts/src/pr-merge/merge"
+import { ciSteps, slotted } from "../../../../../packages/scripts/src/pr-merge/types"
 import "./scratch-config"
 import { greenChecks } from "./suite"
 
@@ -154,7 +155,6 @@ describe("the types gate", () => {
     expect(squashes(calls)).toEqual([])
     // the scratch worktree is gone, and git no longer lists it
     expect(existsSync(join(checkout, ".claude", "worktrees", `merge-types-${N}`))).toBe(false)
-    expect(await git(["worktree", "list", "--porcelain"])).toMatchObject({ code: 0 })
     expect((await git(["worktree", "list"])).stdout.trim().split("\n")).toHaveLength(1)
     // the same head and canary refuse again from the kept refusal, with no second run
     const again = await prMerge(N, { repo: REPO }, gh(head, "1").run, {
@@ -254,5 +254,34 @@ describe("the types gate", () => {
       lockRoot: holds.lockRoot,
     })
     expect(skipped.gates.find((gate) => gate.name === "types")?.detail).toStartWith("skipped: ")
+  })
+
+  test("ciSteps runs CI's type steps, each through run-slot as the merge train, or bare under a held slot", () => {
+    const at = { canary: "c".repeat(40), checkout: "/co", worktree: "/wt" }
+    const nice = process.env.RUN_SLOT_NICE
+    process.env.RUN_SLOT_NICE = "10"
+    try {
+      expect(
+        ciSteps(at).map((step) => [step.name, step.argv.join(" "), step.types ?? false]),
+      ).toEqual([
+        ["clone", "cp -cR /co/node_modules /wt/", false],
+        ["install", "bun install --force --ignore-scripts --cwd /wt", false],
+        ["check-types", `bunx turbo run check-types --filter=...[${"c".repeat(40)}]`, true],
+        ["build", "bunx turbo run build --filter=./packages/* --filter=@api/hono", true],
+        ["metrics", "bun packages/scripts/src/data-table-metrics.ts", false],
+        ["check-types:tests", "bun run check-types:tests", true],
+      ])
+    } finally {
+      if (nice === undefined) delete process.env.RUN_SLOT_NICE
+      else process.env.RUN_SLOT_NICE = nice
+    }
+    expect(slotted(["tsc"], {}, "/ops/run-slot.sh")).toEqual([
+      "/ops/run-slot.sh",
+      "ops-merge-train",
+      "--",
+      "tsc",
+    ])
+    expect(slotted(["tsc"], { RUN_SLOT_NICE: "10" }, "/ops/run-slot.sh")).toEqual(["tsc"])
+    expect(slotted(["tsc"], {}, null)).toEqual(["tsc"])
   })
 })

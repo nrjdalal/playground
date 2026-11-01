@@ -1,4 +1,5 @@
 // The types gate: a head behind canary that merges with it clean merges on its own checks, which typed the head alone, so pr:merge type-checks the tree the squash makes before it squashes, since two PRs green alone once broke canary together on a changed signature.
+import { accessSync, constants } from "node:fs"
 import { mkdir, rm } from "node:fs/promises"
 import { homedir } from "node:os"
 import { dirname, join } from "node:path"
@@ -12,7 +13,7 @@ export type TypeStep = { argv: string[]; name: string; types?: boolean }
 // The steps for one merged tree: the worktree it is checked out in, the checkout pr:merge runs from (whose node_modules it clones), and canary's sha, which the turbo filter diffs against.
 export type TypeSteps = (at: { canary: string; checkout: string; worktree: string }) => TypeStep[]
 
-// How long the whole check may take, slot waits included, so a run that cannot finish refuses inside the merge train's 900s call of pr:train ready.
+// How long the whole check may take, slot waits included, so a run that cannot finish refuses inside the merge train's 900s call of pr:train ready, whose gates share it (ready.ts).
 export const TYPES_BUDGET_MS = 10 * 60_000
 
 const NAME = "types"
@@ -20,12 +21,22 @@ const NAME = "types"
 const runSlot = (): string =>
   join(process.env.PLAYGROUND_DATA_DIR || join(homedir(), ".playground"), "ops", "run-slot.sh")
 
-// Pure: argv through the machine's run slot (**slots**), or bare under a run that already holds one (run-slot exports RUN_SLOT_NICE to its child), as commit-slot.ts does, so a gate never waits on a slot its own caller holds.
+const executable = (path: string): boolean => {
+  try {
+    accessSync(path, constants.X_OK)
+    return true
+  } catch {
+    return false
+  }
+}
+
+// Pure: argv through the machine's run slot (**slots**) as the merge train's own runs take it, since the gate holds the merge lock as theirs do (run-slot.sh puts ops-merge-train in class 0, outside the queue); bare under a run that already holds a slot (run-slot exports RUN_SLOT_NICE to its child) or on a machine with no run-slot, as commit-slot.ts does.
 export const slotted = (
   argv: string[],
   env: Record<string, string | undefined>,
-  script: string,
-): string[] => (env.RUN_SLOT_NICE === undefined ? [script, `pr-merge-types`, "--", ...argv] : argv)
+  script: string | null,
+): string[] =>
+  env.RUN_SLOT_NICE === undefined && script ? [script, "ops-merge-train", "--", ...argv] : argv
 
 // CI's own type steps (.github/workflows/auto-check-build.yml), after a node_modules clone by scripts/README.md's "A worktree's node_modules", each through the run slot.
 export const ciSteps: TypeSteps = ({ canary, checkout, worktree }) => {
@@ -45,7 +56,9 @@ export const ciSteps: TypeSteps = ({ canary, checkout, worktree }) => {
     { argv: ["bun", "packages/scripts/src/data-table-metrics.ts"], name: "metrics" },
     { argv: ["bun", "run", "check-types:tests"], name: "check-types:tests", types: true },
   ]
-  return steps.map((step) => ({ ...step, argv: slotted(step.argv, process.env, runSlot()) }))
+  const script = runSlot()
+  const slot = executable(script) ? script : null
+  return steps.map((step) => ({ ...step, argv: slotted(step.argv, process.env, slot) }))
 }
 
 // Pure: what a failed step printed, as a refusal shows it: its first TypeScript errors, else its last lines.
@@ -130,6 +143,9 @@ export async function typesGate({
   const memo = join(lockRoot, "merge-types", `${head}-${canary}`)
   const kept = Bun.file(memo)
   if (await kept.exists()) return { detail: await kept.text(), name: NAME, ok: false }
+  if (budgetMs <= 0)
+    return unfinished("this call's shared budget ran out on the gates before it, so no check ran")
+  const deadline = Date.now() + budgetMs
   const at = `the merged tree ${mergeTree.slice(0, 7)} (#${n} at ${head.slice(0, 7)} onto ${BASE} ${canary.slice(0, 7)})`
   let worktree = ""
   try {
@@ -161,7 +177,6 @@ export async function typesGate({
       worktree,
       commit,
     ])
-    const deadline = Date.now() + budgetMs
     const times: string[] = []
     for (const step of steps({ canary, checkout, worktree })) {
       const left = deadline - Date.now()
@@ -195,7 +210,8 @@ export async function typesGate({
         times.push(`${step.name} ${seconds}s`)
         continue
       }
-      if (proc.signalCode)
+      // read from the clock: run-slot traps the TERM and exits 143 itself, so its kill leaves no signalCode
+      if (Date.now() >= deadline)
         return unfinished(
           `${step.name} ran past the check's ${Math.round(budgetMs / 1000)}s, slot waits included`,
         )
