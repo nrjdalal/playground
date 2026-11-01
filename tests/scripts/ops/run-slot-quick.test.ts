@@ -363,7 +363,7 @@ describe("the quick slot holds while load5 is at or over the load line", () => {
   })
 })
 
-// a command's first word past env and VAR=x can be an option: env -i made each basename print "illegal option -- i", eight lines a run
+// PG-298: a command's first word past env and VAR=x can be an option: env -i made each basename print "illegal option -- i", eight errors a run
 describe("a command whose first word past env is an option", () => {
   test("runs with no basename error", async () => {
     const run = machine().start("worker-e", {}, undefined, ["env", "-i", "touch"])
