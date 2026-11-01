@@ -14,10 +14,6 @@ export const SETUP = {
       "Pull requests are read through GitHub's gh tool: the Settings page's checks set it up and sign it in.",
     title: "GitHub can't be read",
   },
-  linear: {
-    description: "Run the linear skill once to read your tickets.",
-    title: "No Linear board yet",
-  },
   plan: {
     description:
       "It appears once bundles/plan.json exists in the Dashboard's data folder (PLAYGROUND_DATA_DIR).",
