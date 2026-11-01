@@ -97,7 +97,7 @@ const SUPERVISED = [
 // next's standalone server.js moves into its build folder before it listens, so only the launcher above it still works in the Dashboard's checkout
 const CHDIR = [
   "  99085 94877 bash /x/desk/scripts/ops/dashboard/run.sh",
-  "  49510     1 bun /x/desk/packages/scripts/src/launcher.ts",
+  "  49510     1 bun ../../packages/scripts/src/portless.ts bun /d/builds/1a1291d54884f782f5c7e71c10a9637a1c174987/web/web/next/server.js",
   "  49526 49510 bun /d/builds/1a1291d54884f782f5c7e71c10a9637a1c174987/web/web/next/server.js",
 ].join("\n")
 
