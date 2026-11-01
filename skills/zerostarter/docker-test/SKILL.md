@@ -14,7 +14,7 @@ bash ~/.playground/ops/runner-host/ci.sh web HEAD
 ```
 
 It exits with the build's code, or 255 when the box cannot take it; nothing falls back to the Mac.
-With no runner host set (`RUNNER_HOST`, or the data folder's `ops/runner-host/ip`), it exits 255 at once, so the web image builds on this Mac once that Postgres is stopped.
+With no runner host set (`RUNNER_HOST`, or the data folder's `ops/runner-host/ip`), it exits 255 at once, so ask Ops, which runs the live dashboard, to stop its Postgres, and build the web image on this Mac once it is stopped.
 The api image still builds here, so a recipe below that names `api` runs as written; a full-stack one runs only on a Mac whose Docker VM holds no live dashboard's Postgres.
 
 Full stack, the same Dockerfiles prod ships:

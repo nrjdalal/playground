@@ -79,16 +79,18 @@ export const INSPECT_TIMEOUT_MS = 8_000
 const WEB_DOCKERFILE = "web/next/Dockerfile"
 const API_HERE = "The api image still builds here (docker compose build api)."
 const BOX_ROUTE = `Build the web image on the box instead: commit, then from the checkout run bash ~/.playground/ops/runner-host/ci.sh web HEAD, which builds HEAD's tree there and never on the Mac. ${API_HERE}`
-const NO_HOST_ROUTE = `No runner host is set (RUNNER_HOST, or the data folder's ops/runner-host/ip), so there is no box to build it on: set one up (scripts/ops/runner-host/host.sh setup <ip>, then write its address to that ip file), or build once the live dashboard's Postgres is stopped. ${API_HERE}`
+const NO_HOST_ROUTE = `No runner host is set (RUNNER_HOST, or the data folder's ops/runner-host/ip), so there is no box to build it on: set one up (scripts/ops/runner-host/host.sh setup <ip>, then write its address to that ip file), or ask Ops, which runs the live dashboard, to stop its Postgres, and build once it is stopped. ${API_HERE}`
 
-// Whether a runner host is set, read as ci.sh reads it (ci.sh:14,17): RUNNER_HOST, else the data folder's ops/runner-host/ip, holding an IPv4 address.
+// Whether a runner host is set, read as ci.sh's IP= line and its address check read it: RUNNER_HOST, else the data folder's ops/runner-host/ip with its trailing newlines stripped as $(cat) strips them, holding an IPv4 address.
 async function hasRunnerHost(environment: Record<string, string | undefined>): Promise<boolean> {
-  let ip = environment.RUNNER_HOST
-  if (!ip)
-    ip = await Bun.file(join(dataDirOf(environment), "ops", "runner-host", "ip"))
-      .text()
-      .catch(() => "")
-  return /^[0-9]{1,3}(\.[0-9]{1,3}){3}$/.test(ip.replace(/\n+$/, ""))
+  const ip =
+    environment.RUNNER_HOST ||
+    (
+      await Bun.file(join(dataDirOf(environment), "ops", "runner-host", "ip"))
+        .text()
+        .catch(() => "")
+    ).replace(/\n+$/, "")
+  return /^[0-9]{1,3}(\.[0-9]{1,3}){3}$/.test(ip)
 }
 
 // The words after the options that `takes` names, with each value skipped; an attached value (--file=x) is one word.

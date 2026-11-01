@@ -214,11 +214,11 @@ Their tests are `bun run test:file tests/scripts/hooks`.
   `image build` or `builder build` whose `-f` or `--file` names `web/next/Dockerfile` or a path it cannot read, through a wrapper, `bash -c` or run-slot.sh;
   an `ssh` call, a printed command and `--help` pass.
   For a web build alone it reads the container's name from the dashboard supervisor's `dashboard-db` (`ops/dashboard/dashboard-db` in the data folder, the `$S` of `scripts/ops/dashboard/supervisor.sh`) and asks `docker inspect` whether it runs.
-  The build runs only when dashboard-db names a container Docker reports as stopped or gone, with a runner host set or not.
+  The build runs only when dashboard-db names a container Docker reports as stopped or gone, whether or not a runner host is set.
   A dashboard-db that is missing, empty (the supervisor writes it empty both when the dashboard has no container and when its lookup failed) or unreadable refuses, as do a running container, any other answer from Docker and no answer in 8s (well inside the hook's 15s, since a hook past its limit lets the call through), since a wrong guess costs the dashboard's database.
   It reads the runner host as `ci.sh` does: `RUNNER_HOST`, else the data folder's `ops/runner-host/ip`, holding an IPv4 address.
   With a host set, its reason names the box route, `bash ~/.playground/ops/runner-host/ci.sh web HEAD` from a commit ([scripts/ops/README.md](../ops/README.md)), and the api image, which still builds on the Mac.
-  With none set, `ci.sh` exits 255 with no box to reach, so the reason names the routes that exist: set one up (`scripts/ops/runner-host/host.sh setup <ip>`, its address written to that ip file), or build once the live dashboard's Postgres is stopped, and the api image.
+  With none set, `ci.sh` exits 255 with no box to reach, so the reason names the routes that exist: set one up (`scripts/ops/runner-host/host.sh setup <ip>`, then write its address to that ip file), or ask Ops, which runs the live dashboard, to stop its Postgres, and build once it is stopped, and the api image.
   It fails closed only on a call that reads as a docker build, and its tests are in `bun run test:file tests/scripts/hooks`.
 
 ## no-main-checkout
