@@ -137,7 +137,7 @@ After a restart, a PR body is pulled back with `gh pr view <n> --json body -q .b
 
 Every start and every end, with its reason, lands in the roster the moment it happens (**roster**).
 
-A session takes its skills from the copy written when it started (`~/.playground/orgs/<set>/<hash>/`), so after a ship a live session reads each changed skill's files from the folder `playground update` names in the main checkout (**release**).
+A session takes its skills from the copy written when it started (`~/.playground/orgs/<set>/<hash>/`), so after any `playground update` that prints `skills changed`, a ship or the user menu's Update now alike, the session that ran it sends each lead the folders that line names in the main checkout, and a live session reads each changed skill's files there (**release**).
 
 ## Updating Claude Code
 
