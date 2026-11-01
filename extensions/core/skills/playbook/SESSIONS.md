@@ -264,7 +264,7 @@ Each answer is a line in `ops/picker.log`: the time, the manager, the answer, th
 Done when it prints that line; it refuses any caller but the session's manager or the primary dispatcher, a deny with no reason, a dispatcher's session, and a key no waiting call or shown prompt matches, which means the prompt changed: wait for its next alert.
 An ops-unstick alert that says picker cannot answer the prompt found no waiting call surely its own: take it to the dispatcher.
 On herdr it also refuses a prompt that may be another waiting call's, as a subagent's file or URL prompt always is while its parent waits.
-A herdr pane takes no key from your hand, since `no-raw-spawn` refuses every herdr call but a read, so end that prompt by a close and a resume under the session's name, or take it to the dispatcher, for the owner to answer it in the pane:
+A herdr pane takes no key from your hand, since `no-raw-spawn` refuses every herdr call but a read, so end that prompt by a close and a resume under the session's name:
 
 ```bash
 "${PLAYGROUND_REPO:?}/scripts/spawn.sh" close <session>

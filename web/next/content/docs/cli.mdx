@@ -138,9 +138,8 @@ A manager keeps it running as a background task and starts it again after each a
 `allow` presses Yes, once, in the session's own pane after reading that the pane's prompt shows that command; `deny` presses No and sends the session the reason, so it can try a simpler way.
 Each answer is a line in `ops/picker.log` under `~/.playground`, naming who answered, the session and the start of the command.
 It refuses anyone but the session's manager or the primary dispatcher, a deny with no reason, a session that is not running, a dispatcher's own prompt, a key that no prompt showing matches, and a prompt that may be another waiting call's, as a subagent's file or URL prompt always is while its parent waits.
-For that last one on cmux, the manager denies it by hand with Escape and sends the session the reason.
+For that last one on cmux, the manager denies it by hand with Escape and sends the session the reason, or takes it to the dispatcher.
 On herdr, whose panes take no key from a session's hand, the manager closes the session with `spawn.sh close` and resumes it under its name by its session id, with the reason as its brief, so the prompted call never runs.
-Either way, it can take the prompt to the dispatcher instead.
 
 ## Read the rules: `playground rules`
 

@@ -205,6 +205,7 @@ describe("playground picker (PG-2184)", () => {
     expect(result.out).toContain("spawn.sh close k3m9px-worker")
     expect(result.out).toContain("~/.playground/resume/k3m9px-worker.sh")
     expect(result.out).not.toContain("Escape")
+    expect(result.out).not.toContain("dispatcher")
     expect(presses()).toEqual([])
   })
 

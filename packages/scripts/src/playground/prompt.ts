@@ -32,7 +32,7 @@ export const BY_HAND =
 
 // A herdr pane takes no key from a session's own hand, since no-raw-spawn refuses every herdr call but a read: the session closes and resumes under its name by its session id, so the prompted call never runs.
 export const herdrRoute = (name: string): string =>
-  `close the session with spawn.sh close ${name}, then run the spawn.sh resume line ~/.playground/resume/${name}.sh holds with --brief <a file of the reason and the simpler shape> added, so it resumes under its name by its session id and the prompted call never runs; or take it to the dispatcher, for the owner to answer it in the pane`
+  `close the session with spawn.sh close ${name}, then run the spawn.sh resume line ~/.playground/resume/${name}.sh holds with --brief <a file of the reason and the simpler shape> added, so it resumes under its name by its session id and the prompted call never runs`
 
 function matchOf(dialog: string[], input: Record<string, unknown>): "strong" | "weak" | null {
   const flat = (text: string) => text.replace(/[\s│]+/g, "")
