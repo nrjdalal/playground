@@ -237,7 +237,7 @@ const POST_RULES: Record<
         await db
           .select({ id: yardMessage.id })
           .from(yardMessage)
-          .where(and(eq(yardMessage.channelId, channel.id), eq(yardMessage.status, "sent")))
+          .where(and(eq(yardMessage.channelId, channel.id), eq(yardMessage.status, "sent"), live()))
           .limit(1)
       ).length === 0,
   }),
