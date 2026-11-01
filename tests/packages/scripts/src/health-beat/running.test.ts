@@ -43,6 +43,14 @@ const PROD = [
   "    800     1 bash /x/idle.sh",
 ].join("\n")
 
+// the live Dashboard after its supervisor took the route: run.sh owns it, and the web it started runs with ppid 1 on the route's port
+const SUPERVISED = [
+  "  99085 94877 bash /x/desk/scripts/ops/dashboard/run.sh",
+  "    576 99085 bash /x/desk/scripts/ops/dashboard/supervisor.sh",
+  "  49510     1 bun ../../packages/scripts/src/portless.ts bun /d/builds/1a1291d54884f782f5c7e71c10a9637a1c174987/web/web/next/server.js",
+  "  49526 49510 bun /d/builds/1a1291d54884f782f5c7e71c10a9637a1c174987/web/web/next/server.js",
+].join("\n")
+
 const DEV = [
   "  4100  4000 node /x/node_modules/.bin/portless --script dev:app",
   "  4101  4100 bun run dev:app",
@@ -64,6 +72,29 @@ describe("buildOf, the main checkout's branch, the live Dashboard's web and its 
     expect(buildOf({ branch: MAIN, health: SHA, ps: DEV, root: 4200 })).toBe(
       "main build, at 1a1291d",
     )
+  })
+
+  test("a branch's build, as a /builds/<sha>/ path on the process listening on the route's port, when the route's owner runs none", () => {
+    expect(
+      buildOf({
+        branch: MAIN,
+        health: SHA,
+        listeners: [49526],
+        port: 58008,
+        ps: SUPERVISED,
+        root: 99085,
+      }),
+    ).toBe("main build, at 1a1291d")
+    expect(
+      buildOf({
+        branch: MAIN,
+        health: SHA,
+        listeners: [49526],
+        port: 58008,
+        ps: SUPERVISED,
+        root: 4242,
+      }),
+    ).toBe("main build, at 1a1291d")
   })
 
   test("a branch's dev server, as next dev in the route's tree", () => {
@@ -92,8 +123,11 @@ describe("buildOf, the main checkout's branch, the live Dashboard's web and its 
         why: "no route",
       }),
     ).toBe("main, unknown (no route), at unknown (no answer)")
-    expect(buildOf({ branch: MAIN, health: SHA, ps: PROD, root: 800 })).toBe(
-      "main, unknown (neither a /builds/<sha>/ path nor next dev runs under pid 800), at 1a1291d",
+    expect(buildOf({ branch: MAIN, health: SHA, port: 58008, ps: PROD, root: 800 })).toBe(
+      "main, unknown (neither a /builds/<sha>/ path nor next dev runs under pid 800 or on port 58008), at 1a1291d",
+    )
+    expect(buildOf({ branch: MAIN, health: SHA, port: 58008, ps: SUPERVISED, root: 99085 })).toBe(
+      "main, unknown (neither a /builds/<sha>/ path nor next dev runs under pid 99085 or on port 58008), at 1a1291d",
     )
     expect(buildOf({ branch: MAIN, health: SHA, ps: PROD, root: 4242 })).toBe(
       "main, unknown (pid 4242 is not running), at 1a1291d",
@@ -130,8 +164,10 @@ describe("readRunning", () => {
     if (argv.includes("describe")) return { code: 0, out: "v0.0.23-1-g8b6438a\n" }
     if (argv.includes("branch")) return { code: 0, out: "main\n" }
     if (argv[0] === "ps") return { code: 0, out: ps }
+    if (argv[0] === "lsof" && listening[argv[2]!]) return { code: 0, out: listening[argv[2]!] }
     return { code: 1, out: "" }
   }
+  const listening: Record<string, string> = {}
 
   test("reads the main checkout, then the web route's owner for playground.localhost and the API's port for api.playground.localhost", async () => {
     const asked: string[] = []
@@ -154,6 +190,25 @@ describe("readRunning", () => {
       version: "v0.0.23 + 1 local commit (8b6438a)",
     })
     expect(asked).toEqual(["http://127.0.0.1:4459/api/health"])
+  })
+
+  test("reads the supervised web from the process listening on the route's port, read through lsof", async () => {
+    listening["-iTCP:58008"] = "49526\n"
+    try {
+      const got = await readRunning({
+        health: async () => ({ version: "0.0.1-1a1291d" }),
+        portless: routes([
+          { hostname: "dashboard.playground.localhost", pid: 99085, port: 58008 },
+          { hostname: "playground.localhost", pid: 0, port: 58008 },
+          { hostname: "api.playground.localhost", pid: 0, port: 4459 },
+        ]),
+        repo: "/repo",
+        run: run(SUPERVISED),
+      })
+      expect(got.build).toBe("main build, at 1a1291d")
+    } finally {
+      delete listening["-iTCP:58008"]
+    }
   })
 
   test("a route that holds the bare name itself is its own owner", async () => {
