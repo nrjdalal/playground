@@ -86,6 +86,26 @@ describe("the job registry", () => {
     expect(jobs.map((job) => job.name)).toEqual([...jobs.map((job) => job.name)].sort())
   })
 
+  test("a stored row naming cmux or auto, with needsCmux or without it, loads and runs in herdr, and one with an unknown key is skipped", () => {
+    const sweep = jobKey("ops-sweep")
+    const stored = (value: Record<string, unknown>) =>
+      renderJobs(
+        settingsFor([{ key: sweep, scope: "me", value }], "me").values,
+        [],
+        fill,
+      ).jobs.find((job) => job.name === "ops-sweep")!
+    const { needsCmux: _, ...bare } = { ...JOBS["ops-sweep"]!, enabled: true }
+    for (const row of [
+      { ...bare, needsCmux: true, runtime: "cmux" },
+      { ...bare, needsCmux: false, runtime: "auto" },
+      bare,
+    ]) {
+      expect(stored(row).disabled).toBeUndefined()
+      expect(stored(row).runtime).toBe("herdr")
+    }
+    expect(stored({ ...bare, madeUp: true }).disabled).toBe(true)
+  })
+
   test("its schema takes every shape the runner reads, and refuses a job with no schedule", () => {
     expect(
       jobSchema.safeParse({ ...JOBS["ops-dashboard"], pausedFor: "a made-up reason" }).success,

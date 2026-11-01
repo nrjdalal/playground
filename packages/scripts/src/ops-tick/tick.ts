@@ -361,7 +361,7 @@ const felled = async (ctx: Context, upPy: string, agents: Map<string | undefined
   await appendFile(toldPath, sent.map((line) => `${line}\n`).join(""))
 }
 
-// ops-up every 5 minutes, so a job that went down (a reboot, a quit cmux) comes back with no hand step, each line it prints told to ops once until it changes.
+// ops-up every 5 minutes, so a job that went down (a reboot, a herdr server that went down) comes back with no hand step, each line it prints told to ops once until it changes.
 const up = async (ctx: Context) => {
   const toldPath = join(ctx.ops, "tick", "up-told.txt")
   const told = new Set(
