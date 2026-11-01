@@ -11,7 +11,7 @@ Your spec is the slice file your lead names, in ~/.playground/notes/rush/. It li
 
 - Change only the files you own. If you need a change in a file you don't own, stop and tell the Builder: it goes to that file's slice, or waits.
 - Keep the diff small: no refactors, no renames, no drive-by fixes.
-- When another PR merges into canary, do NOT merge canary into yours by default: run `git merge-tree --write-tree origin/canary HEAD`. If it is clean, keep your head: pr:merge takes a head that merges clean, with its 5/5 and checks as they stand. Merge canary in only when merge-tree shows a conflict, then tell the Builder first, since the new head needs its checks and a 5/5.
+- When another PR merges into canary, do NOT merge canary into yours by default: run `git merge-tree --write-tree origin/canary HEAD`. If it is clean, keep your head: pr:merge takes a head that merges clean, with its 5/5 and checks as they stand, once its `types` gate type-checks the merged tree. Merge canary in only when merge-tree shows a conflict or the `types` gate refuses, then tell the Builder first, since the new head needs its checks and a 5/5.
 
 Plan: send the Builder 3 lines (files, done list, ETA) before building, then build without waiting.
 
@@ -51,9 +51,9 @@ Standing lines:
 
 - When you close a reviewer, tester or probe of yours, or one closes itself, end it in the roster the same moment: `python3 ~/.playground/roster.py set <name> status=ended`. A closed checker left as working shows as STUCK.
 - On GitHub (PR bodies, comments, reviews), wrap every @Name in backticks (`@Greed`, `@Builder`): a bare @word mentions and notifies the GitHub user of that name (worker-sloth).
-- When canary moves just before your pr:merge (another PR took the lock first), keep your head: pr:merge takes a head that merges clean with canary as it is. A conflict needs a merge of canary, then checks and a 5/5 on the new head.
+- When canary moves just before your pr:merge (another PR took the lock first), keep your head: pr:merge takes a head that merges clean with canary, once its `types` gate type-checks the merged tree. A conflict or a `types` refusal needs a merge of canary, then checks and a 5/5 on the new head.
 - Set `pr=<url>` on your roster entry as soon as the PR opens, so each merge notice finds you.
-- Merge turns: pr:merge and merge-on-ready read each PR's checks, so several green PRs merge back to back in merge-queue.json order with no new run.
+- Merge turns: pr:merge and merge-on-ready read each PR's checks, so several green PRs merge back to back in merge-queue.json order with no new GitHub run; each behind canary waits on its `types` gate's type check of the merged tree.
 - Near-zero owner time: demos and design picks are decided by the Builder and the Planner with the recommended option, and built without waiting for him (the dispatcher tells him after). When unsure, ask the Builder, who consults the Planner, Ops or an advisor session, never him. Only these reach him, via the dispatcher: Slack messages to people whose channel he has not pre-authorised, shipping canary to main, new Linear tickets, irreversible deletes, and budget.
 - Nothing custom: before writing any UI component, check shadcn (the registry and installable community registries) and AI Elements, use one as-is, and name it in the PR. A bespoke part needs a one-line "checked X, Y; none fits because…" in the PR. Reviewers score against it.
 - ETA: an ETA is to MERGED, not to PR open: now + build left + rounds left × 26 min + 20 min checks + PRs ahead in merge-queue.json × 20 min + a slip buffer (the model: ~/.playground/planner/eta-model.json). One number, no ranges; re-send it whenever the queue moves.
