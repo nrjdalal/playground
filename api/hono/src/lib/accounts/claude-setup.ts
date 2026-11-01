@@ -101,10 +101,14 @@ const browserOf = (applications = "/Applications"): (typeof BROWSERS)[number] | 
 const shown = (browser: (typeof BROWSERS)[number] | undefined): Browser | null =>
   browser ? { app: browser.app, name: browser.name } : null
 
+// Pure: where the profile read goes, PLAYGROUND_PROFILE_URL when set (the new-user gate points it at a closed loopback port, so its made-up token never leaves the Mac), else Claude's own.
+export const profileUrl = (env: Record<string, string | undefined> = process.env): string =>
+  env.PLAYGROUND_PROFILE_URL || "https://api.anthropic.com/api/oauth/profile"
+
 // The account a long-lived token signs in as, by Claude's own profile read, or null when it cannot say (a token scoped to inference alone may not read it).
 const profileOf = async (token: string): Promise<string | null> => {
   try {
-    const answer = await fetch("https://api.anthropic.com/api/oauth/profile", {
+    const answer = await fetch(profileUrl(), {
       headers: { "anthropic-beta": "oauth-2025-04-20", authorization: `Bearer ${token}` },
       signal: AbortSignal.timeout(PROFILE_MS),
     })

@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, test } from "bun:test"
-import { mkdtempSync, rmSync } from "node:fs"
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { readFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -7,8 +7,10 @@ import { join } from "node:path"
 import {
   beat,
   cycle,
+  emptyBalanceAt,
   windowsOf,
   zaiQuota,
+  BALANCE_HOLD_MS,
   CYCLE_SECONDS,
 } from "../../../../../packages/scripts/src/ops-zai-usage/sync"
 
@@ -141,11 +143,69 @@ describe("cycle", () => {
     expect(written.windows.fiveHour.cap).toBe(28000)
   })
 
-  test("reports why it failed and leaves the last file as it was", async () => {
+  test("marks the balance empty while a GLM session's empty-balance failure is in its hold", async () => {
+    const path = join(scratch(), "zai-usage.json")
+    const now = new Date("2026-10-16T15:00:00.000Z")
+    const seen = async () => "2026-10-16T14:40:00.000Z"
+    expect(await cycle(async () => ({ limits: LIMITS }), path, now, seen)).toBe("ok")
+    const written = JSON.parse(await readFile(path, "utf8")) as { balance?: unknown }
+    expect(written.balance).toEqual({ empty: true, seenAt: "2026-10-16T14:40:00.000Z" })
+    expect(await cycle(async () => ({ limits: LIMITS }), path, now)).toBe("ok")
+    expect(
+      (JSON.parse(await readFile(path, "utf8")) as { balance?: unknown }).balance,
+    ).toBeUndefined()
+  })
+
+  test("reports why it failed and writes the error over the last file's windows", async () => {
     const dir = scratch()
     const path = join(dir, "zai-usage.json")
-    expect(await cycle(async () => ({ limits: [] }), path)).toBe("no credit window in the answer")
-    await expect(readFile(path, "utf8")).rejects.toThrow()
+    const now = new Date("2026-10-16T15:05:00.000Z")
+    expect(await cycle(async () => ({ limits: [] }), path, now)).toBe(
+      "no credit window in the answer",
+    )
+    expect(JSON.parse(await readFile(path, "utf8"))).toEqual({
+      error: "no credit window in the answer",
+      errorAt: "2026-10-16T15:05:00.000Z",
+    })
+    await cycle(async () => ({ limits: LIMITS }), path, new Date("2026-10-16T15:10:00.000Z"))
+    await cycle(async () => Promise.reject(new Error("Z.ai 401: code 1001")), path, now)
+    const failed = JSON.parse(await readFile(path, "utf8")) as Record<string, unknown>
+    expect(failed.error).toBe("Z.ai 401: code 1001")
+    expect(failed.writtenAt).toBe("2026-10-16T15:10:00.000Z")
+    expect(failed.windows).toBeDefined()
+  })
+})
+
+describe("emptyBalanceAt", () => {
+  const now = new Date("2026-10-31T03:00:00.000Z")
+  const state = (dir: string, id: string, record: Record<string, unknown>) =>
+    writeFileSync(
+      join(dir, `${id}.json`),
+      JSON.stringify({ event: "StopFailure", sessionId: id, ...record }),
+    )
+
+  test("names the newest empty-balance failure within the hold, and no other failure", async () => {
+    const dir = join(scratch(), "session-state")
+    mkdirSync(dir)
+    state(dir, "a", { at: "2026-10-31T02:05:11.819Z", reason: "balance", state: "failed" })
+    state(dir, "b", { at: "2026-10-31T02:30:00.000Z", reason: "balance", state: "failed" })
+    state(dir, "c", { at: "2026-10-31T02:55:00.000Z", reason: "rate_limit", state: "failed" })
+    state(dir, "d", { at: "2026-10-31T02:56:00.000Z", state: "working" })
+    writeFileSync(join(dir, "e.json"), "{ nope")
+    expect(await emptyBalanceAt(dir, now)).toBe("2026-10-31T02:30:00.000Z")
+  })
+
+  test("lets the flag lapse once the newest failure is older than the hold, so one start can try again", async () => {
+    const dir = join(scratch(), "session-state")
+    mkdirSync(dir)
+    const old = new Date(now.getTime() - BALANCE_HOLD_MS - 1000).toISOString()
+    state(dir, "a", { at: old, reason: "balance", state: "failed" })
+    expect(await emptyBalanceAt(dir, now)).toBeNull()
+    expect(await emptyBalanceAt(join(dir, "missing"), now)).toBeNull()
+  })
+
+  test("holds for an hour", () => {
+    expect(BALANCE_HOLD_MS).toBe(60 * 60 * 1000)
   })
 })
 

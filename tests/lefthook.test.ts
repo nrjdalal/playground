@@ -235,7 +235,7 @@ test("the pre-commit env-keys step runs before the build and stops it on a short
   }
   const { build, "dev-stack": devStack, "env-keys": envKeys } = config["pre-commit"].commands
   expect(envKeys).toBeDefined()
-  expect(String(envKeys!.run)).toEndWith("bun packages/scripts/src/env-keys.ts")
+  expect(String(envKeys!.run)).toEndWith("bun packages/scripts/src/env-keys.ts POSTGRES_URL")
   // after the dev-stack guard, since its own build of @packages/env would rebuild dist under a running stack
   expect(envKeys!.priority as number).toBeGreaterThan(devStack!.priority as number)
   expect(envKeys!.exclude).toEqual(build!.exclude)
@@ -312,19 +312,23 @@ test("the pre-commit rule test runs when the rules change, and a broken pin refu
   const unpin = (text: string) =>
     text.replace("- ALWAYS: Do every change in its", "- ALWAYS: Do each change in its")
   const addLine = (text: string) => `${text}\nOne more plain line.\n`
-  // a same-length edit, so an AGENTS.md just under the budget still passes
+  // a same-length edit, so an AGENTS.md just under the limit still passes
   const sameLength = (text: string) => text.replace("AI coding agents", "AI-coding agents")
   try {
     expect(git("init", "-q")).toMatchObject({ code: 0 })
     for (const file of files) await Bun.write(join(dir, file), Bun.file(join(ROOT, file)))
-    // AGENTS.md sits one character under tests/AGENTS.test.ts's budget, the most a commit may leave it at
-    const budget = Number(
-      /const BUDGET = ([\d_]+)/
-        .exec(await Bun.file(join(ROOT, "tests/AGENTS.test.ts")).text())![1]!
-        .replaceAll("_", ""),
-    )
+    // AGENTS.md sits one character under tests/AGENTS.test.ts's limit, MARGIN of BUDGET, the most a commit may leave it at
+    const rule = await Bun.file(join(ROOT, "tests/AGENTS.test.ts")).text()
+    const budget = Number(/const BUDGET = ([\d_]+)/.exec(rule)![1]!.replaceAll("_", ""))
+    const limit = Math.floor(budget * Number(/const MARGIN = ([\d.]+)/.exec(rule)![1]!))
     const agents = await Bun.file(join(dir, "AGENTS.md")).text()
-    await Bun.write(join(dir, "AGENTS.md"), `${agents}${"x".repeat(budget - 1 - agents.length)}`)
+    const room = limit - 1 - agents.length
+    expect(
+      room >= 0
+        ? ""
+        : `AGENTS.md holds ${agents.length} chars, over the limit of ${limit} from BUDGET ${budget}`,
+    ).toBe("")
+    await Bun.write(join(dir, "AGENTS.md"), `${agents}${"x".repeat(room)}`)
     // CLAUDE.md is a link to AGENTS.md, as in the repo, so a commit stages AGENTS.md alone
     symlinkSync("AGENTS.md", join(dir, "CLAUDE.md"))
     // the rule test runs through bun run test:file, so the scratch repo takes that script, pointed at this repo's sandbox
@@ -386,6 +390,68 @@ test("the pre-commit rule test runs when the rules change, and a broken pin refu
   }
 }, 60_000)
 
+// The trace ratchet's test counts the whole tree against counts.json, so it runs in a clone of this repo at its head, with this checkout's installs, and lefthook gets the step as lefthook.yml has it.
+test("the pre-commit trace count refuses a commit that raises a count, and a commit of images alone skips it", async () => {
+  const config = Bun.YAML.parse(await Bun.file(join(ROOT, "lefthook.yml")).text()) as {
+    "pre-commit": { commands: Record<string, Record<string, unknown>>; piped?: boolean }
+  }
+  const step = config["pre-commit"].commands["trace-count"]
+  expect(step).toBeDefined()
+  const dir = mkdtempSync(join(tmpdir(), "lefthook-trace-"))
+  const run = (argv: string[]) => {
+    const result = Bun.spawnSync(argv, { cwd: dir, env: SCRATCH_ENV, stdin: "ignore" })
+    return { code: result.exitCode, out: result.stdout.toString() + result.stderr.toString() }
+  }
+  const git = (...args: string[]) =>
+    run(["git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", ...args])
+  const hookWith = async (files: Record<string, string>) => {
+    for (const [file, text] of Object.entries(files)) await Bun.write(join(dir, file), text)
+    expect(git("add", ...Object.keys(files))).toMatchObject({ code: 0 })
+    const hook = run(["bun", join(ROOT, LEFTHOOK_BIN), "run", "pre-commit"])
+    expect(git("reset", "-q", "--hard")).toMatchObject({ code: 0 })
+    expect(git("clean", "-q", "-fd")).toMatchObject({ code: 0 })
+    return { ...hook, skipped: hook.out.includes("trace-count (skip)") }
+  }
+  try {
+    const head = Bun.spawnSync(["git", "-C", ROOT, "rev-parse", "HEAD"]).stdout.toString().trim()
+    expect(run(["git", "clone", "-q", "--shared", "--no-checkout", ROOT, "."])).toMatchObject({
+      code: 0,
+    })
+    expect(git("checkout", "-q", head)).toMatchObject({ code: 0 })
+    // the install is isolated, so each workspace keeps its own node_modules beside the root's
+    const installs = new Bun.Glob("{api,packages,web}/*/node_modules").scanSync({
+      cwd: ROOT,
+      onlyFiles: false,
+    })
+    for (const install of ["node_modules", ...installs])
+      symlinkSync(join(ROOT, install), join(dir, install))
+    // .gitignore's node_modules/ matches a folder alone, so each link is kept out of git clean by name
+    await Bun.write(join(dir, ".git/info/exclude"), "node_modules\n")
+    // JSON is YAML, so the step goes in as lefthook read it
+    await Bun.write(
+      join(dir, "lefthook.yml"),
+      JSON.stringify({
+        "pre-commit": { commands: { "trace-count": step }, piped: config["pre-commit"].piped },
+      }),
+    )
+    expect(git("commit", "-q", "--no-verify", "-am", "the step alone")).toMatchObject({ code: 0 })
+
+    const fine = await hookWith({ "docs/trace-scratch.md": "A line in plain words.\n" })
+    expect(fine).toMatchObject({ code: 0, skipped: false })
+
+    const raised = await hookWith({ "docs/trace-scratch.md": "Fixed in #4242.\n" })
+    expect(raised.code).not.toBe(0)
+    expect(raised.out).toContain("issueRefs")
+
+    expect(await hookWith({ "docs/trace-scratch.png": "not text" })).toMatchObject({
+      code: 0,
+      skipped: true,
+    })
+  } finally {
+    rmSync(dir, { force: true, recursive: true })
+  }
+}, 120_000)
+
 // lefthook on this repo's own commit-msg steps, commitlint and its config included, in a scratch repo: a ticket scope in either case passes, a Co-authored-by trailer in any case is refused by name, and a body that only mentions it passes
 test("commit-msg takes a ticket scope in either case and refuses a Co-authored-by trailer in any case", async () => {
   const config = Bun.YAML.parse(await Bun.file(join(ROOT, "lefthook.yml")).text()) as {
@@ -417,6 +483,8 @@ test("commit-msg takes a ticket scope in either case and refuses a Co-authored-b
   try {
     expect(run(["git", "init", "-q"])).toMatchObject({ code: 0 })
     symlinkSync(join(ROOT, "node_modules"), join(dir, "node_modules"))
+    // the pg-scope step runs packages/scripts/src/commit-scope.ts by its path in the checkout
+    symlinkSync(join(ROOT, "packages"), join(dir, "packages"))
     const { commitlint } = await Bun.file(join(ROOT, "package.json")).json()
     await Bun.write(join(dir, "package.json"), JSON.stringify({ commitlint }))
     // JSON is YAML, so the steps go in as lefthook read them

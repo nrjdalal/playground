@@ -2,7 +2,7 @@ import { cache } from "react"
 
 import { config } from "@/lib/config"
 
-// The API's /api/health body, read once per server render for the layout's Test data badge, and the user menu's machine name. A read that fails or is slow is undefined.
+// The API's /api/health body, read once per server render for the layout's badge (Test data's, or a Vibeground's), and the user menu's machine name. A read that fails or is slow is undefined.
 export const readHealth = cache(async (): Promise<unknown> => {
   try {
     const response = await fetch(`${config.api.internalUrl || config.api.url}/api/health`, {

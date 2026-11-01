@@ -47,7 +47,6 @@ import {
 import { org } from "../../../../../../api/hono/src/lib/org"
 import { setSessionNames } from "../../../../../../packages/config/src/kinds"
 import { orgOf } from "../../../../../../packages/config/src/org"
-import { stampText, type StampStatus } from "../../../../../../packages/config/src/verdicts"
 import { verdictsAt } from "../../../../../../packages/scripts/src/pr-merge/gates"
 import { inFixture, onLiveDashboard } from "../../../../../dashboard-fixture"
 import { liveReads } from "../../../../../live-reads"
@@ -57,13 +56,9 @@ import { SEEDED_NAMES } from "../../../../../session-names"
 // workers.ts sets the names its data folder holds when it loads; the cases name the managers' old names, as a machine past the switch does.
 setSessionNames(SEEDED_NAMES)
 
-// A tester's stamp at a commit: one with an agent-drive check.
-const drove = (status: StampStatus, commit: string) =>
-  stampText({
-    checks: { "agent-drive": { source: "agent", status: status === "green" ? "pass" : "fail" } },
-    commit,
-    status,
-  })
+// A tester's word at a commit.
+const drove = (status: "green" | "red", commit: string) =>
+  `## TesterBot · ${status === "green" ? "PASS" : "FAIL"} at ${commit.slice(0, 7)} · both shots attached`
 
 // These drive the live paths against the test's own scratch files.
 liveReads()
@@ -383,8 +378,8 @@ describe("pull requests", () => {
     ).toBe(2)
     expect(read(drove("green", head))?.tester).toBe("pass")
     expect(read(drove("red", head))?.tester).toBe("fail")
-    // a Checks stamp with no agent-drive check is no tester's
-    expect(read(stampText({ checks: {}, commit: head, status: "red" }))?.tester).toBeNull()
+    // a review is no tester's word
+    expect(read(`## ReviewBot · round 1: 5/5 at ${head.slice(0, 7)}`)?.tester).toBeNull()
     // a stale verdict at an earlier head does not count, so it cannot hide an at-head PASS (the gate's rule)
     expect(read(drove("green", head), drove("red", "1234567"))?.tester).toBe("pass")
     expect(read("a plain comment that says PASS at abcdef1")?.tester).toBeNull()
@@ -453,8 +448,7 @@ describe("pull requests", () => {
       const { pull } = build(comments)
       const board = verdictsAt({ comments, head, owner: "acme" })
       const review = board.get("review")
-      const stamp = board.get("stamp")
-      const drive = stamp?.stamp?.checks["agent-drive"] ? stamp : undefined
+      const drive = board.get("tester")
       return {
         ready: pull?.score,
         gate: review?.pass ? `${review.score}/5` : null,

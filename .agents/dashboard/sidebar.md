@@ -25,10 +25,12 @@
   The sidebar has no toggle button: the rail along its edge and Cmd+B (Ctrl+B) collapse and expand it.
   The rail takes the toggle as its own click (`SidebarToggleRail` in `web/next/src/components/shell/sidebar-toggle-rail.tsx`), since its tooltip's trigger replaces the click `SidebarRail` builds in, which once left the rail doing nothing.
   The docs' sidebar draws it too, a test fails on any other file that draws `SidebarRail`, and `bun run verify rail` clicks it on `/dashboard` and `/docs`.
+  The header's site name links to `/dashboard` and opens the Inbox tab with its Preview row open, on a phone too once the move to `/dashboard` resets its tab (`takeMove()`, judged by the address the click left, since `/dashboard?worker=<the dispatcher>` keeps the aside's session),
+  while a modified click only opens a new tab (`BrandLink` in `web/next/src/components/shell/brand-link.tsx`, `previewClick()` in `web/next/src/lib/previews.ts`, the shell's `opensPreview`; asks.md).
   The machine at a glance sits on the sidebar header's name row: GitHub at the row's right end, in the toggle's old place, through the shell's `mark` slot (`DashboardMark`, `GithubMark`),
   and the system icons (`headerIcons()`, `SystemIcons` and `DashboardStats` in the same file, through the shell's `stats` slot) between the name and GitHub, 4px apart.
-  The icons keep that place only while the row shows no Test data badge and is 238px or wider, the room for the name, all four readings with disk at orange and GitHub (measured), so the layout follows the row and never a reading (`SidebarShell`'s `:has` rule and container query);
-  otherwise, beside a fixture stack's Test data badge or in a sidebar squeezed below its stock 16rem (verify's 11rem), they take a centred line of their own under the row.
+  The icons keep that place only while the row shows no badge (Test data, or a Vibeground's) and is 238px or wider, the room for the name, all four readings with disk at orange and GitHub (measured), so the layout follows the row and never a reading (`SidebarShell`'s `:has` rule and container query);
+  otherwise, beside either badge or in a sidebar squeezed below its stock 16rem (verify's 11rem), they take a centred line of their own under the row.
   A reading of three digits (memory at 100%) can need a few px past that room, and then the name truncates with its ellipsis while the rows below stay put.
   The icons are memory, the 5-minute load and swap, in three fixed 12px slots from first paint, server render included, then disk only while it is orange or red, on a line that keeps its 20px height, so the rows below never move when a sample lands or disk crosses its level,
   while the centred icons slide aside as their numbers arrive.
@@ -39,11 +41,13 @@
   GitHub is Remix's filled GitHub icon in `text-foreground`, 20px, a little over the site name's 16px type, in a 24px slot, carrying no health colour; it opens the repo's pull requests in a new tab (the report's `pulls`, from the checkout's GitHub origin), and with no GitHub origin it is not drawn.
   The Claude usage windows sit after the Claude dispatcher's title in its header row, before its model's logo (`DispatcherUsage`, through `SessionRow`'s `trailing`):
   the week then the 5-hour window, each a `size-3` icon and its number in mono with tabular digits at its own width, in its level's colour, its own tooltip its words, and screen readers hearing both once; two gray outlines with no numbers before a sample, after a failed read or once sampling has stopped;
+  an account with no 5-hour window (a probe reading with a week and no `five_hour`, `fiveHourNone` in `api/hono/src/lib/usage/window.ts`) shows its 5-hour reading as `none`, green and fresh, never 0%, stale or an outline;
   hidden on the collapsed rail with the row's title.
   With two or more account files (`accounts`, `.agents/dashboard/dashboard.md`), each reading is one combined figure, the plain mean of the fresh accounts' shares out of 100 (`63` for `97+88+76+31+23`), from `combinedUsage()` in `web/next/src/lib/system.ts` (one combined figure with each account's own reading on hover).
   The mean is plain because no usage file carries its limit's size to weight it by.
   The readings stay `shrink-0`, so the model's name beside them is never cut.
-  Its colour judges that mean against `READING_LEVELS`, so a stale account never moves the figure or its colour; with no fresh share, every account stale or none reading the window, the reading shows the last shares' mean gray and judges nothing, its words saying which, and `-` when no account reads the window at all.
+  Its colour judges that mean against `READING_LEVELS`, so a stale account never moves the figure or its colour; with no fresh share, every account stale or no account reading the window, the reading shows the last shares' mean gray and judges nothing, its words saying which, `none` when every fresh account has no 5-hour window, and `-` when no account reads the window at all.
+  An account with no 5-hour window stays out of the 5-hour mean, and its tooltip row reads `none`.
   Each window's tooltip (`UsageBlock`) heads with its room left, the mean of every account's 100 less its share, exhausted ones at 0 (`roomLeft()`), then one row an account (`usageRows()` in `web/next/src/lib/system.ts`), soonest next week reset first in both windows:
   the address's local part, the account the factory runs on marked, its share and a 10-cell bar in its level's colour, its next reset as `Mon 19:30` in the browser's zone (a passed week reset rolls a week on and reads 0%), and its status; a stale account dims.
   The status is `exhausted` once that window reads 100% or an ending plan is within 2 hours of its end, else its pace as `0.6%/h` (`paceOf()`): the share left over the hours to the window's reset, or, in the week's, to an ending plan's `endsAt` when sooner, an hour at least, `-` with no reset known.
@@ -53,10 +57,11 @@
   The screen reader hears the same rows as words.
   They sit on the first live dispatcher not on GLM (`usageSlot`, `isGlmModel` in `web/next/src/lib/model-label.ts`; a reply not read yet counts as Claude's).
   GLM's week and 5-hour window show the same way (`DispatcherUsage` with `provider="zai"`), each its credits' share of `zai-usage.json` (the system report's `zai`, `readZaiUsage` in `api/hono/src/lib/usage/zai.ts`) judged by the same `READING_LEVELS` and pace (`zaiReadings` in `web/next/src/lib/system.ts`),
-  its name and words saying GLM, and screen readers hearing GLM usage;
+  its name and words saying GLM, and screen readers hearing GLM usage, and only while `usage.accounts` holds a GLM row (`hasGlmAccount` in `api/hono/src/lib/store/accounts.ts`): without one the sampler leaves the report's `zai` null, so a `zai-usage.json` left behind draws nothing.
+  An empty GLM balance (the file's `balance`, from a GLM session's `429 [1113]`) reads both windows at their cap, red, and a failed read (the file's `error`) draws nothing, since `zaiUsageOf` reads that file as no usage, and the usage report's problems name it (`zaiFailureOf`).
   a file older than `ZAI_STALE_MS` shows each window's last share gray and dimmed, its hover saying stale and when it was last seen.
   They sit on the first live GLM dispatcher's row, gray outlines there until a GLM reading, as Claude's are before a sample; with none live, while a GLM reading is there, on the second dispatcher's row when it does not carry Claude's, Not running or live on Claude, led by Z.ai's mark (`ZaiLogo`, `logo`) on any row not GLM's own;
-  else nowhere, so a machine with no GLM plan draws none (`glmSlot`).
+  else nowhere, so a machine with no GLM reading draws none (`glmSlot`).
   They never share Claude's row: in the 239px row, Claude's readings, GLM's and the two model icons left its name one letter wide (tester round 1).
   The footer holds the music player alone (`MusicPlayer` in `web/next/src/components/dashboard/music-player.tsx`, the owner's #i959), and the Dashboard's user menu is the last square of the aside toolbar on a wide screen, the sidebar's Menu after it on a phone,
   in view while the rest of the bar waits for the socket's first frame so a dashboard that never connects still opens the sidebar (`MENU_TAB`), and below the owner rung, where no bar draws, the shell's floating Menu stays (`SidebarFloatingTrigger always`; the owner: "on mobile menu can join the toolbar"; `AsideUserMenu` in `components/dashboard/owner-menu.tsx`, after a separator),
@@ -205,15 +210,15 @@
   AI Runners holds the runner sessions alone.
   Scripts, after it, lists the ops jobs Ops runs as scripts with no Claude session, A to Z, collapsed until its label is clicked, so the jobs never read as a crowd of runners, a Failing or Down script still showing, in red,
   under the collapsed label (`scriptsShown` in `web/next/src/lib/ops.ts`; its open state lives in `DashboardProvider`, as Other's does).
-  On the collapsed rail the group is one icon (`scriptsRail`), red while any script it lists is failing or down, its tooltip the label's count and how many are not running; a click opens the sidebar on the scripts.
+  On the collapsed rail the group is one icon (`scriptsRail`), red while any script it lists is failing or down, its tooltip the label's count and how many are failing or down; a click opens the sidebar on the scripts.
   They are read by `GET /api/v1/ops` from the heartbeat each writes to `~/.playground/ops/<job>.json` (`api/hono/src/lib/dashboard/ops.ts`, zod-checked, read-only): every `ops-*.json` there is a job, so a new one (ops-report, ops-sweep) shows with no code change,
   while `report.json` and `alerts.log` beside them are not jobs, which is why they show in no runner row.
   Ops' `playground/ops/jobs.json` beside them lists every job, each with its `schedule` (`{"every": <seconds>}`, `{"cron": "<5 fields>"}` or `{"always": true}`): one it marks `disabled` is paused and left out of the sidebar (`shownOps`, since a listed job that cannot run reads as down), a row still, heartbeat or not,
   so the System page's Paused table holds it, and one it expects to run with no heartbeat file reads as Down; a Down job's mark is red, since a listed job should be running.
-  Each row has two lines: its plain name (`RUNNER_NAMES`, else its id without `ops-`, in words) truncates on its first line, and its second is `SecondLine`, its state `Script · <state>` never cut, red while it is not running:
+  Each row has two lines: its plain name (`RUNNER_NAMES`, else its id without `ops-`, in words) truncates on its first line, and its second is `SecondLine`, its state `Script · <state>` never cut, red while it is failing or down and muted while it is running or waiting:
   `Script · <state>`, then when it runs (`whenWords` in `web/next/src/lib/ops.ts`, from `scheduleWords` in `@packages/config/schedule`) and the model it calls when `jobs.json` marks it `callsModel` (its name, or AI when none is named; `Calls <model>` on hover and to screen readers), the tail cut first;
   the reason a job fails or is down is its hover and screen-reader text.
-  Its state is Running while its last result is ok and it beat within three cycles, Failing with its last result otherwise, Down with the reason when its file is malformed, its loop has exited, its process is gone or it has not beaten for three cycles;
+  Its state is Running while its last result is ok and it beat within three cycles, Waiting, muted, while its last result starts `waiting: ` (ops-usage with no Claude account yet), Failing with its last result otherwise, Down with the reason when its file is malformed, its loop has exited, its process is gone or it has not beaten for three cycles;
   its hover gives its name and job id, what it does (`OPS_DOES`), its state with the reason and its last beat, and, when its schedule's `every` differs from its heartbeat's `cycleSeconds`, both (`problem`).
   A script row opens nothing.
   Every group label ends with one number at its right, ZeroSDK's `countCell`, muted with tabular digits (`GroupCount`):

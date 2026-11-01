@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # The live dashboard's supervisor: one background task of runner-pride's cmux session that keeps the dashboard stack and
-# the session follower running as its own children (so both stay descendants of a cmux terminal), and rolls them
-# to every new head of the branch upstream.sh names end to end: stop both by their recorded process groups, reset to it, install, build or
-# migrate when the merge needs it, start dev, check it, start the follower, check it. Each roll, outage or anomaly
+# the session follower running as its own children (so both stay descendants of a cmux terminal), the web beside them, and rolls them
+# to every new head of the branch upstream.sh names end to end: build it while the old stack serves (prebuild, from a staging worktree, unless it migrates), swap the web to that build with no stop (swap_web), stop the API and the follower by their recorded process groups, reset to it, install, build or
+# migrate when the merge needs it, take its build (build_head, kept per head in $S/builds) and serve it, check it, start the follower, check it. Each roll, outage or anomaly
 # appends one line to results.log (a refused roll a second, naming its refusal), which wakes the runner to report it. It signals only processes it started.
 # It runs the latest head of the branch its main checkout sits on (upstream.sh: main for an install, canary for a checkout kept on canary), never one-off hashes or branches
 # or worktrees. A head that fails its roll is remembered in bad-builds and never rolled again (one dev refused to start for its own settings, on its third refusal), and the dashboard falls back to the head it ran
@@ -36,18 +36,117 @@ branch=$(git symbolic-ref --short HEAD 2>/dev/null)
 say() { echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) $*" >> "$LOG"; }
 result() { echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) $*" >> "$RESULTS"; say "RESULT $*"; }
 
+# The head's production build, kept in $S/builds/<sha> outside the checkout: made by bun run build when it is missing, or when it was built for other URLs, since next bakes NEXT_PUBLIC_APP_URL and NEXT_PUBLIC_API_URL into its client and auth bakes HONO_APP_URL's host; NODE_ENV and SKIP_ENV_VALIDATION_SERVER let it build before first run writes its .env, whose values the stack reads at its start; a failure prints its last error line; $1 is the tree it builds, the checkout by default, or prebuild's staging worktree
+build_head() {
+  local src=${1:-.} sha dir was started out
+  sha=$(git -C "$src" rev-parse HEAD); dir=$S/builds/$sha
+  dashboard_urls || { echo "bunx portless get failed"; return 1; }
+  if [ -d "$dir" ]; then
+    was=$(cat "$dir/urls" 2>/dev/null)
+    [ "$was" = "$WEB $API" ] && return 0
+    say "rebuilding ${sha:0:7}: its build was for ${was:-no URLs}, the Dashboard is now on $WEB $API"
+  fi
+  say "building ${sha:0:7} for $WEB $API"; started=$(date +%s)
+  if ! out=$(cd "$src" && HONO_APP_URL=$API HONO_TRUSTED_ORIGINS=$WEB NEXT_PUBLIC_API_URL=$API NEXT_PUBLIC_APP_URL=$WEB NODE_ENV=production SKIP_ENV_VALIDATION_SERVER=true bun run build 2>&1); then
+    echo "$out" >> "$LOG"
+    echo "$out" | grep -E 'error|Error|ERR' | tail -1 | cut -c1-200; return 1
+  fi
+  rm -rf "$dir.tmp"; mkdir -p "$dir.tmp"
+  # next's standalone server leaves .next/static and public for its host to copy beside it
+  cp -R "$src/web/next/.next/standalone" "$dir.tmp/web" && mkdir -p "$dir.tmp/web/web/next/.next" && cp -R "$src/web/next/.next/static" "$dir.tmp/web/web/next/.next/static" &&
+    { [ ! -d "$src/web/next/public" ] || cp -R "$src/web/next/public" "$dir.tmp/web/web/next/public"; } &&
+    echo "$WEB $API" > "$dir.tmp/urls" || { echo "copying the build to $dir failed"; return 1; }
+  rm -rf "$dir"; mv "$dir.tmp" "$dir"
+  say "built ${sha:0:7} in $(( $(date +%s) - started ))s, $(du -sh "$dir" | cut -f1)"
+}
+# Before a roll stops anything: build the target ($1, the roll tagged $2) into $S/builds/<sha> from a detached staging worktree while the old stack serves, so build_head finds it kept after the stop; a target that migrates, whose commit cannot be had here, or whose staging worktree or install fails, builds after the stop as before; a build that fails lists the target in bad-builds and returns 1 with nothing stopped; the staging worktree goes either way
+prebuild() {
+  local target=$1 tag=$2 stage=$S/staging built rc=0
+  prebuilt=
+  drop_stage() { git worktree remove --force "$stage" >> "$LOG" 2>&1 || rm -rf "$stage"; git worktree prune; }
+  "$D/net-git.sh" fetch -q origin >> "$LOG" 2>&1
+  git cat-file -e "$target^{commit}" 2>/dev/null || { say "no commit ${target:0:7} here yet; building after the stop"; return 0; }
+  git diff --quiet HEAD "$target" -- packages/db/drizzle/ || { say "${target:0:7} migrates; building after the stop"; return 0; }
+  rm -rf "$stage"; git worktree prune
+  git worktree add -q --detach "$stage" "$target" >> "$LOG" 2>&1 || { say "the staging worktree for ${target:0:7} failed; building after the stop"; drop_stage; return 0; }
+  # node_modules as an APFS clone of the checkout's, then an install for what the move changed and each workspace's own links; .env as the checkout's, which bun run build loads
+  if ! { { [ ! -d node_modules ] || cp -cR node_modules "$stage/"; } && (cd "$stage" && unset NODE_ENV SKIP_ENV_VALIDATION && bun install --frozen-lockfile --ignore-scripts); } >> "$LOG" 2>&1; then
+    say "the staging worktree's install for ${target:0:7} failed; building after the stop"
+    drop_stage; return 0
+  fi
+  [ ! -f .env ] || cp .env "$stage/.env"
+  say "building ${target:0:7} before the stop, from $stage"
+  built=$(build_head "$stage") || rc=1
+  drop_stage
+  [ $rc -eq 0 ] && { prebuilt=1; return 0; }
+  echo "$target" >> "$BAD"
+  result "$tag ${target:0:7} FAIL build before the stop: ${built:-no error line; see supervisor.log}; still serving $(git rev-parse --short HEAD)"
+  tell_dispatcher "Dashboard roll to ${target:0:7} FAILED its build; nothing stopped, still on $(git rev-parse --short HEAD)"
+  return 1
+}
+# After a pass: keep this head's build and the last one that passed before it, for the next fallback, and remove the rest
+keep_builds() {
+  local before d; before=$(cat "$S/builds/passed" 2>/dev/null)
+  for d in "$S/builds"/*/; do d=$(basename "$d"); [ "$d" = "$1" ] || [ "$d" = "$before" ] || rm -rf "${S:?}/builds/$d"; done
+  [ "$before" = "$1" ] || echo "$1" > "$S/builds/passed"
+}
+# The API alone, from the checkout's source, under the dev launcher; the web runs on its own (web_up)
 start_dev() {
-  bun run dev --ui stream > "$DEVLOG" 2>&1 &
+  PLAYGROUND_BUILD=$S/builds/$(git rev-parse HEAD) bun run serve --filter=@api/hono --ui stream > "$DEVLOG" 2>&1 &
   echo $! > "$S/dashboard-dev.pid"; say "dev started, pid $!"
 }
 start_follower() {
   bash "$D/start-ingest.sh" &
   echo $! > "$S/dashboard-ingest.pid"; say "follower started, pid $!"
 }
+# The web: next's standalone server from the head's kept build ($2), started as job $1 on a port of its own, with the env packages/scripts/src/portless.ts gives the serve task; ready once / answers 2xx or 3xx, within 60s
+# It returns 1 for the head's fault (its web exited, or answered only errors) and 2 for the machine's (no free port, the port taken, a web still silent at 60s), and names which in web_why
+web_up() {
+  local job=$1 sha=$2 port i code=000
+  port=$(bun --no-env-file -e 'const s = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: () => new Response() }); console.log(s.port); s.stop(true)') || { web_why="no free port for the web"; return 2; }
+  (cd web/next && PORTLESS_URL=$WEB PORT=$port HOSTNAME=127.0.0.1 exec bun ../../packages/scripts/src/portless.ts bun "$S/builds/$sha/web/web/next/server.js") > "$S/$job.log" 2>&1 &
+  echo $! > "$S/$job.pid"; echo "$port" > "$S/$job.port"; echo "$sha" > "$S/$job.sha"
+  for i in $(seq 1 60); do
+    code=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$port/")
+    case "$code" in 2*|3*) "$D/procs.sh" record "$job" >> "$LOG" 2>&1; say "web ${sha:0:7} up on :$port, pid $(cat "$S/$job.pid")"; return 0 ;; esac
+    alive "$job" || break; sleep 1
+  done
+  if alive "$job"; then
+    [ "$code" = 000 ] && { web_why="the web ${sha:0:7} was still silent on :$port at 60s"; return 2; }
+    web_why="the web ${sha:0:7} answered only $code"; return 1
+  fi
+  grep -q EADDRINUSE "$S/$job.log" 2>/dev/null && { web_why="the web's port :$port was taken"; return 2; }
+  web_why="the web ${sha:0:7} exited: $(tail -1 "$S/$job.log" | cut -c1-200)"; return 1
+}
+# The web's portless route, and its bare alias, to port $1, owned by run.sh ($PPID, which a reload keeps), so moving it from one web to the next is one write and the old web's exit leaves it; a refusal (another live process holds the name) is the machine's
+web_route() { bun "$WT/api/hono/src/bin/web-route.ts" "$WEB" "$1" "$PPID" >> "$LOG" 2>&1 || { web_why="the web's route was refused (see supervisor.log)"; return 2; }; }
+serving_web() { alive dashboard-web && [ "$(cat "$S/dashboard-web.sha" 2>/dev/null)" = "$1" ]; }
+web_stop() { local rc=0; "$D/procs.sh" stop "$1" >> "$LOG" 2>&1 || rc=1; rm -f "$S/$1.pid" "$S/$1.port" "$S/$1.sha"; return $rc; }
+stop_web() { web_stop dashboard-web-next; web_stop dashboard-web; }
+# The head's web ($1) serving and routed: the one that serves it already is kept (a swap, or a reload's), else a new one starts in the old one's place; returns web_up's or web_route's 1 or 2
+ensure_web() {
+  local rc
+  serving_web "$1" || { stop_web; web_up dashboard-web "$1" || { rc=$?; say "$web_why"; return $rc; }; }
+  web_route "$(cat "$S/dashboard-web.port")" || { say "$web_why"; return 2; }
+}
+# A roll's web with no gap: the target's ($1) starts beside the serving one, the route moves to it, and the old one stops once the proxy has read the move; returns 1, the old one serving, when no web of this supervisor's serves or the new one does not take over
+swap_web() {
+  local sha=$1
+  alive dashboard-web || return 1
+  if ! web_up dashboard-web-next "$sha" || ! web_route "$(cat "$S/dashboard-web-next.port")"; then
+    web_stop dashboard-web-next; say "web ${sha:0:7} did not take over ($web_why); stopping both as before"; return 1
+  fi
+  sleep "${ROUTE_SETTLE:-3}"
+  web_stop dashboard-web || say "the old web outlived its stop (see supervisor.log)"
+  local f; for f in pid port sha procs log; do [ ! -e "$S/dashboard-web-next.$f" ] || mv "$S/dashboard-web-next.$f" "$S/dashboard-web.$f"; done
+  say "web swapped to ${sha:0:7} on :$(cat "$S/dashboard-web.port") with no stop"
+}
+# Stop the follower and the API, and the web too unless $1 is keep-web (a roll whose web has swapped already)
 stop_all() {
   dashboard_container > /dev/null
   "$D/procs.sh" stop dashboard-ingest >> "$LOG" 2>&1
   "$D/procs.sh" stop dashboard-dev >> "$LOG" 2>&1
+  [ "${1:-}" = keep-web ] || stop_web
 }
 # the dashboard's URLs as portless names them for this checkout, read at every check, since portless's proxy can move (http on 1355 to https on 443)
 dashboard_urls() { WEB=$(bunx portless get playground) && API=$(bunx portless get api.playground); }
@@ -64,6 +163,10 @@ setup_pending() { [ -z "${POSTGRES_URL:-}" ] && ! grep -qE "^POSTGRES_URL=[\"']?
 # an importer holds the follower's lock: a follower an earlier supervisor left running counts, so this one's "another importer holds the lock" exit is no outage; the status read gets HELD_WAIT seconds, then is stopped by its own process group (set -m gives it one), so a wedged docker child under it goes too, and exits 2, holder unknown, so a wedged Docker or database never freezes the loop
 follower_held() { local p i; bun api/hono/src/bin/dashboard-ingest.ts status > /dev/null 2>&1 & p=$!; for i in $(seq 1 "${HELD_WAIT:-20}"); do kill -0 "$p" 2>/dev/null || { wait "$p" && return 0 || return 1; }; sleep 1; done; kill -- -"$p" 2>/dev/null; wait "$p" 2>/dev/null; return 2; }
 
+# The bare aliases (playground.localhost, api.playground.localhost) hold the ports of the live stack's own routes in portless's route file, read by alias.ts and never written: its exit is 0 when they do, 1 when one points elsewhere, 2 for a missing file or route
+read_aliases() { bun --no-env-file "$D/alias.ts" "${PORTLESS_STATE_DIR:-$HOME/.portless}/routes.json" "$WEB" "$API" 2>&1; }
+# A mismatch is read again after ALIAS_CONFIRM seconds (6), past the launcher's 2 s alias sync, which an alias waits on after a restart (live.md); one that holds, a missing file or a missing route is one ALIAS FAIL result (run.sh's notify_new alerts it), written again only when it changes, and ALIAS PASS once it is right, so the heartbeat reads ok again
+check_aliases() { local out rc=0; dashboard_urls || return 0; out=$(read_aliases) || rc=$?; if [ $rc -eq 1 ]; then sleep "${ALIAS_CONFIRM:-6}" & wait $!; rc=0; out=$(read_aliases) || rc=$?; fi; if [ $rc -eq 0 ]; then [ -z "${alias_said:-}" ] || result "ALIAS PASS $out"; alias_said=; return 0; fi; [ "$out" = "${alias_said:-}" ] || result "ALIAS FAIL $out"; alias_said=$out; return 1; }
 # Dev up and checked: health answers, verify passes against HEAD, approvals stay off. Prints one summary.
 # every verify check but pages, one call each (verify takes one check per call): the pages check opens /dashboard/apps/changelog,
 # which marks the changelog read for LocalAgent, the owner's account, so each roll cleared the owner's +1 (fixed since, 7 Oct)
@@ -121,9 +224,17 @@ dev_down() {
   [ -n "$reason" ] || reason=$(printf '%s\n' "$tail" | tail -1)
   printf '%s' "$reason" | cut -c1-360
 }
-roll_up() {   # start dev and the follower, check both, and report one line; returns 0 on PASS
-  local tag=$1 sha dev fol t
+roll_up() {   # build the head when it has no build, start it and the follower, check both, and report one line; returns 0 on PASS
+  local tag=$1 sha dev fol t built
   sha=$(git rev-parse --short HEAD)
+  # a failed build leaves no dev log of its own, so finish_roll never reads the last stack's refusal as this head's
+  built=$(build_head) || { : > "$DEVLOG"; result "$tag $sha FAIL build: $built"; return 1; }
+  # a web the head broke fails the roll as a bad build; the machine's fault writes the refusal line finish_roll reads, so the head is tried again
+  dashboard_urls; ensure_web "$(git rev-parse HEAD)"; local wrc=$?
+  if [ $wrc -ne 0 ]; then
+    if [ $wrc -eq 2 ]; then echo "dev: refusing to start: $web_why" > "$DEVLOG"; else : > "$DEVLOG"; fi
+    result "$tag $sha FAIL web: $web_why"; return 1
+  fi
   start_dev; dev=$(check_dev); local dok=$?
   local fok=0
   if setup_pending; then
@@ -131,7 +242,7 @@ roll_up() {   # start dev and the follower, check both, and report one line; ret
   else
     t=$(date -u +%Y-%m-%dT%H:%M:%S); start_follower; fol=$(check_follower "$t"); fok=$?
   fi
-  if [ $dok -eq 0 ] && [ $fok -eq 0 ]; then result "$tag $sha PASS $dev $fol"; return 0; else result "$tag $sha FAIL $dev $fol"; return 1; fi
+  if [ $dok -eq 0 ] && [ $fok -eq 0 ]; then result "$tag $sha PASS $dev $fol"; keep_builds "$(git rev-parse HEAD)"; return 0; else result "$tag $sha FAIL $dev $fol"; return 1; fi
 }
 # The owner's rule: restart the app every time something lands on the upstream, so the change is visible at once
 tell_dispatcher() { NOTIFY_TO=dispatcher "$OPS/notify.sh" dashboard "$1"; }
@@ -151,7 +262,7 @@ owner_idle() {
 # a roll is due once ROLL_GAP has passed ($1 seconds since the last) and the owner has been idle OWNER_IDLE ($2), or the owner's idle cannot be read while the dashboard's Postgres runs ($3 is up), so a canary move never waits on a reading; with the container down a roll would fail its database proof, so it holds
 roll_due() { [ "$1" -ge $ROLL_GAP ] && { [ -n "$2" ] && [ "$2" -ge $OWNER_IDLE ] || { [ -z "$2" ] && [ "$3" = up ]; }; }; }
 dashboard_db() { dashboard_container > /dev/null && echo up || echo down; }
-# When the running code (from head $1, or a copy outside this checkout) differs from the checkout's scripts/ops/dashboard/, write the roll to $S/reload (the head, tag $2, then $3-$5 for finish_roll) and exit 75 with the stack down, so run.sh execs the checkout's own copy
+# When the running code (from head $1, or a copy outside this checkout) differs from the checkout's scripts/ops/dashboard/, write the roll to $S/reload (the head, tag $2, then $3-$5 for finish_roll) and exit 75 with the API and the follower down (a swapped web keeps serving), so run.sh execs the checkout's own copy
 reload_if() {
   [ "$D" -ef "$WT/scripts/ops/dashboard" ] && git diff --quiet "$1" HEAD -- scripts/ops/dashboard/ && return 0
   printf '%s\n' "$(git rev-parse HEAD)" "$2" "${3:-}" "${4:-}" "${5:-}" > "$S/reload"
@@ -166,10 +277,12 @@ pull_to() {
   echo "$out" | grep -qx migrate && mig=migrate
   if [ "$pulled" -ne 0 ] && [ "$(git rev-parse HEAD)" != "$(git rev-parse -q --verify "$1^{commit}")" ]; then result "ANOMALY pull to ${1:0:7} failed before it moved (exit $pulled); staying on $(git rev-parse --short HEAD)"; return 1; fi
 }
-# Stop, move the checkout to $1, start, check; falls back to the head it ran before when the roll fails (never after a migration).
+# Build $1 while the old stack serves (prebuild) and swap the web to it (swap_web), then stop, move the checkout to $1, start, check; falls back to the head it ran before when the roll fails (never after a migration).
 roll_to() {
   local target=$1 why=$2 prev out notes mig tag pulled
-  stop_all
+  prebuild "$target" "ROLL $why" || return 0
+  local keep=; [ -n "$prebuilt" ] && dashboard_urls && swap_web "$target" && keep=keep-web
+  stop_all $keep
   if [ -n "$("$D/procs.sh" left dashboard-dev)$("$D/procs.sh" left dashboard-ingest)" ]; then result "ANOMALY stop left processes alive; not rolling"; return 1; fi
   prev=$running
   if ! pull_to "$target"; then roll_up RESTART; last_roll=$(date +%s); return; fi
@@ -283,6 +396,9 @@ while true; do
   if ! alive dashboard-dev; then
     result "DOWN dev: $(dev_down)"
     stop_all; roll_up RESTART
+  elif ! alive dashboard-web; then
+    result "DOWN web: $(tail -1 "$S/dashboard-web.log" 2>/dev/null | cut -c1-200)"
+    stop_all; roll_up RESTART
   elif ! alive dashboard-ingest && setup_pending; then
     [ -n "${waiting_f:-}" ] || { say "follower: waiting for first run's setup, which writes POSTGRES_URL; not starting it"; waiting_f=1; }
   elif ! alive dashboard-ingest && { follower_held; held=$?; [ $held -ne 1 ]; }; then
@@ -299,4 +415,5 @@ while true; do
   else
     held_said_f=
   fi
+  check_aliases
 done

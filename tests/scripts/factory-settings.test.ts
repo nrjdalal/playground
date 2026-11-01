@@ -44,6 +44,7 @@ describe("a session cmux restored in a dispatcher checkout keeps the factory's h
     "no-false-green",
     "no-glm-heavy-path",
     "no-headless-login",
+    "no-kill-by-name",
     "no-linear-ticket",
     "no-main-checkout",
     "no-manager-subagent",

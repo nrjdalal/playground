@@ -120,6 +120,33 @@ with tempfile.TemporaryDirectory() as d:
     check(state.read_plans() == {}, "04l a missing plans folder is no plans")
     del os.environ["PLAYGROUND_PLANS_DIR"]
 
+# 04m plan.json's lane items: a live worker an item names holds its PR, an item no live worker holds parks it
+plan = [
+    {"id": "pr-157", "pr": "https://github.com/acme/archive/pull/157", "worker": "worker-greed"},
+    {"id": "pr-158", "pr": "https://github.com/acme/archive/pull/158", "worker": "worker-greed (D)"},
+    {"id": "pr-159", "pr": "https://github.com/acme/archive/pull/159", "worker": "reviewer-old"},
+    {"id": "pr-160", "pr": "https://github.com/acme/archive/pull/160", "worker": None},
+    {"id": "pr-161", "pr": "https://github.com/acme/archive/pull/1610", "worker": "worker-other"},
+    {"id": "no-pr", "worker": "worker-other"}, "not an item",
+]
+check(state.holder_tag(roster, {}, "acme/archive", 158, plan=plan) == ("worker-greed", False),
+      "04m a worker holding two PRs holds the one plan.json gives it, its note after the name read past")
+check(state.holder_tag(roster, {}, "acme/archive", 157, plan=plan) == ("reviewer-greed, worker-greed", False),
+      "04n the roster's and plan.json's holders of one PR are named once each")
+check(state.holder_tag(roster, {}, "acme/archive", 159, plan=plan) == ("no agent; parked in plan.json", False)
+      and state.holder_tag(roster, {}, "acme/archive", 160, plan=plan) == ("no agent; parked in plan.json", False),
+      "04o a plan.json item with no live worker parks its PR")
+check(state.holder_tag(roster, {}, "acme/archive", 161, plan=plan) == ("no agent, in no plan: lost", True),
+      "04p an item for #1610 neither holds nor parks #161")
+with tempfile.TemporaryDirectory() as d:
+    path = os.path.join(d, "plan.json")
+    json.dump({"lanes": [{"items": plan[:2]}, {"items": "none"}, "not a lane"]}, open(path, "w"))
+    os.environ["PLAYGROUND_PLAN_PATH"] = path
+    check(state.read_plan() == plan[:2], "04q the plan is plan.json's lane items, a malformed lane skipped", state.read_plan())
+    os.environ["PLAYGROUND_PLAN_PATH"] = os.path.join(d, "missing.json")
+    check(state.read_plan() == [], "04r a missing plan.json is no plan")
+    del os.environ["PLAYGROUND_PLAN_PATH"]
+
 # 05 our open threads
 threads = [
     {"id": "T1", "isResolved": False, "path": "a.ts", "line": 3,
@@ -493,6 +520,17 @@ with tempfile.TemporaryDirectory() as repo:
     git(repo, "mv", "web/next/src/lib/old.ts", "web/next/src/lib/new.ts")
     git(repo, "commit", "-qm", "rename")
     check("tests/uses-old.test.ts" in touched(repo)[1], "10k a renamed file's old path still selects the test importing it")
+
+WALKERS = ("tests/packages/scripts/src/parity/record.test.ts", "tests/packages/scripts/src/trace-count/count.test.ts",
+           "tests/packages/scripts/src/verify/prebuild.test.ts", "tests/skills/built-in-names.test.ts")
+with tempfile.TemporaryDirectory() as repo:
+    scratch_repo(repo, {"docs/page.md": "x\n", **{path: 'import { walk } from "./source"\n' for path in WALKERS}})
+    write(repo, {"docs/page.md": "y\n"})
+    git(repo, "commit", "-qam", "a docs line")
+    listed = touched(repo)[1]
+    check(set(WALKERS) <= set(listed),
+          "10p each test whose imported source walks the repo (git ls-files, Bun.Glob, readdirSync) is listed for any change",
+          [p for p in WALKERS if p not in listed])
 
 with tempfile.TemporaryDirectory() as repo:
     scratch_repo(repo, {

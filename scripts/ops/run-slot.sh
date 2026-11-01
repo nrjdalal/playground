@@ -125,6 +125,14 @@ if issue:
 done("medium")
 PY
 }
+# run-slot.sh box-off: print, one word a line, each precondition of the runner-box route (below) that fails, for ops-sweep's box-route-off finding, since a run otherwise falls back to this Mac without a word; nothing when the route can fire
+if [ "${1:-}" = box-off ]; then
+  [ -x "$OPS/runner-host/ci.sh" ] || echo no-ci-sh
+  [ -e "${RUNNER_HOST_KEY:-$HOME/.ssh/playground_runner}" ] || echo no-ssh-key
+  switch_on runner-host/off && echo runner-host-off
+  switch_on runner-host/slot-off && echo slot-off
+  exit 0
+fi
 # run-slot.sh clear-stale: remove each slot's leftover holder (and its directory) whose pid is dead, or whose directory is already gone,
 # and each slot directory with no holder line that is 2 hours old.
 # Sessions call this instead of a bare rm under ~/.claude, which raises Claude Code's delete prompt even in bypass mode (dispatcher, 12 Oct).
@@ -188,6 +196,13 @@ fi
 # session's reserve) fit, else 1, so a script that takes its slot itself reads them as every run here does (ops-unstick does; localci and
 # the merge train still take theirs by their own mkdir for now); it reads neither the queue nor run-slot.priority
 CAN_TAKE=
+# run-slot.sh head: prints the queue's head, the ticket first_waiter names (<ns>-<pid>-<who>), or nothing, so ops-unstick watches the waiter the queue serves next rather than the oldest
+HEAD_ONLY=
+if [ "${1:-}" = head ]; then
+  [ $# -eq 1 ] || { echo "usage: run-slot.sh head" >&2; exit 2; }
+  HEAD_ONLY=1 CAN_TAKE=run-slot
+  set -- ops-unstick -- true
+fi
 if [ "${1:-}" = can-take ]; then
   [ $# -eq 3 ] || { echo "usage: run-slot.sh can-take <slot> <who>" >&2; exit 2; }
   case "$2" in run-slot|run-slot-2|run-slot-3|run-slot-4) CAN_TAKE=$2 ;; *) echo "run-slot.sh: no slot $2" >&2; exit 2 ;; esac
@@ -301,6 +316,84 @@ if [ -z "$CAN_TAKE" ] && [ -z "$MODEL_BOUND" ] && [ -x "$OPS/runner-host/ci.sh" 
   [ "$rc" -ne 255 ] && exit "$rc"
   echo "run-slot.sh: the runner host could not take it, so it waits for a slot here" >&2
 fi
+# Quick slots, outside the queue, one holder each: a plain git commit (its pre-commit build, about 17s) takes run-slot-commit (builder,
+# 13 Oct: five commits waited in a fifteen-deep queue; a commit with a longer hook goes through the queue as <who> -- bash -c '...'), and a
+# node_modules clone (cp -cR <sibling>/node_modules <worktree>/) takes run-slot-clone (dispatcher, 13 Oct: three load spikes, 77 and 43
+# among them, each with fseventsd near 100% while clones ran at once); a git merge or pull takes run-slot-commit too, and a short bun test,
+# docs:wrap or format:check takes run-slot-quick
+quick_rule() {
+  local a first=""
+  # the command's first word past env and VAR=x, as box_fits finds it (optimizer, 19 Oct: a commit run as env NODE_ENV=... git commit waited 14 min in the queue)
+  for a in "$@"; do case "$a" in env|*=*) continue ;; esac; first=$a; break; done
+  if [ "$(basename "$first")" = git ]; then
+    # a merge or pull runs no pre-commit build (lefthook.yml has no merge hook), so it ends in seconds (optimizer, 20 Oct: a 1s git merge waited 26.6 min behind suites)
+    # a push runs only the pre-push hook's seconds (retro 2, 31 Oct: git push queued 205 min in a day)
+    for a in "$@"; do case "$a" in commit|merge|pull|push) echo commit; return ;; esac; done
+  elif [ "$(basename "$first")" = cp ]; then
+    for a in "$@"; do a=${a%/.}; case "${a%/}" in node_modules|*/node_modules) echo clone; return ;; esac; done
+  elif [ "$(basename "$first")" = bun ]; then
+    # a bun test or bun run test:file naming 1 to 3 test files, nothing else, takes run-slot-quick, with --cwd=<p> anywhere or a bare --cwd after run or test, since bun misreads one before the subcommand (scripts/hooks/README.md's no-false-green; ops, 20 Oct: with slot-off, a 5-file run that ran 1s waited 52 min behind suites; PG-2158)
+    # bun run docs:wrap and format:check never run past seconds (run-slot.runs.log, 20 Oct: max 2s and 9s), so they take run-slot-quick too
+    for a in "$@"; do case "$a" in docs:wrap|format:check) echo quick; return ;; esac; done
+    # bun install --ignore-scripts after a node_modules clone only links what the clone holds (retro 2, 31 Oct: 619 min queued in a day)
+    case " $* " in *" install --ignore-scripts "* | *" install "*" --ignore-scripts "*) echo quick; return ;; esac
+    local n=0 t="" skip=""
+    for a in "$@"; do
+      [ -n "$skip" ] && { skip=""; continue; }
+      if [ "$a" = --cwd ]; then [ -n "$t" ] && skip=1 || return; continue; fi
+      case "$a" in env|*=*|-*) continue ;; esac
+      [ "$a" = "$first" ] && continue
+      case "$a" in run|test|test:file) t="$t $a" ;; *.e2e.*) return ;; *.test.ts|*.test.tsx) n=$((n + 1)) ;; *) return ;; esac
+    done
+    case "$t" in " test" | " run test:file") [ "$n" -ge 1 ] && [ "$n" -le 3 ] && echo quick ;; esac
+  fi
+}
+# whether the last 3 runs of this exact command line in run-slot.runs.log each ended in 10 s or less (retro 2, 31 Oct: 408 of 686 CPU-lane runs did, and queued 2,004 min against 17 min of running)
+ran_short() {
+  tail -n 20000 "$OPS/run-slot.runs.log" 2>/dev/null | RUN_LINE="$*" awk '
+    $2 == "ask" { c = $0; for (k = 0; k < 4; k++) sub(/^[^ ]+ /, "", c); line[$4] = c; next }
+    $2 == "end" && line[$4] == ENVIRON["RUN_LINE"] { delete line[$4]; for (i = 5; i <= NF; i++) if ($i ~ /^ran=[0-9]+s$/) r[++n] = substr($i, 5) + 0 }
+    END { if (n < 3) exit 1; for (i = n - 2; i <= n; i++) if (r[i] > 10) exit 1 }'
+}
+# the slot a command takes outside the queue: its rule's, else quick when it ran short its last 3 times, so a long run after short ones holds the one quick slot and sends the next back to the queue
+quick_kind() {
+  local kind
+  kind=$(quick_rule "$@")
+  [ -z "$kind" ] && ran_short "$@" && kind=quick
+  echo "$kind"
+}
+# whether turbo's dry run, in the run's checkout and with its env words, finds every check-types task and the builds under it cached; a dry run that fails or takes over 10 s counts as not cached (retro 5, 31 Oct: the dry run takes about 0.2 s, while 88 of 226 check-types runs ended in 10 s or less and waited 19,953 s, and the rest ran up to 190 s)
+types_cached() {
+  local a vars=()
+  for a in "$@"; do case "$a" in env) continue ;; *=*) vars+=("$a") ;; *) break ;; esac; done
+  (cd "$(box_dir "$@")" 2>/dev/null && python3 -I - ${vars[@]+"${vars[@]}"} 2>/dev/null <<'PY'
+import json, os, signal, subprocess, sys
+env = dict(os.environ, **dict(v.split("=", 1) for v in sys.argv[1:]))
+p = subprocess.Popen(["bun", "run", "turbo", "run", "check-types", "--dry=json"], env=env, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, start_new_session=True)
+try:
+    out, _ = p.communicate(timeout=10)
+except subprocess.TimeoutExpired:
+    os.killpg(p.pid, signal.SIGKILL)
+    p.wait()
+    sys.exit(1)
+tasks = [t for t in json.loads(out)["tasks"] if t.get("command") != "<NONEXISTENT>"]
+sys.exit(0 if p.returncode == 0 and tasks and all(t["cache"]["status"] == "HIT" for t in tasks) else 1)
+PY
+  )
+}
+# a light run, whatever its session's size: a quick kind, a bun install or add, a filtered turbo run, a plain tsc, or a check-types whose work is cached (retro 3, 31 Oct: a big session's 2s git push and 1s bun install each waited over 1,290s for the age bump)
+light_run() {
+  [ -n "$(quick_kind "$@")" ] && return
+  local a first="" next="" turbo="" filter="" types=""
+  for a in "$@"; do case "$a" in env|*=*) continue ;; esac; [ -z "$first" ] && first=$a && continue; next=$a; break; done
+  # the 4 bare bunx tsc runs in the runs log each ran 1 s or less, while an sh -c holding a build and then tsc ran up to 152 s, so only the bare program counts (retro 5, 31 Oct)
+  [ "$(basename "$first")" = tsc ] && return
+  case "$(basename "$first")" in bun|bunx) ;; *) return 1 ;; esac
+  [ "$(basename "$first")" = bunx ] && [ "$next" = tsc ] && return
+  for a in "$@"; do case "$a" in install|add) return 0 ;; turbo) turbo=1 ;; --filter|--filter=*|-F) filter=1 ;; check-types) types=1 ;; esac; done
+  [ -n "$turbo" ] && [ -n "$filter" ] && return
+  [ -n "$types" ] && types_cached "$@"
+}
 CORES=$(sysctl -n hw.ncpu 2>/dev/null || echo 8)
 # one line when a Mac run asks, takes its slot and ends, so a run's wait sits beside its run time (optimizer, 19 Oct)
 rlog() { echo "$(date -u +%FT%TZ) $1 $WHO $$ $2" >> "$OPS/run-slot.runs.log" 2>/dev/null; }
@@ -309,6 +402,8 @@ read -r SIZE UNITS <<EOF
 $(size_of "$WHO")
 EOF
 case "$UNITS" in 1|2|3) ;; *) SIZE=medium UNITS=2 ;; esac
+# a ticket's units come from the run, so a light run from a big session ranks as small; a suite or a full build keeps its session's size
+light_run "$@" && SIZE=small UNITS=1
 # Merging keeps going: a run that gates a merge (Checks, local CI, the merge train, the dashboard's build) goes before the
 # rest and may use the small reserve, as may an org's run (below) and the run-slot.priority pick. A checker's run is ranked by its worker's size (size_of), and
 # the rest keep class 2 so an older copy's ticket still ranks.
@@ -465,7 +560,42 @@ free() {
   [ -n "$TICKET" ] && rm -f "$TICKET"
 }
 trap 'free' EXIT
-trap '[ -n "$CHILD" ] && kill -TERM -- "-$CHILD" 2>/dev/null; wait "$CHILD" 2>/dev/null; exit 143' TERM INT HUP
+trap '[ -n "$CHILD" ] && kill -TERM -- "-$CHILD" 2>/dev/null; wait "$CHILD" 2>/dev/null; [ -n "$CHILD" ] && { reap "$CHILD"; rlog end "rc=143 ran=$(($(date +%s) - TOOK))s"; }; exit 143' TERM INT HUP
+
+# stops what is left in the command's group once it has ended, TERM then KILL after 3 seconds, logging each pid (a suite's worker once outlived it by 5 hours)
+reap() {
+  local left
+  left=$(ps -A -o pid=,pgid=,command= | awk -v g="$1" '$2 == g { $2 = ""; print }')
+  [ -n "$left" ] || return 0
+  printf '%s\n' "$left" | while read -r pid cmd; do rlog reap "pid=$pid $cmd"; done
+  kill -TERM -- "-$1" 2>/dev/null
+  gone "$1" && return 0
+  kill -KILL -- "-$1" 2>/dev/null
+  gone "$1"
+}
+
+# whether a process group has emptied within 3 seconds, since a signalled process lingers until the kernel has torn it down
+gone() {
+  local i
+  for i in $(seq 15); do
+    ps -A -o pgid= | awk -v g="$1" '$1 == g { found = 1 } END { exit !found }' || return 0
+    sleep 0.2
+  done
+  return 1
+}
+
+# runs the command as the leader of a process group of its own (macOS has no setsid(1)), which reap stops once it ends, and exits with its code
+run_command() {
+  local code
+  python3 -I -c 'import os, sys; os.setsid(); os.nice(int(os.environ.get("RUN_SLOT_NICE", "10"))); os.execvp(sys.argv[1], sys.argv[1:])' "$@" <&3 3<&- &
+  CHILD=$!
+  wait "$CHILD"
+  code=$?
+  reap "$CHILD"
+  CHILD=""
+  rlog end "rc=$code ran=$(($(date +%s) - TOOK))s"
+  exit "$code"
+}
 
 reclaim() {
   # $1 is a slot directory that mkdir found taken: free it when its holder line ($2 of stale) has gone stale; the line and the directory are
@@ -518,6 +648,22 @@ held_units() {
     case "$u" in 1|2|3) ;; *) u=2 ;; esac
     total=$((total + u))
   done
+  echo $((total + $(peer_units)))
+}
+# each live holder of another factory's run slots (slots.peers) counts its units here, read only, since that folder is theirs (ops, 31 Oct: the two pools took load1 to 77)
+peer_units() {
+  local d s line u total=0
+  while IFS= read -r d; do
+    [ -n "$d" ] || continue
+    for s in run-slot run-slot-2 run-slot-3 run-slot-4; do
+      [ -d "$d/$s" ] || continue
+      line=$(cat "$d/$s.holder" 2>/dev/null)
+      stale "$d/$s" "$line" && continue
+      u=$(printf '%s' "$line" | cut -d' ' -f4)
+      case "$u" in 1|2|3) ;; *) u=2 ;; esac
+      total=$((total + u))
+    done
+  done <<< "$PEERS"
   echo "$total"
 }
 capacity() {
@@ -549,35 +695,6 @@ mem_ok() {
   [ -n "$free" ] && [ -n "$level" ] && [ "$free" -ge 40 ] && [ "$level" -eq 1 ]
 }
 
-# Quick slots, outside the queue, one holder each: a plain git commit (its pre-commit build, about 17s) takes run-slot-commit (builder,
-# 13 Oct: five commits waited in a fifteen-deep queue; a commit with a longer hook goes through the queue as <who> -- bash -c '...'), and a
-# node_modules clone (cp -cR <sibling>/node_modules <worktree>/) takes run-slot-clone (dispatcher, 13 Oct: three load spikes, 77 and 43
-# among them, each with fseventsd near 100% while clones ran at once); a git merge or pull takes run-slot-commit too, and a short bun test,
-# docs:wrap or format:check takes run-slot-quick
-quick_kind() {
-  local a first=""
-  # the command's first word past env and VAR=x, as box_fits finds it (optimizer, 19 Oct: a commit run as env NODE_ENV=... git commit waited 14 min in the queue)
-  for a in "$@"; do case "$a" in env|*=*) continue ;; esac; first=$a; break; done
-  if [ "$(basename "$first")" = git ]; then
-    # a merge or pull runs no pre-commit build (lefthook.yml has no merge hook), so it ends in seconds (optimizer, 20 Oct: a 1s git merge waited 26.6 min behind suites)
-    for a in "$@"; do case "$a" in commit|merge|pull) echo commit; return ;; esac; done
-  elif [ "$(basename "$first")" = cp ]; then
-    for a in "$@"; do a=${a%/.}; case "${a%/}" in node_modules|*/node_modules) echo clone; return ;; esac; done
-  elif [ "$(basename "$first")" = bun ]; then
-    # a bun test or bun run test:file naming 1 to 3 test files, nothing else, takes run-slot-quick, with --cwd=<p> anywhere or a bare --cwd after run or test, since bun misreads one before the subcommand (scripts/hooks/README.md's no-false-green; ops, 20 Oct: with slot-off, a 5-file run that ran 1s waited 52 min behind suites; PG-2158)
-    # bun run docs:wrap and format:check never run past seconds (run-slot.runs.log, 20 Oct: max 2s and 9s), so they take run-slot-quick too
-    for a in "$@"; do case "$a" in docs:wrap|format:check) echo quick; return ;; esac; done
-    local n=0 t="" skip=""
-    for a in "$@"; do
-      [ -n "$skip" ] && { skip=""; continue; }
-      if [ "$a" = --cwd ]; then [ -n "$t" ] && skip=1 || return; continue; fi
-      case "$a" in env|*=*|-*) continue ;; esac
-      [ "$a" = "$first" ] && continue
-      case "$a" in run|test|test:file) t="$t $a" ;; *.e2e.*) return ;; *.test.ts|*.test.tsx) n=$((n + 1)) ;; *) return ;; esac
-    done
-    case "$t" in " test" | " run test:file") [ "$n" -ge 1 ] && [ "$n" -le 3 ] && echo quick ;; esac
-  fi
-}
 # Dictation misses come from input delay under load, so every command runs under nice 10, and the
 # factory's CPU-heavy work yields to the owner's foreground apps; the live dashboard's own runs (ops-dashboard) keep normal priority
 if [ "$WHO" = ops-dashboard ]; then export RUN_SLOT_NICE=0; else export RUN_SLOT_NICE="${RUN_SLOT_NICE:-10}"; fi
@@ -603,13 +720,7 @@ if [ -n "$MODEL_BOUND" ]; then
   echo "$WHO $$ $(date -u +%FT%TZ) 0 model" > "$SLOT.holder"
   echo "run-slot.sh: $WHO holds $(basename "$SLOT")" >&2
   TOOK=$(date +%s); rlog start "$(basename "$SLOT") waited=$((TOOK - ASKED))s"
-  python3 -I -c 'import os, sys; os.setsid(); os.nice(int(os.environ.get("RUN_SLOT_NICE", "10"))); os.execvp(sys.argv[1], sys.argv[1:])' "$@" <&3 3<&- &
-  CHILD=$!
-  wait "$CHILD"
-  code=$?
-  CHILD=""
-  rlog end "rc=$code ran=$(($(date +%s) - TOOK))s"
-  exit "$code"
+  run_command "$@"
 fi
 KIND=$(quick_kind "$@")
 if [ -n "$KIND" ]; then
@@ -642,14 +753,12 @@ if [ -n "$KIND" ]; then
   echo "$WHO $$ $(date -u +%FT%TZ)" > "$SLOT.holder"
   echo "run-slot.sh: $WHO holds run-slot-$KIND" >&2
   TOOK=$(date +%s); rlog start "run-slot-$KIND waited=$((TOOK - ASKED))s"
-  python3 -I -c 'import os, sys; os.setsid(); os.nice(int(os.environ.get("RUN_SLOT_NICE", "10"))); os.execvp(sys.argv[1], sys.argv[1:])' "$@" <&3 3<&- &
-  CHILD=$!
-  wait "$CHILD"
-  code=$?
-  CHILD=""
-  rlog end "rc=$code ran=$(($(date +%s) - TOOK))s"
-  exit "$code"
+  run_command "$@"
 fi
+
+# slots.peers, one folder a line, read once here since held_units runs in a subshell; a reader that cannot answer counts no peer
+PEERS=$(setting slots.peers 2>/dev/null | python3 -I -c 'import json, sys; [print(p) for p in json.load(sys.stdin) if isinstance(p, str)]' 2>/dev/null)
+[ -n "$HEAD_ONLY" ] && { first_waiter; exit 0; }
 
 if [ -n "$CAN_TAKE" ]; then
   reclaim "$OPS/$CAN_TAKE"
@@ -714,11 +823,4 @@ done
 [ -n "$SLOT" ] || exit 143
 echo "run-slot.sh: $WHO holds $(basename "$SLOT")" >&2
 TOOK=$(date +%s); rlog start "$(basename "$SLOT") waited=$((TOOK - ASKED))s"
-# the command leads a process group of its own (macOS has no setsid(1)), so a dev stack it starts can be stopped by bun run dev:stop
-python3 -I -c 'import os, sys; os.setsid(); os.nice(int(os.environ.get("RUN_SLOT_NICE", "10"))); os.execvp(sys.argv[1], sys.argv[1:])' "$@" <&3 3<&- &
-CHILD=$!
-wait "$CHILD"
-code=$?
-CHILD=""
-rlog end "rc=$code ran=$(($(date +%s) - TOOK))s"
-exit "$code"
+run_command "$@"

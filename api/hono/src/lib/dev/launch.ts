@@ -47,7 +47,7 @@ export const PORTLESS = { PORTLESS_SYNC_HOSTS: "0" }
 // The bare names the live dashboard takes beside its own `desk.`-prefixed names, as portless names their hosts.
 const BARE_HOSTS = ["api.playground.localhost", "playground.localhost"]
 
-// What the live dashboard's stack is told beyond any other's: that the bare names are its too, so the API trusts the bare web origin (.github/scripts/portless.ts). Its own URLs stay its `desk.`-prefixed names, so it works whatever the aliases hold.
+// What the live dashboard's stack is told beyond any other's: that the bare names are its too, so the API trusts the bare web origin (packages/scripts/src/portless.ts). Its own URLs stay its `desk.`-prefixed names, so it works whatever the aliases hold.
 export const dashboardEnv = (
   { branch }: Checkout,
   liveDashboard: LiveDashboard = livePair(),
@@ -77,6 +77,25 @@ export const syncAliases = (
     }
   }
   return { failed, wrote }
+}
+
+// Points a route at a port, owned by a pid that outlives each server behind it (the live dashboard's run.sh), so the supervisor moves its web from one server to the next in one write; a route another live process holds is refused, portless's own conflict, never forced.
+// Its bare alias moves with it only while that alias follows this route (it held the route's old port), as the launcher's 2s sync would, so another stack's alias is never taken.
+export const moveRoute = (
+  host: string,
+  port: number,
+  owner: number,
+  dir = portlessDir(),
+): { failed: string[]; wrote: string[] } => {
+  const store = new RouteStore(dir)
+  const before = store.loadRoutes()
+  const was = before.find((route) => route.hostname === host)?.port
+  store.addRoute(host, port, owner)
+  const bare = host.slice(host.indexOf(".") + 1)
+  const alias = before.find((route) => route.hostname === bare && route.pid === 0)
+  if (!BARE_HOSTS.includes(bare) || was === undefined || alias?.port !== was)
+    return { failed: [], wrote: [] }
+  return syncAliases([[host, bare]], dir)
 }
 
 // The bare names held in portless's routes, by an alias or a running stack.

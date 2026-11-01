@@ -24,7 +24,7 @@ Hand-authored, keep each in step with the code:
 | `AGENTS.md` (`CLAUDE.md` symlinks in) | the rules and the skills catalog table; ships to every fork whole, so a rule must read true there too | a rule changes, or the skill set changes |
 | `.agents/dashboard/<topic>.md` | the dashboard app's rules, one file per topic, each reached from `AGENTS.md` by a pointer naming when to read it, each ALWAYS rule also there in one line | a dashboard rule changes: edit the topic file that holds it, and its one-line form in `AGENTS.md` when its meaning moves; a new topic file gets its pointer, and a new ALWAYS rule its line under that pointer |
 | `.agents/testing.md` | the test suite's reference (the sandbox, the parallel pass, its traps), reached from `AGENTS.md`'s test rule by a pointer | the suite's runner or its sandbox changes |
-| `scripts/README.md`, `scripts/hooks/README.md` | spawn.sh's and ops-herdr's full rules, and the factory hooks', one section per hook, each reached from its one line in `AGENTS.md` | a hook, spawn.sh or ops-herdr changes: edit its section, and its one line in `AGENTS.md` when its meaning moves; a new hook gets a section and a line |
+| `scripts/README.md`, `scripts/hooks/README.md` | spawn.sh's and ops-herdr's full rules, each reached from its one line in `AGENTS.md`, and the factory hooks', one section per hook, each named in `AGENTS.md`'s hooks pointer | a hook, spawn.sh or ops-herdr changes: edit its section, and spawn.sh's or ops-herdr's line in `AGENTS.md` when its meaning moves; a new hook gets a section and its name in that pointer |
 | `packages/config/src/site.ts` | the brand, the feature flags, and the hand-written preamble served at the top of `/llms-full.txt` | the layout, the route groups, the packages, or the API surface it describes changes |
 
 Generated, never hand-edit (they regenerate from the surfaces above): `content/docs/meta.json` (git-ignored), the `/llms.txt` and `/llms-full.txt` routes, and the fumadocs search index. The one hand-written part of those routes is the `/llms-full.txt` preamble, which lives in `site.ts` above.
@@ -45,14 +45,14 @@ rg -n "<changed-path-or-command>" web/next/content/docs README.md AGENTS.md .age
 
 Fix each hit in the same change. Before the first edit to an agent-facing surface (a `SKILL.md` or a file beside it, `AGENTS.md`, an `.agents/dashboard` file, `.agents/testing.md`, `scripts/README.md` or `scripts/hooks/README.md`, a `docs/<bucket>/<name>.md` page), call the Skill tool with `writing-for-agents` when it is installed, and follow it; that page also follows `.agents/writing-docs.md` where that file exists. Three couplings are easy to miss:
 
-- **Adding or removing a skill** touches the `AGENTS.md` skills table (generated, so run `bun .github/scripts/skills-manager.ts`). A vendored one also touches `skills-lock.json` when it is a stub pinned for integrity (`agent-browser`); one copied in full (`portless`) has no lock entry.
+- **Adding or removing a skill** touches the `AGENTS.md` skills table (generated, so run `bun packages/scripts/src/skills-manager.ts`). A vendored one also touches `skills-lock.json` when it is a stub pinned for integrity (`agent-browser`); one copied in full (`portless`) has no lock entry.
 - **Adding, removing, or renaming a doc page** touches `web/next/docs.config.ts`, not the `.mdx` alone.
 - **Editing a wrapped doc** (`PATTERNS` in `packages/scripts/src/docs-wrap/cli.ts`) means one sentence per line, a sentence over 400 characters broken at a comma, colon or semicolon: run `bun run docs:wrap` after the edit, and its `--check`, which pre-commit and `test:skills` run, passes.
 
 ## 4. Verify with the repo's own drift gate
 
 ```bash
-bun .github/scripts/docs.ts --strict
+bun packages/scripts/src/docs.ts --strict
 ```
 
 This is the fast gate (seconds): it exits non-zero on any `.mdx` missing from `docs.config.ts`, any config entry with no file, or frontmatter drifted from `docs.config.ts`. To fix a failure, run it without `--strict` to rewrite the managed frontmatter and scaffold missing pages, then commit. Before the PR, also run `cd web/next && bun run build` once: it reruns this check inside the full build, and additionally catches type errors and rebuilds the search index. Done when the strict gate passes AND a fresh `rg` for every removed or renamed path, command, and skill name finds zero stale mentions across the surfaces.

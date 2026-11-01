@@ -26,6 +26,7 @@ Two reasons this is a hard step rather than a courtesy. A shape is cheap to argu
 - For examples, read `auth.ts` (tables, relations, indexes) and `waitlist.ts` (a minimal non-auth table).
 - A JSON column takes `jsonb` from `@/columns` (`packages/db/src/columns.ts`), never `json` or `jsonb` from `drizzle-orm/pg-core`: drizzle's own hand Bun's SQL client a JSON string, which Bun binds as json, so every object or array lands as one JSON string (`jsonb_typeof` reads `string`). `tests/packages/db/src/columns.test.ts` fails on a schema file that imports either of drizzle's.
 - Conventions: `text` primary keys (`.$defaultFn(() => crypto.randomUUID())` on non-auth tables), `timestamp("created_at").defaultNow().notNull()`, snake_case columns, `onDelete: "cascade"` on FKs, and an `index()` on every FK column. Both bend for the same kind of column: use `onDelete: "set null"` when the row outlives the reference and the column is only provenance, and skip the index when nothing queries by it and the table is small enough that the delete-time scan is free. The `console.ts` tables are both: their `actor_id` must not take a rule or a history entry with it when an account is deleted, and although the lists join, search and sort through it, every one of those drives off `user`'s primary key rather than this column, so an index here would serve only the delete-time sweep. Index a FK when a query narrows on the column itself, or when the table is large enough for the sweep to matter. When a `set null` column is the only record of who acted, store the readable text beside it (`activity.actor`, `allowlist.actor`) so a row does not become anonymous, and can name an actor that was never an account at all.
+- `tests/packages/db/src/conventions.test.ts` holds the on-delete and index rules over every table the schema exports, and counts only a full index (no WHERE): a column that bends one goes in `NOT_CASCADE` with the action its bend allows, in `UNINDEXED`, or in `PARTIAL_INDEX` when its only index is partial, each with its reason, in the same PR as the column.
 
 ## 2. Generate and review
 
@@ -37,7 +38,7 @@ Read the generated `packages/db/drizzle/NNNN_*.sql`. Done when that SQL, its `me
 
 ## 3. Point at a throwaway database first
 
-**Local work runs against a disposable container of the worktree's own, never the live dashboard's database** (`live.container`, which the live dashboard checkout's `.env` names). It holds every real session and transcript, so a migration applied there lands under the running dashboard, and a column renamed under running code takes that code down. This is not hypothetical: on ZeroStarter's shared database it has happened, and step 0 and this step both exist because of it.
+**Local work runs against a disposable container of the worktree's own, never the live dashboard's database** (`live.container`, which the live dashboard checkout's `.env` names). It holds every real session and transcript, so a migration applied there lands under the running dashboard, and a column renamed under running code takes that code down. This is not hypothetical: on ZeroStarter's shared database it has happened, and step 0 and this step both exist because of it. One read of it is allowed: a Vibeground's Start seeds its own copy with one `pg_dump` inside the live database's container, and its branch's migrations run on that copy alone (`.agents/dashboard/stack.md`).
 
 ```bash
 docker run -d --name playground-<worktree>-db -e POSTGRES_PASSWORD=<pw> -p 127.0.0.1::5432 postgres:alpine
@@ -61,7 +62,7 @@ Done when `docker port` prints a `127.0.0.1:` line and the worktree's `.env` nam
 bun run db:migrate
 ```
 
-This is local or ad-hoc only. The dashboard is never deployed, so ZeroStarter's deploy-time auto-apply (`.github/scripts/migrate-on-deploy.ts`) never runs here; the runner hosting the live dashboard runs `bun run db:migrate` in its checkout after a reset that brings a migration (the dev skill's "The live dashboard's build").
+This is local or ad-hoc only. The dashboard is never deployed, so ZeroStarter's deploy-time auto-apply (`packages/scripts/src/migrate-on-deploy.ts`) never runs here; the runner hosting the live dashboard runs `bun run db:migrate` in its checkout after a reset that brings a migration (the dev skill's "The live dashboard's build").
 
 ## 5. Make the running stack see it
 

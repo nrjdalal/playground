@@ -70,7 +70,7 @@ A 💻 row on the linear skill's board for one of the owner's own started ticket
 A file saying which Claude session (by its session id) is working a ticket, so no other session takes it (triage-and-implement's CLAIMS.md, in the org's extension).
 
 **Inbox**:
-Playground's list of what the factory needs from the owner and what the owner should know, beside the owner's chat on the Dashboard: one `inbox_item` row each in the dashboard's local Postgres, posted only with `bun run ask`, shown by its `#i<ref>` id. Its three kinds are a **decision** (a preview of exactly what Approve does: a Slack message, a ship, a new ticket, a delete, a schema, a budget, or a plain ask whose words say what its poster does, answered Approve, Deny or Archive, with an optional note), a **draft** (a Slack message or Linear comment the owner edits, then sends or discards, or for a Slack message saves as a draft in Slack for the owner to finish) and an **update** (an outcome to read: merged, shipped, an alert, a finding or a decision made for the owner). It replaced the asks; the poster carries out the owner's answer and never waits on it (playbook's **ask** rule).
+Playground's list of what the factory needs from the owner and what the owner should know, beside the owner's chat on the Dashboard: one `inbox_item` row each in the dashboard's local Postgres, posted only with `bun run ask`, shown by its `#i<ref>` id. Its three kinds are a **decision** (a preview of exactly what Approve does: a Slack message, a ship, a new ticket, a delete, a schema, a budget, or a plain ask whose words say what its poster does, answered Approve, Deny or Archive, with an optional note; or a secret ask, answered with a value its card hands to a sink and keeps nowhere), a **draft** (a Slack message or Linear comment the owner edits, then sends or discards, or for a Slack message saves as a draft in Slack for the owner to finish) and an **update** (an outcome to read: merged, shipped, an alert, a finding or a decision made for the owner). It replaced the asks; the poster carries out the owner's answer and never waits on it (playbook's **ask** rule).
 
 **One-way door**:
 A choice whose undoing costs real rows, real money or someone else's trust, such as a breaking schema change, a budget or a new Linear ticket. Of the choices a session could make itself, only these go to the owner as an **Inbox** decision, the closed set being the **ask** rule's list ([ADR 0012](./.agents/adr/0012-the-factory-decides-two-way-doors.md)).
@@ -79,7 +79,7 @@ A choice whose undoing costs real rows, real money or someone else's trust, such
 A choice that can be undone: a design, an order, the scope inside an ask the owner approved. The factory picks it and records it in an ADR or on the issue, telling the owner with an Inbox update only when it changes what the owner sees or does ([ADR 0012](./.agents/adr/0012-the-factory-decides-two-way-doors.md)).
 
 **Gate**:
-The set of verdicts a PR's head must hold before pr:merge or a train's land squashes it: code-review-loop's 5/5 and a green stamp, which passed `verify` when it touches the dashboard's code and the tester's `agent-drive` on a `web/next/` diff ([playbook](./extensions/core/skills/playbook/SKILL.md), the **gate** rule).
+The set of verdicts a PR's head must hold before pr:merge squashes it: code-review-loop's 5/5 and GitHub's `Audit, Lint, and Build` and `test` checks green ([playbook](./extensions/core/skills/playbook/SKILL.md), the **gate** rule).
 
 **Lead**:
 One of the two managers under the dispatcher that run the floor (the dashboard's and the roster's Manager): the Builder leads the workers, Ops the runners and the ops jobs. Every worker and runner reports to exactly one lead, and the leads report to the dispatcher ([playbook](./extensions/core/skills/playbook/SKILL.md)).
@@ -89,6 +89,9 @@ One thing the owner asked about, followed until it is done however many sessions
 
 **Fixture**:
 A made-up machine the dashboard reads on factory, test and `PLAYGROUND_FIXTURE` stacks: fake sessions in every state, their transcripts, roster and usage, written fresh into a stack's scratch folder when it starts (`api/hono/src/fixtures/dashboard.json`), shown under a Test data badge. A full-page screenshot of a fixture stack carries no real data, so screenshots come from one alone. A person's own clone, the live dashboard's branch and a `PLAYGROUND_LIVE_READS` stack read the live machine ([ADR 0008](./.agents/adr/0008-a-persons-stack-reads-their-own-machine.md)).
+
+**Vibeground**:
+A worktree's own stack the owner starts from the Inbox's Preview row, worked on beside the chat or in a tab of its own: its branch as it stands, on a copy of the live dashboard's database seeded by one `pg_dump`, so it shows real data while its migrations reach the copy alone. Done asks the dispatcher to have its worktree's session push to the branch's open PR, else open one into its parent, never merging; Stop removes the copy and keeps the worktree. Its pages wear a Vibeground badge with its branch.
 
 **Probe**:
 A throwaway session named `<id>-probe`, or `probe-<what>` when started before, spawned for one test and closed by its spawner the moment the test is done.
@@ -100,13 +103,19 @@ A lead's regular check of its own agents, for a picker waiting, a permission pro
 The dispatcher's own session: it routes each task by role, a new ask through the Planner and then a lead (the Builder or Ops), a fast lane straight to a lead, and holds no task of its own, so the sidebar lists it in its header, above the session groups, with no group title, and `/dashboard` opens its chat. The live dashboard itself belongs to a runner ([playbook](./extensions/core/skills/playbook/SKILL.md)).
 
 **Manager**:
-A session that manages under the dispatcher: the Planner, the Builder and Ops, by default `planner`, `builder` and `ops` by name, or any agent the dispatcher's roster gives the manager role. The dashboard lists managers under Orchestrators, below the dispatcher rows in the sidebar's header, with their tasks, A to Z by roster title until the owner drags them into an order of the owner's choosing. The factory's rules call the Builder and Ops leads (Lead).
+A session that manages under the dispatcher: the Planner, the Builder, Ops and the Optimizer, by default `planner`, `builder`, `ops` and `optimizer` by name, or any agent the dispatcher's roster gives the manager role. The dashboard lists managers under Orchestrators, below the dispatcher rows in the sidebar's header, with their tasks, A to Z by roster title until the owner drags them into an order of the owner's choosing. The factory's rules call the Builder and Ops leads (Lead).
 
 **Picker**:
 The command (`playground picker`) by which a session's manager answers one permission prompt: it allows or denies only the call the session's stuck alert named, keyed to that call (packages/scripts/src/playground/picker.ts).
 
 **Planner**:
 The Planner's session, a manager: it does every research, deep dive, comparison and plan, through read-only research workers the Builder dispatches, and never builds, so it stays free for the next ask. It keeps the roadmap, `~/.playground/bundles/plan.json`, whose lanes the Builder dispatches from ([playbook](./extensions/core/skills/playbook/SKILL.md)).
+
+**Icebox**:
+The Optimizer's parking place for an idea a retro found but nothing needs yet, one GitHub issue it keeps and reads at each retro; an idea leaves it for a `PG-<n>` issue of its own once a lead schedules it.
+
+**Retro**:
+The Optimizer's look back over what the factory did: what slowed it, what it cost and what went wrong, each lesson turned into a fix routed through the dispatcher, or parked in the icebox.
 
 **Brief**:
 The file that spawns a session and binds it: the task, its steps and its Done-when, passed to `scripts/spawn.sh` as a path, from the templates in `scripts/briefs/` ([SESSIONS.md](./extensions/core/skills/playbook/SESSIONS.md#spawn)).
@@ -125,6 +134,9 @@ A dedicated long-running session named `<id>-runner`, or `runner-<adjective>-<no
 
 **Roster**:
 The file the dispatcher keeps of the agents it dispatched (`~/.playground/roster.json`): each one's kind, role, task, short title, ETA and where its work went. The dashboard reads it for its Agents table, its Next up list (the roster's backlog still waiting) and its sidebar's titles and ETAs; the dispatcher and the leads write it, only through `scripts/roster.ts`.
+
+**Slack mode**:
+The owner is away and the owner's own Slack DM is the owner's remote access: the `slack.mode` setting, on until the owner turns it off. While it is on, ops-dm-watch hands each owner message in the DM to the dispatcher, to the second dispatcher too when no reply lands in 3 minutes or the dispatcher is stuck, and nudges the dispatcher for an update every 15 minutes; every reply goes through `playground dm send` ([DISPATCH.md](./extensions/core/skills/playbook/DISPATCH.md#slack-mode)).
 
 **Slot**:
 One turn at a heavy run on this machine: `~/.playground/ops/run-slot.sh <name> -- <command>` takes a run slot by mkdir and gives it back however the run ends ([playbook](./extensions/core/skills/playbook/SKILL.md), the **slots** rule).

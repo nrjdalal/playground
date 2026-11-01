@@ -30,6 +30,20 @@ for link in "$DEST"/*; do
   esac
 done
 
+# A link into this checkout whose file a pull removed goes, in the folders doctor reads (linksInto in packages/scripts/src/playground/links.ts); a live one, and every link elsewhere, stays
+DATA="$HOME/.playground"
+for dir in "$HOME/.bun/bin" "$DATA" "$DATA/handoffs" "$DATA/ops" "$DATA"/ops/*/; do
+  dir="${dir%/}"
+  case "$dir" in "$DATA"/ops/*) [ ! -L "$dir" ] || continue ;; esac
+  [ -d "$dir" ] || continue
+  for link in "$dir"/*; do
+    [ -L "$link" ] && [ ! -e "$link" ] || continue
+    case "$(readlink "$link")" in
+      "$REPO"/*) rm "$link"; echo "removed dead link $link" ;;
+    esac
+  done
+done
+
 # Links the factory's settings, which every factory session is spawned with
 # (--settings), so a pull updates its hooks too. A real file there is left alone.
 SETTINGS="$HOME/.playground/factory-settings.json"
@@ -67,17 +81,13 @@ link_file "$REPO/scripts/briefs/brief-rush.md" "$RUSH"
 link_file "$REPO/packages/scripts/src/playground/cli.ts" "$HOME/.bun/bin/playground"
 # run-slot.sh keeps its state in the state folder (ops/run-slot*) beside the link, so every heavy run follows the checkout's copy
 link_file "$REPO/scripts/ops/run-slot.sh" "$HOME/.playground/ops/run-slot.sh"
-# The Checks lane's scripts read their folder through a path that keeps the link, so their state (checks.log, go.log, the lane locks) stays in ops/checks
-for script in checks.py go.py outside.py parallel.py; do
-  link_file "$REPO/scripts/ops/checks/$script" "$HOME/.playground/ops/checks/$script"
-done
 BEAT="$HOME/.playground/ops/beat.py"
 if [ -f "$BEAT" ] && [ ! -L "$BEAT" ]; then
   mv "$BEAT" "$BEAT.replaced-$(date -u +%Y%m%dT%H%M%SZ)"
   echo "moved aside $BEAT: a copy the scripts' checkout() lookup lacks"
 fi
-# The merge train's and usage's scripts name their state folders by path, so their state stays there whichever path runs them; beat.py is the module they import for the heartbeat and the checkout, and notify.sh the line the Checks lane and the merge train queue their alerts through
-for script in beat.py merge-train/run.py merge-train/wait-check.py notify.sh usage/account-watch.py usage/glm-credits.py usage/login-flip.py usage/near-limit.py usage/run.py usage/week-marks.py; do
+# The merge train's and usage's scripts name their state folders by path, so their state stays there whichever path runs them; beat.py is the module they import for the heartbeat and the checkout, and notify.sh the line the merge train queues its alerts through
+for script in beat.py merge-train/run.py notify.sh usage/account-watch.py usage/glm-credits.py usage/login-flip.py usage/near-limit.py usage/run.py usage/week-marks.py; do
   link_file "$REPO/scripts/ops/$script" "$HOME/.playground/ops/$script"
 done
 # The home skill set, written from this checkout and the extensions and installed at user scope as ws-home@ws (playground orgs home), so a pull's skills reach the next session started by hand

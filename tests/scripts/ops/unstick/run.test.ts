@@ -58,6 +58,9 @@ const drive = async (
       HOME: process.env.HOME,
       PATH: process.env.PATH,
       TZ: "UTC",
+      // the sandbox's real-home uv folders, so uv finds its Python 3.13 rather than downloading one into the scratch home
+      UV_CACHE_DIR: process.env.UV_CACHE_DIR,
+      UV_PYTHON_INSTALL_DIR: process.env.UV_PYTHON_INSTALL_DIR,
       ...env,
     },
     stderr: "pipe",
@@ -538,7 +541,8 @@ describe("an account move", () => {
 
 // review round 1: under the load units a waiter for units that are not free waits beside a free run-slot by design
 describe("the slot-stuck alert", () => {
-  const queue = (held: boolean) => {
+  // older: a big ticket older than the medium one, which the window has tracked; took: a start of run-slot in the runs log inside the window
+  const queue = (held: boolean, { older = false, took = false } = {}) => {
     const config = scratch()
     const ops = join(config, "playground", "ops")
     const bin = join(config, "bin")
@@ -557,9 +561,16 @@ describe("the slot-stuck alert", () => {
         `worker-big ${process.pid} 2026-10-18T19:00:00Z 3 big\n`,
       )
     }
-    writeFileSync(join(ops, "run-slot.waiters", `1-${process.pid}-worker-m`), "s2 22 2 medium\n")
+    writeFileSync(join(ops, "run-slot.waiters", `2-${process.pid}-worker-m`), "s2 22 2 medium\n")
+    if (older)
+      writeFileSync(join(ops, "run-slot.waiters", `1-${process.pid}-worker-big`), "s2 23 3 big\n")
     const now = Date.now() / 1000
-    const state = { slot_free: { since: now - 200, ticket: `1${process.pid}` } }
+    if (took)
+      writeFileSync(
+        join(ops, "run-slot.runs.log"),
+        `${new Date((now - 60) * 1000).toISOString().slice(0, 19)}Z start worker-x 4242 run-slot waited=3s\n`,
+      )
+    const state = { slot_free: { since: now - 200, ticket: `${older ? 1 : 2}${process.pid}` } }
     return callWith(
       { PATH: `${bin}:${process.env.PATH}`, RUN_SLOT_SIZE: "medium" },
       config,
@@ -577,6 +588,16 @@ describe("the slot-stuck alert", () => {
 
   test("stays quiet while the waiter's units are not free", async () => {
     expect(await queue(true)).toBeNull()
+  })
+
+  // 31 Oct: both alerts named a big session's ticket, the oldest, which ranks behind a newer medium one by design
+  test("watches the queue's head, so an older big ticket behind a newer medium one fires nothing", async () => {
+    expect(await queue(false, { older: true })).toBeNull()
+  })
+
+  // 31 Oct: two samples 2 minutes apart read free while the runs log shows run-slot taken 5 times between them
+  test("stays quiet when the runs log shows run-slot taken inside the window", async () => {
+    expect(await queue(false, { took: true })).toBeNull()
   })
 })
 
@@ -1098,6 +1119,7 @@ describe("pickers go to the manager (PG-2184)", () => {
 // OrbStack hung twice on 27 Oct and the live dashboard lost its database for about 6 minutes each time, until a person restarted it.
 describe("a hung Docker with the live dashboard's db unreachable restarts OrbStack (#2437)", () => {
   // A machine whose `docker info` hangs until `answer()`, whose live dashboard's health reads `db`, and whose orbctl records each call; its state folder carries from one cycle to the next.
+  // The probe gets 2 s, 5 times the 0.4 s an answering probe took at most beside twice the cores in busy loops, and the hang execs its sleep, so the probe's kill ends it and none outlives its case.
   const machine = (db: string) => {
     const config = scratch()
     const bin = join(config, "bin")
@@ -1109,7 +1131,7 @@ describe("a hung Docker with the live dashboard's db unreachable restarts OrbSta
       writeFileSync(join(bin, name), `#!/bin/sh\n${body}\n`)
       chmodSync(join(bin, name), 0o755)
     }
-    script("docker", `if [ -f "${answers}" ]; then echo 28.0.0; else sleep 5; fi`)
+    script("docker", `if [ -f "${answers}" ]; then echo 28.0.0; else exec sleep 10; fi`)
     script("orbctl", `echo "$1" >> "${orbctl}"`)
     script(
       "git",
@@ -1119,7 +1141,7 @@ describe("a hung Docker with the live dashboard's db unreachable restarts OrbSta
     script("curl", `echo '{"data":{"db":"${db}","dashboard":"live","message":"degraded"}}'`)
     const env = { PLAYGROUND_REPO: "/repo", PATH: `${bin}:${process.env.PATH}` }
     const check = (state: Record<string, unknown> = {}) =>
-      drive(env, config, { args: [state, 1], fn: "docker_check", notified: true }) as Promise<{
+      drive(env, config, { args: [state, 2], fn: "docker_check", notified: true }) as Promise<{
         notified: [string, string][]
         result: { kind: string; line: string }[]
       }>

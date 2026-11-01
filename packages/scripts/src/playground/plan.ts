@@ -23,11 +23,11 @@ export const VIEW_SERVER = "playground"
 export const HELP = `playground            start herdr's servers that are down and restore their sessions, start the Dashboard's stack and follower when down (in cmux while a session is open there, else in herdr), start the dispatcher when it is not running (playground dispatcher), stop there when the Dashboard needs a cmux terminal open, else wait for the Dashboard (a progress line every 10s, stopping early once ops-dashboard's supervisor stops, 15 minutes at most), then open it; a step that failed is named last, with why, under Left for you, and the run exits 1
 playground view       open the ${VIEW_SERVER} herdr server, where the sessions run, in this terminal
 playground dispatcher start the dispatcher in a herdr workspace of its own, its brief written once from scripts/briefs/dispatcher.md into the data folder as brief-<dispatcher>.md: exit 0 started, 3 already running, 1 refused with spawn.sh's reason
-playground planner | builder | ops
-                      start that manager as playground dispatcher starts the dispatcher, its brief from scripts/briefs/<manager>.md; the dispatcher runs it the first time it routes work there
+playground planner | builder | ops | optimizer
+                      start that manager as playground dispatcher starts the dispatcher, its brief from scripts/briefs/<manager>.md; the dispatcher runs it the first time it routes work there, and the optimizer at its own start
 playground status     one line each for the terminal, the Dashboard, the follower, each dispatcher, GLM and each herdr server
 playground sweep <lead>
-                      what changed since that lead's last sweep (Checks lines, alerts, the merge queue, load5 crossing 15, the single-slot flag, its rows' passed ETAs), or quiet
+                      what changed since that lead's last sweep (alerts, the merge queue, load5 crossing 15, the single-slot flag, its rows' passed ETAs), or quiet
 playground page <file.html> --title "<title>" --by <session> [--for <session>]
                       keep a page for the Dashboard: copy it into the previews folder under a free name, with its title as its caption and a line in pages.jsonl, then open the copy; it shows on the Pages tab of --by's view, of --for's and of the dispatcher's
 playground update [--to <tag>]
@@ -41,6 +41,8 @@ playground ask <command> ...
                       the Inbox: post an ask, read its answer, close it (bun run ask)
 playground changelog <command> ...
                       add rows to the Changelog from GitHub's merges and versions, or a line by hand (bun run changelog)
+playground dm send <file>
+                      post the reply in <file>, named by its absolute path, to the owner's own DM in its frame, the one way any session posts there (bun run dm)
 playground ingest [--follow | status]
                       read every Claude Code session on this machine into the Dashboard's database (bun run ingest)
 playground queues     print the merge queue and the work queue (bun run queues)
@@ -75,7 +77,7 @@ playground picker <session> allow <key> | deny <key> "<reason>"
                       as the session's manager, answer the permission prompt its stuck alert named by key: allow presses Yes once, deny presses No and sends the session the reason; each answer is a line in ops/picker.log`
 
 // The package scripts playground runs as its own verbs.
-export const VERBS = ["ask", "changelog", "ingest", "queues", "thread"]
+export const VERBS = ["ask", "changelog", "dm", "ingest", "queues", "thread"]
 
 // playground <verb> runs the package script of that name in the Dashboard's checkout, words and all.
 export const verbArgv = (verb: string, words: string[]): string[] => ["run", verb, ...words]
@@ -135,6 +137,7 @@ export const WORDS: Record<string, number | "rest"> = {
   "herdr stop": 0,
   migrate: 0,
   ops: 0,
+  optimizer: 0,
   "orgs home": 0,
   "orgs resolve": 0,
   page: 1,
@@ -335,7 +338,7 @@ export type RollOutcome =
   | { phase: "building" | "going back" | "switching" }
   | { done: string; ok: boolean }
 
-// Where the dashboard's supervisor is in the roll `playground update` asked for, from the lines its log and results log gained since. A failed roll goes back to the build before, and is done once that FALLBACK lands, unless it ran a migration.
+// Where the dashboard's supervisor is in the roll `playground update` asked for, from the lines its log and results log gained since. A failed roll goes back to the build before, and is done once that FALLBACK lands, unless it ran a migration or its build failed before the stop.
 export const rollOutcome = (log: string[], results: string[]): RollOutcome => {
   let failed: string | undefined
   for (const line of results) {
@@ -362,6 +365,8 @@ export const rollOutcome = (log: string[], results: string[]): RollOutcome => {
     if (roll?.[3] === "PASS") return { done: `Updated to ${roll[2]}`, ok: true }
     if (!roll) continue
     failed = roll[4] || "the roll failed"
+    // a build that failed before the stop stopped nothing, so no fallback follows
+    if (failed.startsWith("build before the stop:")) return { done: `Failed: ${failed}`, ok: false }
     if (/\bmigrate\b/.test(roll[1]))
       return {
         done: `Failed: ${failed}; it changed the database, so the Dashboard stays on ${roll[2]}`,
@@ -369,9 +374,12 @@ export const rollOutcome = (log: string[], results: string[]): RollOutcome => {
       }
   }
   if (failed !== undefined) return { phase: "going back" }
-  return {
-    phase: log.some((line) => line.includes("roll-now: rolling to")) ? "switching" : "building",
-  }
+  // the supervisor builds the head after its roll-now line, before it stops the Dashboard or, for a head that migrates, after, so the roll reads as building until the head is built, or starts on a build it kept, and only then as switching
+  const rolling = log.findIndex((line) => line.includes("roll-now: rolling to"))
+  const starting = log.findIndex(
+    (line, at) => at > rolling && / (built \w+ in |dev started)/.test(line),
+  )
+  return { phase: rolling >= 0 && starting > rolling ? "switching" : "building" }
 }
 
 // ops-dashboard's heartbeat as read at one poll: its age, its cycle and whether its pid is alive.

@@ -11,7 +11,7 @@ import {
   writeFileSync,
 } from "node:fs"
 import { homedir, tmpdir } from "node:os"
-import { join, relative } from "node:path"
+import { dirname, join, relative, resolve } from "node:path"
 
 import {
   checkoutRoot,
@@ -294,6 +294,18 @@ describe("writeFixture", () => {
     expect(fixtureDir({ PLAYGROUND_FIXTURE_DIR: "scratch/fx" })).toBe(join(root, "scratch/fx"))
     expect(fixtureDir({ PLAYGROUND_FIXTURE_DIR: "/elsewhere/fx" })).toBe("/elsewhere/fx")
     expect(fixtureDir({})).toBe(join(root, ".turbo", "dashboard-fixture"))
+  })
+
+  test("the API the live Dashboard serves runs inside its checkout, so it reads the live machine and finds its migrations, never falling to a Docker image's fixture", () => {
+    const root = checkoutRoot()
+    if (!root) throw new Error("the tests run from a checkout")
+    const script = JSON.parse(readFileSync(join(root, "api/hono/package.json"), "utf8")).scripts[
+      "serve:app"
+    ] as string
+    const entry = (script.match(/(\S+)$/)?.[1] ?? "")
+      .replaceAll('"', "")
+      .replace("$PLAYGROUND_BUILD", scratch("served-build"))
+    expect(checkoutRoot(dirname(resolve(root, "api/hono", entry)))).toBe(root)
   })
 
   test("a stack the launcher wrote a fixture for never writes it again once it is gone, so a process outliving the stop leaves nothing behind", () => {

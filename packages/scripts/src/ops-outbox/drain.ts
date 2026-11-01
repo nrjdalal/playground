@@ -45,5 +45,23 @@ export async function drain(outbox: string): Promise<Queued[]> {
   return out.sort((a, b) => a.at.localeCompare(b.at))
 }
 
+// The queues holding a whole line past cursor.json's offset, which the next drain would send, read without moving the cursor; none before a first drain, which starts every queue at its end.
+export async function pending(outbox: string): Promise<string[]> {
+  const raw = await Bun.file(join(outbox, "cursor.json"))
+    .text()
+    .catch(() => null)
+  if (raw === null) return []
+  const cursor: Record<string, number> = raw ? JSON.parse(raw) : {}
+  const waiting: string[] = []
+  for (const file of (await readdir(outbox).catch(() => []))
+    .filter((f) => /^ops-.+\.jsonl$/.test(f))
+    .sort()) {
+    const bytes = new Uint8Array(await Bun.file(join(outbox, file)).arrayBuffer())
+    const from = (cursor[file] ?? 0) > bytes.length ? 0 : (cursor[file] ?? 0)
+    if (bytes.lastIndexOf(10) + 1 > from) waiting.push(file)
+  }
+  return waiting
+}
+
 if (import.meta.main)
   for (const q of await drain(join(opsDir(), "outbox"))) console.log(JSON.stringify(q))

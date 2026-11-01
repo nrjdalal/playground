@@ -65,18 +65,14 @@ const bunJob = (name: string) =>
 // The jobs Playground ships, each off until the owner turns it on but the Dashboard's own; A to Z.
 export const JOBS: Record<string, Job> = {
   "ops-awake": terminal("ops-awake", `${bunJob("ops-awake")} --data {data}`, {
-    description: "Keeps the Mac awake on AC power with caffeinate, display and lock unchanged.",
+    description:
+      "Keeps the Mac awake on AC power and on battery with caffeinate, display and lock unchanged.",
     needsCmux: false,
     schedule: { always: true },
   }),
   "ops-changelog": terminal("ops-changelog", bunJob("ops-changelog"), {
     description: "Syncs new canary merges and main versions into the Changelog every 5 minutes.",
     schedule: { every: 300 },
-  }),
-  "ops-checks-go": terminal("ops-checks-go", "python3 -I {checkout}/scripts/ops/checks/go.py", {
-    description: "Runs Checks on each gated PR scored 5/5 at its head, in merge-queue order.",
-    needsCmux: false,
-    schedule: { every: 120 },
   }),
   // The one job on by default: the Dashboard serves first run and every settings write, so a store with no row for it, or no store, keeps it running. It runs from the Dashboard's checkout, since its supervisor rolls the checkout it runs in and refuses any other branch.
   "ops-dashboard": terminal("ops-dashboard", "{dashboard}/scripts/ops/dashboard/run.sh", {
@@ -85,6 +81,12 @@ export const JOBS: Record<string, Job> = {
     enabled: true,
     schedule: { every: 60 },
     stop: "dashboard",
+  }),
+  "ops-dm-watch": terminal("ops-dm-watch", bunJob("ops-dm-watch"), {
+    description:
+      "In Slack mode, hands each message in the owner's DM to the dispatcher, the second dispatcher too when no reply lands in 3 minutes.",
+    needsCmux: false,
+    schedule: { every: 60 },
   }),
   "ops-ext-sync": terminal("ops-ext-sync", bunJob("ops-ext-sync"), {
     description:

@@ -25,31 +25,17 @@ const steps: [string, string[]][] = [
   ["container volumes", py("test_docker_rm_volumes.py")],
   ["kill by name", py("test_kill_by_name.py")],
   ["ops cmux", py("test_ops_cmux.py")],
-  ["ops checks", py("test_ops_checks.py")],
   ["ops merge train", py("test_ops_merge_train.py")],
   ["em-dash check", ["bash", "scripts/check-em-dashes.sh"]],
   ["one sentence per line", ["bun", "packages/scripts/src/docs-wrap/cli.ts", "--check"]],
 ]
 
-const ask = (bin: string, ...args: string[]) =>
-  Bun.which(bin)
-    ? Bun.spawnSync([bin, ...args])
-        .stdout.toString()
-        .split("\n")
-        .map((line) => line.trim())
-    : []
-
 type Result = [name: string, ok: boolean, fail?: string]
 
-// Every step runs in sandbox.ts's sandbox; uv's Pythons and cache and Docker's config stay the real home's, read before the swap, so a run downloads nothing twice
+// Every step runs in sandbox.ts's sandbox, which keeps uv's Pythons and cache the real home's; Docker's config stays the real home's too, read before the swap, so a run downloads nothing twice
 export const runSteps = async (list: [string, string[]][]) => {
-  const real = {
-    DOCKER_CONFIG: process.env.DOCKER_CONFIG ?? join(homedir(), ".docker"),
-    UV_CACHE_DIR: ask("uv", "cache", "dir")[0],
-    UV_PYTHON_INSTALL_DIR: ask("uv", "python", "dir")[0],
-  }
   const { env: box, scratch } = sandbox()
-  const env = { ...box, ...Object.fromEntries(Object.entries(real).filter(([, dir]) => dir)) }
+  const env = { ...box, DOCKER_CONFIG: process.env.DOCKER_CONFIG ?? join(homedir(), ".docker") }
   const results: Result[] = []
   try {
     for (const [name, cmd] of list) {

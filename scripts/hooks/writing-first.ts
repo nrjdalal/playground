@@ -23,7 +23,9 @@ type Input = {
 
 const WRITES = new Set(["Edit", "MultiEdit", "Write"])
 const ID = /^[\w-]+$/
-const TYPED = new RegExp(`^\\s*/${SKILL}(?:\\s|$)`)
+// the bare name, or a plugin's or a folder's scoped copy (`ws-home:writing-for-agents`)
+const LOADS = new RegExp(`^(?:[\\w./-]+:)?${SKILL}$`)
+const TYPED = new RegExp(`^\\s*/(?:[\\w./-]+:)?${SKILL}(?:\\s|$)`)
 // a checkout is the factory's when it holds the factory's own skill, in core or in either folder an older worktree's branch may have, so a worktree matches and another org's repository does not
 const FACTORY_MARKERS = [
   join("extensions", "core", "skills", "playbook", "SKILL.md"),
@@ -99,9 +101,43 @@ async function scoped(path: string, env: Environment): Promise<boolean> {
   )
 }
 
-const installed = (env: Environment, cwd: string | undefined) =>
-  [configDir(env), ...(cwd ? [join(cwd, ".claude")] : [])].some((dir) =>
-    existsSync(join(dir, "skills", SKILL, "SKILL.md")),
+// each plugin installed and enabled for the user, or installed for the session's project
+const plugins = async (env: Environment, cwd: string | undefined): Promise<string[]> => {
+  const read = async (file: string): Promise<unknown> => {
+    try {
+      return await Bun.file(join(configDir(env), file)).json()
+    } catch {
+      return undefined
+    }
+  }
+  const listed = (await read(join("plugins", "installed_plugins.json"))) as
+    | {
+        plugins?: Record<
+          string,
+          { installPath?: unknown; projectPath?: unknown; scope?: unknown }[]
+        >
+      }
+    | undefined
+  const enabled = (
+    (await read("settings.json")) as { enabledPlugins?: Record<string, unknown> } | undefined
+  )?.enabledPlugins
+  return Object.entries(listed?.plugins ?? {}).flatMap(([key, installs]) =>
+    (Array.isArray(installs) ? installs : []).flatMap((install) => {
+      if (typeof install?.installPath !== "string") return []
+      const loads =
+        install.scope === "user"
+          ? enabled?.[key] === true
+          : typeof install.projectPath === "string" &&
+            !!cwd &&
+            !relative(install.projectPath, cwd).startsWith("..")
+      return loads ? [install.installPath] : []
+    }),
+  )
+}
+
+const installed = async (env: Environment, cwd: string | undefined) =>
+  [configDir(env), ...(cwd ? [join(cwd, ".claude")] : []), ...(await plugins(env, cwd))].some(
+    (dir) => existsSync(join(dir, "skills", SKILL, "SKILL.md")),
   )
 
 async function mark(input: Input, env: Environment) {
@@ -123,10 +159,11 @@ async function judge(input: Input, env: Environment): Promise<string | undefined
   if (typeof target !== "string" || !file) return
   const cwd = typeof input.cwd === "string" ? input.cwd : undefined
   const path = real(resolve(cwd ?? "/", target))
-  if (!(await scoped(path, env)) || existsSync(file) || !installed(env, cwd)) return
+  if (!(await scoped(path, env)) || existsSync(file)) return
+  if (!(await installed(env, cwd))) return
   const who =
     typeof input.agent_id === "string" && input.agent_id ? "this subagent" : "this session"
-  return `writing-first hook refuses this ${String(input.tool_name)} to ${target}: it is an agent-facing doc, and ${who} has not loaded ${SKILL} since its last compaction. Call the Skill tool with skill "${SKILL}", follow it, then retry this write (playbook's **writing** rule).`
+  return `writing-first hook refuses this ${String(input.tool_name)} to ${target}: it is an agent-facing doc, and ${who} has not loaded ${SKILL} since its last compaction. Call the Skill tool with skill "${SKILL}", or the scoped name your skill list shows for it (such as "ws-home:${SKILL}"), follow it, then retry this write (playbook's **writing** rule).`
 }
 
 // Fails open: input it cannot read, or an error, lets the call run, so a fault here never blocks every write.
@@ -139,7 +176,8 @@ export async function check(
     if (typeof input !== "object" || input === null) return
     const event = input.hook_event_name
     if (event === "PreToolUse" && input.tool_name === "Skill") {
-      if (input.tool_input?.skill === SKILL) await mark(input, env)
+      const skill = input.tool_input?.skill
+      if (typeof skill === "string" && LOADS.test(skill)) await mark(input, env)
       return
     }
     if (event === "UserPromptSubmit") {
