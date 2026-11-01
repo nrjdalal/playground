@@ -38,9 +38,11 @@ describe("DISPATCH.md", () => {
     )
     expect(line).toContain("plus once more before the try, never on a schedule")
     expect(line).toContain("6,774 s")
-    expect(lines[at + 1]).toContain("Each sync's round waits on CI at the synced head and cites it")
+    expect(lines[at + 1]).toContain(
+      "Each sync's round waits on CI at the synced head and cites it where code-review-loop's The last 5/5 lets CI stand in",
+    )
     expect(lines[at + 2]).toContain(
-      "A sync is done when each PR in the stack has its merged head pushed",
+      "A sync is done when each PR in the stack has its merged head pushed and its reviewer has posted a verdict at that head",
     )
   })
 
