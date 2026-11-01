@@ -155,6 +155,7 @@ def notify(text, to="dispatcher"):
 
 
 STUCK_ALERT = os.path.join(os.path.dirname(os.path.dirname(CODE)), "packages", "scripts", "src", "stuck-alert.ts")
+PROMPT = os.path.join(os.path.dirname(STUCK_ALERT), "playground", "prompt.ts")
 
 
 def alert_to(name, transcript):
@@ -173,12 +174,12 @@ def alert_to(name, transcript):
 
 
 def prompt_answer(name, sid, lines):
-    """How the manager answers a permission prompt read off the screen (answerOf in packages/scripts/src/stuck-alert.ts): `playground picker` by
+    """How the manager answers a permission prompt read off the screen (answerOf in packages/scripts/src/playground/prompt.ts): `playground picker` by
     the key of the waiting call the prompt shows, a subagent's included, so a prompt whose hook record a later Stop replaced still gets a key; else
     the one route left. "" when the table cannot run."""
     bun = shutil.which("bun") or os.path.expanduser("~/.bun/bin/bun")
     try:
-        r = subprocess.run([bun, "--no-env-file", STUCK_ALERT, "answer", name, sid or ""], input="\n".join(lines), capture_output=True, text=True, timeout=20)
+        r = subprocess.run([bun, "--no-env-file", PROMPT, "answer", name, sid or ""], input="\n".join(lines), capture_output=True, text=True, timeout=20)
         return r.stdout.strip() if r.returncode == 0 else ""
     except (OSError, subprocess.TimeoutExpired):
         return ""

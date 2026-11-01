@@ -12,7 +12,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { HERDR_SESSIONS } from "../../../../packages/scripts/src/ops-herdr/herdr"
-import { refusalOf } from "../../../../packages/scripts/src/playground/picker"
+import { refusalOf } from "../../../../packages/scripts/src/playground/prompt"
 import { callKey, transcriptOf } from "../../../../packages/scripts/src/stuck-alert"
 import { OLD_NAMES } from "../../../session-names"
 import { storeWith } from "../../hooks/render-set"
@@ -737,13 +737,13 @@ describe("a permission prompt read off the screen", () => {
     expect(refusalOf("k3m9px-worker", screen.join("\n"), transcript, key)).toBe("")
   })
 
-  test("names the one route left when no waiting call matches it", async () => {
+  test("names the route left when no waiting call is surely its own", async () => {
     const config = scratch()
     transcripts(config)
     expect(
       await call(config, "prompt_answer", "k3m9px-worker", SESSION, screenOf("rm -rf /tmp/spec")),
     ).toBe(
-      "playground picker cannot answer it, since no waiting call matches it: tell dispatcher, for the owner to answer it in the pane.",
+      "playground picker cannot answer it, since no waiting call is surely its own: tell dispatcher, for the owner to answer it in the pane.",
     )
   })
 })

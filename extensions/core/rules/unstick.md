@@ -5,7 +5,7 @@ The manager allows a permission prompt the work needs and otherwise denies it wi
 Only `playground picker`, run by the session's manager, answers a permission prompt, since a key pressed in another's pane reads as the owner's.
 Each manager wakes on its alerts within seconds through its own `playground alerts-wait` task, and the relay sends each line too, as the backstop.
 ops-session-resume sends one carry-on line past a usage limit's reset, after a failed turn and after a restart that lost a turn, and tells the session's lead when the same failure stands again.
-ops-unstick reads every live session's screen for what no hook reports, such as the folder-trust and MCP-server dialogs, and sends each such block to the session's manager, pressing nothing on a permission prompt, whose alert carries the key `playground picker` answers it by.
+ops-unstick reads every live session's screen for what no hook reports, such as the folder-trust and MCP-server dialogs, and sends each such block to the session's manager, pressing nothing on a permission prompt: that alert gives the key `playground picker` answers it by, or says picker cannot answer it.
 It clears the usage-limit dialog with Escape only while the session's account has room, and sends a limit with no room to the Builder and the dispatcher, since one limit holds every session on that account.
 The `no-prompt-stop` hook refuses the `rm` shapes that stop a session on a prompt, so fewer prompts arise at all.
 scripts/hooks/README.md's session-state section and scripts/ops/README.md's ops-unstick section hold the how, and SESSIONS.md holds how a manager answers a prompt.
