@@ -59,6 +59,8 @@ describe("GITHUB-BULK-READS.md", () => {
     expect(section).toContain("20 of them held runs, and one real break (measured)")
     expect(section).toContain("pulls?head=<owner>:canary&base=main&state=open")
     expect(section).toContain("commits/$sha/check-runs")
+    expect(section).toContain("state=closed&per_page=100")
+    expect(section).toContain("From a publish step until canary's next push no such PR is open")
     expect(section).toContain('--jq .total_count)" -gt 0 ]')
   })
 })
