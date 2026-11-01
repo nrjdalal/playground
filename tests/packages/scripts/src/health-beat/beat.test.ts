@@ -19,6 +19,7 @@ const reading = (over: Partial<Reading> = {}): Reading => ({
   at: AT,
   battery: { pct: 84, state: "charging" },
   cores: 12,
+  down: [],
   freeMin: 8,
   freePct: 64,
   idlePct: 41,
@@ -89,10 +90,19 @@ describe("beatText", () => {
     expect(lines[4]).toBe("⚠️ Ops jobs: 9 ok, late: ops-sweep, ops-tick")
     expect(lines[5]).toBe("🔋 ?")
   })
+
+  test("warns on an ops job that is down, beside any late one", () => {
+    expect(beatText(reading({ down: ["ops-never"] })).split("\n")[4]).toBe(
+      "⚠️ Ops jobs: 9 ok, down: ops-never",
+    )
+    expect(beatText(reading({ down: ["ops-never"], late: ["ops-tick"] })).split("\n")[4]).toBe(
+      "⚠️ Ops jobs: 9 ok, late: ops-tick, down: ops-never",
+    )
+  })
 })
 
 describe("readBeat", () => {
-  test("reads the Mac through ops-machine, the sessions of the last 2 hours, each job's heartbeat but a disabled one's and the battery", async () => {
+  test("reads the Mac through ops-machine, the sessions of the last 2 hours, each job's heartbeat but a disabled one's, a job with no readable heartbeat as down, and the battery", async () => {
     const data = join(scratch, "data")
     const ops = join(data, "ops")
     const states = join(data, "session-state")
@@ -123,6 +133,9 @@ describe("readBeat", () => {
           { name: "ops-flow" },
           { disabled: true, name: "ops-off" },
           { name: "ops-never" },
+          { name: "ops-broken" },
+          { name: "ops-empty" },
+          { disabled: true, name: "ops-paused" },
         ],
       }),
     )
@@ -139,6 +152,8 @@ describe("readBeat", () => {
     beat("ops-tick-beat", 1000)
     beat("ops-flow", 60, "error: boom")
     beat("ops-off", 99_999)
+    writeFileSync(join(ops, "ops-broken.json"), "not json")
+    writeFileSync(join(ops, "ops-empty.json"), "[]")
     const sysctl: Record<string, string> = {
       "hw.ncpu": "12",
       "kern.memorystatus_level": "7",
@@ -165,6 +180,7 @@ describe("readBeat", () => {
       at: AT,
       battery: { pct: 72, state: "discharging" },
       cores: 12,
+      down: ["ops-never", "ops-broken", "ops-empty"],
       freeMin: 8,
       freePct: 7,
       idlePct: 60.5,

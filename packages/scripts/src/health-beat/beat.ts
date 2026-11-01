@@ -12,6 +12,7 @@ export type Reading = {
   at: Date
   battery: { pct: number; state: string } | null
   cores: number
+  down: string[]
   freeMin: number
   freePct: number
   idlePct: number | null
@@ -64,7 +65,7 @@ export const beatText = (r: Reading): string => {
     `${mark(r.load5 > LOAD_WARN)} Mac: load ${r.load5.toFixed(0)} on ${r.cores} cores, ${r.idlePct === null ? "?" : r.idlePct.toFixed(0)}% CPU idle`,
     `${mark(!memoryOk)} Memory: pressure ${r.pressure} (${PRESSURE_NAMES[r.pressure] ?? "unknown"}), ${r.freePct}% free${memoryOk ? "" : ", so spawn's gate refuses a Claude start"}`,
     `${mark(stuck > 0)} Sessions: ${r.sessions.working ?? 0} working, ${r.sessions.idle ?? 0} idle, ${stuck} stuck`,
-    `${mark(r.late.length > 0)} Ops jobs: ${r.ok} ok${r.late.length ? `, late: ${r.late.join(", ")}` : ""}`,
+    `${mark(r.late.length + r.down.length > 0)} Ops jobs: ${r.ok} ok${r.late.length ? `, late: ${r.late.join(", ")}` : ""}${r.down.length ? `, down: ${r.down.join(", ")}` : ""}`,
     `🔋 ${r.battery ? `${r.battery.pct}%, ${r.battery.state}` : "?"}`,
   ].join("\n")
 }
@@ -90,21 +91,28 @@ const readSessions = async (data: string, at: Date): Promise<Record<string, numb
   return counts
 }
 
-// Each job in ops/jobs.json not marked disabled, with a heartbeat: ok while its last result is ok and its beat is under three cycles (at least 10 minutes) old, else late.
-const readJobs = async (ops: string, at: Date): Promise<{ late: string[]; ok: number }> => {
+// Each job in ops/jobs.json not marked disabled: down with no readable heartbeat or one with no lastBeatAt, as the Dashboard's ops.ts calls it, ok while its last result is ok and its beat is under three cycles (at least 10 minutes) old, else late.
+const readJobs = async (
+  ops: string,
+  at: Date,
+): Promise<{ down: string[]; late: string[]; ok: number }> => {
   const jobs = (await readJson(join(ops, "jobs.json")))?.jobs
+  const down: string[] = []
   const late: string[] = []
   let ok = 0
   for (const job of Array.isArray(jobs) ? (jobs as Record<string, unknown>[]) : []) {
     if (job.disabled === true) continue
     const beat = await readJson(join(ops, `${String(job.heartbeat ?? job.name)}.json`))
-    if (!beat) continue
+    if (!beat || typeof beat.lastBeatAt !== "string") {
+      down.push(String(job.name))
+      continue
+    }
     const window = Math.max(3 * Number(beat.cycleSeconds ?? 60), 600) * 1000
     const fresh = at.getTime() - Date.parse(String(beat.lastBeatAt)) < window
     if (fresh && beat.lastResult === "ok") ok++
     else late.push(String(job.name))
   }
-  return { late, ok }
+  return { down, late, ok }
 }
 
 // Reads everything the beat prints, once: the Mac's load and memory through ops-machine's read, the CPU's idle share from top, and the battery from pmset.
@@ -131,6 +139,7 @@ export const readBeat = async (input: {
     at,
     battery: batt ? { pct: Number(batt[1]), state: batt[2]!.trim() } : null,
     cores: machine.cores,
+    down: jobs.down,
     freeMin: input.freeMin,
     freePct: machine.freePct,
     idlePct: idle ? Number(idle[1]) : null,
