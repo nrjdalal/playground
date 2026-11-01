@@ -137,7 +137,7 @@ Their tests are `bun run test:file tests/scripts/hooks`.
   It refuses a closed list of write forms, the literal ones its tests pin, so a same-user session can still get past it by a form outside that list, such as a script file it writes and then runs.
   Outside its reach are a program whose own code pushes or calls the API (a script by its path, `bun run`, `bun -e`, `python -c`, a binary, an HTTP client other than curl such as wget or httpie, and GNU `parallel`, which appends its input as `xargs` does), a fork that keeps its source's name, and a gh alias set before it.
   A pull request named by a shell value (`gh pr merge $N`) is placed as a number is, by `-R` or the checkout, so a pull request URL held in a variable is outside its reach.
-  The words a plain `xargs` appends are read for neither flags nor a pull request URL, so a `gh api` read or a `gh pr merge` it runs can carry a method, a field or `-R` in that input.
+  The words a plain `xargs` appends are read for neither flags nor a pull request URL, so a `gh api` read or a `gh pr merge` it runs can carry a method, a field or `-R` in that input, and `echo <ext>/pull/1 | xargs gh pr merge` passes in a clone of another repository.
   In a checkout it cannot resolve (`cd $X`), it reads a git alias from the global and system configs alone, so an alias in that checkout's own config is outside its reach.
   A `bash -c` script over 128 KB that names git, gh or `repo` is refused when the reader fails on its size, which waits on the reader's script-size work to narrow.
   `gh workflow run`, `gh secret set` and `gh repo deploy-key add` pass, since none writes a branch or the name itself, while their `gh api` routes are refused.
