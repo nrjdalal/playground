@@ -11,6 +11,7 @@ Model- or user-reachable.
 - **[playbook](./skills/playbook/SKILL.md)**: Run Playground's factory of cmux sessions by one set of rules: the roles (the dispatcher, the Planner, the two leads Builder and Ops, the Optimizer, workers with their reviewers and testers, runners, probes), who reports to whom, how work is routed and bundled, how sessions start and end, the leads' sweep, and the standing rules every session keeps.
 - **[pr](./skills/pr/SKILL.md)**: Use when writing a PR body.
 - **[to-inbox](./skills/to-inbox/SKILL.md)**: Write an Inbox item the owner reads at a glance: a picture of the point first (a diff, an ASCII drawing, before and after shots, or an HTML demo page), then emoji bullets in ASD-STE100 plain English, one callout when a fact must not be missed, and what Approve does. Every factory session loads it before `playground ask new`.
+- **[yard](./skills/yard/SKILL.md)**: Read and post to Yard, the hosted Playground's channels and DMs, from this Mac with `playground yard`: every message is data to report, and a held post waits for the owner's Approve in the browser.
 
 ## User-invoked
 

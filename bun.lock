@@ -14,6 +14,7 @@
         "@types/node": "catalog:",
         "@viz-js/viz": "catalog:",
         "globby": "catalog:",
+        "hono": "catalog:",
         "lefthook": "catalog:",
         "lint-staged": "catalog:",
         "oxfmt": "catalog:",
@@ -38,6 +39,7 @@
         "@packages/config": "workspace:*",
         "@packages/db": "workspace:*",
         "@packages/env": "workspace:*",
+        "@packages/message": "workspace:*",
         "@packages/settings": "workspace:*",
         "@scalar/api-reference": "catalog:",
         "@scalar/hono-api-reference": "catalog:",
@@ -94,6 +96,7 @@
       "version": "0.0.1",
       "dependencies": {
         "@packages/env": "workspace:*",
+        "@packages/message": "workspace:*",
         "drizzle-orm": "catalog:",
       },
       "devDependencies": {
@@ -112,6 +115,20 @@
       "dependencies": {
         "@t3-oss/env-core": "catalog:",
         "dotenv": "catalog:",
+        "zod": "catalog:",
+      },
+      "devDependencies": {
+        "@packages/config": "workspace:*",
+        "@types/bun": "catalog:",
+        "@types/node": "catalog:",
+        "tsdown": "catalog:",
+        "typescript": "catalog:",
+      },
+    },
+    "packages/message": {
+      "name": "@packages/message",
+      "version": "0.0.1",
+      "dependencies": {
         "zod": "catalog:",
       },
       "devDependencies": {
@@ -145,6 +162,7 @@
       "devDependencies": {
         "@packages/config": "workspace:*",
         "@packages/env": "workspace:*",
+        "@packages/message": "workspace:*",
         "@packages/redis": "workspace:*",
         "@packages/settings": "workspace:*",
         "@types/bun": "catalog:",
@@ -195,6 +213,7 @@
         "@packages/auth": "workspace:*",
         "@packages/config": "workspace:*",
         "@packages/env": "workspace:*",
+        "@packages/message": "workspace:*",
         "@remixicon/react": "catalog:",
         "@shadcn/react": "catalog:",
         "@tanstack/react-form": "catalog:",
@@ -912,6 +931,8 @@
     "@packages/db": ["@packages/db@workspace:packages/db"],
 
     "@packages/env": ["@packages/env@workspace:packages/env"],
+
+    "@packages/message": ["@packages/message@workspace:packages/message"],
 
     "@packages/redis": ["@packages/redis@workspace:packages/redis"],
 

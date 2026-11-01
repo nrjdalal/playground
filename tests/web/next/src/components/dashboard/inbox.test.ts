@@ -1181,3 +1181,21 @@ describe("an ask's files in its card", () => {
     )
   })
 })
+
+describe("a held Yard post's card", () => {
+  test("its Approve is a link that opens Yard's approve page in a new tab, never an answer", () => {
+    const html = render(false, {
+      ...decision,
+      kind: "update",
+      preview: {
+        approve: "https://yard.example/yard/approve/m1",
+        outcome: "decision",
+        text: "run it",
+      },
+      status: "done",
+    } as InboxItem)
+    expect(html).toMatch(
+      /<a [^>]*href="https:\/\/yard.example\/yard\/approve\/m1"[^>]*target="_blank"[^>]*>.*?Approve<\/a>/,
+    )
+  })
+})

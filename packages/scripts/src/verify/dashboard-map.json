@@ -306,6 +306,23 @@
         "Opening it marks the thread read, while what was unread stays under Unread until the view is left."
       ],
       "title": "Thread"
+    },
+    {
+      "api": [
+        "GET /api/v1/yard/channels",
+        "GET /api/v1/yard/channels/:id/messages",
+        "POST /api/v1/yard/channels/:id/messages",
+        "POST /api/v1/yard/channels/:id/read"
+      ],
+      "reach": ["Sidebar Channels or Direct messages: a row opens /dashboard/yard/<id>"],
+      "route": "/dashboard/yard/[id]",
+      "shows": [
+        "A composer under the messages, Playground's box at its sizes with the message's kind in place of the session's mode.",
+        "Each message as untrusted data through the transcript renderer, links shown and opened only on a click, images from elsewhere unloaded, behind its from line: the sender's GitHub login, the device it came from and its kind tag (none for a plain text message); a leading [thread:<id>] reads as written.",
+        "One Yard channel or direct message, headed by #name or the other member's login and its topic; opening it marks it read.",
+        "Your own tier-two post waiting for your approval says so, to approve on Yard's web; a denied one stays, seen by you alone."
+      ],
+      "title": "Yard channel"
     }
   ],
   "sidebar": [
@@ -336,6 +353,14 @@
     {
       "label": "Other",
       "shows": "Shown only while a probe (a session its roster kind or its name, probe-<what> or <id>-probe, makes one) or one outside the factory's names is live (a name that is not `dispatcher`, `planner`, `builder` or `ops`, that gives no kind the way an <id>-<kind> manager does or the way worker-<sin> or <id>-worker does, and that the roster gives no role), such as one started by hand: collapsed until its label is clicked; open, its rows in the Subagents group's order, with any idle for over three hours behind Show N idle (Hide idle puts them back). A session waiting on you (at a picker or a prompt, or with an open ask), or open in the view, shows even while the group is collapsed; a probe never waits on him. Owner rung only."
+    },
+    {
+      "label": "Channels",
+      "shows": "Last in the nav, so its arrival moves no row above it: the Yard channels you belong to, from GET /api/v1/yard/channels, in the API's order, collapsing as Scripts does with its label the toggle, open to start; absent with none, and both Yard groups absent on a stack with no Yard. Each row a # icon (RiHashtag), then #name cut at its end, its full name as its tooltip, and its unread count as a badge, 99+ past 99, in the mention colour while any names you, none once read; a click opens /dashboard/yard/<id>, which marks it read. Owner rung only."
+    },
+    {
+      "label": "Direct messages",
+      "shows": "After Channels: your Yard direct messages, each row a person icon (RiUserLine) and the other member's GitHub login, with the same toggle, badge and click as Channels. Owner rung only."
     }
   ],
   "unpagedApi": [

@@ -5,6 +5,9 @@ import { NODE_ENV } from "@/lib/constants"
 import { polyfillClient, polyfillServer, serverSecret } from "@/lib/polyfill"
 import { dockerHostUrl } from "@/lib/postgres-url"
 
+// Playground's hosted build (Yard), on 1 or true alone, so a mistyped value fails at boot rather than serving the local dashboard.
+const hostedFlag = z.stringbool({ falsy: ["0", "false"], truthy: ["1", "true"] }).default(false)
+
 // Each env schema as its app validates it, the one source the env modules build their createEnv calls from: the shapes, and the values validation reads (runtimeEnv, before emptyStringAsUndefined reads an empty one as unset). Held apart from createEnv so a check can ask what each schema requires without validating anything; every module it reads is browser-safe, since the web's client graph comes through web-next.
 export const apiHono = {
   runtimeEnv: {
@@ -18,12 +21,17 @@ export const apiHono = {
     HONO_RATE_LIMIT: process.env.HONO_RATE_LIMIT,
     HONO_RATE_LIMIT_WINDOW_MS: process.env.HONO_RATE_LIMIT_WINDOW_MS,
     HONO_TRUSTED_ORIGINS: polyfillServer(process.env.HONO_TRUSTED_ORIGINS, "https://polyfill.url"),
+    HONO_WEB_URL: process.env.HONO_WEB_URL,
+    KV_URL: process.env.KV_URL,
     PLAYGROUND_APPROVALS_ENABLED: process.env.PLAYGROUND_APPROVALS_ENABLED,
     PLAYGROUND_CMUX_SESSIONS: process.env.PLAYGROUND_CMUX_SESSIONS,
     PLAYGROUND_DISPATCHER: process.env.PLAYGROUND_DISPATCHER,
     PLAYGROUND_DISPATCHER_SECONDARY: process.env.PLAYGROUND_DISPATCHER_SECONDARY,
+    PLAYGROUND_HOSTED: process.env.PLAYGROUND_HOSTED,
     PLAYGROUND_SDK_PERMISSION_MODE: process.env.PLAYGROUND_SDK_PERMISSION_MODE,
     PLAYGROUND_SDK_PROBE_DIR: process.env.PLAYGROUND_SDK_PROBE_DIR,
+    YARD_API_URL: process.env.YARD_API_URL,
+    YARD_WEB_URL: process.env.YARD_WEB_URL,
   },
   server: {
     NODE_ENV,
@@ -47,14 +55,20 @@ export const apiHono = {
       .string()
       .transform((s) => s.split(",").map((v) => v.trim().replace(/\/$/, "")))
       .pipe(z.array(z.url())),
+    HONO_WEB_URL: z.url().optional(),
+    KV_URL: z.url().optional(),
     PLAYGROUND_APPROVALS_ENABLED: z.stringbool().default(false),
     PLAYGROUND_CMUX_SESSIONS: z.stringbool().default(false),
     PLAYGROUND_DISPATCHER: z.string().optional(),
     PLAYGROUND_DISPATCHER_SECONDARY: z.string().optional(),
+    PLAYGROUND_HOSTED: hostedFlag,
     PLAYGROUND_SDK_PERMISSION_MODE: z
       .enum(["acceptEdits", "bypassPermissions", "default", "plan"])
       .default("bypassPermissions"),
     PLAYGROUND_SDK_PROBE_DIR: z.string().optional(),
+    // the hosted Yard this Playground reads and posts to with the Mac's token: its API, and its web for the approve page; unset, Yard stays off here
+    YARD_API_URL: z.url().optional(),
+    YARD_WEB_URL: z.url().optional(),
   },
 }
 
@@ -62,19 +76,25 @@ export const auth = {
   runtimeEnv: {
     NODE_ENV: process.env.NODE_ENV,
     BETTER_AUTH_SECRET: process.env.BETTER_AUTH_SECRET,
+    GITHUB_CLIENT_ID: process.env.GITHUB_CLIENT_ID,
+    GITHUB_CLIENT_SECRET: process.env.GITHUB_CLIENT_SECRET,
     HONO_APP_URL: polyfillServer(process.env.HONO_APP_URL, "https://polyfill.url"),
     HONO_TRUSTED_ORIGINS: polyfillServer(process.env.HONO_TRUSTED_ORIGINS, "https://polyfill.url"),
     HONO_WEB_URL: process.env.HONO_WEB_URL,
+    PLAYGROUND_HOSTED: process.env.PLAYGROUND_HOSTED,
   },
   server: {
     NODE_ENV,
     BETTER_AUTH_SECRET: serverSecret(z.string().min(1)),
+    GITHUB_CLIENT_ID: z.string().optional(),
+    GITHUB_CLIENT_SECRET: z.string().optional(),
     HONO_APP_URL: z.url(),
     HONO_TRUSTED_ORIGINS: z
       .string()
       .transform((s) => s.split(",").map((v) => v.trim().replace(/\/$/, "")))
       .pipe(z.array(z.url())),
     HONO_WEB_URL: z.url().optional(),
+    PLAYGROUND_HOSTED: hostedFlag,
   },
 }
 
@@ -111,6 +131,7 @@ export const webNext = {
     NEXT_PUBLIC_APP_URL: z.url(),
     NEXT_PUBLIC_API_URL: z.url(),
     NEXT_PUBLIC_NODE_ENV: NODE_ENV,
+    NEXT_PUBLIC_PLAYGROUND_HOSTED: hostedFlag,
     NEXT_PUBLIC_POSTHOG_HOST: z.url().optional(),
     NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN: z.string().optional(),
     NEXT_PUBLIC_USERJOT_URL: z.url().optional(),
@@ -121,6 +142,7 @@ export const webNext = {
     NEXT_PUBLIC_API_URL: polyfillClient(process.env.NEXT_PUBLIC_API_URL, "https://polyfill.url"),
     NEXT_PUBLIC_APP_URL: polyfillClient(process.env.NEXT_PUBLIC_APP_URL, "https://polyfill.url"),
     NEXT_PUBLIC_NODE_ENV: process.env.NODE_ENV,
+    NEXT_PUBLIC_PLAYGROUND_HOSTED: process.env.NEXT_PUBLIC_PLAYGROUND_HOSTED,
     NEXT_PUBLIC_POSTHOG_HOST: process.env.NEXT_PUBLIC_POSTHOG_HOST,
     NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN: process.env.NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN,
     NEXT_PUBLIC_USERJOT_URL: process.env.NEXT_PUBLIC_USERJOT_URL,

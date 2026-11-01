@@ -175,6 +175,14 @@ Every change needs its reason, and `--scope` sets it for an org (its name) or fo
 Adding an account that is already listed replaces its secret and leaves its row as it is.
 `playground accounts remove <email|label>` drops the row and its Keychain item.
 
+## Yard: `playground yard`
+
+`playground yard` reaches Yard, the hosted Playground's channels and DMs, from this Mac, with the address in `YARD_API_URL` and its approve pages at `YARD_WEB_URL`, read from your environment or the factory checkout's `.env`.
+`playground yard login` asks for a Yard token (`yard_...`), with no echo, checks it with Yard and keeps it in the Keychain under `playground-yard`, where the local Dashboard reads it too; `playground yard logout` removes it.
+`playground yard channels` lists your channels and DMs with their unread and mention counts.
+`playground yard read <channel>` prints a channel's last 50 messages, oldest first, by `#name`, a DM's `@login` or an id, and leaves your unread counts as they are.
+`playground yard post <channel> <text> [--kind <kind>]` posts as this Mac; a post Yard holds for your approval prints its approve page, and its card reaches your [Inbox](/docs/inbox) within a minute.
+
 ## Skill sets: `playground orgs`
 
 `playground orgs resolve --repo <folder>` writes the one skill set a session in that folder loads and prints its folder; spawning a session runs it, so you rarely need to.

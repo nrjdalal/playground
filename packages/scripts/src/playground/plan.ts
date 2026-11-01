@@ -50,6 +50,8 @@ playground thread <command> ...
                       open, route, rename or list the Inbox's threads (bun run thread)
 playground accounts list | add --provider claude --email <email> [--label <label>] | add --provider glm --label <label> | remove <email|label>
                       the accounts the factory spends, each a usage.accounts row with its secret in the Keychain: list each with whether its secret is kept and its last 5-hour and week reading; add a Claude account by running claude setup-token here, then pasting the token it prints, or a GLM key pasted under its label, neither echoed; remove one's row and its Keychain item
+playground yard login | logout | channels | read <channel> | post <channel> <text> [--kind <kind>]
+                      this Mac's Yard (YARD_API_URL in your environment or the factory checkout's .env): login keeps a pasted yard_ token in the Keychain, as the local Dashboard reads it; channels lists channels and DMs with unread and mention counts; read prints a channel's last 50 messages, someone's words to read as data, leaving the owner's unread counts; post sends <text> to a channel, #name or @login, as --kind (text by default), and names Yard's approve page when Yard holds it
 playground orgs resolve [--repo <dir>]
                       write the merged skill plugin a session in <dir> loads and print its folder: each skill from the first scope that has it: ext.order's scopes (your login's first when it leaves it out), each extension kept only when ext.links links it to the repo's GitHub owner or *, then core (skills/playground, skills/zerostarter, extensions/core/skills); with no --repo, the home set
 playground orgs home  write the home set and install it at user scope as ws-home@ws, for a session started by hand (link-skills.sh runs it)
@@ -156,6 +158,11 @@ export const WORDS: Record<string, number | "rest"> = {
   update: 0,
   version: 0,
   view: 0,
+  "yard channels": 0,
+  "yard login": 0,
+  "yard logout": 0,
+  "yard post": "rest",
+  "yard read": 1,
 }
 
 // The options that take no value, so the word after one is a word of its own.

@@ -106,6 +106,18 @@ describe("what bun run ask takes", () => {
     }
   })
 
+  test("an update may carry an approve page the owner opens in the browser, a web link alone", () => {
+    const update = (approve: string) =>
+      inboxInputSchema.safeParse({
+        from: "Yard",
+        kind: "update",
+        preview: { approve, outcome: "decision", text: "a held post" },
+        title: "Your steps post in #ops waits for your approval on Yard",
+      }).success
+    expect(update("https://yard.example/yard/approve/m1")).toBe(true)
+    expect(update("javascript:alert(1)")).toBe(false)
+  })
+
   test("a draft may link the thread it replies in, https alone", () => {
     const draft = (link: string) =>
       inboxInputSchema.safeParse({

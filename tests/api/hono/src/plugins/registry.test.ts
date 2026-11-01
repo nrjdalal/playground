@@ -52,7 +52,7 @@ describe("the plugin registry", () => {
 
   // Deleting a plugin's folder and its registry line removes it: core reaches a plugin only through the registry, and no plugin imports another.
   test("core imports no plugin but through the registry, and no plugin imports another", async () => {
-    const REGISTRY_USERS = new Set(["index.ts", "routers/apps.ts"])
+    const REGISTRY_USERS = new Set(["local.ts", "routers/apps.ts"])
     const SHARED = new Set(["plugins/registry", "plugins/switch"])
     const faults: string[] = []
     for await (const path of new Glob("**/*.{ts,tsx}").scan(SRC)) {
@@ -75,7 +75,7 @@ describe("the plugin registry", () => {
 
   // Core reaches an app's lib only through the two files that mount or serve the apps: the roster's ticket pattern once reached it from lib/dashboard, where the plugin test above could not see it.
   test("core imports no app's lib but through the apps router and the entry", async () => {
-    const APP_BOUNDARY = new Set(["index.ts", "routers/apps.ts"])
+    const APP_BOUNDARY = new Set(["local.ts", "routers/apps.ts"])
     const faults: string[] = []
     for await (const path of new Glob("**/*.{ts,tsx}").scan(SRC)) {
       const file = relative(SRC, join(SRC, path))

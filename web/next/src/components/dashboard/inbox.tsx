@@ -979,6 +979,19 @@ export function InboxCard({
           </Button>
         </Hint>
       </>
+    ) : item.kind === "update" && item.preview.approve ? (
+      // a pending Yard post's Approve opens Yard's approve page in the browser, where the owner is signed in, since a token never approves (the tier-two rule)
+      <Button
+        size="sm"
+        variant="outline"
+        className={SIDE_TONES.approve}
+        render={<a href={item.preview.approve} target="_blank" rel="noopener noreferrer" />}
+        nativeButton={false}
+        onClick={read}
+      >
+        <RiExternalLinkLine data-icon="inline-start" />
+        Approve
+      </Button>
     ) : null
 
   const right = (

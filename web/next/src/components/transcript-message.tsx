@@ -21,15 +21,18 @@ export const leadsWithImage = (text: string): boolean => /^(!\[|<img\b)/i.test(t
 // A message's words at text-sm, its code too (Streamdown's own size). Only his are a bubble, on the right in the stock muted bubble's own grey; a session's own words and a peer's read as full-width text.
 export function TranscriptBubble({
   className,
+  plain,
   text,
   variant,
 }: {
   className?: string
+  // Text from outside Playground (a Yard message), whose leading [thread:<id>] names no thread of ours, so it reads as written.
+  plain?: boolean
   text: string
   variant: TranscriptVariant
 }) {
   const mine = variant === "default"
-  const marker = markerOf(text)
+  const marker = plain ? { id: null, text } : markerOf(text)
   return (
     <Bubble
       align={mine ? "end" : "start"}
@@ -61,6 +64,7 @@ export function TranscriptMessage({
   children,
   now,
   opensWithText,
+  plain,
   text,
   variant,
   who,
@@ -71,6 +75,7 @@ export function TranscriptMessage({
   now: Date
   // Whether the message opens with words its name can lead (a session's turn passes it from its first part); else whether its own text does.
   opensWithText?: boolean
+  plain?: boolean
   text: string
   variant: TranscriptVariant
   who: ReactNode
@@ -89,7 +94,7 @@ export function TranscriptMessage({
   ) : null
   // a message of files alone has no words to show
   const words = text.trim() ? (
-    <TranscriptBubble className={bubbleClassName} text={text} variant={variant} />
+    <TranscriptBubble className={bubbleClassName} plain={plain} text={text} variant={variant} />
   ) : null
   // A turn that opens with a tool row, a thinking row or an image puts the name on its own line, since floating it beside those would sit it inside them.
   const inline = (opensWithText ?? Boolean(words)) && !leadsWithImage(text)
