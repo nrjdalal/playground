@@ -215,8 +215,8 @@ ZeroStarter's rules above govern Playground too; this section adds its own.
 - The herdr servers belong to one ops job, `bun run ops:herdr`, on the binary and config its `pin.json` names ([scripts/README.md](./scripts/README.md#the-herdr-servers)), read before you change that job or herdr's pinned binary or config.
 - The factory's hooks: read a hook's section of [scripts/hooks/README.md](./scripts/hooks/README.md) before you change it, its tests or its registration, and when it refuses a call you did not expect, since the README holds each one in full and its reason names the fix.
   Five have their own lines above (`no-bare-slack-link`, `no-linear-ticket`, `no-playground-leak`, `no-raw-spawn`, `no-release-comment`);
-  the rest are `after-compact`, `after-resume`, `no-chat-question`, `no-desktop-owner-app`, `no-env-dump`, `no-extensions-write`, `no-false-green`, `no-glm-heavy-path`, `no-headless-login`, `no-kill-by-name`,
-  `no-mac-web-build`, `no-main-checkout`, `no-manager-subagent`, `no-off-palette-label`, `no-ours-merge`, `no-prompt-stop`, `no-public-leak`, `no-stash`, `no-unslotted-run`, `rules`, `session-state` and `writing-first`.
+  the rest are `after-compact`, `after-resume`, `no-chat-question`, `no-desktop-owner-app`, `no-env-dump`, `no-extension-repo-write`, `no-extensions-write`, `no-false-green`, `no-glm-heavy-path`, `no-headless-login`,
+  `no-kill-by-name`, `no-mac-web-build`, `no-main-checkout`, `no-manager-subagent`, `no-off-palette-label`, `no-ours-merge`, `no-prompt-stop`, `no-public-leak`, `no-stash`, `no-unslotted-run`, `rules`, `session-state` and `writing-first`.
 
 ### The factory
 

@@ -154,7 +154,8 @@ playground ext import --from-tree extensions/core/lists   # the guards' list fil
 ```
 
 A factory session changes none of what the guards read: the `no-extensions-write` hook refuses its write into `extensions/` and its `playground` call that changes a guard's list or setting (`ext put` of a list, `ext add`, `import`, `init`, `link`, `order`, `remove`, `sync` and `unlink` but a `--dry-run` of `add`, `import` or `init`, `migrate`, `uninstall --purge`, and `settings set` or `reset` of a key a guard reads).
-You run those yourself, typed in a session as a `!` command, which runs without hooks.
+A factory session changes no extension's GitHub repository: the `no-extension-repo-write` hook refuses its push there, a `gh`, `gh api` or GitHub MCP write to the repository's code or name, any curl to it (a read included), and a repository made or renamed at that name, while issues and pull request comments pass.
+You run any of those yourself, typed in a session as a `!` command, which runs without hooks.
 
 A script reads a file of the extensions through their reader, a path at the root or under a scope:
 

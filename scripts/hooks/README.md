@@ -109,6 +109,37 @@ Their tests are `bun run test:file tests/scripts/hooks`.
   `env VAR=x <command>`, `set -e` and `export VAR=x` run.
   It fails open, and its tests are in `bun run test:file tests/scripts/hooks` too.
 
+## no-extension-repo-write
+
+- A factory session changes no extension repository's git data or name: `scripts/hooks/no-extension-repo-write.ts`, registered beside no-public-leak, refuses such a write, since `ops:ext-sync` renders each one's `main` into the extensions root every guard reads.
+  Its repositories are each `ext.repos` value in the root's `policy.json`, each scope clone's `origin`, which follows a rename, and `<login>/playground-<scope>` for each scope clone `ext.repos` does not name, under `PLAYGROUND_LOGIN` and the root's `login` file both, matched in any case and with percent escapes decoded, as GitHub decodes them.
+  It reads every write through no-playground-leak's engine with `anyWrite` set (`inspectAs`), which refuses a write to one of them whatever its text, and a write whose target it cannot place.
+  Those writes are a `git push`, `send-pack` or `subtree push`, a git alias expanded from its config (its body split as git splits it, quotes and backslashes included), a gh or `gh api` write, a curl to one on `api.github.com` or `github.com` (a read included), and a GitHub MCP write.
+  Its gh writes include a DELETE, `gh pr merge` and `update-branch`, the publish-step group's `create`, `delete`, `edit` and `upload`, and `gh repo edit`, `rename`, `delete`, `archive`, `unarchive` and `sync <destination>`.
+  It reads a push's target as git does: each push URL of the remote named, `--repo`'s value when none is named, else each push URL of every remote and each URL `remote.pushDefault`, `branch.<b>.pushRemote` or `branch.<b>.remote` holds.
+  It reads a `gh api` endpoint and a curl URL where the request lands: dot segments resolved, `{owner}`, `{repo}`, `:owner` and `:repo` filled from the checkout, and curl's host and path read as a URL reads them, `uploads.github.com` with `api.github.com`.
+  It cannot place, so refuses, a curl glob (`{…}`, `[…]`) on a GitHub host without `-g`, and a curl beside a word naming GitHub with a `Host` header, `--connect-to`, `--request-target` or `--resolve`.
+  It reads that state when it checks the call, so after an earlier command in the same call changes it, it cannot place a push, an alias run or a write gh places by the checkout, and refuses it with the fix: run the setup in a call of its own first.
+  Those changes are a `git config` write, `git remote add`, `remove`, `rename`, `rm` or `set-url`, `git clone`, `init` or `submodule`, `gh repo clone`, `fork` or `set-default`, `gh config set`, and any other command naming a `.git` path or a git config file.
+  A config file it reaches only through `include.path` or a link, written in the same call by a command that names neither a `.git` path nor a git config file, is outside its reach.
+  It cannot place, so refuses, a push with `-c`, `--config-env`, `--git-dir` or a `GIT_` variable in the call, a literal URL an `insteadOf` or `pushInsteadOf` prefix matches, a remote whose URL is a local path, a `!` alias, an alias with an unclosed quote or a trailing backslash, an alias `-c` sets, `gh alias set` and `import`, and a REST write to `repositories/<id>`.
+  It also refuses a push, a gh or `gh api` write, and any curl run by an `xargs` with no replace string, since that `xargs` appends arguments from its input, which the hook cannot read; `xargs git add` and an `xargs` gh conversation verb pass.
+  An `xargs -I` string is unplaceable too: it refuses a pull request the string puts in place, and a curl that may write (a method other than GET or HEAD, a form, an upload, or data without `-G`) to a URL it puts in place, while a curl that only reads passes.
+  It refuses a repository made or renamed at one of those names, `*` standing for the account gh picks itself, and a name it cannot read counts as one.
+  Those are `gh repo create` (its name or its `--source` folder's), `rename` and `fork --fork-name`, `gh api`'s repo PATCH with a `name`, `generate`, `transfer`, `forks` with a `name`, `user/repos` and `orgs/<org>/repos`, and MCP `create_repository`.
+  A branch other than `main` is outside its scope, since the sync reads only `main`, so `gh issue develop` and the head `gh pr create` pushes pass.
+  Issue and pull request conversation passes: `gh issue` and `gh label`, `gh pr create`, `comment`, `edit`, `review`, `close` and `reopen`, `gh api` on `issues`, `labels` and `pulls` but a pull request's `merge` or `update-branch`, and the matching MCP tools.
+  A commit is refused only in a clone of one of them, and every call passes on a machine with no extensions root.
+  Its refusal names the one route: the owner types the command in Ops' pane as a `!` command; no flag, environment variable, role or note frees a call.
+  It fails closed, as the leak guards do and only on a call that may write, when `policy.json` does not read or no login names the default repositories, and on any call that may write when the reader fails on it (a script nested too deep) or is still reading it at its 8s deadline, inside the hook's 15s timeout, whatever it names.
+  It refuses a closed list of write forms, the literal ones its tests pin, so a same-user session can still get past it by a form outside that list, such as a script file it writes and then runs.
+  Outside its reach are a program whose own code pushes or calls the API (a script by its path, `bun run`, `bun -e`, `python -c`, a binary, an HTTP client other than curl such as wget or httpie, and GNU `parallel`, which appends its input as `xargs` does), a fork that keeps its source's name, and a gh alias set before it.
+  A pull request named by a shell value (`gh pr merge $N`) is placed as a number is, by `-R` or the checkout, so a pull request URL held in a variable is outside its reach.
+  `gh workflow run`, `gh secret set` and `gh repo deploy-key add` pass, since none writes a branch or the name itself, while their `gh api` routes are refused.
+  A GraphQL mutation, which names its repository by node id, and a curl whose URL the run computes are refused only when the data they send names one of the repositories, so a curl URL with a computed part (`$U`, `$(…)`) passes even when its literal part names one; a URL in a curl config file (`-K`, `~/.curlrc`) and a redirect a server answers with (`-L`) are unread.
+  An `ext.order` name with no clone and no `ext.repos` entry is not guarded, and the sync does not push it either.
+  Its tests are `bun run test:file tests/scripts/hooks/no-extension-repo-write.test.ts`.
+
 ## no-extensions-write
 
 - A factory session changes nothing a guard reads to allow or deny a call: `scripts/hooks/no-extensions-write.ts`, registered beside no-main-checkout on Bash and the file tools (Edit, MultiEdit, NotebookEdit and Write), guards the extensions root (`extensionsDir` of the data folder) and every file under it.
@@ -139,7 +170,7 @@ Their tests are `bun run test:file tests/scripts/hooks`.
   It runs its check in a Worker (`scripts/hooks/no-extensions-write-worker.ts`) and refuses from the main thread when the Worker has not answered in 12 s, so a single step the deadline cannot interrupt (a regex, a copy) cannot hold it past its 15 s timeout; this costs about 10 ms a call.
   It reads `env -C<dir>` and `env --chdir=<dir>` as the folder the command runs in, as it reads `env -C <dir>`.
   It reads a command's text, so a program whose own code writes the root (a script file run by its path, a binary) and a path it cannot read (built at run time, in a `$(…)` or a variable) pass it.
-  A write to a scope's GitHub repository, which `ops:ext-sync` renders into the root, is outside its reach too; a guard on those writes is a follow-up of its own.
+  A write to a scope's GitHub repository, which `ops:ext-sync` renders into the root, is outside its reach too; [no-extension-repo-write](#no-extension-repo-write) refuses one.
   A path through a link into the root with `..` after the link (`echo x > <link>/../f`) is judged as typed, so a write by one passes.
   A `cd` or `pushd` it cannot follow (`cd -`, `cd ~-`, `popd`'s stack, a glob in the folder, a `CDPATH` lookup) leaves the command's folder unread, so a relative write after one passes.
   From a cwd at or above the root (`~`, `~/.playground`), a quoted glob that can reach the root reads as a glob there, so a call holding one (`git commit -m "see *"`) is refused; run it from a worktree.

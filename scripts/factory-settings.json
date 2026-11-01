@@ -101,6 +101,11 @@
             "type": "command",
             "command": "R=\"${PLAYGROUND_REPO}\"; [ -n \"$R\" ] || { g=\"$(git -C \"$CLAUDE_PROJECT_DIR\" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)\" && R=\"$(dirname \"$g\")\"; }; [ -n \"$R\" ] && [ \"$R\" != . ] && [ -f \"$R/scripts/hooks/no-public-leak.ts\" ] || exit 0; cd -P \"$R\" && bun --no-env-file scripts/hooks/no-public-leak.ts",
             "timeout": 15
+          },
+          {
+            "type": "command",
+            "command": "R=\"${PLAYGROUND_REPO}\"; [ -n \"$R\" ] || { g=\"$(git -C \"$CLAUDE_PROJECT_DIR\" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)\" && R=\"$(dirname \"$g\")\"; }; [ -n \"$R\" ] && [ \"$R\" != . ] && [ -f \"$R/scripts/hooks/no-extension-repo-write.ts\" ] || exit 0; cd -P \"$R\" && bun --no-env-file scripts/hooks/no-extension-repo-write.ts",
+            "timeout": 15
           }
         ]
       },
