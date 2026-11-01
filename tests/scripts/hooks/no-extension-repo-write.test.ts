@@ -356,6 +356,10 @@ describe("a push resolves its target the way git does, and one it cannot place i
         "echo repos/quillco/acme-skills/git/refs | xargs gh api -X POST",
       ],
       [
+        "xargs appending a gh api endpoint to a write with -X in a flag group",
+        "echo repos/quillco/acme-skills/git/refs/heads/main | xargs gh api -iXDELETE",
+      ],
+      [
         "xargs -I placing gh pr merge's pull request",
         `echo ${EXT}/pull/1 | xargs -I{} gh pr merge {}`,
       ],

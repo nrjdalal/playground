@@ -748,7 +748,7 @@ async function api(
   if (!request || ["GET", "HEAD"].includes(request.method)) return
   // Under anyWrite, a plain xargs before a gh api with no method, field or input of its own reads, since only the words it appends make it a write.
   if (policy.anyWrite && xargs && !xargs.replace) {
-    const method = args.some((a) => /^(?:-X|--method)/.test(a.value))
+    const method = args.some((a) => /^(?:-[A-Za-z]*X|--method)/.test(a.value))
     if (!method && request.fields.length === 1 && request.inputs.length === 0) return
   }
   if (request.method === "DELETE" && !policy.anyWrite) return
