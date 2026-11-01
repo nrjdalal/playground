@@ -14,7 +14,7 @@ A single PR's read stays REST.
 
 2. Page the batched query, 50 PRs a page.
    Ask only the fields the sweep reads; every extra field spends points.
-   `states` takes `OPEN`, `CLOSED` and `MERGED`, so an inventory passes all three; `files(first: 50)` cuts a PR with more files, and a sweep that counts files raises the count and its cost with it.
+   `states` takes `OPEN`, `CLOSED` and `MERGED`, so an inventory passes all three; `files(first: 50)` cuts a PR with more files, so the query asks the connection's `pageInfo`, and step 3 reads the rest of each PR whose files say `hasNextPage`; a sweep that raises the count raises its cost with it.
    Carry `rateLimit { cost remaining }` in the query, so each page reports what it spent.
    Done when the page returns and `rateLimit` shows what it spent.
 
@@ -37,6 +37,10 @@ A single PR's read stays REST.
            headRefName
            isDraft
            files(first: 50) {
+             pageInfo {
+               hasNextPage
+               endCursor
+             }
              nodes {
                path
              }
@@ -61,7 +65,29 @@ A single PR's read stays REST.
    ```
 
 3. Feed each page's `pageInfo.endCursor` back as `$cursor` until `hasNextPage` is false.
-   Done when the sweep holds every PR the filters name and nothing was read twice.
+   To let `gh api graphql --paginate` page it for you, rename the variable `$endCursor` and keep `pageInfo { hasNextPage endCursor }`, since `--paginate` fills only that name (`gh api --help`): a sweep that kept `$cursor` under `--paginate` refetched page 1 554 times and spent 50 GraphQL points (measured).
+   A PR whose `files` say `hasNextPage` reads its whole list through REST, `gh api --paginate repos/<owner>/<repo>/pulls/<n>/files --jq '.[].filename'`, since `gh pr view <n> --json files` stops at 100 with no sign it cut the list (one PR read 100 of its 143 files, measured).
+   When several PRs' files say `hasNextPage`, one query reads the rest of each from its files' own `endCursor`, one aliased `pullRequest` a PR, and runs again with each new `endCursor` until no PR's files say `hasNextPage`.
+
+   ```graphql
+   query ($owner: String!, $name: String!) {
+     repository(owner: $owner, name: $name) {
+       pr169: pullRequest(number: 169) {
+         files(first: 100, after: "<its endCursor>") {
+           pageInfo {
+             hasNextPage
+             endCursor
+           }
+           nodes {
+             path
+           }
+         }
+       }
+     }
+   }
+   ```
+
+   Done when the sweep holds every PR the filters name, with each one's whole file list where the sweep reads files, and nothing was read twice.
 
 On a refused call, wait for the reset the rule names and retry nothing before it: the probe's `remaining` is the budget, and a sweep that would outspend it waits or narrows its filters first.
 

@@ -182,6 +182,7 @@ Like the ticket guard, a hook that cannot start lets the call through, and the r
 - Leads wait on a message, a background task's notification, their sweep or an ops job, rather than a `sleep` loop or a repeated `gh` read.
 - A changed draft reaches the owner through its Inbox item, never as a second Slack draft for an item he has already sent.
 - No session polls a PR more often than every 5 minutes, and reads and comment posts go through GitHub's REST API where they can, so the shared GraphQL quota lasts the hour; a sweep over many PRs is the exception, one batched GraphQL query ([GITHUB-BULK-READS.md](../../extensions/core/skills/playbook/GITHUB-BULK-READS.md)).
+- A check that needs a PR's whole file list (an overlap with another PR, a stack's files) reads it page by page, since the plain read stops at 100 files without saying so.
 - No session writes Claude Code memory: every learning arrives as a PR to this repo.
 - Every skill, agent guide, docs page, handoff and brief a session writes reads as writing-for-agents shapes it: lean, each step ending on a completion criterion, phrased as what to do, a hook turns back a factory session's write to one until it has loaded the skill,
   and the reviewer scores the changed ones against it.
@@ -204,7 +205,8 @@ Like the ticket guard, a hook that cannot start lets the call through, and the r
   A hook refuses each of those there, naming the fix, while its upkeep (a pull, a fetch, rebuilding the shared packages with env validation off after a pull that changes them, relinking the skills) and reads run.
 - Nothing types into another session's pane in the owner's name: sessions and ops alerts reach a session through `SendMessage` (the **voice** rule), and the dashboard types only for his own clicks.
   A test fails on any other caller of the dashboard's `deliver()` and on any text in the repo that types into a pane, Escape on the usage-limit dialog and a manager's `playground picker` on a permission prompt aside.
-- A page for the owner (a report, a comparison, a mock, a diagram) is a local HTML file in the session's scratchpad, kept and opened in his browser with `playground page` (the **local page** rule), since a claude.ai artifact publishes under whichever account the session holds; it then stays on the Pages tab of the session's view, of the one it was made for and of the dispatcher's.
+- A page for the owner (a report, a comparison, a mock, a diagram) is a local HTML file in the session's scratchpad, kept with `playground page` and posted as an Inbox card's `html` attachment, so the Inbox's viewer shows it and nothing opens on the owner's screen (the **local page** rule), since a claude.ai artifact publishes under whichever account the session holds.
+  The page then stays on the Pages tab of the session's view, of the one it was made for and of the dispatcher's.
   Every page's header shows its version, "Version N · <date> · <kind>", always, and a copy made to share outside drops the label.
   The factory's settings deny the `Artifact` tool, and a test fails without the deny.
 
