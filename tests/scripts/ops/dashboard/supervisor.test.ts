@@ -1239,7 +1239,6 @@ describe("the supervisor's web swap (#122)", () => {
   })
 })
 
-// First run's setup writes POSTGRES_URL into the checkout's .env; until then the follower, which validates it at once, would exit on every tick (#31).
 // The real web_up and swap_web: a stand-in bun on PATH records the launcher the new web is exec'd through, and curl answers 200 at once
 describe("the web a swap starts runs the target head's launcher", () => {
   const swapped = async (withLauncher: boolean) => {
@@ -1282,6 +1281,7 @@ swap_web ${c2}`,
   })
 })
 
+// First run's setup writes POSTGRES_URL into the checkout's .env; until then the follower, which validates it at once, would exit on every tick (#31).
 describe("the follower before first run's setup (#31)", () => {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), "supervisor-setup-")))
   afterAll(() => rmSync(dir, { force: true, recursive: true }))
