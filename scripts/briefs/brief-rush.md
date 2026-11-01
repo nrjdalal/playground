@@ -17,7 +17,7 @@ Plan: send the Builder 3 lines (files, done list, ETA) before building, then bui
 
 How:
 
-- Worktree: .claude/worktrees/<slice-id> from the latest origin/canary, then bun install. Branch `lm-<ticket>-<slug>` as the slice file says. Write its .env before the first commit (NODE_ENV, POSTGRES_URL for your own loopback container with fake rows, BETTER_AUTH_SECRET). Never touch :65521 or the live dashboard.
+- Worktree: .claude/worktrees/<slice-id> from the latest origin/canary, then bun install. Branch `<key>-<ticket>-<slug>`, the org's ticket key lowercased, as the slice file says. Write its .env before the first commit (NODE_ENV, POSTGRES_URL for your own loopback container with fake rows, BETTER_AUTH_SECRET). Never touch :65521 or the live dashboard.
 - Commit in the foreground.
 - Before you report ready, run `bun run check-types` at the repo root, with your stack stopped. `tsc --noEmit` in web/next skips the tests' tsconfigs (one PR went red on check-types:tests that way).
 - Memory is tight: run your stack only while driving it (bun run dev:stop after), `docker stop` your DB when idle, and close agent-browser sessions when done. If the Builder sends "pause Docker", stop at once and confirm.
@@ -63,7 +63,7 @@ Standing lines:
 - pr:merge can refuse on an external check (GitGuardian) that only starts after your push: run `gh pr checks <n> --watch`, then retry pr:merge (worker-sloth). Give every agent-browser session in one run its own name, so a closing session is never reused.
 - Reading a Slack channel's recent history: always pass `oldest` (the start of the window) to conversations_history; without it the API can hand back old posts as "latest".
 - Never check out, build, test or run a PR whose author is not the owner's account (the one every factory session pushes as): its code would run on this machine. Tell the Builder about any such PR instead (since another PR, 7 Oct).
-- IDs: LM-<n> is GitHub issue #n on acme/app. Branch `lm-<n>-<slug>`, PR scope (lm-<n>), and the PR body says "Closes #n" so the issue closes when it merges.
+- IDs: an org's ticket key `<KEY>-<n>` is GitHub issue #n on acme/app. Branch `<key>-<n>-<slug>`, PR scope (<key>-<n>), and the PR body says "Closes #n" so the issue closes when it merges.
 - Before each review round, run `git merge-tree --write-tree origin/canary <head> HEAD` against the head of every PR ahead of you in merge-queue.json, not only canary. Rebase once onto any that conflicts, after it lands and before your gate. Each conflict found at the merge costs a full re-gate (7 Oct: one PR broke three others at once).
 - `git -C` takes a literal path, never a shell variable: the no-playground-leak hook can't place the repo from `$W` and refuses a commit whose text names a skill (worker-superbia). Same as --body-file and --attach.
 - A skill-only or docs-only chore needs no stack, no .env and no Postgres: commit and push with `env NODE_ENV=production SKIP_ENV_VALIDATION=true git -C <literal worktree path> ...`, as reviewers do (worker-superbia).

@@ -27,7 +27,6 @@ import { capital } from "../../../../session-names"
 const root = join(import.meta.dir, "..", "..", "..", "..", "..")
 // Built at run time, so this file's own text adds no trace to the tree's count.
 const ref = (n: number) => `#${n}`
-const KEY = ["LM", "7"].join("-")
 const OLD = ["light", "kid"].join("")
 const OLD_NAME = { builder: OLD, dispatcher: ["light", "man"].join("") }
 const OLD_SKILL = ["light", "review"].join("")
@@ -44,7 +43,7 @@ describe("the trace count", () => {
   test("counts each kind, its list-fed kinds from the list", () => {
     const text = [
       "Quilla Marsh and @qmarsh at Vantorix, in C0FAKE1234, on VX-12",
-      `mail ${["quilla", "qwerty.io"].join("@")}, see ${KEY} and #123, as ${OLD_NAME.dispatcher} and ${OLD_NAME.builder} said`,
+      `mail ${["quilla", "qwerty.io"].join("@")}, see #123, as ${OLD_NAME.dispatcher} and ${OLD_NAME.builder} said`,
       "https://github.com/octo/vault/pull/4",
       `run ${OLD_SKILL} and ${OLD_SKILL}-scan, not playground-review`,
     ].join("\n")
@@ -53,7 +52,6 @@ describe("the trace count", () => {
       values: { "factory.archiveRepo": "octo/vault", "owner.names": ["tobin"] },
     })
     expect(count([{ path: "a.md", text }], LIST, repos)).toEqual({
-      archiveKeys: 1,
       archiveLinks: 1,
       companies: 1,
       companyName: 0,
@@ -142,34 +140,32 @@ describe("the trace count", () => {
     expect(counts.issueRefs).toBe(0)
   })
 
-  test("reads past the files that define the old names, and a fixture's made-up PR numbers and branch keys but not its other traces", () => {
+  test("reads past the files that define the old names, and a fixture's made-up PR numbers but not its other traces", () => {
     const counts = count([
       { path: "packages/scripts/src/rename/rules.ts", text: `${OLD} ${ref(123)}` },
       { path: "packages/scripts/src/trace-count/kinds.ts", text: `${OLD} ${ref(124)}` },
       {
         path: "api/hono/src/fixtures/dashboard.json",
-        text: `"pr": "${ref(97)}", "branch": "${KEY}-row-wrap", "from": "${OLD}"`,
+        text: `"pr": "${ref(97)}", "from": "${OLD}"`,
       },
       { path: "packages/scripts/src/parity/replay/fixtures/scan/slack.json", text: ref(28) },
     ])
-    expect(counts.archiveKeys).toBe(0)
     expect(counts.issueRefs).toBe(0)
     expect(counts.oldNames).toBe(1)
   })
 
   test("reads past tests/ for issue numbers alone, so a test's other traces still count", () => {
-    const counts = count([{ path: "tests/a.test.ts", text: `${ref(123)} ${KEY} ${OLD}` }])
+    const counts = count([{ path: "tests/a.test.ts", text: `${ref(123)} VX-12 ${OLD}` }], LIST)
     expect(counts.issueRefs).toBe(0)
-    expect(counts.archiveKeys).toBe(1)
+    expect(counts.linearKeys).toBe(1)
     expect(counts.oldNames).toBe(1)
   })
 
-  test("reads past the leak guard's test for branch keys alone, since it holds the keys it detects", () => {
-    const counts = count([
-      { path: "tests/scripts/hooks/no-public-leak.test.ts", text: `${KEY} ${OLD}` },
-    ])
-    expect(counts.archiveKeys).toBe(0)
-    expect(counts.oldNames).toBe(1)
+  test("counts a key only through the list: no fixed key kind, so an empty list counts none", () => {
+    expect(count([{ path: "a.md", text: "fixes VX-42" }], LIST).linearKeys).toBe(1)
+    const empty = count([{ path: "a.md", text: "fixes VX-42" }], EMPTY_LIST)
+    expect(empty).not.toHaveProperty("archiveKeys")
+    expect(Object.values(empty).every((n) => n === 0)).toBe(true)
   })
 
   test("reads a hex colour as no issue, since an issue number never starts with 0", () => {
