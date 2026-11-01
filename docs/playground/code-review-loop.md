@@ -6,7 +6,7 @@ Each round reads what was asked (the plan item and the brief for a Playground PR
 It treats a review as a **subscription**, not a one-off: every push gets a round, a finding stays open until a round sees it fixed in the code, and a faultless push does not raise the score while anyone's finding is still open.
 The score is the PR's, never the delta's.
 
-The reviewer reads the skill's newest text from the main checkout at the start of every round, since the Skill tool serves the copy its session started with, so a fix to the skill reaches it at its next round.
+The reviewer reads the skill's newest text, its scripts included, from the main checkout at the start of every round, so a fix to the skill reaches it at its next round.
 
 It replaces review-bot.
 What review-bot learned stays; what changed is who runs it: one reviewer session per PR, spawned by the PR's worker once its head is ready, in the same step as its tester, rather than one loop polling every repo in an org.

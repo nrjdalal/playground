@@ -20,7 +20,7 @@ export const updateSteps = (changed: string[]) => ({
     (path) => path.startsWith("packages/") && !path.startsWith("packages/scripts/"),
   ),
   install: changed.some((path) => /(^|\/)(bun\.lock|package\.json)$/.test(path)),
-  // each changed skill's folder, A to Z by name: a running session's Skill tool serves the copy it started with, so a live session reads the new text from here
+  // each changed skill's folder, A to Z by name, which a live session reads the new text from (the release rule)
   skills: [
     ...new Set(
       changed.flatMap((path) =>
