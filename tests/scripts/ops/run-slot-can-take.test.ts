@@ -35,3 +35,27 @@ describe("a read command while the runs log holds three short true runs", () => 
     expect([run.exitCode, run.stdout.toString()]).toEqual([0, `2-${process.pid}-worker-m\n`])
   })
 })
+
+// ops-unstick's heavy-job cap reads this count, so four slots run-slot opens never read as over the cap
+describe("slots counts the CPU slots held or open now", () => {
+  const slots = (m: ReturnType<typeof machine>) => {
+    const run = Bun.spawnSync(["bash", SCRIPT, "slots"], { cwd: m.root, env: m.env() })
+    return [run.exitCode, run.stdout.toString()]
+  }
+
+  test("all four while load1 is under 12", () => {
+    expect(slots(machine())).toEqual([0, "4\n"])
+  })
+
+  test("run-slot.4-off closes the fourth", () => {
+    expect(slots(machine({ off: ["run-slot.4-off"] }))).toEqual([0, "3\n"])
+  })
+
+  test("load1 at 12 closes the third and fourth, and a holder keeps each", () => {
+    const m = machine({ load1: 12 })
+    expect(slots(m)).toEqual([0, "2\n"])
+    m.hold("run-slot-3", 2, "medium")
+    m.hold("run-slot-4", 2, "medium")
+    expect(slots(m)).toEqual([0, "4\n"])
+  })
+})

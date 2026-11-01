@@ -1170,6 +1170,44 @@ describe("ops-unstick's slot alerts", () => {
     expect(alerts.map((a) => a.line.match(/holds (\S+) with/)?.[1])).toEqual(cpu ?? [])
     expect(new Set(alerts.map((a) => a.kind))).toEqual(new Set(["slot-idle"]))
   })
+
+  // the heavy-job cap reads run-slot.sh's own count of the CPU slots held or open, on a machine at load1 2 with the given off-switches
+  const capped = (off: string[] = [], held: string[] = []) => {
+    const config = scratch()
+    const ops = join(config, "playground", "ops")
+    const bin = join(config, "bin")
+    mkdirSync(ops, { recursive: true })
+    mkdirSync(bin)
+    writeFileSync(
+      join(bin, "sysctl"),
+      `#!/bin/bash\ncase "$2" in hw.ncpu) echo 15 ;; vm.loadavg) echo "{ 2.00 2.00 2.00 }" ;; esac\n`,
+    )
+    chmodSync(join(bin, "sysctl"), 0o755)
+    for (const name of off) writeFileSync(join(ops, name), "")
+    for (const slot of held) {
+      mkdirSync(join(ops, slot))
+      writeFileSync(
+        join(ops, `${slot}.holder`),
+        `worker-x ${process.pid} 2026-11-01T14:00:00Z 2 medium\n`,
+      )
+    }
+    return callWith({ PATH: `${bin}:${process.env.PATH}` }, config, "heavy_cap") as Promise<number>
+  }
+
+  test("four CPU slots held at load1 under 12 raise no heavy-jobs alert", async () => {
+    const cap = await capped([], ["run-slot", "run-slot-2", "run-slot-3", "run-slot-4"])
+    const jobs = ["101", "102", "103", "104"].map((pid) => ({
+      inside: true,
+      kind: "suite",
+      pid,
+      where: `pg-340-${pid}`,
+    }))
+    expect(await call(scratch(), "slot_alerts", jobs, cap, at)).toEqual([])
+  })
+
+  test("with run-slot.4-off and no run-slot-4 holder, the cap is at most 3", async () => {
+    expect(await capped(["run-slot.4-off"])).toBe(3)
+  })
 })
 
 // ops-unstick routes a block to the session's manager and presses nothing on a permission prompt; a block the session's own hook recorded is that hook's to route.
