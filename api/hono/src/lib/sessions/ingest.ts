@@ -512,6 +512,7 @@ export function follow(
   projects: string,
   report: Report,
   giveUp: (reason: string) => void,
+  rescanMs = RESCAN_MS,
 ): Follower {
   const timers = new Map<string, ReturnType<typeof setTimeout>>()
   const tally = new Map<string, number>()
@@ -587,7 +588,7 @@ export function follow(
       .finally(() => {
         rescanning = false
       })
-  }, RESCAN_MS)
+  }, rescanMs)
   const summary = setInterval(() => {
     if (tally.size > 0) {
       const entries = [...tally.values()].reduce((sum, n) => sum + n, 0)
