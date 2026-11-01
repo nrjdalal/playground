@@ -68,7 +68,7 @@ const headed = () =>
   `${GUARD} hook refused this agent-desktop call: it carries --headed, whose physical input moves the owner's own pointer and focus. --headed is the owner's alone, so ${OWNER}.`
 
 const listed = (app: string) =>
-  `${GUARD} hook refused this agent-desktop call: it targets ${app}, an app on the desktop-owner-apps guard list of the owner's own apps. Leave it alone; when the task needs it, ${OWNER}, or ask the owner to have Ops take ${app} off the list in the owner's login extension.`
+  `${GUARD} hook refused this agent-desktop call: it targets ${app}, an app on the desktop-owner-apps guard list of the owner's own apps. Leave it alone; when the task needs it, ${OWNER}, or ask the owner to take ${app} off the list in the owner's login extension with a ! command Ops prepares.`
 
 const unread = (what: string) =>
   `${GUARD} hook refused this agent-desktop call: it cannot read ${what} before the command runs, so it cannot tell whether the call carries --headed or targets an app on the desktop-owner-apps list. Write the agent-desktop command's every word literally as a command of its own, or ${OWNER}.`
@@ -79,8 +79,9 @@ const front = (sub: string) =>
 const SCRIPT_IN_CALL =
   "a script file in a call that names agent-desktop, since the call may change it"
 
-// A list refusal's reason alone, without the fix a session could run itself, since the list is Ops' to write.
-const reasonOf = (refusal: string) => refusal.split(/: seed the guards'|\. Restore the file/)[0]
+// A list refusal's reason alone, without the fix it names, since only the owner's own ! command changes the list.
+const reasonOf = (refusal: string) =>
+  refusal.split(/: ask Ops for the owner to seed the guards'|\. Restore the file/)[0]
 
 const appName = (value: string) =>
   (value.split("/").filter(Boolean).pop() ?? "")
@@ -128,7 +129,7 @@ function lister(environment: Environment) {
     (loaded ??= guardList(GUARD, "desktop-owner-apps", isStrings, [], environment).then((l) =>
       l.refusal
         ? {
-            refusal: `${reasonOf(l.refusal)}. The list is Ops' to write: ask your lead to route it to Ops, then run the call again.`,
+            refusal: `${reasonOf(l.refusal)}. The list changes only by the owner's own ! command: ask your lead to have Ops prepare it for the owner, then run the call again.`,
           }
         : { apps: new Set((l.list ?? []).map(appName)) },
     ))

@@ -92,10 +92,10 @@ Their tests are `bun run test:file tests/scripts/hooks`.
 
 - agent-desktop runs headless and leaves the owner's own apps alone: `scripts/hooks/no-desktop-owner-app.ts`, registered beside no-headless-login and acting for every session, refuses an `agent-desktop` call that carries `--headed`, since headed input moves the owner's own pointer and focus.
   It also refuses one that targets an app on the `desktop-owner-apps` guard list ([Guard lists](#guard-lists)): an `--app` value, or a `launch` or `close-app` target, matched without case and with or without `.app` or a path before it.
-  Core's list is empty, and the owner's login extension holds the owner's apps, which Ops adds and removes on the owner's word.
+  Core's list is empty, and the owner's login extension holds the owner's apps, which change only by the owner's own `!` command, which Ops prepares.
   It reads the list and nothing else, so no flag, environment variable, `export`, `env` or write in the same call frees a call.
-  The list is Ops' to change, and a session that edits it in an earlier call or runs agent-desktop under another name breaks the rule; a text hook sees neither, and a write guard on every guard list is planned as a follow-up.
-  Its refusal names the two ways out: the owner runs the command with the `!` prefix in the owner's own pane, which runs outside the hooks, or has Ops take the app off the list.
+  The list changes only on the owner's own command, since [no-extensions-write](#no-extensions-write) refuses a session's edit of it in any call; a session that runs agent-desktop under another name breaks the rule, which a text hook cannot see.
+  Its refusal names the two ways out: the owner runs the command with the `!` prefix in the owner's own pane, which runs outside the hooks, or takes the app off the list with a `!` command Ops prepares.
   It refuses what it cannot read, as a call that may hide either: a word built from a variable or a substitution, the program in a variable in a call that names agent-desktop, arguments xargs appends, `batch`, `--window-id`, `notification-action`, an interpreter's code that names agent-desktop, and a script file run in a call that names agent-desktop.
   A command that acts on the app in front when no `--app` names one (`snapshot`, `find`, `screenshot`, `press`, the window and notification commands) needs an `--app`; `snapshot` and `find` under a `--root` ref, and every ref action, pass, since the snapshot that gave the ref was checked.
   It reads agent-desktop behind `bash -c`, a pipe into a shell, `env` and the other wrappers `scripts/hooks/shell.ts` knows, `run-slot.sh --`, `npx`, `bunx` and `find -exec`, and a script file the call runs, by its text.

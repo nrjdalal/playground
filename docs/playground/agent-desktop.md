@@ -32,5 +32,5 @@ The session reads the grants with `agent-desktop permissions`, which never promp
 ## Where it fits
 
 A core skill beside [agent-browser](../../skills/zerostarter/agent-browser/SKILL.md), its browser sibling from the same upstream.
-The `no-desktop-owner-app` hook refuses the skill's two rules in every session, `--headed` and any command naming an app on your list, and its refusal names the two routes past it: you run the command with `!`, or Ops takes the app off your list.
+The `no-desktop-owner-app` hook refuses the skill's two rules in every session, `--headed` and any command naming an app on your list, and its refusal names the two routes past it: you run the command with `!`, or you take the app off your list with a `!` command Ops prepares.
 A session trying it before it merges follows [.agents/skill-trial.md](../../.agents/skill-trial.md).
