@@ -18,6 +18,7 @@ import {
   program,
   pythonModule,
   run,
+  slotWords,
   UV_TAKES,
   unknown,
   unreadable,
@@ -367,13 +368,11 @@ const visitor = (load5: number, limit: number): Visit => {
   let earlier: "none" | "staging" | "other" = "none"
   const forced: string[] = []
   let branchReads: (string | undefined)[] = []
-  const visit: Visit = async (cmd, { args, name }, env) => {
-    // run-slot.sh runs the words after its -- as the command
-    if (name === "run-slot.sh") {
-      const at = args.findIndex((a) => a.value === "--")
-      const inner = { ...cmd, words: at === -1 ? [] : args.slice(at + 1) }
-      return inner.words.length === 0 ? undefined : examine(inner, env, visit, false)
-    }
+  const visit: Visit = async (cmd, parsed, env) => {
+    const slot = slotWords(parsed)
+    if (slot)
+      return slot.length === 0 ? undefined : examine({ ...cmd, words: slot }, env, visit, false)
+    const { args, name } = parsed
     const reads = branchReads
     branchReads = []
     const busyRun = busy ? installOrClone(name, args) : undefined

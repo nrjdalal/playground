@@ -112,7 +112,7 @@ Their tests are `bun run test:file tests/scripts/hooks`.
   an Opus file found there but not staged getting the chain's fix rather than the lead's, and a commit chained after any other command, or a push chained after any command, is refused with the fix: run it as its own call.
   `cd`, `export` and assignments never chain, nor do `cat`, `date`, `echo`, `printf`, `pwd` and `true` with no redirect that writes, so a commit message built by `$(cat <<'EOF' ... EOF)` reads as the commit alone.
   A push whose ref is a whole `$(git branch --show-current)` or `$(git rev-parse --abbrev-ref HEAD)` in the same checkout pushes HEAD, and any other ref built at run time gets the fix: name it literally.
-  A commit or push run through `run-slot.sh` is read as the words after its `--`, a `bash -c`, `eval` or `cd` there followed as anywhere else.
+  A commit or push run through `run-slot.sh` is read as the words after its `--` (`slotWords` in `scripts/hooks/shell.ts`, shared with no-main-checkout), a `bash -c`, `eval` or `cd` there followed as anywhere else.
   While load5 (`os.loadavg()[1]`, the third field of `sysctl -n vm.loadavg`) is over the `glm.readOnlyLoad5` setting (15 by default, read at each call) it also refuses any install, node_modules clone, commit or push, its reason naming the load and the rule: a GLM session goes read-only while load5 is over that limit.
   An install is `bun`, `npm`, `pnpm` or `yarn` `install`, `i`, `it`, `install-test`, `cit`, `install-ci-test`, `add`, `ci`, `up` or `update` (and `upgrade` but for `bun upgrade`, which updates bun itself).
   It is also a bare `yarn` (not `-v`, `--version`, `-h` or `--help`), `yarn global add` and `yarn workspace <name> add`, `uv sync` or `add`, `uv pip sync`, or a `pip` (`pip3`, `pip3.12`), `pipx`, `uv pip`, `uv tool` or `python -m pip` `install`, each also through `uv run` and past uv's own options.
@@ -225,9 +225,12 @@ Their tests are `bun run test:file tests/scripts/hooks`.
 
 - A factory session keeps the main checkout clean: `scripts/hooks/no-main-checkout.ts`, registered beside no-stash on Bash and the file tools (Edit, MultiEdit, NotebookEdit and Write), refuses lefthook, turbo (but for its packages build, below), `git commit` (it runs pre-commit), `bun run build`, `bun run check-types`,
   `bun run test`, `bun run test:file` and `bun test` while the command's directory (the Bash tool's cwd, after any `cd`, `git -C` or `bun --cwd` in it, but for `bun x` and `bunx`, which run in the shell's folder whatever bun's own `--cwd` says) is the main checkout and not a worktree under `.claude/worktrees/`,
-  and a write into the main checkout from anywhere (a redirect, `cp`, `mv`, `touch`, `tee`, curl's `-c` or `-o`, or a file tool's path), naming the fix: run it in your own worktree.
-  It refuses a git move there too: `am`, `apply` (but `--check`, `--numstat`, `--stat` or `--summary` without `--apply`), `bisect`, `branch -f`, `checkout`, `cherry-pick`, `clean` (but `-n`), `merge`, `mv`, `pull`, `rebase`, `reset`, `restore`, `revert`, `rm`, `stash` (but `list` and `show`), `switch` and `update-ref`,
+  and a write into the main checkout from anywhere (a redirect, `cp`, `mv`, `touch`, `tee`, curl's `-c` or `-o`, the files `sed -i`, BSD's `sed -I`, `sed --in-place` or `perl -i` edits in place, or a file tool's path), naming the fix: run it in your own worktree.
+  A command run through `run-slot.sh` is read as the words after its `--` (`slotWords` in `scripts/hooks/shell.ts`, which no-glm-heavy-path reads it by too), so a commit, a build or a write through run-slot is refused as the same command typed bare.
+  It refuses a git move there too: `add` (but `-n` or `--dry-run`), `am`, `apply` (but `--check`, `--numstat`, `--stat` or `--summary` without `--apply`), `bisect`, `branch -f`, `checkout`, `cherry-pick`, `clean` (but `-n`), `merge`, `mv`, `pull`, `rebase`, `reset` (but the one below), `restore`, `revert`, `rm`, `stash` (but `list` and `show`), `switch` and `update-ref`,
   whose tree it reads from a `--git-dir` of `<checkout>/.git`, else `--work-tree`, else the cwd after every `-C` in turn, naming the fix: `git -C <your worktree>`, after `git -C <your worktree> rev-parse --show-toplevel` names it.
+  The one reset it lets through is exactly `git reset --keep origin/main`, on the main checkout's `main`, while `git status --porcelain` is empty and no remote-tracking ref holds any commit of `origin/main..main`.
+  It is the way back from a stray local commit there, which `playground update`'s fast-forward stops on, since `--keep` keeps uncommitted work and the check keeps every commit someone else holds.
   A worker's shell lands there when it changes into the main checkout to run spawn.sh, so the factory's docs run spawn.sh by its absolute path (a bare `git reset --hard` there once ran every installed skill and hook off another branch for 3.5 minutes).
   Run a worktree's commands as `git -C <your worktree>` or `cd <worktree> && …` in one command, since a failed command leaves the Bash tool's shell in its old folder without a word.
   It judges each path where it lands, its nearest existing folder's links followed, so a write through a link link-skills.sh made (`~/.claude/skills/<name>`, `~/.playground/factory-settings.json`) is refused too, while the data folder's own files (handoffs, the roster) and a worktree reached through a link run.
@@ -236,6 +239,10 @@ Their tests are `bun run test:file tests/scripts/hooks`.
   That build needs `NODE_ENV` set and `SKIP_ENV_VALIDATION=true`, on its line, exported or in the session, since the main checkout has no `.env` and the packages' env checks fail without them, so a bare one is refused with the line `playground update`'s build step runs.
   It fails open.
   Its tests are in `bun run test:file tests/scripts/hooks`.
+  The backstop behind it is `lefthook.yml`'s pre-commit step `main-checkout`, alone at priority 1 so it runs first, before any step that writes (lefthook runs a tie in any order).
+  It refuses a commit whose `git rev-parse --show-toplevel` is the factory's main checkout, the one `~/.playground/ops/run-slot.sh` links into (`scripts/link-skills.sh` makes that link), whatever wrapper, shell or cwd made it, since this hook reads a command's text and the step reads where the commit lands.
+  A worktree and every other clone, a person's own included, commit as before.
+  A ship's pull is a fast-forward and runs no pre-commit, and the step's test is in `tests/lefthook.test.ts`.
 
 ## no-manager-subagent
 
