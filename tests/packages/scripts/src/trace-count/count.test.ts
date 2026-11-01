@@ -333,9 +333,17 @@ describe("no-public-leak's list", () => {
     expect(none.exitCode).toBe(2)
     expect(none.stdout.toString()).toBe("")
     expect(none.stderr.toString()).toContain("factory.archiveRepo and owner.names are unset")
+    expect(none.stderr.toString()).toContain("nothing was counted")
+    expect(none.stderr.toString()).toContain(
+      "bun run test:file tests/packages/scripts/src/trace-count/count.test.ts",
+    )
     const named = run({ "factory.archiveRepo": "qmarsh/vault" })
     expect(named.exitCode).toBe(2)
     expect(named.stderr.toString()).toContain("owner.names is unset")
+    expect(named.stderr.toString()).toContain("nothing was counted")
+    expect(named.stderr.toString()).toContain(
+      "bun run test:file tests/packages/scripts/src/trace-count/count.test.ts",
+    )
   })
 
   test("a run with no list file exits 2 before it counts", () => {
@@ -349,6 +357,26 @@ describe("no-public-leak's list", () => {
     expect(run.stdout.toString()).toBe("")
     expect(run.stderr.toString()).toContain(
       join(data, "extensions", "hooks", "no-public-leak.json"),
+    )
+    expect(run.stderr.toString()).toContain("nothing was counted")
+    expect(run.stderr.toString()).toContain(
+      "bun run test:file tests/packages/scripts/src/trace-count/count.test.ts",
+    )
+  })
+
+  test("a run whose policy.json does not parse exits 2 before it counts", () => {
+    const data = join(scratch, "bad-policy")
+    mkdirSync(join(data, "extensions"), { recursive: true })
+    writeFileSync(join(data, "extensions", "policy.json"), "{ not json")
+    const run = Bun.spawnSync(
+      [process.execPath, join(root, "packages/scripts/src/trace-count/cli.ts")],
+      { env: { ...process.env, PLAYGROUND_DATA_DIR: data }, stderr: "pipe", stdout: "pipe" },
+    )
+    expect(run.exitCode).toBe(2)
+    expect(run.stderr.toString()).toContain("does not parse")
+    expect(run.stderr.toString()).toContain("nothing was counted")
+    expect(run.stderr.toString()).toContain(
+      "bun run test:file tests/packages/scripts/src/trace-count/count.test.ts",
     )
   })
 })
