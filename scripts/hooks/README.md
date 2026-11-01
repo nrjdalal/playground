@@ -379,6 +379,7 @@ Their tests are `bun run test:file tests/scripts/hooks`.
 
 - Every worktree of a checkout shares one `git stash` list, so a pop can take another worker's entry, lint-staged's commit backup included: take a before-shot from a separate worktree on `origin/canary`, or commit first.
   The factory's `scripts/hooks/no-stash.ts` (registered in `scripts/factory-settings.json`, and in `.claude/settings.json` for a session cmux restores without it) refuses a stash that could take another worktree's work, and `agent-browser close --all`, which closes every session's browser on the machine.
+  It finds git's subcommand past git's own options, stepping over the value each one that takes a separate value names, as git 2.56 reads them (`GIT_TAKES`, `--attr-source <tree>` among them), so `git --attr-source HEAD stash pop` reads as a stash.
 
 ## no-unslotted-run
 
