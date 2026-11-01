@@ -3,7 +3,7 @@ import { describe, expect, test } from "bun:test"
 import { type PickerDeps, runPicker } from "../../../../../packages/scripts/src/playground/picker"
 import { callKey } from "../../../../../packages/scripts/src/stuck-alert"
 import { PERMISSION_ID, permissionItem } from "../../../../api/hono/src/lib/dashboard/feed-fixtures"
-import { OLD } from "../../../../old-names"
+import { OLD } from "../../../../session-names"
 
 const SESSION = "d9d2ef1a-a7b9-4ecb-a758-087576d79391"
 const KEY = callKey({ command: "rm -rf build" })

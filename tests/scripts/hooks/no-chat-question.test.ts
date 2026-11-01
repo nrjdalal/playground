@@ -10,8 +10,7 @@ import {
   readStatus,
   REASON,
 } from "../../../scripts/hooks/no-chat-question"
-import { OLD, capital } from "../../old-names"
-import { OLD_NAMES } from "../../session-names"
+import { capital, OLD, OLD_NAMES } from "../../session-names"
 import { storeWith } from "./render-set"
 
 const script = join(import.meta.dir, "..", "..", "..", "scripts", "hooks", "no-chat-question.ts")

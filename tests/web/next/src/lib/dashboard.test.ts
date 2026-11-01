@@ -43,7 +43,7 @@ import {
 } from "../../../../../web/next/src/lib/dashboard"
 import { modelName } from "../../../../../web/next/src/lib/model-label"
 import { inFixture, onLiveDashboard } from "../../../../dashboard-fixture"
-import { OLD } from "../../../../old-names"
+import { OLD } from "../../../../session-names"
 
 const entry = (id: string, at: string, text = id): Entry => ({
   at,

@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test"
 import { join } from "node:path"
 
-import { OLD, OLD_SECOND } from "./old-names"
+import { OLD, OLD_SECOND } from "./session-names"
 
 const ROOT = join(import.meta.dir, "..")
 

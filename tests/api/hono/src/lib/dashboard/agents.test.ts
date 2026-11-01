@@ -50,8 +50,7 @@ import { orgOf } from "../../../../../../packages/config/src/org"
 import { verdictsAt } from "../../../../../../packages/scripts/src/pr-merge/gates"
 import { inFixture, onLiveDashboard } from "../../../../../dashboard-fixture"
 import { liveReads } from "../../../../../live-reads"
-import { OLD } from "../../../../../old-names"
-import { SEEDED_NAMES } from "../../../../../session-names"
+import { OLD, SEEDED_NAMES } from "../../../../../session-names"
 
 // workers.ts sets the names its data folder holds when it loads; the cases name the managers' old names, as a machine past the switch does.
 setSessionNames(SEEDED_NAMES)

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { check, skillNames } from "../../../scripts/hooks/no-playground-leak"
-import { OLD } from "../../old-names"
+import { OLD } from "../../session-names"
 import { storeWith } from "./render-set"
 
 const root = join(import.meta.dir, "..", "..", "..")
@@ -69,13 +69,18 @@ beforeAll(async () => {
   await Bun.write(join(scratch, "broken", "playground", "roster.json"), "{ not json")
   lists = join(scratch, "lists")
   await mkdir(lists)
-  // The repo's terms, plus a made-up org's own words, as that org's extension adds them.
+  // The repo's terms, plus the stand-in old names a machine's own list holds and a made-up org's own words, as that org's extension adds them.
   const terms = await Bun.file(
     join(root, "extensions", "core", "lists", "playground-terms.json"),
   ).json()
   await Bun.write(
     join(lists, "playground-terms.json"),
-    JSON.stringify({ ...terms, everyday: [...terms.everyday, "acme", "acme-blue"] }),
+    JSON.stringify({
+      ...terms,
+      aliases: [...terms.aliases, OLD.builder, OLD.ops, OLD.planner],
+      everyday: [...terms.everyday, "acme", "acme-blue"],
+      names: [...terms.names, OLD.dispatcher],
+    }),
   )
   await Bun.write(
     join(lists, "slack-cleared.json"),

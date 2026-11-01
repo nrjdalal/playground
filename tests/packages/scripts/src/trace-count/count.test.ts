@@ -22,13 +22,14 @@ import {
   reposOf,
   UNSET_REPOS,
 } from "../../../../../packages/scripts/src/trace-count/kinds"
-import { capital, OLD as OLD_NAME } from "../../../../old-names"
+import { capital } from "../../../../session-names"
 
 const root = join(import.meta.dir, "..", "..", "..", "..", "..")
 // Built at run time, so this file's own text adds no trace to the tree's count.
 const ref = (n: number) => `#${n}`
 const KEY = ["LM", "7"].join("-")
 const OLD = ["light", "kid"].join("")
+const OLD_NAME = { builder: OLD, dispatcher: ["light", "man"].join("") }
 const OLD_SKILL = ["light", "review"].join("")
 // Made-up values, one per list key.
 const LIST = {
