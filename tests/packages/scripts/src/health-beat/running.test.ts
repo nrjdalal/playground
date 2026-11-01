@@ -5,6 +5,7 @@ import { join } from "node:path"
 
 import {
   buildOf,
+  fetchHealth,
   readRunning,
   versionOf,
 } from "../../../../../packages/scripts/src/health-beat/running"
@@ -39,6 +40,7 @@ const PROD = [
   "  49510   576 bun ../../packages/scripts/src/portless.ts bun /d/builds/1a1291d54884f782f5c7e71c10a9637a1c174987/web/web/next/server.js",
   "  49526 49510 bun /d/builds/1a1291d54884f782f5c7e71c10a9637a1c174987/web/web/next/server.js",
   "    700     1 node /elsewhere/node_modules/.bin/next dev",
+  "    800     1 bash /x/idle.sh",
 ].join("\n")
 
 const DEV = [
@@ -90,9 +92,20 @@ describe("buildOf, the main checkout's branch, the live Dashboard's web and its 
         why: "no route",
       }),
     ).toBe("main, unknown (no route), at unknown (no answer)")
-    expect(buildOf({ branch: MAIN, health: SHA, ps: PROD, root: 4242 })).toBe(
-      "main, unknown (neither a /builds/<sha>/ path nor next dev runs under pid 4242), at 1a1291d",
+    expect(buildOf({ branch: MAIN, health: SHA, ps: PROD, root: 800 })).toBe(
+      "main, unknown (neither a /builds/<sha>/ path nor next dev runs under pid 800), at 1a1291d",
     )
+    expect(buildOf({ branch: MAIN, health: SHA, ps: PROD, root: 4242 })).toBe(
+      "main, unknown (pid 4242 is not running), at 1a1291d",
+    )
+    expect(
+      buildOf({
+        branch: { code: 0, out: "main\nwarning: something\n" },
+        health: SHA,
+        ps: PROD,
+        root: 99085,
+      }),
+    ).toBe("main build, at 1a1291d")
     expect(buildOf({ branch: { code: 0, out: "" }, health: SHA, ps: PROD, root: 99085 })).toBe(
       "unknown branch (detached HEAD) build, at 1a1291d",
     )
@@ -147,6 +160,8 @@ describe("readRunning", () => {
     const got = await readRunning({
       health: async () => ({ version: "0.0.1-9f0e1d2" }),
       portless: routes([
+        null,
+        "junk",
         { hostname: "playground.localhost", pid: 4100, port: 3000 },
         { hostname: "api.playground.localhost", pid: 4300, port: 4000 },
       ]),
@@ -178,5 +193,35 @@ describe("readRunning", () => {
     expect(orphan.build).toBe(
       "main, unknown (no running stack holds playground.localhost's port 58008), at unknown (/api/health did not answer: refused)",
     )
+  })
+})
+
+describe("fetchHealth", () => {
+  const serve = (body: string, status = 200) =>
+    Bun.serve({ fetch: () => new Response(body, { status }), hostname: "127.0.0.1", port: 0 })
+
+  test("the version an answer carries, else what the answer was", async () => {
+    const good = serve(JSON.stringify({ data: { version: "0.0.1-1a1291d" } }))
+    const none = serve(JSON.stringify({ data: {} }), 503)
+    const html = serve("<html></html>", 502)
+    try {
+      expect(await fetchHealth(`${good.url}api/health`)).toEqual({ version: "0.0.1-1a1291d" })
+      expect(await fetchHealth(`${none.url}api/health`)).toEqual({
+        reason: "/api/health answered 503 with no version",
+      })
+      expect(await fetchHealth(`${html.url}api/health`)).toEqual({
+        reason: "/api/health answered 502, not JSON",
+      })
+    } finally {
+      for (const server of [good, none, html]) server.stop(true)
+    }
+  })
+
+  test("no answer names the error", async () => {
+    const gone = serve("")
+    const url = `${gone.url}api/health`
+    gone.stop(true)
+    const got = await fetchHealth(url)
+    expect("reason" in got && got.reason.startsWith("/api/health did not answer: ")).toBe(true)
   })
 })

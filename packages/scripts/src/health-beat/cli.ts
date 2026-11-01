@@ -1,11 +1,9 @@
-import { homedir } from "node:os"
-import { join } from "node:path"
-
 import { dataDirOf } from "@packages/env/data-dir"
 import { gateSettings, readPolicyOrDefaults, ruleSettings } from "@packages/settings"
 
 import { mainCheckout } from "../main-checkout"
 import { run } from "../ops-job/job"
+import { portlessDir } from "../portless-ca"
 import { beatText, readBeat } from "./beat"
 
 // The settings as spawn.sh reads them, from policy.json, refusing as it does when that file does not parse.
@@ -21,7 +19,7 @@ const reading = await readBeat({
   at: new Date(),
   data,
   freeMin,
-  portless: process.env.PORTLESS_STATE_DIR || join(homedir(), ".portless"),
+  portless: portlessDir(),
   repo: mainCheckout(),
   run,
   zone,

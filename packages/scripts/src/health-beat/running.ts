@@ -25,7 +25,7 @@ export const versionOf = ({ code, out }: Answer): string => {
 // Pure: `git branch --show-current`, which prints nothing on a detached HEAD.
 const branchOf = ({ code, out }: Answer): string => {
   if (code !== 0) return `unknown branch (git branch: ${firstLine(out) || "no output"})`
-  return out.trim() || "unknown branch (detached HEAD)"
+  return firstLine(out) || "unknown branch (detached HEAD)"
 }
 
 // Pure: the branch, then the process tree under root, from `ps -A -o pid=,ppid=,command=`, read as a build when a command runs from a /builds/<sha>/ path and as a dev server when one runs next dev, then /api/health's version, its sha alone when it ends in one.
@@ -41,16 +41,22 @@ export const buildOf = (input: {
       ? (/-([0-9a-f]{7,40})$/.exec(input.health.version)?.[1] ?? input.health.version)
       : `unknown (${input.health.reason})`
   const kind = kindOf(input.ps, input.root, input.why)
-  return `${branchOf(input.branch)}${kind.startsWith("unknown") ? ", " : " "}${kind}, at ${version}`
+  const branch = branchOf(input.branch)
+  return `${"kind" in kind ? `${branch} ${kind.kind}` : `${branch}, unknown (${kind.unknown})`}, at ${version}`
 }
 
-const kindOf = (ps: string, root: number | null, why = "no web route"): string => {
-  if (root === null) return `unknown (${why})`
+const kindOf = (
+  ps: string,
+  root: number | null,
+  why = "no web route",
+): { kind: string } | { unknown: string } => {
+  if (root === null) return { unknown: why }
   const rows = ps
     .split("\n")
     .map((line) => /^\s*(\d+)\s+(\d+)\s+(.*)$/.exec(line))
     .filter((row) => row !== null)
     .map(([, pid, ppid, command]) => ({ command: command!, pid: Number(pid), ppid: Number(ppid) }))
+  if (!rows.some((row) => row.pid === root)) return { unknown: `pid ${root} is not running` }
   const tree = new Set([root])
   for (let grew = true; grew;) {
     grew = false
@@ -61,9 +67,10 @@ const kindOf = (ps: string, root: number | null, why = "no web route"): string =
       }
   }
   const commands = rows.filter((row) => tree.has(row.pid)).map((row) => row.command)
-  if (commands.some((command) => /\/builds\/[0-9a-f]{7,40}\//.test(command))) return "build"
-  if (commands.some((command) => /\bnext dev\b/.test(command))) return "dev server"
-  return `unknown (neither a /builds/<sha>/ path nor next dev runs under pid ${root})`
+  if (commands.some((command) => /\/builds\/[0-9a-f]{7,40}\//.test(command)))
+    return { kind: "build" }
+  if (commands.some((command) => /\bnext dev\b/.test(command))) return { kind: "dev server" }
+  return { unknown: `neither a /builds/<sha>/ path nor next dev runs under pid ${root}` }
 }
 
 type Route = { hostname: string; pid: number; port: number }
@@ -71,7 +78,14 @@ type Route = { hostname: string; pid: number; port: number }
 const readRoutes = async (portless: string): Promise<Route[]> => {
   try {
     const rows = (await Bun.file(join(portless, "routes.json")).json()) as unknown
-    return Array.isArray(rows) ? (rows as Route[]) : []
+    return Array.isArray(rows)
+      ? rows.filter(
+          (row): row is Route =>
+            typeof row?.hostname === "string" &&
+            typeof row.port === "number" &&
+            typeof row.pid === "number",
+        )
+      : []
   } catch {
     return []
   }
@@ -87,18 +101,20 @@ const webOwner = (routes: Route[]): { root: number } | { why: string } => {
 
 // The live Dashboard's /api/health on its loopback port, which the API binds.
 export const fetchHealth = async (url: string): Promise<Health> => {
+  let response: Response
   try {
-    const response = await fetch(url, { signal: AbortSignal.timeout(3000) })
-    const body = (await response.json()) as { data?: { version?: unknown } }
-    const version = body.data?.version
-    return typeof version === "string"
-      ? { version }
-      : { reason: `/api/health answered ${response.status} with no version` }
+    response = await fetch(url, { signal: AbortSignal.timeout(3000) })
   } catch (error) {
     return {
       reason: `/api/health did not answer: ${error instanceof Error ? error.message : String(error)}`,
     }
   }
+  const body = (await response.json().catch(() => null)) as { data?: { version?: unknown } } | null
+  if (body === null) return { reason: `/api/health answered ${response.status}, not JSON` }
+  const version = body.data?.version
+  return typeof version === "string"
+    ? { version }
+    : { reason: `/api/health answered ${response.status} with no version` }
 }
 
 // Reads the two lines' values once: two git reads of the main checkout, portless's routes, one ps read and one GET.
