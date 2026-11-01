@@ -56,6 +56,10 @@ const run = async (config: string, args: string[]) => {
   }
 }
 
+// A UTC ISO time the given minutes from now, as `date -u +%FT%TZ` prints one.
+const inMinutes = (minutes: number) =>
+  new Date(Date.now() + minutes * 60_000).toISOString().replace(/\.\d{3}Z$/, "Z")
+
 const agentOf = (roster: RosterFile | null, name: string) =>
   roster?.agents.find((a) => a.name === name)
 
@@ -143,9 +147,10 @@ describe("set", () => {
     expect(r.err).toContain("worker-greed holds a pr")
     expect(r.err).toContain("roster.ts assign worker-greed")
     expect(r.roster?.agents).toEqual([WITH_PR])
-    const eta = await run(config, ["set", "worker-greed", "eta=2026-10-18T14:30:00Z"])
+    const at = inMinutes(90)
+    const eta = await run(config, ["set", "worker-greed", `eta=${at}`])
     expect(eta.code).toBe(0)
-    expect(agentOf(eta.roster, "worker-greed")).toEqual({ ...WITH_PR, eta: "2026-10-18T14:30:00Z" })
+    expect(agentOf(eta.roster, "worker-greed")).toEqual({ ...WITH_PR, eta: at })
   })
 
   // rows read by their first ask while no title was set, and set refused one on a row holding a pr.
@@ -389,9 +394,10 @@ describe("status", () => {
 
   test("leaves a row already holding text: its other keys still write", async () => {
     const old = { ...WITH_PR, status: "#1114 r3 4/5 @7453ba1, fixing S1/S2" }
-    const r = await run(configWith([old]), ["set", "worker-greed", "eta=2026-10-22T08:45:00Z"])
+    const at = inMinutes(90)
+    const r = await run(configWith([old]), ["set", "worker-greed", `eta=${at}`])
     expect(r.code).toBe(0)
-    expect(agentOf(r.roster, "worker-greed")).toEqual({ ...old, eta: "2026-10-22T08:45:00Z" })
+    expect(agentOf(r.roster, "worker-greed")).toEqual({ ...old, eta: at })
     const report = await run(configWith([old]), [
       "report",
       "worker-greed",
@@ -399,6 +405,37 @@ describe("status", () => {
       "status=ended",
     ])
     expect(agentOf(report.roster, "worker-greed")?.status).toBe("ended")
+  })
+})
+
+// a worker sent its lead the literal placeholder <ETA>, and the roster stored it.
+describe("eta", () => {
+  test.each([
+    ["the placeholder", "<ETA>"],
+    ["a clock time alone", "13:50Z"],
+    ["a time a minute past", inMinutes(-1)],
+  ])("%s is refused by set, report and assign, naming the recipe", async (_case, value) => {
+    for (const args of [
+      ["set", "worker-greed", `eta=${value}`],
+      ["report", "worker-greed", "PR opened", `eta=${value}`],
+      ["assign", "worker-greed", "Export fix", "Fix the export", `eta=${value}`],
+    ]) {
+      const r = await run(configWith([WITH_PR]), args)
+      expect(r.code).toBe(2)
+      expect(r.err).toContain("an ETA is `date -u` plus your estimate, in UTC")
+      expect(r.roster).toMatchObject({ agents: [WITH_PR], updatedAt: "2026-10-01T00:00:00Z" })
+    }
+  })
+
+  test("a future UTC ISO time is stored, and an empty eta= clears it", async () => {
+    const config = configWith([WITH_PR])
+    const at = inMinutes(60)
+    const set = await run(config, ["set", "worker-greed", `eta=${at}`])
+    expect(set.code).toBe(0)
+    expect(agentOf(set.roster, "worker-greed")?.eta).toBe(at)
+    const cleared = await run(config, ["report", "worker-greed", "merged abc1234", "eta="])
+    expect(cleared.code).toBe(0)
+    expect(agentOf(cleared.roster, "worker-greed")).not.toHaveProperty("eta")
   })
 })
 
