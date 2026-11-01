@@ -303,6 +303,21 @@ describe("a push resolves its target the way git does, and one it cannot place i
       ],
       ["gh's publish-step delete", "gh release delete v1 -y --cleanup-tag -R quillco/acme-skills"],
       ["gh's publish-step upload", "gh release upload v1 x.tgz -R quillco/acme-skills"],
+      ["xargs appending a push's URL", `echo ${EXT} main | xargs git push`],
+      ["xargs appending a send-pack URL", `echo ${EXT} main | xargs git send-pack`],
+      [
+        "xargs appending gh repo delete's repository",
+        "echo quillco/acme-skills | xargs gh repo delete --yes",
+      ],
+      ["xargs appending -R's value", "echo quillco/acme-skills | xargs gh pr merge 1 -R"],
+      [
+        "xargs appending a gh api endpoint",
+        "echo repos/quillco/acme-skills/git/refs | xargs gh api -X POST -f ref=x -f sha=y",
+      ],
+      [
+        "xargs appending a curl URL",
+        "echo https://api.github.com/repos/quillco/acme-skills/contents/x | xargs curl -X PUT -d x",
+      ],
     ]),
   )("%s", async (_, command, dir) => {
     await refused(bash(command, at(dir)))
@@ -476,6 +491,7 @@ describe("what it lets through", () => {
       ["a commit in a clone whose remote is a local path", "git commit -m x", "local"],
       ["a GIT_ variable on a commit", "GIT_EDITOR=true git commit --amend --no-edit"],
       ["a git alias that only reads", "git l", "alias"],
+      ["xargs appending files to git add", "echo a b | xargs git add"],
       ["gh api GET", `gh api ${A}/contents/x.md`],
       ["gh api GET of repositories/<id>", "gh api repositories/123"],
       ["gh repo view", "gh repo view quillco/acme-skills"],
@@ -548,6 +564,7 @@ describe("B7: issue and pull request conversation on an extension repository pas
       ["gh api on labels", `gh api -X POST ${A}/labels -f name=x`],
       ["gh api on pulls", `gh api -X POST ${A}/pulls -f title=x -f head=b -f base=main`],
       ["gh api PATCH on a pull request", `gh api -X PATCH ${A}/pulls/1 -f title=x`],
+      ["xargs appending an issue comment's body", `echo y | xargs gh issue comment 1 ${R} -b`],
     ]),
   )("%s", async (_, command, dir) => {
     expect(await run(bash(command, at(dir)))).toBeUndefined()

@@ -470,8 +470,14 @@ function decide(candidates: (Repo | undefined)[]): Target {
   return { label: "", where: "other" }
 }
 
+// Under anyWrite, the arguments an xargs with no replace string appends from its input, which the hook cannot read.
+const XARGS_INPUT: Word = { quoted: false, unknown: "xargs's input", value: UNKNOWN }
+
 const leak: Visit = async (cmd, parsed, env) => {
-  const { args, first, name, xargs } = parsed
+  const { first, name, xargs } = parsed
+  const appended = policy.anyWrite && xargs && xargs.replace === undefined
+  const args =
+    appended && parsed.args.at(-1) !== XARGS_INPUT ? [...parsed.args, XARGS_INPUT] : parsed.args
   if (policy.anyWrite && changesState(cmd, parsed)) changed = true
   const head = args[0]?.value ?? ""
   const group = GH_GROUPS.has(head) || (policy.anyWrite && (head === "alias" || head === "repo"))
@@ -875,6 +881,8 @@ async function curl(
       return judge("curl", { label: "a host the call redirects to", where: "unknown" }, [], env)
   }
   const targets = urls.map((u): Target => {
+    if (u.unknown === XARGS_INPUT.unknown)
+      return { label: "a URL xargs appends from its input", where: "unknown" }
     const value = visible(u.value)
     if (u.unknown || u.reads?.length || value.includes(UNKNOWN) || fromXargs(u, xargs))
       return { byText: true, label: "a URL the hook cannot read", where: "unknown" }
@@ -1093,7 +1101,6 @@ function builtin(sub: string): boolean {
   return builtins.has(sub)
 }
 
-// A URL git reaches over the network, by owner and name; undefined for a local path, a file:// URL or a remote helper's <transport>::<address>, which the hook cannot place.
 // git's split_cmdline: quotes group and drop, a backslash escapes outside single quotes, and an unclosed quote or a trailing backslash fails the alias.
 function splitCmdline(body: string): Word[] | undefined {
   const words: Word[] = []
@@ -1122,6 +1129,7 @@ function splitCmdline(body: string): Word[] | undefined {
   return words
 }
 
+// A URL git reaches over the network, by owner and name; undefined for a local path, a file:// URL or a remote helper's <transport>::<address>, which the hook cannot place.
 function placeUrl(url: string): Repo | undefined {
   if (url.includes("::") || /^file:/i.test(url)) return
   if (/^[a-z][a-z\d+.-]*:\/\//i.test(url) || /^[^/:]+:/.test(url)) return remoteRepo(url)

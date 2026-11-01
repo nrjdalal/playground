@@ -123,13 +123,15 @@ Their tests are `bun run test:file tests/scripts/hooks`.
   Those changes are a `git config` write, `git remote add`, `remove`, `rename`, `rm` or `set-url`, `git clone`, `init` or `submodule`, `gh repo clone`, `fork` or `set-default`, `gh config set`, and any other command naming a `.git` path or a git config file.
   A config file it reaches only through `include.path` or a link, written in the same call by a command that names neither a `.git` path nor a git config file, is outside its reach.
   It cannot place, so refuses, a push with `-c`, `--config-env`, `--git-dir` or a `GIT_` variable in the call, a literal URL an `insteadOf` or `pushInsteadOf` prefix matches, a remote whose URL is a local path, a `!` alias, an alias with an unclosed quote or a trailing backslash, an alias `-c` sets, `gh alias set` and `import`, and a REST write to `repositories/<id>`.
+  It also refuses a push, a gh or `gh api` write, and any curl run by an `xargs` with no replace string, since that `xargs` appends arguments from its input, which the hook cannot read; `xargs git add` and an `xargs` gh conversation verb pass.
   It refuses a repository made or renamed at one of those names, `*` standing for the account gh picks itself, and a name it cannot read counts as one.
   Those are `gh repo create` (its name or its `--source` folder's), `rename` and `fork --fork-name`, `gh api`'s repo PATCH with a `name`, `generate`, `transfer`, `forks` with a `name`, `user/repos` and `orgs/<org>/repos`, and MCP `create_repository`.
   Issue and pull request conversation passes, since the sync reads only `main`: `gh issue` and `gh label`, `gh pr create`, `comment`, `edit`, `review`, `close` and `reopen`, `gh api` on `issues`, `labels` and `pulls` but a pull request's `merge` or `update-branch`, and the matching MCP tools.
   A commit is refused only in a clone of one of them, and every call passes on a machine with no extensions root.
   Its refusal names the one route: the owner types the command in Ops' pane as a `!` command; no flag, environment variable, role or note frees a call.
   It fails closed, as the leak guards do and only on a call that may write, when `policy.json` does not read or no login names the default repositories.
-  Outside its reach are a program whose own code pushes or calls the API (a script by its path, `bun run`, a binary), a fork that keeps its source's name, and a gh alias set before it.
+  Outside its reach are a program whose own code pushes or calls the API (a script by its path, `bun run`, `bun -e`, `python -c`, a binary, an HTTP client other than curl such as wget or httpie), a fork that keeps its source's name, and a gh alias set before it.
+  `gh workflow run`, `gh secret set` and `gh repo deploy-key add` pass, since none writes a branch or the name itself, while their `gh api` routes are refused.
   A GraphQL mutation, which names its repository by node id, and a curl whose URL the run computes are refused only when their text names one of the repositories; a URL in a curl config file (`-K`, `~/.curlrc`) and a redirect a server answers with (`-L`) are unread.
   An `ext.order` name with no clone and no `ext.repos` entry is not guarded, and the sync does not push it either.
   Its tests are `bun run test:file tests/scripts/hooks/no-extension-repo-write.test.ts`.
