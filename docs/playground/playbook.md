@@ -1,7 +1,7 @@
 ## What it does
 
 `playbook` holds the operating rules of Playground's factory, the Claude Code sessions cmux or herdr runs on the owner's behalf: who does what, who reports to whom, how sessions start and end, how the leads keep watch,
-and the standing rules (override, gate, comments, release, dashboard, clock, eta, roster, ask, tickets, classified, channel, signal, main, zerosdk, voice, terminal, local page, correction, upstream, verify, memory, writing, ci, slots, unstick, usage, glm, battery, context, rounds, polling, github, workers, meetings).
+and the standing rules (override, gate, comments, release, dashboard, clock, eta, roster, ask, tickets, classified, signal, main, voice, terminal, local page, correction, upstream, verify, memory, writing, ci, slots, unstick, usage, glm, battery, context, rounds, polling, github, workers, meetings).
 It lives in the repo rather than in one session's memory, so every session loads the same rules.
 
 ## When to reach for it
@@ -19,7 +19,7 @@ It lives in the repo rather than in one session's memory, so every session loads
 | Ask the owner something, or pass on his override                                                          | the **ask** and **override** rules                                             |
 | File a Linear ticket                                                                                      | the **tickets** rule                                                           |
 | Write anything an org sees                                                                                | the **classified** rule                                                        |
-| Post in the factory's channel, or take an ask from there                                                  | the **channel** rule (`CHANNEL.md`)                                            |
+| Post in the factory's channel, or take an ask from there                                                  | the channel's lists and triage (`CHANNEL.md`)                                  |
 | Run a `vercel` command, a deploy among them                                                               | the Vercel CLI's three traps (`VERCEL.md`)                                     |
 | Stop a process                                                                                            | the **signal** rule                                                            |
 | Hand off a build, a read or research                                                                      | the **workers** rule                                                           |
@@ -33,10 +33,10 @@ A session outside the factory has no reason to.
 
 `SKILL.md` is the part every session keeps in view: the roles, the chain, and under **Standing rules** a pointer to where the rules live, short enough to fit inside what Claude Code re-attaches after a compaction (its first 5,000 tokens, within a budget that can drop an older skill whole).
 Each rule is its own intent file, `extensions/core/rules/<name>.md`: its first line is the glance, the lines after it its what and why, with each value a `{key}` slot.
-A rule that belongs to the owner alone (**zerosdk**) sits in its scope's own `skills/<scope>/rules/` until the switch imports it into the extensions, and keeps its glance line in `SKILL.md` until then.
+A rule that belongs to one login alone lives in that login extension's own `rules/`, and the `rules` hook shows its glance under "Your own rules:".
 The lifecycle, dispatch and sweep are in `LIFECYCLE.md`, `DISPATCH.md` and `SWEEP.md`, each read when its moment comes.
 At every session start, resume and compaction the `rules` hook puts each rule file's glance in front of the session, its slots filled with this machine's settings (`playground rules <name>` prints one whole), and after a compaction a second hook tells it to load the skill again, so the rules arrive even when the skill was dropped.
-A test holds `SKILL.md` under 14,000 characters, its pointer to the rules folder, and its glance lines to the rules that wait in a scope's own folder.
+A test holds `SKILL.md` under 14,000 characters, its pointer to the rules folder and its glance lines to the rules that wait in a scope's own folder; another holds the rule list above to the files in `extensions/core/rules/`.
 
 ## The shape
 
