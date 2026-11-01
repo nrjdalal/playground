@@ -567,12 +567,13 @@ export function parse(cmd: Command): Parsed {
       const v = words[k].value
       if (ASSIGN.test(v)) assign(words[k++])
       // env -S splits its one string into the words it runs
-      else if (wrapper === "env" && (v === "-S" || v === "--split-string") && words[k + 1]) {
-        const split = words[k + 1].value
+      else if (wrapper === "env" && /^(?:-[0iv]*S|--split-string(?:=|$))/.test(v)) {
+        const attached = /^(?:-[0iv]*S|--split-string=?)(.*)$/.exec(v)?.[1] ?? ""
+        const split = (attached || words[k + 1]?.value || "")
           .split(/\s+/)
           .filter(Boolean)
           .map((value) => ({ quoted: false, value }))
-        words = [...words.slice(0, k), ...split, ...words.slice(k + 2)]
+        words = [...words.slice(0, k), ...split, ...words.slice(attached ? k + 1 : k + 2)]
       } else if (wrapper === "env" && (v === "-C" || v === "--chdir")) {
         chdir = words[k + 1]
         k += 2

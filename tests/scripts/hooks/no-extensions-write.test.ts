@@ -159,6 +159,18 @@ describe("a direct write into the extensions root is refused, naming the owner's
     expect(reason).toContain("no-extensions-write hook refuses")
   })
 
+  test.each([
+    ["-S attached", `env -S'bun ${CLI_DIR}/cli.ts' settings set owner.names x --reason r`],
+    [
+      "--split-string=",
+      `env --split-string='bun ${CLI_DIR}/cli.ts' settings set owner.names x --reason r`,
+    ],
+    ["-v -S", `env -v -S 'bun ${CLI_DIR}/cli.ts' settings set owner.names x --reason r`],
+    ["-vS attached", `env -vS'bun ${CLI_DIR}/cli.ts' settings set owner.names x --reason r`],
+  ])("the CLI behind env %s", async (_, command) => {
+    expect(await bash(command)).toContain("no-extensions-write hook refuses")
+  })
+
   test("the CLI behind env -S", async () => {
     const reason = await bash(
       `env -S 'bun ${CLI_DIR}/cli.ts' settings set owner.names x --reason r`,
