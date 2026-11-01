@@ -562,6 +562,12 @@ describe("a read of the root, and writes elsewhere, run", () => {
         "sed -n '/^a*b/p; /^a?b/p; /^{a,b}/p' x",
         cwd,
       ],
+      [
+        "a bun -e script with a regex from /",
+        where,
+        `bun -e 'for (const i of (l.items??[])) { const s=String(i.status??""); if (/^(done|merged|closed)/i.test(s)) continue }' /tmp/plan.json`,
+        cwd,
+      ],
     ]),
   ])("%s with a quoted glob runs from %s", async (_, _where, command, cwd) => {
     expect(await bash(command, cwd)).toBeUndefined()
