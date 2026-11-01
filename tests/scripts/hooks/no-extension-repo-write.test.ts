@@ -331,6 +331,13 @@ describe("a push resolves its target the way git does, and one it cannot place i
         "switch",
       ],
       ["a bare push after a checkout alias in the same call", "git co feat && git push", "switch"],
+      ["a bare push after any other git command", "git status && git push", "stale"],
+      ["a bare push after git rebase onto a branch", "git rebase main feat && git push", "switch"],
+      [
+        "a bare push after git add and commit",
+        "git add -A && git commit -m m && git push",
+        "switch",
+      ],
       [
         "a bare push after git symbolic-ref in the same call",
         "git symbolic-ref HEAD refs/heads/feat && git push",
@@ -571,6 +578,7 @@ describe("what it lets through", () => {
       ["a git alias that only reads", "git l", "alias"],
       ["xargs appending files to git add", "echo a b | xargs git add"],
       ["a bare push with a stale remote on another branch", "git push", "stale"],
+      ["a bare push after a command that is not git", "ls && git push", "stale"],
       [
         "a push to a named remote after git switch",
         "git switch -c feat && git push -u origin feat",
