@@ -23,6 +23,7 @@ const bash = (command: string) =>
 describe("a git stash that can take another worktree's work is refused", () => {
   test.each([
     ["a bare stash", "git stash"],
+    ["a stash inside an array assignment", "arr=($(git stash))"],
     ["push without a message", "git stash push"],
     ["push with options but no message", "git stash push -u --keep-index"],
     ["an implied push without a message", "git stash -u"],

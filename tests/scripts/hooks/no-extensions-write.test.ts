@@ -300,6 +300,22 @@ describe("a direct write into the extensions root is refused, naming the owner's
     expect(reason).toContain("no-extensions-write hook refuses")
   }, 10_000)
 
+  test.each([
+    ["nested substitutions", `x=${"$(".repeat(20_000)}${")".repeat(20_000)}; playground ext sync`],
+    ["nested groups", `${"(".repeat(20_000)}true${")".repeat(20_000)}; playground ext sync`],
+    [
+      "nested quoted substitutions",
+      `${'"$('.repeat(5_000)}${')"'.repeat(5_000)}; playground ext sync`,
+    ],
+  ])("%s too deep for the reader's stack are refused", async (_, command) => {
+    expect(await bash(command, "/tmp")).toContain("no-extensions-write hook refuses")
+  })
+
+  test("a command longer than the reader can lex inside the hook's time is refused", async () => {
+    const reason = await bash(`echo ${"${a:-".repeat(30_000)}${"}".repeat(30_000)}`, "/tmp")
+    expect(reason).toContain("split it into shorter calls")
+  })
+
   test("a Bash call whose cwd is already inside the root runs no writer", async () => {
     expect(await bash("node -e 'x'", SCOPE)).toContain("no-extensions-write hook refuses")
   })

@@ -33,6 +33,8 @@ const ROUTE =
 
 const refuse = (what: string) => `no-extensions-write hook refuses ${what}: ${ROUTE}`
 
+const TOO_LONG = "a command too long to read inside the hook's time: split it into shorter calls"
+
 // Programs that only read what they name; rg, find and git read only without the options below that run a program.
 const READERS = new Set([
   "[",
@@ -224,6 +226,8 @@ function inspect(raw: string, environment: Environment) {
   if (tool !== "Bash") return
   const { command } = input
   if (typeof command !== "string") return
+  // nesting makes the lexer's time grow with the square of the length, so a longer command could outlast the hook's timeout
+  if (command.length > 131_072) return refuse(TOO_LONG)
   // the root's path from a cwd above it, which a script may name it by
   const relative = (env: Env) =>
     env.cwd && above(env.cwd, false) ? root.slice(real(env.cwd).length + 1) : undefined
@@ -256,10 +260,7 @@ function inspect(raw: string, environment: Environment) {
   const seen = new Set<string>()
   const deadline = performance.now() + 10_000
   const visit: Visit = async (cmd: Command, parsed, env) => {
-    if (performance.now() > deadline)
-      return refuse(
-        "a command too long to read inside the hook's time: split it into shorter calls",
-      )
+    if (performance.now() > deadline) return refuse(TOO_LONG)
     const slot = slotWords(parsed)
     if (slot)
       return slot.length === 0 ? undefined : examine({ ...cmd, words: slot }, env, visit, false)
@@ -335,15 +336,16 @@ function inspect(raw: string, environment: Environment) {
   return run(lex(command, env.known), env, visit, true)
 }
 
-// Fails open: an error on any call lets it run, so a reader bug cannot block every Bash command or write.
+// Fails open: an error on any call lets it run, so a reader bug cannot block every Bash command or write; a stack overflow, which a command can force by nesting, refuses.
 export async function check(
   raw: string,
   environment: Environment = process.env,
 ): Promise<string | undefined> {
   try {
     return await inspect(raw, environment)
-  } catch {
-    return
+  } catch (error) {
+    if (error instanceof RangeError)
+      return refuse("a command nested too deep to read: split it into shorter calls")
   }
 }
 

@@ -18,6 +18,12 @@ const bash = (command: string) => check(input(command))
 describe("a command that prints the environment is refused, with the fix", () => {
   test.each([
     "env",
+    "arr=(a $(env) b)",
+    "arr=(`env`)",
+    "declare -a arr=($(env))",
+    "arr+=($(env))",
+    "x=( $(env) )",
+    "arr=(<(env))",
     "\\env",
     "'env'",
     'e"n"v',

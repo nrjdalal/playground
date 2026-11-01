@@ -20,6 +20,7 @@ const SETTINGS = "--settings $HOME/.playground/factory-settings.json"
 
 describe("a session not started through scripts/spawn.sh is refused, naming the script", () => {
   test.each([
+    ["a spawn inside an array assignment", "arr=($(cmux new-workspace --command claude))"],
     [
       "SESSIONS.md's old worker spawn",
       `CMUX_QUIET=1 cmux new-workspace --name worker-x --cwd /w --command "env PLAYGROUND_ROLE=worker claude -n worker-x ${SETTINGS}" --focus false`,

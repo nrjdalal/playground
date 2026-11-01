@@ -413,6 +413,7 @@ function word(lx: Lexer): Word {
       const end = balanced(src, lx.i, "(", ")")
       out.value += src.slice(lx.i, end)
       bare += src.slice(lx.i, end)
+      inner(lx, src.slice(lx.i + 1, end - 1))
       lx.i = end
     } else if (c === "\\") {
       out.quoted = true
@@ -520,7 +521,8 @@ function inner(lx: Lexer, src: string): void {
   const sub = { ...lx, i: 0, src }
   while (sub.i < src.length) {
     const from = sub.i
-    word(sub)
+    if ((src[sub.i] === "<" || src[sub.i] === ">") && src[sub.i + 1] === "(") procSub(sub)
+    else word(sub)
     if (sub.i === from) sub.i++
   }
 }
