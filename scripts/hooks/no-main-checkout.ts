@@ -170,7 +170,7 @@ const APPLY_READS = new Set(["--check", "--numstat", "--stat", "--summary"])
 // The release skill's step 5 moves the main checkout by this fast-forward alone.
 const STEP_FIVE = /^(?:-q |--quiet )?--ff-only (?:-q |--quiet )?origin\/main$/
 const GIT_FIX =
-  "it moves the HEAD, index or files of the main checkout, which every installed skill, hook and ops job runs from. Name your own tree on every git call, git -C <your worktree> ..., after git -C <your worktree> rev-parse --show-toplevel names it; the main checkout moves only by the release skill's step 5, git -C <main checkout> fetch -q origin main && git -C <main checkout> merge --ff-only -q origin/main, and a worktree is made under .claude/worktrees/ by git worktree add."
+  "it moves the HEAD, index or files of the main checkout, which every installed skill, hook and ops job runs from. Name your own tree on every git call, git -C <your worktree> ..., after git -C <your worktree> rev-parse --show-toplevel names it; the main checkout moves only by the release skill's step 5, git -C <main checkout> fetch -q origin main && git -C <main checkout> merge --ff-only -q origin/main, a stray local commit on its main goes by git -C <main checkout> reset --keep origin/main while its tree is clean, and a worktree is made under .claude/worktrees/ by git worktree add."
 
 // The one reset the main checkout takes, back to origin/main from its own main with the tree clean and every commit it drops (origin/main..main) on no remote, so it removes only a stray local commit nobody else holds; --keep refuses to drop uncommitted work too.
 function keepReset(sub: string | undefined, rest: string[], cwd: string | undefined): boolean {
