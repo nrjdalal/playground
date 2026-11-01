@@ -6,7 +6,6 @@ import {
   headerIcons,
   dispatcherSlotsShown,
   PendingRow,
-  ROW_BOX,
   NoDispatcherRow,
   SessionRow,
   DispatcherUsage,
@@ -14,6 +13,7 @@ import {
   SystemIcons,
   usageSlot,
 } from "../../../../../../web/next/src/components/dashboard/app-sidebar"
+import { ROW_BOX } from "../../../../../../web/next/src/components/shell/row-box"
 import { SidebarMenu, SidebarProvider } from "../../../../../../web/next/src/components/ui/sidebar"
 import { calm, FIVE, glm, NOW } from "../../lib/system.test"
 import { tipsOf } from "../../tooltips"

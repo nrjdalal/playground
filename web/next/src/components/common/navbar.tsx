@@ -18,6 +18,8 @@ import { Button } from "@/components/ui/button"
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet"
 import { Spinner } from "@/components/ui/spinner"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { authClient } from "@/lib/auth/client"
+import { config } from "@/lib/config"
 import { isActive } from "@/lib/utils"
 
 const socialLinks = [
@@ -68,14 +70,14 @@ function SocialLinks({ onClick }: { onClick?: () => void }) {
 
 export function Navbar() {
   const pathname = usePathname()
-  const [toDashboard, setToDashboard] = useState(false)
+  const [leaving, setLeaving] = useState(false)
   const [isOpen, setIsOpen] = useState(false)
 
   useEffect(() => {
-    setToDashboard(false)
+    setLeaving(false)
   }, [pathname])
 
-  if (pathname?.startsWith("/console") || pathname?.startsWith("/dashboard")) return null
+  if (["/console", "/dashboard", "/yard"].some((area) => pathname?.startsWith(area))) return null
 
   // A link with a `feature` is shown only when that feature is enabled; /hire has none, so it always shows (and is stripped from forks by the CLI).
   const allNavLinks: { href: string; label: string; external?: boolean; feature?: Feature }[] = [
@@ -130,16 +132,29 @@ export function Navbar() {
             <SocialLinks />
           </div>
 
-          {/* The dashboard signs this Mac's owner in by itself, so there is no Login: a visit with no session gets /dashboard's first-run pane, which signs the owner in. */}
-          <Button
-            role="link"
-            className="w-24"
-            variant="outline"
-            onClick={() => setToDashboard(true)}
-            render={<Link href="/dashboard" />}
-          >
-            {toDashboard ? <Spinner /> : "Dashboard"}
-          </Button>
+          {/* The dashboard signs this Mac's owner in by itself, so there is no Login: a visit with no session gets /dashboard's first-run pane, which signs the owner in. The hosted build has no dashboard pages, and a member signs in with GitHub. */}
+          {config.hosted ? (
+            <Button
+              variant="outline"
+              onClick={() => {
+                setLeaving(true)
+                void authClient.signIn.social({ callbackURL: config.app.url, provider: "github" })
+              }}
+            >
+              {leaving ? <Spinner /> : <RiGithubFill aria-hidden="true" />}
+              Sign in with GitHub
+            </Button>
+          ) : (
+            <Button
+              role="link"
+              className="w-24"
+              variant="outline"
+              onClick={() => setLeaving(true)}
+              render={<Link href="/dashboard" />}
+            >
+              {leaving ? <Spinner /> : "Dashboard"}
+            </Button>
+          )}
 
           <div className="lg:-mr-2.5">
             <ModeToggle />

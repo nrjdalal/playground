@@ -81,7 +81,7 @@ describe("every write on the owner rung is guarded by its method, not its path",
 
   // A router put on the owner rung another way (a shared constant) would drop out of the source check, so the routers the API mounts at the dashboard's paths must be among those walked.
   test("every router the API mounts at a dashboard path is walked as owner-rung", async () => {
-    const index = await Bun.file(join(ROUTERS, "..", "index.ts")).text()
+    const index = await Bun.file(join(ROUTERS, "..", "local.ts")).text()
     const mounted = [...index.matchAll(/\.route\(\s*"\/([\w/-]+)"\s*,\s*(\w+)\s*\)/g)].map(
       ([, at, name]) => ({ at: at!, name: name! }),
     )
@@ -164,4 +164,20 @@ describe("an ask's file is read only from the dashboard's own page on this machi
   test("past both guards it still needs the owner's session", async () => {
     expect((await read(trusted(), peer("127.0.0.1"))).status).toBe(401)
   })
+})
+
+// writes.md's hosted rule: Yard's writes, which hosted.ts alone mounts, take a trusted origin and the member rung, with no loopback check, since the hosted build serves the network.
+describe("Yard's writes take a trusted origin and no loopback", () => {
+  const yard = found.find((f) => f.file === "yard.ts")!
+
+  test.each(writesOf(yard.router).map((r) => [r.method, r.path] as const))(
+    "%s %s refuses another origin before the session is read, and asks a trusted one off this machine for a session",
+    async (method, path) => {
+      const route = { handler: null, method, path }
+      const refused = await send(yard.router, route, "http://evil.localhost", peer("203.0.113.9"))
+      expect(refused.status).toBe(403)
+      expect(await refused.text()).toContain("Untrusted origin")
+      expect((await send(yard.router, route, trusted(), peer("203.0.113.9"))).status).toBe(401)
+    },
+  )
 })
