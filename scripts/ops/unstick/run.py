@@ -570,10 +570,16 @@ def heavy_jobs(rows=None):
     return jobs
 
 
-# the cap is one per CPU slot held or open now, which run-slot.sh's `slots` counts by its own load rules and off-switches
+# the cap is one per CPU slot held or open now, which run-slot.sh's `slots` counts by its own load rules and off-switches; a read that fails allows every CPU slot, so the pass's outside-slot alerts still go
 def heavy_cap():
-    out = subprocess.run(["bash", os.path.join(CODE, "run-slot.sh"), "slots"], env=os.environ | {"RUN_SLOT_OPS": OPS}, capture_output=True, text=True, timeout=30).stdout
-    return int(out)
+    try:
+        out = subprocess.run(["bash", os.path.join(CODE, "run-slot.sh"), "slots"], env=os.environ | {"RUN_SLOT_OPS": OPS}, capture_output=True, text=True, timeout=30).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        out = ""
+    if out.isdigit():
+        return int(out)
+    log(f"run-slot.sh slots gave no count ({out!r}), so the heavy-job cap reads {len(CPU_SLOTS)}")
+    return len(CPU_SLOTS)
 
 
 def slot_alerts(jobs, cap, at):

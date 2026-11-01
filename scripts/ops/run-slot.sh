@@ -207,7 +207,7 @@ fi
 SLOTS_ONLY=
 if [ "${1:-}" = slots ]; then
   [ $# -eq 1 ] || { echo "usage: run-slot.sh slots" >&2; exit 2; }
-  SLOTS_ONLY=1
+  SLOTS_ONLY=1 CAN_TAKE=run-slot
   set -- ops-unstick -- true
 fi
 if [ "${1:-}" = can-take ]; then

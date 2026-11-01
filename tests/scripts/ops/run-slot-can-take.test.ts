@@ -1,5 +1,5 @@
 import { describe, expect, setDefaultTimeout, test } from "bun:test"
-import { writeFileSync } from "node:fs"
+import { readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 
 import { SCRIPT, machine } from "./run-slot-fake"
@@ -25,6 +25,15 @@ describe("a read command while the runs log holds three short true runs", () => 
     m.hold("run-slot", 1, "small")
     threeShortTrueRuns(m)
     expect(await m.canTake("run-slot", "worker-probe")).toBe(false)
+  })
+
+  test("slots still counts the CPU slots and adds no run to the log", () => {
+    const m = machine()
+    threeShortTrueRuns(m)
+    const log = readFileSync(join(m.ops, "run-slot.runs.log"), "utf8")
+    const run = Bun.spawnSync(["bash", SCRIPT, "slots"], { cwd: m.root, env: m.env() })
+    expect([run.exitCode, run.stdout.toString()]).toEqual([0, "4\n"])
+    expect(readFileSync(join(m.ops, "run-slot.runs.log"), "utf8")).toBe(log)
   })
 
   test("head still names the waiter it named before", () => {

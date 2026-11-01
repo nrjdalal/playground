@@ -1208,6 +1208,19 @@ describe("ops-unstick's slot alerts", () => {
   test("with run-slot.4-off and no run-slot-4 holder, the cap is at most 3", async () => {
     expect(await capped(["run-slot.4-off"])).toBe(3)
   })
+
+  test("a cap read that fails allows every CPU slot and logs it", async () => {
+    const config = scratch()
+    const bin = join(config, "bin")
+    mkdirSync(join(config, "playground", "ops", "unstick"), { recursive: true })
+    mkdirSync(bin)
+    writeFileSync(join(bin, "bash"), "#!/bin/sh\nexit 1\n")
+    chmodSync(join(bin, "bash"), 0o755)
+    expect(await callWith({ PATH: `${bin}:${process.env.PATH}` }, config, "heavy_cap")).toBe(4)
+    expect(
+      readFileSync(join(config, "playground", "ops", "unstick", "unstick.log"), "utf8"),
+    ).toContain("run-slot.sh slots gave no count ('')")
+  })
 })
 
 // ops-unstick routes a block to the session's manager and presses nothing on a permission prompt; a block the session's own hook recorded is that hook's to route.
