@@ -497,6 +497,14 @@ describe("text read as a command line judges what a shell would run", () => {
     expect(await bash(command, DATA)).toContain("no-extensions-write hook refuses")
   })
 
+  // a glob that matches nothing is left as typed by bash, and stops the call in zsh, so neither writes into the root
+  test.each([
+    ["a redirect to a glob no entry matches", "echo x > q*", DATA],
+    ["rm of a glob no entry matches", "rm -rf q*", HOME],
+  ])("%s runs", async (_, command, cwd) => {
+    expect(await bash(command, cwd)).toBeUndefined()
+  })
+
   test.each([
     ["a brace with no pair", "rm -rf {print"],
     ["a group that names no folder down to the root", "rm -rf fix(x):"],

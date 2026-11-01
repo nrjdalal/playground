@@ -1,5 +1,5 @@
 // PreToolUse hook: refuses a factory session's write into the extensions root, where every guard's list, policy.json and each scope's sources live, and its playground CLI call that changes what a guard reads to allow or deny a call, so no session edits a list in one call and makes the guarded call in the next.
-import { existsSync, statSync } from "node:fs"
+import { existsSync, readdirSync, statSync } from "node:fs"
 import { homedir } from "node:os"
 import { dirname, join, resolve, sep } from "node:path"
 
@@ -228,20 +228,32 @@ function inspect(raw: string, environment: Environment) {
     const at = real(path)
     return at === sep ? remover : root.startsWith(at + sep)
   }
-  // Whether a glob's part in a folder above the root can reach it: by the name of the next folder down, or by an entry the folder holds, links followed; a group, zsh's or bash's extglob, and a brace range read as `*`, so only a lone brace or a name that matches neither is a plain word.
+  // The names in a folder above the root that reach it: the next folder down, and each entry the folder holds whose path, links followed, is in the root or above it, read once a folder; undefined for a folder that cannot be read, which may hold anything.
+  const reaching = new Map<string, string[] | undefined>()
+  const reachersOf = (folder: string): string[] | undefined => {
+    if (!reaching.has(folder)) {
+      const down = root.slice(real(folder).length).split(sep).find(Boolean) ?? ""
+      let held: string[] | undefined = []
+      try {
+        held = readdirSync(folder).filter((name) => {
+          const path = join(folder, name)
+          return inRoot(path) || above(path, true)
+        })
+      } catch {
+        // a folder that is not there holds nothing
+        if (existsSync(folder)) held = undefined
+      }
+      reaching.set(folder, held && [down, ...held])
+    }
+    return reaching.get(folder)
+  }
+  // Whether a glob's part in a folder above the root can match a name that reaches the root; a group, zsh's or bash's extglob, and a brace range read as `*`, so only a lone brace or a name that matches none is a plain word.
   const reaches = (value: string, at: number, folder: string) => {
     let rest = value.slice(value.lastIndexOf("/", at) + 1)
     for (let was = ""; was !== rest;) [was, rest] = [rest, rest.replace(/[@?+*!]?\([^()]*\)/g, "*")]
     const glob = new Bun.Glob(rest.split("/")[0]!.replace(/\{[^}]*\.\.[^}]*\}/g, "*"))
-    if (glob.match(root.slice(real(folder).length).split(sep).find(Boolean) ?? "")) return true
-    try {
-      for (const name of glob.scanSync({ cwd: folder, dot: true, onlyFiles: false }))
-        if (inRoot(join(folder, name)) || above(join(folder, name), true)) return true
-      return false
-    } catch {
-      // a folder that is not there holds nothing to match; one that cannot be read may hold anything
-      return existsSync(folder)
-    }
+    const names = reachersOf(folder)
+    return !names || names.some((name) => glob.match(name))
   }
   const file = typeof tool === "string" ? input[FILE_TOOLS[tool]] : undefined
   if (typeof file === "string") {
