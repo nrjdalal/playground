@@ -257,10 +257,12 @@ describe("code-review-loop checks its own fixes and a repo scanner's landing (PG
   test("step 8 runs the touched tests on a local merge when canary adds or changes a repo-scanning test (#223's conventions test against #75 and #106)", async () => {
     const step = (await skill()).match(/^8\. \*\*Report and wait\.\*\*.*$/m)?.[0] ?? ""
     expect(step).toContain(
-      "When what landed adds or changes a test that scans the repo or reads the schema, run the touched tests on a local merge with `origin/canary` before you call a waiting 5/5 still good",
+      "When what landed adds or changes a test that scans the repo or reads the schema, run that test and the touched tests on a local merge with `origin/canary` before you call a waiting 5/5 still good",
     )
     expect(step).toContain("a schema conventions test landed on canary")
-    expect(step.split("**Done when**")[1] ?? "").toContain("a repo scanner that landed")
-    expect(await page()).toContain("a test that scans the repo lands on canary")
+    expect(step.split("**Done when**")[1] ?? "").toContain(
+      "each scanning or schema-reading test that landed has run",
+    )
+    expect(await page()).toContain("a test that scans the repo or reads the schema lands on canary")
   })
 })
