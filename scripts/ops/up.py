@@ -1,31 +1,23 @@
 #!/usr/bin/env python3
 """ops-up: start every ops job in jobs.json that is not healthy, and leave healthy ones alone.
 
-A job's `runtime` says where it runs: "cmux" as a split in cmux's Ops workspace, "herdr" (the default for a job ops starts in a terminal) as a pane of the Ops
-workspace on the factory herdr server (the binary pin.json names, as spawn.sh reaches it), or "auto": cmux while cmux holds a live
-factory session, else herdr, so quitting cmux moves the job on the next pass with no hand step. When a cmux or herdr job's
-runtime changes, the next pass stops the copy in the other runtime by its recorded pid and starts the job in the new one; an auto
-job is left wherever a healthy copy runs inside herdr or cmux while cmux holds no session (a launchd orphan is stopped and started in
-herdr), and moves back to cmux once it holds one, on the next pass that runs inside cmux.
+A job ops starts in a terminal (one whose `runtime` names one, or that names none and sets `needsCmux`) runs as a pane of the Ops
+workspace on the factory herdr server (the binary pin.json names, as spawn.sh reaches it). An old `runtime` of cmux or auto reads
+as herdr, so a copy still running under cmux is stopped by its recorded pid and started in herdr on the next pass.
 
-  up.py                      check every job once; start the unhealthy cmux and herdr jobs, each as a pane of its runtime's Ops workspace
-  up.py --once-per-cmux      the same, at most once per cmux launch (the ~/.zshrc hook); silent. A launch counts as done only once a
-                             pass found cmux holding a session, so each new cmux terminal tries until an auto job has moved back
+  up.py                      check every job once; start each unhealthy terminal job as a pane of herdr's Ops workspace
+  up.py --once-per-cmux      does nothing: an old ~/.zshrc hook's call, which starts no pass
   up.py --restarted <a,b>    a plain pass, once any running pass ends, with those jobs' starts dropped first, so GRACE holds
                              back no job ops-restart stopped (packages/scripts/src/ops-restart)
   up.py --sessions           list, never run, the commands that bring the factory's Claude sessions back
 
 Healthy means the job's heartbeat (ops/<name>.json) is fresh (within three cycles), its pid is alive, its last result
-is not an exit and, for a cmux job, its pid runs under the cmux app this script runs under (ptable.py): a job a cmux restart orphaned
-keeps a fresh heartbeat under launchd, where cmux refuses it, so it is stopped by its recorded pid and started in the new Ops grid. An unhealthy cmux job's old workspace, which ops opened, is closed first (ops-dashboard then waits until its
-recorded process groups are gone, stopping them through procs.sh); nothing is ever selected by name or pattern. A
-launchd job is only reported: launchd keeps it alive. A job whose holder runs an executable an update deleted, or whose heartbeat pid does while a holder or launchd holds it,
-(lsof, once a pass) is unhealthy: a cmux or herdr job is stopped by its recorded pid and started again, a launchd job is reported once. cmux answers only its own terminals, so a pass outside one (ops-tick's) logs
-a cmux job it would start and leaves it. A job that fails to start is logged with cmux's or herdr's whole answer and tried again on
-the next pass; only one that started waits out GRACE.
-
-A plain pass exits 3 when it left the Dashboard's job (stop "dashboard") down only because it runs outside cmux (the "open a cmux terminal"
-line), so dispatcher stops there rather than wait for a Dashboard this pass cannot start; every other pass exits 0.
+is not an exit and, for a terminal job, its pid runs under no cmux app (ptable.py). An unhealthy job's old herdr pane, which ops
+opened, is closed first (ops-dashboard then waits until its recorded process groups are gone, stopping them through procs.sh);
+nothing is ever selected by name or pattern. A launchd job is only reported: launchd keeps it alive. A job whose holder runs an
+executable an update deleted, or whose heartbeat pid does while a holder or launchd holds it, (lsof, once a pass) is unhealthy: a
+terminal job is stopped by its recorded pid and started again, a launchd job is reported once. A job that fails to start is logged
+with herdr's whole answer and tried again on the next pass; only one that started waits out GRACE. Every pass exits 0.
 """
 import fcntl, glob, hashlib, json, os, re, shutil, subprocess, sys, time
 
@@ -44,7 +36,6 @@ REGISTRY = (
 )
 # spawn.sh's data folder, as dataDir() reads it: PLAYGROUND_DATA_DIR when set, else .playground in the home folder; it keeps the backend pins and the roster there
 DATA = os.path.abspath(os.environ.get("PLAYGROUND_DATA_DIR") or os.path.expanduser("~/.playground"))
-OUTSIDE_CMUX = 3
 GRACE = 600  # a job started this recently has not had time to write its first heartbeat, so it is left alone
 SPAWN = os.path.join(os.path.dirname(HERE), "spawn.sh")  # the one way a session comes back, through the factory's capacity gate
 ONCE = os.path.join(HERE, "once.py")  # every job starts through it: one copy per job, held by its recorded pid
@@ -69,8 +60,7 @@ def log(msg):
 
 def run(argv, timeout=60):
     try:
-        # CMUX_QUIET keeps cmux's notice that a legacy command is now an alias out of the answer, which a failure logs whole
-        r = subprocess.run(argv, capture_output=True, text=True, timeout=timeout, env={**os.environ, "CMUX_QUIET": "1"})
+        r = subprocess.run(argv, capture_output=True, text=True, timeout=timeout)
         return r.returncode, (r.stdout or "") + (r.stderr or "")
     except Exception as e:
         return 1, str(e)
@@ -84,7 +74,7 @@ def alive(pid):
         return False
 
 
-def healthy(job, procs, cmux):
+def healthy(job, procs):
     try:
         b = json.load(open(os.path.join(OPS, f"{job['heartbeat']}.json")))
     except Exception:
@@ -96,22 +86,15 @@ def healthy(job, procs, cmux):
         return False, "process gone"
     if "exited" in str(b.get("lastResult", "")):
         return False, str(b["lastResult"])
-    if job.get("auto") and is_herdr(job):
-        # cmux holds no session, so a copy is left where it runs, but only inside a terminal: a launchd orphan sits in neither
-        if int(b["pid"]) in procs and not in_a_terminal(int(b["pid"]), procs):
-            return False, f"pid {b['pid']} runs in neither herdr nor cmux"
-        return True, "ok"
     # a pid the snapshot lacks started after it was read (a restart during this pass): it cannot be judged, so it is left to the next pass
     if is_herdr(job) and int(b["pid"]) in procs and ptable.cmux_of(int(b["pid"]), procs):
         return False, f"pid {b['pid']} runs under cmux, and its runtime is herdr"
-    if job.get("needsCmux") and not is_herdr(job) and cmux and int(b["pid"]) in procs and ptable.cmux_of(int(b["pid"]), procs) != cmux:
-        return False, f"pid {b['pid']} is not under the running cmux (pid {cmux})"
     return True, "ok"
 
 
 def is_herdr(job):
-    # a job ops starts in a terminal (needsCmux) names no runtime to run in herdr
-    return job.get("runtime", "herdr" if job.get("needsCmux") else None) == "herdr"
+    """Whether ops starts the job in a terminal, which is herdr: its runtime names one (an old row's cmux or auto included), or it names none and sets needsCmux."""
+    return job.get("runtime", "herdr" if job.get("needsCmux") else None) in ("auto", "cmux", "herdr")
 
 
 def is_dashboard(job):
@@ -125,24 +108,6 @@ def herdr_exes():
         return {path, os.path.realpath(path)}
     except Exception:
         return set()
-
-
-def in_a_terminal(pid, procs):
-    """Whether pid runs under the pinned herdr's server or a running cmux app."""
-    return bool(ptable.above(pid, procs, herdr_exes()) or ptable.cmux_of(pid, procs))
-
-
-def registered(path):
-    """(the procStart a registry file gives in the shape ps prints under C, spaces made one, else "", and the name it gives, else "") for a file that reads whole as the dashboard's registeredOf() reads one, else None: a file Claude is rewriting counts by its pid."""
-    try:
-        d = json.load(open(path))
-        pid, name = d.get("pid"), d.get("name")
-        if isinstance(pid, int) and pid > 1 and isinstance(d.get("sessionId"), str) and d["sessionId"]:
-            start = " ".join(str(d.get("procStart", "")).split())
-            return (start if re.fullmatch(r"[A-Z][a-z]{2} [A-Z][a-z]{2} \d{1,2} \d{2}:\d{2}:\d{2} \d{4}", start) else "", name if isinstance(name, str) else "")
-    except Exception:
-        pass
-    return None
 
 
 # The factory-role rule from its one source: the names of the [name, the roster's kind] pairs on stdin that factoryRoleOf places in the factory; kinds.ts imports nothing, so Bun reads it from source as the hooks do
@@ -165,53 +130,18 @@ def in_factory(names):
         return None
 
 
-def cmux_held(procs):
-    """Whether cmux holds a live factory session, as the dashboard's cmuxHeldOf() reads one: a registry file (sessions/<pid>.json) whose pid runs under the cmux app and, where the file gives procStart, started then (a crashed session's pid macOS gave to another process does not hold), and whose name a PR's rule places in the factory, so a session of the owner's own never holds cmux. A file Claude is rewriting holds by its pid. With no cmux app running it holds none; a process table, registry, ps or Bun call that cannot be read counts as held."""
-    if not procs:
-        return True
-    if not ptable.running_cmux(procs):
-        return False
-    folder = os.path.join(REGISTRY, "sessions")
-    try:
-        names = os.listdir(folder)
-    except FileNotFoundError:
-        return False
-    except OSError:
-        return True
-    under = {int(n[:-5]): registered(os.path.join(folder, n)) for n in names if re.fullmatch(r"\d+\.json", n) and ptable.cmux_of(int(n[:-5]), procs)}
-    timed = [pid for pid, file in under.items() if file and file[0]]
-    started = ptable.starts(timed) if timed else {}
-    live = [file for pid, file in under.items() if not file or not file[0] or started is None or started.get(pid) == file[0]]
-    if any(file is None for file in live):
-        return True
-    held = in_factory([name for _, name in live])
-    return held is None or bool(held)
-
-
-def placed(job, held):
-    """The job as this pass runs it: an auto job's runtime is cmux while cmux holds a factory session and herdr once it holds none."""
-    if job.get("runtime") != "auto":
-        return job
-    return {**job, "auto": True, "runtime": "cmux" if held else "herdr"}
-
-
 def one_line_answer(out):
-    """A cmux or herdr answer whole, on one line."""
-    return " ".join(line.strip() for line in out.splitlines() if line.strip() and "is now an alias for" not in line) or "no answer"
+    """An answer whole, on one line."""
+    return " ".join(line.strip() for line in out.splitlines() if line.strip()) or "no answer"
 
 
-def elsewhere(job, holder, procs, cmux, stale=""):
-    """Why a job's live holder runs outside its runtime, else "": a herdr job's under a cmux, a cmux job's outside the running cmux (a cmux restart's orphan, or a copy in herdr), an auto job's in neither herdr nor cmux, or any job's on a deleted executable (stale)."""
+def elsewhere(job, holder, procs, stale=""):
+    """Why a job's live holder must stop, else "": a terminal job's under a cmux, or any job's on a deleted executable (stale)."""
     if not holder or holder not in procs:
         return ""
     if stale:
         return stale
-    if job.get("auto") and is_herdr(job):
-        return "" if in_a_terminal(holder, procs) else "runs in neither herdr nor cmux"
-    under = ptable.cmux_of(holder, procs)
-    if is_herdr(job):
-        return "runs under cmux, and its runtime is herdr" if under else ""
-    return "is not under the running cmux" if job.get("needsCmux") and cmux and under != cmux else ""
+    return "runs under cmux, and its runtime is herdr" if is_herdr(job) and ptable.cmux_of(holder, procs) else ""
 
 
 def beat_pid(job):
@@ -315,16 +245,6 @@ def start_herdr(job, binary, command, cwd):
     return True
 
 
-def workspaces():
-    _, out = run(["cmux", "list-workspaces"], 20)
-    found = {}
-    for line in out.splitlines():
-        m = re.match(r"^\*?\s*(workspace:\d+)\s+(\S+)", line.strip())
-        if m:
-            found.setdefault(m.group(2), []).append(m.group(1))
-    return found
-
-
 # the dashboard's jobs, each a pid file procs.sh reads: the follower first, then the API, a swap's next web and the web
 JOBS = ("dashboard-ingest", "dashboard-dev", "dashboard-web-next", "dashboard-web")
 
@@ -340,17 +260,7 @@ def stop_dashboard():
         run([procs, "stop", job], 60)
 
 
-GRID = "Ops"  # every ops job runs as a split in this one workspace
-
-
-def surfaces(ws):
-    """[(surface ref, title)] across every pane of a workspace."""
-    _, panes = run(["cmux", "list-panes", "--workspace", ws], 20)
-    found = []
-    for pane in re.findall(r"pane:\d+", panes):
-        _, out = run(["cmux", "list-pane-surfaces", "--workspace", ws, "--pane", pane], 20)
-        found += [(m.group(1), m.group(2)) for l in out.splitlines() for m in [re.match(r"^\*?\s*(surface:\d+)\s+(.*?)(\s+\[selected\])?$", l.strip())] if m]
-    return found
+GRID = "Ops"  # every terminal job runs as a pane of this one herdr workspace
 
 
 def marker(job):
@@ -360,56 +270,21 @@ def marker(job):
     return once.marker_of(script)
 
 
-def key_of(job):
+def in_grid(job, binary):
+    """Whether the job has a pane in herdr's Ops workspace."""
+    return bool(binary) and any(label == job["name"] for _, label in ops_panes(binary)[0])
+
+
+def start(job):
+    """Start the job as a pane of herdr's Ops workspace, closing its old pane there first (best effort); True once it started."""
     command = job["command"].replace("~/", os.path.expanduser("~") + "/")
-    key = command.split()[-1] if command.split()[-1].startswith("/") else command.split()[0]
-    # a Bun job (packages/scripts/src/ops-<name>/cli.ts) holds no /ops/ word, and keyed by bun it would close every Ops surface, so its script is found by shape even before it is on disk
-    script = next((w for w in command.split() if "/" in w and not w.endswith(("/python3", "/bash", "/bun", "/env"))), None)
-    folder = once.marker_of(script) if script else "/"
-    return next((w for w in command.split() if "/ops/" in w), folder if folder != "/" else key)
-
-
-def in_grid(job, existing, binary=None):
-    """Whether the job has a pane in its runtime's Ops workspace; an auto job's pane counts in either."""
-    if job.get("auto") and not binary:
-        binary = herdr()[0]
-    pane = bool(binary) and any(label == job["name"] for _, label in ops_panes(binary)[0])
-    if is_herdr(job) and not job.get("auto"):
-        return pane
-    if pane and job.get("auto"):
-        return True
-    grid = (existing.get(GRID) or [None])[0]
-    return bool(grid) and any(key_of(job) in title for _, title in surfaces(grid))
-
-
-def start(job, existing):
-    """Start the job in its runtime's Ops workspace, closing its old cmux workspace, surface and herdr pane first (best effort); True once it started."""
-    for ws in existing.get(job["name"], []):
-        run(["cmux", "close-workspace", "--workspace", ws], 20)
-    command = job["command"].replace("~/", os.path.expanduser("~") + "/")
-    key = key_of(job)
-    grid = (existing.get(GRID) or [None])[0]
-    if grid:
-        for ref, title in surfaces(grid):
-            if key in title:
-                run(["cmux", "close-surface", "--surface", ref, "--workspace", grid], 20)
     binary = herdr()[0]
     for pane, label in ops_panes(binary)[0] if binary else []:
         if label == job["name"]:
             hr(binary, "pane", "close", pane)
     if is_dashboard(job):
         stop_dashboard()
-    cwd = os.path.expanduser(job["cwd"])
-    if is_herdr(job):
-        return start_herdr(job, binary, command, cwd)
-    if grid and surfaces(grid):
-        members = surfaces(grid)
-        # full-height columns only, never a grid, since columns give more room
-        code, out = run(["cmux", "new-split", "right", "--workspace", grid, "--surface", members[-1][0], "--command", f"cd {cwd} && exec python3 -I {ONCE} {job['name']} {command}", "--focus", "false"], 30)
-    else:
-        code, out = run(["cmux", "new-workspace", "--name", GRID, "--cwd", cwd, "--command", f"exec python3 -I {ONCE} {job['name']} {command}", "--focus", "false"], 30)
-    log(f"started {job['name']} in {GRID}: {'ok' if code == 0 else one_line_answer(out)}")
-    return code == 0
+    return start_herdr(job, binary, command, os.path.expanduser(job["cwd"]))
 
 
 JOBS_RENDER = os.path.join(os.path.dirname(os.path.dirname(HERE)), "packages", "scripts", "src", "playground", "jobs.ts")
@@ -435,21 +310,16 @@ def render_jobs():
 def up(quiet):
     render_jobs()
     jobs = json.load(open(os.path.join(OPS, "jobs.json")))["jobs"]
-    existing = workspaces()
     try:
         starts = json.load(open(STARTS))
     except Exception:
         starts = {}
     skip = os.environ.get("OPS_UP_SKIP", "")
     procs = ptable.table()
-    cmux = ptable.cmux_of(os.getpid(), procs)
-    held = cmux_held(procs) if any(job.get("runtime") == "auto" for job in jobs) else True
-    stranded = False
     holders = {job["name"]: once.running(job["name"], marker(job)) if job.get("command") else None for job in jobs}
     beats = {job["name"]: beat_pid(job) for job in jobs if job.get("heartbeat")}
     gone = deleted({pid for pid in [*holders.values(), *beats.values()] if pid})
     for job in jobs:
-        job = placed(job, held)
         holder = holders[job["name"]]
         if job.get("disabled"):
             # a paused job stops itself here: ops-up started it through once.py, so its recorded pid is ours to signal
@@ -459,22 +329,12 @@ def up(quiet):
             continue
         if job["name"] == skip or time.time() - (starts.get(job["name"]) or 0) < GRACE:
             continue
-        ok, why = healthy(job, procs, cmux)
+        ok, why = healthy(job, procs)
         # a heartbeat pid counts only with a holder to stop, or for a job ops-up never starts; with neither, a start would run a second copy beside it
         stale = stale_of(holder, beats.get(job["name"]) if holder or not job.get("command") else None, gone)
         if ok and stale:
             ok, why = False, stale
         if ok:
-            if job.get("auto") and not is_herdr(job) and not cmux and holder in procs and not ptable.cmux_of(holder, procs):
-                # only a pass inside cmux moves it back, and spawn.sh's panes run bash; ops hears it by two routes, notify.sh once a holder and ops-tick's relay of the printed line once until it changes
-                said = f"{job['name']} runs outside cmux while cmux holds a factory session; a pass inside cmux moves it back, so open a cmux terminal"
-                key = f"{job['name']}:{holder}:cmux"
-                if key not in starts.get("_reported", []):
-                    starts.setdefault("_reported", []).append(key)
-                    log(said)
-                    run(["env", "NOTIFY_MAC=1", os.path.join(HERE, "notify.sh"), "up", said], 60)
-                if not quiet:
-                    print(said)
             continue
         binary = None
         if is_herdr(job):
@@ -485,15 +345,9 @@ def up(quiet):
                 if not quiet:
                     print(f"{job['name']} is down, and herdr cannot start it: {refused}")
                 continue
-        elif job.get("needsCmux") and not cmux:
-            log(f"{job['name']} unhealthy ({why}); not starting it in cmux: this pass runs outside cmux, which answers only its own terminals")
-            if not quiet:
-                print(f"{job['name']} is down, and this pass runs outside cmux, which answers only its own terminals; a pass inside cmux starts it, so open a cmux terminal")
-            stranded = stranded or is_dashboard(job)
-            continue
-        moved = elsewhere(job, holder, procs, cmux, stale)
+        moved = elsewhere(job, holder, procs, stale)
         if moved:
-            # orphaned by a cmux restart, or left in its old runtime: ops-up started it through once.py, so its recorded pid is ours to signal; its trap stops its children
+            # left under cmux, or on a deleted executable: ops-up started it through once.py, so its recorded pid is ours to signal; its trap stops its children
             os.kill(holder, 15)
             for _ in range(60):
                 if not alive(holder):
@@ -503,7 +357,7 @@ def up(quiet):
                 log(f"{job['name']} pid {holder} {moved} and outlived its TERM by 60s; the next pass tries again")
                 continue
             log(f"{job['name']} pid {holder} {moved}; stopped it")
-        elif holder and not in_grid(job, existing, binary):
+        elif holder and not in_grid(job, binary):
             # a live copy with no pane in Ops (an orphan): starting another would stack a second supervisor, so report it
             key = f"{job['name']}:{holder}"
             if key not in starts.get("_reported", []):
@@ -511,7 +365,7 @@ def up(quiet):
                 run([os.path.join(HERE, "notify.sh"), "up", f"{job['name']} is {why} but its loop, pid {holder}, is still alive; not starting a second copy"], 60)
             log(f"{job['name']} unhealthy ({why}) but pid {holder} still holds it; not starting another")
             continue
-        if not job.get("needsCmux") and not is_herdr(job):
+        if not is_herdr(job):
             if stale:
                 # launchd keeps it alive and ops-up never started it, so it is reported, never signalled
                 key = f"{job['name']}:{beats.get(job['name'])}:deleted"
@@ -524,17 +378,16 @@ def up(quiet):
         # the printed line is told to ops once until it changes, so a heartbeat's age stays out of it
         told = re.sub(r"\d+m old", "stale", why)
         # only a job that started waits out GRACE; a failed start is tried again on the next pass
-        if start(job, existing):
+        if start(job):
             starts[job["name"]] = time.time()
             with open(STARTS, "w") as f:
                 json.dump(starts, f)
             if not quiet:
-                print(f"started {job['name']} in {'herdr' if is_herdr(job) else 'cmux'} ({told})")
+                print(f"started {job['name']} in herdr ({told})")
         elif not quiet:
-            print(f"could not start {job['name']} in {'herdr' if is_herdr(job) else 'cmux'} ({told}); see {LOG}")
+            print(f"could not start {job['name']} in herdr ({told}); see {LOG}")
     with open(STARTS, "w") as f:
         json.dump(starts, f)
-    return held, stranded
 
 
 def roster_kinds():
@@ -647,6 +500,8 @@ def main():
     if args == ["--sessions"]:
         sessions()
         return
+    if args == ["--once-per-cmux"]:
+        return
     restarted = args[1].split(",") if len(args) == 2 and args[0] == "--restarted" else []
     lock = open(os.path.join(OPS, "up.lock"), "w")
     try:
@@ -663,23 +518,7 @@ def main():
             starts.pop(name, None)
         with open(STARTS, "w") as f:
             json.dump(starts, f)
-    if args == ["--once-per-cmux"]:
-        sock = os.environ.get("CMUX_SOCKET_PATH", "")
-        try:
-            st = os.stat(sock)
-            key = f"{st.st_ino}-{int(st.st_mtime)}"
-        except Exception:
-            return
-        marker = os.path.join(OPS, "up.cmux")
-        if os.path.exists(marker) and open(marker).read().strip() == key:
-            return
-        held, _ = up(True)
-        if held:
-            open(marker, "w").write(key)
-        return
-    _, stranded = up(False)
-    if stranded:
-        sys.exit(OUTSIDE_CMUX)
+    up(False)
 
 
 if __name__ == "__main__":
