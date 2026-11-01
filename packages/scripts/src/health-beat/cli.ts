@@ -1,6 +1,10 @@
+import { homedir } from "node:os"
+import { join } from "node:path"
+
 import { dataDirOf } from "@packages/env/data-dir"
 import { gateSettings, readPolicyOrDefaults, ruleSettings } from "@packages/settings"
 
+import { mainCheckout } from "../main-checkout"
 import { run } from "../ops-job/job"
 import { beatText, readBeat } from "./beat"
 
@@ -13,4 +17,13 @@ if (policy.refusal !== undefined) {
 }
 const zone = ruleSettings.get(policy.settings, "clock.ownerZone")
 const freeMin = gateSettings.get(policy.settings, "gates.memoryFreeMin")
-console.log(beatText(await readBeat({ at: new Date(), data, freeMin, run, zone })))
+const reading = await readBeat({
+  at: new Date(),
+  data,
+  freeMin,
+  portless: process.env.PORTLESS_STATE_DIR || join(homedir(), ".portless"),
+  repo: mainCheckout(),
+  run,
+  zone,
+})
+console.log(beatText(reading))
