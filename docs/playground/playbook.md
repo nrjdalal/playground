@@ -182,6 +182,7 @@ Like the ticket guard, a hook that cannot start lets the call through, and the r
 - Leads wait on a message, a background task's notification, their sweep or an ops job, rather than a `sleep` loop or a repeated `gh` read.
 - A changed draft reaches the owner through its Inbox item, never as a second Slack draft for an item he has already sent.
 - No session polls a PR more often than every 5 minutes, and reads and comment posts go through GitHub's REST API where they can, so the shared GraphQL quota lasts the hour; a sweep over many PRs is the exception, one batched GraphQL query ([GITHUB-BULK-READS.md](../../extensions/core/skills/playbook/GITHUB-BULK-READS.md)).
+- A check that needs a PR's whole file list (an overlap with another PR, a stack's files) reads it page by page, since the plain read stops at 100 files without saying so.
 - No session writes Claude Code memory: every learning arrives as a PR to this repo.
 - Every skill, agent guide, docs page, handoff and brief a session writes reads as writing-for-agents shapes it: lean, each step ending on a completion criterion, phrased as what to do, a hook turns back a factory session's write to one until it has loaded the skill,
   and the reviewer scores the changed ones against it.
