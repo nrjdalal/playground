@@ -67,6 +67,13 @@ beforeAll(async () => {
   dirs.pdname = await clone("pdname", ["origin", OTHER])
   git(dirs.pdname, "config", "remote.pushDefault", "origin")
   dirs.zed = await clone("zed", ["origin", "https://github.com/zed/acme-skills.git"])
+  dirs.stale = await clone("stale", ["origin", OTHER])
+  git(dirs.stale, "config", "branch.old.remote", "gone")
+  git(dirs.stale, "config", "branch.dev.pushRemote", EXT)
+  await mkdir(join(dirs.stale, "sub"))
+  dirs.switch = await clone("switch", ["origin", OTHER])
+  git(dirs.switch, "config", "branch.feat.remote", EXT)
+  git(dirs.switch, "config", "alias.co", "checkout")
   dirs.alias = await clone("alias", ["origin", OTHER])
   git(dirs.alias, "config", "alias.p", "push")
   git(dirs.alias, "config", "alias.pp", "p --force")
@@ -111,7 +118,7 @@ const refused = async (raw: string, data = stored, extra: Record<string, string>
 // Each row: what it is, the command, and the folder it runs in.
 type Row = [string, string, string?]
 const at = (dir: string) => dirs[dir]
-// Every row as three, so bun:test hands the callback no done argument, which would turn an assertion that fails into a timeout.
+// Every row as three, so bun:test hands the callback no done argument, which it would read as its dir.
 const rows = (table: Row[]): [string, string, string][] =>
   table.map(([name, command, dir = "other"]) => [name, command, dir])
 
@@ -313,7 +320,45 @@ describe("a push resolves its target the way git does, and one it cannot place i
       ["gh's publish-step delete", "gh release delete v1 -y --cleanup-tag -R quillco/acme-skills"],
       ["gh's publish-step upload", "gh release upload v1 x.tgz -R quillco/acme-skills"],
       ["gh pr merge by a variable in the extension clone", "gh pr merge $N", "ext"],
-      ["xargs appending gh pr merge's pull request", `echo ${EXT}/pull/1 | xargs gh pr merge`],
+      ["a bare push after git switch in the same call", "git switch -c feat && git push", "switch"],
+      [
+        "a bare push after git checkout in the same call",
+        "git checkout -b feat && git push",
+        "switch",
+      ],
+      [
+        "a bare push after gh pr checkout in the same call",
+        "gh pr checkout 1 && git push",
+        "switch",
+      ],
+      ["a bare push after a checkout alias in the same call", "git co feat && git push", "switch"],
+      ["a bare push after any other git command", "git status && git push", "stale"],
+      ["a bare push after a cd", "cd sub && git push", "stale"],
+      ["a bare push by git -C", "git -C sub push", "stale"],
+      ["a bare push after git rebase onto a branch", "git rebase main feat && git push", "switch"],
+      [
+        "a bare push after git add and commit",
+        "git add -A && git commit -m m && git push",
+        "switch",
+      ],
+      [
+        "a bare push after git symbolic-ref in the same call",
+        "git symbolic-ref HEAD refs/heads/feat && git push",
+        "switch",
+      ],
+      [
+        "a bare push after git branch -m in the same call",
+        "git branch -m feat && git push",
+        "switch",
+      ],
+      [
+        "xargs appending a gh api endpoint to a write",
+        "echo repos/quillco/acme-skills/git/refs | xargs gh api -X POST",
+      ],
+      [
+        "xargs appending a gh api endpoint to a write with -X in a flag group",
+        "echo repos/quillco/acme-skills/git/refs/heads/main | xargs gh api -iXDELETE",
+      ],
       [
         "xargs -I placing gh pr merge's pull request",
         `echo ${EXT}/pull/1 | xargs -I{} gh pr merge {}`,
@@ -539,6 +584,20 @@ describe("what it lets through", () => {
       ["a GIT_ variable on a commit", "GIT_EDITOR=true git commit --amend --no-edit"],
       ["a git alias that only reads", "git l", "alias"],
       ["xargs appending files to git add", "echo a b | xargs git add"],
+      ["a bare push with a stale remote on another branch", "git push", "stale"],
+      ["a bare push after a command that is not git", "ls && git push", "stale"],
+      [
+        "a push to a named remote after git switch",
+        "git switch -c feat && git push -u origin feat",
+        "switch",
+      ],
+      ["xargs appending a gh api read", "echo repos/acme/tools | xargs gh api"],
+      [
+        "xargs appending pull requests to merge in another repository's clone",
+        "gh pr list --json number -q '.[].number' | xargs -n1 gh pr merge --squash",
+      ],
+      ["git absorb in a checkout the hook cannot read", "cd $X && git absorb"],
+      ["git -C absorb in a checkout the hook cannot read", "git -C $X absorb"],
       [
         "xargs -I placing a curl URL it only reads",
         "echo https://example.com | xargs -I{} curl -sL {}",
@@ -658,6 +717,22 @@ describe("the repositories it guards", () => {
     await mkdir(bare, { recursive: true })
     for (const [, command, dir] of rows(REFUSED))
       expect(await run(bash(command, at(dir)), bare)).toBeUndefined()
+  })
+})
+
+describe("an alias in a config the hook can read", () => {
+  test("git absorb, aliased to push in the global config, is refused in a checkout the hook cannot read", async () => {
+    const global = join(scratch, "global.gitconfig")
+    await writeFile(global, "[alias]\n\tabsorb = push\n")
+    const before = process.env.GIT_CONFIG_GLOBAL
+    process.env.GIT_CONFIG_GLOBAL = global
+    try {
+      await refused(bash("cd $X && git absorb"))
+      await refused(bash("git -C $X absorb"))
+    } finally {
+      if (before === undefined) delete process.env.GIT_CONFIG_GLOBAL
+      else process.env.GIT_CONFIG_GLOBAL = before
+    }
   })
 })
 

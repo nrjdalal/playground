@@ -11,8 +11,6 @@ import {
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 
-import { CMUX_APP, cmuxHeldOf, processTableOf } from "../../../api/hono/src/lib/dashboard/cmux"
-
 const upPy = join(import.meta.dir, "..", "..", "..", "scripts", "ops", "up.py")
 const scratch = mkdtempSync(join(tmpdir(), "ops-up-"))
 afterAll(() => rmSync(scratch, { force: true, recursive: true }))
@@ -27,124 +25,6 @@ spec = importlib.util.spec_from_file_location("up", sys.argv[1])
 up = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(up)
 `
-
-// Loads up.py with every read of the machine stubbed: an auto job runs healthy outside cmux under each pid given, one pass a pid, and each notify.sh call is printed rather than run.
-const HARNESS = `${LOAD}holders = [int(p) for p in sys.argv[2:]]
-calls = []
-up.workspaces = lambda: {}
-up.healthy = lambda job, procs, cmux: (True, "")
-up.cmux_held = lambda procs: True
-up.ptable.cmux_of = lambda pid, procs: None
-up.run = lambda argv, timeout=60: (argv[0] != "lsof" and calls.append(argv), (0, ""))[1]
-for holder in holders:
-    up.ptable.table = lambda holder=holder: {holder: None}
-    up.once.running = lambda name, marker, holder=holder: holder
-    up.up(True)
-print(json.dumps(calls))
-`
-
-// Loads up.py and prints cmux_held for the process table given, with ps's starts stubbed to the one start every session gives.
-const HELD = `${LOAD}up.ptable.starts = lambda pids: {pid: sys.argv[3] for pid in pids}
-print(json.dumps(up.cmux_held({int(pid): tuple(row) for pid, row in json.loads(sys.argv[2]).items()})))
-`
-
-const passes = (...holders: number[]): string[][] => {
-  const config = join(scratch, `config-${holders.join("-")}`)
-  const ops = join(dataOf(config), "ops")
-  mkdirSync(ops, { recursive: true })
-  const job = {
-    auto: true,
-    command: "bash /x/ops/ops-dashboard/loop.sh",
-    name: "ops-dashboard",
-    runtime: "auto",
-  }
-  writeFileSync(join(ops, "jobs.json"), JSON.stringify({ jobs: [job] }))
-  const child = Bun.spawnSync(["python3", "-I", "-c", HARNESS, upPy, ...holders.map(String)], {
-    env: {
-      CLAUDE_CONFIG_DIR: config,
-      PLAYGROUND_DATA_DIR: join(config, "playground"),
-      HOME: scratch,
-      PATH: "/usr/bin:/bin",
-    },
-    stderr: "pipe",
-    stdout: "pipe",
-  })
-  expect(child.stderr.toString()).toBe("")
-  return JSON.parse(child.stdout.toString())
-}
-
-// the warning reaches the owner off the Dashboard as one macOS banner a holder, through notify.sh with NOTIFY_MAC set.
-test("a job outside cmux while cmux holds a factory session shows one banner per holder", () => {
-  const banner = [
-    "env",
-    "NOTIFY_MAC=1",
-    join(import.meta.dir, "..", "..", "..", "scripts", "ops", "notify.sh"),
-    "up",
-    "ops-dashboard runs outside cmux while cmux holds a factory session; a pass inside cmux moves it back, so open a cmux terminal",
-  ]
-  expect(passes(4101, 4101, 4101)).toEqual([banner])
-  expect(passes(4201, 4201, 4202)).toEqual([banner, banner])
-})
-
-// an auto job stays in cmux only while cmux holds a factory session, by the rule the dashboard's cmuxHeldOf() reads.
-test("cmux_held counts the factory's sessions alone, as cmuxHeldOf does", () => {
-  const config = join(scratch, "held")
-  mkdirSync(join(config, "sessions"), { recursive: true })
-  mkdirSync(dataOf(config), { recursive: true })
-  const roster = [{ kind: "builder", name: "x7mh4d-builder" }]
-  writeFileSync(join(dataOf(config), "roster.json"), JSON.stringify({ agents: roster }))
-  const START = "Mon Oct 19 01:00:00 2026"
-  const table = processTableOf(
-    [
-      `    1     0 ${START}     /sbin/launchd`,
-      `  500     1 ${START}     ${CMUX_APP}`,
-      `  510   500 ${START}     /Users/me/.bun/bin/claude`,
-      `  520   500 ${START}     /Users/me/.bun/bin/claude`,
-      `  530   500 ${START}     /Users/me/.bun/bin/claude`,
-      `  540   500 ${START}     /Users/me/.bun/bin/claude`,
-    ].join("\n"),
-  )
-  const procs = Object.fromEntries([...table].map(([pid, row]) => [pid, [row.ppid, row.exe]]))
-  const files: { pid: number; text: string }[] = []
-  const register = (
-    pid: number,
-    name: string,
-    text = JSON.stringify({ name, pid, procStart: START, sessionId: `s-${pid}` }),
-  ) => {
-    writeFileSync(join(config, "sessions", `${pid}.json`), text)
-    files.push({ pid, text })
-  }
-  const held = (path = `${dirname(process.execPath)}:/usr/bin:/bin`): boolean => {
-    const child = Bun.spawnSync(["python3", "-I", "-c", HELD, upPy, JSON.stringify(procs), START], {
-      env: {
-        CLAUDE_CONFIG_DIR: config,
-        PLAYGROUND_DATA_DIR: join(config, "playground"),
-        HOME: scratch,
-        PATH: path,
-      },
-      stderr: "pipe",
-      stdout: "pipe",
-    })
-    expect(child.stderr.toString()).toBe("")
-    return JSON.parse(child.stdout.toString())
-  }
-  register(510, "fix the sidebar")
-  expect(held()).toBe(false)
-  expect(cmuxHeldOf(files, table, roster)).toEqual([])
-  // a Bun call that cannot run counts as held, as an unreadable ps does
-  expect(held("/usr/bin:/bin")).toBe(true)
-  register(530, "")
-  expect(held()).toBe(false)
-  expect(cmuxHeldOf(files, table, roster)).toEqual([])
-  register(540, "", "{")
-  expect(held()).toBe(true)
-  expect(cmuxHeldOf(files, table, roster)).toEqual(["pid 540"])
-  rmSync(join(config, "sessions", "540.json"))
-  files.pop()
-  register(520, "x7mh4d-builder")
-  expect(held()).toBe(true)
-  expect(cmuxHeldOf(files, table, roster)).toEqual(["x7mh4d-builder"])
-})
 
 // Loads up.py and runs --sessions with every live session's pid alive, outside the factory's folders, and running a claude with no --settings.
 const SESSIONS = `${LOAD}up.alive = lambda pid: True
@@ -207,28 +87,35 @@ test("--sessions names a session of a kind only kinds.ts knows", () => {
   )
 })
 
-// Loads up.py and runs a plain pass (main()) over the jobs given, every job healthy or every job down, inside cmux or outside it; each start succeeds, herdr's included.
-const EXIT = `${LOAD}inside, ok = sys.argv[2] == "inside", sys.argv[3] == "healthy"
-up.workspaces = lambda: {}
-up.healthy = lambda job, procs, cmux: (ok, "" if ok else "no heartbeat")
-up.cmux_held = lambda procs: True
+// Loads up.py and runs main() with the arguments given after where it runs, every job down, inside cmux or outside it; each start is recorded rather than made, and the exit code printed with them.
+const EXIT = `${LOAD}inside = sys.argv[2] == "inside"
+started = []
+up.healthy = lambda job, procs: (False, "no heartbeat")
 up.ptable.table = lambda: {4101: None}
 up.ptable.cmux_of = lambda pid, procs: 1 if inside else None
-up.once.running = lambda name, marker: 4101 if ok else None
+up.once.running = lambda name, marker: None
 up.run = lambda argv, timeout=60: (0, "")
-up.start = lambda job, existing: True
+up.start = lambda job: started.append(job["name"]) or True
 up.herdr = lambda: ("/x/herdr", "")
-sys.argv = sys.argv[:1]
-up.main()
+sys.argv = ["up.py", *sys.argv[3:]]
+try:
+    up.main()
+    code = 0
+except SystemExit as e:
+    code = e.code
+print(json.dumps({"code": code, "started": started}))
 `
 
-const exitOf = (jobs: object[], where: "inside" | "outside", state: "down" | "healthy"): number => {
+const exitOf = (jobs: object[], where: "inside" | "outside", ...args: string[]) => {
   const config = mkdtempSync(join(scratch, "exit-"))
+  const cmuxSocket = join(config, "cmux.sock")
+  writeFileSync(cmuxSocket, "")
   mkdirSync(join(dataOf(config), "ops"), { recursive: true })
   writeFileSync(join(dataOf(config), "ops", "jobs.json"), JSON.stringify({ jobs }))
-  const child = Bun.spawnSync(["python3", "-I", "-c", EXIT, upPy, where, state], {
+  const child = Bun.spawnSync(["python3", "-I", "-c", EXIT, upPy, where, ...args], {
     env: {
       CLAUDE_CONFIG_DIR: config,
+      CMUX_SOCKET_PATH: cmuxSocket,
       PLAYGROUND_DATA_DIR: join(config, "playground"),
       HOME: scratch,
       PATH: "/usr/bin:/bin",
@@ -237,11 +124,14 @@ const exitOf = (jobs: object[], where: "inside" | "outside", state: "down" | "he
     stdout: "pipe",
   })
   expect(child.stderr.toString()).toBe("")
-  return child.exitCode
+  return JSON.parse(child.stdout.toString().trim().split("\n").at(-1)!) as {
+    code: number
+    started: string[]
+  }
 }
 
-// dispatcher stops on up.py's exit 3 rather than wait for a Dashboard that a pass outside cmux cannot start.
-test("a pass exits 3 only when the Dashboard's cmux job is down and the pass runs outside cmux", () => {
+// a job row stored before cmux left the runtimes still names cmux or auto, and ops-up starts it in herdr from any terminal.
+test("a pass exits 0 and starts a down job stored as cmux or auto in herdr, inside cmux or outside it", () => {
   const cmuxJob = {
     command: "bash /x/ops/ops-dashboard/loop.sh",
     name: "ops-dashboard",
@@ -249,42 +139,35 @@ test("a pass exits 3 only when the Dashboard's cmux job is down and the pass run
     runtime: "cmux",
     stop: "dashboard",
   }
-  const herdrJob = { ...cmuxJob, needsCmux: false, runtime: "herdr" }
-  const otherJob = {
-    command: "bash /x/ops/ops-x/loop.sh",
-    name: "ops-x",
-    needsCmux: true,
-    runtime: "cmux",
-  }
-  const autoJob = {
-    auto: true,
-    command: "bash /x/ops/ops-dashboard/loop.sh",
-    name: "ops-dashboard",
-    runtime: "auto",
-  }
+  const autoJob = { command: "bash /x/ops/ops-x/loop.sh", name: "ops-x", runtime: "auto" }
   const launchdJob = { launchd: "blue.acme.x", name: "x" }
-  expect(exitOf([cmuxJob], "outside", "down")).toBe(3)
-  expect(exitOf([cmuxJob], "inside", "down")).toBe(0)
-  expect(exitOf([cmuxJob], "outside", "healthy")).toBe(0)
-  // a job that names no runtime starts in herdr, so a pass outside cmux brings the Dashboard up
-  expect(exitOf([{ ...cmuxJob, runtime: undefined }], "outside", "down")).toBe(0)
-  // another cmux job left down while the Dashboard's job starts in herdr: the Dashboard still comes up
-  expect(exitOf([herdrJob, otherJob], "outside", "down")).toBe(0)
-  // the banner case: healthy outside cmux while cmux holds a factory session
-  expect(exitOf([autoJob], "outside", "healthy")).toBe(0)
-  expect(exitOf([launchdJob], "outside", "down")).toBe(0)
+  for (const where of ["inside", "outside"] as const)
+    expect(exitOf([cmuxJob, autoJob, launchdJob], where)).toEqual({
+      code: 0,
+      started: ["ops-dashboard", "ops-x"],
+    })
+  // a row that names no runtime and needs a terminal starts in herdr too
+  expect(exitOf([{ ...cmuxJob, runtime: undefined }], "outside")).toEqual({
+    code: 0,
+    started: ["ops-dashboard"],
+  })
+})
+
+// an old ~/.zshrc hook still calls --once-per-cmux in every cmux terminal it opens.
+test("--once-per-cmux runs no pass and exits 0", () => {
+  const job = { command: "bash /x/ops/ops-x/loop.sh", name: "ops-x", runtime: "herdr" }
+  for (const where of ["inside", "outside"] as const)
+    expect(exitOf([job], where, "--once-per-cmux")).toEqual({ code: 0, started: [] })
 })
 
 // Loads up.py and runs main() with the arguments after its path, every job down and outside cmux, each start printed rather than made.
 const RESTARTED = `${LOAD}started = []
-up.workspaces = lambda: {}
-up.healthy = lambda job, procs, cmux: (False, "no heartbeat")
-up.cmux_held = lambda procs: True
+up.healthy = lambda job, procs: (False, "no heartbeat")
 up.ptable.table = lambda: {}
 up.ptable.cmux_of = lambda pid, procs: None
 up.once.running = lambda name, marker: None
 up.run = lambda argv, timeout=60: (0, "")
-up.start = lambda job, existing: started.append(job["name"]) or True
+up.start = lambda job: started.append(job["name"]) or True
 up.herdr = lambda: ("/x/herdr", "")
 sys.argv = sys.argv[1:]
 up.main()
@@ -343,18 +226,16 @@ test("--restarted drops the named jobs' starts once any running pass ends, and s
 // Loads up.py and runs two passes with every job healthy by its heartbeat, lsof answering the fake listing given and every other call recorded; a TERM'd pid dies, and starts are recorded rather than made.
 const DELETED = `${LOAD}listing = sys.argv[2]
 calls, kills, started = [], [], []
-up.workspaces = lambda: {}
-up.healthy = lambda job, procs, cmux: (True, "ok")
-up.cmux_held = lambda procs: True
+up.healthy = lambda job, procs: (True, "ok")
 up.ptable.table = lambda: {pid: None for pid in (4301, 4302, 4401, 4501, 4601, 4602, 4701)}
 up.ptable.cmux_of = lambda pid, procs: None
 up.once.running = lambda name, marker: {"ops-x": 4301, "ops-y": 4501, "ops-z": 4601}.get(name)
 up.run = lambda argv, timeout=60: (0, listing) if argv[0] == "lsof" else (calls.append(argv), (0, ""))[1]
 up.os.kill = lambda pid, sig: kills.append([pid, sig])
 up.alive = lambda pid: [pid, 15] not in kills
-up.start = lambda job, existing: started.append(job["name"]) or True
+up.start = lambda job: started.append(job["name"]) or True
 up.herdr = lambda: ("/x/herdr", "")
-up.in_grid = lambda job, existing, binary=None: True
+up.in_grid = lambda job, binary: True
 up.up(True)
 up.up(True)
 print(json.dumps({"calls": calls, "kills": kills, "started": started}))
@@ -428,22 +309,17 @@ test("a job on a deleted executable is restarted, or reported once when launchd 
   expect(log).not.toContain("ops-w")
 })
 
-// Loads up.py and starts one herdr job and two cmux jobs (one split, one new workspace), recording every herdr call and spawned argv rather than making them.
-const STARTED = `${LOAD}calls, lines = [], []
+// Loads up.py and starts one herdr job, recording every herdr call rather than making it.
+const STARTED = `${LOAD}calls = []
 up.herdr = lambda: ("/x/herdr", "")
 up.ops_panes = lambda binary: ([(4101, "ops-a")], "workspace:1")
 up.hr = lambda binary, *args: (calls.append(args), (0, {"pane": {"pane_id": 5501}}, ""))[1]
-up.workspaces = lambda: {}
-up.surfaces = lambda ws: [("surface:1", "x")]
-up.run = lambda argv, timeout=60: (lines.append(argv), (0, ""))[1]
-up.start({"name": "ops-h", "runtime": "herdr", "cwd": "~/h", "command": "bash /x/h.sh"}, {})
-up.start({"name": "ops-c", "runtime": "cmux", "cwd": "~/c", "command": "bash /x/c.sh"}, {"Ops": ["workspace:1"]})
-up.start({"name": "ops-n", "runtime": "cmux", "cwd": "~/n", "command": "bash /x/n.sh"}, {})
-print(json.dumps({"hr": [list(c) for c in calls], "run": lines}))
+up.start({"name": "ops-h", "runtime": "herdr", "cwd": "~/h", "command": "bash /x/h.sh"})
+print(json.dumps([list(c) for c in calls]))
 `
 
-// a job's pane closes when its job exits, so every line up.py sends holds exec before the job.
-test("each start line holds exec before the job", () => {
+// a job's pane closes when its job exits, so the line up.py runs holds exec before the job.
+test("the start line holds exec before the job", () => {
   const config = mkdtempSync(join(scratch, "started-"))
   mkdirSync(join(dataOf(config), "ops"), { recursive: true })
   const child = Bun.spawnSync(["python3", "-I", "-c", STARTED, upPy], {
@@ -457,17 +333,9 @@ test("each start line holds exec before the job", () => {
     stdout: "pipe",
   })
   expect(child.stderr.toString()).toBe("")
-  const { hr, run } = JSON.parse(child.stdout.toString())
-  const herdrLine = hr.find((c: unknown[]) => c[1] === "run")[3]
-  const splitArgv = run.find((argv: string[]) => argv[1] === "new-split")
-  const workspaceArgv = run.find((argv: string[]) => argv[1] === "new-workspace")
-  const lineOf = (argv: string[]): string => argv[argv.indexOf("--command") + 1]
+  const herdrLine = JSON.parse(child.stdout.toString()).find((c: unknown[]) => c[1] === "run")[3]
   expect(herdrLine).toContain("ops-h")
   expect(herdrLine).toContain("&& exec python3 -I ")
-  expect(lineOf(splitArgv)).toContain("ops-c")
-  expect(lineOf(splitArgv)).toContain("&& exec python3 -I ")
-  expect(lineOf(workspaceArgv)).toContain("ops-n")
-  expect(lineOf(workspaceArgv)).toMatch(/^exec python3 -I /)
 })
 
 // a failed or empty lsof read changes nothing.
