@@ -43,6 +43,23 @@ describe("lex reads a literal assignment made earlier in the same command", () =
     ["empty", `Q=; echo "$Q"`],
     ["with a quoted name", `'Q=x'; echo "$Q"`],
     ["with a tilde", `Q=~/x; echo "$Q"`],
+    ["set again by print -v", `Q=x; print -vQ y; echo "$Q"`],
+    ["set again by printf -v", `Q=x; printf -vQ %s y; echo "$Q"`],
+    ["set again by zsh's ${Q::=}", `Q=x; : \${Q::=y}; echo "$Q"`],
+    ["in a case branch", `case b in a) Q=x;; esac; echo "$Q"`],
+    ["in a zsh short for loop", `for i (); Q=x; echo "$Q"`],
+    ["in a zsh foreach loop", `foreach i (); Q=x; end; echo "$Q"`],
+    ["set by a built name in typeset", `A=QU; B=ERY; QUERY=x; typeset -g "$A$B=y"; echo "$QUERY"`],
+    [
+      "set by a built name in printf -v",
+      `A=QU; B=ERY; QUERY=x; printf -v "$A$B" %s y; echo "$QUERY"`,
+    ],
+    ["read in the second command after it", `Q=x; true; echo "$Q"`],
+    ["read after an expansion it cannot follow", `Q=x; echo "\${X:-y}" "$Q"`],
+    ["read after an arithmetic expansion", `Q=x; echo "$((1))" "$Q"`],
+    ["read unquoted, where bash splits it", `Q='a --input f'; echo $Q`],
+    ["read unquoted, where bash globs it", `Q='*'; echo $Q`],
+    ["named inside another name", `MYQ=y; Q=x; echo "$Q"`],
   ])("leaves a variable %s unknown", (_, src) => {
     expect(last(src)?.unknown).toBe("a shell variable")
   })

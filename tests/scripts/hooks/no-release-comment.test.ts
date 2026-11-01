@@ -499,6 +499,9 @@ describe("files and variables", () => {
   })
 })
 
+// A GraphQL comment whose body holds the word, which the hook refuses wherever its text comes from.
+const MUTATION = `mutation { addComment(input: {subjectId: "I_1", body: "release"}) { clientMutationId } }`
+
 describe("gh api", () => {
   test.each([
     [
@@ -561,6 +564,35 @@ describe("gh api", () => {
     [
       "a GraphQL query held in a variable set in a pipeline",
       `Q='query { viewer { login } }' | cat; gh api graphql -f query="$Q"`,
+      "other",
+    ],
+    ...(
+      [
+        ["print -v", `print -vQ '${MUTATION}'`],
+        ["printf -v", `printf -vQ %s '${MUTATION}'`],
+        ["zsh's ${Q::=}", `: \${Q::='${MUTATION}'}`],
+      ] as const
+    ).map(
+      ([how, sets]) =>
+        [
+          `a GraphQL query in a variable that ${how} sets to a mutation after`,
+          `Q='query { viewer { login } }'; ${sets}; gh api graphql -f query="$Q"`,
+          "other",
+        ] as const,
+    ),
+    [
+      "a GraphQL query in a variable that a name built in typeset sets to a mutation after",
+      `A=QU; B=ERY; QUERY='query { viewer { login } }'; typeset -g "$A$B=${MUTATION}"; gh api graphql -f query="$QUERY"`,
+      "other",
+    ],
+    [
+      "a GraphQL query in a variable set in a case branch",
+      `case b in a) Q='query { viewer { login } }';; esac; gh api graphql -f query="$Q"`,
+      "other",
+    ],
+    [
+      "a GraphQL query in a variable read unquoted, which bash splits into --input",
+      `Q='query { viewer { login } } --input /abs/mutation.json'; gh api graphql -f query=$Q`,
       "other",
     ],
   ] as const)("refuses %s", async (_, command, dir) => {

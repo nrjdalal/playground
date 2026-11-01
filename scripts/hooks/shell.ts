@@ -246,14 +246,18 @@ function decode(raw: string): string {
   )
 }
 
-// learn: a literal assignment earlier in the command becomes known to the words after it (learn(), below), for a hook that judges text; other hooks keep such a variable unknown, as their refusals of a variable wrapper or a variable cd need.
-export function lex(src: string, known: Record<string, string> = {}, learn = false): Lexed {
+// learnAssignments: a literal assignment earlier in the command becomes known to the command after it (learn(), below), for a hook that judges text; other hooks keep such a variable unknown, as their refusals of a variable wrapper or a variable cd need.
+export function lex(
+  src: string,
+  known: Record<string, string> = {},
+  learnAssignments = false,
+): Lexed {
   const lx: Lexer = {
     commands: [],
     i: 0,
     known: { ...known },
     learned: [],
-    learning: learn,
+    learning: learnAssignments,
     scope: 0,
     scopes: [-1],
     src,
@@ -262,30 +266,43 @@ export function lex(src: string, known: Record<string, string> = {}, learn = fal
   return { commands: lx.commands, scopes: lx.scopes }
 }
 
-// A bare assignment of a non-empty literal the shell surely runs (at the top level, after a ; or a newline, unpiped, before any compound command, eval or source) becomes known to the words after it, when the command names that variable nowhere else.
-function learn(lx: Lexer, cmd: Command, raws: string[], sure: boolean): void {
+// The words that open a compound command or a zsh short loop, after which the hook learns no assignment.
+const COMPOUND = new Set(["case", "for", "foreach", "function", "repeat", "select"])
+
+// A bare assignment of a non-empty literal the shell surely runs (at the top level, after a ; or a newline, unpiped, before any compound command) becomes known to the first command after it that is not an assignment, when the command names that variable nowhere but in a plain $Q or ${Q} read; that command's end forgets it.
+function learn(lx: Lexer, cmd: Command, raws: string[], sure: boolean, top: boolean): void {
+  if (!lx.learning && lx.learned.length === 0) return
+  if (cmd.words.length === 0 && cmd.redirects.length === 0 && !cmd.group) return
   const head = cmd.words[0]
-  if (head && !head.quoted && (RESERVED.has(head.value) || head.value === "function")) {
-    lx.learning = false
-  }
-  if (["eval", "source", "."].includes(parse(cmd).name)) {
-    for (const name of lx.learned) delete lx.known[name]
+  if (head && !head.quoted && (RESERVED.has(head.value) || COMPOUND.has(head.value))) {
     lx.learning = false
   }
   const bare =
     cmd.words.length > 0 && raws.length === cmd.words.length && raws.every((r) => ASSIGN.test(r))
-  if (!sure || !lx.learning || cmd.detached || cmd.group || cmd.stdin || !bare) return
+  if (!bare) {
+    if (top) forget(lx)
+    return
+  }
+  if (!sure || !lx.learning || cmd.detached || cmd.group || cmd.stdin) return
   cmd.words.forEach((w, k) => {
     const eq = w.value.indexOf("=")
     const name = w.value.slice(0, eq)
     const value = w.value.slice(eq + 1)
     if (value === "" || w.unknown || w.reads?.length || marked(value) || raws[k].includes("~"))
       return
-    const mentions = lx.src.match(new RegExp(`(?<![\\w$])(?<!\\$\\{)${name}(?!\\w)`, "g"))
-    if (mentions?.length !== 1) return
+    const all = lx.src.match(new RegExp(`${name}(?!\\w)`, "g"))?.length ?? 0
+    const reads = lx.src.match(new RegExp(`\\$${name}(?!\\w)|\\$\\{${name}\\}`, "g"))?.length ?? 0
+    if (all - reads !== 1) return
     lx.known[name] = value
     lx.learned.push(name)
   })
+}
+
+// Drops what the hook learned and learns nothing more, at a command or an expansion that could assign a variable in a way the hook cannot follow.
+function forget(lx: Lexer): void {
+  for (const name of lx.learned) delete lx.known[name]
+  lx.learned = []
+  lx.learning = false
 }
 
 // A subshell or a substitution is a scope of its own, so a cd inside it stays inside it.
@@ -316,7 +333,7 @@ function walk(lx: Lexer, scope: number, nested: boolean, inherit?: Command): voi
     const pipe = op === "|" || op === "|&"
     if (pipe || op === "&") done.detached = true
     if (done.words.length > 0 || done.redirects.length > 0 || done.group) lx.commands.push(done)
-    learn(lx, done, raws, scope === 0 && !nested && after === ";")
+    learn(lx, done, raws, scope === 0 && !nested && after === ";", scope === 0 && !nested)
     after = op
     raws = []
     cmd = fresh()
@@ -462,7 +479,7 @@ function double(lx: Lexer): Text {
     if (c === "\\") {
       if (next !== "\n") out.value += '$`"\\'.includes(next) ? next : c + next
       lx.i += 2
-    } else if (c === "$") merge(out, dollar(lx))
+    } else if (c === "$") merge(out, dollar(lx, true))
     else if (c === "`") merge(out, backtick(lx))
     else {
       out.value += c
@@ -482,14 +499,19 @@ function ansi(lx: Lexer): Text {
   return { value: decode(raw) }
 }
 
-function dollar(lx: Lexer): Text {
+// quoted: inside double quotes, where the shell neither splits nor globs what a variable holds.
+function dollar(lx: Lexer, quoted = false): Text {
   const { src } = lx
   const next = src[lx.i + 1] ?? ""
-  const variable = (name: string | undefined): Text =>
-    name !== undefined && lx.known[name] !== undefined
-      ? { value: lx.known[name], variable: name }
+  const variable = (name: string | undefined): Text => {
+    const value = name === undefined ? undefined : lx.known[name]
+    const split = !quoted && name !== undefined && lx.learned.includes(name)
+    return value !== undefined && !(split && !/^[\w%+,./:=@-]*$/.test(value))
+      ? { value, variable: name }
       : { ...unknown("a shell variable"), variable: name }
+  }
   if (src.startsWith("$((", lx.i)) {
+    forget(lx)
     lx.i = balanced(src, lx.i + 1, "(", ")")
     return unknown("an arithmetic expansion")
   }
@@ -502,6 +524,7 @@ function dollar(lx: Lexer): Text {
   if (next === "{") {
     const end = balanced(src, lx.i + 1, "{", "}")
     const name = /^\$\{([A-Za-z_]\w*)\}$/.exec(src.slice(lx.i, end))?.[1]
+    if (name === undefined) forget(lx)
     lx.i = end
     return variable(name)
   }
