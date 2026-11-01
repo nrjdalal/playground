@@ -112,10 +112,13 @@ Their tests are `bun run test:file tests/scripts/hooks`.
 ## no-extension-repo-write
 
 - A factory session changes no extension repository's git data or name: `scripts/hooks/no-extension-repo-write.ts`, registered beside no-public-leak, refuses such a write, since `ops:ext-sync` renders each one's `main` into the extensions root every guard reads.
-  Its repositories are each `ext.repos` value in the root's `policy.json`, each scope clone's `origin`, which follows a rename, and `<login>/playground-<scope>` for each scope clone `ext.repos` does not name, under `PLAYGROUND_LOGIN` and the root's `login` file both, matched in any case.
+  Its repositories are each `ext.repos` value in the root's `policy.json`, each scope clone's `origin`, which follows a rename, and `<login>/playground-<scope>` for each scope clone `ext.repos` does not name, under `PLAYGROUND_LOGIN` and the root's `login` file both, matched in any case and with percent escapes decoded, as GitHub decodes them.
   It reads every write through no-playground-leak's engine with `anyWrite` set (`inspectAs`), which refuses a write to one of them whatever its text, and a write whose target it cannot place.
-  Those writes are a `git push`, `send-pack` or `subtree push`, a git alias expanded from its config, a gh or `gh api` write (a DELETE included, `gh pr merge`, and `gh repo edit`, `rename`, `delete`, `archive`, `unarchive` and `sync <destination>`), a curl to one on `api.github.com` or `github.com` (a read included), and a GitHub MCP write.
+  Those writes are a `git push`, `send-pack` or `subtree push`, a git alias expanded from its config, a gh or `gh api` write, a curl to one on `api.github.com` or `github.com` (a read included), and a GitHub MCP write.
+  Its gh writes include a DELETE, `gh pr merge` and `update-branch`, the publish-step group's `create`, `delete`, `edit` and `upload`, and `gh repo edit`, `rename`, `delete`, `archive`, `unarchive` and `sync <destination>`.
   It reads a push's target as git does: each push URL of the remote named, `--repo`'s value when none is named, else each push URL of every remote.
+  It reads that state when it checks the call, so after an earlier command in the same call changes it, it cannot place a push, an alias run or a write gh places by the checkout, and refuses it with the fix: run the setup in a call of its own first.
+  Those changes are a `git config` write, `git remote add`, `remove`, `rename`, `rm` or `set-url`, `git clone`, `init` or `submodule`, `gh repo clone`, `fork` or `set-default`, `gh config set`, and any other command naming a `.git` path or a git config file.
   It cannot place, so refuses, a push with `-c`, `--config-env`, `--git-dir` or a `GIT_` variable in the call, a literal URL an `insteadOf` or `pushInsteadOf` prefix matches, a remote whose URL is a local path, a `!` alias, an alias `-c` sets, `gh alias set` and `import`, and a REST write to `repositories/<id>`.
   It refuses a repository made or renamed at one of those names, `*` standing for the account gh picks itself, and a name it cannot read counts as one.
   Those are `gh repo create` (its name or its `--source` folder's), `rename` and `fork --fork-name`, `gh api`'s repo PATCH with a `name`, `generate`, `transfer`, `forks` with a `name`, `user/repos` and `orgs/<org>/repos`, and MCP `create_repository`.
@@ -124,7 +127,7 @@ Their tests are `bun run test:file tests/scripts/hooks`.
   Its refusal names the one route: the owner types the command in Ops' pane as a `!` command; no flag, environment variable, role or note frees a call.
   It fails closed, as the leak guards do and only on a call that may write, when `policy.json` does not read or no login names the default repositories.
   Outside its reach are a program whose own code pushes or calls the API (a script by its path, `bun run`, a binary), a fork that keeps its source's name, and a gh alias set before it.
-  A GraphQL mutation, which names its repository by node id, and a curl whose URL the run computes are refused only when their text names one of the repositories.
+  A GraphQL mutation, which names its repository by node id, and a curl whose URL the run computes are refused only when their text names one of the repositories; a URL in a curl config file (`-K`, `~/.curlrc`) is unread.
   An `ext.order` name with no clone and no `ext.repos` entry is not guarded, and the sync does not push it either.
   Its tests are `bun run test:file tests/scripts/hooks/no-extension-repo-write.test.ts`.
 

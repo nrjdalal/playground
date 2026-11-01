@@ -16,6 +16,11 @@ const GUARD = "no-extension-repo-write"
 const OWNER_ROUTE =
   "Only the owner changes one, typing the command as a ! command in Ops' pane, so tell your lead what it should do."
 const REPO = /^[A-Za-z0-9-]+\/[A-Za-z0-9._-]+$/
+// GitHub decodes a percent escape in a repository's owner or name.
+const decoded = (text: string) =>
+  text.replace(/%([0-9a-f]{2})/gi, (_, hex: string) =>
+    String.fromCharCode(Number.parseInt(hex, 16)),
+  )
 
 // The repositories the sync pushes to, lowercase: each ext.repos value, and <login>/playground-<scope> for each scope clone it does not name, under the environment's login and the login file's.
 function guardedRepos(data: string, values: Record<string, unknown>, environment: Environment) {
@@ -51,7 +56,7 @@ function finder(repos: Set<string>): (text: string) => Hit | undefined {
   const names = [...repos].map((r) => r.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
   const pattern = new RegExp(`(?<![\\w.-])(?:${names.join("|")})(?:\\.git)?(?![\\w.-])`, "i")
   return (text) => {
-    const found = pattern.exec(text)?.[0]
+    const found = pattern.exec(decoded(text))?.[0]
     return found ? { detail: `it names ${found}`, fix: OWNER_ROUTE } : undefined
   }
 }
@@ -61,10 +66,14 @@ const policy = (repos: Set<string>): Policy => ({
   find: finder(repos),
   git: true,
   guard: GUARD,
-  // An owner of * is one gh picks itself, the signed-in account, so any guarded repository of that name matches.
+  // An owner of * is one gh picks itself, the signed-in account, so any guarded repository of that name matches; one still holding a % or a / once decoded cannot be placed, so it counts as guarded.
   guarded: (repo) => {
-    const name = repo.repo.replace(/\.git$/i, "").toLowerCase()
-    if (repo.owner !== "*") return repos.has(`${repo.owner.toLowerCase()}/${name}`)
+    const owner = decoded(repo.owner).toLowerCase()
+    const name = decoded(repo.repo)
+      .replace(/\.git$/i, "")
+      .toLowerCase()
+    if (/[%/]/.test(owner + name)) return true
+    if (owner !== "*") return repos.has(`${owner}/${name}`)
     return [...repos].some((guarded) => guarded.endsWith(`/${name}`))
   },
   hosts: false,

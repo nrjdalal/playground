@@ -370,7 +370,21 @@ const CREATE_TAKES = [
   "--team",
 ]
 const SUBTREE_TAKES = new Set(["-b", "--branch", "-m", "--message", "--onto", "-P", "--prefix"])
-const PLACE_FIX = `Name where it goes by its literal value in a call of its own: a git push run plainly, with no -c, --config-env, --git-dir or GIT_ variable, to a remote or URL the hook can read (a remote whose URL is a local path cannot be placed, so push from a clone of its GitHub URL), gh -R <owner>/<repo>, or repos/<owner>/<name>/... for gh api. ${NOT_RUN}`
+const PLACE_FIX = `Run any setup (a git config or remote change, a clone, gh repo set-default) in a call of its own first, then name where the write goes by its literal value in a call of its own: a git push run plainly, with no -c, --config-env, --git-dir or GIT_ variable, to a remote or URL the hook can read (a remote whose URL is a local path cannot be placed, so push from a clone of its GitHub URL), gh -R <owner>/<repo>, or repos/<owner>/<name>/... for gh api. ${NOT_RUN}`
+// Under anyWrite: the gh verbs outside GH_WRITES that change git data, placed as pr merge is; a command that changes the git or gh state a later write is placed by; and whether one ran earlier in the call.
+const ANY_GH_WRITES = new Map<string, Spec>([
+  ["pr update-branch", spec([], [])],
+  ["release delete", spec([], [])],
+  ["release upload", spec([], [])],
+])
+const GH_STATE = new Set(["config set", "repo clone", "repo fork", "repo set-default"])
+const GIT_CONFIG_PATH = /(?:^|\/)\.git(?:\/|$)|\.gitconfig|(?:^|\/)git\/config$/
+const CONFIG_WRITE =
+  /^--(?:add|edit|remove-section|rename-section|replace-all|unset|unset-all)$|^-e$/
+const CONFIG_READ =
+  /^(?:get|list)$|^--(?:get|get-all|get-color|get-colorbool|get-regexp|get-urlmatch|list)$|^-l$/
+const CONFIG_TAKES = new Set(["--blob", "--default", "-f", "--file", "--type"])
+let changed = false
 let builtins: Set<string> | undefined
 const MCP_TOOL = /^mcp__(.+?)__(.+)$/
 const READ_TOOL =
@@ -457,6 +471,7 @@ function decide(candidates: (Repo | undefined)[]): Target {
 
 const leak: Visit = async (cmd, parsed, env) => {
   const { args, first, name, xargs } = parsed
+  if (policy.anyWrite && changesState(cmd, parsed)) changed = true
   const head = args[0]?.value ?? ""
   const group = GH_GROUPS.has(head) || (policy.anyWrite && (head === "alias" || head === "repo"))
   if (name === "gh" || (first?.unknown && group)) {
@@ -480,6 +495,28 @@ const leak: Visit = async (cmd, parsed, env) => {
   }
   return leak(cmd, inner, env)
 }
+
+// Under anyWrite, whether a command changes what a later write in the call is placed by: a git config write, a remote added, renamed, removed or repointed, a clone, init or submodule, gh's clone, fork, set-default or config set, or any other command naming a .git path or a git config file.
+function changesState(cmd: Command, { args, name }: Parsed): boolean {
+  const words = args.map((a) => a.value)
+  if (name === "gh") return GH_STATE.has(ghCommand(args).head.join(" "))
+  if (name === "git") {
+    const k = words.findIndex((w, i) => !w.startsWith("-") && !GIT_GLOBALS.has(words[i - 1]))
+    const [sub, ...rest] = k === -1 ? [] : words.slice(k)
+    if (sub === "clone" || sub === "init" || sub === "submodule") return true
+    if (sub === "remote") return ["add", "remove", "rename", "rm", "set-url"].includes(rest[0])
+    if (sub !== "config") return false
+    if (rest.some((w) => CONFIG_WRITE.test(w))) return true
+    if (rest.some((w) => CONFIG_READ.test(w))) return false
+    return parseFlags(args.slice(k + 1), CONFIG_TAKES).positionals.length > 1
+  }
+  const targets = cmd.redirects.flatMap((r) => (r.target ? [r.target] : []))
+  return [...args, ...targets].some((w) => GIT_CONFIG_PATH.test(w.value))
+}
+
+// The repositories gh falls back to, none it can trust under anyWrite once an earlier command in the call changed them.
+const implicit = (env: Env, local: Map<string, Text>) =>
+  policy.anyWrite && changed ? [undefined] : implicitRepos(env, local)
 
 async function gh(
   args: Word[],
@@ -508,7 +545,7 @@ async function gh(
     const takes = REPO_WRITES.get(key)
     if (takes) return repoWrite(key, rest, repos, env, local, xargs, takes)
   }
-  const found = GH_WRITES.get(key)
+  const found = GH_WRITES.get(key) ?? (policy.anyWrite ? ANY_GH_WRITES.get(key) : undefined)
   if (!found) return
   const { flags, positionals } = parseFlags(rest, found.takes)
   const texts: Text[] = []
@@ -538,12 +575,12 @@ async function gh(
   })
   const named = [...flagged, ...urls]
   const placed = urls.some(Boolean)
-  const implicit = flagged.length > 0 || placed ? [] : implicitRepos(env, local)
+  const fallback = flagged.length > 0 || placed ? [] : implicit(env, local)
   if (!placed) {
-    const refused = unplaced(`gh ${key}`, flagged.length > 0 ? flagged : implicit, env)
+    const refused = unplaced(`gh ${key}`, flagged.length > 0 ? flagged : fallback, env)
     if (refused) return refused
   }
-  const target = decide(named.length > 0 ? named : implicit)
+  const target = decide(named.length > 0 ? named : fallback)
   if (key === "pr create" && target.where !== "other") texts.push(...prCreate(rest, env))
   return judge(
     `gh ${key}`,
@@ -612,13 +649,20 @@ function repoWrite(
   const given = (named.length > 0 ? named : repos).map((w) =>
     fromXargs(w, xargs) || marked(w.value) ? undefined : repoOf(w),
   )
-  return judge(`gh ${key}`, decide(given.length > 0 ? given : implicitRepos(env, local)), [], env)
+  return judge(`gh ${key}`, decide(given.length > 0 ? given : implicit(env, local)), [], env)
 }
 
 // A gh write whose repository comes from a value the hook cannot read (-R $R, GH_REPO=$R, repos/$R) or a directory it lost (a cd, popd or env -C it cannot follow) may write to a guarded org, so it is refused before its text is judged.
 function unplaced(what: string, source: (Repo | undefined)[], env: Env): string | undefined {
   const lost = source.length === 0 && !env.cwd
   if (!lost && source.every(Boolean)) return
+  if (policy.anyWrite && changed)
+    return refuse(
+      what,
+      decide([]),
+      "an earlier command in the call changes the git or gh state it is placed by",
+      PLACE_FIX,
+    )
   return refuse(
     what,
     decide([]),
@@ -712,7 +756,7 @@ async function api(
     return judge(what, { label: "a repository named only by its id", where: "unknown" }, [], env)
   let candidates: (Repo | undefined)[]
   if (fromXargs(endpoint, xargs)) candidates = [undefined]
-  else if (repo?.[1] === "{owner}") candidates = implicitRepos(env, local)
+  else if (repo?.[1] === "{owner}") candidates = implicit(env, local)
   else if (repo) candidates = [marked(repo[0]) ? undefined : { owner: repo[1], repo: repo[2] }]
   else if (org) candidates = [marked(org[0]) ? undefined : { owner: org[1], repo: "*" }]
   else if (marked(value) && (/^(repos|orgs)\//.test(path) || marked(path.split("/")[0])))
@@ -810,7 +854,11 @@ async function curl(
         )
       if (web) return decide([{ owner: web[1], repo: web[2] }])
     }
-    const repo = /api\.github\.com\/repos\/([^/\s]+)\/([^/\s?#]+)/i.exec(value)
+    const port = policy.anyWrite ? "(?::\\d+)?" : ""
+    const repo = new RegExp(
+      `api\\.github\\.com${port}\\/repos\\/([^/\\s]+)\\/([^/\\s?#]+)`,
+      "i",
+    ).exec(value)
     return repo ? decide([{ owner: repo[1], repo: repo[2] }]) : { label: "", where: "other" }
   })
   const target =
@@ -912,6 +960,8 @@ async function git(
         return cannot(
           `it runs ${sub}, which may be an alias, in a checkout the hook cannot resolve`,
         )
+      if (changed)
+        return cannot(`it runs ${sub}, which an earlier command in the call may define as an alias`)
       const alias = gitText(dir, ["config", "--get", `alias.${sub}`], `alias ${sub}`)
       if (!alias.unknown) {
         if (alias.value.trim().startsWith("!") || depth > 8)
@@ -991,7 +1041,11 @@ function placeUrl(url: string): Repo | undefined {
 
 // Under anyWrite, where a push goes as git resolves it: a configured remote's every push URL (pushurl, each url, pushInsteadOf applied), every remote's when none is named, else the literal URL, which is unknown when an insteadOf or pushInsteadOf rule's prefix matches it.
 function pushTarget(remote: Word | undefined, dir: string | undefined): Target {
-  if (!dir || (remote && (remote.unknown || remote.reads?.length || marked(remote.value))))
+  if (
+    changed ||
+    !dir ||
+    (remote && (remote.unknown || remote.reads?.length || marked(remote.value)))
+  )
     return decide([undefined])
   const lines = (args: string[]) => {
     const text = gitText(dir, args, "a remote")
@@ -1204,6 +1258,7 @@ export async function inspectAs(
   environment: Environment,
 ): Promise<string | undefined> {
   policy = given
+  changed = false
   try {
     return await inspect(raw, environment)
   } catch (error) {

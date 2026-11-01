@@ -57,6 +57,7 @@ beforeAll(async () => {
   git(dirs.instead, "remote", "add", "rewritten", "https://example.com/y")
   dirs.local = await clone("local", ["origin", join(scratch, "work", "ext")])
   dirs.named = await clone("playground-notes")
+  await mkdir(join(dirs.other, "empty"))
   dirs.alias = await clone("alias", ["origin", OTHER])
   git(dirs.alias, "config", "alias.p", "push")
   git(dirs.alias, "config", "alias.pp", "p --force")
@@ -212,9 +213,72 @@ describe("a push resolves its target the way git does, and one it cannot place i
       ["N1: curl to git's smart HTTP", `curl -X POST --data-binary @p ${EXT}.git/git-receive-pack`],
       ["N3: a remote whose URL is a local path", "git push origin main", "local"],
       ["N3: a local path", `git push ${join("..", "ext")} main`],
+      [
+        "a percent-encoded name to gh api",
+        "gh api -X PUT repos/quillco/acme%2Dskills/contents/x -f message=m",
+      ],
+      [
+        "a percent-encoded slash to gh api",
+        "gh api -X PUT repos/quillco%2Facme-skills/contents/x -f message=m",
+      ],
+      [
+        "a percent-encoded name to curl",
+        "curl -X PUT -d x https://api.github.com/repos/quillco/acme%2Dskills/contents/x",
+      ],
+      [
+        "a percent-encoded name to git push",
+        "git push https://github.com/quillco/acme%2Dskills.git main",
+      ],
+      ["curl with a port", `curl -X PUT -d x https://api.github.com:443/${A}/contents/x`],
+      ["gh pr update-branch", "gh pr update-branch 1 -R quillco/acme-skills"],
+      ["gh's publish-step delete", "gh release delete v1 -y --cleanup-tag -R quillco/acme-skills"],
+      ["gh's publish-step upload", "gh release upload v1 x.tgz -R quillco/acme-skills"],
     ]),
   )("%s", async (_, command, dir) => {
     await refused(bash(command, at(dir)))
+  })
+
+  test.each(
+    rows([
+      [
+        "set-url --push, then a push",
+        `git remote set-url --push origin ${EXT} && git push origin main`,
+      ],
+      ["set-url, then a push with no remote", `git remote set-url origin ${EXT} && git push`],
+      [
+        "config pushurl, then a push",
+        `git config remote.origin.pushurl ${EXT}; git push origin main`,
+      ],
+      [
+        "config pushInsteadOf, then a push",
+        `git config url.${EXT}.pushInsteadOf ${OTHER} && git push origin main`,
+      ],
+      ["config set alias, then the alias", `git config alias.zz push && git zz ${EXT} main`],
+      [
+        "an alias written to .git/config, then the alias",
+        `printf '[alias] zz = push' >> .git/config && git zz ${EXT} main`,
+      ],
+      [
+        "remote add and set-default, then gh pr merge",
+        `git remote add e ${EXT} && gh repo set-default quillco/acme-skills && gh pr merge 1 --squash`,
+      ],
+      [
+        "gh repo set-default, then gh repo edit",
+        "gh repo set-default quillco/acme-skills && gh repo edit --visibility public",
+      ],
+      [
+        "a clone into a folder, then git -C",
+        `git clone ${EXT} empty && git -C empty push origin HEAD:main`,
+      ],
+      [
+        "a clone into a folder, then cd",
+        `git clone ${EXT} empty && cd empty && git push origin HEAD:main`,
+      ],
+      ["gh repo clone, then cd", "gh repo clone quillco/acme-skills empty && cd empty && git push"],
+    ]),
+  )("a state change earlier in the call: %s", async (_, command, dir) => {
+    const reason = await refused(bash(command, at(dir)))
+    expect(reason).toContain("in a call of its own first")
   })
 
   test("N3: the local path refusal names the fix", async () => {
@@ -295,6 +359,13 @@ describe("what it lets through", () => {
   test.each(
     rows([
       ["a push to another repository", "git push origin feature"],
+      [
+        "a config read, then a push",
+        "git config --get remote.origin.url && git push origin feature",
+      ],
+      ["a config read by key, then a push", "git config user.name && git push origin feature"],
+      ["a remote listed, then a push", "git remote -v && git push origin feature"],
+      ["a push, then a config write", "git push origin feature && git config x.y z"],
       ["a push by URL to another repository", `git push ${OTHER} feature`],
       ["a literal URL no rewrite matches", `git push ${OTHER} main`, "instead"],
       ["a commit in another clone", "git commit -m 'Fix the export'"],
