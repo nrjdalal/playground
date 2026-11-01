@@ -67,10 +67,10 @@ describe("beatText", () => {
       beatText(reading({ freePct, pressure })).split("\n")[2]
     expect(memory(2, 8)).toBe("✅ Memory: pressure 2 (warning), 8% free")
     expect(memory(1, 7)).toBe(
-      "⚠️ Memory: pressure 1 (normal), 7% free, so spawn's gate refuses a start",
+      "⚠️ Memory: pressure 1 (normal), 7% free, so spawn's gate refuses a Claude start",
     )
     expect(memory(4, 64)).toBe(
-      "⚠️ Memory: pressure 4 (critical), 64% free, so spawn's gate refuses a start",
+      "⚠️ Memory: pressure 4 (critical), 64% free, so spawn's gate refuses a Claude start",
     )
   })
 
@@ -92,7 +92,7 @@ describe("beatText", () => {
 })
 
 describe("readBeat", () => {
-  test("reads the Mac through ops-machine, the sessions of the last 2 hours, each enabled job's heartbeat and the battery", async () => {
+  test("reads the Mac through ops-machine, the sessions of the last 2 hours, each job's heartbeat but a disabled one's and the battery", async () => {
     const data = join(scratch, "data")
     const ops = join(data, "ops")
     const states = join(data, "session-state")
@@ -121,7 +121,7 @@ describe("readBeat", () => {
           { name: "ops-sweep" },
           { heartbeat: "ops-tick-beat", name: "ops-tick" },
           { name: "ops-flow" },
-          { enabled: false, name: "ops-off" },
+          { disabled: true, name: "ops-off" },
           { name: "ops-never" },
         ],
       }),
