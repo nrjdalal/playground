@@ -292,3 +292,60 @@ describe("a quick run takes its own slot past a full queue", () => {
     expect(await quick(["bun", "test", "--cwd", "x", "b.e2e.test.ts"])).toBe(false)
   })
 })
+
+// optimizer, 31 Oct: 6 quick-lane runs of 1 to 3 spawn suites took 173 to 317 s beside the CPU slots, which alone read load5
+describe("the quick slot holds while load5 is at or over the load line", () => {
+  const LOAD_WAIT = /^run-slot\.sh: waiting for load5 under \d+ for the quick slot/gm
+  // A machine whose fake bun and git touch their last argument, and whose fake sysctl reads load5 from a file the test rewrites
+  const loaded = (load5: number, setup: Parameters<typeof machine>[0] = {}) => {
+    const m = machine(setup)
+    for (const bin of ["bun", "git"]) {
+      writeFileSync(join(m.bin, bin), '#!/bin/bash\ntouch "${@: -1}"\n')
+      chmodSync(join(m.bin, bin), 0o755)
+    }
+    const file = join(m.root, "load5")
+    writeFileSync(file, `${load5}\n`)
+    writeFileSync(
+      join(m.bin, "sysctl"),
+      `#!/bin/bash\ncase "$2" in\n  hw.ncpu) echo 15 ;;\n  vm.loadavg) l=$(cat ${file}); echo "{ 2.00 $l.00 $l.00 }" ;;\n  kern.memorystatus_level) echo 80 ;;\n  kern.memorystatus_vm_pressure_level) echo 1 ;;\nesac\n`,
+    )
+    chmodSync(join(m.bin, "sysctl"), 0o755)
+    return { ...m, load: (n: number) => writeFileSync(file, `${n}\n`) }
+  }
+
+  test("a quick run waits at load5 22, and starts once it drops under", async () => {
+    const m = loaded(22)
+    const run = m.start("worker-q", {}, undefined, ["bun", "run", "docs:wrap"])
+    expect(await run.saw(LOAD_WAIT)).toBe(true)
+    expect(existsSync(run.marker)).toBe(false)
+    m.load(21)
+    expect(await run.ran()).toBe(true)
+  })
+
+  test("a quick run under the line starts at once", async () => {
+    const m = loaded(21)
+    const run = m.start("worker-q", {}, undefined, ["bun", "run", "docs:wrap"])
+    expect(await run.ran()).toBe(true)
+    expect(await run.saw(LOAD_WAIT)).toBe(false)
+  })
+
+  test("run-slot.load5-cap lowers the line the quick slot reads", async () => {
+    const m = loaded(12)
+    writeFileSync(join(m.ops, "run-slot.load5-cap"), "12\n")
+    const run = m.start("worker-q", {}, undefined, ["bun", "run", "docs:wrap"])
+    expect(await run.saw(LOAD_WAIT)).toBe(true)
+    m.load(11)
+    expect(await run.ran()).toBe(true)
+  })
+
+  test("a commit takes its slot at load5 30, as before", async () => {
+    const m = loaded(30)
+    const run = m.start("worker-q", {}, undefined, ["git", "commit"])
+    expect(await run.ran()).toBe(true)
+    expect(await run.saw(LOAD_WAIT)).toBe(false)
+  })
+
+  test("and so does a node_modules clone, with clone-off unset", async () => {
+    expect(await machine({ load1: 30 }).clones("node_modules")).toBe(true)
+  })
+})
