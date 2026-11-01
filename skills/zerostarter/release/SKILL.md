@@ -52,6 +52,8 @@ c. **Invitee.** Clone from the mirror, check out the last tag on `main`, and ins
 
 d. **Update.** Run `playground update --to <tag>`, then `playground doctor`, still contained.
    Done when the update exits 0, doctor's version line reads `at <tag>`, and the MISSING lines are only the containment's own and the machine's own gaps: `claude` off `PATH`, `docker` and `gh` left off it, the pinned `herdr` the throwaway `HOME` lacks, and the `portless proxy` line where no proxy serves 443, while every need the update itself runs on reads ok (`bun`, `git` and `node`, with `python3` from the system basics); the after-state reads unchanged against the before-state, and each stub's log names the calls the real machine would have taken. A step that fails names its caller: when a stub took that call, the update needs it, so contain that call another way (a flag, an env) and run the rehearsal again.
+   This run proves the last tag's `update.ts` taking the invitee to the candidate, since the clone runs the code it holds. When the candidate changes `update.ts` itself, run `playground update --to <tag>` a second time from the updated clone, still contained, so the candidate's own `update.ts` runs; when its change is a no-record path, first move the throwaway data folder's `ops/update-head` aside, so that path is reached (the v0.0.26 rehearsal on 1 Nov: the first run ran v0.0.25's `update.ts`, and only the second printed the candidate's new no-record line).
+   Done when the second run exits 0 and prints the line the candidate's change adds.
 
 The rehearsal's result goes into the ship PR's body beside the new-user gate's PASS and FAIL list.
 
