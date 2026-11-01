@@ -860,7 +860,8 @@ async function curl(
 ): Promise<string | undefined> {
   const { flags, positionals } = parseFlags(args, CURL_TAKES)
   const urls = curlUrls(flags, positionals)
-  const globs = policy.anyWrite && !flags.some((f) => f.name === "-g" || f.name === "--globoff")
+  const globs =
+    policy.anyWrite === true && !flags.some((f) => f.name === "-g" || f.name === "--globoff")
   if (policy.anyWrite) {
     // A Host header, --connect-to, --request-target or --resolve beside a word naming GitHub sends the request somewhere its URL does not name.
     const redirect = args.some(
