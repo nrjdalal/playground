@@ -3,6 +3,7 @@
 Each Claude Code hook in this folder, in full: what it refuses or writes, for whom, and why.
 AGENTS.md names each hook and points here, and this file holds each one's text.
 Read a hook's section before you change the hook, its tests or its registration, or when it refuses a call you did not expect.
+A hook widens what it allows only by one literal form it reads whole: it tracks no shell state (variables, functions, loops, traps), and refuses every other form with a reason that names the literal one.
 `no-raw-spawn` guards `scripts/spawn.sh`, so its text sits in [the spawn.sh section of scripts/README.md](../README.md#spawnsh).
 Their tests are `bun run test:file tests/scripts/hooks`.
 
