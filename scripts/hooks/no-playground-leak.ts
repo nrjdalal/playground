@@ -389,6 +389,10 @@ const CONFIG_WRITE =
 const CONFIG_READ = /^--(?:get|get-all|get-color|get-colorbool|get-regexp|get-urlmatch|list)$|^-l$/
 const CONFIG_TAKES = new Set(["--blob", "--default", "-f", "--file", "--type"])
 let changed = false
+// Under anyWrite, whether the call has run a git or gh command or a program the hook cannot name, and whether one ran before the command being read, which may have moved the branch a bare push reads its remote from; and the folder the call starts in.
+let moved = false
+let movedBefore = false
+let startCwd: string | undefined
 let builtins: Set<string> | undefined
 const MCP_TOOL = /^mcp__(.+?)__(.+)$/
 const READ_TOOL =
@@ -483,6 +487,10 @@ const leak: Visit = async (cmd, parsed, env) => {
   const args =
     appended && parsed.args.at(-1) !== XARGS_INPUT ? [...parsed.args, XARGS_INPUT] : parsed.args
   if (policy.anyWrite && changesState(cmd, parsed)) changed = true
+  if (policy.anyWrite) {
+    movedBefore = moved
+    if (MOVERS.has(name) || first?.unknown) moved = true
+  }
   const head = args[0]?.value ?? ""
   const group = GH_GROUPS.has(head) || (policy.anyWrite && (head === "alias" || head === "repo"))
   if (name === "gh" || (first?.unknown && group)) {
@@ -530,6 +538,9 @@ function changesState(cmd: Command, { args, name }: Parsed): boolean {
   const targets = cmd.redirects.flatMap((r) => (r.target ? [r.target] : []))
   return [...args, ...targets].some((w) => GIT_CONFIG_PATH.test(w.value))
 }
+
+// Under anyWrite, the programs after which a bare push reads every branch's remote keys, since any of them may move HEAD.
+const MOVERS = new Set(["gh", "git"])
 
 // The repositories gh falls back to, none it can trust under anyWrite once an earlier command in the call changed them.
 const implicit = (env: Env, local: Map<string, Text>) =>
@@ -584,10 +595,10 @@ async function gh(
     texts.push(unknown(`what xargs puts in place of ${xargs?.replace}`))
   }
   const flagged = repos.map((r) => (fromXargs(r, xargs) ? undefined : repoOf(r)))
-  // A positional the hook cannot read may be a pull request URL, which picks the repository; under anyWrite a shell value is placed as a number is, by -R or the checkout, while xargs input stays unplaced.
+  // A positional the hook cannot read may be a pull request URL, which picks the repository; under anyWrite a shell value or the input a plain xargs appends is placed as a number is, by -R or the checkout, while an xargs -I string stays unplaced.
   const urls = positionals.flatMap((p) => {
-    if (fromXargs(p, xargs) || p === XARGS_INPUT) return [undefined]
-    if (p.unknown || p.reads?.length || p.value.includes(UNKNOWN))
+    if (fromXargs(p, xargs)) return [undefined]
+    if (p === XARGS_INPUT || p.unknown || p.reads?.length || p.value.includes(UNKNOWN))
       return policy.anyWrite ? [] : [undefined]
     return PR_URL.test(p.value) ? [repoOf(p)] : []
   })
@@ -735,6 +746,11 @@ async function api(
 ): Promise<string | undefined> {
   const request = await ghApi(args, cmd, env, xargs)
   if (!request || ["GET", "HEAD"].includes(request.method)) return
+  // Under anyWrite, a plain xargs before a gh api with no method, field or input of its own reads, since only the words it appends make it a write.
+  if (policy.anyWrite && xargs && !xargs.replace) {
+    const method = args.some((a) => /^(?:-[A-Za-z]*X|--method)/.test(a.value))
+    if (!method && request.fields.length === 1 && request.inputs.length === 0) return
+  }
   if (request.method === "DELETE" && !policy.anyWrite) return
   const { endpoint, fields, inputs } = request
   const posted = (f: { key: string }) =>
@@ -1042,13 +1058,10 @@ async function git(
         return cannot(
           `it runs ${sub}, which -c, --config-env, --git-dir or a GIT_ variable may define as an alias`,
         )
-      if (!dir)
-        return cannot(
-          `it runs ${sub}, which may be an alias, in a checkout the hook cannot resolve`,
-        )
       if (changed)
         return cannot(`it runs ${sub}, which an earlier command in the call may define as an alias`)
-      const alias = gitText(dir, ["config", "--get", `alias.${sub}`], `alias ${sub}`)
+      // In a checkout the hook cannot resolve, only the global and system configs, which git reads from /, can define the alias.
+      const alias = gitText(dir ?? "/", ["config", "--get", `alias.${sub}`], `alias ${sub}`)
       if (!alias.unknown) {
         if (alias.value.trim().startsWith("!") || depth > 8)
           return cannot(`its alias ${sub} runs a command the hook does not read`)
@@ -1176,12 +1189,12 @@ function pushTarget(remote: Word | undefined, dir: string | undefined): Target {
   }
   if (!remote) {
     const names = lines(["remote"])
-    // remote.pushDefault, branch.<b>.pushRemote and branch.<b>.remote pick the push's remote, and each may hold a URL.
-    const keys = lines([
-      "config",
-      "--get-regexp",
-      "^(remote\\.pushdefault|branch\\..*\\.(pushremote|remote))$",
-    ])
+    // remote.pushDefault and the current branch's pushRemote and remote pick the push's remote, and each may hold a URL; after another git or gh command or an unnamed program earlier in the call, or in a folder other than the one the call starts in (a cd, git -C), any branch's may.
+    const branch = lines(["symbolic-ref", "--short", "HEAD"])?.[0]
+    const name =
+      movedBefore || dir !== startCwd ? ".*" : branch?.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+    const current = name ? `|branch\\.${name}\\.(pushremote|remote)` : ""
+    const keys = lines(["config", "--get-regexp", `^(remote\\.pushdefault${current})$`])
     const picked = (keys ?? [])
       .map((line) => line.slice(line.indexOf(" ") + 1))
       .filter((value) => value !== "" && value !== "." && !names?.includes(value))
@@ -1385,6 +1398,9 @@ export async function inspectAs(
 ): Promise<string | undefined> {
   policy = given
   changed = false
+  moved = false
+  movedBefore = false
+  startCwd = undefined
   try {
     return await inspect(raw, environment)
   } catch (error) {
@@ -1425,6 +1441,7 @@ async function inspect(raw: string, environment: Environment): Promise<string | 
       : undefined
   }
   const { cwd, tool_input: toolInput, tool_name: tool } = payload as Record<string, unknown>
+  startCwd = typeof cwd === "string" ? cwd : undefined
   const input =
     typeof toolInput === "object" && toolInput !== null
       ? (toolInput as Record<string, unknown>)
