@@ -349,6 +349,14 @@ describe("a direct write into the extensions root is refused, naming the owner's
       `echo a > /tmp/nxw-f; ${"cat /tmp/nxw-f /tmp/nxw-f > /tmp/nxw-g; cat /tmp/nxw-g /tmp/nxw-g > /tmp/nxw-f; ".repeat(12)}bash < /tmp/nxw-f; echo x > ${LIST}`,
     ],
     ["a 120 KB path", `touch /tmp/${"a/".repeat(60_000)}x; echo x > ${LIST}`],
+    [
+      "a printf format of 100000 zeros through three cat stages",
+      `printf '%${"0".repeat(100_000)}!' | cat > /tmp/nxw-a | cat > /tmp/nxw-b | cat > /tmp/nxw-c; echo x > ${LIST}`,
+    ],
+    [
+      "4600 reads of a 45 KB file in one word",
+      `echo ${"A".repeat(45_000)} > /tmp/nxw-r; echo "${"$(cat /tmp/nxw-r)".repeat(4_600)}" > /tmp/nxw-o; echo x > ${LIST}`,
+    ],
   ])(
     "%s ahead of a write are read inside the hook's time",
     async (_, command) => {

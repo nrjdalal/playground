@@ -960,7 +960,7 @@ async function outputOf(cmd: Command, env: Env): Promise<Text> {
 
 // printf reuses its format while arguments remain; a pass that takes none ends it.
 function printf([format = "", ...args]: string[]): string {
-  const conversion = /%(?:%|[-+ #0']*\d*(?:\.\d+)?([a-zA-Z]))/g
+  const conversion = /%(?:%|[-+ #0']*(?:[1-9]\d*)?(?:\.\d+)?([a-zA-Z]))/g
   let out = ""
   let k = 0
   for (;;) {
@@ -994,12 +994,17 @@ async function stdinText(cmd: Command, env: Env): Promise<Text> {
 
 export async function resolveText(text: Text, env: Env): Promise<Text> {
   if (text.unknown || !text.reads?.length) return text
-  let { value } = text
-  for (const path of text.reads) {
+  // each read fills the next READ mark in turn; splitting once keeps the cost to the text's length
+  const pieces = text.value.split(READ)
+  let value = pieces[0]
+  for (const [k, path] of text.reads.entries()) {
+    tick()
     const file = await readPath(path, env)
     if (file.unknown) return file
-    value = value.replace(READ, () => file.value)
+    if (k + 1 < pieces.length) value += file.value + pieces[k + 1]
+    if (value.length > MAX_BYTES) return unknown(LARGE)
   }
+  for (const piece of pieces.slice(text.reads.length + 1)) value += READ + piece
   return { value }
 }
 
