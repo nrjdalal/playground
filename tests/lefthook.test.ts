@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from "node:fs"
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -538,45 +538,62 @@ test("the pre-commit build waits for a run slot through commit-slot, env-keys' s
   expect(String(envKeys!.run)).toStartWith(`${CACHE}bunx turbo run build `)
 })
 
-// lefthook on this repo's own main-checkout step, in a scratch repo with a linked worktree: a commit in the checkout itself is refused whatever command made it, and one in the worktree goes through
-test("the pre-commit main-checkout step refuses a commit in the main checkout and passes in a worktree", async () => {
+// lefthook on this repo's own main-checkout step, in scratch repos under a scratch HOME: a commit in the factory's main checkout (where link-skills.sh's run-slot.sh link points) is refused whatever command made it, while one in its worktree, a plain clone of a person's own or a clone beside it goes through
+test("the pre-commit main-checkout step refuses a commit in the factory's main checkout alone", async () => {
   const config = Bun.YAML.parse(await Bun.file(join(ROOT, "lefthook.yml")).text()) as {
-    "pre-commit": { commands: Record<string, Record<string, unknown>>; piped?: boolean }
+    "pre-commit": { commands: Record<string, Record<string, unknown>> }
   }
   const { "conflict-markers": markers, "main-checkout": main } = config["pre-commit"].commands
   expect(main).toBeDefined()
   expect(main!.priority as number).toBeLessThanOrEqual(markers!.priority as number)
-  const dir = mkdtempSync(join(tmpdir(), "lefthook-main-"))
-  const [checkout, worktree] = [join(dir, "main"), join(dir, "main/.claude/worktrees/w")]
-  const run = (cwd: string, argv: string[]) => {
-    const result = Bun.spawnSync(argv, { cwd, env: SCRATCH_ENV, stdin: "ignore" })
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), "lefthook-main-")))
+  const [factory, home, clone] = ["playground", "home", "clone"].map((name) => join(dir, name)) as [
+    string,
+    string,
+    string,
+  ]
+  const worktree = join(factory, ".claude/worktrees/w")
+  const run = (cwd: string, argv: string[], linked = true) => {
+    const env = { ...SCRATCH_ENV, HOME: linked ? home : join(dir, "nohome") }
+    const result = Bun.spawnSync(argv, { cwd, env, stdin: "ignore" })
     return { code: result.exitCode, out: result.stdout.toString() + result.stderr.toString() }
   }
   const git = (cwd: string, ...args: string[]) =>
     run(cwd, ["git", "-c", "user.name=t", "-c", "user.email=t@t", ...args])
   // a staged file, since lefthook skips a command when nothing is staged
-  const hook = async (cwd: string) => {
+  const hook = async (cwd: string, linked = true) => {
     await Bun.write(join(cwd, "x.txt"), "x")
     expect(git(cwd, "add", "x.txt")).toMatchObject({ code: 0 })
-    return run(cwd, ["bun", join(ROOT, LEFTHOOK_BIN), "run", "pre-commit"])
+    return run(cwd, ["bun", join(ROOT, LEFTHOOK_BIN), "run", "pre-commit"], linked)
   }
-  try {
-    mkdirSync(checkout)
-    expect(git(checkout, "init", "-q", "-b", "main")).toMatchObject({ code: 0 })
+  const repo = async (path: string) => {
+    mkdirSync(join(path, "scripts/ops"), { recursive: true })
+    expect(git(path, "init", "-q", "-b", "main")).toMatchObject({ code: 0 })
+    await Bun.write(join(path, "scripts/ops/run-slot.sh"), "")
     await Bun.write(
-      join(checkout, "lefthook.yml"),
+      join(path, "lefthook.yml"),
       JSON.stringify({ "pre-commit": { commands: { "main-checkout": main } } }),
     )
-    expect(git(checkout, "add", "lefthook.yml")).toMatchObject({ code: 0 })
-    expect(git(checkout, "commit", "-q", "--no-verify", "-m", "config")).toMatchObject({ code: 0 })
-    expect(git(checkout, "worktree", "add", "-q", "-b", "w", worktree)).toMatchObject({ code: 0 })
+    expect(git(path, "add", ".")).toMatchObject({ code: 0 })
+    expect(git(path, "commit", "-q", "--no-verify", "-m", "config")).toMatchObject({ code: 0 })
+  }
+  try {
+    await repo(factory)
+    await repo(clone)
+    expect(git(factory, "worktree", "add", "-q", "-b", "w", worktree)).toMatchObject({ code: 0 })
+    // link-skills.sh's link, which names the factory's main checkout
+    mkdirSync(join(home, ".playground/ops"), { recursive: true })
+    symlinkSync(join(factory, "scripts/ops/run-slot.sh"), join(home, ".playground/ops/run-slot.sh"))
 
-    const refused = await hook(checkout)
+    const refused = await hook(factory)
     expect(refused.code).not.toBe(0)
-    expect(refused.out).toContain("the main checkout")
-    mkdirSync(join(checkout, "sub"))
-    expect((await hook(join(checkout, "sub"))).code).not.toBe(0)
+    expect(refused.out).toContain("the factory's main checkout")
+    mkdirSync(join(factory, "sub"))
+    expect((await hook(join(factory, "sub"))).code).not.toBe(0)
+
     expect(await hook(worktree)).toMatchObject({ code: 0 })
+    expect(await hook(clone)).toMatchObject({ code: 0 })
+    expect(await hook(factory, false)).toMatchObject({ code: 0 })
   } finally {
     rmSync(dir, { force: true, recursive: true })
   }

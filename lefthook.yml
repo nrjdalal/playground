@@ -5,10 +5,10 @@ pre-commit:
   piped: true
   commands:
     main-checkout:
-      # first: a commit in the main checkout (its root is its common git dir's parent) is refused whatever wrapper, shell or cwd made it, behind the no-main-checkout hook
+      # first: a commit in the factory's main checkout, the one link-skills.sh links run-slot.sh from, is refused whatever wrapper, shell or cwd made it, behind the no-main-checkout hook; any other clone commits as before
       priority: 1
       run: >-
-        test "$(git rev-parse --show-toplevel)" != "$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")" || { echo "main-checkout: this is the main checkout; commit in a worktree under .claude/worktrees/ (AGENTS.md, Workflow)" >&2; exit 1; }
+        case "$(readlink -f "$HOME/.playground/ops/run-slot.sh" 2>/dev/null)" in "$(git rev-parse --show-toplevel)/scripts/ops/run-slot.sh") echo "main-checkout: this is the factory's main checkout; commit in a worktree under .claude/worktrees/ (AGENTS.md, Workflow)" >&2; exit 1;; esac
     conflict-markers:
       # before lint-staged, whose formatter can rewrite a staged conflict marker into Markdown that reads clean
       priority: 1
