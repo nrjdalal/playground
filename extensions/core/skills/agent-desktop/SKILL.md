@@ -35,9 +35,9 @@ Done when every command in the session runs headless.
 
 ## 4. Leave the owner's apps alone
 
-Name only apps off the owner's list in a snapshot, act, launch or close. Read the list from Playground's checkout with `bun packages/scripts/src/playground/guard-list.ts no-desktop-owner-app desktop-owner-apps`, which prints it as JSON; while it exits 2 (no hook reads the list yet), the list is the owner's browser and Slack. The owner's login extension fills the list, an app leaves it only when Ops edits that extension on the owner's word, and the `no-desktop-owner-app` hook refuses a command that names a listed app once it is registered.
+Name only apps off the owner's list in a snapshot, act, launch or close, matching a name in any case and with or without `.app`. Read the list with `bun "$PLAYGROUND_REPO/packages/scripts/src/playground/guard-list.ts" no-desktop-owner-app desktop-owner-apps`, which prints it as JSON. While it exits 2 with `no guard list desktop-owner-apps` (no hook reads the list yet), the list is every web browser and Slack; any other exit 2 is a list the reader cannot trust, so stop and tell your manager. The owner's login extension fills the list, an app leaves it only when Ops edits that extension on the owner's word, and the `no-desktop-owner-app` hook refuses a command that names a listed app once it is registered.
 
-Done when every app the session's commands name is off the list the reader printed, or off the owner's browser and Slack while the reader exits 2.
+Done when every app the session's commands name is off the list the reader printed, or off every web browser and Slack while the reader answers `no guard list desktop-owner-apps`.
 
 ## 5. Keep desktop content private
 
