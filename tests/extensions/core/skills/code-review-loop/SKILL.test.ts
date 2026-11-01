@@ -282,6 +282,9 @@ describe("code-review-loop checks its own fixes and a repo scanner's landing (PG
     expect(step.split("**Done when**")[1] ?? "").toContain(
       "each waiting 5/5's head has a `merge-tree` check against the newest `origin/canary`",
     )
+    expect(step).toContain(
+      "On a stack held at 5/5 until the owner's try, that verdict is what starts a canary sync (playbook's DISPATCH.md, its held-stack line)",
+    )
     const last = text.split("## The last 5/5")[1]?.split("\n## ")[0] ?? ""
     expect(last).toContain(
       "First `git -C <clone> merge-tree --write-tree <head> origin/canary`: a conflict there is a blocking finding, which goes to the worker with the merge",
