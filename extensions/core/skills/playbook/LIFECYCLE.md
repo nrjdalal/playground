@@ -137,6 +137,8 @@ After a restart, a PR body is pulled back with `gh pr view <n> --json body -q .b
 
 Every start and every end, with its reason, lands in the roster the moment it happens (**roster**).
 
+A session takes its skills from the copy written when it started (`~/.playground/orgs/<set>/<hash>/`), so after a ship a live session reads each changed skill's files from the folder `playground update` names in the main checkout (**release**).
+
 ## Updating Claude Code
 
 Factory sessions and sessions started in this checkout update Claude Code only when someone runs the update: `DISABLE_AUTOUPDATER` in `scripts/factory-settings.json` and `.claude/settings.json` turns their background updates off ([Claude Code's setup docs](https://code.claude.com/docs/en/setup#disable-auto-updates)).
