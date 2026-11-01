@@ -389,6 +389,8 @@ const CONFIG_WRITE =
 const CONFIG_READ = /^--(?:get|get-all|get-color|get-colorbool|get-regexp|get-urlmatch|list)$|^-l$/
 const CONFIG_TAKES = new Set(["--blob", "--default", "-f", "--file", "--type"])
 let changed = false
+// Under anyWrite, whether an earlier command in the call may switch the branch a bare push reads its remote from.
+let switched = false
 let builtins: Set<string> | undefined
 const MCP_TOOL = /^mcp__(.+?)__(.+)$/
 const READ_TOOL =
@@ -483,6 +485,7 @@ const leak: Visit = async (cmd, parsed, env) => {
   const args =
     appended && parsed.args.at(-1) !== XARGS_INPUT ? [...parsed.args, XARGS_INPUT] : parsed.args
   if (policy.anyWrite && changesState(cmd, parsed)) changed = true
+  if (policy.anyWrite && switchesBranch(parsed)) switched = true
   const head = args[0]?.value ?? ""
   const group = GH_GROUPS.has(head) || (policy.anyWrite && (head === "alias" || head === "repo"))
   if (name === "gh" || (first?.unknown && group)) {
@@ -529,6 +532,15 @@ function changesState(cmd: Command, { args, name }: Parsed): boolean {
   }
   const targets = cmd.redirects.flatMap((r) => (r.target ? [r.target] : []))
   return [...args, ...targets].some((w) => GIT_CONFIG_PATH.test(w.value))
+}
+
+// Under anyWrite, whether a command may switch the checkout's branch: git switch or checkout, or gh pr checkout.
+function switchesBranch({ args, name }: Parsed): boolean {
+  if (name === "gh") return ghCommand(args).head.join(" ") === "pr checkout"
+  if (name !== "git") return false
+  const words = args.map((a) => a.value)
+  const sub = words.find((w, i) => !w.startsWith("-") && !GIT_GLOBALS.has(words[i - 1]))
+  return sub === "switch" || sub === "checkout"
 }
 
 // The repositories gh falls back to, none it can trust under anyWrite once an earlier command in the call changed them.
@@ -1178,11 +1190,10 @@ function pushTarget(remote: Word | undefined, dir: string | undefined): Target {
   }
   if (!remote) {
     const names = lines(["remote"])
-    // remote.pushDefault and the current branch's pushRemote and remote pick the push's remote, and each may hold a URL; another branch's do not.
+    // remote.pushDefault and the current branch's pushRemote and remote pick the push's remote, and each may hold a URL; after a same-call switch any branch's may.
     const branch = lines(["symbolic-ref", "--short", "HEAD"])?.[0]
-    const current = branch
-      ? `|branch\\.${branch.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\.(pushremote|remote)`
-      : ""
+    const name = switched ? ".*" : branch?.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+    const current = name ? `|branch\\.${name}\\.(pushremote|remote)` : ""
     const keys = lines(["config", "--get-regexp", `^(remote\\.pushdefault${current})$`])
     const picked = (keys ?? [])
       .map((line) => line.slice(line.indexOf(" ") + 1))
@@ -1387,6 +1398,7 @@ export async function inspectAs(
 ): Promise<string | undefined> {
   policy = given
   changed = false
+  switched = false
   try {
     return await inspect(raw, environment)
   } catch (error) {

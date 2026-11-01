@@ -70,6 +70,8 @@ beforeAll(async () => {
   dirs.stale = await clone("stale", ["origin", OTHER])
   git(dirs.stale, "config", "branch.old.remote", "gone")
   git(dirs.stale, "config", "branch.dev.pushRemote", EXT)
+  dirs.switch = await clone("switch", ["origin", OTHER])
+  git(dirs.switch, "config", "branch.feat.remote", EXT)
   dirs.alias = await clone("alias", ["origin", OTHER])
   git(dirs.alias, "config", "alias.p", "push")
   git(dirs.alias, "config", "alias.pp", "p --force")
@@ -114,7 +116,7 @@ const refused = async (raw: string, data = stored, extra: Record<string, string>
 // Each row: what it is, the command, and the folder it runs in.
 type Row = [string, string, string?]
 const at = (dir: string) => dirs[dir]
-// Every row as three, so bun:test hands the callback no done argument, which would turn an assertion that fails into a timeout.
+// Every row as three, so bun:test hands the callback no done argument, which it would read as its dir.
 const rows = (table: Row[]): [string, string, string][] =>
   table.map(([name, command, dir = "other"]) => [name, command, dir])
 
@@ -316,6 +318,17 @@ describe("a push resolves its target the way git does, and one it cannot place i
       ["gh's publish-step delete", "gh release delete v1 -y --cleanup-tag -R quillco/acme-skills"],
       ["gh's publish-step upload", "gh release upload v1 x.tgz -R quillco/acme-skills"],
       ["gh pr merge by a variable in the extension clone", "gh pr merge $N", "ext"],
+      ["a bare push after git switch in the same call", "git switch -c feat && git push", "switch"],
+      [
+        "a bare push after git checkout in the same call",
+        "git checkout -b feat && git push",
+        "switch",
+      ],
+      [
+        "a bare push after gh pr checkout in the same call",
+        "gh pr checkout 1 && git push",
+        "switch",
+      ],
       [
         "xargs appending a gh api endpoint to a write",
         "echo repos/quillco/acme-skills/git/refs | xargs gh api -X POST",
@@ -546,6 +559,11 @@ describe("what it lets through", () => {
       ["a git alias that only reads", "git l", "alias"],
       ["xargs appending files to git add", "echo a b | xargs git add"],
       ["a bare push with a stale remote on another branch", "git push", "stale"],
+      [
+        "a push to a named remote after git switch",
+        "git switch -c feat && git push -u origin feat",
+        "switch",
+      ],
       ["xargs appending a gh api read", "echo repos/acme/tools | xargs gh api"],
       [
         "xargs appending pull requests to merge in another repository's clone",
