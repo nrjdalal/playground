@@ -357,6 +357,8 @@ ran_short() {
 }
 # the slot a command takes outside the queue: its rule's, else quick when it ran short its last 3 times, so a long run after short ones holds the one quick slot and sends the next back to the queue
 quick_kind() {
+  # a read command takes no slot and runs a bare true, so three short true runs in the log would take can-take and head down the quick lane, past their own exits (issue 285)
+  [ -n "$CAN_TAKE" ] && return
   local kind
   kind=$(quick_rule "$@")
   [ -z "$kind" ] && ran_short "$@" && kind=quick
