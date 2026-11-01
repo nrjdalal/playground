@@ -204,3 +204,41 @@ describe("a diff holding a long-lived connection is reviewed by a lifecycle tabl
     )
   })
 })
+
+describe("code-review-loop runs its newest text every round (PG-213)", () => {
+  test("step 1 opens by loading the skill again, and its Done when checks it", async () => {
+    const recover = (await skill()).match(/^1\. \*\*Recover\.\*\*.*$/m)?.[0] ?? ""
+    expect(recover).toStartWith(
+      "1. **Recover.** Call the Skill tool with `code-review-loop` again, so the round runs this skill's newest text.",
+    )
+    expect(recover.split("**Done when**")[1] ?? "").toContain(
+      "loaded code-review-loop again this round",
+    )
+    expect(await page()).toContain("loads the skill again at the start of every round")
+  })
+})
+
+describe("code-review-loop's round 1 greps each changed term", () => {
+  test("step 4 runs the changed-term grep in round 1, names its finding's shape and its Done when, with its measured case", async () => {
+    const step = (await skill()).match(/^4\. \*\*Review on two axes\.\*\*.*$/m)?.[0] ?? ""
+    expect(step).toContain(
+      "the changed-term grep (`git grep -l <term>` over the agent-facing docs) for each term whose meaning the diff changes",
+    )
+    expect(step).toContain(
+      "file every list or doc either leaves behind as one such finding, each as `file:line`",
+    )
+    expect(step).toContain("7 rounds")
+    expect(step.split("**Done when**")[1] ?? "").toContain(
+      "its changed-term grep for each term whose meaning it changes",
+    )
+    expect(await page()).toContain("each term whose meaning the diff changes")
+  })
+
+  test("AGENTS.md's pre-review pass runs the same grep before round 1", async () => {
+    const agents = await Bun.file(join(root, "AGENTS.md")).text()
+    const line = agents.split("\n").find((l) => l.includes("changed-term grep")) ?? ""
+    expect(line).toContain("`git grep -l <term>`")
+    expect(line).toContain("each term whose meaning the diff changes")
+    expect(agents).toContain("each list grep and changed-term grep with its hits")
+  })
+})

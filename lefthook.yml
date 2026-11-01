@@ -35,7 +35,7 @@ pre-commit:
         - ".agents/testing.md"
         - "AGENTS.md"
         - "CLAUDE.md"
-        - "docs/playground/playbook.md"
+        - "docs/playground/*.md"
         - "packages/scripts/src/docs-wrap/*.ts"
         - "scripts/README.md"
         - "scripts/hooks/README.md"

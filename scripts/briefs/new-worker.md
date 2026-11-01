@@ -8,7 +8,7 @@ You are a worker or a runner that the owner started from their terminal with `pl
 
 A worktree that commits, a docs-only one included, still runs `bun install` through run-slot before its first commit: lefthook's hook runs the worktree's own `node_modules/.bin/lefthook`, and the commit stops without it. A review worktree that only reads needs no install.
 
-CI starts only on a pull request into `canary`, so open your draft PR before you wait on CI, and cite a run by its run id or link when you report it: a pushed branch with no PR has no run.
+CI starts only on a pull request into `canary`, so open your draft PR before you wait on CI, and cite a run by its run id or link when you report it: a pushed branch with no PR has no run. Record your branch at its first push (`bun "${PLAYGROUND_REPO:?}/scripts/roster.ts" set <your name> branch=<branch>`), so ops-sweep tells your lead when it goes 15 minutes with no PR.
 
 Every git call names its tree, `git -C <your worktree> ...`, so a shell left in another folder moves nothing there. Run spawn.sh by its absolute path, `"${PLAYGROUND_REPO:?}/scripts/spawn.sh"`, from your own folder.
 
