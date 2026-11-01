@@ -675,12 +675,15 @@ async function cdTarget(args: Word[], env: Env): Promise<string | undefined> {
   }
 }
 
+// A shell's options that take the next word as their value.
+const SHELL_TAKES = new Set(["-o", "+o", "-O", "+O", "--init-file", "--rcfile"])
+
 // A shell's first operand, and whether -c makes it the script's text rather than a script file's name; no operand means the shell reads its script from stdin.
 export function shellOperand(args: Word[]): { inline: boolean; operand?: Word } {
   let inline = false
   for (let k = 0; k < args.length; k++) {
     const v = args[k].value
-    if (v === "-o" || v === "+o") k++
+    if (SHELL_TAKES.has(v)) k++
     else if (/^[-+][A-Za-z]+$/.test(v)) inline ||= v.startsWith("-") && v.includes("c")
     else if (!v.startsWith("--")) return { inline, operand: args[k] }
   }

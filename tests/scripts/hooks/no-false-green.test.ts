@@ -136,6 +136,14 @@ describe("a run whose exit status is the test's own runs", () => {
       $label: "a test run piped into run-slot with nothing after its --, which runs nothing",
       command: "bun test x | ~/.playground/ops/run-slot.sh worker-x --",
     },
+    {
+      $label: "a test run piped into bash run-slot with nothing after its --, which runs nothing",
+      command: "bun test x | bash ~/.playground/ops/run-slot.sh worker-x --",
+    },
+    {
+      $label: "a test run piped into bash run-slot with no --, which runs nothing",
+      command: "bun test x | bash ~/.playground/ops/run-slot.sh worker-x",
+    },
     { $label: "pipefail first", command: "set -o pipefail; bun test x | tail -5" },
     {
       $label: "PIPESTATUS after",
