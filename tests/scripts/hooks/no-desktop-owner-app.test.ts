@@ -46,7 +46,6 @@ describe("--headed", () => {
     ["with a value", "agent-desktop hover @s8f3k2p9:e5 --headed=true"],
     ["behind bash -c", `bash -c 'agent-desktop click @s8f3k2p9:e5 --headed'`],
     ["behind zsh -O -c", `zsh -O -c 'agent-desktop click @s8f3k2p9:e5 --headed'`],
-    // bash's -O takes a shopt name, so the script is the text after -c, not extglob
     ["behind bash -O extglob -c", `bash -O extglob -c 'agent-desktop click @s8f3k2p9:e5 --headed'`],
     ["behind env", "env agent-desktop click @s8f3k2p9:e5 --headed"],
     ["behind run-slot", "~/.playground/ops/run-slot.sh w -- agent-desktop click @s1:e5 --headed"],
@@ -169,6 +168,8 @@ describe("what the hook cannot read is refused", () => {
 
   test("a script file that names a listed app", async () => {
     expect(await bash(`bash ${script}`)).toContain("Slack")
+    // bash's -O takes a shopt name, so the script file is the word after it: the shell's name has to reach the reader
+    expect(await bash(`bash -O extglob ${script}`)).toContain("Slack")
     expect(await bash(`source ${script}`)).toContain("no-desktop-owner-app hook refused")
   })
 })
