@@ -50,6 +50,7 @@ Its waiter for the next push polls GitHub's REST API, so a reviewer waiting all 
 - A reviewer stays up after its 5/5, its waiter on the head, until the PR merges or stays closed a poll later (Checks closes and reopens a PR to rebuild its merge commit), so a canary move after the score gets its merge round from the same session, not a new one.
 - A reviewer idle 30 minutes with every head scored may be ended by the factory's 5-minute check, and its worker resumes it under the same name on the next push.
 - A 5/5 can go stale with no push and no conflict: each time the reviewer sees canary move, it diffs what landed since each waiting 5/5's canary, checks that PR for any file:line or quoted text in those files, and scores each match again.
+  When a test that scans the repo lands on canary, it runs the touched tests on a local merge before it calls a waiting 5/5 still good, since a clean merge can still fail that test.
 - The touched tests a reviewer runs come from the diff: the test of every file the PR changes, every test file it changes, every test that names or imports one of those files, by its path or from the test's own folder, plus the tests that scan the whole repo;
   `state.py touched-tests` lists them, and in a Python repo it adds each test that scans a folder holding a changed file and, when a prompt template changes, each test that pins a built prompt's digest.
 - When GitHub's `test` and `Audit, Lint, and Build` checks are green at the exact head, and canary has changed none of the PR's files since the base that run merged, the last 5/5 cites that run's link in place of a local run of the touched tests, since CI already ran the whole suite there.
@@ -69,6 +70,7 @@ Its waiter for the next push polls GitHub's REST API, so a reviewer waiting all 
 - A test that fails only on the runner box counts against the score once a rerun on the Mac fails too, so a difference in the box alone never lowers a score.
 - A report that fails to send by name reaches the worker anyway, sent again to the `uds:` address its newest message came from.
 - The reviewer's small fix goes to the worker as a patch, never as a commit of its own, since ADR 0004 makes the gate a reviewer independent of the code it scores: save `git -C <clone> diff > <scratch>/fix.patch`, restore the clone, check it with `git -C <clone> apply --check <scratch>/fix.patch`, and hand it over, since the worker applies it word for word.
+  It applies a patch or a suggested wording in its clone and runs the checks its files call for before it posts, so its own fix never costs the PR a round.
 - After a compaction, a resume, or a notice that background tasks did not finish before the previous session ended, the reviewer runs `state.py pr` for each PR it holds and re-arms every `state.py wait` with none running, since an account flip kills the waiters with no notice.
 - A finding that asks for a behaviour states the behaviour wanted, not only the defect.
 - On a collaborator's org PR whose review ask came to you, the session that posts your review replies to the ask right after, in the same DM or thread, with what you approved and any blocking note.
