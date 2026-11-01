@@ -3,6 +3,9 @@ import { join } from "node:path"
 
 import { kindOf, placedKindOf } from "@packages/config/kinds"
 
+import STATUSES from "../../../../scripts/roster-statuses.json"
+import { leadName } from "../ops-session-resume/resume"
+import { factoryRepoOf } from "../playground/setting"
 import { writeAtomic } from "../write-atomic"
 
 export type Run = (
@@ -10,11 +13,12 @@ export type Run = (
   options?: { cwd?: string; env?: Record<string, string | undefined>; timeoutMs?: number },
 ) => Promise<{ code: number; err: string; out: string }>
 
-// cfg is Claude Code's config folder, data the factory's folder in it, ops the ops jobs' state, dashboard the live dashboard's checkout, main the main checkout and repo the checkout this job runs from.
+// cfg is Claude Code's config folder, data the factory's folder in it, ops the ops jobs' state, dashboard the live dashboard's checkout, main the main checkout, repo the checkout this job runs from, and factory the factory's GitHub repository (factory.repo by default).
 export type Context = {
   cfg: string
   data: string
   dashboard: string
+  factory?: () => Promise<string>
   load: () => number
   main: string
   now: () => number
@@ -28,8 +32,10 @@ type Json = Record<string, unknown>
 export const HEADROOM = 85
 export const IDLE_DB_AFTER = 7200
 export const IDLE_DB_GAP = 900
+export const NO_PR_AFTER = 900
 export const PRUNE_EVERY = 21600
-export const STALE_EVERY = 1800
+export const REVIEWER_LATE = 1200
+export const STALE_EVERY = 14_400
 
 const IDLE_SQL =
   "select count(*) from pg_stat_activity where backend_type = 'client backend' and pid <> pg_backend_pid()"
@@ -105,8 +111,9 @@ export async function forecast(ctx: Context): Promise<Record<string, number>> {
   try {
     const rl = JSON.parse(await Bun.file(join(ctx.data, "usage.json")).text()).rate_limits
     s = {
-      f5: rl.five_hour.used_percentage,
-      r5: rl.five_hour.resets_at,
+      // an account with no 5-hour window (usage.json leaves it out) projects its week alone
+      f5: rl.five_hour?.used_percentage,
+      r5: rl.five_hour?.resets_at,
       r7: rl.seven_day.resets_at,
       s7: rl.seven_day.used_percentage,
       t: Math.floor(seconds(ctx)),
@@ -167,7 +174,7 @@ export async function opsDown(ctx: Context): Promise<string[]> {
   return out
 }
 
-// Each answer of the owner's that its poster has not closed within 15 minutes (bun run ask stale): a live poster gets one outbox line, again every STALE_EVERY seconds while it stays open; a poster with no live session is a finding.
+// Each answer of the owner's that its poster has not closed within 15 minutes (bun run ask stale): a live poster gets one outbox line, then at most one every STALE_EVERY seconds (4 hours) while it stays open, by the item's tag in stale-told.json; a poster with no live session is a finding.
 export async function chaseStale(ctx: Context, live: Map<string, string>): Promise<string[]> {
   const r = await ctx.run(dashboardAsk(ctx, "stale", "--minutes", "15"))
   if (r.code) return ["stale-unreadable"]
@@ -196,6 +203,158 @@ export async function chaseStale(ctx: Context, live: Map<string, string>): Promi
   }
   await writeAtomic(path, JSON.stringify(keep))
   return out
+}
+
+const pullOf = (pr: unknown, repo: string): number | undefined => {
+  const m =
+    /^#?(\d+)$/.exec(String(pr ?? "").trim()) ??
+    new RegExp(`github\\.com/${repo}/pull/(\\d+)$`, "i").exec(String(pr ?? ""))
+  return m ? Number(m[1]) : undefined
+}
+
+// A worker's PR whose head has been ready (its checks green) REVIEWER_LATE seconds with no review round (a ReviewBot verdict at any head) and no live session for the reviewer the roster names on it: one line to the worker's lead, once per head, since a reviewer started late or by hand left heads ready for over an hour. A parked row waits by design, as the runner check below reads it.
+export async function lateReviewers(
+  ctx: Context,
+  agents: Json[],
+  live: Map<string, string>,
+): Promise<string[]> {
+  const open = agents.filter((a) => a.status !== "ended" && a.status !== "parked")
+  if (!open.some((a) => a.pr && kindOf(String(a.name), a.kind) === "worker")) return []
+  let repo: string
+  try {
+    repo = (await (ctx.factory ?? (() => factoryRepoOf()))()).toLowerCase()
+  } catch {
+    return ["reviewer-check-unreadable"]
+  }
+  const workers = new Map<number, string>()
+  for (const a of open) {
+    const n = pullOf(a.pr, repo)
+    if (n !== undefined && kindOf(String(a.name), a.kind) === "worker")
+      workers.set(n, String(a.name))
+  }
+  if (!workers.size) return []
+  const fields =
+    "state headRefOid comments(last: 100) { nodes { body } } commits(last: 1) { nodes { commit { statusCheckRollup { state contexts(first: 100) { nodes { ... on CheckRun { completedAt } ... on StatusContext { createdAt } } } } } } }"
+  const [owner, name] = repo.split("/")
+  const query = `{ repository(owner: "${owner}", name: "${name}") { ${[...workers.keys()].map((n) => `p${n}: pullRequest(number: ${n}) { ${fields} }`).join(" ")} } }`
+  const r = await ctx.run(["gh", "api", "graphql", "-f", `query=${query}`], { timeoutMs: 60_000 })
+  let pulls: Record<string, Json | null>
+  try {
+    pulls = JSON.parse(r.out).data.repository
+  } catch {
+    return ["reviewer-check-unreadable"]
+  }
+  const path = join(here(ctx), "reviewer-told.json")
+  const told = (await readJson<Record<string, string>>(path, {})) ?? {}
+  const keep: Record<string, string> = {}
+  const now = seconds(ctx)
+  for (const [n, worker] of workers) {
+    const pr = pulls?.[`p${n}`] as {
+      comments?: { nodes?: { body?: string }[] }
+      commits?: {
+        nodes?: {
+          commit?: {
+            statusCheckRollup?: {
+              contexts?: { nodes?: { completedAt?: string; createdAt?: string }[] }
+              state?: string
+            }
+          }
+        }[]
+      }
+      headRefOid?: string
+      state?: string
+    } | null
+    if (!pr || pr.state !== "OPEN" || !pr.headRefOid) continue
+    if (told[n] === pr.headRefOid) keep[n] = pr.headRefOid
+    const rollup = pr.commits?.nodes?.[0]?.commit?.statusCheckRollup
+    if (rollup?.state !== "SUCCESS") continue
+    const readyAt = Math.max(
+      0,
+      ...(rollup.contexts?.nodes ?? []).map(
+        (c) => Date.parse(c.completedAt ?? c.createdAt ?? "") / 1000 || 0,
+      ),
+    )
+    if (!readyAt || now - readyAt < REVIEWER_LATE) continue
+    if ((pr.comments?.nodes ?? []).some((c) => /^## ReviewBot · round /.test(c.body ?? "")))
+      continue
+    const reviewers = open.filter(
+      (a) => kindOf(String(a.name), a.kind) === "reviewer" && pullOf(a.pr, repo) === n,
+    )
+    if (reviewers.some((a) => live.has(String(a.name)))) continue
+    if (keep[n] === pr.headRefOid) continue
+    keep[n] = pr.headRefOid
+    const minutes = Math.floor((now - readyAt) / 60)
+    const named = reviewers.map((a) => String(a.name)).join(", ")
+    const text = `PR #${n} (${worker}): its head ${pr.headRefOid.slice(0, 7)} has been ready ${minutes}m with no review round and ${named ? `no live session for ${named}` : "no reviewer on the roster"}. Start its reviewer, or ask ${worker} to.`
+    await ctx.run(notifyArgv(ctx, text), {
+      env: { ...process.env, NOTIFY_TO: await leadName(ctx.ops, worker) },
+      timeoutMs: 60_000,
+    })
+  }
+  await writeAtomic(path, JSON.stringify(keep))
+  return []
+}
+
+// A live worker's PG branch whose head is NO_PR_AFTER seconds old with no PR in any state: one line to the worker's lead, once per head, since CI runs only on a PR into canary, so a lead can plan around a run that never started. The branch is the one its row records at first push (playbook's ROSTER.md); a row holding a pr, or one whose status is not live, is not read, and one GraphQL read covers every branch.
+export async function prlessBranches(ctx: Context, agents: Json[]): Promise<string[]> {
+  const workerOf = new Map<string, string>()
+  for (const a of agents)
+    if (
+      (STATUSES.live as string[]).includes(String(a.status)) &&
+      !a.pr &&
+      kindOf(String(a.name), a.kind) === "worker" &&
+      /^pg-\d+/i.test(String(a.branch ?? ""))
+    )
+      workerOf.set(String(a.branch), String(a.name))
+  if (!workerOf.size) return []
+  let repo: string
+  try {
+    repo = await (ctx.factory ?? (() => factoryRepoOf()))()
+  } catch {
+    return ["branch-check-unreadable"]
+  }
+  const branches = [...workerOf.keys()]
+  const [owner, name] = repo.split("/")
+  const query = `{ repository(owner: "${owner}", name: "${name}") { ${branches.map((b, i) => `b${i}: ref(qualifiedName: ${JSON.stringify(`refs/heads/${b}`)}) { associatedPullRequests { totalCount } target { ... on Commit { committedDate oid } } }`).join(" ")} } }`
+  const r = await ctx.run(["gh", "api", "graphql", "-f", `query=${query}`], { timeoutMs: 60_000 })
+  let refs: Record<string, Json | null>
+  try {
+    refs = JSON.parse(r.out).data.repository
+  } catch {
+    return ["branch-check-unreadable"]
+  }
+  const path = join(here(ctx), "branch-told.json")
+  const told = (await readJson<Record<string, string>>(path, {})) ?? {}
+  const keep: Record<string, string> = {}
+  const now = seconds(ctx)
+  for (const [i, branch] of branches.entries()) {
+    const ref = refs?.[`b${i}`] as {
+      associatedPullRequests?: { totalCount?: number }
+      target?: { committedDate?: string; oid?: string }
+    } | null
+    const oid = ref?.target?.oid
+    if (!ref || !oid || ref.associatedPullRequests?.totalCount !== 0) continue
+    const committed = Date.parse(ref.target?.committedDate ?? "") / 1000
+    if (!committed || now - committed < NO_PR_AFTER) continue
+    keep[branch] = oid
+    if (told[branch] === oid) continue
+    const worker = workerOf.get(branch)!
+    const text = `Branch ${branch} (${worker}): its head ${oid.slice(0, 7)} is ${Math.floor((now - committed) / 60)}m old and has no PR, so no CI runs on it. Open its draft PR so CI runs.`
+    await ctx.run(notifyArgv(ctx, text), {
+      env: { ...process.env, NOTIFY_TO: await leadName(ctx.ops, worker) },
+      timeoutMs: 60_000,
+    })
+  }
+  await writeAtomic(path, JSON.stringify(keep))
+  return []
+}
+
+// run-slot's runner-box route, which falls back to this Mac without a word: one finding naming each precondition run-slot.sh box-off reports failing (no-ci-sh, no-ssh-key, runner-host-off, slot-off).
+export async function boxRoute(ctx: Context): Promise<string[]> {
+  const r = await ctx.run([join(ctx.ops, "run-slot.sh"), "box-off"], { timeoutMs: 60_000 })
+  if (r.code) return ["box-route-unreadable"]
+  const why = r.out.split(/\s+/).filter(Boolean)
+  return why.length ? [`box-route-off:${why.join(",")}`] : []
 }
 
 // The dashboard database's container, the one publishing POSTGRES_URL's port from the dashboard's own .env, so it runs under any name; undefined when none passes.
@@ -248,7 +407,7 @@ export async function idleDbs(ctx: Context): Promise<string[]> {
   return out
 }
 
-// One read of runners, probes, the managers' asks, unclosed answers, the ops jobs, idle databases and the usage forecast.
+// One read of runners, probes, the managers' asks, unclosed answers, the ops jobs, idle databases, the runner-box route, late reviewers, branches with no PR and the usage forecast.
 export async function check(ctx: Context): Promise<string[]> {
   let roster: Json
   try {
@@ -304,6 +463,9 @@ export async function check(ctx: Context): Promise<string[]> {
   found.push(...(await chaseStale(ctx, live)))
   found.push(...(await opsDown(ctx)))
   found.push(...(await idleDbs(ctx)))
+  found.push(...(await boxRoute(ctx)))
+  found.push(...(await lateReviewers(ctx, agents, live)))
+  found.push(...(await prlessBranches(ctx, agents)))
   const projected = Object.values(await forecast(ctx))
   if (projected.length) found.push(projected.some((v) => v > HEADROOM) ? "no-headroom" : "headroom")
   return found

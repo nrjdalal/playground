@@ -12,6 +12,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import {
+  boxRoute,
   chaseStale,
   check,
   type Context,
@@ -19,9 +20,11 @@ import {
   IDLE_DB_AFTER,
   IDLE_DB_GAP,
   idleDbs,
+  lateReviewers,
   maybePrune,
   opsDown,
   pass,
+  prlessBranches,
   type Run,
 } from "../../../../../packages/scripts/src/ops-sweep/sweep"
 
@@ -269,9 +272,282 @@ describe("chaseStale", () => {
     expect(calls.filter((c) => c.argv[1] === "/repo/scripts/ops/notify.sh")).toHaveLength(1)
   })
 
+  test("reports an unclosed answer once, stays quiet on it for 4 hours, then reports it again (#129)", async () => {
+    const { calls, ctx } = setup({ [STALE]: { out: lines } })
+    const live = new Map([["builder", "busy"]])
+    const told = () => calls.filter((c) => c.argv[1] === "/repo/scripts/ops/notify.sh").length
+    const at = (minutes: number) => {
+      ctx.now = () => NOW + minutes * 60_000
+      return chaseStale(ctx, live)
+    }
+    await at(0)
+    await at(5)
+    await at(60)
+    await at(239)
+    expect(told()).toBe(1)
+    await at(240)
+    expect(told()).toBe(2)
+  })
+
   test("a failed read is stale-unreadable", async () => {
     const { ctx } = setup({ [STALE]: { code: 1 } })
     expect(await chaseStale(ctx, new Map())).toEqual(["stale-unreadable"])
+  })
+})
+
+describe("boxRoute", () => {
+  const route = async (reply: { code?: number; out?: string }) => {
+    const { ctx, ops } = setup()
+    const argvs: string[][] = []
+    ctx.run = async (argv) => {
+      argvs.push(argv)
+      return { code: reply.code ?? 0, err: "", out: reply.out ?? "" }
+    }
+    const found = await boxRoute(ctx)
+    expect(argvs).toEqual([[join(ops, "run-slot.sh"), "box-off"]])
+    return found
+  }
+
+  test("names each failing precondition run-slot.sh box-off prints in one finding, and none when the route can fire (#129)", async () => {
+    expect(await route({ out: "no-ci-sh\nno-ssh-key\n" })).toEqual([
+      "box-route-off:no-ci-sh,no-ssh-key",
+    ])
+    expect(await route({ out: "slot-off\n" })).toEqual(["box-route-off:slot-off"])
+    expect(await route({ out: "" })).toEqual([])
+    expect(await route({ code: 2 })).toEqual(["box-route-unreadable"])
+  })
+})
+
+describe("lateReviewers", () => {
+  const minutesAgo = (m: number) => new Date(NOW - m * 60_000).toISOString()
+  // one PR as GitHub's GraphQL answers it: open, its head's checks in the rollup state given, the last finishing `ready` minutes ago, and the comments given
+  const answer = (ready: number, comments: string[] = [], state = "SUCCESS") =>
+    JSON.stringify({
+      data: {
+        repository: {
+          p145: {
+            comments: { nodes: comments.map((body) => ({ body })) },
+            commits: {
+              nodes: [
+                {
+                  commit: {
+                    statusCheckRollup: {
+                      contexts: {
+                        nodes: [
+                          { completedAt: minutesAgo(ready + 5) },
+                          { completedAt: minutesAgo(ready) },
+                        ],
+                      },
+                      state,
+                    },
+                  },
+                },
+              ],
+            },
+            headRefOid: "b9861d6aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            state: "OPEN",
+          },
+        },
+      },
+    })
+  const late = async (
+    reply: string,
+    live: [string, string][] = [],
+    reviewer = true,
+    status = "working",
+  ) => {
+    const { ctx } = setup()
+    const told: Call[] = []
+    ctx.factory = async () => "acme/app"
+    ctx.run = async (argv, options = {}) => {
+      if (argv[1] === "/repo/scripts/ops/notify.sh") told.push({ argv, env: options.env })
+      return { code: 0, err: "", out: argv[0] === "gh" ? reply : "" }
+    }
+    const agents = [
+      { kind: "builder", name: "builder" },
+      {
+        kind: "worker",
+        name: "abcdef-worker",
+        pr: "https://github.com/acme/app/pull/145",
+        status,
+      },
+      ...(reviewer ? [{ kind: "reviewer", name: "ghjkmn-reviewer", pr: "145", status }] : []),
+    ]
+    roster(ctx, agents)
+    const found = await lateReviewers(ctx, agents, new Map(live))
+    const again = told.length
+    await lateReviewers(ctx, agents, new Map(live))
+    return { again, found, told }
+  }
+
+  test("tells the worker's lead once per head when a head ready 20 minutes has no round and no live reviewer (#129)", async () => {
+    const { again, found, told } = await late(answer(21))
+    expect(found).toEqual([])
+    expect(again).toBe(1)
+    expect(told).toHaveLength(1)
+    expect(told[0]!.env?.NOTIFY_TO).toBe("builder")
+    expect(told[0]!.argv[3]).toBe(
+      "PR #145 (abcdef-worker): its head b9861d6 has been ready 21m with no review round and no live session for ghjkmn-reviewer. Start its reviewer, or ask abcdef-worker to.",
+    )
+    const none = await late(answer(21), [], false)
+    expect(none.told[0]!.argv[3]).toContain("no reviewer on the roster")
+  })
+
+  test("stays quiet before 20 minutes, after a review round, with a live reviewer, or while the checks are not green (#129)", async () => {
+    expect((await late(answer(19))).told).toEqual([])
+    expect((await late(answer(30, ["## ReviewBot · round 1: 3/5 at 1234567"]))).told).toEqual([])
+    expect((await late(answer(30), [["ghjkmn-reviewer", "busy"]])).told).toEqual([])
+    expect((await late(answer(30, [], "PENDING"))).told).toEqual([])
+  })
+
+  test("a parked worker's ready head sends nothing, while a working one's still alerts (#175)", async () => {
+    expect((await late(answer(30), [], true, "parked")).told).toEqual([])
+    expect((await late(answer(30), [], true, "working")).told).toHaveLength(1)
+  })
+
+  test("a GraphQL answer it cannot read is reviewer-check-unreadable", async () => {
+    expect((await late("not json")).found).toEqual(["reviewer-check-unreadable"])
+  })
+})
+
+describe("prlessBranches", () => {
+  const minutesAgo = (m: number) => new Date(NOW - m * 60_000).toISOString()
+  // each branch as GitHub's GraphQL answers it, by its alias: its head committed `age` minutes ago with `prs` PRs in any state, or null when the branch is not on GitHub
+  const answer = (branches: (null | { age: number; prs: number })[]) =>
+    JSON.stringify({
+      data: {
+        repository: Object.fromEntries(
+          branches.map((b, i) => [
+            `b${i}`,
+            b && {
+              associatedPullRequests: { totalCount: b.prs },
+              target: {
+                committedDate: minutesAgo(b.age),
+                oid: `c0ffee${i}aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`,
+              },
+            },
+          ]),
+        ),
+      },
+    })
+  const sweep = async (
+    reply: string,
+    rows: Record<string, unknown>[] = [
+      { branch: "PG-234-branch-no-pr", kind: "worker", name: "abcdef-worker", status: "working" },
+    ],
+  ) => {
+    const { ctx } = setup()
+    const told: Call[] = []
+    const queries: string[] = []
+    ctx.factory = async () => "acme/app"
+    ctx.run = async (argv, options = {}) => {
+      if (argv[1] === "/repo/scripts/ops/notify.sh") told.push({ argv, env: options.env })
+      if (argv[0] === "gh") queries.push(argv.join(" "))
+      return { code: 0, err: "", out: argv[0] === "gh" ? reply : "" }
+    }
+    const agents = [{ kind: "builder", name: "builder" }, ...rows]
+    roster(ctx, agents)
+    const found = await prlessBranches(ctx, agents)
+    const again = told.length
+    await prlessBranches(ctx, agents)
+    return { again, found, queries, told }
+  }
+
+  test("tells the worker's lead once per head when its PG branch's head is 15 minutes old with no PR (#234)", async () => {
+    const { again, found, told } = await sweep(answer([{ age: 16, prs: 0 }]))
+    expect(found).toEqual([])
+    expect(again).toBe(1)
+    expect(told).toHaveLength(1)
+    expect(told[0]!.env?.NOTIFY_TO).toBe("builder")
+    expect(told[0]!.argv[3]).toBe(
+      "Branch PG-234-branch-no-pr (abcdef-worker): its head c0ffee0 is 16m old and has no PR, so no CI runs on it. Open its draft PR so CI runs.",
+    )
+  })
+
+  test("tells the lead again when the branch's head moves and still has no PR (#234)", async () => {
+    const { ctx } = setup()
+    const told: string[] = []
+    let reply = answer([{ age: 20, prs: 0 }])
+    ctx.factory = async () => "acme/app"
+    ctx.run = async (argv) => {
+      if (argv[1] === "/repo/scripts/ops/notify.sh") told.push(argv[3]!)
+      return { code: 0, err: "", out: argv[0] === "gh" ? reply : "" }
+    }
+    const agents = [
+      { kind: "builder", name: "builder" },
+      { branch: "PG-234-branch-no-pr", kind: "worker", name: "abcdef-worker", status: "working" },
+    ]
+    roster(ctx, agents)
+    await prlessBranches(ctx, agents)
+    reply = reply.replace("c0ffee0", "beef000")
+    await prlessBranches(ctx, agents)
+    await prlessBranches(ctx, agents)
+    expect(told.map((line) => line.split(" ")[5])).toEqual(["c0ffee0", "beef000"])
+  })
+
+  test("stays quiet with a PR in any state, a head under 15 minutes, or a branch not on GitHub (#234)", async () => {
+    expect((await sweep(answer([{ age: 30, prs: 1 }]))).told).toEqual([])
+    expect((await sweep(answer([{ age: 14, prs: 0 }]))).told).toEqual([])
+    expect((await sweep(answer([null]))).told).toEqual([])
+  })
+
+  test("reads no row holding a pr, as a merged one does, and none whose status is not live (#234)", async () => {
+    const merged = await sweep(answer([{ age: 30, prs: 0 }]), [
+      {
+        branch: "PG-227-conventions-tighten",
+        kind: "worker",
+        name: "abcdef-worker",
+        pr: "https://github.com/acme/app/pull/230",
+        status: "working",
+      },
+    ])
+    expect(merged.queries).toEqual([])
+    expect(merged.told).toEqual([])
+    expect(
+      (
+        await sweep(answer([{ age: 30, prs: 0 }]), [
+          {
+            branch: "PG-234-branch-no-pr",
+            kind: "worker",
+            name: "abcdef-worker",
+            status: "waiting",
+          },
+        ])
+      ).told,
+    ).toHaveLength(1)
+    for (const status of ["done", "ended", "merged", "parked"]) {
+      const { queries, told } = await sweep(answer([{ age: 30, prs: 0 }]), [
+        { branch: "PG-234-branch-no-pr", kind: "worker", name: "abcdef-worker", status },
+      ])
+      expect(told).toEqual([])
+      expect(queries).toEqual([])
+    }
+  })
+
+  test("reads every worker's PG branch in one GraphQL call, and no other branch (#234)", async () => {
+    const { queries, told } = await sweep(
+      answer([
+        { age: 20, prs: 0 },
+        { age: 40, prs: 0 },
+      ]),
+      [
+        { branch: "PG-234-branch-no-pr", kind: "worker", name: "abcdef-worker", status: "working" },
+        { branch: "pg-235-other", kind: "worker", name: "ghjkmn-worker", status: "working" },
+        { branch: "fix-not-tracked", kind: "worker", name: "pqrstv-worker", status: "working" },
+      ],
+    )
+    expect(queries).toHaveLength(2)
+    expect(queries[0]).toContain('b0: ref(qualifiedName: "refs/heads/PG-234-branch-no-pr")')
+    expect(queries[0]).toContain('b1: ref(qualifiedName: "refs/heads/pg-235-other")')
+    expect(queries[0]).not.toContain("fix-not-tracked")
+    expect(told.map((c) => c.argv[3]!.split(":")[0])).toEqual([
+      "Branch PG-234-branch-no-pr (abcdef-worker)",
+      "Branch pg-235-other (ghjkmn-worker)",
+    ])
+  })
+
+  test("a GraphQL answer it cannot read is branch-check-unreadable (#234)", async () => {
+    expect((await sweep("not json")).found).toEqual(["branch-check-unreadable"])
   })
 })
 
@@ -350,6 +626,20 @@ describe("forecast", () => {
       },
     })
     expect(await forecast(ctx)).toEqual({})
+  })
+
+  test("an account with no 5-hour window still has its week projected", async () => {
+    const { ctx, sweep } = setup()
+    const t = NOW / 1000
+    const r7 = t + 86400
+    write(join(ctx.data, "usage.json"), {
+      rate_limits: { seven_day: { resets_at: r7, used_percentage: 40 } },
+    })
+    writeFileSync(
+      join(sweep, "usage-samples.jsonl"),
+      `${JSON.stringify({ r7, s7: 39, t: t - 3600 })}\n`,
+    )
+    expect(await forecast(ctx)).toEqual({ "7d": 64 })
   })
 })
 

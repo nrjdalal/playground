@@ -20,6 +20,26 @@ describe("updateSteps", () => {
     expect(updateSteps(["README.md", "package.json.bak"]).install).toBe(false)
   })
 
+  test("the skills a merge changed are each one folder, once, A to Z by name, for a live session to read the new text from", () => {
+    expect(
+      updateSteps([
+        "extensions/core/skills/pr/SKILL.md",
+        "extensions/core/skills/code-review-loop/scripts/state.py",
+        "extensions/core/skills/code-review-loop/SKILL.md",
+        "skills/zerostarter/ui-verify/SKILL.md",
+        "skills/playground/README.md",
+        "skills/playground/inbox/SKILL.md",
+        "extensions/core/rules/ci.md",
+      ]).skills,
+    ).toEqual([
+      "extensions/core/skills/code-review-loop",
+      "skills/playground/inbox",
+      "extensions/core/skills/pr",
+      "skills/zerostarter/ui-verify",
+    ])
+    expect(updateSteps(["README.md"]).skills).toEqual([])
+  })
+
   test("a package with a dist changed builds; packages/scripts runs from source", () => {
     expect(updateSteps(["packages/db/src/schema/claude.ts"]).build).toBe(true)
     expect(updateSteps(["packages/scripts/src/playground/update.ts"]).build).toBe(false)
@@ -68,6 +88,34 @@ describe("runUpdate", () => {
     ])
   })
 
+  test("a merge that changed a skill names it and the folder in the checkout a live session reads it from; one that changed none says nothing of skills", async () => {
+    const said: string[] = []
+    const { run } = fakeRun({
+      diff: { out: "extensions/core/skills/pr/SKILL.md\nskills/zerostarter/dev/SKILL.md\n" },
+    })
+    expect(
+      await runUpdate(
+        repo,
+        run,
+        async () => 0,
+        (l) => said.push(l),
+      ),
+    ).toBe(0)
+    expect(said).toContain(
+      `playground update: skills changed: dev, pr; a running session's Skill tool serves the copy it started with, so a live session reads each one's files here: ${repo}/skills/zerostarter/dev/, ${repo}/extensions/core/skills/pr/`,
+    )
+    const quietSaid: string[] = []
+    expect(
+      await runUpdate(
+        repo,
+        fakeRun().run,
+        async () => 0,
+        (l) => quietSaid.push(l),
+      ),
+    ).toBe(0)
+    expect(quietSaid.some((l) => l.includes("skills changed"))).toBe(false)
+  })
+
   test("a changed lockfile and package install and build before the restart", async () => {
     const { calls, run } = fakeRun({ diff: { out: "bun.lock\npackages/db/src/index.ts\n" } })
     expect(await runUpdate(repo, run, async () => 0, quiet)).toBe(0)
@@ -90,6 +138,33 @@ describe("runUpdate", () => {
       "--cwd",
       repo,
     ])
+  })
+
+  test("a run after one cut short past its fast-forward diffs from the commit the last finished update reached, and records the new one once its steps pass", async () => {
+    const done = join(scratch, "fake-update-head")
+    writeFileSync(done, "old\n")
+    const { calls, run } = fakeRun({
+      diff: { out: "bun.lock\npackages/db/src/index.ts\n" },
+      "rev-parse": { out: "new\n" },
+    })
+    expect(await runUpdate(repo, run, async () => 0, quiet, undefined, done)).toBe(0)
+    expect(calls).toContainEqual(["git", "-C", repo, "diff", "--name-only", "old", "HEAD"])
+    expect(calls.some((argv) => argv.includes("install"))).toBe(true)
+    expect(calls.some((argv) => argv.includes("build"))).toBe(true)
+    expect(calls.find((argv) => argv.includes("--no-env-file"))?.slice(-2)).toEqual(["old", "HEAD"])
+    expect(readFileSync(done, "utf8")).toBe("new\n")
+  })
+
+  test("a recorded commit the checkout lacks diffs from HEAD, and a failed step leaves the record as it was", async () => {
+    const done = join(scratch, "fake-update-head-gone")
+    writeFileSync(done, "gone\n")
+    const { calls, run } = fakeRun({ "cat-file": { code: 128 }, "rev-parse": { out: "new\n" } })
+    expect(await runUpdate(repo, run, async () => 0, quiet, undefined, done)).toBe(0)
+    expect(calls).toContainEqual(["git", "-C", repo, "diff", "--name-only", "new", "HEAD"])
+    writeFileSync(done, "old\n")
+    const failed = fakeRun({ "rev-parse": { out: "new\n" }, "--no-env-file": { code: 1 } })
+    expect(await runUpdate(repo, failed.run, async () => 0, quiet, undefined, done)).toBe(1)
+    expect(readFileSync(done, "utf8")).toBe("old\n")
   })
 
   test("a merge that is not a fast-forward stops the update, names the step, and rolls nothing", async () => {
@@ -179,6 +254,54 @@ test("runUpdate fast-forwards a real checkout onto origin/main and runs its own 
   ).toBe(0)
   expect(git(checkout, "rev-parse", "HEAD").stdout.toString().trim()).toBe(head)
   expect(readFileSync(marks, "utf8")).toBe(`linked\nrestart ${old} HEAD\n`)
+})
+
+test("a real update cut short after its fast-forward is finished by the next run, which restarts from the commit the last finished update reached", async () => {
+  const env = { GIT_CONFIG_NOSYSTEM: "1", HOME: scratch, PATH: process.env.PATH }
+  const git = (cwd: string, ...args: string[]) =>
+    Bun.spawnSync(["git", "-c", "user.name=t", "-c", "user.email=t@t", ...args], { cwd, env })
+      .stdout.toString()
+      .trim()
+  const origin = join(scratch, "rerun-origin")
+  const marks = join(scratch, "rerun-marks")
+  const cut = join(scratch, "rerun-cut")
+  const done = join(scratch, "rerun-update-head")
+  mkdirSync(join(origin, "scripts"), { recursive: true })
+  mkdirSync(join(origin, "packages", "scripts", "src", "ops-restart"), { recursive: true })
+  writeFileSync(join(origin, "scripts", "link-skills.sh"), "true\n")
+  // an ops-restart that fails while the cut file exists, standing in for an update cut short after its fast-forward
+  writeFileSync(
+    join(origin, "packages", "scripts", "src", "ops-restart", "cli.ts"),
+    `const fs = require("node:fs"); if (fs.existsSync(${JSON.stringify(cut)})) process.exit(1); fs.appendFileSync(${JSON.stringify(marks)}, "restart " + process.argv.slice(3).join(" ") + "\\n")\n`,
+  )
+  git(scratch, "init", "-q", "-b", "main", origin)
+  git(origin, "add", ".")
+  git(origin, "commit", "-q", "-m", "one")
+  const checkout = join(scratch, "rerun-checkout")
+  git(scratch, "clone", "-q", origin, checkout)
+  const one = git(checkout, "rev-parse", "HEAD")
+  const update = () =>
+    runUpdate(
+      checkout,
+      spawnRun,
+      async () => 0,
+      () => {},
+      undefined,
+      done,
+    )
+
+  expect(await update()).toBe(0)
+  writeFileSync(join(origin, "README.md"), "two\n")
+  git(origin, "add", ".")
+  git(origin, "commit", "-q", "-m", "two")
+  const two = git(origin, "rev-parse", "HEAD")
+  writeFileSync(cut, "")
+  expect(await update()).toBe(1)
+  expect(git(checkout, "rev-parse", "HEAD")).toBe(two)
+  rmSync(cut)
+  expect(await update()).toBe(0)
+  expect(readFileSync(marks, "utf8")).toBe(`restart ${one} HEAD\nrestart ${one} HEAD\n`)
+  expect(readFileSync(done, "utf8").trim()).toBe(two)
 })
 
 test("runUpdate --to moves a real checkout's main back to a tag, and a plain update moves it on again", async () => {
@@ -292,4 +415,46 @@ describe("runUpdate on a checkout left on another branch", () => {
     )
     expect(readFileSync(join(checkout, "README.md"), "utf8")).toBe("mine\n")
   })
+})
+
+test("a run cut short after its fast-forward with no record yet is finished by the next run, which restarts from where the first one started", async () => {
+  const env = { GIT_CONFIG_NOSYSTEM: "1", HOME: scratch, PATH: process.env.PATH }
+  const git = (cwd: string, ...args: string[]) =>
+    Bun.spawnSync(["git", "-c", "user.name=t", "-c", "user.email=t@t", ...args], { cwd, env })
+      .stdout.toString()
+      .trim()
+  const origin = join(scratch, "first-origin")
+  const marks = join(scratch, "first-marks")
+  const cut = join(scratch, "first-cut")
+  const done = join(scratch, "first-update-head")
+  mkdirSync(join(origin, "scripts"), { recursive: true })
+  mkdirSync(join(origin, "packages", "scripts", "src", "ops-restart"), { recursive: true })
+  writeFileSync(join(origin, "scripts", "link-skills.sh"), "true\n")
+  writeFileSync(
+    join(origin, "packages", "scripts", "src", "ops-restart", "cli.ts"),
+    `const fs = require("node:fs"); if (fs.existsSync(${JSON.stringify(cut)})) process.exit(1); fs.appendFileSync(${JSON.stringify(marks)}, "restart " + process.argv.slice(3).join(" ") + "\\n")\n`,
+  )
+  git(scratch, "init", "-q", "-b", "main", origin)
+  git(origin, "add", ".")
+  git(origin, "commit", "-q", "-m", "one")
+  const checkout = join(scratch, "first-checkout")
+  git(scratch, "clone", "-q", origin, checkout)
+  const one = git(checkout, "rev-parse", "HEAD")
+  const update = () =>
+    runUpdate(
+      checkout,
+      spawnRun,
+      async () => 0,
+      () => {},
+      undefined,
+      done,
+    )
+  writeFileSync(join(origin, "README.md"), "two\n")
+  git(origin, "add", ".")
+  git(origin, "commit", "-q", "-m", "two")
+  writeFileSync(cut, "")
+  expect(await update()).toBe(1)
+  rmSync(cut)
+  expect(await update()).toBe(0)
+  expect(readFileSync(marks, "utf8")).toBe(`restart ${one} HEAD\n`)
 })

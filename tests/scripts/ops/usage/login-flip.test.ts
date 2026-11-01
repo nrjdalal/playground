@@ -31,7 +31,7 @@ src = open(sys.argv[1]).read()
 folder = os.path.expanduser("~/.playground/ops/usage")
 os.makedirs(folder, exist_ok=True)
 me = spec["seen"][spec["on"]]
-limits = {"five_hour": {"used_percentage": me.get("five", 0), "resets_at": me.get("fiveReset")}}
+limits = {} if spec.get("noFive") else {"five_hour": {"used_percentage": me.get("five", 0), "resets_at": me.get("fiveReset")}}
 if "week" in me:
     limits["seven_day"] = {"used_percentage": me["week"], "resets_at": me.get("weekReset")}
 if spec.get("probeRead"):
@@ -41,6 +41,8 @@ else:
 path = os.path.join(folder, "login-flip.json")
 state = json.load(open(path)) if os.path.exists(path) else {}
 state["seen"] = dict(state.get("seen") or {}, **{email[k]: dict({"five": 0, "at": spec["now"]}, **v) for k, v in spec["seen"].items() if k != spec["on"] or spec.get("probeRead")})
+for k, v in (spec.get("prior") or {}).items():
+    state["seen"][email[k]] = v
 if not spec.get("keepDue"):
     state.pop("due", None)
 if spec.get("factory"):
@@ -58,7 +60,8 @@ written = json.load(open(ns["STATE"]))
 pool = [dict(e, account=name[e["account"]]) for e in written["rotation"]["pool"]]
 split = {name[k]: v for k, v in written["split"]["shares"].items()}
 seenAt = {name[k]: v.get("at") for k, v in written["seen"].items()}
-print(json.dumps({"noEnd": noEnd, "pool": pool, "seenAt": seenAt, "split": split, "target": target}))
+seenFive = {name[k]: v.get("five") for k, v in written["seen"].items()}
+print(json.dumps({"noEnd": noEnd, "pool": pool, "seenAt": seenAt, "seenFive": seenFive, "split": split, "target": target}))
 `
 
 const at = (iso: string) => Date.parse(iso) / 1000
@@ -96,13 +99,23 @@ const flip = (
   factory?: string,
   keepDue = false,
   probeRead = false,
+  extra: { noFive?: boolean; prior?: Record<string, Reading> } = {},
 ) => {
   const env: Record<string, string | undefined> = {
     ...process.env,
     HOME: home ?? mkdtempSync(join(scratch, "home-")),
   }
   delete env.CLAUDE_CONFIG_DIR
-  const spec = JSON.stringify({ accounts: ACCOUNTS, factory, keepDue, now, on, probeRead, seen })
+  const spec = JSON.stringify({
+    ...extra,
+    accounts: ACCOUNTS,
+    factory,
+    keepDue,
+    now,
+    on,
+    probeRead,
+    seen,
+  })
   const child = Bun.spawnSync(["python3", "-I", "-c", harness, script, spec], { env })
   expect(child.stderr.toString()).toBe("")
   return JSON.parse(child.stdout.toString().trim())
@@ -325,4 +338,12 @@ test("with no stored login, a usage.json run.py took from an account's probe lea
     true,
   )
   expect(seenAt.ND).toBe(readAt)
+})
+
+test("a reading with a week and no 5-hour window is an account with no 5-hour limit: its five is none, never the last reading's (#85)", () => {
+  const { seenFive } = flip("ND", spent, TONIGHT, undefined, undefined, false, false, {
+    noFive: true,
+    prior: { ND: { at: TONIGHT - 600, five: 95, fiveReset: TONIGHT + 3600, week: 40 } },
+  })
+  expect(seenFive.ND).toBeNull()
 })

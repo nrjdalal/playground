@@ -22,6 +22,8 @@ const NOTICES: Record<string, Pick<SessionState, "reason" | "state">> = {
   permission_prompt: { reason: "permission", state: "stuck" },
 }
 const USAGE_LIMIT = /usage limit reached|hit your [\w -]*limit|limit will reset/i
+// Z.ai's empty balance (31 Oct: "429 · [1113][Insufficient balance or no resource package. Please recharge.]"), which its quota endpoint never reports, so the zai usage job reads it from this record.
+const GLM_BALANCE = /\[1113\]/
 // GLM prints its reset in UTC+8 (16 Oct: "reset at 2026-10-16 19:00:02" still printed at 10:09Z, on a 5-hour window).
 const GLM_RESET = /limit will reset at (\d{4}-\d\d-\d\d) (\d\d:\d\d:\d\d)/
 const TAIL_BYTES = 256 * 1024
@@ -75,6 +77,8 @@ async function failureOf(
 ): Promise<Pick<SessionState, "reason" | "resetsAt" | "state">> {
   const error = text(input.error) || "unknown"
   if (error === "authentication_failed") return { reason: "login", state: "stuck" }
+  if (error === "rate_limit" && GLM_BALANCE.test(text(input.last_assistant_message)))
+    return { reason: "balance", state: "failed" }
   if (error === "rate_limit" && USAGE_LIMIT.test(text(input.last_assistant_message))) {
     const resetsAt = await resetOf(input)
     return { reason: error, ...(resetsAt ? { resetsAt } : {}), state: "usage-limit" }

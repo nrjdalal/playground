@@ -10,17 +10,18 @@ Playground runs your Claude Code sessions as a factory: a few long-lived manager
 
 ## The roles
 
-| Role       | What it does                                                                  | How many       |
-| ---------- | ----------------------------------------------------------------------------- | -------------- |
-| Dispatcher | talks with you, keeps the Inbox and routes each ask to the role that owns it  | 1              |
-| Planner    | researches, compares and plans; it never builds                               | 1              |
-| Builder    | a lead: starts workers, writes their briefs, and holds review and merge order | 1              |
-| Ops        | a lead: runs the background jobs, the live dashboard and each ship            | 1              |
-| Worker     | one bounded chore: a fix, a feature, an investigation                         | as room allows |
-| Reviewer   | scores its worker's pull request out of 5, round by round                     | 1 per worker   |
-| Tester     | drives its worker's change in a real browser                                  | 1 per worker   |
-| Runner     | keeps one long-running job alive, such as a dev server                        | as room allows |
-| Probe      | one throwaway test                                                            | per test       |
+| Role       | What it does                                                                           | How many       |
+| ---------- | -------------------------------------------------------------------------------------- | -------------- |
+| Dispatcher | talks with you, keeps the Inbox and routes each ask to the role that owns it           | 1              |
+| Planner    | researches, compares and plans; it never builds                                        | 1              |
+| Builder    | a lead: starts workers, writes their briefs, and holds review and merge order          | 1              |
+| Ops        | a lead: runs the background jobs, the live dashboard and each ship                     | 1              |
+| Optimizer  | looks back over what the factory did and turns each lesson into a fix; it never builds | 1              |
+| Worker     | one bounded chore: a fix, a feature, an investigation                                  | as room allows |
+| Reviewer   | scores its worker's pull request out of 5, round by round                              | 1 per worker   |
+| Tester     | drives its worker's change in a real browser                                           | 1 per worker   |
+| Runner     | keeps one long-running job alive, such as a dev server                                 | as room allows |
+| Probe      | one throwaway test                                                                     | per test       |
 
 The four managers' session names are a setting, so you can call them what you like.
 

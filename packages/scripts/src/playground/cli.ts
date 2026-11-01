@@ -64,9 +64,12 @@ const fail = (message: string, code = 1): never => {
 const pause = (ms: number) => Bun.sleep(ms)
 const briefExists = (brief: string): boolean => existsSync(join(HOME_DATA, brief))
 
-// playground dispatcher, planner, builder or ops, and the bare start's dispatcher step: 0 started, 3 already running, 1 refused with spawn.sh's reason.
-const manager = async (kind: NamedKind): Promise<{ code: number; message: string }> => {
-  const name = getSessionNames().names[kind]
+// The managers a playground verb starts: the named kinds, and the optimizer, whose name is its kind.
+type ManagerVerb = NamedKind | "optimizer"
+
+// playground dispatcher, planner, builder, ops or optimizer, and the bare start's dispatcher step: 0 started, 3 already running, 1 refused with spawn.sh's reason.
+const manager = async (kind: ManagerVerb): Promise<{ code: number; message: string }> => {
+  const name = kind === "optimizer" ? kind : getSessionNames().names[kind]
   const result = await startDispatcher({
     data: HOME_DATA,
     live: liveSessions((live) => live === name).map((d) => d.name),
@@ -129,10 +132,10 @@ const setUp = async (): Promise<string | null> => {
   return stepFailed([process.execPath, "--no-env-file", OPS_HERDR, "start"], "stdout")
 }
 
-// The managers the dispatcher starts the first time it routes work to one, so none sits idle on the user's usage.
-const MANAGERS: NamedKind[] = ["builder", "dispatcher", "ops", "planner"]
+// The managers a playground verb starts: the dispatcher, which starts the Planner, the Builder and Ops the first time it routes work to each, so none sits idle on the user's usage, and the optimizer when the dispatcher itself starts, since ops-tick's beats bring its retros.
+const MANAGERS: ManagerVerb[] = ["builder", "dispatcher", "ops", "optimizer", "planner"]
 
-const managerAlone = async (kind: NamedKind): Promise<number> => {
+const managerAlone = async (kind: ManagerVerb): Promise<number> => {
   const unready = await setUp()
   if (unready === null) return (await manager(kind)).code
   console.error(`playground: ${unready}`)
@@ -264,7 +267,8 @@ const roll = async (): Promise<number> => {
 }
 
 // playground update [--to <tag>]: the release skill's step 5 on this checkout (update.ts), then the roll.
-const update = (to?: string): Promise<number> => runUpdate(REPO, spawnRun, roll, console.log, to)
+const update = (to?: string): Promise<number> =>
+  runUpdate(REPO, spawnRun, roll, console.log, to, join(dataDir(), "ops", "update-head"))
 
 // playground uninstall: the install's links, LaunchAgents and the Dashboard's stack (uninstall.ts); --purge, after asking, the data folder and the database too. The database's name is loaded only here, since it lives in the API's tree.
 const uninstallAll = async (purge: boolean): Promise<number> => {
@@ -308,13 +312,12 @@ const add = async (args: string[]): Promise<number> => {
   return 0
 }
 
-// playground page: the page kept in the data folder the dashboard reads (PLAYGROUND_DATA_DIR's when set, so a test stack's fixture folder can be named), then opened.
+// playground page: the page kept in the data folder the dashboard reads (PLAYGROUND_DATA_DIR's when set, so a test stack's fixture folder can be named), and never opened: it reaches the owner as an Inbox card's html attachment.
 const page = (args: string[]): number => {
   const parsed = pageArgs(args)
   if ("error" in parsed) return fail(parsed.error)
   const kept = keepPage(parsed, dataDir())
   if ("error" in kept) return fail(kept.error)
-  Bun.spawnSync(["open", kept.path])
   console.log(`Kept ${kept.path}`)
   return 0
 }
@@ -368,8 +371,8 @@ const code =
           ? await update(rest[1])
           : command === "add"
             ? await add(rest)
-            : MANAGERS.includes(command as NamedKind)
-              ? await managerAlone(command as NamedKind)
+            : MANAGERS.includes(command as ManagerVerb)
+              ? await managerAlone(command as ManagerVerb)
               : command === "page"
                 ? page(rest)
                 : command === "view"

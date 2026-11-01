@@ -21,6 +21,11 @@ Agent-fired: a session loads it before every `playground ask new`, and the owner
 | A draft, or a Slack or ticket decision       | the message or ticket itself, in its own shape |
 | A secret ask                                 | its key and sink alone, under a plain title    |
 
+The kind also decides how the card closes.
+A decision or a draft the session decided another way is settled.
+An alert update that fixed itself is resolved.
+Any other update stays editable until you dismiss it, so a card the session will replace, such as a mock's first version, is edited in place before then.
+
 ## The card it writes for
 
 ```
@@ -37,8 +42,10 @@ Mermaid is to join the pictures; until then a flow is drawn in ASCII.
 - You can say what an item asks, and what Approve does, before you read its second line.
 - No drawing on a card shrinks or scrolls sideways.
 - An item from any session reads like one from any other.
+- Every clock time on a card reads in your own time zone, the `clock.ownerZone` setting, and names it ("9:30 pm UTC").
 
 ## Where it fits
 
 Every factory session uses it under [playbook](./playbook.md)'s **ask** rule, which decides when an item goes to the owner; `to-inbox` decides how it reads.
+Before it posts, `playground ask open` lists the items already open, so a session names one on the same thing rather than posting it twice.
 `playground ask new` checks the shape and prints a hint when the text runs long with no list, code block or attachment, or when a drawing runs past the card's width (`ASK_CODE_COLUMNS`).

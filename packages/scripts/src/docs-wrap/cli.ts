@@ -22,7 +22,7 @@ export const PATTERNS = [
   ".agents/skill-trial.md",
   ".agents/testing.md",
   "AGENTS.md",
-  "docs/playground/playbook.md",
+  "docs/playground/*.md",
   "scripts/README.md",
   "scripts/hooks/README.md",
   "extensions/core/skills/playbook/*.md",

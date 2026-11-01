@@ -2,6 +2,7 @@ import { join } from "node:path"
 
 import { z } from "zod"
 
+import { isAhead } from "../clock"
 import { entries, issuesOf } from "../entries"
 // Relative, not @/: the web tests type-check this file under web/next's own @/ paths.
 import { dataDir } from "../sessions/paths"
@@ -73,6 +74,24 @@ const envelopeSchema = z.object({
   lanes: z.array(z.unknown()),
 })
 
+// A "now" stamp (generatedAt, an inFlight since, a doneToday or decision at) is the clock's, so one ahead of it was typed and is refused; an ETA, a start or a finish is future by design and reads (clock.md).
+const nowStamp = (now: Date) =>
+  isoTime.superRefine((value, ctx) => {
+    if (isAhead(value, now))
+      ctx.addIssue({ code: "custom", message: `${value} is ahead of the clock` })
+  })
+
+const decisionsAhead = (json: unknown, now: Date): string[] => {
+  const decisions = (json as { decisions?: unknown }).decisions
+  if (!Array.isArray(decisions)) return []
+  return decisions.flatMap((row, i) => {
+    const at = (row as { at?: unknown } | null)?.at
+    return typeof at === "string" && isAhead(at, now)
+      ? [`decisions.${i}.at: ${at} is ahead of the clock`]
+      : []
+  })
+}
+
 export type PlanItem = z.infer<typeof planItemSchema>
 export type PlanLanding = z.infer<typeof landingSchema>
 export type PlanInFlight = z.infer<typeof inFlightSchema>
@@ -94,17 +113,22 @@ export const planPath = (): string => join(dataDir(), "bundles", "plan.json")
 
 const byId = (row: { id: string }): string => row.id
 
-// Pure: the plan a file's text holds, with every part that did not read named. A file that is not JSON, or lacks generatedAt or lanes, is no plan; anything smaller costs only its own entry.
-export function parsePlan(text: string): { plan: Plan | null; problems: string[] } {
+// Pure: the plan a file's text holds, with every part that did not read named. A file that is not JSON, or lacks generatedAt or lanes, or whose generatedAt is ahead of now, is no plan; anything smaller costs only its own entry, or its own stamp.
+export function parsePlan(
+  text: string,
+  now = new Date(),
+): { plan: Plan | null; problems: string[] } {
   let json: unknown
   try {
     json = JSON.parse(text)
   } catch {
     return { plan: null, problems: ["plan.json is not valid JSON"] }
   }
-  const envelope = envelopeSchema.safeParse(json)
+  const envelope = envelopeSchema.extend({ generatedAt: nowStamp(now) }).safeParse(json)
   if (!envelope.success) return { plan: null, problems: [issuesOf(envelope.error, [])] }
   const problems: string[] = []
+  const done = doneSchema.extend({ at: nowStamp(now).nullable().optional() })
+  const flying = inFlightSchema.extend({ since: nowStamp(now).nullable().optional() })
   const lanes: PlanLane[] = []
   const itemIds = new Set<string>()
   for (const [i, raw] of envelope.data.lanes.entries()) {
@@ -124,9 +148,9 @@ export function parsePlan(text: string): { plan: Plan | null; problems: string[]
   const { doneToday, generatedAt, inFlight, landingNext } = envelope.data
   return {
     plan: {
-      doneToday: entries<PlanDone>(doneSchema, doneToday, ["doneToday"], problems, (row) => row.pr),
+      doneToday: entries<PlanDone>(done, doneToday, ["doneToday"], problems, (row) => row.pr),
       generatedAt,
-      inFlight: entries<PlanInFlight>(inFlightSchema, inFlight, ["inFlight"], problems, byId),
+      inFlight: entries<PlanInFlight>(flying, inFlight, ["inFlight"], problems, byId),
       landingNext: entries<PlanLanding>(
         landingSchema,
         landingNext,
@@ -136,7 +160,7 @@ export function parsePlan(text: string): { plan: Plan | null; problems: string[]
       ),
       lanes,
     },
-    problems,
+    problems: [...problems, ...decisionsAhead(json, now)],
   }
 }
 

@@ -10,7 +10,7 @@ The Dashboard reads your own machine: your Claude Code sessions in herdr, your `
 Its sessions are the ones Playground started, on the board, under Sessions and in System; a session another terminal runs stays off it and out of its database, and every session, cmux's included, joins it once you set `PLAYGROUND_CMUX_SESSIONS=true` in the app's `.env`.
 Where an area has nothing to show yet, it says what is missing and what fills it, naming the button or page when the app has one, such as "No Claude Code sessions yet.
 Sessions appear here once Playground starts them, the first from the Dashboard's chat."
-A stack that shows test data instead, a made-up machine for tests and screenshots, wears a **Test data** badge beside the name in the sidebar and in the tab's title.
+A stack that shows test data instead, a made-up machine for tests and screenshots, wears a **Test data** badge beside the name in the sidebar and in the tab's title, as a Vibeground wears its own (below).
 
 ## Your chat
 
@@ -110,7 +110,7 @@ Wherever these pages say hover, the Dashboard shows its own tooltip, never the b
 The top line holds the name and, at its right end, the GitHub icon, which opens your repo's pull requests in a new tab (it is not shown when your checkout has no GitHub `origin`).
 
 Between the name and GitHub sit this machine's system icons: memory used, CPU load and swap used, then disk free only when it is low (orange under 50 GB, red under 20 GB).
-When the top line has no room for them, as when the Test data badge sits beside the name, they sit on a line of their own under it.
+When the top line has no room for them, as when the Test data or Vibeground badge sits beside the name, they sit on a line of their own under it.
 Each icon shows its number beside it, green while its reading is normal, orange past its warning level and red past its critical one.
 Hover or Tab to an icon for its full reading and level, and click it to open the System page.
 The icons are gray outlines with no number before the first reading and once sampling stops, and dim when live sessions cannot be read, which also shows one toast with the reason.
@@ -136,8 +136,9 @@ Below the header are the live sessions in groups:
 - **Other**: test sessions and sessions outside these groups, shown only while one is live, collapsed until you click its label.
 
 Before the model's logo at the end of the Claude dispatcher's row, the week and the 5-hour window of your Claude usage each show as an icon and a number, in the system icons' green, orange and red.
+An account with no 5-hour window shows `none` for it, and is left out of the combined 5-hour figure.
 That usage is the first Claude account you added in [Settings](/docs/settings) that gives a reading, read with the token the Keychain keeps for it; with none added, it is the account Claude Code itself is signed in with.
-With a GLM plan, its week and 5-hour window show the same way on the GLM dispatcher's row, or, while none runs on GLM, on the second dispatcher's row, led by the Z.ai mark, each hover naming GLM.
+With a GLM key added in [Settings](/docs/settings), its week and 5-hour window show the same way on the GLM dispatcher's row, or, while none runs on GLM, on the second dispatcher's row, led by the Z.ai mark, each hover naming GLM.
 When a usage window stops being reported, or GLM's have not been read for 10 minutes, its last reading stays, gray and dimmed, its hover saying it is stale, when it reset and when it was last seen.
 Each live usage reading's hover, and the System page's usage line, say how long ago it was read (`read 2 min. ago`).
 With several Claude accounts, every list of them, in the hover, on the System page and in the Usage app, puts the account whose week resets soonest first.

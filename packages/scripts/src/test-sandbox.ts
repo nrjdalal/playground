@@ -7,7 +7,7 @@ import { sandbox } from "./sandbox"
 
 const TIMINGS = "tests/timings.json"
 
-// Files that run one at a time after the parallel pass: dev.test.ts and launch.test.ts move packages/env/dist/gaps.mjs aside, and dev.test.ts's launcher rebuilds @packages/env, whose dist the other workers import; workers.test.ts's cmux reads pace a real 4s read against its own time and start a fake cmux process for each read, and beside other workers on a loaded runner one ran past its 20s (27 Oct, five Actions runs); this pass runs its files in one process, which loads a shared helper once, so no spawn*.test.ts file joins it, since each needs spawn-fake.ts afresh
+// Files that run one at a time after the parallel pass: dev.test.ts and launch.test.ts move packages/env/dist/gaps.mjs aside, and dev.test.ts's launcher rebuilds @packages/env, whose dist the other workers import; workers.test.ts's cmux reads pace a real 4s read against its own time and start a fake cmux process for each read, and beside other workers on a loaded runner one ran past its 20s (27 Oct, five Actions runs); this pass runs its files in one process, which loads a shared helper once, so no spawn*.test.ts or ops/run-slot*.test.ts file joins it, since each needs its fake afresh
 const SERIAL = [
   "tests/api/hono/src/bin/dev.test.ts",
   "tests/api/hono/src/lib/dashboard/workers.test.ts",

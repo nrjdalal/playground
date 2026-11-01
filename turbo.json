@@ -11,9 +11,9 @@
       "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/package.json"],
       "outputs": ["dist/**"]
     },
-    // web's build also writes .generated/ at the repo root, which a bare check-types:tests reads, so a cached replay restores it too
+    // web's build also writes .generated/ at the repo root, which a bare check-types:tests reads, so a cached replay restores it too; it waits for web's check-types, whose tsc reads the .next/types next build deletes and rewrites
     "@web/next#build": {
-      "dependsOn": ["^build"],
+      "dependsOn": ["^build", "check-types"],
       "outputs": [
         ".next/**",
         "!.next/cache/**",
@@ -64,6 +64,12 @@
       "persistent": true,
       "cache": false
     },
+    // the live dashboard's production stack: each app serves the build the supervisor kept (PLAYGROUND_BUILD), so nothing builds first
+    "serve": {
+      "passThroughEnv": ["GIT_SHA", "PLAYGROUND_BUILD"],
+      "persistent": true,
+      "cache": false
+    },
     "start": {
       "persistent": true,
       "cache": false
@@ -106,7 +112,7 @@
     "NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN",
     "NEXT_PUBLIC_USERJOT_URL"
   ],
-  // CLAUDECODE, PLAYGROUND_FIXTURE, PLAYGROUND_FIXTURE_DIR, PLAYGROUND_LIVE_READS and PLAYGROUND_ROLE are read straight from the environment by the dashboard's source (api/hono/src/lib/dashboard/fixture.ts), so an exported one reaches the API as it reaches the dev launcher, and the API chooses the source the launcher checked (a factory session's role, or Claude Code with none), which writes the fixture the API then reads, PLAYGROUND_FIXTURE_LAUNCHED is the launcher's word to its stack that it wrote that fixture, and PLAYGROUND_HERDR_ALONE its word that the dashboard reads herdr alone (api/hono/src/lib/dashboard/cmux.ts); the organisation's config (packages/config/src/org.ts: PLAYGROUND_DATA_DIR, PLAYGROUND_OWNER_NAME, SLACK_ENABLED, WORK_GITHUB_ORG and WORK_LABEL) is read straight from the environment too, and so is each live-reads stack's scratch path, by its reader: PLAYGROUND_ATTACHMENTS_DIR by the dashboard's attachments (api/hono/src/lib/dashboard/attachments.ts), which the transcript parser reads too, PLAYGROUND_CHANGELOG_DIR by the Changelog's screenshots (api/hono/src/plugins/changelog/images.ts), PLAYGROUND_DEBUG_PASTE_DIR by the composer's temporary debug report (api/hono/src/lib/dashboard/debug-report.ts), PLAYGROUND_HERDR_DIR and PLAYGROUND_HERDR_SESSIONS by the dashboard's herdr provider (api/hono/src/lib/dashboard/herdr.ts), PLAYGROUND_MERGED_PULLS by the merged pull requests' cache (api/hono/src/lib/dashboard/agents.ts), PLAYGROUND_PREVIEWS_DIR by the Previews app (api/hono/src/lib/apps/previews.ts), and PLAYGROUND_PROFILE_URL by a Claude account's profile read (api/hono/src/lib/accounts/claude-setup.ts); each old name the DESK_* wildcard passes still reads (packages/env/src/aliases.ts); PLAYGROUND_BARE_NAMES is the dev launcher's word to the live dashboard's apps that the bare names are theirs too (.github/scripts/portless.ts), and PORTLESS_STATE_DIR keeps portless in the apps on the routes the launcher read; PLAYGROUND_ONBOARD_MISSING is read by onboarding's checks on a fixture stack alone (api/hono/src/lib/onboard/checks.ts)
+  // CLAUDECODE, PLAYGROUND_FIXTURE, PLAYGROUND_FIXTURE_DIR, PLAYGROUND_LIVE_READS and PLAYGROUND_ROLE are read straight from the environment by the dashboard's source (api/hono/src/lib/dashboard/fixture.ts), so an exported one reaches the API as it reaches the dev launcher, and the API chooses the source the launcher checked (a factory session's role, or Claude Code with none), which writes the fixture the API then reads, PLAYGROUND_FIXTURE_LAUNCHED is the launcher's word to its stack that it wrote that fixture, and PLAYGROUND_HERDR_ALONE its word that the dashboard reads herdr alone (api/hono/src/lib/dashboard/cmux.ts); the organisation's config (packages/config/src/org.ts: PLAYGROUND_DATA_DIR, PLAYGROUND_OWNER_NAME, SLACK_ENABLED, WORK_GITHUB_ORG and WORK_LABEL) is read straight from the environment too, and so is each live-reads stack's scratch path, by its reader: PLAYGROUND_ATTACHMENTS_DIR by the dashboard's attachments (api/hono/src/lib/dashboard/attachments.ts), which the transcript parser reads too, PLAYGROUND_CHANGELOG_DIR by the Changelog's screenshots (api/hono/src/plugins/changelog/images.ts), PLAYGROUND_DEBUG_PASTE_DIR by the composer's temporary debug report (api/hono/src/lib/dashboard/debug-report.ts), PLAYGROUND_HERDR_DIR and PLAYGROUND_HERDR_SESSIONS by the dashboard's herdr provider (api/hono/src/lib/dashboard/herdr.ts), PLAYGROUND_MERGED_PULLS by the merged pull requests' cache (api/hono/src/lib/dashboard/agents.ts), PLAYGROUND_PREVIEWS_DIR by the Previews app (api/hono/src/lib/apps/previews.ts), and PLAYGROUND_PROFILE_URL by a Claude account's profile read (api/hono/src/lib/accounts/claude-setup.ts); each old name the DESK_* wildcard passes still reads (packages/env/src/aliases.ts); PLAYGROUND_BARE_NAMES is the dev launcher's word to the live dashboard's apps that the bare names are theirs too (packages/scripts/src/portless.ts), and PORTLESS_STATE_DIR keeps portless in the apps on the routes the launcher read; PLAYGROUND_ONBOARD_MISSING is read by onboarding's checks on a fixture stack alone (api/hono/src/lib/onboard/checks.ts)
   "globalPassThroughEnv": [
     "CLAUDECODE",
     "DESK_*",

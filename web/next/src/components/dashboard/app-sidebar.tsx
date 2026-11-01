@@ -402,7 +402,7 @@ function UsageBlock({ reading }: { reading: Reading }) {
           </span>
           <span>{row.name}</span>
           <span className="text-right font-mono tabular-nums">
-            {row.used === null ? "-" : `${row.used}%`}
+            {row.none ? "none" : row.used === null ? "-" : `${row.used}%`}
           </span>
           <UsageBar row={row} />
           <span className="font-mono tabular-nums">{row.reset}</span>

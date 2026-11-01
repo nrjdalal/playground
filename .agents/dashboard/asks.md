@@ -41,7 +41,11 @@
   its row muted once none is unread, as an empty one is, though it still opens to its history, full again on hover or while open ("Why at 0 is it not muted like others?").
   Under Done sits the Preview row, its icon and name with no count, starting shut and there in an empty Inbox too: opened, `PreviewPane` in `web/next/src/components/dashboard/preview-pane.tsx` fills the pane below it with a frame down to the pane's bottom edge.
   Its picker lists every project's worktrees on this machine, one group a project (`GET /api/v1/stacks`, `readStacks()` in `api/hono/src/lib/dashboard/stacks.ts`): the projects are this checkout's and each live session's folder's, their worktrees read from git's own files, each labelled by its branch and the session working in it,
-  running where a portless route's process group is one its stack's record (`.turbo/dev.pgid`) names and stopped (shown, not picked) otherwise; a web stack no worktree claims lists under its app's name, and a fixture stack lists the fixture's made-up `worktrees`.
+  running where a portless route's process group is one its stack's record (`.turbo/dev.pgid`) names and stopped otherwise; a web stack no worktree claims lists under its app's name, and a fixture stack lists the fixture's made-up `worktrees`.
+  A stopped worktree picked shows Start in the frame, which starts it as a Vibeground (`POST /api/v1/stacks/start`, `startVibe()` in `api/hono/src/lib/dashboard/vibe.ts`, stack.md) and opens it once it serves, one started and not serving yet reading starting in the list and showing Starting with Stop in the frame,
+  and a running Vibeground (`vibe` in the list, its `.turbo/vibe.json`) shows Stop in the bar (`POST /api/v1/stacks/stop`) and, under it,
+  its badge (`vibeLabel()` in `web/next/src/lib/test-data.ts`) and Done, the owner's click sending the dispatcher `doneMessage()` (`web/next/src/lib/previews.ts`) through the outbox, since the message route reaches the dispatchers alone: it names the worktree, branch and session, for the dispatcher to route, to push to the branch's open PR, else open one into its parent, never merge;
+  a fixture stack marks its made-up worktree running or stopped in the scratch copy.
   The 8 newest Previews pages follow, which load sandboxed with no script.
   A stack's link opens in a new tab with the bar's open-out button, where it works as itself on its own sign-in; the sidebar's brand opens the Inbox tab with this row open (`openPreview()` in `web/next/src/lib/previews.ts`).
   Its address field loads only a `.localhost` stack or a Previews page (`loadable()` in `web/next/src/lib/previews.ts`), and the last address is kept in localStorage.
@@ -132,6 +136,8 @@
   Run it in the checkout that serves the dashboard, from anywhere with `bun run --cwd <checkout> ask`: any other checkout has its own database, which the live dashboard never shows, and says so on stderr.
   From a user install's clone root with no `POSTGRES_URL`, `bun run ask` runs as the Dashboard's checkout's (`.claude/worktrees/desk`, whose `.env` holds the database), through `api/hono/src/bin/ask-from-clone.ts`.
   A fresh worktree runs it once its `.env` is set up (the `dev` skill's Start) and its shared packages are built (`~/.playground/ops/run-slot.sh <your name> -- bunx turbo run build --filter='./packages/*'`), since a cloned `node_modules` alone leaves `@packages/db` unresolved.
+  Before every `bun run ask new`, run `bun run ask open` and read what is already open: when an open item asks the same thing, name its `#iN` in chat and post nothing, since two sessions once posted one question as two items.
+  It lists a snoozed item and one the owner replied to in chat, since each still asks something, until it moves to Done or its poster closes it.
 
   ```bash
   bun run ask new <<'EOF'   # prints the id on stdout, its tag (#i41) on stderr
@@ -147,11 +153,12 @@
    "preview": {"outcome": "merged", "link": "https://github.com/acme/app/pull/270"}}
   EOF
   bun run ask new --thread <id> < item.json   # routes the item to that thread (bun run thread), refused when no thread has the id
+  bun run ask open --from builder   # each open item, oldest first, one line each: its #iN, kind, sender and title; --from keeps one sender's
   bun run ask get <id|#i41> --ack   # the item, with answer {at, choice, editedText?, link?, linkLabel?, noLink?, ackedAt?} once the owner answers, marked read (which closes a deny, a clear, a discard or a provided secret, not a go)
   bun run ask ack <id|#i41> --link https://app.slack.com/client/<team>/<channel>/thread/<channel>-1700000000.000100   # once carried out, a go closes with where (a Slack link in its app.slack.com/client form, which reads Open thread, so no --label), which its card links to by the label, or --no-link "<why>" when it has no page or Slack refused a Draft
   bun run ask edit <id|#i41> < item.json   # the poster replaces its own open item's title and preview in place, checked and its files copied as new does; the card redraws on the next 5s poll
-  bun run ask settle <id|#i41> --note "Shipped by hand"   # the poster closes its own open item, decided another way
-  bun run ask resolve <id|#i41> --by builder --note "The loop recovered on its own"   # the poster clears its own alert update once it has resolved itself
+  bun run ask settle <id|#i41> --note "Shipped by hand"   # the poster closes its own open decision or draft, decided another way; an update asks nothing, so settle refuses it
+  bun run ask resolve <id|#i41> --by builder --note "The loop recovered on its own"   # the poster clears its own alert update once it has resolved itself; every other update, a read-only card included, stays editable by its poster until the owner dismisses it
   bun run ask stale --minutes 15   # ops-sweep's chase: each answer given in the last 24h (--since <iso> moves that) its poster has not closed within 15 minutes
   ```
 
@@ -162,6 +169,8 @@
   `ship` (`sha`, `prs` of `{number, title}`), `ticket` (`team`, `title`, `body`), `delete` (`what`, `why`), `schema` (`shape`), `budget` (`amount`, `why`) or `secret` (`key`, `sink`); a decision with none is refused.
   An `ask`'s `attachments`, and a read-only update's, are up to 20 files on this Mac, each `{src, kind?, label?, group?}`: `src` an absolute path, never a URL; `kind` one of `code`, `doc`, `html`, `image` or `pdf`,
   read from the extension when left out (`KIND_OF_EXTENSION` in `api/hono/src/lib/dashboard/inbox-attachments.ts`); `label` `before` or `after`; `group` a one-line section heading.
+  `bun run ask new` and `edit` fill each `{now}` in the item's text with the time they post at in the owner's zone (`clock.ownerZone`, `fillNow` in `api/hono/src/lib/dashboard/ask-clock.ts`), and refuse a `measured` or `now` time more than 2 minutes ahead of the clock (`futureNowTimes`), naming it;
+  an ETA or a finish carries neither word and posts, and plan.json's reader refuses its own now-stamps the same way (`.agents/dashboard/apps.md`).
   `bun run ask edit <id|#iN>` (`editItem()`) takes the same JSON as `new` and replaces the item's `title` and `preview`, its files copied the same way, bumping `updatedAt` and `version`, so one card carries a progress to its end;
   an item put away with Snooze edits as an open one, and the card's own answer carries `seen`, the `updatedAt` it showed, which `answerItem` refuses once it no longer matches (`This item changed since you read it`), so Approve never lands on words the owner did not read;
   it refuses another session's item (its `from` differs), a change of `kind`, and an item answered, closed or replied to in chat (a decision or draft not open or holding a reply, an update dismissed or resolved).
@@ -226,7 +235,7 @@
   and once closed with no link it adds `No link: <why>`, but for a Draft, which reads, gray, `Draft not saved: <why>`.
   `bun run ask stale [--minutes 15] [--since <iso>]` prints one line for each answer of the owner's (not a settle) given since `--since` (default 24 hours ago) and at least `--minutes` ago with no `ackedAt` (a go not closed with its link or why, anything else not read), its delivery pending, failed or typed into the session alike, but for a failed one the owner dismissed,
   which the owner chose not to send (`staleItems`; an answer delivered before acks were stamped, `ACKS_STAMPED_FROM`, is not listed, since it may have been acked with no stamp, while one never delivered still is, and a go delivered before then, read through bun run ask or typed into its session, reads as closed):
-  ops-sweep reminds each live poster on it every 30 minutes, and a lead hears of a poster that is down (playbook's Sweep).
+  ops-sweep reminds each live poster on it once, then at most every 4 hours, and a lead hears of a poster that is down (playbook's Sweep).
 - A `secret` ask asks the owner for a value (a client secret, an API key) that goes straight to one sink and is kept nowhere: no row, log line, transcript, response, error or argv holds it.
   Its `key` is the environment variable's name and its `sink` one of the allowlist in code, `secretSinkSchema` in `api/hono/src/lib/dashboard/inbox.ts`, today Vercel alone: `{type: "vercel", project, scope, environments}`, each environment of `development`, `preview` and `production` named once.
   Its card shows what Submit does, a masked field and Submit, Enter submitting too, with no comment box, Archive or Chat about it, so nothing else invites the value; Snooze stays.
