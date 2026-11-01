@@ -5,6 +5,7 @@ import { join } from "node:path"
 
 import {
   buildOf,
+  checkoutOf,
   fetchHealth,
   readRunning,
   versionOf,
@@ -31,6 +32,38 @@ describe("versionOf, the main checkout's git describe", () => {
     expect(
       versionOf({ code: 128, out: "fatal: No names found, cannot describe anything.\n" }),
     ).toBe("unknown (git describe: fatal: No names found, cannot describe anything.)")
+  })
+})
+
+describe("checkoutOf, the main checkout's version beside main's latest tag", () => {
+  const DESCRIBE = { code: 0, out: "v0.0.23-1-g8b6438a\n" }
+  test("a checkout behind main names main's latest tag", () => {
+    expect(
+      checkoutOf({
+        ancestor: { code: 1, out: "" },
+        describe: DESCRIBE,
+        mainTag: { code: 0, out: "v0.0.25\n" },
+      }),
+    ).toBe("v0.0.23 + 1 local commit (8b6438a), behind main v0.0.25")
+  })
+
+  test("a checkout level with main, or ahead of it, says only its own version", () => {
+    expect(
+      checkoutOf({
+        ancestor: { code: 0, out: "" },
+        describe: { code: 0, out: "v0.0.25-0-gb73af93\n" },
+        mainTag: { code: 0, out: "v0.0.25\n" },
+      }),
+    ).toBe("v0.0.25")
+  })
+
+  test("a main tag it cannot read leaves the comparison out, never a guess", () => {
+    expect(
+      checkoutOf({
+        describe: DESCRIBE,
+        mainTag: { code: 128, out: "fatal: Not a valid object name origin/main\n" },
+      }),
+    ).toBe("v0.0.23 + 1 local commit (8b6438a)")
   })
 })
 
@@ -97,6 +130,30 @@ describe("buildOf, the main checkout's branch, the live Dashboard's web and its 
     ).toBe("main build, at 1a1291d")
   })
 
+  test("the Dashboard's sha carries the tag at it or the nearest before it, or says why it cannot", () => {
+    const B73 = { version: "0.0.1-b73af937" }
+    expect(
+      buildOf({
+        branch: MAIN,
+        health: B73,
+        ps: PROD,
+        root: 99085,
+        tag: { code: 0, out: "v0.0.25\n" },
+      }),
+    ).toBe("main build, at b73af937 (v0.0.25)")
+    expect(
+      buildOf({
+        branch: MAIN,
+        health: B73,
+        ps: PROD,
+        root: 99085,
+        tag: { code: 128, out: "fatal: Not a valid object name b73af937\n" },
+      }),
+    ).toBe(
+      "main build, at b73af937 (version unknown: git describe: fatal: Not a valid object name b73af937)",
+    )
+  })
+
   test("a branch's dev server, as next dev in the route's tree", () => {
     const feature = { code: 0, out: "feat/x\n" }
     expect(
@@ -160,8 +217,21 @@ describe("readRunning", () => {
     writeFileSync(join(dir, "routes.json"), JSON.stringify(rows))
     return dir
   }
+  const git = {
+    ancestor: 1,
+    mainTag: { code: 1, out: "" },
+    tags: {} as Record<string, string>,
+  }
+  const asks: string[][] = []
   const run = (ps: string) => async (argv: string[]) => {
-    if (argv.includes("describe")) return { code: 0, out: "v0.0.23-1-g8b6438a\n" }
+    if (argv[0] === "git") asks.push(argv.slice(3))
+    if (argv.includes("--long")) return { code: 0, out: "v0.0.23-1-g8b6438a\n" }
+    if (argv.includes("origin/main")) return git.mainTag
+    if (argv.includes("--is-ancestor")) return { code: git.ancestor, out: "" }
+    if (argv.includes("describe")) {
+      const tag = git.tags[argv.at(-1)!]
+      return tag ? { code: 0, out: `${tag}\n` } : { code: 128, out: "fatal: no tag\n" }
+    }
     if (argv.includes("branch")) return { code: 0, out: "main\n" }
     if (argv[0] === "ps") return { code: 0, out: ps }
     if (argv[0] === "lsof" && listening[argv[2]!]) return { code: 0, out: listening[argv[2]!] }
@@ -186,10 +256,47 @@ describe("readRunning", () => {
       run: run(PROD),
     })
     expect(got).toEqual({
-      build: "main build, at 1a1291d",
+      build: "main build, at 1a1291d (version unknown: git describe: fatal: no tag)",
       version: "v0.0.23 + 1 local commit (8b6438a)",
     })
     expect(asked).toEqual(["http://127.0.0.1:4459/api/health"])
+  })
+
+  test("names main's latest tag when the checkout is behind it, and the tag at the Dashboard's sha", async () => {
+    git.mainTag = { code: 0, out: "v0.0.25\n" }
+    git.tags["b73af937"] = "v0.0.25"
+    asks.length = 0
+    try {
+      const got = await readRunning({
+        health: async () => ({ version: "0.0.1-b73af937" }),
+        portless: routes([
+          { hostname: "dashboard.playground.localhost", pid: 99085, port: 58008 },
+          { hostname: "playground.localhost", pid: 0, port: 58008 },
+          { hostname: "api.playground.localhost", pid: 0, port: 4459 },
+        ]),
+        repo: "/repo",
+        run: run(PROD),
+      })
+      expect(got).toEqual({
+        build: "main build, at b73af937 (v0.0.25)",
+        version: "v0.0.23 + 1 local commit (8b6438a), behind main v0.0.25",
+      })
+      expect(asks).toContainEqual(["describe", "--tags", "--abbrev=0", "origin/main"])
+      expect(asks).toContainEqual(["merge-base", "--is-ancestor", "v0.0.25", "HEAD"])
+      expect(asks).toContainEqual(["describe", "--tags", "--abbrev=0", "b73af937"])
+      git.ancestor = 0
+      const level = await readRunning({
+        health: async () => ({ version: "0.0.1-b73af937" }),
+        portless: routes([{ hostname: "playground.localhost", pid: 99085, port: 58008 }]),
+        repo: "/repo",
+        run: run(PROD),
+      })
+      expect(level.version).toBe("v0.0.23 + 1 local commit (8b6438a)")
+    } finally {
+      git.ancestor = 1
+      git.mainTag = { code: 1, out: "" }
+      git.tags = {}
+    }
   })
 
   test("reads the supervised web from the process listening on the route's port, read through lsof", async () => {
@@ -205,7 +312,9 @@ describe("readRunning", () => {
         repo: "/repo",
         run: run(SUPERVISED),
       })
-      expect(got.build).toBe("main build, at 1a1291d")
+      expect(got.build).toBe(
+        "main build, at 1a1291d (version unknown: git describe: fatal: no tag)",
+      )
     } finally {
       delete listening["-iTCP:58008"]
     }
@@ -223,7 +332,9 @@ describe("readRunning", () => {
       repo: "/repo",
       run: run(DEV),
     })
-    expect(got.build).toBe("main dev server, at 9f0e1d2")
+    expect(got.build).toBe(
+      "main dev server, at 9f0e1d2 (version unknown: git describe: fatal: no tag)",
+    )
   })
 
   test("no routes file, or no owner for the web's port, prints unknown with the reason", async () => {

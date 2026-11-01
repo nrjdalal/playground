@@ -2,7 +2,7 @@ import { join } from "node:path"
 
 import type { Run } from "../ops-tick/tick"
 
-// What this install runs, read and never acted on: the main checkout's version, and its branch's build or dev server as the live Dashboard serves it, at the version its /api/health reports.
+// What this install runs, read and never acted on: the main checkout's version beside main's latest tag, and its branch's build or dev server as the live Dashboard serves it, at the sha its /api/health reports and that sha's tag.
 
 export type Running = { build: string; version: string }
 export type Health = { reason: string } | { version: string }
@@ -22,6 +22,19 @@ export const versionOf = ({ code, out }: Answer): string => {
   return n === 0 ? tag! : `${tag} + ${n} local commit${n === 1 ? "" : "s"} (${sha})`
 }
 
+// Pure: the main checkout's version, then main's latest tag when the checkout does not hold it (ancestor is `git merge-base --is-ancestor <tag> HEAD`, exit 1 when it does not); a main tag it cannot read leaves the comparison out.
+export const checkoutOf = (input: {
+  ancestor?: Answer
+  describe: Answer
+  mainTag: Answer
+}): string => {
+  const version = versionOf(input.describe)
+  const tag = firstLine(input.mainTag.out)
+  return input.mainTag.code === 0 && tag && input.ancestor?.code === 1
+    ? `${version}, behind main ${tag}`
+    : version
+}
+
 // Pure: `git branch --show-current`, which prints nothing on a detached HEAD.
 const branchOf = ({ code, out }: Answer): string => {
   if (code !== 0) return `unknown branch (git branch: ${firstLine(out) || "no output"})`
@@ -37,16 +50,28 @@ export const buildOf = (input: {
   port?: number
   ps: string
   root: number | null
+  tag?: Answer
   why?: string
 }): string => {
+  const sha = shaOf(input.health)
+  const tag =
+    input.tag === undefined
+      ? ""
+      : input.tag.code === 0 && firstLine(input.tag.out)
+        ? ` (${firstLine(input.tag.out)})`
+        : ` (version unknown: git describe: ${firstLine(input.tag.out) || "no output"})`
   const version =
     "version" in input.health
-      ? (/-([0-9a-f]{7,40})$/.exec(input.health.version)?.[1] ?? input.health.version)
+      ? `${sha ?? input.health.version}${tag}`
       : `unknown (${input.health.reason})`
   const kind = kindOf(input)
   const branch = branchOf(input.branch)
   return `${"kind" in kind ? `${branch} ${kind.kind}` : `${branch}, unknown (${kind.unknown})`}, at ${version}`
 }
+
+// The sha /api/health's version ends in, when it ends in one.
+const shaOf = (health: Health): string | undefined =>
+  "version" in health ? /-([0-9a-f]{7,40})$/.exec(health.version)?.[1] : undefined
 
 const kindOf = ({
   listeners = [],
@@ -139,7 +164,7 @@ const listenersOn = async (run: Run, port: number): Promise<number[]> =>
     .filter((line) => /^\d+$/.test(line.trim()))
     .map(Number)
 
-// Reads the two lines' values once: two git reads of the main checkout, portless's routes, one ps read, one lsof read of the web's port and one GET.
+// Reads the two lines' values once: up to five git reads of the main checkout (its describe and branch, main's latest tag and whether HEAD holds it, the Dashboard sha's tag), portless's routes, one ps read, one lsof read of the web's port and one GET.
 export const readRunning = async (input: {
   health?: (url: string) => Promise<Health>
   portless: string
@@ -153,18 +178,27 @@ export const readRunning = async (input: {
     ? await (input.health ?? fetchHealth)(`http://127.0.0.1:${api.port}/api/health`)
     : { reason: `portless has no route for ${API}` }
   const owner = webOwner(routes)
+  const git = (...args: string[]) => run(["git", "-C", repo, ...args])
+  const mainTag = await git("describe", "--tags", "--abbrev=0", "origin/main")
+  const sha = shaOf(health)
   return {
     build: buildOf({
-      branch: await run(["git", "-C", repo, "branch", "--show-current"]),
+      branch: await git("branch", "--show-current"),
       health,
       listeners: "root" in owner ? await listenersOn(run, owner.port) : [],
       port: "root" in owner ? owner.port : undefined,
       ps: "root" in owner ? (await run(["ps", "-A", "-o", "pid=,ppid=,command="])).out : "",
       root: "root" in owner ? owner.root : null,
+      tag: sha ? await git("describe", "--tags", "--abbrev=0", sha) : undefined,
       why: "why" in owner ? owner.why : undefined,
     }),
-    version: versionOf(
-      await run(["git", "-C", repo, "describe", "--tags", "--long", "--abbrev=7"]),
-    ),
+    version: checkoutOf({
+      ancestor:
+        mainTag.code === 0
+          ? await git("merge-base", "--is-ancestor", firstLine(mainTag.out), "HEAD")
+          : undefined,
+      describe: await git("describe", "--tags", "--long", "--abbrev=7"),
+      mainTag,
+    }),
   }
 }

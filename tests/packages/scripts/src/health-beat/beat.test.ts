@@ -52,8 +52,8 @@ describe("beatText", () => {
     expect(beatText(reading())).toBe(
       [
         "*Health, 6:05 pm UTC*",
-        "🏷️ Version: v0.0.23 + 1 local commit (8b6438a)",
-        "🏗️ Build: main build, at 1a1291d",
+        "🏷️ Main checkout: v0.0.23 + 1 local commit (8b6438a)",
+        "🏗️ Dashboard: main build, at 1a1291d",
         "✅ Mac: load 6 on 12 cores, 41% CPU idle",
         "✅ Memory: pressure 1 (normal), 64% free",
         "✅ Sessions: 5 working, 3 idle, 0 stuck",
