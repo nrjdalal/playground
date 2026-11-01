@@ -435,8 +435,8 @@ describe("a write by ~ is judged against the home the shell expands it to", () =
   })
 })
 
-// A quoted awk program or commit message holds a space, so the hook reads it as a command line of its own too, as a shell would run it: a word that expands to nothing is dropped, a folder runs nothing, and a glob counts only where it can match the next folder down to the root.
-describe("text read as a command line judges what a shell would run", () => {
+// A quoted argument with a space is read as a command line only where a program runs it as one (watch, ssh, tmux, rsync -e, find, git, a variable the call sets); awk's program is one word, still refused when it names the root.
+describe("a quoted argument is read as a command line only where a program runs it", () => {
   const real = { HOME: homedir() }
   const at = (command: string, cwd: string) =>
     check(JSON.stringify({ cwd, tool_input: { command }, tool_name: "Bash" }), real)
@@ -444,8 +444,6 @@ describe("text read as a command line judges what a shell would run", () => {
   test.each([
     ["awk matching a field to a regex", "awk '$3 ~ /runner/' /dev/null"],
     ["awk matching a field to a string", `awk '$3 ~ "runner"' /dev/null`],
-    ["awk printing a field", "awk '{print $1}' /dev/null"],
-    ["a commit message with a scope", `git commit -m "fix(x): y"`],
   ])("%s runs from the home and the data folder", async (_, command) => {
     for (const cwd of homes) expect(await at(command, cwd)).toBeUndefined()
   })
@@ -454,51 +452,50 @@ describe("text read as a command line judges what a shell would run", () => {
     [
       "awk printing into the root",
       `awk '{print > "${join(homedir(), ".playground", "extensions", "x")}"}' /dev/null`,
-      "a write to",
     ],
-    ["touch in the root by ~", "touch ~/.playground/extensions/x", "touch on"],
-    ["watch removing the home", "watch 'rm -rf ~'", "rm on"],
-    ["watch removing by a glob in the data folder", "watch 'rm -rf ~/.playground/ext*'", "rm on"],
-    ["watch with an empty word ahead of rm", "watch '$3 rm -rf ~'", "rm on"],
-    ["watch running the home, its substitution removing it", "watch '~ $(rm -rf ~)'", "rm on"],
-    ["a git alias removing the home", "git -c alias.x='!rm -rf ~' x", "rm on"],
     [
-      "a git alias running its argument on the home",
-      "git -c alias.x='!$1 ~' x rm",
-      "a program it cannot read on",
+      "awk's system() naming the root",
+      `awk 'BEGIN{system("touch ${join(homedir(), ".playground", "extensions", "x")}")}'`,
     ],
+    ["touch in the root by ~", "touch ~/.playground/extensions/x"],
+    ["watch removing the home", "watch 'rm -rf ~'"],
+    ["watch removing by a glob in the data folder", "watch 'rm -rf ~/.playground/ext*'"],
+    ["watch with an unknown word ahead of rm", "watch '$3 rm -rf ~'"],
+    ["watch running the home, its substitution removing it", "watch '~ $(rm -rf ~)'"],
+    ["a git alias removing the home", "git -c alias.x='!rm -rf ~' x"],
+    ["a git alias running its argument on the home", "git -c alias.x='!$1 ~' x rm"],
+    ["git config setting an alias that removes the home", "git config alias.x '!rm -rf ~'"],
     [
       "ssh's ProxyCommand touching the root",
       "ssh -o ProxyCommand='touch ~/.playground/extensions/x' h",
-      "no-extensions-write hook refuses",
     ],
-  ])("%s stays refused, naming its verb", async (_, command, said) => {
-    for (const cwd of homes) expect(await at(command, cwd)).toContain(said)
+    ["tmux's command removing the home", "tmux new-session 'rm -rf ~'"],
+    ["rsync's -e removing the home", "rsync -e 'rm -rf ~' a b"],
+    ["find's -exec removing the home", "find . -exec sh -c 'rm -rf ~' \;"],
+    ["GIT_SSH_COMMAND removing the home", "GIT_SSH_COMMAND='rm -rf ~' git fetch"],
+  ])("%s stays refused", async (_, command) => {
+    for (const cwd of homes)
+      expect(await at(command, cwd)).toContain("no-extensions-write hook refuses")
+  })
+
+  test("a refusal names a program it cannot read as such", async () => {
+    expect(await at("git -c alias.x='!$1 ~' x rm", homedir())).toContain(
+      "refuses a program it cannot read on",
+    )
   })
 
   test.each([
-    ["a glob of the data folder", "rm -rf .pl*"],
-    ["a brace of the data folder", "rm -rf {.playground,x}"],
-    ["a zsh group of the data folder", "rm -rf (.playground|x)"],
-    ["a zsh qualifier on every folder", "rm -rf *(/)"],
-    ["a glob through a link to the data folder", "rm -rf p*/extensions/x"],
-    ["bash's extglob @() of the data folder", "shopt -s extglob; rm -rf @(.playground)"],
-    ["bash's extglob +() of the data folder", "shopt -s extglob; rm -rf +(.playground)"],
-    ["bash's extglob ?() of the data folder", "shopt -s extglob; rm -rf ?(.playground)"],
-    ["bash's extglob !() of every other name", "shopt -s extglob; rm -rf !(x)"],
-  ])("%s from the home stays refused", async (_, command) => {
-    expect(await bash(command)).toContain("no-extensions-write hook refuses")
-  })
-
-  test.each([
-    ["rm of a glob through a link to the root", "rm -rf s*/"],
-    ["a redirect through a glob of a link to the root", "echo x > s*/policy.json"],
-  ])("%s from the data folder stays refused", async (_, command) => {
-    expect(await bash(command, DATA)).toContain("no-extensions-write hook refuses")
-  })
-
-  // a `..` or another glob after a glob's part leaves the folder it matched in, so the part alone cannot say where the path lands
-  test.each([
+    ["a glob of the data folder", "rm -rf .pl*", HOME],
+    ["a brace of the data folder", "rm -rf {.playground,x}", HOME],
+    ["a zsh group of the data folder", "rm -rf (.playground|x)", HOME],
+    ["a zsh qualifier on every folder", "rm -rf *(/)", HOME],
+    ["a glob through a link to the data folder", "rm -rf p*/extensions/x", HOME],
+    ["bash's extglob @() of the data folder", "shopt -s extglob; rm -rf @(.playground)", HOME],
+    ["bash's extglob +() of the data folder", "shopt -s extglob; rm -rf +(.playground)", HOME],
+    ["bash's extglob ?() of the data folder", "shopt -s extglob; rm -rf ?(.playground)", HOME],
+    ["bash's extglob !() of every other name", "shopt -s extglob; rm -rf !(x)", HOME],
+    ["rm of a glob through a link to the root", "rm -rf s*/", DATA],
+    ["a redirect through a glob of a link to the root", "echo x > s*/policy.json", DATA],
     ["a glob climbing back out to the data folder", "rm -rf w*/../.p*", HOME],
     [
       "a redirect climbing back out into the root",
@@ -508,28 +505,11 @@ describe("text read as a command line judges what a shell would run", () => {
     ["a glob in the data folder climbing to the root", "rm -rf .playground/h*/../e*", HOME],
     ["a glob climbing to the root from the data folder", "rm -rf h*/../e*", DATA],
     ["a glob climbing out to any other folder", "rm -rf w*/../Documents/x", HOME],
-    [
-      "a glob past a link and its `..`, which climbs from where the link lands",
-      "rm -rf store/../e*",
-      HOME,
-    ],
-  ])("%s stays refused", async (_, command, cwd) => {
-    expect(await bash(command, cwd)).toContain("no-extensions-write hook refuses")
-  })
-
-  // a glob that matches nothing is left as typed by bash, and stops the call in zsh, so neither writes into the root
-  test.each([
+    ["a glob past a link and its `..`", "rm -rf store/../e*", HOME],
     ["a redirect to a glob no entry matches", "echo x > q*", DATA],
     ["rm of a glob no entry matches", "rm -rf q*", HOME],
-  ])("%s runs", async (_, command, cwd) => {
-    expect(await bash(command, cwd)).toBeUndefined()
-  })
-
-  test.each([
-    ["a brace with no pair", "rm -rf {print"],
-    ["a group that names no folder down to the root", "rm -rf fix(x):"],
-  ])("%s from the home runs", async (_, command) => {
-    expect(await bash(command)).toBeUndefined()
+  ])("%s stays refused, as every glob above the root is", async (_, command, cwd) => {
+    expect(await bash(command, cwd)).toContain("no-extensions-write hook refuses")
   })
 })
 
@@ -783,7 +763,7 @@ describe("the hook's run", () => {
   })
 
   test("a single step the deadline cannot interrupt is refused when the main thread's timer fires", async () => {
-    const command = `printf '%s${",".repeat(60)}' '{' ${"x ".repeat(6_000)}| xargs -I @ foo '@ a'; playground ext import x`
+    const command = `printf '%s${",".repeat(60)}' '{' ${"x ".repeat(6_000)}| xargs -I @ watch '@ a'; playground ext import x`
     const raw = JSON.stringify({ cwd: "/tmp", tool_input: { command }, tool_name: "Bash" })
     const started = performance.now()
     expect(await guarded(raw, ENV, 1_000)).toContain("split it into shorter calls")

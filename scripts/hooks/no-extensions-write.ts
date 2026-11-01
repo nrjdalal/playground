@@ -1,5 +1,5 @@
 // PreToolUse hook: refuses a factory session's write into the extensions root, where every guard's list, policy.json and each scope's sources live, and its playground CLI call that changes what a guard reads to allow or deny a call, so no session edits a list in one call and makes the guarded call in the next.
-import { existsSync, readdirSync, statSync } from "node:fs"
+import { existsSync, statSync } from "node:fs"
 import { homedir } from "node:os"
 import { dirname, join, resolve, sep } from "node:path"
 
@@ -14,6 +14,7 @@ import {
   knownVariables,
   lex,
   marked,
+  parse,
   type Parsed,
   pathOf,
   PRINTERS,
@@ -75,12 +76,6 @@ const EXPORTS = new Set(["declare", "export", "local", "readonly", "typeset"])
 const REMOVERS = new Set(["find", "mv", "rm", "rmdir", "rsync", "unlink"])
 const DUPLICATE = /^(?:\d+|-)$/
 const GLOB = /[*?[{(]/
-// The scope of a command line a program runs (watch, ssh's ProxyCommand, a git alias), read from a word's text.
-type LineEnv = Env & { line?: true }
-// A line a program runs starts a shell with no arguments, so its positional parameters expand to nothing and the shell drops them; git alone passes an alias its arguments, which stay unknown.
-const POSITIONAL = /\$(?:[1-9@*#]|\{(?:[1-9]\d*|[@*#])\})/g
-const argless = (line: string, runner: string): string =>
-  runner === "git" ? line : line.replace(POSITIONAL, "")
 // Variables that make git or a pager run a program, so a reader with one set is judged as any other program.
 const RUNS = /^(?:EDITOR|GIT_[A-Z_]+|LESSOPEN|PAGER|VISUAL)$/
 const CLI = join("packages", "scripts", "src", "playground", "cli.ts")
@@ -153,12 +148,37 @@ function cliCalls(parsed: Parsed, env: Env): Word[][] {
   return words.flatMap((word, at) => (isCli(word, dirs) ? [words.slice(at + 1)] : []))
 }
 
-// Every text of a word or a variable that holds a space, a leading ! dropped, read as a command line of its own, since a program may run it (watch, ssh's ProxyCommand, a git alias, a pager).
+// Programs that run a word as a shell line: arch's, concurrently's, find's -exec, npx's package, rsync's -e, script's -c, ssh's remote command and ProxyCommand, tmux's command and watch's; git runs its -c values (an alias, core.sshCommand, core.pager) and more, so all its words but a message are read too.
+const RUNNERS = new Set([
+  "arch",
+  "concurrently",
+  "find",
+  "git",
+  "npx",
+  "rsync",
+  "script",
+  "ssh",
+  "tmux",
+  "watch",
+])
+// git's commit or tag message at a word: the word after -m or --message, or one with the message attached
+const messageAt = (words: Word[], at: number): string | undefined =>
+  /^(?:-m|--message)$/.test(words[at - 1]?.value ?? "")
+    ? words[at].value
+    : /^(?:-m|--message=)./.test(words[at].value)
+      ? words[at].value.replace(/^(?:-m|--message=)/, "")
+      : undefined
+
+// Every text of a variable the call sets or exports, or of a runner's word, that holds a space, a leading ! dropped, read as a command line of its own (a pager, GIT_SSH_COMMAND, a git alias, watch's line); any other program's quoted argument (awk's program) stays one word.
 function runsOf(parsed: Parsed, env: Env): string[] {
-  const { args, first, local } = parsed
+  const { args, first, local, name } = parsed
   const values = [...local, ...env.vars].flatMap(([, text]) => (text.unknown ? [] : [text.value]))
-  for (const word of first ? [first, ...args] : args)
+  const words = !RUNNERS.has(name) ? [] : first ? [first, ...args] : args
+  for (const [at, word] of words.entries()) {
+    // a commit or tag message is text git keeps, never a line it runs
+    if (name === "git" && messageAt(words, at) !== undefined) continue
     for (const text of texts(word)) values.push(text.value.replace(/^!/, ""))
+  }
   return [...new Set(values)].filter((value) => /\s/.test(value) && !marked(value))
 }
 
@@ -228,35 +248,6 @@ function inspect(raw: string, environment: Environment) {
     const at = real(path)
     return at === sep ? remover : root.startsWith(at + sep)
   }
-  // The names in a folder above the root that reach it: the next folder down, and each entry the folder holds whose path, links followed, is in the root or above it, read once a folder; undefined for a folder that cannot be read, which may hold anything.
-  const reaching = new Map<string, string[] | undefined>()
-  const reachersOf = (folder: string): string[] | undefined => {
-    if (!reaching.has(folder)) {
-      const down = root.slice(real(folder).length).split(sep).find(Boolean) ?? ""
-      let held: string[] | undefined = []
-      try {
-        held = readdirSync(folder).filter((name) => {
-          const path = join(folder, name)
-          return inRoot(path) || above(path, true)
-        })
-      } catch {
-        // a folder that is not there holds nothing
-        if (existsSync(folder)) held = undefined
-      }
-      reaching.set(folder, held && [down, ...held])
-    }
-    return reaching.get(folder)
-  }
-  // Whether a glob's part in a folder above the root can match a name that reaches the root; a group, zsh's or bash's extglob, and a brace range read as `*`, so only a lone brace or a name that matches none is a plain word; a `..` anywhere, which the shell climbs from where a link lands, or another glob after the part may land anywhere, so it reaches.
-  const reaches = (value: string, at: number, folder: string) => {
-    let rest = value.slice(value.lastIndexOf("/", at) + 1)
-    for (let was = ""; was !== rest;) [was, rest] = [rest, rest.replace(/[@?+*!]?\([^()]*\)/g, "*")]
-    const [part, ...after] = rest.split("/")
-    if (value.split("/").includes("..") || after.some((step) => GLOB.test(step))) return true
-    const glob = new Bun.Glob(part!.replace(/\{[^}]*\.\.[^}]*\}/g, "*"))
-    const names = reachersOf(folder)
-    return !names || names.some((name) => glob.match(name))
-  }
   const file = typeof tool === "string" ? input[FILE_TOOLS[tool]] : undefined
   if (typeof file === "string") {
     const expanded = /^~(?:\/|$)/.test(file) ? join(home, file.slice(1)) : file
@@ -292,10 +283,7 @@ function inspect(raw: string, environment: Environment) {
       if (glob && !marked(text.value)) {
         const dir = pathOf({ value: `${text.value.slice(0, glob.index)}x` }, env)
         const folder = dir && dirname(dir)
-        if (
-          folder &&
-          (inRoot(folder) || (above(folder, true) && reaches(text.value, glob.index, folder)))
-        )
+        if (folder && (inRoot(folder) || above(folder, true)))
           return `${text.value}, a glob in ${folder}`
       }
     }
@@ -315,9 +303,6 @@ function inspect(raw: string, environment: Environment) {
           (GLOB.test(r.target.value) && !!names(r.target, env, true))),
     )
     if (into?.target) return refuse(`a write to ${pathOf(into.target, env)}`)
-    // a line a program runs whose program is a folder runs nothing, so only its redirects, judged above, can write
-    const ran = first && (env as LineEnv).line ? pathOf(first, env) : undefined
-    if (ran && existsSync(ran) && statSync(ran).isDirectory()) return
     const reader = !!first && reads(parsed, env)
     const fed = xargs ? await stdinOf(cmd, env) : undefined
     const stdinWords: Word[] = !fed
@@ -341,9 +326,18 @@ function inspect(raw: string, environment: Environment) {
           : raw
       if (seen.has(line)) continue
       seen.add(line)
-      const inner: LineEnv = { ...env, line: true, vars: new Map() }
-      const verdict = await run(lex(argless(line, name), env.known), inner, visit, true)
+      const verdict = await run(lex(line, env.known), { ...env, vars: new Map() }, visit, true)
       if (verdict) return verdict
+    }
+    // a git message is text, no line git runs, but one naming a gated call is refused all the same
+    for (const message of name === "git" && !reader
+      ? args.flatMap((_, at) => messageAt(args, at) ?? [])
+      : []) {
+      const write = lex(message, env.known)
+        .commands.flatMap((cmd) => cliCalls(parse(cmd), env))
+        .map((words) => cliWrite(words))
+        .find(Boolean)
+      if (write) return refuse(write)
     }
     // a bare assignment or export with no command, or a reader: only its redirect writes, and a variable it sets is read where a command runs with it
     if (!first || EXPORTS.has(name) || reader) return
