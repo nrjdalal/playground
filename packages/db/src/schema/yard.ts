@@ -29,7 +29,7 @@ const id = () =>
     .primaryKey()
     .$defaultFn(() => crypto.randomUUID())
 
-// A single-use way in, for one GitHub login or, with for_login null, for whoever redeems it first: a member's request waits as requested, with no code, until the owner's web session makes it open; the code is stored only as its hash; it goes with the account that made, asked for or redeemed it, since a week-long way in has no history worth keeping.
+// A single-use way in, for one GitHub login or, with for_login null, for whoever redeems it first: a member's request waits as requested, with no code, until the owner's web session makes it open; the code is stored only as its hash; it goes with the account that made, asked for or redeemed it, since a spent or unused way in has no history worth keeping.
 export const yardInvite = pgTable(
   "yard_invite",
   {

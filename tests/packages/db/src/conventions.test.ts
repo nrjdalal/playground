@@ -46,9 +46,9 @@ const UNINDEXED: Record<string, string> = {
   "invitation.inviter_id":
     "Better Auth writes it and never queries by it, and no Playground code sends an invitation, so the table stays small",
   "yard_invite.made_by":
-    "the Yard writes it when an invite is made and never queries by it, and invites are few and expire within a week, so the table stays small",
+    "the Yard writes it when an invite is made and never queries by it, and the table holds one row per invite, few enough for a user delete to scan",
   "yard_invite.redeemed_by":
-    "the Yard writes it when an invite is redeemed and never queries by it, and invites are few and expire within a week, so the table stays small",
+    "the Yard writes it when an invite is redeemed and never queries by it, and the table holds one row per invite, few enough for a user delete to scan",
 }
 // A column whose only leading index is partial, and why its WHERE still holds every row a delete of the referenced row touches.
 const PARTIAL_INDEX: Record<string, string> = {
