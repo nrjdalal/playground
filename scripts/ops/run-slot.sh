@@ -325,13 +325,13 @@ quick_rule() {
   local a first=""
   # the command's first word past env and VAR=x, as box_fits finds it (optimizer, 19 Oct: a commit run as env NODE_ENV=... git commit waited 14 min in the queue)
   for a in "$@"; do case "$a" in env|*=*) continue ;; esac; first=$a; break; done
-  if [ "$(basename "$first")" = git ]; then
+  if [ "$(basename -- "$first")" = git ]; then
     # a merge or pull runs no pre-commit build (lefthook.yml has no merge hook), so it ends in seconds (optimizer, 20 Oct: a 1s git merge waited 26.6 min behind suites)
     # a push runs only the pre-push hook's seconds (retro 2, 31 Oct: git push queued 205 min in a day)
     for a in "$@"; do case "$a" in commit|merge|pull|push) echo commit; return ;; esac; done
-  elif [ "$(basename "$first")" = cp ]; then
+  elif [ "$(basename -- "$first")" = cp ]; then
     for a in "$@"; do a=${a%/.}; case "${a%/}" in node_modules|*/node_modules) echo clone; return ;; esac; done
-  elif [ "$(basename "$first")" = bun ]; then
+  elif [ "$(basename -- "$first")" = bun ]; then
     # a bun test or bun run test:file naming 1 to 3 test files, nothing else, takes run-slot-quick, with --cwd=<p> anywhere or a bare --cwd after run or test, since bun misreads one before the subcommand (scripts/hooks/README.md's no-false-green; ops, 20 Oct: with slot-off, a 5-file run that ran 1s waited 52 min behind suites; PG-2158)
     # bun run docs:wrap and format:check never run past seconds (run-slot.runs.log, 20 Oct: max 2s and 9s), so they take run-slot-quick too
     for a in "$@"; do case "$a" in docs:wrap|format:check) echo quick; return ;; esac; done
@@ -357,6 +357,8 @@ ran_short() {
 }
 # the slot a command takes outside the queue: its rule's, else quick when it ran short its last 3 times, so a long run after short ones holds the one quick slot and sends the next back to the queue
 quick_kind() {
+  # a read command takes no slot and runs a bare true, so three short true runs in the log would take can-take and head down the quick lane, past their own exits (issue 285)
+  [ -n "$CAN_TAKE" ] && return
   local kind
   kind=$(quick_rule "$@")
   [ -z "$kind" ] && ran_short "$@" && kind=quick
@@ -387,9 +389,9 @@ light_run() {
   local a first="" next="" turbo="" filter="" types=""
   for a in "$@"; do case "$a" in env|*=*) continue ;; esac; [ -z "$first" ] && first=$a && continue; next=$a; break; done
   # the 4 bare bunx tsc runs in the runs log each ran 1 s or less, while an sh -c holding a build and then tsc ran up to 152 s, so only the bare program counts (retro 5, 31 Oct)
-  [ "$(basename "$first")" = tsc ] && return
-  case "$(basename "$first")" in bun|bunx) ;; *) return 1 ;; esac
-  [ "$(basename "$first")" = bunx ] && [ "$next" = tsc ] && return
+  [ "$(basename -- "$first")" = tsc ] && return
+  case "$(basename -- "$first")" in bun|bunx) ;; *) return 1 ;; esac
+  [ "$(basename -- "$first")" = bunx ] && [ "$next" = tsc ] && return
   for a in "$@"; do case "$a" in install|add) return 0 ;; turbo) turbo=1 ;; --filter|--filter=*|-F) filter=1 ;; check-types) types=1 ;; esac; done
   [ -n "$turbo" ] && [ -n "$filter" ] && return
   [ -n "$types" ] && types_cached "$@"
@@ -606,19 +608,23 @@ reclaim() {
   [ "$(cat "$1.holder" 2>/dev/null)" = "$line" ] && [ "$(stamp "$1")" = "$dir" ] && rmdir "$1" 2>/dev/null
 }
 
+# the 5-minute load run-slot-2 in single-slot mode and the quick slot start under: 22, or run-slot.load5-cap's cap while it stands (builder, 12 Oct: 12 while the live dashboard's cmux reads time out), 22 at most
+# its cap is the file's last line, the one a set writes below its reason or an old-shape file's only one
+load_line() {
+  local cap
+  cap=$(switch_on run-slot.load5-cap && tail -n 1 "$OPS/run-slot.load5-cap" | grep -xE '[0-9]{1,3}'); [ -n "$cap" ] || cap=22; [ "$cap" -le 22 ] || cap=22
+  echo "$cap"
+}
 # whether the load rules open slot $1 to this run now
 slot_open() {
-  local s=$1 cap
+  local s=$1
   # run-slot.single (builder, 9 Oct: heavy suites one at a time) closes slots 2 and 3 to new holders while it exists
   # ...except for the dashboard's own build and the merge train (12 Oct: single-slot mode left both waiting an hour behind testers' runs)
   # #i162: in single-slot mode run-slot-2 still opens for a second suite; since 13 Oct (dispatcher, so work runs while the
   # machine allows) it opens on memory: free share 40% or more (ops, 19 Oct 01:16Z, from the optimizer: 9 Mac-only waiters at
   # pressure 1 with 43% free), pressure normal, and the 5-minute load under 22 as a backstop
   if [ "$s" != run-slot ] && switch_on run-slot.single && [ "$WHO" != ops-dashboard ] && [ "$WHO" != ops-merge-train ]; then
-    # run-slot.load5-cap lowers the load line for a while (builder, 12 Oct: 12 while the live dashboard's cmux reads time out); 22 at most
-    # its cap is the file's last line, the one a set writes below its reason or an old-shape file's only one
-    cap=$(switch_on run-slot.load5-cap && tail -n 1 "$OPS/run-slot.load5-cap" | grep -xE '[0-9]{1,3}'); [ -n "$cap" ] || cap=22; [ "$cap" -le 22 ] || cap=22
-    if [ "$s" = run-slot-2 ] && [ "$(load5)" -lt "$cap" ] && mem_ok; then :; else return 1; fi
+    if [ "$s" = run-slot-2 ] && [ "$(load5)" -lt "$(load_line)" ] && mem_ok; then :; else return 1; fi
   elif [ "$s" = run-slot-2 ] && [ "$(load1)" -ge "$CORES" ]; then
     return 1
   fi
@@ -739,6 +745,15 @@ if [ -n "$KIND" ]; then
   # bash 5.2 can fail to parse the TERM trap while it expands a "$(...)" and then drop the loop it was in (measured on the runner host:
   # the waiter ran its command with no slot), so each wait checks it ended as it should, and the waiter stops when it did not
   clone_held && { echo "run-slot.sh: run-slot.clone-off holds this clone, so $WHO stops" >&2; exit 143; }
+  # the quick slot waits while load5 is at or over the load line, since a 1 to 3 file suite there ran up to 317 s beside the CPU slots (optimizer, 31 Oct); a commit or a clone ends in seconds or has clone-off's gate, so neither waits here
+  load_held() { [ "$KIND" = quick ] && [ "$(load5)" -ge "$(load_line)" ]; }
+  while load_held; do
+    [ $((waited % 300)) -eq 0 ] && echo "run-slot.sh: waiting for load5 under $(load_line) for the quick slot (load5 is $(load5))" >&2
+    reread
+    sleep "$CLONE_POLL"
+    waited=$((waited + 5))
+  done
+  load_held && { echo "run-slot.sh: load5 $(load5) is at or over $(load_line), so $WHO stops" >&2; exit 143; }
   GOT=
   while :; do
     mkdir "$OPS/run-slot-$KIND" 2>/dev/null && { GOT=1; break; }

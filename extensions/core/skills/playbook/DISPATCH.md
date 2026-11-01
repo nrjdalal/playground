@@ -27,6 +27,7 @@ The steps to spawn and brief a session are in [SESSIONS.md](SESSIONS.md#spawn), 
   - A route waits up to a minute for ingest to bring the message; one that fails names the quote, so check its words against the message and route again.
 - The Planner orders and decides, and builds nothing: every research or advisor pass goes to the Builder as a read-only research worker that reports to the Planner (**workers**).
   Every non-trivial plan it writes is researched first and passes an advisor (a research worker asked for a second opinion, on Opus at high effort) before it is decided (**verify**); a design choice goes in `~/.playground/bundles/decisions.md`.
+  A decision that claims no change for this machine or for the owner's setup cites its measurement there, the command run and its output, since one such claim, unmeasured, once nearly let a web build run beside the live dashboard's Postgres.
   It sends the dispatcher each result with any decision on **ask**'s list, which the dispatcher posts to his Inbox, and keeps the roadmap in `~/.playground/bundles/plan.json`, re-groomed whenever the owner adds something.
   It files an issue in the repo where the work lives: the factory's own work in the factory repo, an org's in that org's extension repo and a person's in their login extension ([ADR 0016](../../../../.agents/adr/0016-playground-is-generic-with-a-small-core.md)).
   Before it files one, it searches that repo's open issues for the same file or symptom, and folds the finding into a match as a comment, filing a new issue only when none matches (one issue once duplicated another).
@@ -70,6 +71,10 @@ The steps to spawn and brief a session are in [SESSIONS.md](SESSIONS.md#spawn), 
   while the two heads' adjacent hunks still conflict once the parent squash-merges onto `canary`.
   A stack holds the child behind its parent: the lead sends Ops the hold line **gate**'s hold paragraph names, for the child's PR, and Ops removes it on the lead's word once the parent has merged, so a ready child never lands its parent's lines first.
   The child merges its parent's branch in once, when the parent scores 5/5 or merges, and `canary` only when it needs it (a conflict, or a change it builds on), since every merge is a new head its reviewer scores again (measured, 31 Oct: one child merged its parent four times in 59 minutes while the parent sat at 3/5).
+  A stack held at 5/5 until the owner's try syncs with `canary` only when GitHub reads a PR in it as conflicting or code-review-loop's step 8 finds a conflict, plus once more before the try, never on a schedule, since each sync is a new head on every PR in the stack (measured, 1 Nov: its three reviewers ran 6,774 s of local tests in 5 hours of syncs, then 0 s in the 3 hours after).
+  Each sync's round waits on CI at the synced head and cites it where code-review-loop's The last 5/5 lets CI stand in, since the sync itself merged `canary`.
+  A sync is done when each PR in the stack has its merged head pushed and its reviewer has posted a verdict at that head.
+  The owner's try is the owner's own run of a stack before any PR in it merges, which the lead names with its time to each reviewer in the stack, so each knows its waiting 5/5 is held and which sync comes before the try.
   Anything else bundles the items into one PR or sequences them one PR after the other.
   A PR whose GitHub base is the parent's branch is the other stack shape, the one **github**'s stacked-base line governs.
   A single task goes out alone when it takes a route that skips the Planner (above).

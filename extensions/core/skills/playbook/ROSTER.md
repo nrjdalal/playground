@@ -55,7 +55,7 @@ Run each row as `bun <main checkout>/scripts/roster.ts <row>` (`$PLAYGROUND_REPO
   It takes the slot's number, never its label.
   Each reader of a manager goes through it or its rule (`managerOf` in `packages/config/src/kinds.ts`): spawn.sh's reports-to, notify.sh's default and kind words, and the backlog marks below.
   Write "your builder" in a brief and resolve it with `who builder` when you send it.
-- A runner under another name (a headless job such as `linear-auto`) is recorded with `kind=runner` on its `assign`, which places it as a runner whatever its name.
+- A runner under another name (a headless job such as `nightly-digest`) is recorded with `kind=runner` on its `assign`, which places it as a runner whatever its name.
 - A new name needs a task, since the dashboard's schema drops an agent with none: `set` and `report` refuse a name the roster lacks unless `task=` gives one, and `assign` gives it as its third word.
 - A name is lowercase words joined by `-`, spawn.sh's word shape: `set`, `report` and `assign` refuse any other, naming it, before they read or write the roster.
 - The backlog only grows until roster.ts can take an entry off it, so the builder (`who builder`, `builder` today) keeps two marks on its own entry, where the dashboard reads them: `backlogNext` (0-based, 0 when unset), below which every entry is settled, and `backlogTaken`, the space-separated indices at or past it that are settled already (dispatched, folded into a lane or dropped).

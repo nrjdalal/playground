@@ -19,10 +19,11 @@ afterAll(() => {
   for (const dir of dirs) rmSync(dir, { force: true, recursive: true })
 })
 
-// A scratch config folder with the dashboard supervisor's dashboard-db (`missing`, `unreadable` or the text to write) and a stub docker whose inspect answers as `answer` says, logging each call.
+// A scratch config folder with the dashboard supervisor's dashboard-db (`missing`, `unreadable` or the text to write), a runner host (`ip`, the data folder's ip file's text, and `runnerHost`, RUNNER_HOST, each left out when unset) and a stub docker whose inspect answers as `answer` says, logging each call.
 const dashboard = (
   answer: "error" | "gone" | "hung" | "running" | "stopped",
   db: string = "playground-dashboard-db",
+  host: { ip?: string; runnerHost?: string } = { ip: "203.0.113.7\n" },
 ) => {
   const dir = mkdtempSync(join(tmpdir(), "no-mac-web-build-"))
   dirs.push(dir)
@@ -41,11 +42,17 @@ const dashboard = (
   }[answer]
   writeFileSync(join(bin, "docker"), `#!/bin/bash\necho "$*" >> "${dir}/calls"\n${reply}\n`)
   chmodSync(join(bin, "docker"), 0o755)
+  const data = join(dir, "config", "playground")
+  if (host.ip !== undefined) {
+    mkdirSync(join(data, "ops", "runner-host"), { recursive: true })
+    writeFileSync(join(data, "ops", "runner-host", "ip"), host.ip)
+  }
   const environment = {
     CLAUDE_CONFIG_DIR: join(dir, "config"),
-    PLAYGROUND_DATA_DIR: join(join(dir, "config"), "playground"),
+    PLAYGROUND_DATA_DIR: data,
     HOME: dir,
     PATH: `${bin}:/usr/bin:/bin`,
+    ...(host.runnerHost === undefined ? {} : { RUNNER_HOST: host.runnerHost }),
   }
   const bash = (command: string) =>
     check(
@@ -119,6 +126,66 @@ describe("every other build runs, and asks Docker nothing", () => {
   })
 })
 
+describe("with no runner host set, the dashboard's container decides, and a refusal names the routes that exist", () => {
+  test.each([
+    ["no RUNNER_HOST and no ip file, the container stopped", "stopped" as const, {}],
+    ["no RUNNER_HOST and no ip file, the container gone", "gone" as const, {}],
+    [
+      "an ip file holding no address, the container stopped",
+      "stopped" as const,
+      { ip: "not-an-address\n" },
+    ],
+  ])("%s: the build runs", async (_, answer, host) => {
+    const { bash, calls } = dashboard(answer, "playground-dashboard-db", host)
+    expect(await bash("docker compose build web")).toBeUndefined()
+    expect(calls()).toBe("inspect -f {{.State.Running}} playground-dashboard-db\n")
+  })
+
+  test.each([
+    [
+      "runs",
+      "running" as const,
+      "playground-dashboard-db",
+      "the live dashboard's Postgres (playground-dashboard-db) runs in this Mac's Docker VM",
+    ],
+    ["is missing", "stopped" as const, "missing", "there is no dashboard-db"],
+    ["is unreadable", "stopped" as const, "unreadable", "dashboard-db could not be read"],
+    [
+      "Docker cannot answer for",
+      "error" as const,
+      "playground-dashboard-db",
+      "Cannot connect to the Docker daemon",
+    ],
+  ])("a dashboard Postgres that %s refuses, naming no ci.sh route", async (_, answer, db, why) => {
+    const reason = await dashboard(answer, db, {}).bash("docker compose build web")
+    expect(reason).toContain("no-mac-web-build hook refuses docker compose build of the web image")
+    expect(reason).toContain(why)
+    expect(reason).toContain(
+      "No runner host is set (RUNNER_HOST, or the data folder's ops/runner-host/ip), so there is no box to build it on, and the live dashboard's Postgres stays up: set one up (scripts/ops/runner-host/host.sh setup <ip>, then write its address to that ip file), or build the web image on a machine with no live dashboard running.",
+    )
+    expect(reason).toContain("The api image still builds here (docker compose build api).")
+    expect(reason).not.toContain("ci.sh")
+  })
+
+  test("a RUNNER_HOST ending in a newline is no host, as ci.sh reads it", async () => {
+    const { bash } = dashboard("running", "playground-dashboard-db", {
+      runnerHost: "203.0.113.7\n",
+    })
+    expect(await bash("docker compose build web")).toContain("No runner host is set")
+  })
+
+  test.each([
+    ["the ip file holds an address", { ip: "203.0.113.7\n" }],
+    ["RUNNER_HOST is set", { runnerHost: "203.0.113.7" }],
+  ])("when %s, the refusal stays as it was", async (_, host) => {
+    const { bash, calls } = dashboard("running", "playground-dashboard-db", host)
+    expect(await bash("docker compose build web")).toBe(
+      "no-mac-web-build hook refuses docker compose build of the web image: the live dashboard's Postgres (playground-dashboard-db) runs in this Mac's Docker VM, and a web image build peaks past the VM's memory, so its out-of-memory killer takes the dashboard's database. Build the web image on the box instead: commit, then from the checkout run bash ~/.playground/ops/runner-host/ci.sh web HEAD, which builds HEAD's tree there and never on the Mac. The api image still builds here (docker compose build api).",
+    )
+    expect(calls()).toBe("inspect -f {{.State.Running}} playground-dashboard-db\n")
+  })
+})
+
 describe("the dashboard's container decides", () => {
   test.each([
     ["not running", "stopped" as const],
@@ -165,6 +232,7 @@ describe("the dashboard's container decides", () => {
       PLAYGROUND_DATA_DIR: join(dir, "playground"),
       HOME: dir,
       PATH: join(dir, "none"),
+      RUNNER_HOST: "203.0.113.7",
     })
     expect(reason).toContain("no docker on PATH")
   })

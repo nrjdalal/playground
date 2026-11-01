@@ -27,6 +27,7 @@ How run-slot runs the factory's **slots** rule (`extensions/core/rules/slots.md`
 - A type check goes to the box only from a checkout's root, since one from a subfolder reads the other workspaces' `dist`, which the box lacks, and it stays on the Mac while the checkout lacks a package's `dist`.
 - `RUN_SLOT_HERE=1`, in run-slot's environment or as an `env` word of the command, keeps a run on the Mac, where it waits for a slot; a docs-only PR's touched-test run takes it while the box queue is long, and so does a run that sets `TMPDIR` to a Mac path, since the box has no `/private/tmp`.
   The box takes its runs first come, first served, so the queue's merge-first order holds only for runs that wait here.
+- The quick slot waits while load5 is at or over the load line, 22 or `run-slot.load5-cap`'s lower cap, the line `run-slot-2` starts under in single-slot mode, since a 1 to 3 file suite there can run for minutes beside the CPU slots; a commit, merge, pull or push and a clone skip this wait.
 - `run-slot.clone-off` holds a `node_modules` clone until memory passes spawn.sh's gate and both the 1-minute and 5-minute loads are under 30, since load5 lags a fresh spike; `run-slot.clone-allow` lists grep patterns (`tester-.*`) for the sessions whose clones still go.
 - `git fetch`, `git rebase` and a `git merge` that finishes by itself run light, outside run-slot, since lefthook.yml has no merge hook; one sent through run-slot anyway takes `run-slot-commit`.
   Commit through `run-slot.sh <your name> -- git commit ...`, which holds `run-slot-commit` and builds under it; a plain `git commit` in a worktree joins the full queue through `packages/scripts/src/commit-slot.ts` as `commit-<worktree folder>`, a wait that can pass the Bash tool's 10 minutes, so run a plain one in the background.
@@ -103,7 +104,7 @@ A run whose `ci.sh` died past any trap (a SIGKILL, a restart) stops itself: ever
 Every ssh of every `ci.sh` rides one connection per user (`ControlMaster=auto`, `ControlPersist=60`, its socket `~/.ssh/lm-%C`), so a poll costs the box no new handshake.
 ssh refuses a socket path past 86 bytes, so on a `$HOME` over 37 characters every `ci.sh` call exits 255 and the run falls back to the Mac.
 
-A web image build goes there alone through `ci.sh web <rev>`, the route `no-mac-web-build` names ([why](../hooks/README.md#no-mac-web-build)).
+A web image build goes there alone through `ci.sh web <rev>`, the route `no-mac-web-build` names while a runner host is set ([why](../hooks/README.md#no-mac-web-build)).
 It uploads `<rev>`'s tree as `ci.sh <rev>` does, and suite.sh's web mode takes every slot alone, so it waits for every suite to end.
 It prints the build's output and exits with its code, or 255 when the box cannot take it, and nothing falls back to the Mac: commit what it should build first, since only a commit's tree goes.
 

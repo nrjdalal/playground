@@ -87,6 +87,8 @@ describe.skipIf(!dockerUp())("the bun run ingest CLI", () => {
     liveReadsEnv({
       ...process.env,
       CLAUDE_CONFIG_DIR: home,
+      // the watcher's FSEvents can drop a change under load, so the rescan that catches it runs every 500ms rather than 30s
+      INGEST_RESCAN_MS: "500",
       // every scratch transcript is stored, as on a stack opted in to every session (own.ts)
       PLAYGROUND_CMUX_SESSIONS: "true",
       POSTGRES_URL: postgres,
@@ -126,41 +128,81 @@ describe.skipIf(!dockerUp())("the bun run ingest CLI", () => {
       stderr: "pipe",
       stdout: "pipe",
     })
-    const reader = follower.stdout.getReader()
-    let log = ""
-    while (!log.includes("following")) {
-      const { done, value } = await reader.read()
-      if (done) break
-      log += new TextDecoder().decode(value)
+    try {
+      const reader = follower.stdout.getReader()
+      let log = ""
+      while (!log.includes("following")) {
+        const { done, value } = await reader.read()
+        if (done) break
+        log += new TextDecoder().decode(value)
+      }
+      expect(log).toMatch(
+        /writing to 127\.0\.0\.1:\d+\/postgres is \S+ \(postgres:18-alpine\), published on 127\.0\.0\.1 only/,
+      )
+      expect(await entries()).toBe(2)
+
+      const second = cli(["--follow"])
+      expect(second.code).toBe(0)
+      expect(second.out).toContain("another importer holds the lock; nothing to do")
+
+      const running = cli(["status"])
+      expect(running.code).toBe(0)
+      expect(running.out).toContain("follower: running")
+      expect(running.out).toContain("0 with unread bytes")
+      expect(running.out).toMatch(/sessions: 1, entries: 2, newest entry: \d{4}-/)
+
+      appendFileSync(transcript, line("u3", "third"))
+      while ((await entries()) < 3) await Bun.sleep(100)
+      expect(await entries()).toBe(3)
+
+      follower.kill("SIGTERM")
+      expect(await follower.exited).toBe(0)
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        log += new TextDecoder().decode(value)
+      }
+      expect(log).toContain("stopped by SIGTERM")
+      expect(cli(["status"]).code).toBe(1)
+    } finally {
+      // a failed step leaves the follower holding the lock, which would fail every case after it
+      follower.kill()
     }
-    expect(log).toMatch(
-      /writing to 127\.0\.0\.1:\d+\/postgres is \S+ \(postgres:18-alpine\), published on 127\.0\.0\.1 only/,
-    )
-    expect(await entries()).toBe(2)
+  }, 30_000)
 
-    const second = cli(["--follow"])
-    expect(second.code).toBe(0)
-    expect(second.out).toContain("another importer holds the lock; nothing to do")
-
-    const running = cli(["status"])
-    expect(running.code).toBe(0)
-    expect(running.out).toContain("follower: running")
-    expect(running.out).toContain("0 with unread bytes")
-    expect(running.out).toMatch(/sessions: 1, entries: 2, newest entry: \d{4}-/)
-
-    appendFileSync(transcript, line("u3", "third"))
-    for (let i = 0; i < 40 && (await entries()) < 3; i++) await Bun.sleep(250)
-    expect(await entries()).toBe(3)
-
-    follower.kill("SIGTERM")
-    expect(await follower.exited).toBe(0)
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-      log += new TextDecoder().decode(value)
+  // The one follower case on the real watcher: the rescan stays at its 30s default, past this case's deadline, so only a change the watcher reports can store the row. FSEvents can drop a change under load, so it appends again until one lands.
+  test("a follower stores a line the watcher reports, before any rescan", async () => {
+    const session = "77777777-8888-4999-aaaa-bbbbbbbbbbbb"
+    const follower = Bun.spawn([process.execPath, CLI, "--follow"], {
+      cwd: home,
+      env: { ...env(), INGEST_RESCAN_MS: "" },
+      stderr: "pipe",
+      stdout: "pipe",
+    })
+    try {
+      const reader = follower.stdout.getReader()
+      let log = ""
+      while (!log.includes("following")) {
+        const { done, value } = await reader.read()
+        if (done) break
+        log += new TextDecoder().decode(value)
+      }
+      const watched = join(home, "projects", "-repo", `${session}.jsonl`)
+      const stored = async () =>
+        (await admin`select count(*)::int as n from claude_entry where session_id = ${session}`)[0]
+          .n as number
+      const deadline = Date.now() + 20_000
+      for (let i = 0; (await stored()) === 0; i++) {
+        if (Date.now() > deadline)
+          throw new Error("timed out waiting for the watcher to report a change")
+        appendFileSync(watched, line(`w${i}`, "seen through the watcher"))
+        await Bun.sleep(500)
+      }
+      expect(await stored()).toBeGreaterThan(0)
+    } finally {
+      follower.kill()
+      await follower.exited
     }
-    expect(log).toContain("stopped by SIGTERM")
-    expect(cli(["status"]).code).toBe(1)
   }, 30_000)
 
   // a config folder Claude Code has run no session in yet: no projects folder under it
@@ -190,13 +232,13 @@ describe.skipIf(!dockerUp())("the bun run ingest CLI", () => {
   test("before Claude Code's first session makes the projects folder, the follower waits for it, then reads it", async () => {
     const { env: freshEnv, fresh } = freshConfig()
     const session = "66666666-7777-4888-9999-aaaaaaaaaaaa"
+    const follower = Bun.spawn([process.execPath, CLI, "--follow"], {
+      cwd: fresh,
+      env: freshEnv,
+      stderr: "pipe",
+      stdout: "pipe",
+    })
     try {
-      const follower = Bun.spawn([process.execPath, CLI, "--follow"], {
-        cwd: fresh,
-        env: freshEnv,
-        stderr: "pipe",
-        stdout: "pipe",
-      })
       const reader = follower.stdout.getReader()
       let log = ""
       while (!log.includes("following")) {
@@ -215,12 +257,13 @@ describe.skipIf(!dockerUp())("the bun run ingest CLI", () => {
       const stored = async () =>
         (await admin`select count(*)::int as n from claude_entry where session_id = ${session}`)[0]
           .n as number
-      for (let i = 0; i < 40 && (await stored()) < 2; i++) await Bun.sleep(250)
+      while ((await stored()) < 2) await Bun.sleep(100)
       expect(await stored()).toBe(2)
 
       follower.kill("SIGTERM")
       expect(await follower.exited).toBe(0)
     } finally {
+      follower.kill()
       rmSync(fresh, { force: true, recursive: true })
     }
   }, 30_000)
