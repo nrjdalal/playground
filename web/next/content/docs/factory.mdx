@@ -80,6 +80,7 @@ Its refusal names the kind of text, never the text, and says how to put it in pl
 
 `bun run trace-count` counts each of those kinds over the code, plus issue numbers, the old session names and the old skill names, and fails when any count rises.
 It needs that guard's list: when the list is missing or one of its keys is empty, it stops and says how to add it, since those kinds would count nothing.
+Every pull request's checks run it too, reading the archive repository, the list and the owner's names from three repository secrets (`FACTORY_ARCHIVE_REPO`, `NO_PUBLIC_LEAK_LIST`, `OWNER_NAMES`), and the check fails while any of them is unset.
 A made-up address counts as none: one on a domain kept for examples (`example.com`, `.test`, `.invalid`, `.localhost`) or the fixtures' `local.host`.
 So do a made-up issue number in a test or a fixture and a hex colour such as `#000`.
 So new comments, docs and tests are written in plain words, and the counts only fall.
