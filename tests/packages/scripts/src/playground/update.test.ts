@@ -102,7 +102,7 @@ describe("runUpdate", () => {
       ),
     ).toBe(0)
     expect(said).toContain(
-      `playground update: skills changed: dev, pr; a running session's Skill tool serves the copy it started with, so a live session reads each one's files here: ${repo}/skills/zerostarter/dev/, ${repo}/extensions/core/skills/pr/`,
+      `playground update: skills changed: dev, pr; a running session's Skill tool serves the copy it started with, so a live session reads each one's files here: ${repo}/skills/zerostarter/dev/, ${repo}/extensions/core/skills/pr/; send each lead these folders, for the lead to have each of its live checkers read the new text there (release)`,
     )
     const quietSaid: string[] = []
     expect(

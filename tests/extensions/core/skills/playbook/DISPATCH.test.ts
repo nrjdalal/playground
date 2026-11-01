@@ -27,6 +27,28 @@ describe("DISPATCH.md", () => {
     expect(line).toContain("four times in 59 minutes while the parent sat at 3/5")
   })
 
+  test("a stack held at 5/5 until the owner's try syncs with canary only on a conflict, plus once before the try, with its measured case", async () => {
+    const lines = (await Bun.file(DISPATCH).text()).split("\n")
+    const at = lines.findIndex((l) =>
+      l.includes("A stack held at 5/5 until the owner's try syncs with `canary` only when"),
+    )
+    const line = lines[at] ?? ""
+    expect(line).toContain(
+      "GitHub reads a PR in it as conflicting or code-review-loop's step 8 finds a conflict",
+    )
+    expect(line).toContain("plus once more before the try, never on a schedule")
+    expect(line).toContain("6,774 s")
+    expect(lines[at + 1]).toContain(
+      "Each sync's round waits on CI at the synced head and cites it where code-review-loop's The last 5/5 lets CI stand in",
+    )
+    expect(lines[at + 2]).toContain(
+      "A sync is done when each PR in the stack has its merged head pushed and its reviewer has posted a verdict at that head",
+    )
+    expect(lines[at + 3]).toContain(
+      "The owner's try is the owner's own run of a stack before any PR in it merges, which the lead names with its time to each reviewer in the stack, so each knows its waiting 5/5 is held and which sync comes before the try",
+    )
+  })
+
   test("a lane's item aims at about 1,000 changed lines, a bigger diff splitting off canary, with its measured case", async () => {
     const text = await Bun.file(DISPATCH).text()
     const line = text.split("\n").find((l) => l.includes("aims at about 1,000 changed lines")) ?? ""
