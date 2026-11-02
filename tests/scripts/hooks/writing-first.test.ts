@@ -406,17 +406,19 @@ describe("registration", () => {
       const settings = (await Bun.file(join(root, file)).json()) as {
         hooks: Record<string, { hooks: { command: string }[]; matcher?: string }[]>
       }
-      // the factory file's command, which the project file must carry byte for byte
+      // the factory file's command for each event, which the project file must carry byte for byte; the PreToolUse one fails closed
       const factory = (await Bun.file(join(root, "scripts", "factory-settings.json")).json()) as {
-        hooks: { UserPromptSubmit: { hooks: { command: string }[] }[] }
+        hooks: Record<string, { hooks: { command: string }[] }[]>
       }
-      const command = factory.hooks.UserPromptSubmit.flatMap((entry) => entry.hooks)
-        .map((hook) => hook.command)
-        .find((c) => c.endsWith("scripts/hooks/writing-first.ts"))
+      const commandOf = (event: string) =>
+        factory.hooks[event]!.flatMap((entry) => entry.hooks)
+          .map((hook) => hook.command)
+          .find((c) => c.includes("scripts/hooks/writing-first.ts"))
       const matchers = (event: string) =>
         settings.hooks[event]
-          ?.filter((entry) => entry.hooks.some((hook) => hook.command === command))
+          ?.filter((entry) => entry.hooks.some((hook) => hook.command === commandOf(event)))
           .map((entry) => entry.matcher ?? "") ?? []
+      expect(commandOf("SessionStart")).toBe(commandOf("UserPromptSubmit"))
       expect(matchers("PreToolUse")).toEqual(["^(Edit|MultiEdit|Skill|Write)$"])
       expect(matchers("UserPromptSubmit")).toEqual([""])
       expect(matchers("SessionStart")).toEqual(["^compact$"])

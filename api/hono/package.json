@@ -27,6 +27,7 @@
     "@packages/config": "workspace:*",
     "@packages/db": "workspace:*",
     "@packages/env": "workspace:*",
+    "@packages/safe-delete": "workspace:*",
     "@packages/settings": "workspace:*",
     "@scalar/api-reference": "catalog:",
     "@scalar/hono-api-reference": "catalog:",

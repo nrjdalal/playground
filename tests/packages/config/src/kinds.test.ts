@@ -13,7 +13,7 @@ import {
   setSessionNames,
   slotOfName,
 } from "../../../../packages/config/src/kinds"
-import { OLD } from "../../../old-names"
+import { OLD } from "../../../session-names"
 import { SEEDED_NAMES } from "../../../session-names"
 
 const agent = (name: string, status: string, kind?: string) => ({ kind, name, status })

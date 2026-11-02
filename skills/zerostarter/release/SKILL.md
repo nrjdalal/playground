@@ -26,6 +26,51 @@ Run the new-user gate on it, `bun run gate:new-user "$CANARY"` (`.agents/testing
 
 Done when `CANARY` holds the SHA you mean to ship and the gate's PASS and FAIL list for it is in hand. When `canary` moves before step 3, read it again.
 
+## Rehearse an invitee's update
+
+When the candidate changes the update path anything in the ship's step 5 runs (`update.ts` itself, `link-skills.sh`, an ops job, the Dashboard roll), rehearse the update an invitee runs, from the last tag to the candidate, before the ship's step 3: a machine whose own checkout cannot take the update yet still gets the proof. The whole rehearsal lives in one scratch folder, and nothing outside it changes. A `--to` run stops before the Dashboard roll, which `playground update` reaches only without a tag, and with no `jobs.json` in the throwaway data folder its ops-restart step restarts nothing, so the rehearsal proves the checkout-side path: the fetch, the tag checkout, `link-skills.sh`, the install and the build. The roll proves itself on a dashboard stack of its own; an ops job's restart proves itself in the ship's step 5, on the machine that holds the jobs.
+
+a. **Mirror.** Give the rehearsal an origin of its own: clone the repository bare into the scratch folder, then clone that mirror and, in the clone, fetch the pinned `$CANARY` from the repository, merge it into `main` with `--no-ff` (the merge commit a ship makes), and tag the merge with the tag this ship will cut.
+   Clone the mirror with `-b main`, since the mirror's HEAD is `canary`, where the merge is a no-op (`Already up to date.`) and the tag lands on the candidate itself (the v0.0.29 rehearsal).
+   Merge with `-c commit.gpgsign=false`, since the merge commit stays in the scratch folder and signing stops on a machine with no secret key (the v0.0.29 rehearsal).
+   The block runs the whole step; its last line brings `main` and the tag into the mirror with a fetch run in the mirror, since no-extension-repo-write refuses a push to a local path (the v0.0.28 rehearsal):
+
+   ```bash
+   git clone --bare <repository> <mirror>.git
+   git clone -b main <mirror>.git <clone>   # the mirror's HEAD is canary
+   git -C <clone> fetch <repository> "$CANARY"
+   git -C <clone> -c commit.gpgsign=false merge --no-ff "$CANARY"   # the merge commit stays in the scratch folder
+   git -C <clone> tag <tag>
+   git -C <mirror>.git fetch <clone> refs/heads/main:refs/heads/main refs/tags/<tag>:refs/tags/<tag>
+   ```
+
+   Done when the mirror's `main` holds the merge commit, the tag names it, and the repository holds neither.
+
+b. **Contain.** Run every later command under `env -i`, so the run inherits nothing from the real environment, `PLAYGROUND_REPO` included, with `HOME` at a throwaway folder inside the scratch folder.
+   Put `PATH` together for the run: the stub folder first, then the throwaway `HOME`'s `.bun/bin`, then a folder holding the real `bun`, `bunx` and `node` alone, the runtimes the install, the build and the `playground` command run on (`bunx` since `bun install` runs the checkout's `prepare` script), then the system basics; the real `HOME`'s own bin stays off `PATH`, since its `playground` link points at the real checkout.
+   Put a stub on `PATH` for each side-effecting tool the update can call, one that logs each call and refuses; read `update.ts`, `ops-restart/cli.ts` and what they call for the list.
+   Leave `claude` off `PATH` altogether: `link-skills`' `orgs home` step waits for an absent `claude` and fails a stub that refuses.
+   Record the before-state (listings and checksums) of everything outside the scratch folder the update could reach, the home folder's bins and links among them, before any install runs, leaving out the main checkout's `.git/config`, which other sessions rewrite as they add branches and worktrees (two v0.0.27 rehearsals in a row read it changed).
+   Done when every tool on the list is stubbed or absent, and the before-state is saved.
+
+c. **Invitee.** Clone from the mirror, check out the last tag on `main`, and install and build inside the containment, running the install and build steps of an invitee's install from the clone, since `install.sh` itself stops without `claude`:
+
+   ```bash
+   bun install --frozen-lockfile
+   env NODE_ENV=production SKIP_ENV_VALIDATION=true node_modules/.bin/turbo run build --filter='./packages/*'
+   bash scripts/link-skills.sh   # links this clone's playground command into the throwaway HOME's bin, already on PATH
+   ```
+
+   Done when `playground doctor` from the clone, still contained, reads `held at <last tag>, N commits behind origin/main`.
+
+d. **Update.** Run `playground update --to <tag>`, then `playground doctor`, still contained.
+   This run proves the last tag's `update.ts` taking the invitee to the candidate, since the clone runs the code it holds.
+   When the candidate changes `update.ts` itself, run `playground update --to <tag>` a second time from the updated clone, then `playground doctor`, still contained, so the candidate's own `update.ts` runs.
+   The first run leaves the tag's own commit in the throwaway data folder's `ops/update-head`, so a second run reads an empty change set and skips the install, the build and the skills line: first move that file aside when the change is on the no-record path, or write the last tag's commit into it when the change reads the change set, so the second run reads what the first did (the v0.0.26 rehearsal on 1 Nov: the first run ran v0.0.25's `update.ts`, and only the second, with the file moved aside, printed the candidate's new no-record line).
+   Done when each update exits 0, doctor's version line reads `at <tag>` after each, and the MISSING lines are only the containment's own and the machine's own gaps: `claude` off `PATH`, `docker` and `gh` left off it, the pinned `herdr` the throwaway `HOME` lacks, and the `portless proxy` line where no proxy serves 443, while every need the update itself runs on reads ok (`bun`, `git` and `node`, with `python3` from the system basics); the after-state, taken the same way, reads unchanged against the before-state, and each stub's log names the calls the real machine would have taken, and a second run's output shows the step the candidate's change is on, with the line that change adds when it adds one. A step that fails names its caller: when a stub took that call, the update needs it, so contain that call another way (a flag, an env) and run the rehearsal again.
+
+The rehearsal's result goes into the ship PR's body beside the new-user gate's PASS and FAIL list.
+
 ## 2. Open the ship PR
 
 Write the body to a file first. It opens with two or three plain sentences the owner reads first, then `## What ships`, one line per PR since the last tag (`gh release view --json tagName --jq .tagName` names it).
@@ -65,18 +110,23 @@ Run `playground update` (`packages/scripts/src/playground/update.ts`) in a run s
 ~/.playground/ops/run-slot.sh <your name> -- playground update
 ```
 
-It runs each step below and stops at the first that fails, naming it:
+It runs each step below and stops at the first that fails, naming it.
+Steps 2 to 5 read what changed since the commit the last finished update reached, which it records in the data folder's `ops/update-head` once step 5 passes, so a run after one cut short (a crash, a killed terminal, a failed step) still installs, builds and restarts what that merge changed; with no record yet, they read from the reflog's last fast-forward onto `origin/main` (`merge origin/main: Fast-forward`), else from `HEAD` at the run's start, which it records before step 1 moves the checkout, naming the point in one line either way.
+A reset or merge of the main checkout made outside `playground update`, with no record yet, writes the commit `main` stood at before it into the record first, so the next update installs, builds and restarts what that move brought in; a record already there keeps its older point, which covers that move too: `[ -s <data folder>/ops/update-head ] || git -C <main checkout> rev-parse HEAD > <data folder>/ops/update-head`, the data folder being `~/.playground` unless `PLAYGROUND_DATA_DIR` names another.
 
 1. Fetch and fast-forward onto `origin/main`, since `pull --ff-only origin main` there fails with "Cannot fast-forward to multiple branches". A checkout on another branch with a clean tree moves to `main` at `origin/main` first, and a dirty one stops here.
-2. `link-skills.sh`, before anything else, since every later step and every ops job reads `~/.playground`, which it links to `~/.playground` on a machine holding only the old folder.
+   When the fast-forward fails because `main` holds a local commit no remote holds (a session's stray commit there), run `git -C <main checkout> reset --keep origin/main`, the one reset no-main-checkout lets through while the tree is clean, then run `playground update` again.
+   When no-main-checkout refuses that reset (a dirty tree, or a commit some remote holds), stop there and send its reason up the chain, since that work or commit is someone else's to keep.
+2. `link-skills.sh`, before anything else, since every later step and every ops job reads `~/.playground`, which it links to `~/.playground` on a machine holding only the old folder; when the merge changed a skill, `playground update` then prints `skills changed:` with each one's folder in the checkout, which you send every lead, for each live checker to read the new text there (the `release` rule says why).
 3. Install when the merge changed `bun.lock` or a `package.json`, with `--ignore-scripts`, since the postinstall's `deps-manager.ts` can rewrite a `package.json` there (v0.0.141's pull left a newly added `nanoid` uninstalled, so `bun run name` failed).
 4. Build `packages/*` when the merge changed a package with a `dist` (`packages/scripts` runs from source, so a change there alone builds nothing), since the `playground` command imports their `dist`, with env validation off, since the main checkout has no `.env`.
 5. Restart each ops job whose source the merge changed ([ops-restart](../../../scripts/ops/README.md#when-a-job-restarts-onto-new-code)).
 6. Roll the Dashboard, which answers `Already up to date` when `canary` has not moved.
 
-A build that fails part way can leave another package's `dist` cleaned and empty (`packages/redis`, which pr:merge's lock imports, on v0.0.107): after a failed build, fix its cause and run `env NODE_ENV=production SKIP_ENV_VALIDATION=true <main checkout>/node_modules/.bin/turbo run build --filter='./packages/*' --cwd <main checkout>` by hand, since the merge has landed and a second `playground update` sees nothing changed.
+A build that fails part way can leave another package's `dist` cleaned and empty (`packages/redis`, which pr:merge's lock imports, on v0.0.107): after a failed build, fix its cause and run `playground update` again, which builds again, since a run that stopped short records nothing.
+A job that a `left alone` or an `on, but not running` line names and that is not running three of its cycles after the update (its heartbeat's `cycleSeconds`, the staleness `up.py` reads a job down by) is a failed step, whatever the line's `up.py exited 0` says, since `up.py` exits 0 on every pass: send its `up.log` lines (`ops/` in the data folder) up the chain.
 
-Done when the main checkout's `HEAD` equals `origin/main`, `playground update` exits 0, no `ops-restart:` line reads `still runs` or a non-zero `up.py exited`, and every package but `packages/scripts` holds a `dist` with files in it.
+Done when the main checkout's `HEAD` equals `origin/main`, `playground update` exits 0, no `ops-restart:` line reads `still runs` or a non-zero `up.py exited`, each job an `ops-restart:` line names as `source changed, stopped pid <n>` has restarted, its heartbeat (`ops/<job>.json` in the data folder) reading a `pid` other than `<n>` and a `startedAt` after the update, the proof the rehearsal cannot give, each job a `left alone` or an `on, but not running` line names is running once it has beaten again, its heartbeat reading a `pid` that `ps -p` finds and a `startedAt` after the update, a launchd job started by launchd, every package but `packages/scripts` holds a `dist` with files in it, and each folder a `skills changed:` line names has reached every lead.
 
 ## Notes
 

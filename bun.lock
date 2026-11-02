@@ -38,6 +38,7 @@
         "@packages/config": "workspace:*",
         "@packages/db": "workspace:*",
         "@packages/env": "workspace:*",
+        "@packages/safe-delete": "workspace:*",
         "@packages/settings": "workspace:*",
         "@scalar/api-reference": "catalog:",
         "@scalar/hono-api-reference": "catalog:",
@@ -151,6 +152,17 @@
         "typescript": "catalog:",
       },
     },
+    "packages/safe-delete": {
+      "name": "@packages/safe-delete",
+      "version": "0.0.1",
+      "devDependencies": {
+        "@packages/config": "workspace:*",
+        "@types/bun": "catalog:",
+        "@types/node": "catalog:",
+        "tsdown": "catalog:",
+        "typescript": "catalog:",
+      },
+    },
     "packages/scripts": {
       "name": "@packages/scripts",
       "version": "0.0.1",
@@ -161,6 +173,7 @@
         "@packages/config": "workspace:*",
         "@packages/env": "workspace:*",
         "@packages/redis": "workspace:*",
+        "@packages/safe-delete": "workspace:*",
         "@packages/settings": "workspace:*",
         "@types/bun": "catalog:",
         "@types/fontkit": "catalog:",
@@ -186,6 +199,7 @@
       "name": "@packages/settings",
       "version": "0.0.1",
       "dependencies": {
+        "@packages/safe-delete": "workspace:*",
         "zod": "catalog:",
       },
       "devDependencies": {
@@ -931,6 +945,8 @@
     "@packages/message": ["@packages/message@workspace:packages/message"],
 
     "@packages/redis": ["@packages/redis@workspace:packages/redis"],
+
+    "@packages/safe-delete": ["@packages/safe-delete@workspace:packages/safe-delete"],
 
     "@packages/scripts": ["@packages/scripts@workspace:packages/scripts"],
 

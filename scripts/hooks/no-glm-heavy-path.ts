@@ -11,6 +11,7 @@ import {
   type Command,
   type Env,
   examine,
+  GIT_TAKES,
   knownVariables,
   lex,
   parseFlags,
@@ -18,6 +19,7 @@ import {
   program,
   pythonModule,
   run,
+  slotWords,
   UV_TAKES,
   unknown,
   unreadable,
@@ -38,14 +40,6 @@ const OPUS_PATHS = [
   "web/next/",
 ]
 
-const GIT_GLOBALS = new Set([
-  "-c",
-  "--config-env",
-  "--exec-path",
-  "--git-dir",
-  "--namespace",
-  "--work-tree",
-])
 const COMMIT_TAKES = new Set([
   "--author",
   "-c",
@@ -367,13 +361,11 @@ const visitor = (load5: number, limit: number): Visit => {
   let earlier: "none" | "staging" | "other" = "none"
   const forced: string[] = []
   let branchReads: (string | undefined)[] = []
-  const visit: Visit = async (cmd, { args, name }, env) => {
-    // run-slot.sh runs the words after its -- as the command
-    if (name === "run-slot.sh") {
-      const at = args.findIndex((a) => a.value === "--")
-      const inner = { ...cmd, words: at === -1 ? [] : args.slice(at + 1) }
-      return inner.words.length === 0 ? undefined : examine(inner, env, visit, false)
-    }
+  const visit: Visit = async (cmd, parsed, env) => {
+    const slot = slotWords(parsed)
+    if (slot)
+      return slot.length === 0 ? undefined : examine({ ...cmd, words: slot }, env, visit, false)
+    const { args, name } = parsed
     const reads = branchReads
     branchReads = []
     const busyRun = busy ? installOrClone(name, args) : undefined
@@ -388,7 +380,7 @@ const visitor = (load5: number, limit: number): Visit => {
       if (v === "-C") {
         const next = args[++k]
         dir = next ? pathOf(next, { ...env, cwd: dir }) : undefined
-      } else if (GIT_GLOBALS.has(v)) k++
+      } else if (GIT_TAKES.has(v)) k++
       else if (!v.startsWith("-")) break
     }
     const sub = isGit ? args[k]?.value : undefined

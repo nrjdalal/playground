@@ -12,6 +12,8 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { HERDR_SESSIONS } from "../../../../packages/scripts/src/ops-herdr/herdr"
+import { refusalOf } from "../../../../packages/scripts/src/playground/prompt"
+import { callKey, transcriptOf } from "../../../../packages/scripts/src/stuck-alert"
 import { OLD_NAMES } from "../../../session-names"
 import { storeWith } from "../../hooks/render-set"
 
@@ -690,20 +692,73 @@ describe("block alerts", () => {
   })
 })
 
-// with every session on herdr, a cycle asks cmux nothing. The test's own process stands in for a live claude: its pid is alive and ps gives its start.
-describe("with no session live in cmux", () => {
-  const pid = String(process.pid)
-  const started = Bun.spawnSync(["ps", "-o", "lstart=", "-p", pid], {
-    env: { ...process.env, LC_ALL: "C", TZ: "UTC" },
+// A subagent's prompt whose hook record a later Stop replaced reaches ops-unstick's screen alone, which read no key off it (PG-385).
+describe("a permission prompt read off the screen", () => {
+  const SESSION = "d9d2ef1a-a7b9-4ecb-a758-087576d79391"
+  const COMMAND = "mkdir -p /tmp/spec && cd /tmp/spec"
+  const DASHES = "╌".repeat(27)
+  const screenOf = (command: string) => [
+    `⏺ Bash(${command})`,
+    "─".repeat(27),
+    " Bash command",
+    DASHES,
+    ` │ ${command}`,
+    DASHES,
+    "",
+    " Do you want to proceed?",
+    " ❯ 1. Yes",
+    "   2. Yes, and don't ask again for mkdir commands",
+    "   3. No, and tell Claude what to do differently (esc)",
+  ]
+  const line = (type: string, part: Record<string, unknown>) =>
+    JSON.stringify({ message: { content: [part] }, type })
+  // The session's own transcript, its turn ended, and a subagent's beside it whose Bash call waits on the prompt.
+  const transcripts = (config: string) => {
+    const dir = join(config, "projects", "-repo")
+    mkdirSync(join(dir, SESSION, "subagents"), { recursive: true })
+    writeFileSync(
+      join(dir, `${SESSION}.jsonl`),
+      `${line("assistant", { id: "t1", input: { prompt: "Spec read" }, name: "Agent", type: "tool_use" })}\n${line("user", { tool_use_id: "t1", type: "tool_result" })}\n`,
+    )
+    writeFileSync(
+      join(dir, SESSION, "subagents", "agent-a7d782.jsonl"),
+      `${line("assistant", { id: "t2", input: { command: COMMAND }, name: "Bash", type: "tool_use" })}\n`,
+    )
+  }
+
+  test("carries the key of the subagent's waiting call, which picker's allow accepts", async () => {
+    const config = scratch()
+    transcripts(config)
+    const screen = screenOf(COMMAND)
+    const answer = String(await call(config, "prompt_answer", "k3m9px-worker", SESSION, screen))
+    const key = /playground picker k3m9px-worker allow ([0-9a-f]{8})/.exec(answer)?.[1] ?? ""
+    expect(key).toBe(callKey({ command: COMMAND }))
+    const transcript = await transcriptOf(config, SESSION)
+    expect(refusalOf("k3m9px-worker", screen.join("\n"), transcript, key)).toBe("")
   })
-    .stdout.toString()
-    .trim()
+
+  // no-raw-spawn refuses the dispatcher's herdr call too, so the route left is a close and a resume by session id
+  test("names the close and resume when no waiting call is surely its own", async () => {
+    const config = scratch()
+    transcripts(config)
+    const answer = String(
+      await call(config, "prompt_answer", "k3m9px-worker", SESSION, screenOf("rm -rf /tmp/spec")),
+    )
+    expect(answer).toContain("spawn.sh close k3m9px-worker")
+    expect(answer).toContain("~/.playground/resume/k3m9px-worker.sh")
+    expect(answer).not.toContain("dispatcher")
+  })
+})
+
+// ops-unstick reads herdr alone (#419): the source test below holds run.py to no cmux command, and these read herdr's panes.
+describe("the session read", () => {
+  const pid = String(process.pid)
   const script = (path: string, body: string): void => {
     writeFileSync(path, `#!/bin/sh\n${body}\n`)
     chmodSync(path, 0o755)
   }
-  // A cmux that fails every call and records it, and a herdr server whose one pane runs claude at `held` (none when null).
-  const machine = (held: string | null, registry: Record<string, unknown>[]) => {
+  // A herdr server whose one pane runs claude at `held` (none when null).
+  const machine = (held: string | null) => {
     const config = scratch()
     const bin = join(config, "bin")
     const herdrDir = join(config, "herdr")
@@ -711,78 +766,61 @@ describe("with no session live in cmux", () => {
     mkdirSync(herdrDir)
     mkdirSync(join(config, "sessions"))
     writeFileSync(join(herdrDir, "factory.sock"), "")
-    const calls = join(config, "cmux-calls")
-    script(join(bin, "cmux"), `echo "$*" >> "${calls}"\nexit 1`)
     const panes = held ? '[{"pane_id":"p1","workspace_id":"w1"}]' : "[]"
     const info = `{"result":{"process_info":{"foreground_processes":[{"argv":["claude"],"name":"claude","pid":${held}}]}}}`
     script(
       join(bin, "herdr"),
       `case "$1 $2" in\n"pane list") echo '{"result":{"panes":${panes}}}' ;;\n"pane process-info") echo '${info}' ;;\n*) exit 1 ;;\nesac`,
     )
-    for (const entry of registry)
-      writeFileSync(join(config, "sessions", `${entry.pid}.json`), JSON.stringify(entry))
+    // Claude's registry entry at the pane's pid, which gives the session's id.
+    writeFileSync(
+      join(config, "sessions", `${pid}.json`),
+      JSON.stringify({
+        entrypoint: "cli",
+        pid: Number(pid),
+        sessionId: "0b9e8f1a-2c3d-4e5f-8a9b-0c1d2e3f4a5b",
+      }),
+    )
     const env = {
       PLAYGROUND_HERDR_DIR: herdrDir,
       PLAYGROUND_HERDR_SESSIONS: "factory",
       HERDR_BIN_PATH: join(bin, "herdr"),
       PATH: `${bin}:${process.env.PATH}`,
     }
-    return { calls, config, env }
+    return { config, env }
   }
-  const session = (entry: Record<string, unknown> = {}) => ({
-    entrypoint: "cli",
-    pid: Number(pid),
-    procStart: started,
-    sessionId: "0b9e8f1a-2c3d-4e5f-8a9b-0c1d2e3f4a5b",
-    ...entry,
-  })
 
-  test("reads herdr's sessions and makes no cmux call while herdr holds every live one", async () => {
-    const { calls, config, env } = machine(pid, [session()])
-    const found = (await callWith(env, config, "sessions")) as { herdr: string; pid: string }[]
-    expect(found.map((s) => [s.herdr, s.pid])).toEqual([["factory", pid]])
-    expect(existsSync(calls)).toBe(false)
+  test("reads herdr's sessions with the registry's session id", async () => {
+    const { config, env } = machine(pid)
+    const found = (await callWith(env, config, "herdr_sessions")) as {
+      herdr: string
+      pid: string
+      session_id: string
+    }[]
+    expect(found.map((s) => [s.herdr, s.pid, s.session_id])).toEqual([
+      ["factory", pid, "0b9e8f1a-2c3d-4e5f-8a9b-0c1d2e3f4a5b"],
+    ])
   })
 
   test("runs the pinned herdr in HOME's data folder when HERDR_BIN_PATH is unset", async () => {
-    const { config, env } = machine(pid, [session()])
+    const { config, env } = machine(pid)
     const { HERDR_BIN_PATH: bin, ...rest } = env
     const home = scratch()
     mkdirSync(join(home, ".playground", "bin"), { recursive: true })
     script(join(home, ".playground", "bin", "herdr"), readFileSync(bin, "utf8"))
-    const found = (await callWith({ ...rest, HOME: home }, config, "sessions")) as { pid: string }[]
+    const found = (await callWith({ ...rest, HOME: home }, config, "herdr_sessions")) as {
+      pid: string
+    }[]
     expect(found.map((s) => s.pid)).toEqual([pid])
   })
 
-  test("makes no cmux call, and fails nothing, with no session live anywhere", async () => {
-    const { calls, config, env } = machine(null, [])
-    expect(await callWith(env, config, "sessions")).toEqual([])
-    expect(existsSync(calls)).toBe(false)
+  test("reads no session and fails nothing while the registry's live session runs in no herdr pane", async () => {
+    const { config, env } = machine(null)
+    expect(await callWith(env, config, "herdr_sessions")).toEqual([])
   })
 
-  test("asks cmux in doubt: a procStart in another shape, or an entry naming no entrypoint", async () => {
-    for (const entry of [{ procStart: "2026-10-19T00:00:00Z" }, { entrypoint: undefined }]) {
-      const { config, env } = machine(null, [session(entry)])
-      expect(await callWith(env, config, "cmux_may_hold", []), JSON.stringify(entry)).toBe(true)
-    }
-  })
-
-  test("asks cmux once a live interactive session is in no herdr pane", async () => {
-    const { calls, config, env } = machine(null, [session()])
-    expect(await callWith(env, config, "cmux_may_hold", [])).toBe(true)
-    await expect(callWith(env, config, "sessions")).rejects.toThrow("cmux tree")
-    expect(readFileSync(calls, "utf8")).toStartWith("tree --all")
-  })
-
-  test("counts no headless run, no ended session and no pid handed on", async () => {
-    for (const entry of [
-      { entrypoint: "sdk-cli" },
-      { pid: 999_999 },
-      { procStart: "Thu Jan  1 00:00:00 1970" },
-    ]) {
-      const { config, env } = machine(null, [session(entry)])
-      expect(await callWith(env, config, "cmux_may_hold", []), JSON.stringify(entry)).toBe(false)
-    }
+  test("run.py names no cmux command, so a cycle, its reads and its Escape run on herdr alone", () => {
+    expect(readFileSync(RUN_PY, "utf8")).not.toMatch(/["']cmux["']/)
   })
 })
 
@@ -1087,6 +1125,139 @@ describe("ops-unstick's slot alerts", () => {
     expect(
       await call(scratch(), "heavy_jobs", [devRow("999421", "desk"), devRow("999422", "canary")]),
     ).toEqual([])
+  })
+
+  // a slotted commit's pre-commit suite: run-slot.sh holds the slot, git commit runs under it, and the suite under that
+  const held = (slot: string) => {
+    const config = scratch()
+    const ops = join(config, "playground", "ops")
+    mkdirSync(join(ops, slot), { recursive: true })
+    writeFileSync(join(ops, `${slot}.holder`), "worker-x 999441 2026-11-01T13:00:00Z 1 small\n")
+    return config
+  }
+  const committing = (holder: string) => [
+    `  ${holder}      1 bash /x/.playground/ops/run-slot.sh worker-x -- git commit`,
+    `  999442 ${holder} git commit`,
+    "  999443 999442 bun run test:file tests/AGENTS.test.ts /x/.claude/worktrees/pg-334-x",
+  ]
+
+  for (const slot of ["run-slot-commit", "run-slot-model-2"])
+    test(`a suite under ${slot}'s holder reads as inside a slot`, async () => {
+      expect(await call(held(slot), "heavy_jobs", committing("999441"))).toEqual([
+        { inside: true, kind: "suite", pid: "999443", where: "pg-334-x" },
+      ])
+    })
+
+  test("a suite with no slot holder in its chain is still outside", async () => {
+    const jobs = await call(held("run-slot-commit"), "heavy_jobs", committing("999444"))
+    expect(jobs).toEqual([{ inside: false, kind: "suite", pid: "999443", where: "pg-334-x" }])
+    expect(await call(scratch(), "slot_alerts", jobs, 2, at)).toHaveLength(1)
+  })
+
+  test("the slots read are run-slot.sh's own, each model slot by its name", async () => {
+    const script = readFileSync(
+      join(import.meta.dir, "../../../../scripts/ops/run-slot.sh"),
+      "utf8",
+    )
+    const fixed = script
+      .match(/^\s*for s in ((?:run-slot\S* )+)\$\(ls "\$OPS"/m)?.[1]
+      ?.trim()
+      .split(" ")
+    expect(fixed?.length).toBeGreaterThan(0)
+    const config = held("run-slot-model-2")
+    writeFileSync(join(config, "playground", "ops", "run-slot-model-10.holder"), "")
+    expect(await call(config, "slot_names")).toEqual([
+      ...(fixed ?? []),
+      "run-slot-model-10",
+      "run-slot-model-2",
+    ])
+  })
+
+  test("an idle holder raises slot-idle on each of run-slot.sh's CPU slots alone", async () => {
+    const script = readFileSync(
+      join(import.meta.dir, "../../../../scripts/ops/run-slot.sh"),
+      "utf8",
+    )
+    const cpu = script.match(/^held_units\(\) \{\n[^\n]*\n\s*for s in ([^;]+);/m)?.[1]?.split(" ")
+    expect(cpu?.length).toBeGreaterThan(0)
+    const config = scratch()
+    const ops = join(config, "playground", "ops")
+    const bin = join(config, "bin")
+    mkdirSync(bin)
+    // the holder's one child has used no CPU
+    writeFileSync(
+      join(bin, "ps"),
+      `#!/bin/bash\necho "  999461 ${process.pid} 0:00.00 sleep 900"\n`,
+    )
+    chmodSync(join(bin, "ps"), 0o755)
+    const now = Date.now() / 1000
+    const slots = ["run-slot-commit", "run-slot-clone", "run-slot-quick", "run-slot-model-1"]
+    const state: { slot_idle: Record<string, unknown> } = { slot_idle: {} }
+    for (const slot of [...(cpu ?? []), ...slots]) {
+      mkdirSync(join(ops, slot), { recursive: true })
+      writeFileSync(join(ops, `${slot}.holder`), `worker-x ${process.pid} 2026-11-01T13:00:00Z\n`)
+      state.slot_idle[`${slot}:${process.pid}`] = { cpu: 0, since: now - 1000, told: true }
+    }
+    const alerts = (await callWith(
+      { PATH: `${bin}:${process.env.PATH}` },
+      config,
+      "slot_idle_alerts",
+      state,
+      now,
+    )) as { kind: string; line: string }[]
+    expect(alerts.map((a) => a.line.match(/holds (\S+) with/)?.[1])).toEqual(cpu ?? [])
+    expect(new Set(alerts.map((a) => a.kind))).toEqual(new Set(["slot-idle"]))
+  })
+
+  // the heavy-job cap reads run-slot.sh's own count of the CPU slots held or open, on a machine at load1 2 with the given off-switches
+  const capped = (off: string[] = [], held: string[] = []) => {
+    const config = scratch()
+    const ops = join(config, "playground", "ops")
+    const bin = join(config, "bin")
+    mkdirSync(ops, { recursive: true })
+    mkdirSync(bin)
+    writeFileSync(
+      join(bin, "sysctl"),
+      `#!/bin/bash\ncase "$2" in hw.ncpu) echo 15 ;; vm.loadavg) echo "{ 2.00 2.00 2.00 }" ;; esac\n`,
+    )
+    chmodSync(join(bin, "sysctl"), 0o755)
+    for (const name of off) writeFileSync(join(ops, name), "")
+    for (const slot of held) {
+      mkdirSync(join(ops, slot))
+      writeFileSync(
+        join(ops, `${slot}.holder`),
+        `worker-x ${process.pid} 2026-11-01T14:00:00Z 2 medium\n`,
+      )
+    }
+    return callWith({ PATH: `${bin}:${process.env.PATH}` }, config, "heavy_cap") as Promise<number>
+  }
+
+  test("four CPU slots held at load1 under 12 raise no heavy-jobs alert", async () => {
+    const cap = await capped([], ["run-slot", "run-slot-2", "run-slot-3", "run-slot-4"])
+    const jobs = ["101", "102", "103", "104"].map((pid) => ({
+      inside: true,
+      kind: "suite",
+      pid,
+      where: `pg-340-${pid}`,
+    }))
+    expect(await call(scratch(), "slot_alerts", jobs, cap, at)).toEqual([])
+  })
+
+  test("with run-slot.4-off and no run-slot-4 holder, the cap is at most 3", async () => {
+    expect(await capped(["run-slot.4-off"])).toBe(3)
+  })
+
+  test("a cap read that fails allows every CPU slot and logs it", async () => {
+    const config = scratch()
+    const bin = join(config, "bin")
+    mkdirSync(join(config, "playground", "ops", "unstick"), { recursive: true })
+    mkdirSync(bin)
+    writeFileSync(join(bin, "bash"), "#!/bin/sh\nexit 1\n")
+    chmodSync(join(bin, "bash"), 0o755)
+    expect(await callWith({ PATH: `${bin}:${process.env.PATH}` }, config, "heavy_cap")).toBe(4)
+    expect(
+      readFileSync(join(config, "playground", "ops", "unstick", "unstick.log"), "utf8"),
+    ).toContain("run-slot.sh slots gave no count ('')")
   })
 })
 

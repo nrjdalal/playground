@@ -50,8 +50,7 @@ import { orgOf } from "../../../../../../packages/config/src/org"
 import { verdictsAt } from "../../../../../../packages/scripts/src/pr-merge/gates"
 import { inFixture, onLiveDashboard } from "../../../../../dashboard-fixture"
 import { liveReads } from "../../../../../live-reads"
-import { OLD } from "../../../../../old-names"
-import { SEEDED_NAMES } from "../../../../../session-names"
+import { OLD, SEEDED_NAMES } from "../../../../../session-names"
 
 // workers.ts sets the names its data folder holds when it loads; the cases name the managers' old names, as a machine past the switch does.
 setSessionNames(SEEDED_NAMES)
@@ -1517,7 +1516,7 @@ describe("branchTicketOf", () => {
       ["test-855-stack", own],
       ["pr-843", own],
       ["cedar-1234-export", null],
-      ["lm-step1-soak", own],
+      ["vx-step1-soak", own],
       ["feat/board-colours", "acme-labs/example-repo"],
       ["research-939-pg-baseline", "acme-labs/example-repo"],
       [null, own],

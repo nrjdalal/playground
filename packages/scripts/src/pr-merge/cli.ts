@@ -25,6 +25,9 @@ at that head and the head is up to date with canary:
                 GitGuardian check, since a head it never started on ran no secret scan
   body          the PR body is the PR template the Changelog reads
   review        ## ReviewBot · round <n>: 5/5 at <sha7>, at the head
+  types         last, inside the merge lock: the tree the squash makes type-checks by CI's own
+                type steps in a scratch worktree, each through run-slot; skipped when the head
+                already holds canary's tip, and a type error refuses with the first errors
 
 A gate reads only comments the repo's owner wrote; the newest review at the head wins, so a
 lower score after a 5/5 refuses.
@@ -38,7 +41,7 @@ the lock let go however it ends; a lock another PR holds refuses, naming it.
 Options
   --explain       print whether the head merges clean with canary now and as which tree
                   (or the files it conflicts in), then each gate and what it found at the
-                  head, and merge nothing
+                  head, types as whether it would run or skip, and merge nothing
   --outside-author <login>
                   merge a PR that login opened, not the repo's owner: only on a lead's go,
                   once its read-only review and every gate have passed

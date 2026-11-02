@@ -6,7 +6,6 @@ import {
   readdirSync,
   readFileSync,
   renameSync,
-  rmSync,
   symlinkSync,
   unlinkSync,
 } from "node:fs"
@@ -14,7 +13,7 @@ import { basename, dirname, join } from "node:path"
 
 import { jobKey, resetSetting, setSetting, settingRows, writeAtomically } from "@packages/settings"
 
-// The machine half of playground migrate, run with the Dashboard's job stopped. Every old name it moves comes from the migration table at the pre-squash head (TABLE), so this file names none: the data folder takes its new name before the seeds, then each renamed job takes its new name in jobs.json and in the login's settings, the dropped jobs go, every path into an old data folder points at the playground one, the stale ops copies are archived then deleted, the Dashboard's state folder and the table's files move, and each variable the shell profiles and LaunchAgents set under an old name takes the new one.
+// The machine half of playground migrate, run with the Dashboard's job stopped. Every old name it moves comes from the migration table at the pre-squash head (TABLE), so this file names none: the data folder takes its new name before the seeds, then each renamed job takes its new name in jobs.json and in the login's settings, the dropped jobs go, every path into an old data folder points at the playground one, the stale ops copies move into archive/, the Dashboard's state folder and the table's files move, and each variable the shell profiles and LaunchAgents set under an old name takes the new one.
 
 export const TABLE = ".github/notes/migrate/table.json"
 
@@ -148,14 +147,14 @@ export function moveMachine(
   }
 
   for (const path of table.staleCopies.filter((each) => lstatOf(join(data, each)))) {
-    say(true, `- ${path}: archived in archive/${path}, then deleted`)
+    if (lstatOf(join(data, "archive", path))) {
+      say(false, `- ${path}: archive/${path} already exists, so it stays`)
+      continue
+    }
+    say(true, `- ${path}: moved to archive/${path}`)
     if (dryRun) continue
     mkdirSync(dirname(join(data, "archive", path)), { recursive: true })
-    cpSync(join(data, path), join(data, "archive", path), {
-      recursive: true,
-      verbatimSymlinks: true,
-    })
-    rmSync(join(data, path), { recursive: true })
+    renameSync(join(data, path), join(data, "archive", path))
   }
 
   const { from, to } = table.stateFolder

@@ -2,7 +2,7 @@ import { describe, expect, setDefaultTimeout, test } from "bun:test"
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 
-import { OLD } from "../old-names"
+import { OLD } from "../session-names"
 import {
   bin,
   execLine,
@@ -199,6 +199,18 @@ describe("with no --runtime, a start opens in herdr whatever its spawner's termi
     expect(herdrCalls(r)).toEqual([])
     expect(existsSync(lw(r.home, "runtimes"))).toBe(false)
     expect(r.roster).toBeUndefined()
+  })
+
+  test("spawn.sh's only cmux calls are a move's read and close of the copy it takes to herdr", () => {
+    const text = readFileSync(join(import.meta.dir, "../../scripts/spawn.sh"), "utf8")
+    const calls = [...text.matchAll(/CMUX_QUIET=1 cmux ([a-z-]+(?: [a-z][a-z-]*)?)/g)].map(
+      (m) => m[1],
+    )
+    expect([...new Set(calls)].sort()).toEqual([
+      "close-surface",
+      "sessions list",
+      "workspace close",
+    ])
   })
 
   test.each([

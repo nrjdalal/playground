@@ -1,9 +1,9 @@
 // `bun audit <args>` that tries again, up to 3 tries of 90s, when npm's advisories endpoint hangs or answers 5xx, and fails at once on any other exit, an advisory found among them
 // With `--new-over <ref>` it fails only on an advisory the head adds over <ref>'s lockfile, at the head's merge base with <ref> or in the file <ref> names, so a PR never fails on an advisory canary already carries
 
-import { mkdtempSync, rmSync } from "node:fs"
-import { tmpdir } from "node:os"
 import { join } from "node:path"
+
+import { makeScratch, removeScratch } from "@packages/safe-delete"
 
 const TRIES = 3
 // AUDIT_TRY_MS shortens a try for the tests alone
@@ -111,7 +111,7 @@ const newOver = async (args: string[], ref: string) => {
   const lock = await baseLock(ref)
   if (lock === null) return 1
   // bun audit reads the lockfile alone, beside any package.json
-  const dir = mkdtempSync(join(tmpdir(), "audit-base-"))
+  const dir = makeScratch("audit-base-")
   try {
     await Bun.write(join(dir, "bun.lock"), lock)
     await Bun.write(join(dir, "package.json"), "{}\n")
@@ -132,7 +132,8 @@ const newOver = async (args: string[], ref: string) => {
     )
     return 1
   } finally {
-    rmSync(dir, { force: true, recursive: true })
+    const refused = removeScratch(dir)
+    if (refused) console.error(`audit: ${refused}`)
   }
 }
 

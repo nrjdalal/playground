@@ -7,7 +7,6 @@ import {
   readdirSync,
   readFileSync,
   renameSync,
-  rmSync,
   statSync,
   writeFileSync,
 } from "node:fs"
@@ -15,6 +14,7 @@ import { homedir, tmpdir } from "node:os"
 import { dirname, isAbsolute, join, normalize, resolve, sep } from "node:path"
 
 import { threadIdSchema } from "@packages/config/threads"
+import type { Roots } from "@packages/safe-delete"
 import { deriveRoot } from "@packages/settings"
 import { z } from "zod"
 
@@ -22,6 +22,7 @@ import { z } from "zod"
 import shipped from "../../fixtures/dashboard.json" with { type: "json" }
 import { livePair } from "../dev/live-dashboard"
 import { FIX_IDS } from "../onboard/fix-ids"
+import { discard, trashRoots } from "../trash"
 
 // Where the dashboard's data comes from, chosen by who runs the stack (ADR 0008): a person's own clone reads their own machine (cmux's sessions, Claude Code's config folder, git, GitHub and the System panel's probes), and a factory, test or PLAYGROUND_FIXTURE stack reads a fixture, a made-up machine written into a scratch folder of its own, so real rows never reach a screenshot or a PR. A refused source reads nothing at all.
 export type DashboardSource =
@@ -149,13 +150,17 @@ export const currentSource = (): DashboardSource => {
 
 export const readsLive = (): boolean => currentSource().kind === "live"
 
-// The scratch folder a fixture is written into: inside the checkout's own .turbo (ignored by git and Docker, beside the launcher's record), else the system's temp folder. PLAYGROUND_FIXTURE_DIR lets a test keep it elsewhere, as DEV_RECORD does the record, relative to the checkout's root as PLAYGROUND_FIXTURE is, so the launcher and the API, which run from different folders, name the same one.
-export const fixtureDir = (env: Record<string, string | undefined> = process.env): string => {
-  const root = checkoutRoot()
+// The scratch folder a fixture is written into: inside a worktree's own .turbo (ignored by git and Docker, beside the launcher's record), else the system's temp folder, one per clone, since the trash refuses a folder inside a main checkout. PLAYGROUND_FIXTURE_DIR lets a test keep it elsewhere, as DEV_RECORD does the record, relative to the checkout's root as PLAYGROUND_FIXTURE is, so the launcher and the API, which run from different folders, name the same one.
+export const fixtureDir = (
+  env: Record<string, string | undefined> = process.env,
+  root: string | null = checkoutRoot(),
+  tmp: string = tmpdir(),
+): string => {
   if (env.PLAYGROUND_FIXTURE_DIR) return resolve(root ?? process.cwd(), env.PLAYGROUND_FIXTURE_DIR)
-  return root
-    ? join(root, ".turbo", "dashboard-fixture")
-    : join(tmpdir(), `playground-dashboard-fixture-${process.getuid?.() ?? 0}`)
+  const scratch = join(tmp, `playground-dashboard-fixture-${process.getuid?.() ?? 0}`)
+  if (!root) return scratch
+  if (statSync(join(root, ".git")).isFile()) return join(root, ".turbo", "dashboard-fixture")
+  return `${scratch}-${new Bun.CryptoHasher("sha256").update(root).digest("hex").slice(0, 8)}`
 }
 
 // The fixture's Claude Code config folder, which stands in for ~/.claude on a fixture stack.
@@ -372,14 +377,25 @@ const writeEntry = (path: string, content: unknown): void => {
   }
 }
 
-// Writes a fixture into dir, fresh, as of now: the config folder, cmux's state (cmux.json) and the rest of the machine (machine.json). The folder is replaced whole and only when it is a fixture's own (its stamp.json), so a misnamed folder (a real config folder) is refused rather than overwritten.
-export function writeFixture(fixture: Fixture, dir: string, now = new Date()): void {
+// Moves a fixture's folder into the trash under this process's own session, so a restart within the minute is not held to the last one's tripwire; a refusal throws in its words.
+const trashFixture = (path: string, roots: Roots) => {
+  const refused = discard(
+    path,
+    { reason: "dashboard fixture", session: `fixture-${process.pid}` },
+    roots,
+  )
+  if (refused) throw new Error(`the fixture's ${path} stays: ${refused}`)
+}
+
+// Writes a fixture into dir, fresh, as of now: the config folder, cmux's state (cmux.json) and the rest of the machine (machine.json). The folder is replaced whole and only when it is a fixture's own (its stamp.json), so a misnamed folder (a real config folder) is refused rather than overwritten; the one it replaces goes to the trash of the roots given before anything is written, so a refusal changes nothing.
+export function writeFixture(fixture: Fixture, dir: string, roots: Roots, now = new Date()): void {
   const target = resolve(dir)
   if (existsSync(target) && !existsSync(join(target, STAMP))) {
     throw new Error(`${target} exists and is not a fixture's folder, so it is left alone`)
   }
   const fresh = `${target}.writing-${process.pid}`
-  rmSync(fresh, { force: true, recursive: true })
+  trashFixture(fresh, roots)
+  if (existsSync(target)) trashFixture(target, roots)
   mkdirSync(fresh, { mode: 0o700, recursive: true })
   const config = join(target, "claude")
   const shift = now.getTime() - Date.parse(fixture.anchor)
@@ -435,16 +451,13 @@ export function writeFixture(fixture: Fixture, dir: string, now = new Date()): v
     worktrees: fixture.worktrees ?? [],
   })
   writeEntry(join(fresh, STAMP), { writtenAt: now.toISOString() })
-  const old = `${target}.old-${process.pid}`
-  if (existsSync(target)) renameSync(target, old)
   renameSync(fresh, target)
-  rmSync(old, { force: true, recursive: true })
 }
 
-// Removes a fixture's folder when it is one (a stack's scratch state goes with the stack).
-export function dropFixture(dir: string): void {
+// Moves a fixture's folder into the trash of the roots given when it is one (a stack's scratch state goes with the stack).
+export function dropFixture(dir: string, roots: Roots): void {
   const target = resolve(dir)
-  if (existsSync(join(target, STAMP))) rmSync(target, { force: true, recursive: true })
+  if (existsSync(join(target, STAMP))) trashFixture(target, roots)
 }
 
 // The folder this process reads its fixture from, written from its source's file when it is not there yet (the API started without the launcher, or a CLI before any stack). Throws on a hosted, live or refused source.
@@ -468,7 +481,7 @@ export function ensureFixture(source: DashboardSource = currentSource()): string
   }
   const loaded = loadFixture(source.file)
   if (!loaded.ok) throw new Error(loaded.error)
-  writeFixture(loaded.fixture, dir)
+  writeFixture(loaded.fixture, dir, trashRoots())
   return dir
 }
 

@@ -3,10 +3,15 @@ import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 
-import { renamePath, renameText } from "../../../packages/scripts/src/rename/rules"
+import { OLD_ROLES, renamePath, renameText } from "../../../packages/scripts/src/rename/rules"
 import { check } from "../../../scripts/hooks/no-playground-leak"
-import { OLD } from "../../old-names"
 
+// The old dispatcher's name, read from the rules this tool renames by.
+const OLD = {
+  dispatcher: Object.keys(OLD_ROLES).find(
+    (name) => OLD_ROLES[name as keyof typeof OLD_ROLES] === "dispatcher",
+  )!,
+}
 const root = join(import.meta.dir, "..", "..", "..")
 // The list's path as the codemod leaves it, so a rename of the file moves this test with it.
 const list = join(root, renamePath("extensions/core/lists/playground-terms.json"))
