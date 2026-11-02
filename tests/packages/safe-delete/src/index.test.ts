@@ -14,7 +14,10 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import {
+  CARVE_OUTS,
+  type CarveOut,
   isProtected,
+  LIMITS,
   listTrash,
   MARKER,
   makeScratch,
@@ -270,6 +273,131 @@ const withWorktree = () => {
   writeFileSync(roster, JSON.stringify({ agents: [] }))
   return { holders: { cwds: [], live: ["working"], roster }, roots, wt }
 }
+
+// A carve-out table for the mechanism's own cases: one script's builds folder, under a cap of 3 files and 100 bytes.
+const TABLE: Record<string, CarveOut> = {
+  builder: { bytes: 100, files: 3, folder: ".playground/ops/builds" },
+  trashy: { bytes: 100, files: 3, folder: ".playground" },
+}
+const carved = { ...opts, carveOut: "builder" }
+
+describe("a carve-out", () => {
+  test("lets an entry directly in its folder through, records it, and restore puts it back", () => {
+    const roots = machine()
+    const path = file(join(roots.home, ".playground", "ops", "builds", "abc", "web"))
+    const moved = quarantine(join(path, ".."), carved, roots, { carveOuts: TABLE, now: NOW })
+    expect(moved).toMatchObject({ files: 1 })
+    expect(existsSync(path)).toBe(false)
+    const [entry] = listTrash(roots.trash)
+    expect(entry).toMatchObject({ carveOut: "builder", path: join(path, "..") })
+    expect(restore(entry!.id, roots, TABLE)).toEqual({ path: join(path, "..") })
+    expect(readFileSync(path, "utf8")).toBe("x")
+  })
+
+  test("without its name the same entry stays protected", () => {
+    const roots = machine()
+    const path = file(join(roots.home, ".playground", "ops", "builds", "abc"))
+    expect(quarantine(path, opts, roots, { carveOuts: TABLE, now: NOW })).toMatchObject({
+      kind: "protected",
+    })
+    expect(existsSync(path)).toBe(true)
+  })
+
+  test.each([
+    ["its folder itself", (home: string) => join(home, ".playground", "ops", "builds")],
+    ["its parent", (home: string) => join(home, ".playground", "ops")],
+    [
+      "a sibling folder's entry",
+      (home: string) => join(home, ".playground", "ops", "other", "abc"),
+    ],
+    [
+      "an entry deeper in its folder",
+      (home: string) => join(home, ".playground", "ops", "builds", "abc", "web"),
+    ],
+  ])("refuses %s and moves nothing", (_, pathOf) => {
+    const roots = machine()
+    file(join(roots.home, ".playground", "ops", "builds", "abc", "web", "x"))
+    file(join(roots.home, ".playground", "ops", "other", "abc", "x"))
+    const path = pathOf(roots.home)
+    expect(quarantine(path, carved, roots, { carveOuts: TABLE, now: NOW })).toMatchObject({
+      kind: "protected",
+    })
+    expect(existsSync(path)).toBe(true)
+    expect(listTrash(roots.trash)).toEqual([])
+  })
+
+  test.each([
+    ["files", (dir: string) => ["a", "b", "c", "d"].forEach((name) => file(join(dir, name)))],
+    ["bytes", (dir: string) => void file(join(dir, "big"), "x".repeat(101))],
+  ])("refuses an entry over its cap in %s as a tripwire", (_, fill) => {
+    const roots = machine()
+    const dir = join(roots.home, ".playground", "ops", "builds", "abc")
+    fill(dir)
+    expect(quarantine(dir, carved, roots, { carveOuts: TABLE, now: NOW })).toMatchObject({
+      kind: "tripwire",
+      refused: expect.stringContaining("builder carve-out's cap"),
+    })
+    expect(existsSync(dir)).toBe(true)
+  })
+
+  test("refuses a name no carve-out has, a link out of its folder, and the trash in its folder", () => {
+    const roots = machine()
+    const path = file(join(roots.home, ".playground", "ops", "builds", "abc"))
+    expect(
+      quarantine(path, { ...opts, carveOut: "nobody" }, roots, { carveOuts: TABLE, now: NOW }),
+    ).toMatchObject({
+      kind: "protected",
+      refused: expect.stringContaining("no carve-out is named"),
+    })
+    const link = join(roots.home, ".playground", "ops", "builds", "ssh")
+    symlinkSync(join(roots.home, ".ssh"), link)
+    expect(quarantine(link, carved, roots, { carveOuts: TABLE, now: NOW })).toMatchObject({
+      kind: "protected",
+    })
+    mkdirSync(roots.trash, { recursive: true })
+    expect(
+      quarantine(roots.trash, { ...opts, carveOut: "trashy" }, roots, {
+        carveOuts: TABLE,
+        now: NOW,
+      }),
+    ).toMatchObject({ kind: "protected" })
+    expect(existsSync(join(roots.home, ".ssh", "id_ed25519"))).toBe(true)
+    expect(existsSync(roots.trash)).toBe(true)
+  })
+})
+
+// Every real carve-out: one exact folder at least two deep in a protected HOME folder, a cap within the tripwire's, its own entry let through, and its parent, a sibling and an entry over its cap refused.
+describe.each(Object.entries(CARVE_OUTS))("the %s carve-out", (name, carve) => {
+  test("names one exact folder inside a protected HOME folder, under a cap within the tripwire's", () => {
+    const parts = carve.folder.split("/")
+    expect(parts.length).toBeGreaterThanOrEqual(2)
+    expect(parts.every((part) => part && part !== "." && part !== "..")).toBe(true)
+    expect([".claude", ".config", ".gnupg", ".playground", ".ssh", "Library", "Music"]).toContain(
+      parts[0]!,
+    )
+    expect(carve.files).toBeLessThanOrEqual(LIMITS.files)
+    expect(carve.bytes).toBeLessThanOrEqual(LIMITS.bytes)
+  })
+
+  test("lets its own entry through and refuses its parent, a sibling and an entry over its cap", () => {
+    const roots = machine()
+    const folder = join(roots.home, carve.folder)
+    const own = file(join(folder, "own"))
+    const sibling = file(join(folder, "..", "sibling-of-carve-out", "own"))
+    const over = join(folder, "over")
+    file(join(over, "big"), "x".repeat(Math.min(carve.bytes + 1, 4096)))
+    if (carve.bytes >= 4096) for (let i = 0; i <= carve.files; i++) file(join(over, `f${i}`))
+    const named = { ...opts, carveOut: name }
+    expect(quarantine(own, named, roots, { now: NOW })).toMatchObject({ files: 1 })
+    expect(quarantine(join(folder, ".."), named, roots, { now: NOW })).toMatchObject({
+      kind: "protected",
+    })
+    expect(quarantine(sibling, named, roots, { now: NOW })).toMatchObject({ kind: "protected" })
+    expect(quarantine(over, { ...named, session: "over-cap" }, roots, { now: NOW })).toMatchObject({
+      kind: "tripwire",
+    })
+  })
+})
 
 describe("worktreeRefusal", () => {
   test("refuses when the roster cannot be read", () => {
