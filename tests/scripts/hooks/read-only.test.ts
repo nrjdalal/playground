@@ -11,20 +11,16 @@ describe("a call that only reads", () => {
     "git log --oneline -5",
     "git -C /tmp status --short",
     "git remote -v",
-    "git config --get remote.origin.url",
     "git branch --show-current",
-    "git fetch origin canary",
-    "git worktree list",
+    "git log --format=%B -n 1 | head -3",
     "gh issue list -R acme/app",
     "gh pr view 1 -R acme/app --json state",
     "gh api repos/acme/app/issues",
-    "gh api -X GET repos/acme/app/pulls -f per_page=100",
-    "gh search issues foo",
+    "gh api -X GET repos/acme/app/pulls --paginate",
     "cat .git/worktrees/a/HEAD",
     "grep gitdir .git",
-    "git log --format=%B -n 1 | head -3",
-    "echo $(git rev-parse HEAD)",
     "cd /tmp && git diff HEAD~1 | wc -l",
+    "( git log -1 ) | head -3",
   ])("%s reads", (command) => {
     expect(readOnly(bash(command))).toBe(true)
   })
@@ -34,20 +30,39 @@ describe("a call that only reads", () => {
   })
 })
 
-describe("a call that may write", () => {
+describe("a call outside the read shapes", () => {
   test.each([
     "gh issue create -R acme/app -t x -b y",
     "gh api -X DELETE repos/acme/app",
     "gh api repos/acme/app/issues -f title=y",
+    "gh api -iXDELETE repos/acme/app/git/refs/heads/x",
+    "gh api --hostname example.com x",
+    "gh api https://example.com/x",
+    "gh issue --title list create -R acme/app -b y",
+    "gh search issues foo",
     "git push origin main",
+    "git fetch origin canary",
     "git branch -D x",
-    "git config user.name x",
+    "git branch x",
+    "git config --get remote.origin.url",
     "git -c core.pager=less log",
+    "git remote -v add x https://github.com/acme/app.git",
+    "git log --output=/tmp/x",
+    "git diff --outp=/tmp/x",
+    "git constructor",
     "GIT_PAGER=less git log",
+    "LESSOPEN='|gh issue create %s' git log",
+    "x=1",
+    "git log > /tmp/x",
+    "git log -1 2>&1 | head -3",
+    "{ git log; } >> /tmp/x",
+    "echo $(git rev-parse HEAD)",
+    "./tools/git log",
+    "env git log",
     "echo 'git push' | sh",
     "git log; git push",
     "curl https://example.com",
-    "python3 -c 'print(1)'",
+    "sort -o/tmp/x .git/HEAD",
   ])("%s does not read only", (command) => {
     expect(readOnly(bash(command))).toBe(false)
   })
