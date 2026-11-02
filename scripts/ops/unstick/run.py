@@ -55,8 +55,9 @@ _NAMES = None
 
 
 def session_kinds():
-    """Each manager's set name and its kind: sessions.names, the dispatcher's with -2, then sessions.aliases, read once through setting.ts as
-    spawn.sh reads them; a read that fails places none, as a fresh install's role words still do by name."""
+    """Each manager's set name and its kind: sessions.names, the dispatcher's with -2, sessions.aliases, then the optimizer's own, read once
+    through setting.ts as spawn.sh reads them (namedKinds in packages/config/src/kinds.ts); a read that fails places none, as a fresh install's
+    role words still do by name."""
     global _NAMES
     if _NAMES is None:
         names, aliases = {}, {}
@@ -69,7 +70,7 @@ def session_kinds():
         except (OSError, ValueError, subprocess.SubprocessError):
             pass
         names = names or {k: k for k in ("builder", "dispatcher", "ops", "planner")}
-        _NAMES = {**{v: k for k, v in names.items()}, f"{names['dispatcher']}-2": "dispatcher", **aliases}
+        _NAMES = {**{v: k for k, v in names.items()}, f"{names['dispatcher']}-2": "dispatcher", **aliases, "optimizer": "optimizer"}
     return _NAMES
 
 
@@ -580,7 +581,8 @@ def dialog_room(name, lines):
 
 
 # autoMemoryEnabled is false and the memory folders were archived (8 Oct): any file under ~/.claude/projects/*/memory/ other than the one-line
-# MEMORY.md pointer is new memory a session wrote anyway; name it, its originSessionId and that session's name (builder, 9 Oct)
+# MEMORY.md pointer is new memory a session wrote anyway; name it, its originSessionId and that session's name (builder, 9 Oct). Only a file
+# whose originSessionId names a factory session alerts, in any project folder, so the owner's own sessions and a file with no id stay quiet (PG-488)
 POINTER = "Learnings live in the playground repo; see AGENTS.md."
 
 
@@ -594,7 +596,7 @@ def memory_files():
             names[d.get("sessionId")] = d.get("name")
         except (OSError, ValueError):
             pass
-    found = []
+    kinds, found = roster_kinds(), []
     for path in _glob.glob(os.path.join(cfg, "projects", "*", "memory", "*")):
         if not os.path.isfile(path):
             continue
@@ -605,9 +607,11 @@ def memory_files():
         if os.path.basename(path) == "MEMORY.md" and text.strip() == POINTER:
             continue
         m = re.search(r"originSessionId:\s*([0-9a-f-]{36})", text)
-        sid = m.group(1) if m else None
+        name = names.get(m.group(1)) if m else None
+        if not isinstance(name, str) or not (kind_of(name, kinds) or named_kind(name) or manager_kind_of_name(name)):
+            continue
         rel = os.path.relpath(path, os.path.join(cfg, "projects"))
-        found.append({"at": now(), "kind": "memory-file", "line": f"{rel} (originSessionId {sid or 'unknown'})", "name": names.get(sid) or (sid[:8] if sid else "unknown session"),
+        found.append({"at": now(), "kind": "memory-file", "line": f"{rel} (originSessionId {m.group(1)})", "name": name,
                       "since": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(os.path.getmtime(path)))})
     return found
 
