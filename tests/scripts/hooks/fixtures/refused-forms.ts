@@ -2186,6 +2186,30 @@ gh api graphql -f query="$QUERY"`,
           "a commit after an eval whose own chained cd may not have run",
           `eval 'true && cd ${W}/nope'; git commit -m x`,
         ],
+        [
+          "a commit in a subshell the chained cd's own run does not reach",
+          `true && cd ${W}/nope; (git commit -m x)`,
+        ],
+        [
+          "a commit in a subshell on the || of a chained cd",
+          `true && cd ${W}/nope || (git commit -m x)`,
+        ],
+        [
+          "a commit in a substitution the chained cd's own run does not reach",
+          `true && cd ${W}/nope; echo $(git commit -m x)`,
+        ],
+        [
+          "a commit in a process substitution after a chained cd",
+          `true && cd ${W}/nope; cat <(git commit -m x)`,
+        ],
+        [
+          "a commit in backticks after a chained cd",
+          `true && cd ${W}/nope; echo \`git commit -m x\``,
+        ],
+        [
+          "a commit in a substitution an assignment reads after a chained cd",
+          `true && cd ${W}/nope; x=$(git commit -m x)`,
+        ],
         ["a commit after a backgrounded chained cd", `true && cd ${W} & git commit -m x`],
         ["a commit after a cd to a missing folder", `cd ${MAIN}/.no-such-folder; git commit -m x`],
         ["a commit after a cd to a folder in a variable", `cd "$X"; git commit -m x`],
