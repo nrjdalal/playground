@@ -451,7 +451,7 @@ Only the first reading moves the folder, sets variables and records files for th
   whose directory (the Bash tool's cwd after any `cd`, or a `bun --cwd`, `bun run --cwd`, `bun install --cwd`, `bun test --cwd` or turbo's `--cwd`, so one typed from anywhere counts, and a clone's destination) is inside a worktree under `.claude/worktrees/`,
   unless the command runs through `~/.playground/ops/run-slot.sh`, naming that form (18 Oct: five worktree installs at once drove load1 to 66.8).
   The main checkout is no-main-checkout's. It fails open on a call it cannot read, and its tests are in `bun run test:file tests/scripts/hooks`.
-  A commit's pre-commit build takes a slot through `packages/scripts/src/commit-slot.ts`, and playbook's **slots** rule says which slot each way of committing takes.
+  A commit's pre-commit build takes a slot through `packages/scripts/src/commit-slot.ts` when turbo's dry run finds a build task with work to do, and playbook's **slots** rule says which slot each way of committing takes.
 
 ## rules
 
