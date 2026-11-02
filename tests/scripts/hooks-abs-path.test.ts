@@ -28,7 +28,7 @@ const commands = async (file: string) => (await entries(file)).map((e) => e.comm
 const factoryCommands = async (file: string) =>
   (await commands(file)).filter((c) => !c.startsWith('cd "$CLAUDE_PROJECT_DIR" && '))
 
-// A hook that cannot start fails open, so a command that hangs on $HOME is off wherever HOME is another folder.
+// A command that hangs on $HOME breaks wherever HOME is another folder: a PreToolUse guard then refuses every factory call, and any other hook goes quiet.
 describe("no factory hook command hangs on HOME", () => {
   for (const file of [FACTORY, PROJECT])
     test(`${file} holds no $HOME, \${HOME} or ~ in a hook command`, async () => {
@@ -46,14 +46,33 @@ describe("the two settings files carry one command per factory hook", () => {
   test("every factory command in both files is the one resolver, differing only in the hook it runs", async () => {
     const shapes = new Set(
       [...(await factoryCommands(FACTORY)), ...(await factoryCommands(PROJECT))].map((c) =>
-        c.replaceAll(/scripts\/hooks\/[\w-]+\.ts/g, "scripts/hooks/<hook>.ts"),
+        c
+          .replaceAll(/scripts\/hooks\/[\w-]+\.ts/g, "scripts/hooks/<hook>.ts")
+          .replaceAll(/"[\w-]+: /g, '"<hook>: '),
       ),
     )
-    expect(shapes.size).toBe(1)
-    const [shape] = shapes
-    expect(shape).toStartWith('R="${PLAYGROUND_REPO}";')
-    expect(shape).toContain("--git-common-dir")
+    expect(shapes.size).toBe(2)
+    for (const shape of shapes) {
+      expect(shape).toStartWith('R="${PLAYGROUND_REPO}";')
+      expect(shape).toContain("--git-common-dir")
+    }
     expect((await factoryCommands(PROJECT)).length).toBe((await commands(FACTORY)).length)
+  })
+
+  // Claude Code blocks a call only on exit 2, so a guard that crashes (exit 1) or whose script is gone (exit 0) let every call through; a Stop hook at exit 2 would loop its session, so the rest stay open.
+  test("every PreToolUse wrapper, and only those, refuses on a crash and, under a role, on a missing script", async () => {
+    for (const file of [FACTORY, PROJECT])
+      for (const { command, event } of await entries(file)) {
+        const name = command.match(/scripts\/hooks\/([\w-]+)\.ts/)?.[1]
+        const closed = [
+          `|| { [ -z "$PLAYGROUND_ROLE" ] && exit 0; echo "${name}: `,
+          `; c=$?; [ $c = 0 ] || [ $c = 2 ] || { echo "${name}: crashed (exit $c)`,
+        ]
+        for (const part of closed)
+          if (event === "PreToolUse") expect(command).toContain(part)
+          else expect(command).not.toContain(part)
+        if (event !== "PreToolUse") expect(command).toContain('.ts" ] || exit 0; cd -P')
+      }
   })
 
   // The command runs nothing when its script is missing, so a renamed or removed hook would turn its guard off with no word.
@@ -74,9 +93,9 @@ describe("the two settings files carry one command per factory hook", () => {
 describe("the command finds the checkout", () => {
   const scratch = realpathSync(mkdtempSync(join(tmpdir(), "hooks-917-")))
   afterAll(() => rmSync(scratch, { force: true, recursive: true }))
-  const withHook = (dir: string) => {
+  const withHook = (dir: string, body = "console.log(process.cwd())\n", hook = "no-stash") => {
     mkdirSync(join(dir, "scripts", "hooks"), { recursive: true })
-    writeFileSync(join(dir, "scripts", "hooks", "no-stash.ts"), "console.log(process.cwd())\n")
+    writeFileSync(join(dir, "scripts", "hooks", `${hook}.ts`), body)
     return dir
   }
   const git = (cwd: string, ...args: string[]) =>
@@ -92,20 +111,33 @@ describe("the command finds the checkout", () => {
   const elsewhere = withHook(join(scratch, "elsewhere"))
   const empty = join(scratch, "empty")
   mkdirSync(empty)
+  // Stub guards that crash and refuse, and a Stop hook that crashes.
+  const crashing = withHook(join(scratch, "crashing"), "process.exit(1)\n")
+  withHook(crashing, "process.exit(1)\n", "no-chat-question")
+  const refusing = withHook(join(scratch, "refusing"), "process.exit(2)\n")
 
-  const command = async (file: string) => {
-    const found = (await commands(file)).find((c) => c.endsWith("scripts/hooks/no-stash.ts"))
-    if (!found) throw new Error(`${file} registers no no-stash hook`)
-    return found
+  const command = async (file: string, hook: string) => {
+    const found = (await entries(file)).find(
+      (e) => e.command.includes(`scripts/hooks/${hook}.ts`) && e.event !== "SessionStart",
+    )
+    if (!found) throw new Error(`${file} registers no ${hook} hook`)
+    return found.command
   }
-  const run = async (file: string, shell: string, cwd: string, env: Record<string, string>) => {
-    const proc = Bun.spawn([shell, "-c", await command(file)], {
+  const run = async (
+    file: string,
+    shell: string,
+    cwd: string,
+    env: Record<string, string>,
+    hook = "no-stash",
+  ) => {
+    const proc = Bun.spawn([shell, "-c", await command(file, hook)], {
       cwd,
       // the ceiling keeps git from finding a repository above the scratch folders
       env: {
         ...process.env,
         GIT_CEILING_DIRECTORIES: scratch,
         PLAYGROUND_REPO: "",
+        PLAYGROUND_ROLE: "",
         ...env,
       },
       stderr: "pipe",
@@ -154,6 +186,51 @@ describe("the command finds the checkout", () => {
             PLAYGROUND_REPO: repo,
           }),
         ).toEqual({ code: 0, stderr: "", stdout: "" })
+    })
+
+    test(`${file}, ${shell}: a PreToolUse guard that crashes refuses with exit 2, naming the hook, its code and the fix`, async () => {
+      const { code, stderr } = await run(file, shell, outside, {
+        CLAUDE_PROJECT_DIR: outside,
+        PLAYGROUND_REPO: crashing,
+      })
+      expect(code).toBe(2)
+      expect(stderr).toContain("no-stash: crashed (exit 1)")
+      expect(stderr).toContain(`bun install in ${crashing}`)
+    })
+
+    test(`${file}, ${shell}: a guard's own refusal stays exit 2`, async () => {
+      const { code } = await run(file, shell, outside, {
+        CLAUDE_PROJECT_DIR: outside,
+        PLAYGROUND_REPO: refusing,
+      })
+      expect(code).toBe(2)
+    })
+
+    test(`${file}, ${shell}: a Stop hook that crashes still lets the session stop`, async () => {
+      const { code } = await run(
+        file,
+        shell,
+        outside,
+        { CLAUDE_PROJECT_DIR: outside, PLAYGROUND_REPO: crashing, PLAYGROUND_ROLE: "worker" },
+        "no-chat-question",
+      )
+      expect(code).toBe(1)
+    })
+
+    test(`${file}, ${shell}: under PLAYGROUND_ROLE a missing script or an unresolved checkout refuses, naming the restore route`, async () => {
+      for (const env of [
+        { CLAUDE_PROJECT_DIR: outside, PLAYGROUND_REPO: empty },
+        { CLAUDE_PROJECT_DIR: outside, PLAYGROUND_REPO: "." },
+        { CLAUDE_PROJECT_DIR: empty },
+      ]) {
+        const { code, stderr } = await run(file, shell, outside, {
+          ...env,
+          PLAYGROUND_ROLE: "worker",
+        })
+        expect(code).toBe(2)
+        expect(stderr).toContain("no-stash: ")
+        expect(stderr).toContain("Restoring the main checkout")
+      }
     })
   }
 })
