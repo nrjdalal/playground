@@ -505,7 +505,8 @@ function walk(lx: Lexer, scope: number, nested: boolean, inherit?: Command): voi
       // an `&&` is left out: a command on its right runs only if the one before it succeeded, so it is chained rather than unsure, and every command the chain joins after it runs only if it did too
       if (after === "||" || depth > 0 || body) done.unsure = true
       if (after === "&&") done.chained = true
-      else done.breaks = true
+      // only a command the chain could have reached frees the folder: the first command of a line, of a group or of a body is reached through whatever runs that group, so it keeps the chain's folder
+      else if (after !== "" && depth === 0) done.breaks = true
       if (reserved.some((w) => HELD.has(w))) done.held = true
       if (loops > 0 || loop) done.repeated = true
       depth = Math.max(0, depth + opened - closed)
