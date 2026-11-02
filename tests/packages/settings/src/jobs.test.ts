@@ -53,6 +53,15 @@ describe("the job registry", () => {
     })
   })
 
+  test("the Changelog's job runs from the Dashboard's checkout, whose .env it needs, since the main checkout has none", () => {
+    const { jobs } = renderJobs({}, [], { ...fill, dashboard: "/c/.claude/worktrees/desk" })
+    expect(jobs.find((job) => job.name === "ops-changelog")).toMatchObject({
+      command:
+        "/b/bun --no-env-file /c/.claude/worktrees/desk/packages/scripts/src/ops-changelog/cli.ts",
+      cwd: "/c/.claude/worktrees/desk",
+    })
+  })
+
   test("a job turned on renders without its pause, and a launchd one gets its plist", () => {
     const tick = { ...JOBS["ops-tick"]!, enabled: true }
     const sweep = { ...JOBS["ops-sweep"]!, enabled: true, schedule: { every: 120 } }
