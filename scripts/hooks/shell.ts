@@ -713,6 +713,8 @@ export type Parsed = {
 const SPLIT = /^(?:-[0iv]*S|--split-string(?:=|$))(.*)$/
 
 type State = { chdir?: Word; local: Map<string, Text>; rest: Word[]; xargs: Xargs }
+// The other readings one command's parse makes at most, so options it cannot read cost a bounded time; past them it reads each as canary did, a flag
+const READINGS = 16
 
 export function parse(cmd: Command): Parsed {
   // the words still to read, the next one last, so env -S puts its words back in front in the time of their own count
@@ -724,7 +726,7 @@ export function parse(cmd: Command): Parsed {
     else break
   }
   while (ASSIGN.test(rest.at(-1)?.value ?? "")) assign(state.local, rest.pop() as Word)
-  return unwrap(state)
+  return unwrap(state, undefined, { left: READINGS })
 }
 
 const assign = (local: Map<string, Text>, w: Word) => {
@@ -733,12 +735,13 @@ const assign = (local: Map<string, Text>, w: Word) => {
 }
 
 // The program behind the wrappers at the front of the words, resumed inside `inside`'s options for a second reading: an option the wrapper's lists lack is read as a flag, as a value-less option, and again as taking the next word, and a value in a variable again as expanding to no word and to more than one, each other reading kept in `also`.
-function unwrap(state: State, inside?: string): Parsed {
+function unwrap(state: State, inside: string | undefined, budget: { left: number }): Parsed {
   const { local, rest } = state
   const peek = (): Word | undefined => rest[rest.length - 1]
   const take = (): Word | undefined => rest.pop()
   const also: Parsed[] = []
   const fork = (wrapper: string, drop: number) =>
+    budget.left-- > 0 &&
     also.push(
       unwrap(
         {
@@ -748,6 +751,7 @@ function unwrap(state: State, inside?: string): Parsed {
           xargs: state.xargs && { ...state.xargs },
         },
         wrapper,
+        budget,
       ),
     )
   for (let wrapper = inside; ; wrapper = undefined) {
