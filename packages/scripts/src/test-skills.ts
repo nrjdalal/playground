@@ -1,6 +1,7 @@
-import { rmSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
+
+import { removeScratch } from "@packages/safe-delete"
 
 import { sandbox } from "./sandbox"
 
@@ -58,7 +59,8 @@ export const runSteps = async (list: [string, string[]][]) => {
       results.push([name, (await step.exited) === 0, fail?.trim()])
     }
   } finally {
-    rmSync(scratch, { force: true, recursive: true })
+    const refused = removeScratch(scratch)
+    if (refused) console.error(`test-skills: ${refused}`)
   }
   return results
 }

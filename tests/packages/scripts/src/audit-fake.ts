@@ -17,12 +17,13 @@ export const lockOf = (...rows: [string, string, string][]) => {
   return JSON.stringify(found)
 }
 
-// a fake `bun` whose `audit --json` prints its folder's bun.lock as the answer, so each lockfile here is the advisories it carries; FAKE_503 answers each folder's first try with a 503
+// a fake `bun` whose `audit --json` prints its folder's bun.lock as the answer, so each lockfile here is the advisories it carries; FAKE_503 answers each folder's first try with a 503, and a folder holding makeScratch's marker leaves a marked file beside the fake
 export const fakeBun = (dir: string) => {
   writeFileSync(
     join(dir, "bun"),
     `#!/bin/sh
 echo "$PWD $*" >> "${dir}/tries"
+[ -f .safe-delete-scratch ] && : > "${dir}/marked"
 if [ -n "$FAKE_503" ] && [ ! -f .tried ]; then : > .tried; echo "error: POST https://registry.npmjs.org/-/npm/v1/security/advisories/bulk - 503" >&2; exit 1; fi
 cat bun.lock
 grep -q GHSA bun.lock && exit 1

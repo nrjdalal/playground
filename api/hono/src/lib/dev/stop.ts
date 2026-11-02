@@ -5,9 +5,12 @@ import {
   readFileSync,
   renameSync,
   rmSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs"
-import { dirname, join, sep } from "node:path"
+import { basename, dirname, join, sep } from "node:path"
+
+import { makeScratch, removeScratch } from "@packages/safe-delete"
 
 // The launcher records its pid, process group, start time and the stack's task groups in its checkout, so `bun run dev:stop` can end a stack whose starting session has gone, by that record alone, never by a name or a pattern.
 export const RECORD = ".turbo/dev.pgid"
@@ -77,18 +80,54 @@ const code = (error: unknown): string | undefined => (error as NodeJS.ErrnoExcep
 // A lock left by a process that died inside the few milliseconds it is held
 const LOCK_STALE_MS = 5_000
 
-// The record is only ever created by an atomic link (claimRecord) and only ever removed under this lock, after it is read again, so no start or stop removes a record it has not just judged.
-const underLock = <T>(path: string, run: () => T, busy: T): T => {
+// A rename onto a lock folder that holds anything fails with one of these.
+const HELD = new Set(["EEXIST", "ENOTEMPTY"])
+
+// Moves the lock aside when it still holds this holder's token; one taken over as stale meanwhile, or gone, stays as it is.
+const releasable = (lock: string, aside: string, token: string): boolean => {
+  try {
+    if (readFileSync(join(lock, "owner"), "utf8") !== token) return false
+    renameSync(lock, aside)
+    return true
+  } catch {
+    return false
+  }
+}
+
+// The record is only ever created by an atomic link (claimRecord) and only ever removed under this lock, after it is read again, so no start or stop removes a record it has not just judged. The lock is a scratch folder renamed into place, so it always holds makeScratch's marker and its holder's token; a stale one is moved aside, then removed, and a release leaves a lock that holds another's token.
+export const underLock = <T>(path: string, run: () => T, busy: T): T => {
   const lock = `${path}.lock`
+  const parent = dirname(lock)
+  const drop = (dir: string) => {
+    const refused = removeScratch(dir, parent)
+    if (refused) console.error(`dev record lock: ${refused}`)
+  }
+  let mine: string
+  const token = crypto.randomUUID()
+  try {
+    mine = makeScratch(`${basename(lock)}.`, parent)
+    writeFileSync(join(mine, "owner"), token)
+  } catch {
+    return busy
+  }
   for (let waited = 0; ; waited += 10) {
     try {
-      mkdirSync(lock)
+      // a rename keeps the folder's time, so it is stamped now, or a lock taken after a wait would read as old
+      const now = new Date()
+      utimesSync(mine, now, now)
+      renameSync(mine, lock)
       break
     } catch (error) {
-      if (code(error) !== "EEXIST" || waited >= 2_000) return busy
+      if (!HELD.has(code(error) ?? "") || waited >= 2_000) {
+        drop(mine)
+        return busy
+      }
       try {
-        if (Date.now() - lstatSync(lock).mtimeMs > LOCK_STALE_MS)
-          rmSync(lock, { force: true, recursive: true })
+        if (Date.now() - lstatSync(lock).mtimeMs > LOCK_STALE_MS) {
+          const aside = `${lock}.stale-${crypto.randomUUID()}`
+          renameSync(lock, aside)
+          drop(aside)
+        }
       } catch {
         // released meanwhile
       }
@@ -98,7 +137,10 @@ const underLock = <T>(path: string, run: () => T, busy: T): T => {
   try {
     return run()
   } finally {
-    rmSync(lock, { force: true, recursive: true })
+    // moved aside before its removal, so the lock is never an empty folder a waiter's rename could land on
+    const aside = `${lock}.free-${token}`
+    if (releasable(lock, aside, token)) drop(aside)
+    else console.error(`dev record lock: ${lock} was taken over as stale while held; left as it is`)
   }
 }
 

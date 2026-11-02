@@ -1,5 +1,14 @@
 import { afterAll, describe, expect, test } from "bun:test"
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -108,6 +117,7 @@ const over = (head: string, base: string, env: Record<string, string> = {}) => {
     code: proc.exitCode,
     err: proc.stderr.toString(),
     out: proc.stdout.toString(),
+    dir,
     tries: readFileSync(join(dir, "tries"), "utf8").trim().split("\n"),
   }
 }
@@ -118,6 +128,15 @@ const CANARY: [string, string, string][] = [
 ]
 
 describe("audit --new-over (#1704)", () => {
+  test("the base lockfile's folder is a marked scratch folder, gone once the run ends (#545)", () => {
+    const tmp = mkdtempSync(join(tmpdir(), "audit-tmp-"))
+    dirs.push(tmp)
+    const { code, dir } = over(lockOf(...CANARY), lockOf(...CANARY), { TMPDIR: tmp })
+    expect(code).toBe(0)
+    expect(existsSync(join(dir, "marked"))).toBe(true)
+    expect(readdirSync(tmp)).toEqual([])
+  })
+
   test("a head that adds nothing passes while canary carries dompurify and toml, and names them as canary's", () => {
     const { code, out } = over(lockOf(...CANARY), lockOf(...CANARY))
     expect(code).toBe(0)
