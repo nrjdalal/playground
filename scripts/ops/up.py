@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """ops-up: start every ops job in jobs.json that is not healthy, and leave healthy ones alone.
 
-A job ops starts in a terminal (one whose `runtime` names one, or that names none and sets `needsCmux`) runs as a pane of the Ops
+A job ops starts in a terminal (one whose `runtime` names one) runs as a pane of the Ops
 workspace on the factory herdr server (the binary pin.json names, as spawn.sh reaches it). An old `runtime` of cmux or auto reads
 as herdr, so a copy still running under cmux is stopped by its recorded pid and started in herdr on the next pass.
 
@@ -93,8 +93,8 @@ def healthy(job, procs):
 
 
 def is_herdr(job):
-    """Whether ops starts the job in a terminal, which is herdr: its runtime names one (an old row's cmux or auto included), or it names none and sets needsCmux."""
-    return job.get("runtime", "herdr" if job.get("needsCmux") else None) in ("auto", "cmux", "herdr")
+    """Whether ops starts the job in a terminal, which is herdr: its runtime names one, an old row's cmux or auto included."""
+    return job.get("runtime") in ("auto", "cmux", "herdr")
 
 
 def is_dashboard(job):

@@ -135,7 +135,6 @@ test("a pass exits 0 and starts a down job stored as cmux or auto in herdr, insi
   const cmuxJob = {
     command: "bash /x/ops/ops-dashboard/loop.sh",
     name: "ops-dashboard",
-    needsCmux: true,
     runtime: "cmux",
     stop: "dashboard",
   }
@@ -146,10 +145,10 @@ test("a pass exits 0 and starts a down job stored as cmux or auto in herdr, insi
       code: 0,
       started: ["ops-dashboard", "ops-x"],
     })
-  // a row that names no runtime and needs a terminal starts in herdr too
+  // a row that names no runtime is launchd's, which ops-up only reports; the render gives a stored terminal job its runtime
   expect(exitOf([{ ...cmuxJob, runtime: undefined }], "outside")).toEqual({
     code: 0,
-    started: ["ops-dashboard"],
+    started: [],
   })
 })
 

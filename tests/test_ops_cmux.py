@@ -90,7 +90,7 @@ def test_up(scratch):
     now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     with open(os.path.join(state, "ops-x.json"), "w") as f:
         json.dump({"job": "ops-x", "pid": me, "startedAt": now, "lastBeatAt": now, "lastResult": "ok", "cycleSeconds": 60}, f)
-    job = {"name": "ops-x", "heartbeat": "ops-x", "needsCmux": True, "runtime": "cmux"}
+    job = {"name": "ops-x", "heartbeat": "ops-x", "runtime": "cmux"}
     under = {me: (400, "/bin/bash"), 400: (300, "/bin/zsh"), 300: (100, "/usr/bin/login"), 100: (1, CMUX), 1: (0, "/sbin/launchd")}
     ok, why = up.healthy(job, under)
     check(not ok and "runs under cmux" in why, "up: a job stored as cmux whose pid runs under the cmux app is unhealthy, so it moves to herdr", why)
@@ -362,9 +362,9 @@ def test_up_orphan(scratch):
         for name, pid in (("ops-orphan", orphan), ("ops-kept", kept.pid), ("ops-late", late.pid)):
             with open(os.path.join(state, f"{name}.json"), "w") as f:
                 json.dump({"job": name, "pid": pid, "startedAt": now, "lastBeatAt": now, "lastResult": "ok", "cycleSeconds": 60}, f)
-            jobs.append({"name": name, "heartbeat": name, "needsCmux": True, "runtime": "cmux", "command": f"python3 /x/{name}/run.py", "cwd": "/x"})
+            jobs.append({"name": name, "heartbeat": name, "runtime": "cmux", "command": f"python3 /x/{name}/run.py", "cwd": "/x"})
         # ops-fresh was restarted during the pass: once.py has recorded its pid, but it has written no heartbeat yet
-        jobs.append({"name": "ops-fresh", "heartbeat": "ops-fresh", "needsCmux": True, "runtime": "cmux", "command": "python3 /x/ops-fresh/run.py", "cwd": "/x"})
+        jobs.append({"name": "ops-fresh", "heartbeat": "ops-fresh", "runtime": "cmux", "command": "python3 /x/ops-fresh/run.py", "cwd": "/x"})
         # ops-daemon is a launchd job with no heartbeat: launchd started its holder, so up.py only reports it
         jobs.append({"name": "ops-daemon", "heartbeat": "ops-daemon", "launchd": "com.x.daemon", "command": "python3 /x/ops-daemon/run.py", "cwd": "/x"})
         with open(os.path.join(state, "jobs.json"), "w") as f:
@@ -492,7 +492,7 @@ def test_up_herdr(scratch):
     def job(name, **extra):
         os.makedirs(os.path.join(folder, name), exist_ok=True)
         open(os.path.join(folder, name, "run.py"), "w").close()
-        return {"name": name, "heartbeat": name, "needsCmux": True, "runtime": "cmux", "command": f"python3 {folder}/{name}/run.py", "cwd": "/x", **extra}
+        return {"name": name, "heartbeat": name, "runtime": "cmux", "command": f"python3 {folder}/{name}/run.py", "cwd": "/x", **extra}
 
     def pass_with(jobs, quiet=True):
         with open(os.path.join(state, "jobs.json"), "w") as f:
@@ -579,11 +579,11 @@ def test_up_herdr(scratch):
             sys.argv = argv
         check(len(herdr_st()["calls"]) == calls and not os.path.exists(os.path.join(state, "up.cmux")), "up: --once-per-cmux runs no pass and leaves no marker")
 
-        # a pass that prints: a job with no runtime opens in herdr, and the jobs after it still run
+        # a pass that prints: a job with no runtime is launchd's, which ops-up only reports, and the jobs after it still run
         bare = {k: v for k, v in job("ops-noruntime").items() if k != "runtime"}
         printed = pass_with([bare, job("ops-after", runtime="herdr")], quiet=False)
-        check("started ops-noruntime in herdr (no heartbeat)" in printed and "started ops-after in herdr" in printed and any(p.get("label") == "ops-noruntime" for p in herdr_st()["panes"]),
-              "up: a job with no runtime prints as started in herdr, and the jobs after it still run", printed)
+        check("started ops-noruntime" not in printed and "started ops-after in herdr" in printed and not any(p.get("label") == "ops-noruntime" for p in herdr_st()["panes"]),
+              "up: a job with no runtime is only reported, and the jobs after it still run", printed)
 
         # a failed start logs herdr's whole answer and waits out no GRACE
         os.environ["STUB_HERDR_RUN_FAIL"] = "1"
