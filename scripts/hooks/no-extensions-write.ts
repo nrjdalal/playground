@@ -195,21 +195,33 @@ const definedFunctions = (command: string): Set<string> =>
   )
 
 // Every text of a variable the call sets or exports, or of a word from the first that names a runner on (behind any wrapper, or a program word the hook cannot read or a function the command defines), that holds a space, a leading ! dropped, read as a command line of its own (a pager, GIT_SSH_COMMAND, a git alias, watch's line); any other program's quoted argument (awk's program) stays one word.
-function runsOf(parsed: Parsed, env: Env, functions: Set<string>): string[] {
+// With `wide`, every word is read, as for a line holding a runner call whose argument the hook cannot read (`set -- '…'; eval "$1"`), since an earlier word may hold its payload; `dark` marks such a call, and `messages` the git messages kept out of the read.
+function runsOf(
+  parsed: Parsed,
+  env: Env,
+  functions: Set<string>,
+  wide: boolean,
+): { dark: boolean; lines: string[]; messages: string[] } {
   const { args, first, local, name } = parsed
   const values = [...local, ...env.vars].flatMap(([, text]) => (text.unknown ? [] : [text.value]))
   const all = first ? [first, ...args] : args
-  const from =
+  const found =
     first && (marked(name) || functions.has(name.toLowerCase()))
       ? 0
       : all.findIndex((word) => runnerOf(word))
+  const from = wide ? 0 : found
   const words = from < 0 ? [] : all.slice(from)
-  const keeps = runnerOf(words[0] ?? { value: "" }) === "git" && keepsMessage(words.slice(1), env)
+  const git = found < 0 ? -1 : runnerOf(all[found]) === "git" ? found - from : -1
+  const keeps = git >= 0 && keepsMessage(words.slice(git + 1), env)
+  const messages: string[] = []
   for (const [at, word] of words.entries()) {
-    if (keeps && messageAt(words, at) !== undefined) continue
-    for (const text of texts(word)) values.push(text.value.replace(/^!/, ""))
+    const message = keeps && at > git ? messageAt(words, at) : undefined
+    if (message !== undefined) messages.push(message)
+    else for (const text of texts(word)) values.push(text.value.replace(/^!/, ""))
   }
-  return [...new Set(values)].filter((value) => /\s/.test(value) && !marked(value))
+  const dark = found >= 0 && all.slice(found + 1).some((word) => marked(word.value))
+  const lines = [...new Set(values)].filter((value) => /\s/.test(value) && !marked(value))
+  return { dark, lines, messages }
 }
 
 // What of a playground call changes what a guard reads, or undefined; its words split as that command's parseWords splits them, and a word the hook cannot read taken as the worst.
@@ -260,7 +272,7 @@ const texts = (word: Word): Word[] => {
   return out
 }
 
-function inspect(raw: string, environment: Environment) {
+async function inspect(raw: string, environment: Environment) {
   const { cwd, tool_input: toolInput, tool_name: tool } = JSON.parse(raw) as Record<string, unknown>
   const input = (toolInput ?? {}) as Record<string, unknown>
   const directory = typeof cwd === "string" ? cwd : undefined
@@ -320,6 +332,8 @@ function inspect(raw: string, environment: Environment) {
     }
   }
   const seen = new Set<string>()
+  let dark = false
+  let wide = false
   const visit: Visit = async (cmd: Command, parsed, env) => {
     const slot = slotWords(parsed)
     if (slot)
@@ -350,7 +364,9 @@ function inspect(raw: string, environment: Environment) {
           .map((words) => cliWrite(xargs?.replace ? words : [...words, ...stdinWords]))
           .find(Boolean)
     if (write) return refuse(write)
-    for (const raw of reader ? [] : runsOf(parsed, env, functions)) {
+    const runs = reader ? undefined : runsOf(parsed, env, functions, wide)
+    if (runs?.dark) dark = true
+    for (const raw of runs?.lines ?? []) {
       const line =
         xargs?.replace && fed
           ? raw.replaceAll(xargs.replace, fed.unknown ? UNKNOWN : fed.value)
@@ -361,9 +377,7 @@ function inspect(raw: string, environment: Environment) {
       if (verdict) return verdict
     }
     // a git message is text, no line git runs, but one naming a gated call is refused all the same
-    for (const message of name === "git" && !reader && keepsMessage(args, env)
-      ? args.flatMap((_, at) => messageAt(args, at) ?? [])
-      : []) {
+    for (const message of runs?.messages ?? []) {
       const write = lex(message, env.known)
         .commands.flatMap((cmd) => cliCalls(parse(cmd), env))
         .map((words) => cliWrite(words))
@@ -398,14 +412,20 @@ function inspect(raw: string, environment: Environment) {
       if (named) return refuse(`${verb} under xargs on ${named}`)
     }
   }
-  const env: Env = {
-    cwd: directory,
-    files: new Map(),
-    known: knownVariables(command, environment, directory),
-    process: environment,
-    vars: new Map(),
-  }
-  return run(lex(command, env.known), env, visit, true)
+  const known = knownVariables(command, environment, directory)
+  const pass = () =>
+    run(
+      lex(command, known),
+      { cwd: directory, files: new Map(), known, process: environment, vars: new Map() },
+      visit,
+      true,
+    )
+  const verdict = await pass()
+  if (verdict || !dark) return verdict
+  // a runner call read a word the hook cannot know, so the line is read again with every spaced text a line of its own, as a payload held earlier (set --, $_, getopts, an array) may be what it runs
+  wide = true
+  seen.clear()
+  return pass()
 }
 
 // Fails open: an error on any call lets it run, so a reader bug cannot block every Bash command or write; a RangeError, a stack overflow or the walk past its time, refuses.
