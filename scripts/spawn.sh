@@ -85,6 +85,7 @@ fi
 DATA=$(cd / && env $UNSET "$BUN" --no-env-file -e "import { dataDir } from '$REPO/packages/env/src/data-dir.ts'; console.log(dataDir())") || { echo "spawn.sh: bun could not resolve the data folder" >&2; exit 1; }
 [[ $DATA == "$HOME"/* ]] && SHOWN="~${DATA#"$HOME"}" || SHOWN=$DATA
 SETTINGS="$DATA/factory-settings.json"
+HERDR_DIR=${PLAYGROUND_HERDR_DIR:-${DESK_HERDR_DIR:-$DATA/herdr}}
 PINS="$DATA/backends"
 RESUME_DIR="$DATA/resume"
 ROSTER_JSON="$DATA/roster.json"
@@ -753,7 +754,6 @@ set -- ${words[@]+"${words[@]}"}
 
 # herdr runs by the absolute path herdr's pin names, never a bare herdr, and only while that file is the pinned version and hash and the server $1 is running; hr then speaks to that server.
 herdr_ready() {
-  HERDR_DIR=${PLAYGROUND_HERDR_DIR:-${DESK_HERDR_DIR:-$DATA/herdr}}
   HERDR_SESSION_NAME=$1
   word "$HERDR_SESSION_NAME" || refuse "PLAYGROUND_HERDR_SESSION is a word, not $HERDR_SESSION_NAME"
   pinned=$(python3 -I - "$HERDR_DIR/pin.json" <<'PY'
@@ -1281,9 +1281,12 @@ TAG=
 SANDBOX=
 [ "$ROLE" = probe ] && SANDBOX=sandbox-
 BUILT="$DATA/factory-settings-$TAG$SANDBOX$((WINDOW / 1000))k.json"
-python3 -I - "$SETTINGS" "$BUILT" "$WINDOW" "$BACKEND" "$SANDBOX" "$DATA" "${PLAYGROUND_HERDR_DIR:-${DESK_HERDR_DIR:-$DATA/herdr}}" "$MAIN" "$(getconf DARWIN_USER_TEMP_DIR 2>/dev/null)" <<'PY' || refuse "it cannot build $BUILT from $SETTINGS"
+# The folder the session runs in, as the launch below moves to it.
+OWN=${DIR:-$REPO}
+[ "$MODE" = column ] && OWN=$REPO
+python3 -I - "$SETTINGS" "$BUILT" "$WINDOW" "$BACKEND" "$SANDBOX" "$DATA" "$HERDR_DIR" "$MAIN" "$(getconf DARWIN_USER_TEMP_DIR 2>/dev/null)" "$OWN" <<'PY' || refuse "it cannot build $BUILT from $SETTINGS"
 import json, os, sys
-src, dst, window, backend, sandbox, data, herdr, main, temp = sys.argv[1:10]
+src, dst, window, backend, sandbox, data, herdr, main, temp, own = sys.argv[1:11]
 settings = json.load(open(src))
 settings["autoCompactWindow"] = int(window)
 # The home skill set link-skills.sh turns on at user scope stays off here, since the session loads its own set (below) and two plugins that ship one name refuse it at call time.
@@ -1291,9 +1294,12 @@ settings["enabledPlugins"] = {**settings.get("enabledPlugins", {}), "ws-home@ws"
 if backend == "glm":
     settings["env"] = {**settings.get("env", {}), "CLAUDE_CODE_ENABLE_TELEMETRY": "0", "OTEL_METRICS_EXPORTER": "none"}
 if sandbox:
-    # The main checkout is the session's working folder, which the sandbox lets it write; a deny wins over that default, so every entry but .git and .claude/worktrees, where a worktree's git and files live, is denied.
-    keep = lambda folder, name: (folder, name) not in {(main, ".git"), (main, ".claude"), (os.path.join(main, ".claude"), "worktrees")}
-    deny = [os.path.join(folder, name) for folder in (main, os.path.join(main, ".claude")) if os.path.isdir(folder) for name in sorted(os.listdir(folder)) if keep(folder, name)]
+    # The sandbox lets a session write its own folder, the main checkout or a worktree in it; a deny wins over that, so every entry of the main checkout is denied, .git and every other worktree included, but the path down to a worktree the session runs in.
+    own = os.path.realpath(own)
+    def denied(folder):
+        paths = [os.path.join(folder, name) for name in sorted(os.listdir(folder))]
+        return [d for p in paths if p != own for d in (denied(p) if own.startswith(p + os.sep) else [p])]
+    deny = denied(main)
     home = os.path.expanduser("~")
     settings["sandbox"] = {
         # Bypass mode would run the unsandboxed retry with no prompt, and a sandbox that cannot start would run every command unsandboxed.
@@ -1301,17 +1307,8 @@ if sandbox:
         "enabled": True,
         # gh, a Go CLI, verifies TLS through trustd, which the sandbox closes without this.
         "enableWeakerNetworkIsolation": True,
-        # Docker cannot run in the sandbox: these typed shapes alone leave it, and a script's own docker stays inside, its socket closed.
-        "excludedCommands": [
-            "docker port playground-*",
-            "docker ps",
-            "docker ps *",
-            "docker rm -fv playground-*",
-            "docker run -d --name playground-* -e POSTGRES_PASSWORD=* -p 127.0.0.1::5432 postgres:alpine",
-            "docker run -d --name playground-* -p 127.0.0.1::6379 redis:alpine",
-            "docker start playground-*",
-            "docker stop playground-*",
-        ],
+        # Docker cannot run in the sandbox, and a wildcard in an exclusion spans arguments, so only the read-only listing leaves it when typed; a script's own docker stays inside, its socket closed.
+        "excludedCommands": ["docker ps", "docker ps *"],
         "failIfUnavailable": True,
         "filesystem": {
             "allowWrite": sorted({data, os.path.join(home, ".agent-browser"), os.path.join(home, ".bun", "install", "cache"), os.path.join(home, ".cache", "turbo"), os.path.join(home, ".portless")} | ({temp.rstrip("/")} if temp else set())),

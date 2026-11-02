@@ -62,7 +62,7 @@ describe("--backend glm runs the session on Z.ai's GLM through Claude Code", () 
     expect(command(r).split(" --settings ")).toHaveLength(2)
     expect(command(r)).toContain(` --settings ${glm} --dangerously-skip-permissions`)
     const built = JSON.parse(readFileSync(glm, "utf8"))
-    delete built.sandbox
+    if (sandbox) delete built.sandbox
     expect(built.hooks).toEqual(FACTORY_SETTINGS.hooks)
     expect(built).toEqual({
       ...FACTORY_SETTINGS,

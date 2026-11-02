@@ -1,5 +1,5 @@
 import { describe, expect, setDefaultTimeout, test } from "bun:test"
-import { existsSync, readFileSync, readdirSync } from "node:fs"
+import { existsSync, readFileSync, readdirSync, realpathSync } from "node:fs"
 import { dirname, join } from "node:path"
 
 import { FACTORY_SETTINGS, launchAfterRm, root, spawn } from "./spawn-fake"
@@ -13,29 +13,13 @@ const main = dirname(
     .stdout.toString()
     .trim(),
 )
-const entries = (folder: string, keep: string) =>
-  existsSync(folder)
-    ? readdirSync(folder)
-        .sort()
-        .filter((name) => name !== keep)
-        .map((name) => join(folder, name))
-    : []
 const temp = Bun.spawnSync(["getconf", "DARWIN_USER_TEMP_DIR"]).stdout.toString().trim()
 
 const sandboxOf = (home: string, data = join(home, ".playground")) => ({
   allowUnsandboxedCommands: false,
   enabled: true,
   enableWeakerNetworkIsolation: true,
-  excludedCommands: [
-    "docker port playground-*",
-    "docker ps",
-    "docker ps *",
-    "docker rm -fv playground-*",
-    "docker run -d --name playground-* -e POSTGRES_PASSWORD=* -p 127.0.0.1::5432 postgres:alpine",
-    "docker run -d --name playground-* -p 127.0.0.1::6379 redis:alpine",
-    "docker start playground-*",
-    "docker stop playground-*",
-  ],
+  excludedCommands: ["docker ps", "docker ps *"],
   failIfUnavailable: true,
   filesystem: {
     allowWrite: [
@@ -46,10 +30,7 @@ const sandboxOf = (home: string, data = join(home, ".playground")) => ({
       join(home, ".portless"),
       ...(temp ? [temp.replace(/\/$/, "")] : []),
     ].sort(),
-    denyWrite: [
-      ...entries(main, ".git").filter((path) => path !== join(main, ".claude")),
-      ...entries(join(main, ".claude"), "worktrees"),
-    ],
+    denyWrite: expect.any(Array),
   },
   network: {
     allowLocalBinding: true,
@@ -83,19 +64,40 @@ describe("a probe runs its shell commands in Claude Code's sandbox", () => {
     expect(existsSync(settingsOf(r, "factory-settings-400k.json"))).toBe(false)
   })
 
-  test("the main checkout's tree is denied but .git and .claude/worktrees, and nothing else is", async () => {
+  test("a probe whose folder is the main checkout can write no entry of it, .git and .claude/worktrees included", async () => {
+    const r = await spawn(["resume", "probe-x", main, id], [], {}, undefined, {
+      name: "probe-x",
+      backend: "claude",
+    })
+    expect(r.code, r.err).toBe(0)
+    const { denyWrite } = builtOf(r, "factory-settings-sandbox-400k.json").sandbox.filesystem
+    expect(denyWrite).toEqual(
+      readdirSync(main)
+        .sort()
+        .map((name) => join(main, name)),
+    )
+    expect(denyWrite).toContain(join(main, ".git"))
+    expect(denyWrite).toContain(join(main, ".claude"))
+  })
+
+  test("a probe in a worktree writes its own folder alone: .git, every other worktree and the rest of the main checkout are denied", async () => {
     const r = await spawn(["probe", "probe-x", "ops", "p.md"], [])
     expect(r.code, r.err).toBe(0)
     const { denyWrite } = builtOf(r, "factory-settings-sandbox-400k.json").sandbox.filesystem
-    expect(denyWrite).toContain(join(main, "scripts"))
-    expect(denyWrite).not.toContain(join(main, ".git"))
-    expect(denyWrite).not.toContain(join(main, ".claude"))
-    expect(denyWrite).not.toContain(join(main, ".claude", "worktrees"))
-    expect(
-      denyWrite.filter(
-        (path: string) => dirname(path) !== main && dirname(path) !== join(main, ".claude"),
-      ),
-    ).toEqual([])
+    const own = realpathSync(root)
+    const covered = (path: string) =>
+      denyWrite.some((d: string) => path === d || path.startsWith(`${d}/`))
+    expect(covered(own)).toBe(false)
+    expect(covered(join(main, ".git"))).toBe(true)
+    expect(covered(join(main, "scripts"))).toBe(true)
+    const worktrees = join(main, ".claude", "worktrees")
+    const others = existsSync(worktrees)
+      ? readdirSync(worktrees)
+          .map((name) => join(worktrees, name))
+          .filter((path) => path !== own)
+      : []
+    expect(others.filter((path) => !covered(path))).toEqual([])
+    expect(denyWrite.filter((path: string) => !path.startsWith(`${main}/`))).toEqual([])
   })
 
   test("a resumed probe keeps the sandbox", async () => {
