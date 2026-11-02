@@ -1024,6 +1024,9 @@ describe("a write it cannot place", () => {
       "gh after a popd word it cannot read",
       () => `cd ${dirs.lm}; pushd ${dirs.lw}; popd bogus; gh pr comment 5613 --body ok`,
     ],
+    ["gh after a bare popd", () => `popd; gh pr comment 5 -F "$S/x"`],
+    ["gh after popd -q", () => `popd -q; gh pr comment 5 -F "$S/x"`],
+    ["gh after a pushd and popd -q", () => `pushd /tmp; popd -q; gh pr comment 5 -F "$S/x"`],
   ])(
     "%s with no --repo, from a directory it cannot follow, is refused whatever its text",
     async (_, command) => {

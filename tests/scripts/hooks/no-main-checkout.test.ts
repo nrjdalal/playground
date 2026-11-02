@@ -185,6 +185,10 @@ describe("a build, a test run, lefthook, turbo or a file write in the main check
   ])("from a worktree, %s", async (_name, command) => {
     expect(await bash(command, WORKTREE)).toContain("no-main-checkout hook refuses")
   })
+
+  test("from a worktree, a popd naming it, which leaves the shell where it is, runs", async () => {
+    expect(await bash(`popd ${MAIN}; bun run build`, WORKTREE)).toBeUndefined()
+  })
 })
 
 // a home whose installed skills and settings link into the main checkout, as link-skills.sh makes them, beside the dispatcher folder's own files

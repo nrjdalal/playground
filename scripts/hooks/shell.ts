@@ -32,14 +32,13 @@ type Lexer = {
 }
 type Lexed = { commands: Command[]; scopes: number[] }
 type Pending = { delim: string; quoted: boolean; redirect: Redirect; strip: boolean }
-// `old` is OLDPWD, `stack` the folders pushd left below the current one (empty when unset, null when the hook cannot tell), and `unheld` a hook's verdict on a shell or eval whose script holds a part it cannot read.
+// `old` is OLDPWD, and `unheld` a hook's verdict on a shell or eval whose script holds a part it cannot read.
 export type Env = {
   cwd?: string
   files: Map<string, Text>
   known: Record<string, string>
   old?: string
   process: Record<string, string | undefined>
-  stack?: (string | undefined)[] | null
   unheld?: (name: string) => string | undefined
   vars: Map<string, Text>
 }
@@ -878,7 +877,7 @@ export async function examine(
   return verdict
 }
 
-// Where cd, pushd and popd leave the shell, OLDPWD and the directory stack kept as zsh keeps them, for a closed list of forms: cd and pushd of a folder, a bare pushd (the top two swapped, or home on a one-folder stack), a pushd of +N or -N that turns the list of the current folder and the stack, and a bare popd or one of +N or -N that removes that entry; every other form (a popd word, a pushd option such as -n or -q, an index past the list, a stack it cannot tell) takes the reading the hooks gave before the stack was followed, so each hook keeps that verdict.
+// Where cd, pushd and popd leave the shell and OLDPWD: a cd as zsh, the Bash tool's shell, reads it, and a pushd or popd as the hooks read every one before cd was followed, keeping no directory stack, so each keeps that verdict; OLDPWD is unread after either.
 async function moveDir(
   name: string,
   args: Word[],
@@ -887,43 +886,14 @@ async function moveDir(
   detached: boolean,
 ): Promise<void> {
   const from = env.cwd
-  const stack = env.stack === undefined ? [] : env.stack
-  const go = (to: string | undefined, below: (string | undefined)[] | null) => {
-    env.old = to === undefined ? undefined : from
-    env.cwd = to
-    env.stack = below
-  }
-  if (detached) return go(undefined, null)
-  const words = args.map((a) => a.value)
-  const plain = async () => go(await plainTarget(args, env), null)
-  if (
-    name !== "cd" &&
-    words.some((v) => !/^[+-]\d+$/.test(v) && (name === "popd" || v.startsWith("-")))
-  )
-    return plain()
-  const turn = words.find((v) => /^[+-]\d+$/.test(v))
-  const operand = args.some((a) => !/^-./.test(a.value) || /^[+-]\d+$/.test(a.value))
-  if (name === "cd" || (name === "pushd" && operand && turn === undefined)) {
-    const to = await cdTarget(args, env, local)
-    return go(to, name === "cd" ? stack : stack && [from, ...stack])
-  }
-  if (!stack) return plain()
-  const list = [from, ...stack]
-  const n = Number(turn?.slice(1) ?? (name === "pushd" ? 1 : 0))
-  const at = turn?.startsWith("-") ? list.length - 1 - n : n
-  // zsh's bare pushd with one folder on the stack goes home, as a bare cd does
-  if (name === "pushd" && turn === undefined && list.length < 2) return go(homedir(), [from])
-  if (at < 0 || at >= list.length || list.length < 2) return plain()
-  if (name === "pushd") {
-    const turned =
-      turn === undefined
-        ? [list[1], list[0], ...list.slice(2)]
-        : [...list.slice(at), ...list.slice(0, at)]
-    return at === 0 ? undefined : go(turned[0], turned.slice(1))
-  }
-  const rest = list.filter((_, k) => k !== at)
-  if (at === 0) return go(rest[0], rest.slice(1))
-  env.stack = rest.slice(1)
+  const to =
+    detached || name === "popd"
+      ? undefined
+      : name === "pushd"
+        ? await plainTarget(args, env)
+        : await cdTarget(args, env, local)
+  env.old = name === "cd" && to !== undefined ? from : undefined
+  env.cwd = to
 }
 
 // The directory a cd lands in: OLDPWD for - and ~-, the folder read as typed from the current one, its .. folded as cd folds it, else a CDPATH folder that holds it; undefined when the hook cannot tell, or the cd would fail and leave the shell where it was.
@@ -962,7 +932,7 @@ async function cdTarget(
   return undefined
 }
 
-// The folder a cd, pushd or popd outside moveDir's closed list lands in, read as the hooks read every one before the stack was followed: its first word that is no option, as typed, home when there is none, unread for - or a word that names no folder.
+// The folder a pushd lands in, read as the hooks read every one before cd was followed: its first word that is no option, as typed, home when there is none, unread for - or a word that names no folder.
 async function plainTarget(args: Word[], env: Env): Promise<string | undefined> {
   const dir = args.find((a) => !(a.value.startsWith("-") && a.value.length > 1))
   if (!dir) return homedir()

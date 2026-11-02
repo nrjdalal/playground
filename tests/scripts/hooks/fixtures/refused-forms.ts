@@ -1614,4 +1614,35 @@ gh api graphql -f query="$QUERY"`,
     ],
     source: "#468",
   },
+  {
+    folders: ["process worktree"],
+    guards: ["no-extensions-write"],
+    rows: () => [
+      [
+        "a pushd that fails, then a bare pushd, which zsh takes home",
+        "pushd nonexist; pushd; echo x > .playground/extensions/f",
+      ],
+      [
+        "pushd home, a pushd that fails, then two bare pushds back home",
+        "pushd ~; pushd nonexist; pushd; pushd; echo x > .playground/extensions/f",
+      ],
+      [
+        "pushd elsewhere, a pushd that fails, then a bare pushd back home",
+        "pushd /usr; pushd nonexist; pushd; rm -rf .playground/extensions/acme",
+      ],
+    ],
+    source: "#468",
+  },
+  {
+    folders: ["data folder"],
+    guards: ["no-extensions-write"],
+    rows: ({ DATA }) => [
+      [
+        "a pushd of a folder beside +1",
+        `pushd /usr; pushd ${DATA}; pushd extensions +1; echo x > extensions/f`,
+      ],
+      ["a pushd of a folder beside -0", `pushd /usr; pushd ${DATA}; pushd extensions -0; touch f`],
+    ],
+    source: "#468",
+  },
 ]
