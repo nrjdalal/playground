@@ -49,7 +49,14 @@ export const PURGE = { days: 7, minFree: 50e9 }
 export type CarveOut = { bytes: number; files: number; folder: string }
 
 // Each script's carve-out by the script's name, which quarantine's carveOut and playground rm --carve-out take; one entry per script, each added in a commit of its own.
-export const CARVE_OUTS: Record<string, CarveOut> = {}
+export const CARVE_OUTS: Record<string, CarveOut> = {
+  // scripts/ops/dashboard/supervisor.sh's production builds, one folder per head; one measured 2,251 files and 78 MB on 2 Nov
+  "dashboard-supervisor": {
+    bytes: 256 * 1024 ** 2,
+    files: 4000,
+    folder: ".playground/ops/dashboard/builds",
+  },
+}
 
 const HOME_DIRS = [".claude", ".config", ".gnupg", ".playground", ".ssh", "Library", "Music"]
 const BATCH = /^(\d{8}T\d{6}Z)-([A-Za-z0-9][A-Za-z0-9-]*)$/

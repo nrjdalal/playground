@@ -34,6 +34,8 @@ branch=$(git symbolic-ref --short HEAD 2>/dev/null)
 [ "$branch" = "$LIVE" ] || { echo "supervisor: refusing to run in $WT on ${branch:-a detached HEAD}: the dashboard's checkout is on $LIVE" >&2; exit 1; }
 
 say() { echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) $*" >> "$LOG"; }
+# A folder in $S/builds goes to the trash through playground rm's dashboard-supervisor carve-out, $2 its reason; a refusal is logged and returns 1, and the folder stays
+trash_build() { [ -e "$1" ] || return 0; bun --no-env-file "$D/../../../packages/scripts/src/playground/cli.ts" rm "$1" --carve-out dashboard-supervisor --reason "$2" >> "$LOG" 2>&1 || { say "the trash refused $1, so it stays (supervisor.log has why)"; return 1; }; }
 result() { echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) $*" >> "$RESULTS"; say "RESULT $*"; }
 
 # The head's production build, kept in $S/builds/<sha> outside the checkout: made by bun run build when it is missing, or when it was built for other URLs, since next bakes NEXT_PUBLIC_APP_URL and NEXT_PUBLIC_API_URL into its client and auth bakes HONO_APP_URL's host; NODE_ENV and SKIP_ENV_VALIDATION_SERVER let it build before first run writes its .env, whose values the stack reads at its start; a failure prints its last error line; $1 is the tree it builds, the checkout by default, or prebuild's staging worktree
@@ -51,14 +53,14 @@ build_head() {
     echo "$out" >> "$LOG"
     echo "$out" | grep -E 'error|Error|ERR' | tail -1 | cut -c1-200; return 1
   fi
-  rm -rf "$dir.tmp"; mkdir -p "$dir.tmp"
+  trash_build "$dir.tmp" "a build copy an earlier run left half made" || { echo "the trash refused $dir.tmp"; return 1; }; mkdir -p "$dir.tmp"
   # next's standalone server leaves .next/static and public for its host to copy beside it
   cp -R "$src/web/next/.next/standalone" "$dir.tmp/web" && mkdir -p "$dir.tmp/web/web/next/.next" && cp -R "$src/web/next/.next/static" "$dir.tmp/web/web/next/.next/static" &&
     { [ ! -d "$src/web/next/public" ] || cp -R "$src/web/next/public" "$dir.tmp/web/web/next/public"; } &&
     echo "$WEB $API" > "$dir.tmp/urls" || { echo "copying the build to $dir failed"; return 1; }
   # the head's own web launcher, bundled into one file, so the web a roll swaps in runs the target's launcher, not the checkout's older one
   (cd "$src" && bun build packages/scripts/src/portless.ts --target=bun --outfile="$dir.tmp/launcher.js") >> "$LOG" 2>&1 || say "bundling ${sha:0:7}'s web launcher failed; its web starts through the checkout's portless.ts"
-  rm -rf "$dir"; mv "$dir.tmp" "$dir"
+  trash_build "$dir" "rebuilt for the Dashboard's URLs" || { echo "the trash refused $dir"; return 1; }; mv "$dir.tmp" "$dir"
   say "built ${sha:0:7} in $(( $(date +%s) - started ))s, $(du -sh "$dir" | cut -f1)"
 }
 # Before a roll stops anything: build the target ($1, the roll tagged $2) into $S/builds/<sha> from a detached staging worktree while the old stack serves, so build_head finds it kept after the stop; a target that migrates, whose commit cannot be had here, or whose staging worktree or install fails, builds after the stop as before; a build that fails lists the target in bad-builds and returns 1 with nothing stopped; the staging worktree goes either way
@@ -86,10 +88,10 @@ prebuild() {
   tell_dispatcher "Dashboard roll to ${target:0:7} FAILED its build; nothing stopped, still on $(git rev-parse --short HEAD)"
   return 1
 }
-# After a pass: keep this head's build and the last one that passed before it, for the next fallback, and remove the rest
+# After a pass: keep this head's build and the last one that passed before it, for the next fallback, and move the rest to the trash
 keep_builds() {
   local before d; before=$(cat "$S/builds/passed" 2>/dev/null)
-  for d in "$S/builds"/*/; do d=$(basename "$d"); [ "$d" = "$1" ] || [ "$d" = "$before" ] || rm -rf "${S:?}/builds/$d"; done
+  for d in "$S/builds"/*/; do d=$(basename "$d"); [ "$d" = "$1" ] || [ "$d" = "$before" ] || trash_build "${S:?}/builds/$d" "older than the last two builds that passed"; done
   [ "$before" = "$1" ] || echo "$1" > "$S/builds/passed"
 }
 # The API alone, from the checkout's source, under the dev launcher; the web runs on its own (web_up)
