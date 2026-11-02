@@ -58,4 +58,15 @@ describe("SESSIONS.md", () => {
     )
     expect(line).toContain("in its Evidence before round 1")
   })
+
+  test("has a guard's loosening name its one class and put the refusal table in its Evidence before round 1 (PG-439)", async () => {
+    const lines = (await Bun.file(SESSIONS).text()).split("\n")
+    const brief = lines.find((l) => l.includes("refusal table")) ?? ""
+    expect(brief).toContain("a PR loosening a guard puts code-review-loop's refusal table")
+    expect(brief).toContain("in its Evidence before round 1")
+    expect(brief).toContain("`tests/scripts/hooks/fixtures/refused-forms.ts`")
+    const loosening = lines.find((l) => l.includes("A loosening's plan and brief")) ?? ""
+    expect(loosening).toContain("name the one class of forms it lets run")
+    expect(loosening).toContain("every other form keeps canary's verdict")
+  })
 })
