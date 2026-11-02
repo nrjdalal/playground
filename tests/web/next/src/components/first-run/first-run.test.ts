@@ -4,14 +4,14 @@ import { join } from "node:path"
 import { FirstRun } from "../../../../../../web/next/src/components/first-run/first-run"
 
 // React and react-query resolve from the web app's own packages, which this directory cannot see.
-type Node = unknown
-type CreateElement = (type: unknown, props?: unknown, ...children: Node[]) => Node
+type ReactNode = unknown
+type CreateElement = (type: unknown, props?: unknown, ...children: ReactNode[]) => ReactNode
 const web = join(import.meta.dir, "../../../../../../web/next")
 const { createElement } = (await import(Bun.resolveSync("react", web))) as {
   createElement: CreateElement
 }
 const { renderToStaticMarkup } = (await import(Bun.resolveSync("react-dom/server", web))) as {
-  renderToStaticMarkup: (node: Node) => string
+  renderToStaticMarkup: (node: ReactNode) => string
 }
 const { QueryClient, QueryClientProvider } = (await import(
   Bun.resolveSync("@tanstack/react-query", web)
