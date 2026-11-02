@@ -2253,6 +2253,18 @@ gh api graphql -f query="$QUERY"`,
     },
     source: "#514",
   },
+  // a line that names more folders than the reader carries, the guarded one past its cap of 32, so the shell reads as able to be in any folder
+  {
+    folders: ["checkout"],
+    guards: ["no-main-checkout"],
+    rows: ({ MAIN }) => [
+      [
+        "a commit after more cd steps than the reader carries, one into the main checkout",
+        `${Array.from({ length: 32 }, (_, k) => `true || cd /tmp/d${k}`).join("; ")}; true || cd ${MAIN}; git commit -m x`,
+      ],
+    ],
+    source: "#514",
+  },
   {
     folders: ["main checkout"],
     guards: ["no-unslotted-run"],

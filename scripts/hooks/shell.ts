@@ -32,6 +32,8 @@ type Lexer = {
 type Lexed = { commands: Command[]; scopes: number[] }
 type Pending = { delim: string; quoted: boolean; redirect: Redirect; strip: boolean }
 export type Env = {
+  // Set once the line names more folders than the reader carries, so the shell may be in any folder, the one a hook guards included: a hook refuses the command it guards outright, since `places` can enumerate no such set
+  cwdAnywhere?: boolean
   cwd?: string
   // Every folder a cd on the line has named, which `cd -`, `popd` and a bare `pushd` go back to
   cwdBack?: string[]
@@ -1201,11 +1203,14 @@ async function chdirTo(name: string, cmd: Command, parsed: Parsed, env: Env): Pr
   env.cwdUnread = env.cwdUnread || unread || (from.length === 0 && paths.length === 0)
 }
 
-// At most this many folders are carried for one line, since each hook judges every command in all of them; a line that names more reads as one whose folder nothing names, by each hook's own fail-closed rule.
+// At most this many folders are carried for one line, since each hook judges every command in all of them.
 const MAX_FOLDERS = 32
 
+// The folders kept, and `Env.cwdAnywhere` set once a line names more than that: dropping a folder would let a line name a guarded one past the cap and run there, so past it the shell reads as able to be in any folder, and each hook refuses the command it guards. It stays set for the rest of the line, since a folder the reader dropped stays one the shell may be in.
 function keep(folders: string[], env: Env): string[] {
   if (folders.length <= MAX_FOLDERS) return folders
+  env.cwdAnywhere = true
+  env.cwd = undefined
   env.cwdUnread = true
   return folders.slice(0, MAX_FOLDERS)
 }

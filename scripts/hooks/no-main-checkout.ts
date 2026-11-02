@@ -86,6 +86,10 @@ const refuse = (what: string, fix = INSTEAD) => `no-main-checkout hook refuses $
 const UNKNOWN_FIX =
   "the hook cannot tell which folder it runs in, since a cd before it may not run, may run many times, or names a path it cannot read, so it reads every folder the shell may be in. Name the folder instead: git -C <your worktree>, bun --cwd <your worktree>, or cd by a literal path."
 
+// This hook's rule for a line that names more folders than the reader carries (`Env.cwdAnywhere`): the shell may be in any folder, the main checkout included, so a guarded command is refused wherever the line started.
+const ANYWHERE_FIX =
+  "the line names more folders than the hook carries, so it cannot rule out the main checkout. Name the folder on the command instead: git -C <your worktree>, bun --cwd <your worktree>, or run it as a line of its own after a cd to a literal path."
+
 // A refusal's fix: the command's own where the reader named the folder it runs in, else the one for a folder the hook cannot pin down.
 const fixFor = (sure: boolean, own = INSTEAD) => (sure ? own : UNKNOWN_FIX)
 
@@ -395,6 +399,21 @@ function writes(name: string, args: Word[]): Word[] {
   return out
 }
 
+// The files a command writes, by a redirect or by name, each one the hook can place.
+function writeTargets(cmd: Command, name: string, args: Word[]): Word[] {
+  const targets = [
+    ...cmd.redirects
+      .filter(
+        (r) =>
+          [">", ">>", ">|"].includes(r.op) ||
+          (r.op === ">&" && !DUPLICATE.test(r.target?.value ?? "")),
+      )
+      .flatMap((r) => (r.target ? [r.target] : [])),
+    ...writes(name, args),
+  ]
+  return targets.filter((t) => !["-", "/dev/null"].includes(t.value))
+}
+
 // A shell whose script the hook cannot read, refused where the shell would run in the main checkout: a script the hook reads is judged command by command by the shared reader, which runs a shell's script itself.
 async function unreadScript(
   shell: Command,
@@ -436,6 +455,18 @@ function inspect(raw: string, environment: Record<string, string | undefined>, m
     if (slot)
       return slot.length === 0 ? undefined : examine({ ...cmd, words: slot }, env, visit, false)
     const { args, local, name } = parsed
+    // a line that names more folders than the reader carries may run anywhere, the main checkout included, so what it guards is refused with no folder to name
+    if (env.cwdAnywhere) {
+      const blind: Env = { ...env, cwd: undefined }
+      const ran = runs(name, args, local, blind)
+      // a folder the command names itself is judged by that path, as everywhere else; one the shell gives it could be the main checkout
+      if (ran && (ran.cwd === undefined || inMain(ran.cwd))) return refuse(ran.what, ANYWHERE_FIX)
+      const blindWrite = writeTargets(cmd, name, args).find((t) => {
+        const path = pathOf(t, blind)
+        return path === undefined || inMain(path)
+      })
+      if (blindWrite) return refuse(`a write to ${blindWrite.value}`, ANYWHERE_FIX)
+    }
     // every folder the shell may be in, so a cd the reader cannot be sure of is judged wherever it may have left the command, by the fail-closed rule above
     for (const here of places(env, directory)) {
       // the Env the reader holds is its own object, so a refusal in any other folder names the fix for a folder the hook cannot pin down
@@ -448,18 +479,7 @@ function inspect(raw: string, environment: Record<string, string | undefined>, m
       }
       const ran = runs(name, args, local, here)
       if (ran && inMain(ran.cwd)) return refuse(ran.what, fixFor(sure, ran.fix))
-      const targets = [
-        ...cmd.redirects
-          .filter(
-            (r) =>
-              [">", ">>", ">|"].includes(r.op) ||
-              (r.op === ">&" && !DUPLICATE.test(r.target?.value ?? "")),
-          )
-          .flatMap((r) => (r.target ? [r.target] : [])),
-        ...writes(name, args),
-      ]
-      const named = targets.filter((t) => !["-", "/dev/null"].includes(t.value))
-      const wrote = named.find((t) => inMain(pathOf(t, here)))
+      const wrote = writeTargets(cmd, name, args).find((t) => inMain(pathOf(t, here)))
       if (wrote) return refuse(`a write to ${pathOf(wrote, here)}`, fixFor(sure))
     }
   }

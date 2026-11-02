@@ -55,6 +55,8 @@ Only the first reading moves the folder, sets variables and records files for th
   A function's or a brace group's own `cd` adds its folder to `Env.cwdHeld`, which no later `cd` clears, since the line may call that body at any point.
   `popd`, `cd -` and a bare `pushd` take every folder the line has named (`Env.cwdBack`).
   `Env.cwdUnread` marks a `cd` whose landing folder nothing names (`cd "$X"`, zsh's two-operand `cd`, a `popd` whose stack the reader cannot see).
+  At most 32 folders are carried for one line, since each hook judges every command in all of them; past that `Env.cwdAnywhere` is set for the rest of the line, and each of the three hooks below refuses the command it guards outright, since a folder the reader dropped stays one the shell may be in.
+  A command that names its own folder keeps running on such a line, as everywhere else.
 - `places(env, fallback)` gives each folder the shell may be in as an `Env` of its own, so a hook judges a command in every folder it cannot rule out and refuses where any is the folder it guards: [no-main-checkout](#no-main-checkout) the main checkout, [no-unslotted-run](#no-unslotted-run) a worktree, [no-extensions-write](#no-extensions-write) the extensions root.
   Each hook reads an unread folder by its own fail-closed rule: no-main-checkout passes the folder the line started in as `places`'s fallback, and the hooks that place a repository, a socket or a file by the folder refuse the call they cannot place, as they already refuse one after a `cd` they cannot read.
   A line whose folders the reader rules out keeps canary's reading, since nothing on it names where the shell goes (a `cd -` on a line that names no folder).

@@ -20,6 +20,10 @@ import {
 const refuse = (what: string, cd: string, command: string) =>
   `no-unslotted-run hook refuses ${what} in a worktree outside run-slot: every heavy run goes through it (playbook's **slots**), so the machine runs a few at a time. Run it as ${cd}~/.playground/ops/run-slot.sh <your name> -- ${command}`
 
+// A line that names more folders than the reader carries (`Env.cwdAnywhere` in shell.ts) may run in any folder, a worktree included, so a heavy run on it goes through run-slot too.
+const anywhere = (what: string, command: string) =>
+  `no-unslotted-run hook refuses ${what} on a line that names more folders than the hook carries, since it cannot rule out a worktree: every heavy run goes through run-slot (playbook's **slots**). Run it as ~/.playground/ops/run-slot.sh <your name> -- ${command}, or as a line of its own after a cd to a literal path.`
+
 // bun scripts that build packages/* or run the whole suite
 const BUN_SCRIPTS = new Set(["build", "check-types", "test"])
 const RUNNERS = new Set(["bunx", "npx"])
@@ -176,27 +180,34 @@ function inspect(raw: string, environment: Record<string, string | undefined>, m
   const visit: Visit = async (cmd, { args, first, name }, env) => {
     // run-slot.sh queues the words after its -- as one heavy run
     if (name === "run-slot.sh") return
+    const words = () => {
+      const at = first ? cmd.words.indexOf(first) : -1
+      if (at < 0) return undefined
+      const assigns = cmd.words.slice(0, at).filter((w) => ASSIGN.test(w.value))
+      return [
+        ...(assigns.length ? ["env", ...assigns.map(shown)] : []),
+        ...cmd.words.slice(at).map(shown),
+      ].join(" ")
+    }
+    // a line that names more folders than the reader carries may run in a worktree, whatever folder it started in
+    if (env.cwdAnywhere) {
+      const found = heavy(name, args, { ...env, cwd: undefined })
+      const line = words()
+      if (found && line !== undefined && (found.dir === undefined || inWorktree(found.dir)))
+        return anywhere(found.what, line)
+    }
     // every folder the shell may be in, so a heavy run after a cd the reader cannot be sure of is caught wherever that cd may have left it
     for (const here of places(env)) {
       const found = heavy(name, args, here)
       if (!found || !inWorktree(found.dir)) continue
       // run-slot execs the first word after its --, so the fix keeps the program, its words and every assignment before it behind env, and drops every wrapper (exec, timeout, env's own options)
-      const at = first ? cmd.words.indexOf(first) : -1
-      if (at < 0) return
-      const assigns = cmd.words.slice(0, at).filter((w) => ASSIGN.test(w.value))
-      const words = [
-        ...(assigns.length ? ["env", ...assigns.map(shown)] : []),
-        ...cmd.words.slice(at).map(shown),
-      ]
+      const line = words()
+      if (line === undefined) return
       // a cd earlier in the command moved the shell, so the fix starts in the folder the run would reach rather than in the tool's own
       const moved =
         here.cwd !== undefined &&
         (directory === undefined || resolve(here.cwd) !== resolve(directory))
-      return refuse(
-        found.what,
-        moved ? `cd ${quotedDir(here.cwd as string)} && ` : "",
-        words.join(" "),
-      )
+      return refuse(found.what, moved ? `cd ${quotedDir(here.cwd as string)} && ` : "", line)
     }
   }
   const env: Env = {

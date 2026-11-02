@@ -487,6 +487,11 @@ function inspect(raw: string, environment: Environment) {
     // a program word the hook cannot read is named as such, so a refusal always names what runs
     const verb = name && !marked(name) ? name : "a program it cannot read"
     const remover = REMOVERS.has(name)
+    // a line that names more folders than the reader carries (`Env.cwdAnywhere` in shell.ts) may run inside this root, whatever folder it started in
+    if (env.cwdAnywhere)
+      return refuse(
+        `${verb} on a line that names more folders than the hook carries, since it cannot rule out ${root}; run it as a line of its own after a cd to a literal path`,
+      )
     // each folder the shell may be in, so a program a cd the reader cannot be sure of would run inside the root, or a path of its own that lands there, is judged in every one
     for (const here of places(env)) {
       if (inRoot(here.cwd)) return refuse(`${verb} run inside ${root}`)
