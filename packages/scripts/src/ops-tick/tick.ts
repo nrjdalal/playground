@@ -3,7 +3,13 @@ import { homedir } from "node:os"
 import { basename, join } from "node:path"
 
 import { dispatcherOf, kindOf, managerKindOfName, managerOf } from "@packages/config/kinds"
-import { accountSettings, readPolicy } from "@packages/settings"
+import {
+  accountSettings,
+  cronMatches,
+  readPolicy,
+  readPolicyOrDefaults,
+  timerSettings,
+} from "@packages/settings"
 
 import {
   sweep as autoEndSweep,
@@ -25,7 +31,8 @@ export type Run = (
 ) => Promise<{ code: number; out: string }>
 // to is a manager kind (builder, ops, optimizer), dispatcher (the primary) or a session's name, as notify.sh takes it; true once the line is queued. A beat's own send never throws: a failed one is named in the heartbeat's result (guard).
 // again: the beat finds this line again by itself until it marks it told, so a failed send of it is never kept to resend.
-export type Send = (to: string, text: string, again?: boolean) => Promise<boolean>
+// whole: the line goes uncut, where the relay otherwise cuts it at 400 characters.
+export type Send = (to: string, text: string, again?: boolean, whole?: boolean) => Promise<boolean>
 
 export type Context = {
   now: Date
@@ -35,33 +42,9 @@ export type Context = {
   send: Send
 }
 
+export { cronMatches }
+
 export type Beat = { cron: string; name: string; run: (ctx: Context) => Promise<void>; to: string }
-
-const fieldOf = (field: string, min: number, max: number): Set<number> | null => {
-  const values = new Set<number>()
-  for (const part of field.split(",")) {
-    const m = /^(\*|(\d+)(?:-(\d+))?)(?:\/(\d+))?$/.exec(part)
-    if (!m) return null
-    const from = m[1] === "*" ? min : Number(m[2])
-    const to = m[1] === "*" ? max : m[3] !== undefined ? Number(m[3]) : m[4] ? max : from
-    const step = m[4] ? Number(m[4]) : 1
-    if (from < min || to > max || from > to || step < 1) return null
-    for (let n = from; n <= to; n += step) values.add(n)
-  }
-  return values
-}
-
-// Whether a 5-field cron names this minute, read in machine wall time, as CronCreate read the old crons.
-export function cronMatches(cron: string, at: Date): boolean {
-  const fields = cron.trim().split(/\s+/)
-  if (fields.length !== 5) throw new Error(`not a 5-field cron: ${cron}`)
-  const sets = fields.map((field, i) =>
-    fieldOf(field, [0, 0, 1, 1, 0][i]!, [59, 23, 31, 12, 6][i]!),
-  )
-  if (sets.some((set) => set === null)) throw new Error(`unreadable cron: ${cron}`)
-  const now = [at.getMinutes(), at.getHours(), at.getDate(), at.getMonth() + 1, at.getDay()]
-  return sets.every((set, i) => set!.has(now[i]!))
-}
 
 // The next minute after from that the cron names, within 8 days.
 export function nextDue(cron: string, from: Date): Date {
@@ -625,6 +608,14 @@ const relayWatch = async (ctx: Context) => {
   )
 }
 
+// Each timers row whose cron names this minute: its text sent whole to its session; the rows are the owner's, in the timers setting.
+const timers = async (ctx: Context) => {
+  const read = readPolicyOrDefaults(join(ctx.ops, ".."))
+  if (read.refusal !== undefined) throw new Error(read.refusal)
+  for (const row of timerSettings.get(read.settings, "timers"))
+    if (cronMatches(row.cron, ctx.now)) await ctx.send(row.to, row.text, false, true)
+}
+
 // Each beat at its old cron, with the target its output goes to.
 export const BEATS: Beat[] = [
   { cron: "*/5 * * * *", name: "roll-gate", run: rollGate, to: "ops" },
@@ -645,6 +636,7 @@ export const BEATS: Beat[] = [
     run: dashboardWatch,
     to: "ops and a macOS banner",
   },
+  { cron: "* * * * *", name: "timers", run: timers, to: "each due row's session" },
 ]
 
 // The minute a beat last started, so a cycle that lands twice in one minute starts it once, and a beat still running is not started again.
@@ -663,27 +655,27 @@ export const runner = (): Runner => ({
   unsent: new Map(),
 })
 
-export type Unsent = { text: string; to: string }
+export type Unsent = { text: string; to: string; whole?: boolean }
 
 // The beat's context with a send that never throws: a failed send is named in failed and reads false, so the beat goes on and nothing it marks as told is lost, and is kept in unsent for the beat's next run unless the beat finds it again itself (again), so a line whose words change each run goes out once, as it reads then; each line is tried once a run, so a line still failing stays one copy in unsent.
 export const guard = (ctx: Context, failed: string[], unsent: Unsent[] = []): Context => {
   const tried = new Map<string, Promise<boolean>>()
-  const attempt = async (to: string, text: string, again?: boolean) => {
+  const attempt = async (to: string, text: string, again?: boolean, whole?: boolean) => {
     try {
-      return await ctx.send(to, text, again)
+      return await ctx.send(to, text, again, whole)
     } catch (err) {
       failed.push(`send to ${to} failed: ${err instanceof Error ? err.message : String(err)}`)
-      if (!again) unsent.push({ text, to })
+      if (!again) unsent.push({ text, to, ...(whole && { whole }) })
       return false
     }
   }
   return {
     ...ctx,
-    send: (to, text, again) => {
+    send: (to, text, again, whole) => {
       const key = `${to}\n${text}`
       const known = tried.get(key)
       if (known) return known
-      const result = attempt(to, text, again)
+      const result = attempt(to, text, again, whole)
       tried.set(key, result)
       return result
     },
@@ -707,7 +699,8 @@ export function cycle(ctx: Context, state: Runner, beats: Beat[] = BEATS): Promi
       const unsent: Unsent[] = []
       const guarded = guard(ctx, failed, unsent)
       try {
-        for (const line of state.unsent.get(b.name) ?? []) await guarded.send(line.to, line.text)
+        for (const line of state.unsent.get(b.name) ?? [])
+          await guarded.send(line.to, line.text, false, line.whole)
         await b.run(guarded)
         if (failed.length) state.failures.set(b.name, failed.join("; "))
         else state.failures.delete(b.name)

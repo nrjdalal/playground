@@ -67,13 +67,13 @@ export const run: Context["run"] = async (argv, timeoutMs = 120_000, stdin) => {
   return { code: await proc.exited, out: out + err }
 }
 
-// One line through the ops relay: notify.sh queues it under the job's name for the seat or session named, and the relay sends it with SendMessage; notify.sh adds the `ops-` itself, and cuts the line at 400 characters unless whole.
+// One line through the ops relay: notify.sh queues it under the job's name for the seat or session named, and the relay sends it with SendMessage; notify.sh adds the `ops-` itself, and cuts the line at 400 characters unless whole, for the job or for this line.
 export const sendAs =
   (job: string, whole = false): Context["send"] =>
-  async (to, text) => {
+  async (to, text, _again, line = whole) => {
     const name = job.replace(/^ops-/, "")
     const proc = Bun.spawn(["bash", join(REPO, "scripts", "ops", "notify.sh"), name, text], {
-      env: { ...process.env, NOTIFY_TO: to, ...(whole && { NOTIFY_WHOLE: "1" }) },
+      env: { ...process.env, NOTIFY_TO: to, ...(line && { NOTIFY_WHOLE: "1" }) },
       stderr: "pipe",
       stdin: "ignore",
       stdout: "ignore",
