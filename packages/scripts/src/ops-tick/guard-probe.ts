@@ -20,8 +20,9 @@ export const preToolUseGuards = async (repo: string): Promise<string[]> => {
 // Each guard's own exit on an empty input, run as its wrapper runs it but without the wrapper's tail, which turns a crash into a refusal: 0 or 2 is a guard that starts, and any other exit, a missing script's included, is one whose wrapper refuses every factory call it guards; the dispatcher is told once a change of what is broken, and the state is kept in tick/guard-probe.json.
 export const guardProbe = async (ctx: Context) => {
   const statePath = join(ctx.ops, "tick", "guard-probe.json")
+  const guards = await preToolUseGuards(ctx.repo)
   const broken: string[] = []
-  for (const name of await preToolUseGuards(ctx.repo)) {
+  for (const name of guards) {
     const { code, out } = await ctx.run(
       [
         "sh",
@@ -35,7 +36,8 @@ export const guardProbe = async (ctx: Context) => {
       "{}",
     )
     if (code === 0 || code === 2) continue
-    const why = out.trim().split("\n").at(-1)?.slice(0, 80)
+    const lines = out.split("\n").map((line) => line.trim())
+    const why = (lines.find((line) => /^error:/i.test(line)) ?? lines.find(Boolean))?.slice(0, 80)
     broken.push(`${name} (exit ${code}${why ? `: ${why}` : ""})`)
   }
   const told = (await Bun.file(statePath)
@@ -45,7 +47,8 @@ export const guardProbe = async (ctx: Context) => {
     if (told) await unlink(statePath)
     return
   }
-  const text = `PreToolUse guards that cannot start, so their wrappers refuse every factory call they guard: ${broken.join("; ")}. Fix: bun install in ${ctx.repo}`
+  // The count and the fix lead, since notify.sh cuts a line at 400 characters and every guard breaks at once when the packages are gone.
+  const text = `${broken.length} of ${guards.length} PreToolUse guards cannot start, so their wrappers refuse every factory call they guard. Fix: bun install in ${ctx.repo}. ${broken.join("; ")}`
   if (told?.text === text) return
   if (await ctx.send("dispatcher", text, true))
     await writeAtomic(statePath, JSON.stringify({ text }))

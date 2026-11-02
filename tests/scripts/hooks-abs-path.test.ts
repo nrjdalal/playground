@@ -221,7 +221,7 @@ describe("the command finds the checkout", () => {
       for (const env of [
         { CLAUDE_PROJECT_DIR: outside, PLAYGROUND_REPO: empty },
         { CLAUDE_PROJECT_DIR: outside, PLAYGROUND_REPO: "." },
-        { CLAUDE_PROJECT_DIR: empty },
+        { CLAUDE_PROJECT_DIR: empty, PLAYGROUND_REPO: "" },
       ]) {
         const { code, stderr } = await run(file, shell, outside, {
           ...env,

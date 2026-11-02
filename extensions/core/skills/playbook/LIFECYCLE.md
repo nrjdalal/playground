@@ -176,7 +176,8 @@ Ops runs an update when the owner asks for one:
 Every PreToolUse guard runs from the main checkout and fails closed ([scripts/hooks/README.md](../../../../scripts/hooks/README.md#registered-in-both-settings-files)): with its scripts gone every factory session's Bash is refused, its Edit and Write too, and with its packages gone every session's guarded call is.
 No session can then repair it, so the restore runs from the owner's own `!` window, whose commands run with no hook:
 
-1. The owner puts the files back: `! git -C <main checkout> checkout -- .` while its `.git` is in place, else a fresh clone of the repo at the same path.
+1. The owner puts the files back: `! git -C <main checkout> checkout -- .` while its `.git` is in place.
+   With it gone, restore in place, since a clone refuses the folder the delete left `node_modules`, `.env` and `.claude/worktrees` in: `! git -C <main checkout> init`, `! git -C <main checkout> remote add origin <the repo's URL>`, `! git -C <main checkout> fetch origin`, then `! git -C <main checkout> checkout -f -B main origin/main`.
    **Done when** `! git -C <main checkout> status` reads clean.
 2. The owner runs `! bun install --cwd <main checkout>`, then `! <main checkout>/scripts/link-skills.sh`.
    **Done when** a factory session's Bash call runs again.

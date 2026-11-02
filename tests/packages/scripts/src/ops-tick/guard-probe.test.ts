@@ -43,7 +43,12 @@ const probe = async (codes: Record<string, number>, sendOk = true) => {
     run: async (argv, _timeout, stdin) => {
       runs.push({ argv, stdin })
       const code = codes[argv.at(-1)!] ?? 0
-      return { code, out: code === 1 ? "error: Cannot find package 'x'\n" : "" }
+      // Bun's own crash output: the error, a note, then its version banner last.
+      const out =
+        code === 1
+          ? "error: Cannot find package 'x'\nnote: GET x\n\nBun v1.4.4 (macOS arm64)\n"
+          : ""
+      return { code, out }
     },
     send: async (to, text) => {
       sent.push({ text, to })
@@ -77,7 +82,7 @@ test("each guard gets {} without its wrapper's tail, and a crash is told to the 
   })
   expect(first.sent).toEqual([
     {
-      text: `PreToolUse guards that cannot start, so their wrappers refuse every factory call they guard: no-stash (exit 1: error: Cannot find package 'x'). Fix: bun install in ${repo}`,
+      text: `1 of 3 PreToolUse guards cannot start, so their wrappers refuse every factory call they guard. Fix: bun install in ${repo}. no-stash (exit 1: error: Cannot find package 'x')`,
       to: "dispatcher",
     },
   ])
@@ -92,6 +97,28 @@ test("each guard gets {} without its wrapper's tail, and a crash is told to the 
   expect(existsSync(join(ops, "tick", "guard-probe.json"))).toBe(false)
   expect((await probe({ "no-stash": 1 })).sent).toHaveLength(1)
   await probe({})
+})
+
+test("with every real guard broken, the fix sits inside the 400 characters notify.sh keeps", async () => {
+  const guards = await preToolUseGuards(root)
+  const sent: string[] = []
+  await guardProbe({
+    now: new Date(),
+    ops: join(scratch, "ops-all"),
+    repo: root,
+    run: async () => ({
+      code: 1,
+      out: "error: Cannot find package 'x'\nBun v1.4.4 (macOS arm64)\n",
+    }),
+    send: async (_to, text) => {
+      sent.push(text)
+      return true
+    },
+  })
+  expect(sent).toHaveLength(1)
+  expect(sent[0]!.length).toBeGreaterThan(400)
+  expect(sent[0]!.slice(0, 400)).toContain(`${guards.length} of ${guards.length} PreToolUse guards`)
+  expect(sent[0]!.slice(0, 400)).toContain(`Fix: bun install in ${root}.`)
 })
 
 test("a send that fails is not marked told, so the next run tells it", async () => {
