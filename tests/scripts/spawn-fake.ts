@@ -126,11 +126,11 @@ fake(
 echo "CPU usage: 30.00% user, 20.00% sys, 50.00% idle"
 echo "CPU usage: 60.00% user, 40.00% sys, \${FAKE_CPU_IDLE:-0.00}% idle"`,
 )
-// The load read where sysctl is refused, uptime: macOS's line, at FAKE_LOAD1 and FAKE_LOAD5 as the sysctl fake gives them.
+// The load read where sysctl is refused, uptime: the line it prints inside Claude Code's sandbox, which drops the up field, at FAKE_LOAD1 and FAKE_LOAD5 as the sysctl fake gives them.
 fake(
   "uptime",
   `[ -n "$FAKE_UPTIME_BROKEN" ] && exit 1
-echo "22:15  up 35 mins, 2 users, load averages: \${FAKE_LOAD1:-1.00} \${FAKE_LOAD5:-2.00} 3.00"`,
+echo "22:15  2 users, load averages: \${FAKE_LOAD1:-1.00} \${FAKE_LOAD5:-2.00} 3.00"`,
 )
 // The swap-in read, vm_stat -c 2 1: its first row the totals since boot, its second the last second's, swap-ins at FAKE_SWAPINS (0 by default).
 fake(

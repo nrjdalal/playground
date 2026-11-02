@@ -48,8 +48,7 @@ export type Setup = {
   sandboxed?: boolean
 }
 
-// A scratch state folder and config folder, with a fake sysctl on PATH giving 15 cores, the load asked for (load5 and load15 as load1 unless given) and normal memory, and a fake uptime giving the same load;
-// sandboxed, sysctl and ps refuse every read as Claude Code's sandbox does, so the load comes from uptime alone and the cores from a fake getconf giving 15.
+// A scratch state folder and config folder, with a fake sysctl on PATH giving 15 cores, the load asked for (load5 and load15 as load1 unless given) and normal memory, and a fake uptime giving the same load; sandboxed, sysctl and ps refuse every read as Claude Code's sandbox does, so the load comes from uptime alone and the cores from a fake getconf giving 15.
 export const machine = ({
   free = 80,
   load1 = 2,
@@ -90,7 +89,7 @@ esac
   chmodSync(join(bin, "sysctl"), 0o755)
   writeFileSync(
     join(bin, "uptime"),
-    `#!/bin/bash\necho "22:15  up 35 mins, 2 users, load averages: ${load1}.00 ${load5}.00 ${load5}.00"\n`,
+    `#!/bin/bash\necho "22:15  2 users, load averages: ${load1}.00 ${load5}.00 ${load5}.00"\n`,
   )
   chmodSync(join(bin, "uptime"), 0o755)
   if (sandboxed) {

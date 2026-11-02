@@ -43,13 +43,13 @@ switch_on() {
   mv "$f" "$f.expired-$(date -u +%Y%m%dT%H%M%SZ)" 2>/dev/null && echo "$now expire ${WHO:-run-slot} $$ $1 $line" >> "$OPS/run-slot.runs.log"
   return 1
 }
-# whether slot directory $1, whose holder line is $2, is stale: its pid has died, or a line with no pid (or no line, read by the directory's
-# own mtime) has aged 2 hours; a run killed between free()'s rm of its holder and its rmdir leaves a directory with no line
 # whether pid $1 runs: kill -0 reaches it, or the kernel refuses the signal (another user's process, or one outside Claude Code's sandbox, which also refuses the setuid ps) rather than finding no such process
 alive() {
   local err
   err=$(LC_ALL=C kill -0 "$1" 2>&1) || case "$err" in *"not permitted"*) true ;; *) false ;; esac
 }
+# whether slot directory $1, whose holder line is $2, is stale: its pid has died, or a line with no pid (or no line, read by the directory's
+# own mtime) has aged 2 hours; a run killed between free()'s rm of its holder and its rmdir leaves a directory with no line
 stale() {
   local pid
   pid=$(printf '%s' "$2" | cut -d' ' -f2)
@@ -579,6 +579,7 @@ free() {
   fi
   SLOT=""
   [ -n "$TICKET" ] && rm -f "$TICKET"
+  rm -f "${MEM_TOLD:-}"
 }
 trap 'free' EXIT
 trap '[ -n "$CHILD" ] && kill -TERM -- "-$CHILD" 2>/dev/null; wait "$CHILD" 2>/dev/null; [ -n "$CHILD" ] && { reap "$CHILD"; rlog end "rc=143 ran=$(($(date +%s) - TOOK))s"; }; exit 143' TERM INT HUP
@@ -614,8 +615,7 @@ gone() {
   return 1
 }
 
-# runs the command as the leader of a process group of its own (macOS has no setsid(1)), which reap stops once it ends, and exits with its code;
-# where Claude Code's sandbox refuses the new group or the nice, it says so on stderr and runs the command without it
+# runs the command as the leader of a process group of its own (macOS has no setsid(1)), which reap stops once it ends, and exits with its code; where Claude Code's sandbox refuses the new group or the nice, it says so on stderr and runs the command without it
 run_command() {
   local code
   python3 -I -c '
@@ -732,15 +732,13 @@ load1() { loadavg | awk '{print int($2)}'; }
 load5() { loadavg | awk '{print int($3)}'; }
 # macOS's memory reading $1: level (the free share) or vm_pressure_level (1 normal, 2 warn, 4 critical)
 memstat() { sysctl -n "kern.memorystatus_$1" 2>/dev/null | tr -cd 0-9; }
-# memory room for a second suite: macOS's free share at 40% or more and its pressure level normal (1; 2 is warn, 4 critical); an unread
-# reading (Claude Code's sandbox refuses both) leaves no room, said once on stderr
-MEM_TOLD=""
+# memory room for a second suite: macOS's free share at 40% or more and its pressure level normal (1; 2 is warn, 4 critical); an unread reading (Claude Code's sandbox refuses both) leaves no room, said once a run on stderr: a file marks it, since each look reads it in a subshell
+MEM_TOLD="${TMPDIR:-/tmp}/run-slot-mem-told.$$"
 mem_ok() {
   local free level
   free=$(memstat level); level=$(memstat vm_pressure_level)
   if [ -z "$free" ] || [ -z "$level" ]; then
-    [ -n "$MEM_TOLD" ] || echo "run-slot.sh: cannot read the memory (sysctl kern.memorystatus_*), so no second suite runs beside this one" >&2
-    MEM_TOLD=1
+    [ -e "$MEM_TOLD" ] || { echo "run-slot.sh: cannot read the memory (sysctl kern.memorystatus_*), so no second suite runs beside this one" >&2; : > "$MEM_TOLD"; }
     return 1
   fi
   [ "$free" -ge 40 ] && [ "$level" -eq 1 ]

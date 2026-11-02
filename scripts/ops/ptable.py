@@ -1,4 +1,4 @@
-"""The process table, read once with ps, and where a process sits under the cmux app. Reads only; signals nothing.
+"""The process table, read once with ps or from the kernel (started, group), and where a process sits under the cmux app. Reads only; signals nothing.
 
 A process is under cmux when one of its ancestors runs the cmux app's own executable (CMUX_APP, by its exact path, never a name or a
 pattern: the `cmux` CLI is another binary). A job orphaned by a cmux restart has been reparented to launchd, so its chain ends at pid 1.
@@ -39,7 +39,7 @@ def cmux_of(pid, procs):
     return above(pid, procs, {CMUX_APP})
 
 
-# The kernel's process table through sysctl kern.proc, which Claude Code's sandbox reads where it refuses the setuid /bin/ps: one 648-byte kinfo_proc a process, its start time at 0, pid at 40, command (16 bytes) at 243 and process group at 564.
+# The kernel's process table through sysctl kern.proc, which Claude Code's sandbox reads where it refuses the setuid /bin/ps: one 648-byte kinfo_proc a process, its start time at 0, pid at 40, command (17 bytes) at 243.
 def kinfo(*mib):
     import ctypes, ctypes.util, sys
     if sys.platform != "darwin":

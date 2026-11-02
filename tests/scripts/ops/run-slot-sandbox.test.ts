@@ -26,6 +26,16 @@ describe("run-slot.sh under Claude Code's sandbox", () => {
     expect(slots(machine({ load1: 12, sandboxed: true }))).toBe("2\n")
   })
 
+  test("an unread memory reading is said once a run, however many looks it waits", async () => {
+    const m = machine({ off: ["run-slot.single"], sandboxed: true })
+    m.hold("run-slot", 1, "small")
+    const run = m.start("worker-mem")
+    const said = /^run-slot\.sh: cannot read the memory /gm
+    expect(await run.waits()).toBe(true)
+    expect(await run.saw(said)).toBe(true)
+    expect(await run.saw(said, 2)).toBe(false)
+  })
+
   test("a run whose nice is refused runs at the default priority and says so", async () => {
     const m = machine()
     // lowering the nice value needs root, so the kernel refuses it as the sandbox refuses any nice
