@@ -154,10 +154,7 @@ if (import.meta.main) {
   const policy = await readPolicy(dir)
   if (policy.refusal !== undefined) throw new Error(`the settings refuse: ${policy.refusal}`)
   const channel = channelSettings.get(policy.settings, "channel.slackId")
-  if (!channel) {
-    console.log("channel.slackId is unset, so there is no channel to watch")
-    process.exit(0)
-  }
+  if (!channel) throw new Error("channel.slackId is unset, so there is no channel to watch")
   const send = sendAs("channel-watch", true)
   await watch(mode, {
     channel,

@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 
 import {
+  checkSetting,
   importedJob,
   JOBS,
   jobKey,
@@ -47,17 +48,15 @@ describe("the job registry", () => {
 
   test("the channel watch is a setting, off by default, that jobs.json lists running its cli once turned on", () => {
     const key = jobKey("ops-channel-watch")
-    const field = settingFields().find((f) => f.key === key)!
+    const { field } = settingFields().find((f) => f.key === key)!
     expect(field.description).toContain("channel.slackId")
     expect(field.description).toContain("local.slack.channel_token")
     expect(
       renderJobs({}, [], fill).jobs.find((job) => job.name === "ops-channel-watch")!.disabled,
     ).toBe(true)
-    const { jobs } = renderJobs(
-      { [key]: { ...JOBS["ops-channel-watch"]!, enabled: true } },
-      [],
-      fill,
-    )
+    const set = checkSetting(key, { ...JOBS["ops-channel-watch"]!, enabled: true })
+    expect(set).toMatchObject({ key: "jobs.opsChannelWatch", ok: true })
+    const { jobs } = renderJobs({ [key]: set.ok && set.value }, [], fill)
     expect(jobs.find((job) => job.name === "ops-channel-watch")).toMatchObject({
       command: "/b/bun --no-env-file /c/packages/scripts/src/ops-channel-watch/cli.ts",
       cwd: "/c",

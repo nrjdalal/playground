@@ -84,6 +84,11 @@ export const JOBS: Record<string, Job> = {
     description: "Syncs new canary merges and main versions into the Changelog every 5 minutes.",
     schedule: { every: 300 },
   }),
+  "ops-channel-watch": terminal("ops-channel-watch", bunJob("ops-channel-watch"), {
+    description:
+      "Sends each new post in the factory channel, the channel.slackId setting, to the dispatcher every 3 minutes and its edits twice an hour, with the token vault holds as local.slack.channel_token.",
+    schedule: { every: 180 },
+  }),
   // The one job on by default: the Dashboard serves first run and every settings write, so a store with no row for it, or no store, keeps it running. It runs from the Dashboard's checkout, since its supervisor rolls the checkout it runs in and refuses any other branch.
   "ops-dashboard": terminal("ops-dashboard", "{dashboard}/scripts/ops/dashboard/run.sh", {
     cwd: "{dashboard}",
