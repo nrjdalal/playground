@@ -9,7 +9,9 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs"
-import { dirname, join, relative } from "node:path"
+import { basename, dirname, join, relative } from "node:path"
+
+import { makeScratch, removeScratch } from "@packages/safe-delete"
 
 import { CORE, coreDir, extensionsDir, GUARD_LISTS, scopeDir } from "./rendered"
 
@@ -71,30 +73,45 @@ export const mustGit = (dir: string, args: string[], env: Record<string, string>
   return run.out
 }
 
-// One write at a time across every process, the API's and the CLI's: the lock is a folder made beside the root, so its making is atomic.
+// One write at a time across every process, the API's and the CLI's: the lock is a scratch folder made beside the root and renamed into place, so its taking is atomic and it always holds makeScratch's marker; a stale one is moved aside, then removed.
 export const withLock = <T>(data: string, run: () => T, wait = 30_000): T => {
   const lock = lockPath(data)
-  mkdirSync(dirname(lock), { recursive: true })
+  const parent = dirname(lock)
+  const drop = (dir: string) => {
+    const refused = removeScratch(dir, parent)
+    if (refused) console.error(`extensions' lock: ${refused}`)
+  }
+  mkdirSync(parent, { recursive: true })
+  const mine = makeScratch(`${basename(lock)}.`, parent)
   const start = Date.now()
   for (;;) {
     try {
-      mkdirSync(lock)
+      renameSync(mine, lock)
       break
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error
+      const code = (error as NodeJS.ErrnoException).code
+      if (code !== "EEXIST" && code !== "ENOTEMPTY") {
+        drop(mine)
+        throw error
+      }
     }
     try {
-      if (Date.now() - statSync(lock).mtimeMs > STALE_MS)
-        rmSync(lock, { force: true, recursive: true })
+      if (Date.now() - statSync(lock).mtimeMs > STALE_MS) {
+        const aside = `${lock}.stale-${crypto.randomUUID()}`
+        renameSync(lock, aside)
+        drop(aside)
+      }
     } catch {}
-    if (Date.now() - start > wait)
+    if (Date.now() - start > wait) {
+      drop(mine)
       throw new Error(`another write holds the extensions' lock (${lock}); try again once it ends`)
+    }
     Bun.sleepSync(20)
   }
   try {
     return run()
   } finally {
-    rmSync(lock, { force: true, recursive: true })
+    drop(lock)
   }
 }
 

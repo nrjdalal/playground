@@ -38,6 +38,7 @@
         "@packages/config": "workspace:*",
         "@packages/db": "workspace:*",
         "@packages/env": "workspace:*",
+        "@packages/safe-delete": "workspace:*",
         "@packages/settings": "workspace:*",
         "@scalar/api-reference": "catalog:",
         "@scalar/hono-api-reference": "catalog:",
@@ -183,6 +184,7 @@
       "name": "@packages/settings",
       "version": "0.0.1",
       "dependencies": {
+        "@packages/safe-delete": "workspace:*",
         "zod": "catalog:",
       },
       "devDependencies": {

@@ -190,6 +190,7 @@ test("a write's lock carries makeScratch's marker while it runs, and is gone aft
 test("an unmarked lock left behind goes aside once stale, and stays there with its refusal logged (#545)", () => {
   const lock = lockPath(data("unmarked"))
   mkdirSync(lock, { recursive: true })
+  writeFileSync(join(lock, "left"), "")
   const old = new Date(Date.now() - 10 * 60_000)
   utimesSync(lock, old, old)
   const said = spyOn(console, "error").mockImplementation(() => {})

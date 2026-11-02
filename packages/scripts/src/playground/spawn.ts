@@ -4,10 +4,11 @@ import {
   mkdirSync,
   readFileSync,
   renameSync,
-  rmSync,
   writeFileSync,
 } from "node:fs"
 import { join } from "node:path"
+
+import { makeScratch, removeScratch } from "@packages/safe-delete"
 
 // The lock one `playground add` holds at a time. Anything else that starts sessions and shares it takes it the same way, a folder holding `pid` renamed into place, so the lock is never seen empty.
 export const SPAWN_LOCK = "spawn.lock"
@@ -22,24 +23,36 @@ const holder = (lock: string): number | null => {
   }
 }
 
-// Takes the lock in the data folder it is given, or names the pid holding it; a lock whose holder has gone is taken over. The lock appears with its pid already inside (a folder of this process's own, renamed into place, which fails while a lock holds its pid), so a start never reads a lock taken a moment ago as abandoned.
+// Takes the lock in the data folder it is given, or names the pid holding it; a lock whose holder has gone is moved aside and removed, so it is taken over. The lock appears with its pid already inside (a scratch folder of this process's own, renamed into place, which fails while a lock holds its pid), so a start never reads a lock taken a moment ago as abandoned.
 export const takeLock = (dir: string): { release: () => void } | { held: number | null } => {
   const lock = join(dir, SPAWN_LOCK)
-  const mine = `${lock}.${process.pid}`
   mkdirSync(dir, { recursive: true })
+  const drop = (path: string) => {
+    const refused = removeScratch(path, dir)
+    if (refused) console.error(`spawn lock: ${refused}`)
+  }
+  const mine = makeScratch(`${SPAWN_LOCK}.`, dir)
+  writeFileSync(join(mine, "pid"), String(process.pid))
   for (let attempt = 0; attempt < 2; attempt++) {
-    mkdirSync(mine, { recursive: true })
-    writeFileSync(join(mine, "pid"), String(process.pid))
     try {
       renameSync(mine, lock)
-      return { release: () => rmSync(lock, { force: true, recursive: true }) }
+      return { release: () => drop(lock) }
     } catch {
-      rmSync(mine, { force: true, recursive: true })
       const pid = holder(lock)
-      if (pid !== null) return { held: pid }
-      rmSync(lock, { force: true, recursive: true })
+      if (pid !== null) {
+        drop(mine)
+        return { held: pid }
+      }
+      const aside = `${lock}.stale-${crypto.randomUUID()}`
+      try {
+        renameSync(lock, aside)
+        drop(aside)
+      } catch {
+        // released meanwhile
+      }
     }
   }
+  drop(mine)
   return { held: null }
 }
 

@@ -83,6 +83,7 @@ describe("the record", () => {
     try {
       writeRecord(path, { pgid: 4100, pid: 4123, started: STARTED })
       mkdirSync(lock)
+      writeFileSync(join(lock, "left"), "")
       const old = new Date(Date.now() - 60_000)
       utimesSync(lock, old, old)
       clearRecord(path, 4123)

@@ -7,7 +7,9 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs"
-import { dirname, join, sep } from "node:path"
+import { basename, dirname, join, sep } from "node:path"
+
+import { makeScratch, removeScratch } from "@packages/safe-delete"
 
 // The launcher records its pid, process group, start time and the stack's task groups in its checkout, so `bun run dev:stop` can end a stack whose starting session has gone, by that record alone, never by a name or a pattern.
 export const RECORD = ".turbo/dev.pgid"
@@ -77,18 +79,38 @@ const code = (error: unknown): string | undefined => (error as NodeJS.ErrnoExcep
 // A lock left by a process that died inside the few milliseconds it is held
 const LOCK_STALE_MS = 5_000
 
-// The record is only ever created by an atomic link (claimRecord) and only ever removed under this lock, after it is read again, so no start or stop removes a record it has not just judged.
+// A rename onto a lock folder that holds anything fails with one of these.
+const HELD = new Set(["EEXIST", "ENOTEMPTY"])
+
+// The record is only ever created by an atomic link (claimRecord) and only ever removed under this lock, after it is read again, so no start or stop removes a record it has not just judged. The lock is a scratch folder renamed into place, so it always holds makeScratch's marker; a stale one is moved aside, then removed.
 const underLock = <T>(path: string, run: () => T, busy: T): T => {
   const lock = `${path}.lock`
+  const parent = dirname(lock)
+  const drop = (dir: string) => {
+    const refused = removeScratch(dir, parent)
+    if (refused) console.error(`dev record lock: ${refused}`)
+  }
+  let mine: string
+  try {
+    mine = makeScratch(`${basename(lock)}.`, parent)
+  } catch {
+    return busy
+  }
   for (let waited = 0; ; waited += 10) {
     try {
-      mkdirSync(lock)
+      renameSync(mine, lock)
       break
     } catch (error) {
-      if (code(error) !== "EEXIST" || waited >= 2_000) return busy
+      if (!HELD.has(code(error) ?? "") || waited >= 2_000) {
+        drop(mine)
+        return busy
+      }
       try {
-        if (Date.now() - lstatSync(lock).mtimeMs > LOCK_STALE_MS)
-          rmSync(lock, { force: true, recursive: true })
+        if (Date.now() - lstatSync(lock).mtimeMs > LOCK_STALE_MS) {
+          const aside = `${lock}.stale-${crypto.randomUUID()}`
+          renameSync(lock, aside)
+          drop(aside)
+        }
       } catch {
         // released meanwhile
       }
@@ -98,7 +120,7 @@ const underLock = <T>(path: string, run: () => T, busy: T): T => {
   try {
     return run()
   } finally {
-    rmSync(lock, { force: true, recursive: true })
+    drop(lock)
   }
 }
 

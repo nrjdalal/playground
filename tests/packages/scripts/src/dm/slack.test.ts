@@ -1,5 +1,13 @@
 import { afterAll, describe, expect, spyOn, test } from "bun:test"
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, utimesSync } from "node:fs"
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  rmSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -100,6 +108,7 @@ describe("the send lock", () => {
     const dir = join(scratch, "unmarked")
     const lock = join(dir, "dm-send.lock")
     mkdirSync(lock, { recursive: true })
+    writeFileSync(join(lock, "owner"), "a dead send's token")
     const old = new Date(Date.now() - 11 * 60_000)
     utimesSync(lock, old, old)
     const said = spyOn(console, "error").mockImplementation(() => {})
