@@ -146,14 +146,13 @@ esac
     existsSync(join(ops, "run-slot.waiters")) ? readdirSync(join(ops, "run-slot.waiters")) : []
   // Starts `touch <marker>` through run-slot (or the copy at `script`) in the background, reading its stderr as it comes. Each check waits on an event (the run's exit, a line it prints), never a wall-clock budget, so a loaded runner only makes it slower.
   // command: the words before the marker, which a fake bin in the machine's bin folder touches; touch by default
-  // marker: a fixed path, for a test that writes the run's command line into run-slot.runs.log first; a fresh one by default
   const start = (
     who: string,
     extra: Record<string, string> = {},
     script = SCRIPT,
     command = ["touch"],
-    marker = join(root, `ran-${who}-${Math.random()}`),
   ) => {
+    const marker = join(root, `ran-${who}-${Math.random()}`)
     const p = Bun.spawn(["bash", script, who, "--", ...command, marker], {
       cwd: root,
       env: env(extra),
