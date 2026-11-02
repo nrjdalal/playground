@@ -462,6 +462,10 @@ describe("a quoted argument is read as a command line only where a program runs 
     ["rm of a glob outside the root", "rm -f build/*.tmp"],
     ["grep of spaced text through a glob", "grep -rn 'foo bar' docs/*.md"],
     ["cp of a glob into a spaced folder", "cp docs/*.md 'out dir'"],
+    ["a glob listing, then awk", "ls *.md; awk '{print $1}' f"],
+    ["an unknown variable set, then awk", "x=\"$1\"; awk '{print $1}' f"],
+    ["find running grep on spaced text", "find . -name '*.ts' -exec grep -l 'foo bar' {} +"],
+    ["awk over each file of a glob", "for f in *.md; do awk '/sh -c/ {print}' \"$f\"; done"],
     [
       "a commit of a glob pathspec with a message naming a removal",
       "git commit docs/*.md -m 'fix: rm -rf ~ bug'",
@@ -551,6 +555,30 @@ describe("a quoted argument is read as a command line only where a program runs 
     ["a payload held in the last argument", `true 'rm -rf ~'; eval "$_"`],
     ["a payload held by getopts", `getopts x o 'rm -rf ~'; eval "$o"`],
     ["a payload set in bash -c's script, then evaluated", `bash -c 'set -- "rm -rf ~"; eval "$1"'`],
+    [
+      "a commit message run by eval through $_",
+      "git commit --allow-empty -m 'rm -rf ~'; eval \"$_\"",
+    ],
+    [
+      "a commit message run by eval through git log",
+      "git commit --allow-empty -m 'rm -rf ~' && eval \"$(git log -1 --format=%s)\"",
+    ],
+    [
+      "a commit message run by sh -c through git log",
+      "git commit --allow-empty -m 'rm -rf ~'; sh -c \"$(git log -1 --format=%s)\"",
+    ],
+    [
+      "a tag message run by eval through git tag",
+      "git tag -m 'rm -rf ~' v1; eval \"$(git tag -l --format='%(contents)' v1)\"",
+    ],
+    [
+      "a commit message piped into sh",
+      "git commit --allow-empty -m 'rm -rf ~'; git log -1 --format=%s | sh",
+    ],
+    [
+      "a commit message run through xargs and sh -c",
+      "git commit --allow-empty -m 'rm -rf ~'; git log -1 --format=%s | xargs -I{} sh -c '{}'",
+    ],
     ["a payload held in an array", `args=('rm -rf ~'); sh -c "\${args[0]}"`],
   ])("%s stays refused", async (_, command) => {
     for (const cwd of [...homes, join(homedir(), "x", ".claude", "worktrees", "y")])
