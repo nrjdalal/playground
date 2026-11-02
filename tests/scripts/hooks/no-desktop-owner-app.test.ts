@@ -249,3 +249,58 @@ describe("passes", () => {
     )
   })
 })
+
+// bun run ask/thread read argv as data only where the call's effective cwd resolves a package.json mapping the script to its Playground entry; every other cwd keeps the verdict, since there the script's body goes unread.
+describe("a bun run ask/thread note reads as data only in a Playground checkout", () => {
+  const CHECKOUT = join(import.meta.dir, "..", "..", "..")
+  const askNote = `bun run ask x "note; agent-desktop 1.0 ok"`
+  const threadNote = `bun run thread title t1 "note; agent-desktop 1.0 ok"`
+  const at = (command: string, cwd: string) =>
+    check(
+      JSON.stringify({
+        cwd,
+        hook_event_name: "PreToolUse",
+        tool_input: { command },
+        tool_name: "Bash",
+      }),
+      { PLAYGROUND_DATA_DIR: guarded },
+    )
+
+  test("runs in a Playground checkout, whose package.json maps the script to its entry", async () => {
+    expect(await at(askNote, CHECKOUT)).toBeUndefined()
+    expect(await at(threadNote, CHECKOUT)).toBeUndefined()
+  })
+
+  test("stays refused in a folder with no package.json", async () => {
+    expect(await at(askNote, scratch)).toContain("no-desktop-owner-app hook refused")
+    expect(await at(threadNote, scratch)).toContain("no-desktop-owner-app hook refused")
+  })
+
+  test("stays refused where the nearest package.json maps the script elsewhere", async () => {
+    const fake = join(scratch, "fakepkg")
+    await Bun.write(
+      join(fake, "package.json"),
+      JSON.stringify({ scripts: { ask: "echo hi", thread: "agent-desktop launch Slack" } }),
+    )
+    expect(await at(askNote, fake)).toContain("no-desktop-owner-app hook refused")
+    expect(await at(threadNote, fake)).toContain("no-desktop-owner-app hook refused")
+  })
+
+  test("stays refused after a cd out of the checkout earlier in the line", async () => {
+    expect(await at(`cd ${scratch} && ${askNote}`, CHECKOUT)).toContain(
+      "no-desktop-owner-app hook refused",
+    )
+  })
+
+  test("stays refused after a cd to a variable, whose target is unknown", async () => {
+    expect(await at(`cd "$DEST" && ${askNote}`, CHECKOUT)).toContain(
+      "no-desktop-owner-app hook refused",
+    )
+  })
+
+  test("stays refused with an argument built from a variable, even in a checkout", async () => {
+    expect(await at(`bun run ask x "note: agent-desktop $BUILD ok"`, CHECKOUT)).toContain(
+      "no-desktop-owner-app hook refused",
+    )
+  })
+})

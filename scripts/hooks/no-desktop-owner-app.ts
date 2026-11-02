@@ -1,4 +1,6 @@
 // PreToolUse hook for every session run from this repo, registered in both settings files: refuses an agent-desktop call that carries --headed, that targets an app on the desktop-owner-apps guard list, or whose target it cannot read, as scripts/hooks/README.md's section states; it reads the list and nothing else, so no setting or file a session writes frees a call.
+import { dirname, join, resolve } from "node:path"
+
 import "../../packages/env/src/aliases"
 import { guardList, isStrings } from "./lists"
 import {
@@ -34,8 +36,32 @@ const LAUNCHERS = new Set([
   "watch",
   "yarn",
 ])
-// bun run <script> scripts whose quoted arguments the hook reads as data, since their entry points (api/hono/src/bin/dashboard-ask.ts, dashboard-thread.ts) take argv as plain strings and run nothing from it; every other bun run keeps its verdict.
-const BUN_DATA_SCRIPTS = new Set(["ask", "thread"])
+// bun run <script> scripts whose literal arguments the hook reads as data, each mapped to the Playground entry point that takes argv as plain strings and runs nothing from it; the allowance holds only where the call's cwd resolves a package.json mapping the script to this entry, since in any other folder bun run <script> runs a script whose body the hook never reads.
+const BUN_DATA_SCRIPTS = new Map([
+  ["ask", "bun api/hono/src/bin/dashboard-ask.ts"],
+  ["thread", "bun api/hono/src/bin/dashboard-thread.ts"],
+])
+
+// Whether the nearest package.json to cwd maps script to its Playground entry, as bun run resolves the script: false when cwd is unknown (no cwd, or a cd to a variable or a substitution), when no package.json is found, or when it maps the script elsewhere, so the call keeps its verdict there.
+async function mapsDataScript(cwd: string | undefined, script: string): Promise<boolean> {
+  const entry = BUN_DATA_SCRIPTS.get(script)
+  if (entry === undefined || cwd === undefined) return false
+  let dir = resolve(cwd)
+  for (;;) {
+    const file = Bun.file(join(dir, "package.json"))
+    if (await file.exists()) {
+      try {
+        const { scripts } = JSON.parse(await file.text()) as { scripts?: Record<string, string> }
+        return scripts?.[script] === entry
+      } catch {
+        return false
+      }
+    }
+    const up = dirname(dir)
+    if (up === dir) return false
+    dir = up
+  }
+}
 // Wrappers a shell line may hide in: watch joins its words past its options into one sh -c line, flock -c runs its string, and a word of any of them holding a space may be one.
 const LINES = new Set(["flock", "setsid", "watch"])
 const WATCH_TAKES = new Set(["--equexit", "--interval", "--shotsdir", "-n", "-q", "-s"])
@@ -309,8 +335,9 @@ async function judgeText(
       name === "bun" &&
       args[0]?.value === "run" &&
       args[1] !== undefined &&
-      BUN_DATA_SCRIPTS.has(args[1].value) &&
-      args.slice(2).every((a) => !unreadable(a))
+      !unreadable(args[1]) &&
+      args.slice(2).every((a) => !unreadable(a)) &&
+      (await mapsDataScript(here.cwd, args[1].value))
     )
       return
     if (INTERPRETERS.has(name))

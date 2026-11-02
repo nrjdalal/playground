@@ -122,7 +122,7 @@ type Run = (raw: string, home: string) => Promise<string | undefined>
 // Each guard's check with the environment its own test gives it, and the folders it runs in, each a cwd and the HOME that goes with it.
 const GUARDS: Record<Guard, { folders: Partial<Record<Folder, [string, string]>>; run: Run }> = {
   "no-desktop-owner-app": {
-    folders: { checkout: [CHECKOUT, HOME] },
+    folders: { checkout: [CHECKOUT, HOME], home: [HOME, HOME] },
     run: (raw) => desktopOwnerApp(raw, { PLAYGROUND_DATA_DIR: DESKTOP }),
   },
   "no-env-dump": { folders: { checkout: [CHECKOUT, HOME] }, run: (raw) => envDump(raw) },
