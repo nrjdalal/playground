@@ -59,7 +59,18 @@ export type Group = {
   folders: Folder[]
   guards: Guard[]
   rows: (paths: Paths) => readonly Row[]
-  source: "#292" | "#356" | "#402" | "#411" | "#446" | "#448" | "#456" | "#463" | "#466" | "#469" | "#509"
+  source:
+    | "#292"
+    | "#356"
+    | "#402"
+    | "#411"
+    | "#446"
+    | "#448"
+    | "#456"
+    | "#463"
+    | "#466"
+    | "#469"
+    | "#509"
 }
 
 // The rows a guard-loosening PR lets run on purpose, each written as a row's "<source> <what>" for all its cases, or as one case's "<source> <what> | <guard> | <folder>"; canary lets none run.
@@ -1726,48 +1737,56 @@ gh api graphql -f query="$QUERY"`,
     folders: ["process home", "process data folder", "process worktree"],
     guards: ["no-extensions-write"],
     rows: () => [
-      ["rm of a substitution the hook cannot read", "rm -rf $(echo .p*)"],
-      ["rm of a backtick substitution the hook cannot read", "rm -rf `echo .p*`"],
-      ["rm of a variable the call never sets", "rm -rf $X"],
+      ["rm of a substitution the hook cannot read", "rm -rf $(echo .p*)/.no-such-folder"],
+      ["rm of a backtick substitution the hook cannot read", "rm -rf `echo .p*`/.no-such-folder"],
+      ["rm of a variable the call never sets", "rm -rf $X/.no-such-folder"],
       ["mv of a quoted variable the call never sets", 'mv "$X" /tmp/y'],
-      ["rm of a glob after a variable the call held", "X=.p; rm -rf $X*", "process home"],
-      ["rm of a variable's glob inside .playground", "X=e; rm -rf .playground/$X*", "process home"],
-      ["rm of a held path's glob", "X=.playground/e; rm -rf $X*", "process home"],
+      [
+        "rm of a glob after a variable the call held",
+        "X=.p; rm -rf $X*/.no-such-folder",
+        "process home",
+      ],
+      [
+        "rm of a variable's glob inside .playground",
+        "X=e; rm -rf .playground/$X*/.no-such-folder",
+        "process home",
+      ],
+      ["rm of a held path's glob", "X=.playground/e; rm -rf $X*/.no-such-folder", "process home"],
       [
         "git -c running a pager exported earlier in the call",
-        `export P='rm -rf .playground'; true; cd \${HOME}; git -c core.pager="$P" log`,
+        `export P='rm -rf .playground/.no-such-folder'; true; cd \${HOME}; git -c core.pager="$P" log`,
         "process tmp",
       ],
       ["git -c with a value the call never sets", 'git -c core.pager="$P" log'],
       ["git -c attached with a value the call never sets", 'git -ccore.pager="$P" log'],
       [
         "rm of mktemp's folder made from a template in the root",
-        'T=$(mktemp -d ~/.playground/extensions/x.XXXX); rm -rf "$T"',
+        'T=$(mktemp -d ~/.playground/extensions/x.XXXX); rm -rf "$T/.no-such-folder"',
       ],
       [
         "rm of mktemp's folder made with -p in the root",
-        'T=$(mktemp -d -p ~/.playground/extensions); rm -rf "$T"',
+        'T=$(mktemp -d -p ~/.playground/extensions); rm -rf "$T/.no-such-folder"',
       ],
       [
         "rm of mktemp's folder made with --tmpdir= in the root",
-        'T=$(mktemp -d --tmpdir=$HOME/.playground/extensions); rm -rf "$T"',
+        'T=$(mktemp -d --tmpdir=$HOME/.playground/extensions); rm -rf "$T/.no-such-folder"',
       ],
       [
         "rm of mktemp's folder made with TMPDIR set inline",
-        'T=$(TMPDIR=$HOME/.playground/extensions mktemp -d); rm -rf "$T"',
+        'T=$(TMPDIR=$HOME/.playground/extensions mktemp -d); rm -rf "$T/.no-such-folder"',
       ],
       [
         "rm of mktemp's folder made with TMPDIR exported",
-        'export TMPDIR=$HOME/.playground/extensions; T=$(mktemp -d); rm -rf "$T"',
+        'export TMPDIR=$HOME/.playground/extensions; T=$(mktemp -d); rm -rf "$T/.no-such-folder"',
       ],
-      ["rm of a pid-named path in the root", "rm -rf ~/.playground/extensions/$$"],
+      ["rm of a pid-named path in the root", "rm -rf ~/.playground/extensions/$$/.no-such-folder"],
       [
         "rm of mktemp's folder from a held variable's template in the root",
-        'D=~/.playground/extensions; T=$(mktemp -d "$D/x.XXXX"); rm -rf "$T"',
+        'D=~/.playground/extensions; T=$(mktemp -d "$D/x.XXXX"); rm -rf "$T/.no-such-folder"',
       ],
       [
         "rm of mktemp's folder from a relative template inside the root",
-        'T=$(mktemp -d x.XXXX); rm -rf "$T"',
+        'T=$(mktemp -d x.XXXX); rm -rf "$T/.no-such-folder"',
         "extensions root",
       ],
     ],
