@@ -516,7 +516,7 @@ describe("a quoted argument is read as a command line only where a program runs 
     ["rm of a glob in a build folder", "rm -rf build/*"],
     ["rm of a held folder's glob", "X=build; rm -rf $X/*"],
     ["rm of a held temporary folder", 'D=/tmp/x.1; rm -rf "$D"'],
-    ["rm under TMPDIR", 'rm -rf "$TMPDIR/x"'],
+    ["rm under HOME, which the hook holds", 'rm -rf "$HOME/tmp-x"'],
   ])("%s runs from the home and the data folder", async (_, command) => {
     for (const cwd of homes) expect(await at(command, cwd)).toBeUndefined()
   })

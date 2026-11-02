@@ -5,7 +5,8 @@ import { basename, isAbsolute, resolve } from "node:path"
 // `variable` names the first shell variable a text expands, so a hook can tell `"$HERDR_BIN_PATH"` from any other unknown program.
 export type Text = { reads?: Text[]; unknown?: string; value: string; variable?: string }
 // `glob` marks a word with a glob character the shell sees outside quotes, so `'{print $1}'` holds none and `{a,'b'}` one.
-export type Word = Text & { glob?: boolean; procs?: Command[]; quoted: boolean }
+// `raw` keeps the source of a word that holds a value the lexer cannot read, so a hook can lex it again once the call has set its variables.
+export type Word = Text & { glob?: boolean; procs?: Command[]; quoted: boolean; raw?: string }
 type Redirect = { body?: Text; fd: string; op: string; target?: Word }
 export type Command = {
   detached?: boolean
@@ -620,6 +621,7 @@ function word(lx: Lexer): Word {
   // the lookahead finds the close once, so a { with no } costs its length rather than its square
   if (/\{(?=[^{}]*\})[^{}]*(?:,|\.\.)/.test(bare)) out.unknown ??= "a brace expansion"
   if (GLOB_CHARS.test(bare)) out.glob = true
+  if (marked(out.value)) out.raw = src.slice(start, lx.i)
   return out
 }
 

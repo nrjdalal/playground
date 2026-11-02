@@ -13,6 +13,7 @@ import {
   examine,
   filled,
   knownVariables,
+  GIT_TAKES,
   lex,
   marked,
   onlyReserved,
@@ -112,9 +113,50 @@ function reads(parsed: Parsed, env: Env): boolean {
   return (
     !!sub &&
     GIT_READS.has(sub) &&
-    !before.some((w) => w === "-c" || /^--(?:config-env|exec-path)/.test(w)) &&
+    !before.some((w) => /^-c|^--(?:config-env|exec-path)/.test(w)) &&
     !rest.some((w) => /^(?:--output|-O|--open-files-in-pager|--ext-diff|--textconv)/.test(w))
   )
+}
+
+// A word with a value the lexer could not read, lexed again with the variables the call has set by now; undefined when it holds none, or still holds one the hook cannot read
+function heldWord(word: Word, env: Env): Word | undefined {
+  return word.raw && marked(word.value) ? relexed(word.raw, heldVars(env)) : undefined
+}
+
+// A raw word lexed with known variables: the one word it makes, or undefined when it still holds a value the hook cannot read
+function relexed(raw: string, known: Record<string, string>): Word | undefined {
+  // a substitution's commands come first, so the word's own command is the last
+  const words = lex(raw, known).commands.at(-1)?.words ?? []
+  return words.length === 1 && !marked(words[0].value) ? words[0] : undefined
+}
+
+// The variables the call has set by now whose values the hook holds, an assignment that names an earlier one (`T="$S/x"`) lexed again with it, in the order they were set
+function heldVars(env: Env): Record<string, string> {
+  const known = { ...env.known }
+  for (const [key, text] of env.vars) {
+    if (!text.unknown && !marked(text.value)) known[key] = text.value
+    else if ("raw" in text && typeof text.raw === "string") {
+      const again = relexed(text.raw, known)?.value
+      if (again?.startsWith(`${key}=`)) known[key] = again.slice(key.length + 1)
+    }
+  }
+  return known
+}
+
+// Whether the hook holds a word's whole value
+const held = (word: Word, env: Env): boolean => !marked(word.value) || !!heldWord(word, env)
+
+// The values git's -c options set before its subcommand (`-c k=v`, `-ck=v`)
+function gitConfigs(args: Word[]): Word[] {
+  const configs: Word[] = []
+  for (let k = 0; k < args.length; k++) {
+    const { value } = args[k]
+    if (value === "-c" && args[k + 1]) configs.push(args[++k])
+    else if (value.startsWith("-c") && value.length > 2) configs.push(args[k])
+    else if (GIT_TAKES.has(value)) k++
+    else if (!value.startsWith("-")) break
+  }
+  return configs
 }
 
 // The settings keys a guard reads to allow or deny a call, A to Z: the hooks' (no-chat-question, no-glm-heavy-path, no-headless-login, no-playground-leak, no-public-leak, and role.ts, which places a session in the factory), spawn.sh's code root, and ext.repos, which names the repository each scope syncs from.
@@ -447,13 +489,26 @@ function inspect(raw: string, environment: Environment) {
     if (inRoot(env.cwd)) return refuse(`${verb} run inside ${root}`)
     if (name === "git" && inRoot(gitCall(args, env).cwd)) return refuse(`git on a clone in ${root}`)
     const remover = REMOVERS.has(name)
+    // a value the hook cannot read under a remover, or in git's -c, could name the root, so it is refused unless the call holds it
+    const unheld = remover ? args.find((word) => !held(word, env)) : undefined
+    if (unheld)
+      return refuse(
+        `${verb} on ${unheld.raw ?? unheld.value}, a value the hook does not hold; hold it in the same call (X=<path>; ${verb} "$X") or write the path literally`,
+      )
+    if (name === "git") {
+      const config = gitConfigs(args).find((word) => marked(word.value))
+      if (config)
+        return refuse(
+          `git -c ${config.raw ?? config.value}, a value the hook does not hold; write the value literally in the call`,
+        )
+    }
     const scope = since(varsJudged, env.vars, `${env.cwd}\0${remover}`)
     for (const value of [...parsed.local.values(), ...scope]) {
       const named = names({ ...value, quoted: false }, env, remover)
       if (named) return refuse(`${verb} with a variable on ${named}`)
     }
     const literal = !whole && narrow(cmd, env)
-    for (const word of [first, ...args]) {
+    for (const word of [first, ...args].map((word) => heldWord(word, env) ?? word)) {
       const named = names(word, env, remover, literal)
       if (named) return refuse(`${verb} on ${named}`)
     }
