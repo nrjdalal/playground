@@ -711,9 +711,16 @@ describe("an answer", () => {
         ],
       },
     })
-    for (const answer of [{ choice: "send" }, { choice: "send", editedText: "hey" }] as const) {
+    for (const answer of [
+      { choice: "send" },
+      { choice: "send", editedText: "hey" },
+      { choice: "draft" },
+    ] as const) {
       expect(deliveryText(shown, answer)).toBe(deliveryText(plain, answer))
-      expect(relayText(shown, answer)).toBe(relayText(plain, answer))
+      const relay = relayText(shown, answer)
+      expect(relay).toBe(relayText(plain, answer))
+      expect(relay).not.toContain("before.png")
+      expect(relay).not.toContain("3f0e7a52-1c4b-4d2a-9e6f-0000000000a1")
     }
   })
 })
