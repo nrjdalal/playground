@@ -26,10 +26,6 @@ describe("a call that only reads", () => {
   ])("%s reads", (command) => {
     expect(readOnly(bash(command))).toBe(true)
   })
-
-  test("a GitHub MCP read", () => {
-    expect(readOnly(mcp("mcp__github-shared__list_issues"))).toBe(true)
-  })
 })
 
 describe("a call outside the read shapes", () => {
@@ -87,9 +83,9 @@ describe("a call outside the read shapes", () => {
     expect(readOnly(bash(command))).toBe(false)
   })
 
-  test("a GitHub MCP write, and a call that does not parse", () => {
+  test("any MCP call, a read included, and a call that does not parse", () => {
     expect(readOnly(mcp("mcp__github-shared__add_issue_comment"))).toBe(false)
-    expect(readOnly(mcp("mcp__notion-shared__get_page"))).toBe(false)
+    expect(readOnly(mcp("mcp__github-shared__list_issues"))).toBe(false)
     expect(readOnly("not json")).toBe(false)
   })
 })

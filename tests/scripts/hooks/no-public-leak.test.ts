@@ -238,10 +238,6 @@ describe("it fails closed on its list", () => {
       ["gh api GET", bash("gh api repos/quillco/playground/issues")],
       ["a read over a .git path", bash("cat .git/worktrees/a/HEAD")],
       ["a grep over a worktree's .git file", bash("grep gitdir .git")],
-      [
-        "the GitHub MCP's read",
-        mcp("mcp__github-shared__list_issues", { owner: "quillco", repo: "playground" }),
-      ],
     ])("lets %s run", async (_, raw) => {
       expect(await run(raw, lacks())).toBeUndefined()
     })
@@ -254,6 +250,10 @@ describe("it fails closed on its list", () => {
       [
         "gh api POST",
         bash(`gh api -X POST repos/quillco/playground/issues/1/comments -f body="Fixes it"`),
+      ],
+      [
+        "the GitHub MCP's read",
+        mcp("mcp__github-shared__list_issues", { owner: "quillco", repo: "playground" }),
       ],
       [
         "the GitHub MCP's comment",
