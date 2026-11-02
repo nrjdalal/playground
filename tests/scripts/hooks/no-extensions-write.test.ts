@@ -523,6 +523,12 @@ describe("a quoted argument is read as a command line only where a program runs 
       "a quiet commit on a quiet line after a reader",
       `grep -q x /dev/null; git commit -m "fix(x): y"`,
     ],
+    ["gh api with a jq filter", `gh api repos/o/r/pulls --jq '.[] | "\\(.number) \\(.title)"'`],
+    [
+      "gh search with an attached jq filter",
+      `gh search prs x --json number --jq='.[] | "\\(.number) x"'`,
+    ],
+    ["gh issue view with a jq filter", `gh issue view 1 --json title -q '"\\(.title) (open)"'`],
   ])("%s runs from the home and the data folder", async (_, command) => {
     for (const cwd of homes) expect(await at(command, cwd)).toBeUndefined()
   })
@@ -549,6 +555,14 @@ describe("a quoted argument is read as a command line only where a program runs 
     [
       "sudo with a flag cluster holding a value option",
       "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sudo -ui",
+    ],
+    [
+      "gh pr view with a jq filter joining fields",
+      `gh pr view 436 --json state,title,additions,deletions -q '.state+" "+.title+" +\\(.additions)/-\\(.deletions)"'`,
+    ],
+    [
+      "gh run view with a jq filter joining a job's status and conclusion",
+      `gh run view 1 --json jobs --jq '.jobs[] | "\\(.name) \\(.status)/\\(.conclusion)"'`,
     ],
   ])("%s runs from a worktree", async (_, command) => {
     expect(await at(command, join(homedir(), "x", ".claude", "worktrees", "y"))).toBeUndefined()
