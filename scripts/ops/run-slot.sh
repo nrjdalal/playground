@@ -43,13 +43,18 @@ switch_on() {
   mv "$f" "$f.expired-$(date -u +%Y%m%dT%H%M%SZ)" 2>/dev/null && echo "$now expire ${WHO:-run-slot} $$ $1 $line" >> "$OPS/run-slot.runs.log"
   return 1
 }
+# whether pid $1 runs: kill -0 reaches it, or the kernel refuses the signal (another user's process, or one outside Claude Code's sandbox, which also refuses the setuid ps) rather than finding no such process
+alive() {
+  local err
+  err=$(LC_ALL=C kill -0 "$1" 2>&1) || case "$err" in *"not permitted"*) true ;; *) false ;; esac
+}
 # whether slot directory $1, whose holder line is $2, is stale: its pid has died, or a line with no pid (or no line, read by the directory's
 # own mtime) has aged 2 hours; a run killed between free()'s rm of its holder and its rmdir leaves a directory with no line
 stale() {
   local pid
   pid=$(printf '%s' "$2" | cut -d' ' -f2)
   if printf '%s' "$pid" | grep -Eq '^[0-9]+$'; then
-    ! kill -0 "$pid" 2>/dev/null && ! ps -p "$pid" >/dev/null 2>&1
+    ! alive "$pid"
   else
     [ $(( $(date +%s) - $(mtime "$1.holder" || mtime "$1" || date +%s) )) -ge 7200 ]
   fi
@@ -144,7 +149,7 @@ if [ "${1:-}" = clear-stale ]; then
       continue
     fi
     pid=$(cut -d' ' -f2 "$h" 2>/dev/null)
-    if printf '%s' "$pid" | grep -Eq '^[0-9]+$' && { kill -0 "$pid" 2>/dev/null || ps -p "$pid" >/dev/null 2>&1; }; then
+    if printf '%s' "$pid" | grep -Eq '^[0-9]+$' && alive "$pid"; then
       [ -d "$OPS/$s" ] && { echo "$s: held by $(cut -d' ' -f1 "$h") (pid $pid, alive); left alone"; continue; }
     fi
     line=$(cat "$h" 2>/dev/null)
@@ -410,7 +415,7 @@ light_run() {
   [ -n "$turbo" ] && [ -n "$filter" ] && return
   [ -n "$types" ] && types_cached "$@"
 }
-CORES=$(sysctl -n hw.ncpu 2>/dev/null || echo 8)
+CORES=$(sysctl -n hw.ncpu 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || echo 8)
 # one line when a Mac run asks, takes its slot and ends, so a run's wait sits beside its run time (optimizer, 19 Oct)
 rlog() { echo "$(date -u +%FT%TZ) $1 $WHO $$ $2" >> "$OPS/run-slot.runs.log" 2>/dev/null; }
 [ -n "$CAN_TAKE" ] || [ -n "$REREAD" ] || rlog ask "$*"
@@ -508,7 +513,7 @@ ordered_waiters() {
   ready=$(ready_line)
   for t in $(ls "$QUEUE" 2>/dev/null | sort -t- -k1,1n); do
     pid=$(printf '%s' "$t" | cut -d- -f2)
-    if ! kill -0 "$pid" 2>/dev/null && ! ps -p "$pid" >/dev/null 2>&1; then rm -f "${QUEUE:?}/${t:?}"; continue; fi
+    if ! alive "$pid"; then rm -f "${QUEUE:?}/${t:?}"; continue; fi
     m=$(mtime "$QUEUE/$t") || continue
     rank=$(cut -d' ' -f2 "$QUEUE/$t" 2>/dev/null)
     case "$rank" in [0-2][1-3]) [ $((now - m)) -lt "$AGED" ] && {
@@ -560,7 +565,7 @@ prio_waiting() {
   [ -n "$h" ] || return 1
   for t in $(ls "$QUEUE" 2>/dev/null | grep -- "-$h\$"); do
     pid=$(printf '%s' "$t" | cut -d- -f2)
-    { kill -0 "$pid" 2>/dev/null || ps -p "$pid" >/dev/null 2>&1; } && return 0
+    alive "$pid" && return 0
   done
   return 1
 }
@@ -574,14 +579,24 @@ free() {
   fi
   SLOT=""
   [ -n "$TICKET" ] && rm -f "$TICKET"
+  [ -n "${MEM_TOLD:-}" ] && rm -f "$MEM_TOLD-suite" "$MEM_TOLD-clone"
 }
 trap 'free' EXIT
 trap '[ -n "$CHILD" ] && kill -TERM -- "-$CHILD" 2>/dev/null; wait "$CHILD" 2>/dev/null; [ -n "$CHILD" ] && { reap "$CHILD"; rlog end "rc=143 ran=$(($(date +%s) - TOOK))s"; }; exit 143' TERM INT HUP
 
+# process group $1's members, a `<pid> <command>` line each: from ps, else from the kernel's process table (ptable.py), since Claude Code's sandbox refuses the setuid ps
+members() {
+  local all
+  if all=$(ps -A -o pid=,pgid=,command= 2>/dev/null); then
+    printf '%s\n' "$all" | awk -v g="$1" '$2 == g { $2 = ""; print }'
+  else
+    python3 -I "$(dirname "$(realpath "$SELF")")/ptable.py" group "$1"
+  fi
+}
 # stops what is left in the command's group once it has ended, TERM then KILL after 3 seconds, logging each pid (a suite's worker once outlived it by 5 hours)
 reap() {
   local left
-  left=$(ps -A -o pid=,pgid=,command= | awk -v g="$1" '$2 == g { $2 = ""; print }')
+  left=$(members "$1")
   [ -n "$left" ] || return 0
   printf '%s\n' "$left" | while read -r pid cmd; do rlog reap "pid=$pid $cmd"; done
   kill -TERM -- "-$1" 2>/dev/null
@@ -594,16 +609,23 @@ reap() {
 gone() {
   local i
   for i in $(seq 15); do
-    ps -A -o pgid= | awk -v g="$1" '$1 == g { found = 1 } END { exit !found }' || return 0
+    [ -n "$(members "$1")" ] || return 0
     sleep 0.2
   done
   return 1
 }
 
-# runs the command as the leader of a process group of its own (macOS has no setsid(1)), which reap stops once it ends, and exits with its code
+# runs the command as the leader of a process group of its own (macOS has no setsid(1)), which reap stops once it ends, and exits with its code; where Claude Code's sandbox refuses the new group or the nice, it says so on stderr and runs the command without it
 run_command() {
   local code
-  python3 -I -c 'import os, sys; os.setsid(); os.nice(int(os.environ.get("RUN_SLOT_NICE", "10"))); os.execvp(sys.argv[1], sys.argv[1:])' "$@" <&3 3<&- &
+  python3 -I -c '
+import os, sys
+for step, call in (("its own process group", os.setsid), ("nice " + os.environ.get("RUN_SLOT_NICE", "10"), lambda: os.nice(int(os.environ.get("RUN_SLOT_NICE", "10"))))):
+    try:
+        call()
+    except OSError as error:
+        print(f"run-slot.sh: runs the command without {step} ({error.strerror})", file=sys.stderr)
+os.execvp(sys.argv[1], sys.argv[1:])' "$@" <&3 3<&- &
   CHILD=$!
   wait "$CHILD"
   code=$?
@@ -704,15 +726,24 @@ may_reserve() {
   echo "$4"
 }
 
-load1() { sysctl -n vm.loadavg 2>/dev/null | awk '{print int($2)}'; }
-load5() { sysctl -n vm.loadavg 2>/dev/null | awk '{print int($3)}'; }
+# the load averages as `{ <1m> <5m> <15m> }`: from sysctl, else from uptime, since Claude Code's sandbox refuses the sysctl command's name lookup
+loadavg() { sysctl -n vm.loadavg 2>/dev/null || LC_ALL=C uptime 2>/dev/null | sed -nE 's/.*load averages?: *([^ ,]+),? +([^ ,]+),? +([^ ,]+).*/{ \1 \2 \3 }/p'; }
+load1() { loadavg | awk '{print int($2)}'; }
+load5() { loadavg | awk '{print int($3)}'; }
 # macOS's memory reading $1: level (the free share) or vm_pressure_level (1 normal, 2 warn, 4 critical)
 memstat() { sysctl -n "kern.memorystatus_$1" 2>/dev/null | tr -cd 0-9; }
-# memory room for a second suite: macOS's free share at 40% or more and its pressure level normal (1; 2 is warn, 4 critical)
+# memory room for a second suite: macOS's free share at 40% or more and its pressure level normal (1; 2 is warn, 4 critical); an unread reading (Claude Code's sandbox refuses both) leaves no room, said once a run on stderr
+MEM_TOLD="${TMPDIR:-/tmp}/run-slot-mem-told.$$"
+# says what an unread memory reading holds ($2) once a run on stderr, a file per kind ($1) marking it, since a look reads the memory in a subshell
+mem_unread() { [ -e "$MEM_TOLD-$1" ] || { echo "run-slot.sh: cannot read the memory (sysctl kern.memorystatus_*), so $2" >&2; : > "$MEM_TOLD-$1"; }; }
 mem_ok() {
   local free level
   free=$(memstat level); level=$(memstat vm_pressure_level)
-  [ -n "$free" ] && [ -n "$level" ] && [ "$free" -ge 40 ] && [ "$level" -eq 1 ]
+  if [ -z "$free" ] || [ -z "$level" ]; then
+    mem_unread suite "no second suite runs beside this one"
+    return 1
+  fi
+  [ "$free" -ge 40 ] && [ "$level" -eq 1 ]
 }
 
 # Dictation misses come from input delay under load, so every command runs under nice 10, and the
@@ -751,9 +782,11 @@ if [ -n "$KIND" ]; then
   # clone-off lets a clone through while load1 and load5 are under 30 and memory passes spawn.sh's gate, pressure level 1 or 2 with 8% or more free (dispatcher, 19 Oct 01:18Z;
   # builder, 19 Oct); spawn.sh keeps its 8 inside its own Python, so the number is written twice until one home holds it
   # load1 counts since load5 lags a fresh spike (optimizer, 19 Oct 03:42Z: a clone let through at load5 under 30 took load1 to 73)
+  # an unread memory reading (Claude Code's sandbox refuses it) holds the clone, said once a run
   clone_held() {
-    [ "$KIND" = clone ] && switch_on run-slot.clone-off && ! printf "%s\n" "$WHO" | grep -qxf "$OPS/run-slot.clone-allow" 2>/dev/null &&
-      ! { case "$(memstat vm_pressure_level)" in 1|2) true ;; *) false ;; esac && [ "$(memstat level)" -ge 8 ] 2>/dev/null && [ "$(load5)" -lt 30 ] && [ "$(load1)" -lt 30 ]; }
+    [ "$KIND" = clone ] && switch_on run-slot.clone-off && ! printf "%s\n" "$WHO" | grep -qxf "$OPS/run-slot.clone-allow" 2>/dev/null || return 1
+    [ -n "$(memstat level)" ] || { mem_unread clone "run-slot.clone-off holds this clone until it expires or run-slot.clone-allow names $WHO"; return 0; }
+    ! { case "$(memstat vm_pressure_level)" in 1|2) true ;; *) false ;; esac && [ "$(memstat level)" -ge 8 ] 2>/dev/null && [ "$(load5)" -lt 30 ] && [ "$(load1)" -lt 30 ]; }
   }
   while clone_held; do reread; sleep "$CLONE_POLL"; done
   # bash 5.2 can fail to parse the TERM trap while it expands a "$(...)" and then drop the loop it was in (measured on the runner host:

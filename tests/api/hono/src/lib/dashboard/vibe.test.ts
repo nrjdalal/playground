@@ -336,6 +336,24 @@ describe("Start", () => {
     expect(existsSync(join(path, ".turbo/vibe.json"))).toBe(true)
   })
 
+  test("a failed Start puts the worktree's own .env back before it moves its record, so a trash that throws leaves the .env in place, past the next Stop", async () => {
+    const path = worktree("launch-trash-throws", "OLD=3\n")
+    const blocker = join(dir, "not-a-folder")
+    writeFileSync(blocker, "")
+    const f = fake([stack(path)], {
+      launch: () => {
+        throw new Error("launch failed")
+      },
+      roots: () => ({ ...ROOTS, trash: join(blocker, "trash") }),
+    })
+    await startVibe(path, f.deps).catch(() => {})
+    expect(readFileSync(join(path, ".env"), "utf8")).toBe("OLD=3\n")
+    expect(existsSync(join(path, ".env.vibe-saved"))).toBe(false)
+    // the record left behind says the .env is the worktree's own, so the Stop it offers leaves it in place
+    await stopVibe(path, fake([stack(path, { vibe: true })]).deps)
+    expect(readFileSync(join(path, ".env"), "utf8")).toBe("OLD=3\n")
+  })
+
   test("the load gate and a missing live database refuse before any container starts", async () => {
     const path = worktree("gated")
     // a Vibeground still booting (no URL yet) holds the one-at-a-time line too

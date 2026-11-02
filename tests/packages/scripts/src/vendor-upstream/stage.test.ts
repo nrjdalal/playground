@@ -1,11 +1,21 @@
 import { describe, expect, test } from "bun:test"
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
+import { MARKER } from "../../../../../packages/safe-delete/src"
 import {
   blobSha,
   diffSkills,
+  download,
   manifestFor,
   manifestText,
   parseManifest,
@@ -55,6 +65,20 @@ const coreOf = (root: string): string => {
   return core
 }
 
+// The trash's roots on the test's own mkdtemp root: a HOME and a main checkout beside the core folder, the trash in the HOME's data folder.
+const rootsOf = (root: string) => ({
+  roots: {
+    home: join(root, "home"),
+    main: join(root, "main"),
+    trash: join(root, "home", ".playground", "trash"),
+  },
+  session: "vendor-test",
+})
+
+// The staging folders a run left in core.
+const staged = (core: string): string[] =>
+  readdirSync(core).filter((name) => name.startsWith(".upstream-staging"))
+
 const snapshot = (dir: string): string =>
   JSON.stringify(readTree(dir).map(({ path, bytes: data }) => [path, blobSha(data)]))
 
@@ -90,7 +114,14 @@ describe("vendoring", () => {
       const files = kept()
       const manifest = manifestFor(files)
       expect(
-        vendor({ coreDir: core, files, manifest, repo: "upstream/skills", sha: "a".repeat(40) }),
+        vendor({
+          coreDir: core,
+          files,
+          manifest,
+          repo: "upstream/skills",
+          sha: "a".repeat(40),
+          ...rootsOf(root),
+        }),
       ).toEqual({
         ok: true,
         files: 3,
@@ -116,14 +147,74 @@ describe("vendoring", () => {
       expect(readFileSync(join(core, "upstream/SOURCE"), "utf8")).toBe(
         `upstream/skills ${"a".repeat(40)}\n${new Date().toISOString().slice(0, 10)}\n`,
       )
-      expect(existsSync(join(core, ".upstream-staging"))).toBe(false)
+      expect(staged(core)).toEqual([])
+      expect(existsSync(join(core, ".upstream-replaced"))).toBe(false)
+      const trash = join(root, "home", ".playground", "trash")
+      const [batch] = readdirSync(trash)
+      const replaced = join(trash, batch!, "1", ".upstream-replaced")
+      expect(readFileSync(join(replaced, "skills", "tdd", "SKILL.md"), "utf8")).toBe("old\n")
+      expect(readFileSync(join(replaced, "skills", "research", "SKILL.md"), "utf8")).toBe("old\n")
+      expect(readFileSync(join(replaced, "upstream", "SOURCE"), "utf8")).toBe("stub\n")
       // A second run over the same sha swaps the same bytes in again.
       expect(
-        vendor({ coreDir: core, files, manifest, repo: "upstream/skills", sha: "a".repeat(40) }),
+        vendor({
+          coreDir: core,
+          files,
+          manifest,
+          repo: "upstream/skills",
+          sha: "a".repeat(40),
+          ...rootsOf(root),
+        }),
       ).toEqual({
         ok: true,
         files: 3,
       })
+    } finally {
+      rmSync(root, { force: true, recursive: true })
+    }
+  })
+
+  test("a core folder inside the main checkout is refused before anything moves", () => {
+    const root = mkdtempSync(join(tmpdir(), "vendor-upstream-test-"))
+    try {
+      const core = coreOf(join(root, "main"))
+      const before = snapshot(core)
+      const files = kept()
+      expect(() =>
+        vendor({
+          coreDir: core,
+          files,
+          manifest: manifestFor(files),
+          repo: "upstream/skills",
+          sha: "a".repeat(40),
+          ...rootsOf(root),
+        }),
+      ).toThrow("main checkout")
+      expect(snapshot(core)).toBe(before)
+    } finally {
+      rmSync(root, { force: true, recursive: true })
+    }
+  })
+
+  test("a MANIFEST path the files lack throws, leaves core as it was and takes its staging folder with it (#545)", () => {
+    const root = mkdtempSync(join(tmpdir(), "vendor-upstream-test-"))
+    try {
+      const core = coreOf(root)
+      const before = snapshot(core)
+      const entries = parseManifest(manifestFor(kept()))
+      entries.push({ path: "skills/tdd/EXTRA.md", sha: "0".repeat(40) })
+      expect(() =>
+        vendor({
+          coreDir: core,
+          files: kept(),
+          manifest: manifestText(entries),
+          repo: "upstream/skills",
+          sha: "a".repeat(40),
+          ...rootsOf(root),
+        }),
+      ).toThrow("MANIFEST names skills/tdd/EXTRA.md")
+      expect(snapshot(core)).toBe(before)
+      expect(staged(core)).toEqual([])
     } finally {
       rmSync(root, { force: true, recursive: true })
     }
@@ -144,6 +235,7 @@ describe("vendoring", () => {
         manifest: manifestText(entries),
         repo: "upstream/skills",
         sha: "a".repeat(40),
+        ...rootsOf(root),
       })
       expect(done.ok).toBe(false)
       if (!done.ok)
@@ -151,7 +243,40 @@ describe("vendoring", () => {
           `${first.path}: staged ${real}, MANIFEST says ${first.sha}`,
         ])
       expect(snapshot(core)).toBe(before)
-      expect(existsSync(join(core, ".upstream-staging"))).toBe(false)
+      expect(staged(core)).toEqual([])
+    } finally {
+      rmSync(root, { force: true, recursive: true })
+    }
+  })
+})
+
+describe("the download", () => {
+  test("lands in a marked scratch folder, gone once it is read, and names a path the tree wants that the tarball lacks (#545)", async () => {
+    const root = mkdtempSync(join(tmpdir(), "vendor-upstream-test-"))
+    try {
+      for (const { path, bytes: data } of UPSTREAM)
+        put(join(root, "src", "skills-main"), path, data)
+      const tarball = join(root, "upstream.tgz")
+      Bun.spawnSync(["tar", "-czf", tarball, "-C", join(root, "src"), "skills-main"])
+      const tmp = join(root, "tmp")
+      mkdirSync(tmp)
+      const marked: boolean[] = []
+      const wanted = [...UPSTREAM.map(({ path }) => path), "skills/engineering/tdd/EXTRA.md"]
+      const gh = (...args: string[]): Buffer => {
+        marked.push(readdirSync(tmp).some((name) => existsSync(join(tmp, name, MARKER))))
+        return args[0]!.includes("/tarball/")
+          ? readFileSync(tarball)
+          : Buffer.from(JSON.stringify({ tree: wanted.map((path) => ({ path, type: "blob" })) }))
+      }
+      const { kept: got, missing } = await download(gh, "upstream/skills", "a".repeat(40), tmp)
+      expect(got.map(({ path }) => path).sort()).toEqual(
+        UPSTREAM.filter(({ path }) => upstreamKeep(path))
+          .map(({ path }) => path)
+          .sort(),
+      )
+      expect(missing).toEqual(["skills/engineering/tdd/EXTRA.md"])
+      expect(marked).toEqual([true, true])
+      expect(readdirSync(tmp)).toEqual([])
     } finally {
       rmSync(root, { force: true, recursive: true })
     }

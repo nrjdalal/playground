@@ -6,6 +6,7 @@ import { join, relative } from "node:path"
 import {
   isMainCheckout,
   sourcesIn,
+  staleInstall,
   unbuilt,
   workspaceImports,
 } from "../../../../../packages/scripts/src/verify/prebuild"
@@ -147,5 +148,53 @@ test("every workspace package verify or pr-merge imports is a dependency of @pac
     )
     expect(imported.length).toBeGreaterThan(0)
     expect(imported.filter((name) => !declared.includes(name))).toEqual([])
+  }
+})
+
+// A made-up worktree: `fresh` has its dependency linked, `added` came with a canary pull after the last install, and `hoisted` finds its own at the root.
+const worktree = (): string => {
+  const dir = mkdtempSync(join(tmpdir(), "prebuild-install-"))
+  writeFileSync(join(dir, "package.json"), JSON.stringify({ workspaces: ["packages/*"] }))
+  for (const [name, dep] of [
+    ["fresh", "tsdown"],
+    ["added", "tsdown"],
+    ["hoisted", "typescript"],
+  ]) {
+    mkdirSync(join(dir, "packages", name), { recursive: true })
+    writeFileSync(
+      join(dir, "packages", name, "package.json"),
+      JSON.stringify({ devDependencies: { [dep]: "catalog:" }, name: `@packages/${name}` }),
+    )
+  }
+  mkdirSync(join(dir, "packages/fresh/node_modules/tsdown"), { recursive: true })
+  mkdirSync(join(dir, "node_modules/typescript"), { recursive: true })
+  return dir
+}
+
+// On 2 Nov pr:merge, run from a worktree installed before canary added @packages/safe-delete, stopped on "tsdown: command not found" partway through its build.
+test("staleInstall refuses a worktree whose install predates a package its bun.lock added, naming the package and the install that fixes it", () => {
+  const dir = worktree()
+  try {
+    const refusal = staleInstall("pr-merge", dir) ?? ""
+    expect(refusal).toContain("packages/added (tsdown)")
+    expect(refusal).not.toContain("packages/fresh")
+    expect(refusal).not.toContain("packages/hoisted")
+    expect(refusal).toContain(
+      `~/.playground/ops/run-slot.sh <your name> -- bun install --ignore-scripts --cwd ${dir}`,
+    )
+    expect(refusal).toContain("then run pr-merge again")
+  } finally {
+    rmSync(dir, { force: true, recursive: true })
+  }
+})
+
+test("staleInstall passes a worktree whose every workspace package has its dependencies installed", () => {
+  const dir = worktree()
+  try {
+    mkdirSync(join(dir, "packages/added/node_modules/tsdown"), { recursive: true })
+    expect(staleInstall("pr-merge", dir)).toBeNull()
+    expect(staleInstall("pr-merge", ROOT)).toBeNull()
+  } finally {
+    rmSync(dir, { force: true, recursive: true })
   }
 })

@@ -4,9 +4,9 @@ import { join } from "node:path"
 import { dataDir } from "@packages/env/data-dir"
 import { listTrash, quarantine, restore, type Roots } from "@packages/safe-delete"
 
-import { registryName } from "../../../../scripts/hooks/role"
 import STATUSES from "../../../../scripts/roster-statuses.json"
 import { mainCheckout } from "../main-checkout"
+import { sessionName } from "../trash"
 
 export const RM_USAGE =
   'usage: playground rm <path> [--reason "<why>"] | --worktree <path> [--reason "<why>"] | --list | --restore <id>'
@@ -68,10 +68,7 @@ export const rmDeps = (repo: string): RmDeps => ({
       stderr: "ignore",
       stdout: "ignore",
     }),
-  session: async () =>
-    (process.env.CLAUDE_CODE_SESSION_ID &&
-      (await registryName(process.env.CLAUDE_CODE_SESSION_ID))) ||
-    "shell",
+  session: sessionName,
 })
 
 // playground rm: one quarantine, list or restore against the deps' HOME, main checkout and trash; a protected or tripwire refusal goes to the dispatcher; exit 0 done, 1 refused, 2 a usage error.

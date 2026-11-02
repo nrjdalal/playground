@@ -27,7 +27,7 @@ Sessions that work together share a workspace as full-height columns ([SESSIONS.
 
 - **Workers** are spawned by the Builder, one per chore, and close with their checkers once their chore is done.
   A worker ends when its chore is done: its PR merged (or dropped with the Builder's ok), its branch pushed (`git push -u origin <branch>`), so its commits show on origin even with no PR,
-  its worktrees, branches, containers and probes cleaned up from the main checkout (`cd` there before `git worktree remove`, since the session sits inside its own last worktree: the one `cd` a worker runs), and its final report sent, naming the pushed head.
+  its worktrees, branches, containers and probes cleaned up from the main checkout (`cd` there before `playground rm --worktree <path>`, since the session sits inside its own last worktree: the one `cd` a worker runs), and its final report sent, naming the pushed head.
   Remove a worktree another session holds only once that session is closed or off the roster and no live session's cwd is inside it: a clean tree is not a free tree, since a reviewer keeps its worktree across PRs (**rounds**).
   The Builder then closes its workspace, which takes any split still open in it, and its slot returns to the pool.
   Ending is automatic, by [SESSIONS.md](SESSIONS.md#end)'s path: `pr:merge` and the train's land end the merged PR's worker, reviewer and tester, and ops-tick's auto-end beat ends the rest every 5 minutes, each with one line to its lead.
@@ -65,7 +65,7 @@ Sessions that work together share a workspace as full-height columns ([SESSIONS.
   never marked told since a resume keeps the session id and the line returns with the next outage,
   rather than queueing it for a relay that is down, naming the outcome to ops, and load past 30 once a crossing), the GLM credits log line, the optimizer's wake words,
   the canary pull (every clean worktree on `canary` fast-forwarded to origin's head every 5 minutes,
-  then installed through run-slot when the pull changed `bun.lock` or a `package.json` and again each beat until one exits 0, a failed pull or install told to ops once until its words change),
+  its fast-forward and install run back to back inside one run-slot slot when the incoming change touches `bun.lock` or a `package.json`, so no session runs new code on old `node_modules` while the install waits for a slot, and the install runs again each beat until one exits 0, a failed fetch, pull or install told to ops once until its words change),
   the trash purge (hourly, `purgeTrash` of `@packages/safe-delete` removing each batch in the data folder's `trash` over 7 days old, `playground rm`'s and the dashboard's alike, then the oldest while the disk has under 50 GB free, its one recursive delete, one line to `ops/log/trash-purge.log`),
   the turbo prune (weekly, each file in the shared turbo cache `~/.cache/turbo/playground` last modified over 7 days ago removed, one line to `ops/log/turbo-prune.log`),
   the dashboard watch (every minute: once the live dashboard's `/api/health` has failed 5 minutes in a row, a gap of over 2 minutes with no check starting the count again, one macOS banner and one ops line through `notify.sh` with `NOTIFY_MAC=1`, since the Inbox shows only on the dashboard, and one more when it answers again,
@@ -111,7 +111,9 @@ Sessions that work together share a workspace as full-height columns ([SESSIONS.
   Bare `dispatcher` first runs ops-herdr's `start`, so it brings back every herdr server that is down and names each it started; then, from any terminal while the Dashboard's API does not answer 200 on `/api/health` (portless's 404 for a stack that is down is no answer), it runs ops-up (`scripts/ops/up.py`), which starts each ops job that is not healthy,
   ops-dashboard's stack and follower among them,
   and stops a job's holder still running under cmux by its recorded pid; it starts no Claude session, and names a missing dispatcher for you to start.
-  Then it waits for the Dashboard's API, printing a progress line every 10s, and stops with an error once ops-dashboard's supervisor is gone or its heartbeat is past three cycles (after a 30s grace for the start), else at 15 minutes (`waitOutcome` in `packages/scripts/src/playground/plan.ts`).
+  Before ops-up it sets the Dashboard's database container (the `live.container` setting's) to restart with Docker and starts it when stopped, saying so in one line each (`ensureDatabase` in `packages/scripts/src/playground/database.ts`).
+  Then it waits for the Dashboard's API, printing a progress line every 10s, and stops with an error once ops-dashboard's supervisor is gone or its heartbeat is past three cycles, else at 15 minutes (`waitOutcome` in `packages/scripts/src/playground/plan.ts`).
+  It also stops on a START or RESTART roll begun after the database step that failed on the stack, in the supervisor's own words (`startFailure`); each early stop waits out a 30s grace for the start.
   Every job ops starts in a terminal (`runtime: "herdr"` in `~/.playground/ops/jobs.json`) runs as a pane labelled with its name in the Ops workspace on the factory herdr server, by the binary herdr's `pin.json` names,
   skipped while herdr fails spawn.sh's checks (its pin's sha256, its version, its server's socket and that server running).
   A job row stored with the old `cmux` or `auto` runtime, or with no runtime and the retired flag that marked a terminal job, reads as `herdr` (`jobSchema` in `packages/settings/src/jobs.ts`), so its copy still under cmux is stopped by its recorded pid and started in herdr on the next pass, from any terminal.
