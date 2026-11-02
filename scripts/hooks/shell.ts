@@ -517,7 +517,7 @@ function word(lx: Lexer): Word {
     else if (c === "$") merge(out, dollar(lx))
     else if (c === "`") merge(out, backtick(lx))
     else if (c === "~" && lx.i === start && (next === "" || next === "/" || BREAK.has(next))) {
-      out.value += lx.known.HOME ?? homedir()
+      out.value += homedir()
       lx.i++
     } else {
       out.value += c

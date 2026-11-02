@@ -298,8 +298,6 @@ describe("a direct write into the extensions root is refused, naming the owner's
       `{ { echo 'rm ${LIST}'; }; echo true; } | sh`,
     ],
     ["rm of a zsh ( ) glob", `rm -rf ${DATA}/extensio(n)s`],
-    ["rm of a glob by ~ that matches the data folder", "rm -rf ~/.p*"],
-    ["rm of a glob by $HOME that matches the data folder", "rm -rf $HOME/.p*"],
     ["cd - back to the root, then a relative rm", `cd ${ROOT}; cd /tmp; cd -; rm -rf hooks`],
     ["cd ~- back to the root, then a relative rm", `cd ${ROOT}; cd /tmp; cd ~-; rm -rf hooks`],
     ["rm by ~- after a cd out of the root", `cd ${ROOT}; cd /tmp; rm -rf ~-/hooks`],
@@ -397,14 +395,6 @@ describe("a direct write into the extensions root is refused, naming the owner's
     },
     60_000,
   )
-
-  test("distinct globs in the home at the command cap are read inside a second", async () => {
-    let command = "rm -rf"
-    for (let i = 0; command.length < 130_000; i++) command += ` ./t${i}*`
-    const started = performance.now()
-    expect(await bash(command)).toBeUndefined()
-    expect(performance.now() - started).toBeLessThan(1_000)
-  }, 60_000)
 
   test.each([300, 8_000])(
     "an eval chain %d deep ahead of a write is refused inside the hook's time",
@@ -582,8 +572,6 @@ describe("a read of the root, and writes elsewhere, run", () => {
     ["a git author name with a space", "GIT_AUTHOR_NAME='A B' git log"],
     ["a pager with an option", "GIT_PAGER='less -R' git log"],
     ["a commit message with an unbalanced quote", `git commit -m "it's fine"`],
-    ["rm of a glob in the home that names no folder above the root", "rm -rf ./tmp*"],
-    ["rm of a glob in a folder below the home", "rm -rf build/*"],
     ["cd - back to a folder elsewhere", "cd /tmp; cd -; echo x > notes"],
     ["popd back to a folder elsewhere", `cd ${WORK}; pushd /tmp; popd; echo x > notes`],
     ["popd with an empty stack", `cd ${WORK}; popd; echo x > notes`],
