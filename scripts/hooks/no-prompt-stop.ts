@@ -15,19 +15,25 @@ const variables = (path: string) =>
 const shown = (path: string) => path.replaceAll(UNKNOWN, "$…").replaceAll(GUARD, "${…:?}")
 
 // rmdir runs guarded, while no-raw-delete refuses an rm whose path it cannot read, guarded or not, so an rm takes a literal path.
-const FIX: Record<string, string> = {
-  rm: "Name each path literally, with playground rm <literal path> for a folder (in a script, removeScratch), and run it again.",
+const FIX: Record<"rm" | "rmdir", string> = {
+  rm: "Name each path literally: a file in your worktree or scratchpad with rm, anything else with playground rm <literal path> (in a script, removeScratch), and run it again.",
   rmdir: 'Guard each one as ${VAR:?} ("${S:?}/${m:?}"), or name a literal path, and run it again.',
 }
 
-const refuse = (name: string, path: string) =>
+const refuse = (name: "rm" | "rmdir", path: string) =>
   `no-prompt-stop hook refuses ${name} ${shown(path)}: Claude Code stops on a removal whose target has two or more parts that start with a variable and waits for a person, who is not there. ${FIX[name]}`
 
 // A literal name directly in /, a glob or a trailing slash included.
 const AT_ROOT = /^\/[^/\u0000]+\/?$/
 
-const refuseAtRoot = (name: string, path: string) =>
-  `no-prompt-stop hook refuses ${name} ${path}: Claude Code stops on a removal of a name directly in / and waits for a person, who is not there. Write and remove in $TMPDIR or the session's scratchpad, and run it again.`
+// no-raw-delete refuses an rm of $TMPDIR, a word it cannot read and a folder outside both roots, so an rm moves to the scratchpad.
+const AT_ROOT_FIX: Record<"rm" | "rmdir", string> = {
+  rm: "Write and remove in the session's scratchpad, and run it again.",
+  rmdir: "Write and remove in $TMPDIR or the session's scratchpad, and run it again.",
+}
+
+const refuseAtRoot = (name: "rm" | "rmdir", path: string) =>
+  `no-prompt-stop hook refuses ${name} ${path}: Claude Code stops on a removal of a name directly in / and waits for a person, who is not there. ${AT_ROOT_FIX[name]}`
 
 const visit: Visit = async (_cmd, { args, name }) => {
   if (name !== "rm" && name !== "rmdir") return

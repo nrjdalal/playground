@@ -60,6 +60,7 @@ describe("a delete the hook lets run", () => {
     "$R/scripts/spawn.sh column reviewer $W",
     "gh pr checks $N -R owner/repo",
     "'/bin/r?' -rf sub",
+    'rmdir "${S:?}/${m:?}"',
     "mv web/next/.next .turbo /tmp/claude-501/p/s/scratchpad/cold-1/",
     "playground rm sub/old",
     "playground rm --worktree .claude/worktrees/old",
