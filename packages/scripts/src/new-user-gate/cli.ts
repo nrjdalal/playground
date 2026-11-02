@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 // The new-user gate: a fresh scratch HOME installs Playground at a given sha the way `curl | bash` does, then each step a new user meets is checked in turn, printed PASS, FAIL or INCONCLUSIVE and screenshotted; it exits 1 when any step does not pass.
-// Usage: bun run gate:new-user <tag|sha> [--box <dir>] [--keep], or --clean <dir> for a box a --keep run left. The box (default /tmp/pg-gate-<sha7>, short since herdr's socket path must fit 104 bytes) holds the HOME, the stand-ins, a bare source repo and the screenshots.
+// Usage: bun run gate:new-user <tag|sha> [--box <parent dir>] [--keep], or --clean <box> for a box a --keep run left. The box (makeBox's /tmp/pg-gate-<sha7>-<random> unless --box names its folder, short since herdr's socket path must fit 104 bytes) holds the HOME, the stand-ins, a bare source repo and the screenshots.
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { dirname, join, resolve } from "node:path"
