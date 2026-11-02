@@ -1,9 +1,9 @@
-// Whether a tool call only reads, while a guard's list is missing: an MCP get, list or search, or a Bash line whose every command is one of the exact read shapes below, so a guard can let it run.
+// Whether a tool call only reads, while a guard's list is missing: an MCP get, list or search, or a Bash line whose every command is one of the exact read shapes below with no redirect or unquoted glob, so a guard can let it run.
 import { type Command, lex, marked } from "./shell"
 
 const MCP_READ = /^mcp__.+?__(?:get|list|search)_\w+$/
 
-// A read shape: the options it takes alone and with a value (the next word, or after `=` for a long one), a bare count (`-5`), and whether it takes operands.
+// A read shape: the options it takes alone and with a value (see fits), a bare count (`-5`), and whether it takes operands.
 type Shape = { count?: boolean; flags?: string[]; operands?: boolean; values?: string[] }
 
 const READ_FILE: Shape = { count: true, operands: true, values: ["-c", "-n"] }
@@ -102,14 +102,24 @@ const GH: Record<string, Shape> = {
   "pr view": GH_VIEW,
 }
 
-// Whether every word fits the shape: a listed option (its value the next word, or after `=`), a count where it takes one, or an operand where it takes them; after `--` every word is an operand.
-function fits(args: string[], shape: Shape): boolean {
+const OWNER_REPO = /^[\w.-]+\/[\w.-]+$/
+
+// Whether every word fits the shape: a listed option, with its value after `=` or (but a git long one) the next word that is no option, a count where it takes one, or an operand where it takes them; `-R` names an OWNER/REPO, and no word holds a URL, which would reach another host.
+function fits(args: string[], shape: Shape, git = false): boolean {
   for (let i = 0; i < args.length; i++) {
     const v = args[i]
-    if (v === "--") return shape.operands === true
-    if (shape.values?.includes(v)) i++
-    else if (shape.values?.includes(v.split("=")[0]) && v.startsWith("--")) continue
-    else if (shape.flags?.includes(v) || (shape.count && /^-\d+$/.test(v))) continue
+    const [option, value] =
+      v.startsWith("--") && v.includes("=")
+        ? [v.slice(0, v.indexOf("=")), v.slice(v.indexOf("=") + 1)]
+        : [v, undefined]
+    if (v.includes("://")) return false
+    if (v === "--")
+      return shape.operands === true && args.slice(i + 1).every((a) => !a.includes("://"))
+    if (shape.values?.includes(option)) {
+      const given = value ?? (git && option.startsWith("--") ? undefined : args[++i])
+      if (given === undefined || (value === undefined && given.startsWith("-"))) return false
+      if ((option === "-R" || option === "--repo") && !OWNER_REPO.test(given)) return false
+    } else if (shape.flags?.includes(v) || (shape.count && /^-\d+$/.test(v))) continue
     else if (v.startsWith("-") || !shape.operands) return false
   }
   return true
@@ -135,7 +145,8 @@ const shapeOf = (shapes: Record<string, Shape>, key: string | undefined): Shape 
   key !== undefined && Object.hasOwn(shapes, key) ? shapes[key] : undefined
 
 function commandReads(cmd: Command): boolean {
-  if (cmd.redirects.length > 0) return false
+  if (cmd.redirects.length > 0 || cmd.words.some((w) => !w.quoted && /[*?[{]/.test(w.value)))
+    return false
   const words = cmd.words.map((w) => w.value)
   if (words.length === 0) return true
   if (words.some(marked)) return false
@@ -143,7 +154,7 @@ function commandReads(cmd: Command): boolean {
   if (name === "git") {
     const k = args[0] === "-C" ? 2 : 0
     const shape = shapeOf(GIT, args[k])
-    return shape !== undefined && fits(args.slice(k + 1), shape)
+    return shape !== undefined && fits(args.slice(k + 1), shape, true)
   }
   if (name === "gh") {
     if (args[0] === "api") return apiReads(args.slice(1))
