@@ -1,6 +1,7 @@
 import { readdirSync, readFileSync, statSync } from "node:fs"
 import { join, relative } from "node:path"
 
+import { dataDir } from "@packages/env/data-dir"
 import {
   diffItem,
   exportTo,
@@ -113,9 +114,20 @@ export const contentOf = async (
 export type Io = {
   data: string
   out: Out
+  // the caller's PLAYGROUND_ROLE, which a factory session sets and the owner's own terminal does not
+  role?: string
   stdin: () => Promise<string>
   write: (path: string, data: string | Uint8Array) => Promise<unknown>
 }
+
+// The terminal's Io: the data folder, stdout, stdin and the caller's PLAYGROUND_ROLE, an empty one counting as none.
+export const terminalIo = (env: Record<string, string | undefined> = process.env): Io => ({
+  data: dataDir(env),
+  out: console.log,
+  role: env.PLAYGROUND_ROLE || undefined,
+  stdin: () => Bun.stdin.text(),
+  write: Bun.write,
+})
 
 // Who a write from the terminal is: the CLI as its actor, --by as its author (the owner when not given), with its reason.
 const whoOf = (options: Record<string, string[]>) => ({
@@ -230,6 +242,10 @@ export async function extCommand(words: string[], io: Io): Promise<number> {
     for (const line of done(importFrom(io.data, dir, Boolean(options["--dry-run"]), who)).lines)
       io.out(line)
   } else if (verb === "score" || verb === "accept" || verb === "reject") {
+    if (verb === "accept" && io.role)
+      throw new Error(
+        `accept is the owner's own call, so a session with a role (${io.role}) scores a proposal instead; the owner runs \`env -u PLAYGROUND_ROLE playground ext accept …\` as a ! command in the dispatcher's terminal window, which carries PLAYGROUND_ROLE=dispatcher`,
+      )
     const at = ref()
     const rev = need(positional[3], "a rev")
     const who = whoOf(options)

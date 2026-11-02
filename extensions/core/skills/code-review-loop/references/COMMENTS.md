@@ -4,6 +4,12 @@ Every body goes to a file in your scratchpad in one call and is posted in a sepa
 
 Every session shares one GitHub account, and with it one GraphQL budget (`gh api rate_limit --jq .resources.graphql`). REST has a budget of its own: the verdict and the inline review always post over it (below), and when GraphQL is spent, so does a PR body, with `gh api -X PATCH repos/<repo>/pulls/<n> -F body=@<file>`. With GraphQL spent, `state.py pr` and `scan` read over REST and say so, listing every review thread with its resolution unknown, since only GraphQL knows it: treat each as open until the reset lets you check. Closing threads needs GraphQL and waits for the reset, and the verdict names the threads still open.
 
+## A working bypass
+
+When the review finds a working way past a guard (a form the guard should refuse that runs), the verdict and its inline finding explain the mechanism in words, the shape and the parse step that misses it, and the exact forms go to the worker by `SendMessage` alone.
+The forms stay off the PR until the fix pins each as a refused row in `tests/scripts/hooks/fixtures/refused-forms.ts`, so a working payload never sits in a public comment while the guard still lets it run; on 2 Nov one guard PR's round 1 took this path on its lead's ruling.
+Done when each bypass's mechanism is in the verdict, its forms are in the worker's inbox, and a later round confirms each refused at the head.
+
 ## The verdict comment
 
 One new comment per round, never an edit of an earlier one: the record of what was said at which SHA is the point. Post it over REST, which spends no GraphQL (playbook's **github** rule): `gh api repos/<repo>/issues/<n>/comments -F body=@<file> --jq .html_url`. Its first line is the gate's, exactly:

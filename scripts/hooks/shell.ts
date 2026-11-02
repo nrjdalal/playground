@@ -111,32 +111,82 @@ const RESERVED = new Set([
   "until",
   "while",
 ])
+// Whether a program is its command's own first word, a reserved word before it (`!`, `then`, `do`) skipped, rather than one a wrapper or an assignment runs
+export const ownFirst = (cmd: Command, first: Word | undefined): first is Word =>
+  !!first && first === cmd.words.find((w) => w.quoted || !RESERVED.has(w.value))
+// Whether every word of a command is an unquoted reserved word (`fi`, `done`), so it names no program of its own
+export const onlyReserved = (cmd: Command): boolean =>
+  cmd.words.length > 0 && cmd.words.every((w) => !w.quoted && RESERVED.has(w.value))
 // The words that close a compound command, whose output the hook does not follow.
 const GROUPING = new Set(["}", "done", "esac", "fi"])
 export const ASSIGN = /^[A-Za-z_]\w*=/
-const WRAPPERS = new Map<string, Set<string>>([
-  ["builtin", new Set()],
-  ["caffeinate", new Set(["-t", "-w"])],
-  ["command", new Set()],
-  ["doas", new Set(["-u"])],
-  ["env", new Set(["-P", "-S", "-u", "--unset"])],
-  ["exec", new Set(["-a"])],
-  ["nice", new Set(["-n", "--adjustment"])],
-  ["nocorrect", new Set()],
-  ["noglob", new Set()],
-  ["nohup", new Set()],
-  ["repeat", new Set()],
-  ["stdbuf", new Set(["-e", "-i", "-o"])],
-  ["sudo", new Set(["-C", "-D", "-g", "-h", "-p", "-R", "-r", "-T", "-t", "-U", "-u"])],
-  ["time", new Set()],
-  ["timeout", new Set(["-k", "--kill-after", "-s", "--signal"])],
-  ["xargs", new Set(["-a", "-d", "-E", "-I", "-L", "-n", "-P", "-s"])],
-])
+// Each wrapper's options, A to Z: its flags, then the options that take a value, short and long; parse reads a cluster (`-Hp`) letter by letter and a value attached (`-pwc`, `--prompt=wc`) or as the next word, and reads an option missing here both as a flag and as taking the next word, so a hook judges the program under each
+type Options = { flags: Set<string>; values: Set<string> }
+const WRAPPERS = new Map<string, Options>(
+  Object.entries({
+    builtin: ["", ""],
+    caffeinate: ["-d -i -m -s -u", "-t -w"],
+    command: ["-p -V -v", ""],
+    doas: ["-L -n -s", "-a -C -u"],
+    env: ["-0 -i -v --debug --ignore-environment --null", "-P -S -u --unset"],
+    exec: ["-c -l", "-a"],
+    nice: ["", "-n --adjustment"],
+    nocorrect: ["", ""],
+    noglob: ["", ""],
+    nohup: ["", ""],
+    repeat: ["", ""],
+    stdbuf: ["", "-e -i -o --error --input --output"],
+    sudo: [
+      "-A -B -b -E -e -H -i -K -k -l -N -n -P -S -s -V -v --askpass --background --bell --edit --help --list --login --non-interactive --preserve-env --preserve-groups --remove-timestamp --reset-timestamp --set-home --shell --stdin --validate --version",
+      "-C -D -g -h -p -R -r -T -t -U -u --chdir --chroot --close-from --command-timeout --group --host --other-user --prompt --role --type --user",
+    ],
+    time: [
+      "-a -h -l -p -q -V -v --append --portability --quiet --verbose",
+      "-f -o --format --output",
+    ],
+    timeout: ["-f -p -v --foreground --preserve-status --verbose", "-k -s --kill-after --signal"],
+    xargs: [
+      "-0 -o -p -r -t -x --exit --interactive --no-run-if-empty --null --open-tty --show-limits --verbose",
+      "-a -d -E -L -n -P -R -S -s --arg-file --delimiter --max-args --max-chars --max-lines --max-procs --process-slot-var",
+    ],
+  }).map(([name, [flags, values]]) => [
+    name,
+    { flags: new Set(flags.split(" ")), values: new Set(values.split(" ")) },
+  ]),
+)
+
+// Where a wrapper's option word leaves its value: "own" when it takes none or carries it, "next" when the next word is its value, or undefined for an option the wrapper's list lacks
+function optionValue(word: string, { flags, values }: Options): "next" | "own" | undefined {
+  if (word.startsWith("--")) {
+    const eq = word.indexOf("=")
+    const name = eq === -1 ? word : word.slice(0, eq)
+    if (values.has(name)) return eq === -1 ? "next" : "own"
+    return flags.has(name) ? "own" : undefined
+  }
+  for (let k = 1; k < word.length; k++) {
+    const option = `-${word[k]}`
+    if (values.has(option)) return k === word.length - 1 ? "next" : "own"
+    if (!flags.has(option)) return undefined
+  }
+  return "own"
+}
+
 // Wrappers that take one positional argument (a count or a duration) before the command.
 const COUNTED = new Set(["repeat", "timeout"])
 export const SHELLS = new Set(["bash", "dash", "ksh", "sh", "zsh"])
 const EXPORTS = new Set(["declare", "export", "local", "readonly", "typeset"])
 export const PRINTERS = new Set(["echo", "printf"])
+// Every git-reading hook's one list of the words git 2.56 steps over before its subcommand: each option that takes the next word as its value, and --exec-path, which takes none but whose bare form prints git's folder and exits, so the word after it never runs.
+export const GIT_TAKES = new Set([
+  "-C",
+  "-c",
+  "--attr-source",
+  "--config-env",
+  "--exec-path",
+  "--git-dir",
+  "--namespace",
+  "--work-tree",
+])
 
 const API_FIELDS = new Set(["-F", "--field", "-f", "--raw-field"])
 const API_TAKES = new Set([
@@ -666,6 +716,8 @@ function substituted(inner: Command[]): Text {
 export type Xargs = { replace?: string } | undefined
 
 export type Parsed = {
+  // the other readings of a wrapper's option it cannot read, each judged as the command too
+  also: Parsed[]
   args: Word[]
   chdir?: Word
   first?: Word
@@ -677,33 +729,59 @@ export type Parsed = {
 // env's split-string option, attached or not, with the text it carries attached
 const SPLIT = /^(?:-[0iv]*S|--split-string(?:=|$))(.*)$/
 
+type State = { chdir?: Word; local: Map<string, Text>; rest: Word[]; xargs: Xargs }
+// The other readings one command's parse makes at most, so options it cannot read cost a bounded time; past them it reads each as canary did, a flag
+const READINGS = 16
+
 export function parse(cmd: Command): Parsed {
   // the words still to read, the next one last, so env -S puts its words back in front in the time of their own count
-  const rest = cmd.words.toReversed()
-  const peek = (): Word | undefined => rest[rest.length - 1]
-  const take = (): Word | undefined => rest.pop()
-  const local = new Map<string, Text>()
-  const assign = (w: Word) => {
-    const eq = w.value.indexOf("=")
-    local.set(w.value.slice(0, eq), slice(w, eq + 1))
-  }
-  let chdir: Word | undefined
-  let xargs: Xargs
-  for (let w = peek(); w && !w.quoted; w = peek()) {
-    if (RESERVED.has(w.value)) take()
+  const state: State = { local: new Map(), rest: cmd.words.toReversed(), xargs: undefined }
+  const { rest } = state
+  for (let w = rest.at(-1); w && !w.quoted; w = rest.at(-1)) {
+    if (RESERVED.has(w.value)) rest.pop()
     else if (w.value === "function") rest.length = Math.max(0, rest.length - 2)
     else break
   }
-  while (ASSIGN.test(peek()?.value ?? "")) assign(take() as Word)
-  for (;;) {
-    const wrapper = program(peek()?.value ?? "")
-    const takes = WRAPPERS.get(wrapper)
-    if (!takes) break
-    if (wrapper === "xargs") xargs ??= {}
-    take()
+  while (ASSIGN.test(rest.at(-1)?.value ?? "")) assign(state.local, rest.pop() as Word)
+  return unwrap(state, undefined, { left: READINGS })
+}
+
+const assign = (local: Map<string, Text>, w: Word) => {
+  const eq = w.value.indexOf("=")
+  local.set(w.value.slice(0, eq), slice(w, eq + 1))
+}
+
+// The program behind the wrappers at the front of the words, resumed inside `inside`'s options for a second reading: an option the wrapper's lists lack is read as a flag, as a value-less option, and again as taking the next word, and a value in a variable again as expanding to no word and to more than one, each other reading kept in `also`.
+function unwrap(state: State, inside: string | undefined, budget: { left: number }): Parsed {
+  const { local, rest } = state
+  const peek = (): Word | undefined => rest[rest.length - 1]
+  const take = (): Word | undefined => rest.pop()
+  const also: Parsed[] = []
+  const fork = (wrapper: string, drop: number) =>
+    budget.left-- > 0 &&
+    also.push(
+      unwrap(
+        {
+          chdir: state.chdir,
+          local: new Map(local),
+          rest: rest.slice(0, Math.max(0, rest.length - drop)),
+          xargs: state.xargs && { ...state.xargs },
+        },
+        wrapper,
+        budget,
+      ),
+    )
+  for (let wrapper = inside; ; wrapper = undefined) {
+    if (!wrapper) {
+      wrapper = program(peek()?.value ?? "")
+      if (!WRAPPERS.has(wrapper)) break
+      if (wrapper === "xargs") state.xargs ??= {}
+      take()
+    }
+    const options = WRAPPERS.get(wrapper) as Options
     for (let w = peek(); w; w = peek()) {
       const v = w.value
-      if (ASSIGN.test(v)) assign(take() as Word)
+      if (ASSIGN.test(v)) assign(local, take() as Word)
       // env -S splits its one string into the words it runs
       else if (wrapper === "env" && SPLIT.test(v)) {
         const attached = SPLIT.exec(v)?.[1] ?? ""
@@ -712,28 +790,45 @@ export function parse(cmd: Command): Parsed {
         for (let j = split.length - 1; j >= 0; j--) rest.push({ quoted: false, value: split[j] })
       } else if (wrapper === "env" && (v === "-C" || v === "--chdir")) {
         take()
-        chdir = take()
+        state.chdir = take()
       } else if (wrapper === "env" && /^(?:-C|--chdir=)./.test(v)) {
-        chdir = slice(w, v.startsWith("-C") ? 2 : "--chdir=".length)
+        state.chdir = slice(w, v.startsWith("-C") ? 2 : "--chdir=".length)
         take()
-      } else if (xargs && /^(?:-[IiJ]|--replace)/.test(v)) {
+      } else if (state.xargs && /^(?:-[IiJ]|--replace)/.test(v)) {
         const attached = /^(?:-[IiJ]|--replace=?)(.*)$/.exec(v)?.[1] ?? ""
         take()
-        xargs.replace = v === "-I" || v === "-J" ? take()?.value : attached || "{}"
-      } else if (takes.has(v)) rest.length = Math.max(0, rest.length - 2)
-      else if (v.startsWith("-") && v !== "-") take()
-      else break
+        state.xargs.replace = v === "-I" || v === "-J" ? take()?.value : attached || "{}"
+      } else if (v === "--") {
+        take()
+        while (ASSIGN.test(peek()?.value ?? "")) assign(local, take() as Word)
+        break
+      } else if (v.startsWith("-") && v !== "-") {
+        // nice's own -<number> is its adjustment
+        const end =
+          wrapper === "nice" && /^-\d+$/.test(v)
+            ? "own"
+            : marked(v)
+              ? undefined
+              : optionValue(v, options)
+        if (!end) fork(wrapper, 2)
+        else if (end === "next" && marked(rest[rest.length - 2]?.value ?? "")) {
+          fork(wrapper, 1)
+          fork(wrapper, 3)
+        }
+        rest.length = Math.max(0, rest.length - (end === "next" ? 2 : 1))
+      } else break
     }
     if (COUNTED.has(wrapper)) take()
   }
   const first = take()
   return {
+    also,
     args: rest.reverse(),
-    chdir,
+    chdir: state.chdir,
     first,
     local,
     name: first ? program(first.value) : "",
-    xargs,
+    xargs: state.xargs,
   }
 }
 
@@ -805,7 +900,33 @@ export async function examine(
   builtins: boolean,
 ): Promise<string | undefined> {
   tick()
-  const parsed = parse(cmd)
+  const readings = (parsed: Parsed): Parsed[] => [parsed, ...parsed.also.flatMap(readings)]
+  const [primary, ...others] = readings(parse(cmd))
+  // only the primary reading moves the folder, sets variables and records files, as canary's one reading did; each other runs on a copy of the env before the command
+  const before = others.length > 0 ? apart(env) : env
+  const verdict = await examineReading(cmd, primary, env, visit, builtins)
+  if (verdict) return verdict
+  for (const parsed of others) {
+    const verdict = await examineReading(cmd, parsed, apart(before), visit, builtins)
+    if (verdict) return verdict
+  }
+}
+
+const apart = (env: Env): Env => ({
+  ...env,
+  files: new Map(env.files),
+  known: { ...env.known },
+  process: { ...env.process },
+  vars: new Map(env.vars),
+})
+
+async function examineReading(
+  cmd: Command,
+  parsed: Parsed,
+  env: Env,
+  visit: Visit,
+  builtins: boolean,
+): Promise<string | undefined> {
   const { args, chdir, local, name } = parsed
   const here: Env = chdir ? { ...env, cwd: pathOf(chdir, env) } : env
   let verdict: string | undefined

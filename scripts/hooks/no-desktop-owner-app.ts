@@ -21,7 +21,22 @@ type Environment = Record<string, string | undefined>
 const GUARD = "no-desktop-owner-app"
 const TOOL = /^agent-desktop(?:@.*)?$/
 const MENTION = /agent-desktop/
-const LAUNCHERS = new Set(["bun", "bunx", "find", "npm", "npx", "pnpm", "pnpx", "yarn"])
+const LAUNCHERS = new Set([
+  "bun",
+  "bunx",
+  "find",
+  "flock",
+  "npm",
+  "npx",
+  "pnpm",
+  "pnpx",
+  "setsid",
+  "watch",
+  "yarn",
+])
+// Wrappers a shell line may hide in: watch joins its words past its options into one sh -c line, flock -c runs its string, and a word of any of them holding a space may be one.
+const LINES = new Set(["flock", "setsid", "watch"])
+const WATCH_TAKES = new Set(["--equexit", "--interval", "--shotsdir", "-n", "-q", "-s"])
 const INTERPRETERS = new Set([
   "bun",
   "deno",
@@ -122,6 +137,97 @@ function judge(words: Word[], viaXargs: boolean, apps: Set<string>): string | un
   if (FRONT.has(sub) && named.length === 0 && !rooted) return front(sub)
 }
 
+// The character before a quote that opens a string, so a quote the hook cannot pair as a string (a Ruby ?" character literal, a quote inside a Perl m[…] regex) reads as code, not as a string's edge.
+const OPENER_BEFORE = new Set(["(", ",", "=", ":", "+", ";"])
+// The character after a closing quote, by the same rule.
+const CLOSER_AFTER = new Set([")", "]", "}", ",", ";", ".", "+", ":"])
+const opensAt = (code: string, k: number) =>
+  k === 0 || /\s/.test(code[k - 1]!) || OPENER_BEFORE.has(code[k - 1]!)
+const closesAt = (code: string, k: number) =>
+  k >= code.length || /\s/.test(code[k]!) || CLOSER_AFTER.has(code[k]!)
+
+// An interpreter's code split into its quoted strings and the text outside them, where a quote is a string's edge only in a position a string can open and close in; a string left open, or one closed in a spot no string closes in, runs to the end or is marked unclosed, so the code it holds reads as code.
+function quotedParts(code: string) {
+  const strings: { closed: boolean; quote: string; text: string }[] = []
+  let outside = ""
+  let k = 0
+  while (k < code.length) {
+    const c = code[k]
+    if ((c !== "'" && c !== '"' && c !== "`") || !opensAt(code, k)) {
+      outside += c
+      k++
+      continue
+    }
+    const quote = code.startsWith(c.repeat(3), k) ? c.repeat(3) : c
+    let text = ""
+    let closed = false
+    k += quote.length
+    while (k < code.length) {
+      if (code[k] === "\\") {
+        text += code.slice(k, k + 2)
+        k += 2
+      } else if (code.startsWith(quote, k)) {
+        closed = closesAt(code, k + quote.length)
+        k += quote.length
+        break
+      } else text += code[k++]
+    }
+    strings.push({ closed, quote, text })
+    outside += " "
+  }
+  return { outside, strings }
+}
+
+const RUNNERS = new Set([...LAUNCHERS, ...SHELLS, "command", "exec", "time", "xargs"])
+
+// Whether a shell line runs agent-desktop, or holds a form this hook refuses in a Bash call naming it (a script file, or flock, setsid or watch naming it); a line it cannot read counts as one.
+async function runsTool(line: string): Promise<boolean> {
+  try {
+    const env: Env = { cwd: undefined, files: new Map(), known: {}, process: {}, vars: new Map() }
+    const visit: Visit = async (_, { args, first, name }) =>
+      TOOL.test(name) ||
+      (first !== undefined && unreadable(first)) ||
+      (LAUNCHERS.has(name) && args.some((a) => TOOL.test(program(a.value)))) ||
+      ((INTERPRETERS.has(name) || LINES.has(name)) && args.some((a) => MENTION.test(a.value))) ||
+      name === "source" ||
+      name === "." ||
+      first?.value.includes("/")
+        ? "runs"
+        : undefined
+    return (await run(lex(line), env, visit)) !== undefined
+  } catch {
+    return true
+  }
+}
+
+// Prose: a quoted string with no quote, backslash, $, brace or newline, where each agent-desktop follows a plain word (not a flag, launcher or wrapper) and the string, read as a shell line, runs no agent-desktop.
+async function prose(text: string): Promise<boolean> {
+  if (/['"`\\${}\n\r]/.test(text)) return false
+  for (const match of text.matchAll(/agent-desktop/g)) {
+    const before = text.slice(0, match.index)
+    const word = before.trimEnd().split(/\s+/).pop() ?? ""
+    if (!/\s$/.test(before) || !/[\p{L}\p{N},:.]$/u.test(word) || word.startsWith("-")) return false
+    const last =
+      word
+        .replace(/[,:.]+$/, "")
+        .split(/[^\w.-]/)
+        .pop() ?? ""
+    if (RUNNERS.has(last.toLowerCase())) return false
+  }
+  return !(await runsTool(text))
+}
+
+// Whether an interpreter's argument may run agent-desktop: it names the tool outside a quoted string, or in a string that is not prose.
+async function callsTool(code: string): Promise<boolean> {
+  if (!MENTION.test(code)) return false
+  const { outside, strings } = quotedParts(code)
+  if (MENTION.test(outside)) return true
+  for (const { closed, quote, text } of strings)
+    if (MENTION.test(text) && !(closed && (quote === "'" || quote === '"') && (await prose(text))))
+      return true
+  return false
+}
+
 // The guard list's apps, read once per call and only for a call that runs agent-desktop.
 function lister(environment: Environment) {
   let loaded: Promise<{ apps?: Set<string>; refusal?: string }> | undefined
@@ -160,6 +266,23 @@ async function judgeText(
       const inner = { ...cmd, words: at === -1 ? [] : args.slice(at + 1) }
       return inner.words.length === 0 ? undefined : examine(inner, here, visit, false)
     }
+    if (LINES.has(name) && mention) {
+      const lines = args.filter((a) => /\s/.test(a.value)).map((a) => a.value)
+      if (name === "watch") {
+        let k = 0
+        while (args[k]?.value.startsWith("-")) k += WATCH_TAKES.has(args[k].value) ? 2 : 1
+        lines.push(
+          args
+            .slice(k)
+            .map((a) => a.value)
+            .join(" "),
+        )
+      }
+      for (const line of lines) {
+        const verdict = await judgeText(line, here.cwd, apps, depth + 1)
+        if (verdict) return verdict
+      }
+    }
     let words: Word[] | undefined
     if (TOOL.test(name)) words = args
     else if (LAUNCHERS.has(name)) {
@@ -180,8 +303,8 @@ async function judgeText(
       return unread(
         `the program it runs (it comes from ${first.unknown ?? "a word it cannot read"})`,
       )
-    if (INTERPRETERS.has(name) && args.some((a) => MENTION.test(a.value)))
-      return unread(`what ${name} runs`)
+    if (INTERPRETERS.has(name))
+      for (const a of args) if (await callsTool(a.value)) return unread(`what ${name} runs`)
     if (name === "source" || name === "." || first?.value.includes("/"))
       return unread(SCRIPT_IN_CALL)
   }
