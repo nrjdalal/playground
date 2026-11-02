@@ -44,7 +44,7 @@ import {
   supervisorRunning,
 } from "./probe"
 import { runSpawn, startDispatcher } from "./spawn"
-import { runStore } from "./store"
+import { runStore, terminalIo } from "./store"
 import { OUTSIDE_CMUX, startJobs, TERMINAL } from "./terminal"
 import { askPurge, uninstall } from "./uninstall"
 import { runUpdate, spawnRun } from "./update"
@@ -388,17 +388,7 @@ const code =
                           : command === "uninstall"
                             ? await uninstallAll(rest[0] === "--purge")
                             : command === "ext" || command === "settings"
-                              ? await runStore(
-                                  command,
-                                  rest,
-                                  {
-                                    data: dataDir(),
-                                    out: console.log,
-                                    stdin: () => Bun.stdin.text(),
-                                    write: Bun.write,
-                                  },
-                                  console.error,
-                                )
+                              ? await runStore(command, rest, terminalIo(), console.error)
                               : command === "rules"
                                 ? // loaded only here, since it reads the rules hook and the settings package, which the bare dispatcher's start needs neither of
                                   await (
