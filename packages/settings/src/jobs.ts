@@ -70,8 +70,8 @@ const launchd = (name: string, job: Pick<Job, "description" | "schedule">): Job 
   ...job,
 })
 
-const bunJob = (name: string) =>
-  `{bun} --no-env-file {checkout}/packages/scripts/src/${name}/cli.ts`
+const bunJob = (name: string, root = "{checkout}") =>
+  `{bun} --no-env-file ${root}/packages/scripts/src/${name}/cli.ts`
 
 // The jobs Playground ships, each off until the owner turns it on but the Dashboard's own; A to Z.
 export const JOBS: Record<string, Job> = {
@@ -81,15 +81,11 @@ export const JOBS: Record<string, Job> = {
     schedule: { always: true },
   }),
   // It runs from the Dashboard's checkout, whose .env names the database it writes; the main checkout has none.
-  "ops-changelog": terminal(
-    "ops-changelog",
-    "{bun} --no-env-file {dashboard}/packages/scripts/src/ops-changelog/cli.ts",
-    {
-      cwd: "{dashboard}",
-      description: "Syncs new canary merges and main versions into the Changelog every 5 minutes.",
-      schedule: { every: 300 },
-    },
-  ),
+  "ops-changelog": terminal("ops-changelog", bunJob("ops-changelog", "{dashboard}"), {
+    cwd: "{dashboard}",
+    description: "Syncs new canary merges and main versions into the Changelog every 5 minutes.",
+    schedule: { every: 300 },
+  }),
   // The one job on by default: the Dashboard serves first run and every settings write, so a store with no row for it, or no store, keeps it running. It runs from the Dashboard's checkout, since its supervisor rolls the checkout it runs in and refuses any other branch.
   "ops-dashboard": terminal("ops-dashboard", "{dashboard}/scripts/ops/dashboard/run.sh", {
     cwd: "{dashboard}",
