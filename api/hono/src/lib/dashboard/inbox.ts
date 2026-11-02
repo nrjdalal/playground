@@ -219,8 +219,8 @@ const link = z
 
 // A draft's words, who they go to by a short name ("a colleague's thread"), the thread they reply in, which its card links to, and files its card shows, which Send leaves out of Slack.
 export const draftSchema = z.strictObject({
-  ...place,
   attachments,
+  ...place,
   text: words,
   thread: soFar,
   to: oneLine(LIMITS.name),
