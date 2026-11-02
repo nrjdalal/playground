@@ -47,7 +47,7 @@ describe("the two settings files carry one command per factory hook", () => {
     const shapes = new Set(
       [...(await factoryCommands(FACTORY)), ...(await factoryCommands(PROJECT))].map((c) =>
         c
-          .replaceAll(/scripts\/hooks\/[\w-]+\.ts/g, "scripts/hooks/<hook>.ts")
+          .replaceAll(/scripts\/hooks\/(bundled\/)?[\w-]+\.([jt]s)/g, "scripts/hooks/$1<hook>.$2")
           .replaceAll(/"[\w-]+: /g, '"<hook>: '),
       ),
     )
@@ -63,7 +63,7 @@ describe("the two settings files carry one command per factory hook", () => {
   test("every PreToolUse wrapper, and only those, refuses on a crash and, under a role, on a missing script", async () => {
     for (const file of [FACTORY, PROJECT])
       for (const { command, event } of await entries(file)) {
-        const name = command.match(/scripts\/hooks\/([\w-]+)\.ts/)?.[1]
+        const name = command.match(/scripts\/hooks\/(?:bundled\/)?([\w-]+)\.[jt]s/)?.[1]
         const closed = [
           `|| { [ -z "$PLAYGROUND_ROLE" ] && exit 0; echo "${name}: `,
           `; c=$?; [ $c = 0 ] || [ $c = 2 ] || { echo "${name}: crashed (exit $c)`,
@@ -75,32 +75,68 @@ describe("the two settings files carry one command per factory hook", () => {
       }
   })
 
+  // A PreToolUse guard runs its bundle, which imports nothing at run time, so a missing or damaged node_modules cannot crash it; every other hook runs its source.
+  test("every PreToolUse wrapper runs its guard's bundle, and every other its source", async () => {
+    for (const file of [FACTORY, PROJECT])
+      for (const { command, event } of await entries(file)) {
+        const paths = [...command.matchAll(/scripts\/hooks\/[\w/-]+\.[jt]s/g)].map((m) => m[0])
+        for (const path of paths)
+          expect(path).toMatch(
+            event === "PreToolUse"
+              ? /^scripts\/hooks\/bundled\/[\w-]+\.js$/
+              : /^scripts\/hooks\/[\w-]+\.ts$/,
+          )
+      }
+  })
+
+  // A skill's frontmatter registers a guard for a session outside this checkout, so it fails closed the same way.
+  test("the playbook skill's no-linear-ticket wrapper runs the bundle and fails closed", async () => {
+    const text = await Bun.file(
+      join(root, "extensions", "core", "skills", "playbook", "SKILL.md"),
+    ).text()
+    const front = Bun.YAML.parse(text.split("---\n")[1]!) as {
+      hooks: { PreToolUse: Hook[] }
+    }
+    const [command] = front.hooks.PreToolUse.flatMap((e) => e.hooks.map((h) => h.command))
+    expect(command).toContain('[ -f "$PLAYGROUND_REPO/scripts/hooks/bundled/no-linear-ticket.js" ]')
+    expect(command).toContain('|| { [ -z "$PLAYGROUND_ROLE" ] && exit 0; echo "no-linear-ticket: ')
+    expect(command).toContain(
+      'bun --no-env-file scripts/hooks/bundled/no-linear-ticket.js; c=$?; [ $c = 0 ] || [ $c = 2 ] || { echo "no-linear-ticket: crashed (exit $c)',
+    )
+    expect(command).toEndWith("exit $c")
+  })
+
   // The command runs nothing when its script is missing, so a renamed or removed hook would turn its guard off with no word.
   test("every factory command checks and runs the same hook script, and that script exists", async () => {
     for (const command of [
       ...(await factoryCommands(FACTORY)),
       ...(await factoryCommands(PROJECT)),
     ]) {
-      const names = [...command.matchAll(/scripts\/hooks\/([\w-]+)\.ts/g)].map((m) => m[1])
-      expect(names).toHaveLength(2)
-      expect(names[1]).toBe(names[0])
-      expect(existsSync(join(root, "scripts", "hooks", `${names[0]}.ts`))).toBe(true)
+      const paths = [...command.matchAll(/scripts\/hooks\/(?:bundled\/)?([\w-]+)\.[jt]s/g)]
+      expect(paths).toHaveLength(2)
+      expect(paths[1]![0]).toBe(paths[0]![0])
+      expect(existsSync(join(root, paths[0]![0]))).toBe(true)
+      expect(existsSync(join(root, "scripts", "hooks", `${paths[0]![1]}.ts`))).toBe(true)
     }
   })
 })
 
-// Each case runs the real command under the shells Claude Code may use, in scratch folders whose hooks/no-stash.ts prints the folder it ran from.
+// Each case runs the real command under the shells Claude Code may use, in scratch folders whose no-stash bundle prints the folder it ran from.
 describe("the command finds the checkout", () => {
   const scratch = realpathSync(mkdtempSync(join(tmpdir(), "hooks-917-")))
   afterAll(() => rmSync(scratch, { force: true, recursive: true }))
-  const withHook = (dir: string, body = "console.log(process.cwd())\n", hook = "no-stash") => {
-    mkdirSync(join(dir, "scripts", "hooks"), { recursive: true })
-    writeFileSync(join(dir, "scripts", "hooks", `${hook}.ts`), body)
+  const withHook = (
+    dir: string,
+    body = "console.log(process.cwd())\n",
+    file = join("scripts", "hooks", "bundled", "no-stash.js"),
+  ) => {
+    mkdirSync(join(dir, file, ".."), { recursive: true })
+    writeFileSync(join(dir, file), body)
     return dir
   }
   const git = (cwd: string, ...args: string[]) =>
     Bun.spawnSync(["git", ...args], { cwd, stderr: "ignore", stdout: "ignore" }).exitCode
-  // A scratch repo whose own hooks/no-stash.ts is committed, and a worktree of it, which holds a copy.
+  // A scratch repo whose own no-stash bundle is committed, and a worktree of it, which holds a copy.
   const main = withHook(join(scratch, "main"))
   git(main, "init", "-q", "-b", "main")
   git(main, "add", ".")
@@ -113,12 +149,14 @@ describe("the command finds the checkout", () => {
   mkdirSync(empty)
   // Stub guards that crash and refuse, and a Stop hook that crashes.
   const crashing = withHook(join(scratch, "crashing"), "process.exit(1)\n")
-  withHook(crashing, "process.exit(1)\n", "no-chat-question")
+  withHook(crashing, "process.exit(1)\n", join("scripts", "hooks", "no-chat-question.ts"))
   const refusing = withHook(join(scratch, "refusing"), "process.exit(2)\n")
 
   const command = async (file: string, hook: string) => {
     const found = (await entries(file)).find(
-      (e) => e.command.includes(`scripts/hooks/${hook}.ts`) && e.event !== "SessionStart",
+      (e) =>
+        new RegExp(`scripts/hooks/(bundled/)?${hook}\\.[jt]s`).test(e.command) &&
+        e.event !== "SessionStart",
     )
     if (!found) throw new Error(`${file} registers no ${hook} hook`)
     return found.command

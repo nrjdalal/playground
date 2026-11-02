@@ -13,7 +13,8 @@ const root = join(import.meta.dir, "..", "..", "..", "..", "..")
 // The scratch folder stays for the system to clear, since a test removes no tree.
 const scratch = mkdtempSync(join(tmpdir(), "guard-probe-"))
 
-const wrapper = (hook: string) => `R=x; cd -P "$R" && bun --no-env-file scripts/hooks/${hook}.ts`
+const wrapper = (hook: string) =>
+  `R=x; cd -P "$R" && bun --no-env-file scripts/hooks/bundled/${hook}.js`
 const repo = join(scratch, "repo")
 mkdirSync(join(repo, "scripts"), { recursive: true })
 writeFileSync(
@@ -73,7 +74,7 @@ test("each guard gets {} without its wrapper's tail, and a crash is told to the 
     argv: [
       "sh",
       "-c",
-      'cd -P "$1" && exec bun --no-env-file "scripts/hooks/$2.ts"',
+      'cd -P "$1" && exec bun --no-env-file "scripts/hooks/bundled/$2.js"',
       "guard-probe",
       repo,
       "no-stash",
