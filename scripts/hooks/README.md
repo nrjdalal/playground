@@ -393,7 +393,9 @@ Only the first reading moves the folder, sets variables and records files for th
   Where the reader left the folder unknown ([The folder a hook reads](#the-folder-a-hook-reads)), it reads the command as running in the folder the line started in, the Bash tool's own cwd, since the shell is there unless that `cd` moved it: from the main checkout a build, a test run, a commit, a git move, a tool and a write to a path it cannot place are refused,
   and the refusal names the fix, naming the folder (`git -C <your worktree>`, `bun --cwd <your worktree>`) or a `cd` to a literal path that is there.
   A line that starts in a worktree runs as before, since each candidate folder of its own `cd` steps is inside that worktree.
-  It reads the shell a pipeline, a here-string or a heredoc feeds (`<reader> | sh`, `sudo -s`) as the shell's own command line, judging each command of a script it reads, and refusing a script it cannot read while the folder is the main checkout or unknown.
+  It reads the shell a pipeline feeds (`<reader> | sh`, `<reader> | sudo -s`) as the shell's own command line: a script it cannot read is refused while the folder that shell would run in is the main checkout or unknown.
+  A script it reads is judged command by command wherever the shell's stdin comes from, since the shared reader runs a shell's script itself.
+  Two forms keep canary's reading: a privilege wrapper's shell fed by a here-string or a heredoc (`sudo -s <<< '<command>'`), whose script this hook does not read, and a heredoc holding a value it cannot read (`sh <<EOF` around a substitution).
   It fails open on a call it cannot read.
   Its tests are in `bun run test:file tests/scripts/hooks`.
   The backstop behind it is `lefthook.yml`'s pre-commit step `main-checkout`, alone at priority 1 so it runs first, before any step that writes (lefthook runs a tie in any order).
