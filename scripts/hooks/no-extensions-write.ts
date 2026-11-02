@@ -22,10 +22,10 @@ import {
   pathOf,
   PRINTERS,
   program,
-  rootShell,
   run,
   slotWords,
   stdinOf,
+  stdinShell,
   type Text,
   tick,
   UNKNOWN,
@@ -225,11 +225,11 @@ function narrow(cmd: Command, env: Env): boolean {
   return false
 }
 
-// Whether a line holds a root shell (`sudo -s`, `doas -s`) anywhere, its groups' and substitutions' included, which runs as a script whatever a reader prints into it
+// Whether a line holds a shell reading its script from stdin (`sudo -s`, `sh`) anywhere, its groups' and substitutions' included, which runs whatever a reader prints into it
 function rooted(commands: Command[]): boolean {
   return commands.some(
     (cmd) =>
-      rootShell(cmd) ||
+      !!stdinShell(cmd) ||
       (!!cmd.inner && rooted(cmd.inner())) ||
       [...cmd.words, ...cmd.redirects.flatMap((r) => (r.target ? [r.target] : []))].some(
         (word) => !!word.procs && rooted(word.procs),
@@ -415,10 +415,16 @@ function inspect(raw: string, environment: Environment) {
     if (write) return refuse(write)
     // a command with no program runs nothing that reads the environment, so only its own assignments count
     const vars = !reader && first ? since(varsRead, env.vars, "") : []
-    // a root shell's heredoc or here-string is its script
-    const script = rootShell(cmd)
-      ? cmd.redirects.flatMap((r) => (r.body && !r.body.unknown ? [r.body.value] : []))
-      : []
+    // a root shell's stdin is its script, so one the hook cannot read is refused
+    const script: string[] = []
+    if (stdinShell(cmd) === "root") {
+      const text = await stdinOf(cmd, env)
+      if (text.unknown || marked(text.value))
+        return refuse(
+          `a root shell whose script (${text.unknown ?? "a value it cannot read"}) the hook cannot read; run its commands as calls of their own, with no root shell`,
+        )
+      script.push(text.value)
+    }
     for (const raw of reader ? [] : [...script, ...runsOf(parsed, vars, whole, rootLine)]) {
       const line =
         xargs?.replace && fed ? filled(raw, xargs.replace, fed.unknown ? UNKNOWN : fed.value) : raw

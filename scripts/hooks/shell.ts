@@ -176,26 +176,36 @@ const ROOT_SHELLS = new Map([
   ["doas", new Set(["-s"])],
   ["sudo", new Set(["--login", "--shell", "-i", "-s"])],
 ])
-// Whether a command is a privilege wrapper starting a root shell with no command of its own (`sudo -s`, `doas -s`), as its own first words, a reserved word, a function's name or an assignment before it skipped
-export function rootShell(cmd: Command): boolean {
+// Whether a command starts a shell that reads its script from stdin, with no command of its own: "root" for a privilege wrapper's shell (`sudo -s`, `nice doas -s`, an option or program in a variable taken as one), "shell" for a shell given no script (`sh`, `sudo bash`); a reserved word, a function's name or an assignment before it skipped
+export function stdinShell(cmd: Command): "root" | "shell" | undefined {
+  const { args, first, name } = parse(cmd)
+  if (first && !marked(first.value)) {
+    if (!SHELLS.has(name)) return undefined
+    const { inline, operand } = shellOperand(args, name)
+    return inline || operand ? undefined : "shell"
+  }
   let at = 0
   for (let w = cmd.words[at]; w && !w.quoted; w = cmd.words[at]) {
     if (w.value === "function") at += 2
     else if (RESERVED.has(w.value) || ASSIGN.test(w.value)) at++
     else break
   }
-  const [wrapper, ...rest] = cmd.words.slice(at)
-  const name = wrapper && !wrapper.quoted ? program(wrapper.value) : ""
-  const shells = ROOT_SHELLS.get(name)
-  if (!shells) return false
-  const { flags } = WRAPPERS.get(name) as Options
-  // a listed option, alone or in a cluster of the wrapper's own flags (`-Es`)
-  const starts = (v: string) =>
-    shells.has(v) ||
-    (/^-[A-Za-z]+$/.test(v) &&
-      [...v.slice(1)].every((c) => flags.has(`-${c}`)) &&
-      [...v.slice(1)].some((c) => shells.has(`-${c}`)))
-  return rest.some((w) => !w.quoted && starts(w.value)) && !parse(cmd).first
+  const end = first ? cmd.words.indexOf(first) : -1
+  const before = cmd.words.slice(at, end === -1 ? undefined : end)
+  const k = before.findIndex((w) => !w.quoted && ROOT_SHELLS.has(program(w.value)))
+  if (k === -1) return undefined
+  const wrapper = program(before[k].value)
+  const shells = ROOT_SHELLS.get(wrapper) as Set<string>
+  const { flags } = WRAPPERS.get(wrapper) as Options
+  // a listed option, alone or in a cluster of the wrapper's own flags (`-Es`), or a word the hook cannot read, which may hold one
+  const starts = ({ quoted, value }: Word) =>
+    marked(value) ||
+    (!quoted &&
+      (shells.has(value) ||
+        (/^-[A-Za-z]+$/.test(value) &&
+          [...value.slice(1)].every((c) => flags.has(`-${c}`)) &&
+          [...value.slice(1)].some((c) => shells.has(`-${c}`)))))
+  return !!first || before.slice(k + 1).some(starts) ? "root" : undefined
 }
 // Wrappers that take one positional argument (a count or a duration) before the command.
 const COUNTED = new Set(["repeat", "timeout"])
