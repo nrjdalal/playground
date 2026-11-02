@@ -575,7 +575,7 @@ describe("a read of the root, and writes elsewhere, run", () => {
     ["cd - back to a folder elsewhere", "cd /tmp; cd -; echo x > notes"],
     ["popd back to a folder elsewhere", `cd ${WORK}; pushd /tmp; popd; echo x > notes`],
     ["popd with an empty stack", `cd ${WORK}; popd; echo x > notes`],
-    ["cd by a glob elsewhere", "cd /tmp/scr*; rm -rf x"],
+    ["cd by a glob elsewhere", "cd /usr/l*; rm -rf x"],
     ["a redirect through a .. elsewhere", `echo x > ${WORK}/../notes`],
     ["a shell reading a script it holds whole", "echo ls | bash"],
     ["a shell running a script file by its path", "bash ./setup.sh"],
