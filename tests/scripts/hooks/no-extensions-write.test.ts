@@ -476,6 +476,10 @@ describe("a quoted argument is read as a command line only where a program runs 
       "a git-only line whose commit message names a removal",
       "git add -A && git commit -m 'fix: rm -rf ~ bug' && git push",
     ],
+    [
+      "a git call given an unread word, then a plain commit",
+      "git log \"$REV\"; git commit -m 'fix(x): y'",
+    ],
   ])("%s runs from a worktree", async (_, command) => {
     expect(await at(command, join(homedir(), "x", ".claude", "worktrees", "y"))).toBeUndefined()
   })
@@ -633,6 +637,36 @@ describe("a quoted argument is read as a command line only where a program runs 
     ["a positional piped into ssh", "set -- 'rm -rf ~'; echo \"$1\" | ssh h"],
     ["a positional run as a command", "set -- 'rm -rf ~'; $1"],
     ["a positional written to a script sh runs", "set -- 'rm -rf ~'; echo \"$1\" > f.sh; sh f.sh"],
+    [
+      "a commit message run by a stored git alias through $_",
+      "git commit --allow-empty -m 'rm -rf ~'; git x \"$_\"",
+    ],
+    [
+      "a commit message run by git rebase -x",
+      "git commit --allow-empty -m 'rm -rf ~'; git rebase -x \"$_\" HEAD~1",
+    ],
+    [
+      "a commit message run by git rebase --exec",
+      "git commit --allow-empty -m 'rm -rf ~'; git rebase --exec \"$_\" HEAD~1",
+    ],
+    [
+      "a commit message run by git bisect run",
+      "git commit --allow-empty -m 'rm -rf ~'; git bisect run \"$_\"",
+    ],
+    [
+      "a commit message run by git submodule foreach",
+      "git commit --allow-empty -m 'rm -rf ~'; git submodule foreach \"$_\"",
+    ],
+    [
+      "a commit message run by git filter-branch",
+      "git commit --allow-empty -m 'rm -rf ~'; git filter-branch -f --tree-filter \"$_\" HEAD",
+    ],
+    [
+      "a commit message run by git difftool -x",
+      "git commit --allow-empty -m 'rm -rf ~'; git difftool -y -x \"$_\" HEAD~1",
+    ],
+    ["a positional run by git rebase -x", "set -- 'rm -rf ~'; git rebase -x \"$1\" HEAD~1"],
+    ["an argument run by git submodule foreach", "true 'rm -rf ~'; git submodule foreach \"$_\""],
   ])("%s stays refused", async (_, command) => {
     for (const cwd of [...homes, join(homedir(), "x", ".claude", "worktrees", "y")])
       expect(await at(command, cwd)).toContain("no-extensions-write hook refuses")
