@@ -114,7 +114,7 @@ const RESERVED = new Set([
 // The words that close a compound command, whose output the hook does not follow.
 const GROUPING = new Set(["}", "done", "esac", "fi"])
 export const ASSIGN = /^[A-Za-z_]\w*=/
-// Each wrapper's options, A to Z: its flags, then the options that take a value, short and long; parse reads a cluster (`-Hp`) letter by letter and a value attached (`-pwc`, `--prompt=wc`) or as the next word, and makes the program unknown at an option missing here, so a missing one costs a refusal, never a bypass
+// Each wrapper's options, A to Z: its flags, then the options that take a value, short and long; parse reads a cluster (`-Hp`) letter by letter and a value attached (`-pwc`, `--prompt=wc`) or as the next word, and reads an option missing here both as a flag and as taking the next word, so a hook judges the program under each
 type Options = { flags: Set<string>; values: Set<string> }
 const WRAPPERS = new Map<string, Options>(
   Object.entries({
@@ -699,6 +699,8 @@ function substituted(inner: Command[]): Text {
 export type Xargs = { replace?: string } | undefined
 
 export type Parsed = {
+  // the other readings of a wrapper's option it cannot read, each judged as the command too
+  also: Parsed[]
   args: Word[]
   chdir?: Word
   first?: Word
@@ -710,33 +712,55 @@ export type Parsed = {
 // env's split-string option, attached or not, with the text it carries attached
 const SPLIT = /^(?:-[0iv]*S|--split-string(?:=|$))(.*)$/
 
+type State = { chdir?: Word; local: Map<string, Text>; rest: Word[]; xargs: Xargs }
+
 export function parse(cmd: Command): Parsed {
   // the words still to read, the next one last, so env -S puts its words back in front in the time of their own count
-  const rest = cmd.words.toReversed()
-  const peek = (): Word | undefined => rest[rest.length - 1]
-  const take = (): Word | undefined => rest.pop()
-  const local = new Map<string, Text>()
-  const assign = (w: Word) => {
-    const eq = w.value.indexOf("=")
-    local.set(w.value.slice(0, eq), slice(w, eq + 1))
-  }
-  let chdir: Word | undefined
-  let xargs: Xargs
-  for (let w = peek(); w && !w.quoted; w = peek()) {
-    if (RESERVED.has(w.value)) take()
+  const state: State = { local: new Map(), rest: cmd.words.toReversed(), xargs: undefined }
+  const { rest } = state
+  for (let w = rest.at(-1); w && !w.quoted; w = rest.at(-1)) {
+    if (RESERVED.has(w.value)) rest.pop()
     else if (w.value === "function") rest.length = Math.max(0, rest.length - 2)
     else break
   }
-  while (ASSIGN.test(peek()?.value ?? "")) assign(take() as Word)
-  for (;;) {
-    const wrapper = program(peek()?.value ?? "")
-    const options = WRAPPERS.get(wrapper)
-    if (!options) break
-    if (wrapper === "xargs") xargs ??= {}
-    take()
+  while (ASSIGN.test(rest.at(-1)?.value ?? "")) assign(state.local, rest.pop() as Word)
+  return unwrap(state)
+}
+
+const assign = (local: Map<string, Text>, w: Word) => {
+  const eq = w.value.indexOf("=")
+  local.set(w.value.slice(0, eq), slice(w, eq + 1))
+}
+
+// The program behind the wrappers at the front of the words, resumed inside `inside`'s options for a second reading: an option the wrapper's lists lack is read as a flag, as a value-less option, and again as taking the next word, and a value in a variable again as expanding to no word, each other reading kept in `also`.
+function unwrap(state: State, inside?: string): Parsed {
+  const { local, rest } = state
+  const peek = (): Word | undefined => rest[rest.length - 1]
+  const take = (): Word | undefined => rest.pop()
+  const also: Parsed[] = []
+  const fork = (wrapper: string, drop: number) =>
+    also.push(
+      unwrap(
+        {
+          chdir: state.chdir,
+          local: new Map(local),
+          rest: rest.slice(0, Math.max(0, rest.length - drop)),
+          xargs: state.xargs && { ...state.xargs },
+        },
+        wrapper,
+      ),
+    )
+  for (let wrapper = inside; ; wrapper = undefined) {
+    if (!wrapper) {
+      wrapper = program(peek()?.value ?? "")
+      if (!WRAPPERS.has(wrapper)) break
+      if (wrapper === "xargs") state.xargs ??= {}
+      take()
+    }
+    const options = WRAPPERS.get(wrapper) as Options
     for (let w = peek(); w; w = peek()) {
       const v = w.value
-      if (ASSIGN.test(v)) assign(take() as Word)
+      if (ASSIGN.test(v)) assign(local, take() as Word)
       // env -S splits its one string into the words it runs
       else if (wrapper === "env" && SPLIT.test(v)) {
         const attached = SPLIT.exec(v)?.[1] ?? ""
@@ -745,30 +769,28 @@ export function parse(cmd: Command): Parsed {
         for (let j = split.length - 1; j >= 0; j--) rest.push({ quoted: false, value: split[j] })
       } else if (wrapper === "env" && (v === "-C" || v === "--chdir")) {
         take()
-        chdir = take()
+        state.chdir = take()
       } else if (wrapper === "env" && /^(?:-C|--chdir=)./.test(v)) {
-        chdir = slice(w, v.startsWith("-C") ? 2 : "--chdir=".length)
+        state.chdir = slice(w, v.startsWith("-C") ? 2 : "--chdir=".length)
         take()
-      } else if (xargs && /^(?:-[IiJ]|--replace)/.test(v)) {
+      } else if (state.xargs && /^(?:-[IiJ]|--replace)/.test(v)) {
         const attached = /^(?:-[IiJ]|--replace=?)(.*)$/.exec(v)?.[1] ?? ""
         take()
-        xargs.replace = v === "-I" || v === "-J" ? take()?.value : attached || "{}"
+        state.xargs.replace = v === "-I" || v === "-J" ? take()?.value : attached || "{}"
       } else if (v === "--") {
         take()
+        while (ASSIGN.test(peek()?.value ?? "")) assign(local, take() as Word)
         break
       } else if (v.startsWith("-") && v !== "-") {
-        const end = marked(v) ? undefined : optionValue(v, options)
-        const value = end === "next" ? rest[rest.length - 2] : undefined
-        // an option it cannot read, or a value that may expand to no word, leaves the program unknown, its words kept for a hook to search
-        if (!end || (value && marked(value.value)))
-          return {
-            args: rest.reverse(),
-            chdir,
-            first: { ...unknown(`a ${wrapper} option it cannot read`), quoted: false },
-            local,
-            name: program(UNKNOWN),
-            xargs,
-          }
+        // nice's own -<number> is its adjustment
+        const end =
+          wrapper === "nice" && /^-\d+$/.test(v)
+            ? "own"
+            : marked(v)
+              ? undefined
+              : optionValue(v, options)
+        if (!end) fork(wrapper, 2)
+        else if (end === "next" && marked(rest[rest.length - 2]?.value ?? "")) fork(wrapper, 3)
         rest.length = Math.max(0, rest.length - (end === "next" ? 2 : 1))
       } else break
     }
@@ -776,12 +798,13 @@ export function parse(cmd: Command): Parsed {
   }
   const first = take()
   return {
+    also,
     args: rest.reverse(),
-    chdir,
+    chdir: state.chdir,
     first,
     local,
     name: first ? program(first.value) : "",
-    xargs,
+    xargs: state.xargs,
   }
 }
 
@@ -853,7 +876,20 @@ export async function examine(
   builtins: boolean,
 ): Promise<string | undefined> {
   tick()
-  const parsed = parse(cmd)
+  const readings = (parsed: Parsed): Parsed[] => [parsed, ...parsed.also.flatMap(readings)]
+  for (const parsed of readings(parse(cmd))) {
+    const verdict = await examineReading(cmd, parsed, env, visit, builtins)
+    if (verdict) return verdict
+  }
+}
+
+async function examineReading(
+  cmd: Command,
+  parsed: Parsed,
+  env: Env,
+  visit: Visit,
+  builtins: boolean,
+): Promise<string | undefined> {
   const { args, chdir, local, name } = parsed
   const here: Env = chdir ? { ...env, cwd: pathOf(chdir, env) } : env
   let verdict: string | undefined
