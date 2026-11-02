@@ -137,6 +137,33 @@ const COUNTED = new Set(["repeat", "timeout"])
 export const SHELLS = new Set(["bash", "dash", "ksh", "sh", "zsh"])
 const EXPORTS = new Set(["declare", "export", "local", "readonly", "typeset"])
 export const PRINTERS = new Set(["echo", "printf"])
+// Every git-reading hook's one list of the words git 2.56 steps over before its subcommand: each option that takes the next word as its value, and --exec-path, which takes none but whose bare form prints git's folder and exits, so the word after it never runs.
+export const GIT_TAKES = new Set([
+  "-C",
+  "-c",
+  "--attr-source",
+  "--config-env",
+  "--exec-path",
+  "--git-dir",
+  "--namespace",
+  "--work-tree",
+])
+let builtins: Set<string> | undefined
+// Whether git runs a word as its own command, which no alias can replace.
+export function gitBuiltin(word: string): boolean {
+  builtins ??= new Set(
+    Bun.spawnSync(["git", "--list-cmds=builtins"], { stderr: "ignore" })
+      .stdout.toString()
+      .split("\n")
+      .filter(Boolean),
+  )
+  return builtins.has(word)
+}
+// Whether git takes the word after a GIT_TAKES option as its value: any word but one of git's own subcommands, which, taken as a value, stops git with an error, so the hook reads it as the subcommand, the stricter way.
+export function gitTakes(option: string | undefined, next: string | undefined): boolean {
+  if (option === undefined || !GIT_TAKES.has(option)) return false
+  return next === undefined || marked(next) || !gitBuiltin(next)
+}
 
 const API_FIELDS = new Set(["-F", "--field", "-f", "--raw-field"])
 const API_TAKES = new Set([

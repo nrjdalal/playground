@@ -11,6 +11,7 @@ import {
   type Command,
   type Env,
   examine,
+  gitTakes,
   knownVariables,
   lex,
   parseFlags,
@@ -39,14 +40,6 @@ const OPUS_PATHS = [
   "web/next/",
 ]
 
-const GIT_GLOBALS = new Set([
-  "-c",
-  "--config-env",
-  "--exec-path",
-  "--git-dir",
-  "--namespace",
-  "--work-tree",
-])
 const COMMIT_TAKES = new Set([
   "--author",
   "-c",
@@ -387,7 +380,7 @@ const visitor = (load5: number, limit: number): Visit => {
       if (v === "-C") {
         const next = args[++k]
         dir = next ? pathOf(next, { ...env, cwd: dir }) : undefined
-      } else if (GIT_GLOBALS.has(v)) k++
+      } else if (gitTakes(v, args[k + 1]?.value)) k++
       else if (!v.startsWith("-")) break
     }
     const sub = isGit ? args[k]?.value : undefined

@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test"
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -549,6 +549,20 @@ describe("B5: making a repository at a guarded name is refused", () => {
   )("%s passes", async (_, command, dir) => {
     expect(await run(bash(command, at(dir)))).toBeUndefined()
     expect(await run(tool("create_repository", { name: "new-thing" }))).toBeUndefined()
+  })
+})
+
+describe("a start folder reached through a link reads as the clone it links to", () => {
+  test("a push from a link to a guarded clone is refused, and a read or a push from a link to another clone runs", async () => {
+    await symlink(dirs.ext, join(scratch, "link-ext"))
+    await symlink(dirs.other, join(scratch, "link-other"))
+    expect(await run(bash("git push origin HEAD:main", join(scratch, "link-ext")))).toContain(
+      "no-extension-repo-write hook refused",
+    )
+    expect(await run(bash("git log -1", join(scratch, "link-other")))).toBeUndefined()
+    expect(
+      await run(bash("git push origin HEAD:main", join(scratch, "link-other"))),
+    ).toBeUndefined()
   })
 })
 
