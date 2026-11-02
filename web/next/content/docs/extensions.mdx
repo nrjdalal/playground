@@ -26,7 +26,7 @@ playground settings import-jobs <jobs.json> [--launch-agents <dir>] [--scope <sc
   Your value wins over your org's, your org's over Playground's own in `core`, and `core`'s over the key's default.
   `core` is read-only here: it changes by a pull request to the Playground repo.
 - A value that reads as JSON (`3`, `true`, `["a","b"]`) is stored as JSON; anything else is stored as text.
-- Every change is one git commit in its scope's folder: its message is the reason, its author who made it (`--by <name>`, `owner` by default), so `why` is that folder's `git log`, and you can read it by hand with `git -C ~/.playground/extensions/<scope> log -p settings.json`.
+- Every change is one git commit in its scope's folder: its message is the reason, its author who made it (an extension write's author is the calling session, [Review](#review); `settings` takes `--by <name>`, `owner` by default), so `why` is that folder's `git log`, and you can read it by hand with `git -C ~/.playground/extensions/<scope> log -p settings.json`.
 - `policy.json` at the folder's root holds the settings every session reads, rebuilt on each change.
 - A machine with no settings of its own runs on the defaults.
 
@@ -193,19 +193,21 @@ A new revision of prose (a rule, a skill, a doc, a learning, a script or a templ
 A revision is the commit that wrote it, named by its sha.
 
 ```bash
-playground ext score <scope> <kind> <key> <sha> <0-5> --reason "<why>" --by <reviewer>
+playground ext score <scope> <kind> <key> <sha> <0-5> --reason "<why>"
 playground ext accept <scope> <kind> <key> <sha> --reason "<why>"
 playground ext reject <scope> <kind> <key> <sha> --reason "<why>"
 ```
 
 - A score below 5 is recorded as a commit of its own and leaves the proposal for a later revision or another score; a 5 accepts it.
+- A score from the proposal's own author is refused, so another session or you score it.
 - An accepted proposal moves out of `proposed/` over the accepted copy, and sessions read it at once.
-- `accept` is your own call: the CLI refuses it whenever `PLAYGROUND_ROLE` is set, `--by owner` included.
+- `accept` is your own call: the CLI refuses it whenever `PLAYGROUND_ROLE` is set.
   The dispatcher's window carries `PLAYGROUND_ROLE=dispatcher`, so run it there as `! env -u PLAYGROUND_ROLE playground ext accept …`.
 - `reject` removes the proposal.
 - Each judges only the proposal the sha names: one rewritten since is refused, so read it again first.
 - Each decision is a commit whose trailers name the verdict, the score and the reviewer, so `playground ext why` lists it beside each revision.
-- Every call from the terminal acts as you, so the name given with `--by` is recorded for the history, not checked.
+- A write's author is the calling session: its name in Claude Code's registry, else its `PLAYGROUND_ROLE`, and `owner` from your own terminal or the dashboard.
+  `ext` refuses `--by`, so no call names an author of its own.
 
 ## History
 
