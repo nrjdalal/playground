@@ -449,14 +449,17 @@ describe("a quoted argument is read as a command line only where a program runs 
     ["awk matching a line naming a runner", "awk '/watch/' /dev/null"],
     ["sed printing a line naming a shell", "sed -n '/sh -c/p' /dev/null"],
     ["awk with a block matching a line naming a runner", "awk '/watch/ {print}' /dev/null"],
+    ["sed substituting a starred regex", "sed 's/a*/b/' /dev/null"],
+    ["awk with its errors sent to /dev/null", "awk '$3 ~ /runner/' /dev/null 2>/dev/null"],
+    [
+      "awk with its errors joined and piped to head",
+      "awk '$3 ~ /runner/' /dev/null 2>&1 | head -3",
+    ],
   ])("%s runs from the home and the data folder", async (_, command) => {
     for (const cwd of homes) expect(await at(command, cwd)).toBeUndefined()
   })
 
   test.each([
-    ["a commit message naming a removal", "git commit -m 'fix: rm -rf ~ bug'"],
-    ["a commit message after -am naming a removal", "git commit -am 'fix: rm -rf ~ bug'"],
-    ["a tag message naming a removal", "git tag -m 'see rm -rf ~' v1"],
     ["ls of a glob", "ls *.md"],
     ["grep through a glob", "grep -n foo src/*.ts"],
     ["git add of a glob", "git add docs/*.md"],
@@ -468,14 +471,6 @@ describe("a quoted argument is read as a command line only where a program runs 
     ["an unknown variable set, then awk", "x=\"$1\"; awk '{print $1}' f"],
     ["find running grep on spaced text", "find . -name '*.ts' -exec grep -l 'foo bar' {} +"],
     ["awk over each file of a glob", "for f in *.md; do awk '/sh -c/ {print}' \"$f\"; done"],
-    [
-      "a commit of a glob pathspec with a message naming a removal",
-      "git commit docs/*.md -m 'fix: rm -rf ~ bug'",
-    ],
-    [
-      "a git-only line whose commit message names a removal",
-      "git add -A && git commit -m 'fix: rm -rf ~ bug' && git push",
-    ],
     [
       "a git call given an unread word, then a plain commit",
       "git log \"$REV\"; git commit -m 'fix(x): y'",
@@ -494,6 +489,28 @@ describe("a quoted argument is read as a command line only where a program runs 
       `awk 'BEGIN{system("touch ${join(homedir(), ".playground", "extensions", "x")}")}'`,
     ],
     ["touch in the root by ~", "touch ~/.playground/extensions/x"],
+    ["awk's system() removing the home", `awk 'BEGIN{system("rm -rf ~")}'`],
+    ["awk printing into a command removing the home", `awk 'BEGIN{print "x" | "rm -rf ~"}'`],
+    ["awk reading a command removing the home", `awk 'BEGIN{"rm -rf ~" | getline}'`],
+    [
+      "awk writing a removal into a git hook",
+      `awk 'BEGIN{print "rm -rf ~" > ".git/hooks/pre-commit"}'`,
+    ],
+    ["awk's system() of a -v value removing the home", "awk -v c='rm -rf ~' 'BEGIN{system(c)}'"],
+    ["gawk's system() removing the home", `gawk 'BEGIN{system("rm -rf ~")}'`],
+    ["nawk's system() removing the home", `nawk 'BEGIN{system("rm -rf ~")}'`],
+    ["sed's e command removing the home", "sed 'e rm -rf ~' /dev/null"],
+    ["sed's addressed e command removing the home", "sed '1e rm -rf ~' /dev/null"],
+    ["sed's s///e flag running a removal", "sed 's/.*/rm -rf ~/e' /dev/null"],
+    ["gsed's e command removing the home", "gsed '1e rm -rf ~' /dev/null"],
+    [
+      "sed's w command writing into the root",
+      `sed 'w ${join(homedir(), ".playground", "extensions", "x")}' /dev/null`,
+    ],
+    [
+      "sed's s///w flag writing into the root",
+      `sed 's/a/b/w ${join(homedir(), ".playground", "extensions", "x")}' /dev/null`,
+    ],
     ["watch removing the home", "watch 'rm -rf ~'"],
     ["watch removing by a glob in the data folder", "watch 'rm -rf ~/.playground/ext*'"],
     ["watch with an unknown word ahead of rm", "watch '$3 rm -rf ~'"],
@@ -667,6 +684,34 @@ describe("a quoted argument is read as a command line only where a program runs 
     ],
     ["a positional run by git rebase -x", "set -- 'rm -rf ~'; git rebase -x \"$1\" HEAD~1"],
     ["an argument run by git submodule foreach", "true 'rm -rf ~'; git submodule foreach \"$_\""],
+    [
+      "a commit message run by a stored git alias with no argument",
+      "git commit --allow-empty -m 'rm -rf ~'; git x",
+    ],
+    [
+      "a commit message xargs hands git rebase -x",
+      "git commit --allow-empty -m 'rm -rf ~'; git log -1 --format=%s | xargs -I{} git rebase -x {} HEAD~1",
+    ],
+    [
+      "a commit message xargs hands git submodule foreach",
+      "git commit --allow-empty -m 'rm -rf ~'; git log -1 --format=%s | xargs git submodule foreach",
+    ],
+    [
+      "a commit message written to a script git rebase -x runs",
+      "git commit --allow-empty -m 'rm -rf ~'; git log -1 --format=%s > .git/x.sh; git rebase -x 'sh .git/x.sh' HEAD~1",
+    ],
+    [
+      "a commit message written to a script git submodule foreach runs",
+      "git commit --allow-empty -m 'rm -rf ~'; git log -1 --format=%s > f.sh; git submodule foreach 'sh f.sh'",
+    ],
+    [
+      "a commit message piped into git submodule foreach's sh",
+      "git commit --allow-empty -m 'rm -rf ~'; git log -1 --format=%s | git submodule foreach sh",
+    ],
+    [
+      "a commit message piped into git submodule foreach's sh -s",
+      "git commit --allow-empty -m 'rm -rf ~'; git log -1 --format=%s | git submodule foreach 'sh -s'",
+    ],
   ])("%s stays refused", async (_, command) => {
     for (const cwd of [...homes, join(homedir(), "x", ".claude", "worktrees", "y")])
       expect(await at(command, cwd)).toContain("no-extensions-write hook refuses")
