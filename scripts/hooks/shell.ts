@@ -234,7 +234,7 @@ export function varsSince(vars: Map<string, Text>, cursor: number | undefined): 
 
 const merge = (out: Text, part: Text): void => {
   out.value += part.value
-  if (part.unknown) out.unknown ??= part.unknown
+  if (part.unknown && (!out.unknown || part.unknown === LARGE)) out.unknown = part.unknown
   if (part.variable) out.variable ??= part.variable
   if (part.reads?.length) (out.reads ??= []).push(...part.reads)
 }

@@ -4,6 +4,7 @@ import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { check as envDump } from "../../../scripts/hooks/no-env-dump"
+import { check as extensionRepoWrite } from "../../../scripts/hooks/no-extension-repo-write"
 import { check as extensionsWrite } from "../../../scripts/hooks/no-extensions-write"
 import { check as headlessLogin } from "../../../scripts/hooks/no-headless-login"
 import { check as killByName } from "../../../scripts/hooks/no-kill-by-name"
@@ -67,12 +68,29 @@ Bun.spawnSync([
   "https://github.com/acme-labs/demo.git",
 ])
 const OWNED = storeWith(join(SCRATCH, "owned"), { "release-owners.json": '["qmarsh"]' })
+// A data folder whose scope acme syncs with the made-up extension repo quillco/acme-skills.
+const SYNCED = storeWith(
+  join(SCRATCH, "synced"),
+  {},
+  { "ext.repos": { acme: "quillco/acme-skills" } },
+)
+mkdirSync(join(SYNCED, "extensions", "acme"), { recursive: true })
+Bun.spawnSync(["git", "-C", join(SYNCED, "extensions", "acme"), "init", "-q"])
 
 type Run = (raw: string, home: string) => Promise<string | undefined>
 
 // Each guard's check with the environment its own test gives it, and the folders it runs in, each a cwd and the HOME that goes with it.
 const GUARDS: Record<Guard, { folders: Partial<Record<Folder, [string, string]>>; run: Run }> = {
   "no-env-dump": { folders: { checkout: [CHECKOUT, HOME] }, run: (raw) => envDump(raw) },
+  "no-extension-repo-write": {
+    folders: { checkout: [OTHER, HOME] },
+    run: (raw, home) =>
+      extensionRepoWrite(raw, {
+        HOME: home,
+        PLAYGROUND_DATA_DIR: SYNCED,
+        PLAYGROUND_ROLE: "worker",
+      }),
+  },
   "no-extensions-write": {
     folders: {
       "bare home": [PATHS.BARE, PATHS.BARE],
