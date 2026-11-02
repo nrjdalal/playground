@@ -4,13 +4,13 @@ import {
   readdirSync,
   readFileSync,
   renameSync,
-  rmSync,
   writeFileSync,
 } from "node:fs"
 import { homedir } from "node:os"
 import { dirname, join, resolve } from "node:path"
 import { parseArgs } from "node:util"
 
+import { quarantine, type Roots } from "@packages/safe-delete"
 import {
   CORE,
   type Fill,
@@ -71,7 +71,7 @@ const installScripts = async (data: string, err: (line: string) => void): Promis
 
 // The ops runner's render, at the top of each pass: jobs.json and each enabled launchd job's plist from the store's policy.json, and each org's script folders installed under ops. Exits 3 with jobs.json untouched on a machine with no store whose jobs.json is there (a fresh one gets the registry's defaults, the Dashboard's job and the usage read on, as does a store with no policy.json yet), and 2 on stderr when policy.json or jobs.json does not parse, so the runner keeps the last jobs.json and logs why. Plists go only into the folder it is handed; one for a job now off is removed.
 export const renderJobsFile = async (
-  options: { data: string; fill: Fill; jobs: string; launchAgents?: string },
+  options: { data: string; fill: Fill; jobs: string; launchAgents?: string; roots: Roots },
   out: (line: string) => void,
   err: (line: string) => void,
 ): Promise<number> => {
@@ -94,18 +94,26 @@ export const renderJobsFile = async (
       : "",
     ...(read.path ? await installScripts(options.data, err) : []),
   ]
+  let code = 0
   if (options.launchAgents) {
     for (const [label, text] of plists)
       if (writeIfChanged(join(options.launchAgents, `${label}.plist`), text)) changed.push(label)
     for (const file of existsSync(options.launchAgents) ? readdirSync(options.launchAgents) : [])
       if (file.startsWith("com.playground.") && !plists.has(file.replace(/\.plist$/, ""))) {
-        rmSync(join(options.launchAgents, file))
-        changed.push(`-${file}`)
+        const moved = quarantine(
+          join(options.launchAgents, file),
+          { carveOut: "jobs", reason: "its job left jobs.json", session: "jobs" },
+          options.roots,
+        )
+        if ("refused" in moved) {
+          err(`jobs: kept ${file}: ${moved.refused}`)
+          code = 1
+        } else changed.push(`-${file}`)
       }
   }
   const lines = changed.filter(Boolean)
   out(lines.length ? `jobs: rendered ${lines.join(", ")}` : "jobs: unchanged")
-  return 0
+  return code
 }
 
 // playground settings import-jobs, run once at the switch: each job jobs.json lists that the registry knows becomes its jobs.<camelName> setting, a launchd job's program read from its plist; a job the registry does not know stays in jobs.json, which the render keeps.
@@ -182,6 +190,11 @@ export const jobsExit = async (
       },
       jobs: values.jobs,
       launchAgents: values["launch-agents"],
+      roots: {
+        home: environment.HOME ?? homedir(),
+        main: CHECKOUT,
+        trash: join(found.data, "trash"),
+      },
     },
     out,
     err,

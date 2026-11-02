@@ -56,6 +56,8 @@ export const CARVE_OUTS: Record<string, CarveOut> = {
     files: 4000,
     folder: ".playground/ops/dashboard/builds",
   },
+  // packages/scripts/src/playground/jobs.ts's LaunchAgent plists, one file each, for a job jobs.json no longer holds
+  jobs: { bytes: 64 * 1024, files: 1, folder: "Library/LaunchAgents" },
 }
 
 const HOME_DIRS = [".claude", ".config", ".gnupg", ".playground", ".ssh", "Library", "Music"]

@@ -158,6 +158,7 @@ The trash records the script as who deleted it, and `--restore` puts its entry b
 The carve-outs, by script:
 
 - `dashboard-supervisor`: the Dashboard's supervisor moves an old production build out of `~/.playground/ops/dashboard/builds`, at most 4,000 files and 256 MB.
+- `jobs`: the ops runner's render moves the plist of a job `jobs.json` no longer holds out of `~/Library/LaunchAgents`, one file of at most 64 KB.
 
 `playground rm --worktree <path>` removes a worktree under `.claude/worktrees/`: it refuses when the roster cannot be read, when a live session on the roster holds it by its branch, its name or its pull request's number, when a process works inside it, or when its commit is on no remote branch, then moves it to the trash and runs `git worktree prune`.
 A live session whose roster entry names no branch and no pull request, and with no process inside the worktree, is not seen as holding it; the trash keeps the worktree 7 days for `--restore`.
