@@ -41,7 +41,7 @@ describe("the shebang", () => {
 })
 
 describe("bare dispatcher", () => {
-  // a copy of the dispatcher folder and the portless-ca.ts, store's rendered.ts, herdr pin, data-dir.ts and the dev stack's proxy.ts it imports in a scratch repo, with ops-herdr, up.py's python3 (its body given) and every command the probes run stubbed, so nothing real starts; a case adds stubs and repo files of its own
+  // a copy of the dispatcher folder and the portless-ca.ts, store's rendered.ts, herdr pin, data-dir.ts and the dev stack's proxy.ts and live-dashboard.ts it imports in a scratch repo, with ops-herdr, up.py's python3 (its body given) and every command the probes run stubbed, so nothing real starts; a case adds stubs and repo files of its own
   const dispatcher = async (
     python3: string,
     more: Record<string, string> = {},
@@ -55,10 +55,11 @@ describe("bare dispatcher", () => {
     const src = join(repo, "packages", "scripts", "src")
     cpSync(dirname(CLI), join(src, "playground"), { recursive: true })
     cpSync(join(dirname(CLI), "..", "portless-ca.ts"), join(src, "portless-ca.ts"))
-    cpSync(
-      join(dirname(CLI), "../../../../api/hono/src/lib/dev/proxy.ts"),
-      join(repo, "api/hono/src/lib/dev/proxy.ts"),
-    )
+    for (const file of ["live-dashboard.ts", "proxy.ts"])
+      cpSync(
+        join(dirname(CLI), "../../../../api/hono/src/lib/dev", file),
+        join(repo, "api/hono/src/lib/dev", file),
+      )
     cpSync(
       join(dirname(CLI), "../../../settings/src/rendered.ts"),
       join(repo, "packages/settings/src/rendered.ts"),
@@ -71,6 +72,10 @@ describe("bare dispatcher", () => {
     symlinkSync(
       join(dirname(CLI), "..", "..", "node_modules"),
       join(repo, "packages", "scripts", "node_modules"),
+    )
+    symlinkSync(
+      join(dirname(CLI), "../../../../api/hono/node_modules"),
+      join(repo, "api", "hono", "node_modules"),
     )
     await Bun.write(join(src, "ops-herdr", "cli.ts"), "")
     const bin = join(root, "bin")

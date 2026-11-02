@@ -142,7 +142,7 @@ describe("playground picker (PG-2184)", () => {
   test("a prompt for another call in the same worktree gets no key, though both share the cd prefix and the waiting call's header shows above it", async () => {
     const cd = `cd /Users/acme-dev/acme-dev/${OLD.dispatcher}/.claude/worktrees/pg-2184-stuck-alerts && `
     const a = `${cd}ls -la packages`
-    const b = `${cd}rm -rf ~/.claude`
+    const b = `${cd}rm -rf ~/.playground/extensions/.no-such-folder`
     const screen = PERMISSION.replace("⏺ Bash(rm -rf build)", `⏺ Bash(${a})`).replace(
       " │ rm -rf build",
       ` │ ${b}`,

@@ -66,11 +66,13 @@ export type Group = {
     | "#402"
     | "#411"
     | "#446"
+    | "#452"
     | "#456"
     | "#463"
     | "#466"
     | "#469"
     | "#486"
+    | "#508"
     | "#509"
 }
 
@@ -79,6 +81,9 @@ export const ALLOWED: string[] = [
   "#446 bun -e writing a JSON label whose prose names it",
   "#446 bun -e editing a JSON label whose prose names it, then a script",
   "#446 python3 -c printing prose that names it",
+  "#452 a quiet commit whose -m message holds a parenthesised scope",
+  "#452 a quiet commit whose -am message holds a parenthesised scope",
+  "#452 a quiet commit whose --message= holds a parenthesised scope",
   "#466 git --attr-source with a subcommand for its value before a read in a repo with a heavy path staged",
   "#486 bun run ask with a prose arg that only names the tool",
   "#486 bun run thread with a prose arg that only names the tool",
@@ -1912,6 +1917,168 @@ gh api graphql -f query="$QUERY"`,
     source: "#469",
   },
   {
+    folders: ["data folder", "home"],
+    guards: ["no-extensions-write"],
+    rows: () => [
+      [
+        "ext score behind env -u of the role",
+        "env -u PLAYGROUND_ROLE playground ext score login doc x abc 5 --reason ok",
+      ],
+      [
+        "ext score behind env -u of the role, attached",
+        "env -uPLAYGROUND_ROLE playground ext score login doc x abc 5 --reason ok",
+      ],
+      [
+        "ext score behind env --unset of the role",
+        "env --unset PLAYGROUND_ROLE playground ext score login doc x abc 5 --reason ok",
+      ],
+      [
+        "ext score behind env --unset= of the role",
+        "env --unset=PLAYGROUND_ROLE playground ext score login doc x abc 5 --reason ok",
+      ],
+      [
+        "ext score with the role cleared",
+        "PLAYGROUND_ROLE= playground ext score login doc x abc 5 --reason ok",
+      ],
+      [
+        "ext score behind env with the role cleared",
+        "env PLAYGROUND_ROLE= playground ext score login doc x abc 5 --reason ok",
+      ],
+      [
+        "ext score with another role",
+        "PLAYGROUND_ROLE=owner playground ext score login doc x abc 5 --reason ok",
+      ],
+      [
+        "ext score behind env -u of the session id",
+        "env -u CLAUDE_CODE_SESSION_ID playground ext score login doc x abc 5 --reason ok",
+      ],
+      [
+        "ext score with another session id",
+        "CLAUDE_CODE_SESSION_ID=other playground ext score login doc x abc 5 --reason ok",
+      ],
+      [
+        "ext score behind env with another config folder",
+        "env CLAUDE_CONFIG_DIR=/tmp/c playground ext score login doc x abc 5 --reason ok",
+      ],
+      [
+        "ext score with another config folder",
+        "CLAUDE_CONFIG_DIR=/tmp/c playground ext score login doc x abc 5 --reason ok",
+      ],
+      ["ext score behind env -i", "env -i playground ext score login doc x abc 5 --reason ok"],
+      [
+        "ext score behind env -i with a path",
+        "env -i PATH=/usr/bin playground ext score login doc x abc 5 --reason ok",
+      ],
+      [
+        "ext score behind env --ignore-environment",
+        "env --ignore-environment playground ext score login doc x abc 5 --reason ok",
+      ],
+      ["ext score behind env -", "env - playground ext score login doc x abc 5 --reason ok"],
+      [
+        "ext score behind env -S with the role unset",
+        `env -S "-u PLAYGROUND_ROLE playground ext score login doc x abc 5 --reason ok"`,
+      ],
+      [
+        "ext score behind nice and env -u",
+        "nice env -u PLAYGROUND_ROLE playground ext score login doc x abc 5 --reason ok",
+      ],
+      [
+        "ext score behind env's -i grouped with -u",
+        "env -iuTZ playground ext score login doc x abc 5 --reason ok",
+      ],
+      [
+        "ext score behind env's -i grouped with -P",
+        "env -iP /usr/bin playground ext score login doc x abc 5 --reason ok",
+      ],
+      [
+        "ext score behind env's -i grouped with -S",
+        `env -iS "playground ext score login doc x abc 5 --reason ok"`,
+      ],
+      [
+        "ext score behind env's -i grouped with -L",
+        "env -iL x playground ext score login doc x abc 5 --reason ok",
+      ],
+      [
+        "ext score behind env's -i grouped with -U",
+        "env -iU x playground ext score login doc x abc 5 --reason ok",
+      ],
+      [
+        "ext score with the role appended to",
+        "PLAYGROUND_ROLE+=x playground ext score login doc x abc 5 --reason ok",
+      ],
+      [
+        "ext score with the session id appended to",
+        "CLAUDE_CODE_SESSION_ID+=x playground ext score login doc x abc 5 --reason ok",
+      ],
+      [
+        "ext score with the config folder appended to",
+        "CLAUDE_CONFIG_DIR+=x playground ext score login doc x abc 5 --reason ok",
+      ],
+      [
+        "ext score in bash -c with the role cleared",
+        "PLAYGROUND_ROLE= bash -c 'playground ext score login doc x abc 5 --reason ok'",
+      ],
+      [
+        "ext score in bash -c behind env -u",
+        "env -u PLAYGROUND_ROLE bash -c 'playground ext score login doc x abc 5 --reason ok'",
+      ],
+      [
+        "ext score in sh -c behind env -i",
+        "env -i sh -c 'playground ext score login doc x abc 5 --reason ok'",
+      ],
+      [
+        "ext score in zsh -c with another session id",
+        "CLAUDE_CODE_SESSION_ID=x zsh -c 'playground ext score login doc x abc 5 --reason ok'",
+      ],
+      [
+        "ext score echoed to sh with the role cleared",
+        "echo 'playground ext score login doc x abc 5 --reason ok' | PLAYGROUND_ROLE= sh",
+      ],
+      [
+        "ext score after the role is exported empty",
+        "export PLAYGROUND_ROLE=; playground ext score login doc x abc 5 --reason ok",
+      ],
+      [
+        "ext score after the role is set empty",
+        "PLAYGROUND_ROLE=; playground ext score login doc x abc 5 --reason ok",
+      ],
+      [
+        "ext score by bun run behind env -u",
+        "env -u PLAYGROUND_ROLE bun run packages/scripts/src/playground/cli.ts ext score login doc x abc 5 --reason ok",
+        "checkout",
+      ],
+      [
+        "ext score split by an empty quote in bash -c",
+        "PLAYGROUND_ROLE= bash -c 'playground ext s\"\"core login doc x abc 5 --reason ok'",
+      ],
+      [
+        "ext score split by a backslash in bash -c",
+        "PLAYGROUND_ROLE= bash -c 'playground ext sc\\ore login doc x abc 5 --reason ok'",
+      ],
+      [
+        "ext score quoted inside bash -c",
+        `PLAYGROUND_ROLE= bash -c "playground ext 'score' login doc x abc 5 --reason ok"`,
+      ],
+      [
+        "ext score split by an empty quote in env -i sh -c",
+        "env -i sh -c 'playground ext s\"\"core login doc x abc 5 --reason ok'",
+      ],
+      [
+        "ext score split by an empty quote, echoed to sh",
+        "echo 'playground ext s\"\"core login doc x abc 5 --reason ok' | PLAYGROUND_ROLE= sh",
+      ],
+      [
+        "ext quoted in zsh -c with another session id",
+        "CLAUDE_CODE_SESSION_ID=x zsh -c 'playground \"ext\" score login doc x abc 5 --reason ok'",
+      ],
+      [
+        "ext score as a locale string in bash -c",
+        "PLAYGROUND_ROLE= bash -c 'playground ext $\"score\" login doc x abc 5 --reason ok'",
+      ],
+    ],
+    source: "#508",
+  },
+  {
     folders: ["process home", "process data folder", "process worktree"],
     guards: ["no-extensions-write"],
     rows: () => [
@@ -1975,5 +2142,39 @@ gh api graphql -f query="$QUERY"`,
       ["cut over a half-quoted glob in the home", "cut -f1 '.pl'*"],
     ],
     source: "#463",
+  },
+  {
+    folders: ["home", "data folder"],
+    guards: ["no-extensions-write"],
+    rows: ({ ROOT }) => [
+      ["a quiet commit whose -m message holds a parenthesised scope", `git commit -m "fix(x): y"`],
+      [
+        "a quiet commit whose -am message holds a parenthesised scope",
+        `git commit -am "fix(x): y"`,
+      ],
+      [
+        "a quiet commit whose --message= holds a parenthesised scope",
+        `git commit --message="fix(x): y"`,
+      ],
+      ["git config set in the call before a quiet message", `git -c x.y=z commit -m "fix(x): y"`],
+      ["a runner on the line after a quiet commit", `git commit -m "fix(x): y"; sh -c 'true'`],
+      ["a redirect writing a file after a quiet commit", `git commit -m "fix(x): y" > f`],
+      ["a quiet message on a commit git -C moves", `git -C /tmp commit -m "fix(x): y"`],
+      ["a globbing file name after -F, not a held message", `git commit -F "my(x) file"`],
+      ["a quiet message that holds the root's path as text", `git commit -m "see ${ROOT} now"`],
+      [
+        "a quiet message that names a gated call",
+        `git commit -m "docs: the hook refuses playground ext sync now"`,
+      ],
+      ["a quiet message on a git sudo runs", `sudo git commit -m "fix(x): y"`],
+      ["a quiet message on a git env runs", `env git commit -m "fix(x): y"`],
+      ["a quiet message on a git xargs runs", `xargs git commit -m "fix(x): y"`],
+      ["a quiet message on a git nice runs with an option", `nice -n 5 git commit -m "fix(x): y"`],
+      ["a quiet message on a git command runs", `command git commit -m "fix(x): y"`],
+      ["a quiet message on a git in this folder", `./git commit -m "fix(x): y"`],
+      ["a quiet message on a git in a folder of the home", `~/bin/git commit -m "fix(x): y"`],
+      ["a quiet message on a git outside the system folders", `/tmp/x/git commit -m "fix(x): y"`],
+    ],
+    source: "#452",
   },
 ]
