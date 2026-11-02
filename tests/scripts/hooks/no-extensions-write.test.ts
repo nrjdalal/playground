@@ -524,6 +524,10 @@ describe("a quoted argument is read as a command line only where a program runs 
       "a git call given an unread word, then a plain commit",
       "git log \"$REV\"; git commit -m 'fix(x): y'",
     ],
+    ["a word piped to a root shell", "echo hi | sudo -s"],
+    ["a listing piped to a root shell", "echo 'ls -la' | sudo -s"],
+    ["a root shell given its command", "sudo -s ls"],
+    ["sudo with a flag cluster holding a value option", "echo 'rm -rf ~' | sudo -ui"],
   ])("%s runs from a worktree", async (_, command) => {
     expect(await at(command, join(homedir(), "x", ".claude", "worktrees", "y"))).toBeUndefined()
   })
