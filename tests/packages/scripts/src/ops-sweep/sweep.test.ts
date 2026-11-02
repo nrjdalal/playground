@@ -26,6 +26,7 @@ import {
   pass,
   prlessBranches,
   type Run,
+  stalledPrs,
 } from "../../../../../packages/scripts/src/ops-sweep/sweep"
 
 const dirs: string[] = []
@@ -44,7 +45,11 @@ const PS = {
 
 // A scratch config folder and a fake run: each argv is answered by the first reply whose key it starts with (ps shows the dashboard's supervisor unless told otherwise), else exit 0 and nothing printed.
 const setup = (given: Record<string, { code?: number; out?: string }> = {}) => {
-  const replies: Record<string, { code?: number; out?: string }> = { "ps -ax": PS, ...given }
+  const replies: Record<string, { code?: number; out?: string }> = {
+    "gh api graphql": { out: JSON.stringify({ data: { search: { nodes: [] } } }) },
+    "ps -ax": PS,
+    ...given,
+  }
   const cfg = realpathSync(mkdtempSync(join(tmpdir(), "ops-sweep-")))
   dirs.push(cfg)
   const data = join(cfg, "playground")
@@ -63,6 +68,7 @@ const setup = (given: Record<string, { code?: number; out?: string }> = {}) => {
     cfg,
     data,
     dashboard: "/dashboard",
+    factory: async () => "acme/app",
     load: () => 1,
     main: "/main",
     now: () => NOW,
@@ -407,6 +413,164 @@ describe("lateReviewers", () => {
 
   test("a GraphQL answer it cannot read is reviewer-check-unreadable", async () => {
     expect((await late("not json")).found).toEqual(["reviewer-check-unreadable"])
+  })
+})
+
+describe("stalledPrs", () => {
+  const minutesAgo = (m: number) => new Date(NOW - m * 60_000).toISOString()
+  type Pr = {
+    body?: string
+    checks?: string
+    comments?: { age: number; body: string }[]
+    commitAge?: number
+    labels?: string[]
+    number?: number
+    repo?: string
+  }
+  // open PRs as GitHub's GraphQL search answers them: each head committed `commitAge` minutes ago, its checks in the rollup state given, and its comments oldest first
+  const answer = (prs: Pr[]) =>
+    JSON.stringify({
+      data: {
+        search: {
+          nodes: prs.map((p) => ({
+            body: p.body ?? "",
+            comments: {
+              nodes: (p.comments ?? []).map((c) => ({ body: c.body, createdAt: minutesAgo(c.age) })),
+            },
+            commits: {
+              nodes: [
+                {
+                  commit: {
+                    committedDate: minutesAgo(p.commitAge ?? 5),
+                    statusCheckRollup: { state: p.checks ?? "FAILURE" },
+                  },
+                },
+              ],
+            },
+            labels: { nodes: (p.labels ?? []).map((name) => ({ name })) },
+            number: p.number ?? 9,
+            repository: { nameWithOwner: p.repo ?? "acme/app" },
+            reviews: { nodes: [] },
+          })),
+        },
+      },
+    })
+  const verdicts = (...scores: number[]) =>
+    scores.map((s, i) => ({
+      age: 20 * (scores.length - i),
+      body: `## ReviewBot · round ${i + 9}: ${s}/5 at 1234567 · 2 blocking`,
+    }))
+  const stalled = async (reply: string, agents: Record<string, unknown>[] = []) => {
+    const { ctx, ops } = setup()
+    const queries: string[] = []
+    ctx.run = async (argv) => {
+      if (argv[0] === "gh") queries.push(argv.join(" "))
+      return { code: 0, err: "", out: argv[0] === "gh" ? reply : "" }
+    }
+    const found = await stalledPrs(ctx, agents)
+    let file: { alerts: Record<string, string>[]; writtenAt: string } | null = null
+    try {
+      file = read(join(ops, "alerts-prs.json"))
+    } catch {}
+    return { ctx, file, found, queries }
+  }
+  const lines = async (prs: Pr[]) => (await stalled(answer(prs))).file?.alerts.map((a) => a.line)
+
+  test("writes an entry for a PR whose last 4 verdicts hold one score below 5, naming the score and round (#454)", async () => {
+    const { file, found } = await stalled(answer([{ comments: verdicts(5, 3, 3, 3, 3) }]))
+    expect(found).toEqual([])
+    expect(file).toEqual({
+      alerts: [
+        {
+          at: "2026-10-20T12:00:00Z",
+          kind: "pr-stalled",
+          lastActivityAt: "2026-10-20T11:55:00Z",
+          line: "last 4 verdicts 3/5, round 13",
+          name: "acme/app#9",
+        },
+      ],
+      writtenAt: "2026-10-20T12:00:00Z",
+    })
+  })
+
+  test("writes no entry for 3 same scores, 4 mixed ones, or 4 at 5/5 (#454)", async () => {
+    expect(await lines([{ comments: verdicts(3, 3, 3) }])).toEqual([])
+    expect(await lines([{ comments: verdicts(3, 4, 3, 3) }])).toEqual([])
+    expect(await lines([{ comments: verdicts(5, 5, 5, 5) }])).toEqual([])
+  })
+
+  test("reads only ReviewBot verdicts among the comments when it counts 4 (#454)", async () => {
+    const comments = [
+      ...verdicts(3, 3),
+      { age: 15, body: "## TesterBot · PASS at 1234567" },
+      { age: 12, body: "pushed a fix" },
+      ...verdicts(3, 3).map((c) => ({ ...c, age: c.age / 4 })),
+    ]
+    expect(await lines([{ comments }])).toEqual(["last 4 verdicts 3/5, round 10"])
+  })
+
+  test("writes an entry for a PR with no commit, verdict or comment for 30 minutes, not before (#454)", async () => {
+    expect(
+      await lines([{ comments: [{ age: 31, body: "a comment" }], commitAge: 40 }]),
+    ).toEqual(["no new commit, verdict or comment for 31m"])
+    expect(await lines([{ comments: [{ age: 29, body: "a comment" }], commitAge: 40 }])).toEqual(
+      [],
+    )
+    expect(await lines([{ commitAge: 29 }])).toEqual([])
+  })
+
+  test("joins both reasons in one entry for a PR that is idle and repeats its score (#454)", async () => {
+    const comments = verdicts(2, 2, 2, 2).map((c) => ({ ...c, age: c.age + 40 }))
+    expect(await lines([{ commitAge: 90, comments }])).toEqual([
+      "last 4 verdicts 2/5, round 12; no new commit, verdict or comment for 60m",
+    ])
+  })
+
+  test("leaves out an idle PR waiting on its checks or on merge-on-ready, but not its repeated score (#454)", async () => {
+    expect(await lines([{ checks: "PENDING", commitAge: 40 }])).toEqual([])
+    const { ctx } = setup()
+    write(join(ctx.data, "merge-queue.json"), { queue: [{ pr: 9, readyAt: minutesAgo(35) }] })
+    ctx.run = async (argv) => ({
+      code: 0,
+      err: "",
+      out: argv[0] === "gh" ? answer([{ checks: "SUCCESS", commitAge: 40 }]) : "",
+    })
+    await stalledPrs(ctx, [])
+    expect(read(join(ctx.ops, "alerts-prs.json")).alerts).toEqual([])
+    expect(
+      await lines([{ checks: "PENDING", comments: verdicts(3, 3, 3, 3), commitAge: 40 }]),
+    ).toEqual(["last 4 verdicts 3/5, round 12"])
+  })
+
+  test("leaves out a PR held or parked by its body, a label or its newest comment (#454)", async () => {
+    const repeat = verdicts(3, 3, 3, 3)
+    expect(await lines([{ body: "## TL;DR\n\nParked: waits on #12.", comments: repeat }])).toEqual(
+      [],
+    )
+    expect(await lines([{ comments: repeat, labels: ["on hold"] }])).toEqual([])
+    expect(await lines([{ comments: repeat, labels: ["parked"] }])).toEqual([])
+    expect(
+      await lines([{ comments: [...repeat, { age: 1, body: "**Held** until the lock lands." }] }]),
+    ).toEqual([])
+    expect(
+      await lines([{ body: "The lock is held by the train.", comments: repeat, commitAge: 40 }]),
+    ).toEqual(["last 4 verdicts 3/5, round 12"])
+  })
+
+  test("reads the factory repo and each live row's PR repo in one search for our open PRs (#454)", async () => {
+    const { queries } = await stalled(answer([]), [
+      { name: "abcdef-worker", pr: "https://github.com/Work/Site/pull/3", status: "working" },
+      { name: "ghjkmn-worker", pr: "https://github.com/old/gone/pull/1", status: "ended" },
+    ])
+    expect(queries).toHaveLength(1)
+    expect(queries[0]).toContain("is:pr is:open author:@me repo:acme/app repo:work/site")
+    expect(queries[0]).not.toContain("old/gone")
+  })
+
+  test("an answer it cannot read is stalled-check-unreadable, and leaves the file as it was (#454)", async () => {
+    const { file, found } = await stalled("not json")
+    expect(found).toEqual(["stalled-check-unreadable"])
+    expect(file).toBeNull()
   })
 })
 
