@@ -48,12 +48,13 @@ const scratch = (name: string): string => {
   dirs.push(dir)
   return dir
 }
-// The folders a replaced fixture's move into the trash starts from, on a mkdtemp root of the test's own that holds no fixture.
-const ROOTS = (() => {
+// The folders a fixture's move into the trash starts from, on a mkdtemp root of the test's own that holds no fixture: a test that moves one takes its own, so no test meets another's 3-a-minute tripwire.
+const freshRoots = () => {
   const root = scratch("fixture-roots")
   return { home: join(root, "home"), main: join(root, "main"), trash: join(root, "data", "trash") }
-})()
-const trashed = () => listTrash(ROOTS.trash).map((entry) => entry.path)
+}
+const ROOTS = freshRoots()
+const trashed = (roots: { trash: string }) => listTrash(roots.trash).map((entry) => entry.path)
 
 afterAll(() => {
   cleanGitShims()
@@ -296,12 +297,24 @@ describe("writeFixture", () => {
     }
   })
 
-  test("a relative PLAYGROUND_FIXTURE_DIR sits under the checkout's root, so the launcher and the API, run from different folders, name one folder", () => {
+  test("a relative PLAYGROUND_FIXTURE_DIR sits under the checkout's root, so the launcher and the API, run from different folders, name one folder; else a worktree's sits in its .turbo and a plain clone's in the temp folder, one per clone", () => {
     const root = checkoutRoot()
     if (!root) throw new Error("the tests run from a checkout")
     expect(fixtureDir({ PLAYGROUND_FIXTURE_DIR: "scratch/fx" })).toBe(join(root, "scratch/fx"))
     expect(fixtureDir({ PLAYGROUND_FIXTURE_DIR: "/elsewhere/fx" })).toBe("/elsewhere/fx")
-    expect(fixtureDir({})).toBe(join(root, ".turbo", "dashboard-fixture"))
+    const worktree = scratch("fixture-worktree")
+    writeFileSync(join(worktree, ".git"), "gitdir: /elsewhere\n")
+    expect(fixtureDir({}, worktree)).toBe(join(worktree, ".turbo", "dashboard-fixture"))
+    const uid = process.getuid?.() ?? 0
+    expect(fixtureDir({}, null, "/tmp-x")).toBe(`/tmp-x/playground-dashboard-fixture-${uid}`)
+    const clone = scratch("fixture-plain")
+    mkdirSync(join(clone, ".git"))
+    expect(fixtureDir({}, clone, "/tmp-x")).toMatch(
+      new RegExp(`^/tmp-x/playground-dashboard-fixture-${uid}-[0-9a-f]{8}$`),
+    )
+    const other = scratch("fixture-other")
+    mkdirSync(join(other, ".git"))
+    expect(fixtureDir({}, clone, "/tmp-x")).not.toBe(fixtureDir({}, other, "/tmp-x"))
   })
 
   test("the API the live Dashboard serves runs inside its checkout, so it reads the live machine and finds its migrations, never falling to a Docker image's fixture", () => {
@@ -344,44 +357,63 @@ describe("writeFixture", () => {
   })
 
   test("replaces its own folder whole, so a stack starts from the fixture again", () => {
+    const roots = freshRoots()
     const dir = join(scratch("fixture-rewrite"), "fixture")
-    writeFixture(small(), dir, ROOTS)
+    writeFixture(small(), dir, roots)
     writeFileSync(join(dir, "claude/playground/attachments/left-over.txt"), "{}")
-    writeFixture(small(), dir, ROOTS)
+    writeFixture(small(), dir, roots)
     expect(readdirSync(join(dir, "claude/playground/attachments"))).toEqual([])
-    const old = listTrash(ROOTS.trash).find((entry) => entry.path === `${dir}.old-${process.pid}`)
+    const old = listTrash(roots.trash).find((entry) => entry.path === dir)
     expect(old).toBeDefined()
     expect(
       existsSync(
-        join(
-          ROOTS.trash,
-          old!.id,
-          `fixture.old-${process.pid}`,
-          "claude/playground/attachments/left-over.txt",
-        ),
+        join(roots.trash, old!.id, "fixture", "claude/playground/attachments/left-over.txt"),
       ),
     ).toBe(true)
-    dropFixture(dir, ROOTS)
+    dropFixture(dir, roots)
     expect(existsSync(dir)).toBe(false)
-    expect(trashed()).toContain(dir)
+    expect(trashed(roots).filter((path) => path === dir)).toHaveLength(2)
+    expect(readdirSync(dirname(dir))).toEqual([])
   })
 
   test("a half-written folder a stopped write left behind goes to the trash before the next write", () => {
+    const roots = freshRoots()
     const dir = join(scratch("fixture-left"), "fixture")
     mkdirSync(`${dir}.writing-${process.pid}`, { recursive: true })
     writeFileSync(join(`${dir}.writing-${process.pid}`, "half.json"), "{}")
-    writeFixture(small(), dir, ROOTS)
+    writeFixture(small(), dir, roots)
     expect(existsSync(`${dir}.writing-${process.pid}`)).toBe(false)
-    expect(trashed()).toContain(`${dir}.writing-${process.pid}`)
+    expect(trashed(roots)).toContain(`${dir}.writing-${process.pid}`)
   })
 
   test("a fixture folder the trash refuses, as one inside the main checkout, stays, and the refusal is thrown in its words", () => {
     const root = scratch("fixture-protected")
     const dir = join(root, "fixture")
     const roots = { ...ROOTS, main: root }
-    writeFixture(small(), dir, roots)
+    writeFixture(small(), dir, roots, new Date(Date.parse(ANCHOR)))
     expect(() => dropFixture(dir, roots)).toThrow("inside the main checkout")
-    expect(existsSync(join(dir, "stamp.json"))).toBe(true)
+    expect(() => writeFixture(small(), dir, roots, new Date(Date.parse(ANCHOR) + DAY))).toThrow(
+      "inside the main checkout",
+    )
+    // the refusal comes before any write or rename, so the folder is as it was and nothing sits beside it
+    expect(JSON.parse(readFileSync(join(dir, "stamp.json"), "utf8")).writtenAt).toBe(ANCHOR)
+    expect(readdirSync(root)).toEqual(["fixture"])
+  })
+
+  test("a plain clone's fixture sits in the temp folder, so a fixture stack there starts, stops and starts again with nothing left in the clone", () => {
+    const clone = scratch("fixture-clone")
+    mkdirSync(join(clone, ".git"))
+    const tmp = scratch("fixture-tmp")
+    const dir = fixtureDir({}, clone, tmp)
+    expect(dirname(dir)).toBe(tmp)
+    const roots = { ...freshRoots(), main: clone }
+    writeFixture(small(), dir, roots)
+    dropFixture(dir, roots)
+    writeFixture(small(), dir, roots)
+    dropFixture(dir, roots)
+    expect(readdirSync(clone)).toEqual([".git"])
+    expect(readdirSync(tmp)).toEqual([])
+    expect(trashed(roots).filter((path) => path === dir)).toHaveLength(2)
   })
 
   test("leaves a folder that is not a fixture's alone, a real config folder named by mistake included", () => {

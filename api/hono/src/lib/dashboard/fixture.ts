@@ -147,13 +147,17 @@ export const currentSource = (): DashboardSource => {
 
 export const readsLive = (): boolean => currentSource().kind === "live"
 
-// The scratch folder a fixture is written into: inside the checkout's own .turbo (ignored by git and Docker, beside the launcher's record), else the system's temp folder. PLAYGROUND_FIXTURE_DIR lets a test keep it elsewhere, as DEV_RECORD does the record, relative to the checkout's root as PLAYGROUND_FIXTURE is, so the launcher and the API, which run from different folders, name the same one.
-export const fixtureDir = (env: Record<string, string | undefined> = process.env): string => {
-  const root = checkoutRoot()
+// The scratch folder a fixture is written into: inside a worktree's own .turbo (ignored by git and Docker, beside the launcher's record), else the system's temp folder, one per clone, since the trash refuses a folder inside a main checkout. PLAYGROUND_FIXTURE_DIR lets a test keep it elsewhere, as DEV_RECORD does the record, relative to the checkout's root as PLAYGROUND_FIXTURE is, so the launcher and the API, which run from different folders, name the same one.
+export const fixtureDir = (
+  env: Record<string, string | undefined> = process.env,
+  root: string | null = checkoutRoot(),
+  tmp: string = tmpdir(),
+): string => {
   if (env.PLAYGROUND_FIXTURE_DIR) return resolve(root ?? process.cwd(), env.PLAYGROUND_FIXTURE_DIR)
-  return root
-    ? join(root, ".turbo", "dashboard-fixture")
-    : join(tmpdir(), `playground-dashboard-fixture-${process.getuid?.() ?? 0}`)
+  const scratch = join(tmp, `playground-dashboard-fixture-${process.getuid?.() ?? 0}`)
+  if (!root) return scratch
+  if (statSync(join(root, ".git")).isFile()) return join(root, ".turbo", "dashboard-fixture")
+  return `${scratch}-${new Bun.CryptoHasher("sha256").update(root).digest("hex").slice(0, 8)}`
 }
 
 // The fixture's Claude Code config folder, which stands in for ~/.claude on a fixture stack.
@@ -380,7 +384,7 @@ const trashFixture = (path: string, roots: Roots) => {
   if (refused) throw new Error(`the fixture's ${path} stays: ${refused}`)
 }
 
-// Writes a fixture into dir, fresh, as of now: the config folder, cmux's state (cmux.json) and the rest of the machine (machine.json). The folder is replaced whole and only when it is a fixture's own (its stamp.json), so a misnamed folder (a real config folder) is refused rather than overwritten; the one it replaces goes to the trash of the roots given.
+// Writes a fixture into dir, fresh, as of now: the config folder, cmux's state (cmux.json) and the rest of the machine (machine.json). The folder is replaced whole and only when it is a fixture's own (its stamp.json), so a misnamed folder (a real config folder) is refused rather than overwritten; the one it replaces goes to the trash of the roots given before anything is written, so a refusal changes nothing.
 export function writeFixture(fixture: Fixture, dir: string, roots: Roots, now = new Date()): void {
   const target = resolve(dir)
   if (existsSync(target) && !existsSync(join(target, STAMP))) {
@@ -388,6 +392,7 @@ export function writeFixture(fixture: Fixture, dir: string, roots: Roots, now = 
   }
   const fresh = `${target}.writing-${process.pid}`
   trashFixture(fresh, roots)
+  if (existsSync(target)) trashFixture(target, roots)
   mkdirSync(fresh, { mode: 0o700, recursive: true })
   const config = join(target, "claude")
   const shift = now.getTime() - Date.parse(fixture.anchor)
@@ -443,10 +448,7 @@ export function writeFixture(fixture: Fixture, dir: string, roots: Roots, now = 
     worktrees: fixture.worktrees ?? [],
   })
   writeEntry(join(fresh, STAMP), { writtenAt: now.toISOString() })
-  const old = `${target}.old-${process.pid}`
-  if (existsSync(target)) renameSync(target, old)
   renameSync(fresh, target)
-  trashFixture(old, roots)
 }
 
 // Moves a fixture's folder into the trash of the roots given when it is one (a stack's scratch state goes with the stack).
