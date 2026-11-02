@@ -21,6 +21,7 @@ import {
   type Folder,
   type Guard,
   type Paths,
+  NEVER_MADE,
   REFUSED_FORMS,
 } from "./fixtures/refused-forms"
 import { storeWith } from "./render-set"
@@ -265,6 +266,36 @@ describe("every refused form stays refused unless the allow list names it", () =
           expect(ids.has(id)).toBe(false)
           ids.add(id)
         }
+  })
+
+  // A recursive rm (-r, -R or --recursive, alone or in a cluster) and the folder it names, read from a row's text, where a backslash starts an escape (printf's \n) rather than the folder's name.
+  const RECURSIVE = /\brm\s+((?:-\S+\s+)*)([^\s'"`;)&|\\]+)/g
+  // A folder named from HOME, and a cd or pushd to HOME, after which a relative folder is in HOME too
+  const HOME_PATH = /^(?:~|\$HOME|\$\{HOME\})(?=\/|$)/
+  const CD_HOME = /\b(?:cd|pushd)\s+(?:~|\$HOME|\$\{HOME\})\/?(?=[\s;&|)]|$)/
+  // A folder written from ~ is NEVER_MADE itself, or a glob of it that keeps its last name
+  const never = (path: string) =>
+    path.endsWith(NEVER_MADE.slice(NEVER_MADE.lastIndexOf("/"))) &&
+    new Bun.Glob(path).match(NEVER_MADE)
+
+  test("every recursive delete from HOME names a path under the root that never exists", () => {
+    const left: string[] = []
+    for (const { rows, source } of REFUSED_FORMS)
+      for (const [what, call] of rows(PATHS)) {
+        const text = typeof call === "string" ? call : JSON.stringify(call)
+        for (const { 0: rm, 1: flags = "", 2: target = "", index = 0 } of text.matchAll(
+          RECURSIVE,
+        )) {
+          if (!/(?:^|\s)(?:-[a-zA-Z]*[rR]|--recursive)/.test(flags)) continue
+          const path = HOME_PATH.test(target)
+            ? target.replace(HOME_PATH, "~")
+            : !/^[/~$]/.test(target) && CD_HOME.test(text.slice(0, index))
+              ? `~/${target}`
+              : undefined
+          if (path !== undefined && !never(path)) left.push(`${source} ${what}: ${rm}`)
+        }
+      }
+    expect(left).toEqual([])
   })
 
   test("every allow-list entry names a case", () => {
