@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# The live dashboard's supervisor: one background task of runner-pride's cmux session that keeps the dashboard stack and
-# the session follower running as its own children (so both stay descendants of a cmux terminal), the web beside them, and rolls them
+# The live dashboard's supervisor: run.sh's child in ops-dashboard's herdr pane, which keeps the dashboard stack and
+# the session follower running as its own children (so both stay descendants of that terminal), the web beside them, and rolls them
 # to every new head of the branch upstream.sh names end to end: build it while the old stack serves (prebuild, from a staging worktree, unless it migrates), swap the web to that build with no stop (swap_web), stop the API and the follower by their recorded process groups, reset to it, install, build or
 # migrate when the merge needs it, take its build (build_head, kept per head in $S/builds) and serve it, check it, start the follower, check it. Each roll, outage or anomaly
 # appends one line to results.log (a refused roll a second, naming its refusal), which wakes the runner to report it. It signals only processes it started.

@@ -61,6 +61,12 @@ export async function withDeadline<T>(budget: number, body: () => Promise<T>): P
   }
 }
 
+// Throws once the walk is past its deadline, for a visit whose spawns take time no tick sees.
+export function pastDeadline(): void {
+  if (deadline !== undefined && performance.now() > deadline)
+    throw new RangeError("past the hook's time")
+}
+
 let steps = 0
 
 // The one choke point every lex, expansion and walk step passes through; it reads the clock once every 1024 steps, so a tight loop pays for a counter alone.

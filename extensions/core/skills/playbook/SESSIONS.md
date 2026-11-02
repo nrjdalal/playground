@@ -91,10 +91,10 @@ Sessions run in bypass-permissions mode, yet some commands still prompt (`rm`, a
    On a Mac whose inscope exports a workspace's own `CLAUDE_CONFIG_DIR` (its `inscope.zsh` names it, or `INSCOPE_CCD` is set), it launches with `env -u CLAUDE_CONFIG_DIR -u INSCOPE_CCD`, where a session would otherwise start with no login, and reads the live sessions and the roster under `~/.claude`; elsewhere it leaves the environment as it is.
 
    `--account <email>`, with any mode and anywhere among its words, has the session log in as that Claude account: the lead names it to pin a login (`spawn.sh resume dispatcher <dir> <session-id> --account <email>`, `spawn.sh worker <name> <brief> --title "<title>" --in <dir> --account <email>`), and a running session never switches accounts by itself.
-   spawn.sh refuses, before any cmux call, an email that is not a plain `local@domain`, the machine's own login (`oauthAccount.emailAddress` in Claude Code's `.claude.json`, under `$CLAUDE_CONFIG_DIR` else in `~`, matched in any case), since a session on it would share that login's usage while `--account` skips the usage check, and one with no item in the Keychain under `usage.keychainService`,
+   spawn.sh refuses, before it opens a pane, an email that is not a plain `local@domain`, the machine's own login (`oauthAccount.emailAddress` in Claude Code's `.claude.json`, under `$CLAUDE_CONFIG_DIR` else in `~`, matched in any case), since a session on it would share that login's usage while `--account` skips the usage check, and one with no item in the Keychain under `usage.keychainService`,
    checking only that the item exists.
    It also refuses an `--account` whose week a reading names at 100% (`usage.json`, `ops/usage/stored-login.json` or a `usage-<name>.json`, until its `resets_at`), naming the account and its reading, in any mode, a resume included.
-   The launch then starts with `CLAUDE_CODE_OAUTH_TOKEN="$(security find-generic-password -s <usage.keychainService> -a <email> -w)"` as text, so the new pane's own shell reads the token into the session's environment and it never reaches cmux's argv, spawn.sh's output, the roster or a log; a read that comes back empty stops the pane there, before claude runs, naming the save-it-again command.
+   The launch then starts with `CLAUDE_CODE_OAUTH_TOKEN="$(security find-generic-password -s <usage.keychainService> -a <email> -w)"` as text, so the new pane's own shell reads the token into the session's environment and it never reaches herdr's argv, spawn.sh's output, the roster or a log; a read that comes back empty stops the pane there, before claude runs, naming the save-it-again command.
    With no `--account`, spawn.sh picks among the machine's own login (the one in `.claude.json`'s `oauthAccount`, judged by `usage.json`, or by `ops/usage/stored-login.json` while `usage.json` reads the factory account, which then counts as another login), each other login with a `usage-<name>.json`, and each account login-flip probes with a reading in `login-flip.json`'s `seen`,
    keeping those that pass the usage gate.
    It takes the one next in the account split: `ops/usage/login-flip.json`'s `split.shares`, each account's week left per hour to its week reset or, for an ending account, 2 hours before its end, whichever comes first, read when under 30 minutes old (two of the ops tick's 15-minute beats).
@@ -166,6 +166,9 @@ Sessions run in bypass-permissions mode, yet some commands still prompt (`rm`, a
    apart from the one at a worker's end (LIFECYCLE.md), which prompts once, the **signal** rule, a literal absolute path for `gh --body-file`, since `no-playground-leak` and `no-release-comment` each refuse a path built from a shell variable,
    that a worker starts its fixture stack outside run-slot, only while it takes shots, since a command that never exits would hold a slot until it is stopped (**slots**), that a multi-stack ask (a bisect, an A/B) builds one stack at a time, and the **writing** rule: load writing-for-agents with the Skill tool before writing any agent-facing doc, a handoff included.
    A worker's brief says that any change under `web/next/`, a docs `.mdx` included, gets its tester's drive, posted as a `## TesterBot · PASS at <sha7>` comment.
+   A guard's plan and its brief (a hook or a gate that refuses calls) each name its threat model as a closed list of literal forms (for a path guard: an Edit or Write tool call on the path, and a shell write, copy, move or delete that names the path literally),
+   say plainly that a same-user session can still get past the guard by a form outside that list, and hold a Done when that names only forms from that list.
+   By round 3 on that guard, or at its reviewer's ask for a scope ruling, the lead narrows the PR to that list or moves the protection to a layer that parses no shell, since a guard asked to stop every form never closes: on 1 Nov one ran 16 rounds over 299 minutes, each finding one more shell form, then shipped refusing read-only awk.
    A worker starts its checkers in one step, once its PR's head is ready (its checks green at it): its reviewer always, and its tester (`bun run name tester`) with it when a tester's drive is due, since a reviewer started later left heads waiting over an hour; ops-sweep tells the worker's lead of a head ready 20 minutes with no review round and no live reviewer.
    Done when both are briefed, or the reviewer alone for a PR with no `web/next/` change.
    A worker's brief says that before a push it runs only the touched tests, the list `extensions/core/skills/code-review-loop/scripts/state.py touched-tests <worktree> origin/canary HEAD` writes to a file it checks is non-empty before passing it to xargs (code-review-loop's two steps), and check-types, through run-slot, and leaves the full suite to GitHub Actions,
@@ -184,8 +187,8 @@ Sessions run in bypass-permissions mode, yet some commands still prompt (`rm`, a
    A probe's brief adds that it ends by telling its spawner it is done, so the spawner closes its surface (End).
    A brief that has a script written for `/bin/bash` keeps it to macOS's bash 3.2.57, which stops on a fractional `read -t 0.5` (`invalid timeout specification`): wait in whole seconds (`read -t 1`), or run the script under zsh or bun.
    A rule that changes while a checker is live goes to it at once from its worker's lead by `SendMessage`, as an addition to its brief, since a checker that never heard of the change scores it as a finding (12 Oct).
-4. Record a cmux session's start with its `workspace` and `surface` (a herdr session records neither: its pane's label finds it) ([ROSTER.md](ROSTER.md); a session respawned after a cmux restore, by the respawned-session row, which keeps the entry's work).
-   spawn.sh records the refs; a worker that spawned a checker or a probe sends the Builder its name and both refs, and adds `pr=<its PR's URL>` to a checker's entry beside the `worker=` spawn.sh wrote, which the Dashboard nests it under its worker by.
+4. Record the start by [ROSTER.md](ROSTER.md)'s start rows (a session respawned after a cmux restore, by the respawned-session row, which keeps the entry's work).
+   A worker that spawned a checker or a probe sends the Builder its name, and adds `pr=<its PR's URL>` to a checker's entry beside the `worker=` spawn.sh wrote, which the Dashboard nests it under its worker by.
 
 Send the brief with `notify_when_idle: true`, so its next idle arrives as a notice.
 Done when `ListAgents` shows the session busy on the brief and the roster shows the task.
@@ -259,11 +262,11 @@ playground picker <session> allow <key>
 playground picker <session> deny <key> "<why, and the simpler shape to run instead>"
 ```
 
-Allow presses Yes once in a herdr pane whose prompt shows that call, a subagent's command included, or answers a cmux session's Feed permission for it once; deny presses No (Escape) or denies it, and the relay sends the session the reason.
+Allow presses Yes once in the session's herdr pane while its prompt shows that call, a subagent's command included; deny presses No (Escape), and the relay sends the session the reason.
 Each answer is a line in `ops/picker.log`: the time, the manager, the answer, the session and the command's first 120 characters.
-Done when it prints that line; it refuses any caller but the session's manager or the primary dispatcher, a deny with no reason, a dispatcher's session, and a key no waiting call or shown prompt matches, which means the prompt changed: wait for its next alert.
-An ops-unstick alert that says picker cannot answer the prompt found no waiting call surely its own: on herdr it names the close and resume below, and on cmux it says to take it to the dispatcher.
-On herdr it also refuses a prompt that may be another waiting call's, as a subagent's file or URL prompt always is while its parent waits.
+Done when it prints that line; it refuses any caller but the session's manager or the primary dispatcher, a deny with no reason, a dispatcher's session, a session in no herdr pane, and a key no waiting call or shown prompt matches, which means the prompt changed: wait for its next alert.
+An ops-unstick alert that says picker cannot answer the prompt found no waiting call surely its own, and names the close and resume below.
+Picker also refuses a prompt that may be another waiting call's, as a subagent's file or URL prompt always is while its parent waits.
 A herdr pane takes no key from your hand, since `no-raw-spawn` refuses every herdr call but a read, so end that prompt by a close and a resume under the session's name:
 
 ```bash
@@ -274,16 +277,6 @@ A herdr pane takes no key from your hand, since `no-raw-spawn` refuses every her
 
 The session comes back by its session id with its transcript, and the prompted call never runs.
 Done when the session works again from its brief.
-
-On cmux, a prompt picker refuses is denied by hand with Escape and a `SendMessage` of the reason, or taken to the dispatcher.
-By hand, Escape is the one key a session presses in another's cmux pane: it types no text, so it says nothing in the owner's name (the pane-typing test in `tests/api/hono/src/lib/dashboard/cmux.test.ts` allows this line alone).
-
-```bash
-cmux send-key --workspace workspace:N --surface surface:N escape
-```
-
-Then `SendMessage` the session the plain commands to run in place of the one that prompted.
-Done when `read-screen` shows the prompt gone and the session working.
 
 ## Keep the sweep running
 
@@ -314,20 +307,13 @@ Done when every wait ends on a signal and every gap you name is checked against 
 ## Answer a picker
 
 Sessions in the chain ask by `SendMessage`.
-A picker that shows anyway (a skill's own `AskUserQuestion`) is answered through the Feed:
+A picker that shows anyway (a skill's own `AskUserQuestion`) sits in a herdr pane, which takes no key from your hand, as Answer a permission prompt says:
 
-```bash
-cmux rpc feed.list '{"pending_only":true}'
-cmux rpc feed.question.reply '{"request_id":"<id>","selections":["<label>"]}'
-```
+- When a rule or a sound default decides it, end it by that section's close and resume, with a brief that gives the answer.
+- When only the owner decides it, give the resume brief the choice to post as an Inbox decision (**ask**), so the session carries on.
+- When the owner is answering the picker in that pane or on the Dashboard, leave it to the owner and wait for the session's report.
 
-- One string per question, each an exact option label; a multi-select joins its labels with `, `.
-  An unmatched string goes through as free text, so a typo becomes a real answer.
-- A Feed item maps to its session by the base64 session id at the end of its `workstream_id`: `cmux sessions list --session <id> --json`.
-- `"delivered": true` prints even for a made-up id.
-  Done only when `read-screen` shows the picker gone.
-- The Feed gives up after 120s. After that the picker is the owner's to answer in that pane, where the dashboard shows the session as Stuck (only Playground's own row reads Waiting on you): file nothing, and type nothing, since keys typed into a pane read as his.
-- When the owner is answering the picker in that pane himself, leave it to him and wait for the session's report.
+Done when the session's state record reads `working` with `at` after the resume, or the owner has the picker.
 
 ## End
 

@@ -23,7 +23,7 @@ Their tests are `bun run test:file tests/scripts/hooks`.
   which only the extensions hold) loads it through `guardList` in `scripts/hooks/lists.ts` inside its check, at every call,
   and fails closed on it:
   on a machine with extensions (its data folder holds `extensions/`) the list comes from `extensions/hooks/<list>.json`, which every list write derives as the union of every scope's `lists/<list>.json` (the login's, each org's, then core's), read by `packages/settings/src/rendered.ts`, and never from this folder.
-  A root that lacks the list refuses the guarded call, naming the file and `playground ext import --from-tree extensions/core/lists`, which seeds it, for the owner to type in Ops' pane as a `!` command.
+  A root that lacks the list refuses the guarded call, naming the file and `playground ext import --from-tree extensions/core/lists`, which seeds it: the session tells its lead, and the dispatcher hands the owner the command to type as a `!` command in the dispatcher's terminal window, since the Dashboard's composer types no `!` command.
   A factory session writes nothing in the root itself and changes no list or guard setting through the CLI: [no-extensions-write](#no-extensions-write) refuses both, so a list changes only on the owner's own command.
   With no extensions, the list is core's file; with no file either, the guard takes its empty default.
   A list file that is there but empty, malformed or missing a key refuses the guarded call, extensions or not; an explicit empty list (`[]`, or every key empty) is the owner's choice and loads.
@@ -93,14 +93,14 @@ Their tests are `bun run test:file tests/scripts/hooks`.
 
 - agent-desktop runs headless and leaves the owner's own apps alone: `scripts/hooks/no-desktop-owner-app.ts`, registered beside no-headless-login and acting for every session, refuses an `agent-desktop` call that carries `--headed`, since headed input moves the owner's own pointer and focus.
   It also refuses one that targets an app on the `desktop-owner-apps` guard list ([Guard lists](#guard-lists)): an `--app` value, or a `launch` or `close-app` target, matched without case and with or without `.app` or a path before it.
-  Core's list is empty, and the owner's login extension holds the owner's apps, which change only by the owner's own `!` command, which Ops prepares.
+  Core's list is empty, and the owner's login extension holds the owner's apps, which change only by the owner's own `!` command, which the dispatcher hands the owner.
   It reads the list and nothing else, so no flag, environment variable, `export`, `env` or write in the same call frees a call.
   The list changes only on the owner's own command, since [no-extensions-write](#no-extensions-write) refuses a session's edit of it in any call; a session that runs agent-desktop under another name breaks the rule, which a text hook cannot see.
-  Its refusal names the two ways out: the owner runs the command with the `!` prefix in the owner's own pane, which runs outside the hooks, or takes the app off the list with a `!` command Ops prepares.
+  Its refusal names the two ways out: the owner runs the command with the `!` prefix in the dispatcher's terminal window, which runs outside the hooks, or takes the app off the list with a `!` command the dispatcher hands the owner when a session tells its lead.
   It refuses what it cannot read, as a call that may hide either: a word built from a variable or a substitution, the program in a variable in a call that names agent-desktop, arguments xargs appends, `batch`, `--window-id`, `notification-action`, an interpreter's code that names agent-desktop, and a script file run in a call that names agent-desktop.
   A command that acts on the app in front when no `--app` names one (`snapshot`, `find`, `screenshot`, `press`, the window and notification commands) needs an `--app`; `snapshot` and `find` under a `--root` ref, and every ref action, pass, since the snapshot that gave the ref was checked.
   It reads agent-desktop behind `bash -c`, a pipe into a shell, `env` and the other wrappers `scripts/hooks/shell.ts` knows, `run-slot.sh --`, `npx`, `bunx` and `find -exec`, and a script file the call runs, by its text.
-  It loads the list only for a call that runs agent-desktop, and fails closed on it, its refusal naming the file and Ops, whose list write fixes it; it fails open on a call it cannot parse.
+  It loads the list only for a call that runs agent-desktop, and fails closed on it, its refusal naming the file and the route to the owner's list write that fixes it (tell your lead, and the dispatcher hands the owner the command); it fails open on a call it cannot parse.
 
 ## no-env-dump
 
@@ -108,6 +108,44 @@ Their tests are `bun run test:file tests/scripts/hooks`.
   since the environment holds tokens and the output lands in the transcript (13 Oct: a planning subagent's `env` printed this machine's GitHub and Slack tokens).
   `env VAR=x <command>`, `set -e` and `export VAR=x` run.
   It fails open, and its tests are in `bun run test:file tests/scripts/hooks` too.
+
+## no-extension-repo-write
+
+- A factory session changes no extension repository's git data or name: `scripts/hooks/no-extension-repo-write.ts`, registered beside no-public-leak, refuses such a write, since `ops:ext-sync` renders each one's `main` into the extensions root every guard reads.
+  Its repositories are each `ext.repos` value in the root's `policy.json`, each scope clone's `origin`, which follows a rename, and `<login>/playground-<scope>` for each scope clone `ext.repos` does not name, under `PLAYGROUND_LOGIN` and the root's `login` file both, matched in any case and with percent escapes decoded, as GitHub decodes them.
+  It reads every write through no-playground-leak's engine with `anyWrite` set (`inspectAs`), which refuses a write to one of them whatever its text, and a write whose target it cannot place.
+  Those writes are a `git push`, `send-pack` or `subtree push`, a git alias expanded from its config (its body split as git splits it, quotes and backslashes included), a gh or `gh api` write, a curl to one on `api.github.com` or `github.com` (a read included), and a GitHub MCP write.
+  Its gh writes include a DELETE, `gh pr merge` and `update-branch`, the publish-step group's `create`, `delete`, `edit` and `upload`, and `gh repo edit`, `rename`, `delete`, `archive`, `unarchive` and `sync <destination>`.
+  It reads a push's target as git does: each push URL of the remote named, `--repo`'s value when none is named, else each push URL of every remote and each URL `remote.pushDefault` or the current branch's `pushRemote` or `remote` holds, another branch's left out.
+  It reads the current branch's keys alone for a bare push, an alias of push included, written before any other git or gh command or a program it cannot name, in the folder the call starts in; after one, or in another folder (a `cd`, `git -C`), it reads every branch's `pushRemote` and `remote`, since the branch it pushes from may have changed.
+  It reads that order as written, so a loop or a shell function that runs a branch switch before a push written earlier, and a named program whose own code switches the branch (`make`, a script by its path, `bun run`), are outside its reach.
+  It reads a `gh api` endpoint and a curl URL where the request lands: dot segments resolved, `{owner}`, `{repo}`, `:owner` and `:repo` filled from the checkout, and curl's host and path read as a URL reads them, `uploads.github.com` with `api.github.com`.
+  It cannot place, so refuses, a curl glob (`{…}`, `[…]`) on a GitHub host without `-g`, and a curl beside a word naming GitHub with a `Host` header, `--connect-to`, `--request-target` or `--resolve`.
+  It reads that state when it checks the call, so after an earlier command in the same call changes it, it cannot place a push, an alias run or a write gh places by the checkout, and refuses it with the fix: run the setup in a call of its own first.
+  Those changes are a `git config` write, `git remote add`, `remove`, `rename`, `rm` or `set-url`, `git clone`, `init` or `submodule`, `gh repo clone`, `fork` or `set-default`, `gh config set`, and any other command naming a `.git` path or a git config file.
+  A config file it reaches only through `include.path` or a link, written in the same call by a command that names neither a `.git` path nor a git config file, is outside its reach.
+  It cannot place, so refuses, a push with `-c`, `--config-env`, `--git-dir` or a `GIT_` variable in the call, a literal URL an `insteadOf` or `pushInsteadOf` prefix matches, a remote whose URL is a local path, a `!` alias, an alias with an unclosed quote or a trailing backslash, an alias `-c` sets, `gh alias set` and `import`, and a REST write to `repositories/<id>`.
+  An `xargs` with no replace string appends arguments from its input, which the hook cannot read, so it refuses a push whose remote that input names and any curl that `xargs` runs, while a push whose remote is named (`xargs git push origin`), `xargs git add` and an `xargs` gh conversation verb pass.
+  Under such an `xargs`, a gh write whose repository that input names and a `gh api` with a method, field or input of its own are refused, while a `gh api` with none reads and a pull request that input names is placed as a number is, by `-R` or the checkout.
+  An `xargs -I` string is unplaceable too: it refuses a pull request the string puts in place, and a curl that may write (a method other than GET or HEAD, a form, an upload, or data without `-G`) to a URL it puts in place, while a curl that only reads passes.
+  It refuses a repository made or renamed at one of those names, `*` standing for the account gh picks itself, and a name it cannot read counts as one.
+  Those are `gh repo create` (its name or its `--source` folder's), `rename` and `fork --fork-name`, `gh api`'s repo PATCH with a `name`, `generate`, `transfer`, `forks` with a `name`, `user/repos` and `orgs/<org>/repos`, and MCP `create_repository`.
+  A branch other than `main` is outside its scope, since the sync reads only `main`, so `gh issue develop` and the head `gh pr create` pushes pass.
+  Issue and pull request conversation passes: `gh issue` and `gh label`, `gh pr create`, `comment`, `edit`, `review`, `close` and `reopen`, `gh api` on `issues`, `labels` and `pulls` but a pull request's `merge` or `update-branch`, and the matching MCP tools.
+  A commit is refused only in a clone of one of them, and every call passes on a machine with no extensions root.
+  Its refusal names the one route: the owner types the command as a `!` command in the dispatcher's terminal window, which the dispatcher hands the owner when a session tells its lead; no flag, environment variable, role or note frees a call.
+  It fails closed, as the leak guards do and only on a call that may write, when `policy.json` does not read or no login names the default repositories, and on any call that may write when the reader fails on it (a script nested too deep or too large) or is still reading it at its 8s deadline, inside the hook's 15s timeout, whatever it names.
+  `withDeadline` alone does not bound a hook whose time goes on spawns, since `tick()` reads the clock only in lex and walk steps, so each command it visits calls `pastDeadline()` in `scripts/hooks/shell.ts`; a Worker timer, as no-extensions-write runs, is the other route.
+  It refuses a closed list of write forms, the literal ones its tests pin, so a same-user session can still get past it by a form outside that list, such as a script file it writes and then runs.
+  Outside its reach are a program whose own code pushes or calls the API (a script by its path, `bun run`, `bun -e`, `python -c`, a binary, an HTTP client other than curl such as wget or httpie, and GNU `parallel`, which appends its input as `xargs` does), a fork that keeps its source's name, and a gh alias set before it.
+  A pull request named by a shell value (`gh pr merge $N`) is placed as a number is, by `-R` or the checkout, so a pull request URL held in a variable is outside its reach.
+  The words a plain `xargs` appends are read for neither flags nor a pull request URL, so a `gh api` read or a `gh pr merge` it runs can carry a method, a field or `-R` in that input, and `echo <ext>/pull/1 | xargs gh pr merge` passes in a clone of another repository.
+  In a checkout it cannot resolve (`cd $X`, `git -C $X`), it reads a git alias from the global and system configs alone, so an alias in that checkout's own config is outside its reach.
+  A `bash -c` script over 128 KB that names git, gh or `repo` is refused when the reader fails on its size, which waits on the reader's script-size work to narrow.
+  `gh workflow run`, `gh secret set` and `gh repo deploy-key add` pass, since none writes a branch or the name itself, while their `gh api` routes are refused.
+  A GraphQL mutation, which names its repository by node id, and a curl whose URL the run computes are refused only when the data they send names one of the repositories, so a curl URL with a computed part (`$U`, `$(…)`) passes even when its literal part names one; a URL in a curl config file (`-K`, `~/.curlrc`) and a redirect a server answers with (`-L`) are unread.
+  An `ext.order` name with no clone and no `ext.repos` entry is not guarded, and the sync does not push it either.
+  Its tests are `bun run test:file tests/scripts/hooks/no-extension-repo-write.test.ts`.
 
 ## no-extensions-write
 
@@ -129,7 +167,7 @@ Their tests are `bun run test:file tests/scripts/hooks`.
   A test holds that list to every key a hook names, to `ext.order`, which orders the extensions every guard reads, and to spawn.sh's `paths.codeRoot`; spawn.sh's `gates.*` stay open, as capacity tuning Ops adjusts in normal upkeep.
   A command, verb, kind or key word it cannot read, or any such word among the words of `ext put` or `settings set` or `reset`, counts as the write.
   `ext put` of a doc, a rule or any other reviewed kind, every read, `ext score`, `accept` and `reject`, `settings set` of any other key, `settings import-jobs` and writes elsewhere in the data folder (handoffs, the roster) run.
-  Its refusal names the one route: the owner types the command in Ops' pane as a `!` command, which runs without hooks; no flag, environment variable, role or note frees a call.
+  Its refusal names the one route: the owner types the command as a `!` command in the dispatcher's terminal window, which runs without hooks and which the dispatcher hands the owner when a session tells its lead; no flag, environment variable, role or note frees a call.
   It reads every command `scripts/hooks/shell.ts` finds: one inside a `$(…)`, a `${…}`, a `$((…))` or an array assignment's `(…)`, and the script a shell, `source` or `.` reads from a process substitution, a group's output or `/dev/stdin`, every command that prints part of it included, and the parts it can read of a script it reads only in part (a group holding a `curl`).
   It judges each command line and each word once per call, so a deep nest or a long list of variables ends well inside the hook's timeout, and it refuses, each time naming the fix (split it into shorter calls), a call whose lexing or walk runs past 10 s
   (a deadline checked at every lex, expansion and walk step, its clock read once every 1024 steps, so any slow route is refused), a command over 128 KB, whose lexing could outlast the timeout, one nested too deep for its stack, and a chain of scripts a shell,
@@ -137,7 +175,7 @@ Their tests are `bun run test:file tests/scripts/hooks`.
   It runs its check in a Worker (`scripts/hooks/no-extensions-write-worker.ts`) and refuses from the main thread when the Worker has not answered in 12 s, so a single step the deadline cannot interrupt (a regex, a copy) cannot hold it past its 15 s timeout; this costs about 10 ms a call.
   It reads `env -C<dir>` and `env --chdir=<dir>` as the folder the command runs in, as it reads `env -C <dir>`.
   It reads a command's text, so a program whose own code writes the root (a script file run by its path, a binary) and a path it cannot read (built at run time, in a `$(…)` or a variable) pass it.
-  A write to a scope's GitHub repository, which `ops:ext-sync` renders into the root, is outside its reach too; a guard on those writes is a follow-up of its own.
+  A write to a scope's GitHub repository, which `ops:ext-sync` renders into the root, is outside its reach too; [no-extension-repo-write](#no-extension-repo-write) refuses one.
   A path through a link into the root with `..` after the link (`echo x > <link>/../f`) is judged as typed, so a write by one passes.
   A `cd` or `pushd` it cannot follow (`cd -`, `cd ~-`, `popd`'s stack, a glob in the folder, a `CDPATH` lookup) leaves the command's folder unread, so a relative write after one passes.
   From a cwd at or above the root (`~`, `~/.playground`), a quoted `(`, `[`, `*`, `?` or `{` reads as a glob there, so a call holding one (`git commit -m "fix(x): y"`) is refused; run it from a worktree.
@@ -204,6 +242,7 @@ Their tests are `bun run test:file tests/scripts/hooks`.
   or any agent's name in the roster, both read on every call since skills are added and sessions renamed, leaving out one the file's `everyday` list names, such as `builder`, an org's own name, which its extension's copy adds, or `pr`, the public skill copied from upstream whose name is the word for a pull request, and adding none when the roster is missing or does not read;
   each matched whole in any case, with `_` and `-` counting as edges, so `PLAYGROUND_ROLE` holds one and `the dashboard` does not):
   a Linear or Slack MCP tool that is not a read, a GitHub MCP write whose owner is a guarded org, a `gh` write (pr, issue, label, release, a non-GET `gh api`) or curl to Linear, Slack or a guarded org's repository, and `git commit` or `git push` in a guarded org's checkout, judged by its message, its branch and the messages of the commits the remote does not hold.
+  It finds git's subcommand past git's own options, stepping over the separate value of each option the hook's `GIT_GLOBALS` lists (`--attr-source <tree>` among them), so `git --attr-source HEAD push` reads as a push, and no-extension-repo-write reads git the same way.
   The guarded GitHub orgs are the ones the `ext.links` setting links (`guardedOrgs` in `packages/settings/src/ext.ts`), read from the data folder's policy at each call, so a machine with no extensions guards Linear and Slack alone, and a policy it cannot read refuses a writing call with the fix.
   It also refuses a guarded org's write whose text it cannot read, refuses a write it cannot place (a pull request number in a variable, a GraphQL mutation) only when its text holds a term, and passes every other write, the factory's own repository's included.
   Unlike those, a `gh` write whose repository the hook cannot place is refused whatever its text, since that repository may be a guarded org's, and its refusal names `--repo <owner>/<name>` as the fix.
@@ -226,7 +265,7 @@ Their tests are `bun run test:file tests/scripts/hooks`.
 
 - ALWAYS: Write each public repository's pull requests, issues, reviews and comments in plain words, naming no person, company or private record, since everything written there is public once the repository is and stays cached after.
   `scripts/hooks/no-public-leak.ts`, registered in both settings files, refuses a write to a public repository (`factory.publicRepo`, one or a list, or while unset `TODAY_PUBLIC` in trace-count's `kinds.ts`, the factory's and Yard's)
-  whose text holds a name, a handle, a company term, a Slack id or a Linear key from its list, or any email address, `LM-<n>` key or link into the archive repository (`factory.archiveRepo`).
+  whose text holds a name, a handle, a company term, a Slack id or a Linear key from its list, or any email address or link into the archive repository (`factory.archiveRepo`).
   An extensions root whose policy.json it cannot read for those two refuses the write, as a list it cannot trust does.
   Its reason names the kind and the plain-words fix, never the text.
   It reads every write through no-playground-leak's engine (`inspectAs` with its own `Policy`), so the shapes it reads are that guard's gh, `gh api`, curl and GitHub MCP writes; git commits and pushes, Linear and Slack are outside it.
@@ -236,7 +275,7 @@ Their tests are `bun run test:file tests/scripts/hooks`.
 
 ## The trace ratchet
 
-- ALWAYS: Write a new comment, doc or test in plain words, with no issue number (`#NNN`, `LM-<n>`) or old session name: the number belongs in the commit scope and the pull request body.
+- ALWAYS: Write a new comment, doc or test in plain words, with no issue number (`#NNN`, or a ticket key from the list) or old session name: the number belongs in the commit scope and the pull request body.
   `bun run trace-count` counts each kind in `kinds.ts` over the tree (git's files, or every file but installs and build output where no `.git` is), past the live names `LIVE_NAMES` keeps for the switch's migration.
   Its `ownerName` kind counts the owner's names (`owner.names`, then the owner part of `factory.archiveRepo`, read from the settings at run time), a quote set against the owner and anyone's dated quote; `companyName` counts the company's name, and `lightWords` a factory or old skill word glued into a longer one.
   It reads past the lockfiles too (`bun.lock`, `package-lock.json`), whose integrity hashes can spell a list value by chance.
@@ -348,6 +387,7 @@ Their tests are `bun run test:file tests/scripts/hooks`.
 
 - Every worktree of a checkout shares one `git stash` list, so a pop can take another worker's entry, lint-staged's commit backup included: take a before-shot from a separate worktree on `origin/canary`, or commit first.
   The factory's `scripts/hooks/no-stash.ts` (registered in `scripts/factory-settings.json`, and in `.claude/settings.json` for a session cmux restores without it) refuses a stash that could take another worktree's work, and `agent-browser close --all`, which closes every session's browser on the machine.
+  It finds git's subcommand past git's own options, stepping over the separate value of each option the hook's `GIT_TAKES` lists (`--attr-source <tree>` among them), so `git --attr-source HEAD stash pop` reads as a stash.
 
 ## no-unslotted-run
 

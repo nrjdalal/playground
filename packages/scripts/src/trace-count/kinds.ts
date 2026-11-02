@@ -53,7 +53,6 @@ export const publicListPath = (environment: Environment = process.env): string =
   join(dataDir(environment), "extensions", "hooks", "no-public-leak.json")
 
 export type Kind =
-  | "archiveKeys"
   | "archiveLinks"
   | "companies"
   | "companyName"
@@ -107,7 +106,6 @@ export function patterns(list: PublicList, repos: Repos): [Kind, RegExp][] {
         ? new RegExp(`(?<![\\w.-])${escape(repos.archive)}(?![\\w.-])`, "gi")
         : undefined,
     ],
-    ["archiveKeys", /(?<![a-z\d])lm-\d+(?![a-z\d])/gi],
     ["emails", /[a-z\d._%+-]+@[a-z\d-]+(?:\.[a-z\d-]+)*\.[a-z]{2,}/gi],
     ["names", anyOf(list.names)],
     ["handles", anyOf(list.handles)],

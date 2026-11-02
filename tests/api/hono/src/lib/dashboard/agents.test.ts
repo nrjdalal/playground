@@ -1516,7 +1516,7 @@ describe("branchTicketOf", () => {
       ["test-855-stack", own],
       ["pr-843", own],
       ["cedar-1234-export", null],
-      ["lm-step1-soak", own],
+      ["vx-step1-soak", own],
       ["feat/board-colours", "acme-labs/example-repo"],
       ["research-939-pg-baseline", "acme-labs/example-repo"],
       [null, own],

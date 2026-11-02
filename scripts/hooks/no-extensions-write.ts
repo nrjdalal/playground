@@ -31,7 +31,7 @@ import {
 type Environment = Record<string, string | undefined>
 
 const ROUTE =
-  "every guard reads its list and policy.json from there, so a session's write would change what a guard allows. A guard's list or setting changes only by the owner typing the playground command in Ops' pane as a ! command, which runs without hooks; ask Ops, who asks the owner. A session writes nothing there by hand."
+  "every guard reads its list and policy.json from there, so a session's write would change what a guard allows. A guard's list or setting changes only by the owner typing the playground command as a ! command in the dispatcher's terminal window, which runs without hooks: tell your lead, and the dispatcher hands the owner the command. A session writes nothing there by hand."
 
 const refuse = (what: string) => `no-extensions-write hook refuses ${what}: ${ROUTE}`
 

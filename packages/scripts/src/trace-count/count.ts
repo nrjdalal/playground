@@ -44,12 +44,8 @@ export const LEFT_OUT = [
 // In the seed but never counted, nor swapped: a lockfile, whose integrity hashes can spell a list value by chance and break the install when rewritten.
 export const LOCKFILES = [/(?:^|\/)bun\.lock$/, /(?:^|\/)package-lock\.json$/]
 
-// Left out of one kind alone: the dashboard's and the Changelog's fixtures and the recorded replays mimic real data, so their PR numbers and branch keys are no provenance, the leak guard's test holds the branch keys it detects, as kinds.ts holds their shape, and a test's issue numbers are its own made-up data.
+// Left out of one kind alone: the dashboard's and the Changelog's fixtures and the recorded replays mimic real data, so their PR numbers are no provenance, and a test's issue numbers are its own made-up data.
 const LEFT_OUT_OF: Partial<Record<Kind, RegExp[]>> = {
-  archiveKeys: [
-    /^api\/hono\/src\/fixtures\/dashboard\.json$/,
-    /^tests\/scripts\/hooks\/no-public-leak\.test\.ts$/,
-  ],
   issueRefs: [
     /^api\/hono\/src\/fixtures\/dashboard\.json$/,
     /^api\/hono\/src\/plugins\/changelog\/fixture\.ts$/,
@@ -186,7 +182,7 @@ export async function tree(root: string): Promise<File[]> {
 
 // No-public-leak's list, or the refusal for one the count cannot trust: a missing file or a key with no entry leaves its kinds with no pattern, so they would count nothing and a trace would pass unseen.
 export async function list(path: string): Promise<{ list: PublicList } | { refusal: string }> {
-  const fix = `ask Ops for the owner to type ! playground ext put <scope> list no-public-leak <file> --reason <why> in Ops' pane, every key (${LIST_KEYS.join(", ")}) holding an entry`
+  const fix = `tell your lead, and the dispatcher hands the owner ! playground ext put <scope> list no-public-leak <file> --reason <why> to type in the dispatcher's terminal window, every key (${LIST_KEYS.join(", ")}) holding an entry`
   if (!existsSync(path)) return { refusal: `no ${path}, so its kinds would count nothing: ${fix}` }
   const value: unknown = await Bun.file(path)
     .json()
