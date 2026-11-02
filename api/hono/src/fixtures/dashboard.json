@@ -1154,7 +1154,7 @@
         "message": {
           "content": [
             {
-              "text": "Fixture: here is the day so far.\n\n| Lane | Work | State |\n| --- | --- | --- |\n| Boards | The Linear app | 5/5, ready to merge |\n| Sidebar | The worker lights | In review |\n\nThe Linear app merges once its check reads green:\n\n```ts\nconst ready = (pull: Pull) => pull.score === 5 && pull.ci !== \"failing\"\n```\n\n```json\n{ \"number\": 97, \"score\": 5, \"ci\": \"passing\" }\n```\n\n```sh\nbun run pr:merge 97\n```",
+              "text": "Fixture: here is the day so far.\n\n| Lane | Work | State |\n| --- | --- | --- |\n| Boards | The Linear app | 5/5, ready to merge |\n| Sidebar | The worker lights | In review |\n\nThe Linear app merges once its check reads green:\n\n```ts\nconst ready = (pull: Pull) => pull.score === 5 && pull.ci !== \"failing\"\n```\n\n```json\n{ \"number\": 97, \"score\": 5, \"ci\": \"passing\" }\n```\n\n```sh\nbun run pr:merge 97\n```\n\nThe Linear app changes one line:\n\n```diff\n@@ -1 +1 @@\n- const limit = 100\n+ const limit = rows.length\n```",
               "type": "text"
             }
           ],
