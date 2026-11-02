@@ -446,12 +446,12 @@ describe("a quoted argument is read as a command line only where a program runs 
     ["awk matching a field to a string", `awk '$3 ~ "runner"' /dev/null`],
     ["awk matching a line naming a runner", "awk '/watch/' /dev/null"],
     ["sed printing a line naming a shell", "sed -n '/sh -c/p' /dev/null"],
+    ["awk with a block matching a line naming a runner", "awk '/watch/ {print}' /dev/null"],
   ])("%s runs from the home and the data folder", async (_, command) => {
     for (const cwd of homes) expect(await at(command, cwd)).toBeUndefined()
   })
 
   test.each([
-    ["awk with a block matching a line naming a runner", "awk '/watch/ {print}' /dev/null"],
     ["a commit message naming a removal", "git commit -m 'fix: rm -rf ~ bug'"],
     ["a commit message after -am naming a removal", "git commit -am 'fix: rm -rf ~ bug'"],
     ["a tag message naming a removal", "git tag -m 'see rm -rf ~' v1"],
@@ -550,6 +550,7 @@ describe("a quoted argument is read as a command line only where a program runs 
     ],
     ["a payload held in the last argument", `true 'rm -rf ~'; eval "$_"`],
     ["a payload held by getopts", `getopts x o 'rm -rf ~'; eval "$o"`],
+    ["a payload set in bash -c's script, then evaluated", `bash -c 'set -- "rm -rf ~"; eval "$1"'`],
     ["a payload held in an array", `args=('rm -rf ~'); sh -c "\${args[0]}"`],
   ])("%s stays refused", async (_, command) => {
     for (const cwd of [...homes, join(homedir(), "x", ".claude", "worktrees", "y")])
