@@ -115,8 +115,22 @@ describe("a secret ask (PG-59)", () => {
       ]),
     )
     expect(line).toStartWith("Provided at ")
-    expect(line).toEndWith(" · production: exit 0 · preview: stopped by a signal")
+    expect(line).toEndWith(" · production: exit 0 · preview: stopped at its time limit")
     expect(needsYou(provided([]))).toBe(false)
+  })
+
+  test("names each way a sink can fail: not installed, a refused step, its time limit", () => {
+    const line = outcomeLine(
+      provided([
+        { environment: "1Password sign-in", exitCode: 127 },
+        { environment: "1Password sign-in", exitCode: 1 },
+        { environment: "1Password item", exitCode: 2 },
+        { environment: "1Password item", exitCode: null },
+      ]),
+    )
+    expect(line).toEndWith(
+      " · 1Password sign-in: not installed · 1Password sign-in: exit 1 · 1Password item: exit 2 · 1Password item: stopped at its time limit",
+    )
   })
 
   test("is done once every environment took it, failed while any did not, sending until its sink ran", () => {

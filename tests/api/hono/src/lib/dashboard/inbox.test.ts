@@ -19,7 +19,7 @@ import {
   savesDraft,
   secretInputSchema,
   type SecretSink,
-  sinkArgv,
+  sinkSteps,
 } from "../../../../../../api/hono/src/lib/dashboard/inbox"
 
 const CHANNEL = "https://app.slack.com/client/T0000000000/C0MADEUP01"
@@ -777,6 +777,11 @@ const SECRET = {
   type: "secret",
 }
 
+const ONE_PASSWORD = { key: "made-up.service.token", sink: { type: "1password" }, type: "secret" }
+
+// made-up names for the owner's private settings
+const PLACE = { tag: "made-up-tag", vault: "Made Up Vault" }
+
 describe("a secret ask (PG-59)", () => {
   test("names its key and a sink from the allowlist, with each environment once", () => {
     expect(inboxInputSchema.safeParse(decision(SECRET)).success).toBe(true)
@@ -796,21 +801,71 @@ describe("a secret ask (PG-59)", () => {
     expect(refused({}, "-e")).toBe(false)
   })
 
-  test("runs one vercel env add an environment, the value never in its argv", () => {
+  test("runs one vercel env add an environment, the value its stdin and never in its argv", () => {
     const sink = SECRET.sink as SecretSink
-    expect(sinkArgv(SECRET.key, sink, "preview")).toEqual([
-      "vercel",
-      "env",
-      "add",
-      "GITHUB_CLIENT_SECRET",
-      "--environment",
-      "preview",
-      "--project",
-      "api-made-up",
-      "--scope",
-      "made-up-team",
-      "--yes",
+    const steps = sinkSteps(SECRET.key, sink, "made-up-value", PLACE)
+    expect(steps.map((step) => step.label)).toEqual(["production", "preview"])
+    expect(steps[1]).toEqual({
+      argv: [
+        "vercel",
+        "env",
+        "add",
+        "GITHUB_CLIENT_SECRET",
+        "--environment",
+        "preview",
+        "--project",
+        "api-made-up",
+        "--scope",
+        "made-up-team",
+        "--yes",
+      ],
+      label: "preview",
+      stdin: "made-up-value",
+    })
+  })
+
+  test("a 1Password sink names nothing but its type, and its key may be a dotted name", () => {
+    expect(inboxInputSchema.safeParse(decision(ONE_PASSWORD)).success).toBe(true)
+    const with_ = (preview: object) =>
+      inboxInputSchema.safeParse(decision({ ...ONE_PASSWORD, ...preview })).success
+    // the vault and the tag are the owner's private settings, never the ask's
+    expect(with_({ sink: { type: "1password", vault: "made-up-vault" } })).toBe(false)
+    expect(with_({ key: "staging.made-up_2" })).toBe(true)
+    expect(with_({ key: "-made-up" })).toBe(false)
+    expect(with_({ key: "made up" })).toBe(false)
+    // a Vercel key stays an environment variable's name
+    expect(inboxInputSchema.safeParse(decision({ ...SECRET, key: "made.up" })).success).toBe(false)
+  })
+
+  test("signs in to 1Password, then creates one item in the set vault with the set tag, the value inside its stdin alone", () => {
+    const steps = sinkSteps(
+      ONE_PASSWORD.key,
+      ONE_PASSWORD.sink as SecretSink,
+      "made-up-value",
+      PLACE,
+    )
+    expect(steps.map(({ argv, label }) => ({ argv, label }))).toEqual([
+      { argv: ["op", "signin"], label: "1Password sign-in" },
+      {
+        argv: ["op", "item", "create", "--vault", "Made Up Vault", "--tags", "made-up-tag", "-"],
+        label: "1Password item",
+      },
     ])
+    expect(steps[0]?.stdin).toBe("")
+    expect(JSON.parse(steps[1]!.stdin)).toEqual({
+      category: "PASSWORD",
+      fields: [
+        {
+          id: "password",
+          label: "password",
+          purpose: "PASSWORD",
+          type: "CONCEALED",
+          value: "made-up-value",
+        },
+      ],
+      title: "made-up.service.token",
+    })
+    for (const step of steps) expect(step.argv.join(" ")).not.toContain("made-up-value")
   })
 
   test("takes no Approve, Deny, Archive or Edit: its value comes through Submit alone", () => {
@@ -2415,7 +2470,7 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       const calls: { argv: string[]; stdin: string }[] = []
       const run = async (argv: string[], stdin: string) => {
         calls.push({ argv, stdin })
-        return exitCodes[calls.length - 1] ?? 0
+        return calls.length <= exitCodes.length ? (exitCodes[calls.length - 1] as number | null) : 0
       }
       return { calls, run }
     }
@@ -2514,6 +2569,69 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
           { environment: "preview", exitCode: 0 },
         ],
       })
+    })
+
+    test("a 1Password sink signs in, then saves one item from its stdin, and the card keeps each step's status", async () => {
+      const posted = await post(decision(ONE_PASSWORD))
+      const sink = stub()
+      const provided = await store.provideSecret(
+        db,
+        posted.id,
+        { value: VALUE },
+        { actor, place: () => PLACE, run: sink.run },
+      )
+      expect(sink.calls.map((call) => call.argv.slice(0, 3))).toEqual([
+        ["op", "signin"],
+        ["op", "item", "create"],
+      ])
+      expect(sink.calls[1]?.stdin).toContain(VALUE)
+      for (const call of sink.calls) expect(call.argv.join(" ")).not.toContain(VALUE)
+      expect(provided.ok && provided.item.answer).toMatchObject({
+        results: [
+          { environment: "1Password sign-in", exitCode: 0 },
+          { environment: "1Password item", exitCode: 0 },
+        ],
+      })
+      expect(await everyRow()).not.toContain(VALUE)
+    })
+
+    test("a 1Password sign-in that fails, or an op that is missing, stops before the item is made", async () => {
+      for (const code of [1, 127, null]) {
+        const posted = await post(decision(ONE_PASSWORD))
+        const sink = stub([code])
+        const provided = await store.provideSecret(
+          db,
+          posted.id,
+          { value: VALUE },
+          { actor, place: () => PLACE, run: sink.run },
+        )
+        expect(sink.calls, String(code)).toHaveLength(1)
+        expect(provided.ok && provided.item.answer).toMatchObject({
+          results: [{ environment: "1Password sign-in", exitCode: code }],
+        })
+      }
+    })
+
+    test("a 1Password sink with no vault or tag set is refused before op runs, and the ask stays open", async () => {
+      for (const place of [
+        { tag: "", vault: "" },
+        { tag: "made-up-tag", vault: "" },
+        { tag: "", vault: "Made Up Vault" },
+      ]) {
+        const posted = await post(decision(ONE_PASSWORD))
+        const sink = stub()
+        const refused = await store.provideSecret(
+          db,
+          posted.id,
+          { value: VALUE },
+          { actor, place: () => place, run: sink.run },
+        )
+        expect(refused).toMatchObject({ code: "VALIDATION_ERROR", ok: false })
+        expect(!refused.ok && refused.message).toContain("onePassword.vault and onePassword.tag")
+        expect(JSON.stringify(refused)).not.toContain(VALUE)
+        expect(sink.calls).toHaveLength(0)
+        expect((await store.getItem(db, posted.id))?.status).toBe("open")
+      }
     })
 
     test("is refused on any other item, and the item takes no other answer", async () => {

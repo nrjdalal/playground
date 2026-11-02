@@ -74,6 +74,8 @@ describe("defineSettings", () => {
       "models.glm",
       "models.glmKeychainService",
       "models.probe",
+      "onePassword.tag",
+      "onePassword.vault",
       "owner.names",
       "paths.codeRoot",
       "release.hours",
