@@ -39,11 +39,6 @@ const CARVE_OUTS: Record<string, { lines: number; reason: string }> = {
     lines: 1,
     reason: "prose that names the form as one never to run",
   },
-  "scripts/briefs/new-tester.md": {
-    lines: 1,
-    reason:
-      "a tester clears the gitignored web/next/.next and .turbo caches (clean -X) in its own worktree, to time a cold build",
-  },
   "scripts/ops/dashboard/supervisor.sh": {
     lines: 5,
     reason:
