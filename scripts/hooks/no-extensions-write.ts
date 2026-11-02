@@ -216,6 +216,43 @@ function cliCalls(parsed: Parsed, env: Env): Word[][] {
   return words.flatMap((word, at) => (isCli(word, dirs) ? [words.slice(at + 1)] : []))
 }
 
+// The variables a score's author is read from (store.ts, terminalIo); an ext score whose line clears or sets one reads as another author.
+const IDENTITY = ["CLAUDE_CODE_SESSION_ID", "CLAUDE_CONFIG_DIR", "PLAYGROUND_ROLE"]
+const SETS = /^(?:CLAUDE_CODE_SESSION_ID|CLAUDE_CONFIG_DIR|PLAYGROUND_ROLE)\+?=/
+// env's options that clear the whole environment: -i alone or in any cluster of short options, --ignore-environment, or a bare -
+const CLEARS = /^(?:-[^-\s]*i|--ignore-environment$|-$)/
+const SCORE = /\bext\s+score\b/
+// the line's text as a shell it runs reads it: backslash-newlines, a $ before a quote, and every quote and backslash removed
+const unquoted = (text: string) => text.replace(/\\\n|\$(?=["'])|["'\\]/g, "")
+const SCORE_AS_OTHER = `playground ext score on a line that clears or sets ${IDENTITY.join(", ")}, which reads as another author than the calling session`
+
+// Whether words clear or set an identity variable: an assignment or += to one, or env beside -u or --unset naming one or an option that clears the environment.
+const changes = (words: Word[]): boolean =>
+  words.some((w) => SETS.test(w.value)) ||
+  (words.some((w) => program(w.value) === "env") &&
+    words.some((w) => CLEARS.test(w.value) || IDENTITY.some((k) => w.value.includes(k))))
+
+// Whether any command on a line, inside its groups and substitutions included, clears or sets an identity variable.
+function changesIdentity(commands: Command[]): boolean {
+  return commands.some(
+    (cmd) =>
+      changes(cmd.words) ||
+      (!!cmd.inner && changesIdentity(cmd.inner())) ||
+      [...cmd.words, ...cmd.redirects.flatMap((r) => (r.target ? [r.target] : []))].some(
+        (word) => !!word.procs && changesIdentity(word.procs),
+      ),
+  )
+}
+
+// Whether a playground call, its words after the CLI word, is an ext score whose own command clears or sets an identity variable, or runs after the scope set or exported one, as a line a shell reads on its own does.
+function scoreAsOther(words: Word[], cmd: Command, parsed: Parsed, env: Env): boolean {
+  if (words[0]?.value !== "ext" || words[1]?.value !== "score") return false
+  if (IDENTITY.some((k) => parsed.local.has(k) || env.vars.has(k))) return true
+  const all = parsed.first ? [parsed.first, ...parsed.args] : parsed.args
+  const at = cmd.words.indexOf(all[all.length - words.length - 1])
+  return changes(at === -1 ? cmd.words : cmd.words.slice(0, at))
+}
+
 const AWKS = new Set(["awk", "gawk", "mawk", "nawk"])
 // what lets an awk program run a command or write a file: system(), a | pipe, getline, a > redirect or an @ directive
 const AWK_RUNS = /system|getline|[|>@]/
@@ -463,11 +500,12 @@ function inspect(raw: string, environment: Environment) {
             .split(/\s+/)
             .filter(Boolean)
             .map((value) => ({ quoted: false, value }))
-    const write = reader
-      ? undefined
-      : cliCalls(parsed, env)
-          .map((words) => cliWrite(xargs?.replace ? words : [...words, ...stdinWords]))
-          .find(Boolean)
+    const calls = reader ? [] : cliCalls(parsed, env)
+    const write =
+      calls
+        .map((words) => cliWrite(xargs?.replace ? words : [...words, ...stdinWords]))
+        .find(Boolean) ??
+      (calls.some((words) => scoreAsOther(words, cmd, parsed, env)) ? SCORE_AS_OTHER : undefined)
     if (write) return refuse(write)
     // a command with no program runs nothing that reads the environment, so only its own assignments count
     const vars = !reader && first ? since(varsRead, env.vars, "") : []
@@ -544,6 +582,9 @@ function inspect(raw: string, environment: Environment) {
   // a line with a root shell is read whole with no reader spared, an awk program's strings its lines, since what a reader prints into the shell runs
   rootLine = rooted(lexed.commands)
   whole = rootLine || wholeLine(lexed.commands, env)
+  // a line holding an ext score is refused whole once any command on it changes who the session reads as, so a shell it runs or pipes into carries the change
+  if (SCORE.test(unquoted(command)) && changesIdentity(lexed.commands))
+    return refuse(SCORE_AS_OTHER)
   return run(lexed, env, visit, true)
 }
 

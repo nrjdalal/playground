@@ -1,5 +1,5 @@
 import { afterAll, expect, test } from "bun:test"
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -36,6 +36,23 @@ test("discard answers a protected path's refusal in its words and leaves it in p
     "inside the main checkout",
   )
   expect(existsSync(folder)).toBe(true)
+})
+
+test("trashRoots names a worktree's main checkout, not the worktree", () => {
+  const main = join(root, "repo")
+  const worktree = join(main, ".claude", "worktrees", "wt")
+  const git = (...args: string[]) =>
+    expect(
+      Bun.spawnSync(["git", "-C", main, "-c", "commit.gpgsign=false", ...args], {
+        stderr: "ignore",
+        stdout: "ignore",
+      }).exitCode,
+    ).toBe(0)
+  mkdirSync(main)
+  git("init", "-q")
+  git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "init")
+  git("worktree", "add", "-q", worktree)
+  expect(trashRoots(worktree).main).toBe(realpathSync(main))
 })
 
 test("trashRoots names HOME, the main checkout of the folder given and the trash in the data folder", () => {

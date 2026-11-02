@@ -20,7 +20,7 @@ describe("gateOf", () => {
 describe("firstRunView", () => {
   type Facts = Parameters<typeof firstRunView>[0]
   const cases: [Facts, ReturnType<typeof firstRunView>][] = [
-    // nothing known yet: a neutral frame, never a card
+    // nothing known yet: the frame, never a card
     [{}, "frame"],
     [{ gate: "unknown" }, "frame"],
     [{ gate: "unknown", signedIn: true, done: true }, "frame"],
@@ -45,7 +45,7 @@ describe("firstRunView", () => {
     expect(firstRunView(facts)).toBe(view)
   })
 
-  test("every unread fact on the way to a view draws the neutral frame", () => {
+  test("every unread fact on the way to a view draws the frame", () => {
     const views = cases.filter(([facts]) => facts.gate === undefined || facts.gate === "unknown")
     expect(views.every(([, view]) => view === "frame")).toBe(true)
   })
