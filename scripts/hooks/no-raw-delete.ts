@@ -89,9 +89,9 @@ const recursive = (v: string): boolean =>
 const spellsRecursive = (v: string): boolean =>
   v.split(/[\s,{}]+/).some((part) => part.startsWith("-") && recursive(part))
 
-// A word the shell may turn into other words: a variable, a substitution or a brace, or an unquoted glob.
+// A word the shell may turn into other words: a variable, a substitution or a brace, or an unquoted glob, where a lone `[` is test's own name.
 const hidden = (word: Word): boolean =>
-  unreadable(word) || (!word.quoted && /[*?[]/.test(word.value))
+  unreadable(word) || (!word.quoted && /[*?]|\[[^\]]*\]/.test(word.value))
 
 // A long option by any prefix git takes (`--forc`), its shortest unique one given.
 const prefixOf = (v: string, option: string, shortest: number) =>
@@ -244,12 +244,15 @@ async function inspect(raw: string, environment: Record<string, string | undefin
     reach: Reach,
   ): Promise<string | undefined> => {
     const { args, first, name, xargs } = parsed
-    // a program word the hook cannot read (a variable, a brace, a glob) given -r, or given a word it cannot read either, may be a recursive rm
+    // a program word the hook cannot read (a variable, a brace, a glob) given -r, or led by a word it cannot read either (`$RM $FLAGS`), may be a recursive rm; a readable word ends the lead (`$T git clone $S/x`)
+    const end = args.findIndex((a) => !a.value.startsWith("-") && !hidden(a))
+    const lead = end < 0 ? args : args.slice(0, end)
     if (
       first &&
       hidden(first) &&
       (spellsRecursive(first.value) ||
-        args.some((a) => spellsRecursive(a.value) || (hidden(a) && !a.quoted)))
+        args.some((a) => spellsRecursive(a.value)) ||
+        lead.some((a) => hidden(a) && !a.quoted))
     )
       return refuse(`a program the hook cannot read (${shown(first)}) given -r`, "it may be rm")
     const slot = slotWords(parsed)

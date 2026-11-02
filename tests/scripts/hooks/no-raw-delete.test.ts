@@ -54,6 +54,10 @@ describe("a delete the hook lets run", () => {
     `python3 -c "print('rm -rf x')"`,
     "ls -la",
     "rm --help",
+    "while gh pr checks 1 >/dev/null 2>&1; [ $? -eq 8 ]; do sleep 120; done",
+    '[ -n "$R" ] && [ -f $R/x ] && echo ok',
+    "$T git clone -q $S/mirror.git $S/home",
+    "$R/scripts/spawn.sh column reviewer $W",
   ])("%s", async (command) => {
     expect(await check(input(command))).toBeUndefined()
   })
