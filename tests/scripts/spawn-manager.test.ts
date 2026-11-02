@@ -365,6 +365,31 @@ describe("a manager starts in a workspace of its own, in the leads worktree", ()
     expect(installs(r.home)).toHaveLength(1)
   })
 
+  test("a leads worktree whose node_modules a failed install left, with no install mark, is installed at the next manager start", async () => {
+    const r = await spawn(
+      ["manager", "optimizer", "b.md"],
+      [],
+      { NO_LEADS: "1" },
+      undefined,
+      undefined,
+      (home) => {
+        checkout(home)
+        const factory = join(home, "code", "factory")
+        git(factory, "worktree", "add", "-q", "--track", "-B", "leads", leads(home), "origin/main")
+        mkdirSync(join(leads(home), "node_modules", "partial"), { recursive: true })
+      },
+    )
+    expect(r.code).toBe(0)
+    expect(installs(r.home)).toHaveLength(1)
+    expect(existsSync(join(leads(r.home), "node_modules", ".playground-installed"))).toBe(true)
+  })
+
+  test("an installed leads worktree is not installed again", async () => {
+    const r = await spawn(["manager", "optimizer", "b.md"], [])
+    expect(r.code).toBe(0)
+    expect(installs(r.home)).toHaveLength(0)
+  })
+
   test("a failed install of a leads worktree this start did not cut keeps it and moves nothing", async () => {
     const r = await spawn(
       ["manager", "optimizer", "b.md"],

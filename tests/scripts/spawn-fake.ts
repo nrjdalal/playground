@@ -243,11 +243,12 @@ export async function spawn(
     writeFileSync(join(home, ".playground", "backends", pin.name), `${pin.backend}\n`)
   }
   if (!env.NO_REGISTRY) mkdirSync(registry, { recursive: true })
-  // The leads worktree a manager opens in, installed, which NO_LEADS leaves off, as on a Mac that has not made it.
-  if (!env.NO_LEADS)
-    mkdirSync(join(home, "code", "factory", ".claude", "worktrees", "leads", "node_modules"), {
-      recursive: true,
-    })
+  // The leads worktree a manager opens in, installed with the mark a finished install leaves, which NO_LEADS leaves off, as on a Mac that has not made it.
+  if (!env.NO_LEADS) {
+    const modules = join(home, "code", "factory", ".claude", "worktrees", "leads", "node_modules")
+    mkdirSync(modules, { recursive: true })
+    writeFileSync(join(modules, ".playground-installed"), "")
+  }
   // The roster as earlier sessions left it, which a title default reads before it writes.
   if (env.ROSTER_JSON !== undefined)
     writeFileSync(join(home, ".playground", "roster.json"), env.ROSTER_JSON)
