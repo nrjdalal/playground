@@ -294,6 +294,38 @@ describe("code blocks and tables", () => {
       expect(html).not.toContain(stock)
   })
 
+  // Each line's variant, with the words it shows.
+  const lines = (html: string) =>
+    [
+      ...html.matchAll(
+        /data-slot="code-block-line" data-variant="(\w+)"[^>]*><span data-slot="code-block-line-content"[^>]*>([^<]*)</g,
+      ),
+    ].map((m) => [m[1], m[2]])
+
+  test("a diff block tints its added and removed lines, its sign shown once by the line's marker", () => {
+    const html = page(
+      "```diff\n--- a/limit.ts\n+++ b/limit.ts\n@@ -1 +1 @@\n- const limit = 100\n+ const limit = rows.length\n same\n```",
+    )
+    expect(lines(html)).toEqual([
+      ["default", "--- a/limit.ts"],
+      ["default", "+++ b/limit.ts"],
+      ["default", "@@ -1 +1 @@"],
+      ["removed", " const limit = 100"],
+      ["added", " const limit = rows.length"],
+      ["default", " same"],
+    ])
+    expect(html).toMatch(/data-variant="added" class="[^"]*\bbg-success\/10\b/)
+    expect(html).toMatch(/data-variant="removed" class="[^"]*\bbg-destructive\/10\b/)
+  })
+
+  test("a line starting + or - in any other block stays a plain line", () => {
+    for (const language of ["", "ts", "md"])
+      expect(lines(page(`\`\`\`${language}\n- a\n+ b\n\`\`\``))).toEqual([
+        ["default", "- a"],
+        ["default", "+ b"],
+      ])
+  })
+
   test("inline code stays Streamdown's own", () => {
     const html = page("see `inline` here")
     expect(html).toContain('data-streamdown="inline-code"')
