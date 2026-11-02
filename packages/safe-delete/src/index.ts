@@ -22,6 +22,9 @@ export type Roots = { home: string; main: string; trash: string }
 // protected and tripwire refusals go to the dispatcher through the ops notify line; refused is a plain no.
 export type Refusal = { kind: "protected" | "refused" | "tripwire"; refused: string }
 
+// What tells a worktree is held: every process's working folder (null when they cannot be listed), the roster's live statuses, and the roster's path.
+export type Holders = { cwds: string[] | null; live: string[]; roster: string }
+
 export type Quarantined = { files: number; id: string; size: number; to: string }
 
 export type TrashEntry = {
@@ -139,20 +142,26 @@ const manifestOf = (trash: string, batch: string): TrashEntry[] => {
 const recentCount = (trash: string, session: string, now: Date): number => {
   const since = now.getTime() - 60_000
   return batches(trash)
-    .filter((batch) => BATCH.exec(batch)![2] === session && stampMs(BATCH.exec(batch)![1]!) > since)
+    .filter(
+      (batch) =>
+        BATCH.exec(batch)![2] === session && stampMs(BATCH.exec(batch)![1]!) > since - 1000,
+    )
     .flatMap((batch) => manifestOf(trash, batch))
     .filter((entry) => Date.parse(entry.at) > since).length
 }
+
+const otherVolume = (path: string, trash: string) =>
+  `${path} is on another volume than the trash ${trash}, so a move would copy it`
 
 const refused = (text: string, kind: Refusal["kind"] = "refused"): Refusal => ({
   kind,
   refused: text,
 })
 
-// Renames a path into <trash>/<UTC-ts>-<session>/<n>/ with a manifest line, after the protected list, the worktree rule, the tripwire and the volume check; a worktree's own checks are worktreeRefusal's.
+// Renames a path into <trash>/<UTC-ts>-<session>/<n>/ with a manifest line, after the protected list, worktreeRefusal for a worktree (which only the worktree option's holders move), the tripwire and the volume check.
 export function quarantine(
   path: string,
-  opts: { reason: string; session: string; worktree?: boolean },
+  opts: { reason: string; session: string; worktree?: Holders },
   roots: Roots,
   io: { dev?: (path: string) => number; now?: Date } = {},
 ): Quarantined | Refusal {
@@ -167,6 +176,8 @@ export function quarantine(
     return refused(`${abs} is a worktree: playground rm --worktree removes it`)
   if (!isWorktree && opts.worktree)
     return refused(`--worktree takes a folder in ${worktreesOf(roots)}, not ${abs}`)
+  const held = opts.worktree && worktreeRefusal(abs, roots, opts.worktree)
+  if (held) return refused(held)
   const now = io.now ?? new Date()
   const trash = real(roots.trash)
   const recent = recentCount(trash, opts.session, now)
@@ -183,8 +194,7 @@ export function quarantine(
     )
   mkdirSync(trash, { recursive: true })
   const dev = io.dev ?? ((p: string) => lstatSync(p).dev)
-  if (dev(abs) !== dev(trash))
-    return refused(`${abs} is on another volume than the trash ${trash}, so a move would copy it`)
+  if (dev(abs) !== dev(trash)) return refused(otherVolume(abs, trash))
   const batch = `${stamp(now)}-${opts.session}`
   mkdirSync(join(trash, batch), { recursive: true })
   let n = 1
@@ -199,7 +209,7 @@ export function quarantine(
     const code = (error as NodeJS.ErrnoException).code
     return refused(
       code === "EXDEV"
-        ? `${abs} is on another volume than the trash ${trash}, so a move would copy it`
+        ? otherVolume(abs, trash)
         : `${abs} did not move: ${code ?? (error as Error).message}`,
     )
   }
@@ -224,14 +234,17 @@ export function listTrash(trash: string): TrashEntry[] {
     .filter((entry) => existsSync(join(trash, entry.id)))
 }
 
-// Moves a trash item back to the path it came from, refusing when anything stands there or its folder is gone.
-export function restore(id: string, trash: string): { path: string } | Refusal {
+// Moves a trash item back to the path it came from, refusing a protected path, one anything stands at, and one whose folder is gone.
+export function restore(id: string, roots: Roots): { path: string } | Refusal {
+  const trash = roots.trash
   const match = ID.exec(id)
   if (!match) return refused(`${id} is not a trash id; playground rm --list prints them`)
   const entry = manifestOf(trash, match[1]!).find((line) => line.id === id)
   const slot = join(trash, id)
   const items = existsSync(slot) ? readdirSync(slot) : []
   if (!entry || items.length !== 1) return refused(`no trash item ${id}`)
+  const why = isProtected(entry.path, roots)
+  if (why) return refused(why, "protected")
   if (lstat(entry.path)) return refused(`${entry.path} already exists; move it aside first`)
   if (!existsSync(dirname(entry.path)))
     return refused(`${dirname(entry.path)}, the folder ${id} came from, is gone`)
@@ -241,14 +254,10 @@ export function restore(id: string, trash: string): { path: string } | Refusal {
 }
 
 // Why a worktree may not be removed, or null: it sits in <main>/.claude/worktrees, the roster reads, no live session or process holds it, and its HEAD is on a remote branch.
-export function worktreeRefusal(
-  path: string,
-  roots: Roots,
-  holders: { cwds: string[] | null; live: string[]; roster: string },
-): string | null {
+export function worktreeRefusal(path: string, roots: Roots, holders: Holders): string | null {
   const at = real(path)
   if (dirname(at) !== worktreesOf(roots)) return `${at} is not a worktree in ${worktreesOf(roots)}`
-  let agents: { branch?: unknown; name?: unknown; status?: unknown }[]
+  let agents: ({ branch?: unknown; name?: unknown; pr?: unknown; status?: unknown } | null)[]
   try {
     agents = JSON.parse(readFileSync(holders.roster, "utf8")).agents
     if (!Array.isArray(agents)) throw new Error("no agents")
@@ -263,13 +272,17 @@ export function worktreeRefusal(
   if (!top.ok || real(top.out) !== at) return `${at} is not a git worktree`
   const branch = git("symbolic-ref", "--quiet", "--short", "HEAD").out
   const folder = basename(at).toLowerCase()
+  const where = `${folder} ${branch.toLowerCase()}`
   for (const agent of agents) {
-    if (!holders.live.includes(String(agent.status)) || typeof agent.name !== "string") continue
+    if (!agent || !holders.live.includes(String(agent.status)) || typeof agent.name !== "string")
+      continue
     const id = agent.name.split("-")[0]!
     const tokens = [agent.name, ...(/\d/.test(id) ? [id] : [])].map((t) => t.toLowerCase())
     const byBranch =
       typeof agent.branch === "string" && agent.branch.toLowerCase() === branch.toLowerCase()
-    if (byBranch || tokens.some((t) => folder.includes(t) || branch.toLowerCase().includes(t)))
+    const pr = typeof agent.pr === "string" ? /\/pull\/(\d+)$/.exec(agent.pr)?.[1] : undefined
+    const byPr = pr !== undefined && new RegExp(`(^|\\D)${pr}(\\D|$)`).test(where)
+    if (byBranch || byPr || tokens.some((t) => where.includes(t)))
       return `${at} is held by ${agent.name}, which the roster lists as ${agent.status}`
   }
   if (holders.cwds === null) return `the processes' folders cannot be listed, so ${at} stays`
@@ -302,7 +315,6 @@ export function removeScratch(dir: string, tmp = tmpdir()): string | null {
 export function purgeTrash(
   trash: string,
   io: { free: () => number; now: Date },
-  rules = PURGE,
 ): { removed: string[]; skipped: string[] } {
   const root = real(trash)
   const removed: string[] = []
@@ -316,11 +328,11 @@ export function purgeTrash(
     rmSync(at, { force: true, recursive: true })
     removed.push(batch)
   }
-  const cutoff = io.now.getTime() - rules.days * 86_400_000
+  const cutoff = io.now.getTime() - PURGE.days * 86_400_000
   const left: string[] = []
   for (const batch of batches(root))
     if (stampMs(BATCH.exec(batch)![1]!) < cutoff) remove(batch)
     else left.push(batch)
-  while (left.length && io.free() < rules.minFree) remove(left.shift()!)
+  while (left.length && io.free() < PURGE.minFree) remove(left.shift()!)
   return { removed, skipped }
 }

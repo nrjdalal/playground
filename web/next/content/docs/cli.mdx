@@ -152,7 +152,8 @@ It refuses, before moving anything:
 - A path over 5,000 files or 2 GB, and a fourth delete within a minute from one session; these and a protected path are also sent to the dispatcher.
 - A move to another disk, since that would copy rather than rename.
 
-`playground rm --worktree <path>` removes a worktree under `.claude/worktrees/`: it refuses when the roster cannot be read, when a live session on the roster holds it by its branch or name, when a process works inside it, or when its commit is on no remote branch, then moves it to the trash and runs `git worktree prune`.
+`playground rm --worktree <path>` removes a worktree under `.claude/worktrees/`: it refuses when the roster cannot be read, when a live session on the roster holds it by its branch, its name or its pull request's number, when a process works inside it, or when its commit is on no remote branch, then moves it to the trash and runs `git worktree prune`.
+Uncommitted changes go into the trash with the worktree, so they come back with it.
 A worktree restored from the trash has its files back, but git no longer lists it as a worktree.
 Ops empties the trash every hour: each delete over 7 days old goes, and the oldest go sooner while the disk has under 50 GB free.
 

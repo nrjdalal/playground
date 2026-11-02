@@ -337,6 +337,12 @@ const alertsWaitFor = async (name: string): Promise<number> => {
   return 0
 }
 
+// playground rm: the trash (rm.ts), loaded only for this command.
+const rm = async (words: string[]): Promise<number> => {
+  const { rmDeps, runRm } = await import("./rm")
+  return runRm(words, rmDeps(REPO))
+}
+
 // playground migrate: the switch's one-time move (migrate.ts), loaded only for this command.
 const migrateMachine = async (words: string[]): Promise<number> => {
   const { runMigrate } = await import("./migrate")
@@ -407,7 +413,7 @@ const code =
                                     : command === "accounts"
                                       ? await runAccounts(rest, accountsIo(dataDir()))
                                       : command === "rm"
-                                        ? await (await import("./rm")).runRm(rest, REPO)
+                                        ? await rm(rest)
                                         : command === "herdr" && rest[0] === "stop"
                                           ? (await opsHerdr(["stop-all"]).exited) === 0
                                             ? 0

@@ -2,14 +2,7 @@ import { homedir } from "node:os"
 import { join } from "node:path"
 
 import { dataDir } from "@packages/env/data-dir"
-import {
-  listTrash,
-  quarantine,
-  type Refusal,
-  restore,
-  type Roots,
-  worktreeRefusal,
-} from "@packages/safe-delete"
+import { listTrash, quarantine, restore, type Roots } from "@packages/safe-delete"
 
 import { registryName } from "../../../../scripts/hooks/role"
 import STATUSES from "../../../../scripts/roster-statuses.json"
@@ -42,6 +35,16 @@ export const rmArgs = (words: string[]): RmArgs | { error: string } => {
   return path === undefined ? { error: RM_USAGE } : { path, reason, worktree }
 }
 
+// What playground rm reads and calls beyond its words, so a test hands it a mkdtemp machine: the folders it starts from, every process's working folder, the ops notify line to the dispatcher, and the session's name.
+export type RmDeps = {
+  cwds: () => string[] | null
+  data: string
+  home: string
+  main: string
+  notify: (text: string) => void
+  session: () => Promise<string>
+}
+
 // Every process's working folder, as lsof lists them, or null when it lists none.
 const processFolders = (): string[] | null => {
   const run = Bun.spawnSync(["lsof", "-d", "cwd", "-Fn"], { stderr: "ignore", stdout: "pipe" })
@@ -53,73 +56,67 @@ const processFolders = (): string[] | null => {
   return dirs.length ? dirs : null
 }
 
-// The ops notify line to the dispatcher, for a refusal that says something tried to delete what it must not.
-const notify = (repo: string, session: string, refusal: Refusal) => {
-  Bun.spawnSync(
-    [
-      "bash",
-      join(repo, "scripts", "ops", "notify.sh"),
-      "safe-delete",
-      `${session}: ${refusal.refused}`,
-    ],
-    { env: { ...process.env, NOTIFY_TO: "dispatcher" }, stderr: "ignore", stdout: "ignore" },
-  )
-}
+// This machine's: HOME, the data folder, the main checkout, lsof, notify.sh to the dispatcher, and the Claude Code registry's name for this session, else "shell".
+export const rmDeps = (repo: string): RmDeps => ({
+  cwds: processFolders,
+  data: dataDir(),
+  home: homedir(),
+  main: mainCheckout(repo),
+  notify: (text) =>
+    void Bun.spawnSync(["bash", join(repo, "scripts", "ops", "notify.sh"), "safe-delete", text], {
+      env: { ...process.env, NOTIFY_TO: "dispatcher" },
+      stderr: "ignore",
+      stdout: "ignore",
+    }),
+  session: async () =>
+    (process.env.CLAUDE_CODE_SESSION_ID &&
+      (await registryName(process.env.CLAUDE_CODE_SESSION_ID))) ||
+    "shell",
+})
 
-// playground rm: one quarantine, list or restore against this machine's HOME, main checkout and trash; exit 0 done, 1 refused, 2 a usage error.
-export async function runRm(words: string[], repo: string): Promise<number> {
+// playground rm: one quarantine, list or restore against the deps' HOME, main checkout and trash; a protected or tripwire refusal goes to the dispatcher; exit 0 done, 1 refused, 2 a usage error.
+export async function runRm(words: string[], deps: RmDeps): Promise<number> {
   const args = rmArgs(words)
   if ("error" in args) {
     console.error(`playground: ${args.error}`)
     return 2
   }
-  const trash = join(dataDir(), "trash")
+  const roots: Roots = { home: deps.home, main: deps.main, trash: join(deps.data, "trash") }
   if ("list" in args) {
-    for (const entry of listTrash(trash))
+    for (const entry of listTrash(roots.trash))
       console.log(
         `${entry.id}  ${entry.path}  ${entry.files} files, ${entry.size} bytes, by ${entry.session}: ${entry.reason}`,
       )
     return 0
   }
-  if ("restore" in args) {
-    const back = restore(args.restore, trash)
-    if ("refused" in back) {
-      console.error(`playground: ${back.refused}`)
-      return 1
-    }
-    console.log(`Restored ${back.path}`)
-    return 0
-  }
-  const main = mainCheckout(repo)
-  const roots: Roots = { home: homedir(), main, trash }
-  const session =
-    (process.env.CLAUDE_CODE_SESSION_ID &&
-      (await registryName(process.env.CLAUDE_CODE_SESSION_ID))) ||
-    "shell"
-  if (args.worktree) {
-    const why = worktreeRefusal(args.path, roots, {
-      cwds: processFolders(),
-      live: STATUSES.live,
-      roster: join(dataDir(), "roster.json"),
-    })
-    if (why) {
-      console.error(`playground: ${why}`)
-      return 1
-    }
-  }
-  const moved = quarantine(
-    args.path,
-    { reason: args.reason, session, worktree: args.worktree },
-    roots,
-  )
-  if ("refused" in moved) {
-    if (moved.kind !== "refused") notify(repo, session, moved)
-    console.error(`playground: ${moved.refused}`)
+  const session = "restore" in args ? "" : await deps.session()
+  const done =
+    "restore" in args
+      ? restore(args.restore, roots)
+      : quarantine(
+          args.path,
+          {
+            reason: args.reason,
+            session,
+            worktree: args.worktree
+              ? { cwds: deps.cwds(), live: STATUSES.live, roster: join(deps.data, "roster.json") }
+              : undefined,
+          },
+          roots,
+        )
+  if ("refused" in done) {
+    if (done.kind !== "refused") deps.notify(`${session || "restore"}: ${done.refused}`)
+    console.error(`playground: ${done.refused}`)
     return 1
   }
-  if (args.worktree) Bun.spawnSync(["git", "-C", main, "worktree", "prune"])
+  if ("path" in done) {
+    console.log(`Restored ${done.path}`)
+    return 0
+  }
+  if ("worktree" in args && args.worktree)
+    Bun.spawnSync(["git", "-C", roots.main, "worktree", "prune"])
   console.log(
-    `Moved to the trash as ${moved.id} (${moved.files} files); playground rm --restore ${moved.id} brings it back`,
+    `Moved to the trash as ${done.id} (${done.files} files); playground rm --restore ${done.id} brings it back`,
   )
   return 0
 }

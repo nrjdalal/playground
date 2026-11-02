@@ -127,7 +127,7 @@ describe("quarantine, listTrash and restore", () => {
       size: 7,
     })
     expect(listTrash(roots.trash).map((entry) => entry.id)).toEqual([moved.id])
-    expect(restore(moved.id, roots.trash)).toEqual({ path: doomed })
+    expect(restore(moved.id, roots)).toEqual({ path: doomed })
     expect(readFileSync(join(doomed, "b", "c.txt"), "utf8")).toBe("hi")
     expect(listTrash(roots.trash)).toEqual([])
   })
@@ -145,9 +145,23 @@ describe("quarantine, listTrash and restore", () => {
     const moved = quarantine(path, opts, roots, { now: NOW })
     if ("refused" in moved) throw new Error(moved.refused)
     file(path, "new")
-    expect(restore(moved.id, roots.trash)).toMatchObject({ refused: expect.stringContaining(path) })
-    expect(restore("20261102T120000Z-j6rjgy-worker/9", roots.trash)).toHaveProperty("refused")
-    expect(restore("../../etc", roots.trash)).toHaveProperty("refused")
+    expect(restore(moved.id, roots)).toMatchObject({ refused: expect.stringContaining(path) })
+    expect(restore("20261102T120000Z-j6rjgy-worker/9", roots)).toHaveProperty("refused")
+    expect(restore("../../etc", roots)).toHaveProperty("refused")
+  })
+
+  test("restore refuses a manifest path that is protected", () => {
+    const roots = machine()
+    const moved = quarantine(file(join(roots.home, "note")), opts, roots, { now: NOW })
+    if ("refused" in moved) throw new Error(moved.refused)
+    const manifest = join(roots.trash, "20261102T120000Z-j6rjgy-worker", "manifest.jsonl")
+    const edited = {
+      ...JSON.parse(readFileSync(manifest, "utf8")),
+      path: join(roots.home, ".ssh", "note"),
+    }
+    writeFileSync(manifest, `${JSON.stringify(edited)}\n`)
+    expect(restore(moved.id, roots)).toMatchObject({ kind: "protected" })
+    expect(existsSync(join(roots.home, ".ssh", "note"))).toBe(false)
   })
 
   test("refuses a protected path, a missing path and a bad session name", () => {
@@ -177,7 +191,8 @@ describe("quarantine, listTrash and restore", () => {
       refused: expect.stringContaining("--worktree"),
     })
     const plain = file(join(roots.home, "plain"))
-    expect(quarantine(plain, { ...opts, worktree: true }, roots)).toHaveProperty("refused")
+    const holders = { cwds: [], live: ["working"], roster: join(roots.root, "roster.json") }
+    expect(quarantine(plain, { ...opts, worktree: holders }, roots)).toHaveProperty("refused")
   })
 })
 
@@ -196,6 +211,19 @@ describe("the tripwire", () => {
     const path = file(join(roots.home, "huge.bin"), "")
     truncateSync(path, 2 * 1024 ** 3 + 1)
     expect(quarantine(path, opts, roots, { now: NOW })).toMatchObject({ kind: "tripwire" })
+  })
+
+  test("counts a quarantine whose second-cut stamp sits just outside the minute", () => {
+    const roots = machine()
+    const at = new Date("2026-11-02T12:00:00.900Z")
+    for (const name of ["a", "b", "c"])
+      expect(quarantine(file(join(roots.home, name)), opts, roots, { now: at })).toHaveProperty(
+        "id",
+      )
+    const later = new Date("2026-11-02T12:01:00.500Z")
+    expect(quarantine(file(join(roots.home, "d")), opts, roots, { now: later })).toMatchObject({
+      kind: "tripwire",
+    })
   })
 
   test("refuses a fourth quarantine within a minute from one session, and lets another go", () => {
@@ -266,6 +294,13 @@ describe("worktreeRefusal", () => {
     expect(worktreeRefusal(wt, roots, holders)).toContain("abc123-worker")
     rosterOf([{ name: "pg-1", status: "working" }])
     expect(worktreeRefusal(wt, roots, holders)).toContain("pg-1")
+    rosterOf([
+      null,
+      { name: "x9y8z7-reviewer", pr: "https://github.com/o/r/pull/1", status: "working" },
+    ])
+    expect(worktreeRefusal(wt, roots, holders)).toContain("x9y8z7-reviewer")
+    rosterOf([{ name: "x9y8z7-reviewer", pr: "https://github.com/o/r/pull/11", status: "working" }])
+    expect(worktreeRefusal(wt, roots, holders)).toBeNull()
     rosterOf([{ branch: "PG-1-thing", name: "abc123-worker", status: "ended" }])
     expect(worktreeRefusal(wt, roots, holders)).toBeNull()
     expect(worktreeRefusal(wt, roots, { ...holders, cwds: [join(wt, "packages")] })).toContain(
@@ -274,12 +309,29 @@ describe("worktreeRefusal", () => {
     expect(worktreeRefusal(wt, roots, { ...holders, cwds: null })).toContain("process")
   })
 
+  test("quarantine runs the holder check itself, so a held worktree stays", () => {
+    const { holders, roots, wt } = withWorktree()
+    git(wt, "push", "-q", "origin", "PG-1-thing")
+    writeFileSync(
+      holders.roster,
+      JSON.stringify({
+        agents: [
+          { name: "x9y8z7-reviewer", pr: "https://github.com/o/r/pull/1", status: "working" },
+        ],
+      }),
+    )
+    expect(quarantine(wt, { ...opts, worktree: holders }, roots, { now: NOW })).toMatchObject({
+      refused: expect.stringContaining("x9y8z7-reviewer"),
+    })
+    expect(existsSync(wt)).toBe(true)
+  })
+
   test("refuses a worktree whose branch is not pushed, and passes it once pushed", () => {
     const { holders, roots, wt } = withWorktree()
     expect(worktreeRefusal(wt, roots, holders)).toContain("push")
     git(wt, "push", "-q", "origin", "PG-1-thing")
     expect(worktreeRefusal(wt, roots, holders)).toBeNull()
-    const moved = quarantine(wt, { ...opts, worktree: true }, roots, { now: NOW })
+    const moved = quarantine(wt, { ...opts, worktree: holders }, roots, { now: NOW })
     expect(moved).toHaveProperty("id")
     expect(existsSync(wt)).toBe(false)
   })
