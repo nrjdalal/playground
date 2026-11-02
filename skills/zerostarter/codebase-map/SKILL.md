@@ -15,7 +15,7 @@ web/next/             # frontend (Next.js App Router): app/, components/, lib/, 
 packages/auth/        # Better Auth instance
 packages/db/          # Drizzle schema + client
 packages/redis/       # the lock store on Bun's Redis client (REDIS_URL), the merge lock's holder
-packages/safe-delete/ # playground rm's trash: quarantine, restore, the trash purge, the protected list and its carve-outs, removeScratch
+packages/safe-delete/ # playground rm's trash: quarantine, restore, the trash purge, the protected list, removeScratch
 packages/env/         # type-safe env, one validated entry per consumer
 packages/config/      # TS base, tsdown factory, and site.ts (brand identity)
 packages/scripts/     # build-only bun tooling (auth-schema, data-table-metrics, generate-env, lock, pr-merge, verify); every new script lands here, never bundled
