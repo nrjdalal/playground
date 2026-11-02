@@ -454,6 +454,7 @@ describe("a quoted argument is read as a command line only where a program runs 
       "awk '$3 ~ /runner/' /dev/null 2>&1 | head -3",
     ],
     ["awk reading cat's output", "cat /dev/null | awk '$3 ~ /runner/'"],
+    ["awk by its system path", "/usr/bin/awk '$3 ~ /runner/' /dev/null"],
     [
       "grep, awk, sort, uniq and head in a pipe",
       "grep x /dev/null | awk '$3 ~ /runner/' | sort | uniq -c | head -3",
@@ -519,6 +520,17 @@ describe("a quoted argument is read as a command line only where a program runs 
       "awk's output sorted through a compress program",
       "awk '$3 ~ /runner/' /dev/null | sort --compress-program=sh",
     ],
+    [
+      "awk's output sorted into a git hook by an abbreviated --out",
+      "awk '$3 ~ /runner/' /dev/null | sort --out=.git/hooks/pre-commit",
+    ],
+    [
+      "awk's output sorted through an abbreviated --comp",
+      "awk '$3 ~ /runner/' /dev/null | sort --comp=sh",
+    ],
+    ["a script named awk in the folder given a removal", "./awk 'rm -rf ~'"],
+    ["a script named awk by a relative path given a removal", "bin/awk 'rm -rf ~'"],
+    ["awk run with PATH set in the call", "PATH=. awk 'rm -rf ~'"],
     [
       "awk after a sed, which keeps canary's reading",
       "sed -n '/sh -c/p' /dev/null; awk '$3 ~ /runner/' /dev/null",
