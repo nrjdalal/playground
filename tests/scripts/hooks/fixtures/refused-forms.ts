@@ -1779,7 +1779,7 @@ gh api graphql -f query="$QUERY"`,
         "rm of mktemp's folder made with TMPDIR exported",
         'export TMPDIR=$HOME/.playground/extensions; T=$(mktemp -d); rm -rf "$T/.no-such-folder"',
       ],
-      ["rm of a pid-named path in the root", "rm -rf ~/.playground/extensions/$$/.no-such-folder"],
+      ["rm of a pid-named path in the root", "rm -f ~/.playground/extensions/$$"],
       [
         "rm of mktemp's folder from a held variable's template in the root",
         'D=~/.playground/extensions; T=$(mktemp -d "$D/x.XXXX"); rm -rf "$T/.no-such-folder"',
