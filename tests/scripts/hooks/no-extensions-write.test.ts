@@ -78,7 +78,9 @@ describe("a direct write into the extensions root is refused, naming the owner's
   ])("%s", async (_, name, input) => {
     const reason = await tool(name, input)
     expect(reason).toContain("no-extensions-write hook refuses")
-    expect(reason).toContain("!")
+    expect(reason).toContain(
+      "the owner typing the playground command as a ! command in the dispatcher's terminal window, which runs without hooks: tell your lead, and the dispatcher hands the owner the command.",
+    )
   })
 
   test.each([

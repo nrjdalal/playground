@@ -302,7 +302,15 @@ const GH_WRITES = new Map<string, Spec>([
 ])
 const GH_GROUPS = new Set(["api", "issue", "label", "pr", "release"])
 const PR_URL = /^https?:\/\/[^/]+\/[^/]+\/[^/]+\/(?:issues|pull)\/\d+/i
-const GIT_GLOBALS = new Set(["-C", "-c", "--exec-path", "--git-dir", "--namespace", "--work-tree"])
+const GIT_GLOBALS = new Set([
+  "-C",
+  "-c",
+  "--attr-source",
+  "--exec-path",
+  "--git-dir",
+  "--namespace",
+  "--work-tree",
+])
 const COMMIT_TAKES = new Set([
   "--author",
   "-c",

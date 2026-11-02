@@ -23,7 +23,7 @@ Their tests are `bun run test:file tests/scripts/hooks`.
   which only the extensions hold) loads it through `guardList` in `scripts/hooks/lists.ts` inside its check, at every call,
   and fails closed on it:
   on a machine with extensions (its data folder holds `extensions/`) the list comes from `extensions/hooks/<list>.json`, which every list write derives as the union of every scope's `lists/<list>.json` (the login's, each org's, then core's), read by `packages/settings/src/rendered.ts`, and never from this folder.
-  A root that lacks the list refuses the guarded call, naming the file and `playground ext import --from-tree extensions/core/lists`, which seeds it, for the owner to type in Ops' pane as a `!` command.
+  A root that lacks the list refuses the guarded call, naming the file and `playground ext import --from-tree extensions/core/lists`, which seeds it: the session tells its lead, and the dispatcher hands the owner the command to type as a `!` command in the dispatcher's terminal window, since the Dashboard's composer types no `!` command.
   A factory session writes nothing in the root itself and changes no list or guard setting through the CLI: [no-extensions-write](#no-extensions-write) refuses both, so a list changes only on the owner's own command.
   With no extensions, the list is core's file; with no file either, the guard takes its empty default.
   A list file that is there but empty, malformed or missing a key refuses the guarded call, extensions or not; an explicit empty list (`[]`, or every key empty) is the owner's choice and loads.
@@ -93,14 +93,14 @@ Their tests are `bun run test:file tests/scripts/hooks`.
 
 - agent-desktop runs headless and leaves the owner's own apps alone: `scripts/hooks/no-desktop-owner-app.ts`, registered beside no-headless-login and acting for every session, refuses an `agent-desktop` call that carries `--headed`, since headed input moves the owner's own pointer and focus.
   It also refuses one that targets an app on the `desktop-owner-apps` guard list ([Guard lists](#guard-lists)): an `--app` value, or a `launch` or `close-app` target, matched without case and with or without `.app` or a path before it.
-  Core's list is empty, and the owner's login extension holds the owner's apps, which change only by the owner's own `!` command, which Ops prepares.
+  Core's list is empty, and the owner's login extension holds the owner's apps, which change only by the owner's own `!` command, which the dispatcher hands the owner.
   It reads the list and nothing else, so no flag, environment variable, `export`, `env` or write in the same call frees a call.
   The list changes only on the owner's own command, since [no-extensions-write](#no-extensions-write) refuses a session's edit of it in any call; a session that runs agent-desktop under another name breaks the rule, which a text hook cannot see.
-  Its refusal names the two ways out: the owner runs the command with the `!` prefix in the owner's own pane, which runs outside the hooks, or takes the app off the list with a `!` command Ops prepares.
+  Its refusal names the two ways out: the owner runs the command with the `!` prefix in the dispatcher's terminal window, which runs outside the hooks, or takes the app off the list with a `!` command the dispatcher hands the owner when a session tells its lead.
   It refuses what it cannot read, as a call that may hide either: a word built from a variable or a substitution, the program in a variable in a call that names agent-desktop, arguments xargs appends, `batch`, `--window-id`, `notification-action`, an interpreter's code that names agent-desktop, and a script file run in a call that names agent-desktop.
   A command that acts on the app in front when no `--app` names one (`snapshot`, `find`, `screenshot`, `press`, the window and notification commands) needs an `--app`; `snapshot` and `find` under a `--root` ref, and every ref action, pass, since the snapshot that gave the ref was checked.
   It reads agent-desktop behind `bash -c`, a pipe into a shell, `env` and the other wrappers `scripts/hooks/shell.ts` knows, `run-slot.sh --`, `npx`, `bunx` and `find -exec`, and a script file the call runs, by its text.
-  It loads the list only for a call that runs agent-desktop, and fails closed on it, its refusal naming the file and Ops, whose list write fixes it; it fails open on a call it cannot parse.
+  It loads the list only for a call that runs agent-desktop, and fails closed on it, its refusal naming the file and the route to the owner's list write that fixes it (tell your lead, and the dispatcher hands the owner the command); it fails open on a call it cannot parse.
 
 ## no-env-dump
 
@@ -133,7 +133,7 @@ Their tests are `bun run test:file tests/scripts/hooks`.
   A branch other than `main` is outside its scope, since the sync reads only `main`, so `gh issue develop` and the head `gh pr create` pushes pass.
   Issue and pull request conversation passes: `gh issue` and `gh label`, `gh pr create`, `comment`, `edit`, `review`, `close` and `reopen`, `gh api` on `issues`, `labels` and `pulls` but a pull request's `merge` or `update-branch`, and the matching MCP tools.
   A commit is refused only in a clone of one of them, and every call passes on a machine with no extensions root.
-  Its refusal names the one route: the owner types the command in Ops' pane as a `!` command; no flag, environment variable, role or note frees a call.
+  Its refusal names the one route: the owner types the command as a `!` command in the dispatcher's terminal window, which the dispatcher hands the owner when a session tells its lead; no flag, environment variable, role or note frees a call.
   It fails closed, as the leak guards do and only on a call that may write, when `policy.json` does not read or no login names the default repositories, and on any call that may write when the reader fails on it (a script nested too deep or too large) or is still reading it at its 8s deadline, inside the hook's 15s timeout, whatever it names.
   `withDeadline` alone does not bound a hook whose time goes on spawns, since `tick()` reads the clock only in lex and walk steps, so each command it visits calls `pastDeadline()` in `scripts/hooks/shell.ts`; a Worker timer, as no-extensions-write runs, is the other route.
   It refuses a closed list of write forms, the literal ones its tests pin, so a same-user session can still get past it by a form outside that list, such as a script file it writes and then runs.
@@ -174,7 +174,7 @@ Their tests are `bun run test:file tests/scripts/hooks`.
   A test holds that list to every key a hook names, to `ext.order`, which orders the extensions every guard reads, and to spawn.sh's `paths.codeRoot`; spawn.sh's `gates.*` stay open, as capacity tuning Ops adjusts in normal upkeep.
   A command, verb, kind or key word it cannot read, or any such word among the words of `ext put` or `settings set` or `reset`, counts as the write.
   `ext put` of a doc, a rule or any other reviewed kind, every read, `ext score`, `accept` and `reject`, `settings set` of any other key, `settings import-jobs` and writes elsewhere in the data folder (handoffs, the roster) run.
-  Its refusal names the one route: the owner types the command in Ops' pane as a `!` command, which runs without hooks; no flag, environment variable, role or note frees a call.
+  Its refusal names the one route: the owner types the command as a `!` command in the dispatcher's terminal window, which runs without hooks and which the dispatcher hands the owner when a session tells its lead; no flag, environment variable, role or note frees a call.
   It reads every command `scripts/hooks/shell.ts` finds: one inside a `$(…)`, a `${…}`, a `$((…))` or an array assignment's `(…)`, and the script a shell, `source` or `.` reads from a process substitution, a group's output or `/dev/stdin`, every command that prints part of it included, and the parts it can read of a script it reads only in part (a group holding a `curl`).
   It judges each command line and each word once per call, so a deep nest or a long list of variables ends well inside the hook's timeout, and it refuses, each time naming the fix (split it into shorter calls), a call whose lexing or walk runs past 10 s
   (a deadline checked at every lex, expansion and walk step, its clock read once every 1024 steps, so any slow route is refused), a command over 128 KB, whose lexing could outlast the timeout, one nested too deep for its stack, and a chain of scripts a shell,
@@ -250,6 +250,7 @@ Their tests are `bun run test:file tests/scripts/hooks`.
   or any agent's name in the roster, both read on every call since skills are added and sessions renamed, leaving out one the file's `everyday` list names, such as `builder`, an org's own name, which its extension's copy adds, or `pr`, the public skill copied from upstream whose name is the word for a pull request, and adding none when the roster is missing or does not read;
   each matched whole in any case, with `_` and `-` counting as edges, so `PLAYGROUND_ROLE` holds one and `the dashboard` does not):
   a Linear or Slack MCP tool that is not a read, a GitHub MCP write whose owner is a guarded org, a `gh` write (pr, issue, label, release, a non-GET `gh api`) or curl to Linear, Slack or a guarded org's repository, and `git commit` or `git push` in a guarded org's checkout, judged by its message, its branch and the messages of the commits the remote does not hold.
+  It finds git's subcommand past git's own options, stepping over the separate value of each option the hook's `GIT_GLOBALS` lists (`--attr-source <tree>` among them), so `git --attr-source HEAD push` reads as a push, and no-extension-repo-write reads git the same way.
   The guarded GitHub orgs are the ones the `ext.links` setting links (`guardedOrgs` in `packages/settings/src/ext.ts`), read from the data folder's policy at each call, so a machine with no extensions guards Linear and Slack alone, and a policy it cannot read refuses a writing call with the fix.
   It also refuses a guarded org's write whose text it cannot read, refuses a write it cannot place (a pull request number in a variable, a GraphQL mutation) only when its text holds a term, and passes every other write, the factory's own repository's included.
   Unlike those, a `gh` write whose repository the hook cannot place is refused whatever its text, since that repository may be a guarded org's, and its refusal names `--repo <owner>/<name>` as the fix.
@@ -394,6 +395,7 @@ Their tests are `bun run test:file tests/scripts/hooks`.
 
 - Every worktree of a checkout shares one `git stash` list, so a pop can take another worker's entry, lint-staged's commit backup included: take a before-shot from a separate worktree on `origin/canary`, or commit first.
   The factory's `scripts/hooks/no-stash.ts` (registered in `scripts/factory-settings.json`, and in `.claude/settings.json` for a session cmux restores without it) refuses a stash that could take another worktree's work, and `agent-browser close --all`, which closes every session's browser on the machine.
+  It finds git's subcommand past git's own options, stepping over the separate value of each option the hook's `GIT_TAKES` lists (`--attr-source <tree>` among them), so `git --attr-source HEAD stash pop` reads as a stash.
 
 ## no-unslotted-run
 

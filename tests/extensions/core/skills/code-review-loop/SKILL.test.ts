@@ -227,7 +227,7 @@ describe("code-review-loop's round 1 greps each changed term", () => {
   test("step 4 runs the changed-term grep in round 1, names its finding's shape and its Done when, with its measured case", async () => {
     const step = (await skill()).match(/^4\. \*\*Review on two axes\.\*\*.*$/m)?.[0] ?? ""
     expect(step).toContain(
-      "the changed-term grep (`git grep -l <term>` over the agent-facing docs) for each term whose meaning the diff changes",
+      "the changed-term grep (`git grep -l <term>` over the agent-facing and web docs) for each term whose meaning the diff changes",
     )
     expect(step).toContain(
       "file every list or doc either leaves behind as one such finding, each as `file:line`",
@@ -237,12 +237,13 @@ describe("code-review-loop's round 1 greps each changed term", () => {
       "its changed-term grep for each term whose meaning it changes",
     )
     expect(await page()).toContain("each term whose meaning the diff changes")
+    expect(await page()).toContain("greps the agent-facing and web docs")
   })
 
   test("AGENTS.md's pre-review pass runs the same grep before round 1", async () => {
     const agents = await Bun.file(join(root, "AGENTS.md")).text()
     const line = agents.split("\n").find((l) => l.includes("changed-term grep")) ?? ""
-    expect(line).toContain("`git grep -l <term>`")
+    expect(line).toContain("`git grep -l <term>` over the agent-facing and web docs")
     expect(line).toContain("each term whose meaning the diff changes")
     expect(agents).toContain("each list grep and changed-term grep with its hits")
   })
@@ -269,6 +270,29 @@ describe("code-review-loop checks its own fixes and a repo scanner's landing (PG
       "each scanning or schema-reading test that landed has run",
     )
     expect(await page()).toContain("a test that scans the repo or reads the schema lands on canary")
+  })
+
+  test("The last 5/5 fetches canary again once CI goes green and reads both stand-in conditions against it before citing the run (#422's CI merge went stale twice in one round)", async () => {
+    const last = (await skill()).split("## The last 5/5")[1]?.split("\n## ")[0] ?? ""
+    const stand = last.split("**CI stands in**")[1]?.split("\n")[0] ?? ""
+    expect(stand).toContain(
+      "Once both checks are green at `<head>`, run `git -C <clone> fetch origin canary` again and read both stand-in conditions against that `origin/canary` before you cite the run",
+    )
+    expect(last.split("**Done when**")[1] ?? "").toContain(
+      "or CI stood in for them at the head, read against a canary fetched after both checks went green",
+    )
+    expect(await page()).toContain("fetches canary again once both checks are green")
+  })
+
+  test("step 8 runs a waiting scanner PR's touched tests on a local merge at every canary move, whatever landed (#422's CI merge went stale twice)", async () => {
+    const step = (await skill()).match(/^8\. \*\*Report and wait\.\*\*.*$/m)?.[0] ?? ""
+    expect(step).toContain(
+      "A waiting 5/5 whose own diff adds or changes a repo scanner or a data file one reads (The last 5/5's merge rule names them) takes that local merge at every canary move (a held stack's aside), whatever landed",
+    )
+    expect(step.split("**Done when**")[1] ?? "").toContain(
+      "each waiting 5/5 that adds or changes a repo scanner or a data file one reads has run its touched tests on a local merge with the newest `origin/canary`",
+    )
+    expect(await page()).toContain("A waiting 5/5 that adds or changes a repo scanner")
   })
 
   test("step 8 checks each waiting 5/5 for a merge conflict with canary whenever canary moves (#118 went CONFLICTING under its 5/5)", async () => {

@@ -62,13 +62,13 @@ const ROOTED = new Set(["find", "snapshot"])
 const TARGETED = new Set(["close-app", "launch"])
 
 const OWNER =
-  "ask the owner to run it with the ! prefix in the owner's own pane, which runs outside the hooks"
+  "tell your lead, and the dispatcher hands the owner the command to run with the ! prefix in the dispatcher's terminal window, where it runs outside the hooks"
 
 const headed = () =>
   `${GUARD} hook refused this agent-desktop call: it carries --headed, whose physical input moves the owner's own pointer and focus. --headed is the owner's alone, so ${OWNER}.`
 
 const listed = (app: string) =>
-  `${GUARD} hook refused this agent-desktop call: it targets ${app}, an app on the desktop-owner-apps guard list of the owner's own apps. Leave it alone; when the task needs it, ${OWNER}, or ask the owner to take ${app} off the list in the owner's login extension with a ! command Ops prepares.`
+  `${GUARD} hook refused this agent-desktop call: it targets ${app}, an app on the desktop-owner-apps guard list of the owner's own apps. Leave it alone; when the task needs it, ${OWNER}; or, to take ${app} off the list in the owner's login extension, tell your lead, and the dispatcher hands the owner the ! command that does it.`
 
 const unread = (what: string) =>
   `${GUARD} hook refused this agent-desktop call: it cannot read ${what} before the command runs, so it cannot tell whether the call carries --headed or targets an app on the desktop-owner-apps list. Write the agent-desktop command's every word literally as a command of its own, or ${OWNER}.`
@@ -81,7 +81,7 @@ const SCRIPT_IN_CALL =
 
 // A list refusal's reason alone, without the fix it names, since only the owner's own ! command changes the list.
 const reasonOf = (refusal: string) =>
-  refusal.split(/: ask Ops for the owner to seed the guards'|\. Restore the file/)[0]
+  refusal.split(/: tell your lead, and the dispatcher hands the owner|\. Restore the file/)[0]
 
 const appName = (value: string) =>
   (value.split("/").filter(Boolean).pop() ?? "")
@@ -129,7 +129,7 @@ function lister(environment: Environment) {
     (loaded ??= guardList(GUARD, "desktop-owner-apps", isStrings, [], environment).then((l) =>
       l.refusal
         ? {
-            refusal: `${reasonOf(l.refusal)}. The list changes only by the owner's own ! command: ask your lead to have Ops prepare it for the owner, then run the call again.`,
+            refusal: `${reasonOf(l.refusal)}. The list changes only by the owner's own ! command: tell your lead, and the dispatcher hands the owner the command, then run the call again.`,
           }
         : { apps: new Set((l.list ?? []).map(appName)) },
     ))
