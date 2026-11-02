@@ -14,6 +14,7 @@ import {
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 
+import { MARKER } from "../../../../../packages/safe-delete/src"
 import {
   type OrgsIo,
   orgsCommand,
@@ -175,6 +176,7 @@ test("with no extensions the home set is core's alone, and the same winners reus
   expect(first.body("tdd")).toBe("CORE-TDD")
   expect((await resolve(data)).plugin).toBe(first.plugin)
   expect(readdirSync(join(data, "orgs", "home"))).toHaveLength(1)
+  expect(existsSync(join(first.plugin, MARKER))).toBe(false)
 })
 
 test("extensions that name no login refuse, exit 2, naming ext init", async () => {

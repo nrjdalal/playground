@@ -1,16 +1,18 @@
-import { afterAll, expect, test } from "bun:test"
+import { afterAll, expect, spyOn, test } from "bun:test"
 import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   utimesSync,
   writeFileSync,
 } from "node:fs"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { basename, dirname, join } from "node:path"
 
+import { MARKER } from "../../../../packages/safe-delete/src"
 import {
   commitExt,
   deriveHooks,
@@ -21,6 +23,7 @@ import {
   mustGit,
   scopeDir,
   scopesIn,
+  withLock,
   writeFiles,
   writeTree,
 } from "../../../../packages/settings/src"
@@ -168,12 +171,37 @@ test("a guard's list is the union of the login's, each org's and core's, so a lo
 
 test("a lock left behind by a write that died goes once stale", () => {
   mkdirSync(lockPath(data("locked")), { recursive: true })
+  writeFileSync(join(lockPath(data("locked")), MARKER), "")
   const old = new Date(Date.now() - 10 * 60_000)
   utimesSync(lockPath(data("locked")), old, old)
   expect(
     writeFiles(data("locked"), "tester", new Map([["a.md", "a"]]), { author: "o", reason: "r" }),
   ).toBeString()
   expect(existsSync(lockPath(data("locked")))).toBe(false)
+})
+
+test("a write's lock carries makeScratch's marker while it runs, and is gone after (#545)", () => {
+  const lock = lockPath(data("marked"))
+  expect(withLock(data("marked"), () => existsSync(join(lock, MARKER)))).toBe(true)
+  expect(existsSync(lock)).toBe(false)
+  expect(readdirSync(dirname(lock)).filter((name) => name.startsWith(basename(lock)))).toEqual([])
+})
+
+test("an unmarked lock left behind goes aside once stale, and stays there with its refusal logged (#545)", () => {
+  const lock = lockPath(data("unmarked"))
+  mkdirSync(lock, { recursive: true })
+  const old = new Date(Date.now() - 10 * 60_000)
+  utimesSync(lock, old, old)
+  const said = spyOn(console, "error").mockImplementation(() => {})
+  try {
+    expect(withLock(data("unmarked"), () => "ran", 1_000)).toBe("ran")
+    const left = readdirSync(dirname(lock)).filter((name) => name.startsWith(basename(lock)))
+    expect(left).toHaveLength(1)
+    expect(left[0]).toStartWith(`${basename(lock)}.stale-`)
+    expect(String(said.mock.calls[0]?.[0])).toContain(`has no ${MARKER} marker`)
+  } finally {
+    said.mockRestore()
+  }
 })
 
 test("two processes writing at once both land, one commit each", async () => {

@@ -3,6 +3,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } 
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
+import { MARKER, removeScratch } from "../../../../packages/safe-delete/src"
 import { sandbox } from "../../../../packages/scripts/src/sandbox"
 
 // Builds the sandbox while the parent reads Asia/Kolkata, as the Mac does, and returns the zone a Python child reports with that env plus the given overrides
@@ -93,4 +94,11 @@ test("a test's own fake gh ahead of the sandbox's answers instead", () => {
   } finally {
     rmSync(scratch, { force: true, recursive: true })
   }
+})
+
+test("the sandbox is a marked scratch folder, which removeScratch removes (#545)", () => {
+  const { scratch } = sandbox()
+  expect(existsSync(join(scratch, MARKER))).toBe(true)
+  expect(removeScratch(scratch)).toBeNull()
+  expect(existsSync(scratch)).toBe(false)
 })

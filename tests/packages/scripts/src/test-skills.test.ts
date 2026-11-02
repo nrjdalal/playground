@@ -54,6 +54,16 @@ test("a step writes under the sandbox's home, never the real ~/.claude (#1430)",
   expect(marker).toBe(false)
 })
 
+test("a step runs in a marked scratch folder, gone once the run ends (#545)", () => {
+  const { out } = runStep(
+    {},
+    'printf "%s %s" "$TEST_SANDBOX_HOME" "$(test -f "$TEST_SANDBOX_HOME/.safe-delete-scratch" && echo marked)" > $OUT',
+  )
+  const [home, marked] = out.split(" ")
+  expect(marked).toBe("marked")
+  expect(existsSync(home!)).toBe(false)
+})
+
 test("uv's cache folder reaches a step (#1443)", () => {
   const uv =
     'case "$1 $2" in "cache dir") echo /fake/uv-cache ;; "python dir") echo /fake/uv-python ;; esac'

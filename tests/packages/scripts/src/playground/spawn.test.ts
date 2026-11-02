@@ -1,4 +1,4 @@
-import { afterAll, describe, expect, test } from "bun:test"
+import { afterAll, describe, expect, spyOn, test } from "bun:test"
 import {
   existsSync,
   mkdirSync,
@@ -12,6 +12,7 @@ import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { dataDir } from "../../../../../packages/env/src/data-dir"
+import { MARKER } from "../../../../../packages/safe-delete/src"
 import {
   runSpawn,
   SPAWN_LOCK,
@@ -107,23 +108,45 @@ describe("runSpawn on the real spawn.sh", () => {
 })
 
 describe("takeLock", () => {
-  test("a lock appears with its pid inside, so a second take reads it as held", () => {
+  test("a lock appears with its pid and makeScratch's marker inside, so a second take reads it as held, and its release removes it", () => {
     const acme = join(scratch(), "dispatcher")
     const first = takeLock(acme)
     expect(readFileSync(join(acme, SPAWN_LOCK, "pid"), "utf8")).toBe(String(process.pid))
+    expect(existsSync(join(acme, SPAWN_LOCK, MARKER))).toBe(true)
     expect(takeLock(acme)).toEqual({ held: process.pid })
     expect(readdirSync(acme)).toEqual([SPAWN_LOCK])
     if ("release" in first) first.release()
+    expect(readdirSync(acme)).toEqual([])
   })
 
   test("takes over a lock whose holder has gone", () => {
     const acme = join(scratch(), "dispatcher")
     mkdirSync(join(acme, SPAWN_LOCK), { recursive: true })
     writeFileSync(join(acme, SPAWN_LOCK, "pid"), "999999")
+    writeFileSync(join(acme, SPAWN_LOCK, MARKER), "")
     const lock = takeLock(acme)
     expect("release" in lock).toBe(true)
     if ("release" in lock) lock.release()
-    expect(existsSync(join(acme, SPAWN_LOCK))).toBe(false)
+    expect(readdirSync(acme)).toEqual([])
+  })
+
+  test("takes over an unmarked lock whose holder has gone, leaving it aside and logging why it stays (#545)", () => {
+    const acme = join(scratch(), "dispatcher")
+    mkdirSync(join(acme, SPAWN_LOCK), { recursive: true })
+    writeFileSync(join(acme, SPAWN_LOCK, "pid"), "999999")
+    const said = spyOn(console, "error").mockImplementation(() => {})
+    try {
+      const lock = takeLock(acme)
+      expect("release" in lock).toBe(true)
+      if ("release" in lock) lock.release()
+      const left = readdirSync(acme)
+      expect(left).toHaveLength(1)
+      expect(left[0]).toStartWith(`${SPAWN_LOCK}.stale-`)
+      expect(readFileSync(join(acme, left[0]!, "pid"), "utf8")).toBe("999999")
+      expect(String(said.mock.calls[0]?.[0])).toContain(`has no ${MARKER} marker`)
+    } finally {
+      said.mockRestore()
+    }
   })
 })
 

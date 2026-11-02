@@ -1,8 +1,9 @@
-import { afterAll, describe, expect, test } from "bun:test"
-import { existsSync, mkdtempSync, rmSync, utimesSync } from "node:fs"
+import { afterAll, describe, expect, spyOn, test } from "bun:test"
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, utimesSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
+import { MARKER } from "../../../../../packages/safe-delete/src"
 import {
   locked,
   ownerMessages,
@@ -92,5 +93,24 @@ describe("the send lock", () => {
     releaseB()
     await b
     expect(existsSync(lock)).toBe(false)
+    expect(readdirSync(dir)).toEqual([])
+  })
+
+  test("a send's lock carries makeScratch's marker while it runs, and an unmarked dead lock goes aside and stays with its refusal logged (#545)", async () => {
+    const dir = join(scratch, "unmarked")
+    const lock = join(dir, "dm-send.lock")
+    mkdirSync(lock, { recursive: true })
+    const old = new Date(Date.now() - 11 * 60_000)
+    utimesSync(lock, old, old)
+    const said = spyOn(console, "error").mockImplementation(() => {})
+    try {
+      expect(await locked(dir, async () => existsSync(join(lock, MARKER)))).toBe(true)
+      const left = readdirSync(dir)
+      expect(left).toHaveLength(1)
+      expect(left[0]).toStartWith("dm-send.lock.stale-")
+      expect(String(said.mock.calls[0]?.[0])).toContain(`has no ${MARKER} marker`)
+    } finally {
+      said.mockRestore()
+    }
   })
 })
