@@ -26,10 +26,10 @@ import {
   stdinOf,
   type Text,
   tick,
-  type Visit,
-  withDeadline,
   UNKNOWN,
   varsSince,
+  type Visit,
+  withDeadline,
   type Word,
 } from "./shell"
 

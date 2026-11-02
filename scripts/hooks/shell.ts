@@ -95,7 +95,7 @@ export function filled(script: string, mark: string, value: string): string {
 const held = (text: Text): Text => (text.value.length > MAX_BYTES ? unknown(LARGE) : text)
 
 // The characters a shell expands as a glob where they stand unquoted.
-export const GLOB = /[*?[{(]/
+const GLOB = /[*?[{(]/
 
 // Where a word's first glob character stands, or -1.
 export const globAt = (word: Word): number => word.glob ?? word.value.search(GLOB)

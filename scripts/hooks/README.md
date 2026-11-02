@@ -155,6 +155,7 @@ Their tests are `bun run test:file tests/scripts/hooks`.
   It refuses a file tool's path in the root, `~` expanded, and a redirect into it, a group's, a subshell's, `exec`'s, a shell's, `eval`'s, `source`'s, `.`'s, `cd`'s, `pushd`'s, `popd`'s or a bare one included, and zsh's `>!` and `>>!` with them.
   It refuses any program but a reader that names the root, a path in it, a folder above it (`~/.playground`, `~`) or an unquoted glob there (`*`, `?`, `[…]`, `{…}` or zsh's `(…)`, in a redirect's target too), links followed, in any word:
   the program word, an option's attached value (`-o<path>`, `--out=<path>`), a variable the call sets (`GIT_DIR=<clone>`), or the stdin xargs hands it.
+  An interpreter's words (`bun`, `deno`, `node`, `perl`, `php`, `python`, `ruby`) count their quoted glob characters too, since its script may expand a glob or build a path at run time (`perl -e 'unlink glob ".p*/…"'`).
   It refuses any program but a reader whose words or heredoc hold the root's path as text, whole or as seen from a folder above it the command runs in, so an interpreter's script and a commit message that names it are refused alike, as is a commit message or an inline body that names a gated call (`playground ext sync`); write such text to a file and pass the file.
   The readers are `[`, `cat`, `cmp`, `diff`, `echo`, `grep`, `head`, `jq`, `ls`, `printf`, `readlink`, `realpath`, `shasum`, `stat`, `tail`, `test` and `wc`;
   `rg` with no `--hostname-bin` or `--pre`; `find` with no `-delete`, `-exec`, `-execdir`, `-fls`, `-fprint`, `-fprint0`, `-fprintf`, `-ok` or `-okdir` action; and git's `blame`, `cat-file`, `diff`, `grep`, `log`, `ls-files`, `rev-parse`, `show` and `status` with no `-c`, `--config-env`, `--exec-path`, `--ext-diff`, `-O`, `--open-files-in-pager`, `--output` or `--textconv`.
@@ -181,7 +182,7 @@ Their tests are `bun run test:file tests/scripts/hooks`.
   A path through a link into the root with `..` after the link (`echo x > <link>/../f`) is judged as typed, so a write by one passes.
   A `cd` or `pushd` it cannot follow (`cd -`, `cd ~-`, `popd`'s stack, a glob in the folder, a `CDPATH` lookup) leaves the command's folder unread, so a relative write after one passes.
   A text that holds a space is read again as a command line, where its quoted glob characters stand unquoted, so from a cwd at or above the root (`~`, `~/.playground`) a call such as `git commit -m "fix(x): y"` or `awk '{print $1}' f` is refused; run it from a worktree.
-  A quoted regex from `/` that holds a space and a glob character (`awk '… /^(a|b)/ …'`, `sed -n '/^a*b/p; …'`, `bun -e '… /^(a|b)/ …'`) is refused from any folder, since `/` holds the root; run such a script from a file (`awk -f <file>`, `bun <file>`).
+  A quoted regex from `/` that holds a space and a glob character (`awk '… /^(a|b)/ …'`, `sed -n '/^a*b/p; …'`, `bun -e '… /^(a|b)/ …'`) is refused from any folder, since `/` holds the root; run such a script from a file (`awk -f <file>`, `bun <file>`, `sed -f <file>`).
   It fails open on any other error, and its tests are in `bun run test:file tests/scripts/hooks/no-extensions-write.test.ts`.
 
 ## no-false-green
