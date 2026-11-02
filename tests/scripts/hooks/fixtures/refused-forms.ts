@@ -2157,6 +2157,18 @@ gh api graphql -f query="$QUERY"`,
           "a commit after a cd behind && whose left side may fail",
           `false && cd ${W}; git commit -m x`,
         ],
+        [
+          "a commit the ; frees from the && that made the cd before it sure",
+          `true && cd ${W}; git commit -m x`,
+        ],
+        [
+          "a commit the ; frees from a chained cd into the folder the line makes",
+          `mkdir -p ${W}/sub && cd ${W}/sub; git commit -m x`,
+        ],
+        [
+          "a commit after a chained cd and one it cannot read",
+          `true && cd ${W} && cd "$D" && git commit -m x`,
+        ],
         ["a commit after a cd to a missing folder", `cd ${MAIN}/.no-such-folder; git commit -m x`],
         ["a commit after a cd to a folder in a variable", `cd "$X"; git commit -m x`],
         ["a commit after a cd in an if branch", `if false; then cd ${W}; fi; git commit -m x`],

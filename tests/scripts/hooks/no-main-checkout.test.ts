@@ -209,6 +209,23 @@ describe("a build, a test run, lefthook, turbo or a file write in the main check
     expect(await bash(command)).toBeUndefined()
   })
 
+  // #573: a cd an && joins to the commands after it has certainly run for each of them, since a cd that does not run, or fails, stops the chain before them: so the folder it names is the one they run from, whether or not that folder is there when the hook reads the line
+  test.each([
+    ["a chained cd into a worktree", `true && cd ${WORKTREE} && bun run build`],
+    ["a chained cd after a real command", `git fetch -q origin canary && cd ${WORKTREE} && git add -A`],
+    ["two chained cds, the second into a worktree", `cd ${MAIN} && cd ${WORKTREE} && git add -A`],
+    [
+      "a chained cd into the worktree the same line makes, as the Workflow rule types it",
+      `git fetch origin canary && git worktree add ${MAIN}/.claude/worktrees/new -b PG-1-x origin/canary && cd ${MAIN}/.claude/worktrees/new && git merge origin/canary --no-edit`,
+    ],
+    [
+      "a chained cd into the folder mkdir makes",
+      `mkdir -p ${WORKTREE}/sub && cd ${WORKTREE}/sub && git commit -m x`,
+    ],
+  ])("from the main checkout, %s runs", async (_name, command) => {
+    expect(await bash(command)).toBeUndefined()
+  })
+
   test("a pipe into a shell from the main checkout is refused, since its script is unread", async () => {
     expect(await bash("bun run ask list | sh")).toContain("no-main-checkout hook refuses")
   })
