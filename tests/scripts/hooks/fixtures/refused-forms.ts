@@ -947,6 +947,21 @@ gh api graphql -f query="$QUERY"`,
         "node -e evaluating code that spawns it",
         `node -e 'eval("require(\\"child_process\\").execSync(\\"agent-desktop snapshot\\")")'`,
       ],
+      ...(["watch", "flock /tmp/x", "setsid"] as const).map(
+        (wrapper) =>
+          [
+            `node -e running it behind ${wrapper.split(" ")[0]} in a shell line`,
+            `node -e 'require("child_process").execSync("${wrapper} agent-desktop snapshot --app Finder")'`,
+          ] as const,
+      ),
+      [
+        "node -e sourcing a file named for it in a shell line",
+        `node -e 'require("child_process").execSync("source agent-desktop")'`,
+      ],
+      [
+        "node -e running a script by its path beside it in a shell line",
+        `node -e 'require("child_process").execSync("bin/run agent-desktop")'`,
+      ],
       [
         "bun -e running it in a template",
         "bun -e 'await Bun.$`agent-desktop snapshot --app Finder`'",
