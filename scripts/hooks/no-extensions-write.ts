@@ -173,6 +173,8 @@ const SETS = /^(?:CLAUDE_CODE_SESSION_ID|CLAUDE_CONFIG_DIR|PLAYGROUND_ROLE)\+?=/
 // env's options that clear the whole environment: -i alone or in any cluster of short options, --ignore-environment, or a bare -
 const CLEARS = /^(?:-[^-\s]*i|--ignore-environment$|-$)/
 const SCORE = /\bext\s+score\b/
+// the line's text as a shell it runs reads it: backslash-newlines, a $ before a quote, and every quote and backslash removed
+const unquoted = (text: string) => text.replace(/\\\n|\$(?=["'])|["'\\]/g, "")
 const SCORE_AS_OTHER = `playground ext score on a line that clears or sets ${IDENTITY.join(", ")}, which reads as another author than the calling session`
 
 // Whether words clear or set an identity variable: an assignment or += to one, or env beside -u or --unset naming one or an option that clears the environment.
@@ -511,7 +513,8 @@ function inspect(raw: string, environment: Environment) {
   rootLine = rooted(lexed.commands)
   whole = rootLine || wholeLine(lexed.commands, env)
   // a line holding an ext score is refused whole once any command on it changes who the session reads as, so a shell it runs or pipes into carries the change
-  if (SCORE.test(command) && changesIdentity(lexed.commands)) return refuse(SCORE_AS_OTHER)
+  if (SCORE.test(unquoted(command)) && changesIdentity(lexed.commands))
+    return refuse(SCORE_AS_OTHER)
   return run(lexed, env, visit, true)
 }
 
