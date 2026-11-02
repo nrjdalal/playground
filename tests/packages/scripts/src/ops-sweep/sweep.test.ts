@@ -435,7 +435,10 @@ describe("stalledPrs", () => {
           nodes: prs.map((p) => ({
             body: p.body ?? "",
             comments: {
-              nodes: (p.comments ?? []).map((c) => ({ body: c.body, createdAt: minutesAgo(c.age) })),
+              nodes: (p.comments ?? []).map((c) => ({
+                body: c.body,
+                createdAt: minutesAgo(c.age),
+              })),
             },
             commits: {
               nodes: [
@@ -510,12 +513,10 @@ describe("stalledPrs", () => {
   })
 
   test("writes an entry for a PR with no commit, verdict or comment for 30 minutes, not before (#454)", async () => {
-    expect(
-      await lines([{ comments: [{ age: 31, body: "a comment" }], commitAge: 40 }]),
-    ).toEqual(["no new commit, verdict or comment for 31m"])
-    expect(await lines([{ comments: [{ age: 29, body: "a comment" }], commitAge: 40 }])).toEqual(
-      [],
-    )
+    expect(await lines([{ comments: [{ age: 31, body: "a comment" }], commitAge: 40 }])).toEqual([
+      "no new commit, verdict or comment for 31m",
+    ])
+    expect(await lines([{ comments: [{ age: 29, body: "a comment" }], commitAge: 40 }])).toEqual([])
     expect(await lines([{ commitAge: 29 }])).toEqual([])
   })
 

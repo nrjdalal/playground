@@ -2,6 +2,7 @@ import { appendFile, readdir } from "node:fs/promises"
 import { join } from "node:path"
 
 import { kindOf, placedKindOf } from "@packages/config/kinds"
+import { verdictOf } from "@packages/config/verdicts"
 
 import STATUSES from "../../../../scripts/roster-statuses.json"
 import { leadName } from "../ops-session-resume/resume"
@@ -34,7 +35,9 @@ export const IDLE_DB_AFTER = 7200
 export const IDLE_DB_GAP = 900
 export const NO_PR_AFTER = 900
 export const PRUNE_EVERY = 21600
+export const REPEATS = 4
 export const REVIEWER_LATE = 1200
+export const STALL_AFTER = 1800
 export const STALE_EVERY = 14_400
 
 const IDLE_SQL =
@@ -349,6 +352,111 @@ export async function prlessBranches(ctx: Context, agents: Json[]): Promise<stri
   return []
 }
 
+// Each open PR of ours, in the factory repo or the repo of a PR a live roster row names, read in one GraphQL search into ops/alerts-prs.json, which ops-unstick folds into alerts-pending.json: one whose last REPEATS ReviewBot verdicts hold one score below 5 (a fresh round resets the idle clock, so a 3/5 every 20 minutes never idles), and one with no new commit, verdict or comment for STALL_AFTER seconds that waits on neither its checks nor merge-on-ready. A PR held on purpose is left out: a park or hold label, or a line of its body or newest comment opening with Held or Parked.
+export async function stalledPrs(ctx: Context, agents: Json[]): Promise<string[]> {
+  let factory: string
+  try {
+    factory = (await (ctx.factory ?? (() => factoryRepoOf()))()).toLowerCase()
+  } catch {
+    return ["stalled-check-unreadable"]
+  }
+  const repos = new Set([factory])
+  for (const a of agents) {
+    const m = /github\.com\/([\w.-]+\/[\w.-]+)\/pull\/\d+/i.exec(String(a.pr ?? ""))
+    if (m && a.status !== "ended") repos.add(m[1]!.toLowerCase())
+  }
+  const search = `is:pr is:open author:@me ${[...repos]
+    .sort()
+    .map((r) => `repo:${r}`)
+    .join(" ")}`
+  const fields =
+    "number body repository { nameWithOwner } labels(first: 20) { nodes { name } } comments(last: 50) { nodes { body createdAt } } reviews(last: 1) { nodes { submittedAt } } commits(last: 1) { nodes { commit { committedDate statusCheckRollup { state } } } }"
+  const query = `{ search(query: ${JSON.stringify(search)}, type: ISSUE, first: 50) { nodes { ... on PullRequest { ${fields} } } } }`
+  const r = await ctx.run(["gh", "api", "graphql", "-f", `query=${query}`], { timeoutMs: 60_000 })
+  let prs: {
+    body?: string
+    comments?: { nodes?: { body?: string; createdAt?: string }[] }
+    commits?: {
+      nodes?: {
+        commit?: { committedDate?: string; statusCheckRollup?: { state?: string } | null }
+      }[]
+    }
+    labels?: { nodes?: { name?: string }[] }
+    number?: number
+    repository?: { nameWithOwner?: string }
+    reviews?: { nodes?: { submittedAt?: string }[] }
+  }[]
+  try {
+    prs = JSON.parse(r.out).data.search.nodes
+    if (!Array.isArray(prs)) throw new Error("no nodes")
+  } catch {
+    return ["stalled-check-unreadable"]
+  }
+  const queue = await readJson<{ queue?: { pr?: unknown; readyAt?: unknown }[] }>(
+    join(ctx.data, "merge-queue.json"),
+    {},
+  )
+  const ready = new Set(
+    (Array.isArray(queue?.queue) ? queue.queue : []).filter((e) => e?.readyAt).map((e) => e.pr),
+  )
+  const held = (text = "") => /^\W*(held|parked)\b/im.test(text)
+  const iso = (ms: number) => `${new Date(ms).toISOString().slice(0, 19)}Z`
+  const alerts: Json[] = []
+  for (const pr of prs) {
+    const repo = pr?.repository?.nameWithOwner?.toLowerCase()
+    if (!repo || typeof pr.number !== "number") continue
+    const comments = pr.comments?.nodes ?? []
+    if (
+      held(pr.body) ||
+      held(comments.at(-1)?.body) ||
+      (pr.labels?.nodes ?? []).some((l) => /park|hold/i.test(l.name ?? ""))
+    )
+      continue
+    const commit = pr.commits?.nodes?.[0]?.commit
+    const last = Math.max(
+      0,
+      ...[
+        commit?.committedDate,
+        comments.at(-1)?.createdAt,
+        pr.reviews?.nodes?.at(-1)?.submittedAt,
+      ].map((t) => Date.parse(t ?? "") || 0),
+    )
+    const reasons: string[] = []
+    const scores = comments.flatMap((c) => {
+      const v = verdictOf(c.body ?? "")
+      return v?.gate === "review" ? [v] : []
+    })
+    const tail = scores.slice(-REPEATS)
+    const score = tail[0]?.score
+    if (
+      tail.length === REPEATS &&
+      score !== undefined &&
+      score < 5 &&
+      tail.every((v) => v.score === score)
+    )
+      reasons.push(`last ${REPEATS} verdicts ${score}/5, round ${tail.at(-1)!.round}`)
+    const idle = Math.floor((ctx.now() - last) / 60_000)
+    const waiting =
+      ["EXPECTED", "PENDING"].includes(commit?.statusCheckRollup?.state ?? "") ||
+      (repo === factory && ready.has(pr.number))
+    if (idle * 60 >= STALL_AFTER && !waiting)
+      reasons.push(`no new commit, verdict or comment for ${idle}m`)
+    if (reasons.length)
+      alerts.push({
+        at: stamp(ctx),
+        kind: "pr-stalled",
+        lastActivityAt: iso(last),
+        line: reasons.join("; "),
+        name: `${repo}#${pr.number}`,
+      })
+  }
+  await writeAtomic(
+    join(ctx.ops, "alerts-prs.json"),
+    `${JSON.stringify({ alerts, writtenAt: stamp(ctx) }, null, 1)}\n`,
+  )
+  return []
+}
+
 // run-slot's runner-box route, which falls back to this Mac without a word: one finding naming each precondition run-slot.sh box-off reports failing (no-ci-sh, no-ssh-key, runner-host-off, slot-off).
 export async function boxRoute(ctx: Context): Promise<string[]> {
   const r = await ctx.run([join(ctx.ops, "run-slot.sh"), "box-off"], { timeoutMs: 60_000 })
@@ -407,7 +515,7 @@ export async function idleDbs(ctx: Context): Promise<string[]> {
   return out
 }
 
-// One read of runners, probes, the managers' asks, unclosed answers, the ops jobs, idle databases, the runner-box route, late reviewers, branches with no PR and the usage forecast.
+// One read of runners, probes, the managers' asks, unclosed answers, the ops jobs, idle databases, the runner-box route, late reviewers, branches with no PR, stalled PRs and the usage forecast.
 export async function check(ctx: Context): Promise<string[]> {
   let roster: Json
   try {
@@ -466,6 +574,7 @@ export async function check(ctx: Context): Promise<string[]> {
   found.push(...(await boxRoute(ctx)))
   found.push(...(await lateReviewers(ctx, agents, live)))
   found.push(...(await prlessBranches(ctx, agents)))
+  found.push(...(await stalledPrs(ctx, agents)))
   const projected = Object.values(await forecast(ctx))
   if (projected.length) found.push(projected.some((v) => v > HEADROOM) ? "no-headroom" : "headroom")
   return found
