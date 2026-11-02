@@ -13,7 +13,7 @@ export const channelSettings = defineSettings({
   "channel.slackId": {
     default: "",
     description:
-      "The Slack channel id of the shared channel the channel watch relays to the dispatcher; the watch reads nothing until it is set.",
+      "The Slack channel id of the shared channel the channel watch relays to the dispatcher; once the watch is on, each pass fails by name while it is unset.",
     schema: z.string().regex(/^(?:[CG][A-Z0-9]+)?$/, "a Slack channel id"),
   },
 })
