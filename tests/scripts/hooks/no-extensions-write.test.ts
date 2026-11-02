@@ -747,6 +747,32 @@ describe("a playground CLI call that no guard reads runs", () => {
   })
 })
 
+describe("a slash word ending in playground is the CLI only as the program word or a runner's operand", () => {
+  const FOLDERS = [
+    ["the data folder", DATA],
+    ["the home folder", HOME],
+  ]
+  test.each(FOLDERS)("a repo slug as a plain argument runs from %s", async (_, cwd) => {
+    expect(
+      await bash("for n in 75; do /tmp/state.py pr nrjdalal/playground $n; done", cwd),
+    ).toBeUndefined()
+  })
+  test.each(
+    [
+      ["the CLI by name", "playground ext sync"],
+      ["the CLI by its path", "/opt/cli/playground ext sync"],
+      ["a copy not made yet", "cp cli.ts x/playground; x/playground ext sync"],
+      ["a link", "ln -s /opt/cli.ts y/playground && y/playground ext sync"],
+      ["a copy behind bun", "bun x/playground ext sync"],
+      ["the CLI behind npx", "npx playground ext sync"],
+      ["a copy behind find -exec", "find . -exec x/playground ext sync ';'"],
+      ["a copy behind watch", "watch x/playground ext sync"],
+    ].flatMap(([what, command]) => FOLDERS.map(([where, cwd]) => [what, where, command, cwd])),
+  )("%s is refused from %s", async (_, __, command, cwd) => {
+    expect(await bash(command, cwd)).toContain("no-extensions-write hook refuses playground ext")
+  })
+})
+
 describe("the hook's run", () => {
   test("a check in its Worker answers as the check does", async () => {
     const raw = JSON.stringify({
