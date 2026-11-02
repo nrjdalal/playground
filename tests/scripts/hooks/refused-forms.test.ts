@@ -12,6 +12,7 @@ import { check as headlessLogin } from "../../../scripts/hooks/no-headless-login
 import { check as killByName } from "../../../scripts/hooks/no-kill-by-name"
 import { check as mainCheckout } from "../../../scripts/hooks/no-main-checkout"
 import { check as playgroundLeak } from "../../../scripts/hooks/no-playground-leak"
+import { check as rawDelete } from "../../../scripts/hooks/no-raw-delete"
 import { check as rawSpawn } from "../../../scripts/hooks/no-raw-spawn"
 import { check as releaseComment } from "../../../scripts/hooks/no-release-comment"
 import { check as stash } from "../../../scripts/hooks/no-stash"
@@ -181,6 +182,13 @@ const GUARDS: Record<Guard, { folders: Partial<Record<Folder, [string, string]>>
         undefined,
         LISTS,
       ),
+  },
+  "no-raw-delete": {
+    folders: {
+      checkout: [CHECKOUT, HOME],
+      "process worktree": [join(homedir(), "x", ".claude", "worktrees", "y"), homedir()],
+    },
+    run: (raw) => rawDelete(raw),
   },
   "no-raw-spawn": { folders: { checkout: [CHECKOUT, HOME] }, run: (raw) => rawSpawn(raw) },
   "no-release-comment": {

@@ -13,6 +13,7 @@ export type Guard =
   | "no-kill-by-name"
   | "no-main-checkout"
   | "no-playground-leak"
+  | "no-raw-delete"
   | "no-raw-spawn"
   | "no-release-comment"
   | "no-stash"
@@ -56,15 +57,16 @@ export type Group = {
   folders: Folder[]
   guards: Guard[]
   rows: (paths: Paths) => readonly Row[]
-  source: "#292" | "#356" | "#402" | "#411" | "#446" | "#456" | "#466" | "#469" | "#509"
+  source: "#292" | "#356" | "#402" | "#411" | "#446" | "#456" | "#466" | "#469" | "#509" | "#536"
 }
 
-// The rows a guard-loosening PR lets run on purpose, each written as a row's "<source> <what>" for all its cases, or as one case's "<source> <what> | <guard> | <folder>"; canary lets none run.
+// The rows a guard-loosening PR lets run on purpose, and the rows that show the one form a guard lets run, each written as a row's "<source> <what>" for all its cases, or as one case's "<source> <what> | <guard> | <folder>".
 export const ALLOWED: string[] = [
   "#446 bun -e writing a JSON label whose prose names it",
   "#446 bun -e editing a JSON label whose prose names it, then a script",
   "#446 python3 -c printing prose that names it",
   "#466 git --attr-source with a subcommand for its value before a read in a repo with a heavy path staged",
+  "#536 a non-recursive rm of files inside the session's own worktree",
 ]
 
 // A harmless git alias nest of the given depth around an inner command line, each level double-quoted.
@@ -84,6 +86,9 @@ const PUSH = "git push https://github.com/quillco/acme-skills main"
 
 // A guarded org's repository by its URL, which a push names from any folder.
 const ORG = "https://github.com/acme-blue/app.git"
+
+// The folder every delete row names, which never exists under the data folder's extensions root.
+const NEVER_MADE = "~/.playground/extensions/.no-such-folder"
 
 const MUTATION = `mutation { addComment(input: {subjectId: "I_1", body: "release"}) { clientMutationId } }`
 
@@ -1620,5 +1625,93 @@ gh api graphql -f query="$QUERY"`,
       ["a file's unread text piped to doas's shell", `cat "$F" | doas -s`],
     ],
     source: "#509",
+  },
+  {
+    folders: ["checkout"],
+    guards: ["no-raw-delete"],
+    rows: () => [
+      [
+        "the incident's form, a recursive delete in sh -c behind screen -dm",
+        `screen -dm sh -c 'rm -rf ${NEVER_MADE}'`,
+      ],
+      [
+        "a recursive delete behind screen -dmS and a session name",
+        `screen -dmS job rm -rf ${NEVER_MADE}`,
+      ],
+      [
+        "a recursive delete in bash -c behind screen's flags apart",
+        `screen -d -m bash -c "rm -rf ${NEVER_MADE}"`,
+      ],
+      ["a recursive delete behind tmux new -d as one string", `tmux new -d 'rm -rf ${NEVER_MADE}'`],
+      [
+        "a recursive delete behind tmux new-session -d -s as words",
+        `tmux new-session -d -s job rm -rf ${NEVER_MADE}`,
+      ],
+      [
+        "a recursive delete of a variable in tmux's double-quoted string",
+        `tmux new -d "rm -rf $D"`,
+      ],
+      ["a recursive delete behind nohup", `nohup rm -rf ${NEVER_MADE} &`],
+      [
+        "a recursive delete in sh -c behind nohup",
+        `nohup sh -c 'rm -rf ${NEVER_MADE}' >/dev/null 2>&1 &`,
+      ],
+      ["a recursive delete fed to at by a here-string", `at now <<< 'rm -rf ${NEVER_MADE}'`],
+      ["a recursive delete echoed into at", `echo 'rm -rf ${NEVER_MADE}' | at now`],
+      ["a recursive delete as watch's command line", `watch -n 60 'rm -rf ${NEVER_MADE}'`],
+      ["rm -r", `rm -r ${NEVER_MADE}`],
+      ["rm -R", `rm -R ${NEVER_MADE}`],
+      ["rm --recursive", `rm --recursive ${NEVER_MADE}`],
+      ["rm --recursive abbreviated", `rm --rec ${NEVER_MADE}`],
+      ["rm -fr", `rm -fr ${NEVER_MADE}`],
+      ["rm with -r after its target", `rm ${NEVER_MADE} -r`],
+      ["a recursive rm of a glob", "rm -rf ~/.playground/ext*/.no-such-folder"],
+      ["a recursive rm of a variable", `rm -rf "$DIR"`],
+      ["an rm whose options sit in a variable", `rm $OPTS ${NEVER_MADE}`],
+      ["a recursive rm by its absolute path", `/bin/rm -rf ${NEVER_MADE}`],
+      ["a recursive rm behind sudo", `sudo rm -rf ${NEVER_MADE}`],
+      ["a recursive rm behind command", `command rm -rf ${NEVER_MADE}`],
+      ["a recursive rm with its name quoted apart", `r''m -rf ${NEVER_MADE}`],
+      ["a recursive rm with its name escaped", `\\rm -rf ${NEVER_MADE}`],
+      ["a recursive rm in a command substitution", `echo $(rm -rf ${NEVER_MADE})`],
+      ["a recursive rm in eval", `eval 'rm -rf ${NEVER_MADE}'`],
+      ["a recursive rm run by a program in a variable", `$RM -rf ${NEVER_MADE}`],
+      [
+        "a recursive rm inside the session's own worktree",
+        "rm -rf node_modules",
+        "process worktree",
+      ],
+      ["a non-recursive rm outside the session's own worktree and scratchpad", `rm ${NEVER_MADE}`],
+      ["find -delete", `find ${NEVER_MADE} -delete`],
+      ["find -exec rm with +", `find ${NEVER_MADE} -exec rm {} +`],
+      ["find -exec rm -rf", `find ${NEVER_MADE} -exec rm -rf {} \\;`],
+      ["find -execdir rm", `find ${NEVER_MADE} -execdir rm {} \\;`],
+      [
+        "find -exec of a shell that deletes recursively",
+        `find ${NEVER_MADE} -exec sh -c 'rm -rf "$1"' _ {} \\;`,
+      ],
+      ["xargs rm", `echo ${NEVER_MADE} | xargs rm`],
+      ["xargs rm -rf", `echo ${NEVER_MADE} | xargs rm -rf`],
+      ["xargs -I rm", `printf '%s\\0' ${NEVER_MADE} | xargs -0 -I{} rm {}`],
+      ["git clean -fd", "git clean -fd"],
+      ["git clean -fdx", "git clean -fdx"],
+      ["git clean -f -x", "git clean -f -x"],
+      ["git clean --force -d", "git clean --force -d"],
+      ["git clean -xf behind git -C", `git -C ${NEVER_MADE} clean -xf`],
+      ["git worktree remove --force", `git worktree remove --force ${NEVER_MADE}`],
+      ["git worktree remove -f", `git worktree remove -f ${NEVER_MADE}`],
+      ["a recursive delete in a git alias", `git -c alias.x='!rm -rf ${NEVER_MADE}' x`],
+      ["chmod -a", `chmod -a 'everyone deny delete' ${NEVER_MADE}`],
+      ["chmod -N", `chmod -N ${NEVER_MADE}`],
+      ["chmod -R -a#", `chmod -R -a# 0 ${NEVER_MADE}`],
+      ["chflags", `chflags nouchg ${NEVER_MADE}`],
+      ["chflags -R", `chflags -R noschg ${NEVER_MADE}`],
+      [
+        "a non-recursive rm of files inside the session's own worktree",
+        "rm -f notes.txt build.log",
+        "process worktree",
+      ],
+    ],
+    source: "#536",
   },
 ]
