@@ -65,6 +65,7 @@ Sessions that work together share a workspace as full-height columns ([SESSIONS.
   rather than queueing it for a relay that is down, naming the outcome to ops, and load past 30 once a crossing), the GLM credits log line, the optimizer's wake words,
   the canary pull (every clean worktree on `canary` fast-forwarded to origin's head every 5 minutes,
   then installed through run-slot when the pull changed `bun.lock` or a `package.json` and again each beat until one exits 0, a failed pull or install told to ops once until its words change),
+  the trash purge (hourly, `purgeTrash` of `@packages/safe-delete` removing each `playground rm` batch in the data folder's `trash` over 7 days old, then the oldest while the disk has under 50 GB free, its one recursive delete, one line to `ops/log/trash-purge.log`),
   the turbo prune (weekly, each file in the shared turbo cache `~/.cache/turbo/playground` last modified over 7 days ago removed, one line to `ops/log/turbo-prune.log`),
   the dashboard watch (every minute: once the live dashboard's `/api/health` has failed 5 minutes in a row, a gap of over 2 minutes with no check starting the count again, one macOS banner and one ops line through `notify.sh` with `NOTIFY_MAC=1`, since the Inbox shows only on the dashboard, and one more when it answers again,
   its state in `ops/tick/dashboard-watch.json`) and the relay watch (every 5 minutes:
