@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test"
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -1037,15 +1038,29 @@ describe("canary pull", () => {
     expect(next.sent).toHaveLength(1)
   })
 
-  // git runs for real; run-slot.sh is stubbed, its argv recorded and its exit code given.
+  // git runs for real; run-slot.sh is stubbed: it records its argv and the worktree's head as it starts, then runs its command with a bun of its own that exits with code, printing a frozen lockfile's error when it fails.
   const slotted = (code = 0) => {
     const installs: string[][] = []
+    const heads: string[] = []
+    const bin = realpathSync(mkdtempSync(join(tmpdir(), "canary-pull-bin-")))
+    dirs.push(bin)
+    writeFileSync(
+      join(bin, "bun"),
+      `#!/bin/sh\n[ ${code} -eq 0 ] && exit 0\necho "error: lockfile had changes, but lockfile is frozen"\nexit ${code}\n`,
+    )
+    chmodSync(join(bin, "bun"), 0o755)
     const run: Context["run"] = async (argv, timeoutMs, stdin) => {
       if (!argv[0]!.endsWith("run-slot.sh")) return realRun(argv, timeoutMs, stdin)
       installs.push(argv)
-      return { code, out: code ? "error: lockfile had changes, but lockfile is frozen" : "" }
+      heads.push(git(argv.at(-1)!, "rev-parse", "HEAD"))
+      const proc = Bun.spawnSync(argv.slice(argv.indexOf("--") + 1), {
+        env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
+        stderr: "pipe",
+        stdout: "pipe",
+      })
+      return { code: proc.exitCode ?? 1, out: proc.stdout.toString() + proc.stderr.toString() }
     }
-    return { installs, run }
+    return { heads, installs, run }
   }
   const pushLock = (w: ReturnType<typeof world>, file = "bun.lock") => {
     mkdirSync(dirname(join(w.seed, file)), { recursive: true })
@@ -1062,20 +1077,46 @@ describe("canary pull", () => {
     const { installs, run } = slotted()
     const { ctx, sent } = fake(ops, at(14, 5))
     await beat("canary-pull").run({ ...ctx, repo: w.repo, run })
-    expect(installs).toEqual([
-      [
-        join(ops, "run-slot.sh"),
-        "ops-tick",
-        "--",
-        "bun",
-        "install",
-        "--frozen-lockfile",
-        "--ignore-scripts",
-        "--cwd",
-        w.leads,
-      ],
-    ])
+    expect(installs).toHaveLength(1)
+    expect(installs[0]!.slice(0, 3)).toEqual([join(ops, "run-slot.sh"), "ops-tick", "--"])
+    expect(installs[0]!.at(-1)).toBe(w.leads)
+    expect(installs[0]!.join(" ")).toContain("bun install --frozen-lockfile --ignore-scripts")
     expect(sent).toEqual([])
+  })
+
+  // On 2 Nov the leads worktree fast-forwarded onto a new workspace dependency, then its install waited 42s for a slot, and a roster.ts run in that gap failed on "Cannot find module".
+  test("takes the slot before it fast-forwards a pull that changed bun.lock, so the worktree never runs new code on old node_modules (#599)", async () => {
+    const w = world()
+    const old = git(w.leads, "rev-parse", "HEAD")
+    pushLock(w)
+    const { heads, run } = slotted()
+    const { ctx, sent } = fake(scratch(), at(14, 5))
+    await beat("canary-pull").run({ ...ctx, repo: w.repo, run })
+    expect(heads).toEqual([old])
+    expect(git(w.leads, "rev-parse", "HEAD")).toBe(git(w.origin, "rev-parse", "canary"))
+    expect(sent).toEqual([])
+  })
+
+  test("names a pull that changed bun.lock and cannot fast-forward as a pull, not an install", async () => {
+    const w = world()
+    git(
+      w.leads,
+      "-c",
+      "user.name=t",
+      "-c",
+      "user.email=t@t",
+      "commit",
+      "-q",
+      "--allow-empty",
+      "-m",
+      "local",
+    )
+    pushLock(w)
+    const { run } = slotted()
+    const { ctx, sent } = fake(scratch(), at(14, 5))
+    await beat("canary-pull").run({ ...ctx, repo: w.repo, run })
+    expect(sent).toHaveLength(1)
+    expect(sent[0]!.text).toStartWith(`canary-pull: ${w.leads} did not fast-forward:`)
   })
 
   test("installs in a worktree whose pull changed a nested package.json alone", async () => {
