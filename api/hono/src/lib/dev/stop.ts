@@ -83,8 +83,19 @@ const LOCK_STALE_MS = 5_000
 // A rename onto a lock folder that holds anything fails with one of these.
 const HELD = new Set(["EEXIST", "ENOTEMPTY"])
 
-// The record is only ever created by an atomic link (claimRecord) and only ever removed under this lock, after it is read again, so no start or stop removes a record it has not just judged. The lock is a scratch folder renamed into place, so it always holds makeScratch's marker; a stale one is moved aside, then removed.
-const underLock = <T>(path: string, run: () => T, busy: T): T => {
+// Moves the lock aside when it still holds this holder's token; one taken over as stale meanwhile, or gone, stays as it is.
+const releasable = (lock: string, aside: string, token: string): boolean => {
+  try {
+    if (readFileSync(join(lock, "owner"), "utf8") !== token) return false
+    renameSync(lock, aside)
+    return true
+  } catch {
+    return false
+  }
+}
+
+// The record is only ever created by an atomic link (claimRecord) and only ever removed under this lock, after it is read again, so no start or stop removes a record it has not just judged. The lock is a scratch folder renamed into place, so it always holds makeScratch's marker and its holder's token; a stale one is moved aside, then removed, and a release leaves a lock that holds another's token.
+export const underLock = <T>(path: string, run: () => T, busy: T): T => {
   const lock = `${path}.lock`
   const parent = dirname(lock)
   const drop = (dir: string) => {
@@ -92,8 +103,10 @@ const underLock = <T>(path: string, run: () => T, busy: T): T => {
     if (refused) console.error(`dev record lock: ${refused}`)
   }
   let mine: string
+  const token = crypto.randomUUID()
   try {
     mine = makeScratch(`${basename(lock)}.`, parent)
+    writeFileSync(join(mine, "owner"), token)
   } catch {
     return busy
   }
@@ -125,9 +138,9 @@ const underLock = <T>(path: string, run: () => T, busy: T): T => {
     return run()
   } finally {
     // moved aside before its removal, so the lock is never an empty folder a waiter's rename could land on
-    const aside = `${lock}.free-${crypto.randomUUID()}`
-    renameSync(lock, aside)
-    drop(aside)
+    const aside = `${lock}.free-${token}`
+    if (releasable(lock, aside, token)) drop(aside)
+    else console.error(`dev record lock: ${lock} was taken over as stale while held; left as it is`)
   }
 }
 

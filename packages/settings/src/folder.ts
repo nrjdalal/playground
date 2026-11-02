@@ -74,7 +74,18 @@ export const mustGit = (dir: string, args: string[], env: Record<string, string>
   return run.out
 }
 
-// One write at a time across every process, the API's and the CLI's: the lock is a scratch folder made beside the root and renamed into place, so its taking is atomic and it always holds makeScratch's marker; a stale one is moved aside, then removed.
+// Moves the lock aside when it still holds this holder's token; one taken over as stale meanwhile, or gone, stays as it is.
+const releasable = (lock: string, aside: string, token: string): boolean => {
+  try {
+    if (readFileSync(join(lock, "owner"), "utf8") !== token) return false
+    renameSync(lock, aside)
+    return true
+  } catch {
+    return false
+  }
+}
+
+// One write at a time across every process, the API's and the CLI's: the lock is a scratch folder made beside the root and renamed into place, so its taking is atomic and it always holds makeScratch's marker and its holder's token; a stale one is moved aside, then removed, and a release leaves a lock that holds another's token.
 export const withLock = <T>(data: string, run: () => T, wait = 30_000): T => {
   const lock = lockPath(data)
   const parent = dirname(lock)
@@ -84,6 +95,8 @@ export const withLock = <T>(data: string, run: () => T, wait = 30_000): T => {
   }
   mkdirSync(parent, { recursive: true })
   const mine = makeScratch(`${basename(lock)}.`, parent)
+  const token = crypto.randomUUID()
+  writeFileSync(join(mine, "owner"), token)
   const start = Date.now()
   for (;;) {
     try {
@@ -116,9 +129,12 @@ export const withLock = <T>(data: string, run: () => T, wait = 30_000): T => {
     return run()
   } finally {
     // moved aside before its removal, so the lock is never an empty folder a waiter's rename could land on
-    const aside = `${lock}.free-${crypto.randomUUID()}`
-    renameSync(lock, aside)
-    drop(aside)
+    const aside = `${lock}.free-${token}`
+    if (releasable(lock, aside, token)) drop(aside)
+    else
+      console.error(
+        `extensions' lock: ${lock} was taken over as stale during this write; left as it is`,
+      )
   }
 }
 

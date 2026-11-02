@@ -39,7 +39,7 @@ export const takeLock = (dir: string): { release: () => void } | { held: number 
       // moved aside before its removal, so the lock is never an empty folder a waiter's rename could land on
       return {
         release: () => {
-          const aside = `${lock}.free-${process.pid}`
+          const aside = `${lock}.free-${crypto.randomUUID()}`
           renameSync(lock, aside)
           drop(aside)
         },

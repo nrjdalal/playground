@@ -5,6 +5,7 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  renameSync,
   rmSync,
   statSync,
   utimesSync,
@@ -201,6 +202,25 @@ test("an unmarked lock left behind goes aside once stale, and stays there with i
     expect(left).toHaveLength(1)
     expect(left[0]).toStartWith(`${basename(lock)}.stale-`)
     expect(String(said.mock.calls[0]?.[0])).toContain(`has no ${MARKER} marker`)
+  } finally {
+    said.mockRestore()
+  }
+})
+
+test("a lock taken over as stale during a write keeps the write's result and leaves the new holder's lock (#545)", () => {
+  const at = data("taken-over")
+  const lock = lockPath(at)
+  const said = spyOn(console, "error").mockImplementation(() => {})
+  try {
+    const result = withLock(at, () => {
+      renameSync(lock, `${lock}.stale-test`)
+      mkdirSync(lock)
+      writeFileSync(join(lock, "owner"), "another")
+      return "wrote"
+    })
+    expect(result).toBe("wrote")
+    expect(readFileSync(join(lock, "owner"), "utf8")).toBe("another")
+    expect(String(said.mock.calls[0]?.[0])).toContain("was taken over as stale")
   } finally {
     said.mockRestore()
   }
