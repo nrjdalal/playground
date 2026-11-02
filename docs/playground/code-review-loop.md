@@ -47,6 +47,7 @@ Its waiter for the next push polls GitHub's REST API, so a reviewer waiting all 
 - Round 1 also greps the agent-facing and web docs for each term whose meaning the diff changes, and files every doc still describing the old meaning as one finding, each by `file:line`, so later rounds spend no turn finding them one at a time.
 - A verdict posts with every blank filled, and a review's sub-agents search inside its clone and the paths its brief names, stopping every background task of theirs before they report.
   Each sub-agent makes its scratch folder first and writes every probe output to an absolute path inside it.
+  Each opens its report saying whether it read its source, and a Spec read that finds no spec runs again with the spec's lines pasted in, so a missing spec never passes as a review.
 - No verdict stands on stale CI: the reviewer reads the head's checks again right before it posts, and a check gone red since its earlier read is a blocking finding in that verdict.
 - A reviewer stays up after its 5/5, its waiter on the head, until the PR merges or stays closed a poll later (Checks closes and reopens a PR to rebuild its merge commit), so a canary move after the score gets its merge round from the same session, not a new one.
 - A reviewer idle 30 minutes with every head scored may be ended by the factory's 5-minute check, and its worker resumes it under the same name on the next push.
