@@ -69,10 +69,10 @@ export type Group = {
     | "#456"
     | "#463"
     | "#466"
-    | "#468"
     | "#469"
     | "#486"
     | "#509"
+    | "#614"
 }
 
 // The rows a guard-loosening PR lets run on purpose, each written as a row's "<source> <what>" for all its cases, or as one case's "<source> <what> | <guard> | <folder>"; canary lets none run.
@@ -2018,7 +2018,7 @@ gh api graphql -f query="$QUERY"`,
         ["a glob in pushd's folder", "pushd .playground/ext?nsions; rm -rf login"],
       ]
     },
-    source: "#468",
+    source: "#614",
   },
   {
     folders: ["main checkout"],
@@ -2027,6 +2027,6 @@ gh api graphql -f query="$QUERY"`,
       ["pushd ~+ before a build", "pushd ~+; bun run build"],
       ["pushd ~+ before a commit", "pushd ~+; git commit -m x"],
     ],
-    source: "#468",
+    source: "#614",
   },
 ]
