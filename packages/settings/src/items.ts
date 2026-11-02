@@ -193,13 +193,15 @@ export const judgeItem = (
       ok: false,
       status: 409,
     }
-  const writer = extGit(dir, ["log", "-1", "--format=%an", head]).out
-  if (verdict.kind === "score" && who.author === writer)
-    return {
-      message: `${writer} wrote this proposal, so another session scores it`,
-      ok: false,
-      status: 400,
-    }
+  if (verdict.kind === "score") {
+    const writer = extGit(dir, ["log", "-1", "--format=%an", head]).out
+    if (who.author === writer)
+      return {
+        message: `${writer} wrote this proposal, so another session scores it`,
+        ok: false,
+        status: 400,
+      }
+  }
   const accepts = verdict.kind === "accept" || (verdict.kind === "score" && verdict.score === 5)
   const state = accepts ? "accepted" : verdict.kind === "reject" ? "rejected" : "proposed"
   const extra: [string, string][] = [

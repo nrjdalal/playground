@@ -166,6 +166,23 @@ function cliCalls(parsed: Parsed, env: Env): Word[][] {
   return words.flatMap((word, at) => (isCli(word, dirs) ? [words.slice(at + 1)] : []))
 }
 
+// The variables a score's author is read from (store.ts, terminalIo), and env's options that clear the whole environment; an ext score that clears or sets one reads as another author.
+const IDENTITY = ["CLAUDE_CODE_SESSION_ID", "CLAUDE_CONFIG_DIR", "PLAYGROUND_ROLE"]
+const CLEARS = /^(?:-[0v]*i[0iv]*|--ignore-environment|-)$/
+
+// Whether a playground call, its words after the CLI word, is an ext score whose command clears or sets an identity variable: by an assignment in front or in env's words, one the scope set earlier on the line, or env's -u, --unset or a clearing option before the CLI word.
+function scoreAsOther(words: Word[], cmd: Command, parsed: Parsed, env: Env): boolean {
+  if (words[0]?.value !== "ext" || words[1]?.value !== "score") return false
+  if (IDENTITY.some((k) => parsed.local.has(k) || env.vars.has(k))) return true
+  const all = parsed.first ? [parsed.first, ...parsed.args] : parsed.args
+  const at = cmd.words.indexOf(all[all.length - words.length - 1])
+  const before = at === -1 ? cmd.words : cmd.words.slice(0, at)
+  return (
+    before.some((w) => program(w.value) === "env") &&
+    before.some((w) => CLEARS.test(w.value) || IDENTITY.some((k) => w.value.includes(k)))
+  )
+}
+
 const AWKS = new Set(["awk", "gawk", "mawk", "nawk"])
 // what lets an awk program run a command or write a file: system(), a | pipe, getline, a > redirect or an @ directive
 const AWK_RUNS = /system|getline|[|>@]/
@@ -389,11 +406,14 @@ function inspect(raw: string, environment: Environment) {
             .split(/\s+/)
             .filter(Boolean)
             .map((value) => ({ quoted: false, value }))
-    const write = reader
-      ? undefined
-      : cliCalls(parsed, env)
-          .map((words) => cliWrite(xargs?.replace ? words : [...words, ...stdinWords]))
-          .find(Boolean)
+    const calls = reader ? [] : cliCalls(parsed, env)
+    const write =
+      calls
+        .map((words) => cliWrite(xargs?.replace ? words : [...words, ...stdinWords]))
+        .find(Boolean) ??
+      (calls.some((words) => scoreAsOther(words, cmd, parsed, env))
+        ? `playground ext score with ${IDENTITY.join(", ")} cleared or set, which reads as another author than the calling session`
+        : undefined)
     if (write) return refuse(write)
     // a command with no program runs nothing that reads the environment, so only its own assignments count
     const vars = !reader && first ? since(varsRead, env.vars, "") : []
