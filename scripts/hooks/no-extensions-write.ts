@@ -246,6 +246,17 @@ function narrow(cmd: Command, env: Env): boolean {
   return false
 }
 
+// gh's jq filter and Go template, the word after --jq, -q, --template or -t or joined to --jq= or --template=: a value gh evaluates over its response or reads as a title, never a path it opens
+function ghData({ args, first }: Parsed): Set<Word> {
+  const data = new Set<Word>()
+  if (program(first?.value ?? "").toLowerCase() !== "gh") return data
+  args.forEach((word, i) => {
+    if (/^--(?:jq|template)=/.test(word.value)) data.add(word)
+    else if (/^(?:--jq|-q|--template|-t)$/.test(word.value) && args[i + 1]) data.add(args[i + 1]!)
+  })
+  return data
+}
+
 // Whether a line holds a shell reading its script from stdin (`sudo -s`, `sh`) anywhere, its groups' and substitutions' included, which runs whatever a reader prints into it
 function rooted(commands: Command[]): boolean {
   return commands.some(
@@ -272,12 +283,16 @@ function wholeLine(commands: Command[], env: Env): boolean {
 function runsOf(parsed: Parsed, vars: Text[], whole: boolean, rootLine: boolean): string[] {
   const { args, first, local } = parsed
   const values = [...local.values(), ...vars].flatMap((text) => (text.unknown ? [] : [text.value]))
-  for (const word of whole ? (first ? [first, ...args] : args) : [])
+  // gh's filter and template are never a command line, but on a line with a root shell, which runs what gh prints
+  const data = rootLine ? new Set<Word>() : ghData(parsed)
+  for (const word of whole ? (first ? [first, ...args] : args) : []) {
+    if (data.has(word)) continue
     for (const text of texts(word)) {
       values.push(text.value.replace(/^!/, ""))
       // printf and echo -e print a \n as a line break, which a root shell runs as one
       if (rootLine) values.push(...text.value.split("\\n"))
     }
+  }
   values.push(...programLines(parsed, rootLine))
   return [...new Set(values)].filter((value) => /\s/.test(value) && !marked(value))
 }
@@ -474,8 +489,9 @@ function inspect(raw: string, environment: Environment) {
       if (named) return refuse(`${verb} with a variable on ${named}`)
     }
     const literal = !whole && narrow(cmd, env)
+    const data = rootLine ? new Set<Word>() : ghData(parsed)
     for (const word of [first, ...args]) {
-      const named = names(word, env, remover, literal)
+      const named = names(word, env, remover, literal || data.has(word))
       if (named) return refuse(`${verb} on ${named}`)
     }
     if (cmd.redirects.some((r) => r.body && holds(r.body.value, env)))
