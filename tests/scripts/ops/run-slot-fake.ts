@@ -49,7 +49,7 @@ export type Setup = {
 }
 
 // A scratch state folder and config folder, with a fake sysctl on PATH giving 15 cores, the load asked for (load5 and load15 as load1 unless given) and normal memory, and a fake uptime giving the same load;
-// sandboxed, sysctl and ps refuse every read as Claude Code's sandbox does, so the load comes from uptime alone.
+// sandboxed, sysctl and ps refuse every read as Claude Code's sandbox does, so the load comes from uptime alone and the cores from a fake getconf giving 15.
 export const machine = ({
   free = 80,
   load1 = 2,
@@ -99,6 +99,12 @@ esac
       `#!/bin/bash\necho "bash: /bin/ps: Operation not permitted" >&2\nexit 126\n`,
     )
     chmodSync(join(bin, "ps"), 0o755)
+    // the cores where sysctl is refused, 15 as the sysctl fake gives them, whatever the runner's own count
+    writeFileSync(
+      join(bin, "getconf"),
+      `#!/bin/bash\n[ "$1" = _NPROCESSORS_ONLN ] && { echo 15; exit 0; }\nexec /usr/bin/getconf "$@"\n`,
+    )
+    chmodSync(join(bin, "getconf"), 0o755)
   }
   // the settings reader answers factory.repo, the guarded orgs and slots.peers as a store that sets them would, and every other key as the real one does
   writeFileSync(
