@@ -23,6 +23,7 @@ import {
   pathOf,
   PRINTERS,
   program,
+  READ,
   run,
   slotWords,
   stdinOf,
@@ -37,6 +38,10 @@ import {
 } from "./shell"
 
 type Environment = Record<string, string | undefined>
+
+// a word as the call wrote it, else its value, with each part the hook cannot read shown as $…
+const shown = (word: Word): string =>
+  (word.raw ?? word.value).replaceAll(UNKNOWN, () => "$…").replaceAll(READ, () => "$…")
 
 const ROUTE =
   "every guard reads its list and policy.json from there, so a session's write would change what a guard allows. A guard's list or setting changes only by the owner typing the playground command as a ! command in the dispatcher's terminal window, which runs without hooks: tell your lead, and the dispatcher hands the owner the command. A session writes nothing there by hand."
@@ -495,13 +500,13 @@ function inspect(raw: string, environment: Environment) {
     const unheld = remover ? args.find((word) => !held(word, env)) : undefined
     if (unheld)
       return refuse(
-        `${verb} on ${unheld.raw ?? unheld.value}, a value the hook does not hold; hold it in the same call (X=<path>; ${verb} "$X") or write the path literally`,
+        `${verb} on ${shown(unheld)}, a value the hook does not hold; hold it in the same call (X=<path>; ${verb} "$X") or write the path literally`,
       )
     if (name === "git") {
       const config = gitConfigs(args).find((word) => marked(word.value))
       if (config)
         return refuse(
-          `git -c ${config.raw ?? config.value}, a value the hook does not hold; write the value literally in the call`,
+          `git -c ${shown(config)}, a value the hook does not hold; write the value literally in the call`,
         )
     }
     const scope = since(varsJudged, env.vars, `${env.cwd}\0${remover}`)
