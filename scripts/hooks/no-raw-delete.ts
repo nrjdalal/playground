@@ -26,7 +26,7 @@ const INSTEAD =
   "Move it to the 7-day trash with playground rm <path> (a worktree: playground rm --worktree <path>), or leave a scratch folder in place for your lead's cleanup. A plain rm of a file inside your own worktree or scratchpad, with no -r, still runs."
 
 const WORKTREE =
-  "Remove a worktree with playground rm --worktree <path>, which moves it to the 7-day trash once no live session holds it."
+  "Remove a worktree with playground rm --worktree <path>, which moves it to the 7-day trash once no live session holds it and its commit is on a remote branch."
 
 const refuse = (
   what: string,
