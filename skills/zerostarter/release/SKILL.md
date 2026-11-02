@@ -30,7 +30,13 @@ Done when `CANARY` holds the SHA you mean to ship and the gate's PASS and FAIL l
 
 When the candidate changes the update path anything in the ship's step 5 runs (`update.ts` itself, `link-skills.sh`, an ops job, the Dashboard roll), rehearse the update an invitee runs, from the last tag to the candidate, before the ship's step 3: a machine whose own checkout cannot take the update yet still gets the proof. The whole rehearsal lives in one scratch folder, and nothing outside it changes. A `--to` run stops before the Dashboard roll, which `playground update` reaches only without a tag, and with no `jobs.json` in the throwaway data folder its ops-restart step restarts nothing, so the rehearsal proves the checkout-side path: the fetch, the tag checkout, `link-skills.sh`, the install and the build. The roll proves itself on a dashboard stack of its own; an ops job's restart proves itself in the ship's step 5, on the machine that holds the jobs.
 
-a. **Mirror.** Give the rehearsal an origin of its own: clone the repository bare into the scratch folder, then clone that mirror and, in the clone, fetch the pinned `$CANARY` from the repository, merge it into `main` with `--no-ff` (the merge commit a ship makes), tag the merge with the tag this ship will cut, and push `main` and the tag to the mirror.
+a. **Mirror.** Give the rehearsal an origin of its own: clone the repository bare into the scratch folder, then clone that mirror and, in the clone, fetch the pinned `$CANARY` from the repository, merge it into `main` with `--no-ff` (the merge commit a ship makes), and tag the merge with the tag this ship will cut.
+   Then bring `main` and the tag into the mirror with a fetch run in the mirror, since no-extension-repo-write refuses a push to a local path (the v0.0.28 rehearsal):
+
+   ```bash
+   git -C <mirror>.git fetch <clone> refs/heads/main:refs/heads/main refs/tags/<tag>:refs/tags/<tag>
+   ```
+
    Done when the mirror's `main` holds the merge commit, the tag names it, and the repository holds neither.
 
 b. **Contain.** Run every later command under `env -i`, so the run inherits nothing from the real environment, `PLAYGROUND_REPO` included, with `HOME` at a throwaway folder inside the scratch folder.

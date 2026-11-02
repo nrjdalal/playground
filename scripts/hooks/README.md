@@ -102,7 +102,8 @@ Their tests are `bun run test:file tests/scripts/hooks`.
   An interpreter's code passes when each agent-desktop in it sits in prose: a closed single- or double-quoted string, its opening quote after the start, whitespace or one of `( , = : + ;` and its closing quote before the end, whitespace or one of `) ] } , ; . + :`, with no quote, backslash, `$`, brace or newline, where the name follows a plain word that is no flag, launcher, shell or wrapper,
   and the string, read as a shell line the way the hook reads a Bash call, runs no agent-desktop, sources or runs no script file, and holds no `flock`, `setsid` or `watch` that names it.
   A command that acts on the app in front when no `--app` names one (`snapshot`, `find`, `screenshot`, `press`, the window and notification commands) needs an `--app`; `snapshot` and `find` under a `--root` ref, and every ref action, pass, since the snapshot that gave the ref was checked.
-  It reads agent-desktop behind `bash -c`, a pipe into a shell, `env` and the other wrappers `scripts/hooks/shell.ts` knows, `run-slot.sh --`, `npx`, `bunx` and `find -exec`, and a script file the call runs, by its text.
+  It reads agent-desktop behind `bash -c`, a pipe into a shell, `env` and the other wrappers `scripts/hooks/shell.ts` knows, `run-slot.sh --`, `npx`, `bunx`, `find -exec`, `flock`, `setsid` and `watch`, and a script file the call runs, by its text.
+  Behind `flock`, `setsid` and `watch` it also reads each word holding a space as a shell line, and `watch`'s words past its options joined into the one line its `sh -c` runs.
   It loads the list only for a call that runs agent-desktop, and fails closed on it, its refusal naming the file and the route to the owner's list write that fixes it (tell your lead, and the dispatcher hands the owner the command); it fails open on a call it cannot parse.
 
 ## no-env-dump
