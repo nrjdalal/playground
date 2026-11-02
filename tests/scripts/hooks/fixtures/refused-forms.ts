@@ -1668,6 +1668,58 @@ gh api graphql -f query="$QUERY"`,
         "nice env -u PLAYGROUND_ROLE playground ext score login doc x abc 5 --reason ok",
       ],
       [
+        "ext score behind env's -i grouped with -u",
+        "env -iuTZ playground ext score login doc x abc 5 --reason ok",
+      ],
+      [
+        "ext score behind env's -i grouped with -P",
+        "env -iP /usr/bin playground ext score login doc x abc 5 --reason ok",
+      ],
+      [
+        "ext score behind env's -i grouped with -S",
+        `env -iS "playground ext score login doc x abc 5 --reason ok"`,
+      ],
+      [
+        "ext score behind env's -i grouped with -L",
+        "env -iL x playground ext score login doc x abc 5 --reason ok",
+      ],
+      [
+        "ext score behind env's -i grouped with -U",
+        "env -iU x playground ext score login doc x abc 5 --reason ok",
+      ],
+      [
+        "ext score with the role appended to",
+        "PLAYGROUND_ROLE+=x playground ext score login doc x abc 5 --reason ok",
+      ],
+      [
+        "ext score with the session id appended to",
+        "CLAUDE_CODE_SESSION_ID+=x playground ext score login doc x abc 5 --reason ok",
+      ],
+      [
+        "ext score with the config folder appended to",
+        "CLAUDE_CONFIG_DIR+=x playground ext score login doc x abc 5 --reason ok",
+      ],
+      [
+        "ext score in bash -c with the role cleared",
+        "PLAYGROUND_ROLE= bash -c 'playground ext score login doc x abc 5 --reason ok'",
+      ],
+      [
+        "ext score in bash -c behind env -u",
+        "env -u PLAYGROUND_ROLE bash -c 'playground ext score login doc x abc 5 --reason ok'",
+      ],
+      [
+        "ext score in sh -c behind env -i",
+        "env -i sh -c 'playground ext score login doc x abc 5 --reason ok'",
+      ],
+      [
+        "ext score in zsh -c with another session id",
+        "CLAUDE_CODE_SESSION_ID=x zsh -c 'playground ext score login doc x abc 5 --reason ok'",
+      ],
+      [
+        "ext score echoed to sh with the role cleared",
+        "echo 'playground ext score login doc x abc 5 --reason ok' | PLAYGROUND_ROLE= sh",
+      ],
+      [
         "ext score after the role is exported empty",
         "export PLAYGROUND_ROLE=; playground ext score login doc x abc 5 --reason ok",
       ],
