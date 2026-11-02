@@ -1,7 +1,7 @@
 // PreToolUse hook: refuses a factory session's write into the extensions root, where every guard's list, policy.json and each scope's sources live, and its playground CLI call that changes what a guard reads to allow or deny a call, so no session edits a list in one call and makes the guarded call in the next.
 import { existsSync, statSync } from "node:fs"
 import { homedir } from "node:os"
-import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path"
+import { dirname, join, resolve, sep } from "node:path"
 
 import { dataDir } from "../../packages/env/src/data-dir"
 import { extensionsDir } from "../../packages/settings/src/rendered"
@@ -136,11 +136,7 @@ const SWITCHES: Record<string, string[]> = {
 }
 
 // Whether a word is the playground CLI: the command by name in any case, as macOS's filesystem reads it, or by a path that is no folder, or the checkout's cli.ts, with or without its extension, links followed.
-function isCli(
-  word: Word,
-  dirs: (string | undefined)[],
-  realOf: (path: string) => string,
-): boolean {
+function isCli(word: Word, dirs: (string | undefined)[]): boolean {
   tick()
   if (marked(word.value) || word.value.startsWith("-")) return false
   const paths = dirs.map((dir) => pathOf(word, { cwd: dir } as Env))
@@ -151,17 +147,17 @@ function isCli(
     )
   const cli = (sep + CLI).toLowerCase()
   return paths.some(
-    (path) => !!path && [path, `${path}.ts`].some((at) => realOf(at).toLowerCase().endsWith(cli)),
+    (path) => !!path && [path, `${path}.ts`].some((at) => real(at).toLowerCase().endsWith(cli)),
   )
 }
 
 // The words after each word of a command that is the playground CLI, so the CLI behind any wrapper (bun, npx, find -exec, arch, watch) is read as typed bare.
-function cliCalls(parsed: Parsed, env: Env, realOf: (path: string) => string): Word[][] {
+function cliCalls(parsed: Parsed, env: Env): Word[][] {
   const { args, first, name } = parsed
   if (!first) return []
   const words = [first, ...args]
   const dirs = [env.cwd, name === "bun" ? bunCall(args, env).cwd : undefined]
-  return words.flatMap((word, at) => (isCli(word, dirs, realOf) ? [words.slice(at + 1)] : []))
+  return words.flatMap((word, at) => (isCli(word, dirs) ? [words.slice(at + 1)] : []))
 }
 
 // Every text of a word or a variable that holds a space, a leading ! dropped, read as a command line of its own, since a program may run it (watch, ssh's ProxyCommand, a git alias, a pager); `vars` is the scope's variables set since their lines were last read.
@@ -225,33 +221,18 @@ function inspect(raw: string, environment: Environment) {
   const { cwd, tool_input: toolInput, tool_name: tool } = JSON.parse(raw) as Record<string, unknown>
   const input = (toolInput ?? {}) as Record<string, unknown>
   const directory = typeof cwd === "string" ? cwd : undefined
-  // each path's real form, read once a check, and a path that is not there read through its folder's, since a script can name thousands of paths and each read costs several calls to the filesystem
-  const reals = new Map<string, string>()
-  const realOf = (path: string): string => {
-    let found = reals.get(path)
-    if (found !== undefined) return found
-    const folder = dirname(path)
-    if (!isAbsolute(path) || folder === path || existsSync(path)) found = real(path)
-    else {
-      const above = reals.get(folder) ?? real(folder)
-      reals.set(folder, above)
-      found = join(above, basename(path))
-    }
-    reals.set(path, found)
-    return found
-  }
   const root = real(extensionsDir(dataDir(environment)))
   const home = environment.HOME || homedir()
   const needle = root.startsWith(real(home) + sep) ? root.slice(real(home).length) : root
   const inRoot = (path: string | undefined) => {
     if (path === undefined) return false
-    const at = realOf(path)
+    const at = real(path)
     return at === root || at.startsWith(root + sep)
   }
   // a folder that holds the root, but the filesystem's own root, which only a remover names to harm
   const above = (path: string | undefined, remover: boolean) => {
     if (path === undefined) return false
-    const at = realOf(path)
+    const at = real(path)
     return at === sep ? remover : root.startsWith(at + sep)
   }
   const file = typeof tool === "string" ? input[FILE_TOOLS[tool]] : undefined
@@ -266,7 +247,7 @@ function inspect(raw: string, environment: Environment) {
   if (command.length > 131_072) return refuse(TOO_LONG)
   // the root's path from a cwd above it, which a script may name it by
   const relative = (env: Env) =>
-    env.cwd && above(env.cwd, false) ? root.slice(realOf(env.cwd).length + 1) : undefined
+    env.cwd && above(env.cwd, false) ? root.slice(real(env.cwd).length + 1) : undefined
   const holds = (value: string, env: Env) => {
     const near = relative(env)
     return value.includes(needle) || (!!near && value.includes(near))
@@ -332,7 +313,7 @@ function inspect(raw: string, environment: Environment) {
             .map((value) => ({ quoted: false, value }))
     const write = reader
       ? undefined
-      : cliCalls(parsed, env, realOf)
+      : cliCalls(parsed, env)
           .map((words) => cliWrite(xargs?.replace ? words : [...words, ...stdinWords]))
           .find(Boolean)
     if (write) return refuse(write)

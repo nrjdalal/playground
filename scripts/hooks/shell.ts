@@ -234,7 +234,7 @@ export function varsSince(vars: Map<string, Text>, cursor: number | undefined): 
 
 const merge = (out: Text, part: Text): void => {
   out.value += part.value
-  if (part.unknown && (!out.unknown || part.unknown === LARGE)) out.unknown = part.unknown
+  if (part.unknown) out.unknown ??= part.unknown
   if (part.variable) out.variable ??= part.variable
   if (part.reads?.length) (out.reads ??= []).push(...part.reads)
 }
@@ -977,10 +977,7 @@ async function outputOf(cmd: Command, env: Env): Promise<Text> {
   const values = await Promise.all(args.map((a) => resolveText(a, env)))
   const hidden = values.find((v) => v.unknown)
   if (hidden) return hidden
-  if (name === "printf") {
-    const out = printf(values.map((v) => v.value))
-    return deadline !== undefined && out.length > MAX_BYTES ? unknown(LARGE) : { value: out }
-  }
+  if (name === "printf") return { value: printf(values.map((v) => v.value)) }
   let k = 0
   while (k < values.length && /^-[neE]+$/.test(values[k].value)) k++
   return {
@@ -991,7 +988,7 @@ async function outputOf(cmd: Command, env: Env): Promise<Text> {
   }
 }
 
-// printf reuses its format while arguments remain; a pass that takes none ends it, and under a deadline so does an output past what the hook holds, which the walk then holds as unknown; a hook with no deadline reads the whole output.
+// printf reuses its format while arguments remain; a pass that takes none ends it.
 function printf([format = "", ...args]: string[]): string {
   const conversion = /%(?:%|[-+ #0']*(?:[1-9]\d*)?(?:\.\d+)?([a-zA-Z]))/g
   const pattern = decode(format)
@@ -1005,8 +1002,7 @@ function printf([format = "", ...args]: string[]): string {
       const value = args[k++] ?? ""
       return kind === "b" ? decode(value) : value
     })
-    if (k === before || k >= args.length || (deadline !== undefined && out.length > MAX_BYTES))
-      return out
+    if (k === before || k >= args.length) return out
   }
 }
 

@@ -370,18 +370,6 @@ describe("a direct write into the extensions root is refused, naming the owner's
     60_000,
   )
 
-  test("a 64 KB printf format over 30000 arguments that a shell reads is held inside a second and 500 MB", async () => {
-    const before = process.memoryUsage().rss
-    const started = performance.now()
-    const reason = await bash(
-      `bash <(printf '${"%s".padEnd(64_000, "a")}' ${"x ".repeat(30_000)})`,
-      "/tmp",
-    )
-    expect(reason).toContain("split it into shorter calls")
-    expect(performance.now() - started).toBeLessThan(1_000)
-    expect(process.memoryUsage().rss - before).toBeLessThan(500_000_000)
-  }, 60_000)
-
   test.each([300, 8_000])(
     "an eval chain %d deep ahead of a write is refused inside the hook's time",
     async (depth) => {

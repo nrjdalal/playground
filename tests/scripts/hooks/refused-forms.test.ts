@@ -35,6 +35,7 @@ const PATHS: Paths = {
   BARE: join(SCRATCH, "bare"),
   CLI_DIR: join(CHECKOUT, "packages", "scripts", "src", "playground"),
   DATA,
+  HOME,
   LINK: join(HOME, "store"),
   LIST: join(ROOT, "hooks", "desktop-owner-apps.json"),
   ROOT,
@@ -57,6 +58,7 @@ writeFileSync(PATHS.WORDS, "y ".repeat(400_000))
 symlinkSync(ROOT, PATHS.LINK)
 symlinkSync(ROOT, join(DATA, "store"))
 symlinkSync(DATA, join(HOME, "pg"))
+symlinkSync(join(PATHS.CLI_DIR, "cli.ts"), join(HOME, "pc"))
 Bun.spawnSync(["git", "init", "-q", OTHER])
 Bun.spawnSync([
   "git",

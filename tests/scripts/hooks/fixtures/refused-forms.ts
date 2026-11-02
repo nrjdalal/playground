@@ -30,6 +30,7 @@ export type Paths = {
   BARE: string
   CLI_DIR: string
   DATA: string
+  HOME: string
   LINK: string
   LIST: string
   ROOT: string
@@ -61,9 +62,11 @@ const nest = (depth: number, inner: string): string =>
 const fill = (head: string, unit: string, tail: string) =>
   head + unit.repeat(Math.floor((130_000 - head.length - tail.length) / unit.length)) + tail
 
-// A printf output of about 1.1 MB from a 50 KB command, past what a shell's script is read to under a deadline.
+// A printf output of about 1.1 MB from a 50 KB command, which a shell reads whole.
 const PAD = "x".repeat(40)
 const COLONS = ": ".repeat(25_000)
+
+// A push to the made-up extension repo the runner's synced data folder names.
 const PUSH = "git push https://github.com/quillco/acme-skills main"
 
 const MUTATION = `mutation { addComment(input: {subjectId: "I_1", body: "release"}) { clientMutationId } }`
@@ -748,6 +751,42 @@ gh api graphql -f query="$QUERY"`,
       [
         "a group's date, then a printf output past 1 MB that pushes to an extension repo, piped to a shell",
         `(date; printf '%s\\n#${PAD}\\n' ${COLONS} '${PUSH}') | bash`,
+      ],
+    ],
+    source: "#402",
+  },
+  {
+    folders: ["tmp"],
+    guards: ["no-extensions-write"],
+    rows: ({ HOME }) => [
+      [
+        "rm through a missing folder, .., then a link to the root",
+        `mkdir ${HOME}/m && rm -rf ${HOME}/m/../store/`,
+      ],
+      ["rm of a link to the root through a missing folder and ..", `rm -rf ${HOME}/m/../store`],
+      [
+        "cp through a missing folder, .., then a link to the root",
+        `mkdir -p ${HOME}/m && cp /etc/hosts ${HOME}/m/../store`,
+      ],
+      [
+        "mv through a missing folder, .., then a link to the root",
+        `mkdir -p ${HOME}/m && mv /tmp/x ${HOME}/m/../store`,
+      ],
+      [
+        "rm through a missing folder, .., then a link to the data folder",
+        `mkdir -p ${HOME}/m && rm -rf ${HOME}/m/../pg/`,
+      ],
+      [
+        "a variable through a missing folder, .., then a link to the root",
+        `V=${HOME}/m/../store/; mkdir ${HOME}/m; rm -rf $V`,
+      ],
+      [
+        "the CLI by a link through a missing folder and ..",
+        `${HOME}/m/../pc ext put login list x /tmp/l.json --reason y`,
+      ],
+      [
+        "bun on the CLI by a link through a missing folder and ..",
+        `bun ${HOME}/m/../pc ext put login list x /tmp/l.json --reason y`,
       ],
     ],
     source: "#402",
