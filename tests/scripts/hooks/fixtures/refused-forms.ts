@@ -51,7 +51,7 @@ export type Group = {
   folders: Folder[]
   guards: Guard[]
   rows: (paths: Paths) => readonly Row[]
-  source: "#292" | "#356" | "#402" | "#411" | "#PR435"
+  source: "#292" | "#356" | "#402" | "#411" | "#466"
 }
 
 // The rows a guard-loosening PR lets run on purpose, each written as a row's "<source> <what>" for all its cases, or as one case's "<source> <what> | <guard> | <folder>"; canary lets none run.
@@ -1031,7 +1031,7 @@ gh api graphql -f query="$QUERY"`,
       ["git -C before a stash", `git -C ${WORK} stash pop`],
       ["git -c with a subcommand for its value", "git -c stash pop"],
     ],
-    source: "#PR435",
+    source: "#466",
   },
   {
     folders: ["data folder", "home"],
@@ -1080,7 +1080,7 @@ gh api graphql -f query="$QUERY"`,
         `git --config-env push ${ORG} HEAD:worker-greed/fix`,
       ],
     ],
-    source: "#PR435",
+    source: "#466",
   },
   {
     folders: ["glm repo"],
@@ -1093,6 +1093,6 @@ gh api graphql -f query="$QUERY"`,
       ],
       ["git --attr-source with a subcommand for its value", "git --attr-source commit -m x"],
     ],
-    source: "#PR435",
+    source: "#466",
   },
 ]
