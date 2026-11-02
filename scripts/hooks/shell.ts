@@ -111,6 +111,9 @@ const RESERVED = new Set([
   "until",
   "while",
 ])
+// Whether a program is its command's own first word, a reserved word before it (`!`, `then`, `do`) skipped, rather than one a wrapper or an assignment runs
+export const ownFirst = (cmd: Command, first: Word | undefined): first is Word =>
+  !!first && first === cmd.words.find((w) => w.quoted || !RESERVED.has(w.value))
 // The words that close a compound command, whose output the hook does not follow.
 const GROUPING = new Set(["}", "done", "esac", "fi"])
 export const ASSIGN = /^[A-Za-z_]\w*=/
