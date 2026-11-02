@@ -264,6 +264,16 @@
         "hooks": [
           {
             "type": "command",
+            "command": "R=\"${PLAYGROUND_REPO}\"; [ -n \"$R\" ] || { g=\"$(git -C \"$CLAUDE_PROJECT_DIR\" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)\" && R=\"$(dirname \"$g\")\"; }; [ -n \"$R\" ] && [ \"$R\" != . ] && [ -f \"$R/scripts/hooks/no-raw-delete.ts\" ] || { [ -z \"$PLAYGROUND_ROLE\" ] && exit 0; echo \"no-raw-delete: no guard script in the main checkout (${R:-not found}); refusing. Restore it from the owner's own window: playbook LIFECYCLE.md, Restoring the main checkout\" >&2; exit 2; }; cd -P \"$R\" && bun --no-env-file scripts/hooks/no-raw-delete.ts; c=$?; [ $c = 0 ] || [ $c = 2 ] || { echo \"no-raw-delete: crashed (exit $c); refusing. Fix: bun install in $R\" >&2; exit 2; }; exit $c",
+            "timeout": 15
+          }
+        ]
+      },
+      {
+        "matcher": "^Bash$",
+        "hooks": [
+          {
+            "type": "command",
             "command": "R=\"${PLAYGROUND_REPO}\"; [ -n \"$R\" ] || { g=\"$(git -C \"$CLAUDE_PROJECT_DIR\" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)\" && R=\"$(dirname \"$g\")\"; }; [ -n \"$R\" ] && [ \"$R\" != . ] && [ -f \"$R/scripts/hooks/no-mac-web-build.ts\" ] || { [ -z \"$PLAYGROUND_ROLE\" ] && exit 0; echo \"no-mac-web-build: no guard script in the main checkout (${R:-not found}); refusing. Restore it from the owner's own window: playbook LIFECYCLE.md, Restoring the main checkout\" >&2; exit 2; }; cd -P \"$R\" && bun --no-env-file scripts/hooks/no-mac-web-build.ts; c=$?; [ $c = 0 ] || [ $c = 2 ] || { echo \"no-mac-web-build: crashed (exit $c); refusing. Fix: bun install in $R\" >&2; exit 2; }; exit $c",
             "timeout": 15
           }
