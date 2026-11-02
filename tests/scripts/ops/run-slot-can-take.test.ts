@@ -69,6 +69,28 @@ describe("slots counts the CPU slots held or open now", () => {
   })
 })
 
+// spawn.sh's slots gate reads this line before it admits a new worker
+describe("room prints the lanes, the held ones and the live waiters", () => {
+  const room = (m: ReturnType<typeof machine>) => {
+    const run = Bun.spawnSync(["bash", SCRIPT, "room"], { cwd: m.root, env: m.env() })
+    return [run.exitCode, run.stdout.toString()]
+  }
+
+  test("an idle machine has four free lanes and no one waiting", () => {
+    expect(room(machine())).toEqual([0, "4 0 0\n"])
+  })
+
+  test("held lanes and live tickets count, and a dead waiter's ticket does not", () => {
+    const m = machine({ load1: 12 })
+    m.hold("run-slot", 2, "medium")
+    m.hold("run-slot-2", 2, "medium")
+    m.ticket(2, "worker-a", "s2 22 2 medium")
+    m.ticket(3, "worker-b", "s2 21 1 small")
+    writeFileSync(join(m.ops, "run-slot.waiters", "4-999999-worker-gone"), "s2 22 2 medium\n")
+    expect(room(m)).toEqual([0, "2 2 2\n"])
+  })
+})
+
 // each subcommand the script dispatches that runs on as a bare `true` is a read: read from the script, so a new one is covered here as it lands
 const reads = [
   ...readFileSync(SCRIPT, "utf8").matchAll(
