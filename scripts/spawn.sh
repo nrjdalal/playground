@@ -1325,8 +1325,7 @@ SETTINGS=$BUILT
 # The factory's sessions run in bypass mode, passed here so it never rests on the machine's own settings: a session in another mode holds every cross-session message for approval.
 FLAGS="--model $MODEL --effort ${EFFORT:-high} --settings $SETTINGS --dangerously-skip-permissions"
 # The skills: one merged plugin per session, from the login's scope, its repo's org, core, then each always org's new names, loaded in place by --plugin-dir, from the data folder this launch reads (under inscope ~/.claude's, not the workspace's); the resolver writes it fresh on every spawn, so a skill `playground ext add` puts in an extension reaches the next session with no install. A column runs in this checkout.
-SKILLS_REPO=${DIR:-$REPO}
-[ "$MODE" = column ] && SKILLS_REPO=$REPO
+SKILLS_REPO=$OWN
 PLUGIN=$(PLAYGROUND_DATA_DIR="$DATA" "$BUN" --no-env-file "$REPO/packages/scripts/src/playground/orgs.ts" resolve --repo "$SKILLS_REPO") && [ -d "$PLUGIN" ] || refuse "playground orgs resolve gave no skill plugin for $SKILLS_REPO"
 FLAGS+=" --plugin-dir $(printf %q "$PLUGIN")"
 READ="Load the playbook skill first. Your brief is in $SHOWN/$BRIEF: read it in full and follow it."

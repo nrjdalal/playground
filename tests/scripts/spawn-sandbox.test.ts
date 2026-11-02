@@ -80,7 +80,7 @@ describe("a probe runs its shell commands in Claude Code's sandbox", () => {
     expect(denyWrite).toContain(join(main, ".claude"))
   })
 
-  test("a probe in a worktree writes its own folder alone: .git, every other worktree and the rest of the main checkout are denied", async () => {
+  test("a probe in the checkout the suite runs from writes its own folder alone: .git, every other worktree and the rest of the main checkout are denied", async () => {
     const r = await spawn(["probe", "probe-x", "ops", "p.md"], [])
     expect(r.code, r.err).toBe(0)
     const { denyWrite } = builtOf(r, "factory-settings-sandbox-400k.json").sandbox.filesystem
