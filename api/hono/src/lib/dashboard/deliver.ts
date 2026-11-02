@@ -115,7 +115,7 @@ const commandRefusal = (skill?: string): Refusal =>
   refused(
     "COMMAND",
     skill
-      ? `/${skill} is not a skill this session can run, and any other / or ! would run as a command in the session, so it is not typed. ${BANG_ROUTE}`
+      ? `/${skill} is not a skill this session can run, and any other / or ! would run as a command in the session, so it is not typed.`
       : `A message starting with / or ! would run as a command in the session, so it is not typed. ${BANG_ROUTE}`,
   )
 

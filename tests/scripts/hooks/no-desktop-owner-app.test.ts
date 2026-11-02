@@ -83,7 +83,9 @@ describe("an app on the list", () => {
     const reason = await bash("agent-desktop snapshot --app Slack")
     expect(reason).toContain("! prefix")
     expect(reason).toContain("take Slack off")
-    expect(reason).toContain("with a ! command the dispatcher hands the owner")
+    expect(reason).toContain(
+      "to take Slack off the list in the owner's login extension, tell your lead, and the dispatcher hands the owner the ! command that does it",
+    )
   })
 
   test("passes once the list no longer holds it", async () => {
