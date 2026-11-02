@@ -179,10 +179,8 @@ function quotedParts(code: string) {
 }
 
 const RUNNERS = new Set([...LAUNCHERS, ...SHELLS, "command", "exec", "time", "xargs"])
-// Wrappers whose words may run as a command of their own.
-const LINES = new Set(["flock", "setsid", "watch"])
 
-// Whether a shell line runs agent-desktop, or holds a form this hook refuses in a Bash call naming it (a script file, a wrapper the hook does not follow); a line it cannot read counts as one.
+// Whether a shell line runs agent-desktop, or holds a form this hook refuses in a Bash call naming it (a script file, or flock, setsid or watch naming it); a line it cannot read counts as one.
 async function runsTool(line: string): Promise<boolean> {
   try {
     const env: Env = { cwd: undefined, files: new Map(), known: {}, process: {}, vars: new Map() }
