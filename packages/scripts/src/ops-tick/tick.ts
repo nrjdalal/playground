@@ -1,8 +1,10 @@
+import { statfsSync } from "node:fs"
 import { appendFile, lstat, mkdir, readdir, stat, unlink } from "node:fs/promises"
 import { homedir } from "node:os"
-import { basename, join } from "node:path"
+import { basename, dirname, join } from "node:path"
 
 import { dispatcherOf, kindOf, managerKindOfName, managerOf } from "@packages/config/kinds"
+import { purgeTrash } from "@packages/safe-delete"
 import { accountSettings, readPolicy } from "@packages/settings"
 
 import {
@@ -508,6 +510,22 @@ export const turboPrune =
     await appendFile(join(ctx.ops, "log", "turbo-prune.log"), `${isoSeconds(ctx.now)} ${line}\n`)
   }
 
+const freeBytes = (dir: string): number => {
+  const fs = statfsSync(dir)
+  return fs.bavail * fs.bsize
+}
+
+// The trash playground rm fills, beside ops in the data folder, emptied hourly by purgeTrash (@packages/safe-delete): each batch over 7 days old, then the oldest while its disk has under 50 GB free; one line in ops/log/trash-purge.log.
+export const trashPurge =
+  (trash?: string, free = freeBytes) =>
+  async (ctx: Context) => {
+    const root = trash ?? join(dirname(ctx.ops), "trash")
+    const { removed, skipped } = purgeTrash(root, { free: () => free(root), now: ctx.now })
+    const line = `removed ${removed.length}${removed.length ? ` (${removed.join(", ")})` : ""}${skipped.length ? `, skipped ${skipped.join(", ")}` : ""}`
+    await mkdir(join(ctx.ops, "log"), { recursive: true })
+    await appendFile(join(ctx.ops, "log", "trash-purge.log"), `${isoSeconds(ctx.now)} ${line}\n`)
+  }
+
 const words = (text: string) => async (ctx: Context) => void (await ctx.send("optimizer", text))
 
 // Every worktree of the repo's clone on canary, and the leads worktree on its leads branch, kept at the head of the origin branch each tracks (canary's, and for leads the branch the install cloned, which spawn.sh's cut sets: main on a public install), so every session runs that line rather than the live checkout: a fast-forward pull, never in one holding an open change, a pull that changed bun.lock or a package.json then installing through run-slot as redeploy-pull.sh does and owing that install in tick/canary-pull-owed.json until one exits 0, and a pull or install that fails named to ops once a failure, marked by its words in tick/canary-pull-told.json and cleared once that worktree pulls and owes no install.
@@ -637,6 +655,7 @@ export const BEATS: Beat[] = [
   { cron: "7 */2 * * *", name: "optimizer-tick", run: words("optimizer tick"), to: "optimizer" },
   { cron: "13 21 * * *", name: "optimizer-daily", run: words("optimizer daily"), to: "optimizer" },
   { cron: "29 3 * * 0", name: "turbo-prune", run: turboPrune(), to: "ops/log/turbo-prune.log" },
+  { cron: "17 * * * *", name: "trash-purge", run: trashPurge(), to: "ops/log/trash-purge.log" },
   { cron: "*/5 * * * *", name: "canary-pull", run: canaryPull, to: "ops, once a failed pull" },
   { cron: "*/5 * * * *", name: "relay-watch", run: relayWatch, to: "the Inbox, by bun run ask" },
   {
