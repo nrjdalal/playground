@@ -404,7 +404,8 @@ function inspect(raw: string, environment: Environment) {
     const dispatcher =
       cmd === sole &&
       !!first &&
-      ownFirst(cmd, first) &&
+      // its very first word, so no reserved word (`coproc`, `!`) runs it otherwise
+      cmd.words[0] === first &&
       parsed.local.size === 0 &&
       !xargs &&
       isCli(first, [env.cwd]) &&
@@ -475,7 +476,9 @@ function inspect(raw: string, environment: Environment) {
     !one.group &&
     !one.inner &&
     !one.detached &&
-    !one.words.some((word) => word.procs)
+    !one.words.some((word) => word.procs) &&
+    // the lexer drops a stray `)`, and no word of the closed list holds one
+    !command.includes(")")
   )
     sole = one
   return run(lexed, env, visit, true)
