@@ -167,7 +167,7 @@ Like the ticket guard, a hook that cannot start lets the call through, and the r
   Every two-way door, a design, an order or the scope inside an ask he approved, the factory picks itself and records in an ADR or on the issue, and a grilling sends him only the questions nothing in the repo or his past words settles, batched as one plain ask.
 - No decision reaches the owner as a question in chat.
   The inbox gate, a hook on Playground and the leads, refuses to end a turn whose last reply asks him to decide (any question mark outside code, quotes and lines to other agents, rhetorical ones and headings included, or words such as "say yes", "your call" or "should I") until that reply names an item open in his Inbox, so the session names the one already open on the same thing,
-  or else posts it there and says so; a pointer he is free to skip ("if you want to look") is no ask.
+  or else posts it there and says so, where a lead sends it to the dispatcher, who posts it; a pointer he is free to skip ("if you want to look") is no ask.
   It refuses a request for his own action the same way, such as "you need to", "please", "when you can" or "the owner, plug in the Mac", so a step only he can take goes to his Inbox too.
   A question quoted from someone else, or put to another agent, passes.
   Anything promised to him for later, and any later outcome of something he asked, reaches him as an Inbox update; chat answers only what he is asking now.
