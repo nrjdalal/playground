@@ -362,7 +362,6 @@ describe("prMerge", () => {
   })
 })
 
-// merge-on-ready skips drafts, so a green draft sat for 30 minutes while another PR merged ahead of it and made it conflict.
 describe("a hold written after the gates are read", () => {
   // git in local()'s world whose types gate, the slow step between the gates and the merge call, writes the held list as it starts
   const holdingDuringTypes = (text: string) => {
@@ -430,6 +429,7 @@ describe("a hold written after the gates are read", () => {
   })
 })
 
+// merge-on-ready skips drafts, so a green draft sat for 30 minutes while another PR merged ahead of it and made it conflict.
 describe("a green draft", () => {
   test("pr:merge marks the owner's draft ready when every other gate passes, then merges it", async () => {
     const { calls, run } = stub({ draft: true })
