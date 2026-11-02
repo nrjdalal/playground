@@ -1,5 +1,7 @@
 import { rm } from "node:fs/promises"
-import { join } from "node:path"
+import { join, resolve } from "node:path"
+
+import { machineRoots, sessionName, toTrash } from "./trash"
 
 // Rescaffolds web/next's shadcn components, then reapplies shadcn-customize.ts and formats. Runs from the repo root (cwd).
 
@@ -32,7 +34,12 @@ const run = (cmd: string[], cwd = ".") => {
 }
 
 await rm("web/next/components.json", { force: true })
-await rm("web/next/src/components/ui", { force: true, recursive: true })
+toTrash(
+  resolve("web/next/src/components/ui"),
+  "sync:shadcn rescaffolds it",
+  machineRoots(),
+  await sessionName(),
+)
 run(
   ["bunx", "shadcn@latest", "init", "--template", "next", "--preset", "a16C8", "--base", "base"],
   "web/next",

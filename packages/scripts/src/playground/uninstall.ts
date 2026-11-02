@@ -1,5 +1,5 @@
-// playground uninstall: the LaunchAgents, the Dashboard's stack, the home skill set and the links go; the data folder and the database stay unless --purge, which asks first.
-import { readdirSync, readFileSync, rmSync } from "node:fs"
+// playground uninstall: the LaunchAgents, the Dashboard's stack, the home skill set and the links go; the data folder and the database stay unless --purge, which asks first, then removes the database and moves the data folder aside.
+import { readdirSync, readFileSync, renameSync, rmSync } from "node:fs"
 import { join } from "node:path"
 
 import { linksInto } from "./links"
@@ -21,7 +21,9 @@ export const ourPlists = (agents: string, repo: string, data: string): string[] 
 }
 
 export const askPurge = async (data: string, database: string): Promise<boolean> =>
-  prompt(`Type purge to remove ${data} and the database ${database} for good:`) === "purge"
+  prompt(
+    `Type purge to move ${data} aside to ${data}-purged-<UTC time> and remove the database ${database} for good:`,
+  ) === "purge"
 
 // The home skill set and its ws marketplace, as orgs.ts's installHome added them, each only while Claude Code lists it.
 const removeHomeSet = async (run: Run, log: (line: string) => void) => {
@@ -80,12 +82,15 @@ export const uninstall = async (o: Options): Promise<number> => {
   o.log(`removed ${links.length} links into ${o.repo}`)
   if (!o.purge) {
     o.log(
-      `kept ${o.data} and the database ${o.database}; playground uninstall --purge removes them`,
+      `kept ${o.data} and the database ${o.database}; playground uninstall --purge removes the database and moves the folder aside`,
     )
     return failed ? 1 : 0
   }
   await o.run(["docker", "rm", "-fv", o.database], true)
-  rmSync(o.data, { force: true, recursive: true })
-  o.log(`removed ${o.data} and the database ${o.database}`)
+  const aside = `${o.data}-purged-${new Date().toISOString().replace(/[-:]|\.\d{3}/g, "")}`
+  renameSync(o.data, aside)
+  o.log(
+    `removed the database ${o.database}, and moved ${o.data} aside to ${aside}; delete it yourself once you no longer need it`,
+  )
   return failed ? 1 : 0
 }

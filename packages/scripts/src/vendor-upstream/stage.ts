@@ -10,6 +10,10 @@ import {
 } from "node:fs"
 import { dirname, join } from "node:path"
 
+import { isProtected, type Roots } from "@packages/safe-delete"
+
+import { toTrash } from "../trash"
+
 export type UpstreamFile = { path: string; bytes: Uint8Array }
 export type ManifestEntry = { sha: string; path: string }
 export type Vendored = { ok: true; files: number } | { ok: false; mismatches: string[] }
@@ -111,23 +115,30 @@ export const diffSkills = (oldText: string | null, entries: ManifestEntry[]): st
 }
 
 const STAGING = ".upstream-staging"
+const REPLACED = ".upstream-replaced"
 
-// Stages the files in core, writes upstream/SOURCE and upstream/MANIFEST, and swaps each upstream skill folder and upstream/ in only when every staged byte matches its manifest sha; a skill's CREDITS.md, which is core's, stays, a skill the old MANIFEST held and the new one does not leaves, and a mismatch removes the staging folder and leaves core as it was. It never commits.
+// Stages the files in core, writes upstream/SOURCE and upstream/MANIFEST, and swaps each upstream skill folder and upstream/ in only when every staged byte matches its manifest sha; a skill's CREDITS.md, which is core's, stays, a skill the old MANIFEST held and the new one does not leaves, and a mismatch removes the staging folder and leaves core as it was. Each folder it replaces is moved into one REPLACED folder that goes to the trash whole, so a run is one quarantine under the tripwire's 3 a minute, and a refusal throws its text. It never commits.
 export const vendor = ({
   coreDir,
   files,
   manifest,
   repo,
+  roots,
+  session,
   sha,
 }: {
   coreDir: string
   files: UpstreamFile[]
   manifest: string
   repo: string
+  roots: Roots
+  session: string
   sha: string
 }): Vendored => {
   const entries = parseManifest(manifest)
   const bytesOf = new Map(files.map(({ path, bytes }) => [path, bytes]))
+  const protectedWhy = isProtected(join(coreDir, REPLACED), roots)
+  if (protectedWhy) throw new Error(protectedWhy)
   const staging = join(coreDir, STAGING)
   rmSync(staging, { force: true, recursive: true })
   for (const { path } of entries) {
@@ -157,18 +168,27 @@ export const vendor = ({
     ? skillsIn(parseManifest(readFileSync(oldManifest, "utf8")))
     : new Set<string>()
   const now = skillsIn(entries)
+  const replaced = join(coreDir, REPLACED)
+  const reason = "vendor:upstream replaced it"
+  toTrash(replaced, reason, roots, session)
+  const moveAside = (from: string, to: string) => {
+    if (!existsSync(from)) return
+    mkdirSync(dirname(join(replaced, to)), { recursive: true })
+    renameSync(from, join(replaced, to))
+  }
   for (const name of new Set([...was, ...now])) {
     const live = join(coreDir, "skills", name)
     const credits = join(live, "CREDITS.md")
     const kept = existsSync(credits) ? readFileSync(credits) : null
-    rmSync(live, { force: true, recursive: true })
+    moveAside(live, join("skills", name))
     if (!now.has(name)) continue
     mkdirSync(dirname(live), { recursive: true })
     renameSync(join(staging, "skills", name), live)
     if (kept) writeFileSync(credits, kept)
   }
-  rmSync(join(coreDir, "upstream"), { force: true, recursive: true })
+  moveAside(join(coreDir, "upstream"), "upstream")
   renameSync(join(staging, "upstream"), join(coreDir, "upstream"))
   rmSync(staging, { force: true, recursive: true })
+  toTrash(replaced, reason, roots, session)
   return { ok: true, files: entries.length }
 }
