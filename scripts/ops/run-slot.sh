@@ -633,13 +633,13 @@ load_line() {
 slot_open() {
   local s=$1
   # run-slot.single (builder, 9 Oct: heavy suites one at a time) closes slots 2 and 3 to new holders while it exists
-  # ...except for the dashboard's own build and the merge train (12 Oct: single-slot mode left both waiting an hour behind testers' runs)
+  # ...except for the dashboard's own build and the merge train (12 Oct: single-slot mode left both waiting an hour behind testers' runs), which load1 over the cores leaves run-slot-2 open to as well (retro 22: two 5/5 PRs sat about 55 min while the train raced the queue for run-slot alone)
   # #i162: in single-slot mode run-slot-2 still opens for a second suite; since 13 Oct (dispatcher, so work runs while the
   # machine allows) it opens on memory: free share 40% or more (ops, 19 Oct 01:16Z, from the optimizer: 9 Mac-only waiters at
   # pressure 1 with 43% free), pressure normal, and the 5-minute load under 22 as a backstop
   if [ "$s" != run-slot ] && switch_on run-slot.single && [ "$WHO" != ops-dashboard ] && [ "$WHO" != ops-merge-train ]; then
     if [ "$s" = run-slot-2 ] && [ "$(load5)" -lt "$(load_line)" ] && mem_ok; then :; else return 1; fi
-  elif [ "$s" = run-slot-2 ] && [ "$(load1)" -ge "$CORES" ]; then
+  elif [ "$s" = run-slot-2 ] && [ "$WHO" != ops-dashboard ] && [ "$WHO" != ops-merge-train ] && [ "$(load1)" -ge "$CORES" ]; then
     return 1
   fi
   # a third slot, approved by dispatcher (8 Oct), opens only while the 1-minute load is under 12; a holder that took it finishes either way

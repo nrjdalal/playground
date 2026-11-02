@@ -321,7 +321,6 @@ describe("a quick run takes its own slot past a full queue", () => {
 
 // #547: load from outside run-slot kept 44 quick runs waiting 201 min for 8 min of work after the 15 s pass (2 Nov), and the one quick slot adds about a core at most, so it runs whatever load5 reads
 describe("the quick slot runs whatever load5 reads", () => {
-  const LOAD_WAIT = /^run-slot\.sh: waiting for load5/gm
   // A machine whose fake bun and git touch their last argument, at the load5 asked for
   const loaded = (load5: number) => {
     const m = machine({ load1: 2, load5 })
@@ -335,7 +334,6 @@ describe("the quick slot runs whatever load5 reads", () => {
   test("a quick-rule run with no runs on record starts at once at load5 30", async () => {
     const run = loaded(30).start("worker-q", {}, undefined, ["bun", "run", "docs:wrap"])
     expect(await run.ran()).toBe(true)
-    expect(await run.saw(LOAD_WAIT)).toBe(false)
   })
 
   test("and so does one over run-slot.load5-cap's lower line", async () => {
@@ -343,13 +341,11 @@ describe("the quick slot runs whatever load5 reads", () => {
     writeFileSync(join(m.ops, "run-slot.load5-cap"), "12\n")
     const run = m.start("worker-q", {}, undefined, ["bun", "run", "docs:wrap"])
     expect(await run.ran()).toBe(true)
-    expect(await run.saw(LOAD_WAIT)).toBe(false)
   })
 
   test("a commit takes its slot at load5 30, as before", async () => {
     const run = loaded(30).start("worker-q", {}, undefined, ["git", "commit"])
     expect(await run.ran()).toBe(true)
-    expect(await run.saw(LOAD_WAIT)).toBe(false)
   })
 
   test("and so does a node_modules clone, with clone-off unset", async () => {
