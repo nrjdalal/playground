@@ -74,6 +74,11 @@ describe("a call outside the read shapes", () => {
     "gh issue list --repo=evil.example/o/r",
     "gh issue view https://evil.example/o/r/issues/1",
     "gh pr diff https://evil.example/o/r/pull/1",
+    'git diff ""{--output=.git/hooks/pre-commit,HEAD}',
+    'git diff ""*',
+    "git diff ''*",
+    "cat =(gh issue create -t a -b b)",
+    'cat .git/HEAD(e:"gh issue create":)',
   ])("%s does not read only", (command) => {
     expect(readOnly(bash(command))).toBe(false)
   })
