@@ -272,6 +272,29 @@ describe("code-review-loop checks its own fixes and a repo scanner's landing (PG
     expect(await page()).toContain("a test that scans the repo or reads the schema lands on canary")
   })
 
+  test("The last 5/5 fetches canary again once CI goes green and reads both stand-in conditions against it before citing the run (#422's CI merge went stale twice in one round)", async () => {
+    const last = (await skill()).split("## The last 5/5")[1]?.split("\n## ")[0] ?? ""
+    const stand = last.split("**CI stands in**")[1]?.split("\n")[0] ?? ""
+    expect(stand).toContain(
+      "Once both checks are green at `<head>`, run `git -C <clone> fetch origin canary` again and read both stand-in conditions against that `origin/canary` before you cite the run",
+    )
+    expect(last.split("**Done when**")[1] ?? "").toContain(
+      "or CI stood in for them at the head, read against a canary fetched after both checks went green",
+    )
+    expect(await page()).toContain("fetches canary again once both checks are green")
+  })
+
+  test("step 8 runs a waiting scanner PR's touched tests on a local merge at every canary move, whatever landed (#422's CI merge went stale twice)", async () => {
+    const step = (await skill()).match(/^8\. \*\*Report and wait\.\*\*.*$/m)?.[0] ?? ""
+    expect(step).toContain(
+      "A waiting 5/5 whose own diff adds or changes a repo scanner or a data file one reads (The last 5/5's merge rule names them) takes that local merge at every canary move (a held stack's aside), whatever landed",
+    )
+    expect(step.split("**Done when**")[1] ?? "").toContain(
+      "each waiting 5/5 that adds or changes a repo scanner or a data file one reads has run its touched tests on a local merge with the newest `origin/canary`",
+    )
+    expect(await page()).toContain("A waiting 5/5 that adds or changes a repo scanner")
+  })
+
   test("step 8 checks each waiting 5/5 for a merge conflict with canary whenever canary moves (#118 went CONFLICTING under its 5/5)", async () => {
     const text = await skill()
     const step = text.match(/^8\. \*\*Report and wait\.\*\*.*$/m)?.[0] ?? ""
