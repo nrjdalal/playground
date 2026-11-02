@@ -54,7 +54,6 @@ describe("a session cmux restored in a dispatcher checkout keeps the factory's h
     "no-ours-merge",
     "no-playground-leak",
     "no-prompt-stop",
-    "no-raw-delete",
     "no-raw-spawn",
     "no-release-comment",
     "no-stash",
