@@ -63,6 +63,7 @@ Only the first reading moves the folder, sets variables and records files for th
   A command that names its own folder (`git -C <path>`, `bun --cwd <path>`, turbo's `--cwd`, `env -C <path>`) is judged by that path, whatever the shell's folder.
   Its tests are in `bun run test:file tests/scripts/hooks`.
 - Repetition is the open class, which canary shares and a follow-up holds: where a line may run one `cd` more times than the reader counts it, the reader keeps the folders of a single run, so a target that climbs reaches a folder it kept none of.
+  The follow-up is filed as the reader treating a `cd` that may run more than once as reaching every folder above its base, which is the wording to search the tracker for.
   Name the folder in the command itself (`git -C <path>`, `bun --cwd <path>`), which holds whatever the line's `cd` steps do, when a `cd` of the line sits in a body the line calls, in a loop's own test, or in text the shell reads again as a command.
 
 ## after-compact
