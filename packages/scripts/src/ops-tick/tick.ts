@@ -551,7 +551,10 @@ const canaryPull = async (ctx: Context) => {
     if (fetch.code !== 0)
       text = `canary-pull: ${tree} did not fetch: ${lines(fetch.out).at(-1) ?? `exit ${fetch.code}`}`
     else {
-      const incoming = await ctx.run(["git", "-C", tree, "diff", "--name-only", "HEAD", "@{u}"])
+      const sha = async (ref: string) =>
+        (await ctx.run(["git", "-C", tree, "rev-parse", ref])).out.trim()
+      const [old, up] = [await sha("HEAD"), await sha("@{u}")]
+      const incoming = await ctx.run(["git", "-C", tree, "diff", "--name-only", old, up])
       const install = owed.has(tree) || /(^|\/)(bun\.lock|package\.json)$/m.test(incoming.out)
       const step = install
         ? await ctx.run(
@@ -561,19 +564,18 @@ const canaryPull = async (ctx: Context) => {
               "--",
               "bash",
               "-c",
-              'git -C "$1" merge --ff-only -q "@{u}" && bun install --frozen-lockfile --ignore-scripts --cwd "$1"',
+              'git -C "$2" merge --ff-only -q "$1" && bun install --frozen-lockfile --ignore-scripts --cwd "$2"',
               "canary-pull",
+              up,
               tree,
             ],
             30 * 60_000,
           )
-        : await ctx.run(["git", "-C", tree, "merge", "--ff-only", "-q", "@{u}"], 120_000)
-      const head = async (ref: string) =>
-        (await ctx.run(["git", "-C", tree, "rev-parse", ref])).out.trim()
+        : await ctx.run(["git", "-C", tree, "merge", "--ff-only", "-q", up], 120_000)
       const why = lines(step.out).at(-1) ?? `exit ${step.code}`
       if (step.code === 0) {
         if (install) owed.delete(tree)
-      } else if (install && (await head("HEAD")) === (await head("@{u}"))) {
+      } else if (install && ((await sha("HEAD")) !== old || old === up)) {
         owed.add(tree)
         text = `canary-pull: ${tree} did not install: ${why}`
       } else text = `canary-pull: ${tree} did not fast-forward: ${why}`
