@@ -128,7 +128,8 @@ describe("the job registry", () => {
     expect(tick.disabled).toBe(true)
     expect(tick).not.toHaveProperty("needsCmux")
     const company = { command: "~/x/run.sh", heartbeat: "ops-company", name: "ops-company" }
-    const { jobs } = renderJobs({}, [{ ...company, needsCmux: true }], fill)
+    const kept = { ...company, needsCmux: true }
+    const { jobs } = renderJobs({}, [kept], fill)
     expect(jobs.find((job) => job.name === "ops-company")).toEqual({ ...company, runtime: "herdr" })
   })
 
