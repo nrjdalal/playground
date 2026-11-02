@@ -454,6 +454,38 @@ describe("a direct write into the extensions root is refused, naming the owner's
     expect(await bash(command, "/tmp")).toContain("no-extensions-write hook refuses")
   })
 
+  // a write into the root, its name whole and split by quotes, so no text of the call names the root
+  const WHOLE = `rm -rf ${ROOT}`
+  const SPLIT = `rm -rf ${DATA}/ext""ensions`
+  test.each(
+    [
+      ["read's here-string", (p: string) => `read x <<< '${p}'; eval "$x"`, [WHOLE, SPLIT]],
+      [
+        "mapfile's here-string",
+        (p: string) => `mapfile -t a <<< '${p}'; eval "\${a[0]}"`,
+        [WHOLE, SPLIT],
+      ],
+      ["printf -v", (p: string) => `printf -v x '%s' '${p}'; eval "$x"`, [SPLIT]],
+      ["echo's last word", (p: string) => `echo '${p}'; eval "$_"`, [SPLIT]],
+      ["test's last word", (p: string) => `test '${p}'; eval "$_"`, [SPLIT]],
+      ["a $(echo …)", (p: string) => `eval "$(echo '${p}')"`, [SPLIT]],
+      ["a variable set by $(echo …)", (p: string) => `x=$(echo '${p}'); eval "$x"`, [SPLIT]],
+    ].flatMap(([name, row, payloads]) =>
+      (payloads as string[]).flatMap((p) =>
+        [
+          ["the home", HOME],
+          ["a worktree", WORK],
+        ].map(([where, cwd]) => [
+          `${name}${p === SPLIT ? ", the root's name split by quotes," : ""} from ${where}`,
+          (row as (p: string) => string)(p),
+          cwd,
+        ]),
+      ),
+    ),
+  )("eval of a value from %s is refused", async (_, command, cwd) => {
+    expect(await bash(command, cwd)).toContain("no-extensions-write hook refuses")
+  })
+
   test("a slow lex refuses at the walk's deadline, whatever made it slow", async () => {
     const command = `echo ${"a(".repeat(20_000)}${")".repeat(20_000)}`
     const started = performance.now()
