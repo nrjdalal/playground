@@ -144,6 +144,7 @@ For that last one, since a herdr pane takes no key from a session's hand, the ma
 
 `playground rm <path> [--reason "<why>"]` moves a file or folder into the trash, `~/.playground/trash`, rather than deleting it, so it can come back for 7 days.
 Each delete lands in `trash/<UTC-ts>-<session>/<n>/`, and a line in that folder's `manifest.jsonl` records where it came from, who deleted it, why, and its size and file count.
+The dashboard moves its own leftovers there too: a fixture stack's scratch folder and a Vibeground's record and `.env`.
 `playground rm --list` prints what the trash holds, and `playground rm --restore <id>` puts one item back where it was, refusing when something already stands there.
 It refuses, before moving anything:
 

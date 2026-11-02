@@ -13,6 +13,8 @@ import {
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
+import { listTrash } from "../../../../../../packages/safe-delete/src"
+
 const {
   childEnv,
   copyData,
@@ -32,6 +34,14 @@ type Stack = import("../../../../../../api/hono/src/lib/dashboard/stacks").Stack
 
 const dir = mkdtempSync(join(tmpdir(), "vibe-"))
 afterAll(() => rmSync(dir, { force: true, recursive: true }))
+
+// The folders a removed file's move into the trash starts from, on the test's own mkdtemp root: the worktrees sit in none of them.
+const ROOTS = {
+  home: join(dir, "home"),
+  main: join(dir, "main"),
+  trash: join(dir, "data", "trash"),
+}
+const trashed = () => listTrash(ROOTS.trash).map((entry) => entry.path)
 
 const LIVE = { branch: "live/dashboard", database: "playground-dashboard-db" }
 const PASSWORD = "s3cret-copy-password"
@@ -95,6 +105,7 @@ const fake = (stacks: Stack[], over: Partial<Deps> = {}) => {
       return { bytes: 2048, error: null }
     },
     readsLive: () => true,
+    roots: () => ROOTS,
     secret: () => PASSWORD,
     stacks: async () => stacks,
     stop: async () => ({ code: 0, stderr: "", stdout: "dev:stop: stopped the stack" }),
@@ -294,6 +305,37 @@ describe("Start", () => {
     expect(f.docker.at(-1)?.args).toEqual(["rm", "-fv", copyName(path)])
   })
 
+  test("a Start that fails after writing its .env moves its record, and its own .env in a worktree that had none, into the trash", async () => {
+    const path = worktree("launch-fails")
+    const f = fake([stack(path)], {
+      launch: () => {
+        throw new Error("launch failed")
+      },
+    })
+    expect(await startVibe(path, f.deps).catch((error: Error) => error.message)).toContain(
+      "launch failed",
+    )
+    expect(existsSync(join(path, ".env"))).toBe(false)
+    expect(existsSync(join(path, ".turbo/vibe.json"))).toBe(false)
+    expect(trashed()).toEqual(
+      expect.arrayContaining([join(path, ".env"), join(path, ".turbo/vibe.json")]),
+    )
+  })
+
+  test("a failed Start whose cleanup the trash refuses names the cause and the refusal, and leaves its record in place", async () => {
+    const path = worktree("launch-refused")
+    const f = fake([stack(path)], {
+      launch: () => {
+        throw new Error("launch failed")
+      },
+      roots: () => ({ ...ROOTS, main: dir }),
+    })
+    const message = await startVibe(path, f.deps).catch((error: Error) => error.message)
+    expect(message).toContain("launch failed")
+    expect(message).toContain("inside the main checkout")
+    expect(existsSync(join(path, ".turbo/vibe.json"))).toBe(true)
+  })
+
   test("the load gate and a missing live database refuse before any container starts", async () => {
     const path = worktree("gated")
     // a Vibeground still booting (no URL yet) holds the one-at-a-time line too
@@ -330,7 +372,45 @@ describe("Stop", () => {
     expect(g.docker.map((call) => call.args)).toEqual([["rm", "-fv", copyName(path)]])
     expect(readFileSync(join(path, ".env"), "utf8")).toBe("OLD=3\n")
     expect(existsSync(join(path, ".turbo/vibe.json"))).toBe(false)
+    expect(trashed()).toContain(join(path, ".turbo/vibe.json"))
     expect(existsSync(path)).toBe(true)
+  })
+
+  test("a worktree that had no .env has the Vibeground's own moved into the trash, beside its record", async () => {
+    const path = worktree("stop-no-env")
+    await startVibe(path, fake([stack(path)]).deps)
+    await stopVibe(path, fake([stack(path, { vibe: true })]).deps)
+    expect(existsSync(join(path, ".env"))).toBe(false)
+    expect(trashed()).toEqual(
+      expect.arrayContaining([join(path, ".env"), join(path, ".turbo/vibe.json")]),
+    )
+    const entry = listTrash(ROOTS.trash).find((e) => e.path === join(path, ".env"))!
+    expect(readFileSync(join(ROOTS.trash, entry.id, ".env"), "utf8")).toContain(
+      "NEW_KEY=from-branch",
+    )
+  })
+
+  test("a .env the trash refuses, as a protected path, stays and fails the Stop in the refusal's words, so the next Stop tries again", async () => {
+    const path = worktree("stop-refused")
+    await startVibe(path, fake([stack(path)]).deps)
+    // the worktree sits in the main checkout these roots name, outside its .claude/worktrees
+    const g = fake([stack(path, { vibe: true })], { roots: () => ({ ...ROOTS, main: dir }) })
+    expect(await stopVibe(path, g.deps).catch((error: Error) => error.message)).toContain(
+      "inside the main checkout",
+    )
+    expect(readFileSync(join(path, ".env"), "utf8")).toContain("NEW_KEY=from-branch")
+    expect(existsSync(join(path, ".turbo/vibe.json"))).toBe(true)
+  })
+
+  test("a Stop whose record the trash refuses puts the worktree's own .env back by rename, then fails in the refusal's words with the record in place", async () => {
+    const path = worktree("stop-record-refused", "OWN=4\n")
+    await startVibe(path, fake([stack(path)]).deps)
+    const g = fake([stack(path, { vibe: true })], { roots: () => ({ ...ROOTS, main: dir }) })
+    expect(await stopVibe(path, g.deps).catch((error: Error) => error.message)).toContain(
+      "inside the main checkout",
+    )
+    expect(readFileSync(join(path, ".env"), "utf8")).toBe("OWN=4\n")
+    expect(existsSync(join(path, ".turbo/vibe.json"))).toBe(true)
   })
 
   test("a second Stop from another tab is refused while the first holds the record, so the worktree's own .env stays", async () => {
@@ -598,6 +678,8 @@ describe("the data folder's copy", () => {
     const to = join(dir, "data-copy")
     mkdirSync(join(from, "herdr"), { recursive: true })
     mkdirSync(join(from, "archive"), { recursive: true })
+    mkdirSync(join(from, "trash"), { recursive: true })
+    writeFileSync(join(from, "trash", "manifest.jsonl"), "{}\n")
     writeFileSync(join(from, "roster.json"), "{}\n")
     writeFileSync(join(from, "herdr", "config.toml"), "x = 1\n")
     writeFileSync(join(from, "archive", "old.jsonl"), "{}\n")
@@ -613,5 +695,6 @@ describe("the data folder's copy", () => {
     expect(lstatSync(join(to, "link.json")).isSymbolicLink()).toBe(true)
     expect(existsSync(join(to, "herdr", "s.sock"))).toBe(false)
     expect(existsSync(join(to, "archive"))).toBe(false)
+    expect(existsSync(join(to, "trash"))).toBe(false)
   })
 })

@@ -94,7 +94,7 @@ A made-up machine the dashboard reads on factory, test and `PLAYGROUND_FIXTURE` 
 A worktree's own stack the owner starts from the Inbox's Preview row, worked on beside the chat or in a tab of its own: its branch as it stands, on a copy of the live dashboard's database seeded by one `pg_dump`, so it shows real data while its migrations reach the copy alone. Done asks the dispatcher to have its worktree's session push to the branch's open PR, else open one into its parent, never merging; Stop removes the copy and keeps the worktree. Its pages wear a Vibeground badge with its branch.
 
 **Trash**:
-`~/.playground/trash`, where `playground rm` moves a deleted path as a same-disk rename, one `<UTC-ts>-<session>/<n>/` folder per delete with a `manifest.jsonl` line naming where it came from, so `playground rm --restore <id>` can put it back. The `trash-purge` beat in ops-tick empties each delete after 7 days, sooner while the disk has under 50 GB free (`packages/safe-delete`).
+`~/.playground/trash`, where `playground rm`, and the dashboard for a fixture stack's scratch folder and a Vibeground's record and `.env`, move a deleted path as a same-disk rename, one `<UTC-ts>-<session>/<n>/` folder per delete with a `manifest.jsonl` line naming where it came from, so `playground rm --restore <id>` can put it back. The `trash-purge` beat in ops-tick empties each delete after 7 days, sooner while the disk has under 50 GB free (`packages/safe-delete`).
 
 **Probe**:
 A throwaway session named `<id>-probe`, or `probe-<what>` when started before, spawned for one test and closed by its spawner the moment the test is done.
