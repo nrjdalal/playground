@@ -4,6 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { check } from "../../../scripts/hooks/no-extension-repo-write"
+import { NOT_RUN as ENGINE_NOT_RUN } from "../../../scripts/hooks/shell"
 import { storeWith } from "./render-set"
 
 // Made-up values: the login quillco, the scope acme synced with quillco/acme-skills by ext.repos, and the scope notes synced with its default name, quillco/playground-notes.
@@ -200,6 +201,24 @@ describe("a write to an extension repository's git data or name is refused", () 
   ])("the GitHub MCP's %s", async (name, input) => {
     await refused(tool(name, { owner: "quillco", repo: "acme-skills", ...input }))
     await refused(tool(name, { owner: "QuillCo", repo: "playground-notes", ...input }))
+  })
+})
+
+// #564: a scratch folder named git, passed to a program the hook does not know, read as that program running git
+describe("a path word read as git behind a program it does not know", () => {
+  test("its refusal names what it read and the ways through", async () => {
+    const reason = await refused(
+      bash("npx foo https://example.com $T/git push origin main", at("ext")),
+    )
+    expect(reason).toContain(
+      "It read a word whose path ends in /git as git run by npx, a program it does not know: a folder or file passes under a path that does not end in /git, and git run by npx is read the same when written by its own name, git.",
+    )
+    expect(reason.endsWith(`, git. ${ENGINE_NOT_RUN}`)).toBe(true)
+  })
+
+  test("git by its own name behind it is refused as before", async () => {
+    const reason = await refused(bash("npx foo git push origin main", at("ext")))
+    expect(reason).not.toContain("It read a word whose path ends in")
   })
 })
 
