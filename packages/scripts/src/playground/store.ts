@@ -113,6 +113,8 @@ export const contentOf = async (
 export type Io = {
   data: string
   out: Out
+  // the caller's PLAYGROUND_ROLE, which a factory session sets and the owner's own terminal does not
+  role?: string
   stdin: () => Promise<string>
   write: (path: string, data: string | Uint8Array) => Promise<unknown>
 }
@@ -232,6 +234,10 @@ export async function extCommand(words: string[], io: Io): Promise<number> {
   } else if (verb === "score" || verb === "accept" || verb === "reject") {
     const at = ref()
     const rev = need(positional[3], "a rev")
+    if (verb === "accept" && io.role)
+      throw new Error(
+        `accept is the owner's own call, so a session with a role (${io.role}) scores a proposal instead; the owner accepts it from a terminal with no PLAYGROUND_ROLE`,
+      )
     const who = whoOf(options)
     const score = verb === "score" ? Number(need(positional[4], "a score from 0 to 5")) : undefined
     if (score !== undefined && !(Number.isInteger(score) && score >= 0 && score <= 5))

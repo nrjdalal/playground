@@ -394,6 +394,7 @@ const code =
                                   {
                                     data: dataDir(),
                                     out: console.log,
+                                    role: process.env.PLAYGROUND_ROLE || undefined,
                                     stdin: () => Bun.stdin.text(),
                                     write: Bun.write,
                                   },
