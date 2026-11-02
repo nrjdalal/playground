@@ -550,6 +550,11 @@ describe("a quoted argument is read as a command line only where a program runs 
     ["rm of mktemp's quiet folder", 'T="$(mktemp -dq)"; rm -rf "$T"'],
     ["rm of mktemp's file", 'F=$(mktemp); rm -f "$F"'],
     ["rm of a pid-named temporary file", "rm -f /tmp/x.$$"],
+    ["rm of mktemp's folder from a literal template", 'T=$(mktemp -d /tmp/x.XXXX); rm -rf "$T"'],
+    [
+      "rm of mktemp's folder from a held variable's template",
+      'D=/tmp/w; T=$(mktemp -d "$D/x.XXXX"); rm -rf "$T"',
+    ],
   ])("%s runs from the home with TMPDIR set", async (_, command) => {
     const env = { HOME: homedir(), TMPDIR: tmpdir() }
     const raw = JSON.stringify({ cwd: homedir(), tool_input: { command }, tool_name: "Bash" })
