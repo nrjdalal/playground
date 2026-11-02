@@ -3,8 +3,14 @@ import { realpathSync } from "node:fs"
 import { homedir } from "node:os"
 import { basename, dirname, isAbsolute, resolve } from "node:path"
 
-// `variable` names the first shell variable a text expands, so a hook can tell `"$HERDR_BIN_PATH"` from any other unknown program.
-export type Text = { reads?: Text[]; unknown?: string; value: string; variable?: string }
+// `variable` names the first shell variable a text expands, so a hook can tell `"$HERDR_BIN_PATH"` from any other unknown program, and `vars` every one whose value the lexer left unknown, in order.
+export type Text = {
+  reads?: Text[]
+  unknown?: string
+  value: string
+  variable?: string
+  vars?: string[]
+}
 export type Word = Text & { procs?: Command[]; quoted: boolean }
 type Redirect = { body?: Text; fd: string; op: string; target?: Word }
 export type Command = {
@@ -241,6 +247,7 @@ const merge = (out: Text, part: Text): void => {
   out.value += part.value
   if (part.unknown) out.unknown ??= part.unknown
   if (part.variable) out.variable ??= part.variable
+  if (part.vars?.length) (out.vars ??= []).push(...part.vars)
   if (part.reads?.length) (out.reads ??= []).push(...part.reads)
 }
 
@@ -566,7 +573,11 @@ function dollar(lx: Lexer): Text {
   const variable = (name: string | undefined): Text =>
     name !== undefined && lx.known[name] !== undefined
       ? { value: lx.known[name], variable: name }
-      : { ...unknown("a shell variable"), variable: name }
+      : {
+          ...unknown("a shell variable"),
+          variable: name,
+          ...(name === undefined ? {} : { vars: [name] }),
+        }
   if (src.startsWith("$((", lx.i)) {
     const end = balanced(src, lx.i + 1, "(", ")")
     inner(lx, src.slice(lx.i + 3, end - 2))
@@ -703,7 +714,8 @@ export function parse(cmd: Command): Parsed {
   for (;;) {
     const wrapper = program(peek()?.value ?? "")
     const takes = WRAPPERS.get(wrapper)
-    if (!takes) break
+    // command -v and -V print where a name resolves and run nothing
+    if (!takes || (wrapper === "command" && /^-[vV]$/.test(rest.at(-2)?.value ?? ""))) break
     if (wrapper === "xargs") xargs ??= {}
     take()
     for (let w = peek(); w; w = peek()) {
@@ -848,7 +860,7 @@ export async function examine(
   } else if (name === "eval") {
     const script = args.map((a) => a.value).join(" ")
     verdict =
-      (args.some(unheld) ? here.unheld?.(name) : undefined) ??
+      (args.some((a) => unheldNow(a, here)) ? here.unheld?.(name) : undefined) ??
       (await run(lexScript(script, env), here, visit, builtins))
   } else verdict = await visit(cmd, parsed, here)
   await record(cmd, name, args, here)
@@ -977,13 +989,16 @@ async function shell(
   const slot = shellSlot(args, name)
   if (slot) return examine({ ...cmd, words: slot }, env, visit, builtins)
   const { inline, operand } = shellOperand(args, name)
+  // --version and --help print and exit, reading no script
+  if (!operand && args.some((a) => a.value === "--version" || a.value === "--help"))
+    return undefined
   if (operand && inline) {
     let script = operand.value
     if (xargs?.replace && script.includes(xargs.replace)) {
       const fed = await stdinOf(cmd, env)
       script = filled(script, xargs.replace, fed.unknown ? UNKNOWN : fed.value.trim())
     }
-    if (unheld({ ...operand, value: script })) {
+    if (unheldNow({ ...operand, value: script }, env)) {
       const verdict = env.unheld?.(name)
       if (verdict) return verdict
     }
@@ -1001,6 +1016,19 @@ async function shell(
 // Whether a script holds a part the hook cannot read: a `$(…)`'s output, a `curl`'s, a variable set by one.
 const unheld = (text: Text): boolean =>
   !!text.unknown || !!text.reads?.length || text.value.includes(UNKNOWN)
+
+// A -c script or eval's words, which the shell expands as it runs them: each unknown mark a variable the call set to a value the hook holds, or `$PWD` in a folder it follows, is read, so only a part from a $(…), a curl, a read or the environment counts.
+const unheldNow = (text: Text, env: Env): boolean => {
+  if (text.reads?.length) return true
+  const marks = text.value.split(UNKNOWN).length - 1
+  if (!marks) return !!text.unknown
+  if (marks !== text.vars?.length) return true
+  return text.vars.some((name) => {
+    if (name === "PWD" && !env.vars.has(name)) return !env.cwd
+    const value = env.vars.get(name)
+    return !value || unheld(value)
+  })
+}
 
 // A script's parts the hook can read, each part it cannot read (a `curl`'s output in a group) taken as a line break, so the rest is still walked.
 const known = (script: Text): string => script.value.replaceAll(UNKNOWN, "\n")

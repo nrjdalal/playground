@@ -509,6 +509,30 @@ describe("a direct write into the extensions root is refused, naming the owner's
     )
   })
 
+  test.each([
+    ["a -c script's variable the call set", `W=${WORK}; bash -c "cd $W && bun run test"`],
+    [
+      "the same behind run-slot",
+      `W=${WORK}; ~/.playground/ops/run-slot.sh w -- bash -c "cd $W && bun run test"`,
+    ],
+    ["eval of a variable the call set", `x='git status'; eval "$x"`],
+    ["$PWD in a folder it follows", `cd ${WORK} && bash -c "bun $PWD/x.ts"`],
+    ["a variable set again to a held value", `x=$(curl -s e.x); x=ok; bash -c "echo $x"`],
+    ["a shell's --version", "/bin/bash --version | head -1"],
+    ["command -v of a shell", "command -v bash"],
+  ])("%s, which it reads, runs", async (_, command) => {
+    expect(await bash(command, WORK)).toBeUndefined()
+  })
+
+  test.each([
+    ["a variable set from one it cannot read", `X=$(curl -s e.x); W=$X; bash -c "$W"`],
+    ["a held variable beside a $(…)", `x=ok; bash -c "$x $(curl -s e.x)"`],
+    ["a variable from the environment", `bash -c "$SOME_ENV_VAR"`],
+    ["$PWD after a cd it cannot follow", `cd "$(mktemp -d)" && bash -c "bun $PWD/x.ts"`],
+  ])("%s in a -c script is refused", async (_, command) => {
+    expect(await bash(command, WORK)).toContain("a script it cannot read whole")
+  })
+
   test("a slow lex refuses at the walk's deadline, whatever made it slow", async () => {
     const command = `echo ${"a(".repeat(20_000)}${")".repeat(20_000)}`
     const started = performance.now()
