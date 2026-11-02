@@ -176,9 +176,7 @@ Ops runs an update when the owner asks for one:
 Every PreToolUse guard runs from the main checkout and fails closed ([scripts/hooks/README.md](../../../../scripts/hooks/README.md#registered-in-both-settings-files)): with its scripts gone every factory session's Bash is refused, its Edit and Write too, and with its packages gone every session's guarded call is.
 No session can then repair it, so the restore runs from the owner's own `!` window, whose commands run with no hook:
 
-1. A session refused with `Restoring the main checkout` or `crashed (exit <n>)` tells its manager by `SendMessage`, which no guard holds, and each manager passes it up to the dispatcher, which tells the owner in its own chat, since `bun run ask` is Bash.
-   **Done when** the owner has the steps below.
-2. The owner puts the files back: `! git -C <main checkout> checkout -- .` while its `.git` is in place, else a fresh clone of the repo at the same path.
+1. The owner puts the files back: `! git -C <main checkout> checkout -- .` while its `.git` is in place, else a fresh clone of the repo at the same path.
    **Done when** `! git -C <main checkout> status` reads clean.
-3. The owner runs `! bun install --cwd <main checkout>`, then `! <main checkout>/scripts/link-skills.sh`.
+2. The owner runs `! bun install --cwd <main checkout>`, then `! <main checkout>/scripts/link-skills.sh`.
    **Done when** a factory session's Bash call runs again.
