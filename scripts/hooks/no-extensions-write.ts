@@ -476,6 +476,8 @@ function inspect(raw: string, environment: Environment) {
     cwd: directory,
     files: new Map(),
     known,
+    // zsh starts with OLDPWD at the folder it starts in
+    old: { dir: directory },
     process: environment,
     vars: new Map(),
   }

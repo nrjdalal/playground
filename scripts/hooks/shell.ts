@@ -26,10 +26,12 @@ type Lexer = {
 }
 type Lexed = { commands: Command[]; scopes: number[] }
 type Pending = { delim: string; quoted: boolean; redirect: Redirect; strip: boolean }
+// `old` is set by a hook that follows OLDPWD, `old.dir` the folder it holds (unset when the hook cannot tell), so a pushd of ~- or ~+ reads a folder there; a hook that leaves it unset reads both as typed.
 export type Env = {
   cwd?: string
   files: Map<string, Text>
   known: Record<string, string>
+  old?: { dir?: string }
   process: Record<string, string | undefined>
   vars: Map<string, Text>
 }
@@ -990,9 +992,15 @@ async function examineReading(
     for (const [key, value] of local) setVar(env.vars, key, value)
     if (builtins) verdict = await visit(cmd, parsed, here)
   } else if (name === "cd" || name === "pushd") {
-    env.cwd = cmd.detached ? undefined : await cdTarget(args, env)
-  } else if (name === "popd") env.cwd = undefined
-  else if (EXPORTS.has(name)) {
+    // a glob in the folder is judged as any program's words are, since it may land anywhere it matches
+    if (args.some((a) => /[*?[{(]/.test(a.value))) verdict = await visit(cmd, parsed, here)
+    const from = env.cwd
+    env.cwd = cmd.detached ? undefined : await cdTarget(name, args, env)
+    if (env.old) env.old = { dir: env.cwd === undefined ? undefined : from }
+  } else if (name === "popd") {
+    env.cwd = undefined
+    if (env.old) env.old = {}
+  } else if (EXPORTS.has(name)) {
     for (const w of args.filter((a) => ASSIGN.test(a.value))) {
       const eq = w.value.indexOf("=")
       setVar(env.vars, w.value.slice(0, eq), slice(w, eq + 1))
@@ -1015,11 +1023,21 @@ async function examineReading(
   return verdict
 }
 
-// The directory a cd lands in; undefined when the hook cannot tell, or the cd would fail and leave the shell where it was.
-async function cdTarget(args: Word[], env: Env): Promise<string | undefined> {
+// The directory a cd or pushd lands in; undefined when the hook cannot tell, or the cd would fail and leave the shell where it was.
+async function cdTarget(name: string, args: Word[], env: Env): Promise<string | undefined> {
   const dir = args.find((a) => !(a.value.startsWith("-") && a.value.length > 1))
   if (!dir) return homedir()
-  const path = dir.value === "-" ? undefined : pathOf(dir, env)
+  // in a hook that follows OLDPWD, a pushd's unquoted ~- is that folder and ~+ the current one, as the shell expands them
+  const tilde =
+    name === "pushd" && env.old && !dir.quoted && !dir.unknown && !dir.reads?.length
+      ? /^~([-+])(?=\/|$)/.exec(dir.value)
+      : null
+  const base = tilde && (tilde[1] === "-" ? env.old?.dir : env.cwd)
+  const path = tilde
+    ? base && base + dir.value.slice(2)
+    : dir.value === "-"
+      ? undefined
+      : pathOf(dir, env)
   if (!path) return undefined
   try {
     return (await Bun.file(path).stat()).isDirectory() ? path : undefined
