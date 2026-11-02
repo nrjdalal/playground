@@ -59,7 +59,7 @@ Only the first reading moves the folder, sets variables and records files for th
   A command that names its own folder keeps running on such a line, as everywhere else.
 - `places(env, fallback)` gives each folder the shell may be in as an `Env` of its own, so a hook judges a command in every folder it cannot rule out and refuses where any is the folder it guards: [no-main-checkout](#no-main-checkout) the main checkout, [no-unslotted-run](#no-unslotted-run) a worktree, [no-extensions-write](#no-extensions-write) the extensions root.
   Each hook reads an unread folder by its own fail-closed rule: no-main-checkout passes the folder the line started in as `places`'s fallback, and the hooks that place a repository, a socket or a file by the folder refuse the call they cannot place, as they already refuse one after a `cd` they cannot read.
-  A line whose folders the reader rules out keeps canary's reading, since nothing on it names where the shell goes (a `cd -` on a line that names no folder).
+  A line on which the reader can name no folder keeps canary's reading, since nothing on it says where the shell goes (a bare `cd -` with no earlier `cd` to return to).
   A command that names its own folder (`git -C <path>`, `bun --cwd <path>`, turbo's `--cwd`, `env -C <path>`) is judged by that path, whatever the shell's folder.
   Its tests are in `bun run test:file tests/scripts/hooks`.
 - Repetition is the open class, which canary shares and a follow-up holds: where a line may run one `cd` more times than the reader counts it, the reader keeps the folders of a single run, so a target that climbs reaches a folder it kept none of.
