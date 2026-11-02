@@ -362,9 +362,9 @@ describe("a direct write into the extensions root is refused, naming the owner's
   }, 20_000)
 
   // a variable set once, then a program after each, at the cap
-  const variables = (each: string) => {
+  const variables = (each: string, cap = 130_000) => {
     let script = ""
-    for (let i = 0; script.length < 130_000; i++) script += `V${i}=x${i}; ${each}`
+    for (let i = 0; script.length < cap; i++) script += `V${i}=x${i}; ${each}`
     return `${script}true`
   }
   const fill = (head: string, unit: string, tail: string) =>
@@ -378,8 +378,7 @@ describe("a direct write into the extensions root is refused, naming the owner's
       1_000,
     ],
     ["env -S", fill("env -S'", "-S ", "' true"), false, 1_000],
-    // each variable's path is still read from the filesystem, so these take longer, inside bounds canary misses (2.4 to 2.9 s and 6 to 9.5 s)
-    ["distinct variables", variables(""), false, 2_000],
+    // each variable's path is still read from the filesystem, so this takes longer, inside a bound the reader before its fix misses (6 to 9.5 s)
     ["distinct variables, each with a program", variables("true; "), false, 3_000],
     [
       "a printf escape format over many arguments",
@@ -398,6 +397,17 @@ describe("a direct write into the extensions root is refused, naming the owner's
     },
     60_000,
   )
+
+  // the reader before its fix took about 23 times as long at the cap as at an eighth of it, and takes 5 to 7.5 times now; a ratio holds on a loaded machine where a bound in seconds does not
+  test("distinct variables at the command cap take time in step with their count", async () => {
+    const time = async (cap: number) => {
+      const started = performance.now()
+      expect(await bash(variables("", cap), "/tmp")).toBeUndefined()
+      return performance.now() - started
+    }
+    const eighth = await time(16_250)
+    expect((await time(130_000)) / eighth).toBeLessThan(14)
+  }, 60_000)
 
   test.each([300, 8_000])(
     "an eval chain %d deep ahead of a write is refused inside the hook's time",
