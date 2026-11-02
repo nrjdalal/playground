@@ -2317,6 +2317,7 @@ gh api graphql -f query="$QUERY"`,
       ["at fed a job from a variable's file", `at now < "$F"`],
       ["at fed a job from an unquoted variable's file", `at now < $F`],
       ["at given -f a variable's file", `at -f "$F" now`],
+      ["at fed a variable's file inside bash -c's double quotes", `bash -c "at now < $F"`],
       ["a variable holding a recursive delete, run unquoted", `c="rm -rf ${NEVER_MADE}"; $c`],
       [
         "a variable holding a recursive delete, run unquoted under bash",
