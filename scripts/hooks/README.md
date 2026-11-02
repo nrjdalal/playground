@@ -176,7 +176,8 @@ Their tests are `bun run test:file tests/scripts/hooks`.
   It runs its check in a Worker (`scripts/hooks/no-extensions-write-worker.ts`) and refuses from the main thread when the Worker has not answered in 12 s, so a single step the deadline cannot interrupt (a regex, a copy) cannot hold it past its 15 s timeout; this costs about 10 ms a call.
   It reads `env -C<dir>` and `env --chdir=<dir>` as the folder the command runs in, as it reads `env -C <dir>`.
   It reads a command's text, so a program whose own code writes the root (a script file run by its path, a binary), a file the same line writes that git then runs (a hook in `.git/hooks`, a filter or diff driver in `.git/config`) and a path it cannot read (built at run time, in a `$(…)` or a variable) pass it.
-  It follows no payload of `fish -c`, `trap`, `alias`, `su -c`, `man -P`, `less -P`, GNU `parallel`, `osascript`, `open --args` or `make` as a runner's, so a same-user session can still get past it through any of them.
+  It follows no payload of `fish -c`, `trap`, `alias`, a function the same call defines (`cat() { sh -c "$1"; } && cat '<cmd>'`), `hash -p` (`hash -p /bin/sh cat && cat -c '<cmd>'`), `env -S` before a reader (`env -S 'sh -c "<cmd>"' cut`),
+  `su -c`, `man -P`, `less -P`, GNU `parallel`, `osascript`, `open --args` or `make` as a runner's, so a same-user session can still get past it through any of them.
   A write to a scope's GitHub repository, which `ops:ext-sync` renders into the root, is outside its reach too; [no-extension-repo-write](#no-extension-repo-write) refuses one.
   A path through a link into the root with `..` after the link (`echo x > <link>/../f`) is judged as typed, so a write by one passes.
   A `cd` or `pushd` it cannot follow (`cd -`, `cd ~-`, `popd`'s stack, a glob in the folder, a `CDPATH` lookup) leaves the command's folder unread, so a relative write after one passes.
