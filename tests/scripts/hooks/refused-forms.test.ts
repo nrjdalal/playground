@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSyn
 import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
 
+import { check as desktopOwnerApp } from "../../../scripts/hooks/no-desktop-owner-app"
 import { check as envDump } from "../../../scripts/hooks/no-env-dump"
 import { check as extensionRepoWrite } from "../../../scripts/hooks/no-extension-repo-write"
 import { check as extensionsWrite } from "../../../scripts/hooks/no-extensions-write"
@@ -106,6 +107,7 @@ storeWith(
   { "ext.links": { "made-up-org": ["acme-blue"] } },
 )
 const OWNED = storeWith(join(SCRATCH, "owned"), { "release-owners.json": '["qmarsh"]' })
+const DESKTOP = storeWith(join(SCRATCH, "desktop"), { "desktop-owner-apps.json": '["Slack"]' })
 // A data folder whose scope acme syncs with the made-up extension repo quillco/acme-skills.
 const SYNCED = storeWith(
   join(SCRATCH, "synced"),
@@ -119,6 +121,10 @@ type Run = (raw: string, home: string) => Promise<string | undefined>
 
 // Each guard's check with the environment its own test gives it, and the folders it runs in, each a cwd and the HOME that goes with it.
 const GUARDS: Record<Guard, { folders: Partial<Record<Folder, [string, string]>>; run: Run }> = {
+  "no-desktop-owner-app": {
+    folders: { checkout: [CHECKOUT, HOME] },
+    run: (raw) => desktopOwnerApp(raw, { PLAYGROUND_DATA_DIR: DESKTOP }),
+  },
   "no-env-dump": { folders: { checkout: [CHECKOUT, HOME] }, run: (raw) => envDump(raw) },
   "no-extension-repo-write": {
     folders: { checkout: [OTHER, HOME] },
