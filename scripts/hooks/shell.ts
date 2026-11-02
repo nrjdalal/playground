@@ -197,7 +197,7 @@ export function stdinShell(cmd: Command): "root" | "shell" | undefined {
   const wrapper = program(before[k].value)
   const shells = ROOT_SHELLS.get(wrapper) as Set<string>
   const { flags, values } = WRAPPERS.get(wrapper) as Options
-  // a cluster's letters up to its first value-taking one, which takes the rest as its value (`-su root`, `-us`): a shell letter among them, each a flag of the wrapper's own
+  // a cluster's letters up to its first value-taking one, which takes the rest as its value (`-su root`, `-su#0`, `-us`): a shell letter among them, each a flag of the wrapper's own
   const clustered = (value: string) => {
     let shell = false
     for (const c of value.slice(1)) {
@@ -210,7 +210,7 @@ export function stdinShell(cmd: Command): "root" | "shell" | undefined {
   // a listed option, alone or in a cluster of the wrapper's own flags (`-Es`, `-su root`), or a word the hook cannot read, which may hold one
   const starts = ({ quoted, value }: Word) =>
     marked(value) ||
-    (!quoted && (shells.has(value) || (/^-[A-Za-z]+$/.test(value) && clustered(value))))
+    (!quoted && (shells.has(value) || (/^-[A-Za-z]/.test(value) && clustered(value))))
   return !!first || before.slice(k + 1).some(starts) ? "root" : undefined
 }
 
