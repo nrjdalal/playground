@@ -1116,6 +1116,11 @@ if [ "$MODE" != resume ] || [ -n "$BRIEF" ]; then
   { [[ $BRIEF =~ ^[A-Za-z0-9._-][A-Za-z0-9._/-]*$ ]] && [[ /$BRIEF/ != */../* ]]; } || refuse "a brief is a file name under $SHOWN"
   # Only the file's name reaches the prompt, so a session reads the file itself.
   [ -f "$DATA/$BRIEF" ] || refuse "$SHOWN/$BRIEF is not a file"
+  # A brief filled from its role's template (new-reviewer.md for a reviewer) keeps none of that template's slots, so a session never starts on a bare slot, while a brief's prose about another role's slot is left alone.
+  template="$REPO/scripts/briefs/new-${ROLE:-}.md"
+  slots=$([ ! -f "$template" ] || grep -oE '__[A-Z0-9]+__' "$template" | sort -u || true)
+  left=$([ -z "$slots" ] || grep -oE '__[A-Z0-9]+__' "$DATA/$BRIEF" | sort -u | grep -Fx -f <(printf '%s\n' "$slots") | paste -sd ' ' - || true)
+  [ -z "$left" ] || refuse "$SHOWN/$BRIEF still holds the slot $left: fill each one, read the brief back, then run spawn.sh again (playbook's SESSIONS.md, the fill rule)"
 fi
 # A resume runs the session the way its start recorded; only a start takes a backend fresh.
 PIN_GIVEN=
