@@ -68,7 +68,7 @@ const repo = (mainFiles: Record<string, string>, head: Record<string, string>) =
   git(root, "update-ref", "refs/remotes/origin/main", "HEAD")
   put(root, head)
   git(root, "add", "-A")
-  git(root, "commit", "-q", "-m", "head")
+  git(root, "commit", "-q", "--allow-empty", "-m", "head")
   return root
 }
 
