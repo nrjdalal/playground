@@ -1,4 +1,4 @@
-// PreToolUse hook: refuses a factory session's write into the extensions root, where every guard's list, policy.json and each scope's sources live, and its playground CLI call that changes what a guard reads to allow or deny a call, so no session edits a list in one call and makes the guarded call in the next.
+// PreToolUse hook: refuses a factory session's write into the extensions root, where every guard's list, policy.json and each scope's sources live, and its playground CLI call that changes what a guard reads to allow or deny a call, so no session edits a list in one call and makes the guarded call in the next; the dispatcher alone runs a plain `ext sync` or `ext add`.
 import { existsSync, statSync } from "node:fs"
 import { homedir } from "node:os"
 import { dirname, join, resolve, sep } from "node:path"
@@ -6,7 +6,7 @@ import { dirname, join, resolve, sep } from "node:path"
 import { dataDir } from "../../packages/env/src/data-dir"
 import { extensionsDir } from "../../packages/settings/src/rendered"
 import { bunCall, FILE_TOOLS, gitCall, real } from "./no-main-checkout"
-import { fromFactory } from "./role"
+import { sessionOf, sessionRole } from "./role"
 import {
   type Command,
   type Env,
@@ -284,6 +284,16 @@ function cliWrite(words: Word[]): string | undefined {
     return `playground ext ${verb}, which changes what the guards' lists and policy.json render from`
 }
 
+const NAME = /^\w[\w.-]*$/
+const REPO = /^\w[\w.-]*\/[\w.-]+$/
+// The dispatcher's closed list, the CLI's words after its program: `ext sync [<scope>]` or `ext add <name> <owner/name>`, with no option and no word it cannot read; `ext add --yes` would create a repository, so it stays out.
+function dispatcherCall(words: Word[]): boolean {
+  const [command, verb, ...rest] = words.map((w) => w.value)
+  if (command !== "ext") return false
+  if (verb === "sync") return rest.length <= 1 && rest.every((w) => NAME.test(w))
+  return verb === "add" && rest.length === 2 && NAME.test(rest[0]!) && REPO.test(rest[1]!)
+}
+
 // The texts a word may name a path by: the word, the value after an =, and the rest after a one-letter option (-o<path>, -C<dir>).
 const texts = (word: Word): Word[] => {
   const v = word.value
@@ -354,6 +364,8 @@ function inspect(raw: string, environment: Environment) {
   }
   const seen = new Set<string>()
   let whole = false
+  // the dispatcher's call when the whole Bash command is one plain command, with no redirect, pipe, group or substitution; a line a wrapper or a pager runs is lexed anew, so it is never this one
+  let sole: Command | undefined
   // where each scope's variables were read to for their lines, and judged to for each cwd and remover, so each variable is read once rather than once a command
   type Cursors = WeakMap<Map<string, Text>, Map<string, number>>
   const varsRead: Cursors = new WeakMap()
@@ -389,11 +401,20 @@ function inspect(raw: string, environment: Environment) {
             .split(/\s+/)
             .filter(Boolean)
             .map((value) => ({ quoted: false, value }))
-    const write = reader
-      ? undefined
-      : cliCalls(parsed, env)
-          .map((words) => cliWrite(xargs?.replace ? words : [...words, ...stdinWords]))
-          .find(Boolean)
+    const dispatcher =
+      cmd === sole &&
+      !!first &&
+      ownFirst(cmd, first) &&
+      parsed.local.size === 0 &&
+      !xargs &&
+      isCli(first, [env.cwd]) &&
+      dispatcherCall(args)
+    const write =
+      reader || dispatcher
+        ? undefined
+        : cliCalls(parsed, env)
+            .map((words) => cliWrite(xargs?.replace ? words : [...words, ...stdinWords]))
+            .find(Boolean)
     if (write) return refuse(write)
     // a command with no program runs nothing that reads the environment, so only its own assignments count
     const vars = !reader && first ? since(varsRead, env.vars, "") : []
@@ -444,6 +465,19 @@ function inspect(raw: string, environment: Environment) {
     vars: new Map(),
   }
   whole = wholeLine(lexed.commands, env)
+  const [one] = lexed.commands
+  if (
+    environment.PLAYGROUND_ROLE === "dispatcher" &&
+    one &&
+    lexed.commands.length === 1 &&
+    !one.redirects.length &&
+    !one.stdin &&
+    !one.group &&
+    !one.inner &&
+    !one.detached &&
+    !one.words.some((word) => word.procs)
+  )
+    sole = one
   return run(lexed, env, visit, true)
 }
 
@@ -488,7 +522,9 @@ export async function guarded(
 
 if (import.meta.main) {
   const raw = await Bun.stdin.text()
-  const reason = (await fromFactory(raw)) ? await guarded(raw) : undefined
+  // the role read here, in the hook's own process, and never from the command's text, which may set PLAYGROUND_ROLE for the call it runs
+  const role = await sessionRole(process.env, sessionOf(raw))
+  const reason = role ? await guarded(raw, { ...process.env, PLAYGROUND_ROLE: role }) : undefined
   if (reason) {
     console.error(reason)
     process.exit(2)

@@ -149,7 +149,8 @@ const GUARDS: Record<Guard, { folders: Partial<Record<Folder, [string, string]>>
       "process worktree": [join(homedir(), "x", ".claude", "worktrees", "y"), homedir()],
       tmp: ["/tmp", HOME],
     },
-    run: (raw, home) => extensionsWrite(raw, { HOME: home }),
+    // as the dispatcher, the one role whose plain ext sync and ext add run, so every other form is held refused even from it
+    run: (raw, home) => extensionsWrite(raw, { HOME: home, PLAYGROUND_ROLE: "dispatcher" }),
   },
   "no-glm-heavy-path": {
     folders: { "glm repo": [GLM_REPO, HOME] },
