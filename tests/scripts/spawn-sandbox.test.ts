@@ -100,6 +100,22 @@ describe("a probe runs its shell commands in Claude Code's sandbox", () => {
     expect(denyWrite.filter((path: string) => !path.startsWith(`${main}/`))).toEqual([])
   })
 
+  test("a probe resumed in scripts/hooks writes that folder alone, in every checkout", async () => {
+    const own = join(main, "scripts", "hooks")
+    const r = await spawn(["resume", "probe-x", own, id], [], {}, undefined, {
+      name: "probe-x",
+      backend: "claude",
+    })
+    expect(r.code, r.err).toBe(0)
+    const { denyWrite } = builtOf(r, "factory-settings-sandbox-400k.json").sandbox.filesystem
+    const covered = (path: string) =>
+      denyWrite.some((d: string) => path === d || path.startsWith(`${d}/`))
+    expect(covered(own)).toBe(false)
+    expect(covered(join(main, "scripts", "spawn.sh"))).toBe(true)
+    expect(covered(join(main, ".git"))).toBe(true)
+    expect(covered(join(main, "README.md"))).toBe(true)
+  })
+
   test("a resumed probe keeps the sandbox", async () => {
     const name = "probe-x"
     const r = await spawn(["resume", name, root, id], [], {}, undefined, {
