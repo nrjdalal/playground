@@ -1409,7 +1409,7 @@ export async function check(
     join(lists, "slack-cleared.json"),
   )
   const refusal = loadedTerms.refusal ?? loadedCleared.refusal
-  if (refusal) return refusedList(raw, refusal)
+  if (refusal) return refusedList(raw, refusal, environment)
   terms = loadedTerms.list ?? EMPTY_TERMS
   CLEARED = loadedCleared.list ?? {}
   TERM = pattern(environment, checkout)
@@ -1418,13 +1418,30 @@ export async function check(
     return refusedList(
       raw,
       `no-playground-leak hook refused this call: ${read.refusal}, then run the call again.`,
+      environment,
     )
   return inspectAs(leakPolicy(new Set(guardedOrgs(read.settings.values))), raw, environment)
 }
 
-// A list's refusal, given only to a call that may write somewhere.
-export const refusedList = (raw: string, refusal: string): string | undefined =>
-  WRITE_CALL.test(subjectOf(raw)) ? refusal : undefined
+// Reads every write the engine can place, to any repository or host, as a hit, so a call it reads as writing nowhere is the only one that passes; an error falls back to WRITE_CALL.
+const ANY_WRITE: Policy = {
+  find: () => ({ detail: "a write", fix: "" }),
+  git: true,
+  guard: "a guard",
+  guarded: () => true,
+  hosts: true,
+  place: "anywhere",
+  what: "a write",
+  why: "",
+}
+
+// A list's refusal, given only to a call that may write somewhere: a git or gh read, or a read over a .git path, runs.
+export const refusedList = async (
+  raw: string,
+  refusal: string,
+  environment: Environment,
+): Promise<string | undefined> =>
+  (await inspectAs(ANY_WRITE, raw, environment)) ? refusal : undefined
 
 // Reads the call as a write under the policy given: an error refuses only a writing call whose text holds a hit.
 export async function inspectAs(

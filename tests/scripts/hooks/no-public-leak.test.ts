@@ -215,7 +215,7 @@ describe("it fails closed on its list", () => {
       "tell your lead, and the dispatcher hands the owner ! playground ext put <login> list no-public-leak <file> --reason <why> to type in the dispatcher's terminal window",
     )
     expect(reason).toContain(
-      "<file> is a JSON object of five arrays of strings: companies, handles, linearKeys, names, slackIds",
+      "<file> is a JSON object with an array of strings under each of companies, handles, linearKeys, names, slackIds",
     )
     expect(reason).not.toContain("ext import")
   })
