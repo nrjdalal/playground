@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import { parseArgs } from "node:util"
 
+import { machineRoots, sessionName } from "../trash"
 import { diffSkills, download, manifestFor, parseManifest, vendored, vendor } from "./stage"
 
 const USAGE = `Usage: bun run vendor:upstream [<sha or ref>]
@@ -55,7 +56,15 @@ const files = vendored(kept)
 const manifest = manifestFor(files)
 const oldManifest = join(CORE, "upstream", "MANIFEST")
 const oldText = existsSync(oldManifest) ? readFileSync(oldManifest, "utf8") : null
-const done = vendor({ coreDir: CORE, files, manifest, repo: REPO, sha })
+const done = vendor({
+  coreDir: CORE,
+  files,
+  manifest,
+  repo: REPO,
+  roots: machineRoots(),
+  session: await sessionName(),
+  sha,
+})
 if (!done.ok) {
   console.error(`vendor:upstream: the staged bytes do not match MANIFEST, leaving core as it was:
 ${done.mismatches.join("\n")}`)

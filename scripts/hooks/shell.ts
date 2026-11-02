@@ -172,7 +172,7 @@ function optionValue(word: string, { flags, values }: Options): "next" | "own" |
   return "own"
 }
 
-// The privilege wrappers' options that start a root shell, which reads its script from stdin when no command follows them: a closed list, read as a word or in a cluster of the wrapper's own flags
+// The privilege wrappers' options that start a root shell, which reads its script from stdin when no command follows them: a closed list, read as a word or in a cluster of the wrapper's own flags ahead of its first value-taking letter
 const ROOT_SHELLS = new Map([
   ["doas", new Set(["-s"])],
   ["sudo", new Set(["--login", "--shell", "-i", "-s"])],
@@ -197,21 +197,21 @@ export function stdinShell(cmd: Command): "root" | "shell" | undefined {
   if (k === -1) return undefined
   const wrapper = program(before[k].value)
   const shells = ROOT_SHELLS.get(wrapper) as Set<string>
-  const { flags } = WRAPPERS.get(wrapper) as Options
-  // a listed option, alone or in a cluster of the wrapper's own flags (`-Es`), or a word the hook cannot read, which may hold one
+  const { flags, values } = WRAPPERS.get(wrapper) as Options
+  // a cluster's letters up to its first value-taking one, which takes the rest as its value (`-su root`, `-su#0`, `-us`): a shell letter among them, each a flag of the wrapper's own
+  const clustered = (value: string) => {
+    let shell = false
+    for (const c of value.slice(1)) {
+      if (values.has(`-${c}`)) return shell
+      if (!flags.has(`-${c}`)) return false
+      shell ||= shells.has(`-${c}`)
+    }
+    return shell
+  }
+  // a listed option, alone or in a cluster of the wrapper's own flags (`-Es`, `-su root`), or a word the hook cannot read, which may hold one
   const starts = ({ quoted, value }: Word) =>
     marked(value) ||
-    (!quoted &&
-      (shells.has(value) ||
-        (/^-[A-Za-z]+$/.test(value) &&
-          value
-            .slice(1)
-            .split("")
-            .every((c) => flags.has(`-${c}`)) &&
-          value
-            .slice(1)
-            .split("")
-            .some((c) => shells.has(`-${c}`)))))
+    (!quoted && (shells.has(value) || (/^-[A-Za-z]/.test(value) && clustered(value))))
   return !!first || before.slice(k + 1).some(starts) ? "root" : undefined
 }
 

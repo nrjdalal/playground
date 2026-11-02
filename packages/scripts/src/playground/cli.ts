@@ -303,7 +303,7 @@ const roll = async (): Promise<number> => {
 const update = (to?: string): Promise<number> =>
   runUpdate(REPO, spawnRun, roll, console.log, to, join(dataDir(), "ops", "update-head"))
 
-// playground uninstall: the install's links, LaunchAgents and the Dashboard's stack (uninstall.ts); --purge, after asking, the data folder and the database too.
+// playground uninstall: the install's links, LaunchAgents and the Dashboard's stack (uninstall.ts); --purge, after asking, also the database, and moves the data folder aside.
 const uninstallAll = async (purge: boolean): Promise<number> => {
   const { database } = livePair()
   const checkout = dashboardCheckout(REPO)
