@@ -114,24 +114,57 @@ const RESERVED = new Set([
 // The words that close a compound command, whose output the hook does not follow.
 const GROUPING = new Set(["}", "done", "esac", "fi"])
 export const ASSIGN = /^[A-Za-z_]\w*=/
-const WRAPPERS = new Map<string, Set<string>>([
-  ["builtin", new Set()],
-  ["caffeinate", new Set(["-t", "-w"])],
-  ["command", new Set()],
-  ["doas", new Set(["-u"])],
-  ["env", new Set(["-P", "-S", "-u", "--unset"])],
-  ["exec", new Set(["-a"])],
-  ["nice", new Set(["-n", "--adjustment"])],
-  ["nocorrect", new Set()],
-  ["noglob", new Set()],
-  ["nohup", new Set()],
-  ["repeat", new Set()],
-  ["stdbuf", new Set(["-e", "-i", "-o"])],
-  ["sudo", new Set(["-C", "-D", "-g", "-h", "-p", "-R", "-r", "-T", "-t", "-U", "-u"])],
-  ["time", new Set()],
-  ["timeout", new Set(["-k", "--kill-after", "-s", "--signal"])],
-  ["xargs", new Set(["-a", "-d", "-E", "-I", "-L", "-n", "-P", "-s"])],
-])
+// Each wrapper's options, A to Z: its flags, then the options that take a value, short and long; parse reads a cluster (`-Hp`) letter by letter and a value attached (`-pwc`, `--prompt=wc`) or as the next word, and makes the program unknown at an option missing here, so a missing one costs a refusal, never a bypass
+type Options = { flags: Set<string>; values: Set<string> }
+const WRAPPERS = new Map<string, Options>(
+  Object.entries({
+    builtin: ["", ""],
+    caffeinate: ["-d -i -m -s -u", "-t -w"],
+    command: ["-p -V -v", ""],
+    doas: ["-L -n -s", "-a -C -u"],
+    env: ["-0 -i -v --debug --ignore-environment --null", "-P -S -u --unset"],
+    exec: ["-c -l", "-a"],
+    nice: ["", "-n --adjustment"],
+    nocorrect: ["", ""],
+    noglob: ["", ""],
+    nohup: ["", ""],
+    repeat: ["", ""],
+    stdbuf: ["", "-e -i -o --error --input --output"],
+    sudo: [
+      "-A -B -b -E -e -H -i -K -k -l -N -n -P -S -s -V -v --askpass --background --bell --edit --help --list --login --non-interactive --preserve-env --preserve-groups --remove-timestamp --reset-timestamp --set-home --shell --stdin --validate --version",
+      "-C -D -g -h -p -R -r -T -t -U -u --chdir --chroot --close-from --command-timeout --group --host --other-user --prompt --role --type --user",
+    ],
+    time: [
+      "-a -h -l -p -q -V -v --append --portability --quiet --verbose",
+      "-f -o --format --output",
+    ],
+    timeout: ["-f -p -v --foreground --preserve-status --verbose", "-k -s --kill-after --signal"],
+    xargs: [
+      "-0 -o -p -r -t -x --exit --interactive --no-run-if-empty --null --open-tty --show-limits --verbose",
+      "-a -d -E -L -n -P -R -S -s --arg-file --delimiter --max-args --max-chars --max-lines --max-procs --process-slot-var",
+    ],
+  }).map(([name, [flags, values]]) => [
+    name,
+    { flags: new Set(flags.split(" ")), values: new Set(values.split(" ")) },
+  ]),
+)
+
+// Where a wrapper's option word leaves its value: "own" when it takes none or carries it, "next" when the next word is its value, or undefined for an option the wrapper's list lacks
+function optionValue(word: string, { flags, values }: Options): "next" | "own" | undefined {
+  if (word.startsWith("--")) {
+    const eq = word.indexOf("=")
+    const name = eq === -1 ? word : word.slice(0, eq)
+    if (values.has(name)) return eq === -1 ? "next" : "own"
+    return flags.has(name) ? "own" : undefined
+  }
+  for (let k = 1; k < word.length; k++) {
+    const option = `-${word[k]}`
+    if (values.has(option)) return k === word.length - 1 ? "next" : "own"
+    if (!flags.has(option)) return undefined
+  }
+  return "own"
+}
+
 // Wrappers that take one positional argument (a count or a duration) before the command.
 const COUNTED = new Set(["repeat", "timeout"])
 export const SHELLS = new Set(["bash", "dash", "ksh", "sh", "zsh"])
@@ -697,8 +730,8 @@ export function parse(cmd: Command): Parsed {
   while (ASSIGN.test(peek()?.value ?? "")) assign(take() as Word)
   for (;;) {
     const wrapper = program(peek()?.value ?? "")
-    const takes = WRAPPERS.get(wrapper)
-    if (!takes) break
+    const options = WRAPPERS.get(wrapper)
+    if (!options) break
     if (wrapper === "xargs") xargs ??= {}
     take()
     for (let w = peek(); w; w = peek()) {
@@ -720,9 +753,24 @@ export function parse(cmd: Command): Parsed {
         const attached = /^(?:-[IiJ]|--replace=?)(.*)$/.exec(v)?.[1] ?? ""
         take()
         xargs.replace = v === "-I" || v === "-J" ? take()?.value : attached || "{}"
-      } else if (takes.has(v)) rest.length = Math.max(0, rest.length - 2)
-      else if (v.startsWith("-") && v !== "-") take()
-      else break
+      } else if (v === "--") {
+        take()
+        break
+      } else if (v.startsWith("-") && v !== "-") {
+        const end = marked(v) ? undefined : optionValue(v, options)
+        const value = end === "next" ? rest[rest.length - 2] : undefined
+        // an option it cannot read, or a value that may expand to no word, leaves the program unknown, its words kept for a hook to search
+        if (!end || (value && marked(value.value)))
+          return {
+            args: rest.reverse(),
+            chdir,
+            first: { ...unknown(`a ${wrapper} option it cannot read`), quoted: false },
+            local,
+            name: program(UNKNOWN),
+            xargs,
+          }
+        rest.length = Math.max(0, rest.length - (end === "next" ? 2 : 1))
+      } else break
     }
     if (COUNTED.has(wrapper)) take()
   }
