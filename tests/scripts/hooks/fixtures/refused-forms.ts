@@ -55,7 +55,7 @@ export type Group = {
   folders: Folder[]
   guards: Guard[]
   rows: (paths: Paths) => readonly Row[]
-  source: "#292" | "#356" | "#402" | "#411" | "#446" | "#456" | "#466" | "#468"
+  source: "#292" | "#356" | "#402" | "#411" | "#446" | "#456" | "#466" | "#468" | "#469"
 }
 
 // The rows a guard-loosening PR lets run on purpose, each written as a row's "<source> <what>" for all its cases, or as one case's "<source> <what> | <guard> | <folder>"; canary lets none run.
@@ -1648,5 +1648,95 @@ gh api graphql -f query="$QUERY"`,
       ["a pushd of a folder beside -0", `pushd /usr; pushd ${DATA}; pushd extensions -0; touch f`],
     ],
     source: "#468",
+  },
+  {
+    folders: ["process home", "process data folder", "process worktree"],
+    guards: ["no-extensions-write"],
+    rows: () => [
+      ["a delete behind sudo, its -p value in a cluster", "sudo -Hp wc watch 'rm -rf ~'"],
+      ["a delete behind sudo --prompt", "sudo --prompt wc watch 'rm -rf ~'"],
+      ["a delete behind time -o", "/usr/bin/time -o cat watch 'rm -rf ~'"],
+      ["a delete behind doas -a", "doas -a wc watch 'rm -rf ~'"],
+      ["a delete behind doas -C", "doas -C wc watch 'rm -rf ~'"],
+      ["a delete behind a sudo option it does not know", "sudo -Z wc watch 'rm -rf ~'"],
+      ["a delete behind time -o's value in a variable", "/usr/bin/time -o $F cat watch 'rm -rf ~'"],
+      ["a delete behind sudo, its -p value attached", "sudo -pwc watch 'rm -rf ~'"],
+      ["a delete behind sudo --prompt=", "sudo --prompt=wc watch 'rm -rf ~'"],
+      ["a delete behind time, its -o value attached", "/usr/bin/time -ocat watch 'rm -rf ~'"],
+      ["a delete behind sudo's options and --", "sudo -Hp wc -- watch 'rm -rf ~'"],
+      ["a delete behind nice's -<number>", "nice -10 watch 'rm -rf ~'"],
+      ["a file name piped to sudo's shell", "cut 'rm -rf ~' | sudo -s"],
+      [
+        "a removal printed to doas's shell",
+        `awk 'BEGIN{print "rm -rf ~"}' | doas -s`,
+        "process home",
+      ],
+      [
+        "a removal printed to sudo's login shell",
+        `awk 'BEGIN{print "rm -rf ~"}' | sudo -i`,
+        "process home",
+      ],
+      [
+        "a removal printed to a reader-named function running sudo's shell",
+        `function grep { sudo -s; }; awk 'BEGIN{print "rm -rf ~"}' | grep x`,
+        "process home",
+      ],
+      [
+        "a removal printed to sudo with its user in a variable",
+        `awk 'BEGIN{print "rm -rf ~"}' | sudo -u $U`,
+        "process home",
+      ],
+    ],
+    source: "#469",
+  },
+  {
+    folders: ["checkout"],
+    guards: ["no-stash"],
+    rows: () => [
+      ["a stash behind sudo, its -p value in a cluster", "sudo -Hp echo git stash"],
+      ["a stash behind sudo --prompt", "sudo --prompt echo git stash"],
+      ["a stash behind time -o", "/usr/bin/time -o echo git stash"],
+      ["a stash behind doas -a", "doas -a echo git stash"],
+      ["a stash behind a sudo option it does not know", "sudo -Z echo git stash"],
+      ["a stash pop in a shell behind nice's -<number>", "nice -10 sh -c 'git stash pop'"],
+      ["a stash behind nice -n with its value in a variable", "nice -n $N git stash"],
+      ["a stash behind a timeout option it does not know", "timeout -Q 5 git stash"],
+    ],
+    source: "#469",
+  },
+  {
+    folders: ["checkout"],
+    guards: ["no-main-checkout"],
+    rows: ({ MAIN }) => [
+      ["a commit behind nice's -<number>", `nice -10 git -C ${MAIN} commit -m x`],
+      [
+        "a commit behind nice -n with its value in a variable",
+        `nice -n $N git -C ${MAIN} commit -m x`,
+      ],
+      [
+        "a commit behind sudo -u with its value in a variable",
+        `sudo -u $U git -C ${MAIN} commit -m x`,
+      ],
+      ["a commit behind a sudo option it does not know", `sudo -Z git -C ${MAIN} commit -m x`],
+    ],
+    source: "#469",
+  },
+  {
+    folders: ["checkout"],
+    guards: ["no-kill-by-name"],
+    rows: () => [
+      ["pkill by pattern behind nice's -<number>", "nice -10 pkill -f x"],
+      ["pkill by pattern behind a timeout option it does not know", "timeout -Q 5 pkill -f x"],
+    ],
+    source: "#469",
+  },
+  {
+    folders: ["checkout"],
+    guards: ["no-env-dump"],
+    rows: () => [
+      ["printenv behind nice's -<number>", "nice -10 printenv"],
+      ["printenv behind a sudo option it does not know", "sudo -Z printenv"],
+    ],
+    source: "#469",
   },
 ]
