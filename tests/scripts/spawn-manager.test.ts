@@ -338,6 +338,33 @@ describe("a manager starts in a workspace of its own, in the leads worktree", ()
     },
   )
 
+  test("a kept leads worktree with no node_modules is installed at the next manager start", async () => {
+    const r = await spawn(
+      ["manager", "optimizer", "b.md"],
+      [],
+      { NO_LEADS: "1" },
+      undefined,
+      undefined,
+      (home) => {
+        checkout(home)
+        const factory = join(home, "code", "factory")
+        git(
+          factory,
+          "worktree",
+          "add",
+          "-q",
+          "--track",
+          "-B",
+          "leads",
+          join(factory, ".claude", "worktrees", "leads"),
+          "origin/main",
+        )
+      },
+    )
+    expect(r.code).toBe(0)
+    expect(installs(r.home)).toHaveLength(1)
+  })
+
   test("a failed leads install that playground rm refuses keeps the worktree and names the refusal", async () => {
     const r = await spawn(
       ["manager", "optimizer", "b.md"],

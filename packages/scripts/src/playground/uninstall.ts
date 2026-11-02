@@ -1,5 +1,5 @@
 // playground uninstall: the LaunchAgents, the Dashboard's stack, the home skill set and the links go; the data folder and the database stay unless --purge, which asks first, then removes the database and moves the data folder aside.
-import { readdirSync, readFileSync, renameSync, rmSync } from "node:fs"
+import { lstatSync, readdirSync, readFileSync, renameSync, rmSync } from "node:fs"
 import { join } from "node:path"
 
 import { linksInto } from "./links"
@@ -87,6 +87,10 @@ export const uninstall = async (o: Options): Promise<number> => {
     return failed ? 1 : 0
   }
   await o.run(["docker", "rm", "-fv", o.database], true)
+  if (!lstatSync(o.data, { throwIfNoEntry: false })) {
+    o.log(`removed the database ${o.database}; there was no ${o.data} to move aside`)
+    return failed ? 1 : 0
+  }
   const aside = `${o.data}-purged-${new Date().toISOString().replace(/[-:]|\.\d{3}/g, "")}`
   renameSync(o.data, aside)
   o.log(

@@ -270,7 +270,7 @@ const roll = async (): Promise<number> => {
 const update = (to?: string): Promise<number> =>
   runUpdate(REPO, spawnRun, roll, console.log, to, join(dataDir(), "ops", "update-head"))
 
-// playground uninstall: the install's links, LaunchAgents and the Dashboard's stack (uninstall.ts); --purge, after asking, the data folder and the database too. The database's name is loaded only here, since it lives in the API's tree.
+// playground uninstall: the install's links, LaunchAgents and the Dashboard's stack (uninstall.ts); --purge, after asking, also the database, and moves the data folder aside. The database's name is loaded only here, since it lives in the API's tree.
 const uninstallAll = async (purge: boolean): Promise<number> => {
   const { livePair } = await import("../../../../api/hono/src/lib/dev/live-dashboard")
   const { database } = livePair()

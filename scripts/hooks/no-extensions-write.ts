@@ -269,7 +269,7 @@ function cliWrite(words: Word[]): string | undefined {
   if (command === "migrate") return "playground migrate, which seeds the lists and settings"
   if (command === "uninstall")
     return words.some((w) => w.value === "--purge")
-      ? "playground uninstall --purge, which removes the data folder"
+      ? "playground uninstall --purge, which moves the data folder aside"
       : undefined
   const switches = SWITCHES[command]
   if (!switches) return

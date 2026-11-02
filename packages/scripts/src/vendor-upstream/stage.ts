@@ -189,6 +189,12 @@ export const vendor = ({
   moveAside(join(coreDir, "upstream"), "upstream")
   renameSync(join(staging, "upstream"), join(coreDir, "upstream"))
   rmSync(staging, { force: true, recursive: true })
-  toTrash(replaced, reason, roots, session)
+  try {
+    toTrash(replaced, reason, roots, session)
+  } catch (error) {
+    throw new Error(
+      `${(error as Error).message}; the replaced folders stay in ${replaced}, which the next run moves to the trash first`,
+    )
+  }
   return { ok: true, files: entries.length }
 }

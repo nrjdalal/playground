@@ -33,13 +33,13 @@ const run = (cmd: string[], cwd = ".") => {
   if (exitCode !== 0) process.exit(exitCode ?? 1)
 }
 
-await rm("web/next/components.json", { force: true })
 toTrash(
   resolve("web/next/src/components/ui"),
   "sync:shadcn rescaffolds it",
   machineRoots(),
   await sessionName(),
 )
+await rm("web/next/components.json", { force: true })
 run(
   ["bunx", "shadcn@latest", "init", "--template", "next", "--preset", "a16C8", "--base", "base"],
   "web/next",

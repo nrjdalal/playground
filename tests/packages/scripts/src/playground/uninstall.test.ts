@@ -138,6 +138,16 @@ describe("uninstall", () => {
     expect(said.at(-1)).toContain(join(home, aside!))
   })
 
+  test("a second --purge finds no data folder, says so and moves nothing", async () => {
+    const { base, home, said } = install()
+    expect(await uninstall({ ...base, confirm: async () => true, purge: true })).toBe(0)
+    expect(await uninstall({ ...base, confirm: async () => true, purge: true })).toBe(0)
+    expect(said.at(-1)).toContain("there was no")
+    expect(readdirSync(home).filter((name) => name.startsWith(".playground-purged-"))).toHaveLength(
+      1,
+    )
+  })
+
   test("removes the home skill set and its marketplace from Claude Code, naming both, and a second run calls neither", async () => {
     const { base, calls, said } = install()
     const removals = () =>

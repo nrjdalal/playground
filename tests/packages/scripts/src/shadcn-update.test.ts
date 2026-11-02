@@ -16,6 +16,9 @@ const SOURCE = join(
 // The script runs on import, so its delete is read from its text; toTrash's own behaviour is trash.test.ts's.
 test("sync:shadcn moves the ui folder to the trash with toTrash, and deletes nothing recursively", async () => {
   const text = await Bun.file(SOURCE).text()
-  expect(text).toMatch(/toTrash\(\s*resolve\("web\/next\/src\/components\/ui"\)/)
-  expect(text).not.toContain("recursive")
+  const trashed = text.search(/toTrash\(\s*resolve\("web\/next\/src\/components\/ui"\)/)
+  expect(trashed).toBeGreaterThan(-1)
+  expect(trashed).toBeLessThan(text.indexOf('rm("web/next/components.json"'))
+  expect(text.indexOf('rm("web/next/components.json"')).toBeLessThan(text.indexOf("shadcn@latest"))
+  expect(text).not.toMatch(/recursive:\s*true/)
 })
