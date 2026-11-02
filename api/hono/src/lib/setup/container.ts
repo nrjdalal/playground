@@ -9,6 +9,7 @@ import { migrate as drizzleMigrate } from "drizzle-orm/bun-sql/migrator"
 import {
   CONTAINER_LIST,
   containersOf,
+  isLiveDatabase,
   type LiveDashboard,
   liveDatabaseHeld,
   livePair,
@@ -142,6 +143,16 @@ export async function startLocal({
   if (!launched?.container) {
     const said = `${result.stderr}\n${result.stdout}`.trim().slice(0, 300)
     throw new SetupError(`pglaunch printed no database address: ${said || `exit ${result.code}`}`)
+  }
+  // pglaunch makes its container with no restart policy, so the live dashboard's would stay stopped after a reboot
+  if (isLiveDatabase(launched.container, live)) {
+    onStep("Keeping Postgres running after a restart")
+    const kept = await docker(["update", "--restart", "unless-stopped", launched.container])
+    if (kept.code !== 0) {
+      throw new SetupError(
+        `docker update --restart unless-stopped ${launched.container} failed: ${kept.stderr.trim() || `exit ${kept.code}`}`,
+      )
+    }
   }
   onStep("Waiting for Postgres")
   let ready = false

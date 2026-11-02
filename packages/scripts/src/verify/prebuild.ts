@@ -1,6 +1,6 @@
 import "@packages/env/aliases"
-import { realpathSync } from "node:fs"
-import { join } from "node:path"
+import { existsSync, readFileSync, realpathSync } from "node:fs"
+import { dirname, join } from "node:path"
 
 import { withoutShebang } from "../shebang"
 
@@ -56,6 +56,26 @@ export const isMainCheckout = (root: string, repo: string | undefined): boolean 
   }
 }
 
+// A worktree installed before a canary pull that added a workspace package, or a dependency of one, lacks its links, and its build then stops on "tsdown: command not found"; pr:merge refuses it naming the install that fixes it, while verify and `bun run dev`, the live dashboard's serve among them, build on as before.
+export const staleInstall = (target: string, root: string): string | null => {
+  const { workspaces } = JSON.parse(readFileSync(join(root, "package.json"), "utf8"))
+  const globs: string[] = Array.isArray(workspaces) ? workspaces : (workspaces?.packages ?? [])
+  const missing = globs.flatMap((glob) =>
+    [...new Bun.Glob(`${glob}/package.json`).scanSync({ cwd: root })].flatMap((manifest) => {
+      const dir = dirname(manifest)
+      const pkg = JSON.parse(readFileSync(join(root, manifest), "utf8"))
+      const deps = Object.keys({ ...pkg.dependencies, ...pkg.devDependencies }).filter(
+        (dep) =>
+          !existsSync(join(root, dir, "node_modules", dep)) &&
+          !existsSync(join(root, "node_modules", dep)),
+      )
+      return deps.length > 0 ? [`${dir} (${deps.join(", ")})`] : []
+    }),
+  )
+  if (missing.length === 0) return null
+  return `${target}: this worktree's install predates its bun.lock and misses ${missing.join(", ")}; run \`~/.playground/ops/run-slot.sh <your name> -- bun install --ignore-scripts --cwd ${root}\`, then run ${target} again`
+}
+
 if (import.meta.main) {
   const target = process.argv[2] ?? "verify"
   const missing = unbuilt(workspaceImports(await sourcesIn(target)), dirOf(target))
@@ -63,6 +83,11 @@ if (import.meta.main) {
     console.error(
       `${target}: ${missing.join(", ")} is unbuilt here, and the factory's main checkout builds only packages/* after a pull; run it from your own worktree`,
     )
+    process.exit(1)
+  }
+  const stale = missing.length > 0 && target === "pr-merge" ? staleInstall(target, ROOT) : null
+  if (stale) {
+    console.error(stale)
     process.exit(1)
   }
   if (missing.length > 0) {
