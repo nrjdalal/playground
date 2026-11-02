@@ -517,7 +517,7 @@ function word(lx: Lexer): Word {
     else if (c === "$") merge(out, dollar(lx))
     else if (c === "`") merge(out, backtick(lx))
     else if (c === "~" && lx.i === start && (next === "" || next === "/" || BREAK.has(next))) {
-      out.value += homedir()
+      out.value += lx.known.HOME ?? homedir()
       lx.i++
     } else {
       out.value += c
@@ -825,7 +825,7 @@ export async function examine(
     if (builtins) verdict = await visit(cmd, parsed, here)
   } else if (name === "cd" || name === "pushd" || name === "popd") {
     // a glob in the folder is judged as any program's words are, since it may land anywhere it matches
-    if (name !== "popd" && args.some((a) => globAt(a) !== -1))
+    if (name !== "popd" && args.some((a) => /[*?[{(]/.test(a.value)))
       verdict = await visit(cmd, parsed, here)
     await moveDir(name, args, env, local, !!cmd.detached)
   } else if (EXPORTS.has(name)) {

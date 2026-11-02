@@ -270,11 +270,28 @@ function inspect(raw: string, environment: Environment) {
       if (above(path, remover)) return `${path}, which holds ${root}`
       const glob = GLOB.exec(text.value)
       if (glob && !marked(text.value)) {
-        const dir = pathOf({ value: `${text.value.slice(0, glob.index)}x` }, env)
-        const folder = dir && dirname(dir)
-        if (folder && (inRoot(folder) || above(folder, true)))
-          return `${text.value}, a glob in ${folder}`
+        const folder = globReach(text.value, glob.index, env)
+        if (folder) return `${text.value}, a glob in ${folder}`
       }
+    }
+  }
+  // The folder a glob may reach the root from: one in the root, or one above it where the glob's first component may name the root's next folder, as typed (any dot name included) or through an entry there that leads into or above the root; an extglob, a zsh qualifier or a `..` after it may lead anywhere
+  const globReach = (value: string, glob: number, env: Env): string | undefined => {
+    const cut = value.lastIndexOf("/", glob) + 1
+    const dir = pathOf({ value: `${value.slice(0, cut)}x` }, env)
+    const folder = dir && dirname(dir)
+    if (!folder || inRoot(folder)) return folder
+    if (!above(folder, true)) return undefined
+    const [first, ...rest] = value.slice(cut).split("/")
+    if (/[()]/.test(first) || rest.includes("..")) return folder
+    const at = real(folder)
+    const next = root.slice(at === sep ? 1 : at.length + 1).split(sep)[0]
+    const pattern = new Bun.Glob(first)
+    if (pattern.match(next)) return folder
+    if (!existsSync(folder)) return undefined
+    for (const entry of pattern.scanSync({ cwd: folder, dot: true, onlyFiles: false })) {
+      const path = join(folder, entry)
+      if (inRoot(path) || above(path, true)) return folder
     }
   }
   const seen = new Set<string>()
