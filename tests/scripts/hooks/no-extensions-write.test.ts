@@ -1287,3 +1287,15 @@ describe("the gated keys are every key the guards read", () => {
     expect(GUARD_KEYS.has("paths.codeRoot")).toBe(true)
   })
 })
+
+describe("a refusal for a value the hook does not hold names it in readable text", () => {
+  test.each([
+    ["a variable", "rm -f $X/x", "rm on $X/x,"],
+    ["a loop variable", 'for d in a b; do rm -f "$d/x"; done', 'rm on "$d/x",'],
+    ["a variable inside a nested shell's script", 'bash -c "rm -f $X/x"', "rm on $…/x,"],
+  ])("%s", async (_, command, named) => {
+    const reason = await bash(command, "/tmp")
+    expect(reason).toContain(named)
+    expect(reason).not.toContain("\u0000")
+  })
+})
