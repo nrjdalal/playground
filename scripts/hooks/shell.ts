@@ -203,10 +203,17 @@ export function stdinShell(cmd: Command): "root" | "shell" | undefined {
     (!quoted &&
       (shells.has(value) ||
         (/^-[A-Za-z]+$/.test(value) &&
-          [...value.slice(1)].every((c) => flags.has(`-${c}`)) &&
-          [...value.slice(1)].some((c) => shells.has(`-${c}`)))))
+          value
+            .slice(1)
+            .split("")
+            .every((c) => flags.has(`-${c}`)) &&
+          value
+            .slice(1)
+            .split("")
+            .some((c) => shells.has(`-${c}`)))))
   return !!first || before.slice(k + 1).some(starts) ? "root" : undefined
 }
+
 // Wrappers that take one positional argument (a count or a duration) before the command.
 const COUNTED = new Set(["repeat", "timeout"])
 export const SHELLS = new Set(["bash", "dash", "ksh", "sh", "zsh"])
