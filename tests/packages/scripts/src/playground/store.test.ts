@@ -141,7 +141,7 @@ describe("playground ext", () => {
     expect(author()).toBe("a-worker")
   })
 
-  test("a score by the proposal's own author is refused, and another session's score records, its 5 accepting", async () => {
+  test("a score by the proposal's own author, named, unnamed or the owner, is refused, and another session's score records, its 5 accepting", async () => {
     const at = folder("self-score")
     writeFileSync(join(scratch, "self.md"), "Review another's work.\n")
     const put = await ext(
@@ -169,6 +169,26 @@ describe("playground ext", () => {
     expect(readFileSync(join(scopeDir(at, "tester"), "rules/self.md"), "utf8")).toBe(
       "Review another's work.\n",
     )
+    for (const [key, role, writer] of [
+      ["unnamed", "worker", "worker"],
+      ["mine", undefined, "owner"],
+    ] as const) {
+      const proposal = await ext(
+        at,
+        ["put", "tester", "rule", key, join(scratch, "self.md"), "--reason", "r"],
+        "",
+        role,
+      )
+      const { rev: proposed } = JSON.parse(proposal.out) as { rev: string }
+      const scored = await ext(
+        at,
+        ["score", "tester", "rule", key, proposed, "5", "--reason", "r"],
+        "",
+        role,
+      )
+      expect(scored.code).toBe(1)
+      expect(scored.err).toContain(`${writer} wrote this proposal, so another session scores it`)
+    }
   })
 
   test("accept from a session with a role is refused, by --by owner too and before its words are read, and the owner's own accept with no role accepts", async () => {
