@@ -1,9 +1,10 @@
 import { afterAll, describe, expect, test } from "bun:test"
-import { mkdtempSync, readdirSync, rmSync } from "node:fs"
+import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-const SCRIPT = join(import.meta.dir, "../../../../../packages/scripts/src/trace-count/ci.ts")
+const ROOT = join(import.meta.dir, "../../../../..")
+const SCRIPT = join(ROOT, "packages/scripts/src/trace-count/ci.ts")
 
 const LIST = JSON.stringify({
   companies: ["made-up-co"],
@@ -18,8 +19,15 @@ const ARCHIVE = "qzxowner/qzxarchive"
 const scratch = mkdtempSync(join(tmpdir(), "trace-count-ci-test-"))
 afterAll(() => rmSync(scratch, { force: true, recursive: true }))
 
-const run = (secrets: Record<string, string>) => {
-  const env: Record<string, string | undefined> = { ...process.env, ...secrets, TMPDIR: scratch }
+// A run with the TRACE_COUNT repository variable on, as a repo that holds the secrets sets it, unless the case gives its own value or "unset".
+const run = (secrets: Record<string, string>, traceCount = "on") => {
+  const env: Record<string, string | undefined> = {
+    ...process.env,
+    ...secrets,
+    TMPDIR: scratch,
+    TRACE_COUNT: traceCount,
+  }
+  if (traceCount === "unset") delete env.TRACE_COUNT
   for (const key of ["FACTORY_ARCHIVE_REPO", "NO_PUBLIC_LEAK_LIST", "OWNER_NAMES"])
     if (!(key in secrets)) delete env[key]
   const child = Bun.spawnSync([process.execPath, SCRIPT], { env })
@@ -27,7 +35,27 @@ const run = (secrets: Record<string, string>) => {
   return { code: child.exitCode, err: child.stderr.toString(), out: child.stdout.toString() }
 }
 
-describe("trace-count in CI (PG-112)", () => {
+describe("trace-count in CI is opt-in, so a fork without the secrets keeps green checks", () => {
+  test.each(["unset", "", "off", "yes"])(
+    "with TRACE_COUNT %p it prints one notice line and exits 0, though no secret is set",
+    (value) => {
+      const { code, err, out } = run({}, value)
+      expect(code).toBe(0)
+      expect(err).toBe("")
+      expect(out.trimEnd().split("\n")).toEqual([
+        "::notice title=Trace count::trace-count ci: off, since the repository variable TRACE_COUNT is not on; set it to on, with the secrets FACTORY_ARCHIVE_REPO, NO_PUBLIC_LEAK_LIST and OWNER_NAMES, to count",
+      ])
+    },
+  )
+
+  test("the Lint and Build job hands the step the repository variable", () => {
+    const workflow = readFileSync(join(ROOT, ".github/workflows/auto-check-build.yml"), "utf8")
+    const step = workflow.slice(workflow.indexOf("- name: Trace count"))
+    expect(step).toContain("TRACE_COUNT: ${{ vars.TRACE_COUNT }}")
+  })
+})
+
+describe("trace-count in CI with TRACE_COUNT on (PG-112)", () => {
   test("with no secret set, it exits 2 and names each one, so CI never passes on a count of nothing", () => {
     const { code, err } = run({})
     expect(code).toBe(2)
