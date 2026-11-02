@@ -15,6 +15,8 @@ import {
   knownVariables,
   lex,
   marked,
+  onlyReserved,
+  ownFirst,
   parse,
   type Parsed,
   pathOf,
@@ -196,7 +198,17 @@ function programLines({ args, first }: Parsed): string[] {
 function narrow(cmd: Command, env: Env): boolean {
   const parsed = parse(cmd)
   const { args, first, name } = parsed
-  if (!first || first !== cmd.words[0] || marked(name)) return false
+  // a command of reserved words alone (`fi`, `done`) runs nothing; any other with no program read (`sudo -s`, a group) has its line read whole
+  if (!first) {
+    return (
+      onlyReserved(cmd) &&
+      cmd.redirects.length === 0 &&
+      !cmd.inner &&
+      !cmd.group &&
+      parsed.local.size === 0
+    )
+  }
+  if (!ownFirst(cmd, first) || marked(name)) return false
   if (!/^(?:\/(?:bin|opt\/homebrew\/bin|usr\/bin|usr\/local\/bin)\/)?[^/]+$/.test(first.value))
     return false
   const base = program(first.value).toLowerCase()
@@ -364,7 +376,8 @@ function inspect(raw: string, environment: Environment) {
           (GLOB.test(r.target.value) && !!names(r.target, env, true))),
     )
     if (into?.target) return refuse(`a write to ${pathOf(into.target, env)}`)
-    const reader = !!first && reads(parsed, env)
+    // a reader is its command's own first word, so a wrapper's option value parse misread never stands in for one
+    const reader = ownFirst(cmd, first) && reads(parsed, env)
     const fed = xargs ? await stdinOf(cmd, env) : undefined
     const stdinWords: Word[] = !fed
       ? []

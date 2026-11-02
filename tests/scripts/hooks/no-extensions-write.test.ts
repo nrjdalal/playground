@@ -495,6 +495,9 @@ describe("a quoted argument is read as a command line only where a program runs 
     ],
     ["awk reading cat's output", "cat /dev/null | awk '$3 ~ /runner/'"],
     ["awk by its system path", "/usr/bin/awk '$3 ~ /runner/' /dev/null"],
+    ["grep over the folder after !", "! grep -r x ."],
+    ["grep over the folder after then", "if true; then grep -r x .; fi"],
+    ["awk after then", "if grep -q x /dev/null; then awk '$3 ~ /runner/' /dev/null; fi"],
     [
       "grep, awk, sort, uniq and head in a pipe",
       "grep x /dev/null | awk '$3 ~ /runner/' | sort | uniq -c | head -3",
@@ -571,6 +574,7 @@ describe("a quoted argument is read as a command line only where a program runs 
     ["a script named awk in the folder given a removal", "./awk 'rm -rf ~'"],
     ["a script named awk by a relative path given a removal", "bin/awk 'rm -rf ~'"],
     ["awk run with PATH set in the call", "PATH=. awk 'rm -rf ~'"],
+    ["cut given a removal in a subshell", "( cut 'rm -rf ~' )"],
     [
       "awk named as /usr/bin/time -o's output file, running watch",
       "/usr/bin/time -o awk watch 'rm -rf ~'",
