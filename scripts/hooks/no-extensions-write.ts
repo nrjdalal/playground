@@ -194,7 +194,7 @@ const definedFunctions = (command: string): Set<string> =>
     ),
   )
 
-// Whether a line is read whole, as canary read it: it holds, in a command or a substitution, a runner call other than git (a listed runner, a shell, eval, source or ., a function it defines, a program word the hook cannot read or a glob), or git with config set in the call, since a runner may run any text the line holds (`set -- '…'; eval "$1"`, `git log … | sh`)
+// Whether a line is read whole, as canary read it: it holds, in a command or a substitution, a runner call other than git (a listed runner, a shell, eval, source or ., a function it defines, a program word the hook cannot read or a glob), or git with config set in the call or given a word the hook cannot read (an alias, `rebase -x "$1"`), since a runner may run any text the line holds (`set -- '…'; eval "$1"`, `git log … | sh`)
 function wholeLine(commands: Command[], functions: Set<string>): boolean {
   return commands.some((cmd) => {
     const words = [...cmd.words, ...cmd.redirects.flatMap((r) => (r.target ? [r.target] : []))]
@@ -209,7 +209,9 @@ function wholeLine(commands: Command[], functions: Set<string>): boolean {
     if (runnerOf(all[at]) !== "git") return true
     return (
       [...local.keys()].some((key) => key.startsWith("GIT_CONFIG")) ||
-      all.slice(at + 1).some(({ value }) => /^(?:-c|--config-env(?:=|$))/.test(value))
+      all
+        .slice(at + 1)
+        .some(({ value }) => marked(value) || /^(?:-c|--config-env(?:=|$))/.test(value))
     )
   })
 }
