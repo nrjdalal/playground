@@ -98,6 +98,7 @@ const RUNNERS = new Set([
   "npx",
   "pnpm",
   "pnpx",
+  "source",
   "ts-node",
   "tsx",
   "uv",
@@ -105,6 +106,8 @@ const RUNNERS = new Set([
   "watch",
   "yarn",
 ])
+// A call that defines a function, an alias or a hashed command may run a runner under any name, so every program in it counts as one.
+const DEFINES = /\b(?:alias|functions?|hash)\b|\(\s*\)/
 
 // Whether a scope's variables set one that makes git or a pager run a program, each name read once.
 const varsRun = new WeakMap<Map<string, Text>, [number, boolean]>()
@@ -164,7 +167,7 @@ function isCli(
   word: Word,
   dirs: (string | undefined)[],
   realOf: (path: string) => string,
-  asProgram: boolean,
+  mayRun: boolean,
 ): boolean {
   tick()
   if (marked(word.value) || word.value.startsWith("-")) return false
@@ -172,8 +175,7 @@ function isCli(
   if (program(word.value).toLowerCase() === "playground")
     return (
       !word.value.includes("/") ||
-      (asProgram &&
-        !paths.some((path) => !!path && existsSync(path) && statSync(path).isDirectory()))
+      (mayRun && !paths.some((path) => !!path && existsSync(path) && statSync(path).isDirectory()))
     )
   const cli = (sep + CLI).toLowerCase()
   return paths.some(
@@ -181,13 +183,27 @@ function isCli(
   )
 }
 
-// The words after each word of a command that is the playground CLI, so the CLI behind a runner (bun, npx, find -exec, arch, watch), or a program the hook cannot name, is read as typed bare.
-function cliCalls(parsed: Parsed, env: Env, realOf: (path: string) => string): Word[][] {
+// The words after each word of a command that is the playground CLI, so the CLI behind a runner (bun, npx, find -exec, arch, watch), or a program the hook cannot name or that the call may define, is read as typed bare.
+function cliCalls(
+  parsed: Parsed,
+  env: Env,
+  realOf: (path: string) => string,
+  cmd: Command,
+  defines: boolean,
+): Word[][] {
   const { args, first, name } = parsed
   if (!first) return []
   const words = [first, ...args]
   const dirs = [env.cwd, name === "bun" ? bunCall(args, env).cwd : undefined]
-  const runner = RUNNERS.has(name.toLowerCase()) || marked(first.value)
+  const wrapped = cmd.words
+    .slice(0, cmd.words.indexOf(first))
+    .some((w) => WRAPPERS.has(program(w.value)))
+  const runner =
+    defines ||
+    wrapped ||
+    RUNNERS.has(name.toLowerCase()) ||
+    marked(first.value) ||
+    globAt(first) !== -1
   return words.flatMap((word, at) =>
     isCli(word, dirs, realOf, at === 0 || runner) ? [words.slice(at + 1)] : [],
   )
@@ -293,6 +309,7 @@ function inspect(raw: string, environment: Environment) {
   if (typeof command !== "string") return
   // nesting makes the lexer's time grow with the square of the length, so a longer command could outlast the hook's timeout
   if (command.length > 131_072) return refuse(TOO_LONG)
+  const defines = DEFINES.test(command)
   // the root's path from a cwd above it, which a script may name it by
   const relative = (env: Env) =>
     env.cwd && above(env.cwd, false) ? root.slice(realOf(env.cwd).length + 1) : undefined
@@ -361,7 +378,7 @@ function inspect(raw: string, environment: Environment) {
             .map((value) => ({ quoted: false, value }))
     const write = reader
       ? undefined
-      : cliCalls(parsed, env, realOf)
+      : cliCalls(parsed, env, realOf, cmd, defines)
           .map((words) => cliWrite(xargs?.replace ? words : [...words, ...stdinWords]))
           .find(Boolean)
     if (write) return refuse(write)

@@ -162,8 +162,10 @@ Their tests are `bun run test:file tests/scripts/hooks`.
   For any program but a reader, each text that holds a space (a word, the value after its `=`, an option's attached value, a variable the call sets or exports) is judged as a command line of its own, a leading `!` dropped, since a program may run it (`watch`, `tmux`, `ssh -o ProxyCommand`, `rsync -e`, a git alias, a pager).
   It refuses any program but a reader run with the root as its folder or, for git, its tree.
   It refuses the `playground` CLI's calls that change what a guard reads, the CLI found by where its word lands: `playground` by name in any case, or the checkout's `cli.ts` with or without its extension, as any word of a command but a reader's,
-  or a path that is no folder ending in `playground` (a copy or link, made yet or not) as the program word or as any word of a runner, read in any case (a shell, a wrapper `shell.ts` unwraps, `arch`, `bun`, `bunx`, `deno`, `find`, `node`, `npm`, `npx`, `pnpm`, `pnpx`, `ts-node`, `tsx`, `uv`, `uvx`, `watch` or `yarn`) or of a program it cannot name (`$B`),
-  its words followed by the stdin xargs hands it or carried in xargs' `-I` string; so a repo slug such as `owner/playground` handed to any other program runs.
+  or a path that is no folder ending in `playground` (a copy or link, made yet or not) as the program word or as any word of a runner, its words followed by the stdin xargs hands it or carried in xargs' `-I` string.
+  A runner is a program named in any case among a shell, a wrapper `shell.ts` unwraps, `arch`, `bun`, `bunx`, `deno`, `find`, `node`, `npm`, `npx`, `pnpm`, `pnpx`, `source`, `ts-node`, `tsx`, `uv`, `uvx`, `watch` and `yarn`;
+  any program reached through such a wrapper; a program it cannot name (`$B`, a glob); and every program of a call that defines a function, an alias or a hashed name.
+  So a repo slug such as `owner/playground` handed to any other program runs.
   The bar it holds to is three forms, from any folder: the CLI by its name or path as the program word, a copy or link of it as the program word, and the CLI behind a runner or a wrapper `shell.ts` unwraps (`env`, `sudo`, `timeout`, `xargs`).
   A same-user session can still get past it, for example through a program it does not count as a runner.
   Its words split as that command's own parse splits them (`--dry-run` and `--yes` are bare for `ext`, `--dry-run` alone for `settings`):
