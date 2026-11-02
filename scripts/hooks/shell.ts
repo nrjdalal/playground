@@ -976,10 +976,14 @@ export async function run(
   // each script a shell, eval or source reads holds its text until it returns, so a deep chain of them can outgrow the hook's memory and time
   if (running >= MAX_RUNS) throw new RangeError("scripts nested too deep")
   running++
+  // a chain that reached this script is already resolved for every command in it, since the script runs only because that chain did, so none of its commands is one the chain does not reach; the line's own chain carries on after it
+  const chain = env.cwdChain
+  env.cwdChain = []
   try {
     return await runAll(lexed, env, visit, builtins)
   } finally {
     running--
+    env.cwdChain = chain
   }
 }
 
@@ -1202,17 +1206,18 @@ async function chdirTo(name: string, cmd: Command, parsed: Parsed, env: Env): Pr
     return
   }
   // a cd an `&&` joins to what follows needs no folder there to read: one into a folder that is not there fails, and then nothing the chain joins after it runs
+  const chained = cmd.chained && !negated(cmd)
   if (
     sureToRun(cmd, parsed) &&
     !unread &&
     paths.length === 1 &&
-    (cmd.chained || (await isFolder(paths[0])))
+    (chained || (await isFolder(paths[0])))
   ) {
     env.cwd = paths[0]
     env.cwdMaybe = []
     env.cwdUnread = false
     // the chain holds only to the first command it does not reach, so the folders from before this cd are kept for that one
-    if (cmd.chained) env.cwdChain = keep([...new Set([...(env.cwdChain ?? []), ...from])], env)
+    if (chained) env.cwdChain = keep([...new Set([...(env.cwdChain ?? []), ...from])], env)
     return
   }
   env.cwd = undefined
@@ -1220,6 +1225,10 @@ async function chdirTo(name: string, cmd: Command, parsed: Parsed, env: Env): Pr
   env.cwdMaybe = keep([...new Set([...(move.back ? back : from), ...paths])], env)
   env.cwdUnread = env.cwdUnread || unread || (from.length === 0 && paths.length === 0)
 }
+
+// Whether a `!` inverts the command's own status, which an `&&` after it reads: a cd negated an odd number of times carries the chain on when it fails, so the commands after it run in the folder the shell never left and the reader keeps that folder a candidate.
+const negated = (cmd: Command): boolean =>
+  markers(cmd.words).filter((word) => word === "!").length % 2 === 1
 
 // A cd an `&&` alone made sure holds only while the chain holds: the first command the chain does not reach runs whether or not that cd did, so the folders from before it are the shell's again beside the one it named.
 function unchain(cmd: Command, env: Env): void {
