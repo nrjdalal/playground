@@ -1168,6 +1168,63 @@ describe("canary pull", () => {
     await beat("canary-pull").run({ ...fake(ops, at(14, 15)).ctx, repo: w.repo, run: after.run })
     expect(after.installs).toEqual([])
   })
+
+  // Another session's fetch can move @{u} while a beat runs, so the beat reads it once after its own fetch and works from that sha alone.
+  test("fast-forwards to the head it read, so a bun.lock change fetched mid-beat waits for the next beat's install", async () => {
+    const w = world()
+    const s = slotted()
+    let raced = false
+    const run: Context["run"] = async (argv, timeoutMs, stdin) => {
+      if (!raced && argv[0] === "git" && argv.includes("merge")) {
+        raced = true
+        pushLock(w)
+        git(w.leads, "fetch", "-q")
+      }
+      return s.run(argv, timeoutMs, stdin)
+    }
+    const ops = scratch()
+    await beat("canary-pull").run({ ...fake(ops, at(14, 5)).ctx, repo: w.repo, run })
+    expect(existsSync(join(w.leads, "bun.lock"))).toBe(false)
+    const next = slotted()
+    await beat("canary-pull").run({ ...fake(ops, at(14, 10)).ctx, repo: w.repo, run: next.run })
+    expect(next.installs).toHaveLength(1)
+    expect(existsSync(join(w.leads, "bun.lock"))).toBe(true)
+  })
+
+  test("owes a failed install even when canary moves on before the beat reads the result", async () => {
+    const w = world()
+    pushLock(w)
+    const s = slotted(1)
+    const run: Context["run"] = async (argv, timeoutMs, stdin) => {
+      const result = await s.run(argv, timeoutMs, stdin)
+      if (argv[0]!.endsWith("run-slot.sh")) {
+        git(
+          w.seed,
+          "-c",
+          "user.name=t",
+          "-c",
+          "user.email=t@t",
+          "commit",
+          "-q",
+          "--allow-empty",
+          "-m",
+          "later",
+        )
+        git(w.seed, "push", "-q", w.origin, "canary")
+        git(w.leads, "fetch", "-q")
+      }
+      return result
+    }
+    const ops = scratch()
+    const first = fake(ops, at(14, 5))
+    await beat("canary-pull").run({ ...first.ctx, repo: w.repo, run })
+    expect(first.sent.map((line) => line.text)).toEqual([
+      `canary-pull: ${w.leads} did not install: error: lockfile had changes, but lockfile is frozen`,
+    ])
+    const next = slotted()
+    await beat("canary-pull").run({ ...fake(ops, at(14, 10)).ctx, repo: w.repo, run: next.run })
+    expect(next.installs).toHaveLength(1)
+  })
 })
 
 describe("relay watch", () => {
