@@ -982,6 +982,14 @@ async function examineReading(
   const { args, chdir, local, name } = parsed
   const here: Env = chdir ? { ...env, cwd: pathOf(chdir, env) } : env
   let verdict: string | undefined
+  // a command that names OLDPWD may set it, so ~- reads as unknown from it on
+  if (
+    env.old &&
+    [...args.map((a) => a.value), ...[...local].map(([key]) => key)].some((v) =>
+      v.includes("OLDPWD"),
+    )
+  )
+    env.old = {}
   const followed = SHELLS.has(name) || [".", "cd", "eval", "popd", "pushd", "source"].includes(name)
   if (followed && builtins && cmd.redirects.length > 0) {
     const bare = { ...cmd, words: [] }
@@ -1027,17 +1035,17 @@ async function examineReading(
 async function cdTarget(name: string, args: Word[], env: Env): Promise<string | undefined> {
   const dir = args.find((a) => !(a.value.startsWith("-") && a.value.length > 1))
   if (!dir) return homedir()
-  // in a hook that follows OLDPWD, a pushd's unquoted ~- is that folder and ~+ the current one, as the shell expands them
+  const typed = dir.value === "-" ? undefined : await folder(pathOf(dir, env))
+  // in a hook that follows OLDPWD, a pushd's unquoted ~- is that folder and ~+ the current one, as the shell expands them, but for a folder named ~- or ~+ itself, which keeps the typed reading
   const tilde =
-    name === "pushd" && env.old && !dir.quoted && !dir.unknown && !dir.reads?.length
+    !typed && name === "pushd" && env.old && !dir.quoted && !dir.unknown && !dir.reads?.length
       ? /^~([-+])(?=\/|$)/.exec(dir.value)
       : null
   const base = tilde && (tilde[1] === "-" ? env.old?.dir : env.cwd)
-  const path = tilde
-    ? base && base + dir.value.slice(2)
-    : dir.value === "-"
-      ? undefined
-      : pathOf(dir, env)
+  return base ? await folder(base + dir.value.slice(2)) : typed
+}
+
+async function folder(path: string | undefined): Promise<string | undefined> {
   if (!path) return undefined
   try {
     return (await Bun.file(path).stat()).isDirectory() ? path : undefined

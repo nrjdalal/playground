@@ -216,7 +216,8 @@ Only the first reading moves the folder, sets variables and records files for th
   It refuses a closed list of write forms, so a same-user session can still get past it by a form outside that list, such as a script file it writes and then runs.
   A path through a link into the root with `..` after the link (`echo x > <link>/../f`) is judged as typed, so a write by one passes.
   A `cd` or `pushd` it cannot follow (`cd -`, `cd ~-`, `popd`'s stack, a `CDPATH` lookup) leaves the command's folder unread, so a relative write after one passes.
-  A `pushd ~-` or `pushd ~+` lands where zsh takes it, `~-` reading the folder before the last `cd` or `pushd`, the start folder before any, and a glob in a `cd` or `pushd` folder is judged as any word holding one, so `cd ~/.playground/e*` is refused as `ls ~/.playground/e*` is.
+  A `pushd ~-` or `pushd ~+` lands where zsh takes it, `~-` reading the folder before the last `cd` or `pushd`, the start folder before any (a folder named `~-` or `~+` keeps the typed reading, and a command naming `OLDPWD` leaves `~-` unread).
+  A glob in a `cd` or `pushd` folder is judged as any word holding one, so `cd ~/.playground/e*` is refused as `ls ~/.playground/e*` is.
   From a cwd at or above the root (`~`, `~/.playground`), a quoted `(`, `[`, `*`, `?` or `{` reads as a glob there, so a call holding one (`git commit -m "fix(x): y"`) is refused; run it from a worktree.
   A closed-list reader on a line read call by call is the exception: its quoted glob is text, so `awk '{print $1}' f` runs, since the lexer marks each word whose glob the shell sees outside quotes (`Word.glob` in `scripts/hooks/shell.ts`).
   A quoted regex that starts at `/` reads its glob characters as a glob in `/`, which holds the root, so `sed -n '/^a*b/p' f` and `awk '$1 ~ /^(a|b)/' f` (whose `|` takes awk off the closed list) are refused from any folder, while `awk '/^a*b/' f` runs; run such a script from a file (`awk -f <file>`, `sed -f <file>`).
