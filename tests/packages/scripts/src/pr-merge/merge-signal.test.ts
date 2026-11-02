@@ -115,9 +115,9 @@ describe("a signal inside the merge lock", () => {
 })
 
 describe("a signal inside the types gate", () => {
-  test("ends its running step and removes its worktree, as its deadline does", async () => {
+  test("ends its running step and keeps its worktree for the next merge, as its deadline does", async () => {
     const root = mkdtempSync(join(scratch, "types-"))
-    const worktree = join(root, ".claude", "worktrees", "merge-types-7")
+    const worktree = join(root, ".claude", "worktrees", "merge-types")
     const pidFile = join(root, "step.pid")
     const before = async () => {
       while (!existsSync(pidFile) || !readFileSync(pidFile, "utf8").trim()) await Bun.sleep(10)
@@ -125,6 +125,6 @@ describe("a signal inside the types gate", () => {
     }
     expect((await stopped(["types", root], "SIGTERM", { before })).code).toBe(143)
     expect(alive(Number(readFileSync(pidFile, "utf8")))).toBe(false)
-    expect(existsSync(worktree)).toBe(false)
+    expect(existsSync(worktree)).toBe(true)
   })
 })

@@ -9,7 +9,12 @@ import {
   type Run,
   type RunResult,
 } from "../../../../../packages/scripts/src/pr-merge/merge"
-import { ciSteps, slotted } from "../../../../../packages/scripts/src/pr-merge/types"
+import {
+  ciSteps,
+  slotted,
+  typesGate,
+  type TypeSteps,
+} from "../../../../../packages/scripts/src/pr-merge/types"
 import "./scratch-config"
 import { greenChecks } from "./suite"
 
@@ -90,6 +95,40 @@ async function world(name: string, { merged = false } = {}) {
   return { checkout, git, head, lockRoot }
 }
 
+// A scratch repo whose canary is ahead of PR 7's head and moves on while the head stays, so every check runs: check() runs the types gate on their merged tree with the given steps, and canary() commits files onto canary.
+async function repo(name: string) {
+  const work = join(scratch, name)
+  mkdirSync(join(work, "patches"), { recursive: true })
+  await sh(work, "init", "-q", "-b", "canary")
+  write(work, {
+    ".gitignore": ".claude/\nnode_modules/\nout/\n",
+    "bun.lock": "{}\n",
+    "lib.ts": "export const add = (a: number): number => a\n",
+    "package.json": "{}\n",
+    "patches/a.patch": "\n",
+    "tsconfig.json": JSON.stringify({ compilerOptions: { noEmit: true, strict: true } }),
+  })
+  await commit(work, "base")
+  await sh(work, "switch", "-qc", "pr")
+  write(work, { "extra.ts": 'import { add } from "./lib"\nexport const two = add(2)\n' })
+  const head = await commit(work, "pr: a caller")
+  await sh(work, "switch", "-q", "canary")
+  write(work, { "main.ts": "export const one = 1\n" })
+  await commit(work, "canary: ahead of the head")
+  const git: Run = (args) => runGit(["-C", work, ...args])
+  const lockRoot = join(work, "..", `${name}-lock`)
+  const check = async (steps: TypeSteps) => {
+    const canary = await sh(work, "rev-parse", "canary")
+    const mergeTree = await sh(work, "merge-tree", "--write-tree", canary, head)
+    return typesGate({ facts: { canary, head, mergeTree, n: N }, git, lockRoot, steps })
+  }
+  const canary = async (files: Record<string, string>) => {
+    write(work, files)
+    await commit(work, "canary moves")
+  }
+  return { canary, check, git, work }
+}
+
 // gh for PR 7 at head, every gate but types passing: canary is one commit ahead.
 const gh = (head: string, aheadBy: string) => {
   const calls: string[][] = []
@@ -153,9 +192,9 @@ describe("the types gate", () => {
     )
     expect(types?.detail).toContain(". Merge canary into the PR and fix the error")
     expect(squashes(calls)).toEqual([])
-    // the scratch worktree is gone, and git no longer lists it
-    expect(existsSync(join(checkout, ".claude", "worktrees", `merge-types-${N}`))).toBe(false)
-    expect((await git(["worktree", "list"])).stdout.trim().split("\n")).toHaveLength(1)
+    // the one merge-types worktree stays for the next merge, and git still lists it
+    expect(existsSync(join(checkout, ".claude", "worktrees", "merge-types"))).toBe(true)
+    expect((await git(["worktree", "list"])).stdout.trim().split("\n")).toHaveLength(2)
     // the same head and canary refuse again from the kept refusal, with no second run
     const again = await prMerge(N, { repo: REPO }, gh(head, "1").run, {
       git,
@@ -203,7 +242,7 @@ describe("the types gate", () => {
     expect(squashes(calls)).toHaveLength(1)
   })
 
-  test("refuses a run it cannot finish, naming the fix, and removes the worktree", async () => {
+  test("refuses a run it cannot finish, naming the fix, and keeps the worktree", async () => {
     const { checkout, git, head, lockRoot } = await world("unfinished")
     const failing = () => [{ argv: ["false"], name: "install" }]
     const outcome = await prMerge(N, { repo: REPO }, gh(head, "1").run, {
@@ -216,7 +255,7 @@ describe("the types gate", () => {
     expect(outcome.gates.find((gate) => gate.name === "types")?.detail).toStartWith(
       "could not finish the merged-tree type check: install exited 1",
     )
-    expect(readdirSync(join(checkout, ".claude", "worktrees"))).toEqual([])
+    expect(readdirSync(join(checkout, ".claude", "worktrees"))).toEqual(["merge-types"])
   })
 
   test("refuses a step that runs past the budget, slot waits included", async () => {
@@ -256,21 +295,89 @@ describe("the types gate", () => {
     expect(skipped.gates.find((gate) => gate.name === "types")?.detail).toStartWith("skipped: ")
   })
 
-  test("ciSteps runs CI's type steps, each through run-slot as the merge train, or bare under a held slot", () => {
+  test("a second check with the same dependencies reuses the worktree: no clone, no install, its node_modules kept", async () => {
+    const r = await repo("reuse")
+    const runs: string[][] = []
+    const recorded: TypeSteps = (at) => {
+      const steps = ciSteps(at)
+      runs.push(steps.map((step) => step.name))
+      return steps.map((step) => ({
+        ...step,
+        argv:
+          step.name === "clone"
+            ? ["sh", "-c", "mkdir node_modules && touch node_modules/kept"]
+            : ["true"],
+      }))
+    }
+    const worktree = join(r.work, ".claude", "worktrees", "merge-types")
+    expect(await r.check(recorded)).toMatchObject({ ok: true })
+    expect(runs.at(-1)?.slice(0, 2)).toEqual(["clone", "install"])
+    await r.canary({ "other.ts": "export const other = 1\n" })
+    expect(await r.check(recorded)).toMatchObject({ ok: true })
+    expect(runs.at(-1)).not.toContain("clone")
+    expect(runs.at(-1)).not.toContain("install")
+    expect(existsSync(join(worktree, "node_modules", "kept"))).toBe(true)
+    expect((await r.git(["worktree", "list"])).stdout.trim().split("\n")).toHaveLength(2)
+    // a changed package.json, bun.lock or patch installs again into the kept node_modules, with no clone
+    for (const changed of ["package.json", "bun.lock", "patches/a.patch"]) {
+      await r.canary({ [changed]: `${changed} changed\n` })
+      expect(await r.check(recorded)).toMatchObject({ ok: true })
+      expect(runs.at(-1)?.slice(0, 2)).toEqual(["install", "check-types"])
+      expect(existsSync(join(worktree, "node_modules", "kept"))).toBe(true)
+    }
+  })
+
+  test("a check reads its own merged tree alone: nothing the last check left in the worktree leaks in", async () => {
+    const r = await repo("stale")
+    const worktree = join(r.work, ".claude", "worktrees", "merge-types")
+    const broken = "export const bad: number = 'text'\n"
+    // the first check leaves an untracked file, an ignored one and an edited tracked one, each a type error, beside a file in node_modules
+    const leaves = () => [
+      { argv: ["mkdir", "-p", "node_modules", "out"], name: "clone" },
+      {
+        argv: [
+          "sh",
+          "-c",
+          `for f in leak.ts out/leak.ts lib.ts; do echo "${broken}" > "$f"; done; touch node_modules/kept`,
+        ],
+        name: "leave",
+      },
+    ]
+    expect(await r.check(leaves)).toMatchObject({ ok: true })
+    await r.canary({ "other.ts": "export const other = 1\n" })
+    expect(await r.check(tsc)).toMatchObject({ ok: true })
+    expect(existsSync(join(worktree, "leak.ts"))).toBe(false)
+    expect(existsSync(join(worktree, "out", "leak.ts"))).toBe(false)
+    expect(existsSync(join(worktree, "node_modules", "kept"))).toBe(true)
+  })
+
+  test("ciSteps runs CI's type steps after what node_modules needs, each through run-slot as the merge train, or bare under a held slot", () => {
     const at = { canary: "c".repeat(40), checkout: "/co", worktree: "/wt" }
+    const checks = [
+      ["check-types", `bunx turbo run check-types --filter=...[${"c".repeat(40)}]`, true],
+      ["build", "bunx turbo run build --filter=./packages/* --filter=@api/hono", true],
+      ["metrics", "bun packages/scripts/src/data-table-metrics.ts", false],
+      ["check-types:tests", "bun run check-types:tests", true],
+    ]
+    const clone = ["clone", "cp -cR /co/node_modules /wt/", false]
+    const install = ["install", "bun install --force --ignore-scripts --cwd /wt", false]
     const nice = process.env.RUN_SLOT_NICE
     process.env.RUN_SLOT_NICE = "10"
     try {
+      const listed = (prepare: "clone" | "install" | "none") =>
+        ciSteps({ ...at, prepare }).map((step) => [
+          step.name,
+          step.argv.join(" "),
+          step.types ?? false,
+        ])
+      expect(listed("clone")).toEqual([clone, install, ...checks])
+      expect(listed("install")).toEqual([install, ...checks])
+      expect(listed("none")).toEqual(checks)
       expect(
-        ciSteps(at).map((step) => [step.name, step.argv.join(" "), step.types ?? false]),
-      ).toEqual([
-        ["clone", "cp -cR /co/node_modules /wt/", false],
-        ["install", "bun install --force --ignore-scripts --cwd /wt", false],
-        ["check-types", `bunx turbo run check-types --filter=...[${"c".repeat(40)}]`, true],
-        ["build", "bunx turbo run build --filter=./packages/* --filter=@api/hono", true],
-        ["metrics", "bun packages/scripts/src/data-table-metrics.ts", false],
-        ["check-types:tests", "bun run check-types:tests", true],
-      ])
+        ciSteps({ ...at, prepare: "install" })
+          .filter((step) => step.deps)
+          .map((step) => step.name),
+      ).toEqual(["install"])
     } finally {
       if (nice === undefined) delete process.env.RUN_SLOT_NICE
       else process.env.RUN_SLOT_NICE = nice
