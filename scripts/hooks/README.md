@@ -188,7 +188,7 @@ Only the first reading moves the folder, sets variables and records files for th
   its words followed by the stdin xargs hands it or carried in xargs' `-I` string.
   Its words split as that command's own parse splits them (`--dry-run` and `--yes` are bare for `ext`, `--dry-run` alone for `settings`):
   `ext accept`, the owner's own call, whatever its words (the role cleared in the same call included);
-  `ext score` with `PLAYGROUND_ROLE`, `CLAUDE_CODE_SESSION_ID` or `CLAUDE_CONFIG_DIR` cleared or set, by an assignment in front or in env's words, one set or exported earlier on the line, or env's `-u`, `--unset`, `-i`, `--ignore-environment` or `-`, since a score's author is read from them;
+  `ext score` on a line where any command clears or sets `PLAYGROUND_ROLE`, `CLAUDE_CODE_SESSION_ID` or `CLAUDE_CONFIG_DIR` (an assignment or `+=` to one, one exported earlier, or env with `-u` or `--unset` naming one, `-i` alone or in a cluster, `--ignore-environment` or `-`), a shell the line runs or pipes into included, since a score's author is read from them;
   `ext put <scope> list`; `ext add`, `import`, `init`, `link`, `order`, `remove`, `sync` and `unlink`, but `--dry-run` on `add`, `import` and `init`; `migrate`; `uninstall --purge`;
   and `settings set` or `reset` of a key a guard reads: `ext.links`, `ext.order`, `ext.repos`, `factory.archiveRepo`, `factory.publicRepo`, `glm.readOnlyLoad5`, `live.branch`, `owner.names`, `paths.codeRoot`, `sessions.aliases`, `sessions.names` and `usage.keychainService`.
   A test holds that list to every key a hook names, to `ext.order`, which orders the extensions every guard reads, and to spawn.sh's `paths.codeRoot`; spawn.sh's `gates.*` stay open, as capacity tuning Ops adjusts in normal upkeep.
@@ -210,7 +210,7 @@ Only the first reading moves the folder, sets variables and records files for th
   An awk program that builds the line it runs (`system("rm " x)`) without naming the root literally gets past.
   A line holding `sed` keeps canary's reading, so `sed -n '/sh -c/p' f` is refused from `~` as on canary.
   It refuses a closed list of write forms, so a same-user session can still get past it by a form outside that list, such as a script file it writes and then runs.
-  An `ext score` after an `unset` of one of those variables earlier on the line gets past, since the hook tracks a variable set, not one unset.
+  An `ext score` after an `unset` or an `export -n` of one of those variables earlier on the line gets past, since the hook tracks a variable set, not one unset or un-exported.
   A path through a link into the root with `..` after the link (`echo x > <link>/../f`) is judged as typed, so a write by one passes.
   A `cd` or `pushd` it cannot follow (`cd -`, `cd ~-`, `popd`'s stack, a glob in the folder, a `CDPATH` lookup) leaves the command's folder unread, so a relative write after one passes.
   From a cwd at or above the root (`~`, `~/.playground`), a quoted `(`, `[`, `*`, `?` or `{` reads as a glob there, so a call holding one (`git commit -m "fix(x): y"`, `awk '{print $1}' f`) is refused, a closed-list reader's line included; run it from a worktree.
