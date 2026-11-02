@@ -688,11 +688,12 @@ function word(lx) {
       merge(out, ansi(lx));
     } else if (c === "$" && next === '"')
       lx.i++;
-    else if (c === "$")
-      merge(out, dollar(lx));
-    else if (c === "`")
-      merge(out, backtick(lx));
-    else if (c === "~" && lx.i === start && (next === "" || next === "/" || BREAK.has(next))) {
+    else if (c === "$" || c === "`") {
+      const text = c === "$" ? dollar(lx) : backtick(lx);
+      merge(out, text);
+      if (GLOB_CHARS.test(text.value))
+        out.glob = true;
+    } else if (c === "~" && lx.i === start && (next === "" || next === "/" || BREAK.has(next))) {
       out.value += homedir3();
       lx.i++;
     } else {
@@ -703,8 +704,11 @@ function word(lx) {
   }
   if (/\{(?=[^{}]*\})[^{}]*(?:,|\.\.)/.test(bare))
     out.unknown ??= "a brace expansion";
+  if (GLOB_CHARS.test(bare))
+    out.glob = true;
   return out;
 }
+var GLOB_CHARS = /[*?[{(]/;
 function double(lx) {
   const { src } = lx;
   const out = { value: "" };
@@ -1633,13 +1637,14 @@ function inspect(raw, environment) {
     return value.includes(needle) || !!near && value.includes(near);
   };
   const judged = new Map;
-  const names = (word, env, remover) => {
-    const key = `${remover}\x00${env.cwd}\x00${word.value}`;
+  const names = (word, env, remover, literal = false) => {
+    const quotedGlob = literal && !word.glob;
+    const key = `${remover}\x00${quotedGlob}\x00${env.cwd}\x00${word.value}`;
     if (!judged.has(key))
-      judged.set(key, judge(word, env, remover));
+      judged.set(key, judge(word, env, remover, quotedGlob));
     return judged.get(key);
   };
-  const judge = (word, env, remover) => {
+  const judge = (word, env, remover, quotedGlob) => {
     tick();
     for (const text of texts(word)) {
       if (holds(text.value, env))
@@ -1650,7 +1655,7 @@ function inspect(raw, environment) {
       if (above(path, remover))
         return `${path}, which holds ${root}`;
       const glob = GLOB.exec(text.value);
-      if (glob && !marked(text.value)) {
+      if (glob && !quotedGlob && !marked(text.value)) {
         const dir = pathOf({ value: `${text.value.slice(0, glob.index)}x` }, env);
         const folder = dir && dirname2(dir);
         if (folder && (inRoot(folder) || above(folder, true)))
@@ -1715,8 +1720,9 @@ function inspect(raw, environment) {
       if (named)
         return refuse(`${verb} with a variable on ${named}`);
     }
+    const literal = !whole && narrow(cmd, env);
     for (const word of [first, ...args]) {
-      const named = names(word, env, remover);
+      const named = names(word, env, remover, literal);
       if (named)
         return refuse(`${verb} on ${named}`);
     }

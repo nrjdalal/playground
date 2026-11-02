@@ -7090,11 +7090,12 @@ function word(lx) {
       merge2(out, ansi(lx));
     } else if (c === "$" && next === '"')
       lx.i++;
-    else if (c === "$")
-      merge2(out, dollar(lx));
-    else if (c === "`")
-      merge2(out, backtick(lx));
-    else if (c === "~" && lx.i === start && (next === "" || next === "/" || BREAK.has(next))) {
+    else if (c === "$" || c === "`") {
+      const text = c === "$" ? dollar(lx) : backtick(lx);
+      merge2(out, text);
+      if (GLOB_CHARS.test(text.value))
+        out.glob = true;
+    } else if (c === "~" && lx.i === start && (next === "" || next === "/" || BREAK.has(next))) {
       out.value += homedir3();
       lx.i++;
     } else {
@@ -7105,8 +7106,11 @@ function word(lx) {
   }
   if (/\{(?=[^{}]*\})[^{}]*(?:,|\.\.)/.test(bare))
     out.unknown ??= "a brace expansion";
+  if (GLOB_CHARS.test(bare))
+    out.glob = true;
   return out;
 }
+var GLOB_CHARS = /[*?[{(]/;
 function double(lx) {
   const { src } = lx;
   const out = { value: "" };
