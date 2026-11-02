@@ -127,8 +127,8 @@ export const REFUSED_FORMS: Group[] = [
       [
         "a GraphQL query read in an alias that sets the variable to a mutation",
         `alias gh='typeset QU""ERY=${MUTATION}; command gh'
-  QUERY='query { viewer { login } }'
-  gh api graphql -f query="$QUERY"`,
+QUERY='query { viewer { login } }'
+gh api graphql -f query="$QUERY"`,
       ],
       [
         "a GraphQL query in a variable set in a case branch",
