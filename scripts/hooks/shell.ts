@@ -674,7 +674,7 @@ function dollar(lx: Lexer): Text {
     lx.i += 2
     const from = lx.commands.length
     nest(lx)
-    return substituted(lx.commands.slice(from))
+    return substituted(lx.commands.slice(from), lx.known)
   }
   if (next === "{") {
     const end = balanced(src, lx.i + 1, "{", "}")
@@ -687,6 +687,11 @@ function dollar(lx: Lexer): Text {
     const from = ++lx.i
     while (/\w/.test(src[lx.i] ?? "")) lx.i++
     return variable(src.slice(from, lx.i))
+  }
+  // the shell's pid is digits whatever its value, so a path built around it is judged by where it lands
+  if (next === "$") {
+    lx.i += 2
+    return { value: "99999" }
   }
   if (/[\d@*#?$!-]/.test(next)) {
     lx.i += 2
@@ -739,9 +744,11 @@ function backtick(lx: Lexer): Text {
 }
 
 // `$(cat <<'EOF' ... EOF)`, `$(cat file)` and `$(< file)` are read; any other command substitution is unknown.
-function substituted(inner: Command[]): Text {
+function substituted(inner: Command[], known: Record<string, string>): Text {
   const [only] = inner
   if (inner.length !== 1 || only.stdin || only.group) return unknown("a command substitution")
+  const made = mktempPath(only, known)
+  if (made) return { value: made }
   const [first, ...args] = only.words
   const plainCat = first?.value === "cat" && !first.unknown && !first.reads?.length
   const input = only.redirects[0]
@@ -762,6 +769,24 @@ function substituted(inner: Command[]): Text {
     return { reads: [input.target], value: READ }
   }
   return unknown("a command substitution")
+}
+
+// mktemp's flags that leave it making a fresh name under TMPDIR
+const MKTEMP_FLAGS = new Set(["d", "q", "u"])
+const MKTEMP_LONG = new Set(["--directory", "--dry-run", "--quiet"])
+
+// The path a bare `mktemp` makes, under a TMPDIR the hook holds and the call never sets (knownVariables drops it then), with no template, -p, --tmpdir or -t to steer it; a name standing in for its random part
+function mktempPath(cmd: Command, known: Record<string, string>): string | undefined {
+  const [first, ...args] = cmd.words
+  if (!first || first.quoted || first.value !== "mktemp" || cmd.redirects.length > 0) return
+  if (!known.TMPDIR) return
+  const plain = args.every(
+    ({ quoted, value }) =>
+      !quoted &&
+      (MKTEMP_LONG.has(value) ||
+        (/^-[a-z]+$/.test(value) && [...value.slice(1)].every((c) => MKTEMP_FLAGS.has(c)))),
+  )
+  return plain ? `${known.TMPDIR.replace(/\/$/, "")}/tmp.mktemp` : undefined
 }
 
 // xargs in front of a command: `replace` is its -I (or BSD -J) string, which marks where stdin goes; without one, stdin is appended as arguments.

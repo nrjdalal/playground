@@ -134,6 +134,8 @@ function relexed(raw: string, known: Record<string, string>): Word | undefined {
 function heldVars(env: Env): Record<string, string> {
   const known = { ...env.known }
   for (const [key, text] of env.vars) {
+    // a TMPDIR the call sets steers mktemp, so mktemp's path stays unheld
+    if (key === "TMPDIR") continue
     if (!text.unknown && !marked(text.value)) known[key] = text.value
     else if ("raw" in text && typeof text.raw === "string") {
       const again = relexed(text.raw, known)?.value
