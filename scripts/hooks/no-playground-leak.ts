@@ -520,8 +520,9 @@ function changesState(cmd: Command, { args, name }: Parsed): boolean {
   const words = args.map((a) => a.value)
   if (name === "gh") return GH_STATE.has(ghCommand(args).head.join(" "))
   if (name === "git") {
-    const k = words.findIndex((w, i) => !w.startsWith("-") && !GIT_TAKES.has(words[i - 1] ?? ""))
-    const [sub, ...rest] = k === -1 ? [] : words.slice(k)
+    let k = 0
+    while (k < words.length && words[k].startsWith("-")) k += GIT_TAKES.has(words[k]) ? 2 : 1
+    const [sub, ...rest] = words.slice(k)
     if (sub === "clone" || sub === "init" || sub === "submodule") return true
     const verb = rest.find((w) => !w.startsWith("-"))
     if (sub === "remote") return ["add", "remove", "rename", "rm", "set-url"].includes(verb ?? "")
