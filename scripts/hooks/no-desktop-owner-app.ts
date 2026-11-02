@@ -122,14 +122,23 @@ function judge(words: Word[], viaXargs: boolean, apps: Set<string>): string | un
   if (FRONT.has(sub) && named.length === 0 && !rooted) return front(sub)
 }
 
-// An interpreter's code split into its quoted strings and the text outside them; a string left open runs to the end.
+// The character before a quote that opens a string, so a quote the hook cannot pair as a string (a Ruby ?" character literal, a quote inside a Perl m[…] regex) reads as code, not as a string's edge.
+const OPENER_BEFORE = new Set(["(", ",", "=", ":", "+", ";"])
+// The character after a closing quote, by the same rule.
+const CLOSER_AFTER = new Set([")", "]", "}", ",", ";", ".", "+", ":"])
+const opensAt = (code: string, k: number) =>
+  k === 0 || /\s/.test(code[k - 1]!) || OPENER_BEFORE.has(code[k - 1]!)
+const closesAt = (code: string, k: number) =>
+  k >= code.length || /\s/.test(code[k]!) || CLOSER_AFTER.has(code[k]!)
+
+// An interpreter's code split into its quoted strings and the text outside them, where a quote is a string's edge only in a position a string can open and close in; a string left open, or one closed in a spot no string closes in, runs to the end or is marked unclosed, so the code it holds reads as code.
 function quotedParts(code: string) {
   const strings: { closed: boolean; quote: string; text: string }[] = []
   let outside = ""
   let k = 0
   while (k < code.length) {
     const c = code[k]
-    if (c !== "'" && c !== '"' && c !== "`") {
+    if ((c !== "'" && c !== '"' && c !== "`") || !opensAt(code, k)) {
       outside += c
       k++
       continue
@@ -143,7 +152,7 @@ function quotedParts(code: string) {
         text += code.slice(k, k + 2)
         k += 2
       } else if (code.startsWith(quote, k)) {
-        closed = true
+        closed = closesAt(code, k + quote.length)
         k += quote.length
         break
       } else text += code[k++]

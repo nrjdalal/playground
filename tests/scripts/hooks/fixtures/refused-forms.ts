@@ -963,6 +963,34 @@ gh api graphql -f query="$QUERY"`,
         `node -e 'require("child_process").execSync("bin/run agent-desktop")'`,
       ],
       [
+        "ruby a double-quote char literal that opens no string around spawning code",
+        `ruby -e 'c = ?" and system *%w[x agent-desktop snapshot --app Slack][1..4] and ?"'`,
+      ],
+      [
+        "ruby a single-quote char literal that opens no string around spawning code",
+        `ruby -e "c = ?' and system *%w[x agent-desktop snapshot --app Slack][1..4] and ?'"`,
+      ],
+      [
+        "ruby a %w word list slice with no quote",
+        `ruby -e 'system *%w[x agent-desktop snapshot --app Slack][1..4]'`,
+      ],
+      [
+        "perl a quote inside m[] and qw[] delimiters that opens no string",
+        `perl -e '$c = m["] or @a = qw[x agent-desktop snapshot --app Slack] and shift @a and system @a and m["]'`,
+      ],
+      [
+        "bun building the program name from a string then spawning it",
+        `bun -e 'Bun.spawn(["run agent-desktop".split(" ")[1], "snapshot", "--app", "Slack"])'`,
+      ],
+      [
+        "node running it in a backtick template",
+        `node -e 'require("child_process").execSync(\`agent-desktop snapshot --app Slack\`)'`,
+      ],
+      [
+        "python3 running it in a triple-quoted string",
+        `python3 -c 'import os; os.system("""agent-desktop snapshot --app Slack""")'`,
+      ],
+      [
         "bun -e running it in a template",
         "bun -e 'await Bun.$`agent-desktop snapshot --app Finder`'",
       ],
