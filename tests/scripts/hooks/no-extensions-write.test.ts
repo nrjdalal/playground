@@ -545,6 +545,17 @@ describe("a quoted argument is read as a command line only where a program runs 
     expect(await at(command, join(homedir(), "x", ".claude", "worktrees", "y"))).toBeUndefined()
   })
 
+  test.each([
+    ["rm of mktemp's folder", 'T=$(mktemp -d); rm -rf "$T"'],
+    ["rm of mktemp's quiet folder", 'T="$(mktemp -dq)"; rm -rf "$T"'],
+    ["rm of mktemp's file", 'F=$(mktemp); rm -f "$F"'],
+    ["rm of a pid-named temporary file", "rm -f /tmp/x.$$"],
+  ])("%s runs from the home with TMPDIR set", async (_, command) => {
+    const env = { HOME: homedir(), TMPDIR: tmpdir() }
+    const raw = JSON.stringify({ cwd: homedir(), tool_input: { command }, tool_name: "Bash" })
+    expect(await check(raw, env)).toBeUndefined()
+  })
+
   test("the dispatcher brief's call that finds the Dashboard's checkout runs from a worktree", async () => {
     const step = readFileSync(
       join(import.meta.dir, "../../../scripts/briefs/dispatcher.md"),

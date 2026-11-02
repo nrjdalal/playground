@@ -1740,6 +1740,27 @@ gh api graphql -f query="$QUERY"`,
       ],
       ["git -c with a value the call never sets", 'git -c core.pager="$P" log'],
       ["git -c attached with a value the call never sets", 'git -ccore.pager="$P" log'],
+      [
+        "rm of mktemp's folder made from a template in the root",
+        'T=$(mktemp -d ~/.playground/extensions/x.XXXX); rm -rf "$T"',
+      ],
+      [
+        "rm of mktemp's folder made with -p in the root",
+        'T=$(mktemp -d -p ~/.playground/extensions); rm -rf "$T"',
+      ],
+      [
+        "rm of mktemp's folder made with --tmpdir= in the root",
+        'T=$(mktemp -d --tmpdir=$HOME/.playground/extensions); rm -rf "$T"',
+      ],
+      [
+        "rm of mktemp's folder made with TMPDIR set inline",
+        'T=$(TMPDIR=$HOME/.playground/extensions mktemp -d); rm -rf "$T"',
+      ],
+      [
+        "rm of mktemp's folder made with TMPDIR exported",
+        'export TMPDIR=$HOME/.playground/extensions; T=$(mktemp -d); rm -rf "$T"',
+      ],
+      ["rm of a pid-named path in the root", "rm -rf ~/.playground/extensions/$$"],
     ],
     source: "#448",
   },
