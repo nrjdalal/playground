@@ -364,7 +364,8 @@ function inspect(raw: string, environment: Environment) {
           (GLOB.test(r.target.value) && !!names(r.target, env, true))),
     )
     if (into?.target) return refuse(`a write to ${pathOf(into.target, env)}`)
-    const reader = !!first && reads(parsed, env)
+    // a reader is its command's own first word, so a wrapper's option value parse misread never stands in for one
+    const reader = !!first && first === cmd.words[0] && reads(parsed, env)
     const fed = xargs ? await stdinOf(cmd, env) : undefined
     const stdinWords: Word[] = !fed
       ? []
