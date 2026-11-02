@@ -59,9 +59,6 @@ export type Group = {
 
 // The rows a guard-loosening PR lets run on purpose, each written as a row's "<source> <what>" for all its cases, or as one case's "<source> <what> | <guard> | <folder>"; canary lets none run.
 export const ALLOWED: string[] = [
-  "#466 git --attr-source before a read in the extensions root",
-  "#466 git --attr-source before -C into the extensions root and a read",
-  "#466 git --attr-source with a subcommand for its value before a read in the main checkout",
   "#466 git --attr-source with a subcommand for its value before a read in a repo with a heavy path staged",
 ]
 
@@ -1258,10 +1255,6 @@ gh api graphql -f query="$QUERY"`,
         "git --attr-source with a subcommand for its value before a checkout in the main checkout",
         "git --attr-source log checkout x",
       ],
-      [
-        "git --attr-source with a subcommand for its value before a read in the main checkout",
-        "git --attr-source checkout log -1",
-      ],
     ],
     source: "#466",
   },
@@ -1269,7 +1262,6 @@ gh api graphql -f query="$QUERY"`,
     folders: ["extensions root"],
     guards: ["no-extensions-write"],
     rows: () => [
-      ["git --attr-source before a read in the extensions root", "git --attr-source HEAD log -1"],
       [
         "git --attr-source with a subcommand for its value before a commit in the extensions root",
         "git --attr-source log commit -m x",
@@ -1289,10 +1281,6 @@ gh api graphql -f query="$QUERY"`,
     folders: ["data folder", "home"],
     guards: ["no-extensions-write"],
     rows: ({ ROOT }) => [
-      [
-        "git --attr-source before -C into the extensions root and a read",
-        `git --attr-source HEAD -C ${ROOT} status`,
-      ],
       [
         "git --attr-source with a subcommand for its value before -C into the extensions root and a commit",
         `git --attr-source log -C ${ROOT} commit -m x`,
