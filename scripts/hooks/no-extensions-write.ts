@@ -169,7 +169,7 @@ function awkPrograms(words: Word[]): Word[] | undefined {
   return programs.length ? programs : undefined
 }
 
-// sed's script words, or undefined when a script comes from a file or an option the hook does not know: -e and --expression give a script, -i a suffix, -l a length, and with no -e the first other word is the script
+// sed's script words, or undefined when a script comes from a file, sed edits its files in place (-i, --in-place), or an option the hook does not know: -e and --expression give a script, -l a length, and with no -e the first other word is the script
 function sedScripts(words: Word[]): Word[] | undefined {
   const scripts: Word[] = []
   let first: Word | undefined
@@ -183,7 +183,7 @@ function sedScripts(words: Word[]): Word[] | undefined {
     else if (value.startsWith("--expression="))
       scripts.push({ ...words[k], value: value.slice(13) })
     else if (
-      /^--(?:debug|in-place(?:=.*)?|line-length=\d+|null-data|posix|quiet|regexp-extended|sandbox|separate|silent|unbuffered)$/.test(
+      /^--(?:debug|line-length=\d+|null-data|posix|quiet|regexp-extended|sandbox|separate|silent|unbuffered)$/.test(
         value,
       )
     )
@@ -200,7 +200,7 @@ function sedScripts(words: Word[]): Word[] | undefined {
           )
           break
         }
-        if (flag === "i") break
+        if (flag === "i") return undefined
         if (flag === "l") {
           if (c + 1 === value.length) k++
           break
