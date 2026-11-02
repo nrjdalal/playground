@@ -504,6 +504,51 @@ describe("a quoted argument is read as a command line only where a program runs 
     ["sed's s///e flag running a removal", "sed 's/.*/rm -rf ~/e' /dev/null"],
     ["gsed's e command removing the home", "gsed '1e rm -rf ~' /dev/null"],
     [
+      "sed -i '' inserting a removal into a git hook",
+      "sed -i '' '1i\\\nrm -rf ~' .git/hooks/pre-commit",
+    ],
+    [
+      "sed -i '' appending a removal to a git hook",
+      "sed -i '' '$a\\\nrm -rf ~' .git/hooks/pre-commit",
+    ],
+    [
+      "sed -i '' prefixing a removal in a git hook",
+      "sed -i '' 's/^/rm -rf ~; /' .git/hooks/pre-commit",
+    ],
+    ["sed -i prefixing a removal in a git hook", "sed -i 's/^/rm -rf ~; /' .git/hooks/pre-commit"],
+    [
+      "sed -i.bak prefixing a removal in a git hook",
+      "sed -i.bak 's/^/rm -rf ~; /' .git/hooks/pre-commit",
+    ],
+    [
+      "sed --in-place prefixing a removal in a git hook",
+      "sed --in-place 's/^/rm -rf ~; /' .git/hooks/pre-commit",
+    ],
+    [
+      "sed --in-place= with a suffix prefixing a removal in a git hook",
+      "sed --in-place=.bak 's/^/rm -rf ~; /' .git/hooks/pre-commit",
+    ],
+    [
+      "sed -ni prefixing a removal in a git hook",
+      "sed -ni 's/^/rm -rf ~; /p' .git/hooks/pre-commit",
+    ],
+    [
+      "sed -Ei prefixing a removal in a git hook",
+      "sed -Ei 's/^/rm -rf ~; /' .git/hooks/pre-commit",
+    ],
+    [
+      "sed with a trailing -i prefixing a removal in a git hook",
+      "sed 's/^/rm -rf ~; /' .git/hooks/pre-commit -i",
+    ],
+    [
+      "gsed -i prefixing a removal in a git hook",
+      "gsed -i 's/^/rm -rf ~; /' .git/hooks/pre-commit",
+    ],
+    [
+      "/usr/bin/sed -i prefixing a removal in a git hook",
+      "/usr/bin/sed -i '' 's/^/rm -rf ~; /' .git/hooks/pre-commit",
+    ],
+    [
       "sed's w command writing into the root",
       `sed 'w ${join(homedir(), ".playground", "extensions", "x")}' /dev/null`,
     ],
