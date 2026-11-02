@@ -6,8 +6,10 @@ export type Guard =
   | "no-env-dump"
   | "no-extension-repo-write"
   | "no-extensions-write"
+  | "no-glm-heavy-path"
   | "no-headless-login"
   | "no-kill-by-name"
+  | "no-playground-leak"
   | "no-raw-spawn"
   | "no-release-comment"
   | "no-stash"
@@ -19,6 +21,7 @@ export type Folder =
   | "cli folder"
   | "data folder"
   | "extensions root"
+  | "glm repo"
   | "home"
   | "process data folder"
   | "process home"
@@ -48,7 +51,7 @@ export type Group = {
   folders: Folder[]
   guards: Guard[]
   rows: (paths: Paths) => readonly Row[]
-  source: "#292" | "#356" | "#402" | "#411"
+  source: "#292" | "#356" | "#402" | "#411" | "#PR435"
 }
 
 // The rows a guard-loosening PR lets run on purpose, each written as a row's "<source> <what>" for all its cases, or as one case's "<source> <what> | <guard> | <folder>"; canary lets none run.
@@ -68,6 +71,9 @@ const COLONS = ": ".repeat(25_000)
 
 // A push to the made-up extension repo the runner's synced data folder names.
 const PUSH = "git push https://github.com/quillco/acme-skills main"
+
+// A guarded org's repository by its URL, which a push names from any folder.
+const ORG = "https://github.com/acme-blue/app.git"
 
 const MUTATION = `mutation { addComment(input: {subjectId: "I_1", body: "release"}) { clientMutationId } }`
 
@@ -1015,5 +1021,55 @@ gh api graphql -f query="$QUERY"`,
       ["rm of a glob no entry matches", "rm -rf q*", "home"],
     ],
     source: "#411",
+  },
+  {
+    folders: ["data folder", "home"],
+    guards: ["no-stash"],
+    rows: ({ WORK }) => [
+      ["git --attr-source before a stash", "git --attr-source HEAD stash pop"],
+      ["git -c before a stash", "git -c k=v stash pop"],
+      ["git -C before a stash", `git -C ${WORK} stash pop`],
+    ],
+    source: "#PR435",
+  },
+  {
+    folders: ["data folder", "home"],
+    guards: ["no-playground-leak"],
+    rows: () => [
+      [
+        "git --attr-source before a push",
+        `git --attr-source HEAD push ${ORG} HEAD:worker-greed/fix`,
+      ],
+      ["git -c before a push", `git -c k=v push ${ORG} HEAD:worker-greed/fix`],
+      ["git -C before a push", `git -C /tmp push ${ORG} HEAD:worker-greed/fix`],
+      [
+        "git --config-env before a push",
+        `git --config-env core.pager=HOME push ${ORG} HEAD:worker-greed/fix`,
+      ],
+      ["a literal -c alias for push", `git -c alias.p=push p ${ORG} HEAD:worker-greed/fix`],
+      [
+        "a literal -c alias for push after --attr-source",
+        `git --attr-source HEAD -c alias.p=push p ${ORG} HEAD:worker-greed/fix`,
+      ],
+      ["a ! alias", `git -c 'alias.p=!git push' p ${ORG} HEAD:worker-greed/fix`],
+      [
+        "an alias that names another alias",
+        `git -c alias.q=push -c alias.p=q p ${ORG} HEAD:worker-greed/fix`,
+      ],
+      ["an alias the hook cannot read", `git -c "alias.p=$X" p ${ORG} HEAD:worker-greed/fix`],
+    ],
+    source: "#PR435",
+  },
+  {
+    folders: ["glm repo"],
+    guards: ["no-glm-heavy-path"],
+    rows: () => [
+      ["git --attr-source before a commit of a heavy path", "git --attr-source HEAD commit -m x"],
+      [
+        "git --exec-path before a commit of a heavy path",
+        "git --exec-path=/usr/libexec commit -m x",
+      ],
+    ],
+    source: "#PR435",
   },
 ]
