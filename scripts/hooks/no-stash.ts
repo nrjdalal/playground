@@ -3,6 +3,7 @@
 import { fromFactory } from "./role"
 import {
   type Env,
+  GIT_TAKES,
   knownVariables,
   lex,
   marked,
@@ -15,17 +16,6 @@ import {
   type Xargs,
 } from "./shell"
 
-// The words git 2.56 steps over before its subcommand: each option that takes the next word as its value, and --exec-path, which takes none but whose bare form prints git's folder and exits, so the word after it never runs.
-const GIT_TAKES = new Set([
-  "-C",
-  "-c",
-  "--attr-source",
-  "--config-env",
-  "--exec-path",
-  "--git-dir",
-  "--namespace",
-  "--work-tree",
-])
 const FULL_SHA = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/
 const READS = new Set(["list", "show"])
 const WRITES = new Set(["create", "store"])

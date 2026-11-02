@@ -170,6 +170,17 @@ const COUNTED = new Set(["repeat", "timeout"])
 export const SHELLS = new Set(["bash", "dash", "ksh", "sh", "zsh"])
 const EXPORTS = new Set(["declare", "export", "local", "readonly", "typeset"])
 export const PRINTERS = new Set(["echo", "printf"])
+// Every git-reading hook's one list of the words git 2.56 steps over before its subcommand: each option that takes the next word as its value, and --exec-path, which takes none but whose bare form prints git's folder and exits, so the word after it never runs.
+export const GIT_TAKES = new Set([
+  "-C",
+  "-c",
+  "--attr-source",
+  "--config-env",
+  "--exec-path",
+  "--git-dir",
+  "--namespace",
+  "--work-tree",
+])
 
 const API_FIELDS = new Set(["-F", "--field", "-f", "--raw-field"])
 const API_TAKES = new Set([
