@@ -162,7 +162,7 @@ Their tests are `bun run test:file tests/scripts/hooks`.
   a program word the hook cannot read (`$S -c`) or that bash expands by a glob or a brace (`/bin/s? -c`, `{sh,-c}`; a glob argument such as `ls *.md` holds no spaced text after it, so it runs), and a function the command defines (`f() { eval "$@"; }; f '…'`), counts as one, but a quoted text with a space (awk's program) never does.
   git's message after `-m`, a flag cluster ending in it (`-am`) or `--message` is kept out of that read for a `commit` or `tag` that carries no `-c` or `--config-env`, and judged for a gated call alone, since an alias runs every word it gets.
   A shell's `-c`, `eval` and `source` are also followed as scripts, and any other program's quoted argument is one word (`awk '$3 ~ /x/'` runs), judged by the rule above.
-  A line holding, in a command or a substitution, any runner call but git, `source` or `.`, or a git call with `-c`, `--config-env` or `GIT_CONFIG*` set in it, is read as a whole:
+  A line holding, in a command or a substitution, any runner call other than git (`source` and `.` among them), or a git call with `-c`, `--config-env` or `GIT_CONFIG*` set in it or given a word the hook cannot read (a stored alias, `rebase -x "$1"`, `submodule foreach "$_"`), is read as a whole:
   every spaced text of every program but a reader, a git message included, since the runner may run any text the line holds (`set -- '…'; eval "$1"`, `git commit -m '…'; git log -1 --format=%s | sh`).
   So only a line whose runner calls are all plain git (`git add -A && git commit -m '…' && git push`) keeps its messages out of the read.
   It refuses any program but a reader run with the root as its folder or, for git, its tree.
