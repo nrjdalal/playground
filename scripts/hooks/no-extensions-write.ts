@@ -176,10 +176,12 @@ function programLines({ args, first }: Parsed): string[] {
     .flatMap(({ value }) => [...value.matchAll(/"((?:[^"\\]|\\.)*)"/g)].map((m) => m[1]))
 }
 
-// Whether a call only reads, so its quoted words are never a command line: one of a closed list of readers, an awk whose every program the hook reads and none can run a command or write a file, a reader by `reads` of cat, grep, head, tail or wc, cut, a sort with no -o, --output or --compress-program, and a uniq with at most one file, since a second is its output
+// Whether a call only reads, so its quoted words are never a command line: one of a closed list of readers, an awk whose every program the hook reads and none can run a command or write a file, a reader by `reads` of cat, grep, head, tail or wc, cut, a sort with no -o and no long option (macOS takes --out= for --output), and a uniq with at most one file, since a second is its output; each named bare or by a system folder's path, with no variable set in the call, so no script the session wrote or a PATH it set stands in
 function narrow(parsed: Parsed, env: Env): boolean {
   const { args, first, name, xargs } = parsed
-  if (!first || xargs || marked(name)) return false
+  if (!first || xargs || marked(name) || parsed.local.size > 0) return false
+  if (!/^(?:\/(?:bin|opt\/homebrew\/bin|usr\/bin|usr\/local\/bin)\/)?[^/]+$/.test(first.value))
+    return false
   const base = (first.value.split("/").pop() ?? "").toLowerCase()
   if (AWKS.has(base)) {
     const programs = awkPrograms(args)
@@ -187,8 +189,7 @@ function narrow(parsed: Parsed, env: Env): boolean {
   }
   if (["cat", "grep", "head", "tail", "wc"].includes(base)) return reads(parsed, env)
   if (base === "cut") return true
-  if (base === "sort")
-    return !args.some(({ value }) => /^-[a-zA-Z]*o|^--(?:compress-program|output)/.test(value))
+  if (base === "sort") return !args.some(({ value }) => /^-[a-zA-Z]*o|^--./.test(value))
   if (base === "uniq")
     return args.filter(({ value }) => value === "-" || !value.startsWith("-")).length <= 1
   return false
