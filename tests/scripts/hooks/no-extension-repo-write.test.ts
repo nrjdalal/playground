@@ -131,6 +131,7 @@ const REFUSED: Row[] = [
   ["git push --mirror", `git push --mirror ${EXT}`],
   ["git push --delete", `git push --delete ${EXT} old`],
   ["git push behind a wrapper", `env X=1 git push ${EXT} main`],
+  ["git --attr-source <tree> before a push", `git --attr-source HEAD push ${EXT} main`],
   ["git push to a remote added in the same call", `git remote add e ${EXT} && git push e main`],
   ["git push to a remote in a variable", "git push $R main"],
   ["gh api PUT on contents", `gh api -X PUT ${A}/contents/x.md -f message=m -f content=eA==`],
