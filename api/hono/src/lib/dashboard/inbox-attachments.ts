@@ -33,6 +33,7 @@ export const KIND_OF_EXTENSION: Record<string, InboxAttachmentKind> = {
   js: "code",
   json: "code",
   md: "doc",
+  patch: "code",
   pdf: "pdf",
   png: "image",
   py: "code",

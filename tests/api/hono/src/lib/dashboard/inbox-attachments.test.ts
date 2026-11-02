@@ -59,6 +59,17 @@ describe("bun run ask keeps an ask's pictures (#2282)", () => {
     expect(inboxInputSchema.safeParse((kept as { input: unknown }).input).success).toBe(true)
   })
 
+  test("a diff or a patch is kept as code with no kind named, so the viewer draws it as a patch", async () => {
+    for (const name of ["fix.diff", "fix.patch"]) {
+      const src = file(name, "--- a/x.ts\n+++ b/x.ts\n@@ -1 +1 @@\n-a\n+b\n")
+      const { kept } = await keep([{ src }])
+      expect(kept.ok).toBe(true)
+      const [attachment] = (kept as { input: { preview: { attachments: { kind: string }[] } } })
+        .input.preview.attachments
+      expect(attachment?.kind).toBe("code")
+    }
+  })
+
   test("an item with no attachments passes as it is", async () => {
     const input = { from: "dispatcher", preview: { text: "Look", type: "ask" }, title: "A mock" }
     expect(await keepAttachments(input, { dir: join(scratch, "none") })).toEqual({

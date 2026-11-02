@@ -203,7 +203,8 @@
   It runs in an `<iframe sandbox="allow-scripts">` from `srcdoc` alone; its blob is plain text, and it has no Open in new tab.
   A link clicked in it opens in a browser tab of its own, http or https alone (`viewer: "link"`), and one to a place on the page scrolls there with no load.
   Since a policy reaches no navigation, each load is judged by whether its page posted `viewer: "ready"` (`frameLoad`): a page a script or a refresh sent the frame off to is put back once, then stopped on a notice, each request that took it off having left.
-  A `doc` renders through `TranscriptMarkdown` and a `code` file as one fenced block named by its extension (`fenced`), both in a region that keeps Up and Down for scrolling; a `pdf` opens in the browser's own viewer in an unsandboxed frame.
+  A `doc` renders through `TranscriptMarkdown` and a `code` file as one fenced block named by its extension (`fenced`), both in a region that keeps Up and Down for scrolling;
+  a `.diff` or `.patch` draws there as a patch view instead (`patch-view.tsx`, loaded through `next/dynamic` only when one opens), one block a changed file, split from 768px up and unified below, its lines wrapping, and as that fenced block when it holds no patch the view can read or the view throws; a `pdf` opens in the browser's own viewer in an unsandboxed frame.
   An `ask` whose title, text or labels have the owner quit, restart, close or stop something, in any form of the four verbs but a past form after after, since, because or while, a determiner and one word ("after the dashboard restarted"), carries `checked`,
   one line saying what the four checks of playbook's **ask** found (the ops jobs and their runtimes in the data folder's `ops/jobs.json`, the live processes under the target, the sessions in it, and the Dashboard's `/api/health`),
   `none` or what still depends on the target, and is refused without it,
