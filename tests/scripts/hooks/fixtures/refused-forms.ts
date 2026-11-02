@@ -59,7 +59,7 @@ export type Group = {
   folders: Folder[]
   guards: Guard[]
   rows: (paths: Paths) => readonly Row[]
-  source: "#292" | "#356" | "#402" | "#411" | "#446" | "#456" | "#463" | "#466" | "#469" | "#509"
+  source: "#292" | "#356" | "#402" | "#411" | "#446" | "#448" | "#456" | "#463" | "#466" | "#469" | "#509"
 }
 
 // The rows a guard-loosening PR lets run on purpose, each written as a row's "<source> <what>" for all its cases, or as one case's "<source> <what> | <guard> | <folder>"; canary lets none run.
@@ -1721,6 +1721,27 @@ gh api graphql -f query="$QUERY"`,
       ],
     ],
     source: "#456",
+  },
+  {
+    folders: ["process home", "process data folder", "process worktree"],
+    guards: ["no-extensions-write"],
+    rows: () => [
+      ["rm of a substitution the hook cannot read", "rm -rf $(echo .p*)"],
+      ["rm of a backtick substitution the hook cannot read", "rm -rf `echo .p*`"],
+      ["rm of a variable the call never sets", "rm -rf $X"],
+      ["mv of a quoted variable the call never sets", 'mv "$X" /tmp/y'],
+      ["rm of a glob after a variable the call held", "X=.p; rm -rf $X*", "process home"],
+      ["rm of a variable's glob inside .playground", "X=e; rm -rf .playground/$X*", "process home"],
+      ["rm of a held path's glob", "X=.playground/e; rm -rf $X*", "process home"],
+      [
+        "git -c running a pager exported earlier in the call",
+        `export P='rm -rf .playground'; true; cd \${HOME}; git -c core.pager="$P" log`,
+        "process tmp",
+      ],
+      ["git -c with a value the call never sets", 'git -c core.pager="$P" log'],
+      ["git -c attached with a value the call never sets", 'git -ccore.pager="$P" log'],
+    ],
+    source: "#448",
   },
   {
     folders: ["process home", "process data folder", "process worktree"],
