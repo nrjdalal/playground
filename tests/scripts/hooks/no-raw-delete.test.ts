@@ -3,12 +3,12 @@ import { homedir } from "node:os"
 import { join } from "node:path"
 
 import { check } from "../../../scripts/hooks/no-raw-delete"
+import { NEVER_MADE } from "./fixtures/refused-forms"
 
 // Every form here is data passed to check(); none runs. Refused rows live in fixtures/refused-forms.ts.
 const SESSION = "0a1b2c3d-4e5f-6789-abcd-ef0123456789"
 const SCRATCH = `/private/tmp/claude-501/-Users-x-playground/${SESSION}/scratchpad`
 const WORKTREE = join(homedir(), "x", ".claude", "worktrees", "y")
-const NEVER_MADE = "~/.playground/extensions/.no-such-folder"
 
 const input = (command: string, extra: Record<string, unknown> = {}, cwd = WORKTREE) =>
   JSON.stringify({
@@ -30,6 +30,14 @@ describe("a delete the hook lets run", () => {
     "rm -- -odd-name",
     "rmdir empty",
     "docker rm -fv playground-y-db",
+    'docker rm -f "$CID"',
+    "bun rm left-pad",
+    "git rm --cached notes.txt",
+    "rm *.log",
+    "git clean --dry-run -dx",
+    "rsync -a src/ dst/",
+    "~/.playground/ops/run-slot.sh me -- rm notes.txt",
+    "~/.playground/ops/run-slot.sh me -- bun run test",
     "git clean -f",
     "git clean -n -d",
     "git clean -ndx",
@@ -72,6 +80,12 @@ describe("a delete the hook refuses, naming playground rm", () => {
     expect(await check(input(`git worktree remove --force ${WORKTREE}`))).toContain(
       "Remove a worktree with playground rm --worktree <path>",
     )
+  })
+
+  test("a tree over the trash's limit is pointed at the cleanup and a reinstall", async () => {
+    const reason = await check(input("rm -rf node_modules"))
+    expect(reason).toContain("leave a bigger tree or a scratch folder in place")
+    expect(reason).toContain("bun install rebuild a node_modules in place")
   })
 
   test("a word it cannot read is named by its variable", async () => {

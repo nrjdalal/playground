@@ -11,19 +11,24 @@ import {
   knownVariables,
   lex,
   marked,
+  parse,
+  type Parsed,
   pathOf,
   PRINTERS,
   program,
   readPath,
   run,
+  slotWords,
   stdinOf,
+  unreadable,
   visible,
   type Visit,
+  withDeadline,
   type Word,
 } from "./shell"
 
 const INSTEAD =
-  "Move it to the 7-day trash with playground rm <path> (a worktree: playground rm --worktree <path>), or leave a scratch folder in place for your lead's cleanup. A plain rm of a file inside your own worktree or scratchpad, with no -r, still runs."
+  "Move it to the 7-day trash with playground rm <path> (a worktree: playground rm --worktree <path>), which takes up to 5,000 files or 2 GB; leave a bigger tree or a scratch folder in place for your lead's cleanup, and let bun install rebuild a node_modules in place. A plain rm of a file inside your own worktree or scratchpad, with no -r, still runs."
 
 const WORKTREE =
   "Remove a worktree with playground rm --worktree <path>, which moves it to the 7-day trash once no live session holds it and its commit is on a remote branch."
@@ -59,11 +64,38 @@ const DATA = new Set([
 const isData = (name: string) => DATA.has(name) || /^python[\d.]*$/.test(name)
 // Programs that run the command their arguments name, read here at each word that does not start with a dash.
 const STARTERS = new Set(["screen", "tmux"])
-const FIND_RUNS = new Set(["-exec", "-execdir", "-ok", "-okdir"])
+// rm under its own name and GNU rm's Homebrew name.
+const RM = new Set(["grm", "rm"])
+// The programs the hook judges, read wherever another program names one among its words (`arch -arm64 rm -rf`, `busybox rm`), since any program may run its arguments.
+const JUDGED = new Set([...RM, "chflags", "chmod", "fd", "find", "gfind", "git", "rimraf", "rsync"])
+// Programs that print or search their words, so a judged name among them is text.
+const READERS = new Set([...PRINTERS, "egrep", "fgrep", "grep", "rg"])
+// Runners that add arguments the hook cannot see, as xargs does.
+const APPENDS = new Set(["gxargs", "parallel"])
+// The options of find and fd that run a program on every path they reach.
+const RUNS: Record<string, Set<string>> = {
+  fd: new Set(["--exec", "--exec-batch", "-X", "-x"]),
+  find: new Set(["-exec", "-execdir", "-ok", "-okdir"]),
+  gfind: new Set(["-exec", "-execdir", "-ok", "-okdir"]),
+}
+// at and batch read the script they queue from stdin or -f.
+const QUEUES = new Set(["at", "batch"])
 
 // rm's recursive option: -r or -R in a cluster, or --recursive by any prefix GNU rm takes (`--rec`).
 const recursive = (v: string): boolean =>
   v.startsWith("--") ? v.length >= 3 && "--recursive".startsWith(v) : /^-[A-Za-z]*[rR]/.test(v)
+
+// A recursive option anywhere in a text, as a brace's members spell one (`{rm,-rf,x}`).
+const spellsRecursive = (v: string): boolean =>
+  v.split(/[\s,{}]+/).some((part) => part.startsWith("-") && recursive(part))
+
+// A word the shell may turn into other words: a variable, a substitution or a brace, or an unquoted glob.
+const hidden = (word: Word): boolean =>
+  unreadable(word) || (!word.quoted && /[*?[]/.test(word.value))
+
+// A long option by any prefix git takes (`--forc`), its shortest unique one given.
+const prefixOf = (v: string, option: string, shortest: number) =>
+  v.length >= shortest && option.startsWith(v)
 
 // A path with every folder that exists resolved through its links, so /tmp reads as /private/tmp and a link cannot carry a delete out of a root.
 function real(path: string): string {
@@ -93,21 +125,37 @@ const inside = (path: string, { scratch, worktree }: Roots): boolean => {
   return (!!worktree && at.startsWith(worktree + sep)) || (!!scratch && scratch.test(at))
 }
 
-function judgeRm(args: Word[], xargs: boolean, env: Env, roots: Roots): string | undefined {
+// How a command was reached: on its own, or as words another program runs (`nested`), whose plain rm the hook cannot place and so judges for recursion alone; `appends` when that program adds arguments.
+type Reach = { appends: boolean; nested: boolean }
+const OWN: Reach = { appends: false, nested: false }
+
+function judgeRm(
+  args: Word[],
+  xargs: boolean,
+  env: Env,
+  roots: Roots,
+  { nested }: Reach,
+): string | undefined {
   if (xargs) return refuse("rm under xargs", "the hook cannot read the paths xargs hands it")
   let options = true
   const targets: Word[] = []
   for (const a of args) {
-    if (marked(a.value))
+    if (options && a.value === "--") {
+      options = false
+      continue
+    }
+    const option = options && a.value.startsWith("-") && a.value !== "-"
+    if (option && recursive(a.value)) return refuse(`a recursive rm (${a.value})`)
+    // a variable may split into -r and any path, but a quoted one among another program's words stays one word (`docker rm "$ID"`); a brace may spell -r, and a glob in an option any option
+    const spread = marked(a.value) && (!nested || !a.quoted)
+    if (spread || (options && spellsRecursive(a.value)) || (option && hidden(a)))
       return refuse(
         `an rm with a word the hook cannot read (${shown(a)})`,
         "it may be -r or any path",
       )
-    if (options && a.value === "--") options = false
-    else if (options && a.value.startsWith("-") && a.value !== "-") {
-      if (recursive(a.value)) return refuse(`a recursive rm (${a.value})`)
-    } else targets.push(a)
+    if (!option) targets.push(a)
   }
+  if (nested) return
   const outside = targets.find((t) => {
     const path = pathOf(t, env)
     return !path || !inside(path, roots)
@@ -123,20 +171,17 @@ function judgeGit(args: Word[]): string | undefined {
   const { rest, sub } = gitCommand(args)
   const words = rest.map((w) => w.value)
   const cluster = (letter: string) => words.some((v) => new RegExp(`^-[A-Za-z]*${letter}`).test(v))
+  const force = cluster("f") || words.some((v) => prefixOf(v, "--force", 3))
+  // with or without force, since `-c clean.requireForce=false` or the repo's own config lets -d and -x delete without one
   if (sub?.value === "clean") {
-    if (cluster("n") || words.includes("--dry-run")) return
-    const force = cluster("f") || words.includes("--force")
-    if (force && (cluster("d") || cluster("x") || cluster("X")))
+    if (cluster("n") || words.some((v) => prefixOf(v, "--dry-run", 3))) return
+    if (cluster("d") || cluster("x") || cluster("X"))
       return refuse(
-        "git clean -f with -d or -x",
+        "git clean with -d or -x",
         "it deletes untracked folders or ignored files for good",
       )
   }
-  if (
-    sub?.value === "worktree" &&
-    words[0] === "remove" &&
-    (cluster("f") || words.includes("--force"))
-  )
+  if (sub?.value === "worktree" && words[0] === "remove" && force)
     return refuse(
       "git worktree remove --force",
       "it deletes a worktree's uncommitted work for good",
@@ -161,49 +206,82 @@ async function inspect(raw: string, environment: Record<string, string | undefin
   }
   const line = (text: string, at: Env) =>
     run(lex(text, at.known), { ...at, vars: new Map(at.vars) }, visit)
-  const visit: Visit = async (cmd, { args, first, name, xargs }, at) => {
-    const verdict = await judge(cmd, args, first, name, xargs !== undefined, at)
-    if (verdict || isData(name)) return verdict
-    // a spaced word is read as a command line of its own, the text after an = and a leading ! too (`sh -c '…'` behind any wrapper); git's only command lines are its -c aliases' `!` values, so its messages and patterns stay text; a part it cannot read stays unread in the words it lands in
-    const words =
-      name === "git"
-        ? gitCommand(args).aliases.flatMap((a) => /^alias\.[^=]*=!(.*)$/s.exec(a)?.[1] ?? [])
-        : args.flatMap(({ value }) => [value, value.slice(value.indexOf("=") + 1)])
-    for (const text of new Set(words.map((w) => w.replace(/^!/, "")))) {
-      if (!/\s/.test(text)) continue
-      const found = await line(text, at)
-      if (found) return found
+  const visitAs =
+    (reach: Reach): Visit =>
+    async (cmd, parsed, at) => {
+      const { args, name } = parsed
+      const verdict = await judge(cmd, parsed, at, reach)
+      if (verdict) return verdict
+      // a judged program named among another's words runs as that program, behind any runner
+      if (!READERS.has(name) && !JUDGED.has(name))
+        for (const [k, a] of args.entries()) {
+          if (!JUDGED.has(program(a.value)) || hidden(a)) continue
+          const found = await examine(
+            { ...cmd, words: args.slice(k) },
+            at,
+            visitAs({ appends: APPENDS.has(name), nested: true }),
+            false,
+          )
+          if (found) return found
+        }
+      if (isData(name)) return
+      // a spaced word is read as a command line of its own, the text after an = and a leading ! too (`sh -c '…'` behind any wrapper); git's only command lines are its -c aliases' `!` values, so its messages and patterns stay text; a part it cannot read stays unread in the words it lands in
+      const words =
+        name === "git"
+          ? gitCommand(args).aliases.flatMap((w) => /^alias\.[^=]*=!(.*)$/s.exec(w)?.[1] ?? [])
+          : args.flatMap(({ value }) => [value, value.slice(value.indexOf("=") + 1)])
+      for (const text of new Set(words.map((w) => w.replace(/^!/, "")))) {
+        if (!/\s/.test(text)) continue
+        const found = await line(text, at)
+        if (found) return found
+      }
     }
-  }
+  const visit = visitAs(OWN)
   const judge = async (
     cmd: Command,
-    args: Word[],
-    first: Word | undefined,
-    name: string,
-    xargs: boolean,
+    parsed: Parsed,
     at: Env,
+    reach: Reach,
   ): Promise<string | undefined> => {
-    if (first && marked(first.value) && args.some((a) => /^-[A-Za-z]*[rR]/.test(a.value)))
+    const { args, first, name, xargs } = parsed
+    // a program word the hook cannot read (a variable, a brace, a glob) given -r, or given a word it cannot read either, may be a recursive rm
+    if (
+      first &&
+      hidden(first) &&
+      (spellsRecursive(first.value) ||
+        args.some((a) => spellsRecursive(a.value) || (hidden(a) && !a.quoted)))
+    )
       return refuse(`a program the hook cannot read (${shown(first)}) given -r`, "it may be rm")
-    if (name === "rm") return judgeRm(args, xargs, at, roots)
+    const slot = slotWords(parsed)
+    if (slot) return examine({ ...cmd, words: slot }, at, visitAs(reach), false)
+    if (RM.has(name)) return judgeRm(args, xargs !== undefined || reach.appends, at, roots, reach)
     if (name === "git") return judgeGit(args)
+    if (name === "rimraf") return refuse("rimraf")
+    if (name === "rsync" && args.some((a) => a.value.startsWith("--del")))
+      return refuse("rsync --delete", "it deletes every file its source lacks, for good")
     if (name === "chflags")
       return refuse("chflags", "it lifts the flags that keep a file from deletion")
     if (name === "chmod" && args.some((a) => /^-[A-Za-z]*[aN]/.test(a.value)))
       return refuse("chmod -a or -N", "it strips the access entries that keep a file from deletion")
-    if (name === "find") {
-      if (args.some((a) => a.value === "-delete")) return refuse("find -delete")
+    const runs = RUNS[name]
+    if (runs) {
+      if (args.some((a) => a.value === "-delete")) return refuse(`${name} -delete`)
       for (const [k, a] of args.entries()) {
-        if (!FIND_RUNS.has(a.value)) continue
+        if (!runs.has(a.value)) continue
         const end = args.findIndex((w, j) => j > k && (w.value === ";" || w.value === "+"))
         const words = args.slice(k + 1, end === -1 ? undefined : end)
-        if (program(words[0]?.value ?? "") === "rm")
-          return refuse(`find ${a.value} rm`, "it deletes every path find reaches")
-        const found = await examine({ ...cmd, words }, at, visit, false)
+        if (RM.has(parse({ ...cmd, words }).name))
+          return refuse(`${name} ${a.value} rm`, `it deletes every path ${name} reaches`)
+        const found = await examine(
+          { ...cmd, words },
+          at,
+          visitAs({ appends: true, nested: true }),
+          false,
+        )
         if (found) return found
       }
     }
-    if (name === "at") {
+    if (QUEUES.has(name)) {
       const file = args.findIndex((a) => a.value === "-f")
       const script =
         file === -1 ? await stdinOf(cmd, at) : await readPath(args[file + 1] ?? { value: "" }, at)
@@ -226,11 +304,12 @@ async function inspect(raw: string, environment: Record<string, string | undefin
 
 const bare = (command: string) => command.replace(/[\\'"]/g, "")
 
-// The cheap first look: a name the hook judges, or a $ or backtick that can spell one.
-const CANDIDATE = /rm|delete|chflags|chmod|clean|worktree|screen|tmux|\bat\b|\$|`/
+// The cheap first look: a name the hook judges, or a $, a backtick, a brace or a glob that can spell one.
+const CANDIDATE =
+  /rm|delete|chflags|chmod|clean|worktree|rimraf|screen|tmux|\bat\b|batch|\$|`|[{*?[]/
 
 // A call that reads as a delete, which the hook refuses when it cannot read it.
-const DELETES = /\brm\b|-delete\b|\bchflags\b|\bchmod\b|\bclean\b|\bworktree\b/
+const DELETES = /\bg?rm\b|-delete\b|\bchflags\b|\bchmod\b|\bclean\b|\bworktree\b|\brimraf\b|--del/
 
 // The Bash command an input names, or undefined when the input does not parse as one.
 function commandOf(raw: string): string | undefined {
@@ -242,13 +321,13 @@ function commandOf(raw: string): string | undefined {
   }
 }
 
-// Fails closed only on a call that reads as a delete, so a parser bug cannot block every Bash command.
+// Fails closed only on a call that reads as a delete, a walk past its 10 s budget included, so a parser bug cannot block every Bash command.
 export async function check(
   raw: string,
   environment: Record<string, string | undefined> = process.env,
 ): Promise<string | undefined> {
   try {
-    return await inspect(raw, environment)
+    return await withDeadline(10_000, async () => inspect(raw, environment))
   } catch (error) {
     if (!DELETES.test(bare(commandOf(raw) ?? raw))) return
     return refuse(`a call it could not read (${error})`, "it reads as a delete").concat(
