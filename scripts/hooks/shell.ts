@@ -4,11 +4,13 @@ import { basename, isAbsolute, resolve } from "node:path"
 
 // `variable` names the first shell variable a text expands, so a hook can tell `"$HERDR_BIN_PATH"` from any other unknown program.
 export type Text = { reads?: Text[]; unknown?: string; value: string; variable?: string }
-export type Word = Text & { quoted: boolean }
+// `glob` marks a word with a glob character the shell sees outside quotes, so `'{print $1}'` holds none and `{a,'b'}` one.
+export type Word = Text & { glob?: boolean; procs?: Command[]; quoted: boolean }
 type Redirect = { body?: Text; fd: string; op: string; target?: Word }
 export type Command = {
   detached?: boolean
   group?: boolean
+  inner?: () => Command[]
   redirects: Redirect[]
   scope: number
   stdin?: Command
@@ -43,9 +45,57 @@ export const READ = "\u0001"
 export const NOT_RUN =
   "The refusal stopped this whole Bash call, so none of its commands ran: once it is fixed, run again each one you still need."
 const MAX_BYTES = 1_048_576
+const MAX_SCRIPT = 131_072
+const LARGE = "a text too large to read"
+
+// The performance.now() past which every lex, expansion and walk step throws a RangeError, set by a hook that must answer inside its timeout.
+let deadline: number | undefined
+
+// Runs body with a deadline budget ms away, so any slow route through the lexer or the walk refuses, whatever made it slow.
+export async function withDeadline<T>(budget: number, body: () => Promise<T>): Promise<T> {
+  const outer = deadline
+  deadline = performance.now() + budget
+  try {
+    return await body()
+  } finally {
+    deadline = outer
+  }
+}
+
+// Throws once the walk is past its deadline, for a visit whose spawns take time no tick sees.
+export function pastDeadline(): void {
+  if (deadline !== undefined && performance.now() > deadline)
+    throw new RangeError("past the hook's time")
+}
+
+let steps = 0
+
+// The one choke point every lex, expansion and walk step passes through; it reads the clock once every 1024 steps, so a tight loop pays for a counter alone.
+export function tick(): void {
+  if (deadline === undefined || ++steps % 1024 !== 0) return
+  if (performance.now() > deadline) throw new RangeError("past the hook's time")
+}
+
+// A script a shell, eval or source reads, held under a deadline to the size of a command the hook reads.
+function lexScript(value: string, env: Env): Lexed {
+  if (deadline !== undefined && value.length > MAX_SCRIPT)
+    throw new RangeError("a script too large to read")
+  return lex(value, env.known)
+}
+
+// A script with xargs' -I string filled in from stdin, refused before it is built when it would outgrow a script the hook reads.
+export function filled(script: string, mark: string, value: string): string {
+  const count = script.split(mark).length - 1
+  if (deadline !== undefined && script.length + count * value.length > MAX_SCRIPT)
+    throw new RangeError("a script too large to read")
+  return script.replaceAll(mark, value)
+}
+
+// A text a command writes or reads from stdin, unknown past the size of a file the hook reads, so a text that doubles stops growing.
+const held = (text: Text): Text => (text.value.length > MAX_BYTES ? unknown(LARGE) : text)
 
 const BREAK = new Set([" ", "\t", "\n", ";", "&", "|", "<", ">", "(", ")"])
-const REDIRECT = /^(\d*|&)(<<<|<<-|<<|<>|<&|>&|>>|>\||<|>)/
+const REDIRECT = /^(\d*|&)(<<<|<<-|<<|<>|<&|>&!?|>>[!|]?|>[!|]|<|>)/
 const RESERVED = new Set([
   "!",
   "{",
@@ -62,32 +112,125 @@ const RESERVED = new Set([
   "until",
   "while",
 ])
+// Whether a program is its command's own first word, a reserved word before it (`!`, `then`, `do`) skipped, rather than one a wrapper or an assignment runs
+export const ownFirst = (cmd: Command, first: Word | undefined): first is Word =>
+  !!first && first === cmd.words.find((w) => w.quoted || !RESERVED.has(w.value))
+// Whether every word of a command is an unquoted reserved word (`fi`, `done`), so it names no program of its own
+export const onlyReserved = (cmd: Command): boolean =>
+  cmd.words.length > 0 && cmd.words.every((w) => !w.quoted && RESERVED.has(w.value))
 // The words that close a compound command, whose output the hook does not follow.
 const GROUPING = new Set(["}", "done", "esac", "fi"])
 export const ASSIGN = /^[A-Za-z_]\w*=/
-const WRAPPERS = new Map<string, Set<string>>([
-  ["builtin", new Set()],
-  ["caffeinate", new Set(["-t", "-w"])],
-  ["command", new Set()],
-  ["doas", new Set(["-u"])],
-  ["env", new Set(["-P", "-S", "-u", "--unset"])],
-  ["exec", new Set(["-a"])],
-  ["nice", new Set(["-n", "--adjustment"])],
-  ["nocorrect", new Set()],
-  ["noglob", new Set()],
-  ["nohup", new Set()],
-  ["repeat", new Set()],
-  ["stdbuf", new Set(["-e", "-i", "-o"])],
-  ["sudo", new Set(["-C", "-D", "-g", "-h", "-p", "-R", "-r", "-T", "-t", "-U", "-u"])],
-  ["time", new Set()],
-  ["timeout", new Set(["-k", "--kill-after", "-s", "--signal"])],
-  ["xargs", new Set(["-a", "-d", "-E", "-I", "-L", "-n", "-P", "-s"])],
+// Each wrapper's options, A to Z: its flags, then the options that take a value, short and long; parse reads a cluster (`-Hp`) letter by letter and a value attached (`-pwc`, `--prompt=wc`) or as the next word, and reads an option missing here both as a flag and as taking the next word, so a hook judges the program under each
+type Options = { flags: Set<string>; values: Set<string> }
+const WRAPPERS = new Map<string, Options>(
+  Object.entries({
+    builtin: ["", ""],
+    caffeinate: ["-d -i -m -s -u", "-t -w"],
+    command: ["-p -V -v", ""],
+    doas: ["-L -n -s", "-a -C -u"],
+    env: ["-0 -i -v --debug --ignore-environment --null", "-P -S -u --unset"],
+    exec: ["-c -l", "-a"],
+    nice: ["", "-n --adjustment"],
+    nocorrect: ["", ""],
+    noglob: ["", ""],
+    nohup: ["", ""],
+    repeat: ["", ""],
+    stdbuf: ["", "-e -i -o --error --input --output"],
+    sudo: [
+      "-A -B -b -E -e -H -i -K -k -l -N -n -P -S -s -V -v --askpass --background --bell --edit --help --list --login --non-interactive --preserve-env --preserve-groups --remove-timestamp --reset-timestamp --set-home --shell --stdin --validate --version",
+      "-C -D -g -h -p -R -r -T -t -U -u --chdir --chroot --close-from --command-timeout --group --host --other-user --prompt --role --type --user",
+    ],
+    time: [
+      "-a -h -l -p -q -V -v --append --portability --quiet --verbose",
+      "-f -o --format --output",
+    ],
+    timeout: ["-f -p -v --foreground --preserve-status --verbose", "-k -s --kill-after --signal"],
+    xargs: [
+      "-0 -o -p -r -t -x --exit --interactive --no-run-if-empty --null --open-tty --show-limits --verbose",
+      "-a -d -E -L -n -P -R -S -s --arg-file --delimiter --max-args --max-chars --max-lines --max-procs --process-slot-var",
+    ],
+  }).map(([name, [flags, values]]) => [
+    name,
+    { flags: new Set(flags.split(" ")), values: new Set(values.split(" ")) },
+  ]),
+)
+
+// Where a wrapper's option word leaves its value: "own" when it takes none or carries it, "next" when the next word is its value, or undefined for an option the wrapper's list lacks
+function optionValue(word: string, { flags, values }: Options): "next" | "own" | undefined {
+  if (word.startsWith("--")) {
+    const eq = word.indexOf("=")
+    const name = eq === -1 ? word : word.slice(0, eq)
+    if (values.has(name)) return eq === -1 ? "next" : "own"
+    return flags.has(name) ? "own" : undefined
+  }
+  for (let k = 1; k < word.length; k++) {
+    const option = `-${word[k]}`
+    if (values.has(option)) return k === word.length - 1 ? "next" : "own"
+    if (!flags.has(option)) return undefined
+  }
+  return "own"
+}
+
+// The privilege wrappers' options that start a root shell, which reads its script from stdin when no command follows them: a closed list, read as a word or in a cluster of the wrapper's own flags
+const ROOT_SHELLS = new Map([
+  ["doas", new Set(["-s"])],
+  ["sudo", new Set(["--login", "--shell", "-i", "-s"])],
 ])
+// Whether a command starts a shell that reads its script from stdin, with no command of its own: "root" for a privilege wrapper's shell (`sudo -s`, `nice doas -s`, an option or program in a variable taken as one), "shell" for a shell given no script (`sh`, `sudo bash`); a reserved word, a function's name or an assignment before it skipped
+export function stdinShell(cmd: Command): "root" | "shell" | undefined {
+  const { args, first, name } = parse(cmd)
+  if (first && !marked(first.value)) {
+    if (!SHELLS.has(name)) return undefined
+    const { inline, operand } = shellOperand(args, name)
+    return inline || operand ? undefined : "shell"
+  }
+  let at = 0
+  for (let w = cmd.words[at]; w && !w.quoted; w = cmd.words[at]) {
+    if (w.value === "function") at += 2
+    else if (RESERVED.has(w.value) || ASSIGN.test(w.value)) at++
+    else break
+  }
+  const end = first ? cmd.words.indexOf(first) : -1
+  const before = cmd.words.slice(at, end === -1 ? undefined : end)
+  const k = before.findIndex((w) => !w.quoted && ROOT_SHELLS.has(program(w.value)))
+  if (k === -1) return undefined
+  const wrapper = program(before[k].value)
+  const shells = ROOT_SHELLS.get(wrapper) as Set<string>
+  const { flags } = WRAPPERS.get(wrapper) as Options
+  // a listed option, alone or in a cluster of the wrapper's own flags (`-Es`), or a word the hook cannot read, which may hold one
+  const starts = ({ quoted, value }: Word) =>
+    marked(value) ||
+    (!quoted &&
+      (shells.has(value) ||
+        (/^-[A-Za-z]+$/.test(value) &&
+          value
+            .slice(1)
+            .split("")
+            .every((c) => flags.has(`-${c}`)) &&
+          value
+            .slice(1)
+            .split("")
+            .some((c) => shells.has(`-${c}`)))))
+  return !!first || before.slice(k + 1).some(starts) ? "root" : undefined
+}
+
 // Wrappers that take one positional argument (a count or a duration) before the command.
 const COUNTED = new Set(["repeat", "timeout"])
 export const SHELLS = new Set(["bash", "dash", "ksh", "sh", "zsh"])
 const EXPORTS = new Set(["declare", "export", "local", "readonly", "typeset"])
 export const PRINTERS = new Set(["echo", "printf"])
+// Every git-reading hook's one list of the words git 2.56 steps over before its subcommand: each option that takes the next word as its value, and --exec-path, which takes none but whose bare form prints git's folder and exits, so the word after it never runs.
+export const GIT_TAKES = new Set([
+  "-C",
+  "-c",
+  "--attr-source",
+  "--config-env",
+  "--exec-path",
+  "--git-dir",
+  "--namespace",
+  "--work-tree",
+])
 
 const API_FIELDS = new Set(["-F", "--field", "-f", "--raw-field"])
 const API_TAKES = new Set([
@@ -167,6 +310,21 @@ const ESCAPES: Record<string, string> = {
 }
 
 export const unknown = (why: string): Text => ({ unknown: why, value: UNKNOWN })
+
+// Each scope's variable names in the order they were set, so a hook reads only those set since it last looked, where a read of them all before each command grows with the square of their count; every set here goes through setVar.
+const setLog = new WeakMap<Map<string, Text>, string[]>()
+const setVar = (vars: Map<string, Text>, key: string, value: Text): void => {
+  vars.set(key, value)
+  const log = setLog.get(vars)
+  if (log) log.push(key)
+  else setLog.set(vars, [key])
+}
+
+// The names a scope's variables were set by since a hook's cursor, every name on its first look (a copied scope's included), and the cursor that marks where it read to.
+export function varsSince(vars: Map<string, Text>, cursor: number | undefined): [string[], number] {
+  const log = setLog.get(vars) ?? []
+  return [cursor === undefined ? [...vars.keys()] : log.slice(cursor), log.length]
+}
 
 const merge = (out: Text, part: Text): void => {
   out.value += part.value
@@ -270,12 +428,28 @@ function walk(lx: Lexer, scope: number, nested: boolean, inherit?: Command): voi
   const pending: Pending[] = []
   const fresh = (): Command => ({ redirects: [], scope, stdin: inherit, words: [] })
   let cmd = fresh()
+  const opens: number[] = []
   // A pipeline's commands and a backgrounded one run in subshells: a cd there leaves the shell where it was.
   const end = (op: string) => {
     const done = cmd
     const pipe = op === "|" || op === "|&"
+    const brace = (c: Command, value: string) => c.words[0]?.value === value && !c.words[0].quoted
+    if (brace(done, "}")) {
+      const open = opens.pop()
+      if (open !== undefined) {
+        const { commands } = lx
+        const close = commands.length
+        done.inner = () => topLevel(commands.slice(open, close), scope)
+      }
+    }
     if (pipe || op === "&") done.detached = true
-    if (done.words.length > 0 || done.redirects.length > 0 || done.group) lx.commands.push(done)
+    if (done.words.length > 0 || done.redirects.length > 0 || done.group) {
+      for (const w of done.words) {
+        if (w.value !== "{" || w.quoted) break
+        opens.push(lx.commands.length)
+      }
+      lx.commands.push(done)
+    }
     cmd = fresh()
     if (pipe) {
       cmd.stdin = done
@@ -283,6 +457,7 @@ function walk(lx: Lexer, scope: number, nested: boolean, inherit?: Command): voi
     }
   }
   while (lx.i < src.length) {
+    tick()
     const c = src[lx.i]
     const redirect = REDIRECT.exec(src.slice(lx.i, lx.i + 8))
     if (c === " " || c === "\t") lx.i++
@@ -301,17 +476,21 @@ function walk(lx: Lexer, scope: number, nested: boolean, inherit?: Command): voi
       lx.i++
       const piped = cmd.words.length === 0 && cmd.redirects.length === 0 ? cmd.stdin : undefined
       end(";")
+      const from = lx.commands.length
+      const scope = lx.scopes.length
       nest(lx, piped)
       cmd.group = true
+      const members = topLevel(lx.commands.slice(from), scope)
+      cmd.inner = () => members
     } else if ((c === "<" || c === ">") && src[lx.i + 1] === "(") {
-      lx.i += 2
-      nest(lx)
-      cmd.words.push({ quoted: false, ...unknown("a process substitution") })
+      cmd.words.push(procSub(lx))
     } else if (redirect) {
       lx.i += redirect[0].length
       while (src[lx.i] === " " || src[lx.i] === "\t") lx.i++
-      const [, fd, op] = redirect
-      const target = word(lx)
+      const [, fd] = redirect
+      // zsh's >!, >>! and >&! override noclobber as >| does
+      const op = redirect[2].replace(/!$/, "|").replace(/^(>[>&])\|$/, "$1")
+      const target = src.startsWith("<(", lx.i) ? procSub(lx) : word(lx)
       const entry: Redirect = { fd, op, target }
       if (op === "<<" || op === "<<-") {
         pending.push({
@@ -337,10 +516,30 @@ function walk(lx: Lexer, scope: number, nested: boolean, inherit?: Command): voi
   end(";")
 }
 
+// The commands of one scope whose output leaves it, so not piped into another.
+function topLevel(cmds: Command[], scope: number): Command[] {
+  const fed = new Set(cmds.map((c) => c.stdin))
+  return cmds.filter((c) => !fed.has(c) && c.scope === scope)
+}
+
+// A process substitution, carrying the commands whose output leaves it, so a shell that reads it as a script can read that output.
+function procSub(lx: Lexer): Word {
+  lx.i += 2
+  const from = lx.commands.length
+  const scope = lx.scopes.length
+  nest(lx)
+  return {
+    procs: topLevel(lx.commands.slice(from), scope),
+    quoted: false,
+    ...unknown("a process substitution"),
+  }
+}
+
 function heredocs(lx: Lexer, pending: Pending[], nested: boolean): void {
   for (const doc of pending.splice(0)) {
     const lines: string[] = []
     while (lx.i < lx.src.length) {
+      tick()
       const start = lx.i
       const newline = lx.src.indexOf("\n", start)
       const stop = newline === -1 ? lx.src.length : newline
@@ -373,10 +572,20 @@ function word(lx: Lexer): Word {
   const start = lx.i
   const out: Word = { quoted: false, value: "" }
   let bare = ""
-  while (lx.i < src.length && !BREAK.has(src[lx.i])) {
+  while (
+    lx.i < src.length &&
+    (!BREAK.has(src[lx.i]) || (src[lx.i] === "(" && lx.i > start && src[lx.i + 1] !== ")"))
+  ) {
+    tick()
     const c = src[lx.i]
     const next = src[lx.i + 1] ?? ""
-    if (c === "\\") {
+    if (c === "(") {
+      const end = balanced(src, lx.i, "(", ")")
+      out.value += src.slice(lx.i, end)
+      bare += src.slice(lx.i, end)
+      inner(lx, src.slice(lx.i + 1, end - 1))
+      lx.i = end
+    } else if (c === "\\") {
       out.quoted = true
       if (next !== "\n") out.value += next
       lx.i += 2
@@ -394,9 +603,12 @@ function word(lx: Lexer): Word {
       out.quoted = true
       merge(out, ansi(lx))
     } else if (c === "$" && next === '"') lx.i++
-    else if (c === "$") merge(out, dollar(lx))
-    else if (c === "`") merge(out, backtick(lx))
-    else if (c === "~" && lx.i === start && (next === "" || next === "/" || BREAK.has(next))) {
+    else if (c === "$" || c === "`") {
+      // an unquoted expansion's value is globbed too
+      const text = c === "$" ? dollar(lx) : backtick(lx)
+      merge(out, text)
+      if (GLOB_CHARS.test(text.value)) out.glob = true
+    } else if (c === "~" && lx.i === start && (next === "" || next === "/" || BREAK.has(next))) {
       out.value += homedir()
       lx.i++
     } else {
@@ -405,9 +617,13 @@ function word(lx: Lexer): Word {
       lx.i++
     }
   }
-  if (/\{[^{}]*(?:,|\.\.)[^{}]*\}/.test(bare)) out.unknown ??= "a brace expansion"
+  // the lookahead finds the close once, so a { with no } costs its length rather than its square
+  if (/\{(?=[^{}]*\})[^{}]*(?:,|\.\.)/.test(bare)) out.unknown ??= "a brace expansion"
+  if (GLOB_CHARS.test(bare)) out.glob = true
   return out
 }
+
+const GLOB_CHARS = /[*?[{(]/
 
 function double(lx: Lexer): Text {
   const { src } = lx
@@ -439,6 +655,7 @@ function ansi(lx: Lexer): Text {
 }
 
 function dollar(lx: Lexer): Text {
+  tick()
   const { src } = lx
   const next = src[lx.i + 1] ?? ""
   const variable = (name: string | undefined): Text =>
@@ -446,7 +663,9 @@ function dollar(lx: Lexer): Text {
       ? { value: lx.known[name], variable: name }
       : { ...unknown("a shell variable"), variable: name }
   if (src.startsWith("$((", lx.i)) {
-    lx.i = balanced(src, lx.i + 1, "(", ")")
+    const end = balanced(src, lx.i + 1, "(", ")")
+    inner(lx, src.slice(lx.i + 3, end - 2))
+    lx.i = end
     return unknown("an arithmetic expansion")
   }
   if (next === "(") {
@@ -458,6 +677,7 @@ function dollar(lx: Lexer): Text {
   if (next === "{") {
     const end = balanced(src, lx.i + 1, "{", "}")
     const name = /^\$\{([A-Za-z_]\w*)\}$/.exec(src.slice(lx.i, end))?.[1]
+    inner(lx, src.slice(lx.i + 2, end - 1))
     lx.i = end
     return variable(name)
   }
@@ -474,9 +694,22 @@ function dollar(lx: Lexer): Text {
   return { value: "$" }
 }
 
+// Lexes an expansion's own text for the substitutions in it, so their commands are read.
+function inner(lx: Lexer, src: string): void {
+  const sub = { ...lx, i: 0, src }
+  while (sub.i < src.length) {
+    tick()
+    const from = sub.i
+    if ((src[sub.i] === "<" || src[sub.i] === ">") && src[sub.i + 1] === "(") procSub(sub)
+    else word(sub)
+    if (sub.i === from) sub.i++
+  }
+}
+
 function balanced(src: string, from: number, open: string, close: string): number {
   let depth = 0
   for (let i = from; i < src.length; i++) {
+    tick()
     const c = src[i]
     if (c === "\\") i++
     else if (c === "'") {
@@ -533,6 +766,8 @@ function substituted(inner: Command[]): Text {
 export type Xargs = { replace?: string } | undefined
 
 export type Parsed = {
+  // the other readings of a wrapper's option it cannot read, each judged as the command too
+  also: Parsed[]
   args: Word[]
   chdir?: Word
   first?: Word
@@ -541,64 +776,154 @@ export type Parsed = {
   xargs: Xargs
 }
 
+// env's split-string option, attached or not, with the text it carries attached
+const SPLIT = /^(?:-[0iv]*S|--split-string(?:=|$))(.*)$/
+
+type State = { chdir?: Word; local: Map<string, Text>; rest: Word[]; xargs: Xargs }
+// The other readings one command's parse makes at most, so options it cannot read cost a bounded time; past them it reads each as canary did, a flag
+const READINGS = 16
+
 export function parse(cmd: Command): Parsed {
-  const { words } = cmd
-  const local = new Map<string, Text>()
-  const assign = (w: Word) => {
-    const eq = w.value.indexOf("=")
-    local.set(w.value.slice(0, eq), slice(w, eq + 1))
-  }
-  let chdir: Word | undefined
-  let xargs: Xargs
-  let k = 0
-  while (k < words.length && !words[k].quoted) {
-    if (RESERVED.has(words[k].value)) k++
-    else if (words[k].value === "function") k += 2
+  // the words still to read, the next one last, so env -S puts its words back in front in the time of their own count
+  const state: State = { local: new Map(), rest: cmd.words.toReversed(), xargs: undefined }
+  const { rest } = state
+  for (let w = rest.at(-1); w && !w.quoted; w = rest.at(-1)) {
+    if (RESERVED.has(w.value)) rest.pop()
+    else if (w.value === "function") rest.length = Math.max(0, rest.length - 2)
     else break
   }
-  while (k < words.length && ASSIGN.test(words[k].value)) assign(words[k++])
-  for (;;) {
-    const wrapper = program(words[k]?.value ?? "")
-    const takes = WRAPPERS.get(wrapper)
-    if (!takes) break
-    if (wrapper === "xargs") xargs ??= {}
-    k++
-    while (k < words.length) {
-      const v = words[k].value
-      if (ASSIGN.test(v)) assign(words[k++])
-      else if (wrapper === "env" && (v === "-C" || v === "--chdir")) {
-        chdir = words[k + 1]
-        k += 2
-      } else if (xargs && /^(?:-[IiJ]|--replace)/.test(v)) {
-        const attached = /^(?:-[IiJ]|--replace=?)(.*)$/.exec(v)?.[1] ?? ""
-        const separate = v === "-I" || v === "-J"
-        xargs.replace = separate ? words[k + 1]?.value : attached || "{}"
-        k += separate ? 2 : 1
-      } else if (takes.has(v)) k += 2
-      else if (v.startsWith("-") && v !== "-") k++
-      else break
+  while (ASSIGN.test(rest.at(-1)?.value ?? "")) assign(state.local, rest.pop() as Word)
+  return unwrap(state, undefined, { left: READINGS })
+}
+
+const assign = (local: Map<string, Text>, w: Word) => {
+  const eq = w.value.indexOf("=")
+  local.set(w.value.slice(0, eq), slice(w, eq + 1))
+}
+
+// The program behind the wrappers at the front of the words, resumed inside `inside`'s options for a second reading: an option the wrapper's lists lack is read as a flag, as a value-less option, and again as taking the next word, and a value in a variable again as expanding to no word and to more than one, each other reading kept in `also`.
+function unwrap(state: State, inside: string | undefined, budget: { left: number }): Parsed {
+  const { local, rest } = state
+  const peek = (): Word | undefined => rest[rest.length - 1]
+  const take = (): Word | undefined => rest.pop()
+  const also: Parsed[] = []
+  const fork = (wrapper: string, drop: number) =>
+    budget.left-- > 0 &&
+    also.push(
+      unwrap(
+        {
+          chdir: state.chdir,
+          local: new Map(local),
+          rest: rest.slice(0, Math.max(0, rest.length - drop)),
+          xargs: state.xargs && { ...state.xargs },
+        },
+        wrapper,
+        budget,
+      ),
+    )
+  for (let wrapper = inside; ; wrapper = undefined) {
+    if (!wrapper) {
+      wrapper = program(peek()?.value ?? "")
+      if (!WRAPPERS.has(wrapper)) break
+      if (wrapper === "xargs") state.xargs ??= {}
+      take()
     }
-    if (COUNTED.has(wrapper)) k++
+    const options = WRAPPERS.get(wrapper) as Options
+    for (let w = peek(); w; w = peek()) {
+      const v = w.value
+      if (ASSIGN.test(v)) assign(local, take() as Word)
+      // env -S splits its one string into the words it runs
+      else if (wrapper === "env" && SPLIT.test(v)) {
+        const attached = SPLIT.exec(v)?.[1] ?? ""
+        take()
+        const split = (attached || take()?.value || "").split(/\s+/).filter(Boolean)
+        for (let j = split.length - 1; j >= 0; j--) rest.push({ quoted: false, value: split[j] })
+      } else if (wrapper === "env" && (v === "-C" || v === "--chdir")) {
+        take()
+        state.chdir = take()
+      } else if (wrapper === "env" && /^(?:-C|--chdir=)./.test(v)) {
+        state.chdir = slice(w, v.startsWith("-C") ? 2 : "--chdir=".length)
+        take()
+      } else if (state.xargs && /^(?:-[IiJ]|--replace)/.test(v)) {
+        const attached = /^(?:-[IiJ]|--replace=?)(.*)$/.exec(v)?.[1] ?? ""
+        take()
+        state.xargs.replace = v === "-I" || v === "-J" ? take()?.value : attached || "{}"
+      } else if (v === "--") {
+        take()
+        while (ASSIGN.test(peek()?.value ?? "")) assign(local, take() as Word)
+        break
+      } else if (v.startsWith("-") && v !== "-") {
+        // nice's own -<number> is its adjustment
+        const end =
+          wrapper === "nice" && /^-\d+$/.test(v)
+            ? "own"
+            : marked(v)
+              ? undefined
+              : optionValue(v, options)
+        if (!end) fork(wrapper, 2)
+        else if (end === "next" && marked(rest[rest.length - 2]?.value ?? "")) {
+          fork(wrapper, 1)
+          fork(wrapper, 3)
+        }
+        rest.length = Math.max(0, rest.length - (end === "next" ? 2 : 1))
+      } else break
+    }
+    if (COUNTED.has(wrapper)) take()
   }
+  const first = take()
   return {
-    args: words.slice(k + 1),
-    chdir,
-    first: words[k],
+    also,
+    args: rest.reverse(),
+    chdir: state.chdir,
+    first,
     local,
-    name: k < words.length ? program(words[k].value) : "",
-    xargs,
+    name: first ? program(first.value) : "",
+    xargs: state.xargs,
   }
 }
 
-// A hook's judgement of one command, given everything but the shell's own builtins, the shells it starts and eval, which run() follows itself.
+// run-slot.sh runs the words after its -- as the command: those words (none when it has no --), or undefined for any other command, so a hook that calls it reads a slotted command as the command itself.
+export function slotWords({ args, name }: Parsed): Word[] | undefined {
+  if (name !== "run-slot.sh") return
+  const at = args.findIndex((a) => a.value === "--")
+  return at === -1 ? [] : args.slice(at + 1)
+}
+
+// A shell whose script file is run-slot.sh runs that run-slot call: its words from the script on, the shell's own flags before it dropped, or undefined for any other shell call.
+export function shellSlot(args: Word[], shell: string): Word[] | undefined {
+  const { inline, operand } = shellOperand(args, shell)
+  if (inline || !operand || program(operand.value) !== "run-slot.sh") return
+  return args.slice(args.indexOf(operand))
+}
+
+// A hook's judgement of one command, given everything but the shell's own builtins, the shells it starts, eval, and source or . of a process substitution or /dev/stdin, which run() follows itself.
 export type Visit = (cmd: Command, parsed: Parsed, env: Env) => Promise<string | undefined>
 
-// builtins: visit also each bare assignment or wrapper with no command (name "", as a bare `env`) and each declare, export, local, readonly or typeset.
+// builtins: visit also each bare assignment or wrapper with no command (name "", as a bare `env`), each declare, export, local, readonly or typeset, and a bare copy of each followed command that has a redirect.
 export async function run(
   lexed: Lexed,
   env: Env,
   visit: Visit,
   builtins = false,
+): Promise<string | undefined> {
+  // each script a shell, eval or source reads holds its text until it returns, so a deep chain of them can outgrow the hook's memory and time
+  if (running >= MAX_RUNS) throw new RangeError("scripts nested too deep")
+  running++
+  try {
+    return await runAll(lexed, env, visit, builtins)
+  } finally {
+    running--
+  }
+}
+
+let running = 0
+const MAX_RUNS = 256
+
+async function runAll(
+  lexed: Lexed,
+  env: Env,
+  visit: Visit,
+  builtins: boolean,
 ): Promise<string | undefined> {
   const envs = new Map<number, Env>([[0, env]])
   const envOf = (scope: number): Env => {
@@ -617,19 +942,52 @@ export async function run(
 
 const subshell = (env: Env): Env => ({ ...env, vars: new Map(env.vars) })
 
-// One command as run() reads it, cd, the shells it starts and eval followed, for a hook that finds a command inside another (a wrapper's words).
+// One command as run() reads it, cd, the shells it starts, eval, and source or . of a process substitution or /dev/stdin followed, for a hook that finds a command inside another (a wrapper's words).
 export async function examine(
   cmd: Command,
   env: Env,
   visit: Visit,
   builtins: boolean,
 ): Promise<string | undefined> {
-  const parsed = parse(cmd)
+  tick()
+  const readings = (parsed: Parsed): Parsed[] => [parsed, ...parsed.also.flatMap(readings)]
+  const [primary, ...others] = readings(parse(cmd))
+  // only the primary reading moves the folder, sets variables and records files, as canary's one reading did; each other runs on a copy of the env before the command
+  const before = others.length > 0 ? apart(env) : env
+  const verdict = await examineReading(cmd, primary, env, visit, builtins)
+  if (verdict) return verdict
+  for (const parsed of others) {
+    const verdict = await examineReading(cmd, parsed, apart(before), visit, builtins)
+    if (verdict) return verdict
+  }
+}
+
+const apart = (env: Env): Env => ({
+  ...env,
+  files: new Map(env.files),
+  known: { ...env.known },
+  process: { ...env.process },
+  vars: new Map(env.vars),
+})
+
+async function examineReading(
+  cmd: Command,
+  parsed: Parsed,
+  env: Env,
+  visit: Visit,
+  builtins: boolean,
+): Promise<string | undefined> {
   const { args, chdir, local, name } = parsed
   const here: Env = chdir ? { ...env, cwd: pathOf(chdir, env) } : env
   let verdict: string | undefined
+  const followed = SHELLS.has(name) || [".", "cd", "eval", "popd", "pushd", "source"].includes(name)
+  if (followed && builtins && cmd.redirects.length > 0) {
+    const bare = { ...cmd, words: [] }
+    verdict = await visit(bare, parse(bare), here)
+    if (verdict) return verdict
+  }
   if (name === "") {
-    for (const [key, value] of local) env.vars.set(key, value)
+    for (const [key, value] of local) setVar(env.vars, key, value)
     if (builtins) verdict = await visit(cmd, parsed, here)
   } else if (name === "cd" || name === "pushd") {
     env.cwd = cmd.detached ? undefined : await cdTarget(args, env)
@@ -637,12 +995,21 @@ export async function examine(
   else if (EXPORTS.has(name)) {
     for (const w of args.filter((a) => ASSIGN.test(a.value))) {
       const eq = w.value.indexOf("=")
-      env.vars.set(w.value.slice(0, eq), slice(w, eq + 1))
+      setVar(env.vars, w.value.slice(0, eq), slice(w, eq + 1))
     }
     if (builtins) verdict = await visit(cmd, parsed, here)
-  } else if (SHELLS.has(name)) verdict = await shell(args, cmd, here, visit, builtins)
-  else if (name === "eval") {
-    verdict = await run(lex(args.map((a) => a.value).join(" "), env.known), here, visit, builtins)
+  } else if (SHELLS.has(name))
+    verdict = await shell(name, args, cmd, here, visit, builtins, parsed.xargs)
+  else if (
+    (name === "source" || name === ".") &&
+    (args[0]?.procs || args[0]?.value === "/dev/stdin")
+  ) {
+    const script = await scriptOf(args[0], cmd, here)
+    verdict =
+      (script.unknown ? await visit(cmd, parsed, here) : undefined) ??
+      (await run(lexScript(known(script), env), here, visit, builtins))
+  } else if (name === "eval") {
+    verdict = await run(lexScript(args.map((a) => a.value).join(" "), env), here, visit, builtins)
   } else verdict = await visit(cmd, parsed, here)
   await record(cmd, name, args, here)
   return verdict
@@ -661,12 +1028,17 @@ async function cdTarget(args: Word[], env: Env): Promise<string | undefined> {
   }
 }
 
+// A shell's options that take the next word as their value; -O and +O take one in bash and sh alone, since zsh's take none.
+const SHELL_TAKES = new Set(["-o", "+o", "--init-file", "--rcfile"])
+const BASH_TAKES = new Set([...SHELL_TAKES, "-O", "+O"])
+
 // A shell's first operand, and whether -c makes it the script's text rather than a script file's name; no operand means the shell reads its script from stdin.
-export function shellOperand(args: Word[]): { inline: boolean; operand?: Word } {
+export function shellOperand(args: Word[], shell: string): { inline: boolean; operand?: Word } {
+  const takes = shell === "bash" || shell === "sh" ? BASH_TAKES : SHELL_TAKES
   let inline = false
   for (let k = 0; k < args.length; k++) {
     const v = args[k].value
-    if (v === "-o" || v === "+o") k++
+    if (takes.has(v)) k++
     else if (/^[-+][A-Za-z]+$/.test(v)) inline ||= v.startsWith("-") && v.includes("c")
     else if (!v.startsWith("--")) return { inline, operand: args[k] }
   }
@@ -674,20 +1046,47 @@ export function shellOperand(args: Word[]): { inline: boolean; operand?: Word } 
 }
 
 async function shell(
+  name: string,
   args: Word[],
   cmd: Command,
   env: Env,
   visit: Visit,
   builtins: boolean,
+  xargs?: Xargs,
 ): Promise<string | undefined> {
-  const { inline, operand } = shellOperand(args)
-  if (operand) {
-    return inline ? run(lex(operand.value, env.known), subshell(env), visit, builtins) : undefined
+  const slot = shellSlot(args, name)
+  if (slot) return examine({ ...cmd, words: slot }, env, visit, builtins)
+  const { inline, operand } = shellOperand(args, name)
+  if (operand && inline) {
+    let script = operand.value
+    if (xargs?.replace && script.includes(xargs.replace)) {
+      const fed = await stdinOf(cmd, env)
+      script = filled(script, xargs.replace, fed.unknown ? UNKNOWN : fed.value.trim())
+    }
+    return run(lexScript(script, env), subshell(env), visit, builtins)
   }
-  const script = await stdinOf(cmd, env)
-  return script.unknown
-    ? undefined
-    : run(lex(script.value, env.known), subshell(env), visit, builtins)
+  const script = await scriptOf(operand, cmd, env)
+  return run(lexScript(known(script), env), subshell(env), visit, builtins)
+}
+
+// A script's parts the hook can read, each part it cannot read (a `curl`'s output in a group) taken as a line break, so the rest is still walked.
+const known = (script: Text): string => script.value.replaceAll(UNKNOWN, "\n")
+
+// A shell's or source's script: stdin with no operand or `/dev/stdin`, a process substitution's output, else unknown; a walk with a budget throws on one too large to hold.
+async function scriptOf(operand: Word | undefined, cmd: Command, env: Env): Promise<Text> {
+  const script =
+    !operand || operand.value === "/dev/stdin"
+      ? await stdinOf(cmd, env)
+      : operand.procs
+        ? await outputs(operand.procs, env)
+        : unknown("a script file")
+  if (deadline !== undefined && script.unknown === LARGE) throw new RangeError(LARGE)
+  return script
+}
+
+// The output of a list of commands run in order, unknown when any part is.
+async function outputs(cmds: Command[], env: Env): Promise<Text> {
+  return join(await Promise.all(cmds.map((c) => outputOf(c, env))))
 }
 
 async function record(cmd: Command, name: string, args: Word[], env: Env): Promise<void> {
@@ -699,14 +1098,14 @@ async function record(cmd: Command, name: string, args: Word[], env: Env): Promi
     const out = stdout
       ? await outputOf(cmd, env)
       : unknown(`what ${name || "a command"} writes to stderr`)
-    env.files.set(path, r.op === ">>" ? join([await existing(path, env), out]) : out)
+    env.files.set(path, held(r.op === ">>" ? join([await existing(path, env), out]) : out))
   }
   if (name !== "tee") return
   const input = await stdinOf(cmd, env)
   const append = args.some((a) => a.value === "-a" || a.value === "--append")
   for (const a of args) {
     const path = a.value.startsWith("-") ? undefined : pathOf(a, env)
-    if (path) env.files.set(path, append ? join([await existing(path, env), input]) : input)
+    if (path) env.files.set(path, held(append ? join([await existing(path, env), input]) : input))
   }
 }
 
@@ -715,8 +1114,10 @@ async function existing(path: string, env: Env): Promise<Text> {
 }
 
 async function outputOf(cmd: Command, env: Env): Promise<Text> {
+  tick()
   const { args, name } = parse(cmd)
   if (name === "") {
+    if (cmd.inner) return outputs(cmd.inner(), env)
     return cmd.group || cmd.words.some((w) => GROUPING.has(w.value) && !w.quoted)
       ? unknown("the output of a command group")
       : { value: "" }
@@ -724,11 +1125,23 @@ async function outputOf(cmd: Command, env: Env): Promise<Text> {
   if (name === "cat") {
     const sources = args.filter((a) => a.value === "-" || !a.value.startsWith("-"))
     if (sources.length === 0) return stdinOf(cmd, env)
-    return join(
-      await Promise.all(
-        sources.map((s) => (s.value === "-" ? stdinOf(cmd, env) : readPath(s, env))),
-      ),
-    )
+    // the first `-` reads all of stdin, so a later one reads nothing; the sources are read in turn until their text outgrows what the hook holds
+    const first = sources.findIndex((s) => s.value === "-")
+    const parts: Text[] = []
+    let size = 0
+    for (const [k, s] of sources.entries()) {
+      tick()
+      const part =
+        s.value !== "-"
+          ? await readPath(s, env)
+          : k === first
+            ? await stdinOf(cmd, env)
+            : { value: "" }
+      size += part.value.length
+      if (size > MAX_BYTES) return unknown(LARGE)
+      parts.push(part)
+    }
+    return join(parts)
   }
   if (name === "tee") return stdinOf(cmd, env)
   if (!PRINTERS.has(name)) return unknown(`the output of ${name}`)
@@ -748,12 +1161,14 @@ async function outputOf(cmd: Command, env: Env): Promise<Text> {
 
 // printf reuses its format while arguments remain; a pass that takes none ends it.
 function printf([format = "", ...args]: string[]): string {
-  const conversion = /%(?:%|[-+ #0']*\d*(?:\.\d+)?([a-zA-Z]))/g
+  const conversion = /%(?:%|[-+ #0']*(?:[1-9]\d*)?(?:\.\d+)?([a-zA-Z]))/g
+  const pattern = decode(format)
   let out = ""
   let k = 0
   for (;;) {
+    tick()
     const before = k
-    out += decode(format).replace(conversion, (_, kind?: string) => {
+    out += pattern.replace(conversion, (_, kind?: string) => {
       if (!kind) return "%"
       const value = args[k++] ?? ""
       return kind === "b" ? decode(value) : value
@@ -763,9 +1178,15 @@ function printf([format = "", ...args]: string[]): string {
 }
 
 export async function stdinOf(cmd: Command, env: Env): Promise<Text> {
+  tick()
+  return held(await stdinText(cmd, env))
+}
+
+async function stdinText(cmd: Command, env: Env): Promise<Text> {
   const input = cmd.redirects.findLast(
     (r) => (r.fd === "" || r.fd === "0") && r.op.startsWith("<") && r.op !== "<&",
   )
+  if (input?.target?.procs) return outputs(input.target.procs, env)
   if (input?.op === "<" || input?.op === "<>")
     return input.target ? readPath(input.target, env) : unknown("an input redirect")
   if (input)
@@ -776,12 +1197,17 @@ export async function stdinOf(cmd: Command, env: Env): Promise<Text> {
 
 export async function resolveText(text: Text, env: Env): Promise<Text> {
   if (text.unknown || !text.reads?.length) return text
-  let { value } = text
-  for (const path of text.reads) {
+  // each read fills the next READ mark in turn; splitting once keeps the cost to the text's length
+  const pieces = text.value.split(READ)
+  let value = pieces[0]
+  for (const [k, path] of text.reads.entries()) {
+    tick()
     const file = await readPath(path, env)
     if (file.unknown) return file
-    value = value.replace(READ, () => file.value)
+    if (k + 1 < pieces.length) value += file.value + pieces[k + 1]
+    if (value.length > MAX_BYTES) return unknown(LARGE)
   }
+  for (const piece of pieces.slice(text.reads.length + 1)) value += READ + piece
   return { value }
 }
 

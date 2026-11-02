@@ -42,6 +42,7 @@ Mermaid is to join the pictures; until then a flow is drawn in ASCII.
 - You can say what an item asks, and what Approve does, before you read its second line.
 - No drawing on a card shrinks or scrolls sideways.
 - An item from any session reads like one from any other.
+- Every clock time on a card reads in your own time zone, the `clock.ownerZone` setting, and names it ("9:30 pm UTC").
 
 ## Where it fits
 

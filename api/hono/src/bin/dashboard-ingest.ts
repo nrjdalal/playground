@@ -157,10 +157,17 @@ if (stopping.signal.aborted) {
 }
 if (mode === "once") process.exit(pass.read > 0 && pass.failed === pass.read ? 1 : 0)
 
-follower = follow(db, projects, say, (reason) => {
-  say(`giving up: ${reason}; exiting so the runner restarts the follower`)
-  process.exit(1)
-})
+// INGEST_RESCAN_MS lets a test shorten the rescan that catches a change the watcher missed.
+follower = follow(
+  db,
+  projects,
+  say,
+  (reason) => {
+    say(`giving up: ${reason}; exiting so the runner restarts the follower`)
+    process.exit(1)
+  },
+  Number(process.env.INGEST_RESCAN_MS) || undefined,
+)
 say(`following ${projects}`)
 
 // The lock lives on this one connection: if it drops, a second importer could start, so this one stops and the runner restarts it.

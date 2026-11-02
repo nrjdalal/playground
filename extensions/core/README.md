@@ -6,6 +6,7 @@ Playground's own skills, which every session gets; core's upstream skills are li
 
 Model- or user-reachable.
 
+- **[agent-desktop](./skills/agent-desktop/SKILL.md)**: Operate a desktop app through the agent-desktop CLI: check its install and macOS grants and stop with the one action needed when either is missing, load the binary's own docs, stay headless, leave the owner's own apps alone, and keep desktop content out of every outward write.
 - **[code-review-loop](./skills/code-review-loop/SKILL.md)**: Review one PR as its reviewer session, round by round until 5/5: core's code-review on two axes (the right thing, built well), a score out of 5 checked against the ticket, inline comments, a re-review on every push, its own threads resolved, and a fresh full read before the last 5/5. Its recovery scan lists the open PRs whose head nobody has scored.
 - **[playbook](./skills/playbook/SKILL.md)**: Run Playground's factory of cmux sessions by one set of rules: the roles (the dispatcher, the Planner, the two leads Builder and Ops, the Optimizer, workers with their reviewers and testers, runners, probes), who reports to whom, how work is routed and bundled, how sessions start and end, the leads' sweep, and the standing rules every session keeps.
 - **[pr](./skills/pr/SKILL.md)**: Use when writing a PR body.

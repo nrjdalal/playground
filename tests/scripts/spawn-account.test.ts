@@ -2,7 +2,7 @@ import { describe, expect, setDefaultTimeout, test } from "bun:test"
 import { existsSync } from "node:fs"
 import { join } from "node:path"
 
-import { OLD } from "../old-names"
+import { OLD } from "../session-names"
 import {
   homes,
   launchAfterRm,

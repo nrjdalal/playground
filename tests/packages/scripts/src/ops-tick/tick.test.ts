@@ -24,11 +24,11 @@ import {
   resultOf,
   runner,
   switchAccount,
+  trashPurge,
   turboPrune,
 } from "../../../../../packages/scripts/src/ops-tick/tick"
-import { OLD } from "../../../../old-names"
 import { storeWith } from "../../../../scripts/hooks/render-set"
-import { OLD_AS_NAMES, SEEDED_NAMES } from "../../../../session-names"
+import { OLD, OLD_AS_NAMES, SEEDED_NAMES } from "../../../../session-names"
 
 // A machine whose sessions.names keep the old names, which this file's fallbacks name.
 beforeAll(() => setSessionNames(OLD_AS_NAMES))
@@ -108,7 +108,7 @@ describe("up", () => {
     await up.run(first.ctx)
     expect(first.runs).toEqual([["python3", "-I", "/repo/scripts/ops/up.py"]])
     expect(first.sent).toEqual([{ text: said, to: "ops" }])
-    const failed = "could not start ops-dashboard in cmux (process gone); see up.log"
+    const failed = "could not start ops-dashboard in herdr (process gone); see up.log"
     const again = fake(ops, at(13, 10), { "up.py": `${said}\n${failed}` })
     await up.run(again.ctx)
     expect(again.sent).toEqual([{ text: failed, to: "ops" }])
@@ -757,6 +757,24 @@ describe("the beats that send no line", () => {
     expect(sent).toEqual([])
     expect(await Bun.file(join(ops, "log", "turbo-prune.log")).text()).toContain(
       "removed 1, kept 1, freed 3 MB",
+    )
+  })
+
+  test("the trash purge runs hourly on the trash beside ops, removing batches over 7 days old", async () => {
+    expect(beat("trash-purge").cron).toBe("17 * * * *")
+    const ops = scratch()
+    const trash = join(ops, "..", "trash")
+    const now = new Date("2026-11-02T12:17:00Z")
+    mkdirSync(join(trash, "20261020T000000Z-s", "1"), { recursive: true })
+    mkdirSync(join(trash, "20261101T000000Z-s", "1"), { recursive: true })
+    const { ctx, runs, sent } = fake(ops, now)
+    await trashPurge(undefined, () => 100e9)(ctx)
+    expect(existsSync(join(trash, "20261020T000000Z-s"))).toBe(false)
+    expect(existsSync(join(trash, "20261101T000000Z-s"))).toBe(true)
+    expect(runs).toEqual([])
+    expect(sent).toEqual([])
+    expect(await Bun.file(join(ops, "log", "trash-purge.log")).text()).toContain(
+      "removed 1 (20261020T000000Z-s)",
     )
   })
 

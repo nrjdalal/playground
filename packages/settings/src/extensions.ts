@@ -12,7 +12,7 @@ import { type Result, setSetting, settingRows } from "./settings-folder"
 // The extensions as the user arranges them, ext.order, ext.links and ext.repos at the login's scope: what playground ext list, order, link, unlink and remove read and write, and the Settings Extensions section beside them.
 
 type Who = Parameters<typeof setSetting>[2]
-type Written = { key: string; scope: string; value: unknown }
+export type Written = { key: string; scope: string; value: unknown }
 
 const CORE_FIXED = "core is built into Playground: it is linked everywhere and always comes last"
 

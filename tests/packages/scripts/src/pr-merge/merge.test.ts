@@ -299,7 +299,8 @@ describe("prMerge", () => {
     expect(merges(calls)).toEqual([])
   })
 
-  test("a head behind canary that merges clean merges as it is, with no new run", async () => {
+  // git here reads the head as holding canary, so the types gate skips; types.test.ts runs it on a real merged tree
+  test("a head behind canary that merges clean merges on its own checks, with no new GitHub run", async () => {
     const { calls, run } = stub({ aheadBy: "3" })
     expect(await prMerge(112, { repo: REPO }, run, local())).toMatchObject({ kind: "merged" })
     expect(merges(calls)).toHaveLength(1)

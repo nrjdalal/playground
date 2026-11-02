@@ -1,5 +1,13 @@
 import { afterAll, expect, test } from "bun:test"
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -92,8 +100,11 @@ test("an interrupt during the parallel pass ends the run with 128 plus its numbe
     join(serial, "dev.test.ts"),
     `import { test } from "bun:test"\nimport { writeFileSync } from "node:fs"\ntest("serial", () => writeFileSync(${JSON.stringify(serialRan)}, ""))\n`,
   )
+  const tmp = join(DIR, "tmp-interrupt")
+  mkdirSync(tmp)
   const run = Bun.spawn(["bun", SCRIPT, "./slow.test.ts", "./tests/api/hono/src/bin/dev.test.ts"], {
     cwd: DIR,
+    env: { ...process.env, TMPDIR: tmp },
     stderr: "ignore",
     stdout: "ignore",
     timeout: 15_000,
@@ -102,6 +113,29 @@ test("an interrupt during the parallel pass ends the run with 128 plus its numbe
   run.kill("SIGINT")
   expect(await run.exited).toBe(130)
   expect(existsSync(serialRan)).toBe(false)
+  expect(readdirSync(tmp).filter((name) => name.startsWith("test-sandbox-"))).toEqual([])
+}, 20_000)
+
+test("its sandbox is a marked scratch folder, gone once the run ends (#545)", async () => {
+  const tmp = join(DIR, "tmp-scratch")
+  const seen = join(DIR, "scratch-seen")
+  mkdirSync(tmp)
+  writeFileSync(
+    join(DIR, "scratch.test.ts"),
+    `import { test } from "bun:test"\nimport { existsSync, writeFileSync } from "node:fs"\nconst home = process.env.TEST_SANDBOX_HOME!\ntest("sees", () => writeFileSync(${JSON.stringify(seen)}, home + " " + existsSync(home + "/.safe-delete-scratch")))\n`,
+  )
+  const run = Bun.spawn(["bun", SCRIPT, "./scratch.test.ts"], {
+    cwd: DIR,
+    env: { ...process.env, TMPDIR: tmp },
+    stderr: "ignore",
+    stdout: "ignore",
+    timeout: 15_000,
+  })
+  expect(await run.exited).toBe(0)
+  const [home, marked] = readFileSync(seen, "utf8").split(" ")
+  expect(marked).toBe("true")
+  expect(existsSync(home!)).toBe(false)
+  expect(readdirSync(tmp).filter((name) => name.startsWith("test-sandbox-"))).toEqual([])
 }, 20_000)
 
 const ENV_MODULE = join(import.meta.dir, "../../../../packages/env/dist/api-hono.mjs")

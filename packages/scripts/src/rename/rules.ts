@@ -13,7 +13,7 @@ export const COLLISIONS: Record<string, string> = {
   "web/next/src/components/desk/sidebar.tsx": "web/next/src/components/dashboard/app-sidebar.tsx",
 }
 
-// Files the rename leaves as they are: history, generated lockfiles and migrations, vendored skills, the leak hook's term list (lightman stays a term it refuses), and the env aliases, the old routes' mounts, the rename's own rules and their tests and the UI copy test, which hold the old names as data.
+// Files the rename leaves as they are: history, generated lockfiles and migrations, vendored skills, the leak hook's term list, and the env aliases, the old routes' mounts, the rename's own rules and their tests and the UI copy test, which hold the old names as data.
 export const EXCLUDED = [
   /^CHANGELOG\.md$/,
   /^\.github\/notes\//,

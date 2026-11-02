@@ -13,7 +13,7 @@ import {
 } from "node:fs"
 import { dirname, join } from "node:path"
 
-import { OLD } from "../old-names"
+import { OLD } from "../session-names"
 import {
   bin,
   launchAfterRm,

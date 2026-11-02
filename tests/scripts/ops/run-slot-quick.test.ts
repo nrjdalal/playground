@@ -227,6 +227,32 @@ describe("a quick run takes its own slot past a full queue", () => {
     expect(await quick(["bun", "run", "build"], [2, 3, 4, 11])).toBe(false)
   })
 
+  // 1 Nov: a two-file test:file line ran 37, 36, 33, 39, 421 and 226 s back to back in the one quick slot, and the quick lane's waiters waited 63 min in the hour from 12:00Z
+  test("a quick-rule line whose last 3 runs each took over 60 s goes to the queue", async () => {
+    expect(await quick(["bun", "run", "test:file", "b.test.ts"], [39, 421, 226, 61])).toBe(false)
+  })
+
+  test("but one whose last 3 runs each took exactly 60 s still takes quick", async () => {
+    expect(await quick(["bun", "run", "test:file", "b.test.ts"], [60, 60, 60])).toBe(true)
+    expect(took).toBe("run-slot-quick")
+  })
+
+  test("but one with a short run among its last 3 still takes quick", async () => {
+    expect(await quick(["bun", "run", "test:file", "b.test.ts"], [37, 36, 33, 39, 421, 226])).toBe(
+      true,
+    )
+    expect(took).toBe("run-slot-quick")
+  })
+
+  test("and so does a docs:wrap that ran long", async () => {
+    expect(await quick(["bun", "run", "docs:wrap"], [61, 70, 80])).toBe(false)
+  })
+
+  test("and a commit that ran long keeps its own slot", async () => {
+    expect(await quick(["git", "commit"], [70, 80, 90])).toBe(true)
+    expect(took).toBe("run-slot-commit")
+  })
+
   // ops, 20 Oct: with slot-off, a 5-file run that ran 1s waited 52 min behind suites
   test("bun test naming one test file", async () => {
     expect(await quick(["env", "X=1", "bun", "test"])).toBe(true)
@@ -290,5 +316,48 @@ describe("a quick run takes its own slot past a full queue", () => {
 
   test("nor a bun test --cwd <dir> end-to-end test", async () => {
     expect(await quick(["bun", "test", "--cwd", "x", "b.e2e.test.ts"])).toBe(false)
+  })
+})
+
+// #547: load from outside run-slot kept 44 quick runs waiting 201 min for 8 min of work after the 15 s pass (2 Nov), and the one quick slot adds about a core at most, so it runs whatever load5 reads
+describe("the quick slot runs whatever load5 reads", () => {
+  // A machine whose fake bun and git touch their last argument, at the load5 asked for
+  const loaded = (load5: number) => {
+    const m = machine({ load1: 2, load5 })
+    for (const bin of ["bun", "git"]) {
+      writeFileSync(join(m.bin, bin), '#!/bin/bash\ntouch "${@: -1}"\n')
+      chmodSync(join(m.bin, bin), 0o755)
+    }
+    return m
+  }
+
+  test("a quick-rule run with no runs on record starts at once at load5 30", async () => {
+    const run = loaded(30).start("worker-q", {}, undefined, ["bun", "run", "docs:wrap"])
+    expect(await run.ran()).toBe(true)
+  })
+
+  test("and so does one over run-slot.load5-cap's lower line", async () => {
+    const m = loaded(13)
+    writeFileSync(join(m.ops, "run-slot.load5-cap"), "12\n")
+    const run = m.start("worker-q", {}, undefined, ["bun", "run", "docs:wrap"])
+    expect(await run.ran()).toBe(true)
+  })
+
+  test("a commit takes its slot at load5 30, as before", async () => {
+    const run = loaded(30).start("worker-q", {}, undefined, ["git", "commit"])
+    expect(await run.ran()).toBe(true)
+  })
+
+  test("and so does a node_modules clone, with clone-off unset", async () => {
+    expect(await machine({ load1: 30 }).clones("node_modules")).toBe(true)
+  })
+})
+
+// PG-298: a command's first word past env and VAR=x can be an option: env -i made each basename print "illegal option -- i", eight errors a run
+describe("a command whose first word past env is an option", () => {
+  test("runs with no basename error", async () => {
+    const run = machine().start("worker-e", {}, undefined, ["env", "-i", "touch"])
+    expect(await run.ran()).toBe(true)
+    expect(await run.saw(/basename/g)).toBe(false)
   })
 })

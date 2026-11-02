@@ -64,7 +64,11 @@ describe("startDispatcher on a fixture stack", () => {
     const dir = join(scratch, `fixture-${made++}`)
     const loaded = loadFixture(null)
     if (!loaded.ok) throw new Error(loaded.error)
-    writeFixture(loaded.fixture, dir)
+    writeFixture(loaded.fixture, dir, {
+      home: join(scratch, "home"),
+      main: join(scratch, "main"),
+      trash: join(scratch, "data", "trash"),
+    })
     const path = join(dir, "cmux.json")
     const state = JSON.parse(readFileSync(path, "utf8"))
     for (const s of state.sessions) {

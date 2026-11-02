@@ -67,6 +67,31 @@ const input = (over: Partial<CollectInput> = {}): CollectInput => ({
 })
 
 describe("sweep: ops-tick ends what the detector flags", () => {
+  test("names the PR that merged last and its merge sha, not an older linked PR", async () => {
+    const { deps, reported } = fakes()
+    const older: PrState = { ...MERGED, mergeSha: "0ld0000", mergedAt: "2026-10-31T19:00:00Z" }
+    const newer: PrState = { ...MERGED, mergeSha: "2ew1111", mergedAt: "2026-11-01T00:10:00Z" }
+    const lines = await sweep(
+      input({
+        linkedPrs: async (sessionId) => (sessionId === "sess-h2wq8n-worker" ? [URL] : []),
+        prState: async (url) => (url === URL ? older : url === NEXT ? newer : null),
+        roster: { "h2wq8n-worker": { kind: "worker", name: "h2wq8n-worker", pr: NEXT } },
+        sessions: { "h2wq8n-worker": live("h2wq8n-worker") },
+        workerPrs: async (name) => (name === "h2wq8n-worker" ? [NEXT] : []),
+      }),
+      deps,
+    )
+    expect(reported).toEqual([
+      ["h2wq8n-worker", "ended automatically: worker-prs-done (merged), #2111 merged as 2ew1111"],
+    ])
+    expect(lines).toEqual([
+      {
+        text: "Ended h2wq8n-worker: worker-prs-done (merged), #2111 merged as 2ew1111",
+        to: "builder",
+      },
+    ])
+  })
+
   test("a checker whose PR is done, one whose worker is gone, and a worker whose PRs are merged", async () => {
     const { closed, deps, reported } = fakes()
     const lines = await sweep(
@@ -90,16 +115,19 @@ describe("sweep: ops-tick ends what the detector flags", () => {
     expect(closed).toEqual(["b7k2mq-tester", "m4tqzr-reviewer", "q6dmtb-worker"])
     expect(reported).toEqual([
       ["b7k2mq-tester", "ended automatically: checker-worker-gone (gone-worker)"],
-      ["m4tqzr-reviewer", "ended automatically: checker-pr-done (merged), merged as daaac8e"],
-      ["q6dmtb-worker", "ended automatically: worker-prs-done (merged), merged as daaac8e"],
+      ["m4tqzr-reviewer", "ended automatically: checker-pr-done (merged), #2110 merged as daaac8e"],
+      ["q6dmtb-worker", "ended automatically: worker-prs-done (merged), #2110 merged as daaac8e"],
     ])
     expect(lines).toEqual([
       { text: "Ended b7k2mq-tester: checker-worker-gone (gone-worker)", to: "builder" },
       {
-        text: "Ended m4tqzr-reviewer: checker-pr-done (merged), merged as daaac8e",
+        text: "Ended m4tqzr-reviewer: checker-pr-done (merged), #2110 merged as daaac8e",
         to: "builder",
       },
-      { text: "Ended q6dmtb-worker: worker-prs-done (merged), merged as daaac8e", to: "builder" },
+      {
+        text: "Ended q6dmtb-worker: worker-prs-done (merged), #2110 merged as daaac8e",
+        to: "builder",
+      },
     ])
   })
 

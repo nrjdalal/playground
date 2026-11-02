@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Guidance for AI coding agents working in this repository, a Bun monorepo: the `web/next` app, the `api/hono` service, and shared `packages/*` (auth, config, db, env, message, redis, settings), with build-only tooling in `packages/scripts`.
+Guidance for AI coding agents working in this repository, a Bun monorepo: the `web/next` app, the `api/hono` service, and shared `packages/*` (auth, config, db, env, message, redis, safe-delete, settings), with build-only tooling in `packages/scripts`.
 The canonical starter also carries the `packages/cli` npm binary and the `tests/` suite, neither of which a fork takes; this guide and every skill ship to a fork whole, rebranded to its name.
 Start each task with the `codebase-map` skill to orient, then load the task skill that fits (see [Skills](#skills)).
 
@@ -190,6 +190,7 @@ ZeroStarter's rules above govern Playground too; this section adds its own.
 - A new worktree can clone a sibling's `node_modules` in place of a full install, through run-slot ([scripts/README.md](./scripts/README.md#a-worktrees-node_modules)).
   Remove worktrees one at a time, never in parallel, and keep one review worktree across a PR's rounds.
 - Every worktree of a checkout shares one `git stash` list, so a pop can take another worker's entry: set work aside with a commit, and take a before-shot from a separate worktree on `origin/canary`.
+- Commit before a red-first swap, so the file's edits sit in a commit, and restore it with `git checkout HEAD -- <file>`, which brings back that commit, where `git checkout -- <file>` brings back the index, which holds the swap once it is staged: on 1 Nov a worker's restore after a red-first swap took the file's uncommitted edits with it, and the work was redone.
 - Squash a branch with `git reset --soft $(git merge-base HEAD origin/<base>)`, never onto a base that has moved: the soft reset keeps the branch's old copies of whatever the base changed since, and the squash reverts it.
   Check the file list after.
 - When the owner asks to see a draft, a tree or a restructure, show it in chat and change no file until told to apply it.
@@ -206,16 +207,18 @@ ZeroStarter's rules above govern Playground too; this section adds its own.
 - Run `bun run test:skills`, CI's `auto-test.yml` steps, before pushing a change to a hook, a script, a skill's frontmatter, or a command that starts a database or stops a process ([scripts/README.md](./scripts/README.md#bun-run-testskills)).
 - The em-dash rule above has one exception: an output format the user specified, such as linear's table, where `—` marks an empty cell.
   `scripts/check-em-dashes.sh` skips inline code and table cells that hold only an em-dash.
-- ALWAYS: In every comment and review body on any of the owner's repos, this one included, write "ship" or "publish step" where "release" (any case) would go, since an owner comment holding the word publishes to npm; `no-release-comment` refuses such a comment ([scripts/hooks/README.md](./scripts/hooks/README.md)).
+- ALWAYS: In every comment and review body on a repo whose owner `release-owners.json` lists, write "ship" or "publish step" where "release" (any case) would go, since an owner comment holding the word publishes to npm; `no-release-comment` refuses such a comment ([scripts/hooks/README.md](./scripts/hooks/README.md)).
 - ALWAYS: File a new Linear ticket only after the owner's yes, posted as one Inbox `ticket` decision, and keep Playground's own work out of Linear (playbook's **tickets** rule); `no-linear-ticket` refuses a factory session's ticket create whose title no approval names ([scripts/hooks/README.md](./scripts/hooks/README.md)).
 - ALWAYS: Keep Playground out of every ticket, PR, commit, branch, comment, chat message or DM of an org it works for, and every file in an org's repo (playbook's **classified** rule); `no-playground-leak` refuses an org write that holds a Playground term, and a post in the factory's channel without its signature ([scripts/hooks/README.md](./scripts/hooks/README.md)).
 - ALWAYS: Send every link in a Slack post as a link chip in its full shape; `no-bare-slack-link` refuses a factory session's post holding a URL no chip carries, and its reason gives the chip ([scripts/hooks/README.md](./scripts/hooks/README.md)).
+- ALWAYS: Feed a row of `tests/scripts/hooks/fixtures/refused-forms.ts` to a guard only as `check()` input, whatever HOME or folder is set, since each row is a command that does what it says and can name a path outside HOME; `tests/scripts/hooks/fixtures-are-data.test.ts` holds the fixture's importers to it.
 - A factory session starts another only through `scripts/spawn.sh`, whose capacity gate, backends, models, runtimes, resume and restore are in [scripts/README.md](./scripts/README.md#spawnsh): read it before you change spawn.sh or when it refuses a start you did not expect;
   `no-raw-spawn` refuses a cmux call that opens a claude session, and every herdr call but a read or one to a scratch world of the session's own.
 - The herdr servers belong to one ops job, `bun run ops:herdr`, on the binary and config its `pin.json` names ([scripts/README.md](./scripts/README.md#the-herdr-servers)), read before you change that job or herdr's pinned binary or config.
 - The factory's hooks: read a hook's section of [scripts/hooks/README.md](./scripts/hooks/README.md) before you change it, its tests or its registration, and when it refuses a call you did not expect, since the README holds each one in full and its reason names the fix.
   Five have their own lines above (`no-bare-slack-link`, `no-linear-ticket`, `no-playground-leak`, `no-raw-spawn`, `no-release-comment`);
-  the rest are `after-compact`, `after-resume`, `no-chat-question`, `no-env-dump`, `no-false-green`, `no-glm-heavy-path`, `no-headless-login`, `no-kill-by-name`, `no-mac-web-build`, `no-main-checkout`, `no-manager-subagent`, `no-off-palette-label`, `no-ours-merge`, `no-prompt-stop`, `no-public-leak`, `no-stash`, `no-unslotted-run`, `rules`, `session-state` and `writing-first`.
+  the rest are `after-compact`, `after-resume`, `no-chat-question`, `no-desktop-owner-app`, `no-env-dump`, `no-extension-repo-write`, `no-extensions-write`, `no-false-green`, `no-glm-heavy-path`, `no-headless-login`,
+  `no-kill-by-name`, `no-mac-web-build`, `no-main-checkout`, `no-manager-subagent`, `no-off-palette-label`, `no-ours-merge`, `no-prompt-stop`, `no-public-leak`, `no-stash`, `no-unslotted-run`, `rules`, `session-state` and `writing-first`.
 
 ### The factory
 
@@ -247,7 +250,7 @@ When a dashboard rule's meaning changes, its ALWAYS line here changes with it.
   - ALWAYS: Keep the `claude_*` tables (`packages/db/src/schema/claude.ts`: each stored session's transcript, line by line, Playground's own alone unless the stack opts in) in the dashboard's local Postgres on 127.0.0.1, never a shared database.
   - ALWAYS: Read an organisation's own values from `packages/config/src/org.ts`, and every file the dashboard keeps outside the database from its data folder, `dataDir()`.
 - Cmux: read `.agents/dashboard/cmux.md` before you change a cmux or herdr call, how a session counts as live, the board's read pacing or the System panel's commands.
-  - ALWAYS: Route every cmux call through `api/hono/src/lib/dashboard/cmux.ts`, which takes only the reads in `READ_COMMANDS`, one session's own writes and `reply()`'s answer to one pending Feed prompt; the factory's `playground picker` alone answers a manager's session's Feed permission itself.
+  - ALWAYS: Route every cmux call through `api/hono/src/lib/dashboard/cmux.ts`, which takes only the reads in `READ_COMMANDS`, one session's own writes and `reply()`'s answer to one pending Feed prompt.
   - ALWAYS: Route every herdr call through `api/hono/src/lib/dashboard/herdr.ts`, the dashboard's second terminal beside cmux.
   - ALWAYS: Count a cmux record as a live session only through `liveRecords()`, and keep the read of every record paced as `workers.ts` paces it.
   - ALWAYS: Run the System panel's commands only through `api/hono/src/lib/system/probe.ts`, whose `COMMANDS` holds each one's fixed argv.
@@ -285,7 +288,7 @@ The owner does not review Playground PRs: the review loop is the gate ([ADR 0004
    Before the review's round 1, settle in your own pass what a round should never spend its turn on (most late findings were docs, skill, body and wording ones): run doc-sync over the change, give each touched doc and skill a writing-for-agents read (a completion criterion on every step, positive phrasing, reference disclosed into sibling files, one meaning in one place),
    and fill the template above; the reviewer still judges everything.
    When the diff adds a member to an enumerated kind (a status, a type, a choice, a button), grep the repo for the wording of every list that names that kind's members (`git grep -n "Archive, Snooze"`) and update each hit: one such grep once found what six review rounds had found piece by piece.
-   As part of that doc-sync pass, run the changed-term grep for each term whose meaning the diff changes (a behaviour, a rule, what a command does): `git grep -l <term>` over the agent-facing docs, then update every hit still describing the old meaning, since one PR took 7 rounds when each round found one more doc that did.
+   As part of that doc-sync pass, run the changed-term grep for each term whose meaning the diff changes (a behaviour, a rule, what a command does): `git grep -l <term>` over the agent-facing and web docs, then update every hit still describing the old meaning, since one PR took 7 rounds, each finding one more doc that did.
    After you merge `canary` into the branch, run that grep for what the incoming commits changed: list each term whose meaning they changed (`git log -p HEAD^1..HEAD^2` while the merge commit is `HEAD`), grep the PR's own changed docs for each,
    and fix every line still describing the old meaning in a commit after the merge before you ask for the next round, since one PR spent two docs-only rounds, about 24 minutes, on lines a merged change had made stale; done when no line of the PR's docs describes a meaning those commits changed.
    Done when the body's Evidence names each touched doc and skill with its check, doc-sync's result and each list grep and changed-term grep with its hits, before the review's round 1 opens.

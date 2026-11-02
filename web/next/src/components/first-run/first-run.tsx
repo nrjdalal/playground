@@ -6,7 +6,7 @@ import { useEffect, useRef, useState } from "react"
 import { ChecksCard, NO_API, ONBOARD_URL, readChecks } from "@/components/first-run/checks"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
-import { Spinner } from "@/components/ui/spinner"
+import { CenterSpinner, Spinner } from "@/components/ui/spinner"
 import { config } from "@/lib/config"
 import { firstRunView, gateOf, keptSignIn, markTried, triedJustNow } from "@/lib/first-run"
 import { canContinue, ONBOARD_QUERY_KEY, refusalOf } from "@/lib/onboard"
@@ -28,7 +28,7 @@ const signIn = async (route: "finish" | "sign-in"): Promise<string | undefined> 
   return undefined
 }
 
-// /dashboard's first run, in place of the dashboard while there is no database (gate setup) or no session (gate normal): a neutral frame while the owner is signed in by itself and the checks are read, then "Let's check this Mac" with Continue, which makes and signs in this Mac's owner. It opens no WebSocket and reads nothing on the owner rung. With no database yet it reads the gate every 2s and loads again once the database is up.
+// /dashboard's first run, in place of the dashboard while there is no database (gate setup) or no session (gate normal): a centred spinner while the owner is signed in by itself and the checks are read, then "Let's check this Mac" with Continue, which makes and signs in this Mac's owner. It opens no WebSocket and reads nothing on the owner rung. With no database yet it reads the gate every 2s and loads again once the database is up.
 export function FirstRun({ gate }: { gate: "normal" | "setup" }) {
   const [signedIn, setSignedIn] = useState<boolean | undefined>(
     gate === "setup" ? false : undefined,
@@ -81,7 +81,12 @@ export function FirstRun({ gate }: { gate: "normal" | "setup" }) {
 
   const view = firstRunView({ done: checks.data?.done, gate, signedIn })
   const failure = refused ?? checks.error?.message
-  if (view === "frame" && !failure) return <main aria-busy="true" className="min-h-svh" />
+  if (view === "frame" && !failure)
+    return (
+      <main aria-busy="true" className="relative min-h-svh">
+        <CenterSpinner />
+      </main>
+    )
   return (
     <main className="flex min-h-svh flex-col items-center justify-center gap-4 p-4">
       {failure && (

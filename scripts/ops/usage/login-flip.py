@@ -64,11 +64,6 @@ def probe(email):
     return got
 
 
-def hm(ts):
-    t = datetime.datetime.fromtimestamp(ts, datetime.timezone.utc)
-    return f"{t:%H:%M}Z ({(t + datetime.timedelta(hours=5, minutes=30)):%H:%M} IST)"
-
-
 def dashboard_ask(*args, stdin=None):
     if DRY:
         print("would run: bun run ask", *args, stdin or "")

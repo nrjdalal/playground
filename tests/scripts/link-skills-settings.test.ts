@@ -16,7 +16,7 @@ import {
 import { tmpdir } from "node:os"
 import { join, relative } from "node:path"
 
-import { OLD } from "../old-names"
+import { OLD } from "../session-names"
 
 const root = join(import.meta.dir, "..", "..")
 const scratch = realpathSync(mkdtempSync(join(tmpdir(), "link-skills-917-")))

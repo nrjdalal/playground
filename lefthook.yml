@@ -4,18 +4,23 @@ lefthook: bun node_modules/.bin/lefthook
 pre-commit:
   piped: true
   commands:
+    main-checkout:
+      # alone at priority 1, so it runs first, before any step that writes: a commit in the factory's main checkout, the one link-skills.sh links run-slot.sh from, is refused whatever wrapper, shell or cwd made it, behind the no-main-checkout hook; any other clone commits as before
+      priority: 1
+      run: >-
+        case "$(readlink -f "$HOME/.playground/ops/run-slot.sh" 2>/dev/null)" in "$(git rev-parse --show-toplevel)/scripts/ops/run-slot.sh") echo "main-checkout: this is the factory's main checkout; commit in a worktree under .claude/worktrees/ (AGENTS.md, Workflow)" >&2; exit 1;; esac
     conflict-markers:
       # before lint-staged, whose formatter can rewrite a staged conflict marker into Markdown that reads clean
-      priority: 1
+      priority: 2
       run: bun --no-env-file packages/scripts/src/conflict-markers.ts
     skills-manager:
-      priority: 1
+      priority: 2
       glob:
         - "skills/zerostarter/**/*.md"
         - "packages/scripts/src/skills-manager.ts"
       run: bun packages/scripts/src/skills-manager.ts && git add AGENTS.md
     lint-staged:
-      priority: 2
+      priority: 3
       run: bunx lint-staged --verbose
       stage_fixed: true
     agents-rules:
@@ -28,7 +33,7 @@ pre-commit:
       run: bun run test:file tests/AGENTS.test.ts
     docs-wrap:
       # after lint-staged's formatter, so it reads the docs as they are committed: one sentence per line, none over the limit
-      priority: 3
+      priority: 4
       glob:
         - ".agents/dashboard/*.md"
         - ".agents/skill-trial.md"
@@ -44,7 +49,7 @@ pre-commit:
       run: bun --no-env-file packages/scripts/src/docs-wrap/cli.ts --check
     trace-count:
       # the trace ratchet's test, as CI runs it: it counts every tracked and untracked file as it stands on disk, staged or not, and a commit of images and fonts alone skips it
-      priority: 3
+      priority: 4
       exclude:
         - "*.gif"
         - "*.ico"
@@ -56,14 +61,14 @@ pre-commit:
       run: bun run test:file tests/packages/scripts/src/trace-count/count.test.ts
     dev-stack:
       # the build below rebuilds packages/* under this checkout's running `bun run dev` and hangs it, so the commit waits for the stack to stop
-      priority: 3
+      priority: 4
       exclude:
         - "*.md"
         - "tests/*.py"
       run: bun --no-env-file api/hono/src/bin/dev-running.ts
     env-keys:
       # before the build, which fails on a short .env one key at a time; this names every key it lacks at once (its own build of @packages/env makes the dist it reads on a fresh worktree)
-      priority: 4
+      priority: 5
       exclude:
         - "*.md"
         - "tests/*.py"
