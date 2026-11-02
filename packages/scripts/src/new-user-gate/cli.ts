@@ -1,10 +1,11 @@
 #!/usr/bin/env bun
 // The new-user gate: a fresh scratch HOME installs Playground at a given sha the way `curl | bash` does, then each step a new user meets is checked in turn, printed PASS, FAIL or INCONCLUSIVE and screenshotted; it exits 1 when any step does not pass.
-// Usage: bun run gate:new-user <tag|sha> [--box <dir>] [--keep], or --clean <dir> for a box a --keep run left. The box (default /tmp/pg-gate-<sha7>, short since herdr's socket path must fit 104 bytes) holds the HOME, the stand-ins, a bare source repo and the screenshots.
-import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+// Usage: bun run gate:new-user <tag|sha> [--box <parent dir>] [--keep], or --clean <box> for a box a --keep run left. The box (makeBox's /tmp/pg-gate-<sha7>-<random> unless --box names its folder, short since herdr's socket path must fit 104 bytes) holds the HOME, the stand-ins, a bare source repo and the screenshots.
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { dirname, join, resolve } from "node:path"
 
+import { makeScratch, removeScratch } from "@packages/safe-delete"
 import { gateSettings, SCHEMA_VERSION } from "@packages/settings"
 
 import { GATE_LABEL, stubs, usageReading } from "./stubs"
@@ -114,10 +115,19 @@ const realBin = (name: string) => {
   return found
 }
 
+// A box for sha: a scratch folder in parent named pg-gate-<sha7>-<random>, which dropBox alone removes.
+export const makeBox = (sha: string, parent = "/tmp") =>
+  makeScratch(`pg-gate-${sha.slice(0, 7)}-`, parent)
+
+// Removes a box makeBox made, or leaves it and says why.
+export const dropBox = (box: string) => {
+  const refused = removeScratch(box, dirname(box))
+  if (refused) console.error(`gate: ${refused}`)
+}
+
 // A box at sha: the HOME, the stand-ins first on PATH, a bare source.git holding sha as pinned and as main, as a ship leaves it, beside origin's canary (HEAD main, as GitHub's), its clone at HOME/playground where install.sh finds it, and the box's own portless proxy on a high port with no TLS, so the box's stack never routes through this Mac's proxy.
 const prep = (box: string, sha: string) => {
   const home = join(box, "h")
-  rmSync(box, { force: true, recursive: true })
   mkdirSync(join(box, "stubs"), { recursive: true })
   mkdirSync(join(box, "shots"), { recursive: true })
   mkdirSync(home, { recursive: true })
@@ -372,7 +382,7 @@ const clean = (box: string, home: string) => {
     .out.split("\n")
     .filter(Boolean)
   for (const name of names) run(["docker", "rm", "-fv", name])
-  rmSync(box, { force: true, recursive: true })
+  dropBox(box)
 }
 
 const main = async (args: string[]) => {
@@ -382,7 +392,9 @@ const main = async (args: string[]) => {
   }
   const sha = args.find((a) => !a.startsWith("--"))
   if (!sha) {
-    console.error("usage: bun run gate:new-user <tag|sha> [--box <dir>] [--keep] | --clean <dir>")
+    console.error(
+      "usage: bun run gate:new-user <tag|sha> [--box <parent dir>] [--keep] | --clean <box>",
+    )
     return 2
   }
   // a tag reads from origin, since a checkout can hold a stale local tag of the same name
@@ -399,12 +411,13 @@ const main = async (args: string[]) => {
     console.error(`gate: ${sha} is no commit in this checkout`)
     return 2
   }
-  const box = args.includes("--box")
-    ? resolve(args[args.indexOf("--box") + 1]!)
-    : `/tmp/pg-gate-${full.slice(0, 7)}`
   const keep = args.includes("--keep")
   const steps: Step[] = []
   await waitForRoom()
+  const box = makeBox(
+    full,
+    args.includes("--box") ? resolve(args[args.indexOf("--box") + 1]!) : undefined,
+  )
   const { home, path } = prep(box, full)
   const stray = strayStandIns(box, home, Object.keys(stubs(box, "")))
   if (stray.length) {
@@ -581,7 +594,6 @@ const main = async (args: string[]) => {
     if (keep) console.log(`gate: kept ${box}; bun run gate:new-user --clean ${box} removes it`)
     else {
       const shots = join(dirname(box), `${box.split("/").at(-1)}-shots`)
-      rmSync(shots, { force: true, recursive: true })
       if (existsSync(join(box, "shots"))) run(["cp", "-R", join(box, "shots"), shots])
       mkdirSync(shots, { recursive: true })
       const logs = join(home, ".playground", "ops", "dashboard")
