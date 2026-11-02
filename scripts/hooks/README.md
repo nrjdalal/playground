@@ -7,6 +7,8 @@ Widen what a hook allows only by one literal form it reads whole, tracking no sh
 Every bypass form a review has found stays refused through a widening: each is a row of `tests/scripts/hooks/fixtures/refused-forms.ts`, which `tests/scripts/hooks/refused-forms.test.ts` runs through each guard it names, and a bypass a new review finds that canary refuses joins it as a row in the same PR.
 `no-raw-spawn` guards `scripts/spawn.sh`, so its text sits in [the spawn.sh section of scripts/README.md](../README.md#spawnsh).
 Their tests are `bun run test:file tests/scripts/hooks`.
+Every hook reads a wrapper (`sudo`, `time`, `doas`, `env`, `nice`, `nohup`, `stdbuf`, `timeout`, `xargs` and the rest of `WRAPPERS` in `scripts/hooks/shell.ts`) by that wrapper's own list of options, a cluster (`-Hp`) letter by letter and a value attached (`-pwc`, `--prompt=wc`) or as the next word, so the program it finds is the one the wrapper runs.
+An option missing from that list, or an option's value in a variable, leaves the program unknown, so a hook that refuses a program it cannot read refuses the call: a missing option costs a refusal, never a bypass, and is fixed by adding it to the list.
 
 ## Registered in both settings files
 
@@ -158,10 +160,11 @@ Their tests are `bun run test:file tests/scripts/hooks`.
   The readers are `[`, `cat`, `cmp`, `diff`, `echo`, `grep`, `head`, `jq`, `ls`, `printf`, `readlink`, `realpath`, `shasum`, `stat`, `tail`, `test` and `wc`;
   `rg` with no `--hostname-bin` or `--pre`; `find` with no `-delete`, `-exec`, `-execdir`, `-fls`, `-fprint`, `-fprint0`, `-fprintf`, `-ok` or `-okdir` action; and git's `blame`, `cat-file`, `diff`, `grep`, `log`, `ls-files`, `rev-parse`, `show` and `status` with no `-c`, `--config-env`, `--exec-path`, `--ext-diff`, `-O`, `--open-files-in-pager`, `--output` or `--textconv`.
   A reader run with `EDITOR`, `GIT_*`, `LESSOPEN`, `PAGER` or `VISUAL` set in the call is judged as any other program, since each makes it run one.
+  A reader is its command's own first word, so a reader behind a wrapper (`timeout 5 grep -r x .`, `sudo cat f`) is judged as any other program, and from `~` one naming `.` is refused; run it bare.
   For any program but a reader, each text that holds a space (a word, the value after its `=`, an option's attached value, a variable the call sets or exports) is judged as a command line of its own, a leading `!` dropped, since a program may run it (`watch`, `tmux`, `ssh -o ProxyCommand`, `rsync -e`, a git alias, a pager).
   A line is read call by call instead when every command on it, a substitution's included, is on a closed list of readers and no redirect on it writes a file (`2>&1` and `>/dev/null` write none): then only a variable's text is read that way, so `awk '$3 ~ /runner/' f` runs from `~`.
   The list is an `awk`, `gawk`, `mawk` or `nawk` whose program runs nothing, a `cat`, `grep`, `head`, `tail` or `wc` that is a reader by the list above, `cut`, a `sort` with no `-o` and no long option (macOS sort takes an abbreviation, `--out=`), and a `uniq` with at most one file, since its second is its output.
-  Each is its command's own first word, named bare or by a system folder's path (`/usr/bin/awk`), so a script the session wrote (`./awk`), a `PATH` set in the call, and a reader behind a wrapper (`time cut …`, `sudo --prompt awk …`, whose `awk` is the prompt) keep canary's reading.
+  Each is its command's own first word as a reader is, named bare or by a system folder's path (`/usr/bin/awk`), so a script the session wrote (`./awk`), a `PATH` set in the call and a reader behind a wrapper (`time cut …`) keep canary's reading.
   An awk program runs something when it holds `system`, `getline`, `|`, `>` or `@`, or comes from `-f` or an option the hook does not know; each string literal of such a program is judged as a command line wherever it stands (`awk 'BEGIN{system("…")}'`).
   It refuses any program but a reader run with the root as its folder or, for git, its tree.
   It refuses the `playground` CLI's calls that change what a guard reads, the CLI found by where its word lands: `playground` by name in any case, or by a path that is no folder, or the checkout's `cli.ts` with or without its extension, as any word of a command but a reader's, so behind any wrapper (`bun`, `npx`, `find -exec`, `arch`, `watch`),
