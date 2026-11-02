@@ -9,6 +9,14 @@ import { isPublicList, LIST_KEYS, publicListPath } from "./kinds"
 // Runs trace-count in CI, where no data folder holds its private inputs: each comes from a repository secret, is written into a scratch data folder, and is never printed.
 const SECRETS = ["FACTORY_ARCHIVE_REPO", "NO_PUBLIC_LEAK_LIST", "OWNER_NAMES"] as const
 
+// The count's inputs are one owner's, so it runs only where the repository variable TRACE_COUNT is on (ADR 0016): a fork or another owner skips it with one notice line.
+if (process.env.TRACE_COUNT !== "on") {
+  console.log(
+    `::notice title=Trace count::trace-count ci: off, since the repository variable TRACE_COUNT is not on; set it to on, with the secrets ${SECRETS.slice(0, -1).join(", ")} and ${SECRETS.at(-1)}, to count`,
+  )
+  process.exit(0)
+}
+
 function refuse(why: string): never {
   console.error(`trace-count ci: ${why}`)
   process.exit(2)
