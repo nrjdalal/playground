@@ -203,6 +203,24 @@ describe("a write to an extension repository's git data or name is refused", () 
   })
 })
 
+// #564: a scratch folder named git, passed to a program the hook does not know, read as that program running git
+describe("a path word read as git behind a program it does not know", () => {
+  test("its refusal names what it read and the ways through", async () => {
+    const reason = await refused(
+      bash("npx foo https://example.com $T/git push origin main", at("ext")),
+    )
+    expect(reason).toContain(
+      "It read a word whose path ends in /git as git run by npx, a program it does not know: a folder or file passes under a path that does not end in /git, and git run by npx is read the same when written by its own name, git.",
+    )
+    expect(reason.indexOf("It read a word")).toBeLessThan(reason.indexOf(NOT_RUN))
+  })
+
+  test("git by its own name behind it is refused as before", async () => {
+    const reason = await refused(bash("npx foo git push origin main", at("ext")))
+    expect(reason).not.toContain("It read a word whose path ends in")
+  })
+})
+
 describe("a push resolves its target the way git does, and one it cannot place is refused", () => {
   test.each(
     rows([
