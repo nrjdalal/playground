@@ -398,7 +398,7 @@ describe("a direct write into the extensions root is refused, naming the owner's
     60_000,
   )
 
-  // the reader before its fix took 17 to 36 times as long at the cap as at an eighth of it at load 12, and takes 6 to 8.5 times now; a ratio holds on a loaded machine where a bound in seconds does not
+  // at load 12 the reader before its fix took 40 to 121 times as long at the cap as at a sixteenth of it, and takes 11.5 to 15 times now; a ratio holds on a loaded machine where a bound in seconds does not
   test("distinct variables at the command cap take time in step with their count", async () => {
     const time = async (cap: number) => {
       let fastest = Infinity
@@ -409,8 +409,8 @@ describe("a direct write into the extensions root is refused, naming the owner's
       }
       return fastest
     }
-    const eighth = await time(16_250)
-    expect((await time(130_000)) / eighth).toBeLessThan(11)
+    const sixteenth = await time(8_125)
+    expect((await time(130_000)) / sixteenth).toBeLessThan(25)
   }, 60_000)
 
   test.each([300, 8_000])(
