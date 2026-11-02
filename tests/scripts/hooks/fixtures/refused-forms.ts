@@ -2226,6 +2226,11 @@ gh api graphql -f query="$QUERY"`,
         `echo | cd ${MAIN}; git commit -m x`,
       ],
       ["a commit after builtin cd", `builtin cd ${MAIN}; git commit -m x`],
+      [
+        "a commit after zsh's two-operand cd naming the main checkout",
+        `cd ${MAIN} ${MAIN}; git commit -m x`,
+      ],
+      ["a commit after a two-operand cd of relative words", "cd ../.. ../..; git commit -m x"],
       ["a commit after command cd", `command cd ${MAIN}; git commit -m x`],
       ["a build after a cd behind || into the main checkout", `true || cd ${MAIN}; bun run build`],
       [
@@ -2290,8 +2295,22 @@ gh api graphql -f query="$QUERY"`,
   {
     folders: ["tmp"],
     guards: ["no-extensions-write"],
-    rows: ({ SCOPE }) => [
+    rows: ({ ROOT, SCOPE }) => [
       ["a program run after a cd behind || into the extensions root", `true || cd ${SCOPE}; true`],
+      ["a program run after a two-operand cd into the extensions root", `cd ${ROOT} ${ROOT}; true`],
+    ],
+    source: "#514",
+  },
+  // a bare pushd, which zsh sends home on a one-folder stack, so a relative path after one may be in the root; the home is the one ~ expands to, so these rows sit in the process's own worktree folder
+  {
+    folders: ["process worktree"],
+    guards: ["no-extensions-write"],
+    rows: () => [
+      [
+        "a relative rm after a bare pushd",
+        `pushd >/dev/null; rm -rf ${NEVER_MADE.replace("~/", "")}`,
+      ],
+      ["a relative write after a bare pushd", `pushd; echo x > ${NEVER_MADE.replace("~/", "")}/f`],
     ],
     source: "#514",
   },

@@ -278,9 +278,11 @@ describe("every refused form stays refused unless the allow list names it", () =
 
   // A recursive rm (-r, -R or --recursive, alone or in a cluster) and the folder it names, read from a row's text, where a backslash starts an escape (printf's \n) rather than the folder's name.
   const RECURSIVE = /\brm\s+((?:-\S+\s+)*)([^\s'"`;)&|\\]+)/g
-  // A folder named from HOME, and a cd or pushd to HOME, after which a relative folder is in HOME too
+  // A folder named from HOME, and a cd or pushd to HOME, after which a relative folder is in HOME too; a bare cd or pushd goes there as well, as the shared reader reads one
   const HOME_PATH = /^(?:~|\$HOME|\$\{HOME\})(?=\/|$)/
   const CD_HOME = /\b(?:cd|pushd)\s+(?:~|\$HOME|\$\{HOME\})\/?(?=[\s;&|)]|$)/
+  // A bare cd or pushd, with no folder word and a redirect of its own aside, which the shared reader reads as the home too
+  const BARE_HOME = /\b(?:cd|pushd)(?:\s+\d?>{1,2}\s*\S+)*\s*(?=[;&|)]|$)/
   // A folder written from ~ is NEVER_MADE itself, or a glob of it that keeps its last name
   const never = (path: string) =>
     path.endsWith(NEVER_MADE.slice(NEVER_MADE.lastIndexOf("/"))) &&
@@ -291,7 +293,8 @@ describe("every refused form stays refused unless the allow list names it", () =
       if (!/(?:^|\s)(?:-[a-zA-Z]*[rR]|--recursive)/.test(flags)) return []
       const path = HOME_PATH.test(target)
         ? target.replace(HOME_PATH, "~")
-        : !/^[/~$]/.test(target) && CD_HOME.test(text.slice(0, index))
+        : !/^[/~$]/.test(target) &&
+            (CD_HOME.test(text.slice(0, index)) || BARE_HOME.test(text.slice(0, index)))
           ? `~/${target}`
           : undefined
       return path !== undefined && !never(path) ? [rm] : []

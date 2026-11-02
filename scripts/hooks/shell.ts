@@ -1143,49 +1143,48 @@ function ancestors(path: string): string[] {
   }
 }
 
-// Each folder a cd's or pushd's own words may land it in, and whether its target names a folder the reader cannot read at all; undefined for the forms that go back to a folder the line named before: `cd -`, a bare `pushd`, which swaps the stack's top two, and zsh's two-operand cd, which replaces part of the path it is in.
-function cdTargets(
-  name: string,
-  cmd: Command,
-  parsed: Parsed,
-  env: Env,
-  from: string[],
-): { paths: string[]; unread: boolean } | undefined {
+// Where a cd or pushd may leave the shell: each folder its own words name, whether its target names a folder the reader cannot read at all, and `back` for a form that returns to a folder the line named before, so every one of those is a candidate too. `cd -` and a bare `pushd` are such forms, and so is zsh's two-operand cd, which replaces part of the path the shell is in: its operands go in as candidates, since one of them is the folder a one-operand reading would reach. A bare `pushd` takes the home as well, which zsh's PUSHD_TO_HOME makes it reach.
+type Move = { back?: boolean; paths: string[]; unread: boolean }
+
+function cdTargets(name: string, cmd: Command, parsed: Parsed, env: Env, from: string[]): Move {
   const dirs = parsed.args.filter((a) => !(a.value.startsWith("-") && a.value.length > 1))
-  if (dirs.length > 1) return undefined
   const [dir] = dirs
-  if (!dir) return name === "cd" ? { paths: [homedir()], unread: false } : undefined
-  if (dir.value === "-") return undefined
+  if (!dir) {
+    return name === "cd"
+      ? { paths: [homedir()], unread: false }
+      : { back: true, paths: [homedir()], unread: true }
+  }
+  if (dir.value === "-") return { back: true, paths: [], unread: true }
   const paths = new Set<string>()
   const many = manyTimes(cmd, parsed)
-  let unread = false
-  for (const base of from.length > 0 ? from : [undefined]) {
-    tick()
-    const path = pathOf(dir, { ...env, cwd: base })
-    if (path === undefined) {
-      unread = true
-      continue
+  let unread = dirs.length > 1
+  for (const word of dirs.length > 1 ? dirs : [dir]) {
+    for (const base of from.length > 0 ? from : [undefined]) {
+      tick()
+      const path = pathOf(word, { ...env, cwd: base })
+      if (path === undefined) {
+        unread = true
+        continue
+      }
+      paths.add(path)
+      // a loop or a count runs the cd again from wherever the last run left it, so a target that climbs reaches every folder above
+      if (many && word.value.split("/").includes("..")) {
+        for (const up of ancestors(path)) paths.add(up)
+      }
     }
-    paths.add(path)
-    // a loop or a count runs the cd again from wherever the last run left it, so a target that climbs reaches every folder above
-    if (many && dir.value.split("/").includes("..")) for (const up of ancestors(path)) paths.add(up)
   }
-  return { paths: [...paths], unread }
+  return { back: dirs.length > 1, paths: [...paths], unread }
 }
 
 // Where a cd, pushd or popd leaves the folder. A cd the shell is sure to run once, into one folder the reader reads, moves it there and clears each folder it may have been in, since the shell is certainly in that one; any other leaves `cwd` unnamed with every folder it may have reached a candidate, so each hook judges the commands after it in all of them. A cd inside a body the shell keeps for a later call moves nothing now, and its folder stays a candidate through every later cd, since the line may call that body at any point.
 async function chdirTo(name: string, cmd: Command, parsed: Parsed, env: Env): Promise<void> {
   const from = startFolders(env)
   const back = [...new Set([...(env.cwdBack ?? []), ...from])]
-  const target = name === "popd" ? undefined : cdTargets(name, cmd, parsed, env, from)
-  if (!target) {
-    env.cwd = undefined
-    env.cwdMaybe = keep(back, env)
-    env.cwdUnread = true
-    env.cwdBack = env.cwdMaybe
-    return
-  }
-  const { paths, unread } = target
+  const move: Move =
+    name === "popd"
+      ? { back: true, paths: [], unread: true }
+      : cdTargets(name, cmd, parsed, env, from)
+  const { paths, unread } = move
   env.cwdBack = keep([...new Set([...back, ...paths])], env)
   if (cmd.held) {
     env.cwdHeld = keep([...new Set([...(env.cwdHeld ?? []), ...paths])], env)
@@ -1199,7 +1198,8 @@ async function chdirTo(name: string, cmd: Command, parsed: Parsed, env: Env): Pr
     return
   }
   env.cwd = undefined
-  env.cwdMaybe = keep([...new Set([...from, ...paths])], env)
+  // a form that returns to a folder the line named before takes every one of them, since the reader cannot tell which the shell goes back to
+  env.cwdMaybe = keep([...new Set([...(move.back ? back : from), ...paths])], env)
   env.cwdUnread = env.cwdUnread || unread || (from.length === 0 && paths.length === 0)
 }
 
