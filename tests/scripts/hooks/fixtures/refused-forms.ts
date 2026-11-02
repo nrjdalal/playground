@@ -1978,6 +1978,34 @@ gh api graphql -f query="$QUERY"`,
         "env -u PLAYGROUND_ROLE bun run packages/scripts/src/playground/cli.ts ext score login doc x abc 5 --reason ok",
         "checkout",
       ],
+      [
+        "ext score split by an empty quote in bash -c",
+        "PLAYGROUND_ROLE= bash -c 'playground ext s\"\"core login doc x abc 5 --reason ok'",
+      ],
+      [
+        "ext score split by a backslash in bash -c",
+        "PLAYGROUND_ROLE= bash -c 'playground ext sc\\ore login doc x abc 5 --reason ok'",
+      ],
+      [
+        "ext score quoted inside bash -c",
+        `PLAYGROUND_ROLE= bash -c "playground ext 'score' login doc x abc 5 --reason ok"`,
+      ],
+      [
+        "ext score split by an empty quote in env -i sh -c",
+        "env -i sh -c 'playground ext s\"\"core login doc x abc 5 --reason ok'",
+      ],
+      [
+        "ext score split by an empty quote, echoed to sh",
+        "echo 'playground ext s\"\"core login doc x abc 5 --reason ok' | PLAYGROUND_ROLE= sh",
+      ],
+      [
+        "ext quoted in zsh -c with another session id",
+        "CLAUDE_CODE_SESSION_ID=x zsh -c 'playground \"ext\" score login doc x abc 5 --reason ok'",
+      ],
+      [
+        "ext score as a locale string in bash -c",
+        "PLAYGROUND_ROLE= bash -c 'playground ext $\"score\" login doc x abc 5 --reason ok'",
+      ],
     ],
     source: "#508",
   },
