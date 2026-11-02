@@ -457,6 +457,8 @@ export async function prMerge(
   } finally {
     store?.close()
   }
+  // a signal's stop exits once its cleanups finish, so a stopped run waits for that: no merge comment, no session ends, and no exit code of its own
+  if (stopping()) await new Promise<never>(() => {})
   if (outcome.kind === "merged") {
     await run(["pr", "comment", String(n), "-R", name, "--body", mergeNote(head, outcome.gates)])
     await endSessions(
