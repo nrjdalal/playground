@@ -167,8 +167,29 @@ function cliCalls(parsed: Parsed, env: Env): Word[][] {
 }
 
 const AWKS = new Set(["awk", "gawk", "mawk", "nawk"])
-// what lets an awk program run a command or write a file: system(), a | pipe, getline, a > redirect or an @ directive
-const AWK_RUNS = /system|getline|[|>@]/
+// what lets an awk program run a command or write a file: system(), getline, a > redirect or an @ directive, and a | pipe outside a regex literal or a string
+const AWK_RUNS = /system|getline|[>@]/
+const awkRuns = (program: string) => AWK_RUNS.test(program) || awkPipe(program)
+
+// Whether a | stands outside every string and regex literal; a / opens a regex only where an operand starts, so a division (`$1/2`, `3/4`) never hides a pipe after it
+function awkPipe(program: string): boolean {
+  let last = ""
+  for (let i = 0; i < program.length; i++) {
+    const c = program[i]!
+    if (c === '"' || (c === "/" && /^[(,{};!~&|=?:]?$/.test(last))) {
+      let end = i + 1
+      while (end < program.length && program[end] !== c) end += program[end] === "\\" ? 2 : 1
+      if (end < program.length) {
+        i = end
+        last = c
+        continue
+      }
+    }
+    if (c === "|") return true
+    if (!/\s/.test(c)) last = c
+  }
+  return false
+}
 
 // awk's program words, or undefined when a program comes from a file or an option the hook does not know: -F and -v take a value, gawk's -e and --source a program, and the first other word is the program
 function awkPrograms(words: Word[]): Word[] | undefined {
@@ -190,7 +211,7 @@ function awkPrograms(words: Word[]): Word[] | undefined {
 function programLines({ args, first }: Parsed): string[] {
   if (!AWKS.has(program(first?.value ?? "").toLowerCase())) return []
   return (awkPrograms(args) ?? [])
-    .filter(({ value }) => AWK_RUNS.test(value))
+    .filter(({ value }) => awkRuns(value))
     .flatMap(({ value }) => [...value.matchAll(/"((?:[^"\\]|\\.)*)"/g)].map((m) => m[1]))
 }
 
@@ -214,7 +235,7 @@ function narrow(cmd: Command, env: Env): boolean {
   const base = program(first.value).toLowerCase()
   if (AWKS.has(base)) {
     const programs = awkPrograms(args)
-    return !!programs && programs.every(({ value }) => !marked(value) && !AWK_RUNS.test(value))
+    return !!programs && programs.every(({ value }) => !marked(value) && !awkRuns(value))
   }
   if (["cat", "grep", "head", "tail", "wc"].includes(base)) return reads(parsed, env)
   if (base === "cut") return true
