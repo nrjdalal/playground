@@ -8,6 +8,10 @@ export type Text = { reads?: Text[]; unknown?: string; value: string; variable?:
 export type Word = Text & { glob?: boolean; procs?: Command[]; quoted: boolean }
 type Redirect = { body?: Text; fd: string; op: string; target?: Word }
 export type Command = {
+  // Set when the command runs whatever the one before it did (it follows a `;`, a newline, an `&` or an `||`), so a cd an `&&` made sure before it may not have run at all and the folders from before that cd are the shell's again
+  breaks?: boolean
+  // Set when the command runs only if the one before it succeeded (it sits on the right of an `&&`), so a cd of its own has certainly run for every command the same chain joins after it
+  chained?: boolean
   detached?: boolean
   group?: boolean
   // Set when the command sits in a body the shell keeps for a later call (a function's, a brace group's, a coproc's), so a cd of its own may move the shell at any point of the line
@@ -37,6 +41,8 @@ export type Env = {
   cwd?: string
   // Every folder a cd on the line has named, which `cd -`, `popd` and a bare `pushd` go back to
   cwdBack?: string[]
+  // The folders the shell was in before a cd an `&&` alone made sure, which become the shell's again at the first command the chain does not reach, since that one runs whether or not the cd did
+  cwdChain?: string[]
   // The folders a body on the line may cd into, which no later cd clears, since the shell may run that body at any point of the line
   cwdHeld?: string[]
   // The folders a cd the reader could not be sure of may have left the shell in, beside `cwd`; `cwd` is unnamed whenever one of them is the shell's instead
@@ -471,10 +477,10 @@ function walk(lx: Lexer, scope: number, nested: boolean, inherit?: Command): voi
   const fresh = (): Command => ({ redirects: [], scope, stdin: inherit, words: [] })
   let cmd = fresh()
   const opens: number[] = []
-  // How many bodies the walk is inside, how many of them a loop runs, and whether the last operator makes the next command run on the one before it, so a command the shell may not run is marked unsure.
+  // How many bodies the walk is inside, how many of them a loop runs, and the operator that joined the last command to this one, so a command the shell may not run is marked unsure and one it runs only on the command before it succeeding is marked chained.
   let depth = 0
   let loops = 0
-  let conditional = false
+  let after = ""
   // A pipeline's commands and a backgrounded one run in subshells: a cd there leaves the shell where it was.
   const end = (op: string) => {
     const done = cmd
@@ -496,12 +502,15 @@ function walk(lx: Lexer, scope: number, nested: boolean, inherit?: Command): voi
       const closed = reserved.filter((w) => CLOSES.has(w)).length
       const body = reserved.some((w) => HELD.has(w) || BODIES.has(w))
       const loop = reserved.includes("do")
-      if (conditional || depth > 0 || body) done.unsure = true
+      // an `&&` is left out: a command on its right runs only if the one before it succeeded, so it is chained rather than unsure, and every command the chain joins after it runs only if it did too
+      if (after === "||" || depth > 0 || body) done.unsure = true
+      if (after === "&&") done.chained = true
+      else done.breaks = true
       if (reserved.some((w) => HELD.has(w))) done.held = true
       if (loops > 0 || loop) done.repeated = true
       depth = Math.max(0, depth + opened - closed)
       loops = Math.max(0, loops + (loop ? 1 : 0) - (reserved.includes("done") ? 1 : 0))
-      conditional = op === "&&" || op === "||"
+      after = op
       for (const w of done.words) {
         if (w.value !== "{" || w.quoted) break
         opens.push(lx.commands.length)
@@ -1008,6 +1017,7 @@ export async function examine(
   builtins: boolean,
 ): Promise<string | undefined> {
   tick()
+  unchain(cmd, env)
   const readings = (parsed: Parsed): Parsed[] => [parsed, ...parsed.also.flatMap(readings)]
   const [primary, ...others] = readings(parse(cmd))
   // only the primary reading moves the folder, sets variables and records files, as canary's one reading did; each other runs on a copy of the env before the command
@@ -1078,7 +1088,7 @@ async function examineReading(
 
 // The two wrappers that run a shell builtin, so `builtin cd X` and `command cd X` move the shell as a bare `cd` does; every other wrapper (`env`, `nice`, `xargs`) runs no builtin at all.
 const BUILTIN = new Set(["builtin", "command"])
-// Whether the shell is sure to run a command once, so the folder a cd of its own lands in is the folder the commands after it run from: it reaches its program as its own first word or through `builtin` or `command` alone, and the lexer marked it neither detached (a pipeline, a background) nor unsure (a conditional's right side, a body the shell may run no time or many) nor repeated.
+// Whether the shell is sure to run a command once, so the folder a cd of its own lands in is the folder the commands after it run from: it reaches its program as its own first word or through `builtin` or `command` alone, and the lexer marked it neither detached (a pipeline, a background) nor unsure (an `||`'s right side, a body the shell may run no time or many) nor repeated. A command on an `&&`'s right side is sure in this sense, since every command that chain joins after it runs only if it ran and succeeded; `unchain` ends that where the chain does.
 const sureToRun = (cmd: Command, parsed: Parsed): boolean =>
   !cmd.detached &&
   !cmd.unsure &&
@@ -1191,16 +1201,35 @@ async function chdirTo(name: string, cmd: Command, parsed: Parsed, env: Env): Pr
     env.cwdUnread ||= unread
     return
   }
-  if (sureToRun(cmd, parsed) && !unread && paths.length === 1 && (await isFolder(paths[0]))) {
+  // a cd an `&&` joins to what follows needs no folder there to read: one into a folder that is not there fails, and then nothing the chain joins after it runs
+  if (
+    sureToRun(cmd, parsed) &&
+    !unread &&
+    paths.length === 1 &&
+    (cmd.chained || (await isFolder(paths[0])))
+  ) {
     env.cwd = paths[0]
     env.cwdMaybe = []
     env.cwdUnread = false
+    // the chain holds only to the first command it does not reach, so the folders from before this cd are kept for that one
+    if (cmd.chained) env.cwdChain = keep([...new Set([...(env.cwdChain ?? []), ...from])], env)
     return
   }
   env.cwd = undefined
   // a form that returns to a folder the line named before takes every one of them, since the reader cannot tell which the shell goes back to
   env.cwdMaybe = keep([...new Set([...(move.back ? back : from), ...paths])], env)
   env.cwdUnread = env.cwdUnread || unread || (from.length === 0 && paths.length === 0)
+}
+
+// A cd an `&&` alone made sure holds only while the chain holds: the first command the chain does not reach runs whether or not that cd did, so the folders from before it are the shell's again beside the one it named.
+function unchain(cmd: Command, env: Env): void {
+  if (!cmd.breaks || !env.cwdChain?.length) return
+  env.cwdMaybe = keep(
+    [...new Set([...(env.cwdMaybe ?? []), ...(env.cwd ? [env.cwd] : []), ...env.cwdChain])],
+    env,
+  )
+  env.cwd = undefined
+  env.cwdChain = []
 }
 
 // At most this many folders are carried for one line, since each hook judges every command in all of them.

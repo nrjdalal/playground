@@ -46,10 +46,13 @@ Only the first reading moves the folder, sets variables and records files for th
 
 ## The folder a hook reads
 
-- The shared reader (`scripts/hooks/shell.ts`) follows the folder a command runs in from the Bash tool's cwd through the line's `cd` steps, and names one folder where the shell is sure to run that `cd` once, into a folder that is there.
-  Sure means: `cd` is the command's own first word, or `builtin` or `command` runs it, since every other wrapper runs no builtin (`env cd`, `xargs cd`); it stands outside a pipeline, a background and a conditional's right side (`cmd || cd x`, `cmd && cd x`); it stands outside every body the shell may run no time or many (`if`, `while`, `until`, `for`, `case`, a function, a brace group, `coproc`);
+- The shared reader (`scripts/hooks/shell.ts`) follows the folder a command runs in from the Bash tool's cwd through the line's `cd` steps, and names one folder where the shell is sure to run that `cd` once.
+  Sure means: `cd` is the command's own first word, or `builtin` or `command` runs it, since every other wrapper runs no builtin (`env cd`, `xargs cd`); it stands outside a pipeline, a background and an `||`'s right side (`cmd || cd x`); it stands outside every body the shell may run no time or many (`if`, `while`, `until`, `for`, `case`, a function, a brace group, `coproc`);
   and no count or loop runs it again.
   A reserved word counts in command position alone, so an argument that spells one (`echo if`, `grep -q done`) opens and closes no body.
+  The folder a sure `cd` names has to be there for the reader to name it, but for a `cd` an `&&` joins to what follows: such a `cd` has certainly run and succeeded for each command that chain joins after it, since a `cd` that does not run, or that fails, stops the chain before them.
+  So the reader names its folder whether or not the folder is there as it reads the line, which is how the worktree line of [AGENTS.md](../../AGENTS.md)'s Workflow rule reaches its new worktree (`git worktree add <path> && cd <path> && git merge origin/canary`, `mkdir -p <path> && cd <path> && git commit -m x`).
+  That reading holds while the chain holds: at the first command the chain does not reach, one after a `;`, a newline, an `&` or an `||`, the folders from before that `cd` are the shell's again beside the one it named (`Env.cwdChain`), since that command runs whether or not the `cd` did (`false && cd <path>; git commit -m x`, refused in both folders).
 - Every other `cd` leaves `Env.cwd` unnamed and keeps each folder the shell may be in: the folder before it, and each folder its target names, read against every folder the shell may already be in (`Env.cwdMaybe`).
   A relative target a count or a loop may run again adds every folder above it.
   A function's or a brace group's own `cd` adds its folder to `Env.cwdHeld`, which no later `cd` clears, since the line may call that body at any point.

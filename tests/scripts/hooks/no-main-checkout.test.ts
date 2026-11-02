@@ -212,7 +212,10 @@ describe("a build, a test run, lefthook, turbo or a file write in the main check
   // #573: a cd an && joins to the commands after it has certainly run for each of them, since a cd that does not run, or fails, stops the chain before them: so the folder it names is the one they run from, whether or not that folder is there when the hook reads the line
   test.each([
     ["a chained cd into a worktree", `true && cd ${WORKTREE} && bun run build`],
-    ["a chained cd after a real command", `git fetch -q origin canary && cd ${WORKTREE} && git add -A`],
+    [
+      "a chained cd after a real command",
+      `git fetch -q origin canary && cd ${WORKTREE} && git add -A`,
+    ],
     ["two chained cds, the second into a worktree", `cd ${MAIN} && cd ${WORKTREE} && git add -A`],
     [
       "a chained cd into the worktree the same line makes, as the Workflow rule types it",
