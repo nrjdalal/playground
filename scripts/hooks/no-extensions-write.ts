@@ -232,10 +232,19 @@ function programLines({ args, first }: Parsed, rooted: boolean): string[] {
     .flatMap(({ value }) => [...value.matchAll(/"((?:[^"\\]|\\.)*)"/g)].map((m) => m[1]))
 }
 
-// Whether a call is a closed-list reader whose quoted words are never a command line: awk, cat, cut, grep, head, sort, tail, uniq or wc, as its command's own first word, bare or by a system path, with no variable set in the call
+// Whether a call's program is its command's own first word, read outright, bare or by a system path, so no wrapper or file of another folder runs in its place
+function ownProgram(cmd: Command, { first, name }: Parsed): boolean {
+  return (
+    ownFirst(cmd, first) &&
+    !marked(name) &&
+    /^(?:\/(?:bin|opt\/homebrew\/bin|usr\/bin|usr\/local\/bin)\/)?[^/]+$/.test(first.value)
+  )
+}
+
+// Whether a call is a closed-list reader whose quoted words are never a command line: awk, cat, cut, grep, head, sort, tail, uniq or wc, as its own program (ownProgram), with no variable set in the call
 function narrow(cmd: Command, env: Env): boolean {
   const parsed = parse(cmd)
-  const { args, first, name } = parsed
+  const { args, first } = parsed
   // a command of reserved words alone (`fi`, `done`) runs nothing; any other with no program read (`sudo -s`, a group) has its line read whole
   if (!first) {
     return (
@@ -246,9 +255,7 @@ function narrow(cmd: Command, env: Env): boolean {
       parsed.local.size === 0
     )
   }
-  if (!ownFirst(cmd, first) || marked(name)) return false
-  if (!/^(?:\/(?:bin|opt\/homebrew\/bin|usr\/bin|usr\/local\/bin)\/)?[^/]+$/.test(first.value))
-    return false
+  if (!ownProgram(cmd, parsed)) return false
   const base = program(first.value).toLowerCase()
   if (AWKS.has(base)) {
     const programs = awkPrograms(args)
@@ -274,10 +281,10 @@ function rooted(commands: Command[]): boolean {
   )
 }
 
-// A git commit the hook reads as text: its sub is commit, it sets no shell variable and no git -c, -C, --config-env, --exec-path, --git-dir or --work-tree that moves where it runs, and every spaced word is a quoted message it holds (after -m, a flag cluster ending in m, --message, or --message=), since commit runs no word it is given.
-function quietCommit(parsed: Parsed, env: Env): boolean {
+// A git commit the hook reads as text: git as its own program (ownProgram), its sub commit, no shell variable set, no git option ahead of commit that changes what git runs or where (-c, -C, --config-env, --exec-path, --git-dir, --work-tree), and every spaced word a quoted message it holds (after -m, a flag cluster ending in m, --message, or --message=), since commit runs no word it is given.
+function quietCommit(cmd: Command, parsed: Parsed, env: Env): boolean {
   const { args, local, name } = parsed
-  if (name !== "git" || local.size > 0) return false
+  if (name !== "git" || local.size > 0 || !ownProgram(cmd, parsed)) return false
   const { rest, sub } = gitCall(args, env)
   if (sub !== "commit") return false
   const before = args.slice(0, args.length - rest.length - 1).map((a) => a.value)
@@ -303,7 +310,7 @@ function wholeLine(commands: Command[], env: Env): boolean {
     const words = [...cmd.words, ...cmd.redirects.flatMap((r) => (r.target ? [r.target] : []))]
     if (words.some((word) => word.procs && wholeLine(word.procs, env))) return true
     const writes = cmd.redirects.some((r) => writer(r) && r.target?.value !== "/dev/null")
-    return writes || !(narrow(cmd, env) || quietCommit(parse(cmd), env))
+    return writes || !(narrow(cmd, env) || quietCommit(cmd, parse(cmd), env))
   })
 }
 
@@ -502,7 +509,7 @@ function inspect(raw: string, environment: Environment) {
       if (verdict) return verdict
     }
     // a quiet commit's message is text git never runs, but one naming a gated call is refused all the same
-    const quiet = !whole && quietCommit(parsed, env)
+    const quiet = !whole && quietCommit(cmd, parsed, env)
     for (const word of quiet ? args : []) {
       if (!/\s/.test(word.value)) continue
       const named = lex(word.value.replace(/^--message=/, ""), env.known)
