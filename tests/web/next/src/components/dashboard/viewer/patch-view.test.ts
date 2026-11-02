@@ -35,11 +35,20 @@ describe("the patch view", () => {
       expect(patchFiles(text)).toEqual([])
   })
 
-  test("a broken patch shows the text view in its place", () => {
-    const html = renderToStaticMarkup(
-      createElement(PatchView, { fallback: "the text view", text: "- a\n+ b" }),
-    )
-    expect(html).toBe("the text view")
+  // a hunk cut short under a git header reads as a file once the parser recovers, so only the parser's strict mode keeps it from the view
+  const CUT_SHORT = file("limit.ts", "a", "b").replace("@@ -1 +1 @@", "@@ -1,3 +1,3 @@")
+
+  test("a patch whose hunk is cut short reads no file", () => {
+    expect(patchFiles(CUT_SHORT)).toEqual([])
+  })
+
+  test("a broken patch, or text that is no patch, shows the text view in its place", () => {
+    for (const text of [CUT_SHORT, "- a\n+ b"]) {
+      const html = renderToStaticMarkup(
+        createElement(PatchView, { fallback: "the text view", text }),
+      )
+      expect(html).toBe("the text view")
+    }
   })
 
   test("a diff or patch file routes to the patch view, and any other code file shows as text", () => {
@@ -63,8 +72,7 @@ describe("the package stays in its own chunk", () => {
     for await (const path of new Bun.Glob("**/*.{ts,tsx}").scan(src)) {
       const text = await Bun.file(join(src, path)).text()
       if (/from "@pierre\/diffs/.test(text)) importers.push(path)
-      if (/(?<!import\()["']@\/components\/dashboard\/viewer\/patch-view["']/.test(text))
-        importers.push(`${path} (static)`)
+      if (/(?<!import\()["'][^"']*\/patch-view["']/.test(text)) importers.push(`${path} (static)`)
     }
     expect(importers).toEqual(["components/dashboard/viewer/patch-view.tsx"])
     const documents = await Bun.file(join(src, "components/dashboard/viewer/documents.tsx")).text()
