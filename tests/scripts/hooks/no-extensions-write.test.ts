@@ -437,7 +437,7 @@ describe("a write by ~ is judged against the home the shell expands it to", () =
   })
 })
 
-// A quoted argument with a space is read as a command line only where a program runs it as one (watch, ssh, tmux, rsync -e, find, git, a variable the call sets); awk's program is one word, still refused when it names the root.
+// A quoted argument with a space is read as a command line unless every command on the line is a reader or an awk or sed program that runs nothing, with no redirect that writes a file; an awk or sed program that runs a command has its lines read wherever it stands.
 describe("a quoted argument is read as a command line only where a program runs it", () => {
   const real = { HOME: homedir() }
   const at = (command: string, cwd: string) =>
