@@ -1277,16 +1277,48 @@ fi
 # The window reaches the session through its one settings file, built here from the factory's on every launch so the two never drift, one file per backend. On GLM: the user settings turn on telemetry to the Loom relay, and Loom counts Claude usage alone, so a GLM session exports none. Claude Code keeps only the last --settings, and the user settings' env beats a variable on the launch line (both measured by a reviewer, 16 Oct), so the session's one settings file also turns the telemetry off (measured from a folder outside any checkout, 16 Oct: a SessionStart hook ran, no-env-dump refused printenv, and no metric left).
 TAG=
 [ "$BACKEND" = glm ] && TAG=glm-
-BUILT="$DATA/factory-settings-$TAG$((WINDOW / 1000))k.json"
-python3 -I - "$SETTINGS" "$BUILT" "$WINDOW" "$BACKEND" <<'PY' || refuse "it cannot build $BUILT from $SETTINGS"
+# A worker or probe runs its shell commands in Claude Code's sandbox, which every child process inherits, so a delete a script makes where no guard hook sees it stays inside the write roots; its settings go in a file of their own.
+SANDBOX=
+case "$ROLE" in worker | probe) SANDBOX=sandbox- ;; esac
+BUILT="$DATA/factory-settings-$TAG$SANDBOX$((WINDOW / 1000))k.json"
+python3 -I - "$SETTINGS" "$BUILT" "$WINDOW" "$BACKEND" "$SANDBOX" "$DATA" "${PLAYGROUND_HERDR_DIR:-${DESK_HERDR_DIR:-$DATA/herdr}}" "$MAIN" "$(getconf DARWIN_USER_TEMP_DIR 2>/dev/null)" <<'PY' || refuse "it cannot build $BUILT from $SETTINGS"
 import json, os, sys
-src, dst, window, backend = sys.argv[1:5]
+src, dst, window, backend, sandbox, data, herdr, main, temp = sys.argv[1:10]
 settings = json.load(open(src))
 settings["autoCompactWindow"] = int(window)
 # The home skill set link-skills.sh turns on at user scope stays off here, since the session loads its own set (below) and two plugins that ship one name refuse it at call time.
 settings["enabledPlugins"] = {**settings.get("enabledPlugins", {}), "ws-home@ws": False}
 if backend == "glm":
     settings["env"] = {**settings.get("env", {}), "CLAUDE_CODE_ENABLE_TELEMETRY": "0", "OTEL_METRICS_EXPORTER": "none"}
+if sandbox:
+    # The main checkout is the session's working folder, which the sandbox lets it write; a deny wins over that default, so every entry but .git and .claude/worktrees, where a worktree's git and files live, is denied.
+    keep = lambda folder, name: (folder, name) not in {(main, ".git"), (main, ".claude"), (os.path.join(main, ".claude"), "worktrees")}
+    deny = [os.path.join(folder, name) for folder in (main, os.path.join(main, ".claude")) if os.path.isdir(folder) for name in sorted(os.listdir(folder)) if keep(folder, name)]
+    home = os.path.expanduser("~")
+    settings["sandbox"] = {
+        # Bypass mode would run the unsandboxed retry with no prompt, and a sandbox that cannot start would run every command unsandboxed.
+        "allowUnsandboxedCommands": False,
+        "enabled": True,
+        # gh, a Go CLI, verifies TLS through trustd, which the sandbox closes without this.
+        "enableWeakerNetworkIsolation": True,
+        # Docker cannot run in the sandbox: these typed shapes alone leave it, and a script's own docker stays inside, its socket closed.
+        "excludedCommands": [
+            "docker port playground-*",
+            "docker ps",
+            "docker ps *",
+            "docker rm -fv playground-*",
+            "docker run -d --name playground-* -e POSTGRES_PASSWORD=* -p 127.0.0.1::5432 postgres:alpine",
+            "docker run -d --name playground-* -p 127.0.0.1::6379 redis:alpine",
+            "docker start playground-*",
+            "docker stop playground-*",
+        ],
+        "failIfUnavailable": True,
+        "filesystem": {
+            "allowWrite": sorted({data, os.path.join(home, ".agent-browser"), os.path.join(home, ".bun", "install", "cache"), os.path.join(home, ".cache", "turbo"), os.path.join(home, ".portless")} | ({temp.rstrip("/")} if temp else set())),
+            "denyWrite": deny,
+        },
+        "network": {"allowLocalBinding": True, "allowUnixSockets": sorted({herdr, os.path.join(home, ".agent-browser")})},
+    }
 tmp = f"{dst}.{os.getpid()}.tmp"
 with open(tmp, "w") as f:
     json.dump(settings, f, indent=2)
