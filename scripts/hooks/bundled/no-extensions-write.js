@@ -327,8 +327,19 @@ function stdinShell(cmd) {
     return;
   const wrapper = program(before[k].value);
   const shells = ROOT_SHELLS.get(wrapper);
-  const { flags } = WRAPPERS.get(wrapper);
-  const starts = ({ quoted, value }) => marked(value) || !quoted && (shells.has(value) || /^-[A-Za-z]+$/.test(value) && value.slice(1).split("").every((c) => flags.has(`-${c}`)) && value.slice(1).split("").some((c) => shells.has(`-${c}`)));
+  const { flags, values } = WRAPPERS.get(wrapper);
+  const clustered = (value) => {
+    let shell = false;
+    for (const c of value.slice(1)) {
+      if (values.has(`-${c}`))
+        return shell;
+      if (!flags.has(`-${c}`))
+        return false;
+      shell ||= shells.has(`-${c}`);
+    }
+    return shell;
+  };
+  const starts = ({ quoted, value }) => marked(value) || !quoted && (shells.has(value) || /^-[A-Za-z]/.test(value) && clustered(value));
   return !!first || before.slice(k + 1).some(starts) ? "root" : undefined;
 }
 var COUNTED = new Set(["repeat", "timeout"]);
@@ -1520,15 +1531,16 @@ function programLines({ args, first }, rooted) {
     return [];
   return (awkPrograms(args) ?? []).filter(({ value }) => rooted || AWK_RUNS.test(value)).flatMap(({ value }) => [...value.matchAll(/"((?:[^"\\]|\\.)*)"/g)].map((m) => m[1]));
 }
+function ownProgram(cmd, { first, name }) {
+  return ownFirst(cmd, first) && !marked(name) && /^(?:\/(?:bin|opt\/homebrew\/bin|usr\/bin|usr\/local\/bin)\/)?[^/]+$/.test(first.value);
+}
 function narrow(cmd, env) {
   const parsed = parse(cmd);
-  const { args, first, name } = parsed;
+  const { args, first } = parsed;
   if (!first) {
     return onlyReserved(cmd) && cmd.redirects.length === 0 && !cmd.inner && !cmd.group && parsed.local.size === 0;
   }
-  if (!ownFirst(cmd, first) || marked(name))
-    return false;
-  if (!/^(?:\/(?:bin|opt\/homebrew\/bin|usr\/bin|usr\/local\/bin)\/)?[^/]+$/.test(first.value))
+  if (!ownProgram(cmd, parsed))
     return false;
   const base = program(first.value).toLowerCase();
   if (AWKS.has(base)) {
@@ -1548,13 +1560,25 @@ function narrow(cmd, env) {
 function rooted(commands) {
   return commands.some((cmd) => !!stdinShell(cmd) || !!cmd.inner && rooted(cmd.inner()) || [...cmd.words, ...cmd.redirects.flatMap((r) => r.target ? [r.target] : [])].some((word) => !!word.procs && rooted(word.procs)));
 }
+function quietCommit(cmd, parsed, env) {
+  const { args, local, name } = parsed;
+  if (name !== "git" || local.size > 0 || !ownProgram(cmd, parsed))
+    return false;
+  const { rest, sub } = gitCall(args, env);
+  if (sub !== "commit")
+    return false;
+  const before = args.slice(0, args.length - rest.length - 1).map((a) => a.value);
+  if (before.some((w) => w === "-c" || w === "-C" || /^--(?:config-env|exec-path|git-dir|work-tree)/.test(w)))
+    return false;
+  return args.every((word, at) => !/\s/.test(word.value) || word.quoted && !marked(word.value) && (/^(?:-[a-zA-Z]*m|--message)$/.test(args[at - 1]?.value ?? "") || word.value.startsWith("--message=")));
+}
 function wholeLine(commands, env) {
   return commands.some((cmd) => {
     const words = [...cmd.words, ...cmd.redirects.flatMap((r) => r.target ? [r.target] : [])];
     if (words.some((word) => word.procs && wholeLine(word.procs, env)))
       return true;
     const writes = cmd.redirects.some((r) => writer(r) && r.target?.value !== "/dev/null");
-    return writes || !narrow(cmd, env);
+    return writes || !(narrow(cmd, env) || quietCommit(cmd, parse(cmd), env));
   });
 }
 function runsOf(parsed, vars, whole, rootLine) {
@@ -1576,7 +1600,7 @@ function cliWrite(words) {
   if (command === "migrate")
     return "playground migrate, which seeds the lists and settings";
   if (command === "uninstall")
-    return words.some((w) => w.value === "--purge") ? "playground uninstall --purge, which removes the data folder" : undefined;
+    return words.some((w) => w.value === "--purge") ? "playground uninstall --purge, which moves the data folder aside" : undefined;
   const switches = SWITCHES[command];
   if (!switches)
     return;
@@ -1726,6 +1750,14 @@ function inspect(raw, environment) {
       if (verdict)
         return verdict;
     }
+    const quiet = !whole && quietCommit(cmd, parsed, env);
+    for (const word of quiet ? args : []) {
+      if (!/\s/.test(word.value))
+        continue;
+      const named = lex(word.value.replace(/^--message=/, ""), env.known).commands.flatMap((c) => cliCalls(parse(c), env)).map((words) => cliWrite(words)).find(Boolean);
+      if (named)
+        return refuse(named);
+    }
     if (!first || EXPORTS2.has(name) || reader)
       return;
     const verb = name && !marked(name) ? name : "a program it cannot read";
@@ -1742,6 +1774,8 @@ function inspect(raw, environment) {
     }
     const literal = !whole && narrow(cmd, env);
     for (const word of [first, ...args]) {
+      if (quiet && /\s/.test(word.value) && !texts(word).some((t) => holds(t.value, env)))
+        continue;
       const named = names(word, env, remover, literal);
       if (named)
         return refuse(`${verb} on ${named}`);

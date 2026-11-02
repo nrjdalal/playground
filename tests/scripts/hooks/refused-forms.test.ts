@@ -137,7 +137,6 @@ afterAll(() =>
 
 type Run = (raw: string, home: string) => Promise<string | undefined>
 
-// Each guard's check with the environment its own test gives it, and the folders it runs in, each a cwd and the HOME that goes with it.
 // Each guard's check() by the name this file calls it: the source's, and the bundle's its wrapper runs.
 // oxlint-disable-next-line typescript/no-explicit-any
 type Checks = Record<(typeof CHECK_NAMES)[number], (...args: any[]) => Promise<string | undefined>>
@@ -206,6 +205,7 @@ const BUNDLED: Checks = Object.fromEntries(
   ),
 ) as Checks
 
+// Each guard's check with the environment its own test gives it, and the folders it runs in, each a cwd and the HOME that goes with it.
 const guardsOf = (
   c: Checks,
 ): Record<Guard, { folders: Partial<Record<Folder, [string, string]>>; run: Run }> => ({

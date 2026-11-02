@@ -56,19 +56,6 @@ var dataDirOf = (env, home = env.HOME || homedir()) => env.PLAYGROUND_DATA_DIR ?
 // packages/safe-delete/src/index.ts
 var LIMITS = { bytes: 2 * 1024 ** 3, files: 5000, perMinute: 3 };
 
-// packages/scripts/src/vendor-upstream/stage.ts
-var UPSTREAM_SKILLS = [
-  "code-review",
-  "codebase-design",
-  "diagnosing-bugs",
-  "domain-modeling",
-  "handoff",
-  "research",
-  "tdd",
-  "to-spec",
-  "writing-for-agents"
-];
-
 // scripts/hooks/role.ts
 import { homedir as homedir2 } from "os";
 import { join as join2 } from "path";
@@ -198,6 +185,19 @@ function sessionOf(raw) {
     return;
   }
 }
+
+// packages/scripts/src/vendor-upstream/stage.ts
+var UPSTREAM_SKILLS = [
+  "code-review",
+  "codebase-design",
+  "diagnosing-bugs",
+  "domain-modeling",
+  "handoff",
+  "research",
+  "tdd",
+  "to-spec",
+  "writing-for-agents"
+];
 
 // scripts/hooks/writing-first.ts
 var SKILL = "writing-for-agents";
