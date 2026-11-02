@@ -1,4 +1,4 @@
-// Whether a tool call only reads, while a guard's list is missing: an MCP get, list or search, or a Bash line whose every command is one of the exact read shapes below with no redirect or unquoted glob, so a guard can let it run.
+// Whether a tool call only reads, while a guard's list is missing: an MCP get, list or search, or a Bash line whose every command is one of the exact read shapes below with no redirect and no glob, brace or parenthesis in any word, quoted or not, so a guard can let it run.
 import { type Command, lex, marked } from "./shell"
 
 const MCP_READ = /^mcp__.+?__(?:get|list|search)_\w+$/
@@ -145,8 +145,7 @@ const shapeOf = (shapes: Record<string, Shape>, key: string | undefined): Shape 
   key !== undefined && Object.hasOwn(shapes, key) ? shapes[key] : undefined
 
 function commandReads(cmd: Command): boolean {
-  if (cmd.redirects.length > 0 || cmd.words.some((w) => !w.quoted && /[*?[{]/.test(w.value)))
-    return false
+  if (cmd.redirects.length > 0 || cmd.words.some((w) => /[*?[{()]/.test(w.value))) return false
   const words = cmd.words.map((w) => w.value)
   if (words.length === 0) return true
   if (words.some(marked)) return false
