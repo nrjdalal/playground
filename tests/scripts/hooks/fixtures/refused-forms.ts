@@ -48,7 +48,7 @@ export type Group = {
   folders: Folder[]
   guards: Guard[]
   rows: (paths: Paths) => readonly Row[]
-  source: "#292" | "#356" | "#402" | "#411"
+  source: "#292" | "#356" | "#402" | "#411" | "#468"
 }
 
 // The rows a guard-loosening PR lets run on purpose, each written as a row's "<source> <what>" for all its cases, or as one case's "<source> <what> | <guard> | <folder>"; canary lets none run.
@@ -1015,5 +1015,44 @@ gh api graphql -f query="$QUERY"`,
       ["rm of a glob no entry matches", "rm -rf q*", "home"],
     ],
     source: "#411",
+  },
+  {
+    folders: ["data folder"],
+    guards: ["no-extensions-write"],
+    rows: ({ HOME }) => [
+      [
+        "a cd by a CDPATH that holds the name, where the cwd holds it too",
+        `CDPATH=${HOME}/cdp; cd extensions && rm -rf login`,
+      ],
+      [
+        "a cd by an exported CDPATH, where the cwd holds the name too",
+        `export CDPATH=${HOME}/cdp; cd extensions && rm -rf login`,
+      ],
+      [
+        "a cd by a CDPATH prefix, where the cwd holds the name too",
+        `CDPATH=${HOME}/cdp cd extensions && rm -rf login`,
+      ],
+    ],
+    source: "#468",
+  },
+  {
+    folders: ["tmp"],
+    guards: ["no-extensions-write"],
+    rows: ({ HOME }) => [
+      [
+        "bun's --cwd= through a link and .., which bun folds as typed",
+        `bun --cwd=${HOME}/out/../pg/extensions/login x.ts`,
+      ],
+      [
+        "bun run's --cwd through a link and ..",
+        `bun run --cwd ${HOME}/out/../pg/extensions/login x`,
+      ],
+      [
+        "npm's --prefix through a link and ..",
+        `npm --prefix ${HOME}/out/../pg/extensions/login run x`,
+      ],
+      ["rm through a link and .., folded as typed", `rm -rf ${HOME}/out/../pg/extensions`],
+    ],
+    source: "#468",
   },
 ]

@@ -15,6 +15,7 @@ import {
   knownVariables,
   lex,
   marked,
+  openedPathOf,
   type Parsed,
   pathOf,
   PRINTERS,
@@ -265,9 +266,10 @@ function inspect(raw: string, environment: Environment) {
     tick()
     for (const text of texts(word)) {
       if (holds(text.value, env)) return `${root} in its text`
-      const path = pathOf(text, env)
-      if (inRoot(path)) return path
-      if (above(path, remover)) return `${path}, which holds ${root}`
+      for (const path of new Set([pathOf(text, env), openedPathOf(text, env)])) {
+        if (inRoot(path)) return path
+        if (above(path, remover)) return `${path}, which holds ${root}`
+      }
       const glob = GLOB.exec(text.value)
       if (glob && !marked(text.value)) {
         const dir = pathOf({ value: `${text.value.slice(0, glob.index)}x` }, env)
@@ -300,6 +302,7 @@ function inspect(raw: string, environment: Environment) {
         ([">", ">>", ">|", "<>"].includes(r.op) ||
           (r.op === ">&" && !DUPLICATE.test(r.target.value))) &&
         (inRoot(pathOf(r.target, env)) ||
+          inRoot(openedPathOf(r.target, env)) ||
           (GLOB.test(r.target.value) && !!names(r.target, env, true))),
     )
     if (into?.target) return refuse(`a write to ${pathOf(into.target, env)}`)

@@ -855,7 +855,7 @@ export async function examine(
   return verdict
 }
 
-// Where cd, pushd and popd leave the shell, OLDPWD and the directory stack kept as bash keeps them; a pushd or popd of +N or -N turns the list of the current folder and the stack, and one that would fail leaves both as they are.
+// Where cd, pushd and popd leave the shell, OLDPWD and the directory stack kept as bash keeps them: a pushd of +N or -N turns the list of the current folder and the stack, a popd of one removes that entry, an index past the list leaves both as they are, and any other popd word or pushd option leaves both unread.
 async function moveDir(
   name: string,
   args: Word[],
@@ -873,6 +873,12 @@ async function moveDir(
   if (detached) return go(undefined, null)
   const words = args.map((a) => a.value)
   if (name !== "cd" && words.some((v) => /^-[A-Za-z]*n/.test(v))) return void (env.stack = null)
+  // any other popd word, or a pushd option, may fail or land where the hook cannot tell (popd bogus stays put)
+  if (
+    name !== "cd" &&
+    words.some((v) => !/^[+-]\d+$/.test(v) && (name === "popd" || v.startsWith("-")))
+  )
+    return go(undefined, null)
   const turn = words.find((v) => /^[+-]\d+$/.test(v))
   const operand = args.some((a) => !/^-./.test(a.value) || /^[+-]\d+$/.test(a.value))
   if (name === "cd" || (name === "pushd" && operand && turn === undefined)) {
@@ -896,7 +902,7 @@ async function moveDir(
   env.stack = rest.slice(1)
 }
 
-// The directory a cd lands in: OLDPWD for - and ~-, a CDPATH folder that holds it, else the folder read as typed, a link's .. stepping back up it as cd does; undefined when the hook cannot tell, or the cd would fail and leave the shell where it was.
+// The directory a cd lands in: OLDPWD for - and ~-, the folder read as typed from the current one, its .. folded as cd folds it, else a CDPATH folder that holds it; undefined when the hook cannot tell, or the cd would fail and leave the shell where it was.
 async function cdTarget(
   args: Word[],
   env: Env,
@@ -912,6 +918,9 @@ async function cdTarget(
   const inherited: Text | undefined =
     env.process.CDPATH === undefined ? undefined : { value: env.process.CDPATH }
   const cdpath = local.get("CDPATH") ?? env.vars.get("CDPATH") ?? inherited
+  // zsh, the Bash tool's shell, tries the current folder before CDPATH, where bash tries CDPATH first
+  const here = env.cwd ? await directory(resolve(env.cwd, value)) : undefined
+  if (here) return here
   if (cdpath && !/^\.\.?(?:\/|$)/.test(value)) {
     if (cdpath.unknown || cdpath.reads?.length) return undefined
     for (const entry of cdpath.value.split(":")) {
@@ -920,7 +929,7 @@ async function cdTarget(
       if (found) return found
     }
   }
-  return env.cwd ? directory(resolve(env.cwd, value)) : undefined
+  return undefined
 }
 
 // A text with ~- and ~+ expanded as the shell expands them, to OLDPWD and the current folder; undefined when the hook cannot tell that folder.
@@ -1135,14 +1144,23 @@ export async function resolveText(text: Text, env: Env): Promise<Text> {
   return { value }
 }
 
+// A path as typed, its .. folded into the folder before it, as cd and a program's own folder option (bun --cwd, npm --prefix) fold it.
 export function pathOf(text: Text, env: Env): string | undefined {
+  if (text.unknown || text.reads?.length || text.value === "") return undefined
+  const value = expandDirs(text, env)
+  if (value === undefined) return undefined
+  if (isAbsolute(value)) return value
+  return env.cwd ? resolve(env.cwd, value) : undefined
+}
+
+// A path as the kernel opens it, each link resolved before a .. after it steps up; a hook that guards a folder judges this and pathOf's both, since a program may fold either way.
+export function openedPathOf(text: Text, env: Env): string | undefined {
   if (text.unknown || text.reads?.length || text.value === "") return undefined
   const value = expandDirs(text, env)
   if (value === undefined) return undefined
   const path = isAbsolute(value) ? value : env.cwd && `${env.cwd}/${value}`
   if (!path) return undefined
   if (!/(?:^|\/)\.\.(?:\/|$)/.test(path)) return isAbsolute(value) ? path : resolve(path)
-  // the kernel resolves each link before a .. after it steps up, where resolve() would fold the .. into the link's own folder
   let at = "/"
   for (const part of path.split("/")) {
     if (part === "" || part === ".") continue

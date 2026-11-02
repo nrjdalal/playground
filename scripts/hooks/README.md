@@ -12,13 +12,13 @@ Their tests are `bun run test:file tests/scripts/hooks`.
 
 - `scripts/hooks/shell.ts` lexes a Bash command and walks it as the shell runs it, for every hook that reads Bash, so each line below holds for each of them.
   It reads every command inside a `$(…)`, a `${…}`, a `$((…))` or an array assignment's `(…)`, and the script a shell, `source` or `.` reads from a process substitution, a group's output or `/dev/stdin`, every command that prints part of it included, and the parts it can read of a script it reads only in part (a group holding a `curl`).
-  It follows the folder a command runs in through `cd`, `pushd` and `popd`, with OLDPWD (`cd -`, `~-`) and the directory stack (`pushd +N`, `popd -N`) kept as bash keeps them, a `CDPATH` the call sets, exports or inherits, and `env -C <dir>`, `env -C<dir>` and `env --chdir=<dir>`.
-  A `cd` or `pushd` with a glob in its folder is handed to the hook as any program's words are, and one it cannot follow leaves the folder unread.
-  It resolves a link before a `..` after it steps up, as the kernel opens a path, and a `cd` folds `..` as typed, as the shell's own `cd` does.
+  It follows the folder a command runs in through `cd`, `pushd` and `popd`, with OLDPWD (`cd -`, `~-`) and the directory stack (`pushd +N`, `popd -N`) kept as bash keeps them, a `CDPATH` the call sets, exports or inherits, tried after the current folder as zsh, the Bash tool's shell, tries it, and `env -C <dir>`, `env -C<dir>` and `env --chdir=<dir>`.
+  A `cd` or `pushd` with a glob in its folder is handed to the hook as any program's words are, and one it cannot follow leaves the folder unread, as do a `popd` with any word but `+N`, `-N` or `-n` and a `pushd` with an option.
+  It does not read `dirs -c`, so a `popd` after one is read as if the stack still held its folders, nor a `~-` before a quoted part (`~-/"x"`), and it reads a `bash -c` script's `CDPATH` in zsh's order too, so a relative write after one of these is judged in that folder.
+  `pathOf` folds a path's `..` as typed, as `cd`, `bun --cwd` and `npm --prefix` fold it, and `openedPathOf` as the kernel opens it, each link resolved before a `..` after it steps up; no-extensions-write judges both.
   Under a hook's deadline it stops at a chain of scripts a shell, `eval` or `source` reads 256 or more deep, such a script over 128 KB and an `xargs -I` line over 128 KB once its stdin is filled in.
   It holds as unknown any text over 1 MB that a command printed or wrote.
   A hook that sets `unheld` on its `Env` gives the verdict on a shell, `source` or `eval` whose script holds a part the reader cannot read; a script file run by its path is the file's own code, which no hook reads.
-  Its tests are in `bun run test:file tests/scripts/hooks`.
 
 ## Registered in both settings files
 
@@ -186,8 +186,9 @@ Their tests are `bun run test:file tests/scripts/hooks`.
   (a deadline checked at every lex, expansion and walk step, its clock read once every 1024 steps, so any slow route is refused), a command over 128 KB, whose lexing could outlast the timeout, one nested too deep for its stack, and each script the shared reader finds too deep or too large to read.
   It runs its check in a Worker (`scripts/hooks/no-extensions-write-worker.ts`) and refuses from the main thread when the Worker has not answered in 12 s, so a single step the deadline cannot interrupt (a regex, a copy) cannot hold it past its 15 s timeout; this costs about 10 ms a call.
   It reads a command's text, so a program whose own code writes the root (a script file run by its path, a binary) and a path it cannot read (built at run time, in a `$(…)` or a variable) pass it.
-  It refuses a shell, `source` or `eval` whose script, from a pipe, a process substitution or `eval`'s words, holds a part it cannot read (a `$(…)`'s or a `curl`'s output, `curl … | sh`, a value `read`, `mapfile` or `printf -v` sets, `$_`), since a guard-list write may rest on it.
-  Such a script is refused even when it only reads (`x=$(echo 'cat …'); eval "$x"`), since the hook cannot tell it from a write; a value it cannot read used anywhere else runs.
+  It refuses a shell, `source` or `eval` whose script, from a pipe, a process substitution, `eval`'s words, `bash -c`'s script or an `xargs -I` line, holds a part it cannot read (a `$(…)`'s or a `curl`'s output, `curl … | sh`, a value `read`, `mapfile` or `printf -v` sets, `$_`), since a guard-list write may rest on it.
+  Such a script is refused even when it only reads, since the hook cannot tell it from a write: `eval "$(fnm env)"`, `eval "$(ssh-agent -s)"`, `source <(fzf --zsh)`, `x=$(git branch --show-current); echo $x | bash` and `bash -c "cd $(git rev-parse --show-toplevel) && bun run test"` are refused alike.
+  Run such a script from a file, or name the folder with `git -C <dir>` or `bun --cwd=<dir>` in place of a `cd $(…)`; a value it cannot read used anywhere else runs.
   A write to a scope's GitHub repository, which `ops:ext-sync` renders into the root, is outside its reach too; [no-extension-repo-write](#no-extension-repo-write) refuses one.
   From a cwd at or above the root (`~`, `~/.playground`), a quoted `(`, `[`, `*`, `?` or `{` reads as a glob there, so a call holding one (`git commit -m "fix(x): y"`, `awk '{print $1}' f`) is refused; run it from a worktree.
   A quoted regex that starts at `/` reads its glob characters as a glob in `/`, which holds the root, so `sed -n '/^a*b/p' f` and `awk '$1 ~ /^(a|b)/' f` are refused from any folder; run such a script from a file (`awk -f <file>`, `sed -f <file>`).

@@ -11,6 +11,8 @@ const script = join(root, "scripts", "hooks", "no-main-checkout.ts")
 const MAIN = mkdtempSync(join(tmpdir(), "no-main-checkout-main-"))
 const WORKTREE = `${MAIN}/.claude/worktrees/a`
 mkdirSync(join(WORKTREE, "api", "hono"), { recursive: true })
+// a link out of the checkout, which bun's --cwd folds past as typed
+symlinkSync(tmpdir(), join(WORKTREE, "out"))
 afterAll(() => rmSync(MAIN, { force: true, recursive: true }))
 // the settings the main checkout's packages build needs, as the release skill's step 5 types them
 const OFF = "env NODE_ENV=production SKIP_ENV_VALIDATION=true"
@@ -168,6 +170,7 @@ describe("a build, a test run, lefthook, turbo or a file write in the main check
     ["a cd into it", `cd ${MAIN} && bun run build`],
     ["bun's --cwd", `bun run --cwd ${MAIN} build`],
     ["bun's --cwd=", `bun --cwd=${MAIN} test`],
+    ["bun's --cwd= through a link and ..", `bun --cwd=${WORKTREE}/out/../../../.. run build`],
     ["turbo's --cwd", `turbo run build --cwd ${MAIN}`],
     ["turbo's --cwd through bun x", `bun x turbo run build --cwd=${MAIN}`],
     ["bun test's own --cwd after test", `bun test --cwd ${MAIN} tests/x.test.ts`],

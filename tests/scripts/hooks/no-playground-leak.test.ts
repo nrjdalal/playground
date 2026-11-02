@@ -1015,6 +1015,10 @@ describe("a write it cannot place", () => {
       () => lost("gh api repos/{owner}/{repo}/issues/5/comments -f body=ok"),
     ],
     ["gh through env -C", () => `env -C "$W" gh pr comment 5613 --body ok`],
+    [
+      "gh after a popd word it cannot read",
+      () => `cd ${dirs.lm}; pushd ${dirs.lw}; popd bogus; gh pr comment 5613 --body ok`,
+    ],
   ])(
     "%s with no --repo, from a directory it cannot follow, is refused whatever its text",
     async (_, command) => {

@@ -59,6 +59,9 @@ symlinkSync(ROOT, PATHS.LINK)
 symlinkSync(ROOT, join(DATA, "store"))
 symlinkSync(DATA, join(HOME, "pg"))
 symlinkSync(join(PATHS.CLI_DIR, "cli.ts"), join(HOME, "pc"))
+// a link out of the home, and a CDPATH folder that holds the root's name too
+symlinkSync(OTHER, join(HOME, "out"))
+mkdirSync(join(HOME, "cdp", "extensions"), { recursive: true })
 Bun.spawnSync(["git", "init", "-q", OTHER])
 Bun.spawnSync([
   "git",
