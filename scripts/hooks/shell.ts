@@ -14,6 +14,7 @@ export type Command = {
   redirects: Redirect[]
   scope: number
   stdin?: Command
+  unsure?: boolean
   words: Word[]
 }
 type Lexer = {
@@ -28,6 +29,8 @@ type Lexed = { commands: Command[]; scopes: number[] }
 type Pending = { delim: string; quoted: boolean; redirect: Redirect; strip: boolean }
 export type Env = {
   cwd?: string
+  // Set once a cd leaves the folder unknown, `cwd` unnamed with it: a cd the shell may not run, one it may run many times, or one into a folder the hook cannot read. Each hook reads an unknown folder by its own fail-closed rule.
+  cwdUnknown?: boolean
   files: Map<string, Text>
   known: Record<string, string>
   process: Record<string, string | undefined>
@@ -112,6 +115,13 @@ const RESERVED = new Set([
   "until",
   "while",
 ])
+// The reserved words that open a body the shell may run no time or many (a conditional, a loop, a case, a function, a brace group), and those that close one
+const OPENS = new Set(["case", "coproc", "for", "function", "if", "select", "until", "while", "{"])
+const CLOSES = new Set(["done", "esac", "fi", "}"])
+// The openers whose own command the shell may not run as typed: a brace group's, which a function keeps for a later call, and a coproc's, which runs in a subshell. An `if`, `while` or `until` runs its condition, and a `for` or `case` opener runs no command of its own.
+const HELD = new Set(["coproc", "function", "{"])
+// The reserved words a body's own commands carry, which the shell may not run
+const BODIES = new Set(["do", "elif", "else", "then"])
 // Whether a program is its command's own first word, a reserved word before it (`!`, `then`, `do`) skipped, rather than one a wrapper or an assignment runs
 export const ownFirst = (cmd: Command, first: Word | undefined): first is Word =>
   !!first && first === cmd.words.find((w) => w.quoted || !RESERVED.has(w.value))
@@ -429,6 +439,9 @@ function walk(lx: Lexer, scope: number, nested: boolean, inherit?: Command): voi
   const fresh = (): Command => ({ redirects: [], scope, stdin: inherit, words: [] })
   let cmd = fresh()
   const opens: number[] = []
+  // How many bodies the walk is inside, and whether the last operator makes the next command run on the one before it, so a command the shell may not run is marked unsure.
+  let depth = 0
+  let conditional = false
   // A pipeline's commands and a backgrounded one run in subshells: a cd there leaves the shell where it was.
   const end = (op: string) => {
     const done = cmd
@@ -444,6 +457,19 @@ function walk(lx: Lexer, scope: number, nested: boolean, inherit?: Command): voi
     }
     if (pipe || op === "&") done.detached = true
     if (done.words.length > 0 || done.redirects.length > 0 || done.group) {
+      // one pass over the words for each set, since a command the hook reads can carry many thousands
+      let opened = 0
+      let closed = 0
+      let body = false
+      for (const w of done.words) {
+        if (w.quoted) continue
+        if (OPENS.has(w.value)) opened++
+        if (CLOSES.has(w.value)) closed++
+        if (HELD.has(w.value) || BODIES.has(w.value)) body = true
+      }
+      if (conditional || depth > 0 || body) done.unsure = true
+      depth = Math.max(0, depth + opened - closed)
+      conditional = op === "&&" || op === "||"
       for (const w of done.words) {
         if (w.value !== "{" || w.quoted) break
         opens.push(lx.commands.length)
@@ -978,7 +1004,8 @@ async function examineReading(
   builtins: boolean,
 ): Promise<string | undefined> {
   const { args, chdir, local, name } = parsed
-  const here: Env = chdir ? { ...env, cwd: pathOf(chdir, env) } : env
+  const into = chdir && pathOf(chdir, env)
+  const here: Env = chdir ? { ...env, cwd: into, cwdUnknown: into === undefined } : env
   let verdict: string | undefined
   const followed = SHELLS.has(name) || [".", "cd", "eval", "popd", "pushd", "source"].includes(name)
   if (followed && builtins && cmd.redirects.length > 0) {
@@ -990,9 +1017,13 @@ async function examineReading(
     for (const [key, value] of local) setVar(env.vars, key, value)
     if (builtins) verdict = await visit(cmd, parsed, here)
   } else if (name === "cd" || name === "pushd") {
-    env.cwd = cmd.detached ? undefined : await cdTarget(args, env)
-  } else if (name === "popd") env.cwd = undefined
-  else if (EXPORTS.has(name)) {
+    // a cd the shell is sure to run moves the folder to the one it lands in; any other leaves the folder unknown, since the shell may be where it was or wherever that cd reached
+    env.cwd = sureToRun(cmd, parsed) ? await cdTarget(name, args, env) : undefined
+    env.cwdUnknown = env.cwd === undefined
+  } else if (name === "popd") {
+    env.cwd = undefined
+    env.cwdUnknown = true
+  } else if (EXPORTS.has(name)) {
     for (const w of args.filter((a) => ASSIGN.test(a.value))) {
       const eq = w.value.indexOf("=")
       setVar(env.vars, w.value.slice(0, eq), slice(w, eq + 1))
@@ -1015,10 +1046,16 @@ async function examineReading(
   return verdict
 }
 
-// The directory a cd lands in; undefined when the hook cannot tell, or the cd would fail and leave the shell where it was.
-async function cdTarget(args: Word[], env: Env): Promise<string | undefined> {
-  const dir = args.find((a) => !(a.value.startsWith("-") && a.value.length > 1))
-  if (!dir) return homedir()
+// Whether the shell is sure to run a command, so the folder a cd of its own lands in is the folder the commands after it run from: its program is its own first word, since a wrapper (`env`, `xargs`, `repeat`) runs no builtin and a count runs it more than once, and the lexer marked it neither detached (a pipeline, a background) nor unsure (a conditional's right side, a body the shell may run no time or many).
+const sureToRun = (cmd: Command, { first }: Parsed): boolean =>
+  !cmd.detached && !cmd.unsure && ownFirst(cmd, first)
+
+// The directory a cd or pushd lands in; undefined when the hook cannot tell, when the cd would fail and leave the shell where it was, or when the form lands somewhere the hook does not read: zsh's two-operand cd, which replaces part of the path, `cd -`, and a bare `pushd`, which swaps the stack's top two.
+async function cdTarget(name: string, args: Word[], env: Env): Promise<string | undefined> {
+  const dirs = args.filter((a) => !(a.value.startsWith("-") && a.value.length > 1))
+  if (dirs.length > 1) return undefined
+  const [dir] = dirs
+  if (!dir) return name === "cd" ? homedir() : undefined
   const path = dir.value === "-" ? undefined : pathOf(dir, env)
   if (!path) return undefined
   try {

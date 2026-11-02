@@ -44,6 +44,16 @@ Only the first reading moves the folder, sets variables and records files for th
   A shell script that judges by a list of words reads it whole through `bun packages/scripts/src/playground/guard-list.ts <guard> <list>`, which takes `guardList`'s fallbacks and prints the words as JSON, or exits 2 with its refusal, as spawn.sh does for `glm-refused-sources`.
   Its tests are `bun run test:file tests/scripts/hooks/guard-lists.test.ts tests/packages/settings/src/rendered.test.ts tests/packages/scripts/src/playground/guard-list.test.ts`.
 
+## The folder a hook reads
+
+- The shared reader (`scripts/hooks/shell.ts`) follows the folder a command runs in from the Bash tool's cwd through the line's `cd` steps, and applies a `cd` only where the shell is sure to run it: the command's own first word, since a wrapper runs no builtin and a count runs it many times (`env cd`, `xargs cd`, `repeat 3 cd`), outside a pipeline,
+  a background and a conditional's right side (`cmd || cd x`, `cmd && cd x`),
+  outside every body the shell may run no time or many (`if`, `while`, `until`, `for`, `case`, a function, a brace group, `coproc`), and into a folder that is there, named by the one operand the reader reads.
+  Every other `cd`, `popd` and `cd -` leaves the folder unknown: `Env.cwd` keeps the last folder the reader named, since the shell may still be there, and `Env.cwdUnknown` says the shell may have moved.
+  Each hook reads an unknown folder by its own fail-closed rule, which its section names: [no-main-checkout](#no-main-checkout) reads it as the folder the line started in, and the hooks that place a repository, a socket or a file by it refuse the call they cannot place, as they already refuse one after a `cd` they cannot read.
+  A command that names its own folder (`git -C <path>`, `bun --cwd <path>`, turbo's `--cwd`) is judged by that path, whatever the shell's folder.
+  Its tests are in `bun run test:file tests/scripts/hooks`.
+
 ## after-compact
 
 - A factory session that has just compacted its context is told what to reread: `scripts/hooks/after-compact.ts`, a SessionStart hook with the `compact` matcher in both `scripts/factory-settings.json` and `.claude/settings.json`,
@@ -355,7 +365,7 @@ Only the first reading moves the folder, sets variables and records files for th
 ## no-main-checkout
 
 - A factory session keeps the main checkout clean: `scripts/hooks/no-main-checkout.ts`, registered beside no-stash on Bash and the file tools (Edit, MultiEdit, NotebookEdit and Write), refuses lefthook, turbo (but for its packages build, below), `git commit` (it runs pre-commit), `bun run build`, `bun run check-types`,
-  `bun run test`, `bun run test:file` and `bun test` while the command's directory (the Bash tool's cwd, after any `cd`, `git -C` or `bun --cwd` in it, but for `bun x` and `bunx`, which run in the shell's folder whatever bun's own `--cwd` says) is the main checkout and not a worktree under `.claude/worktrees/`,
+  `bun run test`, `bun run test:file` and `bun test` while the command's directory ([The folder a hook reads](#the-folder-a-hook-reads), and a `git -C` or `bun --cwd` in it, but for `bun x` and `bunx`, which run in the shell's folder whatever bun's own `--cwd` says) is the main checkout and not a worktree under `.claude/worktrees/`,
   and a write into the main checkout from anywhere (a redirect, `cp`, `mv`, `touch`, `tee`, curl's `-c` or `-o`, the files `sed -i`, BSD's `sed -I`, `sed --in-place` or `perl -i` edits in place, or a file tool's path), naming the fix: run it in your own worktree.
   A command run through `run-slot.sh`, typed bare or as a shell's script (`bash <path>/run-slot.sh <who> -- <command>`, `shellSlot`), is read as the words after its `--` (`slotWords` in `scripts/hooks/shell.ts`, which no-glm-heavy-path and no-false-green read it by too), so a commit, a build or a write through run-slot is refused as the same command typed bare.
   It refuses a git move there too: `add` (but `-n` or `--dry-run`), `am`, `apply` (but `--check`, `--numstat`, `--stat` or `--summary` without `--apply`), `bisect`, `branch -f`, `checkout`, `cherry-pick`, `clean` (but `-n`), `merge`, `mv`, `pull`, `rebase`, `reset` (but the one below), `restore`, `revert`, `rm`, `stash` (but `list` and `show`), `switch` and `update-ref`,
@@ -369,6 +379,10 @@ Only the first reading moves the folder, sets variables and records files for th
   Reads, `git fetch`, step 5's `git merge --ff-only origin/main` (with `-q` or `--quiet` before or after `--ff-only`), `scripts/link-skills.sh`, `bun install` and `env NODE_ENV=production SKIP_ENV_VALIDATION=true turbo run build --filter='./packages/*'` alone run, as the release skill's step 5 needs:
   the install a pull that changes `bun.lock` or a `package.json` needs, and the build a pull that changes `packages/` needs, since the `playground` command imports their `dist`.
   That build needs `NODE_ENV` set and `SKIP_ENV_VALIDATION=true`, on its line, exported or in the session, since the main checkout has no `.env` and the packages' env checks fail without them, so a bare one is refused with the line `playground update`'s build step runs.
+  Where the reader left the folder unknown ([The folder a hook reads](#the-folder-a-hook-reads)), it reads the command as running in the folder the line started in, the Bash tool's own cwd, since the shell is there unless that `cd` moved it: from the main checkout a build, a test run, a commit, a git move, a tool and a write to a path it cannot place are refused,
+  and the refusal names the fix, naming the folder (`git -C <your worktree>`, `bun --cwd <your worktree>`) or a `cd` to a literal path that is there.
+  A line that starts in a worktree runs as before, since each candidate folder of its own `cd` steps is inside that worktree.
+  It reads the shell a pipeline, a here-string or a heredoc feeds (`<reader> | sh`, `sudo -s`) as the shell's own command line, judging each command of a script it reads, and refusing a script it cannot read while the folder is the main checkout or unknown.
   It fails open on a call it cannot read.
   Its tests are in `bun run test:file tests/scripts/hooks`.
   The backstop behind it is `lefthook.yml`'s pre-commit step `main-checkout`, alone at priority 1 so it runs first, before any step that writes (lefthook runs a tie in any order).
@@ -434,7 +448,7 @@ Only the first reading moves the folder, sets variables and records files for th
 
 - A factory session runs every heavy run in a worktree through run-slot: `scripts/hooks/no-unslotted-run.ts`, registered beside no-stash, refuses `bun install`, a recursive `cp` of a `node_modules` folder, `bun run build`, `bun run check-types`, `bun run test`, a `bun test` or `bun run test:file` that names no file, `next build`,
   and turbo running `build`, `check-types`, `lint` or `test` (`turbo run <task>` or `turbo <task>`), by name, path or versioned package (`turbo@latest`), through `bunx`, `npx` (past their own options, `-y` or `-p turbo`) or `bun x`, but for `--help`, `--version` and `--dry-run`,
-  whose directory (the Bash tool's cwd after any `cd`, or a `bun --cwd`, `bun run --cwd`, `bun install --cwd`, `bun test --cwd` or turbo's `--cwd`, so one typed from anywhere counts, and a clone's destination) is inside a worktree under `.claude/worktrees/`,
+  whose directory ([The folder a hook reads](#the-folder-a-hook-reads), or a `bun --cwd`, `bun run --cwd`, `bun install --cwd`, `bun test --cwd` or turbo's `--cwd`, so one typed from anywhere counts, and a clone's destination) is inside a worktree under `.claude/worktrees/`,
   unless the command runs through `~/.playground/ops/run-slot.sh`, naming that form (18 Oct: five worktree installs at once drove load1 to 66.8).
   The main checkout is no-main-checkout's. It fails open on a call it cannot read, and its tests are in `bun run test:file tests/scripts/hooks`.
   A commit's pre-commit build takes a slot through `packages/scripts/src/commit-slot.ts`, and playbook's **slots** rule says which slot each way of committing takes.

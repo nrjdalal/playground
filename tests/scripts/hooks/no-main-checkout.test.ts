@@ -164,6 +164,44 @@ describe("a build, a test run, lefthook, turbo or a file write in the main check
     expect(reason).toContain(OFF)
   })
 
+  // #573: a cd the shell may not run, or one whose folder the hook cannot read, leaves the folder unknown, which this hook reads as the folder the line started in
+  test.each([
+    ["a cd to a word it cannot read", "cd $DIR && bun run build"],
+    ["a cd to a folder that is not there", `cd ${MAIN}/.no-such-folder; bun run build`],
+    ["a cd the shell runs only on the one before it", `true || cd ${WORKTREE}; bun run build`],
+    ["a cd in a then branch", `if false; then cd ${WORKTREE}; fi; git commit -m x`],
+    ["a cd in a loop's body", `for i in 1 2; do cd ${WORKTREE}; done; git commit -m x`],
+    ["a cd in a function's body, never called", `f() { cd ${WORKTREE}; }; git commit -m x`],
+    ["a cd env cannot run", `env cd ${WORKTREE}; git commit -m x`],
+    ["a backgrounded cd", `cd ${WORKTREE} & bun run build`],
+    ["a cd in a pipeline", `cd ${WORKTREE} | cat; bun run build`],
+    ["a popd", `pushd ${WORKTREE}; popd; bun run build`],
+    ["a cd back", `cd ${WORKTREE}; cd -; bun run build`],
+    ["a write after a cd it cannot read", "cd $DIR && echo x > stray.txt"],
+  ])("from the main checkout, %s is read as the folder it started in", async (_name, command) => {
+    const reason = await bash(command)
+    expect(reason).toContain("no-main-checkout hook refuses")
+    expect(reason).toContain("the one the line started in")
+  })
+
+  test.each([
+    ["a readable cd into a worktree", `cd ${WORKTREE} && bun run build`],
+    ["a readable cd into a worktree, then one it cannot read", `cd ${WORKTREE}; cd $D; git status`],
+  ])("from the main checkout, %s runs", async (_name, command) => {
+    expect(await bash(command)).toBeUndefined()
+  })
+
+  test("a pipe into a shell from the main checkout is refused, since its script is unread", async () => {
+    expect(await bash("bun run ask list | sh")).toContain("no-main-checkout hook refuses")
+  })
+
+  test("a pipe into a shell from the main checkout is judged by the script it reads", async () => {
+    expect(await bash("echo 'git commit -m x' | sh")).toContain(
+      "git commit, which runs lefthook's pre-commit",
+    )
+    expect(await bash("echo 'git status' | sh")).toBeUndefined()
+  })
+
   test.each([
     ["a cd into it", `cd ${MAIN} && bun run build`],
     ["bun's --cwd", `bun run --cwd ${MAIN} build`],
@@ -377,8 +415,8 @@ describe("what keeps the main checkout up to date, or only reads it, runs", () =
     expect(await bash(command, WORKTREE)).toBeUndefined()
   })
 
-  test("a cd the hook cannot follow leaves the command alone", async () => {
-    expect(await bash("cd $DIR && bun run build")).toBeUndefined()
+  test("from a worktree, a cd the hook cannot follow leaves the command alone", async () => {
+    expect(await bash("cd $DIR && bun run build", WORKTREE)).toBeUndefined()
   })
 
   test("from a worktree, bun's --cwd into another worktree runs", async () => {

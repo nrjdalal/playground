@@ -4,6 +4,7 @@ import { basename, dirname, isAbsolute, join, normalize, resolve, sep } from "no
 
 import { fromFactory } from "./role"
 import {
+  type Command,
   type Env,
   examine,
   GIT_TAKES,
@@ -13,6 +14,8 @@ import {
   program,
   run,
   slotWords,
+  stdinOf,
+  stdinShell,
   type Text,
   type Visit,
   type Word,
@@ -77,6 +80,10 @@ const INSTEAD =
   "the main checkout is what every installed skill follows, so it stays clean. Run it in your own worktree under .claude/worktrees/ (git worktree add .claude/worktrees/<name> -b <branch> origin/canary), or start lefthook from a script with cwd set to a scratch repo, as tests/lefthook.test.ts does."
 
 const refuse = (what: string, fix = INSTEAD) => `no-main-checkout hook refuses ${what}: ${fix}`
+
+// This hook's fail-closed rule for a folder the shared reader left unknown (a cd the shell may not run, a cd to a word it cannot read, a popd): the command is read as running in the folder the line started in, the one the shell is in unless that cd moved it, and the fix names the folder.
+const UNKNOWN_FIX =
+  "the hook cannot tell which folder it runs in, since a cd before it may not run or names a path it cannot read, so it reads the folder as the one the line started in. Name the folder instead: git -C <your worktree>, bun --cwd <your worktree>, or cd by a literal path."
 
 // bun scripts that rebuild packages/* or write turbo's runs
 const BUN_SCRIPTS = new Set(["build", "check-types", "test", "test:file"])
@@ -247,6 +254,10 @@ function runnerTarget(args: Word[]): number {
 const isTurbo = (word: string | undefined) =>
   program((word ?? "").replace(/(?<=.)@[^/]*$/, "")) === "turbo"
 
+// Whether a word names a path the hook reads but cannot place without the folder, so an unknown folder leaves it unplaced.
+const relative = (word: Word): boolean =>
+  !word.unknown && !word.reads?.length && word.value !== "" && !isAbsolute(word.value)
+
 // Whether the build's settings reach turbo: from its own assignments or env wrapper, an export before it, or the session's environment.
 function validationOff(local: Map<string, Text>, env: Env): boolean {
   const read = (key: string) =>
@@ -384,6 +395,21 @@ function writes(name: string, args: Word[]): Word[] {
   return out
 }
 
+// A shell whose script the hook cannot read, refused where the shell would run in the main checkout: a script the hook reads is judged command by command by the shared reader, which runs a shell's script itself.
+async function unreadScript(
+  shell: Command,
+  env: Env,
+  inMain: (path: string | undefined) => boolean,
+  place: (cwd: string | undefined, env: Env) => string | undefined,
+): Promise<string | undefined> {
+  const script = await stdinOf(shell, env)
+  if (!script.unknown || !inMain(place(env.cwd, env))) return
+  return refuse(
+    `a shell whose script (${script.unknown}) the hook cannot read`,
+    env.cwdUnknown ? UNKNOWN_FIX : INSTEAD,
+  )
+}
+
 function inspect(raw: string, environment: Record<string, string | undefined>, main: string) {
   const { cwd, tool_input: toolInput, tool_name: tool } = JSON.parse(raw) as Record<string, unknown>
   const input = (toolInput ?? {}) as Record<string, unknown>
@@ -398,18 +424,33 @@ function inspect(raw: string, environment: Record<string, string | undefined>, m
       !(path + sep).startsWith(worktrees)
     )
   }
+  // the folder a command runs in: the one the reader named, else the folder the line started in when a cd left it unknown, by this hook's fail-closed rule
+  const place = (cwd: string | undefined, env: Env) =>
+    cwd ?? (env.cwdUnknown ? directory : undefined)
   const file = typeof tool === "string" ? input[FILE_TOOLS[tool]] : undefined
   if (typeof file === "string") return inMain(file) ? refuse(`a write to ${file}`) : undefined
   if (tool !== "Bash") return
   const { command } = input
   if (typeof command !== "string") return
+  const known = knownVariables(command, environment, directory)
+  const lexed = lex(command, known)
+  // the shell each pipeline feeds, by the command whose output it reads, since the walk judges that command in the folder the pipeline runs in and never visits a shell of its own
+  const fed = new Map<Command, Command>()
+  for (const cmd of lexed.commands) if (cmd.stdin && stdinShell(cmd)) fed.set(cmd.stdin, cmd)
   const visit: Visit = async (cmd, parsed, env) => {
     const slot = slotWords(parsed)
     if (slot)
       return slot.length === 0 ? undefined : examine({ ...cmd, words: slot }, env, visit, false)
     const { args, local, name } = parsed
+    // the shell this command's output feeds runs whatever it prints, so a script the hook cannot read is refused where that shell would run in the main checkout
+    const pipedTo = fed.get(cmd)
+    if (pipedTo) {
+      const verdict = await unreadScript(pipedTo, env, inMain, place)
+      if (verdict) return verdict
+    }
     const ran = runs(name, args, local, env)
-    if (ran && inMain(ran.cwd)) return refuse(ran.what, ran.fix)
+    if (ran && inMain(place(ran.cwd, env)))
+      return refuse(ran.what, ran.cwd === undefined && env.cwdUnknown ? UNKNOWN_FIX : ran.fix)
     const targets = [
       ...cmd.redirects
         .filter(
@@ -420,19 +461,21 @@ function inspect(raw: string, environment: Record<string, string | undefined>, m
         .flatMap((r) => (r.target ? [r.target] : [])),
       ...writes(name, args),
     ]
-    const into = targets.find(
-      (t) => !["-", "/dev/null"].includes(t.value) && inMain(pathOf(t, env)),
-    )
-    if (into) return refuse(`a write to ${pathOf(into, env)}`)
+    const named = targets.filter((t) => !["-", "/dev/null"].includes(t.value))
+    const wrote = named.find((t) => inMain(pathOf(t, env)))
+    if (wrote) return refuse(`a write to ${pathOf(wrote, env)}`)
+    // a path the hook reads but cannot place lands in the folder the line started in, by the fail-closed rule above
+    const blind = named.find((t) => env.cwdUnknown && relative(t) && inMain(t.value))
+    if (blind) return refuse(`a write to ${blind.value}`, UNKNOWN_FIX)
   }
   const env: Env = {
     cwd: directory,
     files: new Map(),
-    known: knownVariables(command, environment, directory),
+    known,
     process: environment,
     vars: new Map(),
   }
-  return run(lex(command, env.known), env, visit)
+  return run(lexed, env, visit)
 }
 
 // Fails open: an error on any call lets it run, so a reader bug cannot block every Bash command or write.

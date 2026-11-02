@@ -1961,25 +1961,17 @@ gh api graphql -f query="$QUERY"`,
     source: "#514",
   },
   {
-    folders: ["checkout"],
+    folders: ["main checkout"],
     guards: ["no-main-checkout"],
-    rows: () => [
+    rows: ({ MAIN }) => [
       [
-        "a commit after a cd a loop runs three times",
-        "for i in 1 2 3; do cd ..; done; git commit -m x",
+        "a commit after a cd a loop's body holds",
+        "for i in 1 2 3; do cd /tmp; done; git commit -m x",
       ],
-      ["a commit after a cd repeat runs three times", "repeat 3 cd ..; git commit -m x"],
-      ["a commit after zsh's two-operand cd", "cd /.claude/worktrees/a /; git commit -m x"],
-    ],
-    source: "#514",
-  },
-  {
-    folders: ["data folder"],
-    guards: ["no-extensions-write"],
-    rows: () => [
+      ["a commit after a cd repeat runs three times", "repeat 3 cd /tmp; git commit -m x"],
       [
-        "a write into the root after a cd behind ||",
-        "true || cd /tmp; echo x > extensions/policy.json",
+        "a commit after zsh's two-operand cd",
+        `cd ${MAIN}/.claude/worktrees/a ${MAIN}; git commit -m x`,
       ],
     ],
     source: "#514",
