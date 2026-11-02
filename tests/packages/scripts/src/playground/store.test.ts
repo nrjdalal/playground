@@ -36,11 +36,12 @@ describe("playground ext", () => {
     writeFileSync(join(at, "extensions", "login"), "tester\n")
     return at
   }
-  const ext = async (at: string, words: string[], stdin = "", role?: string) => {
+  const ext = async (at: string, words: string[], stdin = "", role?: string, name?: string) => {
     const out: string[] = []
     const err: string[] = []
     const io: Io = {
       data: at,
+      name,
       out: (l) => out.push(l),
       role,
       stdin: async () => stdin,
@@ -87,19 +88,17 @@ describe("playground ext", () => {
     ])
     expect(stale).toMatchObject({ code: 1 })
     expect(stale.err).toContain("409 the proposal is at")
-    const scored = await ext(at, [
-      "score",
-      "tester",
-      "rule",
-      "short",
-      rev,
-      "5",
-      "--reason",
-      "clear",
-      "--by",
+    const scored = await ext(
+      at,
+      ["score", "tester", "rule", "short", rev, "5", "--reason", "clear"],
+      "",
+      "reviewer",
       "rev-x",
-    ])
+    )
     expect(scored.out).toBe(`rev ${git(at, "tester", ["rev-parse", "HEAD"])} is accepted`)
+    expect(
+      git(at, "tester", ["log", "-1", "--format=%an|%(trailers:key=Reviewer,valueonly)"]),
+    ).toBe("rev-x|rev-x")
     expect(readFileSync(join(scopeDir(at, "tester"), "rules/short.md"), "utf8")).toBe(
       "Keep it short.\n",
     )
@@ -107,6 +106,69 @@ describe("playground ext", () => {
       reason: string
     }[]
     expect(why.map((entry) => entry.reason)).toEqual(["clear", "shorter replies"])
+  })
+
+  test("a write's author is the calling session, its role when no name is known and the owner with no role, and --by is refused", async () => {
+    const at = folder("author")
+    writeFileSync(join(scratch, "author.md"), "Name the caller.\n")
+    const put = (key: string, role?: string, name?: string) =>
+      ext(
+        at,
+        ["put", "tester", "rule", key, join(scratch, "author.md"), "--reason", "r"],
+        "",
+        role,
+        name,
+      )
+    const author = () => git(at, "tester", ["log", "-1", "--format=%an"])
+    expect((await put("named", "worker", "a-worker")).code).toBe(0)
+    expect(author()).toBe("a-worker")
+    expect((await put("unnamed", "worker")).code).toBe(0)
+    expect(author()).toBe("worker")
+    expect((await put("mine")).code).toBe(0)
+    expect(author()).toBe("owner")
+    const { rev } = JSON.parse((await put("by", "worker", "a-worker")).out) as { rev: string }
+    for (const role of ["reviewer", undefined]) {
+      const by = await ext(
+        at,
+        ["score", "tester", "rule", "by", rev, "3", "--reason", "r", "--by", "someone-else"],
+        "",
+        role,
+        "b-reviewer",
+      )
+      expect(by.code).toBe(1)
+      expect(by.err).toContain("--by is gone: a write's author is the calling session")
+    }
+    expect(author()).toBe("a-worker")
+  })
+
+  test("a score by the proposal's own author is refused, and another session's score records, its 5 accepting", async () => {
+    const at = folder("self-score")
+    writeFileSync(join(scratch, "self.md"), "Review another's work.\n")
+    const put = await ext(
+      at,
+      ["put", "tester", "rule", "self", join(scratch, "self.md"), "--reason", "r"],
+      "",
+      "worker",
+      "a-worker",
+    )
+    const { rev } = JSON.parse(put.out) as { rev: string }
+    const score = (n: string, role?: string, name?: string) =>
+      ext(at, ["score", "tester", "rule", "self", rev, n, "--reason", "r"], "", role, name)
+    const own = await score("5", "worker", "a-worker")
+    expect(own.code).toBe(1)
+    expect(own.err).toContain("a-worker wrote this proposal, so another session scores it")
+    expect(existsSync(join(scopeDir(at, "tester"), "rules/self.md"))).toBe(false)
+    const low = await score("3", "reviewer", "b-reviewer")
+    expect(low.out).toBe(`rev ${git(at, "tester", ["rev-parse", "HEAD"])} is proposed`)
+    expect(git(at, "tester", ["log", "-1", "--format=%an|%(trailers:key=Score,valueonly)"])).toBe(
+      "b-reviewer|3",
+    )
+    const high = await score("5")
+    expect(high.out).toBe(`rev ${git(at, "tester", ["rev-parse", "HEAD"])} is accepted`)
+    expect(git(at, "tester", ["log", "-1", "--format=%an"])).toBe("owner")
+    expect(readFileSync(join(scopeDir(at, "tester"), "rules/self.md"), "utf8")).toBe(
+      "Review another's work.\n",
+    )
   })
 
   test("accept from a session with a role is refused, by --by owner too and before its words are read, and the owner's own accept with no role accepts", async () => {
@@ -145,7 +207,7 @@ describe("playground ext", () => {
     expect(readFileSync(join(scopeDir(at, "tester"), "rules/less.md"), "utf8")).toBe("Say less.\n")
   })
 
-  test("the terminal's Io carries PLAYGROUND_ROLE to accept's check, and an empty one counts as none", async () => {
+  test("the terminal's Io carries PLAYGROUND_ROLE to accept's check and the session's registry name, and an empty role counts as none", async () => {
     const at = folder("terminal")
     writeFileSync(join(scratch, "terminal.md"), "Ask once.\n")
     const put = await ext(at, [
@@ -159,14 +221,30 @@ describe("playground ext", () => {
     ])
     const { rev } = JSON.parse(put.out) as { rev: string }
     const words = ["accept", "tester", "rule", "once", rev, "--reason", "r"]
+    const config = join(at, "claude")
+    mkdirSync(join(config, "sessions"), { recursive: true })
+    writeFileSync(
+      join(config, "sessions", "1.json"),
+      JSON.stringify({ name: "q-dispatcher", sessionId: "s-1" }),
+    )
     const io = (role: string) =>
-      terminalIo({ HOME: scratch, PLAYGROUND_DATA_DIR: at, PLAYGROUND_ROLE: role })
-    expect(io("dispatcher")).toMatchObject({ data: at, role: "dispatcher" })
+      terminalIo({
+        CLAUDE_CODE_SESSION_ID: "s-1",
+        CLAUDE_CONFIG_DIR: config,
+        HOME: scratch,
+        PLAYGROUND_DATA_DIR: at,
+        PLAYGROUND_ROLE: role,
+      })
+    expect(await io("dispatcher")).toMatchObject({
+      data: at,
+      name: "q-dispatcher",
+      role: "dispatcher",
+    })
     const err: string[] = []
-    expect(await runStore("ext", words, io("dispatcher"), (l) => err.push(l))).toBe(1)
+    expect(await runStore("ext", words, await io("dispatcher"), (l) => err.push(l))).toBe(1)
     expect(err.join("\n")).toContain("a session with a role (dispatcher)")
-    expect(io("").role).toBeUndefined()
-    expect(await runStore("ext", words, io(""), (l) => err.push(l))).toBe(0)
+    expect(await io("")).toMatchObject({ name: undefined, role: undefined })
+    expect(await runStore("ext", words, await io(""), (l) => err.push(l))).toBe(0)
     expect(readFileSync(join(scopeDir(at, "tester"), "rules/once.md"), "utf8")).toBe("Ask once.\n")
   })
 
