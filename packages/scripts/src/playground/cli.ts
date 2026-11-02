@@ -388,7 +388,7 @@ const code =
                           : command === "uninstall"
                             ? await uninstallAll(rest[0] === "--purge")
                             : command === "ext" || command === "settings"
-                              ? await runStore(command, rest, terminalIo(), console.error)
+                              ? await runStore(command, rest, await terminalIo(), console.error)
                               : command === "rules"
                                 ? // loaded only here, since it reads the rules hook and the settings package, which the bare dispatcher's start needs neither of
                                   await (

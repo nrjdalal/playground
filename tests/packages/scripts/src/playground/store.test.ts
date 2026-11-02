@@ -135,7 +135,7 @@ describe("playground ext", () => {
         role,
         "b-reviewer",
       )
-      expect(by.code).toBe(1)
+      expect(by.code).toBe(2)
       expect(by.err).toContain("--by is gone: a write's author is the calling session")
     }
     expect(author()).toBe("a-worker")
