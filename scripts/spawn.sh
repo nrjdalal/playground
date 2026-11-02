@@ -1277,9 +1277,9 @@ fi
 # The window reaches the session through its one settings file, built here from the factory's on every launch so the two never drift, one file per backend. On GLM: the user settings turn on telemetry to the Loom relay, and Loom counts Claude usage alone, so a GLM session exports none. Claude Code keeps only the last --settings, and the user settings' env beats a variable on the launch line (both measured by a reviewer, 16 Oct), so the session's one settings file also turns the telemetry off (measured from a folder outside any checkout, 16 Oct: a SessionStart hook ran, no-env-dump refused printenv, and no metric left).
 TAG=
 [ "$BACKEND" = glm ] && TAG=glm-
-# A worker or probe runs its shell commands in Claude Code's sandbox, which every child process inherits, so a delete a script makes where no guard hook sees it stays inside the write roots; its settings go in a file of their own.
+# A probe runs its shell commands in Claude Code's sandbox, which every child process inherits, so a delete a script makes where no guard hook sees it stays inside the write roots; its settings go in a file of their own. Workers and testers join once run-slot, spawn.sh and the worker git flow run inside it.
 SANDBOX=
-case "$ROLE" in worker | probe) SANDBOX=sandbox- ;; esac
+[ "$ROLE" = probe ] && SANDBOX=sandbox-
 BUILT="$DATA/factory-settings-$TAG$SANDBOX$((WINDOW / 1000))k.json"
 python3 -I - "$SETTINGS" "$BUILT" "$WINDOW" "$BACKEND" "$SANDBOX" "$DATA" "${PLAYGROUND_HERDR_DIR:-${DESK_HERDR_DIR:-$DATA/herdr}}" "$MAIN" "$(getconf DARWIN_USER_TEMP_DIR 2>/dev/null)" <<'PY' || refuse "it cannot build $BUILT from $SETTINGS"
 import json, os, sys

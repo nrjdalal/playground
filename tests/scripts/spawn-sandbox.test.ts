@@ -61,11 +61,10 @@ const settingsOf = (r: { home: string }, file: string) => join(r.home, ".playgro
 const builtOf = (r: { home: string }, file: string) =>
   JSON.parse(readFileSync(settingsOf(r, file), "utf8"))
 
-describe("a worker or probe runs its shell commands in Claude Code's sandbox", () => {
+describe("a probe runs its shell commands in Claude Code's sandbox", () => {
   const id = "a7e37f18-1fa1-4cb2-a26e-4ff414fd4b27"
 
   test.each([
-    ["a worker", ["worker", "worker-brave-otter", "b.md"]],
     ["a probe in its own workspace", ["probe", "probe-x", "ops", "p.md"]],
     ["a probe's column", ["column", "probe", "probe-x", "ops", "w1:p2", "p.md"]],
   ])("%s starts with the sandbox's settings file", async (_, args) => {
@@ -84,18 +83,23 @@ describe("a worker or probe runs its shell commands in Claude Code's sandbox", (
     expect(existsSync(settingsOf(r, "factory-settings-400k.json"))).toBe(false)
   })
 
-  test("the main checkout's tree is denied but .git and .claude/worktrees", async () => {
-    const r = await spawn(["worker", "worker-brave-otter", "b.md"], [])
+  test("the main checkout's tree is denied but .git and .claude/worktrees, and nothing else is", async () => {
+    const r = await spawn(["probe", "probe-x", "ops", "p.md"], [])
     expect(r.code, r.err).toBe(0)
     const { denyWrite } = builtOf(r, "factory-settings-sandbox-400k.json").sandbox.filesystem
     expect(denyWrite).toContain(join(main, "scripts"))
     expect(denyWrite).not.toContain(join(main, ".git"))
     expect(denyWrite).not.toContain(join(main, ".claude"))
     expect(denyWrite).not.toContain(join(main, ".claude", "worktrees"))
+    expect(
+      denyWrite.filter(
+        (path: string) => dirname(path) !== main && dirname(path) !== join(main, ".claude"),
+      ),
+    ).toEqual([])
   })
 
-  test("a resumed worker keeps the sandbox", async () => {
-    const name = "worker-brave-otter"
+  test("a resumed probe keeps the sandbox", async () => {
+    const name = "probe-x"
     const r = await spawn(["resume", name, root, id], [], {}, undefined, {
       name,
       backend: "claude",
@@ -106,8 +110,11 @@ describe("a worker or probe runs its shell commands in Claude Code's sandbox", (
     expect(builtOf(r, file).sandbox).toEqual(sandboxOf(r.home))
   })
 
-  test("a worker on GLM keeps the sandbox in GLM's own file", async () => {
-    const r = await spawn(["worker", "worker-brave-otter", "b.md", "--backend", "glm"], [])
+  test("a probe on GLM keeps the sandbox in GLM's own file", async () => {
+    const r = await spawn(
+      ["column", "probe", "probe-x", "ops", "w1:p2", "p.md", "--backend", "glm"],
+      [],
+    )
     expect(r.code, r.err).toBe(0)
     const built = builtOf(r, "factory-settings-glm-sandbox-400k.json")
     expect(built.sandbox).toEqual(sandboxOf(r.home))
@@ -115,6 +122,7 @@ describe("a worker or probe runs its shell commands in Claude Code's sandbox", (
   })
 
   test.each([
+    ["a worker", ["worker", "worker-brave-otter", "b.md"]],
     ["a runner", ["runner", "runner-calm-heron", "b.md"]],
     ["a reviewer", ["column", "reviewer", "reviewer-x", "worker-x", "w1:p2", "r.md"]],
     ["a tester", ["column", "tester", "tester-x", "worker-x", "w1:p2", "t.md"]],

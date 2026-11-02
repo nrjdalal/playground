@@ -20,6 +20,7 @@ describe("every session compacts in one 400k window (#1805)", () => {
   })
 
   test.each([
+    ["a worker", ["worker", "worker-brave-otter", "b.md"]],
     ["a runner", ["runner", "runner-calm-heron", "b.md"]],
     ["a reviewer", ["column", "reviewer", "reviewer-x", "worker-x", "w1:p2", "r.md"]],
     ["a tester", ["column", "tester", "tester-x", "worker-x", "w1:p2", "t.md"]],
@@ -46,7 +47,7 @@ describe("every session compacts in one 400k window (#1805)", () => {
   })
 
   test("context.window sets the window, in the built file's name and its autoCompactWindow", async () => {
-    const r = await spawn(["runner", "runner-calm-heron", "b.md"], [], {
+    const r = await spawn(["worker", "worker-brave-otter", "b.md"], [], {
       SETTINGS_JSON: JSON.stringify({ "context.window": 300000 }),
     })
     expect(r.code, r.err).toBe(0)
@@ -57,6 +58,7 @@ describe("every session compacts in one 400k window (#1805)", () => {
   })
 
   test.each([
+    ["a worker", "worker-brave-otter"],
     ["a runner", "runner-calm-heron"],
     ["a reviewer", "reviewer-x"],
     ["a tester", "tester-x"],
@@ -77,9 +79,9 @@ describe("every session compacts in one 400k window (#1805)", () => {
   })
 
   test.each([
-    ["a runner", ["runner", "runner-calm-heron", "b.md", "--backend", "glm"], undefined],
+    ["a worker", ["worker", "worker-brave-otter", "b.md", "--backend", "glm"], undefined],
     ["the second dispatcher", ["manager", "dispatcher-2", "b.md", "--backend", "glm"], undefined],
-    ["a resumed runner", ["resume", "runner-calm-heron", root, id], "runner-calm-heron"],
+    ["a resumed worker", ["resume", "worker-brave-otter", root, id], "worker-brave-otter"],
     ["a resumed lead", ["resume", "builder", root, id], "builder"],
   ])("%s on GLM takes the 400k window", async (_, args, pinned) => {
     const pin = pinned ? { name: pinned, backend: "glm" } : undefined
@@ -94,7 +96,7 @@ describe("every session compacts in one 400k window (#1805)", () => {
   test("the built file keeps every hook command of the real factory settings byte for byte", async () => {
     const real = readFileSync(join(root, "scripts", "factory-settings.json"), "utf8")
     const r = await spawn(
-      ["runner", "runner-calm-heron", "b.md"],
+      ["worker", "worker-brave-otter", "b.md"],
       [],
       {},
       undefined,
@@ -114,7 +116,7 @@ describe("every session compacts in one 400k window (#1805)", () => {
 
   // The session loads its own merged skill set in place, and the home set user scope turns on stays off, so no name is shipped twice.
   test("a session loads the merged skill plugin its repo resolves to", async () => {
-    const r = await spawn(["runner", "runner-calm-heron", "b.md"], [], { ROSTER_JSON: roster })
+    const r = await spawn(["worker", "worker-brave-otter", "b.md"], [], { ROSTER_JSON: roster })
     expect(r.code).toBe(0)
     const plugin = launchAfterRm(r).match(/ --plugin-dir (\S+)/)?.[1] ?? ""
     expect(plugin).toStartWith(join(r.home, ".playground", "orgs", "home"))
@@ -158,7 +160,7 @@ describe("the backend pin carries a start onto its resume", () => {
     )
     expect(command(r)).toContain(" --model 'glm-5.3-flash[1m]' --effort high ")
     expect(command(r)).not.toContain("claude-opus")
-    const glmSettings = join(r.home, ".playground", "factory-settings-glm-sandbox-400k.json")
+    const glmSettings = join(r.home, ".playground", "factory-settings-glm-400k.json")
     expect(command(r)).toContain(` --settings ${glmSettings} --dangerously-skip-permissions`)
     expect(r.security).toEqual(["find-generic-password -s playground-glm -a zai"])
   })

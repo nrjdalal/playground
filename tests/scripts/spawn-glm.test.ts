@@ -56,8 +56,8 @@ describe("--backend glm runs the session on Z.ai's GLM through Claude Code", () 
     expect(command(r)).toContain(" --model 'glm-5.3-flash[1m]' --effort high ")
     expect(command(r)).not.toContain("claude-opus")
     expect(command(r)).not.toContain("--backend")
-    // A worker or probe runs in the sandbox, from a file of its own (spawn-sandbox.test.ts holds the block).
-    const sandbox = /PLAYGROUND_ROLE=(worker|probe) /.test(command(r)) ? "sandbox-" : ""
+    // A probe runs in the sandbox, from a file of its own (spawn-sandbox.test.ts holds the block).
+    const sandbox = /PLAYGROUND_ROLE=probe /.test(command(r)) ? "sandbox-" : ""
     const glm = join(r.home, ".playground", `factory-settings-glm-${sandbox}400k.json`)
     expect(command(r).split(" --settings ")).toHaveLength(2)
     expect(command(r)).toContain(` --settings ${glm} --dangerously-skip-permissions`)
@@ -84,7 +84,7 @@ describe("--backend glm runs the session on Z.ai's GLM through Claude Code", () 
     expect(r.code).toBe(0)
     expect(command(r)).not.toContain("CLAUDE_CODE_ENABLE_TELEMETRY")
     expect(command(r).split(" --settings ")).toHaveLength(2)
-    const built = join(r.home, ".playground", "factory-settings-sandbox-400k.json")
+    const built = join(r.home, ".playground", "factory-settings-400k.json")
     expect(command(r)).toContain(` --settings ${built} `)
     expect(JSON.parse(readFileSync(built, "utf8")).env).toEqual(FACTORY_SETTINGS.env)
   })

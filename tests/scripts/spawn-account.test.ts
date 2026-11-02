@@ -64,7 +64,7 @@ describe("--account logs the session in as another Claude account", () => {
     const r = await spawn(["worker", "worker-brave-otter", "b.md"], [])
     const home = join(scratch, `home-${homes}`)
     expect(unplugged(command(r))).toBe(
-      `(env PLAYGROUND_ROLE=worker claude -n worker-brave-otter --model claude-opus-5-5 --effort high --settings ${home}/.playground/factory-settings-sandbox-400k.json --dangerously-skip-permissions "You are worker-brave-otter, a worker in the Playground factory; you report to builder. Load the playbook skill first. Your brief is in ~/.playground/b.md: read it in full and follow it. Report to builder with SendMessage (to: builder).")`,
+      `(env PLAYGROUND_ROLE=worker claude -n worker-brave-otter --model claude-opus-5-5 --effort high --settings ${home}/.playground/factory-settings-400k.json --dangerously-skip-permissions "You are worker-brave-otter, a worker in the Playground factory; you report to builder. Load the playbook skill first. Your brief is in ~/.playground/b.md: read it in full and follow it. Report to builder with SendMessage (to: builder).")`,
     )
     expect(r.security).toBeUndefined()
   })
