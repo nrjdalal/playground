@@ -18,7 +18,8 @@ Their tests are `bun run test:file tests/scripts/hooks`.
   `pathOf` folds a path's `..` as typed, as `cd`, `bun --cwd` and `npm --prefix` fold it, and `openedPathOf` as the kernel opens it, each link resolved before a `..` after it steps up; no-extensions-write judges both.
   Under a hook's deadline it stops at a chain of scripts a shell, `eval` or `source` reads 256 or more deep, such a script over 128 KB and an `xargs -I` line over 128 KB once its stdin is filled in.
   It holds as unknown any text over 1 MB that a command printed or wrote.
-  A hook that sets `unheld` on its `Env` gives the verdict on a shell, `source` or `eval` whose script holds a part the reader cannot read; a script file run by its path is the file's own code, which no hook reads.
+  A hook that sets `unheld` on its `Env` gives the verdict on a shell, `source` or `eval` whose script holds a part the reader cannot read.
+  In a `-c` script or `eval`'s words, a variable the call set to a value it holds (`W=<dir>; bash -c "cd $W && …"`) and `$PWD` in a folder it follows are read, and one set from another variable, a `read` or the environment is not; a shell's `--version` or `--help` and `command -v` read no script, and a script file run by its path is the file's own code, which no hook reads.
 
 ## Registered in both settings files
 
@@ -195,9 +196,7 @@ Their tests are `bun run test:file tests/scripts/hooks`.
   It reads a command's text, so a program whose own code writes the root (a script file run by its path, a binary) and a path it cannot read (built at run time, in a `$(…)` or a variable) pass it.
   It refuses a shell, `source` or `eval` whose script, from a pipe, a process substitution, `eval`'s words, `bash -c`'s script or an `xargs -I` line, holds a part it cannot read (a `$(…)`'s or a `curl`'s output, `curl … | sh`, a value `read`, `mapfile` or `printf -v` sets, `$_`), since a guard-list write may rest on it.
   Such a script is refused even when it only reads, since the hook cannot tell it from a write: `eval "$(fnm env)"`, `eval "$(ssh-agent -s)"`, `source <(fzf --zsh)`, `x=$(git branch --show-current); echo $x | bash` and `bash -c "cd $(git rev-parse --show-toplevel) && bun run test"` are refused alike.
-  In a `-c` script or `eval`'s words, a variable the call set to a value it holds (`W=<dir>; bash -c "cd $W && …"`) and `$PWD` in a folder it follows are read; one set from another variable, a `read` or the environment is not.
-  A shell's `--version` or `--help`, `command -v`, and a shell named in quoted text it reads only in case it runs (an assignment's, `bun -e`'s) read no script.
-  So a shell line a program runs from its quoted words (a git alias's `!` line, an `ssh` or `watch` line) keeps canary's reading, and one over a `$(…)` runs.
+  A shell named in quoted text it reads only in case it runs (an assignment's, `bun -e`'s) is no script the shell reads, so a shell line a program runs from its quoted words (a git alias's `!` line, an `ssh` or `watch` line) is outside the unheld rule, and one over a `$(…)` runs.
   Its refusal names the forms it reads: the script in a file run by its path (`bash <file>`), a folder named with `git -C <dir>` or `bun --cwd=<dir>` in place of a `cd $(…)`, or the value set as a literal in the call; a value it cannot read used anywhere else runs.
   A write to a scope's GitHub repository, which `ops:ext-sync` renders into the root, is outside its reach too; [no-extension-repo-write](#no-extension-repo-write) refuses one.
   An awk program that builds the line it runs (`system("rm " x)`) without naming the root literally gets past.
