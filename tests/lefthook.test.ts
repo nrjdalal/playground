@@ -1,5 +1,13 @@
 import { expect, test } from "bun:test"
-import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from "node:fs"
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  utimesSync,
+} from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -633,6 +641,9 @@ test("the install's prepare writes no hook while the installed ones match", asyn
       join(dir, "lefthook.yml"),
       `${config}pre-push:\n  commands:\n    mark:\n      run: echo push-ran\n`,
     )
+    // lefthook reads its hooks as matching while the config's mtime, in seconds, equals the one it installed from, so a rewrite in that same second is moved on
+    const later = Date.now() / 1000 + 10
+    utimesSync(join(dir, "lefthook.yml"), later, later)
     expect(prepare().code).not.toBe(0)
   } finally {
     chmodSync(hooks, 0o755)
