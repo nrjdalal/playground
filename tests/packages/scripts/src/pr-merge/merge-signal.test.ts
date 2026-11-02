@@ -106,6 +106,7 @@ describe("a signal inside the merge lock", () => {
     const { code, out } = await stopped(["merge", root, "squash"], "SIGTERM", { after })
     expect(code).toBe(143)
     expect(out).toContain("gh pr merge")
+    expect(out).not.toContain("gh pr comment")
     expect(existsSync(join(root, "merge.lock"))).toBe(false)
     expect(readdirSync(join(root, "merge-locks"))).toEqual([
       expect.stringMatching(/^112-\d+-SIGTERM$/),
