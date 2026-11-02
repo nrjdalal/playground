@@ -424,7 +424,7 @@ export const saidOf = (text: string): string | undefined => {
 // The poster cleared its own alert update (`bun run ask resolve`), which had resolved itself: read, so nothing was left for him to dismiss.
 export type InboxResolved = { at: string; by: string; choice: "resolved"; note?: string }
 
-// A secret ask he answered with its value, which went to its sink and is kept nowhere: when, and each environment's exit status (null: stopped by a signal), written once the sink has run; its poster's read closes it.
+// A secret ask he answered with its value, which went to its sink and is kept nowhere: when, and each step's exit status (null: stopped by a signal), written once the sink has run; its poster's read closes it.
 export type InboxProvided = {
   ackedAt?: string
   at: string
@@ -619,7 +619,7 @@ function relayWith(item: InboxItem, go: boolean, text: string): string {
 const exitWords = (code: number | null): string =>
   code === null ? "stopped at its time limit" : code === 127 ? "not installed" : `exit ${code}`
 
-// Pure: what is typed into the poster of a secret ask he answered: when, and each environment's exit status; the value never, since only the sink was handed it.
+// Pure: what is typed into the poster of a secret ask he answered: when, and each step's exit status; the value never, since only the sink was handed it.
 function providedText(
   item: Pick<InboxItem, "id" | "ref" | "title">,
   answer: Pick<InboxProvided, "at" | "results">,

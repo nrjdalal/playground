@@ -197,7 +197,7 @@ export const inboxRouter = new Hono<{ Variables: Session }>()
     describeRoute({
       tags: ["Inbox"],
       description:
-        "Answer an open secret ask with its value, which goes straight to the ask's sink on stdin, once an environment, and is kept nowhere: the item records only when it was provided and each exit status, and its poster is told that alone",
+        "Answer an open secret ask with its value, which goes straight to the ask's sink on stdin, once a step, and is kept nowhere: the item records only when it was provided and each step's exit status, and its poster is told that alone",
       responses: {
         200: { description: "OK" },
         ...validationErrorResponses,

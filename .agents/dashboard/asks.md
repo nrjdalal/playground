@@ -263,7 +263,7 @@
 
   ```bash
   bun run ask new <<'EOF'
-  {"from": "dispatcher", "title": "Staging read-only password",
+  {"from": "dispatcher", "title": "API token for acme",
    "preview": {"type": "secret", "key": "acme.api.token",
                "sink": {"type": "1password"}}}
   EOF
