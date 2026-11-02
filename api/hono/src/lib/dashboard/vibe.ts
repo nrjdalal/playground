@@ -416,6 +416,9 @@ export async function startVibe(path: string, deps: Deps = DEPS): Promise<Seeded
       await deps.docker(["rm", "-fv", copy])
       // the .env first, so a trash that throws never leaves the worktree on the copy's
       const kept = wrote ? [restoreEnv(deps, path)] : []
+      // a record the trash then leaves behind names the .env as the worktree's own, so the Stop it offers leaves the .env alone
+      if (wrote && !kept[0])
+        writeRecord(path, { container: copy, env: false, id, started: new Date().toISOString() })
       kept.push(trash(deps, path, VIBE_RECORD))
       rmSync(join(path, DATA), { force: true, recursive: true })
       const words = kept.filter(Boolean).join("; ")

@@ -10,6 +10,9 @@ import type { Shift } from "./cls-observer"
 import { DASHBOARD_MAP, type DashboardPage, driftProblems } from "./map"
 
 export type Result = { check: string; detail: string; ok: boolean }
+export type Target = { api: string; web: string }
+export type Expectation = { label: string; sha: string } | { label: string; version: string }
+export type Viewport = { height: number; width: number }
 
 // The fixture's scratch folder as the launcher names it (fixtureDir in api/hono/src/lib/dashboard/fixture.ts), which a test holds this mirror to.
 export const fixtureDirOf = (
@@ -25,9 +28,6 @@ export const fixtureDirOf = (
     `playground-dashboard-fixture-${process.getuid?.() ?? 0}-${new Bun.CryptoHasher("sha256").update(root).digest("hex").slice(0, 8)}`,
   )
 }
-export type Target = { api: string; web: string }
-export type Expectation = { label: string; sha: string } | { label: string; version: string }
-export type Viewport = { height: number; width: number }
 
 // 1280 is the narrowest desktop the dashboard promises; 1782×972 is the ui-verify skill's default, so these screenshots pair with the ones a PR already carries.
 export const VIEWPORTS: Viewport[] = [
