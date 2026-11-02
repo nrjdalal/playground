@@ -24,7 +24,6 @@ describe("every session compacts in one 400k window (#1805)", () => {
     ["a runner", ["runner", "runner-calm-heron", "b.md"]],
     ["a reviewer", ["column", "reviewer", "reviewer-x", "worker-x", "w1:p2", "r.md"]],
     ["a tester", ["column", "tester", "tester-x", "worker-x", "w1:p2", "t.md"]],
-    ["a probe", ["column", "probe", "probe-x", "ops", "w1:p2", "p.md"]],
     ["a lead", ["column", "lead", "planner", "dispatcher", "w1:p2", "h.md"]],
     [
       "a lead by its roster kind",

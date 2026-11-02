@@ -4,8 +4,11 @@ import { mkdir, rm } from "node:fs/promises"
 import { homedir } from "node:os"
 import { dirname, join } from "node:path"
 
+import type { Subprocess } from "bun"
+
 import { BASE, type Gate } from "./gates"
 import type { Run } from "./merge"
+import { onStop } from "./stop"
 
 // One step of the check, run in the scratch worktree: its name for the timing line, its argv, and whether a failure is the tree's own type error rather than the run's.
 export type TypeStep = { argv: string[]; name: string; types?: boolean }
@@ -148,6 +151,13 @@ export async function typesGate({
   const deadline = Date.now() + budgetMs
   const at = `the merged tree ${mergeTree.slice(0, 7)} (#${n} at ${head.slice(0, 7)} onto ${BASE} ${canary.slice(0, 7)})`
   let worktree = ""
+  let running: Subprocess | null = null
+  // a signal ends the gate as its deadline does: the running step killed and waited for, then the worktree cleared
+  const unlisten = onStop(async () => {
+    running?.kill("SIGTERM")
+    await running?.exited
+    if (worktree) await clear(git, worktree)
+  })
   try {
     const common = await gitOk(git, ["rev-parse", "--path-format=absolute", "--git-common-dir"])
     const checkout = await gitOk(git, ["rev-parse", "--show-toplevel"])
@@ -185,7 +195,7 @@ export async function typesGate({
           `it ran past its ${Math.round(budgetMs / 1000)}s before ${step.name}, waiting on the machine's run slots`,
         )
       const started = Date.now()
-      const proc = Bun.spawn(step.argv, {
+      const proc = (running = Bun.spawn(step.argv, {
         cwd: worktree,
         env: {
           ...process.env,
@@ -199,7 +209,7 @@ export async function typesGate({
         stdin: "ignore",
         stdout: "pipe",
         timeout: left,
-      })
+      }))
       const [stdout, stderr, code] = await Promise.all([
         new Response(proc.stdout).text(),
         new Response(proc.stderr).text(),
@@ -230,5 +240,6 @@ export async function typesGate({
     return unfinished(err instanceof Error ? err.message : String(err))
   } finally {
     if (worktree) await clear(git, worktree)
+    unlisten()
   }
 }

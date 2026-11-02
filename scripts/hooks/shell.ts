@@ -4,7 +4,8 @@ import { basename, isAbsolute, resolve } from "node:path"
 
 // `variable` names the first shell variable a text expands, so a hook can tell `"$HERDR_BIN_PATH"` from any other unknown program.
 export type Text = { reads?: Text[]; unknown?: string; value: string; variable?: string }
-export type Word = Text & { procs?: Command[]; quoted: boolean }
+// `glob` marks a word with a glob character the shell sees outside quotes, so `'{print $1}'` holds none and `{a,'b'}` one.
+export type Word = Text & { glob?: boolean; procs?: Command[]; quoted: boolean }
 type Redirect = { body?: Text; fd: string; op: string; target?: Word }
 export type Command = {
   detached?: boolean
@@ -602,9 +603,12 @@ function word(lx: Lexer): Word {
       out.quoted = true
       merge(out, ansi(lx))
     } else if (c === "$" && next === '"') lx.i++
-    else if (c === "$") merge(out, dollar(lx))
-    else if (c === "`") merge(out, backtick(lx))
-    else if (c === "~" && lx.i === start && (next === "" || next === "/" || BREAK.has(next))) {
+    else if (c === "$" || c === "`") {
+      // an unquoted expansion's value is globbed too
+      const text = c === "$" ? dollar(lx) : backtick(lx)
+      merge(out, text)
+      if (GLOB_CHARS.test(text.value)) out.glob = true
+    } else if (c === "~" && lx.i === start && (next === "" || next === "/" || BREAK.has(next))) {
       out.value += homedir()
       lx.i++
     } else {
@@ -615,8 +619,11 @@ function word(lx: Lexer): Word {
   }
   // the lookahead finds the close once, so a { with no } costs its length rather than its square
   if (/\{(?=[^{}]*\})[^{}]*(?:,|\.\.)/.test(bare)) out.unknown ??= "a brace expansion"
+  if (GLOB_CHARS.test(bare)) out.glob = true
   return out
 }
+
+const GLOB_CHARS = /[*?[{(]/
 
 function double(lx: Lexer): Text {
   const { src } = lx

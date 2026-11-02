@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, test } from "bun:test"
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
 import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -504,6 +504,14 @@ describe("a quoted argument is read as a command line only where a program runs 
     ],
     ["awk's output cut at a spaced delimiter", "awk '$3 ~ /runner/' /dev/null | cut -d' ' -f1"],
     ["awk's output counted by wc and tail", "awk '$3 ~ /runner/' /dev/null | tail -n 2 | wc -l"],
+    ["awk printing a field in a quoted block", "awk '{print $1}' /dev/null"],
+    [
+      "awk matching a worktree's line with a variable",
+      `awk -v b="branch refs/heads/$B" '/^worktree /{w=substr($0,10)} $0==b{print w}' /dev/null`,
+    ],
+    ["cut at a quoted brace", "cut -d'{' -f1 /dev/null"],
+    ["sort keyed at a quoted bracket", "sort -t'[' -k2 /dev/null"],
+    ["awk matching a regex that starts at / and holds a glob", "awk '/^a*b/' /dev/null"],
   ])("%s runs from the home and the data folder", async (_, command) => {
     for (const cwd of homes) expect(await at(command, cwd)).toBeUndefined()
   })
@@ -542,6 +550,21 @@ describe("a quoted argument is read as a command line only where a program runs 
     ],
   ])("%s runs from a worktree", async (_, command) => {
     expect(await at(command, join(homedir(), "x", ".claude", "worktrees", "y"))).toBeUndefined()
+  })
+
+  test("the dispatcher brief's call that finds the Dashboard's checkout runs from a worktree", async () => {
+    const step = readFileSync(
+      join(import.meta.dir, "../../../scripts/briefs/dispatcher.md"),
+      "utf8",
+    )
+      .split("\n")
+      .find((line) => line.startsWith("2. "))
+    const spans = [...(step ?? "").matchAll(/`([^`]+)`/g)].map((m) => m[1])
+    const call = ['R="', "curl ", "bun run --cwd "]
+      .map((start) => spans.find((span) => span.startsWith(start)))
+      .join("; ")
+    expect(call).toContain("worktree list")
+    expect(await at(call, join(homedir(), "x", ".claude", "worktrees", "y"))).toBeUndefined()
   })
 
   test.each([
