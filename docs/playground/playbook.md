@@ -35,6 +35,7 @@ A session outside the factory has no reason to.
 Each rule is its own intent file, `extensions/core/rules/<name>.md`: its first line is the glance, the lines after it its what and why, with each value a `{key}` slot.
 A rule that belongs to one login alone lives in that login extension's own `rules/`, and the `rules` hook shows its glance under "Your own rules:".
 The lifecycle, dispatch and sweep are in `LIFECYCLE.md`, `DISPATCH.md` and `SWEEP.md`, each read when its moment comes.
+`LIFECYCLE.md` also holds the main checkout's restore, run from the owner's own `!` window, since with the checkout gone every guard refuses a factory session's Bash.
 At every session start, resume and compaction the `rules` hook puts each rule file's glance in front of the session, its slots filled with this machine's settings (`playground rules <name>` prints one whole), and after a compaction a second hook tells it to load the skill again, so the rules arrive even when the skill was dropped.
 A test holds `SKILL.md` under 14,000 characters and its pointer to the rules folder; another holds the rule list above to the files in `extensions/core/rules/`.
 
@@ -95,7 +96,7 @@ A new Linear ticket waits for the owner's yes, and Playground's own work stays o
 A session that needs a ticket asks up the chain; the dispatcher puts it to the owner as an Inbox decision, and on his yes writes that day's approval naming the team and title, which lets the ticket be filed.
 Every spawn sets `PLAYGROUND_ROLE` (a session cmux restores without it is known by its name), and in a session that has it the `no-linear-ticket` hook refuses any call that would file a ticket with no approval, through the Linear MCP or a GraphQL `issueCreate` alike.
 His own sessions have no role, so they file freely.
-The hook is a guard, not a lock: when it cannot start (Bun missing, the checkout moved) or times out, Claude Code lets the call through, so a broken hook never blocks every call, and the rule still binds the session.
+The hook is a guard that fails closed: when it cannot start (Bun missing, a package missing, the checkout gone) it refuses the call, naming the fix, and only a timeout lets the call through, where the rule still binds the session.
 Only the dispatcher writes an approval, and the hook refuses any other session a write into the approvals folder.
 Playground is classified: nothing about it appears in any guarded org's ticket, PR, commit, branch, comment, Slack message or DM, and file in its repos.
 
@@ -118,7 +119,7 @@ An observer in the channel is answered directly when they write there.
 The dispatcher sorts each ask from the colleague, their Playground or the observer into three: it answers it, fixes a small shared bug and tells the owner after, or puts it to the owner first, and the owner's asks always come first (`CHANNEL.md` beside the skill).
 A simple, working PR from the colleague is the dispatcher's to decide and record, and it merges as their own PR after a read-only review, so their name stays on the work; only a hard-to-undo change to how the owner works goes to the owner's Inbox.
 The hook also refuses a guarded org's write it cannot read.
-Like the ticket guard, a hook that cannot start lets the call through, and the rule still binds the session.
+Like the ticket guard, a hook that cannot start refuses the call, and one that times out lets it through, where the rule still binds the session.
 
 ## It's working if
 

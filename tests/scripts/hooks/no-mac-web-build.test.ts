@@ -247,8 +247,13 @@ describe("the dashboard's container decides", () => {
       expect(reason).toContain("ci.sh web HEAD")
       expect(performance.now() - started).toBeLessThan(INSPECT_TIMEOUT_MS + 3000)
       for (const settings of ["scripts/factory-settings.json", ".claude/settings.json"]) {
-        const text = readFileSync(join(root, settings), "utf8")
-        const timeout = Number(/no-mac-web-build\.ts",\s*"timeout": (\d+)/.exec(text)?.[1])
+        const { hooks } = JSON.parse(readFileSync(join(root, settings), "utf8")) as {
+          hooks: { PreToolUse: { hooks: { command: string; timeout: number }[] }[] }
+        }
+        const timeout =
+          hooks.PreToolUse.flatMap((e) => e.hooks).find((h) =>
+            h.command.includes("scripts/hooks/no-mac-web-build.ts"),
+          )?.timeout ?? NaN
         expect(timeout * 1000, settings).toBeGreaterThan(INSPECT_TIMEOUT_MS + 4000)
       }
     },

@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Guidance for AI coding agents working in this repository, a Bun monorepo: the `web/next` app, the `api/hono` service, and shared `packages/*` (auth, config, db, env, redis), with build-only tooling in `packages/scripts`.
+Guidance for AI coding agents working in this repository, a Bun monorepo: the `web/next` app, the `api/hono` service, and shared `packages/*` (auth, config, db, env, redis, safe-delete), with build-only tooling in `packages/scripts`.
 The canonical starter also carries the `packages/cli` npm binary and the `tests/` suite, neither of which a fork takes; this guide and every skill ship to a fork whole, rebranded to its name.
 Start each task with the `codebase-map` skill to orient, then load the task skill that fits (see [Skills](#skills)).
 
@@ -211,6 +211,7 @@ ZeroStarter's rules above govern Playground too; this section adds its own.
 - ALWAYS: File a new Linear ticket only after the owner's yes, posted as one Inbox `ticket` decision, and keep Playground's own work out of Linear (playbook's **tickets** rule); `no-linear-ticket` refuses a factory session's ticket create whose title no approval names ([scripts/hooks/README.md](./scripts/hooks/README.md)).
 - ALWAYS: Keep Playground out of every ticket, PR, commit, branch, comment, chat message or DM of an org it works for, and every file in an org's repo (playbook's **classified** rule); `no-playground-leak` refuses an org write that holds a Playground term, and a post in the factory's channel without its signature ([scripts/hooks/README.md](./scripts/hooks/README.md)).
 - ALWAYS: Send every link in a Slack post as a link chip in its full shape; `no-bare-slack-link` refuses a factory session's post holding a URL no chip carries, and its reason gives the chip ([scripts/hooks/README.md](./scripts/hooks/README.md)).
+- ALWAYS: Feed a row of `tests/scripts/hooks/fixtures/refused-forms.ts` to a guard only as `check()` input, whatever HOME or folder is set, since each row is a command that does what it says and can name a path outside HOME; `tests/scripts/hooks/fixtures-are-data.test.ts` holds the fixture's importers to it.
 - A factory session starts another only through `scripts/spawn.sh`, whose capacity gate, backends, models, runtimes, resume and restore are in [scripts/README.md](./scripts/README.md#spawnsh): read it before you change spawn.sh or when it refuses a start you did not expect;
   `no-raw-spawn` refuses a cmux call that opens a claude session, and every herdr call but a read or one to a scratch world of the session's own.
 - The herdr servers belong to one ops job, `bun run ops:herdr`, on the binary and config its `pin.json` names ([scripts/README.md](./scripts/README.md#the-herdr-servers)), read before you change that job or herdr's pinned binary or config.

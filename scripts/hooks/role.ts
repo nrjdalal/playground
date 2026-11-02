@@ -3,7 +3,7 @@ import "../../packages/env/src/aliases"
 import { homedir } from "node:os"
 import { join } from "node:path"
 
-// By relative source path, never through @packages/config: every guard imports this file from the main checkout and fails open, so a dist a failed build left stale or missing would turn them all off.
+// By relative source path, never through @packages/config: every guard imports this file from the main checkout, so a dist a failed build left stale or missing would make each PreToolUse guard refuse every call it guards.
 import {
   FACTORY_ROLE_OF_KIND,
   isRosterKind,
