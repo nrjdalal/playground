@@ -237,7 +237,7 @@ describe("the factory settings run it", () => {
   })
 
   // CLAUDE_PROJECT_DIR is a folder in no repository, so only PLAYGROUND_REPO can name the checkout
-  const hook = async (home: string, command: string, repo: string) => {
+  const hook = async (home: string, command: string, repo: string, role = "worker") => {
     const proc = Bun.spawn(["bash", "-c", (await entry()).hooks[0].command], {
       cwd: tmpdir(),
       env: {
@@ -246,7 +246,7 @@ describe("the factory settings run it", () => {
         GIT_CEILING_DIRECTORIES: tmpdir(),
         HOME: home,
         PLAYGROUND_REPO: repo,
-        PLAYGROUND_ROLE: "worker",
+        PLAYGROUND_ROLE: role,
       },
       stderr: "pipe",
       stdin: new Blob([JSON.stringify({ tool_input: { command }, tool_name: "Bash" })]),
@@ -263,9 +263,12 @@ describe("the factory settings run it", () => {
     expect(await hook(home, "git stash list", root)).toEqual({ code: 0, stderr: "" })
   })
 
-  test("a hook that finds no checkout lets the call through", async () => {
+  test("a hook that finds no checkout refuses a factory session's call and lets any other through", async () => {
     const home = await mkdtemp(join(tmpdir(), "no-stash-nohome-"))
-    expect(await hook(home, "git stash pop", "")).toEqual({ code: 0, stderr: "" })
+    const refused = await hook(home, "git stash pop", "")
+    expect(refused.code).toBe(2)
+    expect(refused.stderr).toContain("Restoring the main checkout")
+    expect(await hook(home, "git stash pop", "", "")).toEqual({ code: 0, stderr: "" })
   })
 
   test("the script runs on its own", async () => {

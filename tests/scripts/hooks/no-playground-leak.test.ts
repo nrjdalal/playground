@@ -1201,11 +1201,17 @@ describe("as Claude Code runs it", () => {
     expect(await hook(command, clean, away(home, root))).toEqual({ code: 0, stderr: "" })
   })
 
-  test("a hook that finds no checkout lets the call through", async () => {
+  test("a hook that finds no checkout refuses a factory session's call and lets any other through", async () => {
     const home = join(scratch, "nowhere")
     await mkdir(home, { recursive: true })
     const [{ command }] = (await entry()).hooks
-    expect(await hook(command, leaky, away(home, ""))).toEqual({ code: 0, stderr: "" })
+    const refused = await hook(command, leaky, away(home, ""))
+    expect(refused.code).toBe(2)
+    expect(refused.stderr).toContain("Restoring the main checkout")
+    expect(await hook(command, leaky, { ...away(home, ""), PLAYGROUND_ROLE: "" })).toEqual({
+      code: 0,
+      stderr: "",
+    })
   })
 
   test("the script runs on its own", async () => {

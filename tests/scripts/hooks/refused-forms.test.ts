@@ -24,6 +24,7 @@ import {
   REFUSED_FORMS,
 } from "./fixtures/refused-forms"
 import { storeWith } from "./render-set"
+import { git } from "./scratch-git"
 
 const CHECKOUT = join(import.meta.dir, "..", "..", "..")
 const SCRATCH = mkdtempSync(join(tmpdir(), "refused-forms-"))
@@ -65,36 +66,15 @@ symlinkSync(ROOT, PATHS.LINK)
 symlinkSync(ROOT, join(DATA, "store"))
 symlinkSync(DATA, join(HOME, "pg"))
 symlinkSync(join(PATHS.CLI_DIR, "cli.ts"), join(HOME, "pc"))
-Bun.spawnSync(["git", "init", "-q", OTHER])
-Bun.spawnSync([
-  "git",
-  "-C",
-  OTHER,
-  "remote",
-  "add",
-  "origin",
-  "https://github.com/acme-labs/demo.git",
-])
+git(SCRATCH, "init", "-q", OTHER)
+git(OTHER, "remote", "add", "origin", "https://github.com/acme-labs/demo.git")
 // A repo with a heavy path staged, as no-glm-heavy-path's own test stages one.
 const GLM_REPO = join(SCRATCH, "glm-repo")
-const gitIn = (dir: string, ...args: string[]) =>
-  Bun.spawnSync([
-    "git",
-    "-C",
-    dir,
-    "-c",
-    "user.name=t",
-    "-c",
-    "user.email=t@t",
-    "-c",
-    "commit.gpgsign=false",
-    ...args,
-  ])
-gitIn(SCRATCH, "init", "-q", "-b", "canary", GLM_REPO)
-gitIn(GLM_REPO, "commit", "-q", "--allow-empty", "-m", "base")
+git(SCRATCH, "init", "-q", "-b", "canary", GLM_REPO)
+git(GLM_REPO, "commit", "-q", "--allow-empty", "-m", "base")
 mkdirSync(join(GLM_REPO, "web", "next", "src"), { recursive: true })
 writeFileSync(join(GLM_REPO, "web", "next", "src", "x.ts"), "x\n")
-gitIn(GLM_REPO, "add", ".")
+git(GLM_REPO, "add", ".")
 // The leak guard's lists as core holds them, with ext.links guarding a made-up org's repositories, as its own test sets them.
 const LISTS = join(CHECKOUT, "extensions", "core", "lists")
 const LEAK = join(SCRATCH, "leak")
@@ -115,11 +95,11 @@ const SYNCED = storeWith(
   { "ext.repos": { acme: "quillco/acme-skills" } },
 )
 mkdirSync(join(SYNCED, "extensions", "acme"), { recursive: true })
-Bun.spawnSync(["git", "-C", join(SYNCED, "extensions", "acme"), "init", "-q"])
+git(join(SYNCED, "extensions", "acme"), "init", "-q")
 // A fabricated main checkout (holds scripts/spawn.sh and maps ask/thread to their Playground entries) and a linked worktree of it whose package.json and entry files match byte for byte, since no-desktop-owner-app's prose allowance holds from the main checkout alone. PLAYGROUND_REPO pins mainCheckout() to NDMAIN, restored after.
 const NDMAIN = join(SCRATCH, "nd-main")
 const NDWORK = join(SCRATCH, "nd-work")
-gitIn(SCRATCH, "init", "-q", "-b", "canary", NDMAIN)
+git(SCRATCH, "init", "-q", "-b", "canary", NDMAIN)
 mkdirSync(join(NDMAIN, "scripts"), { recursive: true })
 writeFileSync(join(NDMAIN, "scripts", "spawn.sh"), "#!/bin/sh\n")
 mkdirSync(join(NDMAIN, "api", "hono", "src", "bin"), { recursive: true })
@@ -134,9 +114,9 @@ writeFileSync(
     },
   })}\n`,
 )
-gitIn(NDMAIN, "add", ".")
-gitIn(NDMAIN, "commit", "-q", "-m", "base")
-gitIn(NDMAIN, "worktree", "add", "-q", "--detach", NDWORK)
+git(NDMAIN, "add", ".")
+git(NDMAIN, "commit", "-q", "-m", "base")
+git(NDMAIN, "worktree", "add", "-q", "--detach", NDWORK)
 const PRIOR_REPO = process.env.PLAYGROUND_REPO
 process.env.PLAYGROUND_REPO = NDMAIN
 afterAll(() =>

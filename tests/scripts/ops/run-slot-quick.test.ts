@@ -377,6 +377,43 @@ describe("the quick slot holds while load5 is at or over the load line", () => {
     expect(existsSync(run.marker)).toBe(false)
   })
 
+  // #525: load from outside run-slot held a 2 s install 1,813 s and a 3 s test 1,952 s, so a quick run whose last 3 runs each ended in 15 s or less goes past the line
+  // Starts bun run docs:wrap through run-slot after a runs log whose earlier runs of the same line took ran's seconds, oldest first
+  const after = (m: ReturnType<typeof loaded>, ran: number[]) => {
+    const command = ["bun", "run", "docs:wrap"]
+    const marker = join(m.root, "a")
+    writeFileSync(
+      join(m.ops, "run-slot.runs.log"),
+      ran
+        .map(
+          (s, i) =>
+            `2026-11-02T10:00:0${i}Z ask worker-q ${900 + i} ${[...command, marker].join(" ")}\n2026-11-02T10:01:0${i}Z end worker-q ${900 + i} rc=0 ran=${s}s\n`,
+        )
+        .join(""),
+    )
+    return m.start("worker-q", {}, undefined, command, marker)
+  }
+
+  test("a quick run with no runs on record waits at load5 22", async () => {
+    const run = after(loaded(22), [])
+    expect(await run.saw(LOAD_WAIT)).toBe(true)
+    expect(existsSync(run.marker)).toBe(false)
+    await stop(run.p)
+  })
+
+  test("but one whose last 3 runs each ended in 15 s or less starts at once", async () => {
+    const run = after(loaded(22), [400, 2, 15, 3])
+    expect(await run.ran()).toBe(true)
+    expect(await run.saw(LOAD_WAIT)).toBe(false)
+  })
+
+  test("and one whose last run took 16 s still waits", async () => {
+    const run = after(loaded(22), [2, 3, 16])
+    expect(await run.saw(LOAD_WAIT)).toBe(true)
+    expect(existsSync(run.marker)).toBe(false)
+    await stop(run.p)
+  })
+
   test("a commit takes its slot at load5 30, as before", async () => {
     const m = loaded(30)
     const run = m.start("worker-q", {}, undefined, ["git", "commit"])
