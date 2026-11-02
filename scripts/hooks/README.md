@@ -54,7 +54,9 @@ Only the first reading moves the folder, sets variables and records files for th
   So the reader names its folder whether or not the folder is there as it reads the line, which is how the worktree line of [AGENTS.md](../../AGENTS.md)'s Workflow rule reaches its new worktree (`git worktree add <path> && cd <path> && git merge origin/canary`, `mkdir -p <path> && cd <path> && git commit -m x`).
   That reading holds while the chain holds: at the first command the chain does not reach, one after a `;`, a newline, an `&` or an `||`, the folders from before that `cd` are the shell's again beside the one it named (`Env.cwdChain`), since that command runs whether or not the `cd` did (`false && cd <path>; git commit -m x`, refused in both folders).
   A `!` in front of the `cd` keeps those folders from the start, since it turns the `cd`'s own failure into success and the chain carries on with the shell where it was (`! cd <path> && git commit -m x`); an even count of them reads as none.
-  A script a command of the chain reads (`sh -c`, `eval`, `source`) runs only because the chain reached it, so the chain is settled for every command in that script, and the line's own chain carries on after it.
+  Only a command an operator joins to the one before it at the top level frees the folder that way: the first command of a group, of a body or of a script a command of the chain reads (`(…)`, `{ …; }`, `if`, a loop, `sh -c`, `eval`, `source`) runs because whatever runs it ran, which the chain reached,
+  so the `cd` before it has run and its folder stands (`cd <path> && (git commit -m x)`, `cd <path> && sh -c "git add -A"`).
+  The line's own chain carries on after such a script.
 - Every other `cd` leaves `Env.cwd` unnamed and keeps each folder the shell may be in: the folder before it, and each folder its target names, read against every folder the shell may already be in (`Env.cwdMaybe`).
   A relative target a count or a loop may run again adds every folder above it.
   A function's or a brace group's own `cd` adds its folder to `Env.cwdHeld`, which no later `cd` clears, since the line may call that body at any point.
