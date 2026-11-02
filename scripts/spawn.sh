@@ -1024,15 +1024,17 @@ case "$MODE" in
     [ "$KIND" = dispatcher ] && { [ "$NAME" = "$TO" ] || { [ "$(session_kind "$NAME")" = dispatcher ] && ! second_dispatcher "$NAME"; }; } && FIRST=1 TO=
     DIR="${PLAYGROUND_REPO:-$MAIN}/.claude/worktrees/leads"
     # A fresh checkout has no leads worktree until its first manager start cuts one as branch leads from origin's copy of the branch the checkout was cloned on, tracking it: canary only for a checkout cloned on canary on purpose, else main, so a public install's managers run what it shipped. A branch of its own, since the checkout holds its branch already, and a manager's bare git calls land in its own tree, never the main checkout.
+    CUT=
     if [ ! -e "$DIR" ]; then
       base=main
       [ "$(git -C "${PLAYGROUND_REPO:-$MAIN}" symbolic-ref -q --short HEAD 2>/dev/null)" = canary ] && base=canary
       made=$(git -C "${PLAYGROUND_REPO:-$MAIN}" worktree add -q --track -B leads "$DIR" "origin/$base" 2>&1) || refuse "git worktree add $DIR origin/$base failed, so there is no leads worktree to open in: ${made%%$'\n'*}"
+      CUT=1
     fi
     [ -d "$DIR" ] || refuse "$DIR is not a folder"
-    # Its install follows whenever it has no node_modules, a new cut's or one a refused move kept, since a manager runs bun run from it; a failed install moves it to the trash for the next start to cut again, and a refused move keeps it for the next start's install.
+    # Its install follows whenever it has no node_modules, a new cut's or one an earlier start kept, since a manager runs bun run from it; a failed install moves only this start's cut to the trash for the next start to cut again, and keeps any other leads worktree, which may hold work, for the next start's install.
     if [ ! -d "$DIR/node_modules" ]; then
-      made=$(bash "$REPO/scripts/ops/run-slot.sh" "$NAME" -- "$BUN" install --frozen-lockfile --ignore-scripts --cwd "$DIR" 2>&1) || { gone=$("$BUN" --no-env-file "$REPO/packages/scripts/src/playground/cli.ts" rm --worktree "$DIR" --reason "its install failed" 2>&1) || refuse "bun install in the new leads worktree $DIR failed (${made##*$'\n'}), and playground rm --worktree refused to move it, so it stays: ${gone##*$'\n'}"; refuse "bun install in the new leads worktree $DIR failed, so it is moved to the trash for the next start to cut again: ${made##*$'\n'}"; }
+      made=$(bash "$REPO/scripts/ops/run-slot.sh" "$NAME" -- "$BUN" install --frozen-lockfile --ignore-scripts --cwd "$DIR" 2>&1) || { [ -n "${CUT:-}" ] || refuse "bun install in the leads worktree $DIR failed, and this start did not cut it, so it stays for the next start's install: ${made##*$'\n'}"; gone=$("$BUN" --no-env-file "$REPO/packages/scripts/src/playground/cli.ts" rm --worktree "$DIR" --reason "its install failed" 2>&1) || refuse "bun install in the new leads worktree $DIR failed (${made##*$'\n'}), and playground rm --worktree refused to move it, so it stays: ${gone##*$'\n'}"; refuse "bun install in the new leads worktree $DIR failed, so it is moved to the trash for the next start to cut again: ${made##*$'\n'}"; }
     fi
     ;;
   resume)

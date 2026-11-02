@@ -365,6 +365,26 @@ describe("a manager starts in a workspace of its own, in the leads worktree", ()
     expect(installs(r.home)).toHaveLength(1)
   })
 
+  test("a failed install of a leads worktree this start did not cut keeps it and moves nothing", async () => {
+    const r = await spawn(
+      ["manager", "optimizer", "b.md"],
+      [],
+      { FAKE_INSTALL_FAIL: "1", NO_LEADS: "1", ROSTER_JSON: '{"agents":[]}' },
+      undefined,
+      undefined,
+      (home) => {
+        checkout(home)
+        const factory = join(home, "code", "factory")
+        git(factory, "worktree", "add", "-q", "--track", "-B", "leads", leads(home), "origin/main")
+      },
+    )
+    expect(r.code).toBe(1)
+    expect(placing(r)).toEqual([])
+    expect(r.err).toContain("this start did not cut it, so it stays")
+    expect(existsSync(leads(r.home))).toBe(true)
+    expect(existsSync(join(r.home, ".playground", "trash"))).toBe(false)
+  })
+
   test("a failed leads install that playground rm refuses keeps the worktree and names the refusal", async () => {
     const r = await spawn(
       ["manager", "optimizer", "b.md"],
