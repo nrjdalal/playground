@@ -1,16 +1,20 @@
 import { afterAll, describe, expect, test } from "bun:test"
 import {
   chmodSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   realpathSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 
+import { MARKER } from "../../../../../../packages/safe-delete/src"
 import {
   fixtureDir,
   mcpConfig,
@@ -193,23 +197,32 @@ console.log(JSON.stringify({ permission_denials: [], result: searched, type: "re
       token: "t",
     })
 
+  // Each run's folder in a side's scratch, a marked scratch folder of its own, oldest first.
+  const runsOf = (dir: string, i: number) =>
+    readdirSync(join(scratch, dir))
+      .filter((name) => name.startsWith(`run-${i}-`))
+      .map((name) => join(scratch, dir, name))
+      .sort((a, b) => statSync(a).birthtimeMs - statSync(b).birthtimeMs)
+
   test("each run gets its own HOME and the shim, and signs its stream", async () => {
     const result = await side("plain", { ANTHROPIC_API_KEY: "k", PATH: process.env.PATH })
     expect(result.misses).toEqual([])
     expect(result.signatures).toEqual(
       Array(2).fill(JSON.stringify({ denials: [], reads: ["mcp__linear-shared__get_issue"] })),
     )
-    const given = JSON.parse(readFileSync(join(scratch, "plain/run-1/home/given.json"), "utf8"))
-    expect(given.env.HOME).toBe(join(scratch, "plain/run-1/home"))
+    const [run1] = runsOf("plain", 1)
+    expect(existsSync(join(run1!, MARKER))).toBe(true)
+    const given = JSON.parse(readFileSync(join(run1!, "home/given.json"), "utf8"))
+    expect(given.env.HOME).toBe(join(run1!, "home"))
     expect(given.env.ANTHROPIC_API_KEY).toBeUndefined()
-    expect(realpathSync(join(scratch, "plain/run-1/home/.claude/skills/claim"))).toBe(
+    expect(realpathSync(join(run1!, "home/.claude/skills/claim"))).toBe(
       realpathSync(join(SCOPE, "skills/claim")),
     )
     expect(given.argv).toContain("dontAsk")
     expect((await side("plain", { PATH: process.env.PATH })).misses).toEqual([])
-    expect(readFileSync(join(scratch, "plain/run-0/stream.jsonl"), "utf8")).toContain(
-      '"result":"[]\\n"',
-    )
+    const reruns = runsOf("plain", 0)
+    expect(reruns).toHaveLength(2)
+    expect(readFileSync(join(reruns[1]!, "stream.jsonl"), "utf8")).toContain('"result":"[]\\n"')
   })
 
   test("a gh call the recording lacks comes back as a miss", async () => {

@@ -1,6 +1,7 @@
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs"
-import { tmpdir } from "node:os"
+import { mkdirSync } from "node:fs"
 import { dirname, join } from "node:path"
+
+import { makeScratch, removeScratch } from "@packages/safe-delete"
 
 // The Agent Skills reference validator, pinned to one commit of agentskills/agentskills and run through uv, over every skill core and the buckets ship. The keys Claude Code reads beside the spec's are dropped from a copy of each SKILL.md first, so any other key fails as the spec has it.
 export const PIN =
@@ -42,7 +43,7 @@ export const specOnly = (text: string, path = ""): string => {
 
 if (import.meta.main) {
   const root = join(import.meta.dir, "..", "..", "..", "..")
-  const scratch = mkdtempSync(join(tmpdir(), "skills-ref-"))
+  const scratch = makeScratch("skills-ref-")
   const failed: string[] = []
   try {
     const files = GLOBS.flatMap((glob) => [...new Bun.Glob(glob).scanSync({ cwd: root })]).sort()
@@ -66,7 +67,8 @@ if (import.meta.main) {
       `${files.length - failed.length} of ${files.length} skills pass skills-ref validate`,
     )
   } finally {
-    rmSync(scratch, { force: true, recursive: true })
+    const refused = removeScratch(scratch)
+    if (refused) console.error(`skills-ref: ${refused}`)
   }
   process.exit(failed.length ? 1 : 0)
 }
