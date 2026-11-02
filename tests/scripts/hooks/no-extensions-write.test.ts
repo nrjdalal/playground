@@ -536,6 +536,10 @@ describe("a quoted argument is read as a command line only where a program runs 
       "sudo whose user option comes first in a cluster, its value a uid",
       "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sudo -us#0",
     ],
+    [
+      "doas whose user option comes first in a cluster and takes the shell letter as its value",
+      "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | doas -us",
+    ],
   ])("%s runs from a worktree", async (_, command) => {
     expect(await at(command, join(homedir(), "x", ".claude", "worktrees", "y"))).toBeUndefined()
   })
