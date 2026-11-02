@@ -82,6 +82,14 @@ function lexScript(value: string, env: Env): Lexed {
   return lex(value, env.known)
 }
 
+// A script with xargs' -I string filled in from stdin, refused before it is built when it would outgrow a script the hook reads.
+export function filled(script: string, mark: string, value: string): string {
+  const count = script.split(mark).length - 1
+  if (deadline !== undefined && script.length + count * value.length > MAX_SCRIPT)
+    throw new RangeError("a script too large to read")
+  return script.replaceAll(mark, value)
+}
+
 // A text a command writes or reads from stdin, unknown past the size of a file the hook reads, so a text that doubles stops growing.
 const held = (text: Text): Text => (text.value.length > MAX_BYTES ? unknown(LARGE) : text)
 
@@ -208,6 +216,21 @@ const ESCAPES: Record<string, string> = {
 }
 
 export const unknown = (why: string): Text => ({ unknown: why, value: UNKNOWN })
+
+// Each scope's variable names in the order they were set, so a hook reads only those set since it last looked, where a read of them all before each command grows with the square of their count; every set here goes through setVar.
+const setLog = new WeakMap<Map<string, Text>, string[]>()
+const setVar = (vars: Map<string, Text>, key: string, value: Text): void => {
+  vars.set(key, value)
+  const log = setLog.get(vars)
+  if (log) log.push(key)
+  else setLog.set(vars, [key])
+}
+
+// The names a scope's variables were set by since a hook's cursor, every name on its first look (a copied scope's included), and the cursor that marks where it read to.
+export function varsSince(vars: Map<string, Text>, cursor: number | undefined): [string[], number] {
+  const log = setLog.get(vars) ?? []
+  return [cursor === undefined ? [...vars.keys()] : log.slice(cursor), log.length]
+}
 
 const merge = (out: Text, part: Text): void => {
   out.value += part.value
@@ -497,7 +520,8 @@ function word(lx: Lexer): Word {
       lx.i++
     }
   }
-  if (/\{[^{}]*(?:,|\.\.)[^{}]*\}/.test(bare)) out.unknown ??= "a brace expansion"
+  // the lookahead finds the close once, so a { with no } costs its length rather than its square
+  if (/\{(?=[^{}]*\})[^{}]*(?:,|\.\.)/.test(bare)) out.unknown ??= "a brace expansion"
   return out
 }
 
@@ -654,7 +678,10 @@ export type Parsed = {
 const SPLIT = /^(?:-[0iv]*S|--split-string(?:=|$))(.*)$/
 
 export function parse(cmd: Command): Parsed {
-  let { words } = cmd
+  // the words still to read, the next one last, so env -S puts its words back in front in the time of their own count
+  const rest = cmd.words.toReversed()
+  const peek = (): Word | undefined => rest[rest.length - 1]
+  const take = (): Word | undefined => rest.pop()
   const local = new Map<string, Text>()
   const assign = (w: Word) => {
     const eq = w.value.indexOf("=")
@@ -662,53 +689,50 @@ export function parse(cmd: Command): Parsed {
   }
   let chdir: Word | undefined
   let xargs: Xargs
-  let k = 0
-  while (k < words.length && !words[k].quoted) {
-    if (RESERVED.has(words[k].value)) k++
-    else if (words[k].value === "function") k += 2
+  for (let w = peek(); w && !w.quoted; w = peek()) {
+    if (RESERVED.has(w.value)) take()
+    else if (w.value === "function") rest.length = Math.max(0, rest.length - 2)
     else break
   }
-  while (k < words.length && ASSIGN.test(words[k].value)) assign(words[k++])
+  while (ASSIGN.test(peek()?.value ?? "")) assign(take() as Word)
   for (;;) {
-    const wrapper = program(words[k]?.value ?? "")
+    const wrapper = program(peek()?.value ?? "")
     const takes = WRAPPERS.get(wrapper)
     if (!takes) break
     if (wrapper === "xargs") xargs ??= {}
-    k++
-    while (k < words.length) {
-      const v = words[k].value
-      if (ASSIGN.test(v)) assign(words[k++])
+    take()
+    for (let w = peek(); w; w = peek()) {
+      const v = w.value
+      if (ASSIGN.test(v)) assign(take() as Word)
       // env -S splits its one string into the words it runs
       else if (wrapper === "env" && SPLIT.test(v)) {
         const attached = SPLIT.exec(v)?.[1] ?? ""
-        const split = (attached || words[k + 1]?.value || "")
-          .split(/\s+/)
-          .filter(Boolean)
-          .map((value) => ({ quoted: false, value }))
-        words = [...words.slice(0, k), ...split, ...words.slice(attached ? k + 1 : k + 2)]
+        take()
+        const split = (attached || take()?.value || "").split(/\s+/).filter(Boolean)
+        for (let j = split.length - 1; j >= 0; j--) rest.push({ quoted: false, value: split[j] })
       } else if (wrapper === "env" && (v === "-C" || v === "--chdir")) {
-        chdir = words[k + 1]
-        k += 2
+        take()
+        chdir = take()
       } else if (wrapper === "env" && /^(?:-C|--chdir=)./.test(v)) {
-        chdir = { ...words[k], value: v.replace(/^(?:-C|--chdir=)/, "") }
-        k++
+        chdir = slice(w, v.startsWith("-C") ? 2 : "--chdir=".length)
+        take()
       } else if (xargs && /^(?:-[IiJ]|--replace)/.test(v)) {
         const attached = /^(?:-[IiJ]|--replace=?)(.*)$/.exec(v)?.[1] ?? ""
-        const separate = v === "-I" || v === "-J"
-        xargs.replace = separate ? words[k + 1]?.value : attached || "{}"
-        k += separate ? 2 : 1
-      } else if (takes.has(v)) k += 2
-      else if (v.startsWith("-") && v !== "-") k++
+        take()
+        xargs.replace = v === "-I" || v === "-J" ? take()?.value : attached || "{}"
+      } else if (takes.has(v)) rest.length = Math.max(0, rest.length - 2)
+      else if (v.startsWith("-") && v !== "-") take()
       else break
     }
-    if (COUNTED.has(wrapper)) k++
+    if (COUNTED.has(wrapper)) take()
   }
+  const first = take()
   return {
-    args: words.slice(k + 1),
+    args: rest.reverse(),
     chdir,
-    first: words[k],
+    first,
     local,
-    name: k < words.length ? program(words[k].value) : "",
+    name: first ? program(first.value) : "",
     xargs,
   }
 }
@@ -792,7 +816,7 @@ export async function examine(
     if (verdict) return verdict
   }
   if (name === "") {
-    for (const [key, value] of local) env.vars.set(key, value)
+    for (const [key, value] of local) setVar(env.vars, key, value)
     if (builtins) verdict = await visit(cmd, parsed, here)
   } else if (name === "cd" || name === "pushd") {
     env.cwd = cmd.detached ? undefined : await cdTarget(args, env)
@@ -800,7 +824,7 @@ export async function examine(
   else if (EXPORTS.has(name)) {
     for (const w of args.filter((a) => ASSIGN.test(a.value))) {
       const eq = w.value.indexOf("=")
-      env.vars.set(w.value.slice(0, eq), slice(w, eq + 1))
+      setVar(env.vars, w.value.slice(0, eq), slice(w, eq + 1))
     }
     if (builtins) verdict = await visit(cmd, parsed, here)
   } else if (SHELLS.has(name))
@@ -866,7 +890,7 @@ async function shell(
     let script = operand.value
     if (xargs?.replace && script.includes(xargs.replace)) {
       const fed = await stdinOf(cmd, env)
-      script = script.replaceAll(xargs.replace, fed.unknown ? UNKNOWN : fed.value.trim())
+      script = filled(script, xargs.replace, fed.unknown ? UNKNOWN : fed.value.trim())
     }
     return run(lexScript(script, env), subshell(env), visit, builtins)
   }
@@ -967,11 +991,13 @@ async function outputOf(cmd: Command, env: Env): Promise<Text> {
 // printf reuses its format while arguments remain; a pass that takes none ends it.
 function printf([format = "", ...args]: string[]): string {
   const conversion = /%(?:%|[-+ #0']*(?:[1-9]\d*)?(?:\.\d+)?([a-zA-Z]))/g
+  const pattern = decode(format)
   let out = ""
   let k = 0
   for (;;) {
+    tick()
     const before = k
-    out += decode(format).replace(conversion, (_, kind?: string) => {
+    out += pattern.replace(conversion, (_, kind?: string) => {
       if (!kind) return "%"
       const value = args[k++] ?? ""
       return kind === "b" ? decode(value) : value

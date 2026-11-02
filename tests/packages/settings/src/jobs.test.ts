@@ -86,7 +86,7 @@ describe("the job registry", () => {
     expect(jobs.map((job) => job.name)).toEqual([...jobs.map((job) => job.name)].sort())
   })
 
-  test("a stored row naming cmux or auto, with needsCmux or without it, loads and runs in herdr, and one with an unknown key is skipped", () => {
+  test("a stored row naming cmux, auto or herdr loads and runs in herdr, and one with an unknown key is skipped", () => {
     const sweep = jobKey("ops-sweep")
     const stored = (value: Record<string, unknown>) =>
       renderJobs(
@@ -94,16 +94,43 @@ describe("the job registry", () => {
         [],
         fill,
       ).jobs.find((job) => job.name === "ops-sweep")!
-    const { needsCmux: _, ...bare } = { ...JOBS["ops-sweep"]!, enabled: true }
-    for (const row of [
-      { ...bare, needsCmux: true, runtime: "cmux" },
-      { ...bare, needsCmux: false, runtime: "auto" },
-      bare,
-    ]) {
+    const on = { ...JOBS["ops-sweep"]!, enabled: true }
+    for (const row of [{ ...on, runtime: "cmux" }, { ...on, runtime: "auto" }, on]) {
       expect(stored(row).disabled).toBeUndefined()
       expect(stored(row).runtime).toBe("herdr")
     }
-    expect(stored({ ...bare, madeUp: true }).disabled).toBe(true)
+    expect(stored({ ...on, madeUp: true }).disabled).toBe(true)
+  })
+
+  test("a stored row that still carries needsCmux loads with its enabled state and without the field, and one that set it with no runtime runs in herdr", () => {
+    const stored = (name: string, value: Record<string, unknown>) =>
+      renderJobs(
+        settingsFor([{ key: jobKey(name), scope: "me", value }], "me").values,
+        [],
+        fill,
+      ).jobs.find((job) => job.name === name)!
+    for (const name of Object.keys(JOBS)) expect(JOBS[name]).not.toHaveProperty("needsCmux")
+    const sweep = { ...JOBS["ops-sweep"]!, enabled: true }
+    const { runtime: _, ...noRuntime } = sweep
+    for (const [row, runtime] of [
+      [{ ...sweep, needsCmux: true }, "herdr"],
+      [{ ...sweep, needsCmux: false, runtime: "cmux" }, "herdr"],
+      [{ ...noRuntime, needsCmux: true }, "herdr"],
+      [{ ...noRuntime, needsCmux: false }, undefined],
+    ] as const) {
+      const job = stored("ops-sweep", row)
+      expect(job.disabled).toBeUndefined()
+      expect(job.runtime).toBe(runtime)
+      expect(job).not.toHaveProperty("needsCmux")
+    }
+    expect(stored("ops-sweep", { ...sweep, needsCmux: true, madeUp: true }).disabled).toBe(true)
+    const tick = stored("ops-tick", { ...JOBS["ops-tick"]!, enabled: false, needsCmux: false })
+    expect(tick.disabled).toBe(true)
+    expect(tick).not.toHaveProperty("needsCmux")
+    const company = { command: "~/x/run.sh", heartbeat: "ops-company", name: "ops-company" }
+    const kept = { ...company, needsCmux: true }
+    const { jobs } = renderJobs({}, [kept], fill)
+    expect(jobs.find((job) => job.name === "ops-company")).toEqual({ ...company, runtime: "herdr" })
   })
 
   test("its schema takes every shape the runner reads, and refuses a job with no schedule", () => {
@@ -143,6 +170,9 @@ describe("the job registry", () => {
       key: "jobs.opsSweep",
       value: { enabled: false, pausedFor: "made-up" },
     })
+    const old = importedJob({ name: "ops-sweep", needsCmux: true }, null)
+    expect(old).toMatchObject({ key: "jobs.opsSweep", value: { enabled: true, runtime: "herdr" } })
+    expect("value" in old && old.value).not.toHaveProperty("needsCmux")
   })
 
   test("a plist's program and folder read from its XML, and a plist with none reads as null", () => {
