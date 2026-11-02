@@ -37,8 +37,8 @@ export const NO_PR_AFTER = 900
 export const PRUNE_EVERY = 21600
 export const REPEATS = 4
 export const REVIEWER_LATE = 1200
-export const STALL_AFTER = 1800
 export const STALE_EVERY = 14_400
+export const STALL_AFTER = 1800
 
 const IDLE_SQL =
   "select count(*) from pg_stat_activity where backend_type = 'client backend' and pid <> pg_backend_pid()"
@@ -352,7 +352,7 @@ export async function prlessBranches(ctx: Context, agents: Json[]): Promise<stri
   return []
 }
 
-// Each open PR of ours, in the factory repo or the repo of a PR a live roster row names, read in one GraphQL search into ops/alerts-prs.json, which ops-unstick folds into alerts-pending.json: one whose last REPEATS ReviewBot verdicts hold one score below 5 (a fresh round resets the idle clock, so a 3/5 every 20 minutes never idles), and one with no new commit, verdict or comment for STALL_AFTER seconds that waits on neither its checks nor merge-on-ready. A PR held on purpose is left out: a park or hold label, or a line of its body or newest comment opening with Held or Parked.
+// Each open PR of ours, in the factory repo or the repo of a PR a live roster row names, read in one GraphQL search into ops/alerts-prs.json, which ops-unstick folds into alerts-pending.json: one whose last REPEATS ReviewBot verdicts hold one score below 5 (a fresh round resets the idle clock, so a 3/5 every 20 minutes never idles), and one with no new commit, verdict or comment for STALL_AFTER seconds that waits on neither its checks nor merge-on-ready. A PR held on purpose is left out: a park or hold label, or a line of its body or newest comment opening with Held: or Parked:.
 export async function stalledPrs(ctx: Context, agents: Json[]): Promise<string[]> {
   let factory: string
   try {
@@ -363,14 +363,14 @@ export async function stalledPrs(ctx: Context, agents: Json[]): Promise<string[]
   const repos = new Set([factory])
   for (const a of agents) {
     const m = /github\.com\/([\w.-]+\/[\w.-]+)\/pull\/\d+/i.exec(String(a.pr ?? ""))
-    if (m && a.status !== "ended") repos.add(m[1]!.toLowerCase())
+    if (m && (STATUSES.live as string[]).includes(String(a.status))) repos.add(m[1]!.toLowerCase())
   }
   const search = `is:pr is:open author:@me ${[...repos]
     .sort()
     .map((r) => `repo:${r}`)
     .join(" ")}`
   const fields =
-    "number body repository { nameWithOwner } labels(first: 20) { nodes { name } } comments(last: 50) { nodes { body createdAt } } reviews(last: 1) { nodes { submittedAt } } commits(last: 1) { nodes { commit { committedDate statusCheckRollup { state } } } }"
+    "number body repository { nameWithOwner } labels(first: 20) { nodes { name } } comments(last: 100) { nodes { body createdAt } } reviews(last: 1) { nodes { submittedAt } } commits(last: 1) { nodes { commit { committedDate statusCheckRollup { state } } } }"
   const query = `{ search(query: ${JSON.stringify(search)}, type: ISSUE, first: 50) { nodes { ... on PullRequest { ${fields} } } } }`
   const r = await ctx.run(["gh", "api", "graphql", "-f", `query=${query}`], { timeoutMs: 60_000 })
   let prs: {
@@ -399,7 +399,7 @@ export async function stalledPrs(ctx: Context, agents: Json[]): Promise<string[]
   const ready = new Set(
     (Array.isArray(queue?.queue) ? queue.queue : []).filter((e) => e?.readyAt).map((e) => e.pr),
   )
-  const held = (text = "") => /^\W*(held|parked)\b/im.test(text)
+  const held = (text = "") => /^\W*(held|parked)\W*:/im.test(text)
   const iso = (ms: number) => `${new Date(ms).toISOString().slice(0, 19)}Z`
   const alerts: Json[] = []
   for (const pr of prs) {
@@ -409,7 +409,7 @@ export async function stalledPrs(ctx: Context, agents: Json[]): Promise<string[]
     if (
       held(pr.body) ||
       held(comments.at(-1)?.body) ||
-      (pr.labels?.nodes ?? []).some((l) => /park|hold/i.test(l.name ?? ""))
+      (pr.labels?.nodes ?? []).some((l) => /\b(park|hold)/i.test(l.name ?? ""))
     )
       continue
     const commit = pr.commits?.nodes?.[0]?.commit

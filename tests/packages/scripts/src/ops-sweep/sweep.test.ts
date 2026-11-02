@@ -551,21 +551,30 @@ describe("stalledPrs", () => {
     expect(await lines([{ comments: repeat, labels: ["on hold"] }])).toEqual([])
     expect(await lines([{ comments: repeat, labels: ["parked"] }])).toEqual([])
     expect(
-      await lines([{ comments: [...repeat, { age: 1, body: "**Held** until the lock lands." }] }]),
+      await lines([{ comments: [...repeat, { age: 1, body: "**Held:** until the lock lands." }] }]),
     ).toEqual([])
-    expect(
-      await lines([{ body: "The lock is held by the train.", comments: repeat, commitAge: 40 }]),
-    ).toEqual(["last 4 verdicts 3/5, round 12"])
+    for (const body of [
+      "The lock is held by the train.",
+      "- Parked work: none related.",
+      "- **Held/parked:** a line opening with the marker.",
+    ])
+      expect(await lines([{ body, comments: repeat, commitAge: 40 }])).toEqual([
+        "last 4 verdicts 3/5, round 12",
+      ])
+    expect(await lines([{ comments: repeat, labels: ["threshold"] }])).toEqual([
+      "last 4 verdicts 3/5, round 12",
+    ])
   })
 
   test("reads the factory repo and each live row's PR repo in one search for our open PRs (#454)", async () => {
     const { queries } = await stalled(answer([]), [
       { name: "abcdef-worker", pr: "https://github.com/Work/Site/pull/3", status: "working" },
       { name: "ghjkmn-worker", pr: "https://github.com/old/gone/pull/1", status: "ended" },
+      { name: "pqrstv-worker", pr: "https://github.com/old/done/pull/2", status: "merged" },
     ])
     expect(queries).toHaveLength(1)
     expect(queries[0]).toContain("is:pr is:open author:@me repo:acme/app repo:work/site")
-    expect(queries[0]).not.toContain("old/gone")
+    expect(queries[0]).not.toContain("old/")
   })
 
   test("an answer it cannot read is stalled-check-unreadable, and leaves the file as it was (#454)", async () => {

@@ -59,20 +59,18 @@ ops-sweep writes them to `ops/alerts-prs.json` every 5 minutes (`stalledPrs` in 
 - an idle PR: no new commit, verdict or comment for 30 minutes (after one sat two hours unnoticed), unless it waits on its checks or merge-on-ready;
 - a repeated score: its last 4 ReviewBot verdicts hold one score below 5, its line reading like `last 4 verdicts 3/5, round 12`, since each fresh round resets the idle clock (one PR parked after 12 rounds, all 3/5).
 
-A PR held on purpose is left out: one with a park or hold label, or whose body or newest comment has a line opening with Held or Parked.
+A PR held on purpose is left out: one with a park or hold label, or whose body or newest comment has a line opening with `Held:` or `Parked:`.
 
 For a repeated score, the Builder picks one of three with the PR's worker, since another round of the same fix scores the same:
 
 - narrow the change to a literal list of the cases it handles;
 - move the guard to a layer that parses no shell;
-- park it with the workaround written down, in its body's line opening with Parked.
+- park it with the workaround written down, in its body's line opening with `Parked:`.
 
-Done when the worker's next push carries the narrowed change or the moved guard, or the PR reads parked, and the choice is in the Builder's message to the worker.
-
-Every clean-or-conflict call (a conflict above, a head behind canary) comes from a tool that reads git's exit code, never a tree line read by eye: `bun run pr:train forecast` for the queue, `bun run pr:merge <n> --explain` for one PR, whose first line says whether its head merges clean with canary now and as which tree,
+Every clean-or-conflict call (a head that conflicts with canary, or one behind it) comes from a tool that reads git's exit code, never a tree line read by eye: `bun run pr:train forecast` for the queue, `bun run pr:merge <n> --explain` for one PR, whose first line says whether its head merges clean with canary now and as which tree,
 or the files it conflicts in.
 
-Done when every row the recovery scan leaves and every stalled PR is acted on.
+Done when every row the recovery scan leaves and every stalled PR is acted on, each repeated score's pick named in the Builder's message to the worker.
 
 ## 5. Act on your Inbox decisions
 
