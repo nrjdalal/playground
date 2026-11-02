@@ -901,11 +901,24 @@ export async function examine(
 ): Promise<string | undefined> {
   tick()
   const readings = (parsed: Parsed): Parsed[] => [parsed, ...parsed.also.flatMap(readings)]
-  for (const parsed of readings(parse(cmd))) {
-    const verdict = await examineReading(cmd, parsed, env, visit, builtins)
+  const [primary, ...others] = readings(parse(cmd))
+  // only the primary reading moves the folder, sets variables and records files, as canary's one reading did; each other runs on a copy of the env before the command
+  const before = others.length > 0 ? apart(env) : env
+  const verdict = await examineReading(cmd, primary, env, visit, builtins)
+  if (verdict) return verdict
+  for (const parsed of others) {
+    const verdict = await examineReading(cmd, parsed, apart(before), visit, builtins)
     if (verdict) return verdict
   }
 }
+
+const apart = (env: Env): Env => ({
+  ...env,
+  files: new Map(env.files),
+  known: { ...env.known },
+  process: { ...env.process },
+  vars: new Map(env.vars),
+})
 
 async function examineReading(
   cmd: Command,
