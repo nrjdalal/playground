@@ -194,47 +194,37 @@ const definedFunctions = (command: string): Set<string> =>
     ),
   )
 
-// Every text of a variable the call sets or exports, or of a word from the first that names a runner on (behind any wrapper, or a program word the hook cannot read or a function the command defines), that holds a space, a leading ! dropped, read as a command line of its own (a pager, GIT_SSH_COMMAND, a git alias, watch's line); any other program's quoted argument (awk's program) stays one word.
-// Whether a line holds a runner call (a shell's -c and eval included) given a word the hook cannot read or text from a pipe or xargs, in itself or in a script a runner's word carries, since an earlier word may hold its payload (`set -- '…'; eval "$1"`, `$_`, getopts, an array)
-function darkLine(line: string, known: Record<string, string>, depth = 0): boolean {
-  return lex(line, known).commands.some((cmd) => {
-    const { args, first, name, xargs } = parse(cmd)
-    const all = first ? [first, ...args] : args
-    const at = first && marked(name) ? 0 : all.findIndex((word) => runnerOf(word))
-    const runs = at < 0 ? [] : all.slice(at + 1)
-    if (runs.some((word) => marked(word.value))) return true
-    // a runner fed by xargs, or a shell reading its script from a pipe, runs text an earlier command printed
-    if (at >= 0 && (xargs || (cmd.stdin && SHELLS.has(runnerOf(all[at]) ?? "")))) return true
+// Whether a line is read whole, as canary read it: it holds, in a command or a substitution, a runner call other than git (a listed runner, a shell, eval, source or ., a function it defines, a program word the hook cannot read or a glob), or git with config set in the call, since a runner may run any text the line holds (`set -- '…'; eval "$1"`, `git log … | sh`)
+function wholeLine(commands: Command[], functions: Set<string>): boolean {
+  return commands.some((cmd) => {
+    const words = [...cmd.words, ...cmd.redirects.flatMap((r) => (r.target ? [r.target] : []))]
+    if (words.some((word) => word.procs && wholeLine(word.procs, functions))) return true
+    const { args, first, local, name } = parse(cmd)
+    if (!first) return false
+    if (marked(name) || name === "source" || name === "." || functions.has(name.toLowerCase()))
+      return true
+    const all = [first, ...args]
+    const at = all.findIndex((word) => runnerOf(word))
+    if (at < 0) return false
+    if (runnerOf(all[at]) !== "git") return true
     return (
-      depth < 3 &&
-      runs.some(
-        (w) => /\s/.test(w.value) && !marked(w.value) && darkLine(w.value, known, depth + 1),
-      )
+      [...local.keys()].some((key) => key.startsWith("GIT_CONFIG")) ||
+      all.slice(at + 1).some(({ value }) => /^(?:-c|--config-env(?:=|$))/.test(value))
     )
   })
 }
 
-// With `wide`, for a dark line, every word is read, a git message included, as canary read them; `messages` are the git messages kept out of the read.
-function runsOf(
-  parsed: Parsed,
-  env: Env,
-  functions: Set<string>,
-  wide: boolean,
-): { lines: string[]; messages: string[] } {
-  const { args, first, local, name } = parsed
+// Every text of a variable the call sets or exports, and, on a line read whole, of every word, or else of git's words but a commit's or tag's message, which `messages` returns for a gated call's check; each holds a space, a leading ! dropped, and is read as a command line of its own.
+function runsOf(parsed: Parsed, env: Env, whole: boolean): { lines: string[]; messages: string[] } {
+  const { args, first, local } = parsed
   const values = [...local, ...env.vars].flatMap(([, text]) => (text.unknown ? [] : [text.value]))
   const all = first ? [first, ...args] : args
-  const found =
-    first && (marked(name) || functions.has(name.toLowerCase()))
-      ? 0
-      : all.findIndex((word) => runnerOf(word))
-  const from = wide ? 0 : found
+  const from = whole ? 0 : all.findIndex((word) => runnerOf(word))
   const words = from < 0 ? [] : all.slice(from)
-  const git = found < 0 ? -1 : runnerOf(all[found]) === "git" ? found - from : -1
-  const keeps = !wide && git >= 0 && keepsMessage(words.slice(git + 1), env)
+  const keeps = !whole && words.length > 0 && keepsMessage(words.slice(1), env)
   const messages: string[] = []
   for (const [at, word] of words.entries()) {
-    const message = keeps && at > git ? messageAt(words, at) : undefined
+    const message = keeps && at > 0 ? messageAt(words, at) : undefined
     if (message !== undefined) messages.push(message)
     else for (const text of texts(word)) values.push(text.value.replace(/^!/, ""))
   }
@@ -350,7 +340,7 @@ function inspect(raw: string, environment: Environment) {
     }
   }
   const seen = new Set<string>()
-  let wide = false
+  let whole = false
   const visit: Visit = async (cmd: Command, parsed, env) => {
     const slot = slotWords(parsed)
     if (slot)
@@ -381,7 +371,7 @@ function inspect(raw: string, environment: Environment) {
           .map((words) => cliWrite(xargs?.replace ? words : [...words, ...stdinWords]))
           .find(Boolean)
     if (write) return refuse(write)
-    const runs = reader ? undefined : runsOf(parsed, env, functions, wide)
+    const runs = reader ? undefined : runsOf(parsed, env, whole)
     for (const raw of runs?.lines ?? []) {
       const line =
         xargs?.replace && fed
@@ -429,9 +419,10 @@ function inspect(raw: string, environment: Environment) {
     }
   }
   const known = knownVariables(command, environment, directory)
-  wide = darkLine(command, known)
+  const lexed = lex(command, known)
+  whole = wholeLine(lexed.commands, functions)
   return run(
-    lex(command, known),
+    lexed,
     { cwd: directory, files: new Map(), known, process: environment, vars: new Map() },
     visit,
     true,
