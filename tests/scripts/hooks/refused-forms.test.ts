@@ -8,6 +8,7 @@ import { check as extensionRepoWrite } from "../../../scripts/hooks/no-extension
 import { check as extensionsWrite } from "../../../scripts/hooks/no-extensions-write"
 import { check as headlessLogin } from "../../../scripts/hooks/no-headless-login"
 import { check as killByName } from "../../../scripts/hooks/no-kill-by-name"
+import { check as mainCheckout } from "../../../scripts/hooks/no-main-checkout"
 import { check as rawSpawn } from "../../../scripts/hooks/no-raw-spawn"
 import { check as releaseComment } from "../../../scripts/hooks/no-release-comment"
 import { check as stash } from "../../../scripts/hooks/no-stash"
@@ -38,6 +39,7 @@ const PATHS: Paths = {
   HOME,
   LINK: join(HOME, "store"),
   LIST: join(ROOT, "hooks", "desktop-owner-apps.json"),
+  MAIN: join(SCRATCH, "main"),
   ROOT,
   SCOPE,
   WORDS: join(HOME, "words"),
@@ -48,6 +50,7 @@ for (const dir of [
   join(SCOPE, "lists"),
   join(DATA, "handoffs"),
   join(PATHS.WORK, "playground"),
+  join(PATHS.MAIN, ".claude", "worktrees", "a"),
   PATHS.BARE,
 ])
   mkdirSync(dir, { recursive: true })
@@ -122,6 +125,10 @@ const GUARDS: Record<Guard, { folders: Partial<Record<Folder, [string, string]>>
       }),
   },
   "no-kill-by-name": { folders: { checkout: [CHECKOUT, HOME] }, run: (raw) => killByName(raw) },
+  "no-main-checkout": {
+    folders: { checkout: [join(PATHS.MAIN, ".claude", "worktrees", "a"), HOME] },
+    run: (raw, home) => mainCheckout(raw, { HOME: home }, PATHS.MAIN),
+  },
   "no-raw-spawn": { folders: { checkout: [CHECKOUT, HOME] }, run: (raw) => rawSpawn(raw) },
   "no-release-comment": {
     folders: { checkout: [OTHER, HOME] },

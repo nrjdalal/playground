@@ -28,6 +28,9 @@ symlinkSync(ROOT, LINK)
 // a link to a folder inside the root, so a .. after it lands in the root
 const INNER = join(HOME, "inner")
 symlinkSync(join(ROOT, "hooks"), INNER)
+// Links whose names no glob of the root's own names matches: one to the root in the data folder, one to the data folder in the home.
+symlinkSync(ROOT, join(DATA, "store"))
+symlinkSync(DATA, join(HOME, "pg"))
 afterAll(() => rmSync(HOME, { force: true, recursive: true }))
 
 const ENV = { HOME }
@@ -535,6 +538,406 @@ describe("a write by ~ is judged against the home the shell expands it to", () =
   })
 })
 
+// A quoted argument with a space is read as a command line unless every command on the line is on a closed list of readers (awk with a program that runs nothing, cat, grep, head, tail, wc, sort, uniq, cut), with no redirect that writes a file; an awk program that runs a command has its literals read wherever it stands, and sed keeps canary's reading.
+describe("a quoted argument is read as a command line only where a program runs it", () => {
+  const real = { HOME: homedir() }
+  const at = (command: string, cwd: string) =>
+    check(JSON.stringify({ cwd, tool_input: { command }, tool_name: "Bash" }), real)
+  const homes = [homedir(), join(homedir(), ".playground")]
+  test.each([
+    ["awk matching a field to a regex", "awk '$3 ~ /runner/' /dev/null"],
+    ["awk matching a field to a string", `awk '$3 ~ "runner"' /dev/null`],
+    ["awk matching a line naming a runner", "awk '/watch/' /dev/null"],
+    ["awk with a block matching a line naming a runner", "awk '/watch/ {print}' /dev/null"],
+    ["awk with its errors sent to /dev/null", "awk '$3 ~ /runner/' /dev/null 2>/dev/null"],
+    [
+      "awk with its errors joined and piped to head",
+      "awk '$3 ~ /runner/' /dev/null 2>&1 | head -3",
+    ],
+    ["awk reading cat's output", "cat /dev/null | awk '$3 ~ /runner/'"],
+    ["awk by its system path", "/usr/bin/awk '$3 ~ /runner/' /dev/null"],
+    [
+      "grep, awk, sort, uniq and head in a pipe",
+      "grep x /dev/null | awk '$3 ~ /runner/' | sort | uniq -c | head -3",
+    ],
+    ["awk's output cut at a spaced delimiter", "awk '$3 ~ /runner/' /dev/null | cut -d' ' -f1"],
+    ["awk's output counted by wc and tail", "awk '$3 ~ /runner/' /dev/null | tail -n 2 | wc -l"],
+  ])("%s runs from the home and the data folder", async (_, command) => {
+    for (const cwd of homes) expect(await at(command, cwd)).toBeUndefined()
+  })
+
+  test.each([
+    ["ls of a glob", "ls *.md"],
+    ["grep through a glob", "grep -n foo src/*.ts"],
+    ["git add of a glob", "git add docs/*.md"],
+    ["cat of a brace", "cat {a,b}.txt"],
+    ["rm of a glob outside the root", "rm -f build/*.tmp"],
+    ["grep of spaced text through a glob", "grep -rn 'foo bar' docs/*.md"],
+    ["cp of a glob into a spaced folder", "cp docs/*.md 'out dir'"],
+    ["a glob listing, then awk", "ls *.md; awk '{print $1}' f"],
+    ["an unknown variable set, then awk", "x=\"$1\"; awk '{print $1}' f"],
+    ["find running grep on spaced text", "find . -name '*.ts' -exec grep -l 'foo bar' {} +"],
+    ["awk over each file of a glob", "for f in *.md; do awk '/sh -c/ {print}' \"$f\"; done"],
+    [
+      "a git call given an unread word, then a plain commit",
+      "git log \"$REV\"; git commit -m 'fix(x): y'",
+    ],
+  ])("%s runs from a worktree", async (_, command) => {
+    expect(await at(command, join(homedir(), "x", ".claude", "worktrees", "y"))).toBeUndefined()
+  })
+
+  test.each([
+    [
+      "awk printing into the root",
+      `awk '{print > "${join(homedir(), ".playground", "extensions", "x")}"}' /dev/null`,
+    ],
+    [
+      "awk's system() naming the root",
+      `awk 'BEGIN{system("touch ${join(homedir(), ".playground", "extensions", "x")}")}'`,
+    ],
+    ["touch in the root by ~", "touch ~/.playground/extensions/x"],
+    ["awk's system() removing the home", `awk 'BEGIN{system("rm -rf ~")}'`],
+    ["awk printing into a command removing the home", `awk 'BEGIN{print "x" | "rm -rf ~"}'`],
+    ["awk reading a command removing the home", `awk 'BEGIN{"rm -rf ~" | getline}'`],
+    [
+      "awk writing a removal into a git hook",
+      `awk 'BEGIN{print "rm -rf ~" > ".git/hooks/pre-commit"}'`,
+    ],
+    ["awk's system() of a -v value removing the home", "awk -v c='rm -rf ~' 'BEGIN{system(c)}'"],
+    ["gawk's system() removing the home", `gawk 'BEGIN{system("rm -rf ~")}'`],
+    ["nawk's system() removing the home", `nawk 'BEGIN{system("rm -rf ~")}'`],
+    ["sed's e command removing the home", "sed 'e rm -rf ~' /dev/null"],
+    ["sed's addressed e command removing the home", "sed '1e rm -rf ~' /dev/null"],
+    ["gsed's e command removing the home", "gsed '1e rm -rf ~' /dev/null"],
+    [
+      "awk's output sorted into a git hook by sort -o",
+      "awk '$3 ~ /runner/' /dev/null | sort -o .git/hooks/pre-commit",
+    ],
+    [
+      "awk's output written into a git hook by uniq's second file",
+      "awk '$3 ~ /runner/' /dev/null | uniq - .git/hooks/pre-commit",
+    ],
+    [
+      "awk's output sorted through a compress program",
+      "awk '$3 ~ /runner/' /dev/null | sort --compress-program=sh",
+    ],
+    [
+      "awk's output sorted into a git hook by an abbreviated --out",
+      "awk '$3 ~ /runner/' /dev/null | sort --out=.git/hooks/pre-commit",
+    ],
+    [
+      "awk's output sorted through an abbreviated --comp",
+      "awk '$3 ~ /runner/' /dev/null | sort --comp=sh",
+    ],
+    ["a script named awk in the folder given a removal", "./awk 'rm -rf ~'"],
+    ["a script named awk by a relative path given a removal", "bin/awk 'rm -rf ~'"],
+    ["awk run with PATH set in the call", "PATH=. awk 'rm -rf ~'"],
+    [
+      "awk named as /usr/bin/time -o's output file, running watch",
+      "/usr/bin/time -o awk watch 'rm -rf ~'",
+    ],
+    ["awk named as sudo --prompt's value, running watch", "sudo --prompt awk watch 'rm -rf ~'"],
+    ["cut under time, given watch and a removal", "time cut watch 'rm -rf ~'"],
+    ["sort under nohup, given watch and a removal", "nohup sort watch 'rm -rf ~'"],
+    ["uniq under exec, given watch and a removal", "exec uniq watch 'rm -rf ~'"],
+    [
+      "awk after a sed, which keeps canary's reading",
+      "sed -n '/sh -c/p' /dev/null; awk '$3 ~ /runner/' /dev/null",
+    ],
+    [
+      "sed -i '' inserting a removal into a git hook",
+      "sed -i '' '1i\\\nrm -rf ~' .git/hooks/pre-commit",
+    ],
+    [
+      "sed -i '' appending a removal to a git hook",
+      "sed -i '' '$a\\\nrm -rf ~' .git/hooks/pre-commit",
+    ],
+    [
+      "sed -i '' prefixing a removal in a git hook",
+      "sed -i '' 's/^/rm -rf ~; /' .git/hooks/pre-commit",
+    ],
+    ["sed -i prefixing a removal in a git hook", "sed -i 's/^/rm -rf ~; /' .git/hooks/pre-commit"],
+    [
+      "sed -i.bak prefixing a removal in a git hook",
+      "sed -i.bak 's/^/rm -rf ~; /' .git/hooks/pre-commit",
+    ],
+    [
+      "sed --in-place prefixing a removal in a git hook",
+      "sed --in-place 's/^/rm -rf ~; /' .git/hooks/pre-commit",
+    ],
+    [
+      "sed --in-place= with a suffix prefixing a removal in a git hook",
+      "sed --in-place=.bak 's/^/rm -rf ~; /' .git/hooks/pre-commit",
+    ],
+    [
+      "sed -ni prefixing a removal in a git hook",
+      "sed -ni 's/^/rm -rf ~; /p' .git/hooks/pre-commit",
+    ],
+    [
+      "sed -Ei prefixing a removal in a git hook",
+      "sed -Ei 's/^/rm -rf ~; /' .git/hooks/pre-commit",
+    ],
+    [
+      "sed with a trailing -i prefixing a removal in a git hook",
+      "sed 's/^/rm -rf ~; /' .git/hooks/pre-commit -i",
+    ],
+    [
+      "gsed -i prefixing a removal in a git hook",
+      "gsed -i 's/^/rm -rf ~; /' .git/hooks/pre-commit",
+    ],
+    [
+      "/usr/bin/sed -i prefixing a removal in a git hook",
+      "/usr/bin/sed -i '' 's/^/rm -rf ~; /' .git/hooks/pre-commit",
+    ],
+    [
+      "sed's w command writing into the root",
+      `sed 'w ${join(homedir(), ".playground", "extensions", "x")}' /dev/null`,
+    ],
+    [
+      "sed's s///w flag writing into the root",
+      `sed 's/a/b/w ${join(homedir(), ".playground", "extensions", "x")}' /dev/null`,
+    ],
+    ["watch removing the home", "watch 'rm -rf ~'"],
+    ["watch removing by a glob in the data folder", "watch 'rm -rf ~/.playground/ext*'"],
+    ["watch with an unknown word ahead of rm", "watch '$3 rm -rf ~'"],
+    ["watch running the home, its substitution removing it", "watch '~ $(rm -rf ~)'"],
+    ["a git alias removing the home", "git -c alias.x='!rm -rf ~' x"],
+    ["a git alias running its argument on the home", "git -c alias.x='!$1 ~' x rm"],
+    ["git config setting an alias that removes the home", "git config alias.x '!rm -rf ~'"],
+    [
+      "ssh's ProxyCommand touching the root",
+      "ssh -o ProxyCommand='touch ~/.playground/extensions/x' h",
+    ],
+    ["tmux's command removing the home", "tmux new-session 'rm -rf ~'"],
+    ["rsync's -e removing the home", "rsync -e 'rm -rf ~' a b"],
+    ["find's -exec removing the home", "find . -exec sh -c 'rm -rf ~' \\;"],
+    ["GIT_SSH_COMMAND removing the home", "GIT_SSH_COMMAND='rm -rf ~' git fetch"],
+    ["a git alias evaluating the word after -m", `git -c alias.x='!eval "$2"' x -m 'rm -rf ~'`],
+    [
+      "a git alias's sh -c running the word after -m",
+      `git -c alias.x='!sh -c "$2"' x -m 'rm -rf ~'`,
+    ],
+    [
+      "a git alias from the environment running the word after -m behind --attr-source commit",
+      `GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=alias.x GIT_CONFIG_VALUE_0='!eval "$2"' git --attr-source commit x -m 'rm -rf ~'`,
+    ],
+    ["a commit message under a call that sets config", "git -c x.y=z commit -m 'rm -rf ~'"],
+    ["screen's shell removing the home", "screen -dm sh -c 'rm -rf ~'"],
+    ["flock's shell removing the home", "flock /tmp/l sh -c 'rm -rf ~'"],
+    ["a shell held in a variable", "S=sh; $S -c 'rm -rf ~'"],
+    ["the user's shell", "$SHELL -c 'rm -rf ~'"],
+    ["ssh held in a variable", "x=ssh; $x host 'rm -rf ~'"],
+    ["watch held in a loop variable", "for p in watch; do $p 'rm -rf ~'; done"],
+    ["a shell in capitals", "SH -c 'rm -rf ~'"],
+    ["watch with a capital", "Watch 'rm -rf ~'"],
+    ["git in capitals running an alias", "GIT -c alias.x='!rm -rf ~' x"],
+    ["taskpolicy's shell", "taskpolicy -b sh -c 'rm -rf ~'"],
+    ["lockf's shell", "lockf -t0 /tmp/l sh -c 'rm -rf ~'"],
+    ["watch through bun x", "bun x watch 'rm -rf ~'"],
+    ["a shell through pnpm exec", "pnpm exec sh -c 'rm -rf ~'"],
+    ["eval through setsid", "setsid eval 'rm -rf ~'"],
+    ["ssh through sshpass", "sshpass -p x ssh h 'rm -rf ~'"],
+    ["scp's ProxyCommand removing the home", "scp -o ProxyCommand='rm -rf ~' a h:b"],
+    ["a shell named by a ? glob", "/bin/s? -c 'rm -rf ~'"],
+    ["a shell named by a bracket glob", "/bin/[s]h -c 'rm -rf ~'"],
+    ["a shell and its -c from a brace", "{sh,-c} 'rm -rf ~'"],
+    ["a shell from a brace with an empty member", "{sh,} -c 'rm -rf ~'"],
+    ["a globbed shell behind taskpolicy", "taskpolicy -b /bin/s? -c 'rm -rf ~'"],
+    ["a braced shell behind env", "env {sh,-c} 'rm -rf ~'"],
+    ["a braced shell in bash -c's script", `bash -c "{sh,-c} 'rm -rf ~'"`],
+    ["a shell named by a POSIX class", "/bin/[[:alpha:]]h -c 'rm -rf ~'"],
+    ["a shell named by a brace range", "/bin/{r..t}h -c 'rm -rf ~'"],
+    ["a shell named by an extglob", "/bin/@(sh) -c 'rm -rf ~'"],
+    ["a shell named by a leading star", "/bin/*h -c 'rm -rf ~'"],
+    ["a shell from a brace inside the name", "{s,}h -c 'rm -rf ~'"],
+    ["a copy of a shell named by a glob", "./x? -c 'rm -rf ~'"],
+    ["a star-named shell behind taskpolicy", "taskpolicy -b /bin/*h -c 'rm -rf ~'"],
+    ["a function that evals its arguments", `f() { eval "$@"; }; f 'rm -rf ~'`],
+    ["a function that runs its argument by sh -c", `f() { sh -c "$1"; }; f 'rm -rf ~'`],
+    ["a function by the function keyword", `function f { eval "$@"; }; f 'rm -rf ~'`],
+    ["a gated message under git in capitals", "GIT commit -m 'docs: playground ext sync'"],
+    ["a gated message under Git", "Git commit -m 'docs: playground ext sync'"],
+    ["a payload set as an argument, then evaluated", `set -- 'rm -rf ~'; eval "$1"`],
+    ["a payload set as an argument, then run by bash -c", `set -- 'rm -rf ~'; bash -c "$1"`],
+    ["a payload set as an argument, then run by ssh", `set -- 'rm -rf ~'; ssh h "$1"`],
+    ["a payload set as an argument, then run by watch", `set -- 'rm -rf ~'; watch "$1"`],
+    [
+      "a payload set as an argument, then run by the user's shell",
+      `set -- 'rm -rf ~'; "$SHELL" -c "$1"`,
+    ],
+    ["a payload held in the last argument", `true 'rm -rf ~'; eval "$_"`],
+    ["a payload held by getopts", `getopts x o 'rm -rf ~'; eval "$o"`],
+    ["a payload set in bash -c's script, then evaluated", `bash -c 'set -- "rm -rf ~"; eval "$1"'`],
+    [
+      "a commit message run by eval through $_",
+      "git commit --allow-empty -m 'rm -rf ~'; eval \"$_\"",
+    ],
+    [
+      "a commit message run by eval through git log",
+      "git commit --allow-empty -m 'rm -rf ~' && eval \"$(git log -1 --format=%s)\"",
+    ],
+    [
+      "a commit message run by sh -c through git log",
+      "git commit --allow-empty -m 'rm -rf ~'; sh -c \"$(git log -1 --format=%s)\"",
+    ],
+    [
+      "a tag message run by eval through git tag",
+      "git tag -m 'rm -rf ~' v1; eval \"$(git tag -l --format='%(contents)' v1)\"",
+    ],
+    [
+      "a commit message piped into sh",
+      "git commit --allow-empty -m 'rm -rf ~'; git log -1 --format=%s | sh",
+    ],
+    [
+      "a commit message run through xargs and sh -c",
+      "git commit --allow-empty -m 'rm -rf ~'; git log -1 --format=%s | xargs -I{} sh -c '{}'",
+    ],
+    ["a payload held in an array", `args=('rm -rf ~'); sh -c "\${args[0]}"`],
+    [
+      "a commit message sourced through process substitution",
+      "git commit --allow-empty -m 'rm -rf ~'; source <(git log -1 --format=%s)",
+    ],
+    [
+      "a commit message fed to sh as a here-string",
+      "git commit --allow-empty -m 'rm -rf ~'; sh <<< \"$(git log -1 --format=%s)\"",
+    ],
+    [
+      "a commit message sourced from stdin",
+      "git commit --allow-empty -m 'rm -rf ~'; . /dev/stdin <<< \"$(git log -1 --format=%s)\"",
+    ],
+    [
+      "a commit message written to a script sh runs",
+      "git commit --allow-empty -m 'rm -rf ~'; git log -1 --format=%s > f.sh; sh f.sh",
+    ],
+    [
+      "a commit message run as a substitution",
+      "git commit --allow-empty -m 'rm -rf ~'; $(git log -1 --format=%s)",
+    ],
+    [
+      "a commit message run through a variable",
+      "git commit --allow-empty -m 'rm -rf ~'; x=$(git log -1 --format=%s); $x",
+    ],
+    [
+      "a commit message piped into a glob program",
+      "git commit --allow-empty -m 'rm -rf ~'; git log -1 --format=%s | /bin/s?",
+    ],
+    [
+      "a commit message piped into ssh",
+      "git commit --allow-empty -m 'rm -rf ~'; git log -1 --format=%s | ssh h",
+    ],
+    [
+      "a commit message piped into ssh's sh",
+      "git commit --allow-empty -m 'rm -rf ~'; git log -1 --format=%s | ssh h sh",
+    ],
+    [
+      "a commit message piped into watch's sh",
+      "git commit --allow-empty -m 'rm -rf ~'; git log -1 --format=%s | watch -x sh",
+    ],
+    ["an argument fed to sh as a here-string through $_", "true 'rm -rf ~'; sh <<< \"$_\""],
+    ["an argument sourced through $_", "true 'rm -rf ~'; source <(echo \"$_\")"],
+    ["a positional fed to sh as a here-string", "set -- 'rm -rf ~'; sh <<< \"$1\""],
+    ["a positional piped into a glob program", "set -- 'rm -rf ~'; echo \"$1\" | /bin/s?"],
+    ["a positional piped into ssh", "set -- 'rm -rf ~'; echo \"$1\" | ssh h"],
+    ["a positional run as a command", "set -- 'rm -rf ~'; $1"],
+    ["a positional written to a script sh runs", "set -- 'rm -rf ~'; echo \"$1\" > f.sh; sh f.sh"],
+    [
+      "a commit message run by a stored git alias through $_",
+      "git commit --allow-empty -m 'rm -rf ~'; git x \"$_\"",
+    ],
+    [
+      "a commit message run by git rebase -x",
+      "git commit --allow-empty -m 'rm -rf ~'; git rebase -x \"$_\" HEAD~1",
+    ],
+    [
+      "a commit message run by git rebase --exec",
+      "git commit --allow-empty -m 'rm -rf ~'; git rebase --exec \"$_\" HEAD~1",
+    ],
+    [
+      "a commit message run by git bisect run",
+      "git commit --allow-empty -m 'rm -rf ~'; git bisect run \"$_\"",
+    ],
+    [
+      "a commit message run by git submodule foreach",
+      "git commit --allow-empty -m 'rm -rf ~'; git submodule foreach \"$_\"",
+    ],
+    [
+      "a commit message run by git filter-branch",
+      "git commit --allow-empty -m 'rm -rf ~'; git filter-branch -f --tree-filter \"$_\" HEAD",
+    ],
+    [
+      "a commit message run by git difftool -x",
+      "git commit --allow-empty -m 'rm -rf ~'; git difftool -y -x \"$_\" HEAD~1",
+    ],
+    ["a positional run by git rebase -x", "set -- 'rm -rf ~'; git rebase -x \"$1\" HEAD~1"],
+    ["an argument run by git submodule foreach", "true 'rm -rf ~'; git submodule foreach \"$_\""],
+    [
+      "a commit message run by a stored git alias with no argument",
+      "git commit --allow-empty -m 'rm -rf ~'; git x",
+    ],
+    [
+      "a commit message xargs hands git rebase -x",
+      "git commit --allow-empty -m 'rm -rf ~'; git log -1 --format=%s | xargs -I{} git rebase -x {} HEAD~1",
+    ],
+    [
+      "a commit message xargs hands git submodule foreach",
+      "git commit --allow-empty -m 'rm -rf ~'; git log -1 --format=%s | xargs git submodule foreach",
+    ],
+    [
+      "a commit message written to a script git rebase -x runs",
+      "git commit --allow-empty -m 'rm -rf ~'; git log -1 --format=%s > .git/x.sh; git rebase -x 'sh .git/x.sh' HEAD~1",
+    ],
+    [
+      "a commit message written to a script git submodule foreach runs",
+      "git commit --allow-empty -m 'rm -rf ~'; git log -1 --format=%s > f.sh; git submodule foreach 'sh f.sh'",
+    ],
+    [
+      "a commit message piped into git submodule foreach's sh",
+      "git commit --allow-empty -m 'rm -rf ~'; git log -1 --format=%s | git submodule foreach sh",
+    ],
+    [
+      "a commit message piped into git submodule foreach's sh -s",
+      "git commit --allow-empty -m 'rm -rf ~'; git log -1 --format=%s | git submodule foreach 'sh -s'",
+    ],
+  ])("%s stays refused", async (_, command) => {
+    for (const cwd of [...homes, join(homedir(), "x", ".claude", "worktrees", "y")])
+      expect(await at(command, cwd)).toContain("no-extensions-write hook refuses")
+  })
+
+  test("a refusal names a program it cannot read as such", async () => {
+    expect(await at("git -c alias.x='!$1 ~' x rm", homedir())).toContain(
+      "refuses a program it cannot read on",
+    )
+  })
+
+  test.each([
+    ["a glob of the data folder", "rm -rf .pl*", HOME],
+    ["a brace of the data folder", "rm -rf {.playground,x}", HOME],
+    ["a zsh group of the data folder", "rm -rf (.playground|x)", HOME],
+    ["a zsh qualifier on every folder", "rm -rf *(/)", HOME],
+    ["a glob through a link to the data folder", "rm -rf p*/extensions/x", HOME],
+    ["bash's extglob @() of the data folder", "shopt -s extglob; rm -rf @(.playground)", HOME],
+    ["bash's extglob +() of the data folder", "shopt -s extglob; rm -rf +(.playground)", HOME],
+    ["bash's extglob ?() of the data folder", "shopt -s extglob; rm -rf ?(.playground)", HOME],
+    ["bash's extglob !() of every other name", "shopt -s extglob; rm -rf !(x)", HOME],
+    ["rm of a glob through a link to the root", "rm -rf s*/", DATA],
+    ["a redirect through a glob of a link to the root", "echo x > s*/policy.json", DATA],
+    ["a glob climbing back out to the data folder", "rm -rf w*/../.p*", HOME],
+    [
+      "a redirect climbing back out into the root",
+      "echo x > w*/../.playground/extension?/policy.json",
+      HOME,
+    ],
+    ["a glob in the data folder climbing to the root", "rm -rf .playground/h*/../e*", HOME],
+    ["a glob climbing to the root from the data folder", "rm -rf h*/../e*", DATA],
+    ["a glob climbing out to any other folder", "rm -rf w*/../Documents/x", HOME],
+    ["a glob past a link and its `..`", "rm -rf store/../e*", HOME],
+    ["a redirect to a glob no entry matches", "echo x > q*", DATA],
+    ["rm of a glob no entry matches", "rm -rf q*", HOME],
+  ])("%s stays refused, as every glob above the root is", async (_, command, cwd) => {
+    expect(await bash(command, cwd)).toContain("no-extensions-write hook refuses")
+  })
+})
+
 describe("a read of the root, and writes elsewhere, run", () => {
   test.each([
     ["cat of a list", `cat ${LIST}`],
@@ -797,7 +1200,7 @@ describe("the hook's run", () => {
   })
 
   test("a single step the deadline cannot interrupt is refused when the main thread's timer fires", async () => {
-    const command = `printf '%s${",".repeat(60)}' '{' ${"x ".repeat(6_000)}| xargs -I @ foo '@ a'; playground ext import x`
+    const command = `printf '%s${",".repeat(60)}' '{' ${"x ".repeat(6_000)}| xargs -I @ watch '@ a'; playground ext import x`
     const raw = JSON.stringify({ cwd: "/tmp", tool_input: { command }, tool_name: "Bash" })
     const started = performance.now()
     expect(await guarded(raw, ENV, 1_000)).toContain("split it into shorter calls")
