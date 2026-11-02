@@ -55,7 +55,10 @@ export type Group = {
 }
 
 // The rows a guard-loosening PR lets run on purpose, each written as a row's "<source> <what>" for all its cases, or as one case's "<source> <what> | <guard> | <folder>"; canary lets none run.
-export const ALLOWED: string[] = []
+export const ALLOWED: string[] = [
+  "#466 git --attr-source before a read in the extensions root",
+  "#466 git --attr-source before -C into the extensions root and a read",
+]
 
 // A harmless git alias nest of the given depth around an inner command line, each level double-quoted.
 const escape = (text: string) => text.replace(/[\\"$`]/g, (c) => `\\${c}`)
@@ -1100,6 +1103,41 @@ gh api graphql -f query="$QUERY"`,
         "git --exec-path=/usr/libexec commit -m x",
       ],
       ["git --namespace with a subcommand for its value", "git --namespace log commit -m x"],
+    ],
+    source: "#466",
+  },
+  {
+    folders: ["extensions root"],
+    guards: ["no-extensions-write"],
+    rows: () => [
+      ["git --attr-source before a read in the extensions root", "git --attr-source HEAD log -1"],
+      [
+        "git --attr-source with a subcommand for its value before a commit in the extensions root",
+        "git --attr-source log commit -m x",
+      ],
+      [
+        "git --attr-source with a subcommand for its value before a push from the extensions root",
+        "git --attr-source log push origin HEAD:main",
+      ],
+      [
+        "git --attr-source with a subcommand for its value before a config write in the extensions root",
+        "git --attr-source log config core.hooksPath x",
+      ],
+    ],
+    source: "#466",
+  },
+  {
+    folders: ["data folder", "home"],
+    guards: ["no-extensions-write"],
+    rows: ({ ROOT }) => [
+      [
+        "git --attr-source before -C into the extensions root and a read",
+        `git --attr-source HEAD -C ${ROOT} status`,
+      ],
+      [
+        "git --attr-source with a subcommand for its value before -C into the extensions root and a commit",
+        `git --attr-source log -C ${ROOT} commit -m x`,
+      ],
     ],
     source: "#466",
   },
