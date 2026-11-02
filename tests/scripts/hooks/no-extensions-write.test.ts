@@ -529,6 +529,14 @@ describe("a quoted argument is read as a command line only where a program runs 
       `gh search prs x --json number --jq='.[] | "\\(.number) x"'`,
     ],
     ["gh issue view with a jq filter", `gh issue view 1 --json title -q '"\\(.title) (open)"'`],
+    ["gh issue view with a sliced body", `gh issue view 522 --json body -q '.body[0:900]'`],
+    [
+      "gh issue list with a jq filter",
+      `gh issue list --json number,title --jq '.[]|"\\(.number) \\(.title[0:90])"'`,
+    ],
+    ["gh api with a Go template", `gh api x --template '{{range .}}{{.a}} {{end}}'`],
+    ["gh api with a Go template by -t", `gh api x -t '{{range .}}{{.a}} {{end}}'`],
+    ["gh pr view with a Go template", `gh pr view 1 --json a --template '{{.a}} x'`],
   ])("%s runs from the home and the data folder", async (_, command) => {
     for (const cwd of homes) expect(await at(command, cwd)).toBeUndefined()
   })
@@ -563,6 +571,10 @@ describe("a quoted argument is read as a command line only where a program runs 
     [
       "gh run view with a jq filter joining a job's status and conclusion",
       `gh run view 1 --json jobs --jq '.jobs[] | "\\(.name) \\(.status)/\\(.conclusion)"'`,
+    ],
+    [
+      "gh pr list with a jq filter joining fields",
+      `gh pr list --json number,additions --jq '.[] | "\\(.number) +\\(.additions)/-x"'`,
     ],
   ])("%s runs from a worktree", async (_, command) => {
     expect(await at(command, join(homedir(), "x", ".claude", "worktrees", "y"))).toBeUndefined()

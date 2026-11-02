@@ -117,11 +117,20 @@ function reads(parsed: Parsed, env: Env): boolean {
   )
 }
 
-// gh's calls that only read, a closed list, whose -q or --jq filter is jq text that no shell runs
-const GH_READS = new Set(["api", "issue view", "pr view", "run view", "search"])
+// gh's calls that only read, a closed list, whose -q or --jq filter and -t or --template template are text that no shell runs
+const GH_READS = new Set([
+  "api",
+  "issue list",
+  "issue view",
+  "pr list",
+  "pr view",
+  "run list",
+  "run view",
+  "search",
+])
 const GH_API_SENDS = /^(?:-[FXf]|--(?:cache|field|input|method|raw-field)(?:=|$))/
 
-// The words of a read-only gh call's jq filter (`-q '<filter>'`, `--jq=<filter>`), read as text rather than a command line; none for any other gh call, or when a variable on the line makes gh run a pager or an editor
+// The words of a read-only gh call's jq filter or Go template (`-q '<filter>'`, `--jq=<filter>`, `-t '<template>'`), read as text rather than a command line; none for any other gh call, or when a variable on the line makes gh run a pager or an editor
 function ghFilters(parsed: Parsed, env: Env): Set<Word> {
   const { args, first, local, name } = parsed
   const filters = new Set<Word>()
@@ -134,8 +143,8 @@ function ghFilters(parsed: Parsed, env: Env): Set<Word> {
   if (runsVariable(env.vars)) return filters
   for (let k = 0; k < args.length; k++) {
     const { value } = args[k]
-    if ((value === "-q" || value === "--jq") && args[k + 1]) filters.add(args[++k])
-    else if (/^(?:-q.|--jq=)/.test(value)) filters.add(args[k])
+    if (["-q", "--jq", "-t", "--template"].includes(value) && args[k + 1]) filters.add(args[++k])
+    else if (/^(?:-[qt].|--(?:jq|template)=)/.test(value)) filters.add(args[k])
   }
   return filters
 }
@@ -561,8 +570,10 @@ function inspect(raw: string, environment: Environment) {
     const literal = !whole && narrow(cmd, env)
     // on a line read call by call, a read-only gh call's jq filter is text, never a path
     const filters = whole ? new Set<Word>() : ghFilters(parsed, env)
-    for (const word of [first, ...args.filter((a) => !filters.has(a))]) {
-      if (quiet && /\s/.test(word.value) && !texts(word).some((t) => holds(t.value, env))) continue
+    for (const word of [first, ...args]) {
+      // a quiet commit's message and a gh filter are text, judged only when the root is in it
+      const text = (quiet && /\s/.test(word.value)) || filters.has(word)
+      if (text && !texts(word).some((t) => holds(t.value, env))) continue
       const named = names(word, env, remover, literal)
       if (named) return refuse(`${verb} on ${named}`)
     }
