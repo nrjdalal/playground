@@ -279,6 +279,39 @@ describe("one action where two overlapped, and Draft where the app has a draft A
     expect(named(html, "Discard")).not.toBe("")
   })
 
+  test("a draft shows its before and after under its words, as an ask does (#501)", () => {
+    const shots = [
+      {
+        id: "3f0e7a52-1c4b-4d2a-9e6f-0000000000a1.png",
+        kind: "image",
+        label: "before",
+        name: "b.png",
+      },
+      {
+        id: "3f0e7a52-1c4b-4d2a-9e6f-0000000000a2.png",
+        kind: "image",
+        label: "after",
+        name: "a.png",
+      },
+    ]
+    const plain = draft("https://app.slack.com/client/T0000000000/C0MADEUP01")
+    const shown = render(false, {
+      ...plain,
+      preview: { ...plain.preview, attachments: shots },
+    } as InboxItem)
+    const ask = render(false, {
+      ...decision,
+      preview: { attachments: shots, text: "hi", type: "ask" },
+    } as InboxItem)
+    const thumbs = (html: string) => html.split('data-slot="attachment-thumbs"').length - 1
+    expect(thumbs(shown)).toBe(1)
+    expect(thumbs(shown)).toBe(thumbs(ask))
+    expect(shown.indexOf('data-slot="attachment-thumbs"')).toBeGreaterThan(
+      shown.indexOf("<textarea"),
+    )
+    expect(thumbs(render(false, plain))).toBe(0)
+  })
+
   test("a Linear comment offers no Draft, since Linear's API creates none", () => {
     const html = render(false, draft("https://linear.app/acme/issue/DUNE-1/x"))
     expect(named(html, "Send")).not.toBe("")
