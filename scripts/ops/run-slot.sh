@@ -216,7 +216,7 @@ if [ "${1:-}" = slots ]; then
   SLOTS_ONLY=1 CAN_TAKE=run-slot
   set -- ops-unstick -- true
 fi
-# run-slot.sh room: prints "<lanes> <held> <waiters>": the lanes slots counts, how many of them a run holds, and the live tickets in the queue, the room spawn.sh's slots gate reads before it admits a new worker
+# run-slot.sh room: prints "<lanes> <held> <free> <waiters>": the lanes slots counts, how many a run holds, how many a medium run could take now (the open, unheld ones while its load units fit beside the held runs' and slots.peers', less the reserve), and the live tickets in the queue, which spawn.sh's slots gate reads
 ROOM_ONLY=
 if [ "${1:-}" = room ]; then
   [ $# -eq 1 ] || { echo "usage: run-slot.sh room" >&2; exit 2; }
@@ -827,7 +827,10 @@ if [ -n "$ROOM_ONLY" ]; then
     reclaim "$OPS/$s"
     [ -d "$OPS/$s" ] && held=$((held + 1))
   done
-  echo "$(($(capacity) / 2)) $held $(ordered_waiters | grep -c .)"
+  c=$(capacity)
+  free=0
+  fits "$(held_units)" 2 $((c - $(reserve "$c"))) && free=$((c / 2 - held))
+  echo "$((c / 2)) $held $free $(ordered_waiters | grep -c .)"
   exit 0
 fi
 

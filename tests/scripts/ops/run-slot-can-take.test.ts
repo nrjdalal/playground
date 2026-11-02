@@ -70,14 +70,14 @@ describe("slots counts the CPU slots held or open now", () => {
 })
 
 // spawn.sh's slots gate reads this line before it admits a new worker
-describe("room prints the lanes, the held ones and the live waiters", () => {
+describe("room prints the lanes, the held ones, the ones a run can take and the live waiters", () => {
   const room = (m: ReturnType<typeof machine>) => {
     const run = Bun.spawnSync(["bash", SCRIPT, "room"], { cwd: m.root, env: m.env() })
     return [run.exitCode, run.stdout.toString()]
   }
 
   test("an idle machine has four free lanes and no one waiting", () => {
-    expect(room(machine())).toEqual([0, "4 0 0\n"])
+    expect(room(machine())).toEqual([0, "4 0 4 0\n"])
   })
 
   test("held lanes and live tickets count, and a dead waiter's ticket does not", () => {
@@ -87,7 +87,20 @@ describe("room prints the lanes, the held ones and the live waiters", () => {
     m.ticket(2, "worker-a", "s2 22 2 medium")
     m.ticket(3, "worker-b", "s2 21 1 small")
     writeFileSync(join(m.ops, "run-slot.waiters", "4-999999-worker-gone"), "s2 22 2 medium\n")
-    expect(room(m)).toEqual([0, "2 2 2\n"])
+    expect(room(m)).toEqual([0, "2 2 0 2\n"])
+  })
+
+  test("an unheld lane is not free while a medium run's load units do not fit", () => {
+    const m = machine({ load1: 12 })
+    m.hold("run-slot", 3, "big")
+    m.ticket(2, "worker-a", "s2 22 2 medium")
+    expect(room(m)).toEqual([0, "2 1 0 1\n"])
+  })
+
+  test("under Claude Code's sandbox it reads the load from uptime and a live waiter by kill", () => {
+    const m = machine({ sandboxed: true })
+    m.ticket(2, "worker-a", "s2 22 2 medium")
+    expect(room(m)).toEqual([0, "4 0 4 1\n"])
   })
 })
 
