@@ -8,7 +8,8 @@ Every bypass form a review has found stays refused through a widening: each is a
 `no-raw-spawn` guards `scripts/spawn.sh`, so its text sits in [the spawn.sh section of scripts/README.md](../README.md#spawnsh).
 Their tests are `bun run test:file tests/scripts/hooks`.
 Every hook reads a wrapper (`sudo`, `time`, `doas`, `env`, `nice`, `nohup`, `stdbuf`, `timeout`, `xargs` and the rest of `WRAPPERS` in `scripts/hooks/shell.ts`) by that wrapper's own list of options, a cluster (`-Hp`) letter by letter and a value attached (`-pwc`, `--prompt=wc`) or as the next word, so the program it finds is the one the wrapper runs.
-An option missing from that list is read both as a flag and as taking the next word, and an option's value in a variable as one word, as none and as several; each hook judges the command under every reading, so a missing option costs at most a refusal, and adding it to the list fixes one.
+An option missing from that list is read both as a flag and as taking the next word, and an option's value in a variable as one word, as none and as several; each hook judges the command under every reading through `run()`, so a missing option costs at most a refusal, and adding it to the list fixes one.
+A hook that calls `parse` itself (no-false-green, no-kill-by-name's xargs read) takes the first reading, the flag and the one word, as canary read them.
 A command's parse makes at most 16 other readings (`READINGS`), so a call holding many such options is read in bounded time; past them, an option is read as a flag alone, as canary read it.
 
 ## Registered in both settings files
