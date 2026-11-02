@@ -24,5 +24,5 @@ Run one plain command per call, with absolute paths and `git -C`, and no `cd`, `
 ## Steps
 
 1. Load the playbook skill with the Skill tool, then code-review-loop. Done when both are in your context.
-2. Review the PR round by round as code-review-loop says, every step and its Done when. Done when code-review-loop's waiter ends with `CLOSED`, your clone still in place, since removing it belongs to your lead's or Ops' cleanup step, which removes worktrees one at a time by literal path.
+2. Review the PR round by round as code-review-loop says, every step and its Done when. Done when code-review-loop's waiter ends with `CLOSED` and your clone is still in place for your lead's or Ops' cleanup, which removes worktrees one at a time by literal path.
 3. Tell the session you report to by SendMessage that you are done, with your clone's path, so it closes your pane and the cleanup finds the clone. Done when the send succeeds and names that path.
