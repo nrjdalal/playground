@@ -766,6 +766,97 @@ gh api graphql -f query="$QUERY"`,
       ["a function that evals its arguments", `f() { eval "$@"; }; f 'rm -rf ~'`],
       ["a function that runs its argument by sh -c", `f() { sh -c "$1"; }; f 'rm -rf ~'`],
       ["a function by the function keyword", `function f { eval "$@"; }; f 'rm -rf ~'`],
+      ["a gated message under git in capitals", "GIT commit -m 'docs: playground ext sync'"],
+      ["a gated message under Git", "Git commit -m 'docs: playground ext sync'"],
+      ["a payload set as an argument, then evaluated", `set -- 'rm -rf ~'; eval "$1"`],
+      ["a payload set as an argument, then run by bash -c", `set -- 'rm -rf ~'; bash -c "$1"`],
+      ["a payload set as an argument, then run by ssh", `set -- 'rm -rf ~'; ssh h "$1"`],
+      ["a payload set as an argument, then run by watch", `set -- 'rm -rf ~'; watch "$1"`],
+      [
+        "a payload set as an argument, then run by the user's shell",
+        `set -- 'rm -rf ~'; "$SHELL" -c "$1"`,
+      ],
+      ["a payload held in the last argument", `true 'rm -rf ~'; eval "$_"`],
+      ["a payload held by getopts", `getopts x o 'rm -rf ~'; eval "$o"`],
+      [
+        "a payload set in bash -c's script, then evaluated",
+        `bash -c 'set -- "rm -rf ~"; eval "$1"'`,
+      ],
+      [
+        "a commit message run by eval through $_",
+        "git commit --allow-empty -m 'rm -rf ~'; eval \"$_\"",
+      ],
+      [
+        "a commit message run by eval through git log",
+        "git commit --allow-empty -m 'rm -rf ~' && eval \"$(git log -1 --format=%s)\"",
+      ],
+      [
+        "a commit message run by sh -c through git log",
+        "git commit --allow-empty -m 'rm -rf ~'; sh -c \"$(git log -1 --format=%s)\"",
+      ],
+      [
+        "a tag message run by eval through git tag",
+        "git tag -m 'rm -rf ~' v1; eval \"$(git tag -l --format='%(contents)' v1)\"",
+      ],
+      [
+        "a commit message piped into sh",
+        "git commit --allow-empty -m 'rm -rf ~'; git log -1 --format=%s | sh",
+      ],
+      [
+        "a commit message run through xargs and sh -c",
+        "git commit --allow-empty -m 'rm -rf ~'; git log -1 --format=%s | xargs -I{} sh -c '{}'",
+      ],
+      ["a payload held in an array", `args=('rm -rf ~'); sh -c "\${args[0]}"`],
+      [
+        "a commit message sourced through process substitution",
+        "git commit --allow-empty -m 'rm -rf ~'; source <(git log -1 --format=%s)",
+      ],
+      [
+        "a commit message fed to sh as a here-string",
+        "git commit --allow-empty -m 'rm -rf ~'; sh <<< \"$(git log -1 --format=%s)\"",
+      ],
+      [
+        "a commit message sourced from stdin",
+        "git commit --allow-empty -m 'rm -rf ~'; . /dev/stdin <<< \"$(git log -1 --format=%s)\"",
+      ],
+      [
+        "a commit message written to a script sh runs",
+        "git commit --allow-empty -m 'rm -rf ~'; git log -1 --format=%s > f.sh; sh f.sh",
+      ],
+      [
+        "a commit message run as a substitution",
+        "git commit --allow-empty -m 'rm -rf ~'; $(git log -1 --format=%s)",
+      ],
+      [
+        "a commit message run through a variable",
+        "git commit --allow-empty -m 'rm -rf ~'; x=$(git log -1 --format=%s); $x",
+      ],
+      [
+        "a commit message piped into a glob program",
+        "git commit --allow-empty -m 'rm -rf ~'; git log -1 --format=%s | /bin/s?",
+      ],
+      [
+        "a commit message piped into ssh",
+        "git commit --allow-empty -m 'rm -rf ~'; git log -1 --format=%s | ssh h",
+      ],
+      [
+        "a commit message piped into ssh's sh",
+        "git commit --allow-empty -m 'rm -rf ~'; git log -1 --format=%s | ssh h sh",
+      ],
+      [
+        "a commit message piped into watch's sh",
+        "git commit --allow-empty -m 'rm -rf ~'; git log -1 --format=%s | watch -x sh",
+      ],
+      ["an argument fed to sh as a here-string through $_", "true 'rm -rf ~'; sh <<< \"$_\""],
+      ["an argument sourced through $_", "true 'rm -rf ~'; source <(echo \"$_\")"],
+      ["a positional fed to sh as a here-string", "set -- 'rm -rf ~'; sh <<< \"$1\""],
+      ["a positional piped into a glob program", "set -- 'rm -rf ~'; echo \"$1\" | /bin/s?"],
+      ["a positional piped into ssh", "set -- 'rm -rf ~'; echo \"$1\" | ssh h"],
+      ["a positional run as a command", "set -- 'rm -rf ~'; $1"],
+      [
+        "a positional written to a script sh runs",
+        "set -- 'rm -rf ~'; echo \"$1\" > f.sh; sh f.sh",
+      ],
     ],
     source: "#411",
   },
