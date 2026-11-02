@@ -30,6 +30,7 @@ import {
 import { parseLines } from "../../../../../../api/hono/src/lib/dashboard/transcript"
 import { livePair } from "../../../../../../api/hono/src/lib/dev/live-dashboard"
 import { priceOf } from "../../../../../../api/hono/src/lib/usage/prices"
+import { listTrash } from "../../../../../../packages/safe-delete/src"
 import {
   cleanGitShims,
   gitShim,
@@ -47,6 +48,13 @@ const scratch = (name: string): string => {
   dirs.push(dir)
   return dir
 }
+// The folders a replaced fixture's move into the trash starts from, on a mkdtemp root of the test's own that holds no fixture.
+const ROOTS = (() => {
+  const root = scratch("fixture-roots")
+  return { home: join(root, "home"), main: join(root, "main"), trash: join(root, "data", "trash") }
+})()
+const trashed = () => listTrash(ROOTS.trash).map((entry) => entry.path)
+
 afterAll(() => {
   cleanGitShims()
   for (const dir of dirs) rmSync(dir, { force: true, recursive: true })
@@ -269,7 +277,7 @@ describe("writeFixture", () => {
 
   test("moves every time by the gap between the anchor and now, and makes $CONFIG its own folder", () => {
     const dir = join(scratch("fixture-write"), "fixture")
-    writeFixture(small(), dir, new Date(Date.parse(ANCHOR) + DAY))
+    writeFixture(small(), dir, ROOTS, new Date(Date.parse(ANCHOR) + DAY))
     const usage = JSON.parse(readFileSync(join(dir, "claude/playground/usage.json"), "utf8"))
     expect(usage).toEqual({
       at: "2026-01-02T12:00:00.000Z",
@@ -337,19 +345,50 @@ describe("writeFixture", () => {
 
   test("replaces its own folder whole, so a stack starts from the fixture again", () => {
     const dir = join(scratch("fixture-rewrite"), "fixture")
-    writeFixture(small(), dir)
+    writeFixture(small(), dir, ROOTS)
     writeFileSync(join(dir, "claude/playground/attachments/left-over.txt"), "{}")
-    writeFixture(small(), dir)
+    writeFixture(small(), dir, ROOTS)
     expect(readdirSync(join(dir, "claude/playground/attachments"))).toEqual([])
-    dropFixture(dir)
+    const old = listTrash(ROOTS.trash).find((entry) => entry.path === `${dir}.old-${process.pid}`)
+    expect(old).toBeDefined()
+    expect(
+      existsSync(
+        join(
+          ROOTS.trash,
+          old!.id,
+          `fixture.old-${process.pid}`,
+          "claude/playground/attachments/left-over.txt",
+        ),
+      ),
+    ).toBe(true)
+    dropFixture(dir, ROOTS)
     expect(existsSync(dir)).toBe(false)
+    expect(trashed()).toContain(dir)
+  })
+
+  test("a half-written folder a stopped write left behind goes to the trash before the next write", () => {
+    const dir = join(scratch("fixture-left"), "fixture")
+    mkdirSync(`${dir}.writing-${process.pid}`, { recursive: true })
+    writeFileSync(join(`${dir}.writing-${process.pid}`, "half.json"), "{}")
+    writeFixture(small(), dir, ROOTS)
+    expect(existsSync(`${dir}.writing-${process.pid}`)).toBe(false)
+    expect(trashed()).toContain(`${dir}.writing-${process.pid}`)
+  })
+
+  test("a fixture folder the trash refuses, as one inside the main checkout, stays, and the refusal is thrown in its words", () => {
+    const root = scratch("fixture-protected")
+    const dir = join(root, "fixture")
+    const roots = { ...ROOTS, main: root }
+    writeFixture(small(), dir, roots)
+    expect(() => dropFixture(dir, roots)).toThrow("inside the main checkout")
+    expect(existsSync(join(dir, "stamp.json"))).toBe(true)
   })
 
   test("leaves a folder that is not a fixture's alone, a real config folder named by mistake included", () => {
     const dir = scratch("fixture-foreign")
     writeFileSync(join(dir, "roster.json"), "real")
-    expect(() => writeFixture(small(), dir)).toThrow("is not a fixture's folder")
-    dropFixture(dir)
+    expect(() => writeFixture(small(), dir, ROOTS)).toThrow("is not a fixture's folder")
+    dropFixture(dir, ROOTS)
     expect(readFileSync(join(dir, "roster.json"), "utf8")).toBe("real")
   })
 
@@ -388,7 +427,7 @@ describe("writeFixture", () => {
 
   test("refuses a send into an input that holds text unless it is forced, as cmux 0.65's draft guard does", () => {
     const dir = join(scratch("fixture-guard"), "fixture")
-    writeFixture(shipped(), dir)
+    writeFixture(shipped(), dir, ROOTS)
     const session = readFixtureCmux(dir).sessions.find(
       (s) => s.stored_pid_exists === true && typeof s.surface_id === "string",
     )
@@ -406,7 +445,7 @@ describe("writeFixture", () => {
   // herdr pastes a message, and Claude Code takes each image path in as an image; the dispatcher's fixture session stands for one
   test("a session the dashboard pastes into writes a message with an image as Claude Code writes the paste", () => {
     const dir = join(scratch("fixture-paste"), "fixture")
-    writeFixture(shipped(), dir)
+    writeFixture(shipped(), dir, ROOTS)
     const session = readFixtureCmux(dir).sessions.find((s) => s.pastes === true)
     if (!session) throw new Error("the shipped fixture has a session the dashboard pastes into")
     const surface = String(session.surface_id)
@@ -451,7 +490,7 @@ describe("writeFixture", () => {
 
   test("types into no transcript outside its own folder, whatever its scratch state names", () => {
     const dir = join(scratch("fixture-outside"), "fixture")
-    writeFixture(shipped(), dir)
+    writeFixture(shipped(), dir, ROOTS)
     const outside = join(scratch("fixture-real"), "real.jsonl")
     writeFileSync(outside, "")
     const state = readFixtureCmux(dir)
@@ -551,6 +590,7 @@ describe("writeFixture", () => {
     writeFixture(
       { ...shipped(), anchor: "2026-01-01T12:00:00.000Z" },
       dir,
+      ROOTS,
       new Date("2026-01-02T12:00:00.000Z"),
     )
     const machine = JSON.parse(readFileSync(join(dir, "machine.json"), "utf8"))
