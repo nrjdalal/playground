@@ -2,6 +2,7 @@ import { homedir } from "node:os"
 import { join } from "node:path"
 
 // Every bypass form a review found, refused on canary or since the PR whose tests pinned it, each named by that PR; tests/scripts/hooks/refused-forms.test.ts runs every row through each guard its group names and expects a refusal.
+// Each row is data: it reaches a hook only as a check() input or through that test, and a shell runs it in no mode, since a form can name a path outside HOME, so pointing HOME at a scratch folder contains nothing.
 export type Guard =
   | "no-desktop-owner-app"
   | "no-env-dump"
