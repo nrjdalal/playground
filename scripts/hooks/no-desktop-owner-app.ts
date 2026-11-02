@@ -52,14 +52,14 @@ const realOf = (path: string): string => {
   }
 }
 
-// Whether the call runs script from the main checkout, where its entry point is a file no session writes (no-main-checkout keeps a session out of that tree). The main checkout is packages/scripts/src/main-checkout.ts's mainCheckout (PLAYGROUND_REPO, else the git common dir's parent holding scripts/spawn.sh); the allowance holds only when the effective cwd's own checkout (its git toplevel, not the common dir's parent, so a linked worktree sharing the common dir fails) is that one path, and its package.json maps script to the entry with the entry file present. Every other cwd, a worktree byte-identical to the main checkout included, a made folder, an unknown cwd (no cwd, or a cd to a variable or a substitution), keeps the verdict.
+// Whether the call runs script from the main checkout, where its entry point is a file no session writes (no-main-checkout keeps a session out of that tree). The main checkout is mainCheckout() (packages/scripts/src/main-checkout.ts: PLAYGROUND_REPO, else the git common dir's parent holding scripts/spawn.sh), resolved from the hook's own location rather than the call's cwd, so a made folder that git-inits itself and plants scripts/spawn.sh cannot pass as the main checkout. The allowance holds only when the effective cwd's own git toplevel (not the common dir's parent, so a linked worktree sharing the common dir fails) equals that path, its package.json maps script to the entry, and the entry file is present. Every other cwd, a byte-identical worktree, a made folder with its own scripts/spawn.sh, an unknown cwd (no cwd, or a cd to a variable or a substitution), keeps the verdict.
 async function mapsDataScript(cwd: string | undefined, script: string): Promise<boolean> {
   const entry = BUN_DATA_SCRIPTS.get(script)
   if (entry === undefined || cwd === undefined) return false
   const git = Bun.spawnSync(["git", "-C", cwd, "rev-parse", "--show-toplevel"])
   if (git.exitCode !== 0) return false
   const top = git.stdout.toString().trim()
-  if (realOf(top) !== realOf(mainCheckout(cwd))) return false
+  if (realOf(top) !== realOf(mainCheckout())) return false
   const pkg = Bun.file(join(top, "package.json"))
   if (!(await pkg.exists())) return false
   try {
