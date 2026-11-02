@@ -23,6 +23,11 @@ Only the first reading moves the folder, sets variables and records files for th
   A timeout still lets the call run, since Claude Code treats a hook timeout as a non-blocking error.
   Every other wrapper (SessionStart, Stop, PostToolUse and the rest) stays open on a crash, since a Stop hook at exit 2 keeps its session going and a crashing one would loop it.
   `tests/scripts/hooks-abs-path.test.ts` holds both shapes and runs them over stub guards.
+- A PreToolUse guard's wrapper runs its bundle, `scripts/hooks/bundled/<hook>.js`, which `bun run hooks:bundle` (`packages/scripts/src/hooks-bundle.ts`) builds from `scripts/hooks/<hook>.ts` with everything it imports, so the guard starts with a missing or damaged `node_modules`; every other hook runs its source.
+  The source stays the one place a guard's logic is edited: after an edit to a guard or to anything it imports, run `bun run hooks:bundle` and commit `scripts/hooks/bundled/`, since `tests/packages/scripts/src/hooks-bundle.test.ts` fails on a bundle a fresh build would write otherwise.
+  The bundles are committed, so a git restore of a deleted checkout brings them back with no install, and two branches that both change a shared hook file conflict there: take either side and run `bun run hooks:bundle` again.
+  A bundled module reads `import.meta.dir` as `scripts/hooks/`, its source's folder, so each path a guard builds from it holds; role.ts's read of the session names still runs `setting.ts` in a process of its own, and keeps a fresh install's names when that read fails.
+  `tests/scripts/hooks/refused-forms.test.ts` runs each bundle from a scratch checkout no `node_modules` reaches and holds it to its source's verdict on every row.
   A headless scan run from outside the checkout exports `PLAYGROUND_REPO` as the factory's checkout and passes `--settings` naming that checkout's `scripts/factory-settings.json`, so its guards run rather than exit 0: the board scan's loop takes the checkout from `beat.py`'s `checkout()`, the end-of-day scan's `scan.sh` from its own path.
   Three factory hooks act for every session: session-state writes every session's state, since the Dashboard is to show them all, no-off-palette-label guards every session's labels, since the label rule covers any label, and no-desktop-owner-app guards every session's agent-desktop calls, since the owner's pointer and apps are the same whichever session drives them.
   Every other factory hook acts for a factory session alone, `PLAYGROUND_ROLE` or else its name in Claude Code's registry, placed by the roster's `kind` for that name and then by the factory's names (`scripts/hooks/role.ts`), so a session the owner opens in the factory's checkout passes them untouched.
@@ -265,7 +270,7 @@ Only the first reading moves the folder, sets variables and records files for th
   It reads the whole call for a search before it judges a kill, since a loop's `done < <(pgrep …)` comes after the kill it feeds, and it reads the `-I` string xargs hands a shell it starts as such a pid.
   Its reason gives the way out: `TaskStop` for a background task, `bun run dev:stop` for a dev stack, `kill <pid>` for a pid the session spawned and holds, in a Bash call of its own when the call also searches.
   `kill <pid>`, `kill -<sig> <pid>`, `kill $!`, `kill %1`, `kill $(cat <pid file>)` and a liveness check before it (`ps -p $PID && kill $PID`) run in a call that searches nothing else, and so do each search alone (`pgrep -f x`, `lsof -i :3000`), `command -v pkill` and `pkill --help`. <!-- kill-check: names only -->
-  It fails open on a call it cannot read, and its tests are in `bun run test:file tests/scripts/hooks` too; `tests/test_kill_by_name.py` skips the hook, its test and `tests/scripts/hooks/fixtures/refused-forms.ts`, which hold the refused commands as data.
+  It fails open on a call it cannot read, and its tests are in `bun run test:file tests/scripts/hooks` too; `tests/test_kill_by_name.py` skips the hook, its bundle, its test and `tests/scripts/hooks/fixtures/refused-forms.ts`, which hold the refused commands as data.
 
 ## no-playground-leak
 

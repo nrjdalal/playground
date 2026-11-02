@@ -13,7 +13,7 @@ import { join } from "node:path"
 
 import { BUNDLED, entries, FIX, ROOT, stale } from "../../../../packages/scripts/src/hooks-bundle"
 
-test("every bundle in scripts/hooks/bundle is what a fresh build of its source writes", async () => {
+test("every bundle in scripts/hooks/bundled is what a fresh build of its source writes", async () => {
   const drift = await stale(ROOT)
   expect(drift, `stale: ${drift.join(", ")}; ${FIX}`).toEqual([])
 })

@@ -69,7 +69,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "R=\"${PLAYGROUND_REPO}\"; [ -n \"$R\" ] || { g=\"$(git -C \"$CLAUDE_PROJECT_DIR\" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)\" && R=\"$(dirname \"$g\")\"; }; [ -n \"$R\" ] && [ \"$R\" != . ] && [ -f \"$R/scripts/hooks/no-release-comment.ts\" ] || { [ -z \"$PLAYGROUND_ROLE\" ] && exit 0; echo \"no-release-comment: no guard script in the main checkout (${R:-not found}); refusing. Restore it from the owner's own window: playbook LIFECYCLE.md, Restoring the main checkout\" >&2; exit 2; }; cd -P \"$R\" && bun --no-env-file scripts/hooks/no-release-comment.ts; c=$?; [ $c = 0 ] || [ $c = 2 ] || { echo \"no-release-comment: crashed (exit $c); refusing. Fix: bun install in $R\" >&2; exit 2; }; exit $c",
+            "command": "R=\"${PLAYGROUND_REPO}\"; [ -n \"$R\" ] || { g=\"$(git -C \"$CLAUDE_PROJECT_DIR\" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)\" && R=\"$(dirname \"$g\")\"; }; [ -n \"$R\" ] && [ \"$R\" != . ] && [ -f \"$R/scripts/hooks/bundled/no-release-comment.js\" ] || { [ -z \"$PLAYGROUND_ROLE\" ] && exit 0; echo \"no-release-comment: no guard script in the main checkout (${R:-not found}); refusing. Restore it from the owner's own window: playbook LIFECYCLE.md, Restoring the main checkout\" >&2; exit 2; }; cd -P \"$R\" && bun --no-env-file scripts/hooks/bundled/no-release-comment.js; c=$?; [ $c = 0 ] || [ $c = 2 ] || { echo \"no-release-comment: crashed (exit $c); refusing. Fix: bun install in $R\" >&2; exit 2; }; exit $c",
             "timeout": 15
           }
         ]
@@ -79,7 +79,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "R=\"${PLAYGROUND_REPO}\"; [ -n \"$R\" ] || { g=\"$(git -C \"$CLAUDE_PROJECT_DIR\" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)\" && R=\"$(dirname \"$g\")\"; }; [ -n \"$R\" ] && [ \"$R\" != . ] && [ -f \"$R/scripts/hooks/no-linear-ticket.ts\" ] || { [ -z \"$PLAYGROUND_ROLE\" ] && exit 0; echo \"no-linear-ticket: no guard script in the main checkout (${R:-not found}); refusing. Restore it from the owner's own window: playbook LIFECYCLE.md, Restoring the main checkout\" >&2; exit 2; }; cd -P \"$R\" && bun --no-env-file scripts/hooks/no-linear-ticket.ts; c=$?; [ $c = 0 ] || [ $c = 2 ] || { echo \"no-linear-ticket: crashed (exit $c); refusing. Fix: bun install in $R\" >&2; exit 2; }; exit $c",
+            "command": "R=\"${PLAYGROUND_REPO}\"; [ -n \"$R\" ] || { g=\"$(git -C \"$CLAUDE_PROJECT_DIR\" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)\" && R=\"$(dirname \"$g\")\"; }; [ -n \"$R\" ] && [ \"$R\" != . ] && [ -f \"$R/scripts/hooks/bundled/no-linear-ticket.js\" ] || { [ -z \"$PLAYGROUND_ROLE\" ] && exit 0; echo \"no-linear-ticket: no guard script in the main checkout (${R:-not found}); refusing. Restore it from the owner's own window: playbook LIFECYCLE.md, Restoring the main checkout\" >&2; exit 2; }; cd -P \"$R\" && bun --no-env-file scripts/hooks/bundled/no-linear-ticket.js; c=$?; [ $c = 0 ] || [ $c = 2 ] || { echo \"no-linear-ticket: crashed (exit $c); refusing. Fix: bun install in $R\" >&2; exit 2; }; exit $c",
             "timeout": 15
           }
         ]
@@ -89,7 +89,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "R=\"${PLAYGROUND_REPO}\"; [ -n \"$R\" ] || { g=\"$(git -C \"$CLAUDE_PROJECT_DIR\" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)\" && R=\"$(dirname \"$g\")\"; }; [ -n \"$R\" ] && [ \"$R\" != . ] && [ -f \"$R/scripts/hooks/no-playground-leak.ts\" ] || { [ -z \"$PLAYGROUND_ROLE\" ] && exit 0; echo \"no-playground-leak: no guard script in the main checkout (${R:-not found}); refusing. Restore it from the owner's own window: playbook LIFECYCLE.md, Restoring the main checkout\" >&2; exit 2; }; cd -P \"$R\" && bun --no-env-file scripts/hooks/no-playground-leak.ts; c=$?; [ $c = 0 ] || [ $c = 2 ] || { echo \"no-playground-leak: crashed (exit $c); refusing. Fix: bun install in $R\" >&2; exit 2; }; exit $c",
+            "command": "R=\"${PLAYGROUND_REPO}\"; [ -n \"$R\" ] || { g=\"$(git -C \"$CLAUDE_PROJECT_DIR\" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)\" && R=\"$(dirname \"$g\")\"; }; [ -n \"$R\" ] && [ \"$R\" != . ] && [ -f \"$R/scripts/hooks/bundled/no-playground-leak.js\" ] || { [ -z \"$PLAYGROUND_ROLE\" ] && exit 0; echo \"no-playground-leak: no guard script in the main checkout (${R:-not found}); refusing. Restore it from the owner's own window: playbook LIFECYCLE.md, Restoring the main checkout\" >&2; exit 2; }; cd -P \"$R\" && bun --no-env-file scripts/hooks/bundled/no-playground-leak.js; c=$?; [ $c = 0 ] || [ $c = 2 ] || { echo \"no-playground-leak: crashed (exit $c); refusing. Fix: bun install in $R\" >&2; exit 2; }; exit $c",
             "timeout": 15
           }
         ]
@@ -99,12 +99,12 @@
         "hooks": [
           {
             "type": "command",
-            "command": "R=\"${PLAYGROUND_REPO}\"; [ -n \"$R\" ] || { g=\"$(git -C \"$CLAUDE_PROJECT_DIR\" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)\" && R=\"$(dirname \"$g\")\"; }; [ -n \"$R\" ] && [ \"$R\" != . ] && [ -f \"$R/scripts/hooks/no-public-leak.ts\" ] || { [ -z \"$PLAYGROUND_ROLE\" ] && exit 0; echo \"no-public-leak: no guard script in the main checkout (${R:-not found}); refusing. Restore it from the owner's own window: playbook LIFECYCLE.md, Restoring the main checkout\" >&2; exit 2; }; cd -P \"$R\" && bun --no-env-file scripts/hooks/no-public-leak.ts; c=$?; [ $c = 0 ] || [ $c = 2 ] || { echo \"no-public-leak: crashed (exit $c); refusing. Fix: bun install in $R\" >&2; exit 2; }; exit $c",
+            "command": "R=\"${PLAYGROUND_REPO}\"; [ -n \"$R\" ] || { g=\"$(git -C \"$CLAUDE_PROJECT_DIR\" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)\" && R=\"$(dirname \"$g\")\"; }; [ -n \"$R\" ] && [ \"$R\" != . ] && [ -f \"$R/scripts/hooks/bundled/no-public-leak.js\" ] || { [ -z \"$PLAYGROUND_ROLE\" ] && exit 0; echo \"no-public-leak: no guard script in the main checkout (${R:-not found}); refusing. Restore it from the owner's own window: playbook LIFECYCLE.md, Restoring the main checkout\" >&2; exit 2; }; cd -P \"$R\" && bun --no-env-file scripts/hooks/bundled/no-public-leak.js; c=$?; [ $c = 0 ] || [ $c = 2 ] || { echo \"no-public-leak: crashed (exit $c); refusing. Fix: bun install in $R\" >&2; exit 2; }; exit $c",
             "timeout": 15
           },
           {
             "type": "command",
-            "command": "R=\"${PLAYGROUND_REPO}\"; [ -n \"$R\" ] || { g=\"$(git -C \"$CLAUDE_PROJECT_DIR\" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)\" && R=\"$(dirname \"$g\")\"; }; [ -n \"$R\" ] && [ \"$R\" != . ] && [ -f \"$R/scripts/hooks/no-extension-repo-write.ts\" ] || { [ -z \"$PLAYGROUND_ROLE\" ] && exit 0; echo \"no-extension-repo-write: no guard script in the main checkout (${R:-not found}); refusing. Restore it from the owner's own window: playbook LIFECYCLE.md, Restoring the main checkout\" >&2; exit 2; }; cd -P \"$R\" && bun --no-env-file scripts/hooks/no-extension-repo-write.ts; c=$?; [ $c = 0 ] || [ $c = 2 ] || { echo \"no-extension-repo-write: crashed (exit $c); refusing. Fix: bun install in $R\" >&2; exit 2; }; exit $c",
+            "command": "R=\"${PLAYGROUND_REPO}\"; [ -n \"$R\" ] || { g=\"$(git -C \"$CLAUDE_PROJECT_DIR\" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)\" && R=\"$(dirname \"$g\")\"; }; [ -n \"$R\" ] && [ \"$R\" != . ] && [ -f \"$R/scripts/hooks/bundled/no-extension-repo-write.js\" ] || { [ -z \"$PLAYGROUND_ROLE\" ] && exit 0; echo \"no-extension-repo-write: no guard script in the main checkout (${R:-not found}); refusing. Restore it from the owner's own window: playbook LIFECYCLE.md, Restoring the main checkout\" >&2; exit 2; }; cd -P \"$R\" && bun --no-env-file scripts/hooks/bundled/no-extension-repo-write.js; c=$?; [ $c = 0 ] || [ $c = 2 ] || { echo \"no-extension-repo-write: crashed (exit $c); refusing. Fix: bun install in $R\" >&2; exit 2; }; exit $c",
             "timeout": 15
           }
         ]
@@ -114,7 +114,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "R=\"${PLAYGROUND_REPO}\"; [ -n \"$R\" ] || { g=\"$(git -C \"$CLAUDE_PROJECT_DIR\" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)\" && R=\"$(dirname \"$g\")\"; }; [ -n \"$R\" ] && [ \"$R\" != . ] && [ -f \"$R/scripts/hooks/no-bare-slack-link.ts\" ] || { [ -z \"$PLAYGROUND_ROLE\" ] && exit 0; echo \"no-bare-slack-link: no guard script in the main checkout (${R:-not found}); refusing. Restore it from the owner's own window: playbook LIFECYCLE.md, Restoring the main checkout\" >&2; exit 2; }; cd -P \"$R\" && bun --no-env-file scripts/hooks/no-bare-slack-link.ts; c=$?; [ $c = 0 ] || [ $c = 2 ] || { echo \"no-bare-slack-link: crashed (exit $c); refusing. Fix: bun install in $R\" >&2; exit 2; }; exit $c",
+            "command": "R=\"${PLAYGROUND_REPO}\"; [ -n \"$R\" ] || { g=\"$(git -C \"$CLAUDE_PROJECT_DIR\" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)\" && R=\"$(dirname \"$g\")\"; }; [ -n \"$R\" ] && [ \"$R\" != . ] && [ -f \"$R/scripts/hooks/bundled/no-bare-slack-link.js\" ] || { [ -z \"$PLAYGROUND_ROLE\" ] && exit 0; echo \"no-bare-slack-link: no guard script in the main checkout (${R:-not found}); refusing. Restore it from the owner's own window: playbook LIFECYCLE.md, Restoring the main checkout\" >&2; exit 2; }; cd -P \"$R\" && bun --no-env-file scripts/hooks/bundled/no-bare-slack-link.js; c=$?; [ $c = 0 ] || [ $c = 2 ] || { echo \"no-bare-slack-link: crashed (exit $c); refusing. Fix: bun install in $R\" >&2; exit 2; }; exit $c",
             "timeout": 15
           }
         ]
@@ -124,7 +124,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "R=\"${PLAYGROUND_REPO}\"; [ -n \"$R\" ] || { g=\"$(git -C \"$CLAUDE_PROJECT_DIR\" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)\" && R=\"$(dirname \"$g\")\"; }; [ -n \"$R\" ] && [ \"$R\" != . ] && [ -f \"$R/scripts/hooks/no-stash.ts\" ] || { [ -z \"$PLAYGROUND_ROLE\" ] && exit 0; echo \"no-stash: no guard script in the main checkout (${R:-not found}); refusing. Restore it from the owner's own window: playbook LIFECYCLE.md, Restoring the main checkout\" >&2; exit 2; }; cd -P \"$R\" && bun --no-env-file scripts/hooks/no-stash.ts; c=$?; [ $c = 0 ] || [ $c = 2 ] || { echo \"no-stash: crashed (exit $c); refusing. Fix: bun install in $R\" >&2; exit 2; }; exit $c",
+            "command": "R=\"${PLAYGROUND_REPO}\"; [ -n \"$R\" ] || { g=\"$(git -C \"$CLAUDE_PROJECT_DIR\" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)\" && R=\"$(dirname \"$g\")\"; }; [ -n \"$R\" ] && [ \"$R\" != . ] && [ -f \"$R/scripts/hooks/bundled/no-stash.js\" ] || { [ -z \"$PLAYGROUND_ROLE\" ] && exit 0; echo \"no-stash: no guard script in the main checkout (${R:-not found}); refusing. Restore it from the owner's own window: playbook LIFECYCLE.md, Restoring the main checkout\" >&2; exit 2; }; cd -P \"$R\" && bun --no-env-file scripts/hooks/bundled/no-stash.js; c=$?; [ $c = 0 ] || [ $c = 2 ] || { echo \"no-stash: crashed (exit $c); refusing. Fix: bun install in $R\" >&2; exit 2; }; exit $c",
             "timeout": 15
           }
         ]
@@ -134,7 +134,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "R=\"${PLAYGROUND_REPO}\"; [ -n \"$R\" ] || { g=\"$(git -C \"$CLAUDE_PROJECT_DIR\" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)\" && R=\"$(dirname \"$g\")\"; }; [ -n \"$R\" ] && [ \"$R\" != . ] && [ -f \"$R/scripts/hooks/no-manager-subagent.ts\" ] || { [ -z \"$PLAYGROUND_ROLE\" ] && exit 0; echo \"no-manager-subagent: no guard script in the main checkout (${R:-not found}); refusing. Restore it from the owner's own window: playbook LIFECYCLE.md, Restoring the main checkout\" >&2; exit 2; }; cd -P \"$R\" && bun --no-env-file scripts/hooks/no-manager-subagent.ts; c=$?; [ $c = 0 ] || [ $c = 2 ] || { echo \"no-manager-subagent: crashed (exit $c); refusing. Fix: bun install in $R\" >&2; exit 2; }; exit $c",
+            "command": "R=\"${PLAYGROUND_REPO}\"; [ -n \"$R\" ] || { g=\"$(git -C \"$CLAUDE_PROJECT_DIR\" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)\" && R=\"$(dirname \"$g\")\"; }; [ -n \"$R\" ] && [ \"$R\" != . ] && [ -f \"$R/scripts/hooks/bundled/no-manager-subagent.js\" ] || { [ -z \"$PLAYGROUND_ROLE\" ] && exit 0; echo \"no-manager-subagent: no guard script in the main checkout (${R:-not found}); refusing. Restore it from the owner's own window: playbook LIFECYCLE.md, Restoring the main checkout\" >&2; exit 2; }; cd -P \"$R\" && bun --no-env-file scripts/hooks/bundled/no-manager-subagent.js; c=$?; [ $c = 0 ] || [ $c = 2 ] || { echo \"no-manager-subagent: crashed (exit $c); refusing. Fix: bun install in $R\" >&2; exit 2; }; exit $c",
             "timeout": 15
           }
         ]
@@ -144,7 +144,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "R=\"${PLAYGROUND_REPO}\"; [ -n \"$R\" ] || { g=\"$(git -C \"$CLAUDE_PROJECT_DIR\" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)\" && R=\"$(dirname \"$g\")\"; }; [ -n \"$R\" ] && [ \"$R\" != . ] && [ -f \"$R/scripts/hooks/no-ours-merge.ts\" ] || { [ -z \"$PLAYGROUND_ROLE\" ] && exit 0; echo \"no-ours-merge: no guard script in the main checkout (${R:-not found}); refusing. Restore it from the owner's own window: playbook LIFECYCLE.md, Restoring the main checkout\" >&2; exit 2; }; cd -P \"$R\" && bun --no-env-file scripts/hooks/no-ours-merge.ts; c=$?; [ $c = 0 ] || [ $c = 2 ] || { echo \"no-ours-merge: crashed (exit $c); refusing. Fix: bun install in $R\" >&2; exit 2; }; exit $c",
+            "command": "R=\"${PLAYGROUND_REPO}\"; [ -n \"$R\" ] || { g=\"$(git -C \"$CLAUDE_PROJECT_DIR\" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)\" && R=\"$(dirname \"$g\")\"; }; [ -n \"$R\" ] && [ \"$R\" != . ] && [ -f \"$R/scripts/hooks/bundled/no-ours-merge.js\" ] || { [ -z \"$PLAYGROUND_ROLE\" ] && exit 0; echo \"no-ours-merge: no guard script in the main checkout (${R:-not found}); refusing. Restore it from the owner's own window: playbook LIFECYCLE.md, Restoring the main checkout\" >&2; exit 2; }; cd -P \"$R\" && bun --no-env-file scripts/hooks/bundled/no-ours-merge.js; c=$?; [ $c = 0 ] || [ $c = 2 ] || { echo \"no-ours-merge: crashed (exit $c); refusing. Fix: bun install in $R\" >&2; exit 2; }; exit $c",
             "timeout": 15
           }
         ]
@@ -154,7 +154,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "R=\"${PLAYGROUND_REPO}\"; [ -n \"$R\" ] || { g=\"$(git -C \"$CLAUDE_PROJECT_DIR\" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)\" && R=\"$(dirname \"$g\")\"; }; [ -n \"$R\" ] && [ \"$R\" != . ] && [ -f \"$R/scripts/hooks/no-main-checkout.ts\" ] || { [ -z \"$PLAYGROUND_ROLE\" ] && exit 0; echo \"no-main-checkout: no guard script in the main checkout (${R:-not found}); refusing. Restore it from the owner's own window: playbook LIFECYCLE.md, Restoring the main checkout\" >&2; exit 2; }; cd -P \"$R\" && bun --no-env-file scripts/hooks/no-main-checkout.ts; c=$?; [ $c = 0 ] || [ $c = 2 ] || { echo \"no-main-checkout: crashed (exit $c); refusing. Fix: bun install in $R\" >&2; exit 2; }; exit $c",
+            "command": "R=\"${PLAYGROUND_REPO}\"; [ -n \"$R\" ] || { g=\"$(git -C \"$CLAUDE_PROJECT_DIR\" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)\" && R=\"$(dirname \"$g\")\"; }; [ -n \"$R\" ] && [ \"$R\" != . ] && [ -f \"$R/scripts/hooks/bundled/no-main-checkout.js\" ] || { [ -z \"$PLAYGROUND_ROLE\" ] && exit 0; echo \"no-main-checkout: no guard script in the main checkout (${R:-not found}); refusing. Restore it from the owner's own window: playbook LIFECYCLE.md, Restoring the main checkout\" >&2; exit 2; }; cd -P \"$R\" && bun --no-env-file scripts/hooks/bundled/no-main-checkout.js; c=$?; [ $c = 0 ] || [ $c = 2 ] || { echo \"no-main-checkout: crashed (exit $c); refusing. Fix: bun install in $R\" >&2; exit 2; }; exit $c",
             "timeout": 15
           }
         ]
@@ -164,7 +164,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "R=\"${PLAYGROUND_REPO}\"; [ -n \"$R\" ] || { g=\"$(git -C \"$CLAUDE_PROJECT_DIR\" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)\" && R=\"$(dirname \"$g\")\"; }; [ -n \"$R\" ] && [ \"$R\" != . ] && [ -f \"$R/scripts/hooks/no-extensions-write.ts\" ] || { [ -z \"$PLAYGROUND_ROLE\" ] && exit 0; echo \"no-extensions-write: no guard script in the main checkout (${R:-not found}); refusing. Restore it from the owner's own window: playbook LIFECYCLE.md, Restoring the main checkout\" >&2; exit 2; }; cd -P \"$R\" && bun --no-env-file scripts/hooks/no-extensions-write.ts; c=$?; [ $c = 0 ] || [ $c = 2 ] || { echo \"no-extensions-write: crashed (exit $c); refusing. Fix: bun install in $R\" >&2; exit 2; }; exit $c",
+            "command": "R=\"${PLAYGROUND_REPO}\"; [ -n \"$R\" ] || { g=\"$(git -C \"$CLAUDE_PROJECT_DIR\" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)\" && R=\"$(dirname \"$g\")\"; }; [ -n \"$R\" ] && [ \"$R\" != . ] && [ -f \"$R/scripts/hooks/bundled/no-extensions-write.js\" ] || { [ -z \"$PLAYGROUND_ROLE\" ] && exit 0; echo \"no-extensions-write: no guard script in the main checkout (${R:-not found}); refusing. Restore it from the owner's own window: playbook LIFECYCLE.md, Restoring the main checkout\" >&2; exit 2; }; cd -P \"$R\" && bun --no-env-file scripts/hooks/bundled/no-extensions-write.js; c=$?; [ $c = 0 ] || [ $c = 2 ] || { echo \"no-extensions-write: crashed (exit $c); refusing. Fix: bun install in $R\" >&2; exit 2; }; exit $c",
             "timeout": 15
           }
         ]
@@ -174,7 +174,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "R=\"${PLAYGROUND_REPO}\"; [ -n \"$R\" ] || { g=\"$(git -C \"$CLAUDE_PROJECT_DIR\" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)\" && R=\"$(dirname \"$g\")\"; }; [ -n \"$R\" ] && [ \"$R\" != . ] && [ -f \"$R/scripts/hooks/no-unslotted-run.ts\" ] || { [ -z \"$PLAYGROUND_ROLE\" ] && exit 0; echo \"no-unslotted-run: no guard script in the main checkout (${R:-not found}); refusing. Restore it from the owner's own window: playbook LIFECYCLE.md, Restoring the main checkout\" >&2; exit 2; }; cd -P \"$R\" && bun --no-env-file scripts/hooks/no-unslotted-run.ts; c=$?; [ $c = 0 ] || [ $c = 2 ] || { echo \"no-unslotted-run: crashed (exit $c); refusing. Fix: bun install in $R\" >&2; exit 2; }; exit $c",
+            "command": "R=\"${PLAYGROUND_REPO}\"; [ -n \"$R\" ] || { g=\"$(git -C \"$CLAUDE_PROJECT_DIR\" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)\" && R=\"$(dirname \"$g\")\"; }; [ -n \"$R\" ] && [ \"$R\" != . ] && [ -f \"$R/scripts/hooks/bundled/no-unslotted-run.js\" ] || { [ -z \"$PLAYGROUND_ROLE\" ] && exit 0; echo \"no-unslotted-run: no guard script in the main checkout (${R:-not found}); refusing. Restore it from the owner's own window: playbook LIFECYCLE.md, Restoring the main checkout\" >&2; exit 2; }; cd -P \"$R\" && bun --no-env-file scripts/hooks/bundled/no-unslotted-run.js; c=$?; [ $c = 0 ] || [ $c = 2 ] || { echo \"no-unslotted-run: crashed (exit $c); refusing. Fix: bun install in $R\" >&2; exit 2; }; exit $c",
             "timeout": 15
           }
         ]
@@ -184,7 +184,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "R=\"${PLAYGROUND_REPO}\"; [ -n \"$R\" ] || { g=\"$(git -C \"$CLAUDE_PROJECT_DIR\" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)\" && R=\"$(dirname \"$g\")\"; }; [ -n \"$R\" ] && [ \"$R\" != . ] && [ -f \"$R/scripts/hooks/no-prompt-stop.ts\" ] || { [ -z \"$PLAYGROUND_ROLE\" ] && exit 0; echo \"no-prompt-stop: no guard script in the main checkout (${R:-not found}); refusing. Restore it from the owner's own window: playbook LIFECYCLE.md, Restoring the main checkout\" >&2; exit 2; }; cd -P \"$R\" && bun --no-env-file scripts/hooks/no-prompt-stop.ts; c=$?; [ $c = 0 ] || [ $c = 2 ] || { echo \"no-prompt-stop: crashed (exit $c); refusing. Fix: bun install in $R\" >&2; exit 2; }; exit $c",
+            "command": "R=\"${PLAYGROUND_REPO}\"; [ -n \"$R\" ] || { g=\"$(git -C \"$CLAUDE_PROJECT_DIR\" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)\" && R=\"$(dirname \"$g\")\"; }; [ -n \"$R\" ] && [ \"$R\" != . ] && [ -f \"$R/scripts/hooks/bundled/no-prompt-stop.js\" ] || { [ -z \"$PLAYGROUND_ROLE\" ] && exit 0; echo \"no-prompt-stop: no guard script in the main checkout (${R:-not found}); refusing. Restore it from the owner's own window: playbook LIFECYCLE.md, Restoring the main checkout\" >&2; exit 2; }; cd -P \"$R\" && bun --no-env-file scripts/hooks/bundled/no-prompt-stop.js; c=$?; [ $c = 0 ] || [ $c = 2 ] || { echo \"no-prompt-stop: crashed (exit $c); refusing. Fix: bun install in $R\" >&2; exit 2; }; exit $c",
             "timeout": 15
           }
         ]
@@ -194,7 +194,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "R=\"${PLAYGROUND_REPO}\"; [ -n \"$R\" ] || { g=\"$(git -C \"$CLAUDE_PROJECT_DIR\" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)\" && R=\"$(dirname \"$g\")\"; }; [ -n \"$R\" ] && [ \"$R\" != . ] && [ -f \"$R/scripts/hooks/no-raw-spawn.ts\" ] || { [ -z \"$PLAYGROUND_ROLE\" ] && exit 0; echo \"no-raw-spawn: no guard script in the main checkout (${R:-not found}); refusing. Restore it from the owner's own window: playbook LIFECYCLE.md, Restoring the main checkout\" >&2; exit 2; }; cd -P \"$R\" && bun --no-env-file scripts/hooks/no-raw-spawn.ts; c=$?; [ $c = 0 ] || [ $c = 2 ] || { echo \"no-raw-spawn: crashed (exit $c); refusing. Fix: bun install in $R\" >&2; exit 2; }; exit $c",
+            "command": "R=\"${PLAYGROUND_REPO}\"; [ -n \"$R\" ] || { g=\"$(git -C \"$CLAUDE_PROJECT_DIR\" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)\" && R=\"$(dirname \"$g\")\"; }; [ -n \"$R\" ] && [ \"$R\" != . ] && [ -f \"$R/scripts/hooks/bundled/no-raw-spawn.js\" ] || { [ -z \"$PLAYGROUND_ROLE\" ] && exit 0; echo \"no-raw-spawn: no guard script in the main checkout (${R:-not found}); refusing. Restore it from the owner's own window: playbook LIFECYCLE.md, Restoring the main checkout\" >&2; exit 2; }; cd -P \"$R\" && bun --no-env-file scripts/hooks/bundled/no-raw-spawn.js; c=$?; [ $c = 0 ] || [ $c = 2 ] || { echo \"no-raw-spawn: crashed (exit $c); refusing. Fix: bun install in $R\" >&2; exit 2; }; exit $c",
             "timeout": 15
           }
         ]
@@ -204,7 +204,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "R=\"${PLAYGROUND_REPO}\"; [ -n \"$R\" ] || { g=\"$(git -C \"$CLAUDE_PROJECT_DIR\" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)\" && R=\"$(dirname \"$g\")\"; }; [ -n \"$R\" ] && [ \"$R\" != . ] && [ -f \"$R/scripts/hooks/no-env-dump.ts\" ] || { [ -z \"$PLAYGROUND_ROLE\" ] && exit 0; echo \"no-env-dump: no guard script in the main checkout (${R:-not found}); refusing. Restore it from the owner's own window: playbook LIFECYCLE.md, Restoring the main checkout\" >&2; exit 2; }; cd -P \"$R\" && bun --no-env-file scripts/hooks/no-env-dump.ts; c=$?; [ $c = 0 ] || [ $c = 2 ] || { echo \"no-env-dump: crashed (exit $c); refusing. Fix: bun install in $R\" >&2; exit 2; }; exit $c",
+            "command": "R=\"${PLAYGROUND_REPO}\"; [ -n \"$R\" ] || { g=\"$(git -C \"$CLAUDE_PROJECT_DIR\" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)\" && R=\"$(dirname \"$g\")\"; }; [ -n \"$R\" ] && [ \"$R\" != . ] && [ -f \"$R/scripts/hooks/bundled/no-env-dump.js\" ] || { [ -z \"$PLAYGROUND_ROLE\" ] && exit 0; echo \"no-env-dump: no guard script in the main checkout (${R:-not found}); refusing. Restore it from the owner's own window: playbook LIFECYCLE.md, Restoring the main checkout\" >&2; exit 2; }; cd -P \"$R\" && bun --no-env-file scripts/hooks/bundled/no-env-dump.js; c=$?; [ $c = 0 ] || [ $c = 2 ] || { echo \"no-env-dump: crashed (exit $c); refusing. Fix: bun install in $R\" >&2; exit 2; }; exit $c",
             "timeout": 15
           }
         ]
@@ -214,7 +214,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "R=\"${PLAYGROUND_REPO}\"; [ -n \"$R\" ] || { g=\"$(git -C \"$CLAUDE_PROJECT_DIR\" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)\" && R=\"$(dirname \"$g\")\"; }; [ -n \"$R\" ] && [ \"$R\" != . ] && [ -f \"$R/scripts/hooks/no-false-green.ts\" ] || { [ -z \"$PLAYGROUND_ROLE\" ] && exit 0; echo \"no-false-green: no guard script in the main checkout (${R:-not found}); refusing. Restore it from the owner's own window: playbook LIFECYCLE.md, Restoring the main checkout\" >&2; exit 2; }; cd -P \"$R\" && bun --no-env-file scripts/hooks/no-false-green.ts; c=$?; [ $c = 0 ] || [ $c = 2 ] || { echo \"no-false-green: crashed (exit $c); refusing. Fix: bun install in $R\" >&2; exit 2; }; exit $c",
+            "command": "R=\"${PLAYGROUND_REPO}\"; [ -n \"$R\" ] || { g=\"$(git -C \"$CLAUDE_PROJECT_DIR\" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)\" && R=\"$(dirname \"$g\")\"; }; [ -n \"$R\" ] && [ \"$R\" != . ] && [ -f \"$R/scripts/hooks/bundled/no-false-green.js\" ] || { [ -z \"$PLAYGROUND_ROLE\" ] && exit 0; echo \"no-false-green: no guard script in the main checkout (${R:-not found}); refusing. Restore it from the owner's own window: playbook LIFECYCLE.md, Restoring the main checkout\" >&2; exit 2; }; cd -P \"$R\" && bun --no-env-file scripts/hooks/bundled/no-false-green.js; c=$?; [ $c = 0 ] || [ $c = 2 ] || { echo \"no-false-green: crashed (exit $c); refusing. Fix: bun install in $R\" >&2; exit 2; }; exit $c",
             "timeout": 15
           }
         ]
@@ -224,7 +224,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "R=\"${PLAYGROUND_REPO}\"; [ -n \"$R\" ] || { g=\"$(git -C \"$CLAUDE_PROJECT_DIR\" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)\" && R=\"$(dirname \"$g\")\"; }; [ -n \"$R\" ] && [ \"$R\" != . ] && [ -f \"$R/scripts/hooks/no-glm-heavy-path.ts\" ] || { [ -z \"$PLAYGROUND_ROLE\" ] && exit 0; echo \"no-glm-heavy-path: no guard script in the main checkout (${R:-not found}); refusing. Restore it from the owner's own window: playbook LIFECYCLE.md, Restoring the main checkout\" >&2; exit 2; }; cd -P \"$R\" && bun --no-env-file scripts/hooks/no-glm-heavy-path.ts; c=$?; [ $c = 0 ] || [ $c = 2 ] || { echo \"no-glm-heavy-path: crashed (exit $c); refusing. Fix: bun install in $R\" >&2; exit 2; }; exit $c",
+            "command": "R=\"${PLAYGROUND_REPO}\"; [ -n \"$R\" ] || { g=\"$(git -C \"$CLAUDE_PROJECT_DIR\" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)\" && R=\"$(dirname \"$g\")\"; }; [ -n \"$R\" ] && [ \"$R\" != . ] && [ -f \"$R/scripts/hooks/bundled/no-glm-heavy-path.js\" ] || { [ -z \"$PLAYGROUND_ROLE\" ] && exit 0; echo \"no-glm-heavy-path: no guard script in the main checkout (${R:-not found}); refusing. Restore it from the owner's own window: playbook LIFECYCLE.md, Restoring the main checkout\" >&2; exit 2; }; cd -P \"$R\" && bun --no-env-file scripts/hooks/bundled/no-glm-heavy-path.js; c=$?; [ $c = 0 ] || [ $c = 2 ] || { echo \"no-glm-heavy-path: crashed (exit $c); refusing. Fix: bun install in $R\" >&2; exit 2; }; exit $c",
             "timeout": 15
           }
         ]
@@ -234,7 +234,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "R=\"${PLAYGROUND_REPO}\"; [ -n \"$R\" ] || { g=\"$(git -C \"$CLAUDE_PROJECT_DIR\" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)\" && R=\"$(dirname \"$g\")\"; }; [ -n \"$R\" ] && [ \"$R\" != . ] && [ -f \"$R/scripts/hooks/no-desktop-owner-app.ts\" ] || { [ -z \"$PLAYGROUND_ROLE\" ] && exit 0; echo \"no-desktop-owner-app: no guard script in the main checkout (${R:-not found}); refusing. Restore it from the owner's own window: playbook LIFECYCLE.md, Restoring the main checkout\" >&2; exit 2; }; cd -P \"$R\" && bun --no-env-file scripts/hooks/no-desktop-owner-app.ts; c=$?; [ $c = 0 ] || [ $c = 2 ] || { echo \"no-desktop-owner-app: crashed (exit $c); refusing. Fix: bun install in $R\" >&2; exit 2; }; exit $c",
+            "command": "R=\"${PLAYGROUND_REPO}\"; [ -n \"$R\" ] || { g=\"$(git -C \"$CLAUDE_PROJECT_DIR\" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)\" && R=\"$(dirname \"$g\")\"; }; [ -n \"$R\" ] && [ \"$R\" != . ] && [ -f \"$R/scripts/hooks/bundled/no-desktop-owner-app.js\" ] || { [ -z \"$PLAYGROUND_ROLE\" ] && exit 0; echo \"no-desktop-owner-app: no guard script in the main checkout (${R:-not found}); refusing. Restore it from the owner's own window: playbook LIFECYCLE.md, Restoring the main checkout\" >&2; exit 2; }; cd -P \"$R\" && bun --no-env-file scripts/hooks/bundled/no-desktop-owner-app.js; c=$?; [ $c = 0 ] || [ $c = 2 ] || { echo \"no-desktop-owner-app: crashed (exit $c); refusing. Fix: bun install in $R\" >&2; exit 2; }; exit $c",
             "timeout": 15
           }
         ]
@@ -244,7 +244,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "R=\"${PLAYGROUND_REPO}\"; [ -n \"$R\" ] || { g=\"$(git -C \"$CLAUDE_PROJECT_DIR\" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)\" && R=\"$(dirname \"$g\")\"; }; [ -n \"$R\" ] && [ \"$R\" != . ] && [ -f \"$R/scripts/hooks/no-headless-login.ts\" ] || { [ -z \"$PLAYGROUND_ROLE\" ] && exit 0; echo \"no-headless-login: no guard script in the main checkout (${R:-not found}); refusing. Restore it from the owner's own window: playbook LIFECYCLE.md, Restoring the main checkout\" >&2; exit 2; }; cd -P \"$R\" && bun --no-env-file scripts/hooks/no-headless-login.ts; c=$?; [ $c = 0 ] || [ $c = 2 ] || { echo \"no-headless-login: crashed (exit $c); refusing. Fix: bun install in $R\" >&2; exit 2; }; exit $c",
+            "command": "R=\"${PLAYGROUND_REPO}\"; [ -n \"$R\" ] || { g=\"$(git -C \"$CLAUDE_PROJECT_DIR\" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)\" && R=\"$(dirname \"$g\")\"; }; [ -n \"$R\" ] && [ \"$R\" != . ] && [ -f \"$R/scripts/hooks/bundled/no-headless-login.js\" ] || { [ -z \"$PLAYGROUND_ROLE\" ] && exit 0; echo \"no-headless-login: no guard script in the main checkout (${R:-not found}); refusing. Restore it from the owner's own window: playbook LIFECYCLE.md, Restoring the main checkout\" >&2; exit 2; }; cd -P \"$R\" && bun --no-env-file scripts/hooks/bundled/no-headless-login.js; c=$?; [ $c = 0 ] || [ $c = 2 ] || { echo \"no-headless-login: crashed (exit $c); refusing. Fix: bun install in $R\" >&2; exit 2; }; exit $c",
             "timeout": 15
           }
         ]
@@ -254,7 +254,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "R=\"${PLAYGROUND_REPO}\"; [ -n \"$R\" ] || { g=\"$(git -C \"$CLAUDE_PROJECT_DIR\" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)\" && R=\"$(dirname \"$g\")\"; }; [ -n \"$R\" ] && [ \"$R\" != . ] && [ -f \"$R/scripts/hooks/no-kill-by-name.ts\" ] || { [ -z \"$PLAYGROUND_ROLE\" ] && exit 0; echo \"no-kill-by-name: no guard script in the main checkout (${R:-not found}); refusing. Restore it from the owner's own window: playbook LIFECYCLE.md, Restoring the main checkout\" >&2; exit 2; }; cd -P \"$R\" && bun --no-env-file scripts/hooks/no-kill-by-name.ts; c=$?; [ $c = 0 ] || [ $c = 2 ] || { echo \"no-kill-by-name: crashed (exit $c); refusing. Fix: bun install in $R\" >&2; exit 2; }; exit $c",
+            "command": "R=\"${PLAYGROUND_REPO}\"; [ -n \"$R\" ] || { g=\"$(git -C \"$CLAUDE_PROJECT_DIR\" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)\" && R=\"$(dirname \"$g\")\"; }; [ -n \"$R\" ] && [ \"$R\" != . ] && [ -f \"$R/scripts/hooks/bundled/no-kill-by-name.js\" ] || { [ -z \"$PLAYGROUND_ROLE\" ] && exit 0; echo \"no-kill-by-name: no guard script in the main checkout (${R:-not found}); refusing. Restore it from the owner's own window: playbook LIFECYCLE.md, Restoring the main checkout\" >&2; exit 2; }; cd -P \"$R\" && bun --no-env-file scripts/hooks/bundled/no-kill-by-name.js; c=$?; [ $c = 0 ] || [ $c = 2 ] || { echo \"no-kill-by-name: crashed (exit $c); refusing. Fix: bun install in $R\" >&2; exit 2; }; exit $c",
             "timeout": 15
           }
         ]
@@ -264,7 +264,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "R=\"${PLAYGROUND_REPO}\"; [ -n \"$R\" ] || { g=\"$(git -C \"$CLAUDE_PROJECT_DIR\" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)\" && R=\"$(dirname \"$g\")\"; }; [ -n \"$R\" ] && [ \"$R\" != . ] && [ -f \"$R/scripts/hooks/no-mac-web-build.ts\" ] || { [ -z \"$PLAYGROUND_ROLE\" ] && exit 0; echo \"no-mac-web-build: no guard script in the main checkout (${R:-not found}); refusing. Restore it from the owner's own window: playbook LIFECYCLE.md, Restoring the main checkout\" >&2; exit 2; }; cd -P \"$R\" && bun --no-env-file scripts/hooks/no-mac-web-build.ts; c=$?; [ $c = 0 ] || [ $c = 2 ] || { echo \"no-mac-web-build: crashed (exit $c); refusing. Fix: bun install in $R\" >&2; exit 2; }; exit $c",
+            "command": "R=\"${PLAYGROUND_REPO}\"; [ -n \"$R\" ] || { g=\"$(git -C \"$CLAUDE_PROJECT_DIR\" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)\" && R=\"$(dirname \"$g\")\"; }; [ -n \"$R\" ] && [ \"$R\" != . ] && [ -f \"$R/scripts/hooks/bundled/no-mac-web-build.js\" ] || { [ -z \"$PLAYGROUND_ROLE\" ] && exit 0; echo \"no-mac-web-build: no guard script in the main checkout (${R:-not found}); refusing. Restore it from the owner's own window: playbook LIFECYCLE.md, Restoring the main checkout\" >&2; exit 2; }; cd -P \"$R\" && bun --no-env-file scripts/hooks/bundled/no-mac-web-build.js; c=$?; [ $c = 0 ] || [ $c = 2 ] || { echo \"no-mac-web-build: crashed (exit $c); refusing. Fix: bun install in $R\" >&2; exit 2; }; exit $c",
             "timeout": 15
           }
         ]
@@ -274,7 +274,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "R=\"${PLAYGROUND_REPO}\"; [ -n \"$R\" ] || { g=\"$(git -C \"$CLAUDE_PROJECT_DIR\" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)\" && R=\"$(dirname \"$g\")\"; }; [ -n \"$R\" ] && [ \"$R\" != . ] && [ -f \"$R/scripts/hooks/no-off-palette-label.ts\" ] || { [ -z \"$PLAYGROUND_ROLE\" ] && exit 0; echo \"no-off-palette-label: no guard script in the main checkout (${R:-not found}); refusing. Restore it from the owner's own window: playbook LIFECYCLE.md, Restoring the main checkout\" >&2; exit 2; }; cd -P \"$R\" && bun --no-env-file scripts/hooks/no-off-palette-label.ts; c=$?; [ $c = 0 ] || [ $c = 2 ] || { echo \"no-off-palette-label: crashed (exit $c); refusing. Fix: bun install in $R\" >&2; exit 2; }; exit $c",
+            "command": "R=\"${PLAYGROUND_REPO}\"; [ -n \"$R\" ] || { g=\"$(git -C \"$CLAUDE_PROJECT_DIR\" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)\" && R=\"$(dirname \"$g\")\"; }; [ -n \"$R\" ] && [ \"$R\" != . ] && [ -f \"$R/scripts/hooks/bundled/no-off-palette-label.js\" ] || { [ -z \"$PLAYGROUND_ROLE\" ] && exit 0; echo \"no-off-palette-label: no guard script in the main checkout (${R:-not found}); refusing. Restore it from the owner's own window: playbook LIFECYCLE.md, Restoring the main checkout\" >&2; exit 2; }; cd -P \"$R\" && bun --no-env-file scripts/hooks/bundled/no-off-palette-label.js; c=$?; [ $c = 0 ] || [ $c = 2 ] || { echo \"no-off-palette-label: crashed (exit $c); refusing. Fix: bun install in $R\" >&2; exit 2; }; exit $c",
             "timeout": 15
           }
         ]
@@ -284,7 +284,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "R=\"${PLAYGROUND_REPO}\"; [ -n \"$R\" ] || { g=\"$(git -C \"$CLAUDE_PROJECT_DIR\" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)\" && R=\"$(dirname \"$g\")\"; }; [ -n \"$R\" ] && [ \"$R\" != . ] && [ -f \"$R/scripts/hooks/writing-first.ts\" ] || { [ -z \"$PLAYGROUND_ROLE\" ] && exit 0; echo \"writing-first: no guard script in the main checkout (${R:-not found}); refusing. Restore it from the owner's own window: playbook LIFECYCLE.md, Restoring the main checkout\" >&2; exit 2; }; cd -P \"$R\" && bun --no-env-file scripts/hooks/writing-first.ts; c=$?; [ $c = 0 ] || [ $c = 2 ] || { echo \"writing-first: crashed (exit $c); refusing. Fix: bun install in $R\" >&2; exit 2; }; exit $c",
+            "command": "R=\"${PLAYGROUND_REPO}\"; [ -n \"$R\" ] || { g=\"$(git -C \"$CLAUDE_PROJECT_DIR\" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)\" && R=\"$(dirname \"$g\")\"; }; [ -n \"$R\" ] && [ \"$R\" != . ] && [ -f \"$R/scripts/hooks/bundled/writing-first.js\" ] || { [ -z \"$PLAYGROUND_ROLE\" ] && exit 0; echo \"writing-first: no guard script in the main checkout (${R:-not found}); refusing. Restore it from the owner's own window: playbook LIFECYCLE.md, Restoring the main checkout\" >&2; exit 2; }; cd -P \"$R\" && bun --no-env-file scripts/hooks/bundled/writing-first.js; c=$?; [ $c = 0 ] || [ $c = 2 ] || { echo \"writing-first: crashed (exit $c); refusing. Fix: bun install in $R\" >&2; exit 2; }; exit $c",
             "timeout": 15
           }
         ]

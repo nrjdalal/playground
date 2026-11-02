@@ -3,7 +3,7 @@
   "semi": false,
   "experimentalSortImports": {},
   "experimentalTailwindcss": {},
-  // The pr skill, ZeroStarter's skills and core's upstream skills stay upstream's bytes
+  // The pr skill, ZeroStarter's skills and core's upstream skills stay upstream's bytes, and the guards' bundles stay hooks-bundle's
   "ignorePatterns": [
     ".agents/**",
     "extensions/core/skills/code-review/**",
@@ -17,6 +17,7 @@
     "extensions/core/skills/to-spec/**",
     "extensions/core/skills/writing-for-agents/**",
     "extensions/core/upstream/**",
+    "scripts/hooks/bundled/**",
     "skills/zerostarter/**",
     "tests/extensions/core/skills/pr/upstream/**",
   ],

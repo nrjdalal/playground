@@ -12,7 +12,7 @@ export const preToolUseGuards = async (repo: string): Promise<string[]> => {
     join(repo, "scripts", "factory-settings.json"),
   ).json()) as Settings
   const names = (settings.hooks.PreToolUse ?? []).flatMap((entry) =>
-    entry.hooks.map((hook) => hook.command.match(/scripts\/hooks\/([\w-]+)\.ts/)?.[1]),
+    entry.hooks.map((hook) => hook.command.match(/scripts\/hooks\/bundled\/([\w-]+)\.js/)?.[1]),
   )
   return [...new Set(names.filter((name): name is string => !!name))]
 }
@@ -27,7 +27,7 @@ export const guardProbe = async (ctx: Context) => {
       [
         "sh",
         "-c",
-        'cd -P "$1" && exec bun --no-env-file "scripts/hooks/$2.ts"',
+        'cd -P "$1" && exec bun --no-env-file "scripts/hooks/bundled/$2.js"',
         "guard-probe",
         ctx.repo,
         name,
