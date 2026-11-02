@@ -159,3 +159,40 @@ describe("the ready line", () => {
     expect(await localci.waits("ops-checks-8", { RUN_SLOT_SIZE: "medium" })).toBe(true)
   })
 })
+
+// Ops, 2 Nov 21:32Z: 9 of 17 waiters were reviewers, 486 to 1304 s in, while a drafted 5/5 waited behind workers' long runs at the same class
+describe("a reviewer's run", () => {
+  test("takes the one free slot ahead of an older worker's medium run", async () => {
+    const m = machine()
+    m.ticket(1, "a1b2c3-worker", "s2 22 2 medium")
+    expect(await m.runs("d4e5f6-reviewer", { RUN_SLOT_SIZE: "medium" })).toBe(true)
+  })
+
+  test("and ahead of one past AGED, which still holds back a worker's newer run", async () => {
+    const aged = machine()
+    aged.ticket(1, "a1b2c3-worker", "s2 22 2 medium", 21 * 60)
+    expect(await aged.runs("d4e5f6-reviewer-spec", { RUN_SLOT_SIZE: "medium" })).toBe(true)
+    const worker = machine()
+    worker.ticket(1, "a1b2c3-worker", "s2 22 2 medium", 21 * 60)
+    expect(await worker.waits("g7h8i9-worker", { RUN_SLOT_SIZE: "small" })).toBe(true)
+  })
+
+  test("still waits behind an older Checks, merge-train or org run, fresh or past AGED, and behind local CI", async () => {
+    for (const [who, line] of [
+      ["ops-checks-5", "s2 02 2 medium"],
+      ["ops-localci", "s2"],
+      ["a1b2c3-worker", "s2 12 2 medium"],
+    ])
+      for (const ago of [0, 21 * 60]) {
+        const m = machine()
+        m.ticket(1, who, line, ago)
+        expect(await m.waits("d4e5f6-reviewer", { RUN_SLOT_SIZE: "small" })).toBe(true)
+      }
+  })
+
+  test("goes ahead of a worker's newer small run, which its size alone ranked first before", async () => {
+    const m = machine()
+    m.ticket(1, "d4e5f6-reviewer", "s2 22 2 medium")
+    expect(await m.waits("a1b2c3-worker", { RUN_SLOT_SIZE: "small" })).toBe(true)
+  })
+})
