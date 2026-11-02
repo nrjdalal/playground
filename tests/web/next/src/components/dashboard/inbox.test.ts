@@ -279,7 +279,7 @@ describe("one action where two overlapped, and Draft where the app has a draft A
     expect(named(html, "Discard")).not.toBe("")
   })
 
-  test("a draft shows its before and after under its words, as an ask does (#501)", () => {
+  test("a draft shows its before and after under its words, as an ask does (PG-501)", () => {
     const shots = [
       {
         id: "3f0e7a52-1c4b-4d2a-9e6f-0000000000a1.png",

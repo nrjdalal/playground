@@ -228,7 +228,7 @@ describe("bun run ask keeps an ask's pages, docs, code and PDFs (#2276, #2277)",
   })
 })
 
-describe("a draft carries pictures as an ask does (#501)", () => {
+describe("a draft carries pictures as an ask does (PG-501)", () => {
   const id = "3f0e7a52-1c4b-4d2a-9e6f-0000000000a1.png"
   const ok = { id, kind: "image", name: "a.png" }
   const item = (kind: "ask" | "draft", attachments: unknown) =>
