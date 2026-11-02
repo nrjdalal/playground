@@ -30,7 +30,7 @@ describe("a delete the hook lets run", () => {
     "rm -- -odd-name",
     "rmdir empty",
     "docker rm -fv playground-y-db",
-    'docker rm -f "$CID"',
+    'docker rm -fv "$CID"',
     "bun rm left-pad",
     "git rm --cached notes.txt",
     "rm *.log",

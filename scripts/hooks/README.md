@@ -424,7 +424,7 @@ Only the first reading moves the folder, sets variables and records files for th
   Any other path is refused, so a session working in the main checkout removes no file there, as the **main** rule keeps that checkout to upkeep.
   It reads a delete wherever the shell runs one, through `shell.ts`'s walk (wrappers such as `nohup` and `sudo`, `sh -c`, `eval`, substitutions), and more ways:
   the words after run-slot's `--`, each word of `screen` or `tmux` that starts no option as the command it runs, the script `at` or `batch` takes from stdin or `-f`, and every program it judges named among another program's words (`arch -arm64 rm -rf`, `busybox rm`, `npx rimraf`), but a printer's or a search's.
-  A plain `rm` met that way is judged for recursion alone, so `docker rm "$ID"` and `bun rm <package>` run.
+  A plain `rm` met that way is judged for recursion alone, so `docker rm -fv "$ID"` and `bun rm <package>` run.
   It also reads every word holding a space, the text after an `=` and a leading `!` too, as a command line of its own.
   The programs in its `DATA` list (printers, searches, `sed`, `awk`, `jq`, `gh` and the interpreters) take text as data, so their words stay text, and git's only command line is a `-c alias.<name>=!…` value, so a commit message or a `git grep` pattern stays text.
   It is a speed bump, not a wall: a script file a session writes and runs passes it, as does an interpreter's own delete call (`fs.rmSync` in `bun -e`), and only an OS sandbox contains those.

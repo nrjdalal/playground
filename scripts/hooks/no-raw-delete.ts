@@ -146,7 +146,7 @@ function judgeRm(
     }
     const option = options && a.value.startsWith("-") && a.value !== "-"
     if (option && recursive(a.value)) return refuse(`a recursive rm (${a.value})`)
-    // a variable may split into -r and any path, but a quoted one among another program's words stays one word (`docker rm "$ID"`); a brace may spell -r, and a glob in an option any option
+    // a variable may split into -r and any path, but a quoted one among another program's words stays one word (`docker rm -fv "$ID"`); a brace may spell -r, and a glob in an option any option
     const spread = marked(a.value) && (!nested || !a.quoted)
     if (spread || (options && spellsRecursive(a.value)) || (option && hidden(a)))
       return refuse(
