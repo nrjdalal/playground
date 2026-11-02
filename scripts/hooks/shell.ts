@@ -8,8 +8,8 @@ export type Text = { reads?: Text[]; unknown?: string; value: string; variable?:
 export type Word = Text & { glob?: boolean; procs?: Command[]; quoted: boolean }
 type Redirect = { body?: Text; fd: string; op: string; target?: Word }
 export type Command = {
-  // Set when the command runs whatever the one before it did (it follows a `;`, a newline, an `&` or an `||`), so a cd an `&&` made sure before it may not have run at all and the folders from before that cd are the shell's again
-  breaks?: boolean
+  // The token of the run of commands this one belongs to: it changes at each operator that runs a command whatever the one before it did (a `;`, a newline, an `&`, an `||`), and carries into every group, body and pipeline the run reaches, so a cd is read as having moved the shell only for the commands whose token is its own
+  chain?: number
   // Set when the command runs only if the one before it succeeded (it sits on the right of an `&&`), so a cd of its own has certainly run for every command the same chain joins after it
   chained?: boolean
   detached?: boolean
@@ -26,6 +26,8 @@ export type Command = {
   words: Word[]
 }
 type Lexer = {
+  // The run of commands the walk is in, carried into every group and substitution it enters, so one reached through a chain keeps that chain's token
+  token: number
   commands: Command[]
   i: number
   known: Record<string, string>
@@ -41,8 +43,10 @@ export type Env = {
   cwd?: string
   // Every folder a cd on the line has named, which `cd -`, `popd` and a bare `pushd` go back to
   cwdBack?: string[]
-  // The folders the shell was in before a cd an `&&` alone made sure, which become the shell's again at the first command the chain does not reach, since that one runs whether or not the cd did
+  // The folders the shell was in before a cd an `&&` alone made sure, which become the shell's again at the first command outside that cd's own run, since such a command runs whether or not the cd did
   cwdChain?: string[]
+  // The `Command.chain` token of that cd, so only a command of its own run keeps the folder it named
+  cwdChainToken?: number
   // The folders a body on the line may cd into, which no later cd clears, since the shell may run that body at any point of the line
   cwdHeld?: string[]
   // The folders a cd the reader could not be sure of may have left the shell in, beside `cwd`; `cwd` is unnamed whenever one of them is the shell's instead
@@ -138,6 +142,11 @@ const OPENS = new Set(["case", "coproc", "for", "if", "select", "until", "while"
 const CLOSES = new Set(["done", "esac", "fi", "}"])
 // The openers whose own command the shell may not run as typed: a brace group's, which a function keeps for a later call, and a coproc's, which runs in a subshell. An `if`, `while` or `until` runs its condition, and a `for` or `case` opener runs no command of its own.
 const HELD = new Set(["coproc", "function", "{"])
+// The operators that run the next command whatever the one before it did, so the run of commands a `cd` moved the shell for ends there; `&&` carries the run on, and `|` keeps a pipeline inside it.
+const FREES = new Set(["\n", ";", ";;", "&", "||"])
+// Tokens are handed out across every script the hook reads, so a script's own run never shares one with the line that read it.
+let tokens = 0
+const freshToken = () => ++tokens
 // The reserved words a body's own commands carry, which the shell may not run
 const BODIES = new Set(["do", "elif", "else", "then"])
 // Every reserved word the walk counts, each read in command position alone: `grep -q done` names a pattern, not a loop's end
@@ -451,7 +460,7 @@ function decode(raw: string): string {
 }
 
 export function lex(src: string, known: Record<string, string> = {}): Lexed {
-  const lx: Lexer = { commands: [], i: 0, known, scope: 0, scopes: [-1], src }
+  const lx: Lexer = { commands: [], i: 0, known, scope: 0, scopes: [-1], src, token: freshToken() }
   list(lx, 0, false)
   return { commands: lx.commands, scopes: lx.scopes }
 }
@@ -505,12 +514,13 @@ function walk(lx: Lexer, scope: number, nested: boolean, inherit?: Command): voi
       // an `&&` is left out: a command on its right runs only if the one before it succeeded, so it is chained rather than unsure, and every command the chain joins after it runs only if it did too
       if (after === "||" || depth > 0 || body) done.unsure = true
       if (after === "&&") done.chained = true
-      // only a command the chain could have reached frees the folder: the first command of a line, of a group or of a body is reached through whatever runs that group, so it keeps the chain's folder
-      else if (after !== "" && depth === 0) done.breaks = true
+      done.chain = lx.token
       if (reserved.some((w) => HELD.has(w))) done.held = true
       if (loops > 0 || loop) done.repeated = true
       depth = Math.max(0, depth + opened - closed)
       loops = Math.max(0, loops + (loop ? 1 : 0) - (reserved.includes("done") ? 1 : 0))
+      // a run ends only at an operator that runs the next command whatever this one did, and only outside every body: a `|` keeps the pipeline in the run, and entering a group, a body or a script keeps the run it was reached through
+      if (depth === 0 && FREES.has(op)) lx.token = freshToken()
       after = op
       for (const w of done.words) {
         if (w.value !== "{" || w.quoted) break
@@ -977,15 +987,10 @@ export async function run(
   // each script a shell, eval or source reads holds its text until it returns, so a deep chain of them can outgrow the hook's memory and time
   if (running >= MAX_RUNS) throw new RangeError("scripts nested too deep")
   running++
-  // a chain that reached this script is already resolved for every command in it, since the script runs only because that chain did, so none of its commands is one the chain does not reach; the line's own chain carries on after it
-  const chain = env.cwdChain
-  env.cwdChain = []
   try {
     return await runAll(lexed, env, visit, builtins)
   } finally {
     running--
-    // the script's own trailing chain joins the line's, since a cd an `&&` made sure at the end of an eval or a source may not have run either
-    env.cwdChain = keep([...new Set([...(chain ?? []), ...(env.cwdChain ?? [])])], env)
   }
 }
 
@@ -1076,7 +1081,9 @@ async function examineReading(
     }
     if (builtins) verdict = await visit(cmd, parsed, here)
   } else if (SHELLS.has(name))
-    verdict = await shell(name, args, cmd, here, visit, builtins, parsed.xargs)
+    verdict = await nested(cmd, env, () =>
+      shell(name, args, cmd, here, visit, builtins, parsed.xargs),
+    )
   else if (
     (name === "source" || name === ".") &&
     (args[0]?.procs || args[0]?.value === "/dev/stdin")
@@ -1084,12 +1091,29 @@ async function examineReading(
     const script = await scriptOf(args[0], cmd, here)
     verdict =
       (script.unknown ? await visit(cmd, parsed, here) : undefined) ??
-      (await run(lexScript(known(script), env), here, visit, builtins))
+      (await nested(cmd, env, () => run(lexScript(known(script), env), here, visit, builtins)))
   } else if (name === "eval") {
-    verdict = await run(lexScript(args.map((a) => a.value).join(" "), env), here, visit, builtins)
+    verdict = await nested(cmd, env, () =>
+      run(lexScript(args.map((a) => a.value).join(" "), env), here, visit, builtins),
+    )
   } else verdict = await visit(cmd, parsed, here)
   await record(cmd, name, args, here)
   return verdict
+}
+
+// Runs a script a command of the line reads (a shell, an eval, a source). The line's own run does not reach into it, since every command of the script runs because that command ran, so the script reads with no chain of the line's; what the script's own trailing chain leaves joins the line's on the way out, under the reading command's own token, since a cd an `&&` made sure at the end of an eval or a source may not have run either.
+async function nested<T>(cmd: Command, env: Env, body: () => Promise<T>): Promise<T> {
+  const chain = env.cwdChain
+  const token = env.cwdChainToken
+  env.cwdChain = []
+  env.cwdChainToken = undefined
+  try {
+    return await body()
+  } finally {
+    const left = [...new Set([...(chain ?? []), ...(env.cwdChain ?? [])])]
+    env.cwdChain = keep(left, env)
+    env.cwdChainToken = left.length > 0 ? (chain?.length ? token : cmd.chain) : undefined
+  }
 }
 
 // The two wrappers that run a shell builtin, so `builtin cd X` and `command cd X` move the shell as a bare `cd` does; every other wrapper (`env`, `nice`, `xargs`) runs no builtin at all.
@@ -1219,7 +1243,10 @@ async function chdirTo(name: string, cmd: Command, parsed: Parsed, env: Env): Pr
     env.cwdMaybe = []
     env.cwdUnread = false
     // the chain holds only to the first command it does not reach, so the folders from before this cd are kept for that one
-    if (chained) env.cwdChain = keep([...new Set([...(env.cwdChain ?? []), ...from])], env)
+    if (chained) {
+      env.cwdChain = keep([...new Set([...(env.cwdChain ?? []), ...from])], env)
+      env.cwdChainToken = cmd.chain
+    }
     return
   }
   env.cwd = undefined
@@ -1232,15 +1259,16 @@ async function chdirTo(name: string, cmd: Command, parsed: Parsed, env: Env): Pr
 const negated = (cmd: Command): boolean =>
   markers(cmd.words).filter((word) => word === "!").length % 2 === 1
 
-// A cd an `&&` alone made sure holds only while the chain holds: the first command the chain does not reach runs whether or not that cd did, so the folders from before it are the shell's again beside the one it named.
+// A cd an `&&` alone made sure holds for its own run of commands alone: any other command runs whether or not that cd did, so the folders from before it are the shell's again beside the one it named. A command keeps the folder only by proof, its own token matching the cd's, which every operator that frees a command takes away and no group, body, pipeline or script grants.
 function unchain(cmd: Command, env: Env): void {
-  if (!cmd.breaks || !env.cwdChain?.length) return
+  if (!env.cwdChain?.length || cmd.chain === env.cwdChainToken) return
   env.cwdMaybe = keep(
     [...new Set([...(env.cwdMaybe ?? []), ...(env.cwd ? [env.cwd] : []), ...env.cwdChain])],
     env,
   )
   env.cwd = undefined
   env.cwdChain = []
+  env.cwdChainToken = undefined
 }
 
 // At most this many folders are carried for one line, since each hook judges every command in all of them.
