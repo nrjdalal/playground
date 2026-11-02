@@ -30,7 +30,7 @@ On a first run, **Start a local container** on the Database row of **Let's check
 - **`docker is not on PATH`**: install Docker or OrbStack, or put `docker` on your PATH.
 - **`no single running Docker container publishes port <port>`**: no running container publishes the database's port, or more than one does.
   Run `docker ps -a` to see each container and its ports.
-  Start the Dashboard's database container if it has stopped (`docker start <name>`), or stop the other container that publishes the same port.
+  Run `playground`, which starts the Dashboard's database container when it has stopped, or stop the other container that publishes the same port.
   A started container can come back on a new port: read it with `docker port <name> 5432` and put that port in `POSTGRES_URL` in `.env`.
 
 ## herdr is not running

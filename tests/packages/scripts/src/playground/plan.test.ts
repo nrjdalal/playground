@@ -11,6 +11,7 @@ import {
   statusLines,
   VIEW_HINT,
   dashboardBeatOf,
+  startFailure,
   waitOutcome,
   wantsHelp,
   type DashboardBeat,
@@ -614,8 +615,12 @@ describe("managing the install", () => {
 
 describe("waitOutcome", () => {
   const RUNNING: DashboardBeat = { ageMs: 5_000, cycleSeconds: 60, running: true }
-  const at = (now: number, beat: DashboardBeat | null = RUNNING, api = false) =>
-    waitOutcome({ api, beat, now }, { shownAt: 0, startedAt: 0 })
+  const at = (
+    now: number,
+    beat: DashboardBeat | null = RUNNING,
+    api = false,
+    failure: string | null = null,
+  ) => waitOutcome({ api, beat, failure, now }, { shownAt: 0, startedAt: 0 })
 
   test("ends at once when the API answers", () => {
     expect(at(42_000, RUNNING, true)).toEqual({
@@ -650,11 +655,27 @@ describe("waitOutcome", () => {
   test("prints what it waits on and the time spent, at most every 10s", () => {
     expect(at(10_000)).toEqual({ progress: "Waiting for the Dashboard's API to answer… 10s" })
     expect(
-      waitOutcome({ api: false, beat: RUNNING, now: 75_000 }, { shownAt: 70_000, startedAt: 0 }),
+      waitOutcome(
+        { api: false, beat: RUNNING, failure: null, now: 75_000 },
+        { shownAt: 70_000, startedAt: 0 },
+      ),
     ).toEqual({ progress: null })
     expect(
-      waitOutcome({ api: false, beat: RUNNING, now: 80_000 }, { shownAt: 70_000, startedAt: 0 }),
+      waitOutcome(
+        { api: false, beat: RUNNING, failure: null, now: 80_000 },
+        { shownAt: 70_000, startedAt: 0 },
+      ),
     ).toEqual({ progress: "Waiting for the Dashboard's API to answer… 1m 20s" })
+  })
+
+  test("ends with the supervisor's failed start in its words once the 30s grace has passed", () => {
+    const why = "cmux is not running; open cmux, then run playground again"
+    expect(at(29_000, RUNNING, false, why)).not.toHaveProperty("done")
+    expect(at(30_000, RUNNING, false, why)).toEqual({
+      done: `the Dashboard's stack could not start: ${why} (waited 30s); see ops/dashboard/supervisor.log, then run playground again`,
+      ok: false,
+    })
+    expect(at(30_000, RUNNING, true, why)).toMatchObject({ ok: true })
   })
 
   test("ends after 15 minutes, as before", () => {
@@ -662,6 +683,48 @@ describe("waitOutcome", () => {
       done: "the Dashboard did not answer within 15 minutes; see ops/dashboard/supervisor.log, then run playground again",
       ok: false,
     })
+  })
+})
+
+describe("startFailure", () => {
+  const T = "2026-11-02T18:00:00Z"
+  const FOLLOWER = "follower=running follower: running entries: 12"
+
+  test("reads a refused dev's reason in plain words, from the newest START or RESTART line", () => {
+    expect(
+      startFailure([
+        `${T} START abc1234 FAIL dev=DOWN (dev: refusing to start: the database at 127.0.0.1:5432 is not answering (is it running?)) ${FOLLOWER}`,
+      ]),
+    ).toBe("the database at 127.0.0.1:5432 is not answering (is it running?)")
+    expect(startFailure([`${T} RESTART abc1234 FAIL build: error: tsc exited 2`])).toBe(
+      "error: tsc exited 2",
+    )
+    expect(startFailure([`${T} START abc1234 FAIL web: next build exited 1`])).toBe(
+      "next build exited 1",
+    )
+  })
+
+  test("is null once a newer start passed, for a failure off the stack, and for DOWN or other lines alone", () => {
+    expect(
+      startFailure([
+        `${T} START abc1234 FAIL build: error`,
+        `${T} RESTART abc1234 PASS version=1 verify=PASS ${FOLLOWER}`,
+      ]),
+    ).toBeNull()
+    expect(
+      startFailure([
+        `${T} START abc1234 FAIL build: error`,
+        `${T} RESTART abc1234 FAIL version=1 verify=PASS follower=FAIL lost the lock`,
+      ]),
+    ).toBeNull()
+    expect(
+      startFailure([
+        `${T} DOWN dev: refusing to start: gone`,
+        `${T} RESTART follower follower=running`,
+        `${T} ALIAS FAIL playground.localhost`,
+      ]),
+    ).toBeNull()
+    expect(startFailure([])).toBeNull()
   })
 })
 

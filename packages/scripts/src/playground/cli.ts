@@ -8,6 +8,7 @@ import { configDirOf, dataDir } from "@packages/env/data-dir"
 import { modelSettings, readPolicyOrDefaults, readSessionNames } from "@packages/settings"
 
 import { accountsIo, runAccounts } from "./accounts"
+import { type Docker, ensureDatabase } from "./database"
 import { doctor, report } from "./doctor"
 import { pinHere } from "./herdr-pin"
 import { orgsCommand, orgsIo } from "./orgs"
@@ -21,6 +22,7 @@ import {
   rollOutcome,
   runStart,
   runStatus,
+  startFailure,
   statusLines,
   VIEW_HINT,
   VERBS,
@@ -37,6 +39,7 @@ import {
   dashboardUrls,
   homeDataDir,
   linesSince,
+  liveContainer,
   liveSessions,
   NO_CHECKOUT,
   opsDashboard,
@@ -166,6 +169,25 @@ const liveDashboard = (cut = false) => {
   return { checkout, urls: dashboardUrls(checkout) }
 }
 
+// docker's own argv, its error words as its output on a failure; a missing docker reads as a failure.
+const docker: Docker = async (args) => {
+  try {
+    const child = Bun.spawn(["docker", ...args], {
+      stderr: "pipe",
+      stdout: "pipe",
+      timeout: 30_000,
+    })
+    const [out, err, code] = await Promise.all([
+      new Response(child.stdout).text(),
+      new Response(child.stderr).text(),
+      child.exited,
+    ])
+    return { code, out: (code === 0 ? out : err || out).trim() }
+  } catch (error) {
+    return { code: 127, out: error instanceof Error ? error.message : String(error) }
+  }
+}
+
 const dashboard = async (): Promise<number> => {
   const failed: string[] = []
   const close = (): number => {
@@ -173,6 +195,9 @@ const dashboard = async (): Promise<number> => {
     return failed.length ? 1 : 0
   }
   const { checkout, urls } = liveDashboard(true)
+  const database = await ensureDatabase(liveContainer(), docker)
+  for (const line of database.lines) console.log(line)
+  if (database.failed) failed.push(`The Dashboard's database didn't start: ${database.failed}`)
   for (const step of planStart(await probe(urls))) {
     if (step === "jobs") {
       console.log("Starting the Dashboard…")
@@ -186,12 +211,15 @@ const dashboard = async (): Promise<number> => {
       if (started.code !== 0) failed.push(`The dispatcher didn't start: ${started.message}`)
     } else if (step === "wait") {
       const ready = urls ?? dashboardUrls(checkout)
+      const results = join(opsDashboard(), "results.log")
+      const from = Bun.file(results).size
       const started = Date.now()
       const state = { shownAt: started, startedAt: started }
       for (;;) {
         const api = await apiUp(ready)
         const now = Date.now()
-        const outcome = waitOutcome({ api, beat: dashboardBeat(now), now }, state)
+        const failure = startFailure(await linesSince(results, from))
+        const outcome = waitOutcome({ api, beat: dashboardBeat(now), failure, now }, state)
         if ("done" in outcome) {
           if (!outcome.ok) {
             failed.push(`The Dashboard didn't come up: ${outcome.done}`)

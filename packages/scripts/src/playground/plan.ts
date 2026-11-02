@@ -20,7 +20,7 @@ const NAME = /^[a-z0-9]+(-[a-z0-9]+)*$/
 // The server playground view opens: the sessions', since probes keep to a server of their own.
 export const VIEW_SERVER = "playground"
 
-export const HELP = `playground            start herdr's servers that are down and restore their sessions, start the Dashboard's stack and follower when down (in cmux while a session is open there, else in herdr), start the dispatcher when it is not running (playground dispatcher), stop there when the Dashboard needs a cmux terminal open, else wait for the Dashboard (a progress line every 10s, stopping early once ops-dashboard's supervisor stops, 15 minutes at most), then open it; a step that failed is named last, with why, under Left for you, and the run exits 1
+export const HELP = `playground            start herdr's servers that are down and restore their sessions, start the Dashboard's stack and follower when down (in cmux while a session is open there, else in herdr), set the Dashboard's database to start again with Docker and start it when stopped, start the dispatcher when it is not running (playground dispatcher), stop there when the Dashboard needs a cmux terminal open, else wait for the Dashboard (a progress line every 10s, stopping early with the reason once ops-dashboard's supervisor stops or its start fails, 15 minutes at most), then open it; a step that failed is named last, with why, under Left for you, and the run exits 1
 playground view       open the ${VIEW_SERVER} herdr server, where the sessions run, in this terminal
 playground dispatcher start the dispatcher in a herdr workspace of its own, its brief written once from scripts/briefs/dispatcher.md into the data folder as brief-<dispatcher>.md: exit 0 started, 3 already running, 1 refused with spawn.sh's reason
 playground planner | builder | ops | optimizer
@@ -387,7 +387,7 @@ export const rollOutcome = (log: string[], results: string[]): RollOutcome => {
 
 // ops-dashboard's heartbeat as read at one poll: its age, its cycle and whether its pid is alive.
 export type DashboardBeat = { ageMs: number; cycleSeconds: number; running: boolean }
-type WaitRead = { api: boolean; beat: DashboardBeat | null; now: number }
+type WaitRead = { api: boolean; beat: DashboardBeat | null; failure: string | null; now: number }
 type WaitOutcome = { done: string; ok: boolean } | { progress: string | null }
 
 // The results ops.ts's EXITED reads as a loop that has exited.
@@ -435,7 +435,26 @@ const duration = (ms: number): string => {
   return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`
 }
 
-// One poll of the wait for the Dashboard's API after the jobs step: done once it answers, once ops-dashboard's supervisor is gone or its heartbeat stale, or at 15 minutes; else a progress line at most every 10s.
+// Why the Dashboard's stack did not start, in plain words, from the newest START or RESTART line of the supervisor's results: the refusal or error it names when it failed on the stack itself (its dev, its build or its web), else null. A DOWN line is left out, since it names the stack that died, before the restart that may well pass.
+export const startFailure = (results: string[]): string | null => {
+  for (const line of [...results].reverse()) {
+    const result = line.match(/^\S+ (?:START|RESTART) \w+ (PASS|FAIL) (.*)$/)
+    if (!result) continue
+    if (result[1] === "PASS") return null
+    const failed = result[2]!
+    const dev = failed.match(/^dev=DOWN \((.*)$/)?.[1]
+    const other = failed.match(/^(?:build|web): (.*)$/)?.[1]
+    let why = other
+    if (dev !== undefined) {
+      const end = dev.lastIndexOf(") follower=")
+      why = end >= 0 ? dev.slice(0, end) : dev.replace(/\)$/, "")
+    }
+    return why?.replace(/^dev: refusing to start: /, "").trim() || null
+  }
+  return null
+}
+
+// One poll of the wait for the Dashboard's API after the jobs step: done once it answers, once the supervisor's results name why its stack did not start, once ops-dashboard's supervisor is gone or its heartbeat stale, or at 15 minutes; else a progress line at most every 10s.
 export const waitOutcome = (
   read: WaitRead,
   state: { shownAt: number; startedAt: number },
@@ -444,6 +463,11 @@ export const waitOutcome = (
   if (read.api) return { done: `The Dashboard answered after ${duration(spent)}`, ok: true }
   const beat = read.beat
   if (spent >= START_GRACE_MS) {
+    if (read.failure)
+      return {
+        done: `the Dashboard's stack could not start: ${read.failure} (waited ${duration(spent)}); ${AGAIN}`,
+        ok: false,
+      }
     if (!beat?.running)
       return {
         done: `ops-dashboard's supervisor is not running, so the Dashboard will not come up (waited ${duration(spent)}); ${AGAIN}`,

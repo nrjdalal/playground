@@ -231,17 +231,45 @@ describe("startLocal", () => {
     }
   })
 
-  test("starts the live dashboard's database on its own branch, a fresh install's first run", async () => {
+  test("starts the live dashboard's database on its own branch, a fresh install's first run, set to start again after a restart", async () => {
     const bunx = pglaunch({ stdout: STARTED.replace("playground-a-db", LIVE.database) })
+    const docker = fake()
     const migrated: string[] = []
-    const url = await go(fake().run, bunx.run, envFile("live-fresh.env"), {
+    const steps: string[] = []
+    const url = await go(docker.run, bunx.run, envFile("live-fresh.env"), {
       branch: LIVE.branch,
       migrate: async (u) => void migrated.push(u),
       name: LIVE.database,
+      onStep: (s) => steps.push(s),
     })
     expect(url).toBe(URL)
     expect(bunx.calls).toEqual([["--bun", PGLAUNCH, "-k", "-n", LIVE.database]])
+    expect(docker.calls).toContainEqual([
+      "update",
+      "--restart",
+      "unless-stopped",
+      `${LIVE.database}-x9Kq`,
+    ])
+    expect(steps).toContain("Keeping Postgres running after a restart")
     expect(migrated).toEqual([URL])
+  })
+
+  test("a live dashboard's database Docker cannot set to restart stops setup with Docker's words", async () => {
+    const docker = fake({ update: { code: 1, stderr: "no such container" } })
+    const migrated: string[] = []
+    await expect(
+      go(
+        docker.run,
+        pglaunch({ stdout: STARTED.replace("playground-a-db", LIVE.database) }).run,
+        envFile("live-policy.env"),
+        {
+          branch: LIVE.branch,
+          migrate: async (u) => void migrated.push(u),
+          name: LIVE.database,
+        },
+      ),
+    ).rejects.toThrow("docker update --restart unless-stopped")
+    expect(migrated).toEqual([])
   })
 
   // Docker can come up between the launcher's check and the click, and pglaunch reuses only a running container it named, so setup asks Docker itself before it starts one.
