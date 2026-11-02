@@ -212,7 +212,7 @@ describe("it fails closed on its list", () => {
     expect(reason).toContain("no-public-leak hook refused this call:")
     expect(reason).toContain("holds no hooks/no-public-leak.json")
     expect(reason).toContain(
-      "! playground ext import --from-tree extensions/core/lists in Ops' pane",
+      "tell your lead, and the dispatcher hands the owner ! playground ext import --from-tree extensions/core/lists to type in the dispatcher's terminal window",
     )
   })
 

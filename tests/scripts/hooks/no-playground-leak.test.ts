@@ -289,6 +289,10 @@ describe(`a Acme write holding a ${OLD.dispatcher} term is refused`, () => {
     ["git commit -F", "git commit -F leaky.md"],
     ["git -C commit", `git -C ${"$PWD"} commit -am "${OLD.dispatcher}"`],
     ["git push to a branch named for a session", "git push origin HEAD:worker-greed/fix"],
+    [
+      "git --attr-source <tree> before a push to a branch named for a session",
+      "git --attr-source HEAD push origin HEAD:worker-greed/fix",
+    ],
     ["curl to Slack", `curl -d text="${OLD.builder} here" https://slack.com/api/chat.postMessage`],
     [
       "curl to Linear",
@@ -301,6 +305,15 @@ describe(`a Acme write holding a ${OLD.dispatcher} term is refused`, () => {
   ])("%s", async (_, command) => {
     const reason = await bash(command)
     expect(reason).toContain("no-playground-leak hook refused")
+    expect(reason).toContain("a factory term")
+  })
+
+  // no-extension-repo-write reads `repo` as a gh verb after an unknown program, which must leave this verdict as it is
+  test("an unknown program's words before a git push still carry it to the push", async () => {
+    const reason = await bash(
+      `$X repo git push https://github.com/acme-blue/app.git HEAD:${OLD.dispatcher}`,
+    )
+    expect(reason).toContain("no-playground-leak hook refused git push")
     expect(reason).toContain("a factory term")
   })
 

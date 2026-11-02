@@ -112,7 +112,7 @@ const stop = async (run: Run, pid: number, file: string, sleep: (ms: number) => 
   return !(await holds(run, pid, file))
 }
 
-// After a checkout moved from one head to another, render jobs.json from the settings with the new code, TERM each running ops job whose source the move changed, by its heartbeat's pid, then start the herdr and cmux ones again, and any the new code turns on that runs nowhere yet, with one up.py pass; launchd starts its own.
+// After a checkout moved from one head to another, render jobs.json from the settings with the new code, TERM each running ops job whose source the move changed, by its heartbeat's pid, then start the terminal ones again in herdr, and any the new code turns on that runs nowhere yet, with one up.py pass; launchd starts its own.
 export const restart = async (opts: {
   checkout: string
   from: string

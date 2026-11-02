@@ -307,7 +307,9 @@ describe("no-public-leak's list", () => {
     const path = at(name.replaceAll(" ", "-"), value)
     const read = await list(path)
     expect(read).toEqual({ refusal: expect.stringContaining(says) })
-    expect((read as { refusal: string }).refusal).toContain("playground ext put")
+    expect((read as { refusal: string }).refusal).toContain(
+      "tell your lead, and the dispatcher hands the owner ! playground ext put <scope> list no-public-leak <file> --reason <why> to type in the dispatcher's terminal window",
+    )
   })
 
   test("a run with no owner.names or no archive exits 2 before it counts, naming each unset key", () => {
@@ -329,6 +331,9 @@ describe("no-public-leak's list", () => {
     expect(none.exitCode).toBe(2)
     expect(none.stdout.toString()).toBe("")
     expect(none.stderr.toString()).toContain("factory.archiveRepo and owner.names are unset")
+    expect(none.stderr.toString()).toContain(
+      "tell your lead, and the dispatcher hands the owner ! playground settings set to type in the dispatcher's terminal window, which sets them",
+    )
     expect(none.stderr.toString()).toContain("nothing was counted")
     expect(none.stderr.toString()).toContain(
       "bun run test:file tests/packages/scripts/src/trace-count/count.test.ts",

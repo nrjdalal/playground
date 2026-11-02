@@ -201,6 +201,18 @@ describe("with no --runtime, a start opens in herdr whatever its spawner's termi
     expect(r.roster).toBeUndefined()
   })
 
+  test("spawn.sh's only cmux calls are a move's read and close of the copy it takes to herdr", () => {
+    const text = readFileSync(join(import.meta.dir, "../../scripts/spawn.sh"), "utf8")
+    const calls = [...text.matchAll(/CMUX_QUIET=1 cmux ([a-z-]+(?: [a-z][a-z-]*)?)/g)].map(
+      (m) => m[1],
+    )
+    expect([...new Set(calls)].sort()).toEqual([
+      "close-surface",
+      "sessions list",
+      "workspace close",
+    ])
+  })
+
   test.each([
     ["a worker", ["worker", "worker-brave-otter", "b.md"]],
     ["a resume", ["resume", "worker-x", root, "0b6e3c1a-4d2f-4e8a-9c7b-1f2e3d4c5b6a"]],
