@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, test } from "bun:test"
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
 import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -7,9 +7,11 @@ import { check as desktopOwnerApp } from "../../../scripts/hooks/no-desktop-owne
 import { check as envDump } from "../../../scripts/hooks/no-env-dump"
 import { check as extensionRepoWrite } from "../../../scripts/hooks/no-extension-repo-write"
 import { check as extensionsWrite } from "../../../scripts/hooks/no-extensions-write"
+import { check as glmHeavyPath } from "../../../scripts/hooks/no-glm-heavy-path"
 import { check as headlessLogin } from "../../../scripts/hooks/no-headless-login"
 import { check as killByName } from "../../../scripts/hooks/no-kill-by-name"
 import { check as mainCheckout } from "../../../scripts/hooks/no-main-checkout"
+import { check as playgroundLeak } from "../../../scripts/hooks/no-playground-leak"
 import { check as rawSpawn } from "../../../scripts/hooks/no-raw-spawn"
 import { check as releaseComment } from "../../../scripts/hooks/no-release-comment"
 import { check as stash } from "../../../scripts/hooks/no-stash"
@@ -76,6 +78,37 @@ Bun.spawnSync([
   "origin",
   "https://github.com/acme-labs/demo.git",
 ])
+// A repo with a heavy path staged, as no-glm-heavy-path's own test stages one.
+const GLM_REPO = join(SCRATCH, "glm-repo")
+const gitIn = (dir: string, ...args: string[]) =>
+  Bun.spawnSync([
+    "git",
+    "-C",
+    dir,
+    "-c",
+    "user.name=t",
+    "-c",
+    "user.email=t@t",
+    "-c",
+    "commit.gpgsign=false",
+    ...args,
+  ])
+gitIn(SCRATCH, "init", "-q", "-b", "canary", GLM_REPO)
+gitIn(GLM_REPO, "commit", "-q", "--allow-empty", "-m", "base")
+mkdirSync(join(GLM_REPO, "web", "next", "src"), { recursive: true })
+writeFileSync(join(GLM_REPO, "web", "next", "src", "x.ts"), "x\n")
+gitIn(GLM_REPO, "add", ".")
+// The leak guard's lists as core holds them, with ext.links guarding a made-up org's repositories, as its own test sets them.
+const LISTS = join(CHECKOUT, "extensions", "core", "lists")
+const LEAK = join(SCRATCH, "leak")
+storeWith(
+  join(LEAK, "playground"),
+  {
+    "playground-terms.json": readFileSync(join(LISTS, "playground-terms.json"), "utf8"),
+    "slack-cleared.json": readFileSync(join(LISTS, "slack-cleared.json"), "utf8"),
+  },
+  { "ext.links": { "made-up-org": ["acme-blue"] } },
+)
 const OWNED = storeWith(join(SCRATCH, "owned"), { "release-owners.json": '["qmarsh"]' })
 const DESKTOP = storeWith(join(SCRATCH, "desktop"), { "desktop-owner-apps.json": '["Slack"]' })
 // A data folder whose scope acme syncs with the made-up extension repo quillco/acme-skills.
@@ -121,6 +154,10 @@ const GUARDS: Record<Guard, { folders: Partial<Record<Folder, [string, string]>>
     },
     run: (raw, home) => extensionsWrite(raw, { HOME: home }),
   },
+  "no-glm-heavy-path": {
+    folders: { "glm repo": [GLM_REPO, HOME] },
+    run: (raw) => glmHeavyPath(raw, { ANTHROPIC_BASE_URL: "https://api.z.ai/api/anthropic" }, 1),
+  },
   "no-headless-login": {
     folders: { checkout: [CHECKOUT, "/nonexistent"] },
     run: (raw, home) =>
@@ -132,15 +169,31 @@ const GUARDS: Record<Guard, { folders: Partial<Record<Folder, [string, string]>>
   },
   "no-kill-by-name": { folders: { checkout: [CHECKOUT, HOME] }, run: (raw) => killByName(raw) },
   "no-main-checkout": {
-    folders: { checkout: [join(PATHS.MAIN, ".claude", "worktrees", "a"), HOME] },
+    folders: {
+      checkout: [join(PATHS.MAIN, ".claude", "worktrees", "a"), HOME],
+      "main checkout": [PATHS.MAIN, HOME],
+    },
     run: (raw, home) => mainCheckout(raw, { HOME: home }, PATHS.MAIN),
+  },
+  "no-playground-leak": {
+    folders: { "data folder": [DATA, HOME], home: [HOME, HOME] },
+    run: (raw) =>
+      playgroundLeak(
+        raw,
+        { CLAUDE_CONFIG_DIR: LEAK, PLAYGROUND_DATA_DIR: join(LEAK, "playground") },
+        undefined,
+        LISTS,
+      ),
   },
   "no-raw-spawn": { folders: { checkout: [CHECKOUT, HOME] }, run: (raw) => rawSpawn(raw) },
   "no-release-comment": {
     folders: { checkout: [OTHER, HOME] },
     run: (raw) => releaseComment(raw, { PLAYGROUND_DATA_DIR: OWNED }),
   },
-  "no-stash": { folders: { checkout: [CHECKOUT, HOME] }, run: (raw) => stash(raw, {}) },
+  "no-stash": {
+    folders: { checkout: [CHECKOUT, HOME], "data folder": [DATA, HOME], home: [HOME, HOME] },
+    run: (raw) => stash(raw, {}),
+  },
 }
 
 const input = (call: Call, cwd: string) =>
@@ -179,6 +232,19 @@ describe("every refused form stays refused unless the allow list names it", () =
     },
     60_000,
   )
+
+  // the extensions root left out, since no-extensions-write refuses any program run inside it
+  test.each(
+    Object.entries(GUARDS).flatMap(([guard, { folders }]) =>
+      Object.keys(folders)
+        .filter((folder) => folder !== "extensions root")
+        .map((folder) => [guard, folder] as const),
+    ),
+  )("%s's setup lets a plain call run from its %s folder", async (guard, folder) => {
+    const { folders, run } = GUARDS[guard as Guard]
+    const at = folders[folder as Folder] as [string, string]
+    expect(await run(input("true", at[0]), at[1])).toBeUndefined()
+  })
 
   test("each row's name is its source's only one", () => {
     const ids = new Set<string>()

@@ -1,15 +1,17 @@
 import { homedir } from "node:os"
 import { join } from "node:path"
 
-// Every bypass form a review found that canary refuses, each named by the PR whose tests pinned it; tests/scripts/hooks/refused-forms.test.ts runs every row through each guard its group names and expects a refusal.
+// Every bypass form a review found, refused on canary or since the PR whose tests pinned it, each named by that PR; tests/scripts/hooks/refused-forms.test.ts runs every row through each guard its group names and expects a refusal.
 export type Guard =
   | "no-desktop-owner-app"
   | "no-env-dump"
   | "no-extension-repo-write"
   | "no-extensions-write"
+  | "no-glm-heavy-path"
   | "no-headless-login"
   | "no-kill-by-name"
   | "no-main-checkout"
+  | "no-playground-leak"
   | "no-raw-spawn"
   | "no-release-comment"
   | "no-stash"
@@ -21,7 +23,9 @@ export type Folder =
   | "cli folder"
   | "data folder"
   | "extensions root"
+  | "glm repo"
   | "home"
+  | "main checkout"
   | "process data folder"
   | "process home"
   | "process tmp"
@@ -51,7 +55,7 @@ export type Group = {
   folders: Folder[]
   guards: Guard[]
   rows: (paths: Paths) => readonly Row[]
-  source: "#292" | "#356" | "#402" | "#411" | "#446" | "#456" | "#468"
+  source: "#292" | "#356" | "#402" | "#411" | "#446" | "#456" | "#466" | "#468"
 }
 
 // The rows a guard-loosening PR lets run on purpose, each written as a row's "<source> <what>" for all its cases, or as one case's "<source> <what> | <guard> | <folder>"; canary lets none run.
@@ -59,6 +63,7 @@ export const ALLOWED: string[] = [
   "#446 bun -e writing a JSON label whose prose names it",
   "#446 bun -e editing a JSON label whose prose names it, then a script",
   "#446 python3 -c printing prose that names it",
+  "#466 git --attr-source with a subcommand for its value before a read in a repo with a heavy path staged",
 ]
 
 // A harmless git alias nest of the given depth around an inner command line, each level double-quoted.
@@ -75,6 +80,9 @@ const COLONS = ": ".repeat(25_000)
 
 // A push to the made-up extension repo the runner's synced data folder names.
 const PUSH = "git push https://github.com/quillco/acme-skills main"
+
+// A guarded org's repository by its URL, which a push names from any folder.
+const ORG = "https://github.com/acme-blue/app.git"
 
 const MUTATION = `mutation { addComment(input: {subjectId: "I_1", body: "release"}) { clientMutationId } }`
 
@@ -1151,6 +1159,140 @@ gh api graphql -f query="$QUERY"`,
     source: "#411",
   },
   {
+    folders: ["data folder", "home"],
+    guards: ["no-stash"],
+    rows: ({ WORK }) => [
+      ["git --attr-source before a stash", "git --attr-source HEAD stash pop"],
+      ["git -c before a stash", "git -c k=v stash pop"],
+      ["git -C before a stash", `git -C ${WORK} stash pop`],
+      ["git -c with a subcommand for its value", "git -c log stash pop"],
+      ["git --namespace with a subcommand for its value", "git --namespace log stash pop"],
+      ["git -C with a subcommand for its value", "git -C log stash pop"],
+      ["git --work-tree with a subcommand for its value", "git --work-tree log stash pop"],
+      ["git --attr-source with a subcommand for its value", "git --attr-source push stash pop"],
+    ],
+    source: "#466",
+  },
+  {
+    folders: ["data folder", "home"],
+    guards: ["no-playground-leak"],
+    rows: () => [
+      [
+        "git --attr-source before a push",
+        `git --attr-source HEAD push ${ORG} HEAD:worker-greed/fix`,
+      ],
+      ["git -c before a push", `git -c k=v push ${ORG} HEAD:worker-greed/fix`],
+      ["git -C before a push", `git -C /tmp push ${ORG} HEAD:worker-greed/fix`],
+      [
+        "git --config-env before a push",
+        `git --config-env core.pager=HOME push ${ORG} HEAD:worker-greed/fix`,
+      ],
+      ["a literal -c alias for push", `git -c alias.p=push p ${ORG} HEAD:worker-greed/fix`],
+      [
+        "a literal -c alias for push after --attr-source",
+        `git --attr-source HEAD -c alias.p=push p ${ORG} HEAD:worker-greed/fix`,
+      ],
+      ["a ! alias", `git -c 'alias.p=!git push' p ${ORG} HEAD:worker-greed/fix`],
+      [
+        "an alias that names another alias",
+        `git -c alias.q=push -c alias.p=q p ${ORG} HEAD:worker-greed/fix`,
+      ],
+      ["an alias the hook cannot read", `git -c "alias.p=$X" p ${ORG} HEAD:worker-greed/fix`],
+      ["an alias in another case", `git -c alias.P=push p ${ORG} HEAD:worker-greed/fix`],
+      [
+        "an alias --config-env sets",
+        `git --config-env alias.p=HOME p ${ORG} HEAD:worker-greed/fix`,
+      ],
+      [
+        "a -c word the hook cannot read before an alias",
+        `git -c "$X" p ${ORG} HEAD:worker-greed/fix`,
+      ],
+      [
+        "an alias whose name the hook cannot read",
+        `x=p; git -c alias.$x=push p ${ORG} HEAD:worker-greed/fix`,
+      ],
+      [
+        "a subcommand the hook cannot read after an alias",
+        `git -c alias.p=push $Y ${ORG} HEAD:worker-greed/fix`,
+      ],
+      [
+        "git --config-env with a subcommand for its value",
+        `git --config-env log push ${ORG} HEAD:worker-greed/fix`,
+      ],
+      [
+        "git --namespace with a subcommand for its value",
+        `git --namespace log push ${ORG} HEAD:worker-greed/fix`,
+      ],
+    ],
+    source: "#466",
+  },
+  {
+    folders: ["glm repo"],
+    guards: ["no-glm-heavy-path"],
+    rows: () => [
+      ["git --attr-source before a commit of a heavy path", "git --attr-source HEAD commit -m x"],
+      [
+        "git --exec-path before a commit of a heavy path",
+        "git --exec-path=/usr/libexec commit -m x",
+      ],
+      ["git --namespace with a subcommand for its value", "git --namespace log commit -m x"],
+      [
+        "git --attr-source with a subcommand for its value before a commit of a heavy path",
+        "git --attr-source log commit -m x",
+      ],
+      [
+        "git --attr-source with a subcommand for its value before a read in a repo with a heavy path staged",
+        "git --attr-source commit log -1",
+      ],
+    ],
+    source: "#466",
+  },
+  {
+    folders: ["main checkout"],
+    guards: ["no-main-checkout"],
+    rows: () => [
+      [
+        "git --attr-source before a reset in the main checkout",
+        "git --attr-source HEAD reset --hard",
+      ],
+      [
+        "git --attr-source with a subcommand for its value before a checkout in the main checkout",
+        "git --attr-source log checkout x",
+      ],
+    ],
+    source: "#466",
+  },
+  {
+    folders: ["extensions root"],
+    guards: ["no-extensions-write"],
+    rows: () => [
+      [
+        "git --attr-source with a subcommand for its value before a commit in the extensions root",
+        "git --attr-source log commit -m x",
+      ],
+      [
+        "git --attr-source with a subcommand for its value before a push from the extensions root",
+        "git --attr-source log push origin HEAD:main",
+      ],
+      [
+        "git --attr-source with a subcommand for its value before a config write in the extensions root",
+        "git --attr-source log config core.hooksPath x",
+      ],
+    ],
+    source: "#466",
+  },
+  {
+    folders: ["data folder", "home"],
+    guards: ["no-extensions-write"],
+    rows: ({ ROOT }) => [
+      [
+        "git --attr-source with a subcommand for its value before -C into the extensions root and a commit",
+        `git --attr-source log -C ${ROOT} commit -m x`,
+      ],
+    ],
+    source: "#466",
+  },
+  {
     folders: ["checkout"],
     guards: ["no-desktop-owner-app"],
     rows: () => [
@@ -1294,6 +1436,49 @@ gh api graphql -f query="$QUERY"`,
       ["git -C behind --attr-source's value", `git --attr-source HEAD -C ${MAIN} commit -m x`],
     ],
     source: "#411",
+  },
+  {
+    folders: ["checkout"],
+    guards: ["no-extension-repo-write"],
+    rows: () => [
+      [
+        "a repoint behind --attr-source taking --config-env as its value, then a push",
+        "git --attr-source --config-env remote set-url origin https://github.com/quillco/acme-skills.git && git push origin main",
+      ],
+      [
+        "a push-url repoint behind --attr-source taking --config-env as its value, then a push",
+        "git --attr-source --config-env remote set-url --push origin https://github.com/quillco/acme-skills.git && git push origin main",
+      ],
+      [
+        "a pushurl config behind --attr-source taking --config-env as its value, then a push",
+        "git --attr-source --config-env config remote.origin.pushurl https://github.com/quillco/acme-skills.git && git push origin main",
+      ],
+      [
+        "a repoint behind --namespace taking --config-env as its value, then a push",
+        "git --namespace --config-env remote set-url origin https://github.com/quillco/acme-skills.git && git push origin main",
+      ],
+      [
+        "a repoint behind --attr-source taking -c as its value, then a push",
+        "git --attr-source -c remote set-url origin https://github.com/quillco/acme-skills.git && git push origin main",
+      ],
+      [
+        "a repoint behind --config-env, then a push",
+        "git --config-env core.x=HOME remote set-url origin https://github.com/quillco/acme-skills.git && git push origin main",
+      ],
+      [
+        "a pushurl config behind --config-env, then a push",
+        "git --config-env core.x=HOME config remote.origin.pushurl https://github.com/quillco/acme-skills.git && git push origin main",
+      ],
+      [
+        "a clone behind --config-env, then a push",
+        "git --config-env core.x=HOME clone https://github.com/quillco/acme-skills.git && git push origin main",
+      ],
+      [
+        "an init behind --config-env, then a push",
+        "git --config-env core.x=HOME init && git push origin main",
+      ],
+    ],
+    source: "#466",
   },
   {
     folders: ["checkout"],

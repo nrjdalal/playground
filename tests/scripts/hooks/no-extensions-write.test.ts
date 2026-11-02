@@ -1193,6 +1193,21 @@ describe("a playground CLI call that changes what a guard reads is refused, nami
   })
 })
 
+describe("git's global options before a push keep a bare push's verdict", () => {
+  test.each([
+    ["the data folder", DATA],
+    ["the home folder", HOME],
+  ])("from %s", async (_, cwd) => {
+    for (const command of [
+      "git push",
+      "git --attr-source HEAD push",
+      "git -c k=v push",
+      "git -C /usr push",
+    ])
+      expect(await bash(command, cwd)).toBeUndefined()
+  })
+})
+
 describe("a playground CLI call that no guard reads runs", () => {
   test.each([
     ["ext put of a doc", "playground ext put login doc plan-x /tmp/p.md --reason x"],

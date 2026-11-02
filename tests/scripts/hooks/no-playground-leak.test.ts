@@ -518,6 +518,11 @@ describe("the same Acme writes without a term pass", () => {
     expect(await bash(`git commit -m "Raise the timeout"`, dirs.infra)).toBeUndefined()
     expect(await bash("git push -u origin HEAD", dirs.infra)).toBeUndefined()
   })
+
+  test("a read through a literal -c alias, and a push through one to a clean branch", async () => {
+    expect(await bash("git -c alias.l=log l")).toBeUndefined()
+    expect(await bash("git -c alias.p=push p -u origin HEAD", dirs.infra)).toBeUndefined()
+  })
 })
 
 describe("writes elsewhere pass, terms and all", () => {
