@@ -55,7 +55,7 @@ export type Group = {
   folders: Folder[]
   guards: Guard[]
   rows: (paths: Paths) => readonly Row[]
-  source: "#292" | "#356" | "#402" | "#411" | "#446" | "#456" | "#466" | "#469"
+  source: "#292" | "#356" | "#402" | "#411" | "#443" | "#446" | "#456" | "#466" | "#469"
 }
 
 // The rows a guard-loosening PR lets run on purpose, each written as a row's "<source> <what>" for all its cases, or as one case's "<source> <what> | <guard> | <folder>"; canary lets none run.
@@ -1609,5 +1609,23 @@ gh api graphql -f query="$QUERY"`,
       ["printenv behind a sudo option it does not know", "sudo -Z printenv"],
     ],
     source: "#469",
+  },
+  {
+    folders: ["home", "data folder"],
+    guards: ["no-extensions-write"],
+    rows: ({ ROOT }) => [
+      ["awk piping its output into a shell", `awk '{ print | "sh" }'`],
+      ["awk piping a division's output into a shell", `awk '{ print $1/2 | "sh" }'`],
+      ["awk piping into a shell after a division", `awk '{ x = 3/4; print x | "sh" }'`],
+      ["awk reading a command through getline", `awk '{ "cmd" | getline x }'`],
+      ["awk's system() in BEGIN", `awk 'BEGIN { system("rm -rf ~") }'`],
+      ["awk piping into a shell after a regex alternation", `awk '/a|b/ { print | "sh" }'`],
+      ["awk piping into a shell after a string alternation", `awk '$1 ~ "a|b" { print | "sh" }'`],
+      [
+        "awk matching an alternation and printing into the root",
+        `awk '/a|b/ { print > "${ROOT}/x" }'`,
+      ],
+    ],
+    source: "#443",
   },
 ]
