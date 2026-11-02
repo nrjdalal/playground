@@ -46,11 +46,11 @@ export type Group = {
   folders: Folder[]
   guards: Guard[]
   rows: (paths: Paths) => readonly Row[]
-  source: "#292" | "#356" | "#402" | "#411"
+  source: "#292" | "#356" | "#402" | "#411" | "#457"
 }
 
 // The rows a guard-loosening PR lets run on purpose, each written as a row's "<source> <what>" for all its cases, or as one case's "<source> <what> | <guard> | <folder>"; canary lets none run.
-export const ALLOWED: string[] = []
+export const ALLOWED: string[] = ["#457 a repo slug as a plain argument"]
 
 // A harmless git alias nest of the given depth around an inner command line, each level double-quoted.
 const escape = (text: string) => text.replace(/[\\"$`]/g, (c) => `\\${c}`)
@@ -893,5 +893,42 @@ gh api graphql -f query="$QUERY"`,
       ["rm of a glob no entry matches", "rm -rf q*", "home"],
     ],
     source: "#411",
+  },
+  {
+    folders: ["home", "data folder"],
+    guards: ["no-extensions-write"],
+    rows: () => [
+      [
+        "a repo slug as a plain argument",
+        "for n in 75; do /tmp/state.py pr nrjdalal/playground $n; done",
+      ],
+      ["a copy behind BUN", "BUN x/playground ext sync"],
+      ["a copy behind Bun", "Bun x/playground ext sync"],
+      ["a copy behind Npx", "Npx x/playground ext sync"],
+      ["a copy behind WATCH", "WATCH x/playground ext sync"],
+      ["a copy behind Bash", "Bash x/playground ext sync"],
+      ["a copy behind Node", "Node x/playground ext sync"],
+      ["a copy behind /opt/homebrew/bin/BUN", "/opt/homebrew/bin/BUN x/playground ext sync"],
+      ["a copy behind /bin/ZSH", "/bin/ZSH x/playground ext sync"],
+      ["a copy behind env BUN", "env BUN x/playground ext sync"],
+      ["a copy behind xargs BUN", "xargs BUN x/playground ext sync"],
+      ["a copy behind ENV", "ENV x/playground ext sync"],
+      ["a copy behind /usr/bin/ENV", "/usr/bin/ENV x/playground ext sync"],
+      ["a copy behind NOHUP", "NOHUP x/playground ext sync"],
+      ["a copy behind XARGS", "XARGS x/playground ext sync"],
+      ["a copy behind CAFFEINATE", "CAFFEINATE x/playground ext sync"],
+      ["a copy behind SUDO", "SUDO x/playground ext sync"],
+      ["a copy behind NICE", "NICE x/playground ext sync"],
+      ["a copy behind TIMEOUT 5", "TIMEOUT 5 x/playground ext sync"],
+      ["a copy behind STDBUF -o0", "STDBUF -o0 x/playground ext sync"],
+      ["a copy behind /usr/bin/TIME", "/usr/bin/TIME x/playground ext sync"],
+      ["a copy behind B=bun; $B", "B=bun; $B x/playground ext sync"],
+      ["a copy behind $UNSET", "$UNSET x/playground ext sync"],
+      ['a copy behind "$(echo bun)"', '"$(echo bun)" x/playground ext sync'],
+      ["a copy behind ts-node", "ts-node x/playground ext sync"],
+      ["a copy behind uv run", "uv run x/playground ext sync"],
+      ["a copy behind uvx", "uvx x/playground ext sync"],
+    ],
+    source: "#457",
   },
 ]

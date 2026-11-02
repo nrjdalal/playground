@@ -125,7 +125,7 @@ const RESERVED = new Set([
 // The words that close a compound command, whose output the hook does not follow.
 const GROUPING = new Set(["}", "done", "esac", "fi"])
 export const ASSIGN = /^[A-Za-z_]\w*=/
-const WRAPPERS = new Map<string, Set<string>>([
+export const WRAPPERS = new Map<string, Set<string>>([
   ["builtin", new Set()],
   ["caffeinate", new Set(["-t", "-w"])],
   ["command", new Set()],

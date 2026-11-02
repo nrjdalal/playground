@@ -767,6 +767,11 @@ describe("a slash word ending in playground is the CLI only as the program word 
       ["the CLI behind npx", "npx playground ext sync"],
       ["a copy behind find -exec", "find . -exec x/playground ext sync ';'"],
       ["a copy behind watch", "watch x/playground ext sync"],
+      ["a copy behind node", "node x/playground ext sync"],
+      ["a copy behind a runner in upper case", "BUN x/playground ext sync"],
+      ["a copy behind a wrapper in upper case", "ENV x/playground ext sync"],
+      ["a copy behind nohup in upper case", "NOHUP x/playground ext sync"],
+      ["a copy behind a runner it cannot name", "B=bun; $B x/playground ext sync"],
     ].flatMap(([what, command]) => FOLDERS.map(([where, cwd]) => [what, where, command, cwd])),
   )("%s is refused from %s", async (_, __, command, cwd) => {
     expect(await bash(command, cwd)).toContain("no-extensions-write hook refuses playground ext")

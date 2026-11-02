@@ -23,6 +23,7 @@ import {
   program,
   run,
   SHELLS,
+  WRAPPERS,
   slotWords,
   stdinOf,
   type Text,
@@ -83,9 +84,10 @@ const DUPLICATE = /^(?:\d+|-)$/
 // Variables that make git or a pager run a program, so a reader with one set is judged as any other program.
 const RUNS = /^(?:EDITOR|GIT_[A-Z_]+|LESSOPEN|PAGER|VISUAL)$/
 const CLI = join("packages", "scripts", "src", "playground", "cli.ts")
-// Programs that run an operand as a program, so a path to a playground copy among their words is the CLI; shell.ts's parse already unwraps env, sudo, timeout, xargs and the like.
+// Programs that run an operand as a program, read in any case, so a path to a playground copy among their words is the CLI; shell.ts's wrappers count too, since parse unwraps them only in lower case.
 const RUNNERS = new Set([
   ...SHELLS,
+  ...WRAPPERS.keys(),
   "arch",
   "bun",
   "bunx",
@@ -96,7 +98,10 @@ const RUNNERS = new Set([
   "npx",
   "pnpm",
   "pnpx",
+  "ts-node",
   "tsx",
+  "uv",
+  "uvx",
   "watch",
   "yarn",
 ])
@@ -159,7 +164,7 @@ function isCli(
   word: Word,
   dirs: (string | undefined)[],
   realOf: (path: string) => string,
-  runs: boolean,
+  asProgram: boolean,
 ): boolean {
   tick()
   if (marked(word.value) || word.value.startsWith("-")) return false
@@ -167,7 +172,8 @@ function isCli(
   if (program(word.value).toLowerCase() === "playground")
     return (
       !word.value.includes("/") ||
-      (runs && !paths.some((path) => !!path && existsSync(path) && statSync(path).isDirectory()))
+      (asProgram &&
+        !paths.some((path) => !!path && existsSync(path) && statSync(path).isDirectory()))
     )
   const cli = (sep + CLI).toLowerCase()
   return paths.some(
@@ -175,13 +181,13 @@ function isCli(
   )
 }
 
-// The words after each word of a command that is the playground CLI, so the CLI behind any wrapper (bun, npx, find -exec, arch, watch) is read as typed bare.
+// The words after each word of a command that is the playground CLI, so the CLI behind a runner (bun, npx, find -exec, arch, watch), or a program the hook cannot name, is read as typed bare.
 function cliCalls(parsed: Parsed, env: Env, realOf: (path: string) => string): Word[][] {
   const { args, first, name } = parsed
   if (!first) return []
   const words = [first, ...args]
   const dirs = [env.cwd, name === "bun" ? bunCall(args, env).cwd : undefined]
-  const runner = RUNNERS.has(name)
+  const runner = RUNNERS.has(name.toLowerCase()) || marked(first.value)
   return words.flatMap((word, at) =>
     isCli(word, dirs, realOf, at === 0 || runner) ? [words.slice(at + 1)] : [],
   )
