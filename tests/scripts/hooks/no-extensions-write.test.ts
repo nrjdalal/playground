@@ -21,6 +21,8 @@ const LINK = join(HOME, "store")
 const WORK = join(HOME, "work")
 const BIG = [join(HOME, "big-a"), join(HOME, "big-b")]
 for (const file of BIG) writeFileSync(file, "x".repeat(900_000))
+const WORDS = join(HOME, "words")
+writeFileSync(WORDS, "y ".repeat(400_000))
 mkdirSync(join(WORK, "playground"), { recursive: true })
 symlinkSync(ROOT, LINK)
 afterAll(() => rmSync(HOME, { force: true, recursive: true }))
@@ -293,6 +295,22 @@ describe("a direct write into the extensions root is refused, naming the owner's
       `{ { echo 'rm ${LIST}'; }; echo true; } | sh`,
     ],
     ["rm of a zsh ( ) glob", `rm -rf ${DATA}/extensio(n)s`],
+    ["rm of a glob from the home", "rm -rf .playground/ext*"],
+    ["rm of a glob in the home that matches the data folder", "rm -rf .p*"],
+    ["rm of a glob held in a quoted variable", 'X=".playground/ext*"; rm -rf $X'],
+    ["rm of a brace that makes the root's name", "rm -rf .playground/{x,extensions}"],
+    ["rm of a glob that matches a link to the root", "rm -rf st*/hooks"],
+    ["rm of a bare glob that matches a link to the root", "rm -rf s*/"],
+    ["a redirect through a glob that matches a link to the root", "echo x > s*/policy.json"],
+    ["cp through a glob that matches a link to the root", "cp /etc/hosts s*/policy.json"],
+    ["rm of a ksh glob in the home", "setopt kshglob\nrm -rf +(.playground)"],
+    [
+      "awk printing into the root by its path as seen from the home",
+      `awk '{print > ".playground/extensions/policy.json"}' /dev/null`,
+    ],
+    ["rm of a glob with a .. after it", "rm -rf w*/../.playground/extensions"],
+    ["rm of an extglob in the data folder", "rm -rf .playground/@(extensions)"],
+    ["rm of a negated extglob in the data folder", "rm -rf .playground/!(handoffs)"],
     ["env -C attached to a scope", `env -C${SCOPE} git reset --hard`],
     ["env --chdir= to a scope", `env --chdir=${SCOPE} git reset --hard`],
   ])("%s", async (_, command) => {
@@ -332,6 +350,46 @@ describe("a direct write into the extensions root is refused, naming the owner's
     expect(reason).toContain("no-extensions-write hook refuses")
     expect(performance.now() - started).toBeLessThan(1_000)
   }, 20_000)
+
+  // a variable set once, then a program after each, at the cap
+  const variables = (each: string) => {
+    let script = ""
+    for (let i = 0; script.length < 130_000; i++) script += `V${i}=x${i}; ${each}`
+    return `${script}true`
+  }
+  const fill = (head: string, unit: string, tail: string) =>
+    head + unit.repeat(Math.floor((130_000 - head.length - tail.length) / unit.length)) + tail
+  test.each([
+    ["a brace with no close", fill("echo {", ",", ""), false],
+    [
+      "xargs -I over a large stdin",
+      fill(`cat ${WORDS} | xargs -I@ git -c alias.x="!`, "@ ", '" x'),
+      true,
+    ],
+    ["env -S", fill("env -S'", "-S ", "' true"), false],
+    ["distinct variables", variables(""), false],
+    ["distinct variables, each with a program", variables("true; "), false],
+    [
+      "a printf escape format over many arguments",
+      `printf '%s${"\\\\x41".repeat(16_000)}' ${"x ".repeat(3_000)}> /tmp/nxw-p`,
+      false,
+    ],
+    [
+      "a 64 KB printf format over 30000 arguments",
+      `printf '${"%s".padEnd(64_000, "a")}' ${"x ".repeat(30_000)}> /tmp/nxw-p`,
+      false,
+    ],
+  ])(
+    "%s at the command cap is read inside a second",
+    async (_, command, refused) => {
+      const started = performance.now()
+      const reason = await bash(command, "/tmp")
+      if (refused) expect(reason).toContain("split it into shorter calls")
+      else expect(reason).toBeUndefined()
+      expect(performance.now() - started).toBeLessThan(1_000)
+    },
+    60_000,
+  )
 
   test.each([300, 8_000])(
     "an eval chain %d deep ahead of a write is refused inside the hook's time",
@@ -477,6 +535,28 @@ describe("a read of the root, and writes elsewhere, run", () => {
     ],
   ])("%s", async (_, command) => {
     expect(await bash(command)).toBeUndefined()
+  })
+
+  test.each(
+    [
+      ["a worktree", WORK],
+      ["the home", HOME],
+    ].flatMap(([where, cwd]) => [
+      [
+        "a sed address from /",
+        where,
+        `grep -n -E "^ {0,2}(if |elif |else$|fi$)" scripts/spawn.sh | sed -n '/^13[2-9][0-9]:\\|^1[45][0-9][0-9]:/p' | cut -c1-160`,
+        cwd,
+      ],
+      [
+        "a gh -q filter with jq interpolations",
+        where,
+        `gh pr view 436 --json state,title,additions,deletions -q '.state+" "+.title+" +\\(.additions)/-\\(.deletions)"'`,
+        cwd,
+      ],
+    ]),
+  )("%s with a quoted glob runs from %s", async (_, _where, command, cwd) => {
+    expect(await bash(command, cwd)).toBeUndefined()
   })
 
   test("a reader inside the root", async () => {
@@ -664,6 +744,33 @@ describe("a playground CLI call that no guard reads runs", () => {
     ["status", "playground status"],
   ])("%s", async (_, command) => {
     expect(await bash(command)).toBeUndefined()
+  })
+})
+
+describe("a slash word ending in playground is the CLI only as the program word or a runner's operand", () => {
+  const FOLDERS = [
+    ["the data folder", DATA],
+    ["the home folder", HOME],
+  ]
+  test.each(FOLDERS)("a repo slug as a plain argument runs from %s", async (_, cwd) => {
+    expect(
+      await bash("for n in 75; do /tmp/state.py pr nrjdalal/playground $n; done", cwd),
+    ).toBeUndefined()
+  })
+  test.each(
+    [
+      ["the CLI by name", "playground ext sync"],
+      ["the CLI by its path", "/opt/cli/playground ext sync"],
+      ["a copy not made yet", "cp cli.ts x/playground; x/playground ext sync"],
+      ["a link", "ln -s /opt/cli.ts y/playground && y/playground ext sync"],
+      ["a copy behind bun", "bun x/playground ext sync"],
+      ["the CLI behind npx", "npx playground ext sync"],
+      ["a copy behind find -exec", "find . -exec x/playground ext sync ';'"],
+      ["a copy behind watch", "watch x/playground ext sync"],
+      ["a copy behind node", "node x/playground ext sync"],
+    ].flatMap(([what, command]) => FOLDERS.map(([where, cwd]) => [what, where, command, cwd])),
+  )("%s is refused from %s", async (_, __, command, cwd) => {
+    expect(await bash(command, cwd)).toContain("no-extensions-write hook refuses playground ext")
   })
 })
 
