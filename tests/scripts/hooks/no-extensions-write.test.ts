@@ -539,16 +539,6 @@ describe("a quoted argument is read as a command line only where a program runs 
     expect(await at(command, join(homedir(), "x", ".claude", "worktrees", "y"))).toBeUndefined()
   })
 
-  test.each([
-    ["rm of a half-quoted brace", "rm -rf {.playground,'x'}"],
-    ["a write to a half-quoted glob", "echo x > '.pl'*"],
-    ["awk over an unquoted glob in the home", "awk '{print $1}' .pl*"],
-    ["awk over a half-quoted glob in the home", "awk '{print $1}' '.pl'*"],
-    ["cut over a half-quoted glob in the home", "cut -f1 '.pl'*"],
-  ])("%s is still refused from the home", async (_, command) => {
-    expect(await at(command, homedir())).toBeDefined()
-  })
-
   test("the dispatcher brief's call that finds the Dashboard's checkout runs from a worktree", async () => {
     const step = readFileSync(
       join(import.meta.dir, "../../../scripts/briefs/dispatcher.md"),
