@@ -31,6 +31,9 @@ symlinkSync(join(ROOT, "hooks"), INNER)
 // Links whose names no glob of the root's own names matches: one to the root in the data folder, one to the data folder in the home.
 symlinkSync(ROOT, join(DATA, "store"))
 symlinkSync(DATA, join(HOME, "pg"))
+// a folder holding its own extensions, so a cd by name stays here unless CDPATH is searched first
+const TWIN = join(HOME, "twin")
+mkdirSync(join(TWIN, "extensions", "hooks"), { recursive: true })
 afterAll(() => rmSync(HOME, { force: true, recursive: true }))
 
 const ENV = { HOME }
@@ -325,6 +328,15 @@ describe("a direct write into the extensions root is refused, naming the owner's
     ["env --chdir= to a scope", `env --chdir=${SCOPE} git reset --hard`],
   ])("%s", async (_, command) => {
     expect(await bash(command)).toContain("no-extensions-write hook refuses")
+  })
+
+  // zsh searches a CDPATH naming the current folder strictly in its order, ahead of the folder's own extensions
+  test.each([
+    ["a CDPATH naming .", `CDPATH=${DATA}:.; cd extensions; rm -rf hooks`],
+    ["a CDPATH with an empty entry", `CDPATH=${DATA}:; cd extensions; rm -rf hooks`],
+    ["an exported CDPATH naming .", `export CDPATH=${DATA}:.; cd extensions && rm -rf hooks`],
+  ])("%s, from a folder holding its own extensions", async (_, command) => {
+    expect(await bash(command, TWIN)).toContain("no-extensions-write hook refuses")
   })
 
   test("a deep harmless nest ahead of the CLI is judged before the hook's timeout", async () => {

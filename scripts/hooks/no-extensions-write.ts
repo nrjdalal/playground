@@ -436,6 +436,8 @@ function inspect(raw: string, environment: Environment) {
     cwd: directory,
     files: new Map(),
     known,
+    // zsh starts with OLDPWD at the folder it starts in, so ~- and cd - name it
+    old: directory,
     process: environment,
     stack: [],
     // a guard-list write may rest on a script it cannot read, so only one it reads whole runs

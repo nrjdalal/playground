@@ -1582,4 +1582,36 @@ gh api graphql -f query="$QUERY"`,
     ],
     source: "#468",
   },
+  {
+    folders: ["process worktree"],
+    guards: ["no-extensions-write"],
+    rows: () => [
+      [
+        "a bare pushd, which zsh takes home on a one-folder stack, then a relative rm",
+        "pushd; rm -rf .playground/extensions/x",
+      ],
+      [
+        "a bare pushd home with its output sent away, then a relative rm",
+        "pushd >/dev/null; rm -rf .playground/extensions/x",
+      ],
+      [
+        "a bare pushd home, then a relative redirect",
+        "pushd; echo x > .playground/extensions/policy.json",
+      ],
+    ],
+    source: "#468",
+  },
+  {
+    folders: ["extensions root"],
+    guards: ["no-extensions-write"],
+    rows: () => [
+      ["a redirect by ~-, which zsh starts at the call's folder", "echo x > ~-/policy.json"],
+      [
+        "cd - before any cd, which zsh takes to the call's folder, then a relative rm",
+        "cd -; rm -rf lists",
+      ],
+      ["cd ~- before any cd, then a relative rm", "cd ~-; rm -rf lists"],
+    ],
+    source: "#468",
+  },
 ]

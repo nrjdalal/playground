@@ -878,7 +878,7 @@ export async function examine(
   return verdict
 }
 
-// Where cd, pushd and popd leave the shell, OLDPWD and the directory stack kept as bash keeps them: a pushd of +N or -N turns the list of the current folder and the stack, a popd of one removes that entry, an index past the list leaves both as they are, and any other popd word or pushd option leaves both unread.
+// Where cd, pushd and popd leave the shell, OLDPWD and the directory stack kept as zsh keeps them, for a closed list of forms: cd and pushd of a folder, a bare pushd (the top two swapped, or home on a one-folder stack), a pushd of +N or -N that turns the list of the current folder and the stack, and a bare popd or one of +N or -N that removes that entry; every other form (a popd word, a pushd option such as -n or -q, an index past the list, a stack it cannot tell) takes the reading the hooks gave before the stack was followed, so each hook keeps that verdict.
 async function moveDir(
   name: string,
   args: Word[],
@@ -895,24 +895,25 @@ async function moveDir(
   }
   if (detached) return go(undefined, null)
   const words = args.map((a) => a.value)
-  if (name !== "cd" && words.some((v) => /^-[A-Za-z]*n/.test(v))) return void (env.stack = null)
-  // any other popd word, or a pushd option, may fail or land where the hook cannot tell (popd bogus stays put)
+  const plain = async () => go(await plainTarget(args, env), null)
   if (
     name !== "cd" &&
     words.some((v) => !/^[+-]\d+$/.test(v) && (name === "popd" || v.startsWith("-")))
   )
-    return go(undefined, null)
+    return plain()
   const turn = words.find((v) => /^[+-]\d+$/.test(v))
   const operand = args.some((a) => !/^-./.test(a.value) || /^[+-]\d+$/.test(a.value))
   if (name === "cd" || (name === "pushd" && operand && turn === undefined)) {
     const to = await cdTarget(args, env, local)
     return go(to, name === "cd" ? stack : stack && [from, ...stack])
   }
-  if (!stack) return go(undefined, null)
+  if (!stack) return plain()
   const list = [from, ...stack]
   const n = Number(turn?.slice(1) ?? (name === "pushd" ? 1 : 0))
   const at = turn?.startsWith("-") ? list.length - 1 - n : n
-  if (at < 0 || at >= list.length || list.length < 2) return
+  // zsh's bare pushd with one folder on the stack goes home, as a bare cd does
+  if (name === "pushd" && turn === undefined && list.length < 2) return go(homedir(), [from])
+  if (at < 0 || at >= list.length || list.length < 2) return plain()
   if (name === "pushd") {
     const turned =
       turn === undefined
@@ -943,7 +944,13 @@ async function cdTarget(
   const cdpath = local.get("CDPATH") ?? env.vars.get("CDPATH") ?? inherited
   // zsh, the Bash tool's shell, tries the current folder before CDPATH, where bash tries CDPATH first
   const here = env.cwd ? await directory(resolve(env.cwd, value)) : undefined
-  if (here) return here
+  // a CDPATH naming the current folder (. or an empty entry) is searched strictly in its order
+  const ordered =
+    !!cdpath &&
+    !cdpath.unknown &&
+    !/^\.\.?(?:\/|$)/.test(value) &&
+    cdpath.value.split(":").some((e) => e === "" || e === ".")
+  if (here && !ordered) return here
   if (cdpath && !/^\.\.?(?:\/|$)/.test(value)) {
     if (cdpath.unknown || cdpath.reads?.length) return undefined
     for (const entry of cdpath.value.split(":")) {
@@ -953,6 +960,15 @@ async function cdTarget(
     }
   }
   return undefined
+}
+
+// The folder a cd, pushd or popd outside moveDir's closed list lands in, read as the hooks read every one before the stack was followed: its first word that is no option, as typed, home when there is none, unread for - or a word that names no folder.
+async function plainTarget(args: Word[], env: Env): Promise<string | undefined> {
+  const dir = args.find((a) => !(a.value.startsWith("-") && a.value.length > 1))
+  if (!dir) return homedir()
+  if (dir.value === "-") return undefined
+  const path = pathOf(dir, env)
+  return path && directory(path)
 }
 
 // A text with ~- and ~+ expanded as the shell expands them, to OLDPWD and the current folder; undefined when the hook cannot tell that folder.

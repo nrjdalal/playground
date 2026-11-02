@@ -12,14 +12,19 @@ Their tests are `bun run test:file tests/scripts/hooks`.
 
 - `scripts/hooks/shell.ts` lexes a Bash command and walks it as the shell runs it, for every hook that reads Bash, so each line below holds for each of them.
   It reads every command inside a `$(…)`, a `${…}`, a `$((…))` or an array assignment's `(…)`, and the script a shell, `source` or `.` reads from a process substitution, a group's output or `/dev/stdin`, every command that prints part of it included, and the parts it can read of a script it reads only in part (a group holding a `curl`).
-  It follows the folder a command runs in through `cd`, `pushd` and `popd`, with OLDPWD (`cd -`, `~-`) and the directory stack (`pushd +N`, `popd -N`) kept as bash keeps them, a `CDPATH` the call sets, exports or inherits, tried after the current folder as zsh, the Bash tool's shell, tries it, and `env -C <dir>`, `env -C<dir>` and `env --chdir=<dir>`.
-  A `cd` or `pushd` with a glob in its folder is handed to the hook as any program's words are, and one it cannot follow leaves the folder unread, as do a `popd` with any word but `+N`, `-N` or `-n` and a `pushd` with an option.
-  It does not read `dirs -c`, so a `popd` after one is read as if the stack still held its folders, nor a `~-` before a quoted part (`~-/"x"`), and it reads a `bash -c` script's `CDPATH` in zsh's order too, so a relative write after one of these is judged in that folder.
+  It follows the folder a command runs in through `cd`, `pushd` and `popd`, with OLDPWD (`cd -`, `~-`) and the directory stack kept as zsh, the Bash tool's shell, keeps them for a closed list of forms: a `cd` or `pushd` of a folder, a bare `pushd` (the top two swapped, or home on a one-folder stack), a `pushd +N` or `-N`, and a bare `popd` or one of `+N` or `-N`.
+  A hook that sets `old` on its `Env` starts OLDPWD at the call's own folder, as zsh does; no-extensions-write sets it.
+  Every other form (a `popd` word, a `pushd` option such as `-n` or `-q`, an index past the stack, a stack it cannot tell) takes the reading the hooks gave before the stack was followed: its first word that is no option, as typed, or home when there is none.
+  A `CDPATH` the call sets, exports or inherits is tried after the current folder, or strictly in its order when it names `.` or holds an empty entry, as zsh tries it, and `env -C <dir>`, `env -C<dir>` and `env --chdir=<dir>` are followed too.
+  A `cd` or `pushd` with a glob in its folder is handed to the hook as any program's words are, and one it cannot follow leaves the folder unread.
+  It does not read `dirs -c`, so a `popd` after one is read as if the stack still held its folders, nor a `~-` before a quoted part (`~-/"x"`), nor zsh's `cd +N` and `cd -N`, a two-word `cd old new` or a `cdpath=(…)` array, and it reads a `bash -c` script's `CDPATH` in zsh's order too, so a relative write after one of these is judged in the folder the reader takes.
   `pathOf` folds a path's `..` as typed, as `cd`, `bun --cwd` and `npm --prefix` fold it, and `openedPathOf` as the kernel opens it, each link resolved before a `..` after it steps up; no-extensions-write judges both.
   Under a hook's deadline it stops at a chain of scripts a shell, `eval` or `source` reads 256 or more deep, such a script over 128 KB and an `xargs -I` line over 128 KB once its stdin is filled in.
   It holds as unknown any text over 1 MB that a command printed or wrote.
   A hook that sets `unheld` on its `Env` gives the verdict on a shell, `source` or `eval` whose script holds a part the reader cannot read.
-  In a `-c` script or `eval`'s words, a variable the call set to a value it holds (`W=<dir>; bash -c "cd $W && …"`) and `$PWD` in a folder it follows are read, and one set from another variable, a `read` or the environment is not; a shell's `--version` or `--help` as its first word and `command -v` read no script, and a script file run by its path is the file's own code, which no hook reads.
+  In a `-c` script or `eval`'s words, a variable the call set to a value it holds (`W=<dir>; bash -c "cd $W && …"`) and `$PWD` in a folder it follows are not counted as unread, and one set from another variable, a `read` or the environment is.
+  The script is still read with such a variable unknown, so a `cd` through one leaves the folder unread, and a relative write after it is judged as no folder.
+  A shell's `--version` or `--help` as its first word and `command -v` read no script, and a script file run by its path is the file's own code, which no hook reads.
 
 ## Registered in both settings files
 
