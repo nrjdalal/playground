@@ -14,6 +14,7 @@ import {
   knownVariables,
   lex,
   marked,
+  parse,
   type Parsed,
   pathOf,
   PRINTERS,
@@ -147,12 +148,75 @@ function cliCalls(parsed: Parsed, env: Env): Word[][] {
   return words.flatMap((word, at) => (isCli(word, dirs) ? [words.slice(at + 1)] : []))
 }
 
-// Every text of a word or a variable that holds a space, a leading ! dropped, read as a command line of its own, since a program may run it (watch, ssh's ProxyCommand, a git alias, a pager).
-function runsOf(parsed: Parsed, env: Env): string[] {
+const AWKS = new Set(["awk", "gawk", "mawk", "nawk"])
+// what lets an awk program run a command or write a file: system(), a | pipe, getline, a > redirect or an @ directive
+const AWK_RUNS = /system|getline|[|>@]/
+
+// awk's program words, or undefined when a program comes from a file or an option the hook does not know: -F and -v take a value, gawk's -e and --source a program, and the first other word is the program
+function awkPrograms(words: Word[]): Word[] | undefined {
+  const programs: Word[] = []
+  for (let k = 0; k < words.length; k++) {
+    const { value } = words[k]
+    if (value === "--") return programs.length ? programs : words.slice(k + 1, k + 2)
+    if (/^-[Fv]$/.test(value)) k++
+    else if (/^-[Fv]./.test(value)) continue
+    else if (value === "-e" || value === "--source") programs.push(words[++k] ?? { value: "" })
+    else if (value.startsWith("--source=")) programs.push({ ...words[k], value: value.slice(9) })
+    else if (value.startsWith("-")) return undefined
+    else return programs.length ? programs : [words[k]]
+  }
+  return programs.length ? programs : undefined
+}
+
+// The lines an awk program runs, read whatever the line: each string literal of a program that can run a command or write a file
+function programLines({ args, first }: Parsed): string[] {
+  if (!AWKS.has((first?.value.split("/").pop() ?? "").toLowerCase())) return []
+  return (awkPrograms(args) ?? [])
+    .filter(({ value }) => AWK_RUNS.test(value))
+    .flatMap(({ value }) => [...value.matchAll(/"((?:[^"\\]|\\.)*)"/g)].map((m) => m[1]))
+}
+
+// Whether a call only reads, so its quoted words are never a command line: one of a closed list of readers, an awk whose every program the hook reads and none can run a command or write a file, a reader by `reads` of cat, grep, head, tail or wc, cut, a sort with no -o, --output or --compress-program, and a uniq with at most one file, since a second is its output
+function narrow(parsed: Parsed, env: Env): boolean {
+  const { args, first, name, xargs } = parsed
+  if (!first || xargs || marked(name)) return false
+  const base = (first.value.split("/").pop() ?? "").toLowerCase()
+  if (AWKS.has(base)) {
+    const programs = awkPrograms(args)
+    return !!programs && programs.every(({ value }) => !marked(value) && !AWK_RUNS.test(value))
+  }
+  if (["cat", "grep", "head", "tail", "wc"].includes(base)) return reads(parsed, env)
+  if (base === "cut") return true
+  if (base === "sort")
+    return !args.some(({ value }) => /^-[a-zA-Z]*o|^--(?:compress-program|output)/.test(value))
+  if (base === "uniq")
+    return args.filter(({ value }) => value === "-" || !value.startsWith("-")).length <= 1
+  return false
+}
+
+// Whether a line is read whole, as canary read it: every spaced text of every program but a reader, since a program may run any text the line holds (`set -- '…'; eval "$1"`, `git log … | sh`); only a line whose every command, its substitutions' included, is a narrow call and that writes no file by a redirect is read call by call; sed keeps canary's reading
+function wholeLine(commands: Command[], env: Env): boolean {
+  return commands.some((cmd) => {
+    const words = [...cmd.words, ...cmd.redirects.flatMap((r) => (r.target ? [r.target] : []))]
+    if (words.some((word) => word.procs && wholeLine(word.procs, env))) return true
+    const writes = cmd.redirects.some(
+      ({ op, target }) =>
+        ([">", ">>", ">|", "<>"].includes(op) ||
+          (op === ">&" && !DUPLICATE.test(target?.value ?? ""))) &&
+        target?.value !== "/dev/null",
+    )
+    return writes || !narrow(parse(cmd), env)
+  })
+}
+
+// Every text of a variable the call sets or exports, and on a line read whole of every word, that holds a space, a leading ! dropped, each read as a command line of its own.
+function runsOf(parsed: Parsed, env: Env, whole: boolean): string[] {
   const { args, first, local } = parsed
   const values = [...local, ...env.vars].flatMap(([, text]) => (text.unknown ? [] : [text.value]))
-  for (const word of first ? [first, ...args] : args)
+  const words = whole ? (first ? [first, ...args] : args) : []
+  for (const word of words)
     for (const text of texts(word)) values.push(text.value.replace(/^!/, ""))
+  values.push(...programLines(parsed))
   return [...new Set(values)].filter((value) => /\s/.test(value) && !marked(value))
 }
 
@@ -263,6 +327,7 @@ function inspect(raw: string, environment: Environment) {
     }
   }
   const seen = new Set<string>()
+  let whole = false
   const visit: Visit = async (cmd: Command, parsed, env) => {
     const slot = slotWords(parsed)
     if (slot)
@@ -293,7 +358,8 @@ function inspect(raw: string, environment: Environment) {
           .map((words) => cliWrite(xargs?.replace ? words : [...words, ...stdinWords]))
           .find(Boolean)
     if (write) return refuse(write)
-    for (const raw of reader ? [] : runsOf(parsed, env)) {
+    const runs = reader ? undefined : runsOf(parsed, env, whole)
+    for (const raw of runs ?? []) {
       const line =
         xargs?.replace && fed
           ? raw.replaceAll(xargs.replace, fed.unknown ? UNKNOWN : fed.value)
@@ -305,19 +371,21 @@ function inspect(raw: string, environment: Environment) {
     }
     // a bare assignment or export with no command, or a reader: only its redirect writes, and a variable it sets is read where a command runs with it
     if (!first || EXPORTS.has(name) || reader) return
-    if (inRoot(env.cwd)) return refuse(`${name} run inside ${root}`)
+    // a program word the hook cannot read is named as such, so a refusal always names what runs
+    const verb = name && !marked(name) ? name : "a program it cannot read"
+    if (inRoot(env.cwd)) return refuse(`${verb} run inside ${root}`)
     if (name === "git" && inRoot(gitCall(args, env).cwd)) return refuse(`git on a clone in ${root}`)
     const remover = REMOVERS.has(name)
     for (const value of [...parsed.local.values(), ...env.vars.values()]) {
       const named = names({ ...value, quoted: false }, env, remover)
-      if (named) return refuse(`${name} with a variable on ${named}`)
+      if (named) return refuse(`${verb} with a variable on ${named}`)
     }
     for (const word of [first, ...args]) {
       const named = names(word, env, remover)
-      if (named) return refuse(`${name} on ${named}`)
+      if (named) return refuse(`${verb} on ${named}`)
     }
     if (cmd.redirects.some((r) => r.body && holds(r.body.value, env)))
-      return refuse(`${name} with a script that names ${root}`)
+      return refuse(`${verb} with a script that names ${root}`)
     if (fed) {
       const named =
         !fed.unknown &&
@@ -326,17 +394,20 @@ function inspect(raw: string, environment: Environment) {
           .filter(Boolean)
           .map((value) => names({ quoted: false, value }, env, remover))
           .find(Boolean)
-      if (named) return refuse(`${name} under xargs on ${named}`)
+      if (named) return refuse(`${verb} under xargs on ${named}`)
     }
   }
+  const known = knownVariables(command, environment, directory)
+  const lexed = lex(command, known)
   const env: Env = {
     cwd: directory,
     files: new Map(),
-    known: knownVariables(command, environment, directory),
+    known,
     process: environment,
     vars: new Map(),
   }
-  return run(lex(command, env.known), env, visit, true)
+  whole = wholeLine(lexed.commands, env)
+  return run(lexed, env, visit, true)
 }
 
 // Fails open: an error on any call lets it run, so a reader bug cannot block every Bash command or write; a RangeError, a stack overflow or the walk past its time, refuses.
