@@ -1100,6 +1100,126 @@ describe("a factory session's ext accept is refused, since accepting a proposal 
   })
 })
 
+describe("the dispatcher alone runs ext sync and ext add, as one plain call", () => {
+  const as = (role: string, command: string) =>
+    check(
+      JSON.stringify({
+        cwd: HOME,
+        hook_event_name: "PreToolUse",
+        tool_input: { command },
+        tool_name: "Bash",
+      }),
+      { ...ENV, PLAYGROUND_ROLE: role },
+    )
+  const CALLS = [
+    ["ext sync", "playground ext sync"],
+    ["ext sync of one scope", "playground ext sync login"],
+    ["ext add", "playground ext add acme acme-co/acme-skills"],
+  ]
+
+  test.each(CALLS)("the dispatcher's %s runs", async (_, command) => {
+    expect(await as("dispatcher", command)).toBeUndefined()
+  })
+
+  test.each(CALLS)("a worker's %s is refused", async (_, command) => {
+    expect(await as("worker", command)).toContain("no-extensions-write hook refuses playground ext")
+  })
+
+  test.each([
+    ["ext link", "playground ext link acme '*'"],
+    ["ext unlink", "playground ext unlink acme acme-org"],
+    ["ext accept", "playground ext accept login rule x abc --reason ok"],
+    ["ext put of a list", "playground ext put login list x /tmp/l.json --reason y"],
+    ["ext init", "playground ext init --yes"],
+    ["ext import", "playground ext import /tmp/scopes"],
+    ["ext order", "playground ext order acme login"],
+    ["ext remove", "playground ext remove acme"],
+    ["settings set of a guard key", "playground settings set owner.names '[]' --reason x"],
+    ["settings reset of a guard key", "playground settings reset live.branch --reason x"],
+    ["migrate", "playground migrate --archive /tmp/a --pre-squash abc --org acme"],
+    ["uninstall --purge", "playground uninstall --purge"],
+    ["ext add --yes, which creates a repository", "playground ext add acme acme-co/x --yes"],
+    ["ext add of a name alone", "playground ext add acme"],
+    ["ext add of a repo not owner/name", "playground ext add acme acme-skills"],
+    ["ext sync of two scopes", "playground ext sync login acme"],
+    ["ext sync past an option", "playground ext sync --scope login"],
+    ["ext sync with a word it cannot read", 'playground ext sync "$S"'],
+    ["ext sync by its path under bun", `bun ${CLI_DIR}/cli.ts ext sync`],
+    ["ext sync behind a wrapper", "watch playground ext sync"],
+    ["ext sync behind env", "env playground ext sync"],
+    ["ext sync with a variable set for it", "X=1 playground ext sync"],
+    ["ext sync after another call", "true; playground ext sync"],
+    ["ext sync after a cd", `cd ${WORK} && playground ext sync`],
+    ["ext sync into a pipe", "playground ext sync | cat"],
+    ["ext sync with a redirect", "playground ext sync > /tmp/out"],
+    ["ext sync in a group", "{ playground ext sync; }"],
+    ["ext sync in a subshell", "(playground ext sync)"],
+    ["ext sync in a substitution", "echo $(playground ext sync)"],
+    ["ext sync through bash -c", "bash -c 'playground ext sync'"],
+    ["ext sync through xargs", "printf 'sync' | xargs playground ext"],
+    ["ext sync piped into a shell", "echo 'playground ext sync' | sh"],
+    ["ext sync after a function of its name", "playground() { :; }; playground ext sync"],
+    ["ext sync after an alias of its name", "alias playground=true; playground ext sync"],
+    ["ext sync after a hash of its name", "hash -p /bin/sh playground; playground ext sync"],
+    ["ext sync after a source", "source /tmp/x.sh; playground ext sync"],
+  ])("the dispatcher's %s keeps canary's refusal", async (_, command) => {
+    expect(await as("dispatcher", command)).toContain("no-extensions-write hook refuses")
+  })
+
+  test.each([
+    ["a role set for the call", "PLAYGROUND_ROLE=dispatcher playground ext sync"],
+    ["a role set by env", "env PLAYGROUND_ROLE=dispatcher playground ext sync"],
+    ["a role exported first", "export PLAYGROUND_ROLE=dispatcher; playground ext sync"],
+    ["a role set first", "PLAYGROUND_ROLE=dispatcher; playground ext sync login"],
+    ["a --by flag", "playground ext sync --by dispatcher"],
+    ["the dispatcher's name as the scope", "playground ext sync dispatcher"],
+    ["a role set for bash -c", "PLAYGROUND_ROLE=dispatcher bash -c 'playground ext sync'"],
+    [
+      "a role exported before an add",
+      "export PLAYGROUND_ROLE=dispatcher; playground ext add a b/c",
+    ],
+  ])("a worker's call with %s keeps the refusal", async (_, command) => {
+    expect(await as("worker", command)).toContain("no-extensions-write hook refuses")
+  })
+
+  // The hook's own run, which places the session by role.ts: its PLAYGROUND_ROLE, else its name in Claude Code's registry.
+  const HOOK = join(CHECKOUT, "scripts", "hooks", "no-extensions-write.ts")
+  const CONFIG = join(HOME, "claude")
+  mkdirSync(join(CONFIG, "sessions"), { recursive: true })
+  writeFileSync(
+    join(CONFIG, "sessions", "1.json"),
+    JSON.stringify({ name: "dispatcher", sessionId: "s-dispatcher" }),
+  )
+  writeFileSync(
+    join(CONFIG, "sessions", "2.json"),
+    JSON.stringify({ name: "worker-test", sessionId: "s-worker" }),
+  )
+  const hook = async (env: Record<string, string>, session = "s-none") => {
+    const child = Bun.spawn([process.execPath, "--no-env-file", HOOK], {
+      env: { CLAUDE_CONFIG_DIR: CONFIG, HOME, PATH: process.env.PATH ?? "", ...env },
+      stderr: "pipe",
+      stdin: new Blob([
+        JSON.stringify({
+          cwd: HOME,
+          session_id: session,
+          tool_input: { command: "playground ext sync" },
+          tool_name: "Bash",
+        }),
+      ]),
+    })
+    return child.exited
+  }
+
+  test.each([
+    ["PLAYGROUND_ROLE dispatcher", { PLAYGROUND_ROLE: "dispatcher" }, "s-none", 0],
+    ["PLAYGROUND_ROLE worker", { PLAYGROUND_ROLE: "worker" }, "s-none", 2],
+    ["the registry's name dispatcher", {}, "s-dispatcher", 0],
+    ["the registry's name of a worker", {}, "s-worker", 2],
+  ] as const)("the hook run with %s exits as its role says", async (_, env, session, code) => {
+    expect(await hook(env, session)).toBe(code)
+  })
+})
+
 describe("git's global options before a push keep a bare push's verdict", () => {
   test.each([
     ["the data folder", DATA],
