@@ -243,8 +243,8 @@ describe("what the command leaves in its process group", () => {
     const m = machine()
     const pidFile = join(m.root, "loop.pid")
     const loop = `${trap}while :; do sleep 0.2; done`
-    // the loop's output goes to /dev/null, so a loop left behind never holds the caller's stdout open
-    const command = `bash -c '${loop}' >/dev/null 2>&1 & echo $! > ${pidFile}; exit 7`
+    // the loop's output goes to /dev/null, so a loop left behind never holds the caller's stdout open; the command exits only once the loop has exec'd, since until then the fork still carries this command line (its pid file's path) and the reap logs that one (#592: a loaded CI run did)
+    const command = `bash -c '${loop}' >/dev/null 2>&1 & echo $! > ${pidFile}; while ps -p $! -o command= | grep -qF ${pidFile}; do sleep 0.05; done; exit 7`
     const p = Bun.spawn(
       [
         "bash",
