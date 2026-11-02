@@ -127,4 +127,15 @@ describe("a signal inside the types gate", () => {
     expect(alive(Number(readFileSync(pidFile, "utf8")))).toBe(false)
     expect(existsSync(worktree)).toBe(true)
   })
+
+  test("kills and waits for its running step before the merge lock goes, since the next merge checks out into the same worktree", async () => {
+    const root = mkdtempSync(join(scratch, "held-types-"))
+    const pidFile = join(root, "step.pid")
+    const before = async () => {
+      while (!existsSync(pidFile) || !readFileSync(pidFile, "utf8").trim()) await Bun.sleep(10)
+    }
+    expect((await stopped(["held-types", root], "SIGTERM", { before })).code).toBe(143)
+    expect(readFileSync(join(root, "step-saw"), "utf8").trim()).toBe("held")
+    expect(existsSync(join(root, "merge.lock"))).toBe(false)
+  })
 })

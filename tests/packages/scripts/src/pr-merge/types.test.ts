@@ -13,6 +13,7 @@ import {
   ciSteps,
   slotted,
   typesGate,
+  type Prepare,
   type TypeSteps,
 } from "../../../../../packages/scripts/src/pr-merge/types"
 import "./scratch-config"
@@ -128,6 +129,23 @@ async function repo(name: string) {
   }
   return { canary, check, git, work }
 }
+
+// Steps that record their names and run none of CI's: clone makes node_modules with a file in it, and the step named fail fails.
+const recorder =
+  (runs: string[][], fail = ""): TypeSteps =>
+  (at) => {
+    const steps = ciSteps(at)
+    runs.push(steps.map((step) => step.name))
+    return steps.map((step) => ({
+      ...step,
+      argv:
+        step.name === fail
+          ? ["false"]
+          : step.name === "clone"
+            ? ["sh", "-c", "mkdir node_modules && touch node_modules/kept"]
+            : ["true"],
+    }))
+  }
 
 // gh for PR 7 at head, every gate but types passing: canary is one commit ahead.
 const gh = (head: string, aheadBy: string) => {
@@ -260,13 +278,13 @@ describe("the types gate", () => {
 
   test("refuses a step that runs past the budget, slot waits included", async () => {
     const { git, head, lockRoot } = await world("slow")
-    const slow = () => [{ argv: ["sleep", "5"], name: "check-types", types: true }]
+    const slow = () => [{ argv: ["sleep", "10"], name: "check-types", types: true }]
     const outcome = await prMerge(N, { repo: REPO }, gh(head, "1").run, {
       git,
       lockRoot,
       store: null,
       types: slow,
-      typesBudgetMs: 200,
+      typesBudgetMs: 2000,
     })
     expect(outcome.gates.find((gate) => gate.name === "types")?.detail).toContain(
       "check-types ran past the check's",
@@ -298,17 +316,7 @@ describe("the types gate", () => {
   test("a second check with the same dependencies reuses the worktree: no clone, no install, its node_modules kept", async () => {
     const r = await repo("reuse")
     const runs: string[][] = []
-    const recorded: TypeSteps = (at) => {
-      const steps = ciSteps(at)
-      runs.push(steps.map((step) => step.name))
-      return steps.map((step) => ({
-        ...step,
-        argv:
-          step.name === "clone"
-            ? ["sh", "-c", "mkdir node_modules && touch node_modules/kept"]
-            : ["true"],
-      }))
-    }
+    const recorded = recorder(runs)
     const worktree = join(r.work, ".claude", "worktrees", "merge-types")
     expect(await r.check(recorded)).toMatchObject({ ok: true })
     expect(runs.at(-1)?.slice(0, 2)).toEqual(["clone", "install"])
@@ -318,12 +326,37 @@ describe("the types gate", () => {
     expect(runs.at(-1)).not.toContain("install")
     expect(existsSync(join(worktree, "node_modules", "kept"))).toBe(true)
     expect((await r.git(["worktree", "list"])).stdout.trim().split("\n")).toHaveLength(2)
-    // a changed package.json, bun.lock or patch installs again into the kept node_modules, with no clone
-    for (const changed of ["package.json", "bun.lock", "patches/a.patch"]) {
+    // a changed package.json, bun.lock, bunfig.toml or patch installs again into the kept node_modules, with no clone
+    for (const changed of ["package.json", "bun.lock", "bunfig.toml", "patches/a.patch"]) {
       await r.canary({ [changed]: `${changed} changed\n` })
       expect(await r.check(recorded)).toMatchObject({ ok: true })
       expect(runs.at(-1)?.slice(0, 2)).toEqual(["install", "check-types"])
       expect(existsSync(join(worktree, "node_modules", "kept"))).toBe(true)
+    }
+  })
+
+  test("an install that never finished runs again, even on a tree back on the dependencies installed before it", async () => {
+    const r = await repo("unfinished-install")
+    const runs: string[][] = []
+    expect(await r.check(recorder(runs))).toMatchObject({ ok: true })
+    await r.canary({ "package.json": '{ "two": true }\n' })
+    expect(await r.check(recorder(runs, "install"))).toMatchObject({ ok: false })
+    await r.canary({ "package.json": "{}\n" })
+    expect(await r.check(recorder(runs))).toMatchObject({ ok: true })
+    expect(runs.at(-1)?.slice(0, 2)).toEqual(["install", "check-types"])
+  })
+
+  test("a worktree that cannot be reused is made again with a fresh clone", async () => {
+    const r = await repo("broken")
+    const worktree = join(r.work, ".claude", "worktrees", "merge-types")
+    const runs: string[][] = []
+    expect(await r.check(recorder(runs))).toMatchObject({ ok: true })
+    for (const broken of [worktree, join(r.work, ".git", "worktrees", "merge-types")]) {
+      rmSync(broken, { force: true, recursive: true })
+      await r.canary({ "other.ts": `export const other = "${broken}"\n` })
+      expect(await r.check(recorder(runs))).toMatchObject({ ok: true })
+      expect(runs.at(-1)?.slice(0, 2)).toEqual(["clone", "install"])
+      expect(existsSync(join(worktree, "other.ts"))).toBe(true)
     }
   })
 
@@ -360,17 +393,18 @@ describe("the types gate", () => {
       ["check-types:tests", "bun run check-types:tests", true],
     ]
     const clone = ["clone", "cp -cR /co/node_modules /wt/", false]
-    const install = ["install", "bun install --force --ignore-scripts --cwd /wt", false]
+    const forced = ["install", "bun install --force --ignore-scripts --cwd /wt", false]
+    const install = ["install", "bun install --ignore-scripts --cwd /wt", false]
     const nice = process.env.RUN_SLOT_NICE
     process.env.RUN_SLOT_NICE = "10"
     try {
-      const listed = (prepare: "clone" | "install" | "none") =>
+      const listed = (prepare: Prepare) =>
         ciSteps({ ...at, prepare }).map((step) => [
           step.name,
           step.argv.join(" "),
           step.types ?? false,
         ])
-      expect(listed("clone")).toEqual([clone, install, ...checks])
+      expect(listed("clone")).toEqual([clone, forced, ...checks])
       expect(listed("install")).toEqual([install, ...checks])
       expect(listed("none")).toEqual(checks)
       expect(

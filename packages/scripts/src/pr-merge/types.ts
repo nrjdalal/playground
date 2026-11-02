@@ -13,7 +13,7 @@ import { onStop } from "./stop"
 // One step of the check, run in the kept worktree: its name for the timing line, its argv, whether a failure is the tree's own type error rather than the run's, and whether it brings node_modules up to the tree's dependencies.
 export type TypeStep = { argv: string[]; deps?: boolean; name: string; types?: boolean }
 
-// What node_modules needs before the check: a clone when the worktree has none, an install when the tree's dependencies changed since the last install, or nothing.
+// What node_modules needs before the check: a clone and a forced install when the worktree has none, a plain install when the tree's dependencies changed since the last install or that install never finished, or nothing.
 export type Prepare = "clone" | "install" | "none"
 
 // The steps for one merged tree: the worktree it is checked out in, the checkout pr:merge runs from (whose node_modules it clones), canary's sha, which the turbo filter diffs against, and what node_modules needs.
@@ -49,14 +49,21 @@ export const slotted = (
 ): string[] =>
   env.RUN_SLOT_NICE === undefined && script ? [script, "ops-merge-train", "--", ...argv] : argv
 
-// CI's own type steps (.github/workflows/auto-check-build.yml), after what node_modules needs: a clone by scripts/README.md's "A worktree's node_modules" then the forced install, or the forced install alone, each through the run slot.
+// CI's own type steps (.github/workflows/auto-check-build.yml), after what node_modules needs: a clone by scripts/README.md's "A worktree's node_modules" then its forced install, or a plain install into the kept node_modules, since a forced one rewrites every package; each through the run slot.
 export const ciSteps: TypeSteps = ({ canary, checkout, prepare, worktree }) => {
   const clone = {
     argv: ["cp", "-cR", join(checkout, "node_modules"), `${worktree}/`],
     name: "clone",
   }
   const install = {
-    argv: ["bun", "install", "--force", "--ignore-scripts", "--cwd", worktree],
+    argv: [
+      "bun",
+      "install",
+      ...(prepare === "clone" ? ["--force"] : []),
+      "--ignore-scripts",
+      "--cwd",
+      worktree,
+    ],
     deps: true,
     name: "install",
   }
@@ -139,22 +146,22 @@ async function clear(git: Run, worktree: string): Promise<void> {
 // The file in the kept node_modules naming the dependencies it was last installed for; it goes with node_modules, and a run removes it before an install, so an install that never finished leaves none.
 const stampOf = (worktree: string) => join(worktree, "node_modules", ".merge-types-deps")
 
-// What the tree's node_modules depends on: the blobs of bun.lock, every package.json and every file under patches/, so a change to any of them installs again.
+// What the tree's node_modules depends on: the blobs of bun.lock, bunfig.toml, every package.json and every file under patches/, so a change to any of them installs again.
 async function depsOf(git: Run, commit: string): Promise<string> {
   const listed = await gitOk(git, ["ls-tree", "-r", commit])
   return listed
     .split("\n")
-    .filter((line) => /\t(bun\.lock|(.*\/)?package\.json|patches\/.*)$/.test(line))
+    .filter((line) => /\t(bun\.lock|bunfig\.toml|(.*\/)?package\.json|patches\/.*)$/.test(line))
     .join("\n")
 }
 
 // The kept worktree at commit, exactly: tracked files forced to the tree, and every untracked and ignored file removed but node_modules, so nothing from the last merge's check reads into this one; false when it cannot be reused.
 async function reuse(git: Run, worktree: string, commit: string): Promise<boolean> {
   if (!existsSync(join(worktree, ".git"))) return false
-  const at = ["-C", worktree, "-c", "core.hooksPath=/dev/null"]
-  if ((await git([...at, "checkout", "--quiet", "--force", "--detach", commit])).code !== 0)
+  const inside = ["-C", worktree, "-c", "core.hooksPath=/dev/null"]
+  if ((await git([...inside, "checkout", "--quiet", "--force", "--detach", commit])).code !== 0)
     return false
-  return (await git([...at, "clean", "-ffdxq", "-e", "node_modules"])).code === 0
+  return (await git([...inside, "clean", "-ffdxq", "-e", "node_modules"])).code === 0
 }
 
 // The types gate at the merge, inside the merge lock: skipped when the head holds canary's tip; else the merged tree, checked out detached in the one merge-types worktree under the repo's .claude/worktrees/ that every merge reuses, its node_modules kept and installed again only when the dependencies change, through steps. A type error refuses and is kept beside the lock (by head and canary), so the merge train's next cycle refuses the same pair without a second run; a run it cannot finish refuses, naming the fix.
