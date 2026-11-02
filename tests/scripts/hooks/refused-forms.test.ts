@@ -244,26 +244,42 @@ describe("every refused form stays refused unless the allow list names it", () =
   const never = (path: string) =>
     path.endsWith(NEVER_MADE.slice(NEVER_MADE.lastIndexOf("/"))) &&
     new Bun.Glob(path).match(NEVER_MADE)
+  // Each recursive delete in a text whose folder is in HOME and is not NEVER_MADE
+  const homeDeletes = (text: string) =>
+    [...text.matchAll(RECURSIVE)].flatMap(({ 0: rm, 1: flags = "", 2: target = "", index = 0 }) => {
+      if (!/(?:^|\s)(?:-[a-zA-Z]*[rR]|--recursive)/.test(flags)) return []
+      const path = HOME_PATH.test(target)
+        ? target.replace(HOME_PATH, "~")
+        : !/^[/~$]/.test(target) && CD_HOME.test(text.slice(0, index))
+          ? `~/${target}`
+          : undefined
+      return path !== undefined && !never(path) ? [rm] : []
+    })
 
   test("every recursive delete from HOME names a path under the root that never exists", () => {
     const left: string[] = []
     for (const { rows, source } of REFUSED_FORMS)
       for (const [what, call] of rows(PATHS)) {
         const text = typeof call === "string" ? call : JSON.stringify(call)
-        for (const { 0: rm, 1: flags = "", 2: target = "", index = 0 } of text.matchAll(
-          RECURSIVE,
-        )) {
-          if (!/(?:^|\s)(?:-[a-zA-Z]*[rR]|--recursive)/.test(flags)) continue
-          const path = HOME_PATH.test(target)
-            ? target.replace(HOME_PATH, "~")
-            : !/^[/~$]/.test(target) && CD_HOME.test(text.slice(0, index))
-              ? `~/${target}`
-              : undefined
-          if (path !== undefined && !never(path)) left.push(`${source} ${what}: ${rm}`)
-        }
+        for (const rm of homeDeletes(text)) left.push(`${source} ${what}: ${rm}`)
       }
     expect(left).toEqual([])
   })
+
+  // Test files that hold commands as strings outside the fixture, read line by line as source, a \n escape read as the line break it writes
+  test.each([
+    "tests/packages/scripts/src/playground/picker.test.ts",
+    "tests/scripts/hooks/no-extensions-write.test.ts",
+  ])(
+    "every recursive delete from HOME in %s names a path under the root that never exists",
+    (file) => {
+      const lines = readFileSync(join(CHECKOUT, file), "utf8").split("\n")
+      const left = lines.flatMap((line, i) =>
+        homeDeletes(line.replaceAll("\\n", "\n")).map((rm) => `${file}:${i + 1}: ${rm}`),
+      )
+      expect(left).toEqual([])
+    },
+  )
 
   test("every allow-list entry names a case", () => {
     for (const entry of ALLOWED)
