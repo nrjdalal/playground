@@ -9,7 +9,8 @@ import {
 } from "node:fs"
 import { basename, dirname, join, sep } from "node:path"
 
-import { makeScratch, removeScratch } from "@packages/safe-delete"
+// imported by path, as dev-running.test.ts holds: pre-commit loads this file before the build that makes packages/*/dist
+import { makeScratch, removeScratch } from "../../../../../packages/safe-delete/src"
 
 // The launcher records its pid, process group, start time and the stack's task groups in its checkout, so `bun run dev:stop` can end a stack whose starting session has gone, by that record alone, never by a name or a pattern.
 export const RECORD = ".turbo/dev.pgid"
