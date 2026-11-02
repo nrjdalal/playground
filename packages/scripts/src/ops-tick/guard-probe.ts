@@ -27,7 +27,7 @@ export const guardProbe = async (ctx: Context) => {
       [
         "sh",
         "-c",
-        'cd -P "$1" && exec bun --no-env-file "scripts/hooks/bundled/$2.js"',
+        'cd -P "$1" && s="scripts/hooks/bundled/$2.js" && { [ -f "$s" ] || s="scripts/hooks/$2.ts"; } && exec bun --no-env-file "$s"',
         "guard-probe",
         ctx.repo,
         name,

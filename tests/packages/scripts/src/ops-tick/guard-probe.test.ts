@@ -74,7 +74,7 @@ test("each guard gets {} without its wrapper's tail, and a crash is told to the 
     argv: [
       "sh",
       "-c",
-      'cd -P "$1" && exec bun --no-env-file "scripts/hooks/bundled/$2.js"',
+      'cd -P "$1" && s="scripts/hooks/bundled/$2.js" && { [ -f "$s" ] || s="scripts/hooks/$2.ts"; } && exec bun --no-env-file "$s"',
       "guard-probe",
       repo,
       "no-stash",
