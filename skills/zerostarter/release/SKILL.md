@@ -33,7 +33,7 @@ When the candidate changes the update path anything in the ship's step 5 runs (`
 a. **Mirror.** Give the rehearsal an origin of its own: clone the repository bare into the scratch folder, then clone that mirror and, in the clone, fetch the pinned `$CANARY` from the repository, merge it into `main` with `--no-ff` (the merge commit a ship makes), and tag the merge with the tag this ship will cut.
    Clone the mirror with `-b main`, since the mirror's HEAD is `canary`, where the merge is a no-op (`Already up to date.`) and the tag lands on the candidate itself (the v0.0.29 rehearsal).
    Merge with `-c commit.gpgsign=false`, since the merge commit stays in the scratch folder and signing stops on a machine with no secret key (the v0.0.29 rehearsal).
-   Then bring `main` and the tag into the mirror with a fetch run in the mirror, since no-extension-repo-write refuses a push to a local path (the v0.0.28 rehearsal):
+   The block runs the whole step; its last line brings `main` and the tag into the mirror with a fetch run in the mirror, since no-extension-repo-write refuses a push to a local path (the v0.0.28 rehearsal):
 
    ```bash
    git clone --bare <repository> <mirror>.git
