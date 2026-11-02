@@ -20,6 +20,7 @@ set -euo pipefail
 #      free at 8% or more (kern.memorystatus_level)
 #   A GLM session takes its own load and memory gate in place of both:
 #   load5 under 30, pressure level 1 and swap-ins under 100/s (vm_stat -c 2 1)
+#   Under Claude Code's sandbox the load comes from uptime, and a refused pressure level leaves the swap-ins to decide (scripts/README.md)
 #   3. usage, the launching backend's own window: Claude reads usage.json
 #      (5-hour under 90%, the week within 14.3 points a day of pace, floored at one day's share, readings
 #      no older than 15 minutes; one never written, as on a fresh install before ops-usage first runs, passes,
@@ -71,6 +72,8 @@ REPO="$(cd -P "$(dirname "$0")/.." && pwd -P)"
 # The main checkout: git's common dir less .git, the same folder from a worktree as from the checkout itself.
 MAIN="$(git -C "$REPO" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" && MAIN="$(cd -P "$(dirname "$MAIN")" && pwd -P)" || MAIN=$REPO
 ROSTER="$REPO/scripts/roster.ts"
+# pid $1 and its start, one `<pid> <lstart>` line words single-spaced, or nothing once it has gone: from ps, else from the kernel's process table, since Claude Code's sandbox refuses the setuid ps
+started() { echo $(LC_ALL=C TZ=UTC ps -o pid=,lstart= -p "$1" 2>/dev/null || python3 -I "$REPO/scripts/ops/ptable.py" started "$1"); }
 # launchd runs a login item (herdr's restore) on /usr/bin:/bin, where bun is not on PATH, so the roster write falls back to bun's own install folder.
 BUN=$(command -v bun || echo "$HOME/.bun/bin/bun")
 REGISTRY="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/sessions"
@@ -185,10 +188,10 @@ second_dispatcher() { [ "${1%-2}" != "$1" ] && [ "$(session_kind "${1%-2}")" = d
 
 # The live sessions: a registry file whose pid is alive with the start time the file records, as the Dashboard reads them, but for a `claude -p` run (entrypoint sdk-cli), which holds no name. It prints a line, tab-separated pid, session id, folder and process start ("-" for a field the file lacks), for each live session named $1, the lowest pid first.
 live_holders() {
-  python3 - "$REGISTRY" "$1" <<'PY'
+  python3 - "$REGISTRY" "$1" "$REPO" <<'PY'
 import json, os, subprocess, sys
 
-folder, wanted = sys.argv[1:3]
+folder, wanted, repo = sys.argv[1:4]
 entries = {}
 # Claude Code makes its sessions folder with its first session, so a Mac that never ran one holds no live session.
 try:
@@ -206,19 +209,28 @@ for file in files:
         data = {}
     entries[int(stem)] = data if isinstance(data, dict) else {}
 me = os.getpid()
-listing = subprocess.run(
-    ["ps", "-o", "pid=,lstart=", "-p", ",".join(str(p) for p in [me, *entries])],
-    capture_output=True,
-    env=dict(os.environ, LC_ALL="C", TZ="UTC"),
-    text=True,
-).stdout
+pids = [me, *entries]
+# each pid's start from ps, else from the kernel's process table (ptable.py), since Claude Code's sandbox refuses the setuid ps
+try:
+    listing = subprocess.run(
+        ["ps", "-o", "pid=,lstart=", "-p", ",".join(str(p) for p in pids)],
+        capture_output=True,
+        env=dict(os.environ, LC_ALL="C", TZ="UTC"),
+        text=True,
+    ).stdout
+except OSError:
+    listing = ""
 starts = {}
 for line in listing.splitlines():
     parts = line.split(None, 1)
     if len(parts) == 2 and parts[0].isdigit():
         starts[int(parts[0])] = " ".join(parts[1].split())
 if me not in starts:
-    sys.exit("ps did not list this process")
+    sys.path.insert(0, os.path.join(repo, "scripts", "ops"))
+    import ptable
+    starts = {pid: start for pid in pids if (start := ptable.started(pid))}
+if me not in starts:
+    sys.exit("neither ps nor the kernel's process table listed this process")
 def field(value):
     return " ".join(value.split()) if isinstance(value, str) and value.strip() else "-"
 for pid, data in sorted(entries.items()):
@@ -278,6 +290,30 @@ def sysctl_int(name):
     except ValueError:
         return None
 
+# whether Claude Code's sandbox refuses sysctl reading name, as it does every kern.memorystatus_* reading
+def sandbox_refuses(name):
+    return "not permitted" in subprocess.run(["sysctl", "-n", name], capture_output=True, text=True).stderr
+
+# (load1, load5) from sysctl, else from uptime, since Claude Code's sandbox refuses the sysctl command's name lookup; None when neither reads
+def loadavg():
+    words = subprocess.run(["sysctl", "-n", "vm.loadavg"], capture_output=True, text=True).stdout.strip(" {}\n").split()
+    if len(words) < 2:
+        out = subprocess.run(["uptime"], capture_output=True, text=True, env=dict(os.environ, LC_ALL="C")).stdout
+        words = out.rpartition("load average")[2].lstrip("s:").replace(",", " ").split()
+    try:
+        return float(words[0]), float(words[1])
+    except (IndexError, ValueError):
+        return None
+
+# the last second's swap-ins, from vm_stat's last row under a header naming each column, or None when it cannot be read
+def swapins():
+    try:
+        rows = [line.split() for line in subprocess.run(["vm_stat", "-c", "2", "1"], capture_output=True, text=True, timeout=10, check=True).stdout.splitlines()]
+        column = next(row for row in rows if "swapins" in row).index("swapins")
+        return int(rows[-1][column])
+    except (IndexError, OSError, StopIteration, subprocess.SubprocessError, ValueError):
+        return None
+
 def load(name):
     path = os.path.join(data_dir, name)
     if not os.path.exists(path):
@@ -306,35 +342,31 @@ if move:
     readings["memory"] = f"skipped (move of pid {move})"
 elif backend == "glm":
     # a GLM session draws no Claude usage, so it has its own gate: load5 under gates.glmLoad5Max, memory pressure 1 and swap-ins under gates.glmSwapinsMax a second
-    fields = subprocess.run(["sysctl", "-n", "vm.loadavg"], capture_output=True, text=True).stdout.split()
-    try:
-        readings["load5"] = float(fields[2])
-    except (IndexError, ValueError):
-        refuse("load", "it cannot read the load average (sysctl vm.loadavg)")
+    loads = loadavg()
+    if loads is None:
+        refuse("load", "it cannot read the load average (sysctl vm.loadavg or uptime)")
+    readings["load5"] = loads[1]
     if readings["load5"] >= gates["glmLoad5Max"]:
         refuse("load", f"load5 is {readings['load5']:.2f} (sysctl vm.loadavg), and a GLM session starts under {fmt(gates['glmLoad5Max'])}")
     readings["pressure"] = sysctl_int("kern.memorystatus_vm_pressure_level")
-    if readings["pressure"] is None:
+    if readings["pressure"] is None and sandbox_refuses("kern.memorystatus_vm_pressure_level"):
+        readings["memory"] = "pressure level refused by the sandbox, so the swap-ins alone decide"
+    elif readings["pressure"] is None:
         refuse("memory", "it cannot read the pressure level (sysctl kern.memorystatus_vm_pressure_level)")
-    if readings["pressure"] != 1:
+    elif readings["pressure"] != 1:
         refuse("memory", f"pressure level is {readings['pressure']} (sysctl kern.memorystatus_vm_pressure_level), and a GLM session starts at 1 alone")
-    # vm_stat's last row is the last second's counts, under a header naming each column
-    try:
-        rows = [line.split() for line in subprocess.run(["vm_stat", "-c", "2", "1"], capture_output=True, text=True, timeout=10, check=True).stdout.splitlines()]
-        column = next(row for row in rows if "swapins" in row).index("swapins")
-        readings["swapins"] = int(rows[-1][column])
-    except (IndexError, OSError, StopIteration, subprocess.SubprocessError, ValueError):
+    readings["swapins"] = swapins()
+    if readings["swapins"] is None:
         refuse("memory", "it cannot read the swap-ins (vm_stat -c 2 1)")
     if readings["swapins"] >= gates["glmSwapinsMax"]:
         refuse("memory", f"swap-ins are {readings['swapins']}/s (vm_stat), and a GLM session starts under {fmt(gates['glmSwapinsMax'])}/s")
 else:
     # 1 load: max(load1, load5) plus the starts the log holds from the last gates.startsWindow seconds
-    fields = subprocess.run(["sysctl", "-n", "vm.loadavg"], capture_output=True, text=True).stdout.split()
-    try:
-        load1, load5 = float(fields[1]), float(fields[2])
-    except (IndexError, ValueError):
-        refuse("load", "it cannot read the load average (sysctl vm.loadavg)")
-    cores = sysctl_int("hw.ncpu")
+    loads = loadavg()
+    if loads is None:
+        refuse("load", "it cannot read the load average (sysctl vm.loadavg or uptime)")
+    load1, load5 = loads
+    cores = sysctl_int("hw.ncpu") or os.cpu_count()
     if cores is None:
         refuse("load", "it cannot read the core count (sysctl hw.ncpu)")
     readings["cores"] = cores
@@ -405,17 +437,25 @@ else:
             )
             refuse("load", f"max(load1, load5) is {readings['load5']:.2f} and {starts:g} started in the last {fmt(gates['startsWindow'] / 60)} minutes, {at}; {cpu}. Wait for it to fall, or close a session that is done, and run it again.")
 
-    # 2 memory
+    # 2 memory; where Claude Code's sandbox refuses the pressure level and free share, the swap-ins stand in, under GLM's line
     readings["pressure"] = sysctl_int("kern.memorystatus_vm_pressure_level")
-    if readings["pressure"] is None:
-        refuse("memory", "it cannot read the pressure level (sysctl kern.memorystatus_vm_pressure_level)")
-    if readings["pressure"] not in (1, 2):
-        refuse("memory", f"pressure level is {readings['pressure']} (sysctl kern.memorystatus_vm_pressure_level), 1 or 2 passes")
-    readings["free"] = sysctl_int("kern.memorystatus_level")
-    if readings["free"] is None:
-        refuse("memory", "it cannot read the free share (sysctl kern.memorystatus_level)")
-    if readings["free"] < gates["memoryFreeMin"]:
-        refuse("memory", f"free is {readings['free']}% (sysctl kern.memorystatus_level), {gates['memoryFreeMin']}% is the floor. Close a session or wait for the pressure to pass, and run it again.")
+    if readings["pressure"] is None and sandbox_refuses("kern.memorystatus_vm_pressure_level"):
+        readings["memory"] = "pressure level and free share refused by the sandbox"
+        readings["swapins"] = swapins()
+        if readings["swapins"] is None:
+            refuse("memory", "the sandbox refuses the pressure level, and it cannot read the swap-ins (vm_stat -c 2 1)")
+        if readings["swapins"] >= gates["glmSwapinsMax"]:
+            refuse("memory", f"the sandbox refuses the pressure level, and swap-ins are {readings['swapins']}/s (vm_stat), {fmt(gates['glmSwapinsMax'])}/s is the line. Close a session or wait for the pressure to pass, and run it again.")
+    else:
+        if readings["pressure"] is None:
+            refuse("memory", "it cannot read the pressure level (sysctl kern.memorystatus_vm_pressure_level)")
+        if readings["pressure"] not in (1, 2):
+            refuse("memory", f"pressure level is {readings['pressure']} (sysctl kern.memorystatus_vm_pressure_level), 1 or 2 passes")
+        readings["free"] = sysctl_int("kern.memorystatus_level")
+        if readings["free"] is None:
+            refuse("memory", "it cannot read the free share (sysctl kern.memorystatus_level)")
+        if readings["free"] < gates["memoryFreeMin"]:
+            refuse("memory", f"free is {readings['free']}% (sysctl kern.memorystatus_level), {gates['memoryFreeMin']}% is the floor. Close a session or wait for the pressure to pass, and run it again.")
 
 # 3 usage: the launching backend's own window
 readings["backend"] = backend or "claude"
@@ -797,13 +837,12 @@ if [ "$MODE" = restore ]; then
   [ $# -eq 0 ] && [ -z "$CHECK$ACCOUNT$BACKEND$CLAUDE_MODEL$EFFORT$RESUME_BRIEF$RUNTIME$SIZE" ] || usage "restore takes no other words"
   # One restore at a time: ops-herdr's start and its job's next cycle can both run one, and two resumes of a name both pass the live-name check until its claude writes its registry file, so it would start twice. The lock is a symlink naming its holder's pid and start time, so a holder that died, or a pid macOS handed on, frees it.
   LOCK="$RESUME_DIR/.restore.lock"
-  holder() { echo $(LC_ALL=C TZ=UTC ps -o pid=,lstart= -p "$1" 2>/dev/null); }
-  ME=$(holder $$)
+  ME=$(started $$)
   ME=${ME:-$$}
   mkdir -p "$RESUME_DIR"
   if ! ln -s "$ME" "$LOCK" 2>/dev/null; then
     HELD=$(readlink "$LOCK")
-    if [ -n "$HELD" ] && [ "$HELD" = "$(holder "${HELD%% *}")" ]; then
+    if [ -n "$HELD" ] && [ "$HELD" = "$(started "${HELD%% *}")" ]; then
       echo "another restore is running (pid ${HELD%% *})"
       exit 1
     fi
@@ -1288,7 +1327,7 @@ fi
 # The window reaches the session through its one settings file, built here from the factory's on every launch so the two never drift, one file per backend. On GLM: the user settings turn on telemetry to the Loom relay, and Loom counts Claude usage alone, so a GLM session exports none. Claude Code keeps only the last --settings, and the user settings' env beats a variable on the launch line (both measured by a reviewer, 16 Oct), so the session's one settings file also turns the telemetry off (measured from a folder outside any checkout, 16 Oct: a SessionStart hook ran, no-env-dump refused printenv, and no metric left).
 TAG=
 [ "$BACKEND" = glm ] && TAG=glm-
-# A probe runs its shell commands in Claude Code's sandbox, which every child process inherits, so a delete a script makes where no guard hook sees it stays inside the write roots; its settings go in a file of their own. Workers and testers join once run-slot, spawn.sh and the worker git flow run inside it.
+# A probe runs its shell commands in Claude Code's sandbox, which every child process inherits, so a delete a script makes where no guard hook sees it stays inside the write roots; its settings go in a file of their own. Workers and testers join once the worker git flow runs inside it, as run-slot and spawn.sh do.
 SANDBOX=
 [ "$ROLE" = probe ] && SANDBOX=sandbox-
 BUILT="$DATA/factory-settings-$TAG$SANDBOX$((WINDOW / 1000))k.json"
@@ -1456,7 +1495,7 @@ if [ -n "$MOVE_PID" ]; then
     fi
   fi
   tries=0
-  while [ "$(echo $(LC_ALL=C TZ=UTC ps -o pid=,lstart= -p "$MOVE_PID" 2>/dev/null))" = "$MOVE_PID $MOVE_START" ]; do
+  while [ "$(started "$MOVE_PID")" = "$MOVE_PID $MOVE_START" ]; do
     if [ "$tries" -ge $((MOVE_WAIT * 2)) ]; then
       rm -f -- "$LAUNCH_FILE"
       refuse "pid $MOVE_PID still runs ${MOVE_WAIT}s after cmux closed its surface, so the herdr copy was not started: resume it by hand once it exits: $by_hand"

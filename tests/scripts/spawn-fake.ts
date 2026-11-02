@@ -34,7 +34,7 @@ afterAll(() => rmSync(scratch, { force: true, recursive: true }))
 
 export const LSTART = "Tue Oct 13 04:43:59 2026"
 
-// Fake cmux (a move's reads and closes), ps, sysctl and bun on PATH, each logging what it was asked; bun fakes spawn.sh's roster write alone.
+// Fake cmux (a move's reads and closes), ps, sysctl, uptime and bun on PATH, each logging what it was asked; bun fakes spawn.sh's roster write alone.
 export const bin = join(scratch, "bin")
 const sharedOrgs = join(scratch, "orgs")
 mkdirSync(sharedOrgs, { recursive: true })
@@ -109,6 +109,7 @@ fake(
   "sysctl",
   // spawn.sh always reads with -n, so the name is $2.
   `[ -n "$FAKE_SYSCTL_BROKEN" ] && exit 1
+[ -n "$FAKE_SYSCTL_SANDBOXED" ] && { echo "sysctl: sysctl fmt -1 1024 1: Operation not permitted" >&2; exit 1; }
 [ "$1" = -n ] || exit 1
 case "$2" in
   vm.loadavg) echo "{ \${FAKE_LOAD1:-1.00} \${FAKE_LOAD5:-2.00} 3.00 }" ;;
@@ -125,6 +126,12 @@ fake(
 [ -n "$FAKE_TOP_BROKEN" ] && exit 1
 echo "CPU usage: 30.00% user, 20.00% sys, 50.00% idle"
 echo "CPU usage: 60.00% user, 40.00% sys, \${FAKE_CPU_IDLE:-0.00}% idle"`,
+)
+// The load read where sysctl is refused, uptime: the line it prints inside Claude Code's sandbox, which drops the up field, at FAKE_LOAD1 and FAKE_LOAD5 as the sysctl fake gives them.
+fake(
+  "uptime",
+  `[ -n "$FAKE_UPTIME_BROKEN" ] && exit 1
+echo "22:15  2 users, load averages: \${FAKE_LOAD1:-1.00} \${FAKE_LOAD5:-2.00} 3.00"`,
 )
 // The swap-in read, vm_stat -c 2 1: its first row the totals since boot, its second the last second's, swap-ins at FAKE_SWAPINS (0 by default).
 fake(
