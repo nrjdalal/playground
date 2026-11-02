@@ -113,6 +113,12 @@ describe("a stash found by name or SHA, and every other call, runs", () => {
     expect(await bash(command)).toBeUndefined()
   })
 
+  test("40 wrapper options it does not know before a stash are read in time, and the stash refused", async () => {
+    const started = performance.now()
+    expect(await bash(`sudo ${"-Z ".repeat(40)}true; git stash`)).toContain("no-stash hook")
+    expect(performance.now() - started).toBeLessThan(2000)
+  })
+
   test("a tool other than Bash passes", async () => {
     expect(
       await check(JSON.stringify({ tool_input: { file_path: "/x" }, tool_name: "Read" }), {}),
