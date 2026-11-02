@@ -414,9 +414,10 @@ export async function startVibe(path: string, deps: Deps = DEPS): Promise<Seeded
     // a Stop already took this Start's copy and record, and a later Start's are its own
     if (owns()) {
       await deps.docker(["rm", "-fv", copy])
-      const kept = [trash(deps, path, VIBE_RECORD)]
+      // the .env first, so a trash that throws never leaves the worktree on the copy's
+      const kept = wrote ? [restoreEnv(deps, path)] : []
+      kept.push(trash(deps, path, VIBE_RECORD))
       rmSync(join(path, DATA), { force: true, recursive: true })
-      if (wrote) kept.push(restoreEnv(deps, path))
       const words = kept.filter(Boolean).join("; ")
       if (words) throw new VibeError(`${error instanceof Error ? error.message : error}; ${words}`)
     }
