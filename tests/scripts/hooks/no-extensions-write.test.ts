@@ -1128,6 +1128,20 @@ describe("a playground CLI call that no guard reads runs", () => {
     ["ext diff", "playground ext diff login list x --from a --to b"],
     ["ext export", "playground ext export /tmp/out"],
     ["ext score", "playground ext score login doc x abc 5 --reason ok"],
+    [
+      "ext score behind env -u of another variable",
+      "env -u HOME playground ext score login doc x abc 5 --reason ok",
+    ],
+    [
+      "ext score with another data folder variable",
+      "TZ=UTC playground ext score login doc x abc 5 --reason ok",
+    ],
+    ["ext list behind env -u of the role", "env -u PLAYGROUND_ROLE playground ext list"],
+    ["ext show behind env -i", "env -i playground ext show login list release-owners"],
+    [
+      "ext search after the role is exported empty",
+      "export PLAYGROUND_ROLE=; playground ext search x",
+    ],
     ["ext import --dry-run", "playground ext import --from-tree extensions/core/lists --dry-run"],
     ["ext init --dry-run", "playground ext init --dry-run"],
     ["ext add --dry-run", "playground ext add acme --dry-run"],
