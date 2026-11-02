@@ -114,6 +114,9 @@ const RESERVED = new Set([
 // Whether a program is its command's own first word, a reserved word before it (`!`, `then`, `do`) skipped, rather than one a wrapper or an assignment runs
 export const ownFirst = (cmd: Command, first: Word | undefined): first is Word =>
   !!first && first === cmd.words.find((w) => w.quoted || !RESERVED.has(w.value))
+// Whether every word of a command is an unquoted reserved word (`fi`, `done`), so it names no program of its own
+export const onlyReserved = (cmd: Command): boolean =>
+  cmd.words.length > 0 && cmd.words.every((w) => !w.quoted && RESERVED.has(w.value))
 // The words that close a compound command, whose output the hook does not follow.
 const GROUPING = new Set(["}", "done", "esac", "fi"])
 export const ASSIGN = /^[A-Za-z_]\w*=/

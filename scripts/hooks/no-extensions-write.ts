@@ -15,6 +15,7 @@ import {
   knownVariables,
   lex,
   marked,
+  onlyReserved,
   ownFirst,
   parse,
   type Parsed,
@@ -197,8 +198,16 @@ function programLines({ args, first }: Parsed): string[] {
 function narrow(cmd: Command, env: Env): boolean {
   const parsed = parse(cmd)
   const { args, first, name } = parsed
-  // a command of reserved words alone (`fi`, `done`) runs nothing, where a group or subshell holds commands of its own
-  if (!first) return !cmd.inner && !cmd.group && parsed.local.size === 0
+  // a command of reserved words alone (`fi`, `done`) runs nothing; any other with no program read (`sudo -s`, a group) has its line read whole
+  if (!first) {
+    return (
+      onlyReserved(cmd) &&
+      cmd.redirects.length === 0 &&
+      !cmd.inner &&
+      !cmd.group &&
+      parsed.local.size === 0
+    )
+  }
   if (!ownFirst(cmd, first) || marked(name)) return false
   if (!/^(?:\/(?:bin|opt\/homebrew\/bin|usr\/bin|usr\/local\/bin)\/)?[^/]+$/.test(first.value))
     return false
