@@ -216,12 +216,13 @@ export function quarantine(
     return refused(`the session name ${opts.session} is not a word of letters, digits and hyphens`)
   if (!lstat(abs)) return refused(`no such path ${abs}`)
   const why = isProtected(abs, roots)
-  const carve =
+  const found =
     why && opts.carveOut !== undefined
       ? carveOutOf(abs, opts.carveOut, roots, io.carveOuts ?? CARVE_OUTS)
       : null
-  if (why && (carve === null || typeof carve === "string"))
-    return refused(carve ? `${why}; ${carve}` : why, "protected")
+  if (why && (found === null || typeof found === "string"))
+    return refused(found ? `${why}; ${found}` : why, "protected")
+  const carve = typeof found === "string" ? null : found
   const isWorktree = dirname(join(real(dirname(abs)), basename(abs))) === worktreesOf(roots)
   if (isWorktree && !opts.worktree)
     return refused(`${abs} is a worktree: playground rm --worktree removes it`)
