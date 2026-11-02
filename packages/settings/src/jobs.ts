@@ -80,7 +80,7 @@ export const JOBS: Record<string, Job> = {
       "Keeps the Mac awake on AC power and on battery with caffeinate, display and lock unchanged.",
     schedule: { always: true },
   }),
-  // Its sync runs `bun run changelog sync` in the checkout that holds its script, so it runs from the Dashboard's checkout, whose .env names the database; the install's checkout has none.
+  // Its sync runs in its script's checkout, so it runs from the Dashboard's, which holds the database's .env.
   "ops-changelog": terminal("ops-changelog", bunJob("ops-changelog", "{dashboard}"), {
     cwd: "{dashboard}",
     description: "Syncs new canary merges and main versions into the Changelog every 5 minutes.",
