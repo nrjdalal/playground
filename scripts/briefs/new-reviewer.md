@@ -7,6 +7,12 @@ You report to `__WORKER__`.
 Your review clone is `.claude/worktrees/review-__PR__` in your checkout of `__REPO__`; create it at the head when it is absent. When `__REPO__` is not a repo of an org `ext.links` guards and no local checkout of it exists, clone it fresh as `<the Playground checkout>/.claude/worktrees/review-<name>-__PR__`, `<name>` the part of `__REPO__` after the slash, and remove the clone when the PR merges or closes.
 For a guarded org's repo, that checkout is the one in the org's folder under the code root, or your scratchpad when there is none (code-review-loop says why).
 
+## This PR
+
+Its scope as your worker's lead ruled it, the bar you score against, and any harness you re-run:
+
+`__SPEC__`
+
 ## Rules
 
 - "nothing merge ever without 5/5" (the owner): score only the exact head, since a 5/5 carries only across a clean merge of the PR's base, one with no conflict and no edit of its own.

@@ -209,6 +209,10 @@ describe("passes", () => {
     ["its docs", "agent-desktop skills get desktop"],
     ["permissions", "agent-desktop permissions"],
     ["a commit naming it", `git commit -m "docs: agent-desktop --headed is refused"`],
+    ["snapshot --app Finder behind watch -n", "watch -n 1 agent-desktop snapshot --app Finder"],
+    ["snapshot --app Finder behind flock", "flock /tmp/x agent-desktop snapshot --app Finder"],
+    ["list-apps behind setsid", "setsid agent-desktop list-apps"],
+    ["a quoted line watch runs", "watch -n 1 'agent-desktop snapshot --app Finder'"],
     ["an unrelated script", `bash ${join(tmpdir(), "missing-dir", "x.sh")}`],
     [
       "behind sudo's known options",
