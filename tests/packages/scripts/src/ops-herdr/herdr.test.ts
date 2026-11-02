@@ -17,7 +17,9 @@ import {
   pinFor,
   pinProblem,
   restoreEnv,
+  restoreLines,
   restoreProblem,
+  restoreSummary,
   runJob,
   serverEnv,
   serverNames,
@@ -590,14 +592,60 @@ describe("owedFile", () => {
   })
 })
 
+// spawn.sh restore's lines for a server after a reboot: one back, two running, three the load gate held, one the usage gate held, one that failed.
+const AFTER_BOOT = [
+  "restored a-worker",
+  "skipped b-worker: live",
+  "skipped c-worker: live",
+  ...["d", "e", "f"].map(
+    (id) =>
+      `not restored: spawn.sh refuses ${id}-worker: the load gate holds it: max(load1, load5) is 17.23 and 10 started in the last 5 minutes. Wait for it to fall, or close a session that is done, and run it again.`,
+  ),
+  "not restored: spawn.sh refuses g-worker: the usage gate holds it: it cannot read zai-usage.json",
+  "not restored: spawn.sh refuses h-worker: its brief is gone",
+].join("\n")
+
+describe("restoreSummary", () => {
+  test("counts each kind of line, the gates' waits apart from the failures", () => {
+    expect(restoreSummary(`${AFTER_BOOT}\n`)).toBe(
+      "1 restored · 2 already running · 3 waiting for load to drop · 1 waiting on the usage gate · 1 not restored (the waiting ones come back on their own)",
+    )
+  })
+
+  test("leaves out a kind with none", () => {
+    expect(restoreSummary("restored a-worker\nskipped b-worker: live\n")).toBe(
+      "1 restored · 1 already running",
+    )
+  })
+
+  test("is null for output with no session line, a refusal before any session", () => {
+    expect(restoreSummary("spawn.sh refuses restore: it cannot read the roster\n")).toBeNull()
+    expect(restoreSummary("")).toBeNull()
+  })
+})
+
+describe("restoreLines", () => {
+  test("prints one summary line for a restore's sessions, naming the file that holds each one's line", () => {
+    expect(restoreLines("playground", AFTER_BOOT, "/h/playground.restore.log")).toEqual([
+      "restore playground: 1 restored · 2 already running · 3 waiting for load to drop · 1 waiting on the usage gate · 1 not restored (the waiting ones come back on their own); each session's line: /h/playground.restore.log",
+    ])
+  })
+
+  test("prints a refusal before any session as it came", () => {
+    expect(restoreLines("playground", "spawn.sh refuses restore: x\n", "/h/p.log")).toEqual([
+      "restore playground: spawn.sh refuses restore: x",
+    ])
+  })
+})
+
 describe("restoreProblem", () => {
   test("passes a restore that exits 0", () => {
     expect(restoreProblem(0, "restored worker-a\nskipped worker-b: live\n")).toBeNull()
   })
 
-  test("names each session it did not restore", () => {
+  test("names counts, never the joined lines", () => {
     expect(restoreProblem(1, "restored worker-a\nnot restored: x\nnot restored: y\n")).toBe(
-      "restore: not restored: x; not restored: y",
+      "restore: 1 restored · 2 not restored",
     )
   })
 
