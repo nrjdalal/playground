@@ -363,6 +363,73 @@ describe("prMerge", () => {
 })
 
 // merge-on-ready skips drafts, so a green draft sat for 30 minutes while another PR merged ahead of it and made it conflict.
+describe("a hold written after the gates are read", () => {
+  // git in local()'s world whose types gate, the slow step between the gates and the merge call, writes the held list as it starts
+  const holdingDuringTypes = (text: string) => {
+    const world = local()
+    const git: Run = async (args) => {
+      if (args[0] === "merge-base" && args[1] === "--is-ancestor") writeFileSync(HELD, text)
+      return world.git(args)
+    }
+    return { ...world, git }
+  }
+
+  test("refuses, naming the hold's reason, and never calls gh pr merge", async () => {
+    try {
+      const { calls, run } = stub()
+      const outcome = await prMerge(
+        112,
+        { repo: REPO },
+        run,
+        holdingDuringTypes(JSON.stringify({ held: { [`${REPO}#112`]: "held for the ship" } })),
+      )
+      expect(outcome.kind).toBe("refused")
+      expect(outcome.gates.find((gate) => gate.name === "held")).toMatchObject({
+        detail: "read again before the merge: held for the ship",
+        ok: false,
+      })
+      expect(merges(calls)).toEqual([])
+    } finally {
+      rmSync(HELD, { force: true })
+    }
+  })
+
+  test("refuses when the held list no longer reads, and never calls gh pr merge", async () => {
+    try {
+      const { calls, run } = stub()
+      const outcome = await prMerge(112, { repo: REPO }, run, holdingDuringTypes("{"))
+      expect(outcome.kind).toBe("refused")
+      expect(outcome.gates.find((gate) => gate.name === "held")).toMatchObject({
+        detail: "read again before the merge: held-prs.json does not read: it is not JSON",
+        ok: false,
+      })
+      expect(merges(calls)).toEqual([])
+    } finally {
+      rmSync(HELD, { force: true })
+    }
+  })
+
+  test("merges as before when the list still does not name the PR at the merge call", async () => {
+    try {
+      const { calls, run } = stub()
+      const outcome = await prMerge(
+        112,
+        { repo: REPO },
+        run,
+        holdingDuringTypes(JSON.stringify({ held: { [`${REPO}#113`]: "held for the ship" } })),
+      )
+      expect(outcome).toMatchObject({ kind: "merged", sha: "abc1234def" })
+      expect(outcome.gates.find((gate) => gate.name === "held")).toMatchObject({
+        detail: "not in held-prs.json",
+        ok: true,
+      })
+      expect(merges(calls)).toHaveLength(1)
+    } finally {
+      rmSync(HELD, { force: true })
+    }
+  })
+})
+
 describe("a green draft", () => {
   test("pr:merge marks the owner's draft ready when every other gate passes, then merges it", async () => {
     const { calls, run } = stub({ draft: true })
