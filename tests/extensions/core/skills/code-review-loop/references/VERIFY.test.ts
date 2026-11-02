@@ -19,6 +19,7 @@ describe("VERIFY.md", () => {
     expect(line).toContain("`gh pr view <n> --json files` stops at 100")
     expect(line).toContain("100 of its 143 files")
   })
+
   test("tells each sub-agent to make its scratch folder first and to write every probe output to an absolute path inside it (#415's out.txt in the main checkout)", async () => {
     const line =
       (await Bun.file(VERIFY).text())
@@ -30,7 +31,7 @@ describe("VERIFY.md", () => {
       "Tell each sub-agent to make its folder (`mkdir -p <absolute path>`) before any command names it, and to write every probe output to an absolute path inside it",
     )
     expect(line).toContain(
-      "**Done when** every sub-agent's prompt names its folder by absolute path",
+      "**Done when** every measuring sub-agent's prompt names its folder by absolute path, with its `mkdir -p` and its absolute-output instruction",
     )
   })
 })
