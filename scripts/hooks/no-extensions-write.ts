@@ -348,12 +348,19 @@ function inspect(raw: string, environment: Environment) {
   }
   // What a word of a program that is no reader names: a path in the root, a folder above it, a glob there, or the root's path in its text.
   const judged = new Map<string, string | undefined>()
-  const names = (word: Word, env: Env, remover: boolean): string | undefined => {
-    const key = `${remover}\0${env.cwd}\0${word.value}`
-    if (!judged.has(key)) judged.set(key, judge(word, env, remover))
+  // literal: a closed-list reader's word on a line read call by call, whose quoted glob character is text the reader never expands
+  const names = (word: Word, env: Env, remover: boolean, literal = false): string | undefined => {
+    const quotedGlob = literal && !word.glob
+    const key = `${remover}\0${quotedGlob}\0${env.cwd}\0${word.value}`
+    if (!judged.has(key)) judged.set(key, judge(word, env, remover, quotedGlob))
     return judged.get(key)
   }
-  const judge = (word: Word, env: Env, remover: boolean): string | undefined => {
+  const judge = (
+    word: Word,
+    env: Env,
+    remover: boolean,
+    quotedGlob: boolean,
+  ): string | undefined => {
     tick()
     for (const text of texts(word)) {
       if (holds(text.value, env)) return `${root} in its text`
@@ -361,7 +368,7 @@ function inspect(raw: string, environment: Environment) {
       if (inRoot(path)) return path
       if (above(path, remover)) return `${path}, which holds ${root}`
       const glob = GLOB.exec(text.value)
-      if (glob && !marked(text.value)) {
+      if (glob && !quotedGlob && !marked(text.value)) {
         const dir = pathOf({ value: `${text.value.slice(0, glob.index)}x` }, env)
         const folder = dir && dirname(dir)
         if (folder && (inRoot(folder) || above(folder, true)))
@@ -445,8 +452,9 @@ function inspect(raw: string, environment: Environment) {
       const named = names({ ...value, quoted: false }, env, remover)
       if (named) return refuse(`${verb} with a variable on ${named}`)
     }
+    const literal = !whole && narrow(cmd, env)
     for (const word of [first, ...args]) {
-      const named = names(word, env, remover)
+      const named = names(word, env, remover, literal)
       if (named) return refuse(`${verb} on ${named}`)
     }
     if (cmd.redirects.some((r) => r.body && holds(r.body.value, env)))

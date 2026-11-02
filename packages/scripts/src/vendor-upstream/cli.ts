@@ -1,19 +1,9 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs"
-import { tmpdir } from "node:os"
+import { existsSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import { parseArgs } from "node:util"
 
 import { machineRoots, sessionName } from "../trash"
-import {
-  diffSkills,
-  extractTarball,
-  manifestFor,
-  parseManifest,
-  readTree,
-  upstreamKeep,
-  vendored,
-  vendor,
-} from "./stage"
+import { diffSkills, download, manifestFor, parseManifest, vendored, vendor } from "./stage"
 
 const USAGE = `Usage: bun run vendor:upstream [<sha or ref>]
 
@@ -56,21 +46,7 @@ if (!/^[0-9a-f]{40}$/.test(sha)) {
   process.exit(1)
 }
 
-// A download is untrusted data: it lands alone in its own fresh folder under $TMPDIR.
-const scratch = mkdtempSync(join(tmpdir(), "vendor-upstream-"))
-const tarball = join(scratch, "tarball.tgz")
-await Bun.write(tarball, gh(`repos/${REPO}/tarball/${sha}`))
-const upstream = join(scratch, "upstream")
-extractTarball(tarball, upstream)
-
-const tree = JSON.parse(gh(`repos/${REPO}/git/trees/${sha}?recursive=1`).toString()) as {
-  tree: { path: string; type: string }[]
-}
-const wanted = tree.tree
-  .filter((entry) => entry.type === "blob" && upstreamKeep(entry.path))
-  .map((entry) => entry.path)
-const kept = readTree(upstream).filter(({ path }) => upstreamKeep(path))
-const missing = wanted.filter((path) => !kept.some(({ path: got }) => got === path))
+const { kept, missing } = await download(gh, REPO, sha)
 if (missing.length > 0) {
   console.error(`vendor:upstream: the tarball of ${sha} is missing ${missing.join(", ")}`)
   process.exit(1)
@@ -89,7 +65,6 @@ const done = vendor({
   session: await sessionName(),
   sha,
 })
-rmSync(scratch, { force: true, recursive: true })
 if (!done.ok) {
   console.error(`vendor:upstream: the staged bytes do not match MANIFEST, leaving core as it was:
 ${done.mismatches.join("\n")}`)

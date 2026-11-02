@@ -1,7 +1,17 @@
 import { afterAll, afterEach, describe, expect, spyOn, test } from "bun:test"
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs"
+import {
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  renameSync,
+  rmSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
 
 import {
   claimRecord,
@@ -21,9 +31,11 @@ import {
   startOf,
   stopStack,
   strangers,
+  underLock,
   unstoppable,
   writeRecord,
 } from "../../../../../../api/hono/src/lib/dev/stop"
+import { MARKER } from "../../../../../../packages/safe-delete/src"
 
 const ROOT = "/Users/a/dispatcher/.claude/worktrees/a"
 const STARTED = "Tue Oct  6 02:30:00 2026"
@@ -60,7 +72,57 @@ describe("the record", () => {
       clearRecord(path, 4123)
       expect(readRecord(path)).toBeNull()
       clearRecord(path, 4123)
+      expect(readdirSync(dirname(path))).toEqual([])
     } finally {
+      rmSync(dir, { force: true, recursive: true })
+    }
+  })
+
+  test("takes an unmarked lock a dead clear left aside, clears, and logs why the lock stays (#545)", () => {
+    const dir = mkdtempSync(join(tmpdir(), "dev-record-"))
+    const path = join(dir, RECORD)
+    const lock = `${path}.lock`
+    const said = spyOn(console, "error").mockImplementation(() => {})
+    try {
+      writeRecord(path, { pgid: 4100, pid: 4123, started: STARTED })
+      mkdirSync(lock)
+      writeFileSync(join(lock, "left"), "")
+      const old = new Date(Date.now() - 60_000)
+      utimesSync(lock, old, old)
+      clearRecord(path, 4123)
+      expect(readRecord(path)).toBeNull()
+      const left = readdirSync(dirname(path))
+      expect(left).toHaveLength(1)
+      expect(left[0]).toStartWith("dev.pgid.lock.stale-")
+      expect(String(said.mock.calls[0]?.[0])).toContain(`has no ${MARKER} marker`)
+    } finally {
+      said.mockRestore()
+      rmSync(dir, { force: true, recursive: true })
+    }
+  })
+
+  test("a lock taken over as stale while held keeps the run's result and leaves the new holder's lock (#545)", () => {
+    const dir = mkdtempSync(join(tmpdir(), "dev-record-"))
+    const path = join(dir, RECORD)
+    const lock = `${path}.lock`
+    const said = spyOn(console, "error").mockImplementation(() => {})
+    try {
+      writeRecord(path, { pgid: 4100, pid: 4123, started: STARTED })
+      const result = underLock(
+        path,
+        () => {
+          renameSync(lock, `${lock}.stale-test`)
+          mkdirSync(lock)
+          writeFileSync(join(lock, "owner"), "another")
+          return "ran"
+        },
+        "busy",
+      )
+      expect(result).toBe("ran")
+      expect(readFileSync(join(lock, "owner"), "utf8")).toBe("another")
+      expect(String(said.mock.calls[0]?.[0])).toContain("was taken over as stale")
+    } finally {
+      said.mockRestore()
       rmSync(dir, { force: true, recursive: true })
     }
   })

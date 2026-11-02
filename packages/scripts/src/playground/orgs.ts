@@ -11,12 +11,14 @@ import {
   renameSync,
   rmSync,
   statSync,
+  unlinkSync,
   writeFileSync,
 } from "node:fs"
 import { homedir } from "node:os"
 import { dirname, isAbsolute, join, relative, resolve } from "node:path"
 
 import { configDirOf, dataDir } from "@packages/env/data-dir"
+import { MARKER, makeScratch, removeScratch } from "@packages/safe-delete"
 import {
   CORE,
   extChain,
@@ -129,7 +131,7 @@ const filesOf = (dir: string): string[] =>
     .map((entry) => relative(dir, join(entry.parentPath, entry.name)))
     .sort()
 
-// One merged plugin for a set of winners, under <data>/orgs/<set>/<hash>/: the folder is named by what it holds, so a session already running on an older one keeps it whole, and a second spawn with the same winners reuses it.
+// One merged plugin for a set of winners, under <data>/orgs/<set>/<hash>/: the folder is named by what it holds, so a session already running on an older one keeps it whole, and a second spawn with the same winners reuses it. It is built in a scratch folder beside it and renamed into place, losing the scratch marker once there.
 export const writePlugin = (data: string, set: string, winners: Winner[]): string => {
   const hash = createHash("sha256")
   for (const winner of [...winners].sort((a, b) => a.name.localeCompare(b.name)))
@@ -138,9 +140,10 @@ export const writePlugin = (data: string, set: string, winners: Winner[]): strin
   const id = hash.digest("hex").slice(0, 16)
   const dir = join(data, "orgs", set, id)
   if (existsSync(dir)) return dir
-  const temp = join(dirname(dir), `.${id}.${process.pid}.tmp`)
-  rmSync(temp, { force: true, recursive: true })
-  mkdirSync(join(temp, ".claude-plugin"), { recursive: true })
+  const parent = dirname(dir)
+  mkdirSync(parent, { recursive: true })
+  const temp = makeScratch(`.${id}.`, parent)
+  mkdirSync(join(temp, ".claude-plugin"))
   writeFileSync(
     join(temp, ".claude-plugin", "plugin.json"),
     `${JSON.stringify({ description: `The ${set} skill set`, name: `ws-${set}`, version: id }, null, 2)}\n`,
@@ -150,9 +153,12 @@ export const writePlugin = (data: string, set: string, winners: Winner[]): strin
   try {
     renameSync(temp, dir)
   } catch (error) {
-    rmSync(temp, { force: true, recursive: true })
+    const refused = removeScratch(temp, parent)
+    if (refused) console.error(`orgs: ${refused}`)
     if (!existsSync(dir)) throw error
+    return dir
   }
+  unlinkSync(join(dir, MARKER))
   return dir
 }
 
