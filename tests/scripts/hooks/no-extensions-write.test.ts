@@ -504,6 +504,13 @@ describe("a quoted argument is read as a command line only where a program runs 
     ],
     ["awk's output cut at a spaced delimiter", "awk '$3 ~ /runner/' /dev/null | cut -d' ' -f1"],
     ["awk's output counted by wc and tail", "awk '$3 ~ /runner/' /dev/null | tail -n 2 | wc -l"],
+    ["awk printing a field in a quoted block", "awk '{print $1}' /dev/null"],
+    [
+      "awk matching a worktree's line with a variable",
+      `awk -v b="branch refs/heads/$B" '/^worktree /{w=substr($0,10)} $0==b{print w}' /dev/null`,
+    ],
+    ["cut at a quoted brace", "cut -d'{' -f1 /dev/null"],
+    ["sort keyed at a quoted bracket", "sort -t'[' -k2 /dev/null"],
   ])("%s runs from the home and the data folder", async (_, command) => {
     for (const cwd of homes) expect(await at(command, cwd)).toBeUndefined()
   })
@@ -530,6 +537,14 @@ describe("a quoted argument is read as a command line only where a program runs 
     ["sudo with a flag cluster holding a value option", "echo 'rm -rf ~' | sudo -ui"],
   ])("%s runs from a worktree", async (_, command) => {
     expect(await at(command, join(homedir(), "x", ".claude", "worktrees", "y"))).toBeUndefined()
+  })
+
+  test.each([
+    ["rm of a half-quoted brace", "rm -rf {.playground,'x'}"],
+    ["a write to a half-quoted glob", "echo x > '.pl'*"],
+    ["awk over an unquoted glob in the home", "awk '{print $1}' .pl*"],
+  ])("%s is still refused from the home", async (_, command) => {
+    expect(await at(command, homedir())).toBeDefined()
   })
 
   test.each([
