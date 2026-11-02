@@ -826,7 +826,12 @@ describe("as Claude Code runs it", () => {
     }
   })
 
-  const hook = async (payload: object, cwd = plain, project = root) => {
+  const hook = async (
+    payload: object,
+    cwd = plain,
+    project = root,
+    env: Record<string, string> = {},
+  ) => {
     const [{ command }] = (await entry()).hooks
     const proc = Bun.spawn(["bash", "-c", command], {
       cwd,
@@ -836,6 +841,7 @@ describe("as Claude Code runs it", () => {
         GIT_CEILING_DIRECTORIES: scratch,
         PLAYGROUND_DATA_DIR: owned,
         PLAYGROUND_REPO: project,
+        ...env,
       },
       stderr: "pipe",
       stdin: new Blob([JSON.stringify(payload)]),
@@ -884,17 +890,19 @@ describe("as Claude Code runs it", () => {
     expect((await hook(payload("gh pr comment 3 -R qmarsh/demo -b Release"), broken)).code).toBe(2)
   })
 
-  test("a hook that finds no checkout lets the call through", async () => {
-    const result = await hook(
-      {
-        cwd: plain,
-        tool_input: { command: "gh pr comment 3 -R qmarsh/demo -b Release" },
-        tool_name: "Bash",
-      },
-      plain,
-      scratch,
-    )
-    expect(result).toEqual({ code: 0, stderr: "" })
+  test("a hook that finds no checkout refuses a factory session's call and lets any other through", async () => {
+    const payload = {
+      cwd: plain,
+      tool_input: { command: "gh pr comment 3 -R qmarsh/demo -b Release" },
+      tool_name: "Bash",
+    }
+    const refused = await hook(payload, plain, scratch, { PLAYGROUND_ROLE: "worker" })
+    expect(refused.code).toBe(2)
+    expect(refused.stderr).toContain("Restoring the main checkout")
+    expect(await hook(payload, plain, scratch, { PLAYGROUND_ROLE: "" })).toEqual({
+      code: 0,
+      stderr: "",
+    })
   })
 
   test("the script runs on its own", async () => {
