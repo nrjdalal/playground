@@ -11,6 +11,7 @@ import {
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 
+import { MARKER } from "../../../../../packages/safe-delete/src"
 import type { Run } from "../../../../../packages/scripts/src/ops-tick/tick"
 import {
   extAddCheck,
@@ -19,7 +20,7 @@ import {
   extVerb,
 } from "../../../../../packages/scripts/src/playground/ext-init"
 import type { Io } from "../../../../../packages/scripts/src/playground/store"
-import { extGit } from "../../../../../packages/settings/src/folder"
+import { extGit, scopesIn } from "../../../../../packages/settings/src/folder"
 import { extensionsDir, loginPath, scopeDir } from "../../../../../packages/settings/src/rendered"
 import { readSetting, setSetting } from "../../../../../packages/settings/src/settings-folder"
 
@@ -128,6 +129,17 @@ test("a public repository is refused, and nothing is written", async () => {
   )
   expect(created(calls)).toEqual([])
   expect(existsSync(extensionsDir(data))).toBe(false)
+})
+
+test("a root init made goes again when init fails, and a root that lands keeps no scratch marker (#545)", async () => {
+  const { bare, data, run } = fixture()
+  writeFileSync(join(bare(SLUG), "HEAD"), "not a ref\n")
+  await expect(extInit(data, run, YES)).rejects.toThrow("git ls-remote")
+  expect(existsSync(extensionsDir(data))).toBe(false)
+  const landed = fixture()
+  await extInit(landed.data, landed.run, YES)
+  expect(existsSync(join(extensionsDir(landed.data), MARKER))).toBe(false)
+  expect(scopesIn(landed.data)).toEqual([ME])
 })
 
 test("add --dry-run reads the repository add would use and its skills/ through gh, and makes nothing", async () => {
