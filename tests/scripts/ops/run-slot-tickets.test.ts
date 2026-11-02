@@ -147,10 +147,10 @@ describe("the ready line", () => {
     expect(await m.waits("ops-checks-8", { RUN_SLOT_SIZE: "medium" })).toBe(true)
   })
 
-  test("never passes an older pinned big ticket", async () => {
+  test("passes a worker's older pinned big ticket, as every run that goes ahead does", async () => {
     const aged = machine({ mergeQueue: line("2026-10-19T00:20:00Z", "2026-10-19T00:10:00Z") })
     aged.ticket(1, "worker-big", "s2 23 3 big", 21 * 60)
-    expect(await aged.waits("ops-checks-8", { RUN_SLOT_SIZE: "medium" })).toBe(true)
+    expect(await aged.runs("ops-checks-8", { RUN_SLOT_SIZE: "medium" })).toBe(true)
   })
 
   test("never passes local CI's older pinned ticket", async () => {

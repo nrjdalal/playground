@@ -475,9 +475,10 @@ if [ "$WHO" != ops-dashboard ] && [ "$WHO" != ops-merge-train ] && [ -z "$CAN_TA
   # Then its rank (class and units, 01 to 23), units and size, which order the queue
   echo "s2 $CLASS$UNITS $UNITS $SIZE" > "$TICKET"
 fi
-# A pinned ticket keeps its place by age, so no newer ticket passes it: one with no rank, from an older copy or local CI (plain "s2", or
-# empty), since those take a slot only while theirs is the oldest live ticket and any other order deadlocks them (a review's round 1), and
-# one that has waited AGED seconds, 20 minutes, so the slots drain and a run too big for the free units still starts
+# A pinned ticket keeps its place by age: one with no rank, from an older copy or local CI (plain "s2", or empty), which no newer ticket
+# passes, since those take a slot only while theirs is the oldest live ticket and any other order deadlocks them (a review's round 1), and
+# one of the rest that has waited AGED seconds, 20 minutes, which no newer one of the rest passes, so the slots drain and a run too big for
+# the free units still starts; the runs that go ahead (ordered_waiters) pass it, a merge's gates and a reviewer's included
 AGED=1200
 # the ready line, "<pr> <place>" a line: merge-queue.json's entries (PLAYGROUND_MERGE_QUEUE moves it, as for the train) with a readyAt, by goAt (one with none after) and then readyAt
 # (Checks on a ready PR goes first by itself, as run-slot.priority does by hand, after an org's runs); a file that does not read ranks nothing
@@ -505,10 +506,12 @@ ready_place() {
   echo "$best"
 }
 ordered_waiters() {
-  # the live tickets in the order they take slots, one "<pinned 0|1> <ticket>" a line: between pinned tickets, an org's, then Checks for a
-  # PR in the ready line by its place there, then those that gate a merge, then the rest, each small before medium
-  # before big, oldest first. A dead waiter's goes on the way
-  local t pid rank m p seg=0 now ready
+  # the live tickets in the order they take slots, one "<pinned 0|1> <ticket>" a line. A ticket with no rank (local CI's, an older copy's) is
+  # a wall no newer ticket passes. Between walls go first the runs that go ahead, past AGED or not: an org's, then Checks for a PR in the
+  # ready line by its place there, then those that gate a merge, then a reviewer's (<id>-reviewer, -reviewer-spec), so a drafted review is
+  # never held behind workers' long runs (Ops, 2 Nov: 9 of 17 waiters were reviewers). Then the rest, where one past AGED is pinned and no
+  # newer one of the rest passes it; each small before medium before big, oldest first. A dead waiter's goes on the way
+  local t pid rank m p aged seg=0 sub=1 now ready
   now=$(date +%s)
   ready=$(ready_line)
   for t in $(ls "$QUEUE" 2>/dev/null | sort -t- -k1,1n); do
@@ -516,17 +519,23 @@ ordered_waiters() {
     if ! alive "$pid"; then rm -f "${QUEUE:?}/${t:?}"; continue; fi
     m=$(mtime "$QUEUE/$t") || continue
     rank=$(cut -d' ' -f2 "$QUEUE/$t" 2>/dev/null)
-    case "$rank" in [0-2][1-3]) [ $((now - m)) -lt "$AGED" ] && {
-      case "$rank" in
-        1?) rank=0$rank ;;
-        *) p=$(ready_place "${t#*-*-}" "$ready"); if [ -n "$p" ]; then rank=1$(printf '%04d' "$p"); else rank=2$rank; fi ;;
-      esac
-      echo "$seg $rank 0 $t"
-      continue
-    } ;; esac
-    echo "$((seg + 1)) 00 1 $t"
-    seg=$((seg + 2))
-  done | sort -s -k1,1n -k2,2 | cut -d' ' -f3,4
+    case "$rank" in
+      [0-2][1-3]) ;;
+      *) echo "$((seg + 1)) 0 00 1 $t"; seg=$((seg + 2)); sub=1; continue ;;
+    esac
+    aged=0
+    [ $((now - m)) -lt "$AGED" ] || aged=1
+    case "$rank" in
+      1?) rank=0$rank ;;
+      2?) case "${t#*-*-}" in *-reviewer|*-reviewer-spec) rank=21${rank#2} ;; *) rank=2$rank ;; esac ;;
+      *) p=$(ready_place "${t#*-*-}" "$ready"); if [ -n "$p" ]; then rank=1$(printf '%04d' "$p"); else rank=2$rank; fi ;;
+    esac
+    case "$rank" in
+      22?) ;;
+      *) echo "$seg 0 $rank $aged $t"; continue ;;
+    esac
+    if [ "$aged" = 0 ]; then echo "$seg $sub $rank 0 $t"; else echo "$seg $((sub + 1)) 00 1 $t"; sub=$((sub + 2)); fi
+  done | sort -s -k1,1n -k2,2n -k3,3 | cut -d' ' -f4,5
 }
 first_waiter() {
   # the first waiter in that order whose run fits the units free now, so a run too big for them never holds back a smaller one behind it,
