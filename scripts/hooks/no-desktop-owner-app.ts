@@ -1,6 +1,8 @@
 // PreToolUse hook for every session run from this repo, registered in both settings files: refuses an agent-desktop call that carries --headed, that targets an app on the desktop-owner-apps guard list, or whose target it cannot read, as scripts/hooks/README.md's section states; it reads the list and nothing else, so no setting or file a session writes frees a call.
-import { dirname, join, resolve } from "node:path"
+import { existsSync, realpathSync } from "node:fs"
+import { join, resolve } from "node:path"
 
+import { mainCheckout } from "../../packages/scripts/src/main-checkout"
 import "../../packages/env/src/aliases"
 import { guardList, isStrings } from "./lists"
 import {
@@ -36,31 +38,37 @@ const LAUNCHERS = new Set([
   "watch",
   "yarn",
 ])
-// bun run <script> scripts whose literal arguments the hook reads as data, each mapped to the Playground entry point that takes argv as plain strings and runs nothing from it; the allowance holds only where the call's cwd resolves a package.json mapping the script to this entry, since in any other folder bun run <script> runs a script whose body the hook never reads.
+// bun run <script> scripts whose literal arguments the hook reads as data, each mapped to the Playground entry point that takes argv as plain strings and runs nothing from it; the allowance holds only from the main checkout, where the entry's text is a file no session writes.
 const BUN_DATA_SCRIPTS = new Map([
-  ["ask", "bun api/hono/src/bin/dashboard-ask.ts"],
-  ["thread", "bun api/hono/src/bin/dashboard-thread.ts"],
+  ["ask", "api/hono/src/bin/dashboard-ask.ts"],
+  ["thread", "api/hono/src/bin/dashboard-thread.ts"],
 ])
 
-// Whether the nearest package.json to cwd maps script to its Playground entry, as bun run resolves the script: false when cwd is unknown (no cwd, or a cd to a variable or a substitution), when no package.json is found, or when it maps the script elsewhere, so the call keeps its verdict there.
+const realOf = (path: string): string => {
+  try {
+    return realpathSync(path)
+  } catch {
+    return resolve(path)
+  }
+}
+
+// Whether the call runs script from the main checkout, where its entry point is a file no session writes (no-main-checkout keeps a session out of that tree). The main checkout is packages/scripts/src/main-checkout.ts's mainCheckout (PLAYGROUND_REPO, else the git common dir's parent holding scripts/spawn.sh); the allowance holds only when the effective cwd's own checkout (its git toplevel, not the common dir's parent, so a linked worktree sharing the common dir fails) is that one path, and its package.json maps script to the entry with the entry file present. Every other cwd, a worktree byte-identical to the main checkout included, a made folder, an unknown cwd (no cwd, or a cd to a variable or a substitution), keeps the verdict.
 async function mapsDataScript(cwd: string | undefined, script: string): Promise<boolean> {
   const entry = BUN_DATA_SCRIPTS.get(script)
   if (entry === undefined || cwd === undefined) return false
-  let dir = resolve(cwd)
-  for (;;) {
-    const file = Bun.file(join(dir, "package.json"))
-    if (await file.exists()) {
-      try {
-        const { scripts } = JSON.parse(await file.text()) as { scripts?: Record<string, string> }
-        return scripts?.[script] === entry
-      } catch {
-        return false
-      }
-    }
-    const up = dirname(dir)
-    if (up === dir) return false
-    dir = up
+  const git = Bun.spawnSync(["git", "-C", cwd, "rev-parse", "--show-toplevel"])
+  if (git.exitCode !== 0) return false
+  const top = git.stdout.toString().trim()
+  if (realOf(top) !== realOf(mainCheckout(cwd))) return false
+  const pkg = Bun.file(join(top, "package.json"))
+  if (!(await pkg.exists())) return false
+  try {
+    const { scripts } = JSON.parse(await pkg.text()) as { scripts?: Record<string, string> }
+    if (scripts?.[script] !== `bun ${entry}`) return false
+  } catch {
+    return false
   }
+  return existsSync(join(top, entry))
 }
 // Wrappers a shell line may hide in: watch joins its words past its options into one sh -c line, flock -c runs its string, and a word of any of them holding a space may be one.
 const LINES = new Set(["flock", "setsid", "watch"])

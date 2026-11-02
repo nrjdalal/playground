@@ -250,11 +250,55 @@ describe("passes", () => {
   })
 })
 
-// bun run ask/thread read argv as data only where the call's effective cwd resolves a package.json mapping the script to its Playground entry; every other cwd keeps the verdict, since there the script's body goes unread.
-describe("a bun run ask/thread note reads as data only in a Playground checkout", () => {
-  const CHECKOUT = join(import.meta.dir, "..", "..", "..")
+// bun run ask/thread read argv as data only from the main checkout, whose package.json maps the script to its Playground entry and whose entry file no session writes; every other cwd, a byte-identical linked worktree included, keeps the verdict, since there the script's body goes unread.
+describe("a bun run ask/thread note reads as data only from the main checkout", () => {
   const askNote = `bun run ask x "note; agent-desktop 1.0 ok"`
   const threadNote = `bun run thread title t1 "note; agent-desktop 1.0 ok"`
+  const GOOD = {
+    ask: "bun api/hono/src/bin/dashboard-ask.ts",
+    thread: "bun api/hono/src/bin/dashboard-thread.ts",
+  }
+  const gitc = (dir: string, ...args: string[]) =>
+    Bun.spawnSync([
+      "git",
+      "-C",
+      dir,
+      "-c",
+      "user.name=t",
+      "-c",
+      "user.email=t@t",
+      "-c",
+      "commit.gpgsign=false",
+      ...args,
+    ])
+  // A fabricated main checkout: a git repo with scripts/spawn.sh, the given package scripts, and (unless entry is false) the ask/thread entry files.
+  const makeMain = async (name: string, scripts: Record<string, string>, entry = true) => {
+    const dir = join(scratch, name)
+    Bun.spawnSync(["git", "-C", scratch, "init", "-q", "-b", "canary", dir])
+    await Bun.write(join(dir, "scripts", "spawn.sh"), "#!/bin/sh\n")
+    await Bun.write(join(dir, "package.json"), `${JSON.stringify({ scripts })}\n`)
+    if (entry) {
+      await Bun.write(join(dir, "api", "hono", "src", "bin", "dashboard-ask.ts"), "")
+      await Bun.write(join(dir, "api", "hono", "src", "bin", "dashboard-thread.ts"), "")
+    }
+    return dir
+  }
+  let MAIN = ""
+  let WORK = ""
+  let prior: string | undefined
+  beforeAll(async () => {
+    MAIN = await makeMain("ndo-main", GOOD)
+    WORK = join(scratch, "ndo-work")
+    gitc(MAIN, "add", ".")
+    gitc(MAIN, "commit", "-q", "-m", "base")
+    gitc(MAIN, "worktree", "add", "-q", "--detach", WORK)
+    prior = process.env.PLAYGROUND_REPO
+    process.env.PLAYGROUND_REPO = MAIN
+  })
+  afterAll(() => {
+    if (prior === undefined) delete process.env.PLAYGROUND_REPO
+    else process.env.PLAYGROUND_REPO = prior
+  })
   const at = (command: string, cwd: string) =>
     check(
       JSON.stringify({
@@ -265,10 +309,24 @@ describe("a bun run ask/thread note reads as data only in a Playground checkout"
       }),
       { PLAYGROUND_DATA_DIR: guarded },
     )
+  const withMain = async (repo: string, command: string, cwd: string) => {
+    const save = process.env.PLAYGROUND_REPO
+    process.env.PLAYGROUND_REPO = repo
+    try {
+      return await at(command, cwd)
+    } finally {
+      process.env.PLAYGROUND_REPO = save
+    }
+  }
 
-  test("runs in a Playground checkout, whose package.json maps the script to its entry", async () => {
-    expect(await at(askNote, CHECKOUT)).toBeUndefined()
-    expect(await at(threadNote, CHECKOUT)).toBeUndefined()
+  test("runs from the main checkout, whose package.json maps the script to its entry", async () => {
+    expect(await at(askNote, MAIN)).toBeUndefined()
+    expect(await at(threadNote, MAIN)).toBeUndefined()
+  })
+
+  test("stays refused from a byte-identical linked worktree of the main checkout", async () => {
+    expect(await at(askNote, WORK)).toContain("no-desktop-owner-app hook refused")
+    expect(await at(threadNote, WORK)).toContain("no-desktop-owner-app hook refused")
   })
 
   test("stays refused in a folder with no package.json", async () => {
@@ -276,30 +334,31 @@ describe("a bun run ask/thread note reads as data only in a Playground checkout"
     expect(await at(threadNote, scratch)).toContain("no-desktop-owner-app hook refused")
   })
 
-  test("stays refused where the nearest package.json maps the script elsewhere", async () => {
-    const fake = join(scratch, "fakepkg")
-    await Bun.write(
-      join(fake, "package.json"),
-      JSON.stringify({ scripts: { ask: "echo hi", thread: "agent-desktop launch Slack" } }),
-    )
-    expect(await at(askNote, fake)).toContain("no-desktop-owner-app hook refused")
-    expect(await at(threadNote, fake)).toContain("no-desktop-owner-app hook refused")
+  test("stays refused where the main checkout's package.json maps the script elsewhere", async () => {
+    const bad = await makeMain("ndo-bad", { ask: "echo hi", thread: "agent-desktop launch Slack" })
+    expect(await withMain(bad, askNote, bad)).toContain("no-desktop-owner-app hook refused")
+    expect(await withMain(bad, threadNote, bad)).toContain("no-desktop-owner-app hook refused")
   })
 
-  test("stays refused after a cd out of the checkout earlier in the line", async () => {
-    expect(await at(`cd ${scratch} && ${askNote}`, CHECKOUT)).toContain(
+  test("stays refused where the Playground entry file is absent", async () => {
+    const noentry = await makeMain("ndo-noentry", GOOD, false)
+    expect(await withMain(noentry, askNote, noentry)).toContain("no-desktop-owner-app hook refused")
+  })
+
+  test("stays refused after a cd out of the main checkout earlier in the line", async () => {
+    expect(await at(`cd ${scratch} && ${askNote}`, MAIN)).toContain(
       "no-desktop-owner-app hook refused",
     )
   })
 
   test("stays refused after a cd to a variable, whose target is unknown", async () => {
-    expect(await at(`cd "$DEST" && ${askNote}`, CHECKOUT)).toContain(
+    expect(await at(`cd "$DEST" && ${askNote}`, MAIN)).toContain(
       "no-desktop-owner-app hook refused",
     )
   })
 
-  test("stays refused with an argument built from a variable, even in a checkout", async () => {
-    expect(await at(`bun run ask x "note: agent-desktop $BUILD ok"`, CHECKOUT)).toContain(
+  test("stays refused with an argument built from a variable, even from the main checkout", async () => {
+    expect(await at(`bun run ask x "note: agent-desktop $BUILD ok"`, MAIN)).toContain(
       "no-desktop-owner-app hook refused",
     )
   })

@@ -1524,7 +1524,7 @@ gh api graphql -f query="$QUERY"`,
     source: "#456",
   },
   {
-    folders: ["checkout"],
+    folders: ["main checkout"],
     guards: ["no-desktop-owner-app"],
     rows: () => [
       [
@@ -1549,6 +1549,16 @@ gh api graphql -f query="$QUERY"`,
       [
         "a listed bun run script with an argument built from a variable",
         `bun run ask x "note: agent-desktop $BUILD ok"`,
+      ],
+      [
+        "bun run ask with a prose arg, in a byte-identical linked worktree",
+        `bun run ask x "note; agent-desktop 1.0 ok"`,
+        "checkout",
+      ],
+      [
+        "bun run thread with a prose arg, in a byte-identical linked worktree",
+        `bun run thread title t1 "note; agent-desktop 1.0 ok"`,
+        "checkout",
       ],
       [
         "bun run ask with a prose arg, in a folder with no Playground package.json",

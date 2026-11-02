@@ -116,13 +116,41 @@ const SYNCED = storeWith(
 )
 mkdirSync(join(SYNCED, "extensions", "acme"), { recursive: true })
 Bun.spawnSync(["git", "-C", join(SYNCED, "extensions", "acme"), "init", "-q"])
+// A fabricated main checkout (holds scripts/spawn.sh and maps ask/thread to their Playground entries) and a linked worktree of it whose package.json and entry files match byte for byte, since no-desktop-owner-app's prose allowance holds from the main checkout alone. PLAYGROUND_REPO pins mainCheckout() to NDMAIN, restored after.
+const NDMAIN = join(SCRATCH, "nd-main")
+const NDWORK = join(SCRATCH, "nd-work")
+gitIn(SCRATCH, "init", "-q", "-b", "canary", NDMAIN)
+mkdirSync(join(NDMAIN, "scripts"), { recursive: true })
+writeFileSync(join(NDMAIN, "scripts", "spawn.sh"), "#!/bin/sh\n")
+mkdirSync(join(NDMAIN, "api", "hono", "src", "bin"), { recursive: true })
+writeFileSync(join(NDMAIN, "api", "hono", "src", "bin", "dashboard-ask.ts"), "")
+writeFileSync(join(NDMAIN, "api", "hono", "src", "bin", "dashboard-thread.ts"), "")
+writeFileSync(
+  join(NDMAIN, "package.json"),
+  `${JSON.stringify({
+    scripts: {
+      ask: "bun api/hono/src/bin/dashboard-ask.ts",
+      thread: "bun api/hono/src/bin/dashboard-thread.ts",
+    },
+  })}\n`,
+)
+gitIn(NDMAIN, "add", ".")
+gitIn(NDMAIN, "commit", "-q", "-m", "base")
+gitIn(NDMAIN, "worktree", "add", "-q", "--detach", NDWORK)
+const PRIOR_REPO = process.env.PLAYGROUND_REPO
+process.env.PLAYGROUND_REPO = NDMAIN
+afterAll(() =>
+  PRIOR_REPO === undefined
+    ? delete process.env.PLAYGROUND_REPO
+    : (process.env.PLAYGROUND_REPO = PRIOR_REPO),
+)
 
 type Run = (raw: string, home: string) => Promise<string | undefined>
 
 // Each guard's check with the environment its own test gives it, and the folders it runs in, each a cwd and the HOME that goes with it.
 const GUARDS: Record<Guard, { folders: Partial<Record<Folder, [string, string]>>; run: Run }> = {
   "no-desktop-owner-app": {
-    folders: { checkout: [CHECKOUT, HOME], home: [HOME, HOME] },
+    folders: { checkout: [NDWORK, HOME], home: [HOME, HOME], "main checkout": [NDMAIN, HOME] },
     run: (raw) => desktopOwnerApp(raw, { PLAYGROUND_DATA_DIR: DESKTOP }),
   },
   "no-env-dump": { folders: { checkout: [CHECKOUT, HOME] }, run: (raw) => envDump(raw) },
