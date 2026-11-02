@@ -504,11 +504,16 @@ function Preview({ item }: { item: Extract<InboxItem, { kind: "decision" }> }) {
         </>
       )
     case "secret":
-      return (
+      return preview.sink.type === "vercel" ? (
         <p>
           On Submit, the value goes to <code className="font-mono">{preview.key}</code> in Vercel
           project <code className="font-mono">{preview.sink.project}</code> ({preview.sink.scope})
           for {preview.sink.environments.join(", ")}. It is kept nowhere.
+        </p>
+      ) : (
+        <p>
+          On Submit, the value is saved in 1Password as a new item named{" "}
+          <code className="font-mono">{preview.key}</code>. It is kept nowhere else.
         </p>
       )
   }

@@ -4,7 +4,7 @@ import { join } from "node:path"
 import type { ActivityActor, Database } from "@packages/db"
 import { inboxItem, thread } from "@packages/db"
 import { dataDir } from "@packages/env/data-dir"
-import { extensionsDir, slackSettings } from "@packages/settings"
+import { extensionsDir, onePasswordSettings, slackSettings } from "@packages/settings"
 import { and, desc, eq, gt, inArray, isNotNull, isNull, or, sql } from "drizzle-orm"
 import { z } from "zod"
 
@@ -24,16 +24,20 @@ const oneLine = (max: number) =>
 
 const words = z.string().trim().min(1).max(LIMITS.text)
 
-// A Slack link reaches the owner in the app form they open, never the archives form; slack.linkConverter names the command that rewrites one, and slack.sendServer the MCP server a send goes through, each read from the extensions' policy when a message is made, "" when unset or unreadable.
-const ARCHIVES = /\b(?:[a-z0-9-]+\.)?slack\.com\/archives\//i
-const slack = (key: "slack.linkConverter" | "slack.sendServer"): string => {
+// The settings in the extensions' policy, read when they are used; no values when it is missing or unreadable, so each key reads its default.
+const policySettings = () => {
   try {
     const policy = JSON.parse(readFileSync(join(extensionsDir(dataDir()), "policy.json"), "utf8"))
-    return slackSettings.get({ schemaVersion: 1, values: policy.values ?? {} }, key)
+    return { schemaVersion: 1 as const, values: policy.values ?? {} }
   } catch {
-    return ""
+    return { schemaVersion: 1 as const, values: {} }
   }
 }
+
+// A Slack link reaches the owner in the app form they open, never the archives form; slack.linkConverter names the command that rewrites one, and slack.sendServer the MCP server a send goes through, each read from the extensions' policy when a message is made, "" when unset or unreadable.
+const ARCHIVES = /\b(?:[a-z0-9-]+\.)?slack\.com\/archives\//i
+const slack = (key: "slack.linkConverter" | "slack.sendServer"): string =>
+  slackSettings.get(policySettings(), key)
 const archivesMessage = (): string => {
   const converter = slack("slack.linkConverter")
   return `A Slack link goes in its app form (https://app.slack.com/client/...), never .../archives/...${converter ? `; rewrite it with ${converter}` : ""}`
@@ -132,36 +136,74 @@ const argName = z
 
 const SECRET_ENVIRONMENTS = ["development", "preview", "production"] as const
 
-// Where a secret ask's value goes, the allowlist in code: Vercel alone, `vercel env add` once an environment for one project.
-export const secretSinkSchema = z.strictObject({
-  environments: z
-    .array(z.enum(SECRET_ENVIRONMENTS))
-    .min(1)
-    .refine((list) => new Set(list).size === list.length, "Name each environment once"),
-  project: argName,
-  scope: argName,
-  type: z.literal("vercel"),
-})
+// Where a secret ask's value goes, the allowlist in code: 1Password, one new item in the vault and with the tag the owner's onePassword.* settings name; or Vercel, `vercel env add` once an environment for one project.
+export const secretSinkSchema = z.discriminatedUnion("type", [
+  z.strictObject({ type: z.literal("1password") }),
+  z.strictObject({
+    environments: z
+      .array(z.enum(SECRET_ENVIRONMENTS))
+      .min(1)
+      .refine((list) => new Set(list).size === list.length, "Name each environment once"),
+    project: argName,
+    scope: argName,
+    type: z.literal("vercel"),
+  }),
+])
 
 export type SecretSink = z.infer<typeof secretSinkSchema>
 
-// Pure: the one command a sink runs for an environment; the value goes on its stdin alone, so it is never in an argv a process list shows.
-export const sinkArgv = (key: string, sink: SecretSink, environment: string): string[] => [
-  "vercel",
-  "env",
-  "add",
-  key,
-  "--environment",
-  environment,
-  "--project",
-  sink.project,
-  "--scope",
-  sink.scope,
-  "--yes",
-]
+// The owner's onePassword.vault and onePassword.tag, "" while unset.
+export type OnePasswordPlace = { tag: string; vault: string }
 
-// Runs a sink's argv with the value on its stdin and returns its exit code: null once stopped by a signal (its time limit's included), 127 when it could not start. secret-sink.ts holds the real one; a test passes its own.
-export type SinkRun = (argv: string[], stdin: string) => Promise<number | null>
+// One command a sink runs: its label on the card (an environment, or a 1Password step), its argv and its stdin.
+export type SinkStep = { argv: string[]; label: string; stdin: string }
+
+// Pure: the commands a sink runs, in order, the value on a stdin alone, so it is never in an argv a process list shows. Vercel's are one an environment, its stdin the value; 1Password's sign in first (`op signin` asks only when it is not signed in), then create one Password item from its stdin's JSON template (`op item create -`), titled with the key, since op takes a field's value from a template alone.
+export const sinkSteps = (
+  key: string,
+  sink: SecretSink,
+  value: string,
+  place: OnePasswordPlace,
+): SinkStep[] =>
+  sink.type === "vercel"
+    ? sink.environments.map((environment) => ({
+        argv: [
+          "vercel",
+          "env",
+          "add",
+          key,
+          "--environment",
+          environment,
+          "--project",
+          sink.project,
+          "--scope",
+          sink.scope,
+          "--yes",
+        ],
+        label: environment,
+        stdin: value,
+      }))
+    : [
+        { argv: ["op", "signin"], label: "1Password sign-in", stdin: "" },
+        {
+          argv: ["op", "item", "create", "--vault", place.vault, "--tags", place.tag, "-"],
+          label: "1Password item",
+          stdin: JSON.stringify({
+            category: "PASSWORD",
+            fields: [
+              { id: "password", label: "password", purpose: "PASSWORD", type: "CONCEALED", value },
+            ],
+            title: key,
+          }),
+        },
+      ]
+
+// Runs a sink's argv with its stdin, in the environment its kind needs, and returns its exit code: null once stopped by a signal (its time limit's included), 127 when it could not start. secret-sink.ts holds the real one; a test passes its own.
+export type SinkRun = (
+  argv: string[],
+  stdin: string,
+  kind: SecretSink["type"],
+) => Promise<number | null>
 
 // What Approve does, one shape per kind of approval the owner keeps (playbook's ask rule): a Slack message, a ship of canary, a new Linear ticket, a delete, a schema, a budget, or a plain ask, whose words say what its poster does on Approve, for a decision no other shape fits (a production port, a work request from outside the chain, or a step only he can take, such as plugging in the Mac, where Approve means done and Deny means he can't). An ask may label each side in ELI5 / ASD-STE100, one line; the card then shows its text as the quoted block above the two labelled options. A secret asks for a value instead of a yes, which goes straight to its sink and is kept nowhere.
 export const previewSchema = z.discriminatedUnion("type", [
@@ -199,14 +241,22 @@ export const previewSchema = z.discriminatedUnion("type", [
   z.strictObject({ type: z.literal("delete"), what: words, why: words }),
   z.strictObject({ shape: words, type: z.literal("schema") }),
   z.strictObject({ amount: oneLine(LIMITS.name), type: z.literal("budget"), why: words }),
-  z.strictObject({
-    key: z
-      .string()
-      .max(LIMITS.name)
-      .regex(/^[A-Za-z_][A-Za-z0-9_]*$/, "Must be an environment variable's name"),
-    sink: secretSinkSchema,
-    type: z.literal("secret"),
-  }),
+  z
+    .strictObject({
+      key: z
+        .string()
+        .max(LIMITS.name)
+        .regex(/^[A-Za-z0-9_][A-Za-z0-9_.-]*$/, "Must be a name: letters, digits, _, . and -"),
+      sink: secretSinkSchema,
+      type: z.literal("secret"),
+    })
+    .refine(
+      (secret) => secret.sink.type !== "vercel" || /^[A-Za-z_][A-Za-z0-9_]*$/.test(secret.key),
+      {
+        message: "A Vercel key must be an environment variable's name",
+        path: ["key"],
+      },
+    ),
 ])
 
 const link = z
@@ -565,9 +615,9 @@ function relayWith(item: InboxItem, go: boolean, text: string): string {
   return `${lead} ${text}\nKind: ${item.kind}\nPreview text:\n${words}`
 }
 
-// Pure: an exit status in words: its code, or stopped by a signal.
+// Pure: an exit status in words: its code, not installed (127, when it could not start), or stopped at its time limit (a signal).
 const exitWords = (code: number | null): string =>
-  code === null ? "stopped by a signal" : `exit ${code}`
+  code === null ? "stopped at its time limit" : code === 127 ? "not installed" : `exit ${code}`
 
 // Pure: what is typed into the poster of a secret ask he answered: when, and each environment's exit status; the value never, since only the sink was handed it.
 function providedText(
@@ -963,7 +1013,7 @@ export const secretInputSchema = z.strictObject({
   value: z.string().trim().min(1).max(SECRET_MAX_CHARS),
 })
 
-// Hands his value for a secret ask to its sink, once an environment on stdin, and records only when and each exit status: in one write that holds only while the item is open at the version read, so a double click or a second tab runs the sink once, then the results, then a delivery to its poster as an answer's. The value is in no row, delivery, refusal or return.
+// Hands his value for a secret ask to its sink, each step's command with it on stdin, and records only when and each step's exit status: in one write that holds only while the item is open at the version read, so a double click or a second tab runs the sink once, then the results, then a delivery to its poster as an answer's. A 1Password sink is refused while its vault or tag is unset, leaving the ask open, and stops at its first step that fails. The value is in no row, delivery, refusal or return.
 export async function provideSecret(
   db: Database,
   id: string,
@@ -973,8 +1023,22 @@ export async function provideSecret(
     deliver,
     dispatcher,
     now = new Date(),
+    place = () => {
+      const settings = policySettings()
+      return {
+        tag: onePasswordSettings.get(settings, "onePassword.tag"),
+        vault: onePasswordSettings.get(settings, "onePassword.vault"),
+      }
+    },
     run,
-  }: { actor: ActivityActor; deliver?: Deliver; dispatcher?: string; now?: Date; run: SinkRun },
+  }: {
+    actor: ActivityActor
+    deliver?: Deliver
+    dispatcher?: string
+    now?: Date
+    place?: () => OnePasswordPlace
+    run: SinkRun
+  },
 ): Promise<{ item: InboxItem; ok: true } | Refused> {
   const current = await getItem(db, id)
   if (!current || current.id !== id) return NOT_FOUND
@@ -986,6 +1050,15 @@ export async function provideSecret(
     return {
       code: "CONFLICT",
       message: "This item changed since you read it; read it again",
+      ok: false,
+    }
+  }
+  const where = sink.type === "1password" ? place() : { tag: "", vault: "" }
+  if (sink.type === "1password" && (!where.vault || !where.tag)) {
+    return {
+      code: "VALIDATION_ERROR",
+      message:
+        "The 1Password sink is not set up: set onePassword.vault and onePassword.tag with playground settings set, then submit again",
       ok: false,
     }
   }
@@ -1010,8 +1083,10 @@ export async function provideSecret(
     .returning()
   if (!claimed) return { code: "CONFLICT", message: "This item is already answered", ok: false }
   const results: SinkResult[] = []
-  for (const environment of sink.environments) {
-    results.push({ environment, exitCode: await run(sinkArgv(key, sink, environment), value) })
+  for (const step of sinkSteps(key, sink, value, where)) {
+    const exitCode = await run(step.argv, step.stdin, sink.type)
+    results.push({ environment: step.label, exitCode })
+    if (exitCode !== 0 && sink.type === "1password") break
   }
   const answer: InboxProvided = { at, choice: "provided", results }
   // merged key by key, so a poster's read that landed while the sink ran keeps its close

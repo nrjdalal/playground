@@ -534,11 +534,11 @@ export function outcomeLine(item: InboxItem): string | null {
     const by = `Answered by ${agentLabel(item.answer.by)}`
     return item.answer.note ? `${by} · ${item.answer.note}` : by
   }
-  // when, and each environment's exit status: all a secret's card ever shows of it
+  // when, and each step's exit status, named: all a secret's card ever shows of it
   if (item.answer.choice === "provided") {
     const results = (item.answer.results ?? []).map(
       (result) =>
-        `${result.environment}: ${result.exitCode === null ? "stopped by a signal" : `exit ${result.exitCode}`}`,
+        `${result.environment}: ${result.exitCode === null ? "stopped at its time limit" : result.exitCode === 127 ? "not installed" : `exit ${result.exitCode}`}`,
     )
     return [`Provided at ${fullTime(item.answer.at)}`, ...results].join(" · ")
   }
