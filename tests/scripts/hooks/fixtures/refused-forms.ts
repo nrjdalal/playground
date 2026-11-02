@@ -68,6 +68,10 @@ export const REFUSED_FORMS: Group[] = [
     guards: ["no-release-comment"],
     rows: () => [
       [
+        "a GraphQL query held in a variable, whose reason names the query written in the command itself",
+        `Q='query { viewer { login } }'; gh api graphql -f query="$Q"`,
+      ],
+      [
         "a GraphQL mutation held in a variable set earlier in the command",
         `Q='mutation { addComment(input: {subjectId: "I_1", body: "release"}) { clientMutationId } }'; gh api graphql -f query="$Q"`,
       ],
