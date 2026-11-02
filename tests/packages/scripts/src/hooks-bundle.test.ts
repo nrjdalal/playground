@@ -52,18 +52,20 @@ describe("a bundle run as its wrapper runs it gives its source's verdict", () =>
   test.each([
     [
       "no-ours-merge",
+      "an ours merge",
       call(ROOT, "git merge -s ours origin/canary"),
       2,
       "no-ours-merge hook refuses",
     ],
-    ["no-ours-merge", call(ROOT, "git stash"), 0, ""],
+    ["no-ours-merge", "a stash, which no-stash judges", call(ROOT, "git stash"), 0, ""],
     [
       "no-unslotted-run",
+      "a worktree's suite with no slot",
       call(worktree, `bun run --cwd ${worktree} test`),
       2,
       "no-unslotted-run hook refuses",
     ],
-  ])("%s on %s", async (name, raw, code, says) => {
+  ])("%s on %s", async (name, _, raw, code, says) => {
     for (const file of [join(BUNDLED, `${name}.js`), join(HOOKS, `${name}.ts`)]) {
       const proc = Bun.spawn(["bun", "--no-env-file", file], {
         cwd: ROOT,

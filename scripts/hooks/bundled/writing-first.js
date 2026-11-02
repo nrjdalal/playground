@@ -52,7 +52,6 @@ applyEnvAliases();
 import { homedir } from "os";
 import { join, resolve } from "path";
 var dataDirOf = (env, home = env.HOME || homedir()) => env.PLAYGROUND_DATA_DIR ? resolve(env.PLAYGROUND_DATA_DIR) : join(home, ".playground");
-var dataDir = (env = process.env) => dataDirOf(env);
 
 // packages/scripts/src/vendor-upstream/stage.ts
 var UPSTREAM_SKILLS = [

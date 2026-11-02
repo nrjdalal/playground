@@ -83,7 +83,7 @@ test("each guard gets {} without its wrapper's tail, and a crash is told to the 
   })
   expect(first.sent).toEqual([
     {
-      text: `1 of 3 PreToolUse guards cannot start, so their wrappers refuse every factory call they guard. Fix: bun install in ${repo}. no-stash (exit 1: error: Cannot find package 'x')`,
+      text: `1 of 3 PreToolUse guards cannot start, so their wrappers refuse every factory call they guard. Fix: git checkout scripts/hooks/bundled, or bun run hooks:bundle, in ${repo}. no-stash (exit 1: error: Cannot find package 'x')`,
       to: "dispatcher",
     },
   ])
@@ -119,7 +119,9 @@ test("with every real guard broken, the fix sits inside the 400 characters notif
   expect(sent).toHaveLength(1)
   expect(sent[0]!.length).toBeGreaterThan(400)
   expect(sent[0]!.slice(0, 400)).toContain(`${guards.length} of ${guards.length} PreToolUse guards`)
-  expect(sent[0]!.slice(0, 400)).toContain(`Fix: bun install in ${root}.`)
+  expect(sent[0]!.slice(0, 400)).toContain(
+    `Fix: git checkout scripts/hooks/bundled, or bun run hooks:bundle, in ${root}.`,
+  )
 })
 
 test("a send that fails is not marked told, so the next run tells it", async () => {

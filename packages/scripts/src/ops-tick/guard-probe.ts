@@ -47,8 +47,8 @@ export const guardProbe = async (ctx: Context) => {
     if (told) await unlink(statePath)
     return
   }
-  // The count and the fix lead, since notify.sh cuts a line at 400 characters and every guard breaks at once when the packages are gone.
-  const text = `${broken.length} of ${guards.length} PreToolUse guards cannot start, so their wrappers refuse every factory call they guard. Fix: bun install in ${ctx.repo}. ${broken.join("; ")}`
+  // The count and the fix lead, since notify.sh cuts a line at 400 characters and every guard breaks at once when Bun or the bundles are gone.
+  const text = `${broken.length} of ${guards.length} PreToolUse guards cannot start, so their wrappers refuse every factory call they guard. Fix: git checkout scripts/hooks/bundled, or bun run hooks:bundle, in ${ctx.repo}. ${broken.join("; ")}`
   if (told?.text === text) return
   if (await ctx.send("dispatcher", text, true))
     await writeAtomic(statePath, JSON.stringify({ text }))

@@ -110,7 +110,6 @@ var SEATLESS = new Set(["ended", "parked"]);
 import { homedir } from "os";
 import { join, resolve } from "path";
 var dataDirOf = (env, home = env.HOME || homedir()) => env.PLAYGROUND_DATA_DIR ? resolve(env.PLAYGROUND_DATA_DIR) : join(home, ".playground");
-var dataDir = (env = process.env) => dataDirOf(env);
 
 // scripts/hooks/role.ts
 var MANAGER_ROLES = new Set(["dispatcher", "lead", "manager"]);

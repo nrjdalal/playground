@@ -113,7 +113,6 @@ var SEATLESS = new Set(["ended", "parked"]);
 import { homedir } from "os";
 import { join, resolve } from "path";
 var dataDirOf = (env, home = env.HOME || homedir()) => env.PLAYGROUND_DATA_DIR ? resolve(env.PLAYGROUND_DATA_DIR) : join(home, ".playground");
-var dataDir = (env = process.env) => dataDirOf(env);
 
 // scripts/hooks/role.ts
 var MANAGER_ROLES = new Set(["dispatcher", "lead", "manager"]);
@@ -187,24 +186,10 @@ import { homedir as homedir3 } from "os";
 import { basename, isAbsolute, resolve as resolve2 } from "path";
 var UNKNOWN = "\x00";
 var READ = "\x01";
-var NOT_RUN = "The refusal stopped this whole Bash call, so none of its commands ran: once it is fixed, run again each one you still need.";
 var MAX_BYTES = 1048576;
 var MAX_SCRIPT = 131072;
 var LARGE = "a text too large to read";
 var deadline;
-async function withDeadline(budget, body) {
-  const outer = deadline;
-  deadline = performance.now() + budget;
-  try {
-    return await body();
-  } finally {
-    deadline = outer;
-  }
-}
-function pastDeadline() {
-  if (deadline !== undefined && performance.now() > deadline)
-    throw new RangeError("past the hook's time");
-}
 var steps = 0;
 function tick() {
   if (deadline === undefined || ++steps % 1024 !== 0)
@@ -243,8 +228,6 @@ var RESERVED = new Set([
   "until",
   "while"
 ]);
-var ownFirst = (cmd, first) => !!first && first === cmd.words.find((w) => w.quoted || !RESERVED.has(w.value));
-var onlyReserved = (cmd) => cmd.words.length > 0 && cmd.words.every((w) => !w.quoted && RESERVED.has(w.value));
 var GROUPING = new Set(["}", "done", "esac", "fi"]);
 var ASSIGN = /^[A-Za-z_]\w*=/;
 var WRAPPERS = new Map(Object.entries({
@@ -298,34 +281,6 @@ var ROOT_SHELLS = new Map([
   ["doas", new Set(["-s"])],
   ["sudo", new Set(["--login", "--shell", "-i", "-s"])]
 ]);
-function stdinShell(cmd) {
-  const { args, first, name } = parse(cmd);
-  if (first && !marked(first.value)) {
-    if (!SHELLS.has(name))
-      return;
-    const { inline, operand } = shellOperand(args, name);
-    return inline || operand ? undefined : "shell";
-  }
-  let at = 0;
-  for (let w = cmd.words[at];w && !w.quoted; w = cmd.words[at]) {
-    if (w.value === "function")
-      at += 2;
-    else if (RESERVED.has(w.value) || ASSIGN.test(w.value))
-      at++;
-    else
-      break;
-  }
-  const end = first ? cmd.words.indexOf(first) : -1;
-  const before = cmd.words.slice(at, end === -1 ? undefined : end);
-  const k = before.findIndex((w) => !w.quoted && ROOT_SHELLS.has(program(w.value)));
-  if (k === -1)
-    return;
-  const wrapper = program(before[k].value);
-  const shells = ROOT_SHELLS.get(wrapper);
-  const { flags } = WRAPPERS.get(wrapper);
-  const starts = ({ quoted, value }) => marked(value) || !quoted && (shells.has(value) || /^-[A-Za-z]+$/.test(value) && value.slice(1).split("").every((c) => flags.has(`-${c}`)) && value.slice(1).split("").some((c) => shells.has(`-${c}`)));
-  return !!first || before.slice(k + 1).some(starts) ? "root" : undefined;
-}
 var COUNTED = new Set(["repeat", "timeout"]);
 var SHELLS = new Set(["bash", "dash", "ksh", "sh", "zsh"]);
 var EXPORTS = new Set(["declare", "export", "local", "readonly", "typeset"]);
@@ -427,10 +382,6 @@ var setVar = (vars, key, value) => {
   else
     setLog.set(vars, [key]);
 };
-function varsSince(vars, cursor) {
-  const log = setLog.get(vars) ?? [];
-  return [cursor === undefined ? [...vars.keys()] : log.slice(cursor), log.length];
-}
 var merge = (out, part) => {
   out.value += part.value;
   if (part.unknown)
@@ -453,7 +404,6 @@ var slice = (word, from) => {
   const dropped = word.value.slice(0, from).split(READ).length - 1;
   return { ...word, reads: word.reads?.slice(dropped), value: word.value.slice(from) };
 };
-var visible = (value) => value.replaceAll(UNKNOWN, " ").replaceAll(READ, " ");
 var marked = (value) => value.includes(UNKNOWN) || value.includes(READ);
 var program = (value) => basename(value.replace(/^=/, ""));
 var UV_TAKES = new Set([
@@ -475,14 +425,6 @@ var UV_TAKES = new Set([
   "--with-editable",
   "--with-requirements"
 ]);
-var PYTHON = /^python(?:\d+(?:\.\d+)*)?$/;
-function pythonModule(name, args) {
-  if (!PYTHON.test(name))
-    return;
-  const at = args.findIndex((a) => a.value === "-m");
-  const module = at === -1 ? undefined : args[at + 1];
-  return module && { module: module.value, rest: args.slice(at + 2) };
-}
 function decode(raw) {
   return raw.replace(/\\(?:x([\da-fA-F]{1,2})|u([\da-fA-F]{1,4})|U([\da-fA-F]{1,8})|0?([0-7]{1,3})|([\s\S]))/g, (whole, hex, u4, u8, octal, other) => {
     const point = hex || u4 || u8 ? Number.parseInt(hex ?? u4 ?? u8 ?? "", 16) : Number.parseInt(octal ?? "", 8);
@@ -934,12 +876,6 @@ function unwrap(state, inside, budget) {
     xargs: state.xargs
   };
 }
-function slotWords({ args, name }) {
-  if (name !== "run-slot.sh")
-    return;
-  const at = args.findIndex((a) => a.value === "--");
-  return at === -1 ? [] : args.slice(at + 1);
-}
 function shellSlot(args, shell) {
   const { inline, operand } = shellOperand(args, shell);
   if (inline || !operand || program(operand.value) !== "run-slot.sh")
@@ -1242,120 +1178,7 @@ async function readPath(path, env) {
     return unknown("a file path the hook cannot resolve");
   return env.files.get(resolved) ?? await readFile(resolved) ?? unknown(`${resolved}, which does not exist yet`);
 }
-function parseFlags(args, takes) {
-  const flags = [];
-  const positionals = [];
-  for (let k = 0;k < args.length; k++) {
-    const w = args[k];
-    const v = w.value;
-    if (v === "--") {
-      positionals.push(...args.slice(k + 1));
-      break;
-    }
-    if (v.startsWith("--")) {
-      const eq = v.indexOf("=");
-      const name = eq === -1 ? v : v.slice(0, eq);
-      flags.push({
-        name,
-        value: eq !== -1 ? slice(w, eq + 1) : takes.has(name) ? args[++k] : undefined
-      });
-    } else if (v.startsWith("-") && v.length > 1) {
-      for (let c = 1;c < v.length; c++) {
-        const name = `-${v[c]}`;
-        if (!takes.has(name)) {
-          flags.push({ name });
-          continue;
-        }
-        const rest = c + 1 < v.length ? slice(w, v[c + 1] === "=" ? c + 2 : c + 1) : args[++k];
-        flags.push({ name, value: rest });
-        break;
-      }
-    } else
-      positionals.push(w);
-  }
-  return { flags, positionals };
-}
 var unreadable = (text) => Boolean(text.unknown) || Boolean(text.reads?.length) || marked(text.value);
-var fromXargs = (text, xargs) => Boolean(xargs?.replace) && text.value.includes(xargs?.replace ?? "");
-var flagFromXargs = (text, xargs) => fromXargs(text, xargs) && (text.value.startsWith(xargs?.replace ?? "") || text.value.startsWith("-"));
-function viaXargs(text, xargs) {
-  return fromXargs(text, xargs) ? unknown(`what xargs puts in place of ${xargs?.replace}`) : text;
-}
-function ghCommand(args) {
-  const repos = [];
-  const head = [];
-  let k = 0;
-  while (k < args.length && head.length < (head[0] === "api" ? 1 : 2)) {
-    const v = args[k].value;
-    if (v === "-R" || v === "--repo") {
-      if (args[k + 1])
-        repos.push(args[k + 1]);
-      k += 2;
-    } else if (v.startsWith("--repo="))
-      repos.push(slice(args[k++], 7));
-    else if (v.startsWith("-R"))
-      repos.push(slice(args[k++], 2));
-    else if (v.startsWith("-"))
-      k++;
-    else
-      head.push(args[k++].value);
-  }
-  return { head, repos, rest: args.slice(k) };
-}
-async function ghApi(args, cmd, env, xargs) {
-  const { flags, positionals } = parseFlags(args, API_TAKES);
-  const [endpoint] = positionals;
-  if (!endpoint)
-    return;
-  const fields = [];
-  const inputs = [];
-  let method;
-  for (const { name, value } of flags) {
-    if (!value)
-      continue;
-    if (name === "-X" || name === "--method")
-      method = value.unknown ? "POST" : value.value.toUpperCase();
-    else if (name === "--input")
-      inputs.push(value.value === "-" ? await stdinOf(cmd, env) : await readPath(value, env));
-    else if (API_FIELDS.has(name)) {
-      const eq = value.value.indexOf("=");
-      const key = eq === -1 ? value.value : value.value.slice(0, eq);
-      const field = eq === -1 ? { quoted: false, value: "" } : slice(value, eq + 1);
-      const fromFile = (name === "-F" || name === "--field") && field.value.startsWith("@") && !field.unknown;
-      const text = !fromFile ? field : field.value === "@-" ? await stdinOf(cmd, env) : await readPath(slice(field, 1), env);
-      fields.push(fromXargs(value, xargs) ? { key: "body", text: viaXargs(value, xargs) } : { key, text });
-    }
-  }
-  if (xargs && !xargs.replace) {
-    fields.push({
-      key: "body",
-      text: unknown("the arguments xargs appends; a read passes with -X GET")
-    });
-  }
-  if (args.some((a) => flagFromXargs(a, xargs))) {
-    fields.push({ key: "body", text: unknown(`what xargs puts in place of ${xargs?.replace}`) });
-  }
-  const sent = fields.length + inputs.length > 0;
-  return { endpoint, fields, inputs, method: method ?? (sent ? "POST" : "GET") };
-}
-var curlUrls = (flags, positionals) => [
-  ...positionals,
-  ...flags.filter((f) => f.name === "--url" && f.value).map((f) => f.value)
-];
-async function curlData(flags, cmd, env) {
-  const data = [];
-  for (const { name, value } of flags) {
-    if (!value || !CURL_DATA.has(name))
-      continue;
-    if (name === "-T" || name === "--upload-file")
-      data.push(await readPath(value, env));
-    else if (value.value.startsWith("@") && name !== "--data-raw" && name !== "--form-string") {
-      data.push(value.value === "@-" ? await stdinOf(cmd, env) : await readPath(slice(value, 1), env));
-    } else
-      data.push(value);
-  }
-  return data;
-}
 function knownVariables(command, environment, cwd) {
   const values = {
     HOME: environment.HOME,

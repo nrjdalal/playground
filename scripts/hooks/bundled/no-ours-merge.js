@@ -110,7 +110,6 @@ var SEATLESS = new Set(["ended", "parked"]);
 import { homedir } from "os";
 import { join, resolve } from "path";
 var dataDirOf = (env, home = env.HOME || homedir()) => env.PLAYGROUND_DATA_DIR ? resolve(env.PLAYGROUND_DATA_DIR) : join(home, ".playground");
-var dataDir = (env = process.env) => dataDirOf(env);
 
 // scripts/hooks/role.ts
 var MANAGER_ROLES = new Set(["dispatcher", "lead", "manager"]);
@@ -184,24 +183,10 @@ import { homedir as homedir3 } from "os";
 import { basename, isAbsolute, resolve as resolve2 } from "path";
 var UNKNOWN = "\x00";
 var READ = "\x01";
-var NOT_RUN = "The refusal stopped this whole Bash call, so none of its commands ran: once it is fixed, run again each one you still need.";
 var MAX_BYTES = 1048576;
 var MAX_SCRIPT = 131072;
 var LARGE = "a text too large to read";
 var deadline;
-async function withDeadline(budget, body) {
-  const outer = deadline;
-  deadline = performance.now() + budget;
-  try {
-    return await body();
-  } finally {
-    deadline = outer;
-  }
-}
-function pastDeadline() {
-  if (deadline !== undefined && performance.now() > deadline)
-    throw new RangeError("past the hook's time");
-}
 var steps = 0;
 function tick() {
   if (deadline === undefined || ++steps % 1024 !== 0)
@@ -240,8 +225,6 @@ var RESERVED = new Set([
   "until",
   "while"
 ]);
-var ownFirst = (cmd, first) => !!first && first === cmd.words.find((w) => w.quoted || !RESERVED.has(w.value));
-var onlyReserved = (cmd) => cmd.words.length > 0 && cmd.words.every((w) => !w.quoted && RESERVED.has(w.value));
 var GROUPING = new Set(["}", "done", "esac", "fi"]);
 var ASSIGN = /^[A-Za-z_]\w*=/;
 var WRAPPERS = new Map(Object.entries({
@@ -295,34 +278,6 @@ var ROOT_SHELLS = new Map([
   ["doas", new Set(["-s"])],
   ["sudo", new Set(["--login", "--shell", "-i", "-s"])]
 ]);
-function stdinShell(cmd) {
-  const { args, first, name } = parse(cmd);
-  if (first && !marked(first.value)) {
-    if (!SHELLS.has(name))
-      return;
-    const { inline, operand } = shellOperand(args, name);
-    return inline || operand ? undefined : "shell";
-  }
-  let at = 0;
-  for (let w = cmd.words[at];w && !w.quoted; w = cmd.words[at]) {
-    if (w.value === "function")
-      at += 2;
-    else if (RESERVED.has(w.value) || ASSIGN.test(w.value))
-      at++;
-    else
-      break;
-  }
-  const end = first ? cmd.words.indexOf(first) : -1;
-  const before = cmd.words.slice(at, end === -1 ? undefined : end);
-  const k = before.findIndex((w) => !w.quoted && ROOT_SHELLS.has(program(w.value)));
-  if (k === -1)
-    return;
-  const wrapper = program(before[k].value);
-  const shells = ROOT_SHELLS.get(wrapper);
-  const { flags } = WRAPPERS.get(wrapper);
-  const starts = ({ quoted, value }) => marked(value) || !quoted && (shells.has(value) || /^-[A-Za-z]+$/.test(value) && value.slice(1).split("").every((c) => flags.has(`-${c}`)) && value.slice(1).split("").some((c) => shells.has(`-${c}`)));
-  return !!first || before.slice(k + 1).some(starts) ? "root" : undefined;
-}
 var COUNTED = new Set(["repeat", "timeout"]);
 var SHELLS = new Set(["bash", "dash", "ksh", "sh", "zsh"]);
 var EXPORTS = new Set(["declare", "export", "local", "readonly", "typeset"]);
@@ -424,10 +379,6 @@ var setVar = (vars, key, value) => {
   else
     setLog.set(vars, [key]);
 };
-function varsSince(vars, cursor) {
-  const log = setLog.get(vars) ?? [];
-  return [cursor === undefined ? [...vars.keys()] : log.slice(cursor), log.length];
-}
 var merge = (out, part) => {
   out.value += part.value;
   if (part.unknown)
@@ -472,14 +423,6 @@ var UV_TAKES = new Set([
   "--with-editable",
   "--with-requirements"
 ]);
-var PYTHON = /^python(?:\d+(?:\.\d+)*)?$/;
-function pythonModule(name, args) {
-  if (!PYTHON.test(name))
-    return;
-  const at = args.findIndex((a) => a.value === "-m");
-  const module = at === -1 ? undefined : args[at + 1];
-  return module && { module: module.value, rest: args.slice(at + 2) };
-}
 function decode(raw) {
   return raw.replace(/\\(?:x([\da-fA-F]{1,2})|u([\da-fA-F]{1,4})|U([\da-fA-F]{1,8})|0?([0-7]{1,3})|([\s\S]))/g, (whole, hex, u4, u8, octal, other) => {
     const point = hex || u4 || u8 ? Number.parseInt(hex ?? u4 ?? u8 ?? "", 16) : Number.parseInt(octal ?? "", 8);
@@ -931,12 +874,6 @@ function unwrap(state, inside, budget) {
     xargs: state.xargs
   };
 }
-function slotWords({ args, name }) {
-  if (name !== "run-slot.sh")
-    return;
-  const at = args.findIndex((a) => a.value === "--");
-  return at === -1 ? [] : args.slice(at + 1);
-}
 function shellSlot(args, shell) {
   const { inline, operand } = shellOperand(args, shell);
   if (inline || !operand || program(operand.value) !== "run-slot.sh")
@@ -1239,120 +1176,6 @@ async function readPath(path, env) {
     return unknown("a file path the hook cannot resolve");
   return env.files.get(resolved) ?? await readFile(resolved) ?? unknown(`${resolved}, which does not exist yet`);
 }
-function parseFlags(args, takes) {
-  const flags = [];
-  const positionals = [];
-  for (let k = 0;k < args.length; k++) {
-    const w = args[k];
-    const v = w.value;
-    if (v === "--") {
-      positionals.push(...args.slice(k + 1));
-      break;
-    }
-    if (v.startsWith("--")) {
-      const eq = v.indexOf("=");
-      const name = eq === -1 ? v : v.slice(0, eq);
-      flags.push({
-        name,
-        value: eq !== -1 ? slice(w, eq + 1) : takes.has(name) ? args[++k] : undefined
-      });
-    } else if (v.startsWith("-") && v.length > 1) {
-      for (let c = 1;c < v.length; c++) {
-        const name = `-${v[c]}`;
-        if (!takes.has(name)) {
-          flags.push({ name });
-          continue;
-        }
-        const rest = c + 1 < v.length ? slice(w, v[c + 1] === "=" ? c + 2 : c + 1) : args[++k];
-        flags.push({ name, value: rest });
-        break;
-      }
-    } else
-      positionals.push(w);
-  }
-  return { flags, positionals };
-}
-var unreadable = (text) => Boolean(text.unknown) || Boolean(text.reads?.length) || marked(text.value);
-var fromXargs = (text, xargs) => Boolean(xargs?.replace) && text.value.includes(xargs?.replace ?? "");
-var flagFromXargs = (text, xargs) => fromXargs(text, xargs) && (text.value.startsWith(xargs?.replace ?? "") || text.value.startsWith("-"));
-function viaXargs(text, xargs) {
-  return fromXargs(text, xargs) ? unknown(`what xargs puts in place of ${xargs?.replace}`) : text;
-}
-function ghCommand(args) {
-  const repos = [];
-  const head = [];
-  let k = 0;
-  while (k < args.length && head.length < (head[0] === "api" ? 1 : 2)) {
-    const v = args[k].value;
-    if (v === "-R" || v === "--repo") {
-      if (args[k + 1])
-        repos.push(args[k + 1]);
-      k += 2;
-    } else if (v.startsWith("--repo="))
-      repos.push(slice(args[k++], 7));
-    else if (v.startsWith("-R"))
-      repos.push(slice(args[k++], 2));
-    else if (v.startsWith("-"))
-      k++;
-    else
-      head.push(args[k++].value);
-  }
-  return { head, repos, rest: args.slice(k) };
-}
-async function ghApi(args, cmd, env, xargs) {
-  const { flags, positionals } = parseFlags(args, API_TAKES);
-  const [endpoint] = positionals;
-  if (!endpoint)
-    return;
-  const fields = [];
-  const inputs = [];
-  let method;
-  for (const { name, value } of flags) {
-    if (!value)
-      continue;
-    if (name === "-X" || name === "--method")
-      method = value.unknown ? "POST" : value.value.toUpperCase();
-    else if (name === "--input")
-      inputs.push(value.value === "-" ? await stdinOf(cmd, env) : await readPath(value, env));
-    else if (API_FIELDS.has(name)) {
-      const eq = value.value.indexOf("=");
-      const key = eq === -1 ? value.value : value.value.slice(0, eq);
-      const field = eq === -1 ? { quoted: false, value: "" } : slice(value, eq + 1);
-      const fromFile = (name === "-F" || name === "--field") && field.value.startsWith("@") && !field.unknown;
-      const text = !fromFile ? field : field.value === "@-" ? await stdinOf(cmd, env) : await readPath(slice(field, 1), env);
-      fields.push(fromXargs(value, xargs) ? { key: "body", text: viaXargs(value, xargs) } : { key, text });
-    }
-  }
-  if (xargs && !xargs.replace) {
-    fields.push({
-      key: "body",
-      text: unknown("the arguments xargs appends; a read passes with -X GET")
-    });
-  }
-  if (args.some((a) => flagFromXargs(a, xargs))) {
-    fields.push({ key: "body", text: unknown(`what xargs puts in place of ${xargs?.replace}`) });
-  }
-  const sent = fields.length + inputs.length > 0;
-  return { endpoint, fields, inputs, method: method ?? (sent ? "POST" : "GET") };
-}
-var curlUrls = (flags, positionals) => [
-  ...positionals,
-  ...flags.filter((f) => f.name === "--url" && f.value).map((f) => f.value)
-];
-async function curlData(flags, cmd, env) {
-  const data = [];
-  for (const { name, value } of flags) {
-    if (!value || !CURL_DATA.has(name))
-      continue;
-    if (name === "-T" || name === "--upload-file")
-      data.push(await readPath(value, env));
-    else if (value.value.startsWith("@") && name !== "--data-raw" && name !== "--form-string") {
-      data.push(value.value === "@-" ? await stdinOf(cmd, env) : await readPath(slice(value, 1), env));
-    } else
-      data.push(value);
-  }
-  return data;
-}
 function knownVariables(command, environment, cwd) {
   const values = {
     HOME: environment.HOME,
@@ -1368,69 +1191,9 @@ function knownVariables(command, environment, cwd) {
 }
 
 // scripts/hooks/no-stash.ts
-var FULL_SHA = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
 var READS = new Set(["list", "show"]);
 var WRITES = new Set(["create", "store"]);
-var INSTEAD = "Every worktree shares one stash list, so a stash taken by position or without a name can be another session's work. Commit a WIP commit on your own branch instead (git commit -m 'chore: wip <what>'), or take before-shots from a separate worktree on origin/canary (git worktree add --detach .claude/worktrees/<name> origin/canary). git stash list, git stash show, git stash push -m <message> and git stash apply <full sha> stay allowed.";
-var refuse = (what, why) => `no-stash hook refuses ${what}: ${why}. ${INSTEAD}`;
 var BROWSER_CLOSE = new Set(["close", "exit", "quit"]);
-var BROWSER_INSTEAD = "Close only the browser you opened; pass --session <name>: agent-browser --session <name> close.";
-function judgeBrowser(args, session, named) {
-  const batch = args.findIndex((a) => a.value === "batch");
-  const words = args.flatMap((a, k) => batch !== -1 && k > batch ? a.value.split(/\s+/) : [a.value]).filter(Boolean);
-  if (words.some((w) => w === "-h" || w === "--help"))
-    return;
-  const closes = words.some((w, k) => BROWSER_CLOSE.has(w) && words[k - 1] !== "tab");
-  const all = words.some((w) => w === "--all" || w.startsWith("--all="));
-  const hidden = words.find((w) => marked(w));
-  if (all && (closes || named && hidden))
-    return `no-stash hook refuses agent-browser ${hidden && !closes ? "with an action it cannot read and" : "close"} --all: it closes every session's browser, other sessions' included. ${BROWSER_INSTEAD}`;
-  const hasSession = session || words.some((w) => w === "--session" || w.startsWith("--session="));
-  if (named && closes && !hasSession)
-    return `no-stash hook refuses a bare agent-browser close: with no --session it closes the shared default session, which another session may be using. ${BROWSER_INSTEAD}`;
-}
-var sessionIn = (local, env) => ["AGENT_BROWSER_SESSION", "AGENT_BROWSER_SESSION_NAME"].some((key) => local.has(key) || env.vars.has(key) || Boolean(env.process[key]));
-function message(args) {
-  for (let k = 0;k < args.length; k++) {
-    const v = args[k].value;
-    if (v === "--")
-      break;
-    if (v === "-m" || v === "--message")
-      return args[k + 1]?.value || undefined;
-    const attached = /^(?:-m|--message=)(.+)$/.exec(v)?.[1];
-    if (attached)
-      return attached;
-  }
-}
-function judgeStash(args, xargs) {
-  if (xargs)
-    return refuse("git stash under xargs", "the hook cannot read the arguments xargs adds");
-  const action = args[0];
-  if (!action)
-    return refuse("a bare git stash", "it saves your changes with no name to find them by");
-  if (marked(action.value))
-    return refuse("this git stash", `the hook cannot read its action (${visible(action.value)})`);
-  const name = action.value;
-  if (args.some((a) => a.value === "-h" || a.value === "--help"))
-    return;
-  if (READS.has(name) || WRITES.has(name))
-    return;
-  if (name === "push" || name === "save" || name.startsWith("-")) {
-    const implied = name.startsWith("-");
-    if (message(implied ? args : args.slice(1)))
-      return;
-    return refuse(`${implied ? "git stash" : `git stash ${name}`} without -m <message>`, "an unnamed stash is found again only by its position, which another session's stash moves");
-  }
-  if (name === "apply") {
-    const target = args.slice(1).find((a) => !a.value.startsWith("-"));
-    if (target && !marked(target.value) && FULL_SHA.test(target.value))
-      return;
-    return refuse("git stash apply without a full commit SHA", "stash@{n} and the default name whatever entry is newest, which can be another session's");
-  }
-  if (name === "pop" || name === "drop" || name === "clear" || name === "branch")
-    return refuse(`git stash ${name}`, "it removes an entry by position from the list every worktree shares");
-  return refuse(`git stash ${name}`, "it is not a stash action the hook knows to be safe");
-}
 function gitCommand(args) {
   const aliases = [];
   let k = 0;
@@ -1444,103 +1207,12 @@ function gitCommand(args) {
   }
   return { aliases, rest: args.slice(k + 1), sub: args[k] };
 }
-var stashes = (args) => gitCommand(args).sub?.value === "stash";
-var visit = async (_cmd, { args, first, local, name, xargs }, env) => {
-  const session = sessionIn(local, env);
-  if (name === "agent-browser")
-    return judgeBrowser(args, session, true);
-  if (name === "git")
-    return judgeGit(args, xargs);
-  if (first && (first.unknown || marked(first.value))) {
-    if (stashes(args))
-      return judgeGit(args, xargs);
-    const verdict = judgeBrowser(args, session, false);
-    if (verdict)
-      return verdict;
-  }
-  if (PRINTERS.has(name))
-    return;
-  const browser = args.findIndex((a) => program(a.value) === "agent-browser");
-  if (browser !== -1) {
-    const verdict = judgeBrowser(args.slice(browser + 1), session, true);
-    if (verdict)
-      return verdict;
-  }
-  const nested = args.findIndex((a, j) => program(a.value) === "git" && stashes(args.slice(j + 1)));
-  if (nested !== -1)
-    return judgeGit(args.slice(nested + 1), xargs);
-};
-function judgeGit(args, xargs) {
-  const { aliases, rest, sub } = gitCommand(args);
-  if (!sub)
-    return;
-  if (marked(sub.value))
-    return refuse("this git call", `the hook cannot read which git command it runs (${visible(sub.value)})`);
-  if (sub.value === "stash")
-    return judgeStash(rest, xargs !== undefined);
-  const alias = aliases.find((a) => a.startsWith(`alias.${sub.value}=`));
-  if (alias && /\bstash\b/.test(alias))
-    return refuse(`git ${sub.value}`, "it is an alias for git stash");
-}
-var BARE = (command) => command.replace(/[\\'"]/g, "");
-var teardown = (command) => /agent-browser/.test(BARE(command)) && /\b(?:close|exit|quit)\b/.test(BARE(command));
-var candidate = (command) => command.includes("$'") || /stash|--all\b/.test(BARE(command)) || teardown(command);
-var stashCall = (command) => /\bgit\b/.test(BARE(command)) && /\bstash\b/.test(BARE(command)) || teardown(command);
-function commandOf(raw) {
-  try {
-    const { tool_input: toolInput, tool_name: tool } = JSON.parse(raw);
-    return tool === "Bash" && typeof toolInput?.command === "string" ? toolInput.command : undefined;
-  } catch {
-    return;
-  }
-}
-async function inspect(raw, environment) {
-  let payload;
-  try {
-    payload = JSON.parse(raw);
-  } catch {
-    payload = undefined;
-  }
-  if (typeof payload !== "object" || payload === null)
-    return stashCall(raw) ? "no-stash hook could not parse its input, which reads as a git stash, so it refuses the call." : undefined;
-  const { cwd, tool_input: toolInput, tool_name: tool } = payload;
-  if (tool !== "Bash")
-    return;
-  const command = toolInput?.command;
-  if (typeof command !== "string" || !candidate(command))
-    return;
-  const directory = typeof cwd === "string" ? cwd : undefined;
-  const env = {
-    cwd: directory,
-    files: new Map,
-    known: knownVariables(command, environment, directory),
-    process: environment,
-    vars: new Map
-  };
-  return run(lex(command, env.known), env, visit);
-}
-async function check(raw, environment = process.env) {
-  try {
-    return await inspect(raw, environment);
-  } catch (error) {
-    if (!stashCall(commandOf(raw) ?? raw))
-      return;
-    return `no-stash hook could not read this call (${error}), which reads as a git stash, so it refuses it. Split it into plain commands and run them again.`;
-  }
-}
-if (import.meta.main) {
-  const raw = await Bun.stdin.text();
-  const reason = await fromFactory(raw) ? await check(raw) : undefined;
-  if (reason) {
-    console.error(reason);
-    process.exit(2);
-  }
-}
+if (false) {}
 
 // scripts/hooks/no-ours-merge.ts
 var SUBS = new Set(["merge", "pull"]);
 var SHORT_TAKES = new Set(["F", "X", "j", "m", "o", "s"]);
-var INSTEAD2 = "Merge canary in plainly instead: git merge origin/canary, and resolve each conflict keeping both sides' meaning. With ours, the PR's squash onto canary deletes whatever canary added that the merge ignored, while every gate still reads green.";
+var INSTEAD = "Merge canary in plainly instead: git merge origin/canary, and resolve each conflict keeping both sides' meaning. With ours, the PR's squash onto canary deletes whatever canary added that the merge ignored, while every gate still reads green.";
 var strategyLong = (name) => name === "strategy" || name.length > "strategy".length && "strategy-option".startsWith(name);
 function strategies(args) {
   const found = [];
@@ -1576,43 +1248,43 @@ function strategies(args) {
   }
   return found;
 }
-function judgeGit2(args) {
+function judgeGit(args) {
   const { aliases, rest, sub } = gitCommand(args);
   if (!sub)
     return;
   if (marked(sub.value)) {
-    return rest.some((a) => a.value === "ours") ? `no-ours-merge hook refuses this git call: it cannot read which git command runs (${visible(sub.value)}) beside ours. ${INSTEAD2}` : undefined;
+    return rest.some((a) => a.value === "ours") ? `no-ours-merge hook refuses this git call: it cannot read which git command runs (${visible(sub.value)}) beside ours. ${INSTEAD}` : undefined;
   }
   const alias = aliases.find((a) => a.startsWith(`alias.${sub.value}=`));
   if (alias && /\b(?:merge|pull)\b/.test(alias) && /\bours\b/.test(alias))
-    return `no-ours-merge hook refuses git ${sub.value}: it is an alias for a merge with ours. ${INSTEAD2}`;
+    return `no-ours-merge hook refuses git ${sub.value}: it is an alias for a merge with ours. ${INSTEAD}`;
   if (!SUBS.has(sub.value))
     return;
   if (rest.some((a) => a.value === "-h" || a.value === "--help"))
     return;
   for (const { flag, value } of strategies(rest)) {
     if (value && marked(value.value))
-      return `no-ours-merge hook refuses git ${sub.value} ${flag} with a value it cannot read (${visible(value.value)}). ${INSTEAD2}`;
+      return `no-ours-merge hook refuses git ${sub.value} ${flag} with a value it cannot read (${visible(value.value)}). ${INSTEAD}`;
     if (value?.value === "ours")
-      return `no-ours-merge hook refuses git ${sub.value} ${flag} ours. ${INSTEAD2}`;
+      return `no-ours-merge hook refuses git ${sub.value} ${flag} ours. ${INSTEAD}`;
   }
 }
 var merges = (args) => SUBS.has(gitCommand(args).sub?.value ?? "");
-var visit2 = async (_cmd, { args, first, name }) => {
+var visit = async (_cmd, { args, first, name }) => {
   if (name === "git")
-    return judgeGit2(args);
+    return judgeGit(args);
   if (first && (first.unknown || marked(first.value)) && merges(args))
-    return judgeGit2(args);
+    return judgeGit(args);
   if (PRINTERS.has(name))
     return;
   const nested = args.findIndex((a, j) => program(a.value) === "git" && merges(args.slice(j + 1)));
   if (nested !== -1)
-    return judgeGit2(args.slice(nested + 1));
+    return judgeGit(args.slice(nested + 1));
 };
-var BARE2 = (command) => command.replace(/[\\'"]/g, "");
-var candidate2 = (command) => command.includes("$'") || /ours/.test(BARE2(command));
-var mergeCall = (command) => /\bgit\b/.test(BARE2(command)) && /\b(?:merge|pull)\b/.test(BARE2(command)) && /ours/.test(BARE2(command));
-async function inspect2(raw, environment) {
+var BARE = (command) => command.replace(/[\\'"]/g, "");
+var candidate = (command) => command.includes("$'") || /ours/.test(BARE(command));
+var mergeCall = (command) => /\bgit\b/.test(BARE(command)) && /\b(?:merge|pull)\b/.test(BARE(command)) && /ours/.test(BARE(command));
+async function inspect(raw, environment) {
   let payload;
   try {
     payload = JSON.parse(raw);
@@ -1625,7 +1297,7 @@ async function inspect2(raw, environment) {
   if (tool !== "Bash")
     return;
   const command = toolInput?.command;
-  if (typeof command !== "string" || !candidate2(command))
+  if (typeof command !== "string" || !candidate(command))
     return;
   const directory = typeof cwd === "string" ? cwd : undefined;
   const env = {
@@ -1635,11 +1307,11 @@ async function inspect2(raw, environment) {
     process: environment,
     vars: new Map
   };
-  return run(lex(command, env.known), env, visit2);
+  return run(lex(command, env.known), env, visit);
 }
-async function check2(raw, environment = process.env) {
+async function check(raw, environment = process.env) {
   try {
-    return await inspect2(raw, environment);
+    return await inspect(raw, environment);
   } catch (error) {
     let command = raw;
     try {
@@ -1654,12 +1326,12 @@ async function check2(raw, environment = process.env) {
 }
 if (import.meta.main) {
   const raw = await Bun.stdin.text();
-  const reason = await fromFactory(raw) ? await check2(raw) : undefined;
+  const reason = await fromFactory(raw) ? await check(raw) : undefined;
   if (reason) {
     console.error(reason);
     process.exit(2);
   }
 }
 export {
-  check2 as check
+  check
 };

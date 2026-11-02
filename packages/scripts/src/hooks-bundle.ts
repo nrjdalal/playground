@@ -19,24 +19,29 @@ export const entries = async (root: string): Promise<string[]> => [
   ...WORKERS,
 ]
 
-// Each bundle's file name and text, built from root's sources.
+// Each bundle's file name and text, built from root's sources, one build per entry point: Bun compiles an imported module's `if (import.meta.main)` to `if (false)` only when that module is no entry point of the same build, and a guard imports other guards.
 export async function bundle(root: string): Promise<Map<string, string>> {
-  const entrypoints = (await entries(root)).map((name) => join(root, HOOKS, `${name}.ts`))
+  const files = new Map<string, string>()
   // Bun names each module in a comment by its path from the working folder, so the build runs from root and its text is the same wherever it is called from.
   const cwd = process.cwd()
   process.chdir(root)
-  const result = await Bun.build({
-    banner: BANNER,
-    define: { "import.meta.dir": "__HOOK_DIR" },
-    entrypoints,
-    naming: "[name].js",
-    root: join(root, HOOKS),
-    target: "bun",
-  }).finally(() => process.chdir(cwd))
-  if (!result.success) throw new AggregateError(result.logs, "hooks-bundle: the build failed")
-  const files = new Map<string, string>()
-  for (const output of result.outputs)
-    files.set(output.path.replace(/^.*\//, ""), await output.text())
+  try {
+    for (const name of await entries(root)) {
+      const result = await Bun.build({
+        banner: BANNER,
+        define: { "import.meta.dir": "__HOOK_DIR" },
+        entrypoints: [join(root, HOOKS, `${name}.ts`)],
+        naming: "[name].js",
+        root: join(root, HOOKS),
+        target: "bun",
+      })
+      if (!result.success) throw new AggregateError(result.logs, "hooks-bundle: the build failed")
+      for (const output of result.outputs)
+        files.set(output.path.replace(/^.*\//, ""), await output.text())
+    }
+  } finally {
+    process.chdir(cwd)
+  }
   return files
 }
 

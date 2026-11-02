@@ -51,7 +51,6 @@ import { basename as basename2, dirname, isAbsolute as isAbsolute2, join as join
 import { homedir } from "os";
 import { join, resolve } from "path";
 var dataDirOf = (env, home = env.HOME || homedir()) => env.PLAYGROUND_DATA_DIR ? resolve(env.PLAYGROUND_DATA_DIR) : join(home, ".playground");
-var dataDir = (env = process.env) => dataDirOf(env);
 
 // scripts/hooks/role.ts
 import { homedir as homedir2 } from "os";
@@ -172,9 +171,6 @@ async function sessionRole(environment, sessionId) {
     return "";
   }
 }
-async function fromFactory(raw, environment = process.env) {
-  return await sessionRole(environment, sessionOf(raw)) !== "";
-}
 function sessionOf(raw) {
   try {
     return JSON.parse(raw).session_id;
@@ -193,19 +189,6 @@ var MAX_BYTES = 1048576;
 var MAX_SCRIPT = 131072;
 var LARGE = "a text too large to read";
 var deadline;
-async function withDeadline(budget, body) {
-  const outer = deadline;
-  deadline = performance.now() + budget;
-  try {
-    return await body();
-  } finally {
-    deadline = outer;
-  }
-}
-function pastDeadline() {
-  if (deadline !== undefined && performance.now() > deadline)
-    throw new RangeError("past the hook's time");
-}
 var steps = 0;
 function tick() {
   if (deadline === undefined || ++steps % 1024 !== 0)
@@ -244,8 +227,6 @@ var RESERVED = new Set([
   "until",
   "while"
 ]);
-var ownFirst = (cmd, first) => !!first && first === cmd.words.find((w) => w.quoted || !RESERVED.has(w.value));
-var onlyReserved = (cmd) => cmd.words.length > 0 && cmd.words.every((w) => !w.quoted && RESERVED.has(w.value));
 var GROUPING = new Set(["}", "done", "esac", "fi"]);
 var ASSIGN = /^[A-Za-z_]\w*=/;
 var WRAPPERS = new Map(Object.entries({
@@ -299,34 +280,6 @@ var ROOT_SHELLS = new Map([
   ["doas", new Set(["-s"])],
   ["sudo", new Set(["--login", "--shell", "-i", "-s"])]
 ]);
-function stdinShell(cmd) {
-  const { args, first, name } = parse(cmd);
-  if (first && !marked(first.value)) {
-    if (!SHELLS.has(name))
-      return;
-    const { inline, operand } = shellOperand(args, name);
-    return inline || operand ? undefined : "shell";
-  }
-  let at = 0;
-  for (let w = cmd.words[at];w && !w.quoted; w = cmd.words[at]) {
-    if (w.value === "function")
-      at += 2;
-    else if (RESERVED.has(w.value) || ASSIGN.test(w.value))
-      at++;
-    else
-      break;
-  }
-  const end = first ? cmd.words.indexOf(first) : -1;
-  const before = cmd.words.slice(at, end === -1 ? undefined : end);
-  const k = before.findIndex((w) => !w.quoted && ROOT_SHELLS.has(program(w.value)));
-  if (k === -1)
-    return;
-  const wrapper = program(before[k].value);
-  const shells = ROOT_SHELLS.get(wrapper);
-  const { flags } = WRAPPERS.get(wrapper);
-  const starts = ({ quoted, value }) => marked(value) || !quoted && (shells.has(value) || /^-[A-Za-z]+$/.test(value) && value.slice(1).split("").every((c) => flags.has(`-${c}`)) && value.slice(1).split("").some((c) => shells.has(`-${c}`)));
-  return !!first || before.slice(k + 1).some(starts) ? "root" : undefined;
-}
 var COUNTED = new Set(["repeat", "timeout"]);
 var SHELLS = new Set(["bash", "dash", "ksh", "sh", "zsh"]);
 var EXPORTS = new Set(["declare", "export", "local", "readonly", "typeset"]);
@@ -428,10 +381,6 @@ var setVar = (vars, key, value) => {
   else
     setLog.set(vars, [key]);
 };
-function varsSince(vars, cursor) {
-  const log = setLog.get(vars) ?? [];
-  return [cursor === undefined ? [...vars.keys()] : log.slice(cursor), log.length];
-}
 var merge = (out, part) => {
   out.value += part.value;
   if (part.unknown)
@@ -476,14 +425,6 @@ var UV_TAKES = new Set([
   "--with-editable",
   "--with-requirements"
 ]);
-var PYTHON = /^python(?:\d+(?:\.\d+)*)?$/;
-function pythonModule(name, args) {
-  if (!PYTHON.test(name))
-    return;
-  const at = args.findIndex((a) => a.value === "-m");
-  const module = at === -1 ? undefined : args[at + 1];
-  return module && { module: module.value, rest: args.slice(at + 2) };
-}
 function decode(raw) {
   return raw.replace(/\\(?:x([\da-fA-F]{1,2})|u([\da-fA-F]{1,4})|U([\da-fA-F]{1,8})|0?([0-7]{1,3})|([\s\S]))/g, (whole, hex, u4, u8, octal, other) => {
     const point = hex || u4 || u8 ? Number.parseInt(hex ?? u4 ?? u8 ?? "", 16) : Number.parseInt(octal ?? "", 8);
@@ -935,12 +876,6 @@ function unwrap(state, inside, budget) {
     xargs: state.xargs
   };
 }
-function slotWords({ args, name }) {
-  if (name !== "run-slot.sh")
-    return;
-  const at = args.findIndex((a) => a.value === "--");
-  return at === -1 ? [] : args.slice(at + 1);
-}
 function shellSlot(args, shell) {
   const { inline, operand } = shellOperand(args, shell);
   if (inline || !operand || program(operand.value) !== "run-slot.sh")
@@ -1276,7 +1211,6 @@ function parseFlags(args, takes) {
   }
   return { flags, positionals };
 }
-var unreadable = (text) => Boolean(text.unknown) || Boolean(text.reads?.length) || marked(text.value);
 var fromXargs = (text, xargs) => Boolean(xargs?.replace) && text.value.includes(xargs?.replace ?? "");
 var flagFromXargs = (text, xargs) => fromXargs(text, xargs) && (text.value.startsWith(xargs?.replace ?? "") || text.value.startsWith("-"));
 function viaXargs(text, xargs) {

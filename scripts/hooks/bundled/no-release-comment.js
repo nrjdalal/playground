@@ -12,17 +12,6 @@ var CORE = "core";
 var coreDir = () => fileURLToPath(new URL("../../../extensions/core", import.meta.url));
 var extensionsDir = (data) => join(data, "extensions");
 var markerPath = extensionsDir;
-var loginPath = (data) => join(data, "extensions", "login");
-var loginOf = (data, env = process.env) => {
-  if (env.PLAYGROUND_LOGIN)
-    return env.PLAYGROUND_LOGIN;
-  try {
-    const login = readFileSync(loginPath(data), "utf8").trim();
-    if (login)
-      return login;
-  } catch {}
-  throw new Error(`no login for the extensions in ${loginPath(data)}: run playground ext init`);
-};
 var fixFor = (file) => file.startsWith("hooks/") ? "tell your lead, and the dispatcher hands the owner ! playground ext import --from-tree extensions/core/lists to type in the dispatcher's terminal window, which seeds the guards' lists" : "tell your lead, and the dispatcher hands the owner ! playground ext init, then a setting with ! playground settings set, to type in the dispatcher's terminal window, which writes it";
 var readRendered = async (data, file) => readRenderedSync(data, file);
 var readRenderedSync = (data, file) => {
@@ -34,28 +23,6 @@ var readRenderedSync = (data, file) => {
     return { refusal: `${file} is not a path inside the extensions (${dir})` };
   const path = parts[0] === CORE ? join(coreDir(), ...parts.slice(1)) : join(dir, file);
   return existsSync(path) ? { path } : { refusal: `the extensions root (${dir}) holds no ${file}: ${fixFor(file)}` };
-};
-var readPolicy = async (data, org) => readPolicySync(data, org);
-var readPolicySync = (data, org) => {
-  const read = readRenderedSync(data, "policy.json");
-  if (read.refusal)
-    return { refusal: read.refusal };
-  if (!read.path)
-    return { settings: { schemaVersion: 1, values: {} } };
-  let policy;
-  try {
-    policy = JSON.parse(readFileSync(read.path, "utf8"));
-  } catch {
-    return {
-      refusal: `the extensions' policy.json does not parse (${read.path}): ${fixFor("policy.json")}`
-    };
-  }
-  return {
-    settings: {
-      schemaVersion: 1,
-      values: { ...policy.values, ...org ? policy.orgs?.[org.toLowerCase()] : undefined }
-    }
-  };
 };
 
 // scripts/hooks/github.ts
@@ -168,31 +135,16 @@ async function loadList(guard, path, valid, empty, environment = process.env) {
   return valid(value) ? { list: value } : refuse("lacks a key or holds a value of the wrong type");
 }
 var isStrings = (value) => Array.isArray(value) && value.every((item) => typeof item === "string");
-var isRecord = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
 
 // scripts/hooks/shell.ts
 import { homedir as homedir2 } from "os";
 import { basename, isAbsolute, resolve as resolve2 } from "path";
 var UNKNOWN = "\x00";
 var READ = "\x01";
-var NOT_RUN = "The refusal stopped this whole Bash call, so none of its commands ran: once it is fixed, run again each one you still need.";
 var MAX_BYTES = 1048576;
 var MAX_SCRIPT = 131072;
 var LARGE = "a text too large to read";
 var deadline;
-async function withDeadline(budget, body) {
-  const outer = deadline;
-  deadline = performance.now() + budget;
-  try {
-    return await body();
-  } finally {
-    deadline = outer;
-  }
-}
-function pastDeadline() {
-  if (deadline !== undefined && performance.now() > deadline)
-    throw new RangeError("past the hook's time");
-}
 var steps = 0;
 function tick() {
   if (deadline === undefined || ++steps % 1024 !== 0)
@@ -231,8 +183,6 @@ var RESERVED = new Set([
   "until",
   "while"
 ]);
-var ownFirst = (cmd, first) => !!first && first === cmd.words.find((w) => w.quoted || !RESERVED.has(w.value));
-var onlyReserved = (cmd) => cmd.words.length > 0 && cmd.words.every((w) => !w.quoted && RESERVED.has(w.value));
 var GROUPING = new Set(["}", "done", "esac", "fi"]);
 var ASSIGN = /^[A-Za-z_]\w*=/;
 var WRAPPERS = new Map(Object.entries({
@@ -286,34 +236,6 @@ var ROOT_SHELLS = new Map([
   ["doas", new Set(["-s"])],
   ["sudo", new Set(["--login", "--shell", "-i", "-s"])]
 ]);
-function stdinShell(cmd) {
-  const { args, first, name } = parse(cmd);
-  if (first && !marked(first.value)) {
-    if (!SHELLS.has(name))
-      return;
-    const { inline, operand } = shellOperand(args, name);
-    return inline || operand ? undefined : "shell";
-  }
-  let at = 0;
-  for (let w = cmd.words[at];w && !w.quoted; w = cmd.words[at]) {
-    if (w.value === "function")
-      at += 2;
-    else if (RESERVED.has(w.value) || ASSIGN.test(w.value))
-      at++;
-    else
-      break;
-  }
-  const end = first ? cmd.words.indexOf(first) : -1;
-  const before = cmd.words.slice(at, end === -1 ? undefined : end);
-  const k = before.findIndex((w) => !w.quoted && ROOT_SHELLS.has(program(w.value)));
-  if (k === -1)
-    return;
-  const wrapper = program(before[k].value);
-  const shells = ROOT_SHELLS.get(wrapper);
-  const { flags } = WRAPPERS.get(wrapper);
-  const starts = ({ quoted, value }) => marked(value) || !quoted && (shells.has(value) || /^-[A-Za-z]+$/.test(value) && value.slice(1).split("").every((c) => flags.has(`-${c}`)) && value.slice(1).split("").some((c) => shells.has(`-${c}`)));
-  return !!first || before.slice(k + 1).some(starts) ? "root" : undefined;
-}
 var COUNTED = new Set(["repeat", "timeout"]);
 var SHELLS = new Set(["bash", "dash", "ksh", "sh", "zsh"]);
 var EXPORTS = new Set(["declare", "export", "local", "readonly", "typeset"]);
@@ -415,10 +337,6 @@ var setVar = (vars, key, value) => {
   else
     setLog.set(vars, [key]);
 };
-function varsSince(vars, cursor) {
-  const log = setLog.get(vars) ?? [];
-  return [cursor === undefined ? [...vars.keys()] : log.slice(cursor), log.length];
-}
 var merge = (out, part) => {
   out.value += part.value;
   if (part.unknown)
@@ -463,14 +381,6 @@ var UV_TAKES = new Set([
   "--with-editable",
   "--with-requirements"
 ]);
-var PYTHON = /^python(?:\d+(?:\.\d+)*)?$/;
-function pythonModule(name, args) {
-  if (!PYTHON.test(name))
-    return;
-  const at = args.findIndex((a) => a.value === "-m");
-  const module = at === -1 ? undefined : args[at + 1];
-  return module && { module: module.value, rest: args.slice(at + 2) };
-}
 function decode(raw) {
   return raw.replace(/\\(?:x([\da-fA-F]{1,2})|u([\da-fA-F]{1,4})|U([\da-fA-F]{1,8})|0?([0-7]{1,3})|([\s\S]))/g, (whole, hex, u4, u8, octal, other) => {
     const point = hex || u4 || u8 ? Number.parseInt(hex ?? u4 ?? u8 ?? "", 16) : Number.parseInt(octal ?? "", 8);
@@ -921,12 +831,6 @@ function unwrap(state, inside, budget) {
     name: first ? program(first.value) : "",
     xargs: state.xargs
   };
-}
-function slotWords({ args, name }) {
-  if (name !== "run-slot.sh")
-    return;
-  const at = args.findIndex((a) => a.value === "--");
-  return at === -1 ? [] : args.slice(at + 1);
 }
 function shellSlot(args, shell) {
   const { inline, operand } = shellOperand(args, shell);

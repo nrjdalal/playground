@@ -110,7 +110,6 @@ var SEATLESS = new Set(["ended", "parked"]);
 import { homedir } from "os";
 import { join, resolve } from "path";
 var dataDirOf = (env, home = env.HOME || homedir()) => env.PLAYGROUND_DATA_DIR ? resolve(env.PLAYGROUND_DATA_DIR) : join(home, ".playground");
-var dataDir = (env = process.env) => dataDirOf(env);
 
 // scripts/hooks/role.ts
 var MANAGER_ROLES = new Set(["dispatcher", "lead", "manager"]);
@@ -184,24 +183,7 @@ import { homedir as homedir3 } from "os";
 import { basename, isAbsolute, resolve as resolve2 } from "path";
 var UNKNOWN = "\x00";
 var READ = "\x01";
-var NOT_RUN = "The refusal stopped this whole Bash call, so none of its commands ran: once it is fixed, run again each one you still need.";
-var MAX_BYTES = 1048576;
-var MAX_SCRIPT = 131072;
-var LARGE = "a text too large to read";
 var deadline;
-async function withDeadline(budget, body) {
-  const outer = deadline;
-  deadline = performance.now() + budget;
-  try {
-    return await body();
-  } finally {
-    deadline = outer;
-  }
-}
-function pastDeadline() {
-  if (deadline !== undefined && performance.now() > deadline)
-    throw new RangeError("past the hook's time");
-}
 var steps = 0;
 function tick() {
   if (deadline === undefined || ++steps % 1024 !== 0)
@@ -209,18 +191,6 @@ function tick() {
   if (performance.now() > deadline)
     throw new RangeError("past the hook's time");
 }
-function lexScript(value, env) {
-  if (deadline !== undefined && value.length > MAX_SCRIPT)
-    throw new RangeError("a script too large to read");
-  return lex(value, env.known);
-}
-function filled(script, mark, value) {
-  const count = script.split(mark).length - 1;
-  if (deadline !== undefined && script.length + count * value.length > MAX_SCRIPT)
-    throw new RangeError("a script too large to read");
-  return script.replaceAll(mark, value);
-}
-var held2 = (text) => text.value.length > MAX_BYTES ? unknown(LARGE) : text;
 var BREAK = new Set([" ", "\t", `
 `, ";", "&", "|", "<", ">", "(", ")"]);
 var REDIRECT = /^(\d*|&)(<<<|<<-|<<|<>|<&|>&!?|>>[!|]?|>[!|]|<|>)/;
@@ -240,8 +210,6 @@ var RESERVED = new Set([
   "until",
   "while"
 ]);
-var ownFirst = (cmd, first) => !!first && first === cmd.words.find((w) => w.quoted || !RESERVED.has(w.value));
-var onlyReserved = (cmd) => cmd.words.length > 0 && cmd.words.every((w) => !w.quoted && RESERVED.has(w.value));
 var GROUPING = new Set(["}", "done", "esac", "fi"]);
 var ASSIGN = /^[A-Za-z_]\w*=/;
 var WRAPPERS = new Map(Object.entries({
@@ -295,34 +263,6 @@ var ROOT_SHELLS = new Map([
   ["doas", new Set(["-s"])],
   ["sudo", new Set(["--login", "--shell", "-i", "-s"])]
 ]);
-function stdinShell(cmd) {
-  const { args, first, name } = parse(cmd);
-  if (first && !marked(first.value)) {
-    if (!SHELLS.has(name))
-      return;
-    const { inline, operand } = shellOperand(args, name);
-    return inline || operand ? undefined : "shell";
-  }
-  let at = 0;
-  for (let w = cmd.words[at];w && !w.quoted; w = cmd.words[at]) {
-    if (w.value === "function")
-      at += 2;
-    else if (RESERVED.has(w.value) || ASSIGN.test(w.value))
-      at++;
-    else
-      break;
-  }
-  const end = first ? cmd.words.indexOf(first) : -1;
-  const before = cmd.words.slice(at, end === -1 ? undefined : end);
-  const k = before.findIndex((w) => !w.quoted && ROOT_SHELLS.has(program(w.value)));
-  if (k === -1)
-    return;
-  const wrapper = program(before[k].value);
-  const shells = ROOT_SHELLS.get(wrapper);
-  const { flags } = WRAPPERS.get(wrapper);
-  const starts = ({ quoted, value }) => marked(value) || !quoted && (shells.has(value) || /^-[A-Za-z]+$/.test(value) && value.slice(1).split("").every((c) => flags.has(`-${c}`)) && value.slice(1).split("").some((c) => shells.has(`-${c}`)));
-  return !!first || before.slice(k + 1).some(starts) ? "root" : undefined;
-}
 var COUNTED = new Set(["repeat", "timeout"]);
 var SHELLS = new Set(["bash", "dash", "ksh", "sh", "zsh"]);
 var EXPORTS = new Set(["declare", "export", "local", "readonly", "typeset"]);
@@ -416,18 +356,6 @@ var ESCAPES = {
 };
 var unknown = (why) => ({ unknown: why, value: UNKNOWN });
 var setLog = new WeakMap;
-var setVar = (vars, key, value) => {
-  vars.set(key, value);
-  const log = setLog.get(vars);
-  if (log)
-    log.push(key);
-  else
-    setLog.set(vars, [key]);
-};
-function varsSince(vars, cursor) {
-  const log = setLog.get(vars) ?? [];
-  return [cursor === undefined ? [...vars.keys()] : log.slice(cursor), log.length];
-}
 var merge = (out, part) => {
   out.value += part.value;
   if (part.unknown)
@@ -437,20 +365,10 @@ var merge = (out, part) => {
   if (part.reads?.length)
     (out.reads ??= []).push(...part.reads);
 };
-var join3 = (parts, separator = "") => {
-  const out = { value: "" };
-  parts.forEach((part, k) => {
-    if (k > 0)
-      out.value += separator;
-    merge(out, part);
-  });
-  return out;
-};
 var slice = (word, from) => {
   const dropped = word.value.slice(0, from).split(READ).length - 1;
   return { ...word, reads: word.reads?.slice(dropped), value: word.value.slice(from) };
 };
-var visible = (value) => value.replaceAll(UNKNOWN, " ").replaceAll(READ, " ");
 var marked = (value) => value.includes(UNKNOWN) || value.includes(READ);
 var program = (value) => basename(value.replace(/^=/, ""));
 var UV_TAKES = new Set([
@@ -943,109 +861,6 @@ function shellSlot(args, shell) {
     return;
   return args.slice(args.indexOf(operand));
 }
-async function run(lexed, env, visit, builtins = false) {
-  if (running >= MAX_RUNS)
-    throw new RangeError("scripts nested too deep");
-  running++;
-  try {
-    return await runAll(lexed, env, visit, builtins);
-  } finally {
-    running--;
-  }
-}
-var running = 0;
-var MAX_RUNS = 256;
-async function runAll(lexed, env, visit, builtins) {
-  const envs = new Map([[0, env]]);
-  const envOf = (scope) => {
-    const found = envs.get(scope);
-    if (found)
-      return found;
-    const parent = envOf(lexed.scopes[scope]);
-    const child = { ...parent, vars: new Map(parent.vars) };
-    envs.set(scope, child);
-    return child;
-  };
-  for (const cmd of lexed.commands) {
-    const verdict = await examine(cmd, envOf(cmd.scope), visit, builtins);
-    if (verdict)
-      return verdict;
-  }
-}
-var subshell = (env) => ({ ...env, vars: new Map(env.vars) });
-async function examine(cmd, env, visit, builtins) {
-  tick();
-  const readings = (parsed) => [parsed, ...parsed.also.flatMap(readings)];
-  const [primary, ...others] = readings(parse(cmd));
-  const before = others.length > 0 ? apart(env) : env;
-  const verdict = await examineReading(cmd, primary, env, visit, builtins);
-  if (verdict)
-    return verdict;
-  for (const parsed of others) {
-    const verdict = await examineReading(cmd, parsed, apart(before), visit, builtins);
-    if (verdict)
-      return verdict;
-  }
-}
-var apart = (env) => ({
-  ...env,
-  files: new Map(env.files),
-  known: { ...env.known },
-  process: { ...env.process },
-  vars: new Map(env.vars)
-});
-async function examineReading(cmd, parsed, env, visit, builtins) {
-  const { args, chdir, local, name } = parsed;
-  const here = chdir ? { ...env, cwd: pathOf(chdir, env) } : env;
-  let verdict;
-  const followed = SHELLS.has(name) || [".", "cd", "eval", "popd", "pushd", "source"].includes(name);
-  if (followed && builtins && cmd.redirects.length > 0) {
-    const bare = { ...cmd, words: [] };
-    verdict = await visit(bare, parse(bare), here);
-    if (verdict)
-      return verdict;
-  }
-  if (name === "") {
-    for (const [key, value] of local)
-      setVar(env.vars, key, value);
-    if (builtins)
-      verdict = await visit(cmd, parsed, here);
-  } else if (name === "cd" || name === "pushd") {
-    env.cwd = cmd.detached ? undefined : await cdTarget(args, env);
-  } else if (name === "popd")
-    env.cwd = undefined;
-  else if (EXPORTS.has(name)) {
-    for (const w of args.filter((a) => ASSIGN.test(a.value))) {
-      const eq = w.value.indexOf("=");
-      setVar(env.vars, w.value.slice(0, eq), slice(w, eq + 1));
-    }
-    if (builtins)
-      verdict = await visit(cmd, parsed, here);
-  } else if (SHELLS.has(name))
-    verdict = await shell(name, args, cmd, here, visit, builtins, parsed.xargs);
-  else if ((name === "source" || name === ".") && (args[0]?.procs || args[0]?.value === "/dev/stdin")) {
-    const script = await scriptOf(args[0], cmd, here);
-    verdict = (script.unknown ? await visit(cmd, parsed, here) : undefined) ?? await run(lexScript(known(script), env), here, visit, builtins);
-  } else if (name === "eval") {
-    verdict = await run(lexScript(args.map((a) => a.value).join(" "), env), here, visit, builtins);
-  } else
-    verdict = await visit(cmd, parsed, here);
-  await record(cmd, name, args, here);
-  return verdict;
-}
-async function cdTarget(args, env) {
-  const dir = args.find((a) => !(a.value.startsWith("-") && a.value.length > 1));
-  if (!dir)
-    return homedir3();
-  const path = dir.value === "-" ? undefined : pathOf(dir, env);
-  if (!path)
-    return;
-  try {
-    return (await Bun.file(path).stat()).isDirectory() ? path : undefined;
-  } catch {
-    return;
-  }
-}
 var SHELL_TAKES = new Set(["-o", "+o", "--init-file", "--rcfile"]);
 var BASH_TAKES = new Set([...SHELL_TAKES, "-O", "+O"]);
 function shellOperand(args, shell) {
@@ -1061,183 +876,6 @@ function shellOperand(args, shell) {
       return { inline, operand: args[k] };
   }
   return { inline };
-}
-async function shell(name, args, cmd, env, visit, builtins, xargs) {
-  const slot = shellSlot(args, name);
-  if (slot)
-    return examine({ ...cmd, words: slot }, env, visit, builtins);
-  const { inline, operand } = shellOperand(args, name);
-  if (operand && inline) {
-    let script = operand.value;
-    if (xargs?.replace && script.includes(xargs.replace)) {
-      const fed = await stdinOf(cmd, env);
-      script = filled(script, xargs.replace, fed.unknown ? UNKNOWN : fed.value.trim());
-    }
-    return run(lexScript(script, env), subshell(env), visit, builtins);
-  }
-  const script = await scriptOf(operand, cmd, env);
-  return run(lexScript(known(script), env), subshell(env), visit, builtins);
-}
-var known = (script) => script.value.replaceAll(UNKNOWN, `
-`);
-async function scriptOf(operand, cmd, env) {
-  const script = !operand || operand.value === "/dev/stdin" ? await stdinOf(cmd, env) : operand.procs ? await outputs(operand.procs, env) : unknown("a script file");
-  if (deadline !== undefined && script.unknown === LARGE)
-    throw new RangeError(LARGE);
-  return script;
-}
-async function outputs(cmds, env) {
-  return join3(await Promise.all(cmds.map((c) => outputOf(c, env))));
-}
-async function record(cmd, name, args, env) {
-  for (const r of cmd.redirects) {
-    if (r.op !== ">" && r.op !== ">>" && r.op !== ">|")
-      continue;
-    const path = r.target && pathOf(r.target, env);
-    if (!path)
-      continue;
-    const stdout = r.fd === "" || r.fd === "1" || r.fd === "&";
-    const out = stdout ? await outputOf(cmd, env) : unknown(`what ${name || "a command"} writes to stderr`);
-    env.files.set(path, held2(r.op === ">>" ? join3([await existing(path, env), out]) : out));
-  }
-  if (name !== "tee")
-    return;
-  const input = await stdinOf(cmd, env);
-  const append = args.some((a) => a.value === "-a" || a.value === "--append");
-  for (const a of args) {
-    const path = a.value.startsWith("-") ? undefined : pathOf(a, env);
-    if (path)
-      env.files.set(path, held2(append ? join3([await existing(path, env), input]) : input));
-  }
-}
-async function existing(path, env) {
-  return env.files.get(path) ?? await readFile(path) ?? { value: "" };
-}
-async function outputOf(cmd, env) {
-  tick();
-  const { args, name } = parse(cmd);
-  if (name === "") {
-    if (cmd.inner)
-      return outputs(cmd.inner(), env);
-    return cmd.group || cmd.words.some((w) => GROUPING.has(w.value) && !w.quoted) ? unknown("the output of a command group") : { value: "" };
-  }
-  if (name === "cat") {
-    const sources = args.filter((a) => a.value === "-" || !a.value.startsWith("-"));
-    if (sources.length === 0)
-      return stdinOf(cmd, env);
-    const first = sources.findIndex((s) => s.value === "-");
-    const parts = [];
-    let size = 0;
-    for (const [k, s] of sources.entries()) {
-      tick();
-      const part = s.value !== "-" ? await readPath(s, env) : k === first ? await stdinOf(cmd, env) : { value: "" };
-      size += part.value.length;
-      if (size > MAX_BYTES)
-        return unknown(LARGE);
-      parts.push(part);
-    }
-    return join3(parts);
-  }
-  if (name === "tee")
-    return stdinOf(cmd, env);
-  if (!PRINTERS.has(name))
-    return unknown(`the output of ${name}`);
-  const values = await Promise.all(args.map((a) => resolveText(a, env)));
-  const hidden = values.find((v) => v.unknown);
-  if (hidden)
-    return hidden;
-  if (name === "printf")
-    return { value: printf(values.map((v) => v.value)) };
-  let k = 0;
-  while (k < values.length && /^-[neE]+$/.test(values[k].value))
-    k++;
-  return {
-    value: `${values.slice(k).map((v) => decode(v.value)).join(" ")}
-`
-  };
-}
-function printf([format = "", ...args]) {
-  const conversion = /%(?:%|[-+ #0']*(?:[1-9]\d*)?(?:\.\d+)?([a-zA-Z]))/g;
-  const pattern = decode(format);
-  let out = "";
-  let k = 0;
-  for (;; ) {
-    tick();
-    const before = k;
-    out += pattern.replace(conversion, (_, kind) => {
-      if (!kind)
-        return "%";
-      const value = args[k++] ?? "";
-      return kind === "b" ? decode(value) : value;
-    });
-    if (k === before || k >= args.length)
-      return out;
-  }
-}
-async function stdinOf(cmd, env) {
-  tick();
-  return held2(await stdinText(cmd, env));
-}
-async function stdinText(cmd, env) {
-  const input = cmd.redirects.findLast((r) => (r.fd === "" || r.fd === "0") && r.op.startsWith("<") && r.op !== "<&");
-  if (input?.target?.procs)
-    return outputs(input.target.procs, env);
-  if (input?.op === "<" || input?.op === "<>")
-    return input.target ? readPath(input.target, env) : unknown("an input redirect");
-  if (input)
-    return input.body ? resolveText(input.body, env) : unknown("a heredoc the hook could not read");
-  if (cmd.stdin)
-    return outputOf(cmd.stdin, env);
-  return unknown("stdin the hook cannot see");
-}
-async function resolveText(text, env) {
-  if (text.unknown || !text.reads?.length)
-    return text;
-  const pieces = text.value.split(READ);
-  let value = pieces[0];
-  for (const [k, path] of text.reads.entries()) {
-    tick();
-    const file = await readPath(path, env);
-    if (file.unknown)
-      return file;
-    if (k + 1 < pieces.length)
-      value += file.value + pieces[k + 1];
-    if (value.length > MAX_BYTES)
-      return unknown(LARGE);
-  }
-  for (const piece of pieces.slice(text.reads.length + 1))
-    value += READ + piece;
-  return { value };
-}
-function pathOf(text, env) {
-  if (text.unknown || text.reads?.length || text.value === "")
-    return;
-  if (isAbsolute(text.value))
-    return text.value;
-  return env.cwd ? resolve2(env.cwd, text.value) : undefined;
-}
-async function readFile(path) {
-  const file = Bun.file(path);
-  try {
-    const stats = await file.stat();
-    if (!stats.isFile())
-      return unknown(`${path}, which is not a regular file`);
-    if (stats.size > MAX_BYTES)
-      return unknown(`${path}, which is too large to read`);
-    return { value: await file.text() };
-  } catch (error) {
-    if (error.code === "ENOENT")
-      return;
-    return unknown(`${path}, which the hook cannot read`);
-  }
-}
-async function readPath(path, env) {
-  const resolved = pathOf(path, env);
-  if (!resolved && path.unknown)
-    return unknown(`a file path built from ${path.unknown}, which the hook cannot expand: name the file by its literal absolute path`);
-  if (!resolved)
-    return unknown("a file path the hook cannot resolve");
-  return env.files.get(resolved) ?? await readFile(resolved) ?? unknown(`${resolved}, which does not exist yet`);
 }
 function parseFlags(args, takes) {
   const flags = [];
@@ -1271,100 +909,6 @@ function parseFlags(args, takes) {
       positionals.push(w);
   }
   return { flags, positionals };
-}
-var unreadable = (text) => Boolean(text.unknown) || Boolean(text.reads?.length) || marked(text.value);
-var fromXargs = (text, xargs) => Boolean(xargs?.replace) && text.value.includes(xargs?.replace ?? "");
-var flagFromXargs = (text, xargs) => fromXargs(text, xargs) && (text.value.startsWith(xargs?.replace ?? "") || text.value.startsWith("-"));
-function viaXargs(text, xargs) {
-  return fromXargs(text, xargs) ? unknown(`what xargs puts in place of ${xargs?.replace}`) : text;
-}
-function ghCommand(args) {
-  const repos = [];
-  const head = [];
-  let k = 0;
-  while (k < args.length && head.length < (head[0] === "api" ? 1 : 2)) {
-    const v = args[k].value;
-    if (v === "-R" || v === "--repo") {
-      if (args[k + 1])
-        repos.push(args[k + 1]);
-      k += 2;
-    } else if (v.startsWith("--repo="))
-      repos.push(slice(args[k++], 7));
-    else if (v.startsWith("-R"))
-      repos.push(slice(args[k++], 2));
-    else if (v.startsWith("-"))
-      k++;
-    else
-      head.push(args[k++].value);
-  }
-  return { head, repos, rest: args.slice(k) };
-}
-async function ghApi(args, cmd, env, xargs) {
-  const { flags, positionals } = parseFlags(args, API_TAKES);
-  const [endpoint] = positionals;
-  if (!endpoint)
-    return;
-  const fields = [];
-  const inputs = [];
-  let method;
-  for (const { name, value } of flags) {
-    if (!value)
-      continue;
-    if (name === "-X" || name === "--method")
-      method = value.unknown ? "POST" : value.value.toUpperCase();
-    else if (name === "--input")
-      inputs.push(value.value === "-" ? await stdinOf(cmd, env) : await readPath(value, env));
-    else if (API_FIELDS.has(name)) {
-      const eq = value.value.indexOf("=");
-      const key = eq === -1 ? value.value : value.value.slice(0, eq);
-      const field = eq === -1 ? { quoted: false, value: "" } : slice(value, eq + 1);
-      const fromFile = (name === "-F" || name === "--field") && field.value.startsWith("@") && !field.unknown;
-      const text = !fromFile ? field : field.value === "@-" ? await stdinOf(cmd, env) : await readPath(slice(field, 1), env);
-      fields.push(fromXargs(value, xargs) ? { key: "body", text: viaXargs(value, xargs) } : { key, text });
-    }
-  }
-  if (xargs && !xargs.replace) {
-    fields.push({
-      key: "body",
-      text: unknown("the arguments xargs appends; a read passes with -X GET")
-    });
-  }
-  if (args.some((a) => flagFromXargs(a, xargs))) {
-    fields.push({ key: "body", text: unknown(`what xargs puts in place of ${xargs?.replace}`) });
-  }
-  const sent = fields.length + inputs.length > 0;
-  return { endpoint, fields, inputs, method: method ?? (sent ? "POST" : "GET") };
-}
-var curlUrls = (flags, positionals) => [
-  ...positionals,
-  ...flags.filter((f) => f.name === "--url" && f.value).map((f) => f.value)
-];
-async function curlData(flags, cmd, env) {
-  const data = [];
-  for (const { name, value } of flags) {
-    if (!value || !CURL_DATA.has(name))
-      continue;
-    if (name === "-T" || name === "--upload-file")
-      data.push(await readPath(value, env));
-    else if (value.value.startsWith("@") && name !== "--data-raw" && name !== "--form-string") {
-      data.push(value.value === "@-" ? await stdinOf(cmd, env) : await readPath(slice(value, 1), env));
-    } else
-      data.push(value);
-  }
-  return data;
-}
-function knownVariables(command, environment, cwd) {
-  const values = {
-    HOME: environment.HOME,
-    PWD: /\b(?:cd|popd|pushd)\b/.test(command) ? undefined : cwd,
-    TMPDIR: environment.TMPDIR
-  };
-  const known = {};
-  for (const [name, value] of Object.entries(values)) {
-    if (value && !command.includes(`${name}=`))
-      known[name] = value;
-  }
-  return known;
 }
 
 // scripts/hooks/no-false-green.ts

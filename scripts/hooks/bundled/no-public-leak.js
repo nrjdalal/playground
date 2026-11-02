@@ -5863,17 +5863,6 @@ var CORE = "core";
 var coreDir = () => fileURLToPath(new URL("../../../extensions/core", import.meta.url));
 var extensionsDir = (data) => join2(data, "extensions");
 var markerPath = extensionsDir;
-var loginPath = (data) => join2(data, "extensions", "login");
-var loginOf = (data, env = process.env) => {
-  if (env.PLAYGROUND_LOGIN)
-    return env.PLAYGROUND_LOGIN;
-  try {
-    const login = readFileSync(loginPath(data), "utf8").trim();
-    if (login)
-      return login;
-  } catch {}
-  throw new Error(`no login for the extensions in ${loginPath(data)}: run playground ext init`);
-};
 var fixFor = (file) => file.startsWith("hooks/") ? "tell your lead, and the dispatcher hands the owner ! playground ext import --from-tree extensions/core/lists to type in the dispatcher's terminal window, which seeds the guards' lists" : "tell your lead, and the dispatcher hands the owner ! playground ext init, then a setting with ! playground settings set, to type in the dispatcher's terminal window, which writes it";
 var readRendered = async (data, file) => readRenderedSync(data, file);
 var readRenderedSync = (data, file) => {
@@ -6016,28 +6005,8 @@ var extSettings = defineSettings({
     schema: record(extScopeSchema, string2().regex(/^[A-Za-z0-9-]+\/[A-Za-z0-9._-]+$/, "a repository as owner/name"))
   }
 });
-var guardedOrgs = (values) => {
-  const links = extLinksSchema.parse(values["ext.links"] ?? {});
-  return [...new Set(Object.values(links).flat())].filter((link) => link !== "*").sort();
-};
 // packages/settings/src/folder.ts
-import {
-  existsSync as existsSync2,
-  mkdirSync,
-  readdirSync,
-  readFileSync as readFileSync2,
-  renameSync,
-  rmdirSync,
-  rmSync,
-  statSync,
-  writeFileSync
-} from "fs";
-import { dirname, join as join3, relative } from "path";
 var STALE_MS = 5 * 60000;
-var scopesIn = (data) => {
-  const root = extensionsDir(data);
-  return existsSync2(root) ? readdirSync(root, { withFileTypes: true }).filter((entry) => entry.isDirectory() && existsSync2(join3(root, entry.name, ".git"))).map((entry) => entry.name).sort() : [];
-};
 
 // packages/settings/src/items.ts
 var ATTACHMENT_LIMIT = 50 * 1024 * 1024;
@@ -6469,7 +6438,7 @@ function patterns(list, repos) {
 var readPast = (text, repos) => text.replace(new RegExp(`(?<![\\w.-])(?:${repos.public.map(escape).join("|")})(?![\\w.-])`, "gi"), "");
 
 // scripts/hooks/lists.ts
-import { existsSync as existsSync3 } from "fs";
+import { existsSync as existsSync2 } from "fs";
 var storeMarker = (environment = process.env) => markerPath(dataDir(environment));
 async function guardList(guard, name, valid, empty, environment = process.env, file) {
   const read = await readRendered(dataDir(environment), `hooks/${name}.json`);
@@ -6482,8 +6451,8 @@ async function loadList(guard, path, valid, empty, environment = process.env) {
   const refuse = (what) => ({
     refusal: `${guard} hook refused this call: its list ${path} ${what}, so it cannot check the call. Restore the file (git checkout -- it, in the checkout that holds it) or fix it, then run the call again.`
   });
-  if (!existsSync3(path))
-    return existsSync3(storeMarker(environment)) ? refuse(`is missing on a machine with a store (${storeMarker(environment)})`) : { list: empty };
+  if (!existsSync2(path))
+    return existsSync2(storeMarker(environment)) ? refuse(`is missing on a machine with a store (${storeMarker(environment)})`) : { list: empty };
   let value;
   try {
     value = JSON.parse(await Bun.file(path).text());
@@ -6492,12 +6461,10 @@ async function loadList(guard, path, valid, empty, environment = process.env) {
   }
   return valid(value) ? { list: value } : refuse("lacks a key or holds a value of the wrong type");
 }
-var isStrings = (value) => Array.isArray(value) && value.every((item) => typeof item === "string");
-var isRecord = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
 
 // scripts/hooks/no-playground-leak.ts
-import { existsSync as existsSync4, readdirSync as readdirSync2, readFileSync as readFileSync3, statSync as statSync2 } from "fs";
-import { basename as basename2, join as join6 } from "path";
+import { existsSync as existsSync3, readdirSync, readFileSync as readFileSync2, statSync } from "fs";
+import { basename as basename2, join as join5 } from "path";
 
 // scripts/hooks/github.ts
 function repoOf(text) {
@@ -6536,7 +6503,7 @@ function remotes(cwd) {
 
 // scripts/hooks/role.ts
 import { homedir as homedir2 } from "os";
-import { join as join4 } from "path";
+import { join as join3 } from "path";
 
 // packages/config/src/kinds.ts
 var ROSTER_KINDS = [
@@ -6603,7 +6570,7 @@ var names;
 function loadNames(environment = process.env) {
   names ??= (async () => {
     try {
-      const setting = join4(__HOOK_DIR, "../../packages/scripts/src/playground/setting.ts");
+      const setting = join3(__HOOK_DIR, "../../packages/scripts/src/playground/setting.ts");
       const read = Bun.spawn(["bun", setting, "sessions.names", "sessions.aliases"], {
         env: { ...process.env, ...environment },
         stderr: "ignore",
@@ -6618,17 +6585,17 @@ function loadNames(environment = process.env) {
   return names;
 }
 async function registryName(sessionId, environment = process.env) {
-  const dir = join4(environment.CLAUDE_CONFIG_DIR || join4(homedir2(), ".claude"), "sessions");
+  const dir = join3(environment.CLAUDE_CONFIG_DIR || join3(homedir2(), ".claude"), "sessions");
   for await (const file of new Bun.Glob("*.json").scan(dir)) {
     try {
-      const entry = await Bun.file(join4(dir, file)).json();
+      const entry = await Bun.file(join3(dir, file)).json();
       if (entry.sessionId === sessionId && typeof entry.name === "string")
         return entry.name;
     } catch {}
   }
 }
 async function rosterRole(name, environment = process.env) {
-  const path = join4(dataDirOf(environment), "roster.json");
+  const path = join3(dataDirOf(environment), "roster.json");
   try {
     const roster = await Bun.file(path).json();
     const kind = roster.agents?.find((agent) => agent?.name === name)?.kind;
@@ -6674,15 +6641,6 @@ var MAX_BYTES = 1048576;
 var MAX_SCRIPT = 131072;
 var LARGE = "a text too large to read";
 var deadline;
-async function withDeadline(budget, body) {
-  const outer = deadline;
-  deadline = performance.now() + budget;
-  try {
-    return await body();
-  } finally {
-    deadline = outer;
-  }
-}
 function pastDeadline() {
   if (deadline !== undefined && performance.now() > deadline)
     throw new RangeError("past the hook's time");
@@ -6725,8 +6683,6 @@ var RESERVED = new Set([
   "until",
   "while"
 ]);
-var ownFirst = (cmd, first) => !!first && first === cmd.words.find((w) => w.quoted || !RESERVED.has(w.value));
-var onlyReserved = (cmd) => cmd.words.length > 0 && cmd.words.every((w) => !w.quoted && RESERVED.has(w.value));
 var GROUPING = new Set(["}", "done", "esac", "fi"]);
 var ASSIGN = /^[A-Za-z_]\w*=/;
 var WRAPPERS = new Map(Object.entries({
@@ -6780,34 +6736,6 @@ var ROOT_SHELLS = new Map([
   ["doas", new Set(["-s"])],
   ["sudo", new Set(["--login", "--shell", "-i", "-s"])]
 ]);
-function stdinShell(cmd) {
-  const { args, first, name } = parse3(cmd);
-  if (first && !marked(first.value)) {
-    if (!SHELLS.has(name))
-      return;
-    const { inline, operand } = shellOperand(args, name);
-    return inline || operand ? undefined : "shell";
-  }
-  let at = 0;
-  for (let w = cmd.words[at];w && !w.quoted; w = cmd.words[at]) {
-    if (w.value === "function")
-      at += 2;
-    else if (RESERVED.has(w.value) || ASSIGN.test(w.value))
-      at++;
-    else
-      break;
-  }
-  const end = first ? cmd.words.indexOf(first) : -1;
-  const before = cmd.words.slice(at, end === -1 ? undefined : end);
-  const k = before.findIndex((w) => !w.quoted && ROOT_SHELLS.has(program(w.value)));
-  if (k === -1)
-    return;
-  const wrapper = program(before[k].value);
-  const shells = ROOT_SHELLS.get(wrapper);
-  const { flags } = WRAPPERS.get(wrapper);
-  const starts = ({ quoted, value }) => marked(value) || !quoted && (shells.has(value) || /^-[A-Za-z]+$/.test(value) && value.slice(1).split("").every((c) => flags.has(`-${c}`)) && value.slice(1).split("").some((c) => shells.has(`-${c}`)));
-  return !!first || before.slice(k + 1).some(starts) ? "root" : undefined;
-}
 var COUNTED = new Set(["repeat", "timeout"]);
 var SHELLS = new Set(["bash", "dash", "ksh", "sh", "zsh"]);
 var EXPORTS = new Set(["declare", "export", "local", "readonly", "typeset"]);
@@ -6909,10 +6837,6 @@ var setVar = (vars, key, value) => {
   else
     setLog.set(vars, [key]);
 };
-function varsSince(vars, cursor) {
-  const log = setLog.get(vars) ?? [];
-  return [cursor === undefined ? [...vars.keys()] : log.slice(cursor), log.length];
-}
 var merge2 = (out, part) => {
   out.value += part.value;
   if (part.unknown)
@@ -6922,7 +6846,7 @@ var merge2 = (out, part) => {
   if (part.reads?.length)
     (out.reads ??= []).push(...part.reads);
 };
-var join5 = (parts, separator = "") => {
+var join4 = (parts, separator = "") => {
   const out = { value: "" };
   parts.forEach((part, k) => {
     if (k > 0)
@@ -6957,14 +6881,6 @@ var UV_TAKES = new Set([
   "--with-editable",
   "--with-requirements"
 ]);
-var PYTHON = /^python(?:\d+(?:\.\d+)*)?$/;
-function pythonModule(name, args) {
-  if (!PYTHON.test(name))
-    return;
-  const at = args.findIndex((a) => a.value === "-m");
-  const module = at === -1 ? undefined : args[at + 1];
-  return module && { module: module.value, rest: args.slice(at + 2) };
-}
 function decode2(raw) {
   return raw.replace(/\\(?:x([\da-fA-F]{1,2})|u([\da-fA-F]{1,4})|U([\da-fA-F]{1,8})|0?([0-7]{1,3})|([\s\S]))/g, (whole, hex, u4, u8, octal, other) => {
     const point = hex || u4 || u8 ? Number.parseInt(hex ?? u4 ?? u8 ?? "", 16) : Number.parseInt(octal ?? "", 8);
@@ -7416,12 +7332,6 @@ function unwrap(state, inside, budget) {
     xargs: state.xargs
   };
 }
-function slotWords({ args, name }) {
-  if (name !== "run-slot.sh")
-    return;
-  const at = args.findIndex((a) => a.value === "--");
-  return at === -1 ? [] : args.slice(at + 1);
-}
 function shellSlot(args, shell) {
   const { inline, operand } = shellOperand(args, shell);
   if (inline || !operand || program(operand.value) !== "run-slot.sh")
@@ -7572,7 +7482,7 @@ async function scriptOf(operand, cmd, env) {
   return script;
 }
 async function outputs(cmds, env) {
-  return join5(await Promise.all(cmds.map((c) => outputOf(c, env))));
+  return join4(await Promise.all(cmds.map((c) => outputOf(c, env))));
 }
 async function record2(cmd, name, args, env) {
   for (const r of cmd.redirects) {
@@ -7583,7 +7493,7 @@ async function record2(cmd, name, args, env) {
       continue;
     const stdout = r.fd === "" || r.fd === "1" || r.fd === "&";
     const out = stdout ? await outputOf(cmd, env) : unknown2(`what ${name || "a command"} writes to stderr`);
-    env.files.set(path, held2(r.op === ">>" ? join5([await existing(path, env), out]) : out));
+    env.files.set(path, held2(r.op === ">>" ? join4([await existing(path, env), out]) : out));
   }
   if (name !== "tee")
     return;
@@ -7592,7 +7502,7 @@ async function record2(cmd, name, args, env) {
   for (const a of args) {
     const path = a.value.startsWith("-") ? undefined : pathOf(a, env);
     if (path)
-      env.files.set(path, held2(append ? join5([await existing(path, env), input]) : input));
+      env.files.set(path, held2(append ? join4([await existing(path, env), input]) : input));
   }
 }
 async function existing(path, env) {
@@ -7621,7 +7531,7 @@ async function outputOf(cmd, env) {
         return unknown2(LARGE);
       parts.push(part);
     }
-    return join5(parts);
+    return join4(parts);
   }
   if (name === "tee")
     return stdinOf(cmd, env);
@@ -7861,9 +7771,7 @@ var EMPTY_TERMS = {
   probe: "probe",
   sessions: { roles: [], sins: [] }
 };
-var isTerms = (value) => isRecord(value) && ["aliases", "everyday", "names", "paths"].every((key) => isStrings(value[key])) && typeof value.probe === "string" && isRecord(value.sessions) && isStrings(value.sessions.roles) && isStrings(value.sessions.sins);
 var terms = EMPTY_TERMS;
-var isCleared = (value) => isRecord(value) && Object.values(value).every((entry) => isRecord(entry) && typeof entry.name === "string" && (entry.signature === undefined || typeof entry.signature === "string"));
 var CLEARED = {};
 var CHAT_TOOL = /^chat_(?:me_message|post_ephemeral|post_message|schedule_message|update)$/;
 var POST_KEYS = { channel: "channel", text: "text" };
@@ -7924,13 +7832,13 @@ function chipsSigned(blocks, signature) {
 var escape2 = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 var HANDLE = /^[a-z\d][\w.-]{1,63}$/i;
 var MAX_ROSTER_BYTES = 1048576;
-var CHECKOUT = join6(__HOOK_DIR, "..", "..");
+var CHECKOUT = join5(__HOOK_DIR, "..", "..");
 function rosterNames(environment) {
-  const path = join6(dataDirOf(environment), "roster.json");
+  const path = join5(dataDirOf(environment), "roster.json");
   try {
-    if (statSync2(path).size > MAX_ROSTER_BYTES)
+    if (statSync(path).size > MAX_ROSTER_BYTES)
       return [];
-    const agents = JSON.parse(readFileSync3(path, "utf8"))?.agents;
+    const agents = JSON.parse(readFileSync2(path, "utf8"))?.agents;
     if (!Array.isArray(agents))
       return [];
     return agents.flatMap((a) => {
@@ -7943,9 +7851,9 @@ function rosterNames(environment) {
 }
 var notEveryday = (name) => HANDLE.test(name) && !terms.everyday.some((w) => w.toLowerCase() === name.toLowerCase());
 function skillNames(checkout = CHECKOUT) {
-  const ours = join6(checkout, "skills", "playground");
+  const ours = join5(checkout, "skills", "playground");
   try {
-    return readdirSync2(ours, { withFileTypes: true }).filter((d) => d.isDirectory() && existsSync4(join6(ours, d.name, "SKILL.md"))).map((d) => d.name).filter(notEveryday);
+    return readdirSync(ours, { withFileTypes: true }).filter((d) => d.isDirectory() && existsSync3(join5(ours, d.name, "SKILL.md"))).map((d) => d.name).filter(notEveryday);
   } catch {
     return [];
   }
@@ -8913,20 +8821,6 @@ function candidate(command) {
   const maybe = policy.anyWrite ? MAYBE_ANY : MAYBE;
   return command.includes("$'") || maybe.test(command.replace(/[\\'"]/g, ""));
 }
-async function check(raw, environment = process.env, checkout = CHECKOUT, lists = join6(coreDir(), "lists")) {
-  const loadedTerms = await guardList("no-playground-leak", "playground-terms", isTerms, EMPTY_TERMS, environment, join6(lists, "playground-terms.json"));
-  const loadedCleared = await guardList("no-playground-leak", "slack-cleared", isCleared, {}, environment, join6(lists, "slack-cleared.json"));
-  const refusal = loadedTerms.refusal ?? loadedCleared.refusal;
-  if (refusal)
-    return refusedList(raw, refusal);
-  terms = loadedTerms.list ?? EMPTY_TERMS;
-  CLEARED = loadedCleared.list ?? {};
-  TERM = pattern(environment, checkout);
-  const read = await readPolicy(dataDir(environment));
-  if (read.refusal !== undefined)
-    return refusedList(raw, `no-playground-leak hook refused this call: ${read.refusal}, then run the call again.`);
-  return inspectAs(leakPolicy(new Set(guardedOrgs(read.settings.values))), raw, environment);
-}
 var refusedList = (raw, refusal) => WRITE_CALL.test(subjectOf(raw)) ? refusal : undefined;
 async function inspectAs(given, raw, environment) {
   policy = given;
@@ -8986,14 +8880,7 @@ async function inspect(raw, environment) {
   if (typeof tool === "string")
     return mcp(tool, input);
 }
-if (import.meta.main) {
-  const raw = await Bun.stdin.text();
-  const reason = await fromFactory(raw) ? await check(raw) : undefined;
-  if (reason) {
-    console.error(reason);
-    process.exit(2);
-  }
-}
+if (false) {}
 
 // scripts/hooks/no-public-leak.ts
 var PERSON = "Say the role (the owner, a reviewer, a worker) in place of the person.";
@@ -9030,7 +8917,7 @@ var policy2 = (list, repos) => ({
   what: "private text",
   why: `Everything written to ${repos.public.join(" or ")} is public once the repository is, and stays cached after, so it names no person, company or private record.`
 });
-async function check2(raw, environment = process.env) {
+async function check(raw, environment = process.env) {
   const loaded = await guardList("no-public-leak", "no-public-leak", isPublicList, EMPTY_LIST, environment);
   if (loaded.refusal)
     return refusedList(raw, loaded.refusal);
@@ -9041,12 +8928,12 @@ async function check2(raw, environment = process.env) {
 }
 if (import.meta.main) {
   const raw = await Bun.stdin.text();
-  const reason = await fromFactory(raw) ? await check2(raw) : undefined;
+  const reason = await fromFactory(raw) ? await check(raw) : undefined;
   if (reason) {
     console.error(reason);
     process.exit(2);
   }
 }
 export {
-  check2 as check
+  check
 };
