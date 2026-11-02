@@ -1067,7 +1067,7 @@ async function git(
   const here = { ...env, cwd: dir }
   // Outside anyWrite, an alias -c sets is followed when its value is literal git words, and refused when it runs a command, cannot be read or names another alias, or when the alias's name or the subcommand cannot be read.
   const maybeAlias = anyAlias || (aliasSet && !!sub && marked(sub))
-  if (!policy.anyWrite && sub && !builtin(sub) && (maybeAlias || aliases.has(sub.toLowerCase()))) {
+  if (!policy.anyWrite && sub && (maybeAlias || aliases.has(sub.toLowerCase())) && !builtin(sub)) {
     const value = aliases.get(sub.toLowerCase())
     const words =
       value === undefined || value.trim().startsWith("!") ? undefined : splitCmdline(value)
