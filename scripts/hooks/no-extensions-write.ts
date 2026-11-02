@@ -20,7 +20,6 @@ import {
   PRINTERS,
   program,
   run,
-  SHELLS,
   slotWords,
   stdinOf,
   tick,
@@ -149,89 +148,197 @@ function cliCalls(parsed: Parsed, env: Env): Word[][] {
   return words.flatMap((word, at) => (isCli(word, dirs) ? [words.slice(at + 1)] : []))
 }
 
-// Programs that run a word as a shell line: arch's, concurrently's, find's -exec, flock's, npx's package, rsync's -e, scp's and sftp's ProxyCommand, screen's, script's -c, ssh's remote command and ProxyCommand, tmux's command and watch's; git runs its -c values (an alias, core.sshCommand, core.pager) and more, so all its words but a message are read too.
-const RUNNERS = new Set([
-  "arch",
-  "concurrently",
-  "find",
-  "flock",
-  "git",
-  "npx",
-  "rsync",
-  "scp",
-  "screen",
-  "script",
-  "sftp",
-  "ssh",
-  "tmux",
-  "watch",
-])
-// git's commit and tag keep a message as text, and no alias can take their names; an alias runs every word it gets, and a call that sets config may define one, so its message is read
-const KEEPS_MESSAGE = new Set(["commit", "tag"])
-const keepsMessage = (args: Word[], env: Env): boolean =>
-  KEEPS_MESSAGE.has(gitCall(args, env).sub ?? "") &&
-  !args.some(({ value }) => /^(?:-c|--config-env(?:=|$))/.test(value))
-// git's commit or tag message at a word: the word after -m, a flag cluster ending in it (-am) or --message, or one with the message attached
-const messageAt = (words: Word[], at: number): string | undefined =>
-  /^(?:-[a-zA-Z]*m|--message)$/.test(words[at - 1]?.value ?? "")
-    ? words[at].value
-    : /^(?:-m|--message=)./.test(words[at].value)
-      ? words[at].value.replace(/^(?:-m|--message=)/, "")
-      : undefined
+const AWKS = new Set(["awk", "gawk", "mawk", "nawk"])
+const SEDS = new Set(["gsed", "sed"])
+// what lets an awk program run a command or write a file: system(), a | pipe, getline, a > redirect or an @ directive
+const AWK_RUNS = /system|getline|[|>@]/
 
-// The runner, shell or eval a word names, by its basename with case dropped, since macOS runs SH as sh; a word bash expands by a glob or a brace (`/bin/s?`, `{sh,-c}`) may expand to any, and only the spaced texts after it are read, so `ls *.md` runs; a quoted text with a space (awk's program) names none
-const runnerOf = (word: Word): string | undefined => {
-  if (GLOB.test(word.value) && !(word.quoted && /\s/.test(word.value))) return "a glob"
-  const base = (word.value.split("/").pop() ?? "").toLowerCase()
-  return RUNNERS.has(base) || SHELLS.has(base) || base === "eval" ? base : undefined
+// awk's program words, or undefined when a program comes from a file or an option the hook does not know: -F and -v take a value, gawk's -e and --source a program, and the first other word is the program
+function awkPrograms(words: Word[]): Word[] | undefined {
+  const programs: Word[] = []
+  for (let k = 0; k < words.length; k++) {
+    const { value } = words[k]
+    if (value === "--") return programs.length ? programs : words.slice(k + 1, k + 2)
+    if (/^-[Fv]$/.test(value)) k++
+    else if (/^-[Fv]./.test(value)) continue
+    else if (value === "-e" || value === "--source") programs.push(words[++k] ?? { value: "" })
+    else if (value.startsWith("--source=")) programs.push({ ...words[k], value: value.slice(9) })
+    else if (value.startsWith("-")) return undefined
+    else return programs.length ? programs : [words[k]]
+  }
+  return programs.length ? programs : undefined
 }
 
-// The names a command defines as functions (`f() {`, `function f`), anywhere in its text, a shell's script included, since a call of one may run any line
-const definedFunctions = (command: string): Set<string> =>
-  new Set(
-    [...command.matchAll(/(?:\bfunction\s+([\w.:-]+)|(?<![\w.:-])([\w.:-]+)\s*\(\s*\))/g)].map(
-      (m) => (m[1] ?? m[2]).toLowerCase(),
-    ),
-  )
+// sed's script words, or undefined when a script comes from a file or an option the hook does not know: -e and --expression give a script, -i a suffix, -l a length, and with no -e the first other word is the script
+function sedScripts(words: Word[]): Word[] | undefined {
+  const scripts: Word[] = []
+  let first: Word | undefined
+  for (let k = 0; k < words.length; k++) {
+    const { value } = words[k]
+    if (value === "--") {
+      first ??= words[k + 1]
+      break
+    }
+    if (value === "--expression") scripts.push(words[++k] ?? { value: "" })
+    else if (value.startsWith("--expression="))
+      scripts.push({ ...words[k], value: value.slice(13) })
+    else if (
+      /^--(?:debug|in-place(?:=.*)?|line-length=\d+|null-data|posix|quiet|regexp-extended|sandbox|separate|silent|unbuffered)$/.test(
+        value,
+      )
+    )
+      continue
+    else if (value.startsWith("--")) return undefined
+    else if (value.startsWith("-") && value.length > 1) {
+      for (let c = 1; c < value.length; c++) {
+        const flag = value[c]
+        if (flag === "e") {
+          scripts.push(
+            c + 1 < value.length
+              ? { ...words[k], value: value.slice(c + 1) }
+              : (words[++k] ?? { value: "" }),
+          )
+          break
+        }
+        if (flag === "i") break
+        if (flag === "l") {
+          if (c + 1 === value.length) k++
+          break
+        }
+        if (!"nErsuz".includes(flag)) return undefined
+      }
+    } else first ??= words[k]
+  }
+  if (scripts.length) return scripts
+  return first ? [first] : undefined
+}
 
-// Whether a line is read whole, as canary read it: it holds, in a command or a substitution, a runner call other than git (a listed runner, a shell, eval, source or ., a function it defines, a program word the hook cannot read or a glob), or git with config set in the call or given a word the hook cannot read (an alias, `rebase -x "$1"`), since a runner may run any text the line holds (`set -- '…'; eval "$1"`, `git log … | sh`)
-function wholeLine(commands: Command[], functions: Set<string>): boolean {
+// Whether a sed script can run a command or write a file: its e, w or W command, an s command's e or w flag, or a command the hook does not know; `out` gets each e command's line and each e-flagged replacement
+function sedRuns(script: string, out: string[] = []): boolean {
+  let i = 0
+  let runs = false
+  const to = (delimiter: string): boolean => {
+    for (; i < script.length; i++) {
+      if (script[i] === "\\") i++
+      else if (script[i] === delimiter) return ++i > 0
+    }
+    return false
+  }
+  const line = () => {
+    while (i < script.length && script[i] !== "\n") i += script[i] === "\\" ? 2 : 1
+  }
+  const label = () => {
+    while (i < script.length && !";\n".includes(script[i])) i++
+  }
+  const address = (): boolean => {
+    if (script[i] === "/") return ++i > 0 && to("/")
+    if (script[i] === "\\") return (i += 2) <= script.length && to(script[i - 1])
+    while (i < script.length && /[\d$~+]/.test(script[i])) i++
+    return true
+  }
+  while (i < script.length) {
+    if (/[\s;{}!]/.test(script[i])) {
+      i++
+      continue
+    }
+    if (!address()) return true
+    while (/[IM]/.test(script[i] ?? "")) i++
+    if (script[i] === ",") {
+      i++
+      if (!address()) return true
+      while (/[IM]/.test(script[i] ?? "")) i++
+    }
+    while (/[\s!]/.test(script[i] ?? "")) i++
+    const command = script[i++]
+    if (command === undefined || "{};".includes(command)) continue
+    if ("eWw".includes(command)) {
+      const start = i
+      line()
+      if (command === "e") out.push(script.slice(start, i))
+      runs = true
+    } else if (command === "#" || "acirR".includes(command)) line()
+    else if (":bTtv".includes(command)) label()
+    else if (command === "s") {
+      const delimiter = script[i++]
+      if (!delimiter || !to(delimiter)) return true
+      const start = i
+      if (!to(delimiter)) return true
+      const replacement = script.slice(start, i - 1)
+      while (/[egpiImM\d]/.test(script[i] ?? ""))
+        if (script[i++] === "e") {
+          out.push(replacement)
+          runs = true
+        }
+      if (script[i] === "w") {
+        line()
+        runs = true
+      }
+    } else if (command === "y") {
+      const delimiter = script[i++]
+      if (!delimiter || !to(delimiter) || !to(delimiter)) return true
+    } else if ("lLqQ".includes(command))
+      while (/[\s\d]/.test(script[i] ?? "") && script[i] !== "\n") i++
+    else if (!"=DdFGgHhNnPpxz".includes(command)) return true
+  }
+  return runs
+}
+
+// The lines an awk or sed program runs, read whatever the line: each string literal of an awk program that can run a command or write a file, and each sed e command's line and e-flagged replacement
+function programLines({ args, first }: Parsed): string[] {
+  const base = (first?.value.split("/").pop() ?? "").toLowerCase()
+  if (AWKS.has(base))
+    return (awkPrograms(args) ?? [])
+      .filter(({ value }) => AWK_RUNS.test(value))
+      .flatMap(({ value }) => [...value.matchAll(/"((?:[^"\\]|\\.)*)"/g)].map((m) => m[1]))
+  if (!SEDS.has(base)) return []
+  const out: string[] = []
+  for (const { value } of sedScripts(args) ?? []) sedRuns(value, out)
+  return out
+}
+
+// Whether a call only reads, so its quoted words are never a command line: a reader, or an awk or sed whose every program is one the hook reads and none can run a command or write a file (awk's system(), a | pipe, getline, a > redirect or an @ directive; sed's e, w or W)
+function narrow(parsed: Parsed, env: Env): boolean {
+  const { args, first, name, xargs } = parsed
+  if (!first) return true
+  if (xargs) return false
+  if (reads(parsed, env)) return true
+  const base = (first.value.split("/").pop() ?? "").toLowerCase()
+  const programs = AWKS.has(base)
+    ? awkPrograms(args)
+    : SEDS.has(base)
+      ? sedScripts(args)
+      : undefined
+  if (!programs || marked(name)) return false
+  const runs = AWKS.has(base)
+    ? (text: string) => AWK_RUNS.test(text)
+    : (text: string) => sedRuns(text)
+  return programs.every((word) => !marked(word.value) && !runs(word.value))
+}
+
+// Whether a line is read whole, as canary read it: every spaced text of every program but a reader, since a program may run any text the line holds (`set -- '…'; eval "$1"`, `git log … | sh`); only a line whose every command, its substitutions' included, is a narrow call and that writes no file by a redirect is read call by call
+function wholeLine(commands: Command[], env: Env): boolean {
   return commands.some((cmd) => {
     const words = [...cmd.words, ...cmd.redirects.flatMap((r) => (r.target ? [r.target] : []))]
-    if (words.some((word) => word.procs && wholeLine(word.procs, functions))) return true
-    const { args, first, local, name } = parse(cmd)
-    if (!first) return false
-    if (marked(name) || name === "source" || name === "." || functions.has(name.toLowerCase()))
-      return true
-    const all = [first, ...args]
-    const at = all.findIndex((word) => runnerOf(word))
-    if (at < 0) return false
-    if (runnerOf(all[at]) !== "git") return true
-    return (
-      [...local.keys()].some((key) => key.startsWith("GIT_CONFIG")) ||
-      all
-        .slice(at + 1)
-        .some(({ value }) => marked(value) || /^(?:-c|--config-env(?:=|$))/.test(value))
+    if (words.some((word) => word.procs && wholeLine(word.procs, env))) return true
+    const writes = cmd.redirects.some(
+      ({ op, target }) =>
+        ([">", ">>", ">|", "<>"].includes(op) ||
+          (op === ">&" && !DUPLICATE.test(target?.value ?? ""))) &&
+        target?.value !== "/dev/null",
     )
+    return writes || !narrow(parse(cmd), env)
   })
 }
 
-// Every text of a variable the call sets or exports, and, on a line read whole, of every word, or else of git's words but a commit's or tag's message, which `messages` returns for a gated call's check; each holds a space, a leading ! dropped, and is read as a command line of its own.
-function runsOf(parsed: Parsed, env: Env, whole: boolean): { lines: string[]; messages: string[] } {
+// Every text of a variable the call sets or exports, and on a line read whole of every word, that holds a space, a leading ! dropped, each read as a command line of its own.
+function runsOf(parsed: Parsed, env: Env, whole: boolean): string[] {
   const { args, first, local } = parsed
   const values = [...local, ...env.vars].flatMap(([, text]) => (text.unknown ? [] : [text.value]))
-  const all = first ? [first, ...args] : args
-  const from = whole ? 0 : all.findIndex((word) => runnerOf(word))
-  const words = from < 0 ? [] : all.slice(from)
-  const keeps = !whole && words.length > 0 && keepsMessage(words.slice(1), env)
-  const messages: string[] = []
-  for (const [at, word] of words.entries()) {
-    const message = keeps && at > 0 ? messageAt(words, at) : undefined
-    if (message !== undefined) messages.push(message)
-    else for (const text of texts(word)) values.push(text.value.replace(/^!/, ""))
-  }
-  const lines = [...new Set(values)].filter((value) => /\s/.test(value) && !marked(value))
-  return { lines, messages }
+  const words = whole ? (first ? [first, ...args] : args) : []
+  for (const word of words)
+    for (const text of texts(word)) values.push(text.value.replace(/^!/, ""))
+  values.push(...programLines(parsed))
+  return [...new Set(values)].filter((value) => /\s/.test(value) && !marked(value))
 }
 
 // What of a playground call changes what a guard reads, or undefined; its words split as that command's parseWords splits them, and a word the hook cannot read taken as the worst.
@@ -289,7 +396,6 @@ function inspect(raw: string, environment: Environment) {
   const root = real(extensionsDir(dataDir(environment)))
   const home = environment.HOME || homedir()
   const needle = root.startsWith(real(home) + sep) ? root.slice(real(home).length) : root
-  const functions = definedFunctions(typeof input.command === "string" ? input.command : "")
   const inRoot = (path: string | undefined) => {
     if (path === undefined) return false
     const at = real(path)
@@ -374,7 +480,7 @@ function inspect(raw: string, environment: Environment) {
           .find(Boolean)
     if (write) return refuse(write)
     const runs = reader ? undefined : runsOf(parsed, env, whole)
-    for (const raw of runs?.lines ?? []) {
+    for (const raw of runs ?? []) {
       const line =
         xargs?.replace && fed
           ? raw.replaceAll(xargs.replace, fed.unknown ? UNKNOWN : fed.value)
@@ -383,14 +489,6 @@ function inspect(raw: string, environment: Environment) {
       seen.add(line)
       const verdict = await run(lex(line, env.known), { ...env, vars: new Map() }, visit, true)
       if (verdict) return verdict
-    }
-    // a git message is text, no line git runs, but one naming a gated call is refused all the same
-    for (const message of runs?.messages ?? []) {
-      const write = lex(message, env.known)
-        .commands.flatMap((cmd) => cliCalls(parse(cmd), env))
-        .map((words) => cliWrite(words))
-        .find(Boolean)
-      if (write) return refuse(write)
     }
     // a bare assignment or export with no command, or a reader: only its redirect writes, and a variable it sets is read where a command runs with it
     if (!first || EXPORTS.has(name) || reader) return
@@ -422,13 +520,15 @@ function inspect(raw: string, environment: Environment) {
   }
   const known = knownVariables(command, environment, directory)
   const lexed = lex(command, known)
-  whole = wholeLine(lexed.commands, functions)
-  return run(
-    lexed,
-    { cwd: directory, files: new Map(), known, process: environment, vars: new Map() },
-    visit,
-    true,
-  )
+  const env: Env = {
+    cwd: directory,
+    files: new Map(),
+    known,
+    process: environment,
+    vars: new Map(),
+  }
+  whole = wholeLine(lexed.commands, env)
+  return run(lexed, env, visit, true)
 }
 
 // Fails open: an error on any call lets it run, so a reader bug cannot block every Bash command or write; a RangeError, a stack overflow or the walk past its time, refuses.
