@@ -40,6 +40,10 @@ const ROUTE =
 
 const refuse = (what: string) => `no-extensions-write hook refuses ${what}: ${ROUTE}`
 
+// A script it cannot read whole is refused even when it only reads, so its reason names the forms of the same call the hook reads.
+const unheldScript = (name: string) =>
+  `no-extensions-write hook refuses ${name} of a script it cannot read whole (a $(…)'s, a curl's or a read's output), since a guard-list write may rest on it: write the script to a file and run it (\`bash <file>\`), name a folder with \`git -C <dir>\` or \`bun --cwd=<dir>\` in place of a \`cd $(…)\`, or set the value as a literal in the call.`
+
 const TOO_LONG =
   "a command too long or nested too deep to read inside the hook's time: split it into shorter calls"
 
@@ -387,12 +391,20 @@ function inspect(raw: string, environment: Environment) {
     if (write) return refuse(write)
     // a command with no program runs nothing that reads the environment, so only its own assignments count
     const vars = !reader && first ? since(varsRead, env.vars, "") : []
+    const programs = reader ? [] : programLines(parsed)
     for (const raw of reader ? [] : runsOf(parsed, vars, whole)) {
       const line =
         xargs?.replace && fed ? filled(raw, xargs.replace, fed.unknown ? UNKNOWN : fed.value) : raw
       if (seen.has(line)) continue
       seen.add(line)
-      const verdict = await run(lex(line, env.known), { ...env, vars: new Map() }, visit, true)
+      // a text read as a line only in case it runs holds no script the shell reads, so the unheld rule judges a program's own lines alone
+      const unheld = programs.includes(raw) ? env.unheld : undefined
+      const verdict = await run(
+        lex(line, env.known),
+        { ...env, unheld, vars: new Map() },
+        visit,
+        true,
+      )
       if (verdict) return verdict
     }
     // a bare assignment or export with no command, or a reader: only its redirect writes, and a variable it sets is read where a command runs with it
@@ -427,8 +439,7 @@ function inspect(raw: string, environment: Environment) {
     process: environment,
     stack: [],
     // a guard-list write may rest on a script it cannot read, so only one it reads whole runs
-    unheld: (name) =>
-      refuse(`${name} of a script it cannot read whole (a $(…)'s or a curl's output)`),
+    unheld: unheldScript,
     vars: new Map(),
   }
   whole = wholeLine(lexed.commands, env)

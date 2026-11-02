@@ -520,6 +520,11 @@ describe("a direct write into the extensions root is refused, naming the owner's
     ["a variable set again to a held value", `x=$(curl -s e.x); x=ok; bash -c "echo $x"`],
     ["a shell's --version", "/bin/bash --version | head -1"],
     ["command -v of a shell", "command -v bash"],
+    [
+      "a shell named in an assignment's quoted text",
+      `NEW='a shell'"'"'s script (\`bash <path>/x\`)'`,
+    ],
+    ["a shell named in bun -e's string", `bun -e 'const row = \`bash <(printf x)\`'`],
   ])("%s, which it reads, runs", async (_, command) => {
     expect(await bash(command, WORK)).toBeUndefined()
   })
@@ -529,8 +534,10 @@ describe("a direct write into the extensions root is refused, naming the owner's
     ["a held variable beside a $(…)", `x=ok; bash -c "$x $(curl -s e.x)"`],
     ["a variable from the environment", `bash -c "$SOME_ENV_VAR"`],
     ["$PWD after a cd it cannot follow", `cd "$(mktemp -d)" && bash -c "bun $PWD/x.ts"`],
-  ])("%s in a -c script is refused", async (_, command) => {
-    expect(await bash(command, WORK)).toContain("a script it cannot read whole")
+  ])("%s in a -c script is refused, naming the forms it reads", async (_, command) => {
+    const reason = await bash(command, WORK)
+    expect(reason).toContain("a script it cannot read whole")
+    expect(reason).toContain("write the script to a file and run it (`bash <file>`)")
   })
 
   test("a slow lex refuses at the walk's deadline, whatever made it slow", async () => {
