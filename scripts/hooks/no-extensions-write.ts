@@ -20,6 +20,7 @@ import {
   parse,
   type Parsed,
   pathOf,
+  places,
   PRINTERS,
   program,
   run,
@@ -432,14 +433,17 @@ function inspect(raw: string, environment: Environment) {
     if (slot)
       return slot.length === 0 ? undefined : examine({ ...cmd, words: slot }, env, visit, false)
     const { args, first, name, xargs } = parsed
-    const into = cmd.redirects.find(
-      (r) =>
-        r.target &&
-        writer(r) &&
-        (inRoot(pathOf(r.target, env)) ||
-          (GLOB.test(r.target.value) && !!names(r.target, env, true))),
-    )
-    if (into?.target) return refuse(`a write to ${pathOf(into.target, env)}`)
+    // every folder the shell may be in, so a write a cd the reader cannot be sure of would land in the root is judged there too
+    for (const here of places(env)) {
+      const into = cmd.redirects.find(
+        (r) =>
+          r.target &&
+          writer(r) &&
+          (inRoot(pathOf(r.target, here)) ||
+            (GLOB.test(r.target.value) && !!names(r.target, here, true))),
+      )
+      if (into?.target) return refuse(`a write to ${pathOf(into.target, here)}`)
+    }
     // a reader is its command's own first word, so a wrapper's option value parse misread never stands in for one
     const reader = !rootLine && ownFirst(cmd, first) && reads(parsed, env)
     const fed = xargs ? await stdinOf(cmd, env) : undefined
@@ -482,30 +486,34 @@ function inspect(raw: string, environment: Environment) {
     if (!first || EXPORTS.has(name) || reader) return
     // a program word the hook cannot read is named as such, so a refusal always names what runs
     const verb = name && !marked(name) ? name : "a program it cannot read"
-    if (inRoot(env.cwd)) return refuse(`${verb} run inside ${root}`)
-    if (name === "git" && inRoot(gitCall(args, env).cwd)) return refuse(`git on a clone in ${root}`)
     const remover = REMOVERS.has(name)
-    const scope = since(varsJudged, env.vars, `${env.cwd}\0${remover}`)
-    for (const value of [...parsed.local.values(), ...scope]) {
-      const named = names({ ...value, quoted: false }, env, remover)
-      if (named) return refuse(`${verb} with a variable on ${named}`)
-    }
-    const literal = !whole && narrow(cmd, env)
-    for (const word of [first, ...args]) {
-      const named = names(word, env, remover, literal)
-      if (named) return refuse(`${verb} on ${named}`)
-    }
-    if (cmd.redirects.some((r) => r.body && holds(r.body.value, env)))
-      return refuse(`${verb} with a script that names ${root}`)
-    if (fed) {
-      const named =
-        !fed.unknown &&
-        fed.value
-          .split(/\s+/)
-          .filter(Boolean)
-          .map((value) => names({ quoted: false, value }, env, remover))
-          .find(Boolean)
-      if (named) return refuse(`${verb} under xargs on ${named}`)
+    // each folder the shell may be in, so a program a cd the reader cannot be sure of would run inside the root, or a path of its own that lands there, is judged in every one
+    for (const here of places(env)) {
+      if (inRoot(here.cwd)) return refuse(`${verb} run inside ${root}`)
+      if (name === "git" && inRoot(gitCall(args, here).cwd))
+        return refuse(`git on a clone in ${root}`)
+      const scope = since(varsJudged, here.vars, `${here.cwd}\0${remover}`)
+      for (const value of [...parsed.local.values(), ...scope]) {
+        const named = names({ ...value, quoted: false }, here, remover)
+        if (named) return refuse(`${verb} with a variable on ${named}`)
+      }
+      const literal = !whole && narrow(cmd, here)
+      for (const word of [first, ...args]) {
+        const named = names(word, here, remover, literal)
+        if (named) return refuse(`${verb} on ${named}`)
+      }
+      if (cmd.redirects.some((r) => r.body && holds(r.body.value, here)))
+        return refuse(`${verb} with a script that names ${root}`)
+      if (fed) {
+        const named =
+          !fed.unknown &&
+          fed.value
+            .split(/\s+/)
+            .filter(Boolean)
+            .map((value) => names({ quoted: false, value }, here, remover))
+            .find(Boolean)
+        if (named) return refuse(`${verb} under xargs on ${named}`)
+      }
     }
   }
   const known = knownVariables(command, environment, directory)

@@ -11,6 +11,7 @@ import {
   knownVariables,
   lex,
   pathOf,
+  places,
   program,
   run,
   slotWords,
@@ -81,9 +82,12 @@ const INSTEAD =
 
 const refuse = (what: string, fix = INSTEAD) => `no-main-checkout hook refuses ${what}: ${fix}`
 
-// This hook's fail-closed rule for a folder the shared reader left unknown (a cd the shell may not run, a cd to a word it cannot read, a popd): the command is read as running in the folder the line started in, the one the shell is in unless that cd moved it, and the fix names the folder.
+// This hook's fail-closed rule for a command the shared reader cannot place in one folder (a cd the shell may not run or may run many times, a cd to a word it cannot read, a popd): the command is judged in every folder the shell may be in, and in the folder the line started in when a cd's landing folder cannot be named at all, so a refusal names the folder it would reach.
 const UNKNOWN_FIX =
-  "the hook cannot tell which folder it runs in, since a cd before it may not run or names a path it cannot read, so it reads the folder as the one the line started in. Name the folder instead: git -C <your worktree>, bun --cwd <your worktree>, or cd by a literal path."
+  "the hook cannot tell which folder it runs in, since a cd before it may not run, may run many times, or names a path it cannot read, so it reads every folder the shell may be in. Name the folder instead: git -C <your worktree>, bun --cwd <your worktree>, or cd by a literal path."
+
+// A refusal's fix: the command's own where the reader named the folder it runs in, else the one for a folder the hook cannot pin down.
+const fixFor = (sure: boolean, own = INSTEAD) => (sure ? own : UNKNOWN_FIX)
 
 // bun scripts that rebuild packages/* or write turbo's runs
 const BUN_SCRIPTS = new Set(["build", "check-types", "test", "test:file"])
@@ -254,10 +258,6 @@ function runnerTarget(args: Word[]): number {
 const isTurbo = (word: string | undefined) =>
   program((word ?? "").replace(/(?<=.)@[^/]*$/, "")) === "turbo"
 
-// Whether a word names a path the hook reads but cannot place without the folder, so an unknown folder leaves it unplaced.
-const relative = (word: Word): boolean =>
-  !word.unknown && !word.reads?.length && word.value !== "" && !isAbsolute(word.value)
-
 // Whether the build's settings reach turbo: from its own assignments or env wrapper, an export before it, or the session's environment.
 function validationOff(local: Map<string, Text>, env: Env): boolean {
   const read = (key: string) =>
@@ -398,16 +398,13 @@ function writes(name: string, args: Word[]): Word[] {
 // A shell whose script the hook cannot read, refused where the shell would run in the main checkout: a script the hook reads is judged command by command by the shared reader, which runs a shell's script itself.
 async function unreadScript(
   shell: Command,
-  env: Env,
+  here: Env,
+  sure: boolean,
   inMain: (path: string | undefined) => boolean,
-  place: (cwd: string | undefined, env: Env) => string | undefined,
 ): Promise<string | undefined> {
-  const script = await stdinOf(shell, env)
-  if (!script.unknown || !inMain(place(env.cwd, env))) return
-  return refuse(
-    `a shell whose script (${script.unknown}) the hook cannot read`,
-    env.cwdUnknown ? UNKNOWN_FIX : INSTEAD,
-  )
+  const script = await stdinOf(shell, here)
+  if (!script.unknown || !inMain(here.cwd)) return
+  return refuse(`a shell whose script (${script.unknown}) the hook cannot read`, fixFor(sure))
 }
 
 function inspect(raw: string, environment: Record<string, string | undefined>, main: string) {
@@ -424,9 +421,6 @@ function inspect(raw: string, environment: Record<string, string | undefined>, m
       !(path + sep).startsWith(worktrees)
     )
   }
-  // the folder a command runs in: the one the reader named, else the folder the line started in when a cd left it unknown, by this hook's fail-closed rule
-  const place = (cwd: string | undefined, env: Env) =>
-    cwd ?? (env.cwdUnknown ? directory : undefined)
   const file = typeof tool === "string" ? input[FILE_TOOLS[tool]] : undefined
   if (typeof file === "string") return inMain(file) ? refuse(`a write to ${file}`) : undefined
   if (tool !== "Bash") return
@@ -442,31 +436,32 @@ function inspect(raw: string, environment: Record<string, string | undefined>, m
     if (slot)
       return slot.length === 0 ? undefined : examine({ ...cmd, words: slot }, env, visit, false)
     const { args, local, name } = parsed
-    // the shell this command's output feeds runs whatever it prints, so a script the hook cannot read is refused where that shell would run in the main checkout
-    const pipedTo = fed.get(cmd)
-    if (pipedTo) {
-      const verdict = await unreadScript(pipedTo, env, inMain, place)
-      if (verdict) return verdict
+    // every folder the shell may be in, so a cd the reader cannot be sure of is judged wherever it may have left the command, by the fail-closed rule above
+    for (const here of places(env, directory)) {
+      // the Env the reader holds is its own object, so a refusal in any other folder names the fix for a folder the hook cannot pin down
+      const sure = here === env && env.cwd !== undefined
+      // the shell this command's output feeds runs whatever it prints, so a script the hook cannot read is refused where that shell would run in the main checkout
+      const pipedTo = fed.get(cmd)
+      if (pipedTo) {
+        const verdict = await unreadScript(pipedTo, here, sure, inMain)
+        if (verdict) return verdict
+      }
+      const ran = runs(name, args, local, here)
+      if (ran && inMain(ran.cwd)) return refuse(ran.what, fixFor(sure, ran.fix))
+      const targets = [
+        ...cmd.redirects
+          .filter(
+            (r) =>
+              [">", ">>", ">|"].includes(r.op) ||
+              (r.op === ">&" && !DUPLICATE.test(r.target?.value ?? "")),
+          )
+          .flatMap((r) => (r.target ? [r.target] : [])),
+        ...writes(name, args),
+      ]
+      const named = targets.filter((t) => !["-", "/dev/null"].includes(t.value))
+      const wrote = named.find((t) => inMain(pathOf(t, here)))
+      if (wrote) return refuse(`a write to ${pathOf(wrote, here)}`, fixFor(sure))
     }
-    const ran = runs(name, args, local, env)
-    if (ran && inMain(place(ran.cwd, env)))
-      return refuse(ran.what, ran.cwd === undefined && env.cwdUnknown ? UNKNOWN_FIX : ran.fix)
-    const targets = [
-      ...cmd.redirects
-        .filter(
-          (r) =>
-            [">", ">>", ">|"].includes(r.op) ||
-            (r.op === ">&" && !DUPLICATE.test(r.target?.value ?? "")),
-        )
-        .flatMap((r) => (r.target ? [r.target] : [])),
-      ...writes(name, args),
-    ]
-    const named = targets.filter((t) => !["-", "/dev/null"].includes(t.value))
-    const wrote = named.find((t) => inMain(pathOf(t, env)))
-    if (wrote) return refuse(`a write to ${pathOf(wrote, env)}`)
-    // a path the hook reads but cannot place lands in the folder the line started in, by the fail-closed rule above
-    const blind = named.find((t) => env.cwdUnknown && relative(t) && inMain(t.value))
-    if (blind) return refuse(`a write to ${blind.value}`, UNKNOWN_FIX)
   }
   const env: Env = {
     cwd: directory,
