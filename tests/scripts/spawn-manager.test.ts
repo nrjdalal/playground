@@ -315,12 +315,12 @@ describe("a manager starts in a workspace of its own, in the leads worktree", ()
   })
 
   test.each(managers)(
-    "$label whose new leads worktree fails to install is refused before herdr runs, the worktree removed for the next start",
+    "$label whose new leads worktree fails to install is refused before herdr runs, the worktree moved to the trash for the next start",
     async ({ args }) => {
       const r = await spawn(
         args,
         [],
-        { FAKE_INSTALL_FAIL: "1", NO_LEADS: "1" },
+        { FAKE_INSTALL_FAIL: "1", NO_LEADS: "1", ROSTER_JSON: '{"agents":[]}' },
         undefined,
         undefined,
         checkout,
@@ -328,11 +328,30 @@ describe("a manager starts in a workspace of its own, in the leads worktree", ()
       expect(r.code).toBe(1)
       expect(placing(r)).toEqual([])
       expect(r.err).toContain("bun install in the new leads worktree")
+      expect(r.err).toContain("moved to the trash")
       expect(r.err).toContain("lockfile is frozen")
       expect(existsSync(leads(r.home))).toBe(false)
       expect(git(join(r.home, "code", "factory"), "worktree", "list")).not.toContain("leads")
+      const trash = join(r.home, ".playground", "trash")
+      const [batch] = readdirSync(trash).filter((name) => name !== "manifest.jsonl")
+      expect(existsSync(join(trash, batch!, "1", "leads"))).toBe(true)
     },
   )
+
+  test("a failed leads install that playground rm refuses keeps the worktree and names the refusal", async () => {
+    const r = await spawn(
+      ["manager", "optimizer", "b.md"],
+      [],
+      { FAKE_INSTALL_FAIL: "1", NO_LEADS: "1" },
+      undefined,
+      undefined,
+      checkout,
+    )
+    expect(r.code).toBe(1)
+    expect(r.err).toContain("refused to move it, so it stays")
+    expect(r.err).toContain("roster")
+    expect(existsSync(leads(r.home))).toBe(true)
+  })
 
   test.each(managers)(
     "$label with no leads worktree and no git checkout to cut it from is refused before herdr runs",

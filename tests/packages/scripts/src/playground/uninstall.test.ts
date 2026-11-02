@@ -4,6 +4,8 @@ import {
   lstatSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
+  readFileSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -125,11 +127,15 @@ describe("uninstall", () => {
     expect(existsSync(join(data, "roster.json"))).toBe(true)
   })
 
-  test("--purge with a yes also removes the data folder and the database with its volume", async () => {
-    const { base, calls, data } = install()
+  test("--purge with a yes removes the database with its volume and moves the data folder aside", async () => {
+    const { base, calls, data, home, said } = install()
     expect(await uninstall({ ...base, confirm: async () => true, purge: true })).toBe(0)
     expect(calls).toContainEqual(["docker", "rm", "-fv", "playground-dashboard-db"])
     expect(existsSync(data)).toBe(false)
+    const [aside] = readdirSync(home).filter((name) => name.startsWith(".playground-purged-"))
+    expect(aside).toMatch(/^\.playground-purged-\d{8}T\d{6}Z$/)
+    expect(readFileSync(join(home, aside!, "roster.json"), "utf8")).toBe("{}")
+    expect(said.at(-1)).toContain(join(home, aside!))
   })
 
   test("removes the home skill set and its marketplace from Claude Code, naming both, and a second run calls neither", async () => {
