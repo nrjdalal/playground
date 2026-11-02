@@ -22,6 +22,7 @@ import {
   pathOf,
   PRINTERS,
   program,
+  rootShell,
   run,
   slotWords,
   stdinOf,
@@ -187,10 +188,10 @@ function awkPrograms(words: Word[]): Word[] | undefined {
 }
 
 // The lines an awk program runs, read whatever the line: each string literal of a program that can run a command or write a file
-function programLines({ args, first }: Parsed): string[] {
+function programLines({ args, first }: Parsed, rooted: boolean): string[] {
   if (!AWKS.has(program(first?.value ?? "").toLowerCase())) return []
   return (awkPrograms(args) ?? [])
-    .filter(({ value }) => AWK_RUNS.test(value))
+    .filter(({ value }) => rooted || AWK_RUNS.test(value))
     .flatMap(({ value }) => [...value.matchAll(/"((?:[^"\\]|\\.)*)"/g)].map((m) => m[1]))
 }
 
@@ -224,6 +225,18 @@ function narrow(cmd: Command, env: Env): boolean {
   return false
 }
 
+// Whether a line holds a root shell (`sudo -s`, `doas -s`) anywhere, its groups' and substitutions' included, which runs as a script whatever a reader prints into it
+function rooted(commands: Command[]): boolean {
+  return commands.some(
+    (cmd) =>
+      rootShell(cmd) ||
+      (!!cmd.inner && rooted(cmd.inner())) ||
+      [...cmd.words, ...cmd.redirects.flatMap((r) => (r.target ? [r.target] : []))].some(
+        (word) => !!word.procs && rooted(word.procs),
+      ),
+  )
+}
+
 // Whether a line is read whole, as canary read it, every spaced text of every program but a reader a command line; a line is read call by call only when every command, its substitutions' included, is narrow and no redirect writes a file
 function wholeLine(commands: Command[], env: Env): boolean {
   return commands.some((cmd) => {
@@ -235,12 +248,16 @@ function wholeLine(commands: Command[], env: Env): boolean {
 }
 
 // Every text of a variable the call sets or exports, and on a line read whole of every word, that holds a space, a leading ! dropped, each read as a command line of its own; `vars` is the scope's variables set since their lines were last read.
-function runsOf(parsed: Parsed, vars: Text[], whole: boolean): string[] {
+function runsOf(parsed: Parsed, vars: Text[], whole: boolean, rootLine: boolean): string[] {
   const { args, first, local } = parsed
   const values = [...local.values(), ...vars].flatMap((text) => (text.unknown ? [] : [text.value]))
   for (const word of whole ? (first ? [first, ...args] : args) : [])
-    for (const text of texts(word)) values.push(text.value.replace(/^!/, ""))
-  values.push(...programLines(parsed))
+    for (const text of texts(word)) {
+      values.push(text.value.replace(/^!/, ""))
+      // printf and echo -e print a \n as a line break, which a root shell runs as one
+      if (rootLine) values.push(...text.value.split("\\n"))
+    }
+  values.push(...programLines(parsed, rootLine))
   return [...new Set(values)].filter((value) => /\s/.test(value) && !marked(value))
 }
 
@@ -354,6 +371,7 @@ function inspect(raw: string, environment: Environment) {
   }
   const seen = new Set<string>()
   let whole = false
+  let rootLine = false
   // where each scope's variables were read to for their lines, and judged to for each cwd and remover, so each variable is read once rather than once a command
   type Cursors = WeakMap<Map<string, Text>, Map<string, number>>
   const varsRead: Cursors = new WeakMap()
@@ -379,7 +397,7 @@ function inspect(raw: string, environment: Environment) {
     )
     if (into?.target) return refuse(`a write to ${pathOf(into.target, env)}`)
     // a reader is its command's own first word, so a wrapper's option value parse misread never stands in for one
-    const reader = ownFirst(cmd, first) && reads(parsed, env)
+    const reader = !rootLine && ownFirst(cmd, first) && reads(parsed, env)
     const fed = xargs ? await stdinOf(cmd, env) : undefined
     const stdinWords: Word[] = !fed
       ? []
@@ -397,7 +415,7 @@ function inspect(raw: string, environment: Environment) {
     if (write) return refuse(write)
     // a command with no program runs nothing that reads the environment, so only its own assignments count
     const vars = !reader && first ? since(varsRead, env.vars, "") : []
-    for (const raw of reader ? [] : runsOf(parsed, vars, whole)) {
+    for (const raw of reader ? [] : runsOf(parsed, vars, whole, rootLine)) {
       const line =
         xargs?.replace && fed ? filled(raw, xargs.replace, fed.unknown ? UNKNOWN : fed.value) : raw
       if (seen.has(line)) continue
@@ -443,7 +461,9 @@ function inspect(raw: string, environment: Environment) {
     process: environment,
     vars: new Map(),
   }
-  whole = wholeLine(lexed.commands, env)
+  // a line with a root shell is read whole with no reader spared, an awk program's strings its lines, since what a reader prints into the shell runs
+  rootLine = rooted(lexed.commands)
+  whole = rootLine || wholeLine(lexed.commands, env)
   return run(lexed, env, visit, true)
 }
 

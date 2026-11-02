@@ -171,6 +171,23 @@ function optionValue(word: string, { flags, values }: Options): "next" | "own" |
   return "own"
 }
 
+// The privilege wrappers' options that start a root shell, which reads its script from stdin when no command follows them: a closed list, read literally
+const ROOT_SHELLS = new Map([
+  ["doas", new Set(["-s"])],
+  ["sudo", new Set(["--login", "--shell", "-i", "-s"])],
+])
+// Whether a command is a privilege wrapper starting a root shell with no command of its own (`sudo -s`, `doas -s`), as its own first words, a reserved word, a function's name or an assignment before it skipped
+export function rootShell(cmd: Command): boolean {
+  let at = 0
+  for (let w = cmd.words[at]; w && !w.quoted; w = cmd.words[at]) {
+    if (w.value === "function") at += 2
+    else if (RESERVED.has(w.value) || ASSIGN.test(w.value)) at++
+    else break
+  }
+  const [wrapper, ...rest] = cmd.words.slice(at)
+  const options = wrapper && !wrapper.quoted && ROOT_SHELLS.get(program(wrapper.value))
+  return !!options && rest.some((w) => !w.quoted && options.has(w.value)) && !parse(cmd).first
+}
 // Wrappers that take one positional argument (a count or a duration) before the command.
 const COUNTED = new Set(["repeat", "timeout"])
 export const SHELLS = new Set(["bash", "dash", "ksh", "sh", "zsh"])
