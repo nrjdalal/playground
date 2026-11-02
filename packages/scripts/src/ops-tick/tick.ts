@@ -529,7 +529,7 @@ export const trashPurge =
 
 const words = (text: string) => async (ctx: Context) => void (await ctx.send("optimizer", text))
 
-// Every worktree of the repo's clone on canary, and the leads worktree on its leads branch, kept at the head of the origin branch each tracks (canary's, and for leads the branch the install cloned, which spawn.sh's cut sets: main on a public install), so every session runs that line rather than the live checkout: a fast-forward pull, never in one holding an open change, a pull that changed bun.lock or a package.json then installing through run-slot as redeploy-pull.sh does and owing that install in tick/canary-pull-owed.json until one exits 0, and a pull or install that fails named to ops once a failure, marked by its words in tick/canary-pull-told.json and cleared once that worktree pulls and owes no install.
+// Every worktree of the repo's clone on canary, and the leads worktree on its leads branch, kept at the head of the origin branch each tracks (canary's, and for leads the branch the install cloned, which spawn.sh's cut sets: main on a public install), so every session runs that line rather than the live checkout: a fast-forward after a fetch, never in one holding an open change, an incoming change to bun.lock or a package.json fast-forwarding and installing back to back inside one run-slot slot (a fast-forward whose install then waited 42s for a slot once left a roster.ts run on new code and old node_modules) and owing that install in tick/canary-pull-owed.json until one exits 0, and a pull or install that fails named to ops once a failure, marked by its words in tick/canary-pull-told.json and cleared once that worktree pulls and owes no install.
 const canaryPull = async (ctx: Context) => {
   const list = await ctx.run(["git", "-C", ctx.repo, "worktree", "list", "--porcelain"])
   const trees = list.out
@@ -546,34 +546,37 @@ const canaryPull = async (ctx: Context) => {
   const owedBefore = JSON.stringify([...owed])
   for (const tree of trees) {
     if ((await ctx.run(["git", "-C", tree, "status", "--porcelain"])).out.trim()) continue
-    const old = (await ctx.run(["git", "-C", tree, "rev-parse", "HEAD"])).out.trim()
-    const pull = await ctx.run(["git", "-C", tree, "pull", "--ff-only", "-q"], 120_000)
+    const fetch = await ctx.run(["git", "-C", tree, "fetch", "-q"], 120_000)
     let text = ""
-    if (pull.code !== 0)
-      text = `canary-pull: ${tree} did not fast-forward: ${lines(pull.out).at(-1) ?? `exit ${pull.code}`}`
+    if (fetch.code !== 0)
+      text = `canary-pull: ${tree} did not fetch: ${lines(fetch.out).at(-1) ?? `exit ${fetch.code}`}`
     else {
-      const changed = await ctx.run(["git", "-C", tree, "diff", "--name-only", old, "HEAD"])
-      if (owed.has(tree) || /(^|\/)(bun\.lock|package\.json)$/m.test(changed.out)) {
-        const install = await ctx.run(
-          [
-            join(ctx.ops, "run-slot.sh"),
-            "ops-tick",
-            "--",
-            "bun",
-            "install",
-            "--frozen-lockfile",
-            "--ignore-scripts",
-            "--cwd",
-            tree,
-          ],
-          30 * 60_000,
-        )
-        if (install.code === 0) owed.delete(tree)
-        else {
-          owed.add(tree)
-          text = `canary-pull: ${tree} did not install: ${lines(install.out).at(-1) ?? `exit ${install.code}`}`
-        }
-      }
+      const incoming = await ctx.run(["git", "-C", tree, "diff", "--name-only", "HEAD", "@{u}"])
+      const install = owed.has(tree) || /(^|\/)(bun\.lock|package\.json)$/m.test(incoming.out)
+      const step = install
+        ? await ctx.run(
+            [
+              join(ctx.ops, "run-slot.sh"),
+              "ops-tick",
+              "--",
+              "bash",
+              "-c",
+              'git -C "$1" merge --ff-only -q "@{u}" && bun install --frozen-lockfile --ignore-scripts --cwd "$1"',
+              "canary-pull",
+              tree,
+            ],
+            30 * 60_000,
+          )
+        : await ctx.run(["git", "-C", tree, "merge", "--ff-only", "-q", "@{u}"], 120_000)
+      const head = async (ref: string) =>
+        (await ctx.run(["git", "-C", tree, "rev-parse", ref])).out.trim()
+      const why = lines(step.out).at(-1) ?? `exit ${step.code}`
+      if (step.code === 0) {
+        if (install) owed.delete(tree)
+      } else if (install && (await head("HEAD")) === (await head("@{u}"))) {
+        owed.add(tree)
+        text = `canary-pull: ${tree} did not install: ${why}`
+      } else text = `canary-pull: ${tree} did not fast-forward: ${why}`
     }
     if (!text) delete told[tree]
     else if (told[tree] !== text && (await ctx.send("ops", text, true))) told[tree] = text
