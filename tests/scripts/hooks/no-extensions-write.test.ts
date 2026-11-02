@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, test } from "bun:test"
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
 import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -545,6 +545,21 @@ describe("a quoted argument is read as a command line only where a program runs 
     ["awk over an unquoted glob in the home", "awk '{print $1}' .pl*"],
   ])("%s is still refused from the home", async (_, command) => {
     expect(await at(command, homedir())).toBeDefined()
+  })
+
+  test("the dispatcher brief's call that finds the Dashboard's checkout runs from a worktree", async () => {
+    const step = readFileSync(
+      join(import.meta.dir, "../../../scripts/briefs/dispatcher.md"),
+      "utf8",
+    )
+      .split("\n")
+      .find((line) => line.startsWith("2. "))
+    const spans = [...(step ?? "").matchAll(/`([^`]+)`/g)].map((m) => m[1])
+    const call = ['R="', "curl ", "bun run --cwd "]
+      .map((start) => spans.find((span) => span.startsWith(start)))
+      .join("; ")
+    expect(call).toContain("worktree list")
+    expect(await at(call, join(homedir(), "x", ".claude", "worktrees", "y"))).toBeUndefined()
   })
 
   test.each([
