@@ -13,6 +13,7 @@ export type Guard =
   | "no-kill-by-name"
   | "no-main-checkout"
   | "no-playground-leak"
+  | "no-public-leak"
   | "no-raw-spawn"
   | "no-release-comment"
   | "no-stash"
@@ -56,7 +57,7 @@ export type Group = {
   folders: Folder[]
   guards: Guard[]
   rows: (paths: Paths) => readonly Row[]
-  source: "#292" | "#356" | "#402" | "#411" | "#446" | "#456" | "#466" | "#469" | "#509"
+  source: "#292" | "#356" | "#402" | "#411" | "#446" | "#456" | "#466" | "#469" | "#509" | "#555"
 }
 
 // The rows a guard-loosening PR lets run on purpose, each written as a row's "<source> <what>" for all its cases, or as one case's "<source> <what> | <guard> | <folder>"; canary lets none run.
@@ -1620,5 +1621,43 @@ gh api graphql -f query="$QUERY"`,
       ["a file's unread text piped to doas's shell", `cat "$F" | doas -s`],
     ],
     source: "#509",
+  },
+  {
+    folders: ["checkout", "home"],
+    guards: ["no-public-leak"],
+    rows: () => [
+      ["gh issue create", `gh issue create --repo quillco/playground -t x -b y`],
+      ["gh pr comment", `gh pr comment 1 --repo quillco/playground -b y`],
+      ["gh api POST", "gh api -X POST repos/quillco/playground/issues/1/comments -f body=y"],
+      ["gh api with a field and no method", "gh api repos/quillco/playground/issues -f title=y"],
+      ["git push to a URL", "git push https://github.com/quillco/playground.git main"],
+      ["git push to a remote it cannot place", "git push origin main"],
+      ["git push behind env", "env git push origin main"],
+      ["git push through bash -c", "bash -c 'git push origin main'"],
+      ["git push through eval", "eval 'git push origin main'"],
+      ["git push through a variable set in the call", "g=git; $g push origin main"],
+      ["git push through a function defined in the call", "f() { git push origin main; }; f"],
+      ["git push through an alias -c sets", "git -c alias.x=push x origin main"],
+      ["curl posting to Slack", "curl -X POST -d x https://slack.com/api/chat.postMessage"],
+      [
+        "the GitHub MCP's comment",
+        {
+          input: { body: "y", issue_number: 1, owner: "quillco", repo: "playground" },
+          tool: "mcp__github-shared__add_issue_comment",
+        },
+      ],
+      [
+        "a Slack MCP post",
+        {
+          input: { channel: "C0FAKE9999", text: "y" },
+          tool: "mcp__slack-shared__chat_post_message",
+        },
+      ],
+      [
+        "a Linear MCP comment",
+        { input: { body: "y", issueId: "X-1" }, tool: "mcp__linear-shared__save_comment" },
+      ],
+    ],
+    source: "#555",
   },
 ]
