@@ -136,6 +136,17 @@
         "typescript": "catalog:",
       },
     },
+    "packages/safe-delete": {
+      "name": "@packages/safe-delete",
+      "version": "0.0.1",
+      "devDependencies": {
+        "@packages/config": "workspace:*",
+        "@types/bun": "catalog:",
+        "@types/node": "catalog:",
+        "tsdown": "catalog:",
+        "typescript": "catalog:",
+      },
+    },
     "packages/scripts": {
       "name": "@packages/scripts",
       "version": "0.0.1",
@@ -146,6 +157,7 @@
         "@packages/config": "workspace:*",
         "@packages/env": "workspace:*",
         "@packages/redis": "workspace:*",
+        "@packages/safe-delete": "workspace:*",
         "@packages/settings": "workspace:*",
         "@types/bun": "catalog:",
         "@types/fontkit": "catalog:",
@@ -914,6 +926,8 @@
     "@packages/env": ["@packages/env@workspace:packages/env"],
 
     "@packages/redis": ["@packages/redis@workspace:packages/redis"],
+
+    "@packages/safe-delete": ["@packages/safe-delete@workspace:packages/safe-delete"],
 
     "@packages/scripts": ["@packages/scripts@workspace:packages/scripts"],
 

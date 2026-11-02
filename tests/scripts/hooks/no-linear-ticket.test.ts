@@ -592,10 +592,16 @@ describe("as Claude Code runs it", () => {
     },
   )
 
-  test("a hook that finds no checkout lets the call through", async () => {
+  test("a hook that finds no checkout refuses a factory session's call and lets any other through", async () => {
     const [{ command }] = (await entry()).hooks
+    const refused = await hook(command, create, {
+      CLAUDE_PROJECT_DIR: scratch,
+      PLAYGROUND_ROLE: "worker",
+    })
+    expect(refused.code).toBe(2)
+    expect(refused.stderr).toContain("Restoring the main checkout")
     expect(
-      await hook(command, create, { CLAUDE_PROJECT_DIR: scratch, PLAYGROUND_ROLE: "worker" }),
+      await hook(command, create, { CLAUDE_PROJECT_DIR: scratch, PLAYGROUND_ROLE: undefined }),
     ).toEqual({ code: 0, stderr: "" })
   })
 
