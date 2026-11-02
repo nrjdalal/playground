@@ -398,15 +398,19 @@ describe("a direct write into the extensions root is refused, naming the owner's
     60_000,
   )
 
-  // the reader before its fix took about 23 times as long at the cap as at an eighth of it, and takes 5 to 7.5 times now; a ratio holds on a loaded machine where a bound in seconds does not
+  // the reader before its fix took 17 to 36 times as long at the cap as at an eighth of it at load 12, and takes 6 to 8.5 times now; a ratio holds on a loaded machine where a bound in seconds does not
   test("distinct variables at the command cap take time in step with their count", async () => {
     const time = async (cap: number) => {
-      const started = performance.now()
-      expect(await bash(variables("", cap), "/tmp")).toBeUndefined()
-      return performance.now() - started
+      let fastest = Infinity
+      for (let run = 0; run < 2; run++) {
+        const started = performance.now()
+        expect(await bash(variables("", cap), "/tmp")).toBeUndefined()
+        fastest = Math.min(fastest, performance.now() - started)
+      }
+      return fastest
     }
     const eighth = await time(16_250)
-    expect((await time(130_000)) / eighth).toBeLessThan(14)
+    expect((await time(130_000)) / eighth).toBeLessThan(11)
   }, 60_000)
 
   test.each([300, 8_000])(
