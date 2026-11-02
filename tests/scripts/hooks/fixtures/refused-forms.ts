@@ -1,7 +1,7 @@
 import { homedir } from "node:os"
 import { join } from "node:path"
 
-// Every bypass form a review found that canary refuses, each named by the PR whose tests pinned it; tests/scripts/hooks/refused-forms.test.ts runs every row through each guard its group names and expects a refusal.
+// Every bypass form a review found, refused on canary or since the PR whose tests pinned it, each named by that PR; tests/scripts/hooks/refused-forms.test.ts runs every row through each guard its group names and expects a refusal.
 export type Guard =
   | "no-env-dump"
   | "no-extension-repo-write"
