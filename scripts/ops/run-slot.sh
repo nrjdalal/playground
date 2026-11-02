@@ -622,7 +622,7 @@ reclaim() {
   [ "$(cat "$1.holder" 2>/dev/null)" = "$line" ] && [ "$(stamp "$1")" = "$dir" ] && rmdir "$1" 2>/dev/null
 }
 
-# the 5-minute load run-slot-2 in single-slot mode and the quick slot start under: 22, or run-slot.load5-cap's cap while it stands (builder, 12 Oct: 12 while the live dashboard's cmux reads time out), 22 at most
+# the 5-minute load run-slot-2 in single-slot mode starts under: 22, or run-slot.load5-cap's cap while it stands (builder, 12 Oct: 12 while the live dashboard's cmux reads time out), 22 at most
 # its cap is the file's last line, the one a set writes below its reason or an old-shape file's only one
 load_line() {
   local cap
@@ -759,16 +759,7 @@ if [ -n "$KIND" ]; then
   # bash 5.2 can fail to parse the TERM trap while it expands a "$(...)" and then drop the loop it was in (measured on the runner host:
   # the waiter ran its command with no slot), so each wait checks it ended as it should, and the waiter stops when it did not
   clone_held && { echo "run-slot.sh: run-slot.clone-off holds this clone, so $WHO stops" >&2; exit 143; }
-  # the quick slot waits while load5 is at or over the load line, since a 1 to 3 file suite there ran up to 317 s beside the CPU slots (optimizer, 31 Oct); a commit or a clone ends in seconds or has clone-off's gate, so neither waits here
-  # a quick run whose last 3 runs each ended in 15 s or less goes past the line, since load from outside run-slot held a 2 s install 1,813 s and a 3 s test 1,952 s (issue 525)
-  load_held() { [ "$KIND" = quick ] && [ "$(load5)" -ge "$(load_line)" ] && ! ran_last3 within 15 "$@"; }
-  while load_held "$@"; do
-    [ $((waited % 300)) -eq 0 ] && echo "run-slot.sh: waiting for load5 under $(load_line) for the quick slot (load5 is $(load5))" >&2
-    reread
-    sleep "$CLONE_POLL"
-    waited=$((waited + 5))
-  done
-  load_held "$@" && { echo "run-slot.sh: load5 $(load5) is at or over $(load_line), so $WHO stops" >&2; exit 143; }
+  # the quick slot takes no load wait: its load comes mostly from outside run-slot and one slot adds about a core at most, so a hold kept 44 quick runs waiting 201 min for 8 min of work (issue 547); ran_long sends a line that runs long to the queue
   GOT=
   while :; do
     mkdir "$OPS/run-slot-$KIND" 2>/dev/null && { GOT=1; break; }
