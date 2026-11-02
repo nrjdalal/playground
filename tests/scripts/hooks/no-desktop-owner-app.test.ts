@@ -73,6 +73,10 @@ describe("an app on the list", () => {
     ["list-windows", "agent-desktop list-windows --app Slack"],
     ["behind bash -c", `bash -c "agent-desktop snapshot --app Slack"`],
     ["behind sh reading a pipe", "echo 'agent-desktop snapshot --app Slack' | sh"],
+    ["behind sudo, its -p value in a cluster", "sudo -Hp echo agent-desktop snapshot --app Slack"],
+    ["behind sudo --prompt", "sudo --prompt echo agent-desktop snapshot --app Slack"],
+    ["behind time -o", "/usr/bin/time -o echo agent-desktop snapshot --app Slack"],
+    ["behind doas -C", "doas -C echo agent-desktop snapshot --app Slack"],
   ])("is refused: %s", async (_, command) => {
     const reason = await bash(command)
     expect(reason).toContain("no-desktop-owner-app hook refused")
@@ -170,6 +174,8 @@ describe("what the hook cannot read is refused", () => {
     ["press with no --app", "agent-desktop press cmd+c"],
     ["focus-window by title alone", "agent-desktop focus-window --title general"],
     ["list-notifications with no --app", "agent-desktop list-notifications"],
+    ["a wrapper option it does not know", "sudo -Z echo agent-desktop snapshot --app Slack"],
+    ["a wrapper option's value in a variable", "/usr/bin/time -o $F echo agent-desktop --headed"],
     ["an interpreter that runs it", `python3 -c "import os; os.system('agent-desktop --headed')"`],
     [
       "a script written in the same call",
@@ -201,6 +207,11 @@ describe("passes", () => {
     ["permissions", "agent-desktop permissions"],
     ["a commit naming it", `git commit -m "docs: agent-desktop --headed is refused"`],
     ["an unrelated script", `bash ${join(tmpdir(), "missing-dir", "x.sh")}`],
+    [
+      "behind sudo's known options",
+      "sudo -Hp pw -u root --preserve-env agent-desktop launch Finder",
+    ],
+    ["behind time -p", "time -p agent-desktop list-apps"],
   ])("%s", async (_, command) => {
     expect(await bash(command)).toBeUndefined()
   })

@@ -50,7 +50,7 @@ export type Group = {
   folders: Folder[]
   guards: Guard[]
   rows: (paths: Paths) => readonly Row[]
-  source: "#292" | "#356" | "#402" | "#411"
+  source: "#292" | "#356" | "#402" | "#411" | "#469"
 }
 
 // The rows a guard-loosening PR lets run on purpose, each written as a row's "<source> <what>" for all its cases, or as one case's "<source> <what> | <guard> | <folder>"; canary lets none run.
@@ -1152,5 +1152,31 @@ gh api graphql -f query="$QUERY"`,
       ["git -C behind --attr-source's value", `git --attr-source HEAD -C ${MAIN} commit -m x`],
     ],
     source: "#411",
+  },
+  {
+    folders: ["process home", "process data folder", "process worktree"],
+    guards: ["no-extensions-write"],
+    rows: () => [
+      ["a delete behind sudo, its -p value in a cluster", "sudo -Hp wc watch 'rm -rf ~'"],
+      ["a delete behind sudo --prompt", "sudo --prompt wc watch 'rm -rf ~'"],
+      ["a delete behind time -o", "/usr/bin/time -o cat watch 'rm -rf ~'"],
+      ["a delete behind doas -a", "doas -a wc watch 'rm -rf ~'"],
+      ["a delete behind doas -C", "doas -C wc watch 'rm -rf ~'"],
+      ["a delete behind a sudo option it does not know", "sudo -Z wc watch 'rm -rf ~'"],
+      ["a delete behind time -o's value in a variable", "/usr/bin/time -o $F cat watch 'rm -rf ~'"],
+    ],
+    source: "#469",
+  },
+  {
+    folders: ["checkout"],
+    guards: ["no-stash"],
+    rows: () => [
+      ["a stash behind sudo, its -p value in a cluster", "sudo -Hp echo git stash"],
+      ["a stash behind sudo --prompt", "sudo --prompt echo git stash"],
+      ["a stash behind time -o", "/usr/bin/time -o echo git stash"],
+      ["a stash behind doas -a", "doas -a echo git stash"],
+      ["a stash behind a sudo option it does not know", "sudo -Z echo git stash"],
+    ],
+    source: "#469",
   },
 ]
