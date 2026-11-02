@@ -23,6 +23,8 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
   only while the ops-zai-usage job's last beat is ok and within 3 cycles,
   so every GLM spawn refuses until `bun run ops:zai-usage` has beaten once).
   A GLM session takes its own load and memory gate in place of the load and memory checks above: load5 (the third field of `sysctl -n vm.loadavg`) under 30 (`gates.glmLoad5Max`), memory pressure level 1, and swap-ins under 100/s (`gates.glmSwapinsMax`, `vm_stat -c 2 1`'s last second), so it starts while Claude's gate holds; Claude's gate stays as above.
+  Under Claude Code's sandbox, which refuses the `sysctl` command, every `kern.memorystatus_*` reading and the setuid `ps`, it reads the load from `uptime`, the cores from Python's `os.cpu_count()`, and each live session's start from the kernel's process table (`scripts/ops/ptable.py`),
+  and where the sandbox refuses the pressure level the memory check passes on swap-ins under `gates.glmSwapinsMax` in place of the pressure level and free share.
   Every pass and refusal is one line in `~/.playground/ops/capacity.jsonl`, which the load check counts its starts from, a refusal's carrying the words it printed as `detail`.
   It also refuses while a live session already holds the name, naming its pid (Claude Code would give the new one a generated name); a `claude -p` run, whose registry file reads `entrypoint` `sdk-cli`, holds no name, and a Mac with no `~/.claude/sessions` folder (Claude Code makes it with its first session) holds none.
   It launches every session with `--dangerously-skip-permissions`, beside `scripts/factory-settings.json`'s `skipDangerousModePermissionPrompt`, and, where inscope exports its own `CLAUDE_CONFIG_DIR`, with `env -u CLAUDE_CONFIG_DIR -u INSCOPE_CCD`.

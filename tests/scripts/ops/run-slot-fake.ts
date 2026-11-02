@@ -45,9 +45,11 @@ export type Setup = {
   plan?: unknown
   pressure?: number
   roster?: unknown
+  sandboxed?: boolean
 }
 
-// A scratch state folder and config folder, with a fake sysctl on PATH giving 15 cores, the load asked for (load5 and load15 as load1 unless given) and normal memory.
+// A scratch state folder and config folder, with a fake sysctl on PATH giving 15 cores, the load asked for (load5 and load15 as load1 unless given) and normal memory, and a fake uptime giving the same load;
+// sandboxed, sysctl and ps refuse every read as Claude Code's sandbox does, so the load comes from uptime alone.
 export const machine = ({
   free = 80,
   load1 = 2,
@@ -58,6 +60,7 @@ export const machine = ({
   plan,
   pressure = 1,
   roster,
+  sandboxed = false,
 }: Setup = {}) => {
   const root = mkdtempSync(join(tmpdir(), "run-slot-"))
   dirs.push(root)
@@ -75,6 +78,7 @@ export const machine = ({
     join(bin, "sysctl"),
     `#!/bin/bash
 echo "$2" >> ${join(root, "sysctl.log")}
+${sandboxed ? 'echo "sysctl: sysctl fmt -1 1024 1: Operation not permitted" >&2; exit 1' : ""}
 case "$2" in
   hw.ncpu) echo 15 ;;
   vm.loadavg) echo "{ ${load1}.00 ${load5}.00 ${load5}.00 }" ;;
@@ -84,6 +88,18 @@ esac
 `,
   )
   chmodSync(join(bin, "sysctl"), 0o755)
+  writeFileSync(
+    join(bin, "uptime"),
+    `#!/bin/bash\necho "22:15  up 35 mins, 2 users, load averages: ${load1}.00 ${load5}.00 ${load5}.00"\n`,
+  )
+  chmodSync(join(bin, "uptime"), 0o755)
+  if (sandboxed) {
+    writeFileSync(
+      join(bin, "ps"),
+      `#!/bin/bash\necho "bash: /bin/ps: Operation not permitted" >&2\nexit 126\n`,
+    )
+    chmodSync(join(bin, "ps"), 0o755)
+  }
   // the settings reader answers factory.repo, the guarded orgs and slots.peers as a store that sets them would, and every other key as the real one does
   writeFileSync(
     join(bin, "bun"),
