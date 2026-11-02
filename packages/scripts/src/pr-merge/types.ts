@@ -136,7 +136,7 @@ const skipped = (facts: { canary: string; head: string }) =>
 
 const FIX = `Merge ${BASE} into the PR and fix the error; the new head then needs its checks and a 5/5`
 
-// Removes the worktree and its folder, whatever state a run left them in: only when it cannot be reused.
+// Removes the worktree and its folder, whatever state a run left them in, for a worktree that cannot be reused.
 async function clear(git: Run, worktree: string): Promise<void> {
   await git(["worktree", "remove", "--force", "--force", worktree])
   await rm(worktree, { force: true, recursive: true })
