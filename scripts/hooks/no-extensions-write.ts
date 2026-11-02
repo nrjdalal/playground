@@ -262,7 +262,8 @@ function cliWrite(words: Word[]): string | undefined {
       ? `playground settings ${verb} of ${key}, a key a guard reads`
       : undefined
   }
-  if (verb === "accept") return "playground ext accept, which is the owner's own call"
+  if (verb === "accept")
+    return "playground ext accept, the owner's own call, which the owner runs as `! env -u PLAYGROUND_ROLE playground ext accept …` in the dispatcher's terminal window, since the CLI refuses an accept with PLAYGROUND_ROLE set and that window carries one"
   if (verb === "put")
     return unread || positional[1] === "list"
       ? "playground ext put of a list, or with a word it cannot read, which may render into a guard's list"

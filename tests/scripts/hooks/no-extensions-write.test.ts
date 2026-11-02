@@ -1090,7 +1090,9 @@ describe("a factory session's ext accept is refused, since accepting a proposal 
       "env -u PLAYGROUND_ROLE playground ext accept login rule x abc --reason ok",
     ],
   ])("%s", async (_, command) => {
-    expect(await bash(command)).toContain("no-extensions-write hook refuses")
+    expect(await bash(command)).toContain(
+      "refuses playground ext accept, the owner's own call, which the owner runs as `! env -u PLAYGROUND_ROLE playground ext accept …`",
+    )
   })
 })
 

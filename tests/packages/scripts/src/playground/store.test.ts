@@ -3,7 +3,12 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { parseWords, runStore, type Io } from "../../../../../packages/scripts/src/playground/store"
+import {
+  parseWords,
+  runStore,
+  terminalIo,
+  type Io,
+} from "../../../../../packages/scripts/src/playground/store"
 import { mustGit, writeFiles } from "../../../../../packages/settings/src/folder"
 import { GUARD_LISTS, scopeDir } from "../../../../../packages/settings/src/rendered"
 
@@ -126,12 +131,40 @@ describe("playground ext", () => {
       )
       expect(refused.code).toBe(1)
       expect(refused.err).toContain("accept is the owner's own call")
+      expect(refused.err).toContain(
+        "`env -u PLAYGROUND_ROLE playground ext accept …` as a ! command",
+      )
       expect(existsSync(join(scopeDir(at, "tester"), "rules/less.md"))).toBe(false)
     }
     const accepted = await ext(at, ["accept", "tester", "rule", "less", rev, "--reason", "r"])
     expect(accepted.code).toBe(0)
     expect(accepted.out).toBe(`rev ${git(at, "tester", ["rev-parse", "HEAD"])} is accepted`)
     expect(readFileSync(join(scopeDir(at, "tester"), "rules/less.md"), "utf8")).toBe("Say less.\n")
+  })
+
+  test("the terminal's Io carries PLAYGROUND_ROLE to accept's check, and an empty one counts as none", async () => {
+    const at = folder("terminal")
+    writeFileSync(join(scratch, "terminal.md"), "Ask once.\n")
+    const put = await ext(at, [
+      "put",
+      "tester",
+      "rule",
+      "once",
+      join(scratch, "terminal.md"),
+      "--reason",
+      "r",
+    ])
+    const { rev } = JSON.parse(put.out) as { rev: string }
+    const words = ["accept", "tester", "rule", "once", rev, "--reason", "r"]
+    const io = (role: string) =>
+      terminalIo({ HOME: scratch, PLAYGROUND_DATA_DIR: at, PLAYGROUND_ROLE: role })
+    expect(io("dispatcher")).toMatchObject({ data: at, role: "dispatcher" })
+    const err: string[] = []
+    expect(await runStore("ext", words, io("dispatcher"), (l) => err.push(l))).toBe(1)
+    expect(err.join("\n")).toContain("a session with a role (dispatcher)")
+    expect(io("").role).toBeUndefined()
+    expect(await runStore("ext", words, io(""), (l) => err.push(l))).toBe(0)
+    expect(readFileSync(join(scopeDir(at, "tester"), "rules/once.md"), "utf8")).toBe("Ask once.\n")
   })
 
   test("a skill is put from its folder, a list from its JSON and accepted at once, and - reads stdin", async () => {
