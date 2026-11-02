@@ -6,6 +6,7 @@ import { dirname, join } from "node:path"
 
 import { BASE, type Gate } from "./gates"
 import type { Run } from "./merge"
+import { onStop } from "./stop"
 
 // One step of the check, run in the scratch worktree: its name for the timing line, its argv, and whether a failure is the tree's own type error rather than the run's.
 export type TypeStep = { argv: string[]; name: string; types?: boolean }
@@ -148,6 +149,9 @@ export async function typesGate({
   const deadline = Date.now() + budgetMs
   const at = `the merged tree ${mergeTree.slice(0, 7)} (#${n} at ${head.slice(0, 7)} onto ${BASE} ${canary.slice(0, 7)})`
   let worktree = ""
+  const unlisten = onStop(async () => {
+    if (worktree) await clear(git, worktree)
+  })
   try {
     const common = await gitOk(git, ["rev-parse", "--path-format=absolute", "--git-common-dir"])
     const checkout = await gitOk(git, ["rev-parse", "--show-toplevel"])
@@ -229,6 +233,7 @@ export async function typesGate({
   } catch (err) {
     return unfinished(err instanceof Error ? err.message : String(err))
   } finally {
+    unlisten()
     if (worktree) await clear(git, worktree)
   }
 }

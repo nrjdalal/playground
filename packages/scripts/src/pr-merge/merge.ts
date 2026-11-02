@@ -23,6 +23,7 @@ import {
 } from "./gates"
 import { heldPath, readHeld } from "./held"
 import { lostLines } from "./lost"
+import { onStop, stopping, type StopSignal } from "./stop"
 import { ciSteps, typesExplained, typesGate, type TypeSteps } from "./types"
 
 export type RunResult = { code: number; stderr: string; stdout: string }
@@ -363,19 +364,18 @@ export async function takeLock(
   }
   await Bun.write(join(lock, "pr"), `${n}\n`)
   if (held !== null) await Bun.write(join(lock, "redis"), `${held}\n${process.pid}\n`)
-  return {
-    // Moves the lock aside only while it still names this PR, so a lock someone else took after it went stale is never moved, then frees the key.
-    release: async () => {
-      if ((await folderOf(lock)).holder === String(n)) {
-        await mkdir(join(root, "merge-locks"), { recursive: true })
-        await rename(
-          lock,
-          join(root, "merge-locks", `${n}-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`),
-        )
-      }
-      await letGo()
-    },
+  // Moves the lock aside only while it still names this PR, so a lock someone else took after it went stale is never moved, then frees the key; a signal's release names the signal in place of the random tag.
+  const release = async (signal?: StopSignal) => {
+    unlisten()
+    if ((await folderOf(lock)).holder === String(n)) {
+      await mkdir(join(root, "merge-locks"), { recursive: true })
+      const tag = signal ?? crypto.randomUUID().slice(0, 8)
+      await rename(lock, join(root, "merge-locks", `${n}-${Date.now()}-${tag}`))
+    }
+    await letGo()
   }
+  const unlisten = onStop(release)
+  return { release: () => release() }
 }
 
 // The Redis lock store REDIS_URL names, for the pr:merge and pr:train commands alone, or null: none set, or the package will not load (unbuilt, or REDIS_URL is not a URL), which keeps the lock folder alone.
@@ -480,6 +480,8 @@ async function mergeAt(
   // last, since it is the one slow gate: a PR another gate refuses never waits on a type check
   gates.push(await typesGate({ ...types, facts }))
   if (gates.some((gate) => !gate.ok)) return { gates, kind: "refused" }
+  // a signal during the types gate has let the lock go already, so nothing merges outside it
+  if (stopping()) return { gates, kind: "failed", reason: "stopped by a signal" }
   if (marksReady(facts, judged)) {
     const reason = await markReady(run, name, n)
     if (reason) return { gates, kind: "failed", reason }
