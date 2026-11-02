@@ -1186,9 +1186,17 @@ var GUARD = "__guarded__";
 var VARIABLES_TO_STOP = 2;
 var variables = (path) => path.split("/").filter((part) => part.startsWith(UNKNOWN)).length;
 var shown = (path) => path.replaceAll(UNKNOWN, "$\u2026").replaceAll(GUARD, "${\u2026:?}");
-var refuse = (name, path) => `no-prompt-stop hook refuses ${name} ${shown(path)}: Claude Code stops on a removal whose target has two or more parts that start with a variable and waits for a person, who is not there. Guard each one as \${VAR:?} ("\${S:?}/\${m:?}"), or name a literal path, and run it again.`;
+var FIX = {
+  rm: "Name each path literally: a file in your worktree or scratchpad with rm, anything else with playground rm <literal path> (in a script, removeScratch for a folder makeScratch made), and run it again.",
+  rmdir: 'Guard each one as ${VAR:?} ("${S:?}/${m:?}"), or name a literal path, and run it again.'
+};
+var refuse = (name, path) => `no-prompt-stop hook refuses ${name} ${shown(path)}: Claude Code stops on a removal whose target has two or more parts that start with a variable and waits for a person, who is not there. ${FIX[name]}`;
 var AT_ROOT = /^\/[^/\u0000]+\/?$/;
-var refuseAtRoot = (name, path) => `no-prompt-stop hook refuses ${name} ${path}: Claude Code stops on a removal of a name directly in / and waits for a person, who is not there. Write and remove in $TMPDIR or the session's scratchpad, and run it again.`;
+var AT_ROOT_FIX = {
+  rm: "Write and remove in the session's scratchpad, a folder there with playground rm <literal path>, and run it again.",
+  rmdir: "Write and remove in $TMPDIR or the session's scratchpad, and run it again."
+};
+var refuseAtRoot = (name, path) => `no-prompt-stop hook refuses ${name} ${path}: Claude Code stops on a removal of a name directly in / and waits for a person, who is not there. ${AT_ROOT_FIX[name]}`;
 var visit = async (_cmd, { args, name }) => {
   if (name !== "rm" && name !== "rmdir")
     return;

@@ -32,7 +32,9 @@ Only the first reading moves the folder, sets variables and records files for th
   `role.ts`'s read of the session names still runs `setting.ts` in a process of its own, and keeps a fresh install's names when that read fails.
   `tests/scripts/hooks/refused-forms.test.ts` runs each bundle from a scratch checkout no `node_modules` reaches and holds it to its source's verdict on every row.
   A headless scan run from outside the checkout exports `PLAYGROUND_REPO` as the factory's checkout and passes `--settings` naming that checkout's `scripts/factory-settings.json`, so its guards run rather than exit 0: the board scan's loop takes the checkout from `beat.py`'s `checkout()`, the end-of-day scan's `scan.sh` from its own path.
-  Three factory hooks act for every session: session-state writes every session's state, since the Dashboard is to show them all, no-off-palette-label guards every session's labels, since the label rule covers any label, and no-desktop-owner-app guards every session's agent-desktop calls, since the owner's pointer and apps are the same whichever session drives them.
+  Three factory hooks act for every session: session-state writes every session's state, since the Dashboard is to show them all, no-off-palette-label guards every session's labels, since the label rule covers any label,
+  and no-desktop-owner-app guards every session's agent-desktop calls, since the owner's pointer and apps are the same whichever session drives them.
+  no-raw-delete will guard every session's deletes, since a delete is final whoever runs it, once it is registered ([its section](#no-raw-delete)).
   Every other factory hook acts for a factory session alone, `PLAYGROUND_ROLE` or else its name in Claude Code's registry, placed by the roster's `kind` for that name and then by the factory's names (`scripts/hooks/role.ts`), so a session the owner opens in the factory's checkout passes them untouched.
   Claude Code loads project settings from the session's own folder alone, so a factory session restored where they lack the hooks (another checkout, an older one, a subfolder) is respawned with its settings (playbook's SESSIONS.md), and `scripts/ops/up.py --sessions`, which reads each session's command line and its own folder's `.claude/settings.json`, names each one.
 
@@ -427,11 +429,34 @@ Only the first reading moves the folder, sets variables and records files for th
 ## no-prompt-stop
 
 - A factory session never waits on a permission prompt no one answers: `scripts/hooks/no-prompt-stop.ts`, registered beside no-stash, refuses the Bash shapes Claude Code stops on, with a reason the session acts on:
-  an `rm` or an `rmdir` whose target has two or more parts that start with an unguarded variable (`$S/$m`, `$HOME/$s`, `$S/$v.d`), which the session rewrites with `${VAR:?}` or as a literal path.
+  an `rm` or an `rmdir` whose target has two or more parts that start with an unguarded variable (`$S/$m`, `$HOME/$s`, `$S/$v.d`), which the session rewrites as a literal path, an `rm` of a file outside its worktree and scratchpad as `playground rm <literal path>`, and an `rmdir` guarded with `${VAR:?}` too, since no-raw-delete refuses an `rm` whose path it cannot read, guarded or not,
+  and names `playground rm <literal path>`.
   A single such part (`"$O"/d`), or a variable after a name (`$S/p$v`), runs, as it does in Claude Code.
-  It also refuses an `rm` or an `rmdir` of a name directly in `/` (`/scratchpad_*`, `/x`), which the session moves into `$TMPDIR` or its scratchpad.
+  It also refuses an `rm` or an `rmdir` of a name directly in `/` (`/scratchpad_*`, `/x`), which the session moves into its scratchpad, removing a folder there with `playground rm <literal path>`, an `rmdir` into `$TMPDIR` too, since no-raw-delete refuses an `rm` of a `$TMPDIR` path.
   A name a level deeper (`/usr/x`) and a redirect into `/` run, as they do in Claude Code.
   It fails open on a call it cannot read.
+
+## no-raw-delete
+
+- A delete goes to the 7-day trash through `playground rm <path>`, a worktree through `playground rm --worktree <path>`, so a delete aimed wrong comes back (2 Nov: two code-review sub-agents each deleted recursively in their own scratch folders, though their prompts said to run none).
+  The trash takes up to 5,000 files or 2 GB, so the refusal also names the lead's cleanup for a bigger tree and `bun install` for a `node_modules`.
+  It is registered in neither settings file until a ship puts `scripts/hooks/no-raw-delete.ts` on `main`, since the registration runs the main checkout's copy and refuses every factory session's Bash call while that copy is missing; it then goes back after no-kill-by-name in both files.
+  `scripts/hooks/no-raw-delete.ts` acts for every session and every sub-agent, whose hook input carries its own `agent_id` beside its parent's `session_id`, and refuses with a reason that names `playground rm`:
+  an `rm` or GNU rm's `grm` with `-r`, `-R` or `--recursive` (any prefix GNU rm takes, anywhere among its words), `find -delete`, `find -exec`, `-execdir`, `-ok` or `-okdir` and `fd -x`, `-X`, `--exec` or `--exec-batch` running `rm` behind any wrapper, its value attached too (`--exec=rm`, `-xrm`), `rm` under xargs, `gxargs` or `parallel`,
+  `git clean` with `-d`, `-x` or `-X` and no dry run, with or without force, since `clean.requireForce` can be off,
+  `git worktree remove` with `-f` or a prefix of `--force`, `rimraf` with or without a version (`rimraf@5`), `rsync --delete` or its `--del` alias, `chmod -a` or `-N`, which strip a file's access entries, and `chflags`.
+  An `rm` word that may spell `-r` is refused as one it cannot read: a variable or a substitution, a brace (`-{r,f}`) and a glob in an option; so is a program word it cannot read (a variable, a brace, a glob such as `/bin/r?`) given `-r`, or led by an unquoted word it cannot read (`$RM $FLAGS`).
+  A readable word ends that lead, so `$T git clone $S/x` runs, and a glob holds `*`, `?` or a closed `[…]` the shell sees outside quotes, a half-quoted one (`'/bin/r'?`) included, so test's own `[` (`[ -n "$R" ]`) is no glob.
+  A plain `rm` runs when every path it names sits inside the session's own worktree (the `.claude/worktrees/<name>` folder its `cwd` is in) or its own scratchpad (the `scratchpad` folder under `/tmp/claude-<uid>/` named by its `session_id`), each path resolved through its links.
+  Any other path is refused, so a session working in the main checkout removes no file there, as the **main** rule keeps that checkout to upkeep.
+  It reads a delete wherever the shell runs one, through `shell.ts`'s walk (wrappers such as `nohup` and `sudo`, `sh -c`, `eval`, substitutions), and more ways:
+  the words after run-slot's `--`, each word of `screen` or `tmux` that starts no option as the command it runs, the script `at` or `batch` takes from stdin or `-f`, and every program it judges named among another program's words (`arch -arm64 rm -rf`, `busybox rm`, `npx rimraf`); a printer's or a search's words stay text.
+  A word it cannot read among those words, given `-r` after it (`arch -arm64 $R -rf`), is refused as a program it cannot read; a data program's words stay text (`gh pr checks $N -R <repo>`).
+  A plain `rm` met that way is judged for recursion alone, so `docker rm -fv "$ID"` and `bun rm <package>` run.
+  It also reads every word holding a space, the text after an `=` and a leading `!` too, as a command line of its own.
+  The programs in its `DATA` list (printers, searches, `sed`, `awk`, `jq`, `gh` and the interpreters) take text as data, so their words stay text, and git's only command line is a `-c alias.<name>=!…` value, so a commit message or a `git grep` pattern stays text.
+  It is a speed bump, not a wall: a script file a session writes and runs passes it, as does an interpreter's own delete call (`fs.rmSync` in `bun -e`), and only an OS sandbox contains those.
+  It fails closed only on a call it cannot read that reads as a delete, and its tests are `bun run test:file tests/scripts/hooks/no-raw-delete.test.ts tests/scripts/hooks/refused-forms.test.ts`.
 
 ## no-release-comment
 

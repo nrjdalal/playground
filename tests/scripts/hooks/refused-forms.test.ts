@@ -1,6 +1,7 @@
 import { afterAll, describe, expect, test } from "bun:test"
 import {
   copyFileSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
@@ -21,6 +22,7 @@ import { check as headlessLogin } from "../../../scripts/hooks/no-headless-login
 import { check as killByName } from "../../../scripts/hooks/no-kill-by-name"
 import { check as mainCheckout } from "../../../scripts/hooks/no-main-checkout"
 import { check as playgroundLeak } from "../../../scripts/hooks/no-playground-leak"
+import { check as rawDelete } from "../../../scripts/hooks/no-raw-delete"
 import { check as rawSpawn } from "../../../scripts/hooks/no-raw-spawn"
 import { check as releaseComment } from "../../../scripts/hooks/no-release-comment"
 import { check as stash } from "../../../scripts/hooks/no-stash"
@@ -275,6 +277,14 @@ const guardsOf = (
         LISTS,
       ),
   },
+  // No bundle while no settings file registers it, so only its source runs, and the bundled pass below leaves it out.
+  "no-raw-delete": {
+    folders: {
+      checkout: [CHECKOUT, HOME],
+      "process worktree": [join(homedir(), "x", ".claude", "worktrees", "y"), homedir()],
+    },
+    run: (raw) => rawDelete(raw),
+  },
   "no-raw-spawn": { folders: { checkout: [CHECKOUT, HOME] }, run: (raw) => c.rawSpawn(raw) },
   "no-release-comment": {
     folders: { checkout: [OTHER, HOME] },
@@ -408,7 +418,11 @@ describe("each bundled guard gives its source's verdict with no node_modules rea
     expect(() => Bun.resolveSync("zod", BUNDLED_DIR)).toThrow()
   })
 
-  test.each(CASES.map((c) => [c.key, c] as const))(
+  test.each(
+    CASES.filter((c) => existsSync(join(BUNDLED_DIR, `${c.guard}.js`))).map(
+      (c) => [c.key, c] as const,
+    ),
+  )(
     "%s",
     async (_, c) => {
       const at = GUARDS[c.guard].folders[c.folder] as [string, string]
