@@ -1,7 +1,16 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
 
 // The routers' auth refuses Better Auth's default secret under NODE_ENV=production, which CI's build step sets. Set before the router loads.
 process.env.BETTER_AUTH_SECRET ||= "fix-test-secret-not-for-use-anywhere"
@@ -216,6 +225,29 @@ describe("each fix runs its fixed argv", () => {
     expect(file).toBeString()
     expect(bash).toBe(`bash ${file}`)
     expect(m.calls().join("\n")).not.toContain("sudo")
+  })
+
+  test("a fix's download folder is a marked scratch folder in the temp folder, gone once the fix ends (#545)", async () => {
+    const m = machine()
+    const tmp = join(m.root, "tmp")
+    mkdirSync(tmp)
+    const was = process.env.TMPDIR
+    process.env.TMPDIR = tmp
+    try {
+      m.stub("curl", 'while [ "$1" != "-o" ]; do shift; done; echo "echo installed" > "$2"')
+      m.stub("bash", '[ -f "$(dirname "$1")/.safe-delete-scratch" ] && echo marked')
+      const app = setup(m.fixes)
+      expect((await begin(app, `${FIX}/claude`)).status).toBe(202)
+      const claude = await settled(app, `${FIX}/claude`)
+      expect(claude.state).toBe("ok")
+      expect(claude.lines).toContain("marked")
+      const file = m.calls()[1]!.split(" ")[1]!
+      expect(realpathSync(dirname(dirname(file)))).toBe(realpathSync(tmp))
+      expect(readdirSync(tmp)).toEqual([])
+    } finally {
+      if (was === undefined) delete process.env.TMPDIR
+      else process.env.TMPDIR = was
+    }
   })
 
   test("gh-login installs gh, then shows the device code and link until the sign-in finishes", async () => {
