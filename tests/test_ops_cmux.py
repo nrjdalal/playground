@@ -579,11 +579,11 @@ def test_up_herdr(scratch):
             sys.argv = argv
         check(len(herdr_st()["calls"]) == calls and not os.path.exists(os.path.join(state, "up.cmux")), "up: --once-per-cmux runs no pass and leaves no marker")
 
-        # a pass that prints: a job with no runtime is launchd's, which ops-up only reports, and the jobs after it still run
+        # a pass that prints: a job with a command and no runtime opens in herdr, and the jobs after it still run
         bare = {k: v for k, v in job("ops-noruntime").items() if k != "runtime"}
         printed = pass_with([bare, job("ops-after", runtime="herdr")], quiet=False)
-        check("started ops-noruntime" not in printed and "started ops-after in herdr" in printed and not any(p.get("label") == "ops-noruntime" for p in herdr_st()["panes"]),
-              "up: a job with no runtime is only reported, and the jobs after it still run", printed)
+        check("started ops-noruntime in herdr (no heartbeat)" in printed and "started ops-after in herdr" in printed and any(p.get("label") == "ops-noruntime" for p in herdr_st()["panes"]),
+              "up: a job with a command and no runtime prints as started in herdr, and the jobs after it still run", printed)
 
         # a failed start logs herdr's whole answer and waits out no GRACE
         os.environ["STUB_HERDR_RUN_FAIL"] = "1"

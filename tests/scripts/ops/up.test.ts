@@ -145,10 +145,10 @@ test("a pass exits 0 and starts a down job stored as cmux or auto in herdr, insi
       code: 0,
       started: ["ops-dashboard", "ops-x"],
     })
-  // a row that names no runtime is launchd's, which ops-up only reports; the render gives a stored terminal job its runtime
+  // a row that names no runtime and has a command starts in herdr too, as a hand-kept jobs.json row the render never parsed
   expect(exitOf([{ ...cmuxJob, runtime: undefined }], "outside")).toEqual({
     code: 0,
-    started: [],
+    started: ["ops-dashboard"],
   })
 })
 

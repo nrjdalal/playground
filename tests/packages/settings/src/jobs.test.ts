@@ -86,7 +86,7 @@ describe("the job registry", () => {
     expect(jobs.map((job) => job.name)).toEqual([...jobs.map((job) => job.name)].sort())
   })
 
-  test("a stored row naming cmux or auto loads and runs in herdr, and one with an unknown key is skipped", () => {
+  test("a stored row naming cmux, auto or herdr loads and runs in herdr, and one with an unknown key is skipped", () => {
     const sweep = jobKey("ops-sweep")
     const stored = (value: Record<string, unknown>) =>
       renderJobs(
@@ -94,12 +94,12 @@ describe("the job registry", () => {
         [],
         fill,
       ).jobs.find((job) => job.name === "ops-sweep")!
-    const bare = { ...JOBS["ops-sweep"]!, enabled: true }
-    for (const row of [{ ...bare, runtime: "cmux" }, { ...bare, runtime: "auto" }, bare]) {
+    const on = { ...JOBS["ops-sweep"]!, enabled: true }
+    for (const row of [{ ...on, runtime: "cmux" }, { ...on, runtime: "auto" }, on]) {
       expect(stored(row).disabled).toBeUndefined()
       expect(stored(row).runtime).toBe("herdr")
     }
-    expect(stored({ ...bare, madeUp: true }).disabled).toBe(true)
+    expect(stored({ ...on, madeUp: true }).disabled).toBe(true)
   })
 
   test("a stored row that still carries needsCmux loads with its enabled state and without the field, and one that set it with no runtime runs in herdr", () => {
