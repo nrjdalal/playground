@@ -495,6 +495,9 @@ describe("a quoted argument is read as a command line only where a program runs 
     ],
     ["awk reading cat's output", "cat /dev/null | awk '$3 ~ /runner/'"],
     ["awk by its system path", "/usr/bin/awk '$3 ~ /runner/' /dev/null"],
+    ["grep over the folder after !", "! grep -r x ."],
+    ["grep over the folder after then", "if true; then grep -r x .; fi"],
+    ["awk after do", "while false; do awk '$3 ~ /runner/' /dev/null; done"],
     [
       "grep, awk, sort, uniq and head in a pipe",
       "grep x /dev/null | awk '$3 ~ /runner/' | sort | uniq -c | head -3",
