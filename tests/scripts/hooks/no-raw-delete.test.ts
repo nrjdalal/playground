@@ -60,6 +60,7 @@ describe("a delete the hook lets run", () => {
     "$R/scripts/spawn.sh column reviewer $W",
     "gh pr checks $N -R nrjdalal/playground",
     "fd . src --exec=echo",
+    "rsync -a --delay-updates src/ dst/",
     "npx -y @scope/tool@1 build",
   ])("%s", async (command) => {
     expect(await check(input(command))).toBeUndefined()

@@ -273,7 +273,11 @@ async function inspect(raw: string, environment: Record<string, string | undefin
     if (RM.has(name)) return judgeRm(args, xargs !== undefined || reach.appends, at, roots, reach)
     if (name === "git") return judgeGit(args)
     if (name === "rimraf") return refuse("rimraf")
-    if (name === "rsync" && args.some((a) => a.value.startsWith("--del")))
+    // --del is --delete-during's alias, and --delay-updates deletes nothing
+    if (
+      name === "rsync" &&
+      args.some(({ value }) => value === "--del" || value.startsWith("--delete"))
+    )
       return refuse("rsync --delete", "it deletes every file its source lacks, for good")
     if (name === "chflags")
       return refuse("chflags", "it lifts the flags that keep a file from deletion")
