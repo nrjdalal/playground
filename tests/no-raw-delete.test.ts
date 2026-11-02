@@ -47,7 +47,7 @@ const CARVE_OUTS: Record<string, { lines: number; reason: string }> = {
   "scripts/ops/runner-host/suite.sh": {
     lines: 5,
     reason:
-      "runs on the CI runner host under /srv/ci, which has no trash, and removes only that run's own unpacked tree and files",
+      "runs on the CI runner host under /srv/ci, which has no trash: it removes a run's own unpacked tree and files, the trees of runs whose unit has stopped, and logs and outputs older than 7 days",
   },
   "web/next/package.json": {
     lines: 2,
@@ -58,26 +58,30 @@ const CARVE_OUTS: Record<string, { lines: number; reason: string }> = {
 const ARG = `['"]-[a-zA-Z]*['"]\\s*,\\s*`
 const RECURSIVE_FLAG = `(?:-[a-zA-Z]*[rR][a-zA-Z]*|--recursive)`
 
-// Each raw form, by name; a call to rmSync, rm, rmdirSync or rmdir counts when its own arguments, across lines, ask for recursive.
+// Each raw form, by name, A to Z; the text is read as written, so options held in a variable or a computed flag pass unseen.
 const FORMS: [string, RegExp][] = [
-  [
-    "rm -r",
-    new RegExp(
-      `(?:^|[\\s;&|(\`'"])(?<!\\bgit\\s)rm\\s+(?:-[a-zA-Z-]+\\s+)*${RECURSIVE_FLAG}(?=[\\s'"\`;)]|$)`,
-    ),
-  ],
-  ["rm -r", new RegExp(`['"]rm['"]\\s*,\\s*(?:${ARG})*['"]${RECURSIVE_FLAG}['"]`)],
-  ["rmtree", /\brmtree\b/],
   ["find -delete", /\bfind\b[^\n|;]*\s-delete\b/],
-  ["git clean -f", /\bgit\b[^\n|;]*\bclean\s+(?:-[a-zA-Z]+\s+)*-[a-zA-Z]*f/],
-  ["git clean -f", /['"]clean['"]\s*,\s*(?:['"]-[a-zA-Z]+['"]\s*,\s*)*['"]-[a-zA-Z]*f/],
+  ["git clean -f", /\bgit\b[^\n|;]*\bclean\s+(?:-[a-zA-Z-]+\s+)*(?:--force\b|-[a-zA-Z]*f)/],
+  [
+    "git clean -f",
+    /['"]clean['"]\s*,\s*(?:['"]-[a-zA-Z-]+['"]\s*,\s*)*['"](?:--force|-[a-zA-Z]*f[a-zA-Z]*)['"]/,
+  ],
   ["git worktree remove --force", /\bworktree\s+remove\b[^\n|;]*(?:--force|\s-f\b)/],
   [
     "git worktree remove --force",
     /['"]worktree['"]\s*,\s*['"]remove['"]\s*,[^\]\n]*['"](?:--force|-f)['"]/,
   ],
+  [
+    "rm -r",
+    new RegExp(
+      `(?:^|[\\s;&|(\`'"/\\\\])(?<!\\bgit\\s)rm\\s+(?:-[a-zA-Z-]+\\s+)*${RECURSIVE_FLAG}(?=[\\s'"\`;)]|$)`,
+    ),
+  ],
+  ["rm -r", new RegExp(`['"]rm['"]\\s*,\\s*\\[?\\s*(?:${ARG})*['"]${RECURSIVE_FLAG}['"]`)],
+  ["rmtree", /\brmtree\b/],
 ]
 
+// A call to rmSync, rm, rmdirSync or rmdir counts when its own arguments, across lines, ask for recursive.
 const CALL = /\b(?:rmSync|rmdirSync|rm|rmdir)\(/g
 
 // The text from an opening parenthesis to its match, or to the end.
@@ -121,13 +125,10 @@ const offenders = (files: Record<string, string>): Map<string, Map<number, strin
   )
 
 const trackedText = async (): Promise<Record<string, string>> => {
-  const list = Bun.spawnSync(
-    ["git", "ls-files", "--cached", "--others", "--exclude-standard", "-z"],
-    {
-      cwd: ROOT,
-      stderr: "pipe",
-    },
-  )
+  const list = Bun.spawnSync(["git", "ls-files", "--cached", "-z"], {
+    cwd: ROOT,
+    stderr: "pipe",
+  })
   if (list.exitCode !== 0) throw new Error(`git ls-files failed: ${list.stderr}`)
   const files: Record<string, string> = {}
   for (const path of list.stdout.toString().split("\0").filter(Boolean)) {
@@ -179,6 +180,12 @@ describe("no raw recursive delete in the repo", () => {
       "git worktree remove --force",
     ])
     expect(forms("rmSync(dir, { force: true, recursive: true })")).toEqual(["recursive rm"])
+    expect(forms('execFileSync("rm", ["-rf", dir])')).toEqual(["rm -r"])
+    expect(forms('spawnSync("rm", ["-r", "-f", dir])')).toEqual(["rm -r"])
+    expect(forms("/bin/rm -rf build")).toEqual(["rm -r"])
+    expect(forms("\\rm -rf build")).toEqual(["rm -r"])
+    expect(forms("git clean --force -dx")).toEqual(["git clean -f"])
+    expect(forms('git(["clean", "--force", "-dx"])')).toEqual(["git clean -f"])
     expect(rawDeletes("await rm(\n  join(a, b),\n  { recursive: true },\n)")).toEqual(
       new Map([[1, ["recursive rm"]]]),
     )
