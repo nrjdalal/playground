@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { readdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 
-import { GIT_TAKES } from "../../../scripts/hooks/shell"
+import { type Env, GIT_TAKES, lex, run } from "../../../scripts/hooks/shell"
 
 const HOOKS = join(import.meta.dir, "..", "..", "..", "scripts", "hooks")
 
@@ -25,5 +25,30 @@ describe("git's value-taking options live in one list", () => {
       .filter((file) => file.endsWith(".ts") && file !== "shell.ts")
       .filter((file) => readFileSync(join(HOOKS, file), "utf8").includes('"--namespace"'))
     expect(copies).toEqual([])
+  })
+})
+
+describe("an alternate reading runs on its own copy of the env", () => {
+  // sudo -Z is an option sudo's list lacks, so the call is read twice: x as the program, and x as -Z's value with the rest as the program
+  const seen = async (line: string) => {
+    const env: Env = { cwd: "/start", files: new Map(), known: {}, process: {}, vars: new Map() }
+    let probe: Env | undefined
+    await run(lex(line), env, async (_cmd, parsed, here) => {
+      if (parsed.name === "probe") probe = here
+      return undefined
+    })
+    return { cwd: probe?.cwd, vars: [...(probe?.vars.keys() ?? [])] }
+  }
+
+  test("a cd only an alternate reading runs leaves the next command's folder as it was", async () => {
+    expect(await seen("sudo -Z x cd /; probe")).toEqual({ cwd: "/start", vars: [] })
+  })
+
+  test("an export only an alternate reading runs leaves the next command's variables as they were", async () => {
+    expect(await seen("sudo -Z x export A=1; probe")).toEqual({ cwd: "/start", vars: [] })
+  })
+
+  test("the primary reading still moves the folder and sets the variables", async () => {
+    expect(await seen("cd /; export A=1; probe")).toEqual({ cwd: "/", vars: ["A"] })
   })
 })
