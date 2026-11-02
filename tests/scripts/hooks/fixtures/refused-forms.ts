@@ -19,6 +19,7 @@ export type Guard =
   | "no-raw-spawn"
   | "no-release-comment"
   | "no-stash"
+  | "no-unslotted-run"
 
 // "process …" folders sit in the home `~` expands to (the process's own), the rest in the test's scratch machine.
 export type Folder =
@@ -2172,7 +2173,6 @@ gh api graphql -f query="$QUERY"`,
         ["a commit after pushd and popd", `pushd ${W}; popd; git commit -m x`],
         ["a commit after a cd back with cd -", `cd ${W}; cd -; git commit -m x`],
         ["a write after a cd behind ||", `true || cd ${W}; echo x > f`],
-        ["a script's output piped into a shell", "bun run ask list | sh"],
       ]
     },
     source: "#514",
@@ -2190,6 +2190,96 @@ gh api graphql -f query="$QUERY"`,
         "a commit after zsh's two-operand cd",
         `cd ${MAIN}/.claude/worktrees/a ${MAIN}; git commit -m x`,
       ],
+      [
+        "a commit after a deeper directory stack's pushd and popd",
+        `pushd ${MAIN}/.claude/worktrees/a; pushd ${homedir()}; popd; popd; git commit -m x`,
+      ],
+    ],
+    source: "#514",
+  },
+  {
+    folders: ["main checkout"],
+    guards: ["no-main-checkout"],
+    rows: () => [["a script's output piped into a shell", "bun run ask list | sh"]],
+    source: "#514",
+  },
+  // each form reaches the main checkout from a worktree, where the folder the line started in is not the guarded one
+  {
+    folders: ["checkout"],
+    guards: ["no-main-checkout"],
+    rows: ({ DATA, MAIN }) => [
+      [
+        "a commit after a relative cd with the folder already unnamed",
+        `true || cd ${DATA}; cd ../../..; git commit -m x`,
+      ],
+      ["a commit after a relative cd repeat runs three times", "repeat 3 cd ..; git commit -m x"],
+      [
+        "a commit after a relative cd a loop's body holds",
+        "for i in 1 2 3; do cd ..; done; git commit -m x",
+      ],
+      [
+        "a commit after a function body's cd the next cd does not undo",
+        `f() { cd ${MAIN}; }; cd ${DATA}; f; git commit -m x`,
+      ],
+      [
+        "a commit after the cd a pipeline's last element runs",
+        `echo | cd ${MAIN}; git commit -m x`,
+      ],
+      ["a commit after builtin cd", `builtin cd ${MAIN}; git commit -m x`],
+      ["a commit after command cd", `command cd ${MAIN}; git commit -m x`],
+      ["a build after a cd behind || into the main checkout", `true || cd ${MAIN}; bun run build`],
+      [
+        "a write by a relative path after a cd behind || into the main checkout",
+        `true || cd ${MAIN}; echo x > f`,
+      ],
+    ],
+    source: "#514",
+  },
+  {
+    folders: ["main checkout"],
+    guards: ["no-main-checkout"],
+    rows: ({ MAIN }) => {
+      const W = `${MAIN}/.claude/worktrees/a`
+      return [
+        [
+          "a commit after a cd in a branch whose own argument spells a closer",
+          `if false; then echo done; cd ${W}; fi; git commit -m x`,
+        ],
+        [
+          "a commit after a cd in a loop body whose own argument spells a closer",
+          `while false; do grep -q done f; cd ${W}; done; git commit -m x`,
+        ],
+      ]
+    },
+    source: "#514",
+  },
+  {
+    folders: ["main checkout"],
+    guards: ["no-unslotted-run"],
+    rows: ({ MAIN }) => [
+      [
+        "a type check after a cd behind || into a worktree",
+        `true || cd ${MAIN}/.claude/worktrees/a; bun run check-types`,
+      ],
+    ],
+    source: "#514",
+  },
+  {
+    folders: ["data folder"],
+    guards: ["no-extensions-write"],
+    rows: ({ WORK }) => [
+      [
+        "a write by a relative path after a cd behind || out of the data folder",
+        `true || cd ${WORK}; echo x > extensions/policy.json`,
+      ],
+    ],
+    source: "#514",
+  },
+  {
+    folders: ["tmp"],
+    guards: ["no-extensions-write"],
+    rows: ({ SCOPE }) => [
+      ["a program run after a cd behind || into the extensions root", `true || cd ${SCOPE}; true`],
     ],
     source: "#514",
   },

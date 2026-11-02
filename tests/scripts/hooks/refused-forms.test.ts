@@ -15,6 +15,7 @@ import { check as playgroundLeak } from "../../../scripts/hooks/no-playground-le
 import { check as rawSpawn } from "../../../scripts/hooks/no-raw-spawn"
 import { check as releaseComment } from "../../../scripts/hooks/no-release-comment"
 import { check as stash } from "../../../scripts/hooks/no-stash"
+import { check as unslottedRun } from "../../../scripts/hooks/no-unslotted-run"
 import {
   ALLOWED,
   type Call,
@@ -204,6 +205,13 @@ const GUARDS: Record<Guard, { folders: Partial<Record<Folder, [string, string]>>
   "no-stash": {
     folders: { checkout: [CHECKOUT, HOME], "data folder": [DATA, HOME], home: [HOME, HOME] },
     run: (raw) => stash(raw, {}),
+  },
+  "no-unslotted-run": {
+    folders: {
+      checkout: [join(PATHS.MAIN, ".claude", "worktrees", "a"), HOME],
+      "main checkout": [PATHS.MAIN, HOME],
+    },
+    run: (raw, home) => unslottedRun(raw, { HOME: home, PLAYGROUND_ROLE: "worker" }, PATHS.MAIN),
   },
 }
 

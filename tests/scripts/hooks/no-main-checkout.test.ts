@@ -171,22 +171,40 @@ describe("a build, a test run, lefthook, turbo or a file write in the main check
     ["a cd the shell runs only on the one before it", `true || cd ${WORKTREE}; bun run build`],
     ["a cd in a then branch", `if false; then cd ${WORKTREE}; fi; git commit -m x`],
     ["a cd in a loop's body", `for i in 1 2; do cd ${WORKTREE}; done; git commit -m x`],
-    ["a cd in a function's body, never called", `f() { cd ${WORKTREE}; }; git commit -m x`],
     ["a cd env cannot run", `env cd ${WORKTREE}; git commit -m x`],
     ["a backgrounded cd", `cd ${WORKTREE} & bun run build`],
     ["a cd in a pipeline", `cd ${WORKTREE} | cat; bun run build`],
     ["a popd", `pushd ${WORKTREE}; popd; bun run build`],
     ["a cd back", `cd ${WORKTREE}; cd -; bun run build`],
     ["a write after a cd it cannot read", "cd $DIR && echo x > stray.txt"],
-  ])("from the main checkout, %s is read as the folder it started in", async (_name, command) => {
+    [
+      "a readable cd into a worktree, then one it cannot read",
+      `cd ${WORKTREE}; cd $D; bun run build`,
+    ],
+  ])("from the main checkout, %s is judged in every folder it may run in", async (_n, command) => {
     const reason = await bash(command)
     expect(reason).toContain("no-main-checkout hook refuses")
-    expect(reason).toContain("the one the line started in")
+    expect(reason).toContain("every folder the shell may be in")
   })
 
+  // #573: a body's own cd stays a folder the shell may be in, while the folder the line is in is still named, so the refusal names that folder's own fix
+  test("from the main checkout, a cd in a function's body, never called, is refused", async () => {
+    const reason = await bash(`f() { cd ${WORKTREE}; }; git commit -m x`)
+    expect(reason).toContain("no-main-checkout hook refuses")
+    expect(reason).toContain("Run it in your own worktree")
+  })
+
+  // #573: the folder a sure cd lands in is the one the commands after it run from, and a reserved word an argument spells opens and closes no body
   test.each([
     ["a readable cd into a worktree", `cd ${WORKTREE} && bun run build`],
-    ["a readable cd into a worktree, then one it cannot read", `cd ${WORKTREE}; cd $D; git status`],
+    ["a second cd into a subfolder of it", `cd ${WORKTREE} && cd packages && git commit -m x`],
+    ["an argument that spells an opener before it", `echo if; cd ${WORKTREE} && bun run build`],
+    [
+      "an argument that spells a closer before it",
+      `grep -q done f; cd ${WORKTREE} && bun run build`,
+    ],
+    ["a function whose body holds no cd", `function f { :; }; cd ${WORKTREE} && bun run build`],
+    ["a brace group that holds no cd", `{ echo hi; }; cd ${WORKTREE} && bun run build`],
   ])("from the main checkout, %s runs", async (_name, command) => {
     expect(await bash(command)).toBeUndefined()
   })
@@ -417,6 +435,25 @@ describe("what keeps the main checkout up to date, or only reads it, runs", () =
 
   test("from a worktree, a cd the hook cannot follow leaves the command alone", async () => {
     expect(await bash("cd $DIR && bun run build", WORKTREE)).toBeUndefined()
+  })
+
+  // #573: a cd the shell may not run, may run many times, or runs through a builtin wrapper reaches the main checkout from a worktree, so each folder it may leave the shell in is judged
+  test.each([
+    [
+      "a relative cd past the worktree's own root",
+      `true || cd ${HOME}; cd ../../..; git commit -m x`,
+    ],
+    ["a relative cd a count runs three times", "repeat 3 cd ..; git commit -m x"],
+    ["a relative cd a loop's body holds", "for i in 1 2 3; do cd ..; done; git commit -m x"],
+    [
+      "a function body's cd a later cd does not undo",
+      `f() { cd ${MAIN}; }; cd ${HOME}; f; git commit -m x`,
+    ],
+    ["the cd a pipeline's last element runs", `echo | cd ${MAIN}; git commit -m x`],
+    ["a cd builtin runs", `builtin cd ${MAIN}; git commit -m x`],
+    ["a cd command runs", `command cd ${MAIN}; git commit -m x`],
+  ])("from a worktree, %s is refused", async (_name, command) => {
+    expect(await bash(command, WORKTREE)).toContain("no-main-checkout hook refuses")
   })
 
   test("from a worktree, bun's --cwd into another worktree runs", async () => {
