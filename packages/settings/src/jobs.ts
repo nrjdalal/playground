@@ -70,8 +70,8 @@ const launchd = (name: string, job: Pick<Job, "description" | "schedule">): Job 
   ...job,
 })
 
-const bunJob = (name: string) =>
-  `{bun} --no-env-file {checkout}/packages/scripts/src/${name}/cli.ts`
+const bunJob = (name: string, root = "{checkout}") =>
+  `{bun} --no-env-file ${root}/packages/scripts/src/${name}/cli.ts`
 
 // The jobs Playground ships, each off until the owner turns it on but the Dashboard's own; A to Z.
 export const JOBS: Record<string, Job> = {
@@ -80,7 +80,9 @@ export const JOBS: Record<string, Job> = {
       "Keeps the Mac awake on AC power and on battery with caffeinate, display and lock unchanged.",
     schedule: { always: true },
   }),
-  "ops-changelog": terminal("ops-changelog", bunJob("ops-changelog"), {
+  // Its sync runs `bun run changelog sync` in the checkout that holds its script, so it runs from the Dashboard's checkout, whose .env names the database; the install's checkout has none.
+  "ops-changelog": terminal("ops-changelog", bunJob("ops-changelog", "{dashboard}"), {
+    cwd: "{dashboard}",
     description: "Syncs new canary merges and main versions into the Changelog every 5 minutes.",
     schedule: { every: 300 },
   }),
