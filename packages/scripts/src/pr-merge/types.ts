@@ -1,8 +1,10 @@
-// The types gate: a head behind canary that merges with it clean merges on its own checks, which typed the head alone, so pr:merge type-checks the tree the squash makes before it squashes, since two PRs green alone once broke canary together on a changed signature.
 import { accessSync, constants } from "node:fs"
 import { mkdir, rm } from "node:fs/promises"
 import { homedir } from "node:os"
 import { dirname, join } from "node:path"
+
+// The types gate: a head behind canary that merges with it clean merges on its own checks, which typed the head alone, so pr:merge type-checks the tree the squash makes before it squashes, since two PRs green alone once broke canary together on a changed signature.
+import type { Subprocess } from "bun"
 
 import { BASE, type Gate } from "./gates"
 import type { Run } from "./merge"
@@ -149,7 +151,11 @@ export async function typesGate({
   const deadline = Date.now() + budgetMs
   const at = `the merged tree ${mergeTree.slice(0, 7)} (#${n} at ${head.slice(0, 7)} onto ${BASE} ${canary.slice(0, 7)})`
   let worktree = ""
+  let running: Subprocess | null = null
+  // a signal ends the gate as its deadline does: the running step killed and waited for, then the worktree cleared
   const unlisten = onStop(async () => {
+    running?.kill("SIGTERM")
+    await running?.exited
     if (worktree) await clear(git, worktree)
   })
   try {
@@ -189,7 +195,7 @@ export async function typesGate({
           `it ran past its ${Math.round(budgetMs / 1000)}s before ${step.name}, waiting on the machine's run slots`,
         )
       const started = Date.now()
-      const proc = Bun.spawn(step.argv, {
+      const proc = (running = Bun.spawn(step.argv, {
         cwd: worktree,
         env: {
           ...process.env,
@@ -203,7 +209,7 @@ export async function typesGate({
         stdin: "ignore",
         stdout: "pipe",
         timeout: left,
-      })
+      }))
       const [stdout, stderr, code] = await Promise.all([
         new Response(proc.stdout).text(),
         new Response(proc.stderr).text(),
@@ -233,7 +239,7 @@ export async function typesGate({
   } catch (err) {
     return unfinished(err instanceof Error ? err.message : String(err))
   } finally {
-    unlisten()
     if (worktree) await clear(git, worktree)
+    unlisten()
   }
 }
