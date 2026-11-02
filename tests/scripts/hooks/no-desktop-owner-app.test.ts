@@ -77,6 +77,9 @@ describe("an app on the list", () => {
     ["behind sudo --prompt", "sudo --prompt echo agent-desktop snapshot --app Slack"],
     ["behind time -o", "/usr/bin/time -o echo agent-desktop snapshot --app Slack"],
     ["behind doas -C", "doas -C echo agent-desktop snapshot --app Slack"],
+    ["behind sudo, its -p value attached", "sudo -pecho agent-desktop snapshot --app Slack"],
+    ["behind env's --, an assignment after it", "env -- X=1 agent-desktop snapshot --app Slack"],
+    ["behind nice's -<number>", "nice -10 agent-desktop snapshot --app Slack"],
   ])("is refused: %s", async (_, command) => {
     const reason = await bash(command)
     expect(reason).toContain("no-desktop-owner-app hook refused")
