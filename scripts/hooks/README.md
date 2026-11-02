@@ -388,7 +388,7 @@ Only the first reading moves the folder, sets variables and records files for th
   A color it cannot read (a variable, an `--input` it cannot open) is refused, and the reason names the fix: one of the 22 hexes, by name, written literally.
   It recolors nothing, so a label made before the rule keeps its color.
   A GraphQL `createLabel` or `updateLabel` sent through `gh api graphql` is not read.
-  It fails open, and its tests are in `bun run test:file tests/scripts/hooks`, beside a pin that every color the repo's own code creates a label in is a 500, the auto-labeler workflow's included.
+  It fails open on a call it cannot read, and its tests are in `bun run test:file tests/scripts/hooks`, beside a pin that every color the repo's own code creates a label in is a 500, the auto-labeler workflow's included.
 
 ## no-ours-merge
 
@@ -482,6 +482,6 @@ Only the first reading moves the folder, sets variables and records files for th
   ZeroStarter's skills under `skills/zerostarter/`, which `.agents/skills/` links to and which a path reaches with its links resolved (one whose `source` names a tool, not a repository, is vendored and left out), `.agents/dashboard/`, `.agents/*.md` (not `.agents/adr/`),
   the root `AGENTS.md` and `CLAUDE.md`, `scripts/README.md` and `scripts/hooks/README.md`, and `docs/`; and anywhere, a handoff under the data folder's `handoffs/`.
   A Skill call or a typed `/writing-for-agents`, bare or a plugin's or folder's scoped copy (`ws-home:writing-for-agents`), leaves a mark under the data folder's `writing-first/`, a subagent's apart from its parent's, since a subagent's hook input carries its parent's session id beside its own `agent_id`; a compaction clears the session's marks.
-  With the skill installed nowhere (the config folder's `skills/`, the checkout's `.claude/skills/`, or a plugin `plugins/installed_plugins.json` lists, installed for the user and enabled in the user settings or installed for the session's project) it lets every write through, and it fails open.
+  With the skill installed nowhere (the config folder's `skills/`, the checkout's `.claude/skills/`, or a plugin `plugins/installed_plugins.json` lists, installed for the user and enabled in the user settings or installed for the session's project) it lets every write through, and it fails open on a call it cannot read.
   Its refusal names the bare skill or the scoped name the session's skill list shows, since a factory session loads its org's set through `--plugin-dir` under a name the hook cannot see.
   Its tests are in `bun run test:file tests/scripts/hooks` too.
