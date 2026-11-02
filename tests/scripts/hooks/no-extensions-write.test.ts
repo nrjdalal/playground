@@ -511,6 +511,7 @@ describe("a quoted argument is read as a command line only where a program runs 
     ],
     ["cut at a quoted brace", "cut -d'{' -f1 /dev/null"],
     ["sort keyed at a quoted bracket", "sort -t'[' -k2 /dev/null"],
+    ["awk matching a regex that starts at / and holds a glob", "awk '/^a*b/' /dev/null"],
   ])("%s runs from the home and the data folder", async (_, command) => {
     for (const cwd of homes) expect(await at(command, cwd)).toBeUndefined()
   })
