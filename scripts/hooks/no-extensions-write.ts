@@ -75,6 +75,9 @@ const EXPORTS = new Set(["declare", "export", "local", "readonly", "typeset"])
 // Programs that remove or move what they name, so naming a folder above the root takes the root with it, and the guards fall back to core's smaller lists.
 const REMOVERS = new Set(["find", "mv", "rm", "rmdir", "rsync", "unlink"])
 const DUPLICATE = /^(?:\d+|-)$/
+// Whether a redirect writes a file: >, >>, >|, <> or >& to a name, not an fd
+const writer = ({ op, target }: { op: string; target?: Word }): boolean =>
+  [">", ">>", ">|", "<>"].includes(op) || (op === ">&" && !DUPLICATE.test(target?.value ?? ""))
 const GLOB = /[*?[{(]/
 // Variables that make git or a pager run a program, so a reader with one set is judged as any other program.
 const RUNS = /^(?:EDITOR|GIT_[A-Z_]+|LESSOPEN|PAGER|VISUAL)$/
@@ -170,7 +173,7 @@ function awkPrograms(words: Word[]): Word[] | undefined {
 
 // The lines an awk program runs, read whatever the line: each string literal of a program that can run a command or write a file
 function programLines({ args, first }: Parsed): string[] {
-  if (!AWKS.has((first?.value.split("/").pop() ?? "").toLowerCase())) return []
+  if (!AWKS.has(program(first?.value ?? "").toLowerCase())) return []
   return (awkPrograms(args) ?? [])
     .filter(({ value }) => AWK_RUNS.test(value))
     .flatMap(({ value }) => [...value.matchAll(/"((?:[^"\\]|\\.)*)"/g)].map((m) => m[1]))
@@ -182,7 +185,7 @@ function narrow(parsed: Parsed, env: Env): boolean {
   if (!first || xargs || marked(name) || parsed.local.size > 0) return false
   if (!/^(?:\/(?:bin|opt\/homebrew\/bin|usr\/bin|usr\/local\/bin)\/)?[^/]+$/.test(first.value))
     return false
-  const base = (first.value.split("/").pop() ?? "").toLowerCase()
+  const base = program(first.value).toLowerCase()
   if (AWKS.has(base)) {
     const programs = awkPrograms(args)
     return !!programs && programs.every(({ value }) => !marked(value) && !AWK_RUNS.test(value))
@@ -200,12 +203,7 @@ function wholeLine(commands: Command[], env: Env): boolean {
   return commands.some((cmd) => {
     const words = [...cmd.words, ...cmd.redirects.flatMap((r) => (r.target ? [r.target] : []))]
     if (words.some((word) => word.procs && wholeLine(word.procs, env))) return true
-    const writes = cmd.redirects.some(
-      ({ op, target }) =>
-        ([">", ">>", ">|", "<>"].includes(op) ||
-          (op === ">&" && !DUPLICATE.test(target?.value ?? ""))) &&
-        target?.value !== "/dev/null",
-    )
+    const writes = cmd.redirects.some((r) => writer(r) && r.target?.value !== "/dev/null")
     return writes || !narrow(parse(cmd), env)
   })
 }
@@ -337,8 +335,7 @@ function inspect(raw: string, environment: Environment) {
     const into = cmd.redirects.find(
       (r) =>
         r.target &&
-        ([">", ">>", ">|", "<>"].includes(r.op) ||
-          (r.op === ">&" && !DUPLICATE.test(r.target.value))) &&
+        writer(r) &&
         (inRoot(pathOf(r.target, env)) ||
           (GLOB.test(r.target.value) && !!names(r.target, env, true))),
     )
