@@ -70,7 +70,7 @@ Each list is read at every call, and it fails closed:
 | missing, with extensions          | refused, naming the file and how to write it |
 | missing, on a fresh clone         | runs on the guard's empty default            |
 
-While a leak guard's list is missing or broken, a call that only reads still runs, such as `git log` or `gh issue list`.
+While a leak guard's list is missing or broken, a Bash call that only reads still runs, such as `git log` or `gh issue list`.
 
 A machine has extensions once its data folder holds the `extensions/` folder ([Settings and extensions](/docs/extensions)).
 A broken list refuses only the calls its guard checks, so the rest of your work runs on.
