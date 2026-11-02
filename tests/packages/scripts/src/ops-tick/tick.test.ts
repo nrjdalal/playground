@@ -24,6 +24,7 @@ import {
   resultOf,
   runner,
   switchAccount,
+  trashPurge,
   turboPrune,
 } from "../../../../../packages/scripts/src/ops-tick/tick"
 import { storeWith } from "../../../../scripts/hooks/render-set"
@@ -756,6 +757,24 @@ describe("the beats that send no line", () => {
     expect(sent).toEqual([])
     expect(await Bun.file(join(ops, "log", "turbo-prune.log")).text()).toContain(
       "removed 1, kept 1, freed 3 MB",
+    )
+  })
+
+  test("the trash purge runs hourly on the trash beside ops, removing batches over 7 days old", async () => {
+    expect(beat("trash-purge").cron).toBe("17 * * * *")
+    const ops = scratch()
+    const trash = join(ops, "..", "trash")
+    const now = new Date("2026-11-02T12:17:00Z")
+    mkdirSync(join(trash, "20261020T000000Z-s", "1"), { recursive: true })
+    mkdirSync(join(trash, "20261101T000000Z-s", "1"), { recursive: true })
+    const { ctx, runs, sent } = fake(ops, now)
+    await trashPurge(undefined, () => 100e9)(ctx)
+    expect(existsSync(join(trash, "20261020T000000Z-s"))).toBe(false)
+    expect(existsSync(join(trash, "20261101T000000Z-s"))).toBe(true)
+    expect(runs).toEqual([])
+    expect(sent).toEqual([])
+    expect(await Bun.file(join(ops, "log", "trash-purge.log")).text()).toContain(
+      "removed 1 (20261020T000000Z-s)",
     )
   })
 

@@ -1,0 +1,361 @@
+import { afterAll, describe, expect, test } from "bun:test"
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  truncateSync,
+  writeFileSync,
+} from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+
+import {
+  isProtected,
+  listTrash,
+  MARKER,
+  makeScratch,
+  purgeTrash,
+  quarantine,
+  removeScratch,
+  restore,
+  type Roots,
+  worktreeRefusal,
+} from "../../../../packages/safe-delete/src"
+
+const dirs: string[] = []
+afterAll(() => {
+  for (const dir of dirs) rmSync(dir, { force: true, recursive: true })
+})
+
+// A fake machine on a mkdtemp root of its own: a HOME, a main checkout in it, and the trash in its state folder.
+const machine = (): Roots & { root: string } => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "safe-delete-")))
+  dirs.push(root)
+  const home = join(root, "home")
+  const main = join(home, "playground")
+  mkdirSync(join(main, ".claude", "worktrees"), { recursive: true })
+  for (const dir of [".config", ".ssh", ".gnupg", ".claude", "Library", "Music", ".playground"])
+    mkdirSync(join(home, dir), { recursive: true })
+  writeFileSync(join(home, ".ssh", "id_ed25519"), "key")
+  return { home, main, root, trash: join(home, ".playground", "trash") }
+}
+
+const file = (path: string, text = "x"): string => {
+  mkdirSync(join(path, ".."), { recursive: true })
+  writeFileSync(path, text)
+  return path
+}
+
+const NOW = new Date("2026-11-02T12:00:00Z")
+const opts = { reason: "test", session: "j6rjgy-worker" }
+
+describe("isProtected", () => {
+  test.each([
+    ["HOME", (r: Roots) => r.home],
+    ["a folder that holds HOME", (r: Roots) => join(r.home, "..")],
+    ["~/.config", (r: Roots) => join(r.home, ".config")],
+    ["a key in ~/.ssh", (r: Roots) => join(r.home, ".ssh", "id_ed25519")],
+    ["~/.gnupg", (r: Roots) => join(r.home, ".gnupg")],
+    ["~/.claude", (r: Roots) => join(r.home, ".claude")],
+    ["~/Library", (r: Roots) => join(r.home, "Library")],
+    ["~/Music", (r: Roots) => join(r.home, "Music")],
+    ["~/.playground", (r: Roots) => join(r.home, ".playground")],
+    ["a file in ~/.playground", (r: Roots) => join(r.home, ".playground", "roster.json")],
+    ["the trash root", (r: Roots) => r.trash],
+    ["a path in the trash", (r: Roots) => join(r.trash, "20261102T120000Z-a", "1")],
+    ["the main checkout", (r: Roots) => r.main],
+    ["a file in the main checkout", (r: Roots) => join(r.main, "AGENTS.md")],
+    ["the worktrees folder", (r: Roots) => join(r.main, ".claude", "worktrees")],
+  ])("refuses %s", (_, pick) => {
+    const roots = machine()
+    expect(isProtected(pick(roots), roots)).toBeString()
+  })
+
+  test("refuses a symlink whose target is protected, and one inside a protected folder", () => {
+    const roots = machine()
+    const link = join(roots.root, "scratch", "keys")
+    mkdirSync(join(roots.root, "scratch"))
+    symlinkSync(join(roots.home, ".ssh"), link)
+    expect(isProtected(link, roots)).toContain(".ssh")
+    const inside = join(roots.home, ".config", "pointer")
+    symlinkSync(join(roots.root, "scratch"), inside)
+    expect(isProtected(inside, roots)).toContain(".config")
+  })
+
+  test("refuses ~/.playground and the trash root's parent when the trash sits elsewhere", () => {
+    const roots = machine()
+    const elsewhere = { ...roots, trash: join(roots.root, "data", "trash") }
+    expect(isProtected(join(roots.home, ".playground", "x"), elsewhere)).toBeString()
+    expect(isProtected(join(roots.root, "data", "notes.md"), elsewhere)).toBeString()
+  })
+
+  test("lets a session's scratch folder, a worktree and a file in a worktree go", () => {
+    const roots = machine()
+    expect(isProtected(join(roots.root, "scratch"), roots)).toBeNull()
+    expect(isProtected(join(roots.home, "notes"), roots)).toBeNull()
+    expect(isProtected(join(roots.main, ".claude", "worktrees", "wt"), roots)).toBeNull()
+    expect(isProtected(join(roots.main, ".claude", "worktrees", "wt", ".next"), roots)).toBeNull()
+  })
+})
+
+describe("quarantine, listTrash and restore", () => {
+  test("renames a path into the trash with a manifest line, lists it, and restores it", () => {
+    const roots = machine()
+    const doomed = join(roots.home, "work", "old")
+    file(join(doomed, "a.txt"), "hello")
+    file(join(doomed, "b", "c.txt"), "hi")
+    const moved = quarantine(doomed, opts, roots, { now: NOW })
+    if ("refused" in moved) throw new Error(moved.refused)
+    expect(moved.id).toBe("20261102T120000Z-j6rjgy-worker/1")
+    expect(moved).toMatchObject({ files: 2, size: 7 })
+    expect(existsSync(doomed)).toBe(false)
+    expect(readFileSync(join(roots.trash, moved.id, "old", "a.txt"), "utf8")).toBe("hello")
+    const manifest = readFileSync(
+      join(roots.trash, "20261102T120000Z-j6rjgy-worker", "manifest.jsonl"),
+      "utf8",
+    )
+    expect(JSON.parse(manifest)).toMatchObject({
+      files: 2,
+      id: moved.id,
+      path: doomed,
+      reason: "test",
+      session: "j6rjgy-worker",
+      size: 7,
+    })
+    expect(listTrash(roots.trash).map((entry) => entry.id)).toEqual([moved.id])
+    expect(restore(moved.id, roots.trash)).toEqual({ path: doomed })
+    expect(readFileSync(join(doomed, "b", "c.txt"), "utf8")).toBe("hi")
+    expect(listTrash(roots.trash)).toEqual([])
+  })
+
+  test("numbers a second path of the same second and session 2", () => {
+    const roots = machine()
+    quarantine(file(join(roots.home, "one")), opts, roots, { now: NOW })
+    const second = quarantine(file(join(roots.home, "two")), opts, roots, { now: NOW })
+    expect(second).toMatchObject({ id: "20261102T120000Z-j6rjgy-worker/2" })
+  })
+
+  test("restore refuses when something stands at the original path, or the id is unknown", () => {
+    const roots = machine()
+    const path = file(join(roots.home, "note"))
+    const moved = quarantine(path, opts, roots, { now: NOW })
+    if ("refused" in moved) throw new Error(moved.refused)
+    file(path, "new")
+    expect(restore(moved.id, roots.trash)).toMatchObject({ refused: expect.stringContaining(path) })
+    expect(restore("20261102T120000Z-j6rjgy-worker/9", roots.trash)).toHaveProperty("refused")
+    expect(restore("../../etc", roots.trash)).toHaveProperty("refused")
+  })
+
+  test("refuses a protected path, a missing path and a bad session name", () => {
+    const roots = machine()
+    expect(quarantine(join(roots.home, ".ssh"), opts, roots)).toMatchObject({ kind: "protected" })
+    expect(quarantine(join(roots.home, "gone"), opts, roots)).toMatchObject({ kind: "refused" })
+    const path = file(join(roots.home, "x"))
+    expect(quarantine(path, { ...opts, session: "a/b" }, roots)).toMatchObject({ kind: "refused" })
+  })
+
+  test("refuses a move that would cross volumes, and leaves the path in place", () => {
+    const roots = machine()
+    const path = file(join(roots.home, "elsewhere"))
+    const dev = (p: string) => (p === path ? 1 : 2)
+    expect(quarantine(path, opts, roots, { dev, now: NOW })).toMatchObject({
+      kind: "refused",
+      refused: expect.stringContaining("volume"),
+    })
+    expect(existsSync(path)).toBe(true)
+  })
+
+  test("refuses a worktree without --worktree, and --worktree on a plain folder", () => {
+    const roots = machine()
+    const wt = join(roots.main, ".claude", "worktrees", "wt")
+    file(join(wt, "a"))
+    expect(quarantine(wt, opts, roots)).toMatchObject({
+      refused: expect.stringContaining("--worktree"),
+    })
+    const plain = file(join(roots.home, "plain"))
+    expect(quarantine(plain, { ...opts, worktree: true }, roots)).toHaveProperty("refused")
+  })
+})
+
+describe("the tripwire", () => {
+  test("refuses a path of more than 5,000 files", () => {
+    const roots = machine()
+    const big = join(roots.home, "big")
+    mkdirSync(big)
+    for (let i = 0; i <= 5000; i++) writeFileSync(join(big, String(i)), "")
+    expect(quarantine(big, opts, roots, { now: NOW })).toMatchObject({ kind: "tripwire" })
+    expect(existsSync(big)).toBe(true)
+  })
+
+  test("refuses a path of more than 2 GB", () => {
+    const roots = machine()
+    const path = file(join(roots.home, "huge.bin"), "")
+    truncateSync(path, 2 * 1024 ** 3 + 1)
+    expect(quarantine(path, opts, roots, { now: NOW })).toMatchObject({ kind: "tripwire" })
+  })
+
+  test("refuses a fourth quarantine within a minute from one session, and lets another go", () => {
+    const roots = machine()
+    for (const name of ["a", "b", "c"])
+      expect(quarantine(file(join(roots.home, name)), opts, roots, { now: NOW })).toHaveProperty(
+        "id",
+      )
+    const fourth = file(join(roots.home, "d"))
+    const later = new Date(NOW.getTime() + 30_000)
+    expect(quarantine(fourth, opts, roots, { now: later })).toMatchObject({ kind: "tripwire" })
+    expect(quarantine(fourth, { ...opts, session: "other" }, roots, { now: later })).toHaveProperty(
+      "id",
+    )
+    const fifth = file(join(roots.home, "e"))
+    const minuteOn = new Date(NOW.getTime() + 61_000)
+    expect(quarantine(fifth, opts, roots, { now: minuteOn })).toHaveProperty("id")
+  })
+})
+
+const git = (cwd: string, ...args: string[]) => {
+  const run = Bun.spawnSync(["git", "-c", "user.email=t@t", "-c", "user.name=t", ...args], { cwd })
+  if (run.exitCode !== 0) throw new Error(run.stderr.toString())
+  return run.stdout.toString().trim()
+}
+
+// A main checkout with a remote, and a worktree on branch feat whose one commit is not pushed.
+const withWorktree = () => {
+  const roots = machine()
+  const remote = join(roots.root, "remote.git")
+  git(roots.root, "init", "--bare", "-q", remote)
+  git(roots.main, "init", "-q", "-b", "canary")
+  file(join(roots.main, "README.md"))
+  git(roots.main, "add", ".")
+  git(roots.main, "commit", "-qm", "init")
+  git(roots.main, "remote", "add", "origin", remote)
+  git(roots.main, "push", "-q", "origin", "canary")
+  const wt = join(roots.main, ".claude", "worktrees", "pg-1")
+  git(roots.main, "worktree", "add", "-q", "-b", "PG-1-thing", wt)
+  file(join(wt, "new.txt"))
+  git(wt, "add", ".")
+  git(wt, "commit", "-qm", "work")
+  const roster = join(roots.root, "roster.json")
+  writeFileSync(roster, JSON.stringify({ agents: [] }))
+  return { holders: { cwds: [], live: ["working"], roster }, roots, wt }
+}
+
+describe("worktreeRefusal", () => {
+  test("refuses when the roster cannot be read", () => {
+    const { holders, roots, wt } = withWorktree()
+    writeFileSync(holders.roster, "{not json")
+    expect(worktreeRefusal(wt, roots, holders)).toContain("roster")
+    expect(worktreeRefusal(wt, roots, { ...holders, roster: join(roots.root, "none") })).toContain(
+      "roster",
+    )
+  })
+
+  test("refuses a folder outside .claude/worktrees", () => {
+    const { holders, roots } = withWorktree()
+    expect(worktreeRefusal(join(roots.home, "x"), roots, holders)).toContain(".claude/worktrees")
+  })
+
+  test("refuses a worktree a live session holds by branch, by name, or by a process's folder", () => {
+    const { holders, roots, wt } = withWorktree()
+    git(wt, "push", "-q", "origin", "PG-1-thing")
+    const rosterOf = (agents: object[]) => writeFileSync(holders.roster, JSON.stringify({ agents }))
+    rosterOf([{ branch: "PG-1-thing", name: "abc123-worker", status: "working" }])
+    expect(worktreeRefusal(wt, roots, holders)).toContain("abc123-worker")
+    rosterOf([{ name: "pg-1", status: "working" }])
+    expect(worktreeRefusal(wt, roots, holders)).toContain("pg-1")
+    rosterOf([{ branch: "PG-1-thing", name: "abc123-worker", status: "ended" }])
+    expect(worktreeRefusal(wt, roots, holders)).toBeNull()
+    expect(worktreeRefusal(wt, roots, { ...holders, cwds: [join(wt, "packages")] })).toContain(
+      "process",
+    )
+    expect(worktreeRefusal(wt, roots, { ...holders, cwds: null })).toContain("process")
+  })
+
+  test("refuses a worktree whose branch is not pushed, and passes it once pushed", () => {
+    const { holders, roots, wt } = withWorktree()
+    expect(worktreeRefusal(wt, roots, holders)).toContain("push")
+    git(wt, "push", "-q", "origin", "PG-1-thing")
+    expect(worktreeRefusal(wt, roots, holders)).toBeNull()
+    const moved = quarantine(wt, { ...opts, worktree: true }, roots, { now: NOW })
+    expect(moved).toHaveProperty("id")
+    expect(existsSync(wt)).toBe(false)
+  })
+})
+
+describe("removeScratch", () => {
+  test("removes a folder makeScratch made in the temp folder", () => {
+    const { root } = machine()
+    const tmp = join(root, "tmp")
+    mkdirSync(tmp)
+    const dir = makeScratch("job-", tmp)
+    file(join(dir, "deep", "x"))
+    expect(existsSync(join(dir, MARKER))).toBe(true)
+    expect(removeScratch(dir, tmp)).toBeNull()
+    expect(existsSync(dir)).toBe(false)
+  })
+
+  test("refuses a folder with no marker, one outside the temp folder, and a symlink", () => {
+    const { home, root } = machine()
+    const tmp = join(root, "tmp")
+    mkdirSync(join(tmp, "plain"), { recursive: true })
+    expect(removeScratch(join(tmp, "plain"), tmp)).toContain(MARKER)
+    const away = join(home, "away")
+    file(join(away, MARKER))
+    expect(removeScratch(away, tmp)).toContain("temp folder")
+    const made = makeScratch("job-", tmp)
+    symlinkSync(made, join(tmp, "link"))
+    expect(removeScratch(join(tmp, "link"), tmp)).toBeString()
+    expect(existsSync(made)).toBe(true)
+  })
+})
+
+describe("purgeTrash", () => {
+  const DAY = 86_400_000
+  const GB = 1e9
+  const batchAt = (trash: string, at: Date, session = "s") => {
+    const stamp = at.toISOString().replace(/[-:]|\.\d{3}/g, "")
+    file(join(trash, `${stamp}-${session}`, "1", "item"))
+    return `${stamp}-${session}`
+  }
+
+  test("removes batches over 7 days old and keeps the rest while space is plenty", () => {
+    const { trash } = machine()
+    const old = batchAt(trash, new Date(NOW.getTime() - 8 * DAY))
+    const young = batchAt(trash, new Date(NOW.getTime() - 6 * DAY))
+    const done = purgeTrash(trash, { free: () => 100 * GB, now: NOW })
+    expect(done.removed).toEqual([old])
+    expect(existsSync(join(trash, old))).toBe(false)
+    expect(existsSync(join(trash, young))).toBe(true)
+  })
+
+  test("removes the oldest batches early while free space is under 50 GB", () => {
+    const { trash } = machine()
+    const first = batchAt(trash, new Date(NOW.getTime() - 3 * DAY))
+    const second = batchAt(trash, new Date(NOW.getTime() - 2 * DAY))
+    const third = batchAt(trash, new Date(NOW.getTime() - DAY))
+    const free = () => (existsSync(join(trash, second)) ? 40 * GB : 60 * GB)
+    const done = purgeTrash(trash, { free, now: NOW })
+    expect(done.removed).toEqual([first, second])
+    expect(existsSync(join(trash, third))).toBe(true)
+  })
+
+  test("removes nothing outside the trash: a symlinked batch is skipped", () => {
+    const { home, trash } = machine()
+    const keep = join(home, "keep")
+    file(join(keep, "x"))
+    mkdirSync(trash, { recursive: true })
+    symlinkSync(keep, join(trash, "20200101T000000Z-s"))
+    const done = purgeTrash(trash, { free: () => 100 * GB, now: NOW })
+    expect(done.removed).toEqual([])
+    expect(done.skipped).toEqual(["20200101T000000Z-s"])
+    expect(existsSync(join(keep, "x"))).toBe(true)
+  })
+
+  test("a missing trash folder purges nothing", () => {
+    const { trash } = machine()
+    expect(purgeTrash(trash, { free: () => 0, now: NOW }).removed).toEqual([])
+  })
+})
