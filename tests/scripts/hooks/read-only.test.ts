@@ -15,6 +15,8 @@ describe("a call that only reads", () => {
     "git log --format=%B -n 1 | head -3",
     "gh issue list -R acme/app",
     "gh pr view 1 -R acme/app --json state",
+    "gh pr view 1 --repo=acme/app --json=state",
+    "git log --format=%H -n 1",
     "gh api repos/acme/app/issues",
     "gh api -X GET repos/acme/app/pulls --paginate",
     "cat .git/worktrees/a/HEAD",
@@ -63,6 +65,15 @@ describe("a call outside the read shapes", () => {
     "git log; git push",
     "curl https://example.com",
     "sort -o/tmp/x .git/HEAD",
+    "git log -1 --pretty --output=.git/config",
+    "git log --format --output=.git/config",
+    "git -C . log --pretty --output=.git/config",
+    "git diff *",
+    "git diff {--output=x,HEAD}",
+    "gh issue list -R evil.example/o/r --search x",
+    "gh issue list --repo=evil.example/o/r",
+    "gh issue view https://evil.example/o/r/issues/1",
+    "gh pr diff https://evil.example/o/r/pull/1",
   ])("%s does not read only", (command) => {
     expect(readOnly(bash(command))).toBe(false)
   })
