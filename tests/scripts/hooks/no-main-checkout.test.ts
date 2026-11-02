@@ -225,6 +225,12 @@ describe("a build, a test run, lefthook, turbo or a file write in the main check
       "a chained cd into the folder mkdir makes",
       `mkdir -p ${WORKTREE}/sub && cd ${WORKTREE}/sub && git commit -m x`,
     ],
+    [
+      "a twice-negated chained cd, whose status is the cd's own again",
+      `true && ! ! cd ${WORKTREE} && git commit -m x`,
+    ],
+    ["a chained cd, then a script sh runs", `true && cd ${WORKTREE} && sh -c "git add -A"`],
+    ["a chained cd, then an eval", `true && cd ${WORKTREE} && eval "git add -A"`],
   ])("from the main checkout, %s runs", async (_name, command) => {
     expect(await bash(command)).toBeUndefined()
   })
