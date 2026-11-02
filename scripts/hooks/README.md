@@ -161,8 +161,11 @@ Their tests are `bun run test:file tests/scripts/hooks`.
   A reader run with `EDITOR`, `GIT_*`, `LESSOPEN`, `PAGER` or `VISUAL` set in the call is judged as any other program, since each makes it run one.
   For any program but a reader, each text that holds a space (a word, the value after its `=`, an option's attached value, a variable the call sets or exports) is judged as a command line of its own, a leading `!` dropped, since a program may run it (`watch`, `tmux`, `ssh -o ProxyCommand`, `rsync -e`, a git alias, a pager).
   It refuses any program but a reader run with the root as its folder or, for git, its tree.
-  It refuses the `playground` CLI's calls that change what a guard reads, the CLI found by where its word lands: `playground` by name in any case, or by a path that is no folder, or the checkout's `cli.ts` with or without its extension, as any word of a command but a reader's, so behind any wrapper (`bun`, `npx`, `find -exec`, `arch`, `watch`),
-  its words followed by the stdin xargs hands it or carried in xargs' `-I` string.
+  It refuses the `playground` CLI's calls that change what a guard reads, the CLI found by where its word lands: `playground` by name in any case, or the checkout's `cli.ts` with or without its extension, as any word of a command but a reader's,
+  or a path that is no folder ending in `playground` (a copy or link, made yet or not) as the program word or as any word of a runner (a shell, `arch`, `bun`, `bunx`, `deno`, `find`, `node`, `npm`, `npx`, `pnpm`, `pnpx`, `tsx`, `watch` or `yarn`),
+  its words followed by the stdin xargs hands it or carried in xargs' `-I` string; so a repo slug such as `owner/playground` handed to any other program runs.
+  Its whole bar is three forms, from any folder: the CLI by its name or path as the program word, a copy or link of it as the program word, and the CLI behind a runner or a wrapper `shell.ts` unwraps (`env`, `sudo`, `timeout`, `xargs`).
+  A same-user session can still get past it, for example through a program it does not count as a runner.
   Its words split as that command's own parse splits them (`--dry-run` and `--yes` are bare for `ext`, `--dry-run` alone for `settings`):
   `ext put <scope> list`; `ext add`, `import`, `init`, `link`, `order`, `remove`, `sync` and `unlink`, but `--dry-run` on `add`, `import` and `init`; `migrate`; `uninstall --purge`;
   and `settings set` or `reset` of a key a guard reads: `ext.links`, `ext.order`, `ext.repos`, `factory.archiveRepo`, `factory.publicRepo`, `glm.readOnlyLoad5`, `live.branch`, `owner.names`, `paths.codeRoot`, `sessions.aliases`, `sessions.names` and `usage.keychainService`.

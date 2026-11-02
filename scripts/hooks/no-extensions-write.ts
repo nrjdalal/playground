@@ -22,6 +22,7 @@ import {
   PRINTERS,
   program,
   run,
+  SHELLS,
   slotWords,
   stdinOf,
   type Text,
@@ -82,6 +83,23 @@ const DUPLICATE = /^(?:\d+|-)$/
 // Variables that make git or a pager run a program, so a reader with one set is judged as any other program.
 const RUNS = /^(?:EDITOR|GIT_[A-Z_]+|LESSOPEN|PAGER|VISUAL)$/
 const CLI = join("packages", "scripts", "src", "playground", "cli.ts")
+// Programs that run an operand as a program, so a path to a playground copy among their words is the CLI; shell.ts's parse already unwraps env, sudo, timeout, xargs and the like.
+const RUNNERS = new Set([
+  ...SHELLS,
+  "arch",
+  "bun",
+  "bunx",
+  "deno",
+  "find",
+  "node",
+  "npm",
+  "npx",
+  "pnpm",
+  "pnpx",
+  "tsx",
+  "watch",
+  "yarn",
+])
 
 // Whether a scope's variables set one that makes git or a pager run a program, each name read once.
 const varsRun = new WeakMap<Map<string, Text>, [number, boolean]>()
@@ -136,11 +154,12 @@ const SWITCHES: Record<string, string[]> = {
   settings: ["--dry-run"],
 }
 
-// Whether a word is the playground CLI: the command by name in any case, as macOS's filesystem reads it, or by a path that is no folder, or the checkout's cli.ts, with or without its extension, links followed.
+// Whether a word is the playground CLI: the command by name in any case, as macOS's filesystem reads it, or by a path that is no folder as the program word or a runner's operand, or the checkout's cli.ts, with or without its extension, links followed.
 function isCli(
   word: Word,
   dirs: (string | undefined)[],
   realOf: (path: string) => string,
+  runs: boolean,
 ): boolean {
   tick()
   if (marked(word.value) || word.value.startsWith("-")) return false
@@ -148,7 +167,7 @@ function isCli(
   if (program(word.value).toLowerCase() === "playground")
     return (
       !word.value.includes("/") ||
-      !paths.some((path) => !!path && existsSync(path) && statSync(path).isDirectory())
+      (runs && !paths.some((path) => !!path && existsSync(path) && statSync(path).isDirectory()))
     )
   const cli = (sep + CLI).toLowerCase()
   return paths.some(
@@ -162,7 +181,10 @@ function cliCalls(parsed: Parsed, env: Env, realOf: (path: string) => string): W
   if (!first) return []
   const words = [first, ...args]
   const dirs = [env.cwd, name === "bun" ? bunCall(args, env).cwd : undefined]
-  return words.flatMap((word, at) => (isCli(word, dirs, realOf) ? [words.slice(at + 1)] : []))
+  const runner = RUNNERS.has(name)
+  return words.flatMap((word, at) =>
+    isCli(word, dirs, realOf, at === 0 || runner) ? [words.slice(at + 1)] : [],
+  )
 }
 
 // Every text of a word or a variable that holds a space, a leading ! dropped, read as a command line of its own, since a program may run it (watch, ssh's ProxyCommand, a git alias, a pager); `vars` is the scope's variables set since their lines were last read.
