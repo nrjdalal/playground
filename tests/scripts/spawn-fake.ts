@@ -84,11 +84,12 @@ fake(
 case " $* " in *" -w "*) [ -n "$FAKE_EMPTY_TOKEN" ] || echo "${TOKEN}" ;; *) echo 'keychain: "/fake.keychain-db"' ;; esac
 exit 0`,
 )
-// A leads worktree's install, bun install <args>: the args as one line to bun-install.log, failing as a frozen lockfile does under FAKE_INSTALL_FAIL. The roster write, bun <checkout>/scripts/roster.ts <args>: the script's path to roster.script, the args one a line to roster.args and as one line to roster.log. A read, roster.ts who, and the data folder's and a setting's reads (bun --no-env-file) run the real bun, but the skill resolver, orgs.ts, and the settings reader, setting.ts, run from this checkout, since a case's copy of spawn.sh sits in a scratch checkout without them.
+// A leads worktree's install, bun install <args>: the args as one line to bun-install.log, failing as a frozen lockfile does under FAKE_INSTALL_FAIL. The roster write, bun <checkout>/scripts/roster.ts <args>: the script's path to roster.script, the args one a line to roster.args and as one line to roster.log. A read, roster.ts who, and the data folder's and a setting's reads (bun --no-env-file) run the real bun, but the skill resolver, orgs.ts, the settings reader, setting.ts, and playground's cli.ts run from this checkout, since a case's copy of spawn.sh sits in a scratch checkout without them.
 fake(
   "bun",
   `[ "$1" = install ] && { printf '%s\\n' "$*" >> "$HOME/bun-install.log"; [ -z "$FAKE_INSTALL_FAIL" ] || { echo "error: lockfile had changes, but lockfile is frozen"; exit 1; }; exit 0; }
 case "$2" in */playground/orgs.ts) exec "${process.execPath}" "$1" "${join(root, "packages", "scripts", "src", "playground", "orgs.ts")}" "\${@:3}" ;; esac
+case "$2" in */playground/cli.ts) exec "${process.execPath}" "$1" "${join(root, "packages", "scripts", "src", "playground", "cli.ts")}" "\${@:3}" ;; esac
 case "$1" in */setting.ts) shift; exec "${process.execPath}" "${join(root, "packages", "scripts", "src", "playground", "setting.ts")}" "$@" ;; esac
 [ "$2" = who ] || [ "$1" = --no-env-file ] && exec "${process.execPath}" "$@"
 printf '%s' "$1" > "$HOME/roster.script"
@@ -249,11 +250,12 @@ export async function spawn(
     writeFileSync(join(home, ".playground", "backends", pin.name), `${pin.backend}\n`)
   }
   if (!env.NO_REGISTRY) mkdirSync(registry, { recursive: true })
-  // The leads worktree a manager opens in, which NO_LEADS leaves off, as on a Mac that has not made it.
-  if (!env.NO_LEADS)
-    mkdirSync(join(home, "code", "factory", ".claude", "worktrees", "leads"), {
-      recursive: true,
-    })
+  // The leads worktree a manager opens in, installed with the mark a finished install leaves, which NO_LEADS leaves off, as on a Mac that has not made it.
+  if (!env.NO_LEADS) {
+    const modules = join(home, "code", "factory", ".claude", "worktrees", "leads", "node_modules")
+    mkdirSync(modules, { recursive: true })
+    writeFileSync(join(modules, ".playground-installed"), "")
+  }
   // The roster as earlier sessions left it, which a title default reads before it writes.
   if (env.ROSTER_JSON !== undefined)
     writeFileSync(join(home, ".playground", "roster.json"), env.ROSTER_JSON)
