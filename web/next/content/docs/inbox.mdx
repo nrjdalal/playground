@@ -89,11 +89,12 @@ A markdown file reads like a chat message, code shows highlighted, and a PDF ope
 ## Give a secret
 
 A session that needs a value only you hold, such as a client secret or an API key, asks for it as a **Secret** card.
-The card names the variable and where the value goes: a Vercel project and its environments.
+The card names the variable and where the value goes: a new item in 1Password, or a Vercel project and its environments.
 Paste the value into the masked box, then press **Submit** or Enter.
 
-The value goes straight to that project, once for each environment, and is kept nowhere: not in the Inbox, the chat, a log or the session.
-The card then shows only when you gave it and how each environment went, green when every one took it and red when one did not.
+The value goes straight there, once for each environment of a Vercel project, and is kept nowhere: not in the Inbox, the chat, a log or the session.
+A 1Password card saves it to the vault and with the tag your `onePassword.vault` and `onePassword.tag` settings name, and asks you to set them first when either is empty.
+The card then shows only when you gave it and how each step went, green when every one took it and red when one did not, naming a tool that is not installed or a step that ran out of time.
 A secret card has no comment box, no Archive and no Reply, so the value never lands in a chat.
 
 ## Send a draft

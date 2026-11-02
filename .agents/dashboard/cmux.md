@@ -76,6 +76,6 @@
   each step killed by its own handle past its bound and given only the variables in `PASSED` (a proxy's included), so the API's settings and tokens reach no installer.
   gh's sign-in answers Enter to its Authenticate Git prompt, since the settings repo's push needs git to use it, and says so in the fix's lines.
   A fixture stack runs `api/hono/src/fixtures/fix.ts` in their place.
-  The fifth is a secret ask's sink (`api/hono/src/lib/dashboard/secret-sink.ts`, asks.md), whose `vercel env add` is a write: it runs with no shell, an argv built only from the item's checked key, project and scope, the value on its stdin alone, its output dropped and only what `vercel` needs in its environment (`sinkEnv`), and a fixture or test stack runs nothing in its place.
+  The fifth is a secret ask's sink (`api/hono/src/lib/dashboard/secret-sink.ts`, asks.md), whose `vercel env add` or `op item create` is a write: no shell, an argv built only from checked names, the value on its stdin alone, its output dropped, only what its command needs in its environment (`sinkEnv`), and nothing run on a fixture or test stack.
   The sixth is a Vibeground's Start and Stop (`api/hono/src/lib/dashboard/vibe.ts`, stack.md), whose `docker run`, `docker exec`, `docker rm -fv`, `bun run dev` and `bun run dev:stop` are not reads: each runs with no shell and a fixed argv, the worktree's path from the listed stacks and never from a request's words, the copy's password in the child's environment alone,
   and the live database touched only by `pg_dump` inside its own container.

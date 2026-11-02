@@ -33,8 +33,9 @@ const USAGE = `usage: bun run ask new [--thread <id>] < item.json
                                                 an ask's attachments name files on this Mac by absolute path
                                                 an update with text and attachments is a read-only card: it shows
                                                 them as an ask does, with no Approve or Deny
-                                                a secret ask names a key and a sink (Vercel alone); the owner's
-                                                value goes to the sink, and get shows only when and each exit status
+                                                a secret ask names a key and a sink (1Password or Vercel); the
+                                                owner's value goes to the sink, and get shows only when and each
+                                                step's exit status
                                                 --thread files it under that thread (bun run thread)
                                                 write {now} for a now-time, which new and edit fill with the time
                                                 they post at; a "measured" or "now" time ahead of the clock is refused

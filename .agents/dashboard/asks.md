@@ -237,14 +237,18 @@
   which the owner chose not to send (`staleItems`; an answer delivered before acks were stamped, `ACKS_STAMPED_FROM`, is not listed, since it may have been acked with no stamp, while one never delivered still is, and a go delivered before then, read through bun run ask or typed into its session, reads as closed):
   ops-sweep reminds each live poster on it once, then at most every 4 hours, and a lead hears of a poster that is down (playbook's Sweep).
 - A `secret` ask asks the owner for a value (a client secret, an API key) that goes straight to one sink and is kept nowhere: no row, log line, transcript, response, error or argv holds it.
-  Its `key` is the environment variable's name and its `sink` one of the allowlist in code, `secretSinkSchema` in `api/hono/src/lib/dashboard/inbox.ts`, today Vercel alone: `{type: "vercel", project, scope, environments}`, each environment of `development`, `preview` and `production` named once.
+  Its `sink` is one of the allowlist in code, `secretSinkSchema` in `api/hono/src/lib/dashboard/inbox.ts`:
+  `{type: "1password"}`, whose vault and tag are the owner's private settings `onePassword.vault` and `onePassword.tag`, so no ask and no repo text names them, its `key` a name of letters, digits, `_`, `.` and `-` that titles the new item;
+  or `{type: "vercel", project, scope, environments}`, each environment of `development`, `preview` and `production` named once, its `key` the environment variable's name.
   Its card shows what Submit does, a masked field and Submit, Enter submitting too, with no comment box, Archive or Chat about it, so nothing else invites the value; Snooze stays.
-  Submit posts `{value, seen}`, the value trimmed of its edge whitespace (a pasted newline), to `POST /api/v1/inbox/:id/secret`, which `provideSecret()` claims in one write that holds only while the item is open at the version read, so the sink runs once, then hands the value on stdin to `vercel env add <key> --environment <env> --project <project> --scope <scope> --yes`,
-  once an environment in order,
-  from the temp folder with its output dropped and only `HOME`, `PATH`, the proxy and CA variables and `VERCEL_*` in its environment (`spawnSink` in `api/hono/src/lib/dashboard/secret-sink.ts`, stopped after 60 seconds).
+  Submit posts `{value, seen}`, the value trimmed of its edge whitespace (a pasted newline), to `POST /api/v1/inbox/:id/secret`, which `provideSecret()` claims in one write that holds only while the item is open at the version read, so the sink runs once, then runs the sink's steps in order (`sinkSteps`), the value on a stdin alone:
+  Vercel's `vercel env add <key> --environment <env> --project <project> --scope <scope> --yes` once an environment, its stdin the value;
+  1Password's `op signin` (labelled `1Password sign-in`, which asks only when op is not signed in), then `op item create --vault <vault> --tags <tag> -` (`1Password item`), its stdin a Password item's JSON template titled with the key and holding the value, since op takes a field's value from argv or a template alone, and stopping at its first step that fails.
+  A 1Password sink whose vault or tag is unset is refused before the claim, naming both settings, so op never runs and the ask stays open for a Submit once they are set.
+  Each step runs from the temp folder with its output dropped and only `HOME`, `PATH`, the proxy and CA variables and its kind's own in its environment, `VERCEL_*` for Vercel, `OP_*` and `XDG_CONFIG_HOME` for op (`spawnSink` and `sinkEnv` in `api/hono/src/lib/dashboard/secret-sink.ts`, stopped after 60 seconds).
   Only a stack that reads the live machine runs the sink; a fixture or test stack runs nothing and records exit 0 (`runSink`).
-  The item turns `provided`, its answer `{at, choice: "provided", results: [{environment, exitCode}]}` (`exitCode` null once stopped by a signal, 127 when `vercel` could not start), and its poster is typed `Provided at <at>`, each environment's exit status and the `bun run ask get --ack` that closes it, which `bun run ask stale` chases until it does.
-  The card reads `Provided at <time>` with each exit status, green once every environment took it, red while any did not; a value the sink refused takes a new ask, and so does one whose card still reads sending after the sink's minute an environment, since the API restarted mid-run and no exit status came back.
+  The item turns `provided`, its answer `{at, choice: "provided", results: [{environment, exitCode}]}`, `environment` each step's label (`exitCode` null once stopped at its time limit, 127 when its command could not start), and its poster is typed `Provided at <at>`, each step's exit status and the `bun run ask get --ack` that closes it, which `bun run ask stale` chases until it does.
+  The card reads `Provided at <time>` with each step's status named (`exit <n>`, `not installed` for 127, `stopped at its time limit` for null), green once every step took it, red while any did not; a value the sink refused takes a new ask, and so does one whose card still reads sending after the sink's minute a step, since the API restarted mid-run and no exit status came back.
 
   ```bash
   bun run ask new <<'EOF'
@@ -252,6 +256,16 @@
    "preview": {"type": "secret", "key": "GITHUB_CLIENT_SECRET",
                "sink": {"type": "vercel", "project": "web-app", "scope": "acme",
                         "environments": ["production", "preview", "development"]}}}
+  EOF
+  ```
+
+  A 1Password ask names only the key; the vault and the tag come from the owner's settings:
+
+  ```bash
+  bun run ask new <<'EOF'
+  {"from": "dispatcher", "title": "Staging read-only password",
+   "preview": {"type": "secret", "key": "acme.api.token",
+               "sink": {"type": "1password"}}}
   EOF
   ```
 
