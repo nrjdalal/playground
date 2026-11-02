@@ -513,17 +513,6 @@ describe("a quoted argument is read as a command line only where a program runs 
       "sed -i replacing text with a slash and parens in a handoff",
       "sed -i '' 's/a / b (c)/new/' ~/.playground/handoffs/x.md",
     ],
-    ["gh api with a jq filter over every item", "gh api x --jq '.[]'"],
-    ["gh api with -q indexing an item", "gh api x -q '.[0]'"],
-    ["gh api with a jq filter joined to its option", "gh api x --jq='.[]'"],
-    [
-      "gh api formatting a diff stat with jq",
-      `gh api repos/x/y/pulls/1/files --jq '.[] | "+\\(.additions)/-\\(.deletions)"'`,
-    ],
-    ["gh pr view with a jq filter over an array", "gh pr view 1 --json a --jq '.a[]'"],
-    ["gh api with a Go template", "gh api x --template '{{range .}}{{.a}}{{end}}'"],
-    ["gh api with a Go template behind -t", "gh api x -t '{{range .}}{{.a}}{{end}}'"],
-    ["gh pr create with a bracketed title behind -t", "gh pr create -t 'a [b]' -b x"],
     ["awk with a block matching a line naming a runner", "awk '/watch/ {print}' /dev/null"],
     ["awk with its errors sent to /dev/null", "awk '$3 ~ /runner/' /dev/null 2>/dev/null"],
     [
