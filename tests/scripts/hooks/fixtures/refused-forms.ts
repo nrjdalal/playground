@@ -4,6 +4,7 @@ import { join } from "node:path"
 // Every bypass form a review found that canary refuses, each named by the PR whose tests pinned it; tests/scripts/hooks/refused-forms.test.ts runs every row through each guard its group names and expects a refusal.
 export type Guard =
   | "no-env-dump"
+  | "no-extension-repo-write"
   | "no-extensions-write"
   | "no-headless-login"
   | "no-kill-by-name"
@@ -30,6 +31,7 @@ export type Paths = {
   BARE: string
   CLI_DIR: string
   DATA: string
+  HOME: string
   LINK: string
   LIST: string
   MAIN: string
@@ -61,6 +63,13 @@ const nest = (depth: number, inner: string): string =>
 
 const fill = (head: string, unit: string, tail: string) =>
   head + unit.repeat(Math.floor((130_000 - head.length - tail.length) / unit.length)) + tail
+
+// A printf output of about 1.1 MB from a 50 KB command, which a shell reads whole.
+const PAD = "x".repeat(40)
+const COLONS = ": ".repeat(25_000)
+
+// A push to the made-up extension repo the runner's synced data folder names.
+const PUSH = "git push https://github.com/quillco/acme-skills main"
 
 const MUTATION = `mutation { addComment(input: {subjectId: "I_1", body: "release"}) { clientMutationId } }`
 
@@ -676,6 +685,119 @@ gh api graphql -f query="$QUERY"`,
       ["rm of a glob with a .. after it", "rm -rf w*/../.playground/extensions"],
       ["rm of an extglob in the data folder", "rm -rf .playground/@(extensions)"],
       ["rm of a negated extglob in the data folder", "rm -rf .playground/!(handoffs)"],
+      ["perl -e unlinking a glob of the root", `perl -e 'unlink glob ".p*/extensions/*"'`],
+      [
+        "perl -M…-e removing a glob of the root",
+        `perl -MFile::Path=rmtree -e 'rmtree(glob(".p*/ext*"))'`,
+      ],
+      [
+        "node -e removing the root by a built name",
+        `node -e 'require("fs").rmSync(".playground/ext"+"ensions",{recursive:true})'`,
+      ],
+      [
+        "node -e writing into the root by a built name",
+        `node -e 'require("fs").writeFileSync(".playground/ext"+"ensions/policy.json","x")'`,
+      ],
+      [
+        "perl by a versioned name unlinking a glob of the root",
+        `perl5.34 -e 'unlink glob ".p*/extensions/*"'`,
+      ],
+      [
+        "nodejs -e removing the root by a built name",
+        `nodejs -e 'require("fs").rmSync(".playground/ext"+"ensions",{recursive:true})'`,
+      ],
+      [
+        "npx node -e removing the root by a built name",
+        `npx node -e 'require("fs").rmSync(".playground/ext"+"ensions",{recursive:true})'`,
+      ],
+      [
+        "bunx node -e removing the root by a built name",
+        `bunx node -e 'require("fs").rmSync(".playground/ext"+"ensions",{recursive:true})'`,
+      ],
+      [
+        "tsx -e removing the root by a built name",
+        `tsx -e 'require("fs").rmSync(".playground/ext"+"ensions",{recursive:true})'`,
+      ],
+      [
+        "awk's system() removing a glob of the data folder",
+        `awk 'BEGIN{system("rm\\t-rf\\t.p*")}'`,
+      ],
+      [
+        "a shell reading date, then a printf output past 1 MB that removes the root",
+        `bash <(date; printf '%s\\n#${PAD}\\n' ${COLONS} 'rm -rf .playground/extensions')`,
+      ],
+      [
+        "a shell reading curl, then a printf output past 1 MB that removes the root",
+        `bash <(curl -s https://example.com; printf '%s\\n#${PAD}\\n' ${COLONS} 'rm -rf ~/.playground/extensions')`,
+        "tmp",
+      ],
+      [
+        "a group's date, then a printf output past 1 MB that removes the root, piped to a shell",
+        `(date; printf '%s\\n#${PAD}\\n' ${COLONS} 'rm -rf .playground/extensions') | bash`,
+      ],
+      [
+        "source reading date, then a printf output past 1 MB that removes the root",
+        `source <(true; date; printf '%s\\n#${PAD}\\n' ${COLONS} 'rm -rf .playground/extensions')`,
+      ],
+    ],
+    source: "#402",
+  },
+  {
+    folders: ["checkout"],
+    guards: ["no-extension-repo-write"],
+    rows: () => [
+      [
+        "a shell reading date, then a printf output past 1 MB that pushes to an extension repo",
+        `bash <(date; printf '%s\\n#${PAD}\\n' ${COLONS} '${PUSH}')`,
+      ],
+      [
+        "a group's date, then a printf output past 1 MB that pushes to an extension repo, piped to a shell",
+        `(date; printf '%s\\n#${PAD}\\n' ${COLONS} '${PUSH}') | bash`,
+      ],
+    ],
+    source: "#402",
+  },
+  {
+    folders: ["tmp"],
+    guards: ["no-extensions-write"],
+    rows: ({ HOME }) => [
+      [
+        "rm through a missing folder, .., then a link to the root",
+        `mkdir ${HOME}/m && rm -rf ${HOME}/m/../store/`,
+      ],
+      ["rm of a link to the root through a missing folder and ..", `rm -rf ${HOME}/m/../store`],
+      [
+        "cp through a missing folder, .., then a link to the root",
+        `mkdir -p ${HOME}/m && cp /etc/hosts ${HOME}/m/../store`,
+      ],
+      [
+        "mv through a missing folder, .., then a link to the root",
+        `mkdir -p ${HOME}/m && mv /tmp/x ${HOME}/m/../store`,
+      ],
+      [
+        "rm through a missing folder, .., then a link to the data folder",
+        `mkdir -p ${HOME}/m && rm -rf ${HOME}/m/../pg/`,
+      ],
+      [
+        "a variable through a missing folder, .., then a link to the root",
+        `V=${HOME}/m/../store/; mkdir ${HOME}/m; rm -rf $V`,
+      ],
+      [
+        "the CLI by a link through a missing folder and ..",
+        `${HOME}/m/../pc ext put login list x /tmp/l.json --reason y`,
+      ],
+      [
+        "bun on the CLI by a link through a missing folder and ..",
+        `bun ${HOME}/m/../pc ext put login list x /tmp/l.json --reason y`,
+      ],
+      [
+        "rm through two missing folders, .., .., then a link to the root",
+        `rm -rf ${HOME}/m/n/../../store/`,
+      ],
+      [
+        "git -C through a missing folder, .., then a link to the root",
+        `git -C ${HOME}/m/../store reset --hard`,
+      ],
     ],
     source: "#402",
   },

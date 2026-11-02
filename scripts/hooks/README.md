@@ -174,9 +174,9 @@ Their tests are `bun run test:file tests/scripts/hooks`.
   `ext put` of a doc, a rule or any other reviewed kind, every read, `ext score`, `accept` and `reject`, `settings set` of any other key, `settings import-jobs` and writes elsewhere in the data folder (handoffs, the roster) run.
   Its refusal names the one route: the owner types the command as a `!` command in the dispatcher's terminal window, which runs without hooks and which the dispatcher hands the owner when a session tells its lead; no flag, environment variable, role or note frees a call.
   It reads every command `scripts/hooks/shell.ts` finds: one inside a `$(…)`, a `${…}`, a `$((…))` or an array assignment's `(…)`, and the script a shell, `source` or `.` reads from a process substitution, a group's output or `/dev/stdin`, every command that prints part of it included, and the parts it can read of a script it reads only in part (a group holding a `curl`).
-  It judges each command line and each word once per call, so a deep nest or a long list of variables ends well inside the hook's timeout, and it refuses, each time naming the fix (split it into shorter calls), a call whose lexing or walk runs past 10 s
+  It judges each command line and each word once per call, and each variable once per scope and folder, so a deep nest or a long list of variables ends well inside the hook's timeout, and it refuses, each time naming the fix (split it into shorter calls), a call whose lexing or walk runs past 10 s
   (a deadline checked at every lex, expansion and walk step, its clock read once every 1024 steps, so any slow route is refused), a command over 128 KB, whose lexing could outlast the timeout, one nested too deep for its stack, and a chain of scripts a shell,
-  `eval` or `source` reads 256 or more deep, and such a script over 128 KB, or over 1 MB as text a command printed or wrote in the call, which it holds as unknown elsewhere.
+  `eval` or `source` reads 256 or more deep, and such a script over 128 KB, or over 1 MB as text a command printed or wrote in the call, which it holds as unknown elsewhere, and an `xargs -I` line over 128 KB once its stdin is filled in.
   It runs its check in a Worker (`scripts/hooks/no-extensions-write-worker.ts`) and refuses from the main thread when the Worker has not answered in 12 s, so a single step the deadline cannot interrupt (a regex, a copy) cannot hold it past its 15 s timeout; this costs about 10 ms a call.
   It reads `env -C<dir>` and `env --chdir=<dir>` as the folder the command runs in, as it reads `env -C <dir>`.
   It reads a command's text, so a program whose own code writes the root (a script file run by its path, a binary) and a path it cannot read (built at run time, in a `$(…)` or a variable) pass it.
@@ -186,7 +186,9 @@ Their tests are `bun run test:file tests/scripts/hooks`.
   It refuses a closed list of write forms, so a same-user session can still get past it by a form outside that list, such as a script file it writes and then runs.
   A path through a link into the root with `..` after the link (`echo x > <link>/../f`) is judged as typed, so a write by one passes.
   A `cd` or `pushd` it cannot follow (`cd -`, `cd ~-`, `popd`'s stack, a glob in the folder, a `CDPATH` lookup) leaves the command's folder unread, so a relative write after one passes.
-  From a cwd at or above the root (`~`, `~/.playground`), a quoted `(`, `[`, `*`, `?` or `{` reads as a glob there, so a call holding one (`git commit -m "fix(x): y"`, `awk '{print $1}'`) is refused, a closed-list reader's line included; run it from a worktree.
+  From a cwd at or above the root (`~`, `~/.playground`), a quoted `(`, `[`, `*`, `?` or `{` reads as a glob there, so a call holding one (`git commit -m "fix(x): y"`, `awk '{print $1}' f`) is refused, a closed-list reader's line included; run it from a worktree.
+  A quoted regex that starts at `/` reads its glob characters as a glob in `/`, which holds the root, so `sed -n '/^a*b/p' f` and `awk '$1 ~ /^(a|b)/' f` are refused from any folder; run such a script from a file (`awk -f <file>`, `sed -f <file>`).
+  A gh `-q` filter that holds a jq interpolation is refused from the home (`-q '"\(.a)"'`), and from any folder once it holds a space and a `/` after the `(` (`-q '.a+" +\(.a)/-\(.b)"'`); pipe the JSON to jq, a reader, instead (`gh … --json <fields> | jq -r '<filter>'`).
   It fails open on any other error, and its tests are in `bun run test:file tests/scripts/hooks/no-extensions-write.test.ts`.
 
 ## no-false-green

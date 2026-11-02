@@ -11,6 +11,7 @@ import {
   type Command,
   type Env,
   examine,
+  filled,
   knownVariables,
   lex,
   marked,
@@ -22,10 +23,12 @@ import {
   run,
   slotWords,
   stdinOf,
+  type Text,
   tick,
+  UNKNOWN,
+  varsSince,
   type Visit,
   withDeadline,
-  UNKNOWN,
   type Word,
 } from "./shell"
 
@@ -83,10 +86,20 @@ const GLOB = /[*?[{(]/
 const RUNS = /^(?:EDITOR|GIT_[A-Z_]+|LESSOPEN|PAGER|VISUAL)$/
 const CLI = join("packages", "scripts", "src", "playground", "cli.ts")
 
+// Whether a scope's variables set one that makes git or a pager run a program, each name read once.
+const varsRun = new WeakMap<Map<string, Text>, [number, boolean]>()
+function runsVariable(vars: Map<string, Text>): boolean {
+  const [cursor, found] = varsRun.get(vars) ?? [undefined, false]
+  const [keys, next] = varsSince(vars, cursor)
+  const now = found || keys.some((key) => RUNS.test(key))
+  varsRun.set(vars, [next, now])
+  return now
+}
+
 // Whether a command only reads what it names: a reader with no option or variable that makes it run a program.
 function reads(parsed: Parsed, env: Env): boolean {
   const { args, local, name } = parsed
-  if ([...local.keys(), ...env.vars.keys()].some((key) => RUNS.test(key))) return false
+  if ([...local.keys()].some((key) => RUNS.test(key)) || runsVariable(env.vars)) return false
   if (READERS.has(name) || PRINTERS.has(name)) return true
   if (name === "rg") return !args.some((a) => /^--(?:hostname-bin|pre)(?:=|$)/.test(a.value))
   if (name === "find") return !args.some((a) => FIND_ACTS.test(a.value))
@@ -208,12 +221,11 @@ function wholeLine(commands: Command[], env: Env): boolean {
   })
 }
 
-// Every text of a variable the call sets or exports, and on a line read whole of every word, that holds a space, a leading ! dropped, each read as a command line of its own.
-function runsOf(parsed: Parsed, env: Env, whole: boolean): string[] {
+// Every text of a variable the call sets or exports, and on a line read whole of every word, that holds a space, a leading ! dropped, each read as a command line of its own; `vars` is the scope's variables set since their lines were last read.
+function runsOf(parsed: Parsed, vars: Text[], whole: boolean): string[] {
   const { args, first, local } = parsed
-  const values = [...local, ...env.vars].flatMap(([, text]) => (text.unknown ? [] : [text.value]))
-  const words = whole ? (first ? [first, ...args] : args) : []
-  for (const word of words)
+  const values = [...local.values(), ...vars].flatMap((text) => (text.unknown ? [] : [text.value]))
+  for (const word of whole ? (first ? [first, ...args] : args) : [])
     for (const text of texts(word)) values.push(text.value.replace(/^!/, ""))
   values.push(...programLines(parsed))
   return [...new Set(values)].filter((value) => /\s/.test(value) && !marked(value))
@@ -327,6 +339,17 @@ function inspect(raw: string, environment: Environment) {
   }
   const seen = new Set<string>()
   let whole = false
+  // where each scope's variables were read to for their lines, and judged to for each cwd and remover, so each variable is read once rather than once a command
+  type Cursors = WeakMap<Map<string, Text>, Map<string, number>>
+  const varsRead: Cursors = new WeakMap()
+  const varsJudged: Cursors = new WeakMap()
+  const since = (store: Cursors, vars: Map<string, Text>, key: string): Text[] => {
+    const cursors = store.get(vars) ?? new Map<string, number>()
+    store.set(vars, cursors)
+    const [keys, next] = varsSince(vars, cursors.get(key))
+    cursors.set(key, next)
+    return keys.flatMap((k) => vars.get(k) ?? [])
+  }
   const visit: Visit = async (cmd: Command, parsed, env) => {
     const slot = slotWords(parsed)
     if (slot)
@@ -356,12 +379,11 @@ function inspect(raw: string, environment: Environment) {
           .map((words) => cliWrite(xargs?.replace ? words : [...words, ...stdinWords]))
           .find(Boolean)
     if (write) return refuse(write)
-    const runs = reader ? undefined : runsOf(parsed, env, whole)
-    for (const raw of runs ?? []) {
+    // a command with no program runs nothing that reads the environment, so only its own assignments count
+    const vars = !reader && first ? since(varsRead, env.vars, "") : []
+    for (const raw of reader ? [] : runsOf(parsed, vars, whole)) {
       const line =
-        xargs?.replace && fed
-          ? raw.replaceAll(xargs.replace, fed.unknown ? UNKNOWN : fed.value)
-          : raw
+        xargs?.replace && fed ? filled(raw, xargs.replace, fed.unknown ? UNKNOWN : fed.value) : raw
       if (seen.has(line)) continue
       seen.add(line)
       const verdict = await run(lex(line, env.known), { ...env, vars: new Map() }, visit, true)
@@ -374,7 +396,8 @@ function inspect(raw: string, environment: Environment) {
     if (inRoot(env.cwd)) return refuse(`${verb} run inside ${root}`)
     if (name === "git" && inRoot(gitCall(args, env).cwd)) return refuse(`git on a clone in ${root}`)
     const remover = REMOVERS.has(name)
-    for (const value of [...parsed.local.values(), ...env.vars.values()]) {
+    const scope = since(varsJudged, env.vars, `${env.cwd}\0${remover}`)
+    for (const value of [...parsed.local.values(), ...scope]) {
       const named = names({ ...value, quoted: false }, env, remover)
       if (named) return refuse(`${verb} with a variable on ${named}`)
     }

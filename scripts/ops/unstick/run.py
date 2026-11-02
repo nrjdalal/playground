@@ -1037,7 +1037,7 @@ def cycle(state):
                 subprocess.run([os.path.join(CODE, "notify.sh"), "unstick", stuck["line"]], env=os.environ | {"NOTIFY_TO": "builder"}, capture_output=True, timeout=30)
     except Exception as e:
         log(f"slot-stuck check failed: {type(e).__name__}: {e}")
-    # ops-report's PR stalls (no activity for 30 minutes, not held), while its file is fresh (written within 15 minutes)
+    # ops-sweep's PR stalls (idle 30 minutes or 4 verdicts at one sub-5 score, not held), while its file is fresh (written within 15 minutes)
     try:
         u = json.load(open(os.path.join(OPS, "alerts-usage.json")))
         if now_t - calendar.timegm(time.strptime(u["writtenAt"], "%Y-%m-%dT%H:%M:%SZ")) < 900:
