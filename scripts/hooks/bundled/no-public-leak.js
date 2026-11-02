@@ -6140,13 +6140,14 @@ var launchd = (name, job) => ({
   program: ["{bun}", "--no-env-file", `{checkout}/packages/scripts/src/${name}/cli.ts`],
   ...job
 });
-var bunJob = (name) => `{bun} --no-env-file {checkout}/packages/scripts/src/${name}/cli.ts`;
+var bunJob = (name, root = "{checkout}") => `{bun} --no-env-file ${root}/packages/scripts/src/${name}/cli.ts`;
 var JOBS = {
   "ops-awake": terminal("ops-awake", `${bunJob("ops-awake")} --data {data}`, {
     description: "Keeps the Mac awake on AC power and on battery with caffeinate, display and lock unchanged.",
     schedule: { always: true }
   }),
-  "ops-changelog": terminal("ops-changelog", bunJob("ops-changelog"), {
+  "ops-changelog": terminal("ops-changelog", bunJob("ops-changelog", "{dashboard}"), {
+    cwd: "{dashboard}",
     description: "Syncs new canary merges and main versions into the Changelog every 5 minutes.",
     schedule: { every: 300 }
   }),
