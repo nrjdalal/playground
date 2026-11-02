@@ -486,6 +486,15 @@ async function mergeAt(
   if (gates.some((gate) => !gate.ok)) return { gates, kind: "refused" }
   // a signal before this point has let the lock go already, so nothing merges outside it; one from here on waits for the squash to settle, since its spawned gh would carry on past an exit
   if (stopping()) return { gates, kind: "failed", reason: `stopped by ${stopping()}` }
+  // read again inside the lock, since a hold written while the types gate ran would otherwise not stop the merge
+  const heldNow = await readHeld(heldPath(), name, n)
+  if (heldNow !== null) {
+    const detail = `read again before the merge: ${heldNow}`
+    return {
+      gates: gates.map((gate) => (gate.name === "held" ? { ...gate, detail, ok: false } : gate)),
+      kind: "refused",
+    }
+  }
   return settleFirst(async () => {
     if (marksReady(facts, judged)) {
       const reason = await markReady(run, name, n)
