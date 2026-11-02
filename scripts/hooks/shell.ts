@@ -1233,9 +1233,10 @@ async function readFile(path: string): Promise<Text | undefined> {
 
 export async function readPath(path: Text, env: Env): Promise<Text> {
   const resolved = pathOf(path, env)
-  if (!resolved && path.unknown)
+  // a script's text re-read as a line keeps an expansion only as its mark (`bash -c "at now < $F"`)
+  if ((!resolved && path.unknown) || (resolved && marked(resolved)))
     return unknown(
-      `a file path built from ${path.unknown}, which the hook cannot expand: name the file by its literal absolute path`,
+      `a file path built from ${path.unknown ?? "an expansion"}, which the hook cannot expand: name the file by its literal absolute path`,
     )
   if (!resolved) return unknown("a file path the hook cannot resolve")
   return (
