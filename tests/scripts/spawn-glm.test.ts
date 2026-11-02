@@ -56,10 +56,13 @@ describe("--backend glm runs the session on Z.ai's GLM through Claude Code", () 
     expect(command(r)).toContain(" --model 'glm-5.3-flash[1m]' --effort high ")
     expect(command(r)).not.toContain("claude-opus")
     expect(command(r)).not.toContain("--backend")
-    const glm = join(r.home, ".playground", "factory-settings-glm-400k.json")
+    // A probe runs in the sandbox, from a file of its own (spawn-sandbox.test.ts holds the block).
+    const sandbox = /PLAYGROUND_ROLE=probe /.test(command(r)) ? "sandbox-" : ""
+    const glm = join(r.home, ".playground", `factory-settings-glm-${sandbox}400k.json`)
     expect(command(r).split(" --settings ")).toHaveLength(2)
     expect(command(r)).toContain(` --settings ${glm} --dangerously-skip-permissions`)
     const built = JSON.parse(readFileSync(glm, "utf8"))
+    if (sandbox) delete built.sandbox
     expect(built.hooks).toEqual(FACTORY_SETTINGS.hooks)
     expect(built).toEqual({
       ...FACTORY_SETTINGS,

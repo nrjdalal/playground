@@ -30,9 +30,11 @@ import {
   type Folder,
   type Guard,
   type Paths,
+  NEVER_MADE,
   REFUSED_FORMS,
 } from "./fixtures/refused-forms"
 import { storeWith } from "./render-set"
+import { git } from "./scratch-git"
 
 const CHECKOUT = join(import.meta.dir, "..", "..", "..")
 const SCRATCH = mkdtempSync(join(tmpdir(), "refused-forms-"))
@@ -74,36 +76,15 @@ symlinkSync(ROOT, PATHS.LINK)
 symlinkSync(ROOT, join(DATA, "store"))
 symlinkSync(DATA, join(HOME, "pg"))
 symlinkSync(join(PATHS.CLI_DIR, "cli.ts"), join(HOME, "pc"))
-Bun.spawnSync(["git", "init", "-q", OTHER])
-Bun.spawnSync([
-  "git",
-  "-C",
-  OTHER,
-  "remote",
-  "add",
-  "origin",
-  "https://github.com/acme-labs/demo.git",
-])
+git(SCRATCH, "init", "-q", OTHER)
+git(OTHER, "remote", "add", "origin", "https://github.com/acme-labs/demo.git")
 // A repo with a heavy path staged, as no-glm-heavy-path's own test stages one.
 const GLM_REPO = join(SCRATCH, "glm-repo")
-const gitIn = (dir: string, ...args: string[]) =>
-  Bun.spawnSync([
-    "git",
-    "-C",
-    dir,
-    "-c",
-    "user.name=t",
-    "-c",
-    "user.email=t@t",
-    "-c",
-    "commit.gpgsign=false",
-    ...args,
-  ])
-gitIn(SCRATCH, "init", "-q", "-b", "canary", GLM_REPO)
-gitIn(GLM_REPO, "commit", "-q", "--allow-empty", "-m", "base")
+git(SCRATCH, "init", "-q", "-b", "canary", GLM_REPO)
+git(GLM_REPO, "commit", "-q", "--allow-empty", "-m", "base")
 mkdirSync(join(GLM_REPO, "web", "next", "src"), { recursive: true })
 writeFileSync(join(GLM_REPO, "web", "next", "src", "x.ts"), "x\n")
-gitIn(GLM_REPO, "add", ".")
+git(GLM_REPO, "add", ".")
 // The leak guard's lists as core holds them, with ext.links guarding a made-up org's repositories, as its own test sets them.
 const LISTS = join(CHECKOUT, "extensions", "core", "lists")
 const LEAK = join(SCRATCH, "leak")
@@ -124,7 +105,7 @@ const SYNCED = storeWith(
   { "ext.repos": { acme: "quillco/acme-skills" } },
 )
 mkdirSync(join(SYNCED, "extensions", "acme"), { recursive: true })
-Bun.spawnSync(["git", "-C", join(SYNCED, "extensions", "acme"), "init", "-q"])
+git(join(SYNCED, "extensions", "acme"), "init", "-q")
 
 type Run = (raw: string, home: string) => Promise<string | undefined>
 
@@ -334,6 +315,36 @@ describe("every refused form stays refused unless the allow list names it", () =
           expect(ids.has(id)).toBe(false)
           ids.add(id)
         }
+  })
+
+  // A recursive rm (-r, -R or --recursive, alone or in a cluster) and the folder it names, read from a row's text, where a backslash starts an escape (printf's \n) rather than the folder's name.
+  const RECURSIVE = /\brm\s+((?:-\S+\s+)*)([^\s'"`;)&|\\]+)/g
+  // A folder named from HOME, and a cd or pushd to HOME, after which a relative folder is in HOME too
+  const HOME_PATH = /^(?:~|\$HOME|\$\{HOME\})(?=\/|$)/
+  const CD_HOME = /\b(?:cd|pushd)\s+(?:~|\$HOME|\$\{HOME\})\/?(?=[\s;&|)]|$)/
+  // A folder written from ~ is NEVER_MADE itself, or a glob of it that keeps its last name
+  const never = (path: string) =>
+    path.endsWith(NEVER_MADE.slice(NEVER_MADE.lastIndexOf("/"))) &&
+    new Bun.Glob(path).match(NEVER_MADE)
+
+  test("every recursive delete from HOME names a path under the root that never exists", () => {
+    const left: string[] = []
+    for (const { rows, source } of REFUSED_FORMS)
+      for (const [what, call] of rows(PATHS)) {
+        const text = typeof call === "string" ? call : JSON.stringify(call)
+        for (const { 0: rm, 1: flags = "", 2: target = "", index = 0 } of text.matchAll(
+          RECURSIVE,
+        )) {
+          if (!/(?:^|\s)(?:-[a-zA-Z]*[rR]|--recursive)/.test(flags)) continue
+          const path = HOME_PATH.test(target)
+            ? target.replace(HOME_PATH, "~")
+            : !/^[/~$]/.test(target) && CD_HOME.test(text.slice(0, index))
+              ? `~/${target}`
+              : undefined
+          if (path !== undefined && !never(path)) left.push(`${source} ${what}: ${rm}`)
+        }
+      }
+    expect(left).toEqual([])
   })
 
   test("every allow-list entry names a case", () => {
