@@ -422,7 +422,7 @@ Only the first reading moves the folder, sets variables and records files for th
   an `rm` or an `rmdir` whose target has two or more parts that start with an unguarded variable (`$S/$m`, `$HOME/$s`, `$S/$v.d`), which the session rewrites as a literal path, an `rm` of a file outside its worktree and scratchpad as `playground rm <literal path>`, and an `rmdir` guarded with `${VAR:?}` too, since no-raw-delete refuses an `rm` whose path it cannot read, guarded or not,
   and names `playground rm <literal path>`.
   A single such part (`"$O"/d`), or a variable after a name (`$S/p$v`), runs, as it does in Claude Code.
-  It also refuses an `rm` or an `rmdir` of a name directly in `/` (`/scratchpad_*`, `/x`), which the session moves into its scratchpad, an `rmdir` into `$TMPDIR` too, since no-raw-delete refuses an `rm` of a `$TMPDIR` path.
+  It also refuses an `rm` or an `rmdir` of a name directly in `/` (`/scratchpad_*`, `/x`), which the session moves into its scratchpad, removing a folder there with `playground rm <literal path>`, an `rmdir` into `$TMPDIR` too, since no-raw-delete refuses an `rm` of a `$TMPDIR` path.
   A name a level deeper (`/usr/x`) and a redirect into `/` run, as they do in Claude Code.
   It fails open on a call it cannot read.
 

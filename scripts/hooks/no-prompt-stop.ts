@@ -16,7 +16,7 @@ const shown = (path: string) => path.replaceAll(UNKNOWN, "$…").replaceAll(GUAR
 
 // rmdir runs guarded, while no-raw-delete refuses an rm whose path it cannot read, guarded or not, so an rm takes a literal path.
 const FIX: Record<"rm" | "rmdir", string> = {
-  rm: "Name each path literally: a file in your worktree or scratchpad with rm, anything else with playground rm <literal path> (in a script, removeScratch), and run it again.",
+  rm: "Name each path literally: a file in your worktree or scratchpad with rm, anything else with playground rm <literal path> (in a script, removeScratch for a folder makeScratch made), and run it again.",
   rmdir: 'Guard each one as ${VAR:?} ("${S:?}/${m:?}"), or name a literal path, and run it again.',
 }
 
@@ -28,7 +28,7 @@ const AT_ROOT = /^\/[^/\u0000]+\/?$/
 
 // no-raw-delete refuses an rm of $TMPDIR, a word it cannot read and a folder outside both roots, so an rm moves to the scratchpad.
 const AT_ROOT_FIX: Record<"rm" | "rmdir", string> = {
-  rm: "Write and remove in the session's scratchpad, and run it again.",
+  rm: "Write and remove in the session's scratchpad, a folder there with playground rm <literal path>, and run it again.",
   rmdir: "Write and remove in $TMPDIR or the session's scratchpad, and run it again.",
 }
 
