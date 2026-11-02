@@ -1049,6 +1049,47 @@ describe("factory names (#966)", () => {
   })
 })
 
+describe("memory-file alerts (PG-488)", () => {
+  test("only a file a factory session wrote alerts, in an org repo's project folder too", async () => {
+    const config = scratch()
+    const names = [
+      "worker-brave-otter",
+      "k3m9px-reviewer",
+      "builder",
+      "optimizer",
+      "tallowby",
+      "plain-chat",
+    ]
+    mkdirSync(join(config, "sessions"), { recursive: true })
+    for (const [i, name] of names.entries())
+      writeFileSync(
+        join(config, "sessions", `${i}.json`),
+        JSON.stringify({ name, sessionId: `00000000-0000-0000-0000-00000000000${i}` }),
+      )
+    const write = (project: string, file: string, text: string) => {
+      mkdirSync(join(config, "projects", project, "memory"), { recursive: true })
+      writeFileSync(join(config, "projects", project, "memory", file), text)
+    }
+    for (const [i, name] of names.entries())
+      write(
+        i === 0 ? "-Users-x-orgs-acme-app" : "-Users-x-playground",
+        `${name}.md`,
+        `---\noriginSessionId: 00000000-0000-0000-0000-00000000000${i}\n---\n`,
+      )
+    write("-Users-x-playground", "ledger.md", "a ledger with no session id\n")
+    write(
+      "-Users-x-playground",
+      "gone.md",
+      "originSessionId: 00000000-0000-0000-0000-000000000009\n",
+    )
+    const found = (await call(config, "memory_files")) as { line: string; name: string }[]
+    expect(found.map((f) => f.name).sort()).toEqual(names.slice(0, 5).sort())
+    expect(found.find((f) => f.name === "worker-brave-otter")?.line).toStartWith(
+      "-Users-x-orgs-acme-app/memory/",
+    )
+  })
+})
+
 describe("ops-unstick's slot alerts", () => {
   const at = "2026-10-25T21:00:00Z"
   const devRow = (pid: string, tree: string): string =>
