@@ -732,7 +732,7 @@ const assign = (local: Map<string, Text>, w: Word) => {
   local.set(w.value.slice(0, eq), slice(w, eq + 1))
 }
 
-// The program behind the wrappers at the front of the words, resumed inside `inside`'s options for a second reading: an option the wrapper's lists lack is read as a flag, as a value-less option, and again as taking the next word, and a value in a variable again as expanding to no word, each other reading kept in `also`.
+// The program behind the wrappers at the front of the words, resumed inside `inside`'s options for a second reading: an option the wrapper's lists lack is read as a flag, as a value-less option, and again as taking the next word, and a value in a variable again as expanding to no word and to more than one, each other reading kept in `also`.
 function unwrap(state: State, inside?: string): Parsed {
   const { local, rest } = state
   const peek = (): Word | undefined => rest[rest.length - 1]
@@ -790,7 +790,10 @@ function unwrap(state: State, inside?: string): Parsed {
               ? undefined
               : optionValue(v, options)
         if (!end) fork(wrapper, 2)
-        else if (end === "next" && marked(rest[rest.length - 2]?.value ?? "")) fork(wrapper, 3)
+        else if (end === "next" && marked(rest[rest.length - 2]?.value ?? "")) {
+          fork(wrapper, 1)
+          fork(wrapper, 3)
+        }
         rest.length = Math.max(0, rest.length - (end === "next" ? 2 : 1))
       } else break
     }
