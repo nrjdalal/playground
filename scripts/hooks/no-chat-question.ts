@@ -1,4 +1,4 @@
-// Stop hook, the inbox gate: refuses a manager's stop while its final reply asks the owner for a decision or for their own action in chat, until it is an open item in the owner's Inbox (playbook's ask rule), so a question in chat is never missed. It acts for the dispatcher and the leads (PLAYGROUND_ROLE lead, dispatcher or manager, else the roster's kind for the session's registry name, else that name), judges the hook input's `last_assistant_message` (the transcript can lag the turn's last message, ADR 0001), and refuses every stop that still asks, `stop_hook_active` included, Claude Code's own cap on continuations in a row with no tool call between them bounding it. A reply naming an #iN passes once one of them reads open through bun run ask in the live dashboard's checkout; when none does, one it cannot read included, it fails closed for that reply. Anything else it cannot read lets the stop through.
+// Stop hook, the inbox gate: refuses a manager's stop while its final reply asks the owner for a decision or for their own action in chat, until it is an open item in the owner's Inbox (playbook's ask rule), so a question in chat is never missed. It acts for the dispatcher and the leads (PLAYGROUND_ROLE lead, dispatcher or manager, else the roster's kind for the session's registry name, else that name), judges the hook input's `last_assistant_message` (the transcript can lag the turn's last message, ADR 0001), and refuses every stop that still asks, a lead's with the route up to the dispatcher, who alone posts to the Inbox, `stop_hook_active` included, Claude Code's own cap on continuations in a row with no tool call between them bounding it. A reply naming an #iN passes once one of them reads open through bun run ask in the live dashboard's checkout; when none does, one it cannot read included, it fails closed for that reply. Anything else it cannot read lets the stop through.
 
 import "../../packages/env/src/aliases"
 import { join } from "node:path"
@@ -16,6 +16,9 @@ import { loadNames, MANAGER_ROLES, registryName, roleOfName, rosterNames, roster
 
 export const REASON =
   "name the open #iN on the same thing if one exists (bun run ask open lists them), else post it with bun run ask new, then say in chat that it's in the inbox as #iN"
+// A lead's line: only the dispatcher posts owner decisions, so a lead sends one up the chain (playbook's Chain)
+export const LEAD_REASON =
+  "send the decision to the dispatcher with SendMessage, which posts it to the Inbox, and keep the question out of chat; once the dispatcher names its #iN, say in chat that it's in the inbox as #iN"
 
 // git worktree list, then each bun run ask get (all at once), is killed past its limit; one bun run ask get took 5.9s under load.
 const GIT_TIMEOUT_MS = 3000
@@ -213,21 +216,27 @@ const live: Deps = {
   sessionName: registryName,
 }
 
-async function isManager(env: Record<string, string | undefined>, sessionId: unknown, deps: Deps) {
+// The session's manager role (dispatcher, lead or manager), or "" for any other session
+async function managerRole(
+  env: Record<string, string | undefined>,
+  sessionId: unknown,
+  deps: Deps,
+): Promise<string> {
   const role = env.PLAYGROUND_ROLE ?? ""
-  if (MANAGER_ROLES.has(role)) return true
-  if (role || typeof sessionId !== "string") return false
+  if (MANAGER_ROLES.has(role)) return role
+  if (role || typeof sessionId !== "string") return ""
   const name = (await deps.sessionName(sessionId)) ?? ""
   const rostered = name && (await rosterRole(name, env))
-  if (rostered) return MANAGER_ROLES.has(rostered)
+  if (rostered) return MANAGER_ROLES.has(rostered) ? rostered : ""
   await loadNames(env)
-  return MANAGER_ROLES.has(roleOfName(name))
+  const named = roleOfName(name)
+  return MANAGER_ROLES.has(named) ? named : ""
 }
 
 // Fails closed: the stop passes only when some #iN the reply names reads open; the reason says what each one read as.
-async function gate(reply: string, deps: Deps): Promise<string | undefined> {
+async function gate(reply: string, deps: Deps, reason: string): Promise<string | undefined> {
   const refs = [...new Set(reply.match(/#i\d+\b/g) ?? [])].slice(0, MAX_REFS)
-  if (!refs.length) return REASON
+  if (!refs.length) return reason
   const anyOpen = Promise.withResolvers<"open">()
   const reads = Promise.all(
     refs.map((ref) =>
@@ -252,7 +261,7 @@ async function gate(reply: string, deps: Deps): Promise<string | undefined> {
       ? `${r.ref} is ${r.status}, not open`
       : `${r.ref} could not be read with bun run ask (${r.error}), so it does not count as open`,
   )
-  return `${REASON} (${why.join("; ")})`
+  return `${reason} (${why.join("; ")})`
 }
 
 async function inspect(raw: string, env: Record<string, string | undefined>, deps: Deps) {
@@ -263,9 +272,10 @@ async function inspect(raw: string, env: Record<string, string | undefined>, dep
   if (typeof reply !== "string") return
   const owner = await (deps.ownerNames ?? policyOwnerNames)(env)
   if (!asksDecision(reply, [], owner)) return
-  if (!(await isManager(env, sessionId, deps))) return
+  const role = await managerRole(env, sessionId, deps)
+  if (!role) return
   if (!asksDecision(reply, await rosterNames(env), owner)) return
-  return gate(reply, deps)
+  return gate(reply, deps, role === "lead" ? LEAD_REASON : REASON)
 }
 
 // Fails open: an input the hook cannot read, or a session it cannot place, lets the session stop.
