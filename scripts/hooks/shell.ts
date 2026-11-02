@@ -775,18 +775,24 @@ function substituted(inner: Command[], known: Record<string, string>): Text {
 const MKTEMP_FLAGS = new Set(["d", "q", "u"])
 const MKTEMP_LONG = new Set(["--directory", "--dry-run", "--quiet"])
 
-// The path a bare `mktemp` makes, under a TMPDIR the hook holds and the call never sets (knownVariables drops it then), with no template, -p, --tmpdir or -t to steer it; a name standing in for its random part
+// The path a plain `mktemp` makes, on a line that never sets TMPDIR (knownVariables drops it then), with no -p, --tmpdir or -t to steer it: its one held template as written, judged where it lands from the call's folder, else a name under TMPDIR standing in for its random part
 function mktempPath(cmd: Command, known: Record<string, string>): string | undefined {
   const [first, ...args] = cmd.words
   if (!first || first.quoted || first.value !== "mktemp" || cmd.redirects.length > 0) return
   if (!known.TMPDIR) return
-  const plain = args.every(
-    ({ quoted, value }) =>
-      !quoted &&
-      (MKTEMP_LONG.has(value) ||
-        (/^-[a-z]+$/.test(value) && [...value.slice(1)].every((c) => MKTEMP_FLAGS.has(c)))),
-  )
-  return plain ? `${known.TMPDIR.replace(/\/$/, "")}/tmp.mktemp` : undefined
+  const flag = ({ quoted, value }: Word) =>
+    !quoted &&
+    (MKTEMP_LONG.has(value) ||
+      (/^-[a-z]+$/.test(value) &&
+        value
+          .slice(1)
+          .split("")
+          .every((c) => MKTEMP_FLAGS.has(c))))
+  const templates = args.filter((word) => !flag(word))
+  const [template] = templates
+  if (templates.length > 1 || template?.value.startsWith("-") || marked(template?.value ?? ""))
+    return
+  return template ? template.value : `${known.TMPDIR.replace(/\/$/, "")}/tmp.mktemp`
 }
 
 // xargs in front of a command: `replace` is its -I (or BSD -J) string, which marks where stdin goes; without one, stdin is appended as arguments.
