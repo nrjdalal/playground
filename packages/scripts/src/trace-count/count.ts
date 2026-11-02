@@ -182,7 +182,7 @@ export async function tree(root: string): Promise<File[]> {
 
 // No-public-leak's list, or the refusal for one the count cannot trust: a missing file or a key with no entry leaves its kinds with no pattern, so they would count nothing and a trace would pass unseen.
 export async function list(path: string): Promise<{ list: PublicList } | { refusal: string }> {
-  const fix = `ask Ops for the owner to type ! playground ext put <scope> list no-public-leak <file> --reason <why> in Ops' pane, every key (${LIST_KEYS.join(", ")}) holding an entry`
+  const fix = `tell your lead, and the dispatcher hands the owner ! playground ext put <scope> list no-public-leak <file> --reason <why> to type in the dispatcher's terminal window, every key (${LIST_KEYS.join(", ")}) holding an entry`
   if (!existsSync(path)) return { refusal: `no ${path}, so its kinds would count nothing: ${fix}` }
   const value: unknown = await Bun.file(path)
     .json()

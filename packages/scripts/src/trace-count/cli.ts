@@ -73,7 +73,7 @@ const unset = [
 ]
 if (unset.length) {
   console.error(
-    `trace-count: ${unset.join(" and ")} ${unset.length > 1 ? "are" : "is"} unset, so ownerName and archiveLinks would miss the owner's names and the archive's links: ask Ops for the owner to set ${unset.length > 1 ? "them" : "it"} by typing ! playground settings set in Ops' pane`,
+    `trace-count: ${unset.join(" and ")} ${unset.length > 1 ? "are" : "is"} unset, so ownerName and archiveLinks would miss the owner's names and the archive's links: tell your lead, and the dispatcher hands the owner ! playground settings set to type in the dispatcher's terminal window, which sets ${unset.length > 1 ? "them" : "it"}`,
   )
   console.error(NOT_COUNTED)
   process.exit(2)

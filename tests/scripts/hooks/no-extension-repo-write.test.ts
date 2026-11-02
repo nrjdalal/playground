@@ -183,7 +183,9 @@ describe("a write to an extension repository's git data or name is refused", () 
   test("its reason names the owner's route and the repository", async () => {
     const reason = await refused(bash(`git push ${EXT} main`))
     expect(reason).toContain("quillco/acme-skills")
-    expect(reason).toContain("as a ! command in Ops' pane")
+    expect(reason).toContain(
+      "as a ! command in the dispatcher's terminal window: tell your lead what it should do, and the dispatcher hands the owner the command",
+    )
   })
 
   test.each([
