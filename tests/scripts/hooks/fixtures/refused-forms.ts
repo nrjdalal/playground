@@ -56,7 +56,7 @@ export type Group = {
   folders: Folder[]
   guards: Guard[]
   rows: (paths: Paths) => readonly Row[]
-  source: "#292" | "#356" | "#402" | "#411" | "#446" | "#456" | "#466" | "#469" | "#509"
+  source: "#292" | "#356" | "#402" | "#411" | "#446" | "#456" | "#466" | "#469" | "#509" | "#533"
 }
 
 // The rows a guard-loosening PR lets run on purpose, each written as a row's "<source> <what>" for all its cases, or as one case's "<source> <what> | <guard> | <folder>"; canary lets none run.
