@@ -1076,6 +1076,24 @@ describe("a playground CLI call that changes what a guard reads is refused, nami
   })
 })
 
+describe("a factory session's ext accept is refused, since accepting a proposal is the owner's own call", () => {
+  test.each([
+    ["ext accept", "playground ext accept login rule x abc --reason ok"],
+    ["ext accept --by owner", "playground ext accept login rule x abc --reason ok --by owner"],
+    ["ext accept past an option", "playground ext accept --reason ok login rule x abc"],
+    [
+      "ext accept with the role cleared",
+      "PLAYGROUND_ROLE= playground ext accept login rule x abc --reason ok",
+    ],
+    [
+      "ext accept behind env -u",
+      "env -u PLAYGROUND_ROLE playground ext accept login rule x abc --reason ok",
+    ],
+  ])("%s", async (_, command) => {
+    expect(await bash(command)).toContain("no-extensions-write hook refuses")
+  })
+})
+
 describe("git's global options before a push keep a bare push's verdict", () => {
   test.each([
     ["the data folder", DATA],
@@ -1104,7 +1122,6 @@ describe("a playground CLI call that no guard reads runs", () => {
     ["ext diff", "playground ext diff login list x --from a --to b"],
     ["ext export", "playground ext export /tmp/out"],
     ["ext score", "playground ext score login doc x abc 5 --reason ok"],
-    ["ext accept", "playground ext accept login rule x abc --reason ok"],
     ["ext import --dry-run", "playground ext import --from-tree extensions/core/lists --dry-run"],
     ["ext init --dry-run", "playground ext init --dry-run"],
     ["ext add --dry-run", "playground ext add acme --dry-run"],

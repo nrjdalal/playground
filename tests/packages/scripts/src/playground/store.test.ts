@@ -31,12 +31,13 @@ describe("playground ext", () => {
     writeFileSync(join(at, "extensions", "login"), "tester\n")
     return at
   }
-  const ext = async (at: string, words: string[], stdin = "") => {
+  const ext = async (at: string, words: string[], stdin = "", role?: string) => {
     const out: string[] = []
     const err: string[] = []
     const io: Io = {
       data: at,
       out: (l) => out.push(l),
+      role,
       stdin: async () => stdin,
       write: Bun.write,
     }
@@ -101,6 +102,36 @@ describe("playground ext", () => {
       reason: string
     }[]
     expect(why.map((entry) => entry.reason)).toEqual(["clear", "shorter replies"])
+  })
+
+  test("accept from a session with a role is refused, by --by owner too, and the owner's own accept with no role accepts", async () => {
+    const at = folder("accept")
+    writeFileSync(join(scratch, "accept.md"), "Say less.\n")
+    const put = await ext(at, [
+      "put",
+      "tester",
+      "rule",
+      "less",
+      join(scratch, "accept.md"),
+      "--reason",
+      "r",
+    ])
+    const { rev } = JSON.parse(put.out) as { rev: string }
+    for (const by of [[], ["--by", "owner"]]) {
+      const refused = await ext(
+        at,
+        ["accept", "tester", "rule", "less", rev, "--reason", "r", ...by],
+        "",
+        "worker",
+      )
+      expect(refused.code).toBe(1)
+      expect(refused.err).toContain("accept is the owner's own call")
+      expect(existsSync(join(scopeDir(at, "tester"), "rules/less.md"))).toBe(false)
+    }
+    const accepted = await ext(at, ["accept", "tester", "rule", "less", rev, "--reason", "r"])
+    expect(accepted.code).toBe(0)
+    expect(accepted.out).toBe(`rev ${git(at, "tester", ["rev-parse", "HEAD"])} is accepted`)
+    expect(readFileSync(join(scopeDir(at, "tester"), "rules/less.md"), "utf8")).toBe("Say less.\n")
   })
 
   test("a skill is put from its folder, a list from its JSON and accepted at once, and - reads stdin", async () => {
