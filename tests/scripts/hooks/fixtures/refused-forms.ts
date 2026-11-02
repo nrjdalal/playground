@@ -38,6 +38,7 @@ export type Paths = {
   HOME: string
   LINK: string
   LIST: string
+  MAIN: string
   ROOT: string
   SCOPE: string
   WORDS: string
@@ -996,6 +997,133 @@ gh api graphql -f query="$QUERY"`,
         "a positional written to a script sh runs",
         "set -- 'rm -rf ~'; echo \"$1\" > f.sh; sh f.sh",
       ],
+      [
+        "a commit message run by a stored git alias through $_",
+        "git commit --allow-empty -m 'rm -rf ~'; git x \"$_\"",
+      ],
+      [
+        "a commit message run by git rebase -x",
+        "git commit --allow-empty -m 'rm -rf ~'; git rebase -x \"$_\" HEAD~1",
+      ],
+      [
+        "a commit message run by git rebase --exec",
+        "git commit --allow-empty -m 'rm -rf ~'; git rebase --exec \"$_\" HEAD~1",
+      ],
+      [
+        "a commit message run by git bisect run",
+        "git commit --allow-empty -m 'rm -rf ~'; git bisect run \"$_\"",
+      ],
+      [
+        "a commit message run by git submodule foreach",
+        "git commit --allow-empty -m 'rm -rf ~'; git submodule foreach \"$_\"",
+      ],
+      [
+        "a commit message run by git filter-branch",
+        "git commit --allow-empty -m 'rm -rf ~'; git filter-branch -f --tree-filter \"$_\" HEAD",
+      ],
+      [
+        "a commit message run by git difftool -x",
+        "git commit --allow-empty -m 'rm -rf ~'; git difftool -y -x \"$_\" HEAD~1",
+      ],
+      ["a positional run by git rebase -x", "set -- 'rm -rf ~'; git rebase -x \"$1\" HEAD~1"],
+      ["an argument run by git submodule foreach", "true 'rm -rf ~'; git submodule foreach \"$_\""],
+      [
+        "a commit message run by a stored git alias with no argument",
+        "git commit --allow-empty -m 'rm -rf ~'; git x",
+      ],
+      [
+        "a commit message xargs hands git rebase -x",
+        "git commit --allow-empty -m 'rm -rf ~'; git log -1 --format=%s | xargs -I{} git rebase -x {} HEAD~1",
+      ],
+      [
+        "a commit message xargs hands git submodule foreach",
+        "git commit --allow-empty -m 'rm -rf ~'; git log -1 --format=%s | xargs git submodule foreach",
+      ],
+      [
+        "a commit message written to a script git rebase -x runs",
+        "git commit --allow-empty -m 'rm -rf ~'; git log -1 --format=%s > .git/x.sh; git rebase -x 'sh .git/x.sh' HEAD~1",
+      ],
+      [
+        "a commit message written to a script git submodule foreach runs",
+        "git commit --allow-empty -m 'rm -rf ~'; git log -1 --format=%s > f.sh; git submodule foreach 'sh f.sh'",
+      ],
+      [
+        "a commit message piped into git submodule foreach's sh",
+        "git commit --allow-empty -m 'rm -rf ~'; git log -1 --format=%s | git submodule foreach sh",
+      ],
+      [
+        "a commit message piped into git submodule foreach's sh -s",
+        "git commit --allow-empty -m 'rm -rf ~'; git log -1 --format=%s | git submodule foreach 'sh -s'",
+      ],
+      ["awk's system() removing the home", "awk 'BEGIN{system(\"rm -rf ~\")}'"],
+      ["awk printing into a command removing the home", 'awk \'BEGIN{print "x" | "rm -rf ~"}\''],
+      ["awk reading a command removing the home", "awk 'BEGIN{\"rm -rf ~\" | getline}'"],
+      [
+        "awk writing a removal into a git hook",
+        'awk \'BEGIN{print "rm -rf ~" > ".git/hooks/pre-commit"}\'',
+      ],
+      ["awk's system() of a -v value removing the home", "awk -v c='rm -rf ~' 'BEGIN{system(c)}'"],
+      ["gawk's system() removing the home", "gawk 'BEGIN{system(\"rm -rf ~\")}'"],
+      ["nawk's system() removing the home", "nawk 'BEGIN{system(\"rm -rf ~\")}'"],
+      ["sed's e command removing the home", "sed 'e rm -rf ~' /dev/null"],
+      ["sed's addressed e command removing the home", "sed '1e rm -rf ~' /dev/null"],
+      ["gsed's e command removing the home", "gsed '1e rm -rf ~' /dev/null"],
+      [
+        "sed -i '' inserting a removal into a git hook",
+        "sed -i '' '1i\\\nrm -rf ~' .git/hooks/pre-commit",
+      ],
+      [
+        "sed -i '' appending a removal to a git hook",
+        "sed -i '' '$a\\\nrm -rf ~' .git/hooks/pre-commit",
+      ],
+      [
+        "sed -i '' prefixing a removal in a git hook",
+        "sed -i '' 's/^/rm -rf ~; /' .git/hooks/pre-commit",
+      ],
+      [
+        "sed -i prefixing a removal in a git hook",
+        "sed -i 's/^/rm -rf ~; /' .git/hooks/pre-commit",
+      ],
+      [
+        "sed -i.bak prefixing a removal in a git hook",
+        "sed -i.bak 's/^/rm -rf ~; /' .git/hooks/pre-commit",
+      ],
+      [
+        "sed --in-place prefixing a removal in a git hook",
+        "sed --in-place 's/^/rm -rf ~; /' .git/hooks/pre-commit",
+      ],
+      [
+        "sed --in-place= with a suffix prefixing a removal in a git hook",
+        "sed --in-place=.bak 's/^/rm -rf ~; /' .git/hooks/pre-commit",
+      ],
+      [
+        "sed -ni prefixing a removal in a git hook",
+        "sed -ni 's/^/rm -rf ~; /p' .git/hooks/pre-commit",
+      ],
+      [
+        "sed -Ei prefixing a removal in a git hook",
+        "sed -Ei 's/^/rm -rf ~; /' .git/hooks/pre-commit",
+      ],
+      [
+        "sed with a trailing -i prefixing a removal in a git hook",
+        "sed 's/^/rm -rf ~; /' .git/hooks/pre-commit -i",
+      ],
+      [
+        "gsed -i prefixing a removal in a git hook",
+        "gsed -i 's/^/rm -rf ~; /' .git/hooks/pre-commit",
+      ],
+      [
+        "/usr/bin/sed -i prefixing a removal in a git hook",
+        "/usr/bin/sed -i '' 's/^/rm -rf ~; /' .git/hooks/pre-commit",
+      ],
+      [
+        "awk named as /usr/bin/time -o's output file, running watch",
+        "/usr/bin/time -o awk watch 'rm -rf ~'",
+      ],
+      ["awk named as sudo --prompt's value, running watch", "sudo --prompt awk watch 'rm -rf ~'"],
+      ["cut under time, given watch and a removal", "time cut watch 'rm -rf ~'"],
+      ["sort under nohup, given watch and a removal", "nohup sort watch 'rm -rf ~'"],
+      ["uniq under exec, given watch and a removal", "exec uniq watch 'rm -rf ~'"],
     ],
     source: "#411",
   },
@@ -1171,5 +1299,13 @@ gh api graphql -f query="$QUERY"`,
       ],
     ],
     source: "#466",
+  },
+  {
+    folders: ["checkout"],
+    guards: ["no-main-checkout"],
+    rows: ({ MAIN }) => [
+      ["git -C behind --attr-source's value", `git --attr-source HEAD -C ${MAIN} commit -m x`],
+    ],
+    source: "#411",
   },
 ]

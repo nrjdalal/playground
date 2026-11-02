@@ -41,6 +41,7 @@ const PATHS: Paths = {
   HOME,
   LINK: join(HOME, "store"),
   LIST: join(ROOT, "hooks", "desktop-owner-apps.json"),
+  MAIN: join(SCRATCH, "main"),
   ROOT,
   SCOPE,
   WORDS: join(HOME, "words"),
@@ -51,6 +52,7 @@ for (const dir of [
   join(SCOPE, "lists"),
   join(DATA, "handoffs"),
   join(PATHS.WORK, "playground"),
+  join(PATHS.MAIN, ".claude", "worktrees", "a"),
   PATHS.BARE,
 ])
   mkdirSync(dir, { recursive: true })
@@ -113,10 +115,6 @@ const SYNCED = storeWith(
 mkdirSync(join(SYNCED, "extensions", "acme"), { recursive: true })
 Bun.spawnSync(["git", "-C", join(SYNCED, "extensions", "acme"), "init", "-q"])
 
-// A made-up main checkout, as no-main-checkout's own test names one.
-const MAIN = join(SCRATCH, "main")
-mkdirSync(MAIN)
-
 type Run = (raw: string, home: string) => Promise<string | undefined>
 
 // Each guard's check with the environment its own test gives it, and the folders it runs in, each a cwd and the HOME that goes with it.
@@ -162,8 +160,11 @@ const GUARDS: Record<Guard, { folders: Partial<Record<Folder, [string, string]>>
   },
   "no-kill-by-name": { folders: { checkout: [CHECKOUT, HOME] }, run: (raw) => killByName(raw) },
   "no-main-checkout": {
-    folders: { "main checkout": [MAIN, HOME] },
-    run: (raw) => mainCheckout(raw, { HOME: "/u" }, MAIN),
+    folders: {
+      checkout: [join(PATHS.MAIN, ".claude", "worktrees", "a"), HOME],
+      "main checkout": [PATHS.MAIN, HOME],
+    },
+    run: (raw, home) => mainCheckout(raw, { HOME: home }, PATHS.MAIN),
   },
   "no-playground-leak": {
     folders: { "data folder": [DATA, HOME], home: [HOME, HOME] },
