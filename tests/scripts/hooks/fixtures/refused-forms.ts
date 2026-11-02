@@ -59,7 +59,18 @@ export type Group = {
   folders: Folder[]
   guards: Guard[]
   rows: (paths: Paths) => readonly Row[]
-  source: "#292" | "#356" | "#402" | "#411" | "#446" | "#456" | "#463" | "#466" | "#469" | "#509"
+  source:
+    | "#292"
+    | "#356"
+    | "#402"
+    | "#411"
+    | "#446"
+    | "#456"
+    | "#463"
+    | "#466"
+    | "#469"
+    | "#509"
+    | "#514"
 }
 
 // The rows a guard-loosening PR lets run on purpose, each written as a row's "<source> <what>" for all its cases, or as one case's "<source> <what> | <guard> | <folder>"; canary lets none run.
@@ -1911,5 +1922,66 @@ gh api graphql -f query="$QUERY"`,
       ["cut over a half-quoted glob in the home", "cut -f1 '.pl'*"],
     ],
     source: "#463",
+  },
+  {
+    folders: ["main checkout"],
+    guards: ["no-main-checkout"],
+    rows: ({ MAIN }) => {
+      const W = `${MAIN}/.claude/worktrees/a`
+      return [
+        ["a commit after a cd behind ||", `true || cd ${W}; git commit -m x`],
+        [
+          "a commit after a cd behind && whose left side may fail",
+          `false && cd ${W}; git commit -m x`,
+        ],
+        ["a commit after a cd to a missing folder", `cd ${MAIN}/.no-such-folder; git commit -m x`],
+        ["a commit after a cd to a folder in a variable", `cd "$X"; git commit -m x`],
+        ["a commit after a cd in an if branch", `if false; then cd ${W}; fi; git commit -m x`],
+        [
+          "a commit after a cd in a loop that runs no time",
+          `while false; do cd ${W}; done; git commit -m x`,
+        ],
+        ["a commit after a cd in a case branch", `case x in y) cd ${W};; esac; git commit -m x`],
+        [
+          "a commit after a function that holds a cd and is never called",
+          `f() { cd ${W}; }; git commit -m x`,
+        ],
+        ["a commit after a cd behind env", `env cd ${W}; git commit -m x`],
+        ["a commit after a cd xargs runs", `echo ${W} | xargs cd; git commit -m x`],
+        ["a commit after a cd in a coprocess", `coproc cd ${W}; git commit -m x`],
+        ["a commit after a backgrounded cd", `cd ${W} & git commit -m x`],
+        ["a commit after a cd piped into cat", `cd ${W} | cat; git commit -m x`],
+        ["a commit after a backgrounded brace group's cd", `{ cd ${W}; } & git commit -m x`],
+        ["a commit after pushd and popd", `pushd ${W}; popd; git commit -m x`],
+        ["a commit after a cd back with cd -", `cd ${W}; cd -; git commit -m x`],
+        ["a write after a cd behind ||", `true || cd ${W}; echo x > f`],
+        ["a script's output piped into a shell", "bun run ask list | sh"],
+      ]
+    },
+    source: "#514",
+  },
+  {
+    folders: ["checkout"],
+    guards: ["no-main-checkout"],
+    rows: () => [
+      [
+        "a commit after a cd a loop runs three times",
+        "for i in 1 2 3; do cd ..; done; git commit -m x",
+      ],
+      ["a commit after a cd repeat runs three times", "repeat 3 cd ..; git commit -m x"],
+      ["a commit after zsh's two-operand cd", "cd /.claude/worktrees/a /; git commit -m x"],
+    ],
+    source: "#514",
+  },
+  {
+    folders: ["data folder"],
+    guards: ["no-extensions-write"],
+    rows: () => [
+      [
+        "a write into the root after a cd behind ||",
+        "true || cd /tmp; echo x > extensions/policy.json",
+      ],
+    ],
+    source: "#514",
   },
 ]
