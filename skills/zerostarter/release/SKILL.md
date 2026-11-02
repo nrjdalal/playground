@@ -111,8 +111,9 @@ A reset or merge of the main checkout made outside `playground update`, with no 
 6. Roll the Dashboard, which answers `Already up to date` when `canary` has not moved.
 
 A build that fails part way can leave another package's `dist` cleaned and empty (`packages/redis`, which pr:merge's lock imports, on v0.0.107): after a failed build, fix its cause and run `playground update` again, which builds again, since a run that stopped short records nothing.
+A job that a `left alone` or an `on, but not running` line names and that is not running three of its cycles after the update (its heartbeat's `cycleSeconds`, the staleness `up.py` reads a job down by) is a failed step, whatever the line's `up.py exited 0` says, since `up.py` exits 0 on every pass: send its `up.log` lines (`ops/` in the data folder) up the chain.
 
-Done when the main checkout's `HEAD` equals `origin/main`, `playground update` exits 0, no `ops-restart:` line reads `still runs` or a non-zero `up.py exited`, each job an `ops-restart:` line names as `source changed, stopped pid <n>` has restarted, its heartbeat (`ops/<job>.json` in the data folder) reading a `pid` other than `<n>` and a `startedAt` after the update, the proof the rehearsal cannot give, every package but `packages/scripts` holds a `dist` with files in it, and each folder a `skills changed:` line names has reached every lead.
+Done when the main checkout's `HEAD` equals `origin/main`, `playground update` exits 0, no `ops-restart:` line reads `still runs` or a non-zero `up.py exited`, each job an `ops-restart:` line names as `source changed, stopped pid <n>` has restarted, its heartbeat (`ops/<job>.json` in the data folder) reading a `pid` other than `<n>` and a `startedAt` after the update, the proof the rehearsal cannot give, each job a `left alone` or an `on, but not running` line names is running once it has beaten again, its heartbeat reading a `pid` that `ps -p` finds and a `startedAt` after the update, a launchd job started by launchd, every package but `packages/scripts` holds a `dist` with files in it, and each folder a `skills changed:` line names has reached every lead.
 
 ## Notes
 
