@@ -289,6 +289,10 @@ describe(`a Acme write holding a ${OLD.dispatcher} term is refused`, () => {
     ["git commit -F", "git commit -F leaky.md"],
     ["git -C commit", `git -C ${"$PWD"} commit -am "${OLD.dispatcher}"`],
     ["git push to a branch named for a session", "git push origin HEAD:worker-greed/fix"],
+    [
+      "git --attr-source <tree> before a push to a branch named for a session",
+      "git --attr-source HEAD push origin HEAD:worker-greed/fix",
+    ],
     ["curl to Slack", `curl -d text="${OLD.builder} here" https://slack.com/api/chat.postMessage`],
     [
       "curl to Linear",
