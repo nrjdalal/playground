@@ -195,13 +195,30 @@ const definedFunctions = (command: string): Set<string> =>
   )
 
 // Every text of a variable the call sets or exports, or of a word from the first that names a runner on (behind any wrapper, or a program word the hook cannot read or a function the command defines), that holds a space, a leading ! dropped, read as a command line of its own (a pager, GIT_SSH_COMMAND, a git alias, watch's line); any other program's quoted argument (awk's program) stays one word.
-// With `wide`, every word is read, as for a line holding a runner call whose argument the hook cannot read (`set -- '…'; eval "$1"`), since an earlier word may hold its payload; `dark` marks such a call, and `messages` the git messages kept out of the read.
+// Whether a line holds a runner call (a shell's -c and eval included) given a word the hook cannot read, in itself or in a script a runner's word carries, since an earlier word may hold its payload (`set -- '…'; eval "$1"`, `$_`, getopts, an array)
+function darkLine(line: string, known: Record<string, string>, depth = 0): boolean {
+  return lex(line, known).commands.some((cmd) => {
+    const { args, first, name } = parse(cmd)
+    const all = first ? [first, ...args] : args
+    const at = first && marked(name) ? 0 : all.findIndex((word) => runnerOf(word))
+    const runs = at < 0 ? [] : all.slice(at + 1)
+    if (runs.some((word) => marked(word.value))) return true
+    return (
+      depth < 3 &&
+      runs.some(
+        (w) => /\s/.test(w.value) && !marked(w.value) && darkLine(w.value, known, depth + 1),
+      )
+    )
+  })
+}
+
+// With `wide`, for a dark line, every word is read, as canary read them; `messages` are the git messages kept out of the read.
 function runsOf(
   parsed: Parsed,
   env: Env,
   functions: Set<string>,
   wide: boolean,
-): { dark: boolean; lines: string[]; messages: string[] } {
+): { lines: string[]; messages: string[] } {
   const { args, first, local, name } = parsed
   const values = [...local, ...env.vars].flatMap(([, text]) => (text.unknown ? [] : [text.value]))
   const all = first ? [first, ...args] : args
@@ -219,9 +236,8 @@ function runsOf(
     if (message !== undefined) messages.push(message)
     else for (const text of texts(word)) values.push(text.value.replace(/^!/, ""))
   }
-  const dark = found >= 0 && all.slice(found + 1).some((word) => marked(word.value))
   const lines = [...new Set(values)].filter((value) => /\s/.test(value) && !marked(value))
-  return { dark, lines, messages }
+  return { lines, messages }
 }
 
 // What of a playground call changes what a guard reads, or undefined; its words split as that command's parseWords splits them, and a word the hook cannot read taken as the worst.
@@ -272,7 +288,7 @@ const texts = (word: Word): Word[] => {
   return out
 }
 
-async function inspect(raw: string, environment: Environment) {
+function inspect(raw: string, environment: Environment) {
   const { cwd, tool_input: toolInput, tool_name: tool } = JSON.parse(raw) as Record<string, unknown>
   const input = (toolInput ?? {}) as Record<string, unknown>
   const directory = typeof cwd === "string" ? cwd : undefined
@@ -332,7 +348,6 @@ async function inspect(raw: string, environment: Environment) {
     }
   }
   const seen = new Set<string>()
-  let dark = false
   let wide = false
   const visit: Visit = async (cmd: Command, parsed, env) => {
     const slot = slotWords(parsed)
@@ -365,7 +380,6 @@ async function inspect(raw: string, environment: Environment) {
           .find(Boolean)
     if (write) return refuse(write)
     const runs = reader ? undefined : runsOf(parsed, env, functions, wide)
-    if (runs?.dark) dark = true
     for (const raw of runs?.lines ?? []) {
       const line =
         xargs?.replace && fed
@@ -413,19 +427,13 @@ async function inspect(raw: string, environment: Environment) {
     }
   }
   const known = knownVariables(command, environment, directory)
-  const pass = () =>
-    run(
-      lex(command, known),
-      { cwd: directory, files: new Map(), known, process: environment, vars: new Map() },
-      visit,
-      true,
-    )
-  const verdict = await pass()
-  if (verdict || !dark) return verdict
-  // a runner call read a word the hook cannot know, so the line is read again with every spaced text a line of its own, as a payload held earlier (set --, $_, getopts, an array) may be what it runs
-  wide = true
-  seen.clear()
-  return pass()
+  wide = darkLine(command, known)
+  return run(
+    lex(command, known),
+    { cwd: directory, files: new Map(), known, process: environment, vars: new Map() },
+    visit,
+    true,
+  )
 }
 
 // Fails open: an error on any call lets it run, so a reader bug cannot block every Bash command or write; a RangeError, a stack overflow or the walk past its time, refuses.
