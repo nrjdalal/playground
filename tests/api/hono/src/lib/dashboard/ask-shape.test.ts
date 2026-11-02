@@ -55,7 +55,8 @@ describe("shapeHints", () => {
 
   test("skips a diff block's lines, which wrap on the card, and still hints at the same line in any other code block", () => {
     const wide = `+ ${"x".repeat(ASK_CODE_COLUMNS)}`
-    expect(shapeHints(ask(`\`\`\`diff\n${wide}\n\`\`\`\n\n- One line.`))).toEqual([])
+    for (const fence of ["```diff", "```Diff"])
+      expect(shapeHints(ask(`${fence}\n${wide}\n\`\`\`\n\n- One line.`))).toEqual([])
     for (const fence of ["```", "```ts", "```text", "```diffstat"])
       expect(shapeHints(ask(`${fence}\n${wide}\n\`\`\`\n\n- One line.`))).toEqual([
         { kind: "wide", longest: ASK_CODE_COLUMNS + 2 },

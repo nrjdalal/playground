@@ -257,7 +257,7 @@
 
 - The ask's shape: an `ask` decision's text reads the way chat talks to the owner, in three parts, top to bottom:
   1. A picture of the point: a diff or code block for a code change, before and after pictures for a UI change (as `attachments` with the smart viewer), an ASCII flow in a code block for a plain decision.
-     Keep each code or ASCII line within `ASK_CODE_COLUMNS` characters, a `diff` block's aside, since the card wraps it, the drawing width the card paragraph above names, whose source (`packages/config/src/inbox.ts`) gives the card width and character width it comes from.
+     Keep each code or ASCII line within `ASK_CODE_COLUMNS` characters, the drawing width the card paragraph above names, whose source (`packages/config/src/inbox.ts`) gives the card width and character width it comes from; a `diff` block's lines may run longer, since the card wraps them.
      A wider drawing still posts and shrinks to 10px, then scrolls, so the limit is a writing guide.
   2. Short bullets, one fact each, an emoji as each one's marker.
   3. What Approve does, in the `approve` label, with `deny` beside it: the card shows the two as its choices under the text, in place of its On Approve line.

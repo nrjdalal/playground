@@ -22,7 +22,7 @@ const longestCodeLine = (text: string): number => {
   for (const line of text.split("\n")) {
     const fence = line.match(/^\s*```\s*(\S*)/)
     if (fence) {
-      diff = !inside && fence[1] === "diff"
+      diff = !inside && fence[1]!.toLowerCase() === "diff"
       inside = !inside
     } else if (inside && !diff) longest = Math.max(longest, [...line].length)
   }
