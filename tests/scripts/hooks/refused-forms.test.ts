@@ -5,9 +5,11 @@ import { join } from "node:path"
 
 import { check as desktopOwnerApp } from "../../../scripts/hooks/no-desktop-owner-app"
 import { check as envDump } from "../../../scripts/hooks/no-env-dump"
+import { check as extensionRepoWrite } from "../../../scripts/hooks/no-extension-repo-write"
 import { check as extensionsWrite } from "../../../scripts/hooks/no-extensions-write"
 import { check as headlessLogin } from "../../../scripts/hooks/no-headless-login"
 import { check as killByName } from "../../../scripts/hooks/no-kill-by-name"
+import { check as mainCheckout } from "../../../scripts/hooks/no-main-checkout"
 import { check as rawSpawn } from "../../../scripts/hooks/no-raw-spawn"
 import { check as releaseComment } from "../../../scripts/hooks/no-release-comment"
 import { check as stash } from "../../../scripts/hooks/no-stash"
@@ -35,8 +37,10 @@ const PATHS: Paths = {
   BARE: join(SCRATCH, "bare"),
   CLI_DIR: join(CHECKOUT, "packages", "scripts", "src", "playground"),
   DATA,
+  HOME,
   LINK: join(HOME, "store"),
   LIST: join(ROOT, "hooks", "desktop-owner-apps.json"),
+  MAIN: join(SCRATCH, "main"),
   ROOT,
   SCOPE,
   WORDS: join(HOME, "words"),
@@ -47,6 +51,7 @@ for (const dir of [
   join(SCOPE, "lists"),
   join(DATA, "handoffs"),
   join(PATHS.WORK, "playground"),
+  join(PATHS.MAIN, ".claude", "worktrees", "a"),
   PATHS.BARE,
 ])
   mkdirSync(dir, { recursive: true })
@@ -57,6 +62,7 @@ writeFileSync(PATHS.WORDS, "y ".repeat(400_000))
 symlinkSync(ROOT, PATHS.LINK)
 symlinkSync(ROOT, join(DATA, "store"))
 symlinkSync(DATA, join(HOME, "pg"))
+symlinkSync(join(PATHS.CLI_DIR, "cli.ts"), join(HOME, "pc"))
 Bun.spawnSync(["git", "init", "-q", OTHER])
 Bun.spawnSync([
   "git",
@@ -69,6 +75,14 @@ Bun.spawnSync([
 ])
 const OWNED = storeWith(join(SCRATCH, "owned"), { "release-owners.json": '["qmarsh"]' })
 const DESKTOP = storeWith(join(SCRATCH, "desktop"), { "desktop-owner-apps.json": '["Slack"]' })
+// A data folder whose scope acme syncs with the made-up extension repo quillco/acme-skills.
+const SYNCED = storeWith(
+  join(SCRATCH, "synced"),
+  {},
+  { "ext.repos": { acme: "quillco/acme-skills" } },
+)
+mkdirSync(join(SYNCED, "extensions", "acme"), { recursive: true })
+Bun.spawnSync(["git", "-C", join(SYNCED, "extensions", "acme"), "init", "-q"])
 
 type Run = (raw: string, home: string) => Promise<string | undefined>
 
@@ -79,6 +93,15 @@ const GUARDS: Record<Guard, { folders: Partial<Record<Folder, [string, string]>>
     run: (raw) => desktopOwnerApp(raw, { PLAYGROUND_DATA_DIR: DESKTOP }),
   },
   "no-env-dump": { folders: { checkout: [CHECKOUT, HOME] }, run: (raw) => envDump(raw) },
+  "no-extension-repo-write": {
+    folders: { checkout: [OTHER, HOME] },
+    run: (raw, home) =>
+      extensionRepoWrite(raw, {
+        HOME: home,
+        PLAYGROUND_DATA_DIR: SYNCED,
+        PLAYGROUND_ROLE: "worker",
+      }),
+  },
   "no-extensions-write": {
     folders: {
       "bare home": [PATHS.BARE, PATHS.BARE],
@@ -105,6 +128,10 @@ const GUARDS: Record<Guard, { folders: Partial<Record<Folder, [string, string]>>
       }),
   },
   "no-kill-by-name": { folders: { checkout: [CHECKOUT, HOME] }, run: (raw) => killByName(raw) },
+  "no-main-checkout": {
+    folders: { checkout: [join(PATHS.MAIN, ".claude", "worktrees", "a"), HOME] },
+    run: (raw, home) => mainCheckout(raw, { HOME: home }, PATHS.MAIN),
+  },
   "no-raw-spawn": { folders: { checkout: [CHECKOUT, HOME] }, run: (raw) => rawSpawn(raw) },
   "no-release-comment": {
     folders: { checkout: [OTHER, HOME] },
