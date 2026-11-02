@@ -6389,7 +6389,11 @@ var leak = async (cmd, parsed, env) => {
     first: args[at],
     name: program(args[at].value)
   };
-  return leak(cmd, inner, env);
+  const verdict = await leak(cmd, inner, env);
+  if (!verdict || args[at].value === inner.name)
+    return verdict;
+  const read = `It read a word whose path ends in /${inner.name} as ${inner.name} run by ${name}, a program it does not know: a folder or file passes under a path that does not end in /${inner.name}, and ${inner.name} run by ${name} is read the same when written by its own name, ${inner.name}.`;
+  return verdict.endsWith(NOT_RUN) ? `${verdict.slice(0, -NOT_RUN.length)}${read} ${NOT_RUN}` : `${verdict} ${read}`;
 };
 function changesState(cmd, { args, name }) {
   const words = args.map((a) => a.value);
