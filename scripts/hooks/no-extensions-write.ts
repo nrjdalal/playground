@@ -12,8 +12,6 @@ import {
   type Env,
   examine,
   filled,
-  globAt,
-  globFrom,
   knownVariables,
   lex,
   marked,
@@ -79,8 +77,7 @@ const EXPORTS = new Set(["declare", "export", "local", "readonly", "typeset"])
 // Programs that remove or move what they name, so naming a folder above the root takes the root with it, and the guards fall back to core's smaller lists.
 const REMOVERS = new Set(["find", "mv", "rm", "rmdir", "rsync", "unlink"])
 const DUPLICATE = /^(?:\d+|-)$/
-// Programs that run a script of their own, whose words name paths the hook cannot follow
-const INTERPRETERS = /^(?:bun|deno|node|perl|php|python[\d.]*|ruby)$/
+const GLOB = /[*?[{(]/
 // Variables that make git or a pager run a program, so a reader with one set is judged as any other program.
 const RUNS = /^(?:EDITOR|GIT_[A-Z_]+|LESSOPEN|PAGER|VISUAL)$/
 const CLI = join("packages", "scripts", "src", "playground", "cli.ts")
@@ -219,8 +216,8 @@ const texts = (word: Word): Word[] => {
   const v = word.value
   const out = [word]
   const eq = v.indexOf("=")
-  if (eq > 0) out.push({ ...word, glob: globFrom(word.glob, eq + 1), value: v.slice(eq + 1) })
-  if (/^-[A-Za-z]./.test(v)) out.push({ ...word, glob: globFrom(word.glob, 2), value: v.slice(2) })
+  if (eq > 0) out.push({ ...word, value: v.slice(eq + 1) })
+  if (/^-[A-Za-z]./.test(v)) out.push({ ...word, value: v.slice(2) })
   return out
 }
 
@@ -277,7 +274,7 @@ function inspect(raw: string, environment: Environment) {
   // What a word of a program that is no reader names: a path in the root, a folder above it, a glob there, or the root's path in its text.
   const judged = new Map<string, string | undefined>()
   const names = (word: Word, env: Env, remover: boolean): string | undefined => {
-    const key = `${remover}\0${env.cwd}\0${word.glob}\0${word.value}`
+    const key = `${remover}\0${env.cwd}\0${word.value}`
     if (!judged.has(key)) judged.set(key, judge(word, env, remover))
     return judged.get(key)
   }
@@ -288,9 +285,9 @@ function inspect(raw: string, environment: Environment) {
       const path = pathOf(text, env)
       if (inRoot(path)) return path
       if (above(path, remover)) return `${path}, which holds ${root}`
-      const glob = globAt(text)
-      if (glob !== -1 && !marked(text.value)) {
-        const dir = pathOf({ value: `${text.value.slice(0, glob)}x` }, env)
+      const glob = GLOB.exec(text.value)
+      if (glob && !marked(text.value)) {
+        const dir = pathOf({ value: `${text.value.slice(0, glob.index)}x` }, env)
         const folder = dir && dirname(dir)
         if (folder && (inRoot(folder) || above(folder, true)))
           return `${text.value}, a glob in ${folder}`
@@ -320,7 +317,7 @@ function inspect(raw: string, environment: Environment) {
         ([">", ">>", ">|", "<>"].includes(r.op) ||
           (r.op === ">&" && !DUPLICATE.test(r.target.value))) &&
         (inRoot(pathOf(r.target, env)) ||
-          (globAt(r.target) !== -1 && !!names(r.target, env, true))),
+          (GLOB.test(r.target.value) && !!names(r.target, env, true))),
     )
     if (into?.target) return refuse(`a write to ${pathOf(into.target, env)}`)
     const reader = !!first && reads(parsed, env)
@@ -356,14 +353,11 @@ function inspect(raw: string, environment: Environment) {
     const remover = REMOVERS.has(name)
     const scope = since(varsJudged, env.vars, `${env.cwd}\0${remover}`)
     for (const value of [...parsed.local.values(), ...scope]) {
-      // a variable's value is globbed where it is used unquoted, whatever quoted it where it was set
-      const named = names({ ...value, glob: undefined, quoted: false }, env, remover)
+      const named = names({ ...value, quoted: false }, env, remover)
       if (named) return refuse(`${name} with a variable on ${named}`)
     }
-    // an interpreter's script may expand a glob or build a path at run time, so its quoted glob characters count, as canary counts them
-    const script = INTERPRETERS.test(name)
     for (const word of [first, ...args]) {
-      const named = names(script ? { ...word, glob: undefined } : word, env, remover)
+      const named = names(word, env, remover)
       if (named) return refuse(`${name} on ${named}`)
     }
     if (cmd.redirects.some((r) => r.body && holds(r.body.value, env)))

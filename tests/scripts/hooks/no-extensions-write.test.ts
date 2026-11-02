@@ -544,28 +544,6 @@ describe("a read of the root, and writes elsewhere, run", () => {
     expect(await bash(command)).toBeUndefined()
   })
 
-  test.each(
-    [
-      ["a worktree", WORK],
-      ["the home", HOME],
-    ].flatMap(([where, cwd]) => [
-      [
-        "a sed address from /",
-        where,
-        `grep -n -E "^ {0,2}(if |elif |else$|fi$)" scripts/spawn.sh | sed -n '/^13[2-9][0-9]:\\|^1[45][0-9][0-9]:/p' | cut -c1-160`,
-        cwd,
-      ],
-      [
-        "a gh -q filter with jq interpolations",
-        where,
-        `gh pr view 436 --json state,title,additions,deletions -q '.state+" "+.title+" +\\(.additions)/-\\(.deletions)"'`,
-        cwd,
-      ],
-    ]),
-  )("%s with a quoted glob runs from %s", async (_, _where, command, cwd) => {
-    expect(await bash(command, cwd)).toBeUndefined()
-  })
-
   test("a reader inside the root", async () => {
     expect(await bash("cat policy.json", ROOT)).toBeUndefined()
   })

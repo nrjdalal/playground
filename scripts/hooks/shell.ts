@@ -4,8 +4,7 @@ import { basename, isAbsolute, resolve } from "node:path"
 
 // `variable` names the first shell variable a text expands, so a hook can tell `"$HERDR_BIN_PATH"` from any other unknown program.
 export type Text = { reads?: Text[]; unknown?: string; value: string; variable?: string }
-// `glob` is where the first character the shell expands as a glob stands unquoted in a word the lexer read, -1 when none does; unset on a word built elsewhere, whose whole text is then searched, and on a slice that cut its first glob off, since another may follow.
-export type Word = Text & { glob?: number; procs?: Command[]; quoted: boolean }
+export type Word = Text & { procs?: Command[]; quoted: boolean }
 type Redirect = { body?: Text; fd: string; op: string; target?: Word }
 export type Command = {
   detached?: boolean
@@ -93,16 +92,6 @@ export function filled(script: string, mark: string, value: string): string {
 
 // A text a command writes or reads from stdin, unknown past the size of a file the hook reads, so a text that doubles stops growing.
 const held = (text: Text): Text => (text.value.length > MAX_BYTES ? unknown(LARGE) : text)
-
-// The characters a shell expands as a glob where they stand unquoted.
-const GLOB = /[*?[{(]/
-
-// Where a word's first glob character stands, or -1.
-export const globAt = (word: Word): number => word.glob ?? word.value.search(GLOB)
-
-// A word's glob mark once its first `from` characters are dropped; a glob among them may hide another after, so the rest is searched again.
-export const globFrom = (glob: number | undefined, from: number): number | undefined =>
-  glob === undefined || glob === -1 ? glob : glob >= from ? glob - from : undefined
 
 const BREAK = new Set([" ", "\t", "\n", ";", "&", "|", "<", ">", "(", ")"])
 const REDIRECT = /^(\d*|&)(<<<|<<-|<<|<>|<&|>&!?|>>[!|]?|>[!|]|<|>)/
@@ -261,12 +250,7 @@ const join = (parts: Text[], separator = ""): Text => {
 
 export const slice = (word: Word, from: number): Word => {
   const dropped = word.value.slice(0, from).split(READ).length - 1
-  return {
-    ...word,
-    glob: globFrom(word.glob, from),
-    reads: word.reads?.slice(dropped),
-    value: word.value.slice(from),
-  }
+  return { ...word, reads: word.reads?.slice(dropped), value: word.value.slice(from) }
 }
 
 export const visible = (value: string): string =>
@@ -503,7 +487,6 @@ function word(lx: Lexer): Word {
     const next = src[lx.i + 1] ?? ""
     if (c === "(") {
       const end = balanced(src, lx.i, "(", ")")
-      out.glob ??= out.value.length
       out.value += src.slice(lx.i, end)
       bare += src.slice(lx.i, end)
       inner(lx, src.slice(lx.i + 1, end - 1))
@@ -526,17 +509,12 @@ function word(lx: Lexer): Word {
       out.quoted = true
       merge(out, ansi(lx))
     } else if (c === "$" && next === '"') lx.i++
-    else if (c === "$") {
-      const at = out.value.length
-      merge(out, dollar(lx))
-      const hit = out.value.slice(at).search(GLOB)
-      if (hit !== -1) out.glob ??= at + hit
-    } else if (c === "`") merge(out, backtick(lx))
+    else if (c === "$") merge(out, dollar(lx))
+    else if (c === "`") merge(out, backtick(lx))
     else if (c === "~" && lx.i === start && (next === "" || next === "/" || BREAK.has(next))) {
       out.value += homedir()
       lx.i++
     } else {
-      if (GLOB.test(c)) out.glob ??= out.value.length
       out.value += c
       bare += c
       lx.i++
@@ -544,7 +522,6 @@ function word(lx: Lexer): Word {
   }
   // the lookahead finds the close once, so a { with no } costs its length rather than its square
   if (/\{(?=[^{}]*\})[^{}]*(?:,|\.\.)/.test(bare)) out.unknown ??= "a brace expansion"
-  out.glob ??= -1
   return out
 }
 

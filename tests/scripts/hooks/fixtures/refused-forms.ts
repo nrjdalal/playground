@@ -687,6 +687,30 @@ gh api graphql -f query="$QUERY"`,
         "node -e writing into the root by a built name",
         `node -e 'require("fs").writeFileSync(".playground/ext"+"ensions/policy.json","x")'`,
       ],
+      [
+        "perl by a versioned name unlinking a glob of the root",
+        `perl5.34 -e 'unlink glob ".p*/extensions/*"'`,
+      ],
+      [
+        "nodejs -e removing the root by a built name",
+        `nodejs -e 'require("fs").rmSync(".playground/ext"+"ensions",{recursive:true})'`,
+      ],
+      [
+        "npx node -e removing the root by a built name",
+        `npx node -e 'require("fs").rmSync(".playground/ext"+"ensions",{recursive:true})'`,
+      ],
+      [
+        "bunx node -e removing the root by a built name",
+        `bunx node -e 'require("fs").rmSync(".playground/ext"+"ensions",{recursive:true})'`,
+      ],
+      [
+        "tsx -e removing the root by a built name",
+        `tsx -e 'require("fs").rmSync(".playground/ext"+"ensions",{recursive:true})'`,
+      ],
+      [
+        "awk's system() removing a glob of the data folder",
+        `awk 'BEGIN{system("rm\\t-rf\\t.p*")}'`,
+      ],
     ],
     source: "#402",
   },
