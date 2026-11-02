@@ -376,10 +376,15 @@ export function restoreSummary(output: string): string | null {
   const parts = [
     [count("restored "), "restored"],
     [count("skipped "), "already running"],
-    ...[...gates].map(
-      ([gate, n]) =>
-        [n, gate === "load" ? "waiting for load to drop" : `waiting on the ${gate} gate`] as const,
-    ),
+    ...[...gates]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(
+        ([gate, n]) =>
+          [
+            n,
+            gate === "load" ? "waiting for load to drop" : `waiting on the ${gate} gate`,
+          ] as const,
+      ),
     [missed.length - waiting, "not restored"],
   ] as const
   const shown = parts.filter(([n]) => n > 0).map(([n, what]) => `${n} ${what}`)
@@ -387,8 +392,9 @@ export function restoreSummary(output: string): string | null {
   return `${shown.join(" · ")}${waiting > 0 ? " (the waiting ones come back on their own)" : ""}`
 }
 
-// What restore prints for one server: its summary and the file that holds each session's line, or a refusal before any session as it came.
-export function restoreLines(session: string, output: string, log: string): string[] {
+// What restore prints for one server that passed: its summary and the file that holds each session's line, or its lines as they came; nothing for one that failed, whose problem (restoreProblem) the cycle names once.
+export function restoreLines(session: string, code: number, output: string, log: string): string[] {
+  if (code !== 0) return []
   const summary = restoreSummary(output)
   if (summary) return [`restore ${session}: ${summary}; each session's line: ${log}`]
   return output
@@ -397,11 +403,12 @@ export function restoreLines(session: string, output: string, log: string): stri
     .map((line) => `restore ${session}: ${line}`)
 }
 
-// spawn.sh restore exits 1 when any session was not restored, so the beat names its counts, else its last line.
-export function restoreProblem(code: number, output: string): string | null {
+// spawn.sh restore exits 1 when any session was not restored, so the beat names its counts and the file that holds each session's line, else its last line.
+export function restoreProblem(code: number, output: string, log: string): string | null {
   if (code === 0) return null
-  const lines = output.split("\n").filter(Boolean)
-  return `restore: ${restoreSummary(output) ?? lines.at(-1) ?? `exited ${code}`}`
+  const summary = restoreSummary(output)
+  if (summary) return `restore: ${summary}; each session's line: ${log}`
+  return `restore: ${output.split("\n").filter(Boolean).at(-1) ?? `exited ${code}`}`
 }
 
 // The heartbeat api/hono/src/lib/dashboard/ops.ts reads.
