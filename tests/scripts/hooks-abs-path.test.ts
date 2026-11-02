@@ -75,17 +75,19 @@ describe("the two settings files carry one command per factory hook", () => {
       }
   })
 
-  // A PreToolUse guard runs its bundle, which imports nothing at run time, so a missing or damaged node_modules cannot crash it; every other hook runs its source.
-  test("every PreToolUse wrapper runs its guard's bundle, and every other its source", async () => {
+  // A PreToolUse guard runs its bundle, which imports nothing at run time, so a missing or damaged node_modules cannot crash it, and its source while the checkout holds no bundle (a main checkout not yet shipped one); every other hook runs its source.
+  test("every PreToolUse wrapper runs its guard's bundle, else its source, and every other its source", async () => {
     for (const file of [FACTORY, PROJECT])
       for (const { command, event } of await entries(file)) {
-        const paths = [...command.matchAll(/scripts\/hooks\/[\w/-]+\.[jt]s/g)].map((m) => m[0])
-        for (const path of paths)
-          expect(path).toMatch(
-            event === "PreToolUse"
-              ? /^scripts\/hooks\/bundled\/[\w-]+\.js$/
-              : /^scripts\/hooks\/[\w-]+\.ts$/,
+        const name = command.match(/scripts\/hooks\/(?:bundled\/)?([\w-]+)\.[jt]s/)?.[1]
+        if (event === "PreToolUse") {
+          expect(command).toContain(
+            `{ s=scripts/hooks/bundled/${name}.js; [ -f "$R/$s" ] || s=scripts/hooks/${name}.ts; [ -f "$R/$s" ]; } || {`,
           )
+          expect(command).toContain('cd -P "$R" && bun --no-env-file "$s"; c=$?;')
+        } else
+          for (const [path] of command.matchAll(/scripts\/hooks\/[\w/-]+\.[jt]s/g))
+            expect(path).toMatch(/^scripts\/hooks\/[\w-]+\.ts$/)
       }
   })
 
@@ -98,10 +100,11 @@ describe("the two settings files carry one command per factory hook", () => {
       hooks: { PreToolUse: Hook[] }
     }
     const [command] = front.hooks.PreToolUse.flatMap((e) => e.hooks.map((h) => h.command))
-    expect(command).toContain('[ -f "$PLAYGROUND_REPO/scripts/hooks/bundled/no-linear-ticket.js" ]')
-    expect(command).toContain('|| { [ -z "$PLAYGROUND_ROLE" ] && exit 0; echo "no-linear-ticket: ')
     expect(command).toContain(
-      'bun --no-env-file scripts/hooks/bundled/no-linear-ticket.js; c=$?; [ $c = 0 ] || [ $c = 2 ] || { echo "no-linear-ticket: crashed (exit $c)',
+      '{ s=scripts/hooks/bundled/no-linear-ticket.js; [ -f "$PLAYGROUND_REPO/$s" ] || s=scripts/hooks/no-linear-ticket.ts; [ -f "$PLAYGROUND_REPO/$s" ]; } || { [ -z "$PLAYGROUND_ROLE" ] && exit 0; echo "no-linear-ticket: ',
+    )
+    expect(command).toContain(
+      'bun --no-env-file "$s"; c=$?; [ $c = 0 ] || [ $c = 2 ] || { echo "no-linear-ticket: crashed (exit $c)',
     )
     expect(command).toEndWith("exit $c")
   })
@@ -114,8 +117,8 @@ describe("the two settings files carry one command per factory hook", () => {
     ]) {
       const paths = [...command.matchAll(/scripts\/hooks\/(?:bundled\/)?([\w-]+)\.[jt]s/g)]
       expect(paths).toHaveLength(2)
-      expect(paths[1]![0]).toBe(paths[0]![0])
-      expect(existsSync(join(root, paths[0]![0]))).toBe(true)
+      expect(paths[1]![1]).toBe(paths[0]![1])
+      for (const [path] of paths) expect(existsSync(join(root, path))).toBe(true)
       expect(existsSync(join(root, "scripts", "hooks", `${paths[0]![1]}.ts`))).toBe(true)
     }
   })
@@ -151,6 +154,14 @@ describe("the command finds the checkout", () => {
   const crashing = withHook(join(scratch, "crashing"), "process.exit(1)\n")
   withHook(crashing, "process.exit(1)\n", join("scripts", "hooks", "no-chat-question.ts"))
   const refusing = withHook(join(scratch, "refusing"), "process.exit(2)\n")
+  // A checkout with the guard's source and no bundle, as the main checkout is until a ship brings the bundles, and one with both.
+  const sourceOnly = withHook(
+    join(scratch, "source-only"),
+    'console.log("source")\n',
+    join("scripts", "hooks", "no-stash.ts"),
+  )
+  const both = withHook(join(scratch, "both"), 'console.log("bundle")\n')
+  withHook(both, 'console.log("source")\n', join("scripts", "hooks", "no-stash.ts"))
 
   const command = async (file: string, hook: string) => {
     const found = (await entries(file)).find(
@@ -253,6 +264,20 @@ describe("the command finds the checkout", () => {
         "no-chat-question",
       )
       expect(code).toBe(1)
+    })
+
+    test(`${file}, ${shell}: a PreToolUse guard runs its bundle when the checkout holds one, else its source`, async () => {
+      for (const [repo, stdout] of [
+        [sourceOnly, "source"],
+        [both, "bundle"],
+      ] as const)
+        expect(
+          await run(file, shell, outside, {
+            CLAUDE_PROJECT_DIR: outside,
+            PLAYGROUND_REPO: repo,
+            PLAYGROUND_ROLE: "worker",
+          }),
+        ).toEqual({ code: 0, stderr: "", stdout })
     })
 
     test(`${file}, ${shell}: under PLAYGROUND_ROLE a missing script or an unresolved checkout refuses, naming the restore route`, async () => {
