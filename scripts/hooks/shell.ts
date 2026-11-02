@@ -1178,15 +1178,15 @@ async function chdirTo(name: string, cmd: Command, parsed: Parsed, env: Env): Pr
   const target = name === "popd" ? undefined : cdTargets(name, cmd, parsed, env, from)
   if (!target) {
     env.cwd = undefined
-    env.cwdMaybe = back
+    env.cwdMaybe = keep(back, env)
     env.cwdUnread = true
-    env.cwdBack = back
+    env.cwdBack = env.cwdMaybe
     return
   }
   const { paths, unread } = target
-  env.cwdBack = [...new Set([...back, ...paths])]
+  env.cwdBack = keep([...new Set([...back, ...paths])], env)
   if (cmd.held) {
-    env.cwdHeld = [...new Set([...(env.cwdHeld ?? []), ...paths])]
+    env.cwdHeld = keep([...new Set([...(env.cwdHeld ?? []), ...paths])], env)
     env.cwdUnread ||= unread
     return
   }
@@ -1197,8 +1197,17 @@ async function chdirTo(name: string, cmd: Command, parsed: Parsed, env: Env): Pr
     return
   }
   env.cwd = undefined
-  env.cwdMaybe = [...new Set([...from, ...paths])]
+  env.cwdMaybe = keep([...new Set([...from, ...paths])], env)
   env.cwdUnread = env.cwdUnread || unread || (from.length === 0 && paths.length === 0)
+}
+
+// At most this many folders are carried for one line, since each hook judges every command in all of them; a line that names more reads as one whose folder nothing names, by each hook's own fail-closed rule.
+const MAX_FOLDERS = 32
+
+function keep(folders: string[], env: Env): string[] {
+  if (folders.length <= MAX_FOLDERS) return folders
+  env.cwdUnread = true
+  return folders.slice(0, MAX_FOLDERS)
 }
 
 async function isFolder(path: string): Promise<boolean> {
