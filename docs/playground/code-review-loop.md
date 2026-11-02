@@ -86,6 +86,7 @@ Its waiter for the next push polls GitHub's REST API, so a reviewer waiting all 
 - A PR body with no `test:skills` result in it is a nit, since GitHub Actions runs the suite at the head.
 - When the ticket carries samples, the verdict holds a samples table, and a sample left unhandled holds the score down.
 - When the diff holds a long-lived connection (a socket, a pub/sub subscriber, a retrying client), the PR's Evidence holds a lifecycle table, one row per path from connect to close, and a missing table holds the score at 3.
+- When the diff loosens a guard, the PR's Evidence holds a `canary | head` table of refusal rows from round 1 for each refused-forms row it adds or allows and each bypass the review finds that canary refuses, with the refused-forms test's pass count for the rest, and a row canary refuses that runs at the head, unless the fixture's allow list names it, holds the score at 3.
 - A PR that changes a skill, an agent guide or a docs page has its writing judged against writing-for-agents in the verdict, beside the code.
 - A FAIL a lead overruled on the PR (`Lead ruling:`) no longer counts against the score, once the issue the ruling names exists.
 - The recovery scan lists no unscored PR held by a worker without a live reviewer, and no PR as lost: every open PR is held by an agent (its roster row, or a live worker `plan.json` gives it), parked by a plan (`plan.json` or a plans file), or another author's for the Builder to triage.
