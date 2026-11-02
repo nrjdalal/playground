@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from "node:fs"
+import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -601,6 +601,41 @@ test("the pre-commit main-checkout step refuses a commit in the factory's main c
     expect(await hook(clone)).toMatchObject({ code: 0 })
     expect(await hook(factory, false)).toMatchObject({ code: 0 })
   } finally {
+    rmSync(dir, { force: true, recursive: true })
+  }
+}, 60_000)
+
+// the install's prepare script in a scratch repo whose hooks folder it may not write, as Claude Code's sandbox refuses .git/hooks: hooks that match pass with no write, and stale ones still fail loudly
+test("the install's prepare writes no hook while the installed ones match", async () => {
+  const pkg = (await Bun.file(join(ROOT, "package.json")).json()) as {
+    scripts: { prepare: string }
+  }
+  const dir = mkdtempSync(join(tmpdir(), "lefthook-prepare-"))
+  const hooks = join(dir, ".git/hooks")
+  const prepare = () => {
+    const result = Bun.spawnSync(["sh", "-c", pkg.scripts.prepare], {
+      cwd: dir,
+      env: SCRATCH_ENV,
+      stdin: "ignore",
+    })
+    return { code: result.exitCode, out: result.stdout.toString() + result.stderr.toString() }
+  }
+  try {
+    expect(Bun.spawnSync(["git", "init", "-q"], { cwd: dir, env: SCRATCH_ENV }).exitCode).toBe(0)
+    mkdirSync(join(dir, "node_modules/.bin"), { recursive: true })
+    symlinkSync(join(ROOT, LEFTHOOK_BIN), join(dir, LEFTHOOK_BIN))
+    const config = `lefthook: ${OWN_LEFTHOOK}\npre-commit:\n  commands:\n    mark:\n      run: echo hook-ran\n`
+    await Bun.write(join(dir, "lefthook.yml"), config)
+    expect(prepare()).toMatchObject({ code: 0 })
+    chmodSync(hooks, 0o555)
+    expect(prepare()).toMatchObject({ code: 0 })
+    await Bun.write(
+      join(dir, "lefthook.yml"),
+      `${config}pre-push:\n  commands:\n    mark:\n      run: echo push-ran\n`,
+    )
+    expect(prepare().code).not.toBe(0)
+  } finally {
+    chmodSync(hooks, 0o755)
     rmSync(dir, { force: true, recursive: true })
   }
 }, 60_000)

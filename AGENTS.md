@@ -7,7 +7,7 @@ Start each task with the `codebase-map` skill to orient, then load the task skil
 ## Workflow
 
 - ALWAYS: Do every change in its own git worktree, never on the primary checked-out branch.
-  Create it under `.claude/worktrees/` (repo-root relative, one directory per worktree; never `/tmp`, home, or a sibling of the repo), and fork its branch from the latest `canary`: fetch first, then branch from `origin/canary` (`git fetch origin canary && git worktree add .claude/worktrees/<name> -b <branch> origin/canary`, then `bun install` in it, which its git hooks need,
+  Create it under `.claude/worktrees/` (repo-root relative, one directory per worktree; never `/tmp`, home, or a sibling of the repo), and fork its branch from the latest `canary`: fetch first, then branch from `origin/canary` (`git fetch origin canary && git worktree add --no-track .claude/worktrees/<name> -b <branch> origin/canary`, then `bun install` in it, which its git hooks need,
   through `~/.playground/ops/run-slot.sh <your name> --` in a factory session), so the change builds on current main, and set up its `.env`, or none, by the `dev` skill's Start.
 - ALWAYS: Settle a new or altered database schema before generating or applying a migration: work goes ahead on its own, but a breaking change goes through the owner first.
   Show the shape and name the choices that are costly to reverse; a shape is cheap to argue about and expensive to change once rows exist, and the live dashboard's database already holds real ones.
