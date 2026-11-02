@@ -49,7 +49,7 @@ Keep one case on the real watcher, appending again until a change lands inside a
 No end-to-end suite exists: `bun run test:e2e` matches no file.
 
 The new-user gate is the one end-to-end run: `bun run gate:new-user <sha>` (`packages/scripts/src/new-user-gate/`) installs that sha the way `curl | bash` does, in a scratch HOME inside its box, with stand-ins for claude, gh, cmux, brew, security and sudo (`stubs.ts`), its own portless proxy on port 14155, and a pglaunch stand-in that publishes its container on loopback alone.
-The box is `makeBox`'s scratch folder `/tmp/pg-gate-<sha7>-<random>`, made in another folder with `--box <dir>`.
+The box is `makeBox`'s scratch folder `/tmp/pg-gate-<sha7>-<random>`, made in another parent folder with `--box <parent dir>`.
 Before the install it checks that the box's zsh, plain and login, finds every stand-in in the box's stubs folder, and stops with exit 2 naming each one it finds elsewhere, so no job the box starts reaches a real binary.
 Its claude runs a scripted session (`claude.ts`) for each launch spawn.sh makes: the dispatcher hands the typed task to the builder, the builder to a worker, and the worker runs `gh pr create`, calling no model.
 The ops-usage job reads made-up usage windows from the box (`PLAYGROUND_USAGE_API`), so Usage shows a reading on a made-up login, once the installed sha's `scripts/ops/usage/run.py` reads that variable.

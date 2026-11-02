@@ -160,9 +160,11 @@ describe("it fails closed when it cannot read the machine", () => {
   }
   test.each([
     ["a session registry it cannot list", { NO_REGISTRY: "1" }],
-    ["ps cannot be read", { FAKE_PS_BROKEN: "1" }],
-    ["the load cannot be read", { FAKE_SYSCTL_BROKEN: "1" }],
-  ])("%s", async (_name, env) => {
+    ...(process.platform === "darwin"
+      ? []
+      : [["neither ps nor a kernel process table off macOS can be read", { FAKE_PS_BROKEN: "1" }]]),
+    ["the load cannot be read", { FAKE_SYSCTL_BROKEN: "1", FAKE_UPTIME_BROKEN: "1" }],
+  ] as [string, Record<string, string>][])("%s", async (_name, env) => {
     const setup = "NO_REGISTRY" in env ? unlistable : undefined
     const r = await spawn(
       ["worker", "worker-brave-otter", "b.md"],
