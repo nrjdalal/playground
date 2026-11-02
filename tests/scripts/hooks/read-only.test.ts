@@ -79,12 +79,17 @@ describe("a call outside the read shapes", () => {
     "git diff ''*",
     "cat =(gh issue create -t a -b b)",
     'cat .git/HEAD(e:"gh issue create":)',
+    "git log -1 --format=%H $=PWD",
+    "git log $~HOME",
+    "git log $^HOME",
+    "git log $+HOME",
   ])("%s does not read only", (command) => {
     expect(readOnly(bash(command))).toBe(false)
   })
 
   test("a GitHub MCP write, and a call that does not parse", () => {
     expect(readOnly(mcp("mcp__github-shared__add_issue_comment"))).toBe(false)
+    expect(readOnly(mcp("mcp__notion-shared__get_page"))).toBe(false)
     expect(readOnly("not json")).toBe(false)
   })
 })
