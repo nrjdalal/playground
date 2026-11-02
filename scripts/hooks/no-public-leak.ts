@@ -73,7 +73,7 @@ export async function check(
   if (loaded.refusal)
     return refusedList(
       raw,
-      `${loaded.refusal} Its <file> is a JSON object with an array of strings under each of ${LIST_KEYS.join(", ")}.`,
+      `${loaded.refusal} The list is a JSON object with an array of strings under each of ${LIST_KEYS.join(", ")}.`,
     )
   const read = await readPolicy(dataDir(environment))
   if (read.refusal !== undefined)

@@ -40,8 +40,7 @@ Only the first reading moves the folder, sets variables and records files for th
   With no extensions, the list is core's file; with no file either, the guard takes its empty default.
   A list file that is there but empty, malformed or missing a key refuses the guarded call, extensions or not; an explicit empty list (`[]`, or every key empty) is the owner's choice and loads.
   A broken list refuses only the calls its guard checks, so every other call runs.
-  The leak guards and no-extension-repo-write give a list's or `policy.json`'s refusal to a call that names `curl`, `gh`, `git`, GitHub, Linear or Slack, unless it only reads (`scripts/hooks/read-only.ts`):
-  a GitHub, Linear or Slack MCP read tool, or a Bash line whose every command is a git read subcommand, a `gh` read verb, `gh api` with GET or HEAD, or a reader from its closed list (`cat`, `grep`, `head` and the like), with no pager, editor, `GIT_` or `GH_` variable and no `-c`, so a read over a `.git` path runs too.
+  The leak guards and no-extension-repo-write give a list's or `policy.json`'s refusal to a call that names `curl`, `gh`, `git`, GitHub, Linear or Slack, unless it only reads, as `scripts/hooks/read-only.ts` judges it: one of a closed set of exact read shapes, each with its own option list, so a read over a `.git` path runs too.
   `GUARD_LISTS` in `packages/settings/src/rendered.ts` names every guard's list, and a root that lacks one refuses its guard, so a new guard list goes there and into core's `lists/`.
   A shell or Python script reads the set through `bun packages/scripts/src/playground/rendered.ts <file>`: exit 0 prints the path, 2 is extensions that lack the file, 3 is no extensions.
   A shell script that judges by a list of words reads it whole through `bun packages/scripts/src/playground/guard-list.ts <guard> <list>`, which takes `guardList`'s fallbacks and prints the words as JSON, or exits 2 with its refusal, as spawn.sh does for `glm-refused-sources`.
