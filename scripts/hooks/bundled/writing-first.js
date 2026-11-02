@@ -53,6 +53,9 @@ import { homedir } from "os";
 import { join, resolve } from "path";
 var dataDirOf = (env, home = env.HOME || homedir()) => env.PLAYGROUND_DATA_DIR ? resolve(env.PLAYGROUND_DATA_DIR) : join(home, ".playground");
 
+// packages/safe-delete/src/index.ts
+var LIMITS = { bytes: 2 * 1024 ** 3, files: 5000, perMinute: 3 };
+
 // packages/scripts/src/vendor-upstream/stage.ts
 var UPSTREAM_SKILLS = [
   "code-review",

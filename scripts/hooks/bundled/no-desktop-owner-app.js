@@ -1,6 +1,10 @@
 // @bun
 const __HOOK_DIR = import.meta.dir.slice(0, import.meta.dir.lastIndexOf("/"));
 
+// scripts/hooks/no-desktop-owner-app.ts
+import { realpathSync } from "fs";
+import { join as join5, resolve as resolve3 } from "path";
+
 // packages/env/src/aliases.ts
 var DESK_ENV = new Set([
   "APPROVALS_ENABLED",
@@ -43,34 +47,52 @@ var applyEnvAliases = (env = process.env) => {
 };
 applyEnvAliases();
 
+// packages/scripts/src/main-checkout.ts
+import { existsSync } from "fs";
+import { dirname, join } from "path";
+var mainCheckout = (from = join(__HOOK_DIR, "..", "..", "..")) => {
+  if (process.env.PLAYGROUND_REPO)
+    return process.env.PLAYGROUND_REPO;
+  const git = Bun.spawnSync([
+    "git",
+    "-C",
+    from,
+    "rev-parse",
+    "--path-format=absolute",
+    "--git-common-dir"
+  ]);
+  const root = git.exitCode === 0 ? dirname(git.stdout.toString().trim()) : from;
+  return existsSync(join(root, "scripts", "spawn.sh")) ? root : join(dirname(from), "playground");
+};
+
 // scripts/hooks/lists.ts
-import { existsSync as existsSync2 } from "fs";
+import { existsSync as existsSync3 } from "fs";
 
 // packages/env/src/data-dir.ts
 import { homedir } from "os";
-import { join, resolve } from "path";
-var dataDirOf = (env, home = env.HOME || homedir()) => env.PLAYGROUND_DATA_DIR ? resolve(env.PLAYGROUND_DATA_DIR) : join(home, ".playground");
+import { join as join2, resolve } from "path";
+var dataDirOf = (env, home = env.HOME || homedir()) => env.PLAYGROUND_DATA_DIR ? resolve(env.PLAYGROUND_DATA_DIR) : join2(home, ".playground");
 var dataDir = (env = process.env) => dataDirOf(env);
 
 // packages/settings/src/rendered.ts
-import { existsSync, readFileSync } from "fs";
-import { join as join2 } from "path";
+import { existsSync as existsSync2, readFileSync } from "fs";
+import { join as join3 } from "path";
 import { fileURLToPath } from "url";
 var CORE = "core";
 var coreDir = () => fileURLToPath(new URL("../../../extensions/core", import.meta.url));
-var extensionsDir = (data) => join2(data, "extensions");
+var extensionsDir = (data) => join3(data, "extensions");
 var markerPath = extensionsDir;
 var fixFor = (file) => file.startsWith("hooks/") ? "tell your lead, and the dispatcher hands the owner ! playground ext import --from-tree extensions/core/lists to type in the dispatcher's terminal window, which seeds the guards' lists" : "tell your lead, and the dispatcher hands the owner ! playground ext init, then a setting with ! playground settings set, to type in the dispatcher's terminal window, which writes it";
 var readRendered = async (data, file) => readRenderedSync(data, file);
 var readRenderedSync = (data, file) => {
   const dir = extensionsDir(data);
-  if (!existsSync(dir))
+  if (!existsSync2(dir))
     return {};
   const parts = file.split("/");
   if (parts.some((part) => part === "" || part === "." || part === ".."))
     return { refusal: `${file} is not a path inside the extensions (${dir})` };
-  const path = parts[0] === CORE ? join2(coreDir(), ...parts.slice(1)) : join2(dir, file);
-  return existsSync(path) ? { path } : { refusal: `the extensions root (${dir}) holds no ${file}: ${fixFor(file)}` };
+  const path = parts[0] === CORE ? join3(coreDir(), ...parts.slice(1)) : join3(dir, file);
+  return existsSync2(path) ? { path } : { refusal: `the extensions root (${dir}) holds no ${file}: ${fixFor(file)}` };
 };
 
 // scripts/hooks/lists.ts
@@ -86,8 +108,8 @@ async function loadList(guard, path, valid, empty, environment = process.env) {
   const refuse = (what) => ({
     refusal: `${guard} hook refused this call: its list ${path} ${what}, so it cannot check the call. Restore the file (git checkout -- it, in the checkout that holds it) or fix it, then run the call again.`
   });
-  if (!existsSync2(path))
-    return existsSync2(storeMarker(environment)) ? refuse(`is missing on a machine with a store (${storeMarker(environment)})`) : { list: empty };
+  if (!existsSync3(path))
+    return existsSync3(storeMarker(environment)) ? refuse(`is missing on a machine with a store (${storeMarker(environment)})`) : { list: empty };
   let value;
   try {
     value = JSON.parse(await Bun.file(path).text());
@@ -308,7 +330,7 @@ var merge = (out, part) => {
   if (part.reads?.length)
     (out.reads ??= []).push(...part.reads);
 };
-var join3 = (parts, separator = "") => {
+var join4 = (parts, separator = "") => {
   const out = { value: "" };
   parts.forEach((part, k) => {
     if (k > 0)
@@ -947,7 +969,7 @@ async function scriptOf(operand, cmd, env) {
   return script;
 }
 async function outputs(cmds, env) {
-  return join3(await Promise.all(cmds.map((c) => outputOf(c, env))));
+  return join4(await Promise.all(cmds.map((c) => outputOf(c, env))));
 }
 async function record(cmd, name, args, env) {
   for (const r of cmd.redirects) {
@@ -958,7 +980,7 @@ async function record(cmd, name, args, env) {
       continue;
     const stdout = r.fd === "" || r.fd === "1" || r.fd === "&";
     const out = stdout ? await outputOf(cmd, env) : unknown(`what ${name || "a command"} writes to stderr`);
-    env.files.set(path, held(r.op === ">>" ? join3([await existing(path, env), out]) : out));
+    env.files.set(path, held(r.op === ">>" ? join4([await existing(path, env), out]) : out));
   }
   if (name !== "tee")
     return;
@@ -967,7 +989,7 @@ async function record(cmd, name, args, env) {
   for (const a of args) {
     const path = a.value.startsWith("-") ? undefined : pathOf(a, env);
     if (path)
-      env.files.set(path, held(append ? join3([await existing(path, env), input]) : input));
+      env.files.set(path, held(append ? join4([await existing(path, env), input]) : input));
   }
 }
 async function existing(path, env) {
@@ -996,7 +1018,7 @@ async function outputOf(cmd, env) {
         return unknown(LARGE);
       parts.push(part);
     }
-    return join3(parts);
+    return join4(parts);
   }
   if (name === "tee")
     return stdinOf(cmd, env);
@@ -1118,6 +1140,35 @@ var LAUNCHERS = new Set([
   "watch",
   "yarn"
 ]);
+var BUN_DATA_SCRIPTS = new Map([
+  ["ask", "api/hono/src/bin/dashboard-ask.ts"],
+  ["thread", "api/hono/src/bin/dashboard-thread.ts"]
+]);
+var realOf = (path) => {
+  try {
+    return realpathSync(path);
+  } catch {
+    return resolve3(path);
+  }
+};
+async function mapsDataScript(cwd, script) {
+  const entry = BUN_DATA_SCRIPTS.get(script);
+  if (entry === undefined || cwd === undefined)
+    return false;
+  if (realOf(cwd) !== realOf(mainCheckout()))
+    return false;
+  const pkg = Bun.file(join5(cwd, "package.json"));
+  if (!await pkg.exists())
+    return false;
+  try {
+    const { scripts } = JSON.parse(await pkg.text());
+    if (scripts?.[script] !== `bun ${entry}`)
+      return false;
+  } catch {
+    return false;
+  }
+  return await Bun.file(join5(cwd, entry)).exists();
+}
 var LINES = new Set(["flock", "setsid", "watch"]);
 var WATCH_TAKES = new Set(["--equexit", "--interval", "--shotsdir", "-n", "-q", "-s"]);
 var INTERPRETERS = new Set([
@@ -1338,6 +1389,8 @@ async function judgeText(text, cwd, apps, depth) {
     }
     if (first && unreadable(first))
       return unread(`the program it runs (it comes from ${first.unknown ?? "a word it cannot read"})`);
+    if (name === "bun" && args[0]?.value === "run" && args[1] !== undefined && !unreadable(args[1]) && args.slice(2).every((a) => !unreadable(a)) && await mapsDataScript(here.cwd, args[1].value))
+      return;
     if (INTERPRETERS.has(name)) {
       for (const a of args)
         if (await callsTool(a.value))

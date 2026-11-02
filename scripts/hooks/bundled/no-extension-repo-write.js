@@ -63,9 +63,13 @@ import {
   rmdirSync,
   rmSync,
   statSync,
+  utimesSync,
   writeFileSync
 } from "fs";
-import { dirname, join as join3, relative } from "path";
+import { basename, dirname, join as join3, relative } from "path";
+
+// packages/safe-delete/src/index.ts
+var LIMITS = { bytes: 2 * 1024 ** 3, files: 5000, perMinute: 3 };
 
 // packages/settings/src/rendered.ts
 import { existsSync, readFileSync } from "fs";
@@ -163,7 +167,7 @@ function remotes(cwd) {
 
 // scripts/hooks/no-playground-leak.ts
 import { existsSync as existsSync3, readdirSync as readdirSync2, readFileSync as readFileSync3, statSync as statSync2 } from "fs";
-import { basename as basename2, join as join6 } from "path";
+import { basename as basename3, join as join6 } from "path";
 
 // node_modules/.bun/zod@4.6.7/node_modules/zod/v4/core/util.js
 function joinValues(array, separator = "|") {
@@ -4898,7 +4902,7 @@ function sessionOf(raw) {
 
 // scripts/hooks/shell.ts
 import { homedir as homedir3 } from "os";
-import { basename, isAbsolute, resolve as resolve2 } from "path";
+import { basename as basename2, isAbsolute, resolve as resolve2 } from "path";
 var UNKNOWN = "\x00";
 var READ = "\x01";
 var NOT_RUN = "The refusal stopped this whole Bash call, so none of its commands ran: once it is fixed, run again each one you still need.";
@@ -5135,7 +5139,7 @@ var slice = (word, from) => {
 };
 var visible = (value) => value.replaceAll(UNKNOWN, " ").replaceAll(READ, " ");
 var marked = (value) => value.includes(UNKNOWN) || value.includes(READ);
-var program = (value) => basename(value.replace(/^=/, ""));
+var program = (value) => basename2(value.replace(/^=/, ""));
 var UV_TAKES = new Set([
   "--cache-dir",
   "--config-file",
@@ -6526,7 +6530,7 @@ function created(key, rest, env, xargs) {
   }
   const source = flag("-s", "--source")?.value;
   const path = source && read(source) !== undefined ? pathOf(source, env) : undefined;
-  return destination(what, "*", path && basename2(path));
+  return destination(what, "*", path && basename3(path));
 }
 function repoWrite(key, rest, repos, env, local, xargs, takes) {
   const { flags, positionals } = parseFlags(rest, new Set([...takes, "-R", "--repo"]));

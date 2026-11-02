@@ -6005,6 +6005,9 @@ var extSettings = defineSettings({
     schema: record(extScopeSchema, string2().regex(/^[A-Za-z0-9-]+\/[A-Za-z0-9._-]+$/, "a repository as owner/name"))
   }
 });
+// packages/safe-delete/src/index.ts
+var LIMITS = { bytes: 2 * 1024 ** 3, files: 5000, perMinute: 3 };
+
 // packages/settings/src/folder.ts
 var STALE_MS = 5 * 60000;
 
