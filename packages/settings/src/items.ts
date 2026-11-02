@@ -165,12 +165,9 @@ export const putItem = (
   return { ok: true, rev: sha, state }
 }
 
-export type Verdict =
-  | { kind: "accept" }
-  | { kind: "reject" }
-  | { kind: "score"; reviewer: string; score: number }
+export type Verdict = { kind: "accept" } | { kind: "reject" } | { kind: "score"; score: number }
 
-// A proposal judged: a score below 5 is recorded as an empty commit, a 5 or the owner's accept moves it out of proposed/ over the accepted copy, and a reject removes it. Each refuses unless the proposal is still the revision named, so a judge never decides a proposal written after it read.
+// A proposal judged: a score below 5 is recorded as an empty commit, a 5 or the owner's accept moves it out of proposed/ over the accepted copy, and a reject removes it. Each refuses unless the proposal is still the revision named, so a judge never decides a proposal written after it read, and a score is its author's, refused from the proposal's own author.
 export const judgeItem = (
   data: string,
   ref: Ref,
@@ -196,6 +193,15 @@ export const judgeItem = (
       ok: false,
       status: 409,
     }
+  if (verdict.kind === "score") {
+    const writer = extGit(dir, ["log", "-1", "--format=%an", head]).out
+    if (who.author === writer)
+      return {
+        message: `${writer} wrote this proposal, so another session scores it`,
+        ok: false,
+        status: 400,
+      }
+  }
   const accepts = verdict.kind === "accept" || (verdict.kind === "score" && verdict.score === 5)
   const state = accepts ? "accepted" : verdict.kind === "reject" ? "rejected" : "proposed"
   const extra: [string, string][] = [
@@ -203,7 +209,7 @@ export const judgeItem = (
     ...(verdict.kind === "score"
       ? ([
           ["Score", String(verdict.score)],
-          ["Reviewer", verdict.reviewer],
+          ["Reviewer", who.author],
         ] as [string, string][])
       : []),
     ["State", state],
