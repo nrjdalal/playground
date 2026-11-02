@@ -58,6 +58,9 @@ describe("a delete the hook lets run", () => {
     '[ -n "$R" ] && [ -f $R/x ] && echo ok',
     "$T git clone -q $S/mirror.git $S/home",
     "$R/scripts/spawn.sh column reviewer $W",
+    "gh pr checks $N -R nrjdalal/playground",
+    "fd . src --exec=echo",
+    "npx -y @scope/tool@1 build",
   ])("%s", async (command) => {
     expect(await check(input(command))).toBeUndefined()
   })

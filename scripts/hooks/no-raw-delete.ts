@@ -81,6 +81,12 @@ const RUNS: Record<string, Set<string>> = {
 // at and batch read the script they queue from stdin or -f.
 const QUEUES = new Set(["at", "batch"])
 
+// A package runner's name with its version dropped (`rimraf@5`), a scope's leading @ kept.
+const unversioned = (name: string) => name.replace(/(?<=.)@[^@/]*$/, "")
+
+// fd's exec option with its value attached (`--exec=rm`, `-x=rm`, `-xrm`).
+const ATTACHED = /^(?:--exec(?:-batch)?=|-[xX]=?)(.+)$/s
+
 // rm's recursive option: -r or -R in a cluster, or --recursive by any prefix GNU rm takes (`--rec`).
 const recursive = (v: string): boolean =>
   v.startsWith("--") ? v.length >= 3 && "--recursive".startsWith(v) : /^-[A-Za-z]*[rR]/.test(v)
@@ -215,7 +221,13 @@ async function inspect(raw: string, environment: Record<string, string | undefin
       // a judged program named among another's words runs as that program, behind any runner
       if (!READERS.has(name) && !JUDGED.has(name))
         for (const [k, a] of args.entries()) {
-          if (!JUDGED.has(program(a.value)) || hidden(a)) continue
+          // a word it cannot read in a program's place, given -r, may be rm; a data program's words stay its own (`gh pr checks $N -R <repo>`)
+          if (hidden(a)) {
+            if (!isData(name) && args.slice(k).some((w) => spellsRecursive(w.value)))
+              return refuse(`a program the hook cannot read (${shown(a)}) given -r`, "it may be rm")
+            continue
+          }
+          if (!JUDGED.has(unversioned(program(a.value)))) continue
           const found = await examine(
             { ...cmd, words: args.slice(k) },
             at,
@@ -243,7 +255,8 @@ async function inspect(raw: string, environment: Record<string, string | undefin
     at: Env,
     reach: Reach,
   ): Promise<string | undefined> => {
-    const { args, first, name, xargs } = parsed
+    const { args, first, xargs } = parsed
+    const name = unversioned(parsed.name)
     // a program word the hook cannot read (a variable, a brace, a glob) given -r, or led by a word it cannot read either (`$RM $FLAGS`), may be a recursive rm; a readable word ends the lead (`$T git clone $S/x`)
     const end = args.findIndex((a) => !a.value.startsWith("-") && !hidden(a))
     const lead = end < 0 ? args : args.slice(0, end)
@@ -270,11 +283,18 @@ async function inspect(raw: string, environment: Record<string, string | undefin
     if (runs) {
       if (args.some((a) => a.value === "-delete")) return refuse(`${name} -delete`)
       for (const [k, a] of args.entries()) {
-        if (!runs.has(a.value)) continue
+        const value = name === "fd" ? ATTACHED.exec(a.value)?.[1] : undefined
+        if (!runs.has(a.value) && value === undefined) continue
         const end = args.findIndex((w, j) => j > k && (w.value === ";" || w.value === "+"))
-        const words = args.slice(k + 1, end === -1 ? undefined : end)
+        const words = [
+          ...(value === undefined ? [] : [{ ...a, value }]),
+          ...args.slice(k + 1, end === -1 ? undefined : end),
+        ]
         if (RM.has(parse({ ...cmd, words }).name))
-          return refuse(`${name} ${a.value} rm`, `it deletes every path ${name} reaches`)
+          return refuse(
+            value === undefined ? `${name} ${a.value} rm` : `${name} ${a.value}`,
+            `it deletes every path ${name} reaches`,
+          )
         const found = await examine(
           { ...cmd, words },
           at,
@@ -309,7 +329,7 @@ const bare = (command: string) => command.replace(/[\\'"]/g, "")
 
 // The cheap first look: a name the hook judges, or a $, a backtick, a brace or a glob that can spell one.
 const CANDIDATE =
-  /rm|delete|chflags|chmod|clean|worktree|rimraf|screen|tmux|\bat\b|batch|\$|`|[{*?[]/
+  /rm|delete|chflags|chmod|clean|worktree|rimraf|rsync|screen|tmux|\bat\b|batch|\$|`|[{*?[]/
 
 // A call that reads as a delete, which the hook refuses when it cannot read it.
 const DELETES = /\bg?rm\b|-delete\b|\bchflags\b|\bchmod\b|\bclean\b|\bworktree\b|\brimraf\b|--del/
