@@ -21,6 +21,7 @@ import {
   type Folder,
   type Guard,
   type Paths,
+  NEVER_MADE,
   REFUSED_FORMS,
 } from "./fixtures/refused-forms"
 import { storeWith } from "./render-set"
@@ -232,6 +233,27 @@ describe("every refused form stays refused unless the allow list names it", () =
           expect(ids.has(id)).toBe(false)
           ids.add(id)
         }
+  })
+
+  // A recursive rm (-r, -R or --recursive, alone or in a cluster) and the folder it names, read from a row's text, where a backslash starts an escape (printf's \n) rather than the folder's name.
+  const RECURSIVE = /\brm\s+((?:-\S+\s+)*)([^\s'"`;)&|\\]+)/g
+  // NEVER_MADE's own name, which ends a folder whose parent a row reaches by a glob too
+  const NEVER = NEVER_MADE.slice(NEVER_MADE.lastIndexOf("/"))
+
+  test("every recursive delete from HOME names a path under the root that never exists", () => {
+    const left: string[] = []
+    for (const { rows, source } of REFUSED_FORMS)
+      for (const [what, call] of rows(PATHS)) {
+        const text = typeof call === "string" ? call : JSON.stringify(call)
+        for (const [, flags, target] of text.matchAll(RECURSIVE))
+          if (
+            /(?:^|\s)(?:-[a-zA-Z]*[rR]|--recursive)/.test(flags ?? "") &&
+            /^(?:~|\$HOME|\$\{HOME\})/.test(target ?? "") &&
+            !target?.endsWith(NEVER)
+          )
+            left.push(`${source} ${what}: rm ${flags}${target}`)
+      }
+    expect(left).toEqual([])
   })
 
   test("every allow-list entry names a case", () => {
