@@ -4,6 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { check } from "../../../scripts/hooks/no-extension-repo-write"
+import { NOT_RUN as ENGINE_NOT_RUN } from "../../../scripts/hooks/shell"
 import { storeWith } from "./render-set"
 
 // Made-up values: the login quillco, the scope acme synced with quillco/acme-skills by ext.repos, and the scope notes synced with its default name, quillco/playground-notes.
@@ -212,7 +213,7 @@ describe("a path word read as git behind a program it does not know", () => {
     expect(reason).toContain(
       "It read a word whose path ends in /git as git run by npx, a program it does not know: a folder or file passes under a path that does not end in /git, and git run by npx is read the same when written by its own name, git.",
     )
-    expect(reason.indexOf("It read a word")).toBeLessThan(reason.indexOf(NOT_RUN))
+    expect(reason.endsWith(`, git. ${ENGINE_NOT_RUN}`)).toBe(true)
   })
 
   test("git by its own name behind it is refused as before", async () => {
