@@ -171,7 +171,7 @@ function optionValue(word: string, { flags, values }: Options): "next" | "own" |
   return "own"
 }
 
-// The privilege wrappers' options that start a root shell, which reads its script from stdin when no command follows them: a closed list, read literally
+// The privilege wrappers' options that start a root shell, which reads its script from stdin when no command follows them: a closed list, read as a word or in a cluster of the wrapper's own flags
 const ROOT_SHELLS = new Map([
   ["doas", new Set(["-s"])],
   ["sudo", new Set(["--login", "--shell", "-i", "-s"])],
@@ -185,8 +185,17 @@ export function rootShell(cmd: Command): boolean {
     else break
   }
   const [wrapper, ...rest] = cmd.words.slice(at)
-  const options = wrapper && !wrapper.quoted && ROOT_SHELLS.get(program(wrapper.value))
-  return !!options && rest.some((w) => !w.quoted && options.has(w.value)) && !parse(cmd).first
+  const name = wrapper && !wrapper.quoted ? program(wrapper.value) : ""
+  const shells = ROOT_SHELLS.get(name)
+  if (!shells) return false
+  const { flags } = WRAPPERS.get(name) as Options
+  // a listed option, alone or in a cluster of the wrapper's own flags (`-Es`)
+  const starts = (v: string) =>
+    shells.has(v) ||
+    (/^-[A-Za-z]+$/.test(v) &&
+      [...v.slice(1)].every((c) => flags.has(`-${c}`)) &&
+      [...v.slice(1)].some((c) => shells.has(`-${c}`)))
+  return rest.some((w) => !w.quoted && starts(w.value)) && !parse(cmd).first
 }
 // Wrappers that take one positional argument (a count or a duration) before the command.
 const COUNTED = new Set(["repeat", "timeout"])

@@ -415,7 +415,11 @@ function inspect(raw: string, environment: Environment) {
     if (write) return refuse(write)
     // a command with no program runs nothing that reads the environment, so only its own assignments count
     const vars = !reader && first ? since(varsRead, env.vars, "") : []
-    for (const raw of reader ? [] : runsOf(parsed, vars, whole, rootLine)) {
+    // a root shell's heredoc or here-string is its script
+    const script = rootShell(cmd)
+      ? cmd.redirects.flatMap((r) => (r.body && !r.body.unknown ? [r.body.value] : []))
+      : []
+    for (const raw of reader ? [] : [...script, ...runsOf(parsed, vars, whole, rootLine)]) {
       const line =
         xargs?.replace && fed ? filled(raw, xargs.replace, fed.unknown ? UNKNOWN : fed.value) : raw
       if (seen.has(line)) continue
