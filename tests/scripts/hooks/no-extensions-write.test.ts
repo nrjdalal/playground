@@ -1606,6 +1606,16 @@ describe("a refusal for a value the hook does not hold names it in readable text
     ["a variable", "rm -f $X/x", "rm on $X/x,"],
     ["a loop variable", 'for d in a b; do rm -f "$d/x"; done', 'rm on "$d/x",'],
     ["a variable inside a nested shell's script", 'bash -c "rm -f $X/x"', "rm on $…/x,"],
+    [
+      "git -c with a variable",
+      'git -c core.pager="$P" log',
+      'git -c core.pager="$P", a value built from',
+    ],
+    [
+      "git -c attached, with a variable",
+      'git -ccore.pager="$P" log',
+      'git -ccore.pager="$P", a value built from',
+    ],
   ])("%s", async (_, command, named) => {
     const reason = await bash(command, "/tmp")
     expect(reason).toContain(named)
