@@ -538,6 +538,19 @@ describe("a quoted argument is read as a command line only where a program runs 
     ["a function that evals its arguments", `f() { eval "$@"; }; f 'rm -rf ~'`],
     ["a function that runs its argument by sh -c", `f() { sh -c "$1"; }; f 'rm -rf ~'`],
     ["a function by the function keyword", `function f { eval "$@"; }; f 'rm -rf ~'`],
+    ["a gated message under git in capitals", "GIT commit -m 'docs: playground ext sync'"],
+    ["a gated message under Git", "Git commit -m 'docs: playground ext sync'"],
+    ["a payload set as an argument, then evaluated", `set -- 'rm -rf ~'; eval "$1"`],
+    ["a payload set as an argument, then run by bash -c", `set -- 'rm -rf ~'; bash -c "$1"`],
+    ["a payload set as an argument, then run by ssh", `set -- 'rm -rf ~'; ssh h "$1"`],
+    ["a payload set as an argument, then run by watch", `set -- 'rm -rf ~'; watch "$1"`],
+    [
+      "a payload set as an argument, then run by the user's shell",
+      `set -- 'rm -rf ~'; "$SHELL" -c "$1"`,
+    ],
+    ["a payload held in the last argument", `true 'rm -rf ~'; eval "$_"`],
+    ["a payload held by getopts", `getopts x o 'rm -rf ~'; eval "$o"`],
+    ["a payload held in an array", `args=('rm -rf ~'); sh -c "\${args[0]}"`],
   ])("%s stays refused", async (_, command) => {
     for (const cwd of [...homes, join(homedir(), "x", ".claude", "worktrees", "y")])
       expect(await at(command, cwd)).toContain("no-extensions-write hook refuses")
