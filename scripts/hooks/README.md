@@ -180,7 +180,8 @@ Their tests are `bun run test:file tests/scripts/hooks`.
   A write to a scope's GitHub repository, which `ops:ext-sync` renders into the root, is outside its reach too; [no-extension-repo-write](#no-extension-repo-write) refuses one.
   A path through a link into the root with `..` after the link (`echo x > <link>/../f`) is judged as typed, so a write by one passes.
   A `cd` or `pushd` it cannot follow (`cd -`, `cd ~-`, `popd`'s stack, a glob in the folder, a `CDPATH` lookup) leaves the command's folder unread, so a relative write after one passes.
-  A text that holds a space is read again as a command line, where its quoted glob characters stand unquoted, so from a cwd at or above the root (`~`, `~/.playground`) a call such as `git commit -m "fix(x): y"` is refused; run it from a worktree.
+  A text that holds a space is read again as a command line, where its quoted glob characters stand unquoted, so from a cwd at or above the root (`~`, `~/.playground`) a call such as `git commit -m "fix(x): y"` or `awk '{print $1}' f` is refused; run it from a worktree.
+  A quoted regex from `/` that holds a space and a glob character (`awk '… /^(a|b)/ …'`, `sed -n '/^a*b/p; …'`, `bun -e '… /^(a|b)/ …'`) is refused from any folder, since `/` holds the root; run such a script from a file (`awk -f <file>`, `bun <file>`).
   It fails open on any other error, and its tests are in `bun run test:file tests/scripts/hooks/no-extensions-write.test.ts`.
 
 ## no-false-green
