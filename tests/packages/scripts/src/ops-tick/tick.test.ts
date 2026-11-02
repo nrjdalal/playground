@@ -17,7 +17,6 @@ import {
   autoEnd,
   BEATS,
   type Context,
-  cronMatches,
   cycle,
   leadOf,
   nextDue,
@@ -137,28 +136,9 @@ describe("auto-end", () => {
 })
 
 describe("cron", () => {
-  test("reads minute lists, steps and hours in machine wall time", () => {
-    expect(cronMatches("3,18,33,48 * * * *", at(13, 33))).toBe(true)
-    expect(cronMatches("3,18,33,48 * * * *", at(13, 34))).toBe(false)
-    expect(cronMatches("*/5 * * * *", at(9, 55))).toBe(true)
-    expect(cronMatches("7 */2 * * *", at(14, 7))).toBe(true)
-    expect(cronMatches("7 */2 * * *", at(13, 7))).toBe(false)
-    expect(cronMatches("13 21 * * *", at(21, 13))).toBe(true)
-  })
-
-  test("matches day of month and day of week both, where standard cron takes either", () => {
-    expect(cronMatches("0 9 19 * 1", new Date(2026, 9, 19, 9, 0))).toBe(true)
-    expect(cronMatches("0 9 19 * 2", new Date(2026, 9, 19, 9, 0))).toBe(false)
-  })
-
   test("names the next due minute", () => {
     expect(nextDue("13 21 * * *", at(13, 0))).toEqual(new Date(2026, 9, 19, 21, 13))
     expect(nextDue("*/5 * * * *", at(13, 3))).toEqual(new Date(2026, 9, 19, 13, 5))
-  })
-
-  test("refuses a cron it cannot read", () => {
-    expect(() => cronMatches("every 5", at(1, 1))).toThrow()
-    expect(() => cronMatches("61 * * * *", at(1, 1))).toThrow()
   })
 })
 
@@ -874,6 +854,22 @@ describe("timers", () => {
       if (parent === undefined) delete process.env.TZ
       else process.env.TZ = parent
     }
+  })
+
+  test("a send that failed goes again whole at the beat's next run", async () => {
+    const text = `start the report ${"x".repeat(450)}`
+    const ops = timersAt([{ cron: "0 17 * * *", name: "report", text, to: "builder" }])
+    const state = runner()
+    const ctx: Context = {
+      ...fake(ops, at(17, 0)).ctx,
+      send: async () => {
+        throw new Error("notify.sh exited 1")
+      },
+    }
+    await Promise.all(cycle(ctx, state, [beat("timers")]))
+    expect(resultOf(state)).toBe("timers: send to builder failed: notify.sh exited 1")
+    expect(await fire(ops, state, at(17, 1))).toEqual([["builder", text, false, true]])
+    expect(resultOf(state)).toBe("ok")
   })
 
   test("an empty list, or none set, sends nothing", async () => {

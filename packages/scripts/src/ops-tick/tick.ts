@@ -21,7 +21,7 @@ import { pending } from "../ops-outbox/drain"
 import { writeAtomic } from "../write-atomic"
 import { dashboardWatch } from "./dashboard-watch"
 
-// ops-tick: runner-steady-tick's timed beats, run as a script with no model call. Each beat runs at its old cron, in machine wall time as CronCreate ran it, runs the same script, and queues what that script prints for the session it went to before, through notify.sh and the ops relay (ADR 0010); a beat whose script prints nothing sends nothing. The Lanes keeper comes in a later change; the 98% move to GLM is retired (Inbox #i827) for the account rotation (`scripts/ops/usage/login-flip.py`).
+// ops-tick: runner-steady-tick's timed beats, run as a script with no model call. Each ported beat runs at its old cron, in machine wall time as CronCreate ran it, runs the same script, and queues what that script prints for the session it went to before, through notify.sh and the ops relay (ADR 0010); a beat whose script prints nothing sends nothing. The timers beat sends the owner's timers rows the same way. The Lanes keeper comes in a later change; the 98% move to GLM is retired (Inbox #i827) for the account rotation (`scripts/ops/usage/login-flip.py`).
 export const CYCLE_SECONDS = 60
 
 export type Run = (
@@ -41,8 +41,6 @@ export type Context = {
   run: Run
   send: Send
 }
-
-export { cronMatches }
 
 export type Beat = { cron: string; name: string; run: (ctx: Context) => Promise<void>; to: string }
 
@@ -616,7 +614,7 @@ const timers = async (ctx: Context) => {
     if (cronMatches(row.cron, ctx.now)) await ctx.send(row.to, row.text, false, true)
 }
 
-// Each beat at its old cron, with the target its output goes to.
+// Each beat at its cron, with the target its output goes to.
 export const BEATS: Beat[] = [
   { cron: "*/5 * * * *", name: "roll-gate", run: rollGate, to: "ops" },
   { cron: "*/5 * * * *", name: "up", run: up, to: "ops" },

@@ -52,7 +52,7 @@ export const timerSettings = defineSettings({
   timers: {
     default: [],
     description:
-      "Rows of { cron, name, text, to }: each minute ops-tick's timers beat sends the text of each row whose 5-field cron names that minute, whole, to the to session or manager kind, through the ops relay. The cron reads in the machine's local time, and day of month and day of week must both match, where standard cron takes either.",
+      "Rows of { cron, name, text, to }: each minute ops-tick's timers beat sends the text of each row whose 5-field cron names that minute, whole, to the to session or manager kind, through the ops relay. The cron reads in the machine's local time, and day of month and day of week must both match, where standard cron takes either. A line break in the text arrives as a space, since the relay sends one line.",
     schema: z
       .array(timerSchema)
       .refine(
