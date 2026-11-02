@@ -59,7 +59,7 @@ export type Group = {
   folders: Folder[]
   guards: Guard[]
   rows: (paths: Paths) => readonly Row[]
-  source: "#292" | "#356" | "#402" | "#411" | "#446" | "#456" | "#466" | "#469" | "#509"
+  source: "#292" | "#356" | "#402" | "#411" | "#446" | "#456" | "#463" | "#466" | "#469" | "#509"
 }
 
 // The rows a guard-loosening PR lets run on purpose, each written as a row's "<source> <what>" for all its cases, or as one case's "<source> <what> | <guard> | <folder>"; canary lets none run.
@@ -1899,5 +1899,17 @@ gh api graphql -f query="$QUERY"`,
       ["a file's unread text piped to doas's shell", `cat "$F" | doas -s`],
     ],
     source: "#509",
+  },
+  {
+    folders: ["process home"],
+    guards: ["no-extensions-write"],
+    rows: () => [
+      ["rm of a half-quoted brace", "rm -rf {.playground,'x'}/extensions/.no-such-folder"],
+      ["a write to a half-quoted glob", "echo x > '.pl'*"],
+      ["awk over an unquoted glob in the home", "awk '{print $1}' .pl*"],
+      ["awk over a half-quoted glob in the home", "awk '{print $1}' '.pl'*"],
+      ["cut over a half-quoted glob in the home", "cut -f1 '.pl'*"],
+    ],
+    source: "#463",
   },
 ]

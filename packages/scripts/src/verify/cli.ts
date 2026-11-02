@@ -1,4 +1,5 @@
 import "@packages/env/aliases"
+import { statSync } from "node:fs"
 import { mkdir } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
@@ -455,7 +456,12 @@ const fixture =
     ? null
     : process.env.PLAYGROUND_FIXTURE_DIR
       ? resolve(ROOT, process.env.PLAYGROUND_FIXTURE_DIR)
-      : join(ROOT, ".turbo/dashboard-fixture")
+      : statSync(join(ROOT, ".git"), { throwIfNoEntry: false })?.isFile()
+        ? join(ROOT, ".turbo/dashboard-fixture")
+        : join(
+            tmpdir(),
+            `playground-dashboard-fixture-${process.getuid?.() ?? 0}-${new Bun.CryptoHasher("sha256").update(ROOT).digest("hex").slice(0, 8)}`,
+          )
 
 const sendTops = (at: Target) =>
   guard("send-top", async () => {
