@@ -188,7 +188,7 @@ Only the first reading moves the folder, sets variables and records files for th
   its words followed by the stdin xargs hands it or carried in xargs' `-I` string.
   Its words split as that command's own parse splits them (`--dry-run` and `--yes` are bare for `ext`, `--dry-run` alone for `settings`):
   `ext accept`, the owner's own call, whatever its words (the role cleared in the same call included);
-  `ext score` on a line where any command clears or sets `PLAYGROUND_ROLE`, `CLAUDE_CODE_SESSION_ID` or `CLAUDE_CONFIG_DIR` (an assignment or `+=` to one, one exported earlier, or env with `-u` or `--unset` naming one, `-i` alone or in a cluster, `--ignore-environment` or `-`), a shell the line runs or pipes into included,
+  `ext score` on a line where any command clears or sets `CLAUDE_CODE_SESSION_ID`, `CLAUDE_CONFIG_DIR` or `PLAYGROUND_ROLE` (an assignment or `+=` to one, one exported earlier, or env with `-u` or `--unset` naming one, `-i` alone or in a cluster, `--ignore-environment` or `-`), a shell the line runs or pipes into included,
   and `ext score` spelled with quotes or backslashes that shell removes (`s""core`, `'score'`), since a score's author is read from them;
   `ext put <scope> list`; `ext add`, `import`, `init`, `link`, `order`, `remove`, `sync` and `unlink`, but `--dry-run` on `add`, `import` and `init`; `migrate`; `uninstall --purge`;
   and `settings set` or `reset` of a key a guard reads: `ext.links`, `ext.order`, `ext.repos`, `factory.archiveRepo`, `factory.publicRepo`, `glm.readOnlyLoad5`, `live.branch`, `owner.names`, `paths.codeRoot`, `sessions.aliases`, `sessions.names` and `usage.keychainService`.
