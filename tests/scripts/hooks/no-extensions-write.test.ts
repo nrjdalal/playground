@@ -682,7 +682,7 @@ describe("git's global options before a push keep a bare push's verdict", () => 
       "git push",
       "git --attr-source HEAD push",
       "git -c k=v push",
-      "git -C /tmp push",
+      "git -C /usr push",
     ])
       expect(await bash(command, cwd)).toBeUndefined()
   })
