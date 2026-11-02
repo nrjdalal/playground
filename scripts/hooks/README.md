@@ -121,7 +121,7 @@ Only the first reading moves the folder, sets variables and records files for th
 - A factory session never prints its environment: `scripts/hooks/no-env-dump.ts`, registered beside no-stash, refuses an `env` with no command (`env`, `env -0`, `env FOO=1`), `printenv`, a bare `set`, and a bare `declare`, `export` or `typeset`,
   since the environment holds tokens and the output lands in the transcript (13 Oct: a planning subagent's `env` printed this machine's GitHub and Slack tokens).
   `env VAR=x <command>`, `set -e` and `export VAR=x` run.
-  It fails open, and its tests are in `bun run test:file tests/scripts/hooks` too.
+  It fails open on a call it cannot read, and its tests are in `bun run test:file tests/scripts/hooks` too.
 
 ## no-extension-repo-write
 
@@ -219,7 +219,7 @@ Only the first reading moves the folder, sets variables and records files for th
   since the pipeline's exit is its last command's (a red test once read 0 through `| tail`).
   A run-slot call, typed bare or as a shell's script (`bash <path>/run-slot.sh <who> -- <command>`, `shellSlot`), is read as the words after its `--` (`slotWords` in `scripts/hooks/shell.ts`, shared with no-glm-heavy-path and no-main-checkout), and a call with no `--`, or nothing after it, runs nothing (run-slot exits 2 on it), so nothing in it is judged.
   A piped subshell or brace group, `(bun test x) | tail`, is not read.
-  It fails open, and its tests are in `bun run test:file tests/scripts/hooks` too.
+  It fails open on a call it cannot read, and its tests are in `bun run test:file tests/scripts/hooks` too.
 
 ## no-glm-heavy-path
 
@@ -251,7 +251,7 @@ Only the first reading moves the folder, sets variables and records files for th
   The role reaches the factory's hooks where the run loads them, inside the factory's checkout, whose `.claude/settings.json` registers them; a run started in any other folder loads none of them.
   Its reason gives the shape, with the account read from the session's resume record (`~/.playground/resume/<name>.sh`, its `# account:` line, else its `--account`), and the Keychain service from the `usage.keychainService` setting, `playground-claude-oauth` while the policy sets none.
   A command that only names `claude -p` (in `echo`, `grep` or a heredoc's body) runs, and so do `claude` without `-p`, `--resume` and `--version`.
-  It fails open, and its tests are in `bun run test:file tests/scripts/hooks` too.
+  It fails open on a call it cannot read, and its tests are in `bun run test:file tests/scripts/hooks` too.
 
 ## no-kill-by-name
 
@@ -261,7 +261,7 @@ Only the first reading moves the folder, sets variables and records files for th
   It reads the whole call for a search before it judges a kill, since a loop's `done < <(pgrep …)` comes after the kill it feeds, and it reads the `-I` string xargs hands a shell it starts as such a pid.
   Its reason gives the way out: `TaskStop` for a background task, `bun run dev:stop` for a dev stack, `kill <pid>` for a pid the session spawned and holds, in a Bash call of its own when the call also searches.
   `kill <pid>`, `kill -<sig> <pid>`, `kill $!`, `kill %1`, `kill $(cat <pid file>)` and a liveness check before it (`ps -p $PID && kill $PID`) run in a call that searches nothing else, and so do each search alone (`pgrep -f x`, `lsof -i :3000`), `command -v pkill` and `pkill --help`. <!-- kill-check: names only -->
-  It fails open, and its tests are in `bun run test:file tests/scripts/hooks` too; `tests/test_kill_by_name.py` skips the hook, its test and `tests/scripts/hooks/fixtures/refused-forms.ts`, which hold the refused commands as data.
+  It fails open on a call it cannot read, and its tests are in `bun run test:file tests/scripts/hooks` too; `tests/test_kill_by_name.py` skips the hook, its test and `tests/scripts/hooks/fixtures/refused-forms.ts`, which hold the refused commands as data.
 
 ## no-playground-leak
 
@@ -364,7 +364,7 @@ Only the first reading moves the folder, sets variables and records files for th
   Reads, `git fetch`, step 5's `git merge --ff-only origin/main` (with `-q` or `--quiet` before or after `--ff-only`), `scripts/link-skills.sh`, `bun install` and `env NODE_ENV=production SKIP_ENV_VALIDATION=true turbo run build --filter='./packages/*'` alone run, as the release skill's step 5 needs:
   the install a pull that changes `bun.lock` or a `package.json` needs, and the build a pull that changes `packages/` needs, since the `playground` command imports their `dist`.
   That build needs `NODE_ENV` set and `SKIP_ENV_VALIDATION=true`, on its line, exported or in the session, since the main checkout has no `.env` and the packages' env checks fail without them, so a bare one is refused with the line `playground update`'s build step runs.
-  It fails open.
+  It fails open on a call it cannot read.
   Its tests are in `bun run test:file tests/scripts/hooks`.
   The backstop behind it is `lefthook.yml`'s pre-commit step `main-checkout`, alone at priority 1 so it runs first, before any step that writes (lefthook runs a tie in any order).
   It refuses a commit whose `git rev-parse --show-toplevel` is the factory's main checkout, the one `~/.playground/ops/run-slot.sh` links into (`scripts/link-skills.sh` makes that link), whatever wrapper, shell or cwd made it, since this hook reads a command's text and the step reads where the commit lands.
@@ -377,7 +377,7 @@ Only the first reading moves the folder, sets variables and records files for th
   `PLAYGROUND_ROLE` `dispatcher`, `lead` or `manager`, or else a registry name whose roster kind or name reads as one (a manager's name in `sessions.names`, or an old name `sessions.aliases` maps to a manager's kind).
   Its reason names the fix: start a worker through `scripts/spawn.sh`, which writes its roster row, and brief it with the task.
   Workers, checkers and the owner's own sessions keep both tools, so a reviewer's `code-review` sub-agents run, and a manager's forked skill runs through the Skill tool, which the hook leaves alone.
-  It fails open, and its tests are in `bun run test:file tests/scripts/hooks`.
+  It fails open on a call it cannot read, and its tests are in `bun run test:file tests/scripts/hooks`.
 
 ## no-off-palette-label
 
@@ -403,7 +403,7 @@ Only the first reading moves the folder, sets variables and records files for th
   A single such part (`"$O"/d`), or a variable after a name (`$S/p$v`), runs, as it does in Claude Code.
   It also refuses an `rm` or an `rmdir` of a name directly in `/` (`/scratchpad_*`, `/x`), which the session moves into `$TMPDIR` or its scratchpad.
   A name a level deeper (`/usr/x`) and a redirect into `/` run, as they do in Claude Code.
-  It fails open.
+  It fails open on a call it cannot read.
 
 ## no-release-comment
 
@@ -431,7 +431,7 @@ Only the first reading moves the folder, sets variables and records files for th
   and turbo running `build`, `check-types`, `lint` or `test` (`turbo run <task>` or `turbo <task>`), by name, path or versioned package (`turbo@latest`), through `bunx`, `npx` (past their own options, `-y` or `-p turbo`) or `bun x`, but for `--help`, `--version` and `--dry-run`,
   whose directory (the Bash tool's cwd after any `cd`, or a `bun --cwd`, `bun run --cwd`, `bun install --cwd`, `bun test --cwd` or turbo's `--cwd`, so one typed from anywhere counts, and a clone's destination) is inside a worktree under `.claude/worktrees/`,
   unless the command runs through `~/.playground/ops/run-slot.sh`, naming that form (18 Oct: five worktree installs at once drove load1 to 66.8).
-  The main checkout is no-main-checkout's. It fails open, and its tests are in `bun run test:file tests/scripts/hooks`.
+  The main checkout is no-main-checkout's. It fails open on a call it cannot read, and its tests are in `bun run test:file tests/scripts/hooks`.
   A commit's pre-commit build takes a slot through `packages/scripts/src/commit-slot.ts`, and playbook's **slots** rule says which slot each way of committing takes.
 
 ## rules
