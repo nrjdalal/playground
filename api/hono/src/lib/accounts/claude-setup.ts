@@ -1,9 +1,10 @@
 import { randomUUID } from "node:crypto"
-import { existsSync, mkdtempSync, rmSync } from "node:fs"
+import { existsSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { site } from "@packages/config/site"
+import { makeScratch, removeScratch } from "@packages/safe-delete"
 import type { Result, Who } from "@packages/settings"
 
 // Relative, not @/: the routes' types bring this file into web/next's type check, under its own @/ paths.
@@ -75,6 +76,8 @@ type SignIn = {
   label?: string
   proc: Bun.Subprocess
   profile?: string
+  // the folder the profile was made in, which removeScratch checks it against
+  profiles?: string
   screen: string
   timer?: ReturnType<typeof setTimeout>
   url: string
@@ -134,7 +137,8 @@ const end = (signIn: SignIn | undefined) => {
   signIn.ended = true
   clearTimeout(signIn.timer)
   signIn.proc.kill()
-  if (signIn.profile) rmSync(signIn.profile, { force: true, recursive: true })
+  const kept = signIn.profile && removeScratch(signIn.profile, signIn.profiles)
+  if (kept) console.error(`claude-setup: the sign-in's profile stays: ${kept}`)
   if (current === signIn) current = undefined
   for (const wake of signIn.wake) wake()
 }
@@ -284,7 +288,8 @@ export async function openPrivate(
   if (!browser) return { browser: null, ok: true }
   if (!readsLive()) return { browser: shown(browser), ok: true }
   const open = deps.open ?? which("open") ?? "/usr/bin/open"
-  signIn.profile ??= mkdtempSync(join(deps.profiles ?? tmpdir(), "playground-sign-in-"))
+  signIn.profiles ??= deps.profiles ?? tmpdir()
+  signIn.profile ??= makeScratch("playground-sign-in-", signIn.profiles)
   const opened = Bun.spawn(freshWindow(open, browser, signIn.profile, signIn.url), {
     env: process.env,
     stderr: "ignore",
