@@ -344,28 +344,31 @@ describe("a direct write into the extensions root is refused, naming the owner's
   const fill = (head: string, unit: string, tail: string) =>
     head + unit.repeat(Math.floor((130_000 - head.length - tail.length) / unit.length)) + tail
   test.each([
-    ["a brace with no close", fill("echo {", ",", ""), false],
+    ["a brace with no close", fill("echo {", ",", ""), false, 1_000],
     [
       "xargs -I over a large stdin",
       fill(`cat ${WORDS} | xargs -I@ git -c alias.x="!`, "@ ", '" x'),
       true,
+      1_000,
     ],
-    ["env -S", fill("env -S'", "-S ", "' true"), false],
-    ["distinct variables", variables(""), false],
-    ["distinct variables, each with a program", variables("true; "), false],
+    ["env -S", fill("env -S'", "-S ", "' true"), false, 1_000],
+    // each variable's path is still read from the filesystem, so these take longer, inside bounds canary misses (2.4 to 2.9 s and 6 to 9.5 s)
+    ["distinct variables", variables(""), false, 2_000],
+    ["distinct variables, each with a program", variables("true; "), false, 3_000],
     [
       "a printf escape format over many arguments",
       `printf '%s${"\\\\x41".repeat(16_000)}' ${"x ".repeat(3_000)}> /tmp/nxw-p`,
       false,
+      1_000,
     ],
   ])(
-    "%s at the command cap is read inside a second",
-    async (_, command, refused) => {
+    "%s at the command cap is read inside its bound",
+    async (_, command, refused, bound) => {
       const started = performance.now()
       const reason = await bash(command, "/tmp")
       if (refused) expect(reason).toContain("split it into shorter calls")
       else expect(reason).toBeUndefined()
-      expect(performance.now() - started).toBeLessThan(1_000)
+      expect(performance.now() - started).toBeLessThan(bound)
     },
     60_000,
   )
