@@ -14,8 +14,14 @@ const variables = (path: string) =>
 // The path with each part the shell fills in shown as $…, since the reader keeps no variable's name.
 const shown = (path: string) => path.replaceAll(UNKNOWN, "$…").replaceAll(GUARD, "${…:?}")
 
+// rmdir runs guarded, while no-raw-delete refuses an rm whose path it cannot read, guarded or not, so an rm takes a literal path.
+const FIX: Record<string, string> = {
+  rm: "Name each path literally, with playground rm <literal path> for a folder (in a script, removeScratch), and run it again.",
+  rmdir: 'Guard each one as ${VAR:?} ("${S:?}/${m:?}"), or name a literal path, and run it again.',
+}
+
 const refuse = (name: string, path: string) =>
-  `no-prompt-stop hook refuses ${name} ${shown(path)}: Claude Code stops on a removal whose target has two or more parts that start with a variable and waits for a person, who is not there. Guard each one as \${VAR:?} ("\${S:?}/\${m:?}"), or name a literal path, and run it again.`
+  `no-prompt-stop hook refuses ${name} ${shown(path)}: Claude Code stops on a removal whose target has two or more parts that start with a variable and waits for a person, who is not there. ${FIX[name]}`
 
 // A literal name directly in /, a glob or a trailing slash included.
 const AT_ROOT = /^\/[^/\u0000]+\/?$/

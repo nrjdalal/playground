@@ -36,7 +36,10 @@ describe("a removal whose target has two or more parts that start with a variabl
   ])("%s", async (_name, command) => {
     const reason = await bash(command)
     expect(reason).toContain("no-prompt-stop hook refuses")
-    expect(reason).toContain("${VAR:?}")
+    // rmdir runs guarded, and no-raw-delete refuses a guarded rm, so an rm is sent to a literal path
+    expect(reason).toContain(
+      /refuses rmdir /.test(reason ?? "") ? "${VAR:?}" : "playground rm <literal path>",
+    )
   })
 })
 

@@ -411,7 +411,7 @@ Only the first reading moves the folder, sets variables and records files for th
 ## no-prompt-stop
 
 - A factory session never waits on a permission prompt no one answers: `scripts/hooks/no-prompt-stop.ts`, registered beside no-stash, refuses the Bash shapes Claude Code stops on, with a reason the session acts on:
-  an `rm` or an `rmdir` whose target has two or more parts that start with an unguarded variable (`$S/$m`, `$HOME/$s`, `$S/$v.d`), which the session rewrites with `${VAR:?}` or as a literal path.
+  an `rm` or an `rmdir` whose target has two or more parts that start with an unguarded variable (`$S/$m`, `$HOME/$s`, `$S/$v.d`), which the session rewrites as a literal path, an `rmdir` guarded with `${VAR:?}` too, since no-raw-delete refuses an `rm` whose path it cannot read, guarded or not, and names `playground rm <literal path>`.
   A single such part (`"$O"/d`), or a variable after a name (`$S/p$v`), runs, as it does in Claude Code.
   It also refuses an `rm` or an `rmdir` of a name directly in `/` (`/scratchpad_*`, `/x`), which the session moves into `$TMPDIR` or its scratchpad.
   A name a level deeper (`/usr/x`) and a redirect into `/` run, as they do in Claude Code.
