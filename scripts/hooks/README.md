@@ -30,7 +30,7 @@ Only the first reading moves the folder, sets variables and records files for th
   and fails closed on it:
   on a machine with extensions (its data folder holds `extensions/`) the list comes from `extensions/hooks/<list>.json`, which every list write derives as the union of every scope's `lists/<list>.json` (the login's, each org's, then core's), read by `packages/settings/src/rendered.ts`, and never from this folder.
   A root that lacks the list refuses the guarded call, naming the file and `playground ext import --from-tree extensions/core/lists`, which seeds it: the session tells its lead, and the dispatcher hands the owner the command to type as a `!` command in the dispatcher's terminal window, since the Dashboard's composer types no `!` command.
-  A factory session writes nothing in the root itself and changes no list or guard setting through the CLI: [no-extensions-write](#no-extensions-write) refuses both, so a list changes only on the owner's own command.
+  A factory session writes nothing in the root itself and changes no list or guard setting through the CLI: [no-extensions-write](#no-extensions-write) refuses both, so a list changes only on the owner's own command, but for the dispatcher's plain `ext sync` and `ext add`, which pull a scope's own repository.
   With no extensions, the list is core's file; with no file either, the guard takes its empty default.
   A list file that is there but empty, malformed or missing a key refuses the guarded call, extensions or not; an explicit empty list (`[]`, or every key empty) is the owner's choice and loads.
   A broken list refuses only the calls its guard checks, so every other call runs.
@@ -182,6 +182,10 @@ Only the first reading moves the folder, sets variables and records files for th
   and `settings set` or `reset` of a key a guard reads: `ext.links`, `ext.order`, `ext.repos`, `factory.archiveRepo`, `factory.publicRepo`, `glm.readOnlyLoad5`, `live.branch`, `owner.names`, `paths.codeRoot`, `sessions.aliases`, `sessions.names` and `usage.keychainService`.
   A test holds that list to every key a hook names, to `ext.order`, which orders the extensions every guard reads, and to spawn.sh's `paths.codeRoot`; spawn.sh's `gates.*` stay open, as capacity tuning Ops adjusts in normal upkeep.
   A command, verb, kind or key word it cannot read, or any such word among the words of `ext put` or `settings set` or `reset`, counts as the write.
+  The dispatcher alone runs `ext sync`, `ext sync <scope>` and `ext add <name> <owner/name>`, when the whole Bash command is that one plain call: the CLI as its own first word, each name plain, and no option, variable set for it, redirect, pipe, group, substitution or second command.
+  `ext add --yes`, which would create a repository, stays refused, so a repository that does not exist yet is still added on the owner's own command.
+  The role is read in the hook's own process through `scripts/hooks/role.ts` (`PLAYGROUND_ROLE`, else the session's name in Claude Code's registry), so a role written into the command (`PLAYGROUND_ROLE=dispatcher` before the call, `env`, an `export`, `--by`) keeps the refusal.
+  `tests/scripts/hooks/refused-forms.test.ts` runs this guard as the dispatcher, so every pinned form stays refused even from it.
   `ext put` of a doc, a rule or any other reviewed kind, every read, `ext score` and `reject`, `settings set` of any other key, `settings import-jobs` and writes elsewhere in the data folder (handoffs, the roster) run.
   Its refusal names the one route: the owner types the command as a `!` command in the dispatcher's terminal window, which runs without hooks and which the dispatcher hands the owner when a session tells its lead; no flag, environment variable, role or note in a session's own call frees it.
   The owner runs an accept there as `! env -u PLAYGROUND_ROLE playground ext accept …`, since that window carries `PLAYGROUND_ROLE=dispatcher`.
