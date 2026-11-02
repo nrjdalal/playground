@@ -47,7 +47,7 @@ const CARVE_OUTS: Record<string, { lines: number; reason: string }> = {
   "scripts/ops/dashboard/supervisor.sh": {
     lines: 5,
     reason:
-      "the live dashboard's runner replaces its own build and staging folders under its state folder, each rebuilt from a commit, and keeps the current and previous builds; pending #571, which moves them onto playground rm",
+      "the live dashboard's runner removes its own staging worktree under its state folder, whose node_modules clone of about 108k files is past the trash's tripwire (2 lines, for good), and replaces its build folders, each rebuilt from a commit (3 lines, pending #625, which moves them onto the trash)",
   },
   "scripts/ops/runner-host/suite.sh": {
     lines: 5,
