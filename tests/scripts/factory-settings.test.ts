@@ -63,7 +63,7 @@ describe("a session cmux restored in a dispatcher checkout keeps the factory's h
     const commands = (await preToolUse(join("scripts", "factory-settings.json"))).flatMap((h) =>
       h.hooks.map((x) => x.command),
     )
-    expect(commands.some((c) => c.endsWith(`scripts/hooks/${name}.ts`))).toBe(true)
+    expect(commands.some((c) => c.includes(`scripts/hooks/${name}.ts`))).toBe(true)
   })
 
   // a Write into the main checkout passed while no-main-checkout heard only Bash
@@ -73,7 +73,7 @@ describe("a session cmux restored in a dispatcher checkout keeps the factory's h
     ),
   )("%s hears %s", async (name, tool) => {
     const hook = (await preToolUse(join("scripts", "factory-settings.json"))).find((h) =>
-      h.hooks.some((x) => x.command.endsWith(`scripts/hooks/${name}.ts`)),
+      h.hooks.some((x) => x.command.includes(`scripts/hooks/${name}.ts`)),
     )
     expect(new RegExp(hook?.matcher ?? "^$").test(tool)).toBe(true)
   })

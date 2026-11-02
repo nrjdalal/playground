@@ -16,6 +16,7 @@ import { liveInput } from "../../../../scripts/ops/optimizer/idle_sessions"
 import { pending } from "../ops-outbox/drain"
 import { writeAtomic } from "../write-atomic"
 import { dashboardWatch } from "./dashboard-watch"
+import { guardProbe } from "./guard-probe"
 
 // ops-tick: runner-steady-tick's timed beats, run as a script with no model call. Each beat runs at its old cron, in machine wall time as CronCreate ran it, runs the same script, and queues what that script prints for the session it went to before, through notify.sh and the ops relay (ADR 0010); a beat whose script prints nothing sends nothing. The Lanes keeper comes in a later change; the 98% move to GLM is retired (Inbox #i827) for the account rotation (`scripts/ops/usage/login-flip.py`).
 export const CYCLE_SECONDS = 60
@@ -658,6 +659,7 @@ export const BEATS: Beat[] = [
   { cron: "17 * * * *", name: "trash-purge", run: trashPurge(), to: "ops/log/trash-purge.log" },
   { cron: "*/5 * * * *", name: "canary-pull", run: canaryPull, to: "ops, once a failed pull" },
   { cron: "*/5 * * * *", name: "relay-watch", run: relayWatch, to: "the Inbox, by bun run ask" },
+  { cron: "*/10 * * * *", name: "guard-probe", run: guardProbe, to: "dispatcher" },
   {
     cron: "* * * * *",
     name: "dashboard-watch",

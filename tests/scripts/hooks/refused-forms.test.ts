@@ -25,6 +25,7 @@ import {
   REFUSED_FORMS,
 } from "./fixtures/refused-forms"
 import { storeWith } from "./render-set"
+import { git } from "./scratch-git"
 
 const CHECKOUT = join(import.meta.dir, "..", "..", "..")
 const SCRATCH = mkdtempSync(join(tmpdir(), "refused-forms-"))
@@ -66,36 +67,15 @@ symlinkSync(ROOT, PATHS.LINK)
 symlinkSync(ROOT, join(DATA, "store"))
 symlinkSync(DATA, join(HOME, "pg"))
 symlinkSync(join(PATHS.CLI_DIR, "cli.ts"), join(HOME, "pc"))
-Bun.spawnSync(["git", "init", "-q", OTHER])
-Bun.spawnSync([
-  "git",
-  "-C",
-  OTHER,
-  "remote",
-  "add",
-  "origin",
-  "https://github.com/acme-labs/demo.git",
-])
+git(SCRATCH, "init", "-q", OTHER)
+git(OTHER, "remote", "add", "origin", "https://github.com/acme-labs/demo.git")
 // A repo with a heavy path staged, as no-glm-heavy-path's own test stages one.
 const GLM_REPO = join(SCRATCH, "glm-repo")
-const gitIn = (dir: string, ...args: string[]) =>
-  Bun.spawnSync([
-    "git",
-    "-C",
-    dir,
-    "-c",
-    "user.name=t",
-    "-c",
-    "user.email=t@t",
-    "-c",
-    "commit.gpgsign=false",
-    ...args,
-  ])
-gitIn(SCRATCH, "init", "-q", "-b", "canary", GLM_REPO)
-gitIn(GLM_REPO, "commit", "-q", "--allow-empty", "-m", "base")
+git(SCRATCH, "init", "-q", "-b", "canary", GLM_REPO)
+git(GLM_REPO, "commit", "-q", "--allow-empty", "-m", "base")
 mkdirSync(join(GLM_REPO, "web", "next", "src"), { recursive: true })
 writeFileSync(join(GLM_REPO, "web", "next", "src", "x.ts"), "x\n")
-gitIn(GLM_REPO, "add", ".")
+git(GLM_REPO, "add", ".")
 // The leak guard's lists as core holds them, with ext.links guarding a made-up org's repositories, as its own test sets them.
 const LISTS = join(CHECKOUT, "extensions", "core", "lists")
 const LEAK = join(SCRATCH, "leak")
@@ -116,7 +96,7 @@ const SYNCED = storeWith(
   { "ext.repos": { acme: "quillco/acme-skills" } },
 )
 mkdirSync(join(SYNCED, "extensions", "acme"), { recursive: true })
-Bun.spawnSync(["git", "-C", join(SYNCED, "extensions", "acme"), "init", "-q"])
+git(join(SYNCED, "extensions", "acme"), "init", "-q")
 
 type Run = (raw: string, home: string) => Promise<string | undefined>
 

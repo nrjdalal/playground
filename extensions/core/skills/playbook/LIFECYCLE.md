@@ -1,6 +1,6 @@
 # Lifecycle
 
-When each kind of factory session starts and ends, what the Dashboard shows for each role, and the ops jobs that run with no session.
+When each kind of factory session starts and ends, what the Dashboard shows for each role, the ops jobs that run with no session, and how the main checkout is restored.
 The commands for each start and end are in [SESSIONS.md](SESSIONS.md), and every start and end lands in the roster ([ROSTER.md](ROSTER.md)).
 
 ## Roles on the Dashboard
@@ -68,8 +68,9 @@ Sessions that work together share a workspace as full-height columns ([SESSIONS.
   the trash purge (hourly, `purgeTrash` of `@packages/safe-delete` removing each `playground rm` batch in the data folder's `trash` over 7 days old, then the oldest while the disk has under 50 GB free, its one recursive delete, one line to `ops/log/trash-purge.log`),
   the turbo prune (weekly, each file in the shared turbo cache `~/.cache/turbo/playground` last modified over 7 days ago removed, one line to `ops/log/turbo-prune.log`),
   the dashboard watch (every minute: once the live dashboard's `/api/health` has failed 5 minutes in a row, a gap of over 2 minutes with no check starting the count again, one macOS banner and one ops line through `notify.sh` with `NOTIFY_MAC=1`, since the Inbox shows only on the dashboard, and one more when it answers again,
-  its state in `ops/tick/dashboard-watch.json`) and the relay watch (every 5 minutes:
-  a line the relay would send, read by ops-outbox's `pending()`, is timed from the first cycle it reads pending, and once it has waited 10 minutes with no relay cursor moved since, one Inbox alert update is posted straight to the dashboard with `bun run ask new` under the ops manager's name, and resolved with `bun run ask resolve` once a cursor moves or its item is gone);
+  its state in `ops/tick/dashboard-watch.json`), the relay watch (every 5 minutes:
+  a line the relay would send, read by ops-outbox's `pending()`, is timed from the first cycle it reads pending, and once it has waited 10 minutes with no relay cursor moved since, one Inbox alert update is posted straight to the dashboard with `bun run ask new` under the ops manager's name, and resolved with `bun run ask resolve` once a cursor moves or its item is gone),
+  and the guard probe (every 10 minutes: each PreToolUse guard the factory settings register run on `{}` without its wrapper's tail, and each that exits other than 0 or 2 named to the dispatcher with the fix, once a change of what is broken, [Restoring the main checkout](#restoring-the-main-checkout));
   `--dry` prints each beat's next due time and target, and `--once <beat>` runs one beat now.
   The relay, runner-plain-relay, sends every line `outbox/relay.py` prints to its `to`, since relay.py applies quiet mode before it prints; only the drops the relay's brief names hold a line back.
   ops-flow is `bun run ops:flow` in a checkout of `canary`: every 60 seconds it reads the process table and each run-slot `.holder`,
@@ -87,7 +88,7 @@ Sessions that work together share a workspace as full-height columns ([SESSIONS.
   ops-awake holds `caffeinate -s -i` by default, the system awake on AC power and on battery with the display free to sleep and lock (#i19); the repo job alone reads `ops-awake.json` in its data folder, so a machine whose file sets `"lidSleep": true` runs `caffeinate -i` after a restart, to sleep with its lid shut, while a launchd `awake/run.sh` keeps its own flags and reads no setting.
   Add ops-awake to `jobs.json` only on a Mac with no launchd `com.playground.ops-awake`, since both would post the same battery alerts; the repo job runs the battery check each minute (`ops-awake/battery.ts`), as a launchd `awake/run.sh` runs its own where it is installed.
   ops-awake and ops-machine write only under the data folder their `--data` names, which the jobs render passes; run with no `--data` from any checkout but the live dashboard's, each exits 2 before it writes.
-  ops-changelog (`bun run changelog sync`, `4-59/5 * * * *`, skipped quietly while a `bun run changelog seed` runs) runs from the live dashboard's checkout, as its runner's cron did:
+  ops-changelog (`bun run changelog sync`, `4-59/5 * * * *`, skipped quietly while a `bun run changelog seed` runs) runs from the live dashboard's checkout, the one holding the database's `.env`, as its runner's cron did:
   skipped with a line to ops while load5 (the third field of `sysctl -n vm.loadavg`) passes 12 or memory pressure reads critical, never overlapping, its output appended to `dashboard-changelog.log` in the data folder, and a failure sent to ops with its last 5 lines.
   ops-channel-watch is the factory channel's watch: a quick pass every 3 minutes and a full one, which also relays edits, at minutes 7 and 37, each new post sent to the dispatcher as one outbox line; each pass runs `watch.ts` under `vault.py run -e SLACK_TOKEN=local.slack.channel_token`, so the token reaches only that process, and a failure goes to ops once per kind until a pass succeeds.
   Add ops-changelog this way only on a Mac whose `jobs.json` has no job by that name, and ops-channel-watch only on the Mac of the Slack member the `channel.skipUser` setting names, since the watch relays every post but that member's own.
@@ -170,3 +171,14 @@ Ops runs an update when the owner asks for one:
    **Done when** every other named session on the list runs again under its name.
 4. Run step 1's loop again, into a second file.
    **Done when** no line with `-n` reads `deleted`; each one that does goes back to step 3.
+
+## Restoring the main checkout
+
+Every PreToolUse guard runs from the main checkout and fails closed ([scripts/hooks/README.md](../../../../scripts/hooks/README.md#registered-in-both-settings-files)): with its scripts gone every factory session's Bash is refused, its Edit and Write too, and with its packages gone every session's guarded call is.
+No session can then repair it, so the restore runs from the owner's own `!` window, whose commands run with no hook:
+
+1. The owner puts the files back: `! git -C <main checkout> checkout -- .` while its `.git` is in place.
+   With it gone, restore in place, since a clone refuses the folder the delete left `node_modules`, `.env` and `.claude/worktrees` in: `! git -C <main checkout> init`, `! git -C <main checkout> remote add origin <the repo's URL>`, `! git -C <main checkout> fetch origin`, then `! git -C <main checkout> checkout -f -B main origin/main`.
+   **Done when** `! git -C <main checkout> status` reads clean.
+2. The owner runs `! bun install --cwd <main checkout>`, then `! <main checkout>/scripts/link-skills.sh`.
+   **Done when** a factory session's Bash call runs again.

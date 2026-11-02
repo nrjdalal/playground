@@ -18,6 +18,11 @@ Only the first reading moves the folder, sets variables and records files for th
 - cmux restores a session after a restart without its `--settings` or `PLAYGROUND_ROLE`, so `.claude/settings.json` registers every PreToolUse hook `scripts/factory-settings.json` does, with the same matcher and the same command string,
   since Claude Code runs a handler defined in both files once only when the two commands match byte for byte (measured on Claude Code 2.1.302: one space apart, it runs twice; `tests/scripts/hooks-abs-path.test.ts` holds every hook in both files to it).
   That one command finds the checkout with no `$HOME` in it: `$PLAYGROUND_REPO`, which spawn.sh's launch exports as its main checkout, else the main checkout git names for `$CLAUDE_PROJECT_DIR` (`--git-common-dir`, so a session in a worktree runs the main checkout's guards); when neither names a folder holding the hook's script, it runs nothing and exits 0.
+- A PreToolUse guard fails closed, since Claude Code blocks a call only on exit 2: its wrapper turns any other exit but 0 (a crash, a missing package, Bun missing) into exit 2, its refusal naming the hook, the code and the fix (`bun install` in the checkout),
+  and under `PLAYGROUND_ROLE` a missing script or an unresolved checkout refuses too, naming the restore route (playbook's LIFECYCLE.md, Restoring the main checkout); with no role it runs nothing and exits 0, as above.
+  A timeout still lets the call run, since Claude Code treats a hook timeout as a non-blocking error.
+  Every other wrapper (SessionStart, Stop, PostToolUse and the rest) stays open on a crash, since a Stop hook at exit 2 keeps its session going and a crashing one would loop it.
+  `tests/scripts/hooks-abs-path.test.ts` holds both shapes and runs them over stub guards.
   A headless scan run from outside the checkout exports `PLAYGROUND_REPO` as the factory's checkout and passes `--settings` naming that checkout's `scripts/factory-settings.json`, so its guards run rather than exit 0: the board scan's loop takes the checkout from `beat.py`'s `checkout()`, the end-of-day scan's `scan.sh` from its own path.
   Four factory hooks act for every session: session-state writes every session's state, since the Dashboard is to show them all, no-off-palette-label guards every session's labels, since the label rule covers any label, no-desktop-owner-app guards every session's agent-desktop calls, since the owner's pointer and apps are the same whichever session drives them,
   and no-raw-delete guards every session's deletes, since a delete is final whoever runs it.
@@ -64,7 +69,7 @@ Only the first reading moves the folder, sets variables and records files for th
   The factory's PreToolUse hook `scripts/hooks/no-bare-slack-link.ts`, registered beside no-playground-leak (and in `.claude/settings.json`) and acting for a factory session alone (`scripts/hooks/role.ts`),
   refuses a Slack MCP `chat_post_message` or `chat_update` that holds an http(s) URL (in `text`, `markdown_text`, a `text` field of its `blocks`, or any string of an attachment but a field whose name ends in `link`, `url` or `icon`; `<url|label>` and backticks included) that no link chip in its `blocks` carries, and its reason gives the chip to send.
   A chip is a `link` element in its full shape, `{"type":"link","url":"<url>","text":"<url without its scheme>","truncated":true}`, since one with only a `url` draws the raw URL, so a `link` element in any other shape, labelled or url-only, is refused too, even beside words that name no URL.
-  It fails open on a call it cannot read, as on a hook that cannot start or times out.
+  It fails open on a call it cannot read; when it cannot start it refuses, and when it times out the post goes out ([Registered in both settings files](#registered-in-both-settings-files)).
   Its tests are in `bun run test:file tests/scripts/hooks`.
 
 ## no-chat-question
@@ -93,7 +98,7 @@ Only the first reading moves the folder, sets variables and records files for th
   A reply naming an `#iN` passes once one of the first five items it names reads `open` through `bun run ask get` in the live dashboard's checkout (the worktree on `live.branch`, found with `git worktree list`, killed after 3s).
   The reads run at once, each killed after 10s (one took 5.9s under load), and the first to read open passes the stop at once and ends every read still running.
   When no named item reads open, one it cannot read included, the reply fails closed, the reason saying what each item read as.
-  It judges the hook input's `last_assistant_message`, since the transcript can lag the turn's last message (ADR 0001), and fails open on an input it cannot read, as a hook that cannot start or times out does.
+  It judges the hook input's `last_assistant_message`, since the transcript can lag the turn's last message (ADR 0001), and fails open on an input it cannot read, as a Stop hook that cannot start or times out does.
   Its tests are in `bun run test:file tests/scripts/hooks` too.
 
 ## no-desktop-owner-app
@@ -117,7 +122,7 @@ Only the first reading moves the folder, sets variables and records files for th
 - A factory session never prints its environment: `scripts/hooks/no-env-dump.ts`, registered beside no-stash, refuses an `env` with no command (`env`, `env -0`, `env FOO=1`), `printenv`, a bare `set`, and a bare `declare`, `export` or `typeset`,
   since the environment holds tokens and the output lands in the transcript (13 Oct: a planning subagent's `env` printed this machine's GitHub and Slack tokens).
   `env VAR=x <command>`, `set -e` and `export VAR=x` run.
-  It fails open, and its tests are in `bun run test:file tests/scripts/hooks` too.
+  It fails open on a call it cannot read, and its tests are in `bun run test:file tests/scripts/hooks` too.
 
 ## no-extension-repo-write
 
@@ -219,7 +224,7 @@ Only the first reading moves the folder, sets variables and records files for th
   since the pipeline's exit is its last command's (a red test once read 0 through `| tail`).
   A run-slot call, typed bare or as a shell's script (`bash <path>/run-slot.sh <who> -- <command>`, `shellSlot`), is read as the words after its `--` (`slotWords` in `scripts/hooks/shell.ts`, shared with no-glm-heavy-path and no-main-checkout), and a call with no `--`, or nothing after it, runs nothing (run-slot exits 2 on it), so nothing in it is judged.
   A piped subshell or brace group, `(bun test x) | tail`, is not read.
-  It fails open, and its tests are in `bun run test:file tests/scripts/hooks` too.
+  It fails open on a call it cannot read, and its tests are in `bun run test:file tests/scripts/hooks` too.
 
 ## no-glm-heavy-path
 
@@ -251,7 +256,7 @@ Only the first reading moves the folder, sets variables and records files for th
   The role reaches the factory's hooks where the run loads them, inside the factory's checkout, whose `.claude/settings.json` registers them; a run started in any other folder loads none of them.
   Its reason gives the shape, with the account read from the session's resume record (`~/.playground/resume/<name>.sh`, its `# account:` line, else its `--account`), and the Keychain service from the `usage.keychainService` setting, `playground-claude-oauth` while the policy sets none.
   A command that only names `claude -p` (in `echo`, `grep` or a heredoc's body) runs, and so do `claude` without `-p`, `--resume` and `--version`.
-  It fails open, and its tests are in `bun run test:file tests/scripts/hooks` too.
+  It fails open on a call it cannot read, and its tests are in `bun run test:file tests/scripts/hooks` too.
 
 ## no-kill-by-name
 
@@ -261,7 +266,7 @@ Only the first reading moves the folder, sets variables and records files for th
   It reads the whole call for a search before it judges a kill, since a loop's `done < <(pgrep …)` comes after the kill it feeds, and it reads the `-I` string xargs hands a shell it starts as such a pid.
   Its reason gives the way out: `TaskStop` for a background task, `bun run dev:stop` for a dev stack, `kill <pid>` for a pid the session spawned and holds, in a Bash call of its own when the call also searches.
   `kill <pid>`, `kill -<sig> <pid>`, `kill $!`, `kill %1`, `kill $(cat <pid file>)` and a liveness check before it (`ps -p $PID && kill $PID`) run in a call that searches nothing else, and so do each search alone (`pgrep -f x`, `lsof -i :3000`), `command -v pkill` and `pkill --help`. <!-- kill-check: names only -->
-  It fails open, and its tests are in `bun run test:file tests/scripts/hooks` too; `tests/test_kill_by_name.py` skips the hook, its test and `tests/scripts/hooks/fixtures/refused-forms.ts`, which hold the refused commands as data.
+  It fails open on a call it cannot read, and its tests are in `bun run test:file tests/scripts/hooks` too; `tests/test_kill_by_name.py` skips the hook, its test and `tests/scripts/hooks/fixtures/refused-forms.ts`, which hold the refused commands as data.
 
 ## no-playground-leak
 
@@ -293,7 +298,7 @@ Only the first reading moves the folder, sets variables and records files for th
   it is refused otherwise, a post with no text included, since it goes out through his Slack account; curl that writes (sends data without `-G`, or calls a `chat.*` method) and whose URL or data names that channel is refused outright, while a read of it passes.
   Every other channel, thread, group DM and DM, and a write whose channel it cannot read, is judged as before.
   A Slack upload from a path that holds a factory term (the scratchpad folder's name does) is refused, so copy the file first to `/private/tmp/claude-501/<topic>/`, a `<topic>` that names no session and holds no term.
-  A hook that cannot start or times out lets the call through, and its two lists are read as [Guard lists](#guard-lists) says.
+  When it cannot start it refuses and when it times out it lets the call through ([Registered in both settings files](#registered-in-both-settings-files)), and its two lists are read as [Guard lists](#guard-lists) says.
   It shares `scripts/hooks/shell.ts` and `scripts/hooks/github.ts` (the repository resolver) with the other hooks, and its tests are in `bun run test:file tests/scripts/hooks`.
 
 ## no-public-leak
@@ -327,7 +332,7 @@ Only the first reading moves the folder, sets variables and records files for th
   Only the dispatcher's refusal names that path and the approval's shape, `{"ask": "<the Inbox decision's id>", "titles": ["<title>"]}` adding each title approved for that team that day, so the dispatcher writes the approval from its refusal.
   Its `<team>` is the team as `save_issue` names it, lowercased with each run of other characters one hyphen (`AI Platform` is `ai-platform`).
   Any other role is refused a Write, Edit, MultiEdit or NotebookEdit into that folder, or a Bash command with a word that names a path in it; an interpreter's code that builds the path itself is not read.
-  It fails closed on any call that reads as filing a ticket, a Linear API call whose body it cannot read included, and a hook that cannot start or times out lets the call through, so it never blocks every call.
+  It fails closed on any call that reads as filing a ticket, a Linear API call whose body it cannot read included; when it cannot start it refuses, and when it times out it lets the call through ([Registered in both settings files](#registered-in-both-settings-files)).
   The refusal of a body it cannot read names the fix, the query written with the Write tool first and named by its literal absolute path in a call of its own (`curl -d @/abs/query.json`, `gh api --input /abs/query.json`), and says none of the call's commands ran.
   The refusal of an endpoint or URL it cannot read names its fix, that endpoint written out literally (`gh api https://api.linear.app/graphql`).
   It reads Bash through `scripts/hooks/shell.ts`, the reader it shares with the release hook, and its tests are in `bun run test:file tests/scripts/hooks` too.
@@ -364,7 +369,7 @@ Only the first reading moves the folder, sets variables and records files for th
   Reads, `git fetch`, step 5's `git merge --ff-only origin/main` (with `-q` or `--quiet` before or after `--ff-only`), `scripts/link-skills.sh`, `bun install` and `env NODE_ENV=production SKIP_ENV_VALIDATION=true turbo run build --filter='./packages/*'` alone run, as the release skill's step 5 needs:
   the install a pull that changes `bun.lock` or a `package.json` needs, and the build a pull that changes `packages/` needs, since the `playground` command imports their `dist`.
   That build needs `NODE_ENV` set and `SKIP_ENV_VALIDATION=true`, on its line, exported or in the session, since the main checkout has no `.env` and the packages' env checks fail without them, so a bare one is refused with the line `playground update`'s build step runs.
-  It fails open.
+  It fails open on a call it cannot read.
   Its tests are in `bun run test:file tests/scripts/hooks`.
   The backstop behind it is `lefthook.yml`'s pre-commit step `main-checkout`, alone at priority 1 so it runs first, before any step that writes (lefthook runs a tie in any order).
   It refuses a commit whose `git rev-parse --show-toplevel` is the factory's main checkout, the one `~/.playground/ops/run-slot.sh` links into (`scripts/link-skills.sh` makes that link), whatever wrapper, shell or cwd made it, since this hook reads a command's text and the step reads where the commit lands.
@@ -377,7 +382,7 @@ Only the first reading moves the folder, sets variables and records files for th
   `PLAYGROUND_ROLE` `dispatcher`, `lead` or `manager`, or else a registry name whose roster kind or name reads as one (a manager's name in `sessions.names`, or an old name `sessions.aliases` maps to a manager's kind).
   Its reason names the fix: start a worker through `scripts/spawn.sh`, which writes its roster row, and brief it with the task.
   Workers, checkers and the owner's own sessions keep both tools, so a reviewer's `code-review` sub-agents run, and a manager's forked skill runs through the Skill tool, which the hook leaves alone.
-  It fails open, and its tests are in `bun run test:file tests/scripts/hooks`.
+  It fails open on a call it cannot read, and its tests are in `bun run test:file tests/scripts/hooks`.
 
 ## no-off-palette-label
 
@@ -388,7 +393,7 @@ Only the first reading moves the folder, sets variables and records files for th
   A color it cannot read (a variable, an `--input` it cannot open) is refused, and the reason names the fix: one of the 22 hexes, by name, written literally.
   It recolors nothing, so a label made before the rule keeps its color.
   A GraphQL `createLabel` or `updateLabel` sent through `gh api graphql` is not read.
-  It fails open, and its tests are in `bun run test:file tests/scripts/hooks`, beside a pin that every color the repo's own code creates a label in is a 500, the auto-labeler workflow's included.
+  It fails open on a call it cannot read, and its tests are in `bun run test:file tests/scripts/hooks`, beside a pin that every color the repo's own code creates a label in is a 500, the auto-labeler workflow's included.
 
 ## no-ours-merge
 
@@ -403,7 +408,7 @@ Only the first reading moves the folder, sets variables and records files for th
   A single such part (`"$O"/d`), or a variable after a name (`$S/p$v`), runs, as it does in Claude Code.
   It also refuses an `rm` or an `rmdir` of a name directly in `/` (`/scratchpad_*`, `/x`), which the session moves into `$TMPDIR` or its scratchpad.
   A name a level deeper (`/usr/x`) and a redirect into `/` run, as they do in Claude Code.
-  It fails open.
+  It fails open on a call it cannot read.
 
 ## no-raw-delete
 
@@ -433,7 +438,7 @@ Only the first reading moves the folder, sets variables and records files for th
   An `--attach` reads only what gh posts, its alt text after `#`, else its file's name, so a path built from a variable (`"$S/after.png#After"`) passes when the variable sits before the alt's first `#`, or, with no `#`, before the name's last `/`.
   Its refusal gives the way out for a file, rule or patch that holds the word: name the file or rule by what it is ("the ship rule") with its line number, and keep the patch out of the comment.
   Write the patch to a file in your scratchpad, send its absolute path to the PR's worker by SendMessage, and say in the comment that a patch went to the author, since gh's `--attach` uploads only images and video (gh 2.103.3: "supported: png, jpg, jpeg, gif, webp, svg, mp4, mov, webm").
-  It fails closed only on a call that reads as a comment, and a hook that cannot start or times out lets the call through, so it never blocks every Bash call.
+  It fails closed only on a call that reads as a comment; when it cannot start it refuses, and when it times out it lets the call through ([Registered in both settings files](#registered-in-both-settings-files)).
   A PR body or a commit message is not a comment.
   The owners it guards are its `release-owners` list, A to Z, read as [Guard lists](#guard-lists) says; core's `release-owners.json` names none, so a fresh clone guards no owner until one is added.
   Its tests are `bun run test:file tests/scripts/hooks`, which `bun run test` runs rather than `test:skills`; run them before pushing a change to the hook.
@@ -450,7 +455,7 @@ Only the first reading moves the folder, sets variables and records files for th
   and turbo running `build`, `check-types`, `lint` or `test` (`turbo run <task>` or `turbo <task>`), by name, path or versioned package (`turbo@latest`), through `bunx`, `npx` (past their own options, `-y` or `-p turbo`) or `bun x`, but for `--help`, `--version` and `--dry-run`,
   whose directory (the Bash tool's cwd after any `cd`, or a `bun --cwd`, `bun run --cwd`, `bun install --cwd`, `bun test --cwd` or turbo's `--cwd`, so one typed from anywhere counts, and a clone's destination) is inside a worktree under `.claude/worktrees/`,
   unless the command runs through `~/.playground/ops/run-slot.sh`, naming that form (18 Oct: five worktree installs at once drove load1 to 66.8).
-  The main checkout is no-main-checkout's. It fails open, and its tests are in `bun run test:file tests/scripts/hooks`.
+  The main checkout is no-main-checkout's. It fails open on a call it cannot read, and its tests are in `bun run test:file tests/scripts/hooks`.
   A commit's pre-commit build takes a slot through `packages/scripts/src/commit-slot.ts`, and playbook's **slots** rule says which slot each way of committing takes.
 
 ## rules
@@ -501,6 +506,6 @@ Only the first reading moves the folder, sets variables and records files for th
   ZeroStarter's skills under `skills/zerostarter/`, which `.agents/skills/` links to and which a path reaches with its links resolved (one whose `source` names a tool, not a repository, is vendored and left out), `.agents/dashboard/`, `.agents/*.md` (not `.agents/adr/`),
   the root `AGENTS.md` and `CLAUDE.md`, `scripts/README.md` and `scripts/hooks/README.md`, and `docs/`; and anywhere, a handoff under the data folder's `handoffs/`.
   A Skill call or a typed `/writing-for-agents`, bare or a plugin's or folder's scoped copy (`ws-home:writing-for-agents`), leaves a mark under the data folder's `writing-first/`, a subagent's apart from its parent's, since a subagent's hook input carries its parent's session id beside its own `agent_id`; a compaction clears the session's marks.
-  With the skill installed nowhere (the config folder's `skills/`, the checkout's `.claude/skills/`, or a plugin `plugins/installed_plugins.json` lists, installed for the user and enabled in the user settings or installed for the session's project) it lets every write through, and it fails open.
+  With the skill installed nowhere (the config folder's `skills/`, the checkout's `.claude/skills/`, or a plugin `plugins/installed_plugins.json` lists, installed for the user and enabled in the user settings or installed for the session's project) it lets every write through, and it fails open on a call it cannot read.
   Its refusal names the bare skill or the scoped name the session's skill list shows, since a factory session loads its org's set through `--plugin-dir` under a name the hook cannot see.
   Its tests are in `bun run test:file tests/scripts/hooks` too.
