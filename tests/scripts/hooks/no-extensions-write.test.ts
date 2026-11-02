@@ -470,6 +470,10 @@ describe("a quoted argument is read as a command line only where a program runs 
       "a commit of a glob pathspec with a message naming a removal",
       "git commit docs/*.md -m 'fix: rm -rf ~ bug'",
     ],
+    [
+      "a git-only line whose commit message names a removal",
+      "git add -A && git commit -m 'fix: rm -rf ~ bug' && git push",
+    ],
   ])("%s runs from a worktree", async (_, command) => {
     expect(await at(command, join(homedir(), "x", ".claude", "worktrees", "y"))).toBeUndefined()
   })
@@ -580,6 +584,53 @@ describe("a quoted argument is read as a command line only where a program runs 
       "git commit --allow-empty -m 'rm -rf ~'; git log -1 --format=%s | xargs -I{} sh -c '{}'",
     ],
     ["a payload held in an array", `args=('rm -rf ~'); sh -c "\${args[0]}"`],
+    [
+      "a commit message sourced through process substitution",
+      "git commit --allow-empty -m 'rm -rf ~'; source <(git log -1 --format=%s)",
+    ],
+    [
+      "a commit message fed to sh as a here-string",
+      "git commit --allow-empty -m 'rm -rf ~'; sh <<< \"$(git log -1 --format=%s)\"",
+    ],
+    [
+      "a commit message sourced from stdin",
+      "git commit --allow-empty -m 'rm -rf ~'; . /dev/stdin <<< \"$(git log -1 --format=%s)\"",
+    ],
+    [
+      "a commit message written to a script sh runs",
+      "git commit --allow-empty -m 'rm -rf ~'; git log -1 --format=%s > f.sh; sh f.sh",
+    ],
+    [
+      "a commit message run as a substitution",
+      "git commit --allow-empty -m 'rm -rf ~'; $(git log -1 --format=%s)",
+    ],
+    [
+      "a commit message run through a variable",
+      "git commit --allow-empty -m 'rm -rf ~'; x=$(git log -1 --format=%s); $x",
+    ],
+    [
+      "a commit message piped into a glob program",
+      "git commit --allow-empty -m 'rm -rf ~'; git log -1 --format=%s | /bin/s?",
+    ],
+    [
+      "a commit message piped into ssh",
+      "git commit --allow-empty -m 'rm -rf ~'; git log -1 --format=%s | ssh h",
+    ],
+    [
+      "a commit message piped into ssh's sh",
+      "git commit --allow-empty -m 'rm -rf ~'; git log -1 --format=%s | ssh h sh",
+    ],
+    [
+      "a commit message piped into watch's sh",
+      "git commit --allow-empty -m 'rm -rf ~'; git log -1 --format=%s | watch -x sh",
+    ],
+    ["an argument fed to sh as a here-string through $_", "true 'rm -rf ~'; sh <<< \"$_\""],
+    ["an argument sourced through $_", "true 'rm -rf ~'; source <(echo \"$_\")"],
+    ["a positional fed to sh as a here-string", "set -- 'rm -rf ~'; sh <<< \"$1\""],
+    ["a positional piped into a glob program", "set -- 'rm -rf ~'; echo \"$1\" | /bin/s?"],
+    ["a positional piped into ssh", "set -- 'rm -rf ~'; echo \"$1\" | ssh h"],
+    ["a positional run as a command", "set -- 'rm -rf ~'; $1"],
+    ["a positional written to a script sh runs", "set -- 'rm -rf ~'; echo \"$1\" > f.sh; sh f.sh"],
   ])("%s stays refused", async (_, command) => {
     for (const cwd of [...homes, join(homedir(), "x", ".claude", "worktrees", "y")])
       expect(await at(command, cwd)).toContain("no-extensions-write hook refuses")
