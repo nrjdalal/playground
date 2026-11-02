@@ -7,6 +7,7 @@ import {
   rmdirSync,
   rmSync,
   statSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs"
 import { basename, dirname, join, relative } from "node:path"
@@ -86,6 +87,9 @@ export const withLock = <T>(data: string, run: () => T, wait = 30_000): T => {
   const start = Date.now()
   for (;;) {
     try {
+      // a rename keeps the folder's time, so it is stamped now, or a lock taken after a wait would read as old
+      const now = new Date()
+      utimesSync(mine, now, now)
       renameSync(mine, lock)
       break
     } catch (error) {
@@ -111,7 +115,10 @@ export const withLock = <T>(data: string, run: () => T, wait = 30_000): T => {
   try {
     return run()
   } finally {
-    drop(lock)
+    // moved aside before its removal, so the lock is never an empty folder a waiter's rename could land on
+    const aside = `${lock}.free-${crypto.randomUUID()}`
+    renameSync(lock, aside)
+    drop(aside)
   }
 }
 

@@ -5,12 +5,12 @@ import {
   readFileSync,
   renameSync,
   rmSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs"
 import { basename, dirname, join, sep } from "node:path"
 
-// imported by path, as dev-running.test.ts holds: pre-commit loads this file before the build that makes packages/*/dist
-import { makeScratch, removeScratch } from "../../../../../packages/safe-delete/src"
+import { makeScratch, removeScratch } from "@packages/safe-delete"
 
 // The launcher records its pid, process group, start time and the stack's task groups in its checkout, so `bun run dev:stop` can end a stack whose starting session has gone, by that record alone, never by a name or a pattern.
 export const RECORD = ".turbo/dev.pgid"
@@ -99,6 +99,9 @@ const underLock = <T>(path: string, run: () => T, busy: T): T => {
   }
   for (let waited = 0; ; waited += 10) {
     try {
+      // a rename keeps the folder's time, so it is stamped now, or a lock taken after a wait would read as old
+      const now = new Date()
+      utimesSync(mine, now, now)
       renameSync(mine, lock)
       break
     } catch (error) {
@@ -121,7 +124,10 @@ const underLock = <T>(path: string, run: () => T, busy: T): T => {
   try {
     return run()
   } finally {
-    drop(lock)
+    // moved aside before its removal, so the lock is never an empty folder a waiter's rename could land on
+    const aside = `${lock}.free-${crypto.randomUUID()}`
+    renameSync(lock, aside)
+    drop(aside)
   }
 }
 

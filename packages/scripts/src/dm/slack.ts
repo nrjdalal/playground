@@ -97,7 +97,16 @@ export async function locked<T>(dir: string, fn: () => Promise<T>): Promise<T> {
     const held = await Bun.file(owner)
       .text()
       .catch(() => "")
-    if (held === token) drop(path)
+    // moved aside before its removal, so the lock is never an empty folder a waiter's rename could land on
+    const aside = `${path}.free-${token}`
+    if (
+      held === token &&
+      (await rename(path, aside).then(
+        () => true,
+        () => false,
+      ))
+    )
+      drop(aside)
   }
 }
 

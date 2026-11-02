@@ -4,6 +4,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   writeFileSync,
@@ -24,11 +25,14 @@ const runStep = (fakes: Record<string, string>, script: string) => {
       chmodSync(join(bin, name), 0o755)
     }
     const out = join(real, "out")
+    const tmp = join(real, "tmp")
+    mkdirSync(tmp)
     const step = ["sh", "-c", script.replaceAll("$OUT", JSON.stringify(out))]
     const env: Record<string, string | undefined> = {
       ...process.env,
       HOME: real,
       PATH: `${bin}:${process.env.PATH ?? ""}`,
+      TMPDIR: tmp,
     }
     for (const key of ["UV_CACHE_DIR", "UV_PYTHON_INSTALL_DIR"]) delete env[key]
     const run = Bun.spawnSync(
@@ -41,6 +45,7 @@ const runStep = (fakes: Record<string, string>, script: string) => {
     )
     expect(run.exitCode).toBe(0)
     return {
+      left: readdirSync(tmp),
       marker: existsSync(join(real, ".claude/marker")),
       out: existsSync(out) ? readFileSync(out, "utf8") : "",
     }
@@ -54,14 +59,15 @@ test("a step writes under the sandbox's home, never the real ~/.claude (#1430)",
   expect(marker).toBe(false)
 })
 
-test("a step runs in a marked scratch folder, gone once the run ends (#545)", () => {
-  const { out } = runStep(
+test("a step runs in a marked scratch folder of the temp folder, gone once the run ends (#545)", () => {
+  const { left, out } = runStep(
     {},
     'printf "%s %s" "$TEST_SANDBOX_HOME" "$(test -f "$TEST_SANDBOX_HOME/.safe-delete-scratch" && echo marked)" > $OUT',
   )
   const [home, marked] = out.split(" ")
+  expect(home).toContain("/tmp/test-sandbox-")
   expect(marked).toBe("marked")
-  expect(existsSync(home!)).toBe(false)
+  expect(left).toEqual([])
 })
 
 test("uv's cache folder reaches a step (#1443)", () => {

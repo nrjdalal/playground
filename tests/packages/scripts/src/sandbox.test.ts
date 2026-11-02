@@ -1,7 +1,16 @@
 import { expect, test } from "bun:test"
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
 
 import { MARKER, removeScratch } from "../../../../packages/safe-delete/src"
 import { sandbox } from "../../../../packages/scripts/src/sandbox"
@@ -96,9 +105,19 @@ test("a test's own fake gh ahead of the sandbox's answers instead", () => {
   }
 })
 
-test("the sandbox is a marked scratch folder, which removeScratch removes (#545)", () => {
-  const { scratch } = sandbox()
-  expect(existsSync(join(scratch, MARKER))).toBe(true)
-  expect(removeScratch(scratch)).toBeNull()
-  expect(existsSync(scratch)).toBe(false)
+test("the sandbox is a marked scratch folder in the temp folder, which removeScratch removes (#545)", () => {
+  const root = mkdtempSync(join(tmpdir(), "sandbox-tmp-"))
+  const was = process.env.TMPDIR
+  process.env.TMPDIR = root
+  try {
+    const { scratch } = sandbox()
+    expect(realpathSync(dirname(scratch))).toBe(realpathSync(root))
+    expect(existsSync(join(scratch, MARKER))).toBe(true)
+    expect(removeScratch(scratch, root)).toBeNull()
+    expect(readdirSync(root)).toEqual([])
+  } finally {
+    if (was === undefined) delete process.env.TMPDIR
+    else process.env.TMPDIR = was
+    rmSync(root, { force: true, recursive: true })
+  }
 })

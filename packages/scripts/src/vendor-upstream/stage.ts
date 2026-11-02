@@ -147,7 +147,7 @@ const dropStaging = (staging: string, coreDir: string) => {
   if (refused) console.error(`vendor:upstream: ${refused}`)
 }
 
-// Stages the files in core, writes upstream/SOURCE and upstream/MANIFEST, and swaps each upstream skill folder and upstream/ in only when every staged byte matches its manifest sha; a skill's CREDITS.md, which is core's, stays, a skill the old MANIFEST held and the new one does not leaves, and a mismatch removes the staging folder and leaves core as it was. It never commits.
+// Stages the files in core, writes upstream/SOURCE and upstream/MANIFEST, and swaps each upstream skill folder and upstream/ in only when every staged byte matches its manifest sha; a skill's CREDITS.md, which is core's, stays, a skill the old MANIFEST held and the new one does not leaves, and a mismatch leaves core as it was; the staging folder goes however the run ends. It never commits.
 export const vendor = ({
   coreDir,
   files,
@@ -164,45 +164,45 @@ export const vendor = ({
   const entries = parseManifest(manifest)
   const bytesOf = new Map(files.map(({ path, bytes }) => [path, bytes]))
   const staging = makeScratch(".upstream-staging-", coreDir)
-  for (const { path } of entries) {
-    const dest = join(staging, path)
-    mkdirSync(dirname(dest), { recursive: true })
-    const bytes = bytesOf.get(path)
-    if (bytes === undefined)
-      throw new Error(`vendor: MANIFEST names ${path}, which the downloaded tree does not hold`)
-    writeFileSync(dest, bytes)
-  }
-  mkdirSync(join(staging, "upstream"), { recursive: true })
-  writeFileSync(
-    join(staging, "upstream", "SOURCE"),
-    `${repo} ${sha}\n${new Date().toISOString().slice(0, 10)}\n`,
-  )
-  writeFileSync(join(staging, "upstream", "MANIFEST"), manifest)
-  const mismatches = entries.flatMap(({ path, sha: wanted }) => {
-    const got = blobSha(readFileSync(join(staging, path)))
-    return got === wanted ? [] : [`${path}: staged ${got}, MANIFEST says ${wanted}`]
-  })
-  if (mismatches.length > 0) {
+  try {
+    for (const { path } of entries) {
+      const dest = join(staging, path)
+      mkdirSync(dirname(dest), { recursive: true })
+      const bytes = bytesOf.get(path)
+      if (bytes === undefined)
+        throw new Error(`vendor: MANIFEST names ${path}, which the downloaded tree does not hold`)
+      writeFileSync(dest, bytes)
+    }
+    mkdirSync(join(staging, "upstream"), { recursive: true })
+    writeFileSync(
+      join(staging, "upstream", "SOURCE"),
+      `${repo} ${sha}\n${new Date().toISOString().slice(0, 10)}\n`,
+    )
+    writeFileSync(join(staging, "upstream", "MANIFEST"), manifest)
+    const mismatches = entries.flatMap(({ path, sha: wanted }) => {
+      const got = blobSha(readFileSync(join(staging, path)))
+      return got === wanted ? [] : [`${path}: staged ${got}, MANIFEST says ${wanted}`]
+    })
+    if (mismatches.length > 0) return { ok: false, mismatches }
+    const oldManifest = join(coreDir, "upstream", "MANIFEST")
+    const was = existsSync(oldManifest)
+      ? skillsIn(parseManifest(readFileSync(oldManifest, "utf8")))
+      : new Set<string>()
+    const now = skillsIn(entries)
+    for (const name of new Set([...was, ...now])) {
+      const live = join(coreDir, "skills", name)
+      const credits = join(live, "CREDITS.md")
+      const kept = existsSync(credits) ? readFileSync(credits) : null
+      rmSync(live, { force: true, recursive: true })
+      if (!now.has(name)) continue
+      mkdirSync(dirname(live), { recursive: true })
+      renameSync(join(staging, "skills", name), live)
+      if (kept) writeFileSync(credits, kept)
+    }
+    rmSync(join(coreDir, "upstream"), { force: true, recursive: true })
+    renameSync(join(staging, "upstream"), join(coreDir, "upstream"))
+    return { ok: true, files: entries.length }
+  } finally {
     dropStaging(staging, coreDir)
-    return { ok: false, mismatches }
   }
-  const oldManifest = join(coreDir, "upstream", "MANIFEST")
-  const was = existsSync(oldManifest)
-    ? skillsIn(parseManifest(readFileSync(oldManifest, "utf8")))
-    : new Set<string>()
-  const now = skillsIn(entries)
-  for (const name of new Set([...was, ...now])) {
-    const live = join(coreDir, "skills", name)
-    const credits = join(live, "CREDITS.md")
-    const kept = existsSync(credits) ? readFileSync(credits) : null
-    rmSync(live, { force: true, recursive: true })
-    if (!now.has(name)) continue
-    mkdirSync(dirname(live), { recursive: true })
-    renameSync(join(staging, "skills", name), live)
-    if (kept) writeFileSync(credits, kept)
-  }
-  rmSync(join(coreDir, "upstream"), { force: true, recursive: true })
-  renameSync(join(staging, "upstream"), join(coreDir, "upstream"))
-  dropStaging(staging, coreDir)
-  return { ok: true, files: entries.length }
 }

@@ -118,7 +118,7 @@ test("a meeting still recording shows only with --live, marked partial, past a t
   expect(transcripts[1]!.lines).toEqual(["[00:02] Speaker 0: So far."])
 })
 
-test("the database's copy lands in a marked scratch folder of the temp folder given, gone once it is read (#545)", () => {
+test("the database's copy lands in a scratch folder of the temp folder given, gone once it is read (#545)", () => {
   const tmp = scratch()
   expect(readTranscripts(dir, { tmp }).length).toBeGreaterThan(0)
   expect(readdirSync(tmp)).toEqual([])

@@ -36,7 +36,14 @@ export const takeLock = (dir: string): { release: () => void } | { held: number 
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       renameSync(mine, lock)
-      return { release: () => drop(lock) }
+      // moved aside before its removal, so the lock is never an empty folder a waiter's rename could land on
+      return {
+        release: () => {
+          const aside = `${lock}.free-${process.pid}`
+          renameSync(lock, aside)
+          drop(aside)
+        },
+      }
     } catch {
       const pid = holder(lock)
       if (pid !== null) {

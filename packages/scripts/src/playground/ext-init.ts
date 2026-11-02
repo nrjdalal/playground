@@ -126,10 +126,17 @@ export async function extInit(data: string, run: Run, confirm: Confirm): Promise
   const root = extensionsDir(data)
   const dir = scopeDir(data, login)
   // A root this run made goes again when the run fails, since a root with no policy.json refuses every settings read where no root reads the defaults: it starts as a scratch folder renamed into place, which keeps its marker until the run lands.
-  const made = !existsSync(root)
+  let made = !existsSync(root)
   if (made) {
     mkdirSync(dirname(root), { recursive: true })
-    renameSync(makeScratch(`${basename(root)}.`, dirname(root)), root)
+    const fresh = makeScratch(`${basename(root)}.`, dirname(root))
+    try {
+      renameSync(fresh, root)
+    } catch {
+      made = false
+      const refused = removeScratch(fresh, dirname(root))
+      if (refused) console.error(`ext init: ${refused}`)
+    }
   }
   try {
     withLock(data, () => {

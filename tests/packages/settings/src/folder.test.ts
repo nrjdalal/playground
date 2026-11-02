@@ -6,6 +6,7 @@ import {
   readdirSync,
   readFileSync,
   rmSync,
+  statSync,
   utimesSync,
   writeFileSync,
 } from "node:fs"
@@ -203,6 +204,24 @@ test("an unmarked lock left behind goes aside once stale, and stays there with i
   } finally {
     said.mockRestore()
   }
+})
+
+test("a lock taken after a wait reads as just taken, so its stale bound starts at the take (#545)", async () => {
+  const at = data("waited")
+  const lock = lockPath(at)
+  const holder = Bun.spawn(
+    [
+      process.execPath,
+      "-e",
+      `import { withLock } from ${JSON.stringify(folder)}\nwithLock(${JSON.stringify(at)}, () => { console.log("held"); Bun.sleepSync(1_500) })`,
+    ],
+    { stdout: "pipe" },
+  )
+  const reader = holder.stdout.getReader()
+  await reader.read()
+  const age = withLock(at, () => Date.now() - statSync(lock).mtimeMs)
+  await holder.exited
+  expect(age).toBeLessThan(500)
 })
 
 test("two processes writing at once both land, one commit each", async () => {

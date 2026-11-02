@@ -143,6 +143,29 @@ describe("vendoring", () => {
     }
   })
 
+  test("a MANIFEST path the files lack throws, leaves core as it was and takes its staging folder with it (#545)", () => {
+    const root = mkdtempSync(join(tmpdir(), "vendor-upstream-test-"))
+    try {
+      const core = coreOf(root)
+      const before = snapshot(core)
+      const entries = parseManifest(manifestFor(kept()))
+      entries.push({ path: "skills/tdd/EXTRA.md", sha: "0".repeat(40) })
+      expect(() =>
+        vendor({
+          coreDir: core,
+          files: kept(),
+          manifest: manifestText(entries),
+          repo: "upstream/skills",
+          sha: "a".repeat(40),
+        }),
+      ).toThrow("MANIFEST names skills/tdd/EXTRA.md")
+      expect(snapshot(core)).toBe(before)
+      expect(staged(core)).toEqual([])
+    } finally {
+      rmSync(root, { force: true, recursive: true })
+    }
+  })
+
   test("one changed byte fails and leaves core as it was", () => {
     const root = mkdtempSync(join(tmpdir(), "vendor-upstream-test-"))
     try {
