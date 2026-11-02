@@ -21,7 +21,22 @@ type Environment = Record<string, string | undefined>
 const GUARD = "no-desktop-owner-app"
 const TOOL = /^agent-desktop(?:@.*)?$/
 const MENTION = /agent-desktop/
-const LAUNCHERS = new Set(["bun", "bunx", "find", "npm", "npx", "pnpm", "pnpx", "yarn"])
+const LAUNCHERS = new Set([
+  "bun",
+  "bunx",
+  "find",
+  "flock",
+  "npm",
+  "npx",
+  "pnpm",
+  "pnpx",
+  "setsid",
+  "watch",
+  "yarn",
+])
+// Wrappers a shell line may hide in: watch joins its words past its options into one sh -c line, flock -c runs its string, and a word of any of them holding a space may be one.
+const LINES = new Set(["flock", "setsid", "watch"])
+const WATCH_TAKES = new Set(["--equexit", "--interval", "--shotsdir", "-n", "-q", "-s"])
 const INTERPRETERS = new Set([
   "bun",
   "deno",
@@ -164,10 +179,8 @@ function quotedParts(code: string) {
 }
 
 const RUNNERS = new Set([...LAUNCHERS, ...SHELLS, "command", "exec", "time", "xargs"])
-// Wrappers whose words may run as a command of their own.
-const LINES = new Set(["flock", "setsid", "watch"])
 
-// Whether a shell line runs agent-desktop, or holds a form this hook refuses in a Bash call naming it (a script file, a wrapper the hook does not follow); a line it cannot read counts as one.
+// Whether a shell line runs agent-desktop, or holds a form this hook refuses in a Bash call naming it (a script file, or flock, setsid or watch naming it); a line it cannot read counts as one.
 async function runsTool(line: string): Promise<boolean> {
   try {
     const env: Env = { cwd: undefined, files: new Map(), known: {}, process: {}, vars: new Map() }
@@ -252,6 +265,23 @@ async function judgeText(
       const at = args.findIndex((a) => a.value === "--")
       const inner = { ...cmd, words: at === -1 ? [] : args.slice(at + 1) }
       return inner.words.length === 0 ? undefined : examine(inner, here, visit, false)
+    }
+    if (LINES.has(name) && mention) {
+      const lines = args.filter((a) => /\s/.test(a.value)).map((a) => a.value)
+      if (name === "watch") {
+        let k = 0
+        while (args[k]?.value.startsWith("-")) k += WATCH_TAKES.has(args[k].value) ? 2 : 1
+        lines.push(
+          args
+            .slice(k)
+            .map((a) => a.value)
+            .join(" "),
+        )
+      }
+      for (const line of lines) {
+        const verdict = await judgeText(line, here.cwd, apps, depth + 1)
+        if (verdict) return verdict
+      }
     }
     let words: Word[] | undefined
     if (TOOL.test(name)) words = args
