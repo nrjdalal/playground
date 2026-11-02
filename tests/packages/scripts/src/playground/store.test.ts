@@ -109,7 +109,7 @@ describe("playground ext", () => {
     expect(why.map((entry) => entry.reason)).toEqual(["clear", "shorter replies"])
   })
 
-  test("accept from a session with a role is refused, by --by owner too, and the owner's own accept with no role accepts", async () => {
+  test("accept from a session with a role is refused, by --by owner too and before its words are read, and the owner's own accept with no role accepts", async () => {
     const at = folder("accept")
     writeFileSync(join(scratch, "accept.md"), "Say less.\n")
     const put = await ext(at, [
@@ -136,6 +136,9 @@ describe("playground ext", () => {
       )
       expect(existsSync(join(scopeDir(at, "tester"), "rules/less.md"))).toBe(false)
     }
+    const bare = await ext(at, ["accept"], "", "worker")
+    expect(bare.code).toBe(1)
+    expect(bare.err).toContain("accept is the owner's own call")
     const accepted = await ext(at, ["accept", "tester", "rule", "less", rev, "--reason", "r"])
     expect(accepted.code).toBe(0)
     expect(accepted.out).toBe(`rev ${git(at, "tester", ["rev-parse", "HEAD"])} is accepted`)

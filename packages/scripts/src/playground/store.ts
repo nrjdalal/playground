@@ -242,12 +242,12 @@ export async function extCommand(words: string[], io: Io): Promise<number> {
     for (const line of done(importFrom(io.data, dir, Boolean(options["--dry-run"]), who)).lines)
       io.out(line)
   } else if (verb === "score" || verb === "accept" || verb === "reject") {
-    const at = ref()
-    const rev = need(positional[3], "a rev")
     if (verb === "accept" && io.role)
       throw new Error(
         `accept is the owner's own call, so a session with a role (${io.role}) scores a proposal instead; the owner runs \`env -u PLAYGROUND_ROLE playground ext accept …\` as a ! command in the dispatcher's terminal window, which carries PLAYGROUND_ROLE=dispatcher`,
       )
+    const at = ref()
+    const rev = need(positional[3], "a rev")
     const who = whoOf(options)
     const score = verb === "score" ? Number(need(positional[4], "a score from 0 to 5")) : undefined
     if (score !== undefined && !(Number.isInteger(score) && score >= 0 && score <= 5))
