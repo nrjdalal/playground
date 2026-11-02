@@ -572,6 +572,14 @@ describe("a quoted argument is read as a command line only where a program runs 
     ["a script named awk by a relative path given a removal", "bin/awk 'rm -rf ~'"],
     ["awk run with PATH set in the call", "PATH=. awk 'rm -rf ~'"],
     [
+      "awk named as /usr/bin/time -o's output file, running watch",
+      "/usr/bin/time -o awk watch 'rm -rf ~'",
+    ],
+    ["awk named as sudo --prompt's value, running watch", "sudo --prompt awk watch 'rm -rf ~'"],
+    ["cut under time, given watch and a removal", "time cut watch 'rm -rf ~'"],
+    ["sort under nohup, given watch and a removal", "nohup sort watch 'rm -rf ~'"],
+    ["uniq under exec, given watch and a removal", "exec uniq watch 'rm -rf ~'"],
+    [
       "awk after a sed, which keeps canary's reading",
       "sed -n '/sh -c/p' /dev/null; awk '$3 ~ /runner/' /dev/null",
     ],
