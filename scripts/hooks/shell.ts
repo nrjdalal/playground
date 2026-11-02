@@ -941,12 +941,12 @@ async function plainTarget(args: Word[], env: Env): Promise<string | undefined> 
   return path && directory(path)
 }
 
-// A text with ~- and ~+ expanded as the shell expands them, to OLDPWD and the current folder; undefined when the hook cannot tell that folder.
+// A text with ~- and ~+ expanded as the shell expands them, to OLDPWD and the current folder; a ~- whose OLDPWD the hook cannot tell stays as typed, as the hooks read it before OLDPWD was followed and as bash leaves it unset, and a ~+ is undefined without the current folder.
 function expandDirs(text: Text, env: Env): string | undefined {
   const tilde = (text as Partial<Word>).quoted ? null : /^~([-+])(?=\/|$)/.exec(text.value)
   if (!tilde) return text.value
-  const base = tilde[1] === "-" ? env.old : env.cwd
-  return base && base + text.value.slice(2)
+  if (tilde[1] === "-") return env.old ? env.old + text.value.slice(2) : text.value
+  return env.cwd && env.cwd + text.value.slice(2)
 }
 
 const directory = async (path: string): Promise<string | undefined> => {

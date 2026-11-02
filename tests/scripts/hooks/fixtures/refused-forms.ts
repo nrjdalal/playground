@@ -1604,13 +1604,17 @@ gh api graphql -f query="$QUERY"`,
   {
     folders: ["extensions root"],
     guards: ["no-extensions-write"],
-    rows: () => [
+    rows: ({ SCOPE }) => [
       ["a redirect by ~-, which zsh starts at the call's folder", "echo x > ~-/policy.json"],
       [
         "cd - before any cd, which zsh takes to the call's folder, then a relative rm",
         "cd -; rm -rf lists",
       ],
       ["cd ~- before any cd, then a relative rm", "cd ~-; rm -rf lists"],
+      [
+        "a redirect by ~- after a pushd -n, which moves nothing",
+        `pushd -n ${SCOPE}; echo x > ~-/policy.json`,
+      ],
     ],
     source: "#468",
   },

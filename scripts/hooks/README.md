@@ -15,7 +15,7 @@ Their tests are `bun run test:file tests/scripts/hooks`.
   It follows the folder a command runs in through `cd` as zsh, the Bash tool's shell, reads it, with OLDPWD (`cd -`, `~-`), and through `env -C <dir>`, `env -C<dir>` and `env --chdir=<dir>`.
   A hook that sets `old` on its `Env` starts OLDPWD at the call's own folder, as zsh does; no-extensions-write sets it.
   A `CDPATH` the call sets, exports or inherits is tried after the current folder, or strictly in its order when it names `.` or holds an empty entry, as zsh tries it.
-  It keeps no directory stack: a `pushd` takes its first word that is no option, as typed, or home when there is none, and a `popd` leaves the folder unread, as the hooks read both before `cd` was followed, and OLDPWD is unread after either.
+  It keeps no directory stack: a `pushd` takes its first word that is no option, as typed, or home when there is none, and a `popd` leaves the folder unread, as the hooks read both before `cd` was followed, and a `~-` after either, or wherever OLDPWD is unread, stays as typed, as those hooks read it.
   A `cd` or `pushd` with a glob in its folder is handed to the hook as any program's words are, and one it cannot follow leaves the folder unread.
   It does not read a `~-` before a quoted part (`~-/"x"`), zsh's `cd +N` and `cd -N`, a two-word `cd old new` or a `cdpath=(…)` array, and it reads a `bash -c` script's `CDPATH` in zsh's order too, so a relative write after one of these is judged in the folder the reader takes.
   `pathOf` folds a path's `..` as typed, as `cd`, `bun --cwd` and `npm --prefix` fold it, and `openedPathOf` as the kernel opens it, each link resolved before a `..` after it steps up; no-extensions-write judges both.
