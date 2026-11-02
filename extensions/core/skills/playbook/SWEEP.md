@@ -1,7 +1,7 @@
 # Sweep (leads)
 
 Each lead sweeps its own agents every 15 minutes, from a session cron job kept running as [SESSIONS.md](SESSIONS.md#keep-the-sweep-running) says.
-The cron is the backstop: every event a lead acts on already reaches it as a message (a worker's ready CI, ops-report's alerts), and each turn re-reads the lead's whole context, so the Builder's sweep spends one call while nothing has changed, and Ops' adds only step 2's reads (Inbox #i706).
+The cron is the backstop: every event a lead acts on already reaches it as a message (a worker's ready CI, ops-sweep's alerts), and each turn re-reads the lead's whole context, so the Builder's sweep spends one call while nothing has changed, and Ops' adds only step 2's reads (Inbox #i706).
 A sweep is the lead's one look at its sessions between turns: it finds each agent's state and acts on it, so nothing waits unseen.
 Work the steps in order.
 
@@ -53,9 +53,21 @@ Done when every agent of yours is working, has reported, or has had its state ac
 
 ## 4. Run the recovery scan and chase stalled PRs (the Builder)
 
-The Builder runs code-review-loop's [recovery scan](../code-review-loop/SKILL.md#the-recovery-scan) and acts on every row it leaves, and chases at once each `pr-stalled` entry in `~/.playground/ops/alerts-pending.json`:
-an open the dispatcher's or a work-org PR of ours with no new commit, verdict or comment for 30 minutes (after one sat two hours unnoticed) that is truly stuck (a conflict, or every gate green and still unmerged).
-ops-report writes them to `ops/alerts-prs.json` and ops-unstick folds that in; a PR held on purpose, whose body or newest comment says held or parked or which carries a park or hold label, is left out, and so is one waiting only on its checks or merge-on-ready.
+The Builder runs code-review-loop's [recovery scan](../code-review-loop/SKILL.md#the-recovery-scan) and acts on every row it leaves, and chases at once each `pr-stalled` entry in `~/.playground/ops/alerts-pending.json`.
+ops-sweep writes them to `ops/alerts-prs.json` every 5 minutes (`stalledPrs` in `packages/scripts/src/ops-sweep/sweep.ts`) and ops-unstick folds that in, one entry per open PR of ours in the factory repo or a live roster row's PR repo, for either reason:
+
+- an idle PR: no new commit, verdict or comment for 30 minutes (after one sat two hours unnoticed), unless it waits on its checks or merge-on-ready;
+- a repeated score: its last 4 ReviewBot verdicts hold one score below 5, its line reading like `last 4 verdicts 3/5, round 12`, since each fresh round resets the idle clock (one PR parked after 12 rounds, all 3/5).
+
+A PR held on purpose is left out: one with a park or hold label, or whose body or newest comment has a line opening with Held or Parked.
+
+For a repeated score, the Builder picks one of three with the PR's worker, since another round of the same fix scores the same:
+
+- narrow the change to a literal list of the cases it handles;
+- move the guard to a layer that parses no shell;
+- park it with the workaround written down, in its body's line opening with Parked.
+
+Done when the worker's next push carries the narrowed change or the moved guard, or the PR reads parked, and the choice is in the Builder's message to the worker.
 
 Every clean-or-conflict call (a conflict above, a head behind canary) comes from a tool that reads git's exit code, never a tree line read by eye: `bun run pr:train forecast` for the queue, `bun run pr:merge <n> --explain` for one PR, whose first line says whether its head merges clean with canary now and as which tree,
 or the files it conflicts in.
