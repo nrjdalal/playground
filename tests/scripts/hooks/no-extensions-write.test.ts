@@ -21,6 +21,8 @@ const LINK = join(HOME, "store")
 const WORK = join(HOME, "work")
 const BIG = [join(HOME, "big-a"), join(HOME, "big-b")]
 for (const file of BIG) writeFileSync(file, "x".repeat(900_000))
+const WORDS = join(HOME, "words")
+writeFileSync(WORDS, "y ".repeat(400_000))
 mkdirSync(join(WORK, "playground"), { recursive: true })
 symlinkSync(ROOT, LINK)
 afterAll(() => rmSync(HOME, { force: true, recursive: true }))
@@ -332,6 +334,44 @@ describe("a direct write into the extensions root is refused, naming the owner's
     expect(reason).toContain("no-extensions-write hook refuses")
     expect(performance.now() - started).toBeLessThan(1_000)
   }, 20_000)
+
+  // a variable set once, then a program after each, at the cap
+  const variables = (each: string) => {
+    let script = ""
+    for (let i = 0; script.length < 130_000; i++) script += `V${i}=x${i}; ${each}`
+    return `${script}true`
+  }
+  const fill = (head: string, unit: string, tail: string) =>
+    head + unit.repeat(Math.floor((130_000 - head.length - tail.length) / unit.length)) + tail
+  test.each([
+    ["a brace with no close", fill("echo {", ",", ""), false, 1_000],
+    [
+      "xargs -I over a large stdin",
+      fill(`cat ${WORDS} | xargs -I@ git -c alias.x="!`, "@ ", '" x'),
+      true,
+      1_000,
+    ],
+    ["env -S", fill("env -S'", "-S ", "' true"), false, 1_000],
+    // each variable's path is still read from the filesystem, so these take longer, inside bounds canary misses (2.4 to 2.9 s and 6 to 9.5 s)
+    ["distinct variables", variables(""), false, 2_000],
+    ["distinct variables, each with a program", variables("true; "), false, 3_000],
+    [
+      "a printf escape format over many arguments",
+      `printf '%s${"\\\\x41".repeat(16_000)}' ${"x ".repeat(3_000)}> /tmp/nxw-p`,
+      false,
+      1_000,
+    ],
+  ])(
+    "%s at the command cap is read inside its bound",
+    async (_, command, refused, bound) => {
+      const started = performance.now()
+      const reason = await bash(command, "/tmp")
+      if (refused) expect(reason).toContain("split it into shorter calls")
+      else expect(reason).toBeUndefined()
+      expect(performance.now() - started).toBeLessThan(bound)
+    },
+    60_000,
+  )
 
   test.each([300, 8_000])(
     "an eval chain %d deep ahead of a write is refused inside the hook's time",
