@@ -11,6 +11,7 @@ Every hook reads a wrapper (`doas`, `env`, `nice`, `nohup`, `stdbuf`, `sudo`, `t
 An option missing from that list is read both as a flag and as taking the next word, and an option's value in a variable as one word, as none and as several; each hook judges the command under every reading through `run()`, so a missing option costs at most a refusal, and adding it to the list fixes one.
 A hook that calls `parse` itself (no-desktop-owner-app's shell scan, no-false-green, no-kill-by-name's xargs read, and `shell.ts`'s read of a substitution's output) takes the first reading, the flag and the one word, as canary read them.
 A command's parse makes at most 16 other readings (`READINGS`), so a call holding many such options is read in bounded time; past them, an option is read as a flag alone, as canary read it.
+Only the first reading moves the folder, sets variables and records files for the commands after it; each other reading runs on its own copy of them, taken before the command.
 
 ## Registered in both settings files
 
