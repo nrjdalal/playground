@@ -1,5 +1,5 @@
 // PreToolUse hook: refuses a factory session's write into the extensions root, where every guard's list, policy.json and each scope's sources live, and its playground CLI call that changes what a guard reads to allow or deny a call, so no session edits a list in one call and makes the guarded call in the next.
-import { existsSync, statSync } from "node:fs"
+import { existsSync, readdirSync, statSync } from "node:fs"
 import { homedir } from "node:os"
 import { dirname, join, resolve, sep } from "node:path"
 
@@ -288,11 +288,24 @@ function inspect(raw: string, environment: Environment) {
     const next = root.slice(at === sep ? 1 : at.length + 1).split(sep)[0]
     const pattern = new Bun.Glob(first)
     if (pattern.match(next)) return folder
-    if (!existsSync(folder)) return undefined
-    for (const entry of pattern.scanSync({ cwd: folder, dot: true, onlyFiles: false })) {
+    for (const entry of entriesOf(folder)) {
+      if (!pattern.match(entry)) continue
       const path = join(folder, entry)
       if (inRoot(path) || above(path, true)) return folder
     }
+  }
+  // each folder's entries, read once a check, since a command may hold thousands of globs in one folder
+  const listings = new Map<string, string[]>()
+  const entriesOf = (folder: string): string[] => {
+    let found = listings.get(folder)
+    if (found) return found
+    try {
+      found = readdirSync(folder)
+    } catch {
+      found = []
+    }
+    listings.set(folder, found)
+    return found
   }
   const seen = new Set<string>()
   // where each scope's variables were read to for their lines, and judged to for each cwd and remover, so each variable is read once rather than once a command

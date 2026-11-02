@@ -398,6 +398,14 @@ describe("a direct write into the extensions root is refused, naming the owner's
     60_000,
   )
 
+  test("distinct globs in the home at the command cap are read inside a second", async () => {
+    let command = "rm -rf"
+    for (let i = 0; command.length < 130_000; i++) command += ` ./t${i}*`
+    const started = performance.now()
+    expect(await bash(command)).toBeUndefined()
+    expect(performance.now() - started).toBeLessThan(1_000)
+  }, 60_000)
+
   test.each([300, 8_000])(
     "an eval chain %d deep ahead of a write is refused inside the hook's time",
     async (depth) => {
