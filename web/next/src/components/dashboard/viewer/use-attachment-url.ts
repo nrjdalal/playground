@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query"
 
 import { apiClient } from "@/lib/api/client"
 
-// An ask's file, fetched with the owner's cookie from the dashboard's own page, since its route takes a trusted Origin, which an <img> never sends, and shown through a blob URL. One fetch a file for the page's life, shared by its thumbnail and its slide; null until it arrives, and while enabled is false (a slide far from the one shown).
+// An ask's, a draft's or a read-only update's file, fetched with the owner's cookie from the dashboard's own page, since its route takes a trusted Origin, which an <img> never sends, and shown through a blob URL. One fetch a file for the page's life, shared by its thumbnail and its slide; null until it arrives, and while enabled is false (a slide far from the one shown).
 export function useAttachmentUrl(id: string, enabled = true): string | null {
   const { data } = useQuery({
     enabled,
