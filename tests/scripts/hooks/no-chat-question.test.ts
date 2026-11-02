@@ -8,6 +8,7 @@ import {
   type Deps,
   DASHBOARD_DEADLINE_MS,
   readStatus,
+  LEAD_REASON,
   REASON,
 } from "../../../scripts/hooks/no-chat-question"
 import { capital, OLD, OLD_NAMES } from "../../session-names"
@@ -217,23 +218,33 @@ describe("a manager's reply that asks Quilla a decision is refused until it is i
     expect(REASON.indexOf("bun run ask open")).toBeLessThan(REASON.indexOf("bun run ask new"))
   })
 
-  test("every manager: the leads by role, a manager by role, and each by its session name", async () => {
-    expect(await stop("Merge them now?", { role: "lead" })).toBe(REASON)
+  // cmux restores a session without PLAYGROUND_ROLE, so a manager is also known by its session name or roster kind, as role.ts reads them.
+  test("the dispatcher keeps its line by role, by its session name and as the second dispatcher, and so does a manager by role", async () => {
+    expect(await stop("Merge them now?", { role: "dispatcher" })).toBe(REASON)
     expect(await stop("Merge them now?", { role: "manager" })).toBe(REASON)
-    for (const name of [OLD.dispatcher, OLD.builder, OLD.ops, OLD.planner])
+    for (const name of [OLD.dispatcher, `${OLD.dispatcher}-2`])
       expect(await stop("Merge them now?", { name, role: "" })).toBe(REASON)
   })
 
-  // cmux restores a session without PLAYGROUND_ROLE, so the second dispatcher and the optimizer are known by name, as role.ts reads them.
-  test.each([
-    { label: `${OLD.dispatcher}-2, the second dispatcher`, name: `${OLD.dispatcher}-2` },
-    { label: "the optimizer", name: "optimizer" },
-  ])("$label, restored with no role, is a manager by its session name", async ({ name }) => {
-    expect(await stop("Merge them now?", { name, role: "" })).toBe(REASON)
+  test("a lead is sent to the dispatcher by role, by its session name and by its roster kind", async () => {
+    expect(await stop("Merge them now?", { role: "lead" })).toBe(LEAD_REASON)
+    for (const name of [OLD.builder, OLD.ops, OLD.planner, "optimizer", "x7mh4d-builder"])
+      expect(await stop("Merge them now?", { name, role: "" })).toBe(LEAD_REASON)
   })
 
-  test("a manager of a new name, restored with no role, is a manager by its roster kind", async () => {
-    expect(await stop("Merge them now?", { name: "x7mh4d-builder", role: "" })).toBe(REASON)
+  test("the lead's reason sends the decision to the dispatcher by SendMessage and keeps it out of chat", () => {
+    expect(LEAD_REASON).toBe(
+      "send the decision to the dispatcher with SendMessage, which posts it to the Inbox, and keep the question out of chat; once the dispatcher names its #iN, say in chat that it's in the inbox as #iN",
+    )
+  })
+
+  test("a lead naming a closed item is refused with the lead's line, saying the item is not open", async () => {
+    const reason = await stop("It's in the inbox as #i40. Ship now?", {
+      role: "lead",
+      statuses: { "#i40": "approved" },
+    })
+    expect(reason).toStartWith(LEAD_REASON)
+    expect(reason).toContain("#i40 is approved")
   })
 
   test("a second stop in the same turn is refused too, so the ask cannot stand", async () => {
@@ -409,7 +420,7 @@ test("run as Claude Code runs it, a decision ask continues the turn with the rea
   expect(await run.exited).toBe(0)
   const output = JSON.parse(await new Response(run.stdout).text())
   expect(output.hookSpecificOutput.hookEventName).toBe("Stop")
-  expect(output.hookSpecificOutput.additionalContext).toBe(REASON)
+  expect(output.hookSpecificOutput.additionalContext).toBe(LEAD_REASON)
 })
 
 test("run as Claude Code runs it, a report stops with no output", async () => {
