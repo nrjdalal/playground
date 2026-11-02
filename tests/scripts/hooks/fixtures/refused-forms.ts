@@ -90,9 +90,6 @@ const PUSH = "git push https://github.com/quillco/acme-skills main"
 // A guarded org's repository by its URL, which a push names from any folder.
 const ORG = "https://github.com/acme-blue/app.git"
 
-// The folder every delete row names, which never exists under the data folder's extensions root.
-export const NEVER_MADE = "~/.playground/extensions/.no-such-folder"
-
 const MUTATION = `mutation { addComment(input: {subjectId: "I_1", body: "release"}) { clientMutationId } }`
 
 export const REFUSED_FORMS: Group[] = [
