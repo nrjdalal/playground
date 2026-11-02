@@ -678,6 +678,21 @@ describe("waitOutcome", () => {
     expect(at(30_000, RUNNING, true, why)).toMatchObject({ ok: true })
   })
 
+  test("a stale FAIL keeps the wait going, and the next roll's FAIL or answer ends it", () => {
+    const T = "2026-11-02T18:00:00Z"
+    const stale = `${T} RESTART abc1234 FAIL dev=DOWN (dev: refusing to start: no database) follower=running`
+    const read = (results: string[], api = false) =>
+      waitOutcome(
+        { api, beat: RUNNING, failure: startFailure(results, []), now: 60_000 },
+        { shownAt: 60_000, startedAt: 0 },
+      )
+    expect(read([stale])).toEqual({ progress: null })
+    expect(read([stale, `${T} DOWN dev: x`, stale])).toMatchObject({ ok: false })
+    expect(read([stale, `${T} DOWN dev: x`, `${T} RESTART abc1234 PASS v`], true)).toMatchObject({
+      ok: true,
+    })
+  })
+
   test("ends after 15 minutes, as before", () => {
     expect(at(15 * 60_000)).toEqual({
       done: "the Dashboard did not answer within 15 minutes; see ops/dashboard/supervisor.log, then run playground again",
@@ -689,42 +704,69 @@ describe("waitOutcome", () => {
 describe("startFailure", () => {
   const T = "2026-11-02T18:00:00Z"
   const FOLLOWER = "follower=running follower: running entries: 12"
+  const ARMED = [`${T} supervisor armed at abc1234`]
+  const REFUSED = `${T} RESTART abc1234 FAIL dev=DOWN (dev: refusing to start: no single running Docker container publishes port 50300) ${FOLLOWER}`
+  const OPENED = `${T} DOWN dev: refusing to start`
 
-  test("reads a refused dev's reason in plain words, from the newest START or RESTART line", () => {
-    expect(
-      startFailure([
-        `${T} START abc1234 FAIL dev=DOWN (dev: refusing to start: the database at 127.0.0.1:5432 is not answering (is it running?)) ${FOLLOWER}`,
-      ]),
-    ).toBe("the database at 127.0.0.1:5432 is not answering (is it running?)")
-    expect(startFailure([`${T} RESTART abc1234 FAIL build: error: tsc exited 2`])).toBe(
+  test("reads a refused dev's reason in plain words, from a roll begun after the mark", () => {
+    expect(startFailure([OPENED, REFUSED], [])).toBe(
+      "no single running Docker container publishes port 50300",
+    )
+    expect(startFailure([`${T} START abc1234 FAIL build: error: tsc exited 2`], ARMED)).toBe(
       "error: tsc exited 2",
     )
-    expect(startFailure([`${T} START abc1234 FAIL web: next build exited 1`])).toBe(
-      "next build exited 1",
+    expect(
+      startFailure(
+        [`${T} DOWN web: gone`, `${T} RESTART abc1234 FAIL web: next build exited 1`],
+        [],
+      ),
+    ).toBe("next build exited 1")
+  })
+
+  test("skips a FAIL from a roll begun before the mark: a RESTART with no DOWN after it, a START with no supervisor armed after it", () => {
+    expect(startFailure([REFUSED], [])).toBeNull()
+    expect(startFailure([`${T} START abc1234 FAIL build: error`], [])).toBeNull()
+    expect(startFailure([`${T} DOWN follower: lost the lock`, REFUSED], [])).toBeNull()
+    expect(
+      startFailure([REFUSED, OPENED, `${T} RESTART abc1234 PASS version=1 ${FOLLOWER}`], []),
+    ).toBeNull()
+    expect(startFailure([REFUSED, OPENED, REFUSED], [])).toBe(
+      "no single running Docker container publishes port 50300",
     )
   })
 
-  test("is null once a newer start passed, for a failure off the stack, and for DOWN or other lines alone", () => {
+  test("gives a dev that died with no reason in its log one, and is null for a newer PASS, a failure off the stack and DOWN or other lines alone", () => {
+    expect(startFailure([OPENED, `${T} RESTART abc1234 FAIL dev=DOWN () ${FOLLOWER}`], [])).toBe(
+      "its API exited with no reason in its log",
+    )
     expect(
-      startFailure([
-        `${T} START abc1234 FAIL build: error`,
-        `${T} RESTART abc1234 PASS version=1 verify=PASS ${FOLLOWER}`,
-      ]),
+      startFailure(
+        [OPENED, REFUSED, OPENED, `${T} RESTART abc1234 PASS version=1 verify=PASS ${FOLLOWER}`],
+        [],
+      ),
     ).toBeNull()
     expect(
-      startFailure([
-        `${T} START abc1234 FAIL build: error`,
-        `${T} RESTART abc1234 FAIL version=1 verify=PASS follower=FAIL lost the lock`,
-      ]),
+      startFailure(
+        [
+          OPENED,
+          REFUSED,
+          OPENED,
+          `${T} RESTART abc1234 FAIL version=1 verify=PASS follower=FAIL lost the lock`,
+        ],
+        [],
+      ),
     ).toBeNull()
     expect(
-      startFailure([
-        `${T} DOWN dev: refusing to start: gone`,
-        `${T} RESTART follower follower=running`,
-        `${T} ALIAS FAIL playground.localhost`,
-      ]),
+      startFailure(
+        [
+          `${T} DOWN dev: refusing to start: gone`,
+          `${T} RESTART follower follower=running`,
+          `${T} ALIAS FAIL playground.localhost`,
+        ],
+        ARMED,
+      ),
     ).toBeNull()
-    expect(startFailure([])).toBeNull()
+    expect(startFailure([], ARMED)).toBeNull()
   })
 })
 

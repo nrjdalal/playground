@@ -7,6 +7,7 @@ import { getSessionNames, type NamedKind, setSessionNames } from "@packages/conf
 import { configDirOf, dataDir } from "@packages/env/data-dir"
 import { modelSettings, readPolicyOrDefaults, readSessionNames } from "@packages/settings"
 
+import { livePair } from "../../../../api/hono/src/lib/dev/live-dashboard"
 import { accountsIo, runAccounts } from "./accounts"
 import { type Docker, ensureDatabase } from "./database"
 import { doctor, report } from "./doctor"
@@ -39,7 +40,6 @@ import {
   dashboardUrls,
   homeDataDir,
   linesSince,
-  liveContainer,
   liveSessions,
   NO_CHECKOUT,
   opsDashboard,
@@ -195,9 +195,13 @@ const dashboard = async (): Promise<number> => {
     return failed.length ? 1 : 0
   }
   const { checkout, urls } = liveDashboard(true)
-  const database = await ensureDatabase(liveContainer(), docker)
+  const database = await ensureDatabase(livePair(), docker)
   for (const line of database.lines) console.log(line)
   if (database.failed) failed.push(`The Dashboard's database didn't start: ${database.failed}`)
+  // the supervisor's logs from here on: a roll begun earlier may have met the database before it started, so its FAIL is stale
+  const ops = opsDashboard()
+  const logs = { log: join(ops, "supervisor.log"), results: join(ops, "results.log") }
+  const from = { log: Bun.file(logs.log).size, results: Bun.file(logs.results).size }
   for (const step of planStart(await probe(urls))) {
     if (step === "jobs") {
       console.log("Starting the Dashboard…")
@@ -211,14 +215,15 @@ const dashboard = async (): Promise<number> => {
       if (started.code !== 0) failed.push(`The dispatcher didn't start: ${started.message}`)
     } else if (step === "wait") {
       const ready = urls ?? dashboardUrls(checkout)
-      const results = join(opsDashboard(), "results.log")
-      const from = Bun.file(results).size
       const started = Date.now()
       const state = { shownAt: started, startedAt: started }
       for (;;) {
         const api = await apiUp(ready)
         const now = Date.now()
-        const failure = startFailure(await linesSince(results, from))
+        const failure = startFailure(
+          await linesSince(logs.results, from.results),
+          await linesSince(logs.log, from.log),
+        )
         const outcome = waitOutcome({ api, beat: dashboardBeat(now), failure, now }, state)
         if ("done" in outcome) {
           if (!outcome.ok) {
@@ -298,9 +303,8 @@ const roll = async (): Promise<number> => {
 const update = (to?: string): Promise<number> =>
   runUpdate(REPO, spawnRun, roll, console.log, to, join(dataDir(), "ops", "update-head"))
 
-// playground uninstall: the install's links, LaunchAgents and the Dashboard's stack (uninstall.ts); --purge, after asking, the data folder and the database too. The database's name is loaded only here, since it lives in the API's tree.
+// playground uninstall: the install's links, LaunchAgents and the Dashboard's stack (uninstall.ts); --purge, after asking, the data folder and the database too.
 const uninstallAll = async (purge: boolean): Promise<number> => {
-  const { livePair } = await import("../../../../api/hono/src/lib/dev/live-dashboard")
   const { database } = livePair()
   const checkout = dashboardCheckout(REPO)
   return uninstall({

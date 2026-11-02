@@ -20,7 +20,7 @@ const NAME = /^[a-z0-9]+(-[a-z0-9]+)*$/
 // The server playground view opens: the sessions', since probes keep to a server of their own.
 export const VIEW_SERVER = "playground"
 
-export const HELP = `playground            start herdr's servers that are down and restore their sessions, start the Dashboard's stack and follower when down (in cmux while a session is open there, else in herdr), set the Dashboard's database to start again with Docker and start it when stopped, start the dispatcher when it is not running (playground dispatcher), stop there when the Dashboard needs a cmux terminal open, else wait for the Dashboard (a progress line every 10s, stopping early with the reason once ops-dashboard's supervisor stops or its start fails, 15 minutes at most), then open it; a step that failed is named last, with why, under Left for you, and the run exits 1
+export const HELP = `playground            start herdr's servers that are down and restore their sessions, set the Dashboard's database to start again with Docker and start it when stopped, start the Dashboard's stack and follower when down (in cmux while a session is open there, else in herdr), start the dispatcher when it is not running (playground dispatcher), stop there when the Dashboard needs a cmux terminal open, else wait for the Dashboard (a progress line every 10s, stopping early with the reason once ops-dashboard's supervisor stops or its start fails, 15 minutes at most), then open it; a step that failed is named last, with why, under Left for you, and the run exits 1
 playground view       open the ${VIEW_SERVER} herdr server, where the sessions run, in this terminal
 playground dispatcher start the dispatcher in a herdr workspace of its own, its brief written once from scripts/briefs/dispatcher.md into the data folder as brief-<dispatcher>.md: exit 0 started, 3 already running, 1 refused with spawn.sh's reason
 playground planner | builder | ops | optimizer
@@ -435,23 +435,37 @@ const duration = (ms: number): string => {
   return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`
 }
 
-// Why the Dashboard's stack did not start, in plain words, from the newest START or RESTART line of the supervisor's results: the refusal or error it names when it failed on the stack itself (its dev, its build or its web), else null. A DOWN line is left out, since it names the stack that died, before the restart that may well pass.
-export const startFailure = (results: string[]): string | null => {
-  for (const line of [...results].reverse()) {
-    const result = line.match(/^\S+ (?:START|RESTART) \w+ (PASS|FAIL) (.*)$/)
-    if (!result) continue
-    if (result[1] === "PASS") return null
-    const failed = result[2]!
-    const dev = failed.match(/^dev=DOWN \((.*)$/)?.[1]
-    const other = failed.match(/^(?:build|web): (.*)$/)?.[1]
-    let why = other
-    if (dev !== undefined) {
-      const end = dev.lastIndexOf(") follower=")
-      why = end >= 0 ? dev.slice(0, end) : dev.replace(/\)$/, "")
+// Why the Dashboard's stack did not start, in plain words, from the supervisor's results and log since a mark: the refusal or error its newest START or RESTART names when it failed on the stack itself (its dev, its build or its web), else null. Only a roll begun after the mark counts, a RESTART by the DOWN line that opened it and a START by its supervisor's "supervisor armed" line, since an earlier roll may have met a database that has started since; a newer PASS clears a FAIL.
+export const startFailure = (results: string[], log: string[]): string | null => {
+  const armed = log.some((line) => /^\S+ supervisor armed /.test(line))
+  let down = false
+  let failure: string | null = null
+  for (const line of results) {
+    if (/^\S+ DOWN (?:dev|web): /.test(line)) {
+      down = true
+      continue
     }
-    return why?.replace(/^dev: refusing to start: /, "").trim() || null
+    const result = line.match(/^\S+ (START|RESTART) \w+ (PASS|FAIL) (.*)$/)
+    if (!result) continue
+    const begun = result[1] === "START" ? armed : down
+    down = false
+    if (result[2] === "PASS") failure = null
+    else if (begun) failure = stackFailure(result[3]!)
   }
-  return null
+  return failure
+}
+
+// A failed roll's words after FAIL: why its dev refused, or its build's or web's error; a dev that died with no reason in its log gets one, and a failure off the stack (its verify, its follower) is null.
+const stackFailure = (failed: string): string | null => {
+  const other = failed.match(/^(?:build|web): (.*)$/)?.[1]
+  if (other !== undefined) return other.trim() || null
+  const dev = failed.match(/^dev=DOWN \((.*)$/)?.[1]
+  if (dev === undefined) return null
+  const end = dev.lastIndexOf(") follower=")
+  const why = (end >= 0 ? dev.slice(0, end) : dev.replace(/\)$/, ""))
+    .replace(/^dev: refusing to start: /, "")
+    .trim()
+  return why || "its API exited with no reason in its log"
 }
 
 // One poll of the wait for the Dashboard's API after the jobs step: done once it answers, once the supervisor's results name why its stack did not start, once ops-dashboard's supervisor is gone or its heartbeat stale, or at 15 minutes; else a progress line at most every 10s.

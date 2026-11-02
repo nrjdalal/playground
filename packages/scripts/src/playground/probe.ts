@@ -45,13 +45,6 @@ export const liveBranch = (): string => {
   return liveSettings.get(read.settings, "live.branch")
 }
 
-// The live dashboard's database container's name (live.container), read as liveBranch reads live.branch.
-export const liveContainer = (): string => {
-  const read = readPolicyOrDefaults(dataDir())
-  if (read.refusal !== undefined) throw new Error(read.refusal)
-  return liveSettings.get(read.settings, "live.container")
-}
-
 // What a verb that needs the Dashboard's checkout says before a first start has cut it.
 export const NO_CHECKOUT = "no Dashboard checkout yet; run playground once to set it up"
 
