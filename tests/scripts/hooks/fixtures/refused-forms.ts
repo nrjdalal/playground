@@ -540,7 +540,15 @@ export const REFUSED_FORMS: Group[] = [
         "a long run of closing braces ahead of the CLI",
         `${"ls; }\n".repeat(21_000)}playground ext sync`,
       ],
+      [
+        "a command longer than the reader can lex inside the hook's time",
+        `echo ${"${a:-".repeat(30_000)}${"}".repeat(30_000)}`,
+      ],
       ["an eval chain 300 deep ahead of a write", `${"eval 'eval '\\''".repeat(300)}\nrm ${LIST}`],
+      [
+        "an eval chain 8000 deep ahead of a write",
+        `${"eval 'eval '\\''".repeat(8_000)}\nrm ${LIST}`,
+      ],
       ["24 doubling cat stages", `echo hi | ${"cat - - | ".repeat(24)}bash; echo x > ${LIST}`],
       [
         "12 rounds of files that double each other",
