@@ -6,6 +6,7 @@ import {
   readdirSync,
   readFileSync,
   realpathSync,
+  writeFileSync,
 } from "node:fs"
 import { isBuiltin } from "node:module"
 import { tmpdir } from "node:os"
@@ -69,7 +70,7 @@ describe("a bundle run as its wrapper runs it gives its source's verdict", () =>
     for (const file of [join(BUNDLED, `${name}.js`), join(HOOKS, `${name}.ts`)]) {
       const proc = Bun.spawn(["bun", "--no-env-file", file], {
         cwd: ROOT,
-        env: { ...process.env, PLAYGROUND_ROLE: "worker" },
+        env: { ...process.env, PLAYGROUND_REPO: "", PLAYGROUND_ROLE: "worker" },
         stderr: "pipe",
         stdin: new Blob([raw]),
         stdout: "pipe",
@@ -84,6 +85,49 @@ describe("a bundle run as its wrapper runs it gives its source's verdict", () =>
       if (!says) expect(stderr).toBe("")
     }
   })
+})
+
+// A main checkout made in a scratch folder outside any repo, as the factory's sits, holding the bundle: with PLAYGROUND_REPO unset, as cmux restores a session, the bundle finds that checkout from its own folder, as the source does from its own, so an ask note there runs and the same note from another folder is refused.
+test("no-desktop-owner-app's bundle finds the main checkout it sits in, with PLAYGROUND_REPO unset", async () => {
+  const main = realpathSync(mkdtempSync(join(tmpdir(), "hooks-bundle-main-")))
+  expect(Bun.spawnSync(["git", "-C", main, "init", "-q"]).exitCode).toBe(0)
+  mkdirSync(join(main, BUNDLED), { recursive: true })
+  mkdirSync(join(main, "api", "hono", "src", "bin"), { recursive: true })
+  mkdirSync(join(main, "elsewhere"))
+  writeFileSync(join(main, "scripts", "spawn.sh"), "#!/bin/sh\n")
+  writeFileSync(join(main, "api", "hono", "src", "bin", "dashboard-ask.ts"), "")
+  writeFileSync(
+    join(main, "package.json"),
+    `${JSON.stringify({ scripts: { ask: "bun api/hono/src/bin/dashboard-ask.ts" } })}\n`,
+  )
+  copyFileSync(
+    join(ROOT, BUNDLED, "no-desktop-owner-app.js"),
+    join(main, BUNDLED, "no-desktop-owner-app.js"),
+  )
+  const note = (cwd: string) =>
+    JSON.stringify({
+      cwd,
+      hook_event_name: "PreToolUse",
+      tool_input: { command: `bun run ask x "note; agent-desktop 1.0 ok"` },
+      tool_name: "Bash",
+    })
+  const run = async (cwd: string) => {
+    const proc = Bun.spawn(
+      ["bun", "--no-env-file", join(main, BUNDLED, "no-desktop-owner-app.js")],
+      {
+        cwd: main,
+        env: { ...process.env, PLAYGROUND_REPO: "", PLAYGROUND_ROLE: "worker" },
+        stderr: "pipe",
+        stdin: new Blob([note(cwd)]),
+        stdout: "pipe",
+      },
+    )
+    return { code: await proc.exited, stderr: await new Response(proc.stderr).text() }
+  }
+  expect(await run(main)).toEqual({ code: 0, stderr: "" })
+  const elsewhere = await run(join(main, "elsewhere"))
+  expect(elsewhere.code).toBe(2)
+  expect(elsewhere.stderr).toContain("no-desktop-owner-app")
 })
 
 // A bundle that imports only Bun's and Node's own modules reaches no node_modules, so a missing or damaged install cannot crash it.
