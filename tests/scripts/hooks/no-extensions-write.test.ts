@@ -486,6 +486,12 @@ describe("a direct write into the extensions root is refused, naming the owner's
     expect(await bash(command, cwd)).toContain("no-extensions-write hook refuses")
   })
 
+  test("eval of a value it does not hold is refused even when the value only reads", async () => {
+    expect(await bash(`x=$(echo 'cat ${LIST}'); eval "$x"`, WORK)).toContain(
+      "no-extensions-write hook refuses eval of a script it cannot read whole",
+    )
+  })
+
   test("a slow lex refuses at the walk's deadline, whatever made it slow", async () => {
     const command = `echo ${"a(".repeat(20_000)}${")".repeat(20_000)}`
     const started = performance.now()
