@@ -1366,6 +1366,25 @@ function cliCalls(parsed, env) {
   const dirs = [env.cwd, name === "bun" ? bunCall(args, env).cwd : undefined];
   return words.flatMap((word, at) => isCli(word, dirs) ? [words.slice(at + 1)] : []);
 }
+var IDENTITY = ["CLAUDE_CODE_SESSION_ID", "CLAUDE_CONFIG_DIR", "PLAYGROUND_ROLE"];
+var SETS = /^(?:CLAUDE_CODE_SESSION_ID|CLAUDE_CONFIG_DIR|PLAYGROUND_ROLE)\+?=/;
+var CLEARS = /^(?:-[^-\s]*i|--ignore-environment$|-$)/;
+var SCORE = /\bext\s+score\b/;
+var unquoted = (text) => text.replace(/\\\n|\$(?=["'])|["'\\]/g, "");
+var SCORE_AS_OTHER = `playground ext score on a line that clears or sets ${IDENTITY.join(", ")}, which reads as another author than the calling session`;
+var changes = (words) => words.some((w) => SETS.test(w.value)) || words.some((w) => program(w.value) === "env") && words.some((w) => CLEARS.test(w.value) || IDENTITY.some((k) => w.value.includes(k)));
+function changesIdentity(commands) {
+  return commands.some((cmd) => changes(cmd.words) || !!cmd.inner && changesIdentity(cmd.inner()) || [...cmd.words, ...cmd.redirects.flatMap((r) => r.target ? [r.target] : [])].some((word) => !!word.procs && changesIdentity(word.procs)));
+}
+function scoreAsOther(words, cmd, parsed, env) {
+  if (words[0]?.value !== "ext" || words[1]?.value !== "score")
+    return false;
+  if (IDENTITY.some((k) => parsed.local.has(k) || env.vars.has(k)))
+    return true;
+  const all = parsed.first ? [parsed.first, ...parsed.args] : parsed.args;
+  const at = cmd.words.indexOf(all[all.length - words.length - 1]);
+  return changes(at === -1 ? cmd.words : cmd.words.slice(0, at));
+}
 var AWKS = new Set(["awk", "gawk", "mawk", "nawk"]);
 var AWK_RUNS = /system|getline|[|>@]/;
 function awkPrograms(words) {
@@ -1579,7 +1598,8 @@ function inspect(raw, environment) {
     const reader = !rootLine && ownFirst(cmd, first) && reads(parsed, env);
     const fed = xargs ? await stdinOf(cmd, env) : undefined;
     const stdinWords = !fed ? [] : fed.unknown ? [{ quoted: false, value: UNKNOWN }] : fed.value.split(/\s+/).filter(Boolean).map((value) => ({ quoted: false, value }));
-    const write = reader ? undefined : cliCalls(parsed, env).map((words) => cliWrite(xargs?.replace ? words : [...words, ...stdinWords])).find(Boolean);
+    const calls = reader ? [] : cliCalls(parsed, env);
+    const write = calls.map((words) => cliWrite(xargs?.replace ? words : [...words, ...stdinWords])).find(Boolean) ?? (calls.some((words) => scoreAsOther(words, cmd, parsed, env)) ? SCORE_AS_OTHER : undefined);
     if (write)
       return refuse(write);
     const vars = !reader && first ? since(varsRead, env.vars, "") : [];
@@ -1638,6 +1658,8 @@ function inspect(raw, environment) {
   };
   rootLine = rooted(lexed.commands);
   whole = rootLine || wholeLine(lexed.commands, env);
+  if (SCORE.test(unquoted(command)) && changesIdentity(lexed.commands))
+    return refuse(SCORE_AS_OTHER);
   return run(lexed, env, visit, true);
 }
 async function check(raw, environment = process.env, budget = 1e4) {
