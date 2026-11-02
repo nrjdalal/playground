@@ -212,15 +212,19 @@ describe("a diff that loosens a guard is reviewed by a refusal table (PG-439)", 
     expect(line).toContain("ask from round 1 for a `canary | head` table of refusal rows")
     expect(line).toContain("`tests/scripts/hooks/fixtures/refused-forms.ts`")
     expect(line).toContain(
-      "Each row canary refuses stays refused at the head, or the fixture's `ALLOWED` list names it",
+      "Each row canary refuses stays refused at the head, or `ALLOWED` names it",
     )
+    expect(line).toContain(
+      "the fixture's other rows stand through `tests/scripts/hooks/refused-forms.test.ts`'s pass count at canary and at the head",
+    )
+    expect(line).toContain("each bypass the review finds that canary refuses")
     expect(line).toContain("blocking finding")
     expect(step.split("**Done when**")[1] ?? "").toContain("refusal table")
   })
 
   test("the docs page says a loosened guard's refusal table holds the score down", async () => {
     expect(await page()).toContain(
-      "a `canary | head` table of refusal rows from round 1, taken from the shared refused-forms fixture",
+      "a `canary | head` table of refusal rows from round 1 for each refused-forms row it adds or allows",
     )
   })
 })
