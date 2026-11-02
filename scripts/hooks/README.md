@@ -15,7 +15,8 @@ Their tests are `bun run test:file tests/scripts/hooks`.
   It follows the folder a command runs in through `cd`, `pushd` and `popd`, with OLDPWD (`cd -`, `~-`) and the directory stack (`pushd +N`, `popd -N`) kept as bash keeps them, a `CDPATH` the call sets, exports or inherits, and `env -C <dir>`, `env -C<dir>` and `env --chdir=<dir>`.
   A `cd` or `pushd` with a glob in its folder is handed to the hook as any program's words are, and one it cannot follow leaves the folder unread.
   It resolves a link before a `..` after it steps up, as the kernel opens a path, and a `cd` folds `..` as typed, as the shell's own `cd` does.
-  Under a hook's deadline it stops at a chain of scripts a shell, `eval` or `source` reads 256 or more deep, such a script over 128 KB and an `xargs -I` line over 128 KB once its stdin is filled in, and it holds as unknown text over 1 MB that a command printed or wrote.
+  Under a hook's deadline it stops at a chain of scripts a shell, `eval` or `source` reads 256 or more deep, such a script over 128 KB and an `xargs -I` line over 128 KB once its stdin is filled in.
+  It holds as unknown any text over 1 MB that a command printed or wrote.
   A hook that sets `unheld` on its `Env` gives the verdict on a shell, `source` or `eval` whose script holds a part the reader cannot read; a script file run by its path is the file's own code, which no hook reads.
   Its tests are in `bun run test:file tests/scripts/hooks`.
 
