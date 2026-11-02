@@ -38,6 +38,8 @@ An outside author's PR goes to the Builder, who gives its go only after a read-o
 
 Only one merge into `canary` runs at a time: pr:merge takes the factory's merge lock (`mkdir ~/.playground/merge.lock`, its PR number inside; `PLAYGROUND_MERGE_LOCK_DIR` moves it, as the tests do), reads every gate and `canary` inside it, and lets it go into `merge-locks/<pr>-<epoch ms>-<random>` however it ends, a refusal included,
 and only while the lock still names its PR; a lock another merge holds refuses, naming that PR.
+A SIGHUP, SIGINT or SIGTERM releases it too (`stop.ts`): pr:merge moves the lock into `merge-locks/<pr>-<epoch ms>-<signal>`, again only while it names its PR, ends the types gate's running step and removes its worktree, and exits 128 plus the signal's number, so a run stopped by its own handle never leaves the lock held.
+A signal that comes once the squash has begun waits for it to settle, merged or failed, before the lock goes, since the spawned `gh pr merge` would carry on past the exit; the run then posts no merge comment and ends no sessions, whatever the squash did, and a second signal exits at once.
 With `REDIS_URL` set, the lock's holder is also a Redis key with a time to live (`playground:merge.lock`, `takeLock` in `merge.ts`, through `@packages/redis`), renewed while pr:merge runs, and the folder is marked with that key and its pid, so a merge that crashed leaves a lock the next merge takes over once its key lapses;
 a merge that cannot reach Redis keeps to the folder alone and so is refused by any holder.
 `bun run lock take|renew|free` gives a shell script the same Redis lock (exit 3: no Redis, keep the script's own lock file).
@@ -46,6 +48,7 @@ Then it ends the PR's worker, reviewer and tester (`scripts/ops/optimizer/auto_e
 `--explain` takes no lock.
 Like `bun run verify`, pr:merge and pr:train first build the workspace packages they import when a `dist` is missing or lacks an export (`packages/scripts/src/verify/prebuild.ts pr-merge`), so either runs from a fresh worktree;
 in the factory's main checkout (`$PLAYGROUND_REPO`), which builds only `packages/*` after a pull, the prebuild stops instead, verify's and `bun run dev`'s too, and says to run from your own worktree.
+Before that build, pr:merge and pr:train also stop on a worktree whose install predates its `bun.lock`, a workspace package's dependency linked neither in its own `node_modules` nor the root's (`staleInstall`), naming the `bun install --ignore-scripts` that fixes it, since the build would otherwise stop on `tsdown: command not found` (2 Nov, after a pull added `@packages/safe-delete`).
 
 ## When canary moves
 

@@ -85,6 +85,7 @@ fi
 DATA=$(cd / && env $UNSET "$BUN" --no-env-file -e "import { dataDir } from '$REPO/packages/env/src/data-dir.ts'; console.log(dataDir())") || { echo "spawn.sh: bun could not resolve the data folder" >&2; exit 1; }
 [[ $DATA == "$HOME"/* ]] && SHOWN="~${DATA#"$HOME"}" || SHOWN=$DATA
 SETTINGS="$DATA/factory-settings.json"
+HERDR_DIR=${PLAYGROUND_HERDR_DIR:-${DESK_HERDR_DIR:-$DATA/herdr}}
 PINS="$DATA/backends"
 RESUME_DIR="$DATA/resume"
 ROSTER_JSON="$DATA/roster.json"
@@ -753,7 +754,6 @@ set -- ${words[@]+"${words[@]}"}
 
 # herdr runs by the absolute path herdr's pin names, never a bare herdr, and only while that file is the pinned version and hash and the server $1 is running; hr then speaks to that server.
 herdr_ready() {
-  HERDR_DIR=${PLAYGROUND_HERDR_DIR:-${DESK_HERDR_DIR:-$DATA/herdr}}
   HERDR_SESSION_NAME=$1
   word "$HERDR_SESSION_NAME" || refuse "PLAYGROUND_HERDR_SESSION is a word, not $HERDR_SESSION_NAME"
   pinned=$(python3 -I - "$HERDR_DIR/pin.json" <<'PY'
@@ -1116,6 +1116,11 @@ if [ "$MODE" != resume ] || [ -n "$BRIEF" ]; then
   { [[ $BRIEF =~ ^[A-Za-z0-9._-][A-Za-z0-9._/-]*$ ]] && [[ /$BRIEF/ != */../* ]]; } || refuse "a brief is a file name under $SHOWN"
   # Only the file's name reaches the prompt, so a session reads the file itself.
   [ -f "$DATA/$BRIEF" ] || refuse "$SHOWN/$BRIEF is not a file"
+  # A brief filled from its role's template (new-reviewer.md for a reviewer) keeps none of that template's slots, so a session never starts on a bare slot, while a brief's prose about another role's slot is left alone.
+  template="$REPO/scripts/briefs/new-${ROLE:-}.md"
+  slots=$([ ! -f "$template" ] || grep -oE '__[A-Z0-9]+__' "$template" | sort -u || true)
+  left=$([ -z "$slots" ] || grep -oE '__[A-Z0-9]+__' "$DATA/$BRIEF" | sort -u | grep -Fx -f <(printf '%s\n' "$slots") | paste -sd ' ' - || true)
+  [ -z "$left" ] || refuse "$SHOWN/$BRIEF still holds the slot $left: fill each one, read the brief back, then run spawn.sh again (playbook's SESSIONS.md, the fill rule)"
 fi
 # A resume runs the session the way its start recorded; only a start takes a backend fresh.
 PIN_GIVEN=
@@ -1277,16 +1282,45 @@ fi
 # The window reaches the session through its one settings file, built here from the factory's on every launch so the two never drift, one file per backend. On GLM: the user settings turn on telemetry to the Loom relay, and Loom counts Claude usage alone, so a GLM session exports none. Claude Code keeps only the last --settings, and the user settings' env beats a variable on the launch line (both measured by a reviewer, 16 Oct), so the session's one settings file also turns the telemetry off (measured from a folder outside any checkout, 16 Oct: a SessionStart hook ran, no-env-dump refused printenv, and no metric left).
 TAG=
 [ "$BACKEND" = glm ] && TAG=glm-
-BUILT="$DATA/factory-settings-$TAG$((WINDOW / 1000))k.json"
-python3 -I - "$SETTINGS" "$BUILT" "$WINDOW" "$BACKEND" <<'PY' || refuse "it cannot build $BUILT from $SETTINGS"
+# A probe runs its shell commands in Claude Code's sandbox, which every child process inherits, so a delete a script makes where no guard hook sees it stays inside the write roots; its settings go in a file of their own. Workers and testers join once run-slot, spawn.sh and the worker git flow run inside it.
+SANDBOX=
+[ "$ROLE" = probe ] && SANDBOX=sandbox-
+BUILT="$DATA/factory-settings-$TAG$SANDBOX$((WINDOW / 1000))k.json"
+# The folder the session runs in, as the launch below moves to it.
+OWN=${DIR:-$REPO}
+[ "$MODE" = column ] && OWN=$REPO
+python3 -I - "$SETTINGS" "$BUILT" "$WINDOW" "$BACKEND" "$SANDBOX" "$DATA" "$HERDR_DIR" "$MAIN" "$(getconf DARWIN_USER_TEMP_DIR 2>/dev/null)" "$OWN" <<'PY' || refuse "it cannot build $BUILT from $SETTINGS"
 import json, os, sys
-src, dst, window, backend = sys.argv[1:5]
+src, dst, window, backend, sandbox, data, herdr, main, temp, own = sys.argv[1:11]
 settings = json.load(open(src))
 settings["autoCompactWindow"] = int(window)
 # The home skill set link-skills.sh turns on at user scope stays off here, since the session loads its own set (below) and two plugins that ship one name refuse it at call time.
 settings["enabledPlugins"] = {**settings.get("enabledPlugins", {}), "ws-home@ws": False}
 if backend == "glm":
     settings["env"] = {**settings.get("env", {}), "CLAUDE_CODE_ENABLE_TELEMETRY": "0", "OTEL_METRICS_EXPORTER": "none"}
+if sandbox:
+    # The sandbox lets a session write its own folder, the main checkout or a worktree in it; a deny wins over that, so every entry of the main checkout is denied, .git and every other worktree included, but the path down to a worktree the session runs in.
+    own = os.path.realpath(own)
+    def denied(folder):
+        paths = [os.path.join(folder, name) for name in sorted(os.listdir(folder))]
+        return [d for p in paths if p != own for d in (denied(p) if own.startswith(p + os.sep) else [p])]
+    deny = denied(main)
+    home = os.path.expanduser("~")
+    settings["sandbox"] = {
+        # Bypass mode would run the unsandboxed retry with no prompt, and a sandbox that cannot start would run every command unsandboxed.
+        "allowUnsandboxedCommands": False,
+        "enabled": True,
+        # gh, a Go CLI, verifies TLS through trustd, which the sandbox closes without this.
+        "enableWeakerNetworkIsolation": True,
+        # Docker cannot run in the sandbox, and a wildcard in an exclusion spans arguments, so only the read-only listing leaves it when typed; a script's own docker stays inside, its socket closed.
+        "excludedCommands": ["docker ps", "docker ps *"],
+        "failIfUnavailable": True,
+        "filesystem": {
+            "allowWrite": sorted({data, os.path.join(home, ".agent-browser"), os.path.join(home, ".bun", "install", "cache"), os.path.join(home, ".cache", "turbo"), os.path.join(home, ".portless")} | ({temp.rstrip("/")} if temp else set())),
+            "denyWrite": deny,
+        },
+        "network": {"allowLocalBinding": True, "allowUnixSockets": sorted({herdr, os.path.join(home, ".agent-browser")})},
+    }
 tmp = f"{dst}.{os.getpid()}.tmp"
 with open(tmp, "w") as f:
     json.dump(settings, f, indent=2)
@@ -1296,8 +1330,7 @@ SETTINGS=$BUILT
 # The factory's sessions run in bypass mode, passed here so it never rests on the machine's own settings: a session in another mode holds every cross-session message for approval.
 FLAGS="--model $MODEL --effort ${EFFORT:-high} --settings $SETTINGS --dangerously-skip-permissions"
 # The skills: one merged plugin per session, from the login's scope, its repo's org, core, then each always org's new names, loaded in place by --plugin-dir, from the data folder this launch reads (under inscope ~/.claude's, not the workspace's); the resolver writes it fresh on every spawn, so a skill `playground ext add` puts in an extension reaches the next session with no install. A column runs in this checkout.
-SKILLS_REPO=${DIR:-$REPO}
-[ "$MODE" = column ] && SKILLS_REPO=$REPO
+SKILLS_REPO=$OWN
 PLUGIN=$(PLAYGROUND_DATA_DIR="$DATA" "$BUN" --no-env-file "$REPO/packages/scripts/src/playground/orgs.ts" resolve --repo "$SKILLS_REPO") && [ -d "$PLUGIN" ] || refuse "playground orgs resolve gave no skill plugin for $SKILLS_REPO"
 FLAGS+=" --plugin-dir $(printf %q "$PLUGIN")"
 READ="Load the playbook skill first. Your brief is in $SHOWN/$BRIEF: read it in full and follow it."

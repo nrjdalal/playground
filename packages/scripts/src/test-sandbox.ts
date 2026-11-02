@@ -1,7 +1,9 @@
 // The suite's runner: runs `bun test` in sandbox.ts's sandbox, so no test can start a real session or read the real config by accident (a self-removal test once started two). The env is set before bun starts, since os.homedir() and the spawn PATH lookup read the boot environment, not a later mutation. The folder goes when the run does.
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs"
 import { availableParallelism, constants } from "node:os"
 import { join, relative } from "node:path"
+
+import { removeScratch } from "@packages/safe-delete"
 
 import { sandbox } from "./sandbox"
 
@@ -22,6 +24,10 @@ const unbuilt = existsSync("packages")
   : []
 
 const { env, scratch } = sandbox()
+const dropScratch = () => {
+  const refused = removeScratch(scratch)
+  if (refused) console.error(`test-sandbox: ${refused}`)
+}
 // a worktree with none of the env files bun test loads (a skill-only chore; it skips .env.local) has no values for the apps' env schemas, so a test that imports one would fail its validation, unless the caller set the flag
 if (![".env", ".env.test", ".env.test.local"].some((file) => existsSync(file)))
   Object.assign(env, { SKIP_ENV_VALIDATION: process.env.SKIP_ENV_VALIDATION ?? "true" })
@@ -120,7 +126,7 @@ const parallel =
     : 0
 if (interrupted) {
   console.error(`test-sandbox: parallel pass interrupted by ${interrupted}, serial pass skipped`)
-  rmSync(scratch, { force: true, recursive: true })
+  dropScratch()
   process.exit(128 + constants.signals[interrupted])
 }
 const alone = serial.length > 0 ? run(serial) : 0
@@ -131,5 +137,5 @@ if ((parallel || alone) && unbuilt.length > 0)
   console.error(
     `test-sandbox: ${unbuilt.join(", ")} lacks a dist: build the packages with env NODE_ENV=production SKIP_ENV_VALIDATION=true bunx turbo run build --filter='./packages/*' (the dev skill's Start) and run again`,
   )
-rmSync(scratch, { force: true, recursive: true })
+dropScratch()
 process.exit(parallel || alone)
