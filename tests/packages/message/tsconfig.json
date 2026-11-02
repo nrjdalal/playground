@@ -1,0 +1,11 @@
+// Extends the subject's own config so the source these tests import type-checks as it does in its package.
+// The tests themselves import by relative path: @/ would be ambiguous here, since every package defines it against its own src.
+{
+  "extends": "../../../packages/message/tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "types": ["bun"]
+  },
+  "include": ["**/*.ts"],
+  "exclude": ["node_modules"]
+}

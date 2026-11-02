@@ -3,6 +3,7 @@ import {
   chmodSync,
   copyFileSync,
   existsSync,
+  mkdirSync,
   readFileSync,
   renameSync,
   writeFileSync,
@@ -116,6 +117,24 @@ describe("a node_modules clone waits while clone-off stands", () => {
     writeFileSync(join(m.ops, "run-slot.clone-allow"), "tester-.*\n")
     expect(await m.clones("node_modules", "tester-sloth")).toBe(true)
     expect(await m.clones("node_modules", "worker-c")).toBe(false)
+  })
+
+  test("and under Claude Code's sandbox, whose memory reads empty, it holds and says so once a run", async () => {
+    const m = machine({ off, sandboxed: true })
+    mkdirSync(join(m.root, "node_modules"))
+    const run = m.start("worker-c", {}, SCRIPT, ["cp", "-R", "node_modules"])
+    const said =
+      /^run-slot\.sh: cannot read the memory \(sysctl kern\.memorystatus_\*\), so run-slot\.clone-off holds this clone /gm
+    expect(await run.saw(said)).toBe(true)
+    // each look reads the free share once, so five reads are four looks after the line
+    const reads = () =>
+      readFileSync(join(m.root, "sysctl.log"), "utf8")
+        .split("\n")
+        .filter((l) => l === "kern.memorystatus_level").length
+    while (reads() < 5) await Bun.sleep(20)
+    await stop(run.p)
+    expect(await run.saw(said, 2)).toBe(false)
+    expect(await run.ran()).toBe(false)
   })
 })
 

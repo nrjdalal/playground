@@ -53,6 +53,19 @@ describe("shapeHints", () => {
     expect(shapeHints(ask(`- ${"word ".repeat(ASK_CODE_COLUMNS)}`))).toEqual([])
   })
 
+  test("skips a diff block's lines, which wrap on the card, and still hints at the same line in any other code block", () => {
+    const wide = `+ ${"x".repeat(ASK_CODE_COLUMNS)}`
+    for (const fence of ["```diff", "```Diff"])
+      expect(shapeHints(ask(`${fence}\n${wide}\n\`\`\`\n\n- One line.`))).toEqual([])
+    for (const fence of ["```", "```ts", "```text", "```diffstat"])
+      expect(shapeHints(ask(`${fence}\n${wide}\n\`\`\`\n\n- One line.`))).toEqual([
+        { kind: "wide", longest: ASK_CODE_COLUMNS + 2 },
+      ])
+    expect(shapeHints(ask(`\`\`\`diff\n${wide}\n\`\`\`\n\n\`\`\`\n${wide}\n\`\`\``))).toEqual([
+      { kind: "wide", longest: ASK_CODE_COLUMNS + 2 },
+    ])
+  })
+
   test("hints at a wide code line on a read-only update too, and never at its prose (PG-2489)", () => {
     const update = (text: string) => ({ kind: "update", preview: { outcome: "finding", text } })
     expect(shapeHints(update(`\`\`\`\n${"─".repeat(ASK_CODE_COLUMNS + 1)}\n\`\`\``))).toEqual([
