@@ -34,6 +34,8 @@ const LAUNCHERS = new Set([
   "watch",
   "yarn",
 ])
+// bun run <script> scripts whose quoted arguments the hook reads as data, since their entry points (api/hono/src/bin/dashboard-ask.ts, dashboard-thread.ts) take argv as plain strings and run nothing from it; every other bun run keeps its verdict.
+const BUN_DATA_SCRIPTS = new Set(["ask", "thread"])
 // Wrappers a shell line may hide in: watch joins its words past its options into one sh -c line, flock -c runs its string, and a word of any of them holding a space may be one.
 const LINES = new Set(["flock", "setsid", "watch"])
 const WATCH_TAKES = new Set(["--equexit", "--interval", "--shotsdir", "-n", "-q", "-s"])
@@ -303,6 +305,14 @@ async function judgeText(
       return unread(
         `the program it runs (it comes from ${first.unknown ?? "a word it cannot read"})`,
       )
+    if (
+      name === "bun" &&
+      args[0]?.value === "run" &&
+      args[1] !== undefined &&
+      BUN_DATA_SCRIPTS.has(args[1].value) &&
+      args.slice(2).every((a) => !unreadable(a))
+    )
+      return
     if (INTERPRETERS.has(name))
       for (const a of args) if (await callsTool(a.value)) return unread(`what ${name} runs`)
     if (name === "source" || name === "." || first?.value.includes("/"))

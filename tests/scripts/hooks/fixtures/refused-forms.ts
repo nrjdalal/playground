@@ -55,7 +55,7 @@ export type Group = {
   folders: Folder[]
   guards: Guard[]
   rows: (paths: Paths) => readonly Row[]
-  source: "#292" | "#356" | "#402" | "#411" | "#446" | "#456" | "#466"
+  source: "#292" | "#356" | "#402" | "#411" | "#446" | "#456" | "#466" | "#486"
 }
 
 // The rows a guard-loosening PR lets run on purpose, each written as a row's "<source> <what>" for all its cases, or as one case's "<source> <what> | <guard> | <folder>"; canary lets none run.
@@ -64,6 +64,8 @@ export const ALLOWED: string[] = [
   "#446 bun -e editing a JSON label whose prose names it, then a script",
   "#446 python3 -c printing prose that names it",
   "#466 git --attr-source with a subcommand for its value before a read in a repo with a heavy path staged",
+  "#486 bun run ask with a prose arg that only names the tool",
+  "#486 bun run thread with a prose arg that only names the tool",
 ]
 
 // A harmless git alias nest of the given depth around an inner command line, each level double-quoted.
@@ -1519,5 +1521,31 @@ gh api graphql -f query="$QUERY"`,
       ],
     ],
     source: "#456",
+  },
+  {
+    folders: ["checkout"],
+    guards: ["no-desktop-owner-app"],
+    rows: () => [
+      [
+        "bun run ask with a prose arg that only names the tool",
+        `bun run ask ack '#i2' --no-link "local install; agent-desktop 1.0.2 runs with both grants; ok"`,
+      ],
+      [
+        "bun run thread with a prose arg that only names the tool",
+        `bun run thread title t1 "note: agent-desktop 1.0.2 runs with both grants; ok"`,
+      ],
+      ["the tool as bun run's target", "bun run agent-desktop snapshot --app Slack"],
+      ["the tool as bunx's target", "bunx agent-desktop snapshot --app Slack"],
+      ["the tool as bun x's target", "bun x agent-desktop snapshot --app Slack"],
+      [
+        "an unlisted bun run script with a prose arg that names the tool",
+        `bun run build ack '#i2' --no-link "local install; agent-desktop 1.0.2 runs with both grants; ok"`,
+      ],
+      [
+        "a listed bun run script with a command-substitution arg that runs the tool",
+        `bun run ask x "$(agent-desktop launch Slack)"`,
+      ],
+    ],
+    source: "#486",
   },
 ]
