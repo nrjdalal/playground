@@ -232,6 +232,11 @@ describe("a build, a test run, lefthook, turbo or a file write in the main check
     ["a chained cd, then a script sh runs", `true && cd ${WORKTREE} && sh -c "git add -A"`],
     ["a chained cd, then an eval", `true && cd ${WORKTREE} && eval "git add -A"`],
     ["a subshell the chain reaches", `true && cd ${WORKTREE} && (git commit -m x)`],
+    [
+      "a chain carried on past an eval that holds its own",
+      `eval 'true && cd ${WORKTREE}' && git commit -m x`,
+    ],
+    ["an eval whose cd is sure", `eval 'cd ${WORKTREE}'; git commit -m x`],
     ["a brace group the chain reaches", `true && cd ${WORKTREE} && { git commit -m x; }`],
     ["an if the chain reaches", `true && cd ${WORKTREE} && if true; then git commit -m x; fi`],
     ["a loop the chain reaches", `true && cd ${WORKTREE} && for i in 1; do git commit -m x; done`],

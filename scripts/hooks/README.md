@@ -56,7 +56,7 @@ Only the first reading moves the folder, sets variables and records files for th
   A `!` in front of the `cd` keeps those folders from the start, since it turns the `cd`'s own failure into success and the chain carries on with the shell where it was (`! cd <path> && git commit -m x`); an even count of them reads as none.
   Only a command an operator joins to the one before it at the top level frees the folder that way: the first command of a group, of a body or of a script a command of the chain reads (`(…)`, `{ …; }`, `if`, a loop, `sh -c`, `eval`, `source`) runs because whatever runs it ran, which the chain reached,
   so the `cd` before it has run and its folder stands (`cd <path> && (git commit -m x)`, `cd <path> && sh -c "git add -A"`).
-  The line's own chain carries on after such a script.
+  After such a script the line's own chain carries on, and the chain the script itself left joins it, since a `cd` an `&&` made sure at the end of an `eval` or a `source` may not have run either (`eval 'true && cd <path>'; git commit -m x`, refused in both folders).
 - Every other `cd` leaves `Env.cwd` unnamed and keeps each folder the shell may be in: the folder before it, and each folder its target names, read against every folder the shell may already be in (`Env.cwdMaybe`).
   A relative target a count or a loop may run again adds every folder above it.
   A function's or a brace group's own `cd` adds its folder to `Env.cwdHeld`, which no later `cd` clears, since the line may call that body at any point.

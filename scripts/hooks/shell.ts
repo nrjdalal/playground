@@ -984,7 +984,8 @@ export async function run(
     return await runAll(lexed, env, visit, builtins)
   } finally {
     running--
-    env.cwdChain = chain
+    // the script's own trailing chain joins the line's, since a cd an `&&` made sure at the end of an eval or a source may not have run either
+    env.cwdChain = keep([...new Set([...(chain ?? []), ...(env.cwdChain ?? [])])], env)
   }
 }
 
