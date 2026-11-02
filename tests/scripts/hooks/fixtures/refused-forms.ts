@@ -1296,4 +1296,47 @@ gh api graphql -f query="$QUERY"`,
     ],
     source: "#411",
   },
+  {
+    folders: ["checkout"],
+    guards: ["no-extension-repo-write"],
+    rows: () => [
+      [
+        "a repoint behind --attr-source taking --config-env as its value, then a push",
+        "git --attr-source --config-env remote set-url origin https://github.com/quillco/acme-skills.git && git push origin main",
+      ],
+      [
+        "a push-url repoint behind --attr-source taking --config-env as its value, then a push",
+        "git --attr-source --config-env remote set-url --push origin https://github.com/quillco/acme-skills.git && git push origin main",
+      ],
+      [
+        "a pushurl config behind --attr-source taking --config-env as its value, then a push",
+        "git --attr-source --config-env config remote.origin.pushurl https://github.com/quillco/acme-skills.git && git push origin main",
+      ],
+      [
+        "a repoint behind --namespace taking --config-env as its value, then a push",
+        "git --namespace --config-env remote set-url origin https://github.com/quillco/acme-skills.git && git push origin main",
+      ],
+      [
+        "a repoint behind --attr-source taking -c as its value, then a push",
+        "git --attr-source -c remote set-url origin https://github.com/quillco/acme-skills.git && git push origin main",
+      ],
+      [
+        "a repoint behind --config-env, then a push",
+        "git --config-env core.x=HOME remote set-url origin https://github.com/quillco/acme-skills.git && git push origin main",
+      ],
+      [
+        "a pushurl config behind --config-env, then a push",
+        "git --config-env core.x=HOME config remote.origin.pushurl https://github.com/quillco/acme-skills.git && git push origin main",
+      ],
+      [
+        "a clone behind --config-env, then a push",
+        "git --config-env core.x=HOME clone https://github.com/quillco/acme-skills.git && git push origin main",
+      ],
+      [
+        "an init behind --config-env, then a push",
+        "git --config-env core.x=HOME init && git push origin main",
+      ],
+    ],
+    source: "#466",
+  },
 ]
