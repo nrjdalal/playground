@@ -305,6 +305,37 @@ describe("Start", () => {
     expect(f.docker.at(-1)?.args).toEqual(["rm", "-fv", copyName(path)])
   })
 
+  test("a Start that fails after writing its .env moves its record, and its own .env in a worktree that had none, into the trash", async () => {
+    const path = worktree("launch-fails")
+    const f = fake([stack(path)], {
+      launch: () => {
+        throw new Error("launch failed")
+      },
+    })
+    expect(await startVibe(path, f.deps).catch((error: Error) => error.message)).toContain(
+      "launch failed",
+    )
+    expect(existsSync(join(path, ".env"))).toBe(false)
+    expect(existsSync(join(path, ".turbo/vibe.json"))).toBe(false)
+    expect(trashed()).toEqual(
+      expect.arrayContaining([join(path, ".env"), join(path, ".turbo/vibe.json")]),
+    )
+  })
+
+  test("a failed Start whose cleanup the trash refuses names the cause and the refusal, and leaves its record in place", async () => {
+    const path = worktree("launch-refused")
+    const f = fake([stack(path)], {
+      launch: () => {
+        throw new Error("launch failed")
+      },
+      roots: () => ({ ...ROOTS, main: dir }),
+    })
+    const message = await startVibe(path, f.deps).catch((error: Error) => error.message)
+    expect(message).toContain("launch failed")
+    expect(message).toContain("inside the main checkout")
+    expect(existsSync(join(path, ".turbo/vibe.json"))).toBe(true)
+  })
+
   test("the load gate and a missing live database refuse before any container starts", async () => {
     const path = worktree("gated")
     // a Vibeground still booting (no URL yet) holds the one-at-a-time line too
@@ -368,6 +399,17 @@ describe("Stop", () => {
       "inside the main checkout",
     )
     expect(readFileSync(join(path, ".env"), "utf8")).toContain("NEW_KEY=from-branch")
+    expect(existsSync(join(path, ".turbo/vibe.json"))).toBe(true)
+  })
+
+  test("a Stop whose record the trash refuses puts the worktree's own .env back by rename, then fails in the refusal's words with the record in place", async () => {
+    const path = worktree("stop-record-refused", "OWN=4\n")
+    await startVibe(path, fake([stack(path)]).deps)
+    const g = fake([stack(path, { vibe: true })], { roots: () => ({ ...ROOTS, main: dir }) })
+    expect(await stopVibe(path, g.deps).catch((error: Error) => error.message)).toContain(
+      "inside the main checkout",
+    )
+    expect(readFileSync(join(path, ".env"), "utf8")).toBe("OWN=4\n")
     expect(existsSync(join(path, ".turbo/vibe.json"))).toBe(true)
   })
 
