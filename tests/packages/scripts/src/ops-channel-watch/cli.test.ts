@@ -87,6 +87,27 @@ describe("the channel watch beat", () => {
     )
   })
 
+  test("with no channel.slackId or no token, the real watch.ts fails the beat by name and tells ops", async () => {
+    for (const [token, why] of [
+      ["xoxb-fixture", "channel.slackId is unset, so there is no channel to watch"],
+      ["", "SLACK_TOKEN is unset: run it through vault.py run -e"],
+    ] as const) {
+      const { ctx, sent } = fake(41, { code: 0, out: "" })
+      ctx.run = async (argv) => {
+        const proc = Bun.spawn(argv.slice(argv.indexOf("--") + 1), {
+          env: { ...process.env, PLAYGROUND_DATA_DIR: data, SLACK_TOKEN: token },
+          stderr: "pipe",
+          stdout: "pipe",
+        })
+        const out =
+          (await new Response(proc.stdout).text()) + (await new Response(proc.stderr).text())
+        return { code: await proc.exited, out }
+      }
+      await expect(beat.run(ctx)).rejects.toThrow(`exit 1: ${why}`)
+      expect(sent).toEqual([{ text: `channel watch quick failed (exit 1): ${why}`, to: "ops" }])
+    }
+  })
+
   test("tells ops once per kind of failure, again after a success, and throws each time", async () => {
     const bad = { code: 1, out: "  at x\nerror: conversations.history: invalid_auth\n  at y\n" }
     const first = fake(9, bad)

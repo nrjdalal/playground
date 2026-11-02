@@ -45,6 +45,27 @@ describe("the job registry", () => {
     expect(plists.size).toBe(0)
   })
 
+  test("the channel watch is a setting, off by default, that jobs.json lists running its cli once turned on", () => {
+    const key = jobKey("ops-channel-watch")
+    const field = settingFields().find((f) => f.key === key)!
+    expect(field.description).toContain("channel.slackId")
+    expect(field.description).toContain("local.slack.channel_token")
+    expect(
+      renderJobs({}, [], fill).jobs.find((job) => job.name === "ops-channel-watch")!.disabled,
+    ).toBe(true)
+    const { jobs } = renderJobs(
+      { [key]: { ...JOBS["ops-channel-watch"]!, enabled: true } },
+      [],
+      fill,
+    )
+    expect(jobs.find((job) => job.name === "ops-channel-watch")).toMatchObject({
+      command: "/b/bun --no-env-file /c/packages/scripts/src/ops-channel-watch/cli.ts",
+      cwd: "/c",
+      heartbeat: "ops-channel-watch",
+    })
+    expect(jobs.find((job) => job.name === "ops-channel-watch")!.disabled).toBeUndefined()
+  })
+
   test("the Dashboard's job runs its own checkout's run.sh from that checkout, the one its supervisor rolls", () => {
     const { jobs } = renderJobs({}, [], { ...fill, dashboard: "/c/.claude/worktrees/desk" })
     expect(jobs.find((job) => job.name === "ops-dashboard")).toMatchObject({
