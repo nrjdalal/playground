@@ -53,6 +53,9 @@ test("a root that lacks the file refuses, so a guard fails closed, and an empty 
   expect((await readRendered(data("bad"), "hooks/b.json")).refusal).toBe(
     `the extensions root (${extensionsDir(data("bad"))}) holds no hooks/b.json: tell your lead, and the dispatcher hands the owner ! playground ext import --from-tree extensions/core/lists to type in the dispatcher's terminal window, which seeds the guards' lists`,
   )
+  expect((await readRendered(data("bad"), "settings.json")).refusal).toBe(
+    `the extensions root (${extensionsDir(data("bad"))}) holds no settings.json: tell your lead, and the dispatcher hands the owner ! playground ext init, then a setting with ! playground settings set, to type in the dispatcher's terminal window, which writes it`,
+  )
 })
 
 test("a path that leaves the root is refused", async () => {

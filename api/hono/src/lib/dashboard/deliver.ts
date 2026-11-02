@@ -108,7 +108,6 @@ const SKILL_COMMAND = /^\/([a-z0-9][a-z0-9-]*)(?=[ \n]|$)/
 // The skill a message would run, or null when it is not one skill's command.
 export const skillCommand = (text: string): string | null => SKILL_COMMAND.exec(text)?.[1] ?? null
 
-// The composer types nothing that runs as a command, so the owner's own ! command goes where it runs: the dispatcher's terminal window.
 const BANG_ROUTE = "Type a ! command in the dispatcher's terminal window."
 
 const commandRefusal = (skill?: string): Refusal =>

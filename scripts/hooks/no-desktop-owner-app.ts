@@ -62,7 +62,7 @@ const ROOTED = new Set(["find", "snapshot"])
 const TARGETED = new Set(["close-app", "launch"])
 
 const OWNER =
-  "tell your lead, and the dispatcher hands the owner the command to run with the ! prefix in the dispatcher's terminal window, which runs outside the hooks"
+  "tell your lead, and the dispatcher hands the owner the command to run with the ! prefix in the dispatcher's terminal window, where it runs outside the hooks"
 
 const headed = () =>
   `${GUARD} hook refused this agent-desktop call: it carries --headed, whose physical input moves the owner's own pointer and focus. --headed is the owner's alone, so ${OWNER}.`
