@@ -16,7 +16,6 @@ const write = (file: string, body: unknown) => {
 const repo = () => {
   const dir = join(scratch, `repo-${++made}`)
   write(join(dir, "package.json"), { devDependencies: { turbo: "^2" }, workspaces: ["packages/*"] })
-  write(join(dir, "node_modules", "turbo", "package.json"), {})
   write(join(dir, "packages", "settings", "package.json"), {
     dependencies: { "@packages/safe-delete": "workspace:*", zod: "catalog:" },
     devDependencies: { typescript: "catalog:" },
@@ -26,7 +25,7 @@ const repo = () => {
   return dir
 }
 
-test("names a workspace package's declared dependency no node_modules holds", async () => {
+test("names a workspace package's declared dependency no node_modules holds, and leaves out the checkout's own, which link-skills.sh never loads", async () => {
   expect(await unlinked(repo())).toEqual(["packages/settings: @packages/safe-delete"])
 })
 
@@ -34,12 +33,6 @@ test("a dependency linked in the package's own node_modules or one above it coun
   const dir = repo()
   write(join(dir, "node_modules", "@packages", "safe-delete", "package.json"), {})
   expect(await unlinked(dir)).toEqual([])
-})
-
-test("names the checkout's own dependency as .", async () => {
-  const dir = repo()
-  write(join(dir, "package.json"), { devDependencies: { oxfmt: "^1" }, workspaces: [] })
-  expect(await unlinked(dir)).toEqual([".: oxfmt"])
 })
 
 test("a folder with no package.json declares nothing", async () => {

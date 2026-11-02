@@ -110,6 +110,13 @@ describe("link-skills.sh on a checkout a pull has outgrown", () => {
     ).toBe(true)
   })
 
+  test("a check that fails another way installs nothing and fails the run", async () => {
+    const { home, repo } = checkout("settings @packages/safe-delete")
+    writeFileSync(join(repo, "package.json"), JSON.stringify({ workspaces: 1 }))
+    expect((await run(repo, home)).code).toBe(1)
+    expect(installs(home)).toEqual([])
+  })
+
   test("a fully linked checkout installs nothing", async () => {
     const { home, repo } = checkout()
     expect((await run(repo, home)).code).toBe(0)
