@@ -1374,4 +1374,27 @@ gh api graphql -f query="$QUERY"`,
     ],
     source: "#468",
   },
+  {
+    folders: ["home"],
+    guards: ["no-extensions-write"],
+    rows: () => [
+      [
+        "bash -s's stdin, --version its script's word",
+        "echo 'rm -rf .playground/extensions' | bash -s -- --version",
+      ],
+      [
+        "sh -s's stdin, --help its script's word",
+        "echo 'rm -rf .playground/extensions' | sh -s -- --help",
+      ],
+      [
+        "zsh -s's stdin, --version its script's word",
+        "echo 'rm -rf .playground/extensions' | zsh -s -- --version",
+      ],
+      [
+        "bash -s's here-string, --version its script's word",
+        "bash -s -- --version <<< 'rm -rf .playground/extensions'",
+      ],
+    ],
+    source: "#468",
+  },
 ]

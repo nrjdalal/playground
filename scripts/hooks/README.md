@@ -19,7 +19,7 @@ Their tests are `bun run test:file tests/scripts/hooks`.
   Under a hook's deadline it stops at a chain of scripts a shell, `eval` or `source` reads 256 or more deep, such a script over 128 KB and an `xargs -I` line over 128 KB once its stdin is filled in.
   It holds as unknown any text over 1 MB that a command printed or wrote.
   A hook that sets `unheld` on its `Env` gives the verdict on a shell, `source` or `eval` whose script holds a part the reader cannot read.
-  In a `-c` script or `eval`'s words, a variable the call set to a value it holds (`W=<dir>; bash -c "cd $W && …"`) and `$PWD` in a folder it follows are read, and one set from another variable, a `read` or the environment is not; a shell's `--version` or `--help` and `command -v` read no script, and a script file run by its path is the file's own code, which no hook reads.
+  In a `-c` script or `eval`'s words, a variable the call set to a value it holds (`W=<dir>; bash -c "cd $W && …"`) and `$PWD` in a folder it follows are read, and one set from another variable, a `read` or the environment is not; a shell's `--version` or `--help` as its first word and `command -v` read no script, and a script file run by its path is the file's own code, which no hook reads.
 
 ## Registered in both settings files
 

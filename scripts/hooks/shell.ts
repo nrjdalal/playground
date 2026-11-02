@@ -989,9 +989,8 @@ async function shell(
   const slot = shellSlot(args, name)
   if (slot) return examine({ ...cmd, words: slot }, env, visit, builtins)
   const { inline, operand } = shellOperand(args, name)
-  // --version and --help print and exit, reading no script
-  if (!operand && args.some((a) => a.value === "--version" || a.value === "--help"))
-    return undefined
+  // --version and --help print and exit as a shell's first word; after -s or -- they are the script's own words
+  if (!operand && ["--version", "--help"].includes(args[0]?.value ?? "")) return undefined
   if (operand && inline) {
     let script = operand.value
     if (xargs?.replace && script.includes(xargs.replace)) {
