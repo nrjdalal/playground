@@ -20,7 +20,7 @@ export const readSetup = async (api: string): Promise<number | undefined> => {
 
 export type FirstRunView = "checks" | "frame" | "steps"
 
-// Pure: what /dashboard's pane shows on a first run: the neutral frame while any fact on the way is unread (the gate, the silent sign-in, the done mark), so nothing flashes; the checks with no database yet, while signed out once the sign-in finds no owner, and signed in until the done mark is written; then the steps, which Alpha's chat replaces once it runs.
+// Pure: what /dashboard's pane shows on a first run: the frame, a centred spinner, while any fact on the way is unread (the gate, the silent sign-in, the done mark), so nothing flashes; the checks with no database yet, while signed out once the sign-in finds no owner, and signed in until the done mark is written; then the steps, which Alpha's chat replaces once it runs.
 export const firstRunView = ({
   done,
   gate,

@@ -18,6 +18,7 @@ import {
   pinFor,
   pinProblem,
   restoreEnv,
+  restoreLines,
   restoreProblem,
   runJob,
   serverEnv,
@@ -119,7 +120,7 @@ const install = async (pinned: boolean) => {
   }
 }
 
-// herdr's own resume is off in the config, since it runs a bare claude --resume without the session's settings, so spawn.sh restore brings each of a server's sessions back through its resume record, the gate judging each; its lines go to the job's log.
+// herdr's own resume is off in the config, since it runs a bare claude --resume without the session's settings, so spawn.sh restore brings each of a server's sessions back through its resume record, the gate judging each; its summary goes to the output once, a failure's through the cycle's problem, and each session's line to <server>.restore.log beside the server's socket.
 const restore = async (session: string): Promise<string | null> => {
   const proc = Bun.spawn(
     ["bash", join(import.meta.dir, "../../../../scripts/spawn.sh"), "restore"],
@@ -136,8 +137,10 @@ const restore = async (session: string): Promise<string | null> => {
     proc.exited,
   ])
   const output = `${out}${err}`
-  for (const line of output.split("\n").filter(Boolean)) console.log(`restore ${session}: ${line}`)
-  return restoreProblem(code, output)
+  const log = join(dir, `${session}.restore.log`)
+  await writeAtomic(log, output)
+  for (const line of restoreLines(session, code, output, log)) console.log(line)
+  return restoreProblem(code, output, log)
 }
 
 const deps = {
