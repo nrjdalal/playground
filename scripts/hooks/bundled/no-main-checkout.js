@@ -1,5 +1,5 @@
 // @bun
-const __HOOK_DIR = import.meta.dir.slice(0, import.meta.dir.lastIndexOf("/"));
+const __CHECKOUT = import.meta.dir.slice(0, import.meta.dir.lastIndexOf("/scripts/hooks/bundled"));
 
 // scripts/hooks/no-main-checkout.ts
 import { readFileSync, realpathSync } from "fs";
@@ -121,7 +121,7 @@ var names;
 function loadNames(environment = process.env) {
   names ??= (async () => {
     try {
-      const setting = join2(__HOOK_DIR, "../../packages/scripts/src/playground/setting.ts");
+      const setting = join2(__CHECKOUT + "/scripts/hooks", "../../packages/scripts/src/playground/setting.ts");
       const read = Bun.spawn(["bun", setting, "sessions.names", "sessions.aliases"], {
         env: { ...process.env, ...environment },
         stderr: "ignore",
@@ -1586,7 +1586,7 @@ function inspect(raw, environment, main) {
   };
   return run(lex(command, env.known), env, visit);
 }
-async function check(raw, environment = process.env, main = mainCheckout(resolve3(__HOOK_DIR, "..", ".."))) {
+async function check(raw, environment = process.env, main = mainCheckout(resolve3(__CHECKOUT + "/scripts/hooks", "..", ".."))) {
   try {
     return await inspect(raw, environment, main);
   } catch {

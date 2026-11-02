@@ -1,5 +1,8 @@
+import { realpathSync } from "node:fs"
 import { readdir } from "node:fs/promises"
-import { join } from "node:path"
+import { dirname, join, relative } from "node:path"
+
+import type { BunPlugin } from "bun"
 
 import { preToolUseGuards } from "./ops-tick/guard-probe"
 
@@ -11,8 +14,25 @@ export const BUNDLED = join(HOOKS, "bundled")
 // no-extensions-write runs its check in this Worker, which it starts by URL beside its own file.
 const WORKERS = ["no-extensions-write-worker"]
 
-// A bundled module reads import.meta.dir as the folder of its source, scripts/hooks/, one up from the bundle, so each path a guard builds from it holds.
-const BANNER = 'const __HOOK_DIR = import.meta.dir.slice(0, import.meta.dir.lastIndexOf("/"));'
+// The checkout a bundle sits in, two folders up from scripts/hooks/bundled/, read at run time.
+const BANNER =
+  'const __CHECKOUT = import.meta.dir.slice(0, import.meta.dir.lastIndexOf("/scripts/hooks/bundled"));'
+
+// Each module of the checkout reads import.meta.dir as its own source's folder under the checkout the bundle sits in, so a path it builds from there (main-checkout.ts's checkout, a guard's own folder) holds as it does from source.
+const sourceDirs = (root: string): BunPlugin => ({
+  name: "source-dirs",
+  setup(build) {
+    const escaped = root.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")
+    const filter = new RegExp(`^${escaped}/(?!.*/node_modules/).*\\.[cm]?[jt]sx?$`)
+    build.onLoad({ filter }, async ({ path }) => ({
+      contents: (await Bun.file(path).text()).replace(
+        /\bimport\.meta\.dir\b/g,
+        `(__CHECKOUT + ${JSON.stringify(`/${relative(root, dirname(path))}`)})`,
+      ),
+      loader: path.endsWith("x") ? "tsx" : /\.[cm]?js$/.test(path) ? "js" : "ts",
+    }))
+  },
+})
 
 export const entries = async (root: string): Promise<string[]> => [
   ...(await preToolUseGuards(root)),
@@ -29,9 +49,9 @@ export async function bundle(root: string): Promise<Map<string, string>> {
     for (const name of await entries(root)) {
       const result = await Bun.build({
         banner: BANNER,
-        define: { "import.meta.dir": "__HOOK_DIR" },
         entrypoints: [join(root, HOOKS, `${name}.ts`)],
         naming: "[name].js",
+        plugins: [sourceDirs(realpathSync(root))],
         root: join(root, HOOKS),
         target: "bun",
       })

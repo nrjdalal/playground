@@ -1,5 +1,5 @@
 // @bun
-const __HOOK_DIR = import.meta.dir.slice(0, import.meta.dir.lastIndexOf("/"));
+const __CHECKOUT = import.meta.dir.slice(0, import.meta.dir.lastIndexOf("/scripts/hooks/bundled"));
 
 // scripts/hooks/shell.ts
 import { homedir } from "os";

@@ -1,5 +1,5 @@
 // @bun
-const __HOOK_DIR = import.meta.dir.slice(0, import.meta.dir.lastIndexOf("/"));
+const __CHECKOUT = import.meta.dir.slice(0, import.meta.dir.lastIndexOf("/scripts/hooks/bundled"));
 
 // packages/env/src/aliases.ts
 var DESK_ENV = new Set([
@@ -162,7 +162,7 @@ var names;
 function loadNames(environment = process.env) {
   names ??= (async () => {
     try {
-      const setting = join3(__HOOK_DIR, "../../packages/scripts/src/playground/setting.ts");
+      const setting = join3(__CHECKOUT + "/scripts/hooks", "../../packages/scripts/src/playground/setting.ts");
       const read = Bun.spawn(["bun", setting, "sessions.names", "sessions.aliases"], {
         env: { ...process.env, ...environment },
         stderr: "ignore",

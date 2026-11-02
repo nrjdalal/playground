@@ -1,5 +1,5 @@
 // @bun
-const __HOOK_DIR = import.meta.dir.slice(0, import.meta.dir.lastIndexOf("/"));
+const __CHECKOUT = import.meta.dir.slice(0, import.meta.dir.lastIndexOf("/scripts/hooks/bundled"));
 
 // scripts/hooks/no-unslotted-run.ts
 import { join as join5, resolve as resolve4, sep as sep2 } from "path";
@@ -124,7 +124,7 @@ var names;
 function loadNames(environment = process.env) {
   names ??= (async () => {
     try {
-      const setting = join2(__HOOK_DIR, "../../packages/scripts/src/playground/setting.ts");
+      const setting = join2(__CHECKOUT + "/scripts/hooks", "../../packages/scripts/src/playground/setting.ts");
       const read = Bun.spawn(["bun", setting, "sessions.names", "sessions.aliases"], {
         env: { ...process.env, ...environment },
         stderr: "ignore",
@@ -1443,7 +1443,7 @@ function inspect(raw, environment, main) {
   };
   return run(lex(command, env.known), env, visit);
 }
-async function check(raw, environment = process.env, main = mainCheckout(resolve4(__HOOK_DIR, "..", ".."))) {
+async function check(raw, environment = process.env, main = mainCheckout(resolve4(__CHECKOUT + "/scripts/hooks", "..", ".."))) {
   try {
     return await inspect(raw, environment, main);
   } catch {

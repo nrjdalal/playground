@@ -1,5 +1,5 @@
 // @bun
-const __HOOK_DIR = import.meta.dir.slice(0, import.meta.dir.lastIndexOf("/"));
+const __CHECKOUT = import.meta.dir.slice(0, import.meta.dir.lastIndexOf("/scripts/hooks/bundled"));
 
 // scripts/hooks/no-desktop-owner-app.ts
 import { realpathSync } from "fs";
@@ -50,7 +50,7 @@ applyEnvAliases();
 // packages/scripts/src/main-checkout.ts
 import { existsSync } from "fs";
 import { dirname, join } from "path";
-var mainCheckout = (from = join(__HOOK_DIR, "..", "..", "..")) => {
+var mainCheckout = (from = join(__CHECKOUT + "/packages/scripts/src", "..", "..", "..")) => {
   if (process.env.PLAYGROUND_REPO)
     return process.env.PLAYGROUND_REPO;
   const git = Bun.spawnSync([
