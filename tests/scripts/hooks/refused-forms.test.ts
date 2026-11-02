@@ -9,6 +9,7 @@ import { check as extensionsWrite } from "../../../scripts/hooks/no-extensions-w
 import { check as glmHeavyPath } from "../../../scripts/hooks/no-glm-heavy-path"
 import { check as headlessLogin } from "../../../scripts/hooks/no-headless-login"
 import { check as killByName } from "../../../scripts/hooks/no-kill-by-name"
+import { check as mainCheckout } from "../../../scripts/hooks/no-main-checkout"
 import { check as playgroundLeak } from "../../../scripts/hooks/no-playground-leak"
 import { check as rawSpawn } from "../../../scripts/hooks/no-raw-spawn"
 import { check as releaseComment } from "../../../scripts/hooks/no-release-comment"
@@ -112,6 +113,10 @@ const SYNCED = storeWith(
 mkdirSync(join(SYNCED, "extensions", "acme"), { recursive: true })
 Bun.spawnSync(["git", "-C", join(SYNCED, "extensions", "acme"), "init", "-q"])
 
+// A made-up main checkout, as no-main-checkout's own test names one.
+const MAIN = join(SCRATCH, "main")
+mkdirSync(MAIN)
+
 type Run = (raw: string, home: string) => Promise<string | undefined>
 
 // Each guard's check with the environment its own test gives it, and the folders it runs in, each a cwd and the HOME that goes with it.
@@ -156,6 +161,10 @@ const GUARDS: Record<Guard, { folders: Partial<Record<Folder, [string, string]>>
       }),
   },
   "no-kill-by-name": { folders: { checkout: [CHECKOUT, HOME] }, run: (raw) => killByName(raw) },
+  "no-main-checkout": {
+    folders: { "main checkout": [MAIN, HOME] },
+    run: (raw) => mainCheckout(raw, { HOME: "/u" }, MAIN),
+  },
   "no-playground-leak": {
     folders: { "data folder": [DATA, HOME], home: [HOME, HOME] },
     run: (raw) =>

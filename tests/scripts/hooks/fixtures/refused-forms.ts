@@ -9,6 +9,7 @@ export type Guard =
   | "no-glm-heavy-path"
   | "no-headless-login"
   | "no-kill-by-name"
+  | "no-main-checkout"
   | "no-playground-leak"
   | "no-raw-spawn"
   | "no-release-comment"
@@ -23,6 +24,7 @@ export type Folder =
   | "extensions root"
   | "glm repo"
   | "home"
+  | "main checkout"
   | "process data folder"
   | "process home"
   | "process tmp"
@@ -58,6 +60,8 @@ export type Group = {
 export const ALLOWED: string[] = [
   "#466 git --attr-source before a read in the extensions root",
   "#466 git --attr-source before -C into the extensions root and a read",
+  "#466 git --attr-source with a subcommand for its value before a read in the main checkout",
+  "#466 git --attr-source with a subcommand for its value before a read in a repo with a heavy path staged",
 ]
 
 // A harmless git alias nest of the given depth around an inner command line, each level double-quoted.
@@ -1103,6 +1107,33 @@ gh api graphql -f query="$QUERY"`,
         "git --exec-path=/usr/libexec commit -m x",
       ],
       ["git --namespace with a subcommand for its value", "git --namespace log commit -m x"],
+      [
+        "git --attr-source with a subcommand for its value before a commit of a heavy path",
+        "git --attr-source log commit -m x",
+      ],
+      [
+        "git --attr-source with a subcommand for its value before a read in a repo with a heavy path staged",
+        "git --attr-source commit log -1",
+      ],
+    ],
+    source: "#466",
+  },
+  {
+    folders: ["main checkout"],
+    guards: ["no-main-checkout"],
+    rows: () => [
+      [
+        "git --attr-source before a reset in the main checkout",
+        "git --attr-source HEAD reset --hard",
+      ],
+      [
+        "git --attr-source with a subcommand for its value before a checkout in the main checkout",
+        "git --attr-source log checkout x",
+      ],
+      [
+        "git --attr-source with a subcommand for its value before a read in the main checkout",
+        "git --attr-source checkout log -1",
+      ],
     ],
     source: "#466",
   },
