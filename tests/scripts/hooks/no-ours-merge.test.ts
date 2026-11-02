@@ -31,6 +31,7 @@ describe("a merge or pull with ours is refused", () => {
     ["a quoted value", "git merge -s 'ours' origin/canary"],
     ["git pull", "git pull -X ours origin canary"],
     ["git -C <dir>", "git -C /tmp/other merge -s ours origin/canary"],
+    ["git -C with a subcommand for its value", "git -C log merge -s ours origin/canary"],
     ["after cd &&", "cd /tmp && git merge -s ours origin/canary"],
     ["through bash -c", "bash -c 'git merge -X ours origin/canary'"],
     ["through run-slot", "~/.playground/ops/run-slot.sh w -- git merge -s ours origin/canary"],

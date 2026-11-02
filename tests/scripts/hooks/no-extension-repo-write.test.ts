@@ -426,6 +426,10 @@ describe("a push resolves its target the way git does, and one it cannot place i
       ],
       ["set-url, then a push with no remote", `git remote set-url origin ${EXT} && git push`],
       [
+        "set-url behind git -C with a subcommand for its value, then a push",
+        `git -C remote remote set-url --push origin ${EXT} && git push origin HEAD:main`,
+      ],
+      [
         "config pushurl, then a push",
         `git config remote.origin.pushurl ${EXT}; git push origin main`,
       ],

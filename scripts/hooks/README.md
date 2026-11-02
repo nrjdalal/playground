@@ -211,7 +211,7 @@ Their tests are `bun run test:file tests/scripts/hooks`.
   An install is `bun`, `npm`, `pnpm` or `yarn` `install`, `i`, `it`, `install-test`, `cit`, `install-ci-test`, `add`, `ci`, `up` or `update` (and `upgrade` but for `bun upgrade`, which updates bun itself).
   It is also a bare `yarn` (not `-v`, `--version`, `-h` or `--help`), `yarn global add` and `yarn workspace <name> add`, `uv sync` or `add`, `uv pip sync`, or a `pip` (`pip3`, `pip3.12`), `pipx`, `uv pip`, `uv tool` or `python -m pip` `install`, each also through `uv run` and past uv's own options.
   A clone is `cp`, `ditto` or `rsync` naming a `node_modules` folder or its contents (`node_modules/`, `node_modules/.`, `node_modules/*`), read as run-slot.sh reads `cp`'s.
-  It finds git's subcommand past git's own options through `gitTakes` in `scripts/hooks/shell.ts`, as [no-playground-leak](#no-playground-leak) does, so `git --attr-source HEAD commit` reads as a commit.
+  It finds git's subcommand past git's own options through `GIT_TAKES` in `scripts/hooks/shell.ts`, as [no-playground-leak](#no-playground-leak) does, so `git --attr-source HEAD commit` reads as a commit.
   An Opus path's refusal comes first, since that change moves to a Claude worker whatever the load.
   A session is on GLM when its `ANTHROPIC_BASE_URL` points at `api.z.ai`, or when the backend pin spawn.sh keeps under its registry name reads `glm`; a Claude session commits those paths as before.
   It fails closed only on a call that reads as a git commit or push, or over that load as an install or clone (one whose directory, paths or refs it cannot read, or whose input does not parse), and passes every other call.
@@ -248,7 +248,7 @@ Their tests are `bun run test:file tests/scripts/hooks`.
   or any agent's name in the roster, both read on every call since skills are added and sessions renamed, leaving out one the file's `everyday` list names, such as `builder`, an org's own name, which its extension's copy adds, or `pr`, the public skill copied from upstream whose name is the word for a pull request, and adding none when the roster is missing or does not read;
   each matched whole in any case, with `_` and `-` counting as edges, so `PLAYGROUND_ROLE` holds one and `the dashboard` does not):
   a Linear or Slack MCP tool that is not a read, a GitHub MCP write whose owner is a guarded org, a `gh` write (pr, issue, label, release, a non-GET `gh api`) or curl to Linear, Slack or a guarded org's repository, and `git commit` or `git push` in a guarded org's checkout, judged by its message, its branch and the messages of the commits the remote does not hold.
-  It finds git's subcommand past git's own options through `gitTakes` in `scripts/hooks/shell.ts`, which steps over the separate value of each option `GIT_TAKES` lists (`--attr-source <tree>` and `--config-env <key>=<variable>` among them) but a word naming one of git's own subcommands, since git stops there with an error, so `git --attr-source HEAD push` reads as a push.
+  It finds git's subcommand past git's own options through `GIT_TAKES` in `scripts/hooks/shell.ts`, taking the word after each option it lists as that option's value, as git does (`--attr-source <tree>` and `--config-env <key>=<variable>` among them), so `git --attr-source HEAD push` reads as a push and `git -C log push` as a push from `log`.
   `GIT_TAKES` is the one list every git-reading hook steps over (no-glm-heavy-path, no-main-checkout, no-playground-leak and no-stash), and no-extension-repo-write reads git the same way.
   Outside `anyWrite`, it follows a `-c alias.<name>=<value>` whose value is literal git words, reading that value as the subcommand, so `git -c alias.p=push p …` is judged as the push and `git -c alias.l=log l` runs;
   it refuses a `!` alias, an alias whose value or name it cannot read (a variable, a `--config-env` value), an alias that names another alias, and a subcommand it cannot read after one.
@@ -330,7 +330,7 @@ Their tests are `bun run test:file tests/scripts/hooks`.
   A command run through `run-slot.sh`, typed bare or as a shell's script (`bash <path>/run-slot.sh <who> -- <command>`, `shellSlot`), is read as the words after its `--` (`slotWords` in `scripts/hooks/shell.ts`, which no-glm-heavy-path and no-false-green read it by too), so a commit, a build or a write through run-slot is refused as the same command typed bare.
   It refuses a git move there too: `add` (but `-n` or `--dry-run`), `am`, `apply` (but `--check`, `--numstat`, `--stat` or `--summary` without `--apply`), `bisect`, `branch -f`, `checkout`, `cherry-pick`, `clean` (but `-n`), `merge`, `mv`, `pull`, `rebase`, `reset` (but the one below), `restore`, `revert`, `rm`, `stash` (but `list` and `show`), `switch` and `update-ref`,
   whose tree it reads from a `--git-dir` of `<checkout>/.git`, else `--work-tree`, else the cwd after every `-C` in turn, naming the fix: `git -C <your worktree>`, after `git -C <your worktree> rev-parse --show-toplevel` names it.
-  It finds the subcommand past git's other options through `gitTakes` in `scripts/hooks/shell.ts`, as [no-playground-leak](#no-playground-leak) does, so `git --attr-source HEAD checkout <ref>` reads as a checkout.
+  It finds the subcommand past git's other options through `GIT_TAKES` in `scripts/hooks/shell.ts`, as [no-playground-leak](#no-playground-leak) does, so `git --attr-source HEAD checkout <ref>` reads as a checkout.
   The one reset it lets through is exactly `git reset --keep origin/main`, on the main checkout's `main`, while `git status --porcelain` is empty and no remote-tracking ref holds any commit of `origin/main..main`.
   It is the way back from a stray local commit there, which `playground update`'s fast-forward stops on, since `--keep` keeps uncommitted work and the check keeps every commit someone else holds.
   A worker's shell lands there when it changes into the main checkout to run spawn.sh, so the factory's docs run spawn.sh by its absolute path (a bare `git reset --hard` there once ran every installed skill and hook off another branch for 3.5 minutes).
@@ -398,7 +398,7 @@ Their tests are `bun run test:file tests/scripts/hooks`.
 
 - Every worktree of a checkout shares one `git stash` list, so a pop can take another worker's entry, lint-staged's commit backup included: take a before-shot from a separate worktree on `origin/canary`, or commit first.
   The factory's `scripts/hooks/no-stash.ts` (registered in `scripts/factory-settings.json`, and in `.claude/settings.json` for a session cmux restores without it) refuses a stash that could take another worktree's work, and `agent-browser close --all`, which closes every session's browser on the machine.
-  It finds git's subcommand past git's own options through `gitTakes` in `scripts/hooks/shell.ts`, as [no-playground-leak](#no-playground-leak) does, so `git --attr-source HEAD stash pop` reads as a stash.
+  It finds git's subcommand past git's own options through `GIT_TAKES` in `scripts/hooks/shell.ts`, as [no-playground-leak](#no-playground-leak) does, so `git --attr-source HEAD stash pop` reads as a stash.
 
 ## no-unslotted-run
 

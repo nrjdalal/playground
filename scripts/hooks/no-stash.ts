@@ -3,7 +3,7 @@
 import { fromFactory } from "./role"
 import {
   type Env,
-  gitTakes,
+  GIT_TAKES,
   knownVariables,
   lex,
   marked,
@@ -105,7 +105,7 @@ export function gitCommand(args: Word[]): { aliases: string[]; rest: Word[]; sub
     const v = args[k].value
     if (v === "-c") aliases.push(args[k + 1]?.value ?? "")
     else if (v.startsWith("-c")) aliases.push(v.slice(2))
-    k += gitTakes(v, args[k + 1]?.value) ? 2 : 1
+    k += GIT_TAKES.has(v) ? 2 : 1
   }
   return { aliases, rest: args.slice(k + 1), sub: args[k] }
 }

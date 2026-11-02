@@ -21,8 +21,7 @@ import {
   fromXargs,
   ghApi,
   ghCommand,
-  gitBuiltin,
-  gitTakes,
+  GIT_TAKES,
   knownVariables,
   lex,
   marked,
@@ -394,6 +393,7 @@ let changed = false
 let moved = false
 let movedBefore = false
 let startCwd: string | undefined
+let builtins: Set<string> | undefined
 const MCP_TOOL = /^mcp__(.+?)__(.+)$/
 const READ_TOOL =
   /^(?:download|extract|fetch|get|list|read|search)_|_(?:history|info|list|read|replies|search|unreads)$/
@@ -520,7 +520,7 @@ function changesState(cmd: Command, { args, name }: Parsed): boolean {
   const words = args.map((a) => a.value)
   if (name === "gh") return GH_STATE.has(ghCommand(args).head.join(" "))
   if (name === "git") {
-    const k = words.findIndex((w, i) => !w.startsWith("-") && !gitTakes(words[i - 1], w))
+    const k = words.findIndex((w, i) => !w.startsWith("-") && !GIT_TAKES.has(words[i - 1] ?? ""))
     const [sub, ...rest] = k === -1 ? [] : words.slice(k)
     if (sub === "clone" || sub === "init" || sub === "submodule") return true
     const verb = rest.find((w) => !w.startsWith("-"))
@@ -1037,7 +1037,7 @@ async function git(
     if (v === "-C") {
       const next = args[++k]
       dir = next ? pathOf(next, { ...env, cwd: dir }) : undefined
-    } else if (gitTakes(v, args[k + 1]?.value)) {
+    } else if (GIT_TAKES.has(v)) {
       if (v === "-c" || v === "--config-env" || v === "--git-dir") carried = true
       const next = args[k + 1]?.value ?? ""
       if (v !== "--git-dir" && /^alias\./i.test(next)) {
@@ -1067,12 +1067,7 @@ async function git(
   const here = { ...env, cwd: dir }
   // Outside anyWrite, an alias -c sets is followed when its value is literal git words, and refused when it runs a command, cannot be read or names another alias, or when the alias's name or the subcommand cannot be read.
   const maybeAlias = anyAlias || (aliasSet && !!sub && marked(sub))
-  if (
-    !policy.anyWrite &&
-    sub &&
-    !gitBuiltin(sub) &&
-    (maybeAlias || aliases.has(sub.toLowerCase()))
-  ) {
+  if (!policy.anyWrite && sub && !builtin(sub) && (maybeAlias || aliases.has(sub.toLowerCase()))) {
     const value = aliases.get(sub.toLowerCase())
     const words =
       value === undefined || value.trim().startsWith("!") ? undefined : splitCmdline(value)
@@ -1093,7 +1088,7 @@ async function git(
         "it sets a git alias with -c or --config-env, which can run a push under a name the hook does not read",
       )
     if (sub && marked(sub)) return cannot("its subcommand is a value the hook cannot read")
-    if (sub && !["commit", "push", "send-pack", "subtree"].includes(sub) && !gitBuiltin(sub)) {
+    if (sub && !["commit", "push", "send-pack", "subtree"].includes(sub) && !builtin(sub)) {
       if (carried)
         return cannot(
           `it runs ${sub}, which -c, --config-env, --git-dir or a GIT_ variable may define as an alias`,
@@ -1157,6 +1152,17 @@ async function git(
     } else extras.push(value)
   }
   return judge("git commit", decide(dir ? checkout : [undefined]), texts, env, extras)
+}
+
+// Whether git runs a word as its own command, which no alias can replace.
+function builtin(sub: string): boolean {
+  builtins ??= new Set(
+    Bun.spawnSync(["git", "--list-cmds=builtins"], { stderr: "ignore" })
+      .stdout.toString()
+      .split("\n")
+      .filter(Boolean),
+  )
+  return builtins.has(sub)
 }
 
 // git's split_cmdline: quotes group and drop, a backslash escapes outside single quotes, and an unclosed quote or a trailing backslash fails the alias.

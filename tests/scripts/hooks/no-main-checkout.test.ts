@@ -440,6 +440,10 @@ describe("a git command that moves the main checkout's HEAD, index or files is r
     ["a --git-dir with a trailing slash", `git --git-dir=${MAIN}/.git/ reset --hard HEAD`],
     ["git --attr-source before the move", `git -C ${MAIN} --attr-source HEAD checkout 55ae3262ec`],
     [
+      "git --namespace with a subcommand for its value",
+      `git -C ${MAIN} --namespace log checkout 55ae3262ec`,
+    ],
+    [
       "a --git-dir of the main checkout beside another --work-tree",
       `git --git-dir ${MAIN}/.git --work-tree ${WORKTREE} reset --hard HEAD`,
     ],

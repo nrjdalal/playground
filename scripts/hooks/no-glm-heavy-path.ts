@@ -11,7 +11,7 @@ import {
   type Command,
   type Env,
   examine,
-  gitTakes,
+  GIT_TAKES,
   knownVariables,
   lex,
   parseFlags,
@@ -380,7 +380,7 @@ const visitor = (load5: number, limit: number): Visit => {
       if (v === "-C") {
         const next = args[++k]
         dir = next ? pathOf(next, { ...env, cwd: dir }) : undefined
-      } else if (gitTakes(v, args[k + 1]?.value)) k++
+      } else if (GIT_TAKES.has(v)) k++
       else if (!v.startsWith("-")) break
     }
     const sub = isGit ? args[k]?.value : undefined

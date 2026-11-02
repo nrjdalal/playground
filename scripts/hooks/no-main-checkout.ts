@@ -6,7 +6,7 @@ import { fromFactory } from "./role"
 import {
   type Env,
   examine,
-  gitTakes,
+  GIT_TAKES,
   knownVariables,
   lex,
   pathOf,
@@ -162,7 +162,7 @@ export function gitCall(
       const word = value(k, "--work-tree")
       if (v === "--work-tree") k++
       workTree = word && pathOf(word, { ...env, cwd })
-    } else if (gitTakes(v, args[k + 1]?.value)) k++
+    } else if (GIT_TAKES.has(v)) k++
   }
   const repo = gitDir?.replace(/\/+$/, "")
   const tree = repo?.endsWith(`${sep}.git`) ? dirname(repo) : (workTree ?? cwd)

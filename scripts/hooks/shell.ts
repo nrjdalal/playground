@@ -148,22 +148,6 @@ export const GIT_TAKES = new Set([
   "--namespace",
   "--work-tree",
 ])
-let builtins: Set<string> | undefined
-// Whether git runs a word as its own command, which no alias can replace.
-export function gitBuiltin(word: string): boolean {
-  builtins ??= new Set(
-    Bun.spawnSync(["git", "--list-cmds=builtins"], { stderr: "ignore" })
-      .stdout.toString()
-      .split("\n")
-      .filter(Boolean),
-  )
-  return builtins.has(word)
-}
-// Whether git takes the word after a GIT_TAKES option as its value: any word but one of git's own subcommands, which, taken as a value, stops git with an error, so the hook reads it as the subcommand, the stricter way.
-export function gitTakes(option: string | undefined, next: string | undefined): boolean {
-  if (option === undefined || !GIT_TAKES.has(option)) return false
-  return next === undefined || marked(next) || !gitBuiltin(next)
-}
 
 const API_FIELDS = new Set(["-F", "--field", "-f", "--raw-field"])
 const API_TAKES = new Set([
