@@ -315,7 +315,8 @@ describe("a bun run ask/thread note reads as data only from the main checkout", 
     try {
       return await at(command, cwd)
     } finally {
-      process.env.PLAYGROUND_REPO = save
+      if (save === undefined) delete process.env.PLAYGROUND_REPO
+      else process.env.PLAYGROUND_REPO = save
     }
   }
 
@@ -356,6 +357,16 @@ describe("a bun run ask/thread note reads as data only from the main checkout", 
       if (save === undefined) delete process.env.PLAYGROUND_REPO
       else process.env.PLAYGROUND_REPO = save
     }
+  })
+
+  test("stays refused from a plain folder under the main checkout's .claude/worktrees with its own package.json", async () => {
+    const made = join(MAIN, ".claude", "worktrees", "madeX")
+    await Bun.write(
+      join(made, "package.json"),
+      JSON.stringify({ scripts: { ask: "echo hi", thread: "echo hi" } }),
+    )
+    expect(await at(askNote, made)).toContain("no-desktop-owner-app hook refused")
+    expect(await at(threadNote, made)).toContain("no-desktop-owner-app hook refused")
   })
 
   test("stays refused after a cd out of the main checkout earlier in the line", async () => {

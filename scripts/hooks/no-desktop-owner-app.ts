@@ -1,5 +1,5 @@
-// PreToolUse hook for every session run from this repo, registered in both settings files: refuses an agent-desktop call that carries --headed, that targets an app on the desktop-owner-apps guard list, or whose target it cannot read, as scripts/hooks/README.md's section states; it reads the list and nothing else, so no setting or file a session writes frees a call.
-import { existsSync, realpathSync } from "node:fs"
+// PreToolUse hook for every session run from this repo, registered in both settings files: refuses an agent-desktop call that carries --headed, that targets an app on the desktop-owner-apps guard list, or whose target it cannot read, as scripts/hooks/README.md's section states; it reads that list, and for the bun run ask/thread allowance the main checkout's own package.json (a tree no-main-checkout keeps a session out of), and nothing else a session writes frees a call.
+import { realpathSync } from "node:fs"
 import { join, resolve } from "node:path"
 
 import { mainCheckout } from "../../packages/scripts/src/main-checkout"
@@ -52,15 +52,12 @@ const realOf = (path: string): string => {
   }
 }
 
-// Whether the call runs script from the main checkout, where its entry point is a file no session writes (no-main-checkout keeps a session out of that tree). The main checkout is mainCheckout() (packages/scripts/src/main-checkout.ts: PLAYGROUND_REPO, else the git common dir's parent holding scripts/spawn.sh), resolved from the hook's own location rather than the call's cwd, so a made folder that git-inits itself and plants scripts/spawn.sh cannot pass as the main checkout. The allowance holds only when the effective cwd's own git toplevel (not the common dir's parent, so a linked worktree sharing the common dir fails) equals that path, its package.json maps script to the entry, and the entry file is present. Every other cwd, a byte-identical worktree, a made folder with its own scripts/spawn.sh, an unknown cwd (no cwd, or a cd to a variable or a substitution), keeps the verdict.
+// Whether the call runs script from the main checkout, where its entry point is a file no session writes (no-main-checkout keeps a session out of that tree). The main checkout is mainCheckout() (see packages/scripts/src/main-checkout.ts), resolved from the hook's own location rather than the call's cwd, so a made folder that git-inits itself and plants scripts/spawn.sh cannot pass as it. The allowance holds only when the effective cwd is itself that path (realOf(cwd) === realOf(mainCheckout()), so bun run reads the same package.json this gate checks, not a nearer one under a made folder), its package.json maps script to the entry, and the entry file is present. Every other cwd, a linked worktree, a made folder under .claude/worktrees with its own package.json, an unknown cwd (no cwd, or a cd to a variable or a substitution), keeps the verdict.
 async function mapsDataScript(cwd: string | undefined, script: string): Promise<boolean> {
   const entry = BUN_DATA_SCRIPTS.get(script)
   if (entry === undefined || cwd === undefined) return false
-  const git = Bun.spawnSync(["git", "-C", cwd, "rev-parse", "--show-toplevel"])
-  if (git.exitCode !== 0) return false
-  const top = git.stdout.toString().trim()
-  if (realOf(top) !== realOf(mainCheckout())) return false
-  const pkg = Bun.file(join(top, "package.json"))
+  if (realOf(cwd) !== realOf(mainCheckout())) return false
+  const pkg = Bun.file(join(cwd, "package.json"))
   if (!(await pkg.exists())) return false
   try {
     const { scripts } = JSON.parse(await pkg.text()) as { scripts?: Record<string, string> }
@@ -68,7 +65,7 @@ async function mapsDataScript(cwd: string | undefined, script: string): Promise<
   } catch {
     return false
   }
-  return existsSync(join(top, entry))
+  return await Bun.file(join(cwd, entry)).exists()
 }
 // Wrappers a shell line may hide in: watch joins its words past its options into one sh -c line, flock -c runs its string, and a word of any of them holding a space may be one.
 const LINES = new Set(["flock", "setsid", "watch"])

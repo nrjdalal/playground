@@ -32,6 +32,7 @@ export type Folder =
   | "process tmp"
   | "process worktree"
   | "tmp"
+  | "worktree"
 
 export type Paths = {
   BARE: string
@@ -1553,12 +1554,12 @@ gh api graphql -f query="$QUERY"`,
       [
         "bun run ask with a prose arg, in a byte-identical linked worktree",
         `bun run ask x "note; agent-desktop 1.0 ok"`,
-        "checkout",
+        "worktree",
       ],
       [
         "bun run thread with a prose arg, in a byte-identical linked worktree",
         `bun run thread title t1 "note; agent-desktop 1.0 ok"`,
-        "checkout",
+        "worktree",
       ],
       [
         "bun run ask with a prose arg, in a folder with no Playground package.json",
