@@ -95,9 +95,9 @@ const recursive = (v: string): boolean =>
 const spellsRecursive = (v: string): boolean =>
   v.split(/[\s,{}]+/).some((part) => part.startsWith("-") && recursive(part))
 
-// A word the shell may turn into other words: a variable, a substitution or a brace, or an unquoted glob, where a lone `[` is test's own name.
+// A word the shell may turn into other words: a variable, a substitution or a brace, or a glob the shell sees outside quotes (`'/bin/r'?`), where a lone `[` is test's own name.
 const hidden = (word: Word): boolean =>
-  unreadable(word) || (!word.quoted && /[*?]|\[[^\]]*\]/.test(word.value))
+  unreadable(word) || (!!word.glob && /[*?]|\[[^\]]*\]/.test(word.value))
 
 // A long option by any prefix git takes (`--forc`), its shortest unique one given.
 const prefixOf = (v: string, option: string, shortest: number) =>
