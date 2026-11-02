@@ -192,10 +192,11 @@ function programLines({ args, first }: Parsed): string[] {
     .flatMap(({ value }) => [...value.matchAll(/"((?:[^"\\]|\\.)*)"/g)].map((m) => m[1]))
 }
 
-// Whether a call only reads, so its quoted words are never a command line: one of a closed list of readers, an awk whose every program the hook reads and none can run a command or write a file, a reader by `reads` of cat, grep, head, tail or wc, cut, a sort with no -o and no long option (macOS takes --out= for --output), and a uniq with at most one file, since a second is its output; each named bare or by a system folder's path, with no variable set in the call, so no script the session wrote or a PATH it set stands in
-function narrow(parsed: Parsed, env: Env): boolean {
-  const { args, first, name, xargs } = parsed
-  if (!first || xargs || marked(name) || parsed.local.size > 0) return false
+// Whether a call is a closed-list reader whose quoted words are never a command line: awk, cat, cut, grep, head, sort, tail, uniq or wc, as its command's own first word, bare or by a system path, with no variable set in the call
+function narrow(cmd: Command, env: Env): boolean {
+  const parsed = parse(cmd)
+  const { args, first, name } = parsed
+  if (!first || first !== cmd.words[0] || marked(name)) return false
   if (!/^(?:\/(?:bin|opt\/homebrew\/bin|usr\/bin|usr\/local\/bin)\/)?[^/]+$/.test(first.value))
     return false
   const base = program(first.value).toLowerCase()
@@ -211,13 +212,13 @@ function narrow(parsed: Parsed, env: Env): boolean {
   return false
 }
 
-// Whether a line is read whole, as canary read it: every spaced text of every program but a reader, since a program may run any text the line holds (`set -- '…'; eval "$1"`, `git log … | sh`); only a line whose every command, its substitutions' included, is a narrow call and that writes no file by a redirect is read call by call; sed keeps canary's reading
+// Whether a line is read whole, as canary read it, every spaced text of every program but a reader a command line; a line is read call by call only when every command, its substitutions' included, is narrow and no redirect writes a file
 function wholeLine(commands: Command[], env: Env): boolean {
   return commands.some((cmd) => {
     const words = [...cmd.words, ...cmd.redirects.flatMap((r) => (r.target ? [r.target] : []))]
     if (words.some((word) => word.procs && wholeLine(word.procs, env))) return true
     const writes = cmd.redirects.some((r) => writer(r) && r.target?.value !== "/dev/null")
-    return writes || !narrow(parse(cmd), env)
+    return writes || !narrow(cmd, env)
   })
 }
 
