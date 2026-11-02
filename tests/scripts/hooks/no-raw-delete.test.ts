@@ -52,13 +52,17 @@ describe("a delete the hook lets run", () => {
 })
 
 describe("a delete the hook refuses, naming playground rm", () => {
-  test.each([
-    [`a recursive rm in the session's own scratchpad`, `rm -rf ${SCRATCH}/clone`],
-    [`a plain rm in another session's scratchpad`, `rm ${SCRATCH.replace(SESSION, "other")}/x`],
-    [`a plain rm through .. out of the worktree`, "rm ../../../../.zshrc"],
+  test.each<[string, string, string]>([
+    [`a recursive rm in the session's own scratchpad`, `rm -rf ${SCRATCH}/clone`, WORKTREE],
+    [
+      `a plain rm in another session's scratchpad`,
+      `rm ${SCRATCH.replace(SESSION, "other")}/x`,
+      WORKTREE,
+    ],
+    [`a plain rm through .. out of the worktree`, "rm ../../../../.zshrc", WORKTREE],
     [`a plain rm of the worktree from outside it`, `rm ${WORKTREE}/x`, homedir()],
-    [`a plain rm with a word it cannot read`, 'rm "$F"'],
-  ])("%s", async (_, command, cwd = WORKTREE) => {
+    [`a plain rm with a word it cannot read`, 'rm "$F"', WORKTREE],
+  ])("%s", async (_, command, cwd) => {
     const reason = await check(input(command, {}, cwd))
     expect(reason).toContain("no-raw-delete hook ")
     expect(reason).toContain("playground rm")
