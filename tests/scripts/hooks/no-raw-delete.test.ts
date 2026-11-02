@@ -38,6 +38,12 @@ describe("a delete the hook lets run", () => {
     "chmod -w notes.txt",
     "echo 'rm -rf x'",
     "grep -n 'rm -rf' scripts/hooks/README.md",
+    `git grep -n -E "rm -r[f]?|rm -fr|worktree remove" -- '*.md'`,
+    `git commit -m "docs: name rm -rf in words"`,
+    "git -c alias.st=status st",
+    "sed -i '' 's|rm -rf a|rm -rf b|' notes.txt",
+    `bun scripts/roster.ts report ops "shipped; rm incident contained"`,
+    `python3 -c "print('rm -rf x')"`,
     "ls -la",
     "rm --help",
   ])("%s", async (command) => {

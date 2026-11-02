@@ -413,7 +413,8 @@ Only the first reading moves the folder, sets variables and records files for th
   An `rm` holding a word it cannot read (a variable, a substitution) is refused as one that may be recursive, and so is a program it cannot read given `-r` (`$RM -rf`).
   A plain `rm` runs when every path it names sits inside the session's own worktree (the `.claude/worktrees/<name>` folder its `cwd` is in) or its own scratchpad (the `scratchpad` folder under `/tmp/claude-<uid>/` named by its `session_id`), each path resolved through its links; any other path is refused.
   It reads a delete wherever the shell runs one, through `shell.ts`'s walk (wrappers such as `nohup` and `sudo`, `sh -c`, `eval`, substitutions), and three more ways:
-  each word of `screen` or `tmux` that starts no option as the command it runs (`screen -dm`, `tmux new -d`), the script `at` takes from stdin or `-f`, and every word holding a space, the text after an `=` and a leading `!` too, as a command line of its own, but a word of `echo`, `printf`, `grep` or `rg`.
+  each word of `screen` or `tmux` that starts no option as the command it runs (`screen -dm`, `tmux new -d`), the script `at` takes from stdin or `-f`, and every word holding a space, the text after an `=` and a leading `!` too, as a command line of its own.
+  The programs in its `DATA` list (printers, searches, `sed`, `awk`, `jq`, `gh` and the interpreters) take text as data, so their words stay text, and git's only command line is a `-c alias.<name>=!…` value, so a commit message or a `git grep` pattern stays text.
   It is a speed bump, not a wall: a script file a session writes and runs passes it, as does an interpreter's own delete call (`fs.rmSync` in `bun -e`), and only an OS sandbox contains those.
   It fails closed only on a call it cannot read that reads as a delete, and its tests are `bun run test:file tests/scripts/hooks/no-raw-delete.test.ts tests/scripts/hooks/refused-forms.test.ts`.
 

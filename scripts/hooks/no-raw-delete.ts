@@ -30,8 +30,26 @@ const refuse = (
   why = "a recursive delete is final, and one aimed wrong takes a whole tree",
 ) => `no-raw-delete hook refuses ${what}: ${why}. ${INSTEAD}`
 
-// Programs whose arguments are only printed or searched, so a spaced argument is never a command line.
-const READERS = new Set([...PRINTERS, "egrep", "fgrep", "grep", "rg"])
+// Programs whose arguments are text they print, search or edit, or code in their own language, so a spaced argument is never a shell command line (an interpreter's own delete call is the speed bump's stated gap).
+const DATA = new Set([
+  ...PRINTERS,
+  "awk",
+  "bun",
+  "cat",
+  "deno",
+  "egrep",
+  "fgrep",
+  "gawk",
+  "gh",
+  "grep",
+  "jq",
+  "node",
+  "perl",
+  "rg",
+  "ruby",
+  "sed",
+])
+const isData = (name: string) => DATA.has(name) || /^python[\d.]*$/.test(name)
 // Programs that run the command their arguments name, read here at each word that does not start with a dash.
 const STARTERS = new Set(["screen", "tmux"])
 const FIND_RUNS = new Set(["-exec", "-execdir", "-ok", "-okdir"])
@@ -137,16 +155,16 @@ async function inspect(raw: string, environment: Record<string, string | undefin
     run(lex(text, at.known), { ...at, vars: new Map(at.vars) }, visit)
   const visit: Visit = async (cmd, { args, first, name, xargs }, at) => {
     const verdict = await judge(cmd, args, first, name, xargs !== undefined, at)
-    if (verdict || READERS.has(name)) return verdict
-    // a spaced word is read as a command line of its own, the text after an = and a leading ! too (`sh -c '…'` behind any wrapper, a git alias); a part it cannot read stays unread in the words it lands in
-    for (const word of args) {
-      if (!/\s/.test(word.value)) continue
-      const eq = word.value.indexOf("=")
-      const texts = new Set([word.value, word.value.slice(eq + 1)].map((t) => t.replace(/^!/, "")))
-      for (const text of texts) {
-        const found = await line(text, at)
-        if (found) return found
-      }
+    if (verdict || isData(name)) return verdict
+    // a spaced word is read as a command line of its own, the text after an = and a leading ! too (`sh -c '…'` behind any wrapper); git's only command lines are its -c aliases' `!` values, so its messages and patterns stay text; a part it cannot read stays unread in the words it lands in
+    const words =
+      name === "git"
+        ? gitCommand(args).aliases.flatMap((a) => /^alias\.[^=]*=!(.*)$/s.exec(a)?.[1] ?? [])
+        : args.flatMap(({ value }) => [value, value.slice(value.indexOf("=") + 1)])
+    for (const text of new Set(words.map((w) => w.replace(/^!/, "")))) {
+      if (!/\s/.test(text)) continue
+      const found = await line(text, at)
+      if (found) return found
     }
   }
   const judge = async (
