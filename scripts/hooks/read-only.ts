@@ -1,7 +1,5 @@
-// Whether a tool call only reads, while a guard's list is missing: an MCP get, list or search, or a Bash line whose every command is one of the exact read shapes below with no redirect and no glob, brace or parenthesis in any word, quoted or not, so a guard can let it run.
+// Whether a tool call only reads, while a guard's list or policy.json is unreadable: a Bash line whose every command is one of the exact read shapes below, with no redirect and no glob, brace, parenthesis or $ in any word, quoted or not, so a guard can let it run.
 import { type Command, lex, marked } from "./shell"
-
-const MCP_READ = /^mcp__.+?__(?:get|list|search)_\w+$/
 
 // A read shape: the options it takes alone and with a value (see fits), a bare count (`-5`), and whether it takes operands.
 type Shape = { count?: boolean; flags?: string[]; operands?: boolean; values?: string[] }
@@ -145,7 +143,7 @@ const shapeOf = (shapes: Record<string, Shape>, key: string | undefined): Shape 
   key !== undefined && Object.hasOwn(shapes, key) ? shapes[key] : undefined
 
 function commandReads(cmd: Command): boolean {
-  if (cmd.redirects.length > 0 || cmd.words.some((w) => /[*?[{()]/.test(w.value))) return false
+  if (cmd.redirects.length > 0 || cmd.words.some((w) => /[*?[{()$]/.test(w.value))) return false
   const words = cmd.words.map((w) => w.value)
   if (words.length === 0) return true
   if (words.some(marked)) return false
@@ -171,9 +169,7 @@ export function readOnly(raw: string): boolean {
       tool_input?: { command?: unknown }
       tool_name?: unknown
     }
-    if (typeof tool !== "string") return false
-    if (tool !== "Bash") return MCP_READ.test(tool)
-    if (typeof input?.command !== "string") return false
+    if (tool !== "Bash" || typeof input?.command !== "string") return false
     return lex(input.command).commands.every(commandReads)
   } catch {
     return false
