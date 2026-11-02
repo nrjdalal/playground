@@ -64,6 +64,16 @@ describe("a delete the hook refuses, naming playground rm", () => {
     expect(reason).toContain("playground rm")
   })
 
+  test("a forced worktree removal is pointed at playground rm --worktree", async () => {
+    expect(await check(input(`git worktree remove --force ${WORKTREE}`))).toContain(
+      "Remove a worktree with playground rm --worktree <path>",
+    )
+  })
+
+  test("a word it cannot read is named by its variable", async () => {
+    expect(await check(input('rm "$F"'))).toContain("a word the hook cannot read ($F)")
+  })
+
   test("a sub-agent's call, marked by agent_id and agent_type, is refused as the main session's is", async () => {
     const command = `screen -dm sh -c 'rm -rf ${NEVER_MADE}'`
     const main = await check(input(command))

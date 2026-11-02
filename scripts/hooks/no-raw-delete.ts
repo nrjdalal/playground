@@ -25,10 +25,17 @@ import {
 const INSTEAD =
   "Move it to the 7-day trash with playground rm <path> (a worktree: playground rm --worktree <path>), or leave a scratch folder in place for your lead's cleanup. A plain rm of a file inside your own worktree or scratchpad, with no -r, still runs."
 
+const WORKTREE =
+  "Remove a worktree with playground rm --worktree <path>, which moves it to the 7-day trash once no live session holds it."
+
 const refuse = (
   what: string,
   why = "a recursive delete is final, and one aimed wrong takes a whole tree",
-) => `no-raw-delete hook refuses ${what}: ${why}. ${INSTEAD}`
+  instead = INSTEAD,
+) => `no-raw-delete hook refuses ${what}: ${why}. ${instead}`
+
+// A word the hook cannot read, named by the variable it expands when it has one.
+const shown = (word: Word) => (word.variable ? `$${word.variable}` : visible(word.value))
 
 // Programs whose arguments are text they print, search or edit, or code in their own language, so a spaced argument is never a shell command line (an interpreter's own delete call is the speed bump's stated gap).
 const DATA = new Set([
@@ -93,7 +100,7 @@ function judgeRm(args: Word[], xargs: boolean, env: Env, roots: Roots): string |
   for (const a of args) {
     if (marked(a.value))
       return refuse(
-        `an rm with a word the hook cannot read (${visible(a.value)})`,
+        `an rm with a word the hook cannot read (${shown(a)})`,
         "it may be -r or any path",
       )
     if (options && a.value === "--") options = false
@@ -133,6 +140,7 @@ function judgeGit(args: Word[]): string | undefined {
     return refuse(
       "git worktree remove --force",
       "it deletes a worktree's uncommitted work for good",
+      WORKTREE,
     )
 }
 
@@ -176,10 +184,7 @@ async function inspect(raw: string, environment: Record<string, string | undefin
     at: Env,
   ): Promise<string | undefined> => {
     if (first && marked(first.value) && args.some((a) => /^-[A-Za-z]*[rR]/.test(a.value)))
-      return refuse(
-        `a program the hook cannot read (${visible(first.value)}) given -r`,
-        "it may be rm",
-      )
+      return refuse(`a program the hook cannot read (${shown(first)}) given -r`, "it may be rm")
     if (name === "rm") return judgeRm(args, xargs, at, roots)
     if (name === "git") return judgeGit(args)
     if (name === "chflags")
