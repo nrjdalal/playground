@@ -8,6 +8,7 @@ import { guardedOrgs } from "../../packages/settings/src/ext"
 import { coreDir, readPolicy } from "../../packages/settings/src/rendered"
 import { implicitRepos, type Repo, remoteRepo, remotes, repoOf } from "./github"
 import { guardList, isRecord, isStrings } from "./lists"
+import { readOnly } from "./read-only"
 import { fromFactory } from "./role"
 import {
   type ApiRequest,
@@ -55,8 +56,6 @@ export type Hit = { detail: string; fix: string }
 // What one guard guards, so another guard (no-public-leak, no-extension-repo-write) reads every write as this one does: the repositories it guards, what in a text it refuses, how its refusal reads, whether Linear and Slack (hosts) and git commits and pushes count, and whether any write that changes a guarded repository's git data or name is refused whatever its text (anyWrite).
 export type Policy = {
   anyWrite?: true
-  // A gh api DELETE is judged too, though it carries no text.
-  deletes?: true
   find: (text: string) => Hit | undefined
   git: boolean
   guard: string
@@ -754,7 +753,7 @@ async function api(
     const method = args.some((a) => /^(?:-[A-Za-z]*X|--method)/.test(a.value))
     if (!method && request.fields.length === 1 && request.inputs.length === 0) return
   }
-  if (request.method === "DELETE" && !policy.anyWrite && !policy.deletes) return
+  if (request.method === "DELETE" && !policy.anyWrite) return
   const { endpoint, fields, inputs } = request
   const posted = (f: { key: string }) =>
     endpoint.value === "graphql" || f.key.includes(UNKNOWN) || TEXT_FIELD.test(f.key)
@@ -1411,7 +1410,7 @@ export async function check(
     join(lists, "slack-cleared.json"),
   )
   const refusal = loadedTerms.refusal ?? loadedCleared.refusal
-  if (refusal) return refusedList(raw, refusal, environment)
+  if (refusal) return refusedList(raw, refusal)
   terms = loadedTerms.list ?? EMPTY_TERMS
   CLEARED = loadedCleared.list ?? {}
   TERM = pattern(environment, checkout)
@@ -1420,33 +1419,13 @@ export async function check(
     return refusedList(
       raw,
       `no-playground-leak hook refused this call: ${read.refusal}, then run the call again.`,
-      environment,
     )
   return inspectAs(leakPolicy(new Set(guardedOrgs(read.settings.values))), raw, environment)
 }
 
-// The policy a list's refusal reads a call by: every repository and host guarded, every text a hit and a DELETE judged, so a call passes only when the engine reads it as a write to nowhere.
-const FAIL_CLOSED: Policy = {
-  deletes: true,
-  find: () => ({ detail: "a write", fix: "" }),
-  git: true,
-  guard: "a guard",
-  guarded: () => true,
-  hosts: true,
-  place: "anywhere",
-  what: "a write",
-  why: "",
-}
-
-// A list's refusal, given only to a call that names a writing command or tool and that the engine reads as a write: a git or gh read, or a read over a .git path, runs.
-export const refusedList = async (
-  raw: string,
-  refusal: string,
-  environment: Environment,
-): Promise<string | undefined> =>
-  WRITE_CALL.test(subjectOf(raw)) && (await inspectAs(FAIL_CLOSED, raw, environment))
-    ? refusal
-    : undefined
+// A list's refusal, given only to a call that may write somewhere: one that names a writing command or tool and does more than read (read-only.ts).
+export const refusedList = (raw: string, refusal: string): string | undefined =>
+  WRITE_CALL.test(subjectOf(raw)) && !readOnly(raw) ? refusal : undefined
 
 // Reads the call as a write under the policy given: an error refuses only a writing call whose text holds a hit.
 export async function inspectAs(

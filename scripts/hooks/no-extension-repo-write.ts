@@ -96,7 +96,6 @@ export async function check(
     return refusedList(
       raw,
       `${GUARD} hook refused this call: ${read.refusal}, then run the call again.`,
-      environment,
     )
   let repos: Set<string>
   try {
@@ -105,7 +104,6 @@ export async function check(
     return refusedList(
       raw,
       `${GUARD} hook refused this call: ${(error as Error).message}, so it cannot name the extension repositories. ${OWNER_ROUTE}`,
-      environment,
     )
   }
   if (repos.size === 0) return

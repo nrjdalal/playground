@@ -74,14 +74,12 @@ export async function check(
     return refusedList(
       raw,
       `${loaded.refusal} Its <file> is a JSON object with an array of strings under each of ${LIST_KEYS.join(", ")}.`,
-      environment,
     )
   const read = await readPolicy(dataDir(environment))
   if (read.refusal !== undefined)
     return refusedList(
       raw,
       `no-public-leak hook refused this call: ${read.refusal}, then run the call again.`,
-      environment,
     )
   return inspectAs(policy(loaded.list ?? EMPTY_LIST, reposOf(read.settings)), raw, environment)
 }
