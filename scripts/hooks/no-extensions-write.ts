@@ -232,10 +232,19 @@ function programLines({ args, first }: Parsed, rooted: boolean): string[] {
     .flatMap(({ value }) => [...value.matchAll(/"((?:[^"\\]|\\.)*)"/g)].map((m) => m[1]))
 }
 
-// Whether a call is a closed-list reader whose quoted words are never a command line: awk, cat, cut, grep, head, sort, tail, uniq or wc, as its command's own first word, bare or by a system path, with no variable set in the call
+// Whether a call's program is its command's own first word, read outright, bare or by a system path, so no wrapper or file of another folder runs in its place
+function ownProgram(cmd: Command, { first, name }: Parsed): boolean {
+  return (
+    ownFirst(cmd, first) &&
+    !marked(name) &&
+    /^(?:\/(?:bin|opt\/homebrew\/bin|usr\/bin|usr\/local\/bin)\/)?[^/]+$/.test(first.value)
+  )
+}
+
+// Whether a call is a closed-list reader whose quoted words are never a command line: awk, cat, cut, grep, head, sort, tail, uniq or wc, as its own program (ownProgram), with no variable set in the call
 function narrow(cmd: Command, env: Env): boolean {
   const parsed = parse(cmd)
-  const { args, first, name } = parsed
+  const { args, first } = parsed
   // a command of reserved words alone (`fi`, `done`) runs nothing; any other with no program read (`sudo -s`, a group) has its line read whole
   if (!first) {
     return (
@@ -246,9 +255,7 @@ function narrow(cmd: Command, env: Env): boolean {
       parsed.local.size === 0
     )
   }
-  if (!ownFirst(cmd, first) || marked(name)) return false
-  if (!/^(?:\/(?:bin|opt\/homebrew\/bin|usr\/bin|usr\/local\/bin)\/)?[^/]+$/.test(first.value))
-    return false
+  if (!ownProgram(cmd, parsed)) return false
   const base = program(first.value).toLowerCase()
   if (AWKS.has(base)) {
     const programs = awkPrograms(args)
@@ -274,13 +281,36 @@ function rooted(commands: Command[]): boolean {
   )
 }
 
-// Whether a line is read whole, as canary read it, every spaced text of every program but a reader a command line; a line is read call by call only when every command, its substitutions' included, is narrow and no redirect writes a file
+// A git commit the hook reads as text: git as its own program (ownProgram), its sub commit, no shell variable set, no git option ahead of commit that changes what git runs or where (-c, -C, --config-env, --exec-path, --git-dir, --work-tree), and every spaced word a quoted message it holds (after -m, a flag cluster ending in m, --message, or --message=), since commit runs no word it is given.
+function quietCommit(cmd: Command, parsed: Parsed, env: Env): boolean {
+  const { args, local, name } = parsed
+  if (name !== "git" || local.size > 0 || !ownProgram(cmd, parsed)) return false
+  const { rest, sub } = gitCall(args, env)
+  if (sub !== "commit") return false
+  const before = args.slice(0, args.length - rest.length - 1).map((a) => a.value)
+  if (
+    before.some(
+      (w) => w === "-c" || w === "-C" || /^--(?:config-env|exec-path|git-dir|work-tree)/.test(w),
+    )
+  )
+    return false
+  return args.every(
+    (word, at) =>
+      !/\s/.test(word.value) ||
+      (word.quoted &&
+        !marked(word.value) &&
+        (/^(?:-[a-zA-Z]*m|--message)$/.test(args[at - 1]?.value ?? "") ||
+          word.value.startsWith("--message="))),
+  )
+}
+
+// Whether a line is read whole, as canary read it, every spaced text of every program but a reader a command line; a line is read call by call only when every command, its substitutions' included, is narrow or a quiet commit and no redirect writes a file
 function wholeLine(commands: Command[], env: Env): boolean {
   return commands.some((cmd) => {
     const words = [...cmd.words, ...cmd.redirects.flatMap((r) => (r.target ? [r.target] : []))]
     if (words.some((word) => word.procs && wholeLine(word.procs, env))) return true
     const writes = cmd.redirects.some((r) => writer(r) && r.target?.value !== "/dev/null")
-    return writes || !narrow(cmd, env)
+    return writes || !(narrow(cmd, env) || quietCommit(cmd, parse(cmd), env))
   })
 }
 
@@ -306,7 +336,7 @@ function cliWrite(words: Word[]): string | undefined {
   if (command === "migrate") return "playground migrate, which seeds the lists and settings"
   if (command === "uninstall")
     return words.some((w) => w.value === "--purge")
-      ? "playground uninstall --purge, which removes the data folder"
+      ? "playground uninstall --purge, which moves the data folder aside"
       : undefined
   const switches = SWITCHES[command]
   if (!switches) return
@@ -478,6 +508,16 @@ function inspect(raw: string, environment: Environment) {
       const verdict = await run(lex(line, env.known), { ...env, vars: new Map() }, visit, true)
       if (verdict) return verdict
     }
+    // a quiet commit's message is text git never runs, but one naming a gated call is refused all the same
+    const quiet = !whole && quietCommit(cmd, parsed, env)
+    for (const word of quiet ? args : []) {
+      if (!/\s/.test(word.value)) continue
+      const named = lex(word.value.replace(/^--message=/, ""), env.known)
+        .commands.flatMap((c) => cliCalls(parse(c), env))
+        .map((words) => cliWrite(words))
+        .find(Boolean)
+      if (named) return refuse(named)
+    }
     // a bare assignment or export with no command, or a reader: only its redirect writes, and a variable it sets is read where a command runs with it
     if (!first || EXPORTS.has(name) || reader) return
     // a program word the hook cannot read is named as such, so a refusal always names what runs
@@ -492,6 +532,7 @@ function inspect(raw: string, environment: Environment) {
     }
     const literal = !whole && narrow(cmd, env)
     for (const word of [first, ...args]) {
+      if (quiet && /\s/.test(word.value) && !texts(word).some((t) => holds(t.value, env))) continue
       const named = names(word, env, remover, literal)
       if (named) return refuse(`${verb} on ${named}`)
     }

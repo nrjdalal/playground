@@ -149,6 +149,19 @@ describe("migrate's machine half", () => {
     ])
   })
 
+  test("a stale copy whose archive copy already exists stays where it is, so nothing is overwritten", () => {
+    const data = dataWith("archived-before")
+    write(data, { "archive/ops/once.py": "kept\n" })
+    const steps = moveMachine(data, "octo-owner", homeWith("archived-before-home"), TABLE, false)
+    expect(steps).toContainEqual({
+      line: "- ops/once.py: archive/ops/once.py already exists, so it stays",
+      ok: false,
+    })
+    expect(read(join(data, "archive", "ops", "once.py"))).toBe("kept\n")
+    expect(read(join(data, "ops", "once.py"))).toBe("old once\n")
+    expect(read(join(data, "archive", "ops", "panel", "run.sh"))).toBe("old run\n")
+  })
+
   test("a run archives the stale copies, moves the state and its files, and renames the machine's variables", () => {
     const data = dataWith("run")
     const home = homeWith("home")

@@ -512,6 +512,17 @@ describe("a quoted argument is read as a command line only where a program runs 
     ["cut at a quoted brace", "cut -d'{' -f1 /dev/null"],
     ["sort keyed at a quoted bracket", "sort -t'[' -k2 /dev/null"],
     ["awk matching a regex that starts at / and holds a glob", "awk '/^a*b/' /dev/null"],
+    ["a quiet commit with -m", `git commit -m "fix(x): y"`],
+    ["a quiet commit with -am", `git commit -am "fix(x): y"`],
+    ["a quiet commit with --message", `git commit --message "fix(x): y"`],
+    ["a quiet commit with --message=", `git commit --message="fix(x): y"`],
+    ["a quiet commit with a parenthesised scope and body", `git commit -m "feat(a,b): do (z)"`],
+    ["a quiet commit reusing a commit, with a held message", `git commit -C HEAD -m "fix(x): y"`],
+    ["a quiet commit by a system path", `/usr/bin/git commit -m "fix(x): y"`],
+    [
+      "a quiet commit on a quiet line after a reader",
+      `grep -q x /dev/null; git commit -m "fix(x): y"`,
+    ],
   ])("%s runs from the home and the data folder", async (_, command) => {
     for (const cwd of homes) expect(await at(command, cwd)).toBeUndefined()
   })
@@ -538,6 +549,18 @@ describe("a quoted argument is read as a command line only where a program runs 
     [
       "sudo with a flag cluster holding a value option",
       "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sudo -ui",
+    ],
+    [
+      "sudo whose user option comes first in a cluster and takes the shell letter as its value",
+      "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sudo -us",
+    ],
+    [
+      "sudo whose user option comes first in a cluster, its value a uid",
+      "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sudo -us#0",
+    ],
+    [
+      "doas whose user option comes first in a cluster and takes the shell letter as its value",
+      "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | doas -us",
     ],
   ])("%s runs from a worktree", async (_, command) => {
     expect(await at(command, join(homedir(), "x", ".claude", "worktrees", "y"))).toBeUndefined()
@@ -1113,6 +1136,87 @@ describe("a quoted argument is read as a command line only where a program runs 
   ])("%s stays refused, as every glob above the root is", async (_, command, cwd) => {
     expect(await bash(command, cwd)).toContain("no-extensions-write hook refuses")
   })
+
+  test.each([
+    [
+      "git config set in the call, dropping its -c guard runs it",
+      `git -c x.y=z commit -m "fix(x): y"`,
+    ],
+    [
+      "a runner on the line, dropping its quiet-line guard runs it",
+      `git commit -m "fix(x): y"; sh -c 'true'`,
+    ],
+    [
+      "a redirect that writes a file, dropping its redirect guard runs it",
+      `git commit -m "fix(x): y" > f`,
+    ],
+    [
+      "a message naming a gated call, dropping its message guard runs it",
+      `git commit -m "docs: the hook refuses playground ext sync now"`,
+    ],
+    [
+      "a message holding the root's path as text, dropping its text guard runs it",
+      `git commit -m "see ${join(homedir(), ".playground", "extensions")} now"`,
+    ],
+    [
+      "a globbing file name after -F, which names a file not a held message",
+      `git commit -F "my(x) file"`,
+    ],
+    [
+      "a globbing name after --template, which names a file not a held message",
+      `git commit --template "t(x) pl"`,
+    ],
+    [
+      "a commit relocated by git -C, dropping its global guard runs it",
+      `git -C /tmp commit -m "fix(x): y"`,
+    ],
+    [
+      "a commit relocated by --git-dir, dropping its global guard runs it",
+      `git --git-dir=/tmp/.git commit -m "fix(x): y"`,
+    ],
+    [
+      "a commit relocated by --work-tree, dropping its global guard runs it",
+      `git --work-tree=/tmp commit -m "fix(x): y"`,
+    ],
+  ])(
+    "a git commit the hook does not read as text stays refused from the home: %s",
+    async (_, command) => {
+      for (const cwd of homes)
+        expect(await at(command, cwd)).toContain("no-extensions-write hook refuses")
+    },
+  )
+
+  test.each([
+    "sudo git",
+    "sudo -u x git",
+    "doas git",
+    "env git",
+    "env -i git",
+    "env -S 'git'",
+    "xargs git",
+    "nice git",
+    "nice -n 5 git",
+    "nohup git",
+    "timeout 5 git",
+    "time git",
+    "stdbuf -o0 git",
+    "caffeinate git",
+    "command git",
+    "builtin git",
+    "exec git",
+    "./git",
+    "bin/git",
+    "~/bin/git",
+    "/tmp/x/git",
+  ])(
+    "a quiet message on %s, a program narrow() would not read, keeps canary's refusal",
+    async (program) => {
+      for (const cwd of homes)
+        expect(await at(`${program} commit -m "fix(x): y"`, cwd)).toContain(
+          "no-extensions-write hook refuses",
+        )
+    },
+  )
 })
 
 describe("a read of the root, and writes elsewhere, run", () => {

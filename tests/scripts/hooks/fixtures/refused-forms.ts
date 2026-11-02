@@ -66,6 +66,7 @@ export type Group = {
     | "#402"
     | "#411"
     | "#446"
+    | "#452"
     | "#456"
     | "#463"
     | "#466"
@@ -73,6 +74,7 @@ export type Group = {
     | "#486"
     | "#508"
     | "#509"
+    | "#533"
 }
 
 // The rows a guard-loosening PR lets run on purpose, each written as a row's "<source> <what>" for all its cases, or as one case's "<source> <what> | <guard> | <folder>"; canary lets none run.
@@ -80,6 +82,9 @@ export const ALLOWED: string[] = [
   "#446 bun -e writing a JSON label whose prose names it",
   "#446 bun -e editing a JSON label whose prose names it, then a script",
   "#446 python3 -c printing prose that names it",
+  "#452 a quiet commit whose -m message holds a parenthesised scope",
+  "#452 a quiet commit whose -am message holds a parenthesised scope",
+  "#452 a quiet commit whose --message= holds a parenthesised scope",
   "#466 git --attr-source with a subcommand for its value before a read in a repo with a heavy path staged",
   "#486 bun run ask with a prose arg that only names the tool",
   "#486 bun run thread with a prose arg that only names the tool",
@@ -2138,5 +2143,114 @@ gh api graphql -f query="$QUERY"`,
       ["cut over a half-quoted glob in the home", "cut -f1 '.pl'*"],
     ],
     source: "#463",
+  },
+  {
+    folders: ["home", "data folder"],
+    guards: ["no-extensions-write"],
+    rows: ({ ROOT }) => [
+      ["a quiet commit whose -m message holds a parenthesised scope", `git commit -m "fix(x): y"`],
+      [
+        "a quiet commit whose -am message holds a parenthesised scope",
+        `git commit -am "fix(x): y"`,
+      ],
+      [
+        "a quiet commit whose --message= holds a parenthesised scope",
+        `git commit --message="fix(x): y"`,
+      ],
+      ["git config set in the call before a quiet message", `git -c x.y=z commit -m "fix(x): y"`],
+      ["a runner on the line after a quiet commit", `git commit -m "fix(x): y"; sh -c 'true'`],
+      ["a redirect writing a file after a quiet commit", `git commit -m "fix(x): y" > f`],
+      ["a quiet message on a commit git -C moves", `git -C /tmp commit -m "fix(x): y"`],
+      ["a globbing file name after -F, not a held message", `git commit -F "my(x) file"`],
+      ["a quiet message that holds the root's path as text", `git commit -m "see ${ROOT} now"`],
+      [
+        "a quiet message that names a gated call",
+        `git commit -m "docs: the hook refuses playground ext sync now"`,
+      ],
+      ["a quiet message on a git sudo runs", `sudo git commit -m "fix(x): y"`],
+      ["a quiet message on a git env runs", `env git commit -m "fix(x): y"`],
+      ["a quiet message on a git xargs runs", `xargs git commit -m "fix(x): y"`],
+      ["a quiet message on a git nice runs with an option", `nice -n 5 git commit -m "fix(x): y"`],
+      ["a quiet message on a git command runs", `command git commit -m "fix(x): y"`],
+      ["a quiet message on a git in this folder", `./git commit -m "fix(x): y"`],
+      ["a quiet message on a git in a folder of the home", `~/bin/git commit -m "fix(x): y"`],
+      ["a quiet message on a git outside the system folders", `/tmp/x/git commit -m "fix(x): y"`],
+    ],
+    source: "#452",
+  },
+  {
+    folders: ["process home", "process data folder", "process worktree"],
+    guards: ["no-extensions-write"],
+    rows: () => [
+      [
+        "a removal echoed to sudo's shell, its user option after it in a cluster",
+        "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sudo -su root",
+      ],
+      [
+        "a removal echoed to sudo's login shell, its user option after it in a cluster",
+        "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sudo -iu root",
+      ],
+      [
+        "a removal echoed to sudo's shell inside a longer cluster before its user option",
+        "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sudo -Esu root",
+      ],
+      [
+        "a removal echoed to sudo's shell, its user value attached in the cluster",
+        "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sudo -suroot",
+      ],
+      [
+        "a removal echoed to doas's shell, its user option after it in a cluster",
+        "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | doas -su root",
+      ],
+      [
+        "a removal in a here-string to sudo's shell, its user option after it in a cluster",
+        "sudo -su root <<< 'rm -rf ~/.playground/extensions/.no-such-folder'",
+      ],
+      [
+        "a removal echoed to sudo's shell, its user value a uid attached in the cluster",
+        "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sudo -su#0",
+      ],
+      [
+        "a removal echoed to sudo's shell, its user value a digit attached in the cluster",
+        "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sudo -su0",
+      ],
+      [
+        "a removal echoed to sudo's shell, its user value holding an underscore",
+        "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sudo -su_www",
+      ],
+      [
+        "a removal echoed to sudo's shell, its user value holding a dot",
+        "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sudo -suroot.x",
+      ],
+      [
+        "a removal echoed to sudo's shell, its close-from value attached in the cluster",
+        "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sudo -sC3",
+      ],
+      [
+        "a removal echoed to sudo's shell, its chdir value a path attached in the cluster",
+        "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sudo -sD/tmp",
+      ],
+      [
+        "a removal echoed to sudo's login shell, its user value a uid attached in the cluster",
+        "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sudo -iu#0",
+      ],
+      [
+        "a removal echoed to doas's shell, its user value a uid attached in the cluster",
+        "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | doas -su#0",
+      ],
+      [
+        "a removal in a here-string to sudo's shell, its user value a uid attached in the cluster",
+        "sudo -su#0 <<< 'rm -rf ~/.playground/extensions/.no-such-folder'",
+      ],
+      [
+        "a removal echoed to sudo's shell behind nice, its user option after it in a cluster",
+        "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | nice sudo -su root",
+      ],
+      [
+        "a removal echoed to sudo's shell behind env, its user value a uid attached",
+        "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | env sudo -su#0",
+      ],
+    ],
+    source: "#533",
   },
 ]

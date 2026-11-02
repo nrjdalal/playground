@@ -65,6 +65,16 @@ const coreOf = (root: string): string => {
   return core
 }
 
+// The trash's roots on the test's own mkdtemp root: a HOME and a main checkout beside the core folder, the trash in the HOME's data folder.
+const rootsOf = (root: string) => ({
+  roots: {
+    home: join(root, "home"),
+    main: join(root, "main"),
+    trash: join(root, "home", ".playground", "trash"),
+  },
+  session: "vendor-test",
+})
+
 // The staging folders a run left in core.
 const staged = (core: string): string[] =>
   readdirSync(core).filter((name) => name.startsWith(".upstream-staging"))
@@ -104,7 +114,14 @@ describe("vendoring", () => {
       const files = kept()
       const manifest = manifestFor(files)
       expect(
-        vendor({ coreDir: core, files, manifest, repo: "upstream/skills", sha: "a".repeat(40) }),
+        vendor({
+          coreDir: core,
+          files,
+          manifest,
+          repo: "upstream/skills",
+          sha: "a".repeat(40),
+          ...rootsOf(root),
+        }),
       ).toEqual({
         ok: true,
         files: 3,
@@ -131,13 +148,49 @@ describe("vendoring", () => {
         `upstream/skills ${"a".repeat(40)}\n${new Date().toISOString().slice(0, 10)}\n`,
       )
       expect(staged(core)).toEqual([])
+      expect(existsSync(join(core, ".upstream-replaced"))).toBe(false)
+      const trash = join(root, "home", ".playground", "trash")
+      const [batch] = readdirSync(trash)
+      const replaced = join(trash, batch!, "1", ".upstream-replaced")
+      expect(readFileSync(join(replaced, "skills", "tdd", "SKILL.md"), "utf8")).toBe("old\n")
+      expect(readFileSync(join(replaced, "skills", "research", "SKILL.md"), "utf8")).toBe("old\n")
+      expect(readFileSync(join(replaced, "upstream", "SOURCE"), "utf8")).toBe("stub\n")
       // A second run over the same sha swaps the same bytes in again.
       expect(
-        vendor({ coreDir: core, files, manifest, repo: "upstream/skills", sha: "a".repeat(40) }),
+        vendor({
+          coreDir: core,
+          files,
+          manifest,
+          repo: "upstream/skills",
+          sha: "a".repeat(40),
+          ...rootsOf(root),
+        }),
       ).toEqual({
         ok: true,
         files: 3,
       })
+    } finally {
+      rmSync(root, { force: true, recursive: true })
+    }
+  })
+
+  test("a core folder inside the main checkout is refused before anything moves", () => {
+    const root = mkdtempSync(join(tmpdir(), "vendor-upstream-test-"))
+    try {
+      const core = coreOf(join(root, "main"))
+      const before = snapshot(core)
+      const files = kept()
+      expect(() =>
+        vendor({
+          coreDir: core,
+          files,
+          manifest: manifestFor(files),
+          repo: "upstream/skills",
+          sha: "a".repeat(40),
+          ...rootsOf(root),
+        }),
+      ).toThrow("main checkout")
+      expect(snapshot(core)).toBe(before)
     } finally {
       rmSync(root, { force: true, recursive: true })
     }
@@ -157,6 +210,7 @@ describe("vendoring", () => {
           manifest: manifestText(entries),
           repo: "upstream/skills",
           sha: "a".repeat(40),
+          ...rootsOf(root),
         }),
       ).toThrow("MANIFEST names skills/tdd/EXTRA.md")
       expect(snapshot(core)).toBe(before)
@@ -181,6 +235,7 @@ describe("vendoring", () => {
         manifest: manifestText(entries),
         repo: "upstream/skills",
         sha: "a".repeat(40),
+        ...rootsOf(root),
       })
       expect(done.ok).toBe(false)
       if (!done.ok)

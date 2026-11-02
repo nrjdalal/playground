@@ -20,7 +20,7 @@ Pick the kind by how its card closes (asks.md's `settle` and `resolve` lines): y
 ## Steps
 
 1. **Already open?** Run `bun run ask open` before you write anything (asks.md). Done when no open item asks the same thing, or you have named that item's `#iN` in chat and stopped here.
-2. **Picture.** Pick the one picture asks.md's shape leads with, within its `ASK_CODE_COLUMNS` rule. Attachments always show under the text, so an item with one keeps its text to the bullets. Done when the text's first block is that picture, or the item's first attachment is.
+2. **Picture.** Pick the one picture asks.md's shape leads with, within its `ASK_CODE_COLUMNS` rule, which a `diff` block is free of, since the card wraps it. Attachments always show under the text, so an item with one keeps its text to the bullets. Done when the text's first block is that picture, or the item's first attachment is.
 
    Beside asks.md's diff, ASCII flow and before and after pair, two more fit:
 
