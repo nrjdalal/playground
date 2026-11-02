@@ -75,6 +75,8 @@ export type Group = {
     | "#508"
     | "#509"
     | "#533"
+    | "#582"
+    | "#590"
 }
 
 // The rows a guard-loosening PR lets run on purpose, each written as a row's "<source> <what>" for all its cases, or as one case's "<source> <what> | <guard> | <folder>"; canary lets none run.
@@ -2252,5 +2254,139 @@ gh api graphql -f query="$QUERY"`,
       ],
     ],
     source: "#533",
+  },
+  {
+    folders: ["process home", "process data folder", "process worktree"],
+    guards: ["no-extensions-write"],
+    rows: () => [
+      [
+        "a removal echoed to sudo's shell flag in single quotes",
+        "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sudo '-s'",
+      ],
+      [
+        "a removal echoed to sudo's shell letter in single quotes after its dash",
+        "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sudo -'s'",
+      ],
+      [
+        "a removal echoed to sudo's login flag in single quotes",
+        "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sudo '-i'",
+      ],
+      [
+        "a removal echoed to sudo's shell long option in single quotes",
+        "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sudo '--shell'",
+      ],
+      [
+        "a removal echoed to sudo's shell, its cluster in double quotes before its user value",
+        "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sudo \"-su\" root",
+      ],
+      [
+        "a removal echoed to sudo's shell, its cluster in single quotes before its user value",
+        "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sudo '-su' root",
+      ],
+      [
+        "a removal echoed to sudo's shell, its cluster's user letter quoted",
+        "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sudo -s'u' root",
+      ],
+      [
+        "a removal echoed to sudo's shell, its attached user value in single quotes",
+        "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sudo -su'root'",
+      ],
+      [
+        "a removal echoed to sudo's shell, its attached user value in double quotes",
+        "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sudo -su\"root\"",
+      ],
+      [
+        "a removal echoed to sudo's shell, its attached user value holding an escaped space",
+        "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sudo -su\\ x",
+      ],
+      [
+        "a removal echoed to doas's shell flag in single quotes",
+        "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | doas '-s'",
+      ],
+      [
+        "a removal echoed to doas's shell letter in single quotes after its dash",
+        "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | doas -'s'",
+      ],
+      [
+        "a removal echoed to doas's shell, its cluster in double quotes before its user value",
+        "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | doas \"-su\" root",
+      ],
+      [
+        "a removal echoed to doas's shell, its attached user value in single quotes",
+        "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | doas -su'root'",
+      ],
+      [
+        "a removal echoed to doas's shell, its attached user value in double quotes",
+        "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | doas -su\"root\"",
+      ],
+      [
+        "a removal in a here-string to sudo's shell, its attached user value quoted",
+        "sudo -su'root' <<< 'rm -rf ~/.playground/extensions/.no-such-folder'",
+      ],
+      [
+        "a removal echoed to a quoted sudo's shell flag",
+        "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | 'sudo' -s",
+      ],
+      [
+        "a removal echoed to a double-quoted sudo's shell, its user option after it in a cluster",
+        "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | \"sudo\" -su root",
+      ],
+      [
+        "a removal echoed to a quoted sudo's shell flag behind nice",
+        "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | nice 'sudo' -s",
+      ],
+    ],
+    source: "#582",
+  },
+  {
+    folders: ["process home", "process data folder", "process worktree"],
+    guards: ["no-extensions-write"],
+    rows: () => [
+      [
+        "a removal echoed to sudo's shell long option shortened to two letters",
+        "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sudo --sh",
+      ],
+      [
+        "a removal echoed to sudo's shell long option shortened to three letters",
+        "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sudo --she",
+      ],
+      [
+        "a removal echoed to sudo's shell long option shortened to four letters",
+        "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sudo --shel",
+      ],
+      [
+        "a removal echoed to sudo's login long option shortened to two letters",
+        "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sudo --lo",
+      ],
+      [
+        "a removal echoed to sudo's login long option shortened to three letters",
+        "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sudo --log",
+      ],
+      [
+        "a removal echoed to sudo's login long option shortened to four letters",
+        "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sudo --logi",
+      ],
+      [
+        "a removal echoed to sudo's shortened shell long option before its user option",
+        "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sudo --sh -u root",
+      ],
+      [
+        "a removal echoed to sudo's shortened login long option after a flag",
+        "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sudo -E --lo",
+      ],
+      [
+        "a removal echoed to sudo's shortened shell long option in single quotes",
+        "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sudo '--sh'",
+      ],
+      [
+        "a removal in a here-string to sudo's shortened shell long option",
+        "sudo --sh <<< 'rm -rf ~/.playground/extensions/.no-such-folder'",
+      ],
+      [
+        "a removal echoed to sudo's shortened login long option behind nice",
+        "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | nice sudo --lo",
+      ],
+    ],
+    source: "#590",
   },
 ]
