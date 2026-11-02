@@ -18,6 +18,11 @@ Only the first reading moves the folder, sets variables and records files for th
 - cmux restores a session after a restart without its `--settings` or `PLAYGROUND_ROLE`, so `.claude/settings.json` registers every PreToolUse hook `scripts/factory-settings.json` does, with the same matcher and the same command string,
   since Claude Code runs a handler defined in both files once only when the two commands match byte for byte (measured on Claude Code 2.1.302: one space apart, it runs twice; `tests/scripts/hooks-abs-path.test.ts` holds every hook in both files to it).
   That one command finds the checkout with no `$HOME` in it: `$PLAYGROUND_REPO`, which spawn.sh's launch exports as its main checkout, else the main checkout git names for `$CLAUDE_PROJECT_DIR` (`--git-common-dir`, so a session in a worktree runs the main checkout's guards); when neither names a folder holding the hook's script, it runs nothing and exits 0.
+- A PreToolUse guard fails closed, since Claude Code blocks a call only on exit 2: its wrapper turns any other exit but 0 (a crash, a missing package, Bun missing) into exit 2, its refusal naming the hook, the code and the fix (`bun install` in the checkout),
+  and under `PLAYGROUND_ROLE` a missing script or an unresolved checkout refuses too, naming the restore route (playbook's LIFECYCLE.md, Restoring the main checkout); with no role it runs nothing and exits 0, as above.
+  A timeout still lets the call run, since Claude Code treats a hook timeout as a non-blocking error.
+  Every other wrapper (SessionStart, Stop, PostToolUse and the rest) stays open on a crash, since a Stop hook at exit 2 keeps its session going and a crashing one would loop it.
+  `tests/scripts/hooks-abs-path.test.ts` holds both shapes and runs them over stub guards.
   A headless scan run from outside the checkout exports `PLAYGROUND_REPO` as the factory's checkout and passes `--settings` naming that checkout's `scripts/factory-settings.json`, so its guards run rather than exit 0: the board scan's loop takes the checkout from `beat.py`'s `checkout()`, the end-of-day scan's `scan.sh` from its own path.
   Three factory hooks act for every session: session-state writes every session's state, since the Dashboard is to show them all, no-off-palette-label guards every session's labels, since the label rule covers any label, and no-desktop-owner-app guards every session's agent-desktop calls, since the owner's pointer and apps are the same whichever session drives them.
   Every other factory hook acts for a factory session alone, `PLAYGROUND_ROLE` or else its name in Claude Code's registry, placed by the roster's `kind` for that name and then by the factory's names (`scripts/hooks/role.ts`), so a session the owner opens in the factory's checkout passes them untouched.
@@ -63,7 +68,7 @@ Only the first reading moves the folder, sets variables and records files for th
   The factory's PreToolUse hook `scripts/hooks/no-bare-slack-link.ts`, registered beside no-playground-leak (and in `.claude/settings.json`) and acting for a factory session alone (`scripts/hooks/role.ts`),
   refuses a Slack MCP `chat_post_message` or `chat_update` that holds an http(s) URL (in `text`, `markdown_text`, a `text` field of its `blocks`, or any string of an attachment but a field whose name ends in `link`, `url` or `icon`; `<url|label>` and backticks included) that no link chip in its `blocks` carries, and its reason gives the chip to send.
   A chip is a `link` element in its full shape, `{"type":"link","url":"<url>","text":"<url without its scheme>","truncated":true}`, since one with only a `url` draws the raw URL, so a `link` element in any other shape, labelled or url-only, is refused too, even beside words that name no URL.
-  It fails open on a call it cannot read, as on a hook that cannot start or times out.
+  It fails open on a call it cannot read; when it cannot start it refuses, and when it times out the post goes out ([Registered in both settings files](#registered-in-both-settings-files)).
   Its tests are in `bun run test:file tests/scripts/hooks`.
 
 ## no-chat-question
@@ -92,7 +97,7 @@ Only the first reading moves the folder, sets variables and records files for th
   A reply naming an `#iN` passes once one of the first five items it names reads `open` through `bun run ask get` in the live dashboard's checkout (the worktree on `live.branch`, found with `git worktree list`, killed after 3s).
   The reads run at once, each killed after 10s (one took 5.9s under load), and the first to read open passes the stop at once and ends every read still running.
   When no named item reads open, one it cannot read included, the reply fails closed, the reason saying what each item read as.
-  It judges the hook input's `last_assistant_message`, since the transcript can lag the turn's last message (ADR 0001), and fails open on an input it cannot read, as a hook that cannot start or times out does.
+  It judges the hook input's `last_assistant_message`, since the transcript can lag the turn's last message (ADR 0001), and fails open on an input it cannot read, as a Stop hook that cannot start or times out does.
   Its tests are in `bun run test:file tests/scripts/hooks` too.
 
 ## no-desktop-owner-app
@@ -288,7 +293,7 @@ Only the first reading moves the folder, sets variables and records files for th
   it is refused otherwise, a post with no text included, since it goes out through his Slack account; curl that writes (sends data without `-G`, or calls a `chat.*` method) and whose URL or data names that channel is refused outright, while a read of it passes.
   Every other channel, thread, group DM and DM, and a write whose channel it cannot read, is judged as before.
   A Slack upload from a path that holds a factory term (the scratchpad folder's name does) is refused, so copy the file first to `/private/tmp/claude-501/<topic>/`, a `<topic>` that names no session and holds no term.
-  A hook that cannot start or times out lets the call through, and its two lists are read as [Guard lists](#guard-lists) says.
+  When it cannot start it refuses and when it times out it lets the call through ([Registered in both settings files](#registered-in-both-settings-files)), and its two lists are read as [Guard lists](#guard-lists) says.
   It shares `scripts/hooks/shell.ts` and `scripts/hooks/github.ts` (the repository resolver) with the other hooks, and its tests are in `bun run test:file tests/scripts/hooks`.
 
 ## no-public-leak
@@ -322,7 +327,7 @@ Only the first reading moves the folder, sets variables and records files for th
   Only the dispatcher's refusal names that path and the approval's shape, `{"ask": "<the Inbox decision's id>", "titles": ["<title>"]}` adding each title approved for that team that day, so the dispatcher writes the approval from its refusal.
   Its `<team>` is the team as `save_issue` names it, lowercased with each run of other characters one hyphen (`AI Platform` is `ai-platform`).
   Any other role is refused a Write, Edit, MultiEdit or NotebookEdit into that folder, or a Bash command with a word that names a path in it; an interpreter's code that builds the path itself is not read.
-  It fails closed on any call that reads as filing a ticket, a Linear API call whose body it cannot read included, and a hook that cannot start or times out lets the call through, so it never blocks every call.
+  It fails closed on any call that reads as filing a ticket, a Linear API call whose body it cannot read included; when it cannot start it refuses, and when it times out it lets the call through ([Registered in both settings files](#registered-in-both-settings-files)).
   The refusal of a body it cannot read names the fix, the query written with the Write tool first and named by its literal absolute path in a call of its own (`curl -d @/abs/query.json`, `gh api --input /abs/query.json`), and says none of the call's commands ran.
   The refusal of an endpoint or URL it cannot read names its fix, that endpoint written out literally (`gh api https://api.linear.app/graphql`).
   It reads Bash through `scripts/hooks/shell.ts`, the reader it shares with the release hook, and its tests are in `bun run test:file tests/scripts/hooks` too.
@@ -409,7 +414,7 @@ Only the first reading moves the folder, sets variables and records files for th
   An `--attach` reads only what gh posts, its alt text after `#`, else its file's name, so a path built from a variable (`"$S/after.png#After"`) passes when the variable sits before the alt's first `#`, or, with no `#`, before the name's last `/`.
   Its refusal gives the way out for a file, rule or patch that holds the word: name the file or rule by what it is ("the ship rule") with its line number, and keep the patch out of the comment.
   Write the patch to a file in your scratchpad, send its absolute path to the PR's worker by SendMessage, and say in the comment that a patch went to the author, since gh's `--attach` uploads only images and video (gh 2.103.3: "supported: png, jpg, jpeg, gif, webp, svg, mp4, mov, webm").
-  It fails closed only on a call that reads as a comment, and a hook that cannot start or times out lets the call through, so it never blocks every Bash call.
+  It fails closed only on a call that reads as a comment; when it cannot start it refuses, and when it times out it lets the call through ([Registered in both settings files](#registered-in-both-settings-files)).
   A PR body or a commit message is not a comment.
   The owners it guards are its `release-owners` list, A to Z, read as [Guard lists](#guard-lists) says; core's `release-owners.json` names none, so a fresh clone guards no owner until one is added.
   Its tests are `bun run test:file tests/scripts/hooks`, which `bun run test` runs rather than `test:skills`; run them before pushing a change to the hook.

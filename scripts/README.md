@@ -83,7 +83,7 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
   A cmux version that adds a way to open a session needs a line here.
   Out of its scope, and left to the rule: a raw `cmux rpc`, `pipe-pane`, a package runner that starts claude (`npx`, `bunx`), a wrapper the shell reader does not know, a new terminal that is then sent `claude` as keystrokes (playbook's **voice** rule forbids that send), and, since it guards a session's habits rather than an adversary, a deliberate way around its herdr reads:
   zsh's `zsocket`, `openssl s_client -unix` or `busybox nc` to a herdr socket, `HERDR_SOCKET_PATH` moved by `read`, `printf -v`, `+=` or `unset`, herdr symlinked or copied under another name, and interpreter code.
-  It fails closed only on a call that reads as a spawn, and open on any other, as a hook that cannot start does.
+  It fails closed only on a call that reads as a spawn, and open on any other; when it cannot start it refuses, as every PreToolUse guard does ([scripts/hooks/README.md](hooks/README.md#registered-in-both-settings-files)).
   `scripts/ops/up.py --sessions` prints its `spawn.sh resume` lines, every brief names a file under `~/.playground` with no `..`, which spawn.sh checks is there before any gate or launch,
   given by its name there or by its path, `$HOME/.playground/<file>` or `~/.playground/<file>`, and `spawn.sh resume ... --brief <file>` (resume alone) puts only that name in the resumed session's first prompt, never the file's text.
   A `spawn.sh resume <name> <dir>` with no session id refuses, before any pane opens, a folder whose project folder under `$CLAUDE_CONFIG_DIR/projects` holds no transcript naming the session, since Claude's resume picker would find nothing there.

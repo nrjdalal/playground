@@ -1,6 +1,6 @@
 # Lifecycle
 
-When each kind of factory session starts and ends, what the Dashboard shows for each role, and the ops jobs that run with no session.
+When each kind of factory session starts and ends, what the Dashboard shows for each role, the ops jobs that run with no session, and how the main checkout is restored.
 The commands for each start and end are in [SESSIONS.md](SESSIONS.md), and every start and end lands in the roster ([ROSTER.md](ROSTER.md)).
 
 ## Roles on the Dashboard
@@ -67,8 +67,9 @@ Sessions that work together share a workspace as full-height columns ([SESSIONS.
   then installed through run-slot when the pull changed `bun.lock` or a `package.json` and again each beat until one exits 0, a failed pull or install told to ops once until its words change),
   the turbo prune (weekly, each file in the shared turbo cache `~/.cache/turbo/playground` last modified over 7 days ago removed, one line to `ops/log/turbo-prune.log`),
   the dashboard watch (every minute: once the live dashboard's `/api/health` has failed 5 minutes in a row, a gap of over 2 minutes with no check starting the count again, one macOS banner and one ops line through `notify.sh` with `NOTIFY_MAC=1`, since the Inbox shows only on the dashboard, and one more when it answers again,
-  its state in `ops/tick/dashboard-watch.json`) and the relay watch (every 5 minutes:
-  a line the relay would send, read by ops-outbox's `pending()`, is timed from the first cycle it reads pending, and once it has waited 10 minutes with no relay cursor moved since, one Inbox alert update is posted straight to the dashboard with `bun run ask new` under the ops manager's name, and resolved with `bun run ask resolve` once a cursor moves or its item is gone);
+  its state in `ops/tick/dashboard-watch.json`), the relay watch (every 5 minutes:
+  a line the relay would send, read by ops-outbox's `pending()`, is timed from the first cycle it reads pending, and once it has waited 10 minutes with no relay cursor moved since, one Inbox alert update is posted straight to the dashboard with `bun run ask new` under the ops manager's name, and resolved with `bun run ask resolve` once a cursor moves or its item is gone),
+  and the guard probe (every 10 minutes: each PreToolUse guard the factory settings register run on `{}` without its wrapper's tail, and each that exits other than 0 or 2 named to the dispatcher with the fix, once a change of what is broken, [Restoring the main checkout](#restoring-the-main-checkout));
   `--dry` prints each beat's next due time and target, and `--once <beat>` runs one beat now.
   The relay, runner-plain-relay, sends every line `outbox/relay.py` prints to its `to`, since relay.py applies quiet mode before it prints; only the drops the relay's brief names hold a line back.
   ops-flow is `bun run ops:flow` in a checkout of `canary`: every 60 seconds it reads the process table and each run-slot `.holder`,
@@ -169,3 +170,15 @@ Ops runs an update when the owner asks for one:
    **Done when** every other named session on the list runs again under its name.
 4. Run step 1's loop again, into a second file.
    **Done when** no line with `-n` reads `deleted`; each one that does goes back to step 3.
+
+## Restoring the main checkout
+
+Every PreToolUse guard runs from the main checkout and fails closed ([scripts/hooks/README.md](../../../../scripts/hooks/README.md#registered-in-both-settings-files)): with its scripts gone every factory session's Bash is refused, its Edit and Write too, and with its packages gone every session's guarded call is.
+No session can then repair it, so the restore runs from the owner's own `!` window, whose commands run with no hook:
+
+1. A session refused with `Restoring the main checkout` or `crashed (exit <n>)` tells its manager by `SendMessage`, which no guard holds, and each manager passes it up to the dispatcher, which tells the owner in its own chat, since `bun run ask` is Bash.
+   **Done when** the owner has the steps below.
+2. The owner puts the files back: `! git -C <main checkout> checkout -- .` while its `.git` is in place, else a fresh clone of the repo at the same path.
+   **Done when** `! git -C <main checkout> status` reads clean.
+3. The owner runs `! bun install --cwd <main checkout>`, then `! <main checkout>/scripts/link-skills.sh`.
+   **Done when** a factory session's Bash call runs again.

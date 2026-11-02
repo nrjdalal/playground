@@ -58,8 +58,8 @@ Cite a rule by its name, in bold; read it whole with `playground rules <name>` w
 
 ## Where the rest lives
 
-- [LIFECYCLE.md](LIFECYCLE.md): when each kind of session starts and ends, the ops jobs, and how Claude Code updates.
-  Read it before you start, close or respawn a session, remove a worktree, or update Claude Code.
+- [LIFECYCLE.md](LIFECYCLE.md): when each kind of session starts and ends, the ops jobs, how Claude Code updates, and how the main checkout is restored.
+  Read it before you start, close or respawn a session, remove a worktree, or update Claude Code, and when a guard refuses naming the main checkout's restore.
 - [DISPATCH.md](DISPATCH.md): how the dispatcher, the Planner and the leads route a new ask, bundle work and fill the slots.
   Read it when you are one of them and an ask arrives, or when Slack mode is on and the owner's DM speaks to you.
 - [SWEEP.md](SWEEP.md): the leads' sweep, step by step.
