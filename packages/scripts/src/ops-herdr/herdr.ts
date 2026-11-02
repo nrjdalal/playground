@@ -362,12 +362,46 @@ export const restoreEnv = (
   PLAYGROUND_HERDR_SESSION: session,
 })
 
-// spawn.sh restore prints one line a session and exits 1 when any was not restored, so the beat names those lines, else its last line.
+// spawn.sh restore prints one line a session (restored, skipped as live, or not restored with its reason), so a restore reads as counts: what came back, what ran already, what each gate holds (a later cycle restores those) and what failed another way; null when no line names a session.
+export function restoreSummary(output: string): string | null {
+  const lines = output.split("\n").filter(Boolean)
+  const count = (prefix: string) => lines.filter((line) => line.startsWith(prefix)).length
+  const missed = lines.filter((line) => line.startsWith("not restored: "))
+  const gates = new Map<string, number>()
+  for (const line of missed) {
+    const gate = /\bthe (\w+) gate holds it\b/.exec(line)?.[1]
+    if (gate) gates.set(gate, (gates.get(gate) ?? 0) + 1)
+  }
+  const waiting = [...gates.values()].reduce((sum, n) => sum + n, 0)
+  const parts = [
+    [count("restored "), "restored"],
+    [count("skipped "), "already running"],
+    ...[...gates].map(
+      ([gate, n]) =>
+        [n, gate === "load" ? "waiting for load to drop" : `waiting on the ${gate} gate`] as const,
+    ),
+    [missed.length - waiting, "not restored"],
+  ] as const
+  const shown = parts.filter(([n]) => n > 0).map(([n, what]) => `${n} ${what}`)
+  if (shown.length === 0) return null
+  return `${shown.join(" · ")}${waiting > 0 ? " (the waiting ones come back on their own)" : ""}`
+}
+
+// What restore prints for one server: its summary and the file that holds each session's line, or a refusal before any session as it came.
+export function restoreLines(session: string, output: string, log: string): string[] {
+  const summary = restoreSummary(output)
+  if (summary) return [`restore ${session}: ${summary}; each session's line: ${log}`]
+  return output
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => `restore ${session}: ${line}`)
+}
+
+// spawn.sh restore exits 1 when any session was not restored, so the beat names its counts, else its last line.
 export function restoreProblem(code: number, output: string): string | null {
   if (code === 0) return null
   const lines = output.split("\n").filter(Boolean)
-  const missed = lines.filter((line) => line.startsWith("not restored: "))
-  return `restore: ${missed.length > 0 ? missed.join("; ") : (lines.at(-1) ?? `exited ${code}`)}`
+  return `restore: ${restoreSummary(output) ?? lines.at(-1) ?? `exited ${code}`}`
 }
 
 // The heartbeat api/hono/src/lib/dashboard/ops.ts reads.
