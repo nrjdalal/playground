@@ -88,6 +88,7 @@ describe("defineSettings", () => {
       "slots.modelBound",
       "slots.peers",
       "tickets.tracker",
+      "timers",
       "unstick.escalateMinutes",
       "usage.accounts",
       "usage.keychainService",
