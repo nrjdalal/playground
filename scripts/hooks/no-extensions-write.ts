@@ -195,14 +195,16 @@ const definedFunctions = (command: string): Set<string> =>
   )
 
 // Every text of a variable the call sets or exports, or of a word from the first that names a runner on (behind any wrapper, or a program word the hook cannot read or a function the command defines), that holds a space, a leading ! dropped, read as a command line of its own (a pager, GIT_SSH_COMMAND, a git alias, watch's line); any other program's quoted argument (awk's program) stays one word.
-// Whether a line holds a runner call (a shell's -c and eval included) given a word the hook cannot read, in itself or in a script a runner's word carries, since an earlier word may hold its payload (`set -- '…'; eval "$1"`, `$_`, getopts, an array)
+// Whether a line holds a runner call (a shell's -c and eval included) given a word the hook cannot read or text from a pipe or xargs, in itself or in a script a runner's word carries, since an earlier word may hold its payload (`set -- '…'; eval "$1"`, `$_`, getopts, an array)
 function darkLine(line: string, known: Record<string, string>, depth = 0): boolean {
   return lex(line, known).commands.some((cmd) => {
-    const { args, first, name } = parse(cmd)
+    const { args, first, name, xargs } = parse(cmd)
     const all = first ? [first, ...args] : args
     const at = first && marked(name) ? 0 : all.findIndex((word) => runnerOf(word))
     const runs = at < 0 ? [] : all.slice(at + 1)
     if (runs.some((word) => marked(word.value))) return true
+    // a runner fed by xargs, or a shell reading its script from a pipe, runs text an earlier command printed
+    if (at >= 0 && (xargs || (cmd.stdin && SHELLS.has(runnerOf(all[at]) ?? "")))) return true
     return (
       depth < 3 &&
       runs.some(
@@ -212,7 +214,7 @@ function darkLine(line: string, known: Record<string, string>, depth = 0): boole
   })
 }
 
-// With `wide`, for a dark line, every word is read, as canary read them; `messages` are the git messages kept out of the read.
+// With `wide`, for a dark line, every word is read, a git message included, as canary read them; `messages` are the git messages kept out of the read.
 function runsOf(
   parsed: Parsed,
   env: Env,
@@ -229,7 +231,7 @@ function runsOf(
   const from = wide ? 0 : found
   const words = from < 0 ? [] : all.slice(from)
   const git = found < 0 ? -1 : runnerOf(all[found]) === "git" ? found - from : -1
-  const keeps = git >= 0 && keepsMessage(words.slice(git + 1), env)
+  const keeps = !wide && git >= 0 && keepsMessage(words.slice(git + 1), env)
   const messages: string[] = []
   for (const [at, word] of words.entries()) {
     const message = keeps && at > git ? messageAt(words, at) : undefined
