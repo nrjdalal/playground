@@ -345,6 +345,19 @@ describe("a bun run ask/thread note reads as data only from the main checkout", 
     expect(await withMain(noentry, askNote, noentry)).toContain("no-desktop-owner-app hook refused")
   })
 
+  test("stays refused from a planted git folder with its own scripts/spawn.sh when PLAYGROUND_REPO is unset", async () => {
+    const planted = await makeMain("ndo-planted", GOOD)
+    const save = process.env.PLAYGROUND_REPO
+    delete process.env.PLAYGROUND_REPO
+    try {
+      expect(await at(askNote, planted)).toContain("no-desktop-owner-app hook refused")
+      expect(await at(threadNote, planted)).toContain("no-desktop-owner-app hook refused")
+    } finally {
+      if (save === undefined) delete process.env.PLAYGROUND_REPO
+      else process.env.PLAYGROUND_REPO = save
+    }
+  })
+
   test("stays refused after a cd out of the main checkout earlier in the line", async () => {
     expect(await at(`cd ${scratch} && ${askNote}`, MAIN)).toContain(
       "no-desktop-owner-app hook refused",
