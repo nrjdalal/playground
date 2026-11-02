@@ -36,7 +36,7 @@
   `?live=1` (Settings' Things to fix) runs every check whatever the mark says and never writes it, and a fixture stack keeps its mark in the API's memory alone.
   `POST /api/setup/container` and the fix start refuse a `tailscale-user-login` header or an `x-forwarded-for` hop off loopback, so a tailnet or LAN proxy never reaches them, take 5 a minute between them and run one at a time, a fix and setup included.
   It runs `startLocal()` in `api/hono/src/lib/setup/container.ts`: `docker info` (with Docker down, `DOCKER_DOWN` says how to start it), pglaunch 5.5.7 with -k and -n set to the checkout's own name (`playground-<worktree>-db` in a worktree, `playground-db` in a clone of its own, `live.container` on `live.branch`, to which pglaunch adds four random characters),
-  reusing the URL it prints when that name already runs, `docker exec <container> pg_isready -U postgres` for up to 30 s, `provenLocal()`, the migrations,
+  reusing the URL it prints when that name already runs, `docker update --restart unless-stopped` on the live dashboard's own container (`isLiveDatabase()`), so it starts again with Docker after a reboot, `docker exec <container> pg_isready -U postgres` for up to 30 s, `provenLocal()`, the migrations,
   and the URL written into `.env` at 0600 while its `POSTGRES_URL` is empty.
   It mounts no named volume, so `docker rm -f -v` takes the data with the container, and a failed step leaves the container running, so Try again reuses it through pglaunch's name match.
   Once it is done, `firstRun()` loads `index.ts` in the same process and serves it from then on, so setup's routes answer 404 with no restart; the built bundle serves `index.ts` alone.
