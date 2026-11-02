@@ -146,6 +146,11 @@ describe("cron", () => {
     expect(cronMatches("13 21 * * *", at(21, 13))).toBe(true)
   })
 
+  test("matches day of month and day of week both, where standard cron takes either", () => {
+    expect(cronMatches("0 9 19 * 1", new Date(2026, 9, 19, 9, 0))).toBe(true)
+    expect(cronMatches("0 9 19 * 2", new Date(2026, 9, 19, 9, 0))).toBe(false)
+  })
+
   test("names the next due minute", () => {
     expect(nextDue("13 21 * * *", at(13, 0))).toEqual(new Date(2026, 9, 19, 21, 13))
     expect(nextDue("*/5 * * * *", at(13, 3))).toEqual(new Date(2026, 9, 19, 13, 5))
@@ -810,6 +815,70 @@ describe("cycle", () => {
     await Promise.all(cycle({ ...ctx, now: new Date(at(13, 5).getTime() + 20_000) }, state, beats))
     expect(ran).toEqual(["five"])
     expect(resultOf(state)).toBe("broken: no file")
+  })
+})
+
+// A scratch ops folder whose data folder's policy holds these timers rows.
+const timersAt = (rows: unknown[]) => {
+  const ops = scratch()
+  storeWith(join(ops, ".."), {}, { timers: rows })
+  return ops
+}
+
+// The beat's sends, each with its arguments, through cycle as ops-tick runs it.
+const fire = async (ops: string, state: ReturnType<typeof runner>, now: Date) => {
+  const sends: unknown[][] = []
+  const ctx: Context = {
+    ...fake(ops, now).ctx,
+    send: async (...args) => {
+      sends.push(args)
+      return true
+    },
+  }
+  await Promise.all(cycle(ctx, state, [beat("timers")]))
+  return sends
+}
+
+describe("timers", () => {
+  test("a due row sends its text whole, once per matching minute", async () => {
+    const text = `check the queue ${"x".repeat(450)}`
+    const ops = timersAt([{ cron: "*/10 * * * *", name: "watch", text, to: "dispatcher" }])
+    const state = runner()
+    expect(await fire(ops, state, at(13, 10))).toEqual([["dispatcher", text, false, true]])
+    expect(await fire(ops, state, new Date(at(13, 10).getTime() + 20_000))).toEqual([])
+    expect(await fire(ops, state, at(13, 11))).toEqual([])
+    expect(await fire(ops, state, at(13, 20))).toEqual([["dispatcher", text, false, true]])
+    expect(resultOf(state)).toBe("ok")
+  })
+
+  test("an hourly row fires at its minute in each hour it names, and nowhere else", async () => {
+    const ops = timersAt([{ cron: "27 10-15,17 * * *", name: "list", text: "list", to: "builder" }])
+    const sent = async (now: Date) => (await fire(ops, runner(), now)).length
+    expect(await sent(at(10, 27))).toBe(1)
+    expect(await sent(at(17, 27))).toBe(1)
+    expect(await sent(at(16, 27))).toBe(0)
+    expect(await sent(at(10, 28))).toBe(0)
+  })
+
+  test("a daily row fires at its minute in the machine's zone, 17:00 in Asia/Karachi being 12:00Z", async () => {
+    const parent = process.env.TZ
+    process.env.TZ = "Asia/Karachi"
+    try {
+      const ops = timersAt([{ cron: "0 17 * * 1-5", name: "report", text: "go", to: "builder" }])
+      const sent = async (iso: string) => (await fire(ops, runner(), new Date(iso))).length
+      expect(await sent("2026-11-03T12:00:10Z")).toBe(1)
+      expect(await sent("2026-11-03T11:59:10Z")).toBe(0)
+      expect(await sent("2026-11-03T17:00:10Z")).toBe(0)
+      expect(await sent("2026-11-01T12:00:10Z")).toBe(0)
+    } finally {
+      if (parent === undefined) delete process.env.TZ
+      else process.env.TZ = parent
+    }
+  })
+
+  test("an empty list, or none set, sends nothing", async () => {
+    expect(await fire(timersAt([]), runner(), at(13, 10))).toEqual([])
+    expect(await fire(scratch(), runner(), at(13, 10))).toEqual([])
   })
 })
 

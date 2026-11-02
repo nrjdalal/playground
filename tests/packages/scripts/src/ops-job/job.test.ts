@@ -189,6 +189,7 @@ describe("sendAs", () => {
       await sendAs("tick")("ops", "control")
       await sendAs("channel-watch", true)("dispatcher", "w".repeat(1500))
       await sendAs("channel-watch")("dispatcher", "c".repeat(1500))
+      await sendAs("tick")("dispatcher", "t".repeat(1500), false, true)
     } finally {
       if (before === undefined) delete process.env.CLAUDE_CONFIG_DIR
       else process.env.CLAUDE_CONFIG_DIR = before
@@ -205,5 +206,10 @@ describe("sendAs", () => {
       .split("\n")
       .map((line) => (JSON.parse(line) as { text: string }).text.length)
     expect(watched).toEqual([1500, 400])
+    const ticked = (await Bun.file(join(outbox, "ops-tick.jsonl")).text())
+      .trim()
+      .split("\n")
+      .map((line) => (JSON.parse(line) as { text: string }).text.length)
+    expect(ticked).toEqual([7, 1500])
   })
 })
