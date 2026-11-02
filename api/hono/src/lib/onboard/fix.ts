@@ -1,8 +1,7 @@
-import { mkdtempSync, rmSync } from "node:fs"
-import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { site } from "@packages/config/site"
+import { makeScratch, removeScratch } from "@packages/safe-delete"
 import type { Context } from "hono"
 
 import { readsLive } from "@/lib/dashboard/fixture"
@@ -262,7 +261,7 @@ export const createFixes = ({
       PATH,
     }
     const has = (tool: string) => Bun.which(tool, { PATH }) !== null
-    const dir = mkdtempSync(join(tmpdir(), "playground-fix-"))
+    const dir = makeScratch("playground-fix-")
     const real = live()
     const plan: Step[] = real
       ? PLANS[job.id]!(has, dir)
@@ -288,7 +287,8 @@ export const createFixes = ({
       }
       if (!real) fixtureFixed.add(job.id)
     } finally {
-      rmSync(dir, { force: true, recursive: true })
+      const refused = removeScratch(dir)
+      if (refused) console.error(`fix: ${refused}`)
     }
   }
 

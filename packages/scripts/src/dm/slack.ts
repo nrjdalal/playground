@@ -1,5 +1,7 @@
-import { mkdir, rename, rm, stat } from "node:fs/promises"
+import { mkdir, rename, stat } from "node:fs/promises"
 import { join } from "node:path"
+
+import { makeScratch, removeScratch } from "@packages/safe-delete"
 
 import { writeAtomic } from "../write-atomic"
 
@@ -49,21 +51,28 @@ export const readSent = async (dir: string): Promise<Set<string>> =>
 export const recordSent = async (dir: string, ts: string) =>
   writeAtomic(join(dir, SENT), JSON.stringify([...(await readSent(dir)), ts].slice(-KEEP)))
 
-// One dm send at a time per data folder, so two never interleave their frames or lose a record: a lock folder taken by mkdir and held for the whole send. A send makes at most nine Slack calls of up to 30 s each, so a lock older than LOCK_STALE_MS is a dead send's and is taken over; each holder writes its own token in the lock and frees it only while the token is still its own, so a taken-over send never frees its successor's.
+// One dm send at a time per data folder, so two never interleave their frames or lose a record: a lock folder held for the whole send, a scratch folder holding the send's token renamed into place, so it always holds makeScratch's marker. A send makes at most nine Slack calls of up to 30 s each, so a lock older than LOCK_STALE_MS is a dead send's and is taken over; each holder frees the lock only while the token is still its own, so a taken-over send never frees its successor's.
 const LOCK_STALE_MS = 600_000
 export async function locked<T>(dir: string, fn: () => Promise<T>): Promise<T> {
   const path = join(dir, "dm-send.lock")
   const owner = join(path, "owner")
   const token = crypto.randomUUID()
+  const drop = (at: string) => {
+    const refused = removeScratch(at, dir)
+    if (refused) console.error(`dm send: ${refused}`)
+  }
   await mkdir(dir, { recursive: true })
   const until = Date.now() + LOCK_STALE_MS + 30_000
   for (;;) {
+    const mine = makeScratch("dm-send.lock.", dir)
+    await Bun.write(join(mine, "owner"), token)
     try {
-      await mkdir(path)
-      await Bun.write(owner, token)
+      await rename(mine, path)
       break
     } catch (error) {
-      if ((error as { code?: string }).code !== "EEXIST") throw error
+      drop(mine)
+      const code = (error as { code?: string }).code
+      if (code !== "EEXIST" && code !== "ENOTEMPTY") throw error
       const since = await stat(path).then(
         (s) => Date.now() - s.mtimeMs,
         () => 0,
@@ -77,7 +86,7 @@ export async function locked<T>(dir: string, fn: () => Promise<T>): Promise<T> {
             () => false,
           )
         )
-          await rm(aside, { force: true, recursive: true })
+          drop(aside)
       } else if (Date.now() > until) throw new Error("another dm send holds its lock")
       else await Bun.sleep(100)
     }
@@ -88,7 +97,16 @@ export async function locked<T>(dir: string, fn: () => Promise<T>): Promise<T> {
     const held = await Bun.file(owner)
       .text()
       .catch(() => "")
-    if (held === token) await rm(path, { force: true, recursive: true })
+    // moved aside before its removal, so the lock is never an empty folder a waiter's rename could land on
+    const aside = `${path}.free-${token}`
+    if (
+      held === token &&
+      (await rename(path, aside).then(
+        () => true,
+        () => false,
+      ))
+    )
+      drop(aside)
   }
 }
 
