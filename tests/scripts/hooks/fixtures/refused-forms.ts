@@ -67,6 +67,7 @@ export type Group = {
     | "#402"
     | "#411"
     | "#446"
+    | "#452"
     | "#456"
     | "#463"
     | "#466"
@@ -82,6 +83,9 @@ export const ALLOWED: string[] = [
   "#446 bun -e writing a JSON label whose prose names it",
   "#446 bun -e editing a JSON label whose prose names it, then a script",
   "#446 python3 -c printing prose that names it",
+  "#452 a quiet commit whose -m message holds a parenthesised scope",
+  "#452 a quiet commit whose -am message holds a parenthesised scope",
+  "#452 a quiet commit whose --message= holds a parenthesised scope",
   "#466 git --attr-source with a subcommand for its value before a read in a repo with a heavy path staged",
   "#486 bun run ask with a prose arg that only names the tool",
   "#486 bun run thread with a prose arg that only names the tool",
@@ -2345,5 +2349,39 @@ gh api graphql -f query="$QUERY"`,
       ["cut over a half-quoted glob in the home", "cut -f1 '.pl'*"],
     ],
     source: "#463",
+  },
+  {
+    folders: ["home", "data folder"],
+    guards: ["no-extensions-write"],
+    rows: ({ ROOT }) => [
+      ["a quiet commit whose -m message holds a parenthesised scope", `git commit -m "fix(x): y"`],
+      [
+        "a quiet commit whose -am message holds a parenthesised scope",
+        `git commit -am "fix(x): y"`,
+      ],
+      [
+        "a quiet commit whose --message= holds a parenthesised scope",
+        `git commit --message="fix(x): y"`,
+      ],
+      ["git config set in the call before a quiet message", `git -c x.y=z commit -m "fix(x): y"`],
+      ["a runner on the line after a quiet commit", `git commit -m "fix(x): y"; sh -c 'true'`],
+      ["a redirect writing a file after a quiet commit", `git commit -m "fix(x): y" > f`],
+      ["a quiet message on a commit git -C moves", `git -C /tmp commit -m "fix(x): y"`],
+      ["a globbing file name after -F, not a held message", `git commit -F "my(x) file"`],
+      ["a quiet message that holds the root's path as text", `git commit -m "see ${ROOT} now"`],
+      [
+        "a quiet message that names a gated call",
+        `git commit -m "docs: the hook refuses playground ext sync now"`,
+      ],
+      ["a quiet message on a git sudo runs", `sudo git commit -m "fix(x): y"`],
+      ["a quiet message on a git env runs", `env git commit -m "fix(x): y"`],
+      ["a quiet message on a git xargs runs", `xargs git commit -m "fix(x): y"`],
+      ["a quiet message on a git nice runs with an option", `nice -n 5 git commit -m "fix(x): y"`],
+      ["a quiet message on a git command runs", `command git commit -m "fix(x): y"`],
+      ["a quiet message on a git in this folder", `./git commit -m "fix(x): y"`],
+      ["a quiet message on a git in a folder of the home", `~/bin/git commit -m "fix(x): y"`],
+      ["a quiet message on a git outside the system folders", `/tmp/x/git commit -m "fix(x): y"`],
+    ],
+    source: "#452",
   },
 ]
