@@ -79,6 +79,8 @@ const EXPORTS = new Set(["declare", "export", "local", "readonly", "typeset"])
 // Programs that remove or move what they name, so naming a folder above the root takes the root with it, and the guards fall back to core's smaller lists.
 const REMOVERS = new Set(["find", "mv", "rm", "rmdir", "rsync", "unlink"])
 const DUPLICATE = /^(?:\d+|-)$/
+// Programs that run a script of their own, whose words name paths the hook cannot follow
+const INTERPRETERS = /^(?:bun|deno|node|perl|php|python[\d.]*|ruby)$/
 // Variables that make git or a pager run a program, so a reader with one set is judged as any other program.
 const RUNS = /^(?:EDITOR|GIT_[A-Z_]+|LESSOPEN|PAGER|VISUAL)$/
 const CLI = join("packages", "scripts", "src", "playground", "cli.ts")
@@ -358,8 +360,10 @@ function inspect(raw: string, environment: Environment) {
       const named = names({ ...value, glob: undefined, quoted: false }, env, remover)
       if (named) return refuse(`${name} with a variable on ${named}`)
     }
+    // an interpreter's script may expand a glob or build a path at run time, so its quoted glob characters count, as canary counts them
+    const script = INTERPRETERS.test(name)
     for (const word of [first, ...args]) {
-      const named = names(word, env, remover)
+      const named = names(script ? { ...word, glob: undefined } : word, env, remover)
       if (named) return refuse(`${name} on ${named}`)
     }
     if (cmd.redirects.some((r) => r.body && holds(r.body.value, env)))
