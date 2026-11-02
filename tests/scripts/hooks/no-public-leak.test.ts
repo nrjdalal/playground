@@ -250,6 +250,7 @@ describe("it fails closed on its list", () => {
       ["gh issue create", bash(`gh issue create ${R} -t "Fix export" -b "Fixes it"`)],
       ["git push", bash("git push https://github.com/quillco/playground.git main")],
       ["git push to a remote it cannot place", bash("git push origin main")],
+      ["gh api DELETE", bash("gh api -X DELETE repos/quillco/playground/issues/1/labels/x")],
       [
         "gh api POST",
         bash(`gh api -X POST repos/quillco/playground/issues/1/comments -f body="Fixes it"`),
