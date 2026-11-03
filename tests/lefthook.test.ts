@@ -1,11 +1,13 @@
 import { expect, test } from "bun:test"
 import {
   chmodSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   realpathSync,
   rmSync,
   symlinkSync,
+  unlinkSync,
   utimesSync,
 } from "node:fs"
 import { tmpdir } from "node:os"
@@ -613,30 +615,45 @@ test("the pre-commit main-checkout step refuses a commit in the factory's main c
   }
 }, 60_000)
 
-// the install's prepare script in a scratch repo whose hooks folder it may not write, as Claude Code's sandbox refuses .git/hooks: hooks that match pass with no write, and stale ones still fail loudly
-test("the install's prepare writes no hook while the installed ones match", async () => {
-  const pkg = (await Bun.file(join(ROOT, "package.json")).json()) as {
+// the install's prepare as package.json gives it, run in a scratch repo, a script it names read from this checkout
+const preparer = async () => {
+  const { scripts } = (await Bun.file(join(ROOT, "package.json")).json()) as {
     scripts: { prepare: string }
   }
-  const dir = mkdtempSync(join(tmpdir(), "lefthook-prepare-"))
-  const hooks = join(dir, ".git/hooks")
-  const prepare = () => {
-    const result = Bun.spawnSync(["sh", "-c", pkg.scripts.prepare], {
+  const command = scripts.prepare.replaceAll(
+    "packages/scripts/",
+    `${join(ROOT, "packages/scripts")}/`,
+  )
+  return (dir: string) => {
+    const result = Bun.spawnSync(["sh", "-c", command], {
       cwd: dir,
       env: SCRATCH_ENV,
       stdin: "ignore",
     })
     return { code: result.exitCode, out: result.stdout.toString() + result.stderr.toString() }
   }
+}
+
+// a scratch repo with this checkout's lefthook and a config of one pre-commit command
+const scratchRepo = async (dir: string) => {
+  expect(Bun.spawnSync(["git", "init", "-q"], { cwd: dir, env: SCRATCH_ENV }).exitCode).toBe(0)
+  mkdirSync(join(dir, "node_modules/.bin"), { recursive: true })
+  symlinkSync(join(ROOT, LEFTHOOK_BIN), join(dir, LEFTHOOK_BIN))
+  const config = `lefthook: ${OWN_LEFTHOOK}\npre-commit:\n  commands:\n    mark:\n      run: echo hook-ran\n`
+  await Bun.write(join(dir, "lefthook.yml"), config)
+  return config
+}
+
+// the install's prepare script in a scratch repo whose hooks folder it may not write, as Claude Code's sandbox refuses .git/hooks: hooks that match pass with no write, and a config that names a new hook still fails loudly
+test("the install's prepare writes no hook while the installed ones match", async () => {
+  const prepare = await preparer()
+  const dir = mkdtempSync(join(tmpdir(), "lefthook-prepare-"))
+  const hooks = join(dir, ".git/hooks")
   try {
-    expect(Bun.spawnSync(["git", "init", "-q"], { cwd: dir, env: SCRATCH_ENV }).exitCode).toBe(0)
-    mkdirSync(join(dir, "node_modules/.bin"), { recursive: true })
-    symlinkSync(join(ROOT, LEFTHOOK_BIN), join(dir, LEFTHOOK_BIN))
-    const config = `lefthook: ${OWN_LEFTHOOK}\npre-commit:\n  commands:\n    mark:\n      run: echo hook-ran\n`
-    await Bun.write(join(dir, "lefthook.yml"), config)
-    expect(prepare()).toMatchObject({ code: 0 })
+    const config = await scratchRepo(dir)
+    expect(prepare(dir)).toMatchObject({ code: 0 })
     chmodSync(hooks, 0o555)
-    expect(prepare()).toMatchObject({ code: 0 })
+    expect(prepare(dir)).toMatchObject({ code: 0 })
     await Bun.write(
       join(dir, "lefthook.yml"),
       `${config}pre-push:\n  commands:\n    mark:\n      run: echo push-ran\n`,
@@ -644,9 +661,29 @@ test("the install's prepare writes no hook while the installed ones match", asyn
     // lefthook reads its hooks as matching while the config's mtime, in seconds, equals the one it installed from, so a rewrite in that same second is moved on
     const later = Date.now() / 1000 + 10
     utimesSync(join(dir, "lefthook.yml"), later, later)
-    expect(prepare().code).not.toBe(0)
+    expect(prepare(dir).code).not.toBe(0)
   } finally {
-    chmodSync(hooks, 0o755)
+    if (existsSync(hooks)) chmodSync(hooks, 0o755)
+    rmSync(dir, { force: true, recursive: true })
+  }
+}, 60_000)
+
+// lefthook's check-install reads its config's checksum alone, never the hooks, so a hook gone or replaced while the config still matches is the prepare's own check to catch
+test("the install's prepare puts back a hook that was deleted or replaced while the config still matches", async () => {
+  const prepare = await preparer()
+  const dir = mkdtempSync(join(tmpdir(), "lefthook-prepare-"))
+  const hook = join(dir, ".git/hooks/pre-commit")
+  try {
+    await scratchRepo(dir)
+    expect(prepare(dir)).toMatchObject({ code: 0 })
+    const installed = await Bun.file(hook).text()
+    unlinkSync(hook)
+    expect(prepare(dir)).toMatchObject({ code: 0 })
+    expect(existsSync(hook) ? await Bun.file(hook).text() : "deleted").toBe(installed)
+    await Bun.write(hook, "#!/bin/sh\necho foreign\n")
+    expect(prepare(dir)).toMatchObject({ code: 0 })
+    expect(await Bun.file(hook).text()).toBe(installed)
+  } finally {
     rmSync(dir, { force: true, recursive: true })
   }
 }, 60_000)
