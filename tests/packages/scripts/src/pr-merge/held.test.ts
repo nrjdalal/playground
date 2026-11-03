@@ -23,6 +23,14 @@ describe("heldOf", () => {
     expect(heldOf(text, REPO, 742)).toBeNull()
   })
 
+  test('a "*" key holds every PR with its reason, and a PR\'s own line keeps its own', () => {
+    const text = file({ "*": "merges held until v0.0.35 ships", "acme/archive#9": "own reason" })
+    expect(heldOf(text, REPO, 742)).toBe("merges held until v0.0.35 ships")
+    expect(heldOf(text, "acme-labs/acme-app", 1)).toBe("merges held until v0.0.35 ships")
+    expect(heldOf(text, REPO, 9)).toBe("own reason")
+    expect(heldOf(file({ "*": "" }), REPO, 1)).toBe("no reason given")
+  })
+
   test("refuses every PR when the file does not read, so a hold is never lost to a typo", () => {
     for (const text of ["{", file(["acme/archive#742"]), JSON.stringify({ prs: {} })]) {
       expect(heldOf(text, REPO, 1)).toStartWith("held-prs.json does not read")
