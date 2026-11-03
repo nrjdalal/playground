@@ -1,3 +1,5 @@
+import { stepsTaken } from "../../../scripts/hooks/shell"
+
 // The process's CPU time so far in ms, which a busy machine's waits leave out, where they stretch a clock's reading.
 const cpu = (): number => {
   const { system, user } = process.cpuUsage()
@@ -23,4 +25,11 @@ export async function overBaseline(
     took = Math.min(took, cpu() - started)
   }
   return took / base
+}
+
+// What `run` returns and the steps shell.ts's tick() counted while it ran, a count no load stretches.
+export async function stepsOf<T>(run: () => Promise<T>): Promise<[T, number]> {
+  const before = stepsTaken()
+  const result = await run()
+  return [result, stepsTaken() - before]
 }

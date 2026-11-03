@@ -4,8 +4,7 @@ import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { check, GUARD_KEYS, guarded } from "../../../scripts/hooks/no-extensions-write"
-import { stepsTaken } from "../../../scripts/hooks/shell"
-import { overBaseline } from "./pace"
+import { overBaseline, stepsOf } from "./pace"
 
 // A home whose data folder holds an extensions root, with a list, policy.json and a scope's sources, as a machine with extensions has.
 const HOME = mkdtempSync(join(tmpdir(), "no-extensions-write-"))
@@ -307,16 +306,24 @@ describe("a direct write into the extensions root is refused, naming the owner's
     expect(await bash(command)).toContain("no-extensions-write hook refuses")
   })
 
-  test("a deep harmless nest ahead of the CLI is judged before the hook's timeout", async () => {
-    const reason = await bash(`${nest(16, "true")}; playground ext sync`)
+  // refused before its first counted step, with the alias reader's seen set reverted too, so the cap holds the walk to under one clock read
+  test("a deep harmless nest ahead of the CLI is refused in a bounded count of steps", async () => {
+    const [reason, steps] = await stepsOf(() =>
+      bash(`${nest(16, "true")}; playground ext sync`, HOME, 120_000),
+    )
     expect(reason).toContain("no-extensions-write hook refuses")
-  }, 10_000)
+    expect(steps).toBeLessThan(1_024)
+  })
 
-  test("many variables ahead of a write are judged before the hook's timeout", async () => {
+  // about 21,000 steps; reading every variable set before each command took 1.9M
+  test("many variables ahead of a write are refused in a bounded count of steps", async () => {
     const vars = Array.from({ length: 800 }, (_, i) => `V${i}=x${i}`).join("; ")
-    const reason = await bash(`${vars}; ${": ; ".repeat(800)}rm -rf ${ROOT}`)
+    const [reason, steps] = await stepsOf(() =>
+      bash(`${vars}; ${": ; ".repeat(800)}rm -rf ${ROOT}`, HOME, 120_000),
+    )
     expect(reason).toContain("no-extensions-write hook refuses")
-  }, 10_000)
+    expect(steps).toBeLessThan(200_000)
+  })
 
   test.each([
     ["nested substitutions", `x=${"$(".repeat(20_000)}${")".repeat(20_000)}; playground ext sync`],
@@ -382,21 +389,25 @@ describe("a direct write into the extensions root is refused, naming the owner's
   ])(
     "%s at the command cap is read in a bounded count of steps",
     async (_, command, cap) => {
-      const before = stepsTaken()
-      expect(await bash(command, "/tmp", 120_000)).toBeUndefined()
-      expect(stepsTaken() - before).toBeLessThan(cap)
+      const [reason, steps] = await stepsOf(() => bash(command, "/tmp", 120_000))
+      expect(reason).toBeUndefined()
+      expect(steps).toBeLessThan(cap)
     },
     60_000,
   )
 
-  // each level costs about 3000 steps under the cap on shells a call runs; without that cap a chain 2000 deep took 8 times the steps
-  test.each([300, 8_000])(
+  // under the cap on shells a call runs, 300 levels took 753,387 steps and each level about 3000; without it, 300 took 1,148,304 and 8000 took 303M
+  test.each([
+    [300, 1_000_000],
+    [8_000, 32_000_000],
+  ])(
     "an eval chain %d deep ahead of a write is refused in a count of steps linear in its depth",
-    async (depth) => {
-      const before = stepsTaken()
-      const reason = await bash(`${"eval 'eval '\\''".repeat(depth)}\nrm ${LIST}`, "/tmp", 120_000)
+    async (depth, cap) => {
+      const [reason, steps] = await stepsOf(() =>
+        bash(`${"eval 'eval '\\''".repeat(depth)}\nrm ${LIST}`, "/tmp", 120_000),
+      )
       expect(reason).toContain("no-extensions-write hook refuses")
-      expect(stepsTaken() - before).toBeLessThan(4_000 * depth)
+      expect(steps).toBeLessThan(cap)
     },
     60_000,
   )
@@ -431,9 +442,9 @@ describe("a direct write into the extensions root is refused, naming the owner's
   ])(
     "%s ahead of a write are read in bounded work",
     async (_, command, cap, ratio) => {
-      const before = stepsTaken()
-      expect(await bash(command, "/tmp")).toContain("no-extensions-write hook refuses")
-      if (cap !== undefined) expect(stepsTaken() - before).toBeLessThan(cap)
+      const [reason, steps] = await stepsOf(() => bash(command, "/tmp"))
+      expect(reason).toContain("no-extensions-write hook refuses")
+      if (cap !== undefined) expect(steps).toBeLessThan(cap)
       if (ratio !== undefined)
         expect(await overBaseline((c) => bash(c, "/tmp"), command)).toBeLessThan(ratio)
     },
@@ -465,14 +476,11 @@ describe("a direct write into the extensions root is refused, naming the owner's
   // a deadline already past stops the walk at its first clock read, 1024 steps in, where the whole lex takes tens of thousands
   test("a slow lex refuses at the walk's deadline, whatever made it slow", async () => {
     const command = `echo ${"a(".repeat(20_000)}${")".repeat(20_000)}`
-    const before = stepsTaken()
-    const reason = await check(
-      JSON.stringify({ cwd: "/tmp", tool_input: { command }, tool_name: "Bash" }),
-      ENV,
-      0,
+    const [reason, steps] = await stepsOf(() =>
+      check(JSON.stringify({ cwd: "/tmp", tool_input: { command }, tool_name: "Bash" }), ENV, 0),
     )
     expect(reason).toContain("split it into shorter calls")
-    expect(stepsTaken() - before).toBeLessThan(2_048)
+    expect(steps).toBeLessThan(2_048)
   })
 
   test("a Bash call whose cwd is already inside the root runs no writer", async () => {

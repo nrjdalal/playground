@@ -4,8 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { check } from "../../../scripts/hooks/no-stash"
-import { stepsTaken } from "../../../scripts/hooks/shell"
-import { overBaseline } from "./pace"
+import { overBaseline, stepsOf } from "./pace"
 
 const root = join(import.meta.dir, "..", "..", "..")
 const script = join(root, "scripts", "hooks", "no-stash.ts")
@@ -116,9 +115,9 @@ describe("a stash found by name or SHA, and every other call, runs", () => {
   })
 
   test("40 wrapper options it does not know before a stash are read in a bounded count of steps, and the stash refused", async () => {
-    const before = stepsTaken()
-    expect(await bash(`sudo ${"-Z ".repeat(40)}true; git stash`)).toContain("no-stash hook")
-    expect(stepsTaken() - before).toBeLessThan(5_000)
+    const [reason, steps] = await stepsOf(() => bash(`sudo ${"-Z ".repeat(40)}true; git stash`))
+    expect(reason).toContain("no-stash hook")
+    expect(steps).toBeLessThan(5_000)
   })
 
   test("a tool other than Bash passes", async () => {
