@@ -28,6 +28,7 @@ import {
   inboxWaiting,
   itemState,
   kindWord,
+  lifecycle,
   MOVED_PAUSE_MS,
   movedRows,
   movedStep,
@@ -51,6 +52,7 @@ import {
   upfrontLink,
 } from "../../../../../web/next/src/lib/inbox"
 import { statusIcon } from "../../../../../web/next/src/lib/status-icons"
+import { fullTime } from "../../../../../web/next/src/lib/time"
 
 // Remix's icons resolve from the web app's own packages, which this directory cannot see.
 const web = join(import.meta.dir, "../../../../../web/next")
@@ -200,15 +202,16 @@ describe("the inbox's counts", () => {
         status: "denied",
       } as InboxItem),
     ).toBe("You denied it · Read by Ops")
-    // a clear sets it aside for later, read by its poster as a deny is, and is never carried out
+    // a clear archives it, read by its poster as a deny is, and is never carried out (PG-654: Archived and when)
+    const archivedAt = "2026-10-07T11:00:00.000Z"
     expect(
       outcomeLine({
         ...items[4]!,
-        answer: { at: "x", choice: "clear" },
+        answer: { at: archivedAt, choice: "clear" },
         delivery: { at: "x", status: "delivered", via: "cli" },
         status: "cleared",
       } as InboxItem),
-    ).toBe("You set it aside for later · Read by Ops")
+    ).toBe(`Archived ${fullTime(archivedAt)} · Read by Ops`)
     expect(
       outcomeLine({
         ...items[4]!,
@@ -1457,5 +1460,61 @@ describe("a card folds by priority, the ones needing an answer staying open", ()
     } as InboxItem
     expect(foldsByDefault(failed, NOW)).toBe(false)
     expect(foldsByDefault({ ...read, readAt: null }, NOW)).toBe(false)
+  })
+})
+
+describe("a card's lifecycle buttons on each shelf (PG-654)", () => {
+  const decision = item({ kind: "decision", ref: 1 })
+  const draft = item({ kind: "draft", ref: 2 })
+  const update = item({ kind: "update", ref: 3 })
+  const answered = item({
+    answer: { at: "x", choice: "approve" },
+    kind: "decision",
+    ref: 4,
+    status: "approved",
+  })
+  const snoozed = item({
+    answer: { snoozedUntil: "2026-11-04T10:00:00.000Z" },
+    kind: "draft",
+    ref: 5,
+  })
+  const archived = (kind: "decision" | "draft") =>
+    item({ answer: { at: "x", choice: "clear" }, kind, ref: 6, status: "cleared" })
+  const secret = item({
+    kind: "decision",
+    preview: {
+      key: "API_KEY",
+      sink: { environments: ["production"], project: "p", scope: "s", type: "vercel" },
+      type: "secret",
+    },
+    ref: 7,
+  } as never)
+
+  test("an open decision or draft in the Inbox offers Archive and Snooze", () => {
+    expect(lifecycle(decision, "inbox")).toEqual(["archive", "snooze"])
+    expect(lifecycle(draft, "inbox")).toEqual(["archive", "snooze"])
+  })
+
+  test("a snoozed one offers Snooze again, for a new time, and Archive", () => {
+    expect(lifecycle(snoozed, "snoozed")).toEqual(["archive", "snooze"])
+  })
+
+  test("an archived decision or draft offers Move to Inbox and Done", () => {
+    expect(lifecycle(archived("decision"), "archived")).toEqual(["unarchive", "done"])
+    expect(lifecycle(archived("draft"), "archived")).toEqual(["unarchive", "done"])
+  })
+
+  test("an update and an answered item keep Dismiss straight to Done, with nothing to set aside", () => {
+    expect(lifecycle(update, "inbox")).toEqual(["dismiss"])
+    expect(lifecycle(answered, "inbox")).toEqual(["dismiss"])
+  })
+
+  test("a card on Done offers none, since it reads as history", () => {
+    for (const card of [decision, draft, update, answered, archived("draft")])
+      expect(lifecycle(card, "done")).toEqual([])
+  })
+
+  test("a secret ask is snoozed, never archived, since its value comes through Submit alone", () => {
+    expect(lifecycle(secret, "inbox")).toEqual(["snooze"])
   })
 })

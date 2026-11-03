@@ -592,8 +592,11 @@ describe("an answer", () => {
       status: "cleared",
     })
     expect(isGo("clear")).toBe(false)
-    // a draft's own Discard already says no, so a draft is never cleared
-    expect(checkAnswer(item({ kind: "draft" }), { action: "clear" })).toHaveProperty("message")
+    // a draft is archived as a decision is, its own Discard still saying no (PG-654)
+    expect(checkAnswer(item({ kind: "draft" }), { action: "clear" })).toEqual({
+      answer: { choice: "clear" },
+      status: "cleared",
+    })
     expect(checkAnswer(item({ kind: "update" }), { action: "clear" })).toHaveProperty("message")
   })
 
@@ -1367,6 +1370,51 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
     await store.dismissItems(db, [early.id], before)
     await store.ackItem(db, early.id, { now: at })
     expect(dismissed(await store.getItem(db, early.id))).toBe(before.toISOString())
+  })
+
+  test("Move to Inbox takes an archived item back to open with no answer, and nothing else (PG-654)", async () => {
+    const sent: Delivery[] = []
+    const deliver = async (delivery: Delivery) => {
+      sent.push(delivery)
+      return { at: "2026-10-07T12:00:00.000Z", ok: true as const, sessionId: "s1" }
+    }
+    const aside = await post(decision(PREVIEWS.ship))
+    const cleared = await store.answerItem(db, aside.id, { action: "clear" }, { actor, deliver })
+    if (!cleared.ok) throw new Error(cleared.message)
+    expect(cleared.item.status).toBe("cleared")
+    const before = sent.length
+    const back = await store.answerItem(
+      db,
+      aside.id,
+      { action: "unarchive", seen: cleared.item.updatedAt },
+      { actor, deliver },
+    )
+    if (!back.ok) throw new Error(back.message)
+    expect(back.item).toMatchObject({ answer: null, delivery: null, status: "open" })
+    expect(back.item.version).toBe(cleared.item.version + 1)
+    // nothing was decided, so nothing is typed into its poster
+    expect(sent).toHaveLength(before)
+    // answered again, as any open item is
+    const approved = await store.answerItem(db, aside.id, { action: "approve" }, { actor })
+    expect(approved.ok && approved.item.status).toBe("approved")
+    // an item that is not archived is refused: open, answered, or an update
+    for (const id of [(await post(decision(PREVIEWS.schema))).id, aside.id]) {
+      expect(await store.answerItem(db, id, { action: "unarchive" }, { actor })).toMatchObject({
+        code: "CONFLICT",
+        ok: false,
+      })
+    }
+    // a draft archives and comes back the same way
+    const draft = await post({
+      from: "dispatcher",
+      kind: "draft",
+      preview: { link: CHANNEL, text: "hi Merritt", to: "@Merritt" },
+      title: "Ask Merritt",
+    })
+    const archived = await store.answerItem(db, draft.id, { action: "clear" }, { actor })
+    expect(archived.ok && archived.item.status).toBe("cleared")
+    const reopened = await store.answerItem(db, draft.id, { action: "unarchive" }, { actor })
+    expect(reopened.ok && reopened.item.status).toBe("open")
   })
 
   test("a settle takes no reply its poster closed, and keeps its link (PG-2444)", async () => {
