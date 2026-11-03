@@ -1504,7 +1504,37 @@ function scoreAsOther(words, cmd, parsed, env) {
   return changes(at === -1 ? cmd.words : cmd.words.slice(0, at));
 }
 var AWKS = new Set(["awk", "gawk", "mawk", "nawk"]);
-var AWK_RUNS = /system|getline|[|>@]/;
+var AWK_RUNS = /system|getline|[>@]/;
+var awkRuns = (program) => AWK_RUNS.test(program) || awkPipe(program);
+function awkPipe(program) {
+  if (!program.includes("|"))
+    return false;
+  let last = "";
+  for (let i = 0;i < program.length; i++) {
+    const c = program[i];
+    if (c === "#")
+      return true;
+    if (c === '"' || c === "/" && /^[(,{};!~&|=?:]?$/.test(last)) {
+      let end = i + 1;
+      while (end < program.length && program[end] !== c) {
+        if (program[end] === `
+` || c === "/" && program[end] === "[")
+          return true;
+        end += program[end] === "\\" ? 2 : 1;
+      }
+      if (end >= program.length)
+        return true;
+      i = end;
+      last = c;
+      continue;
+    }
+    if (c === "|")
+      return true;
+    if (!/\s/.test(c))
+      last = c;
+  }
+  return false;
+}
 function awkPrograms(words) {
   const programs = [];
   for (let k = 0;k < words.length; k++) {
@@ -1529,7 +1559,7 @@ function awkPrograms(words) {
 function programLines({ args, first }, rooted) {
   if (!AWKS.has(program(first?.value ?? "").toLowerCase()))
     return [];
-  return (awkPrograms(args) ?? []).filter(({ value }) => rooted || AWK_RUNS.test(value)).flatMap(({ value }) => [...value.matchAll(/"((?:[^"\\]|\\.)*)"/g)].map((m) => m[1]));
+  return (awkPrograms(args) ?? []).filter(({ value }) => rooted || awkRuns(value)).flatMap(({ value }) => [...value.matchAll(/"((?:[^"\\]|\\.)*)"/g)].map((m) => m[1]));
 }
 function ownProgram(cmd, { first, name }) {
   return ownFirst(cmd, first) && !marked(name) && /^(?:\/(?:bin|opt\/homebrew\/bin|usr\/bin|usr\/local\/bin)\/)?[^/]+$/.test(first.value);
@@ -1545,7 +1575,7 @@ function narrow(cmd, env) {
   const base = program(first.value).toLowerCase();
   if (AWKS.has(base)) {
     const programs = awkPrograms(args);
-    return !!programs && programs.every(({ value }) => !marked(value) && !AWK_RUNS.test(value));
+    return !!programs && programs.every(({ value }) => !marked(value) && !awkRuns(value));
   }
   if (["cat", "grep", "head", "tail", "wc"].includes(base))
     return reads(parsed, env);
