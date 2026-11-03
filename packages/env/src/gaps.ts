@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process"
-import { readFileSync } from "node:fs"
+import { existsSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 
 import { apiHono, auth, db, redis, webNext } from "@/keys"
@@ -43,7 +43,8 @@ export const requiredKeys = (): Map<string, string[]> => {
   return new Map([...keys].sort(([a], [b]) => (a < b ? -1 : 1)))
 }
 
-export type EnvGaps = { empty: string[]; missing: string[] }
+// `absent` is set when the checkout has no .env at all, so the refusal names the copy from .env.example rather than reading as a short .env.
+export type EnvGaps = { absent?: boolean; empty: string[]; missing: string[] }
 
 // The keys .env.example documents, the ones a person can fill, read from the checkout the way load-dotenv reads ../../.env from the API's working directory; null when it cannot be read, so every required key is named.
 const exampleKeys = (): string[] | null => {
@@ -69,11 +70,18 @@ export const envGaps = (optional: string[] = []): EnvGaps => {
     if (value === undefined) missing.push(`${key} (${targets.join(", ")})`)
     else if (value === "") empty.push(`${key} (${targets.join(", ")})`)
   }
-  return { empty, missing }
+  return existsSync(join(process.cwd(), "../../.env"))
+    ? { empty, missing }
+    : { absent: true, empty, missing }
 }
 
-// The launcher's refusal for a .env with gaps, naming each key with the apps that read it.
-export const gapsRefusal = ({ empty, missing }: EnvGaps): string => {
+// The launcher's refusal for a .env with gaps, naming each key with the apps that read it; with no .env at all, it leads with the copy from .env.example.
+export const gapsRefusal = ({ absent, empty, missing }: EnvGaps): string => {
+  if (absent) {
+    const keys = [...missing, ...empty]
+    const fill = keys.length > 0 ? `, then fill the keys it leaves empty: ${keys.join(", ")}` : ""
+    return `no .env in this checkout: copy .env.example to .env${fill}`
+  }
   const parts = [
     missing.length > 0 ? `the .env lacks keys the apps require: ${missing.join(", ")}` : null,
     empty.length > 0 ? `left empty: ${empty.join(", ")}` : null,
