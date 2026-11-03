@@ -582,12 +582,15 @@ export async function check(
   }
 }
 
-// The check run in a Worker and refused when it has not answered by the main thread's timer, so no synchronous step (a regex, a copy) can hold the hook past its timeout.
+// The check run in a Worker and refused when it has not answered by the main thread's timer, so no synchronous step (a regex, a copy) can hold the hook past its timeout; the bundle in bundled/ starts the worker's bundle beside it.
 export async function guarded(
   raw: string,
   environment: Environment = process.env,
   wait = 12_000,
-  url = new URL("./no-extensions-write-worker.ts", import.meta.url).href,
+  url = new URL(
+    `./no-extensions-write-worker.${import.meta.path.endsWith(".js") ? "js" : "ts"}`,
+    import.meta.url,
+  ).href,
 ): Promise<string | undefined> {
   const worker = new Worker(url)
   let timer: ReturnType<typeof setTimeout> | undefined

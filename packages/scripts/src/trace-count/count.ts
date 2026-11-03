@@ -32,13 +32,14 @@ export type Kept = {
   reason: string
 }
 
-// Left out of the seed, so never counted: these counts and the kept hits, whose lines hold the hits they keep, the files that define the old names, and core's upstream skills, whose text is upstream's.
+// Left out of the seed, so never counted: these counts and the kept hits, whose lines hold the hits they keep, the files that define the old names, core's upstream skills, whose text is upstream's, and the guards' bundles, built from sources counted here.
 export const LEFT_OUT = [
   /^packages\/scripts\/src\/rename\/rules\.ts$/,
   /^packages\/scripts\/src\/trace-count\/counts\.json$/,
   /^packages\/scripts\/src\/trace-count\/kept\.json$/,
   /^packages\/scripts\/src\/trace-count\/kinds\.ts$/,
   new RegExp(`^extensions/core/(upstream|skills/(${UPSTREAM_SKILLS.join("|")}))/`),
+  /^scripts\/hooks\/bundled\//,
 ]
 
 // In the seed but never counted, nor swapped: a lockfile, whose integrity hashes can spell a list value by chance and break the install when rewritten.
