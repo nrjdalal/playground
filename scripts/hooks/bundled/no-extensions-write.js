@@ -1468,19 +1468,20 @@ var GH_READS = new Set([
   "run view",
   "search"
 ]);
-var GH_API_SENDS = /^(?:-[FXf]|--(?:cache|field|input|method|raw-field)(?:=|$))/;
-function ghFilters(parsed, env) {
-  const { args, first, local, name } = parsed;
+var GH_API_SENDS = /^(?:-[^-=qt]*[FXf]|--(?:cache|field|input|method|raw-field)(?:=|$))/;
+var GH_WEB = /^(?:-[^-=qt]*w|--web(?:=|$))/;
+function ghFilters(parsed) {
+  const { args, first, name } = parsed;
   const filters = new Set;
   if (name !== "gh" || !first || marked(first.value))
     return filters;
   const [verb, sub] = args.map((a) => a.value);
   const call = verb === "api" || verb === "search" ? verb : `${verb} ${sub}`;
-  if (!GH_READS.has(call) || [...local.keys()].some((key) => RUNS.test(key)))
+  if (!GH_READS.has(call))
     return filters;
   if (verb === "api" && args.some((a) => GH_API_SENDS.test(a.value)))
     return filters;
-  if (runsVariable(env.vars))
+  if (args.some((a) => GH_WEB.test(a.value)))
     return filters;
   for (let k = 0;k < args.length; k++) {
     const { value } = args[k];
@@ -1597,7 +1598,7 @@ function narrow(cmd, env) {
   if (base === "cut")
     return true;
   if (base === "gh") {
-    const filters = ghFilters(parsed, env);
+    const filters = ghFilters(parsed);
     return filters.size > 0 && args.every((a) => filters.has(a) || !/\s/.test(a.value));
   }
   if (base === "sort")
@@ -1822,7 +1823,7 @@ function inspect(raw, environment) {
         return refuse(`${verb} with a variable on ${named}`);
     }
     const literal = !whole && narrow(cmd, env);
-    const filters = whole ? new Set : ghFilters(parsed, env);
+    const filters = whole ? new Set : ghFilters(parsed);
     for (const word of [first, ...args]) {
       const text = quiet && /\s/.test(word.value) || filters.has(word) && !word.glob;
       if (text && !texts(word).some((t) => holds(t.value, env)))
