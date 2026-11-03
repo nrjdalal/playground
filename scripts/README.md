@@ -71,7 +71,7 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
   herdr 0.9.5 keeps no resume command a custom agent reports (measured: never in its session file, nothing resumed after a restart), so each herdr session's `~/.playground/resume/<name>.sh` is the factory's own list, written once herdr runs the session:
   a `# server: <name>` line naming the server it runs on, a `# account: <email>` line naming the account it runs on, a usage-gate pick included, which ops-unstick reads,
   and one `exec <main checkout>/scripts/spawn.sh resume <name> <dir> <session id>` line with the `--account` its start was given (never a usage-gate pick), the `--model` it started with and an `--effort` other than high, never a token.
-  `spawn.sh restore` reads both, taking no other option, and resumes each session on the server `PLAYGROUND_HERDR_SESSION` names (`playground` by default; a record with no server line is playground's) not ended, parked or paused in the roster, through the gate, in the restored pane holding its label;
+  `spawn.sh restore` reads both, taking no other option, and resumes each session on the server `PLAYGROUND_HERDR_SESSION` names (`playground` by default; a record with no server line is playground's) not done, ended, parked or paused in the roster, through the gate, in the restored pane holding its label;
   a live one is skipped (the live-name refusal exits 3), and each resume of a herdr session stamps its run in `<name>.ran`.
   `spawn.sh close <name>`, taking no other word, ends a herdr session for the one it reports to: it closes the one pane labelled with the name on the server its resume record names, refuses a runtime pin that is not herdr, a missing record, no pane or two carrying the label, and the caller's own pane;
   once the pane closes it ends the session's roster row, which a resume or a new start of that name sets back to starting.
@@ -154,8 +154,9 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
 
 - A new worktree can take `node_modules` as an APFS clone of a sibling worktree's with the same `bun.lock` (`~/.playground/ops/run-slot.sh <your name> -- cp -cR <sibling>/node_modules <worktree>/`, through run-slot since a clone is a heavy run: three load spikes on 13 Oct, fseventsd near 100%, came from clones),
   and once that clone succeeds, run-slot clones each workspace's own `node_modules` from the sibling with the same flags (`CLONE_WORKSPACES` in `scripts/ops/run-slot.sh`, run in the clone's own process group), so the worktree is ready for its checks with no install.
+  While the clone runs, its holder line (`run-slot-clone.holder` in the ops folder) names the sibling it reads from and the worktree it copies into, so `playground rm --worktree` refuses either one, naming the clone, until the clone ends (`clone_ends` in `scripts/ops/run-slot.sh`, `clonesOf` in `packages/scripts/src/playground/rm.ts`).
   When the copy prints any error, run `~/.playground/ops/run-slot.sh <your name> -- bun install --force --ignore-scripts --cwd <worktree>`, since a plain install then looks healthy while check-types fails on a missing module.
-  Tests: `bun run test:file tests/scripts/ops/run-slot-nested-clone.test.ts`.
+  Tests: `bun run test:file tests/scripts/ops/run-slot-nested-clone.test.ts tests/packages/scripts/src/playground/rm.test.ts tests/packages/safe-delete/src/index.test.ts`.
   A review worktree that only reads (no test run, no commit) takes no clone at all.
   AGENTS.md has worktrees removed one at a time, since removing several at once drove fseventsd past 300% CPU and the load to 77.
 - After `git worktree move`, remove the moved worktree's `web/next/.source` and `web/next/.next`, which keep the old absolute path, so the next pre-commit build fails with `webpack loader path ... is outside configured roots`.

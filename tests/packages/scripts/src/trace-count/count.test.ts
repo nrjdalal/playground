@@ -214,13 +214,14 @@ describe("the ratchet", () => {
     })
   })
 
+  // a made-up owner name turns on ownerName's quote patterns, which read no real name, so a new quote fails here; the owner's own names count only in bun run trace-count
   test("no count in the tree, less the kept hits, is over counts.json", async () => {
     const baseline = (await Bun.file(COUNTS).json()) as Counts
     const kept = (await Bun.file(KEPT).json()) as Kept[]
     const files = await tree(root)
-    const over = risen(count(files, undefined, undefined, kept), baseline)
-    const at = () =>
-      located(files, risenKinds(over), undefined, undefined, kept, changedFiles(root))
+    const repos = { ...UNSET_REPOS, owner: [["zq", "made", "up"].join("-")] }
+    const over = risen(count(files, undefined, repos, kept), baseline)
+    const at = () => located(files, risenKinds(over), undefined, repos, kept, changedFiles(root))
     expect(over.length ? refusal(over, at()) : "").toBe("")
   })
 })

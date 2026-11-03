@@ -21,6 +21,7 @@ import { toast } from "@/components/ui/toast"
 import {
   changeSetting,
   EFFORT_LABELS,
+  heldPick,
   isEffort,
   isModel,
   MODEL_LABELS,
@@ -32,15 +33,20 @@ import {
   type SessionSetting,
 } from "@/lib/session-setting"
 
-// The session's model and effort in the composer's toolbar, beside the mode picker, as /model and /effort set them in a terminal: one menu with a radio group for each, where a pick sets that value on the session as the owner's own act (typed into a dispatcher, through the SDK on the hosted session).
-export function SettingPicker({ worker }: { worker: Worker }) {
+// The session's model and effort in the composer's toolbar, directly left of Send at the row's 28px, as /model and /effort set them in a terminal: one menu with a radio group for each, where a pick sets that value on the session as the owner's own act (typed into a dispatcher, through the SDK on the hosted session).
+export function SettingPicker({ label, worker }: { label: string; worker: Worker }) {
   const reported = reportedSetting(worker)
   const [model, setModel] = useState<Pending<SessionModel> | null>(null)
   const [effort, setEffort] = useState<Pending<SessionEffort> | null>(null)
   const change = useMutation({
     mutationFn: async (setting: SessionSetting) => {
       const { error } = await changeSetting(worker.sessionId, setting)
+      if (heldPick(error)) return { queued: true }
       if (error) throw new Error(error.message)
+      return { queued: false }
+    },
+    onSuccess: ({ queued }) => {
+      if (queued) toast.add({ title: `${label} takes it once free`, type: "info" })
     },
     onError: (error, setting) => {
       if ("model" in setting) setModel(null)
@@ -65,6 +71,7 @@ export function SettingPicker({ worker }: { worker: Worker }) {
             <InputGroupButton
               size="sm"
               variant="outline"
+              className="h-7 gap-1 px-2.5 text-xs"
               aria-label={`Model and effort: ${words}`}
               disabled={change.isPending}
             />
@@ -85,9 +92,9 @@ export function SettingPicker({ worker }: { worker: Worker }) {
               change.mutate({ model: next })
             }}
           >
-            {Object.entries(MODEL_LABELS).map(([value, label]) => (
+            {Object.entries(MODEL_LABELS).map(([value, text]) => (
               <DropdownMenuRadioItem key={value} value={value} closeOnClick>
-                {label}
+                {text}
               </DropdownMenuRadioItem>
             ))}
           </DropdownMenuRadioGroup>
@@ -103,9 +110,9 @@ export function SettingPicker({ worker }: { worker: Worker }) {
               change.mutate({ effort: next })
             }}
           >
-            {Object.entries(EFFORT_LABELS).map(([value, label]) => (
+            {Object.entries(EFFORT_LABELS).map(([value, text]) => (
               <DropdownMenuRadioItem key={value} value={value} closeOnClick>
-                {label}
+                {text}
               </DropdownMenuRadioItem>
             ))}
           </DropdownMenuRadioGroup>

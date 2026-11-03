@@ -1,14 +1,7 @@
 "use client"
 
 import type { Worker } from "@api/hono"
-import {
-  RiAddLine,
-  RiArrowUpLine,
-  RiChatThreadFill,
-  RiChatThreadLine,
-  RiCloseLine,
-  RiReplyLine,
-} from "@remixicon/react"
+import { RiAddLine, RiArrowUpLine, RiCloseLine, RiReplyLine } from "@remixicon/react"
 import { useForm, useStore } from "@tanstack/react-form"
 import { useQuery } from "@tanstack/react-query"
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react"
@@ -104,7 +97,7 @@ export function Composer({ threadId, worker }: { threadId?: string; worker: Work
   const { allowed, approvals, dispatcher, outbox } = useDashboard()
   // The session is shown by its label as its chat names it (chatLabel: Message Alpha); the message still goes to its raw name.
   const label = chatLabel(worker, dispatcher)
-  // the main chat of the primary dispatcher, the one session a thread's messages go to, can open a thread with its next message
+  // the main chat of the primary dispatcher, the one session a thread's messages go to, could open a thread with its next message; New thread is off for now, so nothing sets newThread
   const opensThreads = !threadId && worker.name === dispatcher
   const [newThread, setNewThread] = useState(false)
   const startsThread = newThread && opensThreads
@@ -421,33 +414,22 @@ export function Composer({ threadId, worker }: { threadId?: string; worker: Work
                     </InputGroupButton>
                   </Hint>
                   <ModePicker approvals={approvals} worker={worker} />
-                  <SettingPicker worker={worker} />
-                  {opensThreads ? (
-                    <Hint content="Start a thread with this message">
+                  <div className="ml-auto flex items-center gap-2">
+                    {/* New thread is off for now, so this row renders no toggle and a send starts no thread */}
+                    <SettingPicker label={label} worker={worker} />
+                    {/* the box's own aria-description already speaks the key hint */}
+                    <Hint content={hint} description={null}>
                       <InputGroupButton
-                        aria-label="New thread"
-                        aria-pressed={newThread}
-                        className="aria-pressed:border-foreground aria-pressed:bg-input aria-pressed:text-foreground dark:aria-pressed:border-foreground dark:aria-pressed:bg-input rounded-full"
-                        onClick={() => setNewThread((on) => !on)}
+                        aria-label={`Send to ${label}`}
+                        className="rounded-full"
                         size="icon-sm"
-                        variant="outline"
+                        type="submit"
+                        variant="default"
                       >
-                        {newThread ? <RiChatThreadFill /> : <RiChatThreadLine />}
+                        <RiArrowUpLine />
                       </InputGroupButton>
                     </Hint>
-                  ) : null}
-                  {/* the box's own aria-description already speaks the key hint */}
-                  <Hint content={hint} description={null}>
-                    <InputGroupButton
-                      aria-label={`Send to ${label}`}
-                      className="ml-auto rounded-full"
-                      size="icon-sm"
-                      type="submit"
-                      variant="default"
-                    >
-                      <RiArrowUpLine />
-                    </InputGroupButton>
-                  </Hint>
+                  </div>
                 </InputGroupAddon>
               </InputGroup>
             </form>
