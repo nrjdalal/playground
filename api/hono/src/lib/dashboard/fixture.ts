@@ -251,8 +251,11 @@ export const fixtureSchema = z.object({
         z.looseObject({
           pane_id: z.string().min(1),
           processes: z.array(json),
+          // the session a prompt or a sent input goes to; a pane with no transcript takes them and records nothing
           session_id: z.string().min(1).optional(),
+          terminal_id: z.string().min(1),
           transcript_path: transcriptPath.optional(),
+          workspace_id: z.string().min(1),
         }),
       ),
       prompts: z.record(z.string(), z.string()),
