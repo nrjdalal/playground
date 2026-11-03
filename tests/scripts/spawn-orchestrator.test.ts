@@ -1,6 +1,18 @@
 import { describe, expect, setDefaultTimeout, test } from "bun:test"
+import { writeFileSync } from "node:fs"
+import { join } from "node:path"
 
-import { capacityLog, launchAfterRm, placing, root, spawn } from "./spawn-fake"
+import {
+  capacityLog,
+  launchAfterRm,
+  minutesAgo,
+  offUntilUtc,
+  placing,
+  root,
+  script,
+  spawn,
+  weekAt,
+} from "./spawn-fake"
 
 // Every case runs spawn.sh, which starts fake processes and waits on them; one took 19.9s on the loaded runner box, so each gets twice that.
 setDefaultTimeout(40_000)
@@ -60,6 +72,15 @@ describe("spawn.sh manager starts any orchestrator the roster kinds", () => {
     })
     expect(r.code, r.err).toBe(0)
     expect(launchAfterRm(r)).toStartWith(`(env PLAYGROUND_ROLE=lead claude --resume ${ASSISTANT} `)
+  })
+
+  test("a column of it is refused, naming the manager start it takes", async () => {
+    const r = await spawn(["column", ASSISTANT, "w1:p2", "b.md"], [], { ROSTER_JSON: seated })
+    expect(r.code).toBe(1)
+    expect(placing(r)).toEqual([])
+    expect(r.err).toContain(
+      `${ASSISTANT} opens in a workspace of its own: spawn.sh manager ${ASSISTANT} <brief>`,
+    )
   })
 
   test("a name the roster gives no manager kind is refused, naming the roster.ts set that fixes it", async () => {
@@ -129,6 +150,38 @@ describe("a manager start takes the capacity gate, and the first dispatcher star
       ])
     },
   )
+
+  // A skip lets the gates after it read, so the login pick still runs: this machine's login at 98% of its week, another at 30%.
+  test("the first dispatcher past the load gate still starts on the login with room", async () => {
+    const other = (home: string) =>
+      writeFileSync(
+        join(home, ".playground", "usage-nd941z.json"),
+        JSON.stringify({
+          ...JSON.parse(weekAt(30)),
+          account: "quilla@example.net",
+          writtenAt: minutesAgo(0),
+        }),
+      )
+    const r = await spawn(
+      ["manager", "dispatcher", "b.md"],
+      [],
+      { FAKE_LOAD5: "15.00", PACE_OFF_UNTIL: offUntilUtc, USAGE_JSON: weekAt(98) },
+      script,
+      undefined,
+      other,
+    )
+    expect(r.code, r.err).toBe(0)
+    expect(r.out).toContain("spawn.sh: the first dispatcher starts past the load gate")
+    expect(r.out).not.toContain("Wait for it to fall")
+    expect(r.out).toContain("starts on quilla@example.net")
+    expect(capacityLog(r)).toEqual([
+      expect.objectContaining({
+        gate: "load",
+        readings: expect.objectContaining({ account: "quilla@example.net" }),
+        verdict: "skipped",
+      }),
+    ])
+  })
 
   test("a first dispatcher's skipped row counts as a start in the load gate's window", async () => {
     const skipped = JSON.stringify({

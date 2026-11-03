@@ -83,7 +83,7 @@ The steps to spawn and brief a session are in [SESSIONS.md](SESSIONS.md#spawn), 
 - Before a lead spawns a worker, it reads the machine's room from the live dashboard: `bun run --cwd <dashboard checkout> verify system`, which finds the dashboard's stack through portless.
   Room is held in code: `scripts/spawn.sh`, the one way a session starts another ([SESSIONS.md](SESSIONS.md#spawn)), runs a capacity gate on load, memory, for a new worker a run-slot lane free with the load units for a run, or an empty queue, and the backend's usage, and refuses with the gate and its reading (the room is the cores in use, not a count of slots),
   and refuses a name a live session already holds.
-  It has no bypass: past the gate only the owner starts a session, from his own terminal, whose sessions load no factory hook, or a PR changes the gate, and a priority task takes the room its lead frees by closing its lowest-priority worker (below).
+  Its one bypass is the first dispatcher's ([SESSIONS.md](SESSIONS.md), Spawn); past the gate otherwise only the owner starts a session, from his own terminal, whose sessions load no factory hook, or a PR changes the gate, and a priority task takes the room its lead frees by closing its lowest-priority worker (below).
   Spawn a new session only for a chore that needs its own context; a short job (a probe-sized check, a one-off script) runs as a background task in the session that wants it.
   Within them, spawn as many as its `system` line's room allows, and at "No room" spawn none and queue the task with that line as the reason.
   Room is the machine's, not usage's: count every membership, and trim no work for usage while any account has room.

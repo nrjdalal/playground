@@ -279,17 +279,24 @@ readings = {}
 if move:
     readings["move"] = f"pid {move}"
 
-# The first dispatcher starts past a failing gate, its row skipped, so the owner always has one.
+# The first dispatcher starts past a failing gate, so the owner always has one: the skip is kept and the gates after it still read, its login pick included.
+skips = []
+
+class Skip(Exception):
+    pass
+
 def refuse(gate, detail):
-    verdict = ("check" if check else "skipped") if first else "refused"
-    row = {"at": now.isoformat(timespec="seconds").replace("+00:00", "Z"), "detail": detail, "gate": gate, "readings": readings, "verdict": verdict}
+    if first:
+        skips.append((gate, detail))
+        raise Skip
+    row = {"at": now.isoformat(timespec="seconds").replace("+00:00", "Z"), "detail": detail, "gate": gate, "readings": readings, "verdict": "refused"}
     try:
         os.makedirs(os.path.dirname(log_path), exist_ok=True)
         with open(log_path, "a") as f:
             f.write(json.dumps(row, sort_keys=True) + "\n")
     except OSError:
         pass
-    print(f"past the first dispatcher starts past the {gate} gate, which would hold another start: {detail}" if first else f"the {gate} gate holds it: {detail}")
+    print(f"the {gate} gate holds it: {detail}")
     sys.exit(0)
 
 def from_iso(value):
@@ -358,353 +365,375 @@ if move:
     readings["load"] = f"skipped (move of pid {move})"
     readings["memory"] = f"skipped (move of pid {move})"
 elif backend == "glm":
-    # a GLM session draws no Claude usage, so it has its own gate: load5 under gates.glmLoad5Max, memory pressure 1 and swap-ins under gates.glmSwapinsMax a second
-    loads = loadavg()
-    if loads is None:
-        refuse("load", "it cannot read the load average (sysctl vm.loadavg or uptime)")
-    readings["load5"] = loads[1]
-    if readings["load5"] >= gates["glmLoad5Max"]:
-        refuse("load", f"load5 is {readings['load5']:.2f} (sysctl vm.loadavg), and a GLM session starts under {fmt(gates['glmLoad5Max'])}")
-    readings["pressure"] = sysctl_int("kern.memorystatus_vm_pressure_level")
-    if readings["pressure"] is None and sandbox_refuses("kern.memorystatus_vm_pressure_level"):
-        readings["memory"] = "pressure level refused by the sandbox, so the swap-ins alone decide"
-    elif readings["pressure"] is None:
-        refuse("memory", "it cannot read the pressure level (sysctl kern.memorystatus_vm_pressure_level)")
-    elif readings["pressure"] != 1:
-        refuse("memory", f"pressure level is {readings['pressure']} (sysctl kern.memorystatus_vm_pressure_level), and a GLM session starts at 1 alone")
-    readings["swapins"] = swapins()
-    if readings["swapins"] is None:
-        refuse("memory", "it cannot read the swap-ins (vm_stat -c 2 1)")
-    if readings["swapins"] >= gates["glmSwapinsMax"]:
-        refuse("memory", f"swap-ins are {readings['swapins']}/s (vm_stat), and a GLM session starts under {fmt(gates['glmSwapinsMax'])}/s")
-else:
-    # 1 load: max(load1, load5) plus the starts the log holds from the last gates.startsWindow seconds
-    loads = loadavg()
-    if loads is None:
-        refuse("load", "it cannot read the load average (sysctl vm.loadavg or uptime)")
-    load1, load5 = loads
-    cores = sysctl_int("hw.ncpu") or os.cpu_count()
-    if cores is None:
-        refuse("load", "it cannot read the core count (sysctl hw.ncpu)")
-    readings["cores"] = cores
-    mult = 1.0
-    raw_mult = os.environ.get("PLAYGROUND_LOAD_MULT")
-    if raw_mult is not None:
-        try:
-            mult = float(raw_mult)
-        except ValueError:
-            mult = 0.0
-        if not (math.isfinite(mult) and mult > 0):
-            readings["load_mult"] = raw_mult
-            refuse("load", f"PLAYGROUND_LOAD_MULT is {raw_mult}; set a number above 0, or unset it for the default 1.0")
-    readings["load5"] = max(load1, load5)
-    readings["size"] = size
-    readings["units"] = units
-    readings["load_mult"] = mult
-    cap = cores * mult
-    starts = 0
-    # this factory's starts (a pass row, or a first dispatcher's skipped one), then each peer's (slots.peers) from its own log, read only, since the load average lags a start on either side
-    for path in [log_path] + [os.path.join(p, "capacity.jsonl") for p in gates["peers"] if isinstance(p, str)]:
-        try:
-            with open(path) as f:
-                for line in f:
-                    try:
-                        row = json.loads(line)
-                    except ValueError:
-                        continue
-                    if not isinstance(row, dict) or row.get("verdict") not in ("pass", "skipped"):
-                        continue
-                    try:
-                        if (now - from_iso(row["at"])).total_seconds() <= gates["startsWindow"]:
-                            weight = (row.get("readings") or {}).get("units") if isinstance(row.get("readings"), dict) else None
-                            starts += weight / 2 if weight in (1, 2, 3) else 1
-                    except (KeyError, TypeError, ValueError):
-                        continue
-        except OSError:
-            pass
-    readings["starts"] = starts
-    # the reserves nest: a start that is not small keeps gates.smallReserve for small items, so a big plan never blocks the small ones, and a small worker keeps gates.reviewReserve for the checkers, which start small
-    share = (gates["reviewReserve"] if role == "worker" else 0) if size == "small" else gates["smallReserve"]
-    keep = cap * share
-    readings["reserve"] = keep
-    # the load average counts the sessions' many short-lived processes (load 24 on 15 cores at 55% idle, 22 Oct), so a load over the line reads the CPU's busy cores too, against the same line held at the cores' count, and refuses only when both are over
-    if readings["load5"] + starts >= cap - keep:
-        idle = None
-        try:
-            out = subprocess.run(["top", "-l", "2", "-n", "0"], capture_output=True, text=True, timeout=10).stdout
-            idle = float([line for line in out.splitlines() if line.startswith("CPU usage:")][-1].split(",")[-1].split("%")[0])
-        except (IndexError, OSError, subprocess.TimeoutExpired, ValueError):
-            pass
-        readings["cpu_idle"] = idle
-        cpu_cap = min(cap, cores)
-        cpu_line = cpu_cap - cpu_cap * share
-        if idle is not None:
-            readings["cpu_busy"] = round(cores * (100 - idle) / 100, 2)
-        if idle is None or readings["cpu_busy"] + starts >= cpu_line:
-            at = (
-                f"{cap:g}, the {cores} cores at PLAYGROUND_LOAD_MULT {mult:g}"
-                if mult != 1
-                else f"the {cores} cores"
-            )
-            at = f"at or over {at}" if not keep else f"at or over {cap - keep:g}: {at}, less the {keep:g} kept for {'checkers (gates.reviewReserve; this start is a small worker)' if size == 'small' else f'small items (this start is {size})'}"
-            cpu = (
-                "it cannot read the CPU use (top), so the load alone decides"
-                if idle is None
-                else f"the CPU is {100 - idle:g}% busy (top), {readings['cpu_busy']:g} of the {cores} cores, which with the starts is at or over {cpu_line:g} too"
-            )
-            refuse("load", f"max(load1, load5) is {readings['load5']:.2f} and {starts:g} started in the last {fmt(gates['startsWindow'] / 60)} minutes, {at}; {cpu}. Wait for it to fall, or close a session that is done, and run it again.")
-
-    # 2 memory; where Claude Code's sandbox refuses the pressure level and free share, the swap-ins stand in, under GLM's line
-    readings["pressure"] = sysctl_int("kern.memorystatus_vm_pressure_level")
-    if readings["pressure"] is None and sandbox_refuses("kern.memorystatus_vm_pressure_level"):
-        readings["memory"] = "pressure level and free share refused by the sandbox"
+    try:
+        # a GLM session draws no Claude usage, so it has its own gate: load5 under gates.glmLoad5Max, memory pressure 1 and swap-ins under gates.glmSwapinsMax a second
+        loads = loadavg()
+        if loads is None:
+            refuse("load", "it cannot read the load average (sysctl vm.loadavg or uptime)")
+        readings["load5"] = loads[1]
+        if readings["load5"] >= gates["glmLoad5Max"]:
+            refuse("load", f"load5 is {readings['load5']:.2f} (sysctl vm.loadavg), and a GLM session starts under {fmt(gates['glmLoad5Max'])}")
+        readings["pressure"] = sysctl_int("kern.memorystatus_vm_pressure_level")
+        if readings["pressure"] is None and sandbox_refuses("kern.memorystatus_vm_pressure_level"):
+            readings["memory"] = "pressure level refused by the sandbox, so the swap-ins alone decide"
+        elif readings["pressure"] is None:
+            refuse("memory", "it cannot read the pressure level (sysctl kern.memorystatus_vm_pressure_level)")
+        elif readings["pressure"] != 1:
+            refuse("memory", f"pressure level is {readings['pressure']} (sysctl kern.memorystatus_vm_pressure_level), and a GLM session starts at 1 alone")
         readings["swapins"] = swapins()
         if readings["swapins"] is None:
-            refuse("memory", "the sandbox refuses the pressure level, and it cannot read the swap-ins (vm_stat -c 2 1)")
+            refuse("memory", "it cannot read the swap-ins (vm_stat -c 2 1)")
         if readings["swapins"] >= gates["glmSwapinsMax"]:
-            refuse("memory", f"the sandbox refuses the pressure level, and swap-ins are {readings['swapins']}/s (vm_stat), {fmt(gates['glmSwapinsMax'])}/s is the line. Close a session or wait for the pressure to pass, and run it again.")
-    else:
-        if readings["pressure"] is None:
-            refuse("memory", "it cannot read the pressure level (sysctl kern.memorystatus_vm_pressure_level)")
-        if readings["pressure"] not in (1, 2):
-            refuse("memory", f"pressure level is {readings['pressure']} (sysctl kern.memorystatus_vm_pressure_level), 1 or 2 passes")
-        readings["free"] = sysctl_int("kern.memorystatus_level")
-        if readings["free"] is None:
-            refuse("memory", "it cannot read the free share (sysctl kern.memorystatus_level)")
-        if readings["free"] < gates["memoryFreeMin"]:
-            refuse("memory", f"free is {readings['free']}% (sysctl kern.memorystatus_level), {gates['memoryFreeMin']}% is the floor. Close a session or wait for the pressure to pass, and run it again.")
-
-# 3 slots (the header's gate 3)
-if room:
-    try:
-        lanes, held, free, waiters = (int(n) for n in room.split())
-    except ValueError:
-        refuse("slots", "it cannot read run-slot's lanes and queue (run-slot.sh room)")
-    readings.update(lanes=lanes, lanes_free=free, lanes_held=held, waiters=waiters)
-    if free == 0 and waiters > 0:
-        short = "run-slot has no lane open" if lanes == 0 else f"run-slot's {lanes} lanes are all held" if held >= lanes else f"{held} of run-slot's {lanes} lanes are held and the rest lack the load units for a run"
-        refuse("slots", f"{short}, and {waiters} {'run waits' if waiters == 1 else 'runs wait'} in its queue (run-slot.sh room). Wait for the queue to drain, or close a worker that is done, and run it again.")
-
-# 4 usage: the launching backend's own window
-readings["backend"] = backend or "claude"
-if account:
-    # a week at 100% leaves no room on any login, so a reading that names the account (usage.json, stored-login.json or a usage-<name>.json) refuses it before its week resets.
-    names = ["usage.json", "ops/usage/stored-login.json"] + [os.path.basename(p) for p in sorted(glob.glob(os.path.join(data_dir, "usage-*.json")))]
-    for name in names:
-        data, detail = load(name)
-        if detail or not isinstance(data, dict) or str(data.get("account") or "").lower() != account.lower():
-            continue
-        try:
-            week = data["rate_limits"]["seven_day"]
-            week_pct, resets = week["used_percentage"], from_iso(week["resets_at"])
-        except (KeyError, TypeError, ValueError):
-            continue
-        if isinstance(week_pct, (int, float)) and not isinstance(week_pct, bool) and week_pct >= 100 and resets > now:
-            readings["week"] = week_pct
-            refuse("usage", f"--account {account}: its week reads {fmt(week_pct)}% ({name} seven_day.used_percentage) until {resets:%a %H:%M} UTC. Name another account, or, for a session that may run on this machine's login, none, so it starts on the login with the most room")
-    readings["usage"] = f"skipped (--account {account}, whose usage this machine does not read)"
-elif backend == "glm":
-    beat = read("ops/ops-zai-usage.json")
-    if not isinstance(beat, dict) or beat.get("lastResult") != "ok":
-        refuse("usage", f"the zai usage job's last beat is not ok ({beat.get('lastResult') if isinstance(beat, dict) else 'unread'}, ops-zai-usage.json)")
-    try:
-        age = (now - from_iso(beat["lastBeatAt"])).total_seconds()
-        cycle = beat["cycleSeconds"]
-        if isinstance(cycle, bool) or not isinstance(cycle, (int, float)) or cycle <= 0:
-            raise ValueError
-        cycles = math.ceil(age / cycle)
-    except (KeyError, TypeError, ValueError):
-        refuse("usage", "it cannot read ops-zai-usage.json (does not read)")
-    if cycles > 3:
-        refuse("usage", f"the zai usage job's last beat is {cycles} cycles old (ops-zai-usage.json), 3 is the limit")
-    zai = read("zai-usage.json")
-    try:
-        five = zai["windows"]["fiveHour"]
-        five_pct = pct(five["used"], five["cap"])
-    except (KeyError, TypeError):
-        five_pct = None
-    balance = zai.get("balance") if isinstance(zai, dict) else None
-    if isinstance(balance, dict) and balance.get("empty") is True:
-        readings["balance"] = "empty"
-        refuse("usage", f"the GLM balance is empty (zai-usage.json balance, a GLM session's 429 [1113] at {balance.get('seenAt', 'an unread time')}). Top it up at Z.ai: the gate lets GLM starts try again an hour after that failure.")
-    if five_pct is None:
-        refuse("usage", "zai-usage.json holds no five-hour window")
-    readings["fiveHour"] = five_pct
-    if five_pct >= 95:
-        refuse("usage", f"the 5-hour window is at {fmt(five_pct)}% of its credits (zai-usage.json windows.fiveHour), 95 is its cap. Wait for the window to reset, or close a session, and run it again.")
-    try:
-        week = zai["windows"]["week"]
-        week_pct = pct(week["used"], week["cap"])
-    except (KeyError, TypeError):
-        week_pct = None
-    readings["week"] = week_pct
-else:
-    # The pace override (#i509): while ~/.playground/usage-pace-off-until holds a future ISO 8601 time with its zone,
-    # the week-pace check is off and a 98% sanity backup holds instead; anything else leaves the pace on (fail closed).
-    pace_off = None
-    try:
-        with open(os.path.join(data_dir, "usage-pace-off-until")) as f:
-            until = dt.datetime.fromisoformat(f.read().strip().replace("Z", "+00:00"))
-        if until.tzinfo is not None and until > now:
-            pace_off = until.astimezone(dt.timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
-    except (OSError, ValueError):
+            refuse("memory", f"swap-ins are {readings['swapins']}/s (vm_stat), and a GLM session starts under {fmt(gates['glmSwapinsMax'])}/s")
+    except Skip:
         pass
-    if pace_off:
-        readings["pace"] = f"skipped until {pace_off} (usage-pace-off-until)"
-
-    # One login's reading: what it read, and why it is over the gate (None when it passes).
-    def judge(name, usage, limit, writer):
-        seen = {}
-        try:
-            written = from_iso(usage["writtenAt"])
-        except (KeyError, TypeError, ValueError):
-            return seen, f"it cannot read {name} (does not read)"
-        age = int((now - written).total_seconds() // 60)
-        if age >= limit:
-            return seen, f"{name} was written {age} minutes ago (writtenAt), {limit} is its limit. {writer}"
-        rate = usage.get("rate_limits")
-        if not isinstance(rate, dict):
-            return seen, f"{name} holds no rate_limits (does not read)"
-        try:
-            week = rate["seven_day"]
-            resets = from_iso(week["resets_at"])
-            week_pct = week["used_percentage"]
-            if isinstance(week_pct, bool) or not isinstance(week_pct, (int, float)):
-                raise TypeError
-        except (KeyError, TypeError, ValueError):
-            return seen, f"{name} holds no week share (seven_day.used_percentage with seven_day.resets_at)"
-        five = rate.get("five_hour")
-        five_hour = five.get("used_percentage") if isinstance(five, dict) else None
-        if isinstance(five_hour, bool) or not isinstance(five_hour, (int, float)):
-            five_hour = None  # no 5-hour window: an account Anthropic gives no 5-hour limit, so none, never 0%
-        seen["fiveHour"] = "none" if five_hour is None else five_hour
-        if five_hour is not None and five_hour >= 90:
+else:
+    try:
+        # 1 load: max(load1, load5) plus the starts the log holds from the last gates.startsWindow seconds
+        loads = loadavg()
+        if loads is None:
+            refuse("load", "it cannot read the load average (sysctl vm.loadavg or uptime)")
+        load1, load5 = loads
+        cores = sysctl_int("hw.ncpu") or os.cpu_count()
+        if cores is None:
+            refuse("load", "it cannot read the core count (sysctl hw.ncpu)")
+        readings["cores"] = cores
+        mult = 1.0
+        raw_mult = os.environ.get("PLAYGROUND_LOAD_MULT")
+        if raw_mult is not None:
             try:
-                reset = f"{from_iso(five['resets_at']):%H:%M} UTC"
-            except (KeyError, TypeError, ValueError):
-                reset = "later"
-            return seen, f"the 5-hour window is at {fmt(five_hour)}% ({name} five_hour.used_percentage), 90 is its cap. It resets {reset}."
-        seen["week"] = week_pct
-        if pace_off:
-            if week_pct >= 98:
-                return seen, f"the week is at {fmt(week_pct)}% ({name} seven_day.used_percentage), and 98% is the sanity backup while the pace check is off until {pace_off} (usage-pace-off-until)"
-        else:
-            days_in = 7 - (resets - now).total_seconds() / 86400
-            pace = max(days_in, 1) * 100 / 7  # never below one day's share, so a week that has just reset is not refused for its first points
-            if week_pct > pace:
-                return seen, f"the week is at {fmt(week_pct)}% ({name} seven_day.used_percentage), past 14.3 points a day ({days_in:.1f} days in, {pace:.1f} is its pace)"
-        return seen, None
-
-    # this machine's own login (usage.json, which ops-usage writes every 5 minutes) and each other login with a usage-<name>.json,
-    # which ops-usage writes for the stored login and account-watch.py <email>, run by hand, for another; another login's week moves slowly, so its reading holds for an hour.
-    usage, detail = load("usage.json")
-    own = usage.get("account") if isinstance(usage, dict) else None
-    writer = "The ops-usage job writes it every 5 minutes; wait for its next run and try again."
-    # a usage.json never written, as on a fresh install before ops-usage first runs, passes: the gate paces spending, and Anthropic's own limits still bind the login. One that exists is judged.
-    if not os.path.exists(os.path.join(data_dir, "usage.json")):
-        seen, detail = {"usage": "unread (usage.json not yet written)"}, None
-    else:
-        seen, detail = judge("usage.json", usage, 15, writer) if not detail else ({}, detail)
-    logins = [(own or "this machine's login", "usage.json", None, seen, detail)]
-    # a bare start runs on the config's own login; while usage.json reads another account (the factory's), that login is judged by ops-usage's stored-login.json, failing when the file is missing, stale or names another account, and the factory becomes a login --account reaches.
-    try:
-        with open(own_config) as f:
-            runs_on = (json.load(f).get("oauthAccount") or {}).get("emailAddress")
-    except Exception:
-        runs_on = None
-    if isinstance(runs_on, str) and runs_on and own and runs_on.lower() != own.lower():
-        name = "ops/usage/stored-login.json"
-        stored, stored_detail = load(name)
-        named = stored.get("account") if isinstance(stored, dict) else None
-        if not stored_detail and (not isinstance(named, str) or named.lower() != runs_on.lower()):
-            stored_detail = f"{name} reads {named or 'no account'}, not {runs_on}, the login a start with no --account runs on"
-        stored_seen, stored_detail = judge(name, stored, 15, writer) if not stored_detail else ({}, stored_detail)
-        logins = [(runs_on, "stored-login.json", None, stored_seen, stored_detail), (own, "usage.json", own, seen, detail)]
-    known = {login[0].lower() for login in logins}
-    for path in sorted(glob.glob(os.path.join(data_dir, "usage-*.json"))):
-        name = os.path.basename(path)
-        try:
-            with open(path) as f:
-                other = json.load(f)
-        except (OSError, ValueError):
-            other = None
-        email = other.get("account") if isinstance(other, dict) else None
-        if not isinstance(email, str) or not email or email.lower() in known:
-            continue
-        seen, detail = judge(name, other, 60, "ops-usage writes the stored login's every 5 minutes, and account-watch.py <email>, run by hand, another account's.")
-        logins.append((email, name, email, seen, detail))
-        # a refused file leaves the account open to its login-flip reading below
-        if detail is None:
-            known.add(email.lower())
-    # each account login-flip probes, from its reading in login-flip.json's seen, so the split's accounts reach the pick with no usage-<name>.json of their own
-    try:
-        with open(os.path.join(data_dir, "ops", "usage", "login-flip.json")) as f:
-            flip_seen = json.load(f).get("seen") or {}
-    except Exception:
-        flip_seen = {}
-    for email, s in sorted(flip_seen.items()) if isinstance(flip_seen, dict) else []:
-        if not isinstance(email, str) or "@" not in email or email.lower() in known or not isinstance(s, dict):
-            continue
-        rate = {"seven_day": {"used_percentage": s.get("week"), "resets_at": s.get("weekReset")}}
-        if isinstance(s.get("five"), (int, float)):
-            rate["five_hour"] = {"used_percentage": s["five"], "resets_at": s.get("fiveReset")}
-        name = "login-flip.json seen"
-        seen, detail = judge(name, {"rate_limits": rate, "writtenAt": s.get("at")}, 60, "login-flip.py probes it each ops tick.")
-        logins.append((email, name, email, seen, detail))
-        if detail is None:
-            known.add(email.lower())
-    passing = [login for login in logins if login[4] is None]
-    if not passing:
-        readings.update(logins[0][3])
-        if len(logins) == 1:
-            refuse("usage", logins[0][4])
-        readings["logins"] = {f"{email} ({name})": detail for email, name, _, _, detail in logins}
-        refuse("usage", "every login is over it: " + "; ".join(f"{email} ({name}): {detail}" for email, name, _, _, detail in logins))
-    # login-flip.py's split, under 30 minutes old (two of the ops tick's 15-minute beats), picks among the passing logins it shares by smooth weighted round robin over split-picks.json (SESSIONS.md, Spawn), else the lowest week
-    flip_dir = os.path.join(data_dir, "ops", "usage")
-    try:
-        with open(os.path.join(flip_dir, "login-flip.json")) as f:
-            split = json.load(f)["split"]
-        shares = {a.lower(): v for a, v in split["shares"].items()} if now.timestamp() - split["at"] < 1800 else {}
-    except Exception:
-        shares = {}
-    shared = {login[0]: shares[login[0].lower()] for login in passing if isinstance(shares.get(login[0].lower()), (int, float)) and shares[login[0].lower()] > 0}
-    if shared:
-        picks_path = os.path.join(flip_dir, "split-picks.json")
-        try:
-            with open(picks_path) as f:
-                credit = {a: float(c) for a, c in json.load(f).items() if a in shared}
-        except Exception:
-            credit = {}
-        for a, share in shared.items():
-            credit[a] = credit.get(a, 0) + share
-        pick = max(shared, key=lambda a: credit[a])
-        credit[pick] -= sum(shared.values())
-        if not check:
+                mult = float(raw_mult)
+            except ValueError:
+                mult = 0.0
+            if not (math.isfinite(mult) and mult > 0):
+                readings["load_mult"] = raw_mult
+                refuse("load", f"PLAYGROUND_LOAD_MULT is {raw_mult}; set a number above 0, or unset it for the default 1.0")
+        readings["load5"] = max(load1, load5)
+        readings["size"] = size
+        readings["units"] = units
+        readings["load_mult"] = mult
+        cap = cores * mult
+        starts = 0
+        # this factory's starts (a pass row, or a first dispatcher's skipped one), then each peer's (slots.peers) from its own log, read only, since the load average lags a start on either side
+        for path in [log_path] + [os.path.join(p, "capacity.jsonl") for p in gates["peers"] if isinstance(p, str)]:
             try:
-                with open(f"{picks_path}.{os.getpid()}", "w") as f:
-                    json.dump(credit, f)
-                os.replace(f"{picks_path}.{os.getpid()}", picks_path)
+                with open(path) as f:
+                    for line in f:
+                        try:
+                            row = json.loads(line)
+                        except ValueError:
+                            continue
+                        if not isinstance(row, dict) or row.get("verdict") not in ("pass", "skipped"):
+                            continue
+                        try:
+                            if (now - from_iso(row["at"])).total_seconds() <= gates["startsWindow"]:
+                                weight = (row.get("readings") or {}).get("units") if isinstance(row.get("readings"), dict) else None
+                                starts += weight / 2 if weight in (1, 2, 3) else 1
+                        except (KeyError, TypeError, ValueError):
+                            continue
             except OSError:
                 pass
-        chosen = next(login for login in passing if login[0] == pick)
-        readings["share"] = shared[pick]
+        readings["starts"] = starts
+        # the reserves nest: a start that is not small keeps gates.smallReserve for small items, so a big plan never blocks the small ones, and a small worker keeps gates.reviewReserve for the checkers, which start small
+        share = (gates["reviewReserve"] if role == "worker" else 0) if size == "small" else gates["smallReserve"]
+        keep = cap * share
+        readings["reserve"] = keep
+        # the load average counts the sessions' many short-lived processes (load 24 on 15 cores at 55% idle, 22 Oct), so a load over the line reads the CPU's busy cores too, against the same line held at the cores' count, and refuses only when both are over
+        if readings["load5"] + starts >= cap - keep:
+            idle = None
+            try:
+                out = subprocess.run(["top", "-l", "2", "-n", "0"], capture_output=True, text=True, timeout=10).stdout
+                idle = float([line for line in out.splitlines() if line.startswith("CPU usage:")][-1].split(",")[-1].split("%")[0])
+            except (IndexError, OSError, subprocess.TimeoutExpired, ValueError):
+                pass
+            readings["cpu_idle"] = idle
+            cpu_cap = min(cap, cores)
+            cpu_line = cpu_cap - cpu_cap * share
+            if idle is not None:
+                readings["cpu_busy"] = round(cores * (100 - idle) / 100, 2)
+            if idle is None or readings["cpu_busy"] + starts >= cpu_line:
+                at = (
+                    f"{cap:g}, the {cores} cores at PLAYGROUND_LOAD_MULT {mult:g}"
+                    if mult != 1
+                    else f"the {cores} cores"
+                )
+                at = f"at or over {at}" if not keep else f"at or over {cap - keep:g}: {at}, less the {keep:g} kept for {'checkers (gates.reviewReserve; this start is a small worker)' if size == 'small' else f'small items (this start is {size})'}"
+                cpu = (
+                    "it cannot read the CPU use (top), so the load alone decides"
+                    if idle is None
+                    else f"the CPU is {100 - idle:g}% busy (top), {readings['cpu_busy']:g} of the {cores} cores, which with the starts is at or over {cpu_line:g} too"
+                )
+                refuse("load", f"max(load1, load5) is {readings['load5']:.2f} and {starts:g} started in the last {fmt(gates['startsWindow'] / 60)} minutes, {at}; {cpu}. Wait for it to fall, or close a session that is done, and run it again.")
+    except Skip:
+        pass
+
+    try:
+        # 2 memory; where Claude Code's sandbox refuses the pressure level and free share, the swap-ins stand in, under GLM's line
+        readings["pressure"] = sysctl_int("kern.memorystatus_vm_pressure_level")
+        if readings["pressure"] is None and sandbox_refuses("kern.memorystatus_vm_pressure_level"):
+            readings["memory"] = "pressure level and free share refused by the sandbox"
+            readings["swapins"] = swapins()
+            if readings["swapins"] is None:
+                refuse("memory", "the sandbox refuses the pressure level, and it cannot read the swap-ins (vm_stat -c 2 1)")
+            if readings["swapins"] >= gates["glmSwapinsMax"]:
+                refuse("memory", f"the sandbox refuses the pressure level, and swap-ins are {readings['swapins']}/s (vm_stat), {fmt(gates['glmSwapinsMax'])}/s is the line. Close a session or wait for the pressure to pass, and run it again.")
+        else:
+            if readings["pressure"] is None:
+                refuse("memory", "it cannot read the pressure level (sysctl kern.memorystatus_vm_pressure_level)")
+            if readings["pressure"] not in (1, 2):
+                refuse("memory", f"pressure level is {readings['pressure']} (sysctl kern.memorystatus_vm_pressure_level), 1 or 2 passes")
+            readings["free"] = sysctl_int("kern.memorystatus_level")
+            if readings["free"] is None:
+                refuse("memory", "it cannot read the free share (sysctl kern.memorystatus_level)")
+            if readings["free"] < gates["memoryFreeMin"]:
+                refuse("memory", f"free is {readings['free']}% (sysctl kern.memorystatus_level), {gates['memoryFreeMin']}% is the floor. Close a session or wait for the pressure to pass, and run it again.")
+    except Skip:
+        pass
+
+# 3 slots (the header's gate 3)
+try:
+    if room:
+        try:
+            lanes, held, free, waiters = (int(n) for n in room.split())
+        except ValueError:
+            refuse("slots", "it cannot read run-slot's lanes and queue (run-slot.sh room)")
+        readings.update(lanes=lanes, lanes_free=free, lanes_held=held, waiters=waiters)
+        if free == 0 and waiters > 0:
+            short = "run-slot has no lane open" if lanes == 0 else f"run-slot's {lanes} lanes are all held" if held >= lanes else f"{held} of run-slot's {lanes} lanes are held and the rest lack the load units for a run"
+            refuse("slots", f"{short}, and {waiters} {'run waits' if waiters == 1 else 'runs wait'} in its queue (run-slot.sh room). Wait for the queue to drain, or close a worker that is done, and run it again.")
+except Skip:
+    pass
+
+# 4 usage: the launching backend's own window
+try:
+    readings["backend"] = backend or "claude"
+    if account:
+        # a week at 100% leaves no room on any login, so a reading that names the account (usage.json, stored-login.json or a usage-<name>.json) refuses it before its week resets.
+        names = ["usage.json", "ops/usage/stored-login.json"] + [os.path.basename(p) for p in sorted(glob.glob(os.path.join(data_dir, "usage-*.json")))]
+        for name in names:
+            data, detail = load(name)
+            if detail or not isinstance(data, dict) or str(data.get("account") or "").lower() != account.lower():
+                continue
+            try:
+                week = data["rate_limits"]["seven_day"]
+                week_pct, resets = week["used_percentage"], from_iso(week["resets_at"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            if isinstance(week_pct, (int, float)) and not isinstance(week_pct, bool) and week_pct >= 100 and resets > now:
+                readings["week"] = week_pct
+                refuse("usage", f"--account {account}: its week reads {fmt(week_pct)}% ({name} seven_day.used_percentage) until {resets:%a %H:%M} UTC. Name another account, or, for a session that may run on this machine's login, none, so it starts on the login with the most room")
+        readings["usage"] = f"skipped (--account {account}, whose usage this machine does not read)"
+    elif backend == "glm":
+        beat = read("ops/ops-zai-usage.json")
+        if not isinstance(beat, dict) or beat.get("lastResult") != "ok":
+            refuse("usage", f"the zai usage job's last beat is not ok ({beat.get('lastResult') if isinstance(beat, dict) else 'unread'}, ops-zai-usage.json)")
+        try:
+            age = (now - from_iso(beat["lastBeatAt"])).total_seconds()
+            cycle = beat["cycleSeconds"]
+            if isinstance(cycle, bool) or not isinstance(cycle, (int, float)) or cycle <= 0:
+                raise ValueError
+            cycles = math.ceil(age / cycle)
+        except (KeyError, TypeError, ValueError):
+            refuse("usage", "it cannot read ops-zai-usage.json (does not read)")
+        if cycles > 3:
+            refuse("usage", f"the zai usage job's last beat is {cycles} cycles old (ops-zai-usage.json), 3 is the limit")
+        zai = read("zai-usage.json")
+        try:
+            five = zai["windows"]["fiveHour"]
+            five_pct = pct(five["used"], five["cap"])
+        except (KeyError, TypeError):
+            five_pct = None
+        balance = zai.get("balance") if isinstance(zai, dict) else None
+        if isinstance(balance, dict) and balance.get("empty") is True:
+            readings["balance"] = "empty"
+            refuse("usage", f"the GLM balance is empty (zai-usage.json balance, a GLM session's 429 [1113] at {balance.get('seenAt', 'an unread time')}). Top it up at Z.ai: the gate lets GLM starts try again an hour after that failure.")
+        if five_pct is None:
+            refuse("usage", "zai-usage.json holds no five-hour window")
+        readings["fiveHour"] = five_pct
+        if five_pct >= 95:
+            refuse("usage", f"the 5-hour window is at {fmt(five_pct)}% of its credits (zai-usage.json windows.fiveHour), 95 is its cap. Wait for the window to reset, or close a session, and run it again.")
+        try:
+            week = zai["windows"]["week"]
+            week_pct = pct(week["used"], week["cap"])
+        except (KeyError, TypeError):
+            week_pct = None
+        readings["week"] = week_pct
     else:
-        chosen = min(passing, key=lambda login: login[3].get("week", 0))
-    readings.update(chosen[3])
-    if len(logins) > 1:
-        readings["logins"] = {f"{email} ({name})": detail or (f"week {fmt(seen['week'])}%" if "week" in seen else seen["usage"]) for email, name, _, seen, detail in logins}
-    if chosen[2]:
-        readings["account"] = chosen[2]
+        # The pace override (#i509): while ~/.playground/usage-pace-off-until holds a future ISO 8601 time with its zone,
+        # the week-pace check is off and a 98% sanity backup holds instead; anything else leaves the pace on (fail closed).
+        pace_off = None
+        try:
+            with open(os.path.join(data_dir, "usage-pace-off-until")) as f:
+                until = dt.datetime.fromisoformat(f.read().strip().replace("Z", "+00:00"))
+            if until.tzinfo is not None and until > now:
+                pace_off = until.astimezone(dt.timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+        except (OSError, ValueError):
+            pass
+        if pace_off:
+            readings["pace"] = f"skipped until {pace_off} (usage-pace-off-until)"
+
+        # One login's reading: what it read, and why it is over the gate (None when it passes).
+        def judge(name, usage, limit, writer):
+            seen = {}
+            try:
+                written = from_iso(usage["writtenAt"])
+            except (KeyError, TypeError, ValueError):
+                return seen, f"it cannot read {name} (does not read)"
+            age = int((now - written).total_seconds() // 60)
+            if age >= limit:
+                return seen, f"{name} was written {age} minutes ago (writtenAt), {limit} is its limit. {writer}"
+            rate = usage.get("rate_limits")
+            if not isinstance(rate, dict):
+                return seen, f"{name} holds no rate_limits (does not read)"
+            try:
+                week = rate["seven_day"]
+                resets = from_iso(week["resets_at"])
+                week_pct = week["used_percentage"]
+                if isinstance(week_pct, bool) or not isinstance(week_pct, (int, float)):
+                    raise TypeError
+            except (KeyError, TypeError, ValueError):
+                return seen, f"{name} holds no week share (seven_day.used_percentage with seven_day.resets_at)"
+            five = rate.get("five_hour")
+            five_hour = five.get("used_percentage") if isinstance(five, dict) else None
+            if isinstance(five_hour, bool) or not isinstance(five_hour, (int, float)):
+                five_hour = None  # no 5-hour window: an account Anthropic gives no 5-hour limit, so none, never 0%
+            seen["fiveHour"] = "none" if five_hour is None else five_hour
+            if five_hour is not None and five_hour >= 90:
+                try:
+                    reset = f"{from_iso(five['resets_at']):%H:%M} UTC"
+                except (KeyError, TypeError, ValueError):
+                    reset = "later"
+                return seen, f"the 5-hour window is at {fmt(five_hour)}% ({name} five_hour.used_percentage), 90 is its cap. It resets {reset}."
+            seen["week"] = week_pct
+            if pace_off:
+                if week_pct >= 98:
+                    return seen, f"the week is at {fmt(week_pct)}% ({name} seven_day.used_percentage), and 98% is the sanity backup while the pace check is off until {pace_off} (usage-pace-off-until)"
+            else:
+                days_in = 7 - (resets - now).total_seconds() / 86400
+                pace = max(days_in, 1) * 100 / 7  # never below one day's share, so a week that has just reset is not refused for its first points
+                if week_pct > pace:
+                    return seen, f"the week is at {fmt(week_pct)}% ({name} seven_day.used_percentage), past 14.3 points a day ({days_in:.1f} days in, {pace:.1f} is its pace)"
+            return seen, None
+
+        # this machine's own login (usage.json, which ops-usage writes every 5 minutes) and each other login with a usage-<name>.json,
+        # which ops-usage writes for the stored login and account-watch.py <email>, run by hand, for another; another login's week moves slowly, so its reading holds for an hour.
+        usage, detail = load("usage.json")
+        own = usage.get("account") if isinstance(usage, dict) else None
+        writer = "The ops-usage job writes it every 5 minutes; wait for its next run and try again."
+        # a usage.json never written, as on a fresh install before ops-usage first runs, passes: the gate paces spending, and Anthropic's own limits still bind the login. One that exists is judged.
+        if not os.path.exists(os.path.join(data_dir, "usage.json")):
+            seen, detail = {"usage": "unread (usage.json not yet written)"}, None
+        else:
+            seen, detail = judge("usage.json", usage, 15, writer) if not detail else ({}, detail)
+        logins = [(own or "this machine's login", "usage.json", None, seen, detail)]
+        # a bare start runs on the config's own login; while usage.json reads another account (the factory's), that login is judged by ops-usage's stored-login.json, failing when the file is missing, stale or names another account, and the factory becomes a login --account reaches.
+        try:
+            with open(own_config) as f:
+                runs_on = (json.load(f).get("oauthAccount") or {}).get("emailAddress")
+        except Exception:
+            runs_on = None
+        if isinstance(runs_on, str) and runs_on and own and runs_on.lower() != own.lower():
+            name = "ops/usage/stored-login.json"
+            stored, stored_detail = load(name)
+            named = stored.get("account") if isinstance(stored, dict) else None
+            if not stored_detail and (not isinstance(named, str) or named.lower() != runs_on.lower()):
+                stored_detail = f"{name} reads {named or 'no account'}, not {runs_on}, the login a start with no --account runs on"
+            stored_seen, stored_detail = judge(name, stored, 15, writer) if not stored_detail else ({}, stored_detail)
+            logins = [(runs_on, "stored-login.json", None, stored_seen, stored_detail), (own, "usage.json", own, seen, detail)]
+        known = {login[0].lower() for login in logins}
+        for path in sorted(glob.glob(os.path.join(data_dir, "usage-*.json"))):
+            name = os.path.basename(path)
+            try:
+                with open(path) as f:
+                    other = json.load(f)
+            except (OSError, ValueError):
+                other = None
+            email = other.get("account") if isinstance(other, dict) else None
+            if not isinstance(email, str) or not email or email.lower() in known:
+                continue
+            seen, detail = judge(name, other, 60, "ops-usage writes the stored login's every 5 minutes, and account-watch.py <email>, run by hand, another account's.")
+            logins.append((email, name, email, seen, detail))
+            # a refused file leaves the account open to its login-flip reading below
+            if detail is None:
+                known.add(email.lower())
+        # each account login-flip probes, from its reading in login-flip.json's seen, so the split's accounts reach the pick with no usage-<name>.json of their own
+        try:
+            with open(os.path.join(data_dir, "ops", "usage", "login-flip.json")) as f:
+                flip_seen = json.load(f).get("seen") or {}
+        except Exception:
+            flip_seen = {}
+        for email, s in sorted(flip_seen.items()) if isinstance(flip_seen, dict) else []:
+            if not isinstance(email, str) or "@" not in email or email.lower() in known or not isinstance(s, dict):
+                continue
+            rate = {"seven_day": {"used_percentage": s.get("week"), "resets_at": s.get("weekReset")}}
+            if isinstance(s.get("five"), (int, float)):
+                rate["five_hour"] = {"used_percentage": s["five"], "resets_at": s.get("fiveReset")}
+            name = "login-flip.json seen"
+            seen, detail = judge(name, {"rate_limits": rate, "writtenAt": s.get("at")}, 60, "login-flip.py probes it each ops tick.")
+            logins.append((email, name, email, seen, detail))
+            if detail is None:
+                known.add(email.lower())
+        passing = [login for login in logins if login[4] is None]
+        if not passing:
+            readings.update(logins[0][3])
+            if len(logins) == 1:
+                refuse("usage", logins[0][4])
+            readings["logins"] = {f"{email} ({name})": detail for email, name, _, _, detail in logins}
+            refuse("usage", "every login is over it: " + "; ".join(f"{email} ({name}): {detail}" for email, name, _, _, detail in logins))
+        # login-flip.py's split, under 30 minutes old (two of the ops tick's 15-minute beats), picks among the passing logins it shares by smooth weighted round robin over split-picks.json (SESSIONS.md, Spawn), else the lowest week
+        flip_dir = os.path.join(data_dir, "ops", "usage")
+        try:
+            with open(os.path.join(flip_dir, "login-flip.json")) as f:
+                split = json.load(f)["split"]
+            shares = {a.lower(): v for a, v in split["shares"].items()} if now.timestamp() - split["at"] < 1800 else {}
+        except Exception:
+            shares = {}
+        shared = {login[0]: shares[login[0].lower()] for login in passing if isinstance(shares.get(login[0].lower()), (int, float)) and shares[login[0].lower()] > 0}
+        if shared:
+            picks_path = os.path.join(flip_dir, "split-picks.json")
+            try:
+                with open(picks_path) as f:
+                    credit = {a: float(c) for a, c in json.load(f).items() if a in shared}
+            except Exception:
+                credit = {}
+            for a, share in shared.items():
+                credit[a] = credit.get(a, 0) + share
+            pick = max(shared, key=lambda a: credit[a])
+            credit[pick] -= sum(shared.values())
+            if not check:
+                try:
+                    with open(f"{picks_path}.{os.getpid()}", "w") as f:
+                        json.dump(credit, f)
+                    os.replace(f"{picks_path}.{os.getpid()}", picks_path)
+                except OSError:
+                    pass
+            chosen = next(login for login in passing if login[0] == pick)
+            readings["share"] = shared[pick]
+        else:
+            chosen = min(passing, key=lambda login: login[3].get("week", 0))
+        readings.update(chosen[3])
+        if len(logins) > 1:
+            readings["logins"] = {f"{email} ({name})": detail or (f"week {fmt(seen['week'])}%" if "week" in seen else seen["usage"]) for email, name, _, seen, detail in logins}
+        if chosen[2]:
+            readings["account"] = chosen[2]
+except Skip:
+    pass
 
 row = {"at": now.isoformat(timespec="seconds").replace("+00:00", "Z"), "gate": None, "readings": readings, "verdict": "check" if check else "pass"}
+if skips:
+    row.update(detail="; ".join(d for _, d in skips), gate=", ".join(g for g, _ in skips), verdict="check" if check else "skipped")
 try:
     with open(log_path, "a") as f:
         f.write(json.dumps(row, sort_keys=True) + "\n")
 except OSError:
     pass
+# each skip's words without the refusal's advice to run it again, since this start goes ahead
+for gate, detail in skips:
+    print(f"past the first dispatcher starts past the {gate} gate, which would hold another start: {detail.split('. Wait for')[0].split('. Close a session')[0]}")
 why = f"next in the account split ({fmt(readings['share'] * 100)}% of new sessions)" if "share" in readings else "the login with the most room this week"
-if readings.get("account"):
+if any(gate == "usage" for gate, _ in skips):
+    print("ok")
+elif readings.get("account"):
     print(f"ok {readings['account']} no --account, so it starts on {readings['account']}, {why}: its week is at {fmt(readings['week'])}% ({chosen[1]})")
 elif "logins" in readings:
     print(f"ok - no --account, so it stays on {chosen[0]}, {why}: its week is at {fmt(readings['week'])}% ({chosen[1]})")
@@ -712,6 +741,12 @@ else:
     print("ok")
 PY
   ) || refuse "it cannot read the machine's readings"
+  # A first dispatcher's skips come first, one line each, before the verdict's own.
+  while [[ $verdict == "past "*$'\n'* ]]; do
+    line=${verdict%%$'\n'*}
+    echo "spawn.sh: ${line#past }"
+    verdict=${verdict#*$'\n'}
+  done
   case "$verdict" in
     ok) ;;
     "ok "*)
@@ -720,7 +755,6 @@ PY
       [ "$pick" = - ] || { ACCOUNT=$pick; PICKED=1; check_account; }
       echo "spawn.sh: ${verdict#ok "$pick" }"
       ;;
-    "past "*) echo "spawn.sh: ${verdict#past }" ;;
     *) refuse "$verdict" ;;
   esac
 }
@@ -1024,7 +1058,8 @@ except Exception:
     word "$by" || refuse "it reads no session running spawn.sh (CLAUDE_PID's entry in $REGISTRY) to brief $NAME: name it, column dispatcher $NAME <the lead that briefs it> <pane> <brief>"
     set -- dispatcher "$NAME" "$by" "$2" "$3"
   else
-    [[ $(kind_of "$NAME") =~ ^(dispatcher|optimizer)$ ]] && refuse "$NAME opens in a workspace of its own: spawn.sh manager $NAME <brief>"
+    kind=$(kind_of "$NAME")
+    { [[ $kind =~ ^(dispatcher|optimizer)$ ]] || { [ "$(role_of_kind "$kind")" = lead ] && [[ ! $kind =~ ^(builder|ops|planner)$ ]]; }; } && refuse "$NAME opens in a workspace of its own: spawn.sh manager $NAME <brief>"
     [[ $(kind_of "$NAME") =~ ^(builder|ops|planner)$ ]] ||
       refuse "$NAME is no manager: column <manager> <pane> <brief> takes a lead or the first dispatcher, and column <reviewer|tester|probe|lead|dispatcher> <name> <reports-to> <pane> <brief> takes the rest"
     set -- lead "$NAME" "$(dispatcher_of 1)" "$2" "$3"

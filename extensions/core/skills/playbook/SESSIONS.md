@@ -39,11 +39,11 @@ Sessions run in bypass-permissions mode, yet some commands still prompt (`rm`, a
    so every GLM spawn refuses until `bun run ops:zai-usage` has beaten once).
    A GLM start takes its own load and memory gate in place of the load and memory checks above: load5 (the third field of `sysctl -n vm.loadavg`) under 30 (`gates.glmLoad5Max`), memory pressure level 1, and swap-ins under 100/s (`gates.glmSwapinsMax`, `vm_stat -c 2 1`), so GLM starts while Claude's gate holds.
    Every pass and refusal is one line in `~/.playground/ops/capacity.jsonl`, which the load check counts its starts from, a refusal's carrying the words it printed as `detail`.
-   Every manager start takes the gate, an orchestrator's included, but the first dispatcher's, which starts past a failing gate so the owner always has one: its row reads `skipped` with the gate and the words a refusal would print, and counts as a start.
+   Every manager start takes the gate, an orchestrator's included, but the first dispatcher's, which starts past a failing gate so the owner always has one: the gates after a failing one still read and pick its login, and its one row reads `skipped`, naming each gate it went past with a refusal's words, and counts as a start.
    `bun run verify system` reads how many more workers and how many more orchestrators fit now, and what limits each.
    It also refuses while a live session already holds the name (below).
    A refusal names its gate and what it read: close a session that is done ([End](#end)), or wait for the reading to fall, and run it again.
-   It has no bypass: past the gate only the owner starts a session, from his own terminal, whose sessions load no factory hook, or a PR changes the gate.
+   Its one bypass is the first dispatcher's (above); past the gate otherwise only the owner starts a session, from his own terminal, whose sessions load no factory hook, or a PR changes the gate.
    A session that works with others opens as a full-height column to the right of the newest one in their workspace, never wrapped into a grid (side by side gives the most room, so nothing wraps): a worker's workspace reads worker | reviewer | tester, and the managers' reads `dispatcher` | `planner` | `builder` | `ops`.
    A session already running stays where it is until its next restart.
    spawn.sh starts each as `env PLAYGROUND_ROLE=<role> claude -n <name> --model claude-opus-5-5 --effort high --settings $HOME/.playground/factory-settings-400k.json --dangerously-skip-permissions` (a probe's file is `factory-settings-sandbox-400k.json`):
