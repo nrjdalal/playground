@@ -137,6 +137,53 @@ describe("a secret ask (PG-59)", () => {
   })
 })
 
+describe("an accept decision (PG-658)", () => {
+  const preview = {
+    key: "end-of-day",
+    kind: "skill",
+    rev: "3f9a2c1d",
+    scope: "acme",
+    type: "accept",
+    why: "Scored 4 by two reviewers",
+  }
+  const asked = item({ kind: "decision", preview } as never)
+  const approved = (accepted?: { exitCode: number; line: string }) =>
+    item({
+      answer: { accepted, at: "2026-11-03T20:00:00.000Z", choice: "approve" },
+      delivery: { at: "x", status: "delivered", via: "session" },
+      kind: "decision",
+      preview,
+      status: "approved",
+    } as never)
+
+  test("needs you while open, and reads as an accept", () => {
+    expect(kindWord(asked)).toBe("Accept")
+    expect(needsYou(asked)).toBe(true)
+  })
+
+  test("once approved, reads what the dashboard's accept gave, done or failed by its exit code", () => {
+    const ran = approved({ exitCode: 0, line: "rev 9b8c7d6 is accepted" })
+    expect(outcomeLine(ran)).toBe("You approved it · Accepted: rev 9b8c7d6 is accepted")
+    expect(itemState(ran)).toBe("done")
+    const refused = approved({ exitCode: 1, line: "409 the proposal is at 0a1b2c3d4e5f" })
+    expect(outcomeLine(refused)).toBe(
+      "You approved it · Accept failed (exit 1): 409 the proposal is at 0a1b2c3d4e5f",
+    )
+    expect(itemState(refused)).toBe("failed")
+  })
+
+  test("an accept its poster was not told of says why beside the result", () => {
+    const unsent = item({
+      ...approved({ exitCode: 0, line: "rev 9b8c7d6 is accepted" }),
+      delivery: { code: "CMUX_FAILED", reason: "cmux is not running", status: "failed" },
+    } as never)
+    expect(outcomeLine(unsent)).toBe(
+      "You approved it · Accepted: rev 9b8c7d6 is accepted · Send failed: cmux is not running",
+    )
+    expect(itemState(unsent)).toBe("failed")
+  })
+})
+
 describe("the inbox's counts", () => {
   test("what needs you: open decisions and drafts, and unread updates", () => {
     expect(items.filter(needsYou).map((i) => i.ref)).toEqual([41, 40, 44])

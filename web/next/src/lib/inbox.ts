@@ -468,6 +468,7 @@ export function kindWord(item: InboxItem): string {
     return word.charAt(0).toUpperCase() + word.slice(1)
   }
   const words = {
+    accept: "Accept",
     ask: "Ask",
     budget: "Budget",
     delete: "Delete",
@@ -520,6 +521,9 @@ export function itemState(item: InboxItem): ItemState {
     if (!provided.results) return "sending"
     return provided.results.every((result) => result.exitCode === 0) ? "done" : "failed"
   }
+  // an accept the dashboard ran is done or failed by its exit code alone, since nothing is left for its poster to carry out
+  if (provided && "accepted" in provided && provided.accepted)
+    return provided.accepted.exitCode === 0 ? "done" : "failed"
   // a chat reply is being carried out by its poster until it is closed, then done
   if (item.kind !== "update" && chosen(item)?.choice === "replied")
     return carriedOut(item) ? "done" : "sending"
@@ -610,14 +614,6 @@ export function outcomeLine(item: InboxItem): string | null {
     send: item.answer.editedText ? "You sent it with changes" : "You sent it",
   }[item.answer.choice]
   const delivery = item.delivery
-  // Claude Code holds it until the session is free, whatever the answer
-  if (delivery?.status === "queued") return `${done} · Queued: ${who} holds it, to take once free`
-  if (isGo(item.answer.choice) && delivery?.status !== "failed" && !carriedOut(item)) {
-    if (item.answer.choice === "draft") return `${done} · Saving a Slack draft…`
-    const slack = item.kind === "decision" && item.preview.type === "slack"
-    if (item.answer.choice !== "send" && !slack) return `${done} · Being carried out by ${who}…`
-    return `${done} · ${kindWord(item) === "Linear comment" ? "Sending to Linear…" : "Sending in Slack…"}`
-  }
   const reached =
     delivery?.status === "delivered"
       ? delivery.via === "cli"
@@ -630,6 +626,23 @@ export function outcomeLine(item: InboxItem): string | null {
             ? `Send unconfirmed: whether ${who} has it is not known`
             : `Send failed: ${delivery.reason}`
         : "Delivery pending"
+  // an accept the dashboard ran says what the run gave, the card's whole result, and why its poster was not told when that failed
+  const accepted = "accepted" in item.answer ? item.answer.accepted : undefined
+  if (accepted) {
+    const ran =
+      accepted.exitCode === 0
+        ? `Accepted: ${accepted.line}`
+        : `Accept failed (exit ${accepted.exitCode}): ${accepted.line}`
+    return delivery?.status === "failed" ? `${done} · ${ran} · ${reached}` : `${done} · ${ran}`
+  }
+  // Claude Code holds it until the session is free, whatever the answer
+  if (delivery?.status === "queued") return `${done} · Queued: ${who} holds it, to take once free`
+  if (isGo(item.answer.choice) && delivery?.status !== "failed" && !carriedOut(item)) {
+    if (item.answer.choice === "draft") return `${done} · Saving a Slack draft…`
+    const slack = item.kind === "decision" && item.preview.type === "slack"
+    if (item.answer.choice !== "send" && !slack) return `${done} · Being carried out by ${who}…`
+    return `${done} · ${kindWord(item) === "Linear comment" ? "Sending to Linear…" : "Sending in Slack…"}`
+  }
   return item.answer.noLink
     ? `${done} · ${reached} · No link: ${item.answer.noLink}`
     : `${done} · ${reached}`
