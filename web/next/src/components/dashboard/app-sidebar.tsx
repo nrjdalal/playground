@@ -1149,7 +1149,7 @@ const LABEL_PART = "text-muted-foreground min-w-0 truncate"
 const TITLE_LEADS = "min-w-0 truncate"
 const KIND_FOLLOWS = "text-muted-foreground min-w-0 max-w-full shrink-0 truncate"
 
-// A row's first line (firstLineOf), one line in the 32px row: its label, cut only once the title is gone, so a narrow rail cuts the title first and then the label, never past the row (`AB-843#8 Reviewer Review it`, a manager's `Ops`, `Keep the dashboard up · runner`); a worker, like a session with no kind, keeps its ticket, pull request and title (`AB-843#8 Chat scroll fix`). The pull request's number takes its colour, said in words for screen readers.
+// A row's first line (firstLineOf), one line in the 32px row: its label, cut only once the title is gone, so a narrow rail cuts the title first and then the label, never past the row (`AB-843#8 Reviewer Review it`, a manager's `Ops`, `Keep the dashboard up · runner`); a worker, like a session with no kind, keeps its ticket, pull request and title (`AB-843#8 Chat scroll fix`). The pull request's number takes its colour, said in words for screen readers; the worker's line is `relative`, so those words, absolutely placed past a long title, are clipped by its own truncate and never widen the sidebar's body (PG-711).
 function RowFirst({
   line,
   prClass,
@@ -1179,7 +1179,7 @@ function RowFirst({
       <span className={KIND_FOLLOWS} data-part="label">{`\u00a0· ${line.kind}`}</span>
     </span>
   ) : (
-    <span className="truncate text-xs leading-3.5">
+    <span className="relative truncate text-xs leading-3.5">
       {line.ticket && <span className="text-muted-foreground">{line.ticket}</span>}
       {number}
       {(line.ticket || line.pr !== null) && " "}
