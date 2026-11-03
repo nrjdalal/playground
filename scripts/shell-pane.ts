@@ -56,17 +56,21 @@ function reply(args: string[], { code, out }: { code: number; out: string }): Js
 
 const call = async (herdr: Herdr, args: string[]): Promise<Json> => reply(args, await herdr(args))
 
-// The guards registered for the Bash tool in the factory settings, by name, as the hooks run them.
+// The guards registered for the Bash tool in the factory settings, by name, as the hooks run them; a Bash hook whose command names no scripts/hooks/<name>.ts is one the launcher cannot run, so it refuses rather than skip it.
 export async function bashGuards(repo: string): Promise<string[]> {
   const settings = await Bun.file(join(repo, "scripts", "factory-settings.json")).json()
   const entries: { hooks: { command: string }[]; matcher: string }[] =
     settings.hooks?.PreToolUse ?? []
-  const names = entries
+  const commands = entries
     .filter((entry) => new RegExp(entry.matcher).test("Bash"))
-    .flatMap((entry) =>
-      entry.hooks.map((h) => h.command.match(/scripts\/hooks\/([\w-]+)\.ts/)?.[1]),
+    .flatMap((entry) => entry.hooks.map((h) => h.command))
+  const names = commands.map((command) => command.match(/scripts\/hooks\/([\w-]+)\.ts/)?.[1])
+  const unread = commands.find((_, i) => !names[i])
+  if (unread !== undefined)
+    throw new Refusal(
+      `shell-pane cannot run a registered Bash hook that names no scripts/hooks/<name>.ts: ${unread}`,
     )
-  return [...new Set(names.filter((name): name is string => !!name))]
+  return [...new Set(names as string[])]
 }
 
 // The first refusal of a command typed in `cwd`: each registered Bash guard's check() over it as a Bash call of its own, then a word naming claude; a guard that cannot load or check refuses, as its hook does.
@@ -75,7 +79,13 @@ export async function screen(
   cwd: string,
   repo: string,
 ): Promise<string | undefined> {
-  const guards = await bashGuards(repo)
+  let guards: string[]
+  try {
+    guards = await bashGuards(repo)
+  } catch (error) {
+    if (error instanceof Refusal) return error.message
+    throw error
+  }
   if (guards.length === 0)
     return `shell-pane found no Bash guard in ${repo}/scripts/factory-settings.json`
   const raw = JSON.stringify({
@@ -93,7 +103,8 @@ export async function screen(
       return `shell-pane refuses: ${name} could not check the command (${error instanceof Error ? error.message : error})`
     }
   }
-  if (CLAUDE.test(command))
+  // read with its quotes and backslashes taken out, as the shell joins cl''aude or c\\laude into one word
+  if (CLAUDE.test(command.replace(/['"\\]/g, "")))
     return "shell-pane refuses a command naming claude: only scripts/spawn.sh starts a session"
 }
 
@@ -143,9 +154,9 @@ export async function run(
   if (info.agent_session) throw new Refusal(`shell-pane refuses ${pane}: it holds an agent session`)
   // idle when the pane's shell holds its terminal (measured on 0.9.5), so a line is never typed into a running program's input
   const { process_info: proc } = await call(herdr, ["pane", "process-info", "--pane", pane])
-  if (proc?.foreground_process_group_id !== proc?.shell_pid)
+  if (typeof proc?.shell_pid !== "number" || proc.foreground_process_group_id !== proc.shell_pid)
     throw new Refusal(
-      `shell-pane refuses ${pane}: a command is still running there; read its marker first`,
+      `shell-pane refuses ${pane}: a command is still running there, or herdr did not say; read its marker first`,
     )
   const reason = await screen(command, info.foreground_cwd || info.cwd, repo)
   if (reason) throw new Refusal(reason)

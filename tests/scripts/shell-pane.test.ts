@@ -102,6 +102,7 @@ type Pane = {
   agent_session?: Record<string, string>
   busy?: boolean
   cwd: string
+  silent?: boolean
   workspace_id: string
 }
 
@@ -143,6 +144,7 @@ function stubHerdr(seen = "", { cwd = WORKTREE, stuck = false } = {}) {
       if (!stuck) workspaces.delete(id!)
       return ok({ type: "ok" })
     }
+    if (group === "pane" && verb === "process-info" && panes.get(args[3]!)?.silent) return ok({})
     if (group === "pane" && verb === "process-info" && panes.has(args[3]!))
       return ok({
         process_info: {
@@ -266,6 +268,22 @@ describe("run screens the command through every registered Bash guard before it 
     )
   })
 
+  test("a registered Bash hook that names no guard file refuses, rather than being skipped", async () => {
+    const repo = repoWith({ "no-made-up": `export const check = async () => undefined\n` })
+    const file = join(repo, "scripts", "factory-settings.json")
+    const settings = JSON.parse(await Bun.file(file).text())
+    settings.hooks.PreToolUse.push({
+      hooks: [{ command: "echo made-up-hook", type: "command" }],
+      matcher: "^Bash$",
+    })
+    writeFileSync(file, JSON.stringify(settings))
+    const { calls, herdr } = stubHerdr()
+    expect(await refusal(run("w1:p1", "echo fine", herdr, repo))).toContain(
+      "names no scripts/hooks/<name>.ts: echo made-up-hook",
+    )
+    expect(typed(calls)).toEqual([])
+  })
+
   test("a registered guard that cannot load refuses", async () => {
     const repo = repoWith({ "no-made-up": `export const nothing = 1\n` })
     const { calls, herdr } = stubHerdr()
@@ -285,10 +303,15 @@ describe("run screens the command through every registered Bash guard before it 
 })
 
 describe("run's own refusals", () => {
-  test("a word naming claude", async () => {
+  test.each([
+    ["claude --version"],
+    ["cl''aude --version"],
+    ["c\\laude --version"],
+    [`"cl"aude -p hi`],
+  ])("a word naming claude: %s", async (command) => {
     const { calls, herdr } = stubHerdr()
     const repo = repoWith({ "no-made-up": `export const check = async () => undefined\n` })
-    expect(await refusal(run("w1:p1", "claude --version", herdr, repo))).toContain("naming claude")
+    expect(await refusal(run("w1:p1", command, herdr, repo))).toContain("naming claude")
     expect(typed(calls)).toEqual([])
   })
 
@@ -306,6 +329,13 @@ describe("run's own refusals", () => {
     expect(await refusal(run("w1:p1", "echo hi", herdr, CHECKOUT))).toContain(
       "holds an agent session",
     )
+    expect(typed(calls)).toEqual([])
+  })
+
+  test("a pane herdr gives no process info for, since it cannot be told idle", async () => {
+    const { calls, herdr, panes } = stubHerdr()
+    panes.get("w1:p1")!.silent = true
+    expect(await refusal(run("w1:p1", "echo hi", herdr, CHECKOUT))).toContain("herdr did not say")
     expect(typed(calls)).toEqual([])
   })
 
