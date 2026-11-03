@@ -3,7 +3,7 @@
 How the dispatcher, the Planner and the two leads route a new ask, bundle the work and fill the worker slots.
 The steps to spawn and brief a session are in [SESSIONS.md](SESSIONS.md#spawn), and the roster writes in [ROSTER.md](ROSTER.md).
 
-- Every new ask runs down one chain, each manager doing its own part (the owner saw the Planner sit idle and asked that each ask be split by manager, the Planner aligning the work; the chain is his Inbox decision #i48): the dispatcher routes it; the Planner researches it, orders it and writes the plan; the Builder's workers build, review and merge it;
+- Every new ask runs down one chain, each manager doing its own part (so no manager sits idle while another does its part, the Planner aligning the work; the chain is his Inbox decision #i48): the dispatcher routes it; the Planner researches it, orders it and writes the plan; the Builder's workers build, review and merge it;
   Ops ships it, rolls the dashboard and watches the machine.
   Research, a deep dive, a comparison, a plan or a plan page ends with the Planner.
   Four routes skip the Planner, and the manager that takes one tells the Planner after, so it records the task in `plan.json`: the two fast lanes, a live break or a tiny fix the owner points at (a stuck bubble, a wrong colour) straight to the Builder and a machine or ops incident (load, Docker, a stuck session) straight to Ops; a backlog `Fix: ` entry a free slot takes;
@@ -11,7 +11,7 @@ The steps to spawn and brief a session are in [SESSIONS.md](SESSIONS.md#spawn), 
   The work org's work (one of its tickets) skips the Planner too, and stays outside the lanes.
   The dispatcher keeps the owner's conversation, the routing and the Inbox.
   A message reading `update the dashboard now: ...` is his click on the Dashboard's Update now: route it to Ops, who rolls the live dashboard at once with `playground update` (`.agents/dashboard/live.md`).
-- The dispatcher routes every ask of the owner's to a thread, as it routes the ask, in the live dashboard's checkout (threads came in at the owner's ask, each with an ID that a reply carries, so the reply stays with its thread):
+- The dispatcher routes every ask of the owner's to a thread, as it routes the ask, in the live dashboard's checkout (each thread has an ID that a reply carries, so the reply stays with its thread):
   - A message that opens with a marker, `[thread:<id>]`, is already routed: he sent it with New thread or from the thread's view, and ingest routes it as it reads it.
   - A new ask with no marker opens a thread titled with what he asked (`bun run thread new "<title>"` prints its id), and the ask is routed to it (`bun run thread route <id> --quote "<its opening words>"`), quoting enough of them that no other untagged message of the session starts the same way.
   - Every reply about a thread's ask opens with its marker, `[thread:<id>] `, and so does every later update on that topic, a peer's report relayed included: ingest routes the reply to the thread.

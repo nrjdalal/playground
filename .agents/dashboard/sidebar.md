@@ -64,7 +64,7 @@
   else nowhere, so a machine with no GLM reading draws none (`glmSlot`).
   They never share Claude's row: in the 239px row, Claude's readings, GLM's and the two model icons left its name one letter wide (tester round 1).
   The footer holds the music player alone (`MusicPlayer` in `web/next/src/components/dashboard/music-player.tsx`, the owner's #i959), and the Dashboard's user menu is the last square of the aside toolbar on a wide screen, the sidebar's Menu after it on a phone,
-  in view while the rest of the bar waits for the socket's first frame so a dashboard that never connects still opens the sidebar (`MENU_TAB`), and below the owner rung, where no bar draws, the shell's floating Menu stays (`SidebarFloatingTrigger always`; the owner asked for the phone's Menu to join the bar; `AsideUserMenu` in `components/dashboard/owner-menu.tsx`, after a separator),
+  in view while the rest of the bar waits for the socket's first frame so a dashboard that never connects still opens the sidebar (`MENU_TAB`), and below the owner rung, where no bar draws, the shell's floating Menu stays (`SidebarFloatingTrigger always`; on a phone the Menu joins the bar; `AsideUserMenu` in `components/dashboard/owner-menu.tsx`, after a separator),
   opening its items upward, centred on the square, Auto-hide tab bar first on a wide screen (asks.md); the sidebar has no Documentation link:
   the user menu's Documentation item opens `/docs`, after its Sessions item.
   The player plays a YouTube song or playlist link through YouTube's IFrame API, loaded on the card's first pointerenter or focus, in one player a tab, laid under the page at opacity 0, since Chrome throttles a frame parked off-screen and its onReady never fires.

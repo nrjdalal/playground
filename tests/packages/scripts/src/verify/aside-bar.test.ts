@@ -73,7 +73,7 @@ describe("topResult", () => {
   })
 })
 
-// on a phone the Menu joins the bar, at the owner's ask
+// on a phone the Menu joins the bar
 describe("menuResult", () => {
   test("passes while Menu is a square in the phone's bar, and fails without it", () => {
     expect(menuResult("aside-bar 390 menu", true)).toEqual({

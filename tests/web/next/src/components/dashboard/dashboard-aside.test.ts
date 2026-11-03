@@ -44,7 +44,7 @@ describe("the aside window on every dashboard page", () => {
     }
   })
 
-  // the owner kept the Inbox, Changelog and Documents: the bar as DashboardAside builds it, from the default app squares
+  // the Inbox, Changelog and Documents alone: the bar as DashboardAside builds it, from the default app squares
   test("holds the Inbox, Playground's chat, Changelog, Pages and Apps, and no parked app or Pull requests", () => {
     const bar = (selected: typeof dispatcher | typeof worker) =>
       asideTabs(
@@ -101,7 +101,7 @@ describe("the aside window on every dashboard page", () => {
     expect(aside).toContain("{ count: unread }")
   })
 
-  // the owner opened it only to clear the bar's dot
+  // a click made only to clear the bar's dot
   test("counts on the Inbox square what needs you and came since your last look, so a look clears it", async () => {
     const aside = await source("components/dashboard/dashboard-aside.tsx")
     expect(aside).toContain('const inboxSeenAt = useMark("inbox")')
@@ -217,7 +217,7 @@ describe("the aside's tabs", () => {
     expect(TAB_BAR.split(" ")).toContain("group-data-horizontal/tabs:h-auto")
   })
 
-  // on a phone the Menu joins the bar, at the owner's ask
+  // on a phone the Menu joins the bar
   test("on a phone end with the sidebar's Menu as a square of their own, and the shell's floating Menu leaves the dashboard", async () => {
     expect(await source("components/dashboard/dashboard-aside.tsx")).toContain(
       '<SidebarTrigger aria-label="Menu" className={MENU_TAB} />',
@@ -244,7 +244,7 @@ describe("the aside's tabs", () => {
     expect(TAB_BAR.split(" ")).not.toContain("flex-wrap")
   })
 
-  // the owner asked for a bar that hides itself, shows on a hover near it, and is see-through rather than black, down to its bottom
+  // a bar that hides itself, shows on a hover near it, and is see-through rather than black, down to its bottom
   test("hide as a dock does: shut at first, shown while the pointer is within 96px of the bottom or a key has focus in it", async () => {
     const aside = await source("components/dashboard/dashboard-aside.tsx")
     expect(aside).toContain("const [barHidden, setBarHidden] = useState(true)")
@@ -304,7 +304,7 @@ describe("the aside's tabs", () => {
     expect(aside).toContain('"pt-(--pane-top) [--pane-top:--spacing(1)]"} ${paneBottom}`')
   })
 
-  // the owner asked for no padding at the bottom
+  // no padding at the bottom
   test("show the pane under it through a see-through bar, each pane ending 12px under its last line and the chat keeping its 12px and its room", async () => {
     const aside = await source("components/dashboard/dashboard-aside.tsx")
     expect(TAB_BAR).toContain(GLASS)

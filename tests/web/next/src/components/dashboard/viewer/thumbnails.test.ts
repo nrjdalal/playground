@@ -97,7 +97,7 @@ describe("the thumbnail grid takes the arrows too", () => {
   })
 })
 
-// the owner asked for a lone before and after pair at full width, one over the other
+// a lone before and after pair at full width, one over the other
 describe("a lone before/after pair", () => {
   test("shows at the card's full width, Before over After, each opening the pair", () => {
     const [before, after] = items(2)

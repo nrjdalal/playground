@@ -7,7 +7,7 @@
   above every layer a pane holds, since the panes stack in an isolated layer of their own (`PANES`, since a table's sticky header once painted over the bar),
   hidden as a dock is until the pointer comes within 96px of the half's bottom (`BAR_NEAR_PX`; a pointer over a portal opened from the aside, the viewer, counts for nothing, #i949) or a key's focus lands in it,
   unless the owner unticks Auto-hide tab bar at the top of the user menu, which keeps it shown (a wide screen's alone, since a phone's bar never hides), the choice kept in this browser,
-  and shown see-through over the pane (`bg-popover/60` with a blur; the owner asked for a bar that hides itself and a see-through fill in place of black), a drawer handle named Show tabs marking where it comes back, wearing the squares' red dot (`CountBadge`) while something is new,
+  and shown see-through over the pane (`bg-popover/60` with a blur; a bar that hides itself, see-through in place of black), a drawer handle named Show tabs marking where it comes back, wearing the squares' red dot (`CountBadge`) while something is new,
   so each scrolling pane ends 12px under its last line (`PANE_BOTTOM`) and the chat alone keeps the bar's room (`BAR_ROOM`, `CHAT_BOTTOM`), every pane taking `BAR_ROOM` while Auto-hide is off,
   its count inside a red dot at the square's top right, and something new on a square with no count the plain red dot (`cornerMarks`, `.agents/dashboard/sidebar.md`), each tab's name its hover and screen-reader words, Inbox (the default),
   then Playground's chat on every page but your chat, which is that chat itself, then a square for each app you show, in your order (#i787, `.agents/dashboard/apps.md`), then Pages on a session's own view alone, then Apps, the app manager, last of the tabs (`asideTabs`, `.agents/dashboard/dashboard.md`; on a phone the page's own square leads them, at the bottom),
@@ -26,9 +26,9 @@
   so nothing is deleted (`inboxView` and `DONE_AFTER_MS` in `web/next/src/lib/inbox.ts`).
   An answered decision or draft moves to Done at once when its poster closes it, by `bun run ask ack`, by a `bun run ask get --ack` that closes it or by `bun run ask settle`, since `stamp()` and `settleItem()` in `api/hono/src/lib/dashboard/inbox.ts` write `dismissedAt` with the close;
   one the owner set aside keeps its Archived shelf, and a go read but not yet carried out stays in the list.
-  Dismiss takes a decision or draft answered by a chat reply too, moving it to Done at once while it stays open for its poster (the owner asked for a way to dismiss one).
-  Mark all as read on the open row marks every unread update and open decision or draft on screen seen (`markRead`), answering and dismissing none, so each stays in the list as it is until it is done, shown only while one is left (`unreadIds`; the owner asked that a read mark leave each item in the Inbox until it is done).
-  The Inbox is one shadcn Accordion with six rows (the owner's order, a gray all-caught-up state when nothing is open, and an icon and a word on each label): the open items, starting open (`FOLDS_OPEN`), then the shelves In progress, Snoozed, Archived and Done, starting shut (In progress sits above Snoozed and below the open items, at the owner's ask),
+  Dismiss takes a decision or draft answered by a chat reply too, moving it to Done at once while it stays open for its poster, so an answered item leaves the list.
+  Mark all as read on the open row marks every unread update and open decision or draft on screen seen (`markRead`), answering and dismissing none, so each stays in the list as it is until it is done, shown only while one is left (`unreadIds`; a read mark leaves each item in the Inbox until it is done).
+  The Inbox is one shadcn Accordion with six rows (in that order, gray and all caught up when nothing is open, an icon and a word on each label): the open items, starting open (`FOLDS_OPEN`), then the shelves In progress, Snoozed, Archived and Done, starting shut,
   each row's header sticking to the top of the pane while its section scrolls,
   with a full-width line under every header but the last row's while it is shut (the row classes live in `web/next/src/components/shelf.ts`, which the Changelog shares).
   Each row ends in its `ShelfMark` (`web/next/src/components/shelf-mark.tsx`) in place of the stock chevrons: a small circle on an empty row, else a right chevron turning down while open, on a muted square while the row is hovered ("show circle icon if no items in accordion, and right chevron on closed?", "and hover state like this").
@@ -52,7 +52,7 @@
   Its address field loads only a `.localhost` stack or a Previews page (`loadable()` in `web/next/src/lib/previews.ts`), and the last address is kept in localStorage.
   An empty row is always shut and gray with the default cursor, and the open list keeps the owner's open or shut while it is empty.
   The open cards stay mounted while folded, so a fold keeps an edited draft or a picked side, and taking what waits behind the pill, or a link to a card in the folded list, opens the list first.
-  Each item sits flat, led by one muted band the pane's full width (`KindBand`, `bg-muted` with square corners bleeding over the pane's `--pane-x` padding, which `dashboard-aside.tsx` sets on each scroll pane, its words lined up with the card's; the owner asked for a full-width muted band with square corners, the words where they were, and Alpha's blue and Bravo's purple),
+  Each item sits flat, led by one muted band the pane's full width (`KindBand`, `bg-muted` with square corners bleeding over the pane's `--pane-x` padding, which `dashboard-aside.tsx` sets on each scroll pane, its words lined up with the card's),
   which gives its kind as an icon and a word,
   its id `#i<ref>` (`ref` is an identity column, so an id is stable and never reused) and who posted it (Alpha's name `text-info`, Bravo's `text-bravo`, the theme's purple), then at its right end one time and a tick: `posted <time>`,
   or `updated <time>` once a decision or draft changed (its `updatedAt` a second or more after its `createdAt`: an answer, a delivery, an ack, a settle, an edit or a Snooze, `scheduleItem` setting it too), or once its poster edited an update (`bun run ask edit`; an update's read, Dismiss or resolve leaves it `posted`;
@@ -107,7 +107,7 @@
   Each item's Chat about it button, at the right of its footer, prefills Playground's composer with a removable Replying to #iN chip and puts focus in the box in the click's own frame, a phone's too, its Chat tab coming forward in the same render, so a dictation app's Cmd+V sent at once lands there (`bun run verify reply-focus`),
   and marks the item with a muted fill on its card (`bg-muted/50`) until the message is sent, which goes as `re #iN: <words>`; words that already say `re #iN` resolve to the item the same way (`web/next/src/lib/reply.ts`).
   A reply takes the item off the open list, the count and the open row's summary at once, and the owner's card reads `You replied "<his words>" · <poster> is on it…` until the poster closes it, then `You replied "<his words>"`:
-  the reply keeps his words after the tag, at most 280 characters (`said`, `saidOf`; the owner asked to see what action an item is on), and 5 minutes on the item moves to In progress.
+  the reply keeps his words after the tag, at most 280 characters (`said`, `saidOf`; so the item shows what action it is on), and 5 minutes on the item moves to In progress.
   Until then the card folds to that line, and its Show actions chevron left of Reply, a click on the card or E while it holds focus opens it again with its answers and Snooze (`reopenable` and `reopenKey` in `web/next/src/lib/inbox.ts`).
   Every other card that needs no answer now folds the same way by default, on every shelf, so the ones that need one stand out (`foldsByDefault`): a read update, an answered decision or draft, a snoozed one until its time, and each card on In progress, Archived and Done.
   An open decision or draft not answered by a chat reply, an answer that failed to send and an unread update show open, and a card that rises to one of those shows open.
@@ -137,7 +137,7 @@
   until it is delivered or they press its own Dismiss;
   the session carries it out, and the Dashboard itself never sends, merges or files anything.
   No session row carries a count, Playground's included (Worker Lights): the Inbox tab counts what needs the owner and arrived since their last look at the Inbox (`newInInboxCount` in `web/next/src/lib/tab-dot.ts`, the rule `newInInbox` lights the tab dot by), so a look clears it with no answer given,
-  its name reading `N new` (the owner opened it only to clear the bar's dot),
+  its name reading `N new` (a click made only to clear the bar's dot),
   while the Inbox's first row counts every item in the list; the API's `inboxCount` (`api/hono/src/lib/dashboard/inbox.ts`), which Needs you and the sidebar read, counts the open decisions and drafts and the answers that failed to send, plus the unread updates, one put away with Snooze counted again only once its time has passed,
   and one they have replied to in chat counted no more until its poster closes it,
   the browser tab's red dot lights for what is new since their last look (`newInInbox`, `.agents/dashboard/sidebar.md`), and the System page's Needs you lists them, Playground's place alone.
@@ -224,7 +224,7 @@
   A draft's is `{to, text, thread?, attachments?}`: `to` a short name ("a teammate's thread", "a teammate's DM").
   Its `attachments`, such as an issue's before and after shots, show under its words as an ask's do, and stay on the card: Send hands its poster the words alone (`deliveryText`), since the dashboard uploads no file to Slack.
   A `slack` decision's `attachments` show under its message the same way, and Approve hands its poster the words alone too.
-  A draft, and a `slack` decision, carries `thread` whenever the reply answers a Slack conversation (the owner asked for a Slack draft to show a short summary of who said what at the other end, with the drafted reply below).
+  A draft, and a `slack` decision, carries `thread` whenever the reply answers a Slack conversation, so a Slack draft shows a short summary of who said what at the other end, with the drafted reply below.
   It holds 1 to 12 `{who, said}`, oldest first: `who` the display name as Slack shows it (a first name, never a raw token), `said` the gist of that message in one line of plain STE100 words.
   The card shows them as So far above the words to send, a draft's under Your reply, each gist rendered through `TranscriptMarkdown card`; `bun run ask example slack` prints a `slack` decision with its `thread` filled.
   Which Slack messages post directly (a developer's) and which come here as a draft (anyone else's) is playbook's **ask** ([rules/ask.md](../../extensions/core/rules/ask.md)).

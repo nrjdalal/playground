@@ -23,7 +23,7 @@ const git = (cwd: string, ...args: string[]) => {
   if (run.exitCode !== 0) throw new Error(run.stderr.toString())
 }
 
-// the owner asked for the preview to become Vibeground, across projects and worktrees
+// the preview is Vibeground, across projects and worktrees
 describe("webRoutes", () => {
   test("each web host with a process behind it, with the process group portless started it in", () => {
     expect(
