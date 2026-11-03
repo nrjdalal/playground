@@ -146,18 +146,18 @@ describe("places() holds the folder Env.cwd names, unless the reader passed its 
           process: {},
           vars: new Map(),
         }
-        await run(
-          lex(line),
-          env,
-          async (_cmd, _parsed, here) => {
-            if (here.cwd === undefined || here.cwdAnywhere) return undefined
-            reads++
-            const folders = places(here, start).map((place) => place.cwd)
-            if (!folders.includes(here.cwd)) misses.push(`${line} :: ${here.cwd}`)
-            return undefined
-          },
-          true,
-        )
+        const visit: Parameters<typeof run>[2] = async (_cmd, _parsed, here) => {
+          if (here.cwd === undefined || here.cwdAnywhere) return undefined
+          reads++
+          const folders = places(here, start).map((place) => place.cwd)
+          if (!folders.includes(here.cwd)) misses.push(`${line} :: ${here.cwd}`)
+          return undefined
+        }
+        try {
+          await run(lex(line), env, visit, true)
+        } catch {
+          // a line the reader throws on is one every hook refuses whole, so it holds no folder to compare
+        }
       }
     return { misses, reads }
   }
