@@ -169,7 +169,6 @@
   `ship` (`sha`, `prs` of `{number, title}`), `ticket` (`team`, `title`, `body`), `delete` (`what`, `why`), `schema` (`shape`), `budget` (`amount`, `why`) or `secret` (`key`, `sink`); a decision with none is refused.
   An `ask`'s `attachments`, and a read-only update's, are up to 20 files on this Mac, each `{src, kind?, label?, group?}`: `src` an absolute path, never a URL; `kind` one of `code`, `doc`, `html`, `image` or `pdf`,
   read from the extension when left out (`KIND_OF_EXTENSION` in `api/hono/src/lib/dashboard/inbox-attachments.ts`); `label` `before` or `after`; `group` a one-line section heading.
-  A code change may attach its patch, `git diff > x.diff` (or a `.patch`), which the viewer draws as a patch view.
   `bun run ask new` and `edit` fill each `{now}` in the item's text with the time they post at in the owner's zone (`clock.ownerZone`, `fillNow` in `api/hono/src/lib/dashboard/ask-clock.ts`), and refuse a `measured` or `now` time more than 2 minutes ahead of the clock (`futureNowTimes`), naming it;
   an ETA or a finish carries neither word and posts, and plan.json's reader refuses its own now-stamps the same way (`.agents/dashboard/apps.md`).
   `bun run ask edit <id|#iN>` (`editItem()`) takes the same JSON as `new` and replaces the item's `title` and `preview`, its files copied the same way, bumping `updatedAt` and `version`, so one card carries a progress to its end;
