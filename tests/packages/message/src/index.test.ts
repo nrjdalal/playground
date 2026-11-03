@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test"
 
 import {
+  approvePath,
+  githubLoginSchema,
+  inviteCodeSchema,
+  invitePath,
   MAX_TEXT,
   MESSAGE_KINDS,
   messageSchema,
@@ -36,6 +40,13 @@ describe("messageSchema", () => {
     },
   )
 
+  test("refuses more than 10 links, and a device name past 64 characters", () => {
+    const links = Array.from({ length: 11 }, (_, i) => `https://example.com/${i}`)
+    expect(messageSchema.safeParse({ ...message, kind: "text", links }).success).toBe(false)
+    const from = { device: "d".repeat(65), login: "octocat" }
+    expect(messageSchema.safeParse({ ...message, from, kind: "text" }).success).toBe(false)
+  })
+
   test(`takes text of ${MAX_TEXT} characters and refuses one past it`, () => {
     expect(
       messageSchema.safeParse({ ...message, kind: "text", text: "a".repeat(MAX_TEXT) }).success,
@@ -67,5 +78,28 @@ describe("tokenNameSchema", () => {
 
   test("refuses the browser's name", () => {
     expect(tokenNameSchema.safeParse(WEB_DEVICE).success).toBe(false)
+  })
+})
+
+describe("the hosted web's approve pages", () => {
+  test("a pending message and an invite request each have one path, its id escaped", () => {
+    expect(approvePath("m4")).toBe("/yard/approve/m4")
+    expect(invitePath("i 1/2")).toBe("/yard/invites/i%201%2F2")
+  })
+})
+
+describe("the API's and the web's shared input rules", () => {
+  test("a GitHub login is letters, digits and inner hyphens, up to 39, trimmed", () => {
+    expect(githubLoginSchema.parse(" octo-sample ")).toBe("octo-sample")
+    expect(githubLoginSchema.safeParse("a".repeat(39)).success).toBe(true)
+    for (const bad of ["", "-octo", "a".repeat(40), "octo cat", "octo/cat"]) {
+      expect(githubLoginSchema.safeParse(bad).success).toBe(false)
+    }
+  })
+
+  test("an invite code is any trimmed text of 1 to 64 characters", () => {
+    expect(inviteCodeSchema.parse(" YARD-7Q2M ")).toBe("YARD-7Q2M")
+    expect(inviteCodeSchema.safeParse("  ").success).toBe(false)
+    expect(inviteCodeSchema.safeParse("x".repeat(65)).success).toBe(false)
   })
 })

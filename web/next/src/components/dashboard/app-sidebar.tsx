@@ -67,6 +67,8 @@ import { countLabel } from "@/components/dashboard/count-badge"
 import { useDashboard } from "@/components/dashboard/dashboard"
 import { StatusIcon } from "@/components/dashboard/worker-light"
 import { Hint, OFF_FOCUSABLE } from "@/components/hint"
+import { GroupCount } from "@/components/shell/group-count"
+import { ROW_BOX } from "@/components/shell/row-box"
 import type { MenuUpdate } from "@/components/shell/sidebar-user-menu"
 import { Button } from "@/components/ui/button"
 import {
@@ -106,6 +108,7 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar"
 import { toast } from "@/components/ui/toast"
+import { YardGroups } from "@/components/yard/yard-groups"
 import { agentLabel, chatLabel, kindWord, labelOf } from "@/lib/agent-label"
 import {
   checksOpen,
@@ -1146,7 +1149,7 @@ const LABEL_PART = "text-muted-foreground min-w-0 truncate"
 const TITLE_LEADS = "min-w-0 truncate"
 const KIND_FOLLOWS = "text-muted-foreground min-w-0 max-w-full shrink-0 truncate"
 
-// A row's first line (firstLineOf), one line in the 32px row: its label, cut only once the title is gone, so a narrow rail cuts the title first and then the label, never past the row (`AB-843#8 Reviewer Review it`, a manager's `Ops`, `Keep the dashboard up · runner`); a worker, like a session with no kind, keeps its ticket, pull request and title (`AB-843#8 Chat scroll fix`). The pull request's number takes its colour, said in words for screen readers.
+// A row's first line (firstLineOf), one line in the 32px row: its label, cut only once the title is gone, so a narrow rail cuts the title first and then the label, never past the row (`AB-843#8 Reviewer Review it`, a manager's `Ops`, `Keep the dashboard up · runner`); a worker, like a session with no kind, keeps its ticket, pull request and title (`AB-843#8 Chat scroll fix`). The pull request's number takes its colour, said in words for screen readers; the worker's line is `relative`, so those words, absolutely placed past a long title, are clipped by its own truncate and never widen the sidebar's body (PG-711).
 function RowFirst({
   line,
   prClass,
@@ -1176,7 +1179,7 @@ function RowFirst({
       <span className={KIND_FOLLOWS} data-part="label">{`\u00a0· ${line.kind}`}</span>
     </span>
   ) : (
-    <span className="truncate text-xs leading-3.5">
+    <span className="relative truncate text-xs leading-3.5">
       {line.ticket && <span className="text-muted-foreground">{line.ticket}</span>}
       {number}
       {(line.ticket || line.pr !== null) && " "}
@@ -1259,15 +1262,6 @@ function RosterRow({
         </SidebarMenuSub>
       )}
     </SidebarMenuItem>
-  )
-}
-
-// A group label's count, at its right as ZeroSDK's countCell: how many sessions the group holds (heldCount), or the jobs Scripts lists, muted with tabular digits.
-export function GroupCount({ count }: { count: number }) {
-  return (
-    <span data-slot="group-count" className="ml-auto flex w-4 justify-center tabular-nums">
-      {count}
-    </span>
   )
 }
 
@@ -1868,9 +1862,6 @@ function useSidebarSource(allowed: boolean): SidebarSource {
   })
 }
 
-// A row's box, which the session, ops and roster rows and the placeholder share: the stock 32px with no padding above or below, so a script's 14px and 12px lines (26px) sit 3px from each edge; the collapsed rail's own size-8! and p-2! still win there.
-export const ROW_BOX = "h-8 py-0"
-
 // A script's second line, never wrapping: short of room it cuts with … from the end, the tail first, and never the state (Inbox #i546). The state sits in a box that does not shrink, so the tail gives way first.
 function SecondLine({
   className,
@@ -2178,7 +2169,7 @@ const isRosterAgent = (agent: Agent): boolean =>
   agent.role === "worker" &&
   !checkerOf(agent.name, agent.kind)
 
-// Sidebar-nav slot: your threads, then every live session but the dispatchers (the header's, DashboardDispatchers), grouped by role into Orchestrators, Subagents (each reviewer and tester nested under its worker, a gone worker's under its muted roster row), AI Runners, Scripts (the ops jobs jobs.json does not pause, which have no session, collapsed until opened) and Other (each by status, as orderByStatus sets), each label with how many sessions it holds. Orchestrators, Subagents, AI Runners and Scripts always show, and Other follows while a probe or a session outside the factory's names is live; until the board is read they show the stored sidebar, muted, or nothing yet (useSidebarSource), so the first live frame replaces rows of the same count and order rather than moving any.
+// Sidebar-nav slot: your threads, then every live session but the dispatchers (the header's, DashboardDispatchers), grouped by role into Orchestrators, Subagents (each reviewer and tester nested under its worker, a gone worker's under its muted roster row), AI Runners, Scripts (the ops jobs jobs.json does not pause, which have no session, collapsed until opened) and Other (each by status, as orderByStatus sets), each label with how many sessions it holds. Orchestrators, Subagents, AI Runners and Scripts always show, and Other follows while a probe or a session outside the factory's names is live; until the board is read they show the stored sidebar, muted, or nothing yet (useSidebarSource), so the first live frame replaces rows of the same count and order rather than moving any. Yard's Channels and Direct messages (YardGroups) close the nav, each while it has rows.
 export function DashboardNav() {
   const { allowed, board, selected } = useDashboard()
   const source = useSidebarSource(allowed)
@@ -2301,6 +2292,8 @@ export function DashboardNav() {
           </SidebarGroup>
         ),
       )}
+      {/* Yard's Channels and Direct messages last, so their arrival moves no row above them */}
+      <YardGroups />
     </>
   )
 }

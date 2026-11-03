@@ -31,6 +31,7 @@ export type AccountRow = {
   email: string | null
   key: string
   label: string | null
+  own: boolean
   provider: Provider
   stored: boolean
 }
@@ -66,6 +67,7 @@ const rowOf = (data: string, settings: Settings, row: Account): AccountRow => ({
   email: "email" in row ? row.email : null,
   key: accountKey(row),
   label: row.label ?? null,
+  own: "own" in row && row.own === true,
   provider: providerOf(row),
   stored: hasSecret(settings, providerOf(row), accountKey(row), keychainOf(data)),
 })
@@ -81,6 +83,9 @@ export const hasGlmAccount = (data = dataDir()): boolean => {
   const settings = loginSettings(data)?.settings
   return Boolean(settings && accountsOf(accountSettings.get(settings, KEY), "glm").length)
 }
+
+// The scope a Settings write to usage.accounts goes to: the login, or none before ext init names one.
+export const accountsScope = (data = dataDir()): string | null => loginSettings(data)?.login ?? null
 
 export const listAccounts = (data = dataDir()): AccountRow[] => {
   const settings = loginSettings(data)?.settings

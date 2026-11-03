@@ -105,13 +105,33 @@ export const sendFailed = (item: InboxItem): boolean =>
   item.kind !== "update" && item.delivery?.status === "failed" && !answeredDismissedAt(item)
 
 // The failures Retry is offered after, the API's RETRY_CODES restated since the web imports its types alone (a test holds the two equal): nothing was typed, so a retry cannot type the answer twice.
-export const RETRY_CODES = ["CMUX_FAILED", "INPUT_NOT_EMPTY", "NOT_FOUND", "ON_PICKER"] as const
+export const RETRY_CODES = [
+  "CMUX_FAILED",
+  "INPUT_NOT_EMPTY",
+  "LOST",
+  "NOT_FOUND",
+  "ON_PICKER",
+] as const
 
-// Pure: an answer that failed to send that Retry can safely follow; after any other failure it may be in the session already, so it offers Dismiss alone.
-export const retryable = (item: InboxItem): boolean =>
+// Pure: an answer whose send is unconfirmed (typing began, INTERRUPTED, or the adapter threw, ERROR), which may be in the session already, so its card offers Check it for me rather than Retry.
+export const sendUnconfirmed = (item: InboxItem): boolean =>
   sendFailed(item) &&
   item.delivery?.status === "failed" &&
-  (RETRY_CODES as readonly string[]).includes(item.delivery.code)
+  (item.delivery.code === "INTERRUPTED" || item.delivery.code === "ERROR")
+
+// The note Check it for me sends the dispatcher for an unconfirmed answer: the item and the session it went to, so the dispatcher looks there and reports.
+export const checkAnswerNote = (item: InboxItem): string =>
+  `Check it for me: did ${agentLabel(item.from)} get my answer to ${itemTag(item)}? Look at its transcript and tell me whether it arrived.`
+
+// The API's STUCK_QUEUED_MS restated (a test holds the two equal): an answer reading queued this long after it was queued lost its follow-up to an API restart.
+export const STUCK_QUEUED_MS = 11 * 60_000
+
+// Pure: an answer that failed to send that Retry can safely follow, or one stuck queued, whose Retry reads it again and types nothing while Claude Code still holds it; after any other failure it may be in the session already, so it offers Check it for me or Dismiss.
+export const retryable = (item: InboxItem, now = Date.now()): boolean =>
+  (sendFailed(item) &&
+    item.delivery?.status === "failed" &&
+    (RETRY_CODES as readonly string[]).includes(item.delivery.code)) ||
+  (item.delivery?.status === "queued" && now - Date.parse(item.delivery.at) >= STUCK_QUEUED_MS)
 
 // The API's ACKS_STAMPED_FROM restated, since the web imports its types alone (a test holds the two equal): an answer delivered before then may have been acked with no stamp, so it reads as closed.
 export const ACKS_STAMPED_FROM = "2026-10-12T08:05:50.000Z"
@@ -257,6 +277,33 @@ export const needsYou = (item: InboxItem): boolean =>
   item.kind === "update"
     ? item.readAt === null
     : (item.status === "open" && chosen(item)?.choice !== "replied") || sendFailed(item)
+
+// Pure: whether a card shows folded until he opens it: every card but one that needs an answer now, so a snoozed ask folds until its time and a card that rises to needing him shows open.
+export const foldsByDefault = (item: InboxItem, now: number): boolean =>
+  !needsYou(item) ||
+  (item.kind !== "update" &&
+    item.answer !== null &&
+    "snoozedUntil" in item.answer &&
+    Date.parse(item.answer.snoozedUntil) > now)
+
+// The shelf a card sits on: the list, or one of the rows under it.
+export type Shelf = "archived" | "done" | "inbox" | "progress" | "snoozed"
+
+// A card's lifecycle buttons, beside its own answers and Reply: Done is Dismiss renamed on an archived card, and unarchive is Move to Inbox.
+export type Lifecycle = "archive" | "dismiss" | "done" | "snooze" | "unarchive"
+
+// Pure: the lifecycle buttons a card offers on its shelf: Archive and Snooze while it asks something (a secret ask takes no Archive), Dismiss straight to Done for an update or an answered item, Move to Inbox and Done once archived, and none on Done, which is history.
+export function lifecycle(item: InboxItem, shelf: Shelf): Lifecycle[] {
+  if (shelf === "done") return []
+  if (shelf === "archived") return ["unarchive", "done"]
+  const secret = item.kind === "decision" && item.preview.type === "secret"
+  const asks = schedulable(item)
+  return [
+    ...(asks && !secret ? (["archive"] as const) : []),
+    ...(asks ? (["snooze"] as const) : []),
+    ...(dismissable(item) ? (["dismiss"] as const) : []),
+  ]
+}
 
 // Pure: the ids of what waits on the owner in the Inbox, in the list's order, so Playground's row's link reaches the first.
 export const inboxWaiting = (items: InboxItem[]): string[] =>
@@ -521,7 +568,9 @@ export const updatedSince = (
 
 // Pure: the session that took an item's answer, which is not its poster once the poster has ended; a row from before the taker was recorded reads as its poster.
 export const takenBy = (item: InboxItem): string =>
-  item.delivery?.status === "delivered" && item.delivery.to ? item.delivery.to : item.from
+  (item.delivery?.status === "delivered" || item.delivery?.status === "queued") && item.delivery.to
+    ? item.delivery.to
+    : item.from
 
 // Pure: what became of an answer, in the words the list shows once an item is answered.
 export function outcomeLine(item: InboxItem): string | null {
@@ -551,7 +600,7 @@ export function outcomeLine(item: InboxItem): string | null {
   }
   const done = {
     approve: "You approved it",
-    clear: "You set it aside for later",
+    clear: `Archived ${fullTime(item.answer.at)}`,
     deny: "You denied it",
     discard: "You discarded it",
     draft: item.answer.editedText
@@ -561,6 +610,8 @@ export function outcomeLine(item: InboxItem): string | null {
     send: item.answer.editedText ? "You sent it with changes" : "You sent it",
   }[item.answer.choice]
   const delivery = item.delivery
+  // Claude Code holds it until the session is free, whatever the answer
+  if (delivery?.status === "queued") return `${done} · Queued: ${who} holds it, to take once free`
   if (isGo(item.answer.choice) && delivery?.status !== "failed" && !carriedOut(item)) {
     if (item.answer.choice === "draft") return `${done} · Saving a Slack draft…`
     const slack = item.kind === "decision" && item.preview.type === "slack"
@@ -573,10 +624,11 @@ export function outcomeLine(item: InboxItem): string | null {
         ? `Read by ${who}`
         : `Delivered to ${who}`
       : delivery?.status === "failed"
-        ? // typing began (INTERRUPTED) or the adapter threw (ERROR): the answer may be in the session already
-          delivery.code === "INTERRUPTED" || delivery.code === "ERROR"
-          ? `Send unconfirmed: ${delivery.reason}`
-          : `Send failed: ${delivery.reason}`
+        ? delivery.code === "LOST"
+          ? `Lost: ${delivery.reason}`
+          : sendUnconfirmed(item)
+            ? `Send unconfirmed: whether ${who} has it is not known`
+            : `Send failed: ${delivery.reason}`
         : "Delivery pending"
   return item.answer.noLink
     ? `${done} · ${reached} · No link: ${item.answer.noLink}`

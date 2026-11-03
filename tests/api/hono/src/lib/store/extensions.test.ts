@@ -94,7 +94,7 @@ test("add with no yes names the repo it would create and makes nothing; yes pass
   const data = folder()
   const missing = fake({
     code: 1,
-    err: `playground ext: ${ME}/playground-acme was not created: run playground ext add in a terminal and answer y, or pass --yes`,
+    err: `playground ext: ${ME}/playground-acme was not created: run playground ext add again with --yes`,
   })
   expect(await live(() => addExtension({ name: "acme", yes: false }, missing.cli, data))).toEqual({
     create: `${ME}/playground-acme`,

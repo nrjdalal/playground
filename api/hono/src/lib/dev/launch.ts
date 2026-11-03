@@ -349,6 +349,25 @@ export const tableCount = async (url: string): Promise<number> => {
   }
 }
 
+const JOURNAL = join(import.meta.dir, "../../../../../packages/db/drizzle/meta/_journal.json")
+
+// The journal's migrations the database lacks, counted as drizzle's migrator picks the ones it applies: each entry newer than the last it recorded in drizzle.__drizzle_migrations, every entry when that table is missing; it reads and applies nothing.
+export const pendingMigrations = async (url: string, journal = JOURNAL): Promise<number> => {
+  const { entries } = (await Bun.file(journal).json()) as { entries: { when: number }[] }
+  const sql = new SQL(url, { connectionTimeout: 5, max: 1 })
+  try {
+    const [found] =
+      await sql`select to_regclass('drizzle.__drizzle_migrations') is not null as found`
+    if (!found?.found) return entries.length
+    const [row] =
+      await sql`select coalesce(max(created_at), 0)::text as last from drizzle.__drizzle_migrations`
+    const last = Number(row?.last ?? 0)
+    return entries.filter((entry) => entry.when > last).length
+  } finally {
+    await sql.close()
+  }
+}
+
 // The live machine's registry, named here rather than through the dashboard's own reader, which follows this process's source: the launcher reads the API's settings, so a live-reads stack set in .env alone still reads a fixture's folder from here.
 const liveHeld = () =>
   cmuxHeld(join(process.env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude"), "sessions"))
@@ -366,6 +385,7 @@ export type Guard = {
   held?: () => Promise<string[] | null>
   liveDashboard?: LiveDashboard
   locate?: (url: string) => Located
+  pending?: (url: string) => Promise<number>
   prove?: (url: string, located: Located) => Promise<string>
   root?: string
   tables?: (url: string) => Promise<number>
@@ -375,7 +395,7 @@ export type Guard = {
 const SETUP_MODE =
   "none yet: POSTGRES_URL is unset, so the dashboard opens on its first run, whose database check starts a local container"
 
-// Whether the stack may start here, checked before turbo runs and cheapest first: the branch, and for a checkout portless gives the bare names, whether a running stack or a live alias holds them, then the API's settings (read only once the branch passes), then where its dashboard reads from: nothing on a hosted build, a fixture that must load, or the live machine, read through herdr alone unless the stack opts in to cmux's sessions (PLAYGROUND_CMUX_SESSIONS), when it needs cmux to answer this process as it would the stack's API, or else no session live in cmux, read from ps and Claude's registry, when the dashboard reads herdr alone (a fixture stack never asks cmux, so it never opens the live socket); then POSTGRES_URL's container, refused by name before anything runs inside it or connects, then the proof that it is that container's own Postgres, then that its database has the schema the migration makes. The first refusal names its fix.
+// Whether the stack may start here, checked before turbo runs and cheapest first: the branch, and for a checkout portless gives the bare names, whether a running stack or a live alias holds them, then the API's settings (read only once the branch passes), then where its dashboard reads from: nothing on a hosted build, a fixture that must load, or the live machine, read through herdr alone unless the stack opts in to cmux's sessions (PLAYGROUND_CMUX_SESSIONS), when it needs cmux to answer this process as it would the stack's API, or else no session live in cmux, read from ps and Claude's registry, when the dashboard reads herdr alone (a fixture stack never asks cmux, so it never opens the live socket); then POSTGRES_URL's container, refused by name before anything runs inside it or connects, then the proof that it is that container's own Postgres, then that its database has the schema the migration makes and, but on the live dashboard's own checkout, whose roll migrates or holds a migration itself, every migration in the journal. The first refusal names its fix.
 export async function preflight(
   { branch, linked }: Checkout,
   readSettings: () => SettingsRead,
@@ -386,6 +406,7 @@ export async function preflight(
     held = liveHeld,
     liveDashboard = livePair(),
     locate = locateOwner,
+    pending = pendingMigrations,
     prove = proveOwner,
     root = process.cwd(),
     tables = tableCount,
@@ -465,6 +486,12 @@ export async function preflight(
   try {
     const proof = await prove(url, located)
     if ((await tables(url)) === 0) return refuse("database has no tables: run bun run db:migrate")
+    const lacking = branch === liveDashboard.branch ? 0 : await pending(url)
+    if (lacking > 0) {
+      return refuse(
+        `database lacks ${lacking} migration${lacking === 1 ? "" : "s"}: run bun run db:migrate`,
+      )
+    }
     return { dashboard, ok: true, proof }
   } catch (error) {
     return refuseFor(error)

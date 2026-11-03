@@ -56,7 +56,7 @@ Done when every agent of yours is working, has reported, or has had its state ac
 The Builder runs code-review-loop's [recovery scan](../code-review-loop/SKILL.md#the-recovery-scan) and acts on every row it leaves, and chases at once each `pr-stalled` entry in `~/.playground/ops/alerts-pending.json`.
 ops-sweep writes them to `ops/alerts-prs.json` every 5 minutes (`stalledPrs` in `packages/scripts/src/ops-sweep/sweep.ts`) and ops-unstick folds that in, one entry per open PR of ours in the factory repo or a live roster row's PR repo, for either reason:
 
-- an idle PR: no new commit, verdict or comment for 30 minutes (after one sat two hours unnoticed), unless it waits on its checks or merge-on-ready;
+- an idle PR: no opening, new commit, verdict or comment for 30 minutes (after one sat two hours unnoticed), unless it waits on its checks or merge-on-ready;
 - a repeated score: its last 4 ReviewBot verdicts hold one score below 5, its line reading like `last 4 verdicts 3/5, round 12`, since each fresh round resets the idle clock (one PR parked after 12 rounds, all 3/5).
 
 A PR held on purpose is left out: one with a park or hold label, or whose body or newest comment has a line opening with `Held:` or `Parked:`.

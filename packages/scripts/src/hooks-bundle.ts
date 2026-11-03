@@ -79,6 +79,9 @@ export async function stale(root: string): Promise<string[]> {
   return drift
 }
 
+// The head of `--check`'s line for a stale bundle, which pr:merge's types gate reads as the merged tree's own fault.
+export const STALE = `hooks-bundle: stale in ${BUNDLED}:`
+
 export const FIX =
   "run `bun run hooks:bundle` and commit scripts/hooks/bundled; after a merge that conflicts there, take canary's side, commit the merge, then run it again and commit the rebuild on its own"
 
@@ -94,7 +97,7 @@ if (import.meta.main) {
   if (process.argv.includes("--check")) {
     const drift = await stale(ROOT)
     if (drift.length) {
-      console.error(`hooks-bundle: stale in ${BUNDLED}: ${drift.join(", ")}; ${FIX}`)
+      console.error(`${STALE} ${drift.join(", ")}; ${FIX}`)
       process.exit(1)
     }
   } else if (merging(ROOT)) {

@@ -21,6 +21,9 @@ Each item is a card of one of three kinds:
 - **Draft**: a Slack message or a Linear comment, ready to send in your name.
   The card shows its words, and Open thread shows where it goes.
 - **Update**: an outcome you should know, such as a merge, a ship, an alert, a finding or a decision.
+  Yard posts two kinds of update once you set it up ([CLI](/docs/cli#yard-playground-yard)).
+  One says someone mentioned you, with the sender and their words in a quoted block whose links do not open.
+  The other says Yard holds one of your posts for your approval, and its **Approve** opens Yard's approve page in a new tab, since only your signed-in browser can approve there.
 
 The list shows what needs you first, then unread updates, then the rest from the last week, each part newest first.
 The Inbox square counts what needs you and came since you last looked at the Inbox, so opening the Inbox clears it.
@@ -36,7 +39,8 @@ The Inbox is six rows, each opened or closed by a click:
 
 Each row but Preview shows how many it holds; a row reads gray while it is empty, and Done reads gray once you have read all of it, though it still opens.
 An empty row ends in a small circle, and a row with something in it in an arrow that points down while it is open.
-An archived item has its own **Dismiss**, and the check on the Archived row dismisses them all; either sends them to Done.
+An item is the same card on every row.
+An archived one offers **Move to Inbox**, which puts it back at the top of the list to answer again, and **Done**; the check on the Archived row sends them all to Done.
 The check on the Done row marks everything in Done read, and goes once it is all read.
 A row's heading stays at the top while you scroll through it.
 
@@ -44,6 +48,9 @@ A row's heading stays at the top while you scroll through it.
 
 The line at the top of a card gives its kind, the session that posted it and its id, such as `#i41`, and ends at the right with a check and one time: when it was posted, or once a decision or draft changes (your answer, its delivery, the session closing or editing it), or the session edits an update, when it was updated.
 It reads **Updated** in blue when that change came since you last looked at the Inbox.
+
+A card that needs nothing from you now (an update you have read, a decision or draft you have answered or archived, or one snoozed until later) folds to its top line, its title and its result.
+**Show actions**, a click on the card or E opens it to its words and buttons, and the same again folds it.
 
 The icon beside the title is the item's state, drawn like an agent's status icon:
 
@@ -121,10 +128,12 @@ Until the session confirms it, the card reads what is happening, such as Sending
 Once confirmed, the card links to where it landed, such as Open thread for a Slack message.
 A Draft that Slack refused, because that conversation already holds one, reads in gray Draft not saved, with the reason.
 
+While the session holds your answer, during a compaction or its own turn, the card reads Queued, and it turns Delivered by itself once the session takes it.
+A card still Queued after 11 minutes offers **Retry**, which looks again and types nothing while the session still holds it.
 When your answer cannot reach the session, the card stays in the list in red, reading Send failed with the reason.
-When nothing reached the session yet, **Retry** sends it again.
-When part of it may have reached the session already, it reads Send unconfirmed and has no Retry, so it is never sent twice.
-A card with no Retry offers Dismiss alone.
+When nothing reached the session yet, **Retry** sends it again, and an answer the session held but never took reads Lost, with Retry too.
+When part of it may have reached the session already, it reads Send unconfirmed and has no Retry, so it is never sent twice: **Check it for me** asks your dispatcher to look and tell you.
+A card with no Retry offers Dismiss.
 
 ## Put an item away
 
@@ -132,7 +141,7 @@ A card with no Retry offers Dismiss alone.
 Pick one of the times it offers, each shown with its day and time in IST, or Pick a time… for a day and time of your own.
 The item moves to Snoozed and leaves the count until then, then comes back as new.
 
-**Archive**, the archive-box button, sets a decision aside for later: it is neither a yes nor a no.
+**Archive**, the archive-box button, sets a decision or draft aside for later: it is neither a yes nor a no.
 Whatever is already under way keeps going, and the session does not ask about it again until you bring it up.
 The item moves to Archived.
 

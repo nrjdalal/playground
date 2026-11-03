@@ -70,6 +70,7 @@ export const exampleRouter = new Hono().post(
 - Export the router from `api/hono/src/routers/index.ts`.
 - Mount it with `.route("/<name>", exampleRouter)` in `api/hono/src/local.ts`, inside the `routes` chain before the openapi/docs handlers, or RPC types will not include it.
   A dashboard router mounts under `/v1` (`.route("/v1/<name>", exampleRouter)`), before `v1Router`, so its write guards run before the session read; a moved path keeps answering through `mountOldPaths` (`api/hono/src/routers/old-paths.ts`), which the OpenAPI document leaves out.
+- A hosted (Yard) route mounts in `api/hono/src/hosted.ts`'s `routes` chain instead, which `HostedAppType` types, and its path joins `ALLOWED` in `tests/api/hono/src/hosted.test.ts`, the hosted build's allowlist.
 
 ## 3. Restart the stack and test
 
