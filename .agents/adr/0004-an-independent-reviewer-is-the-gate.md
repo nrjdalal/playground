@@ -2,7 +2,7 @@
 
 > Superseded in part by [ADR 0006](./0006-zerostarter-is-playgrounds-base-and-its-process.md): the reviewer still gates a merge, into `canary`, and `main` moves only by a release on the owner's go-ahead.
 
-Playground PRs used to wait for the owner: a finding from another session merged only after the owner said yes, and the owner's own requests merged once seen. On 5 Oct 2026 the owner stepped out of development: the owner talks with the sessions, they push the roll, and no pull request waits on the owner's review, however many stand open.
+Playground PRs used to wait for the owner: a finding from another session merged only after the owner's yes, and the owner's own requests merged once seen. On 5 Oct 2026 the owner stepped out of development: the owner talks with the sessions, they push the roll, and no pull request waits on the owner's review, however many stand open.
 
 ## Decision
 

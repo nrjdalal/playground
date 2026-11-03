@@ -7,12 +7,17 @@ import {
   filesToUpload as API_filesToUpload,
   GO_CHOICES as API_GO_CHOICES,
   PLACED_TYPES as API_PLACED_TYPES,
+  QUEUED_POLL_MS as API_QUEUED_POLL_MS,
   RETRY_CODES as API_RETRY_CODES,
+  retryable as API_retryable,
   savesDraft as API_savesDraft,
+  slackPlace as API_slackPlace,
+  STUCK_QUEUED_MS as API_STUCK_QUEUED_MS,
 } from "../../../../../api/hono/src/lib/dashboard/inbox"
 import {
   ACKS_STAMPED_FROM,
   canDraft,
+  checkAnswerNote,
   cardKey,
   changedAt,
   dismissable,
@@ -48,11 +53,15 @@ import {
   schedulable,
   scheduleChoices,
   sendFailed,
+  sendUnconfirmed,
   sendWhy,
+  STUCK_QUEUED_MS,
   updatedSince,
   upfrontLink,
+  slackPlaced,
   uploadsOn,
 } from "../../../../../web/next/src/lib/inbox"
+import { QUEUED_POLL_MS } from "../../../../../web/next/src/lib/outbox"
 import { statusIcon } from "../../../../../web/next/src/lib/status-icons"
 import { fullTime } from "../../../../../web/next/src/lib/time"
 
@@ -702,7 +711,9 @@ describe("an answer that failed to send", () => {
       }
       expect(sendFailed(cut), code).toBe(true)
       expect(retryable(cut), code).toBe(false)
-      expect(outcomeLine(cut), code).toBe("You sent it · Send unconfirmed: cut off")
+      expect(outcomeLine(cut), code).toMatch(
+        /^You sent it · Send unconfirmed: whether \S+ has it is not known$/,
+      )
     }
     expect(retryable(failed(78, ago(1_000)))).toBe(false)
   })
@@ -1569,6 +1580,27 @@ describe("uploadsOn", () => {
     }
   })
 
+  test("reads a Slack link as the API's slackPlace does, a query, a hash and a thread that does not parse included", () => {
+    const team = "https://app.slack.com/client/T0000000000"
+    for (const link of [
+      THREAD,
+      `${team}/C0MADEUP01`,
+      `${team}/C0MADEUP01/`,
+      `${team}/D0MADEUP11?cdn_fallback=1#top`,
+      `${THREAD}?x=1`,
+      `${team}/C0MADEUP01/thread/C0MADEUP01-notats`,
+      `${team}/C0MADEUP01/thread/C0OTHER001-1700000000.000100`,
+      `${team}/C0MADEUP01/thread`,
+      `${THREAD}/more`,
+      `${team}/C0MADEUP01/files/F0MADEUP01`,
+      team,
+      "https://evil.example/client/T0000000000/C0MADEUP01",
+      "http://app.slack.com/client/T0000000000/C0MADEUP01",
+      "not a link",
+    ])
+      expect([link, slackPlaced(link)]).toEqual([link, API_slackPlace(link) !== null])
+  })
+
   test("leaves an answered card unmarked, its result line counting the files shared", () => {
     const [open] = cases[0]!
     const sent = {
@@ -1579,5 +1611,52 @@ describe("uploadsOn", () => {
     } as InboxItem
     expect(uploadsOn(sent)).toBeNull()
     expect(outcomeLine(sent)).toBe("You sent it · 2 files shared · Sending in Slack…")
+  })
+})
+
+// An answer's line reads what the session has: queued while Claude Code holds it, delivered once it went, lost when neither its screen nor its transcript shows it, which offers Retry
+describe("an answer queued, delivered or lost", () => {
+  const base = items[4]!
+  test("each state reads in the answer line", () => {
+    const queued = {
+      ...base,
+      delivery: { at: "x", id: "d1", status: "queued", to: "ops" },
+    } as InboxItem
+    expect(outcomeLine(queued)).toBe("You approved it · Queued: Ops holds it, to take once free")
+    expect(itemState(queued)).toBe("sending")
+    const lost = {
+      ...base,
+      delivery: { code: "LOST", reason: "Retry sends it again.", status: "failed" },
+    } as InboxItem
+    expect(outcomeLine(lost)).toBe("You approved it · Lost: Retry sends it again.")
+    expect(retryable(lost)).toBe(true)
+  })
+
+  test("an unconfirmed send names no terminal and offers Check it for me, a note naming the item", () => {
+    const cut = {
+      ...base,
+      delivery: { code: "INTERRUPTED", reason: "whatever deliver said", status: "failed" },
+    } as InboxItem
+    expect(outcomeLine(cut)).toBe(
+      "You approved it · Send unconfirmed: whether Ops has it is not known",
+    )
+    expect(sendUnconfirmed(cut)).toBe(true)
+    expect(retryable(cut)).toBe(false)
+    expect(checkAnswerNote(cut)).toContain(`#i${cut.ref}`)
+    expect(checkAnswerNote(cut)).not.toMatch(/\bre #i\d/i)
+  })
+
+  // an API restart ends a queued answer's follow-up, so its card offers Retry once it has read queued past the API's bound
+  test("a queued answer offers Retry once stuck past the bound, as the API reads it", () => {
+    expect(STUCK_QUEUED_MS).toBe(API_STUCK_QUEUED_MS)
+    expect(QUEUED_POLL_MS).toBe(API_QUEUED_POLL_MS)
+    const at = Date.parse("2026-10-12T06:00:00.000Z")
+    const queued = {
+      ...base,
+      delivery: { at: new Date(at).toISOString(), id: "d1", status: "queued", to: "ops" },
+    } as InboxItem
+    expect(retryable(queued, at + STUCK_QUEUED_MS - 1)).toBe(false)
+    expect(retryable(queued, at + STUCK_QUEUED_MS)).toBe(true)
+    expect(API_retryable(queued, new Date(at + STUCK_QUEUED_MS))).toBe(true)
   })
 })

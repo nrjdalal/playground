@@ -21,6 +21,9 @@ Each item is a card of one of three kinds:
 - **Draft**: a Slack message or a Linear comment, ready to send in your name.
   The card shows its words, and Open thread shows where it goes.
 - **Update**: an outcome you should know, such as a merge, a ship, an alert, a finding or a decision.
+  Yard posts two kinds of update once you set it up ([CLI](/docs/cli#yard-playground-yard)).
+  One says someone mentioned you, with the sender and their words in a quoted block whose links do not open.
+  The other says Yard holds one of your posts for your approval, and its **Approve** opens Yard's approve page in a new tab, since only your signed-in browser can approve there.
 
 The list shows what needs you first, then unread updates, then the rest from the last week, each part newest first.
 The Inbox square counts what needs you and came since you last looked at the Inbox, so opening the Inbox clears it.
@@ -127,11 +130,13 @@ Until the session confirms it, the card reads what is happening, such as Sending
 Once confirmed, the card links to where it landed, such as Open thread for a Slack message.
 A Draft that Slack refused, because that conversation already holds one, reads in gray Draft not saved, with the reason.
 
+While the session holds your answer, during a compaction or its own turn, the card reads Queued, and it turns Delivered by itself once the session takes it.
+A card still Queued after 11 minutes offers **Retry**, which looks again and types nothing while the session still holds it.
 When your answer cannot reach the session, the card stays in the list in red, reading Send failed with the reason.
 When Slack refuses the files, it reads Send failed the same way, nothing has gone to the session yet, and **Retry** puts the files in again.
-When nothing reached the session yet, **Retry** sends it again.
-When part of it may have reached the session already, it reads Send unconfirmed and has no Retry, so it is never sent twice.
-A card with no Retry offers Dismiss alone.
+When nothing reached the session yet, **Retry** sends it again, and an answer the session held but never took reads Lost, with Retry too.
+When part of it may have reached the session already, it reads Send unconfirmed and has no Retry, so it is never sent twice: **Check it for me** asks your dispatcher to look and tell you.
+A card with no Retry offers Dismiss.
 
 ## Put an item away
 

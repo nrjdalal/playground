@@ -108,16 +108,31 @@ export const sendFailed = (item: InboxItem): boolean =>
 export const RETRY_CODES = [
   "CMUX_FAILED",
   "INPUT_NOT_EMPTY",
+  "LOST",
   "NOT_FOUND",
   "ON_PICKER",
   "UPLOAD_FAILED",
 ] as const
 
-// Pure: an answer that failed to send that Retry can safely follow; after any other failure it may be in the session already, so it offers Dismiss alone.
-export const retryable = (item: InboxItem): boolean =>
+// Pure: an answer whose send is unconfirmed (typing began, INTERRUPTED, or the adapter threw, ERROR), which may be in the session already, so its card offers Check it for me rather than Retry.
+export const sendUnconfirmed = (item: InboxItem): boolean =>
   sendFailed(item) &&
   item.delivery?.status === "failed" &&
-  (RETRY_CODES as readonly string[]).includes(item.delivery.code)
+  (item.delivery.code === "INTERRUPTED" || item.delivery.code === "ERROR")
+
+// The note Check it for me sends the dispatcher for an unconfirmed answer: the item and the session it went to, so the dispatcher looks there and reports.
+export const checkAnswerNote = (item: InboxItem): string =>
+  `Check it for me: did ${agentLabel(item.from)} get my answer to ${itemTag(item)}? Look at its transcript and tell me whether it arrived.`
+
+// The API's STUCK_QUEUED_MS restated (a test holds the two equal): an answer reading queued this long after it was queued lost its follow-up to an API restart.
+export const STUCK_QUEUED_MS = 11 * 60_000
+
+// Pure: an answer that failed to send that Retry can safely follow, or one stuck queued, whose Retry reads it again and types nothing while Claude Code still holds it; after any other failure it may be in the session already, so it offers Check it for me or Dismiss.
+export const retryable = (item: InboxItem, now = Date.now()): boolean =>
+  (sendFailed(item) &&
+    item.delivery?.status === "failed" &&
+    (RETRY_CODES as readonly string[]).includes(item.delivery.code)) ||
+  (item.delivery?.status === "queued" && now - Date.parse(item.delivery.at) >= STUCK_QUEUED_MS)
 
 // The API's ACKS_STAMPED_FROM restated, since the web imports its types alone (a test holds the two equal): an answer delivered before then may have been acked with no stamp, so it reads as closed.
 export const ACKS_STAMPED_FROM = "2026-10-12T08:05:50.000Z"
@@ -128,15 +143,32 @@ export const isGo = (choice: string): boolean => (GO_CHOICES as readonly string[
 // The API's GO_CHOICES restated (a test holds the two equal).
 export const GO_CHOICES = ["approve", "draft", "edit", "send"] as const
 
-// A Slack link in its app form that names a conversation, the API's slackPlace restated (a test holds the two agreeing): the only place a send shares its files into.
-const SLACK_PLACE = /^https:\/\/app\.slack\.com\/client\/[^/]+\/[CDG][A-Z0-9]+(?:\/|$)/
+// Pure: a Slack link in its app form naming a conversation, or one parsed thread in it, its query and hash aside: the only place a send shares its files into, the API's slackPlace restated (a test holds the two agreeing).
+export const slackPlaced = (link: string): boolean => {
+  if (!URL.canParse(link)) return false
+  const url = new URL(link)
+  if (url.protocol !== "https:" || url.hostname !== "app.slack.com") return false
+  const [, client, team, channel, ...rest] = url.pathname.replace(/\/$/, "").split("/")
+  if (client !== "client" || !team || !channel || !/^[CDG][A-Z0-9]+$/.test(channel)) return false
+  if (rest.length === 0) return true
+  const [word, parent, ...more] = rest
+  return (
+    word === "thread" &&
+    more.length === 0 &&
+    (parent ?? "").startsWith(`${channel}-`) &&
+    /^\d+\.\d+$/.test((parent ?? "").slice(channel.length + 1))
+  )
+}
+
+// Pure: "1 file" or "N files", as a Slack send's mark and its result line count them.
+export const filesCount = (n: number): string => (n === 1 ? "1 file" : `${n} files`)
 
 // Pure: the button whose go shares an open item's files into Slack, a Slack draft's Send or a slack decision's Approve, or null when its files stay on the card (a Linear draft's, an ask's, one with no Slack link); the API's filesToUpload decides the same.
 export const uploadsOn = (item: InboxItem): "Approve" | "Send" | null => {
   if (item.status !== "open" || item.kind === "update") return null
   const preview = item.preview
   if (!("attachments" in preview) || !preview.attachments?.length) return null
-  if (!("link" in preview) || !preview.link || !SLACK_PLACE.test(preview.link)) return null
+  if (!("link" in preview) || !preview.link || !slackPlaced(preview.link)) return null
   if (item.kind === "draft") return "Send"
   return item.kind === "decision" && item.preview.type === "slack" ? "Approve" : null
 }
@@ -567,7 +599,9 @@ export const updatedSince = (
 
 // Pure: the session that took an item's answer, which is not its poster once the poster has ended; a row from before the taker was recorded reads as its poster.
 export const takenBy = (item: InboxItem): string =>
-  item.delivery?.status === "delivered" && item.delivery.to ? item.delivery.to : item.from
+  (item.delivery?.status === "delivered" || item.delivery?.status === "queued") && item.delivery.to
+    ? item.delivery.to
+    : item.from
 
 // Pure: what became of an answer, in the words the list shows once an item is answered.
 export function outcomeLine(item: InboxItem): string | null {
@@ -607,8 +641,10 @@ export function outcomeLine(item: InboxItem): string | null {
     send: item.answer.editedText ? "You sent it with changes" : "You sent it",
   }[item.answer.choice]
   const uploaded = item.answer.uploaded
-  if (uploaded) done += ` · ${uploaded === 1 ? "1 file" : `${uploaded} files`} shared`
+  if (uploaded) done += ` · ${filesCount(uploaded)} shared`
   const delivery = item.delivery
+  // Claude Code holds it until the session is free, whatever the answer
+  if (delivery?.status === "queued") return `${done} · Queued: ${who} holds it, to take once free`
   if (isGo(item.answer.choice) && delivery?.status !== "failed" && !carriedOut(item)) {
     if (item.answer.choice === "draft") return `${done} · Saving a Slack draft…`
     const slack = item.kind === "decision" && item.preview.type === "slack"
@@ -621,10 +657,11 @@ export function outcomeLine(item: InboxItem): string | null {
         ? `Read by ${who}`
         : `Delivered to ${who}`
       : delivery?.status === "failed"
-        ? // typing began (INTERRUPTED) or the adapter threw (ERROR): the answer may be in the session already
-          delivery.code === "INTERRUPTED" || delivery.code === "ERROR"
-          ? `Send unconfirmed: ${delivery.reason}`
-          : `Send failed: ${delivery.reason}`
+        ? delivery.code === "LOST"
+          ? `Lost: ${delivery.reason}`
+          : sendUnconfirmed(item)
+            ? `Send unconfirmed: whether ${who} has it is not known`
+            : `Send failed: ${delivery.reason}`
         : "Delivery pending"
   return item.answer.noLink
     ? `${done} · ${reached} · No link: ${item.answer.noLink}`

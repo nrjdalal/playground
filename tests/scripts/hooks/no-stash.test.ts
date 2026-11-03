@@ -4,6 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { check } from "../../../scripts/hooks/no-stash"
+import { overBaseline, stepsOf } from "./pace"
 
 const root = join(import.meta.dir, "..", "..", "..")
 const script = join(root, "scripts", "hooks", "no-stash.ts")
@@ -76,12 +77,12 @@ describe("a git stash that can take another worktree's work is refused", () => {
 })
 
 describe("a long run of closing braces", () => {
-  test("ahead of a stash is read inside the hook's time", async () => {
-    const started = performance.now()
-    const reason = await bash(`${"ls; }\n".repeat(60_000)}git stash`)
-    expect(reason).toBeDefined()
-    expect(performance.now() - started).toBeLessThan(5_000)
-  }, 20_000)
+  // a scan back for each brace's open grows with the square of their count, where the stack of opens grows with the count
+  test("ahead of a stash is read in a time linear in its length", async () => {
+    const command = `${"ls; }\n".repeat(60_000)}git stash`
+    expect(await bash(command)).toBeDefined()
+    expect(await overBaseline(bash, command, "; git stash")).toBeLessThan(100)
+  }, 60_000)
 })
 
 describe("a stash found by name or SHA, and every other call, runs", () => {
@@ -101,7 +102,7 @@ describe("a stash found by name or SHA, and every other call, runs", () => {
     ["store, which restores an entry", `git stash store -m restored ${SHA}`],
     ["create", "git stash create"],
     ["help", "git stash --help"],
-    ["a plain commit, whose lint-staged backup is no tool call", 'git commit -m "feat: x"'],
+    ["a plain commit, whose lint-staged writes no stash", 'git commit -m "feat: x"'],
     ["a commit that mentions stash in its message", 'git commit -m "fix: the stash hook"'],
     ["another git command", "git status --short"],
     ["a word that is not stash", "git stashed"],
@@ -113,10 +114,10 @@ describe("a stash found by name or SHA, and every other call, runs", () => {
     expect(await bash(command)).toBeUndefined()
   })
 
-  test("40 wrapper options it does not know before a stash are read in time, and the stash refused", async () => {
-    const started = performance.now()
-    expect(await bash(`sudo ${"-Z ".repeat(40)}true; git stash`)).toContain("no-stash hook")
-    expect(performance.now() - started).toBeLessThan(2000)
+  test("40 wrapper options it does not know before a stash are read in a bounded count of steps, and the stash refused", async () => {
+    const [reason, steps] = await stepsOf(() => bash(`sudo ${"-Z ".repeat(40)}true; git stash`))
+    expect(reason).toContain("no-stash hook")
+    expect(steps).toBeLessThan(5_000)
   })
 
   test("a tool other than Bash passes", async () => {

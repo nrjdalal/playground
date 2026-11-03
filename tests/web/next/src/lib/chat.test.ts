@@ -494,7 +494,7 @@ describe("DashboardChats", () => {
     calls[0]?.resolve(refused("INTERNAL_SERVER_ERROR"))
     await settle()
     expect(chats.outbox().map((m) => m.state)).toEqual(["failed", "sending"])
-    expect(chats.outbox()[0]?.reason).toContain("look at its terminal before Retry")
+    expect(chats.outbox()[0]?.reason).toContain("reads Delivered once its transcript shows it")
   })
 
   // A dashboard restart restarts next dev too, and the page reloads when its dev socket reaches the new server: what was unsent goes again from the tab's storage, under the same id.
@@ -595,6 +595,72 @@ describe("DashboardChats", () => {
       expect(ids.length).toBeGreaterThan(2)
       expect([...seen]).not.toContain("failed")
       expect(seen).toContain("queued: the server did not answer")
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  // Claude Code held it, then the dashboard restarted and forgot that: every try after the first carries when it was first held, through the restart's unanswered tries, so the API that comes back reads it again rather than typing it twice
+  test("a held message's tries carry when it was first held, through an API restart", async () => {
+    jest.useFakeTimers()
+    try {
+      const start = Date.now()
+      const held: (string | undefined)[] = []
+      const send = (async (
+        _to: string,
+        _text: string,
+        _files: string[],
+        _id: string,
+        { queuedAt }: { queuedAt?: string } = {},
+      ) => {
+        held.push(queuedAt)
+        const elapsed = Date.now() - start
+        if (elapsed < 10_000) return refused("CONFLICT", { delivery: "QUEUED" })
+        if (elapsed < 40_000) return refused("NETWORK_ERROR")
+        return typed
+      }) as never
+      const chats = new DashboardChats({ label: (name) => name, send })
+      chats.post("dispatcher", { attachments: [], text: "while it compacts" })
+      for (let second = 0; second <= 120; second++) {
+        await flush()
+        if (chats.outbox()[0]?.state === "typed") break
+        jest.advanceTimersByTime(1000)
+      }
+      expect(chats.outbox().map((m) => m.state)).toEqual(["typed"])
+      const first = new Date(start).toISOString()
+      expect(held[0]).toBeUndefined()
+      expect(held.slice(1)).toEqual(held.slice(1).map(() => first))
+      expect(held.length).toBeGreaterThan(3)
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  // the API times the hold from the paste, which a queued_command's stamp follows, rather than from when this tab read the answer
+  test("a held message keeps the API's time for the hold, when its refusal gives one", async () => {
+    const pasted = "2026-10-18T02:29:50.000Z"
+    const held: (string | undefined)[] = []
+    let tries = 0
+    const send = (async (
+      _to: string,
+      _text: string,
+      _files: string[],
+      _id: string,
+      { queuedAt }: { queuedAt?: string } = {},
+    ) => {
+      held.push(queuedAt)
+      tries += 1
+      return tries === 1 ? refused("CONFLICT", { delivery: "QUEUED", queuedAt: pasted }) : typed
+    }) as never
+    jest.useFakeTimers()
+    try {
+      const chats = new DashboardChats({ label: (name) => name, send })
+      chats.post("dispatcher", { attachments: [], text: "while it compacts" })
+      for (let second = 0; second <= 20 && chats.outbox()[0]?.state !== "typed"; second++) {
+        await flush()
+        jest.advanceTimersByTime(1000)
+      }
+      expect(held).toEqual([undefined, pasted])
     } finally {
       jest.useRealTimers()
     }

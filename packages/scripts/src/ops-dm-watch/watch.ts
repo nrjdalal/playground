@@ -47,7 +47,7 @@ export async function watch({ channel, dir, now, owner, send, slack, stuck, tell
   const sent = await readSent(dir)
   for (const m of ownerMessages(read, owner, sent)) {
     if (known.has(m.ts)) continue
-    await send("dispatcher", `The owner wrote in their DM at ${m.ts}: ${m.text ?? ""}\n${reply}`)
+    await send("dispatcher", `The owner's DM at ${m.ts} reads: ${m.text ?? ""}\n${reply}`)
     state.handed.push({ at: now, text: m.text ?? "", ts: m.ts })
   }
   const blocked = await stuck()
@@ -61,7 +61,7 @@ export async function watch({ channel, dir, now, owner, send, slack, stuck, tell
       : `no reply has landed in ${WAIT_S / 60} minutes`
     await send(
       "dispatcher-2",
-      `The owner wrote in their DM at ${h.ts}, and ${why}: ${h.text}\n${reply}`,
+      `The owner's DM at ${h.ts}, handed on since ${why}: ${h.text}\n${reply}`,
     )
     h.bravo = true
     toBravo = true

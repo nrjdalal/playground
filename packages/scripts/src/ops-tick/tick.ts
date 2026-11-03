@@ -323,7 +323,7 @@ const resumeRelay = async (ctx: Context, line: string): Promise<boolean> => {
 }
 
 // A session the roster holds on purpose, or a probe, is never named as felled.
-const HELD = new Set(["ended", "parked", "paused", "starting"])
+const HELD = new Set(["done", "ended", "parked", "paused", "starting"])
 
 type Agent = { kind?: unknown; name?: string; status?: string; worker?: unknown }
 

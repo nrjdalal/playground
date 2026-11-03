@@ -12,8 +12,7 @@ Each row reads by a plain name with no @: a manager by its role word alone (Buil
 tester or runner the same way with its role word after (`ENG-1591#1598 Reviewer`, `Keep the dashboard up · runner`).
 A new session is named `<id>-<kind>` by `bun run name <kind>`, a checker with an id of its own ([SESSIONS.md](SESSIONS.md#spawn)); one started before keeps the name it has.
 A worker's dev stack runs only while it tests: it stops the stack through its own background task once a round of testing ends, and starts it again for the next; anything that must outlive a chore gets a runner.
-No session builds or holds a demo stack for the owner (the owner, 9 Oct: "I won't be trying it.
-I will only be trying Dashboard Playground."): what he should try reaches him on the live dashboard once it merges into canary, and a tester's stack serves its tests alone.
+No session builds or holds a demo stack for the owner, since changes are tried on the live dashboard alone: what he should try reaches him on the live dashboard once it merges into canary, and a tester's stack serves its tests alone.
 A **preview worker** holds a combined preview worktree, canary plus the lane heads, so several changes can be checked together before they merge; it is a worktree for diffs, not a demo stack, and serves no one an app.
 After every lane push it rebuilds the combination: from `<acc>` = `origin/canary`, for each lane head `h` in turn it takes `tree=$(git merge-tree --write-tree <acc> <h>)`, stopping when that exits 1, a conflict between the lanes, and sets `<acc>` to `$(git commit-tree $tree -p <acc> -p <h> -m preview)`.
 It is done when `git diff --stat <acc> HEAD` in the preview worktree reads empty.
@@ -61,7 +60,7 @@ Sessions that work together share a workspace as full-height columns ([SESSIONS.
   the roll gate, the tick (usage marks, a `switch due`, load, the train's slot wait, near-limit marks, and the switch watch, which at a full week writes ops-unstick's move file and tells both dispatchers and both leads), the usage-limit watch (each session on the usage-limit screen named to the builder once with its account, and the lowest-week account with its 5-hour window under 90% to move to),
   the auto-end beat every 5 minutes (`scripts/ops/optimizer/auto_end.ts` over `idle_sessions.ts`'s flags, [SESSIONS.md](SESSIONS.md#end)), each end or `Not ended` line to the session's lead, a `Not ended` line once until its words change,
   ops-up every 5 minutes (`scripts/ops/up.py`, each line it prints told to ops once until it changes, so a reboot or a herdr server that went down brings every job back with no hand step),
-  the sweep (each felled session to its lead once, never a probe or one the roster holds parked, paused, ended or starting, but runner-plain-relay, the relay itself, whose resume line it runs through spawn.sh's capacity gate at every sweep that prints it, with `--brief brief-runner-plain-relay.md` so the relay starts its wait task again,
+  the sweep (each felled session to its lead once, never a probe or one the roster holds done, parked, paused, ended or starting, but runner-plain-relay, the relay itself, whose resume line it runs through spawn.sh's capacity gate at every sweep that prints it, with `--brief brief-runner-plain-relay.md` so the relay starts its wait task again,
   never marked told since a resume keeps the session id and the line returns with the next outage,
   rather than queueing it for a relay that is down, naming the outcome to ops, and load past 30 once a crossing), the GLM credits log line, the optimizer's wake words,
   the canary pull (every clean worktree on `canary` fast-forwarded to origin's head every 5 minutes,

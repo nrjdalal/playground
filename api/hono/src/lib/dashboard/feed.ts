@@ -294,11 +294,11 @@ export async function answerFeed(
       return still === false
         ? refused(
             "UNCONFIRMED",
-            `cmux reported ${error.message}, yet ${worker.name}'s prompt has left the Feed: the answer may have gone. Look at its terminal.`,
+            `cmux reported ${error.message}, yet ${worker.name}'s prompt has left the Feed, so the answer likely went: its card has left with it.`,
           )
         : refused(
             "CMUX_FAILED",
-            `The answer may not have gone through: ${error.message}. Look at ${worker.name}'s terminal before answering again.`,
+            `The answer may not have gone through: ${error.message}. Its card stays here while the prompt waits, to answer again.`,
           )
     }
     let read = false
@@ -311,11 +311,11 @@ export async function answerFeed(
     return read
       ? refused(
           "NOT_TAKEN",
-          `cmux took the answer, but ${worker.name}'s prompt still waits: look at its terminal.`,
+          `cmux took the answer, but ${worker.name}'s prompt still waits: its card stays here to answer again.`,
         )
       : refused(
           "UNCONFIRMED",
-          `The answer went, but cmux's Feed could not be read to see it land: look at ${worker.name}'s terminal.`,
+          `The answer went, but cmux's Feed could not be read to see it land: its card leaves once the prompt is answered.`,
         )
   } finally {
     answering.delete(requestId)
@@ -357,14 +357,14 @@ async function answerHerdr(
   if (!first?.ok) {
     return refused(
       "NOT_PENDING",
-      `Nothing was typed: ${first?.reason ?? "there is nothing to answer"}. Look at ${worker.name}'s terminal.`,
+      `Nothing was typed: ${first?.reason ?? "there is nothing to answer"}. Its card stays here while the prompt waits.`,
     )
   }
   await deps.record(event, async () => {})
   const interrupted = (why: string) =>
     refused(
       "INTERRUPTED",
-      `Keys went into ${worker.name}'s pane, but ${why}: look at its terminal before answering again.`,
+      `Keys went into ${worker.name}'s pane, but ${why}: its card stays here while the prompt waits, to answer again.`,
     )
   // The pane after the keys, read until it no longer shows what `shows` reads, or null when it still does, or undefined when it could not be read.
   const settled = async (
@@ -410,7 +410,7 @@ async function answerHerdr(
   if (after === undefined) {
     return refused(
       "UNCONFIRMED",
-      `The keys went, but ${worker.name}'s pane could not be read to see them land: look at its terminal.`,
+      `The keys went, but ${worker.name}'s pane could not be read to see them land: its card leaves once the prompt is answered.`,
     )
   }
   if (after === null) return interrupted("its prompt still shows")

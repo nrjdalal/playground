@@ -1,5 +1,15 @@
 import { expect, test } from "bun:test"
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from "node:fs"
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  unlinkSync,
+  utimesSync,
+} from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -181,6 +191,143 @@ test("the pre-commit build skips a commit of docs and Python tests alone", async
   }
 }, 60_000)
 
+// lefthook on this repo's own type-check steps, through this checkout's commit-slot.ts and tsc, in a scratch repo holding a minimal tests/ and packages/scripts: a staged type error in either tree fails the commit, as CI's check-types does, and a commit staging neither runs neither, whatever the working tree holds
+test("the pre-commit type checks fail a staged type error in a test or a packages/scripts file", async () => {
+  const config = Bun.YAML.parse(await Bun.file(join(ROOT, "lefthook.yml")).text()) as {
+    "pre-commit": { commands: Record<string, Record<string, unknown>>; piped?: boolean }
+  }
+  const { "check-types-scripts": scripts, "check-types-tests": tests } =
+    config["pre-commit"].commands
+  const own = (step: Record<string, unknown> | undefined) => ({
+    ...step,
+    run: String(step?.run).replaceAll(
+      "packages/scripts/src/",
+      `${join(ROOT, "packages/scripts/src")}/`,
+    ),
+  })
+  const manifest = async (path: string) =>
+    (await Bun.file(join(ROOT, path)).json()) as { scripts: Record<string, string> }
+  const dir = mkdtempSync(join(tmpdir(), "lefthook-types-"))
+  const env = { ...SCRATCH_ENV, PATH: `${join(ROOT, "node_modules/.bin")}:${SCRATCH_ENV.PATH}` }
+  const run = (argv: string[]) => {
+    const result = Bun.spawnSync(argv, { cwd: dir, env, stdin: "ignore" })
+    return { code: result.exitCode, out: result.stdout.toString() + result.stderr.toString() }
+  }
+  const tsconfig = JSON.stringify({
+    compilerOptions: { module: "ESNext", noEmit: true, strict: true, target: "ESNext", types: [] },
+  })
+  const commitWith = async (files: Record<string, string>) => {
+    expect(run(["git", "rm", "-q", "-r", "--cached", "-f", "--ignore-unmatch", "."])).toMatchObject(
+      {
+        code: 0,
+      },
+    )
+    for (const [file, text] of Object.entries(files)) await Bun.write(join(dir, file), text)
+    expect(run(["git", "add", ...Object.keys(files)])).toMatchObject({ code: 0 })
+    return run(["bun", join(ROOT, LEFTHOOK_BIN), "run", "pre-commit"])
+  }
+  try {
+    expect(run(["git", "init", "-q"])).toMatchObject({ code: 0 })
+    await Bun.write(
+      join(dir, "package.json"),
+      JSON.stringify({
+        scripts: {
+          "check-types:tests": (await manifest("package.json")).scripts["check-types:tests"],
+        },
+      }),
+    )
+    await Bun.write(
+      join(dir, "packages/scripts/package.json"),
+      JSON.stringify({
+        scripts: {
+          "check-types": (await manifest("packages/scripts/package.json")).scripts["check-types"],
+        },
+      }),
+    )
+    await Bun.write(join(dir, "packages/scripts/tsconfig.json"), tsconfig)
+    await Bun.write(join(dir, "tests/tsconfig.json"), tsconfig)
+    // JSON is YAML, so the steps go in as lefthook read them
+    await Bun.write(
+      join(dir, "lefthook.yml"),
+      JSON.stringify({
+        "pre-commit": {
+          commands: { "check-types-scripts": own(scripts), "check-types-tests": own(tests) },
+          piped: config["pre-commit"].piped,
+        },
+      }),
+    )
+    const broken = await commitWith({ "tests/a.test.ts": 'export const n: number = "one"\n' })
+    expect(broken.code).not.toBe(0)
+    expect(broken.out).toContain("TS2322")
+    // TS1375: a top-level await in a file with no import or export, which reached CI alone on 3 Nov
+    const script = await commitWith({
+      "packages/scripts/src/x.ts": "await Promise.resolve()\n",
+      "tests/a.test.ts": "export const n: number = 1\n",
+    })
+    expect(script.code).not.toBe(0)
+    expect(script.out).toContain("TS1375")
+    expect(
+      await commitWith({
+        "packages/scripts/src/x.ts": "export const x = await Promise.resolve(1)\n",
+        "tests/a.test.ts": "export const n: number = 1\n",
+      }),
+    ).toMatchObject({ code: 0 })
+    // both trees broken on disk but neither staged: the commit runs neither check
+    await Bun.write(join(dir, "packages/scripts/src/x.ts"), "await Promise.resolve()\n")
+    await Bun.write(join(dir, "tests/a.test.ts"), 'export const n: number = "one"\n')
+    const neither = await commitWith({ "api/hono/src/y.ts": "export {}\n", "README.md": "x\n" })
+    expect(neither).toMatchObject({ code: 0 })
+    expect(neither.out).not.toContain("tsc")
+  } finally {
+    rmSync(dir, { force: true, recursive: true })
+  }
+}, 120_000)
+
+// lefthook on this repo's own build and type-check steps, each run swapped for an echo, in a scratch repo: the type checks read the build's dist, so they run after it
+test("the pre-commit type checks run after the build", async () => {
+  const config = Bun.YAML.parse(await Bun.file(join(ROOT, "lefthook.yml")).text()) as {
+    "pre-commit": { commands: Record<string, Record<string, unknown>>; piped?: boolean }
+  }
+  const {
+    build,
+    "check-types-scripts": scripts,
+    "check-types-tests": tests,
+  } = config["pre-commit"].commands
+  const dir = mkdtempSync(join(tmpdir(), "lefthook-types-order-"))
+  const run = (argv: string[]) => {
+    const result = Bun.spawnSync(argv, { cwd: dir, env: SCRATCH_ENV, stdin: "ignore" })
+    return { code: result.exitCode, out: result.stdout.toString() + result.stderr.toString() }
+  }
+  try {
+    expect(run(["git", "init", "-q"])).toMatchObject({ code: 0 })
+    await Bun.write(
+      join(dir, "lefthook.yml"),
+      JSON.stringify({
+        "pre-commit": {
+          commands: {
+            build: { ...build, run: "echo build-ran" },
+            "check-types-scripts": { ...scripts, run: "echo scripts-ran" },
+            "check-types-tests": { ...tests, run: "echo tests-ran" },
+          },
+          piped: config["pre-commit"].piped,
+        },
+      }),
+    )
+    for (const file of ["packages/scripts/src/x.ts", "tests/a.test.ts"])
+      await Bun.write(join(dir, file), "x")
+    expect(run(["git", "add", "."])).toMatchObject({ code: 0 })
+    const hook = run(["bun", join(ROOT, LEFTHOOK_BIN), "run", "pre-commit"])
+    expect(hook).toMatchObject({ code: 0 })
+    const [built, ...checked] = ["build-ran", "scripts-ran", "tests-ran"].map((mark) =>
+      hook.out.indexOf(mark),
+    )
+    expect(built).toBeGreaterThanOrEqual(0)
+    for (const at of checked) expect(at).toBeGreaterThan(built!)
+  } finally {
+    rmSync(dir, { force: true, recursive: true })
+  }
+}, 60_000)
+
 // lefthook on this repo's own conflict-marker step, its script run from this checkout, beside lint-staged (run swapped for an echo), in a scratch repo: a staged marker refuses the commit before the formatter can rewrite it
 test("the pre-commit marker check refuses a staged conflict marker before lint-staged runs", async () => {
   const config = Bun.YAML.parse(await Bun.file(join(ROOT, "lefthook.yml")).text()) as {
@@ -223,6 +370,87 @@ test("the pre-commit marker check refuses a staged conflict marker before lint-s
     expect(refused.code).not.toBe(0)
     expect(refused.out).toContain("notes.md:2, notes.md:6")
     expect(await hookWith("one\ntwo\nthree\n")).toMatchObject({ code: 0, linted: true })
+  } finally {
+    rmSync(dir, { force: true, recursive: true })
+  }
+}, 60_000)
+
+// every worktree of a checkout shares one stash list, so the pre-commit's lint-staged keeps no backup there (PG-715)
+test("the pre-commit's lint-staged runs with --no-stash", async () => {
+  const config = Bun.YAML.parse(await Bun.file(join(ROOT, "lefthook.yml")).text()) as {
+    "pre-commit": { commands: Record<string, { run: string }> }
+  }
+  expect(config["pre-commit"].commands["lint-staged"]!.run).toMatch(
+    /\blint-staged\b.*\s--no-stash\b/,
+  )
+})
+
+// lefthook on this repo's own lint-staged step (bunx swapped for this checkout's binary, the formatter this checkout's oxfmt), in a scratch repo holding one stash entry of its own: the commit's run leaves the stash list as it was, stages the formatted line and keeps a partially staged file's unstaged line
+test("a commit through the pre-commit's lint-staged leaves the stash list as it was and keeps unstaged lines", async () => {
+  const config = Bun.YAML.parse(await Bun.file(join(ROOT, "lefthook.yml")).text()) as {
+    "pre-commit": { commands: Record<string, Record<string, unknown>>; piped?: boolean }
+  }
+  const lint = config["pre-commit"].commands["lint-staged"]!
+  const linter = String(lint.run).replace(
+    "bunx lint-staged",
+    join(ROOT, "node_modules/.bin/lint-staged"),
+  )
+  expect(linter).not.toBe(String(lint.run))
+  const dir = mkdtempSync(join(tmpdir(), "lefthook-no-stash-"))
+  const run = (argv: string[]) => {
+    const result = Bun.spawnSync(argv, { cwd: dir, env: SCRATCH_ENV, stdin: "ignore" })
+    return { code: result.exitCode, out: result.stdout.toString() + result.stderr.toString() }
+  }
+  const lines = [
+    "const a = 1;",
+    ...Array.from({ length: 12 }, (_, i) => `const k${i} = ${i};`),
+    "const z = 1;",
+  ]
+  try {
+    for (const argv of [
+      ["git", "init", "-q"],
+      ["git", "config", "user.email", "t@t"],
+      ["git", "config", "user.name", "t"],
+    ])
+      expect(run(argv)).toMatchObject({ code: 0 })
+    await Bun.write(
+      join(dir, ".lintstagedrc.json"),
+      JSON.stringify({ "*.ts": [join(ROOT, "node_modules/.bin/oxfmt")] }),
+    )
+    await Bun.write(
+      join(dir, "lefthook.yml"),
+      JSON.stringify({
+        "pre-commit": {
+          commands: {
+            "lint-staged": {
+              ...lint,
+              run: linter,
+            },
+          },
+          piped: config["pre-commit"].piped,
+        },
+      }),
+    )
+    await Bun.write(join(dir, "a.ts"), `${lines.join("\n")}\n`)
+    expect(run(["git", "add", "-A"])).toMatchObject({ code: 0 })
+    expect(run(["git", "commit", "-qm", "init"])).toMatchObject({ code: 0 })
+    await Bun.write(join(dir, "seed.txt"), "seed\n")
+    expect(run(["git", "stash", "push", "-u", "-m", "seed"])).toMatchObject({ code: 0 })
+    const before = run(["git", "stash", "list"]).out
+    await Bun.write(join(dir, "a.ts"), `${["const   a   =   10", ...lines.slice(1)].join("\n")}\n`)
+    expect(run(["git", "add", "a.ts"])).toMatchObject({ code: 0 })
+    await Bun.write(
+      join(dir, "a.ts"),
+      `${["const   a   =   10", ...lines.slice(1, -1), "const z = 20; // unstaged"].join("\n")}\n`,
+    )
+    const hook = run(["bun", join(ROOT, LEFTHOOK_BIN), "run", "pre-commit"])
+    expect(hook).toMatchObject({ code: 0 })
+    expect(hook.out).toContain("Skipping backup because `--no-stash` was used")
+    expect(run(["git", "stash", "list"]).out).toBe(before)
+    const staged = run(["git", "show", ":a.ts"]).out.trimEnd().split("\n")
+    expect([staged[0], staged.at(-1)]).toEqual(["const a = 10;", "const z = 1;"])
+    const working = (await Bun.file(join(dir, "a.ts")).text()).trimEnd().split("\n")
+    expect(working.at(-1)).toBe("const z = 20; // unstaged")
   } finally {
     rmSync(dir, { force: true, recursive: true })
   }
@@ -526,7 +754,7 @@ test("the pre-commit docs-wrap step covers every docs:wrap file and runs after l
   expect(wrap!.priority as number).toBeGreaterThan(lint!.priority as number)
 })
 
-// the pre-commit build, next build included, goes through commit-slot.ts, which takes the run slot in a worktree when turbo finds a build task with work to do; env-keys' build of @packages/env stays bare, since it ran 8s after a 829s queue wait (measured); both share one turbo cache outside every checkout
+// the pre-commit build, next build included, goes through commit-slot.ts, which takes the commit slot in a worktree when turbo finds a build task with work to do; env-keys' build of @packages/env stays bare, since it ran 8s after a 829s queue wait (measured); both share one turbo cache outside every checkout
 test("the pre-commit build goes through commit-slot, which slots a build with work to do, env-keys' small build does not, and both share the turbo cache", async () => {
   const config = Bun.YAML.parse(await Bun.file(join(ROOT, "lefthook.yml")).text()) as {
     "pre-commit": { commands: Record<string, Record<string, unknown>> }
@@ -600,6 +828,79 @@ test("the pre-commit main-checkout step refuses a commit in the factory's main c
     expect(await hook(worktree)).toMatchObject({ code: 0 })
     expect(await hook(clone)).toMatchObject({ code: 0 })
     expect(await hook(factory, false)).toMatchObject({ code: 0 })
+  } finally {
+    rmSync(dir, { force: true, recursive: true })
+  }
+}, 60_000)
+
+// the install's prepare as package.json gives it, run in a scratch repo, a script it names read from this checkout
+const preparer = async () => {
+  const { scripts } = (await Bun.file(join(ROOT, "package.json")).json()) as {
+    scripts: { prepare: string }
+  }
+  const command = scripts.prepare.replaceAll(
+    "packages/scripts/",
+    `${join(ROOT, "packages/scripts")}/`,
+  )
+  return (dir: string) => {
+    const result = Bun.spawnSync(["sh", "-c", command], {
+      cwd: dir,
+      env: SCRATCH_ENV,
+      stdin: "ignore",
+    })
+    return { code: result.exitCode, out: result.stdout.toString() + result.stderr.toString() }
+  }
+}
+
+// a scratch repo with this checkout's lefthook and a config of one pre-commit command
+const scratchRepo = async (dir: string) => {
+  expect(Bun.spawnSync(["git", "init", "-q"], { cwd: dir, env: SCRATCH_ENV }).exitCode).toBe(0)
+  mkdirSync(join(dir, "node_modules/.bin"), { recursive: true })
+  symlinkSync(join(ROOT, LEFTHOOK_BIN), join(dir, LEFTHOOK_BIN))
+  const config = `lefthook: ${OWN_LEFTHOOK}\npre-commit:\n  commands:\n    mark:\n      run: echo hook-ran\n`
+  await Bun.write(join(dir, "lefthook.yml"), config)
+  return config
+}
+
+// the install's prepare script in a scratch repo whose hooks folder it may not write, as Claude Code's sandbox refuses .git/hooks: hooks that match pass with no write, and a config that names a new hook still fails loudly
+test("the install's prepare writes no hook while the installed ones match", async () => {
+  const prepare = await preparer()
+  const dir = mkdtempSync(join(tmpdir(), "lefthook-prepare-"))
+  const hooks = join(dir, ".git/hooks")
+  try {
+    const config = await scratchRepo(dir)
+    expect(prepare(dir)).toMatchObject({ code: 0 })
+    chmodSync(hooks, 0o555)
+    expect(prepare(dir)).toMatchObject({ code: 0 })
+    await Bun.write(
+      join(dir, "lefthook.yml"),
+      `${config}pre-push:\n  commands:\n    mark:\n      run: echo push-ran\n`,
+    )
+    // lefthook reads its hooks as matching while the config's mtime, in seconds, equals the one it installed from, so a rewrite in that same second is moved on
+    const later = Date.now() / 1000 + 10
+    utimesSync(join(dir, "lefthook.yml"), later, later)
+    expect(prepare(dir).code).not.toBe(0)
+  } finally {
+    if (existsSync(hooks)) chmodSync(hooks, 0o755)
+    rmSync(dir, { force: true, recursive: true })
+  }
+}, 60_000)
+
+// lefthook's check-install reads its config's checksum alone, never the hooks, so a hook gone or replaced while the config still matches is the prepare's own check to catch
+test("the install's prepare puts back a hook that was deleted or replaced while the config still matches", async () => {
+  const prepare = await preparer()
+  const dir = mkdtempSync(join(tmpdir(), "lefthook-prepare-"))
+  const hook = join(dir, ".git/hooks/pre-commit")
+  try {
+    await scratchRepo(dir)
+    expect(prepare(dir)).toMatchObject({ code: 0 })
+    const installed = await Bun.file(hook).text()
+    unlinkSync(hook)
+    expect(prepare(dir)).toMatchObject({ code: 0 })
+    expect(existsSync(hook) ? await Bun.file(hook).text() : "deleted").toBe(installed)
+    await Bun.write(hook, "#!/bin/sh\necho foreign\n")
+    expect(prepare(dir)).toMatchObject({ code: 0 })
+    expect(await Bun.file(hook).text()).toBe(installed)
   } finally {
     rmSync(dir, { force: true, recursive: true })
   }

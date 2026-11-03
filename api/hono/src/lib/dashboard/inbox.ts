@@ -231,6 +231,8 @@ export const draftSchema = z.strictObject({
 export const OUTCOMES = ["alert", "decision", "finding", "merged", "shipped"] as const
 
 export const updateSchema = z.strictObject({
+  // a page the owner approves on in the browser, where a session never can: a pending Yard post's approve page
+  approve: link,
   attachments,
   link,
   outcome: z.enum(OUTCOMES),
@@ -407,9 +409,10 @@ export type SinkResult = { environment: string; exitCode: number | null }
 // An open decision or draft he pushed out of his list until a time (Schedule); it asks again once the time passes.
 export type InboxScheduled = { snoozedUntil: string }
 
-// How the answer reached its poster, or the dispatcher when the poster had ended: typed into a session (to: the session that took it, absent on a row from before it was recorded), or read through bun run ask.
+// How the answer reached its poster, or the dispatcher when the poster had ended: typed into a session (to: the session that took it, absent on a row from before it was recorded), or read through bun run ask. queued: Claude Code holds it until the session is free (deliver.ts's QUEUED), under the delivery's id, which the dashboard reads again until it reads delivered, or failed as LOST.
 export type InboxDelivery =
   | { status: "pending" }
+  | { at: string; id: string; status: "queued"; to: string }
   | { at: string; status: "delivered"; to?: string; via: "cli" | "session" }
   | { code: string; reason: string; status: "failed" }
 
@@ -453,10 +456,16 @@ export const answerInputSchema = z.strictObject({
 export type AnswerInput = z.input<typeof answerInputSchema>
 
 // The delivery adapter's contract, deliver() in deliver.ts, restated since this file cannot resolve the API's @/ paths; routers/inbox.ts passes deliver() as a Deliver, so the compiler fails if the two drift apart. It throws only when it cannot write its activity row, which may come after the Enter.
-export type Delivery = { actor: ActivityActor; text: string; to: string }
+export type Delivery = {
+  actor: ActivityActor
+  id?: string
+  queuedAt?: string
+  text: string
+  to: string
+}
 export type DeliveryResult =
   | { at: string; ok: true; sessionId: string }
-  | { code: string; ok: false; reason: string }
+  | { code: string; ok: false; queuedAt?: string; reason: string }
 export type Deliver = (delivery: Delivery) => Promise<DeliveryResult>
 
 export type InboxFailure = { code: "CONFLICT" | "NOT_FOUND" | "VALIDATION_ERROR"; message: string }
@@ -616,41 +625,50 @@ export const deliveryFailed = (item: InboxItem): boolean =>
   item.delivery?.status === "failed" &&
   !(item.answer && "dismissedAt" in item.answer && item.answer.dismissedAt)
 
-// The delivery failures that come before anything is typed (deliver.ts's DELIVERY_FAILURES says which), so Retry cannot type the answer twice; after any other (INTERRUPTED, or ERROR when the adapter threw) the answer may be in the session already, so it waits on a look at the session.
+// The delivery failures that come before anything is typed (deliver.ts's DELIVERY_FAILURES says which, and UPLOAD_FAILED, a Slack send's files refused before its words), and LOST, an answer Claude Code held that neither its screen nor its transcript shows QUEUED_MS on, so Retry cannot type the answer twice; after any other (INTERRUPTED, or ERROR when the adapter threw) the answer may be in the session already, so its card offers Check it for me.
 export const RETRY_CODES = [
   "CMUX_FAILED",
   "INPUT_NOT_EMPTY",
+  "LOST",
   "NOT_FOUND",
   "ON_PICKER",
   "UPLOAD_FAILED",
 ] as const
 
-// Pure: a failed answer he has not dismissed whose failure Retry can safely follow.
-export const retryable = (item: InboxItem): boolean =>
-  deliveryFailed(item) &&
-  item.delivery?.status === "failed" &&
-  (RETRY_CODES as readonly string[]).includes(item.delivery.code)
+// How long an answer reads queued before its card offers Retry: deliver.ts's QUEUED_MS, by which its follow-up reads it delivered or lost, and a minute more, so a card still queued then lost its follow-up to an API restart (a test holds the two apart by that minute).
+export const STUCK_QUEUED_MS = 11 * 60_000
+
+// Pure: an answer still reading queued STUCK_QUEUED_MS after it was queued, whose follow-up has gone.
+export const stuckQueued = (item: InboxItem, now: Date): boolean =>
+  item.delivery?.status === "queued" &&
+  now.getTime() - Date.parse(item.delivery.at) >= STUCK_QUEUED_MS
+
+// Pure: a failed answer he has not dismissed whose failure Retry can safely follow, or a stuck queued one, whose Retry reads it again under its own id and types nothing while Claude Code still holds it.
+export const retryable = (item: InboxItem, now = new Date()): boolean =>
+  (deliveryFailed(item) &&
+    item.delivery?.status === "failed" &&
+    (RETRY_CODES as readonly string[]).includes(item.delivery.code)) ||
+  stuckQueued(item, now)
 
 // Where a Slack send's files go: the conversation, and the thread's parent message when it replies in one.
 export type UploadPlace = { channel: string; thread?: string }
 
-// Shares a send's files into its place (dm upload, run where the Slack token lives), throwing why when Slack refuses any step; slack-upload.ts holds the real one, a test passes its own.
-export type Upload = (place: UploadPlace, files: InboxAttachment[]) => Promise<void>
+// Shares an answered item's files into the place its link names (dm upload, run where the Slack token lives, given the item's id alone) and says how many it shared, throwing why when Slack refuses any step; slack-upload.ts holds the real one, a test passes its own.
+export type Upload = (item: InboxItem) => Promise<number>
 
 const CONVERSATION = /^[CDG][A-Z0-9]+$/
 
-// Pure: the place a Slack link in its app form names (https://app.slack.com/client/<team>/<conversation>, then /thread/<conversation>-<ts> for a thread), or null for no link, a link outside Slack, or one naming no conversation.
+// Pure: the place a Slack link in its app form names (https://app.slack.com/client/<team>/<conversation>, then /thread/<conversation>-<ts> for a thread), its query and hash aside; null for no link, a link outside Slack, one naming no conversation, or a path past the conversation that is not one parsed thread, so a file never lands outside the thread its reply goes to.
 export function slackPlace(link: string | undefined): UploadPlace | null {
   if (!link || !URL.canParse(link)) return null
   const url = new URL(link)
   if (url.protocol !== "https:" || url.hostname !== "app.slack.com") return null
-  const [, client, , channel, threadWord, parent] = url.pathname.split("/")
-  if (client !== "client" || !channel || !CONVERSATION.test(channel)) return null
-  const thread =
-    threadWord === "thread"
-      ? new RegExp(`^${channel}-(\\d+\\.\\d+)$`).exec(parent ?? "")?.[1]
-      : undefined
-  return thread ? { channel, thread } : { channel }
+  const [, client, team, channel, ...rest] = url.pathname.replace(/\/$/, "").split("/")
+  if (client !== "client" || !team || !channel || !CONVERSATION.test(channel)) return null
+  if (rest.length === 0) return { channel }
+  const [word, parent, ...more] = rest
+  const thread = new RegExp(`^${channel}-(\\d+\\.\\d+)$`).exec(parent ?? "")?.[1]
+  return word === "thread" && thread && more.length === 0 ? { channel, thread } : null
 }
 
 // Pure: the files a go shares into Slack before its words reach the poster: a Slack draft's on Send, or a slack decision's on Approve or Edit, when its link names a Slack place and it has shared none yet; null for anything else, whose files stay on the card.
@@ -878,7 +896,11 @@ export async function answerItem(
     dispatcher,
     now = new Date(),
     upload,
-  }: { actor: ActivityActor; deliver?: Deliver; dispatcher?: string; now?: Date; upload?: Upload },
+    wait,
+  }: { actor: ActivityActor; deliver?: Deliver; dispatcher?: string; now?: Date } & Pick<
+    Sending,
+    "upload" | "wait"
+  >,
 ): Promise<{ item: InboxItem; ok: true } | Refused> {
   const current = await getItem(db, id)
   if (!current || current.id !== id) return NOT_FOUND
@@ -926,6 +948,7 @@ export async function answerItem(
       dispatcher,
       now,
       upload,
+      wait,
     }),
     ok: true,
   }
@@ -966,36 +989,94 @@ async function unarchive(
   return { item: toItem(row), ok: true }
 }
 
-// Types the answer into the posting session and records how that went; a poster that has ended hands it to the dispatcher instead.
+// How often a queued answer is read again: deliver() types nothing for it, and reads it delivered once its transcript shows it, or lost QUEUED_MS on.
+export const QUEUED_POLL_MS = 5000
+
+type Sending = {
+  actor: ActivityActor
+  deliver: Deliver
+  dispatcher?: string
+  now: Date
+  upload?: Upload
+  wait?: (ms: number) => Promise<void>
+}
+
+// Types the answer into the posting session and records how that went; a poster that has ended hands it to the dispatcher instead. Each try goes under its own id, so one Claude Code holds (queued) is read again under it until it settles: this process's own reads, so a restart leaves it reading queued until its card offers Retry (stuckQueued).
 async function send(
   db: Database,
   item: InboxItem,
   { relay, text }: { relay: string; text: string },
-  {
-    actor,
-    deliver,
-    dispatcher,
-    now,
-    upload,
-  }: { actor: ActivityActor; deliver: Deliver; dispatcher?: string; now: Date; upload?: Upload },
+  { actor, deliver, dispatcher, now, upload, wait = (ms) => Bun.sleep(ms) }: Sending,
+  held?: Extract<InboxDelivery, { status: "queued" }>,
 ): Promise<InboxItem> {
   // the files go first, so an upload Slack refuses fails the send with nothing typed, and Retry shares them again
   const shared = upload && filesToUpload(item)
   if (shared) {
+    let count: number
     try {
-      await upload(shared.place, shared.files)
+      count = await upload(item)
     } catch (error) {
       const reason = `The files did not upload to Slack: ${(error as Error).message}`
       const failed: InboxDelivery = { code: "UPLOAD_FAILED", reason, status: "failed" }
       return (await recordDelivery(db, item.id, failed, now)) ?? item
     }
-    item = (await recordUploaded(db, item.id, shared.files.length)) ?? item
+    item = (await recordUploaded(db, item.id, count)) ?? item
   }
-  let delivery = await attempt(deliver, { actor, text, to: item.from })
+  const one = (to: string, words: string) => ({ actor, id: crypto.randomUUID(), text: words, to })
+  // a stuck queued answer is read again under its own id and queued time, so this try types nothing: it reads queued, delivered, lost or unconfirmed, and only a Retry after lost types it
+  let sent: Delivery & { id: string } = held
+    ? {
+        actor,
+        id: held.id,
+        queuedAt: held.at,
+        text: held.to === item.from ? text : relay,
+        to: held.to,
+      }
+    : one(item.from, text)
+  let delivery = await attempt(deliver, sent, now)
   if (dispatcher && item.from !== dispatcher && posterGone(delivery)) {
-    delivery = await attempt(deliver, { actor, text: relay, to: dispatcher })
+    sent = one(dispatcher, relay)
+    delivery = await attempt(deliver, sent, now)
   }
-  return (await recordDelivery(db, item.id, delivery, now)) ?? item
+  const recorded = (await recordDelivery(db, item.id, delivery, now)) ?? item
+  if (delivery.status === "queued") {
+    // a write that fails while it follows (the database restarting) leaves the card queued, which offers Retry once stuck, rather than ending the API
+    void follow(
+      db,
+      item.id,
+      { ...sent, queuedAt: sent.queuedAt ?? delivery.at },
+      { deliver, wait },
+    ).catch((error: unknown) => {
+      console.warn(`Could not follow the queued answer on ${item.id}:`, error)
+    })
+  }
+  return recorded
+}
+
+// Reads a queued answer again until Claude Code lets it go, then records what became of it in place of queued, while the item still reads queued under this delivery's id.
+async function follow(
+  db: Database,
+  id: string,
+  sent: Delivery & { id: string },
+  { deliver, wait }: { deliver: Deliver; wait: (ms: number) => Promise<void> },
+): Promise<void> {
+  for (;;) {
+    await wait(QUEUED_POLL_MS)
+    const now = new Date()
+    const delivery = await attempt(deliver, sent, now)
+    if (delivery.status === "queued") continue
+    await db
+      .update(inboxItem)
+      .set({ delivery, updatedAt: now, version: sql`${inboxItem.version} + 1` })
+      .where(
+        and(
+          eq(inboxItem.id, id),
+          sql`${inboxItem.delivery} ->> 'status' = 'queued'`,
+          sql`${inboxItem.delivery} ->> 'id' = ${sent.id}`,
+        ),
+      )
+    return
+  }
 }
 
 // deliver.ts reports a poster that has ended as NOT_FOUND with one of these two reasons; its other NOT_FOUNDs ("now names another session", "has no terminal") come from a live session, which a relay would leave to carry the go out beside the dispatcher.
@@ -1009,11 +1090,21 @@ const posterGone = (delivery: InboxDelivery): boolean =>
   delivery.code === "NOT_FOUND" &&
   GONE_REASONS.some((reason) => reason.test(delivery.reason))
 
-async function attempt(deliver: Deliver, delivery: Delivery): Promise<InboxDelivery> {
+async function attempt(
+  deliver: Deliver,
+  delivery: Delivery & { id: string },
+  now: Date,
+): Promise<InboxDelivery> {
   try {
     const result = await deliver(delivery)
-    return result.ok
-      ? { at: result.at, status: "delivered", to: delivery.to, via: "session" }
+    if (result.ok) return { at: result.at, status: "delivered", to: delivery.to, via: "session" }
+    return result.code === "QUEUED"
+      ? {
+          at: result.queuedAt ?? now.toISOString(),
+          id: delivery.id,
+          status: "queued",
+          to: delivery.to,
+        }
       : { code: result.code, reason: result.reason, status: "failed" }
   } catch (error) {
     // ERROR, not one of the adapter's codes, since the answer may have reached the session after all.
@@ -1021,7 +1112,7 @@ async function attempt(deliver: Deliver, delivery: Delivery): Promise<InboxDeliv
   }
 }
 
-// Retry on an answer whose delivery failed: marks it pending in one write that holds only while it still reads failed at the version read, so a double click types it once, then delivers it again and records the new result.
+// Retry on an answer whose delivery failed, or that is stuck queued: marks it pending in one write that holds only while it still reads failed at the version read, so a double click types it once, then delivers it again and records the new result.
 export async function retryDelivery(
   db: Database,
   id: string,
@@ -1031,13 +1122,14 @@ export async function retryDelivery(
     dispatcher,
     now = new Date(),
     upload,
-  }: { actor: ActivityActor; deliver: Deliver; dispatcher?: string; now?: Date; upload?: Upload },
+    wait,
+  }: Omit<Sending, "now"> & { now?: Date },
 ): Promise<{ item: InboxItem; ok: true } | Refused> {
   const current = await getItem(db, id)
   if (!current || current.id !== id) return NOT_FOUND
   if (
     current.kind === "update" ||
-    !retryable(current) ||
+    !retryable(current, now) ||
     !current.answer ||
     !("choice" in current.answer) ||
     current.answer.choice === "settled" ||
@@ -1045,7 +1137,8 @@ export async function retryDelivery(
   ) {
     return {
       code: "CONFLICT",
-      message: "Only an answer that failed before anything was typed is retried",
+      message:
+        "Only an answer that failed before anything was typed, or one stuck queued, is retried",
       ok: false,
     }
   }
@@ -1059,7 +1152,7 @@ export async function retryDelivery(
     .where(
       and(
         eq(inboxItem.id, id),
-        sql`${inboxItem.delivery} ->> 'status' = 'failed'`,
+        sql`${inboxItem.delivery} ->> 'status' in ('failed', 'queued')`,
         sql`${inboxItem.answer} ->> 'dismissedAt' is null`,
         eq(inboxItem.version, current.version),
       ),
@@ -1068,13 +1161,13 @@ export async function retryDelivery(
   if (!row) return { code: "CONFLICT", message: "This item changed; try again", ok: false }
   const item = toItem(row)
   return {
-    item: await send(db, item, textsOf(item, current.answer), {
-      actor,
-      deliver,
-      dispatcher,
-      now,
-      upload,
-    }),
+    item: await send(
+      db,
+      item,
+      textsOf(item, current.answer),
+      { actor, deliver, dispatcher, now, upload, wait },
+      current.delivery?.status === "queued" ? current.delivery : undefined,
+    ),
     ok: true,
   }
 }
@@ -1154,8 +1247,7 @@ export async function provideSecret(
   }
 }
 
-// The first delivery recorded stands: a poster that read its answer through bun run ask while the adapter typed keeps that record.
-// Keeps how many files a send shared in its answer, so a Retry after the words failed to type shares none twice.
+// Keeps how many files a send shared in its answer, 0 on a stack that shares none, so a Retry after the words failed to type shares none twice.
 async function recordUploaded(db: Database, id: string, count: number): Promise<InboxItem | null> {
   const [row] = await db
     .update(inboxItem)
@@ -1165,6 +1257,7 @@ async function recordUploaded(db: Database, id: string, count: number): Promise<
   return row ? toItem(row) : null
 }
 
+// The first delivery recorded stands: a poster that read its answer through bun run ask while the adapter typed keeps that record.
 async function recordDelivery(
   db: Database,
   id: string,
