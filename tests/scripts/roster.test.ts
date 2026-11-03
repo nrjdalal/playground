@@ -320,7 +320,6 @@ describe("set", () => {
   })
 })
 
-// ops-report took an ended session whose status held a sentence for one that was down.
 describe("prs (#706)", () => {
   const pull = (n: number) => `https://github.com/acme/app/pull/${n}`
   const ISSUE = "https://github.com/acme/app/issues/9"
@@ -374,6 +373,7 @@ describe("prs (#706)", () => {
   })
 })
 
+// ops-report took an ended session whose status held a sentence for one that was down.
 describe("status", () => {
   const statuses = join(import.meta.dir, "..", "..", "scripts", "roster-statuses.json")
 

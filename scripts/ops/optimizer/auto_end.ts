@@ -109,10 +109,10 @@ export async function endMerged(
     const next = worker ? input.roster[worker]?.pr : undefined
     if (next && next !== url) continue
     const lead = r.lead ?? (worker ? input.roster[worker]?.lead : undefined)
-    const listed = await Promise.all(
+    const queued = await Promise.all(
       (r.prs ?? []).filter((u) => u !== url).map((u) => input.prState(u)),
     )
-    if (listed.some((s) => s === null || (s.state !== "merged" && s.state !== "closed"))) continue
+    if (queued.some((s) => s === null || (s.state !== "merged" && s.state !== "closed"))) continue
     const d = input.sessions[name]
     if (!d) {
       await deps.report(name, `ended automatically: ${why}, with no live session`)

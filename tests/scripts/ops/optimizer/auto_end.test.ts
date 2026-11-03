@@ -472,6 +472,14 @@ describe("a checker's prs list (#706)", () => {
     expect(reported).toEqual([])
   })
 
+  test("an entry GitHub cannot read keeps the row through endMerged", async () => {
+    const { closed, deps } = fakes()
+    expect(
+      await endMerged(URL, "daaac8e0000", world([URL, "https://github.com/o/r/pull/2199"]), deps),
+    ).toEqual([])
+    expect(closed).toEqual([])
+  })
+
   test("a row with no prs list, or one whose PRs are all done, ends as today", async () => {
     for (const prs of [undefined, [URL]]) {
       const merged = fakes()

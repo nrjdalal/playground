@@ -334,7 +334,7 @@ export async function prStateLive(
   const hit = cache[url]
   // Only merged is final: go.py closes a PR and reopens it to rebuild its merge commit.
   if (hit && (hit.state === "merged" || now - hit.at < CACHE_TTL_S)) return hit
-  const keep = async (fresh: CachedState) => {
+  const remember = async (fresh: CachedState) => {
     cache[url] = fresh
     try {
       mkdirSync(dirname(cachePath), { recursive: true })
@@ -344,7 +344,7 @@ export async function prStateLive(
   }
   if (!m) {
     const read = (await api(`repos/${issue![1]}/issues/${issue![2]}`)) as { state?: string } | null
-    return read?.state ? keep({ at: now, head: "", state: read.state, verdicts: [] }) : null
+    return read?.state ? remember({ at: now, head: "", state: read.state, verdicts: [] }) : null
   }
   const pr = (await api(`repos/${m[1]}/pulls/${m[2]}`)) as {
     comments?: number
@@ -365,7 +365,7 @@ export async function prStateLive(
     // a checker's verdict: the reviewer's score, or the tester's word
     for (const c of comments ?? []) for (const v of verdictsOf(c.body ?? "")) verdicts.push(v.at)
   }
-  return keep({
+  return remember({
     at: now,
     head: pr.head.sha,
     mergeSha: (pr.merged_at && pr.merge_commit_sha) || undefined,
