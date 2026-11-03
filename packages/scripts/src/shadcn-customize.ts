@@ -245,7 +245,7 @@ export function bodyScroll(source: string): string {
   return source.replace(REGISTRY_BODY_SCROLL, BODY_SCROLL)
 }
 
-// sidebar.tsx: SidebarTrigger gains an optional children label, and SidebarRail drops its native title, since every hover is shadcn's Tooltip (the owner's rule: a tooltip everywhere instead of the default), which SidebarToggleRail puts on the rail.
+// sidebar.tsx: SidebarTrigger gains an optional children label, SidebarContent scrolls up and down alone (bodyScroll, above), and SidebarRail drops its native title, since every hover is shadcn's Tooltip (the owner's rule: a tooltip everywhere instead of the default), which SidebarToggleRail puts on the rail.
 function patchSidebar() {
   const sf = project.addSourceFileAtPath(SIDEBAR)
   const binding = sf.getFunctionOrThrow("SidebarTrigger").getParameters()[0]?.getNameNode()
