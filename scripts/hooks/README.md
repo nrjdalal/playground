@@ -237,7 +237,11 @@ Only the first reading moves the folder, sets variables and records files for th
   It refuses a closed list of write forms, so a same-user session can still get past it by a form outside that list, such as a script file it writes and then runs.
   An `ext score` after an `unset` or an `export -n` of one of those variables earlier on the line gets past, since the hook tracks a variable set, not one unset or un-exported.
   A path through a link into the root with `..` after the link (`echo x > <link>/../f`) is judged as typed, so a write by one passes.
-  A `cd` or `pushd` it cannot follow (`cd -`, `cd ~-`, `popd`'s stack, a glob in the folder, a `CDPATH` lookup) leaves the command's folder unread, so a relative write after one passes.
+  A `cd` or `pushd` it cannot follow (`cd -`, `cd ~-`, `popd`'s stack, a `CDPATH` lookup) leaves the command's folder unread, so a relative write after one passes.
+  A `pushd ~-` or `pushd ~+` lands where zsh takes it, `~-` reading the folder before the last `cd` or `pushd`, the start folder before any.
+  An assignment to `OLDPWD` leaves `~-` where it was, since zsh's `~-` reads the folder it last left rather than the variable.
+  Beside a folder named `~-` or `~+` it keeps the typed reading, though zsh still lands in the folder it last left or the current one, so a relative write after one is judged in a folder zsh does not enter.
+  A glob in a `cd` or `pushd` folder is judged as any word holding one, so `cd ~/.playground/e*` is refused as `ls ~/.playground/e*` is.
   From a cwd at or above the root (`~`, `~/.playground`), a quoted `(`, `[`, `*`, `?` or `{` reads as a glob there, so a call holding one is refused; run it from a worktree.
   A closed-list reader on a line read call by call is the exception: its quoted glob is text, so `awk '{print $1}' f` runs, since the lexer marks each word whose glob the shell sees outside quotes (`Word.glob` in `scripts/hooks/shell.ts`).
   A quiet commit's message is the other exception (above).
@@ -384,7 +388,7 @@ Only the first reading moves the folder, sets variables and records files for th
 ## no-main-checkout
 
 - A factory session keeps the main checkout clean: `scripts/hooks/no-main-checkout.ts`, registered beside no-stash on Bash and the file tools (Edit, MultiEdit, NotebookEdit and Write), refuses lefthook, turbo (but for its packages build, below), `git commit` (it runs pre-commit), `bun run build`, `bun run check-types`,
-  `bun run test`, `bun run test:file` and `bun test` while the command's directory (the Bash tool's cwd, after any `cd`, `git -C` or `bun --cwd` in it, but for `bun x` and `bunx`, which run in the shell's folder whatever bun's own `--cwd` says) is the main checkout and not a worktree under `.claude/worktrees/`,
+  `bun run test`, `bun run test:file` and `bun test` while the command's directory (the Bash tool's cwd, after any `cd`, `pushd` (its `~-` and `~+` read as zsh reads them), `git -C` or `bun --cwd` in it, but for `bun x` and `bunx`, which run in the shell's folder whatever bun's own `--cwd` says) is the main checkout and not a worktree under `.claude/worktrees/`,
   and a write into the main checkout from anywhere (a redirect, `cp`, `mv`, `touch`, `tee`, curl's `-c` or `-o`, the files `sed -i`, BSD's `sed -I`, `sed --in-place` or `perl -i` edits in place, or a file tool's path), naming the fix: run it in your own worktree.
   A command run through `run-slot.sh`, typed bare or as a shell's script (`bash <path>/run-slot.sh <who> -- <command>`, `shellSlot`), is read as the words after its `--` (`slotWords` in `scripts/hooks/shell.ts`, which no-glm-heavy-path and no-false-green read it by too), so a commit, a build or a write through run-slot is refused as the same command typed bare.
   It refuses a git move there too: `add` (but `-n` or `--dry-run`), `am`, `apply` (but `--check`, `--numstat`, `--stat` or `--summary` without `--apply`), `bisect`, `branch -f`, `checkout`, `cherry-pick`, `clean` (but `-n`), `merge`, `mv`, `pull`, `rebase`, `reset` (but the one below), `restore`, `revert`, `rm`, `stash` (but `list` and `show`), `switch` and `update-ref`,
