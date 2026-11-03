@@ -295,8 +295,9 @@ const ask = async (cwd: string, args: string[], stdin?: string) => {
 export const askInbox = (cwd: string): Inbox => ({
   close: async (id, note) => {
     if ((await ask(cwd, ["settle", id, "--note", note])).code === 0) return
-    const acked = await ask(cwd, ["ack", id, "--no-link", note])
-    if (acked.code !== 0) throw new Refusal(`bun run ask could not close ${id}: ${acked.err}`)
+    if ((await ask(cwd, ["ack", id, "--no-link", note])).code === 0) return
+    const read = await ask(cwd, ["get", id, "--ack"])
+    if (read.code !== 0) throw new Refusal(`bun run ask could not close ${id}: ${read.err}`)
   },
   post: async (item) => {
     const posted = await ask(cwd, ["new"], JSON.stringify(item))
@@ -325,6 +326,18 @@ export const loginCard = (from: string, code: string): Json => ({
   title: `Sign in to GitHub for ${from}`,
 })
 
+// Closes the card when the launcher is stopped mid-wait (SIGTERM, SIGINT), then exits as that signal would; returns the function that stops listening.
+export const onStop = (closeCard: () => Promise<void>) => {
+  const stopped = (signal: NodeJS.Signals) =>
+    void closeCard().finally(() => process.exit(signal === "SIGINT" ? 130 : 143))
+  process.once("SIGTERM", stopped)
+  process.once("SIGINT", stopped)
+  return () => {
+    process.off("SIGTERM", stopped)
+    process.off("SIGINT", stopped)
+  }
+}
+
 // Runs GitHub's login in a pane through run(), posts the owner a card with gh's one-time code and link, waits for the login's marker, then closes the card. It returns the card's id and the exit status, and nothing the pane printed, so no line gh writes reaches the session.
 export async function login(
   pane: string,
@@ -333,6 +346,7 @@ export async function login(
   inbox: Inbox = askInbox(mainCheckout()),
   repo = mainCheckout(),
   wait = (ms: number) => Bun.sleep(ms),
+  stop = onStop,
 ): Promise<{ id: string; rc?: number }> {
   const marker = await run(pane, GITHUB_LOGIN, herdr, repo)
   const { pane: info } = await call(herdr, ["pane", "get", pane])
@@ -360,7 +374,18 @@ export async function login(
       `${error.message}; gh's login still waits in ${pane} until its code expires, so close its workspace`,
     )
   })
-  const { rc } = await read(pane, marker, timeout, herdr)
+  const unlisten = stop(() =>
+    inbox.close(id, "The session stopped waiting: ask again for a new code"),
+  )
+  let rc: number | undefined
+  try {
+    ;({ rc } = await read(pane, marker, timeout, herdr))
+  } catch (error) {
+    await inbox.close(id, "The sign-in could not be read: ask again for a new code")
+    throw error
+  } finally {
+    unlisten()
+  }
   await inbox.close(
     id,
     rc === 0
@@ -426,7 +451,9 @@ export async function main(
       console.log(
         rc === 0
           ? `signed in; card ${id} closed`
-          : `no sign-in (rc=${rc ?? "unknown"}); card ${id} closed`,
+          : rc === undefined
+            ? `no sign-in (rc=unknown); card ${id} closed; gh may still wait in ${first}, so close its workspace`
+            : `no sign-in (rc=${rc}); card ${id} closed`,
       )
       return rc === 0 ? 0 : rc === undefined ? 2 : 1
     }

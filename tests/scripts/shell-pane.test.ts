@@ -564,7 +564,7 @@ describe("login drives GitHub's browser login and hands the owner its code on a 
   }
   const noWait = async () => {}
   const shown = (marker: string) => [
-    "! One-time code (AB12-CD34) copied to clipboard",
+    "! First copy your one-time code: AB12-CD34",
     "Open this URL to continue in your web browser: https://github.com/login/device",
     "✓ Authentication complete.",
     `token ${TOKEN}`,
@@ -661,6 +661,75 @@ describe("login drives GitHub's browser login and hands the owner its code on a 
     expect(await refusal(login("w1:p1", 50, herdr, refusing, CHECKOUT, noWait))).toBe(
       "bun run ask new: refused; gh's login still waits in w1:p1 until its code expires, so close its workspace",
     )
+  })
+
+  test("a pane that cannot be read after the post closes the card, and the error still surfaces", async () => {
+    const waiting = loginHerdr(() => [
+      "! First copy your one-time code: AB12-CD34",
+      "Open this URL to continue in your web browser: https://github.com/login/device",
+    ])
+    const gone: Herdr = async (args) =>
+      args[1] === "wait-output"
+        ? {
+            code: 1,
+            out: JSON.stringify({
+              error: { code: "pane_not_found", message: "pane w1:p1 not found" },
+            }),
+          }
+        : waiting.herdr(args)
+    const { closed, fake } = inbox()
+    expect(await refusal(login("w1:p1", 50, gone, fake, CHECKOUT, noWait))).toContain(
+      "pane w1:p1 not found",
+    )
+    expect(closed).toEqual(["item-1 The sign-in could not be read: ask again for a new code"])
+  })
+
+  test("a stop mid-wait closes the card, and the listener goes once the wait ends", async () => {
+    const { herdr } = loginHerdr(shown)
+    const { closed, fake } = inbox()
+    let closeCard: (() => Promise<void>) | undefined
+    let listening = false
+    const stop = (then: () => Promise<void>) => {
+      closeCard = then
+      listening = true
+      return () => void (listening = false)
+    }
+    await login("w1:p1", 50, herdr, fake, CHECKOUT, noWait, stop)
+    expect(listening).toBe(false)
+    await closeCard!()
+    expect(closed).toEqual([
+      "item-1 Signed in: gh saw the login finish",
+      "item-1 The session stopped waiting: ask again for a new code",
+    ])
+  })
+
+  test("askInbox closes an open card by settle, an approved one by ack, and a denied one by get --ack", async () => {
+    const root = join(SCRATCH, "inbox-close")
+    mkdirSync(root)
+    writeFileSync(join(root, "package.json"), JSON.stringify({ scripts: { ask: "sh ask.sh" } }))
+    writeFileSync(
+      join(root, "ask.sh"),
+      [
+        'echo "$1 $3" >> calls',
+        "a=$(cat answer)",
+        'case "$1" in',
+        '  settle) [ "$a" = open ] ;;',
+        '  ack) [ "$a" = approve ] ;;',
+        '  get) [ "$a" = deny ] && [ "$3" = --ack ] ;;',
+        "  *) exit 1 ;;",
+        "esac",
+      ].join("\n"),
+    )
+    const closing = async (answer: string) => {
+      writeFileSync(join(root, "answer"), answer)
+      writeFileSync(join(root, "calls"), "")
+      await askInbox(root).close("i1", "note")
+      return Bun.file(join(root, "calls")).text()
+    }
+    expect(await closing("open")).toBe("settle --note\n")
+    expect(await closing("approve")).toBe("settle --note\nack --no-link\n")
+    expect(await closing("deny")).toBe("settle --note\nack --no-link\nget --ack\n")
+    expect(await refusal(closing("gone"))).toStartWith("bun run ask could not close i1")
   })
 
   test("askInbox runs bun run ask in the checkout it names, with no POSTGRES_URL, as the clone root's ask forwards it", async () => {

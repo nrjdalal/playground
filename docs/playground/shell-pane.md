@@ -29,9 +29,9 @@ Each command runs in a shell of its own, so nothing one command sets carries to 
 
 `login <pane> github` runs `gh`'s browser login in the pane, with no token from the environment and no browser opened on your screen.
 It posts a card to your Dashboard's Inbox, from whichever worktree the session runs in, with `gh`'s one-time code and a link to GitHub's device page: you open the link, enter the code and sign in on GitHub's own page, so nothing you type passes through Playground.
-The card closes itself once `gh` sees the sign-in, or after 15 minutes, when the code runs out.
+The card closes itself once `gh` sees the sign-in, after 15 minutes, when the code runs out, and when the launcher stops or cannot read the pane.
+A session runs `login` as a background task, since it waits up to 15 minutes, past a foreground tool call's limit.
 The session sees only that result and the card's id, never a line `gh` printed, so no token `gh` writes reaches a transcript.
-`gh` also puts the code on your clipboard as it starts.
 A prompt that waits for a typed answer or a keypress has no card yet.
 
 ## Common questions
