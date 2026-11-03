@@ -834,7 +834,7 @@ gauges() {
   echo "${idle:--} ${swap:--}"
 }
 # takes the gauges' refresh lock at epoch $1, or one aged 30 s or more by its mtime, which a refresher killed mid-refresh left (a refresh
-# takes about 2 s); the take of an old one is a rename, so of two looks that find it old only one takes it
+# takes about 2 s); a look that read the old mtime can still rename a lock another look has just taken over, so a takeover can start more than one top
 gauges_lock() {
   local lock="$OPS/run-slot.gauges.lock" at
   mkdir "$lock" 2>/dev/null && return
