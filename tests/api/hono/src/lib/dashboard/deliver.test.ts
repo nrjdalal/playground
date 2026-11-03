@@ -1817,6 +1817,41 @@ describe("deliver to a herdr session", () => {
         expect(run.sent).toHaveLength(1)
       })
 
+      // a model or effort setting types its slash command the way a message types its words, so Claude Code holds it as it holds a message
+      describe("a setting", () => {
+        const COMMAND = "/model opus"
+        const settingRun = (held: string) => {
+          const run = after([held], [held])
+          run.deps.now = () => new Date(NOW)
+          const id = nextId()
+          const send = () =>
+            deliver({ actor, id, setting: { model: "opus" }, text: "", to: "dispatcher" }, run.deps)
+          return { ...run, send }
+        }
+
+        test("sent while the session compacts reads queued, not interrupted, with no Enter pressed into it", async () => {
+          const { enters, recorded, send } = settingRun(compacting(`❯ ${COMMAND}`))
+          expect(await send()).toMatchObject({ code: "QUEUED", ok: false })
+          expect(enters).toEqual([])
+          expect(recorded).toEqual([])
+        })
+
+        test("its retry under the same id while still held types nothing new", async () => {
+          const run = settingRun(compacting(`❯ ${COMMAND}`))
+          await run.send()
+          expect(await run.send()).toMatchObject({ code: "QUEUED", ok: false })
+          expect(run.sent).toEqual([{ surface: HERDR, text: COMMAND }])
+          expect(run.enters).toEqual([])
+        })
+
+        test("sent to an idle session reads delivered", async () => {
+          const run = settingRun(EMPTY)
+          expect(await run.send()).toMatchObject({ ok: true, sessionId: "s-dispatcher" })
+          expect(run.sent).toEqual([{ surface: HERDR, text: COMMAND }])
+          expect(run.recorded).toEqual(["Set dispatcher's model to opus"])
+        })
+      })
+
       // an API restart forgets the ids it queued, and the outbox's queuedAt stands in for them, so the message is read again and never pasted twice
       describe("after an API restart", () => {
         const restarted = (shown: string, ms: number) => {
