@@ -413,7 +413,8 @@ PY
 # a commit whose pre-commit build runs next build, a git commit (but -n) staging a file @web/next#build builds from, with -a one it will stage, or one it names as a path, or commit-slot.ts's build (commit-<worktree>) for one, goes through the queue as a big run (3 Nov, 04:05Z and 06:41Z: one built at 1.7 cores beside its own session's big run, and one beside a clone with load1 at 56)
 heavy_build() {
   local a c f dir="" commit="" all="" state=lead paths=()
-  case "$WHO" in commit-*) commit=1 ;; esac
+  # commit-slot.ts's build step (`bun run build`) alone, never its type checks, which build nothing
+  case "$WHO" in commit-*) for a in "$@"; do [ "$a" = build ] && commit=1; done ;; esac
   for a in "$@"; do
     case "$state" in
       lead) case "$a" in env|*=*) continue ;; esac; [ "$(basename -- "$a")" = git ] || break; state=git ;;
