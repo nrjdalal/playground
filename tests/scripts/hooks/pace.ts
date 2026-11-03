@@ -1,4 +1,10 @@
-// How many times longer a hook takes over a command than over a same-length `echo` of one word and `tail`, each the fastest of `runs` taken in turn, so a bound holds however busy the machine is; `tail` gives the baseline what makes the hook read the whole line.
+// The process's CPU time so far in ms, which a busy machine's waits leave out, where they stretch a clock's reading.
+const cpu = (): number => {
+  const { system, user } = process.cpuUsage()
+  return (system + user) / 1000
+}
+
+// How many times more CPU time a hook takes over a command than over a same-length `echo` of one word and `tail`, each the fastest of `runs` taken in turn, so a bound holds however busy the machine is; `tail` gives the baseline what makes the hook read the whole line.
 export async function overBaseline(
   check: (command: string) => Promise<unknown>,
   command: string,
@@ -9,12 +15,12 @@ export async function overBaseline(
   let base = Infinity
   let took = Infinity
   for (let i = 0; i < runs; i++) {
-    let started = performance.now()
+    let started = cpu()
     await check(baseline)
-    base = Math.min(base, performance.now() - started)
-    started = performance.now()
+    base = Math.min(base, cpu() - started)
+    started = cpu()
     await check(command)
-    took = Math.min(took, performance.now() - started)
+    took = Math.min(took, cpu() - started)
   }
   return took / base
 }
