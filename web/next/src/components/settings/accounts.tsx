@@ -19,11 +19,12 @@ import {
   ItemMedia,
   ItemTitle,
 } from "@/components/ui/item"
+import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { toast } from "@/components/ui/toast"
 import { ACCOUNTS_QUERY_KEY, type AccountRow, accountWords, readAccounts } from "@/lib/accounts"
 import { apiClient, unwrap } from "@/lib/api/client"
-import { withOwn } from "@/lib/own-account"
+import { markOwn } from "@/lib/own-account"
 import { PROVIDER_ICONS } from "@/lib/status-icons"
 import { useAccount } from "@/lib/system"
 
@@ -66,29 +67,31 @@ export function Accounts() {
     },
   })
 
-  // reads usage.accounts whole, so a row the page has not drawn yet is written back as it is
-  const markOwn = useMutation({
-    mutationFn: async ({ own, row, scope }: { own: boolean; row: AccountRow; scope: string }) => {
-      const read = await unwrap(
-        apiClient.v1.settings[":key"].$get({ param: { key: KEY }, query: {} }),
-      )
-      if (read.error) throw new Error(read.error.message)
-      const rows = Array.isArray(read.data.value)
-        ? (read.data.value as Record<string, unknown>[])
-        : []
-      const { error } = await unwrap(
-        apiClient.v1.settings[":key"].$put({
-          param: { key: KEY },
-          json: {
-            by: "Settings",
-            reason: `${own ? "Marked" : "Unmarked"} an account own in Settings`,
-            scope,
-            value: withOwn(rows, row.key, own),
-          },
-        }),
-      )
-      if (error) throw new Error(error.message)
-    },
+  const markOwnRow = useMutation({
+    mutationFn: ({ own, row, scope }: { own: boolean; row: AccountRow; scope: string }) =>
+      markOwn(row.key, own, {
+        read: async () => {
+          const { data, error } = await unwrap(
+            apiClient.v1.settings[":key"].$get({ param: { key: KEY }, query: {} }),
+          )
+          if (error) throw new Error(error.message)
+          return data.value
+        },
+        write: async (value) => {
+          const { error } = await unwrap(
+            apiClient.v1.settings[":key"].$put({
+              param: { key: KEY },
+              json: {
+                by: "Settings",
+                reason: `${own ? "Marked" : "Unmarked"} an account own in Settings`,
+                scope,
+                value,
+              },
+            }),
+          )
+          if (error) throw new Error(error.message)
+        },
+      }),
     onError: (error) => toast.add({ title: error.message, type: "error" }),
     onSettled: refresh,
   })
@@ -130,18 +133,24 @@ export function Accounts() {
                   </ItemDescription>
                 </ItemContent>
                 {row.provider === "claude" && (
-                  <label className="text-muted-foreground flex cursor-pointer items-center gap-2 text-xs max-sm:order-last max-sm:basis-full max-sm:justify-end">
-                    <span>Own account</span>
+                  <div className="flex items-center gap-2 max-sm:order-last max-sm:basis-full max-sm:justify-end">
                     <Switch
+                      id={`own-${row.key}`}
                       aria-label={`Own account: ${words.title}`}
                       checked={row.own}
-                      disabled={!data?.scope || markOwn.isPending}
+                      disabled={!data?.scope || markOwnRow.isPending}
                       onCheckedChange={(own) => {
-                        if (data?.scope) markOwn.mutate({ own, row, scope: data.scope })
+                        if (data?.scope) markOwnRow.mutate({ own, row, scope: data.scope })
                       }}
                       size="sm"
                     />
-                  </label>
+                    <Label
+                      htmlFor={`own-${row.key}`}
+                      className="text-muted-foreground text-xs font-normal peer-data-disabled:cursor-not-allowed peer-data-disabled:opacity-50"
+                    >
+                      Own account
+                    </Label>
+                  </div>
                 )}
                 <ItemActions>
                   <Hint content="Remove">
