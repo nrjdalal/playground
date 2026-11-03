@@ -1677,6 +1677,7 @@ var SHELL_SETS = new Set([
   "modules",
   "nameddirs",
   "options",
+  "parameters",
   "patchars",
   "pipestatus",
   "reply",
@@ -1693,7 +1694,8 @@ var SHELL_SETS = new Set([
   "zcurses_attrs",
   "zcurses_colors",
   "zcurses_keycodes",
-  "zcurses_windows"
+  "zcurses_windows",
+  "zgdbm_tied"
 ]);
 var SHELL_SETS_PREFIX = /^(?:BASH_|COMP_|READLINE_|ZFTP_|ZSH_|zsh_)/;
 var TIED = new Set([
