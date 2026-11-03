@@ -32,7 +32,7 @@ A session on `playground` and a pane on `playground-probes` both run under herdr
 
 ## It's working if
 
-- A step that needed your `!` before now finishes in a session's report, with its `rc=` line quoted.
+- A long run a session started in a pane finishes in its report, with its `rc=` line quoted.
 - A command a guard refuses in a session's Bash is refused in a pane too, with the same reason.
 - No `shell-` workspace stays open on `playground-probes` after the session that opened it is done.
 

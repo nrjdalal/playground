@@ -6,10 +6,10 @@ import { join } from "node:path"
 import { mainCheckout } from "../packages/scripts/src/main-checkout"
 
 const USAGE = `usage:
-  bun scripts/shell-pane.ts open <session name>
-  bun scripts/shell-pane.ts run <pane> '<command>'
-  bun scripts/shell-pane.ts read <pane> <marker> [--timeout <ms>]
-  bun scripts/shell-pane.ts close <workspace>`
+  bun run --no-env-file scripts/shell-pane.ts open <session name>
+  bun run --no-env-file scripts/shell-pane.ts run <pane> '<command>'
+  bun run --no-env-file scripts/shell-pane.ts read <pane> <marker> [--timeout <ms>]
+  bun run --no-env-file scripts/shell-pane.ts close <workspace>`
 
 export const SERVER = "playground-probes"
 const NAME = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
