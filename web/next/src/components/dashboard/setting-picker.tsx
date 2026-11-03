@@ -33,7 +33,7 @@ import {
 } from "@/lib/session-setting"
 
 // The session's model and effort in the composer's toolbar, beside the mode picker, as /model and /effort set them in a terminal: one menu with a radio group for each, where a pick sets that value on the session as the owner's own act (typed into a dispatcher, through the SDK on the hosted session).
-export function SettingPicker({ worker }: { worker: Worker }) {
+export function SettingPicker({ label, worker }: { label: string; worker: Worker }) {
   const reported = reportedSetting(worker)
   const [model, setModel] = useState<Pending<SessionModel> | null>(null)
   const [effort, setEffort] = useState<Pending<SessionEffort> | null>(null)
@@ -46,7 +46,7 @@ export function SettingPicker({ worker }: { worker: Worker }) {
       return { queued: false }
     },
     onSuccess: ({ queued }) => {
-      if (queued) toast.add({ title: `${worker.name} takes it once free`, type: "info" })
+      if (queued) toast.add({ title: `${label} takes it once free`, type: "info" })
     },
     onError: (error, setting) => {
       if ("model" in setting) setModel(null)
