@@ -101,7 +101,7 @@ jobs:
           retention-days: 7
 
   suite:
-    name: Suite (${{ matrix.shard }})
+    name: Suite (${{ matrix.shard }}${{ matrix.clock && ', clock ahead' || '' }})
     needs: shards
     timeout-minutes: 20
     runs-on: ubuntu-latest
@@ -109,6 +109,8 @@ jobs:
       fail-fast: false
       matrix:
         shard: ${{ fromJSON(needs.shards.outputs.matrix) }}
+        # each shard once on the real clock and once 30 days ahead (CLOCK_AHEAD_DAYS, test-sandbox.ts), side by side, so a test that takes its clock from two sources goes red on its own PR, not on the day the real clock reaches it
+        clock: ["", "30"]
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -146,24 +148,27 @@ jobs:
           bun packages/scripts/src/test-shards.ts files ${{ matrix.shard }} > "$RUNNER_TEMP/shard-files"
           NODE_ENV=test xargs bun packages/scripts/src/test-sandbox.ts < "$RUNNER_TEMP/shard-files"
         env:
+          CLOCK_AHEAD_DAYS: ${{ matrix.clock }}
           NODE_ENV: production
           SKIP_ENV_VALIDATION: true
           # the suite's parallel pass names the file it hangs in at its deadline, which lands well inside the job's 20 minutes
           TEST_PARALLEL_DEADLINE_MS: 600000
-          # the parallel pass writes each file's time into tests/timings.json, which the next run's Shards job merges
-          TEST_TIMINGS_UPDATE: 1
+          # the real clock's parallel pass writes each file's time into tests/timings.json, which the next run's Shards job merges
+          TEST_TIMINGS_UPDATE: ${{ !matrix.clock && '1' || '' }}
 
       - name: Gather this shard's timings
+        if: ${{ !matrix.clock }}
         run: mkdir -p "$RUNNER_TEMP/timings" && cp tests/timings.json "$RUNNER_TEMP/shard-files" "$RUNNER_TEMP/timings/"
 
       - name: Keep this shard's timings
+        if: ${{ !matrix.clock }}
         uses: actions/upload-artifact@v7
         with:
           name: timings-${{ matrix.shard }}
           path: ${{ runner.temp }}/timings
           retention-days: 7
 
-  # the gate's check name (REQUIRED_CHECKS in pr-merge/gates.ts): one result, green only when the lint and build job and every shard passed
+  # the gate's check name (REQUIRED_CHECKS in pr-merge/gates.ts): one result, green only when the lint and build job and every shard, on both clocks, passed
   audit-lint-build:
     name: Audit, Lint, and Build
     needs: [auto-check-build, suite]

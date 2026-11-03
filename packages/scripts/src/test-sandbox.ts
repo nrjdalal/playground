@@ -16,6 +16,21 @@ const SERIAL = [
   "tests/api/hono/src/lib/dev/launch.test.ts",
 ]
 
+// Files the clock-ahead pass (CLOCK_AHEAD_DAYS, below) leaves out, each for a clock its preload cannot move: a child process keeps the real clock while the test's own fixtures take the moved one, and a file's mtime comes from the OS's clock, so each reads red on the shift alone
+const CLOCK_EXEMPT: [pattern: string, reason: string][] = [
+  ["tests/api/hono/src/bin/dashboard-ask.test.ts", "runs bun run ask as a child"],
+  ["tests/api/hono/src/lib/dashboard/attachments.test.ts", "sweeps by a file's mtime"],
+  ["tests/api/hono/src/lib/dashboard/inbox-attachments.test.ts", "sweeps by a file's mtime"],
+  ["tests/packages/scripts/src/dm/send.test.ts", "takes a lock by its file's mtime"],
+  ["tests/packages/scripts/src/hook-differential.test.ts", "reads transcripts by their mtime"],
+  ["tests/packages/scripts/src/pr-merge/freeze-cli.test.ts", "runs ship:freeze as a child"],
+  ["tests/scripts/ops/run-slot*.test.ts", "runs run-slot.sh as a child"],
+  ["tests/scripts/ops/unstick/run.test.ts", "runs ops-unstick's Python as a child"],
+  ["tests/scripts/ops/usage/week-marks.test.ts", "runs the usage job's Python as a child"],
+  ["tests/scripts/roster.test.ts", "runs roster.ts as a child"],
+  ["tests/scripts/spawn*.test.ts", "runs spawn.sh as a child"],
+]
+
 // test:file skips the build, and a test importing an unbuilt package fails on a missing module, which hides the failure it reproduces; named only after a failed run, since lefthook's agents-rules runs test:file on a commit that builds nothing
 const unbuilt = existsSync("packages")
   ? readdirSync("packages")
@@ -33,9 +48,14 @@ const dropScratch = () => {
 // a worktree with none of the env files bun test loads (a skill-only chore; it skips .env.local) has no values for the apps' env schemas, so a test that imports one would fail its validation, unless the caller set the flag
 if (![".env", ".env.test", ".env.test.local"].some((file) => existsSync(file)))
   Object.assign(env, { SKIP_ENV_VALIDATION: process.env.SKIP_ENV_VALIDATION ?? "true" })
+// CI's clock-ahead pass: with CLOCK_AHEAD_DAYS set, every test file reads a clock that many days on, so a test that mixes a fixed clock with the real one fails on its own PR rather than on the day the real clock reaches it
+const ahead = Boolean(process.env.CLOCK_AHEAD_DAYS)
+const clock = ahead ? [`--preload=${join(import.meta.dir, "../../../tests/clock-ahead.ts")}`] : []
 const run = (argv: string[]) =>
-  Bun.spawnSync(["bun", "test", ...argv], { env, stdio: ["inherit", "inherit", "inherit"] })
-    .exitCode ?? 1
+  Bun.spawnSync(["bun", "test", ...clock, ...argv], {
+    env,
+    stdio: ["inherit", "inherit", "inherit"],
+  }).exitCode ?? 1
 
 // bun's own test timeout cannot stop a test blocked in sync code (a spawnSync that never returns held a worker 29 minutes once), so the parallel pass has a deadline: each worker marks the file it holds through a preload that runs once per test file, and a pass past the deadline is killed as a group and fails naming the files still marked
 const DEADLINE_MS = Number(process.env.TEST_PARALLEL_DEADLINE_MS) || 20 * 60_000
@@ -56,7 +76,7 @@ const held = () =>
   })
 let interrupted: NodeJS.Signals | undefined
 const runParallel = async (argv: string[]) => {
-  const child = Bun.spawn(["bun", "test", `--preload=${preload}`, ...argv], {
+  const child = Bun.spawn(["bun", "test", `--preload=${preload}`, ...clock, ...argv], {
     detached: true,
     env,
     stdio: ["inherit", "inherit", "inherit"],
@@ -117,7 +137,10 @@ if (missing.length > 0) {
 const serial = SERIAL.filter((file) =>
   paths.map(bare).some((path) => path === "." || file === path || file.startsWith(`${path}/`)),
 )
-const rest = paths.filter((path) => !SERIAL.includes(bare(path)))
+// a shard names its files, which no ignore pattern drops, so the clock-ahead pass drops its exempt ones here
+const exempt = (path: string) =>
+  ahead && CLOCK_EXEMPT.some(([pattern]) => new Bun.Glob(pattern).match(bare(path)))
+const rest = paths.filter((path) => !SERIAL.includes(bare(path)) && !exempt(path))
 
 console.error(
   `test-sandbox: ${workers} workers with a ${Math.round(DEADLINE_MS / 1000)}s deadline, then ${serial.length} serial files`,
@@ -130,6 +153,7 @@ const parallel =
         ...timings,
         ...(update ? ["--update-timings"] : []),
         ...SERIAL.map((file) => `--path-ignore-patterns=${file}`),
+        ...(ahead ? CLOCK_EXEMPT.map(([pattern]) => `--path-ignore-patterns=${pattern}`) : []),
         ...rest,
       ])
     : 0
