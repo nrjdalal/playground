@@ -16,6 +16,7 @@ import {
   type InboxItem,
   inboxOrder,
   isGo,
+  relayText,
   savesDraft,
   secretInputSchema,
   type SecretSink,
@@ -695,6 +696,32 @@ describe("an answer", () => {
     expect(deliveryText(it, { choice: "draft", editedText: "hey" })).toMatch(
       /Save it as a Slack draft with slack_send_message_draft, .* Do not send it\. Save it with changes, as: hey$/,
     )
+  })
+
+  // the dashboard uploads nothing to Slack: Send types these words into the poster, so a draft's pictures stay on its card
+  test("sends a draft's words alone, its pictures left on the card (PG-501)", () => {
+    const words = { text: "the fix is live", to: "@Merritt" }
+    const plain = item({ kind: "draft", preview: words })
+    const shown = item({
+      kind: "draft",
+      preview: {
+        ...words,
+        attachments: [
+          { id: "3f0e7a52-1c4b-4d2a-9e6f-0000000000a1.png", kind: "image", name: "before.png" },
+        ],
+      },
+    })
+    for (const answer of [
+      { choice: "send" },
+      { choice: "send", editedText: "hey" },
+      { choice: "draft" },
+    ] as const) {
+      expect(deliveryText(shown, answer)).toBe(deliveryText(plain, answer))
+      const relay = relayText(shown, answer)
+      expect(relay).toBe(relayText(plain, answer))
+      expect(relay).not.toContain("before.png")
+      expect(relay).not.toContain("3f0e7a52-1c4b-4d2a-9e6f-0000000000a1")
+    }
   })
 })
 

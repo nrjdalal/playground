@@ -1,4 +1,4 @@
-// A pr:merge stopped by SIGHUP, SIGINT or SIGTERM still lets go of what it holds: once any squash it started settles, each cleanup registered here runs, oldest first, so the merge lock goes before the slower types worktree, then the process exits as the signal's default would.
+// A pr:merge stopped by SIGHUP, SIGINT or SIGTERM still lets go of what it holds: once any squash it started settles, each cleanup registered here runs, newest first, so the types gate's running step is killed and waited for before the merge lock goes, since every merge checks out into the one worktree it runs in, then the process exits as the signal's default would.
 import { constants } from "node:os"
 
 export type StopSignal = "SIGHUP" | "SIGINT" | "SIGTERM"
@@ -17,7 +17,7 @@ const stop = async (signal: StopSignal) => {
   if (stopped) exit(signal)
   stopped = signal
   await settling?.catch(() => {})
-  for (const cleanup of cleanups) {
+  for (const cleanup of [...cleanups].reverse()) {
     await cleanup(signal).catch((err) =>
       console.error(`a cleanup on ${signal} failed: ${err instanceof Error ? err.message : err}`),
     )

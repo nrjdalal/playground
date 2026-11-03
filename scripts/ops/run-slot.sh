@@ -216,6 +216,13 @@ if [ "${1:-}" = slots ]; then
   SLOTS_ONLY=1 CAN_TAKE=run-slot
   set -- ops-unstick -- true
 fi
+# run-slot.sh room: prints "<lanes> <held> <free> <waiters>": the lanes slots counts, how many a run holds, how many a medium run could take now (the open, unheld ones while its load units fit beside the held runs' and slots.peers', less the reserve), and the live tickets in the queue, which spawn.sh's slots gate reads
+ROOM_ONLY=
+if [ "${1:-}" = room ]; then
+  [ $# -eq 1 ] || { echo "usage: run-slot.sh room" >&2; exit 2; }
+  ROOM_ONLY=1 CAN_TAKE=run-slot
+  set -- ops-unstick -- true
+fi
 if [ "${1:-}" = can-take ]; then
   [ $# -eq 3 ] || { echo "usage: run-slot.sh can-take <slot> <who>" >&2; exit 2; }
   case "$2" in run-slot|run-slot-2|run-slot-3|run-slot-4) CAN_TAKE=$2 ;; *) echo "run-slot.sh: no slot $2" >&2; exit 2 ;; esac
@@ -823,6 +830,18 @@ fi
 PEERS=$(setting slots.peers 2>/dev/null | python3 -I -c 'import json, sys; [print(p) for p in json.load(sys.stdin) if isinstance(p, str)]' 2>/dev/null)
 [ -n "$HEAD_ONLY" ] && { first_waiter; exit 0; }
 [ -n "$SLOTS_ONLY" ] && { echo $(($(capacity) / 2)); exit 0; }
+if [ -n "$ROOM_ONLY" ]; then
+  held=0
+  for s in run-slot run-slot-2 run-slot-3 run-slot-4; do
+    reclaim "$OPS/$s"
+    [ -d "$OPS/$s" ] && held=$((held + 1))
+  done
+  c=$(capacity)
+  free=0
+  fits "$(held_units)" 2 $((c - $(reserve "$c"))) && free=$((c / 2 - held))
+  echo "$((c / 2)) $held $free $(ordered_waiters | grep -c .)"
+  exit 0
+fi
 
 if [ -n "$CAN_TAKE" ]; then
   reclaim "$OPS/$CAN_TAKE"

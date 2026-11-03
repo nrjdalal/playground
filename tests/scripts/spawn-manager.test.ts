@@ -624,6 +624,12 @@ describe("a launch names the main checkout in PLAYGROUND_REPO", () => {
       expect(Bun.spawnSync(["git", ...args], { cwd: main, stderr: "ignore" }).exitCode).toBe(0)
     mkdirSync(join(main, "scripts"))
     writeFileSync(join(main, "scripts", "spawn.sh"), readFileSync(script))
+    // A worker start's slots gate reads the checkout's own run-slot.sh.
+    mkdirSync(join(main, "scripts", "ops"))
+    writeFileSync(
+      join(main, "scripts", "ops", "run-slot.sh"),
+      readFileSync(join(root, "scripts", "ops", "run-slot.sh")),
+    )
     // spawn.sh resolves its data folder through the checkout's own resolver.
     mkdirSync(join(main, "packages", "env", "src"), { recursive: true })
     for (const file of ["aliases.ts", "data-dir.ts"])

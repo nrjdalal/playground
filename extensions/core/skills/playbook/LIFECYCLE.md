@@ -27,7 +27,7 @@ Sessions that work together share a workspace as full-height columns ([SESSIONS.
 
 - **Workers** are spawned by the Builder, one per chore, and close with their checkers once their chore is done.
   A worker ends when its chore is done: its PR merged (or dropped with the Builder's ok), its branch pushed (`git push -u origin <branch>`), so its commits show on origin even with no PR,
-  its worktrees, branches, containers and probes cleaned up from the main checkout (`cd` there before `git worktree remove`, since the session sits inside its own last worktree: the one `cd` a worker runs), and its final report sent, naming the pushed head.
+  its worktrees, branches, containers and probes cleaned up from the main checkout (`cd` there before `playground rm --worktree <path>`, since the session sits inside its own last worktree: the one `cd` a worker runs), and its final report sent, naming the pushed head.
   Remove a worktree another session holds only once that session is closed or off the roster and no live session's cwd is inside it: a clean tree is not a free tree, since a reviewer keeps its worktree across PRs (**rounds**).
   The Builder then closes its workspace, which takes any split still open in it, and its slot returns to the pool.
   Ending is automatic, by [SESSIONS.md](SESSIONS.md#end)'s path: `pr:merge` and the train's land end the merged PR's worker, reviewer and tester, and ops-tick's auto-end beat ends the rest every 5 minutes, each with one line to its lead.
@@ -65,7 +65,7 @@ Sessions that work together share a workspace as full-height columns ([SESSIONS.
   never marked told since a resume keeps the session id and the line returns with the next outage,
   rather than queueing it for a relay that is down, naming the outcome to ops, and load past 30 once a crossing), the GLM credits log line, the optimizer's wake words,
   the canary pull (every clean worktree on `canary` fast-forwarded to origin's head every 5 minutes,
-  then installed through run-slot when the pull changed `bun.lock` or a `package.json` and again each beat until one exits 0, a failed pull or install told to ops once until its words change),
+  its fast-forward and install run back to back inside one run-slot slot when the incoming change touches `bun.lock` or a `package.json`, so no session runs new code on old `node_modules` while the install waits for a slot, and the install runs again each beat until one exits 0, a failed fetch, pull or install told to ops once until its words change),
   the trash purge (hourly, `purgeTrash` of `@packages/safe-delete` removing each batch in the data folder's `trash` over 7 days old, `playground rm`'s and the dashboard's alike, then the oldest while the disk has under 50 GB free, its one recursive delete, one line to `ops/log/trash-purge.log`),
   the turbo prune (weekly, each file in the shared turbo cache `~/.cache/turbo/playground` last modified over 7 days ago removed, one line to `ops/log/turbo-prune.log`),
   the dashboard watch (every minute: once the live dashboard's `/api/health` has failed 5 minutes in a row, a gap of over 2 minutes with no check starting the count again, one macOS banner and one ops line through `notify.sh` with `NOTIFY_MAC=1`, since the Inbox shows only on the dashboard, and one more when it answers again,

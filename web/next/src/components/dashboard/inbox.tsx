@@ -823,6 +823,7 @@ export function InboxCard({
             onChange={(event) => setDraft(event.target.value)}
           />
         </div>
+        {item.preview.attachments ? <Attachments items={item.preview.attachments} /> : null}
       </div>
     ) : null
 
