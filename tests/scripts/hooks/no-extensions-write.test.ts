@@ -334,7 +334,7 @@ describe("a direct write into the extensions root is refused, naming the owner's
     expect(reason).toContain("split it into shorter calls")
   })
 
-  // a scan back for each brace's open takes over x1000 the baseline's CPU time, where the stack of opens stays under x60
+  // with a scan back for each brace's open this ran past the test's 60 s, where the stack of opens stays under x60 the baseline's CPU time
   test("a long run of closing braces ahead of the CLI is read in a time linear in its length", async () => {
     const command = `${"ls; }\n".repeat(21_000)}playground ext sync`
     expect(await bash(command, "/tmp")).toContain("no-extensions-write hook refuses")
@@ -349,7 +349,7 @@ describe("a direct write into the extensions root is refused, naming the owner's
   }
   const fill = (head: string, unit: string, tail: string) =>
     head + unit.repeat(Math.floor((130_000 - head.length - tail.length) / unit.length)) + tail
-  // a native step the walk cannot count (a backtracking regex, a string built whole, an array shifted), bounded by its CPU time over a same-length echo; with the guard reverted it ran x500 to x1200
+  // a native step the walk cannot count (a backtracking regex, a string built whole, an array shifted), bounded by its CPU time over a same-length echo; with the guard reverted it ran x400 to x950
   test.each([
     ["a brace with no close", fill("echo {", ",", ""), false, 50],
     [
@@ -401,7 +401,7 @@ describe("a direct write into the extensions root is refused, naming the owner's
     60_000,
   )
 
-  // doubling text, held at 1 MB and a script at 128 KB, is bounded by its steps; a native step (a backtracking width match, a copy per read, a walk up a long path) by its CPU time over a same-length echo, which ran x1800 to x12000 with the guard reverted
+  // doubling text, held at 1 MB and a script at 128 KB, is bounded by its steps; a native step (a backtracking width match, a copy per read, a walk up a long path) by its CPU time over a same-length echo, which ran x440 and past with the guard reverted
   test.each<[string, string, number | undefined, number | undefined]>([
     [
       "24 doubling cat stages",
