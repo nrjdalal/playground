@@ -123,10 +123,46 @@ describe("zaiQuota", () => {
     await expect(zaiQuota("", ok)).rejects.toThrow("Keychain")
   })
 
-  test("masks the key in a network failure", async () => {
-    const broken = (async () =>
-      Promise.reject(new Error("boom for zai_key"))) as unknown as typeof fetch
-    await expect(zaiQuota("zai_key", broken)).rejects.toThrow("boom for ***")
+  const counted = (answers: (() => Promise<Response>)[]) => {
+    let calls = 0
+    const impl = (async () =>
+      answers[Math.min(calls++, answers.length - 1)]!()) as unknown as typeof fetch
+    return { calls: () => calls, impl }
+  }
+  const dns = () => Promise.reject(new Error("getaddrinfo ENOTFOUND api.z.ai"))
+
+  test("masks the key in a network failure that outlasts every retry", async () => {
+    const broken = counted([() => Promise.reject(new Error("boom for zai_key"))])
+    const waits: number[] = []
+    await expect(
+      zaiQuota("zai_key", broken.impl, async (ms) => void waits.push(ms)),
+    ).rejects.toThrow("boom for ***")
+    expect(broken.calls()).toBe(waits.length + 1)
+    expect(waits.length).toBeGreaterThan(0)
+  })
+
+  test("retries a network failure, such as DNS right after boot, and hands back the answer once the network is back", async () => {
+    const booting = counted([dns, dns, () => ok("", undefined) as Promise<Response>])
+    const waits: number[] = []
+    const data = (await zaiQuota("zai_key", booting.impl, async (ms) => void waits.push(ms))) as {
+      limits: unknown[]
+    }
+    expect(data.limits).toHaveLength(2)
+    expect(booting.calls()).toBe(3)
+    expect(waits).toHaveLength(2)
+    expect(waits.every((ms) => ms > 0)).toBe(true)
+  })
+
+  test("takes Z.ai's own answer of a failure at once, with no retry", async () => {
+    const refused = counted([
+      async () => new Response(JSON.stringify({ code: 1001, success: false }), { status: 200 }),
+    ])
+    const waits: number[] = []
+    await expect(
+      zaiQuota("zai_key", refused.impl, async (ms) => void waits.push(ms)),
+    ).rejects.toThrow("code 1001")
+    expect(refused.calls()).toBe(1)
+    expect(waits).toEqual([])
   })
 })
 

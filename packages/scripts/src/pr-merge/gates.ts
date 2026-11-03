@@ -32,7 +32,7 @@ export type PrFacts = {
   // Who opened the PR (its GitHub login).
   author: string
   base: string
-  // The PR's description, held to the PR template the Changelog reads; absent only in a test, which skips that gate.
+  // The PR's description, held to the PR template the Changelog reads, its Evidence naming each changed doc; absent only in a test, which skips that gate.
   body?: string
   // origin/canary now, and the tree of the head merged with it (git merge-tree --write-tree); mergeTree is null when they conflict or it could not be read.
   canary: string
@@ -190,8 +190,11 @@ function keepsCanary(lost: Lost): Gate {
   const where = [...byFile]
     .map(([path, merges]) => `${path} (dropped in ${[...merges].join(", ")})`)
     .join(", ")
+  const redo = lost.every((line) => line.path.startsWith("scripts/hooks/bundled/"))
+    ? `these are bundles rebuilt inside the merge: redo that merge plainly (reset the branch to the commit before it, then git merge origin/${BASE}), commit the merge with ${BASE}'s bundles as they are, then run \`bun run hooks:bundle\` and commit the rebuild on its own, and re-gate`
+    : `redo that merge plainly (reset the branch to the commit before it, then git merge origin/${BASE}, resolving each conflict with both sides' meaning) and re-apply your change in a commit of your own, or keep the lines, and re-gate`
   return {
-    detail: `the squash would delete ${lost.length} line${lost.length === 1 ? "" : "s"} ${BASE} added that a merge of ${BASE} dropped, which git's own merge keeps: ${where}. Only a squash that holds them again clears this, so a new merge of ${BASE} leaves them lost: redo that merge plainly (reset the branch to the commit before it, then git merge origin/${BASE}, resolving each conflict with both sides' meaning) and re-apply your change in a commit of your own, or keep the lines, and re-gate`,
+    detail: `the squash would delete ${lost.length} line${lost.length === 1 ? "" : "s"} ${BASE} added that a merge of ${BASE} dropped, which git's own merge keeps: ${where}. Only a squash that holds them again clears this, so a new merge of ${BASE} leaves them lost: ${redo}`,
     name,
     ok: false,
   }
@@ -271,7 +274,7 @@ export function gatesOf(facts: PrFacts, { gitGuardian, outsideAuthor }: GateOpti
   ]
   gates.push(ciGate(facts.checks, { gitGuardian, required: REQUIRED_CHECKS }))
   if (facts.body !== undefined) {
-    const why = bodyRefusal(facts.body)
+    const why = bodyRefusal(facts.body, facts.files)
     gates.push(
       why
         ? { detail: `${why}; fix the body (no push)`, name: "body", ok: false }
