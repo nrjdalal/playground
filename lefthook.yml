@@ -24,7 +24,8 @@ pre-commit:
       run: bunx lint-staged --verbose
       stage_fixed: true
     agents-rules:
-      # the rule test pins each ALWAYS rule by its opening words; its own glob, so a Markdown-only commit still runs it
+      # the rule test pins each ALWAYS rule by its opening words; its own glob, so a Markdown-only commit still runs it; priority 5, so a broken pin stops the commit before the build and its queue
+      priority: 5
       glob:
         - ".agents/dashboard/*.md"
         - "AGENTS.md"
