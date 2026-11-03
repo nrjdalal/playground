@@ -480,6 +480,7 @@ function walk(lx, scope, nested, inherit) {
       lx.commands.push(done);
     }
     cmd = fresh();
+    cmd.follows = op;
     if (pipe) {
       cmd.stdin = done;
       cmd.detached = true;
@@ -505,7 +506,7 @@ function walk(lx, scope, nested, inherit) {
         lx.i++;
     } else if (c === ")") {
       lx.i++;
-      end(";");
+      end(")");
       if (nested)
         return;
     } else if (c === "(") {
@@ -653,6 +654,8 @@ function word(lx) {
     out.unknown ??= "a brace expansion";
   if (GLOB_CHARS.test(bare))
     out.glob = true;
+  if (marked(out.value))
+    out.raw = src.slice(start, lx.i);
   return out;
 }
 var GLOB_CHARS = /[*?[{(]/;
@@ -703,7 +706,7 @@ function dollar(lx) {
     lx.i += 2;
     const from = lx.commands.length;
     nest(lx);
-    return substituted(lx.commands.slice(from));
+    return substituted(lx.commands.slice(from), lx.known);
   }
   if (next === "{") {
     const end = balanced(src, lx.i + 1, "{", "}");
@@ -717,6 +720,10 @@ function dollar(lx) {
     while (/\w/.test(src[lx.i] ?? ""))
       lx.i++;
     return variable(src.slice(from, lx.i));
+  }
+  if (next === "$") {
+    lx.i += 2;
+    return { value: "99999" };
   }
   if (/[\d@*#?$!-]/.test(next)) {
     lx.i += 2;
@@ -770,10 +777,13 @@ function backtick(lx) {
   list({ ...lx, i: 0, src: inner }, lx.scopes.push(lx.scope) - 1, false);
   return unknown("a command substitution");
 }
-function substituted(inner) {
+function substituted(inner, known) {
   const [only] = inner;
   if (inner.length !== 1 || only.stdin || only.group)
     return unknown("a command substitution");
+  const made = mktempPath(only, known);
+  if (made)
+    return { value: made };
   const [first, ...args] = only.words;
   const plainCat = first?.value === "cat" && !first.unknown && !first.reads?.length;
   const input = only.redirects[0];
@@ -787,6 +797,21 @@ function substituted(inner) {
     return { reads: [input.target], value: READ };
   }
   return unknown("a command substitution");
+}
+var MKTEMP_FLAGS = new Set(["d", "q"]);
+var MKTEMP_LONG = new Set(["--directory", "--quiet"]);
+function mktempPath(cmd, known) {
+  const [first, ...args] = cmd.words;
+  if (!first || first.quoted || first.value !== "mktemp" || cmd.redirects.length > 0)
+    return;
+  if (!known.TMPDIR)
+    return;
+  const flag = ({ quoted, value }) => !quoted && (MKTEMP_LONG.has(value) || /^-[a-z]+$/.test(value) && value.slice(1).split("").every((c) => MKTEMP_FLAGS.has(c)));
+  const templates = args.filter((word) => !flag(word));
+  const [template] = templates;
+  if (templates.length > 1 || template?.value.startsWith("-") || marked(template?.value ?? ""))
+    return;
+  return template ? template.value : `${known.TMPDIR.replace(/\/$/, "")}/tmp.mktemp`;
 }
 var SPLIT = /^(?:-[0iv]*S|--split-string(?:=|$))(.*)$/;
 var READINGS = 16;
@@ -1273,7 +1298,7 @@ var FILE_TOOLS = {
   NotebookEdit: "notebook_path",
   Write: "file_path"
 };
-var INSTEAD = "the main checkout is what every installed skill follows, so it stays clean. Run it in your own worktree under .claude/worktrees/ (git worktree add .claude/worktrees/<name> -b <branch> origin/canary), or start lefthook from a script with cwd set to a scratch repo, as tests/lefthook.test.ts does.";
+var INSTEAD = "the main checkout is what every installed skill follows, so it stays clean. Run it in your own worktree under .claude/worktrees/ (git worktree add --no-track .claude/worktrees/<name> -b <branch> origin/canary), or start lefthook from a script with cwd set to a scratch repo, as tests/lefthook.test.ts does.";
 var refuse = (what, fix = INSTEAD) => `no-main-checkout hook refuses ${what}: ${fix}`;
 var BUN_SCRIPTS = new Set(["build", "check-types", "test", "test:file"]);
 var RUNNERS = new Set(["npx"]);
@@ -1374,7 +1399,7 @@ var GIT_MOVES = new Set([
 ]);
 var APPLY_READS = new Set(["--check", "--numstat", "--stat", "--summary"]);
 var STEP_FIVE = /^(?:-q |--quiet )?--ff-only (?:-q |--quiet )?origin\/main$/;
-var GIT_FIX = "it moves the HEAD, index or files of the main checkout, which every installed skill, hook and ops job runs from. Name your own tree on every git call, git -C <your worktree> ..., after git -C <your worktree> rev-parse --show-toplevel names it; the main checkout moves only by the release skill's step 5, git -C <main checkout> fetch -q origin main && git -C <main checkout> merge --ff-only -q origin/main, a stray local commit on its main goes by git -C <main checkout> reset --keep origin/main while its tree is clean, and a worktree is made under .claude/worktrees/ by git worktree add.";
+var GIT_FIX = "it moves the HEAD, index or files of the main checkout, which every installed skill, hook and ops job runs from. Name your own tree on every git call, git -C <your worktree> ..., after git -C <your worktree> rev-parse --show-toplevel names it; the main checkout moves only by the release skill's step 5, git -C <main checkout> fetch -q origin main && git -C <main checkout> merge --ff-only -q origin/main, a stray local commit on its main goes by git -C <main checkout> reset --keep origin/main while its tree is clean, and a worktree is made under .claude/worktrees/ by git worktree add --no-track .claude/worktrees/<name> -b <branch> origin/canary.";
 function keepReset(sub, rest, cwd) {
   if (sub !== "reset" || rest.join(" ") !== "--keep origin/main" || !cwd)
     return false;

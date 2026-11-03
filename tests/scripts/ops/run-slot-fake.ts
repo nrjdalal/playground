@@ -48,6 +48,7 @@ export type Setup = {
   roster?: unknown
   sandboxed?: boolean
   swapins?: number
+  topDelay?: number
 }
 
 // A scratch state folder and config folder, with a fake sysctl on PATH giving the load asked for (load5 and load15 as load1 unless given) and normal memory, a fake uptime giving the same load, a fake top whose second sample reads the CPU idle share asked for, and a fake vm_stat whose last row reads the swap-ins asked for; sandboxed, sysctl and ps refuse every read as Claude Code's sandbox does, so the load comes from uptime alone.
@@ -64,6 +65,7 @@ export const machine = ({
   roster,
   sandboxed = false,
   swapins = 0,
+  topDelay = 0,
 }: Setup = {}) => {
   const root = mkdtempSync(join(tmpdir(), "run-slot-"))
   dirs.push(root)
@@ -95,10 +97,10 @@ esac
     `#!/bin/bash\necho "22:15  2 users, load averages: ${load1.toFixed(2)} ${load5.toFixed(2)} ${load5.toFixed(2)}"\n`,
   )
   chmodSync(join(bin, "uptime"), 0o755)
-  // top's first sample reads since boot and its second the last interval, as `top -l 2 -n 0` prints them; each call is a line in top.log
+  // top's first sample reads since boot and its second the last interval, as `top -l 2 -n 0` prints them, after topDelay seconds as the real one's samples take; each call is a line in top.log
   writeFileSync(
     join(bin, "top"),
-    `#!/bin/bash\necho "$*" >> ${join(root, "top.log")}\necho "CPU usage: 1.00% user, 1.00% sys, 98.00% idle "\necho "CPU usage: ${((100 - idle) / 2).toFixed(2)}% user, ${((100 - idle) / 2).toFixed(2)}% sys, ${idle}% idle "\n`,
+    `#!/bin/bash\necho "$*" >> ${join(root, "top.log")}\n${topDelay ? `sleep ${topDelay}\n` : ""}echo "CPU usage: 1.00% user, 1.00% sys, 98.00% idle "\necho "CPU usage: ${((100 - idle) / 2).toFixed(2)}% user, ${((100 - idle) / 2).toFixed(2)}% sys, ${idle}% idle "\n`,
   )
   chmodSync(join(bin, "top"), 0o755)
   // vm_stat -c 2 1's first row counts since boot and its last the last second, as the real one prints them

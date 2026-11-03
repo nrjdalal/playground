@@ -775,15 +775,21 @@ export async function fetchSubagentSteps(sessionId: string, agentId: string) {
   )
 }
 
-// Types a message into a live session's terminal through the API, which records it in the console's activity; attachments are the ids of files uploaded for it, whose paths follow the words, and thread the thread it is routed to by the marker the API puts first, or newThread to open one with it.
+// Types a message into a live session's terminal through the API, which records it in the console's activity; attachments are the ids of files uploaded for it, whose paths follow the words, and thread the thread it is routed to by the marker the API puts first, or newThread to open one with it; queuedAt is when Claude Code first held it, for an API that restarted since.
 export async function sendMessage(
   to: string,
   text: string,
   attachments: string[] = [],
   id?: string,
-  { newThread, threadId }: { newThread?: boolean; threadId?: string } = {},
+  {
+    newThread,
+    queuedAt,
+    threadId,
+  }: { newThread?: boolean; queuedAt?: string; threadId?: string } = {},
 ) {
   return unwrap(
-    apiClient.v1.messages.$post({ json: { attachments, id, newThread, text, threadId, to } }),
+    apiClient.v1.messages.$post({
+      json: { attachments, id, newThread, queuedAt, text, threadId, to },
+    }),
   )
 }
