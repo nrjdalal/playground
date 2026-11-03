@@ -101,6 +101,7 @@
     A fixture stack reports its fixture's usage.json login (the shipped one's is made up), else its made-up `account`, and never opens the real config.
   - `capacity` (`capacity.ts`): room for more workers at 1.3 GB and a core each, the lesser of memory room (macOS's free share less a 15% reserve) and CPU room (the cores less the 5-minute load), and none while pressure is warn or critical; swap is shown but not judged, since macOS grows it as it needs it.
     Its `line` says the count and what limits it.
+    `orchestrators` is the same read for more orchestrators, each a claude with no dev stack at 0.6 GB and 0.1 cores (`PER_ORCHESTRATOR`), its own `count`, `limitedBy` and `line`.
     `idle` names each worker's dev stack whose processes used under 1% of a core in every sample for 15 minutes, with what stopping them frees; a runner's or a manager's stack is never offered, and detached processes are not either, since one may be shared (the portless proxy).
   - `pulls` (`api/hono/src/lib/dashboard/repo.ts`): the pull requests page of the checkout's `origin` remote when it is on GitHub (`pullsUrlOf`: https or ssh, with or without `.git`, to `https://github.com/<owner>/<repo>/pulls`), read once a process with `git remote get-url origin`, else null; the sidebar header's GitHub icon links there.
     A fixture stack reads the fixture's made-up `origin` instead.

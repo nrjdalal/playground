@@ -83,7 +83,7 @@ The steps to spawn and brief a session are in [SESSIONS.md](SESSIONS.md#spawn), 
 - Before a lead spawns a worker, it reads the machine's room from the live dashboard: `bun run --cwd <dashboard checkout> verify system`, which finds the dashboard's stack through portless.
   Room is held in code: `scripts/spawn.sh`, the one way a session starts another ([SESSIONS.md](SESSIONS.md#spawn)), runs a capacity gate on load, memory, for a new worker a run-slot lane free with the load units for a run, or an empty queue, and the backend's usage, and refuses with the gate and its reading (the room is the cores in use, not a count of slots),
   and refuses a name a live session already holds.
-  It has no bypass: past the gate only the owner starts a session, from his own terminal, whose sessions load no factory hook, or a PR changes the gate, and a priority task takes the room its lead frees by closing its lowest-priority worker (below).
+  Its one bypass is the first dispatcher's ([SESSIONS.md](SESSIONS.md#spawn)); past the gate otherwise only the owner starts a session, from his own terminal, whose sessions load no factory hook, or a PR changes the gate, and a priority task takes the room its lead frees by closing its lowest-priority worker (below).
   Spawn a new session only for a chore that needs its own context; a short job (a probe-sized check, a one-off script) runs as a background task in the session that wants it.
   Within them, spawn as many as its `system` line's room allows, and at "No room" spawn none and queue the task with that line as the reason.
   Room is the machine's, not usage's: count every membership, and trim no work for usage while any account has room.
@@ -95,7 +95,7 @@ The steps to spawn and brief a session are in [SESSIONS.md](SESSIONS.md#spawn), 
   Ready means its brief exists: a worker's order and a backlog entry each carry the brief's path, written when the item is queued.
   The owner's own asks go ahead of the chores the factory proposed, and a fix for live breakage or security goes ahead of both: the Planner folds his asks and the other entries into the lanes, his asks first, and a slot that opens takes what ROSTER.md's step 1 names ([ROSTER.md](ROSTER.md)).
 - A task the owner calls priority starts now: in the same turn, when the slots are full or `verify system` reads No room, close the lowest-priority worker at a safe point (a WIP commit, a handoff ([SESSIONS.md](SESSIONS.md#write-a-handoff)), closed as [SESSIONS.md](SESSIONS.md#end) End says),
-  which frees its room so spawn.sh passes (at the load cap, wait for the load to fall), and spawn the task's worker; past the gate only the owner starts a session, from his own terminal, whose sessions load no factory hook, or a PR changes the gate.
+  which frees its room so spawn.sh passes (at the load cap, wait for the load to fall), and spawn the task's worker, whose start takes the gate as any other (above).
   Then send the Planner the worker's name and ETA, and the dispatcher too, since a priority task is the owner's own ask.
   It never waits in the backlog.
 - A small task going out alone (one concern, a small diff, under about 30 minutes) runs as an A/B pair: two workers on the same brief and base, differing in one variable (such as brief style; model and effort stay Opus at high, [SESSIONS.md](SESSIONS.md#spawn)), one reviewer scoring both PRs blind as X and Y. The winner merges,
