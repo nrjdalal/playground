@@ -81,7 +81,7 @@ describe("every write on the owner rung is guarded by its method, not its path",
 
   // A router put on the owner rung another way (a shared constant) would drop out of the source check, so the routers the API mounts at the dashboard's paths must be among those walked.
   test("every router the API mounts at a dashboard path is walked as owner-rung", async () => {
-    const index = await Bun.file(join(ROUTERS, "..", "index.ts")).text()
+    const index = await Bun.file(join(ROUTERS, "..", "local.ts")).text()
     const mounted = [...index.matchAll(/\.route\(\s*"\/([\w/-]+)"\s*,\s*(\w+)\s*\)/g)].map(
       ([, at, name]) => ({ at: at!, name: name! }),
     )

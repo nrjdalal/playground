@@ -12,7 +12,7 @@ import {
 } from "@/components/dashboard/viewer/documents"
 import { IMAGE_VIEWER } from "@/components/dashboard/viewer/image"
 
-// A file an ask carries, as the viewer and the card's thumbnails show it; a before and an after folded into one slide carry both (foldPairs).
+// A file an ask, a draft or a read-only update carries, as the viewer and the card's thumbnails show it; a before and an after folded into one slide carry both (foldPairs).
 export type ViewerItem = InboxAttachment & {
   pair?: { after: InboxAttachment; before: InboxAttachment }
 }

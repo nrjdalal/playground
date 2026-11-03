@@ -17,4 +17,6 @@ export default definePackageConfig({
   env,
   getSafeEnv,
   deps: { alwaysBundle: [/^@packages\//], neverBundle: ["bun"] },
+  // hosted.ts stands alone too, so build:vercel bundles the hosted build's graph and no local route
+  entry: ["src/hosted.ts", "src/index.ts"],
 })

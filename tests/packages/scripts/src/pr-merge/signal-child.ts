@@ -1,4 +1,4 @@
-// A pr:merge stopped mid-run, for merge-signal.test.ts, each mode printing "ready" once there: `lock <root>` takes the merge lock for #112 and waits inside it; `types <root>` runs the types gate with a stub git, its worktree under root, inside its one step, which writes its pid to root/step.pid; `merge <root> facts|squash` runs prMerge with stub gh and git, paused at reading the PR (answered when a signal comes) or inside the squash (answered on a line of stdin), printing each gh call it makes.
+// A pr:merge stopped mid-run, for merge-signal.test.ts, each mode printing "ready" once there: `lock <root>` takes the merge lock for #112 and waits inside it; `types <root>` runs the types gate with a stub git, its worktree under root, inside its one step, which writes its pid to root/step.pid; `held-types <root>` takes the merge lock for #112 first, and its step, on its TERM, writes to root/step-saw whether the lock was still held half a second on; `merge <root> facts|squash` runs prMerge with stub gh and git, paused at reading the PR (answered when a signal comes) or inside the squash (answered on a line of stdin), printing each gh call it makes.
 import { mkdirSync } from "node:fs"
 import { join } from "node:path"
 
@@ -13,7 +13,8 @@ const HEAD = "69a6a4c5e6caf46c4abda6a89de4ce6f3b309e88"
 const ok = (stdout = "") => ({ code: 0, stderr: "", stdout })
 
 const git: Run = async (args) => {
-  if (args[0] === "merge-base") return { code: mode === "types" ? 1 : 0, stderr: "", stdout: "" }
+  if (args[0] === "merge-base")
+    return { code: mode.endsWith("types") ? 1 : 0, stderr: "", stdout: "" }
   if (args.includes("--git-common-dir")) return ok(join(root, ".git"))
   if (args.includes("--show-toplevel")) return ok(root)
   if (args.includes("add")) mkdirSync(args.at(-2) ?? "", { recursive: true })
@@ -71,6 +72,20 @@ if (mode === "lock") {
       console.log("ready")
       const pid = join(root, "step.pid")
       return [{ argv: ["sh", "-c", 'echo $$ > "$0"; exec sleep 5', pid], name: "wait" }]
+    },
+  })
+} else if (mode === "held-types") {
+  if ("holder" in (await takeLock(root, 112))) process.exit(2)
+  const saw = `kill $!; sleep 0.5; if [ -d "$1" ]; then echo held > "$2"; else echo released > "$2"; fi; exit 143`
+  void typesGate({
+    facts: { canary: "canary", head: "head", mergeTree: "tree", n: 112 },
+    git,
+    lockRoot: join(root, "lock"),
+    steps: () => {
+      console.log("ready")
+      const args = [join(root, "merge.lock"), join(root, "step-saw"), join(root, "step.pid")]
+      const script = `trap '${saw}' TERM; echo $$ > "$3"; sleep 30 & wait`
+      return [{ argv: ["sh", "-c", script, "sh", ...args], name: "wait" }]
     },
   })
 } else {
