@@ -7,7 +7,7 @@ import { machine, type Setup } from "./run-slot-fake"
 // a check waits on its run's exit or a line it prints, so the timeout only catches a hang
 setDefaultTimeout(60_000)
 
-// A machine whose fake git fails on a `-C` folder that is not one, answers `git diff --cached --name-only` with `staged`, a plain `git diff --name-only` with `unstaged`, and touches its last argument for anything else, as a commit's marker
+// A machine whose fake git fails on a `-C` folder that is not one, answers `git diff --cached --name-only` with `staged`, a plain `git diff --name-only` with `unstaged`, a `git diff --name-only HEAD -- <paths>` with each of either under one of the paths, and touches its last argument for anything else, as a commit's marker
 const repo = (setup: Setup, staged: string[], unstaged: string[] = []) => {
   const m = machine(setup)
   writeFileSync(
@@ -16,7 +16,12 @@ const repo = (setup: Setup, staged: string[], unstaged: string[] = []) => {
 [ "$1" = -C ] && { [ -d "$2" ] || exit 128; }
 for a in "$@"; do
   [ "$a" = diff ] || continue
-  case " $* " in *" --cached "*) printf '%s\\n' ${staged.join(" ")} ;; *) printf '%s\\n' ${unstaged.join(" ")} ;; esac
+  case " $* " in
+    *" --cached "*) printf '%s\\n' ${staged.join(" ")} ;;
+    *" -- "*) while [ "$1" != -- ]; do shift; done; shift
+      for f in ${[...staged, ...unstaged].join(" ")}; do for p in "$@"; do case "$f" in "$p"|"$p"/*) echo "$f" ;; esac; done; done ;;
+    *) printf '%s\\n' ${unstaged.join(" ")} ;;
+  esac
   exit 0
 done
 touch "\${@: -1}"
@@ -63,7 +68,7 @@ describe("the commit and clone lanes hold load units", () => {
   test("a run that gates a merge still starts beside a held clone lane while one CPU slot is open", async () => {
     const m = machine({ idle: 30 })
     holdLane(m, "run-slot-clone", "worker-c")
-    expect(await m.runs("ops-checks-1", { RUN_SLOT_SIZE: "small" })).toBe(true)
+    expect(await m.runs("ops-checks-1", { RUN_SLOT_SIZE: "medium" })).toBe(true)
   })
 
   test("a medium run waits beside a held commit lane while one CPU slot is open", async () => {
@@ -131,6 +136,22 @@ describe("a commit whose pre-commit runs next build", () => {
     ).toBe(true)
   })
 
+  test("git commit <folder> counts a web/next file git finds under the folder it names", async () => {
+    const m = repo({ idle: 30 }, ["docs/notes.md"], ["packages/env/src/data-dir.ts"])
+    m.hold("run-slot", 3, "big")
+    expect(
+      await m.start("worker-x", {}, undefined, ["git", "commit", "-m", "x", "packages"]).waits(),
+    ).toBe(true)
+  })
+
+  test("git commit -uno reads its n as the untracked mode, not -n, and still counts a staged web/next file", async () => {
+    const m = repo({ idle: 30 }, ["web/next/src/app/page.tsx"])
+    m.hold("run-slot", 3, "big")
+    expect(
+      await m.start("worker-x", {}, undefined, ["git", "commit", "-uno", "-m", "x"]).waits(),
+    ).toBe(true)
+  })
+
   test("commit-slot.ts's build for a worktree staging a web/next file counts as big", async () => {
     const m = repo({}, ["web/next/src/app/page.tsx"])
     m.hold("run-slot", 3, "big")
@@ -181,6 +202,23 @@ describe("a commit that stages no web/next file", () => {
     expect(await m.start("worker-x", {}, undefined, ["git", "commit", "-n", "-m", "x"]).ran()).toBe(
       true,
     )
+    expect(log(m)).toMatch(/ start worker-x \d+ run-slot-commit waited=/)
+  })
+
+  test("nor does git commit -S<keyid> whose key id holds an a, which reads no -a", async () => {
+    const m = repo({ idle: 30 }, ["docs/notes.md"], ["web/next/src/app/page.tsx"])
+    m.hold("run-slot", 3, "big")
+    expect(
+      await m.start("worker-x", {}, undefined, ["git", "commit", "-Sabc", "-m", "x"]).ran(),
+    ).toBe(true)
+    expect(log(m)).toMatch(/ start worker-x \d+ run-slot-commit waited=/)
+  })
+
+  // lefthook's build step skips a commit whose every staged file is Markdown or a Python test, so it runs no next build
+  test("nor does one staging only Markdown under api/hono and packages", async () => {
+    const m = repo({ idle: 30 }, ["api/hono/README.md", "packages/env/README.md"])
+    m.hold("run-slot", 3, "big")
+    expect(await m.start("worker-x", {}, undefined, ["git", "commit"]).ran()).toBe(true)
     expect(log(m)).toMatch(/ start worker-x \d+ run-slot-commit waited=/)
   })
 
