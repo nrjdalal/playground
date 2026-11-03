@@ -21,6 +21,7 @@ import { toast } from "@/components/ui/toast"
 import {
   changeSetting,
   EFFORT_LABELS,
+  heldPick,
   isEffort,
   isModel,
   MODEL_LABELS,
@@ -40,8 +41,7 @@ export function SettingPicker({ label, worker }: { label: string; worker: Worker
   const change = useMutation({
     mutationFn: async (setting: SessionSetting) => {
       const { error } = await changeSetting(worker.sessionId, setting)
-      // Claude Code holds the command while it compacts and runs it once free, so the pick stays shown
-      if (error && "delivery" in error && error.delivery === "QUEUED") return { queued: true }
+      if (heldPick(error)) return { queued: true }
       if (error) throw new Error(error.message)
       return { queued: false }
     },
@@ -91,9 +91,9 @@ export function SettingPicker({ label, worker }: { label: string; worker: Worker
               change.mutate({ model: next })
             }}
           >
-            {Object.entries(MODEL_LABELS).map(([value, label]) => (
+            {Object.entries(MODEL_LABELS).map(([value, text]) => (
               <DropdownMenuRadioItem key={value} value={value} closeOnClick>
-                {label}
+                {text}
               </DropdownMenuRadioItem>
             ))}
           </DropdownMenuRadioGroup>
@@ -109,9 +109,9 @@ export function SettingPicker({ label, worker }: { label: string; worker: Worker
               change.mutate({ effort: next })
             }}
           >
-            {Object.entries(EFFORT_LABELS).map(([value, label]) => (
+            {Object.entries(EFFORT_LABELS).map(([value, text]) => (
               <DropdownMenuRadioItem key={value} value={value} closeOnClick>
-                {label}
+                {text}
               </DropdownMenuRadioItem>
             ))}
           </DropdownMenuRadioGroup>
