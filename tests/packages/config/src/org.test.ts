@@ -3,7 +3,6 @@ import { describe, expect, test } from "bun:test"
 import { orgOf } from "../../../../packages/config/src/org"
 
 describe("orgOf", () => {
-  // The Slack watches are opted into on the machine (jobs.opsDmWatch and a hand-listed ops-channel-watch row), so the config holds no integrations.
   test("with nothing set, every value is a generic default, and no integration is read", () => {
     expect(orgOf({})).toEqual({
       owner: { name: "Owner" },
