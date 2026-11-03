@@ -105,7 +105,13 @@ export const sendFailed = (item: InboxItem): boolean =>
   item.kind !== "update" && item.delivery?.status === "failed" && !answeredDismissedAt(item)
 
 // The failures Retry is offered after, the API's RETRY_CODES restated since the web imports its types alone (a test holds the two equal): nothing was typed, so a retry cannot type the answer twice.
-export const RETRY_CODES = ["CMUX_FAILED", "INPUT_NOT_EMPTY", "NOT_FOUND", "ON_PICKER"] as const
+export const RETRY_CODES = [
+  "CMUX_FAILED",
+  "INPUT_NOT_EMPTY",
+  "NOT_FOUND",
+  "ON_PICKER",
+  "UPLOAD_FAILED",
+] as const
 
 // Pure: an answer that failed to send that Retry can safely follow; after any other failure it may be in the session already, so it offers Dismiss alone.
 export const retryable = (item: InboxItem): boolean =>
@@ -121,6 +127,19 @@ export const isGo = (choice: string): boolean => (GO_CHOICES as readonly string[
 
 // The API's GO_CHOICES restated (a test holds the two equal).
 export const GO_CHOICES = ["approve", "draft", "edit", "send"] as const
+
+// A Slack link in its app form that names a conversation, the API's slackPlace restated (a test holds the two agreeing): the only place a send shares its files into.
+const SLACK_PLACE = /^https:\/\/app\.slack\.com\/client\/[^/]+\/[CDG][A-Z0-9]+(?:\/|$)/
+
+// Pure: the button whose go shares an open item's files into Slack, a Slack draft's Send or a slack decision's Approve, or null when its files stay on the card (a Linear draft's, an ask's, one with no Slack link); the API's filesToUpload decides the same.
+export const uploadsOn = (item: InboxItem): "Approve" | "Send" | null => {
+  if (item.status !== "open" || item.kind === "update") return null
+  const preview = item.preview
+  if (!("attachments" in preview) || !preview.attachments?.length) return null
+  if (!("link" in preview) || !preview.link || !SLACK_PLACE.test(preview.link)) return null
+  if (item.kind === "draft") return "Send"
+  return item.kind === "decision" && item.preview.type === "slack" ? "Approve" : null
+}
 
 // Pure: whether an open draft offers Draft beside Send: a Slack draft, which Slack's MCP server saves as a draft, never a Linear comment, whose API creates none; the API's savesDraft decides the same (a test holds the two equal).
 export const canDraft = (item: InboxItem): boolean =>
@@ -576,7 +595,7 @@ export function outcomeLine(item: InboxItem): string | null {
     const said = item.answer.said ? `You replied "${item.answer.said}"` : "You replied"
     return carriedOut(item) ? said : `${said} · ${who} is on it…`
   }
-  const done = {
+  let done = {
     approve: "You approved it",
     clear: `Archived ${fullTime(item.answer.at)}`,
     deny: "You denied it",
@@ -587,6 +606,8 @@ export function outcomeLine(item: InboxItem): string | null {
     edit: "You approved it with changes",
     send: item.answer.editedText ? "You sent it with changes" : "You sent it",
   }[item.answer.choice]
+  const uploaded = item.answer.uploaded
+  if (uploaded) done += ` · ${uploaded === 1 ? "1 file" : `${uploaded} files`} shared`
   const delivery = item.delivery
   if (isGo(item.answer.choice) && delivery?.status !== "failed" && !carriedOut(item)) {
     if (item.answer.choice === "draft") return `${done} · Saving a Slack draft…`

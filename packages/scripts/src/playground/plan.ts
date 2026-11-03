@@ -43,6 +43,7 @@ playground changelog <command> ...
                       add rows to the Changelog from GitHub's merges and versions, or a line by hand (bun run changelog)
 playground dm send <file>
                       post the reply in <file>, named by its absolute path, to the owner's own DM in its frame, the one way any session posts there (bun run dm)
+playground dm upload  share a Slack send's files into its channel and thread, its spec on stdin, which the Inbox runs on Send (bun run dm)
 playground ingest [--follow | status]
                       read every Claude Code session on this machine into the Dashboard's database (bun run ingest)
 playground queues     print the merge queue and the work queue (bun run queues)

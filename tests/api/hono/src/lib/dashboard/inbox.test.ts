@@ -703,7 +703,7 @@ describe("an answer", () => {
     )
   })
 
-  // the dashboard uploads nothing to Slack: Send types these words into the poster, so a draft's pictures stay on its card
+  // Send types the words alone into the poster: a draft's files are shared into Slack by the dashboard itself (PG-649), never handed to the session
   test("sends a draft's words alone, its pictures left on the card (PG-501)", () => {
     const words = { text: "the fix is live", to: "@Merritt" }
     const plain = item({ kind: "draft", preview: words })

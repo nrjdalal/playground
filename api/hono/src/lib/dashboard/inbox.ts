@@ -218,7 +218,7 @@ const link = z
   .max(2000)
   .optional()
 
-// A draft's words, who they go to by a short name ("a colleague's thread"), the thread they reply in, which its card links to, and files its card shows, which Send leaves out of Slack.
+// A draft's words, who they go to by a short name ("a colleague's thread"), the thread they reply in, which its card links to, and files its card shows, which Send shares into that Slack thread (filesToUpload).
 export const draftSchema = z.strictObject({
   attachments,
   ...place,
@@ -322,7 +322,7 @@ export type InboxAction = (typeof ACTIONS)[number]
 // What an answer holds: every action but Move to Inbox, which undoes a set-aside and leaves no answer.
 export type InboxChoice = Exclude<InboxAction, "unarchive">
 
-// ackedAt: when its poster closed it through bun run ask, so the sweep stops chasing it; dismissedAt: when he dismissed the answered item or its poster closed it, which moves it to Done at once; noLink: why a go closed with no link.
+// ackedAt: when its poster closed it through bun run ask, so the sweep stops chasing it; dismissedAt: when he dismissed the answered item or its poster closed it, which moves it to Done at once; noLink: why a go closed with no link; uploaded: how many files a Slack send shared into its channel and thread, so a retry shares none twice.
 export type InboxAnswer = {
   ackedAt?: string
   at: string
@@ -333,6 +333,7 @@ export type InboxAnswer = {
   linkLabel?: string
   noLink?: string
   note?: string
+  uploaded?: number
 }
 
 // Pure: a go, an answer he gave to carry out (Approve, Edit, Send, Draft), which closes only with where it landed or why there is no link.
@@ -616,13 +617,60 @@ export const deliveryFailed = (item: InboxItem): boolean =>
   !(item.answer && "dismissedAt" in item.answer && item.answer.dismissedAt)
 
 // The delivery failures that come before anything is typed (deliver.ts's DELIVERY_FAILURES says which), so Retry cannot type the answer twice; after any other (INTERRUPTED, or ERROR when the adapter threw) the answer may be in the session already, so it waits on a look at the session.
-export const RETRY_CODES = ["CMUX_FAILED", "INPUT_NOT_EMPTY", "NOT_FOUND", "ON_PICKER"] as const
+export const RETRY_CODES = [
+  "CMUX_FAILED",
+  "INPUT_NOT_EMPTY",
+  "NOT_FOUND",
+  "ON_PICKER",
+  "UPLOAD_FAILED",
+] as const
 
 // Pure: a failed answer he has not dismissed whose failure Retry can safely follow.
 export const retryable = (item: InboxItem): boolean =>
   deliveryFailed(item) &&
   item.delivery?.status === "failed" &&
   (RETRY_CODES as readonly string[]).includes(item.delivery.code)
+
+// Where a Slack send's files go: the conversation, and the thread's parent message when it replies in one.
+export type UploadPlace = { channel: string; thread?: string }
+
+// Shares a send's files into its place (dm upload, run where the Slack token lives), throwing why when Slack refuses any step; slack-upload.ts holds the real one, a test passes its own.
+export type Upload = (place: UploadPlace, files: InboxAttachment[]) => Promise<void>
+
+const CONVERSATION = /^[CDG][A-Z0-9]+$/
+
+// Pure: the place a Slack link in its app form names (https://app.slack.com/client/<team>/<conversation>, then /thread/<conversation>-<ts> for a thread), or null for no link, a link outside Slack, or one naming no conversation.
+export function slackPlace(link: string | undefined): UploadPlace | null {
+  if (!link || !URL.canParse(link)) return null
+  const url = new URL(link)
+  if (url.protocol !== "https:" || url.hostname !== "app.slack.com") return null
+  const [, client, , channel, threadWord, parent] = url.pathname.split("/")
+  if (client !== "client" || !channel || !CONVERSATION.test(channel)) return null
+  const thread =
+    threadWord === "thread"
+      ? new RegExp(`^${channel}-(\\d+\\.\\d+)$`).exec(parent ?? "")?.[1]
+      : undefined
+  return thread ? { channel, thread } : { channel }
+}
+
+// Pure: the files a go shares into Slack before its words reach the poster: a Slack draft's on Send, or a slack decision's on Approve or Edit, when its link names a Slack place and it has shared none yet; null for anything else, whose files stay on the card.
+export function filesToUpload(
+  item: InboxItem,
+): { files: InboxAttachment[]; place: UploadPlace } | null {
+  const answer = item.answer
+  if (!answer || !("choice" in answer) || ("uploaded" in answer && answer.uploaded !== undefined))
+    return null
+  const preview = item.preview
+  const go =
+    item.kind === "draft"
+      ? answer.choice === "send"
+      : item.kind === "decision" &&
+        preview.type === "slack" &&
+        (answer.choice === "approve" || answer.choice === "edit")
+  if (!go || !("attachments" in preview) || !preview.attachments?.length) return null
+  const place = slackPlace("link" in preview ? preview.link : undefined)
+  return place && { files: preview.attachments, place }
+}
 
 // Pure: when an open item is scheduled to ask again, while that time is still ahead; null once it is awake, and on anything not scheduled.
 export const snoozedUntil = (item: InboxItem, now: Date): string | null => {
@@ -829,7 +877,8 @@ export async function answerItem(
     deliver,
     dispatcher,
     now = new Date(),
-  }: { actor: ActivityActor; deliver?: Deliver; dispatcher?: string; now?: Date },
+    upload,
+  }: { actor: ActivityActor; deliver?: Deliver; dispatcher?: string; now?: Date; upload?: Upload },
 ): Promise<{ item: InboxItem; ok: true } | Refused> {
   const current = await getItem(db, id)
   if (!current || current.id !== id) return NOT_FOUND
@@ -876,6 +925,7 @@ export async function answerItem(
       deliver,
       dispatcher,
       now,
+      upload,
     }),
     ok: true,
   }
@@ -926,8 +976,21 @@ async function send(
     deliver,
     dispatcher,
     now,
-  }: { actor: ActivityActor; deliver: Deliver; dispatcher?: string; now: Date },
+    upload,
+  }: { actor: ActivityActor; deliver: Deliver; dispatcher?: string; now: Date; upload?: Upload },
 ): Promise<InboxItem> {
+  // the files go first, so an upload Slack refuses fails the send with nothing typed, and Retry shares them again
+  const shared = upload && filesToUpload(item)
+  if (shared) {
+    try {
+      await upload(shared.place, shared.files)
+    } catch (error) {
+      const reason = `The files did not upload to Slack: ${(error as Error).message}`
+      const failed: InboxDelivery = { code: "UPLOAD_FAILED", reason, status: "failed" }
+      return (await recordDelivery(db, item.id, failed, now)) ?? item
+    }
+    item = (await recordUploaded(db, item.id, shared.files.length)) ?? item
+  }
   let delivery = await attempt(deliver, { actor, text, to: item.from })
   if (dispatcher && item.from !== dispatcher && posterGone(delivery)) {
     delivery = await attempt(deliver, { actor, text: relay, to: dispatcher })
@@ -967,7 +1030,8 @@ export async function retryDelivery(
     deliver,
     dispatcher,
     now = new Date(),
-  }: { actor: ActivityActor; deliver: Deliver; dispatcher?: string; now?: Date },
+    upload,
+  }: { actor: ActivityActor; deliver: Deliver; dispatcher?: string; now?: Date; upload?: Upload },
 ): Promise<{ item: InboxItem; ok: true } | Refused> {
   const current = await getItem(db, id)
   if (!current || current.id !== id) return NOT_FOUND
@@ -1004,7 +1068,13 @@ export async function retryDelivery(
   if (!row) return { code: "CONFLICT", message: "This item changed; try again", ok: false }
   const item = toItem(row)
   return {
-    item: await send(db, item, textsOf(item, current.answer), { actor, deliver, dispatcher, now }),
+    item: await send(db, item, textsOf(item, current.answer), {
+      actor,
+      deliver,
+      dispatcher,
+      now,
+      upload,
+    }),
     ok: true,
   }
 }
@@ -1085,6 +1155,16 @@ export async function provideSecret(
 }
 
 // The first delivery recorded stands: a poster that read its answer through bun run ask while the adapter typed keeps that record.
+// Keeps how many files a send shared in its answer, so a Retry after the words failed to type shares none twice.
+async function recordUploaded(db: Database, id: string, count: number): Promise<InboxItem | null> {
+  const [row] = await db
+    .update(inboxItem)
+    .set({ answer: sql`${inboxItem.answer} || jsonb_build_object('uploaded', ${count}::int)` })
+    .where(eq(inboxItem.id, id))
+    .returning()
+  return row ? toItem(row) : null
+}
+
 async function recordDelivery(
   db: Database,
   id: string,

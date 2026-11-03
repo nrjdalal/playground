@@ -215,8 +215,12 @@
   `none` or what still depends on the target, and is refused without it,
   the refusal naming the checks; `checked` stays in the stored payload and the owner's card does not show it.
   A draft's is `{to, text, thread?, attachments?}`: `to` a short name ("a teammate's thread", "a teammate's DM").
-  Its `attachments`, such as an issue's before and after shots, show under its words as an ask's do, and stay on the card: Send hands its poster the words alone (`deliveryText`), since the dashboard uploads no file to Slack.
-  A `slack` decision's `attachments` show under its message the same way, and Approve hands its poster the words alone too.
+  Its `attachments`, such as an issue's before and after shots, show under its words as an ask's do, and while it is open its card reads `2 files · uploads on Send` under them when its `link` names a Slack conversation (`uploadsOn` in `web/next/src/lib/inbox.ts`).
+  On Send, the dashboard shares those files into that link's channel and thread before the words reach the poster (`filesToUpload` in `inbox.ts`, through `playground dm upload`, messages.md), and the card's result line counts them (`You sent it · 2 files shared`); the poster still gets the words alone (`deliveryText`).
+  A Linear draft's files, and a draft's with no Slack link, stay on the card.
+  A `slack` decision's `attachments` show under its message the same way, its card reading `uploads on Approve`, and Approve or Edit shares them the same way.
+  A share Slack refuses, or a file gone from the attachments folder, fails the send before anything is typed (`UPLOAD_FAILED`, `Send failed: The files did not upload to Slack: <why>`), which Retry shares again;
+  a send that shared its files keeps their count in its answer (`uploaded`), so a Retry after the words failed to type shares none twice, and a fixture or test stack shares nothing.
   A draft, and a `slack` decision, carries `thread` whenever the reply answers a Slack conversation (the owner: "for slack previews the draft should show what's going on at other end summary of who said what as tldrs and drafted reply below").
   It holds 1 to 12 `{who, said}`, oldest first: `who` the display name as Slack shows it (a first name, never a raw token), `said` the gist of that message in one line of plain STE100 words.
   The card shows them as So far above the words to send, a draft's under Your reply, each gist rendered through `TranscriptMarkdown card`; `bun run ask example slack` prints a `slack` decision with its `thread` filled.
