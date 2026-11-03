@@ -27,7 +27,7 @@ const pathOf = (markup: string) => /<path d="([^"]+)"/.exec(markup)?.[1]
 describe("Spinner", () => {
   const markup = renderToStaticMarkup(createElement(Spinner))
 
-  test('is Remix\'s loader, turning only where motion is welcome (the owner: "instead of dot loader for chat and aside, show a spinner")', () => {
+  test("is Remix's loader, turning only where motion is welcome", () => {
     expect(pathOf(markup)).toBe(pathOf(renderToStaticMarkup(createElement(RiLoader4Line))))
     expect(markup).toContain("motion-safe:animate-spin")
     expect(markup).not.toContain("animate-pulse")
@@ -44,7 +44,7 @@ describe("Spinner", () => {
 })
 
 describe("loader icon", () => {
-  test('is RiLoader4Line app wide, so a shadcn sync that scaffolds RiLoaderLine back fails here (the owner: "user loader4 instead of loader app wide")', async () => {
+  test("is RiLoader4Line app wide, so a shadcn sync that scaffolds RiLoaderLine back fails here", async () => {
     const stray: string[] = []
     for await (const file of new Bun.Glob("src/**/*.{ts,tsx}").scan(web)) {
       if ((await Bun.file(join(web, file)).text()).includes("RiLoaderLine")) stray.push(file)
@@ -54,7 +54,7 @@ describe("loader icon", () => {
 })
 
 describe("CenterSpinner", () => {
-  test('holds the Spinner in the middle of its pane, both ways (the owner: "and in xy center")', () => {
+  test("holds the Spinner in the middle of its pane, both ways", () => {
     const markup = renderToStaticMarkup(createElement(CenterSpinner))
     expect(markup).toMatch(/^<div class="[^"]*absolute inset-0 grid place-items-center/)
     expect(markup).toContain("motion-safe:animate-spin")
@@ -62,7 +62,7 @@ describe("CenterSpinner", () => {
 })
 
 describe("PulseDot", () => {
-  test('is the pulsing dot for a session at work in the chat (the owner: "in chat it should be the dots")', () => {
+  test("is the pulsing dot for a session at work in the chat", () => {
     const markup = renderToStaticMarkup(createElement(PulseDot))
     expect(pathOf(markup)).toBe(
       pathOf(renderToStaticMarkup(createElement(RiCheckboxBlankCircleFill))),
@@ -80,7 +80,7 @@ describe("shadcn-customize", () => {
     expect(RESTORE).toContain("web/next/src/components/ui/spinner.tsx")
   })
 
-  test('swaps the toast\'s loader for RiLoader4Line, once, and fails loudly when it has none (the owner: "user loader4 instead of loader app wide")', () => {
+  test("swaps the toast's loader for RiLoader4Line, once, and fails loudly when it has none", () => {
     const stock =
       'import { RiLoaderLine } from "@remixicon/react"\nicon = <RiLoaderLine className="animate-spin" />'
     const patched = loader4(stock)
