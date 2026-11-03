@@ -104,4 +104,26 @@ describe("rowsFitResult", () => {
     expect(result.detail).toContain('"OpsDashboard" draws 24.0px more')
     expect(result.detail).toContain('"OpsIngest" and "OpsSweep" overlap by 8.0px')
   })
+
+  // PG-711: a row's screen-reader words, placed past a long title, made the whole body scroll sideways and cut every row's left edge
+  test("fails when the sidebar body is wider than it shows, so it would scroll sideways, at either width", () => {
+    expect(
+      rowsFitResult(
+        "rows",
+        [[box()]],
+        [
+          { at: "", client: 255, scroll: 255 },
+          { at: " (at 11rem)", client: 175, scroll: 184 },
+        ],
+      ),
+    ).toEqual({
+      check: "rows",
+      detail: "the sidebar body (at 11rem) is 9px wider than it shows, so it scrolls sideways",
+      ok: false,
+    })
+  })
+
+  test("passes when the sidebar body is exactly as wide as it shows", () => {
+    expect(rowsFitResult("rows", [[box()]], [{ at: "", client: 255, scroll: 255 }]).ok).toBe(true)
+  })
 })
