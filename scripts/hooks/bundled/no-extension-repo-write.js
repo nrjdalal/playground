@@ -89,7 +89,12 @@ var loginOf = (data, env = process.env) => {
   } catch {}
   throw new Error(`no login for the extensions in ${loginPath(data)}: run playground ext init`);
 };
-var fixFor = (file) => file.startsWith("hooks/") ? "tell your lead, and the dispatcher hands the owner ! playground ext import --from-tree extensions/core/lists to type in the dispatcher's terminal window, which seeds the guards' lists" : "tell your lead, and the dispatcher hands the owner ! playground ext init, then a setting with ! playground settings set, to type in the dispatcher's terminal window, which writes it";
+var fixFor = (file) => {
+  const list = /^hooks\/(.+)\.json$/.exec(file)?.[1];
+  if (list && !existsSync(join2(coreDir(), "lists", `${list}.json`)))
+    return `tell your lead, and the dispatcher hands the owner ! playground ext put <login> list ${list} <file> --reason <why> to type in the dispatcher's terminal window, which writes it, since core ships no such list`;
+  return file.startsWith("hooks/") ? "tell your lead, and the dispatcher hands the owner ! playground ext import --from-tree extensions/core/lists to type in the dispatcher's terminal window, which seeds the guards' lists" : "tell your lead, and the dispatcher hands the owner ! playground ext init, then a setting with ! playground settings set, to type in the dispatcher's terminal window, which writes it";
+};
 var readRenderedSync = (data, file) => {
   const dir = extensionsDir(data);
   if (!existsSync(dir))
@@ -4770,138 +4775,8 @@ var extSettings = defineSettings({
   }
 });
 
-// scripts/hooks/role.ts
-import { homedir as homedir2 } from "os";
-import { join as join4 } from "path";
-
-// packages/config/src/kinds.ts
-var ROSTER_KINDS = [
-  "builder",
-  "dispatcher",
-  "ops",
-  "optimizer",
-  "planner",
-  "probe",
-  "researcher",
-  "reviewer",
-  "runner",
-  "tester",
-  "worker"
-];
-var isRosterKind = (value) => ROSTER_KINDS.includes(value);
-var FACTORY_ROLE_OF_KIND = {
-  builder: "lead",
-  dispatcher: "dispatcher",
-  ops: "lead",
-  optimizer: "lead",
-  planner: "lead",
-  probe: "probe",
-  researcher: "worker",
-  reviewer: "reviewer",
-  runner: "runner",
-  tester: "tester",
-  worker: "worker"
-};
-var ID_ALPHABET = "23456789bcdfghjkmnpqrstvwxyz";
-var ID_NAME_SOURCE = `[${ID_ALPHABET}]{6}-(?:${ROSTER_KINDS.join("|")})`;
-var PREFIXED = /^(probe|reviewer|runner|tester|worker)-./;
-var ID_NAME = new RegExp(`^[${ID_ALPHABET}]{6}-(${ROSTER_KINDS.join("|")})$`);
-var kindOfName = (name) => (ID_NAME.exec(name) ?? PREFIXED.exec(name))?.[1] ?? null;
-var DEFAULT_SESSION_NAMES = {
-  aliases: {},
-  names: { builder: "builder", dispatcher: "dispatcher", ops: "ops", planner: "planner" }
-};
-var NAMES = Symbol.for("playground.sessionNames");
-var held = globalThis;
-var setSessionNames = (next) => {
-  held[NAMES] = next;
-};
-var getSessionNames = () => held[NAMES] ?? DEFAULT_SESSION_NAMES;
-var namedKinds = () => {
-  const { aliases, names } = getSessionNames();
-  return new Map([
-    ...Object.entries(names).map(([kind, name]) => [name, kind]),
-    [`${names.dispatcher}-2`, "dispatcher"],
-    ...Object.entries(aliases),
-    ["optimizer", "optimizer"]
-  ]);
-};
-var placedKindOfName = (name) => kindOfName(name) ?? namedKinds().get(name) ?? null;
-function roleOfName(name) {
-  const kind = placedKindOfName(name);
-  return kind ? FACTORY_ROLE_OF_KIND[kind] : "";
-}
-var SEATLESS = new Set(["ended", "parked"]);
-
-// scripts/hooks/role.ts
-var MANAGER_ROLES = new Set(["dispatcher", "lead", "manager"]);
-var names;
-function loadNames(environment = process.env) {
-  names ??= (async () => {
-    try {
-      const setting = join4(__CHECKOUT + "/scripts/hooks", "../../packages/scripts/src/playground/setting.ts");
-      const read = Bun.spawn(["bun", setting, "sessions.names", "sessions.aliases"], {
-        env: { ...process.env, ...environment },
-        stderr: "ignore",
-        stdout: "pipe"
-      });
-      const [names, aliases] = (await new Response(read.stdout).text()).trim().split(`
-`);
-      if (await read.exited === 0)
-        setSessionNames({ aliases: JSON.parse(aliases), names: JSON.parse(names) });
-    } catch {}
-  })();
-  return names;
-}
-async function registryName(sessionId, environment = process.env) {
-  const dir = join4(environment.CLAUDE_CONFIG_DIR || join4(homedir2(), ".claude"), "sessions");
-  for await (const file of new Bun.Glob("*.json").scan(dir)) {
-    try {
-      const entry = await Bun.file(join4(dir, file)).json();
-      if (entry.sessionId === sessionId && typeof entry.name === "string")
-        return entry.name;
-    } catch {}
-  }
-}
-async function rosterRole(name, environment = process.env) {
-  const path = join4(dataDirOf(environment), "roster.json");
-  try {
-    const roster = await Bun.file(path).json();
-    const kind = roster.agents?.find((agent) => agent?.name === name)?.kind;
-    return isRosterKind(kind) ? FACTORY_ROLE_OF_KIND[kind] : "";
-  } catch {
-    return "";
-  }
-}
-async function sessionRole(environment, sessionId) {
-  if (environment.PLAYGROUND_ROLE)
-    return environment.PLAYGROUND_ROLE;
-  if (typeof sessionId !== "string")
-    return "";
-  try {
-    const name = await registryName(sessionId, environment) ?? "";
-    const role = name && await rosterRole(name, environment);
-    if (role)
-      return role;
-    await loadNames(environment);
-    return roleOfName(name);
-  } catch {
-    return "";
-  }
-}
-async function fromFactory(raw, environment = process.env) {
-  return await sessionRole(environment, sessionOf(raw)) !== "";
-}
-function sessionOf(raw) {
-  try {
-    return JSON.parse(raw).session_id;
-  } catch {
-    return;
-  }
-}
-
 // scripts/hooks/shell.ts
-import { homedir as homedir3 } from "os";
+import { homedir as homedir2 } from "os";
 import { basename as basename2, isAbsolute, resolve as resolve2 } from "path";
 var UNKNOWN = "\x00";
 var READ = "\x01";
@@ -4941,7 +4816,7 @@ function filled(script, mark, value) {
     throw new RangeError("a script too large to read");
   return script.replaceAll(mark, value);
 }
-var held2 = (text) => text.value.length > MAX_BYTES ? unknown(LARGE) : text;
+var held = (text) => text.value.length > MAX_BYTES ? unknown(LARGE) : text;
 var BREAK = new Set([" ", "\t", `
 `, ";", "&", "|", "<", ">", "(", ")"]);
 var REDIRECT = /^(\d*|&)(<<<|<<-|<<|<>|<&|>&!?|>>[!|]?|>[!|]|<|>)/;
@@ -5124,7 +4999,7 @@ var merge = (out, part) => {
   if (part.reads?.length)
     (out.reads ??= []).push(...part.reads);
 };
-var join5 = (parts, separator = "") => {
+var join4 = (parts, separator = "") => {
   const out = { value: "" };
   parts.forEach((part, k) => {
     if (k > 0)
@@ -5374,7 +5249,7 @@ function word(lx) {
       if (GLOB_CHARS.test(text.value))
         out.glob = true;
     } else if (c === "~" && lx.i === start && (next === "" || next === "/" || BREAK.has(next))) {
-      out.value += homedir3();
+      out.value += homedir2();
       lx.i++;
     } else {
       out.value += c;
@@ -5713,7 +5588,7 @@ async function examineReading(cmd, parsed, env, visit, builtins) {
 async function cdTarget(args, env) {
   const dir = args.find((a) => !(a.value.startsWith("-") && a.value.length > 1));
   if (!dir)
-    return homedir3();
+    return homedir2();
   const path = dir.value === "-" ? undefined : pathOf(dir, env);
   if (!path)
     return;
@@ -5764,7 +5639,7 @@ async function scriptOf(operand, cmd, env) {
   return script;
 }
 async function outputs(cmds, env) {
-  return join5(await Promise.all(cmds.map((c) => outputOf(c, env))));
+  return join4(await Promise.all(cmds.map((c) => outputOf(c, env))));
 }
 async function record2(cmd, name, args, env) {
   for (const r of cmd.redirects) {
@@ -5775,7 +5650,7 @@ async function record2(cmd, name, args, env) {
       continue;
     const stdout = r.fd === "" || r.fd === "1" || r.fd === "&";
     const out = stdout ? await outputOf(cmd, env) : unknown(`what ${name || "a command"} writes to stderr`);
-    env.files.set(path, held2(r.op === ">>" ? join5([await existing(path, env), out]) : out));
+    env.files.set(path, held(r.op === ">>" ? join4([await existing(path, env), out]) : out));
   }
   if (name !== "tee")
     return;
@@ -5784,7 +5659,7 @@ async function record2(cmd, name, args, env) {
   for (const a of args) {
     const path = a.value.startsWith("-") ? undefined : pathOf(a, env);
     if (path)
-      env.files.set(path, held2(append ? join5([await existing(path, env), input]) : input));
+      env.files.set(path, held(append ? join4([await existing(path, env), input]) : input));
   }
 }
 async function existing(path, env) {
@@ -5813,7 +5688,7 @@ async function outputOf(cmd, env) {
         return unknown(LARGE);
       parts.push(part);
     }
-    return join5(parts);
+    return join4(parts);
   }
   if (name === "tee")
     return stdinOf(cmd, env);
@@ -5853,7 +5728,7 @@ function printf([format = "", ...args]) {
 }
 async function stdinOf(cmd, env) {
   tick();
-  return held2(await stdinText(cmd, env));
+  return held(await stdinText(cmd, env));
 }
 async function stdinText(cmd, env) {
   const input = cmd.redirects.findLast((r) => (r.fd === "" || r.fd === "0") && r.op.startsWith("<") && r.op !== "<&");
@@ -6042,6 +5917,300 @@ function knownVariables(command, environment, cwd) {
       known[name] = value;
   }
   return known;
+}
+
+// scripts/hooks/read-only.ts
+var READ_FILE = { count: true, operands: true, values: ["-c", "-n"] };
+var GH_VIEW = {
+  flags: ["-c", "--comments"],
+  operands: true,
+  values: ["--jq", "--json", "-q", "-R", "--repo"]
+};
+var READERS = {
+  cat: { flags: ["-n"], operands: true },
+  cd: { operands: true },
+  echo: { flags: ["-n"], operands: true },
+  grep: {
+    flags: ["-c", "-E", "-F", "-h", "-i", "-l", "-n", "-q", "-r", "-rn", "-s", "-v"],
+    operands: true,
+    values: ["-e"]
+  },
+  head: READ_FILE,
+  ls: { flags: ["-1", "-a", "-l", "-la"], operands: true },
+  pwd: {},
+  tail: READ_FILE,
+  wc: { flags: ["-c", "-l", "-w"], operands: true }
+};
+var GIT = {
+  branch: { flags: ["-a", "-r", "--show-current", "-v"] },
+  diff: {
+    flags: ["--cached", "--name-only", "--name-status", "--staged", "--stat"],
+    operands: true
+  },
+  log: {
+    count: true,
+    flags: ["--name-only", "--oneline", "--stat"],
+    operands: true,
+    values: ["--format", "-n", "--pretty"]
+  },
+  remote: { flags: ["-v", "--verbose"] },
+  "rev-parse": {
+    flags: ["--abbrev-ref", "--short", "--show-toplevel", "--verify"],
+    operands: true
+  },
+  show: {
+    flags: ["--name-only", "--oneline", "--stat"],
+    operands: true,
+    values: ["--format", "--pretty"]
+  },
+  status: { flags: ["-b", "--branch", "--porcelain", "-s", "--short"], operands: true }
+};
+var GH = {
+  "issue list": {
+    values: [
+      "-A",
+      "--author",
+      "--jq",
+      "--json",
+      "-L",
+      "-l",
+      "--label",
+      "--limit",
+      "-q",
+      "-R",
+      "--repo",
+      "-S",
+      "-s",
+      "--search",
+      "--state"
+    ]
+  },
+  "issue view": GH_VIEW,
+  "pr checks": { operands: true, values: ["-R", "--repo"] },
+  "pr diff": { flags: ["--name-only"], operands: true, values: ["-R", "--repo"] },
+  "pr list": {
+    values: [
+      "-A",
+      "--author",
+      "-B",
+      "--base",
+      "-H",
+      "--head",
+      "--jq",
+      "--json",
+      "-L",
+      "--limit",
+      "-q",
+      "-R",
+      "--repo",
+      "-s",
+      "--state"
+    ]
+  },
+  "pr view": GH_VIEW
+};
+var OWNER_REPO = /^[\w.-]+\/[\w.-]+$/;
+function fits(args, shape, git = false) {
+  for (let i = 0;i < args.length; i++) {
+    const v = args[i];
+    const [option, value] = v.startsWith("--") && v.includes("=") ? [v.slice(0, v.indexOf("=")), v.slice(v.indexOf("=") + 1)] : [v, undefined];
+    if (v.includes("://"))
+      return false;
+    if (v === "--")
+      return shape.operands === true && args.slice(i + 1).every((a) => !a.includes("://"));
+    if (shape.values?.includes(option)) {
+      const given = value ?? (git && option.startsWith("--") ? undefined : args[++i]);
+      if (given === undefined || value === undefined && given.startsWith("-"))
+        return false;
+      if ((option === "-R" || option === "--repo") && !OWNER_REPO.test(given))
+        return false;
+    } else if (shape.flags?.includes(v) || shape.count && /^-\d+$/.test(v))
+      continue;
+    else if (v.startsWith("-") || !shape.operands)
+      return false;
+  }
+  return true;
+}
+function apiReads(args) {
+  const endpoints = [];
+  for (let i = 0;i < args.length; i++) {
+    const v = args[i];
+    if (v === "-X" || v === "--method") {
+      if (!["GET", "HEAD"].includes(args[++i]?.toUpperCase()))
+        return false;
+    } else if (v === "--jq" || v === "-q")
+      i++;
+    else if (v !== "--paginate") {
+      if (v.startsWith("-"))
+        return false;
+      endpoints.push(v);
+    }
+  }
+  return endpoints.length === 1 && !endpoints[0].includes("://") && endpoints[0] !== "graphql";
+}
+var shapeOf = (shapes, key) => key !== undefined && Object.hasOwn(shapes, key) ? shapes[key] : undefined;
+function commandReads(cmd) {
+  if (cmd.redirects.length > 0 || cmd.words.some((w) => /[*?[{()$]/.test(w.value)))
+    return false;
+  const words = cmd.words.map((w) => w.value);
+  if (words.length === 0)
+    return true;
+  if (words.some(marked))
+    return false;
+  const [name, ...args] = words;
+  if (name === "git") {
+    const k = args[0] === "-C" ? 2 : 0;
+    const shape = shapeOf(GIT, args[k]);
+    return shape !== undefined && fits(args.slice(k + 1), shape, true);
+  }
+  if (name === "gh") {
+    if (args[0] === "api")
+      return apiReads(args.slice(1));
+    const shape = shapeOf(GH, `${args[0]} ${args[1]}`);
+    return shape !== undefined && fits(args.slice(2), shape);
+  }
+  const shape = shapeOf(READERS, name);
+  return shape !== undefined && fits(args, shape);
+}
+function readOnly(raw) {
+  try {
+    const { tool_input: input, tool_name: tool } = JSON.parse(raw);
+    if (tool !== "Bash" || typeof input?.command !== "string")
+      return false;
+    return lex(input.command).commands.every(commandReads);
+  } catch {
+    return false;
+  }
+}
+
+// scripts/hooks/role.ts
+import { homedir as homedir3 } from "os";
+import { join as join5 } from "path";
+
+// packages/config/src/kinds.ts
+var ROSTER_KINDS = [
+  "builder",
+  "dispatcher",
+  "ops",
+  "optimizer",
+  "planner",
+  "probe",
+  "researcher",
+  "reviewer",
+  "runner",
+  "tester",
+  "worker"
+];
+var isRosterKind = (value) => ROSTER_KINDS.includes(value);
+var FACTORY_ROLE_OF_KIND = {
+  builder: "lead",
+  dispatcher: "dispatcher",
+  ops: "lead",
+  optimizer: "lead",
+  planner: "lead",
+  probe: "probe",
+  researcher: "worker",
+  reviewer: "reviewer",
+  runner: "runner",
+  tester: "tester",
+  worker: "worker"
+};
+var ID_ALPHABET = "23456789bcdfghjkmnpqrstvwxyz";
+var ID_NAME_SOURCE = `[${ID_ALPHABET}]{6}-(?:${ROSTER_KINDS.join("|")})`;
+var PREFIXED = /^(probe|reviewer|runner|tester|worker)-./;
+var ID_NAME = new RegExp(`^[${ID_ALPHABET}]{6}-(${ROSTER_KINDS.join("|")})$`);
+var kindOfName = (name) => (ID_NAME.exec(name) ?? PREFIXED.exec(name))?.[1] ?? null;
+var DEFAULT_SESSION_NAMES = {
+  aliases: {},
+  names: { builder: "builder", dispatcher: "dispatcher", ops: "ops", planner: "planner" }
+};
+var NAMES = Symbol.for("playground.sessionNames");
+var held2 = globalThis;
+var setSessionNames = (next) => {
+  held2[NAMES] = next;
+};
+var getSessionNames = () => held2[NAMES] ?? DEFAULT_SESSION_NAMES;
+var namedKinds = () => {
+  const { aliases, names } = getSessionNames();
+  return new Map([
+    ...Object.entries(names).map(([kind, name]) => [name, kind]),
+    [`${names.dispatcher}-2`, "dispatcher"],
+    ...Object.entries(aliases),
+    ["optimizer", "optimizer"]
+  ]);
+};
+var placedKindOfName = (name) => kindOfName(name) ?? namedKinds().get(name) ?? null;
+function roleOfName(name) {
+  const kind = placedKindOfName(name);
+  return kind ? FACTORY_ROLE_OF_KIND[kind] : "";
+}
+var SEATLESS = new Set(["ended", "parked"]);
+
+// scripts/hooks/role.ts
+var MANAGER_ROLES = new Set(["dispatcher", "lead", "manager"]);
+var names;
+function loadNames(environment = process.env) {
+  names ??= (async () => {
+    try {
+      const setting = join5(__CHECKOUT + "/scripts/hooks", "../../packages/scripts/src/playground/setting.ts");
+      const read = Bun.spawn(["bun", setting, "sessions.names", "sessions.aliases"], {
+        env: { ...process.env, ...environment },
+        stderr: "ignore",
+        stdout: "pipe"
+      });
+      const [names, aliases] = (await new Response(read.stdout).text()).trim().split(`
+`);
+      if (await read.exited === 0)
+        setSessionNames({ aliases: JSON.parse(aliases), names: JSON.parse(names) });
+    } catch {}
+  })();
+  return names;
+}
+async function registryName(sessionId, environment = process.env) {
+  const dir = join5(environment.CLAUDE_CONFIG_DIR || join5(homedir3(), ".claude"), "sessions");
+  for await (const file of new Bun.Glob("*.json").scan(dir)) {
+    try {
+      const entry = await Bun.file(join5(dir, file)).json();
+      if (entry.sessionId === sessionId && typeof entry.name === "string")
+        return entry.name;
+    } catch {}
+  }
+}
+async function rosterRole(name, environment = process.env) {
+  const path = join5(dataDirOf(environment), "roster.json");
+  try {
+    const roster = await Bun.file(path).json();
+    const kind = roster.agents?.find((agent) => agent?.name === name)?.kind;
+    return isRosterKind(kind) ? FACTORY_ROLE_OF_KIND[kind] : "";
+  } catch {
+    return "";
+  }
+}
+async function sessionRole(environment, sessionId) {
+  if (environment.PLAYGROUND_ROLE)
+    return environment.PLAYGROUND_ROLE;
+  if (typeof sessionId !== "string")
+    return "";
+  try {
+    const name = await registryName(sessionId, environment) ?? "";
+    const role = name && await rosterRole(name, environment);
+    if (role)
+      return role;
+    await loadNames(environment);
+    return roleOfName(name);
+  } catch {
+    return "";
+  }
+}
+async function fromFactory(raw, environment = process.env) {
+  return await sessionRole(environment, sessionOf(raw)) !== "";
+}
+function sessionOf(raw) {
+  try {
+    return JSON.parse(raw).session_id;
+  } catch {
+    return;
+  }
 }
 
 // scripts/hooks/no-playground-leak.ts
@@ -7107,7 +7276,7 @@ function candidate(command) {
   const maybe = policy.anyWrite ? MAYBE_ANY : MAYBE;
   return command.includes("$'") || maybe.test(command.replace(/[\\'"]/g, ""));
 }
-var refusedList = (raw, refusal) => WRITE_CALL.test(subjectOf(raw)) ? refusal : undefined;
+var refusedList = (raw, refusal) => WRITE_CALL.test(subjectOf(raw)) && !readOnly(raw) ? refusal : undefined;
 async function inspectAs(given, raw, environment) {
   policy = given;
   changed = false;
