@@ -1,7 +1,7 @@
 - Playground's Inbox is what the factory posts for the owner: a decision to approve, a draft to send, or an update to read.
   It replaced the asks (their JSON files, locks, in-chat cards and `/dashboard/asks`) and the old approval channel.
   It is one table, `inbox_item` (`packages/db/src/schema/inbox.ts`), in the dashboard's local Postgres, read and written through `api/hono/src/lib/dashboard/inbox.ts`, whose zod schemas check each kind's payload,
-  and served by `/api/v1/inbox` (`GET` the list, `POST /api/v1/inbox/:id/answer`, `POST /api/v1/inbox/:id/retry`, `POST /api/v1/inbox/dismiss`, `POST /api/v1/inbox/read`, `POST /api/v1/inbox/:id/schedule`, `POST /api/v1/inbox/:id/secret` for a secret ask's value (below), and `GET /api/v1/inbox/attachments/:id` for an ask's or a read-only update's files).
+  and served by `/api/v1/inbox` (`GET` the list, `POST /api/v1/inbox/:id/answer`, `POST /api/v1/inbox/:id/retry`, `POST /api/v1/inbox/dismiss`, `POST /api/v1/inbox/read`, `POST /api/v1/inbox/:id/schedule`, `POST /api/v1/inbox/:id/secret` for a secret ask's value (below), and `GET /api/v1/inbox/attachments/:id` for an ask's, a draft's or a read-only update's files).
   It shows first in the aside window beside every dashboard page (`DashboardAside` in `web/next/src/components/dashboard/dashboard-aside.tsx`, drawn once by `web/next/src/app/(protected)/dashboard/layout.tsx`, so the Inbox and the chat are on every page and only the session panes differ by view),
   in stock Tabs whose squares float centred over the bottom of that half in the table's selection-bar look (`FLOATING_BAR`), one icon square a tab, `APP_SQUARE`'s shape (`iconTab` in `web/next/src/components/dashboard/dashboard-aside.tsx`), in one row that scrolls sideways once the squares outgrow it (`TAB_BAR`),
   above every layer a pane holds, since the panes stack in an isolated layer of their own (`PANES`, since a table's sticky header once painted over the bar),
@@ -167,7 +167,7 @@
   Approve meaning done and Deny meaning the owner can't, or a grilling batch, its text each open question numbered with its recommended answer, Approve taking them all and the owner's Note giving his own by number;
   with optional `approve` and `deny` labels, one line each, which the owner's card shows as two choices under its text, the quoted block, when both are there, and optional `attachments`, below), `slack` (`to`, `text`),
   `ship` (`sha`, `prs` of `{number, title}`), `ticket` (`team`, `title`, `body`), `delete` (`what`, `why`), `schema` (`shape`), `budget` (`amount`, `why`) or `secret` (`key`, `sink`); a decision with none is refused.
-  An `ask`'s `attachments`, and a read-only update's, are up to 20 files on this Mac, each `{src, kind?, label?, group?}`: `src` an absolute path, never a URL; `kind` one of `code`, `doc`, `html`, `image` or `pdf`,
+  An `ask`'s `attachments`, a draft's and a read-only update's, are up to 20 files on this Mac, each `{src, kind?, label?, group?}`: `src` an absolute path, never a URL; `kind` one of `code`, `doc`, `html`, `image` or `pdf`,
   read from the extension when left out (`KIND_OF_EXTENSION` in `api/hono/src/lib/dashboard/inbox-attachments.ts`); `label` `before` or `after`; `group` a one-line section heading.
   `bun run ask new` and `edit` fill each `{now}` in the item's text with the time they post at in the owner's zone (`clock.ownerZone`, `fillNow` in `api/hono/src/lib/dashboard/ask-clock.ts`), and refuse a `measured` or `now` time more than 2 minutes ahead of the clock (`futureNowTimes`), naming it;
   an ETA or a finish carries neither word and posts, and plan.json's reader refuses its own now-stamps the same way (`.agents/dashboard/apps.md`).
@@ -189,7 +189,7 @@
   A Close of its own stays shown at the top-right corner, one square on a floating bar of the same look.
   Open in new tab opens an image or a PDF at full size in a browser tab (`OPENS_IN_TAB`), on a pair the Before, whose id the folded item keeps, never an HTML page, code or an SVG, since a blob URL runs with the Dashboard's origin.
   Each kind's renderer is one line of `VIEWERS` in `registry.tsx`; a renderer that keeps its own pointer or keys marks itself `data-viewer-owns-pointer` or `data-viewer-owns-keys`, and hands the arrows back with `onEdge`.
-  An `ask`'s image `attachments` labelled `before` and `after` in one `group`, or both with no `group`, show as one slide in the viewer and one split tile on the card (`foldPairs` in `web/next/src/lib/pictures.ts`).
+  An item's image `attachments` labelled `before` and `after` in one `group`, or both with no `group`, show as one slide in the viewer and one split tile on the card (`foldPairs` in `web/next/src/lib/pictures.ts`).
   That slide has one row of buttons floating at the stage's top over the whole-stage picture, Before, Side, Slider and After, Side and Slider joined in the middle, 3.5rem clear of each side on a narrow screen so the viewer's top-right Close never covers After; the row and the Side divider keep Left and Right and hand Up and Down back with `onEdge` (`handBack`).
   Side, the first view, shows them side by side at a divider that drags from the centre; Slider stacks them under a drag slider (`role="slider"`, 5% a Left or Right press, Home and End to the ends, Up and Down handed back with `onEdge` for the slide before or after).
   Both use one 1px divider, the knob on the slider alone, Before on the left, and Before or After shows that picture alone; a picture zooms in at a click or Enter and pans on a drag, while a touch tap on it shows or hides the bars as on every kind and a tap on the slider or the bar's buttons acts on it alone (`web/next/src/components/dashboard/viewer/image.tsx`).
@@ -208,7 +208,8 @@
   one line saying what the four checks of playbook's **ask** found (the ops jobs and their runtimes in the data folder's `ops/jobs.json`, the live processes under the target, the sessions in it, and the Dashboard's `/api/health`),
   `none` or what still depends on the target, and is refused without it,
   the refusal naming the checks; `checked` stays in the stored payload and the owner's card does not show it.
-  A draft's is `{to, text, thread?}`: `to` a short name ("a teammate's thread", "a teammate's DM").
+  A draft's is `{to, text, thread?, attachments?}`: `to` a short name ("a teammate's thread", "a teammate's DM").
+  Its `attachments`, such as an issue's before and after shots, show under its words as an ask's do, and stay on the card: Send hands its poster the words alone (`deliveryText`), since the dashboard uploads no file to Slack.
   A draft, and a `slack` decision, carries `thread` whenever the reply answers a Slack conversation (the owner: "for slack previews the draft should show what's going on at other end summary of who said what as tldrs and drafted reply below").
   It holds 1 to 12 `{who, said}`, oldest first: `who` the display name as Slack shows it (a first name, never a raw token), `said` the gist of that message in one line of plain STE100 words.
   The card shows them as So far above the words to send, a draft's under Your reply, each gist rendered through `TranscriptMarkdown card`; `bun run ask example slack` prints a `slack` decision with its `thread` filled.

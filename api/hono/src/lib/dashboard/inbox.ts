@@ -114,6 +114,9 @@ export const attachmentSchema = z.strictObject({
 
 export type InboxAttachment = z.infer<typeof attachmentSchema>
 
+// The files an ask, a draft or a read-only update shows on its card.
+const attachments = z.array(attachmentSchema).min(1).max(MAX_INBOX_ATTACHMENTS).optional()
+
 // What the other side has said so far, one line per message in their words' gist, oldest first, so a Slack message or draft reads in its context.
 const soFar = z
   .array(z.strictObject({ said: oneLine(LIMITS.line), who: oneLine(LIMITS.name) }))
@@ -167,7 +170,7 @@ export type SinkRun = (argv: string[], stdin: string) => Promise<number | null>
 export const previewSchema = z.discriminatedUnion("type", [
   z.strictObject({
     approve: oneLine(LIMITS.line).optional(),
-    attachments: z.array(attachmentSchema).min(1).max(MAX_INBOX_ATTACHMENTS).optional(),
+    attachments,
     checked: oneLine(LIMITS.line).optional(),
     deny: oneLine(LIMITS.line).optional(),
     text: words,
@@ -214,8 +217,9 @@ const link = z
   .max(2000)
   .optional()
 
-// A draft's words, who they go to by a short name ("a colleague's thread"), and the thread they reply in, which its card links to.
+// A draft's words, who they go to by a short name ("a colleague's thread"), the thread they reply in, which its card links to, and files its card shows, which Send leaves out of Slack.
 export const draftSchema = z.strictObject({
+  attachments,
   ...place,
   text: words,
   thread: soFar,
@@ -226,7 +230,7 @@ export const draftSchema = z.strictObject({
 export const OUTCOMES = ["alert", "decision", "finding", "merged", "shipped"] as const
 
 export const updateSchema = z.strictObject({
-  attachments: z.array(attachmentSchema).min(1).max(MAX_INBOX_ATTACHMENTS).optional(),
+  attachments,
   link,
   outcome: z.enum(OUTCOMES),
   text: words.optional(),
