@@ -449,6 +449,15 @@ describe("a direct write into the extensions root is refused, naming the owner's
   test("a Bash call whose cwd is already inside the root runs no writer", async () => {
     expect(await bash("node -e 'x'", SCOPE)).toContain("no-extensions-write hook refuses")
   })
+
+  // the README's unread pass: these pin the two branches that drop ~-, since a pushd ~- read as the root would refuse them
+  test.each([
+    ["a command naming OLDPWD", `cd ${SCOPE}; cd /tmp; OLDPWD=/tmp; pushd ~-; touch f`],
+    ["a popd", `cd ${SCOPE}; cd /tmp; popd; pushd ~-; touch f`],
+  ])("pushd ~- after %s leaves the folder unread", async (_, command) => {
+    expect(await bash(command)).toBeUndefined()
+    expect(await bash(`cd ${SCOPE}; cd /tmp; pushd ~-; touch f`)).toContain("refuses")
+  })
 })
 
 // The shell reads ~ as the process's home, so these rows judge the real home's root, which the hook only reads.

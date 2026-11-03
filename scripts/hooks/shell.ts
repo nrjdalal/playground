@@ -1001,7 +1001,7 @@ async function examineReading(
     if (builtins) verdict = await visit(cmd, parsed, here)
   } else if (name === "cd" || name === "pushd") {
     // a glob in the folder is judged as any program's words are, since it may land anywhere it matches
-    if (args.some((a) => /[*?[{(]/.test(a.value))) verdict = await visit(cmd, parsed, here)
+    if (args.some((a) => GLOB_CHARS.test(a.value))) verdict = await visit(cmd, parsed, here)
     const from = env.cwd
     env.cwd = cmd.detached ? undefined : await cdTarget(name, args, env)
     if (env.old) env.old = { dir: env.cwd === undefined ? undefined : from }
@@ -1036,7 +1036,7 @@ async function cdTarget(name: string, args: Word[], env: Env): Promise<string | 
   const dir = args.find((a) => !(a.value.startsWith("-") && a.value.length > 1))
   if (!dir) return homedir()
   const typed = dir.value === "-" ? undefined : await folder(pathOf(dir, env))
-  // in a hook that follows OLDPWD, a pushd's unquoted ~- is that folder and ~+ the current one, as the shell expands them, but for a folder named ~- or ~+ itself, which keeps the typed reading
+  // in a hook that follows OLDPWD, a pushd's unquoted ~- is that folder and ~+ the current one, as the shell expands them; beside a folder named ~- or ~+ the typed reading stays, though the shell still expands the word
   const tilde =
     !typed && name === "pushd" && env.old && !dir.quoted && !dir.unknown && !dir.reads?.length
       ? /^~([-+])(?=\/|$)/.exec(dir.value)

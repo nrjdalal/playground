@@ -226,7 +226,8 @@ Only the first reading moves the folder, sets variables and records files for th
   An `ext score` after an `unset` or an `export -n` of one of those variables earlier on the line gets past, since the hook tracks a variable set, not one unset or un-exported.
   A path through a link into the root with `..` after the link (`echo x > <link>/../f`) is judged as typed, so a write by one passes.
   A `cd` or `pushd` it cannot follow (`cd -`, `cd ~-`, `popd`'s stack, a `CDPATH` lookup) leaves the command's folder unread, so a relative write after one passes.
-  A `pushd ~-` or `pushd ~+` lands where zsh takes it, `~-` reading the folder before the last `cd` or `pushd`, the start folder before any (a folder named `~-` or `~+` keeps the typed reading, and a command naming `OLDPWD` leaves `~-` unread).
+  A `pushd ~-` or `pushd ~+` lands where zsh takes it, `~-` reading the folder before the last `cd` or `pushd`, the start folder before any.
+  Beside a folder named `~-` or `~+` it keeps the typed reading, though zsh still lands in `OLDPWD` or the current folder, and a command naming `OLDPWD` leaves `~-` unread, so a relative write after either is judged in a folder zsh does not enter, or passes.
   A glob in a `cd` or `pushd` folder is judged as any word holding one, so `cd ~/.playground/e*` is refused as `ls ~/.playground/e*` is.
   From a cwd at or above the root (`~`, `~/.playground`), a quoted `(`, `[`, `*`, `?` or `{` reads as a glob there, so a call holding one is refused; run it from a worktree.
   A closed-list reader on a line read call by call is the exception: its quoted glob is text, so `awk '{print $1}' f` runs, since the lexer marks each word whose glob the shell sees outside quotes (`Word.glob` in `scripts/hooks/shell.ts`).

@@ -2448,8 +2448,14 @@ gh api graphql -f query="$QUERY"`,
             ),
           ),
         ),
-        ["pushd ~- into a folder named ~-", `cd /tmp; cd ${ROOT}/hooks; pushd ~-; rm -rf acme`],
-        ["pushd ~+ into a folder named ~+", `cd ${ROOT}/hooks; pushd ~+/../..; rm -rf acme`],
+        [
+          "pushd ~- beside a folder named ~-, read as typed",
+          `cd /tmp; cd ${ROOT}/hooks; pushd ~-; rm -rf acme`,
+        ],
+        [
+          "pushd ~+ beside a folder named ~+, read as typed",
+          `cd ${ROOT}/hooks; pushd ~+/../..; rm -rf acme`,
+        ],
         ["a glob in cd's folder", "cd .playground/e*; rm -rf login"],
         ["a glob in pushd's folder", "pushd .playground/ext?nsions; rm -rf login"],
       ]
