@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync 
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
+import { FIX, STALE } from "../../../../../packages/scripts/src/hooks-bundle"
 import {
   prMerge,
   runGit,
@@ -303,7 +304,7 @@ describe("the types gate", () => {
     expect(explained.kind).toBe("explained")
     expect(explained.gates.find((gate) => gate.name === "types")).toMatchObject({ ok: true })
     expect(explained.gates.find((gate) => gate.name === "types")?.detail).toMatch(
-      /^runs at the merge: canary has commits [0-9a-f]{7} lacks, so pr:merge type-checks the merged tree [0-9a-f]{7} \(--explain runs none\)$/,
+      /^runs at the merge: canary has commits [0-9a-f]{7} lacks, so pr:merge type-checks the merged tree [0-9a-f]{7}, and checks its hook bundles when the PR touches scripts\/hooks\/ or packages\/ \(--explain runs none\)$/,
     )
     const holds = await world("explain-holds", { merged: true })
     const skipped = await prMerge(N, { explain: true, repo: REPO }, gh(holds.head, "0").run, {
@@ -480,9 +481,8 @@ describe("the bundles step on the merged tree", () => {
     expect((await touching("hooks-none", "web/next/src/page.tsx")).flags).toEqual([false])
   })
 
-  const stale = [
-    "hooks-bundle: stale in scripts/hooks/bundled: no-raw-delete.js; run `bun run hooks:bundle` and commit scripts/hooks/bundled",
-  ]
+  // the line --check prints, built from its own parts, so a change to it goes red here
+  const stale = [`${STALE} no-raw-delete.js; ${FIX}`]
   const bundles = (argv: string[]) => () => [{ argv, bundles: true, name: "bundles" }]
 
   test("refuses a merged tree whose bundles a fresh build would write otherwise, naming them and the redo", async () => {
@@ -492,7 +492,7 @@ describe("the bundles step on the merged tree", () => {
       git,
       lockRoot,
       store: null,
-      types: bundles(["sh", "-c", `echo '${stale[0]}' >&2; exit 1`]),
+      types: bundles(["sh", "-c", 'printf "%s\\n" "$1" >&2; exit 1', "sh", stale[0]]),
     })
     expect(outcome.kind).toBe("refused")
     const types = outcome.gates.find((gate) => gate.name === "types")
@@ -500,7 +500,18 @@ describe("the bundles step on the merged tree", () => {
     expect(types?.detail).toContain(
       "Merge canary into the PR plainly, run `bun run hooks:bundle`, and commit the rebuild on its own",
     )
+    expect(types?.detail).not.toContain(FIX)
     expect(squashes(calls)).toEqual([])
+    // the same head and canary refuse again from the kept refusal, with no second run
+    const again = await prMerge(N, { repo: REPO }, gh(head, "1").run, {
+      git,
+      lockRoot,
+      store: null,
+      types: () => {
+        throw new Error("ran a second time")
+      },
+    })
+    expect(again.gates.find((gate) => gate.name === "types")?.detail).toBe(types?.detail ?? "")
   })
 
   test("merges the same PR once its bundles are rebuilt", async () => {

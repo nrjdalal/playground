@@ -6,6 +6,7 @@ import { dirname, join } from "node:path"
 
 import type { Subprocess } from "bun"
 
+import { STALE } from "../hooks-bundle"
 import { BASE, type Gate } from "./gates"
 import type { Run } from "./merge"
 import { onStop } from "./stop"
@@ -56,7 +57,7 @@ export const slotted = (
 ): string[] =>
   env.RUN_SLOT_NICE === undefined && script ? [script, "ops-merge-train", "--", ...argv] : argv
 
-// `hooks-bundle.ts --check` on the merged tree, since a PR branched before another rebuilt a bundle passes its own checks while the squash writes that bundle beside the source this PR changed (3 Nov: a shell.ts change merged after a rebuild of no-raw-delete.js it predated, and canary went red).
+// `hooks-bundle.ts --check` on the merged tree, since a PR branched before another rebuilt a bundle passes its own checks while the squash writes that bundle beside the source this PR changed.
 const BUNDLES: TypeStep = {
   argv: ["bun", "packages/scripts/src/hooks-bundle.ts", "--check"],
   bundles: true,
@@ -64,7 +65,7 @@ const BUNDLES: TypeStep = {
 }
 
 // Pure: whether a PR's changed paths reach a hook bundle: scripts/hooks/, or packages/, whose files a hook imports.
-export const touchesHooks = (paths: string[]): boolean =>
+const touchesHooks = (paths: string[]): boolean =>
   paths.some((path) => /^(scripts\/hooks|packages)\//.test(path))
 
 // CI's own type steps (.github/workflows/auto-check-build.yml), after what node_modules needs: a clone by scripts/README.md's "A worktree's node_modules" then its forced install, or a plain install into the kept node_modules, since a forced one rewrites every package; each through the run slot.
@@ -143,7 +144,7 @@ export async function typesExplained(
     detail: held
       ? skipped(facts)
       : facts.mergeTree
-        ? `runs at the merge: ${BASE} has commits ${facts.head.slice(0, 7)} lacks, so pr:merge type-checks the merged tree ${facts.mergeTree.slice(0, 7)} (--explain runs none)`
+        ? `runs at the merge: ${BASE} has commits ${facts.head.slice(0, 7)} lacks, so pr:merge type-checks the merged tree ${facts.mergeTree.slice(0, 7)}, and checks its hook bundles when the PR touches scripts/hooks/ or packages/ (--explain runs none)`
         : `runs at the merge once ${facts.head.slice(0, 7)} merges clean with ${BASE}`,
     name: NAME,
     ok: true,
@@ -253,7 +254,7 @@ export async function typesGate({
         commit,
       ])
     }
-    const changed = await gitOk(git, ["diff", "--name-only", `${canary}...${head}`])
+    const changed = await gitOk(git, ["diff", "--name-only", "--no-renames", `${canary}...${head}`])
     const hooks = touchesHooks(changed.split("\n"))
     const deps = await depsOf(git, commit)
     const stamp = Bun.file(stampOf(worktree))
@@ -305,9 +306,14 @@ export async function typesGate({
       const output = `${stdout}\n${stderr}`
       const errors = firstErrors(output)
       const typeError = step.types && errors.some((line) => /\berror TS\d+:/.test(line))
-      const staleBundle = step.bundles && output.includes("stale in scripts/hooks/bundled")
-      if (typeError || staleBundle) {
-        const detail = `${at} fails ${step.name}: ${errors.join(" | ")} ${typeError ? FIX : REBUILD}`
+      const drift = step.bundles
+        ? output.split("\n").find((line) => line.includes(STALE))
+        : undefined
+      const refusal = typeError
+        ? `${errors.join(" | ")} ${FIX}`
+        : drift && `${drift.trim().split("; ")[0]}. ${REBUILD}`
+      if (refusal) {
+        const detail = `${at} fails ${step.name}: ${refusal}`
         await mkdir(dirname(memo), { recursive: true })
         await Bun.write(memo, detail)
         return { detail, name: NAME, ok: false }
