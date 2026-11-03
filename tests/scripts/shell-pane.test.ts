@@ -347,6 +347,7 @@ describe("run's own refusals", () => {
     ["a non-ASCII character", "echo caf\u00e9", "U+00E9"],
     ["a DEL", "echo a\x7f", "U+007F"],
     ["a tab", "printf 'a\tb'", "U+0009"],
+    ["an astral character", "echo \u{1F600}", "U+1F600"],
   ])("a command holding %s is refused before typing, naming it", async (_, command, named) => {
     const { calls, herdr } = stubHerdr()
     const repo = repoWith({ "no-made-up": `export const check = async () => undefined\n` })
