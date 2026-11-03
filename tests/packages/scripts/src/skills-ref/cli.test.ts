@@ -1,6 +1,21 @@
-import { describe, expect, test } from "bun:test"
+import { afterAll, describe, expect, test } from "bun:test"
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 
 import { specOnly } from "../../../../../packages/scripts/src/skills-ref/cli"
+
+const SCRIPT = join(import.meta.dir, "../../../../../packages/scripts/src/skills-ref/cli.ts")
+const ROOT = mkdtempSync(join(tmpdir(), "skills-ref-test-"))
+afterAll(() => rmSync(ROOT, { force: true, recursive: true }))
 
 const SKILL = [
   "---",
@@ -45,4 +60,26 @@ describe("the skills-ref step's copy", () => {
   test("leaves a file with no frontmatter as it is", () => {
     expect(specOnly("# Tidy\n")).toBe("# Tidy\n")
   })
+})
+
+// a fake uv on PATH passes every copy and leaves a marked file once it meets makeScratch's marker in the copies' folder
+test("the copies' folder is a marked scratch folder, gone once the run ends (#545)", () => {
+  const bin = join(ROOT, "bin")
+  const tmp = join(ROOT, "tmp")
+  mkdirSync(bin)
+  mkdirSync(tmp)
+  writeFileSync(
+    join(bin, "uv"),
+    `#!/bin/sh\nfor f in "$TMPDIR"/skills-ref-*/.safe-delete-scratch; do [ -f "$f" ] && : > "${ROOT}/marked"; done\nexit 0\n`,
+  )
+  chmodSync(join(bin, "uv"), 0o755)
+  const run = Bun.spawnSync([process.execPath, SCRIPT], {
+    env: { PATH: `${bin}:/usr/bin:/bin`, TMPDIR: tmp },
+    stderr: "pipe",
+    stdout: "pipe",
+  })
+  expect(run.stdout.toString()).toContain("skills pass skills-ref validate")
+  expect(run.exitCode).toBe(0)
+  expect(existsSync(join(ROOT, "marked"))).toBe(true)
+  expect(readdirSync(tmp)).toEqual([])
 })

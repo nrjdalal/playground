@@ -3,6 +3,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   statSync,
@@ -33,7 +34,6 @@ const tick = {
   enabled: true,
   heartbeat: "ops-tick",
   launchd: "com.playground.ops-tick",
-  needsCmux: false,
   program: ["{bun}", "{checkout}/packages/scripts/src/ops-tick/cli.ts"],
   schedule: { every: 60 },
 }
@@ -59,11 +59,14 @@ const storeWith = (
   return data
 }
 
+// A HOME of the test's own; each run's trash is in its data folder, whose ops/launch-agents takes the jobs carve-out as up.py's render writes it.
+const home = join(scratch, "home")
+
 const run = async (data: string, jobs: string, launchAgents?: string) => {
   const out: string[] = []
   const err: string[] = []
   const code = await renderJobsFile(
-    { data, fill, jobs, launchAgents },
+    { data, fill, jobs, launchAgents, roots: { home, main: CHECKOUT, trash: join(data, "trash") } },
     (l) => out.push(l),
     (l) => err.push(l),
   )
@@ -92,8 +95,8 @@ test("a fresh machine, with no store and no jobs.json, gets the registry's defau
 test("a store renders jobs.json in the runner's shape, keeps a job it does not know, and writes the plist of each enabled launchd job", async () => {
   const data = storeWith("on", { "jobs.opsTick": tick })
   const jobs = join(scratch, "on-jobs.json")
-  const agents = join(scratch, "on-agents")
-  mkdirSync(agents)
+  const agents = join(data, "ops", "launch-agents")
+  mkdirSync(agents, { recursive: true })
   writeFileSync(join(agents, "com.playground.ops-flow.plist"), "stale")
   writeFileSync(join(agents, "com.other.keep.plist"), "theirs")
   writeFileSync(jobs, JSON.stringify({ jobs: [{ command: "~/x.sh", name: "ops-company" }] }))
@@ -113,8 +116,28 @@ test("a store renders jobs.json in the runner's shape, keeps a job it does not k
     "<string>/c/packages/scripts/src/ops-tick/cli.ts</string>",
   )
   expect(existsSync(join(agents, "com.playground.ops-flow.plist"))).toBe(false)
+  const [batch] = readdirSync(join(data, "trash"))
+  expect(batch).toMatch(/-jobs$/)
+  expect(
+    readFileSync(join(data, "trash", batch!, "1", "com.playground.ops-flow.plist"), "utf8"),
+  ).toBe("stale")
   expect(readFileSync(join(agents, "com.other.keep.plist"), "utf8")).toBe("theirs")
   expect((await run(data, jobs, agents)).out).toBe("jobs: unchanged")
+})
+
+test("a dropped job's plist the trash refuses stays, is named, and the render exits 1", async () => {
+  const data = storeWith("refused", { "jobs.opsTick": tick })
+  const jobs = join(scratch, "refused-jobs.json")
+  const agents = join(data, "ops", "launch-agents")
+  const odd = join(agents, "com.playground.ops-odd.plist")
+  mkdirSync(odd, { recursive: true })
+  writeFileSync(join(odd, "a"), "x")
+  writeFileSync(join(odd, "b"), "x")
+  const done = await run(data, jobs, agents)
+  expect(done.code).toBe(1)
+  expect(done.err).toContain("jobs: kept com.playground.ops-odd.plist:")
+  expect(done.err).toContain("past the jobs carve-out's cap")
+  expect(existsSync(join(odd, "a"))).toBe(true)
 })
 
 test("each org's script folder is installed under ops beside the state its job keeps, and the login's own scripts are not", async () => {

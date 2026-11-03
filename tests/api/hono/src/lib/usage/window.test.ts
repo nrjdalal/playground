@@ -244,4 +244,105 @@ describe("readAccountUsages", () => {
       [55, false],
     ])
   })
+  // usage.json's accounts map, as ops-usage's accounts_reading() writes it: each account the factory spends into, its week share, the week's reset in seconds, and when it was read.
+  const withMap = (accounts: unknown, writtenAt = "2026-10-06T08:29:00Z") => {
+    const dir = mkdtempSync(join(tmpdir(), "usage-"))
+    dirs.push(dir)
+    writeFileSync(
+      join(dir, "usage.json"),
+      JSON.stringify({
+        account: "main@example.com",
+        accounts,
+        rate_limits: { five_hour: { used_percentage: 12 }, seven_day: { used_percentage: 30 } },
+        writtenAt,
+      }),
+    )
+    return dir
+  }
+
+  test("an account only usage.json's accounts map reads lists, with its week reading and no 5-hour reading", async () => {
+    const dir = withMap({
+      "bo@example.com": { readAt: "2026-10-06T08:28:00Z", week: 64, weekReset: 1791000000 },
+      "cy@example.com": { readAt: "2026-10-06T07:55:00Z", week: 9, weekReset: 1791100000 },
+      // an entry off its shape is left out: a week that is no number, no reset, or a readAt that is no time
+      "dee@example.com": { readAt: "2026-10-06T08:28:00Z", week: "64", weekReset: 1791000000 },
+      "eve@example.com": { readAt: "2026-10-06T08:28:00Z", week: 64 },
+      "fay@example.com": { readAt: "soon", week: 64, weekReset: 1791000000 },
+    })
+    const accounts = await readAccountUsages("main@example.com", dir, NOW)
+    expect(accounts.map((a) => a.account)).toEqual([
+      "main@example.com",
+      "bo@example.com",
+      "cy@example.com",
+    ])
+    expect(accounts[1]!.usage).toEqual({
+      fiveHour: null,
+      sevenDay: { resetsAt: new Date(1791000000 * 1000).toISOString(), usedPercent: 64 },
+      stale: false,
+      writtenAt: "2026-10-06T08:28:00.000Z",
+    })
+    // read 35 minutes before NOW, past the 30 minutes run.py keeps an entry
+    expect(accounts[2]!.usage.stale).toBe(true)
+  })
+
+  test("a map entry the job still writes reads fresh between its probes, and stale once usage.json is", async () => {
+    // run.py probes an account again only every 14 minutes, so a 12-minute-old entry in a fresh usage.json is current
+    const entry = { readAt: "2026-10-06T08:18:00Z", week: 64, weekReset: 1791000000 }
+    const fresh = await readAccountUsages(null, withMap({ "bo@example.com": entry }), NOW)
+    expect(fresh.find((a) => a.account === "bo@example.com")!.usage.stale).toBe(false)
+    // a usage.json written 20 minutes ago means the job stopped writing the map
+    const stopped = await readAccountUsages(
+      null,
+      withMap({ "bo@example.com": entry }, "2026-10-06T08:10:00Z"),
+      NOW,
+    )
+    expect(stopped.find((a) => a.account === "bo@example.com")!.usage.stale).toBe(true)
+  })
+
+  test("an accounts value that is no map adds no account", async () => {
+    for (const accounts of [["bo@example.com"], "bo@example.com", null]) {
+      const listed = await readAccountUsages(null, withMap(accounts), NOW)
+      expect(listed.map((a) => a.account)).toEqual(["main@example.com"])
+    }
+  })
+
+  test("a fresh usage file wins over a map entry for the same account, newer or not; a stale file gives way to a newer entry", async () => {
+    const dir = withMap({
+      "ada@example.com": { readAt: "2026-10-06T08:20:00Z", week: 80, weekReset: 1791000000 },
+      "bo@example.com": { readAt: "2026-10-06T08:28:00Z", week: 64, weekReset: 1791000000 },
+      "cy@example.com": { readAt: "2026-10-06T08:28:00Z", week: 50, weekReset: 1791000000 },
+      "di@example.com": { readAt: "2026-10-06T06:00:00Z", week: 20, weekReset: 1791000000 },
+      // the map's entry for usage.json's own account, read as the file was, keeps the file's 5-hour reading
+      "main@example.com": { readAt: "2026-10-06T08:29:00Z", week: 30, weekReset: 1791000000 },
+    })
+    const write = (name: string, account: string, used: number, writtenAt: string) =>
+      writeFileSync(
+        join(dir, name),
+        JSON.stringify({
+          account,
+          rate_limits: { five_hour: { used_percentage: 5 }, seven_day: { used_percentage: used } },
+          writtenAt,
+        }),
+      )
+    write("usage-ada.json", "Ada@example.com", 70, "2026-10-06T08:25:00Z")
+    write("usage-bo.json", "bo@example.com", 40, "2026-10-06T06:00:00Z")
+    // fresh, though older than its map entry, so it keeps its 5-hour reading
+    write("usage-cy.json", "cy@example.com", 45, "2026-10-06T08:22:00Z")
+    // stale, but written after its entry, so it stays
+    write("usage-di.json", "di@example.com", 25, "2026-10-06T07:00:00Z")
+    const accounts = await readAccountUsages("main@example.com", dir, NOW)
+    expect(
+      accounts.map((a) => [
+        a.account,
+        a.usage.sevenDay?.usedPercent,
+        a.usage.fiveHour?.usedPercent ?? null,
+      ]),
+    ).toEqual([
+      ["main@example.com", 30, 12],
+      ["Ada@example.com", 70, 5],
+      ["bo@example.com", 64, null],
+      ["cy@example.com", 45, 5],
+      ["di@example.com", 25, 5],
+    ])
+  })
 })

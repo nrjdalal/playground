@@ -25,6 +25,7 @@ const ALLOWLIST = [
   "setup/container.ts",
   "store/extensions.ts",
   "system/probe.ts",
+  "trash.ts",
   "yard/keychain.ts",
 ]
 

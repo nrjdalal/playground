@@ -18,6 +18,7 @@ describe("a signal sent by name or pattern is refused, with the way out", () => 
   test.each([
     "pkill -f 'watch-ci.sh 1a2b3c4'",
     "pkill node",
+    "arr=($(pkill -f node))",
     "killall node",
     "/usr/bin/pkill -9 next-server",
     "\\pkill node",

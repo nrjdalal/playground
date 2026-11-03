@@ -166,7 +166,7 @@ describe("an ask's file is read only from the dashboard's own page on this machi
   })
 })
 
-// writes.md's hosted rule: Yard's writes, which hosted.ts alone mounts, take a trusted origin and the member rung, with no loopback check, since the hosted build serves the network.
+// writes.md's hosted rule: Yard's writes, which hosted.ts alone mounts, take a trusted origin and the member rung or the one their route names, with no loopback check, since the hosted build serves the network.
 describe("Yard's writes take a trusted origin and no loopback", () => {
   const yard = found.find((f) => f.file === "yard.ts")!
 

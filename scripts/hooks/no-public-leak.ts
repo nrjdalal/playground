@@ -1,10 +1,11 @@
-// PreToolUse hook for the factory's sessions (role.ts), registered in both settings files: refuses a write to a public repository (a pull request, an issue, a review or a comment, through gh, gh api, curl or the GitHub MCP) whose text holds a name, a handle, a company term, a Slack id or a Linear key from its list, or an email address, an archive issue key or an archive link, since everything written there is public once the repository is. Its reason names the kind of text, never the text; it reads every write as no-playground-leak does, through that guard's engine, and each kind as the trace ratchet counts it (packages/scripts/src/trace-count/kinds.ts).
+// PreToolUse hook for the factory's sessions (role.ts), registered in both settings files: refuses a write to a public repository (a pull request, an issue, a review or a comment, through gh, gh api, curl or the GitHub MCP) whose text holds a name, a handle, a company term, a Slack id or a Linear key from its list, or an email address or an archive link, since everything written there is public once the repository is. Its reason names the kind of text, never the text; it reads every write as no-playground-leak does, through that guard's engine, and each kind as the trace ratchet counts it (packages/scripts/src/trace-count/kinds.ts).
 import "../../packages/env/src/aliases"
 import { dataDir } from "../../packages/env/src/data-dir"
 import {
   EMPTY_LIST,
   isPublicList,
   type Kind,
+  LIST_KEYS,
   type PublicList,
   patterns,
   readPast,
@@ -22,10 +23,6 @@ const PERSON = "Say the role (the owner, a reviewer, a worker) in place of the p
 
 // What a refusal says of each kind it refuses, and its plain-words fix; #NNN and the old session names are the public repository's own words, so a write may hold them.
 const SAID: Partial<Record<Kind, Hit>> = {
-  archiveKeys: {
-    detail: "an archive issue key",
-    fix: "Describe the change in plain words, or name its issue on this repository.",
-  },
   archiveLinks: {
     detail: "an archive link",
     fix: "Describe what it points to, or link this repository's own copy.",
@@ -73,7 +70,11 @@ export async function check(
     EMPTY_LIST,
     environment,
   )
-  if (loaded.refusal) return refusedList(raw, loaded.refusal)
+  if (loaded.refusal)
+    return refusedList(
+      raw,
+      `${loaded.refusal} The list is a JSON object with an array of strings under each of ${LIST_KEYS.join(", ")}.`,
+    )
   const read = await readPolicy(dataDir(environment))
   if (read.refusal !== undefined)
     return refusedList(

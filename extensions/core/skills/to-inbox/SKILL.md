@@ -1,6 +1,6 @@
 ---
 name: to-inbox
-description: "Write an Inbox item the owner reads at a glance: a picture of the point (diff, ASCII, before and after shots, an HTML demo), emoji bullets in ASD-STE100 plain English, one callout, times in IST. Use before every `bun run ask new`: an ask, a draft, an update or a demo."
+description: "Write an Inbox item the owner reads at a glance: a picture of the point (diff, ASCII, before and after shots, an HTML demo), emoji bullets in ASD-STE100 plain English, one callout, times in the owner's zone. Use before every `bun run ask new`: an ask, a draft, an update or a demo."
 license: Complete terms in the repository's NOTICE
 ---
 
@@ -12,7 +12,7 @@ An `ask` decision renders its text as markdown, with its attachments under it: e
 
 - An update with no `text`, or a `ship` or `schema` decision, carries only its fields, which the card lays out itself: its title takes step 4, then steps 7 and 8.
 - A `delete` or `budget` decision's `why` is free text, shown as written: it takes steps 3 and 4 as plain lines, one fact each, then steps 7 and 8.
-- A draft, a `slack` decision or a `ticket` decision is the message or ticket itself, so it keeps that text's own shape and takes steps 4, 7 and 8.
+- A draft, a `slack` decision or a `ticket` decision is the message or ticket itself, so it keeps that text's own shape and takes steps 4, 7 and 8. A draft or a `slack` decision may carry `attachments`, such as an issue's before and after shots, which its card shows under the words and Send leaves out of Slack.
 - A `secret` ask carries only its key and sink, which the card words itself: its title takes step 4, then step 8; the value itself is the owner's to type into the card, so it appears nowhere in the item.
 
 Pick the kind by how its card closes (asks.md's `settle` and `resolve` lines): you settle a decision or a draft you decided another way, you resolve an alert update that has fixed itself, and every other update stays editable until the owner dismisses it, so a card you will replace (a mock's first version) takes `bun run ask edit` before that.
@@ -20,7 +20,7 @@ Pick the kind by how its card closes (asks.md's `settle` and `resolve` lines): y
 ## Steps
 
 1. **Already open?** Run `bun run ask open` before you write anything (asks.md). Done when no open item asks the same thing, or you have named that item's `#iN` in chat and stopped here.
-2. **Picture.** Pick the one picture asks.md's shape leads with, within its `ASK_CODE_COLUMNS` rule. Attachments always show under the text, so an item with one keeps its text to the bullets. Done when the text's first block is that picture, or the item's first attachment is.
+2. **Picture.** Pick the one picture asks.md's shape leads with, within its `ASK_CODE_COLUMNS` rule, which a `diff` block is free of, since the card wraps it. Attachments always show under the text, so an item with one keeps its text to the bullets. Done when the text's first block is that picture, or the item's first attachment is.
 
    Beside asks.md's diff, ASCII flow and before and after pair, two more fit:
 
@@ -28,30 +28,32 @@ Pick the kind by how its card closes (asks.md's `settle` and `resolve` lines): y
    | ------------------------------ | ----------------------------------------------------------------------------------------- |
    | A number or a short comparison | a markdown table of three columns or fewer                                                |
    | A UI not yet built, or a demo  | an ASCII sketch of the page; one `html` attachment built by [HTML.md](references/HTML.md) |
+   | A code change past a few lines | its patch as a file, `git diff > x.diff`, which the viewer draws as a patch view          |
 
    Mermaid is to render once the Inbox takes it; until then, draw the flow in ASCII.
 
 3. **Bullets.** Write three to five of asks.md's bullets, one fact each, each led by one emoji: the legend's when one fits, else any emoji that names the fact, as asks.md's worked examples do (🧪, 🖼️). Done when no bullet holds two facts.
 
-   | Emoji | Marks                      |
-   | ----- | -------------------------- |
-   | 🐛    | the problem                |
-   | ✅    | what is done or tested     |
-   | ⚠️    | a risk                     |
-   | ↩️    | how to undo it             |
-   | 📨    | who asks, or where it goes |
-   | 🕐    | a clock time, in IST       |
-   | ⏱️    | how long it takes          |
-   | 💰    | a cost or a usage figure   |
+   | Emoji | Marks                             |
+   | ----- | --------------------------------- |
+   | 🐛    | the problem                       |
+   | ✅    | what is done or tested            |
+   | ⚠️    | a risk                            |
+   | ↩️    | how to undo it                    |
+   | 📨    | who asks, or where it goes        |
+   | 🕐    | a clock time, in the owner's zone |
+   | ⏱️    | how long it takes                 |
+   | 💰    | a cost or a usage figure          |
 
    A decision that needs more than one answer asks them as numbered questions, the most important first, one idea each, with a one-line why only where a question could be misread.
 
-4. **Plain words.** Write every sentence in ASD-STE100 Simplified Technical English, in the words of `GLOSSARY.md`. Done when each sentence passes all five:
+4. **Plain words.** Write every sentence in ASD-STE100 Simplified Technical English, in the words of `GLOSSARY.md`. Done when each sentence passes all six:
    - It is 20 words or fewer.
    - It says one thing.
    - Its verb is active: "I merge the PR", never "the PR is merged".
    - It speaks in the first person singular, "I", never "we" or the session's name: the poster's "I" in an ask, the owner's in a draft or a `slack` decision, which goes out in his voice (asks.md).
-   - Each word keeps one meaning across the item, and a time reads in IST, am/pm ("9:30 pm IST"); a now-time is `{now}`, which `bun run ask` fills with the time it posts at.
+   - Each word keeps one meaning across the item.
+   - A time reads in the owner's zone (`clock.ownerZone`, which `playground rules clock` prints), am/pm, named by that zone ("9:30 pm UTC"); a now-time is `{now}`, which `bun run ask` fills with the time it posts at.
 
 5. **Callout.** When one fact must not be missed, put it in one GitHub callout after the bullets. Done when the item holds one callout or none.
 
@@ -71,7 +73,7 @@ Pick the kind by how its card closes (asks.md's `settle` and `resolve` lines): y
 
 ## Example
 
-An `ask` decision's text, as its card shows it:
+An `ask` decision's text, as its card shows it to an owner whose `clock.ownerZone` is UTC, the setting's default:
 
 ````markdown
 ```
@@ -84,13 +86,13 @@ Ops ships 3 PRs
 - ✅ Checks pass on all 3 PRs.
 - ⚠️ One PR changes the spawn gate.
 - ↩️ One revert undoes the ship.
-- 🕐 I start at 10:00 pm IST.
+- 🕐 I start at 10:00 pm UTC.
 
 > [!IMPORTANT]
-> I need your yes before 10:00 pm IST.
+> I need your yes before 10:00 pm UTC.
 ````
 
-Approve: `Ship canary to main at 10:00 pm IST`; Deny: `Hold the ship until tomorrow`.
+Approve: `Ship canary to main at 10:00 pm UTC`; Deny: `Hold the ship until tomorrow`.
 
 ## Keep the skills learning
 

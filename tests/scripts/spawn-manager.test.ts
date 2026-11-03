@@ -13,7 +13,7 @@ import {
 } from "node:fs"
 import { dirname, join } from "node:path"
 
-import { OLD } from "../old-names"
+import { OLD } from "../session-names"
 import {
   bin,
   launchAfterRm,
@@ -315,12 +315,12 @@ describe("a manager starts in a workspace of its own, in the leads worktree", ()
   })
 
   test.each(managers)(
-    "$label whose new leads worktree fails to install is refused before herdr runs, the worktree removed for the next start",
+    "$label whose new leads worktree fails to install is refused before herdr runs, the worktree moved to the trash for the next start",
     async ({ args }) => {
       const r = await spawn(
         args,
         [],
-        { FAKE_INSTALL_FAIL: "1", NO_LEADS: "1" },
+        { FAKE_INSTALL_FAIL: "1", NO_LEADS: "1", ROSTER_JSON: '{"agents":[]}' },
         undefined,
         undefined,
         checkout,
@@ -328,11 +328,102 @@ describe("a manager starts in a workspace of its own, in the leads worktree", ()
       expect(r.code).toBe(1)
       expect(placing(r)).toEqual([])
       expect(r.err).toContain("bun install in the new leads worktree")
+      expect(r.err).toContain("moved to the trash")
       expect(r.err).toContain("lockfile is frozen")
       expect(existsSync(leads(r.home))).toBe(false)
       expect(git(join(r.home, "code", "factory"), "worktree", "list")).not.toContain("leads")
+      const trash = join(r.home, ".playground", "trash")
+      const [batch] = readdirSync(trash).filter((name) => name !== "manifest.jsonl")
+      expect(existsSync(join(trash, batch!, "1", "leads"))).toBe(true)
     },
   )
+
+  test("a kept leads worktree with no node_modules is installed at the next manager start", async () => {
+    const r = await spawn(
+      ["manager", "optimizer", "b.md"],
+      [],
+      { NO_LEADS: "1" },
+      undefined,
+      undefined,
+      (home) => {
+        checkout(home)
+        const factory = join(home, "code", "factory")
+        git(
+          factory,
+          "worktree",
+          "add",
+          "-q",
+          "--track",
+          "-B",
+          "leads",
+          join(factory, ".claude", "worktrees", "leads"),
+          "origin/main",
+        )
+      },
+    )
+    expect(r.code).toBe(0)
+    expect(installs(r.home)).toHaveLength(1)
+  })
+
+  test("a leads worktree whose node_modules a failed install left, with no install mark, is installed at the next manager start", async () => {
+    const r = await spawn(
+      ["manager", "optimizer", "b.md"],
+      [],
+      { NO_LEADS: "1" },
+      undefined,
+      undefined,
+      (home) => {
+        checkout(home)
+        const factory = join(home, "code", "factory")
+        git(factory, "worktree", "add", "-q", "--track", "-B", "leads", leads(home), "origin/main")
+        mkdirSync(join(leads(home), "node_modules", "partial"), { recursive: true })
+      },
+    )
+    expect(r.code).toBe(0)
+    expect(installs(r.home)).toHaveLength(1)
+    expect(existsSync(join(leads(r.home), "node_modules", ".playground-installed"))).toBe(true)
+  })
+
+  test("an installed leads worktree is not installed again", async () => {
+    const r = await spawn(["manager", "optimizer", "b.md"], [])
+    expect(r.code).toBe(0)
+    expect(installs(r.home)).toHaveLength(0)
+  })
+
+  test("a failed install of a leads worktree this start did not cut keeps it and moves nothing", async () => {
+    const r = await spawn(
+      ["manager", "optimizer", "b.md"],
+      [],
+      { FAKE_INSTALL_FAIL: "1", NO_LEADS: "1", ROSTER_JSON: '{"agents":[]}' },
+      undefined,
+      undefined,
+      (home) => {
+        checkout(home)
+        const factory = join(home, "code", "factory")
+        git(factory, "worktree", "add", "-q", "--track", "-B", "leads", leads(home), "origin/main")
+      },
+    )
+    expect(r.code).toBe(1)
+    expect(placing(r)).toEqual([])
+    expect(r.err).toContain("this start did not cut it, so it stays")
+    expect(existsSync(leads(r.home))).toBe(true)
+    expect(existsSync(join(r.home, ".playground", "trash"))).toBe(false)
+  })
+
+  test("a failed leads install that playground rm refuses keeps the worktree and names the refusal", async () => {
+    const r = await spawn(
+      ["manager", "optimizer", "b.md"],
+      [],
+      { FAKE_INSTALL_FAIL: "1", NO_LEADS: "1" },
+      undefined,
+      undefined,
+      checkout,
+    )
+    expect(r.code).toBe(1)
+    expect(r.err).toContain("refused to move it, so it stays")
+    expect(r.err).toContain("roster")
+    expect(existsSync(leads(r.home))).toBe(true)
+  })
 
   test.each(managers)(
     "$label with no leads worktree and no git checkout to cut it from is refused before herdr runs",
@@ -533,6 +624,12 @@ describe("a launch names the main checkout in PLAYGROUND_REPO", () => {
       expect(Bun.spawnSync(["git", ...args], { cwd: main, stderr: "ignore" }).exitCode).toBe(0)
     mkdirSync(join(main, "scripts"))
     writeFileSync(join(main, "scripts", "spawn.sh"), readFileSync(script))
+    // A worker start's slots gate reads the checkout's own run-slot.sh.
+    mkdirSync(join(main, "scripts", "ops"))
+    writeFileSync(
+      join(main, "scripts", "ops", "run-slot.sh"),
+      readFileSync(join(root, "scripts", "ops", "run-slot.sh")),
+    )
     // spawn.sh resolves its data folder through the checkout's own resolver.
     mkdirSync(join(main, "packages", "env", "src"), { recursive: true })
     for (const file of ["aliases.ts", "data-dir.ts"])

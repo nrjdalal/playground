@@ -12,6 +12,7 @@ import {
   type Kept,
   list,
   lowered,
+  refusal,
   risen,
   stale,
   tree,
@@ -21,13 +22,13 @@ import {
   reposOf,
   UNSET_REPOS,
 } from "../../../../../packages/scripts/src/trace-count/kinds"
-import { capital, OLD as OLD_NAME } from "../../../../old-names"
+import { capital } from "../../../../session-names"
 
 const root = join(import.meta.dir, "..", "..", "..", "..", "..")
 // Built at run time, so this file's own text adds no trace to the tree's count.
 const ref = (n: number) => `#${n}`
-const KEY = ["LM", "7"].join("-")
 const OLD = ["light", "kid"].join("")
+const OLD_NAME = { builder: OLD, dispatcher: ["light", "man"].join("") }
 const OLD_SKILL = ["light", "review"].join("")
 // Made-up values, one per list key.
 const LIST = {
@@ -42,7 +43,7 @@ describe("the trace count", () => {
   test("counts each kind, its list-fed kinds from the list", () => {
     const text = [
       "Quilla Marsh and @qmarsh at Vantorix, in C0FAKE1234, on VX-12",
-      `mail ${["quilla", "qwerty.io"].join("@")}, see ${KEY} and #123, as ${OLD_NAME.dispatcher} and ${OLD_NAME.builder} said`,
+      `mail ${["quilla", "qwerty.io"].join("@")}, see #123, as ${OLD_NAME.dispatcher} and ${OLD_NAME.builder} said`,
       "https://github.com/octo/vault/pull/4",
       `run ${OLD_SKILL} and ${OLD_SKILL}-scan, not playground-review`,
     ].join("\n")
@@ -51,7 +52,6 @@ describe("the trace count", () => {
       values: { "factory.archiveRepo": "octo/vault", "owner.names": ["tobin"] },
     })
     expect(count([{ path: "a.md", text }], LIST, repos)).toEqual({
-      archiveKeys: 1,
       archiveLinks: 1,
       companies: 1,
       companyName: 0,
@@ -140,34 +140,32 @@ describe("the trace count", () => {
     expect(counts.issueRefs).toBe(0)
   })
 
-  test("reads past the files that define the old names, and a fixture's made-up PR numbers and branch keys but not its other traces", () => {
+  test("reads past the files that define the old names, and a fixture's made-up PR numbers but not its other traces", () => {
     const counts = count([
       { path: "packages/scripts/src/rename/rules.ts", text: `${OLD} ${ref(123)}` },
       { path: "packages/scripts/src/trace-count/kinds.ts", text: `${OLD} ${ref(124)}` },
       {
         path: "api/hono/src/fixtures/dashboard.json",
-        text: `"pr": "${ref(97)}", "branch": "${KEY}-row-wrap", "from": "${OLD}"`,
+        text: `"pr": "${ref(97)}", "from": "${OLD}"`,
       },
       { path: "packages/scripts/src/parity/replay/fixtures/scan/slack.json", text: ref(28) },
     ])
-    expect(counts.archiveKeys).toBe(0)
     expect(counts.issueRefs).toBe(0)
     expect(counts.oldNames).toBe(1)
   })
 
   test("reads past tests/ for issue numbers alone, so a test's other traces still count", () => {
-    const counts = count([{ path: "tests/a.test.ts", text: `${ref(123)} ${KEY} ${OLD}` }])
+    const counts = count([{ path: "tests/a.test.ts", text: `${ref(123)} VX-12 ${OLD}` }], LIST)
     expect(counts.issueRefs).toBe(0)
-    expect(counts.archiveKeys).toBe(1)
+    expect(counts.linearKeys).toBe(1)
     expect(counts.oldNames).toBe(1)
   })
 
-  test("reads past the leak guard's test for branch keys alone, since it holds the keys it detects", () => {
-    const counts = count([
-      { path: "tests/scripts/hooks/no-public-leak.test.ts", text: `${KEY} ${OLD}` },
-    ])
-    expect(counts.archiveKeys).toBe(0)
-    expect(counts.oldNames).toBe(1)
+  test("counts a key only through the list: no fixed key kind, so an empty list counts none", () => {
+    expect(count([{ path: "a.md", text: "fixes VX-42" }], LIST).linearKeys).toBe(1)
+    const empty = count([{ path: "a.md", text: "fixes VX-42" }], EMPTY_LIST)
+    expect(empty).not.toHaveProperty("archiveKeys")
+    expect(Object.values(empty).every((n) => n === 0)).toBe(true)
   })
 
   test("reads a hex colour as no issue, since an issue number never starts with 0", () => {
@@ -196,6 +194,15 @@ describe("the ratchet", () => {
     expect(risen({ emails: 2 }, { emails: 3 })).toEqual([])
   })
 
+  test("a risen issueRefs count names its fix, and another kind keeps the plain reason", () => {
+    expect(refusal(risen({ emails: 2, issueRefs: 4 }, { emails: 3, issueRefs: 3 }))).toBe(
+      "trace-count: a count rose; write the new text in plain words; describe the case in words; a doc cites no issue number:\nissueRefs: 4 in the tree, counts.json allows 3",
+    )
+    expect(refusal(risen({ emails: 4 }, { emails: 3 }))).toBe(
+      "trace-count: a count rose; write the new text in plain words:\nemails: 4 in the tree, counts.json allows 3",
+    )
+  })
+
   test("writing lowers each measured kind and keeps one this run did not measure", () => {
     expect(lowered({ emails: 2, issueRefs: 3 }, { emails: 3, issueRefs: 3, names: 9 })).toEqual({
       emails: 2,
@@ -207,7 +214,8 @@ describe("the ratchet", () => {
   test("no count in the tree, less the kept hits, is over counts.json", async () => {
     const baseline = (await Bun.file(COUNTS).json()) as Counts
     const kept = (await Bun.file(KEPT).json()) as Kept[]
-    expect(risen(count(await tree(root), undefined, undefined, kept), baseline)).toEqual([])
+    const over = risen(count(await tree(root), undefined, undefined, kept), baseline)
+    expect(over.length ? refusal(over) : "").toBe("")
   })
 })
 
@@ -299,7 +307,9 @@ describe("no-public-leak's list", () => {
     const path = at(name.replaceAll(" ", "-"), value)
     const read = await list(path)
     expect(read).toEqual({ refusal: expect.stringContaining(says) })
-    expect((read as { refusal: string }).refusal).toContain("playground ext put")
+    expect((read as { refusal: string }).refusal).toContain(
+      "tell your lead, and the dispatcher hands the owner ! playground ext put <scope> list no-public-leak <file> --reason <why> to type in the dispatcher's terminal window",
+    )
   })
 
   test("a run with no owner.names or no archive exits 2 before it counts, naming each unset key", () => {
@@ -321,9 +331,20 @@ describe("no-public-leak's list", () => {
     expect(none.exitCode).toBe(2)
     expect(none.stdout.toString()).toBe("")
     expect(none.stderr.toString()).toContain("factory.archiveRepo and owner.names are unset")
+    expect(none.stderr.toString()).toContain(
+      "tell your lead, and the dispatcher hands the owner ! playground settings set to type in the dispatcher's terminal window, which sets them",
+    )
+    expect(none.stderr.toString()).toContain("nothing was counted")
+    expect(none.stderr.toString()).toContain(
+      "bun run test:file tests/packages/scripts/src/trace-count/count.test.ts",
+    )
     const named = run({ "factory.archiveRepo": "qmarsh/vault" })
     expect(named.exitCode).toBe(2)
     expect(named.stderr.toString()).toContain("owner.names is unset")
+    expect(named.stderr.toString()).toContain("nothing was counted")
+    expect(named.stderr.toString()).toContain(
+      "bun run test:file tests/packages/scripts/src/trace-count/count.test.ts",
+    )
   })
 
   test("a run with no list file exits 2 before it counts", () => {
@@ -337,6 +358,26 @@ describe("no-public-leak's list", () => {
     expect(run.stdout.toString()).toBe("")
     expect(run.stderr.toString()).toContain(
       join(data, "extensions", "hooks", "no-public-leak.json"),
+    )
+    expect(run.stderr.toString()).toContain("nothing was counted")
+    expect(run.stderr.toString()).toContain(
+      "bun run test:file tests/packages/scripts/src/trace-count/count.test.ts",
+    )
+  })
+
+  test("a run whose policy.json does not parse exits 2 before it counts", () => {
+    const data = join(scratch, "bad-policy")
+    mkdirSync(join(data, "extensions"), { recursive: true })
+    writeFileSync(join(data, "extensions", "policy.json"), "{ not json")
+    const run = Bun.spawnSync(
+      [process.execPath, join(root, "packages/scripts/src/trace-count/cli.ts")],
+      { env: { ...process.env, PLAYGROUND_DATA_DIR: data }, stderr: "pipe", stdout: "pipe" },
+    )
+    expect(run.exitCode).toBe(2)
+    expect(run.stderr.toString()).toContain("does not parse")
+    expect(run.stderr.toString()).toContain("nothing was counted")
+    expect(run.stderr.toString()).toContain(
+      "bun run test:file tests/packages/scripts/src/trace-count/count.test.ts",
     )
   })
 })

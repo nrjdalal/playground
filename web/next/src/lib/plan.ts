@@ -29,16 +29,29 @@ export function statusLabel(status: string | null | undefined): string {
   return `${words}${status.slice(code.length)}`
 }
 
-// Pure: a moment in India's time, as the plan is read from there (Wed 01:21); "-" for none.
-export function istTime(value: string | null | undefined): string {
-  if (!value) return "-"
-  return new Date(value).toLocaleString("en-GB", {
+// The zone's own short name (IST, UTC, EDT) over a GMT offset where one locale has it, as the dashboard's ownerTime names it.
+const zoneName = (at: Date, zone: string): string => {
+  const names = ["en-US", "en-IN"].map(
+    (locale) =>
+      new Intl.DateTimeFormat(locale, { timeZone: zone, timeZoneName: "short" })
+        .formatToParts(at)
+        .find((part) => part.type === "timeZoneName")?.value ?? zone,
+  )
+  return names.find((name) => !name.startsWith("GMT")) ?? names[0]!
+}
+
+// Pure: a moment in the owner's zone, the clock.ownerZone setting, named by that zone (Wed 01:21 IST); "-" for none or a zone not yet read.
+export function zoneTime(value: string | null | undefined, zone: string | undefined): string {
+  if (!value || !zone) return "-"
+  const at = new Date(value)
+  const time = at.toLocaleString("en-GB", {
     hour: "2-digit",
     hourCycle: "h23",
     minute: "2-digit",
-    timeZone: "Asia/Kolkata",
+    timeZone: zone,
     weekday: "short",
   })
+  return `${time} ${zoneName(at, zone)}`
 }
 
 // Pure: a pull request's link text, its number.

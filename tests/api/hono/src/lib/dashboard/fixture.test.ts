@@ -25,11 +25,13 @@ import {
   fixtureWrite,
   loadFixture,
   readFixtureCmux,
+  readFixtureHerdr,
   writeFixture,
 } from "../../../../../../api/hono/src/lib/dashboard/fixture"
 import { parseLines } from "../../../../../../api/hono/src/lib/dashboard/transcript"
 import { livePair } from "../../../../../../api/hono/src/lib/dev/live-dashboard"
 import { priceOf } from "../../../../../../api/hono/src/lib/usage/prices"
+import { listTrash } from "../../../../../../packages/safe-delete/src"
 import {
   cleanGitShims,
   gitShim,
@@ -47,6 +49,14 @@ const scratch = (name: string): string => {
   dirs.push(dir)
   return dir
 }
+// The folders a fixture's move into the trash starts from, on a mkdtemp root of the test's own that holds no fixture: a test that moves one takes its own, so no test meets another's 3-a-minute tripwire.
+const freshRoots = () => {
+  const root = scratch("fixture-roots")
+  return { home: join(root, "home"), main: join(root, "main"), trash: join(root, "data", "trash") }
+}
+const ROOTS = freshRoots()
+const trashed = (roots: { trash: string }) => listTrash(roots.trash).map((entry) => entry.path)
+
 afterAll(() => {
   cleanGitShims()
   for (const dir of dirs) rmSync(dir, { force: true, recursive: true })
@@ -56,6 +66,39 @@ const shipped = (): Fixture => {
   const loaded = loadFixture(null)
   if (!loaded.ok) throw new Error(loaded.error)
   return loaded.fixture
+}
+
+// A made-up herdr server of two panes in one workspace: one idle at its input box, its messages going to a transcript, and one blocked on a picker.
+const HERDR_SESSION = "11111111-1111-4111-8111-0000000000a1"
+const HERDR_TRANSCRIPT = `projects/-fixture-playground/${HERDR_SESSION}.jsonl`
+const withHerdr = (): Fixture => {
+  const base = shipped()
+  const pane = (id: string, status: string, pid: number) => ({
+    agent_session: { kind: "id", value: HERDR_SESSION },
+    agent_status: status,
+    pane_id: id,
+    processes: [{ argv: ["claude", "-n", "ada"], cwd: "/fixture/playground", pid }],
+    scroll: { offset_from_bottom: 0 },
+    terminal_id: `t-${id}`,
+    workspace_id: "w1",
+  })
+  return {
+    ...base,
+    files: { ...base.files, [HERDR_TRANSCRIPT]: [] },
+    herdr: {
+      panes: [
+        {
+          ...pane("w1:p1", "idle", 910001),
+          session_id: HERDR_SESSION,
+          transcript_path: `$CONFIG/${HERDR_TRANSCRIPT}`,
+        },
+        pane("w1:p2", "blocked", 910002),
+      ],
+      prompts: { "w1:p2": "Which colour?\n❯ 1. Teal\n  2. Plum\n  3. Type something." },
+      screens: { "w1:p1": "● Done.", "w1:p2": "● Asking." },
+      workspaces: [{ label: "Builder", workspace_id: "w1" }],
+    },
+  }
 }
 
 describe("dashboardSource", () => {
@@ -290,7 +333,7 @@ describe("writeFixture", () => {
 
   test("moves every time by the gap between the anchor and now, and makes $CONFIG its own folder", () => {
     const dir = join(scratch("fixture-write"), "fixture")
-    writeFixture(small(), dir, new Date(Date.parse(ANCHOR) + DAY))
+    writeFixture(small(), dir, ROOTS, new Date(Date.parse(ANCHOR) + DAY))
     const usage = JSON.parse(readFileSync(join(dir, "claude/playground/usage.json"), "utf8"))
     expect(usage).toEqual({
       at: "2026-01-02T12:00:00.000Z",
@@ -309,12 +352,24 @@ describe("writeFixture", () => {
     }
   })
 
-  test("a relative PLAYGROUND_FIXTURE_DIR sits under the checkout's root, so the launcher and the API, run from different folders, name one folder", () => {
+  test("a relative PLAYGROUND_FIXTURE_DIR sits under the checkout's root, so the launcher and the API, run from different folders, name one folder; else a worktree's sits in its .turbo and a plain clone's in the temp folder, one per clone", () => {
     const root = checkoutRoot()
     if (!root) throw new Error("the tests run from a checkout")
     expect(fixtureDir({ PLAYGROUND_FIXTURE_DIR: "scratch/fx" })).toBe(join(root, "scratch/fx"))
     expect(fixtureDir({ PLAYGROUND_FIXTURE_DIR: "/elsewhere/fx" })).toBe("/elsewhere/fx")
-    expect(fixtureDir({})).toBe(join(root, ".turbo", "dashboard-fixture"))
+    const worktree = scratch("fixture-worktree")
+    writeFileSync(join(worktree, ".git"), "gitdir: /elsewhere\n")
+    expect(fixtureDir({}, worktree)).toBe(join(worktree, ".turbo", "dashboard-fixture"))
+    const uid = process.getuid?.() ?? 0
+    expect(fixtureDir({}, null, "/tmp-x")).toBe(`/tmp-x/playground-dashboard-fixture-${uid}`)
+    const clone = scratch("fixture-plain")
+    mkdirSync(join(clone, ".git"))
+    expect(fixtureDir({}, clone, "/tmp-x")).toMatch(
+      new RegExp(`^/tmp-x/playground-dashboard-fixture-${uid}-[0-9a-f]{8}$`),
+    )
+    const other = scratch("fixture-other")
+    mkdirSync(join(other, ".git"))
+    expect(fixtureDir({}, clone, "/tmp-x")).not.toBe(fixtureDir({}, other, "/tmp-x"))
   })
 
   test("the API the live Dashboard serves runs inside its checkout, so it reads the live machine and finds its migrations, never falling to a Docker image's fixture", () => {
@@ -357,20 +412,70 @@ describe("writeFixture", () => {
   })
 
   test("replaces its own folder whole, so a stack starts from the fixture again", () => {
+    const roots = freshRoots()
     const dir = join(scratch("fixture-rewrite"), "fixture")
-    writeFixture(small(), dir)
+    writeFixture(small(), dir, roots)
     writeFileSync(join(dir, "claude/playground/attachments/left-over.txt"), "{}")
-    writeFixture(small(), dir)
+    writeFixture(small(), dir, roots)
     expect(readdirSync(join(dir, "claude/playground/attachments"))).toEqual([])
-    dropFixture(dir)
+    const old = listTrash(roots.trash).find((entry) => entry.path === dir)
+    expect(old).toBeDefined()
+    expect(
+      existsSync(
+        join(roots.trash, old!.id, "fixture", "claude/playground/attachments/left-over.txt"),
+      ),
+    ).toBe(true)
+    dropFixture(dir, roots)
     expect(existsSync(dir)).toBe(false)
+    expect(trashed(roots).filter((path) => path === dir)).toHaveLength(2)
+    expect(readdirSync(dirname(dir))).toEqual([])
+  })
+
+  test("a half-written folder a stopped write left behind goes to the trash before the next write", () => {
+    const roots = freshRoots()
+    const dir = join(scratch("fixture-left"), "fixture")
+    mkdirSync(`${dir}.writing-${process.pid}`, { recursive: true })
+    writeFileSync(join(`${dir}.writing-${process.pid}`, "half.json"), "{}")
+    writeFixture(small(), dir, roots)
+    expect(existsSync(`${dir}.writing-${process.pid}`)).toBe(false)
+    expect(trashed(roots)).toContain(`${dir}.writing-${process.pid}`)
+  })
+
+  test("a fixture folder the trash refuses, as one inside the main checkout, stays, and the refusal is thrown in its words", () => {
+    const root = scratch("fixture-protected")
+    const dir = join(root, "fixture")
+    const roots = { ...ROOTS, main: root }
+    writeFixture(small(), dir, roots, new Date(Date.parse(ANCHOR)))
+    expect(() => dropFixture(dir, roots)).toThrow("inside the main checkout")
+    expect(() => writeFixture(small(), dir, roots, new Date(Date.parse(ANCHOR) + DAY))).toThrow(
+      "inside the main checkout",
+    )
+    // the refusal comes before any write or rename, so the folder is as it was and nothing sits beside it
+    expect(JSON.parse(readFileSync(join(dir, "stamp.json"), "utf8")).writtenAt).toBe(ANCHOR)
+    expect(readdirSync(root)).toEqual(["fixture"])
+  })
+
+  test("a plain clone's fixture sits in the temp folder, so a fixture stack there starts, stops and starts again with nothing left in the clone", () => {
+    const clone = scratch("fixture-clone")
+    mkdirSync(join(clone, ".git"))
+    const tmp = scratch("fixture-tmp")
+    const dir = fixtureDir({}, clone, tmp)
+    expect(dirname(dir)).toBe(tmp)
+    const roots = { ...freshRoots(), main: clone }
+    writeFixture(small(), dir, roots)
+    dropFixture(dir, roots)
+    writeFixture(small(), dir, roots)
+    dropFixture(dir, roots)
+    expect(readdirSync(clone)).toEqual([".git"])
+    expect(readdirSync(tmp)).toEqual([])
+    expect(trashed(roots).filter((path) => path === dir)).toHaveLength(2)
   })
 
   test("leaves a folder that is not a fixture's alone, a real config folder named by mistake included", () => {
     const dir = scratch("fixture-foreign")
     writeFileSync(join(dir, "roster.json"), "real")
-    expect(() => writeFixture(small(), dir)).toThrow("is not a fixture's folder")
-    dropFixture(dir)
+    expect(() => writeFixture(small(), dir, ROOTS)).toThrow("is not a fixture's folder")
+    dropFixture(dir, ROOTS)
     expect(readFileSync(join(dir, "roster.json"), "utf8")).toBe("real")
   })
 
@@ -407,9 +512,28 @@ describe("writeFixture", () => {
     }
   })
 
+  test("writes herdr's server into herdr.json, its $CONFIG paths moved into the folder, and an empty server for a fixture with none", () => {
+    const dir = join(scratch("fixture-herdr-json"), "fixture")
+    writeFixture(withHerdr(), dir, ROOTS)
+    const herdr = readFixtureHerdr(dir)
+    expect(herdr.inputs).toEqual({})
+    expect(herdr.panes.map((p) => p.pane_id)).toEqual(["w1:p1", "w1:p2"])
+    expect(herdr.panes[0]?.transcript_path).toBe(join(dir, "claude", HERDR_TRANSCRIPT))
+    expect(herdr.prompts["w1:p2"]).toContain("Which colour?")
+    const bare = join(scratch("fixture-herdr-none"), "fixture")
+    writeFixture({ ...shipped(), herdr: undefined }, bare, ROOTS)
+    expect(readFixtureHerdr(bare)).toEqual({
+      inputs: {},
+      panes: [],
+      prompts: {},
+      screens: {},
+      workspaces: [],
+    })
+  })
+
   test("refuses a send into an input that holds text unless it is forced, as cmux 0.65's draft guard does", () => {
     const dir = join(scratch("fixture-guard"), "fixture")
-    writeFixture(shipped(), dir)
+    writeFixture(shipped(), dir, ROOTS)
     const session = readFixtureCmux(dir).sessions.find(
       (s) => s.stored_pid_exists === true && typeof s.surface_id === "string",
     )
@@ -427,7 +551,7 @@ describe("writeFixture", () => {
   // herdr pastes a message, and Claude Code takes each image path in as an image; the dispatcher's fixture session stands for one
   test("a session the dashboard pastes into writes a message with an image as Claude Code writes the paste", () => {
     const dir = join(scratch("fixture-paste"), "fixture")
-    writeFixture(shipped(), dir)
+    writeFixture(shipped(), dir, ROOTS)
     const session = readFixtureCmux(dir).sessions.find((s) => s.pastes === true)
     if (!session) throw new Error("the shipped fixture has a session the dashboard pastes into")
     const surface = String(session.surface_id)
@@ -472,7 +596,7 @@ describe("writeFixture", () => {
 
   test("types into no transcript outside its own folder, whatever its scratch state names", () => {
     const dir = join(scratch("fixture-outside"), "fixture")
-    writeFixture(shipped(), dir)
+    writeFixture(shipped(), dir, ROOTS)
     const outside = join(scratch("fixture-real"), "real.jsonl")
     writeFileSync(outside, "")
     const state = readFixtureCmux(dir)
@@ -572,6 +696,7 @@ describe("writeFixture", () => {
     writeFixture(
       { ...shipped(), anchor: "2026-01-01T12:00:00.000Z" },
       dir,
+      ROOTS,
       new Date("2026-01-02T12:00:00.000Z"),
     )
     const machine = JSON.parse(readFileSync(join(dir, "machine.json"), "utf8"))
@@ -956,4 +1081,57 @@ describe("configDir on a live source", () => {
     delete process.env.CLAUDE_CONFIG_DIR
     expect(configDir()).toBe(join(homedir(), ".claude"))
   })
+})
+
+describe.skipIf(onLiveDashboard())("herdr on a fixture stack", () => {
+  // every read and write in herdr.ts runs on the fixture's own server, answered from herdr.json, and no socket is reached
+  test("reads the fixture's panes and screens, sends a prompt into its transcript, and answers a picker by keys", async () => {
+    const dir = scratch("fixture-herdr")
+    writeFixture(withHerdr(), join(dir, "fixture"), ROOTS)
+    const { code, result, stderr } = await inFixture(
+      `const h = await import(\`\${API}/lib/dashboard/herdr\`)
+const idle = "herdr:playground:w1:p1"
+const blocked = "herdr:playground:w1:p2"
+const outcome = (write) => write.then(() => "sent", (error) => h.promptOutcome(error))
+const servers = h.herdrServers()
+const [before] = await h.readHerdr()
+const screen = await h.readScreen(idle, 40)
+const picker = await h.readScreen(blocked, 40)
+await h.prompt(idle, "hello there")
+const onPicker = await outcome(h.prompt(blocked, "hi"))
+const noPane = await outcome(h.prompt("herdr:playground:w9:p9", "hi"))
+await h.typeKeys(blocked, [{ key: "down" }, { key: "enter" }])
+await h.typeKeys(idle, [{ text: "typed" }, { key: "enter" }])
+const [after] = await h.readHerdr()
+const answered = await h.readScreen(blocked, 40)
+const events = h.herdrEvents()
+events.kill()
+const { fixtureConfigDir } = await import(\`\${API}/lib/dashboard/fixture\`)
+const lines = (await Bun.file(\`\${fixtureConfigDir()}/${HERDR_TRANSCRIPT}\`).text()).trim().split("\\n").map((line) => JSON.parse(line).message.content)
+console.log(JSON.stringify({ after: after.panes.map((p) => p.agent_status), answered, before: { panes: before.panes.map((p) => [p.pane_id, p.agent_status, p.processes.map((x) => x.pid)]), server: before.server, workspaces: before.workspaces }, lines, noPane, onPicker, picker, screen, servers }))
+process.exit(0)
+`,
+      dir,
+    )
+    expect({ code, stderr: code === 0 ? "" : stderr }).toEqual({ code: 0, stderr: "" })
+    const out = result as Record<string, unknown>
+    expect(out.servers).toEqual([{ name: "playground", socket: "fixture:herdr" }])
+    expect(out.before).toEqual({
+      panes: [
+        ["w1:p1", "idle", [910001]],
+        ["w1:p2", "blocked", [910002]],
+      ],
+      server: "playground",
+      workspaces: [{ label: "Builder", workspace_id: "w1" }],
+    })
+    expect(out.screen as string).toStartWith("● Done.\n")
+    expect(out.screen as string).toContain("❯")
+    expect(out.picker).toBe("● Asking.\nWhich colour?\n❯ 1. Teal\n  2. Plum\n  3. Type something.")
+    // herdr refuses a prompt into a session blocked on a picker, and names a pane it does not hold as gone
+    expect([out.onPicker, out.noPane]).toEqual(["picker", "gone"])
+    // the prompt and the words typed then sent each reach the transcript, and the answered picker leaves its pane working at its input box
+    expect(out.lines).toEqual(["hello there", "typed"])
+    expect(out.after).toEqual(["working", "working"])
+    expect(out.answered as string).toStartWith("● Asking.\n─")
+  }, 60_000)
 })

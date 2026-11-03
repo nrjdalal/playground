@@ -14,6 +14,7 @@
     "@packages/env": "workspace:*",
     "@packages/message": "workspace:*",
     "@packages/redis": "workspace:*",
+    "@packages/safe-delete": "workspace:*",
     "@packages/settings": "workspace:*",
     "@types/bun": "catalog:",
     "@types/fontkit": "catalog:",

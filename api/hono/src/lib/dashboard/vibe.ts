@@ -14,6 +14,7 @@ import {
 import { loadavg } from "node:os"
 import { basename, join } from "node:path"
 
+import type { Roots } from "@packages/safe-delete"
 import { SQL } from "bun"
 import { drizzle } from "drizzle-orm/bun-sql"
 import { migrate as drizzleMigrate } from "drizzle-orm/bun-sql/migrator"
@@ -28,6 +29,7 @@ import {
   livePair,
 } from "@/lib/dev/live-dashboard"
 import { dataDir } from "@/lib/sessions/paths"
+import { discard, trashRoots } from "@/lib/trash"
 
 // A Vibeground: a worktree's own stack started from the Preview pane on a copy of the live database, seeded by one pg_dump read of it, the copy's only touch of the live one; Stop ends the stack and removes the copy, keeping the worktree. Every command is a fixed argv built here from a listed worktree's path, never from a request's words.
 
@@ -35,8 +37,8 @@ const LOG = ".turbo/vibe-dev.log"
 const SAVED_ENV = ".env.vibe-saved"
 // the stack's own data folder, a clone of the live one, so its settings and store edits stay in the copy
 const DATA = ".turbo/vibe-data"
-// the live data folder's parts a Vibeground never reads: the transcript archive, the ops binaries, database dumps and debug logs
-const DATA_LEFT = new Set(["archive", "bin", "debug", "dumps"])
+// the live data folder's parts a Vibeground never reads: the transcript archive, the ops binaries, database dumps, debug logs and the trash
+const DATA_LEFT = new Set(["archive", "bin", "debug", "dumps", "trash"])
 const MIGRATIONS = "packages/db/drizzle"
 const DUMP_TIMEOUT_MS = 5 * 60_000
 const READY_TRIES = 60
@@ -66,6 +68,8 @@ export type Deps = {
   // docker's from | docker's to, the first stopped by its own handle past timeoutMs
   pipe: Pipe
   readsLive: () => boolean
+  // the folders a removed file's move into the trash starts from
+  roots: () => Roots
   secret: () => string
   stacks: () => Promise<Stack[]>
   // `bun run dev:stop` in the worktree, on the data folder named
@@ -290,6 +294,7 @@ export const DEPS: Deps = {
   migrate,
   pipe,
   readsLive,
+  roots: () => trashRoots(),
   secret: () => Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("hex"),
   stacks: readStacks,
   stop,
@@ -409,9 +414,15 @@ export async function startVibe(path: string, deps: Deps = DEPS): Promise<Seeded
     // a Stop already took this Start's copy and record, and a later Start's are its own
     if (owns()) {
       await deps.docker(["rm", "-fv", copy])
-      rmSync(record, { force: true })
+      // the .env first, so a trash that throws never leaves the worktree on the copy's
+      const kept = wrote ? [restoreEnv(deps, path)] : []
+      // a record the trash then leaves behind names the .env as the worktree's own, so the Stop it offers leaves the .env alone
+      if (wrote && !kept[0])
+        writeRecord(path, { container: copy, env: false, id, started: new Date().toISOString() })
+      kept.push(trash(deps, path, VIBE_RECORD))
       rmSync(join(path, DATA), { force: true, recursive: true })
-      if (wrote) restoreEnv(path)
+      const words = kept.filter(Boolean).join("; ")
+      if (words) throw new VibeError(`${error instanceof Error ? error.message : error}; ${words}`)
     }
     throw error instanceof VibeError ? error : new VibeError(String(error))
   }
@@ -429,11 +440,20 @@ const STOP_STALE_MS = 10 * 60_000
 const writeRecord = (path: string, record: VibeRecord) =>
   writeFileSync(join(path, VIBE_RECORD), `${JSON.stringify(record)}\n`)
 
-// The worktree's own .env back as it was before Start, or none when it had none.
-const restoreEnv = (path: string) => {
+// Moves a file a Vibeground wrote into the trash, under the worktree's own session so one Stop is never held to another's tripwire: null once moved or when none stands there, else the refusal's words.
+const trash = (deps: Deps, path: string, file: string): string | null =>
+  discard(
+    join(path, file),
+    { reason: "vibeground", session: `vibe-${basename(path).replace(/[^A-Za-z0-9-]/g, "-")}` },
+    deps.roots(),
+  )
+
+// The worktree's own .env back as it was before Start, or none when it had none: null once done, else the refusal's words.
+const restoreEnv = (deps: Deps, path: string): string | null => {
   const saved = join(path, SAVED_ENV)
-  if (existsSync(saved)) renameSync(saved, join(path, ".env"))
-  else rmSync(join(path, ".env"), { force: true })
+  if (!existsSync(saved)) return trash(deps, path, ".env")
+  renameSync(saved, join(path, ".env"))
+  return null
 }
 
 const readVibe = (
@@ -504,12 +524,14 @@ export async function stopVibe(path: string, deps: Deps = DEPS): Promise<void> {
     // a Stop that took the stale mark over has put the .env back already, and a second restore would remove the worktree's own
     if (readVibe(stack.path)?.id !== claim.id) return
     if (record.env) {
-      restoreEnv(stack.path)
+      const kept = restoreEnv(deps, stack.path)
+      if (kept) throw new VibeError(kept)
       claim.env = false
       writeRecord(stack.path, { ...claim, stopping: true })
     }
     rmSync(join(stack.path, DATA), { force: true, recursive: true })
-    rmSync(join(stack.path, VIBE_RECORD), { force: true })
+    const kept = trash(deps, stack.path, VIBE_RECORD)
+    if (kept) throw new VibeError(kept)
   } catch (error) {
     // a Stop that failed lets the next one try
     if (readVibe(stack.path)?.id === claim.id) writeRecord(stack.path, claim)

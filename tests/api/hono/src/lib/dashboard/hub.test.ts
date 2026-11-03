@@ -60,14 +60,20 @@ describe("movesTheBoard", () => {
   })
 })
 
-type Deferred = { promise: Promise<Live>; resolve: (live: Live) => void }
+type Deferred = {
+  promise: Promise<Live>
+  reject: (err: Error) => void
+  resolve: (live: Live) => void
+}
 
 const deferred = (): Deferred => {
+  let reject: (err: Error) => void = () => {}
   let resolve: (live: Live) => void = () => {}
-  const promise = new Promise<Live>((r) => {
+  const promise = new Promise<Live>((r, j) => {
+    reject = j
     resolve = r
   })
-  return { promise, resolve }
+  return { promise, reject, resolve }
 }
 
 const worker = (name: string): Worker => ({
@@ -119,6 +125,9 @@ const hubWith = (
   const asked: unknown[] = []
   // when each read started, so a case can measure the space between reads from the reads themselves
   const starts: number[] = []
+  // each tail's change listener, fired by the case after it appends: fs.watch's FSEvents lost 6 of 15 changes to a file at load5 13
+  const watchers = new Map<string, () => void>()
+  const changed = (path: string) => watchers.get(path)?.()
   const hub = new DashboardHub({
     events: false,
     listLive: (options) => {
@@ -131,8 +140,12 @@ const hubWith = (
     pace,
     refreshTimeoutMs,
     stat,
+    watch: (path, onChange) => {
+      watchers.set(path, onChange)
+      return { close: () => watchers.delete(path) }
+    },
   })
-  return { asked, calls, hub, starts }
+  return { asked, calls, changed, hub, starts }
 }
 
 describe("DashboardHub", () => {
@@ -373,7 +386,7 @@ describe("DashboardHub", () => {
     const before = join(dir, "before.jsonl")
     writeFileSync(before, line("u-before", "already there when the hub started"))
     born(before, Date.now() - 60_000)
-    const { calls, hub } = hubWith(undefined, stat)
+    const { calls, changed, hub } = hubWith(undefined, stat)
     const frames: DashboardFrame[] = []
     const leave = hub.subscribe((frame) => frames.push(frame))
     await until("the hub's first read", () => calls.length === 1)
@@ -401,12 +414,72 @@ describe("DashboardHub", () => {
     )
     await until("the fresh transcript's first prompt", () => sentBy(frames).length === 2)
     appendFileSync(before, line("u-new", "said after the tail began"))
+    changed(before)
     await until("the older transcript's next line", () => sentBy(frames).length === 3)
     expect(sentBy(frames)).toEqual([
       "s-early:created before the hub's first look",
       "s-fresh:the first prompt",
       "s-before:said after the tail began",
     ])
+    leave()
+    again()
+  })
+
+  // a lost change event left its line unsent until the session wrote again: every refresh reads each open tail again from its offset
+  const opened = async (name: string) => {
+    const { born, stat } = birthtimes()
+    const path = join(dir, name)
+    writeFileSync(path, line("u-0", "there before the hub started"))
+    born(path, Date.now() - 60_000)
+    const { calls, changed, hub } = hubWith(undefined, stat)
+    const frames: DashboardFrame[] = []
+    const leave = hub.subscribe((frame) => frames.push(frame))
+    await until("the hub's first read", () => calls.length === 1)
+    calls[0]?.resolve(live([["s-tail", path]]))
+    await until("the tail's watcher", () => hub.watching === 1)
+    // a second viewer asks for a refresh, as the safety timer does every 10 s; `answer` settles its sessions read
+    const refresh = async (answer = (call: Deferred) => call.resolve(live([["s-tail", path]]))) => {
+      const at = calls.length
+      const again = hub.subscribe(() => {})
+      await until("the next read", () => calls.length === at + 1)
+      const call = calls[at]
+      if (call) answer(call)
+      return again
+    }
+    return { changed, frames, leave, path, refresh }
+  }
+
+  test("a line whose change event is lost reaches the board on the next refresh", async () => {
+    const { frames, leave, path, refresh } = await opened("lost.jsonl")
+    appendFileSync(path, line("u-1", "its change event was lost"))
+    const again = await refresh()
+    await until("the lost line", () => sentBy(frames).length === 1)
+    expect(sentBy(frames)).toEqual(["s-tail:its change event was lost"])
+    leave()
+    again()
+  })
+
+  test("a line whose change event is lost reaches the board on a refresh whose sessions read fails", async () => {
+    const { frames, leave, path, refresh } = await opened("failed.jsonl")
+    appendFileSync(path, line("u-1", "read on a failed refresh"))
+    const again = await refresh((call) => call.reject(new Error("cmux is down")))
+    await until("the lost line", () => sentBy(frames).length === 1)
+    expect(sentBy(frames)).toEqual(["s-tail:read on a failed refresh"])
+    leave()
+    again()
+  })
+
+  test("a line both its change event and a refresh read is sent once", async () => {
+    const { changed, frames, leave, path, refresh } = await opened("both.jsonl")
+    appendFileSync(path, line("u-1", "read twice, sent once"))
+    // the event fires in the tick the refresh's read lands, so its tail read is still reading when the refresh's starts
+    const again = await refresh((call) => {
+      call.resolve(live([["s-tail", path]]))
+      changed(path)
+    })
+    await until("the line", () => sentBy(frames).length > 0)
+    await sleep(UNREREAD_MS)
+    expect(sentBy(frames)).toEqual(["s-tail:read twice, sent once"])
     leave()
     again()
   })
@@ -467,7 +540,7 @@ describe("DashboardHub", () => {
     writeFileSync(busy, line("b-0", "working"))
     born(waiting, Date.now() - 60_000)
     born(busy, Date.now() - 60_000)
-    const { calls, hub } = hubWith(undefined, stat)
+    const { calls, changed, hub } = hubWith(undefined, stat)
     const frames: DashboardFrame[] = []
     const leave = hub.subscribe((frame) => frames.push(frame))
     await until("the hub's first read", () => calls.length === 1)
@@ -481,11 +554,13 @@ describe("DashboardHub", () => {
     })
     await until("the two tails, read from their ends", () => hub.watching === 2)
     appendFileSync(busy, line("b-1", "still working"))
+    changed(busy)
     await until("the busy line's entry", () => sentBy(frames).length === 1)
     // proves the negative: a working session's line re-reads nothing, the window starting at its entry
     await sleep(UNREREAD_MS)
     expect(calls).toHaveLength(1)
     appendFileSync(waiting, line("w-1", "answered"))
+    changed(waiting)
     await until("the re-read", () => calls.length === 2)
     leave()
   })
@@ -493,7 +568,7 @@ describe("DashboardHub", () => {
   // an image's attachment went unseen while the message alone showed. Claude Code names a message's image on a source line written after it, so a read can end between the two.
   test("a message whose image's source line comes in a later read is sent again, its image named", async () => {
     const { born, stat } = birthtimes()
-    const { calls, hub } = hubWith(undefined, stat)
+    const { calls, changed, hub } = hubWith(undefined, stat)
     const frames: DashboardFrame[] = []
     const leave = hub.subscribe((frame) => frames.push(frame))
     await until("the hub's first read", () => calls.length === 1)
@@ -522,6 +597,7 @@ describe("DashboardHub", () => {
         uuid: "u-1",
       }),
     )
+    changed(path)
     await until("the message", () => sentBy(frames).length === 2)
     appendFileSync(
       path,
@@ -534,6 +610,7 @@ describe("DashboardHub", () => {
         uuid: "m-1",
       }),
     )
+    changed(path)
     await until("the message again", () => sentBy(frames).length === 3)
     const sent = frames.flatMap((f) => (f.type === "entries" ? f.entries : []))
     expect(sent.map((e) => [e.id, e.attachments?.map((a) => a.id) ?? null])).toEqual([
@@ -547,7 +624,7 @@ describe("DashboardHub", () => {
   // A message whose image no source line names (a path outside the folder, or a Claude Code that writes none) goes out at once, and is held for one read only.
   test("a message whose image's source line never comes is sent at once, and held no longer than the next read", async () => {
     const { born, stat } = birthtimes()
-    const { calls, hub } = hubWith(undefined, stat)
+    const { calls, changed, hub } = hubWith(undefined, stat)
     const frames: DashboardFrame[] = []
     const leave = hub.subscribe((frame) => frames.push(frame))
     await until("the hub's first read", () => calls.length === 1)
@@ -576,16 +653,52 @@ describe("DashboardHub", () => {
         uuid: "u-1",
       })}\n`,
     )
+    changed(path)
     await until("the message, before any source line", () => sentBy(frames).length === 2)
     appendFileSync(path, line("u-2", "the next line, no source"))
+    changed(path)
     await until("the next line", () => sentBy(frames).length === 4)
     appendFileSync(path, line("u-3", "a later line"))
+    changed(path)
     await until("the later line", () => sentBy(frames).length === 5)
     const batches = frames.flatMap((f) =>
       f.type === "entries" ? [f.entries.map((e) => e.id)] : [],
     )
     expect(batches).toEqual([["u-0"], ["u-1"], ["u-1", "u-2"], ["u-3"]])
     leave()
+  })
+
+  // The one case on the real fs.watch: FSEvents dropped or delayed a file's change by seconds at load5 13, so it appends again until a read sends what it wrote.
+  test("a change fs.watch reports sends the transcript's new lines", async () => {
+    const path = join(dir, "real-watch.jsonl")
+    writeFileSync(path, "")
+    const calls: Deferred[] = []
+    const hub = new DashboardHub({
+      events: false,
+      listLive: () => {
+        const call = deferred()
+        calls.push(call)
+        return call.promise
+      },
+    })
+    const frames: DashboardFrame[] = []
+    const leave = hub.subscribe((frame) => frames.push(frame))
+    try {
+      await until("the hub's first read", () => calls.length === 1)
+      calls[0]?.resolve(live([["s-real", path]]))
+      await until("the tail", () => hub.watching === 1)
+      // inside the case's 20s, so a watcher that never reports fails on its own message
+      const deadline = Date.now() + 15_000
+      for (let i = 0; sentBy(frames).length === 0; i++) {
+        if (Date.now() > deadline)
+          throw new Error("timed out waiting for fs.watch to report a change")
+        appendFileSync(path, line(`r-${i}`, "seen through fs.watch"))
+        await sleep(500)
+      }
+      expect(sentBy(frames)[0]).toBe("s-real:seen through fs.watch")
+    } finally {
+      leave()
+    }
   })
 
   test("the snapshot is the newest live list while anyone watches, and none after a failure or once all leave", async () => {

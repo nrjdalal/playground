@@ -23,6 +23,7 @@ const bash = (command: string) =>
 describe("a git stash that can take another worktree's work is refused", () => {
   test.each([
     ["a bare stash", "git stash"],
+    ["a stash inside an array assignment", "arr=($(git stash))"],
     ["push without a message", "git stash push"],
     ["push with options but no message", "git stash push -u --keep-index"],
     ["an implied push without a message", "git stash -u"],
@@ -42,6 +43,9 @@ describe("a git stash that can take another worktree's work is refused", () => {
     ["git with -c and --no-pager first", "git -c core.pager=cat --no-pager stash drop"],
     ["a quoted subcommand", "git 'stash' pop"],
     ["an alias defined with -c", "git -c alias.s=stash s pop"],
+    ["git --attr-source <tree> first, a separate value", "git --attr-source HEAD stash push"],
+    ["git --attr-source=<tree> first, an attached value", "git --attr-source=HEAD stash pop"],
+    ["an alias with --attr-source before its use", "git -c alias.s=stash --attr-source HEAD s pop"],
     ["after &&", "git add -A && git stash && git checkout canary"],
     ["after ;", "echo hi; git stash pop"],
     ["in a pipeline", "git stash pop | cat"],
@@ -71,6 +75,15 @@ describe("a git stash that can take another worktree's work is refused", () => {
   })
 })
 
+describe("a long run of closing braces", () => {
+  test("ahead of a stash is read inside the hook's time", async () => {
+    const started = performance.now()
+    const reason = await bash(`${"ls; }\n".repeat(60_000)}git stash`)
+    expect(reason).toBeDefined()
+    expect(performance.now() - started).toBeLessThan(5_000)
+  }, 20_000)
+})
+
 describe("a stash found by name or SHA, and every other call, runs", () => {
   test.each([
     ["list", "git stash list"],
@@ -84,6 +97,7 @@ describe("a stash found by name or SHA, and every other call, runs", () => {
     ["apply by full SHA", `git stash apply ${SHA}`],
     ["apply --index by full SHA", `git stash apply --index ${SHA}`],
     ["git -C with apply by full SHA", `git -C /tmp/other stash apply ${SHA}`],
+    ["git --attr-source <tree> with push -m", "git --attr-source HEAD stash push -m wip"],
     ["store, which restores an entry", `git stash store -m restored ${SHA}`],
     ["create", "git stash create"],
     ["help", "git stash --help"],
@@ -97,6 +111,12 @@ describe("a stash found by name or SHA, and every other call, runs", () => {
     ["a name it cannot read with no stash after it", "$EDITOR notes.md"],
   ])("%s", async (_, command) => {
     expect(await bash(command)).toBeUndefined()
+  })
+
+  test("40 wrapper options it does not know before a stash are read in time, and the stash refused", async () => {
+    const started = performance.now()
+    expect(await bash(`sudo ${"-Z ".repeat(40)}true; git stash`)).toContain("no-stash hook")
+    expect(performance.now() - started).toBeLessThan(2000)
   })
 
   test("a tool other than Bash passes", async () => {
@@ -203,7 +223,7 @@ describe("the factory settings run it", () => {
       hooks: { PreToolUse: Entry[] }
     }
     const found = settings.hooks.PreToolUse.find((e) =>
-      e.hooks.some((h) => h.command.includes("scripts/hooks/no-stash.ts")),
+      e.hooks.some((h) => h.command.includes("scripts/hooks/bundled/no-stash.js")),
     )
     if (!found) throw new Error("scripts/factory-settings.json registers no no-stash hook")
     return found
@@ -217,7 +237,7 @@ describe("the factory settings run it", () => {
   })
 
   // CLAUDE_PROJECT_DIR is a folder in no repository, so only PLAYGROUND_REPO can name the checkout
-  const hook = async (home: string, command: string, repo: string) => {
+  const hook = async (home: string, command: string, repo: string, role = "worker") => {
     const proc = Bun.spawn(["bash", "-c", (await entry()).hooks[0].command], {
       cwd: tmpdir(),
       env: {
@@ -226,7 +246,7 @@ describe("the factory settings run it", () => {
         GIT_CEILING_DIRECTORIES: tmpdir(),
         HOME: home,
         PLAYGROUND_REPO: repo,
-        PLAYGROUND_ROLE: "worker",
+        PLAYGROUND_ROLE: role,
       },
       stderr: "pipe",
       stdin: new Blob([JSON.stringify({ tool_input: { command }, tool_name: "Bash" })]),
@@ -243,9 +263,12 @@ describe("the factory settings run it", () => {
     expect(await hook(home, "git stash list", root)).toEqual({ code: 0, stderr: "" })
   })
 
-  test("a hook that finds no checkout lets the call through", async () => {
+  test("a hook that finds no checkout refuses a factory session's call and lets any other through", async () => {
     const home = await mkdtemp(join(tmpdir(), "no-stash-nohome-"))
-    expect(await hook(home, "git stash pop", "")).toEqual({ code: 0, stderr: "" })
+    const refused = await hook(home, "git stash pop", "")
+    expect(refused.code).toBe(2)
+    expect(refused.stderr).toContain("Restoring the main checkout")
+    expect(await hook(home, "git stash pop", "", "")).toEqual({ code: 0, stderr: "" })
   })
 
   test("the script runs on its own", async () => {

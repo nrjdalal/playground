@@ -1,0 +1,162 @@
+import { homedir } from "node:os"
+import { join } from "node:path"
+
+import { dataDir } from "@packages/env/data-dir"
+import {
+  isAgentBrowser,
+  listTrash,
+  type Proc,
+  quarantine,
+  restore,
+  type Roots,
+} from "@packages/safe-delete"
+
+import STATUSES from "../../../../scripts/roster-statuses.json"
+import { mainCheckout } from "../main-checkout"
+import { sessionName } from "../trash"
+
+export const RM_USAGE =
+  'usage: playground rm <path> [--reason "<why>"] | --worktree <path> [--reason "<why>"] | --list | --restore <id>'
+
+export type RmArgs =
+  | { list: true }
+  | { restore: string }
+  | { path: string; reason: string; worktree: boolean }
+
+// playground rm's words: one path, or --worktree's, with an optional --reason; --list or --restore <id> alone.
+export const rmArgs = (words: string[]): RmArgs | { error: string } => {
+  if (words.length === 1 && words[0] === "--list") return { list: true }
+  if (words.length === 2 && words[0] === "--restore") return { restore: words[1]! }
+  let path: string | undefined
+  let reason = "playground rm"
+  let worktree = false
+  for (let i = 0; i < words.length; i++) {
+    const word = words[i]!
+    if (word === "--reason" && words[i + 1] !== undefined) reason = words[++i]!
+    else if (word === "--worktree" && words[i + 1] !== undefined && path === undefined) {
+      worktree = true
+      path = words[++i]!
+    } else if (!word.startsWith("--") && path === undefined) path = word
+    else return { error: RM_USAGE }
+  }
+  return path === undefined ? { error: RM_USAGE } : { path, reason, worktree }
+}
+
+// What playground rm reads and calls beyond its words, so a test hands it a mkdtemp machine: the folders it starts from, every process with a working folder, the ops notify line to the dispatcher, and the session's name.
+export type RmDeps = {
+  data: string
+  home: string
+  main: string
+  notify: (text: string) => void
+  procs: () => Proc[] | null
+  session: () => Promise<string>
+}
+
+// lsof -F's names for each pid: its "p<pid>" line, then each "n<name>" line under it.
+const namesByPid = (out: string): Map<number, string[]> => {
+  const names = new Map<number, string[]>()
+  let pid = 0
+  for (const line of out.split("\n"))
+    if (line.startsWith("p")) names.set((pid = Number(line.slice(1))), [])
+    else if (line.startsWith("n")) names.get(pid)?.push(line.slice(1))
+  return names
+}
+
+// Each process lsof gives a working folder, with its command line from ps and its unix socket paths from a second lsof.
+export const processesOf = (cwds: string, ps: string, sockets: string): Proc[] => {
+  const commands = new Map<number, string>()
+  for (const line of ps.split("\n")) {
+    const row = /^\s*(\d+) (.*)$/.exec(line)
+    if (row) commands.set(Number(row[1]), row[2]!)
+  }
+  const paths = namesByPid(sockets)
+  return [...namesByPid(cwds)].flatMap(([pid, [cwd]]) =>
+    cwd?.startsWith("/")
+      ? [
+          {
+            command: commands.get(pid) ?? "",
+            cwd,
+            pid,
+            sockets: (paths.get(pid) ?? []).filter((p) => p.startsWith("/")),
+          },
+        ]
+      : [],
+  )
+}
+
+const output = (argv: string[]): string =>
+  Bun.spawnSync(argv, { stderr: "ignore", stdout: "pipe" }).stdout.toString()
+
+// Every process with a working folder, as lsof and ps list them, an agent-browser one with its sockets, or null when lsof lists none.
+const processes = (): Proc[] | null => {
+  const cwds = output(["lsof", "-d", "cwd", "-Fpn"])
+  const ps = output(["ps", "-axo", "pid=,args="])
+  const browsers = processesOf(cwds, ps, "").filter((p) => isAgentBrowser(p.command))
+  const sockets = browsers.length
+    ? output(["lsof", "-a", "-U", "-p", browsers.map((p) => p.pid).join(","), "-Fpn"])
+    : ""
+  const procs = processesOf(cwds, ps, sockets)
+  return procs.length ? procs : null
+}
+
+// This machine's: HOME, the data folder, the main checkout, notify.sh to the dispatcher, lsof and ps, and the Claude Code registry's name for this session, else "shell".
+export const rmDeps = (repo: string): RmDeps => ({
+  data: dataDir(),
+  home: homedir(),
+  main: mainCheckout(repo),
+  notify: (text) =>
+    void Bun.spawnSync(["bash", join(repo, "scripts", "ops", "notify.sh"), "safe-delete", text], {
+      env: { ...process.env, NOTIFY_TO: "dispatcher" },
+      stderr: "ignore",
+      stdout: "ignore",
+    }),
+  procs: processes,
+  session: sessionName,
+})
+
+// playground rm: one quarantine, list or restore against the deps' HOME, main checkout and trash; a protected or tripwire refusal goes to the dispatcher; exit 0 done, 1 refused, 2 a usage error.
+export async function runRm(words: string[], deps: RmDeps): Promise<number> {
+  const args = rmArgs(words)
+  if ("error" in args) {
+    console.error(`playground: ${args.error}`)
+    return 2
+  }
+  const roots: Roots = { home: deps.home, main: deps.main, trash: join(deps.data, "trash") }
+  if ("list" in args) {
+    for (const entry of listTrash(roots.trash))
+      console.log(
+        `${entry.id}  ${entry.path}  ${entry.files} files, ${entry.size} bytes, by ${entry.session}: ${entry.reason}`,
+      )
+    return 0
+  }
+  const session = "restore" in args ? "" : await deps.session()
+  const done =
+    "restore" in args
+      ? restore(args.restore, roots)
+      : quarantine(
+          args.path,
+          {
+            reason: args.reason,
+            session,
+            worktree: args.worktree
+              ? { live: STATUSES.live, procs: deps.procs(), roster: join(deps.data, "roster.json") }
+              : undefined,
+          },
+          roots,
+        )
+  if ("refused" in done) {
+    if (done.kind !== "refused") deps.notify(`${session || "restore"}: ${done.refused}`)
+    console.error(`playground: ${done.refused}`)
+    return 1
+  }
+  if ("path" in done) {
+    console.log(`Restored ${done.path}`)
+    return 0
+  }
+  if ("worktree" in args && args.worktree)
+    Bun.spawnSync(["git", "-C", roots.main, "worktree", "prune"])
+  console.log(
+    `Moved to the trash as ${done.id} (${done.files} files); playground rm --restore ${done.id} brings it back`,
+  )
+  return 0
+}

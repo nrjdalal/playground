@@ -76,7 +76,7 @@ export const inboxRouter = new Hono<{ Variables: Session }>()
     describeRoute({
       tags: ["Inbox"],
       description:
-        "One file an ask or a read-only update carries, by the id it was kept under: only for the Dashboard's own page on this machine, which fetches it with its cookie, so a page elsewhere cannot embed it",
+        "One file an ask, a draft, a Slack decision or a read-only update carries, by the id it was kept under: only for the Dashboard's own page on this machine, which fetches it with its cookie, so a page elsewhere cannot embed it",
       responses: {
         200: { description: "The file" },
         ...authErrorResponses,
@@ -123,7 +123,7 @@ export const inboxRouter = new Hono<{ Variables: Session }>()
     describeRoute({
       tags: ["Inbox"],
       description:
-        "Answer an open decision (approve, deny, clear to set it aside as Archive, or edit with words) or draft (send, or for a Slack draft save it as a draft in Slack, each as written or changed, or discard), with his optional note. With seen, the updatedAt of the card he answered, it is refused when the item has changed since. The answer is kept, then typed into the posting session through the delivery adapter, and that session carries it out; the Dashboard itself sends nothing",
+        "Answer an open decision (approve, deny, clear to set it aside as Archive, or edit with words) or draft (send, or for a Slack draft save it as a draft in Slack, each as written or changed, discard, or clear to archive it), with his optional note, or move an archived item back to the Inbox open and unanswered (unarchive), which tells its poster nothing. With seen, the updatedAt of the card he answered, it is refused when the item has changed since. The answer is kept, then typed into the posting session through the delivery adapter, and that session carries it out; the Dashboard itself sends nothing",
       responses: {
         200: { description: "OK" },
         ...validationErrorResponses,

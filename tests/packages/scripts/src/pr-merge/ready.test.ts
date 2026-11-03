@@ -6,6 +6,7 @@ import { join } from "node:path"
 import type { Comment, PrFacts } from "../../../../../packages/scripts/src/pr-merge/gates"
 import type { Outcome, Run, RunResult } from "../../../../../packages/scripts/src/pr-merge/merge"
 import { mergeReady } from "../../../../../packages/scripts/src/pr-merge/ready"
+import { TYPES_BUDGET_MS } from "../../../../../packages/scripts/src/pr-merge/types"
 import { SKILL_BODY } from "./bodies"
 import "./scratch-config"
 import { greenChecks } from "./suite"
@@ -103,6 +104,31 @@ describe("pr:train ready", () => {
     const short = world(factsOf({ body: "Outcome: one line.\n" }))
     expect(await short.ready()).toEqual({ refused: [] })
     expect(short.merges).toEqual([])
+  })
+
+  // the merge train's 900s call of pr:train ready: a refused PR's types gate spends the budget the next PR's gate gets
+  test("every pr:merge in one call shares one types budget", async () => {
+    const run: Run = async (args) =>
+      args.join(" ").startsWith("pr list")
+        ? ok([7, 8].map((n) => JSON.stringify({ author: OWNER, draft: false, n })).join("\n"))
+        : { code: 1, stderr: "unexpected gh", stdout: "" }
+    const lockRoot = mkdtempSync(join(scratch, "lock-"))
+    const queue = join(lockRoot, "merge-queue.json")
+    writeFileSync(queue, JSON.stringify({ queue: [{ pr: 7 }, { pr: 8 }] }))
+    const budgets: number[] = []
+    const merge = async (n: number, typesBudgetMs: number): Promise<Outcome> => {
+      budgets.push(typesBudgetMs)
+      await Bun.sleep(20)
+      return n === 7
+        ? { gates: [{ detail: "could not finish", name: "types", ok: false }], kind: "refused" }
+        : { gates: [], kind: "merged", sha: "f".repeat(40) }
+    }
+    const local = { facts: async () => factsOf(), git: async () => ok(), lockRoot, merge, queue }
+    const readied = await mergeReady({ repo: REPO }, run, local)
+    expect(readied.merged?.n).toBe(8)
+    expect(budgets).toHaveLength(2)
+    expect(budgets[0]).toBeLessThanOrEqual(TYPES_BUDGET_MS)
+    expect(budgets[1]).toBeLessThanOrEqual((budgets[0] ?? 0) - 20)
   })
 
   test("a refusal from pr:merge is named and nothing reads as merged", async () => {

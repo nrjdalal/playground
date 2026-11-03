@@ -49,18 +49,33 @@ export function windowsOf(limits: unknown): ZaiWindows | null {
   return windows.fiveHour || windows.week ? windows : null
 }
 
+// The waits before each retry of a fetch that never reached Z.ai (DNS or the network just after boot): with each try's timeout, under 4 minutes in all, so a read and its retries end inside one cycle and the beat turns ok once the network is back.
+const RETRY_MS = [5_000, 15_000, 30_000, 60_000]
+
 // The key goes only into the Authorization header; a failure names Z.ai's status and body code, and masks the key, should Z.ai or the fetch echo it.
-export async function zaiQuota(key: string, fetchImpl: typeof fetch = fetch): Promise<unknown> {
+export async function zaiQuota(
+  key: string,
+  fetchImpl: typeof fetch = fetch,
+  wait: (ms: number) => Promise<void> = Bun.sleep,
+): Promise<unknown> {
   if (!key)
     throw new Error(
       "the Keychain holds no key for the first GLM row of usage.accounts under models.glmKeychainService",
     )
-  const res = await fetchImpl("https://api.z.ai/api/monitor/usage/quota/limit", {
-    headers: { Authorization: `Bearer ${key}` },
-    signal: AbortSignal.timeout(TIMEOUT_MS),
-  }).catch((err: unknown) => {
-    throw new Error((err instanceof Error ? err.message : String(err)).replaceAll(key, "***"))
-  })
+  const call = async ([delay, ...rest]: number[]): Promise<Response> => {
+    try {
+      return await fetchImpl("https://api.z.ai/api/monitor/usage/quota/limit", {
+        headers: { Authorization: `Bearer ${key}` },
+        signal: AbortSignal.timeout(TIMEOUT_MS),
+      })
+    } catch (err) {
+      if (delay === undefined)
+        throw new Error((err instanceof Error ? err.message : String(err)).replaceAll(key, "***"))
+      await wait(delay)
+      return call(rest)
+    }
+  }
+  const res = await call(RETRY_MS)
   const body = (await res.json().catch(() => ({}))) as {
     code?: unknown
     data?: unknown

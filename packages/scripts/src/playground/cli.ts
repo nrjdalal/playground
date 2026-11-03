@@ -7,7 +7,9 @@ import { getSessionNames, type NamedKind, setSessionNames } from "@packages/conf
 import { configDirOf, dataDir } from "@packages/env/data-dir"
 import { modelSettings, readPolicyOrDefaults, readSessionNames } from "@packages/settings"
 
+import { livePair } from "../../../../api/hono/src/lib/dev/live-dashboard"
 import { accountsIo, runAccounts } from "./accounts"
+import { type Docker, ensureDatabase } from "./database"
 import { doctor, report } from "./doctor"
 import { pinHere } from "./herdr-pin"
 import { orgsCommand, orgsIo } from "./orgs"
@@ -21,6 +23,7 @@ import {
   rollOutcome,
   runStart,
   runStatus,
+  startFailure,
   statusLines,
   VIEW_HINT,
   VERBS,
@@ -44,8 +47,8 @@ import {
   supervisorRunning,
 } from "./probe"
 import { runSpawn, startDispatcher } from "./spawn"
-import { runStore } from "./store"
-import { OUTSIDE_CMUX, startJobs, TERMINAL } from "./terminal"
+import { runStore, terminalIo } from "./store"
+import { startJobs, TERMINAL } from "./terminal"
 import { askPurge, uninstall } from "./uninstall"
 import { runUpdate, spawnRun } from "./update"
 import { version } from "./version"
@@ -166,6 +169,25 @@ const liveDashboard = (cut = false) => {
   return { checkout, urls: dashboardUrls(checkout) }
 }
 
+// docker's own argv, its error words as its output on a failure; a missing docker reads as a failure.
+const docker: Docker = async (args) => {
+  try {
+    const child = Bun.spawn(["docker", ...args], {
+      stderr: "pipe",
+      stdout: "pipe",
+      timeout: 30_000,
+    })
+    const [out, err, code] = await Promise.all([
+      new Response(child.stdout).text(),
+      new Response(child.stderr).text(),
+      child.exited,
+    ])
+    return { code, out: (code === 0 ? out : err || out).trim() }
+  } catch (error) {
+    return { code: 127, out: error instanceof Error ? error.message : String(error) }
+  }
+}
+
 const dashboard = async (): Promise<number> => {
   const failed: string[] = []
   const close = (): number => {
@@ -173,12 +195,17 @@ const dashboard = async (): Promise<number> => {
     return failed.length ? 1 : 0
   }
   const { checkout, urls } = liveDashboard(true)
+  const database = await ensureDatabase(livePair(), docker)
+  for (const line of database.lines) console.log(line)
+  if (database.failed) failed.push(`The Dashboard's database didn't start: ${database.failed}`)
+  // the supervisor's logs from here on: a roll begun earlier may have met the database before it started, so its FAIL is stale
+  const ops = opsDashboard()
+  const logs = { log: join(ops, "supervisor.log"), results: join(ops, "results.log") }
+  const from = { log: Bun.file(logs.log).size, results: Bun.file(logs.results).size }
   for (const step of planStart(await probe(urls))) {
     if (step === "jobs") {
       console.log("Starting the Dashboard…")
       const jobs = await startJobs(REPO)
-      // up.py has just said to open a cmux terminal, and the Dashboard cannot come up until one is open
-      if (jobs === OUTSIDE_CMUX) return 1
       if (jobs !== 0) failed.push(`The Dashboard's jobs didn't start: up.py exited ${jobs}`)
     } else if (step === "dispatcher") {
       console.log(`Starting ${getSessionNames().names.dispatcher}…`)
@@ -191,7 +218,11 @@ const dashboard = async (): Promise<number> => {
       for (;;) {
         const api = await apiUp(ready)
         const now = Date.now()
-        const outcome = waitOutcome({ api, beat: dashboardBeat(now), now }, state)
+        const failure = startFailure(
+          await linesSince(logs.results, from.results),
+          await linesSince(logs.log, from.log),
+        )
+        const outcome = waitOutcome({ api, beat: dashboardBeat(now), failure, now }, state)
         if ("done" in outcome) {
           if (!outcome.ok) {
             failed.push(`The Dashboard didn't come up: ${outcome.done}`)
@@ -267,11 +298,11 @@ const roll = async (): Promise<number> => {
 }
 
 // playground update [--to <tag>]: the release skill's step 5 on this checkout (update.ts), then the roll.
-const update = (to?: string): Promise<number> => runUpdate(REPO, spawnRun, roll, console.log, to)
+const update = (to?: string): Promise<number> =>
+  runUpdate(REPO, spawnRun, roll, console.log, to, join(dataDir(), "ops", "update-head"))
 
-// playground uninstall: the install's links, LaunchAgents and the Dashboard's stack (uninstall.ts); --purge, after asking, the data folder and the database too. The database's name is loaded only here, since it lives in the API's tree.
+// playground uninstall: the install's links, LaunchAgents and the Dashboard's stack (uninstall.ts); --purge, after asking, also the database, and moves the data folder aside.
 const uninstallAll = async (purge: boolean): Promise<number> => {
-  const { livePair } = await import("../../../../api/hono/src/lib/dev/live-dashboard")
   const { database } = livePair()
   const checkout = dashboardCheckout(REPO)
   return uninstall({
@@ -311,13 +342,12 @@ const add = async (args: string[]): Promise<number> => {
   return 0
 }
 
-// playground page: the page kept in the data folder the dashboard reads (PLAYGROUND_DATA_DIR's when set, so a test stack's fixture folder can be named), then opened.
+// playground page: the page kept in the data folder the dashboard reads (PLAYGROUND_DATA_DIR's when set, so a test stack's fixture folder can be named), and never opened: it reaches the owner as an Inbox card's html attachment.
 const page = (args: string[]): number => {
   const parsed = pageArgs(args)
   if ("error" in parsed) return fail(parsed.error)
   const kept = keepPage(parsed, dataDir())
   if ("error" in kept) return fail(kept.error)
-  Bun.spawnSync(["open", kept.path])
   console.log(`Kept ${kept.path}`)
   return 0
 }
@@ -335,6 +365,12 @@ const alertsWaitFor = async (name: string): Promise<number> => {
   const { alertsWait } = await import("./alerts-wait")
   console.log(await alertsWait(name, join(dataDir(), "ops", "outbox")))
   return 0
+}
+
+// playground rm: the trash (rm.ts), loaded only for this command.
+const rm = async (words: string[]): Promise<number> => {
+  const { rmDeps, runRm } = await import("./rm")
+  return runRm(words, rmDeps(REPO))
 }
 
 // playground migrate: the switch's one-time move (migrate.ts), loaded only for this command.
@@ -388,17 +424,7 @@ const code =
                           : command === "uninstall"
                             ? await uninstallAll(rest[0] === "--purge")
                             : command === "ext" || command === "settings"
-                              ? await runStore(
-                                  command,
-                                  rest,
-                                  {
-                                    data: dataDir(),
-                                    out: console.log,
-                                    stdin: () => Bun.stdin.text(),
-                                    write: Bun.write,
-                                  },
-                                  console.error,
-                                )
+                              ? await runStore(command, rest, await terminalIo(), console.error)
                               : command === "rules"
                                 ? // loaded only here, since it reads the rules hook and the settings package, which the bare dispatcher's start needs neither of
                                   await (
@@ -416,26 +442,28 @@ const code =
                                     ? await orgsCommand(rest, orgsIo(REPO, dataDir()))
                                     : command === "accounts"
                                       ? await runAccounts(rest, accountsIo(dataDir()))
-                                      : command === "yard"
-                                        ? await (
-                                            await import("./yard")
-                                          ).runYard(
-                                            rest,
-                                            await (
+                                      : command === "rm"
+                                        ? await rm(rest)
+                                        : command === "yard"
+                                          ? await (
                                               await import("./yard")
-                                            ).yardIo(REPO, accountsIo(dataDir()).readSecret),
-                                          )
-                                        : command === "herdr" && rest[0] === "stop"
-                                          ? (await opsHerdr(["stop-all"]).exited) === 0
-                                            ? 0
-                                            : 1
-                                          : command === "herdr" && rest[0] === "pin"
-                                            ? await (
-                                                await import("./herdr-pin")
-                                              ).runHerdrPin(rest.slice(1))
-                                            : VERBS.includes(command)
-                                              ? await verb(command, rest)
-                                              : fail(
-                                                  `no command ${command}; playground --help lists them`,
-                                                )
+                                            ).runYard(
+                                              rest,
+                                              await (
+                                                await import("./yard")
+                                              ).yardIo(REPO, accountsIo(dataDir()).readSecret),
+                                            )
+                                          : command === "herdr" && rest[0] === "stop"
+                                            ? (await opsHerdr(["stop-all"]).exited) === 0
+                                              ? 0
+                                              : 1
+                                            : command === "herdr" && rest[0] === "pin"
+                                              ? await (
+                                                  await import("./herdr-pin")
+                                                ).runHerdrPin(rest.slice(1))
+                                              : VERBS.includes(command)
+                                                ? await verb(command, rest)
+                                                : fail(
+                                                    `no command ${command}; playground --help lists them`,
+                                                  )
 process.exit(code)

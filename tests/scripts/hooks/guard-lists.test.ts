@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
+import { count } from "../../../packages/scripts/src/trace-count/count"
 import { isStrings, loadList, storeMarker } from "../../../scripts/hooks/lists"
 import { check as leakCheck } from "../../../scripts/hooks/no-playground-leak"
 import { check as releaseCheck } from "../../../scripts/hooks/no-release-comment"
@@ -118,6 +119,14 @@ describe("no-playground-leak fails closed on its lists", () => {
     expect(await run(write("built by quillmark"), dir, stranger)).toContain('"quillmark"')
   })
 
+  test("core's own terms list holds no old factory name and still loads, its aliases kept as an empty key", async () => {
+    const text = await Bun.file(join(coreLists, "playground-terms.json")).text()
+    expect(count([{ path: "playground-terms.json", text }]).oldNames).toBe(0)
+    expect(JSON.parse(text).aliases).toEqual([])
+    expect(await run(write("fixes the export button"), coreLists, stranger)).toBeUndefined()
+    expect(await run(write("see roster.json"), coreLists, stranger)).toContain('"roster.json"')
+  })
+
   for (const [shape, terms, cleared, file] of [
     ["its terms list missing", undefined, JSON.stringify(CLEARED), "playground-terms.json"],
     ["its terms list a 0-byte file", "", JSON.stringify(CLEARED), "playground-terms.json"],
@@ -145,6 +154,23 @@ describe("no-playground-leak fails closed on its lists", () => {
     expect(
       await run(read, dir, store("leak-read", { "playground-terms.json": "{}" })),
     ).toBeUndefined()
+  })
+
+  test("a missing list lets a git or gh read run and still refuses a push", async () => {
+    const dir = await lists("leak-git-read", {})
+    const data = store("leak-git-read", { "slack-cleared.json": JSON.stringify(CLEARED) })
+    const bash = (command: string) =>
+      JSON.stringify({
+        cwd: scratch,
+        hook_event_name: "PreToolUse",
+        tool_input: { command },
+        tool_name: "Bash",
+      })
+    for (const command of ["git log --oneline -5", "gh issue list -R acme/app", "cat .git/HEAD"])
+      expect(await run(bash(command), dir, data)).toBeUndefined()
+    expect(await run(bash("git push https://github.com/acme/app.git main"), dir, data)).toContain(
+      "hooks/playground-terms.json",
+    )
   })
 
   test("explicit empty lists pass a company write", async () => {

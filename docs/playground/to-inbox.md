@@ -9,17 +9,18 @@ The defining constraint is the card itself: it sits in the aside's narrow column
 
 Agent-fired: a session loads it before every `playground ask new`, and the owner can name it too.
 
-| You are posting                              | What it leads with                             |
-| -------------------------------------------- | ---------------------------------------------- |
-| A decision about a code change               | a `diff` block of the lines that change        |
-| A decision about a flow or a plan            | an ASCII drawing                               |
-| A UI change                                  | before and after shots in one group            |
-| A UI not yet built, or a demo                | an HTML page                                   |
-| Something to look at, with no answer         | an update with text and files, read-only       |
-| A plain update, or a ship or schema decision | its fields alone, under a plain title          |
-| A delete or budget decision                  | its why as plain lines, one fact each          |
-| A draft, or a Slack or ticket decision       | the message or ticket itself, in its own shape |
-| A secret ask                                 | its key and sink alone, under a plain title    |
+| You are posting                              | What it leads with                          |
+| -------------------------------------------- | ------------------------------------------- |
+| A decision about a code change               | a `diff` block of the lines that change     |
+| A decision about a flow or a plan            | an ASCII drawing                            |
+| A UI change                                  | before and after shots in one group         |
+| A UI not yet built, or a demo                | an HTML page                                |
+| Something to look at, with no answer         | an update with text and files, read-only    |
+| A plain update, or a ship or schema decision | its fields alone, under a plain title       |
+| A delete or budget decision                  | its why as plain lines, one fact each       |
+| A draft or a Slack decision                  | the message, with any files under its words |
+| A ticket decision                            | the ticket itself, in its own shape         |
+| A secret ask                                 | its key and sink alone, under a plain title |
 
 The kind also decides how the card closes.
 A decision or a draft the session decided another way is settled.
@@ -36,15 +37,17 @@ choices   Approve: <verb ...>  Deny: <verb ...>
 ```
 
 Mermaid is to join the pictures; until then a flow is drawn in ASCII.
+A whole patch can ride along as a file: a `.diff` or `.patch` attachment (`git diff > x.diff`) opens in the viewer as a patch view, each changed file side by side, or in one column on a phone.
 
 ## It's working if
 
 - You can say what an item asks, and what Approve does, before you read its second line.
 - No drawing on a card shrinks or scrolls sideways.
 - An item from any session reads like one from any other.
+- Every clock time on a card reads in your own time zone, the `clock.ownerZone` setting, and names it ("9:30 pm UTC").
 
 ## Where it fits
 
 Every factory session uses it under [playbook](./playbook.md)'s **ask** rule, which decides when an item goes to the owner; `to-inbox` decides how it reads.
 Before it posts, `playground ask open` lists the items already open, so a session names one on the same thing rather than posting it twice.
-`playground ask new` checks the shape and prints a hint when the text runs long with no list, code block or attachment, or when a drawing runs past the card's width (`ASK_CODE_COLUMNS`).
+`playground ask new` checks the shape and prints a hint when the text runs long with no list, code block or attachment, or when a line in a code block other than a `diff` one runs past the card's width (`ASK_CODE_COLUMNS`), since a `diff` block wraps.

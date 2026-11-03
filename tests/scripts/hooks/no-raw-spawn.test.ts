@@ -20,6 +20,7 @@ const SETTINGS = "--settings $HOME/.playground/factory-settings.json"
 
 describe("a session not started through scripts/spawn.sh is refused, naming the script", () => {
   test.each([
+    ["a spawn inside an array assignment", "arr=($(cmux new-workspace --command claude))"],
     [
       "SESSIONS.md's old worker spawn",
       `CMUX_QUIET=1 cmux new-workspace --name worker-x --cwd /w --command "env PLAYGROUND_ROLE=worker claude -n worker-x ${SETTINGS}" --focus false`,
@@ -315,7 +316,7 @@ describe("a refusal for a program it cannot read names what the program is", () 
 
 // A scratch herdr world of the session's own: its server's socket under the session's TMPDIR, its session a word of its own.
 const TMP = "/var/folders/zz/abc/T/"
-const WORLD = `HERDR_SESSION=lm-probe HERDR_SOCKET_PATH=${TMP}lm-probe.Ab12/s.sock`
+const WORLD = `HERDR_SESSION=hd-probe HERDR_SOCKET_PATH=${TMP}hd-probe.Ab12/s.sock`
 const inWorld = (command: string, environment: Record<string, string | undefined> = {}) =>
   check(
     JSON.stringify({
@@ -359,7 +360,7 @@ describe("a scratch herdr world of the session's own runs", () => {
   test.each([
     [
       "(a) a write carrying HERDR_SESSION alone",
-      `HERDR_SESSION=lm-probe herdr pane close ${PANE}`,
+      `HERDR_SESSION=hd-probe herdr pane close ${PANE}`,
       "carrying HERDR_SESSION",
     ],
     [
@@ -374,27 +375,27 @@ describe("a scratch herdr world of the session's own runs", () => {
     ],
     [
       "(b) the factory's socket",
-      `HERDR_SESSION=lm-probe HERDR_SOCKET_PATH=/Users/x/.playground/herdr/factory.sock herdr pane close ${PANE}`,
+      `HERDR_SESSION=hd-probe HERDR_SOCKET_PATH=/Users/x/.playground/herdr/factory.sock herdr pane close ${PANE}`,
       "not a literal path under your TMPDIR",
     ],
     [
       "(b) herdr's default socket",
-      "HERDR_SESSION=lm-probe HERDR_SOCKET_PATH=/Users/x/.config/herdr/herdr.sock herdr server",
+      "HERDR_SESSION=hd-probe HERDR_SOCKET_PATH=/Users/x/.config/herdr/herdr.sock herdr server",
       "not a literal path under your TMPDIR",
     ],
     [
       "(b) a socket that climbs out of TMPDIR",
-      `HERDR_SESSION=lm-probe HERDR_SOCKET_PATH=${TMP}../../x.sock herdr server`,
+      `HERDR_SESSION=hd-probe HERDR_SOCKET_PATH=${TMP}../../x.sock herdr server`,
       "not a literal path under your TMPDIR",
     ],
     [
       "(b) a socket it cannot read",
-      'HERDR_SESSION=lm-probe HERDR_SOCKET_PATH="$S/s.sock" herdr server',
+      'HERDR_SESSION=hd-probe HERDR_SOCKET_PATH="$S/s.sock" herdr server',
       "not a literal path under your TMPDIR",
     ],
     [
       "(b) a relative socket",
-      "HERDR_SESSION=lm-probe HERDR_SOCKET_PATH=s.sock herdr server",
+      "HERDR_SESSION=hd-probe HERDR_SOCKET_PATH=s.sock herdr server",
       "not a literal path under your TMPDIR",
     ],
     [
@@ -604,7 +605,7 @@ test("the factory settings register it for Bash", async () => {
     hooks: { PreToolUse: { hooks: { command: string }[]; matcher: string }[] }
   }
   const entry = settings.hooks.PreToolUse.find((e) =>
-    e.hooks.some((h) => h.command.endsWith("scripts/hooks/no-raw-spawn.ts")),
+    e.hooks.some((h) => h.command.includes("scripts/hooks/bundled/no-raw-spawn.js")),
   )
   expect(entry?.matcher).toBe("^Bash$")
 })

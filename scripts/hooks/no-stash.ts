@@ -3,6 +3,7 @@
 import { fromFactory } from "./role"
 import {
   type Env,
+  GIT_TAKES,
   knownVariables,
   lex,
   marked,
@@ -15,16 +16,6 @@ import {
   type Xargs,
 } from "./shell"
 
-// git's own options before its subcommand that take the next word as their value.
-const GIT_TAKES = new Set([
-  "-C",
-  "-c",
-  "--config-env",
-  "--exec-path",
-  "--git-dir",
-  "--namespace",
-  "--work-tree",
-])
 const FULL_SHA = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/
 const READS = new Set(["list", "show"])
 const WRITES = new Set(["create", "store"])

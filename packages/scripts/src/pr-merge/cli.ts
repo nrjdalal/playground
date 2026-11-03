@@ -12,7 +12,8 @@ at that head and the head is up to date with canary:
                 passes, which pr:merge marks ready (gh pr ready) just before it merges
   author        the repo's owner opened it, or --outside-author names who did
   held          ~/.playground/ops/report/held-prs.json does not list it (or
-                PLAYGROUND_HELD_PRS); a file that does not read holds every PR
+                PLAYGROUND_HELD_PRS) at the gates or just before the merge call; a "*"
+                line, or a file that does not read, holds every PR
   base          it merges into canary
   up to date    canary has no commit the head lacks, or the head merges with canary clean;
                 a conflict needs canary merged in, then checks and a 5/5 at the new head
@@ -23,8 +24,13 @@ at that head and the head is up to date with canary:
   ci            every GitHub check on the head finished and passed, "Audit, Lint, and
                 Build" and "test" among them; on factory.repo (the checkout's origin when unset) the head must carry a
                 GitGuardian check, since a head it never started on ran no secret scan
-  body          the PR body is the PR template the Changelog reads
+  body          the PR body is the PR template the Changelog reads, and its Evidence names
+                each changed *.md path by its full path
   review        ## ReviewBot · round <n>: 5/5 at <sha7>, at the head
+  types         last, inside the merge lock: the tree the squash makes type-checks by CI's own
+                type steps in the kept merge-types worktree, each through run-slot; skipped
+                when the head already holds canary's tip, and a type error refuses with the
+                first errors
 
 A gate reads only comments the repo's owner wrote; the newest review at the head wins, so a
 lower score after a 5/5 refuses.
@@ -38,7 +44,7 @@ the lock let go however it ends; a lock another PR holds refuses, naming it.
 Options
   --explain       print whether the head merges clean with canary now and as which tree
                   (or the files it conflicts in), then each gate and what it found at the
-                  head, and merge nothing
+                  head, types as whether it would run or skip, and merge nothing
   --outside-author <login>
                   merge a PR that login opened, not the repo's owner: only on a lead's go,
                   once its read-only review and every gate have passed

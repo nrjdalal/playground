@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 
-import { istTime, prLabel, statusLabel } from "../../../../../web/next/src/lib/plan"
+import { prLabel, statusLabel, zoneTime } from "../../../../../web/next/src/lib/plan"
 
 describe("statusLabel", () => {
   test("puts the planner's codes in plain words, keeping what follows as written", () => {
@@ -17,14 +17,17 @@ describe("statusLabel", () => {
   })
 })
 
-describe("istTime", () => {
-  test("shows a moment in India's time, with its weekday", () => {
-    expect(istTime("2026-10-06T19:57:00+00:00")).toBe("Wed 01:27")
-    expect(istTime("2026-10-06T10:00:00Z")).toBe("Tue 15:30")
+describe("zoneTime", () => {
+  test("shows a moment in the owner's zone, with its weekday and the zone's own name", () => {
+    expect(zoneTime("2026-10-06T19:57:00+00:00", "Asia/Kolkata")).toBe("Wed 01:27 IST")
+    expect(zoneTime("2026-10-06T19:57:00+00:00", "UTC")).toBe("Tue 19:57 UTC")
+    expect(zoneTime("2026-10-06T10:00:00Z", "Asia/Kolkata")).toBe("Tue 15:30 IST")
+    expect(zoneTime("2026-10-06T10:00:00Z", "UTC")).toBe("Tue 10:00 UTC")
   })
 
-  test("shows none as a dash", () => {
-    expect(istTime(null)).toBe("-")
+  test("shows none, or a zone not yet read, as a dash", () => {
+    expect(zoneTime(null, "UTC")).toBe("-")
+    expect(zoneTime("2026-10-06T10:00:00Z", undefined)).toBe("-")
   })
 })
 

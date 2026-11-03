@@ -31,6 +31,7 @@ import {
   recordPath,
   startOf,
 } from "@/lib/dev/stop"
+import { trashRoots } from "@/lib/trash"
 
 // `bun run dev` runs this with --no-env-file, so it sees the shell's environment as turbo did before it; the apps still read .env themselves. Arguments pass through to `turbo run dev` (`bun run dev --ui stream`). DEV_TURBO_BIN lets a test stand in for turbo's dev run.
 const ROOT = join(import.meta.dir, "../../../..")
@@ -104,7 +105,13 @@ let aliasFailed = ""
 let reconcile: ReturnType<typeof setInterval> | null = null
 function leave(code: number): never {
   if (reconcile) clearInterval(reconcile)
-  if (wrote) dropFixture(wrote)
+  if (wrote) {
+    try {
+      dropFixture(wrote, trashRoots(ROOT))
+    } catch (error) {
+      console.error(`dev: ${error instanceof Error ? error.message : error}`)
+    }
+  }
   // a task that outlives turbo stays on record, so dev:stop and the next start can still end or name it
   const held = pgid ? readRecord(record) : null
   const keeps = held?.pid === process.pid && recordHeld(held, ROOT)
@@ -138,7 +145,7 @@ if (!dry) {
     console.error(`dev: dashboard source matched ${DASHBOARD_RULES[checked.dashboard.rule]}`)
     const scratch = fixtureDir({ PLAYGROUND_FIXTURE_DIR: settings.PLAYGROUND_FIXTURE_DIR })
     try {
-      writeFixture(checked.dashboard.fixture, scratch)
+      writeFixture(checked.dashboard.fixture, scratch, trashRoots(ROOT))
       wrote = scratch
     } catch (error) {
       console.error(`dev: refusing to start: ${error instanceof Error ? error.message : error}`)

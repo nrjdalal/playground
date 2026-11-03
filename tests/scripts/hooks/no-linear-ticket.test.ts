@@ -461,7 +461,7 @@ describe("as Claude Code runs it", () => {
 
   const entry = async () => {
     const found = (await settings()).hooks.PreToolUse.find((e) =>
-      e.hooks.some((h) => h.command.includes("scripts/hooks/no-linear-ticket.ts")),
+      e.hooks.some((h) => h.command.includes("scripts/hooks/bundled/no-linear-ticket.js")),
     )
     if (!found) throw new Error(".claude/settings.json registers no no-linear-ticket hook")
     return found
@@ -478,7 +478,7 @@ describe("as Claude Code runs it", () => {
       hooks?: { PreToolUse?: Entry[] }
     }
     const found = front.hooks?.PreToolUse?.find((e) =>
-      e.hooks.some((h) => h.command.includes("scripts/hooks/no-linear-ticket.ts")),
+      e.hooks.some((h) => h.command.includes("scripts/hooks/bundled/no-linear-ticket.js")),
     )
     if (!found) throw new Error(`the ${skill} skill registers no no-linear-ticket hook`)
     return found
@@ -586,16 +586,28 @@ describe("as Claude Code runs it", () => {
       })
       expect(result.code).toBe(2)
       expect(result.stderr).toContain("no-linear-ticket hook refused")
+      const lost = await hook(command, create, {
+        PLAYGROUND_REPO: undefined,
+        PLAYGROUND_ROLE: "worker",
+      })
+      expect(lost.code).toBe(2)
+      expect(lost.stderr).toContain("Restoring the main checkout")
       expect(
-        await hook(command, create, { PLAYGROUND_REPO: undefined, PLAYGROUND_ROLE: "worker" }),
+        await hook(command, create, { PLAYGROUND_REPO: undefined, PLAYGROUND_ROLE: undefined }),
       ).toEqual({ code: 0, stderr: "" })
     },
   )
 
-  test("a hook that finds no checkout lets the call through", async () => {
+  test("a hook that finds no checkout refuses a factory session's call and lets any other through", async () => {
     const [{ command }] = (await entry()).hooks
+    const refused = await hook(command, create, {
+      CLAUDE_PROJECT_DIR: scratch,
+      PLAYGROUND_ROLE: "worker",
+    })
+    expect(refused.code).toBe(2)
+    expect(refused.stderr).toContain("Restoring the main checkout")
     expect(
-      await hook(command, create, { CLAUDE_PROJECT_DIR: scratch, PLAYGROUND_ROLE: "worker" }),
+      await hook(command, create, { CLAUDE_PROJECT_DIR: scratch, PLAYGROUND_ROLE: undefined }),
     ).toEqual({ code: 0, stderr: "" })
   })
 
