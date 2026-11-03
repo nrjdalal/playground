@@ -113,6 +113,27 @@ describe("the composer's sources", () => {
     expect(row).not.toContain("[&_button]:")
   })
 
+  // the owner: the model and effort picker stood taller than the row's 28px buttons, second from the left; it sits directly left of Send at their height
+  test("the model and effort picker is 28px tall, directly left of Send, in the right-hand group with the thread toggle", async () => {
+    const composer = await read("dashboard/composer.tsx")
+    const right = composer.slice(
+      composer.indexOf('<div className="ml-auto flex items-center gap-2">'),
+    )
+    expect(right.length).toBeLessThan(composer.length)
+    const thread = right.indexOf('aria-label="New thread"')
+    const picker = right.indexOf("<SettingPicker worker={worker} />")
+    const send = right.indexOf("aria-label={`Send to ${label}`}")
+    expect(thread).toBeGreaterThan(-1)
+    expect(thread).toBeLessThan(picker)
+    expect(picker).toBeLessThan(send)
+    expect(composer.match(/<SettingPicker /g)).toHaveLength(1)
+    expect(composer).not.toContain('className="ml-auto rounded-full"')
+    const trigger = (await read("dashboard/setting-picker.tsx")).match(
+      /<InputGroupButton[\s\S]*?\/>/,
+    )?.[0]
+    expect(trigger).toContain('className="h-7 gap-1 px-2.5 text-xs"')
+  })
+
   // a tester: flush on the window's bottom edge, the stock box's rounded bottom and focus ring were cut
   test("it keeps 8px under its box, level with the music player, and on a phone 8px over the tab bar", async () => {
     const group =
