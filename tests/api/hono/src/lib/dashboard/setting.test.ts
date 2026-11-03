@@ -1,8 +1,13 @@
 import { describe, expect, test } from "bun:test"
 
-import { deliveryEvent, deliveryWords } from "../../../../../../api/hono/src/lib/dashboard/deliver"
+import {
+  DELIVERED_ACTIONS,
+  deliveryEvent,
+  deliveryWords,
+} from "../../../../../../api/hono/src/lib/dashboard/deliver"
 import {
   settingCommand,
+  settingRequestSchema,
   settingSchema,
   settingSummary,
 } from "../../../../../../api/hono/src/lib/dashboard/setting"
@@ -31,6 +36,21 @@ describe("a session setting", () => {
     }
   })
 
+  test("its route's body takes the composer's id beside the one setting, and nothing else", () => {
+    const id = "11111111-2222-4333-8444-555555555555"
+    expect(settingRequestSchema.parse({ id, model: "opus" })).toEqual({ id, model: "opus" })
+    expect(settingRequestSchema.parse({ effort: "low", id })).toEqual({ effort: "low", id })
+    expect(settingRequestSchema.parse({ model: "opus" })).toEqual({ model: "opus" })
+    for (const body of [
+      { id: "not-a-uuid", model: "opus" },
+      { effort: "high", id, model: "opus" },
+      { id, model: "opus", text: "hi" },
+      { id },
+    ]) {
+      expect(settingRequestSchema.safeParse(body).success).toBe(false)
+    }
+  })
+
   test("types the one slash command its list value names, and its row names the session and the value", () => {
     expect(settingCommand({ model: "sonnet" })).toBe("/model sonnet")
     expect(settingCommand({ effort: "xhigh" })).toBe("/effort xhigh")
@@ -50,6 +70,11 @@ describe("a session setting", () => {
       refused: null,
       skill: "review",
     })
+  })
+
+  test("a setting's row is found again by its id, as a message's is, so a retry under it types nothing", () => {
+    expect(DELIVERED_ACTIONS).toContain("dashboard.setting")
+    expect(DELIVERED_ACTIONS).toContain("dashboard.message")
   })
 
   test("a setting records a dashboard.setting row told whole, a message a dashboard.message row by size", () => {
