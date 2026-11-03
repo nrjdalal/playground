@@ -1,5 +1,5 @@
 import { describe, expect, setDefaultTimeout, test } from "bun:test"
-import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs"
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 
 import { SCRIPT, machine, type Setup } from "./run-slot-fake"
@@ -79,6 +79,27 @@ describe("the gauges", () => {
     const { err, slots } = look(m)
     expect(slots).toBe("1\n")
     expect(err.match(/^run-slot\.sh: cannot read the CPU's idle share /gm)).toHaveLength(1)
+  })
+
+  // top's first sample reads since boot, so a top that prints it alone gives no idle share, rather than its 98%
+  test("a top that prints its first sample alone shuts them", () => {
+    const m = machine()
+    writeFileSync(
+      join(m.bin, "top"),
+      '#!/bin/bash\necho "CPU usage: 1.00% user, 1.00% sys, 98.00% idle "\n',
+    )
+    chmodSync(join(m.bin, "top"), 0o755)
+    expect(look(m).slots).toBe("1\n")
+  })
+
+  test("a run that said an unread top once leaves no marker behind", async () => {
+    const m = machine()
+    writeFileSync(join(m.bin, "top"), "#!/bin/bash\nexit 1\n")
+    chmodSync(join(m.bin, "top"), 0o755)
+    const tmp = join(m.root, "tmp")
+    mkdirSync(tmp)
+    expect(await m.runs("worker-x", { TMPDIR: tmp })).toBe(true)
+    expect(readdirSync(tmp).filter((name) => name.startsWith("run-slot-mem-told"))).toEqual([])
   })
 
   test("an unread swap-in count shuts them too", () => {

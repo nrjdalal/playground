@@ -1,7 +1,7 @@
 #!/bin/bash
 # run-slot.sh <who> [--model-bound] -- <command> [args...]: run one heavy run (a suite, a type check, Checks, a build) holding one of the machine's run slots.
 # A --model-bound run (one that mostly waits on a model, such as a parity replay) takes run-slot-model-<n> instead, at most slots.modelBound at once (model_cap, below), counted apart from the CPU slots and their queue.
-# It takes ops/run-slot, run-slot-2, run-slot-3 or run-slot-4 by mkdir, as the load opens them and its size's load units fit, waiting and
+# It takes ops/run-slot, run-slot-2, run-slot-3 or run-slot-4 by mkdir, as the load rules (lanes_open) open them and its size's load units fit, waiting and
 # retrying while none does; writes "<who> <its own pid> <iso> <units> <size>" to the slot's .holder file beside it; runs the command as its
 # child, in a new session and process group; and gives the slot back (rmdir) however it ends: success, failure or a signal. A holder whose
 # pid has died is reclaimed; a slot whose holder line has no pid, or has no holder line, is held until it is 2 hours old. It prints the slot
@@ -594,7 +594,7 @@ free() {
   fi
   SLOT=""
   [ -n "$TICKET" ] && rm -f "$TICKET"
-  [ -n "${MEM_TOLD:-}" ] && rm -f "$MEM_TOLD-suite" "$MEM_TOLD-clone"
+  [ -n "${MEM_TOLD:-}" ] && rm -f "$MEM_TOLD-suite" "$MEM_TOLD-clone" "$MEM_TOLD-idle" "$MEM_TOLD-swap"
 }
 trap 'free' EXIT
 trap '[ -n "$CHILD" ] && kill -TERM -- "-$CHILD" 2>/dev/null; wait "$CHILD" 2>/dev/null; [ -n "$CHILD" ] && { reap "$CHILD"; rlog end "rc=143 ran=$(($(date +%s) - TOOK))s"; }; exit 143' TERM INT HUP
@@ -744,7 +744,7 @@ lanes_open() {
 # five medium suites and two clones started in 70 s at load1 16, and load1 reached 64): while run-slot.runs.log shows more runs started on
 # run-slot to run-slot-4 or the clone slot in the last minute than ended there, so the held runs grew, a medium or big run waits for the
 # reading to show them and the slots fill one a minute; a run that takes a slot a run freed adds nothing and goes on, as does a small run,
-# and the dashboard's and the merge train's runs go on too, as they pass slot 2's lanes_open; prints how many runs the last
+# and the dashboard's and the merge train's runs go on too, as they skip slot 2's lanes_open; prints how many runs the last
 # minute added when it holds
 burst_held() {
   local now cutoff
@@ -824,7 +824,7 @@ gauges() {
   { read -r at idle swap < "$OPS/run-slot.gauges"; } 2>/dev/null
   case "$at" in ''|*[!0-9]*) at=0 ;; esac
   if [ $((now - at)) -ge 10 ]; then
-    idle=$(top -l 2 -n 0 2>/dev/null | sed -nE 's/^CPU usage:.* ([0-9.]+)% idle.*/\1/p' | tail -n 1)
+    idle=$(top -l 2 -n 0 2>/dev/null | sed -nE 's/^CPU usage:.* ([0-9.]+)% idle.*/\1/p' | awk 'END { if (NR == 2) print }')
     swap=$(swapin_rate)
     printf '%s %s %s\n' "$now" "${idle:--}" "${swap:--}" > "$OPS/run-slot.gauges.$$" 2>/dev/null && mv -f "$OPS/run-slot.gauges.$$" "$OPS/run-slot.gauges" 2>/dev/null
   fi
@@ -832,8 +832,8 @@ gauges() {
 }
 # macOS's memory reading $1: level (the free share) or vm_pressure_level (1 normal, 2 warn, 4 critical)
 memstat() { sysctl -n "kern.memorystatus_$1" 2>/dev/null | tr -cd 0-9; }
-# memory room for a second suite: macOS's free share at 40% or more, its pressure level normal (1; 2 is warn, 4 critical) and swap-ins under 100 a
-# second, spawn.sh's line for a GLM start; an unread reading (Claude Code's sandbox refuses the first two) leaves no room, said once a run on stderr
+# memory room for a second suite: macOS's free share at 40% or more, its pressure level normal (1; 2 is warn, 4 critical) and swap-ins under SWAPINS_MAX a
+# second; an unread reading (Claude Code's sandbox refuses the first two) leaves no room, said once a run on stderr
 MEM_TOLD="${TMPDIR:-/tmp}/run-slot-mem-told.$$"
 # says line $2 once a run on stderr, a file per kind ($1) marking it, since a look reads the gauges in a subshell
 told() { [ -e "$MEM_TOLD-$1" ] || { echo "$2" >&2; : > "$MEM_TOLD-$1"; }; }
