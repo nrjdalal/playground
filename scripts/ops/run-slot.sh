@@ -631,10 +631,12 @@ gone() {
   return 1
 }
 
-# after a clone of one checkout's root node_modules into another, clones each workspace's own the same way, so no bun install has to follow (PG-655: 74 of 80 clones in a day were followed by one, 177 min queued)
-clone_workspaces() {
-  python3 -I -c '
+# a clone runs through this: the clone itself, then, once it exits 0 from one checkout's root node_modules into another, each workspace's own the same way, so no bun install has to follow (PG-655: 74 of 80 clones in a day were followed by one, 177 min queued)
+CLONE_WORKSPACES='
 import glob, json, os, subprocess, sys
+code = subprocess.call(sys.argv[1:])
+if code:
+    sys.exit(code)
 words = sys.argv[1:]
 words = words[next((i for i, w in enumerate(words) if os.path.basename(w) == "cp"), len(words)):]
 flags = [w for w in words[1:] if w.startswith("-")]
@@ -656,12 +658,12 @@ for pattern in workspaces:
         if os.path.isdir(into) and not os.path.lexists(os.path.join(into, "node_modules")):
             code = subprocess.call([words[0], *flags, ws, into + "/"])
             if code:
-                sys.exit(code)' "$@"
-}
+                sys.exit(code)'
 
 # runs the command as the leader of a process group of its own (macOS has no setsid(1)), which reap stops once it ends, and exits with its code; where Claude Code's sandbox refuses the new group or the nice, it says so on stderr and runs the command without it
 run_command() {
   local code
+  [ "${KIND:-}" = clone ] && set -- python3 -I -c "$CLONE_WORKSPACES" "$@"
   python3 -I -c '
 import os, sys
 for step, call in (("its own process group", os.setsid), ("nice " + os.environ.get("RUN_SLOT_NICE", "10"), lambda: os.nice(int(os.environ.get("RUN_SLOT_NICE", "10"))))):
@@ -675,7 +677,6 @@ os.execvp(sys.argv[1], sys.argv[1:])' "$@" <&3 3<&- &
   code=$?
   reap "$CHILD"
   CHILD=""
-  [ "$code" -eq 0 ] && [ "${KIND:-}" = clone ] && { clone_workspaces "$@"; code=$?; }
   rlog end "rc=$code ran=$(($(date +%s) - TOOK))s"
   exit "$code"
 }

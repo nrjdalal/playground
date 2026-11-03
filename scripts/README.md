@@ -146,7 +146,7 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
 ## A worktree's node_modules
 
 - A new worktree can take `node_modules` as an APFS clone of a sibling worktree's with the same `bun.lock` (`~/.playground/ops/run-slot.sh <your name> -- cp -cR <sibling>/node_modules <worktree>/`, through run-slot since a clone is a heavy run: three load spikes on 13 Oct, fseventsd near 100%, came from clones),
-  and once that clone succeeds, run-slot clones each workspace's own `node_modules` from the sibling with the same flags (`clone_workspaces` in `scripts/ops/run-slot.sh`), so the worktree is ready for its checks with no install.
+  and once that clone succeeds, run-slot clones each workspace's own `node_modules` from the sibling with the same flags (`CLONE_WORKSPACES` in `scripts/ops/run-slot.sh`, run in the clone's own process group), so the worktree is ready for its checks with no install.
   When the copy prints any error, run `~/.playground/ops/run-slot.sh <your name> -- bun install --force --ignore-scripts --cwd <worktree>`, since a plain install then looks healthy while check-types fails on a missing module.
   Tests: `bun run test:file tests/scripts/ops/run-slot-nested-clone.test.ts`.
   A review worktree that only reads (no test run, no commit) takes no clone at all.

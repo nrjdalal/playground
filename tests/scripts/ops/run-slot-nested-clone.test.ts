@@ -72,6 +72,17 @@ describe("a node_modules clone of a checkout into another", () => {
     expect(existsSync(join(run.to, "web", "w", "node_modules", ".bin", "tool"))).toBe(true)
   })
 
+  test("exits with a failed root clone's code and clones no workspace", async () => {
+    const run = await clone((root) => {
+      const bare = join(root, "bare")
+      checkout(bare)
+      mkdirSync(join(bare, "packages", "p", "node_modules", "p-dep"), { recursive: true })
+      return ["cp", "-R", join(bare, "node_modules"), join(root, "to") + "/"]
+    })
+    expect(run.code).not.toBe(0)
+    expect(existsSync(join(run.to, "packages", "p", "node_modules"))).toBe(false)
+  })
+
   test("clones only the root when the destination is no checkout", async () => {
     const run = await clone((root) => [
       "cp",
