@@ -75,9 +75,9 @@ export const runUpdate = async (
       : merged || head
   if (done && old !== recorded) await Bun.write(done, `${old}\n`)
   const ok = { code: 0, out: "" }
-  // a checkout left on another branch, such as one cloned while canary was the default, moves to main at origin/main when its tree is clean, and one on main fast-forwards
+  // a checkout left on another branch, such as one cloned while canary was the default, moves to main at origin/main when its tree is clean, and one on main fast-forwards; cleanTree reads the branch that prelink and move then go by
   let branch = ""
-  const onMain = async () => {
+  const cleanTree = async () => {
     branch = (await git("branch", "--show-current")).out.trim()
     return branch === "main" ? ok : git("diff", "--quiet", "HEAD")
   }
@@ -97,7 +97,7 @@ export const runUpdate = async (
     repo,
   ]
   const target = to ? `refs/tags/${to}` : "origin/main"
-  // every hook that runs its source (all but the bundled PreToolUse guards) and every ops job run this checkout's code the moment it moves, so a target that declares a dependency the checkout has not linked gets its changed manifests and that install first, while the code is still the old commit's (the install step after the move then finds it linked); a target that deletes a manifest, which the old code may still read, or a tree with edits or untracked files of its own moves first as before
+  // every hook that runs its source (all but the bundled PreToolUse guards) and every ops job run this checkout's code the moment it moves, so a target that declares a dependency the checkout has not linked gets its changed manifests and that install first, while the code is still the old commit's (the install step after the move then finds it linked); a target that deletes or moves a manifest, which the old code may still read, a tree with edits or untracked files of its own, or an install that fails there moves first as before
   const prelink = async (): ReturnType<Run> => {
     // a fast-forward stops on a checkout with commits of its own, so its manifests are staged only where it will move; a checkout -B moves over them either way
     const merges = !to && branch === "main"
@@ -114,18 +114,11 @@ export const runUpdate = async (
     const missing = await unlinked(repo, manifests)
     if (!missing.length) return ok
     // --no-renames, so a package the target moves reads as a deleted manifest and a new one, never as one new path staged beside the old
-    const manifestsChanged = (
-      await lines("diff", "--name-only", "--no-renames", "HEAD", target)
-    ).filter((path) => MANIFEST.test(path))
-    const deleted = await lines(
-      "diff",
-      "--name-only",
-      "--no-renames",
-      "--diff-filter=D",
-      "HEAD",
-      target,
-    )
-    if (deleted.some((path) => MANIFEST.test(path))) return ok
+    const changes = (await lines("diff", "--name-status", "--no-renames", "HEAD", target))
+      .map((line) => line.split("\t"))
+      .filter(([, path]) => MANIFEST.test(path ?? ""))
+    if (changes.some(([status]) => status === "D")) return ok
+    const manifestsChanged = changes.map(([, path]) => path ?? "")
     log(
       `playground update: install the new commit's dependencies before its code, since it declares ${missing.join(", ")}, which this checkout has not linked`,
     )
@@ -133,19 +126,21 @@ export const runUpdate = async (
       const staged = await git("checkout", target, "--", ...manifestsChanged)
       if (staged.code !== 0) return staged
     }
-    const installed = await run(installArgv, true)
-    // a failed install puts the old commit's manifests back, a manifest the old commit lacks removed, so the tree is clean for the next run
-    if (installed.code !== 0 && manifestsChanged.length)
-      await git(
-        "restore",
-        "-q",
-        "--source=HEAD",
-        "--staged",
-        "--worktree",
-        "--",
-        ...manifestsChanged,
-      )
-    return installed
+    if ((await run(installArgv, true)).code === 0) return ok
+    // an install that needs a file only the manifests were staged without (a patch, bunfig.toml) fails here, so it puts the old commit's manifests back, a manifest the old commit lacks removed, and moves first as before
+    log(
+      "playground update: the install before the move failed, so the checkout's files go back as they were and it moves first, installing after, as before",
+    )
+    if (!manifestsChanged.length) return ok
+    return git(
+      "restore",
+      "-q",
+      "--source=HEAD",
+      "--staged",
+      "--worktree",
+      "--",
+      ...manifestsChanged,
+    )
   }
   const prelinked =
     "the checkout's files are as they were; fix the failure above and run playground update again"
@@ -161,7 +156,7 @@ export const runUpdate = async (
       ]
     : [
         ["fetch origin main", () => git("fetch", "-q", "origin", "main")],
-        ["a tree with no uncommitted changes, off main", onMain],
+        ["a tree with no uncommitted changes, off main", cleanTree],
         ["link the new commit's dependencies", prelink, prelinked],
         ["merge --ff-only origin/main, or move to main there", move],
       ]

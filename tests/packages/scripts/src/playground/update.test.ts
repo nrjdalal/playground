@@ -231,9 +231,10 @@ describe("runUpdate", () => {
 
   test("a target that declares an unlinked dependency checks out its changed manifests and installs before the merge", async () => {
     const { calls, run } = fakeRun({
-      "--diff-filter=D": { out: "" },
       ...declares,
-      diff: { out: "bun.lock\npackages/settings/package.json\npackages/settings/src/a.ts\n" },
+      "--name-status": {
+        out: "M\tbun.lock\nM\tpackages/settings/package.json\nM\tpackages/settings/src/a.ts\n",
+      },
     })
     expect(await runUpdate(repo, run, async () => 0, quiet)).toBe(0)
     const at = (argv: string[]) => calls.findIndex((call) => call.join(" ") === argv.join(" "))
@@ -262,9 +263,8 @@ describe("runUpdate", () => {
 
   test("a target that deletes a file that is not a manifest still installs before the merge", async () => {
     const { calls, run } = fakeRun({
-      "--diff-filter=D": { out: "docs/old.md\n" },
       ...declares,
-      diff: { out: "packages/settings/package.json\n" },
+      "--name-status": { out: "D\tdocs/old.md\nM\tpackages/settings/package.json\n" },
     })
     expect(await runUpdate(repo, run, async () => 0, quiet)).toBe(0)
     const install = calls.findIndex((argv) => argv[1] === "install")
@@ -273,7 +273,10 @@ describe("runUpdate", () => {
   })
 
   test("a link already missing on a hop that changes no manifest installs before the merge and checks out nothing", async () => {
-    const { calls, run } = fakeRun({ ...declares, diff: { out: "packages/settings/src/a.ts\n" } })
+    const { calls, run } = fakeRun({
+      ...declares,
+      "--name-status": { out: "M\tpackages/settings/src/a.ts\n" },
+    })
     expect(await runUpdate(repo, run, async () => 0, quiet)).toBe(0)
     expect(calls.some((argv) => argv.includes("checkout"))).toBe(false)
     const install = calls.findIndex((argv) => argv[1] === "install")
@@ -289,21 +292,23 @@ describe("runUpdate", () => {
 
   test("a target that deletes a manifest merges first as before, since the old code may still read it", async () => {
     const { calls, run } = fakeRun({
-      "--diff-filter=D": { out: "packages/old/package.json\n" },
       ...declares,
+      "--name-status": { out: "D\tpackages/old/package.json\nM\tbun.lock\n" },
     })
     expect(await runUpdate(repo, run, async () => 0, quiet)).toBe(0)
     expect(calls.some((argv) => argv.includes("--") || argv.includes("install"))).toBe(false)
   })
 
-  test("a failed install before the merge puts the old manifests back and stops the update, saying so", async () => {
+  test("a failed install before the merge puts the old manifests back and moves first, installing after, as before", async () => {
     const said: string[] = []
-    const { calls, run } = fakeRun({
-      install: { code: 1 },
-      "--diff-filter=D": { out: "" },
+    const fake = fakeRun({
       ...declares,
-      diff: { out: "packages/settings/package.json\n" },
+      "--name-status": { out: "M\tpackages/settings/package.json\n" },
     })
+    // the first install, before the move, fails as one needing a patch file the prelink did not stage does; the one after the move passes
+    let installs = 0
+    const run: Run = async (argv, show) =>
+      argv[1] === "install" && ++installs === 1 ? { code: 1, out: "" } : fake.run(argv, show)
     expect(
       await runUpdate(
         repo,
@@ -311,9 +316,9 @@ describe("runUpdate", () => {
         async () => 0,
         (l) => said.push(l),
       ),
-    ).toBe(1)
-    expect(calls.some((argv) => argv.includes("merge"))).toBe(false)
-    expect(calls.at(-1)).toEqual([
+    ).toBe(0)
+    const at = (word: string) => fake.calls.findIndex((argv) => argv.includes(word))
+    expect(fake.calls[at("restore")]).toEqual([
       "git",
       "-C",
       repo,
@@ -325,8 +330,9 @@ describe("runUpdate", () => {
       "--",
       "packages/settings/package.json",
     ])
-    expect(said.at(-1)).toBe(
-      "playground update: link the new commit's dependencies failed; the checkout's files are as they were; fix the failure above and run playground update again",
+    expect(at("restore")).toBeLessThan(at("merge"))
+    expect(said).toContain(
+      "playground update: the install before the move failed, so the checkout's files go back as they were and it moves first, installing after, as before",
     )
   })
 
