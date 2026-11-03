@@ -30,13 +30,8 @@ const lapsed = (file: { held?: unknown; since?: unknown }, now: number): boolean
   return now - time >= FREEZE_LAPSE_MS
 }
 
-// Pure: why this PR is held, or null when the file is missing or does not list it. A `"*"` key holds every PR, a floor-wide hold such as a ship's, until it lapses, while a PR's own line keeps its own reason. A file that does not read holds every PR, since a hold lost to a typo would let the PR merge.
-export function heldOf(
-  text: string | null,
-  repo: string,
-  n: number,
-  now = Date.now(),
-): string | null {
+// Pure: why this PR is held at `now`, or null when the file is missing or does not list it. A `"*"` key holds every PR, a floor-wide hold such as a ship's, until it lapses, while a PR's own line keeps its own reason. A file that does not read holds every PR, since a hold lost to a typo would let the PR merge. `now` has no default, so no caller mixes a fixed clock with the real one.
+export function heldOf(text: string | null, repo: string, n: number, now: number): string | null {
   if (text === null) return null
   let file: { held?: unknown; since?: unknown } | null
   try {
@@ -57,7 +52,12 @@ export function heldOf(
 }
 
 // A missing file holds none; any other read error (a folder at the path, no permission) holds every PR, as a file that does not parse does.
-export async function readHeld(path: string, repo: string, n: number): Promise<string | null> {
+export async function readHeld(
+  path: string,
+  repo: string,
+  n: number,
+  now: number,
+): Promise<string | null> {
   let text: string
   try {
     text = await Bun.file(path).text()
@@ -66,7 +66,7 @@ export async function readHeld(path: string, repo: string, n: number): Promise<s
     if (code === "ENOENT") return null
     return `held-prs.json does not read: ${typeof code === "string" ? code : "unreadable"}`
   }
-  return heldOf(text, repo, n)
+  return heldOf(text, repo, n, now)
 }
 
 type HeldFile = { held: Record<string, unknown>; since?: Record<string, unknown> } & Record<
