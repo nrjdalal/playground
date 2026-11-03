@@ -373,6 +373,9 @@ Only the first reading moves the folder, sets variables and records files for th
   It fails when a count is over `packages/scripts/src/trace-count/counts.json`, and so does `tests/packages/scripts/src/trace-count/count.test.ts`, which `bun run test` runs and pre-commit's `trace-count` step runs on every commit but one of images and fonts alone, over every file the index holds as it stands on disk; `--write` lowers each count a trace-out brought down.
   A refusal names each `path:line: kind` holding a hit of a risen kind (`located()`), for each kind the files changed against `HEAD` alone when they hold one, past the lines `kept.json` keeps while they hold no more than its hits.
   It exits 2, naming the fix, when no-public-leak's list (`extensions/hooks/no-public-leak.json` in the data folder) is missing or a key of it is empty, or when `owner.names` or `factory.archiveRepo` is unset, since those kinds would count nothing; the test counts the kinds that read neither alone.
+  To watch a refusal end to end on such a machine, point `PLAYGROUND_DATA_DIR` at a scratch folder whose `extensions/policy.json` holds made-up settings, `{ "values": { "owner.names": ["<made-up name>"], "factory.archiveRepo": "<made-up owner>/<repo>" } }`, and whose `extensions/hooks/no-public-leak.json` holds a made-up entry under each of its five keys.
+  Append a line holding one of those list values to a tracked file in your own worktree, `git add` it, and run `PLAYGROUND_DATA_DIR=<scratch> bun run trace-count`; done when it exits 1 naming `<file>:<line>: names` (or the list kind you used).
+  Probe with a list value, since each list kind's floor in `counts.json` is 0, while `ownerName`'s floor was set by the owner's real names; then restore the file with `git reset -q HEAD <file>` and `git checkout HEAD -- <file>`.
 
 ## no-linear-ticket
 
