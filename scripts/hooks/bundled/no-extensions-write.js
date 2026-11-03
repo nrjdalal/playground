@@ -1025,10 +1025,17 @@ async function examineReading(cmd, parsed, env, visit, builtins) {
     if (builtins)
       verdict = await visit(cmd, parsed, here);
   } else if (name === "cd" || name === "pushd") {
-    env.cwd = cmd.detached ? undefined : await cdTarget(args, env);
-  } else if (name === "popd")
+    if (args.some((a) => GLOB_CHARS.test(a.value)))
+      verdict = await visit(cmd, parsed, here);
+    const from = env.cwd;
+    env.cwd = cmd.detached ? undefined : await cdTarget(name, args, env);
+    if (env.old)
+      env.old = { dir: env.cwd === undefined ? undefined : from };
+  } else if (name === "popd") {
     env.cwd = undefined;
-  else if (EXPORTS.has(name)) {
+    if (env.old)
+      env.old = {};
+  } else if (EXPORTS.has(name)) {
     for (const w of args.filter((a) => ASSIGN.test(a.value))) {
       const eq = w.value.indexOf("=");
       setVar(env.vars, w.value.slice(0, eq), slice(w, eq + 1));
@@ -1047,11 +1054,16 @@ async function examineReading(cmd, parsed, env, visit, builtins) {
   await record(cmd, name, args, here);
   return verdict;
 }
-async function cdTarget(args, env) {
+async function cdTarget(name, args, env) {
   const dir = args.find((a) => !(a.value.startsWith("-") && a.value.length > 1));
   if (!dir)
     return homedir3();
-  const path = dir.value === "-" ? undefined : pathOf(dir, env);
+  const typed = dir.value === "-" ? undefined : await folder(pathOf(dir, env));
+  const tilde = !typed && name === "pushd" && env.old && !dir.quoted && !dir.unknown && !dir.reads?.length ? /^~([-+])(?=\/|$)/.exec(dir.value) : null;
+  const base = tilde && (tilde[1] === "-" ? env.old?.dir : env.cwd);
+  return base ? await folder(base + dir.value.slice(2)) : typed;
+}
+async function folder(path) {
   if (!path)
     return;
   try {
@@ -1504,7 +1516,15 @@ function scoreAsOther(words, cmd, parsed, env) {
   return changes(at === -1 ? cmd.words : cmd.words.slice(0, at));
 }
 var AWKS = new Set(["awk", "gawk", "mawk", "nawk"]);
-var AWK_RUNS = /system|getline|[|>@]/;
+var AWK_RUNS = /system|getline|[>@]/;
+var awkRuns = (program) => AWK_RUNS.test(program) || awkPipe(program);
+var AWK_LEAD = /^\s*\/(?:[^\\/"[\n]|\\.)*\/(?=\s*(?:\{|$))/;
+var AWK_MATCH = /~\s*(?:\/(?:[^\\/"[\n]|\\.)*\/|"[^"\\\n]*")/g;
+function awkPipe(program) {
+  if (!program.includes("|"))
+    return false;
+  return /["/#\\|]/.test(program.replace(AWK_LEAD, " ").replace(AWK_MATCH, " "));
+}
 function awkPrograms(words) {
   const programs = [];
   for (let k = 0;k < words.length; k++) {
@@ -1529,7 +1549,7 @@ function awkPrograms(words) {
 function programLines({ args, first }, rooted) {
   if (!AWKS.has(program(first?.value ?? "").toLowerCase()))
     return [];
-  return (awkPrograms(args) ?? []).filter(({ value }) => rooted || AWK_RUNS.test(value)).flatMap(({ value }) => [...value.matchAll(/"((?:[^"\\]|\\.)*)"/g)].map((m) => m[1]));
+  return (awkPrograms(args) ?? []).filter(({ value }) => rooted || awkRuns(value)).flatMap(({ value }) => [...value.matchAll(/"((?:[^"\\]|\\.)*)"/g)].map((m) => m[1]));
 }
 function ownProgram(cmd, { first, name }) {
   return ownFirst(cmd, first) && !marked(name) && /^(?:\/(?:bin|opt\/homebrew\/bin|usr\/bin|usr\/local\/bin)\/)?[^/]+$/.test(first.value);
@@ -1545,7 +1565,7 @@ function narrow(cmd, env) {
   const base = program(first.value).toLowerCase();
   if (AWKS.has(base)) {
     const programs = awkPrograms(args);
-    return !!programs && programs.every(({ value }) => !marked(value) && !AWK_RUNS.test(value));
+    return !!programs && programs.every(({ value }) => !marked(value) && !awkRuns(value));
   }
   if (["cat", "grep", "head", "tail", "wc"].includes(base))
     return reads(parsed, env);
@@ -1794,6 +1814,7 @@ function inspect(raw, environment) {
     cwd: directory,
     files: new Map,
     known,
+    old: { dir: directory },
     process: environment,
     vars: new Map
   };

@@ -2,6 +2,9 @@ import { describe, expect, test } from "bun:test"
 import { existsSync, readFileSync, statSync } from "node:fs"
 import { dirname, join, relative, resolve } from "node:path"
 
+import { hc } from "hono/client"
+
+import type { HostedAppType } from "../../../../api/hono/src/index"
 import { entryOf } from "../../../../api/hono/src/lib/entry"
 
 const ROOT = resolve(import.meta.dir, "../../../..")
@@ -196,4 +199,10 @@ describe("the hosted entry's import graph", () => {
     expect(graph.files).toContain("packages/auth/src/index.ts")
     expect(graph.files).toContain("packages/db/src/index.ts")
   })
+})
+
+// index.ts once gave the local dashboard's RPC type alone, so a client of the hosted API reached Yard's routes untyped; check-types fails here when the route leaves the type
+test("the hosted RPC type names Yard's routes", () => {
+  const client = hc<HostedAppType>("http://127.0.0.1")
+  expect(typeof client.api.v1.yard.channels.$get).toBe("function")
 })
