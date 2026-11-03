@@ -11,7 +11,7 @@ import {
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { replays, slotted } from "../../../../packages/scripts/src/commit-slot"
+import { isBuild, replays, slotted } from "../../../../packages/scripts/src/commit-slot"
 
 const SCRIPT = join(import.meta.dir, "../../../../packages/scripts/src/commit-slot.ts")
 const DIR = mkdtempSync(join(tmpdir(), "commit-slot-"))
@@ -93,6 +93,12 @@ describe("slotted", () => {
   })
 })
 
+test("isBuild names the build alone, the one step turbo's cache speaks for", () => {
+  expect(isBuild(["bun", "run", "build"])).toBe(true)
+  expect(isBuild(["bun", "run", "check-types:tests"])).toBe(false)
+  expect(isBuild(["bun", "run", "--cwd", "packages/scripts", "check-types"])).toBe(false)
+})
+
 describe("replays", () => {
   test("every task a cache hit replays", () => {
     expect(replays(dry("HIT", "HIT"))).toBe(true)
@@ -140,9 +146,13 @@ describe("commit-slot.ts", () => {
       stdout: "pipe",
     })
 
-  test("hands the step to run-slot.sh and keeps its exit code", () => {
+  // 3 Nov: a plain commit's build waited about an hour in the full queue, since run-slot gave the commit slot to git's own words alone
+  test("hands the step to run-slot.sh marked as a commit's step, and keeps its exit code", () => {
     const seen = join(DIR, "seen")
-    writeFileSync(join(ops, "run-slot.sh"), `#!/bin/sh\necho "$@" > '${seen}'\nexit 7\n`)
+    writeFileSync(
+      join(ops, "run-slot.sh"),
+      `#!/bin/sh\necho "$RUN_SLOT_COMMIT_STEP $@" > '${seen}'\nexit 7\n`,
+    )
     chmodSync(join(ops, "run-slot.sh"), 0o755)
     let result: ReturnType<typeof run>
     try {
@@ -150,7 +160,7 @@ describe("commit-slot.ts", () => {
     } finally {
       rmSync(join(ops, "run-slot.sh"))
     }
-    expect(readFileSync(seen, "utf8")).toBe("commit-wt-one -- echo hi\n")
+    expect(readFileSync(seen, "utf8")).toBe("1 commit-wt-one -- echo hi\n")
     expect(result.exitCode).toBe(7)
   })
 
@@ -170,7 +180,7 @@ describe("commit-slot.ts", () => {
     const seen = join(DIR, "seen-turbo")
     rmSync(seen, { force: true })
     mkdirSync(join(worktree, "node_modules/.bin"), { recursive: true })
-    writeFileSync(join(worktree, "package.json"), "{}")
+    writeFileSync(join(worktree, "package.json"), JSON.stringify({ scripts: { build: "echo hi" } }))
     writeFileSync(
       join(worktree, "node_modules/.bin/turbo"),
       `#!/bin/sh\necho "$@" > '${seen}'\necho '${out}'\nexit ${code}\n`,
@@ -183,7 +193,7 @@ describe("commit-slot.ts", () => {
     try {
       const result = step()
       return {
-        asked: readFileSync(seen, "utf8"),
+        asked: existsSync(seen) ? readFileSync(seen, "utf8") : undefined,
         result,
         slot: existsSync(slot) ? readFileSync(slot, "utf8") : undefined,
       }
@@ -195,7 +205,7 @@ describe("commit-slot.ts", () => {
   }
 
   test("runs the step bare when turbo's dry run finds every build task cached", () => {
-    const { asked, result, slot } = turbo(dry("HIT", "HIT"), () => run(["echo", "hi"]))
+    const { asked, result, slot } = turbo(dry("HIT", "HIT"), () => run(["bun", "run", "build"]))
     expect(asked).toBe("run build --dry=json\n")
     expect(slot).toBeUndefined()
     expect(result.stdout.toString()).toBe("hi\n")
@@ -203,65 +213,25 @@ describe("commit-slot.ts", () => {
   })
 
   test("hands the step to run-slot.sh when turbo's dry run exits non-zero, whatever JSON it printed", () => {
-    const { result, slot } = turbo(dry("HIT", "HIT"), () => run(["echo", "hi"]), 1)
-    expect(slot).toBe("commit-wt-one -- echo hi\n")
+    const { result, slot } = turbo(dry("HIT", "HIT"), () => run(["bun", "run", "build"]), 1)
+    expect(slot).toBe("commit-wt-one -- bun run build\n")
     expect(result.exitCode).toBe(7)
   })
 
   test("hands the step to run-slot.sh as commit-<worktree> when one build task misses the cache", () => {
-    const { result, slot } = turbo(dry("HIT", "MISS"), () => run(["echo", "hi"]))
-    expect(slot).toBe("commit-wt-one -- echo hi\n")
+    const { result, slot } = turbo(dry("HIT", "MISS"), () => run(["bun", "run", "build"]))
+    expect(slot).toBe("commit-wt-one -- bun run build\n")
     expect(result.exitCode).toBe(7)
   })
 
-  // 3 Nov: a plain commit waited 48 minutes in the full queue, printing nothing, before its session found the commit slot's form
-  describe("a commit whose build joins the full queue", () => {
-    const FORM = "~/.playground/ops/run-slot.sh <your name> -- git commit"
-    const queue = (room: string, step: () => ReturnType<typeof run>) => {
-      writeFileSync(
-        join(ops, "run-slot.sh"),
-        `#!/bin/sh\n[ "$1" = room ] && { printf '${room}'; exit 0; }\nexit 7\n`,
-      )
-      chmodSync(join(ops, "run-slot.sh"), 0o755)
-      try {
-        return step()
-      } finally {
-        rmSync(join(ops, "run-slot.sh"))
-      }
-    }
-    const notices = (result: ReturnType<typeof run>) =>
-      result.stderr
-        .toString()
-        .split("\n")
-        .filter((line) => line.startsWith("commit-slot: "))
-
-    test("says once how many runs wait there and names the commit slot's form", () => {
-      const result = queue("4 4 0 27\\n", () => run(["echo", "hi"]))
-      expect(notices(result)).toEqual([
-        `commit-slot: this commit's build joins run-slot's full queue as commit-wt-one, 27 runs waiting; a commit through ${FORM} takes the commit slot instead`,
-      ])
-      expect(result.exitCode).toBe(7)
-    })
-
-    test("still names the form when run-slot.sh room gives no reading", () => {
-      const result = queue("", () => run(["echo", "hi"]))
-      expect(notices(result)).toEqual([
-        `commit-slot: this commit's build joins run-slot's full queue as commit-wt-one; a commit through ${FORM} takes the commit slot instead`,
-      ])
-    })
-
-    test("says nothing for a commit already under run-slot, whose build runs bare", () => {
-      const result = queue("4 4 0 27\\n", () =>
-        Bun.spawnSync(["bun", "--no-env-file", SCRIPT, "echo", "hi"], {
-          cwd: worktree,
-          env: { ...env(), RUN_SLOT_NICE: "10" },
-          stderr: "pipe",
-          stdout: "pipe",
-        }),
-      )
-      expect(notices(result)).toEqual([])
-      expect(result.stdout.toString()).toBe("hi\n")
-    })
+  // a test-only commit's build replayed in 0.83 s, then its type check, which turbo's build cache says nothing of, waited 72.57 s (PR review, 3 Nov)
+  test("hands a type check to run-slot.sh even when turbo would replay every build task, and asks turbo nothing", () => {
+    const { asked, result, slot } = turbo(dry("HIT", "HIT"), () =>
+      run(["bun", "run", "check-types:tests"]),
+    )
+    expect(asked).toBeUndefined()
+    expect(slot).toBe("commit-wt-one -- bun run check-types:tests\n")
+    expect(result.exitCode).toBe(7)
   })
 
   test("runs the step bare with no run-slot.sh, keeping its output and exit code", () => {

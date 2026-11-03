@@ -75,20 +75,20 @@ pre-commit:
         - "tests/*.py"
       run: TURBO_CACHE_DIR="${TURBO_CACHE_DIR:-$HOME/.cache/turbo/playground}" bunx turbo run build --filter=@packages/env --output-logs=errors-only && bun packages/scripts/src/env-keys.ts POSTGRES_URL
     build:
-      # docs and Python tests feed no build; lefthook skips the step when every staged file matches (its * crosses folders); it stops at once on an unlinked workspace dependency, naming bun install; in a worktree it waits for a run slot as commit-<worktree>, unless turbo's dry run finds every build task cached; priority 6, so the type checks below run after it
+      # docs and Python tests feed no build; lefthook skips the step when every staged file matches (its * crosses folders); it stops at once on an unlinked workspace dependency, naming bun install; in a worktree it takes run-slot's commit slot as commit-<worktree>, unless turbo's dry run finds every build task cached; priority 6, so the type checks below run after it
       priority: 6
       exclude:
         - "*.md"
         - "tests/*.py"
       run: TURBO_CACHE_DIR="${TURBO_CACHE_DIR:-$HOME/.cache/turbo/playground}" bun --no-env-file packages/scripts/src/commit-slot.ts bun run build
     check-types-scripts:
-      # CI's check-types runs packages/scripts' tsc, which the build does not; at priority 7, after the build, whose dist it reads, and through the run slot as the build is
+      # CI's check-types runs packages/scripts' tsc, which the build does not; at priority 7, after the build, whose dist it reads, and through the commit slot as the build is
       priority: 7
       glob:
         - "packages/scripts/*.ts"
       run: bun --no-env-file packages/scripts/src/commit-slot.ts bun run --cwd packages/scripts check-types
     check-types-tests:
-      # CI's check-types:tests, which the build does not run; at priority 7, after the build, whose packages' and @api/hono's dist it reads; it writes web/next's generated data-table metrics first, as CI does, and runs through the run slot as the build is
+      # CI's check-types:tests, which the build does not run; at priority 7, after the build, whose packages' and @api/hono's dist it reads; it writes web/next's generated data-table metrics first, as CI does, and runs through the commit slot as the build is
       priority: 7
       glob:
         - "tests/*.ts"

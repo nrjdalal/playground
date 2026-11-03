@@ -378,7 +378,8 @@ Only the first reading moves the folder, sets variables and records files for th
   It reads past the lockfiles too (`bun.lock`, `package-lock.json`), whose integrity hashes can spell a list value by chance.
   It fails when a count is over `packages/scripts/src/trace-count/counts.json`, and so does `tests/packages/scripts/src/trace-count/count.test.ts`, which `bun run test` runs and pre-commit's `trace-count` step runs on every commit but one of images and fonts alone, over every file the index holds as it stands on disk; `--write` lowers each count a trace-out brought down.
   A refusal names each `path:line: kind` holding a hit of a risen kind (`located()`), for each kind the files changed against `HEAD` alone when they hold one, past the lines `kept.json` keeps while they hold no more than its hits.
-  It exits 2, naming the fix, when no-public-leak's list (`extensions/hooks/no-public-leak.json` in the data folder) is missing or a key of it is empty, or when `owner.names` or `factory.archiveRepo` is unset, since those kinds would count nothing; the test counts the kinds that read neither alone.
+  It exits 2, naming the fix, when no-public-leak's list (`extensions/hooks/no-public-leak.json` in the data folder) is missing or a key of it is empty, or when `owner.names` or `factory.archiveRepo` is unset, since those kinds would count nothing.
+  The test counts the kinds that read neither, and `ownerName`'s quote patterns under a made-up owner name built at run time, so a new quote fails the commit while the owner's names count only in `bun run trace-count`.
   To watch a refusal end to end on a machine where it exits 2, point `PLAYGROUND_DATA_DIR` at a scratch folder whose `extensions/policy.json` holds made-up settings, `{ "values": { "owner.names": ["<made-up name>"], "factory.archiveRepo": "<made-up owner>/<repo>" } }`, and whose `extensions/hooks/no-public-leak.json` holds a made-up entry under each key the exit-2 message names.
   Append a line holding one of those list values to an ordinary tracked file in your own worktree, such as `GLOSSARY.md`, `git add` it, and run `PLAYGROUND_DATA_DIR=<scratch> bun run trace-count`; done when its refusal names `<file>:<line>: names` (or the list kind you used).
   Probe with a list value, since each list kind's floor in `counts.json` is 0, so its one hit refuses; then restore the file with `git reset -q HEAD <file>` and `git checkout HEAD -- <file>`.
@@ -526,12 +527,12 @@ Only the first reading moves the folder, sets variables and records files for th
   whose directory (the Bash tool's cwd after any `cd`, or a `bun --cwd`, `bun run --cwd`, `bun install --cwd`, `bun test --cwd` or turbo's `--cwd`, so one typed from anywhere counts, and a clone's destination) is inside a worktree under `.claude/worktrees/`,
   unless the command runs through `~/.playground/ops/run-slot.sh`, naming that form (18 Oct: five worktree installs at once drove load1 to 66.8).
   The main checkout is no-main-checkout's. It fails open on a call it cannot read, and its tests are in `bun run test:file tests/scripts/hooks`.
-  A commit's pre-commit build takes a slot through `packages/scripts/src/commit-slot.ts` when turbo's dry run finds a build task with work to do, and playbook's **slots** rule says which slot each way of committing takes.
+  A commit's pre-commit steps take `run-slot-commit` through `packages/scripts/src/commit-slot.ts`, which hands each to run-slot as `commit-<worktree>` marked `RUN_SLOT_COMMIT_STEP=1`, as `run-slot.sh <who> -- git commit` takes it, and playbook's **slots** rule says which slot each way of committing takes.
+  The build runs bare when turbo's dry run finds every build task cached, while a type check takes the slot whenever it would, since the build's cache says nothing of its cost.
   Before the dry run or any slot, `commit-slot.ts` runs `unlinked()` (`packages/scripts/src/playground/unlinked.ts`, link-skills.sh's check) on the checkout and, when a workspace package's dependency is unlinked, as a canary merge that adds a package leaves it, exits 1 at once, naming each `<package>: <dependency>` and the run-slot `bun install --ignore-scripts --cwd <checkout>` that links it.
   The pre-commit steps `check-types-scripts` and `check-types-tests` run CI's two type checks the build leaves out, `packages/scripts`' `check-types` when a staged file is under `packages/scripts/` and `check-types:tests` when one is under `tests/`, after the build (priority 7 to its 6) and through the same `commit-slot.ts`, so a type error there stops the commit in place of a CI round.
   `check-types-tests` first writes `web/next`'s data-table metrics, outside the slot, as CI does.
-  Their run lines set no `TURBO_CACHE_DIR`, so `commit-slot.ts`'s dry run reads the worktree's own `.turbo/cache`: a check joins the queue even when the build replayed, and runs bare only when that cache holds every build task.
-  Tests: `bun run test:file tests/packages/scripts/src/commit-slot.test.ts tests/lefthook.test.ts`.
+  Tests: `bun run test:file tests/packages/scripts/src/commit-slot.test.ts tests/lefthook.test.ts tests/scripts/ops/run-slot-quick.test.ts`.
 
 ## rules
 
