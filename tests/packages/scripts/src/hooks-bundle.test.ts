@@ -171,3 +171,89 @@ test("every bundled guard runs on {} with no node_modules reachable and exits 0"
     })
   }
 }, 60_000)
+
+// A scratch checkout holding hooks-bundle's own source and one guard, so `bun run hooks:bundle` runs there as it does in the repo, its ROOT that checkout; a merge left uncommitted puts MERGE_HEAD in place, as a merge of canary that stops for its conflicts does.
+describe("hooks:bundle during a merge (#673)", () => {
+  const env = {
+    ...process.env,
+    GIT_AUTHOR_EMAIL: "t@t",
+    GIT_AUTHOR_NAME: "t",
+    GIT_COMMITTER_EMAIL: "t@t",
+    GIT_COMMITTER_NAME: "t",
+  }
+  const checkout = () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "hooks-bundle-merge-")))
+    const git = (...args: string[]) => {
+      const proc = Bun.spawnSync(["git", "-C", root, ...args], { env })
+      if (proc.exitCode !== 0) throw new Error(proc.stderr.toString())
+    }
+    for (const file of ["hooks-bundle.ts", "ops-tick/guard-probe.ts", "write-atomic.ts"]) {
+      const to = join(root, "packages", "scripts", "src", file)
+      mkdirSync(join(to, ".."), { recursive: true })
+      copyFileSync(join(ROOT, "packages", "scripts", "src", file), to)
+    }
+    mkdirSync(join(root, HOOKS), { recursive: true })
+    writeFileSync(
+      join(root, "scripts", "factory-settings.json"),
+      `${JSON.stringify({ hooks: { PreToolUse: [{ hooks: [{ command: "bun scripts/hooks/bundled/a-guard.js" }] }] } })}\n`,
+    )
+    writeFileSync(join(root, HOOKS, "a-guard.ts"), 'console.log("a")\n')
+    writeFileSync(join(root, HOOKS, "no-extensions-write-worker.ts"), "export {}\n")
+    git("init", "-q", "-b", "main")
+    git("add", "-A")
+    git("commit", "-q", "--no-verify", "-m", "start")
+    const merging = () => {
+      git("checkout", "-q", "-b", "side")
+      writeFileSync(join(root, "side.txt"), "side\n")
+      git("add", "-A")
+      git("commit", "-q", "--no-verify", "-m", "side")
+      git("checkout", "-q", "main")
+      git("merge", "-q", "--no-commit", "--no-ff", "side")
+    }
+    const run = (...args: string[]) => {
+      const proc = Bun.spawnSync(
+        [
+          "bun",
+          "--no-env-file",
+          join(root, "packages", "scripts", "src", "hooks-bundle.ts"),
+          ...args,
+        ],
+        { cwd: root, env },
+      )
+      return { code: proc.exitCode, stderr: proc.stderr.toString() }
+    }
+    const written = () => readdirSync(join(root, BUNDLED)).sort()
+    return { git, merging, root, run, written }
+  }
+
+  test("with a merge in progress it exits non-zero, writes no file and names committing the merge first", () => {
+    const { merging, root, run } = checkout()
+    merging()
+    const { code, stderr } = run()
+    expect(code).toBe(1)
+    expect(stderr).toContain("a merge is in progress")
+    expect(stderr).toContain(
+      "commit the merge first, taking canary's bundles in scripts/hooks/bundled as they are, then run `bun run hooks:bundle` again and commit the rebuild on its own",
+    )
+    expect(() => readdirSync(join(root, BUNDLED))).toThrow()
+  })
+
+  test("with no merge in progress it writes each bundle, as before", () => {
+    const { run, written } = checkout()
+    expect(run().code).toBe(0)
+    expect(written()).toEqual(["a-guard.js", "no-extensions-write-worker.js"])
+  })
+
+  test("--check runs during a merge as before: fresh bundles pass, a stale one is named", () => {
+    const { git, merging, root, run } = checkout()
+    expect(run().code).toBe(0)
+    git("add", "-A")
+    git("commit", "-q", "--no-verify", "-m", "bundles")
+    merging()
+    expect(run("--check")).toEqual({ code: 0, stderr: "" })
+    writeFileSync(join(root, BUNDLED, "a-guard.js"), "stale\n")
+    const stale = run("--check")
+    expect(stale.code).toBe(1)
+    expect(stale.stderr).toContain(`stale in ${BUNDLED}: a-guard.js`)
+  })
+})

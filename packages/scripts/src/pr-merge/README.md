@@ -30,6 +30,7 @@ a merge with `-s ours` leaves exactly that while `canary` reads as merged in.
 A read it cannot finish refuses too.
 A blank line, a move (its text added elsewhere in the merge's diff) and a rewrite (a line its hunk adds is 80% alike) pass.
 A line a merge of `canary` dropped clears once the squash holds it again or `canary` drops it too, so it stays lost after a new merge of `canary` and after a restore that a later own commit replaces: redo that merge plainly and re-apply the change in a commit of the PR's own, or keep the line.
+When every lost line sits under `scripts/hooks/bundled/`, the refusal names its cause, bundles rebuilt inside the merge, and that redo: merge `canary` plainly, commit the merge with `canary`'s bundles as they are, then run `bun run hooks:bundle` and commit the rebuild on its own (`hooks:bundle` refuses to write while a merge is in progress).
 
 ## Holds and rulings
 
