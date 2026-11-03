@@ -211,7 +211,7 @@ export async function factsOf(
     filesOf(run, repo, n),
     commentsOf(run, repo, n),
     gh(run, ["api", `repos/${repo}/compare/${view.headRefOid}...${BASE}`, "--jq", ".ahead_by"]),
-    readHeld(heldPath(), repo, n),
+    readHeld(heldPath(), repo, n, Date.now()),
   ])
   const owner = repo.split("/")[0] ?? ""
   const { canary, conflicts, mergeTree } = await mergeOf(git, n, view.headRefOid)
@@ -485,7 +485,7 @@ async function mergeAt(
   gates.push(await typesGate({ ...types, facts }))
   if (gates.some((gate) => !gate.ok)) return { gates, kind: "refused" }
   // read again inside the lock, since a hold written while the types gate ran would otherwise not stop the merge
-  const heldNow = await readHeld(heldPath(), name, n)
+  const heldNow = await readHeld(heldPath(), name, n, Date.now())
   if (heldNow !== null) {
     const detail = `read again before the merge: ${heldNow}`
     return {
