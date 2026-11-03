@@ -48,8 +48,11 @@ Only the first reading moves the folder, sets variables and records files for th
 
 ## The folder a hook reads
 
-- The shared reader (`scripts/hooks/shell.ts`) follows the folder a command runs in from the Bash tool's cwd through the line's `cd` steps, and names one folder where the shell is sure to run that `cd` once.
-  Sure means: `cd` is the command's own first word, or `builtin` or `command` runs it, since every other wrapper runs no builtin (`env cd`, `xargs cd`); it stands outside a pipeline, a background and an `||`'s right side (`cmd || cd x`); it stands outside every body the shell may run no time or many (`if`, `while`, `until`, `for`, `case`, a function, a brace group, `coproc`);
+- The shared reader (`scripts/hooks/shell.ts`) follows the folder a command runs in from the Bash tool's cwd through the line's `cd` steps, and holds two readings of it.
+  `Env.cwd` takes a `cd`'s own target wherever the reader reads it: the reading every hook had before the proven folder arrived, kept so a hook that reads that field alone keeps the verdicts it had.
+  `Env.cwdSure` names a folder only where the shell is sure to run that `cd` once, and `places` gives every folder the shell may be in otherwise.
+  The three hooks below read the folder through `places`, and moving another hook onto it is a change of its own: a guard written as "refuse where the path is inside the folder I guard" reads a folder it cannot place as outside that folder, so it fails open until it judges each of `places`'s folders.
+  Sure means, for `Env.cwdSure`: `cd` is the command's own first word, or `builtin` or `command` runs it, since every other wrapper runs no builtin (`env cd`, `xargs cd`); it stands outside a pipeline, a background and an `||`'s right side (`cmd || cd x`); it stands outside every body the shell may run no time or many (`if`, `while`, `until`, `for`, `case`, a function, a brace group, `coproc`);
   and no count or loop runs it again.
   A reserved word counts in command position alone, so an argument that spells one (`echo if`, `grep -q done`) opens and closes no body.
   The folder a sure `cd` names has to be there for the reader to name it, but for a `cd` an `&&` joins to what follows: such a `cd` has certainly run and succeeded for each command that chain joins after it, since a `cd` that does not run, or that fails, stops the chain before them.
@@ -61,14 +64,15 @@ Only the first reading moves the folder, sets variables and records files for th
   A `!` in front of the `cd` keeps the folders from before it from the start, since it turns the `cd`'s own failure into success and the run carries on with the shell where it was (`! cd <path> && git commit -m x`); an even count of them reads as none.
   A script a command reads (`sh -c`, `eval`, `source`) reads with no run of the line's, since every command in it runs because that command ran; what the script's own trailing run leaves joins the line's on the way out, under the reading command's run,
   since a `cd` an `&&` made sure at the end of an `eval` or a `source` may not have run either (`eval 'true && cd <path>'; git commit -m x`, refused in both folders).
-- Every other `cd` leaves `Env.cwd` unnamed and keeps each folder the shell may be in: the folder before it, and each folder its target names, read against every folder the shell may already be in (`Env.cwdMaybe`).
+- Every other `cd` leaves `Env.cwdSure` unnamed and keeps each folder the shell may be in: the folder before it, and each folder its target names, read against every folder the shell may already be in (`Env.cwdMaybe`).
   A relative target a count or a loop may run again adds every folder above it.
   A function's or a brace group's own `cd` adds its folder to `Env.cwdHeld`, which no later `cd` clears, since the line may call that body at any point.
   `popd`, `cd -` and a bare `pushd` take every folder the line has named (`Env.cwdBack`).
   `Env.cwdUnread` marks a `cd` whose landing folder nothing names (`cd "$X"`, zsh's two-operand `cd`, a `popd` whose stack the reader cannot see).
   At most 32 folders are carried for one line, since each hook judges every command in all of them; past that `Env.cwdAnywhere` is set for the rest of the line, and each of the three hooks below refuses the command it guards outright, since a folder the reader dropped stays one the shell may be in.
   A command that names its own folder keeps running on such a line, as everywhere else.
-- `places(env, fallback)` gives each folder the shell may be in as an `Env` of its own, so a hook judges a command in every folder it cannot rule out and refuses where any is the folder it guards: [no-main-checkout](#no-main-checkout) the main checkout, [no-unslotted-run](#no-unslotted-run) a worktree, [no-extensions-write](#no-extensions-write) the extensions root.
+- `places(env, fallback)` gives each folder the shell may be in as an `Env` of its own, each carrying its own folder as both `cwd` and `cwdSure`, so a hook judges a command in every folder it cannot rule out and refuses where any is the folder it guards:
+  [no-main-checkout](#no-main-checkout) the main checkout, [no-unslotted-run](#no-unslotted-run) a worktree, [no-extensions-write](#no-extensions-write) the extensions root.
   Each hook reads an unread folder by its own fail-closed rule: no-main-checkout passes the folder the line started in as `places`'s fallback, and the hooks that place a repository, a socket or a file by the folder refuse the call they cannot place, as they already refuse one after a `cd` they cannot read.
   A line on which the reader can name no folder keeps canary's reading, since nothing on it says where the shell goes (a bare `cd -` with no earlier `cd` to return to).
   A command that names its own folder (`git -C <path>`, `bun --cwd <path>`, turbo's `--cwd`, `env -C <path>`) is judged by that path, whatever the shell's folder.
@@ -148,8 +152,7 @@ Only the first reading moves the folder, sets variables and records files for th
   The allowance holds only from the main checkout (resolved by `mainCheckout()` in `packages/scripts/src/main-checkout.ts`, that file's precedence), whose tree [no-main-checkout](#no-main-checkout) keeps a session out of, so the script's `package.json` and entry file (`api/hono/src/bin/dashboard-ask.ts`, `dashboard-thread.ts`) are files no session writes.
   `mainCheckout()` is resolved from the hook's own location, not the call's folder (the main checkout is the one tree [no-main-checkout](#no-main-checkout) keeps a session out of), so a planted `scripts/spawn.sh` cannot forge it.
   The effective cwd, after any `cd` in the line, must be that path itself (`realOf(cwd) === realOf(mainCheckout())`, so `bun run` reads the same `package.json` this gate checks, not a nearer one under a made folder), map the script to `bun <entry>`, and hold the entry file.
-  Every other `bun run` keeps its verdict: a linked worktree whose `package.json` and entry match the main checkout byte for byte, a made folder even one that git-inits itself with its own `scripts/spawn.sh` or sits under `.claude/worktrees` with its own `package.json`,
-  a cwd the reader cannot pin to that one path (no cwd, or any `cd` that leaves it naming more folders than one; [The folder a hook reads](#the-folder-a-hook-reads) names them).
+  Every other `bun run` keeps its verdict: a linked worktree whose `package.json` and entry match the main checkout byte for byte, a made folder even one that git-inits itself with its own `scripts/spawn.sh` or sits under `.claude/worktrees` with its own `package.json`, an unknown cwd (no cwd, or a `cd` to a variable or a substitution).
   So does any of these with an argument built from a variable or a substitution.
   A command that acts on the app in front when no `--app` names one (`snapshot`, `find`, `screenshot`, `press`, the window and notification commands) needs an `--app`; `snapshot` and `find` under a `--root` ref, and every ref action, pass, since the snapshot that gave the ref was checked.
   It reads agent-desktop behind `bash -c`, a pipe into a shell, `env` and the other wrappers `scripts/hooks/shell.ts` knows, `run-slot.sh --`, `npx`, `bunx`, `find -exec`, `flock`, `setsid` and `watch`, and a script file the call runs, by its text.

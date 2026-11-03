@@ -567,6 +567,8 @@ function inspect(raw: string, environment: Environment) {
   const lexed = lex(command, known)
   const env: Env = {
     cwd: directory,
+    // the line starts in the folder the tool names, which the reader has proved by the payload itself
+    cwdSure: directory,
     files: new Map(),
     known,
     process: environment,

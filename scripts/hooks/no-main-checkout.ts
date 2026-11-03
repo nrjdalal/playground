@@ -469,8 +469,8 @@ function inspect(raw: string, environment: Record<string, string | undefined>, m
     }
     // every folder the shell may be in, so a cd the reader cannot be sure of is judged wherever it may have left the command, by the fail-closed rule above
     for (const here of places(env, directory)) {
-      // the Env the reader holds is its own object, so a refusal in any other folder names the fix for a folder the hook cannot pin down
-      const sure = here === env && env.cwd !== undefined
+      // only the folder the reader proved takes the command's own fix, so a refusal in any other folder names the fix for a folder the hook cannot pin down
+      const sure = env.cwdSure !== undefined && here.cwd === env.cwdSure
       // the shell this command's output feeds runs whatever it prints, so a script the hook cannot read is refused where that shell would run in the main checkout
       const pipedTo = fed.get(cmd)
       if (pipedTo) {
@@ -485,6 +485,8 @@ function inspect(raw: string, environment: Record<string, string | undefined>, m
   }
   const env: Env = {
     cwd: directory,
+    // the line starts in the folder the tool names, which the reader has proved by the payload itself
+    cwdSure: directory,
     files: new Map(),
     known,
     process: environment,

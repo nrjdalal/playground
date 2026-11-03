@@ -40,6 +40,7 @@ type Pending = { delim: string; quoted: boolean; redirect: Redirect; strip: bool
 export type Env = {
   // Set once the line names more folders than the reader carries, so the shell may be in any folder, the one a hook guards included: a hook refuses the command it guards outright, since `places` can enumerate no such set
   cwdAnywhere?: boolean
+  // The folder a cd names where the reader can read it, taken as the shell's own: the reading every hook had before the proven folder arrived, kept so a hook that reads this field alone keeps its verdicts. A hook reads the proven folder, and every folder the shell may be in, through `places` instead.
   cwd?: string
   // Every folder a cd on the line has named, which `cd -`, `popd` and a bare `pushd` go back to
   cwdBack?: string[]
@@ -49,8 +50,10 @@ export type Env = {
   cwdChainToken?: number
   // The folders a body on the line may cd into, which no later cd clears, since the shell may run that body at any point of the line
   cwdHeld?: string[]
-  // The folders a cd the reader could not be sure of may have left the shell in, beside `cwd`; `cwd` is unnamed whenever one of them is the shell's instead
+  // The folders a cd the reader could not be sure of may have left the shell in, beside `cwdSure`; `cwdSure` is unnamed whenever one of them is the shell's instead
   cwdMaybe?: string[]
+  // The folder the reader proved the shell is in: a cd it is sure the shell runs once, into one folder it reads. Unnamed wherever the reader cannot prove one, which is what `places` enumerates instead.
+  cwdSure?: string
   // Set once a cd's landing folder cannot be named at all (`cd "$X"`, a popd, zsh's two-operand cd), so each hook reads it by its own fail-closed rule, through `places`'s fallback
   cwdUnread?: boolean
   files: Map<string, Text>
@@ -1060,7 +1063,14 @@ async function examineReading(
   // env -C runs the command in the folder it names, wherever the shell is, so its own reading of the folder replaces every other
   const into = chdir && pathOf(chdir, env)
   const here: Env = chdir
-    ? { ...env, cwd: into, cwdHeld: [], cwdMaybe: [], cwdUnread: into === undefined }
+    ? {
+        ...env,
+        cwd: into,
+        cwdHeld: [],
+        cwdMaybe: [],
+        cwdSure: into,
+        cwdUnread: into === undefined,
+      }
     : env
   let verdict: string | undefined
   const followed = SHELLS.has(name) || [".", "cd", "eval", "popd", "pushd", "source"].includes(name)
@@ -1149,13 +1159,13 @@ const manyTimes = (cmd: Command, { first }: Parsed): boolean =>
     .slice(0, first ? cmd.words.indexOf(first) : 0)
     .some((w) => !w.quoted && COUNTED.has(program(w.value)))
 
-// The folders the shell may be in before a command runs: the one the reader named, else each one a cd it could not be sure of may have reached.
+// The folders the shell may be in before a command runs: the one the reader proved, else each one a cd it could not be sure of may have reached.
 const startFolders = (env: Env): string[] => [
-  ...(env.cwd === undefined ? [] : [env.cwd]),
+  ...(env.cwdSure === undefined ? [] : [env.cwdSure]),
   ...(env.cwdMaybe ?? []),
 ]
 
-// Each folder the shell may be in when a command runs, as an Env of its own, so a hook judges the command in every folder it cannot rule out: the folder the reader named, each one a cd it could not be sure of may have reached, and each one a body on the line may cd into. `fallback` is the folder a hook reads when a cd's landing folder cannot be named at all (`cd "$X"`), by its own fail-closed rule. The Env the reader holds comes first and is its own object, so a hook tells the folder the reader named from one the shell merely may be in; a command the reader cannot place at all is judged once, in no folder, as it was before.
+// Each folder the shell may be in when a command runs, as an Env of its own, so a hook judges the command in every folder it cannot rule out: the folder the reader proved, each one a cd it could not be sure of may have reached, and each one a body on the line may cd into. `fallback` is the folder a hook reads when a cd's landing folder cannot be named at all (`cd "$X"`), by its own fail-closed rule. Each Env carries its own folder as both `cwd` and `cwdSure`, so a hook reads the folder it is judging in by either field, and tells the folder the reader proved by `cwdSure` matching the reader's own; a command the reader can place in no folder is judged once with none named. The proven folder comes first.
 export function places(env: Env, fallback?: string): Env[] {
   const folders = [
     ...startFolders(env),
@@ -1168,9 +1178,10 @@ export function places(env: Env, fallback?: string): Env[] {
     tick()
     if (seen.has(cwd)) continue
     seen.add(cwd)
-    out.push(cwd === env.cwd ? env : { ...env, cwd })
+    out.push({ ...env, cwd, cwdSure: cwd })
   }
-  return out.length > 0 ? out : [env]
+  // a command the reader can place in no folder is judged once with none named, so the hook's own fail-closed rule reads it
+  return out.length > 0 ? out : [{ ...env, cwd: undefined, cwdSure: undefined }]
 }
 
 // Every folder above a path, up to the root, since a relative cd a loop runs climbs one for each run.
@@ -1181,6 +1192,15 @@ function ancestors(path: string): string[] {
     out.push(dir)
     if (dir === dirname(dir)) return out
   }
+}
+
+// The one folder a cd names, taken as the shell's own wherever the reader reads it: `Env.cwd`'s own rule, which every hook read before the proven folder arrived and a hook outside `places` reads still.
+async function cdTarget(args: Word[], env: Env): Promise<string | undefined> {
+  const dir = args.find((a) => !(a.value.startsWith("-") && a.value.length > 1))
+  if (!dir) return homedir()
+  const path = dir.value === "-" ? undefined : pathOf(dir, env)
+  if (!path) return undefined
+  return (await isFolder(path)) ? path : undefined
 }
 
 // Where a cd or pushd may leave the shell: each folder its own words name, whether its target names a folder the reader cannot read at all, and `back` for a form that returns to a folder the line named before, so every one of those is a candidate too. `cd -` and a bare `pushd` are such forms, and so is zsh's two-operand cd, which replaces part of the path the shell is in: its operands go in as candidates, since one of them is the folder a one-operand reading would reach. A bare `pushd` takes the home as well, which zsh's PUSHD_TO_HOME makes it reach.
@@ -1218,6 +1238,8 @@ function cdTargets(name: string, cmd: Command, parsed: Parsed, env: Env, from: s
 
 // Where a cd, pushd or popd leaves the folder. A cd the shell is sure to run once, into one folder the reader reads, moves it there and clears each folder it may have been in, since the shell is certainly in that one; any other leaves `cwd` unnamed with every folder it may have reached a candidate, so each hook judges the commands after it in all of them. A cd inside a body the shell keeps for a later call moves nothing now, and its folder stays a candidate through every later cd, since the line may call that body at any point.
 async function chdirTo(name: string, cmd: Command, parsed: Parsed, env: Env): Promise<void> {
+  // `cwd` moves by the reading every hook had before the proven folder arrived, so a hook that reads it alone keeps its verdicts; it is read first, since it resolves a relative target against the folder this cd leaves
+  env.cwd = name === "popd" || cmd.detached ? undefined : await cdTarget(parsed.args, env)
   const from = startFolders(env)
   const back = [...new Set([...(env.cwdBack ?? []), ...from])]
   const move: Move =
@@ -1239,7 +1261,7 @@ async function chdirTo(name: string, cmd: Command, parsed: Parsed, env: Env): Pr
     paths.length === 1 &&
     (chained || (await isFolder(paths[0])))
   ) {
-    env.cwd = paths[0]
+    env.cwdSure = paths[0]
     env.cwdMaybe = []
     env.cwdUnread = false
     // the chain holds only to the first command it does not reach, so the folders from before this cd are kept for that one
@@ -1249,7 +1271,7 @@ async function chdirTo(name: string, cmd: Command, parsed: Parsed, env: Env): Pr
     }
     return
   }
-  env.cwd = undefined
+  env.cwdSure = undefined
   // a form that returns to a folder the line named before takes every one of them, since the reader cannot tell which the shell goes back to
   env.cwdMaybe = keep([...new Set([...(move.back ? back : from), ...paths])], env)
   env.cwdUnread = env.cwdUnread || unread || (from.length === 0 && paths.length === 0)
@@ -1263,10 +1285,10 @@ const negated = (cmd: Command): boolean =>
 function unchain(cmd: Command, env: Env): void {
   if (!env.cwdChain?.length || cmd.chain === env.cwdChainToken) return
   env.cwdMaybe = keep(
-    [...new Set([...(env.cwdMaybe ?? []), ...(env.cwd ? [env.cwd] : []), ...env.cwdChain])],
+    [...new Set([...(env.cwdMaybe ?? []), ...(env.cwdSure ? [env.cwdSure] : []), ...env.cwdChain])],
     env,
   )
-  env.cwd = undefined
+  env.cwdSure = undefined
   env.cwdChain = []
   env.cwdChainToken = undefined
 }
@@ -1278,7 +1300,7 @@ const MAX_FOLDERS = 32
 function keep(folders: string[], env: Env): string[] {
   if (folders.length <= MAX_FOLDERS) return folders
   env.cwdAnywhere = true
-  env.cwd = undefined
+  env.cwdSure = undefined
   env.cwdUnread = true
   return folders.slice(0, MAX_FOLDERS)
 }
