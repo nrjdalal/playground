@@ -2526,6 +2526,30 @@ gh api graphql -f query="$QUERY"`,
         "a removal echoed to doas's shell in a cluster behind sudo",
         "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sudo doas -Ls",
       ],
+      [
+        "a removal echoed to sudo's shell, its attached user value a path ending in sudo",
+        "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sudo -su/usr/bin/sudo",
+      ],
+      [
+        "a removal echoed to sudo's login shell, its attached user value a path ending in doas",
+        "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sudo -iu/x/doas",
+      ],
+      [
+        "a removal echoed to sudo's shell, its attached chdir value a path ending in sudo",
+        "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sudo -sD/sudo",
+      ],
+      [
+        "a removal echoed to doas's shell, its attached user value a path ending in doas",
+        "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | doas -su/doas",
+      ],
+      [
+        "a removal echoed to sudo given an unread word ending in sudo",
+        "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sudo \"$X\"/sudo",
+      ],
+      [
+        "a removal echoed to sudo's shell, its cluster's value an unread word ending in doas",
+        "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sudo -s\"$X\"/doas",
+      ],
     ],
     source: "#582",
   },
