@@ -56,7 +56,7 @@ export const CARVE_OUTS: Record<string, CarveOut> = {
     files: 4000,
     folder: "ops/dashboard/builds",
   },
-  // (one entry per script, A to Z, each added in a commit of its own, so one revert takes it out)
+  // (one entry per script, A to Z; the PR that adds one lists its files and lines, so a small edit takes it out)
   // packages/scripts/src/playground/jobs.ts's rendered LaunchAgent plists, one file each, for a job jobs.json no longer holds
   jobs: { bytes: 64 * 1024, files: 1, folder: "ops/launch-agents" },
 }
