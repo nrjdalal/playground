@@ -1,11 +1,9 @@
 // A PR body's shape, which ops-checks, merge-on-ready and pr:merge's Checks gate each read.
 
-// Pure: whether a PR body is the PR template: a TL;DR of 2 sentences or more first, its bullets or its prose, then the pr skill's Summary, Evidence and Merge Danger, then Links, each a heading of its own, in that order; a TL;DR may open with an `Outcome:` label.
-export function templateBody(body: string): boolean {
-  const lines = body.split(/\r?\n/).filter((line) => line.trim())
-  // a heading inside a code fence is a sample, not a section
+// Pure: each line's ## heading, lowercased with TLDR read as TL;DR, or "" for a line that is none; a heading inside a code fence is a sample, not a section.
+function headingsOf(lines: string[]): string[] {
   let fenced = false
-  const headings = lines.map((line) => {
+  return lines.map((line) => {
     if (/^\s*(?:```|~~~)/.test(line)) fenced = !fenced
     return fenced
       ? ""
@@ -14,6 +12,12 @@ export function templateBody(body: string): boolean {
           ?.toLowerCase()
           .replace(/^tldr$/, "tl;dr") ?? "")
   })
+}
+
+// Pure: whether a PR body is the PR template: a TL;DR of 2 sentences or more first, its bullets or its prose, then the pr skill's Summary, Evidence and Merge Danger, then Links, each a heading of its own, in that order; a TL;DR may open with an `Outcome:` label.
+export function templateBody(body: string): boolean {
+  const lines = body.split(/\r?\n/).filter((line) => line.trim())
+  const headings = headingsOf(lines)
   const at = ["tl;dr", "summary", "evidence", "merge danger", "links"].map((name) =>
     headings.indexOf(name),
   )
@@ -49,12 +53,13 @@ export function tldrLabel(body: string): string | null {
   return null
 }
 
-// Pure: the text of a body's Evidence section, up to its next ## heading.
+// Pure: the text of a body's Evidence section, up to its next ## heading, each read as templateBody reads them.
 function evidenceOf(body: string): string {
   const lines = body.split(/\r?\n/)
-  const at = lines.findIndex((line) => /^##\s+evidence\s*$/i.test(line))
+  const headings = headingsOf(lines)
+  const at = headings.indexOf("evidence")
   if (at === -1) return ""
-  const end = lines.findIndex((line, i) => i > at && /^##\s/.test(line))
+  const end = headings.findIndex((heading, i) => i > at && heading !== "")
   return lines.slice(at + 1, end === -1 ? undefined : end).join("\n")
 }
 

@@ -24,7 +24,8 @@ at that head and the head is up to date with canary:
   ci            every GitHub check on the head finished and passed, "Audit, Lint, and
                 Build" and "test" among them; on factory.repo (the checkout's origin when unset) the head must carry a
                 GitGuardian check, since a head it never started on ran no secret scan
-  body          the PR body is the PR template the Changelog reads
+  body          the PR body is the PR template the Changelog reads, and its Evidence names
+                each changed *.md path by its full path
   review        ## ReviewBot · round <n>: 5/5 at <sha7>, at the head
   types         last, inside the merge lock: the tree the squash makes type-checks by CI's own
                 type steps in the kept merge-types worktree, each through run-slot; skipped
