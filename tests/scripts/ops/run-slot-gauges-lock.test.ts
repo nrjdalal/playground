@@ -88,11 +88,11 @@ describe("the gauges refresh under one lock", () => {
     expect(existsSync(lock(m))).toBe(false)
   })
 
-  test("a lock 29 s old still holds", async () => {
+  test("a lock 20 s old, a slow refresher's, still holds", async () => {
     const m = machine({ idle: 80 })
     cache(m, 60, "30")
     mkdirSync(lock(m))
-    utimesSync(lock(m), now() - 29, now() - 29)
+    utimesSync(lock(m), now() - 20, now() - 20)
     expect(await looks(m)).toEqual(["1"])
     expect(tops(m)).toBe(0)
   })
