@@ -40,4 +40,5 @@ A session on `playground` and a pane on `playground-probes` both run under herdr
 
 A core skill, built on the herdr servers that the `ops:herdr` job keeps running ([scripts/README.md](../../scripts/README.md#the-herdr-servers)).
 The `no-raw-spawn` hook still refuses a session's own direct herdr call on a factory server; the launcher is the one way to type into a pane, and it starts no Claude session, which only `scripts/spawn.sh` does.
+The screen trusts the launcher's own environment for the session's role and id, and the calling session's own hook judges that outer call, a gap the launcher has yet to close.
 A session trying it before it merges follows [.agents/skill-trial.md](../../.agents/skill-trial.md).
