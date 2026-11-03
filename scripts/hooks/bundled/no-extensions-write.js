@@ -1543,13 +1543,12 @@ var READS_ONLY = /^(?:\}|:?[-+?]|[#%/])/;
 var EVALUATES = [
   /\(\([^)]*[A-Za-z_]/,
   /\$\[[^\]]*[A-Za-z_]/,
-  /(?:^|[\s;&|(])let\s[^;&|]*[A-Za-z_]/,
   /\[\[.*\s-(?:eq|ge|gt|le|lt|ne)\s/s,
   /\$\{[#!]?\w+\[[^\]]*[A-Za-z_]/,
   /(?:^|[\s;&|(])\w+\[[^\]]*[A-Za-z_][^\]]*\]\+?=/,
   /\$\{[#!]?\w+:(?![-+=?:])[^}]*[A-Za-z_]/,
   /@P\}/,
-  /[^\s(|&;<>$]\((?:#q)?[^()\s]*?(?:e[^\w\s()]|\+)/
+  /[^\s(|&;<>$=]\((?:#q)?(?:[^()\s=|"']*?e([:'"])[^]*?\1|\+\w+)[^()\s]*\)(?=$|[\s;&|)<>])/
 ];
 function namings(command) {
   const counts = new Map;
@@ -1810,6 +1809,8 @@ function steadyNames(named, commands) {
       return () => NONE;
     const flagged = (letters) => cmd.words.some((w, k) => k > 0 && /^-[^-\s]/.test(w.value) && letters.test(w.value));
     if (NUMERIC.has(name) || TYPESETS.has(name) && flagged(/[EFin]/))
+      return () => NONE;
+    if (name === "let" && cmd.words.some((w, k) => k > 0 && /[A-Za-z_]/.test(w.value)))
       return () => NONE;
     if (name === "print" && flagged(/P/))
       return () => NONE;
