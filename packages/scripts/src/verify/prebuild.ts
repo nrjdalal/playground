@@ -56,7 +56,7 @@ export const isMainCheckout = (root: string, repo: string | undefined): boolean 
   }
 }
 
-// A worktree installed before a canary pull that added a workspace package, or a dependency of one, lacks its links, and its build then stops on "tsdown: command not found"; pr:merge refuses it naming the install that fixes it, while verify and `bun run dev`, the live dashboard's serve among them, build on as before.
+// A worktree installed before a canary pull that added a workspace package, or a dependency of one, lacks its links, and its build then stops on "tsdown: command not found" or its run on "Cannot find module"; pr:merge refuses it naming the install that fixes it, while verify and `bun run dev`, the live dashboard's serve among them, build on as before.
 export const staleInstall = (target: string, root: string): string | null => {
   const { workspaces } = JSON.parse(readFileSync(join(root, "package.json"), "utf8"))
   const globs: string[] = Array.isArray(workspaces) ? workspaces : (workspaces?.packages ?? [])
@@ -76,22 +76,35 @@ export const staleInstall = (target: string, root: string): string | null => {
   return `${target}: this worktree's install predates its bun.lock and misses ${missing.join(", ")}; run \`~/.playground/ops/run-slot.sh <your name> -- bun install --ignore-scripts --cwd ${root}\`, then run ${target} again`
 }
 
+// What prebuild does before a target runs: the refusal it stops on, else the packages it builds, none when every dist is built. pr:merge checks its install on every run, since a canary merge can add a dependency to a package whose dist is already built, which then fails on "Cannot find module".
+export const prebuildStep = (
+  target: string,
+  missing: string[],
+  root: string,
+  repo: string | undefined,
+): { refused: string } | { build: string[] } => {
+  if (missing.length > 0 && isMainCheckout(root, repo))
+    return {
+      refused: `${target}: ${missing.join(", ")} is unbuilt here, and the factory's main checkout builds only packages/* after a pull; run it from your own worktree`,
+    }
+  const stale = target === "pr-merge" ? staleInstall(target, root) : null
+  return stale ? { refused: stale } : { build: missing }
+}
+
 if (import.meta.main) {
   const target = process.argv[2] ?? "verify"
-  const missing = unbuilt(workspaceImports(await sourcesIn(target)), dirOf(target))
-  if (missing.length > 0 && isMainCheckout(ROOT, process.env.PLAYGROUND_REPO)) {
-    console.error(
-      `${target}: ${missing.join(", ")} is unbuilt here, and the factory's main checkout builds only packages/* after a pull; run it from your own worktree`,
-    )
+  const step = prebuildStep(
+    target,
+    unbuilt(workspaceImports(await sourcesIn(target)), dirOf(target)),
+    ROOT,
+    process.env.PLAYGROUND_REPO,
+  )
+  if ("refused" in step) {
+    console.error(step.refused)
     process.exit(1)
   }
-  const stale = missing.length > 0 && target === "pr-merge" ? staleInstall(target, ROOT) : null
-  if (stale) {
-    console.error(stale)
-    process.exit(1)
-  }
-  if (missing.length > 0) {
-    console.error(`${target}: building what ${missing.join(", ")} needs`)
+  if (step.build.length > 0) {
+    console.error(`${target}: building what ${step.build.join(", ")} needs`)
     // turbo's output goes to stderr, so `verify --json` keeps stdout to itself
     const build = Bun.spawnSync(
       [

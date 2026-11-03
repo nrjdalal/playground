@@ -12,7 +12,7 @@ export const preToolUseGuards = async (repo: string): Promise<string[]> => {
     join(repo, "scripts", "factory-settings.json"),
   ).json()) as Settings
   const names = (settings.hooks.PreToolUse ?? []).flatMap((entry) =>
-    entry.hooks.map((hook) => hook.command.match(/scripts\/hooks\/([\w-]+)\.ts/)?.[1]),
+    entry.hooks.map((hook) => hook.command.match(/scripts\/hooks\/bundled\/([\w-]+)\.js/)?.[1]),
   )
   return [...new Set(names.filter((name): name is string => !!name))]
 }
@@ -27,7 +27,7 @@ export const guardProbe = async (ctx: Context) => {
       [
         "sh",
         "-c",
-        'cd -P "$1" && exec bun --no-env-file "scripts/hooks/$2.ts"',
+        'cd -P "$1" && s="scripts/hooks/bundled/$2.js" && { [ -f "$s" ] || s="scripts/hooks/$2.ts"; } && exec bun --no-env-file "$s"',
         "guard-probe",
         ctx.repo,
         name,
@@ -47,8 +47,8 @@ export const guardProbe = async (ctx: Context) => {
     if (told) await unlink(statePath)
     return
   }
-  // The count and the fix lead, since notify.sh cuts a line at 400 characters and every guard breaks at once when the packages are gone.
-  const text = `${broken.length} of ${guards.length} PreToolUse guards cannot start, so their wrappers refuse every factory call they guard. Fix: bun install in ${ctx.repo}. ${broken.join("; ")}`
+  // The count and the fix lead, since notify.sh cuts a line at 400 characters and every guard breaks at once when Bun or the bundles are gone.
+  const text = `${broken.length} of ${guards.length} PreToolUse guards cannot start, so their wrappers refuse every factory call they guard. Fix: git checkout scripts/hooks/bundled, or bun run hooks:bundle, in ${ctx.repo}. ${broken.join("; ")}`
   if (told?.text === text) return
   if (await ctx.send("dispatcher", text, true))
     await writeAtomic(statePath, JSON.stringify({ text }))

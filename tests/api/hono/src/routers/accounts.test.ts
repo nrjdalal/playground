@@ -27,7 +27,7 @@ const peer = (address: string) => ({
   requestIP: () => ({ address, family: address.includes(":") ? "IPv6" : "IPv4", port: 50000 }),
 })
 
-// The router behind the API's own request logger, as index.ts mounts it, each logged line kept.
+// The router behind the API's own request logger, as local.ts mounts it, each logged line kept.
 const lines: string[] = []
 const app = new Hono()
   .use(logger((line: string) => void lines.push(line)))
