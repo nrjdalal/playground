@@ -776,18 +776,22 @@ burst_held() {
     END { if (n > 0) print n; exit !(n > 0) }'
 }
 
-# Load units: each held slot's run counts the units on its holder line (2, a medium, for a line with none, as the commit and clone lanes write
-# theirs, so a big run waits beside a commit's build and a clone), and the slots the load rules
-# open now, or a holder already has, give 2 units each. A quarter of them, at least 1, stays for small runs and the runs that gate a
-# merge, so a big run never blocks a small one
+# Load units: each held CPU slot's run counts the units on its holder line (2, a medium, for a line with none), and the slots the load rules
+# open now, or a holder already has, give 2 units each; a held commit or clone lane counts 2 too, since its holder line carries none, so a big
+# run waits beside a commit's build and a clone (the first loop's list is the CPU slots, which ops-unstick reads). A quarter of them, at least
+# 1, stays for small runs and the runs that gate a merge, so a big run never blocks a small one
 held_units() {
   local s u total=0
-  for s in run-slot run-slot-2 run-slot-3 run-slot-4 run-slot-commit run-slot-clone; do
+  for s in run-slot run-slot-2 run-slot-3 run-slot-4; do
     reclaim "$OPS/$s"
     [ -d "$OPS/$s" ] || continue
     u=$(cut -d' ' -f4 "$OPS/$s.holder" 2>/dev/null)
     case "$u" in 1|2|3) ;; *) u=2 ;; esac
     total=$((total + u))
+  done
+  for s in run-slot-commit run-slot-clone; do
+    reclaim "$OPS/$s"
+    [ -d "$OPS/$s" ] && total=$((total + 2))
   done
   echo $((total + $(peer_units)))
 }
