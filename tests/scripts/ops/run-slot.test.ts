@@ -1,8 +1,8 @@
 import { describe, expect, setDefaultTimeout, test } from "bun:test"
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 
-import { WAITING, stop, machine } from "./run-slot-fake"
+import { SCRIPT, WAITING, stop, machine } from "./run-slot-fake"
 
 // a check waits on its run's exit or a line it prints, so the timeout only catches a hang: 60s, twice the slowest case under SLOW_CHILD=1.5 but local CI's, which sets its own
 setDefaultTimeout(60_000)
@@ -173,6 +173,69 @@ describe("load units", () => {
   test("a big run starts on a quiet machine", async () => {
     const m = machine({ load1: 20 })
     expect(await m.runs("worker-b", { RUN_SLOT_SIZE: "big" })).toBe(true)
+  })
+})
+
+// #610: load1 shows a run's load about a minute after it starts, so a drained queue once started five suites in 70 s at load1 16, and load1 reached 64; a run started under a minute ago holds the next medium or big one, at any load.
+describe("a burst of starts", () => {
+  const medium = { RUN_SLOT_SIZE: "medium" }
+
+  test("a medium run waits while a run started under a minute ago, with load1 under every line", async () => {
+    const m = machine({ load1: 2 })
+    m.hold("run-slot", 2, "medium", 10)
+    expect(await m.waits("worker-m", medium)).toBe(true)
+  })
+
+  test("and starts once that run is a minute old", async () => {
+    const m = machine({ load1: 2 })
+    m.hold("run-slot", 2, "medium", 61)
+    expect(await m.runs("worker-m", medium)).toBe(true)
+  })
+
+  test("a clone started under a minute ago holds it too", async () => {
+    const m = machine({ load1: 2 })
+    m.hold("run-slot-clone", 1, "small", 10)
+    expect(await m.waits("worker-m", medium)).toBe(true)
+  })
+
+  test("with several waiters queued, the first starts and the rest wait for the reading", async () => {
+    const m = machine({ load1: 2 })
+    writeFileSync(join(m.bin, "long"), '#!/bin/bash\ntouch "$1"\nsleep 30\n')
+    chmodSync(join(m.bin, "long"), 0o755)
+    const first = m.start("worker-a", medium, SCRIPT, ["long"])
+    while (!existsSync(first.marker)) await Bun.sleep(20)
+    try {
+      expect(await Promise.all([m.waits("worker-b", medium), m.waits("worker-c", medium)])).toEqual(
+        [true, true],
+      )
+    } finally {
+      await stop(first.p)
+    }
+  })
+
+  test("a single waiter on an idle machine starts at once", async () => {
+    const m = machine({ load1: 2 })
+    const run = m.start("worker-m", medium)
+    const waited = await run.saw(WAITING)
+    if (waited) await stop(run.p)
+    expect(waited).toBe(false)
+    expect(await run.ran()).toBe(true)
+  })
+
+  test("a small run and the merge train's go on beside a fresh start", async () => {
+    const m = machine({ load1: 2 })
+    m.hold("run-slot", 2, "medium", 5)
+    expect(await m.runs("worker-s", { RUN_SLOT_SIZE: "small" })).toBe(true)
+    expect(await m.runs("ops-merge-train", medium)).toBe(true)
+  })
+
+  test("can-take answers no while a run started under a minute ago, and yes once it is a minute old", async () => {
+    const fresh = machine({ load1: 2 })
+    fresh.hold("run-slot", 2, "medium", 5)
+    expect(await fresh.canTake("run-slot-2", "worker-m", medium)).toBe(false)
+    const old = machine({ load1: 2 })
+    old.hold("run-slot", 2, "medium", 61)
+    expect(await old.canTake("run-slot-2", "worker-m", medium)).toBe(true)
   })
 })
 

@@ -122,12 +122,16 @@ esac
     RUN_SLOT_POLL: "0.2",
     ...extra,
   })
-  // A slot already held by this test's own process, which stays alive throughout.
-  const hold = (slot: string, units: number, size: string) => {
+  // A slot already held by this test's own process, which stays alive throughout, its run started `ago` seconds back (long ago by default, so no burst rule reads it as fresh).
+  const hold = (slot: string, units: number, size: string, ago?: number) => {
     mkdirSync(join(ops, slot))
+    const at =
+      ago === undefined
+        ? "2026-10-18T19:00:00Z"
+        : new Date(Date.now() - ago * 1000).toISOString().replace(/\.\d+Z$/, "Z")
     writeFileSync(
       join(ops, `${slot}.holder`),
-      `worker-held ${process.pid} 2026-10-18T19:00:00Z ${units} ${size}\n`,
+      `worker-held ${process.pid} ${at} ${units} ${size}\n`,
     )
   }
   const release = (slot: string) => {
