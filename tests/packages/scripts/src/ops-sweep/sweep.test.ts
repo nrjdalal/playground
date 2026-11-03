@@ -423,11 +423,12 @@ describe("stalledPrs", () => {
     checks?: string
     comments?: { age: number; body: string }[]
     commitAge?: number
+    createdAge?: number
     labels?: string[]
     number?: number
     repo?: string
   }
-  // open PRs as GitHub's GraphQL search answers them: each head committed `commitAge` minutes ago, its checks in the rollup state given, and its comments oldest first
+  // open PRs as GitHub's GraphQL search answers them: each opened `createdAge` minutes ago (by default when its head was committed) with its head committed `commitAge` minutes ago, its checks in the rollup state given, and its comments oldest first
   const answer = (prs: Pr[]) =>
     JSON.stringify({
       data: {
@@ -450,6 +451,7 @@ describe("stalledPrs", () => {
                 },
               ],
             },
+            createdAt: minutesAgo(p.createdAge ?? p.commitAge ?? 5),
             labels: { nodes: (p.labels ?? []).map((name) => ({ name })) },
             number: p.number ?? 9,
             repository: { nameWithOwner: p.repo ?? "acme/app" },
@@ -518,6 +520,13 @@ describe("stalledPrs", () => {
     ])
     expect(await lines([{ comments: [{ age: 29, body: "a comment" }], commitAge: 40 }])).toEqual([])
     expect(await lines([{ commitAge: 29 }])).toEqual([])
+  })
+
+  test("counts a PR's opening as activity, so one opened 10 minutes ago from a 2-hour-old head is not idle", async () => {
+    expect(await lines([{ commitAge: 120, createdAge: 10 }])).toEqual([])
+    expect(await lines([{ commitAge: 120, createdAge: 120 }])).toEqual([
+      "no new commit, verdict or comment for 120m",
+    ])
   })
 
   test("joins both reasons in one entry for a PR that is idle and repeats its score (#454)", async () => {

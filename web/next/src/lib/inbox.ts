@@ -278,6 +278,33 @@ export const needsYou = (item: InboxItem): boolean =>
     ? item.readAt === null
     : (item.status === "open" && chosen(item)?.choice !== "replied") || sendFailed(item)
 
+// Pure: whether a card shows folded until he opens it: every card but one that needs an answer now, so a snoozed ask folds until its time and a card that rises to needing him shows open.
+export const foldsByDefault = (item: InboxItem, now: number): boolean =>
+  !needsYou(item) ||
+  (item.kind !== "update" &&
+    item.answer !== null &&
+    "snoozedUntil" in item.answer &&
+    Date.parse(item.answer.snoozedUntil) > now)
+
+// The shelf a card sits on: the list, or one of the rows under it.
+export type Shelf = "archived" | "done" | "inbox" | "progress" | "snoozed"
+
+// A card's lifecycle buttons, beside its own answers and Reply: Done is Dismiss renamed on an archived card, and unarchive is Move to Inbox.
+export type Lifecycle = "archive" | "dismiss" | "done" | "snooze" | "unarchive"
+
+// Pure: the lifecycle buttons a card offers on its shelf: Archive and Snooze while it asks something (a secret ask takes no Archive), Dismiss straight to Done for an update or an answered item, Move to Inbox and Done once archived, and none on Done, which is history.
+export function lifecycle(item: InboxItem, shelf: Shelf): Lifecycle[] {
+  if (shelf === "done") return []
+  if (shelf === "archived") return ["unarchive", "done"]
+  const secret = item.kind === "decision" && item.preview.type === "secret"
+  const asks = schedulable(item)
+  return [
+    ...(asks && !secret ? (["archive"] as const) : []),
+    ...(asks ? (["snooze"] as const) : []),
+    ...(dismissable(item) ? (["dismiss"] as const) : []),
+  ]
+}
+
 // Pure: the ids of what waits on the owner in the Inbox, in the list's order, so Playground's row's link reaches the first.
 export const inboxWaiting = (items: InboxItem[]): string[] =>
   items.filter(needsYou).map((item) => item.id)
@@ -573,7 +600,7 @@ export function outcomeLine(item: InboxItem): string | null {
   }
   const done = {
     approve: "You approved it",
-    clear: "You set it aside for later",
+    clear: `Archived ${fullTime(item.answer.at)}`,
     deny: "You denied it",
     discard: "You discarded it",
     draft: item.answer.editedText

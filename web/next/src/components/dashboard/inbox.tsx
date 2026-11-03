@@ -16,6 +16,7 @@ import {
   RiExternalLinkLine,
   RiGitMergeLine,
   RiInboxLine,
+  RiInboxUnarchiveLine,
   RiKey2Line,
   RiMoneyDollarCircleLine,
   RiProgress4Line,
@@ -38,7 +39,6 @@ import { cn } from "cn"
 import {
   type ComponentProps,
   type KeyboardEvent,
-  type ReactNode,
   type Ref,
   useEffect,
   useId,
@@ -114,12 +114,14 @@ import {
   dismissable,
   dismissItems,
   focusAfterTake,
+  foldsByDefault,
   INBOX_QUERY_KEY,
   inboxLight,
   inboxSummary,
   inboxView,
   itemTag,
   kindWord,
+  lifecycle,
   markRead,
   MOVED_PAUSE_MS,
   movedStep,
@@ -133,12 +135,12 @@ import {
   resultLink,
   retryable,
   retryItem,
-  schedulable,
   scheduleChoices,
   scheduleItem,
   sendFailed,
   sendUnconfirmed,
   sendWhy,
+  type Shelf,
   takenBy,
   updatedSince,
   upfrontLink,
@@ -278,7 +280,7 @@ function KindBand({
               <button
                 type="button"
                 aria-label="Mark as read"
-                className="hover:text-foreground text-muted-foreground focus-visible:ring-ring/50 -m-1 rounded-sm p-1 outline-none focus-visible:ring-2 disabled:opacity-50"
+                className="hover:text-foreground text-muted-foreground -m-1 rounded-sm p-1 outline-none disabled:opacity-50"
                 disabled={busy}
                 onClick={onRead}
               >
@@ -550,7 +552,7 @@ function ChatAbout({ item }: { item: InboxItem }) {
   )
 }
 
-// Opens a card a chat reply collapsed back to its full self, its answers and Schedule back, or folds it again (a dashboard user: "Maybe add a simple shortcut to be able to re-expand it, just like it automatically compacts"); E does the same with focus in the card, as its tooltip says, the scroll bar's Kbd pattern.
+// Opens a folded card to its full self, a chat reply's its answers and Snooze back, or folds it again (a dashboard user: "Maybe add a simple shortcut to be able to re-expand it, just like it automatically compacts"); E does the same with focus in the card, as its tooltip says, the scroll bar's Kbd pattern.
 function Reopen({ open, setOpen }: { open: boolean; setOpen: (open: boolean) => void }) {
   const label = open ? "Hide actions" : "Show actions"
   return (
@@ -670,20 +672,26 @@ const keyOf = (event: KeyboardEvent): CardKey => {
   }
 }
 
-// One item as a card: its band, place line and title, then what Approve does or a draft's words, then, once answered or settled, the result on its own line above the footer, wrapping freely, then one footer row with an open card's actions on the left and, on the right, Schedule where offered, then Dismiss directly left of Reply. An item in Done is the same card.
+// One item as a card: its band, place line and title, then what Approve does or a draft's words, then, once answered or settled, the result on its own line above the footer, wrapping freely, then one footer row with an open card's actions on the left and, on the right, its lifecycle buttons (lifecycle()), then Reply. The same card sits on every shelf; one that folds by default (foldsByDefault()) shows its band, place line, title and result line alone until opened.
 export function InboxCard({
-  done = false,
+  defaultOpen = false,
   item,
   marked,
   now,
+  onBack,
   paused,
+  shelf = "inbox",
   updated,
 }: {
-  done?: boolean
+  // a card that folds by default starts opened, as a click on it opens it
+  defaultOpen?: boolean
   item: InboxItem
   marked: boolean
   now: number
+  // Move to Inbox's click, before its answer, so the list shows the card at its top rather than behind the pill
+  onBack?: () => void
   paused: boolean
+  shelf?: Shelf
   updated: boolean
 }) {
   const queryClient = useQueryClient()
@@ -740,11 +748,12 @@ export function InboxCard({
     setDay(undefined)
     setTime(PICKED_TIME)
   }
-  // a card a chat reply collapsed, opened back to its full self by Show actions, a click on it or E
-  const [reopened, setReopened] = useState(false)
-  const reopens = reopenable(item)
-  const folded = reopens && !reopened
-  const outcome = item.kind === "update" || (reopens && reopened) ? null : outcomeLine(item)
+  // a card that folds by default (all but one that needs an answer now), opened by Show actions, a click on it or E; a chat reply's card opens to its answers and Snooze
+  const [reopened, setReopened] = useState(defaultOpen)
+  const folds = foldsByDefault(item, now)
+  const folded = folds && !reopened
+  const outcome =
+    item.kind === "update" || (reopenable(item) && folds && reopened) ? null : outcomeLine(item)
   // The taker's label in the outcome keeps the raw name on hover, as its band does: its first mention renders under the same Hint.
   const who = agentLabel(takenBy(item))
   const at = outcome === null ? -1 : outcome.indexOf(who)
@@ -758,8 +767,10 @@ export function InboxCard({
   // a row that just moved under him keeps its buttons focusable, dimmed and saying why, so focus stays put and a click meant for another item lands on none
   const hold = paused ? OFF_FOCUSABLE : {}
   const held = paused ? PAUSED_WHY : undefined
-  const quiet =
-    done || (outcome !== null && !failed) || (item.kind === "update" && item.readAt !== null)
+  const quiet = (outcome !== null && !failed) || (item.kind === "update" && item.readAt !== null)
+  const buttons = folded ? [] : lifecycle(item, shelf)
+  // an archived card's Dismiss, renamed Done
+  const dismiss = buttons.includes("done") ? "Done" : buttons.includes("dismiss") ? "Dismiss" : null
 
   const title =
     item.kind === "update" && item.preview.link ? (
@@ -782,57 +793,69 @@ export function InboxCard({
 
   const labels = labelsOf(item)
   // a labelled ask's footer sits in the form beside its Submit while it is open; every other card's answers from outside it
-  const footerInForm = labels !== null && outcome === null
+  const footerInForm = labels !== null && outcome === null && !folded
   const draftReady = item.kind === "draft" && outcome === null && !busy && draft.trim() !== ""
   const secretReady = secretAsk && outcome === null && !busy && secret.trim() !== ""
-  // what Approve does, the card's description while it is open, or what a read-only update shows
-  const preview =
-    outcome !== null ? null : item.kind === "decision" ? (
-      <Preview item={item} />
-    ) : item.kind === "update" && (item.preview.text || item.preview.attachments) ? (
-      <Shown preview={item.preview} />
-    ) : null
-  const body =
-    outcome !== null ? null : labels ? (
-      <AskChoices busy={busy} labels={labels} paused={paused} pick={pick} setPick={setPick} />
-    ) : secretAsk ? (
-      // masked, never saved by the browser, and a key here stays in the field; Enter submits
-      <Input
-        aria-label={`Value for ${secretKey}`}
-        autoComplete="new-password"
-        className={BOX}
-        data-1p-ignore
-        data-lpignore="true"
-        disabled={busy}
-        placeholder="Paste the value"
-        spellCheck={false}
-        type="password"
-        value={secret}
-        onChange={(event) => setSecret(event.target.value)}
-        onKeyDown={(event) => {
-          event.stopPropagation()
-          if (event.key !== "Enter") return
-          event.preventDefault()
-          if (secretReady) void onProvide()
-        }}
-      />
-    ) : item.kind === "draft" ? (
+  // what Approve does, the card's description, kept once answered or archived, or what a read-only update shows; a folded card hides it
+  const preview = folded ? null : item.kind === "decision" ? (
+    <Preview item={item} />
+  ) : item.kind === "update" && (item.preview.text || item.preview.attachments) ? (
+    <Shown preview={item.preview} />
+  ) : null
+  // an answered or archived draft's words, read-only, as they went
+  const sentWords =
+    item.kind === "draft" ? (
       <div className="flex flex-col gap-3 text-sm">
         <SoFar thread={item.preview.thread} />
-        <div className="flex flex-col gap-1.5">
-          {item.preview.thread && (
-            <p className="text-muted-foreground text-xs font-medium">Your reply</p>
-          )}
-          <Textarea
-            aria-label={`Message to ${item.preview.to}`}
-            className={BOX}
-            value={draft}
-            onChange={(event) => setDraft(event.target.value)}
-          />
-        </div>
+        <p className={QUOTE}>
+          {(item.answer && "editedText" in item.answer && item.answer.editedText) ||
+            item.preview.text}
+        </p>
         {item.preview.attachments ? <Attachments items={item.preview.attachments} /> : null}
       </div>
     ) : null
+  const body = folded ? null : outcome !== null ? (
+    sentWords
+  ) : labels ? (
+    <AskChoices busy={busy} labels={labels} paused={paused} pick={pick} setPick={setPick} />
+  ) : secretAsk ? (
+    // masked, never saved by the browser, and a key here stays in the field; Enter submits
+    <Input
+      aria-label={`Value for ${secretKey}`}
+      autoComplete="new-password"
+      className={BOX}
+      data-1p-ignore
+      data-lpignore="true"
+      disabled={busy}
+      placeholder="Paste the value"
+      spellCheck={false}
+      type="password"
+      value={secret}
+      onChange={(event) => setSecret(event.target.value)}
+      onKeyDown={(event) => {
+        event.stopPropagation()
+        if (event.key !== "Enter") return
+        event.preventDefault()
+        if (secretReady) void onProvide()
+      }}
+    />
+  ) : item.kind === "draft" ? (
+    <div className="flex flex-col gap-3 text-sm">
+      <SoFar thread={item.preview.thread} />
+      <div className="flex flex-col gap-1.5">
+        {item.preview.thread && (
+          <p className="text-muted-foreground text-xs font-medium">Your reply</p>
+        )}
+        <Textarea
+          aria-label={`Message to ${item.preview.to}`}
+          className={BOX}
+          value={draft}
+          onChange={(event) => setDraft(event.target.value)}
+        />
+      </div>
+      {item.preview.attachments ? <Attachments items={item.preview.attachments} /> : null}
+    </div>
+  ) : null
 
   // an answered or settled card's result is its description, read above the footer row and wrapping freely, so a long line never comes between its buttons
   const result =
@@ -878,119 +901,69 @@ export function InboxCard({
       </QuestionnaireDescription>
     )
 
-  const left =
-    outcome !== null ? (
-      sendUnconfirmed(item) && dispatcher ? (
-        <Hint content="Ask the dispatcher to look at the session and tell you whether your answer arrived">
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={busy || asked}
-            {...hold}
-            onClick={() => {
-              setAsked(true)
-              outbox.send(dispatcher, { attachments: [], text: checkAnswerNote(item) })
-            }}
-          >
-            <RiQuestionLine data-icon="inline-start" />
-            Check it for me
-          </Button>
-        </Hint>
-      ) : (
-        retryable(item, now) && (
-          <Hint content={held}>
-            <Button
-              size="sm"
-              disabled={busy}
-              {...hold}
-              onClick={() => void settle(() => retryItem(item.id))}
-            >
-              <RiRefreshLine data-icon="inline-start" />
-              Retry
-            </Button>
-          </Hint>
-        )
-      )
-    ) : secretAsk ? (
-      <Hint content={held}>
+  const left = folded ? null : outcome !== null ? (
+    sendUnconfirmed(item) && dispatcher ? (
+      <Hint content="Ask the dispatcher to look at the session and tell you whether your answer arrived">
         <Button
           size="sm"
           variant="outline"
-          className={SIDE_TONES.approve}
+          disabled={busy || asked}
           {...hold}
-          disabled={!secretReady}
-          onClick={() => void onProvide()}
+          onClick={() => {
+            setAsked(true)
+            outbox.send(dispatcher, { attachments: [], text: checkAnswerNote(item) })
+          }}
         >
-          <RiSendPlaneLine data-icon="inline-start" />
-          Submit
+          <RiQuestionLine data-icon="inline-start" />
+          Check it for me
         </Button>
       </Hint>
-    ) : item.kind === "decision" ? (
-      labels ? null : (
-        // a labelled ask's Send is the form's own Submit; no card takes Edit, since the note carries any change
-        <>
-          <Hint content={held}>
-            <Button
-              size="sm"
-              variant="outline"
-              className={SIDE_TONES.approve}
-              disabled={busy}
-              {...hold}
-              onClick={() => void onAnswer("approve")}
-            >
-              <RiCheckLine data-icon="inline-start" />
-              Approve
-            </Button>
-          </Hint>
-          <Hint content={held}>
-            <Button
-              size="sm"
-              variant="outline"
-              className={SIDE_TONES.deny}
-              disabled={busy}
-              {...hold}
-              onClick={() => void onAnswer("deny")}
-            >
-              <RiCloseLine data-icon="inline-start" />
-              Deny
-            </Button>
-          </Hint>
-        </>
+    ) : (
+      retryable(item, now) && (
+        <Hint content={held}>
+          <Button
+            size="sm"
+            disabled={busy}
+            {...hold}
+            onClick={() => void settle(() => retryItem(item.id))}
+          >
+            <RiRefreshLine data-icon="inline-start" />
+            Retry
+          </Button>
+        </Hint>
       )
-    ) : item.kind === "draft" ? (
+    )
+  ) : secretAsk ? (
+    <Hint content={held}>
+      <Button
+        size="sm"
+        variant="outline"
+        className={SIDE_TONES.approve}
+        {...hold}
+        disabled={!secretReady}
+        onClick={() => void onProvide()}
+      >
+        <RiSendPlaneLine data-icon="inline-start" />
+        Submit
+      </Button>
+    </Hint>
+  ) : item.kind === "decision" ? (
+    labels ? null : (
+      // a labelled ask's Send is the form's own Submit; no card takes Edit, since the note carries any change
       <>
         <Hint content={held}>
           <Button
             size="sm"
             variant="outline"
             className={SIDE_TONES.approve}
+            disabled={busy}
             {...hold}
-            disabled={!draftReady}
-            onClick={() => void onAnswer("send", draft)}
+            onClick={() => void onAnswer("approve")}
           >
-            <RiSendPlaneLine data-icon="inline-start" />
-            Send
+            <RiCheckLine data-icon="inline-start" />
+            Approve
           </Button>
         </Hint>
-        {canDraft(item) && (
-          <Hint
-            content={
-              paused ? PAUSED_WHY : "Save it as a draft in Slack, for you to finish and send"
-            }
-          >
-            <Button
-              size="sm"
-              variant="outline"
-              className={DRAFT_TONE}
-              {...hold}
-              disabled={!draftReady}
-              onClick={() => void onAnswer("draft", draft)}
-            >
-              <RiDraftLine data-icon="inline-start" />
-              Draft
-            </Button>
-          </Hint>
-        )}
         <Hint content={held}>
           <Button
             size="sm"
@@ -998,19 +971,66 @@ export function InboxCard({
             className={SIDE_TONES.deny}
             disabled={busy}
             {...hold}
-            onClick={() => void onAnswer("discard")}
+            onClick={() => void onAnswer("deny")}
           >
             <RiCloseLine data-icon="inline-start" />
-            Discard
+            Deny
           </Button>
         </Hint>
       </>
-    ) : null
+    )
+  ) : item.kind === "draft" ? (
+    <>
+      <Hint content={held}>
+        <Button
+          size="sm"
+          variant="outline"
+          className={SIDE_TONES.approve}
+          {...hold}
+          disabled={!draftReady}
+          onClick={() => void onAnswer("send", draft)}
+        >
+          <RiSendPlaneLine data-icon="inline-start" />
+          Send
+        </Button>
+      </Hint>
+      {canDraft(item) && (
+        <Hint
+          content={paused ? PAUSED_WHY : "Save it as a draft in Slack, for you to finish and send"}
+        >
+          <Button
+            size="sm"
+            variant="outline"
+            className={DRAFT_TONE}
+            {...hold}
+            disabled={!draftReady}
+            onClick={() => void onAnswer("draft", draft)}
+          >
+            <RiDraftLine data-icon="inline-start" />
+            Draft
+          </Button>
+        </Hint>
+      )}
+      <Hint content={held}>
+        <Button
+          size="sm"
+          variant="outline"
+          className={SIDE_TONES.deny}
+          disabled={busy}
+          {...hold}
+          onClick={() => void onAnswer("discard")}
+        >
+          <RiCloseLine data-icon="inline-start" />
+          Discard
+        </Button>
+      </Hint>
+    </>
+  ) : null
 
   const right = (
     <div className="ml-auto flex shrink-0 gap-2">
-      {/* Archive sets the ask aside on the Archived shelf, its icon the shelf's; a draft's own red Discard already says no, so it stays off drafts */}
-      {!done && !folded && outcome === null && item.kind === "decision" && !secretAsk && (
+      {/* Archive sets the ask or draft aside on the Archived shelf, its icon the shelf's */}
+      {buttons.includes("archive") && (
         <Hint
           content={
             held ??
@@ -1029,7 +1049,7 @@ export function InboxCard({
           </Button>
         </Hint>
       )}
-      {!done && !folded && schedulable(item) && (
+      {buttons.includes("snooze") && (
         <Schedule
           busy={busy}
           held={held}
@@ -1038,11 +1058,29 @@ export function InboxCard({
           setPicking={setPicking}
         />
       )}
-      {/* an archived card, muted on its shelf, still takes Dismiss, which sends it to Done */}
-      {(!done || item.status === "cleared") && dismissable(item) && (
-        <Hint content={held ?? "Dismiss: it goes to Done"}>
+      {/* Move to Inbox: an archived card goes back to the list, its choices back */}
+      {buttons.includes("unarchive") && (
+        <Hint content={held ?? "Move to Inbox: answer it again"}>
           <Button
-            aria-label="Dismiss"
+            aria-label="Move to Inbox"
+            size="icon-sm"
+            variant="outline"
+            disabled={busy}
+            {...hold}
+            onClick={() => {
+              onBack?.()
+              void onAnswer("unarchive")
+            }}
+          >
+            <RiInboxUnarchiveLine />
+          </Button>
+        </Hint>
+      )}
+      {/* Dismiss sends an update or an answered card to Done; on an archived card the same button reads Done */}
+      {dismiss && (
+        <Hint content={held ?? `${dismiss}: it goes to Done`}>
+          <Button
+            aria-label={dismiss}
             size="icon-sm"
             variant="outline"
             disabled={busy}
@@ -1053,9 +1091,9 @@ export function InboxCard({
           </Button>
         </Hint>
       )}
-      {reopens && <Reopen open={reopened} setOpen={setReopened} />}
-      {/* an open secret ask offers no chat, so its value is never typed where a transcript keeps it */}
-      {!(secretAsk && outcome === null) && <ChatAbout item={item} />}
+      {folds && <Reopen open={reopened} setOpen={setReopened} />}
+      {/* an open secret ask offers no chat, so its value is never typed where a transcript keeps it; a folded card shows its toggle alone */}
+      {!folded && !(secretAsk && outcome === null) && <ChatAbout item={item} />}
     </div>
   )
 
@@ -1086,7 +1124,7 @@ export function InboxCard({
           {right}
         </>
       )}
-      {picking && !done && !folded && schedulable(item) && (
+      {picking && buttons.includes("snooze") && (
         // shadcn's date and time picker: a day from the Calendar, a time from the field, in this browser's time zone
         <div className="flex basis-full flex-wrap items-center gap-2">
           <Popover open={calendarOpen} onOpenChange={setCalendarOpen}>
@@ -1167,14 +1205,14 @@ export function InboxCard({
       // focusable from script alone, so taking the pill can hand focus to the card it put on top
       tabIndex={-1}
       size="sm"
-      // the item a reply is being written about, until it is sent
+      // the item a reply is being written about takes a muted fill, until it is sent
       className={cn(
         // no outer card: the item sits flat on the Inbox, edge to edge, under its KindBand
-        "focus-visible:ring-ring/50 wrap-anywhere overflow-visible rounded-none bg-transparent px-0 pt-0 ring-0 outline-none focus-visible:ring-[3px] [&_[data-slot=card-content]]:px-0 [&_[data-slot=card-footer]]:rounded-none [&_[data-slot=card-footer]]:border-t-0 [&_[data-slot=card-footer]]:bg-transparent [&_[data-slot=card-footer]]:px-0 [&_[data-slot=card-header]]:px-0",
-        marked && "ring-ring ring-2",
+        "wrap-anywhere overflow-visible rounded-none bg-transparent px-0 pt-0 ring-0 outline-none [&_[data-slot=card-content]]:px-0 [&_[data-slot=card-footer]]:rounded-none [&_[data-slot=card-footer]]:border-t-0 [&_[data-slot=card-footer]]:bg-transparent [&_[data-slot=card-footer]]:px-0 [&_[data-slot=card-header]]:px-0",
+        marked && "bg-muted/50",
         folded && "cursor-pointer",
       )}
-      // a click on a card a chat reply collapsed opens it, and E opens or folds it, with focus anywhere in the card but its box
+      // a click on a folded card opens it, and E opens or folds it, with focus anywhere in the card but its box
       onClick={
         folded
           ? (event) => {
@@ -1184,7 +1222,7 @@ export function InboxCard({
           : undefined
       }
       onKeyDown={
-        reopens
+        folds
           ? (event) => {
               if (!reopenKey(keyOf(event))) return
               event.preventDefault()
@@ -1500,6 +1538,12 @@ export function Inbox({ viewing }: { viewing: boolean }) {
   const updated = (item: InboxItem) => look !== null && updatedSince(item, look.since, look.upto)
   const rowIds = rows.map((item) => item.id)
   if (data && order?.join(" ") !== rowIds.join(" ")) setOrder(rowIds)
+  // a card he moved back from Archived takes the list's top once it arrives, his own click, never behind the pill
+  const [back, setBack] = useState<string | null>(null)
+  if (back !== null && held.some((item) => item.id === back)) {
+    setBack(null)
+    setOrder([back, ...rowIds])
+  }
   const paused = useMovedPause(data ? [...rowIds, ...done.map((item) => item.id)].join(" ") : null)
   const list = useRef<HTMLDivElement>(null)
   const below = useRef<HTMLDivElement>(null)
@@ -1673,12 +1717,12 @@ export function Inbox({ viewing }: { viewing: boolean }) {
         <div ref={below}>
           {(
             [
-              ["In progress", RiProgress4Line, progress, false],
-              ["Snoozed", RiZzzLine, snoozed, false],
-              ["Archived", RiArchive2Line, archived, true],
-              ["Done", RiCheckDoubleLine, done, true],
+              ["In progress", RiProgress4Line, progress, "progress"],
+              ["Snoozed", RiZzzLine, snoozed, "snoozed"],
+              ["Archived", RiArchive2Line, archived, "archived"],
+              ["Done", RiCheckDoubleLine, done, "done"],
             ] as const
-          ).map(([label, Icon, shelf, muted]) => (
+          ).map(([label, Icon, shelf, place]) => (
             <AccordionItem
               key={label}
               value={label}
@@ -1719,16 +1763,18 @@ export function Inbox({ viewing }: { viewing: boolean }) {
                 />
                 <ShelfMark empty={shelf.length === 0} />
               </AccordionTrigger>
-              <AccordionContent className={SHELF_PANEL}>
+              {/* kept mounted while shut, as the open row is, so a card opened on its shelf stays opened */}
+              <AccordionContent keepMounted className={SHELF_PANEL}>
                 <div role="list" className="flex flex-col gap-3 pt-8 pb-3">
                   {shelf.map((item) => (
                     <InboxCard
                       key={item.id}
-                      done={muted}
                       item={item}
                       marked={item.ref === reply?.ref}
                       now={now}
                       paused={paused.has(item.id)}
+                      onBack={() => setBack(item.id)}
+                      shelf={place}
                       updated={updated(item)}
                     />
                   ))}

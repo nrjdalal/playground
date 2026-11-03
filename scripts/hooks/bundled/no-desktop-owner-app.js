@@ -82,7 +82,12 @@ var CORE = "core";
 var coreDir = () => fileURLToPath(new URL("../../../extensions/core", import.meta.url));
 var extensionsDir = (data) => join3(data, "extensions");
 var markerPath = extensionsDir;
-var fixFor = (file) => file.startsWith("hooks/") ? "tell your lead, and the dispatcher hands the owner ! playground ext import --from-tree extensions/core/lists to type in the dispatcher's terminal window, which seeds the guards' lists" : "tell your lead, and the dispatcher hands the owner ! playground ext init, then a setting with ! playground settings set, to type in the dispatcher's terminal window, which writes it";
+var fixFor = (file) => {
+  const list = /^hooks\/(.+)\.json$/.exec(file)?.[1];
+  if (list && !existsSync2(join3(coreDir(), "lists", `${list}.json`)))
+    return `tell your lead, and the dispatcher hands the owner ! playground ext put <login> list ${list} <file> --reason <why> to type in the dispatcher's terminal window, which writes it, since core ships no such list`;
+  return file.startsWith("hooks/") ? "tell your lead, and the dispatcher hands the owner ! playground ext import --from-tree extensions/core/lists to type in the dispatcher's terminal window, which seeds the guards' lists" : "tell your lead, and the dispatcher hands the owner ! playground ext init, then a setting with ! playground settings set, to type in the dispatcher's terminal window, which writes it";
+};
 var readRendered = async (data, file) => readRenderedSync(data, file);
 var readRenderedSync = (data, file) => {
   const dir = extensionsDir(data);
@@ -893,10 +898,17 @@ async function examineReading(cmd, parsed, env, visit, builtins) {
     if (builtins)
       verdict = await visit(cmd, parsed, here);
   } else if (name === "cd" || name === "pushd") {
-    env.cwd = cmd.detached ? undefined : await cdTarget(args, env);
-  } else if (name === "popd")
+    if (args.some((a) => GLOB_CHARS.test(a.value)))
+      verdict = await visit(cmd, parsed, here);
+    const from = env.cwd;
+    env.cwd = cmd.detached ? undefined : await cdTarget(name, args, env);
+    if (env.old)
+      env.old = { dir: env.cwd === undefined ? undefined : from };
+  } else if (name === "popd") {
     env.cwd = undefined;
-  else if (EXPORTS.has(name)) {
+    if (env.old)
+      env.old = {};
+  } else if (EXPORTS.has(name)) {
     for (const w of args.filter((a) => ASSIGN.test(a.value))) {
       const eq = w.value.indexOf("=");
       setVar(env.vars, w.value.slice(0, eq), slice(w, eq + 1));
@@ -915,11 +927,16 @@ async function examineReading(cmd, parsed, env, visit, builtins) {
   await record(cmd, name, args, here);
   return verdict;
 }
-async function cdTarget(args, env) {
+async function cdTarget(name, args, env) {
   const dir = args.find((a) => !(a.value.startsWith("-") && a.value.length > 1));
   if (!dir)
     return homedir2();
-  const path = dir.value === "-" ? undefined : pathOf(dir, env);
+  const typed = dir.value === "-" ? undefined : await folder(pathOf(dir, env));
+  const tilde = !typed && name === "pushd" && env.old && !dir.quoted && !dir.unknown && !dir.reads?.length ? /^~([-+])(?=\/|$)/.exec(dir.value) : null;
+  const base = tilde && (tilde[1] === "-" ? env.old?.dir : env.cwd);
+  return base ? await folder(base + dir.value.slice(2)) : typed;
+}
+async function folder(path) {
   if (!path)
     return;
   try {

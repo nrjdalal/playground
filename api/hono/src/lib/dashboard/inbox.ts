@@ -308,14 +308,25 @@ export type InboxStatus =
   | "provided"
   | "sent"
 
-export const ACTIONS = ["approve", "clear", "deny", "discard", "draft", "edit", "send"] as const
+export const ACTIONS = [
+  "approve",
+  "clear",
+  "deny",
+  "discard",
+  "draft",
+  "edit",
+  "send",
+  "unarchive",
+] as const
 export type InboxAction = (typeof ACTIONS)[number]
+// What an answer holds: every action but Move to Inbox, which undoes a set-aside and leaves no answer.
+export type InboxChoice = Exclude<InboxAction, "unarchive">
 
 // ackedAt: when its poster closed it through bun run ask, so the sweep stops chasing it; dismissedAt: when he dismissed the answered item or its poster closed it, which moves it to Done at once; noLink: why a go closed with no link.
 export type InboxAnswer = {
   ackedAt?: string
   at: string
-  choice: InboxAction
+  choice: InboxChoice
   dismissedAt?: string
   editedText?: string
   link?: string
@@ -511,6 +522,7 @@ function answerOf(
     }
     return { message: "A decision is approved, denied, edited or cleared" }
   }
+  if (action === "clear") return { answer: { choice: action }, status: "cleared" }
   if (action === "discard") return { answer: { choice: action }, status: "discarded" }
   if (action === "draft" && !savesDraft(item.preview)) {
     return { message: "Linear has no draft API, so this draft is sent or discarded" }
@@ -523,7 +535,7 @@ function answerOf(
       status: action === "send" ? "sent" : "drafted",
     }
   }
-  return { message: "A draft is sent, saved as a draft or discarded" }
+  return { message: "A draft is sent, saved as a draft, discarded or cleared" }
 }
 
 // Pure: what is typed into the posting session for its answer, opening with the item's tag and id so `bun run ask get` finds it.
@@ -854,6 +866,7 @@ export async function answerItem(
       ok: false,
     }
   }
+  if (input.action === "unarchive") return unarchive(db, current, now)
   const checked = checkAnswer(current, input)
   if ("message" in checked) {
     // an answered decision or draft conflicts with this answer; an update never takes one
@@ -893,6 +906,41 @@ export async function answerItem(
     }),
     ok: true,
   }
+}
+
+// Move to Inbox: an archived item goes back to open with no answer, so it can be answered again; nothing is typed into its poster, since nothing was decided.
+async function unarchive(
+  db: Database,
+  current: InboxItem,
+  now: Date,
+): Promise<{ item: InboxItem; ok: true } | Refused> {
+  // the Archived shelf's own rule: cleared and not yet dismissed to Done
+  if (
+    current.status !== "cleared" ||
+    (current.answer && "dismissedAt" in current.answer && current.answer.dismissedAt)
+  ) {
+    return { code: "CONFLICT", message: "Only an archived item moves back to the Inbox", ok: false }
+  }
+  const [row] = await db
+    .update(inboxItem)
+    .set({
+      answer: null,
+      delivery: null,
+      status: "open",
+      updatedAt: now,
+      version: sql`${inboxItem.version} + 1`,
+    })
+    .where(
+      and(
+        eq(inboxItem.id, current.id),
+        eq(inboxItem.status, "cleared"),
+        sql`${inboxItem.answer} ->> 'dismissedAt' is null`,
+        eq(inboxItem.version, current.version),
+      ),
+    )
+    .returning()
+  if (!row) return { code: "CONFLICT", message: "This item changed since you read it", ok: false }
+  return { item: toItem(row), ok: true }
 }
 
 // How often a queued answer is read again: deliver() types nothing for it, and reads it delivered once its transcript shows it, or lost QUEUED_MS on.

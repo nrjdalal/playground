@@ -55,6 +55,14 @@ var dataDirOf = (env, home = env.HOME || homedir()) => env.PLAYGROUND_DATA_DIR ?
 
 // packages/safe-delete/src/index.ts
 var LIMITS = { bytes: 2 * 1024 ** 3, files: 5000, perMinute: 3 };
+var CARVE_OUTS = {
+  "dashboard-supervisor": {
+    bytes: 256 * 1024 ** 2,
+    files: 4000,
+    folder: "ops/dashboard/builds"
+  },
+  jobs: { bytes: 64 * 1024, files: 1, folder: "ops/launch-agents" }
+};
 
 // scripts/hooks/role.ts
 import { homedir as homedir2 } from "os";

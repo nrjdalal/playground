@@ -52,20 +52,12 @@ describe("slots counts the CPU slots held or open now", () => {
     return [run.exitCode, run.stdout.toString()]
   }
 
-  test("all four while load1 is under 12", () => {
+  test("all four while the CPU idles and load1 is low", () => {
     expect(slots(machine())).toEqual([0, "4\n"])
   })
 
   test("run-slot.4-off closes the fourth", () => {
     expect(slots(machine({ off: ["run-slot.4-off"] }))).toEqual([0, "3\n"])
-  })
-
-  test("load1 at 12 closes the third and fourth, and a holder keeps each", () => {
-    const m = machine({ load1: 12 })
-    expect(slots(m)).toEqual([0, "2\n"])
-    m.hold("run-slot-3", 2, "medium")
-    m.hold("run-slot-4", 2, "medium")
-    expect(slots(m)).toEqual([0, "4\n"])
   })
 })
 
@@ -81,7 +73,7 @@ describe("room prints the lanes, the held ones, the ones a run can take and the 
   })
 
   test("held lanes and live tickets count, and a dead waiter's ticket does not", () => {
-    const m = machine({ load1: 12 })
+    const m = machine({ off: ["run-slot.3-off", "run-slot.4-off"] })
     m.hold("run-slot", 2, "medium")
     m.hold("run-slot-2", 2, "medium")
     m.ticket(2, "worker-a", "s2 22 2 medium")
@@ -91,16 +83,16 @@ describe("room prints the lanes, the held ones, the ones a run can take and the 
   })
 
   test("an unheld lane is not free while a medium run's load units do not fit", () => {
-    const m = machine({ load1: 12 })
+    const m = machine({ off: ["run-slot.3-off", "run-slot.4-off"] })
     m.hold("run-slot", 3, "big")
     m.ticket(2, "worker-a", "s2 22 2 medium")
     expect(room(m)).toEqual([0, "2 1 0 1\n"])
   })
 
-  test("under Claude Code's sandbox it reads the load from uptime and a live waiter by kill", () => {
+  test("under Claude Code's sandbox it reads a live waiter by kill, and the memory it cannot read leaves one lane", () => {
     const m = machine({ sandboxed: true })
     m.ticket(2, "worker-a", "s2 22 2 medium")
-    expect(room(m)).toEqual([0, "4 0 4 1\n"])
+    expect(room(m)).toEqual([0, "1 0 1 1\n"])
   })
 })
 
