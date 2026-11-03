@@ -1,7 +1,15 @@
 import { describe, expect, setDefaultTimeout, test } from "bun:test"
-import { existsSync, mkdirSync, writeFileSync } from "node:fs"
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  writeFileSync,
+} from "node:fs"
 import { join } from "node:path"
 
+import { clonesOf } from "../../../packages/scripts/src/playground/rm"
 import { SCRIPT, machine } from "./run-slot-fake"
 
 setDefaultTimeout(60_000)
@@ -93,5 +101,49 @@ describe("a node_modules clone of a checkout into another", () => {
     expect(run.code).toBe(0)
     expect(existsSync(join(run.from, "..", "loose", "root-dep"))).toBe(true)
     expect(existsSync(join(run.from, "..", "loose", "packages"))).toBe(false)
+  })
+})
+
+// PG-714: a clone's cp works in its destination and only reads its source, so its holder line names both, for playground rm's refusal
+describe("a node_modules clone's holder line", () => {
+  const holderLine = async (args: (root: string) => string[]) => {
+    const m = machine()
+    const root = realpathSync(m.root)
+    for (const dir of ["from/node_modules", "to"]) mkdirSync(join(root, dir), { recursive: true })
+    const seen = join(root, "seen")
+    const cp = join(m.bin, "cp")
+    writeFileSync(cp, `#!/bin/bash\ncat "${join(m.ops, "run-slot-clone.holder")}" > "${seen}"\n`)
+    chmodSync(cp, 0o755)
+    const p = Bun.spawn(["bash", SCRIPT, "worker-c", "--", cp, "-cR", ...args(root)], {
+      cwd: root,
+      env: m.env(),
+      stderr: "ignore",
+    })
+    expect(await p.exited).toBe(0)
+    return { line: readFileSync(seen, "utf8"), root }
+  }
+
+  test("names the source checkout and the destination, which playground rm reads while the clone runs", async () => {
+    const { line, root } = await holderLine((r) => [
+      join(r, "from", "node_modules"),
+      join(r, "to") + "/",
+    ])
+    expect(line).toMatch(/^worker-c \d+ \S+\t/)
+    expect(clonesOf(line, () => true)).toEqual([
+      {
+        destination: join(root, "to"),
+        pid: Number(line.split(" ")[1]),
+        source: join(root, "from"),
+        who: "worker-c",
+      },
+    ])
+  })
+
+  test("names them absolute for relative words and a destination's node_modules", async () => {
+    const { line, root } = await holderLine(() => ["from/node_modules", "to/node_modules"])
+    expect(clonesOf(line, () => true)[0]).toMatchObject({
+      destination: join(root, "to"),
+      source: join(root, "from"),
+    })
   })
 })

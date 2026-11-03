@@ -697,6 +697,20 @@ for pattern in workspaces:
             if code:
                 sys.exit(code)'
 
+# a clone's source checkout and destination, as CLONE_WORKSPACES reads them from cp <flags> <src>/node_modules <dst>[/node_modules], each absolute and led by a tab, for the clone lane's holder line, so playground rm refuses a worktree a running clone reads from or copies into (PG-714); nothing for words of another shape
+clone_ends() {
+  local a cp="" paths=()
+  for a in "$@"; do
+    [ -n "$cp" ] || { [ "$(basename -- "$a")" = cp ] && cp=1; continue; }
+    case "$a" in -*) ;; *) a=${a%/.}; paths+=("${a%/}") ;; esac
+  done
+  [ ${#paths[@]} -eq 2 ] && [ "$(basename -- "${paths[0]}")" = node_modules ] || return 0
+  local dst=${paths[1]}
+  [ "$(basename -- "$dst")" = node_modules ] && dst=$(dirname -- "$dst")
+  printf '\t%s\t%s' "$(absolute "$(dirname -- "${paths[0]}")")" "$(absolute "$dst")"
+}
+absolute() { (cd -- "$1" 2>/dev/null && pwd -P) || case "$1" in /*) printf %s "$1" ;; *) printf %s "$PWD/$1" ;; esac; }
+
 # runs the command as the leader of a process group of its own (macOS has no setsid(1)), which reap stops once it ends, and exits with its code; where Claude Code's sandbox refuses the new group or the nice, it says so on stderr and runs the command without it
 run_command() {
   local code
@@ -985,7 +999,9 @@ if [ -n "$KIND" ]; then
   done
   [ -n "$GOT" ] || exit 143
   SLOT="$OPS/run-slot-$KIND"
-  echo "$WHO $$ $(date -u +%FT%TZ)" > "$SLOT.holder"
+  ends=""
+  [ "$KIND" = clone ] && ends=$(clone_ends "$@")
+  echo "$WHO $$ $(date -u +%FT%TZ)$ends" > "$SLOT.holder"
   echo "run-slot.sh: $WHO holds run-slot-$KIND" >&2
   TOOK=$(date +%s); rlog start "run-slot-$KIND waited=$((TOOK - ASKED))s"
   run_command "$@"
