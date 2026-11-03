@@ -80,7 +80,15 @@ export async function stale(root: string): Promise<string[]> {
 }
 
 export const FIX =
-  "run `bun run hooks:bundle` and commit scripts/hooks/bundled; after a merge that conflicts there, take either side and run it again"
+  "run `bun run hooks:bundle` and commit scripts/hooks/bundled; after a merge that conflicts there, take canary's side, commit the merge, then run it again and commit the rebuild on its own"
+
+// Write mode's refusal while a merge is in progress: bundles rebuilt before the merge commit land inside it, where pr:merge's keeps-canary gate reads them as lines lost from canary that no later commit clears.
+export const MERGING =
+  "hooks-bundle: a merge is in progress, so the rebuilt bundles would land inside the merge commit, where pr:merge's keeps-canary gate reads them as lines lost from canary; commit the merge first, taking canary's bundles in scripts/hooks/bundled as they are, then run `bun run hooks:bundle` again and commit the rebuild on its own"
+
+// Whether root's checkout has a merge in progress, as git marks one with MERGE_HEAD.
+export const merging = (root: string): boolean =>
+  Bun.spawnSync(["git", "-C", root, "rev-parse", "-q", "--verify", "MERGE_HEAD"]).exitCode === 0
 
 if (import.meta.main) {
   if (process.argv.includes("--check")) {
@@ -89,6 +97,9 @@ if (import.meta.main) {
       console.error(`hooks-bundle: stale in ${BUNDLED}: ${drift.join(", ")}; ${FIX}`)
       process.exit(1)
     }
+  } else if (merging(ROOT)) {
+    console.error(MERGING)
+    process.exit(1)
   } else {
     for (const [name, text] of await bundle(ROOT)) await Bun.write(join(ROOT, BUNDLED, name), text)
     console.log(`hooks-bundle: wrote ${BUNDLED}`)

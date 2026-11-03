@@ -45,9 +45,9 @@ const CARVE_OUTS: Record<string, { lines: number; reason: string }> = {
     reason: "prose that names the form as one never to run",
   },
   "scripts/ops/dashboard/supervisor.sh": {
-    lines: 5,
+    lines: 2,
     reason:
-      "the live dashboard's runner removes its own staging worktree under its state folder, whose node_modules clone of about 108k files is past the trash's tripwire (2 lines, for good), and replaces its build folders, each rebuilt from a commit (3 lines, pending #625, which moves them onto the trash)",
+      "the live dashboard's runner removes its own staging worktree under its state folder, whose node_modules clone of about 108k files is past the trash's tripwire; its build folders go to the trash through trash-build.ts",
   },
   "scripts/ops/runner-host/suite.sh": {
     lines: 5,
