@@ -788,7 +788,9 @@ describe("it fails closed", () => {
     const broken = await store("broken", {}, "quillco")
     await writeFile(join(broken, "extensions", "policy.json"), "{")
     await refused(bash(`git push ${OTHER} main`), broken)
-    for (const read of ["ls", "cat x.md"]) expect(await run(bash(read), broken)).toBeUndefined()
+    await refused(bash("gh api -X DELETE repos/acme/app/git/refs/heads/x"), broken)
+    for (const read of ["ls", "cat x.md", "git log -1", "gh issue list -R acme/app"])
+      expect(await run(bash(read), broken)).toBeUndefined()
   })
 
   test("a root with no login refuses a write, and a read passes", async () => {

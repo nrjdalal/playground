@@ -105,7 +105,7 @@ async function withDeadline(budget, body) {
 }
 var steps = 0;
 function tick() {
-  if (++steps % 1024 !== 0 || deadline === undefined)
+  if (deadline === undefined || ++steps % 1024 !== 0)
     return;
   if (performance.now() > deadline)
     throw new RangeError("past the hook's time");
@@ -197,7 +197,18 @@ var ROOT_SHELLS = new Map([
   ["sudo", new Set(["--login", "--shell", "-i", "-s"])]
 ]);
 function stdinShell(cmd) {
-  const { args, first, name } = parse(cmd);
+  const parsed = parse(cmd);
+  const kinds = readings(parsed).map((reading) => stdinShellOf(cmd, reading));
+  if (parsed.capped) {
+    const names = cmd.words.map((w) => program(w.value));
+    if (names.some((n) => ROOT_SHELLS.has(n)))
+      kinds.push("root");
+    else if (names.some((n) => SHELLS.has(n)))
+      kinds.push("shell");
+  }
+  return kinds.includes("root") ? "root" : kinds.find(Boolean);
+}
+function stdinShellOf(cmd, { args, first, name }) {
   if (first && !marked(first.value)) {
     if (!SHELLS.has(name))
       return;
@@ -385,7 +396,6 @@ var UV_TAKES = new Set([
 ]);
 function decode(raw) {
   return raw.replace(/\\(?:x([\da-fA-F]{1,2})|u([\da-fA-F]{1,4})|U([\da-fA-F]{1,8})|0?([0-7]{1,3})|([\s\S]))/g, (whole, hex, u4, u8, octal, other) => {
-    tick();
     const point = hex || u4 || u8 ? Number.parseInt(hex ?? u4 ?? u8 ?? "", 16) : Number.parseInt(octal ?? "", 8);
     if (!Number.isNaN(point))
       return point <= 1114111 ? String.fromCodePoint(point) : whole;
@@ -761,8 +771,11 @@ function parse(cmd) {
   }
   while (ASSIGN.test(rest.at(-1)?.value ?? ""))
     assign(state.local, rest.pop());
-  return unwrap(state, undefined, { left: READINGS });
+  const budget = { left: READINGS };
+  const parsed = unwrap(state, undefined, budget);
+  return budget.capped ? { ...parsed, capped: true } : parsed;
 }
+var readings = (parsed) => [parsed, ...parsed.also.flatMap(readings)];
 var assign = (local, w) => {
   const eq = w.value.indexOf("=");
   local.set(w.value.slice(0, eq), slice(w, eq + 1));
@@ -773,8 +786,11 @@ function unwrap(state, inside, budget) {
   const take = () => rest.pop();
   const also = [];
   const fork = (wrapper, drop) => {
-    tick();
-    return budget.left-- > 0 && also.push(unwrap({
+    if (budget.left-- <= 0) {
+      budget.capped = true;
+      return;
+    }
+    also.push(unwrap({
       chdir: state.chdir,
       local: new Map(local),
       rest: rest.slice(0, Math.max(0, rest.length - drop)),
@@ -886,7 +902,6 @@ async function runAll(lexed, env, visit, builtins) {
 var subshell = (env) => ({ ...env, vars: new Map(env.vars) });
 async function examine(cmd, env, visit, builtins) {
   tick();
-  const readings = (parsed) => [parsed, ...parsed.also.flatMap(readings)];
   const [primary, ...others] = readings(parse(cmd));
   const before = others.length > 0 ? apart(env) : env;
   const verdict = await examineReading(cmd, primary, env, visit, builtins);
@@ -1413,7 +1428,15 @@ function scoreAsOther(words, cmd, parsed, env) {
   return changes(at === -1 ? cmd.words : cmd.words.slice(0, at));
 }
 var AWKS = new Set(["awk", "gawk", "mawk", "nawk"]);
-var AWK_RUNS = /system|getline|[|>@]/;
+var AWK_RUNS = /system|getline|[>@]/;
+var awkRuns = (program) => AWK_RUNS.test(program) || awkPipe(program);
+var AWK_LEAD = /^\s*\/(?:[^\\/"[\n]|\\.)*\/(?=\s*(?:\{|$))/;
+var AWK_MATCH = /~\s*(?:\/(?:[^\\/"[\n]|\\.)*\/|"[^"\\\n]*")/g;
+function awkPipe(program) {
+  if (!program.includes("|"))
+    return false;
+  return /["/#\\|]/.test(program.replace(AWK_LEAD, " ").replace(AWK_MATCH, " "));
+}
 function awkPrograms(words) {
   const programs = [];
   for (let k = 0;k < words.length; k++) {
@@ -1438,7 +1461,7 @@ function awkPrograms(words) {
 function programLines({ args, first }, rooted) {
   if (!AWKS.has(program(first?.value ?? "").toLowerCase()))
     return [];
-  return (awkPrograms(args) ?? []).filter(({ value }) => rooted || AWK_RUNS.test(value)).flatMap(({ value }) => [...value.matchAll(/"((?:[^"\\]|\\.)*)"/g)].map((m) => m[1]));
+  return (awkPrograms(args) ?? []).filter(({ value }) => rooted || awkRuns(value)).flatMap(({ value }) => [...value.matchAll(/"((?:[^"\\]|\\.)*)"/g)].map((m) => m[1]));
 }
 function ownProgram(cmd, { first, name }) {
   return ownFirst(cmd, first) && !marked(name) && /^(?:\/(?:bin|opt\/homebrew\/bin|usr\/bin|usr\/local\/bin)\/)?[^/]+$/.test(first.value);
@@ -1454,7 +1477,7 @@ function narrow(cmd, env) {
   const base = program(first.value).toLowerCase();
   if (AWKS.has(base)) {
     const programs = awkPrograms(args);
-    return !!programs && programs.every(({ value }) => !marked(value) && !AWK_RUNS.test(value));
+    return !!programs && programs.every(({ value }) => !marked(value) && !awkRuns(value));
   }
   if (["cat", "grep", "head", "tail", "wc"].includes(base))
     return reads(parsed, env);
@@ -1492,10 +1515,7 @@ function wholeLine(commands, env) {
 }
 function runsOf(parsed, vars, whole, rootLine) {
   const { args, first, local } = parsed;
-  const values = [...local.values(), ...vars].flatMap((text) => {
-    tick();
-    return text.unknown ? [] : [text.value];
-  });
+  const values = [...local.values(), ...vars].flatMap((text) => text.unknown ? [] : [text.value]);
   for (const word of whole ? first ? [first, ...args] : args : [])
     for (const text of texts(word)) {
       values.push(text.value.replace(/^!/, ""));
@@ -1628,10 +1648,7 @@ function inspect(raw, environment) {
     store.set(vars, cursors);
     const [keys, next] = varsSince(vars, cursors.get(key));
     cursors.set(key, next);
-    return keys.flatMap((k) => {
-      tick();
-      return vars.get(k) ?? [];
-    });
+    return keys.flatMap((k) => vars.get(k) ?? []);
   };
   const visit = async (cmd, parsed, env) => {
     const slot = slotWords(parsed);

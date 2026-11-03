@@ -35,10 +35,10 @@ describe("run-slot-2 in single-slot mode", () => {
   })
 })
 
-// retro 22: run-slot-2 shut at load1 over the cores left the merge train's type check racing the queue for run-slot alone, and two 5/5 PRs sat about 55 min
-describe("run-slot-2 at load1 at or over the cores", () => {
+// retro 22: run-slot-2 shut by the load left the merge train's type check racing the queue for run-slot alone, and two 5/5 PRs sat about 55 min
+describe("run-slot-2 with the lanes shut", () => {
   const busy = () => {
-    const m = machine({ load1: 15 })
+    const m = machine({ idle: 30 })
     m.hold("run-slot", 1, "small")
     return m
   }

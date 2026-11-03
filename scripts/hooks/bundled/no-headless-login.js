@@ -59,7 +59,12 @@ import { fileURLToPath } from "url";
 var CORE = "core";
 var coreDir = () => fileURLToPath(new URL("../../../extensions/core", import.meta.url));
 var extensionsDir = (data) => join2(data, "extensions");
-var fixFor = (file) => file.startsWith("hooks/") ? "tell your lead, and the dispatcher hands the owner ! playground ext import --from-tree extensions/core/lists to type in the dispatcher's terminal window, which seeds the guards' lists" : "tell your lead, and the dispatcher hands the owner ! playground ext init, then a setting with ! playground settings set, to type in the dispatcher's terminal window, which writes it";
+var fixFor = (file) => {
+  const list = /^hooks\/(.+)\.json$/.exec(file)?.[1];
+  if (list && !existsSync(join2(coreDir(), "lists", `${list}.json`)))
+    return `tell your lead, and the dispatcher hands the owner ! playground ext put <login> list ${list} <file> --reason <why> to type in the dispatcher's terminal window, which writes it, since core ships no such list`;
+  return file.startsWith("hooks/") ? "tell your lead, and the dispatcher hands the owner ! playground ext import --from-tree extensions/core/lists to type in the dispatcher's terminal window, which seeds the guards' lists" : "tell your lead, and the dispatcher hands the owner ! playground ext init, then a setting with ! playground settings set, to type in the dispatcher's terminal window, which writes it";
+};
 var readRenderedSync = (data, file) => {
   const dir = extensionsDir(data);
   if (!existsSync(dir))
@@ -231,7 +236,7 @@ var LARGE = "a text too large to read";
 var deadline;
 var steps = 0;
 function tick() {
-  if (++steps % 1024 !== 0 || deadline === undefined)
+  if (deadline === undefined || ++steps % 1024 !== 0)
     return;
   if (performance.now() > deadline)
     throw new RangeError("past the hook's time");
@@ -466,7 +471,6 @@ var UV_TAKES = new Set([
 ]);
 function decode(raw) {
   return raw.replace(/\\(?:x([\da-fA-F]{1,2})|u([\da-fA-F]{1,4})|U([\da-fA-F]{1,8})|0?([0-7]{1,3})|([\s\S]))/g, (whole, hex, u4, u8, octal, other) => {
-    tick();
     const point = hex || u4 || u8 ? Number.parseInt(hex ?? u4 ?? u8 ?? "", 16) : Number.parseInt(octal ?? "", 8);
     if (!Number.isNaN(point))
       return point <= 1114111 ? String.fromCodePoint(point) : whole;
@@ -842,8 +846,11 @@ function parse(cmd) {
   }
   while (ASSIGN.test(rest.at(-1)?.value ?? ""))
     assign(state.local, rest.pop());
-  return unwrap(state, undefined, { left: READINGS });
+  const budget = { left: READINGS };
+  const parsed = unwrap(state, undefined, budget);
+  return budget.capped ? { ...parsed, capped: true } : parsed;
 }
+var readings = (parsed) => [parsed, ...parsed.also.flatMap(readings)];
 var assign = (local, w) => {
   const eq = w.value.indexOf("=");
   local.set(w.value.slice(0, eq), slice(w, eq + 1));
@@ -854,8 +861,11 @@ function unwrap(state, inside, budget) {
   const take = () => rest.pop();
   const also = [];
   const fork = (wrapper, drop) => {
-    tick();
-    return budget.left-- > 0 && also.push(unwrap({
+    if (budget.left-- <= 0) {
+      budget.capped = true;
+      return;
+    }
+    also.push(unwrap({
       chdir: state.chdir,
       local: new Map(local),
       rest: rest.slice(0, Math.max(0, rest.length - drop)),
@@ -961,7 +971,6 @@ async function runAll(lexed, env, visit, builtins) {
 var subshell = (env) => ({ ...env, vars: new Map(env.vars) });
 async function examine(cmd, env, visit, builtins) {
   tick();
-  const readings = (parsed) => [parsed, ...parsed.also.flatMap(readings)];
   const [primary, ...others] = readings(parse(cmd));
   const before = others.length > 0 ? apart(env) : env;
   const verdict = await examineReading(cmd, primary, env, visit, builtins);

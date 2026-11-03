@@ -526,6 +526,33 @@ describe("a quoted argument is read as a command line only where a program runs 
     ["awk matching a field to a regex", "awk '$3 ~ /runner/' /dev/null"],
     ["awk matching a field to a string", `awk '$3 ~ "runner"' /dev/null`],
     ["awk matching a line naming a runner", "awk '/watch/' /dev/null"],
+    ["awk matching a regex alternation", "awk '/foo|bar/' f"],
+    ["awk matching a regex alternation with a block", "awk '/foo|bar/ {print $2}' f"],
+    ["awk matching a field to a string alternation", `awk '$1 ~ "a|b"' f`],
+    ["awk matching a field to a grouped alternation", "awk '$1 ~ /^(a|b)/' f"],
+    [
+      "awk counting a field's regex alternation",
+      "awk '$3 ~ /runner|watch/ {n++} END {print n}' /dev/null",
+    ],
+    [
+      "awk matching an escaped paren and a quoted word",
+      `awk '/startsWith\\("--del"\\)/{print NR}' f`,
+    ],
+    ["awk matching a line of three dashes and a space", "awk '/^--- /' f"],
+    ["sed printing a line of three dashes and a space", "sed -n '/^--- /p' f"],
+    ["jq formatting two fields around a slash", `jq -r '"\\(.a)/-\\(.b)"' f`],
+    [
+      "awk printing from a heading in a handoff",
+      "awk '/^## .*6/{p=1} p' ~/.playground/handoffs/x.md",
+    ],
+    [
+      "awk printing from a heading alternation in a handoff",
+      "awk '/^## .*6|7/{p=1} p' ~/.playground/handoffs/x.md",
+    ],
+    [
+      "sed -i replacing text with a slash and parens in a handoff",
+      "sed -i '' 's/a / b (c)/new/' ~/.playground/handoffs/x.md",
+    ],
     ["awk with a block matching a line naming a runner", "awk '/watch/ {print}' /dev/null"],
     ["awk with its errors sent to /dev/null", "awk '$3 ~ /runner/' /dev/null 2>/dev/null"],
     [
@@ -600,6 +627,18 @@ describe("a quoted argument is read as a command line only where a program runs 
     [
       "doas whose user option comes first in a cluster and takes the shell letter as its value",
       "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | doas -us",
+    ],
+    [
+      "sudo with its full user option and a harmless command",
+      "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sudo --user root ls",
+    ],
+    [
+      "sudo with no options and a harmless command",
+      "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sudo ls",
+    ],
+    [
+      "sudo with a shortened user option and a harmless command",
+      "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sudo --us root ls",
     ],
   ])("%s runs from a worktree", async (_, command) => {
     expect(await at(command, join(homedir(), "x", ".claude", "worktrees", "y"))).toBeUndefined()

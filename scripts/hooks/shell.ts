@@ -182,9 +182,19 @@ const ROOT_SHELLS = new Map([
   ["doas", new Set(["-s"])],
   ["sudo", new Set(["--login", "--shell", "-i", "-s"])],
 ])
-// Whether a command starts a shell that reads its script from stdin, with no command of its own: "root" for a privilege wrapper's shell (`sudo -s`, `nice doas -s`, an option or program in a variable taken as one), "shell" for a shell given no script (`sh`, `sudo bash`); a reserved word, a function's name or an assignment before it skipped
+// Whether a command starts a shell that reads its script from stdin, with no command of its own, under any of parse's readings (a shortened long option is one its lists lack, so it is read as taking the next word too); once the readings ran out, any privilege wrapper among its words counts as a root shell and any shell's name as a shell: "root" for a privilege wrapper's shell (`sudo -s`, `nice doas -s`, an option or program in a variable taken as one), "shell" for a shell given no script (`sh`, `sudo bash`); a reserved word, a function's name or an assignment before it skipped
 export function stdinShell(cmd: Command): "root" | "shell" | undefined {
-  const { args, first, name } = parse(cmd)
+  const parsed = parse(cmd)
+  const kinds = readings(parsed).map((reading) => stdinShellOf(cmd, reading))
+  if (parsed.capped) {
+    const names = cmd.words.map((w) => program(w.value))
+    if (names.some((n) => ROOT_SHELLS.has(n))) kinds.push("root")
+    else if (names.some((n) => SHELLS.has(n))) kinds.push("shell")
+  }
+  return kinds.includes("root") ? "root" : kinds.find(Boolean)
+}
+
+function stdinShellOf(cmd: Command, { args, first, name }: Parsed): "root" | "shell" | undefined {
   if (first && !marked(first.value)) {
     if (!SHELLS.has(name)) return undefined
     const { inline, operand } = shellOperand(args, name)
@@ -775,6 +785,8 @@ export type Parsed = {
   // the other readings of a wrapper's option it cannot read, each judged as the command too
   also: Parsed[]
   args: Word[]
+  // the parse ran out of other readings (READINGS), so an option it cannot read was read as a flag alone
+  capped?: boolean
   chdir?: Word
   first?: Word
   local: Map<string, Text>
@@ -788,6 +800,7 @@ const SPLIT = /^(?:-[0iv]*S|--split-string(?:=|$))(.*)$/
 type State = { chdir?: Word; local: Map<string, Text>; rest: Word[]; xargs: Xargs }
 // The other readings one command's parse makes at most, so options it cannot read cost a bounded time; past them it reads each as canary did, a flag
 const READINGS = 16
+type Budget = { capped?: boolean; left: number }
 
 export function parse(cmd: Command): Parsed {
   // the words still to read, the next one last, so env -S puts its words back in front in the time of their own count
@@ -799,8 +812,13 @@ export function parse(cmd: Command): Parsed {
     else break
   }
   while (ASSIGN.test(rest.at(-1)?.value ?? "")) assign(state.local, rest.pop() as Word)
-  return unwrap(state, undefined, { left: READINGS })
+  const budget: Budget = { left: READINGS }
+  const parsed = unwrap(state, undefined, budget)
+  return budget.capped ? { ...parsed, capped: true } : parsed
 }
+
+// A parse's primary reading, then each other reading in `also`, depth first.
+const readings = (parsed: Parsed): Parsed[] => [parsed, ...parsed.also.flatMap(readings)]
 
 const assign = (local: Map<string, Text>, w: Word) => {
   const eq = w.value.indexOf("=")
@@ -808,27 +826,28 @@ const assign = (local: Map<string, Text>, w: Word) => {
 }
 
 // The program behind the wrappers at the front of the words, resumed inside `inside`'s options for a second reading: an option the wrapper's lists lack is read as a flag, as a value-less option, and again as taking the next word, and a value in a variable again as expanding to no word and to more than one, each other reading kept in `also`.
-function unwrap(state: State, inside: string | undefined, budget: { left: number }): Parsed {
+function unwrap(state: State, inside: string | undefined, budget: Budget): Parsed {
   const { local, rest } = state
   const peek = (): Word | undefined => rest[rest.length - 1]
   const take = (): Word | undefined => rest.pop()
   const also: Parsed[] = []
   const fork = (wrapper: string, drop: number) => {
     tick()
-    return (
-      budget.left-- > 0 &&
-      also.push(
-        unwrap(
-          {
-            chdir: state.chdir,
-            local: new Map(local),
-            rest: rest.slice(0, Math.max(0, rest.length - drop)),
-            xargs: state.xargs && { ...state.xargs },
-          },
-          wrapper,
-          budget,
-        ),
-      )
+    if (budget.left-- <= 0) {
+      budget.capped = true
+      return
+    }
+    also.push(
+      unwrap(
+        {
+          chdir: state.chdir,
+          local: new Map(local),
+          rest: rest.slice(0, Math.max(0, rest.length - drop)),
+          xargs: state.xargs && { ...state.xargs },
+        },
+        wrapper,
+        budget,
+      ),
     )
   }
   for (let wrapper = inside; ; wrapper = undefined) {
@@ -960,7 +979,6 @@ export async function examine(
   builtins: boolean,
 ): Promise<string | undefined> {
   tick()
-  const readings = (parsed: Parsed): Parsed[] => [parsed, ...parsed.also.flatMap(readings)]
   const [primary, ...others] = readings(parse(cmd))
   // only the primary reading moves the folder, sets variables and records files, as canary's one reading did; each other runs on a copy of the env before the command
   const before = others.length > 0 ? apart(env) : env
