@@ -5,7 +5,7 @@ import { homedir } from "node:os"
 
 const WORKTREE = /\/\.claude\/worktrees\/([^/]+)/
 
-export const DRY_RUN = ["bun", "run", "turbo", "run", "build", "--dry=json"]
+const DRY_RUN = ["bun", "run", "turbo", "run", "build", "--dry=json"]
 
 export const replays = (dry: string): boolean => {
   try {

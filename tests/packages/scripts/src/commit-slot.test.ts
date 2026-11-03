@@ -166,14 +166,14 @@ describe("commit-slot.ts", () => {
     expect(result.exitCode).toBe(0)
   })
 
-  const turbo = (out: string, step: () => ReturnType<typeof run>) => {
+  const turbo = (out: string, step: () => ReturnType<typeof run>, code = 0) => {
     const seen = join(DIR, "seen-turbo")
     rmSync(seen, { force: true })
     mkdirSync(join(worktree, "node_modules/.bin"), { recursive: true })
     writeFileSync(join(worktree, "package.json"), "{}")
     writeFileSync(
       join(worktree, "node_modules/.bin/turbo"),
-      `#!/bin/sh\necho "$@" > '${seen}'\necho '${out}'\n`,
+      `#!/bin/sh\necho "$@" > '${seen}'\necho '${out}'\nexit ${code}\n`,
     )
     chmodSync(join(worktree, "node_modules/.bin/turbo"), 0o755)
     const slot = join(DIR, "seen-slot")
@@ -200,6 +200,12 @@ describe("commit-slot.ts", () => {
     expect(slot).toBeUndefined()
     expect(result.stdout.toString()).toBe("hi\n")
     expect(result.exitCode).toBe(0)
+  })
+
+  test("hands the step to run-slot.sh when turbo's dry run exits non-zero, whatever JSON it printed", () => {
+    const { result, slot } = turbo(dry("HIT", "HIT"), () => run(["echo", "hi"]), 1)
+    expect(slot).toBe("commit-wt-one -- echo hi\n")
+    expect(result.exitCode).toBe(7)
   })
 
   test("hands the step to run-slot.sh as commit-<worktree> when one build task misses the cache", () => {
