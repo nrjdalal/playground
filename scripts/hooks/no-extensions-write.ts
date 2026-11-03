@@ -124,6 +124,40 @@ function reads(parsed: Parsed, env: Env): boolean {
   )
 }
 
+// gh's calls that only read, a closed list, whose -q or --jq filter and -t or --template template are text that no shell runs
+const GH_READS = new Set([
+  "api",
+  "issue list",
+  "issue view",
+  "pr list",
+  "pr view",
+  "run list",
+  "run view",
+  "search",
+])
+// a gh api option that sends, and a read's option that opens the browser, each alone or in a cluster of short flags ahead of a filter's or template's own letter
+const GH_API_SENDS = /^(?:-[^-=qt]*[FXf]|--(?:cache|field|input|method|raw-field)(?:=|$))/
+const GH_WEB = /^(?:-[^-=qt]*w|--web(?:=|$))/
+
+// The words of a read-only gh call's jq filter or Go template (`-q '<filter>'`, `--jq=<filter>`, `-t '<template>'`), read as text rather than a command line; none for any other gh call. A pager or editor variable set on the line needs no check here, since an assignment or an export keeps the line from being read call by call.
+function ghFilters(parsed: Parsed): Set<Word> {
+  const { args, first, name } = parsed
+  const filters = new Set<Word>()
+  if (name !== "gh" || !first || marked(first.value)) return filters
+  const [verb, sub] = args.map((a) => a.value)
+  const call = verb === "api" || verb === "search" ? verb : `${verb} ${sub}`
+  if (!GH_READS.has(call)) return filters
+  // gh api with a method, a field, an input file or a cache writes or sends, and --web opens a browser, so neither is a reader
+  if (verb === "api" && args.some((a) => GH_API_SENDS.test(a.value))) return filters
+  if (args.some((a) => GH_WEB.test(a.value))) return filters
+  for (let k = 0; k < args.length; k++) {
+    const { value } = args[k]
+    if (["-q", "--jq", "-t", "--template"].includes(value) && args[k + 1]) filters.add(args[++k])
+    else if (/^(?:-[qt].|--(?:jq|template)=)/.test(value)) filters.add(args[k])
+  }
+  return filters
+}
+
 type Namings = { counts: Map<string, number>; plain: Set<string> }
 
 // The operators after ${K that only read K; any other (`=`, `:=`, zsh's `::=`, a subscript, a modifier) may set it, so it counts as a naming
@@ -505,7 +539,7 @@ function ownProgram(cmd: Command, { first, name }: Parsed): boolean {
   )
 }
 
-// Whether a call is a closed-list reader whose quoted words are never a command line: awk, cat, cut, grep, head, sort, tail, uniq or wc, as its own program (ownProgram), with no variable set in the call
+// Whether a call is a closed-list reader whose quoted words are never a command line: awk, cat, cut, grep, head, sort, tail, uniq or wc, or a read-only gh call with a jq filter, as its own program (ownProgram), with no variable set in the call
 function narrow(cmd: Command, env: Env): boolean {
   const parsed = parse(cmd)
   const { args, first } = parsed
@@ -527,6 +561,11 @@ function narrow(cmd: Command, env: Env): boolean {
   }
   if (["cat", "grep", "head", "tail", "wc"].includes(base)) return reads(parsed, env)
   if (base === "cut") return true
+  // a read-only gh call is narrow when its jq filter is the only word that holds a space
+  if (base === "gh") {
+    const filters = ghFilters(parsed)
+    return filters.size > 0 && args.every((a) => filters.has(a) || !/\s/.test(a.value))
+  }
   if (base === "sort") return !args.some(({ value }) => /^-[a-zA-Z]*o|^--./.test(value))
   if (base === "uniq")
     return args.filter(({ value }) => value === "-" || !value.startsWith("-")).length <= 1
@@ -817,8 +856,12 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
       if (named) return refuse(`${verb} with a variable on ${named}`)
     }
     const literal = !whole && narrow(cmd, env)
+    // on a line read call by call, a read-only gh call's jq filter is text, never a path
+    const filters = whole ? new Set<Word>() : ghFilters(parsed)
     for (const word of [first, ...args].map((word) => heldWord(word, env, steady) ?? word)) {
-      if (quiet && /\s/.test(word.value) && !texts(word).some((t) => holds(t.value, env))) continue
+      // a quiet commit's message and a gh filter are text, judged only when the root is in it; a filter's unquoted glob is the shell's, judged as any glob
+      const text = (quiet && /\s/.test(word.value)) || (filters.has(word) && !word.glob)
+      if (text && !texts(word).some((t) => holds(t.value, env))) continue
       const named = names(word, env, remover, literal)
       if (named) return refuse(`${verb} on ${named}`)
     }

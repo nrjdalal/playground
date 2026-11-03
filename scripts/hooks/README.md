@@ -216,7 +216,12 @@ Only the first reading moves the folder, sets variables and records files for th
   A dry run (`-u`) is one of those, since it makes no file, so its name can be one that exists.
   A line is read call by call instead when every command on it, a substitution's included, is on a closed list of readers or a quiet git commit, and no redirect on it writes a file (`2>&1` and `>/dev/null` write none): then only a variable's text is read that way, so `awk '$3 ~ /runner/' f` runs from `~`.
   The closed list is an `awk`, `gawk`, `mawk` or `nawk` whose program runs nothing, a `cat`, `grep`, `head`, `tail` or `wc` that is a reader by the list above, `cut`, a `sort` with no `-o` and no long option (macOS sort takes an abbreviation, `--out=`), and a `uniq` with at most one file, since its second is its output.
-  Each is its command's own first word as a reader is, named bare or by a system folder's path (`/usr/bin/awk`), so a script the session wrote (`./awk`), a `PATH` set in the call and a reader behind a wrapper (`time cut …`) keep canary's reading.
+  The closed list also holds a read-only gh call with a `-q` or `--jq` filter or a `-t` or `--template` template: `gh api` with no option that sends, or `issue list`, `issue view`, `pr list`, `pr view`, `run list`, `run view` or `search`.
+  A call with an option that sends (`-F`, `-X`, `-f`, `--cache`, `--field`, `--input`, `--method` or `--raw-field`) or opens the browser (`--web` or `-w`) is no read, a short one counted alone or in a cluster ahead of the filter's letter (`-iX POST`).
+  Such a call holds no other word with a space, and no pager or editor variable (`EDITOR`, `GH_EDITOR`, `GH_PAGER`, `PAGER`, `VISUAL`) is set on its line, since an assignment or an export keeps a line from being read call by call.
+  Its filter or template is text, never a path, so `gh pr view 1 --json a,b -q '.a+" \(.b)/x"'` runs from every folder, and is judged only when it names the root.
+  An unquoted glob in it is the shell's, so `gh api x --jq .[]` is judged as any glob and refused from the home.
+  Each command on the closed list is its own first word as a reader is, named bare or by a system folder's path (`/usr/bin/awk`), so a script the session wrote (`./awk`), a `PATH` set in the call and a reader behind a wrapper (`time cut …`) keep canary's reading.
   An awk program runs something when it holds `system`, `getline`, `>` or `@`, or comes from `-f` or an option the hook does not know.
   It runs something too when it holds a `|` anywhere but two places: a regex that is the whole leading pattern (`/a|b/`, `/a|b/ {print $2}`) and a regex or a string right after `~` (`$1 ~ /a|b/`, `$1 ~ "a|b"`), each holding no quote, `[` or newline.
   Once those are cut out, any `|`, quote, `/`, `#` or backslash left counts as a pipe, as canary counted every `|`, so `awk '!/a|b/' f` and `awk '/[ab]|c/' f` keep canary's reading.
@@ -264,7 +269,7 @@ Only the first reading moves the folder, sets variables and records files for th
   A closed-list reader on a line read call by call is the exception: its quoted glob is text, so `awk '{print $1}' f` runs, since the lexer marks each word whose glob the shell sees outside quotes (`Word.glob` in `scripts/hooks/shell.ts`).
   A quiet commit's message is the other exception (above).
   A quoted regex that starts at `/` reads its glob characters as a glob in `/`, which holds the root, so `sed -n '/^a*b/p' f` is refused from any folder, while `awk '/^a*b/' f` runs; run such a script from a file (`awk -f <file>`, `sed -f <file>`).
-  A gh `-q` filter that holds a jq interpolation is refused from the home (`-q '"\(.a)"'`), and from any folder once it holds a space and a `/` after the `(` (`-q '.a+" +\(.a)/-\(.b)"'`); pipe the JSON to jq, a reader, instead (`gh … --json <fields> | jq -r '<filter>'`).
+  A gh `-q` filter on a line read whole (one beside a program off the closed list, such as `date; gh …` or `gh … | sh`) keeps canary's reading: one that holds a jq interpolation is refused from the home (`-q '"\(.a)"'`), and from any folder once it holds a space and a `/` after the `(`; pipe the JSON to jq, a reader, instead (`gh … --json <fields> | jq -r '<filter>'`).
   It fails open on any other error, and its tests are in `bun run test:file tests/scripts/hooks/no-extensions-write.test.ts`.
 
 ## no-false-green
