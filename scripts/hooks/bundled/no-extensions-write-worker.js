@@ -1433,16 +1433,27 @@ function ghFilters(parsed) {
   return filters;
 }
 var READS_ONLY = /^(?:\}|:?[-+?]|[#%/])/;
+var EVALUATES = [
+  /\(\([^)]*[A-Za-z_]/,
+  /\$\[[^\]]*[A-Za-z_]/,
+  /(?:^|[\s;&|(])let\s[^;&|]*[A-Za-z_]/,
+  /\[\[.*\s-(?:eq|ge|gt|le|lt|ne)\s/s,
+  /\$\{[#!]?\w+\[[^\]]*[A-Za-z_]/,
+  /(?:^|[\s;&|(])\w+\[[^\]]*[A-Za-z_][^\]]*\]\+?=/,
+  /\$\{[#!]?\w+:(?![-+=?:])[^}]*[A-Za-z_]/,
+  /@P\}/,
+  /[^\s(|&;<>$]\((?:#q)?[^()\s]*?(?:e[^\w\s()]|\+)/
+];
 function namings(command) {
   const counts = new Map;
   const plain = new Set;
   const add = (key) => counts.set(key, (counts.get(key) ?? 0) + 1);
-  let blind = false;
+  let blind = EVALUATES.some((evaluates) => evaluates.test(command));
   for (const m of command.matchAll(/\$\{\(([^)]*)(\)?)/g)) {
     const [whole, flags, closed] = m;
     const rest = command.slice(m.index + whole.length);
     const name = rest.match(/^[A-Za-z_]\w*/)?.[0];
-    if (!closed || !/^[\w@#%~^=!*-]*$/.test(flags))
+    if (!closed || !/^[\w@#%~^=!*-]*$/.test(flags) || /[#%e]/.test(flags))
       blind = true;
     else if (flags.includes("P") && (!name || !READS_ONLY.test(rest.slice(name.length))))
       blind = true;
@@ -1675,7 +1686,8 @@ var NAME_SETTERS = new Set([
   "zuntie"
 ]);
 var PRINTS = new Set(["print", "printf"]);
-var NAMEREFS = new Set(["declare", "local", "typeset"]);
+var NUMERIC = new Set(["float", "integer"]);
+var TYPESETS = new Set(["declare", "export", "local", "readonly", "typeset"]);
 var RUNS_TEXT = new Set([".", "eval", "source"]);
 var OPENS = new Set(["case", "for", "if", "select", "until", "while", "{"]);
 var CLOSES = new Set(["done", "esac", "fi", "}"]);
@@ -1689,17 +1701,15 @@ function steadyNames(named, commands) {
     const { name } = parses[at];
     if (RUNS_TEXT.has(name))
       return () => NONE;
-    if (NAMEREFS.has(name) && cmd.words.some((w, k) => k > 0 && /^-[^-\s]*n/.test(w.value)))
+    const flagged = (letters) => cmd.words.some((w, k) => k > 0 && /^-[^-\s]/.test(w.value) && letters.test(w.value));
+    if (NUMERIC.has(name) || TYPESETS.has(name) && flagged(/[EFin]/))
+      return () => NONE;
+    if (name === "print" && flagged(/P/))
       return () => NONE;
     const loop = cmd.words.findIndex((w) => !w.quoted && (w.value === "for" || w.value === "select"));
     if (!NAME_SETTERS.has(name) && loop === -1)
       continue;
-    const v = cmd.words.findIndex((w, k) => k > 0 && /^-[^-\s]*v/.test(w.value));
-    const cluster = cmd.words[v];
-    const vNames = cluster ? [
-      { ...cluster, value: cluster.value.slice(cluster.value.indexOf("v") + 1) },
-      cmd.words[v + 1]
-    ] : [];
+    const vNames = cmd.words.flatMap((w, k) => k > 0 && /^-[^-\s]*v/.test(w.value) ? [{ ...w, value: w.value.slice(w.value.indexOf("v") + 1) }, cmd.words[k + 1]] : []);
     const names = loop !== -1 ? [cmd.words[loop + 1]] : PRINTS.has(name) ? vNames : cmd.words;
     for (const word of names) {
       if (!word)
