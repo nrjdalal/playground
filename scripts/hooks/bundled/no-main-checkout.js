@@ -1265,7 +1265,7 @@ var FILE_TOOLS = {
   NotebookEdit: "notebook_path",
   Write: "file_path"
 };
-var INSTEAD = "the main checkout is what every installed skill follows, so it stays clean. Run it in your own worktree under .claude/worktrees/ (git worktree add .claude/worktrees/<name> -b <branch> origin/canary), or start lefthook from a script with cwd set to a scratch repo, as tests/lefthook.test.ts does.";
+var INSTEAD = "the main checkout is what every installed skill follows, so it stays clean. Run it in your own worktree under .claude/worktrees/ (git worktree add --no-track .claude/worktrees/<name> -b <branch> origin/canary), or start lefthook from a script with cwd set to a scratch repo, as tests/lefthook.test.ts does.";
 var refuse = (what, fix = INSTEAD) => `no-main-checkout hook refuses ${what}: ${fix}`;
 var BUN_SCRIPTS = new Set(["build", "check-types", "test", "test:file"]);
 var RUNNERS = new Set(["npx"]);
@@ -1366,7 +1366,7 @@ var GIT_MOVES = new Set([
 ]);
 var APPLY_READS = new Set(["--check", "--numstat", "--stat", "--summary"]);
 var STEP_FIVE = /^(?:-q |--quiet )?--ff-only (?:-q |--quiet )?origin\/main$/;
-var GIT_FIX = "it moves the HEAD, index or files of the main checkout, which every installed skill, hook and ops job runs from. Name your own tree on every git call, git -C <your worktree> ..., after git -C <your worktree> rev-parse --show-toplevel names it; the main checkout moves only by the release skill's step 5, git -C <main checkout> fetch -q origin main && git -C <main checkout> merge --ff-only -q origin/main, a stray local commit on its main goes by git -C <main checkout> reset --keep origin/main while its tree is clean, and a worktree is made under .claude/worktrees/ by git worktree add.";
+var GIT_FIX = "it moves the HEAD, index or files of the main checkout, which every installed skill, hook and ops job runs from. Name your own tree on every git call, git -C <your worktree> ..., after git -C <your worktree> rev-parse --show-toplevel names it; the main checkout moves only by the release skill's step 5, git -C <main checkout> fetch -q origin main && git -C <main checkout> merge --ff-only -q origin/main, a stray local commit on its main goes by git -C <main checkout> reset --keep origin/main while its tree is clean, and a worktree is made under .claude/worktrees/ by git worktree add --no-track .claude/worktrees/<name> -b <branch> origin/canary.";
 function keepReset(sub, rest, cwd) {
   if (sub !== "reset" || rest.join(" ") !== "--keep origin/main" || !cwd)
     return false;
