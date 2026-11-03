@@ -3,7 +3,6 @@ import { readFileSync } from "node:fs"
 import { join } from "node:path"
 
 import {
-  GroupCount,
   groupEmpty,
   dispatcherRowLabel,
   navGroups,
@@ -1162,15 +1161,6 @@ describe("OpsJobRow", () => {
     expect(icons(down)).toEqual([{ icon: "down", tone: "text-destructive" }])
     expect(icons(failing)).toEqual([{ icon: "failing", tone: "text-destructive" }])
     expect(icons(render(job({})))).toEqual([{ icon: "working", tone: "text-info" }])
-  })
-})
-
-describe("GroupCount", () => {
-  test("a group's count is one number at the label's right, as ZeroSDK's countCell, in the sidebar's own sans with tabular digits", () => {
-    const html = renderToStaticMarkup(createElement(GroupCount, { count: 14 }))
-    const outer =
-      html.match(/^<span data-slot="group-count" class="([^"]*)">14<\/span>$/)?.[1] ?? ""
-    expect(outer.split(" ")).toEqual(["ml-auto", "flex", "w-4", "justify-center", "tabular-nums"])
   })
 })
 

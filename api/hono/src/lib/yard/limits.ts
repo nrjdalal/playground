@@ -1,4 +1,5 @@
 import { type Database, yardMessage, yardRate } from "@packages/db"
+import { RETENTION_DAYS } from "@packages/message"
 import { and, isNull, lt, sql } from "drizzle-orm"
 
 import { ApiError } from "@/lib/error"
@@ -6,9 +7,6 @@ import { ApiError } from "@/lib/error"
 const WINDOW_MS = { day: 86_400_000, hour: 3_600_000, second: 1000 } as const
 
 export type Window = keyof typeof WINDOW_MS
-
-// How long a message is kept before the daily sweep deletes it (the owner's #i6).
-export const RETENTION_DAYS = 90
 
 // Counts one more under key in the fixed window holding now, and refuses past max with 429; the counter lives in yard_rate, so every instance counts the same.
 export const take = async (
