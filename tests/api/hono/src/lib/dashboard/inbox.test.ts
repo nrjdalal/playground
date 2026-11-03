@@ -21,6 +21,8 @@ import {
   secretInputSchema,
   type SecretSink,
   sinkArgv,
+  slackPlace,
+  type UploadPlace,
 } from "../../../../../../api/hono/src/lib/dashboard/inbox"
 
 const CHANNEL = "https://app.slack.com/client/T0000000000/C0MADEUP01"
@@ -869,6 +871,31 @@ const dockerUp = (): boolean =>
   Bun.which("docker") !== null &&
   Bun.spawnSync(["docker", "info"], { stderr: "ignore", stdout: "ignore" }).exitCode === 0
 
+// PG-649: a Slack send uploads its files into the link's channel and thread
+describe("slackPlace", () => {
+  test("reads a thread's channel and its parent's ts from the app form", () => {
+    expect(
+      slackPlace(
+        "https://app.slack.com/client/T0000000000/C0MADEUP01/thread/C0MADEUP01-1700000000.000100",
+      ),
+    ).toEqual({ channel: "C0MADEUP01", thread: "1700000000.000100" })
+  })
+
+  test("reads a channel or a DM with no thread as its top level", () => {
+    expect(slackPlace(CHANNEL)).toEqual({ channel: "C0MADEUP01" })
+    expect(slackPlace("https://app.slack.com/client/T0000000000/D0MADEUP11")).toEqual({
+      channel: "D0MADEUP11",
+    })
+  })
+
+  test("is null for no link, a place outside Slack, or a Slack link that names no conversation", () => {
+    expect(slackPlace(undefined)).toBeNull()
+    expect(slackPlace("https://linear.app/acme/issue/DUNE-1401")).toBeNull()
+    expect(slackPlace("https://app.slack.com/client/T0000000000")).toBeNull()
+    expect(slackPlace("https://evil.example/client/T0000000000/C0MADEUP01")).toBeNull()
+  })
+})
+
 describe.skipIf(!dockerUp())("the inbox store", () => {
   let container = ""
   let store: typeof import("../../../../../../api/hono/src/lib/dashboard/inbox")
@@ -969,6 +996,158 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       status: "delivered",
       to: "ops",
       via: "session",
+    })
+  })
+
+  describe("a Slack send's files (PG-649)", () => {
+    const THREAD =
+      "https://app.slack.com/client/T0000000000/C0MADEUP01/thread/C0MADEUP01-1700000000.000100"
+    const FILES = [
+      { id: "3f0e7a52-1c4b-4d2a-9e6f-0000000000a1.png", kind: "image", name: "before.png" },
+      { id: "3f0e7a52-1c4b-4d2a-9e6f-0000000000a2.png", kind: "image", name: "after.png" },
+    ]
+    const delivered = async () =>
+      ({ at: "2026-10-07T12:00:00.000Z", ok: true, sessionId: "s1" }) as const
+    const filedDraft = (link = THREAD) =>
+      post({
+        from: "ops",
+        kind: "draft",
+        preview: { attachments: FILES, link, text: "the fix is live", to: "@Merritt" },
+        title: "Tell Merritt",
+      })
+    const recorder = (fail?: string) => {
+      const calls: { files: string[]; place: UploadPlace }[] = []
+      const upload = async (place: UploadPlace, files: { id: string }[]) => {
+        calls.push({ files: files.map((file) => file.id), place })
+        if (fail) throw new Error(fail)
+      }
+      return { calls, upload }
+    }
+
+    test("Send uploads the files into the link's channel and thread before the words reach the poster, and the answer keeps the count", async () => {
+      const posted = await filedDraft()
+      const order: string[] = []
+      const { calls, upload } = recorder()
+      const answered = await store.answerItem(
+        db,
+        posted.id,
+        { action: "send" },
+        {
+          actor,
+          deliver: async () => {
+            order.push("typed")
+            return delivered()
+          },
+          upload: async (place, files) => {
+            order.push("uploaded")
+            await upload(place, files)
+          },
+        },
+      )
+      expect(order).toEqual(["uploaded", "typed"])
+      expect(calls).toEqual([
+        {
+          files: FILES.map((file) => file.id),
+          place: { channel: "C0MADEUP01", thread: "1700000000.000100" },
+        },
+      ])
+      if (!answered.ok) throw new Error("not answered")
+      expect(answered.item.answer).toMatchObject({ choice: "send", uploaded: 2 })
+      expect(answered.item.delivery).toMatchObject({ status: "delivered" })
+    })
+
+    test("a failed upload fails the send before anything is typed, and Retry uploads again, then types", async () => {
+      const posted = await filedDraft()
+      const typed: Delivery[] = []
+      const deliver = async (delivery: Delivery) => {
+        typed.push(delivery)
+        return delivered()
+      }
+      const failing = recorder("files.completeUploadExternal: not_in_channel")
+      const answered = await store.answerItem(
+        db,
+        posted.id,
+        { action: "send" },
+        { actor, deliver, upload: failing.upload },
+      )
+      if (!answered.ok) throw new Error("not answered")
+      expect(typed).toEqual([])
+      expect(answered.item.delivery).toEqual({
+        code: "UPLOAD_FAILED",
+        reason: "The files did not upload to Slack: files.completeUploadExternal: not_in_channel",
+        status: "failed",
+      })
+      expect(store.retryable(answered.item)).toBe(true)
+      const working = recorder()
+      const retried = await store.retryDelivery(db, posted.id, {
+        actor,
+        deliver,
+        upload: working.upload,
+      })
+      if (!retried.ok) throw new Error("not retried")
+      expect(working.calls).toHaveLength(1)
+      expect(typed).toHaveLength(1)
+      expect(retried.item.delivery).toMatchObject({ status: "delivered" })
+      expect(retried.item.answer).toMatchObject({ uploaded: 2 })
+    })
+
+    test("a Retry after the words failed to type keeps the files it uploaded, uploading none twice", async () => {
+      const posted = await filedDraft()
+      const { calls, upload } = recorder()
+      const failed = await store.answerItem(
+        db,
+        posted.id,
+        { action: "send" },
+        {
+          actor,
+          deliver: async () => ({ code: "ON_PICKER", ok: false, reason: "A picker is open." }),
+          upload,
+        },
+      )
+      if (!failed.ok) throw new Error("not answered")
+      expect(failed.item.delivery).toMatchObject({ code: "ON_PICKER", status: "failed" })
+      await store.retryDelivery(db, posted.id, { actor, deliver: delivered, upload })
+      expect(calls).toHaveLength(1)
+    })
+
+    test("Approve of a slack decision with files uploads them too", async () => {
+      const posted = await post(decision({ ...SLACK, attachments: FILES }))
+      const { calls, upload } = recorder()
+      await store.answerItem(
+        db,
+        posted.id,
+        { action: "approve" },
+        { actor, deliver: delivered, upload },
+      )
+      expect(calls).toEqual([
+        { files: FILES.map((file) => file.id), place: { channel: "C0MADEUP01" } },
+      ])
+    })
+
+    test("a Slack draft saved as a draft, a Linear draft and a Deny upload nothing", async () => {
+      const { calls, upload } = recorder()
+      const saved = await filedDraft()
+      await store.answerItem(
+        db,
+        saved.id,
+        { action: "draft" },
+        { actor, deliver: delivered, upload },
+      )
+      const linear = await filedDraft("https://linear.app/acme/issue/DUNE-1401")
+      await store.answerItem(
+        db,
+        linear.id,
+        { action: "send" },
+        { actor, deliver: delivered, upload },
+      )
+      const denied = await post(decision({ ...SLACK, attachments: FILES }))
+      await store.answerItem(
+        db,
+        denied.id,
+        { action: "deny" },
+        { actor, deliver: delivered, upload },
+      )
+      expect(calls).toEqual([])
     })
   })
 
