@@ -75,6 +75,7 @@ describe("runUpdate", () => {
       ["git", "-C", repo, "fetch", "-q", "origin", "main"],
       ["git", "-C", repo, "branch", "--show-current"],
       ["git", "-C", repo, "merge-base", "--is-ancestor", "HEAD", "origin/main"],
+      ["git", "-C", repo, "diff", "--quiet", "HEAD"],
       ["git", "-C", repo, "ls-tree", "-r", "--name-only", "origin/main"],
       ["git", "-C", repo, "merge", "--ff-only", "-q", "origin/main"],
       ["bash", `${repo}/scripts/link-skills.sh`],
@@ -201,7 +202,7 @@ describe("runUpdate", () => {
     expect(calls.slice(1, 6)).toEqual([
       ["git", "-C", repo, "fetch", "-q", "--tags", "origin", "main"],
       ["git", "-C", repo, "merge-base", "--is-ancestor", "HEAD", "origin/main"],
-      ["git", "-C", repo, "merge-base", "--is-ancestor", "HEAD", "refs/tags/v0.0.20"],
+      ["git", "-C", repo, "diff", "--quiet", "HEAD"],
       ["git", "-C", repo, "ls-tree", "-r", "--name-only", "refs/tags/v0.0.20"],
       ["git", "-C", repo, "checkout", "-q", "-B", "main", "refs/tags/v0.0.20"],
     ])
@@ -251,6 +252,33 @@ describe("runUpdate", () => {
     expect([checkout < install, install < merge]).toEqual([true, true])
   })
 
+  test("a target that deletes a file that is not a manifest still installs before the merge", async () => {
+    const { calls, run } = fakeRun({
+      "--diff-filter=D": { out: "docs/old.md\n" },
+      ...declares,
+      diff: { out: "packages/settings/package.json\n" },
+    })
+    expect(await runUpdate(repo, run, async () => 0, quiet)).toBe(0)
+    const install = calls.findIndex((argv) => argv[1] === "install")
+    expect(install).toBeGreaterThan(-1)
+    expect(install).toBeLessThan(calls.findIndex((argv) => argv.includes("merge")))
+  })
+
+  test("a link already missing on a hop that changes no manifest installs before the merge and checks out nothing", async () => {
+    const { calls, run } = fakeRun({ ...declares, diff: { out: "packages/settings/src/a.ts\n" } })
+    expect(await runUpdate(repo, run, async () => 0, quiet)).toBe(0)
+    expect(calls.some((argv) => argv.includes("checkout"))).toBe(false)
+    const install = calls.findIndex((argv) => argv[1] === "install")
+    expect(install).toBeGreaterThan(-1)
+    expect(install).toBeLessThan(calls.findIndex((argv) => argv.includes("merge")))
+  })
+
+  test("a tree with edits of its own merges first as before, leaving them to the fast-forward", async () => {
+    const { calls, run } = fakeRun({ "--quiet": { code: 1 }, ...declares })
+    expect(await runUpdate(repo, run, async () => 0, quiet)).toBe(0)
+    expect(calls.some((argv) => argv.includes("ls-tree") || argv[1] === "install")).toBe(false)
+  })
+
   test("a target that deletes a manifest merges first as before, since the old code may still read it", async () => {
     const { calls, run } = fakeRun({
       "--diff-filter=D": { out: "packages/old/package.json\n" },
@@ -260,9 +288,14 @@ describe("runUpdate", () => {
     expect(calls.some((argv) => argv.includes("--") || argv.includes("install"))).toBe(false)
   })
 
-  test("a failed install before the merge stops the update and says the manifests may be the new commit's", async () => {
+  test("a failed install before the merge puts the old manifests back and stops the update, saying so", async () => {
     const said: string[] = []
-    const { calls, run } = fakeRun({ install: { code: 1 }, ...declares })
+    const { calls, run } = fakeRun({
+      install: { code: 1 },
+      "--diff-filter=D": { out: "" },
+      ...declares,
+      diff: { out: "packages/settings/package.json\n" },
+    })
     expect(
       await runUpdate(
         repo,
@@ -272,8 +305,20 @@ describe("runUpdate", () => {
       ),
     ).toBe(1)
     expect(calls.some((argv) => argv.includes("merge"))).toBe(false)
+    expect(calls.at(-1)).toEqual([
+      "git",
+      "-C",
+      repo,
+      "restore",
+      "-q",
+      "--source=HEAD",
+      "--staged",
+      "--worktree",
+      "--",
+      "packages/settings/package.json",
+    ])
     expect(said.at(-1)).toBe(
-      "playground update: link the new commit's dependencies failed; its manifests may be the new commit's; run playground update again, which moves the checkout over them",
+      "playground update: link the new commit's dependencies failed; the checkout's files are as they were; fix the install and run playground update again",
     )
   })
 
@@ -632,12 +677,14 @@ describe("runUpdate onto a commit that declares a dependency the checkout has no
   }
 
   test.each([
-    ["a plain update", undefined],
-    ["--to", "v0.0.2"],
+    ["a plain update", undefined, "prelink"],
+    ["--to", "v0.0.2", "prelink-to"],
+    ["a plain update on a checkout left on canary", undefined, "prelink-canary"],
   ])(
     "%s links it before the commit's code lands, from the commit's own manifests",
-    async (name, to) => {
-      const { checkout, two } = setup(name === "--to" ? "prelink-to" : "prelink")
+    async (_, to, name) => {
+      const { checkout, two } = setup(name)
+      if (name === "prelink-canary") git(checkout, "checkout", "-q", "-b", "canary")
       // what a hook would read at each install: the code it loads and the manifest that declares its imports
       const seen: string[] = []
       // the install and the build stand in for bun's and turbo's, which the scratch checkout lacks
@@ -660,7 +707,10 @@ describe("runUpdate onto a commit that declares a dependency the checkout has no
           to,
         ),
       ).toBe(0)
-      expect(git(checkout, "rev-parse", "HEAD")).toBe(two)
+      expect([
+        git(checkout, "rev-parse", "HEAD"),
+        git(checkout, "branch", "--show-current"),
+      ]).toEqual([two, "main"])
       expect(seen[0]).toBe("export const one = 1 | two")
       expect(lines).toContain(
         "playground update: install the new commit's dependencies before its code, since it declares packages/settings: @packages/safe-delete, which this checkout has not linked",

@@ -132,7 +132,7 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
 - `playground orgs home` loads the workspace packages, and `playground update` runs link-skills.sh before its own install, so link-skills.sh first runs `bun install --frozen-lockfile --ignore-scripts` when a workspace package declares a dependency no `node_modules` of its checkout links (`packages/scripts/src/playground/unlinked.ts` names each one).
   The hop to v0.0.34 declared settings' `@packages/safe-delete`, and the home set failed on `Cannot find module` until the install.
   A fully linked checkout skips the install.
-  `playground update` installs before its fast-forward when the target declares such a dependency, so the hooks never read new code before its imports link, and this install is the fallback for a target that deletes a manifest or an update run by an older `update.ts`.
+  `playground update` installs before it moves the checkout when the target declares such a dependency, so the hooks read new code only once its imports link; this install is the fallback for a target that deletes a manifest, a tree with edits of its own, or an update run by an older `update.ts`.
 - Beside the home set, it symlinks `~/.playground/factory-settings.json` to `scripts/factory-settings.json`, each brief template in `~/.playground/handoffs/` to its file in `scripts/briefs/`, `~/.playground/brief-rush.md` to `scripts/briefs/brief-rush.md`,
   `~/.bun/bin/playground` and its old name to the `playground` command (`packages/scripts/src/playground/cli.ts`; `playground --help` lists what it does),
   and each ops script it names into `~/.playground/ops/`;

@@ -16,6 +16,7 @@ export const spawnRun: Run = async (argv, show = false) => {
 }
 
 const MANIFEST = /(^|\/)(bun\.lock|package\.json)$/
+const PACKAGE = /(^|\/)package\.json$/
 
 // What the merge changed asks for: an install for a lockfile or a package.json, a build for a package with a dist (packages/scripts runs from source).
 export const updateSteps = (changed: string[]) => ({
@@ -73,18 +74,21 @@ export const runUpdate = async (
       ? recorded
       : merged || head
   if (done && old !== recorded) await Bun.write(done, `${old}\n`)
-  // a checkout left on another branch, such as one cloned while canary was the default, moves to main when its tree is clean, so the merge below lands on main
+  const ok = { code: 0, out: "" }
+  // a checkout left on another branch, such as one cloned while canary was the default, moves to main at origin/main when its tree is clean, and one on main fast-forwards
+  let branch = ""
   const onMain = async () => {
-    const branch = (await git("branch", "--show-current")).out.trim()
-    if (branch === "main") return { code: 0, out: "" }
-    const clean = await git("diff", "--quiet", "HEAD")
-    if (clean.code !== 0) return clean
+    branch = (await git("branch", "--show-current")).out.trim()
+    return branch === "main" ? ok : git("diff", "--quiet", "HEAD")
+  }
+  const move = async () => {
+    if (branch === "main") return git("merge", "--ff-only", "-q", "origin/main")
     log(
       `playground update: on ${branch || "a detached HEAD"}, not main, so moving to main at origin/main`,
     )
     return git("checkout", "-q", "-B", "main", "origin/main")
   }
-  const install = [
+  const installArgv = [
     process.execPath,
     "install",
     "--frozen-lockfile",
@@ -93,29 +97,50 @@ export const runUpdate = async (
     repo,
   ]
   const target = to ? `refs/tags/${to}` : "origin/main"
-  // every session's hooks run this checkout's code the moment it moves, so a target that declares a dependency the checkout has not linked gets its manifests and that install first, while the code is still the old commit's; a target that deletes a manifest moves first as before, since the old code may still read it
+  // every session's hooks run this checkout's code the moment it moves, so a target that declares a dependency the checkout has not linked gets its changed manifests and that install first, while the code is still the old commit's (the install step after the move then finds it linked); a target that deletes a manifest, which the old code may still read, or a tree with edits of its own moves first as before
   const prelink = async (): ReturnType<Run> => {
-    const ok = { code: 0, out: "" }
-    if ((await git("merge-base", "--is-ancestor", "HEAD", target)).code !== 0) return ok
+    // a fast-forward stops on a checkout with commits of its own, so its manifests are staged only where it will move; a checkout -B moves over them either way
+    const merges = !to && branch === "main"
+    if (merges && (await git("merge-base", "--is-ancestor", "HEAD", target)).code !== 0) return ok
+    if ((await git("diff", "--quiet", "HEAD")).code !== 0) return ok
     const lines = async (...args: string[]) => (await git(...args)).out.split("\n").filter(Boolean)
     const manifests: Record<string, string> = {}
-    for (const path of await lines("ls-tree", "-r", "--name-only", target))
-      if (/(^|\/)package\.json$/.test(path))
-        manifests[path] = (await git("show", `${target}:${path}`)).out
+    for (const path of await lines("ls-tree", "-r", "--name-only", target)) {
+      if (!PACKAGE.test(path)) continue
+      const shown = await git("show", `${target}:${path}`)
+      if (shown.code !== 0) return shown
+      manifests[path] = shown.out
+    }
     const missing = await unlinked(repo, manifests)
     if (!missing.length) return ok
-    const changed = (await lines("diff", "--name-only", "HEAD", target)).filter((path) =>
+    const manifestsChanged = (await lines("diff", "--name-only", "HEAD", target)).filter((path) =>
       MANIFEST.test(path),
     )
-    if ((await lines("diff", "--name-only", "--diff-filter=D", "HEAD", target)).length) return ok
+    const deleted = await lines("diff", "--name-only", "--diff-filter=D", "HEAD", target)
+    if (deleted.some((path) => MANIFEST.test(path))) return ok
     log(
       `playground update: install the new commit's dependencies before its code, since it declares ${missing.join(", ")}, which this checkout has not linked`,
     )
-    const staged = await git("checkout", target, "--", ...changed)
-    return staged.code === 0 ? run(install, true) : staged
+    if (manifestsChanged.length) {
+      const staged = await git("checkout", target, "--", ...manifestsChanged)
+      if (staged.code !== 0) return staged
+    }
+    const installed = await run(installArgv, true)
+    // a failed install puts the old commit's manifests back, a manifest the old commit lacks removed, so the tree is clean for the next run
+    if (installed.code !== 0 && manifestsChanged.length)
+      await git(
+        "restore",
+        "-q",
+        "--source=HEAD",
+        "--staged",
+        "--worktree",
+        "--",
+        ...manifestsChanged,
+      )
+    return installed
   }
   const prelinked =
-    "its manifests may be the new commit's; run playground update again, which moves the checkout over them"
+    "the checkout's files are as they were; fix the install and run playground update again"
   const steps: [string, () => ReturnType<Run>, string?][] = to
     ? [
         ["fetch origin main and its tags", () => git("fetch", "-q", "--tags", "origin", "main")],
@@ -128,9 +153,9 @@ export const runUpdate = async (
       ]
     : [
         ["fetch origin main", () => git("fetch", "-q", "origin", "main")],
-        ["move to main, on a tree with no uncommitted changes", onMain],
+        ["a tree with no uncommitted changes, off main", onMain],
         ["link the new commit's dependencies", prelink, prelinked],
-        ["merge --ff-only origin/main", () => git("merge", "--ff-only", "-q", "origin/main")],
+        ["merge --ff-only origin/main, or move to main there", move],
       ]
   for (const [name, step, state = "the checkout is as it was"] of steps)
     if ((await step()).code !== 0) {
@@ -144,7 +169,7 @@ export const runUpdate = async (
   ]
   if (!(await shown(linkSkills))) return 1
   const changed = (await git("diff", "--name-only", old, "HEAD")).out.split("\n").filter(Boolean)
-  const { build, install: installs, skills } = updateSteps(changed)
+  const { build, install, skills } = updateSteps(changed)
   if (skills.length)
     log(
       `playground update: skills changed: ${skills.map((folder) => basename(folder)).join(", ")}; a running session's Skill tool serves the copy it started with, so a live session reads each one's files here: ${skills.map((folder) => `${join(repo, folder)}/`).join(", ")}; send each lead these folders, for the lead to have each of its live checkers read the new text there (release)`,
@@ -152,7 +177,7 @@ export const runUpdate = async (
   const turbo = join(repo, "node_modules", ".bin", "turbo")
   const restart = join(repo, "packages", "scripts", "src", "ops-restart", "cli.ts")
   const after: [string, string[]][] = []
-  if (installs) after.push(["install", install])
+  if (install) after.push(["install", installArgv])
   if (build)
     after.push([
       "build",
