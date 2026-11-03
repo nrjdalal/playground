@@ -3,7 +3,9 @@ import {
   constants,
   existsSync,
   mkdirSync,
+  mkdtempSync,
   readdirSync,
+  renameSync,
   statSync,
   writeFileSync,
 } from "node:fs"
@@ -142,7 +144,7 @@ const git = (cwd: string, args: string[]) => {
   return run.stdout.toString().trim()
 }
 
-// canary's whole tree at the sha, installed from its own lockfile with no install scripts, once per sha in `base`, so its hooks load canary's packages, extensions/core and dependencies, never the head's
+// canary's whole tree at the sha, installed from its own lockfile with no install scripts in a folder of its own, then renamed to `base/<sha>`, so its hooks load canary's packages, extensions/core and dependencies, never the head's, and two runs against one sha never install into the same folder
 export function canaryTree({
   base,
   root,
@@ -156,13 +158,22 @@ export function canaryTree({
 }): string {
   const dir = join(base, sha)
   if (existsSync(join(dir, ".installed"))) return dir
-  mkdirSync(dir, { recursive: true })
+  mkdirSync(base, { recursive: true })
+  const build = mkdtempSync(join(base, `${sha}.`))
   const archive = run(["git", "archive", sha], root)
-  if (archive.exitCode !== 0 || run(["tar", "-x", "-C", dir], dir, archive.stdout).exitCode !== 0)
+  if (
+    archive.exitCode !== 0 ||
+    run(["tar", "-x", "-C", build], build, archive.stdout).exitCode !== 0
+  )
     throw new Error(`could not unpack ${sha}`)
-  if (run(["bun", "install", "--frozen-lockfile", "--ignore-scripts"], dir).exitCode !== 0)
-    throw new Error(`could not install ${sha}'s dependencies in ${dir}`)
-  writeFileSync(join(dir, ".installed"), "")
+  if (run(["bun", "install", "--frozen-lockfile", "--ignore-scripts"], build).exitCode !== 0)
+    throw new Error(`could not install ${sha}'s dependencies in ${build}`)
+  writeFileSync(join(build, ".installed"), "")
+  try {
+    renameSync(build, dir)
+  } catch (error) {
+    if (!existsSync(join(dir, ".installed"))) throw error
+  }
   return dir
 }
 
@@ -176,11 +187,13 @@ async function main(args: string[]): Promise<number> {
   const ref = option(args, "--canary")
   const hooks = args.flatMap((a, i) => (args[i - 1] === "--hook" ? [a] : []))
   const formsAt = option(args, "--forms")
+  const hours = Number(option(args, "--hours") ?? 24)
   if (
     (mode !== "sweep" && mode !== "replay") ||
     !ref ||
     hooks.length === 0 ||
-    (mode === "sweep" && !formsAt)
+    (mode === "sweep" && !formsAt) ||
+    !(hours > 0)
   ) {
     console.error(USAGE)
     return 2
@@ -192,6 +205,11 @@ async function main(args: string[]): Promise<number> {
     return 2
   }
   const home = process.env.HOME || homedir()
+  const forms: Form[] = formsAt ? (await import(resolve(formsAt))).forms : []
+  if (mode === "sweep" && !Array.isArray(forms)) {
+    console.error(`hook-differential: the --forms module exports no forms array\n${USAGE}`)
+    return 2
+  }
   const before = canaryTree({
     base: join(tmpdir(), "hook-differential"),
     root,
@@ -199,12 +217,11 @@ async function main(args: string[]): Promise<number> {
       Bun.spawnSync(argv, { cwd, stderr: "inherit", stdin, stdout: "pipe" }),
     sha: git(root, ["rev-parse", "--verify", `${ref}^{commit}`]),
   })
-  const forms: Form[] = formsAt ? (await import(resolve(formsAt))).forms : []
-  if (mode === "sweep" && !Array.isArray(forms)) {
-    console.error(`hook-differential: the --forms module exports no forms array\n${USAGE}`)
+  const absent = hooks.filter((h) => !existsSync(join(before, "scripts/hooks", `${h}.ts`)))
+  if (absent.length > 0) {
+    console.error(`hook-differential: canary has no hook named ${absent.join(", ")} to compare`)
     return 2
   }
-  const hours = Number(option(args, "--hours") ?? 24)
   const projects = join(process.env.CLAUDE_CONFIG_DIR || join(home, ".claude"), "projects")
   const list = mode === "replay" ? await calls(projects, Date.now() - hours * 3600 * 1000) : []
   for (const hook of hooks) {
@@ -237,8 +254,13 @@ if (import.meta.main) {
     home,
   })
   if (argv[0] === "bun") process.exit(await main(process.argv.slice(2)))
-  const room = Bun.spawnSync([argv[0]!, "room"], { stderr: "ignore", stdout: "pipe" })
-  const waiting = room.stdout.toString().trim().split(/\s+/)[3] ?? "?"
+  const room = Bun.spawnSync([argv[0]!, "room"], {
+    stderr: "ignore",
+    stdout: "pipe",
+    timeout: 10_000,
+  })
+  const waiting =
+    (room.exitCode === 0 && /^\d+ \d+ \d+ (\d+)$/.exec(room.stdout.toString().trim())?.[1]) || "?"
   console.error(`hook-differential: queued through run-slot behind ${waiting} waiting`)
   process.exit(await Bun.spawn(argv, { stdio: ["inherit", "inherit", "inherit"] }).exited)
 }

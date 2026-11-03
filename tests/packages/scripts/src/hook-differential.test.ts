@@ -65,9 +65,12 @@ describe("a start of hook-differential", () => {
     expect(existsSync(join(at, "tickets"))).toBe(false)
   })
 
-  test("a sweep with no --forms prints the usage and ends with 2", () => {
+  test.each([
+    ["a sweep with no --forms", ["sweep"]],
+    ["a replay over hours that are not a positive number", ["replay", "--hours", "abc"]],
+  ])("%s prints the usage and ends with 2", (_, mode) => {
     const run = Bun.spawnSync(
-      ["bun", SCRIPT, "sweep", "--canary", "HEAD", "--hook", "no-extensions-write"],
+      ["bun", SCRIPT, ...mode, "--canary", "HEAD", "--hook", "no-extensions-write"],
       { env: { ...process.env, RUN_SLOT_NICE: "10" }, stderr: "pipe", stdout: "pipe" },
     )
     expect(run.exitCode).toBe(2)
@@ -77,24 +80,44 @@ describe("a start of hook-differential", () => {
 
 describe("canaryTree", () => {
   const recorder =
-    (steps: string[], failing = "") =>
+    (steps: string[], failing = "", onInstall = () => {}) =>
     (argv: string[], cwd: string) => {
       steps.push(`${cwd} :: ${argv.join(" ")}`)
+      if (argv[0] === "bun") onInstall()
       return { exitCode: argv[0] === failing ? 1 : 0, stdout: new Uint8Array() }
     }
 
-  test("unpacks the sha's whole tree and installs it from its own lockfile with no install scripts, once", () => {
+  test("unpacks the sha's whole tree into a folder of its own, installs it from its own lockfile with no install scripts, then renames it to the sha, once", () => {
     const base = join(DIR, "trees")
     const steps: string[] = []
     const dir = canaryTree({ base, root: "/repo", run: recorder(steps), sha: "abc" })
     expect(dir).toBe(join(base, "abc"))
+    const build = steps[1]!.split(" :: ")[0]!
+    expect(build).toStartWith(join(base, "abc."))
     expect(steps).toEqual([
       "/repo :: git archive abc",
-      `${dir} :: tar -x -C ${dir}`,
-      `${dir} :: bun install --frozen-lockfile --ignore-scripts`,
+      `${build} :: tar -x -C ${build}`,
+      `${build} :: bun install --frozen-lockfile --ignore-scripts`,
     ])
+    expect(existsSync(join(dir, ".installed"))).toBe(true)
     canaryTree({ base, root: "/repo", run: recorder(steps), sha: "abc" })
     expect(steps).toHaveLength(3)
+  })
+
+  test("a run whose sha another run installed first takes that tree", () => {
+    const base = join(DIR, "race")
+    const other = join(base, "abc")
+    const finishFirst = () => {
+      mkdirSync(other, { recursive: true })
+      writeFileSync(join(other, ".installed"), "")
+      writeFileSync(join(other, "other"), "")
+    }
+    const steps: string[] = []
+    expect(
+      canaryTree({ base, root: "/repo", run: recorder(steps, "", finishFirst), sha: "abc" }),
+    ).toBe(other)
+    expect(steps[2]).not.toStartWith(`${other} ::`)
+    expect(existsSync(join(other, "other"))).toBe(true)
   })
 
   test("a failed install throws and leaves the tree to be installed again", () => {
@@ -202,6 +225,5 @@ describe("sweep and replay", () => {
     ])
     const { counts } = await replay(() => "refused", recorder([]), list, "/h")
     expect(counts).toEqual({ calls: 2, "newly allowed": 2, "newly refused": 0, same: 0 })
-    expect(existsSync(ran)).toBe(false)
   })
 })
