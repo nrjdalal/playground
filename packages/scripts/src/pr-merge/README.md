@@ -52,7 +52,7 @@ Then it ends the PR's worker, reviewer and tester (`scripts/ops/optimizer/auto_e
 `--explain` takes no lock.
 Like `bun run verify`, pr:merge and pr:train first build the workspace packages they import when a `dist` is missing or lacks an export (`packages/scripts/src/verify/prebuild.ts pr-merge`), so either runs from a fresh worktree;
 in the factory's main checkout (`$PLAYGROUND_REPO`), which builds only `packages/*` after a pull, the prebuild stops instead, verify's and `bun run dev`'s too, and says to run from your own worktree.
-Before that build, pr:merge and pr:train also stop on a worktree whose install predates its `bun.lock`, a workspace package's dependency linked neither in its own `node_modules` nor the root's (`staleInstall`), naming the `bun install --ignore-scripts` that fixes it, since the build would otherwise stop on `tsdown: command not found` (2 Nov, after a pull added `@packages/safe-delete`).
+On every run, built or not, pr:merge and pr:train also stop on a worktree whose install predates its `bun.lock`, a workspace package's dependency linked neither in its own `node_modules` nor the root's (`staleInstall`, through `prebuildStep`), naming the `bun install --ignore-scripts` that fixes it, since a build would otherwise stop on `tsdown: command not found` and a run on `Cannot find module` (2 Nov, after a canary merge made `packages/settings` depend on `@packages/safe-delete`).
 
 ## When canary moves
 

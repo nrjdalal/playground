@@ -223,7 +223,7 @@ describe("the factory settings run it", () => {
       hooks: { PreToolUse: Entry[] }
     }
     const found = settings.hooks.PreToolUse.find((e) =>
-      e.hooks.some((h) => h.command.includes("scripts/hooks/no-stash.ts")),
+      e.hooks.some((h) => h.command.includes("scripts/hooks/bundled/no-stash.js")),
     )
     if (!found) throw new Error("scripts/factory-settings.json registers no no-stash hook")
     return found
