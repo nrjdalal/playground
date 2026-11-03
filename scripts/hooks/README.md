@@ -519,7 +519,10 @@ Only the first reading moves the folder, sets variables and records files for th
   The main checkout is no-main-checkout's. It fails open on a call it cannot read, and its tests are in `bun run test:file tests/scripts/hooks`.
   A commit's pre-commit build takes a slot through `packages/scripts/src/commit-slot.ts` when turbo's dry run finds a build task with work to do, and playbook's **slots** rule says which slot each way of committing takes.
   Before the dry run or any slot, `commit-slot.ts` runs `unlinked()` (`packages/scripts/src/playground/unlinked.ts`, link-skills.sh's check) on the checkout and, when a workspace package's dependency is unlinked, as a canary merge that adds a package leaves it, exits 1 at once, naming each `<package>: <dependency>` and the run-slot `bun install --ignore-scripts --cwd <checkout>` that links it.
-  Tests: `bun run test:file tests/packages/scripts/src/commit-slot.test.ts`.
+  The pre-commit steps `check-types-scripts` and `check-types-tests` run CI's two type checks the build leaves out, `packages/scripts`' `check-types` when a staged file is under `packages/scripts/` and `check-types:tests` when one is under `tests/`, after the build (priority 7 to its 6) and through the same `commit-slot.ts`, so a type error there stops the commit in place of a CI round.
+  `check-types-tests` first writes `web/next`'s data-table metrics, outside the slot, as CI does.
+  Their run lines set no `TURBO_CACHE_DIR`, so `commit-slot.ts`'s dry run reads the worktree's own `.turbo/cache`: a check joins the queue even when the build replayed, and runs bare only when that cache holds every build task.
+  Tests: `bun run test:file tests/packages/scripts/src/commit-slot.test.ts tests/lefthook.test.ts`.
 
 ## rules
 
