@@ -29,6 +29,7 @@ import {
 } from "@/lib/dashboard/cmux"
 import { configDir, readsLive } from "@/lib/dashboard/fixture"
 import { isHerdrSurface, pressEnter, prompt, promptOutcome } from "@/lib/dashboard/herdr"
+import { settingCommand, settingSummary, type SessionSetting } from "@/lib/dashboard/setting"
 import { readScreen } from "@/lib/dashboard/terminal"
 import { readTail, type Entry } from "@/lib/dashboard/transcript"
 import { feedBySession, listLive, listSpace, type Live, type Worker } from "@/lib/dashboard/workers"
@@ -41,9 +42,51 @@ export type Delivery = {
   id?: string
   // When an earlier try of this id read QUEUED, as the outbox recorded it, so an API that restarted since, and lost its own record, reads the message again rather than typing it twice.
   queuedAt?: string
+  // A model or effort the composer's pickers set for a dispatcher: its one slash command is typed in place of `text`, and recorded as a dashboard.setting row.
+  setting?: SessionSetting
   text: string
   to: string
 }
+
+// Pure: the words a delivery types and the refusal they meet, judged on the normalized text; a setting's command is built from fixed lists, so it alone passes as a command, with no skill check.
+export const deliveryWords = (
+  delivery: Pick<Delivery, "attachments" | "setting" | "text">,
+  skillLater = false,
+): { refused: Refusal | null; skill: string | null; words: string } => {
+  if (delivery.setting) {
+    return { refused: null, skill: null, words: settingCommand(delivery.setting) }
+  }
+  const words = normalize(delivery.text)
+  return {
+    refused: refusal(words, delivery.attachments?.length ?? 0, skillLater),
+    skill: skillLater ? skillCommand(words) : null,
+    words,
+  }
+}
+
+// The activity row a delivery records: a setting told whole, a message by its size alone.
+export const deliveryEvent = (
+  delivery: Pick<Delivery, "actor" | "attachments" | "id" | "setting">,
+  to: string,
+  words: string,
+): ActivityEvent =>
+  delivery.setting
+    ? {
+        action: "dashboard.setting",
+        actor: delivery.actor,
+        id: delivery.id,
+        summary: settingSummary(to, delivery.setting),
+      }
+    : {
+        action: "dashboard.message",
+        actor: delivery.actor,
+        id: delivery.id,
+        summary: dashboardMessageSummary(
+          to,
+          words,
+          (delivery.attachments ?? []).map((file) => file.size),
+        ),
+      }
 
 // Why a delivery did not happen, or has not yet. CMUX_FAILED, INPUT_NOT_EMPTY, NOT_FOUND and ON_PICKER come before anything is typed (CMUX_FAILED includes a send cmux refused before its first text, tried twice here), so they can succeed on a retry once the session or cmux changes, but for an INPUT_NOT_EMPTY marked `pasted`, whose message sits unsent in the box for its retry to press Enter on; AMBIGUOUS, COMMAND, EMPTY and TOO_LONG cannot until the text or the names change. INTERRUPTED means typing began and did not finish, or a held message left the screen with a transcript that cannot be read back to when it was queued: some or all of the message may be in the session's input or already sent, so it is never retried unseen. QUEUED means Claude Code holds a herdr session's message, in its box while it compacts or in its queue while it works, and takes it on its own: a retry under the same id types nothing and reads it again, and LOST is that retry finding it neither on the screen nor in the transcript QUEUED_MS after it was queued, so Retry sends it again.
 export const DELIVERY_FAILURES = [
@@ -506,10 +549,8 @@ export async function deliver(
   deps: DeliverDeps = deliverDeps,
 ): Promise<DeliveryResult> {
   const attachments = delivery.attachments ?? []
-  const words = normalize(delivery.text)
   // The person's own words are judged, so a leading / or ! is a command whether or not files come with it, and the caps count only what they wrote; the files' Attached lines come on top, at most MAX_ATTACHMENTS of them, and the keystroke cap below still bounds the whole. A skill's command waits for the session's own skills, read once it is found.
-  const skill = skillCommand(words)
-  const refusedText = refusal(words, attachments.length, true)
+  const { refused: refusedText, skill, words } = deliveryWords(delivery, true)
   if (refusedText) return refusedText
   const text = withAttachments(words, attachments)
   const images = attachments.filter((file) => file.kind === "image").map((file) => file.path)
@@ -555,16 +596,7 @@ export async function deliver(
     }
     const { surface, worker } = found
     if (skill && !(await deps.skills(worker.cwd)).has(skill)) return commandRefusal(skill)
-    const event: ActivityEvent = {
-      action: "dashboard.message",
-      actor: delivery.actor,
-      id: delivery.id,
-      summary: dashboardMessageSummary(
-        worker.name,
-        words,
-        attachments.map((file) => file.size),
-      ),
-    }
+    const event = deliveryEvent(delivery, worker.name, words)
     // One try, from reading the screen to the Enter. A first send that fails without being killed at cmux's timeout typed nothing and comes back as BeforeTyping, which the loop below tries once more at once, since the screen is read again and finds anything that landed after all.
     const attempt = async (): Promise<DeliveryResult | BeforeTyping> => {
       let screen: string

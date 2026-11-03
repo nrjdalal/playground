@@ -1,5 +1,6 @@
 import { sValidator } from "@hono/standard-validator"
 import type { Session } from "@packages/auth"
+import { SESSION_EFFORTS, SESSION_MODELS } from "@packages/config/console"
 import {
   threadIdSchema,
   threadPatchSchema,
@@ -70,13 +71,16 @@ import { readRoster } from "@/lib/dashboard/roster"
 import {
   answerHosted,
   changeHostedMode,
+  changeHostedSetting,
   HOSTED_MODES,
   hosts,
   SDK_PROBE,
   sendToHosted,
   type ModeChanging,
   type ModeResult,
+  type SettingChanging,
 } from "@/lib/dashboard/sdk"
+import { settingSchema, type SessionSetting } from "@/lib/dashboard/setting"
 import { readStacks } from "@/lib/dashboard/stacks"
 import {
   createThread,
@@ -88,7 +92,7 @@ import {
 } from "@/lib/dashboard/threads"
 import { AGENT_ID_PATTERN, readTail, subagentPath } from "@/lib/dashboard/transcript"
 import { startVibe, stopVibe, VibeError } from "@/lib/dashboard/vibe"
-import { DISPATCHER, DISPATCHERS, listLive } from "@/lib/dashboard/workers"
+import { DISPATCHER, DISPATCHERS, listLive, type Live } from "@/lib/dashboard/workers"
 import { searchYouTube } from "@/lib/dashboard/youtube-search"
 import {
   ApiError,
@@ -126,6 +130,13 @@ export const answerLimiter = createRateLimiter({
 
 // A person flips a session's mode a few times at most; each one changes what the session may do unasked.
 export const modeLimiter = createRateLimiter({
+  getUserId: (c) => c.get("session")?.userId,
+  limit: 10,
+  windowMs: 60_000,
+})
+
+// A person sets a model or an effort a few times at most; each one changes a running session.
+export const settingLimiter = createRateLimiter({
   getUserId: (c) => c.get("session")?.userId,
   limit: 10,
   windowMs: 60_000,
@@ -450,6 +461,34 @@ export async function changeMode(
     throw new ApiError(status, code, result.reason, { mode: result.code })
   }
   return { at: result.at, mode: result.mode }
+}
+
+// The setting route's work once the request is through its guards: a model or an effort for a dispatcher, typed as its one slash command through deliver(), or for the session the dashboard hosts, set through the SDK by changeHostedSetting(); any other session is refused as FORBIDDEN before anything is sent, and a delivery's refusal is turned into the API's error envelope with its code under `delivery`.
+export async function changeSetting(
+  { sessionId, setting }: { sessionId: string; setting: SessionSetting },
+  actor: Delivery["actor"],
+  live: () => Promise<Live> = listLive,
+  send: (delivery: Delivery) => Promise<DeliveryResult> = deliver,
+  setHosted: (changing: SettingChanging) => Promise<DeliveryResult> = changeHostedSetting,
+): Promise<{ at: string; sessionId: string }> {
+  const worker = (await live()).workers.find((w) => w.sessionId === sessionId)
+  if (!worker) throw new ApiError(404, "NOT_FOUND", "No live session with that id")
+  const typed = DISPATCHERS.includes(worker.name)
+  if (!typed && !worker.hosted) {
+    throw new ApiError(
+      403,
+      "FORBIDDEN",
+      `A model or effort is set on ${[...DISPATCHERS, SDK_PROBE].join(", ")} only`,
+    )
+  }
+  const result = typed
+    ? await send({ actor, setting, text: "", to: worker.name })
+    : await setHosted({ actor, sessionId, setting })
+  if (!result.ok) {
+    const [status, code] = FAILURE_STATUS[result.code]
+    throw new ApiError(status, code, result.reason, { delivery: result.code })
+  }
+  return { at: result.at, sessionId: result.sessionId }
 }
 
 const transcriptQuerySchema = z.object({
@@ -918,6 +957,41 @@ const dashboardRoutes = new Hono<{ Variables: Session }>()
         mode: c.req.valid("json").mode,
         sessionId: c.req.valid("param").sessionId,
       })
+      return c.json({ data })
+    },
+  )
+  .post(
+    "/workers/:sessionId/setting",
+    describeRoute({
+      tags: ["Dashboard"],
+      description: `Set the model or the effort of a dispatcher (${DISPATCHERS.join(" or ")}) or of ${SDK_PROBE}, the session the dashboard hosts on the Agent SDK, as the owner's own pick in the composer: \`model\` one of ${SESSION_MODELS.join(", ")}, or \`effort\` one of ${SESSION_EFFORTS.join(", ")}, never both. For a dispatcher the API builds the one slash command (\`/model <alias>\` or \`/effort <level>\`) from those lists and types it as a message is typed; the hosted session takes it through the SDK's own calls. Either way it records a dashboard.setting row naming the session and the value. Any other session is refused as FORBIDDEN before anything is sent. A delivery's refusal names its reason in \`delivery\`, as the message route's does.`,
+      responses: {
+        200: {
+          description:
+            "Set: a dispatcher runs the typed command, or the hosted session has taken the value",
+          content: {
+            "application/json": {
+              schema: resolver(
+                z.object({ data: z.object({ at: z.string(), sessionId: z.string() }) }),
+              ),
+            },
+          },
+        },
+        ...validationErrorResponses,
+        ...authErrorResponses,
+        ...forbiddenErrorResponses,
+        ...notFoundErrorResponses,
+      },
+    }),
+    settingLimiter,
+    sValidator("param", z.object({ sessionId: z.string().min(1).max(200) }), invalidInput),
+    sValidator("json", settingSchema, invalidInput),
+    async (c) => {
+      const user = c.get("user")
+      const data = await changeSetting(
+        { sessionId: c.req.valid("param").sessionId, setting: c.req.valid("json") },
+        { email: user.email, id: user.id },
+      )
       return c.json({ data })
     },
   )
