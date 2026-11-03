@@ -457,7 +457,7 @@ describe("answerFeed for a herdr session", () => {
     expect(await answerFeed(ask(red), after.deps)).toMatchObject({ code: "UNCONFIRMED" })
   })
 
-  test("a permission or a plan is answered in its terminal alone: nothing is read, typed or recorded, whatever approvals say", async () => {
+  test("a herdr session's permission or plan is not answered here: nothing is read, typed or recorded, whatever approvals say", async () => {
     const plan: FeedAnswer = { feedback: null, kind: "plan", mode: "manual" }
     const on = herdrFakes([permissionItem("s-1"), planItem("s-1")], [PERMISSION, DONE], true)
     expect(await answerFeed(ask(deny, PERMISSION_ID), on.deps)).toMatchObject({

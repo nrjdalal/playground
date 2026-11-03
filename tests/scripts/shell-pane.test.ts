@@ -9,7 +9,10 @@ import { mainCheckout } from "../../scripts/hooks/no-main-checkout"
 import {
   bashGuards,
   close,
+  GITHUB_LOGIN,
   type Herdr,
+  type Inbox,
+  login,
   main,
   open,
   read,
@@ -519,6 +522,129 @@ describe("read waits for the marker", () => {
     expect(await refusal(read("w1:p1", "rc=0", 50, stubHerdr().herdr))).toContain(
       "takes the marker",
     )
+  })
+})
+
+describe("login drives GitHub's browser login and hands the owner its code on a card", () => {
+  const TOKEN = "gho_madeUpTokenNotARealOne0123456789"
+  // The stub's pane prints `lines(marker)` under the typed line, so its text follows the marker run made.
+  function loginHerdr(lines: (marker: string) => string[]) {
+    const stub = stubHerdr()
+    let line = ""
+    const text = () => {
+      const marker = line.match(/__shell_pane_[0-9a-f]{12}/)?.[0] ?? "__none"
+      return [`> ${line}`, ...lines(marker)].join("\n")
+    }
+    const herdr: Herdr = async (args) => {
+      if (args[0] === "pane" && args[1] === "run") line = args[3]!
+      if (args[0] === "pane" && args[1] === "read") return { code: 0, out: text() }
+      if (args[0] === "pane" && args[1] === "wait-output") {
+        const marker = args[args.indexOf("--regex") + 1]!.slice(1).split(" ")[0]!
+        return text().includes(`${marker} rc=`)
+          ? { code: 0, out: JSON.stringify({ result: { read: { text: text() } } }) }
+          : { code: 1, out: JSON.stringify({ error: { code: "timeout", message: "timeout" } }) }
+      }
+      return stub.herdr(args)
+    }
+    return { calls: stub.calls, herdr }
+  }
+  function inbox() {
+    const posted: Record<string, any>[] = []
+    const closed: string[] = []
+    const fake: Inbox = {
+      close: async (id, note) => void closed.push(`${id} ${note}`),
+      post: async (item) => {
+        posted.push(item)
+        return "item-1"
+      },
+    }
+    return { closed, fake, posted }
+  }
+  const noWait = async () => {}
+  const shown = (marker: string) => [
+    "! One-time code (AB12-CD34) copied to clipboard",
+    "Open this URL to continue in your web browser: https://github.com/login/device",
+    "✓ Authentication complete.",
+    `token ${TOKEN}`,
+    "✓ Logged in as made-up-login",
+    "",
+    `${marker} rc=0`,
+  ]
+
+  test("the registered guards pass the login, and the card holds the code and link alone, closed once gh sees the sign-in", async () => {
+    const { calls, herdr } = loginHerdr(shown)
+    const { closed, fake, posted } = inbox()
+    expect(await login("w1:p1", 1000, herdr, fake, CHECKOUT, noWait)).toEqual({
+      id: "item-1",
+      rc: 0,
+    })
+    const [[, , , line]] = typed(calls) as [string[]]
+    expect(line!.startsWith(`/bin/zsh -f -c '${GITHUB_LOGIN}'; printf `)).toBe(true)
+    expect(posted).toHaveLength(1)
+    expect(posted[0]).toMatchObject({
+      from: "vtqhxp-worker",
+      title: "Sign in to GitHub for vtqhxp-worker",
+    })
+    expect(posted[0]!.preview.text).toContain("AB12-CD34")
+    expect(posted[0]!.preview.text).toContain("(https://github.com/login/device)")
+    expect(closed).toEqual(["item-1 Signed in: gh saw the login finish"])
+    expect(JSON.stringify({ closed, posted })).not.toMatch(/gho_|Logged in|made-up-login/)
+  })
+
+  test("main takes github alone, and prints the result and the card, never a line the pane showed", async () => {
+    const log = console.log
+    const error = console.error
+    const printed: string[] = []
+    console.log = (line: string) => printed.push(line)
+    console.error = (line: string) => printed.push(`error: ${line.split("\n")[0]}`)
+    const execArgv = process.execArgv
+    Object.defineProperty(process, "execArgv", {
+      configurable: true,
+      value: [...execArgv, "--no-env-file"],
+    })
+    try {
+      expect(await main(["login", "w1:p1", "gitlab"], loginHerdr(shown).herdr, inbox().fake)).toBe(
+        1,
+      )
+      expect(await main(["login", "w1:p1", "github"], loginHerdr(shown).herdr, inbox().fake)).toBe(
+        0,
+      )
+    } finally {
+      console.log = log
+      console.error = error
+      Object.defineProperty(process, "execArgv", { configurable: true, value: execArgv })
+    }
+    expect(printed).toEqual(["error: usage:", "signed in; card item-1 closed"])
+  })
+
+  test("no sign-in by the timeout closes the card as unknown, and a gh that ends with no code posts none", async () => {
+    const waiting = loginHerdr(() => [
+      "! First copy your one-time code: AB12-CD34",
+      "Open this URL to continue in your web browser: https://github.com/login/device",
+    ])
+    const late = inbox()
+    expect(await login("w1:p1", 50, waiting.herdr, late.fake, CHECKOUT, noWait)).toEqual({
+      id: "item-1",
+    })
+    expect(late.closed).toEqual(["item-1 No sign-in seen in time: ask again for a new code"])
+    const failed = loginHerdr((marker) => ["error connecting to api.github.com", `${marker} rc=1`])
+    const none = inbox()
+    expect(await refusal(login("w1:p1", 50, failed.herdr, none.fake, CHECKOUT, noWait))).toBe(
+      "gh auth login ended rc=1 before it printed a one-time code",
+    )
+    expect(none.posted).toEqual([])
+  })
+
+  test("a code beside any other link posts no card", async () => {
+    const { herdr } = loginHerdr(() => [
+      "! First copy your one-time code: AB12-CD34",
+      "Open this URL to continue in your web browser: https://example.com/login/device",
+    ])
+    const { fake, posted } = inbox()
+    expect(await refusal(login("w1:p1", 50, herdr, fake, CHECKOUT, noWait))).toBe(
+      "gh auth login printed no one-time code in 30 s",
+    )
+    expect(posted).toEqual([])
   })
 })
 
