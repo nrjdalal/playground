@@ -27,14 +27,16 @@ const WORKTREE = join(MAIN, ".claude", "worktrees", "shell-pane-test")
 const SCRATCH = mkdtempSync(join(tmpdir(), "shell-pane-"))
 afterAll(() => rmSync(SCRATCH, { force: true, recursive: true }))
 
-// The launcher runs in a factory session, whose role the guards read.
-const PRIOR_ROLE = process.env.PLAYGROUND_ROLE
+// The launcher runs in a factory session, whose role and Claude Code session id the guards read.
+const PRIOR = { id: process.env.CLAUDE_CODE_SESSION_ID, role: process.env.PLAYGROUND_ROLE }
 process.env.PLAYGROUND_ROLE = "worker"
-afterAll(() =>
-  PRIOR_ROLE === undefined
-    ? delete process.env.PLAYGROUND_ROLE
-    : (process.env.PLAYGROUND_ROLE = PRIOR_ROLE),
-)
+process.env.CLAUDE_CODE_SESSION_ID = "s-shell-pane-test"
+afterAll(() => {
+  if (PRIOR.role === undefined) delete process.env.PLAYGROUND_ROLE
+  else process.env.PLAYGROUND_ROLE = PRIOR.role
+  if (PRIOR.id === undefined) delete process.env.CLAUDE_CODE_SESSION_ID
+  else process.env.CLAUDE_CODE_SESSION_ID = PRIOR.id
+})
 
 // Folders the fixture's rows name, none of them made: each row stays data, read only by check().
 const NONE = join(SCRATCH, "none")
@@ -86,9 +88,15 @@ const ENVS: Record<string, Record<string, string>> = {
   "no-extension-repo-write": { PLAYGROUND_DATA_DIR: SYNCED },
 }
 
-async function withEnv<T>(vars: Record<string, string>, body: () => Promise<T>): Promise<T> {
+// Runs `body` with `vars` set on the process, an undefined one unset, then puts each back.
+async function withEnv<T>(
+  vars: Record<string, string | undefined>,
+  body: () => Promise<T>,
+): Promise<T> {
   const prior = Object.fromEntries(Object.keys(vars).map((key) => [key, process.env[key]]))
-  Object.assign(process.env, vars)
+  for (const [key, value] of Object.entries(vars))
+    if (value === undefined) delete process.env[key]
+    else process.env[key] = value
   try {
     return await body()
   } finally {
@@ -338,20 +346,74 @@ describe("run's own refusals", () => {
     ["a newline", "echo a\ngit stash", "U+000A"],
     ["a non-ASCII character", "echo caf\u00e9", "U+00E9"],
     ["a DEL", "echo a\x7f", "U+007F"],
+    ["a tab", "printf 'a\tb'", "U+0009"],
   ])("a command holding %s is refused before typing, naming it", async (_, command, named) => {
     const { calls, herdr } = stubHerdr()
     const repo = repoWith({ "no-made-up": `export const check = async () => undefined\n` })
     expect(await refusal(run("w1:p1", command, herdr, repo))).toBe(
-      `shell-pane refuses a command holding ${named}: it types printable ASCII, space and tab alone`,
+      `shell-pane refuses a command holding ${named}: it types printable ASCII and space alone`,
     )
     expect(typed(calls)).toEqual([])
   })
 
-  test("a tab passes", async () => {
+  test("a session with no Claude Code session id, whose role the guards could not read", async () => {
     const { calls, herdr } = stubHerdr()
     const repo = repoWith({ "no-made-up": `export const check = async () => undefined\n` })
-    await run("w1:p1", "printf 'a\tb'", herdr, repo)
+    expect(
+      await refusal(
+        withEnv({ CLAUDE_CODE_SESSION_ID: undefined }, () => run("w1:p1", "echo hi", herdr, repo)),
+      ),
+    ).toContain("no CLAUDE_CODE_SESSION_ID")
+    expect(typed(calls)).toEqual([])
+  })
+
+  test("run from a bun that loads an env file, since the hooks load none", async () => {
+    const log = console.error
+    const printed: string[] = []
+    console.error = (line: string) => printed.push(line)
+    try {
+      expect(await main(["run", "w1:p1", "echo hi"], stubHerdr().herdr)).toBe(1)
+    } finally {
+      console.error = log
+    }
+    expect(printed.join("\n")).toContain("takes bun run --no-env-file")
+  })
+
+  test("the screen reads no .env, as the hooks start with --no-env-file", async () => {
+    const guard = `export const check = async () => process.env.SHELL_PANE_MADE_UP ? "no-made-up hook refuses it" : undefined\n`
+    const repo = repoWith({ "no-made-up": guard })
+    writeFileSync(join(repo, ".env"), "SHELL_PANE_MADE_UP=1\n")
+    const { calls, herdr } = stubHerdr()
+    await run("w1:p1", "echo hi", herdr, repo)
     expect(typed(calls)).toHaveLength(1)
+    expect(
+      await refusal(
+        withEnv({ SHELL_PANE_MADE_UP: "1" }, () => run("w1:p1", "echo hi", herdr, repo)),
+      ),
+    ).toBe("no-made-up hook refuses it")
+  })
+
+  test("a role-gated guard reads the role from the session id, as its hook does, when PLAYGROUND_ROLE is unset", async () => {
+    const config = join(SCRATCH, "config-role")
+    mkdirSync(join(config, "sessions"), { recursive: true })
+    writeFileSync(
+      join(config, "sessions", "1.json"),
+      JSON.stringify({ name: "worker-made-up", sessionId: "s-role" }),
+    )
+    const repo = repoOf("no-linear-ticket")
+    const row = OWN_ROWS["no-linear-ticket"]![0]!
+    const as = (id: string) =>
+      withEnv(
+        {
+          CLAUDE_CODE_SESSION_ID: id,
+          CLAUDE_CONFIG_DIR: config,
+          PLAYGROUND_DATA_DIR: dataDir(),
+          PLAYGROUND_ROLE: undefined,
+        },
+        () => run("w1:p1", row, stubHerdr().herdr, repo),
+      )
+    expect(await refusal(as("s-role"))).toContain("no-linear-ticket hook ")
+    expect(await as("s-unknown")).toMatch(/^__shell_pane_/)
   })
 
   test("a pane herdr gives no folder for, which the guards judge", async () => {

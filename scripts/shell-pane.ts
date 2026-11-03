@@ -17,8 +17,8 @@ const LABEL = /^shell-[a-z0-9]+(?:-[a-z0-9]+)*-\d+$/
 const MARKER = /^__shell_pane_[0-9a-f]{12}$/
 // no-raw-spawn's STARTS_CLAUDE: claude as a word, but not the .claude folder or a longer word
 const CLAUDE = /(?<![.\w])claude(?!\w)/i
-// the one set of characters run types: printable ASCII, space and tab
-const UNTYPED = /[^\t\x20-\x7e]/u
+// the one set of characters run types: printable ASCII and space
+const UNTYPED = /[^\x20-\x7e]/
 
 type Json = Record<string, any>
 // One herdr CLI call on the probes server: its exit code and what it printed (stdout, else stderr).
@@ -81,11 +81,12 @@ export async function bashGuards(repo: string): Promise<string[]> {
   return [...new Set(names as string[])]
 }
 
-// The first refusal of a command typed in `cwd`: each registered Bash guard's check() over it as a Bash call of its own, then a word naming claude; a guard that cannot load or check refuses, as its hook does.
-export async function screen(
+// The first refusal of a command typed in `cwd`, as the hooks give it: each registered Bash guard's check() over it as a Bash call of the session `session` names, then a word naming claude; a guard that cannot load or check refuses, as its hook does. Runs in the child screen() starts.
+export async function screenHere(
   command: string,
   cwd: string,
   repo: string,
+  session: string,
 ): Promise<string | undefined> {
   let guards: string[]
   try {
@@ -99,6 +100,7 @@ export async function screen(
   const raw = JSON.stringify({
     cwd,
     hook_event_name: "PreToolUse",
+    session_id: session,
     tool_input: { command },
     tool_name: "Bash",
   })
@@ -114,6 +116,32 @@ export async function screen(
   // read with its quotes and backslashes taken out, as the shell joins cl''aude or c\\laude into one word
   if (CLAUDE.test(command.replace(/['"\\]/g, "")))
     return "shell-pane refuses a command naming claude: only scripts/spawn.sh starts a session"
+}
+
+// screenHere() in a child bun started as the hooks start (no env file, in the main checkout, the session's id in its input), so the guards read the process state their hooks read; a child that fails refuses.
+export async function screen(
+  command: string,
+  cwd: string,
+  repo: string,
+  session: string,
+): Promise<string | undefined> {
+  const child = Bun.spawn([process.execPath, "--no-env-file", import.meta.path, "screen"], {
+    cwd: repo,
+    env: process.env,
+    stderr: "pipe",
+    stdin: new Blob([JSON.stringify({ command, cwd, repo, session })]),
+    stdout: "pipe",
+  })
+  const [out, err, code] = await Promise.all([
+    new Response(child.stdout).text(),
+    new Response(child.stderr).text(),
+    child.exited,
+  ])
+  try {
+    if (code === 0)
+      return (JSON.parse(out.trim().split("\n").at(-1)!) as { reason?: string }).reason
+  } catch {}
+  return `shell-pane refuses: its screen exited ${code} (${err.trim().split("\n").at(-1) ?? ""})`
 }
 
 // A workspace on the probes server labelled shell-<name>-<n>, n one past the name's highest, its one pane's shell in `cwd`.
@@ -170,14 +198,19 @@ export async function run(
   const odd = command.match(UNTYPED)?.[0]
   if (odd !== undefined)
     throw new Refusal(
-      `shell-pane refuses a command holding U+${odd.codePointAt(0)!.toString(16).toUpperCase().padStart(4, "0")}: it types printable ASCII, space and tab alone`,
+      `shell-pane refuses a command holding U+${odd.codePointAt(0)!.toString(16).toUpperCase().padStart(4, "0")}: it types printable ASCII and space alone`,
     )
   const cwd = info.foreground_cwd || info.cwd
   if (!cwd)
     throw new Refusal(
       `shell-pane refuses ${pane}: herdr gave no folder for its shell, which the guards judge`,
     )
-  const reason = await screen(command, cwd, repo)
+  const session = process.env.CLAUDE_CODE_SESSION_ID
+  if (!session)
+    throw new Refusal(
+      "shell-pane refuses: no CLAUDE_CODE_SESSION_ID, so the guards cannot read this session's role as its hooks do",
+    )
+  const reason = await screen(command, cwd, repo, session)
   if (reason) throw new Refusal(reason)
   const marker = `__shell_pane_${crypto.randomUUID().replaceAll("-", "").slice(0, 12)}`
   const quoted = `'${command.replaceAll("'", "'\\''")}'`
@@ -249,6 +282,10 @@ export async function main(argv: string[], herdr: Herdr = herdrCli): Promise<num
       console.log(`pane ${made.pane} workspace ${made.workspace} label ${made.label}`)
       return 0
     }
+    if (verb === "run" && !process.execArgv.includes("--no-env-file"))
+      throw new Refusal(
+        "shell-pane run takes bun run --no-env-file, as the hooks run with no env file, so no worktree .env reaches the guards",
+      )
     if (verb === "run" && first && second && rest.length === 0) {
       console.log(`sent ${await run(first, second, herdr)}`)
       return 0
@@ -279,4 +316,12 @@ export async function main(argv: string[], herdr: Herdr = herdrCli): Promise<num
   }
 }
 
-if (import.meta.main) process.exit(await main(process.argv.slice(2)))
+if (import.meta.main) {
+  if (process.argv[2] === "screen") {
+    const input = JSON.parse(await Bun.stdin.text())
+    const reason = await screenHere(input.command, input.cwd, input.repo, input.session)
+    console.log(JSON.stringify({ reason }))
+    process.exit(0)
+  }
+  process.exit(await main(process.argv.slice(2)))
+}

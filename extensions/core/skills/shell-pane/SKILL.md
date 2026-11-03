@@ -1,12 +1,12 @@
 ---
 name: shell-pane
-description: "Run a command in a plain shell pane with no Claude in it, on the playground-probes herdr server: open a pane, run a command that every Bash guard has passed, read its output and exit status back, close the pane. Use when a step needs a real terminal that outlives one tool call (an interactive login, a long run read back later), in place of handing the owner a `!` command."
+description: "Run a command in a plain shell pane with no Claude in it, on the playground-probes herdr server: open a pane, run a command that every Bash guard has passed, read its output and exit status back, close the pane. Use when a step needs a terminal that outlives one tool call, such as a long run read back later; never for a login or anything that waits on a keypress."
 license: Complete terms in the repository's NOTICE
 ---
 
 # shell-pane
 
-A shell pane is a herdr workspace on the `playground-probes` server, with a plain shell in it and no Claude. It keeps running after your tool call ends, and you drive it only through one launcher, `bun "$PLAYGROUND_REPO/scripts/shell-pane.ts"`, called `shell-pane` below. A pane has no PreToolUse hook of its own, so the launcher **screens** each command before it types it: every Bash guard the factory settings register checks the command as if it were your own Bash call, and the first refusal stops it.
+A shell pane is a herdr workspace on the `playground-probes` server, with a plain shell in it and no Claude. It keeps running after your tool call ends, and you drive it only through one launcher, `bun run --no-env-file "$PLAYGROUND_REPO/scripts/shell-pane.ts"`, called `shell-pane` below. A pane has no PreToolUse hook of its own, so the launcher **screens** each command before it types it: every Bash guard the factory settings register checks the command as if it were your own Bash call, and the first refusal stops it.
 
 ## 1. Open
 
@@ -21,13 +21,14 @@ Run `shell-pane run <pane id> '<command>'`, the command in single quotes. The la
 - A heavy command (a suite, a build, an install) goes inside run-slot, as `~/.playground/ops/run-slot.sh <your name> -- <command>`, as in your own Bash (**slots**).
 - A refusal prints the guard's reason, the same one its hook gives your own Bash call: follow it, then run again.
 - The launcher's own `claude` check reads the words with quotes and backslashes taken out; a word built from a variable or a glob gets past it, as past no-raw-spawn, so a session start goes through `scripts/spawn.sh` alone.
-- A command is one line of printable ASCII, spaces and tabs: the launcher refuses any other character, naming it, since a control character or a newline could edit or end the typed line itself.
+- A command is one line of printable ASCII and spaces: the launcher refuses any other character, naming it, since a tab, a control character or a newline could edit or end the typed line itself.
+- A pane is no place for a login or anything that waits on a keypress: once a command runs, the pane takes no input until it ends, so such a step stays with the owner.
 
 Done when it prints `sent <marker>`, or a refusal you have acted on.
 
 ## 3. Read
 
-Run `shell-pane read <pane id> <marker> --timeout <ms>`. It waits for that marker, then prints what the command printed and `rc=<n>`. With no marker by the timeout it prints what showed so far and `no exit marker by <ms> ms: the result is unknown`, and exits 2. An unknown result is never a pass (**verify**): read again with a longer timeout, or report it as unknown. For a login that shows a code or a link, this read is how you see it.
+Run `shell-pane read <pane id> <marker> --timeout <ms>`. It waits for that marker, then prints what the command printed and `rc=<n>`. With no marker by the timeout it prints what showed so far and `no exit marker by <ms> ms: the result is unknown`, and exits 2. An unknown result is never a pass (**verify**): read again with a longer timeout, or report it as unknown.
 
 Done when it prints `rc=<n>`, or you have reported the result as unknown.
 
