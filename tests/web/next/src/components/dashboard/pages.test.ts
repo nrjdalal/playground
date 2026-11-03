@@ -96,4 +96,20 @@ describe("one row a page, its older versions in a dropdown", () => {
     expect(html).toContain("3 versions")
     expect(html.match(/versions<svg/g) ?? []).toHaveLength(1)
   })
+
+  test("with a delete handler, each row holds one delete button named for its page; with none, no row does", () => {
+    const html = renderToStaticMarkup(
+      createElement(PageList, {
+        apiUrl: "https://api.test",
+        now: Date.now(),
+        onDelete: () => {},
+        pages,
+      }),
+    )
+    expect(html.match(/aria-label="Delete [^"]+"/g)).toHaveLength(2)
+    const without = renderToStaticMarkup(
+      createElement(PageList, { apiUrl: "https://api.test", now: Date.now(), pages }),
+    )
+    expect(without).not.toContain('aria-label="Delete')
+  })
 })
