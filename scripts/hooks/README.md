@@ -200,7 +200,7 @@ Only the first reading moves the folder, sets variables and records files for th
   Each is its command's own first word as a reader is, named bare or by a system folder's path (`/usr/bin/awk`), so a script the session wrote (`./awk`), a `PATH` set in the call and a reader behind a wrapper (`time cut …`) keep canary's reading.
   An awk program runs something when it holds `system`, `getline`, `>` or `@`, or comes from `-f` or an option the hook does not know.
   It runs something too when it holds a `|` anywhere but two places: a regex that is the whole leading pattern (`/a|b/`, `/a|b/ {print $2}`) and a regex or a string right after `~` (`$1 ~ /a|b/`, `$1 ~ "a|b"`), each holding no quote, `[` or newline.
-  Once those are cut out, any `|`, quote, `/`, `#` or backslash left counts as a pipe, as canary counted every `|`, so `awk '!/a|b/' f` and `awk '/[ab]|c/' f` stay refused.
+  Once those are cut out, any `|`, quote, `/`, `#` or backslash left counts as a pipe, as canary counted every `|`, so `awk '!/a|b/' f` and `awk '/[ab]|c/' f` keep canary's reading.
   Each string literal of such a program is judged as a command line wherever it stands (`awk 'BEGIN{system("…")}'`).
   A quiet commit is a `git commit` whose `git` is its command's own first word as a reader is, named bare or by a system folder's path, so `sudo git`, `env git` and `./git` keep canary's reading.
   It sets no shell variable and no git option ahead of `commit` that changes what git runs or where (`-c`, `-C`, `--config-env`, `--exec-path`, `--git-dir`, `--work-tree`), and its every spaced word is a quoted message it holds (after `-m`, a flag cluster ending in `m`, `--message`, or `--message=`).
