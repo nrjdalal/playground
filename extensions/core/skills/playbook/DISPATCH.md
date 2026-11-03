@@ -96,7 +96,7 @@ The steps to spawn and brief a session are in [SESSIONS.md](SESSIONS.md#spawn), 
   The owner's own asks go ahead of the chores the factory proposed, and a fix for live breakage or security goes ahead of both: the Planner folds his asks and the other entries into the lanes, his asks first, and a slot that opens takes what ROSTER.md's step 1 names ([ROSTER.md](ROSTER.md)).
 - A task the owner calls priority starts now: in the same turn, when the slots are full or `verify system` reads No room, close the lowest-priority worker at a safe point (a WIP commit, a handoff ([SESSIONS.md](SESSIONS.md#write-a-handoff)), closed as [SESSIONS.md](SESSIONS.md#end) End says),
   which frees its room so spawn.sh passes (at the load cap, wait for the load to fall), and spawn the task's worker; past the gate only the owner starts a session, from his own terminal, whose sessions load no factory hook, or a PR changes the gate.
-  Then send the dispatcher the worker's name and ETA.
+  Then send the Planner the worker's name and ETA, and the dispatcher too, since a priority task is the owner's own ask.
   It never waits in the backlog.
 - A small task going out alone (one concern, a small diff, under about 30 minutes) runs as an A/B pair: two workers on the same brief and base, differing in one variable (such as brief style; model and effort stay Opus at high, [SESSIONS.md](SESSIONS.md#spawn)), one reviewer scoring both PRs blind as X and Y. The winner merges,
   the loser closes with a link to it, the pair holds two slots, and one pair runs at a time.
@@ -109,10 +109,11 @@ Dispatch is done when the session holds its brief, the roster shows its task (an
 ## Slack mode
 
 While the `slack.mode` setting is on, the owner is away and reads only the owner's own Slack DM, so the DM is the owner's chat with the factory.
-ops-dm-watch reads the DM each minute and sends each new owner message to the dispatcher in full; one with no reply in 3 minutes, or any while the dispatcher has read stuck or failed for 3 minutes, goes to the second dispatcher too, and Ops hears of the stuck dispatcher.
+ops-dm-watch reads the DM each minute and sends each new owner message to the dispatcher in full; one with no reply in 3 minutes, or any while the dispatcher has read stuck or failed for 3 minutes, goes to the session in the assistant seat too (`roster.ts who assistant`), else stays with the dispatcher alone and the job's log says so, and Ops hears of the stuck dispatcher.
+A dispatcher mid-turn, its session state `working` and written in the last 3 minutes, holds the no-reply hand-on until it stops, since its reply waits behind that turn.
 
 1. Answer every owner message the job hands you, even a one-word one: write the reply to a file and run `playground dm send <absolute path>`.
-   The second dispatcher answers only what the job hands it, the same way, and routes nothing.
+   The Assistant answers only what the job hands it, the same way, and routes nothing.
    Done when the command prints `dm send: posted`.
 2. At each 15-minute line from the job, post the owner an update on the factory's work the same way.
    Done when the update is posted, or nothing has changed since the last one and the reply says so.

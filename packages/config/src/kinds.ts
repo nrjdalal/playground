@@ -1,5 +1,6 @@
-// A factory session's kind, what it does: spawn.sh writes it to the roster at every start, and every reader takes it before the session's name, so a name need not carry its role. A builder, ops, planner or optimizer holds a manager's seat; the dispatcher routes the owner's asks. It imports nothing, so the hooks and scripts read it from source.
+// A factory session's kind, what it does: spawn.sh writes it to the roster at every start, and every reader takes it before the session's name, so a name need not carry its role. A builder, ops, planner or optimizer holds a manager's seat, the assistant runs the owner's errands and the dispatcher's tracker, and the dispatcher routes the owner's asks. It imports nothing, so the hooks and scripts read it from source.
 export const ROSTER_KINDS = [
+  "assistant",
   "builder",
   "dispatcher",
   "ops",
@@ -20,6 +21,7 @@ export const isRosterKind = (value: unknown): value is RosterKind =>
 
 // The roster's role for each kind, which roster.ts writes beside it.
 export const ROSTER_ROLE_OF_KIND: Record<RosterKind, "manager" | "runner" | "worker"> = {
+  assistant: "manager",
   builder: "manager",
   dispatcher: "manager",
   ops: "manager",
@@ -35,6 +37,7 @@ export const ROSTER_ROLE_OF_KIND: Record<RosterKind, "manager" | "runner" | "wor
 
 // The PLAYGROUND_ROLE a session of each kind runs under, as spawn.sh sets it and the hooks read it.
 export const FACTORY_ROLE_OF_KIND: Record<RosterKind, string> = {
+  assistant: "lead",
   builder: "lead",
   dispatcher: "dispatcher",
   ops: "lead",
@@ -176,9 +179,13 @@ const seatedOf = (agents: unknown, kind: RosterKind): Seated[] =>
 const newestOf = (held: Seated[]): string | undefined =>
   held.findLast((entry) => !entry.starting)?.name ?? held.at(-1)?.name
 
-// Pure: the session that holds a manager kind's seat, the newest live entry of that kind, else its sessions.names name.
+// Pure: the session that holds a kind's seat, the newest live entry of that kind; undefined while none does.
+export const seatOf = (agents: unknown, kind: RosterKind): string | undefined =>
+  newestOf(seatedOf(agents, kind))
+
+// Pure: the session that holds a manager kind's seat (seatOf), else its sessions.names name.
 export const managerOf = (agents: unknown, kind: ManagerKind): string =>
-  newestOf(seatedOf(agents, kind)) ?? aliasOf(kind)
+  seatOf(agents, kind) ?? aliasOf(kind)
 
 // Pure: the dispatcher holding a slot (1 the primary, Alpha; 2 the second, Bravo): the newest live dispatcher whose entry's `slot`, else its name's (slotOfName), else the first, is that one; else the slot's sessions.names name.
 export const dispatcherOf = (agents: unknown, slot: 1 | 2): string =>

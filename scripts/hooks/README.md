@@ -91,7 +91,7 @@ Only the first reading moves the folder, sets variables and records files for th
 ## no-chat-question
 
 - The dispatcher and the leads run the inbox gate, the Stop hook `scripts/hooks/no-chat-question.ts`, since a question asked in chat with nothing in the Inbox is one the owner can miss; it is registered with one command in `.claude/settings.json` and `scripts/factory-settings.json`, so a session loading both runs it once (the same command string in both, as the cmux restore line says).
-  It acts for `PLAYGROUND_ROLE` `dispatcher`, `lead` or `manager`, else for a session with no role whose name in Claude Code's registry (`$CLAUDE_CONFIG_DIR/sessions/<pid>.json`, matched by the hook input's `session_id`) has a manager's kind in the roster (builder, ops, planner, optimizer or dispatcher, through `rosterRole`)
+  It acts for `PLAYGROUND_ROLE` `dispatcher`, `lead` or `manager`, else for a session with no role whose name in Claude Code's registry (`$CLAUDE_CONFIG_DIR/sessions/<pid>.json`, matched by the hook input's `session_id`) has a manager's kind in the roster (assistant, builder, ops, planner, optimizer or dispatcher, through `rosterRole`)
   or else is a manager's name in the `sessions.names` setting or an old name `sessions.aliases` maps to a manager's kind,
   read through `roleOfName` in `scripts/hooks/role.ts`; workers, checkers, runners and probes report to a lead, so it passes them.
   When the final reply asks the owner for a decision, it refuses the stop with `name the open #iN on the same thing if one exists (bun run ask open lists them), else post it with bun run ask new, then say in chat that it's in the inbox as #iN`, so a session reuses the item already posted (a lead once posted a duplicate of the dispatcher's),

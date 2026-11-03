@@ -6,25 +6,25 @@ It lives in the repo rather than in one session's memory, so every session loads
 
 ## When to reach for it
 
-| You are, or you are about to                                                                              | It gives you                                                                   |
-| --------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
-| the dispatcher, the Planner, the Builder, Ops, the Optimizer, a worker, reviewer, tester, runner or probe | your role, who you report to and the rules you keep                            |
-| Spawn, brief, rename, check or end a session                                                              | the lifecycle (`LIFECYCLE.md`) and the cmux and herdr commands (`SESSIONS.md`) |
-| Update Claude Code                                                                                        | the update steps in `LIFECYCLE.md`                                             |
-| Route a new ask, or run a lead's sweep                                                                    | `DISPATCH.md` and `SWEEP.md`                                                   |
-| Answer the owner's DM while Slack mode is on                                                              | `DISPATCH.md`'s Slack mode and `playground dm send`                            |
-| Merge a Playground PR, or release `canary` to `main`                                                      | the **gate** rule (`bun run pr:merge <n>`, `bun run pr:train`) and **release** |
-| Comment or review on a repo whose owner `release-owners.json` lists                                       | the **comments** rule                                                          |
-| Touch the live dashboard or the roster                                                                    | the **dashboard** and **roster** rules (`ROSTER.md`)                           |
-| Ask the owner something, or pass on his override                                                          | the **ask** and **override** rules                                             |
-| File a Linear ticket                                                                                      | the **tickets** rule                                                           |
-| Write anything an org sees                                                                                | the **classified** rule                                                        |
-| Post in the factory's channel, or take an ask from there                                                  | the channel's lists and triage (`CHANNEL.md`)                                  |
-| Run a `vercel` command, a deploy among them                                                               | the Vercel CLI's three traps (`VERCEL.md`)                                     |
-| Stop a process                                                                                            | the **signal** rule                                                            |
-| Hand off a build, a read or research                                                                      | the **workers** rule                                                           |
-| Run long, spawn a reviewer again, or wait on something                                                    | the **context**, **rounds** and **polling** rules                              |
-| Write a skill, an agent guide, a docs page, a handoff or a brief                                          | the **writing** rule                                                           |
+| You are, or you are about to                                                                                             | It gives you                                                                   |
+| ------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------ |
+| the dispatcher, the Planner, the Builder, Ops, the Optimizer, the Assistant, a worker, reviewer, tester, runner or probe | your role, who you report to and the rules you keep                            |
+| Spawn, brief, rename, check or end a session                                                                             | the lifecycle (`LIFECYCLE.md`) and the cmux and herdr commands (`SESSIONS.md`) |
+| Update Claude Code                                                                                                       | the update steps in `LIFECYCLE.md`                                             |
+| Route a new ask, or run a lead's sweep                                                                                   | `DISPATCH.md` and `SWEEP.md`                                                   |
+| Answer the owner's DM while Slack mode is on                                                                             | `DISPATCH.md`'s Slack mode and `playground dm send`                            |
+| Merge a Playground PR, or release `canary` to `main`                                                                     | the **gate** rule (`bun run pr:merge <n>`, `bun run pr:train`) and **release** |
+| Comment or review on a repo whose owner `release-owners.json` lists                                                      | the **comments** rule                                                          |
+| Touch the live dashboard or the roster                                                                                   | the **dashboard** and **roster** rules (`ROSTER.md`)                           |
+| Ask the owner something, or pass on his override                                                                         | the **ask** and **override** rules                                             |
+| File a Linear ticket                                                                                                     | the **tickets** rule                                                           |
+| Write anything an org sees                                                                                               | the **classified** rule                                                        |
+| Post in the factory's channel, or take an ask from there                                                                 | the channel's lists and triage (`CHANNEL.md`)                                  |
+| Run a `vercel` command, a deploy among them                                                                              | the Vercel CLI's three traps (`VERCEL.md`)                                     |
+| Stop a process                                                                                                           | the **signal** rule                                                            |
+| Hand off a build, a read or research                                                                                     | the **workers** rule                                                           |
+| Run long, spawn a reviewer again, or wait on something                                                                   | the **context**, **rounds** and **polling** rules                              |
+| Write a skill, an agent guide, a docs page, a handoff or a brief                                                         | the **writing** rule                                                           |
 
 A factory session reaches for it on its own, and every brief tells the new session to load it.
 A session outside the factory has no reason to.
@@ -44,6 +44,8 @@ A test holds `SKILL.md` under 14,000 characters and its pointer to the rules fol
 The dispatcher keeps the owner's conversation and the Inbox, and routes each task by role: a new ask goes from the dispatcher to the Planner, which researches it, orders it and writes the plan, and stays free for the next ask, since its research goes to read-only research workers;
 then to the Builder, whose workers build, review and merge it; then to Ops, which ships it, rolls the dashboard and watches the machine.
 The Optimizer runs retros over everything the factory did and routes each lesson to the dispatcher as a fix, parking later ideas in its icebox, and never builds.
+The Assistant runs the owner's personal errands and the dispatcher's tracker, and reports to the dispatcher.
+The Builder and Ops send merges, ETA moves, new PRs, staffing and plan updates to the Planner directly, and the dispatcher only what the owner must see or decide: the status of the owner's own asks, any org work, a blocker or slip on something the owner waits for, a decision only the owner can make, and a finding for the playbook.
 Each manager is found by what it does, its kind (the builder, ops, the planner and the optimizer), not by a fixed name, so a manager started again under a new name gets its reports, its alerts and the Dashboard's place for it at once:
 `roster.ts who builder` prints whoever holds the builder's seat, and every script, hook and Dashboard read that looks for a manager follows the same rule, falling back to today's names.
 Four routes skip the planner, which hears after: two fast lanes (a live break or a tiny fix the owner points at, straight to the Builder; a machine or ops incident, straight to Ops), a backlog fix a free slot takes, and a task the owner calls priority.
