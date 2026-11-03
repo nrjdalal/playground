@@ -193,19 +193,20 @@ export function stdinShell(cmd: Command): "root" | "shell" | undefined {
   }
   const end = first ? cmd.words.indexOf(first) : -1
   const before = cmd.words.slice(at, end === -1 ? undefined : end)
-  const k = before.findIndex((w) => ROOT_SHELLS.has(program(w.value)))
-  if (k === -1) return undefined
-  if (first) return "root"
-  // each word after the first wrapper, read against every wrapper named before it, so a second one (`doas sudo -i`) or one's name taken as another's value (`sudo -u doas -i`) hides no shell option
+  // the first unquoted word naming a wrapper, by its basename, as the reading before quoted words were read
+  const own = before.find((w) => !w.quoted && ROOT_SHELLS.has(program(w.value)))
   const wrappers: string[] = []
-  for (const { value } of before.slice(k)) {
-    if (ROOT_SHELLS.has(program(value))) wrappers.push(program(value))
-    else if (wrappers.some((wrapper) => startsRootShell(wrapper, value))) return "root"
+  for (const w of before) {
+    // each word is read as an option of every wrapper before it ahead of being taken as one, so no word skips the reading
+    if (wrappers.some((wrapper) => startsRootShell(wrapper, w.value))) return "root"
+    // a wrapper: that first one, or a word whose unquoted value is a wrapper's bare name (`'sudo'`, `\doas`, `doas sudo`)
+    if (w === own || ROOT_SHELLS.has(w.value)) wrappers.push(program(w.value))
   }
-  return undefined
+  // a program the hook cannot read, behind a wrapper, may be a root shell
+  return first && wrappers.length ? "root" : undefined
 }
 
-// Whether a word, by its unquoted value, starts a wrapper's root shell: a listed option, alone, as a long one's unambiguous prefix (`--sh`, as getopt_long reads it) or in a cluster of the wrapper's own flags ahead of its first value-taking letter (`-Es`, `-su root`, `-su#0`; in `-us` the `-u` takes the `s`), or a word the hook cannot read, which may hold one
+// Whether a word, by its unquoted value, starts a wrapper's root shell: a listed option, alone, as a long one's unambiguous prefix (`--sh`) or in a cluster of the wrapper's flags ahead of its first value-taking letter, or a word the hook cannot read
 function startsRootShell(wrapper: string, value: string): boolean {
   if (marked(value)) return true
   const shells = ROOT_SHELLS.get(wrapper) as Set<string>

@@ -192,7 +192,8 @@ Only the first reading moves the folder, sets variables and records files for th
   A command of reserved words alone (`fi`, `done`) runs nothing; one with no program read otherwise (`sudo -s`, a group, a redirect or an assignment alone) has its whole line judged.
   A line holding a shell that reads its script from stdin (`stdinShell` in `scripts/hooks/shell.ts`) runs whatever is printed into it, so from every folder no reader on it is spared: a shell given no script (`sh`, `sudo bash`), or a root shell with no command of its own.
   A root shell is sudo's `-s`, `-i`, `--shell` or `--login`, or doas's `-s`, alone or in a cluster of the wrapper's flags ahead of its first value-taking letter (`-Es`, `-su root`, `-su#0`; in `-us` the `-u` takes the `s`).
-  It counts behind any wrapper and quoted or not (`'-s'`, `-su'root'`, `'sudo' -s`), each option read against every privilege wrapper named before it (`doas sudo -i`), and an option or a program in a variable counts as one.
+  Such an option counts behind any wrapper and quoted or not (`'-s'`, `-su'root'`, `'sudo' -s`), and an option or a program in a variable counts as one.
+  Each word is read as an option of every privilege wrapper before it: the first unquoted word naming one, and any word whose unquoted value is `sudo` or `doas` (`'doas' sudo -i`, `doas sudo -i`); a path or other word ending in a wrapper's name is read as an option, never as a wrapper.
   A long option's unambiguous prefix counts as that option, as sudo's getopt_long reads it (`--sh`, `--lo`), while sudo itself refuses the ambiguous `--s` and `--l`.
   Every spaced text of every program on such a line, each `\n`-separated part of it and an awk program's strings are read as command lines.
   A root shell's stdin is read as its script, and one the hook cannot read (a download, a file it cannot see, a bare `sudo -s`) is refused: run its commands as calls of their own.
