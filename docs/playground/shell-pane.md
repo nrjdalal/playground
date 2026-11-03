@@ -28,7 +28,7 @@ Each command runs in a shell of its own, so nothing one command sets carries to 
 ## Signing in to GitHub from the Inbox
 
 `login <pane> github` runs `gh`'s browser login in the pane, with no token from the environment and no browser opened on your screen.
-It posts you an Inbox card with `gh`'s one-time code and a link to GitHub's device page: you open the link, enter the code and sign in on GitHub's own page, so nothing you type passes through Playground.
+It posts a card to your Dashboard's Inbox, from whichever worktree the session runs in, with `gh`'s one-time code and a link to GitHub's device page: you open the link, enter the code and sign in on GitHub's own page, so nothing you type passes through Playground.
 The card closes itself once `gh` sees the sign-in, or after 15 minutes, when the code runs out.
 The session sees only that result and the card's id, never a line `gh` printed, so no token `gh` writes reaches a transcript.
 `gh` also puts the code on your clipboard as it starts.

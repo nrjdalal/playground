@@ -675,7 +675,7 @@ describe("login drives GitHub's browser login and hands the owner its code on a 
     const before = process.env.POSTGRES_URL
     process.env.POSTGRES_URL = "postgres://made-up"
     try {
-      expect(await askInbox(root).post({ title: "t" })).toBe(`${realpathSync(root)} none`)
+      expect(await askInbox(root).post({ title: "t" })).toBe(`${realpathSync(root)} none new`)
     } finally {
       if (before === undefined) delete process.env.POSTGRES_URL
       else process.env.POSTGRES_URL = before
