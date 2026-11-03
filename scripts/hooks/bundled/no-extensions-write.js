@@ -1484,14 +1484,17 @@ function reads(parsed, env) {
   const before = args.slice(0, args.length - rest.length - 1).map((a) => a.value);
   return !!sub && GIT_READS.has(sub) && !before.some((w) => /^-c|^--(?:config-env|exec-path)/.test(w)) && !rest.some((w) => /^(?:--output|-O|--open-files-in-pager|--ext-diff|--textconv)/.test(w));
 }
+var READS_ONLY = /^(?:\}|:?[-+?]|[#%/])/;
 function namings(command) {
   const counts = new Map;
   const plain = new Set;
   const add = (key) => counts.set(key, (counts.get(key) ?? 0) + 1);
-  for (const m of command.matchAll(/(\$\{[#!]?)?(?<![\w$])([A-Za-z_]\w*)(:?=)?/g)) {
-    const [, expanded, key, assigns] = m;
-    if (expanded && !assigns)
+  for (const m of command.matchAll(/(\$\{[#!]?)?(?<![\w$])([A-Za-z_]\w*)/g)) {
+    const [whole, expanded, key] = m;
+    const next = command.slice(m.index + whole.length);
+    if (expanded && READS_ONLY.test(next))
       continue;
+    const assigns = next[0] === "=" ? "=" : undefined;
     const at = m.index + (expanded?.length ?? 0);
     if (!expanded && command[at - 1] === "-" && (at < 2 || /\s/.test(command[at - 2]))) {
       for (let k = 0;k < key.length - 1; k++)
@@ -1503,7 +1506,83 @@ function namings(command) {
     if (!expanded && assigns === "=" && (at === 0 || /[\s;&|(]/.test(command[at - 1])))
       plain.add(key);
   }
+  const from = [];
+  let joined = "";
+  for (let i = 0;i < command.length; i++)
+    if (!'\\\'"'.includes(command[i])) {
+      from.push(i);
+      joined += command[i];
+    }
+  for (const m of joined.matchAll(/(?<![\w$])[A-Za-z_]\w*/g)) {
+    const end = m.index + m[0].length - 1;
+    if (from[end] - from[m.index] !== end - m.index)
+      add(m[0]);
+  }
   return { counts, plain };
+}
+var SHELL_SETS = new Set([
+  "ARGC",
+  "BASH",
+  "BASHOPTS",
+  "BASHPID",
+  "COLUMNS",
+  "COPROC",
+  "CPUTYPE",
+  "DIRSTACK",
+  "EGID",
+  "EPOCHREALTIME",
+  "EPOCHSECONDS",
+  "ERRNO",
+  "EUID",
+  "FUNCNAME",
+  "FUNCNEST",
+  "GID",
+  "GROUPS",
+  "HISTCMD",
+  "HOST",
+  "HOSTNAME",
+  "HOSTTYPE",
+  "LINENO",
+  "LINES",
+  "LOGNAME",
+  "MACHTYPE",
+  "MAPFILE",
+  "MATCH",
+  "MBEGIN",
+  "MEND",
+  "OLDPWD",
+  "OPTARG",
+  "OPTIND",
+  "OSTYPE",
+  "PIPESTATUS",
+  "PPID",
+  "PWD",
+  "RANDOM",
+  "REPLY",
+  "SECONDS",
+  "SHELLOPTS",
+  "SHLVL",
+  "SRANDOM",
+  "TRY_BLOCK_ERROR",
+  "TRY_BLOCK_INTERRUPT",
+  "TTY",
+  "TTYIDLE",
+  "UID",
+  "USERNAME",
+  "VENDOR",
+  "_",
+  "argv",
+  "match",
+  "mbegin",
+  "mend",
+  "pipestatus",
+  "reply",
+  "signals",
+  "status"
+]);
+var SHELL_SETS_PREFIX = /^(?:BASH_|COMP_|READLINE_|ZSH_|zsh_)/;
+function holdable(key, named, counts) {
+  return counts.get(key) === 1 && named.plain.has(key) && !SHELL_SETS.has(key) && !SHELL_SETS_PREFIX.test(key);
 }
 var NONE = { has: () => false };
 var NAME_SETTERS = new Set([
@@ -1525,6 +1604,8 @@ var OPENS = new Set(["case", "for", "if", "select", "until", "while", "{"]);
 var CLOSES = new Set(["done", "esac", "fi", "}"]);
 var LEADS = new Set(["!", "coproc", "do", "elif", "else", "then", "time"]);
 function steadyNames(named, commands) {
+  if (named.counts.has("IFS"))
+    return () => NONE;
   const counts = new Map(named.counts);
   const parses = commands.map((cmd) => parse(cmd));
   for (const [at, cmd] of commands.entries()) {
@@ -1577,7 +1658,7 @@ function steadyNames(named, commands) {
     if (!first || !ASSIGN.test(first.value) || parses[at].name !== "")
       continue;
     for (const key of parses[at].local.keys())
-      if (counts.get(key) === 1 && named.plain.has(key))
+      if (holdable(key, named, counts))
         set.set(key, always ? { at } : { at, chain });
   }
   return (cmd) => {
