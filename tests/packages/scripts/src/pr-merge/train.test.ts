@@ -179,7 +179,7 @@ describe("pr:train", () => {
       (text: string) =>
       async (run: Run, repo: string, n: number): Promise<PrFacts> => ({
         ...(await local.facts(run, repo, n)),
-        held: heldOf(text, repo, n),
+        held: heldOf(text, repo, n, Date.now()),
       })
     const fresh = await gatedOf(h.run, REPO, reading(frozen(60_000)), local.queue)
     expect(fresh.order).toEqual([])
