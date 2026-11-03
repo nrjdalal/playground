@@ -679,6 +679,22 @@ describe("a quoted argument is read as a command line only where a program runs 
       "sudo with a shortened user option and a harmless command",
       "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sudo --us root ls",
     ],
+    [
+      "env's split string naming sudo and a harmless command",
+      "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | env -S 'sudo ls'",
+    ],
+    [
+      "a root shell given a harmless command",
+      "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sudo sh -c ls",
+    ],
+    [
+      "busybox running a harmless applet",
+      "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | busybox ls",
+    ],
+    [
+      "busybox's shell applet given a harmless command",
+      "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sudo busybox sh -c ls",
+    ],
   ])("%s runs from a worktree", async (_, command) => {
     expect(await at(command, join(homedir(), "x", ".claude", "worktrees", "y"))).toBeUndefined()
   })
