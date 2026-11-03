@@ -23,6 +23,7 @@ import { check as killByName } from "../../../scripts/hooks/no-kill-by-name"
 import { check as linearTicket } from "../../../scripts/hooks/no-linear-ticket"
 import { check as mainCheckout } from "../../../scripts/hooks/no-main-checkout"
 import { check as playgroundLeak } from "../../../scripts/hooks/no-playground-leak"
+import { check as publicLeak } from "../../../scripts/hooks/no-public-leak"
 import { check as rawDelete } from "../../../scripts/hooks/no-raw-delete"
 import { check as rawSpawn } from "../../../scripts/hooks/no-raw-spawn"
 import { check as releaseComment } from "../../../scripts/hooks/no-release-comment"
@@ -104,6 +105,8 @@ storeWith(
   },
   { "ext.links": { "made-up-org": ["acme-blue"] } },
 )
+// A data folder whose extensions root lacks no-public-leak's list, which core never ships, so its rows pin the writes that refusal still refuses.
+const LISTLESS = storeWith(join(SCRATCH, "listless"), {})
 const OWNED = storeWith(join(SCRATCH, "owned"), { "release-owners.json": '["qmarsh"]' })
 const DESKTOP = storeWith(join(SCRATCH, "desktop"), { "desktop-owner-apps.json": '["Slack"]' })
 // A data folder whose scope acme syncs with the made-up extension repo quillco/acme-skills.
@@ -159,6 +162,7 @@ const CHECK_NAMES = [
   "linearTicket",
   "mainCheckout",
   "playgroundLeak",
+  "publicLeak",
   "rawSpawn",
   "releaseComment",
   "stash",
@@ -175,6 +179,7 @@ const SOURCE: Checks = {
   linearTicket,
   mainCheckout,
   playgroundLeak,
+  publicLeak,
   rawSpawn,
   releaseComment,
   stash,
@@ -191,6 +196,7 @@ const GUARD_OF: Record<(typeof CHECK_NAMES)[number], Guard> = {
   linearTicket: "no-linear-ticket",
   mainCheckout: "no-main-checkout",
   playgroundLeak: "no-playground-leak",
+  publicLeak: "no-public-leak",
   rawSpawn: "no-raw-spawn",
   releaseComment: "no-release-comment",
   stash: "no-stash",
@@ -298,6 +304,10 @@ const guardsOf = (
         undefined,
         LISTS,
       ),
+  },
+  "no-public-leak": {
+    folders: { checkout: [CHECKOUT, HOME], home: [HOME, HOME] },
+    run: (raw) => c.publicLeak(raw, { CLAUDE_CONFIG_DIR: SCRATCH, PLAYGROUND_DATA_DIR: LISTLESS }),
   },
   // No bundle while no settings file registers it, so only its source runs, and the bundled pass below leaves it out, since GUARD_OF names no check of it.
   "no-raw-delete": {

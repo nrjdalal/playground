@@ -206,8 +206,19 @@ function scoreAsOther(words: Word[], cmd: Command, parsed: Parsed, env: Env): bo
 }
 
 const AWKS = new Set(["awk", "gawk", "mawk", "nawk"])
-// what lets an awk program run a command or write a file: system(), a | pipe, getline, a > redirect or an @ directive
-const AWK_RUNS = /system|getline|[|>@]/
+// what lets an awk program run a command or write a file: system(), getline, a > redirect or an @ directive, and a | pipe outside the literals awkPipe allows
+const AWK_RUNS = /system|getline|[>@]/
+const awkRuns = (program: string) => AWK_RUNS.test(program) || awkPipe(program)
+
+// The literals a | may sit in without piping: a regex that is the program's whole leading pattern (`/a|b/`, `/a|b/ {…}`), and a regex or a string right after ~ (`$1 ~ /a|b/`, `$1 ~ "a|b"`), each holding no quote, no [ and no newline
+const AWK_LEAD = /^\s*\/(?:[^\\/"[\n]|\\.)*\/(?=\s*(?:\{|$))/
+const AWK_MATCH = /~\s*(?:\/(?:[^\\/"[\n]|\\.)*\/|"[^"\\\n]*")/g
+
+// Whether a program holding a | may pipe: once the allowed literals are cut out, any |, quote, /, # or backslash left counts as one, as canary counted every |
+function awkPipe(program: string): boolean {
+  if (!program.includes("|")) return false
+  return /["/#\\|]/.test(program.replace(AWK_LEAD, " ").replace(AWK_MATCH, " "))
+}
 
 // awk's program words, or undefined when a program comes from a file or an option the hook does not know: -F and -v take a value, gawk's -e and --source a program, and the first other word is the program
 function awkPrograms(words: Word[]): Word[] | undefined {
@@ -229,7 +240,7 @@ function awkPrograms(words: Word[]): Word[] | undefined {
 function programLines({ args, first }: Parsed, rooted: boolean): string[] {
   if (!AWKS.has(program(first?.value ?? "").toLowerCase())) return []
   return (awkPrograms(args) ?? [])
-    .filter(({ value }) => rooted || AWK_RUNS.test(value))
+    .filter(({ value }) => rooted || awkRuns(value))
     .flatMap(({ value }) => [...value.matchAll(/"((?:[^"\\]|\\.)*)"/g)].map((m) => m[1]))
 }
 
@@ -260,7 +271,7 @@ function narrow(cmd: Command, env: Env): boolean {
   const base = program(first.value).toLowerCase()
   if (AWKS.has(base)) {
     const programs = awkPrograms(args)
-    return !!programs && programs.every(({ value }) => !marked(value) && !AWK_RUNS.test(value))
+    return !!programs && programs.every(({ value }) => !marked(value) && !awkRuns(value))
   }
   if (["cat", "grep", "head", "tail", "wc"].includes(base)) return reads(parsed, env)
   if (base === "cut") return true

@@ -207,13 +207,70 @@ describe("it fails closed on its list", () => {
   const write = bash(`gh pr comment 1 ${R} --body "Fixes it"`)
   const data = (name: string) => join(scratch, name)
 
-  test("a store that lacks the list refuses a write, naming the file", async () => {
+  test("a store that lacks the list refuses a write, naming the file, the write that seeds it and its shape", async () => {
     const reason = await run(write, storeWith(data("lacks"), {}))
     expect(reason).toContain("no-public-leak hook refused this call:")
     expect(reason).toContain("holds no hooks/no-public-leak.json")
     expect(reason).toContain(
-      "tell your lead, and the dispatcher hands the owner ! playground ext import --from-tree extensions/core/lists to type in the dispatcher's terminal window",
+      "tell your lead, and the dispatcher hands the owner ! playground ext put <login> list no-public-leak <file> --reason <why> to type in the dispatcher's terminal window",
     )
+    expect(reason).toContain(
+      "The list is a JSON object with an array of strings under each of companies, handles, linearKeys, names, slackIds",
+    )
+    expect(reason).not.toContain("ext import")
+  })
+
+  describe("a store that lacks the list", () => {
+    const lacks = () => storeWith(data("lacks-reads"), {})
+    const mcp = (tool: string, input: Record<string, unknown>) =>
+      JSON.stringify({
+        cwd: scratch,
+        hook_event_name: "PreToolUse",
+        tool_input: input,
+        tool_name: tool,
+      })
+
+    test.each([
+      ["git log", bash("git log --oneline -5")],
+      ["git remote -v", bash("git remote -v")],
+      ["gh issue list", bash(`gh issue list ${R}`)],
+      ["gh pr view", bash(`gh pr view 1 ${R}`)],
+      ["gh api GET", bash("gh api repos/quillco/playground/issues")],
+      ["a read over a .git path", bash("cat .git/worktrees/a/HEAD")],
+      ["a grep over a worktree's .git file", bash("grep gitdir .git")],
+    ])("lets %s run", async (_, raw) => {
+      expect(await run(raw, lacks())).toBeUndefined()
+    })
+
+    test.each([
+      ["gh issue create", bash(`gh issue create ${R} -t "Fix export" -b "Fixes it"`)],
+      ["git push", bash("git push https://github.com/quillco/playground.git main")],
+      ["git push to a remote it cannot place", bash("git push origin main")],
+      ["gh api DELETE", bash("gh api -X DELETE repos/quillco/playground/issues/1/labels/x")],
+      [
+        "gh api POST",
+        bash(`gh api -X POST repos/quillco/playground/issues/1/comments -f body="Fixes it"`),
+      ],
+      [
+        "the GitHub MCP's read",
+        mcp("mcp__github-shared__list_issues", { owner: "quillco", repo: "playground" }),
+      ],
+      [
+        "the GitHub MCP's comment",
+        mcp("mcp__github-shared__add_issue_comment", {
+          body: "Fixes it",
+          issue_number: 1,
+          owner: "quillco",
+          repo: "playground",
+        }),
+      ],
+      [
+        "a Slack MCP post",
+        mcp("mcp__slack-shared__chat_post_message", { channel: "C0FAKE9999", text: "hi" }),
+      ],
+    ])("refuses %s", async (_, raw) => {
+      expect(await run(raw, lacks())).toContain("holds no hooks/no-public-leak.json")
+    })
   })
 
   test("an empty store folder refuses a write", async () => {
