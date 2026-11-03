@@ -1,7 +1,7 @@
 import { accessSync, constants } from "node:fs"
 import { homedir } from "node:os"
 
-// Runs the pre-commit build through the machine's run slot, `~/.playground/ops/run-slot.sh commit-<worktree> -- <step>`, when the commit is in a worktree under `.claude/worktrees/`, that script is executable and turbo's dry run finds a build task with work to do, so a real build waits its turn beside every other heavy run; it runs the step bare anywhere else, in a commit already running under run-slot (whose child carries the `RUN_SLOT_NICE` it exports), so a commit never waits on a slot it holds, and when turbo can replay every build task from its cache, since a replay ran 2 s or less after waits of up to 1,297 s (2 Nov, run-slot.runs.log).
+// Runs the pre-commit build through the machine's run slot, `~/.playground/ops/run-slot.sh commit-<worktree> -- <step>`, when the commit is in a worktree under `.claude/worktrees/`, that script is executable and turbo's dry run finds a build task with work to do, so a real build waits its turn beside every other heavy run; it runs the step bare anywhere else, in a commit already running under run-slot (whose child carries the `RUN_SLOT_NICE` it exports), so a commit never waits on a slot it holds, and when turbo can replay every build task from its cache, since a replay ran 2 s or less after waits of up to 1,788 s (2 Nov, run-slot.runs.log).
 
 const WORKTREE = /\/\.claude\/worktrees\/([^/]+)/
 
