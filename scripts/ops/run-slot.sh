@@ -697,8 +697,9 @@ slot_open() {
 # A burst of starts outruns the reading the slots open on, since load1 shows a run's load about a minute after it starts (issue 610, 2 Nov:
 # five medium suites and two clones started in 70 s at load1 16, and load1 reached 64): while run-slot.runs.log shows more runs started on
 # run-slot to run-slot-4 or the clone slot in the last minute than ended there, so the held runs grew, a medium or big run waits for the
-# reading to show them and the slots fill one a minute; a run that takes a slot a run freed adds nothing and goes on, and a small run and the
-# dashboard's and the merge train's runs go on, as they pass slot 2's load line; prints how many runs the last minute added when it holds
+# reading to show them and the slots fill one a minute; a run that takes a slot a run freed adds nothing and goes on, as does a small run,
+# and the dashboard's and the merge train's runs go on too, as they pass slot 2's load line; prints how many runs the last
+# minute added when it holds
 burst_held() {
   local now cutoff
   [ "$SIZE" != small ] && [ "$WHO" != ops-dashboard ] && [ "$WHO" != ops-merge-train ] || return 1
@@ -893,8 +894,8 @@ while :; do
     waited=$((waited + 15))
     continue
   fi
-  if ago=$(burst_held); then
-    [ $((waited % 300)) -eq 0 ] && echo "run-slot.sh: waiting for the load to show the $ago run(s) the last minute added" >&2
+  if added=$(burst_held); then
+    [ $((waited % 300)) -eq 0 ] && echo "run-slot.sh: waiting for the load to show the $added run(s) the last minute added" >&2
     sleep "$POLL"
     waited=$((waited + 15))
     continue
