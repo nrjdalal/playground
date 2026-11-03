@@ -349,6 +349,8 @@ export const tableCount = async (url: string): Promise<number> => {
   }
 }
 
+export const pendingMigrations = async (_url: string, _journal?: string): Promise<number> => 0
+
 // The live machine's registry, named here rather than through the dashboard's own reader, which follows this process's source: the launcher reads the API's settings, so a live-reads stack set in .env alone still reads a fixture's folder from here.
 const liveHeld = () =>
   cmuxHeld(join(process.env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude"), "sessions"))
@@ -366,6 +368,7 @@ export type Guard = {
   held?: () => Promise<string[] | null>
   liveDashboard?: LiveDashboard
   locate?: (url: string) => Located
+  pending?: (url: string) => Promise<number>
   prove?: (url: string, located: Located) => Promise<string>
   root?: string
   tables?: (url: string) => Promise<number>
