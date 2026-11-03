@@ -271,3 +271,53 @@ describe("commit-slot.ts", () => {
     expect(run(["sh", "-c", "exit 3"]).exitCode).toBe(3)
   })
 })
+
+// PG-672: a canary merge that brings a new workspace package left its dependency unlinked, and the build waited for a slot before it failed with exit 127, naming nothing
+describe("commit-slot.ts on a worktree whose install predates a workspace dependency", () => {
+  const home = join(DIR, "home-unlinked")
+  const ops = join(home, ".playground/ops")
+  const worktree = join(DIR, "repo/.claude/worktrees/wt-unlinked")
+  const slot = join(DIR, "seen-unlinked-slot")
+  mkdirSync(ops, { recursive: true })
+  mkdirSync(join(worktree, "packages/fresh"), { recursive: true })
+  writeFileSync(join(worktree, "package.json"), JSON.stringify({ workspaces: ["packages/*"] }))
+  writeFileSync(
+    join(worktree, "packages/fresh/package.json"),
+    JSON.stringify({ dependencies: { "left-pad": "^1.3.0" } }),
+  )
+  writeFileSync(join(ops, "run-slot.sh"), `#!/bin/sh\necho "$@" > '${slot}'\nshift 2\nexec "$@"\n`)
+  chmodSync(join(ops, "run-slot.sh"), 0o755)
+  const run = () =>
+    Bun.spawnSync(["bun", "--no-env-file", SCRIPT, "echo", "built"], {
+      cwd: worktree,
+      env: {
+        ...Object.fromEntries(
+          Object.entries(process.env).filter(([key]) => key !== "RUN_SLOT_NICE"),
+        ),
+        HOME: home,
+      },
+      stderr: "pipe",
+      stdout: "pipe",
+    })
+
+  test("fails before it asks for a slot, naming the package and bun install", () => {
+    rmSync(slot, { force: true })
+    const result = run()
+    expect(result.exitCode).not.toBe(0)
+    expect(existsSync(slot)).toBe(false)
+    expect(result.stdout.toString()).toBe("")
+    const said = result.stderr.toString()
+    expect(said).toContain("packages/fresh: left-pad")
+    expect(said).toContain("bun install")
+  })
+
+  test("with every dependency linked, takes the slot and runs the step as before", () => {
+    mkdirSync(join(worktree, "node_modules/left-pad"), { recursive: true })
+    writeFileSync(join(worktree, "node_modules/left-pad/package.json"), "{}")
+    rmSync(slot, { force: true })
+    const result = run()
+    expect(readFileSync(slot, "utf8")).toBe("commit-wt-unlinked -- echo built\n")
+    expect(result.stdout.toString()).toBe("built\n")
+    expect(result.exitCode).toBe(0)
+  })
+})

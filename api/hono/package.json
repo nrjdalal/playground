@@ -27,6 +27,7 @@
     "@packages/config": "workspace:*",
     "@packages/db": "workspace:*",
     "@packages/env": "workspace:*",
+    "@packages/message": "workspace:*",
     "@packages/safe-delete": "workspace:*",
     "@packages/settings": "workspace:*",
     "@scalar/api-reference": "catalog:",

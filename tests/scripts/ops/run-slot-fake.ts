@@ -37,6 +37,7 @@ afterAll(() => {
 
 export type Setup = {
   free?: number
+  idle?: number
   load1?: number
   load5?: number
   mergeQueue?: unknown
@@ -46,11 +47,13 @@ export type Setup = {
   pressure?: number
   roster?: unknown
   sandboxed?: boolean
+  swapins?: number
 }
 
-// A scratch state folder and config folder, with a fake sysctl on PATH giving 15 cores, the load asked for (load5 and load15 as load1 unless given) and normal memory, and a fake uptime giving the same load; sandboxed, sysctl and ps refuse every read as Claude Code's sandbox does, so the load comes from uptime alone and the cores from a fake getconf giving 15.
+// A scratch state folder and config folder, with a fake sysctl on PATH giving the load asked for (load5 and load15 as load1 unless given) and normal memory, a fake uptime giving the same load, a fake top whose second sample reads the CPU idle share asked for, and a fake vm_stat whose last row reads the swap-ins asked for; sandboxed, sysctl and ps refuse every read as Claude Code's sandbox does, so the load comes from uptime alone.
 export const machine = ({
   free = 80,
+  idle = 80,
   load1 = 2,
   load5 = load1,
   mergeQueue,
@@ -60,6 +63,7 @@ export const machine = ({
   pressure = 1,
   roster,
   sandboxed = false,
+  swapins = 0,
 }: Setup = {}) => {
   const root = mkdtempSync(join(tmpdir(), "run-slot-"))
   dirs.push(root)
@@ -79,8 +83,7 @@ export const machine = ({
 echo "$2" >> ${join(root, "sysctl.log")}
 ${sandboxed ? 'echo "sysctl: sysctl fmt -1 1024 1: Operation not permitted" >&2; exit 1' : ""}
 case "$2" in
-  hw.ncpu) echo 15 ;;
-  vm.loadavg) echo "{ ${load1}.00 ${load5}.00 ${load5}.00 }" ;;
+  vm.loadavg) echo "{ ${load1.toFixed(2)} ${load5.toFixed(2)} ${load5.toFixed(2)} }" ;;
   kern.memorystatus_level) echo ${free} ;;
   kern.memorystatus_vm_pressure_level) echo ${pressure} ;;
 esac
@@ -89,21 +92,27 @@ esac
   chmodSync(join(bin, "sysctl"), 0o755)
   writeFileSync(
     join(bin, "uptime"),
-    `#!/bin/bash\necho "22:15  2 users, load averages: ${load1}.00 ${load5}.00 ${load5}.00"\n`,
+    `#!/bin/bash\necho "22:15  2 users, load averages: ${load1.toFixed(2)} ${load5.toFixed(2)} ${load5.toFixed(2)}"\n`,
   )
   chmodSync(join(bin, "uptime"), 0o755)
+  // top's first sample reads since boot and its second the last interval, as `top -l 2 -n 0` prints them; each call is a line in top.log
+  writeFileSync(
+    join(bin, "top"),
+    `#!/bin/bash\necho "$*" >> ${join(root, "top.log")}\necho "CPU usage: 1.00% user, 1.00% sys, 98.00% idle "\necho "CPU usage: ${((100 - idle) / 2).toFixed(2)}% user, ${((100 - idle) / 2).toFixed(2)}% sys, ${idle}% idle "\n`,
+  )
+  chmodSync(join(bin, "top"), 0o755)
+  // vm_stat -c 2 1's first row counts since boot and its last the last second, as the real one prints them
+  writeFileSync(
+    join(bin, "vm_stat"),
+    `#!/bin/bash\necho "Mach Virtual Memory Statistics: (page size of 16384 bytes)"\necho "    free   active  pageins  pageout  swapins swapouts"\necho "  203349   476233   253407  3087181  4049933   116968"\necho "  194438   485624        0        0  ${swapins}        0"\n`,
+  )
+  chmodSync(join(bin, "vm_stat"), 0o755)
   if (sandboxed) {
     writeFileSync(
       join(bin, "ps"),
       `#!/bin/bash\necho "bash: /bin/ps: Operation not permitted" >&2\nexit 126\n`,
     )
     chmodSync(join(bin, "ps"), 0o755)
-    // the cores where sysctl is refused, 15 as the sysctl fake gives them, whatever the runner's own count
-    writeFileSync(
-      join(bin, "getconf"),
-      `#!/bin/bash\n[ "$1" = _NPROCESSORS_ONLN ] && { echo 15; exit 0; }\nexec /usr/bin/getconf "$@"\n`,
-    )
-    chmodSync(join(bin, "getconf"), 0o755)
   }
   // the settings reader answers factory.repo, the guarded orgs and slots.peers as a store that sets them would, and every other key as the real one does
   writeFileSync(
