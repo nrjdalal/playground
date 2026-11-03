@@ -13,16 +13,26 @@ A session loads it on its own when a step needs a terminal that outlives one too
 | A long run the session reads back later                     | Runs it in a pane, inside run-slot when it is heavy, and reads the exit status later |
 | A command any guard refuses, or one that would start Claude | Refuses it before anything is typed, with the guard's own reason                     |
 | A pane the launcher did not open                            | Leaves it alone: it types into, and closes, only a workspace it labelled             |
+| GitHub's sign-in for the `gh` CLI                           | Runs `gh`'s browser login in a pane and puts its one-time code on an Inbox card      |
 
 ## The four steps
 
 `open` makes a workspace labelled `shell-<session name>-<n>`, its shell in the session's worktree.
 `run` checks the command, then types it with a fresh marker that prints its exit status.
 A command is one line of printable ASCII and spaces, since any other character, a tab, a control character or a newline, could edit the typed line itself.
-A pane is no place for a login or anything that waits on a keypress: once a command runs, the pane takes no input until it ends.
+A pane is no place for a login typed in the pane or anything that waits on a keypress: once a command runs, the pane takes no input until it ends.
 Each command runs in a shell of its own, so nothing one command sets carries to the next, as between a session's own commands, and a pane still running one takes no other until that one finishes.
 `read` waits for that marker and prints the output and `rc=<n>`; with no marker by its timeout, the result reads as unknown, never as a pass.
 `close` closes the workspace by its id, and confirms its label is gone from the server's list.
+
+## Signing in to GitHub from the Inbox
+
+`login <pane> github` runs `gh`'s browser login in the pane, with no token from the environment and no browser opened on your screen.
+It posts you an Inbox card with `gh`'s one-time code and a link to GitHub's device page: you open the link, enter the code and sign in on GitHub's own page, so nothing you type passes through Playground.
+The card closes itself once `gh` sees the sign-in, or after 15 minutes, when the code runs out.
+The session sees only that result and the card's id, never a line `gh` printed, so no token `gh` writes reaches a transcript.
+`gh` also puts the code on your clipboard as it starts.
+A prompt that waits for a typed answer or a keypress has no card yet.
 
 ## Common questions
 

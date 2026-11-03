@@ -367,12 +367,12 @@ export function NeedsYouCard({
       {readOnly && (
         <CardFooter className="text-muted-foreground text-xs">
           {item.herdr
-            ? `Answer it in ${agentLabel(item.from)}'s terminal, in herdr: the Dashboard answers only a herdr session's pickers.`
+            ? `The Dashboard answers only a herdr session's pickers: ask Playground in the chat, and ${agentLabel(item.from)}'s manager answers it.`
             : item.hosted
               ? `Approving a ${item.kind} here is off for now, so it is refused after 10 minutes.`
               : item.kind === "permission" || item.kind === "plan"
-                ? `Answer it in ${agentLabel(item.from)}'s terminal: approving a ${item.kind} here is off for now.`
-                : `This can only be answered in ${agentLabel(item.from)}'s terminal.`}
+                ? `Approving a ${item.kind} here is off for now: ask Playground in the chat, and ${agentLabel(item.from)}'s manager answers it.`
+                : `This cannot be answered here: ask Playground in the chat, and ${agentLabel(item.from)}'s manager answers it.`}
         </CardFooter>
       )}
     </Card>

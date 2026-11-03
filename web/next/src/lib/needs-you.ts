@@ -147,7 +147,7 @@ const choice = (label: string, description: string | null = null): NeedsYouOptio
 
 // What a Feed item asks, as a card shows it. A permission shows the whole input the tool was given and a plan its text, so what is approved is what was read; when either was cut short, or a permission came with nothing to show, only refusing it is offered here.
 export function feedItemNeed(worker: Worker, item: FeedItem, approvals = false): NeedsYou {
-  // Where to approve something that cannot be approved here: the terminal, and here only refusing it, when approvals are on. The session the dashboard hosts has no terminal: unanswered, it is refused after 10 minutes (PROMPT_TIMEOUT_MS in sdk.ts). A herdr session's permission or plan card answers nothing, and its footer names the terminal.
+  // Where to approve something that cannot be approved here: through the chat, whose session's manager answers it, and here only refusing it, when approvals are on. The session the dashboard hosts has no terminal: unanswered, it is refused after 10 minutes (PROMPT_TIMEOUT_MS in sdk.ts). A herdr session's permission or plan card answers nothing, and its footer names the chat.
   const elsewhere = (approve: string, refuse: string) =>
     worker.herdr
       ? "Not all of it can be shown here."
@@ -156,8 +156,8 @@ export function feedItemNeed(worker: Worker, item: FeedItem, approvals = false):
           ? `Not all of it can be shown here: ${refuse} here, or it is refused after 10 minutes.`
           : `Not all of it can be shown here, so it is refused after 10 minutes.`
         : approvals
-          ? `Not all of it can be shown here: ${approve} from the session's terminal, or ${refuse} here.`
-          : `Not all of it can be shown here: answer it in the session's terminal.`
+          ? `Not all of it can be shown here: ${refuse} here, or ask Playground in the chat to ${approve}, and the session's manager does.`
+          : `Not all of it can be shown here: ask Playground in the chat, and the session's manager answers it.`
   // A prompt waits now, so its card stands under the latest step, after the tool call that raised it.
   const base = {
     at: null,

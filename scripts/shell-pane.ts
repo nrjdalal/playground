@@ -9,6 +9,7 @@ const USAGE = `usage:
   bun run --no-env-file scripts/shell-pane.ts open <session name>
   bun run --no-env-file scripts/shell-pane.ts run <pane> '<command>'
   bun run --no-env-file scripts/shell-pane.ts read <pane> <marker> [--timeout <ms>]
+  bun run --no-env-file scripts/shell-pane.ts login <pane> github [--timeout <ms>]
   bun run --no-env-file scripts/shell-pane.ts close <workspace>`
 
 export const SERVER = "playground-probes"
@@ -261,6 +262,108 @@ export async function read(pane: string, marker: string, timeout: number, herdr:
   return since(String(reply(args, waited).read?.text ?? ""), marker)
 }
 
+// The one login the launcher drives, GitHub's browser login: with no token in its environment, which gh signs in with in place of a login, no browser opened on the owner's screen, and its input closed, so gh prints the code and the link and waits for the sign-in rather than for Enter.
+export const GITHUB_LOGIN =
+  "env -u GH_TOKEN -u GITHUB_TOKEN GH_BROWSER=true gh auth login --web --hostname github.com --git-protocol https --skip-ssh-key < /dev/null"
+const DEVICE = "https://github.com/login/device"
+const CODE = /one-time code\W+([A-Z0-9]{4}-[A-Z0-9]{4})\b/i
+
+// The Inbox, as a session reaches it with bun run ask: post a card and print its id, then close it once the login ends.
+export type Inbox = {
+  close: (id: string, note: string) => Promise<void>
+  post: (item: Json) => Promise<string>
+}
+
+const ask = async (args: string[], stdin?: string) => {
+  const child = Bun.spawn([process.execPath, "run", "ask", ...args], {
+    stderr: "pipe",
+    stdin: stdin === undefined ? "ignore" : new Blob([stdin]),
+    stdout: "pipe",
+  })
+  const [out, err, code] = await Promise.all([
+    new Response(child.stdout).text(),
+    new Response(child.stderr).text(),
+    child.exited,
+  ])
+  return { code, err: err.trim(), out: out.trim() }
+}
+
+const askInbox: Inbox = {
+  close: async (id, note) => {
+    if ((await ask(["settle", id, "--note", note])).code === 0) return
+    const acked = await ask(["ack", id, "--no-link", note])
+    if (acked.code !== 0) throw new Refusal(`bun run ask could not close ${id}: ${acked.err}`)
+  },
+  post: async (item) => {
+    const posted = await ask(["new"], JSON.stringify(item))
+    if (posted.code !== 0 || !posted.out) throw new Refusal(`bun run ask new: ${posted.err}`)
+    return posted.out.split("\n").at(-1)!
+  },
+}
+
+// The owner's card: the code and the link alone, read from gh's own lines, so nothing else the pane shows reaches the Inbox.
+export const loginCard = (from: string, code: string): Json => ({
+  from,
+  preview: {
+    approve: "I signed in",
+    deny: "I can't sign in now",
+    text: [
+      "```text",
+      code,
+      "```",
+      "",
+      `- 🌐 Open [github.com/login/device](${DEVICE}) and enter the code above.`,
+      "- 🔒 GitHub asks for your password on its own page, never here.",
+      "- ✅ This card closes itself once gh sees the sign-in.",
+    ].join("\n"),
+    type: "ask",
+  },
+  title: `Sign in to GitHub for ${from}`,
+})
+
+// Runs GitHub's login in a pane through run(), posts the owner a card with gh's one-time code and link, waits for the login's marker, then closes the card. It returns the card's id and the exit status, and nothing the pane printed, so no line gh writes reaches the session.
+export async function login(
+  pane: string,
+  timeout: number,
+  herdr: Herdr = herdrCli,
+  inbox: Inbox = askInbox,
+  repo = mainCheckout(),
+  wait = (ms: number) => Bun.sleep(ms),
+): Promise<{ id: string; rc?: number }> {
+  const marker = await run(pane, GITHUB_LOGIN, herdr, repo)
+  const { pane: info } = await call(herdr, ["pane", "get", pane])
+  const from = (await labelOf(herdr, info.workspace_id)).replace(/^shell-|-\d+$/g, "")
+  let code: string | undefined
+  for (let tries = 0; !code && tries < 60; tries++) {
+    if (tries) await wait(500)
+    const seen = await herdr([
+      "pane",
+      "read",
+      pane,
+      "--source",
+      "recent-unwrapped",
+      "--lines",
+      "200",
+    ])
+    const { output, rc } = since(seen.code === 0 ? seen.out : "", marker)
+    if (output.includes(DEVICE)) code = CODE.exec(output)?.[1]
+    if (!code && rc !== undefined)
+      throw new Refusal(`gh auth login ended rc=${rc} before it printed a one-time code`)
+  }
+  if (!code) throw new Refusal("gh auth login printed no one-time code in 30 s")
+  const id = await inbox.post(loginCard(from, code))
+  const { rc } = await read(pane, marker, timeout, herdr)
+  await inbox.close(
+    id,
+    rc === 0
+      ? "Signed in: gh saw the login finish"
+      : rc === undefined
+        ? "No sign-in seen in time: ask again for a new code"
+        : `gh's login ended rc=${rc}: ask again for a new code`,
+  )
+  return { id, rc }
+}
+
 // Closes a workspace whose label this launcher made, by its own id, then reads the server's workspace list to see its label gone.
 export async function close(workspace: string, herdr: Herdr = herdrCli) {
   const label = await labelOf(herdr, workspace)
@@ -274,7 +377,11 @@ export async function close(workspace: string, herdr: Herdr = herdrCli) {
     throw new Refusal(`shell-pane closed ${workspace}, but the server still lists ${label}`)
 }
 
-export async function main(argv: string[], herdr: Herdr = herdrCli): Promise<number> {
+export async function main(
+  argv: string[],
+  herdr: Herdr = herdrCli,
+  inbox: Inbox = askInbox,
+): Promise<number> {
   const [verb, first, second, ...rest] = argv
   try {
     if (verb === "open" && first && !second) {
@@ -282,9 +389,9 @@ export async function main(argv: string[], herdr: Herdr = herdrCli): Promise<num
       console.log(`pane ${made.pane} workspace ${made.workspace} label ${made.label}`)
       return 0
     }
-    if (verb === "run" && !process.execArgv.includes("--no-env-file"))
+    if ((verb === "run" || verb === "login") && !process.execArgv.includes("--no-env-file"))
       throw new Refusal(
-        "shell-pane run takes bun run --no-env-file, as the hooks run with no env file, so no worktree .env reaches the guards",
+        `shell-pane ${verb} takes bun run --no-env-file, as the hooks run with no env file, so no worktree .env reaches the guards`,
       )
     if (verb === "run" && first && second && rest.length === 0) {
       console.log(`sent ${await run(first, second, herdr)}`)
@@ -302,6 +409,18 @@ export async function main(argv: string[], herdr: Herdr = herdrCli): Promise<num
       }
       console.log(`rc=${got.rc}`)
       return 0
+    }
+    if (verb === "login" && first && second === "github") {
+      const at = rest.indexOf("--timeout")
+      const timeout = at === -1 ? 900_000 : Number(rest[at + 1])
+      if (!Number.isInteger(timeout) || timeout <= 0) throw new Refusal(USAGE)
+      const { id, rc } = await login(first, timeout, herdr, inbox)
+      console.log(
+        rc === 0
+          ? `signed in; card ${id} closed`
+          : `no sign-in (rc=${rc ?? "unknown"}); card ${id} closed`,
+      )
+      return rc === 0 ? 0 : rc === undefined ? 2 : 1
     }
     if (verb === "close" && first && !second) {
       await close(first, herdr)

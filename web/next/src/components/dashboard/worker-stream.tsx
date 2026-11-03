@@ -1252,7 +1252,7 @@ export function WorkerStream({
         <Alert variant={lost.onYou ? "destructive" : "default"} className="mt-3 mb-4">
           <AlertTitle>{lost.title}</AlertTitle>
           <AlertDescription>
-            Its prompt is not in the Feed any more. Its terminal shows what it is asking.
+            Its prompt is not in the Feed any more: ask Playground in the chat what it is asking.
           </AlertDescription>
         </Alert>
       ) : null}
