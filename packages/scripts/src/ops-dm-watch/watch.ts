@@ -24,7 +24,7 @@ export const WAIT_S = 180
 const WINDOW_S = 3600
 const FIRST_S = 120
 
-// bravo marks a message handed to the backup, a name kept from when the second dispatcher was it, so a file written before reads the same.
+// bravo marks a message past its hand-on, sent to the assistant seat or logged as kept with the dispatcher, so neither happens twice; the name is kept from when the second dispatcher was the backup, so a file written before reads the same.
 type Handed = { at: number; bravo?: true; text: string; ts: string }
 type State = { handed: Handed[]; stuckTold?: string }
 export type Stuck = { at: string; state: string } | null

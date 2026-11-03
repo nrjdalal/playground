@@ -148,6 +148,19 @@ describe("the DM watch", () => {
     expect(w.ops[0]).toContain("dispatcher has read stuck since 2026-10-31T06:00:00.000Z")
   })
 
+  test("while the dispatcher has read stuck with no session in the assistant seat, nothing more is sent and Ops hears that no one else holds it, once", async () => {
+    const dm = fakeDm([{ text: "help", ts: "1000.000100", user: OWNER }])
+    const w = harness(dm, { at: "2026-10-31T06:00:00.000Z", state: "stuck" }, false, null)
+    await w.pass(1010)
+    dm.add("still there?")
+    await w.pass(1070)
+    expect(w.sent.map((s) => s.to)).toEqual(["dispatcher", "dispatcher"])
+    expect(w.ops).toEqual([
+      "dispatcher has read stuck since 2026-10-31T06:00:00.000Z, so the owner's DM messages have no one else to go to, since no live session holds the assistant seat; unstick dispatcher.",
+    ])
+    expect(w.logs).toHaveLength(2)
+  })
+
   test("a first pass hands on only the last 2 minutes, so a new install replays no history", async () => {
     const dm = fakeDm([
       { text: "old", ts: "1000.000100", user: OWNER },
