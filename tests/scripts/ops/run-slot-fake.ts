@@ -50,7 +50,7 @@ export type Setup = {
   swapins?: number
 }
 
-// A scratch state folder and config folder, with a fake sysctl on PATH giving 15 cores, the load asked for (load5 and load15 as load1 unless given) and normal memory, a fake uptime giving the same load, a fake top whose second sample reads the CPU idle share asked for, and a fake vm_stat whose last row reads the swap-ins asked for; sandboxed, sysctl and ps refuse every read as Claude Code's sandbox does, so the load comes from uptime alone and the cores from a fake getconf giving 15.
+// A scratch state folder and config folder, with a fake sysctl on PATH giving the load asked for (load5 and load15 as load1 unless given) and normal memory, a fake uptime giving the same load, a fake top whose second sample reads the CPU idle share asked for, and a fake vm_stat whose last row reads the swap-ins asked for; sandboxed, sysctl and ps refuse every read as Claude Code's sandbox does, so the load comes from uptime alone.
 export const machine = ({
   free = 80,
   idle = 80,
@@ -83,7 +83,6 @@ export const machine = ({
 echo "$2" >> ${join(root, "sysctl.log")}
 ${sandboxed ? 'echo "sysctl: sysctl fmt -1 1024 1: Operation not permitted" >&2; exit 1' : ""}
 case "$2" in
-  hw.ncpu) echo 15 ;;
   vm.loadavg) echo "{ ${load1.toFixed(2)} ${load5.toFixed(2)} ${load5.toFixed(2)} }" ;;
   kern.memorystatus_level) echo ${free} ;;
   kern.memorystatus_vm_pressure_level) echo ${pressure} ;;
@@ -114,12 +113,6 @@ esac
       `#!/bin/bash\necho "bash: /bin/ps: Operation not permitted" >&2\nexit 126\n`,
     )
     chmodSync(join(bin, "ps"), 0o755)
-    // the cores where sysctl is refused, 15 as the sysctl fake gives them, whatever the runner's own count
-    writeFileSync(
-      join(bin, "getconf"),
-      `#!/bin/bash\n[ "$1" = _NPROCESSORS_ONLN ] && { echo 15; exit 0; }\nexec /usr/bin/getconf "$@"\n`,
-    )
-    chmodSync(join(bin, "getconf"), 0o755)
   }
   // the settings reader answers factory.repo, the guarded orgs and slots.peers as a store that sets them would, and every other key as the real one does
   writeFileSync(

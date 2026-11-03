@@ -1218,9 +1218,19 @@ describe("ops-unstick's slot alerts", () => {
     mkdirSync(bin)
     writeFileSync(
       join(bin, "sysctl"),
-      `#!/bin/bash\ncase "$2" in hw.ncpu) echo 15 ;; vm.loadavg) echo "{ 2.00 2.00 2.00 }" ;; esac\n`,
+      `#!/bin/bash\ncase "$2" in hw.ncpu) echo 15 ;; vm.loadavg) echo "{ 2.00 2.00 2.00 }" ;; kern.memorystatus_level) echo 80 ;; kern.memorystatus_vm_pressure_level) echo 1 ;; esac\n`,
     )
     chmodSync(join(bin, "sysctl"), 0o755)
+    // the CPU 80% idle in top's second sample and no swap-ins in vm_stat's last row, so run-slot's gauges open every lane
+    writeFileSync(
+      join(bin, "top"),
+      `#!/bin/bash\necho "CPU usage: 1.00% user, 1.00% sys, 98.00% idle"\necho "CPU usage: 10.00% user, 10.00% sys, 80.00% idle"\n`,
+    )
+    writeFileSync(
+      join(bin, "vm_stat"),
+      `#!/bin/bash\necho "    free  swapins swapouts"\necho "    8023  9966113 12153731"\necho "    7698        0        0"\n`,
+    )
+    for (const name of ["top", "vm_stat"]) chmodSync(join(bin, name), 0o755)
     for (const name of off) writeFileSync(join(ops, name), "")
     for (const slot of held) {
       mkdirSync(join(ops, slot))
@@ -1232,7 +1242,7 @@ describe("ops-unstick's slot alerts", () => {
     return callWith({ PATH: `${bin}:${process.env.PATH}` }, config, "heavy_cap") as Promise<number>
   }
 
-  test("four CPU slots held at load1 under 12 raise no heavy-jobs alert", async () => {
+  test("four CPU slots held raise no heavy-jobs alert", async () => {
     const cap = await capped([], ["run-slot", "run-slot-2", "run-slot-3", "run-slot-4"])
     const jobs = ["101", "102", "103", "104"].map((pid) => ({
       inside: true,

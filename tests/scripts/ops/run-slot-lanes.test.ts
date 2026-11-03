@@ -13,12 +13,17 @@ const look = (m: ReturnType<typeof machine>) => {
   return { err: run.stderr.toString(), slots: run.stdout.toString() }
 }
 const slots = (setup: Setup) => look(machine(setup)).slots
-const log = (m: ReturnType<typeof machine>) => {
+// run-slot.runs.log's lanes lines
+const lanes = (m: ReturnType<typeof machine>) => {
   const path = join(m.ops, "run-slot.runs.log")
-  return existsSync(path) ? readFileSync(path, "utf8") : ""
+  return existsSync(path)
+    ? readFileSync(path, "utf8")
+        .split("\n")
+        .filter((line) => / lanes /.test(line))
+    : []
 }
 
-// #704: the factory's resting sessions hold load1 at 14 to 20 on 15 cores while the CPU sits 53 to 67% idle, so the old load1 lines (12 for the third and fourth slots, the cores for the second) left one lane open with 24 to 33 runs waiting
+// 3 Nov: the factory's resting sessions hold load1 at 14 to 20 on 15 cores while the CPU sits 53 to 67% idle, so the old load1 lines (12 for the third and fourth slots, the cores for the second) left one lane open with 24 to 33 runs waiting
 describe("slots 2 to 4 open on the CPU's idle share", () => {
   test("the 05:59Z sample opens all four: load1 18.6 and load5 19.0, over the old lines, with the CPU 52.9% idle", () => {
     expect(slots({ idle: 52.9, load1: 18.6, load5: 19.0 })).toBe("4\n")
@@ -42,6 +47,10 @@ describe("slots 2 to 4 open on the CPU's idle share", () => {
 describe("load1 at 30 is a hard stop", () => {
   test("load1 at 30 shuts slots 2 to 4 at 80% idle", () => {
     expect(slots({ idle: 80, load1: 30 })).toBe("1\n")
+  })
+
+  test("the 08:47Z reading shuts them: load1 31 with the CPU 57% idle, its runs waiting on paging", () => {
+    expect(slots({ idle: 57, load1: 31 })).toBe("1\n")
   })
 
   test("load1 at 29 leaves them open", () => {
@@ -79,6 +88,22 @@ describe("the gauges", () => {
     expect(look(m).slots).toBe("1\n")
   })
 
+  // the first row counts since boot, so with the second sample missing no rate is read, rather than the boot count's 4 a second
+  test("a vm_stat that prints its first sample alone shuts them", () => {
+    const m = machine()
+    writeFileSync(
+      join(m.bin, "vm_stat"),
+      '#!/bin/bash\necho "Mach Virtual Memory Statistics: (page size of 16384 bytes)"\necho "    free  swapins swapouts"\necho "  203349        4        0"\n',
+    )
+    chmodSync(join(m.bin, "vm_stat"), 0o755)
+    expect(look(m).slots).toBe("1\n")
+  })
+
+  test("the rate is the second sample's: 4,049,933 swap-ins since boot and none in the last second leave them open", () => {
+    expect(slots({ swapins: 0 })).toBe("4\n")
+    expect(readFileSync(join(machine().bin, "vm_stat"), "utf8")).toContain("4049933")
+  })
+
   test("every look within 10 s shares one top reading, as top's own sample", () => {
     const m = machine()
     look(m)
@@ -86,20 +111,28 @@ describe("the gauges", () => {
     expect(readFileSync(join(m.root, "top.log"), "utf8")).toBe("-l 2 -n 0\n")
   })
 
-  test("run-slot.runs.log records idle% and load1 when the lanes open and when they shut, and nothing while they stay", () => {
+  test("a run's look records idle% and load1 in run-slot.runs.log when the lanes open and when they shut, and nothing while they stay", async () => {
     const m = machine({ idle: 52.9, load1: 18.6 })
-    look(m)
-    look(m)
-    expect(log(m)).toMatch(/^\S+Z lanes \S* \d+ open idle=52\.9% load1=18\.60 swapins=0\n$/)
+    expect(await m.runs("worker-x")).toBe(true)
+    expect(await m.runs("worker-x")).toBe(true)
+    expect(lanes(m)).toEqual([
+      expect.stringMatching(/^\S+Z lanes worker-x \d+ open idle=52\.9% load1=18\.60 swapins=0$/),
+    ])
     writeFileSync(
       join(m.bin, "top"),
       '#!/bin/bash\necho "CPU usage: 1.00% user, 1.00% sys, 98.00% idle "\necho "CPU usage: 40.00% user, 30.00% sys, 30.00% idle "\n',
     )
     // a reading taken at the epoch is past its 10 s, so the next look reads top again
     writeFileSync(join(m.ops, "run-slot.gauges"), "0 52.9 0\n")
+    expect(await m.runs("worker-x")).toBe(true)
+    expect(lanes(m)).toHaveLength(2)
+    expect(lanes(m)[1]).toMatch(/ lanes worker-x \d+ shut idle=30\.00% load1=18\.60 swapins=0$/)
+  })
+
+  test("a read subcommand records no lanes line", () => {
+    const m = machine()
     look(m)
-    expect(log(m).split("\n").filter(Boolean)).toHaveLength(2)
-    expect(log(m)).toMatch(/ lanes \S* \d+ shut idle=30\.00% load1=18\.60 swapins=0\n$/)
+    expect(lanes(m)).toEqual([])
   })
 })
 
