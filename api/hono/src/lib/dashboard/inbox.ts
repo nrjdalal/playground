@@ -186,13 +186,13 @@ export const acceptArgs = (preview: InboxAccept, ref: number): string[] => [
   `the owner approved it in the Inbox (${itemTag(ref)})`,
 ]
 
-// Runs `playground ext <args>` with no role and returns its exit code and output: store/extensions.ts's runCli is the real one, which the router passes, and a test passes its own.
+// Runs `playground ext <args>` with no role and returns its exit code and output: store/extensions.ts's runCli is the real one, which the router passes, and a test passes its own. It restates that file's Cli, since the web reads this file's types and that file's imports reach the API's own.
 export type ExtRun = (args: string[]) => Promise<{ code: number; err: string; out: string }>
 
 // Runs a sink's argv with the value on its stdin and returns its exit code: null once stopped by a signal (its time limit's included), 127 when it could not start. secret-sink.ts holds the real one; a test passes its own.
 export type SinkRun = (argv: string[], stdin: string) => Promise<number | null>
 
-// What Approve does, one shape per kind of approval the owner keeps (playbook's ask rule): a Slack message, a ship of canary, a new Linear ticket, a delete, a schema, a budget, or a plain ask, whose words say what its poster does on Approve, for a decision no other shape fits (a production port, a work request from outside the chain, or a step only he can take, such as plugging in the Mac, where Approve means done and Deny means he can't). An ask may label each side in ELI5 / ASD-STE100, one line; the card then shows its text as the quoted block above the two labelled options. A secret asks for a value instead of a yes, which goes straight to its sink and is kept nowhere.
+// What Approve does, one shape per kind of approval the owner keeps (playbook's ask rule): an extension accept the dashboard runs itself, a Slack message, a ship of canary, a new Linear ticket, a delete, a schema, a budget, or a plain ask, whose words say what its poster does on Approve, for a decision no other shape fits (a production port, a work request from outside the chain, or a step only he can take, such as plugging in the Mac, where Approve means done and Deny means he can't). An ask may label each side in ELI5 / ASD-STE100, one line; the card then shows its text as the quoted block above the two labelled options. A secret asks for a value instead of a yes, which goes straight to its sink and is kept nowhere.
 export const previewSchema = z.discriminatedUnion("type", [
   z.strictObject({
     approve: oneLine(LIMITS.line).optional(),
@@ -630,14 +630,17 @@ function answerWords(
 
 // Pure: what the dispatcher is typed when the poster has ended, so the item's kind and exact words travel with the answer. A go is carried out in the poster's place; a deny, a clear or a discard has nothing to carry out, only an item to close.
 export function relayText(item: InboxItem, answer: Omit<InboxAnswer, "at">): string {
-  return relayWith(item, isGo(answer.choice), deliveryText(item, answer))
+  const lead = isGo(answer.choice)
+    ? `${item.from} has ended, so you carry this out in its place: a sent Slack message goes out through ${slack("slack.sendServer") || "your Slack tool"} (never the claude.ai connector), a Slack draft is saved with slack_send_message_draft as below, and you bun run ask ack the item with where it landed (bun run ask get shows its link).`
+    : closeLead(item)
+  return relayWith(item, lead, deliveryText(item, answer))
 }
 
-function relayWith(item: InboxItem, go: boolean, text: string): string {
+const closeLead = (item: InboxItem): string =>
+  `${item.from} has ended, so nothing is carried out: close the item with bun run ask get ${itemTag(item.ref)} --ack.`
+
+function relayWith(item: InboxItem, lead: string, text: string): string {
   const words = "text" in item.preview ? item.preview.text : JSON.stringify(item.preview)
-  const lead = go
-    ? `${item.from} has ended, so you carry this out in its place: a sent Slack message goes out through ${slack("slack.sendServer") || "your Slack tool"} (never the claude.ai connector), a Slack draft is saved with slack_send_message_draft as below, and you bun run ask ack the item with where it landed (bun run ask get shows its link).`
-    : `${item.from} has ended, so nothing is carried out: close the item with bun run ask get ${itemTag(item.ref)} --ack.`
   return `${lead} ${text}\nKind: ${item.kind}\nPreview text:\n${words}`
 }
 
@@ -663,12 +666,13 @@ const textsOf = (
 ): { relay: string; text: string } => {
   if (answer.choice === "provided") {
     const text = providedText(item, answer)
-    return { relay: relayWith(item, false, text), text }
+    return { relay: relayWith(item, closeLead(item), text), text }
   }
   // an accept the dashboard ran is carried out already, so the dispatcher closes it in an ended poster's place
   if (answer.accepted) {
     const text = deliveryText(item, answer)
-    return { relay: relayWith(item, false, text), text }
+    const lead = `${item.from} has ended, and the dashboard already ran this accept, so nothing is carried out: close the item with bun run ask ack ${itemTag(item.ref)} --no-link and why, as below.`
+    return { relay: relayWith(item, lead, text), text }
   }
   return { relay: relayText(item, answer), text: deliveryText(item, answer) }
 }
@@ -937,9 +941,11 @@ export async function answerItem(
   }
   const answer: InboxAnswer = { ...checked.answer, at: now.toISOString() }
   // an accept's Approve runs the accept, so one with nothing to run it is refused before it is recorded
-  const accepts =
+  const accepting =
     current.kind === "decision" && current.preview.type === "accept" && answer.choice === "approve"
-  if (accepts && !accept) {
+      ? current.preview
+      : undefined
+  if (accepting && !accept) {
     return { code: "VALIDATION_ERROR", message: "This dashboard cannot run an accept", ok: false }
   }
   const [row] = await db
@@ -964,8 +970,8 @@ export async function answerItem(
   let answered = toItem(row)
   let given: Omit<InboxAnswer, "at"> = checked.answer
   // run once, after the claim above, so a double click or a second tab accepts once
-  if (accepts && accept && current.kind === "decision" && current.preview.type === "accept") {
-    const ran = await accept(acceptArgs(current.preview, current.ref)).catch((error: unknown) => ({
+  if (accepting && accept) {
+    const ran = await accept(acceptArgs(accepting, current.ref)).catch((error: unknown) => ({
       code: 1,
       err: error instanceof Error ? error.message : String(error),
       out: "",

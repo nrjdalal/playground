@@ -2983,8 +2983,13 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
         },
       )
       const relayed = sent.find((delivery) => delivery.to === "dispatcher")
+      expect(relayed?.text).toStartWith(
+        `worker-eod has ended, and the dashboard already ran this accept, so nothing is carried out: close the item with bun run ask ack #i${posted.ref} --no-link`,
+      )
       expect(relayed?.text).toContain("the dashboard ran the accept")
       expect(relayed?.text).not.toContain("you carry this out in its place")
+      // an approved accept is a go, which get --ack leaves open, so the relay names the one close that closes it
+      expect(relayed?.text).not.toContain("--ack")
     })
   })
 })

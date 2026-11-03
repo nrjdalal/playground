@@ -614,21 +614,6 @@ export function outcomeLine(item: InboxItem): string | null {
     send: item.answer.editedText ? "You sent it with changes" : "You sent it",
   }[item.answer.choice]
   const delivery = item.delivery
-  // an accept the dashboard ran says what the run gave, the card's whole result
-  const accepted = "accepted" in item.answer ? item.answer.accepted : undefined
-  if (accepted) {
-    return accepted.exitCode === 0
-      ? `${done} · Accepted: ${accepted.line}`
-      : `${done} · Accept failed (exit ${accepted.exitCode}): ${accepted.line}`
-  }
-  // Claude Code holds it until the session is free, whatever the answer
-  if (delivery?.status === "queued") return `${done} · Queued: ${who} holds it, to take once free`
-  if (isGo(item.answer.choice) && delivery?.status !== "failed" && !carriedOut(item)) {
-    if (item.answer.choice === "draft") return `${done} · Saving a Slack draft…`
-    const slack = item.kind === "decision" && item.preview.type === "slack"
-    if (item.answer.choice !== "send" && !slack) return `${done} · Being carried out by ${who}…`
-    return `${done} · ${kindWord(item) === "Linear comment" ? "Sending to Linear…" : "Sending in Slack…"}`
-  }
   const reached =
     delivery?.status === "delivered"
       ? delivery.via === "cli"
@@ -641,6 +626,23 @@ export function outcomeLine(item: InboxItem): string | null {
             ? `Send unconfirmed: whether ${who} has it is not known`
             : `Send failed: ${delivery.reason}`
         : "Delivery pending"
+  // an accept the dashboard ran says what the run gave, the card's whole result, and why its poster was not told when that failed
+  const accepted = "accepted" in item.answer ? item.answer.accepted : undefined
+  if (accepted) {
+    const ran =
+      accepted.exitCode === 0
+        ? `Accepted: ${accepted.line}`
+        : `Accept failed (exit ${accepted.exitCode}): ${accepted.line}`
+    return delivery?.status === "failed" ? `${done} · ${ran} · ${reached}` : `${done} · ${ran}`
+  }
+  // Claude Code holds it until the session is free, whatever the answer
+  if (delivery?.status === "queued") return `${done} · Queued: ${who} holds it, to take once free`
+  if (isGo(item.answer.choice) && delivery?.status !== "failed" && !carriedOut(item)) {
+    if (item.answer.choice === "draft") return `${done} · Saving a Slack draft…`
+    const slack = item.kind === "decision" && item.preview.type === "slack"
+    if (item.answer.choice !== "send" && !slack) return `${done} · Being carried out by ${who}…`
+    return `${done} · ${kindWord(item) === "Linear comment" ? "Sending to Linear…" : "Sending in Slack…"}`
+  }
   return item.answer.noLink
     ? `${done} · ${reached} · No link: ${item.answer.noLink}`
     : `${done} · ${reached}`

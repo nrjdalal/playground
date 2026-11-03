@@ -171,6 +171,17 @@ describe("an accept decision (PG-658)", () => {
     )
     expect(itemState(refused)).toBe("failed")
   })
+
+  test("an accept its poster was not told of says why beside the result", () => {
+    const unsent = item({
+      ...approved({ exitCode: 0, line: "rev 9b8c7d6 is accepted" }),
+      delivery: { code: "CMUX_FAILED", reason: "cmux is not running", status: "failed" },
+    } as never)
+    expect(outcomeLine(unsent)).toBe(
+      "You approved it · Accepted: rev 9b8c7d6 is accepted · Send failed: cmux is not running",
+    )
+    expect(itemState(unsent)).toBe("failed")
+  })
 })
 
 describe("the inbox's counts", () => {
