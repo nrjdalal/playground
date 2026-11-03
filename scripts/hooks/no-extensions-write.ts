@@ -581,7 +581,10 @@ function wholeLine(commands: Command[], env: Env): boolean {
 // Every text of a variable the call sets or exports, and on a line read whole of every word, that holds a space, a leading ! dropped, each read as a command line of its own; `vars` is the scope's variables set since their lines were last read.
 function runsOf(parsed: Parsed, vars: Text[], whole: boolean, rootLine: boolean): string[] {
   const { args, first, local } = parsed
-  const values = [...local.values(), ...vars].flatMap((text) => (text.unknown ? [] : [text.value]))
+  const values = [...local.values(), ...vars].flatMap((text) => {
+    tick()
+    return text.unknown ? [] : [text.value]
+  })
   for (const word of whole ? (first ? [first, ...args] : args) : [])
     for (const text of texts(word)) {
       values.push(text.value.replace(/^!/, ""))
@@ -721,7 +724,10 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
     store.set(vars, cursors)
     const [keys, next] = varsSince(vars, cursors.get(key))
     cursors.set(key, next)
-    return keys.flatMap((k) => vars.get(k) ?? [])
+    return keys.flatMap((k) => {
+      tick()
+      return vars.get(k) ?? []
+    })
   }
   const visit: Visit = async (cmd: Command, parsed, env) => {
     const slot = slotWords(parsed)

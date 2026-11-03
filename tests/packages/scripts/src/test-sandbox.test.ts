@@ -240,3 +240,46 @@ test("a test's scratch git init, run under a hook's GIT_DIR and GIT_INDEX_FILE, 
   expect(existsSync(join(repo, ".git"))).toBe(true)
   expect(run.exitCode).toBe(0)
 }, 30_000)
+
+// bun reads a path it cannot find as a name filter that matches nothing, so a mistyped path once let a run pass on its other files (2 Nov)
+test("a test path that names no file fails the run, naming it, and runs nothing (#627)", async () => {
+  const ran = join(DIR, "real-ran")
+  writeFileSync(
+    join(DIR, "real.test.ts"),
+    `import { test } from "bun:test"\nimport { writeFileSync } from "node:fs"\ntest("real", () => writeFileSync(${JSON.stringify(ran)}, ""))\n`,
+  )
+  const run = Bun.spawn(["bun", SCRIPT, "./real.test.ts", "fixtures/missing.test.ts"], {
+    cwd: DIR,
+    stderr: "pipe",
+    stdout: "ignore",
+    timeout: 15_000,
+  })
+  const [stderr, code] = await Promise.all([new Response(run.stderr).text(), run.exited])
+  expect(code).not.toBe(0)
+  expect(stderr).toContain("fixtures/missing.test.ts")
+  expect(existsSync(ran)).toBe(false)
+}, 20_000)
+
+test.each([
+  ["a path with a leading ./", "./filtered.test.ts"],
+  ["a path with none", "filtered.test.ts"],
+  ["a filter with no test suffix", "filtered"],
+])(
+  "%s runs as before (#627)",
+  async (_, arg) => {
+    writeFileSync(
+      join(DIR, "filtered.test.ts"),
+      'import { test } from "bun:test"\ntest("filtered", () => {})\n',
+    )
+    const run = Bun.spawn(["bun", SCRIPT, arg], {
+      cwd: DIR,
+      stderr: "pipe",
+      stdout: "ignore",
+      timeout: 15_000,
+    })
+    const [stderr, code] = await Promise.all([new Response(run.stderr).text(), run.exited])
+    expect(code).toBe(0)
+    expect(stderr).toContain("1 pass")
+  },
+  20_000,
+)

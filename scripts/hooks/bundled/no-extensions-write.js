@@ -212,7 +212,7 @@ async function withDeadline(budget, body) {
 }
 var steps = 0;
 function tick() {
-  if (deadline === undefined || ++steps % 1024 !== 0)
+  if (++steps % 1024 !== 0 || deadline === undefined)
     return;
   if (performance.now() > deadline)
     throw new RangeError("past the hook's time");
@@ -503,6 +503,7 @@ var UV_TAKES = new Set([
 ]);
 function decode(raw) {
   return raw.replace(/\\(?:x([\da-fA-F]{1,2})|u([\da-fA-F]{1,4})|U([\da-fA-F]{1,8})|0?([0-7]{1,3})|([\s\S]))/g, (whole, hex, u4, u8, octal, other) => {
+    tick();
     const point = hex || u4 || u8 ? Number.parseInt(hex ?? u4 ?? u8 ?? "", 16) : Number.parseInt(octal ?? "", 8);
     if (!Number.isNaN(point))
       return point <= 1114111 ? String.fromCodePoint(point) : whole;
@@ -918,6 +919,7 @@ function unwrap(state, inside, budget) {
   const take = () => rest.pop();
   const also = [];
   const fork = (wrapper, drop) => {
+    tick();
     if (budget.left-- <= 0) {
       budget.capped = true;
       return;
@@ -1875,7 +1877,10 @@ function wholeLine(commands, env) {
 }
 function runsOf(parsed, vars, whole, rootLine) {
   const { args, first, local } = parsed;
-  const values = [...local.values(), ...vars].flatMap((text) => text.unknown ? [] : [text.value]);
+  const values = [...local.values(), ...vars].flatMap((text) => {
+    tick();
+    return text.unknown ? [] : [text.value];
+  });
   for (const word of whole ? first ? [first, ...args] : args : [])
     for (const text of texts(word)) {
       values.push(text.value.replace(/^!/, ""));
@@ -2009,7 +2014,10 @@ async function inspect(raw, environment, unknown = false) {
     store.set(vars, cursors);
     const [keys, next] = varsSince(vars, cursors.get(key));
     cursors.set(key, next);
-    return keys.flatMap((k) => vars.get(k) ?? []);
+    return keys.flatMap((k) => {
+      tick();
+      return vars.get(k) ?? [];
+    });
   };
   const visit = async (cmd, parsed, env) => {
     const slot = slotWords(parsed);
