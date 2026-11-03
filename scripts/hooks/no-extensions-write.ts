@@ -205,32 +205,18 @@ function scoreAsOther(words: Word[], cmd: Command, parsed: Parsed, env: Env): bo
 }
 
 const AWKS = new Set(["awk", "gawk", "mawk", "nawk"])
-// what lets an awk program run a command or write a file: system(), getline, a > redirect or an @ directive, and a | pipe outside a regex literal or a string
+// what lets an awk program run a command or write a file: system(), getline, a > redirect or an @ directive, and a | pipe outside the literals awkPipe allows
 const AWK_RUNS = /system|getline|[>@]/
 const awkRuns = (program: string) => AWK_RUNS.test(program) || awkPipe(program)
 
-// Whether a program holding a | may pipe: a | outside every string and regex literal, or anything the scanner cannot read whole, which counts as one as canary counted every |: a # comment, a [ in a regex, a newline or no end in a literal; a / opens a regex only where an operand starts, so a division (`$1/2`, `3/4`) never hides a pipe after it
+// The literals a | may sit in without piping: a regex that is the program's whole leading pattern (`/a|b/`, `/a|b/ {…}`), and a regex or a string right after ~ (`$1 ~ /a|b/`, `$1 ~ "a|b"`), each holding no quote, no [ and no newline
+const AWK_LEAD = /^\s*\/(?:[^\\/"[\n]|\\.)*\/(?=\s*(?:\{|$))/
+const AWK_MATCH = /~\s*(?:\/(?:[^\\/"[\n]|\\.)*\/|"[^"\\\n]*")/g
+
+// Whether a program holding a | may pipe: once the allowed literals are cut out, any |, quote, /, # or backslash left counts as one, as canary counted every |
 function awkPipe(program: string): boolean {
   if (!program.includes("|")) return false
-  let last = ""
-  for (let i = 0; i < program.length; i++) {
-    const c = program[i]!
-    if (c === "#") return true
-    if (c === '"' || (c === "/" && /^[(,{};!~&|=?:]?$/.test(last))) {
-      let end = i + 1
-      while (end < program.length && program[end] !== c) {
-        if (program[end] === "\n" || (c === "/" && program[end] === "[")) return true
-        end += program[end] === "\\" ? 2 : 1
-      }
-      if (end >= program.length) return true
-      i = end
-      last = c
-      continue
-    }
-    if (c === "|") return true
-    if (!/\s/.test(c)) last = c
-  }
-  return false
+  return /["/#\\|]/.test(program.replace(AWK_LEAD, " ").replace(AWK_MATCH, " "))
 }
 
 // awk's program words, or undefined when a program comes from a file or an option the hook does not know: -F and -v take a value, gawk's -e and --source a program, and the first other word is the program
