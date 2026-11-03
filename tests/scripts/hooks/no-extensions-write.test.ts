@@ -566,6 +566,24 @@ describe("a quoted argument is read as a command line only where a program runs 
     expect(await at(command, join(homedir(), "x", ".claude", "worktrees", "y"))).toBeUndefined()
   })
 
+  test.each([
+    [
+      "bun -e holding a regex with a lookbehind",
+      `bun -e 'const r = /(?<=x)y/; console.log(r.test("xy"))'`,
+    ],
+    [
+      "node -e holding a regex with a lookbehind",
+      `node -e 'const r = /(?<=a)b/; console.log(r.test("ab"))'`,
+    ],
+    [
+      "agent-browser eval holding an anchored regex of a tag",
+      `agent-browser eval 'const ok = /^<div>/.test(document.body.innerHTML); ok'`,
+    ],
+  ])("%s runs from a worktree and the home", async (_, command) => {
+    for (const cwd of [join(homedir(), "x", ".claude", "worktrees", "y"), homedir()])
+      expect(await at(command, cwd)).toBeUndefined()
+  })
+
   test("the dispatcher brief's call that finds the Dashboard's checkout runs from a worktree", async () => {
     const step = readFileSync(
       join(import.meta.dir, "../../../scripts/briefs/dispatcher.md"),

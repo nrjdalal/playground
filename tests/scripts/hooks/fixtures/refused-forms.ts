@@ -77,6 +77,7 @@ export type Group = {
     | "#509"
     | "#533"
     | "#536"
+    | "#635"
 }
 
 // The rows a guard-loosening PR lets run on purpose, and the rows that show the one form a guard lets run, each written as a row's "<source> <what>" for all its cases, or as one case's "<source> <what> | <guard> | <folder>".
@@ -2411,5 +2412,32 @@ gh api graphql -f query="$QUERY"`,
       ],
     ],
     source: "#533",
+  },
+  {
+    folders: ["process home", "process data folder", "process worktree"],
+    guards: ["no-extensions-write"],
+    rows: () => [
+      [
+        "an inline bun program holding a regex, its line redirected into the root",
+        `bun -e 'console.log(/^a/.test("a"))' > ~/.playground/extensions/.no-such-folder/x`,
+      ],
+      [
+        "an inline bun program holding a regex, given a path in the root as its argument",
+        `bun -e 'console.log(/^a/.test(process.argv[1]))' ~/.playground/extensions/.no-such-folder`,
+      ],
+      [
+        "an inline node program naming the root in its text",
+        `node -e 'require("fs").writeFileSync(process.env.HOME + "/.playground/extensions/.no-such-folder/x", "")'`,
+      ],
+      [
+        "an agent-browser eval script holding a regex, its line redirected into the root",
+        `agent-browser eval 'document.title.match(/^a/)' > ~/.playground/extensions/.no-such-folder/x`,
+      ],
+      [
+        "an inline bun program printing a removal into sudo's shell",
+        `bun -e 'console.log("rm -rf ~/.playground/extensions/.no-such-folder")' | sudo -s`,
+      ],
+    ],
+    source: "#635",
   },
 ]
