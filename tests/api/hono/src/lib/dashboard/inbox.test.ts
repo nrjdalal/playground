@@ -1398,7 +1398,13 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
     const approved = await store.answerItem(db, aside.id, { action: "approve" }, { actor })
     expect(approved.ok && approved.item.status).toBe("approved")
     // an item that is not archived is refused: open, answered, or an update
-    for (const id of [(await post(decision(PREVIEWS.schema))).id, aside.id]) {
+    const update = await post({
+      from: "ops",
+      kind: "update",
+      preview: { outcome: "merged" },
+      title: "Merged: the export fix",
+    })
+    for (const id of [(await post(decision(PREVIEWS.schema))).id, aside.id, update.id]) {
       expect(await store.answerItem(db, id, { action: "unarchive" }, { actor })).toMatchObject({
         code: "CONFLICT",
         ok: false,

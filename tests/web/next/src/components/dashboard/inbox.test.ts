@@ -21,6 +21,7 @@ import {
   Questionnaire,
   QuestionnaireItem,
 } from "../../../../../../web/next/src/components/ui/questionnaire"
+import type { Shelf } from "../../../../../../web/next/src/lib/inbox"
 import { tipsOf } from "../../tooltips"
 
 // React and React Query resolve from the web app's own packages, which this directory cannot see; the calls the test makes are typed here rather than through a path into node_modules.
@@ -58,7 +59,7 @@ const render = (
   paused: boolean,
   item: InboxItem = decision,
   updated = false,
-  extra: { defaultOpen?: boolean; shelf?: string } = {},
+  extra: { defaultOpen?: boolean; shelf?: Shelf } = {},
 ) =>
   renderToStaticMarkup(
     createElement(
@@ -78,7 +79,7 @@ const render = (
       ),
     ),
   )
-const opened = (item: InboxItem, shelf?: string) =>
+const opened = (item: InboxItem, shelf?: Shelf) =>
   render(false, item, false, { defaultOpen: true, ...(shelf && { shelf }) })
 
 // the opening tag of the button whose words hold the label
@@ -852,6 +853,13 @@ describe("the Inbox as one accordion: the open items, then Snoozed, Archived and
 
   test("a fold keeps the open cards mounted, so what a card holds (a draft typed) is still there when the list opens again", () => {
     expect(source).toContain("<AccordionContent keepMounted className={SHELF_PANEL}>")
+  })
+
+  test("a shut shelf keeps its cards mounted too, so a card opened there is still opened when its row opens again (PG-644)", () => {
+    const shelves = source.slice(source.indexOf("<ShelfMark empty={shelf.length === 0} />"))
+    expect(shelves).toMatch(
+      /<AccordionContent keepMounted className=\{SHELF_PANEL\}>\n\s+<div role="list"/,
+    )
   })
 
   test("the open row's tick is a single ✓ while anything is unread, and a muted ✓✓ All read once all is, the shelves' ✓ too", () => {

@@ -1739,7 +1739,8 @@ export function Inbox({ viewing }: { viewing: boolean }) {
                 />
                 <ShelfMark empty={shelf.length === 0} />
               </AccordionTrigger>
-              <AccordionContent className={SHELF_PANEL}>
+              {/* kept mounted while shut, as the open row is, so a card opened on its shelf stays opened */}
+              <AccordionContent keepMounted className={SHELF_PANEL}>
                 <div role="list" className="flex flex-col gap-3 pt-8 pb-3">
                   {shelf.map((item) => (
                     <InboxCard
