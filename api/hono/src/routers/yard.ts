@@ -5,6 +5,8 @@ import { db } from "@packages/db"
 import { env } from "@packages/env/api-hono"
 import {
   channelSchema,
+  githubLoginSchema,
+  inviteCodeSchema,
   MAX_TEXT,
   MESSAGE_KINDS,
   messageSchema,
@@ -73,11 +75,6 @@ const inviteSchema = z.object({
   requestedBy: z.object({ login: z.string() }).nullable(),
   status: z.enum(["open", "redeemed", "requested", "revoked"]),
 })
-
-const login = z
-  .string()
-  .trim()
-  .regex(/^[a-z\d](?:[a-z\d-]{0,38})$/i, "a GitHub login")
 
 // The hosted web's origin, the one a socket opens from; with HONO_WEB_URL unset, no socket opens, while the other routes still serve.
 const webOrigin = env.HONO_WEB_URL ? new URL(env.HONO_WEB_URL).origin : null
@@ -149,7 +146,7 @@ export const yardRouter = new Hono<{ Variables: YardVariables }>()
       [validationErrorResponses, notFoundErrorResponses],
     ),
     member,
-    valid("json", z.object({ login })),
+    valid("json", z.object({ login: githubLoginSchema })),
     async (c) =>
       c.json({
         data: { channel: await store.openDm(db, c.get("caller"), c.req.valid("json").login) },
@@ -307,7 +304,7 @@ export const yardRouter = new Hono<{ Variables: YardVariables }>()
       "json",
       z.object({
         expiresInDays: z.number().int().min(1).max(30).optional(),
-        forLogin: login.optional(),
+        forLogin: githubLoginSchema.optional(),
       }),
     ),
     async (c) =>
@@ -325,7 +322,7 @@ export const yardRouter = new Hono<{ Variables: YardVariables }>()
       201,
     ),
     web,
-    valid("json", z.object({ forLogin: login })),
+    valid("json", z.object({ forLogin: githubLoginSchema })),
     async (c) =>
       c.json(
         {
@@ -371,7 +368,7 @@ export const yardRouter = new Hono<{ Variables: YardVariables }>()
       [validationErrorResponses, notFoundErrorResponses],
     ),
     yardCaller({ rung: "user", web: true }),
-    valid("json", z.object({ code: z.string().trim().min(1).max(64) })),
+    valid("json", z.object({ code: inviteCodeSchema })),
     async (c) =>
       c.json({ data: await store.redeemInvite(db, c.get("caller"), c.req.valid("json").code) }),
   )
