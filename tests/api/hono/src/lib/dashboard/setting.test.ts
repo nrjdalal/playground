@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test"
 
-import { deliveryEvent, deliveryWords } from "../../../../../../api/hono/src/lib/dashboard/deliver"
+import {
+  DELIVERED_ACTIONS,
+  deliveryEvent,
+  deliveryWords,
+} from "../../../../../../api/hono/src/lib/dashboard/deliver"
 import {
   settingCommand,
   settingRequestSchema,
@@ -66,6 +70,11 @@ describe("a session setting", () => {
       refused: null,
       skill: "review",
     })
+  })
+
+  test("a setting's row is found again by its id, as a message's is, so a retry under it types nothing", () => {
+    expect(DELIVERED_ACTIONS).toContain("dashboard.setting")
+    expect(DELIVERED_ACTIONS).toContain("dashboard.message")
   })
 
   test("a setting records a dashboard.setting row told whole, a message a dashboard.message row by size", () => {
