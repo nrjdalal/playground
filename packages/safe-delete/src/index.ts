@@ -25,8 +25,11 @@ export type Refusal = { kind: "protected" | "refused" | "tripwire"; refused: str
 // A process with a working folder: its command line, and the unix sockets it holds open, read for an agent-browser daemon alone.
 export type Proc = { command: string; cwd: string; pid: number; sockets: string[] }
 
-// What tells a worktree is held: the roster's live statuses, every process with a working folder (null when they cannot be listed), and the roster's path.
-export type Holders = { live: string[]; procs: Proc[] | null; roster: string }
+// A running node_modules clone, from run-slot's clone holder record: the session that runs it, its pid, the checkout it copies from and the one it copies into.
+export type Clone = { destination: string; pid: number; source: string; who: string }
+
+// What tells a worktree is held: each running clone, the roster's live statuses, every process with a working folder (null when they cannot be listed), and the roster's path.
+export type Holders = { clones: Clone[]; live: string[]; procs: Proc[] | null; roster: string }
 
 // An agent-browser process, its daemon or a client, by its command's first word.
 export const isAgentBrowser = (command: string): boolean =>
@@ -329,7 +332,7 @@ export function restore(
   return { path: entry.path }
 }
 
-// Why a worktree may not be removed, or null: it sits in <main>/.claude/worktrees, the roster reads, no live session or process holds it, and its HEAD is on a remote branch.
+// Why a worktree may not be removed, or null: it sits in <main>/.claude/worktrees, the roster reads, no live session, running clone or process holds it, and its HEAD is on a remote branch.
 export function worktreeRefusal(path: string, roots: Roots, holders: Holders): string | null {
   const at = real(path)
   if (dirname(at) !== worktreesOf(roots)) return `${at} is not a worktree in ${worktreesOf(roots)}`
@@ -361,6 +364,12 @@ export function worktreeRefusal(path: string, roots: Roots, holders: Holders): s
     if (byBranch || byPr || tokens.some((t) => where.includes(t)))
       return `${at} is held by ${agent.name}, which the roster lists as ${agent.status}`
   }
+  // a clone's cp works in its destination and only reads its source, so no working folder names the source (PG-699)
+  const clone = holders.clones.find(
+    (c) => inside(real(c.source), at) || inside(real(c.destination), at),
+  )
+  if (clone)
+    return `${at} is held by ${clone.who}'s node_modules clone (pid ${clone.pid}) from ${clone.source} into ${clone.destination}`
   if (holders.procs === null) return `the processes' folders cannot be listed, so ${at} stays`
   const held = holders.procs.filter((p) => inside(real(p.cwd), at))
   const holder = held.find((p) => isAgentBrowser(p.command)) ?? held[0]

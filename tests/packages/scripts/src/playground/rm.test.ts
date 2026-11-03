@@ -14,6 +14,7 @@ import { join } from "node:path"
 
 import { CARVE_OUTS } from "../../../../../packages/safe-delete/src"
 import {
+  clonesOf,
   processesOf,
   RM_USAGE,
   type RmDeps,
@@ -70,6 +71,7 @@ const machine = () => {
   writeFileSync(join(data, "roster.json"), JSON.stringify({ agents: [] }))
   const told: string[] = []
   const deps: RmDeps = {
+    clones: () => [],
     procs: () => [],
     data,
     home,
@@ -133,6 +135,47 @@ test("runRm --worktree checks the holders, moves the worktree and prunes it from
   expect(await runRm(["--worktree", wt], deps)).toBe(0)
   expect(existsSync(wt)).toBe(false)
   expect(git(main, "worktree", "list")).not.toContain("pg-1")
+})
+
+// run-slot's clone lane copies <source>/node_modules with its cwd in the destination, so only its holder record names the source (PG-699)
+test("runRm --worktree refuses a worktree a running clone reads from, naming the clone, and moves it once the record is gone", async () => {
+  const { deps, main, root } = machine()
+  git(root, "init", "--bare", "-q", join(root, "remote.git"))
+  git(main, "init", "-q", "-b", "canary")
+  writeFileSync(join(main, "README.md"), "x")
+  git(main, "add", ".")
+  git(main, "commit", "-qm", "init")
+  git(main, "remote", "add", "origin", join(root, "remote.git"))
+  git(main, "push", "-q", "origin", "canary")
+  const wt = join(main, ".claude", "worktrees", "pg-1")
+  git(main, "worktree", "add", "-q", "-b", "PG-1-thing", wt)
+  git(wt, "push", "-q", "origin", "PG-1-thing")
+  const into = join(main, ".claude", "worktrees", "pg-2")
+  const reading = { destination: into, pid: 4242, source: wt, who: "k3m9px-worker" }
+  const said: string[] = []
+  const error = console.error
+  console.error = (line: string) => void said.push(line)
+  try {
+    expect(await runRm(["--worktree", wt], { ...deps, clones: () => [reading] })).toBe(1)
+  } finally {
+    console.error = error
+  }
+  expect(said).toEqual([
+    `playground: ${wt} is held by k3m9px-worker's node_modules clone (pid 4242) from ${wt} into ${into}`,
+  ])
+  expect(existsSync(wt)).toBe(true)
+  expect(await runRm(["--worktree", wt], deps)).toBe(0)
+  expect(existsSync(wt)).toBe(false)
+})
+
+test("clonesOf reads run-slot's clone holder line while its pid lives, and a line with no source as none", () => {
+  const line = "k3m9px-worker 4242 2026-11-03T05:21:53Z\t/a/src\t/a/dst\n"
+  expect(clonesOf(line, () => true)).toEqual([
+    { destination: "/a/dst", pid: 4242, source: "/a/src", who: "k3m9px-worker" },
+  ])
+  expect(clonesOf(line, () => false)).toEqual([])
+  expect(clonesOf("k3m9px-worker 4242 2026-11-03T05:21:53Z\n", () => true)).toEqual([])
+  expect(clonesOf("", () => true)).toEqual([])
 })
 
 test("rmDeps' notify queues a safe-delete line for the dispatcher through notify.sh", () => {
