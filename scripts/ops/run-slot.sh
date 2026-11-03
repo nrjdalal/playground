@@ -2,7 +2,8 @@
 # run-slot.sh <who> [--model-bound] -- <command> [args...]: run one heavy run (a suite, a type check, Checks, a build) holding one of the machine's run slots.
 # A --model-bound run (one that mostly waits on a model, such as a parity replay) takes run-slot-model-<n> instead, at most slots.modelBound at once (model_cap, below), counted apart from the CPU slots and their queue.
 # It takes ops/run-slot, run-slot-2, run-slot-3 or run-slot-4 by mkdir, as the load rules (lanes_open) open them and its size's load units fit, waiting and
-# retrying while none does; writes "<who> <its own pid> <iso> <units> <size>" to the slot's .holder file beside it; runs the command as its
+# retrying while none does; writes "<who> <its own pid> <iso> <units> <size>" to the slot's .holder file beside it
+# (a quick lane writes "<who> <pid> <iso>", the clone lane adding its two checkouts, clone_ends); runs the command as its
 # child, in a new session and process group; and gives the slot back (rmdir) however it ends: success, failure or a signal. A holder whose
 # pid has died is reclaimed; a slot whose holder line has no pid, or has no holder line, is held until it is 2 hours old. It prints the slot
 # it took to stderr and exits with the command's code.
@@ -697,6 +698,20 @@ for pattern in workspaces:
             if code:
                 sys.exit(code)'
 
+# a clone's source checkout and destination, from cp <flags> <src>/node_modules <dst>[/node_modules] (the shape CLONE_WORKSPACES reads), each absolute and led by a tab, for the clone lane's holder line, so playground rm refuses a worktree a running clone reads from or copies into (PG-714); nothing for words of another shape
+clone_ends() {
+  local a seen="" paths=()
+  for a in "$@"; do
+    [ -n "$seen" ] || { [ "$(basename -- "$a")" = cp ] && seen=1; continue; }
+    case "$a" in -*) ;; *) a=${a%/.}; paths+=("${a%/}") ;; esac
+  done
+  [ ${#paths[@]} -eq 2 ] && [ "$(basename -- "${paths[0]}")" = node_modules ] || return 0
+  local dst=${paths[1]}
+  [ "$(basename -- "$dst")" = node_modules ] && dst=$(dirname -- "$dst")
+  printf '\t%s\t%s' "$(absolute "$(dirname -- "${paths[0]}")")" "$(absolute "$dst")"
+}
+absolute() { (cd -- "$1" 2>/dev/null && pwd -P) || case "$1" in /*) printf %s "$1" ;; *) printf %s "$PWD/$1" ;; esac; }
+
 # runs the command as the leader of a process group of its own (macOS has no setsid(1)), which reap stops once it ends, and exits with its code; where Claude Code's sandbox refuses the new group or the nice, it says so on stderr and runs the command without it
 run_command() {
   local code
@@ -985,7 +1000,9 @@ if [ -n "$KIND" ]; then
   done
   [ -n "$GOT" ] || exit 143
   SLOT="$OPS/run-slot-$KIND"
-  echo "$WHO $$ $(date -u +%FT%TZ)" > "$SLOT.holder"
+  ends=""
+  [ "$KIND" = clone ] && ends=$(clone_ends "$@")
+  echo "$WHO $$ $(date -u +%FT%TZ)$ends" > "$SLOT.holder"
   echo "run-slot.sh: $WHO holds run-slot-$KIND" >&2
   TOOK=$(date +%s); rlog start "run-slot-$KIND waited=$((TOOK - ASKED))s"
   run_command "$@"

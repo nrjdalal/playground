@@ -387,12 +387,17 @@ const recordWhileTyping: DeliverDeps["record"] = (event, typing) =>
     await typing()
   })
 
-// When the message with this id was recorded, if it was: its row commits with its Enter, so a row means the message went.
+// The rows a delivery records under its id: a message's and a setting's.
+export const DELIVERED_ACTIONS = [
+  ...storedAs("dashboard.message"),
+  ...storedAs("dashboard.setting"),
+]
+// When the message or setting with this id was recorded, if it was: its row commits with its Enter, so a row means it went.
 const deliveredAt: DeliverDeps["delivered"] = async (id) => {
   const [row] = await db
     .select({ at: activity.createdAt })
     .from(activity)
-    .where(and(eq(activity.id, id), inArray(activity.action, storedAs("dashboard.message"))))
+    .where(and(eq(activity.id, id), inArray(activity.action, DELIVERED_ACTIONS)))
   return row?.at ?? null
 }
 
