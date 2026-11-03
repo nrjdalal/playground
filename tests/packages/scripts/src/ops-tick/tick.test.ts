@@ -459,6 +459,7 @@ describe("sweep", () => {
     "/m/scripts/spawn.sh resume runner-y /m 4444",
     "/m/scripts/spawn.sh resume worker-parked /m 5555",
     "/m/scripts/spawn.sh resume probe-z /m 6666",
+    "/m/scripts/spawn.sh resume worker-done /m 7777",
     "runner-y (pid 42, /m) runs without the factory's hooks: respawn it from its handoff",
   ].join("\n")
 
@@ -472,6 +473,7 @@ describe("sweep", () => {
           { name: "reviewer-q", worker: OLD.ops },
           { name: "runner-y" },
           { name: "worker-parked", status: "parked" },
+          { name: "worker-done", status: "done" },
         ],
       }),
     )
