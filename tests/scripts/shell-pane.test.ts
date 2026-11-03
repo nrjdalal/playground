@@ -1,12 +1,14 @@
 import { afterAll, describe, expect, test } from "bun:test"
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
+import { inboxInputSchema } from "../../api/hono/src/lib/dashboard/inbox"
 import { dataDir } from "../../packages/env/src/data-dir"
 import { UNSET_REPOS } from "../../packages/scripts/src/trace-count/kinds"
 import { mainCheckout } from "../../scripts/hooks/no-main-checkout"
 import {
+  askInbox,
   bashGuards,
   close,
   GITHUB_LOGIN,
@@ -587,6 +589,7 @@ describe("login drives GitHub's browser login and hands the owner its code on a 
     })
     expect(posted[0]!.preview.text).toContain("AB12-CD34")
     expect(posted[0]!.preview.text).toContain("(https://github.com/login/device)")
+    expect(inboxInputSchema.safeParse(posted[0]).error?.issues).toBeUndefined()
     expect(closed).toEqual(["item-1 Signed in: gh saw the login finish"])
     expect(JSON.stringify({ closed, posted })).not.toMatch(/gho_|Logged in|made-up-login/)
   })
@@ -645,6 +648,38 @@ describe("login drives GitHub's browser login and hands the owner its code on a 
       "gh auth login printed no one-time code in 30 s",
     )
     expect(posted).toEqual([])
+  })
+
+  test("a card the Inbox refuses names the pane still holding gh's login", async () => {
+    const { herdr } = loginHerdr(shown)
+    const refusing: Inbox = {
+      close: async () => {},
+      post: async () => {
+        throw new Refusal("bun run ask new: refused")
+      },
+    }
+    expect(await refusal(login("w1:p1", 50, herdr, refusing, CHECKOUT, noWait))).toBe(
+      "bun run ask new: refused; gh's login still waits in w1:p1 until its code expires, so close its workspace",
+    )
+  })
+
+  test("askInbox runs bun run ask in the checkout it names, with no POSTGRES_URL, as the clone root's ask forwards it", async () => {
+    const root = join(SCRATCH, "inbox-root")
+    mkdirSync(root)
+    writeFileSync(
+      join(root, "package.json"),
+      JSON.stringify({
+        scripts: { ask: 'cat >/dev/null; echo "$(pwd -P) ${POSTGRES_URL:-none}"' },
+      }),
+    )
+    const before = process.env.POSTGRES_URL
+    process.env.POSTGRES_URL = "postgres://made-up"
+    try {
+      expect(await askInbox(root).post({ title: "t" })).toBe(`${realpathSync(root)} none`)
+    } finally {
+      if (before === undefined) delete process.env.POSTGRES_URL
+      else process.env.POSTGRES_URL = before
+    }
   })
 })
 

@@ -274,8 +274,12 @@ export type Inbox = {
   post: (item: Json) => Promise<string>
 }
 
-const ask = async (args: string[], stdin?: string) => {
+// Runs in the main checkout with no POSTGRES_URL, where bun run ask goes on to the live dashboard's checkout (ask-from-clone.ts), so the card reaches the owner's Inbox from any worktree.
+const ask = async (cwd: string, args: string[], stdin?: string) => {
+  const { POSTGRES_URL: _, ...env } = process.env
   const child = Bun.spawn([process.execPath, "run", "ask", ...args], {
+    cwd,
+    env,
     stderr: "pipe",
     stdin: stdin === undefined ? "ignore" : new Blob([stdin]),
     stdout: "pipe",
@@ -288,18 +292,18 @@ const ask = async (args: string[], stdin?: string) => {
   return { code, err: err.trim(), out: out.trim() }
 }
 
-const askInbox: Inbox = {
+export const askInbox = (cwd: string): Inbox => ({
   close: async (id, note) => {
-    if ((await ask(["settle", id, "--note", note])).code === 0) return
-    const acked = await ask(["ack", id, "--no-link", note])
+    if ((await ask(cwd, ["settle", id, "--note", note])).code === 0) return
+    const acked = await ask(cwd, ["ack", id, "--no-link", note])
     if (acked.code !== 0) throw new Refusal(`bun run ask could not close ${id}: ${acked.err}`)
   },
   post: async (item) => {
-    const posted = await ask(["new"], JSON.stringify(item))
+    const posted = await ask(cwd, ["new"], JSON.stringify(item))
     if (posted.code !== 0 || !posted.out) throw new Refusal(`bun run ask new: ${posted.err}`)
     return posted.out.split("\n").at(-1)!
   },
-}
+})
 
 // The owner's card: the code and the link alone, read from gh's own lines, so nothing else the pane shows reaches the Inbox.
 export const loginCard = (from: string, code: string): Json => ({
@@ -314,7 +318,7 @@ export const loginCard = (from: string, code: string): Json => ({
       "",
       `- 🌐 Open [github.com/login/device](${DEVICE}) and enter the code above.`,
       "- 🔒 GitHub asks for your password on its own page, never here.",
-      "- ✅ This card closes itself once gh sees the sign-in.",
+      "- ✅ This card clears itself once gh sees the sign-in.",
     ].join("\n"),
     type: "ask",
   },
@@ -326,7 +330,7 @@ export async function login(
   pane: string,
   timeout: number,
   herdr: Herdr = herdrCli,
-  inbox: Inbox = askInbox,
+  inbox: Inbox = askInbox(mainCheckout()),
   repo = mainCheckout(),
   wait = (ms: number) => Bun.sleep(ms),
 ): Promise<{ id: string; rc?: number }> {
@@ -351,7 +355,11 @@ export async function login(
       throw new Refusal(`gh auth login ended rc=${rc} before it printed a one-time code`)
   }
   if (!code) throw new Refusal("gh auth login printed no one-time code in 30 s")
-  const id = await inbox.post(loginCard(from, code))
+  const id = await inbox.post(loginCard(from, code)).catch((error: Error) => {
+    throw new Refusal(
+      `${error.message}; gh's login still waits in ${pane} until its code expires, so close its workspace`,
+    )
+  })
   const { rc } = await read(pane, marker, timeout, herdr)
   await inbox.close(
     id,
@@ -380,7 +388,7 @@ export async function close(workspace: string, herdr: Herdr = herdrCli) {
 export async function main(
   argv: string[],
   herdr: Herdr = herdrCli,
-  inbox: Inbox = askInbox,
+  inbox: Inbox = askInbox(mainCheckout()),
 ): Promise<number> {
   const [verb, first, second, ...rest] = argv
   try {
