@@ -19,7 +19,8 @@
 - ALWAYS: Test a dashboard write on a fixture stack, where it lands in the fixture's scratch copy.
   Only a test that must reach a real cmux session uses a live-reads stack opted in to cmux's sessions (`PLAYGROUND_LIVE_READS=true` and `PLAYGROUND_CMUX_SESSIONS=true` in the worktree's `.env`), never for a screenshot, and against a throwaway session, never a real one:
   spawn a probe named `probe-<what>` (spawn.sh takes it as a probe's name, and the `-2` one below as well) as a column beside its spawner (playbook's SESSIONS.md,
-  Spawn) and set `PLAYGROUND_DISPATCHER=probe-<what>` in the worktree's `.env` so the composer targets it (the second dispatcher then takes the primary's name plus `-2`, `probe-<what>-2`, so the real second dispatcher stays out of its reach; a test of the second dispatcher's chat spawns that second probe, or names another in `PLAYGROUND_DISPATCHER_SECONDARY`), and `PLAYGROUND_ATTACHMENTS_DIR` and
+  Spawn) and set `PLAYGROUND_DISPATCHER=probe-<what>` in the worktree's `.env` so the composer targets it
+  (the second dispatcher then takes the primary's name plus `-2`, `probe-<what>-2`, so the real second dispatcher stays out of its reach, as the real assistant does, since such a stack seats none (`assistantOf`); a test of the second dispatcher's chat spawns that second probe, or names another in `PLAYGROUND_DISPATCHER_SECONDARY`), and `PLAYGROUND_ATTACHMENTS_DIR` and
   `PLAYGROUND_DEBUG_PASTE_DIR` (each honoured on a live-reads stack alone) to scratch folders so its uploads and paste reports stay out of the live dashboard's.
   Answering an inbox item types into the session its `from` names, so a test stack posts its test items `from` the probe, into the worktree's own database, which never holds a real one.
   Close the probe the moment its test is done.

@@ -6,6 +6,7 @@ import {
   kindOfName,
   managerKindOfName,
   type RosterKind,
+  seatOf,
   setSessionNames,
 } from "@packages/config/kinds"
 import { env } from "@packages/env/api-hono"
@@ -503,7 +504,21 @@ export type RosterFacts = {
 
 const NO_ROSTER: RosterFacts = { etas: new Map(), roles: new Map(), titles: new Map() }
 
-export const rosterFacts = (roster: Roster | null, _redirected = false): RosterFacts => ({
+// Pure: the session the roster seats as the assistant (seatOf), none on a stack whose PLAYGROUND_DISPATCHER points the composer at a throwaway probe, so the real assistant stays out of a test's reach as the real second dispatcher does.
+export const assistantOf = (
+  agents: unknown,
+  redirected = Boolean(env.PLAYGROUND_DISPATCHER),
+): string | undefined => (redirected ? undefined : seatOf(agents, "assistant"))
+
+// The session in the assistant seat as the roster reads now, for a send to check its name against; undefined while none holds it or the roster cannot be read.
+export const assistantSeat = async (): Promise<string | undefined> =>
+  assistantOf((await readRoster().catch(() => null))?.roster?.agents)
+
+export const rosterFacts = (
+  roster: Roster | null,
+  redirected = Boolean(env.PLAYGROUND_DISPATCHER),
+): RosterFacts => ({
+  assistant: assistantOf(roster?.agents, redirected),
   etas: new Map(
     (roster?.agents ?? []).flatMap((agent) =>
       agent.eta ? [[agent.name, agent.eta] as const] : [],
@@ -655,6 +670,7 @@ export function composeWorkers(
       eta: roster.etas.get(name) ?? null,
       failed: read.failed,
       feed,
+      ...(name === roster.assistant && { assistant: true as const }),
       ...(herdr && { herdr: true as const }),
       lastActiveAt: activity.get(sessionId) ?? null,
       lifecycle,

@@ -5,7 +5,7 @@ The commands for each start and end are in [SESSIONS.md](SESSIONS.md), and every
 
 ## Roles on the Dashboard
 
-The dashboard lists the dispatcher and dispatcher-2 in the sidebar's header, above the session groups, lists the Planner, both leads and the Optimizer under Orchestrators, A to Z by roster title or in the order the owner dragged them into,
+The dashboard lists the dispatcher, and dispatcher-2 while one is started, in the sidebar's header, above the session groups, lists the Planner, both leads, the Assistant and the Optimizer under Orchestrators, A to Z by roster title or in the order the owner dragged them into,
 nests each checker under the worker whose PR it checks (by the `worker` key on the checker's roster entry, set at spawn, else its `pr`, else its name: `reviewer-sloth-2-sendtop` under `worker-sloth-2`),
 and puts probes in Other, where they never wait on the owner.
 Each row reads by a plain name with no @: a manager by its role word alone (Builder, Ops, Planner, Optimizer), a worker by its ticket and pull request with no role word (`ENG-1591#1598`), else its title, and a reviewer,
@@ -171,7 +171,7 @@ Ops runs an update when the owner asks for one:
 3. Resume each named session on the list onto the new binary, one at a time: close it by [SESSIONS.md](SESSIONS.md#end), then run its resume record, `bash ~/.playground/resume/<name>.sh`, which resumes it with the `--account` its start was given, the model it started with and an effort other than high ([SESSIONS.md](SESSIONS.md#spawn) says how a resume picks a login).
    A session with no record resumes with `"${PLAYGROUND_REPO:?}/scripts/spawn.sh" resume <name> <folder> <session-id>`, adding the `--model` and the `--effort` its line shows when it runs on Claude, and `--account` with the account it started on when that is a second account ([SESSIONS.md](SESSIONS.md#spawn)).
    The managers go in [Starts and ends](#starts-and-ends)'s order, Ops first: Ops sends the dispatcher the list's path and asks for its own resume, and once Ops runs again the dispatcher tells it to carry on at step 3.
-   Ops also does dispatcher-2 and optimizer; the Builder does its workers, Ops its runners, each worker its checkers, each spawner its probes, and the owner his own; Ops sends `$LIST`'s path to each session that resumes others.
+   Ops also does dispatcher-2, when one runs, and optimizer; the Builder does its workers, Ops its runners, each worker its checkers, each spawner its probes, and the owner his own; Ops sends `$LIST`'s path to each session that resumes others.
    A session that ended on its own since step 1, its roster row `ended` with a report saying why, stays ended.
    **Done when** every other named session on the list runs again under its name.
 4. Run step 1's loop again, into a second file.

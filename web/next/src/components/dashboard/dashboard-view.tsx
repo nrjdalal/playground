@@ -28,7 +28,7 @@ import {
 } from "@/components/ui/empty"
 import { CenterSpinner, Spinner } from "@/components/ui/spinner"
 import { ACCOUNTS_QUERY_KEY, readAccounts } from "@/lib/accounts"
-import { chatLabel, homeTitle } from "@/lib/agent-label"
+import { chatLabel, hasChat, homeTitle } from "@/lib/agent-label"
 import { config } from "@/lib/config"
 import { liveState, type LiveState } from "@/lib/dashboard"
 import { firstRunView, type FirstRunView } from "@/lib/first-run"
@@ -319,9 +319,7 @@ export function DashboardView() {
           now={new Date(inbox.dataUpdatedAt)}
           worker={selected}
         />
-        {selected.role === "dispatcher" || selected.hosted ? (
-          <Composer key={selected.name} worker={selected} />
-        ) : null}
+        {hasChat(selected) ? <Composer key={selected.name} worker={selected} /> : null}
       </div>
     </PageShell>
   )

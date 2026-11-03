@@ -29,6 +29,9 @@ const MANAGER_LABELS: Record<ManagerKind, string> = {
   planner: "Planner",
 }
 
+// The assistant reads by its role too, whatever its session's name.
+const ASSISTANT_LABEL = "Assistant"
+
 // The dispatchers' names in slot order, as the dashboard's frame gives them (setDispatcherOrder), so an `<id>-dispatcher` reads its slot's label.
 let dispatcherOrder: readonly string[] = []
 
@@ -45,6 +48,7 @@ const dispatcherRole = (name: string): string => {
 
 // A manager's role word, by its kind or else its name, so a builder under any name reads Builder; a dispatcher's, a set name or an `<id>-dispatcher`, Alpha or Bravo by its slot; null for any other session, a dispatcher under another name (PLAYGROUND_DISPATCHER) included, which its chat names by its model.
 export const roleLabel = (name: string, kind: RosterKind | null = null): string | null => {
+  if (kind === "assistant") return ASSISTANT_LABEL
   const manager = isManagerKind(kind) ? kind : managerKindOfName(name)
   if (manager) return MANAGER_LABELS[manager]
   return dispatcherLabelOfName(name) || kindOfName(name) === "dispatcher"
@@ -143,11 +147,11 @@ export const labelOf = (
 export const homeTitle = (dispatcher: string | null): string | null =>
   dispatcher === null ? null : dispatcherLabel(null, true)
 
-// Pure: whether a session's view has a chat, a composer under its stream: a dispatcher's and the hosted session's.
+// Pure: whether a session's view has a chat, a composer under its stream: a dispatcher's, the hosted session's and the assistant's.
 export const hasChat = (worker: { assistant?: true; hosted?: true; role: string }): boolean =>
-  worker.role === "dispatcher" || Boolean(worker.hosted)
+  worker.role === "dispatcher" || Boolean(worker.hosted) || Boolean(worker.assistant)
 
-// A session as its chat names it, in its heading and its composer: a dispatcher by its label, Alpha or Bravo, else by its model (dispatcherLabel), the primary's or the second's, whose name the API gives as primary; any other session by its label.
+// A session as its chat names it, in its heading and its composer: the assistant as Assistant, a dispatcher by its label, Alpha or Bravo, else by its model (dispatcherLabel), the primary's or the second's, whose name the API gives as primary; any other session by its label.
 export const chatLabel = (
   worker: {
     assistant?: true
@@ -158,10 +162,12 @@ export const chatLabel = (
   },
   primary: string | null,
 ): string =>
-  worker.role === "dispatcher"
-    ? (roleLabel(worker.name) ??
-      dispatcherLabel(worker, primary === null || worker.name === primary))
-    : agentLabel(worker.name)
+  worker.assistant
+    ? ASSISTANT_LABEL
+    : worker.role === "dispatcher"
+      ? (roleLabel(worker.name) ??
+        dispatcherLabel(worker, primary === null || worker.name === primary))
+      : agentLabel(worker.name)
 
 // A peer's message that opens with its sender's own name or label ("builder: done", "Builder: done", "@Builder: done") drops it, since the label above the message already names the sender.
 export const withoutSenderName = (text: string, sender: string): string => {

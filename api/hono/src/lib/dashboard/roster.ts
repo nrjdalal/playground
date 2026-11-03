@@ -166,6 +166,3 @@ export async function readRoster(path = rosterPath()): Promise<RosterRead> {
     return { problem: `roster.json could not be read: ${reason}`, roster: null }
   }
 }
-
-// The session the roster seats as the assistant, the one manager a chat writes to; undefined while none holds the seat or the roster cannot be read.
-export const assistantSeat = async (): Promise<string | undefined> => undefined

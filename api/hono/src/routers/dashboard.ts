@@ -67,7 +67,7 @@ import {
   storePasteReport,
 } from "@/lib/dashboard/paste-report"
 import { restartSession } from "@/lib/dashboard/restart"
-import { assistantSeat, readRoster } from "@/lib/dashboard/roster"
+import { readRoster } from "@/lib/dashboard/roster"
 import {
   answerHosted,
   changeHostedMode,
@@ -92,7 +92,13 @@ import {
 } from "@/lib/dashboard/threads"
 import { AGENT_ID_PATTERN, readTail, subagentPath } from "@/lib/dashboard/transcript"
 import { startVibe, stopVibe, VibeError } from "@/lib/dashboard/vibe"
-import { DISPATCHER, DISPATCHERS, listLive, type Live } from "@/lib/dashboard/workers"
+import {
+  assistantSeat,
+  DISPATCHER,
+  DISPATCHERS,
+  listLive,
+  type Live,
+} from "@/lib/dashboard/workers"
 import { searchYouTube } from "@/lib/dashboard/youtube-search"
 import {
   ApiError,
@@ -240,12 +246,12 @@ export async function sendMessage(
   threads: typeof threadStore = threadStore,
   assistant: () => Promise<string | undefined> = assistantSeat,
 ): Promise<{ at: string; sessionId: string; threadId?: string }> {
-  const typed = DISPATCHERS.includes(to)
+  const typed = DISPATCHERS.includes(to) || (to !== SDK_PROBE && to === (await assistant()))
   if (!typed && to !== SDK_PROBE) {
     throw new ApiError(
       403,
       "FORBIDDEN",
-      `Messages go to ${[...DISPATCHERS, SDK_PROBE].join(", ")} only for now`,
+      `Messages go to ${[...DISPATCHERS, "the assistant", SDK_PROBE].join(", ")} only for now`,
     )
   }
   if (named && newThread) {
@@ -464,7 +470,7 @@ export async function changeMode(
   return { at: result.at, mode: result.mode }
 }
 
-// The setting route's work once the request is through its guards: a model or an effort for a dispatcher, typed as its one slash command through deliver() under the composer's id, or for the session the dashboard hosts, set through the SDK by changeHostedSetting(); any other session is refused as FORBIDDEN before anything is sent, and a delivery's refusal is turned into the API's error envelope with its code under `delivery`.
+// The setting route's work once the request is through its guards: a model or an effort for a dispatcher or the assistant, typed as its one slash command through deliver() under the composer's id, or for the session the dashboard hosts, set through the SDK by changeHostedSetting(); any other session is refused as FORBIDDEN before anything is sent, and a delivery's refusal is turned into the API's error envelope with its code under `delivery`.
 export async function changeSetting(
   { id, sessionId, setting }: { id?: string; sessionId: string; setting: SessionSetting },
   actor: Delivery["actor"],
@@ -474,12 +480,12 @@ export async function changeSetting(
 ): Promise<{ at: string; sessionId: string }> {
   const worker = (await live()).workers.find((w) => w.sessionId === sessionId)
   if (!worker) throw new ApiError(404, "NOT_FOUND", "No live session with that id")
-  const typed = DISPATCHERS.includes(worker.name)
+  const typed = DISPATCHERS.includes(worker.name) || Boolean(worker.assistant)
   if (!typed && !worker.hosted) {
     throw new ApiError(
       403,
       "FORBIDDEN",
-      `A model or effort is set on ${[...DISPATCHERS, SDK_PROBE].join(", ")} only`,
+      `A model or effort is set on ${[...DISPATCHERS, "the assistant", SDK_PROBE].join(", ")} only`,
     )
   }
   const result = typed
@@ -815,7 +821,7 @@ const dashboardRoutes = new Hono<{ Variables: Session }>()
     "/messages",
     describeRoute({
       tags: ["Dashboard"],
-      description: `Send a message to a live session as the owner, and record it in the console's activity. Phase 2a sends to each dispatcher (${DISPATCHERS.join(" and ")}), typed into its terminal as if the owner typed it, and to ${SDK_PROBE}, the session the dashboard hosts on the Agent SDK, whose message goes on its input rather than into a terminal; a message to any other session is refused as FORBIDDEN before anything is sent. \`attachments\` names up to ${MAX_ATTACHMENTS} uploaded files by id; each one's absolute path follows the words on an "Attached:" line, for the session to Read. \`id\`, the composer's own for the message, makes a retry safe: a message already recorded under it is answered as delivered, not typed again. \`queuedAt\`, with an \`id\`, is the time an earlier try's QUEUED refusal gave under \`queuedAt\` (when the message was pasted), so an API that restarted since reads the message again rather than typing it twice. A refusal names its reason in \`delivery\`: CMUX_FAILED, COMMAND, EMPTY, INPUT_NOT_EMPTY (nothing typed, or, for a message with an \`id\` to a herdr session, its paste left unsent in the box, which its retry presses Enter on and, for a new thread, names under \`threadId\`), INTERRUPTED (typing began and did not finish, or a QUEUED message left the screen with a transcript that cannot be read back to when it was queued, so whether it went is not known and it is never retried unseen), LOST (a QUEUED message that neither the session's screen nor its transcript, read back to when it was queued, shows 10 minutes after it was queued, which a retry sends again), NOT_FOUND, ON_PICKER, QUEUED (Claude Code holds the message, in its box while it compacts or in its queue while it works, and takes it once free: a retry under the same \`id\` types nothing and reads it again, answering it delivered once its transcript shows it) or TOO_LONG; an attachment that is gone is a 404 naming it under \`attachment\` (GONE) and \`id\`. A message naming an inbox item (\`re #iN\`) records the reply on it once sent, which takes it off his count and list until its poster closes it. \`threadId\`, for the primary dispatcher alone, puts that thread's marker (\`[thread:<id>] \`) before the words, which routes the message to the thread once ingest brings it; a thread that does not exist is a 404 before anything is sent. \`newThread: true\`, in place of \`threadId\`, opens a thread titled from the message's first line and sends the message as its first, naming it under \`threadId\`.`,
+      description: `Send a message to a live session as the owner, and record it in the console's activity. Phase 2a sends to each dispatcher (${DISPATCHERS.join(" and ")}) and to the session the roster seats as the assistant, typed into its terminal as if the owner typed it, and to ${SDK_PROBE}, the session the dashboard hosts on the Agent SDK, whose message goes on its input rather than into a terminal; a message to any other session is refused as FORBIDDEN before anything is sent. \`attachments\` names up to ${MAX_ATTACHMENTS} uploaded files by id; each one's absolute path follows the words on an "Attached:" line, for the session to Read. \`id\`, the composer's own for the message, makes a retry safe: a message already recorded under it is answered as delivered, not typed again. \`queuedAt\`, with an \`id\`, is the time an earlier try's QUEUED refusal gave under \`queuedAt\` (when the message was pasted), so an API that restarted since reads the message again rather than typing it twice. A refusal names its reason in \`delivery\`: CMUX_FAILED, COMMAND, EMPTY, INPUT_NOT_EMPTY (nothing typed, or, for a message with an \`id\` to a herdr session, its paste left unsent in the box, which its retry presses Enter on and, for a new thread, names under \`threadId\`), INTERRUPTED (typing began and did not finish, or a QUEUED message left the screen with a transcript that cannot be read back to when it was queued, so whether it went is not known and it is never retried unseen), LOST (a QUEUED message that neither the session's screen nor its transcript, read back to when it was queued, shows 10 minutes after it was queued, which a retry sends again), NOT_FOUND, ON_PICKER, QUEUED (Claude Code holds the message, in its box while it compacts or in its queue while it works, and takes it once free: a retry under the same \`id\` types nothing and reads it again, answering it delivered once its transcript shows it) or TOO_LONG; an attachment that is gone is a 404 naming it under \`attachment\` (GONE) and \`id\`. A message naming an inbox item (\`re #iN\`) records the reply on it once sent, which takes it off his count and list until its poster closes it. \`threadId\`, for the primary dispatcher alone, puts that thread's marker (\`[thread:<id>] \`) before the words, which routes the message to the thread once ingest brings it; a thread that does not exist is a 404 before anything is sent. \`newThread: true\`, in place of \`threadId\`, opens a thread titled from the message's first line and sends the message as its first, naming it under \`threadId\`.`,
       responses: {
         200: {
           description: "Sent and recorded",
@@ -965,7 +971,7 @@ const dashboardRoutes = new Hono<{ Variables: Session }>()
     "/workers/:sessionId/setting",
     describeRoute({
       tags: ["Dashboard"],
-      description: `Set the model or the effort of a dispatcher (${DISPATCHERS.join(" or ")}) or of ${SDK_PROBE}, the session the dashboard hosts on the Agent SDK, as the owner's own pick in the composer: \`model\` one of ${SESSION_MODELS.join(", ")}, or \`effort\` one of ${SESSION_EFFORTS.join(", ")}, never both. For a dispatcher the API builds the one slash command (\`/model <alias>\` or \`/effort <level>\`) from those lists and types it as a message is typed; the hosted session takes it through the SDK's own calls. Either way it records a dashboard.setting row naming the session and the value. Any other session is refused as FORBIDDEN before anything is sent. \`id\`, the composer's own for the pick, lets a dispatcher that holds the command while it compacts read QUEUED rather than INTERRUPTED, and makes a retry under it safe, as the message route's does. A delivery's refusal names its reason in \`delivery\`, as the message route's does.`,
+      description: `Set the model or the effort of a dispatcher (${DISPATCHERS.join(" or ")}), of the session the roster seats as the assistant, or of ${SDK_PROBE}, the session the dashboard hosts on the Agent SDK, as the owner's own pick in the composer: \`model\` one of ${SESSION_MODELS.join(", ")}, or \`effort\` one of ${SESSION_EFFORTS.join(", ")}, never both. For a dispatcher the API builds the one slash command (\`/model <alias>\` or \`/effort <level>\`) from those lists and types it as a message is typed; the hosted session takes it through the SDK's own calls. Either way it records a dashboard.setting row naming the session and the value. Any other session is refused as FORBIDDEN before anything is sent. \`id\`, the composer's own for the pick, lets a dispatcher that holds the command while it compacts read QUEUED rather than INTERRUPTED, and makes a retry under it safe, as the message route's does. A delivery's refusal names its reason in \`delivery\`, as the message route's does.`,
       responses: {
         200: {
           description:
