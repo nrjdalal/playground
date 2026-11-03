@@ -70,6 +70,14 @@ import { basename, dirname, join as join3, relative } from "path";
 
 // packages/safe-delete/src/index.ts
 var LIMITS = { bytes: 2 * 1024 ** 3, files: 5000, perMinute: 3 };
+var CARVE_OUTS = {
+  "dashboard-supervisor": {
+    bytes: 256 * 1024 ** 2,
+    files: 4000,
+    folder: "ops/dashboard/builds"
+  },
+  jobs: { bytes: 64 * 1024, files: 1, folder: "ops/launch-agents" }
+};
 
 // packages/settings/src/rendered.ts
 import { existsSync, readFileSync } from "fs";
