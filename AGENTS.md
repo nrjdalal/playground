@@ -255,7 +255,7 @@ When a dashboard rule's meaning changes, its ALWAYS line here changes with it.
 - Cmux: read `.agents/dashboard/cmux.md` before you change a cmux or herdr call, how a session counts as live, the board's read pacing or the System panel's commands.
   cmux is deprecated: it takes no new work, only a fix for a break, and herdr is the terminal.
   - ALWAYS: Route every cmux call through `api/hono/src/lib/dashboard/cmux.ts`, which takes only the reads in `READ_COMMANDS`, one session's own writes and `reply()`'s answer to one pending Feed prompt.
-  - ALWAYS: Route every herdr call through `api/hono/src/lib/dashboard/herdr.ts`, the dashboard's second terminal beside cmux.
+  - ALWAYS: Route every herdr call through `api/hono/src/lib/dashboard/herdr.ts`, the dashboard's terminal, which takes over from cmux.
   - ALWAYS: Count a cmux record as a live session only through `liveRecords()`, and keep the read of every record paced as `workers.ts` paces it.
   - ALWAYS: Run the System panel's commands only through `api/hono/src/lib/system/probe.ts`, whose `COMMANDS` holds each one's fixed argv.
 - Messages: read `.agents/dashboard/messages.md` before you change how a message, a file or an answer reaches a session, the composer, the session the dashboard hosts on the Agent SDK, how a transcript renders, or the outbox and the stream's scroll.

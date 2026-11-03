@@ -118,8 +118,8 @@ describe("bare dispatcher", () => {
     expect(out).toContain(`Starting the Dashboard…\n${upPy}\n`)
   }, 15_000)
 
-  // up.py no longer exits 3 for a pass outside cmux, so no exit of its stops the run: with no cmux present it goes on to the dispatcher step
-  test("with no cmux present, an up.py exit of 3 is a failed jobs step and the run goes on to the dispatcher", async () => {
+  // up.py exits 0 on every pass, so a jobs exit of 3 is a failed step like any other: with no cmux present the run goes on to the dispatcher step
+  test("with no cmux present, an up.py exit of 3 no longer stops the run", async () => {
     const { child, upPy } = await dispatcher('echo "python3 $*"; exit 3')
     const deadline = setTimeout(() => child.kill(), 10_000)
     let out = ""
