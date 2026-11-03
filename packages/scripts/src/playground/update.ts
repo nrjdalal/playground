@@ -97,7 +97,7 @@ export const runUpdate = async (
     repo,
   ]
   const target = to ? `refs/tags/${to}` : "origin/main"
-  // every session's hooks run this checkout's code the moment it moves, so a target that declares a dependency the checkout has not linked gets its changed manifests and that install first, while the code is still the old commit's (the install step after the move then finds it linked); a target that deletes a manifest, which the old code may still read, or a tree with edits of its own moves first as before
+  // every hook that runs its source (all but the bundled PreToolUse guards) and every ops job run this checkout's code the moment it moves, so a target that declares a dependency the checkout has not linked gets its changed manifests and that install first, while the code is still the old commit's (the install step after the move then finds it linked); a target that deletes a manifest, which the old code may still read, or a tree with edits of its own moves first as before
   const prelink = async (): ReturnType<Run> => {
     // a fast-forward stops on a checkout with commits of its own, so its manifests are staged only where it will move; a checkout -B moves over them either way
     const merges = !to && branch === "main"
