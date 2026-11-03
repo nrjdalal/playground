@@ -1,5 +1,5 @@
 import { describe, expect, setDefaultTimeout, test } from "bun:test"
-import { chmodSync, existsSync, mkdirSync, readFileSync, utimesSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, readFileSync, utimesSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 
 import { SCRIPT, machine } from "./run-slot-fake"
@@ -9,14 +9,6 @@ setDefaultTimeout(60_000)
 
 type Machine = ReturnType<typeof machine>
 const now = () => Math.floor(Date.now() / 1000)
-// a top that takes a second, as the real one's two samples do, so looks that start together overlap it; each call is a line in top.log
-const slowTop = (m: Machine, idle = 80) => {
-  writeFileSync(
-    join(m.bin, "top"),
-    `#!/bin/bash\necho "$*" >> ${join(m.root, "top.log")}\nsleep 1\necho "CPU usage: 1.00% user, 1.00% sys, 98.00% idle "\necho "CPU usage: 10.00% user, 10.00% sys, ${idle}% idle "\n`,
-  )
-  chmodSync(join(m.bin, "top"), 0o755)
-}
 const tops = (m: Machine) => {
   const path = join(m.root, "top.log")
   return existsSync(path) ? readFileSync(path, "utf8").split("\n").filter(Boolean).length : 0
@@ -25,40 +17,43 @@ const tops = (m: Machine) => {
 const cache = (m: Machine, age: number, idle: string, swap = "0") =>
   writeFileSync(join(m.ops, "run-slot.gauges"), `${now() - age} ${idle} ${swap}\n`)
 const lock = (m: Machine) => join(m.ops, "run-slot.gauges.lock")
-// how many of run-slot to run-slot-4 are held or open now, read by `count` looks started together
-const looks = async (m: Machine, count = 1) =>
-  Promise.all(
-    Array.from({ length: count }, async () => {
-      const p = Bun.spawn(["bash", SCRIPT, "slots"], {
-        cwd: m.root,
-        env: m.env(),
-        stderr: "ignore",
-      })
-      await p.exited
-      return (await new Response(p.stdout).text()).trim()
-    }),
-  )
+// a lock a refresher took `age` seconds ago
+const held = (m: Machine, age: number) => {
+  mkdirSync(lock(m))
+  utimesSync(lock(m), now() - age, now() - age)
+}
+const look = (m: Machine) =>
+  Bun.spawn(["bash", SCRIPT, "slots"], { cwd: m.root, env: m.env(), stderr: "pipe" })
+// what one look printed: how many of run-slot to run-slot-4 are held or open, and its stderr
+const read = async (p: ReturnType<typeof look>) => {
+  await p.exited
+  return {
+    err: await new Response(p.stderr).text(),
+    slots: (await new Response(p.stdout).text()).trim(),
+  }
+}
+// the slot counts `count` looks started together read
+const slotsTogether = async (m: Machine, count = 1) =>
+  (await Promise.all(Array.from({ length: count }, () => read(look(m))))).map((r) => r.slots)
 
 // 3 Nov, 10:53 to 10:58Z: 26 waiters each found run-slot.gauges stale and ran top at once, 16 to 23 tops at a time, and load1 reached 56.8
 describe("the gauges refresh under one lock", () => {
   test("eight looks at a stale reading run top once", async () => {
-    const m = machine()
-    slowTop(m)
+    const m = machine({ topDelay: 1 })
     cache(m, 60, "80")
-    expect(await looks(m, 8)).toEqual(Array(8).fill("4"))
+    expect(await slotsTogether(m, 8)).toEqual(Array(8).fill("4"))
     expect(tops(m)).toBe(1)
   })
 
   test("eight looks with no reading yet run top once", async () => {
-    const m = machine()
-    slowTop(m)
-    await looks(m, 8)
+    const m = machine({ topDelay: 1 })
+    await slotsTogether(m, 8)
     expect(tops(m)).toBe(1)
   })
 
   test("the refresher takes the lock away once it has written the reading", async () => {
     const m = machine()
-    expect(await looks(m)).toEqual(["4"])
+    expect(await slotsTogether(m)).toEqual(["4"])
     expect(existsSync(lock(m))).toBe(false)
     expect(readFileSync(join(m.ops, "run-slot.gauges"), "utf8")).toMatch(/^\d+ 80 0\n$/)
   })
@@ -66,34 +61,69 @@ describe("the gauges refresh under one lock", () => {
   test("a look that finds the lock held keeps the stale reading and runs no top", async () => {
     const m = machine({ idle: 80 })
     cache(m, 60, "30")
-    mkdirSync(lock(m))
-    expect(await looks(m)).toEqual(["1"])
+    held(m, 0)
+    expect(await slotsTogether(m)).toEqual(["1"])
     expect(tops(m)).toBe(0)
   })
 
-  test("a look that finds the lock held and no reading at all keeps the lanes shut", async () => {
+  test("a look that finds the lock held and no reading at all keeps the lanes shut, saying a reading is in progress", async () => {
     const m = machine({ idle: 80 })
-    mkdirSync(lock(m))
-    expect(await looks(m)).toEqual(["1"])
+    held(m, 0)
+    const { err, slots } = await read(look(m))
+    expect(slots).toBe("1")
+    expect(err).toContain("another look is reading the CPU's idle share")
+    expect(err).not.toContain("cannot read the CPU's idle share")
     expect(tops(m)).toBe(0)
   })
 
   test("a lock 30 s old is a dead refresher's, so a look takes it over and refreshes", async () => {
     const m = machine({ idle: 80 })
     cache(m, 60, "30")
-    mkdirSync(lock(m))
-    utimesSync(lock(m), now() - 31, now() - 31)
-    expect(await looks(m)).toEqual(["4"])
+    held(m, 30)
+    expect(await slotsTogether(m)).toEqual(["4"])
     expect(tops(m)).toBe(1)
     expect(existsSync(lock(m))).toBe(false)
   })
 
-  test("a lock 20 s old, a slow refresher's, still holds", async () => {
+  test("a lock 27 s old, a slow refresher's, still holds", async () => {
     const m = machine({ idle: 80 })
     cache(m, 60, "30")
-    mkdirSync(lock(m))
-    utimesSync(lock(m), now() - 20, now() - 20)
-    expect(await looks(m)).toEqual(["1"])
+    held(m, 27)
+    expect(await slotsTogether(m)).toEqual(["1"])
     expect(tops(m)).toBe(0)
+  })
+
+  test("a refresher whose lock was taken over leaves the new holder's lock in place", async () => {
+    const m = machine({ topDelay: 2 })
+    const p = look(m)
+    while (!existsSync(lock(m))) await Bun.sleep(20)
+    utimesSync(lock(m), now() + 100, now() + 100)
+    expect((await read(p)).slots).toBe("4")
+    expect(existsSync(lock(m))).toBe(true)
+  })
+
+  test("a takeover beside a leftover run-slot.gauges.lock.<pid> folder still refreshes and leaves no lock", async () => {
+    const m = machine({ idle: 80 })
+    cache(m, 60, "30")
+    held(m, 31)
+    const p = look(m)
+    mkdirSync(`${lock(m)}.${p.pid}`)
+    expect((await read(p)).slots).toBe("4")
+    expect(tops(m)).toBe(1)
+    expect(existsSync(lock(m))).toBe(false)
+    expect(existsSync(join(`${lock(m)}.${p.pid}`, "run-slot.gauges.lock"))).toBe(false)
+  })
+
+  // two looks that read a dead lock's old mtime together can each take it over, so both refresh; each writes the reading whole through a rename, so the last write wins, and every other look reads the stale reading or the new one, never a torn one
+  test("eight looks at a dead lock together each read the stale or the new reading, and leave one well-formed reading and no lock", async () => {
+    const m = machine({ idle: 80, topDelay: 1 })
+    cache(m, 60, "30")
+    held(m, 31)
+    const slots = await slotsTogether(m, 8)
+    expect(slots.every((s) => s === "1" || s === "4")).toBe(true)
+    expect(slots).toContain("4")
+    expect(tops(m)).toBeGreaterThanOrEqual(1)
+    expect(readFileSync(join(m.ops, "run-slot.gauges"), "utf8")).toMatch(/^\d+ 80 0\n$/)
+    expect(existsSync(lock(m))).toBe(false)
   })
 })
