@@ -732,7 +732,7 @@ lanes_open() {
   load=$(loadavg | awk '{print $2}')
   case "$idle" in
     -) told idle "run-slot.sh: cannot read the CPU's idle share (top -l 2 -n 0), so slots 2 to 4 stay shut" ;;
-    busy) told busy "run-slot.sh: another look is reading the CPU's idle share and the swap-ins, so slots 2 to 4 stay shut until it lands" ;;
+    busy) told busy "$BUSY_TOLD" ;;
   esac
   [ "$idle" != - ] && [ "$idle" != busy ] && [ "${idle%.*}" -ge 40 ] && [ "${load%.*}" -lt 30 ] 2>/dev/null && mem_ok && verdict=open
   seen=$(cat "$OPS/run-slot.lanes" 2>/dev/null)
@@ -818,6 +818,8 @@ swapin_rate() {
 }
 # the swap-ins a second at which memory has no room for another heavy run: spawn.sh's line for a GLM start, the gates.glmSwapinsMax setting's default (packages/settings/src/gates.ts): change both together
 SWAPINS_MAX=100
+# what a look says once a run while another takes the first reading of the gauges
+BUSY_TOLD="run-slot.sh: another look is reading the CPU's idle share and the swap-ins, so slots 2 to 4 stay shut until it lands"
 # `<idle> <swapins>`: the CPU's idle share in top's second sample (top -l 2 -n 0, as spawn.sh's load gate reads it) and the swap-ins a second in
 # vm_stat -c 2 1's last row (as spawn.sh's swapins() reads them), each - when unread; every look shares one reading through run-slot.gauges
 # (`<epoch> <idle> <swapins>`) for 10 s, since a top takes a second and about 0.7 s of system CPU, and some 27 waiters each look every 15 s;
@@ -842,8 +844,7 @@ gauges() {
   echo "${idle:--} ${swap:--}"
 }
 # takes the gauges' refresh lock at epoch $1, or one aged 30 s or more by its mtime, which a refresher killed mid-refresh left (a refresh
-# takes about 2 s), and prints the mtime it took the lock at; two looks that read a dead lock's mtime together can each take it over and
-# refresh, which costs one more top and no torn reading, since each writes the reading whole through a rename and the last write wins
+# takes about 2 s), and prints the mtime it took the lock at (scripts/ops/README.md says why two takeovers together are harmless)
 gauges_lock() {
   local now=$1 lock="$OPS/run-slot.gauges.lock" born
   if ! mkdir "$lock" 2>/dev/null; then
@@ -870,7 +871,7 @@ mem_ok() {
   swap=$(gauges | cut -d' ' -f2)
   case "$swap" in
     -) told swap "run-slot.sh: cannot read the swap-ins (vm_stat -c 2 1), so no second suite runs beside this one"; return 1 ;;
-    busy) told busy "run-slot.sh: another look is reading the CPU's idle share and the swap-ins, so slots 2 to 4 stay shut until it lands"; return 1 ;;
+    busy) told busy "$BUSY_TOLD"; return 1 ;;
   esac
   [ "$free" -ge 40 ] && [ "$level" -eq 1 ] && [ "$swap" -lt "$SWAPINS_MAX" ]
 }

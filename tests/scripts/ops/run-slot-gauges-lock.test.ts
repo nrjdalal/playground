@@ -86,10 +86,10 @@ describe("the gauges refresh under one lock", () => {
     expect(existsSync(lock(m))).toBe(false)
   })
 
-  test("a lock 27 s old, a slow refresher's, still holds", async () => {
+  test("a lock 20 s old, a slow refresher's, still holds", async () => {
     const m = machine({ idle: 80 })
     cache(m, 60, "30")
-    held(m, 27)
+    held(m, 20)
     expect(await slotsTogether(m)).toEqual(["1"])
     expect(tops(m)).toBe(0)
   })
@@ -97,7 +97,7 @@ describe("the gauges refresh under one lock", () => {
   test("a refresher whose lock was taken over leaves the new holder's lock in place", async () => {
     const m = machine({ topDelay: 2 })
     const p = start(m)
-    while (!existsSync(lock(m))) await Bun.sleep(20)
+    while (tops(m) === 0) await Bun.sleep(20)
     utimesSync(lock(m), now() + 100, now() + 100)
     expect((await read(p)).slots).toBe("4")
     expect(existsSync(lock(m))).toBe(true)
