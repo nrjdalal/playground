@@ -421,33 +421,35 @@ export function Composer({ threadId, worker }: { threadId?: string; worker: Work
                     </InputGroupButton>
                   </Hint>
                   <ModePicker approvals={approvals} worker={worker} />
-                  <SettingPicker worker={worker} />
-                  {opensThreads ? (
-                    <Hint content="Start a thread with this message">
+                  <div className="ml-auto flex items-center gap-2">
+                    {opensThreads ? (
+                      <Hint content="Start a thread with this message">
+                        <InputGroupButton
+                          aria-label="New thread"
+                          aria-pressed={newThread}
+                          className="aria-pressed:border-foreground aria-pressed:bg-input aria-pressed:text-foreground dark:aria-pressed:border-foreground dark:aria-pressed:bg-input rounded-full"
+                          onClick={() => setNewThread((on) => !on)}
+                          size="icon-sm"
+                          variant="outline"
+                        >
+                          {newThread ? <RiChatThreadFill /> : <RiChatThreadLine />}
+                        </InputGroupButton>
+                      </Hint>
+                    ) : null}
+                    <SettingPicker worker={worker} />
+                    {/* the box's own aria-description already speaks the key hint */}
+                    <Hint content={hint} description={null}>
                       <InputGroupButton
-                        aria-label="New thread"
-                        aria-pressed={newThread}
-                        className="aria-pressed:border-foreground aria-pressed:bg-input aria-pressed:text-foreground dark:aria-pressed:border-foreground dark:aria-pressed:bg-input rounded-full"
-                        onClick={() => setNewThread((on) => !on)}
+                        aria-label={`Send to ${label}`}
+                        className="rounded-full"
                         size="icon-sm"
-                        variant="outline"
+                        type="submit"
+                        variant="default"
                       >
-                        {newThread ? <RiChatThreadFill /> : <RiChatThreadLine />}
+                        <RiArrowUpLine />
                       </InputGroupButton>
                     </Hint>
-                  ) : null}
-                  {/* the box's own aria-description already speaks the key hint */}
-                  <Hint content={hint} description={null}>
-                    <InputGroupButton
-                      aria-label={`Send to ${label}`}
-                      className="ml-auto rounded-full"
-                      size="icon-sm"
-                      type="submit"
-                      variant="default"
-                    >
-                      <RiArrowUpLine />
-                    </InputGroupButton>
-                  </Hint>
+                  </div>
                 </InputGroupAddon>
               </InputGroup>
             </form>
