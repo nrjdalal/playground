@@ -1,11 +1,9 @@
 // A PR body's shape, which ops-checks, merge-on-ready and pr:merge's Checks gate each read.
 
-// Pure: whether a PR body is the PR template: a TL;DR of 2 sentences or more first, its bullets or its prose, then the pr skill's Summary, Evidence and Merge Danger, then Links, each a heading of its own, in that order; a TL;DR may open with an `Outcome:` label.
-export function templateBody(body: string): boolean {
-  const lines = body.split(/\r?\n/).filter((line) => line.trim())
-  // a heading inside a code fence is a sample, not a section
+// Pure: each line's ## heading, lowercased with TLDR read as TL;DR, or "" for a line that is none; a heading inside a code fence is a sample, not a section.
+function headingsOf(lines: string[]): string[] {
   let fenced = false
-  const headings = lines.map((line) => {
+  return lines.map((line) => {
     if (/^\s*(?:```|~~~)/.test(line)) fenced = !fenced
     return fenced
       ? ""
@@ -14,6 +12,12 @@ export function templateBody(body: string): boolean {
           ?.toLowerCase()
           .replace(/^tldr$/, "tl;dr") ?? "")
   })
+}
+
+// Pure: whether a PR body is the PR template: a TL;DR of 2 sentences or more first, its bullets or its prose, then the pr skill's Summary, Evidence and Merge Danger, then Links, each a heading of its own, in that order; a TL;DR may open with an `Outcome:` label.
+export function templateBody(body: string): boolean {
+  const lines = body.split(/\r?\n/).filter((line) => line.trim())
+  const headings = headingsOf(lines)
   const at = ["tl;dr", "summary", "evidence", "merge danger", "links"].map((name) =>
     headings.indexOf(name),
   )
@@ -49,12 +53,38 @@ export function tldrLabel(body: string): string | null {
   return null
 }
 
-// Pure: why the gate refuses a PR's body, or null when it takes it: the PR template, its TL;DR holding no Outcome label line.
-export function bodyRefusal(body: string): string | null {
+// Pure: the text of a body's Evidence section, up to its next ## heading, each read as templateBody reads them.
+function evidenceOf(body: string): string {
+  const lines = body.split(/\r?\n/)
+  const headings = headingsOf(lines)
+  const at = headings.indexOf("evidence")
+  if (at === -1) return ""
+  const end = headings.findIndex((heading, i) => i > at && heading !== "")
+  return lines.slice(at + 1, end === -1 ? undefined : end).join("\n")
+}
+
+const escaped = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+
+// Pure: each changed doc (a *.md path) that a body's Evidence leaves out, a path counting as named where its full repo-relative path stands whole in that section's text.
+export function unnamedDocs(body: string, files: string[]): string[] {
+  const evidence = evidenceOf(body)
+  return files.filter(
+    (path) =>
+      /\.md$/i.test(path) &&
+      !new RegExp(`(?<![\\w./-])${escaped(path)}(?![\\w/-]|\\.\\w)`).test(evidence),
+  )
+}
+
+// Pure: why the gate refuses a PR's body, or null when it takes it: the PR template, its TL;DR holding no Outcome label line, its Evidence naming each changed doc in files (AGENTS.md's Shipping a Playground PR, step 1).
+export function bodyRefusal(body: string, files: string[] = []): string | null {
   const label = tldrLabel(body)
   if (label) {
     return `its body's TL;DR holds a line labelled "${label}:", which the pr skill's template (extensions/core/skills/pr/SKILL.md) leaves out; delete that line`
   }
-  if (templateBody(body)) return null
-  return "its body needs the PR template: a TL;DR of 2 sentences or more, the pr skill's Summary, Evidence and Merge Danger, then Links (extensions/core/skills/pr/SKILL.md)"
+  if (!templateBody(body)) {
+    return "its body needs the PR template: a TL;DR of 2 sentences or more, the pr skill's Summary, Evidence and Merge Danger, then Links (extensions/core/skills/pr/SKILL.md)"
+  }
+  const unnamed = unnamedDocs(body, files)
+  if (unnamed.length === 0) return null
+  return `its body's Evidence leaves out ${unnamed.length === 1 ? "a changed doc" : `${unnamed.length} changed docs`}: ${unnamed.join(", ")}; name each by its full path with its check (AGENTS.md, Shipping a Playground PR, step 1)`
 }
