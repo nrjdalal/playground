@@ -13,7 +13,7 @@ const ALLOWED: Record<string, string> = {
     "a test holds delete commands as data (the refused-forms fixture, the picker's screens) or removes the mkdtemp root it made, inside test-sandbox's scratch HOME, which require-sandbox.test.ts holds every run to",
 }
 
-// Files that keep a raw delete, each with its number of delete lines and why; a new delete in one changes its count and fails, and a site that moves onto the trash lowers it.
+// Files that keep a raw delete, each with its number of delete lines and why; a new delete line in one changes its count and fails (a second delete on a line that holds one already does not), and a site that moves onto the trash lowers it.
 const CARVE_OUTS: Record<string, { lines: number; reason: string }> = {
   "api/hono/src/lib/dashboard/vibe.ts": {
     lines: 2,
@@ -25,10 +25,15 @@ const CARVE_OUTS: Record<string, { lines: number; reason: string }> = {
     reason:
       "bun run clean removes gitignored build outputs by name, node_modules among them, far past the trash's 2 GB and 5000-file limits, and never enters a dot-folder",
   },
-  "packages/scripts/src/pr-merge/types.ts": {
-    lines: 2,
+  "packages/scripts/src/pr-merge/README.md": {
+    lines: 1,
     reason:
-      "the types gate removes the detached merge-types-<n> worktree it checked out in the same run, inside the merge lock; it holds a commit's tree and nothing else",
+      "documents the types gate's reset of its own kept merge-types worktree, as types.ts runs it",
+  },
+  "packages/scripts/src/pr-merge/types.ts": {
+    lines: 3,
+    reason:
+      "the types gate keeps one detached merge-types worktree across merges: it resets it to each merged tree, node_modules kept, and removes it whole only when it cannot be reused; it holds a commit's tree and that tree's install",
   },
   "packages/settings/src/items.ts": {
     lines: 3,
