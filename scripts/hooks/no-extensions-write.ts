@@ -214,7 +214,7 @@ function namings(command: string): Namings {
   return { blind, counts, plain }
 }
 
-// The parameters the shell sets itself, whose value a later word reads is the shell's and not an assignment's: bash 5.3's bash(1), PARAMETERS, Shell Variables ("The shell sets following variables"); zsh 5.9's zshparam(1), PARAMETERS SET BY THE SHELL; and the names a builtin or a match writes with no name among its words (read's and select's REPLY and reply, `=~`'s and the glob flags' MATCH, MBEGIN, MEND, match, mbegin and mend, and bash's COLUMNS and LINES under checkwinsize)
+// The parameters the shell sets itself, whose value a later word reads is the shell's and not an assignment's: bash 5.3's bash(1), PARAMETERS, Shell Variables ("The shell sets following variables"); zsh 5.9's zshparam(1), PARAMETERS SET BY THE SHELL, and each module's Parameters in its zshmodules(1), zsh/zftp's ZFTP_ family by prefix; and the names a builtin or a match writes with no name among its words (read's and select's REPLY and reply, `=~`'s and the glob flags' MATCH, MBEGIN, MEND, match, mbegin and mend, pcre_match's ZPCRE_OP, and bash's COLUMNS and LINES under checkwinsize)
 const SHELL_SETS = new Set([
   "ARGC",
   "BASH",
@@ -265,19 +265,67 @@ const SHELL_SETS = new Set([
   "UID",
   "USERNAME",
   "VENDOR",
+  "ZCURSES_COLORS",
+  "ZCURSES_COLOR_PAIRS",
+  "ZPCRE_OP",
   "_",
+  "aliases",
   "argv",
+  "builtins",
+  "commands",
+  "dirstack",
+  "dis_aliases",
+  "dis_builtins",
+  "dis_functions",
+  "dis_functions_source",
+  "dis_galiases",
+  "dis_patchars",
+  "dis_reswords",
+  "dis_saliases",
+  "epochtime",
+  "errnos",
+  "funcfiletrace",
+  "funcsourcetrace",
+  "funcstack",
+  "functions",
+  "functions_source",
+  "functrace",
+  "galiases",
+  "history",
+  "historywords",
+  "jobdirs",
+  "jobstates",
+  "jobtexts",
+  "keymaps",
+  "langinfo",
+  "mapfile",
   "match",
   "mbegin",
   "mend",
+  "modules",
+  "nameddirs",
+  "options",
+  "patchars",
   "pipestatus",
   "reply",
+  "reswords",
+  "saliases",
   "signals",
   "status",
+  "sysparams",
+  "termcap",
+  "terminfo",
+  "userdirs",
+  "usergroups",
+  "widgets",
+  "zcurses_attrs",
+  "zcurses_colors",
+  "zcurses_keycodes",
+  "zcurses_windows",
 ])
 // the families of those the manuals list by prefix (BASH_ARGV, COMP_WORDS, READLINE_LINE, ZSH_SUBSHELL, zsh_eval_context)
-const SHELL_SETS_PREFIX = /^(?:BASH_|COMP_|READLINE_|ZSH_|zsh_)/
-// zsh's tied parameters, where a write to either side rewrites the other: each array and its colon-joined scalar, and the aliases, from zsh 5.9's zshparam(1), PARAMETERS USED BY THE SHELL
+const SHELL_SETS_PREFIX = /^(?:BASH_|COMP_|READLINE_|ZFTP_|ZSH_|zsh_)/
+// zsh's tied parameters, where a write to either side rewrites the other: each array and its colon-joined scalar, and the aliases, from zsh 5.9's zshparam(1), PARAMETERS USED BY THE SHELL, and zsh/watch's watch and WATCH in zshmodules(1)
 const TIED = new Set([
   "CDPATH",
   "FIGNORE",
@@ -296,6 +344,7 @@ const TIED = new Set([
   "PS3",
   "PS4",
   "PSVAR",
+  "WATCH",
   "cdpath",
   "fignore",
   "fpath",
@@ -306,6 +355,7 @@ const TIED = new Set([
   "path",
   "prompt",
   "psvar",
+  "watch",
 ])
 
 // The allow-list, the one way a variable's value is held: a name the shell neither sets itself nor ties to another, which a plain NAME=value the hook reads whole names once on a line that names no IFS (the rest of steadyNames places that assignment)
@@ -322,7 +372,7 @@ function holdable(key: string, named: Namings, counts: Map<string, number>): boo
 type Steady = { has: (key: string) => boolean }
 const NONE: Steady = { has: () => false }
 
-// The builtins that set a variable by a name among their words, from bash 5.3's bash(1), SHELL BUILTIN COMMANDS, and zsh 5.9's zshbuiltins(1) and zshmodules(1); and the ones that run text as the line's own shell, which can set any
+// The builtins that set a variable by a name among their words, from bash 5.3's bash(1), SHELL BUILTIN COMMANDS, and zsh 5.9's zshbuiltins(1) and zshmodules(1)
 const NAME_SETTERS = new Set([
   "compgen",
   "declare",
@@ -345,6 +395,8 @@ const NAME_SETTERS = new Set([
   "shift",
   "stat",
   "strftime",
+  "syserror",
+  "sysopen",
   "sysread",
   "syswrite",
   "typeset",
@@ -373,6 +425,7 @@ const NAME_SETTERS = new Set([
 const PRINTS = new Set(["print", "printf"])
 // the builtins whose n option makes a bash nameref, a name whose every later write sets the variable its value names
 const NAMEREFS = new Set(["declare", "local", "typeset"])
+// the builtins that run text as the line's own shell, which can set any variable
 const RUNS_TEXT = new Set([".", "eval", "source"])
 // the words that open and close a compound body or group, and the other reserved words a command may lead with
 const OPENS = new Set(["case", "for", "if", "select", "until", "while", "{"])
@@ -393,7 +446,6 @@ function steadyNames(named: Namings, commands: Command[]): (cmd: Command) => Ste
       (w) => !w.quoted && (w.value === "for" || w.value === "select"),
     )
     if (!NAME_SETTERS.has(name) && loop === -1) continue
-    // a name the shell reads after quote removal (`read X\Y` sets XY) counts as written, and one the hook cannot read could be any
     // print and printf name one only by a v in an option cluster (`-v N`, `-vN`, `-rv N`): both the rest of the cluster and the next word count, since either may be the name
     const v = cmd.words.findIndex((w, k) => k > 0 && /^-[^-\s]*v/.test(w.value))
     const cluster = cmd.words[v]
@@ -404,6 +456,7 @@ function steadyNames(named: Namings, commands: Command[]): (cmd: Command) => Ste
         ]
       : []
     const names = loop !== -1 ? [cmd.words[loop + 1]] : PRINTS.has(name) ? vNames : cmd.words
+    // a name the shell reads after quote removal (`read X\Y` sets XY) counts as written, and one the hook cannot read could be any
     for (const word of names) {
       if (!word) continue
       if (marked(word.value.split("=")[0])) return () => NONE
