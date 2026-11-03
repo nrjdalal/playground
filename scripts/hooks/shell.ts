@@ -177,9 +177,13 @@ const ROOT_SHELLS = new Map([
   ["doas", new Set(["-s"])],
   ["sudo", new Set(["--login", "--shell", "-i", "-s"])],
 ])
-// Whether a command starts a shell that reads its script from stdin, with no command of its own: "root" for a privilege wrapper's shell (`sudo -s`, `nice doas -s`, an option or program in a variable taken as one), "shell" for a shell given no script (`sh`, `sudo bash`); a reserved word, a function's name or an assignment before it skipped
+// Whether a command starts a shell that reads its script from stdin, with no command of its own, under any of parse's readings (a shortened long option is one its lists lack, so it is read as taking the next word too): "root" for a privilege wrapper's shell (`sudo -s`, `nice doas -s`, an option or program in a variable taken as one), "shell" for a shell given no script (`sh`, `sudo bash`); a reserved word, a function's name or an assignment before it skipped
 export function stdinShell(cmd: Command): "root" | "shell" | undefined {
-  const { args, first, name } = parse(cmd)
+  const found = readings(parse(cmd)).map((parsed) => shellOf(cmd, parsed))
+  return found.includes("root") ? "root" : found.find(Boolean)
+}
+
+function shellOf(cmd: Command, { args, first, name }: Parsed): "root" | "shell" | undefined {
   if (first && !marked(first.value)) {
     if (!SHELLS.has(name)) return undefined
     const { inline, operand } = shellOperand(args, name)
@@ -796,6 +800,9 @@ export function parse(cmd: Command): Parsed {
   return unwrap(state, undefined, { left: READINGS })
 }
 
+// A parse's primary reading, then each other reading in `also`, depth first.
+const readings = (parsed: Parsed): Parsed[] => [parsed, ...parsed.also.flatMap(readings)]
+
 const assign = (local: Map<string, Text>, w: Word) => {
   const eq = w.value.indexOf("=")
   local.set(w.value.slice(0, eq), slice(w, eq + 1))
@@ -950,7 +957,6 @@ export async function examine(
   builtins: boolean,
 ): Promise<string | undefined> {
   tick()
-  const readings = (parsed: Parsed): Parsed[] => [parsed, ...parsed.also.flatMap(readings)]
   const [primary, ...others] = readings(parse(cmd))
   // only the primary reading moves the folder, sets variables and records files, as canary's one reading did; each other runs on a copy of the env before the command
   const before = others.length > 0 ? apart(env) : env
