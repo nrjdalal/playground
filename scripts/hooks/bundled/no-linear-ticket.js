@@ -802,7 +802,9 @@ function parse(cmd) {
   }
   while (ASSIGN.test(rest.at(-1)?.value ?? ""))
     assign(state.local, rest.pop());
-  return unwrap(state, undefined, { left: READINGS });
+  const budget = { left: READINGS };
+  const parsed = unwrap(state, undefined, budget);
+  return budget.capped ? { ...parsed, capped: true } : parsed;
 }
 var readings = (parsed) => [parsed, ...parsed.also.flatMap(readings)];
 var assign = (local, w) => {
@@ -814,12 +816,18 @@ function unwrap(state, inside, budget) {
   const peek = () => rest[rest.length - 1];
   const take = () => rest.pop();
   const also = [];
-  const fork = (wrapper, drop) => budget.left-- > 0 && also.push(unwrap({
-    chdir: state.chdir,
-    local: new Map(local),
-    rest: rest.slice(0, Math.max(0, rest.length - drop)),
-    xargs: state.xargs && { ...state.xargs }
-  }, wrapper, budget));
+  const fork = (wrapper, drop) => {
+    if (budget.left-- <= 0) {
+      budget.capped = true;
+      return;
+    }
+    also.push(unwrap({
+      chdir: state.chdir,
+      local: new Map(local),
+      rest: rest.slice(0, Math.max(0, rest.length - drop)),
+      xargs: state.xargs && { ...state.xargs }
+    }, wrapper, budget));
+  };
   for (let wrapper = inside;; wrapper = undefined) {
     if (!wrapper) {
       wrapper = program(peek()?.value ?? "");
