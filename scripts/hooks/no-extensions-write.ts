@@ -163,17 +163,16 @@ type Namings = { blind: boolean; counts: Map<string, number>; plain: Set<string>
 // The operators after ${K that only read K; any other (`=`, `:=`, zsh's `::=`, a subscript, a modifier) may set it, so it counts as a naming
 const READS_ONLY = /^(?:\}|:?[-+?]|[#%/])/
 
-// Text the shell evaluates, where an assignment sets a name the hook never reads: arithmetic naming a variable, whose value it evaluates as an expression (`V=XY=0; (( V ))` sets XY), in `(( ))`, `$(( ))`, `$[ ]`, `let`, a `[[ ]]` comparison, an array subscript or a substring offset; bash's prompt transformation (`${V@P}`); and zsh's glob qualifiers that run code (`*(e:…:)`, `*(+f)`)
+// Text the shell evaluates, where an assignment sets a name the hook never reads: arithmetic naming a variable, whose value it evaluates as an expression (`V=XY=0; (( V ))` sets XY), in `(( ))`, `$(( ))`, `$[ ]`, a `[[ ]]` comparison, an array subscript or a substring offset; bash's prompt transformation (`${V@P}`); and zsh's glob qualifiers that run code, an e with its code in `:`, `'` or `"` or a `+` with a function's name, closed at a word's end (`*(e:…:)`, `*(.e'…')`, `*(+f)`)
 const EVALUATES = [
   /\(\([^)]*[A-Za-z_]/,
   /\$\[[^\]]*[A-Za-z_]/,
-  /(?:^|[\s;&|(])let\s[^;&|]*[A-Za-z_]/,
   /\[\[.*\s-(?:eq|ge|gt|le|lt|ne)\s/s,
   /\$\{[#!]?\w+\[[^\]]*[A-Za-z_]/,
   /(?:^|[\s;&|(])\w+\[[^\]]*[A-Za-z_][^\]]*\]\+?=/,
   /\$\{[#!]?\w+:(?![-+=?:])[^}]*[A-Za-z_]/,
   /@P\}/,
-  /[^\s(|&;<>$]\((?:#q)?[^()\s]*?(?:e[^\w\s()]|\+)/,
+  /[^\s(|&;<>$=]\((?:#q)?(?:[^()\s=|"']*?e([:'"])[^]*?\1|\+\w+)[^()\s]*\)(?=$|[\s;&|)<>])/,
 ]
 
 // How many times the line names each variable other than by reading it ($K, ${K}, ${K:-…} and the other READS_ONLY forms): every other spelling of the name counts, an assignment, an append, a bare word (read's, a for loop's, arithmetic's) and a name spelled across a quote or a backslash (`X\Y`, `X"Y"`, which the shell reads as XY) included, as does one attached after an option cluster's a or v (`printf -vK`), a lone flag (`-K`) aside; and the names an unquoted plain assignment sets (`K=`, where a quoted `"K=a"` is a command), read in one pass
@@ -438,7 +437,7 @@ const NAME_SETTERS = new Set([
 ])
 // the setters that name a variable only by their v option, so their other words are text they print
 const PRINTS = new Set(["print", "printf"])
-// zsh's builtins that make a name integer or float, so every later assignment to it is an arithmetic evaluation
+// zsh's builtins that make a name integer or float, so every later assignment to it is an arithmetic evaluation, as let's words are
 const NUMERIC = new Set(["float", "integer"])
 // the builtins that give a name an attribute: n makes a bash nameref, a name whose every later write sets the variable its value names, and i (zsh's E and F too) makes every later assignment to it an arithmetic evaluation
 const TYPESETS = new Set(["declare", "export", "local", "readonly", "typeset"])
@@ -460,6 +459,9 @@ function steadyNames(named: Namings, commands: Command[]): (cmd: Command) => Ste
     const flagged = (letters: RegExp) =>
       cmd.words.some((w, k) => k > 0 && /^-[^-\s]/.test(w.value) && letters.test(w.value))
     if (NUMERIC.has(name) || (TYPESETS.has(name) && flagged(/[EFin]/))) return () => NONE
+    // let evaluates each word as arithmetic, which evaluates a variable's value as an expression
+    if (name === "let" && cmd.words.some((w, k) => k > 0 && /[A-Za-z_]/.test(w.value)))
+      return () => NONE
     // zsh's print -P expands its words as a prompt, which with PROMPT_SUBST set runs their expansions
     if (name === "print" && flagged(/P/)) return () => NONE
     const loop = cmd.words.findIndex(

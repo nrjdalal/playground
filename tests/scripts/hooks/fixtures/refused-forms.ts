@@ -2084,7 +2084,7 @@ gh api graphql -f query="$QUERY"`,
       ],
       [
         "rm of a variable a zsh glob qualifier's code sets from a value the line never sets",
-        "XY=/tmp/a; : /(e:$V:); rm -rf ${XY}.playground/./extensions/.no-such-folder",
+        "XY=/tmp/a; : /tmp/*(e:$V:); rm -rf ${XY}.playground/./extensions/.no-such-folder",
         "process home",
       ],
       [
@@ -2094,12 +2094,12 @@ gh api graphql -f query="$QUERY"`,
       ],
       [
         "rm of a variable arithmetic sets from a variable's built value",
-        "XY=/../../y; V=X; V+=Y=0; (( V )); rm -rf ~/.playground/./extensions/.no-such-folder${XY}",
+        "D=~/.playground/./extensions/x; XY=/../../y; V=X; V+=Y=0; (( V )); rm -rf $D$XY/../.no-such-folder",
         "process home",
       ],
       [
         "rm of a variable an integer attribute's assignment sets from a built value",
-        "XY=/../../y; V=X; V+=Y=0; declare -i Z; Z=V; rm -rf ~/.playground/./extensions/.no-such-folder${XY}",
+        "D=~/.playground/./extensions/x; XY=/../../y; V=X; V+=Y=0; declare -i Z; Z=V; rm -rf $D$XY/../.no-such-folder",
         "process home",
       ],
     ],
