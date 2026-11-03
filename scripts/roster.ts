@@ -10,6 +10,7 @@ import {
   kindOfName,
   MANAGER_KINDS,
   managerOf,
+  seatOf,
   ROSTER_KINDS,
   ROSTER_ROLE_OF_KIND,
   slotOfName,
@@ -28,6 +29,7 @@ export const USAGE = `Usage:
   roster.ts backfill                                (gives each entry with no kind the one its name's prefix gives)
   roster.ts who <kind>                              (prints the name holding a manager kind's seat; writes nothing)
   roster.ts who dispatcher [1|2]                    (prints the dispatcher in slot 1, Alpha, by default, or 2, Bravo; writes nothing)
+  roster.ts who assistant                           (prints the live session the roster gives the assistant kind, else exits 1; writes nothing)
 A checker's prs list holds every PR it serves, so auto-end keeps it while one is open: prs=<pr>,<pr> sets it, prs+=<pr> adds one, prs-=<pr> removes one, and a PR not yet opened goes in as its issue's URL.
 Times always come from the UTC clock; titles are capped at 40 chars.`
 
@@ -222,13 +224,21 @@ async function main(argv: string[]): Promise<void> {
   if (cmd === "who") {
     // the dispatcher takes a slot number, 1 (Alpha, the default) or 2 (Bravo), never a label, since labels can be renamed
     const slot = name === "dispatcher" && rest.length <= 1 ? (rest[0] ?? "1") : null
-    if (!(isManagerKind(name) && rest.length === 0) && slot !== "1" && slot !== "2")
+    const assistant = name === "assistant" && rest.length === 0
+    if (!(isManagerKind(name) && rest.length === 0) && !assistant && slot !== "1" && slot !== "2")
       throw new Refusal(
-        `roster.ts: who takes one of ${[...MANAGER_KINDS, "dispatcher [1|2]"].join(", ")}`,
+        `roster.ts: who takes one of ${[...MANAGER_KINDS, "dispatcher [1|2]", "assistant"].join(", ")}`,
         2,
       )
     // A roster that does not read leaves today's name, so a spawn still has someone to report to.
     const agents = (await load().catch(() => null))?.agents
+    // the assistant has no set name to fall back on, so a reader with no holder falls back on its own
+    if (assistant) {
+      const held = seatOf(agents, "assistant")
+      if (!held) throw new Refusal("roster.ts: no live session holds the assistant seat", 1)
+      console.log(held)
+      return
+    }
     console.log(
       isManagerKind(name) ? managerOf(agents, name) : dispatcherOf(agents, slot === "2" ? 2 : 1),
     )

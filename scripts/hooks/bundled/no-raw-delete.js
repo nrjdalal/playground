@@ -49,6 +49,7 @@ applyEnvAliases();
 
 // packages/config/src/kinds.ts
 var ROSTER_KINDS = [
+  "assistant",
   "builder",
   "dispatcher",
   "ops",

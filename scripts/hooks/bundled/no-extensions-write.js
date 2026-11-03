@@ -68,6 +68,7 @@ import { join as join3 } from "path";
 
 // packages/config/src/kinds.ts
 var ROSTER_KINDS = [
+  "assistant",
   "builder",
   "dispatcher",
   "ops",
@@ -82,6 +83,7 @@ var ROSTER_KINDS = [
 ];
 var isRosterKind = (value) => ROSTER_KINDS.includes(value);
 var FACTORY_ROLE_OF_KIND = {
+  assistant: "lead",
   builder: "lead",
   dispatcher: "dispatcher",
   ops: "lead",

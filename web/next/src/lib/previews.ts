@@ -17,6 +17,15 @@ export async function fetchPages(session: string) {
   return data
 }
 
+// Deletes a kept page by its name: its file, its caption and its record leave the previews folder.
+export async function deletePage(name: string) {
+  const { data, error } = await unwrap(
+    apiClient.v1.apps.previews[":name"].$delete({ param: { name } }),
+  )
+  if (error) throw new Error(error.message)
+  return data
+}
+
 // Pure: where a preview is served, on the API's own origin.
 export const previewUrl = (apiUrl: string, name: string): string =>
   `${apiUrl}/api/v1/apps/previews/${encodeURIComponent(name)}`
