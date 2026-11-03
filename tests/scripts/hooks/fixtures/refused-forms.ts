@@ -2556,6 +2556,108 @@ gh api graphql -f query="$QUERY"`,
     source: "#462",
   },
   {
+    folders: ["data folder", "home"],
+    guards: ["no-extensions-write"],
+    rows: () => [
+      [
+        "a spaced jq filter in the home on gh repo clone, which is no listed read",
+        `gh repo clone o/r -q '.a+" \\(.b)/x"'`,
+      ],
+      [
+        "a spaced jq filter in the home on gh pr checkout, which is no listed read",
+        `gh pr checkout 1 -q '.a+" \\(.b)/x"'`,
+      ],
+      [
+        "a spaced jq filter in the home on gh extension exec, which is no listed read",
+        `gh extension exec x -q '.a+" \\(.b)/x"'`,
+      ],
+      [
+        "a spaced jq filter in the home on an extension, which is no listed read",
+        `gh my-ext -q '.a+" \\(.b)/x"'`,
+      ],
+      [
+        "a spaced jq filter in the home on an alias, which is no listed read",
+        `gh v -q '.a+" \\(.b)/x"'`,
+      ],
+      [
+        "a spaced jq filter in the home on GH_PAGER set in the call",
+        `GH_PAGER=less gh pr view 1 -q '.a+" \\(.b)/x"'`,
+      ],
+      [
+        "a spaced jq filter in the home on GH_EDITOR set in the call",
+        `GH_EDITOR=vi gh issue view 1 -q '.a+" \\(.b)/x"'`,
+      ],
+      [
+        "a spaced jq filter in the home on PAGER set in the call",
+        `PAGER=less gh run view 1 -q '.a+" \\(.b)/x"'`,
+      ],
+      [
+        "a spaced jq filter in the home on GH_PAGER set on the line",
+        `GH_PAGER=less; gh pr view 1 -q '.a+" \\(.b)/x"'`,
+      ],
+      [
+        "a spaced jq filter in the home on EDITOR exported on the line",
+        `export EDITOR=vi; gh api x -q '.a+" \\(.b)/x"'`,
+      ],
+      ["a spaced jq filter in the home on gh api with -X", `gh api x -X POST -q '.a+" \\(.b)/x"'`],
+      [
+        "a spaced jq filter in the home on gh api with -X attached",
+        `gh api x -XPOST -q '.a+" \\(.b)/x"'`,
+      ],
+      [
+        "a spaced jq filter in the home on gh api with --method=",
+        `gh api x --method=PATCH -q '.a+" \\(.b)/x"'`,
+      ],
+      [
+        "a spaced jq filter in the home on gh api with --method",
+        `gh api x --method PATCH -q '.a+" \\(.b)/x"'`,
+      ],
+      ["a spaced jq filter in the home on gh api with -F", `gh api x -F a=b -q '.a+" \\(.b)/x"'`],
+      ["a spaced jq filter in the home on gh api with -f", `gh api x -f a=b -q '.a+" \\(.b)/x"'`],
+      [
+        "a spaced jq filter in the home on gh api with --field",
+        `gh api x --field a=b -q '.a+" \\(.b)/x"'`,
+      ],
+      [
+        "a spaced jq filter in the home on gh api with --raw-field",
+        `gh api x --raw-field a=b -q '.a+" \\(.b)/x"'`,
+      ],
+      [
+        "a spaced jq filter in the home on gh api with --input",
+        `gh api x --input f.json -q '.a+" \\(.b)/x"'`,
+      ],
+      [
+        "a spaced jq filter in the home on gh api with --cache",
+        `gh api x --cache 1h -q '.a+" \\(.b)/x"'`,
+      ],
+      [
+        "a spaced jq filter in the home on gh api with -X in a cluster",
+        `gh api x -iX POST -q '.a+" \\(.b)/x"'`,
+      ],
+      [
+        "a spaced jq filter in the home on gh api with -f in a cluster",
+        `gh api x -if a=b -q '.a+" \\(.b)/x"'`,
+      ],
+      [
+        "a spaced jq filter in the home on gh api with -F in a cluster",
+        `gh api x -iF a=b -q '.a+" \\(.b)/x"'`,
+      ],
+      [
+        "a spaced jq filter in the home on gh pr view with --web",
+        `gh pr view 1 --web -q '.a+" \\(.b)/x"'`,
+      ],
+      [
+        "a spaced jq filter in the home on gh pr view with -w",
+        `gh pr view 1 -w -q '.a+" \\(.b)/x"'`,
+      ],
+      [
+        "a spaced jq filter in the home on gh issue view with -w in a cluster",
+        `gh issue view 1 -cw -q '.a+" \\(.b)/x"'`,
+      ],
+    ],
+    source: "#462",
+  },
+  {
     folders: ["process home", "process data folder", "process worktree"],
     guards: ["no-extensions-write"],
     rows: () => [
