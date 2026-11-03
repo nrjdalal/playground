@@ -2,6 +2,7 @@
 
 The factory's own scripts: `spawn.sh`, which starts and resumes every factory session, `link-skills.sh`, which installs the skills, the herdr servers' ops job, a worktree's `node_modules` clone and `bun run test:skills`.
 AGENTS.md keeps one line for each, and this file holds the text that line stands for.
+It also holds `bun run hooks:differential`, the sweep and replay a hook PR's Evidence quotes.
 Read a section before you change its script or its tests, or when it refuses a start you did not expect.
 The factory's hooks are in [hooks/README.md](./hooks/README.md).
 
@@ -97,6 +98,9 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
   `scripts/ops/up.py --sessions` prints its `spawn.sh resume` lines, every brief names a file under `~/.playground` with no `..`, which spawn.sh checks is there before any gate or launch,
   given by its name there or by its path, `$HOME/.playground/<file>` or `~/.playground/<file>`, and `spawn.sh resume ... --brief <file>` (resume alone) puts only that name in the resumed session's first prompt, never the file's text.
   A brief for a role with a template in `scripts/briefs/` (`new-reviewer.md`, `new-tester.md`, `new-worker.md`) is refused, before any gate or launch, while it still holds a slot that template holds, the refusal naming each slot left and the brief, so a checker never starts on a bare slot; a slot another role's template holds, or one spelled in words, passes.
+  A resume of a reviewer or tester whose roster row's `worker=` names a session the roster has ended refuses before any pane opens, naming `bun scripts/roster.ts assign <checker> "<title>" review worker=<live worker> pr=<url>`,
+  or, when it serves no live worker, `bun scripts/roster.ts set <checker> status=ended`, since the checker reaper (`checker-worker-gone` in `scripts/ops/optimizer/idle_sessions.ts`) would end it again on its next pass.
+  `spawn.sh restore` names such a checker as not restored and runs the rest, and exits 1, so ops:herdr keeps that server's restore owed, each beat counting it as not restored and naming the log that holds its line, until one of those two commands runs.
   A `spawn.sh resume <name> <dir>` with no session id refuses, before any pane opens, a folder whose project folder under `$CLAUDE_CONFIG_DIR/projects` holds no transcript naming the session, since Claude's resume picker would find nothing there.
   A `<dir>` under the Desktop folder resumes in the same tree under the code root, and with a session id its transcript is copied into that folder's project after `--check`, so a moved session keeps its conversation; with no code root folder, or one on the Desktop, it resumes in the Desktop folder itself.
   At `--check`, before any close, a resume refuses the main checkout for a session whose transcript is not already in its project folder, naming the folder the session ran in, and refuses a missing folder, naming its branch, and for a worktree under the main checkout's `.claude/worktrees/` the `git -C <main> worktree add` line that brings it back,
@@ -161,3 +165,16 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
 - `bun run test:skills` runs Playground's checks, as CI's `auto-test.yml` does, through `packages/scripts/src/test-skills.ts`: every Python step runs under `uv run --python 3.13` (the system `python3` is 3.9 on a Mac, too old for the skills' Python), every step runs even after one fails, and a red run ends naming each failed step and its first `FAIL` line.
   Each step runs in the suite's sandbox (`packages/scripts/src/sandbox.ts`, shared with `test-sandbox.ts`), with uv's Pythons and cache and Docker's config kept in the real home, so a step never writes the real `~/.claude` and a second run downloads nothing.
   Its `steps` list in [packages/scripts/src/test-skills.ts](../packages/scripts/src/test-skills.ts) names every step.
+
+## bun run hooks:differential
+
+- A hook PR measures its hooks against `canary` with `bun run hooks:differential` ([packages/scripts/src/hook-differential.ts](../packages/scripts/src/hook-differential.ts)), naming each hook with `--hook <name>` and the base with `--canary <sha>`:
+  - `sweep --forms <module>` passes the forms the module exports (`forms: { command, inClass }[]`) from the home, the data folder and a worktree;
+  - `replay` passes every Bash call of this machine's transcripts from the last 24 hours (`--hours <n>`), a sub-agent's nested transcripts included, each from its own folder.
+- Each form and call reaches the hook only as data, through its `check()` with `HOME` alone in its environment, and none is run.
+  Canary's hooks load from canary's whole tree at the sha, unpacked by `git archive` and installed from its own lockfile (`bun install --frozen-lockfile --ignore-scripts`), so every hook loads canary's packages, `extensions/core` and dependencies, and the install leaves the shared git hooks alone.
+  Each run builds its tree in a folder of its own and renames it to `hook-differential/<sha>` in the temp folder, so two runs against one sha share the finished tree alone; the tree, `node_modules` included, stays there for the next run against that sha, beside any folder a run that lost the rename left.
+- It prints one line of counts per hook, the figures a hook PR's Evidence quotes: forms, cases, the same, newly allowed and newly refused, split by the form's class; calls, the same, newly allowed and newly refused.
+  The first 20 changed cases go to stderr, so read them there; a sweep lists only the cases outside the form's class and the newly refused ones, and transcript text stays out of the repo and the PR.
+- Started bare, it queues itself through `run-slot.sh`, as `commit-slot.ts` queues a commit's build, and says so on stderr with the queue's depth; inside a ticket, or where `run-slot.sh` is not executable, it runs as it is.
+  Tests: `bun run test:file tests/packages/scripts/src/hook-differential.test.ts`.

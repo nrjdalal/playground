@@ -31,6 +31,7 @@ Only the first reading moves the folder, sets variables and records files for th
   The bundles are committed, so a git restore of a deleted checkout brings them back with no install (so a guard that cannot start needs its bundle back, by `git checkout` or `bun run hooks:bundle`, where the wrapper's refusal still reads `bun install`).
   Two branches that both change a shared hook file conflict there: take `canary`'s side, commit the merge, then run `bun run hooks:bundle` and commit the rebuild on its own.
   `bun run hooks:bundle` refuses to write while a merge is in progress (`MERGE_HEAD` set), naming that order, since bundles rebuilt inside the merge commit read to pr:merge's keeps-canary gate as lines lost from `canary`; `--check` runs during a merge as before.
+  pr:merge's `types` gate runs `--check` on the tree the squash makes when the PR touches `scripts/hooks/` or `packages/`, and refuses a bundle stale there ([packages/scripts/src/pr-merge/README.md](../../packages/scripts/src/pr-merge/README.md)).
   Each guard is its own build, since a build that also takes a guard it imports keeps that guard's `import.meta.main` block live, and the bundle would then judge by both guards' rules.
   Each bundled module reads `import.meta.dir` as its own source's folder, which the build writes against the checkout the bundle sits in (two folders up from `bundled/`), and `packages/settings/src/rendered.ts`'s `../../../extensions/core` URL lands on the repo root while `bundled/` sits three folders deep, as `packages/settings/src/` does.
   `role.ts`'s read of the session names still runs `setting.ts` in a process of its own, and keeps a fresh install's names when that read fails.
@@ -218,7 +219,12 @@ Only the first reading moves the folder, sets variables and records files for th
   A dry run (`-u`) is one of those, since it makes no file, so its name can be one that exists.
   A line is read call by call instead when every command on it, a substitution's included, is on a closed list of readers or a quiet git commit, and no redirect on it writes a file (`2>&1` and `>/dev/null` write none): then only a variable's text is read that way, so `awk '$3 ~ /runner/' f` runs from `~`.
   The closed list is an `awk`, `gawk`, `mawk` or `nawk` whose program runs nothing, a `cat`, `grep`, `head`, `tail` or `wc` that is a reader by the list above, `cut`, a `sort` with no `-o` and no long option (macOS sort takes an abbreviation, `--out=`), and a `uniq` with at most one file, since its second is its output.
-  Each is its command's own first word as a reader is, named bare or by a system folder's path (`/usr/bin/awk`), so a script the session wrote (`./awk`), a `PATH` set in the call and a reader behind a wrapper (`time cut …`) keep canary's reading.
+  The closed list also holds a read-only gh call with a `-q` or `--jq` filter or a `-t` or `--template` template: `gh api` with no option that sends, or `issue list`, `issue view`, `pr list`, `pr view`, `run list`, `run view` or `search`.
+  A call with an option that sends (`-F`, `-X`, `-f`, `--cache`, `--field`, `--input`, `--method` or `--raw-field`) or opens the browser (`--web` or `-w`) is no read, a short one counted alone or in a cluster ahead of the filter's letter (`-iX POST`).
+  Such a call holds no other word with a space, and no pager or editor variable (`EDITOR`, `GH_EDITOR`, `GH_PAGER`, `PAGER`, `VISUAL`) is set on its line, since an assignment or an export keeps a line from being read call by call.
+  Its filter or template is text, never a path, so `gh pr view 1 --json a,b -q '.a+" \(.b)/x"'` runs from every folder, and is judged only when it names the root.
+  An unquoted glob in it is the shell's, so `gh api x --jq .[]` is judged as any glob and refused from the home.
+  Each command on the closed list is its own first word as a reader is, named bare or by a system folder's path (`/usr/bin/awk`), so a script the session wrote (`./awk`), a `PATH` set in the call and a reader behind a wrapper (`time cut …`) keep canary's reading.
   An awk program runs something when it holds `system`, `getline`, `>` or `@`, or comes from `-f` or an option the hook does not know.
   It runs something too when it holds a `|` anywhere but two places: a regex that is the whole leading pattern (`/a|b/`, `/a|b/ {print $2}`) and a regex or a string right after `~` (`$1 ~ /a|b/`, `$1 ~ "a|b"`), each holding no quote, `[` or newline.
   Once those are cut out, any `|`, quote, `/`, `#` or backslash left counts as a pipe, as canary counted every `|`, so `awk '!/a|b/' f` and `awk '/[ab]|c/' f` keep canary's reading.
@@ -266,7 +272,7 @@ Only the first reading moves the folder, sets variables and records files for th
   A closed-list reader on a line read call by call is the exception: its quoted glob is text, so `awk '{print $1}' f` runs, since the lexer marks each word whose glob the shell sees outside quotes (`Word.glob` in `scripts/hooks/shell.ts`).
   A quiet commit's message is the other exception (above).
   A quoted regex that starts at `/` reads its glob characters as a glob in `/`, which holds the root, so `sed -n '/^a*b/p' f` is refused from any folder, while `awk '/^a*b/' f` runs; run such a script from a file (`awk -f <file>`, `sed -f <file>`).
-  A gh `-q` filter that holds a jq interpolation is refused from the home (`-q '"\(.a)"'`), and from any folder once it holds a space and a `/` after the `(` (`-q '.a+" +\(.a)/-\(.b)"'`); pipe the JSON to jq, a reader, instead (`gh … --json <fields> | jq -r '<filter>'`).
+  A gh `-q` filter on a line read whole (one beside a program off the closed list, such as `date; gh …` or `gh … | sh`) keeps canary's reading: one that holds a jq interpolation is refused from the home (`-q '"\(.a)"'`), and from any folder once it holds a space and a `/` after the `(`; pipe the JSON to jq, a reader, instead (`gh … --json <fields> | jq -r '<filter>'`).
   It fails open on any other error, and its tests are in `bun run test:file tests/scripts/hooks/no-extensions-write.test.ts`.
 
 ## no-false-green
@@ -369,11 +375,15 @@ Only the first reading moves the folder, sets variables and records files for th
 ## The trace ratchet
 
 - ALWAYS: Write a new comment, doc or test in plain words, with no issue number (`#NNN`, or a ticket key from the list) or old session name: the number belongs in the commit scope and the pull request body.
-  `bun run trace-count` counts each kind in `kinds.ts` over the tree (git's files, or every file but installs and build output where no `.git` is), past the live names `LIVE_NAMES` keeps for the switch's migration.
+  `bun run trace-count` counts each kind in `kinds.ts` over the tree (the files git's index holds, tracked or staged, so a harness's untracked output never counts; or every file but installs and build output where no `.git` is), past the live names `LIVE_NAMES` keeps for the switch's migration.
   Its `ownerName` kind counts the owner's names (`owner.names`, then the owner part of `factory.archiveRepo`, read from the settings at run time), a quote set against the owner and anyone's dated quote; `companyName` counts the company's name, and `lightWords` a factory or old skill word glued into a longer one.
   It reads past the lockfiles too (`bun.lock`, `package-lock.json`), whose integrity hashes can spell a list value by chance.
-  It fails when a count is over `packages/scripts/src/trace-count/counts.json`, and so does `tests/packages/scripts/src/trace-count/count.test.ts`, which `bun run test` runs and pre-commit's `trace-count` step runs on every commit but one of images and fonts alone, over every tracked and untracked file as it stands on disk, staged or not; `--write` lowers each count a trace-out brought down.
+  It fails when a count is over `packages/scripts/src/trace-count/counts.json`, and so does `tests/packages/scripts/src/trace-count/count.test.ts`, which `bun run test` runs and pre-commit's `trace-count` step runs on every commit but one of images and fonts alone, over every file the index holds as it stands on disk; `--write` lowers each count a trace-out brought down.
+  A refusal names each `path:line: kind` holding a hit of a risen kind (`located()`), for each kind the files changed against `HEAD` alone when they hold one, past the lines `kept.json` keeps while they hold no more than its hits.
   It exits 2, naming the fix, when no-public-leak's list (`extensions/hooks/no-public-leak.json` in the data folder) is missing or a key of it is empty, or when `owner.names` or `factory.archiveRepo` is unset, since those kinds would count nothing; the test counts the kinds that read neither alone.
+  To watch a refusal end to end on a machine where it exits 2, point `PLAYGROUND_DATA_DIR` at a scratch folder whose `extensions/policy.json` holds made-up settings, `{ "values": { "owner.names": ["<made-up name>"], "factory.archiveRepo": "<made-up owner>/<repo>" } }`, and whose `extensions/hooks/no-public-leak.json` holds a made-up entry under each key the exit-2 message names.
+  Append a line holding one of those list values to an ordinary tracked file in your own worktree, such as `GLOSSARY.md`, `git add` it, and run `PLAYGROUND_DATA_DIR=<scratch> bun run trace-count`; done when its refusal names `<file>:<line>: names` (or the list kind you used).
+  Probe with a list value, since each list kind's floor in `counts.json` is 0, so its one hit refuses; then restore the file with `git reset -q HEAD <file>` and `git checkout HEAD -- <file>`.
 
 ## no-linear-ticket
 
@@ -520,7 +530,10 @@ Only the first reading moves the folder, sets variables and records files for th
   The main checkout is no-main-checkout's. It fails open on a call it cannot read, and its tests are in `bun run test:file tests/scripts/hooks`.
   A commit's pre-commit build takes a slot through `packages/scripts/src/commit-slot.ts` when turbo's dry run finds a build task with work to do, and playbook's **slots** rule says which slot each way of committing takes.
   Before the dry run or any slot, `commit-slot.ts` runs `unlinked()` (`packages/scripts/src/playground/unlinked.ts`, link-skills.sh's check) on the checkout and, when a workspace package's dependency is unlinked, as a canary merge that adds a package leaves it, exits 1 at once, naming each `<package>: <dependency>` and the run-slot `bun install --ignore-scripts --cwd <checkout>` that links it.
-  Tests: `bun run test:file tests/packages/scripts/src/commit-slot.test.ts`.
+  The pre-commit steps `check-types-scripts` and `check-types-tests` run CI's two type checks the build leaves out, `packages/scripts`' `check-types` when a staged file is under `packages/scripts/` and `check-types:tests` when one is under `tests/`, after the build (priority 7 to its 6) and through the same `commit-slot.ts`, so a type error there stops the commit in place of a CI round.
+  `check-types-tests` first writes `web/next`'s data-table metrics, outside the slot, as CI does.
+  Their run lines set no `TURBO_CACHE_DIR`, so `commit-slot.ts`'s dry run reads the worktree's own `.turbo/cache`: a check joins the queue even when the build replayed, and runs bare only when that cache holds every build task.
+  Tests: `bun run test:file tests/packages/scripts/src/commit-slot.test.ts tests/lefthook.test.ts`.
 
 ## rules
 

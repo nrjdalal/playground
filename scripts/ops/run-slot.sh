@@ -594,7 +594,7 @@ free() {
   fi
   SLOT=""
   [ -n "$TICKET" ] && rm -f "$TICKET"
-  [ -n "${MEM_TOLD:-}" ] && rm -f "$MEM_TOLD-suite" "$MEM_TOLD-clone" "$MEM_TOLD-idle" "$MEM_TOLD-swap"
+  [ -n "${MEM_TOLD:-}" ] && rm -f "$MEM_TOLD-suite" "$MEM_TOLD-clone" "$MEM_TOLD-idle" "$MEM_TOLD-swap" "$MEM_TOLD-busy"
 }
 trap 'free' EXIT
 trap '[ -n "$CHILD" ] && kill -TERM -- "-$CHILD" 2>/dev/null; wait "$CHILD" 2>/dev/null; [ -n "$CHILD" ] && { reap "$CHILD"; rlog end "rc=143 ran=$(($(date +%s) - TOOK))s"; }; exit 143' TERM INT HUP
@@ -730,8 +730,11 @@ lanes_open() {
   local idle swap load verdict=shut seen
   read -r idle swap <<< "$(gauges)"
   load=$(loadavg | awk '{print $2}')
-  [ "$idle" = - ] && told idle "run-slot.sh: cannot read the CPU's idle share (top -l 2 -n 0), so slots 2 to 4 stay shut"
-  [ "$idle" != - ] && [ "${idle%.*}" -ge 40 ] && [ "${load%.*}" -lt 30 ] 2>/dev/null && mem_ok && verdict=open
+  case "$idle" in
+    -) told idle "run-slot.sh: cannot read the CPU's idle share (top -l 2 -n 0), so slots 2 to 4 stay shut" ;;
+    busy) told busy "$BUSY_TOLD" ;;
+  esac
+  [ "$idle" != - ] && [ "$idle" != busy ] && [ "${idle%.*}" -ge 40 ] && [ "${load%.*}" -lt 30 ] 2>/dev/null && mem_ok && verdict=open
   seen=$(cat "$OPS/run-slot.lanes" 2>/dev/null)
   if [ -z "$CAN_TAKE" ] && [ "$seen" != "$verdict" ]; then
     echo "$verdict" > "$OPS/run-slot.lanes"
@@ -815,31 +818,40 @@ swapin_rate() {
 }
 # the swap-ins a second at which memory has no room for another heavy run: spawn.sh's line for a GLM start, the gates.glmSwapinsMax setting's default (packages/settings/src/gates.ts): change both together
 SWAPINS_MAX=100
+# what a look says once a run while another takes the first reading of the gauges
+BUSY_TOLD="run-slot.sh: another look is reading the CPU's idle share and the swap-ins, so slots 2 to 4 stay shut until it lands"
 # `<idle> <swapins>`: the CPU's idle share in top's second sample (top -l 2 -n 0, as spawn.sh's load gate reads it) and the swap-ins a second in
 # vm_stat -c 2 1's last row (as spawn.sh's swapins() reads them), each - when unread; every look shares one reading through run-slot.gauges
 # (`<epoch> <idle> <swapins>`) for 10 s, since a top takes a second and about 0.7 s of system CPU, and some 27 waiters each look every 15 s;
-# one look refreshes it, under gauges_lock, while the rest keep the reading they have (- when none), since without the lock every look that
-# found it stale ran its own top (3 Nov, 10:53Z: 16 to 23 tops at once from 26 waiters, and load1 56.8)
+# one look refreshes it, under gauges_lock, while the rest keep the reading they have, or `busy busy` when there is none yet, since without the
+# lock every look that found it stale ran its own top (3 Nov, 10:53Z: 16 to 23 tops at once from 26 waiters, and load1 56.8); the refresher
+# removes the lock only while it still carries the mtime it took, so a refresher that ran past a takeover leaves the new holder's lock
 gauges() {
-  local now at= idle= swap=
+  local now cached= idle= swap= took lock="$OPS/run-slot.gauges.lock"
   now=$(date +%s)
-  { read -r at idle swap < "$OPS/run-slot.gauges"; } 2>/dev/null
-  case "$at" in ''|*[!0-9]*) at=0 ;; esac
-  if [ $((now - at)) -ge 10 ] && gauges_lock "$now"; then
-    idle=$(top -l 2 -n 0 2>/dev/null | sed -nE 's/^CPU usage:.* ([0-9.]+)% idle.*/\1/p' | awk 'END { if (NR == 2) print }')
-    swap=$(swapin_rate)
-    printf '%s %s %s\n' "$now" "${idle:--}" "${swap:--}" > "$OPS/run-slot.gauges.$$" 2>/dev/null && mv -f "$OPS/run-slot.gauges.$$" "$OPS/run-slot.gauges" 2>/dev/null
-    rmdir "$OPS/run-slot.gauges.lock" 2>/dev/null
+  { read -r cached idle swap < "$OPS/run-slot.gauges"; } 2>/dev/null
+  case "$cached" in ''|*[!0-9]*) cached=0 ;; esac
+  if [ $((now - cached)) -ge 10 ]; then
+    if took=$(gauges_lock "$now"); then
+      idle=$(top -l 2 -n 0 2>/dev/null | sed -nE 's/^CPU usage:.* ([0-9.]+)% idle.*/\1/p' | awk 'END { if (NR == 2) print }')
+      swap=$(swapin_rate)
+      printf '%s %s %s\n' "$now" "${idle:--}" "${swap:--}" > "$OPS/run-slot.gauges.$$" 2>/dev/null && mv -f "$OPS/run-slot.gauges.$$" "$OPS/run-slot.gauges" 2>/dev/null
+      [ "$(mtime "$lock")" = "$took" ] && rmdir "$lock" 2>/dev/null
+    elif [ "$cached" -eq 0 ]; then
+      idle=busy swap=busy
+    fi
   fi
   echo "${idle:--} ${swap:--}"
 }
 # takes the gauges' refresh lock at epoch $1, or one aged 30 s or more by its mtime, which a refresher killed mid-refresh left (a refresh
-# takes about 2 s); a look that read the old mtime can still rename a lock another look has just taken over, so a takeover can start more than one top
+# takes about 2 s), and prints the mtime it took the lock at (scripts/ops/README.md says why two takeovers together are harmless)
 gauges_lock() {
-  local lock="$OPS/run-slot.gauges.lock" at
-  mkdir "$lock" 2>/dev/null && return
-  at=$(mtime "$lock") || return
-  [ $(($1 - at)) -ge 30 ] && mv "$lock" "$lock.$$" 2>/dev/null && rmdir "$lock.$$" 2>/dev/null && mkdir "$lock" 2>/dev/null
+  local now=$1 lock="$OPS/run-slot.gauges.lock" born
+  if ! mkdir "$lock" 2>/dev/null; then
+    born=$(mtime "$lock") || return
+    [ $((now - born)) -ge 30 ] && rmdir "$lock" 2>/dev/null && mkdir "$lock" 2>/dev/null || return
+  fi
+  mtime "$lock"
 }
 # macOS's memory reading $1: level (the free share) or vm_pressure_level (1 normal, 2 warn, 4 critical)
 memstat() { sysctl -n "kern.memorystatus_$1" 2>/dev/null | tr -cd 0-9; }
@@ -857,10 +869,10 @@ mem_ok() {
     return 1
   fi
   swap=$(gauges | cut -d' ' -f2)
-  if [ "$swap" = - ]; then
-    told swap "run-slot.sh: cannot read the swap-ins (vm_stat -c 2 1), so no second suite runs beside this one"
-    return 1
-  fi
+  case "$swap" in
+    -) told swap "run-slot.sh: cannot read the swap-ins (vm_stat -c 2 1), so no second suite runs beside this one"; return 1 ;;
+    busy) told busy "$BUSY_TOLD"; return 1 ;;
+  esac
   [ "$free" -ge 40 ] && [ "$level" -eq 1 ] && [ "$swap" -lt "$SWAPINS_MAX" ]
 }
 

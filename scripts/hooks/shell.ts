@@ -75,9 +75,12 @@ export function pastDeadline(): void {
 
 let steps = 0
 
-// The one choke point every lex, expansion and walk step passes through; it reads the clock once every 1024 steps, so a tight loop pays for a counter alone.
+// The steps tick() has counted so far, so a test bounds a reader's work by a count that holds under any load.
+export const stepsTaken = (): number => steps
+
+// The one choke point every lex, expansion and walk step passes through; it counts each step and reads the clock once every 1024 under a deadline, so a tight loop pays for a counter alone.
 export function tick(): void {
-  if (deadline === undefined || ++steps % 1024 !== 0) return
+  if (++steps % 1024 !== 0 || deadline === undefined) return
   if (performance.now() > deadline) throw new RangeError("past the hook's time")
 }
 
@@ -407,6 +410,7 @@ function decode(raw: string): string {
   return raw.replace(
     /\\(?:x([\da-fA-F]{1,2})|u([\da-fA-F]{1,4})|U([\da-fA-F]{1,8})|0?([0-7]{1,3})|([\s\S]))/g,
     (whole, hex?: string, u4?: string, u8?: string, octal?: string, other?: string) => {
+      tick()
       const point =
         hex || u4 || u8
           ? Number.parseInt(hex ?? u4 ?? u8 ?? "", 16)
@@ -864,6 +868,7 @@ function unwrap(state: State, inside: string | undefined, budget: Budget): Parse
   const take = (): Word | undefined => rest.pop()
   const also: Parsed[] = []
   const fork = (wrapper: string, drop: number) => {
+    tick()
     if (budget.left-- <= 0) {
       budget.capped = true
       return

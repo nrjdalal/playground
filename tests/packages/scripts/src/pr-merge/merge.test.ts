@@ -12,7 +12,7 @@ import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
 
 import type { LockStore } from "../../../../../packages/redis/src/index"
-import { heldPath } from "../../../../../packages/scripts/src/pr-merge/held"
+import { FREEZE_LAPSE_MS, heldPath } from "../../../../../packages/scripts/src/pr-merge/held"
 import {
   gateOptions,
   isServerError,
@@ -443,6 +443,38 @@ describe("a hold written after the gates are read", () => {
     const outcome = await prMerge(112, { repo: REPO }, run, local())
     expect(outcome).toMatchObject({ kind: "merged", sha: "abc1234def" })
     expect(merges(calls)).toHaveLength(1)
+  })
+
+  // the ship flow's freeze (bun run ship:freeze) writes "*" with its time, and a ship that stopped without its --end leaves it to lapse
+  test("a ship's fresh \"*\" line refuses a PR at 5/5 with green checks, one past its lapse merges, and a PR's own line as old still refuses", async () => {
+    const line = "v0.0.38 ships: canary is frozen until its tag lands"
+    const since = (ago: number) => new Date(Date.now() - ago).toISOString()
+    try {
+      writeFileSync(HELD, JSON.stringify({ held: { "*": line }, since: { "*": since(60_000) } }))
+      const fresh = stub()
+      const outcome = await prMerge(112, { repo: REPO }, fresh.run, local())
+      expect(outcome.kind).toBe("refused")
+      expect(outcome.gates.filter((gate) => !gate.ok).map((gate) => gate.name)).toEqual(["held"])
+      expect(merges(fresh.calls)).toEqual([])
+      const old = since(FREEZE_LAPSE_MS + 60_000)
+      writeFileSync(
+        HELD,
+        JSON.stringify({ held: { "*": line, [`${REPO}#113`]: "own" }, since: { "*": old } }),
+      )
+      const lapsed = stub()
+      expect(await prMerge(112, { repo: REPO }, lapsed.run, local())).toMatchObject({
+        kind: "merged",
+      })
+      const own = stub()
+      const refused = await prMerge(113, { repo: REPO }, own.run, local())
+      expect(refused.gates.find((gate) => gate.name === "held")).toMatchObject({
+        detail: "own",
+        ok: false,
+      })
+      expect(merges(own.calls)).toEqual([])
+    } finally {
+      rmSync(HELD, { force: true })
+    }
   })
 
   test("merges as before when the list still does not name the PR at the merge call", async () => {

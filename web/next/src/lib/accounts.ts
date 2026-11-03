@@ -138,8 +138,12 @@ export const accountWords = (row: AccountRow, login?: string | null) => ({
   title: row.label ?? row.email ?? row.key,
 })
 
-// GET /api/v1/accounts: every account the factory spends and whether ext init has named the login they need, read by Settings and by the home's empty state, which asks whether a Claude one exists.
-export const readAccounts = async (): Promise<{ accounts: AccountRow[]; login: boolean }> => {
+// GET /api/v1/accounts: every account the factory spends, whether ext init has named the login they need and the scope a write goes to, read by Settings and by the home's empty state, which asks whether a Claude one exists.
+export const readAccounts = async (): Promise<{
+  accounts: AccountRow[]
+  login: boolean
+  scope: string | null
+}> => {
   const { data, error } = await unwrap(apiClient.v1.accounts.$get())
   if (error) throw new Error(error.message)
   return data

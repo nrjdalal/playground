@@ -105,7 +105,7 @@ async function withDeadline(budget, body) {
 }
 var steps = 0;
 function tick() {
-  if (deadline === undefined || ++steps % 1024 !== 0)
+  if (++steps % 1024 !== 0 || deadline === undefined)
     return;
   if (performance.now() > deadline)
     throw new RangeError("past the hook's time");
@@ -396,6 +396,7 @@ var UV_TAKES = new Set([
 ]);
 function decode(raw) {
   return raw.replace(/\\(?:x([\da-fA-F]{1,2})|u([\da-fA-F]{1,4})|U([\da-fA-F]{1,8})|0?([0-7]{1,3})|([\s\S]))/g, (whole, hex, u4, u8, octal, other) => {
+    tick();
     const point = hex || u4 || u8 ? Number.parseInt(hex ?? u4 ?? u8 ?? "", 16) : Number.parseInt(octal ?? "", 8);
     if (!Number.isNaN(point))
       return point <= 1114111 ? String.fromCodePoint(point) : whole;
@@ -811,6 +812,7 @@ function unwrap(state, inside, budget) {
   const take = () => rest.pop();
   const also = [];
   const fork = (wrapper, drop) => {
+    tick();
     if (budget.left-- <= 0) {
       budget.capped = true;
       return;
@@ -1396,6 +1398,40 @@ function reads(parsed, env) {
   const before = args.slice(0, args.length - rest.length - 1).map((a) => a.value);
   return !!sub && GIT_READS.has(sub) && !before.some((w) => /^-c|^--(?:config-env|exec-path)/.test(w)) && !rest.some((w) => /^(?:--output|-O|--open-files-in-pager|--ext-diff|--textconv)/.test(w));
 }
+var GH_READS = new Set([
+  "api",
+  "issue list",
+  "issue view",
+  "pr list",
+  "pr view",
+  "run list",
+  "run view",
+  "search"
+]);
+var GH_API_SENDS = /^(?:-[^-=qt]*[FXf]|--(?:cache|field|input|method|raw-field)(?:=|$))/;
+var GH_WEB = /^(?:-[^-=qt]*w|--web(?:=|$))/;
+function ghFilters(parsed) {
+  const { args, first, name } = parsed;
+  const filters = new Set;
+  if (name !== "gh" || !first || marked(first.value))
+    return filters;
+  const [verb, sub] = args.map((a) => a.value);
+  const call = verb === "api" || verb === "search" ? verb : `${verb} ${sub}`;
+  if (!GH_READS.has(call))
+    return filters;
+  if (verb === "api" && args.some((a) => GH_API_SENDS.test(a.value)))
+    return filters;
+  if (args.some((a) => GH_WEB.test(a.value)))
+    return filters;
+  for (let k = 0;k < args.length; k++) {
+    const { value } = args[k];
+    if (["-q", "--jq", "-t", "--template"].includes(value) && args[k + 1])
+      filters.add(args[++k]);
+    else if (/^(?:-[qt].|--(?:jq|template)=)/.test(value))
+      filters.add(args[k]);
+  }
+  return filters;
+}
 var READS_ONLY = /^(?:\}|:?[-+?]|[#%/])/;
 function namings(command) {
   const counts = new Map;
@@ -1805,6 +1841,10 @@ function narrow(cmd, env) {
     return reads(parsed, env);
   if (base === "cut")
     return true;
+  if (base === "gh") {
+    const filters = ghFilters(parsed);
+    return filters.size > 0 && args.every((a) => filters.has(a) || !/\s/.test(a.value));
+  }
   if (base === "sort")
     return !args.some(({ value }) => /^-[a-zA-Z]*o|^--./.test(value));
   if (base === "uniq")
@@ -1837,7 +1877,10 @@ function wholeLine(commands, env) {
 }
 function runsOf(parsed, vars, whole, rootLine) {
   const { args, first, local } = parsed;
-  const values = [...local.values(), ...vars].flatMap((text) => text.unknown ? [] : [text.value]);
+  const values = [...local.values(), ...vars].flatMap((text) => {
+    tick();
+    return text.unknown ? [] : [text.value];
+  });
   for (const word of whole ? first ? [first, ...args] : args : [])
     for (const text of texts(word)) {
       values.push(text.value.replace(/^!/, ""));
@@ -1971,7 +2014,10 @@ async function inspect(raw, environment, unknown = false) {
     store.set(vars, cursors);
     const [keys, next] = varsSince(vars, cursors.get(key));
     cursors.set(key, next);
-    return keys.flatMap((k) => vars.get(k) ?? []);
+    return keys.flatMap((k) => {
+      tick();
+      return vars.get(k) ?? [];
+    });
   };
   const visit = async (cmd, parsed, env) => {
     const slot = slotWords(parsed);
@@ -2037,8 +2083,10 @@ async function inspect(raw, environment, unknown = false) {
         return refuse(`${verb} with a variable on ${named}`);
     }
     const literal = !whole && narrow(cmd, env);
+    const filters = whole ? new Set : ghFilters(parsed);
     for (const word of [first, ...args].map((word) => heldWord(word, env, steady) ?? word)) {
-      if (quiet && /\s/.test(word.value) && !texts(word).some((t) => holds(t.value, env)))
+      const text = quiet && /\s/.test(word.value) || filters.has(word) && !word.glob;
+      if (text && !texts(word).some((t) => holds(t.value, env)))
         continue;
       const named = names(word, env, remover, literal);
       if (named)
