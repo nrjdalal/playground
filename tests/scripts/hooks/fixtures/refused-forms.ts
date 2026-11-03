@@ -1879,6 +1879,46 @@ gh api graphql -f query="$QUERY"`,
         "process data folder",
       ],
       [
+        "rm of a variable set only in a function the line never calls",
+        "f() { true; X=/tmp/a; }; rm -rf ${X}extensions/.no-such-folder",
+        "process data folder",
+      ],
+      [
+        "rm of a variable set only in an untaken if branch",
+        "if false; then true; X=/tmp/a; fi; rm -rf ${X}extensions/.no-such-folder",
+        "process data folder",
+      ],
+      [
+        "rm of a variable set only in an untaken if branch on its own line",
+        "if false; then\nX=/tmp/a\nfi\nrm -rf ${X}extensions/.no-such-folder",
+        "process data folder",
+      ],
+      [
+        "rm of a variable set only in a loop body that never runs",
+        "while false; do true; X=/tmp/a; done; rm -rf ${X}extensions/.no-such-folder",
+        "process data folder",
+      ],
+      [
+        "rm of a variable set only in an untaken case arm",
+        "case a in b) true; X=/tmp/a;; esac; rm -rf ${X}extensions/.no-such-folder",
+        "process data folder",
+      ],
+      [
+        "rm of a variable set only in a group behind a failing &&",
+        "false && { true; X=/tmp/a; }; rm -rf ${X}extensions/.no-such-folder",
+        "process data folder",
+      ],
+      [
+        "rm of a variable read sets by a name spelled in pieces",
+        "XY=/tmp/a; read X\\Y <<< exten; rm -rf ${XY}sions/.no-such-folder",
+        "process data folder",
+      ],
+      [
+        "rm of a variable eval sets by a name it builds",
+        'XY=/tmp/a; N=X; eval "${N}Y=exten"; rm -rf ${XY}sions/.no-such-folder',
+        "process data folder",
+      ],
+      [
         "rm of a variable the call appends to",
         "X=ext; X+=ensions/.no-such-folder; rm -rf $X",
         "process data folder",
