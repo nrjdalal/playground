@@ -77,6 +77,7 @@ export type Group = {
     | "#509"
     | "#533"
     | "#536"
+    | "#652"
 }
 
 // The rows a guard-loosening PR lets run on purpose, and the rows that show the one form a guard lets run, each written as a row's "<source> <what>" for all its cases, or as one case's "<source> <what> | <guard> | <folder>".
@@ -2411,5 +2412,36 @@ gh api graphql -f query="$QUERY"`,
       ],
     ],
     source: "#533",
+  },
+  {
+    folders: ["process home", "process data folder", "process worktree"],
+    guards: ["no-extensions-write"],
+    rows: () => [
+      [
+        "a removal echoed to sudo's shell behind a shortened user option and its value",
+        "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sudo --us root -s",
+      ],
+      [
+        "a removal echoed to sudo's shell behind a one-letter user option and its value",
+        "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sudo --u root -s",
+      ],
+      [
+        "a removal echoed to sudo's login shell behind a shortened user option and its value",
+        "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sudo --use root --login",
+      ],
+      [
+        "a removal echoed to sudo's shell behind a shortened prompt option and its value",
+        "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sudo --pro x -s",
+      ],
+      [
+        "a removal echoed to sudo's shell behind a flag and a shortened user option",
+        "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sudo -E --us root -s",
+      ],
+      [
+        "a removal echoed to sudo's shell behind nice and a shortened user option",
+        "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | nice sudo --us root -s",
+      ],
+    ],
+    source: "#652",
   },
 ]

@@ -562,6 +562,18 @@ describe("a quoted argument is read as a command line only where a program runs 
       "doas whose user option comes first in a cluster and takes the shell letter as its value",
       "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | doas -us",
     ],
+    [
+      "sudo with its full user option and a harmless command",
+      "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sudo --user root ls",
+    ],
+    [
+      "sudo with no options and a harmless command",
+      "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sudo ls",
+    ],
+    [
+      "sudo with a shortened user option and a harmless command",
+      "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sudo --us root ls",
+    ],
   ])("%s runs from a worktree", async (_, command) => {
     expect(await at(command, join(homedir(), "x", ".claude", "worktrees", "y"))).toBeUndefined()
   })
