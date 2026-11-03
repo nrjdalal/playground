@@ -437,7 +437,7 @@ describe("the types gate", () => {
   })
 })
 
-// 3 Nov: #681's head, branched before #730, held no no-raw-delete.js, so its own checks passed; the tree its merge wrote held #730's bundle, built from the shell.ts #681 then changed
+// 3 Nov: a head that changed shell.ts, branched before no-raw-delete.js was added, passed its own checks; the tree its merge wrote held that bundle, built from the shell.ts the head then changed
 describe("the bundles step on the merged tree", () => {
   // a scratch repo whose canary is ahead of PR 7's head, the head adding the given file, and the hooks flag each check's steps were given
   async function touching(name: string, path: string) {
