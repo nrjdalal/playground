@@ -26,7 +26,7 @@ type Lexer = {
 }
 type Lexed = { commands: Command[]; scopes: number[] }
 type Pending = { delim: string; quoted: boolean; redirect: Redirect; strip: boolean }
-// `old` is set by a hook that follows OLDPWD, `old.dir` the folder it holds (unset when the hook cannot tell), so a pushd of ~- or ~+ reads a folder there; a hook that leaves it unset reads both as typed.
+// `old` is set by a hook that follows zsh's ~-, `old.dir` the folder the shell last left (unset when the hook cannot tell), which an assignment to OLDPWD leaves as it is, so a pushd of ~- or ~+ reads a folder there; a hook that leaves it unset reads both as typed.
 export type Env = {
   cwd?: string
   files: Map<string, Text>
@@ -982,14 +982,6 @@ async function examineReading(
   const { args, chdir, local, name } = parsed
   const here: Env = chdir ? { ...env, cwd: pathOf(chdir, env) } : env
   let verdict: string | undefined
-  // a command that names OLDPWD may set it, so ~- reads as unknown from it on
-  if (
-    env.old &&
-    [...args.map((a) => a.value), ...[...local].map(([key]) => key)].some((v) =>
-      v.includes("OLDPWD"),
-    )
-  )
-    env.old = {}
   const followed = SHELLS.has(name) || [".", "cd", "eval", "popd", "pushd", "source"].includes(name)
   if (followed && builtins && cmd.redirects.length > 0) {
     const bare = { ...cmd, words: [] }
@@ -1036,7 +1028,7 @@ async function cdTarget(name: string, args: Word[], env: Env): Promise<string | 
   const dir = args.find((a) => !(a.value.startsWith("-") && a.value.length > 1))
   if (!dir) return homedir()
   const typed = dir.value === "-" ? undefined : await folder(pathOf(dir, env))
-  // in a hook that follows OLDPWD, a pushd's unquoted ~- is that folder and ~+ the current one, as the shell expands them; beside a folder named ~- or ~+ the typed reading stays, though the shell still expands the word
+  // in a hook that follows ~-, a pushd's unquoted ~- is the folder the shell last left and ~+ the current one, as the shell expands them; beside a folder named ~- or ~+ the typed reading stays, though the shell still expands the word
   const tilde =
     !typed && name === "pushd" && env.old && !dir.quoted && !dir.unknown && !dir.reads?.length
       ? /^~([-+])(?=\/|$)/.exec(dir.value)

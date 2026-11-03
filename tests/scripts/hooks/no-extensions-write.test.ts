@@ -450,13 +450,14 @@ describe("a direct write into the extensions root is refused, naming the owner's
     expect(await bash("node -e 'x'", SCOPE)).toContain("no-extensions-write hook refuses")
   })
 
-  // the README's unread pass: these pin the two branches that drop ~-, since a pushd ~- read as the root would refuse them
-  test.each([
-    ["a command naming OLDPWD", `cd ${SCOPE}; cd /tmp; OLDPWD=/tmp; pushd ~-; touch f`],
-    ["a popd", `cd ${SCOPE}; cd /tmp; popd; pushd ~-; touch f`],
-  ])("pushd ~- after %s leaves the folder unread", async (_, command) => {
-    expect(await bash(command)).toBeUndefined()
-    expect(await bash(`cd ${SCOPE}; cd /tmp; pushd ~-; touch f`)).toContain("refuses")
+  // zsh's ~- is the folder it last left, so an OLDPWD assignment keeps it in the root, and a popd that lands back leaves it unread
+  test("pushd ~- after an OLDPWD assignment is still the folder zsh last left", async () => {
+    expect(await bash(`cd ${SCOPE}; cd /usr; OLDPWD=/usr; pushd ~-; touch f`)).toContain("refuses")
+  })
+
+  test("pushd ~- after a popd leaves the folder unread", async () => {
+    expect(await bash(`cd ${SCOPE}; pushd /usr; popd; pushd ~-; touch f`)).toBeUndefined()
+    expect(await bash(`cd ${SCOPE}; pushd /usr; pushd ~-; touch f`)).toContain("refuses")
   })
 })
 
