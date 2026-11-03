@@ -394,12 +394,9 @@ describe("the tree a count reads", () => {
   afterAll(() => rmSync(scratch, { force: true, recursive: true }))
   // nothing from this machine's git: a hook exports GIT_DIR and GIT_INDEX_FILE, which would point every git call here, tree()'s included, at the checkout being committed
   const git = (...args: string[]) =>
-    Bun.spawnSync(
-      ["git", "-C", scratch, "-c", "user.email=t@example.test", "-c", "user.name=t", ...args],
-      {
-        env: { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" },
-      },
-    )
+    Bun.spawnSync(["git", "-C", scratch, "-c", "user.email=t@t", "-c", "user.name=t", ...args], {
+      env: { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" },
+    })
 
   test("counts a tracked or staged file, never an untracked one", async () => {
     const hook = Object.entries(process.env).filter(([key]) => key.startsWith("GIT_"))
