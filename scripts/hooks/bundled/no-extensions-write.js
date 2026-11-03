@@ -305,10 +305,14 @@ var ROOT_SHELLS = new Map([
 ]);
 function stdinShell(cmd) {
   const parsed = parse(cmd);
-  const kinds = [
-    ...readings(parsed),
-    ...parsed.capped ? [{ ...parsed, first: undefined }] : []
-  ].map((reading) => stdinShellOf(cmd, reading));
+  const kinds = readings(parsed).map((reading) => stdinShellOf(cmd, reading));
+  if (parsed.capped) {
+    const names = cmd.words.map((w) => program(w.value));
+    if (names.some((n) => ROOT_SHELLS.has(n)))
+      kinds.push("root");
+    else if (names.some((n) => SHELLS.has(n)))
+      kinds.push("shell");
+  }
   return kinds.includes("root") ? "root" : kinds.find(Boolean);
 }
 function stdinShellOf(cmd, { args, first, name }) {

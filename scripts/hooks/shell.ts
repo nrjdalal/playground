@@ -177,13 +177,15 @@ const ROOT_SHELLS = new Map([
   ["doas", new Set(["-s"])],
   ["sudo", new Set(["--login", "--shell", "-i", "-s"])],
 ])
-// Whether a command starts a shell that reads its script from stdin, with no command of its own, under any of parse's readings (a shortened long option is one its lists lack, so it is read as taking the next word too), and as having no program once the readings ran out: "root" for a privilege wrapper's shell (`sudo -s`, `nice doas -s`, an option or program in a variable taken as one), "shell" for a shell given no script (`sh`, `sudo bash`); a reserved word, a function's name or an assignment before it skipped
+// Whether a command starts a shell that reads its script from stdin, with no command of its own, under any of parse's readings (a shortened long option is one its lists lack, so it is read as taking the next word too); once the readings ran out, any privilege wrapper among its words counts as a root shell and any shell's name as a shell: "root" for a privilege wrapper's shell (`sudo -s`, `nice doas -s`, an option or program in a variable taken as one), "shell" for a shell given no script (`sh`, `sudo bash`); a reserved word, a function's name or an assignment before it skipped
 export function stdinShell(cmd: Command): "root" | "shell" | undefined {
   const parsed = parse(cmd)
-  const kinds = [
-    ...readings(parsed),
-    ...(parsed.capped ? [{ ...parsed, first: undefined }] : []),
-  ].map((reading) => stdinShellOf(cmd, reading))
+  const kinds = readings(parsed).map((reading) => stdinShellOf(cmd, reading))
+  if (parsed.capped) {
+    const names = cmd.words.map((w) => program(w.value))
+    if (names.some((n) => ROOT_SHELLS.has(n))) kinds.push("root")
+    else if (names.some((n) => SHELLS.has(n))) kinds.push("shell")
+  }
   return kinds.includes("root") ? "root" : kinds.find(Boolean)
 }
 
