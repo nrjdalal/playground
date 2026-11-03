@@ -39,6 +39,8 @@ Sessions run in bypass-permissions mode, yet some commands still prompt (`rm`, a
    so every GLM spawn refuses until `bun run ops:zai-usage` has beaten once).
    A GLM start takes its own load and memory gate in place of the load and memory checks above: load5 (the third field of `sysctl -n vm.loadavg`) under 30 (`gates.glmLoad5Max`), memory pressure level 1, and swap-ins under 100/s (`gates.glmSwapinsMax`, `vm_stat -c 2 1`), so GLM starts while Claude's gate holds.
    Every pass and refusal is one line in `~/.playground/ops/capacity.jsonl`, which the load check counts its starts from, a refusal's carrying the words it printed as `detail`.
+   Every manager start takes the gate, an orchestrator's included, but the first dispatcher's, which starts past a failing gate so the owner always has one: its row reads `skipped` with the gate and the words a refusal would print, and counts as a start.
+   `bun run verify system` reads how many more workers and how many more orchestrators fit now, and what limits each.
    It also refuses while a live session already holds the name (below).
    A refusal names its gate and what it read: close a session that is done ([End](#end)), or wait for the reading to fall, and run it again.
    It has no bypass: past the gate only the owner starts a session, from his own terminal, whose sessions load no factory hook, or a PR changes the gate.
@@ -70,6 +72,7 @@ Sessions run in bypass-permissions mode, yet some commands still prompt (`rm`, a
      The first dispatcher (`sessions.names`' dispatcher, which `playground dispatcher` starts, working with the owner and reporting to no session), the second dispatcher (Inbox #i520), a dispatcher's name with `-2` or an `<id>-dispatcher` it records as `slot=2`, the optimizer (which `playground optimizer` starts), and the Planner,
      the Builder and Ops (which `playground planner`, `playground builder` and `playground ops` start the first time the dispatcher routes work to each) open instead in a workspace of their own, named after each,
      in the main checkout's `.claude/worktrees/leads` (`manager <name> <brief>`, the optimizer by its name or its roster kind, a new name given `kind=optimizer` first the same way;
+     an orchestrator of any other manager kind in `kinds.ts`, such as the Assistant, opens there too, as a lead reporting to the session its row names, once `scripts/roster.ts set <name> kind=<kind> reportsTo=<session> task=<what it does>` has given it both, and spawn.sh refuses it naming that line until it has;
      spawn.sh refuses the second dispatcher on Claude without `--account <email>`, a second account, so it never shares the first's login, and a resume of it whose pin reads claude needs `--account` again, since nothing records the account).
      After a cmux restart, `python3 scripts/ops/up.py --sessions` prints the `spawn.sh resume <name> <dir> <session-id>` line that brings each session back, with `--backend glm` for a session whose newest turn ran on GLM;
      `--brief <file>`, with resume alone, makes the resumed session's first prompt tell it to read `~/.playground/<file>` and follow it, so it comes back working rather than idle.
@@ -80,9 +83,9 @@ Sessions run in bypass-permissions mode, yet some commands still prompt (`rm`, a
      Before an account move, its dispatcher tells every session that serves a dev stack, so what it serves does not go down unannounced.
      Resumes go about 2 minutes apart to start, since spawn.sh's load gate counts recent starts and refuses a burst; a refused resume waits and runs again.
 
-   It prints herdr's answer (`herdr pane <id> workspace <id>`) and records the session's `kind`, a checker's `worker=<its worker's full name>` and, for an entry with no task, a `task` as [ROSTER.md](ROSTER.md) says, in the roster,
+   It prints herdr's answer (`herdr pane <id> workspace <id>`) and records the session's `kind`, a checker's `worker=<its worker's full name>`, a worker's or runner's `reportsTo=<the session it reports to>` and, for an entry with no task, a `task` as [ROSTER.md](ROSTER.md) says, in the roster,
    by `set` through the checkout's `scripts/roster.ts`, which keeps a respawned session's work.
-   The kind comes from the mode (`worker` for a worker, `runner` for a runner, the column's role for a checker or probe) or, for a manager, from its name (through `sessions.names`, then `sessions.aliases`, or `optimizer`); a resume reads the roster's kind for the name first and refuses a name that neither the roster's kind nor a factory name places.
+   The kind comes from the mode (`worker` for a worker, `runner` for a runner, the column's role for a checker or probe) or, for a manager, from its name (through `sessions.names`, then `sessions.aliases`, or `optimizer`), else an orchestrator's roster kind; a resume reads the roster's kind for the name first and refuses a name that neither the roster's kind nor a factory name places.
 
    It refuses a name a live session already holds (a `claude -p` run, whose registry file reads `entrypoint` `sdk-cli`, holds none), naming that session's pid, since Claude Code would start the new one under a generated name while the roster still pointed at the old one: a respawn under the same name spawns only once the old session has closed (after a cmux restore).
    It launches every session with `--dangerously-skip-permissions`, the factory's bypass mode, so it never rests on the machine's own settings (a session in another mode holds every cross-session message for approval);

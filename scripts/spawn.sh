@@ -34,6 +34,9 @@ set -euo pipefail
 #      check, since the other login's usage is not this machine's, but refuses a week a reading names at 100%; GLM reads zai-usage.json
 #      (the 5-hour window under 95% of its credits, with no week check, and no empty balance (its `balance`), valid only
 #      while the zai usage job's last beat is ok and within 3 cycles)
+#   The first dispatcher starts past every gate, so the owner always has one: the gates still read, a failure
+#   logs a skipped row naming its gate and reading (which the load gate counts as a start) and prints it, and the
+#   pass picks its login as for any start; every other manager start, an orchestrator's included, takes them all
 # It also refuses a name a live session holds, since Claude Code would start the
 # new one under a generated name. Every launch is in bypass mode, and drops
 # inscope's own CLAUDE_CONFIG_DIR where inscope exports one.
@@ -44,7 +47,7 @@ set -euo pipefail
 #                      a column right of a herdr pane id (w1:p2), its spawner's own being $HERDR_PANE_ID; a cmux surface:N is refused
 #   spawn.sh column    <manager> <pane> <brief>        a manager's column names it once: a lead (sessions.names' builder, ops or planner, an <id>-builder, -ops or -planner, or a name the roster kinds) reports to the first dispatcher, and the first dispatcher (sessions.names' dispatcher or an <id>-dispatcher) is briefed by the session running spawn.sh
 #   spawn.sh probe     <name> <reports-to> <brief>     in herdr alone: its own workspace, this checkout, for a server with no pane to split beside
-#   spawn.sh manager   <dispatcher|second dispatcher|optimizer|builder|ops|planner> <brief>   its own workspace in the main checkout's .claude/worktrees/leads: the first dispatcher (sessions.names' dispatcher), which works with the owner and reports to no session; the second dispatcher (Inbox #i520), sessions.names' dispatcher with -2 or an <id>-dispatcher it records as slot=2, on --backend glm or --account <a second account>; the optimizer (optimizer, an <id>-optimizer, or a session the roster gives the optimizer kind) and the builder, ops and planner (playground <manager> starts each), leads; these report to the first dispatcher
+#   spawn.sh manager   <dispatcher|second dispatcher|optimizer|builder|ops|planner|orchestrator> <brief>   its own workspace in the main checkout's .claude/worktrees/leads: the first dispatcher (sessions.names' dispatcher), which works with the owner and reports to no session; the second dispatcher (Inbox #i520), sessions.names' dispatcher with -2 or an <id>-dispatcher it records as slot=2, on --backend glm or --account <a second account>; the optimizer (optimizer, an <id>-optimizer, or a session the roster gives the optimizer kind) and the builder, ops and planner (playground <manager> starts each), leads; these report to the first dispatcher; an orchestrator, a session whose roster row holds a manager kind of kinds.ts (ROSTER_ROLE_OF_KIND) and reportsTo, set first with roster.ts set <name> kind=<kind> reportsTo=<session>, a lead reporting to that session
 #   spawn.sh resume    <name> <dir> [session-id]        reopens a closed session: in herdr in the pane herdr kept under its label while that pane holds no agent, else in a workspace of its own; with no session id, only in a folder it ran in; a <dir> in the Desktop folder resumes in the same tree under the code root, its transcript copied there when a session id is given; with no code root it resumes in the Desktop folder itself
 #   spawn.sh restore                                    resumes every herdr session whose resume record (~/.playground/resume) names it on the server PLAYGROUND_HERDR_SESSION names (playground by default) and whose roster row is not done, ended, parked or paused, each through `spawn.sh resume` and its gate with the --account its start was given, the --model it started with and an --effort other than high; a live one is skipped, and one restore runs at a time
 #   spawn.sh close     <name>                           closes the herdr pane spawn.sh opened for <name>, by the label it set, on the server its resume record names; it refuses any other pane and your own, and ends its roster row once the pane closes
@@ -89,6 +92,8 @@ if [ -n "${INSCOPE_CCD:-}" ] || { [ -r "$INSCOPE_HOOK" ] && grep -q -e INSCOPE_C
 fi
 # The data folder of the config folder the launch runs from, as dataDir() resolves it, and as a brief or a refusal names it.
 DATA=$(cd / && env $UNSET "$BUN" --no-env-file -e "import { dataDir } from '$REPO/packages/env/src/data-dir.ts'; console.log(dataDir())") || { echo "spawn.sh: bun could not resolve the data folder" >&2; exit 1; }
+# The roster's manager kinds (kinds.ts' ROSTER_ROLE_OF_KIND), so a kind role_of_kind does not list runs as a lead: an orchestrator. A read that fails leaves the named kinds alone, so an orchestrator is refused rather than guessed.
+MANAGER_KINDS=$(cd / && env $UNSET "$BUN" --no-env-file -e "import { ROSTER_ROLE_OF_KIND as r } from '$REPO/packages/config/src/kinds.ts'; console.log(Object.keys(r).filter((k) => r[k] === 'manager').join(' '))" 2>/dev/null) || MANAGER_KINDS=
 [[ $DATA == "$HOME"/* ]] && SHOWN="~${DATA#"$HOME"}" || SHOWN=$DATA
 SETTINGS="$DATA/factory-settings.json"
 HERDR_DIR=${PLAYGROUND_HERDR_DIR:-${DESK_HERDR_DIR:-$DATA/herdr}}
@@ -162,13 +167,14 @@ kind_of_name() {
       ;;
   esac
 }
-# The PLAYGROUND_ROLE a kind runs under; nothing for a kind off the list.
+# The PLAYGROUND_ROLE a kind runs under: lead for any other manager kind (an orchestrator), nothing for a kind off the list.
 role_of_kind() {
   case "$1" in
     worker | researcher) echo worker ;;
     reviewer | tester | runner | probe) echo "$1" ;;
     builder | ops | optimizer | planner) echo lead ;;
     dispatcher) echo dispatcher ;;
+    *) case " $MANAGER_KINDS " in *" $1 "*) [ -z "$1" ] || echo lead ;; esac ;;
   esac
 }
 
@@ -255,7 +261,7 @@ gate_capacity() {
     [ -n "$room" ] || room=unread
   fi
   verdict=$(
-    python3 -I - "$DATA" "$ACCOUNT" "$BACKEND" "${CLAUDE_CONFIG_DIR:-$HOME/.claude}" "$(own_config)" "${CHECK:+check}" "$MOVE_PID" "$GATES" $ITEM "$ROLE" "$room" <<'PY'
+    python3 -I - "$DATA" "$ACCOUNT" "$BACKEND" "${CLAUDE_CONFIG_DIR:-$HOME/.claude}" "$(own_config)" "${CHECK:+check}" "$MOVE_PID" "$GATES" $ITEM "$ROLE" "$room" "${FIRST:+first}" <<'PY'
 import datetime as dt
 import glob
 import json
@@ -264,7 +270,7 @@ import os
 import subprocess
 import sys
 
-data_dir, account, backend, config_dir, own_config, check, move, gates, size, units, role, room = sys.argv[1:13]
+data_dir, account, backend, config_dir, own_config, check, move, gates, size, units, role, room, first = sys.argv[1:14]
 log_path = os.path.join(data_dir, "ops", "capacity.jsonl")
 units = int(units)
 gates = json.loads(gates)
@@ -273,15 +279,17 @@ readings = {}
 if move:
     readings["move"] = f"pid {move}"
 
+# The first dispatcher starts past a failing gate, its row skipped, so the owner always has one.
 def refuse(gate, detail):
-    row = {"at": now.isoformat(timespec="seconds").replace("+00:00", "Z"), "detail": detail, "gate": gate, "readings": readings, "verdict": "refused"}
+    verdict = ("check" if check else "skipped") if first else "refused"
+    row = {"at": now.isoformat(timespec="seconds").replace("+00:00", "Z"), "detail": detail, "gate": gate, "readings": readings, "verdict": verdict}
     try:
         os.makedirs(os.path.dirname(log_path), exist_ok=True)
         with open(log_path, "a") as f:
             f.write(json.dumps(row, sort_keys=True) + "\n")
     except OSError:
         pass
-    print(f"the {gate} gate holds it: {detail}")
+    print(f"past the first dispatcher starts past the {gate} gate, which would hold another start: {detail}" if first else f"the {gate} gate holds it: {detail}")
     sys.exit(0)
 
 def from_iso(value):
@@ -395,7 +403,7 @@ else:
     readings["load_mult"] = mult
     cap = cores * mult
     starts = 0
-    # this factory's starts, then each peer's (slots.peers) from its own log, read only, since the load average lags a start on either side
+    # this factory's starts (a pass row, or a first dispatcher's skipped one), then each peer's (slots.peers) from its own log, read only, since the load average lags a start on either side
     for path in [log_path] + [os.path.join(p, "capacity.jsonl") for p in gates["peers"] if isinstance(p, str)]:
         try:
             with open(path) as f:
@@ -404,7 +412,7 @@ else:
                         row = json.loads(line)
                     except ValueError:
                         continue
-                    if not isinstance(row, dict) or row.get("verdict") != "pass":
+                    if not isinstance(row, dict) or row.get("verdict") not in ("pass", "skipped"):
                         continue
                     try:
                         if (now - from_iso(row["at"])).total_seconds() <= gates["startsWindow"]:
@@ -712,6 +720,7 @@ PY
       [ "$pick" = - ] || { ACCOUNT=$pick; PICKED=1; check_account; }
       echo "spawn.sh: ${verdict#ok "$pick" }"
       ;;
+    "past "*) echo "spawn.sh: ${verdict#past }" ;;
     *) refuse "$verdict" ;;
   esac
 }
@@ -1078,7 +1087,12 @@ case "$MODE" in
       dispatcher) ROLE=dispatcher KIND=dispatcher TO=$(dispatcher_of 1) ;;
       optimizer) ROLE=lead KIND=optimizer TO=$(dispatcher_of 1) ;;
       builder | ops | planner) ROLE=lead KIND=$(kind_of "$NAME") TO=$(dispatcher_of 1) ;;
-      *) refuse "a manager in a workspace of its own is the first dispatcher (sessions.names' dispatcher), the second (an <id>-dispatcher, or sessions.names' dispatcher with -2), the optimizer, the builder, ops or the planner; give a new name its kind first: roster.ts set <name> kind=<kind> task=<what it does>" ;;
+      *)
+        # An orchestrator: any other manager kind the roster gives the name, reporting to the session its row names.
+        KIND=$(kind_of "$NAME") TO=$(roster_field "$NAME" reportsTo) ROLE=lead
+        [ "$(role_of_kind "$KIND")" = lead ] || refuse "a manager in a workspace of its own is the first dispatcher (sessions.names' dispatcher), the second (an <id>-dispatcher, or sessions.names' dispatcher with -2), the optimizer, the builder, ops or the planner, or an orchestrator, a name the roster gives a manager kind ($MANAGER_KINDS) and a session to report to; give a new name both first: roster.ts set <name> kind=<kind> reportsTo=<session> task=<what it does>"
+        word "$TO" || refuse "$NAME is an orchestrator of the $KIND kind, and its roster row names no session it reports to: roster.ts set $NAME reportsTo=<session>"
+        ;;
     esac
     [ "$KIND" = dispatcher ] && { [ "$NAME" = "$TO" ] || { [ "$(session_kind "$NAME")" = dispatcher ] && ! second_dispatcher "$NAME"; }; } && FIRST=1 TO=
     DIR="${PLAYGROUND_REPO:-$MAIN}/.claude/worktrees/leads"
@@ -1618,6 +1632,8 @@ set -- set "$NAME" "kind=$KIND"
 if [ "$MODE" = column ]; then
   [[ $ROLE =~ ^(reviewer|tester)$ ]] && { [ "$(kind_of_name "$TO")" = worker ] || [ "$(roster_kind "$TO")" = worker ]; } && set -- "$@" "worker=$TO"
 else
+  # A worker or runner records whom it reports to, --reports-to's session or its lead's seat, which the Dashboard's tree and every escalation read; a resume keeps the row's.
+  [[ $MODE =~ ^(worker|runner)$ ]] && set -- "$@" "reportsTo=$TO"
   # The roster's surface is a cmux one (surface:N), which a herdr session never has, so a session in a workspace of its own clears a column's old one; its pane's label carries its name.
   set -- "$@" "surface="
 fi

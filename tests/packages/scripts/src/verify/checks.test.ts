@@ -261,6 +261,17 @@ describe("systemResults", () => {
     ])
   })
 
+  test("the orchestrators' room follows the workers' when the body holds it", () => {
+    const orchestrators = { line: "Room for ~13 more orchestrators, by memory" }
+    expect(
+      systemResults({ capacity: { ...capacity, orchestrators }, sampledAt: SAMPLED }, NOW)[1],
+    ).toEqual({
+      check: "orchestrators",
+      detail: "Room for ~13 more orchestrators, by memory",
+      ok: true,
+    })
+  })
+
   test("what did not read is printed, so a lead sees a stopped timer or a failed probe", () => {
     const results = systemResults(
       { capacity, problems: ["docker stats: ran past 10s", "timer lost"], sampledAt: SAMPLED },

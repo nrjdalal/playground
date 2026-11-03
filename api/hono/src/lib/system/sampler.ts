@@ -21,7 +21,16 @@ import { updateCheck, type Update } from "@/lib/dashboard/update"
 import { recordsProblem, unstickProblem } from "@/lib/dashboard/workers"
 import { ownRegistered } from "@/lib/sessions/own"
 import { hasGlmAccount } from "@/lib/store/accounts"
-import { idleLineOf, PER_WORKER, roomOf, type IdleStack, type Limit } from "@/lib/system/capacity"
+import {
+  idleLineOf,
+  orchestratorsOf,
+  PER_ORCHESTRATOR,
+  PER_WORKER,
+  roomOf,
+  type Fit,
+  type IdleStack,
+  type Limit,
+} from "@/lib/system/capacity"
 import { footprintOf, type Container, type Session, type Stack } from "@/lib/system/footprint"
 import {
   parseContainers,
@@ -94,6 +103,9 @@ export type SystemReport = {
     idle: { bytes: number; line: string | null; ready: boolean; stacks: IdleStack[] }
     limitedBy: Limit | null
     line: string
+    // How many more orchestrators fit, each a claude alone, and what limits them.
+    orchestrators: Fit
+    perOrchestrator: { bytes: number; cores: number }
     perWorker: { bytes: number; cores: number }
     workers: number
   }
@@ -263,13 +275,14 @@ export function compose(
   )
 
   const swap = sysctl.swap
-  const room = roomOf({
+  const machine = {
     cores: readings.cores,
     freePercent: sysctl.freePercent,
     load5: readings.load[1],
     pressure: sysctl.pressure,
     totalBytes: readings.totalBytes,
-  })
+  }
+  const room = roomOf(machine)
   const point: SystemPoint = {
     at: new Date(now).toISOString(),
     load1: round(readings.load[0]),
@@ -298,6 +311,8 @@ export function compose(
       },
       limitedBy: room.limitedBy,
       line: room.line,
+      orchestrators: orchestratorsOf(machine),
+      perOrchestrator: PER_ORCHESTRATOR,
       perWorker: PER_WORKER,
       workers: room.workers,
     },
