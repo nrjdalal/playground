@@ -398,8 +398,8 @@ describe("the types gate", () => {
     const nice = process.env.RUN_SLOT_NICE
     process.env.RUN_SLOT_NICE = "10"
     try {
-      const listed = (prepare: Prepare) =>
-        ciSteps({ ...at, prepare }).map((step) => [
+      const listed = (prepare: Prepare, hooks = false) =>
+        ciSteps({ ...at, hooks, prepare }).map((step) => [
           step.name,
           step.argv.join(" "),
           step.types ?? false,
@@ -407,8 +407,18 @@ describe("the types gate", () => {
       expect(listed("clone")).toEqual([clone, forced, ...checks])
       expect(listed("install")).toEqual([install, ...checks])
       expect(listed("none")).toEqual(checks)
+      expect(listed("install", true)).toEqual([
+        install,
+        ["bundles", "bun packages/scripts/src/hooks-bundle.ts --check", false],
+        ...checks,
+      ])
       expect(
-        ciSteps({ ...at, prepare: "install" })
+        ciSteps({ ...at, hooks: true, prepare: "none" })
+          .filter((step) => step.bundles)
+          .map((step) => step.name),
+      ).toEqual(["bundles"])
+      expect(
+        ciSteps({ ...at, hooks: false, prepare: "install" })
           .filter((step) => step.deps)
           .map((step) => step.name),
       ).toEqual(["install"])
@@ -424,5 +434,99 @@ describe("the types gate", () => {
     ])
     expect(slotted(["tsc"], { RUN_SLOT_NICE: "10" }, "/ops/run-slot.sh")).toEqual(["tsc"])
     expect(slotted(["tsc"], {}, null)).toEqual(["tsc"])
+  })
+})
+
+// 3 Nov: #681's head, branched before #730, held no no-raw-delete.js, so its own checks passed; the tree its merge wrote held #730's bundle, built from the shell.ts #681 then changed
+describe("the bundles step on the merged tree", () => {
+  // a scratch repo whose canary is ahead of PR 7's head, the head adding the given file, and the hooks flag each check's steps were given
+  async function touching(name: string, path: string) {
+    const work = join(scratch, name)
+    mkdirSync(work, { recursive: true })
+    await sh(work, "init", "-q", "-b", "canary")
+    write(work, { ".gitignore": ".claude/\nnode_modules/\n", "lib.ts": "export const a = 1\n" })
+    await commit(work, "base")
+    await sh(work, "switch", "-qc", "pr")
+    mkdirSync(join(work, path, ".."), { recursive: true })
+    write(work, { [path]: "export const b = 2\n" })
+    const head = await commit(work, "pr: one file")
+    await sh(work, "switch", "-q", "canary")
+    write(work, { "main.ts": "export const one = 1\n" })
+    const canary = await commit(work, "canary: ahead of the head")
+    const mergeTree = await sh(work, "merge-tree", "--write-tree", canary, head)
+    const git: Run = (args) => runGit(["-C", work, ...args])
+    const flags: boolean[] = []
+    const gate = await typesGate({
+      facts: { canary, head, mergeTree, n: N },
+      git,
+      lockRoot: join(work, "..", `${name}-lock`),
+      steps: (at) => {
+        flags.push(at.hooks)
+        return [{ argv: ["true"], name: "tsc", types: true }]
+      },
+    })
+    return { flags, gate }
+  }
+
+  test("a PR touching scripts/hooks/ runs the bundles step", async () => {
+    expect((await touching("hooks-source", "scripts/hooks/shell.ts")).flags).toEqual([true])
+  })
+
+  test("a PR touching only a packages/ file a hook imports runs the bundles step", async () => {
+    expect((await touching("hooks-import", "packages/env/src/data-dir.ts")).flags).toEqual([true])
+  })
+
+  test("a PR touching neither scripts/hooks/ nor packages/ skips it", async () => {
+    expect((await touching("hooks-none", "web/next/src/page.tsx")).flags).toEqual([false])
+  })
+
+  const stale = [
+    "hooks-bundle: stale in scripts/hooks/bundled: no-raw-delete.js; run `bun run hooks:bundle` and commit scripts/hooks/bundled",
+  ]
+  const bundles = (argv: string[]) => () => [{ argv, bundles: true, name: "bundles" }]
+
+  test("refuses a merged tree whose bundles a fresh build would write otherwise, naming them and the redo", async () => {
+    const { git, head, lockRoot } = await world("bundles-stale")
+    const { calls, run } = gh(head, "1")
+    const outcome = await prMerge(N, { repo: REPO }, run, {
+      git,
+      lockRoot,
+      store: null,
+      types: bundles(["sh", "-c", `echo '${stale[0]}' >&2; exit 1`]),
+    })
+    expect(outcome.kind).toBe("refused")
+    const types = outcome.gates.find((gate) => gate.name === "types")
+    expect(types?.detail).toContain("stale in scripts/hooks/bundled: no-raw-delete.js")
+    expect(types?.detail).toContain(
+      "Merge canary into the PR plainly, run `bun run hooks:bundle`, and commit the rebuild on its own",
+    )
+    expect(squashes(calls)).toEqual([])
+  })
+
+  test("merges the same PR once its bundles are rebuilt", async () => {
+    const { git, head, lockRoot } = await world("bundles-fresh")
+    const { calls, run } = gh(head, "1")
+    const outcome = await prMerge(N, { repo: REPO }, run, {
+      git,
+      lockRoot,
+      store: null,
+      types: bundles(["true"]),
+    })
+    expect(outcome.kind).toBe("merged")
+    expect(outcome.gates.find((gate) => gate.name === "types")?.detail).toMatch(/bundles \d+s$/)
+    expect(squashes(calls)).toHaveLength(1)
+  })
+
+  test("a bundles step that fails without naming a stale bundle is a run it could not finish", async () => {
+    const { git, head, lockRoot } = await world("bundles-crash")
+    const outcome = await prMerge(N, { repo: REPO }, gh(head, "1").run, {
+      git,
+      lockRoot,
+      store: null,
+      types: bundles(["sh", "-c", "echo 'hooks-bundle: the build failed' >&2; exit 1"]),
+    })
+    expect(outcome.gates.find((gate) => gate.name === "types")?.detail).toStartWith(
+      "could not finish the merged-tree type check: bundles exited 1",
+    )
   })
 })
