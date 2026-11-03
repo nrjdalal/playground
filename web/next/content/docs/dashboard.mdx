@@ -17,6 +17,7 @@ A stack that shows test data instead, a made-up machine for tests and screenshot
 `/dashboard` opens your chat with the dispatcher, the session you talk to (`sessions.names`' dispatcher, `dispatcher` by default, unless `PLAYGROUND_DISPATCHER` names another), with the box to message it.
 A second dispatcher can run beside it on another model (the first's name plus `-2`, unless `PLAYGROUND_DISPATCHER_SECONDARY` names another), with a chat and a box of its own, opened from its row in the sidebar.
 Each dispatcher's chat and its box are named by its label, such as Message Alpha; the model its newest reply ran shows in its sidebar row's tooltip.
+A menu beside the box's attach button, such as **Opus · High**, shows the model and effort the dispatcher's newest reply ran with, and a pick types `/model` or `/effort` into it for you; the row shows the new one from its next reply.
 On a first run the chat starts with **Let's check this Mac**, each check marked there or missing with the button that fixes it, then **Continue**, which makes you this Mac's owner ([Where to start](/docs#where-to-start)).
 Once every check has passed, it shows one line, **This Mac has everything Playground needs**, over the steps left, each ticked once done: GitHub, Settings (**Set up settings**), a Claude account (**Add a Claude account**) and **Start** with the dispatcher's name.
 Once the dispatcher runs, its chat takes their place.
@@ -98,7 +99,7 @@ Scroll to end shows in the bar while there is more below you, and takes you to t
 
 `probe-sdk` is a throwaway session the Dashboard runs itself on the Claude Agent SDK, when `PLAYGROUND_SDK_PROBE_DIR` names its folder.
 Its view has a box too: your message goes straight into it, and its questions, permission requests and plans show as cards in its view.
-A menu beside its attach button shows its permission mode (Default, Accept edits, Plan or Bypass permissions) and changes it while approvals are on (`PLAYGROUND_APPROVALS_ENABLED`).
+A menu beside its attach button shows its permission mode (Default, Accept edits, Plan or Bypass permissions) and changes it while approvals are on (`PLAYGROUND_APPROVALS_ENABLED`), and the model and effort menu beside it sets those as a dispatcher's does.
 It shows no `/` list yet, since it cannot run a skill.
 
 ## Sidebar

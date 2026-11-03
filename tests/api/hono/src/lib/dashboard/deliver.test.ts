@@ -1514,6 +1514,21 @@ describe("deliver to a herdr session", () => {
     expect(recorded).toHaveLength(1)
   })
 
+  test("a setting types its one slash command, recorded whole, while the same words typed by hand stay refused", async () => {
+    const { deps, recorded, sent } = herdr()
+    deps.readScreen = async () => EMPTY
+    const set = await deliver(
+      { actor, setting: { model: "opus" }, text: "", to: "dispatcher" },
+      deps,
+    )
+    expect(set).toMatchObject({ ok: true, sessionId: "s-dispatcher" })
+    expect(sent).toEqual([{ surface: HERDR, text: "/model opus" }])
+    expect(recorded).toEqual(["Set dispatcher's model to opus"])
+    const typed = await deliver({ actor, text: "/model opus", to: "dispatcher" }, deps)
+    expect(typed).toMatchObject({ code: "COMMAND", ok: false })
+    expect(sent).toHaveLength(1)
+  })
+
   // herdr pastes the message and then presses Enter, and the Enter can land while Claude Code is still taking a pasted image's path in, so the message sat unsent in dispatcher's box and every later delivery read it as a draft
   describe("the box read after the send", () => {
     const MESSAGE = "Is send on the right? why"

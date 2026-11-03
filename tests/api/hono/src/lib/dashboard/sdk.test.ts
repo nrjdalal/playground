@@ -634,6 +634,31 @@ describe("sendToHosted", () => {
     }
   })
 
+  test("a setting goes on the input as its one slash command, recorded whole", async () => {
+    const dir = scratch()
+    try {
+      const { calls, query } = fakeQuery()
+      const host = new SdkHost(deps(query))
+      host.start(dir, CLAUDE, "default")
+      const recorded: string[] = []
+      const result = await sendToHosted(delivery({ setting: { effort: "max" }, text: "" }), {
+        delivered: async () => null,
+        host,
+        now: () => new Date(AT),
+        record: async (event, sending) => {
+          recorded.push(event.summary)
+          await sending()
+        },
+      })
+      expect(result).toEqual({ at: AT, ok: true, sessionId: host.sessionId! })
+      expect(recorded).toEqual([`Set ${SDK_PROBE}'s effort to max`])
+      await Bun.sleep(0)
+      expect(calls[0]!.sent).toEqual(["/effort max"])
+    } finally {
+      rmSync(dir, { force: true, recursive: true })
+    }
+  })
+
   test("while a card waits, a message is refused as on a picker and nothing is recorded", async () => {
     const dir = scratch()
     try {

@@ -17,6 +17,7 @@ import type { CSSProperties, KeyboardEvent } from "react"
 import { AttachmentChips, useAttachments } from "@/components/dashboard/attachments"
 import { useDashboard } from "@/components/dashboard/dashboard"
 import { ModePicker } from "@/components/dashboard/mode-picker"
+import { SettingPicker } from "@/components/dashboard/setting-picker"
 import { Hint } from "@/components/hint"
 import { Badge } from "@/components/ui/badge"
 import { Command, CommandGroup, CommandItem, CommandList } from "@/components/ui/command"
@@ -420,6 +421,7 @@ export function Composer({ threadId, worker }: { threadId?: string; worker: Work
                     </InputGroupButton>
                   </Hint>
                   <ModePicker approvals={approvals} worker={worker} />
+                  <SettingPicker worker={worker} />
                   {opensThreads ? (
                     <Hint content="Start a thread with this message">
                       <InputGroupButton

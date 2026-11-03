@@ -13,7 +13,7 @@ import {
   type SDKUserMessage,
 } from "@anthropic-ai/claude-agent-sdk"
 import { PERMISSION_MODE_LABELS } from "@packages/config/console"
-import { dashboardMessageSummary, type ActivityActor, type ActivityEvent } from "@packages/db"
+import type { ActivityActor, ActivityEvent } from "@packages/db"
 import { env } from "@packages/env/api-hono"
 import { dataDirOf } from "@packages/env/data-dir"
 
@@ -22,8 +22,8 @@ import { withAttachments } from "@/lib/dashboard/attachments"
 import type { FeedReply } from "@/lib/dashboard/cmux"
 import {
   deliverDeps,
-  normalize,
-  refusal,
+  deliveryEvent,
+  deliveryWords,
   type Delivery,
   type DeliveryResult,
 } from "@/lib/dashboard/deliver"
@@ -440,8 +440,7 @@ export async function sendToHosted(
     }
   }
   const attachments = delivery.attachments ?? []
-  const words = normalize(delivery.text)
-  const refused = refusal(words, attachments.length)
+  const { refused, words } = deliveryWords(delivery)
   if (refused) return refused
   const at = delivery.id ? await deps.delivered(delivery.id) : null
   if (at) return { at: at.toISOString(), ok: true, sessionId }
@@ -452,16 +451,7 @@ export async function sendToHosted(
       reason: `${SDK_PROBE} is waiting on a card. Answer that first: the message goes once it is answered.`,
     }
   }
-  const event: ActivityEvent = {
-    action: "dashboard.message",
-    actor: delivery.actor,
-    id: delivery.id,
-    summary: dashboardMessageSummary(
-      SDK_PROBE,
-      words,
-      attachments.map((file) => file.size),
-    ),
-  }
+  const event = deliveryEvent(delivery, SDK_PROBE, words)
   await deps.record(event, async () => deps.host.send(withAttachments(words, attachments)))
   return { at: deps.now().toISOString(), ok: true, sessionId }
 }
