@@ -1,12 +1,12 @@
 import { realpathSync } from "node:fs"
-import { readdir } from "node:fs/promises"
+import { readdir, unlink } from "node:fs/promises"
 import { dirname, join, relative } from "node:path"
 
 import type { BunPlugin } from "bun"
 
 import { preToolUseGuards } from "./ops-tick/guard-probe"
 
-// hooks-bundle: each PreToolUse guard in scripts/hooks/ bundled with everything it imports into scripts/hooks/bundled/<guard>.js, the file its wrapper runs, so a guard starts with no node_modules; the bundles are committed, since a git restore of a deleted checkout brings it back with no install. `--check` builds in memory and names each file that differs from a fresh build.
+// hooks-bundle: each PreToolUse guard in scripts/hooks/ bundled with everything it imports into scripts/hooks/bundled/<guard>.js, the file its wrapper runs, so a guard starts with no node_modules; the bundles are committed, since a git restore of a deleted checkout brings it back with no install. `--check` builds in memory and names each file that differs from a fresh build; write mode writes each bundle and removes any file no build writes.
 export const ROOT = join(import.meta.dir, "..", "..", "..")
 export const HOOKS = join("scripts", "hooks")
 export const BUNDLED = join(HOOKS, "bundled")
@@ -101,7 +101,11 @@ if (import.meta.main) {
     console.error(MERGING)
     process.exit(1)
   } else {
-    for (const [name, text] of await bundle(ROOT)) await Bun.write(join(ROOT, BUNDLED, name), text)
+    const fresh = await bundle(ROOT)
+    for (const [name, text] of fresh) await Bun.write(join(ROOT, BUNDLED, name), text)
+    // A bundle no build writes, a removed guard's, goes too, since --check names it stale.
+    for (const name of await readdir(join(ROOT, BUNDLED)))
+      if (!fresh.has(name)) await unlink(join(ROOT, BUNDLED, name))
     console.log(`hooks-bundle: wrote ${BUNDLED}`)
   }
 }
