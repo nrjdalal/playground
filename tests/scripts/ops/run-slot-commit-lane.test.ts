@@ -25,6 +25,8 @@ touch "\${@: -1}"
   chmodSync(join(m.bin, "git"), 0o755)
   return m
 }
+// a pre-commit step as commit-slot.ts hands it to run-slot, its last word the step's name (sh's $0), touching the marker the fake appends
+const step = (name: string) => ["sh", "-c", 'touch "$1"', name]
 const log = (m: ReturnType<typeof machine>) => {
   const path = join(m.ops, "run-slot.runs.log")
   return existsSync(path) ? readFileSync(path, "utf8") : ""
@@ -133,7 +135,15 @@ describe("a commit whose pre-commit runs next build", () => {
     const m = repo({}, ["web/next/src/app/page.tsx"])
     m.hold("run-slot", 3, "big")
     m.hold("run-slot-2", 2, "medium")
-    expect(await m.waits("commit-wt")).toBe(true)
+    expect(await m.start("commit-wt", {}, undefined, step("build")).waits()).toBe(true)
+  })
+
+  // commit-slot.ts also runs a staged tree's type check as commit-<worktree>, which builds nothing
+  test("commit-slot.ts's type check for that worktree keeps its own size", async () => {
+    const m = repo({}, ["packages/scripts/src/x.ts"])
+    m.hold("run-slot", 3, "big")
+    m.hold("run-slot-2", 2, "medium")
+    expect(await m.start("commit-wt", {}, undefined, step("check-types")).ran()).toBe(true)
   })
 })
 
@@ -158,6 +168,6 @@ describe("a commit that stages no web/next file", () => {
     const m = repo({}, ["docs/notes.md"])
     m.hold("run-slot", 3, "big")
     m.hold("run-slot-2", 2, "medium")
-    expect(await m.runs("commit-wt")).toBe(true)
+    expect(await m.start("commit-wt", {}, undefined, step("build")).ran()).toBe(true)
   })
 })
