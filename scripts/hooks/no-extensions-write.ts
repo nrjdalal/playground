@@ -8,12 +8,13 @@ import { extensionsDir } from "../../packages/settings/src/rendered"
 import { bunCall, FILE_TOOLS, gitCall, real } from "./no-main-checkout"
 import { fromFactory } from "./role"
 import {
+  ASSIGN,
   type Command,
   type Env,
   examine,
   filled,
-  knownVariables,
   GIT_TAKES,
+  knownVariables,
   lex,
   marked,
   onlyReserved,
@@ -123,9 +124,65 @@ function reads(parsed: Parsed, env: Env): boolean {
   )
 }
 
-// A word with a value the lexer could not read, lexed again with the variables the call has set by now; undefined when it holds none, or still holds one the hook cannot read
-function heldWord(word: Word, env: Env): Word | undefined {
-  return word.raw && marked(word.value) ? relexed(word.raw, heldVars(env)) : undefined
+type Namings = { counts: Map<string, number>; plain: Set<string> }
+
+// How many times the line names each variable other than by expanding it ($K, ${K…}): an assignment, an append, a ${K=…} or ${K:=…}, a bare word (read's, a for loop's), or a name attached after an option cluster's a or v (`printf -vK`), a lone flag (`-K`) aside; and the names an unquoted plain assignment sets (`K=`, where a quoted `"K=a"` is a command), read in one pass
+function namings(command: string): Namings {
+  const counts = new Map<string, number>()
+  const plain = new Set<string>()
+  const add = (key: string) => counts.set(key, (counts.get(key) ?? 0) + 1)
+  for (const m of command.matchAll(/(\$\{[#!]?)?(?<![\w$])([A-Za-z_]\w*)(:?=)?/g)) {
+    const [, expanded, key, assigns] = m
+    if (expanded && !assigns) continue
+    const at = m.index + (expanded?.length ?? 0)
+    if (!expanded && command[at - 1] === "-" && (at < 2 || /\s/.test(command[at - 2]))) {
+      for (let k = 0; k < key.length - 1; k++)
+        if (key[k] === "a" || key[k] === "v") add(key.slice(k + 1))
+      continue
+    }
+    add(key)
+    if (!expanded && assigns === "=" && (at === 0 || /[\s;&|(]/.test(command[at - 1])))
+      plain.add(key)
+  }
+  return { counts, plain }
+}
+
+type Steady = { has: (key: string) => boolean }
+const NONE: Steady = { has: () => false }
+
+// For each command of the line, the variables whose value the shell has when it runs: each named once, by an unquoted plain assignment that is its command's first word, in a command not piped or sent to the background; one the shell always runs (first, or after `;` or `&`) holds for every later command, one after `&&` only along that `&&` chain, since the shell skips the rest of the chain with it, and one after `||`, a case arm or a keyword holds for none
+function steadyNames(named: Namings, commands: Command[]): (cmd: Command) => Steady {
+  const set = new Map<string, { at: number; chain?: number }>()
+  const where = new Map<Command, { at: number; chain: number }>()
+  let chain = 0
+  for (const [at, cmd] of commands.entries()) {
+    if (cmd.follows !== "&&") chain++
+    where.set(cmd, { at, chain })
+    const always = !cmd.follows || cmd.follows === ";" || cmd.follows === "&"
+    if (cmd.detached || (!always && cmd.follows !== "&&")) continue
+    const [first] = cmd.words
+    if (!first || !ASSIGN.test(first.value) || parse(cmd).name !== "") continue
+    for (const key of parse(cmd).local.keys())
+      if (named.counts.get(key) === 1 && named.plain.has(key))
+        set.set(key, always ? { at } : { at, chain })
+  }
+  return (cmd) => {
+    const here = where.get(cmd)
+    if (!here) return NONE
+    return {
+      has: (key) => {
+        const from = set.get(key)
+        return (
+          !!from && from.at < here.at && (from.chain === undefined || from.chain === here.chain)
+        )
+      },
+    }
+  }
+}
+
+// A word with a value the lexer could not read, lexed again with the steady variables the call has set by now; undefined when it holds none, or still holds one the hook cannot read
+function heldWord(word: Word, env: Env, steady: Steady): Word | undefined {
+  return word.raw && marked(word.value) ? relexed(word.raw, heldVars(env, steady)) : undefined
 }
 
 // A raw word lexed with known variables: the one word it makes, or undefined when it still holds a value the hook cannot read
@@ -135,12 +192,12 @@ function relexed(raw: string, known: Record<string, string>): Word | undefined {
   return words.length === 1 && !marked(words[0].value) ? words[0] : undefined
 }
 
-// The variables the call has set by now whose values the hook holds, an assignment that names an earlier one (`T="$S/x"`) lexed again with it, in the order they were set
-function heldVars(env: Env): Record<string, string> {
+// The steady variables the call has set by now whose values the hook holds, an assignment that names an earlier one (`T="$S/x"`) lexed again with it, in the order they were set
+function heldVars(env: Env, steady: Steady): Record<string, string> {
   const known = { ...env.known }
   for (const [key, text] of env.vars) {
     // a TMPDIR the call sets steers mktemp, so mktemp's path stays unheld
-    if (key === "TMPDIR") continue
+    if (key === "TMPDIR" || !steady.has(key)) continue
     if (!text.unknown && !marked(text.value)) known[key] = text.value
     else if ("raw" in text && typeof text.raw === "string") {
       const again = relexed(text.raw, known)?.value
@@ -151,7 +208,8 @@ function heldVars(env: Env): Record<string, string> {
 }
 
 // Whether the hook holds a word's whole value
-const held = (word: Word, env: Env): boolean => !marked(word.value) || !!heldWord(word, env)
+const held = (word: Word, env: Env, steady: Steady): boolean =>
+  !marked(word.value) || !!heldWord(word, env, steady)
 
 // The values git's -c options set before its subcommand (`-c k=v`, `-ck=v`)
 function gitConfigs(args: Word[]): Word[] {
@@ -427,7 +485,8 @@ const texts = (word: Word): Word[] => {
   return out
 }
 
-function inspect(raw: string, environment: Environment) {
+// unknown: the line names HOME, TMPDIR or PWD other than by expanding them, so it is read a second time with those unknown, since the shell's value may not be the environment's
+async function inspect(raw: string, environment: Environment, unknown = false) {
   const { cwd, tool_input: toolInput, tool_name: tool } = JSON.parse(raw) as Record<string, unknown>
   const input = (toolInput ?? {}) as Record<string, unknown>
   const directory = typeof cwd === "string" ? cwd : undefined
@@ -493,6 +552,7 @@ function inspect(raw: string, environment: Environment) {
     }
   }
   const seen = new Set<string>()
+  let steadyAt: (cmd: Command) => Steady = () => NONE
   let whole = false
   let rootLine = false
   // where each scope's variables were read to for their lines, and judged to for each cwd and remover, so each variable is read once rather than once a command
@@ -574,8 +634,9 @@ function inspect(raw: string, environment: Environment) {
     if (inRoot(env.cwd)) return refuse(`${verb} run inside ${root}`)
     if (name === "git" && inRoot(gitCall(args, env).cwd)) return refuse(`git on a clone in ${root}`)
     const remover = REMOVERS.has(name)
+    const steady = steadyAt(cmd)
     // a value the hook cannot read under a remover, or in git's -c, could name the root, so it is refused unless the call holds it
-    const unheld = remover ? args.find((word) => !held(word, env)) : undefined
+    const unheld = remover ? args.find((word) => !held(word, env, steady)) : undefined
     if (unheld)
       return refuse(
         `${verb} on ${shown(unheld)}, a value the hook does not hold; hold it in the same call (X=<path>; ${verb} "$X") or write the path literally`,
@@ -584,7 +645,7 @@ function inspect(raw: string, environment: Environment) {
       const config = gitConfigs(args).find((word) => marked(word.value))
       if (config)
         return refuse(
-          `git -c ${shown(config)}, a value the hook does not hold; write the value literally in the call`,
+          `git ${/^-c./.test(config.raw ?? config.value) ? "" : "-c "}${shown(config)}, a value built from a variable or a substitution; write the value literally in the call`,
         )
     }
     const scope = since(varsJudged, env.vars, `${env.cwd}\0${remover}`)
@@ -593,13 +654,17 @@ function inspect(raw: string, environment: Environment) {
       if (named) return refuse(`${verb} with a variable on ${named}`)
     }
     const literal = !whole && narrow(cmd, env)
-    for (const word of [first, ...args].map((word) => heldWord(word, env) ?? word)) {
+    for (const word of [first, ...args].map((word) => heldWord(word, env, steady) ?? word)) {
       if (quiet && /\s/.test(word.value) && !texts(word).some((t) => holds(t.value, env))) continue
       const named = names(word, env, remover, literal)
       if (named) return refuse(`${verb} on ${named}`)
     }
     if (cmd.redirects.some((r) => r.body && holds(r.body.value, env)))
       return refuse(`${verb} with a script that names ${root}`)
+    if (fed && remover && (fed.unknown || marked(fed.value)))
+      return refuse(
+        `${verb} under xargs fed by ${fed.unknown ?? "a value it cannot read"}, a value the hook does not hold; write the paths literally in the call`,
+      )
     if (fed) {
       const named =
         !fed.unknown &&
@@ -611,8 +676,14 @@ function inspect(raw: string, environment: Environment) {
       if (named) return refuse(`${verb} under xargs on ${named}`)
     }
   }
+  const named = namings(command)
+  const steered = Object.keys(knownVariables(command, environment, directory)).filter((key) =>
+    named.counts.has(key),
+  )
   const known = knownVariables(command, environment, directory)
+  if (unknown) for (const key of steered) delete known[key]
   const lexed = lex(command, known)
+  steadyAt = steadyNames(named, lexed.commands)
   const env: Env = {
     cwd: directory,
     files: new Map(),
@@ -626,7 +697,9 @@ function inspect(raw: string, environment: Environment) {
   // a line holding an ext score is refused whole once any command on it changes who the session reads as, so a shell it runs or pipes into carries the change
   if (SCORE.test(unquoted(command)) && changesIdentity(lexed.commands))
     return refuse(SCORE_AS_OTHER)
-  return run(lexed, env, visit, true)
+  const verdict = await run(lexed, env, visit, true)
+  if (verdict || unknown || steered.length === 0) return verdict
+  return inspect(raw, environment, true)
 }
 
 // Fails open: an error on any call lets it run, so a reader bug cannot block every Bash command or write; a RangeError, a stack overflow or the walk past its time, refuses.

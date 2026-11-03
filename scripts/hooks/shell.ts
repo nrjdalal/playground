@@ -10,6 +10,8 @@ export type Word = Text & { glob?: boolean; procs?: Command[]; quoted: boolean; 
 type Redirect = { body?: Text; fd: string; op: string; target?: Word }
 export type Command = {
   detached?: boolean
+  // the operator that ended the command before it in its scope (`;`, `&&`, `||`, `|`, `&`, `)` or `;;`), none for a scope's first
+  follows?: string
   group?: boolean
   inner?: () => Command[]
   redirects: Redirect[]
@@ -452,6 +454,7 @@ function walk(lx: Lexer, scope: number, nested: boolean, inherit?: Command): voi
       lx.commands.push(done)
     }
     cmd = fresh()
+    cmd.follows = op
     if (pipe) {
       cmd.stdin = done
       cmd.detached = true
@@ -471,7 +474,7 @@ function walk(lx: Lexer, scope: number, nested: boolean, inherit?: Command): voi
       while (lx.i < src.length && src[lx.i] !== "\n") lx.i++
     } else if (c === ")") {
       lx.i++
-      end(";")
+      end(")")
       if (nested) return
     } else if (c === "(") {
       lx.i++
@@ -771,9 +774,9 @@ function substituted(inner: Command[], known: Record<string, string>): Text {
   return unknown("a command substitution")
 }
 
-// mktemp's flags that leave it making a fresh name under TMPDIR
-const MKTEMP_FLAGS = new Set(["d", "q", "u"])
-const MKTEMP_LONG = new Set(["--directory", "--dry-run", "--quiet"])
+// mktemp's flags that leave it making a fresh name under TMPDIR; a dry run (-u) makes none, so its name can be one that exists
+const MKTEMP_FLAGS = new Set(["d", "q"])
+const MKTEMP_LONG = new Set(["--directory", "--quiet"])
 
 // The path a plain `mktemp` makes, on a line that never sets TMPDIR (knownVariables drops it then), with no -p, --tmpdir or -t to steer it: its one held template as written, judged where it lands from the call's folder, else a name under TMPDIR standing in for its random part
 function mktempPath(cmd: Command, known: Record<string, string>): string | undefined {
