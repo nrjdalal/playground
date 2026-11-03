@@ -5,7 +5,7 @@ account in ACCOUNTS that has a long-lived token in the Keychain (service usage.k
 headers, at most every 14 minutes. The current account is login-flip.json's `factory`, else the stored login. Ending accounts (ENDS) come first: the first usable one in ending_order() is the target whenever
 the factory is on another account; with none usable, once the current login reaches its line, the renewing account with MIN_ROOM
 whose week resets soonest. It names the target once ("switch due to ..."), or says once that no account has room. Prints nothing otherwise.
-It also writes the split, each account's share of new sessions (week left per hour to its deadline), which spawn.sh's no-account default follows. --dry-run reads no token and changes nothing. State in login-flip.json in the state folder, ~/.playground/ops/usage."""
+It also writes the split, each account's share of new sessions (week left per hour to its deadline, a fifth of that for an own account while that deadline is over a day away), which spawn.sh's no-account default follows. --dry-run reads no token and changes nothing. State in login-flip.json in the state folder, ~/.playground/ops/usage."""
 import datetime, json, os, shutil, subprocess, sys, time
 
 HERE = os.path.expanduser("~/.playground/ops/usage")  # the state folder by name, so a run by its repo path still reads the live state
@@ -30,9 +30,9 @@ MIN_ROOM = 10  # dispatcher, 25 Oct: a switch restarts every session, so a renew
 # dispatcher, 25 Oct: the accounts whose plan ends, each with its end (None until known), spent to 100% and out ENDS_LEAD before it, ENDING_FIRST leading; every other account renews
 ENDS = {a["email"]: a["ends"] for a in ROWS if "ends" in a}
 ENDING_FIRST, ENDS_LEAD = [a["email"] for a in ROWS if a.get("endsFirst")], 2 * 3600
-RENEWS = {a["email"]: a["renews"] for a in ROWS if "renews" in a}
+RENEWS = {a["email"]: a["renews"] for a in ROWS if "renews" in a}  # each renewing account's billing day of the month (None until known), for the dashboard's Renews lines
 # the owner, 3 Nov: the accounts the owner pays for personally (own) are spent less, a fifth of their weight, unless their deadline is within a day, so their week left is still spent before it resets
-OWN, OWN_SHARE, OWN_SOON = {a["email"] for a in ROWS if a.get("own")}, 0.2, 24 * 3600  # each renewing account's billing day of the month (None until known), for the dashboard's Renews lines
+OWN, OWN_SHARE, OWN_SOON = {a["email"] for a in ROWS if a.get("own")}, 0.2, 24 * 3600
 PROBE_MODEL = setting("models.probe")
 
 
