@@ -242,15 +242,27 @@ describe("bun run ask keeps an ask's pages, docs, code and PDFs (#2276, #2277)",
 describe("a draft carries pictures as an ask does (PG-501)", () => {
   const id = "3f0e7a52-1c4b-4d2a-9e6f-0000000000a1.png"
   const ok = { id, kind: "image", name: "a.png" }
-  const item = (kind: "ask" | "draft", attachments: unknown) =>
+  const item = (kind: "ask" | "draft" | "slack", attachments: unknown) =>
     kind === "ask"
       ? { from: "dispatcher", preview: { attachments, text: "Look", type: "ask" }, title: "A mock" }
-      : {
-          from: "dispatcher",
-          kind: "draft",
-          preview: { attachments, noLink: "A made-up thread", text: "Look", to: "@Merritt" },
-          title: "A mock",
-        }
+      : kind === "slack"
+        ? {
+            from: "dispatcher",
+            preview: {
+              attachments,
+              noLink: "A made-up thread",
+              text: "Look",
+              to: "@Merritt",
+              type: "slack",
+            },
+            title: "Send Merritt the mock?",
+          }
+        : {
+            from: "dispatcher",
+            kind: "draft",
+            preview: { attachments, noLink: "A made-up thread", text: "Look", to: "@Merritt" },
+            title: "A mock",
+          }
 
   test("bun run ask copies a draft's before and after in, and the draft keeps them", async () => {
     const before = file("draft-before.png", PNG)
@@ -274,7 +286,7 @@ describe("a draft carries pictures as an ask does (PG-501)", () => {
     expect(readdirSync(dir)).toHaveLength(2)
   })
 
-  test.each(["ask", "draft"] as const)(
+  test.each(["ask", "draft", "slack"] as const)(
     "a %s's stored attachments are judged by the ask's own checks",
     (kind) => {
       const refused = (attachments: unknown) => {
@@ -292,4 +304,35 @@ describe("a draft carries pictures as an ask does (PG-501)", () => {
       refused([{ ...ok, url: "x" }])
     },
   )
+})
+
+describe("a slack decision carries files as an ask does (PG-648)", () => {
+  const slack = (attachments?: unknown) => ({
+    from: "dispatcher",
+    preview: {
+      ...(attachments === undefined ? {} : { attachments }),
+      noLink: "A made-up thread",
+      text: "Look",
+      to: "@Merritt",
+      type: "slack",
+    },
+    title: "Send Merritt the mock?",
+  })
+
+  test("a slack decision with attachments parses, and a stored one without them still does", () => {
+    const ok = { id: "3f0e7a52-1c4b-4d2a-9e6f-0000000000a1.png", kind: "image", name: "a.png" }
+    expect(inboxInputSchema.safeParse(slack([ok])).error).toBeUndefined()
+    expect(inboxInputSchema.safeParse(slack()).error).toBeUndefined()
+  })
+
+  test("bun run ask copies a slack decision's file in, and the decision keeps it", async () => {
+    const dir = join(scratch, `kept${folders++}`)
+    const kept = await keepAttachments(slack([{ src: file("slack-shot.png", PNG) }]), { dir })
+    if (!kept.ok) throw new Error(kept.message)
+    const parsed = inboxInputSchema.safeParse(kept.input)
+    expect(parsed.error).toBeUndefined()
+    const preview = parsed.data?.preview as { attachments?: { name: string }[] }
+    expect(preview.attachments?.map((a) => a.name)).toEqual(["slack-shot.png"])
+    expect(readdirSync(dir)).toHaveLength(1)
+  })
 })
