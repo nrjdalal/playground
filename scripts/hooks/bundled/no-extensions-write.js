@@ -1477,7 +1477,7 @@ var REMOVERS = new Set(["find", "mv", "rm", "rmdir", "rsync", "unlink"]);
 var DUPLICATE = /^(?:\d+|-)$/;
 var writer = ({ op, target }) => [">", ">>", ">|", "<>"].includes(op) || op === ">&" && !DUPLICATE.test(target?.value ?? "");
 var GLOB = /[*?[{(]/;
-var RUNS = /^(?:EDITOR|GH_EDITOR|GH_PAGER|GIT_[A-Z_]+|LESSOPEN|PAGER|VISUAL)$/;
+var RUNS = /^(?:EDITOR|GIT_[A-Z_]+|LESSOPEN|PAGER|VISUAL)$/;
 var CLI = join6("packages", "scripts", "src", "playground", "cli.ts");
 var varsRun = new WeakMap;
 function runsVariable(vars) {

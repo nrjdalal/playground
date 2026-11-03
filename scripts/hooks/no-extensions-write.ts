@@ -93,7 +93,7 @@ const writer = ({ op, target }: { op: string; target?: Word }): boolean =>
   [">", ">>", ">|", "<>"].includes(op) || (op === ">&" && !DUPLICATE.test(target?.value ?? ""))
 const GLOB = /[*?[{(]/
 // Variables that make git or a pager run a program, so a reader with one set is judged as any other program.
-const RUNS = /^(?:EDITOR|GH_EDITOR|GH_PAGER|GIT_[A-Z_]+|LESSOPEN|PAGER|VISUAL)$/
+const RUNS = /^(?:EDITOR|GIT_[A-Z_]+|LESSOPEN|PAGER|VISUAL)$/
 const CLI = join("packages", "scripts", "src", "playground", "cli.ts")
 
 // Whether a scope's variables set one that makes git or a pager run a program, each name read once.
