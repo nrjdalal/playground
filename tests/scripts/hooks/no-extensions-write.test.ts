@@ -607,7 +607,7 @@ describe("a quoted argument is read as a command line only where a program runs 
     ["an escaped shell letter given its command", "sudo -\\s ls"],
     ["a here-string to a quoted cluster given its command", "sudo -su'root' cat <<< 'ls -la'"],
     ["a second wrapper behind a quoted doas given its command", "'doas' sudo -i ls"],
-    ["a shortened shell long option given its command", "sudo --sh ls"],
+    ["the shell long option given its command", "sudo --shell ls"],
     ["a shortened login long option given its command", "sudo --lo -u root ls"],
     [
       "sudo whose quoted user option comes first in a cluster and takes the shell letter as its value",

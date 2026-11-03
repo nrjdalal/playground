@@ -206,13 +206,12 @@ function stdinShellOf(cmd: Command, { args, first, name }: Parsed): "root" | "sh
   const end = first ? cmd.words.indexOf(first) : -1
   const before = cmd.words.slice(at, end === -1 ? undefined : end)
   // the first unquoted word naming a wrapper, by its basename, as the reading before quoted words were read
-  const own = before.find((w) => !w.quoted && ROOT_SHELLS.has(program(w.value)))
+  const firstWrapper = before.find((w) => !w.quoted && ROOT_SHELLS.has(program(w.value)))
   const wrappers: string[] = []
   for (const w of before) {
-    // each word is read as an option of every wrapper before it ahead of being taken as one, so no word skips the reading
     if (wrappers.some((wrapper) => startsRootShell(wrapper, w.value))) return "root"
     // a wrapper: that first one, or a word whose unquoted value is a wrapper's bare name (`'sudo'`, `\doas`, `doas sudo`)
-    if (w === own || ROOT_SHELLS.has(w.value)) wrappers.push(program(w.value))
+    if (w === firstWrapper || ROOT_SHELLS.has(w.value)) wrappers.push(program(w.value))
   }
   // a program the hook cannot read, behind a wrapper, may be a root shell
   return first && wrappers.length ? "root" : undefined

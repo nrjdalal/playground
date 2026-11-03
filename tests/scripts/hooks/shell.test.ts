@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { readdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 
-import { type Env, GIT_TAKES, lex, run } from "../../../scripts/hooks/shell"
+import { type Env, GIT_TAKES, lex, run, stdinShell } from "../../../scripts/hooks/shell"
 
 const HOOKS = join(import.meta.dir, "..", "..", "..", "scripts", "hooks")
 
@@ -50,5 +50,16 @@ describe("an alternate reading runs on its own copy of the env", () => {
 
   test("the primary reading still moves the folder and sets the variables", async () => {
     expect(await seen("cd /; export A=1; probe")).toEqual({ cwd: "/", vars: ["A"] })
+  })
+})
+
+describe("stdinShell reads a privilege wrapper's root shell", () => {
+  test.each([
+    ["a program in a variable behind a quoted bare wrapper", `'sudo' "$X"`, "root"],
+    ["a second wrapper's shell option behind a plain first wrapper", "doas sudo -i", "root"],
+    ["a quoted shell option", "sudo '-s'", "root"],
+    ["the shell long option given its command", "sudo --shell ls", undefined],
+  ])("%s", (_, line, kind) => {
+    expect(stdinShell(lex(line).commands[0])).toBe(kind)
   })
 })
