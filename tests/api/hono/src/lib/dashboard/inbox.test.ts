@@ -11,6 +11,8 @@ import {
 } from "../../../../../../api/hono/src/lib/dashboard/attachments"
 import { QUEUED_MS } from "../../../../../../api/hono/src/lib/dashboard/deliver"
 import {
+  acceptArgs,
+  acceptResult,
   ACTIONS,
   answerInputSchema,
   checkAnswer,
@@ -876,6 +878,73 @@ describe("a secret ask (PG-59)", () => {
     expect(secretInputSchema.safeParse({ value: "   " }).success).toBe(false)
     expect(secretInputSchema.safeParse({}).success).toBe(false)
     expect(secretInputSchema.safeParse({ extra: 1, value: "made-up" }).success).toBe(false)
+  })
+})
+
+const ACCEPT = {
+  key: "end-of-day",
+  kind: "skill",
+  rev: "3f9a2c1d",
+  scope: "acme",
+  type: "accept",
+  why: "Scored 4 by two reviewers; it reads the day's merges",
+}
+
+describe("an accept decision (PG-658)", () => {
+  test("names a scope, kind, key and rev the store takes, none of which can start as a flag", () => {
+    expect(inboxInputSchema.safeParse(decision(ACCEPT)).success).toBe(true)
+    const takes = (change: object) =>
+      inboxInputSchema.safeParse(decision({ ...ACCEPT, ...change })).success
+    for (const change of [
+      { scope: "--yes" },
+      { scope: "-acme" },
+      { scope: "acme/../core" },
+      { key: "--reason" },
+      { key: "End-Of-Day" },
+      { key: "a b" },
+      { kind: "hook" },
+      { rev: "--all" },
+      { rev: "HEAD" },
+      { rev: "3f9a2c" },
+      { why: "" },
+      { extra: "--yes" },
+    ]) {
+      expect(takes(change), JSON.stringify(change)).toBe(false)
+    }
+  })
+
+  test("its Approve runs one fixed argv: the preview's words and a reason naming the item", () => {
+    const parsed = inboxInputSchema.parse(decision(ACCEPT))
+    if (parsed.kind !== "decision" || parsed.preview.type !== "accept") throw new Error("no accept")
+    expect(acceptArgs(parsed.preview, 41)).toEqual([
+      "accept",
+      "acme",
+      "skill",
+      "end-of-day",
+      "3f9a2c1d",
+      "--reason",
+      "the owner approved it in the Inbox (#i41)",
+    ])
+  })
+
+  test("is approved, denied or cleared as it reads, never edited", () => {
+    const open = { kind: "decision", preview: ACCEPT, status: "open" } as never
+    expect(checkAnswer(open, { action: "approve" })).toMatchObject({ status: "approved" })
+    expect(checkAnswer(open, { action: "deny" })).toMatchObject({ status: "denied" })
+    expect(checkAnswer(open, { action: "edit", text: "accept core's too" })).toHaveProperty(
+      "message",
+    )
+  })
+
+  test("its result is the exit code and one line: the CLI's line, else its error, cut to a line", () => {
+    expect(acceptResult({ code: 0, err: "", out: "rev 9b8c7d6 is accepted\n" })).toEqual({
+      exitCode: 0,
+      line: "rev 9b8c7d6 is accepted",
+    })
+    expect(
+      acceptResult({ code: 1, err: "409 the proposal is at 0a1b2c3, not 3f9a2c1d\nmore", out: "" }),
+    ).toEqual({ exitCode: 1, line: "409 the proposal is at 0a1b2c3, not 3f9a2c1d" })
+    expect(acceptResult({ code: 1, err: "x".repeat(500), out: "" }).line).toHaveLength(200)
   })
 })
 
@@ -3030,6 +3099,194 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
         { ok: false },
       )
       expect((await store.getItem(db, secret.id))?.status).toBe("open")
+    })
+  })
+
+  describe("an accept decision's Approve (PG-658)", () => {
+    // what the stubbed runner was handed, per call, and what it answers
+    const runner = (ran: Partial<{ code: number; err: string; out: string }> = {}) => {
+      const calls: string[][] = []
+      const accept = async (args: string[]) => {
+        calls.push(args)
+        return { code: 0, err: "", out: "rev 9b8c7d6 is accepted", ...ran }
+      }
+      return { accept, calls }
+    }
+
+    test("runs the one fixed argv once the answer is kept, records its exit code and line, and tells the poster there is nothing left to do", async () => {
+      const posted = await post(decision(ACCEPT))
+      const run = runner()
+      const sent: Delivery[] = []
+      const answered = await store.answerItem(
+        db,
+        posted.id,
+        { action: "approve", seen: posted.updatedAt },
+        {
+          accept: run.accept,
+          actor,
+          deliver: async (delivery) => {
+            sent.push(delivery)
+            return { at: "2026-11-03T20:00:00.000Z", ok: true, sessionId: "s1" }
+          },
+        },
+      )
+      expect(run.calls).toEqual([
+        [
+          "accept",
+          "acme",
+          "skill",
+          "end-of-day",
+          "3f9a2c1d",
+          "--reason",
+          `the owner approved it in the Inbox (#i${posted.ref})`,
+        ],
+      ])
+      expect(answered.ok).toBe(true)
+      if (!answered.ok) return
+      expect(answered.item.status).toBe("approved")
+      expect(answered.item.answer).toMatchObject({
+        accepted: { exitCode: 0, line: "rev 9b8c7d6 is accepted" },
+        choice: "approve",
+      })
+      expect((await store.getItem(db, posted.id))?.answer).toMatchObject({
+        accepted: { exitCode: 0, line: "rev 9b8c7d6 is accepted" },
+      })
+      expect(sent).toHaveLength(1)
+      expect(sent[0]?.text).toContain("the dashboard ran the accept: rev 9b8c7d6 is accepted")
+      expect(sent[0]?.text).toContain(`bun run ask ack #i${posted.ref} --no-link`)
+      expect(sent[0]?.text).not.toContain("Carry it out")
+    })
+
+    test("a refused accept records the CLI's exit code and its error line, and the poster reads that nothing was accepted", async () => {
+      const posted = await post(decision(ACCEPT))
+      const run = runner({
+        code: 1,
+        err: "playground ext: 409 the proposal is at 0a1b2c3d4e5f, not 3f9a2c1d; read it again",
+        out: "",
+      })
+      const sent: Delivery[] = []
+      const answered = await store.answerItem(
+        db,
+        posted.id,
+        { action: "approve" },
+        {
+          accept: run.accept,
+          actor,
+          deliver: async (delivery) => {
+            sent.push(delivery)
+            return { at: "2026-11-03T20:00:00.000Z", ok: true, sessionId: "s1" }
+          },
+        },
+      )
+      expect(answered.ok && answered.item.answer).toMatchObject({
+        accepted: {
+          exitCode: 1,
+          line: "playground ext: 409 the proposal is at 0a1b2c3d4e5f, not 3f9a2c1d; read it again",
+        },
+      })
+      expect(sent[0]?.text).toContain("failed (exit 1)")
+      expect(sent[0]?.text).toContain("Nothing was accepted")
+    })
+
+    test("a runner that throws is recorded as a failed accept, never an approve with no result", async () => {
+      const posted = await post(decision(ACCEPT))
+      const accept = async () => {
+        throw new Error("spawn ENOENT")
+      }
+      const answered = await store.answerItem(
+        db,
+        posted.id,
+        { action: "approve" },
+        { accept, actor },
+      )
+      expect(answered.ok && answered.item.answer).toMatchObject({
+        accepted: { exitCode: 1, line: "spawn ENOENT" },
+      })
+    })
+
+    test("runs once: a double click, or an answer to a card read before it changed, runs one accept or none", async () => {
+      const posted = await post(decision(ACCEPT))
+      const run = runner()
+      const stale = await store.answerItem(
+        db,
+        posted.id,
+        { action: "approve", seen: "2026-01-01T00:00:00.000Z" },
+        { accept: run.accept, actor },
+      )
+      expect(stale).toMatchObject({ code: "CONFLICT", ok: false })
+      expect(run.calls).toHaveLength(0)
+      const [one, two] = await Promise.all([
+        store.answerItem(db, posted.id, { action: "approve" }, { accept: run.accept, actor }),
+        store.answerItem(db, posted.id, { action: "approve" }, { accept: run.accept, actor }),
+      ])
+      expect([one.ok, two.ok].sort()).toEqual([false, true])
+      expect(run.calls).toHaveLength(1)
+    })
+
+    test("Deny and Archive run nothing, and Edit is refused with the item left open", async () => {
+      const run = runner()
+      const denied = await post(decision(ACCEPT))
+      const cleared = await post(decision(ACCEPT))
+      const edited = await post(decision(ACCEPT))
+      const deps = { accept: run.accept, actor }
+      expect(await store.answerItem(db, denied.id, { action: "deny" }, deps)).toMatchObject({
+        item: { status: "denied" },
+        ok: true,
+      })
+      expect(await store.answerItem(db, cleared.id, { action: "clear" }, deps)).toMatchObject({
+        item: { status: "cleared" },
+        ok: true,
+      })
+      expect(
+        await store.answerItem(db, edited.id, { action: "edit", text: "accept core's" }, deps),
+      ).toMatchObject({ code: "VALIDATION_ERROR", ok: false })
+      expect((await store.getItem(db, edited.id))?.status).toBe("open")
+      expect(run.calls).toHaveLength(0)
+    })
+
+    test("with no runner its Approve is refused and the item stays open, and no other decision ever runs one", async () => {
+      const posted = await post(decision(ACCEPT))
+      expect(await store.answerItem(db, posted.id, { action: "approve" }, { actor })).toMatchObject(
+        {
+          code: "VALIDATION_ERROR",
+          message: "This dashboard cannot run an accept",
+          ok: false,
+        },
+      )
+      expect((await store.getItem(db, posted.id))?.status).toBe("open")
+      const run = runner()
+      const other = await post(decision(PREVIEWS.delete))
+      expect(
+        await store.answerItem(db, other.id, { action: "approve" }, { accept: run.accept, actor }),
+      ).toMatchObject({ ok: true })
+      expect(run.calls).toHaveLength(0)
+    })
+
+    test("an accept answered for an ended poster reaches the dispatcher as an item to close, not a go", async () => {
+      const posted = await post({ ...decision(ACCEPT), from: "worker-eod" })
+      const sent: Delivery[] = []
+      await store.answerItem(
+        db,
+        posted.id,
+        { action: "approve" },
+        {
+          accept: runner().accept,
+          actor,
+          deliver: async (delivery) => {
+            sent.push(delivery)
+            return afterPoster(delivery)
+          },
+          dispatcher: "dispatcher",
+        },
+      )
+      const relayed = sent.find((delivery) => delivery.to === "dispatcher")
+      expect(relayed?.text).toStartWith(
+        `worker-eod has ended, and the dashboard already ran this accept, so nothing is carried out: close the item with bun run ask ack #i${posted.ref} --no-link`,
+      )
+      expect(relayed?.text).toContain("the dashboard ran the accept")
+      expect(relayed?.text).not.toContain("you carry this out in its place")
+      // an approved accept is a go, which get --ack leaves open, so the relay names the one close that closes it
+      expect(relayed?.text).not.toContain("--ack")
     })
   })
 })

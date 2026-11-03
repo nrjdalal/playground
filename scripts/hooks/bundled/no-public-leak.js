@@ -6145,7 +6145,7 @@ var JOBS = {
     stop: "dashboard"
   }),
   "ops-dm-watch": terminal("ops-dm-watch", bunJob("ops-dm-watch"), {
-    description: "In Slack mode, hands each message in the owner's DM to the dispatcher, the second dispatcher too when no reply lands in 3 minutes.",
+    description: "In Slack mode, hands each message in the owner's DM to the dispatcher, the session in the assistant seat too when no reply lands in 3 minutes.",
     schedule: { every: 60 }
   }),
   "ops-ext-sync": terminal("ops-ext-sync", bunJob("ops-ext-sync"), {
@@ -6360,7 +6360,7 @@ var slackSettings = defineSettings({
   },
   "slack.mode": {
     default: false,
-    description: "Slack mode: the owner is away and the DM is the owner's remote access, so the DM watch hands each owner message to the dispatcher, nudges it for an update every 15 minutes and fails over to the second dispatcher; off until the owner turns it on, on until the owner turns it off.",
+    description: "Slack mode: the owner is away and the DM is the owner's remote access, so the DM watch hands each owner message to the dispatcher, nudges it for an update every 15 minutes and fails over to the session in the assistant seat; off until the owner turns it on, on until the owner turns it off.",
     schema: boolean2()
   },
   "slack.sendServer": {
@@ -7870,6 +7870,7 @@ import { join as join4 } from "path";
 
 // packages/config/src/kinds.ts
 var ROSTER_KINDS = [
+  "assistant",
   "builder",
   "dispatcher",
   "ops",
@@ -7884,6 +7885,7 @@ var ROSTER_KINDS = [
 ];
 var isRosterKind = (value) => ROSTER_KINDS.includes(value);
 var FACTORY_ROLE_OF_KIND = {
+  assistant: "lead",
   builder: "lead",
   dispatcher: "dispatcher",
   ops: "lead",

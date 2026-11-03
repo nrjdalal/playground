@@ -68,6 +68,7 @@ import { join as join3 } from "path";
 
 // packages/config/src/kinds.ts
 var ROSTER_KINDS = [
+  "assistant",
   "builder",
   "dispatcher",
   "ops",
@@ -82,6 +83,7 @@ var ROSTER_KINDS = [
 ];
 var isRosterKind = (value) => ROSTER_KINDS.includes(value);
 var FACTORY_ROLE_OF_KIND = {
+  assistant: "lead",
   builder: "lead",
   dispatcher: "dispatcher",
   ops: "lead",
@@ -1962,7 +1964,7 @@ function cliWrite(words) {
     return GUARD_KEYS.has(key) ? `playground settings ${verb} of ${key}, a key a guard reads` : undefined;
   }
   if (verb === "accept")
-    return "playground ext accept, the owner's own call, which the owner runs as `! env -u PLAYGROUND_ROLE playground ext accept \u2026` in the dispatcher's terminal window, since the CLI refuses an accept with PLAYGROUND_ROLE set and that window carries one";
+    return "playground ext accept, the owner's own call: post it as an accept decision with bun run ask new (.agents/dashboard/asks.md), whose Approve has the dashboard run it with no role, since the CLI refuses an accept with PLAYGROUND_ROLE set";
   if (verb === "put")
     return unread || positional[1] === "list" ? "playground ext put of a list, or with a word it cannot read, which may render into a guard's list" : undefined;
   if (EXT_WRITES.has(verb) && !(dry && EXT_DRY.has(verb)))

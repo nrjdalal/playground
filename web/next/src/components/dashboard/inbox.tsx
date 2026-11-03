@@ -20,6 +20,7 @@ import {
   RiKey2Line,
   RiMoneyDollarCircleLine,
   RiProgress4Line,
+  RiPuzzleLine,
   RiQuestionAnswerLine,
   RiQuestionLine,
   RiRefreshLine,
@@ -156,6 +157,7 @@ import { inboxMark, readMark } from "@/lib/tab-dot"
 import { fullTime, relativeTime } from "@/lib/time"
 
 const DECISION_ICONS: Record<InboxPreview["type"], RemixiconComponentType> = {
+  accept: RiPuzzleLine,
   ask: RiQuestionAnswerLine,
   budget: RiMoneyDollarCircleLine,
   delete: RiDeleteBinLine,
@@ -531,6 +533,17 @@ function Preview({ item }: { item: Extract<InboxItem, { kind: "decision" }> }) {
           project <code className="font-mono">{preview.sink.project}</code> ({preview.sink.scope})
           for {preview.sink.environments.join(", ")}. It is kept nowhere.
         </p>
+      )
+    case "accept":
+      return (
+        <>
+          <p>
+            On Approve, the dashboard accepts the proposed {preview.kind}{" "}
+            <code className="font-mono">{preview.key}</code> in {preview.scope}, as it reads at{" "}
+            <code className="font-mono">{preview.rev.slice(0, 7)}</code>.
+          </p>
+          <p className="break-words whitespace-pre-wrap">Why: {preview.why}</p>
+        </>
       )
   }
 }

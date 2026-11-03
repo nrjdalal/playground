@@ -176,6 +176,7 @@ process.exit(3)
 `,
   )
   process.env.MADE_UP_TOKEN = "never-passed"
+  process.env.PLAYGROUND_ROLE = "dispatcher"
   try {
     const run = await runCli(cli)(["add", "acme; touch /tmp/x", "$(id)"])
     expect(run.code).toBe(3)
@@ -183,9 +184,12 @@ process.exit(3)
     const seen = JSON.parse(run.out) as { argv: string[]; env: string[] }
     expect(seen.argv).toEqual(["ext", "add", "acme; touch /tmp/x", "$(id)"])
     expect(seen.env).not.toContain("MADE_UP_TOKEN")
+    // no role reaches the child, so an accept it runs is the owner's own (PG-658)
+    expect(seen.env).not.toContain("PLAYGROUND_ROLE")
     expect(seen.env).toEqual(expect.arrayContaining(["HOME", "PATH", "PLAYGROUND_DATA_DIR"]))
   } finally {
     delete process.env.MADE_UP_TOKEN
+    delete process.env.PLAYGROUND_ROLE
   }
 })
 
