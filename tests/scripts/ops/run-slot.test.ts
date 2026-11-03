@@ -311,10 +311,10 @@ describe("the queue's order", () => {
     // SLOW_CHILD=5, the load that turned it red on CI, takes it about 82s
   }, 180_000)
 
-  // A run for a GitHub org ext.links guards goes first; a checker reads its worker's PR, and load1 15 leaves run-slot the one slot
+  // A run for a GitHub org ext.links guards goes first; a checker reads its worker's PR, and the CPU 30% idle leaves run-slot the one slot
   const order = async (priority?: string, pr = "https://github.com/acme-co/web/pull/1") => {
     const m = machine({
-      load1: 15,
+      idle: 30,
       roster: {
         agents: [
           { name: "worker-lw", pr },

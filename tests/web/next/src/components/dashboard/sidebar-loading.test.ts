@@ -5,12 +5,12 @@ import {
   holdsOrder,
   inShownOrder,
   PendingRow,
-  ROW_BOX,
   parseShown,
   SessionRow,
   shownOf,
   sidebarSource,
 } from "../../../../../../web/next/src/components/dashboard/app-sidebar"
+import { ROW_BOX } from "../../../../../../web/next/src/components/shell/row-box"
 import { SidebarMenu, SidebarProvider } from "../../../../../../web/next/src/components/ui/sidebar"
 
 // React resolves from the web app's own packages, which this directory cannot see; the two calls the test makes are typed here rather than through a path into node_modules.

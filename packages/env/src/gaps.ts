@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process"
-import { readFileSync } from "node:fs"
+import { existsSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 
 import { apiHono, auth, db, redis, webNext } from "@/keys"
@@ -43,13 +43,22 @@ export const requiredKeys = (): Map<string, string[]> => {
   return new Map([...keys].sort(([a], [b]) => (a < b ? -1 : 1)))
 }
 
-export type EnvGaps = { empty: string[]; missing: string[] }
+// `absent` is set when the checkout has no .env at all, holding the keys a copy of .env.example still leaves to fill, so the refusal names the copy rather than reading as a short .env.
+export type EnvGaps = { absent?: { fill: string[] }; empty: string[]; missing: string[] }
 
-// The keys .env.example documents, the ones a person can fill, read from the checkout the way load-dotenv reads ../../.env from the API's working directory; null when it cannot be read, so every required key is named.
-const exampleKeys = (): string[] | null => {
+// A file at the checkout's root, found the way load-dotenv finds ../../.env from the API's working directory.
+const atRoot = (name: string): string => join(process.cwd(), "../..", name)
+
+// The keys .env.example documents, the ones a person can fill, each with the value its line gives (a trailing comment cut off); null when it cannot be read, so every required key is named.
+const exampleValues = (): Map<string, string> | null => {
   try {
-    const example = readFileSync(join(process.cwd(), "../../.env.example"), "utf8")
-    return [...example.matchAll(/^([A-Z][A-Z0-9_]*)=/gm)].map((match) => match[1]!)
+    const example = readFileSync(atRoot(".env.example"), "utf8")
+    return new Map(
+      [...example.matchAll(/^([A-Z][A-Z0-9_]*)=(.*)$/gm)].map((match) => [
+        match[1]!,
+        match[2]!.replace(/(^|\s)#.*$/, "").trim(),
+      ]),
+    )
   } catch {
     return null
   }
@@ -57,23 +66,33 @@ const exampleKeys = (): string[] | null => {
 
 // What the environment is missing or leaves empty among the required keys, each named with the apps that read it, as the apps' own validation would fail on it. Reads the values the schemas read at their load, so call with .env already staged. A required key .env.example does not hold (a derived one, such as NEXT_PUBLIC_NODE_ENV from NODE_ENV) is never named, since no .env line can set it, nor is one the caller names in `optional` (the dev launcher's POSTGRES_URL, which setup fills).
 export const envGaps = (optional: string[] = []): EnvGaps => {
-  const settable = exampleKeys()
+  const example = exampleValues()
   const empty: string[] = []
+  const fill: string[] = []
   const missing: string[] = []
   for (const [key, targets] of requiredKeys()) {
-    if (settable && !settable.includes(key)) continue
+    if (example && !example.has(key)) continue
     if (optional.includes(key)) continue
     const value = targets
       .map((target) => SCHEMAS[target]!.runtimeEnv[key])
       .find((v) => v !== undefined)
-    if (value === undefined) missing.push(`${key} (${targets.join(", ")})`)
-    else if (value === "") empty.push(`${key} (${targets.join(", ")})`)
+    const named = `${key} (${targets.join(", ")})`
+    if (value === undefined) missing.push(named)
+    else if (value === "") empty.push(named)
+    // a copy of .env.example fills each unset key its line gives a value, and leaves a key the shell sets empty as it is, since dotenv keeps the shell's value
+    if (value === "" || (value === undefined && (!example || example.get(key) === "")))
+      fill.push(named)
   }
-  return { empty, missing }
+  return existsSync(atRoot(".env")) ? { empty, missing } : { absent: { fill }, empty, missing }
 }
 
-// The launcher's refusal for a .env with gaps, naming each key with the apps that read it.
-export const gapsRefusal = ({ empty, missing }: EnvGaps): string => {
+// The launcher's refusal for a .env with gaps, naming each key with the apps that read it; with no .env at all, it leads with the copy from .env.example.
+export const gapsRefusal = ({ absent, empty, missing }: EnvGaps): string => {
+  if (absent) {
+    const keys =
+      absent.fill.length > 0 ? `, then fill the keys still empty: ${absent.fill.join(", ")}` : ""
+    return `no .env in this checkout: copy .env.example to .env${keys}`
+  }
   const parts = [
     missing.length > 0 ? `the .env lacks keys the apps require: ${missing.join(", ")}` : null,
     empty.length > 0 ? `left empty: ${empty.join(", ")}` : null,

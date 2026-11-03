@@ -217,7 +217,7 @@ async function patchAccordion() {
   log(`patched: ${ACCORDION}`)
 }
 
-// toast.tsx: its loading icon is RiLoader4Line, the app's one loader (the owner: "user loader4 instead of loader app wide"), where the registry ships RiLoaderLine; idempotent, and it throws when the toast has neither.
+// toast.tsx: its loading icon is RiLoader4Line, the app's one loader, where the registry ships RiLoaderLine; idempotent, and it throws when the toast has neither.
 export const TOAST = `${UI}/toast.tsx`
 
 export function loader4(source: string): string {
@@ -231,7 +231,21 @@ async function patchToast() {
   log(`patched: ${TOAST}`)
 }
 
-// sidebar.tsx: SidebarTrigger gains an optional children label, and SidebarRail drops its native title, since every hover is shadcn's Tooltip (the owner's rule: a tooltip everywhere instead of the default), which SidebarToggleRail puts on the rail.
+// sidebar.tsx: SidebarContent, the body, scrolls up and down alone, since with no visible scrollbar a row wider than the sidebar slid every row's left edge out of view (PG-711); idempotent, and it throws when the body's overflow class changes.
+export const BODY_SCROLL =
+  "overflow-x-hidden overflow-y-auto group-data-[collapsible=icon]:overflow-hidden"
+const REGISTRY_BODY_SCROLL = "overflow-auto group-data-[collapsible=icon]:overflow-hidden"
+
+export function bodyScroll(source: string): string {
+  if (source.includes(BODY_SCROLL)) return source
+  if (!source.includes(REGISTRY_BODY_SCROLL))
+    throw new Error(
+      `shadcn-customize: SidebarContent's overflow not found in ${SIDEBAR}; shape changed`,
+    )
+  return source.replace(REGISTRY_BODY_SCROLL, BODY_SCROLL)
+}
+
+// sidebar.tsx: SidebarTrigger gains an optional children label, SidebarContent scrolls up and down alone (bodyScroll, above), and SidebarRail drops its native title, since every hover is shadcn's Tooltip (the owner's rule: a tooltip everywhere instead of the default), which SidebarToggleRail puts on the rail.
 function patchSidebar() {
   const sf = project.addSourceFileAtPath(SIDEBAR)
   const binding = sf.getFunctionOrThrow("SidebarTrigger").getParameters()[0]?.getNameNode()
@@ -262,6 +276,7 @@ function patchSidebar() {
     .getDescendantsOfKind(SyntaxKind.JsxAttribute)
     .find((a) => a.getNameNode().getText() === "title")
     ?.remove()
+  sf.replaceWithText(bodyScroll(sf.getFullText()))
   sf.saveSync()
   log(`patched: ${SIDEBAR}`)
 }

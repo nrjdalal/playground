@@ -158,8 +158,11 @@ The Dashboard's supervisor takes `dashboard-supervisor`, through `packages/scrip
 The trash records the script as who deleted it, and `--restore` puts its entry back into that folder.
 The ops runner's render takes `jobs`: the plist of a job `jobs.json` no longer holds, out of `ops/launch-agents`, one file of at most 64 KB.
 
-`playground rm --worktree <path>` removes a worktree under `.claude/worktrees/`: it refuses when the roster cannot be read, when a live session on the roster holds it by its branch, its name or its pull request's number, when a process works inside it, or when its commit is on no remote branch, then moves it to the trash and runs `git worktree prune`.
+`playground rm --worktree <path>` removes a worktree under `.claude/worktrees/`: it refuses when the roster cannot be read, when a live session on the roster holds it by its branch, its name or its pull request's number, when a running `node_modules` clone reads from it or copies into it, when a process works inside it, or when its commit is on no remote branch, then moves it to the trash and runs `git worktree prune`.
 A live session whose roster entry names no branch and no pull request, and with no process inside the worktree, is not seen as holding it; the trash keeps the worktree 7 days for `--restore`.
+A process inside it is named in the refusal, `<path> is held by pid <n> (<command>) working in <folder>`, and nothing is signalled, so the session that started it closes it by its own handle.
+When that process is agent-browser, the refusal adds its session, from its `--session` argument or its socket's name, else `default`, and the close that frees the folder: `agent-browser session <name>, which agent-browser --session <name> close frees`.
+A clone is read from run-slot's clone holder record (`run-slot-clone.holder` in the data folder's `ops`), which names its source and destination while its pid lives, since the clone's `cp` only reads its source and works in whatever folder run-slot was called from, so neither end need be a process's working folder; the refusal reads `<path> is held by <session>'s node_modules clone (pid <n>) from <source> into <destination>`.
 Uncommitted changes go into the trash with the worktree, so they come back with it.
 A worktree restored from the trash has its files back, but git no longer lists it as a worktree.
 Ops empties the trash every hour: each delete over 7 days old goes, and the oldest go sooner while the disk has under 50 GB free.
@@ -186,7 +189,7 @@ Every change needs its reason, and `--scope` sets it for an org (its name) or fo
 `playground ext order <name>...` puts the names given first, `ext link <name> <org|*>` and `ext unlink <name> <org|*>` choose whose repos read an extension (`*` is every repo), and `ext remove <name>` takes one out of all three keys while its folder stays.
 `playground ext export <folder>` clones every scope into a new folder, and `playground ext import <folder> [--dry-run]` brings one back, showing what it would change first with `--dry-run`.
 `playground ext import --from-tree <folder>` puts each guard's list file in the folder into your login's lists ([How sessions read it](/docs/extensions#how-sessions-read-it)).
-`playground ext score`, `accept` and `reject` judge a proposal with a reason, `score` from a session other than the proposal's author and `accept` with no `PLAYGROUND_ROLE` set ([Review](/docs/extensions#review)).
+`playground ext score`, `accept` and `reject` judge a proposal with a reason, `score` from a session other than the proposal's author, by its registry name, and `accept` with no `PLAYGROUND_ROLE` set ([Review](/docs/extensions#review)).
 [Settings and extensions](/docs/extensions#extensions) and [Export, import and backup](/docs/backup) have each command.
 `playground ext` and `playground settings` write the folders themselves, so they need no Dashboard running; a usage error exits 2 and a refused write exits 1, with its reason.
 
@@ -197,6 +200,14 @@ Every change needs its reason, and `--scope` sets it for an org (its name) or fo
 `playground accounts add --provider glm --label <label>` asks for a Z.ai key the same way and keeps it under `models.glmKeychainService` by that label; `spawn.sh --backend glm --account <label>` runs on it, and the first GLM row is the default.
 Adding an account that is already listed replaces its secret and leaves its row as it is.
 `playground accounts remove <email|label>` drops the row and its Keychain item.
+
+## Yard: `playground yard`
+
+`playground yard` reaches Yard, the hosted Playground's channels and DMs, from this Mac, with the address in `YARD_API_URL` and its approve pages at `YARD_WEB_URL`, read from your environment or the factory checkout's `.env`.
+`playground yard login` asks for a Yard token (`yard_...`), with no echo, checks it with Yard and keeps it in the Keychain under `playground-yard`, where the local Dashboard reads it too; `playground yard logout` removes it.
+`playground yard channels` lists your channels and DMs with their unread and mention counts.
+`playground yard read <channel>` prints a channel's last 50 messages, oldest first, by `#name`, a DM's `@login` or an id, and leaves your unread counts as they are.
+`playground yard post <channel> <text> [--kind <kind>]` posts as this Mac; a post Yard holds for your approval prints its approve page, and its card reaches your [Inbox](/docs/inbox) within a minute.
 
 ## Skill sets: `playground orgs`
 

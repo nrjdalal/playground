@@ -552,7 +552,7 @@ describe("the slot-stuck alert", () => {
     mkdirSync(bin)
     writeFileSync(
       join(bin, "sysctl"),
-      `#!/bin/bash\ncase "$2" in hw.ncpu) echo 15 ;; vm.loadavg) echo "{ 2.00 2.00 2.00 }" ;; esac\n`,
+      `#!/bin/bash\ncase "$2" in vm.loadavg) echo "{ 2.00 2.00 2.00 }" ;; esac\n`,
     )
     chmodSync(join(bin, "sysctl"), 0o755)
     for (const off of ["run-slot.3-off", "run-slot.4-off"]) writeFileSync(join(ops, off), "")
@@ -1209,6 +1209,56 @@ describe("ops-unstick's slot alerts", () => {
     expect(new Set(alerts.map((a) => a.kind))).toEqual(new Set(["slot-idle"]))
   })
 
+  // run-slot's holder on run-slot-3 with the given ps rows under it, its saved baseline at cpu seconds, idle since `ago` seconds
+  const idleCheck = async (rows: string[], cpu: number, ago: number) => {
+    const config = scratch()
+    const ops = join(config, "playground", "ops")
+    const bin = join(config, "bin")
+    mkdirSync(join(ops, "run-slot-3"), { recursive: true })
+    mkdirSync(bin)
+    writeFileSync(join(ops, "run-slot-3.holder"), `worker-x ${process.pid} 2026-11-03T10:17:00Z\n`)
+    writeFileSync(
+      join(bin, "ps"),
+      `#!/bin/bash\n${rows.map((row) => `echo "${row}"`).join("\n")}\n`,
+    )
+    chmodSync(join(bin, "ps"), 0o755)
+    const now = Date.now() / 1000
+    const key = `run-slot-3:${process.pid}`
+    const state = { slot_idle: { [key]: { cpu, since: now - ago, told: true } } }
+    const alerts = (await callWith(
+      { PATH: `${bin}:${process.env.PATH}` },
+      config,
+      "slot_idle_alerts",
+      state,
+      now,
+    )) as { kind: string }[]
+    return alerts.map((a) => a.kind)
+  }
+
+  test("a batch whose earlier step exited is measured from its new total, so its busy next step raises no slot-idle", async () => {
+    expect(await idleCheck([`  999471 ${process.pid} 5:00.00 bun test`], 600, 1000)).toEqual([])
+  })
+
+  test("a busy grandchild under an idle batch script counts, even below an exited step's baseline", async () => {
+    const rows = [
+      `  999472 ${process.pid} 0:00.04 bash -c batch`,
+      "  999473 999472 3:40.00 bun packages/scripts/src/verdicts.ts",
+    ]
+    expect(await idleCheck(rows, 600, 1000)).toEqual([])
+    expect(await idleCheck(rows, 0.04, 1000)).toEqual([])
+  })
+
+  test("a bun install process at near 0% CPU waits SLOT_IDLE_INSTALL, then still raises slot-idle, and a wrapper naming one in its argv waits SLOT_IDLE", async () => {
+    const rows = [`  999474 ${process.pid} 0:01.00 bun install --frozen-lockfile`]
+    expect(await idleCheck(rows, 1, 1500)).toEqual([])
+    expect(await idleCheck(rows, 1, 2800)).toEqual(["slot-idle"])
+    const wrapped = [
+      `  999476 ${process.pid} 0:00.01 bash -c bun install && sleep 900`,
+      "  999477 999476 0:00.00 sleep 900",
+    ]
+    expect(await idleCheck(wrapped, 0.01, 1000)).toEqual(["slot-idle"])
+  })
+
   // the heavy-job cap reads run-slot.sh's own count of the CPU slots held or open, on a machine at load1 2 with the given off-switches
   const capped = (off: string[] = [], held: string[] = []) => {
     const config = scratch()
@@ -1218,9 +1268,19 @@ describe("ops-unstick's slot alerts", () => {
     mkdirSync(bin)
     writeFileSync(
       join(bin, "sysctl"),
-      `#!/bin/bash\ncase "$2" in hw.ncpu) echo 15 ;; vm.loadavg) echo "{ 2.00 2.00 2.00 }" ;; esac\n`,
+      `#!/bin/bash\ncase "$2" in vm.loadavg) echo "{ 2.00 2.00 2.00 }" ;; kern.memorystatus_level) echo 80 ;; kern.memorystatus_vm_pressure_level) echo 1 ;; esac\n`,
     )
     chmodSync(join(bin, "sysctl"), 0o755)
+    // the CPU 80% idle in top's second sample and no swap-ins in vm_stat's last row, so run-slot's gauges open every lane
+    writeFileSync(
+      join(bin, "top"),
+      `#!/bin/bash\necho "CPU usage: 1.00% user, 1.00% sys, 98.00% idle"\necho "CPU usage: 10.00% user, 10.00% sys, 80.00% idle"\n`,
+    )
+    writeFileSync(
+      join(bin, "vm_stat"),
+      `#!/bin/bash\necho "    free  swapins swapouts"\necho "    8023  9966113 12153731"\necho "    7698        0        0"\n`,
+    )
+    for (const name of ["top", "vm_stat"]) chmodSync(join(bin, name), 0o755)
     for (const name of off) writeFileSync(join(ops, name), "")
     for (const slot of held) {
       mkdirSync(join(ops, slot))
@@ -1232,7 +1292,7 @@ describe("ops-unstick's slot alerts", () => {
     return callWith({ PATH: `${bin}:${process.env.PATH}` }, config, "heavy_cap") as Promise<number>
   }
 
-  test("four CPU slots held at load1 under 12 raise no heavy-jobs alert", async () => {
+  test("four CPU slots held raise no heavy-jobs alert", async () => {
     const cap = await capped([], ["run-slot", "run-slot-2", "run-slot-3", "run-slot-4"])
     const jobs = ["101", "102", "103", "104"].map((pid) => ({
       inside: true,

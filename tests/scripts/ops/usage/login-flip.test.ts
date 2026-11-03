@@ -3,6 +3,11 @@ import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
+// Registers usage.accounts, which setSetting checks a write against.
+import "../../../../packages/settings/src/accounts"
+import { readSetting, setSetting } from "../../../../packages/settings/src/settings-folder"
+import { markOwn } from "../../../../web/next/src/lib/own-account"
+
 const script = join(
   import.meta.dir,
   "..",
@@ -24,7 +29,7 @@ spec = json.loads(sys.argv[2])
 time.time = lambda: spec["now"]
 email = {k: f"{k.lower()}@example.test" for k in ("OWN", "ND", "LW", "PRIDE", "OWN2")}
 name = {v: k for k, v in email.items()}
-values = {"models.probe": "a-made-up-model", "usage.keychainService": "made-up-service", "usage.accounts": [dict(row, email=email[row["email"]]) for row in spec["accounts"]]}
+values = {"models.probe": "a-made-up-model", "usage.keychainService": "made-up-service", "usage.accounts": [dict(row, email=email.get(row["email"], row["email"])) for row in spec["accounts"]]}
 sys.modules["beat"] = types.SimpleNamespace(OPS=os.path.expanduser("~/.playground/ops"), checkout=lambda: "/checkout", setting=lambda key: values[key])
 sys.modules["subprocess"] = types.SimpleNamespace(run=lambda *a, **k: types.SimpleNamespace(returncode=1, stdout="", stderr=""))
 src = open(sys.argv[1]).read()
@@ -333,6 +338,51 @@ test("an own account takes about a fifth of an equal account's share while its r
   expect(soon.OWN / soon.PRIDE).toBeCloseTo(1, 2)
   const unmarked = split(48, ACCOUNTS)
   expect(unmarked.OWN / unmarked.PRIDE).toBeCloseTo(1, 2)
+})
+
+// Settings > Accounts' Own account switch: markOwn writes usage.accounts to a real settings folder, the flip reads the stored list back, and the row it marked takes a fifth of an equal account's share until it is switched off.
+test("a row the Settings switch marks own takes a fifth of an equal account's share, and its full share once switched off", async () => {
+  const login = process.env.PLAYGROUND_LOGIN
+  process.env.PLAYGROUND_LOGIN = "made-up-me"
+  try {
+    const data = mkdtempSync(join(scratch, "data-"))
+    const who = { actor: "test", author: "owner", inboxRef: null, reason: "a test" }
+    const stored = () =>
+      (readSetting(data, "usage.accounts")?.value ?? []) as Record<string, unknown>[]
+    const io = {
+      read: async () => readSetting(data, "usage.accounts")?.value,
+      write: async (value: Record<string, unknown>[]) => {
+        expect(
+          setSetting(data, { key: "usage.accounts", scope: "made-up-me", value }, who),
+        ).toMatchObject({ ok: true })
+      },
+    }
+    const mail = (k: string) => `${k.toLowerCase()}@example.test`
+    await io.write(ACCOUNTS.map((row) => ({ ...row, email: mail(row.email) })))
+    const ratio = () => {
+      const reading = { five: 0, week: 40, weekReset: TONIGHT + 48 * 3600 }
+      const { split } = flip(
+        "OWN",
+        { ...spentLater, OWN: reading, PRIDE: reading },
+        TONIGHT,
+        undefined,
+        undefined,
+        false,
+        false,
+        { accounts: stored() },
+      )
+      return split.OWN / split.PRIDE
+    }
+    await markOwn(mail("OWN"), true, io)
+    expect(stored()[0]).toMatchObject({ email: mail("OWN"), own: true })
+    expect(ratio()).toBeCloseTo(0.2, 2)
+    await markOwn(mail("OWN"), false, io)
+    expect(stored()[0]).not.toHaveProperty("own")
+    expect(ratio()).toBeCloseTo(1, 2)
+  } finally {
+    if (login === undefined) delete process.env.PLAYGROUND_LOGIN
+    else process.env.PLAYGROUND_LOGIN = login
+  }
 })
 
 test("spent by the split, an ending account reaches 100% before its end, and pride@ keeps a share while its week lasts", () => {

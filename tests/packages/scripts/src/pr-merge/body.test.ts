@@ -92,3 +92,67 @@ describe("bodyRefusal", () => {
     expect(bodyRefusal(SKILL_BODY.replace("The board", "Outcomes vary. The board"))).toBeNull()
   })
 })
+
+// PG-693: AGENTS.md's Shipping step 1 asks the Evidence to name each touched doc, and the gate now reads it
+describe("bodyRefusal, given the PR's changed files", () => {
+  const named = (line: string) =>
+    SKILL_BODY.replace(
+      "- **Before:** two rows. **After:** one.",
+      `- **Before:** two rows. **After:** one.\n${line}`,
+    )
+
+  test("refuses a changed doc the Evidence leaves out, naming its path", () => {
+    const why = bodyRefusal(SKILL_BODY, ["scripts/README.md", "scripts/ops/run-slot.sh"])
+    expect(why).toContain("scripts/README.md")
+    expect(why).not.toContain("run-slot.sh")
+  })
+
+  test("takes the same body once its Evidence names that path", () => {
+    expect(
+      bodyRefusal(named("- **Docs:** `scripts/README.md`, checked by doc-sync."), [
+        "scripts/README.md",
+      ]),
+    ).toBeNull()
+  })
+
+  test("takes a PR that changes no doc, as before", () => {
+    expect(bodyRefusal(SKILL_BODY, ["packages/scripts/src/x.ts"])).toBeNull()
+    expect(bodyRefusal(SKILL_BODY, [])).toBeNull()
+  })
+
+  test("reads a SKILL.md as a doc, and names each one left out", () => {
+    const why = bodyRefusal(SKILL_BODY, [
+      "extensions/core/skills/pr/SKILL.md",
+      "docs/playground/pr.md",
+    ])
+    expect(why).toContain("extensions/core/skills/pr/SKILL.md")
+    expect(why).toContain("docs/playground/pr.md")
+  })
+
+  // review round 1: the Evidence section is read as templateBody reads it, so a ## line inside a code fence is a sample, not a heading
+  test("reads past a fenced ## sample, in the Evidence or before it", () => {
+    const fence = "```"
+    const inEvidence = named(`${fence}md\n## x\n${fence}\n- \`README.md\` checked.`)
+    expect(bodyRefusal(inEvidence, ["README.md"])).toBeNull()
+    const inSummary = named("- `README.md` checked.").replace(
+      "The board reads each PR once.",
+      `The board reads each PR once.\n\n${fence}md\n## Evidence\n\nnone\n${fence}`,
+    )
+    expect(bodyRefusal(inSummary, ["README.md"])).toBeNull()
+  })
+
+  test("counts a path as named only in the Evidence, and only whole", () => {
+    const summary = SKILL_BODY.replace(
+      "The board reads each PR once.",
+      "The board reads `README.md` once.",
+    )
+    expect(bodyRefusal(summary, ["README.md"])).toContain("README.md")
+    expect(bodyRefusal(named("- `scripts/README.md` changes."), ["README.md"])).toContain(
+      "README.md",
+    )
+    expect(bodyRefusal(named("- `README.md.bak` changes."), ["README.md"])).toContain("README.md")
+    expect(
+      bodyRefusal(named("- README.md, then AGENTS.md:12."), ["README.md", "AGENTS.md"]),
+    ).toBeNull()
+  })
+})

@@ -22,8 +22,18 @@ export type Roots = { home: string; main: string; trash: string }
 // protected and tripwire refusals go to the dispatcher through the ops notify line; refused is a plain no.
 export type Refusal = { kind: "protected" | "refused" | "tripwire"; refused: string }
 
-// What tells a worktree is held: every process's working folder (null when they cannot be listed), the roster's live statuses, and the roster's path.
-export type Holders = { cwds: string[] | null; live: string[]; roster: string }
+// A process with a working folder: its command line, and the unix sockets it holds open, read for an agent-browser daemon alone.
+export type Proc = { command: string; cwd: string; pid: number; sockets: string[] }
+
+// A running node_modules clone, from run-slot's clone holder record: the session that runs it, its pid, the checkout it copies from and the one it copies into.
+export type Clone = { destination: string; pid: number; source: string; who: string }
+
+// What tells a worktree is held: each running clone, the roster's live statuses, every process with a working folder (null when they cannot be listed), and the roster's path.
+export type Holders = { clones: Clone[]; live: string[]; procs: Proc[] | null; roster: string }
+
+// An agent-browser process, its daemon or a client, by its command's first word.
+export const isAgentBrowser = (command: string): boolean =>
+  /^agent-browser(?:-[\w-]+)?$/.test(basename(command.split(" ")[0]!))
 
 export type Quarantined = { files: number; id: string; size: number; to: string }
 
@@ -322,7 +332,7 @@ export function restore(
   return { path: entry.path }
 }
 
-// Why a worktree may not be removed, or null: it sits in <main>/.claude/worktrees, the roster reads, no live session or process holds it, and its HEAD is on a remote branch.
+// Why a worktree may not be removed, or null: it sits in <main>/.claude/worktrees, the roster reads, no live session, running clone or process holds it, and its HEAD is on a remote branch.
 export function worktreeRefusal(path: string, roots: Roots, holders: Holders): string | null {
   const at = real(path)
   if (dirname(at) !== worktreesOf(roots)) return `${at} is not a worktree in ${worktreesOf(roots)}`
@@ -354,9 +364,26 @@ export function worktreeRefusal(path: string, roots: Roots, holders: Holders): s
     if (byBranch || byPr || tokens.some((t) => where.includes(t)))
       return `${at} is held by ${agent.name}, which the roster lists as ${agent.status}`
   }
-  if (holders.cwds === null) return `the processes' folders cannot be listed, so ${at} stays`
-  const cwd = holders.cwds.find((dir) => inside(real(dir), at))
-  if (cwd) return `${at} is held by a process working in ${cwd}`
+  // a clone's cp only reads its source and works in whatever folder run-slot was called from, so no working folder need name either end (PG-699)
+  const clone = holders.clones.find(
+    (c) => inside(real(c.source), at) || inside(real(c.destination), at),
+  )
+  if (clone)
+    return `${at} is held by ${clone.who}'s node_modules clone (pid ${clone.pid}) from ${clone.source} into ${clone.destination}`
+  if (holders.procs === null) return `the processes' folders cannot be listed, so ${at} stays`
+  const held = holders.procs.filter((p) => inside(real(p.cwd), at))
+  const holder = held.find((p) => isAgentBrowser(p.command)) ?? held[0]
+  if (holder) {
+    const command =
+      holder.command.length > 120 ? `${holder.command.slice(0, 117)}...` : holder.command
+    const by = `${at} is held by pid ${holder.pid} (${command}) working in ${holder.cwd}`
+    if (!isAgentBrowser(holder.command)) return by
+    const session =
+      /(?:^| )--session[= ](\S+)/.exec(holder.command)?.[1] ??
+      holder.sockets.map((s) => /([^/]+)\.sock$/.exec(s)?.[1]).find(Boolean) ??
+      "default"
+    return `${by}: agent-browser session ${session}, which agent-browser --session ${session} close frees`
+  }
   if (!git("branch", "-r", "--contains", "HEAD").out)
     return `${at}'s HEAD is on no remote branch: push it first`
   return null

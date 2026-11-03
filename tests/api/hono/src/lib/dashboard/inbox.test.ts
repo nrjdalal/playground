@@ -5,6 +5,7 @@ import { join } from "node:path"
 
 import { SQL } from "bun"
 
+import { QUEUED_MS } from "../../../../../../api/hono/src/lib/dashboard/deliver"
 import {
   ACTIONS,
   answerInputSchema,
@@ -105,6 +106,18 @@ describe("what bun run ask takes", () => {
       })
       expect(parsed.success, outcome).toBe(true)
     }
+  })
+
+  test("an update may carry an approve page the owner opens in the browser, a web link alone", () => {
+    const update = (approve: string) =>
+      inboxInputSchema.safeParse({
+        from: "Yard",
+        kind: "update",
+        preview: { approve, outcome: "decision", text: "a held post" },
+        title: "Your steps post in #ops waits for your approval on Yard",
+      }).success
+    expect(update("https://yard.example/yard/approve/m1")).toBe(true)
+    expect(update("javascript:alert(1)")).toBe(false)
   })
 
   test("a draft may link the thread it replies in, https alone", () => {
@@ -592,8 +605,11 @@ describe("an answer", () => {
       status: "cleared",
     })
     expect(isGo("clear")).toBe(false)
-    // a draft's own Discard already says no, so a draft is never cleared
-    expect(checkAnswer(item({ kind: "draft" }), { action: "clear" })).toHaveProperty("message")
+    // a draft is archived as a decision is, its own Discard still saying no (PG-654)
+    expect(checkAnswer(item({ kind: "draft" }), { action: "clear" })).toEqual({
+      answer: { choice: "clear" },
+      status: "cleared",
+    })
     expect(checkAnswer(item({ kind: "update" }), { action: "clear" })).toHaveProperty("message")
   })
 
@@ -1369,6 +1385,65 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
     expect(dismissed(await store.getItem(db, early.id))).toBe(before.toISOString())
   })
 
+  test("Move to Inbox takes an archived item back to open with no answer, and nothing else (PG-654)", async () => {
+    const sent: Delivery[] = []
+    const deliver = async (delivery: Delivery) => {
+      sent.push(delivery)
+      return { at: "2026-10-07T12:00:00.000Z", ok: true as const, sessionId: "s1" }
+    }
+    const aside = await post(decision(PREVIEWS.ship))
+    const cleared = await store.answerItem(db, aside.id, { action: "clear" }, { actor, deliver })
+    if (!cleared.ok) throw new Error(cleared.message)
+    expect(cleared.item.status).toBe("cleared")
+    const before = sent.length
+    const back = await store.answerItem(
+      db,
+      aside.id,
+      { action: "unarchive", seen: cleared.item.updatedAt },
+      { actor, deliver },
+    )
+    if (!back.ok) throw new Error(back.message)
+    expect(back.item).toMatchObject({ answer: null, delivery: null, status: "open" })
+    expect(back.item.version).toBe(cleared.item.version + 1)
+    // nothing was decided, so nothing is typed into its poster
+    expect(sent).toHaveLength(before)
+    // answered again, as any open item is
+    const approved = await store.answerItem(db, aside.id, { action: "approve" }, { actor })
+    expect(approved.ok && approved.item.status).toBe("approved")
+    // an item that is not archived is refused: open, answered, or an update
+    const update = await post({
+      from: "ops",
+      kind: "update",
+      preview: { outcome: "merged" },
+      title: "Merged: the export fix",
+    })
+    for (const id of [(await post(decision(PREVIEWS.schema))).id, aside.id, update.id]) {
+      expect(await store.answerItem(db, id, { action: "unarchive" }, { actor })).toMatchObject({
+        code: "CONFLICT",
+        ok: false,
+      })
+    }
+    // a draft archives and comes back the same way
+    const draft = await post({
+      from: "dispatcher",
+      kind: "draft",
+      preview: { link: CHANNEL, text: "hi Merritt", to: "@Merritt" },
+      title: "Ask Merritt",
+    })
+    const archived = await store.answerItem(db, draft.id, { action: "clear" }, { actor })
+    expect(archived.ok && archived.item.status).toBe("cleared")
+    const reopened = await store.answerItem(db, draft.id, { action: "unarchive" }, { actor })
+    expect(reopened.ok && reopened.item.status).toBe("open")
+    // an archived item already sent to Done stays there, as the Archived shelf leaves it out
+    const done = await post(decision(PREVIEWS.ship))
+    await store.answerItem(db, done.id, { action: "clear" }, { actor })
+    await store.dismissItems(db, [done.id])
+    expect(await store.answerItem(db, done.id, { action: "unarchive" }, { actor })).toMatchObject({
+      code: "CONFLICT",
+      ok: false,
+    })
+  })
+
   test("a settle takes no reply its poster closed, and keeps its link (PG-2444)", async () => {
     const posted = await post(decision(PREVIEWS.budget))
     const at = new Date("2026-10-28T03:00:00.000Z")
@@ -2007,6 +2082,105 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       code: "CONFLICT",
       ok: false,
     })
+  })
+
+  // An answer Claude Code holds (typed while its poster compacts) reads queued, and is read again under the same id until it reads delivered, or lost, which offers Retry
+  test("an answer Claude Code holds reads queued, then delivered once a later read finds it arrived", async () => {
+    const posted = await post(decision(SLACK))
+    const sent: Delivery[] = []
+    const answers = [
+      { code: "QUEUED", ok: false as const, reason: "ops holds the message" },
+      { code: "QUEUED", ok: false as const, reason: "ops holds the message" },
+      { at: "2026-10-12T07:00:00.000Z", ok: true as const, sessionId: "s1" },
+    ]
+    const deliver = async (delivery: Delivery) => {
+      sent.push(delivery)
+      return answers.shift() ?? answers.at(-1)!
+    }
+    const answered = await store.answerItem(
+      db,
+      posted.id,
+      { action: "approve" },
+      { actor, deliver, wait: async () => {} },
+    )
+    expect(answered.ok && answered.item.delivery).toMatchObject({ status: "queued", to: "ops" })
+    for (
+      let i = 0;
+      i < 50 && (await store.getItem(db, posted.id))?.delivery?.status === "queued";
+      i++
+    )
+      await Bun.sleep(20)
+    expect((await store.getItem(db, posted.id))?.delivery).toMatchObject({
+      status: "delivered",
+      via: "session",
+    })
+    expect(new Set(sent.map((d) => d.id)).size).toBe(1)
+    expect(sent[0]?.id).toBeString()
+    // each later read carries when it was first held, so it holds across an API restart too
+    const held = answered.ok ? answered.item.delivery : null
+    const at = held?.status === "queued" ? held.at : "not queued"
+    expect(sent.slice(1).map((d) => d.queuedAt ?? "none")).toEqual([at, at])
+  })
+
+  // An API restart ends the follow-up, so a card still queued past STUCK_QUEUED_MS offers Retry, which reads it again under its own id and types nothing while it is held
+  test("an answer stuck queued offers Retry past the bound, which reads it again under its own id", async () => {
+    expect(store.STUCK_QUEUED_MS).toBe(QUEUED_MS + 60_000)
+    const posted = await post(decision(SLACK))
+    const sent: Delivery[] = []
+    const answers = [
+      { code: "QUEUED", ok: false as const, reason: "ops holds the message" },
+      { at: "2026-10-12T07:00:00.000Z", ok: true as const, sessionId: "s1" },
+    ]
+    const deliver = async (delivery: Delivery) => {
+      sent.push(delivery)
+      return answers.shift()!
+    }
+    const at = new Date("2026-10-12T06:00:00.000Z")
+    const restarted = () => new Promise<void>(() => {})
+    await store.answerItem(
+      db,
+      posted.id,
+      { action: "approve" },
+      { actor, deliver, now: at, wait: restarted },
+    )
+    const queued = await store.getItem(db, posted.id)
+    expect(queued?.delivery).toMatchObject({ status: "queued" })
+    const early = new Date(at.getTime() + store.STUCK_QUEUED_MS - 1)
+    expect(queued && store.retryable(queued, early)).toBe(false)
+    expect(await store.retryDelivery(db, posted.id, { actor, deliver, now: early })).toMatchObject({
+      code: "CONFLICT",
+      ok: false,
+    })
+    const stuck = new Date(at.getTime() + store.STUCK_QUEUED_MS)
+    expect(queued && store.retryable(queued, stuck)).toBe(true)
+    const retried = await store.retryDelivery(db, posted.id, { actor, deliver, now: stuck })
+    expect(retried.ok && retried.item.delivery).toMatchObject({ status: "delivered" })
+    expect(sent[1]).toMatchObject({ id: sent[0]?.id, queuedAt: at.toISOString(), to: "ops" })
+  })
+
+  test("an answer lost from the screen and the transcript fails as LOST, which Retry follows", async () => {
+    const posted = await post(decision(SLACK))
+    const answers = [
+      { code: "QUEUED", ok: false as const, reason: "ops holds the message" },
+      { code: "LOST", ok: false as const, reason: "Retry sends it again." },
+    ]
+    let settle = () => {}
+    const settled = new Promise<void>((resolve) => (settle = resolve))
+    const deliver = async () => {
+      const answer = answers.shift()!
+      if (!answers.length) setTimeout(settle, 50)
+      return answer
+    }
+    await store.answerItem(
+      db,
+      posted.id,
+      { action: "approve" },
+      { actor, deliver, wait: async () => {} },
+    )
+    await settled
+    const item = await store.getItem(db, posted.id)
+    expect(item?.delivery).toMatchObject({ code: "LOST", status: "failed" })
+    expect(item && store.retryable(item)).toBe(true)
   })
 
   test("the stale read lists an answer its poster has not acked after the minutes given, not before, and not once acked", async () => {
