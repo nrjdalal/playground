@@ -12,7 +12,9 @@ import {
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
+import { CARVE_OUTS } from "../../../../../packages/safe-delete/src"
 import {
+  processesOf,
   RM_USAGE,
   type RmDeps,
   rmArgs,
@@ -68,7 +70,7 @@ const machine = () => {
   writeFileSync(join(data, "roster.json"), JSON.stringify({ agents: [] }))
   const told: string[] = []
   const deps: RmDeps = {
-    cwds: () => [],
+    procs: () => [],
     data,
     home,
     main,
@@ -100,6 +102,19 @@ test("runRm tells the dispatcher of a protected path, and not of a missing one",
   expect(await runRm(["a", "b"], deps)).toBe(2)
 })
 
+// A carve-out is its own script's alone: playground rm names none, so an entry in each carve-out's folder stays protected and nothing moves.
+test.each(Object.entries(CARVE_OUTS))(
+  "runRm takes no carve-out: an entry in %s's folder stays protected",
+  async (_, carve) => {
+    const { deps, told } = machine()
+    const entry = join(deps.data, carve.folder, "entry")
+    mkdirSync(entry, { recursive: true })
+    expect(await runRm([entry], deps)).toBe(1)
+    expect(existsSync(entry)).toBe(true)
+    expect(told).toEqual([`j6rjgy-worker: ${entry} is inside the protected ${deps.data}`])
+  },
+)
+
 test("runRm --worktree checks the holders, moves the worktree and prunes it from git", async () => {
   const { deps, main, root } = machine()
   git(root, "init", "--bare", "-q", join(root, "remote.git"))
@@ -112,7 +127,8 @@ test("runRm --worktree checks the holders, moves the worktree and prunes it from
   const wt = join(main, ".claude", "worktrees", "pg-1")
   git(main, "worktree", "add", "-q", "-b", "PG-1-thing", wt)
   git(wt, "push", "-q", "origin", "PG-1-thing")
-  expect(await runRm(["--worktree", wt], { ...deps, cwds: () => [wt] })).toBe(1)
+  const held = { command: "zsh", cwd: wt, pid: 7, sockets: [] }
+  expect(await runRm(["--worktree", wt], { ...deps, procs: () => [held] })).toBe(1)
   expect(existsSync(wt)).toBe(true)
   expect(await runRm(["--worktree", wt], deps)).toBe(0)
   expect(existsSync(wt)).toBe(false)
@@ -134,4 +150,19 @@ test("rmDeps' notify queues a safe-delete line for the dispatcher through notify
     readFileSync(join(data, "ops", "outbox", "ops-safe-delete.jsonl"), "utf8"),
   )
   expect(line).toMatchObject({ job: "safe-delete", text: "s: /x is protected" })
+})
+
+test("processesOf joins lsof's working folders with ps's command lines and each process's sockets", () => {
+  const cwds = "p41\nfcwd\nn/wt/api\np43\nfcwd\nn/wt\np50\nfcwd\n"
+  const ps = "   41 bun run dev\n   43 /x/agent-browser-darwin-arm64\n   50 launchd\n"
+  const sockets = "p43\nf6\nn->0xe55b\nf10\nn/h/.agent-browser/s1.sock\n"
+  expect(processesOf(cwds, ps, sockets)).toEqual([
+    { command: "bun run dev", cwd: "/wt/api", pid: 41, sockets: [] },
+    {
+      command: "/x/agent-browser-darwin-arm64",
+      cwd: "/wt",
+      pid: 43,
+      sockets: ["/h/.agent-browser/s1.sock"],
+    },
+  ])
 })

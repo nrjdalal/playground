@@ -8,6 +8,7 @@ import { guardedOrgs } from "../../packages/settings/src/ext"
 import { coreDir, readPolicy } from "../../packages/settings/src/rendered"
 import { implicitRepos, type Repo, remoteRepo, remotes, repoOf } from "./github"
 import { guardList, isRecord, isStrings } from "./lists"
+import { readOnly } from "./read-only"
 import { fromFactory } from "./role"
 import {
   type ApiRequest,
@@ -1428,9 +1429,9 @@ export async function check(
   return inspectAs(leakPolicy(new Set(guardedOrgs(read.settings.values))), raw, environment)
 }
 
-// A list's refusal, given only to a call that may write somewhere.
+// A list's refusal, given only to a call that may write somewhere: one that names a writing command or tool and does more than read (read-only.ts).
 export const refusedList = (raw: string, refusal: string): string | undefined =>
-  WRITE_CALL.test(subjectOf(raw)) ? refusal : undefined
+  WRITE_CALL.test(subjectOf(raw)) && !readOnly(raw) ? refusal : undefined
 
 // Reads the call as a write under the policy given: an error refuses only a writing call whose text holds a hit.
 export async function inspectAs(
