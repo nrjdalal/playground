@@ -97,26 +97,34 @@ export const runUpdate = async (
     repo,
   ]
   const target = to ? `refs/tags/${to}` : "origin/main"
-  // every hook that runs its source (all but the bundled PreToolUse guards) and every ops job run this checkout's code the moment it moves, so a target that declares a dependency the checkout has not linked gets its changed manifests and that install first, while the code is still the old commit's (the install step after the move then finds it linked); a target that deletes a manifest, which the old code may still read, or a tree with edits of its own moves first as before
+  // every hook that runs its source (all but the bundled PreToolUse guards) and every ops job run this checkout's code the moment it moves, so a target that declares a dependency the checkout has not linked gets its changed manifests and that install first, while the code is still the old commit's (the install step after the move then finds it linked); a target that deletes a manifest, which the old code may still read, or a tree with edits or untracked files of its own moves first as before
   const prelink = async (): ReturnType<Run> => {
     // a fast-forward stops on a checkout with commits of its own, so its manifests are staged only where it will move; a checkout -B moves over them either way
     const merges = !to && branch === "main"
     if (merges && (await git("merge-base", "--is-ancestor", "HEAD", target)).code !== 0) return ok
-    if ((await git("diff", "--quiet", "HEAD")).code !== 0) return ok
+    if ((await git("status", "--porcelain", "--untracked-files=all")).out.trim()) return ok
     const lines = async (...args: string[]) => (await git(...args)).out.split("\n").filter(Boolean)
     const manifests: Record<string, string> = {}
     for (const path of await lines("ls-tree", "-r", "--name-only", target)) {
       if (!PACKAGE.test(path)) continue
-      const shown = await git("show", `${target}:${path}`)
-      if (shown.code !== 0) return shown
-      manifests[path] = shown.out
+      const manifest = await git("show", `${target}:${path}`)
+      if (manifest.code !== 0) return manifest
+      manifests[path] = manifest.out
     }
     const missing = await unlinked(repo, manifests)
     if (!missing.length) return ok
-    const manifestsChanged = (await lines("diff", "--name-only", "HEAD", target)).filter((path) =>
-      MANIFEST.test(path),
+    // --no-renames, so a package the target moves reads as a deleted manifest and a new one, never as one new path staged beside the old
+    const manifestsChanged = (
+      await lines("diff", "--name-only", "--no-renames", "HEAD", target)
+    ).filter((path) => MANIFEST.test(path))
+    const deleted = await lines(
+      "diff",
+      "--name-only",
+      "--no-renames",
+      "--diff-filter=D",
+      "HEAD",
+      target,
     )
-    const deleted = await lines("diff", "--name-only", "--diff-filter=D", "HEAD", target)
     if (deleted.some((path) => MANIFEST.test(path))) return ok
     log(
       `playground update: install the new commit's dependencies before its code, since it declares ${missing.join(", ")}, which this checkout has not linked`,
@@ -140,7 +148,7 @@ export const runUpdate = async (
     return installed
   }
   const prelinked =
-    "the checkout's files are as they were; fix the install and run playground update again"
+    "the checkout's files are as they were; fix the failure above and run playground update again"
   const steps: [string, () => ReturnType<Run>, string?][] = to
     ? [
         ["fetch origin main and its tags", () => git("fetch", "-q", "--tags", "origin", "main")],

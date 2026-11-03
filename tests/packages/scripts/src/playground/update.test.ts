@@ -1,5 +1,13 @@
 import { afterAll, describe, expect, test } from "bun:test"
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs"
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 
@@ -75,7 +83,7 @@ describe("runUpdate", () => {
       ["git", "-C", repo, "fetch", "-q", "origin", "main"],
       ["git", "-C", repo, "branch", "--show-current"],
       ["git", "-C", repo, "merge-base", "--is-ancestor", "HEAD", "origin/main"],
-      ["git", "-C", repo, "diff", "--quiet", "HEAD"],
+      ["git", "-C", repo, "status", "--porcelain", "--untracked-files=all"],
       ["git", "-C", repo, "ls-tree", "-r", "--name-only", "origin/main"],
       ["git", "-C", repo, "merge", "--ff-only", "-q", "origin/main"],
       ["bash", `${repo}/scripts/link-skills.sh`],
@@ -202,7 +210,7 @@ describe("runUpdate", () => {
     expect(calls.slice(1, 6)).toEqual([
       ["git", "-C", repo, "fetch", "-q", "--tags", "origin", "main"],
       ["git", "-C", repo, "merge-base", "--is-ancestor", "HEAD", "origin/main"],
-      ["git", "-C", repo, "diff", "--quiet", "HEAD"],
+      ["git", "-C", repo, "status", "--porcelain", "--untracked-files=all"],
       ["git", "-C", repo, "ls-tree", "-r", "--name-only", "refs/tags/v0.0.20"],
       ["git", "-C", repo, "checkout", "-q", "-B", "main", "refs/tags/v0.0.20"],
     ])
@@ -273,8 +281,8 @@ describe("runUpdate", () => {
     expect(install).toBeLessThan(calls.findIndex((argv) => argv.includes("merge")))
   })
 
-  test("a tree with edits of its own merges first as before, leaving them to the fast-forward", async () => {
-    const { calls, run } = fakeRun({ "--quiet": { code: 1 }, ...declares })
+  test("a tree with edits or untracked files of its own merges first as before, leaving them to the fast-forward", async () => {
+    const { calls, run } = fakeRun({ "--porcelain": { out: "?? notes.md\n" }, ...declares })
     expect(await runUpdate(repo, run, async () => 0, quiet)).toBe(0)
     expect(calls.some((argv) => argv.includes("ls-tree") || argv[1] === "install")).toBe(false)
   })
@@ -318,7 +326,7 @@ describe("runUpdate", () => {
       "packages/settings/package.json",
     ])
     expect(said.at(-1)).toBe(
-      "playground update: link the new commit's dependencies failed; the checkout's files are as they were; fix the install and run playground update again",
+      "playground update: link the new commit's dependencies failed; the checkout's files are as they were; fix the failure above and run playground update again",
     )
   })
 
@@ -718,4 +726,34 @@ describe("runUpdate onto a commit that declares a dependency the checkout has no
       expect(git(checkout, "status", "--short")).toBe("")
     },
   )
+
+  test("a target that moves a package moves first as before, never staging its new manifest beside the old", async () => {
+    const { checkout } = setup("prelink-mv")
+    const origin = join(scratch, "prelink-mv-origin")
+    // the checkout at the second commit, its link still missing, so the move below is a rename git pairs whole
+    git(checkout, "fetch", "-q", "origin", "main")
+    git(checkout, "merge", "--ff-only", "-q", "origin/main")
+    git(origin, "mv", join("packages", "settings"), join("packages", "prefs"))
+    git(origin, "commit", "-q", "-m", "three")
+    const three = git(origin, "rev-parse", "HEAD")
+    // bun refuses a workspace whose name two package.json files claim, as the old and the moved one would
+    const run: Run = async (argv, show) => {
+      if (argv.includes("build")) return { code: 0, out: "" }
+      if (argv[1] !== "install") return spawnRun(argv, show)
+      const both = ["settings", "prefs"].every((name) =>
+        existsSync(join(checkout, "packages", name, "package.json")),
+      )
+      return { code: both ? 1 : 0, out: "" }
+    }
+    expect(
+      await runUpdate(
+        checkout,
+        run,
+        async () => 0,
+        () => {},
+      ),
+    ).toBe(0)
+    expect(git(checkout, "rev-parse", "HEAD")).toBe(three)
+    expect(git(checkout, "status", "--short")).toBe("")
+  })
 })
