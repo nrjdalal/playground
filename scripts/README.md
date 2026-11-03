@@ -1,6 +1,6 @@
 # scripts
 
-The factory's own scripts: `spawn.sh`, which starts and resumes every factory session, `link-skills.sh`, which installs the skills, the herdr servers' ops job, a worktree's `node_modules` clone and `bun run test:skills`.
+The factory's own scripts: `spawn.sh`, which starts and resumes every factory session, `link-skills.sh`, which installs the skills, the herdr servers' ops job, a worktree's `node_modules` clone, `bun run test:skills` and a hook PR's sweep and replay.
 AGENTS.md keeps one line for each, and this file holds the text that line stands for.
 Read a section before you change its script or its tests, or when it refuses a start you did not expect.
 The factory's hooks are in [hooks/README.md](./hooks/README.md).
@@ -161,3 +161,15 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
 - `bun run test:skills` runs Playground's checks, as CI's `auto-test.yml` does, through `packages/scripts/src/test-skills.ts`: every Python step runs under `uv run --python 3.13` (the system `python3` is 3.9 on a Mac, too old for the skills' Python), every step runs even after one fails, and a red run ends naming each failed step and its first `FAIL` line.
   Each step runs in the suite's sandbox (`packages/scripts/src/sandbox.ts`, shared with `test-sandbox.ts`), with uv's Pythons and cache and Docker's config kept in the real home, so a step never writes the real `~/.claude` and a second run downloads nothing.
   Its `steps` list in [packages/scripts/src/test-skills.ts](../packages/scripts/src/test-skills.ts) names every step.
+
+## bun run hooks:differential
+
+- A hook PR measures its hooks against `canary` with `bun run hooks:differential` ([packages/scripts/src/hook-differential.ts](../packages/scripts/src/hook-differential.ts)), naming each hook with `--hook <name>` and the base with `--canary <sha>`:
+  - `sweep --forms <module>` passes the forms the module exports (`forms: { command, inClass }[]`) from the home, the data folder and a worktree;
+  - `replay` passes every Bash call of this machine's transcripts from the last 24 hours (`--hours <n>`), each from its own folder.
+- Each form and call reaches the hook only as data, through its `check()` with `HOME` alone in its environment, and none is run.
+  Canary's hooks load from a `git archive` of its `scripts` and `packages`, unpacked once per sha in the temp folder.
+- It prints one line of counts per hook, the figures a hook PR's Evidence quotes: forms, cases, the same, newly allowed and newly refused, split by the form's class; calls, the same, newly allowed and newly refused.
+  The first 20 changed cases go to stderr, so read them there; transcript text stays out of the repo and the PR.
+- Started bare, it queues itself through `run-slot.sh`, as `commit-slot.ts` queues a commit's build, and says so on stderr with the queue's depth; inside a ticket it runs as it is.
+  Tests: `bun run test:file tests/packages/scripts/src/hook-differential.test.ts`.

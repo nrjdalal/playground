@@ -11,6 +11,14 @@ import {
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
+import {
+  calls,
+  replay,
+  routed,
+  sweep,
+  type Check,
+} from "../../../../packages/scripts/src/hook-differential"
+
 const SCRIPT = join(import.meta.dir, "../../../../packages/scripts/src/hook-differential.ts")
 const DIR = mkdtempSync(join(tmpdir(), "hook-differential-"))
 
@@ -53,5 +61,96 @@ describe("a start of hook-differential", () => {
     const at = home("inside")
     start(at, { RUN_SLOT_NICE: "10" })
     expect(existsSync(join(at, "tickets"))).toBe(false)
+  })
+})
+
+describe("routed", () => {
+  const at = (env: Record<string, string | undefined>, runnable = true) =>
+    routed({
+      argv: ["bun", "x.ts"],
+      cwd: "/r/.claude/worktrees/pg 1",
+      env,
+      executable: () => runnable,
+      home: "/h",
+    })
+
+  test("a bare start takes a ticket named for its worktree", () => {
+    expect(at({})).toEqual(["/h/.playground/ops/run-slot.sh", "hooks-pg-1", "--", "bun", "x.ts"])
+  })
+
+  test("a start inside a ticket, or with no executable run-slot.sh, runs as it is", () => {
+    expect(at({ RUN_SLOT_NICE: "10" })).toEqual(["bun", "x.ts"])
+    expect(at({}, false)).toEqual(["bun", "x.ts"])
+  })
+})
+
+describe("sweep and replay", () => {
+  // a hook that records every input it is given and allows a command only when it holds ALLOW
+  const recorder =
+    (seen: string[]): Check =>
+    (raw) => {
+      seen.push(raw)
+      return JSON.parse(raw).tool_input.command.includes(" ALLOW") ? undefined : "refused"
+    }
+  const ran = join(DIR, "ran")
+  const forms = [
+    { command: `touch ${ran} ALLOW`, inClass: true },
+    { command: `touch ${ran}`, inClass: false },
+  ]
+
+  test("each form reaches each hook only as data through check(), from the home, the data folder and a worktree, and none runs", async () => {
+    const before: string[] = []
+    const after: string[] = []
+    const { counts } = await sweep(recorder(before), recorder(after), forms, "/h")
+    expect(after.map((raw) => JSON.parse(raw))).toEqual(
+      forms.flatMap(({ command }) =>
+        ["/h", "/h/.playground", "/h/x/.claude/worktrees/y"].map((cwd) => ({
+          cwd,
+          tool_input: { command },
+          tool_name: "Bash",
+        })),
+      ),
+    )
+    expect(counts).toEqual({
+      cases: 6,
+      forms: 2,
+      "newly allowed": { inClass: 0, outClass: 0 },
+      "newly refused": { inClass: 0, outClass: 0 },
+      same: 6,
+    })
+    expect(existsSync(ran)).toBe(false)
+  })
+
+  test("a form the head allows and canary refuses counts by its class", async () => {
+    const refuseAll: Check = () => "refused"
+    const { changed, counts } = await sweep(refuseAll, recorder([]), forms, "/h")
+    expect(counts["newly allowed"]).toEqual({ inClass: 3, outClass: 0 })
+    expect(changed).toEqual([])
+  })
+
+  test("the replay reads each made-up Bash call of the day's transcripts once, and only as data", async () => {
+    const projects = join(DIR, "projects")
+    mkdirSync(join(projects, "p"), { recursive: true })
+    const line = (command: string, timestamp: string) =>
+      JSON.stringify({
+        cwd: "/h/w",
+        message: { content: [{ input: { command }, name: "Bash", type: "tool_use" }] },
+        timestamp,
+      })
+    const now = new Date().toISOString()
+    writeFileSync(
+      join(projects, "p", "s.jsonl"),
+      [
+        line(`touch ${ran} ALLOW`, now),
+        line(`touch ${ran} ALLOW`, now),
+        line(`touch ${ran}`, "2000-01-01T00:00:00Z"),
+        "not json",
+      ].join("\n"),
+    )
+    const list = await calls(projects, Date.now() - 3600_000)
+    expect(list).toEqual([{ command: `touch ${ran} ALLOW`, cwd: "/h/w" }])
+    const { counts } = await replay(() => "refused", recorder([]), list, "/h")
+    expect(counts).toEqual({ calls: 1, "newly allowed": 1, "newly refused": 0, same: 0 })
+    expect(existsSync(ran)).toBe(false)
   })
 })
