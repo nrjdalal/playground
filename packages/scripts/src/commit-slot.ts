@@ -10,7 +10,7 @@ const WORKTREE = /\/\.claude\/worktrees\/([^/]+)/
 const DRY_RUN = ["bun", "run", "turbo", "run", "build", "--dry=json"]
 
 // The one step whose cost turbo's cache speaks for.
-export const BUILD = ["bun", "run", "build"]
+const BUILD = ["bun", "run", "build"]
 export const isBuild = (step: string[]): boolean => step.join(" ") === BUILD.join(" ")
 
 export const replays = (dry: string): boolean => {

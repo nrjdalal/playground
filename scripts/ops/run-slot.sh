@@ -66,7 +66,7 @@ setting() {
   "$(command -v bun || echo "$HOME/.bun/bin/bun")" "$root/packages/scripts/src/playground/setting.ts" "$1" </dev/null
 }
 # The item size a session's runs and starts count, and its load units (load is split by item so a big plan never
-# blocks small ones; small:medium:big weigh 1:2:3): RUN_SLOT_SIZE, else small for commit-<worktree>, a pre-commit build that runs in
+# blocks small ones; small:medium:big weigh 1:2:3): RUN_SLOT_SIZE, else small for commit-<worktree>, a pre-commit step that runs in
 # seconds and as its branch's big item waited 815s behind smaller runs, else the roster entry's size (a checker falls back to its worker's, and
 # ops-checks-<n> reads the worker on factory.repo's PR n), else the plan.json item for issue <n> (its id PG-<n>, or its spec that issue's URL) that its
 # branch PG-<n>-..., in either case (the roster's, else the checkout's) names, else medium
