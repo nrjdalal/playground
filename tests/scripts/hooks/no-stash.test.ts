@@ -102,7 +102,7 @@ describe("a stash found by name or SHA, and every other call, runs", () => {
     ["store, which restores an entry", `git stash store -m restored ${SHA}`],
     ["create", "git stash create"],
     ["help", "git stash --help"],
-    ["a plain commit, whose lint-staged backup is no tool call", 'git commit -m "feat: x"'],
+    ["a plain commit, whose lint-staged writes no stash", 'git commit -m "feat: x"'],
     ["a commit that mentions stash in its message", 'git commit -m "fix: the stash hook"'],
     ["another git command", "git status --short"],
     ["a word that is not stash", "git stashed"],
