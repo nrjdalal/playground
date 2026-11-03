@@ -3006,6 +3006,54 @@ gh api graphql -f query="$QUERY"`,
     ],
     source: "#573",
   },
+  // a body's cd runs at once, so a relative cd after it starts from the folder the body reached
+  {
+    folders: ["checkout"],
+    guards: ["no-main-checkout"],
+    rows: () => [
+      ["a build after two relative cds in a brace group", "{ cd ..; cd ..; bun run build; }"],
+      [
+        "a build after two relative cds in a function body",
+        "f() { cd ..; cd ..; bun run build; }; f",
+      ],
+      [
+        "a build after a relative cd that follows a brace group's",
+        "{ cd ..; }; cd ..; bun run build",
+      ],
+      [
+        "a build after a relative pushd that follows a brace group's cd",
+        "{ cd ..; }; pushd .. >/dev/null; bun run build",
+      ],
+      [
+        "a build in a subshell whose relative cd follows a brace group's",
+        "{ cd ..; }; (cd ..; bun run build)",
+      ],
+      [
+        "a build after a relative cd that follows a coprocess's",
+        "coproc cd ..; cd ..; bun run build",
+      ],
+      [
+        "a commit after a relative cd that follows a brace group's",
+        "{ cd ..; }; cd ..; git commit -m x",
+      ],
+      [
+        "a write after a relative cd that follows a brace group's",
+        "{ cd ..; }; cd ..; touch made-up-file",
+      ],
+    ],
+    source: "#573",
+  },
+  {
+    folders: ["main checkout"],
+    guards: ["no-main-checkout"],
+    rows: ({ MAIN }) => [
+      [
+        "a build after a relative cd back from the worktree a brace group's cd reached",
+        `{ cd ${MAIN}/.claude/worktrees/a; }; cd ../.. && bun run build`,
+      ],
+    ],
+    source: "#573",
+  },
   {
     folders: ["main checkout"],
     guards: ["no-unslotted-run"],
@@ -3014,7 +3062,58 @@ gh api graphql -f query="$QUERY"`,
         "a type check after a cd behind || into a worktree",
         `true || cd ${MAIN}/.claude/worktrees/a; bun run check-types`,
       ],
+      [
+        "a build after a relative cd into a worktree that follows a brace group's cd",
+        `{ cd ${MAIN}/.claude; }; cd worktrees/a && bun run build`,
+      ],
+      [
+        "a build after a brace group's relative cd into a worktree",
+        `{ cd ${MAIN}/.claude; cd worktrees/a; bun run build; }`,
+      ],
     ],
+    source: "#573",
+  },
+  {
+    folders: ["checkout"],
+    guards: ["no-extensions-write"],
+    rows: ({ ROOT }) => [
+      [
+        "a write after a relative cd into the root that follows a brace group's cd",
+        `{ cd ${ROOT}/..; }; cd extensions; touch x`,
+      ],
+      [
+        "a write after a function body's relative cd into the root",
+        `f() { cd ${ROOT}/..; cd extensions; touch x; }; f`,
+      ],
+      [
+        "a redirect after a relative cd into the root that follows a brace group's cd",
+        `{ cd ${ROOT}/..; }; cd extensions; echo x > policy.json`,
+      ],
+    ],
+    source: "#573",
+  },
+  // past the cap of 32 the extensions root may be the folder the reader dropped, so a writing redirect by a relative path is refused before a reader or an echo lets it through
+  {
+    folders: ["home"],
+    guards: ["no-extensions-write"],
+    rows: ({ ROOT }) => {
+      const many = (joiner: string) =>
+        Array.from({ length: 33 }, (_, k) => `cd /tmp/cap-${k}`).join(` ${joiner} `)
+      return [
+        [
+          "an echo redirect after more cd steps than the reader carries, one into the root",
+          `${many("||")} || cd ${ROOT}; echo x > policy.json`,
+        ],
+        [
+          "a reader's redirect after more cd steps than the reader carries, one into the root",
+          `${many("&&")} || cd ${ROOT}; cat f > policy.json`,
+        ],
+        [
+          "a bare redirect after more cd steps than the reader carries, one into the root",
+          `${many(";")} || cd ${ROOT}; > policy.json`,
+        ],
+      ]
+    },
     source: "#573",
   },
   {

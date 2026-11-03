@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, readdirSync, readFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { type Env, GIT_TAKES, lex, run } from "../../../scripts/hooks/shell"
+import { type Env, GIT_TAKES, lex, places, run } from "../../../scripts/hooks/shell"
 import { type Paths, REFUSED_FORMS } from "./fixtures/refused-forms"
 
 const HOOKS = join(import.meta.dir, "..", "..", "..", "scripts", "hooks")
@@ -56,9 +56,9 @@ describe("an alternate reading runs on its own copy of the env", () => {
 })
 
 // Env.cwd's own reading follows zsh's ~- through the one folder Env.old names, and the proven reading through the set Env.cwdBack holds, so the set must hold that folder or the two readings could disagree on where a `cd -` or `pushd ~-` goes back to.
-describe("the folder Env.old names is always one Env.cwdBack holds", () => {
-  // each line is read as text by the reader alone and never run, in folders made under a mkdtemp root so Env.cwd's reading lands in them
-  const root = mkdtempSync(join(tmpdir(), "old-in-back-"))
+// The fixture's paths as folders made under a mkdtemp root, so Env.cwd's reading lands in them; each line is read as text by the reader alone and never run.
+const madePaths = (prefix: string): Paths => {
+  const root = mkdtempSync(join(tmpdir(), prefix))
   const extensions = join(root, "data", "extensions")
   const paths: Paths = {
     BARE: join(root, "bare"),
@@ -75,6 +75,17 @@ describe("the folder Env.old names is always one Env.cwdBack holds", () => {
   }
   for (const [key, dir] of Object.entries(paths))
     if (key !== "LIST") mkdirSync(dir, { recursive: true })
+  mkdirSync(join(paths.MAIN, ".claude", "worktrees", "a"), { recursive: true })
+  return paths
+}
+
+const fixtureLines = (paths: Paths) =>
+  REFUSED_FORMS.flatMap(({ rows }) => rows(paths))
+    .map(([, call]) => call)
+    .filter((call): call is string => typeof call === "string")
+
+describe("the folder Env.old names is always one Env.cwdBack holds", () => {
+  const paths = madePaths("old-in-back-")
 
   const read = async (lines: string[]) => {
     let reads = 0
@@ -102,11 +113,7 @@ describe("the folder Env.old names is always one Env.cwdBack holds", () => {
   }
 
   test("after every cd, pushd and popd of the refused-forms rows", async () => {
-    const lines = REFUSED_FORMS.flatMap(({ rows }) => rows(paths))
-      .map(([, call]) => call)
-      .filter(
-        (call): call is string => typeof call === "string" && /\b(?:cd|pushd|popd)\b/.test(call),
-      )
+    const lines = fixtureLines(paths).filter((call) => /\b(?:cd|pushd|popd)\b/.test(call))
     const { misses, reads } = await read(lines)
     expect(misses).toEqual([])
     expect(reads).toBeGreaterThan(50)
@@ -117,5 +124,74 @@ describe("the folder Env.old names is always one Env.cwdBack holds", () => {
     const { misses, reads } = await read(["f() { cd /usr; }; cd lib; cd ..; touch x"])
     expect(misses).toEqual([])
     expect(reads).toBeGreaterThan(0)
+  })
+})
+
+// The hooks that judge each folder places() names see what canary's hooks see only while that set holds the folder Env.cwd's own reading names, so a form whose folder only Env.cwd's reading reaches would run under them; past the cap the reader names no set and each hook refuses outright.
+describe("places() holds the folder Env.cwd names, unless the reader passed its cap", () => {
+  const paths = madePaths("places-hold-cwd-")
+  const worktree = join(paths.MAIN, ".claude", "worktrees", "a")
+
+  const read = async (lines: string[]) => {
+    let reads = 0
+    const misses: string[] = []
+    for (const line of lines)
+      for (const start of [worktree, paths.MAIN]) {
+        const env: Env = {
+          cwd: start,
+          cwdSure: start,
+          files: new Map(),
+          known: {},
+          old: { dir: start },
+          process: {},
+          vars: new Map(),
+        }
+        await run(
+          lex(line),
+          env,
+          async (_cmd, _parsed, here) => {
+            if (here.cwd === undefined || here.cwdAnywhere) return undefined
+            reads++
+            const folders = places(here, start).map((place) => place.cwd)
+            if (!folders.includes(here.cwd)) misses.push(`${line} :: ${here.cwd}`)
+            return undefined
+          },
+          true,
+        )
+      }
+    return { misses, reads }
+  }
+
+  test("at every command of the refused-forms rows", async () => {
+    const { misses, reads } = await read(fixtureLines(paths))
+    expect(misses).toEqual([])
+    expect(reads).toBeGreaterThan(500)
+  })
+
+  // a body's cd, then a cd or pushd relative to wherever it reached, from a worktree and from the main checkout
+  test("at every command after a body's cd and a relative one", async () => {
+    const lines: string[] = []
+    for (const open of [
+      "{ cd X; }",
+      "f() { cd X; }; f",
+      "f() { cd X; }",
+      "coproc cd X",
+      "{ cd X; cd ..; }",
+    ])
+      for (const to of ["..", "../..", paths.MAIN, `${paths.MAIN}/.claude`, "/tmp"])
+        for (const tail of [
+          "cd ..; P",
+          "cd ..; cd ..; P",
+          "pushd .. >/dev/null; P",
+          "(cd ..; P)",
+          "cd .. && P",
+          "cd worktrees/a && P",
+          "cd -; P",
+          "pushd; P",
+        ])
+          lines.push(`${open.replace("X", to)}; ${tail.replaceAll("P", "git commit -m x")}`)
+    const { misses, reads } = await read(lines)
+    expect(misses).toEqual([])
+    expect(reads).toBeGreaterThan(lines.length)
   })
 })
