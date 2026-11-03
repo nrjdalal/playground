@@ -137,7 +137,7 @@ describe("an entry's issue numbers", () => {
   })
 })
 
-describe('openVersions (the owner: "changelog should look like inbox, like the accordions")', () => {
+describe("openVersions", () => {
   const group = (id: string, entries: string[], release: string | null = null) => ({
     entries: entries.map((entryId) => ({ id: entryId }) as ChangelogEntry),
     id,

@@ -32,7 +32,7 @@ export type PrFacts = {
   // Who opened the PR (its GitHub login).
   author: string
   base: string
-  // The PR's description, held to the PR template the Changelog reads; absent only in a test, which skips that gate.
+  // The PR's description, held to the PR template the Changelog reads, its Evidence naming each changed doc; absent only in a test, which skips that gate.
   body?: string
   // origin/canary now, and the tree of the head merged with it (git merge-tree --write-tree); mergeTree is null when they conflict or it could not be read.
   canary: string
@@ -274,7 +274,7 @@ export function gatesOf(facts: PrFacts, { gitGuardian, outsideAuthor }: GateOpti
   ]
   gates.push(ciGate(facts.checks, { gitGuardian, required: REQUIRED_CHECKS }))
   if (facts.body !== undefined) {
-    const why = bodyRefusal(facts.body)
+    const why = bodyRefusal(facts.body, facts.files)
     gates.push(
       why
         ? { detail: `${why}; fix the body (no push)`, name: "body", ok: false }

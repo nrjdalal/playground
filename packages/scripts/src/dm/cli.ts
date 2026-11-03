@@ -6,7 +6,7 @@ import { REPO } from "../ops-job/job"
 import { orgsIo, whichSkill } from "../playground/orgs"
 import { underVault } from "./slack"
 
-// dm send <file>: the one way a session posts to the owner's DM, Alpha and Bravo alike; the token reaches only send.ts's own process, through vault.
+// dm send <file>: the one way a session posts to the owner's DM, the dispatcher and the assistant alike; the token reaches only send.ts's own process, through vault.
 const [verb, file] = process.argv.slice(2)
 if (verb !== "send" || !file || !isAbsolute(file) || !(await Bun.file(file).exists())) {
   console.error(

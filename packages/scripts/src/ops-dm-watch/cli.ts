@@ -52,7 +52,7 @@ export const BEATS: Beat[] = [
       }
       throw new Error(`exit ${code}: ${why}`)
     },
-    to: "the dispatcher for each owner message, dispatcher-2 when none is answered; ops once per kind of failure",
+    to: "the dispatcher for each owner message, the assistant seat's session when none is answered while the dispatcher is not mid-turn; ops once per kind of failure",
   },
   {
     cron: "*/15 * * * *",

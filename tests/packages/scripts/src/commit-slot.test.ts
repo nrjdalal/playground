@@ -11,7 +11,7 @@ import {
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { replays, slotted } from "../../../../packages/scripts/src/commit-slot"
+import { isBuild, replays, slotted } from "../../../../packages/scripts/src/commit-slot"
 
 const SCRIPT = join(import.meta.dir, "../../../../packages/scripts/src/commit-slot.ts")
 const DIR = mkdtempSync(join(tmpdir(), "commit-slot-"))
@@ -93,6 +93,12 @@ describe("slotted", () => {
   })
 })
 
+test("isBuild names the build alone, the one step turbo's cache speaks for", () => {
+  expect(isBuild(["bun", "run", "build"])).toBe(true)
+  expect(isBuild(["bun", "run", "check-types:tests"])).toBe(false)
+  expect(isBuild(["bun", "run", "--cwd", "packages/scripts", "check-types"])).toBe(false)
+})
+
 describe("replays", () => {
   test("every task a cache hit replays", () => {
     expect(replays(dry("HIT", "HIT"))).toBe(true)
@@ -140,9 +146,13 @@ describe("commit-slot.ts", () => {
       stdout: "pipe",
     })
 
-  test("hands the step to run-slot.sh and keeps its exit code", () => {
+  // 3 Nov: a plain commit's build waited about an hour in the full queue, since run-slot gave the commit slot to git's own words alone
+  test("hands the step to run-slot.sh marked as a commit's step, and keeps its exit code", () => {
     const seen = join(DIR, "seen")
-    writeFileSync(join(ops, "run-slot.sh"), `#!/bin/sh\necho "$@" > '${seen}'\nexit 7\n`)
+    writeFileSync(
+      join(ops, "run-slot.sh"),
+      `#!/bin/sh\necho "$RUN_SLOT_COMMIT_STEP $@" > '${seen}'\nexit 7\n`,
+    )
     chmodSync(join(ops, "run-slot.sh"), 0o755)
     let result: ReturnType<typeof run>
     try {
@@ -150,7 +160,7 @@ describe("commit-slot.ts", () => {
     } finally {
       rmSync(join(ops, "run-slot.sh"))
     }
-    expect(readFileSync(seen, "utf8")).toBe("commit-wt-one -- echo hi\n")
+    expect(readFileSync(seen, "utf8")).toBe("1 commit-wt-one -- echo hi\n")
     expect(result.exitCode).toBe(7)
   })
 
@@ -170,7 +180,7 @@ describe("commit-slot.ts", () => {
     const seen = join(DIR, "seen-turbo")
     rmSync(seen, { force: true })
     mkdirSync(join(worktree, "node_modules/.bin"), { recursive: true })
-    writeFileSync(join(worktree, "package.json"), "{}")
+    writeFileSync(join(worktree, "package.json"), JSON.stringify({ scripts: { build: "echo hi" } }))
     writeFileSync(
       join(worktree, "node_modules/.bin/turbo"),
       `#!/bin/sh\necho "$@" > '${seen}'\necho '${out}'\nexit ${code}\n`,
@@ -183,7 +193,7 @@ describe("commit-slot.ts", () => {
     try {
       const result = step()
       return {
-        asked: readFileSync(seen, "utf8"),
+        asked: existsSync(seen) ? readFileSync(seen, "utf8") : undefined,
         result,
         slot: existsSync(slot) ? readFileSync(slot, "utf8") : undefined,
       }
@@ -195,7 +205,7 @@ describe("commit-slot.ts", () => {
   }
 
   test("runs the step bare when turbo's dry run finds every build task cached", () => {
-    const { asked, result, slot } = turbo(dry("HIT", "HIT"), () => run(["echo", "hi"]))
+    const { asked, result, slot } = turbo(dry("HIT", "HIT"), () => run(["bun", "run", "build"]))
     expect(asked).toBe("run build --dry=json\n")
     expect(slot).toBeUndefined()
     expect(result.stdout.toString()).toBe("hi\n")
@@ -203,14 +213,24 @@ describe("commit-slot.ts", () => {
   })
 
   test("hands the step to run-slot.sh when turbo's dry run exits non-zero, whatever JSON it printed", () => {
-    const { result, slot } = turbo(dry("HIT", "HIT"), () => run(["echo", "hi"]), 1)
-    expect(slot).toBe("commit-wt-one -- echo hi\n")
+    const { result, slot } = turbo(dry("HIT", "HIT"), () => run(["bun", "run", "build"]), 1)
+    expect(slot).toBe("commit-wt-one -- bun run build\n")
     expect(result.exitCode).toBe(7)
   })
 
   test("hands the step to run-slot.sh as commit-<worktree> when one build task misses the cache", () => {
-    const { result, slot } = turbo(dry("HIT", "MISS"), () => run(["echo", "hi"]))
-    expect(slot).toBe("commit-wt-one -- echo hi\n")
+    const { result, slot } = turbo(dry("HIT", "MISS"), () => run(["bun", "run", "build"]))
+    expect(slot).toBe("commit-wt-one -- bun run build\n")
+    expect(result.exitCode).toBe(7)
+  })
+
+  // a test-only commit's build replayed in 0.83 s, then its type check, which turbo's build cache says nothing of, waited 72.57 s (PR review, 3 Nov)
+  test("hands a type check to run-slot.sh even when turbo would replay every build task, and asks turbo nothing", () => {
+    const { asked, result, slot } = turbo(dry("HIT", "HIT"), () =>
+      run(["bun", "run", "check-types:tests"]),
+    )
+    expect(asked).toBeUndefined()
+    expect(slot).toBe("commit-wt-one -- bun run check-types:tests\n")
     expect(result.exitCode).toBe(7)
   })
 
@@ -219,5 +239,55 @@ describe("commit-slot.ts", () => {
     expect(ok.stdout.toString()).toBe("hi\n")
     expect(ok.exitCode).toBe(0)
     expect(run(["sh", "-c", "exit 3"]).exitCode).toBe(3)
+  })
+})
+
+// PG-672: a canary merge that brings a new workspace package left its dependency unlinked, and the build waited for a slot before it failed with exit 127, naming nothing
+describe("commit-slot.ts on a worktree whose install predates a workspace dependency", () => {
+  const home = join(DIR, "home-unlinked")
+  const ops = join(home, ".playground/ops")
+  const worktree = join(DIR, "repo/.claude/worktrees/wt-unlinked")
+  const slot = join(DIR, "seen-unlinked-slot")
+  mkdirSync(ops, { recursive: true })
+  mkdirSync(join(worktree, "packages/fresh"), { recursive: true })
+  writeFileSync(join(worktree, "package.json"), JSON.stringify({ workspaces: ["packages/*"] }))
+  writeFileSync(
+    join(worktree, "packages/fresh/package.json"),
+    JSON.stringify({ dependencies: { "left-pad": "^1.3.0" } }),
+  )
+  writeFileSync(join(ops, "run-slot.sh"), `#!/bin/sh\necho "$@" > '${slot}'\nshift 2\nexec "$@"\n`)
+  chmodSync(join(ops, "run-slot.sh"), 0o755)
+  const run = () =>
+    Bun.spawnSync(["bun", "--no-env-file", SCRIPT, "echo", "built"], {
+      cwd: worktree,
+      env: {
+        ...Object.fromEntries(
+          Object.entries(process.env).filter(([key]) => key !== "RUN_SLOT_NICE"),
+        ),
+        HOME: home,
+      },
+      stderr: "pipe",
+      stdout: "pipe",
+    })
+
+  test("fails before it asks for a slot, naming the package and bun install", () => {
+    rmSync(slot, { force: true })
+    const result = run()
+    expect(result.exitCode).not.toBe(0)
+    expect(existsSync(slot)).toBe(false)
+    expect(result.stdout.toString()).toBe("")
+    const said = result.stderr.toString()
+    expect(said).toContain("packages/fresh: left-pad")
+    expect(said).toContain("bun install")
+  })
+
+  test("with every dependency linked, takes the slot and runs the step as before", () => {
+    mkdirSync(join(worktree, "node_modules/left-pad"), { recursive: true })
+    writeFileSync(join(worktree, "node_modules/left-pad/package.json"), "{}")
+    rmSync(slot, { force: true })
+    const result = run()
+    expect(readFileSync(slot, "utf8")).toBe("commit-wt-unlinked -- echo built\n")
+    expect(result.stdout.toString()).toBe("built\n")
+    expect(result.exitCode).toBe(0)
   })
 })

@@ -250,7 +250,7 @@ describe("ReasoningStep", () => {
 test("a typed message's Dismiss waits on its own hold", async () => {
   const source = await Bun.file(join(web, "src/components/dashboard/worker-stream.tsx")).text()
   expect(source).toContain("const dismissHeld = useTypedHold(message.typedAt)")
-  expect(source).toContain('message.state === "typed" && dismissHeld ?')
+  expect(source).toContain("pendingAction(message, { busy, held: dismissHeld })")
 })
 
 // Copy on another session's message gives the words the bubble shows, so copying never hands back the sender's name line the bubble hides.

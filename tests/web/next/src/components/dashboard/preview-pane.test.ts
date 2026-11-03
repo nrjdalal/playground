@@ -7,7 +7,7 @@ const source = await Bun.file(
 
 // the Inbox's Preview row, its shape as the owner asked for it in the preview
 describe("the Preview pane", () => {
-  test('its bar is one accordion row tall, its icons 14px and muted until hovered (the owner: "These icons are bigger in size and bright by default. That shouldn\'t be the case")', () => {
+  test("its bar is one accordion row tall, its icons 14px and muted until hovered", () => {
     expect(source).toContain('className="flex h-[34px] items-center gap-1.5"')
     expect(source).toContain(
       'const PANE_BUTTON = "text-muted-foreground hover:text-foreground size-7 [&_svg]:size-3.5!"',
@@ -15,7 +15,7 @@ describe("the Preview pane", () => {
     expect(source.match(/className=\{PANE_BUTTON\}/g)).toHaveLength(3)
   })
 
-  test('its frame runs edge to edge and down to the pane\'s bottom, a top border only (the owner: "Make the browser window full width and without circular corners", "This gap at the bottom ... shouldn\'t exist for the preview")', () => {
+  test("its frame runs edge to edge and down to the pane's bottom, a top border only", () => {
     expect(source).toContain('className="-mx-(--pane-x) overflow-hidden border-t bg-black"')
     expect(source).toContain("style={{ height, marginBottom: -bleed }}")
     expect(source).toContain("data-preview-frame")
