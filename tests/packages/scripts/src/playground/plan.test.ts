@@ -525,7 +525,8 @@ describe("playground view", () => {
     expect(HELP).toContain("playground view       open the playground herdr server")
     expect(HELP).toContain("start herdr's servers that are down and restore their sessions")
     expect(HELP).toContain("each herdr server")
-    expect(HELP).toContain("in cmux while a session is open there, else in herdr")
+    expect(HELP).toContain("start the Dashboard's stack and follower in herdr when down")
+    expect(HELP).not.toContain("cmux")
     expect(VIEW_HINT).toContain("playground view")
   })
 

@@ -30,6 +30,11 @@ const NOT_CASCADE: Record<string, { action: UpdateDeleteAction; reason: string }
     reason: "provenance: a session outlives its parent",
   },
   "inbox_item.thread_id": { action: "set null", reason: "an Inbox item outlives its thread" },
+  "yard_message.user_id": {
+    action: "set null",
+    reason:
+      "provenance: a message outlives its sender's account, and login keeps the readable name",
+  },
 }
 const UNINDEXED: Record<string, string> = {
   "activity.actor_id":
@@ -40,6 +45,10 @@ const UNINDEXED: Record<string, string> = {
     "nothing reads items by thread, and the table is small enough for a thread delete to scan",
   "invitation.inviter_id":
     "Better Auth writes it and never queries by it, and no Playground code sends an invitation, so the table stays small",
+  "yard_invite.made_by":
+    "the Yard writes it when an invite is made and never queries by it, and invites are made by hand under the Yard's write limit, WRITES_HOUR a member an hour, so a user delete's scan stays small",
+  "yard_invite.redeemed_by":
+    "the Yard writes it when an invite is redeemed and never queries by it, and invites are made by hand under the Yard's write limit, WRITES_HOUR a member an hour, so a user delete's scan stays small",
 }
 // A column whose only leading index is partial, and why its WHERE still holds every row a delete of the referenced row touches.
 const PARTIAL_INDEX: Record<string, string> = {

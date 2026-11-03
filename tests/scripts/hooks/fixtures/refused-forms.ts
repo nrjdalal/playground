@@ -16,6 +16,7 @@ export type Guard =
   | "no-kill-by-name"
   | "no-main-checkout"
   | "no-playground-leak"
+  | "no-raw-delete"
   | "no-raw-spawn"
   | "no-release-comment"
   | "no-stash"
@@ -75,9 +76,12 @@ export type Group = {
     | "#486"
     | "#508"
     | "#509"
+    | "#533"
+    | "#536"
+    | "#579"
 }
 
-// The rows a guard-loosening PR lets run on purpose, each written as a row's "<source> <what>" for all its cases, or as one case's "<source> <what> | <guard> | <folder>"; canary lets none run.
+// The rows a guard-loosening PR lets run on purpose, and the rows that show the one form a guard lets run, each written as a row's "<source> <what>" for all its cases, or as one case's "<source> <what> | <guard> | <folder>".
 export const ALLOWED: string[] = [
   "#446 bun -e writing a JSON label whose prose names it",
   "#446 bun -e editing a JSON label whose prose names it, then a script",
@@ -88,6 +92,7 @@ export const ALLOWED: string[] = [
   "#466 git --attr-source with a subcommand for its value before a read in a repo with a heavy path staged",
   "#486 bun run ask with a prose arg that only names the tool",
   "#486 bun run thread with a prose arg that only names the tool",
+  "#536 a non-recursive rm of files inside the session's own worktree",
 ]
 
 // A harmless git alias nest of the given depth around an inner command line, each level double-quoted.
@@ -2133,6 +2138,216 @@ gh api graphql -f query="$QUERY"`,
     source: "#509",
   },
   {
+    folders: ["checkout"],
+    guards: ["no-raw-delete"],
+    rows: () => [
+      [
+        "the incident's form, a recursive delete in sh -c behind screen -dm",
+        `screen -dm sh -c 'rm -rf ${NEVER_MADE}'`,
+      ],
+      [
+        "a recursive delete behind screen -dmS and a session name",
+        `screen -dmS job rm -rf ${NEVER_MADE}`,
+      ],
+      [
+        "a recursive delete in bash -c behind screen's flags apart",
+        `screen -d -m bash -c "rm -rf ${NEVER_MADE}"`,
+      ],
+      ["a recursive delete behind tmux new -d as one string", `tmux new -d 'rm -rf ${NEVER_MADE}'`],
+      [
+        "a recursive delete behind tmux new-session -d -s as words",
+        `tmux new-session -d -s job rm -rf ${NEVER_MADE}`,
+      ],
+      [
+        "a recursive delete of a variable in tmux's double-quoted string",
+        `tmux new -d "rm -rf $D"`,
+      ],
+      ["a recursive delete behind nohup", `nohup rm -rf ${NEVER_MADE} &`],
+      [
+        "a recursive delete in sh -c behind nohup",
+        `nohup sh -c 'rm -rf ${NEVER_MADE}' >/dev/null 2>&1 &`,
+      ],
+      ["a recursive delete fed to at by a here-string", `at now <<< 'rm -rf ${NEVER_MADE}'`],
+      ["a recursive delete echoed into at", `echo 'rm -rf ${NEVER_MADE}' | at now`],
+      ["a recursive delete as watch's command line", `watch -n 60 'rm -rf ${NEVER_MADE}'`],
+      ["rm -r", `rm -r ${NEVER_MADE}`],
+      ["rm -R", `rm -R ${NEVER_MADE}`],
+      ["rm --recursive", `rm --recursive ${NEVER_MADE}`],
+      ["rm --recursive abbreviated", `rm --rec ${NEVER_MADE}`],
+      ["rm -fr", `rm -fr ${NEVER_MADE}`],
+      ["rm with -r after its target", `rm ${NEVER_MADE} -r`],
+      ["a recursive rm of a glob", "rm -rf ~/.playground/ext*/.no-such-folder"],
+      ["a recursive rm of a variable", `rm -rf "$DIR"`],
+      ["an rm whose options sit in a variable", `rm $OPTS ${NEVER_MADE}`],
+      ["a recursive rm by its absolute path", `/bin/rm -rf ${NEVER_MADE}`],
+      ["a recursive rm behind sudo", `sudo rm -rf ${NEVER_MADE}`],
+      ["a recursive rm behind sudo -su", `sudo -su root rm -rf ${NEVER_MADE}`],
+      ["a recursive rm behind sudo -u and --", `sudo -u root -- rm -rf ${NEVER_MADE}`],
+      ["a recursive rm behind command", `command rm -rf ${NEVER_MADE}`],
+      ["a recursive rm with its name quoted apart", `r''m -rf ${NEVER_MADE}`],
+      ["a recursive rm with its name escaped", `\\rm -rf ${NEVER_MADE}`],
+      ["a recursive rm in a command substitution", `echo $(rm -rf ${NEVER_MADE})`],
+      ["a recursive rm in eval", `eval 'rm -rf ${NEVER_MADE}'`],
+      ["a recursive rm run by a program in a variable", `$RM -rf ${NEVER_MADE}`],
+      [
+        "a recursive rm inside the session's own worktree",
+        "rm -rf node_modules",
+        "process worktree",
+      ],
+      ["a non-recursive rm outside the session's own worktree and scratchpad", `rm ${NEVER_MADE}`],
+      ["find -delete", `find ${NEVER_MADE} -delete`],
+      ["find -exec rm with +", `find ${NEVER_MADE} -exec rm {} +`],
+      ["find -exec rm -rf", `find ${NEVER_MADE} -exec rm -rf {} \\;`],
+      ["find -execdir rm", `find ${NEVER_MADE} -execdir rm {} \\;`],
+      [
+        "find -exec of a shell that deletes recursively",
+        `find ${NEVER_MADE} -exec sh -c 'rm -rf "$1"' _ {} \\;`,
+      ],
+      ["xargs rm", `echo ${NEVER_MADE} | xargs rm`],
+      ["xargs rm -rf", `echo ${NEVER_MADE} | xargs rm -rf`],
+      ["xargs -I rm", `printf '%s\\0' ${NEVER_MADE} | xargs -0 -I{} rm {}`],
+      ["git clean -fd", "git clean -fd"],
+      ["git clean -fdx", "git clean -fdx"],
+      ["git clean -f -x", "git clean -f -x"],
+      ["git clean --force -d", "git clean --force -d"],
+      ["git clean -xf behind git -C", `git -C ${NEVER_MADE} clean -xf`],
+      ["git worktree remove --force", `git worktree remove --force ${NEVER_MADE}`],
+      ["git worktree remove -f", `git worktree remove -f ${NEVER_MADE}`],
+      ["a recursive delete in a git alias", `git -c alias.x='!rm -rf ${NEVER_MADE}' x`],
+      ["chmod -a", `chmod -a 'everyone deny delete' ${NEVER_MADE}`],
+      ["chmod -N", `chmod -N ${NEVER_MADE}`],
+      ["chmod -R -a#", `chmod -R -a# 0 ${NEVER_MADE}`],
+      ["chflags", `chflags nouchg ${NEVER_MADE}`],
+      ["chflags -R", `chflags -R noschg ${NEVER_MADE}`],
+      [
+        "a non-recursive rm of files inside the session's own worktree",
+        "rm -f notes.txt build.log",
+        "process worktree",
+      ],
+      [
+        "a recursive rm behind run-slot",
+        `~/.playground/ops/run-slot.sh me -- rm -rf ${NEVER_MADE}`,
+      ],
+      [
+        "a recursive rm behind run-slot run as bash's script",
+        `bash ~/.playground/ops/run-slot.sh me -- rm -rf ${NEVER_MADE}`,
+      ],
+      ["GNU rm by its Homebrew name", `grm -rf ${NEVER_MADE}`],
+      ["GNU rm by its Homebrew path", `/opt/homebrew/bin/grm -rf ${NEVER_MADE}`],
+      ["a recursive rm behind arch", `arch -arm64 rm -rf ${NEVER_MADE}`],
+      ["a recursive rm behind script", `script -q /dev/null rm -rf ${NEVER_MADE}`],
+      ["a recursive rm behind xcrun", `xcrun rm -rf ${NEVER_MADE}`],
+      ["a recursive rm behind launchctl submit", `launchctl submit -l x -- rm -rf ${NEVER_MADE}`],
+      ["a recursive rm behind watch as words", `watch -n1 rm -rf ${NEVER_MADE}`],
+      ["a recursive rm behind parallel", `parallel rm -rf ::: ${NEVER_MADE}`],
+      ["a plain rm behind parallel", `parallel rm ::: ${NEVER_MADE}`],
+      ["fd -X rm", `fd . ${NEVER_MADE} -X rm -rf`],
+      ["fd --exec rm", `fd . ${NEVER_MADE} --exec rm -rf`],
+      ["fd -x plain rm", `fd . ${NEVER_MADE} -x rm`],
+      ["a recursive rm behind busybox", `busybox rm -rf ${NEVER_MADE}`],
+      ["a recursive delete fed to batch by a here-string", `batch <<< 'rm -rf ${NEVER_MADE}'`],
+      ["a recursive delete echoed into batch", `echo 'rm -rf ${NEVER_MADE}' | batch`],
+      ["a recursive rm behind setsid", `setsid rm -rf ${NEVER_MADE}`],
+      ["a recursive rm behind flock", `flock /tmp/l rm -rf ${NEVER_MADE}`],
+      ["a recursive rm behind lockf", `lockf /tmp/l rm -rf ${NEVER_MADE}`],
+      ["a recursive rm behind gtimeout", `gtimeout 5 rm -rf ${NEVER_MADE}`],
+      ["a recursive rm behind gxargs", "gxargs rm -rf < /dev/null"],
+      ["a plain rm behind gxargs", "gxargs rm < /dev/null"],
+      ["a brace that spells -r in a worktree", "rm -{r,f} sub", "process worktree"],
+      ["a brace that spells -r", `rm -{r,f} ${NEVER_MADE}`],
+      ["a brace that spells --recursive", `rm --recurs{ive,} ${NEVER_MADE}`],
+      ["a brace that spells the whole command", `{rm,-rf,${NEVER_MADE}}`],
+      ["braces that spell rm and -r", `{r,}m -{r,}f ${NEVER_MADE}`],
+      ["a glob that spells rm", `/bin/r? -rf ${NEVER_MADE}`],
+      ["a bracket glob that spells rm", `/bin/r[m] -rf ${NEVER_MADE}`],
+      ["a program and options in variables", `$RM $FLAGS ${NEVER_MADE}`],
+      ["find -exec rm behind env", "find . -exec env rm {} +", "process worktree"],
+      ["find -exec rm behind nohup", `find ${NEVER_MADE} -exec nohup rm {} +`],
+      ["git clean -fX, ignored files alone", "git clean -fX"],
+      ["a guarded rm of variable parts", 'rm "${S:?}/${m:?}"'],
+      ["git clean -d with a prefix of --force", "git clean --forc -d"],
+      ["git clean -dx with a prefix of --force", "git clean --forc -dx"],
+      ["git clean -d with requireForce off", "git -c clean.requireForce=false clean -d"],
+      ["git clean -dx with requireForce off", "git -c clean.requireForce=false clean -dx"],
+      ["rimraf through npx", `npx rimraf ${NEVER_MADE}`],
+      ["rimraf through bunx", `bunx rimraf ${NEVER_MADE}`],
+      ["rimraf through bun x", `bun x rimraf ${NEVER_MADE}`],
+      ["rsync --delete from an empty folder", `rsync -a --delete /var/empty/ ${NEVER_MADE}/`],
+      ["rsync's --del alias from an empty folder", `rsync -a --del /var/empty/ ${NEVER_MADE}/`],
+      ["a program in a variable given -r behind arch", `arch -arm64 $R -rf ${NEVER_MADE}`],
+      ["a glob program given -r behind arch", `arch -arm64 /bin/r? -rf ${NEVER_MADE}`],
+      ["a substituted program given -r behind arch", `arch -arm64 "$(echo rm)" -rf ${NEVER_MADE}`],
+      [
+        "a program in a variable given -r behind script",
+        `script -q /dev/null $RM -rf ${NEVER_MADE}`,
+      ],
+      ["a variable set to rm given -r behind arch", `R=/bin/rm; arch -arm64 $R -rf ${NEVER_MADE}`],
+      ["rimraf with a version through npx", `npx -y rimraf@latest ${NEVER_MADE}`],
+      ["rimraf with a version through bunx", `bunx rimraf@5 ${NEVER_MADE}`],
+      ["fd --exec=rm", `fd . ${NEVER_MADE} --exec=rm`],
+      ["fd -x=rm", `fd . ${NEVER_MADE} -x=rm`],
+      ["fd -xrm", `fd . ${NEVER_MADE} -xrm`],
+      ["a half-quoted glob that spells rm", `'/bin/r'? -rf ${NEVER_MADE}`],
+      ["a glob that spells rm with its name quoted", `/bin/'r'? -rf ${NEVER_MADE}`],
+      ["a half-quoted glob program behind arch", `arch -arm64 '/bin/r'? -rf ${NEVER_MADE}`],
+    ],
+    source: "#536",
+  },
+  {
+    folders: ["checkout"],
+    guards: ["no-raw-delete"],
+    rows: () => [
+      ["del-cli through npx", `npx del-cli ${NEVER_MADE}`],
+      ["del-cli with a version through npx", `npx -y del-cli@5 ${NEVER_MADE}`],
+      ["del-cli through bunx", `bunx del-cli ${NEVER_MADE}`],
+      ["del-cli through pnpm dlx", `pnpm dlx del-cli ${NEVER_MADE}`],
+      ["del-cli through pnpx", `pnpx del-cli ${NEVER_MADE}`],
+      ["del-cli's del bin through npx", `npx del ${NEVER_MADE}`],
+      ["del-cli run by its own name", `del-cli ${NEVER_MADE}`],
+      ["del-cli's del bin run by its path", `./node_modules/.bin/del ${NEVER_MADE}`],
+      [
+        "rsync's source-removal option",
+        `rsync -a --remove-source-files ${NEVER_MADE}/ /var/empty/x/`,
+      ],
+      [
+        "rsync's old source-removal alias",
+        `rsync -a --remove-sent-files ${NEVER_MADE}/ /var/empty/x/`,
+      ],
+      ["fd's -X behind another short flag, then rm", `fd . ${NEVER_MADE} -HX rm`],
+      ["fd's -x behind another short flag, then rm", `fd . ${NEVER_MADE} -Hx rm`],
+      ["fd's clustered -x with rm attached", `fd . ${NEVER_MADE} -HIxrm`],
+      ["fd's clustered -x with =rm attached", `fd . ${NEVER_MADE} -Hx=rm`],
+      ["at fed a job from a variable's file", `at now < "$F"`],
+      ["at fed a job from an unquoted variable's file", `at now < $F`],
+      ["at given -f a variable's file", `at -f "$F" now`],
+      ["at fed a variable's file inside bash -c's double quotes", `bash -c "at now < $F"`],
+      ["at fed a program's output, which the hook cannot read", "ls | at now"],
+      ["a variable holding a recursive delete, run unquoted", `c="rm -rf ${NEVER_MADE}"; $c`],
+      [
+        "an exported variable holding a recursive delete, run unquoted",
+        `export c="rm -rf ${NEVER_MADE}"; $c`,
+      ],
+      ["a variable holding a recursive delete, run as ${c}", `c="rm -rf ${NEVER_MADE}"; \${c}`],
+      [
+        "a variable holding a recursive delete, run unquoted under bash",
+        `bash -c 'c="rm -rf ${NEVER_MADE}"; $c'`,
+      ],
+      ["shred -u", `shred -u ${NEVER_MADE}/x`],
+      ["shred -u in a cluster", `shred -zu ${NEVER_MADE}/x`],
+      ["shred --remove", `shred --remove ${NEVER_MADE}/x`],
+      ["shred --remove with a value", `shred --remove=wipe ${NEVER_MADE}/x`],
+      ["shred by a prefix of --remove", `shred --rem ${NEVER_MADE}/x`],
+      ["GNU shred's Homebrew name with -u", `gshred -u ${NEVER_MADE}/x`],
+      ["tar --remove-files", `tar -cf /var/empty/a.tar --remove-files ${NEVER_MADE}`],
+      ["tar by a prefix of --remove-files", `tar --remove-f -cf /var/empty/a.tar ${NEVER_MADE}`],
+      [
+        "GNU tar's Homebrew name with --remove-files",
+        `gtar -cf /var/empty/a.tar --remove-files ${NEVER_MADE}`,
+      ],
+    ],
+    source: "#579",
+  },
+  {
     folders: ["process home"],
     guards: ["no-extensions-write"],
     rows: () => [
@@ -2338,5 +2553,80 @@ gh api graphql -f query="$QUERY"`,
       ["a template's unquoted glob in the home", "gh pr view 1 -t .pl*"],
     ],
     source: "#462",
+  },
+  {
+    folders: ["process home", "process data folder", "process worktree"],
+    guards: ["no-extensions-write"],
+    rows: () => [
+      [
+        "a removal echoed to sudo's shell, its user option after it in a cluster",
+        "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sudo -su root",
+      ],
+      [
+        "a removal echoed to sudo's login shell, its user option after it in a cluster",
+        "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sudo -iu root",
+      ],
+      [
+        "a removal echoed to sudo's shell inside a longer cluster before its user option",
+        "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sudo -Esu root",
+      ],
+      [
+        "a removal echoed to sudo's shell, its user value attached in the cluster",
+        "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sudo -suroot",
+      ],
+      [
+        "a removal echoed to doas's shell, its user option after it in a cluster",
+        "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | doas -su root",
+      ],
+      [
+        "a removal in a here-string to sudo's shell, its user option after it in a cluster",
+        "sudo -su root <<< 'rm -rf ~/.playground/extensions/.no-such-folder'",
+      ],
+      [
+        "a removal echoed to sudo's shell, its user value a uid attached in the cluster",
+        "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sudo -su#0",
+      ],
+      [
+        "a removal echoed to sudo's shell, its user value a digit attached in the cluster",
+        "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sudo -su0",
+      ],
+      [
+        "a removal echoed to sudo's shell, its user value holding an underscore",
+        "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sudo -su_www",
+      ],
+      [
+        "a removal echoed to sudo's shell, its user value holding a dot",
+        "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sudo -suroot.x",
+      ],
+      [
+        "a removal echoed to sudo's shell, its close-from value attached in the cluster",
+        "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sudo -sC3",
+      ],
+      [
+        "a removal echoed to sudo's shell, its chdir value a path attached in the cluster",
+        "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sudo -sD/tmp",
+      ],
+      [
+        "a removal echoed to sudo's login shell, its user value a uid attached in the cluster",
+        "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sudo -iu#0",
+      ],
+      [
+        "a removal echoed to doas's shell, its user value a uid attached in the cluster",
+        "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | doas -su#0",
+      ],
+      [
+        "a removal in a here-string to sudo's shell, its user value a uid attached in the cluster",
+        "sudo -su#0 <<< 'rm -rf ~/.playground/extensions/.no-such-folder'",
+      ],
+      [
+        "a removal echoed to sudo's shell behind nice, its user option after it in a cluster",
+        "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | nice sudo -su root",
+      ],
+      [
+        "a removal echoed to sudo's shell behind env, its user value a uid attached",
+        "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | env sudo -su#0",
+      ],
+    ],
+    source: "#533",
   },
 ]

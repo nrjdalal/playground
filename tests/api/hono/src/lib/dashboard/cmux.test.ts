@@ -603,7 +603,7 @@ describe("the cmux boundary", () => {
     expect(Object.keys(cmux).sort()).toEqual([...BUILDER_NAMES, ...CALLABLE].sort())
   })
 
-  // The skills drive cmux from their own scripts (playbook's SESSIONS.md), so the boundary is the app's and the repo's tooling, not theirs.
+  // The skills drive cmux from their own scripts (playbook's SESSIONS.md), so the boundary is the app's and the repo's tooling, not theirs; the guards' bundles are built from sources read here.
   test("no source file in the repo but cmux.ts spawns cmux or borrows its argv builders", async () => {
     const listed = Bun.spawnSync(
       ["git", "ls-files", "--cached", "--others", "--exclude-standard"],
@@ -615,7 +615,12 @@ describe("the cmux boundary", () => {
     })
     const files: Record<string, string> = {}
     for (const path of listed.stdout.toString().split("\n")) {
-      if (!SOURCE.test(path) || /^(?:tests|skills)\//.test(path) || path.endsWith(".d.ts")) continue
+      if (
+        !SOURCE.test(path) ||
+        /^(?:tests|skills|scripts\/hooks\/bundled)\//.test(path) ||
+        path.endsWith(".d.ts")
+      )
+        continue
       const file = Bun.file(join(ROOT, path))
       if (await file.exists()) files[path] = await file.text()
     }
