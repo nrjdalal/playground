@@ -21,9 +21,13 @@ describe("run-slot.sh under Claude Code's sandbox", () => {
     expect(existsSync(join(m.ops, "run-slot"))).toBe(true)
   })
 
-  test("the load comes from uptime: load1 at 12 closes the third and fourth slots", () => {
-    expect(slots(machine({ sandboxed: true }))).toBe("4\n")
-    expect(slots(machine({ load1: 12, sandboxed: true }))).toBe("2\n")
+  test("the load comes from uptime, and the memory it cannot read shuts slots 2 to 4", async () => {
+    const m = machine({ load1: 12, sandboxed: true })
+    expect(slots(m)).toBe("1\n")
+    expect(await m.runs("worker-x")).toBe(true)
+    expect(readFileSync(join(m.ops, "run-slot.runs.log"), "utf8")).toMatch(
+      / lanes worker-x \d+ shut idle=80% load1=12\.00 swapins=0\n/,
+    )
   })
 
   test("an unread memory reading is said once a run, however many looks it waits", async () => {
