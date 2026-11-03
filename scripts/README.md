@@ -120,6 +120,7 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
   A person brings herdr back with bare `playground`, which runs its `start` first.
   A server hands its panes the shell basics alone, so `spawn.sh`'s herdr launch file sets `TMPDIR` to `$(getconf DARWIN_USER_TEMP_DIR)`, keeping one already set: every start, resume and restore writes that file, so a running server needs no restart for it.
   Nothing in the factory lives under the Desktop folder: macOS guards it by each binary's Full Disk Access, which a herdr or Claude Code update can drop, so the job asks for no grant, and `tests/desktop-paths.test.ts` fails on a tracked file naming a path there.
+  A plain shell pane on `playground-probes`, with no Claude in it, opens, runs, reads and closes only through `scripts/shell-pane.ts` (the `shell-pane` skill), which types a command only once every registered Bash guard's `check()` has passed it, in a child bun started as the hooks start, since a pane has no PreToolUse hook of its own.
   A scratch herdr server, for a test or a smoke, takes its folder from `mktemp -d "$(getconf DARWIN_USER_TEMP_DIR)<prefix>.XXXX"`: macOS caps a socket path at 104 bytes (`sun_path`), a session scratchpad path alone runs past that, and the server then stops with `local socket name length exceeds capacity of sun_path`.
   playbook's LIFECYCLE.md, Ops jobs, has the rest.
 
