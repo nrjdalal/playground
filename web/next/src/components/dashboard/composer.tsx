@@ -416,7 +416,7 @@ export function Composer({ threadId, worker }: { threadId?: string; worker: Work
                   <ModePicker approvals={approvals} worker={worker} />
                   <div className="ml-auto flex items-center gap-2">
                     {/* New thread is off for now, so this row renders no toggle and a send starts no thread */}
-                    <SettingPicker worker={worker} />
+                    <SettingPicker label={label} worker={worker} />
                     {/* the box's own aria-description already speaks the key hint */}
                     <Hint content={hint} description={null}>
                       <InputGroupButton

@@ -120,7 +120,7 @@ describe("the composer's sources", () => {
       composer.indexOf('<div className="ml-auto flex items-center gap-2">'),
     )
     expect(right.length).toBeLessThan(composer.length)
-    const picker = right.indexOf("<SettingPicker worker={worker} />")
+    const picker = right.indexOf("<SettingPicker ")
     const send = right.indexOf("aria-label={`Send to ${label}`}")
     expect(picker).toBeGreaterThan(-1)
     expect(right.slice(picker, send).match(/<InputGroupButton/g)).toHaveLength(1)

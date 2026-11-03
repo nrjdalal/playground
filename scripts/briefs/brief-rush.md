@@ -40,7 +40,7 @@ Standing lines:
 - Commitlint: a lowercase subject and body lines of 100 characters or fewer.
 - Give --body-file and --attach a literal absolute path to a file written in an earlier call, never a $VAR.
 - An org's own brief rules live in its extension's `rules/brief.md`, whose glance a session working in the org's checkout sees under "The <org> org's rules:": anything sent from the owner's account is a draft unless a line there pre-approves it, the factory stays out of the org's writes, and the file is read in full before a Slack post or DM, a review ask, a staging or prod step, or an outside author's PR.
-- Never `git stash` in a worktree: the stash list is shared by every worktree, so a `stash pop` can take another worker's entry (it happened today). Take before-shots from a separate worktree on origin/canary, or commit first and check out the base. lint-staged also parks a backup in that shared list during every commit, so if you ever must touch it, pop or drop only by SHA after checking the entry is yours.
+- Never `git stash` in a worktree: the stash list is shared by every worktree, so a `stash pop` can take another worker's entry (it happened today). Take before-shots from a separate worktree on origin/canary, or commit first and check out the base.
 - agent-browser sessions are machine-wide: close only your own with `agent-browser --session <your-name> close`, never `close --all` (a teardown closed seven other sessions on 6 Oct).
 - No general-purpose subagents.
 - At about 150K context, write your next step and ask for a fresh session.
