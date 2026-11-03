@@ -189,7 +189,7 @@ var LARGE = "a text too large to read";
 var deadline;
 var steps = 0;
 function tick() {
-  if (++steps % 1024 !== 0 || deadline === undefined)
+  if (deadline === undefined || ++steps % 1024 !== 0)
     return;
   if (performance.now() > deadline)
     throw new RangeError("past the hook's time");
@@ -425,7 +425,6 @@ var UV_TAKES = new Set([
 ]);
 function decode(raw) {
   return raw.replace(/\\(?:x([\da-fA-F]{1,2})|u([\da-fA-F]{1,4})|U([\da-fA-F]{1,8})|0?([0-7]{1,3})|([\s\S]))/g, (whole, hex, u4, u8, octal, other) => {
-    tick();
     const point = hex || u4 || u8 ? Number.parseInt(hex ?? u4 ?? u8 ?? "", 16) : Number.parseInt(octal ?? "", 8);
     if (!Number.isNaN(point))
       return point <= 1114111 ? String.fromCodePoint(point) : whole;
@@ -841,7 +840,6 @@ function unwrap(state, inside, budget) {
   const take = () => rest.pop();
   const also = [];
   const fork = (wrapper, drop) => {
-    tick();
     if (budget.left-- <= 0) {
       budget.capped = true;
       return;

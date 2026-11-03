@@ -11,6 +11,7 @@ import {
   RiEditLine,
   RiErrorWarningLine,
   RiHistoryLine,
+  RiQuestionLine,
   RiRefreshLine,
   RiRobot2Line,
   RiToolsLine,
@@ -146,11 +147,14 @@ import {
   type StreamNeed,
 } from "@/lib/needs-you"
 import {
+  canCheck,
   canRetry,
+  checkNote,
   deliveredAt,
   isNext,
   isUnsentMarker,
   othersWaiting,
+  pendingAction,
   retryNote,
   statusLine,
   statusMark,
@@ -634,7 +638,7 @@ function seenInView(box: Element, content: Element): SeenInView | null {
   }
 }
 
-// A message sent from here before its transcript holds it, standing where it will land: it says where it is (sending, queued and why, sent, failed) and offers what can be done (unsend while queued, dismiss once typed, retry or edit once failed). A button that removes itself hands focus back to the composer.
+// A message sent from here before its transcript holds it, standing where it will land: it says where it is (sending, queued and why, sent, failed) and offers what can be done (pendingAction's unsend or dismiss, and retry, check it for me or edit once failed). A button that removes itself hands focus back to the composer.
 function PendingMessage({
   composer,
   message,
@@ -651,8 +655,9 @@ function PendingMessage({
   const label = chatLabel(worker, dispatcher)
   const failed = message.state === "failed"
   const limited = Boolean(worker.usageLimit)
+  const busy = worker.light === "working"
   const status = statusLine(message, {
-    busy: worker.light === "working",
+    busy,
     label,
     limited,
     next: isNext(outbox.messages, message),
@@ -663,6 +668,9 @@ function PendingMessage({
   const short = oneLine(message.text, 40) || `${files} file${files === 1 ? "" : "s"}`
   const focusComposer = () => document.getElementById(composer)?.focus()
   const dismissHeld = useTypedHold(message.typedAt)
+  // Check it for me sends its note once
+  const [asked, setAsked] = useState(false)
+  const action = pendingAction(message, { busy, held: dismissHeld })
   return (
     <TranscriptMessage
       at={message.at}
@@ -686,9 +694,9 @@ function PendingMessage({
           failed && "text-destructive flex-wrap",
         )}
         label={status}
-        mark={statusMark(message.state)}
+        mark={statusMark(message, busy)}
         action={
-          message.state === "queued" ? (
+          action === "unsend" ? (
             <FooterAction
               Icon={RiCloseLine}
               label={`Unsend "${short}"`}
@@ -696,7 +704,7 @@ function PendingMessage({
                 if (outbox.cancel(message.id)) focusComposer()
               }}
             />
-          ) : message.state === "typed" && dismissHeld ? (
+          ) : action === "dismiss" ? (
             <FooterAction
               Icon={RiCloseLine}
               label={`Dismiss "${short}"`}
@@ -717,6 +725,17 @@ function PendingMessage({
             label={`Retry "${short}"`}
             onClick={() => {
               outbox.retry(message.id)
+              focusComposer()
+            }}
+          />
+        ) : null}
+        {failed && dispatcher && canCheck(message.code) && !asked ? (
+          <FooterAction
+            Icon={RiQuestionLine}
+            label={`Check it for me: ask the dispatcher whether "${short}" arrived`}
+            onClick={() => {
+              setAsked(true)
+              outbox.send(dispatcher, { attachments: [], text: checkNote(label, short) })
               focusComposer()
             }}
           />
