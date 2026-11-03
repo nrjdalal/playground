@@ -30,6 +30,7 @@ import {
 import { parseLines } from "../../../../../../api/hono/src/lib/dashboard/transcript"
 import { livePair } from "../../../../../../api/hono/src/lib/dev/live-dashboard"
 import { priceOf } from "../../../../../../api/hono/src/lib/usage/prices"
+import { listTrash } from "../../../../../../packages/safe-delete/src"
 import {
   cleanGitShims,
   gitShim,
@@ -47,6 +48,14 @@ const scratch = (name: string): string => {
   dirs.push(dir)
   return dir
 }
+// The folders a fixture's move into the trash starts from, on a mkdtemp root of the test's own that holds no fixture: a test that moves one takes its own, so no test meets another's 3-a-minute tripwire.
+const freshRoots = () => {
+  const root = scratch("fixture-roots")
+  return { home: join(root, "home"), main: join(root, "main"), trash: join(root, "data", "trash") }
+}
+const ROOTS = freshRoots()
+const trashed = (roots: { trash: string }) => listTrash(roots.trash).map((entry) => entry.path)
+
 afterAll(() => {
   cleanGitShims()
   for (const dir of dirs) rmSync(dir, { force: true, recursive: true })
@@ -290,7 +299,7 @@ describe("writeFixture", () => {
 
   test("moves every time by the gap between the anchor and now, and makes $CONFIG its own folder", () => {
     const dir = join(scratch("fixture-write"), "fixture")
-    writeFixture(small(), dir, new Date(Date.parse(ANCHOR) + DAY))
+    writeFixture(small(), dir, ROOTS, new Date(Date.parse(ANCHOR) + DAY))
     const usage = JSON.parse(readFileSync(join(dir, "claude/playground/usage.json"), "utf8"))
     expect(usage).toEqual({
       at: "2026-01-02T12:00:00.000Z",
@@ -309,12 +318,24 @@ describe("writeFixture", () => {
     }
   })
 
-  test("a relative PLAYGROUND_FIXTURE_DIR sits under the checkout's root, so the launcher and the API, run from different folders, name one folder", () => {
+  test("a relative PLAYGROUND_FIXTURE_DIR sits under the checkout's root, so the launcher and the API, run from different folders, name one folder; else a worktree's sits in its .turbo and a plain clone's in the temp folder, one per clone", () => {
     const root = checkoutRoot()
     if (!root) throw new Error("the tests run from a checkout")
     expect(fixtureDir({ PLAYGROUND_FIXTURE_DIR: "scratch/fx" })).toBe(join(root, "scratch/fx"))
     expect(fixtureDir({ PLAYGROUND_FIXTURE_DIR: "/elsewhere/fx" })).toBe("/elsewhere/fx")
-    expect(fixtureDir({})).toBe(join(root, ".turbo", "dashboard-fixture"))
+    const worktree = scratch("fixture-worktree")
+    writeFileSync(join(worktree, ".git"), "gitdir: /elsewhere\n")
+    expect(fixtureDir({}, worktree)).toBe(join(worktree, ".turbo", "dashboard-fixture"))
+    const uid = process.getuid?.() ?? 0
+    expect(fixtureDir({}, null, "/tmp-x")).toBe(`/tmp-x/playground-dashboard-fixture-${uid}`)
+    const clone = scratch("fixture-plain")
+    mkdirSync(join(clone, ".git"))
+    expect(fixtureDir({}, clone, "/tmp-x")).toMatch(
+      new RegExp(`^/tmp-x/playground-dashboard-fixture-${uid}-[0-9a-f]{8}$`),
+    )
+    const other = scratch("fixture-other")
+    mkdirSync(join(other, ".git"))
+    expect(fixtureDir({}, clone, "/tmp-x")).not.toBe(fixtureDir({}, other, "/tmp-x"))
   })
 
   test("the API the live Dashboard serves runs inside its checkout, so it reads the live machine and finds its migrations, never falling to a Docker image's fixture", () => {
@@ -357,20 +378,70 @@ describe("writeFixture", () => {
   })
 
   test("replaces its own folder whole, so a stack starts from the fixture again", () => {
+    const roots = freshRoots()
     const dir = join(scratch("fixture-rewrite"), "fixture")
-    writeFixture(small(), dir)
+    writeFixture(small(), dir, roots)
     writeFileSync(join(dir, "claude/playground/attachments/left-over.txt"), "{}")
-    writeFixture(small(), dir)
+    writeFixture(small(), dir, roots)
     expect(readdirSync(join(dir, "claude/playground/attachments"))).toEqual([])
-    dropFixture(dir)
+    const old = listTrash(roots.trash).find((entry) => entry.path === dir)
+    expect(old).toBeDefined()
+    expect(
+      existsSync(
+        join(roots.trash, old!.id, "fixture", "claude/playground/attachments/left-over.txt"),
+      ),
+    ).toBe(true)
+    dropFixture(dir, roots)
     expect(existsSync(dir)).toBe(false)
+    expect(trashed(roots).filter((path) => path === dir)).toHaveLength(2)
+    expect(readdirSync(dirname(dir))).toEqual([])
+  })
+
+  test("a half-written folder a stopped write left behind goes to the trash before the next write", () => {
+    const roots = freshRoots()
+    const dir = join(scratch("fixture-left"), "fixture")
+    mkdirSync(`${dir}.writing-${process.pid}`, { recursive: true })
+    writeFileSync(join(`${dir}.writing-${process.pid}`, "half.json"), "{}")
+    writeFixture(small(), dir, roots)
+    expect(existsSync(`${dir}.writing-${process.pid}`)).toBe(false)
+    expect(trashed(roots)).toContain(`${dir}.writing-${process.pid}`)
+  })
+
+  test("a fixture folder the trash refuses, as one inside the main checkout, stays, and the refusal is thrown in its words", () => {
+    const root = scratch("fixture-protected")
+    const dir = join(root, "fixture")
+    const roots = { ...ROOTS, main: root }
+    writeFixture(small(), dir, roots, new Date(Date.parse(ANCHOR)))
+    expect(() => dropFixture(dir, roots)).toThrow("inside the main checkout")
+    expect(() => writeFixture(small(), dir, roots, new Date(Date.parse(ANCHOR) + DAY))).toThrow(
+      "inside the main checkout",
+    )
+    // the refusal comes before any write or rename, so the folder is as it was and nothing sits beside it
+    expect(JSON.parse(readFileSync(join(dir, "stamp.json"), "utf8")).writtenAt).toBe(ANCHOR)
+    expect(readdirSync(root)).toEqual(["fixture"])
+  })
+
+  test("a plain clone's fixture sits in the temp folder, so a fixture stack there starts, stops and starts again with nothing left in the clone", () => {
+    const clone = scratch("fixture-clone")
+    mkdirSync(join(clone, ".git"))
+    const tmp = scratch("fixture-tmp")
+    const dir = fixtureDir({}, clone, tmp)
+    expect(dirname(dir)).toBe(tmp)
+    const roots = { ...freshRoots(), main: clone }
+    writeFixture(small(), dir, roots)
+    dropFixture(dir, roots)
+    writeFixture(small(), dir, roots)
+    dropFixture(dir, roots)
+    expect(readdirSync(clone)).toEqual([".git"])
+    expect(readdirSync(tmp)).toEqual([])
+    expect(trashed(roots).filter((path) => path === dir)).toHaveLength(2)
   })
 
   test("leaves a folder that is not a fixture's alone, a real config folder named by mistake included", () => {
     const dir = scratch("fixture-foreign")
     writeFileSync(join(dir, "roster.json"), "real")
-    expect(() => writeFixture(small(), dir)).toThrow("is not a fixture's folder")
-    dropFixture(dir)
+    expect(() => writeFixture(small(), dir, ROOTS)).toThrow("is not a fixture's folder")
+    dropFixture(dir, ROOTS)
     expect(readFileSync(join(dir, "roster.json"), "utf8")).toBe("real")
   })
 
@@ -409,7 +480,7 @@ describe("writeFixture", () => {
 
   test("refuses a send into an input that holds text unless it is forced, as cmux 0.65's draft guard does", () => {
     const dir = join(scratch("fixture-guard"), "fixture")
-    writeFixture(shipped(), dir)
+    writeFixture(shipped(), dir, ROOTS)
     const session = readFixtureCmux(dir).sessions.find(
       (s) => s.stored_pid_exists === true && typeof s.surface_id === "string",
     )
@@ -427,7 +498,7 @@ describe("writeFixture", () => {
   // herdr pastes a message, and Claude Code takes each image path in as an image; the dispatcher's fixture session stands for one
   test("a session the dashboard pastes into writes a message with an image as Claude Code writes the paste", () => {
     const dir = join(scratch("fixture-paste"), "fixture")
-    writeFixture(shipped(), dir)
+    writeFixture(shipped(), dir, ROOTS)
     const session = readFixtureCmux(dir).sessions.find((s) => s.pastes === true)
     if (!session) throw new Error("the shipped fixture has a session the dashboard pastes into")
     const surface = String(session.surface_id)
@@ -472,7 +543,7 @@ describe("writeFixture", () => {
 
   test("types into no transcript outside its own folder, whatever its scratch state names", () => {
     const dir = join(scratch("fixture-outside"), "fixture")
-    writeFixture(shipped(), dir)
+    writeFixture(shipped(), dir, ROOTS)
     const outside = join(scratch("fixture-real"), "real.jsonl")
     writeFileSync(outside, "")
     const state = readFixtureCmux(dir)
@@ -572,6 +643,7 @@ describe("writeFixture", () => {
     writeFixture(
       { ...shipped(), anchor: "2026-01-01T12:00:00.000Z" },
       dir,
+      ROOTS,
       new Date("2026-01-02T12:00:00.000Z"),
     )
     const machine = JSON.parse(readFileSync(join(dir, "machine.json"), "utf8"))

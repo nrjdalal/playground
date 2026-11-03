@@ -1,4 +1,4 @@
-import { afterAll, describe, expect, test } from "bun:test"
+import { afterAll, afterEach, describe, expect, test } from "bun:test"
 import {
   existsSync,
   mkdirSync,
@@ -299,7 +299,8 @@ describe("prMerge", () => {
     expect(merges(calls)).toEqual([])
   })
 
-  test("a head behind canary that merges clean merges as it is, with no new run", async () => {
+  // git here reads the head as holding canary, so the types gate skips; types.test.ts runs it on a real merged tree
+  test("a head behind canary that merges clean merges on its own checks, with no new GitHub run", async () => {
     const { calls, run } = stub({ aheadBy: "3" })
     expect(await prMerge(112, { repo: REPO }, run, local())).toMatchObject({ kind: "merged" })
     expect(merges(calls)).toHaveLength(1)
@@ -358,6 +359,62 @@ describe("prMerge", () => {
     expect(outcome).toMatchObject({ kind: "failed" })
     expect(outcome.kind === "failed" && outcome.reason).toContain("Head branch was modified")
     expect(merges(once.calls)).toHaveLength(1)
+  })
+})
+
+describe("a hold written after the gates are read", () => {
+  // git in local()'s world whose types gate, the slow step between the gates and the merge call, writes the held list as it starts
+  const holdingDuringTypes = (text: string) => {
+    const world = local()
+    const git: Run = async (args) => {
+      if (args[0] === "merge-base" && args[1] === "--is-ancestor") writeFileSync(HELD, text)
+      return world.git(args)
+    }
+    return { ...world, git }
+  }
+  afterEach(() => rmSync(HELD, { force: true }))
+
+  test("refuses, naming the hold's reason, and never calls gh pr merge", async () => {
+    const { calls, run } = stub()
+    const outcome = await prMerge(
+      112,
+      { repo: REPO },
+      run,
+      holdingDuringTypes(JSON.stringify({ held: { [`${REPO}#112`]: "held for the ship" } })),
+    )
+    expect(outcome.kind).toBe("refused")
+    expect(outcome.gates.find((gate) => gate.name === "held")).toMatchObject({
+      detail: "read again before the merge: held for the ship",
+      ok: false,
+    })
+    expect(merges(calls)).toEqual([])
+  })
+
+  test("refuses when the held list no longer reads, and never calls gh pr merge", async () => {
+    const { calls, run } = stub()
+    const outcome = await prMerge(112, { repo: REPO }, run, holdingDuringTypes("{"))
+    expect(outcome.kind).toBe("refused")
+    expect(outcome.gates.find((gate) => gate.name === "held")).toMatchObject({
+      detail: "read again before the merge: held-prs.json does not read: it is not JSON",
+      ok: false,
+    })
+    expect(merges(calls)).toEqual([])
+  })
+
+  test("merges as before when the list still does not name the PR at the merge call", async () => {
+    const { calls, run } = stub()
+    const outcome = await prMerge(
+      112,
+      { repo: REPO },
+      run,
+      holdingDuringTypes(JSON.stringify({ held: { [`${REPO}#113`]: "held for the ship" } })),
+    )
+    expect(outcome).toMatchObject({ kind: "merged", sha: "abc1234def" })
+    expect(outcome.gates.find((gate) => gate.name === "held")).toMatchObject({
+      detail: "not in held-prs.json",
+      ok: true,
+    })
+    expect(merges(calls)).toHaveLength(1)
   })
 })
 

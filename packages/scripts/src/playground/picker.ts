@@ -1,6 +1,6 @@
-// playground picker <session> allow|deny <key> ["reason"]: a session's manager answers the permission prompt its alert named, allowing what the work needs. Only the session's manager or the primary dispatcher answers, and only the call the alert's key names: a call of the session's still waiting on its result whose callKey() matches. A herdr session's pane gets a key only while its prompt shows that call: 1 (Yes, once) or Escape; a cmux session's pending Feed permission for that call is answered once or denied, as the dashboard's reply() does. A deny carries its reason, which goes to the session as a message through the ops outbox, and every answer is one log line. A dispatcher's own prompt is never answered.
+// playground picker <session> allow|deny <key> ["reason"]: a session's manager answers the permission prompt its alert named, allowing what the work needs. Only the session's manager or the primary dispatcher answers, and only the call the alert's key names: a call of the session's still waiting on its result whose callKey() matches. The session's herdr pane gets a key only while its prompt shows that call: 1 (Yes, once) or Escape; a session in no herdr pane gets none. A deny carries its reason, which goes to the session as a message through the ops outbox, and every answer is one log line. A dispatcher's own prompt is never answered.
 import { appendFile, mkdir } from "node:fs/promises"
-import { basename, join } from "node:path"
+import { join } from "node:path"
 
 import { dispatcherOf } from "@packages/config/kinds"
 import { configDirOf, dataDir } from "@packages/env/data-dir"
@@ -19,11 +19,11 @@ import {
   transcriptOf,
   transcriptPathOf,
 } from "../stuck-alert"
+import { refusalOf } from "./prompt"
 
 export type PickerDeps = {
   agents: { kind?: unknown; name?: unknown; worker?: unknown }[]
   by: string
-  cmux: (args: string[]) => Promise<string>
   herdr: (server: string, args: string[]) => Promise<string>
   live: () => Promise<Map<string, { pid: number; sessionId: string }>>
   log: (line: string) => Promise<void>
@@ -35,48 +35,6 @@ export type PickerDeps = {
 }
 
 const PICKER_USAGE = 'usage: playground picker <session> allow <key> | deny <key> "<reason>"'
-
-// A permission prompt as Claude Code draws it (2.1, read off a herdr pane on 26 Oct): a full rule, its title, then the command between two dashed rules, any warning, its question and the cursor on its first option, Yes.
-const QUESTION = /Do you want to (proceed|make this edit|create|allow|run|fetch|use|overwrite)/i
-const FIRST_YES = /^\s*[│ ]*❯\s*1\.\s+Yes\b/m
-const RULE = /^\s*─{3,}\s*$/
-const DASHES = /^\s*╌{3,}\s*$/
-
-// Pure: the permission dialog at a pane's foot, from below its top rule to its question, or null when the pane shows none.
-function dialogOf(screen: string): string[] | null {
-  const lines = screen.trimEnd().split("\n")
-  const question = lines.findLastIndex((line) => QUESTION.test(line))
-  if (question < lines.length - 15 || !FIRST_YES.test(lines.slice(question).join("\n"))) return null
-  const top = lines.slice(0, question).findLastIndex((line) => RULE.test(line))
-  return top < 0 ? null : lines.slice(top + 1, question + 1)
-}
-
-// The tools whose child raises its own prompts while the call waits on it: a subagent (Agent, Task), a forked skill (Skill), a workflow's agents (Workflow); so a waiting call of one is never the prompt's own.
-const PARENTS = new Set(["Agent", "Skill", "Task", "Workflow"])
-
-// Pure: whether matchOf() can judge a call at all: one with a command, a URL or a file.
-const judgeable = (input: Record<string, unknown>): boolean =>
-  ["command", "file_path", "url"].some((name) => typeof input[name] === "string")
-
-// Pure: how a dialog matches the call, with whitespace and box borders dropped, since the pane wraps a long one: "strong" when the command is the whole text between its dashed rules, "weak" when the command or URL sits whole in a dialog with no such box or the file's name sits in it, else null.
-const BY_HAND =
-  "deny it by hand with Escape and SendMessage the session the reason, or take it to the dispatcher"
-
-function matchOf(dialog: string[], input: Record<string, unknown>): "strong" | "weak" | null {
-  const flat = (text: string) => text.replace(/[\s│]+/g, "")
-  const text = flat(dialog.join(""))
-  if (typeof input.command === "string") {
-    const [from, to] = dialog.flatMap((line, i) => (DASHES.test(line) ? [i] : []))
-    if (from !== undefined && to !== undefined)
-      return flat(dialog.slice(from + 1, to).join("")) === flat(input.command) ? "strong" : null
-    return flat(input.command) && text.includes(flat(input.command)) ? "weak" : null
-  }
-  if (typeof input.url === "string")
-    return flat(input.url) && text.includes(flat(input.url)) ? "weak" : null
-  return typeof input.file_path === "string" && text.includes(flat(basename(input.file_path)))
-    ? "weak"
-    : null
-}
 
 type Pane = { pane: string; server: string }
 
@@ -109,12 +67,6 @@ async function paneOf(pid: number, deps: PickerDeps): Promise<Pane | null> {
   return null
 }
 
-// cmux's Feed gives a tool's input as a JSON string, as the dashboard's jsonField() reads it.
-const feedInput = (input: unknown): unknown => (typeof input === "string" ? json(input) : input)
-
-const sessionOfWorkstream = (workstream: string): string =>
-  Buffer.from(workstream.split(":").at(-1) ?? "", "base64").toString("utf8")
-
 export async function runPicker(
   args: string[],
   deps: PickerDeps,
@@ -140,69 +92,18 @@ export async function runPicker(
     return refuse(`only ${name}'s manager, ${manager}, answers its prompts; you are ${deps.by}`)
   const transcript = await deps.transcript(session.sessionId).catch(() => "")
   const call = pendingCalls(transcript).find((input) => callKey(input) === key)
-  let via: "cmux" | "herdr"
-  let judged: unknown = call
   const pane = await paneOf(session.pid, deps)
-  if (pane) {
-    if (!call) return refuse(`${name} has no call waiting with key ${key}; nothing was pressed`)
-    const screen = await deps.herdr(pane.server, ["pane", "read", pane.pane, "--source", "visible"])
-    const dialog = dialogOf(screen)
-    if (!dialog) return refuse(`${name}'s pane shows no permission prompt; nothing was pressed`)
-    const match = matchOf(dialog, call)
-    if (!match)
-      return refuse(`${name}'s prompt is not for the call with key ${key}; nothing was pressed`)
-    // Only a strong match rules out a waiting parent's own prompt, which draws no dashed box.
-    const others = pendingCalls(
-      transcript,
-      match === "strong" ? (tool) => !PARENTS.has(tool as string) : undefined,
-    )
-    if (
-      others.some(
-        (other) => callKey(other) !== key && (!judgeable(other) || matchOf(dialog, other)),
-      )
-    )
-      return refuse(
-        `${name}'s prompt may be another waiting call's (a subagent's file or URL prompt always is, while its parent waits); nothing was pressed: ${BY_HAND}`,
-      )
-    await deps.herdr(pane.server, [
-      "pane",
-      "send-keys",
-      pane.pane,
-      answer === "allow" ? "1" : "esc",
-    ])
-    via = "herdr"
-  } else {
-    const feed = async () =>
-      (json(await deps.cmux(["rpc", "feed.list", '{"pending_only":true}'])).items ?? []) as {
-        kind?: string
-        request_id?: string
-        tool_input?: unknown
-        workstream_id?: string
-      }[]
-    const items = await feed()
-    const item = items.find(
-      (i) =>
-        i.kind === "permissionRequest" &&
-        sessionOfWorkstream(i.workstream_id ?? "") === session.sessionId &&
-        callKey(feedInput(i.tool_input)) === key,
-    )
-    if (!item?.request_id) return refuse(`${name} has no pending permission prompt with key ${key}`)
-    await deps.cmux([
-      "rpc",
-      "feed.permission.reply",
-      JSON.stringify({ mode: answer === "allow" ? "once" : "deny", request_id: item.request_id }),
-    ])
-    if ((await feed()).some((i) => i.request_id === item.request_id))
-      return refuse(`${name}'s Feed still holds the prompt after the reply: ${BY_HAND}`)
-    via = "cmux"
-    judged = feedInput(item.tool_input)
-  }
-  const what = callOf(judged).replace(/\s+/g, " ").slice(0, 120)
+  if (!pane) return refuse(`${name} runs in no herdr pane; nothing was pressed`)
+  const screen = await deps.herdr(pane.server, ["pane", "read", pane.pane, "--source", "visible"])
+  const refusal = refusalOf(name, screen, transcript, key)
+  if (refusal) return refuse(refusal)
+  await deps.herdr(pane.server, ["pane", "send-keys", pane.pane, answer === "allow" ? "1" : "esc"])
+  const what = callOf(call).replace(/\s+/g, " ").slice(0, 120)
   const at = deps
     .now()
     .toISOString()
     .replace(/\.\d{3}Z$/, "Z")
-  const line = `${at} ${deps.by} ${answer} ${name} via ${via}: ${what}${reason ? ` (${reason})` : ""}`
+  const line = `${at} ${deps.by} ${answer} ${name} via herdr: ${what}${reason ? ` (${reason})` : ""}`
   await deps.log(line)
   if (answer === "deny")
     await deps.queue(name, `${deps.by} denied your permission prompt (${what}): ${reason}`)
@@ -233,7 +134,7 @@ async function callerName(live: Map<string, { pid: number }>): Promise<string> {
   return "unknown"
 }
 
-// The real deps: the roster, herdr's CLI on each factory server, cmux's rpc, Claude's registry, the transcript, ops/picker.log and the ops outbox.
+// The real deps: the roster, herdr's CLI on each factory server, Claude's registry, the transcript, ops/picker.log and the ops outbox.
 export async function pickerDeps(
   env: Record<string, string | undefined> = process.env,
 ): Promise<PickerDeps> {
@@ -244,7 +145,6 @@ export async function pickerDeps(
   return {
     agents: await rosterAgents(env),
     by: await callerName(live),
-    cmux: (args) => run(["cmux", ...args], env as Record<string, string>),
     herdr: (server, args) => run([bin, ...args], serverEnv(env, dir, server)),
     live: async () => live,
     log: async (line) => {

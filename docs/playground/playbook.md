@@ -1,7 +1,7 @@
 ## What it does
 
 `playbook` holds the operating rules of Playground's factory, the Claude Code sessions cmux or herdr runs on the owner's behalf: who does what, who reports to whom, how sessions start and end, how the leads keep watch,
-and the standing rules (override, gate, comments, release, dashboard, clock, eta, roster, ask, tickets, classified, channel, signal, main, zerosdk, voice, terminal, local page, correction, upstream, verify, memory, writing, ci, slots, unstick, usage, glm, battery, context, rounds, polling, github, workers, meetings).
+and the standing rules (override, gate, comments, release, dashboard, clock, eta, roster, ask, tickets, classified, signal, main, voice, terminal, local page, correction, upstream, verify, memory, writing, ci, slots, unstick, usage, glm, battery, context, rounds, polling, github, workers, meetings).
 It lives in the repo rather than in one session's memory, so every session loads the same rules.
 
 ## When to reach for it
@@ -14,12 +14,13 @@ It lives in the repo rather than in one session's memory, so every session loads
 | Route a new ask, or run a lead's sweep                                                                    | `DISPATCH.md` and `SWEEP.md`                                                   |
 | Answer the owner's DM while Slack mode is on                                                              | `DISPATCH.md`'s Slack mode and `playground dm send`                            |
 | Merge a Playground PR, or release `canary` to `main`                                                      | the **gate** rule (`bun run pr:merge <n>`, `bun run pr:train`) and **release** |
-| Comment or review on one of the owner's repos                                                             | the **comments** rule                                                          |
+| Comment or review on a repo whose owner `release-owners.json` lists                                       | the **comments** rule                                                          |
 | Touch the live dashboard or the roster                                                                    | the **dashboard** and **roster** rules (`ROSTER.md`)                           |
 | Ask the owner something, or pass on his override                                                          | the **ask** and **override** rules                                             |
 | File a Linear ticket                                                                                      | the **tickets** rule                                                           |
 | Write anything an org sees                                                                                | the **classified** rule                                                        |
-| Post in the factory's channel, or take an ask from there                                                  | the **channel** rule (`CHANNEL.md`)                                            |
+| Post in the factory's channel, or take an ask from there                                                  | the channel's lists and triage (`CHANNEL.md`)                                  |
+| Run a `vercel` command, a deploy among them                                                               | the Vercel CLI's three traps (`VERCEL.md`)                                     |
 | Stop a process                                                                                            | the **signal** rule                                                            |
 | Hand off a build, a read or research                                                                      | the **workers** rule                                                           |
 | Run long, spawn a reviewer again, or wait on something                                                    | the **context**, **rounds** and **polling** rules                              |
@@ -32,10 +33,11 @@ A session outside the factory has no reason to.
 
 `SKILL.md` is the part every session keeps in view: the roles, the chain, and under **Standing rules** a pointer to where the rules live, short enough to fit inside what Claude Code re-attaches after a compaction (its first 5,000 tokens, within a budget that can drop an older skill whole).
 Each rule is its own intent file, `extensions/core/rules/<name>.md`: its first line is the glance, the lines after it its what and why, with each value a `{key}` slot.
-A rule that belongs to the owner alone (**zerosdk**) sits in its scope's own `skills/<scope>/rules/` until the switch imports it into the extensions, and keeps its glance line in `SKILL.md` until then.
+A rule that belongs to one login alone lives in that login extension's own `rules/`, and the `rules` hook shows its glance under "Your own rules:".
 The lifecycle, dispatch and sweep are in `LIFECYCLE.md`, `DISPATCH.md` and `SWEEP.md`, each read when its moment comes.
+`LIFECYCLE.md` also holds the main checkout's restore, run from the owner's own `!` window, since with the checkout gone every guard refuses a factory session's Bash.
 At every session start, resume and compaction the `rules` hook puts each rule file's glance in front of the session, its slots filled with this machine's settings (`playground rules <name>` prints one whole), and after a compaction a second hook tells it to load the skill again, so the rules arrive even when the skill was dropped.
-A test holds `SKILL.md` under 14,000 characters, its pointer to the rules folder, and its glance lines to the rules that wait in a scope's own folder.
+A test holds `SKILL.md` under 14,000 characters and its pointer to the rules folder; another holds the rule list above to the files in `extensions/core/rules/`.
 
 ## The shape
 
@@ -51,7 +53,9 @@ As it routes an ask, the dispatcher routes it to a thread of its own, so the Das
 and an ask with no marker gets a thread through `playground thread` (each Inbox item about it goes to the same one).
 Work goes out in bundles: the Planner groups the issues that touch one surface, such as the sidebar or the chat, into one bundle, and a bundle is one worker, one PR, one review loop and one tester pass per head, its tester driving only the pages and files the bundle touches.
 Two pieces of work that depend on each other in meaning stack only for no line overlap: the test is a merge-tree of the two heads against the parent's merge base with canary, and the child holds behind its parent until the parent merges.
-A stacked child merges its parent's branch in once, when the parent scores 5/5 or merges, since every merge is a head its reviewer scores again.
+A stacked child merges its parent's branch in once, when the parent scores 5/5 or merges, taking the parent's final head, the head the parent merges at (DISPATCH.md's bundles), since every merge is a head its reviewer scores again.
+A stacked child retargeted to canary after its parent merges pushes a merge of canary before it asks for review, since GitHub can keep a retargeted PR conflicting, with no CI run, until a push makes it recompute.
+A stack held at 5/5 until the owner's try syncs with canary only on a conflict, plus once before the try, and each sync's round cites CI where CI can stand in for the local run, since every sync re-scores every PR in the stack.
 A worker that merges canary or a stack's parent in keeps that merge plain and commits each edit after it on its own, since review scores an edit inside a merge as blocking.
 A lane's item aims at about 1,000 changed lines or fewer, and a bigger diff splits off canary as a new PR, since a diff too big to read whole finds new blocking issues every round.
 Anything else bundles into one PR or sequences one PR after the other.
@@ -81,7 +85,7 @@ The leads keep watch with a sweep: every 15 minutes each one runs `playground sw
 and on news it checks its own agents for a picker waiting, a permission prompt, silence with no report, or a session gone, and acts on it.
 A stuck session tells its manager at once: the manager allows a permission prompt when the command is needed and otherwise denies it with a simpler way to do it (`playground picker`), and a session still stuck after 5 minutes goes to Playground; what only the owner can answer becomes a decision in Playground's Inbox, since he reads the Inbox rather than every chat.
 A worker silent for an hour after a review round, with no push and no report, is asked why, and a bug it found outside its chore becomes an issue of its own at once rather than a detour, unless it blocks the PR.
-The Builder also chases any open PR of the factory's that has seen no commit, verdict or comment for 30 minutes and is truly stuck, not just waiting its turn on merge-on-ready.
+The Builder also chases any open PR of ours that has seen no commit, verdict or comment for 30 minutes and is not just waiting on its checks or its turn on merge-on-ready, and any whose last 4 review scores are the same score below 5, where it narrows the change, moves the check to a simpler layer, or parks the PR.
 An ops job reminds the poster of every answer of the owner's in the Inbox that its poster has not confirmed within 15 minutes, whether it failed to reach the session or reached it and was never carried out, and a lead hears only when that poster is down, so an answer he gave is never left undone.
 An agent confirms a go only with a link to where it landed (the Slack message, the pull request, the Linear ticket) or a reason there is none, and every draft or decision that will post somewhere names that place before he answers.
 No factory session blocks on him: one that posted a decision carries on or ends its turn, and reads Waiting on your inbox, in orange, until he answers; Playground itself is always free, running nothing long and waiting on nothing.
@@ -92,7 +96,7 @@ A new Linear ticket waits for the owner's yes, and Playground's own work stays o
 A session that needs a ticket asks up the chain; the dispatcher puts it to the owner as an Inbox decision, and on his yes writes that day's approval naming the team and title, which lets the ticket be filed.
 Every spawn sets `PLAYGROUND_ROLE` (a session cmux restores without it is known by its name), and in a session that has it the `no-linear-ticket` hook refuses any call that would file a ticket with no approval, through the Linear MCP or a GraphQL `issueCreate` alike.
 His own sessions have no role, so they file freely.
-The hook is a guard, not a lock: when it cannot start (Bun missing, the checkout moved) or times out, Claude Code lets the call through, so a broken hook never blocks every call, and the rule still binds the session.
+The hook is a guard that fails closed: when it cannot start (Bun missing, a package missing, the checkout gone) it refuses the call, naming the fix, and only a timeout lets the call through, where the rule still binds the session.
 Only the dispatcher writes an approval, and the hook refuses any other session a write into the approvals folder.
 Playground is classified: nothing about it appears in any guarded org's ticket, PR, commit, branch, comment, Slack message or DM, and file in its repos.
 
@@ -115,7 +119,7 @@ An observer in the channel is answered directly when they write there.
 The dispatcher sorts each ask from the colleague, their Playground or the observer into three: it answers it, fixes a small shared bug and tells the owner after, or puts it to the owner first, and the owner's asks always come first (`CHANNEL.md` beside the skill).
 A simple, working PR from the colleague is the dispatcher's to decide and record, and it merges as their own PR after a read-only review, so their name stays on the work; only a hard-to-undo change to how the owner works goes to the owner's Inbox.
 The hook also refuses a guarded org's write it cannot read.
-Like the ticket guard, a hook that cannot start lets the call through, and the rule still binds the session.
+Like the ticket guard, a hook that cannot start refuses the call, and one that times out lets it through, where the rule still binds the session.
 
 ## It's working if
 
@@ -125,7 +129,9 @@ Like the ticket guard, a hook that cannot start lets the call through, and the r
 - cmux shows one `Managers` workspace and one workspace per live worker, with no checker or probe in a workspace of its own.
 - Every working worker's ETA shows on its sidebar row's hover, and few have passed it.
 - No agent sits on a prompt or a picker for longer than one sweep, unless the picker waits on the owner in its own pane.
-- No session waits on a prompt for a delete Claude Code stops on: an `rm` or `rmdir` whose target has two or more parts that start with an unguarded variable, or a name directly in `/`, is turned back with a fix (the `no-prompt-stop` hook), and the session runs it again guarded, as a literal path, or in its own temporary folder.
+- No session waits on a prompt for a delete Claude Code stops on: an `rm` or `rmdir` whose target has two or more parts that start with an unguarded variable, or a name directly in `/`, is turned back with a fix (the `no-prompt-stop` hook), and the session runs it again as a literal path (`playground rm <literal path>` for anything outside its worktree and scratchpad),
+  an `rmdir` with each variable guarded too,
+  or in its own scratchpad.
 - A manager starts no hidden helper: the `no-manager-subagent` hook refuses it the Agent and Workflow tools, so every build, read or research it hands off shows as a worker in the sidebar.
 - A heavy run in a worktree (an install, a `node_modules` copy, a build, a type check or the whole test suite) waits for a free run slot, so the machine runs a few at a time: the `no-unslotted-run` hook refuses one typed without `run-slot.sh`, naming the form to use.
 - No factory session starts unless the machine has room: `scripts/spawn.sh` refuses while the load and the busy cores are both at the core count, while memory pressure is critical or free memory is under 8%, or while the model's usage window is near its cap, naming what it read, and when a live session already holds the name, so a respawned session starts only once the old one has closed,
@@ -155,7 +161,7 @@ Like the ticket guard, a hook that cannot start lets the call through, and the r
 - Every session starts at high effort; another effort is the owner's choice alone, which a lead sets with spawn.sh's `--effort` at a start or a resume, on the owner's word relayed in the **override** shape.
 - Every session runs on `models.default` (Opus) unless it was started on GLM or with spawn.sh's `--model` naming another of `models.claude`, and every subagent it starts for work runs on Sonnet unless its call names a model,
   from the factory settings' `CLAUDE_CODE_SUBAGENT_MODEL=sonnet` (the owner approved #i492, 17 Oct; on GLM the alias maps to GLM), so a brief or subagent call that needs Opus names `model: opus`.
-- A suggestion, from anyone, is tested before a session acts on it or repeats it.
+- A suggestion, from anyone, is tested before a session acts on it or repeats it, and a decision that claims no change for this machine or the owner's setup cites the command and output that measured it.
 - No worker is spawned while the System panel reads No room, and the panel's idle line stays empty: no worker's dev stack idles 15 minutes.
 - Of the choices the factory could make itself, only the one-way doors reach the owner's Inbox as decisions: a Slack message to anyone but a developer (a collaborator writing code in an org's repo, about that work), a new ticket, an irreversible delete or another breaking change, a breaking schema change, an org's database change on one environment, and budget.
   A production bug's port, a request for work from a session outside the chain and a step only he can take (plug in the Mac, log in, add a key; Approve means done and Deny means he can't, and a secret value he holds goes to a Vercel project through a secret ask, whose card hands it straight to its sink, or anywhere else where the item says, 1Password or a file,
@@ -168,7 +174,7 @@ Like the ticket guard, a hook that cannot start lets the call through, and the r
   It refuses a request for his own action the same way, such as "you need to", "please", "when you can" or "the owner, plug in the Mac", so a step only he can take goes to his Inbox too.
   A question quoted from someone else, or put to another agent, passes.
   Anything promised to him for later, and any later outcome of something he asked, reaches him as an Inbox update; chat answers only what he is asking now.
-- Every Slack link in the Inbox opens in Slack's app: `playground ask` refuses an archives-style link, and triage-and-implement's `scripts/slack-links.py` rewrites one from the org's workspace (another workspace's is named on stderr, left as it is).
+- Every Slack link in the Inbox opens in Slack's app: `playground ask` refuses an archives-style link, and an org extension's link script rewrites one from the org's workspace (another workspace's is named on stderr, left as it is).
 - Every mention in the Inbox reads as a name (@colleague, @platform-team): `playground ask` refuses Slack's raw tokens (`<@U...>`, `<!subteam^...>`, `<#C...>`, `<!here>`), and the poster resolves each name to its ID when it posts.
 - An ask that has the owner quit, restart, close or stop something says what still depends on it (the owner: "You asked me, and the factory asked me, to quit cmux and then the app was not working.
   Relay the information"): `playground ask` refuses it until it carries `checked`, one line from four checks (the ops jobs, the processes and sessions running under the target, and the Dashboard's health), `none` when nothing does.
@@ -181,7 +187,8 @@ Like the ticket guard, a hook that cannot start lets the call through, and the r
 - Each PR has one reviewer session across all its rounds, and from round 2 it reads only what changed since its last score, plus the findings still open.
 - Leads wait on a message, a background task's notification, their sweep or an ops job, rather than a `sleep` loop or a repeated `gh` read.
 - A changed draft reaches the owner through its Inbox item, never as a second Slack draft for an item he has already sent.
-- No session polls a PR more often than every 5 minutes, and reads and comment posts go through GitHub's REST API where they can, so the shared GraphQL quota lasts the hour; a sweep over many PRs is the exception, one batched GraphQL query ([GITHUB-BULK-READS.md](../../extensions/core/skills/playbook/GITHUB-BULK-READS.md)).
+- No session polls a PR more often than every 5 minutes, and reads and comment posts go through GitHub's REST API where they can, so the shared GraphQL quota lasts the hour; a sweep over many PRs is the exception, one batched GraphQL query ([GITHUB-BULK-READS.md](../../extensions/core/skills/playbook/GITHUB-BULK-READS.md), which also holds the read of canary's own checks).
+- A check that needs a PR's whole file list (an overlap with another PR, a stack's files) reads it page by page, since the plain read stops at 100 files without saying so.
 - No session writes Claude Code memory: every learning arrives as a PR to this repo.
 - Every skill, agent guide, docs page, handoff and brief a session writes reads as writing-for-agents shapes it: lean, each step ending on a completion criterion, phrased as what to do, a hook turns back a factory session's write to one until it has loaded the skill,
   and the reviewer scores the changed ones against it.
@@ -201,10 +208,11 @@ Like the ticket guard, a hook that cannot start lets the call through, and the r
   The one handover is a dev stack whose starting session has gone, which `bun run dev:stop` ends in its worktree from the launcher's own record, never the live dashboard's without `--live-dashboard`.
   CI checks that nothing in the repo kills by name, pattern or port; a command a session types is the rule's to hold.
 - No session builds, tests, commits or writes a file in the main checkout, which every installed skill follows: the **main** rule.
-  A hook refuses each of those there, naming the fix, while its upkeep (a pull, a fetch, rebuilding the shared packages with env validation off after a pull that changes them, relinking the skills) and reads run.
+  A hook refuses each of those there, naming the fix, while its upkeep (a pull, a fetch, rebuilding the shared packages with env validation off after a pull that changes them, `git reset --keep origin/main` off a stray local commit, relinking the skills) and reads run.
 - Nothing types into another session's pane in the owner's name: sessions and ops alerts reach a session through `SendMessage` (the **voice** rule), and the dashboard types only for his own clicks.
   A test fails on any other caller of the dashboard's `deliver()` and on any text in the repo that types into a pane, Escape on the usage-limit dialog and a manager's `playground picker` on a permission prompt aside.
-- A page for the owner (a report, a comparison, a mock, a diagram) is a local HTML file in the session's scratchpad, kept and opened in his browser with `playground page` (the **local page** rule), since a claude.ai artifact publishes under whichever account the session holds; it then stays on the Pages tab of the session's view, of the one it was made for and of the dispatcher's.
+- A page for the owner (a report, a comparison, a mock, a diagram) is a local HTML file in the session's scratchpad, kept with `playground page` and posted as an Inbox card's `html` attachment, so the Inbox's viewer shows it and nothing opens on the owner's screen (the **local page** rule), since a claude.ai artifact publishes under whichever account the session holds.
+  The page then stays on the Pages tab of the session's view, of the one it was made for and of the dispatcher's.
   Every page's header shows its version, "Version N · <date> · <kind>", always, and a copy made to share outside drops the label.
   The factory's settings deny the `Artifact` tool, and a test fails without the deny.
 

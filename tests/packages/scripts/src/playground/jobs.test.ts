@@ -33,7 +33,6 @@ const tick = {
   enabled: true,
   heartbeat: "ops-tick",
   launchd: "com.playground.ops-tick",
-  needsCmux: false,
   program: ["{bun}", "{checkout}/packages/scripts/src/ops-tick/cli.ts"],
   schedule: { every: 60 },
 }

@@ -2,10 +2,14 @@ import { existsSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
 
-// portless's CA, in its state folder as portless names it, when this process was started without an extra CA of its own.
+// portless's state folder: PORTLESS_STATE_DIR, else ~/.portless, as portless names it.
+export const portlessDir = (env: NodeJS.ProcessEnv = process.env): string =>
+  env.PORTLESS_STATE_DIR || join(homedir(), ".portless")
+
+// portless's CA, in its state folder, when this process was started without an extra CA of its own.
 export const portlessCa = (env: NodeJS.ProcessEnv = process.env): string | null => {
   if (env.NODE_EXTRA_CA_CERTS) return null
-  const ca = join(env.PORTLESS_STATE_DIR || join(homedir(), ".portless"), "ca.pem")
+  const ca = join(portlessDir(env), "ca.pem")
   return existsSync(ca) ? ca : null
 }
 

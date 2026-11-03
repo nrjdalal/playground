@@ -65,7 +65,7 @@
   discarded, set aside (`cleared`), settled or read,
   or a failed send dismissed;
   an unread update keeps its dot.
-  An `ask`'s text, and a read-only update's, renders as a chat message's does, through `TranscriptMarkdown card` with its line breaks kept, so a fenced block (`ts`, `sql`, `diff`, `text`) shows highlighted with its copy button, at text-xs and wrapping at any character.
+  An `ask`'s text, and a read-only update's, renders as a chat message's does, through `TranscriptMarkdown card` with its line breaks kept, so a fenced block (`ts`, `sql`, `diff`, `text`) shows highlighted with its copy button, at text-xs and wrapping at any character, a `diff` block's added and removed lines tinted as a chat message's are (`messages.md`).
   A drawing (a `text`, `txt` or `ascii` block, or one with no language) keeps its lines whole, its font shrinking from 12px to fit its widest line, measured with pretext, down to 10px before it scrolls sideways.
   `ASK_CODE_COLUMNS` (`@packages/config/inbox`) is the widest drawing line that fits the narrowest card at 12px.
   Every other preview's words, a Slack message's included, stay plain text, since they go out exactly as written, marked as quoted by a `border-l-2` rule rather than a background, and no card's body, a Done one's included, sits on gray, the band alone muted.
@@ -134,7 +134,7 @@
   Before that it refuses, naming both ports, a `POSTGRES_URL` whose port is not the one in the `.env` of the checkout `dashboard-ask.ts` lives in (`checkoutMismatch` in `api/hono/src/lib/sessions/guard.ts`): a run by path from another checkout, or a URL exported in the shell over the `.env`.
   A test run (`NODE_ENV=test`) passes its own container's URL on purpose, and the check skips it.
   Run it in the checkout that serves the dashboard, from anywhere with `bun run --cwd <checkout> ask`: any other checkout has its own database, which the live dashboard never shows, and says so on stderr.
-  From a user install's clone root with no `POSTGRES_URL`, `bun run ask` runs as the Dashboard's checkout's (`.claude/worktrees/desk`, whose `.env` holds the database), through `api/hono/src/bin/ask-from-clone.ts`.
+  From a user install's clone root with no `POSTGRES_URL`, `bun run ask` runs as the Dashboard's checkout's, the worktree on `live.branch` wherever it sits (`dashboardCheckout()`), whose `.env` holds the database, through `api/hono/src/bin/ask-from-clone.ts`; from any other worktree it runs as that worktree's own.
   A fresh worktree runs it once its `.env` is set up (the `dev` skill's Start) and its shared packages are built (`~/.playground/ops/run-slot.sh <your name> -- bunx turbo run build --filter='./packages/*'`), since a cloned `node_modules` alone leaves `@packages/db` unresolved.
   Before every `bun run ask new`, run `bun run ask open` and read what is already open: when an open item asks the same thing, name its `#iN` in chat and post nothing, since two sessions once posted one question as two items.
   It lists a snoozed item and one the owner replied to in chat, since each still asks something, until it moves to Done or its poster closes it.
@@ -257,7 +257,7 @@
 
 - The ask's shape: an `ask` decision's text reads the way chat talks to the owner, in three parts, top to bottom:
   1. A picture of the point: a diff or code block for a code change, before and after pictures for a UI change (as `attachments` with the smart viewer), an ASCII flow in a code block for a plain decision.
-     Keep each code or ASCII line within `ASK_CODE_COLUMNS` characters, the drawing width the card paragraph above names, whose source (`packages/config/src/inbox.ts`) gives the card width and character width it comes from.
+     Keep each code or ASCII line within `ASK_CODE_COLUMNS` characters, the drawing width the card paragraph above names, whose source (`packages/config/src/inbox.ts`) gives the card width and character width it comes from; a `diff` block's lines may run longer, since the card wraps them.
      A wider drawing still posts and shrinks to 10px, then scrolls, so the limit is a writing guide.
   2. Short bullets, one fact each, an emoji as each one's marker.
   3. What Approve does, in the `approve` label, with `deny` beside it: the card shows the two as its choices under the text, in place of its On Approve line.
@@ -265,7 +265,7 @@
   A factory session writes each item's words and pictures by the `to-inbox` skill (`extensions/core/skills/to-inbox/SKILL.md`), loaded before `bun run ask new`.
 
   `bun run ask example code|decision|slack|ui` prints each worked example as an item to fill in, the three asks below and the slack decision above.
-  `bun run ask new` prints a hint on stderr, and posts the item all the same, when an ask's text runs past 300 characters with no list, code block or attachment, or a code block in an ask's or a read-only update's text holds a line past `ASK_CODE_COLUMNS` (`shapeHints`).
+  `bun run ask new` prints a hint on stderr, and posts the item all the same, when an ask's text runs past 300 characters with no list, code block or attachment, or a code block other than a `diff` one in an ask's or a read-only update's text holds a line past `ASK_CODE_COLUMNS` (`shapeHints`).
   The three, as their card shows the text (`tests/api/hono/src/lib/dashboard/ask-shape.test.ts` holds this file to the templates):
 
   ````markdown

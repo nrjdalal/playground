@@ -1,14 +1,18 @@
-// Vendoring the upstream skills core keeps from their repo, byte for byte, into extensions/core/: this module holds the file work and no network, so the test drives it offline; cli.ts adds the downloads and calls it. The staged files are verified against MANIFEST before the swap, so a changed byte leaves core as it was.
+// Vendoring the upstream skills core keeps from their repo, byte for byte, into extensions/core/: this module holds the file work and no network, so the test drives it offline; cli.ts passes download its gh and calls the rest. The staged files are verified against MANIFEST before the swap, so a changed byte leaves core as it was.
 import {
   existsSync,
   mkdirSync,
   readdirSync,
   readFileSync,
   renameSync,
-  rmSync,
   writeFileSync,
 } from "node:fs"
+import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
+
+import { isProtected, makeScratch, removeScratch, type Roots } from "@packages/safe-delete"
+
+import { toTrash } from "../trash"
 
 export type UpstreamFile = { path: string; bytes: Uint8Array }
 export type ManifestEntry = { sha: string; path: string }
@@ -110,65 +114,119 @@ export const diffSkills = (oldText: string | null, entries: ManifestEntry[]): st
   ]
 }
 
-const STAGING = ".upstream-staging"
+// Downloads sha's tarball through gh into a scratch folder of its own, since a download is untrusted data, and hands back the kept files with each kept path the tree lists that the tarball lacks; the folder goes once they are read.
+export const download = async (
+  gh: (...args: string[]) => Buffer,
+  repo: string,
+  sha: string,
+  tmp = tmpdir(),
+): Promise<{ kept: UpstreamFile[]; missing: string[] }> => {
+  const scratch = makeScratch("vendor-upstream-", tmp)
+  try {
+    const tarball = join(scratch, "tarball.tgz")
+    await Bun.write(tarball, gh(`repos/${repo}/tarball/${sha}`))
+    const upstream = join(scratch, "upstream")
+    extractTarball(tarball, upstream)
+    const tree = JSON.parse(gh(`repos/${repo}/git/trees/${sha}?recursive=1`).toString()) as {
+      tree: { path: string; type: string }[]
+    }
+    const kept = readTree(upstream).filter(({ path }) => upstreamKeep(path))
+    const missing = tree.tree
+      .filter((entry) => entry.type === "blob" && upstreamKeep(entry.path))
+      .map((entry) => entry.path)
+      .filter((path) => !kept.some(({ path: got }) => got === path))
+    return { kept, missing }
+  } finally {
+    const refused = removeScratch(scratch, tmp)
+    if (refused) console.error(`vendor:upstream: ${refused}`)
+  }
+}
 
-// Stages the files in core, writes upstream/SOURCE and upstream/MANIFEST, and swaps each upstream skill folder and upstream/ in only when every staged byte matches its manifest sha; a skill's CREDITS.md, which is core's, stays, a skill the old MANIFEST held and the new one does not leaves, and a mismatch removes the staging folder and leaves core as it was. It never commits.
+// Drops the staging folder, a scratch folder in core, or leaves it and says why.
+const dropStaging = (staging: string, coreDir: string) => {
+  const refused = removeScratch(staging, coreDir)
+  if (refused) console.error(`vendor:upstream: ${refused}`)
+}
+
+const REPLACED = ".upstream-replaced"
+
+// Stages the files in core, writes upstream/SOURCE and upstream/MANIFEST, and swaps each upstream skill folder and upstream/ in only when every staged byte matches its manifest sha; a skill's CREDITS.md, which is core's, stays, a skill the old MANIFEST held and the new one does not leaves, and a mismatch leaves core as it was; the staging folder goes however the run ends. Each folder it replaces is moved into one REPLACED folder that goes to the trash whole, so a run is one quarantine under the tripwire's 3 a minute, and a refusal throws its text. It never commits.
 export const vendor = ({
   coreDir,
   files,
   manifest,
   repo,
+  roots,
+  session,
   sha,
 }: {
   coreDir: string
   files: UpstreamFile[]
   manifest: string
   repo: string
+  roots: Roots
+  session: string
   sha: string
 }): Vendored => {
   const entries = parseManifest(manifest)
   const bytesOf = new Map(files.map(({ path, bytes }) => [path, bytes]))
-  const staging = join(coreDir, STAGING)
-  rmSync(staging, { force: true, recursive: true })
-  for (const { path } of entries) {
-    const dest = join(staging, path)
-    mkdirSync(dirname(dest), { recursive: true })
-    const bytes = bytesOf.get(path)
-    if (bytes === undefined)
-      throw new Error(`vendor: MANIFEST names ${path}, which the downloaded tree does not hold`)
-    writeFileSync(dest, bytes)
+  const protectedWhy = isProtected(join(coreDir, REPLACED), roots)
+  if (protectedWhy) throw new Error(protectedWhy)
+  const staging = makeScratch(".upstream-staging-", coreDir)
+  try {
+    for (const { path } of entries) {
+      const dest = join(staging, path)
+      mkdirSync(dirname(dest), { recursive: true })
+      const bytes = bytesOf.get(path)
+      if (bytes === undefined)
+        throw new Error(`vendor: MANIFEST names ${path}, which the downloaded tree does not hold`)
+      writeFileSync(dest, bytes)
+    }
+    mkdirSync(join(staging, "upstream"), { recursive: true })
+    writeFileSync(
+      join(staging, "upstream", "SOURCE"),
+      `${repo} ${sha}\n${new Date().toISOString().slice(0, 10)}\n`,
+    )
+    writeFileSync(join(staging, "upstream", "MANIFEST"), manifest)
+    const mismatches = entries.flatMap(({ path, sha: wanted }) => {
+      const got = blobSha(readFileSync(join(staging, path)))
+      return got === wanted ? [] : [`${path}: staged ${got}, MANIFEST says ${wanted}`]
+    })
+    if (mismatches.length > 0) return { ok: false, mismatches }
+    const oldManifest = join(coreDir, "upstream", "MANIFEST")
+    const was = existsSync(oldManifest)
+      ? skillsIn(parseManifest(readFileSync(oldManifest, "utf8")))
+      : new Set<string>()
+    const now = skillsIn(entries)
+    const replaced = join(coreDir, REPLACED)
+    const reason = "vendor:upstream replaced it"
+    toTrash(replaced, reason, roots, session)
+    const moveAside = (from: string, to: string) => {
+      if (!existsSync(from)) return
+      mkdirSync(dirname(join(replaced, to)), { recursive: true })
+      renameSync(from, join(replaced, to))
+    }
+    for (const name of new Set([...was, ...now])) {
+      const live = join(coreDir, "skills", name)
+      const credits = join(live, "CREDITS.md")
+      const kept = existsSync(credits) ? readFileSync(credits) : null
+      moveAside(live, join("skills", name))
+      if (!now.has(name)) continue
+      mkdirSync(dirname(live), { recursive: true })
+      renameSync(join(staging, "skills", name), live)
+      if (kept) writeFileSync(credits, kept)
+    }
+    moveAside(join(coreDir, "upstream"), "upstream")
+    renameSync(join(staging, "upstream"), join(coreDir, "upstream"))
+    try {
+      toTrash(replaced, reason, roots, session)
+    } catch (error) {
+      throw new Error(
+        `${(error as Error).message}; the replaced folders stay in ${replaced}, which the next run moves to the trash first`,
+      )
+    }
+    return { ok: true, files: entries.length }
+  } finally {
+    dropStaging(staging, coreDir)
   }
-  mkdirSync(join(staging, "upstream"), { recursive: true })
-  writeFileSync(
-    join(staging, "upstream", "SOURCE"),
-    `${repo} ${sha}\n${new Date().toISOString().slice(0, 10)}\n`,
-  )
-  writeFileSync(join(staging, "upstream", "MANIFEST"), manifest)
-  const mismatches = entries.flatMap(({ path, sha: wanted }) => {
-    const got = blobSha(readFileSync(join(staging, path)))
-    return got === wanted ? [] : [`${path}: staged ${got}, MANIFEST says ${wanted}`]
-  })
-  if (mismatches.length > 0) {
-    rmSync(staging, { force: true, recursive: true })
-    return { ok: false, mismatches }
-  }
-  const oldManifest = join(coreDir, "upstream", "MANIFEST")
-  const was = existsSync(oldManifest)
-    ? skillsIn(parseManifest(readFileSync(oldManifest, "utf8")))
-    : new Set<string>()
-  const now = skillsIn(entries)
-  for (const name of new Set([...was, ...now])) {
-    const live = join(coreDir, "skills", name)
-    const credits = join(live, "CREDITS.md")
-    const kept = existsSync(credits) ? readFileSync(credits) : null
-    rmSync(live, { force: true, recursive: true })
-    if (!now.has(name)) continue
-    mkdirSync(dirname(live), { recursive: true })
-    renameSync(join(staging, "skills", name), live)
-    if (kept) writeFileSync(credits, kept)
-  }
-  rmSync(join(coreDir, "upstream"), { force: true, recursive: true })
-  renameSync(join(staging, "upstream"), join(coreDir, "upstream"))
-  rmSync(staging, { force: true, recursive: true })
-  return { ok: true, files: entries.length }
 }

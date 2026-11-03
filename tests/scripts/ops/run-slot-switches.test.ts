@@ -35,6 +35,25 @@ describe("run-slot-2 in single-slot mode", () => {
   })
 })
 
+// retro 22: run-slot-2 shut at load1 over the cores left the merge train's type check racing the queue for run-slot alone, and two 5/5 PRs sat about 55 min
+describe("run-slot-2 at load1 at or over the cores", () => {
+  const busy = () => {
+    const m = machine({ load1: 15 })
+    m.hold("run-slot", 1, "small")
+    return m
+  }
+
+  test("stays shut to an ordinary waiter", async () => {
+    expect(await busy().waits("worker-s", { RUN_SLOT_SIZE: "small" })).toBe(true)
+  })
+
+  for (const who of ["ops-dashboard", "ops-merge-train"]) {
+    test(`opens to ${who}`, async () => {
+      expect(await busy().runs(who, { RUN_SLOT_SIZE: "small" })).toBe(true)
+    })
+  }
+})
+
 // a hand-set runner-host/slot-off kept the runner box idle for two days, so a switch carries a reason and an expiry, and drops itself past it
 describe("an ops switch carries a reason and an expiry", () => {
   const set = async (m: ReturnType<typeof machine>, ...args: string[]) => {
@@ -224,8 +243,8 @@ describe("what the command leaves in its process group", () => {
     const m = machine()
     const pidFile = join(m.root, "loop.pid")
     const loop = `${trap}while :; do sleep 0.2; done`
-    // the loop's output goes to /dev/null, so a loop left behind never holds the caller's stdout open
-    const command = `bash -c '${loop}' >/dev/null 2>&1 & echo $! > ${pidFile}; exit 7`
+    // the loop's output goes to /dev/null, so a loop left behind never holds the caller's stdout open; the command exits only once the loop has exec'd, since until then the fork still carries this command line (its pid file's path) and the reap logs that one (#592: a loaded CI run did)
+    const command = `bash -c '${loop}' >/dev/null 2>&1 & echo $! > ${pidFile}; while ps -p $! -o command= | grep -qF ${pidFile}; do sleep 0.05; done; exit 7`
     const p = Bun.spawn(
       [
         "bash",

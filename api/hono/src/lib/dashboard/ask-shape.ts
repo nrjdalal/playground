@@ -14,18 +14,22 @@ export type ShapeHint = { kind: "prose" } | { kind: "wide"; longest: number }
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value)
 
-// Pure: the characters in the longest line inside a text's code blocks, counted by code point, so a box-drawing character counts as one.
+// Pure: the characters in the longest line inside a text's code blocks, counted by code point, so a box-drawing character counts as one; a diff block is skipped, since the card wraps it.
 const longestCodeLine = (text: string): number => {
   let inside = false
+  let diff = false
   let longest = 0
   for (const line of text.split("\n")) {
-    if (/^\s*```/.test(line)) inside = !inside
-    else if (inside) longest = Math.max(longest, [...line].length)
+    const fence = line.match(/^\s*```\s*(\S*)/)
+    if (fence) {
+      diff = !inside && fence[1]!.toLowerCase() === "diff"
+      inside = !inside
+    } else if (inside && !diff) longest = Math.max(longest, [...line].length)
   }
   return longest
 }
 
-// Pure: the hints for an `ask` decision: one when its text runs past PROSE_LIMIT with no list, no code block and no attachments, one when a code block holds a line past ASK_CODE_COLUMNS; the wide one alone for a read-only update's text, which renders on the same card; none for any other item, which posts either way.
+// Pure: the hints for an `ask` decision: one when its text runs past PROSE_LIMIT with no list, no code block and no attachments, one when a code block other than a diff holds a line past ASK_CODE_COLUMNS; the wide one alone for a read-only update's text, which renders on the same card; none for any other item, which posts either way.
 export function shapeHints(input: unknown): ShapeHint[] {
   const preview = isRecord(input) ? input.preview : undefined
   if (!isRecord(preview) || typeof preview.text !== "string") return []

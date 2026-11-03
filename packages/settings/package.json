@@ -18,6 +18,7 @@
     "check-types": "tsc --noEmit"
   },
   "dependencies": {
+    "@packages/safe-delete": "workspace:*",
     "zod": "catalog:"
   },
   "devDependencies": {

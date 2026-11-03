@@ -205,16 +205,45 @@ describe("a diff holding a long-lived connection is reviewed by a lifecycle tabl
   })
 })
 
+describe("a diff that loosens a guard is reviewed by a refusal table (PG-439)", () => {
+  test("step 4 asks for a canary | head table from round 1, holds each canary refusal at the head, and its Done when checks it", async () => {
+    const step = (await skill()).match(/^4\. \*\*Review on two axes\.\*\*.*$/m)?.[0] ?? ""
+    const line = step.split("**Refusal table:**")[1]?.split("**Done when**")[0] ?? ""
+    expect(line).toContain("ask from round 1 for a `canary | head` table of refusal rows")
+    expect(line).toContain("`tests/scripts/hooks/fixtures/refused-forms.ts`")
+    expect(line).toContain(
+      "Each row canary refuses stays refused at the head, or `ALLOWED` names it",
+    )
+    expect(line).toContain(
+      "the fixture's other rows stand through `tests/scripts/hooks/refused-forms.test.ts`'s pass count at canary and at the head",
+    )
+    expect(line).toContain("each bypass the review finds that canary refuses")
+    expect(line).toContain("blocking finding")
+    expect(step.split("**Done when**")[1] ?? "").toContain("refusal table")
+  })
+
+  test("the docs page says a loosened guard's refusal table holds the score down", async () => {
+    expect(await page()).toContain(
+      "a `canary | head` table of refusal rows from round 1 for each refused-forms row it adds or allows",
+    )
+  })
+})
+
 describe("code-review-loop runs its newest text every round (PG-213)", () => {
-  test("step 1 opens by loading the skill again, and its Done when checks it", async () => {
+  test("step 1 opens by reading the skill from the main checkout, and its Done when checks it", async () => {
     const recover = (await skill()).match(/^1\. \*\*Recover\.\*\*.*$/m)?.[0] ?? ""
     expect(recover).toStartWith(
-      "1. **Recover.** Call the Skill tool with `code-review-loop` again, so the round runs this skill's newest text.",
+      "1. **Recover.** Read this skill's newest text from its folder in the main checkout, `$PLAYGROUND_REPO/extensions/core/skills/code-review-loop`,",
+    )
+    expect(recover).toContain(
+      "That folder is the one `${CLAUDE_SKILL_DIR}` stands for in every command the round runs, `scripts/state.py` included",
     )
     expect(recover.split("**Done when**")[1] ?? "").toContain(
-      "loaded code-review-loop again this round",
+      "read code-review-loop's SKILL.md from the main checkout this round and the round's scripts and references come from that folder",
     )
-    expect(await page()).toContain("loads the skill again at the start of every round")
+    expect(await page()).toContain(
+      "reads the skill's newest text, its scripts included, from the main checkout at the start of every round",
+    )
   })
 })
 
@@ -222,7 +251,7 @@ describe("code-review-loop's round 1 greps each changed term", () => {
   test("step 4 runs the changed-term grep in round 1, names its finding's shape and its Done when, with its measured case", async () => {
     const step = (await skill()).match(/^4\. \*\*Review on two axes\.\*\*.*$/m)?.[0] ?? ""
     expect(step).toContain(
-      "the changed-term grep (`git grep -l <term>` over the agent-facing docs) for each term whose meaning the diff changes",
+      "the changed-term grep (`git grep -l <term>` over the agent-facing and web docs) for each term whose meaning the diff changes",
     )
     expect(step).toContain(
       "file every list or doc either leaves behind as one such finding, each as `file:line`",
@@ -232,13 +261,93 @@ describe("code-review-loop's round 1 greps each changed term", () => {
       "its changed-term grep for each term whose meaning it changes",
     )
     expect(await page()).toContain("each term whose meaning the diff changes")
+    expect(await page()).toContain("greps the agent-facing and web docs")
   })
 
   test("AGENTS.md's pre-review pass runs the same grep before round 1", async () => {
     const agents = await Bun.file(join(root, "AGENTS.md")).text()
     const line = agents.split("\n").find((l) => l.includes("changed-term grep")) ?? ""
-    expect(line).toContain("`git grep -l <term>`")
+    expect(line).toContain("`git grep -l <term>` over the agent-facing and web docs")
     expect(line).toContain("each term whose meaning the diff changes")
     expect(agents).toContain("each list grep and changed-term grep with its hits")
+  })
+})
+
+describe("code-review-loop checks its own fixes and a repo scanner's landing (PG-251)", () => {
+  test("step 5 runs the checks a patch's files call for before posting it with the results (R11-1: #61, #186, #212, #246)", async () => {
+    const step = (await skill()).match(/^5\. \*\*Hand small fixes over\.\*\*.*$/m)?.[0] ?? ""
+    expect(step).toContain(
+      "a wording you suggest in a finding included, and run the checks its files call for (`bun run docs:wrap --check` on a wrapped doc, the test that pins the wording, `bun run test:file` on the file's mirrored test)",
+    )
+    expect(step).toContain("post the patch or wording with those results")
+    expect(step.split("**Done when**")[1] ?? "").toContain("its checks' results posted with it")
+    expect(await page()).toContain("runs the checks its files call for before it posts")
+  })
+
+  test("step 8 runs the touched tests on a local merge when canary adds or changes a repo-scanning test (#223's conventions test against #75 and #106)", async () => {
+    const step = (await skill()).match(/^8\. \*\*Report and wait\.\*\*.*$/m)?.[0] ?? ""
+    expect(step).toContain(
+      "When what landed adds or changes a test that scans the repo or reads the schema, run that test and the touched tests on a local merge with `origin/canary` before you call a waiting 5/5 still good",
+    )
+    expect(step).toContain("a schema conventions test landed on canary")
+    expect(step.split("**Done when**")[1] ?? "").toContain(
+      "each scanning or schema-reading test that landed has run",
+    )
+    expect(await page()).toContain("a test that scans the repo or reads the schema lands on canary")
+  })
+
+  test("The last 5/5 fetches canary again once CI goes green and reads both stand-in conditions against it before citing the run (#422's CI merge went stale twice in one round)", async () => {
+    const last = (await skill()).split("## The last 5/5")[1]?.split("\n## ")[0] ?? ""
+    const stand = last.split("**CI stands in**")[1]?.split("\n")[0] ?? ""
+    expect(stand).toContain(
+      "Once both checks are green at `<head>`, run `git -C <clone> fetch origin canary` again and read both stand-in conditions against that `origin/canary` before you cite the run",
+    )
+    expect(last.split("**Done when**")[1] ?? "").toContain(
+      "or CI stood in for them at the head, read against a canary fetched after both checks went green",
+    )
+    expect(await page()).toContain("fetches canary again once both checks are green")
+  })
+
+  test("step 8 runs a waiting scanner PR's touched tests on a local merge at every canary move, whatever landed (#422's CI merge went stale twice)", async () => {
+    const step = (await skill()).match(/^8\. \*\*Report and wait\.\*\*.*$/m)?.[0] ?? ""
+    expect(step).toContain(
+      "A waiting 5/5 whose own diff adds or changes a repo scanner or a data file one reads (The last 5/5's merge rule names them) takes that local merge at every canary move (a held stack's aside), whatever landed",
+    )
+    expect(step.split("**Done when**")[1] ?? "").toContain(
+      "each waiting 5/5 that adds or changes a repo scanner or a data file one reads has run its touched tests on a local merge with the newest `origin/canary`",
+    )
+    expect(await page()).toContain("A waiting 5/5 that adds or changes a repo scanner")
+  })
+
+  test("step 8 checks each waiting 5/5 for a merge conflict with canary whenever canary moves (#118 went CONFLICTING under its 5/5)", async () => {
+    const text = await skill()
+    const step = text.match(/^8\. \*\*Report and wait\.\*\*.*$/m)?.[0] ?? ""
+    expect(step).toContain(
+      "beside that `diff --stat`, run `git -C <clone> merge-tree --write-tree --name-only <head> origin/canary` on each waiting 5/5's head",
+    )
+    expect(step).toContain("as The last 5/5's merge-tree line scores it")
+    expect(step).toContain("a new verdict that names the conflicted files")
+    expect(step.split("**Done when**")[1] ?? "").toContain(
+      "each waiting 5/5's head has a `merge-tree` check against the newest `origin/canary`",
+    )
+    expect(step).toContain(
+      "On a stack held at 5/5 until the owner's try, that verdict is one trigger of a canary sync (playbook's DISPATCH.md, its line \"A stack held at 5/5 until the owner's try\")",
+    )
+    expect(step).toContain(
+      "each canary move runs only this `merge-tree` check on its waiting 5/5s, leaving the stale-text check above and the scanning-test merge below to the round at the sync before the try",
+    )
+    expect(step.split("**Done when**")[1] ?? "").toContain(
+      "a held stack's waiting 5/5 keeping its scanning-test merge and its stale-text check for the round at the sync before the try",
+    )
+    const last = text.split("## The last 5/5")[1]?.split("\n## ")[0] ?? ""
+    expect(last).toContain(
+      "First `git -C <clone> merge-tree --write-tree <head> origin/canary`: a conflict there is a blocking finding, which goes to the worker with the merge",
+    )
+    expect(await page()).toContain(
+      "also checks each waiting 5/5's head for a merge conflict with canary",
+    )
+    expect(await page()).toContain(
+      "On a stack held at 5/5 until the owner's try, that verdict is one signal to sync it with canary",
+    )
   })
 })

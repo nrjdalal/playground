@@ -132,7 +132,7 @@ export const toggleApp = (prefs: AppPrefs, id: DashboardAppId): AppPrefs => ({
     : [...prefs.hidden, id],
 })
 
-// Pure: a drop moves one app in the list as shown, and the whole list becomes your order, an app the list leaves out (Linear while it is off) keeping its place after it.
+// Pure: a drop moves one app in the list as shown, and the whole list becomes your order, an app the list leaves out (a parked one, such as Plan) keeping its place after it.
 export const moveApp = (
   prefs: AppPrefs,
   shown: DashboardAppId[],

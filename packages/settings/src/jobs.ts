@@ -3,9 +3,16 @@ import { z } from "zod"
 import { defineSettings } from "@/settings"
 
 // The ops job registry: one setting per job, `jobs.<camelName>`, holding the whole job, so turning a job on, pausing it or moving its schedule is a settings write with a reason, never a PR. The runner renders <data>/ops/jobs.json and each launchd job's plist from it at the top of every pass. A fresh install has every job off but the Dashboard's (ops-dashboard) and ops-usage, so the Dashboard shows the account's week with no setting. In a command, cwd or program, {bun}, {checkout} (the install's checkout), {dashboard} (the Dashboard's checkout, on live.branch) and {data} (the data folder) are filled in by the render.
-export const jobSchema = z.strictObject({
+// A row stored before needsCmux left the schema loads without it, and one that set it with no runtime is a terminal job, which runs in herdr.
+const withoutNeedsCmux = (row: unknown): unknown => {
+  if (!row || typeof row !== "object" || !("needsCmux" in row)) return row
+  const { needsCmux, ...rest } = row as Record<string, unknown>
+  return needsCmux === true && rest.runtime === undefined ? { ...rest, runtime: "herdr" } : rest
+}
+
+const jobFields = z.strictObject({
   callsModel: z.boolean(),
-  // A job a terminal holds (herdr, cmux or auto): its command, run from cwd.
+  // A job a terminal holds (herdr): its command, run from cwd.
   command: z.string().min(1).optional(),
   cwd: z.string().min(1).optional(),
   description: z.string().min(1),
@@ -15,11 +22,16 @@ export const jobSchema = z.strictObject({
   // A job launchd holds: its label, and the program its plist runs from cwd.
   launchd: z.string().min(1).optional(),
   model: z.string().min(1).optional(),
-  needsCmux: z.boolean(),
   neverPause: z.boolean().optional(),
   pausedFor: z.string().optional(),
   program: z.array(z.string().min(1)).min(1).optional(),
-  runtime: z.enum(["auto", "cmux", "herdr"]).optional(),
+  // A stored row's old cmux or auto reads as herdr, where every terminal job runs.
+  runtime: z
+    .preprocess(
+      (runtime) => (runtime === "cmux" || runtime === "auto" ? "herdr" : runtime),
+      z.enum(["herdr"]),
+    )
+    .optional(),
   schedule: z.union([
     z.strictObject({ always: z.literal(true) }),
     z.strictObject({ every: z.number().int().positive() }),
@@ -27,6 +39,7 @@ export const jobSchema = z.strictObject({
   // The process group name a job's stop keys on (procs.sh), for a job that holds a stack.
   stop: z.string().min(1).optional(),
 })
+export const jobSchema = z.preprocess(withoutNeedsCmux, jobFields)
 export type Job = z.infer<typeof jobSchema>
 
 // A job's name as its setting key: ops-merge-train is jobs.opsMergeTrain.
@@ -43,7 +56,6 @@ const terminal = (
   cwd: "{checkout}",
   enabled: false,
   heartbeat: name,
-  needsCmux: true,
   runtime: "herdr",
   ...job,
 })
@@ -54,23 +66,23 @@ const launchd = (name: string, job: Pick<Job, "description" | "schedule">): Job 
   enabled: false,
   heartbeat: name,
   launchd: `com.playground.${name}`,
-  needsCmux: false,
   program: ["{bun}", "--no-env-file", `{checkout}/packages/scripts/src/${name}/cli.ts`],
   ...job,
 })
 
-const bunJob = (name: string) =>
-  `{bun} --no-env-file {checkout}/packages/scripts/src/${name}/cli.ts`
+const bunJob = (name: string, root = "{checkout}") =>
+  `{bun} --no-env-file ${root}/packages/scripts/src/${name}/cli.ts`
 
 // The jobs Playground ships, each off until the owner turns it on but the Dashboard's own; A to Z.
 export const JOBS: Record<string, Job> = {
   "ops-awake": terminal("ops-awake", `${bunJob("ops-awake")} --data {data}`, {
     description:
       "Keeps the Mac awake on AC power and on battery with caffeinate, display and lock unchanged.",
-    needsCmux: false,
     schedule: { always: true },
   }),
-  "ops-changelog": terminal("ops-changelog", bunJob("ops-changelog"), {
+  // Its sync runs in its script's checkout, so it runs from the Dashboard's, which holds the database's .env.
+  "ops-changelog": terminal("ops-changelog", bunJob("ops-changelog", "{dashboard}"), {
+    cwd: "{dashboard}",
     description: "Syncs new canary merges and main versions into the Changelog every 5 minutes.",
     schedule: { every: 300 },
   }),
@@ -85,13 +97,11 @@ export const JOBS: Record<string, Job> = {
   "ops-dm-watch": terminal("ops-dm-watch", bunJob("ops-dm-watch"), {
     description:
       "In Slack mode, hands each message in the owner's DM to the dispatcher, the second dispatcher too when no reply lands in 3 minutes.",
-    needsCmux: false,
     schedule: { every: 60 },
   }),
   "ops-ext-sync": terminal("ops-ext-sync", bunJob("ops-ext-sync"), {
     description:
       "Syncs each extension with its private repository at 02:30, pushed only after a clean secrets scan.",
-    needsCmux: false,
     schedule: { every: 86400 },
   }),
   "ops-flow": launchd("ops-flow", {
@@ -106,7 +116,6 @@ export const JOBS: Record<string, Job> = {
   "ops-machine": terminal("ops-machine", `${bunJob("ops-machine")} --data {data}`, {
     description:
       "Writes one line a minute of the machine's load, memory and live sessions to machine.jsonl.",
-    needsCmux: false,
     schedule: { every: 60 },
   }),
   "ops-merge-train": terminal(
@@ -201,7 +210,7 @@ const plistOf = (name: string, job: Job, fill: Fill): string => {
   ].join("\n")
 }
 
-// Pure: the registry's values (policy.json's, over each job's default) as jobs.json in the shape every reader parses, and an enabled launchd job's plist by label. A job jobs.json lists that the registry does not know (a company script, until the store holds it) is kept as it stands.
+// Pure: the registry's values (policy.json's, over each job's default) as jobs.json in the shape every reader parses, and an enabled launchd job's plist by label. A job jobs.json lists that the registry does not know (a company script, until the store holds it) is kept as it stands, less an old needsCmux (withoutNeedsCmux).
 export const renderJobs = (
   values: Record<string, unknown>,
   existing: { name?: unknown }[],
@@ -224,10 +233,9 @@ export const renderJobs = (
   })
   const known = new Set(Object.keys(JOBS))
   jobs.push(
-    ...(existing.filter((job) => typeof job.name === "string" && !known.has(job.name)) as Record<
-      string,
-      unknown
-    >[]),
+    ...(existing
+      .filter((job) => typeof job.name === "string" && !known.has(job.name))
+      .map(withoutNeedsCmux) as Record<string, unknown>[]),
   )
   return { jobs: jobs.sort((a, b) => String(a.name).localeCompare(String(b.name))), plists }
 }
@@ -241,7 +249,6 @@ const LISTED_FIELDS = [
   "heartbeat",
   "launchd",
   "model",
-  "needsCmux",
   "neverPause",
   "pausedFor",
   "runtime",

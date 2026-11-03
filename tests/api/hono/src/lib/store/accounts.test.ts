@@ -214,7 +214,11 @@ describe("Settings' accounts on a fixture stack", () => {
       const loaded = loadFixture(null)
       if (!loaded.ok) throw new Error(loaded.error)
       const dir = join(bin, `fixture-${n++}`)
-      writeFixture(loaded.fixture, dir)
+      writeFixture(loaded.fixture, dir, {
+        home: join(bin, "home"),
+        main: join(bin, "main"),
+        trash: join(bin, "data", "trash"),
+      })
       const data = join(dir, "claude", "playground")
       expect(listAccounts(data).map(({ key, provider }) => `${provider}:${key}`)).toEqual([
         "claude:pat@example.com",

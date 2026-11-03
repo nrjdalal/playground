@@ -69,6 +69,7 @@ const restored = () => ({
 describe("a factory session's headless claude that would bill this machine's login is refused, with the shape", () => {
   test.each([
     "claude -p 'score it'",
+    "arr=($(claude -p hi))",
     "claude --print 'score it'",
     "claude --model claude-opus-5-5 -p hi",
     "cd /tmp && claude -p hi",

@@ -1,8 +1,10 @@
+import { statfsSync } from "node:fs"
 import { appendFile, lstat, mkdir, readdir, stat, unlink } from "node:fs/promises"
 import { homedir } from "node:os"
-import { basename, join } from "node:path"
+import { basename, dirname, join } from "node:path"
 
 import { dispatcherOf, kindOf, managerKindOfName, managerOf } from "@packages/config/kinds"
+import { purgeTrash } from "@packages/safe-delete"
 import { accountSettings, readPolicy } from "@packages/settings"
 
 import {
@@ -14,6 +16,7 @@ import { liveInput } from "../../../../scripts/ops/optimizer/idle_sessions"
 import { pending } from "../ops-outbox/drain"
 import { writeAtomic } from "../write-atomic"
 import { dashboardWatch } from "./dashboard-watch"
+import { guardProbe } from "./guard-probe"
 
 // ops-tick: runner-steady-tick's timed beats, run as a script with no model call. Each beat runs at its old cron, in machine wall time as CronCreate ran it, runs the same script, and queues what that script prints for the session it went to before, through notify.sh and the ops relay (ADR 0010); a beat whose script prints nothing sends nothing. The Lanes keeper comes in a later change; the 98% move to GLM is retired (Inbox #i827) for the account rotation (`scripts/ops/usage/login-flip.py`).
 export const CYCLE_SECONDS = 60
@@ -361,7 +364,7 @@ const felled = async (ctx: Context, upPy: string, agents: Map<string | undefined
   await appendFile(toldPath, sent.map((line) => `${line}\n`).join(""))
 }
 
-// ops-up every 5 minutes, so a job that went down (a reboot, a quit cmux) comes back with no hand step, each line it prints told to ops once until it changes.
+// ops-up every 5 minutes, so a job that went down (a reboot, a herdr server that went down) comes back with no hand step, each line it prints told to ops once until it changes.
 const up = async (ctx: Context) => {
   const toldPath = join(ctx.ops, "tick", "up-told.txt")
   const told = new Set(
@@ -508,9 +511,25 @@ export const turboPrune =
     await appendFile(join(ctx.ops, "log", "turbo-prune.log"), `${isoSeconds(ctx.now)} ${line}\n`)
   }
 
+const freeBytes = (dir: string): number => {
+  const fs = statfsSync(dir)
+  return fs.bavail * fs.bsize
+}
+
+// The trash playground rm fills, beside ops in the data folder, emptied hourly by purgeTrash (@packages/safe-delete): each batch over 7 days old, then the oldest while its disk has under 50 GB free; one line in ops/log/trash-purge.log.
+export const trashPurge =
+  (trash?: string, free = freeBytes) =>
+  async (ctx: Context) => {
+    const root = trash ?? join(dirname(ctx.ops), "trash")
+    const { removed, skipped } = purgeTrash(root, { free: () => free(root), now: ctx.now })
+    const line = `removed ${removed.length}${removed.length ? ` (${removed.join(", ")})` : ""}${skipped.length ? `, skipped ${skipped.join(", ")}` : ""}`
+    await mkdir(join(ctx.ops, "log"), { recursive: true })
+    await appendFile(join(ctx.ops, "log", "trash-purge.log"), `${isoSeconds(ctx.now)} ${line}\n`)
+  }
+
 const words = (text: string) => async (ctx: Context) => void (await ctx.send("optimizer", text))
 
-// Every worktree of the repo's clone on canary, and the leads worktree on its leads branch, kept at the head of the origin branch each tracks (canary's, and for leads the branch the install cloned, which spawn.sh's cut sets: main on a public install), so every session runs that line rather than the live checkout: a fast-forward pull, never in one holding an open change, a pull that changed bun.lock or a package.json then installing through run-slot as redeploy-pull.sh does and owing that install in tick/canary-pull-owed.json until one exits 0, and a pull or install that fails named to ops once a failure, marked by its words in tick/canary-pull-told.json and cleared once that worktree pulls and owes no install.
+// Every worktree of the repo's clone on canary, and the leads worktree on its leads branch, kept at the head of the origin branch each tracks (canary's, and for leads the branch the install cloned, which spawn.sh's cut sets: main on a public install), so every session runs that line rather than the live checkout: a fast-forward after a fetch, never in one holding an open change, an incoming change to bun.lock or a package.json fast-forwarding and installing back to back inside one run-slot slot (a fast-forward whose install then waited 42s for a slot once left a roster.ts run on new code and old node_modules) and owing that install in tick/canary-pull-owed.json until one exits 0, and a pull or install that fails named to ops once a failure, marked by its words in tick/canary-pull-told.json and cleared once that worktree pulls and owes no install.
 const canaryPull = async (ctx: Context) => {
   const list = await ctx.run(["git", "-C", ctx.repo, "worktree", "list", "--porcelain"])
   const trees = list.out
@@ -527,34 +546,39 @@ const canaryPull = async (ctx: Context) => {
   const owedBefore = JSON.stringify([...owed])
   for (const tree of trees) {
     if ((await ctx.run(["git", "-C", tree, "status", "--porcelain"])).out.trim()) continue
-    const old = (await ctx.run(["git", "-C", tree, "rev-parse", "HEAD"])).out.trim()
-    const pull = await ctx.run(["git", "-C", tree, "pull", "--ff-only", "-q"], 120_000)
+    const fetch = await ctx.run(["git", "-C", tree, "fetch", "-q"], 120_000)
     let text = ""
-    if (pull.code !== 0)
-      text = `canary-pull: ${tree} did not fast-forward: ${lines(pull.out).at(-1) ?? `exit ${pull.code}`}`
+    if (fetch.code !== 0)
+      text = `canary-pull: ${tree} did not fetch: ${lines(fetch.out).at(-1) ?? `exit ${fetch.code}`}`
     else {
-      const changed = await ctx.run(["git", "-C", tree, "diff", "--name-only", old, "HEAD"])
-      if (owed.has(tree) || /(^|\/)(bun\.lock|package\.json)$/m.test(changed.out)) {
-        const install = await ctx.run(
-          [
-            join(ctx.ops, "run-slot.sh"),
-            "ops-tick",
-            "--",
-            "bun",
-            "install",
-            "--frozen-lockfile",
-            "--ignore-scripts",
-            "--cwd",
-            tree,
-          ],
-          30 * 60_000,
-        )
-        if (install.code === 0) owed.delete(tree)
-        else {
-          owed.add(tree)
-          text = `canary-pull: ${tree} did not install: ${lines(install.out).at(-1) ?? `exit ${install.code}`}`
-        }
-      }
+      const sha = async (ref: string) =>
+        (await ctx.run(["git", "-C", tree, "rev-parse", ref])).out.trim()
+      const [old, up] = [await sha("HEAD"), await sha("@{u}")]
+      const incoming = await ctx.run(["git", "-C", tree, "diff", "--name-only", old, up])
+      const install = owed.has(tree) || /(^|\/)(bun\.lock|package\.json)$/m.test(incoming.out)
+      const step = install
+        ? await ctx.run(
+            [
+              join(ctx.ops, "run-slot.sh"),
+              "ops-tick",
+              "--",
+              "bash",
+              "-c",
+              'git -C "$2" merge --ff-only -q "$1" && bun install --frozen-lockfile --ignore-scripts --cwd "$2"',
+              "canary-pull",
+              up,
+              tree,
+            ],
+            30 * 60_000,
+          )
+        : await ctx.run(["git", "-C", tree, "merge", "--ff-only", "-q", up], 120_000)
+      const why = lines(step.out).at(-1) ?? `exit ${step.code}`
+      if (step.code === 0) {
+        if (install) owed.delete(tree)
+      } else if (install && ((await sha("HEAD")) !== old || old === up)) {
+        owed.add(tree)
+        text = `canary-pull: ${tree} did not install: ${why}`
+      } else text = `canary-pull: ${tree} did not fast-forward: ${why}`
     }
     if (!text) delete told[tree]
     else if (told[tree] !== text && (await ctx.send("ops", text, true))) told[tree] = text
@@ -637,8 +661,10 @@ export const BEATS: Beat[] = [
   { cron: "7 */2 * * *", name: "optimizer-tick", run: words("optimizer tick"), to: "optimizer" },
   { cron: "13 21 * * *", name: "optimizer-daily", run: words("optimizer daily"), to: "optimizer" },
   { cron: "29 3 * * 0", name: "turbo-prune", run: turboPrune(), to: "ops/log/turbo-prune.log" },
+  { cron: "17 * * * *", name: "trash-purge", run: trashPurge(), to: "ops/log/trash-purge.log" },
   { cron: "*/5 * * * *", name: "canary-pull", run: canaryPull, to: "ops, once a failed pull" },
   { cron: "*/5 * * * *", name: "relay-watch", run: relayWatch, to: "the Inbox, by bun run ask" },
+  { cron: "*/10 * * * *", name: "guard-probe", run: guardProbe, to: "dispatcher" },
   {
     cron: "* * * * *",
     name: "dashboard-watch",

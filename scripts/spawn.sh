@@ -20,6 +20,7 @@ set -euo pipefail
 #      free at 8% or more (kern.memorystatus_level)
 #   A GLM session takes its own load and memory gate in place of both:
 #   load5 under 30, pressure level 1 and swap-ins under 100/s (vm_stat -c 2 1)
+#   Under Claude Code's sandbox the load comes from uptime, and a refused pressure level leaves the swap-ins to decide (scripts/README.md)
 #   3. usage, the launching backend's own window: Claude reads usage.json
 #      (5-hour under 90%, the week within 14.3 points a day of pace, floored at one day's share, readings
 #      no older than 15 minutes; one never written, as on a fresh install before ops-usage first runs, passes,
@@ -71,6 +72,8 @@ REPO="$(cd -P "$(dirname "$0")/.." && pwd -P)"
 # The main checkout: git's common dir less .git, the same folder from a worktree as from the checkout itself.
 MAIN="$(git -C "$REPO" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" && MAIN="$(cd -P "$(dirname "$MAIN")" && pwd -P)" || MAIN=$REPO
 ROSTER="$REPO/scripts/roster.ts"
+# pid $1 and its start, one `<pid> <lstart>` line words single-spaced, or nothing once it has gone: from ps, else from the kernel's process table, since Claude Code's sandbox refuses the setuid ps
+started() { echo $(LC_ALL=C TZ=UTC ps -o pid=,lstart= -p "$1" 2>/dev/null || python3 -I "$REPO/scripts/ops/ptable.py" started "$1"); }
 # launchd runs a login item (herdr's restore) on /usr/bin:/bin, where bun is not on PATH, so the roster write falls back to bun's own install folder.
 BUN=$(command -v bun || echo "$HOME/.bun/bin/bun")
 REGISTRY="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/sessions"
@@ -85,6 +88,7 @@ fi
 DATA=$(cd / && env $UNSET "$BUN" --no-env-file -e "import { dataDir } from '$REPO/packages/env/src/data-dir.ts'; console.log(dataDir())") || { echo "spawn.sh: bun could not resolve the data folder" >&2; exit 1; }
 [[ $DATA == "$HOME"/* ]] && SHOWN="~${DATA#"$HOME"}" || SHOWN=$DATA
 SETTINGS="$DATA/factory-settings.json"
+HERDR_DIR=${PLAYGROUND_HERDR_DIR:-${DESK_HERDR_DIR:-$DATA/herdr}}
 PINS="$DATA/backends"
 RESUME_DIR="$DATA/resume"
 ROSTER_JSON="$DATA/roster.json"
@@ -184,10 +188,10 @@ second_dispatcher() { [ "${1%-2}" != "$1" ] && [ "$(session_kind "${1%-2}")" = d
 
 # The live sessions: a registry file whose pid is alive with the start time the file records, as the Dashboard reads them, but for a `claude -p` run (entrypoint sdk-cli), which holds no name. It prints a line, tab-separated pid, session id, folder and process start ("-" for a field the file lacks), for each live session named $1, the lowest pid first.
 live_holders() {
-  python3 - "$REGISTRY" "$1" <<'PY'
+  python3 - "$REGISTRY" "$1" "$REPO" <<'PY'
 import json, os, subprocess, sys
 
-folder, wanted = sys.argv[1:3]
+folder, wanted, repo = sys.argv[1:4]
 entries = {}
 # Claude Code makes its sessions folder with its first session, so a Mac that never ran one holds no live session.
 try:
@@ -205,19 +209,28 @@ for file in files:
         data = {}
     entries[int(stem)] = data if isinstance(data, dict) else {}
 me = os.getpid()
-listing = subprocess.run(
-    ["ps", "-o", "pid=,lstart=", "-p", ",".join(str(p) for p in [me, *entries])],
-    capture_output=True,
-    env=dict(os.environ, LC_ALL="C", TZ="UTC"),
-    text=True,
-).stdout
+pids = [me, *entries]
+# each pid's start from ps, else from the kernel's process table (ptable.py), since Claude Code's sandbox refuses the setuid ps
+try:
+    listing = subprocess.run(
+        ["ps", "-o", "pid=,lstart=", "-p", ",".join(str(p) for p in pids)],
+        capture_output=True,
+        env=dict(os.environ, LC_ALL="C", TZ="UTC"),
+        text=True,
+    ).stdout
+except OSError:
+    listing = ""
 starts = {}
 for line in listing.splitlines():
     parts = line.split(None, 1)
     if len(parts) == 2 and parts[0].isdigit():
         starts[int(parts[0])] = " ".join(parts[1].split())
 if me not in starts:
-    sys.exit("ps did not list this process")
+    sys.path.insert(0, os.path.join(repo, "scripts", "ops"))
+    import ptable
+    starts = {pid: start for pid in pids if (start := ptable.started(pid))}
+if me not in starts:
+    sys.exit("neither ps nor the kernel's process table listed this process")
 def field(value):
     return " ".join(value.split()) if isinstance(value, str) and value.strip() else "-"
 for pid, data in sorted(entries.items()):
@@ -277,6 +290,30 @@ def sysctl_int(name):
     except ValueError:
         return None
 
+# whether Claude Code's sandbox refuses sysctl reading name, as it does every kern.memorystatus_* reading
+def sandbox_refuses(name):
+    return "not permitted" in subprocess.run(["sysctl", "-n", name], capture_output=True, text=True).stderr
+
+# (load1, load5) from sysctl, else from uptime, since Claude Code's sandbox refuses the sysctl command's name lookup; None when neither reads
+def loadavg():
+    words = subprocess.run(["sysctl", "-n", "vm.loadavg"], capture_output=True, text=True).stdout.strip(" {}\n").split()
+    if len(words) < 2:
+        out = subprocess.run(["uptime"], capture_output=True, text=True, env=dict(os.environ, LC_ALL="C")).stdout
+        words = out.rpartition("load average")[2].lstrip("s:").replace(",", " ").split()
+    try:
+        return float(words[0]), float(words[1])
+    except (IndexError, ValueError):
+        return None
+
+# the last second's swap-ins, from vm_stat's last row under a header naming each column, or None when it cannot be read
+def swapins():
+    try:
+        rows = [line.split() for line in subprocess.run(["vm_stat", "-c", "2", "1"], capture_output=True, text=True, timeout=10, check=True).stdout.splitlines()]
+        column = next(row for row in rows if "swapins" in row).index("swapins")
+        return int(rows[-1][column])
+    except (IndexError, OSError, StopIteration, subprocess.SubprocessError, ValueError):
+        return None
+
 def load(name):
     path = os.path.join(data_dir, name)
     if not os.path.exists(path):
@@ -305,35 +342,31 @@ if move:
     readings["memory"] = f"skipped (move of pid {move})"
 elif backend == "glm":
     # a GLM session draws no Claude usage, so it has its own gate: load5 under gates.glmLoad5Max, memory pressure 1 and swap-ins under gates.glmSwapinsMax a second
-    fields = subprocess.run(["sysctl", "-n", "vm.loadavg"], capture_output=True, text=True).stdout.split()
-    try:
-        readings["load5"] = float(fields[2])
-    except (IndexError, ValueError):
-        refuse("load", "it cannot read the load average (sysctl vm.loadavg)")
+    loads = loadavg()
+    if loads is None:
+        refuse("load", "it cannot read the load average (sysctl vm.loadavg or uptime)")
+    readings["load5"] = loads[1]
     if readings["load5"] >= gates["glmLoad5Max"]:
         refuse("load", f"load5 is {readings['load5']:.2f} (sysctl vm.loadavg), and a GLM session starts under {fmt(gates['glmLoad5Max'])}")
     readings["pressure"] = sysctl_int("kern.memorystatus_vm_pressure_level")
-    if readings["pressure"] is None:
+    if readings["pressure"] is None and sandbox_refuses("kern.memorystatus_vm_pressure_level"):
+        readings["memory"] = "pressure level refused by the sandbox, so the swap-ins alone decide"
+    elif readings["pressure"] is None:
         refuse("memory", "it cannot read the pressure level (sysctl kern.memorystatus_vm_pressure_level)")
-    if readings["pressure"] != 1:
+    elif readings["pressure"] != 1:
         refuse("memory", f"pressure level is {readings['pressure']} (sysctl kern.memorystatus_vm_pressure_level), and a GLM session starts at 1 alone")
-    # vm_stat's last row is the last second's counts, under a header naming each column
-    try:
-        rows = [line.split() for line in subprocess.run(["vm_stat", "-c", "2", "1"], capture_output=True, text=True, timeout=10, check=True).stdout.splitlines()]
-        column = next(row for row in rows if "swapins" in row).index("swapins")
-        readings["swapins"] = int(rows[-1][column])
-    except (IndexError, OSError, StopIteration, subprocess.SubprocessError, ValueError):
+    readings["swapins"] = swapins()
+    if readings["swapins"] is None:
         refuse("memory", "it cannot read the swap-ins (vm_stat -c 2 1)")
     if readings["swapins"] >= gates["glmSwapinsMax"]:
         refuse("memory", f"swap-ins are {readings['swapins']}/s (vm_stat), and a GLM session starts under {fmt(gates['glmSwapinsMax'])}/s")
 else:
     # 1 load: max(load1, load5) plus the starts the log holds from the last gates.startsWindow seconds
-    fields = subprocess.run(["sysctl", "-n", "vm.loadavg"], capture_output=True, text=True).stdout.split()
-    try:
-        load1, load5 = float(fields[1]), float(fields[2])
-    except (IndexError, ValueError):
-        refuse("load", "it cannot read the load average (sysctl vm.loadavg)")
-    cores = sysctl_int("hw.ncpu")
+    loads = loadavg()
+    if loads is None:
+        refuse("load", "it cannot read the load average (sysctl vm.loadavg or uptime)")
+    load1, load5 = loads
+    cores = sysctl_int("hw.ncpu") or os.cpu_count()
     if cores is None:
         refuse("load", "it cannot read the core count (sysctl hw.ncpu)")
     readings["cores"] = cores
@@ -404,17 +437,25 @@ else:
             )
             refuse("load", f"max(load1, load5) is {readings['load5']:.2f} and {starts:g} started in the last {fmt(gates['startsWindow'] / 60)} minutes, {at}; {cpu}. Wait for it to fall, or close a session that is done, and run it again.")
 
-    # 2 memory
+    # 2 memory; where Claude Code's sandbox refuses the pressure level and free share, the swap-ins stand in, under GLM's line
     readings["pressure"] = sysctl_int("kern.memorystatus_vm_pressure_level")
-    if readings["pressure"] is None:
-        refuse("memory", "it cannot read the pressure level (sysctl kern.memorystatus_vm_pressure_level)")
-    if readings["pressure"] not in (1, 2):
-        refuse("memory", f"pressure level is {readings['pressure']} (sysctl kern.memorystatus_vm_pressure_level), 1 or 2 passes")
-    readings["free"] = sysctl_int("kern.memorystatus_level")
-    if readings["free"] is None:
-        refuse("memory", "it cannot read the free share (sysctl kern.memorystatus_level)")
-    if readings["free"] < gates["memoryFreeMin"]:
-        refuse("memory", f"free is {readings['free']}% (sysctl kern.memorystatus_level), {gates['memoryFreeMin']}% is the floor. Close a session or wait for the pressure to pass, and run it again.")
+    if readings["pressure"] is None and sandbox_refuses("kern.memorystatus_vm_pressure_level"):
+        readings["memory"] = "pressure level and free share refused by the sandbox"
+        readings["swapins"] = swapins()
+        if readings["swapins"] is None:
+            refuse("memory", "the sandbox refuses the pressure level, and it cannot read the swap-ins (vm_stat -c 2 1)")
+        if readings["swapins"] >= gates["glmSwapinsMax"]:
+            refuse("memory", f"the sandbox refuses the pressure level, and swap-ins are {readings['swapins']}/s (vm_stat), {fmt(gates['glmSwapinsMax'])}/s is the line. Close a session or wait for the pressure to pass, and run it again.")
+    else:
+        if readings["pressure"] is None:
+            refuse("memory", "it cannot read the pressure level (sysctl kern.memorystatus_vm_pressure_level)")
+        if readings["pressure"] not in (1, 2):
+            refuse("memory", f"pressure level is {readings['pressure']} (sysctl kern.memorystatus_vm_pressure_level), 1 or 2 passes")
+        readings["free"] = sysctl_int("kern.memorystatus_level")
+        if readings["free"] is None:
+            refuse("memory", "it cannot read the free share (sysctl kern.memorystatus_level)")
+        if readings["free"] < gates["memoryFreeMin"]:
+            refuse("memory", f"free is {readings['free']}% (sysctl kern.memorystatus_level), {gates['memoryFreeMin']}% is the floor. Close a session or wait for the pressure to pass, and run it again.")
 
 # 3 usage: the launching backend's own window
 readings["backend"] = backend or "claude"
@@ -753,7 +794,6 @@ set -- ${words[@]+"${words[@]}"}
 
 # herdr runs by the absolute path herdr's pin names, never a bare herdr, and only while that file is the pinned version and hash and the server $1 is running; hr then speaks to that server.
 herdr_ready() {
-  HERDR_DIR=${PLAYGROUND_HERDR_DIR:-${DESK_HERDR_DIR:-$DATA/herdr}}
   HERDR_SESSION_NAME=$1
   word "$HERDR_SESSION_NAME" || refuse "PLAYGROUND_HERDR_SESSION is a word, not $HERDR_SESSION_NAME"
   pinned=$(python3 -I - "$HERDR_DIR/pin.json" <<'PY'
@@ -797,13 +837,12 @@ if [ "$MODE" = restore ]; then
   [ $# -eq 0 ] && [ -z "$CHECK$ACCOUNT$BACKEND$CLAUDE_MODEL$EFFORT$RESUME_BRIEF$RUNTIME$SIZE" ] || usage "restore takes no other words"
   # One restore at a time: ops-herdr's start and its job's next cycle can both run one, and two resumes of a name both pass the live-name check until its claude writes its registry file, so it would start twice. The lock is a symlink naming its holder's pid and start time, so a holder that died, or a pid macOS handed on, frees it.
   LOCK="$RESUME_DIR/.restore.lock"
-  holder() { echo $(LC_ALL=C TZ=UTC ps -o pid=,lstart= -p "$1" 2>/dev/null); }
-  ME=$(holder $$)
+  ME=$(started $$)
   ME=${ME:-$$}
   mkdir -p "$RESUME_DIR"
   if ! ln -s "$ME" "$LOCK" 2>/dev/null; then
     HELD=$(readlink "$LOCK")
-    if [ -n "$HELD" ] && [ "$HELD" = "$(holder "${HELD%% *}")" ]; then
+    if [ -n "$HELD" ] && [ "$HELD" = "$(started "${HELD%% *}")" ]; then
       echo "another restore is running (pid ${HELD%% *})"
       exit 1
     fi
@@ -1009,7 +1048,6 @@ case "$MODE" in
     [ $# -eq 3 ] || usage
     ROLE=probe KIND=probe NAME=$1 TO=$2 BRIEF=$3
     word "$TO" || refuse "it reports to a session name, not $TO"
-    [ "$RUNTIME" = herdr ] || refuse "a probe opens a workspace of its own in herdr alone; in cmux it opens as a column beside its spawner"
     DIR=$REPO
     ;;
   manager)
@@ -1024,14 +1062,20 @@ case "$MODE" in
     esac
     [ "$KIND" = dispatcher ] && { [ "$NAME" = "$TO" ] || { [ "$(session_kind "$NAME")" = dispatcher ] && ! second_dispatcher "$NAME"; }; } && FIRST=1 TO=
     DIR="${PLAYGROUND_REPO:-$MAIN}/.claude/worktrees/leads"
-    # A fresh checkout has no leads worktree until its first manager start cuts one as branch leads from origin's copy of the branch the checkout was cloned on, tracking it: canary only for a checkout cloned on canary on purpose, else main, so a public install's managers run what it shipped. A branch of its own, since the checkout holds its branch already, and a manager's bare git calls land in its own tree, never the main checkout. Its install follows at once, since a manager runs bun run from it.
+    # A fresh checkout has no leads worktree until its first manager start cuts one as branch leads from origin's copy of the branch the checkout was cloned on, tracking it: canary only for a checkout cloned on canary on purpose, else main, so a public install's managers run what it shipped. A branch of its own, since the checkout holds its branch already, and a manager's bare git calls land in its own tree, never the main checkout.
+    CUT=
     if [ ! -e "$DIR" ]; then
       base=main
       [ "$(git -C "${PLAYGROUND_REPO:-$MAIN}" symbolic-ref -q --short HEAD 2>/dev/null)" = canary ] && base=canary
       made=$(git -C "${PLAYGROUND_REPO:-$MAIN}" worktree add -q --track -B leads "$DIR" "origin/$base" 2>&1) || refuse "git worktree add $DIR origin/$base failed, so there is no leads worktree to open in: ${made%%$'\n'*}"
-      made=$(bash "$REPO/scripts/ops/run-slot.sh" "$NAME" -- "$BUN" install --frozen-lockfile --ignore-scripts --cwd "$DIR" 2>&1) || { git -C "${PLAYGROUND_REPO:-$MAIN}" worktree remove --force "$DIR" >/dev/null 2>&1; refuse "bun install in the new leads worktree $DIR failed, so it is removed for the next start to cut again: ${made##*$'\n'}"; }
+      CUT=1
     fi
     [ -d "$DIR" ] || refuse "$DIR is not a folder"
+    # Its install follows until one has exited 0, which leaves node_modules/.playground-installed, since a failed install leaves a partial node_modules and a manager runs bun run from it; a failed install moves only this start's cut to the trash for the next start to cut again, and keeps any other leads worktree, which may hold work, for the next start's install.
+    if [ ! -e "$DIR/node_modules/.playground-installed" ]; then
+      made=$(bash "$REPO/scripts/ops/run-slot.sh" "$NAME" -- "$BUN" install --frozen-lockfile --ignore-scripts --cwd "$DIR" 2>&1) || { [ -n "${CUT:-}" ] || refuse "bun install in the leads worktree $DIR failed, and this start did not cut it, so it stays for the next start's install: ${made##*$'\n'}"; gone=$("$BUN" --no-env-file "$REPO/packages/scripts/src/playground/cli.ts" rm --worktree "$DIR" --reason "its install failed" 2>&1) || refuse "bun install in the new leads worktree $DIR failed (${made##*$'\n'}), and playground rm --worktree refused to move it, so it stays: ${gone##*$'\n'}"; refuse "bun install in the new leads worktree $DIR failed, so it is moved to the trash for the next start to cut again: ${made##*$'\n'}"; }
+      mkdir -p "$DIR/node_modules" && : > "$DIR/node_modules/.playground-installed"
+    fi
     ;;
   resume)
     [ $# -ge 2 ] && [ $# -le 3 ] || usage
@@ -1117,6 +1161,11 @@ if [ "$MODE" != resume ] || [ -n "$BRIEF" ]; then
   { [[ $BRIEF =~ ^[A-Za-z0-9._-][A-Za-z0-9._/-]*$ ]] && [[ /$BRIEF/ != */../* ]]; } || refuse "a brief is a file name under $SHOWN"
   # Only the file's name reaches the prompt, so a session reads the file itself.
   [ -f "$DATA/$BRIEF" ] || refuse "$SHOWN/$BRIEF is not a file"
+  # A brief filled from its role's template (new-reviewer.md for a reviewer) keeps none of that template's slots, so a session never starts on a bare slot, while a brief's prose about another role's slot is left alone.
+  template="$REPO/scripts/briefs/new-${ROLE:-}.md"
+  slots=$([ ! -f "$template" ] || grep -oE '__[A-Z0-9]+__' "$template" | sort -u || true)
+  left=$([ -z "$slots" ] || grep -oE '__[A-Z0-9]+__' "$DATA/$BRIEF" | sort -u | grep -Fx -f <(printf '%s\n' "$slots") | paste -sd ' ' - || true)
+  [ -z "$left" ] || refuse "$SHOWN/$BRIEF still holds the slot $left: fill each one, read the brief back, then run spawn.sh again (playbook's SESSIONS.md, the fill rule)"
 fi
 # A resume runs the session the way its start recorded; only a start takes a backend fresh.
 PIN_GIVEN=
@@ -1243,25 +1292,6 @@ case "$SIZE" in
 esac
 case "$ITEM" in "small 1" | "medium 2" | "big 3") ;; *) ITEM="medium 2" ;; esac
 gate_capacity
-# Read before --check exits, so a column whose anchor has gone refuses at --check rather than at the start.
-if [ "$MODE" = column ] && [ "$RUNTIME" = cmux ]; then
-  # The column opens right of its surface wherever that surface lives, so the holder workspace is read from cmux's whole tree, not from the calling session's.
-  tree=$(CMUX_QUIET=1 cmux tree --json --all) || refuse "it cannot read cmux's tree (cmux tree)"
-  ws=$(printf '%s' "$tree" | python3 -I -c 'import json, sys
-try:
-    d = json.load(sys.stdin)
-    for w in d.get("windows") or []:
-        for space in w.get("workspaces") or []:
-            for pane in space.get("panes") or []:
-                for s in pane.get("surfaces") or []:
-                    if s.get("ref") == sys.argv[1]:
-                        print(space.get("ref") or "")
-                        raise SystemExit(0)
-    print("")
-except (ValueError, AttributeError, TypeError):
-    raise SystemExit(1)' "$SURFACE") || refuse "it cannot read cmux's tree (cmux tree)"
-  [ -n "$ws" ] || refuse "$SURFACE is in no workspace cmux holds"
-fi
 if [ "$RUNTIME" = herdr ]; then
   # herdr names an agent by [a-z][a-z0-9_-]{0,31}, so a longer name could never name the session's agent there.
   [ "${#NAME}" -le 32 ] || refuse "herdr names an agent with at most 32 characters, and $NAME has ${#NAME}"
@@ -1297,16 +1327,45 @@ fi
 # The window reaches the session through its one settings file, built here from the factory's on every launch so the two never drift, one file per backend. On GLM: the user settings turn on telemetry to the Loom relay, and Loom counts Claude usage alone, so a GLM session exports none. Claude Code keeps only the last --settings, and the user settings' env beats a variable on the launch line (both measured by a reviewer, 16 Oct), so the session's one settings file also turns the telemetry off (measured from a folder outside any checkout, 16 Oct: a SessionStart hook ran, no-env-dump refused printenv, and no metric left).
 TAG=
 [ "$BACKEND" = glm ] && TAG=glm-
-BUILT="$DATA/factory-settings-$TAG$((WINDOW / 1000))k.json"
-python3 -I - "$SETTINGS" "$BUILT" "$WINDOW" "$BACKEND" <<'PY' || refuse "it cannot build $BUILT from $SETTINGS"
+# A probe runs its shell commands in Claude Code's sandbox, which every child process inherits, so a delete a script makes where no guard hook sees it stays inside the write roots; its settings go in a file of their own. Workers and testers join once the worker git flow runs inside it, as run-slot and spawn.sh do.
+SANDBOX=
+[ "$ROLE" = probe ] && SANDBOX=sandbox-
+BUILT="$DATA/factory-settings-$TAG$SANDBOX$((WINDOW / 1000))k.json"
+# The folder the session runs in, as the launch below moves to it.
+OWN=${DIR:-$REPO}
+[ "$MODE" = column ] && OWN=$REPO
+python3 -I - "$SETTINGS" "$BUILT" "$WINDOW" "$BACKEND" "$SANDBOX" "$DATA" "$HERDR_DIR" "$MAIN" "$(getconf DARWIN_USER_TEMP_DIR 2>/dev/null)" "$OWN" <<'PY' || refuse "it cannot build $BUILT from $SETTINGS"
 import json, os, sys
-src, dst, window, backend = sys.argv[1:5]
+src, dst, window, backend, sandbox, data, herdr, main, temp, own = sys.argv[1:11]
 settings = json.load(open(src))
 settings["autoCompactWindow"] = int(window)
 # The home skill set link-skills.sh turns on at user scope stays off here, since the session loads its own set (below) and two plugins that ship one name refuse it at call time.
 settings["enabledPlugins"] = {**settings.get("enabledPlugins", {}), "ws-home@ws": False}
 if backend == "glm":
     settings["env"] = {**settings.get("env", {}), "CLAUDE_CODE_ENABLE_TELEMETRY": "0", "OTEL_METRICS_EXPORTER": "none"}
+if sandbox:
+    # The sandbox lets a session write its own folder, the main checkout or a worktree in it; a deny wins over that, so every entry of the main checkout is denied, .git and every other worktree included, but the path down to a worktree the session runs in.
+    own = os.path.realpath(own)
+    def denied(folder):
+        paths = [os.path.join(folder, name) for name in sorted(os.listdir(folder))]
+        return [d for p in paths if p != own for d in (denied(p) if own.startswith(p + os.sep) else [p])]
+    deny = denied(main)
+    home = os.path.expanduser("~")
+    settings["sandbox"] = {
+        # Bypass mode would run the unsandboxed retry with no prompt, and a sandbox that cannot start would run every command unsandboxed.
+        "allowUnsandboxedCommands": False,
+        "enabled": True,
+        # gh, a Go CLI, verifies TLS through trustd, which the sandbox closes without this.
+        "enableWeakerNetworkIsolation": True,
+        # Docker cannot run in the sandbox, and a wildcard in an exclusion spans arguments, so only the read-only listing leaves it when typed; a script's own docker stays inside, its socket closed.
+        "excludedCommands": ["docker ps", "docker ps *"],
+        "failIfUnavailable": True,
+        "filesystem": {
+            "allowWrite": sorted({data, os.path.join(home, ".agent-browser"), os.path.join(home, ".bun", "install", "cache"), os.path.join(home, ".cache", "turbo"), os.path.join(home, ".portless")} | ({temp.rstrip("/")} if temp else set())),
+            "denyWrite": deny,
+        },
+        "network": {"allowLocalBinding": True, "allowUnixSockets": sorted({herdr, os.path.join(home, ".agent-browser")})},
+    }
 tmp = f"{dst}.{os.getpid()}.tmp"
 with open(tmp, "w") as f:
     json.dump(settings, f, indent=2)
@@ -1316,8 +1375,7 @@ SETTINGS=$BUILT
 # The factory's sessions run in bypass mode, passed here so it never rests on the machine's own settings: a session in another mode holds every cross-session message for approval.
 FLAGS="--model $MODEL --effort ${EFFORT:-high} --settings $SETTINGS --dangerously-skip-permissions"
 # The skills: one merged plugin per session, from the login's scope, its repo's org, core, then each always org's new names, loaded in place by --plugin-dir, from the data folder this launch reads (under inscope ~/.claude's, not the workspace's); the resolver writes it fresh on every spawn, so a skill `playground ext add` puts in an extension reaches the next session with no install. A column runs in this checkout.
-SKILLS_REPO=${DIR:-$REPO}
-[ "$MODE" = column ] && SKILLS_REPO=$REPO
+SKILLS_REPO=$OWN
 PLUGIN=$(PLAYGROUND_DATA_DIR="$DATA" "$BUN" --no-env-file "$REPO/packages/scripts/src/playground/orgs.ts" resolve --repo "$SKILLS_REPO") && [ -d "$PLUGIN" ] || refuse "playground orgs resolve gave no skill plugin for $SKILLS_REPO"
 FLAGS+=" --plugin-dir $(printf %q "$PLUGIN")"
 READ="Load the playbook skill first. Your brief is in $SHOWN/$BRIEF: read it in full and follow it."
@@ -1360,8 +1418,7 @@ else
     REPORT=
   fi
   PROMPT="You are $NAME, $WHO. $READ$BINDS$REPORT"
-  COMMAND="$LAUNCH -n $NAME $FLAGS \"$PROMPT\""
-  [ "$RUNTIME" = herdr ] && COMMAND="$LAUNCH --session-id $SID -n $NAME $FLAGS \"$PROMPT\""
+  COMMAND="$LAUNCH --session-id $SID -n $NAME $FLAGS \"$PROMPT\""
 fi
 # The pane's shell runs this text, so the whole launch goes in a subshell: a failed Keychain read's exit ends only that, the message stays on the pane, and tk dies with it.
 COMMAND="($COMMAND)"
@@ -1438,7 +1495,7 @@ if [ -n "$MOVE_PID" ]; then
     fi
   fi
   tries=0
-  while [ "$(echo $(LC_ALL=C TZ=UTC ps -o pid=,lstart= -p "$MOVE_PID" 2>/dev/null))" = "$MOVE_PID $MOVE_START" ]; do
+  while [ "$(started "$MOVE_PID")" = "$MOVE_PID $MOVE_START" ]; do
     if [ "$tries" -ge $((MOVE_WAIT * 2)) ]; then
       rm -f -- "$LAUNCH_FILE"
       refuse "pid $MOVE_PID still runs ${MOVE_WAIT}s after cmux closed its surface, so the herdr copy was not started: resume it by hand once it exits: $by_hand"
@@ -1513,22 +1570,6 @@ except (ValueError, KeyError, TypeError):
   [ "$MODE" = resume ] || (umask 077 && printf '%s\n' "$PROMPT" > "$RESUME_DIR/$NAME.prompt") ||
     echo "spawn.sh: $NAME started, but its prompt record write failed, so a restore before its first turn starts it without its brief" >&2
   herdr_answer || true
-  # The roster's workspace and surface are cmux's (workspace:N, surface:N), so a herdr session records neither; its pane's label carries its name.
-  ws= surface=
-elif [ "$MODE" = column ]; then
-  # A column otherwise starts in its workspace's folder, which can be a checkout Claude Code has never started in, where the session stops on a dialog no session may approve; this script's own checkout is the one its spawner starts sessions in every day.
-  out=$(CMUX_QUIET=1 cmux new-split right --workspace "$ws" --surface "$SURFACE" --command "cd '$REPO' && bash '$LAUNCH_FILE'" --focus false || true)
-else
-  out=$(CMUX_QUIET=1 cmux new-workspace --name "$NAME" --cwd "$DIR" --command "bash '$LAUNCH_FILE'" --focus false || true)
-fi
-if [ "$RUNTIME" = cmux ]; then
-  [ -n "$out" ] || {
-    rm -f -- "$LAUNCH_FILE"
-    refuse "cmux opened no session for $NAME (no answer from cmux), so nothing was started and no pin was written"
-  }
-  echo "$out"
-  ws=$(grep -o 'workspace:[0-9]*' <<<"$out" | head -1 || true)
-  surface=$(grep -o 'surface:[0-9]*' <<<"$out" | head -1 || true)
 fi
 
 # The pin lands only once herdr has the session; a healed resume records the backend it was given.
@@ -1544,17 +1585,15 @@ fi
 set -- set "$NAME" "kind=$KIND"
 # A resume, or a start that reuses an ended name, runs the session again, so a row close ended reads starting once more; a live row keeps its status.
 [ "$(roster_field "$NAME" status)" = ended ] && set -- "$@" "status=starting"
-[ -n "$ws" ] && set -- "$@" "workspace=$ws"
 # A moved session no longer has the cmux workspace its entry names; an empty value removes the key.
 [ -n "$MOVE_PID" ] && set -- "$@" "workspace="
 # A second dispatcher started under an <id>-dispatcher name records its slot, which roster.ts who dispatcher 2 reads; a dispatcher's name with -2 holds slot 2 by its name.
 [ "$MODE" = manager ] && [ "$KIND" = dispatcher ] && [ -z "$FIRST" ] && ! second_dispatcher "$NAME" && set -- "$@" "slot=2"
 if [ "$MODE" = column ]; then
-  [ -n "$surface" ] && set -- "$@" "surface=$surface"
   [[ $ROLE =~ ^(reviewer|tester)$ ]] && { [ "$(kind_of_name "$TO")" = worker ] || [ "$(roster_kind "$TO")" = worker ]; } && set -- "$@" "worker=$TO"
 else
-  # A session in a workspace of its own records the surface cmux gave it, or clears a column's old one, which would name a closed surface.
-  set -- "$@" "surface=$surface"
+  # The roster's surface is a cmux one (surface:N), which a herdr session never has, so a session in a workspace of its own clears a column's old one; its pane's label carries its name.
+  set -- "$@" "surface="
 fi
 # set keeps an entry's work for a respawned session, and creates a new one.
 roster() { said=$(env $UNSET "$BUN" "$ROSTER" "$@" 2>&1 >/dev/null); }

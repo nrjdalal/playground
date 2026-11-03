@@ -20,9 +20,6 @@ describe("SETUP", () => {
     expect(line(SETUP.sessions)).toBe(
       "No Claude Code sessions yet. Sessions appear here once Playground starts them, the first from the Dashboard's chat.",
     )
-    expect(line(SETUP.linear)).toBe(
-      "No Linear board yet. Run the linear skill once to read your tickets.",
-    )
     expect(line(SETUP.plan)).toBe(
       "No plan yet. It appears once bundles/plan.json exists in the Dashboard's data folder (PLAYGROUND_DATA_DIR).",
     )
@@ -33,6 +30,10 @@ describe("SETUP", () => {
     expect(line(SETUP.github)).toBe(
       "GitHub can't be read. Pull requests are read through GitHub's gh tool: the Settings page's checks set it up and sign it in.",
     )
+  })
+
+  test("holds no line for the removed Linear app (PG-302)", () => {
+    expect(Object.keys(SETUP)).not.toContain("linear")
   })
 })
 

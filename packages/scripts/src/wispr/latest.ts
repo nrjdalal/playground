@@ -1,15 +1,9 @@
 import { Database } from "bun:sqlite"
-import {
-  constants,
-  copyFileSync,
-  existsSync,
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-  statSync,
-} from "node:fs"
+import { constants, copyFileSync, existsSync, readFileSync, rmSync, statSync } from "node:fs"
 import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
+
+import { makeScratch, removeScratch } from "@packages/safe-delete"
 
 const HELP = `bun run wispr:latest [--since <iso>] [--live]
 
@@ -81,11 +75,11 @@ const stamp = (path: string): string =>
 
 export const readTranscripts = (
   dir: string,
-  { live = false, since }: { live?: boolean; since?: Date } = {},
+  { live = false, since, tmp = tmpdir() }: { live?: boolean; since?: Date; tmp?: string } = {},
 ): Transcript[] => {
   const path = join(dir, "flow.sqlite")
   if (!existsSync(path)) throw new Error(`no Wispr Flow database at ${path}`)
-  const copy = mkdtempSync(join(tmpdir(), "wispr-"))
+  const copy = makeScratch("wispr-", tmp)
   let meetings: Meeting[]
   try {
     for (let tries = 1; ; tries++) {
@@ -111,7 +105,8 @@ export const readTranscripts = (
       .all(since ? { $since: since.getTime() } : {}) as Meeting[]
     db.close()
   } finally {
-    rmSync(copy, { force: true, recursive: true })
+    const refused = removeScratch(copy, tmp)
+    if (refused) console.error(`wispr: ${refused}`)
   }
   return meetings.map((meeting) => {
     const folder = join(dir, "meetings", meeting.id)

@@ -6,12 +6,21 @@ This file holds the gates, the merge lock and the merge queue's readers.
 ## Gates
 
 A draft left green reaches `canary` too: when the owner's draft passes every gate but ready, pr:merge marks it ready (`gh pr ready`) just before its squash, merge-on-ready takes it, `--explain` names it, and an outside author's draft is never touched (`marksReady` in `gates.ts`).
-pr:merge refuses a PR the repo's owner did not open unless `--outside-author <login>` names its author (an outside PR's code runs here, so it merges only on a lead's go, after its read-only review), refuses a PR `~/.playground/ops/report/held-prs.json` lists, naming its reason (`PLAYGROUND_HELD_PRS` moves it, as the tests do; a file that does not read holds every PR), and refuses unless:
+pr:merge refuses a PR the repo's owner did not open unless `--outside-author <login>` names its author (an outside PR's code runs here, so it merges only on a lead's go, after its read-only review), refuses a PR `~/.playground/ops/report/held-prs.json` lists at the gates or just before the merge call, naming its reason (`PLAYGROUND_HELD_PRS` moves it, as the tests do; a file that does not read holds every PR), and refuses unless:
 
 - `up to date`: the head holds everything on `canary`, or merges with it clean; a conflict waits for a merge of `canary`, whose new head then needs its own checks and 5/5.
 - `ci`: the newest run of every GitHub check on the head, by workflow and name, has finished and passed, since a rerun or a close and reopen leaves the older runs listed; `Audit, Lint, and Build` and `test` (`REQUIRED_CHECKS` in `gates.ts`) are among them, and on factory.repo (the checkout's origin when unset) a GitGuardian check too, since a head GitGuardian never started on ran no secret scan.
 - `body`: the PR body is the PR template, and its TL;DR holds no `Outcome:` label line (`bodyRefusal()` in `body.ts`, which names why it refuses).
 - `review`: the newest `## ReviewBot · round <n>: <s>/5 at <sha7>` on the head reads 5/5.
+- `types`: last, inside the merge lock once every other gate passes, the tree the squash makes type-checks (`types.ts`), since a head's own checks typed it alone and a clean textual merge can still call an API `canary` changed.
+  It skips when the head already holds `canary`'s tip (`git merge-base --is-ancestor`), whose own checks typed that very tree.
+  Else it checks the `git merge-tree --write-tree` tree out detached in `.claude/worktrees/merge-types`, the one worktree every merge reuses and keeps however it ends, since cloning and removing a whole `node_modules` (about 114k files) on each merge drove the load to 93 on 2 Nov.
+  It forces the checkout to the tree and removes every untracked and ignored file but `node_modules` (`git clean -ffdx -e node_modules`), so nothing the last check left reads into this one.
+  `node_modules` takes a clone of the caller's when the worktree has none ([scripts/README.md](../../../../scripts/README.md#a-worktrees-node_modules)), then `bun install --force` in place of that section's plain install first, since a fresh copy that printed any error needs the forced one.
+  A kept `node_modules` takes a plain `bun install` when `bun.lock`, `bunfig.toml`, a `package.json` or a file under `patches/` differs from its last install, as `node_modules/.merge-types-deps` records them; an install removes that record first and writes it once it exits 0, so a retry after a clone or install that never finished takes the plain install too, which repairs a partial copy (measured), and a forced one there would rewrite every package (27s measured, against 0.2s plain).
+  It then runs CI's own type steps there, each through `~/.playground/ops/run-slot.sh` as `ops-merge-train`, whose class 0 skips the queue, since every step runs inside the merge lock (bare under a run that already holds a slot, or with no run-slot): `turbo run check-types --filter='...[<canary>]'`, the build and data-table metrics `check-types:tests` reads, then `check-types:tests`; its pass names each step's seconds.
+  A type error refuses with the first errors and the fix (merge `canary` in, fix it, and the new head needs its checks and a 5/5), and is kept beside the lock (`merge-types/<head>-<canary>`), so merge-on-ready's next cycle refuses the same pair at once; a run it cannot finish in 600s (`TYPES_BUDGET_MS`, which every gate in one `pr:train ready` call shares, so the call ends inside the merge train's 900s), slot waits included, or a step that fails another way refuses, naming it, and runs again on the next try.
+  `--explain` names whether it would run or skip, and why, and runs no type check.
 
 Every verdict is read from the comments of the account that owns `factory.repo` alone (`packages/config/src/verdicts.ts` parses them): the reviewer's `## ReviewBot` line, which the `review` gate reads, and the tester's `## TesterBot · <PASS|FAIL> at <sha7>` line, which the Dashboard shows and no gate reads.
 `--explain` prints each gate and what it found.
@@ -24,7 +33,7 @@ A line a merge of `canary` dropped clears once the squash holds it again or `can
 
 ## Holds and rulings
 
-A hold is a line in the `held` object of `~/.playground/ops/report/held-prs.json`, `"<owner>/<name>#<n>": "<reason>"`, which Ops writes the moment a lead sends `hold <owner>/<name>#<n>: <reason>` and removes on the lead's word; pr:merge and merge-on-ready refuse a listed PR, naming the reason.
+A hold is a line in the `held` object of `~/.playground/ops/report/held-prs.json`, `"<owner>/<name>#<n>": "<reason>"`, which Ops writes the moment a lead sends `hold <owner>/<name>#<n>: <reason>` and removes on the lead's word; pr:merge and merge-on-ready refuse a listed PR, naming the reason: each reads the file at the gates and again inside the merge lock, after the types gate and just before the merge call, so a hold written while the type check runs still stops the merge.
 A lead that overrules a reviewer's FAIL posts one comment on the PR whose first line is `Lead ruling: ReviewBot round <r> at <sha7> overruled: <evidence>; the fault moves to #<issue>`, with that issue filed first; pr:merge reads no ruling, so the merge still waits for a fresh verdict at the head, or the Builder's merge by hand.
 A red check that `canary` caused needs a fresh run once `canary`'s fix lands: merge `canary` into the PR, since `gh run rerun` reuses the run's original merge commit, which holds the red `canary`.
 An outside author's PR goes to the Builder, who gives its go only after a read-only review of its diff.
@@ -33,6 +42,8 @@ An outside author's PR goes to the Builder, who gives its go only after a read-o
 
 Only one merge into `canary` runs at a time: pr:merge takes the factory's merge lock (`mkdir ~/.playground/merge.lock`, its PR number inside; `PLAYGROUND_MERGE_LOCK_DIR` moves it, as the tests do), reads every gate and `canary` inside it, and lets it go into `merge-locks/<pr>-<epoch ms>-<random>` however it ends, a refusal included,
 and only while the lock still names its PR; a lock another merge holds refuses, naming that PR.
+A SIGHUP, SIGINT or SIGTERM releases it too (`stop.ts`, whose cleanups run newest first): pr:merge ends the types gate's running step and waits for it, keeping its worktree, then moves the lock into `merge-locks/<pr>-<epoch ms>-<signal>`, again only while it names its PR, and exits 128 plus the signal's number, so a run stopped by its own handle never leaves the lock held, and no next merge checks out into the shared worktree under a step still running there.
+A signal that comes once the squash has begun waits for it to settle, merged or failed, before the lock goes, since the spawned `gh pr merge` would carry on past the exit; the run then posts no merge comment and ends no sessions, whatever the squash did, and a second signal exits at once.
 With `REDIS_URL` set, the lock's holder is also a Redis key with a time to live (`playground:merge.lock`, `takeLock` in `merge.ts`, through `@packages/redis`), renewed while pr:merge runs, and the folder is marked with that key and its pid, so a merge that crashed leaves a lock the next merge takes over once its key lapses;
 a merge that cannot reach Redis keeps to the folder alone and so is refused by any holder.
 `bun run lock take|renew|free` gives a shell script the same Redis lock (exit 3: no Redis, keep the script's own lock file).
@@ -41,10 +52,11 @@ Then it ends the PR's worker, reviewer and tester (`scripts/ops/optimizer/auto_e
 `--explain` takes no lock.
 Like `bun run verify`, pr:merge and pr:train first build the workspace packages they import when a `dist` is missing or lacks an export (`packages/scripts/src/verify/prebuild.ts pr-merge`), so either runs from a fresh worktree;
 in the factory's main checkout (`$PLAYGROUND_REPO`), which builds only `packages/*` after a pull, the prebuild stops instead, verify's and `bun run dev`'s too, and says to run from your own worktree.
+Before that build, pr:merge and pr:train also stop on a worktree whose install predates its `bun.lock`, a workspace package's dependency linked neither in its own `node_modules` nor the root's (`staleInstall`), naming the `bun install --ignore-scripts` that fixes it, since the build would otherwise stop on `tsdown: command not found` (2 Nov, after a pull added `@packages/safe-delete`).
 
 ## When canary moves
 
-A PR behind `canary` that merges with it clean merges as it is, on its own head's checks and 5/5, so several gated PRs merge back to back with no new run.
+A PR behind `canary` that merges with it clean merges on its own head's checks and 5/5 once the `types` gate's merged-tree type check passes, so several gated PRs merge back to back with no new GitHub run.
 When its head conflicts with `canary`, merge `canary` in and resolve it; the new head then needs GitHub's checks and a 5/5 of its own.
 A refusal `--explain` shows to be wrong goes to the Builder, who alone may merge that PR by hand with `gh pr merge <n> --squash --body <body> --match-head-commit <head>`, `<body>` the one pr:merge would pass (above), on an override in the factory's **override** shape, and has pr:merge fixed.
 
