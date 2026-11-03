@@ -1,4 +1,4 @@
-import { MAX_TEXT, MESSAGE_KINDS } from "@packages/message"
+import { MAX_TEXT, MESSAGE_KINDS, MESSAGE_STATUSES } from "@packages/message"
 import { sql } from "drizzle-orm"
 import {
   type AnyPgColumn,
@@ -21,7 +21,6 @@ const oneOf = (name: string, column: string, values: readonly string[]) =>
 
 export const CHANNEL_KINDS = ["channel", "dm"] as const
 export const INVITE_STATUSES = ["open", "redeemed", "requested", "revoked"] as const
-export const MESSAGE_STATUSES = ["denied", "pending", "sent"] as const
 export const POST_RULES = ["members", "owner"] as const
 
 const id = () =>

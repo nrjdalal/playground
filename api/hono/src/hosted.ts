@@ -1,8 +1,10 @@
+import { db } from "@packages/db"
 import { env } from "@packages/env/api-hono"
 
 import { baseApp } from "@/lib/base-app"
 import { healthBody } from "@/lib/db-health"
 import { createServer } from "@/lib/server"
+import { sweepOnceADay } from "@/lib/yard/limits"
 import { authRouter } from "@/routers/auth"
 import { yardRouter } from "@/routers/yard"
 
@@ -14,7 +16,13 @@ if (!env.PLAYGROUND_HOSTED) {
 
 export const app = baseApp()
 
-app
+// Yard forgets on time with no cron: each UTC day's first request of any kind, a read, a sign-in or a post, runs the retention sweep, and a sweep that fails never fails the request.
+app.use("*", async (_, next) => {
+  await sweepOnceADay(db).catch((error) => console.error("[yard] retention sweep failed", error))
+  return next()
+})
+
+const routes = app
   .basePath("/api")
   .get("/health", async (c) =>
     // the local health body's shape, so the web reads one; the hosted web draws no dispatcher rows, so the count is the default 1, and a deploy is never a Vibeground
@@ -22,6 +30,9 @@ app
   )
   .route("/auth", authRouter)
   .route("/v1/yard", yardRouter)
+
+// The hosted build's RPC type, as AppType is the local dashboard's, so a client of the hosted API reaches Yard's routes typed.
+export type HostedAppType = typeof routes
 
 // On Vercel an http.Server that never listens (lib/server.ts), with the WebSocket upgrade on it.
 export default createServer(app)

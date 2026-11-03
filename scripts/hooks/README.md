@@ -36,9 +36,8 @@ Only the first reading moves the folder, sets variables and records files for th
   `role.ts`'s read of the session names still runs `setting.ts` in a process of its own, and keeps a fresh install's names when that read fails.
   `tests/scripts/hooks/refused-forms.test.ts` runs each bundle from a scratch checkout no `node_modules` reaches and holds it to its source's verdict on every row.
   A headless scan run from outside the checkout exports `PLAYGROUND_REPO` as the factory's checkout and passes `--settings` naming that checkout's `scripts/factory-settings.json`, so its guards run rather than exit 0: the board scan's loop takes the checkout from `beat.py`'s `checkout()`, the end-of-day scan's `scan.sh` from its own path.
-  Three factory hooks act for every session: session-state writes every session's state, since the Dashboard is to show them all, no-off-palette-label guards every session's labels, since the label rule covers any label,
-  and no-desktop-owner-app guards every session's agent-desktop calls, since the owner's pointer and apps are the same whichever session drives them.
-  no-raw-delete will guard every session's deletes, since a delete is final whoever runs it, once it is registered ([its section](#no-raw-delete)).
+  Four factory hooks act for every session: session-state writes every session's state, since the Dashboard is to show them all, no-off-palette-label guards every session's labels, since the label rule covers any label, no-desktop-owner-app guards every session's agent-desktop calls, since the owner's pointer and apps are the same whichever session drives them,
+  and no-raw-delete guards every session's deletes, since a delete is final whoever runs it.
   Every other factory hook acts for a factory session alone, `PLAYGROUND_ROLE` or else its name in Claude Code's registry, placed by the roster's `kind` for that name and then by the factory's names (`scripts/hooks/role.ts`), so a session the owner opens in the factory's checkout passes them untouched.
   Claude Code loads project settings from the session's own folder alone, so a factory session restored where they lack the hooks (another checkout, an older one, a subfolder) is respawned with its settings (playbook's SESSIONS.md), and `scripts/ops/up.py --sessions`, which reads each session's command line and its own folder's `.claude/settings.json`, names each one.
 
@@ -200,8 +199,9 @@ Only the first reading moves the folder, sets variables and records files for th
   A line holding a shell that reads its script from stdin (`stdinShell` in `scripts/hooks/shell.ts`) runs whatever is printed into it, so from every folder no reader on it is spared: a shell given no script (`sh`, `sudo bash`), or a root shell with no command of its own.
   A root shell is sudo's `-s`, `-i`, `--shell` or `--login`, or doas's `-s`, alone or in a cluster of the wrapper's flags ahead of its first value-taking letter (`-Es`, `-su root`, `-su#0`; in `-us` the `-u` takes the `s`).
   Such an option counts behind any wrapper and quoted or not (`'-s'`, `-su'root'`, `'sudo' -s`), and an option or a program in a variable counts as one.
-  Each word is read as an option of every privilege wrapper before it: the first unquoted word naming one, and any word whose unquoted value is `sudo` or `doas` (`'doas' sudo -i`, `doas sudo -i`); a path or other word ending in a wrapper's name is read as an option, never as a wrapper.
+  Each word is read as an option of every privilege wrapper before it: the first unquoted word naming one, and any word whose unquoted value is `sudo` or `doas` (`'doas' sudo -i`, `doas sudo -i`); any other word ending in a wrapper's name (a quoted path, or a path after the first wrapper) is read as an option, never as a wrapper.
   A long option's unambiguous prefix counts as that option, as sudo's getopt_long reads it (`--sh`, `--lo`), while sudo itself refuses the ambiguous `--s` and `--l`.
+  The root shell is looked for under each reading of the wrapper's options (above); once the parse runs out of readings, any sudo or doas among the command's words counts as a root shell and any shell's name as a shell.
   Every spaced text of every program on such a line, each `\n`-separated part of it and an awk program's strings are read as command lines.
   A root shell's stdin is read as its script, and one the hook cannot read (a download, a file it cannot see, a bare `sudo -s`) is refused: run its commands as calls of their own.
   For any program but a reader, each text that holds a space (a word, the value after its `=`, an option's attached value, a variable the call sets or exports) is judged as a command line of its own, a leading `!` dropped, since a program may run it (`watch`, `tmux`, `ssh -o ProxyCommand`, `rsync -e`, a git alias, a pager).
@@ -457,8 +457,7 @@ Only the first reading moves the folder, sets variables and records files for th
 
 - A delete goes to the 7-day trash through `playground rm <path>`, a worktree through `playground rm --worktree <path>`, so a delete aimed wrong comes back (2 Nov: two code-review sub-agents each deleted recursively in their own scratch folders, though their prompts said to run none).
   The trash takes up to 5,000 files or 2 GB, so the refusal also names the lead's cleanup for a bigger tree and `bun install` for a `node_modules`.
-  It is registered in neither settings file until a ship puts `scripts/hooks/no-raw-delete.ts` on `main`, since the registration runs the main checkout's copy and refuses every factory session's Bash call while that copy is missing; it then goes back after no-kill-by-name in both files.
-  `scripts/hooks/no-raw-delete.ts` acts for every session and every sub-agent, whose hook input carries its own `agent_id` beside its parent's `session_id`, and refuses with a reason that names `playground rm`:
+  `scripts/hooks/no-raw-delete.ts`, registered after no-kill-by-name, acts for every session and every sub-agent, whose hook input carries its own `agent_id` beside its parent's `session_id`, and refuses with a reason that names `playground rm`:
   an `rm` or GNU rm's `grm` with `-r`, `-R` or `--recursive` (any prefix GNU rm takes, anywhere among its words), `find -delete`, `rm` under xargs, `gxargs` or `parallel`,
   `find -exec`, `-execdir`, `-ok` or `-okdir` and `fd -x`, `-X`, `--exec` or `--exec-batch` running `rm` behind any wrapper, fd's option last in a cluster of its flags that take no value too (`-HX rm`) and its value attached too (`--exec=rm`, `-xrm`),
   `git clean` with `-d`, `-x` or `-X` and no dry run, with or without force, since `clean.requireForce` can be off,
@@ -509,6 +508,8 @@ Only the first reading moves the folder, sets variables and records files for th
   unless the command runs through `~/.playground/ops/run-slot.sh`, naming that form (18 Oct: five worktree installs at once drove load1 to 66.8).
   The main checkout is no-main-checkout's. It fails open on a call it cannot read, and its tests are in `bun run test:file tests/scripts/hooks`.
   A commit's pre-commit build takes a slot through `packages/scripts/src/commit-slot.ts` when turbo's dry run finds a build task with work to do, and playbook's **slots** rule says which slot each way of committing takes.
+  Before the dry run or any slot, `commit-slot.ts` runs `unlinked()` (`packages/scripts/src/playground/unlinked.ts`, link-skills.sh's check) on the checkout and, when a workspace package's dependency is unlinked, as a canary merge that adds a package leaves it, exits 1 at once, naming each `<package>: <dependency>` and the run-slot `bun install --ignore-scripts --cwd <checkout>` that links it.
+  Tests: `bun run test:file tests/packages/scripts/src/commit-slot.test.ts`.
 
 ## rules
 

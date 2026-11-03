@@ -184,7 +184,8 @@
   then for the session the dashboard hosts its permission mode (`Accept edits mode`), which its composer's picker changes.
   The tooltip hangs on the title alone, since the readings, the logo and the effort name themselves; the row's `aria-description` and its rail tooltip carry the same words.
   Every menu row is the stock 32px (`ROW_BOX`, `h-8 py-0`), and the title truncates on its own
-  (`bun run verify rows` fails a menu row above the footer that is not 32px, a row or member row whose words are cut or run past its padded edge or a chevron off the row's middle, at the stock width and at 11rem, and a label cut at the stock width (`labelCut`; `rowsFit` in `packages/scripts/src/verify/row-fit.ts`)).
+  (`bun run verify rows` fails a menu row above the footer that is not 32px, a row or member row whose words are cut or run past its padded edge or a chevron off the row's middle, at the stock width and at 11rem, a sidebar body wider than it shows (its `scrollWidth` past its `clientWidth`) at either width, and a label cut at the stock width (`labelCut`;
+  `rowsFit` in `packages/scripts/src/verify/row-fit.ts`)).
   A row other than Playground's whose session has reviewers or testers under it, subagents (Agent tool runs) or background processes (Bash `run_in_background`) has a chevron that opens them under it, collapsed by default and kept open while the dashboard is:
   each member links to its stream in the stock 28px sub-button, one line reading its label (`ENG-262#73 Reviewer`, or its title and kind with neither id, so the reviewer and the tester tell apart), then its logo and its effort, its name and its lines in its tooltip,
   and each subagent shows its description and its state, Running, Done, Failed or Stopped, from the transcript's tool calls, results and task notifications (`factsIn` in `api/hono/src/lib/dashboard/transcript.ts`),
