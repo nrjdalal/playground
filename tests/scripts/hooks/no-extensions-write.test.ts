@@ -549,6 +549,11 @@ describe("a quoted argument is read as a command line only where a program runs 
     ["cut at a quoted brace", "cut -d'{' -f1 /dev/null"],
     ["sort keyed at a quoted bracket", "sort -t'[' -k2 /dev/null"],
     ["awk matching a regex that starts at / and holds a glob", "awk '/^a*b/' /dev/null"],
+    ["git -c with a literal pager", "git -c core.pager=less log"],
+    ["rm of a glob in a build folder", "rm -rf build/*"],
+    ["rm of a held folder's glob", "X=build; rm -rf $X/*"],
+    ["rm of a held temporary folder", 'D=/tmp/x.1; rm -rf "$D"'],
+    ["rm under HOME, which the hook holds", 'rm -rf "$HOME/tmp-x"'],
     ["a quiet commit with -m", `git commit -m "fix(x): y"`],
     ["a quiet commit with -am", `git commit -am "fix(x): y"`],
     ["a quiet commit with --message", `git commit --message "fix(x): y"`],
@@ -613,6 +618,22 @@ describe("a quoted argument is read as a command line only where a program runs 
     ],
   ])("%s runs from a worktree", async (_, command) => {
     expect(await at(command, join(homedir(), "x", ".claude", "worktrees", "y"))).toBeUndefined()
+  })
+
+  test.each([
+    ["rm of mktemp's folder", 'T=$(mktemp -d); rm -rf "$T"'],
+    ["rm of mktemp's quiet folder", 'T="$(mktemp -dq)"; rm -rf "$T"'],
+    ["rm of mktemp's file", 'F=$(mktemp); rm -f "$F"'],
+    ["rm of a pid-named temporary file", "rm -f /tmp/x.$$"],
+    ["rm of mktemp's folder from a literal template", 'T=$(mktemp -d /tmp/x.XXXX); rm -rf "$T"'],
+    [
+      "rm of mktemp's folder from a held variable's template",
+      'D=/tmp/w; T=$(mktemp -d "$D/x.XXXX"); rm -rf "$T"',
+    ],
+  ])("%s runs from the home with TMPDIR set", async (_, command) => {
+    const env = { HOME: homedir(), TMPDIR: tmpdir() }
+    const raw = JSON.stringify({ cwd: homedir(), tool_input: { command }, tool_name: "Bash" })
+    expect(await check(raw, env)).toBeUndefined()
   })
 
   test("the dispatcher brief's call that finds the Dashboard's checkout runs from a worktree", async () => {
@@ -1638,5 +1659,27 @@ describe("the gated keys are every key the guards read", () => {
   test("spawn.sh's code root is gated", async () => {
     expect(await read("scripts/spawn.sh")).toContain("setting_text paths.codeRoot")
     expect(GUARD_KEYS.has("paths.codeRoot")).toBe(true)
+  })
+})
+
+describe("a refusal for a value the hook does not hold names it in readable text", () => {
+  test.each([
+    ["a variable", "rm -f $X/x", "rm on $X/x,"],
+    ["a loop variable", 'for d in a b; do rm -f "$d/x"; done', 'rm on "$d/x",'],
+    ["a variable inside a nested shell's script", 'bash -c "rm -f $X/x"', "rm on $…/x,"],
+    [
+      "git -c with a variable",
+      'git -c core.pager="$P" log',
+      'git -c core.pager="$P", a value built from',
+    ],
+    [
+      "git -c attached, with a variable",
+      'git -ccore.pager="$P" log',
+      'git -ccore.pager="$P", a value built from',
+    ],
+  ])("%s", async (_, command, named) => {
+    const reason = await bash(command, "/tmp")
+    expect(reason).toContain(named)
+    expect(reason).not.toContain("\u0000")
   })
 })
