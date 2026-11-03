@@ -506,6 +506,8 @@ Only the first reading moves the folder, sets variables and records files for th
   unless the command runs through `~/.playground/ops/run-slot.sh`, naming that form (18 Oct: five worktree installs at once drove load1 to 66.8).
   The main checkout is no-main-checkout's. It fails open on a call it cannot read, and its tests are in `bun run test:file tests/scripts/hooks`.
   A commit's pre-commit build takes a slot through `packages/scripts/src/commit-slot.ts` when turbo's dry run finds a build task with work to do, and playbook's **slots** rule says which slot each way of committing takes.
+  Before the dry run or any slot, `commit-slot.ts` runs `unlinked()` (`packages/scripts/src/playground/unlinked.ts`, link-skills.sh's check) on the checkout and, when a workspace package's dependency is unlinked, as a canary merge that adds a package leaves it, exits 1 at once, naming each `<package>: <dependency>` and the run-slot `bun install --ignore-scripts --cwd <checkout>` that links it.
+  Tests: `bun run test:file tests/packages/scripts/src/commit-slot.test.ts`.
 
 ## rules
 
