@@ -1,26 +1,51 @@
 import { join } from "node:path"
 
-import { findAttachment } from "@/lib/dashboard/attachments"
-import { checkoutRoot, readsLive } from "@/lib/dashboard/fixture"
-import type { Upload } from "@/lib/dashboard/inbox"
+import type { Database } from "@packages/db"
 
-// A Slack send's files, shared by `playground dm upload` from the API's own checkout, so the Slack token stays in that run's process (vault) and never passes through a session or an argv. A stack that does not read this machine (a fixture's, a test's) shares nothing, since its items are made up.
+import { readAttachment } from "@/lib/dashboard/attachments"
+import { checkoutRoot, readsLive } from "@/lib/dashboard/fixture"
+import { filesToUpload, getItem, type Upload } from "@/lib/dashboard/inbox"
+
+// What dm upload shares, read from the stored item alone: the place its link names, and each file's name, bytes (base64) and whether those bytes are text, which the folder's name for it says (sniffed when it was kept).
+export type UploadSpec = {
+  channel: string
+  files: { bytes: string; name: string; text: boolean }[]
+  thread?: string
+}
+
+// The spec for an answered item whose go shares its files and has shared none yet (filesToUpload), its files read from the attachments folder alone; throws why for any other item, so a caller can name only an item the owner sent, never a channel, a thread or a path.
+export async function uploadSpec(
+  db: Database,
+  id: string,
+  read: typeof readAttachment = readAttachment,
+): Promise<UploadSpec> {
+  const item = await getItem(db, id)
+  if (!item || item.id !== id) throw new Error(`no Inbox item ${id}`)
+  const shared = filesToUpload(item)
+  if (!shared) throw new Error(`${id} holds no files a Send or an Approve shares into Slack`)
+  const files = []
+  for (const file of shared.files) {
+    const kept = await read(file.id)
+    if (!kept) throw new Error(`${file.name} is gone from the attachments folder`)
+    files.push({
+      bytes: Buffer.from(kept.bytes).toString("base64"),
+      name: file.name,
+      text: kept.file.kind === "text",
+    })
+  }
+  return { ...shared.place, files }
+}
+
+// A Slack send's files, shared by `playground dm upload <item id>` from the API's own checkout, which reads the place and the files from the item itself, so the Slack token stays in that run's process (vault) and never passes through a session or an argv. A stack that does not read this machine (a fixture's, a test's) shares nothing and counts none, since its items are made up.
 export const slackUpload =
   ({ live = readsLive(), root = checkoutRoot() } = {}): Upload =>
-  async (place, files) => {
-    if (!live) return
+  async (item) => {
+    if (!live) return 0
     if (!root) throw new Error("this API has no checkout to run dm upload from")
-    const found = []
-    for (const file of files) {
-      const kept = await findAttachment(file.id)
-      if (!kept) throw new Error(`${file.name} is gone from the attachments folder`)
-      found.push({ name: file.name, path: kept.path })
-    }
-    const child = Bun.spawn(["bun", join(root, "packages/scripts/src/dm/cli.ts"), "upload"], {
-      stderr: "pipe",
-      stdin: new TextEncoder().encode(JSON.stringify({ ...place, files: found })),
-      stdout: "ignore",
-    })
+    const child = Bun.spawn(
+      ["bun", "--no-env-file", join(root, "packages/scripts/src/dm/cli.ts"), "upload", item.id],
+      { cwd: root, stderr: "pipe", stdin: "ignore", stdout: "ignore" },
+    )
     const [stderr, code] = await Promise.all([new Response(child.stderr).text(), child.exited])
     if (code !== 0)
       throw new Error(
@@ -30,4 +55,5 @@ export const slackUpload =
           .at(-1)
           ?.replace(/^error: /, "") || `exit ${code}`,
       )
+    return filesToUpload(item)?.files.length ?? 0
   }

@@ -5,6 +5,10 @@ import { join } from "node:path"
 
 import { SQL } from "bun"
 
+import {
+  readAttachment,
+  storeAttachment,
+} from "../../../../../../api/hono/src/lib/dashboard/attachments"
 import { QUEUED_MS } from "../../../../../../api/hono/src/lib/dashboard/deliver"
 import {
   ACTIONS,
@@ -23,8 +27,8 @@ import {
   type SecretSink,
   sinkArgv,
   slackPlace,
-  type UploadPlace,
 } from "../../../../../../api/hono/src/lib/dashboard/inbox"
+import { uploadSpec } from "../../../../../../api/hono/src/lib/dashboard/slack-upload"
 
 const CHANNEL = "https://app.slack.com/client/T0000000000/C0MADEUP01"
 const SLACK = {
@@ -901,6 +905,22 @@ describe("slackPlace", () => {
     })
   })
 
+  test("reads past a query or a hash, as the web's card does", () => {
+    expect(slackPlace(`${CHANNEL}?cdn_fallback=1#top`)).toEqual({ channel: "C0MADEUP01" })
+  })
+
+  // a reply that goes in a thread its files would miss: they would land at the conversation's top level
+  test("is null for a thread part that does not parse, so the files never land outside the reply's thread", () => {
+    for (const bad of [
+      `${CHANNEL}/thread/C0MADEUP01-notats`,
+      `${CHANNEL}/thread/C0OTHER001-1700000000.000100`,
+      `${CHANNEL}/thread`,
+      `${CHANNEL}/thread/C0MADEUP01-1700000000.000100/more`,
+      `${CHANNEL}/files/F0MADEUP01`,
+    ])
+      expect(slackPlace(bad)).toBeNull()
+  })
+
   test("is null for no link, a place outside Slack, or a Slack link that names no conversation", () => {
     expect(slackPlace(undefined)).toBeNull()
     expect(slackPlace("https://linear.app/acme/issue/DUNE-1401")).toBeNull()
@@ -1028,11 +1048,13 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
         preview: { attachments: FILES, link, text: "the fix is live", to: "@Merritt" },
         title: "Tell Merritt",
       })
+    // the upload is handed the answered item alone, as dm upload is handed its id
     const recorder = (fail?: string) => {
-      const calls: { files: string[]; place: UploadPlace }[] = []
-      const upload = async (place: UploadPlace, files: { id: string }[]) => {
-        calls.push({ files: files.map((file) => file.id), place })
+      const calls: string[] = []
+      const upload = async (item: { id: string }) => {
+        calls.push(item.id)
         if (fail) throw new Error(fail)
+        return FILES.length
       }
       return { calls, upload }
     }
@@ -1051,19 +1073,14 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
             order.push("typed")
             return delivered()
           },
-          upload: async (place, files) => {
+          upload: async (item) => {
             order.push("uploaded")
-            await upload(place, files)
+            return upload(item)
           },
         },
       )
       expect(order).toEqual(["uploaded", "typed"])
-      expect(calls).toEqual([
-        {
-          files: FILES.map((file) => file.id),
-          place: { channel: "C0MADEUP01", thread: "1700000000.000100" },
-        },
-      ])
+      expect(calls).toEqual([posted.id])
       if (!answered.ok) throw new Error("not answered")
       expect(answered.item.answer).toMatchObject({ choice: "send", uploaded: 2 })
       expect(answered.item.delivery).toMatchObject({ status: "delivered" })
@@ -1132,9 +1149,88 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
         { action: "approve" },
         { actor, deliver: delivered, upload },
       )
-      expect(calls).toEqual([
-        { files: FILES.map((file) => file.id), place: { channel: "C0MADEUP01" } },
-      ])
+      expect(calls).toEqual([posted.id])
+    })
+
+    // what dm upload shares comes from the stored item alone: it takes an id, never a channel, a thread or a path
+    describe("uploadSpec", () => {
+      const PNG = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3])
+      let dir = ""
+      const read = (id: string) => readAttachment(id, dir)
+      const kept = async (bytes: Uint8Array, name: string, kind: string) => {
+        const stored = await storeAttachment(bytes, name, { dir })
+        if (!stored.ok) throw new Error("not stored")
+        return { id: stored.id, kind, name }
+      }
+      beforeAll(() => {
+        dir = mkdtempSync(join(tmpdir(), "pg-649-files-"))
+      })
+      afterAll(() => {
+        if (dir) rmSync(dir, { force: true, recursive: true })
+      })
+
+      test("reads the place from the sent item's link and each file's bytes from the attachments folder, its text told by the kept file's kind", async () => {
+        const shot = await kept(PNG, "before.png", "image")
+        // text bytes under a picture's name: the folder keeps them as .txt, so the guard reads their words
+        const notes = await kept(
+          new TextEncoder().encode("the fix is live\n"),
+          "notes.png",
+          "image",
+        )
+        const posted = await post({
+          from: "ops",
+          kind: "draft",
+          preview: { attachments: [shot, notes], link: THREAD, text: "hi", to: "@Merritt" },
+          title: "Tell Merritt",
+        })
+        await store.answerItem(db, posted.id, { action: "send" }, { actor })
+        const spec = await uploadSpec(db, posted.id, read)
+        expect(spec).toEqual({
+          channel: "C0MADEUP01",
+          files: [
+            { bytes: Buffer.from(PNG).toString("base64"), name: "before.png", text: false },
+            {
+              bytes: Buffer.from("the fix is live\n").toString("base64"),
+              name: "notes.png",
+              text: true,
+            },
+          ],
+          thread: "1700000000.000100",
+        })
+      })
+
+      test("refuses an id naming no item, a channel, a thread or a path, so no caller picks the place or the file", async () => {
+        for (const id of ["C0MADEUP01", THREAD, join(dir, "x.png"), "/etc/hosts", "#i999999"])
+          await expect(uploadSpec(db, id, read)).rejects.toThrow("no Inbox item")
+      })
+
+      test("refuses an item still open, denied, already shared, or whose file left the folder", async () => {
+        const shot = await kept(PNG, "before.png", "image")
+        const draft = { attachments: [shot], link: THREAD, text: "hi", to: "@Merritt" }
+        const open = await post({ from: "ops", kind: "draft", preview: draft, title: "Open" })
+        await expect(uploadSpec(db, open.id, read)).rejects.toThrow("holds no files")
+        const denied = await post(decision({ ...SLACK, attachments: [shot] }))
+        await store.answerItem(db, denied.id, { action: "deny" }, { actor })
+        await expect(uploadSpec(db, denied.id, read)).rejects.toThrow("holds no files")
+        const shared = await post({ from: "ops", kind: "draft", preview: draft, title: "Shared" })
+        await store.answerItem(
+          db,
+          shared.id,
+          { action: "send" },
+          { actor, deliver: delivered, upload: async () => 1 },
+        )
+        await expect(uploadSpec(db, shared.id, read)).rejects.toThrow("holds no files")
+        const gone = await post({
+          from: "ops",
+          kind: "draft",
+          preview: { ...draft, attachments: [{ ...shot, id: `${crypto.randomUUID()}.png` }] },
+          title: "Gone",
+        })
+        await store.answerItem(db, gone.id, { action: "send" }, { actor })
+        await expect(uploadSpec(db, gone.id, read)).rejects.toThrow(
+          "before.png is gone from the attachments folder",
+        )
+      })
     })
 
     test("a Slack draft saved as a draft, a Linear draft and a Deny upload nothing", async () => {

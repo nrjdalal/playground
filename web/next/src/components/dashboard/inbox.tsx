@@ -113,6 +113,7 @@ import {
   checkAnswerNote,
   dismissable,
   dismissItems,
+  filesCount,
   focusAfterTake,
   foldsByDefault,
   INBOX_QUERY_KEY,
@@ -426,7 +427,7 @@ function UploadMark({ item }: { item: InboxItem }) {
   const count = item.preview.attachments?.length ?? 0
   return (
     <p className="text-muted-foreground text-xs">
-      {count === 1 ? "1 file" : `${count} files`} · uploads on {on}
+      {filesCount(count)} · uploads on {on}
     </p>
   )
 }

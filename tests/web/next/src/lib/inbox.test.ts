@@ -1537,7 +1537,7 @@ describe("uploadsOn", () => {
   const THREAD =
     "https://app.slack.com/client/T0000000000/C0MADEUP01/thread/C0MADEUP01-1700000000.000100"
   const FILES = [
-    { id: "3f0e7a52-1c4b-4d2a-9e6f-0000000000a1.png", kind: "image", name: "before.png" },
+    { id: "3f0e7a52-1c4b-4d2a-9e6f-0000000000a1.png", kind: "image" as const, name: "before.png" },
   ]
   const words = { text: "hi", to: "@Merritt" }
   const cases: [InboxItem, InboxItem["answer"]][] = [
