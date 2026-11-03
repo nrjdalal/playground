@@ -36,9 +36,8 @@ Only the first reading moves the folder, sets variables and records files for th
   `role.ts`'s read of the session names still runs `setting.ts` in a process of its own, and keeps a fresh install's names when that read fails.
   `tests/scripts/hooks/refused-forms.test.ts` runs each bundle from a scratch checkout no `node_modules` reaches and holds it to its source's verdict on every row.
   A headless scan run from outside the checkout exports `PLAYGROUND_REPO` as the factory's checkout and passes `--settings` naming that checkout's `scripts/factory-settings.json`, so its guards run rather than exit 0: the board scan's loop takes the checkout from `beat.py`'s `checkout()`, the end-of-day scan's `scan.sh` from its own path.
-  Three factory hooks act for every session: session-state writes every session's state, since the Dashboard is to show them all, no-off-palette-label guards every session's labels, since the label rule covers any label,
-  and no-desktop-owner-app guards every session's agent-desktop calls, since the owner's pointer and apps are the same whichever session drives them.
-  no-raw-delete will guard every session's deletes, since a delete is final whoever runs it, once it is registered ([its section](#no-raw-delete)).
+  Four factory hooks act for every session: session-state writes every session's state, since the Dashboard is to show them all, no-off-palette-label guards every session's labels, since the label rule covers any label, no-desktop-owner-app guards every session's agent-desktop calls, since the owner's pointer and apps are the same whichever session drives them,
+  and no-raw-delete guards every session's deletes, since a delete is final whoever runs it.
   Every other factory hook acts for a factory session alone, `PLAYGROUND_ROLE` or else its name in Claude Code's registry, placed by the roster's `kind` for that name and then by the factory's names (`scripts/hooks/role.ts`), so a session the owner opens in the factory's checkout passes them untouched.
   Claude Code loads project settings from the session's own folder alone, so a factory session restored where they lack the hooks (another checkout, an older one, a subfolder) is respawned with its settings (playbook's SESSIONS.md), and `scripts/ops/up.py --sessions`, which reads each session's command line and its own folder's `.claude/settings.json`, names each one.
 
@@ -444,8 +443,7 @@ Only the first reading moves the folder, sets variables and records files for th
 
 - A delete goes to the 7-day trash through `playground rm <path>`, a worktree through `playground rm --worktree <path>`, so a delete aimed wrong comes back (2 Nov: two code-review sub-agents each deleted recursively in their own scratch folders, though their prompts said to run none).
   The trash takes up to 5,000 files or 2 GB, so the refusal also names the lead's cleanup for a bigger tree and `bun install` for a `node_modules`.
-  It is registered in neither settings file until a ship puts `scripts/hooks/no-raw-delete.ts` on `main`, since the registration runs the main checkout's copy and refuses every factory session's Bash call while that copy is missing; it then goes back after no-kill-by-name in both files.
-  `scripts/hooks/no-raw-delete.ts` acts for every session and every sub-agent, whose hook input carries its own `agent_id` beside its parent's `session_id`, and refuses with a reason that names `playground rm`:
+  `scripts/hooks/no-raw-delete.ts`, registered after no-kill-by-name, acts for every session and every sub-agent, whose hook input carries its own `agent_id` beside its parent's `session_id`, and refuses with a reason that names `playground rm`:
   an `rm` or GNU rm's `grm` with `-r`, `-R` or `--recursive` (any prefix GNU rm takes, anywhere among its words), `find -delete`, `rm` under xargs, `gxargs` or `parallel`,
   `find -exec`, `-execdir`, `-ok` or `-okdir` and `fd -x`, `-X`, `--exec` or `--exec-batch` running `rm` behind any wrapper, fd's option last in a cluster of its flags that take no value too (`-HX rm`) and its value attached too (`--exec=rm`, `-xrm`),
   `git clean` with `-d`, `-x` or `-X` and no dry run, with or without force, since `clean.requireForce` can be off,

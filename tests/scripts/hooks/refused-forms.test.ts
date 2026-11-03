@@ -152,6 +152,7 @@ const CHECK_NAMES = [
   "killByName",
   "mainCheckout",
   "playgroundLeak",
+  "rawDelete",
   "rawSpawn",
   "releaseComment",
   "stash",
@@ -166,6 +167,7 @@ const SOURCE: Checks = {
   killByName,
   mainCheckout,
   playgroundLeak,
+  rawDelete,
   rawSpawn,
   releaseComment,
   stash,
@@ -180,6 +182,7 @@ const GUARD_OF: Record<(typeof CHECK_NAMES)[number], Guard> = {
   killByName: "no-kill-by-name",
   mainCheckout: "no-main-checkout",
   playgroundLeak: "no-playground-leak",
+  rawDelete: "no-raw-delete",
   rawSpawn: "no-raw-spawn",
   releaseComment: "no-release-comment",
   stash: "no-stash",
@@ -277,13 +280,12 @@ const guardsOf = (
         LISTS,
       ),
   },
-  // No bundle while no settings file registers it, so only its source runs, and the bundled pass below leaves it out, since GUARD_OF names no check of it.
   "no-raw-delete": {
     folders: {
       checkout: [CHECKOUT, HOME],
       "process worktree": [join(homedir(), "x", ".claude", "worktrees", "y"), homedir()],
     },
-    run: (raw) => rawDelete(raw),
+    run: (raw) => c.rawDelete(raw),
   },
   "no-raw-spawn": { folders: { checkout: [CHECKOUT, HOME] }, run: (raw) => c.rawSpawn(raw) },
   "no-release-comment": {
