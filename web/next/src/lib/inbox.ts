@@ -105,13 +105,33 @@ export const sendFailed = (item: InboxItem): boolean =>
   item.kind !== "update" && item.delivery?.status === "failed" && !answeredDismissedAt(item)
 
 // The failures Retry is offered after, the API's RETRY_CODES restated since the web imports its types alone (a test holds the two equal): nothing was typed, so a retry cannot type the answer twice.
-export const RETRY_CODES = ["CMUX_FAILED", "INPUT_NOT_EMPTY", "NOT_FOUND", "ON_PICKER"] as const
+export const RETRY_CODES = [
+  "CMUX_FAILED",
+  "INPUT_NOT_EMPTY",
+  "LOST",
+  "NOT_FOUND",
+  "ON_PICKER",
+] as const
 
-// Pure: an answer that failed to send that Retry can safely follow; after any other failure it may be in the session already, so it offers Dismiss alone.
-export const retryable = (item: InboxItem): boolean =>
+// Pure: an answer whose send is unconfirmed (typing began, INTERRUPTED, or the adapter threw, ERROR), which may be in the session already, so its card offers Check it for me rather than Retry.
+export const sendUnconfirmed = (item: InboxItem): boolean =>
   sendFailed(item) &&
   item.delivery?.status === "failed" &&
-  (RETRY_CODES as readonly string[]).includes(item.delivery.code)
+  (item.delivery.code === "INTERRUPTED" || item.delivery.code === "ERROR")
+
+// The note Check it for me sends the dispatcher for an unconfirmed answer: the item and the session it went to, so the dispatcher looks there and reports.
+export const checkAnswerNote = (item: InboxItem): string =>
+  `Check it for me: did ${agentLabel(item.from)} get my answer to ${itemTag(item)}? Look at its transcript and tell me whether it arrived.`
+
+// The API's STUCK_QUEUED_MS restated (a test holds the two equal): an answer reading queued this long after it was queued lost its follow-up to an API restart.
+export const STUCK_QUEUED_MS = 11 * 60_000
+
+// Pure: an answer that failed to send that Retry can safely follow, or one stuck queued, whose Retry reads it again and types nothing while Claude Code still holds it; after any other failure it may be in the session already, so it offers Check it for me or Dismiss.
+export const retryable = (item: InboxItem, now = Date.now()): boolean =>
+  (sendFailed(item) &&
+    item.delivery?.status === "failed" &&
+    (RETRY_CODES as readonly string[]).includes(item.delivery.code)) ||
+  (item.delivery?.status === "queued" && now - Date.parse(item.delivery.at) >= STUCK_QUEUED_MS)
 
 // The API's ACKS_STAMPED_FROM restated, since the web imports its types alone (a test holds the two equal): an answer delivered before then may have been acked with no stamp, so it reads as closed.
 export const ACKS_STAMPED_FROM = "2026-10-12T08:05:50.000Z"
@@ -448,6 +468,7 @@ export function kindWord(item: InboxItem): string {
     return word.charAt(0).toUpperCase() + word.slice(1)
   }
   const words = {
+    accept: "Accept",
     ask: "Ask",
     budget: "Budget",
     delete: "Delete",
@@ -500,6 +521,9 @@ export function itemState(item: InboxItem): ItemState {
     if (!provided.results) return "sending"
     return provided.results.every((result) => result.exitCode === 0) ? "done" : "failed"
   }
+  // an accept the dashboard ran is done or failed by its exit code alone, since nothing is left for its poster to carry out
+  if (provided && "accepted" in provided && provided.accepted)
+    return provided.accepted.exitCode === 0 ? "done" : "failed"
   // a chat reply is being carried out by its poster until it is closed, then done
   if (item.kind !== "update" && chosen(item)?.choice === "replied")
     return carriedOut(item) ? "done" : "sending"
@@ -548,7 +572,9 @@ export const updatedSince = (
 
 // Pure: the session that took an item's answer, which is not its poster once the poster has ended; a row from before the taker was recorded reads as its poster.
 export const takenBy = (item: InboxItem): string =>
-  item.delivery?.status === "delivered" && item.delivery.to ? item.delivery.to : item.from
+  (item.delivery?.status === "delivered" || item.delivery?.status === "queued") && item.delivery.to
+    ? item.delivery.to
+    : item.from
 
 // Pure: what became of an answer, in the words the list shows once an item is answered.
 export function outcomeLine(item: InboxItem): string | null {
@@ -588,23 +614,35 @@ export function outcomeLine(item: InboxItem): string | null {
     send: item.answer.editedText ? "You sent it with changes" : "You sent it",
   }[item.answer.choice]
   const delivery = item.delivery
-  if (isGo(item.answer.choice) && delivery?.status !== "failed" && !carriedOut(item)) {
-    if (item.answer.choice === "draft") return `${done} · Saving a Slack draft…`
-    const slack = item.kind === "decision" && item.preview.type === "slack"
-    if (item.answer.choice !== "send" && !slack) return `${done} · Being carried out by ${who}…`
-    return `${done} · ${kindWord(item) === "Linear comment" ? "Sending to Linear…" : "Sending in Slack…"}`
-  }
   const reached =
     delivery?.status === "delivered"
       ? delivery.via === "cli"
         ? `Read by ${who}`
         : `Delivered to ${who}`
       : delivery?.status === "failed"
-        ? // typing began (INTERRUPTED) or the adapter threw (ERROR): the answer may be in the session already
-          delivery.code === "INTERRUPTED" || delivery.code === "ERROR"
-          ? `Send unconfirmed: ${delivery.reason}`
-          : `Send failed: ${delivery.reason}`
+        ? delivery.code === "LOST"
+          ? `Lost: ${delivery.reason}`
+          : sendUnconfirmed(item)
+            ? `Send unconfirmed: whether ${who} has it is not known`
+            : `Send failed: ${delivery.reason}`
         : "Delivery pending"
+  // an accept the dashboard ran says what the run gave, the card's whole result, and why its poster was not told when that failed
+  const accepted = "accepted" in item.answer ? item.answer.accepted : undefined
+  if (accepted) {
+    const ran =
+      accepted.exitCode === 0
+        ? `Accepted: ${accepted.line}`
+        : `Accept failed (exit ${accepted.exitCode}): ${accepted.line}`
+    return delivery?.status === "failed" ? `${done} · ${ran} · ${reached}` : `${done} · ${ran}`
+  }
+  // Claude Code holds it until the session is free, whatever the answer
+  if (delivery?.status === "queued") return `${done} · Queued: ${who} holds it, to take once free`
+  if (isGo(item.answer.choice) && delivery?.status !== "failed" && !carriedOut(item)) {
+    if (item.answer.choice === "draft") return `${done} · Saving a Slack draft…`
+    const slack = item.kind === "decision" && item.preview.type === "slack"
+    if (item.answer.choice !== "send" && !slack) return `${done} · Being carried out by ${who}…`
+    return `${done} · ${kindWord(item) === "Linear comment" ? "Sending to Linear…" : "Sending in Slack…"}`
+  }
   return item.answer.noLink
     ? `${done} · ${reached} · No link: ${item.answer.noLink}`
     : `${done} · ${reached}`

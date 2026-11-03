@@ -217,7 +217,7 @@ async function patchAccordion() {
   log(`patched: ${ACCORDION}`)
 }
 
-// toast.tsx: its loading icon is RiLoader4Line, the app's one loader (the owner: "user loader4 instead of loader app wide"), where the registry ships RiLoaderLine; idempotent, and it throws when the toast has neither.
+// toast.tsx: its loading icon is RiLoader4Line, the app's one loader, where the registry ships RiLoaderLine; idempotent, and it throws when the toast has neither.
 export const TOAST = `${UI}/toast.tsx`
 
 export function loader4(source: string): string {

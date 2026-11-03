@@ -6,12 +6,16 @@ import {
   ACKS_STAMPED_FROM as API_ACKS_STAMPED_FROM,
   GO_CHOICES as API_GO_CHOICES,
   PLACED_TYPES as API_PLACED_TYPES,
+  QUEUED_POLL_MS as API_QUEUED_POLL_MS,
   RETRY_CODES as API_RETRY_CODES,
+  retryable as API_retryable,
   savesDraft as API_savesDraft,
+  STUCK_QUEUED_MS as API_STUCK_QUEUED_MS,
 } from "../../../../../api/hono/src/lib/dashboard/inbox"
 import {
   ACKS_STAMPED_FROM,
   canDraft,
+  checkAnswerNote,
   cardKey,
   changedAt,
   dismissable,
@@ -47,10 +51,13 @@ import {
   schedulable,
   scheduleChoices,
   sendFailed,
+  sendUnconfirmed,
   sendWhy,
+  STUCK_QUEUED_MS,
   updatedSince,
   upfrontLink,
 } from "../../../../../web/next/src/lib/inbox"
+import { QUEUED_POLL_MS } from "../../../../../web/next/src/lib/outbox"
 import { statusIcon } from "../../../../../web/next/src/lib/status-icons"
 import { fullTime } from "../../../../../web/next/src/lib/time"
 
@@ -127,6 +134,53 @@ describe("a secret ask (PG-59)", () => {
     expect(itemState(provided([{ environment: "production", exitCode: 0 }]))).toBe("done")
     expect(itemState(provided([{ environment: "production", exitCode: 1 }]))).toBe("failed")
     expect(itemState(provided())).toBe("sending")
+  })
+})
+
+describe("an accept decision (PG-658)", () => {
+  const preview = {
+    key: "end-of-day",
+    kind: "skill",
+    rev: "3f9a2c1d",
+    scope: "acme",
+    type: "accept",
+    why: "Scored 4 by two reviewers",
+  }
+  const asked = item({ kind: "decision", preview } as never)
+  const approved = (accepted?: { exitCode: number; line: string }) =>
+    item({
+      answer: { accepted, at: "2026-11-03T20:00:00.000Z", choice: "approve" },
+      delivery: { at: "x", status: "delivered", via: "session" },
+      kind: "decision",
+      preview,
+      status: "approved",
+    } as never)
+
+  test("needs you while open, and reads as an accept", () => {
+    expect(kindWord(asked)).toBe("Accept")
+    expect(needsYou(asked)).toBe(true)
+  })
+
+  test("once approved, reads what the dashboard's accept gave, done or failed by its exit code", () => {
+    const ran = approved({ exitCode: 0, line: "rev 9b8c7d6 is accepted" })
+    expect(outcomeLine(ran)).toBe("You approved it · Accepted: rev 9b8c7d6 is accepted")
+    expect(itemState(ran)).toBe("done")
+    const refused = approved({ exitCode: 1, line: "409 the proposal is at 0a1b2c3d4e5f" })
+    expect(outcomeLine(refused)).toBe(
+      "You approved it · Accept failed (exit 1): 409 the proposal is at 0a1b2c3d4e5f",
+    )
+    expect(itemState(refused)).toBe("failed")
+  })
+
+  test("an accept its poster was not told of says why beside the result", () => {
+    const unsent = item({
+      ...approved({ exitCode: 0, line: "rev 9b8c7d6 is accepted" }),
+      delivery: { code: "CMUX_FAILED", reason: "cmux is not running", status: "failed" },
+    } as never)
+    expect(outcomeLine(unsent)).toBe(
+      "You approved it · Accepted: rev 9b8c7d6 is accepted · Send failed: cmux is not running",
+    )
+    expect(itemState(unsent)).toBe("failed")
   })
 })
 
@@ -700,7 +754,9 @@ describe("an answer that failed to send", () => {
       }
       expect(sendFailed(cut), code).toBe(true)
       expect(retryable(cut), code).toBe(false)
-      expect(outcomeLine(cut), code).toBe("You sent it · Send unconfirmed: cut off")
+      expect(outcomeLine(cut), code).toMatch(
+        /^You sent it · Send unconfirmed: whether \S+ has it is not known$/,
+      )
     }
     expect(retryable(failed(78, ago(1_000)))).toBe(false)
   })
@@ -1516,5 +1572,52 @@ describe("a card's lifecycle buttons on each shelf (PG-654)", () => {
 
   test("a secret ask is snoozed, never archived, since its value comes through Submit alone", () => {
     expect(lifecycle(secret, "inbox")).toEqual(["snooze"])
+  })
+})
+
+// An answer's line reads what the session has: queued while Claude Code holds it, delivered once it went, lost when neither its screen nor its transcript shows it, which offers Retry
+describe("an answer queued, delivered or lost", () => {
+  const base = items[4]!
+  test("each state reads in the answer line", () => {
+    const queued = {
+      ...base,
+      delivery: { at: "x", id: "d1", status: "queued", to: "ops" },
+    } as InboxItem
+    expect(outcomeLine(queued)).toBe("You approved it · Queued: Ops holds it, to take once free")
+    expect(itemState(queued)).toBe("sending")
+    const lost = {
+      ...base,
+      delivery: { code: "LOST", reason: "Retry sends it again.", status: "failed" },
+    } as InboxItem
+    expect(outcomeLine(lost)).toBe("You approved it · Lost: Retry sends it again.")
+    expect(retryable(lost)).toBe(true)
+  })
+
+  test("an unconfirmed send names no terminal and offers Check it for me, a note naming the item", () => {
+    const cut = {
+      ...base,
+      delivery: { code: "INTERRUPTED", reason: "whatever deliver said", status: "failed" },
+    } as InboxItem
+    expect(outcomeLine(cut)).toBe(
+      "You approved it · Send unconfirmed: whether Ops has it is not known",
+    )
+    expect(sendUnconfirmed(cut)).toBe(true)
+    expect(retryable(cut)).toBe(false)
+    expect(checkAnswerNote(cut)).toContain(`#i${cut.ref}`)
+    expect(checkAnswerNote(cut)).not.toMatch(/\bre #i\d/i)
+  })
+
+  // an API restart ends a queued answer's follow-up, so its card offers Retry once it has read queued past the API's bound
+  test("a queued answer offers Retry once stuck past the bound, as the API reads it", () => {
+    expect(STUCK_QUEUED_MS).toBe(API_STUCK_QUEUED_MS)
+    expect(QUEUED_POLL_MS).toBe(API_QUEUED_POLL_MS)
+    const at = Date.parse("2026-10-12T06:00:00.000Z")
+    const queued = {
+      ...base,
+      delivery: { at: new Date(at).toISOString(), id: "d1", status: "queued", to: "ops" },
+    } as InboxItem
+    expect(retryable(queued, at + STUCK_QUEUED_MS - 1)).toBe(false)
+    expect(retryable(queued, at + STUCK_QUEUED_MS)).toBe(true)
+    expect(API_retryable(queued, new Date(at + STUCK_QUEUED_MS))).toBe(true)
   })
 })

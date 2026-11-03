@@ -1,12 +1,12 @@
 import { realpathSync } from "node:fs"
-import { readdir } from "node:fs/promises"
+import { readdir, unlink } from "node:fs/promises"
 import { dirname, join, relative } from "node:path"
 
 import type { BunPlugin } from "bun"
 
 import { preToolUseGuards } from "./ops-tick/guard-probe"
 
-// hooks-bundle: each PreToolUse guard in scripts/hooks/ bundled with everything it imports into scripts/hooks/bundled/<guard>.js, the file its wrapper runs, so a guard starts with no node_modules; the bundles are committed, since a git restore of a deleted checkout brings it back with no install. `--check` builds in memory and names each file that differs from a fresh build.
+// hooks-bundle: each PreToolUse guard in scripts/hooks/ bundled with everything it imports into scripts/hooks/bundled/<guard>.js, the file its wrapper runs, so a guard starts with no node_modules; the bundles are committed, since a git restore of a deleted checkout brings it back with no install. `--check` builds in memory and names each file that differs from a fresh build; write mode writes each bundle and removes each .js file in the folder no build writes.
 export const ROOT = join(import.meta.dir, "..", "..", "..")
 export const HOOKS = join("scripts", "hooks")
 export const BUNDLED = join(HOOKS, "bundled")
@@ -79,6 +79,9 @@ export async function stale(root: string): Promise<string[]> {
   return drift
 }
 
+// The head of `--check`'s line for a stale bundle, which pr:merge's types gate reads as the merged tree's own fault.
+export const STALE = `hooks-bundle: stale in ${BUNDLED}:`
+
 export const FIX =
   "run `bun run hooks:bundle` and commit scripts/hooks/bundled; after a merge that conflicts there, take canary's side, commit the merge, then run it again and commit the rebuild on its own"
 
@@ -94,14 +97,19 @@ if (import.meta.main) {
   if (process.argv.includes("--check")) {
     const drift = await stale(ROOT)
     if (drift.length) {
-      console.error(`hooks-bundle: stale in ${BUNDLED}: ${drift.join(", ")}; ${FIX}`)
+      console.error(`${STALE} ${drift.join(", ")}; ${FIX}`)
       process.exit(1)
     }
   } else if (merging(ROOT)) {
     console.error(MERGING)
     process.exit(1)
   } else {
-    for (const [name, text] of await bundle(ROOT)) await Bun.write(join(ROOT, BUNDLED, name), text)
+    const fresh = await bundle(ROOT)
+    for (const [name, text] of fresh) await Bun.write(join(ROOT, BUNDLED, name), text)
+    // A bundle no build writes, a removed guard's, goes too, since --check names it stale: one .js file at a time, directly in the folder, and nothing else.
+    for (const file of await readdir(join(ROOT, BUNDLED), { withFileTypes: true }))
+      if (file.isFile() && file.name.endsWith(".js") && !fresh.has(file.name))
+        await unlink(join(ROOT, BUNDLED, file.name))
     console.log(`hooks-bundle: wrote ${BUNDLED}`)
   }
 }

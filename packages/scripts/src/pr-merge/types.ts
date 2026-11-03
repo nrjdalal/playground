@@ -6,20 +6,28 @@ import { dirname, join } from "node:path"
 
 import type { Subprocess } from "bun"
 
+import { STALE } from "../hooks-bundle"
 import { BASE, type Gate } from "./gates"
 import type { Run } from "./merge"
 import { onStop } from "./stop"
 
-// One step of the check, run in the kept worktree: its name for the timing line, its argv, whether a failure is the tree's own type error rather than the run's, and whether it brings node_modules up to the tree's dependencies.
-export type TypeStep = { argv: string[]; deps?: boolean; name: string; types?: boolean }
+// One step of the check, run in the kept worktree: its name for the timing line, its argv, whether a failure is the tree's own type error rather than the run's, whether it brings node_modules up to the tree's dependencies, and whether it checks the hook bundles, whose stale file is the tree's own fault too.
+export type TypeStep = {
+  argv: string[]
+  bundles?: boolean
+  deps?: boolean
+  name: string
+  types?: boolean
+}
 
 // What node_modules needs before the check: a clone and a forced install when the worktree has none, a plain install when the tree's dependencies changed since the last install or that install never finished, or nothing.
 export type Prepare = "clone" | "install" | "none"
 
-// The steps for one merged tree: the worktree it is checked out in, the checkout pr:merge runs from (whose node_modules it clones), canary's sha, which the turbo filter diffs against, and what node_modules needs.
+// The steps for one merged tree: the worktree it is checked out in, the checkout pr:merge runs from (whose node_modules it clones), canary's sha, which the turbo filter diffs against, whether the PR touches the hook bundles' inputs, and what node_modules needs.
 export type TypeSteps = (at: {
   canary: string
   checkout: string
+  hooks: boolean
   prepare: Prepare
   worktree: string
 }) => TypeStep[]
@@ -49,8 +57,19 @@ export const slotted = (
 ): string[] =>
   env.RUN_SLOT_NICE === undefined && script ? [script, "ops-merge-train", "--", ...argv] : argv
 
+// `hooks-bundle.ts --check` on the merged tree, since a PR branched before another rebuilt a bundle passes its own checks while the squash writes that bundle beside the source this PR changed.
+const BUNDLES: TypeStep = {
+  argv: ["bun", "packages/scripts/src/hooks-bundle.ts", "--check"],
+  bundles: true,
+  name: "bundles",
+}
+
+// Pure: whether a PR's changed paths reach a hook bundle: scripts/hooks/, or packages/, whose files a hook imports.
+const touchesHooks = (paths: string[]): boolean =>
+  paths.some((path) => /^(scripts\/hooks|packages)\//.test(path))
+
 // CI's own type steps (.github/workflows/auto-check-build.yml), after what node_modules needs: a clone by scripts/README.md's "A worktree's node_modules" then its forced install, or a plain install into the kept node_modules, since a forced one rewrites every package; each through the run slot.
-export const ciSteps: TypeSteps = ({ canary, checkout, prepare, worktree }) => {
+export const ciSteps: TypeSteps = ({ canary, checkout, hooks, prepare, worktree }) => {
   const clone = {
     argv: ["cp", "-cR", join(checkout, "node_modules"), `${worktree}/`],
     name: "clone",
@@ -70,6 +89,7 @@ export const ciSteps: TypeSteps = ({ canary, checkout, prepare, worktree }) => {
   const steps: TypeStep[] = [
     ...(prepare === "clone" ? [clone] : []),
     ...(prepare === "none" ? [] : [install]),
+    ...(hooks ? [BUNDLES] : []),
     {
       argv: ["bunx", "turbo", "run", "check-types", `--filter=...[${canary}]`],
       name: "check-types",
@@ -124,7 +144,7 @@ export async function typesExplained(
     detail: held
       ? skipped(facts)
       : facts.mergeTree
-        ? `runs at the merge: ${BASE} has commits ${facts.head.slice(0, 7)} lacks, so pr:merge type-checks the merged tree ${facts.mergeTree.slice(0, 7)} (--explain runs none)`
+        ? `runs at the merge: ${BASE} has commits ${facts.head.slice(0, 7)} lacks, so pr:merge type-checks the merged tree ${facts.mergeTree.slice(0, 7)}, and checks its hook bundles when the PR touches scripts/hooks/ or packages/ (--explain runs none)`
         : `runs at the merge once ${facts.head.slice(0, 7)} merges clean with ${BASE}`,
     name: NAME,
     ok: true,
@@ -135,6 +155,8 @@ const skipped = (facts: { canary: string; head: string }) =>
   `skipped: ${facts.head.slice(0, 7)} holds ${BASE} ${facts.canary.slice(0, 7)}, so its own checks typed this tree`
 
 const FIX = `Merge ${BASE} into the PR and fix the error; the new head then needs its checks and a 5/5`
+
+const REBUILD = `Merge ${BASE} into the PR plainly, run \`bun run hooks:bundle\`, and commit the rebuild on its own; the new head then needs its checks and a 5/5`
 
 // Removes the worktree and its folder, whatever state a run left them in, for a worktree that cannot be reused.
 async function clear(git: Run, worktree: string): Promise<void> {
@@ -164,7 +186,7 @@ async function reuse(git: Run, worktree: string, commit: string): Promise<boolea
   return (await git([...inside, "clean", "-ffdxq", "-e", "node_modules"])).code === 0
 }
 
-// The types gate at the merge, inside the merge lock: skipped when the head holds canary's tip; else the merged tree, checked out detached in the one merge-types worktree under the repo's .claude/worktrees/ that every merge reuses, its node_modules kept and installed again only when the dependencies change, through steps. A type error refuses and is kept beside the lock (by head and canary), so the merge train's next cycle refuses the same pair without a second run; a run it cannot finish refuses, naming the fix.
+// The types gate at the merge, inside the merge lock: skipped when the head holds canary's tip; else the merged tree, checked out detached in the one merge-types worktree under the repo's .claude/worktrees/ that every merge reuses, its node_modules kept and installed again only when the dependencies change, through steps, with the hook bundles checked when the PR touches scripts/hooks/ or packages/. A type error or a stale bundle refuses and is kept beside the lock (by head and canary), so the merge train's next cycle refuses the same pair without a second run; a run it cannot finish refuses, naming the fix.
 export async function typesGate({
   budgetMs = TYPES_BUDGET_MS,
   facts,
@@ -232,6 +254,8 @@ export async function typesGate({
         commit,
       ])
     }
+    const changed = await gitOk(git, ["diff", "--name-only", "--no-renames", `${canary}...${head}`])
+    const hooks = touchesHooks(changed.split("\n"))
     const deps = await depsOf(git, commit)
     const stamp = Bun.file(stampOf(worktree))
     const prepare: Prepare = !existsSync(join(worktree, "node_modules"))
@@ -241,7 +265,7 @@ export async function typesGate({
         : "install"
     if (prepare !== "none") await rm(stampOf(worktree), { force: true })
     const times: string[] = []
-    for (const step of steps({ canary, checkout, prepare, worktree })) {
+    for (const step of steps({ canary, checkout, hooks, prepare, worktree })) {
       const left = deadline - Date.now()
       if (left <= 0)
         return unfinished(
@@ -281,8 +305,15 @@ export async function typesGate({
         )
       const output = `${stdout}\n${stderr}`
       const errors = firstErrors(output)
-      if (step.types && errors.some((line) => /\berror TS\d+:/.test(line))) {
-        const detail = `${at} fails ${step.name}: ${errors.join(" | ")} ${FIX}`
+      const typeError = step.types && errors.some((line) => /\berror TS\d+:/.test(line))
+      const drift = step.bundles
+        ? output.split("\n").find((line) => line.includes(STALE))
+        : undefined
+      const refusal = typeError
+        ? `${errors.join(" | ")} ${FIX}`
+        : drift && `${drift.trim().split("; ")[0]}. ${REBUILD}`
+      if (refusal) {
+        const detail = `${at} fails ${step.name}: ${refusal}`
         await mkdir(dirname(memo), { recursive: true })
         await Bun.write(memo, detail)
         return { detail, name: NAME, ok: false }

@@ -28,7 +28,7 @@ export type Caller = {
   via: "token" | "web"
 }
 
-// The channels every member joins on redeeming an invite: #general, where every member posts, and #releases, where the owner rung alone posts.
+// The channels every member joins on redeeming an invite or on a first list of channels: #general, where every member posts, and #releases, where the owner rung alone posts.
 export const JOINED_ON_REDEEM = [
   { name: "general", postRule: "members" },
   { name: "releases", postRule: "owner" },
@@ -68,8 +68,42 @@ export const toMessage = (row: MessageRow): Message => ({
   text: row.text,
 })
 
-// Every channel and DM a caller sees, each with its unread and mention counts since the caller last read it: every channel, joined or not, and the DMs the caller is in.
+// A Postgres pattern for a message that names @login, as tier.ts's mentionsOf reads one: not inside a word, an email or a longer login.
+const mentionPattern = (login: string) => `(^|[^\\w@])@${login}([^\\w-]|$)`
+
+// Makes #general and #releases once and joins the member to both: the name's unique constraint and on-conflict-do-nothing inserts keep two at once to one row each.
+const joinOwnChannels = async (tx: Pick<Database, "insert" | "select">, userId: string) => {
+  for (const { name, postRule } of JOINED_ON_REDEEM) {
+    await tx
+      .insert(yardChannel)
+      .values({ id: crypto.randomUUID(), kind: "channel", name, postRule })
+      .onConflictDoNothing()
+    const [channel] = await tx
+      .select({ id: yardChannel.id })
+      .from(yardChannel)
+      .where(eq(yardChannel.name, name))
+    await tx.insert(yardMember).values({ channelId: channel!.id, userId }).onConflictDoNothing()
+  }
+}
+
+// Every channel and DM a caller sees, each with its unread and mention counts since the caller last read it: every channel, joined or not, and the DMs the caller is in; a member not in both of Yard's own channels joins the one it lacks on a list, so one cut short mends on the next, since the owner reaches Yard with no invite to redeem.
 export const channels = async (db: Database, caller: Caller, id?: string): Promise<Channel[]> => {
+  if (!id) {
+    const [{ joined }] = await db
+      .select({ joined: sql<number>`count(*)::int` })
+      .from(yardMember)
+      .innerJoin(yardChannel, eq(yardChannel.id, yardMember.channelId))
+      .where(
+        and(
+          eq(yardMember.userId, caller.id),
+          inArray(
+            yardChannel.name,
+            JOINED_ON_REDEEM.map((channel) => channel.name),
+          ),
+        ),
+      )
+    if (joined < JOINED_ON_REDEEM.length) await joinOwnChannels(db, caller.id)
+  }
   const rows = await db.execute<{
     id: string
     joined: boolean
@@ -88,7 +122,7 @@ export const channels = async (db: Database, caller: Caller, id?: string): Promi
         and x.user_id is distinct from ${caller.id} and x.at > coalesce(m.last_read_at, m.joined_at) and ${live("x")}) as unread,
       (select count(*)::int from yard_message x where x.channel_id = c.id and x.status = 'sent'
         and x.user_id is distinct from ${caller.id} and x.at > coalesce(m.last_read_at, m.joined_at)
-        and x.text ~* ${`(^|[^\\w@])@${caller.login}([^\\w-]|$)`} and ${live("x")}) as mentions,
+        and x.text ~* ${mentionPattern(caller.login)} and ${live("x")}) as mentions,
       case when c.kind = 'dm' then (
         select json_build_object('id', u.id, 'image', u.image, 'login', u.login, 'name', u.name)
         from yard_member o join "user" u on u.id = o.user_id
@@ -124,7 +158,7 @@ export const createChannel = async (
   caller: Caller,
   { name, topic }: { name: string; topic?: string },
 ): Promise<Channel> => {
-  // the redeem's channels are made by the first redeem alone, so a member who named one first cannot set #releases open to every member
+  // Yard's own channels are made by the first redeem or list alone, so a member who named one first cannot set #releases open to every member
   if (JOINED_ON_REDEEM.some((channel) => channel.name === name))
     throw new ApiError(409, "CONFLICT", `#${name} is kept for Yard's own channel`)
   await take(db, `writes:${caller.id}`, "hour", WRITES_HOUR)
@@ -215,6 +249,62 @@ export const messages = async (
     .orderBy(desc(yardMessage.at), desc(yardMessage.id))
     .limit(limit + 1)
   return { hasMore: rows.length > limit, messages: rows.slice(0, limit).reverse().map(toMessage) }
+}
+
+// When a message showed to others, at the millisecond: a held post shows when its sender sends it, so an approved mention counts from then, never from when it was written.
+const shownAt = sql<string>`date_trunc('milliseconds', coalesce(${yardMessage.decidedAt}, ${yardMessage.at}))`
+
+export type Waiting = { held: boolean; message: Message; shownAt: string }
+
+// What waits on the caller past a mark, which the local Playground cards in its Inbox, oldest first by when it showed, then by id: every sent message that names them in a channel or DM they are in, a thread's reply included, from when they joined it, and their own posts held for their approval; the mark is a time and, from the second read on, the last item's id, so rows in that item's millisecond still wait; each list reads at most limit rows, and when one comes back full both stop at the earlier full list's last row, so the next mark skips no row either list left out.
+export const waiting = async (
+  db: Database,
+  caller: Caller,
+  { after, limit = 100, since }: { after?: string; limit?: number; since: string },
+): Promise<Waiting[]> => {
+  const from = new Date(since)
+  const id = sql`${yardMessage.id} collate "C"`
+  const past = after
+    ? sql`(${shownAt}, ${id}) > (${from}, ${after} collate "C")`
+    : sql`${shownAt} > ${from}`
+  const mentions = await db
+    .select({ message: yardMessage, shownAt })
+    .from(yardMessage)
+    .innerJoin(
+      yardMember,
+      and(eq(yardMember.channelId, yardMessage.channelId), eq(yardMember.userId, caller.id)),
+    )
+    .where(
+      and(
+        eq(yardMessage.status, "sent"),
+        sql`${yardMessage.userId} is distinct from ${caller.id}`,
+        past,
+        sql`${shownAt} > ${yardMember.joinedAt}`,
+        sql`${yardMessage.text} ~* ${mentionPattern(caller.login)}`,
+        live(),
+      ),
+    )
+    .orderBy(shownAt, id)
+    .limit(limit)
+  const held = await db
+    .select({ message: yardMessage, shownAt })
+    .from(yardMessage)
+    .where(and(eq(yardMessage.userId, caller.id), eq(yardMessage.status, "pending"), past, live()))
+    .orderBy(shownAt, id)
+    .limit(limit)
+  const at = (row: { shownAt: string | Date }) => new Date(row.shownAt).toISOString()
+  const key = (item: Waiting) => `${item.shownAt} ${item.message.id}`
+  const items = (rows: typeof held, isHeld: boolean): Waiting[] =>
+    rows.map((row) => ({ held: isHeld, message: toMessage(row.message), shownAt: at(row) }))
+  const lists = [items(held, true), items(mentions, false)]
+  const cut = lists
+    .filter((list) => list.length === limit)
+    .map((list) => key(list.at(-1)!))
+    .sort()[0]
+  return lists
+    .flat()
+    .filter((item) => !cut || key(item) <= cut)
+    .sort((a, b) => (key(a) < key(b) ? -1 : 1))
 }
 
 // The owner's #i6 limits: a login posts once a second and 200 times a day, and a channel takes 60 posts an hour.
@@ -509,20 +599,7 @@ export const redeemInvite = async (db: Database, caller: Caller, code: string) =
       .update(user)
       .set({ role: "member", roleSetAt: now })
       .where(and(eq(user.id, caller.id), or(isNull(user.role), eq(user.role, "user"))))
-    for (const { name, postRule } of JOINED_ON_REDEEM) {
-      await tx
-        .insert(yardChannel)
-        .values({ id: crypto.randomUUID(), kind: "channel", name, postRule })
-        .onConflictDoNothing()
-      const [channel] = await tx
-        .select({ id: yardChannel.id })
-        .from(yardChannel)
-        .where(eq(yardChannel.name, name))
-      await tx
-        .insert(yardMember)
-        .values({ channelId: channel!.id, userId: caller.id })
-        .onConflictDoNothing()
-    }
+    await joinOwnChannels(tx, caller.id)
   })
   return { member: true as const }
 }

@@ -392,6 +392,27 @@ describe("restore resumes the herdr sessions its resume files list", () => {
     )
   })
 
+  test("a session whose roster row reads done stays down, as an ended one does", async () => {
+    const r = await spawn(
+      ["restore"],
+      [{ name: "worker-d", pid: 5100 }],
+      {
+        ROSTER_JSON: JSON.stringify({
+          agents: [
+            { name: "worker-b", role: "worker", status: "ended", task: "t" },
+            { name: "worker-a", role: "worker", status: "done", task: "t" },
+          ],
+        }),
+      },
+      undefined,
+      undefined,
+      listed,
+    )
+    expect(r.out).toBe("skipped worker-d: live\n")
+    expect(r.code).toBe(0)
+    expect(placing(r).filter((c) => c[1] === "run")).toEqual([])
+  })
+
   test("under inscope it reads the roster roster.ts writes, ~/.claude's", async () => {
     const r = await spawn(
       ["restore"],
@@ -752,5 +773,82 @@ describe("a resume with no id finds its session by name in its folder (#1201)", 
       ranIn(join(home, ".claude"), root, "worker-x"),
     )
     expect(r.code).toBe(0)
+  })
+})
+
+// the checker reaper ends a checker whose roster worker has ended, so one resumed to serve another worker with its old row would be ended again on its next pass
+describe("a resume of a checker whose roster worker has ended", () => {
+  const SESSION = "5e6f7a8b-9c0d-4e1f-8a2b-3c4d5e6f7a8b"
+  const roster = (name: string, kind: string, status: string) => ({
+    NO_SESSION_TRANSCRIPT: "1",
+    ROSTER_JSON: JSON.stringify({
+      agents: [
+        { kind, name, worker: "v2pq8t-worker" },
+        { kind: "worker", name: "v2pq8t-worker", status },
+      ],
+    }),
+  })
+
+  test.each([
+    ["k3m9px-reviewer", "reviewer"],
+    ["k3m9px-tester", "tester"],
+  ])(
+    "%s refuses before any pane opens, naming the assign to a live worker, else ending its row",
+    async (name, kind) => {
+      const r = await spawn(
+        ["resume", name, root, SESSION],
+        [],
+        roster(name, kind, "ended"),
+        undefined,
+        {
+          name,
+          backend: "claude",
+        },
+      )
+      expect(r.code).toBe(1)
+      expect(r.err).toContain(
+        `spawn.sh refuses ${name}: its roster row names v2pq8t-worker as its worker, which has ended`,
+      )
+      expect(r.err).toContain(
+        `bun scripts/roster.ts assign ${name} "<title>" review worker=<live worker> pr=<url>`,
+      )
+      expect(r.err).toContain(`bun scripts/roster.ts set ${name} status=ended`)
+      expect(r.cmux).toBeUndefined()
+      expect(existsSync(lw(r.home, "resume", `${name}.sh`))).toBe(false)
+    },
+  )
+
+  test.each([
+    ["no worker= on its row", [{ kind: "reviewer", name: "k3m9px-reviewer" }]],
+    [
+      "a worker the roster has no row for",
+      [{ kind: "reviewer", name: "k3m9px-reviewer", worker: "v2pq8t-worker" }],
+    ],
+  ])("a checker with %s resumes as before", async (_, agents) => {
+    const name = "k3m9px-reviewer"
+    const env = { NO_SESSION_TRANSCRIPT: "1", ROSTER_JSON: JSON.stringify({ agents }) }
+    const r = await spawn(["resume", name, root, SESSION], [], env, undefined, {
+      name,
+      backend: "claude",
+    })
+    expect(r.err).toBe("")
+    expect(r.code).toBe(0)
+  })
+
+  test("a checker whose worker is live resumes as before", async () => {
+    const name = "k3m9px-reviewer"
+    const r = await spawn(
+      ["resume", name, root, SESSION],
+      [],
+      roster(name, "reviewer", "working"),
+      undefined,
+      {
+        name,
+        backend: "claude",
+      },
+    )
+    expect(r.err).toBe("")
+    expect(r.code).toBe(0)
+    expect(launchOf(r)).toContain(`claude --session-id ${SESSION} -n ${name} `)
   })
 })

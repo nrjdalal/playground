@@ -4,7 +4,7 @@ import { join } from "node:path"
 import type { ActivityActor, Database } from "@packages/db"
 import { inboxItem, thread } from "@packages/db"
 import { dataDir } from "@packages/env/data-dir"
-import { extensionsDir, slackSettings } from "@packages/settings"
+import { extensionsDir, itemKeySchema, KINDS, SCOPE_NAME, slackSettings } from "@packages/settings"
 import { and, desc, eq, gt, inArray, isNotNull, isNull, or, sql } from "drizzle-orm"
 import { z } from "zod"
 
@@ -163,10 +163,36 @@ export const sinkArgv = (key: string, sink: SecretSink, environment: string): st
   "--yes",
 ]
 
+// An extension proposal the owner accepts from the Inbox in place of a terminal: its scope, kind and key, and the rev he reads, which the accept holds to, so a proposal written after he read it is refused. Each word is one the store takes, none can start as a flag, and no session supplies the argv.
+const acceptSchema = z.strictObject({
+  key: z.string().max(LIMITS.name).pipe(itemKeySchema),
+  kind: z.enum(KINDS),
+  rev: z.string().regex(/^[0-9a-f]{7,40}$/, "Must be a commit SHA"),
+  scope: z.string().max(LIMITS.name).regex(SCOPE_NAME, "Must be a login, an org or core"),
+  type: z.literal("accept"),
+  why: words,
+})
+
+export type InboxAccept = z.infer<typeof acceptSchema>
+
+// Pure: the one command Approve runs for an accept, as `playground ext <args>`: the preview's words, and a reason naming the item.
+export const acceptArgs = (preview: InboxAccept, ref: number): string[] => [
+  "accept",
+  preview.scope,
+  preview.kind,
+  preview.key,
+  preview.rev,
+  "--reason",
+  `the owner approved it in the Inbox (${itemTag(ref)})`,
+]
+
+// Runs `playground ext <args>` with no role and returns its exit code and output: store/extensions.ts's runCli is the real one, which the router passes, and a test passes its own. It restates that file's Cli, since the web reads this file's types and that file's imports reach the API's own.
+export type ExtRun = (args: string[]) => Promise<{ code: number; err: string; out: string }>
+
 // Runs a sink's argv with the value on its stdin and returns its exit code: null once stopped by a signal (its time limit's included), 127 when it could not start. secret-sink.ts holds the real one; a test passes its own.
 export type SinkRun = (argv: string[], stdin: string) => Promise<number | null>
 
-// What Approve does, one shape per kind of approval the owner keeps (playbook's ask rule): a Slack message, a ship of canary, a new Linear ticket, a delete, a schema, a budget, or a plain ask, whose words say what its poster does on Approve, for a decision no other shape fits (a production port, a work request from outside the chain, or a step only he can take, such as plugging in the Mac, where Approve means done and Deny means he can't). An ask may label each side in ELI5 / ASD-STE100, one line; the card then shows its text as the quoted block above the two labelled options. A secret asks for a value instead of a yes, which goes straight to its sink and is kept nowhere.
+// What Approve does, one shape per kind of approval the owner keeps (playbook's ask rule): an extension accept the dashboard runs itself, a Slack message, a ship of canary, a new Linear ticket, a delete, a schema, a budget, or a plain ask, whose words say what its poster does on Approve, for a decision no other shape fits (a production port, a work request from outside the chain, or a step only he can take, such as plugging in the Mac, where Approve means done and Deny means he can't). An ask may label each side in ELI5 / ASD-STE100, one line; the card then shows its text as the quoted block above the two labelled options. A secret asks for a value instead of a yes, which goes straight to its sink and is kept nowhere.
 export const previewSchema = z.discriminatedUnion("type", [
   z.strictObject({
     approve: oneLine(LIMITS.line).optional(),
@@ -211,6 +237,7 @@ export const previewSchema = z.discriminatedUnion("type", [
     sink: secretSinkSchema,
     type: z.literal("secret"),
   }),
+  acceptSchema,
 ])
 
 const link = z
@@ -231,6 +258,8 @@ export const draftSchema = z.strictObject({
 export const OUTCOMES = ["alert", "decision", "finding", "merged", "shipped"] as const
 
 export const updateSchema = z.strictObject({
+  // a page the owner approves on in the browser, where a session never can: a pending Yard post's approve page
+  approve: link,
   attachments,
   link,
   outcome: z.enum(OUTCOMES),
@@ -322,8 +351,9 @@ export type InboxAction = (typeof ACTIONS)[number]
 // What an answer holds: every action but Move to Inbox, which undoes a set-aside and leaves no answer.
 export type InboxChoice = Exclude<InboxAction, "unarchive">
 
-// ackedAt: when its poster closed it through bun run ask, so the sweep stops chasing it; dismissedAt: when he dismissed the answered item or its poster closed it, which moves it to Done at once; noLink: why a go closed with no link.
+// ackedAt: when its poster closed it through bun run ask, so the sweep stops chasing it; accepted: what the accept an accept decision's Approve ran gave; dismissedAt: when he dismissed the answered item or its poster closed it, which moves it to Done at once; noLink: why a go closed with no link.
 export type InboxAnswer = {
+  accepted?: AcceptResult
   ackedAt?: string
   at: string
   choice: InboxChoice
@@ -333,6 +363,18 @@ export type InboxAnswer = {
   linkLabel?: string
   noLink?: string
   note?: string
+}
+
+// What an accept's run gave: its exit code and the line it printed, the result or why it was refused.
+export type AcceptResult = { exitCode: number; line: string }
+
+// Pure: an accept's run as a result: its exit code, and its first line, the CLI's error when it failed, cut to a line.
+export const acceptResult = (ran: { code: number; err: string; out: string }): AcceptResult => {
+  const line = ((ran.code === 0 ? ran.out : ran.err || ran.out).split("\n")[0] ?? "").trim()
+  return {
+    exitCode: ran.code,
+    line: line.length > LIMITS.line ? `${line.slice(0, LIMITS.line - 1)}…` : line,
+  }
 }
 
 // Pure: a go, an answer he gave to carry out (Approve, Edit, Send, Draft), which closes only with where it landed or why there is no link.
@@ -406,9 +448,10 @@ export type SinkResult = { environment: string; exitCode: number | null }
 // An open decision or draft he pushed out of his list until a time (Schedule); it asks again once the time passes.
 export type InboxScheduled = { snoozedUntil: string }
 
-// How the answer reached its poster, or the dispatcher when the poster had ended: typed into a session (to: the session that took it, absent on a row from before it was recorded), or read through bun run ask.
+// How the answer reached its poster, or the dispatcher when the poster had ended: typed into a session (to: the session that took it, absent on a row from before it was recorded), or read through bun run ask. queued: Claude Code holds it until the session is free (deliver.ts's QUEUED), under the delivery's id, which the dashboard reads again until it reads delivered, or failed as LOST.
 export type InboxDelivery =
   | { status: "pending" }
+  | { at: string; id: string; status: "queued"; to: string }
   | { at: string; status: "delivered"; to?: string; via: "cli" | "session" }
   | { code: string; reason: string; status: "failed" }
 
@@ -452,10 +495,16 @@ export const answerInputSchema = z.strictObject({
 export type AnswerInput = z.input<typeof answerInputSchema>
 
 // The delivery adapter's contract, deliver() in deliver.ts, restated since this file cannot resolve the API's @/ paths; routers/inbox.ts passes deliver() as a Deliver, so the compiler fails if the two drift apart. It throws only when it cannot write its activity row, which may come after the Enter.
-export type Delivery = { actor: ActivityActor; text: string; to: string }
+export type Delivery = {
+  actor: ActivityActor
+  id?: string
+  queuedAt?: string
+  text: string
+  to: string
+}
 export type DeliveryResult =
   | { at: string; ok: true; sessionId: string }
-  | { code: string; ok: false; reason: string }
+  | { code: string; ok: false; queuedAt?: string; reason: string }
 export type Deliver = (delivery: Delivery) => Promise<DeliveryResult>
 
 export type InboxFailure = { code: "CONFLICT" | "NOT_FOUND" | "VALIDATION_ERROR"; message: string }
@@ -504,6 +553,9 @@ function answerOf(
     if (item.preview.type === "secret") {
       return { message: "A secret ask takes its value through its Submit alone" }
     }
+    if (item.preview.type === "accept" && action === "edit") {
+      return { message: "An accept is approved or denied as its proposal reads" }
+    }
     // Clear: neither a yes nor a no; he has set the talk aside and will pick it up later, while whatever is already moving keeps moving
     if (action === "clear") return { answer: { choice: action }, status: "cleared" }
     if (action === "approve") return { answer: { choice: action }, status: "approved" }
@@ -546,6 +598,13 @@ function answerWords(
 ): string {
   const head = `Inbox ${itemTag(item.ref)} (${item.id}) "${item.title}":`
   const edited = answer.editedText
+  const accepted = answer.accepted
+  if (answer.choice === "approve" && accepted) {
+    const close = `bun run ask ack ${itemTag(item.ref)} --no-link`
+    return accepted.exitCode === 0
+      ? `${head} Approved, and the dashboard ran the accept: ${accepted.line}. Nothing is left to carry out: close it with ${close} "accepted in the extensions store".`
+      : `${head} Approved, but the accept the dashboard ran failed (exit ${accepted.exitCode}): ${accepted.line}. Nothing was accepted: read the proposal again, post a new accept decision for its current rev if it still stands, and close this one with ${close} and why.`
+  }
   switch (answer.choice) {
     case "approve":
       return `${head} Approved. Carry it out.`
@@ -571,14 +630,17 @@ function answerWords(
 
 // Pure: what the dispatcher is typed when the poster has ended, so the item's kind and exact words travel with the answer. A go is carried out in the poster's place; a deny, a clear or a discard has nothing to carry out, only an item to close.
 export function relayText(item: InboxItem, answer: Omit<InboxAnswer, "at">): string {
-  return relayWith(item, isGo(answer.choice), deliveryText(item, answer))
+  const lead = isGo(answer.choice)
+    ? `${item.from} has ended, so you carry this out in its place: a sent Slack message goes out through ${slack("slack.sendServer") || "your Slack tool"} (never the claude.ai connector), a Slack draft is saved with slack_send_message_draft as below, and you bun run ask ack the item with where it landed (bun run ask get shows its link).`
+    : closeLead(item)
+  return relayWith(item, lead, deliveryText(item, answer))
 }
 
-function relayWith(item: InboxItem, go: boolean, text: string): string {
+const closeLead = (item: InboxItem): string =>
+  `${item.from} has ended, so nothing is carried out: close the item with bun run ask get ${itemTag(item.ref)} --ack.`
+
+function relayWith(item: InboxItem, lead: string, text: string): string {
   const words = "text" in item.preview ? item.preview.text : JSON.stringify(item.preview)
-  const lead = go
-    ? `${item.from} has ended, so you carry this out in its place: a sent Slack message goes out through ${slack("slack.sendServer") || "your Slack tool"} (never the claude.ai connector), a Slack draft is saved with slack_send_message_draft as below, and you bun run ask ack the item with where it landed (bun run ask get shows its link).`
-    : `${item.from} has ended, so nothing is carried out: close the item with bun run ask get ${itemTag(item.ref)} --ack.`
   return `${lead} ${text}\nKind: ${item.kind}\nPreview text:\n${words}`
 }
 
@@ -604,7 +666,13 @@ const textsOf = (
 ): { relay: string; text: string } => {
   if (answer.choice === "provided") {
     const text = providedText(item, answer)
-    return { relay: relayWith(item, false, text), text }
+    return { relay: relayWith(item, closeLead(item), text), text }
+  }
+  // an accept the dashboard ran is carried out already, so the dispatcher closes it in an ended poster's place
+  if (answer.accepted) {
+    const text = deliveryText(item, answer)
+    const lead = `${item.from} has ended, and the dashboard already ran this accept, so nothing is carried out: close the item with bun run ask ack ${itemTag(item.ref)} --no-link and why, as below.`
+    return { relay: relayWith(item, lead, text), text }
   }
   return { relay: relayText(item, answer), text: deliveryText(item, answer) }
 }
@@ -615,14 +683,29 @@ export const deliveryFailed = (item: InboxItem): boolean =>
   item.delivery?.status === "failed" &&
   !(item.answer && "dismissedAt" in item.answer && item.answer.dismissedAt)
 
-// The delivery failures that come before anything is typed (deliver.ts's DELIVERY_FAILURES says which), so Retry cannot type the answer twice; after any other (INTERRUPTED, or ERROR when the adapter threw) the answer may be in the session already, so it waits on a look at the session.
-export const RETRY_CODES = ["CMUX_FAILED", "INPUT_NOT_EMPTY", "NOT_FOUND", "ON_PICKER"] as const
+// The delivery failures that come before anything is typed (deliver.ts's DELIVERY_FAILURES says which), and LOST, an answer Claude Code held that neither its screen nor its transcript shows QUEUED_MS on, so Retry cannot type the answer twice; after any other (INTERRUPTED, or ERROR when the adapter threw) the answer may be in the session already, so its card offers Check it for me.
+export const RETRY_CODES = [
+  "CMUX_FAILED",
+  "INPUT_NOT_EMPTY",
+  "LOST",
+  "NOT_FOUND",
+  "ON_PICKER",
+] as const
 
-// Pure: a failed answer he has not dismissed whose failure Retry can safely follow.
-export const retryable = (item: InboxItem): boolean =>
-  deliveryFailed(item) &&
-  item.delivery?.status === "failed" &&
-  (RETRY_CODES as readonly string[]).includes(item.delivery.code)
+// How long an answer reads queued before its card offers Retry: deliver.ts's QUEUED_MS, by which its follow-up reads it delivered or lost, and a minute more, so a card still queued then lost its follow-up to an API restart (a test holds the two apart by that minute).
+export const STUCK_QUEUED_MS = 11 * 60_000
+
+// Pure: an answer still reading queued STUCK_QUEUED_MS after it was queued, whose follow-up has gone.
+export const stuckQueued = (item: InboxItem, now: Date): boolean =>
+  item.delivery?.status === "queued" &&
+  now.getTime() - Date.parse(item.delivery.at) >= STUCK_QUEUED_MS
+
+// Pure: a failed answer he has not dismissed whose failure Retry can safely follow, or a stuck queued one, whose Retry reads it again under its own id and types nothing while Claude Code still holds it.
+export const retryable = (item: InboxItem, now = new Date()): boolean =>
+  (deliveryFailed(item) &&
+    item.delivery?.status === "failed" &&
+    (RETRY_CODES as readonly string[]).includes(item.delivery.code)) ||
+  stuckQueued(item, now)
 
 // Pure: when an open item is scheduled to ask again, while that time is still ahead; null once it is awake, and on anything not scheduled.
 export const snoozedUntil = (item: InboxItem, now: Date): string | null => {
@@ -825,11 +908,19 @@ export async function answerItem(
   id: string,
   input: AnswerInput,
   {
+    accept,
     actor,
     deliver,
     dispatcher,
     now = new Date(),
-  }: { actor: ActivityActor; deliver?: Deliver; dispatcher?: string; now?: Date },
+    wait,
+  }: {
+    accept?: ExtRun
+    actor: ActivityActor
+    deliver?: Deliver
+    dispatcher?: string
+    now?: Date
+  } & Pick<Sending, "wait">,
 ): Promise<{ item: InboxItem; ok: true } | Refused> {
   const current = await getItem(db, id)
   if (!current || current.id !== id) return NOT_FOUND
@@ -849,6 +940,14 @@ export async function answerItem(
     return { code, message: checked.message, ok: false }
   }
   const answer: InboxAnswer = { ...checked.answer, at: now.toISOString() }
+  // an accept's Approve runs the accept, so one with nothing to run it is refused before it is recorded
+  const accepting =
+    current.kind === "decision" && current.preview.type === "accept" && answer.choice === "approve"
+      ? current.preview
+      : undefined
+  if (accepting && !accept) {
+    return { code: "VALIDATION_ERROR", message: "This dashboard cannot run an accept", ok: false }
+  }
   const [row] = await db
     .update(inboxItem)
     .set({
@@ -868,14 +967,36 @@ export async function answerItem(
     )
     .returning()
   if (!row) return { code: "CONFLICT", message: "This item is already answered", ok: false }
-  const answered = toItem(row)
+  let answered = toItem(row)
+  let given: Omit<InboxAnswer, "at"> = checked.answer
+  // run once, after the claim above, so a double click or a second tab accepts once
+  if (accepting && accept) {
+    const ran = await accept(acceptArgs(accepting, current.ref)).catch((error: unknown) => ({
+      code: 1,
+      err: error instanceof Error ? error.message : String(error),
+      out: "",
+    }))
+    const accepted = acceptResult(ran)
+    given = { ...given, accepted }
+    // merged key by key, so a poster's read that landed while it ran keeps its close
+    const [recorded] = await db
+      .update(inboxItem)
+      .set({
+        answer: sql`${inboxItem.answer} || jsonb_build_object('accepted', (${JSON.stringify(accepted)}::text)::jsonb)`,
+        version: sql`${inboxItem.version} + 1`,
+      })
+      .where(eq(inboxItem.id, id))
+      .returning()
+    if (recorded) answered = toItem(recorded)
+  }
   if (!deliver) return { item: answered, ok: true }
   return {
-    item: await send(db, answered, textsOf(answered, checked.answer), {
+    item: await send(db, answered, textsOf(answered, given), {
       actor,
       deliver,
       dispatcher,
       now,
+      wait,
     }),
     ok: true,
   }
@@ -916,23 +1037,80 @@ async function unarchive(
   return { item: toItem(row), ok: true }
 }
 
-// Types the answer into the posting session and records how that went; a poster that has ended hands it to the dispatcher instead.
+// How often a queued answer is read again: deliver() types nothing for it, and reads it delivered once its transcript shows it, or lost QUEUED_MS on.
+export const QUEUED_POLL_MS = 5000
+
+type Sending = {
+  actor: ActivityActor
+  deliver: Deliver
+  dispatcher?: string
+  now: Date
+  wait?: (ms: number) => Promise<void>
+}
+
+// Types the answer into the posting session and records how that went; a poster that has ended hands it to the dispatcher instead. Each try goes under its own id, so one Claude Code holds (queued) is read again under it until it settles: this process's own reads, so a restart leaves it reading queued until its card offers Retry (stuckQueued).
 async function send(
   db: Database,
   item: InboxItem,
   { relay, text }: { relay: string; text: string },
-  {
-    actor,
-    deliver,
-    dispatcher,
-    now,
-  }: { actor: ActivityActor; deliver: Deliver; dispatcher?: string; now: Date },
+  { actor, deliver, dispatcher, now, wait = (ms) => Bun.sleep(ms) }: Sending,
+  held?: Extract<InboxDelivery, { status: "queued" }>,
 ): Promise<InboxItem> {
-  let delivery = await attempt(deliver, { actor, text, to: item.from })
+  const one = (to: string, words: string) => ({ actor, id: crypto.randomUUID(), text: words, to })
+  // a stuck queued answer is read again under its own id and queued time, so this try types nothing: it reads queued, delivered, lost or unconfirmed, and only a Retry after lost types it
+  let sent: Delivery & { id: string } = held
+    ? {
+        actor,
+        id: held.id,
+        queuedAt: held.at,
+        text: held.to === item.from ? text : relay,
+        to: held.to,
+      }
+    : one(item.from, text)
+  let delivery = await attempt(deliver, sent, now)
   if (dispatcher && item.from !== dispatcher && posterGone(delivery)) {
-    delivery = await attempt(deliver, { actor, text: relay, to: dispatcher })
+    sent = one(dispatcher, relay)
+    delivery = await attempt(deliver, sent, now)
   }
-  return (await recordDelivery(db, item.id, delivery, now)) ?? item
+  const recorded = (await recordDelivery(db, item.id, delivery, now)) ?? item
+  if (delivery.status === "queued") {
+    // a write that fails while it follows (the database restarting) leaves the card queued, which offers Retry once stuck, rather than ending the API
+    void follow(
+      db,
+      item.id,
+      { ...sent, queuedAt: sent.queuedAt ?? delivery.at },
+      { deliver, wait },
+    ).catch((error: unknown) => {
+      console.warn(`Could not follow the queued answer on ${item.id}:`, error)
+    })
+  }
+  return recorded
+}
+
+// Reads a queued answer again until Claude Code lets it go, then records what became of it in place of queued, while the item still reads queued under this delivery's id.
+async function follow(
+  db: Database,
+  id: string,
+  sent: Delivery & { id: string },
+  { deliver, wait }: { deliver: Deliver; wait: (ms: number) => Promise<void> },
+): Promise<void> {
+  for (;;) {
+    await wait(QUEUED_POLL_MS)
+    const now = new Date()
+    const delivery = await attempt(deliver, sent, now)
+    if (delivery.status === "queued") continue
+    await db
+      .update(inboxItem)
+      .set({ delivery, updatedAt: now, version: sql`${inboxItem.version} + 1` })
+      .where(
+        and(
+          eq(inboxItem.id, id),
+          sql`${inboxItem.delivery} ->> 'status' = 'queued'`,
+          sql`${inboxItem.delivery} ->> 'id' = ${sent.id}`,
+        ),
+      )
+    return
+  }
 }
 
 // deliver.ts reports a poster that has ended as NOT_FOUND with one of these two reasons; its other NOT_FOUNDs ("now names another session", "has no terminal") come from a live session, which a relay would leave to carry the go out beside the dispatcher.
@@ -946,11 +1124,21 @@ const posterGone = (delivery: InboxDelivery): boolean =>
   delivery.code === "NOT_FOUND" &&
   GONE_REASONS.some((reason) => reason.test(delivery.reason))
 
-async function attempt(deliver: Deliver, delivery: Delivery): Promise<InboxDelivery> {
+async function attempt(
+  deliver: Deliver,
+  delivery: Delivery & { id: string },
+  now: Date,
+): Promise<InboxDelivery> {
   try {
     const result = await deliver(delivery)
-    return result.ok
-      ? { at: result.at, status: "delivered", to: delivery.to, via: "session" }
+    if (result.ok) return { at: result.at, status: "delivered", to: delivery.to, via: "session" }
+    return result.code === "QUEUED"
+      ? {
+          at: result.queuedAt ?? now.toISOString(),
+          id: delivery.id,
+          status: "queued",
+          to: delivery.to,
+        }
       : { code: result.code, reason: result.reason, status: "failed" }
   } catch (error) {
     // ERROR, not one of the adapter's codes, since the answer may have reached the session after all.
@@ -958,22 +1146,17 @@ async function attempt(deliver: Deliver, delivery: Delivery): Promise<InboxDeliv
   }
 }
 
-// Retry on an answer whose delivery failed: marks it pending in one write that holds only while it still reads failed at the version read, so a double click types it once, then delivers it again and records the new result.
+// Retry on an answer whose delivery failed, or that is stuck queued: marks it pending in one write that holds only while it still reads failed at the version read, so a double click types it once, then delivers it again and records the new result.
 export async function retryDelivery(
   db: Database,
   id: string,
-  {
-    actor,
-    deliver,
-    dispatcher,
-    now = new Date(),
-  }: { actor: ActivityActor; deliver: Deliver; dispatcher?: string; now?: Date },
+  { actor, deliver, dispatcher, now = new Date(), wait }: Omit<Sending, "now"> & { now?: Date },
 ): Promise<{ item: InboxItem; ok: true } | Refused> {
   const current = await getItem(db, id)
   if (!current || current.id !== id) return NOT_FOUND
   if (
     current.kind === "update" ||
-    !retryable(current) ||
+    !retryable(current, now) ||
     !current.answer ||
     !("choice" in current.answer) ||
     current.answer.choice === "settled" ||
@@ -981,7 +1164,8 @@ export async function retryDelivery(
   ) {
     return {
       code: "CONFLICT",
-      message: "Only an answer that failed before anything was typed is retried",
+      message:
+        "Only an answer that failed before anything was typed, or one stuck queued, is retried",
       ok: false,
     }
   }
@@ -995,7 +1179,7 @@ export async function retryDelivery(
     .where(
       and(
         eq(inboxItem.id, id),
-        sql`${inboxItem.delivery} ->> 'status' = 'failed'`,
+        sql`${inboxItem.delivery} ->> 'status' in ('failed', 'queued')`,
         sql`${inboxItem.answer} ->> 'dismissedAt' is null`,
         eq(inboxItem.version, current.version),
       ),
@@ -1004,7 +1188,13 @@ export async function retryDelivery(
   if (!row) return { code: "CONFLICT", message: "This item changed; try again", ok: false }
   const item = toItem(row)
   return {
-    item: await send(db, item, textsOf(item, current.answer), { actor, deliver, dispatcher, now }),
+    item: await send(
+      db,
+      item,
+      textsOf(item, current.answer),
+      { actor, deliver, dispatcher, now, wait },
+      current.delivery?.status === "queued" ? current.delivery : undefined,
+    ),
     ok: true,
   }
 }

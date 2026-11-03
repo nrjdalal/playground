@@ -7,13 +7,16 @@ import { readPolicy } from "../../../settings/src/rendered"
 import {
   COUNTS,
   type Counts,
+  changedFiles,
   count,
   KEPT,
   type Kept,
   list,
+  located,
   lowered,
   refusal,
   risen,
+  risenKinds,
   tree,
 } from "./count"
 import { publicListPath, reposOf } from "./kinds"
@@ -30,7 +33,7 @@ files (tests, the API's fixtures, the replay fixtures) a made-up stand-in.
 Exits 2 when no-public-leak's list is missing or a key of it is empty, or when
 factory.archiveRepo or owner.names is unset, since their kinds would count nothing.`
 
-const NOT_COUNTED = `trace-count: nothing was counted; bun run test:file tests/packages/scripts/src/trace-count/count.test.ts counts the kinds that need no list or settings, and the list, owner and archive kinds count only here, once the line above is fixed`
+const NOT_COUNTED = `trace-count: nothing was counted; bun run test:file tests/packages/scripts/src/trace-count/count.test.ts counts the kinds that need no list or settings, ownerName's quote patterns among them, and the list kinds, the owner's names and the archive's links count only here, once the line above is fixed`
 
 const { values } = parseArgs({
   options: {
@@ -99,7 +102,9 @@ const over = risen(now, baseline)
 for (const [kind, n] of Object.entries(now))
   console.log(`${kind}\t${n}\t${baseline[kind as keyof Counts] ?? "-"}`)
 if (over.length > 0 && !values.write) {
-  console.error(refusal(over))
+  console.error(
+    refusal(over, located(files, risenKinds(over), publicList, repos, kept, changedFiles(root))),
+  )
   process.exit(1)
 }
 if (values.write) {

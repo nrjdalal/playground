@@ -136,7 +136,7 @@ describe("set", () => {
     const config = configWith([WITH_PR])
     const r = await run(config, ["set", "worker-greed", "kind=wizard"])
     expect(r.code).toBe(2)
-    expect(r.err).toContain("kind takes one of builder, dispatcher")
+    expect(r.err).toContain("kind takes one of assistant, builder, dispatcher")
     expect(r.roster).toMatchObject({ agents: [WITH_PR], updatedAt: "2026-10-01T00:00:00Z" })
   })
 
@@ -610,6 +610,21 @@ describe("who", () => {
       expect(r.code).toBe(2)
       expect(r.out).toBe("")
     }
+  })
+
+  // #779: ops-dm-watch hands an unanswered DM to whoever holds the assistant seat, so the Assistant takes it under any name
+  test("who assistant prints the live entry the roster gives the assistant kind, and with none exits 1 printing nothing", async () => {
+    const config = configWith([
+      { kind: "assistant", name: "k3m9px-worker", role: "worker", status: "working", task: "t" },
+    ])
+    const held = await run(config, ["who", "assistant"])
+    expect([held.code, held.out]).toEqual([0, "k3m9px-worker\n"])
+    const none = await run(configWith([]), ["who", "assistant"])
+    expect([none.code, none.out]).toEqual([1, ""])
+    expect(none.err).toContain("no live session holds the assistant seat")
+    const set = await run(configWith([]), ["set", "x7mh4d-worker", "kind=assistant", "task=t"])
+    expect(set.code, set.err).toBe(0)
+    expect(agentOf(set.roster, "x7mh4d-worker")?.role).toBe("manager")
   })
 
   test("refuses a kind that is not a manager's", async () => {

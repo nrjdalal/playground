@@ -16,6 +16,7 @@ import { join } from "node:path"
 import {
   CARVE_OUTS,
   type CarveOut,
+  type Clone,
   isProtected,
   LIMITS,
   listTrash,
@@ -203,7 +204,12 @@ describe("quarantine, listTrash and restore", () => {
       refused: expect.stringContaining("--worktree"),
     })
     const plain = file(join(roots.home, "plain"))
-    const holders = { live: ["working"], procs: [], roster: join(roots.root, "roster.json") }
+    const holders = {
+      clones: [],
+      live: ["working"],
+      procs: [],
+      roster: join(roots.root, "roster.json"),
+    }
     expect(quarantine(plain, { ...opts, worktree: holders }, roots)).toHaveProperty("refused")
   })
 })
@@ -280,7 +286,7 @@ const withWorktree = () => {
   git(wt, "commit", "-qm", "work")
   const roster = join(roots.root, "roster.json")
   writeFileSync(roster, JSON.stringify({ agents: [] }))
-  return { holders: { live: ["working"], procs: [], roster }, roots, wt }
+  return { holders: { clones: [] as Clone[], live: ["working"], procs: [], roster }, roots, wt }
 }
 
 // A carve-out table for the mechanism's own cases: one script's builds folder, under a cap of 3 files and 100 bytes.
@@ -454,6 +460,28 @@ describe("worktreeRefusal", () => {
       worktreeRefusal(wt, roots, { ...holders, procs: [proc(7, "zsh", join(wt, "packages"))] }),
     ).toContain("pid 7")
     expect(worktreeRefusal(wt, roots, { ...holders, procs: null })).toContain("process")
+  })
+
+  test("refuses a worktree a running node_modules clone reads from or copies into, naming the clone, and lets it go once the clone is gone", () => {
+    const { holders, roots, wt } = withWorktree()
+    git(wt, "push", "-q", "origin", "PG-1-thing")
+    const other = join(roots.main, ".claude", "worktrees", "pg-2")
+    const clone = (source: string, destination: string): Clone => ({
+      destination,
+      pid: 4242,
+      source,
+      who: "k3m9px-worker",
+    })
+    expect(worktreeRefusal(wt, roots, { ...holders, clones: [clone(wt, other)] })).toBe(
+      `${wt} is held by k3m9px-worker's node_modules clone (pid 4242) from ${wt} into ${other}`,
+    )
+    expect(worktreeRefusal(wt, roots, { ...holders, clones: [clone(other, wt)] })).toContain(
+      `from ${other} into ${wt}`,
+    )
+    expect(
+      worktreeRefusal(wt, roots, { ...holders, clones: [clone(other, roots.main)] }),
+    ).toBeNull()
+    expect(worktreeRefusal(wt, roots, holders)).toBeNull()
   })
 
   test("names a holder's pid and command, and an agent-browser daemon's session and the close that frees it", () => {

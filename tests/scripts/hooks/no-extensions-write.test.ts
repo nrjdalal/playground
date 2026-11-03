@@ -4,6 +4,7 @@ import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { check, GUARD_KEYS, guarded } from "../../../scripts/hooks/no-extensions-write"
+import { overBaseline, stepsOf } from "./pace"
 
 // A home whose data folder holds an extensions root, with a list, policy.json and a scope's sources, as a machine with extensions has.
 const HOME = mkdtempSync(join(tmpdir(), "no-extensions-write-"))
@@ -34,7 +35,7 @@ const ENV = { HOME }
 const CHECKOUT = join(import.meta.dir, "..", "..", "..")
 const CLI_DIR = join(CHECKOUT, "packages", "scripts", "src", "playground")
 
-const bash = (command: string, cwd = HOME) =>
+const bash = (command: string, cwd = HOME, budget?: number) =>
   check(
     JSON.stringify({
       cwd,
@@ -43,6 +44,7 @@ const bash = (command: string, cwd = HOME) =>
       tool_name: "Bash",
     }),
     ENV,
+    budget,
   )
 
 // A harmless git alias nest of the given depth around an inner command line, each level double-quoted.
@@ -304,16 +306,24 @@ describe("a direct write into the extensions root is refused, naming the owner's
     expect(await bash(command)).toContain("no-extensions-write hook refuses")
   })
 
-  test("a deep harmless nest ahead of the CLI is judged before the hook's timeout", async () => {
-    const reason = await bash(`${nest(16, "true")}; playground ext sync`)
+  // refused before its first counted step, with the alias reader's seen set reverted too, so the cap holds the walk to under one clock read
+  test("a deep harmless nest ahead of the CLI is refused in a bounded count of steps", async () => {
+    const [reason, steps] = await stepsOf(() =>
+      bash(`${nest(16, "true")}; playground ext sync`, HOME, 120_000),
+    )
     expect(reason).toContain("no-extensions-write hook refuses")
-  }, 10_000)
+    expect(steps).toBeLessThan(1_024)
+  })
 
-  test("many variables ahead of a write are judged before the hook's timeout", async () => {
+  // about 21,000 steps; reading every variable set before each command took 1.9M
+  test("many variables ahead of a write are refused in a bounded count of steps", async () => {
     const vars = Array.from({ length: 800 }, (_, i) => `V${i}=x${i}`).join("; ")
-    const reason = await bash(`${vars}; ${": ; ".repeat(800)}rm -rf ${ROOT}`)
+    const [reason, steps] = await stepsOf(() =>
+      bash(`${vars}; ${": ; ".repeat(800)}rm -rf ${ROOT}`, HOME, 120_000),
+    )
     expect(reason).toContain("no-extensions-write hook refuses")
-  }, 10_000)
+    expect(steps).toBeLessThan(200_000)
+  })
 
   test.each([
     ["nested substitutions", `x=${"$(".repeat(20_000)}${")".repeat(20_000)}; playground ext sync`],
@@ -331,12 +341,12 @@ describe("a direct write into the extensions root is refused, naming the owner's
     expect(reason).toContain("split it into shorter calls")
   })
 
-  test("a long run of closing braces ahead of the CLI is read inside the hook's time", async () => {
-    const started = performance.now()
-    const reason = await bash(`${"ls; }\n".repeat(21_000)}playground ext sync`, "/tmp")
-    expect(reason).toContain("no-extensions-write hook refuses")
-    expect(performance.now() - started).toBeLessThan(1_000)
-  }, 20_000)
+  // with a scan back for each brace's open this ran past the test's 60 s, where the stack of opens stays under x60 the baseline's CPU time
+  test("a long run of closing braces ahead of the CLI is read in a time linear in its length", async () => {
+    const command = `${"ls; }\n".repeat(21_000)}playground ext sync`
+    expect(await bash(command, "/tmp")).toContain("no-extensions-write hook refuses")
+    expect(await overBaseline((c) => bash(c, "/tmp"), command)).toBeLessThan(300)
+  }, 60_000)
 
   // a variable set once, then a program after each, at the cap
   const variables = (each: string) => {
@@ -346,68 +356,97 @@ describe("a direct write into the extensions root is refused, naming the owner's
   }
   const fill = (head: string, unit: string, tail: string) =>
     head + unit.repeat(Math.floor((130_000 - head.length - tail.length) / unit.length)) + tail
+  // a native step the walk cannot count (a backtracking regex, a string built whole, an array shifted), bounded by its CPU time over a same-length echo; with the guard reverted it ran x400 to x950
   test.each([
-    ["a brace with no close", fill("echo {", ",", ""), false, 1_000],
+    ["a brace with no close", fill("echo {", ",", ""), false, 50],
     [
       "xargs -I over a large stdin",
       fill(`cat ${WORDS} | xargs -I@ git -c alias.x="!`, "@ ", '" x'),
       true,
-      1_000,
+      150,
     ],
-    ["env -S", fill("env -S'", "-S ", "' true"), false, 1_000],
-    // each variable's path is still read from the filesystem, so these take longer, inside bounds canary misses (2.4 to 2.9 s and 6 to 9.5 s)
-    ["distinct variables", variables(""), false, 2_000],
-    ["distinct variables, each with a program", variables("true; "), false, 3_000],
-    [
-      "a printf escape format over many arguments",
-      `printf '%s${"\\\\x41".repeat(16_000)}' ${"x ".repeat(3_000)}> /tmp/nxw-p`,
-      false,
-      1_000,
-    ],
+    ["env -S", fill("env -S'", "-S ", "' true"), false, 150],
   ])(
-    "%s at the command cap is read inside its bound",
-    async (_, command, refused, bound) => {
-      const started = performance.now()
+    "%s at the command cap is read in a time linear in its length",
+    async (_, command, refused, ratio) => {
       const reason = await bash(command, "/tmp")
       if (refused) expect(reason).toContain("split it into shorter calls")
       else expect(reason).toBeUndefined()
-      expect(performance.now() - started).toBeLessThan(bound)
+      expect(await overBaseline((c) => bash(c, "/tmp"), command)).toBeLessThan(ratio)
     },
     60_000,
   )
 
-  test.each([300, 8_000])(
-    "an eval chain %d deep ahead of a write is refused inside the hook's time",
-    async (depth) => {
-      const started = performance.now()
-      const reason = await bash(`${"eval 'eval '\\''".repeat(depth)}\nrm ${LIST}`, "/tmp")
-      expect(reason).toContain("no-extensions-write hook refuses")
-      expect(performance.now() - started).toBeLessThan(12_000)
-    },
-    60_000,
-  )
-
+  // each variable read once and each printf escape decoded once: canary's reread every variable before each command and decoded the format each round, past 40 million steps
   test.each([
-    ["24 doubling cat stages", `echo hi | ${"cat - - | ".repeat(24)}bash; echo x > ${LIST}`],
+    ["distinct variables", variables(""), 400_000],
+    ["distinct variables, each with a program", variables("true; "), 400_000],
+    [
+      "a printf escape format over many arguments",
+      `printf '%s${"\\\\x41".repeat(16_000)}' ${"x ".repeat(3_000)}> /tmp/nxw-p`,
+      100_000,
+    ],
+  ])(
+    "%s at the command cap is read in a bounded count of steps",
+    async (_, command, cap) => {
+      const [reason, steps] = await stepsOf(() => bash(command, "/tmp", 120_000))
+      expect(reason).toBeUndefined()
+      expect(steps).toBeLessThan(cap)
+    },
+    60_000,
+  )
+
+  // under the cap on shells a call runs, 300 levels took 753,387 steps and each level about 3000; without it, 300 took 1,148,304 and 8000 took 303M
+  test.each([
+    [300, 1_000_000],
+    [8_000, 32_000_000],
+  ])(
+    "an eval chain %d deep ahead of a write is refused in a count of steps linear in its depth",
+    async (depth, cap) => {
+      const [reason, steps] = await stepsOf(() =>
+        bash(`${"eval 'eval '\\''".repeat(depth)}\nrm ${LIST}`, "/tmp", 120_000),
+      )
+      expect(reason).toContain("no-extensions-write hook refuses")
+      expect(steps).toBeLessThan(cap)
+    },
+    60_000,
+  )
+
+  // doubling text, held at 1 MB and a script at 128 KB, is bounded by its steps; a native step (a backtracking width match, a copy per read, a walk up a long path) by its CPU time over a same-length echo, which ran x440 and past with the guard reverted
+  test.each<[string, string, number | undefined, number | undefined]>([
+    [
+      "24 doubling cat stages",
+      `echo hi | ${"cat - - | ".repeat(24)}bash; echo x > ${LIST}`,
+      5_000,
+      undefined,
+    ],
     [
       "12 rounds of files that double each other",
       `echo a > /tmp/nxw-f; ${"cat /tmp/nxw-f /tmp/nxw-f > /tmp/nxw-g; cat /tmp/nxw-g /tmp/nxw-g > /tmp/nxw-f; ".repeat(12)}bash < /tmp/nxw-f; echo x > ${LIST}`,
+      10_000,
+      undefined,
     ],
-    ["a 120 KB path", `touch /tmp/${"a/".repeat(60_000)}x; echo x > ${LIST}`],
+    ["a 120 KB path", `touch /tmp/${"a/".repeat(60_000)}x; echo x > ${LIST}`, undefined, 100],
     [
       "a printf format of 100000 zeros through three cat stages",
       `printf '%${"0".repeat(100_000)}!' | cat > /tmp/nxw-a | cat > /tmp/nxw-b | cat > /tmp/nxw-c; echo x > ${LIST}`,
+      undefined,
+      50,
     ],
     [
       "4600 reads of a 45 KB file in one word",
       `echo ${"A".repeat(45_000)} > /tmp/nxw-r; echo "${"$(cat /tmp/nxw-r)".repeat(4_600)}" > /tmp/nxw-o; echo x > ${LIST}`,
+      undefined,
+      100,
     ],
   ])(
-    "%s ahead of a write are read inside the hook's time",
-    async (_, command) => {
-      const started = performance.now()
-      expect(await bash(command, "/tmp")).toContain("no-extensions-write hook refuses")
-      expect(performance.now() - started).toBeLessThan(3_000)
+    "%s ahead of a write are read in bounded work",
+    async (_, command, cap, ratio) => {
+      const [reason, steps] = await stepsOf(() => bash(command, "/tmp"))
+      expect(reason).toContain("no-extensions-write hook refuses")
+      if (cap !== undefined) expect(steps).toBeLessThan(cap)
+      if (ratio !== undefined)
+        expect(await overBaseline((c) => bash(c, "/tmp"), command)).toBeLessThan(ratio)
     },
     60_000,
   )
@@ -434,16 +473,14 @@ describe("a direct write into the extensions root is refused, naming the owner's
     expect(await bash(command, "/tmp")).toContain("no-extensions-write hook refuses")
   })
 
+  // a deadline already past stops the walk at its first clock read, 1024 steps in, where the whole lex takes tens of thousands
   test("a slow lex refuses at the walk's deadline, whatever made it slow", async () => {
     const command = `echo ${"a(".repeat(20_000)}${")".repeat(20_000)}`
-    const started = performance.now()
-    const reason = await check(
-      JSON.stringify({ cwd: "/tmp", tool_input: { command }, tool_name: "Bash" }),
-      ENV,
-      50,
+    const [reason, steps] = await stepsOf(() =>
+      check(JSON.stringify({ cwd: "/tmp", tool_input: { command }, tool_name: "Bash" }), ENV, 0),
     )
     expect(reason).toContain("split it into shorter calls")
-    expect(performance.now() - started).toBeLessThan(250)
+    expect(steps).toBeLessThan(2_048)
   })
 
   test("a Bash call whose cwd is already inside the root runs no writer", async () => {
@@ -549,6 +586,11 @@ describe("a quoted argument is read as a command line only where a program runs 
     ["cut at a quoted brace", "cut -d'{' -f1 /dev/null"],
     ["sort keyed at a quoted bracket", "sort -t'[' -k2 /dev/null"],
     ["awk matching a regex that starts at / and holds a glob", "awk '/^a*b/' /dev/null"],
+    ["git -c with a literal pager", "git -c core.pager=less log"],
+    ["rm of a glob in a build folder", "rm -rf build/*"],
+    ["rm of a held folder's glob", "X=build; rm -rf $X/*"],
+    ["rm of a held temporary folder", 'D=/tmp/x.1; rm -rf "$D"'],
+    ["rm under HOME, which the hook holds", 'rm -rf "$HOME/tmp-x"'],
     ["a quiet commit with -m", `git commit -m "fix(x): y"`],
     ["a quiet commit with -am", `git commit -am "fix(x): y"`],
     ["a quiet commit with --message", `git commit --message "fix(x): y"`],
@@ -560,6 +602,20 @@ describe("a quoted argument is read as a command line only where a program runs 
       "a quiet commit on a quiet line after a reader",
       `grep -q x /dev/null; git commit -m "fix(x): y"`,
     ],
+    ["gh api with a jq filter", `gh api repos/o/r/pulls --jq '.[] | "\\(.number) \\(.title)"'`],
+    [
+      "gh search with an attached jq filter",
+      `gh search prs x --json number --jq='.[] | "\\(.number) x"'`,
+    ],
+    ["gh issue view with a jq filter", `gh issue view 1 --json title -q '"\\(.title) (open)"'`],
+    ["gh issue view with a sliced body", `gh issue view 522 --json body -q '.body[0:900]'`],
+    [
+      "gh issue list with a jq filter",
+      `gh issue list --json number,title --jq '.[]|"\\(.number) \\(.title[0:90])"'`,
+    ],
+    ["gh api with a Go template", `gh api x --template '{{range .}}{{.a}} {{end}}'`],
+    ["gh api with a Go template by -t", `gh api x -t '{{range .}}{{.a}} {{end}}'`],
+    ["gh pr view with a Go template", `gh pr view 1 --json a --template '{{.a}} x'`],
   ])("%s runs from the home and the data folder", async (_, command) => {
     for (const cwd of homes) expect(await at(command, cwd)).toBeUndefined()
   })
@@ -586,6 +642,18 @@ describe("a quoted argument is read as a command line only where a program runs 
     [
       "sudo with a flag cluster holding a value option",
       "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sudo -ui",
+    ],
+    [
+      "gh pr view with a jq filter joining fields",
+      `gh pr view 436 --json state,title,additions,deletions -q '.state+" "+.title+" +\\(.additions)/-\\(.deletions)"'`,
+    ],
+    [
+      "gh run view with a jq filter joining a job's status and conclusion",
+      `gh run view 1 --json jobs --jq '.jobs[] | "\\(.name) \\(.status)/\\(.conclusion)"'`,
+    ],
+    [
+      "gh pr list with a jq filter joining fields",
+      `gh pr list --json number,additions --jq '.[] | "\\(.number) +\\(.additions)/-x"'`,
     ],
     [
       "sudo whose user option comes first in a cluster and takes the shell letter as its value",
@@ -639,6 +707,22 @@ describe("a quoted argument is read as a command line only where a program runs 
     ],
   ])("%s runs from a worktree", async (_, command) => {
     expect(await at(command, join(homedir(), "x", ".claude", "worktrees", "y"))).toBeUndefined()
+  })
+
+  test.each([
+    ["rm of mktemp's folder", 'T=$(mktemp -d); rm -rf "$T"'],
+    ["rm of mktemp's quiet folder", 'T="$(mktemp -dq)"; rm -rf "$T"'],
+    ["rm of mktemp's file", 'F=$(mktemp); rm -f "$F"'],
+    ["rm of a pid-named temporary file", "rm -f /tmp/x.$$"],
+    ["rm of mktemp's folder from a literal template", 'T=$(mktemp -d /tmp/x.XXXX); rm -rf "$T"'],
+    [
+      "rm of mktemp's folder from a held variable's template",
+      'D=/tmp/w; T=$(mktemp -d "$D/x.XXXX"); rm -rf "$T"',
+    ],
+  ])("%s runs from the home with TMPDIR set", async (_, command) => {
+    const env = { HOME: homedir(), TMPDIR: tmpdir() }
+    const raw = JSON.stringify({ cwd: homedir(), tool_input: { command }, tool_name: "Bash" })
+    expect(await check(raw, env)).toBeUndefined()
   })
 
   test("the dispatcher brief's call that finds the Dashboard's checkout runs from a worktree", async () => {
@@ -1508,7 +1592,7 @@ describe("a factory session's ext accept is refused, since accepting a proposal 
     ],
   ])("%s", async (_, command) => {
     expect(await bash(command)).toContain(
-      "refuses playground ext accept, the owner's own call, which the owner runs as `! env -u PLAYGROUND_ROLE playground ext accept …`",
+      "refuses playground ext accept, the owner's own call: post it as an accept decision with bun run ask new (.agents/dashboard/asks.md), whose Approve has the dashboard run it with no role",
     )
   })
 })
@@ -1591,20 +1675,17 @@ describe("the hook's run", () => {
     expect(await guarded(read, ENV)).toBeUndefined()
   })
 
+  // the timer fires at 1 s; a slow step left to the worker answers only at the walk's 10 s deadline or later, past this test's time
   test("a single step the deadline cannot interrupt is refused when the main thread's timer fires", async () => {
     const command = `printf '%s${",".repeat(60)}' '{' ${"x ".repeat(6_000)}| xargs -I @ watch '@ a'; playground ext import x`
     const raw = JSON.stringify({ cwd: "/tmp", tool_input: { command }, tool_name: "Bash" })
-    const started = performance.now()
     expect(await guarded(raw, ENV, 1_000)).toContain("split it into shorter calls")
-    expect(performance.now() - started).toBeLessThan(3_000)
-  })
+  }, 5_000)
 
+  // a worker that never answers leaves only the main thread's timer to end the call
   test("a check that never answers is refused when the main thread's timer fires", async () => {
     const busy = new URL("./fixtures/busy-worker.ts", import.meta.url).href
-    const started = performance.now()
-    const reason = await guarded("{}", ENV, 300, busy)
-    expect(reason).toContain("split it into shorter calls")
-    expect(performance.now() - started).toBeLessThan(2_000)
+    expect(await guarded("{}", ENV, 300, busy)).toContain("split it into shorter calls")
   })
 
   test("it fails open on input it cannot read", async () => {
@@ -1664,5 +1745,27 @@ describe("the gated keys are every key the guards read", () => {
   test("spawn.sh's code root is gated", async () => {
     expect(await read("scripts/spawn.sh")).toContain("setting_text paths.codeRoot")
     expect(GUARD_KEYS.has("paths.codeRoot")).toBe(true)
+  })
+})
+
+describe("a refusal for a value the hook does not hold names it in readable text", () => {
+  test.each([
+    ["a variable", "rm -f $X/x", "rm on $X/x,"],
+    ["a loop variable", 'for d in a b; do rm -f "$d/x"; done', 'rm on "$d/x",'],
+    ["a variable inside a nested shell's script", 'bash -c "rm -f $X/x"', "rm on $…/x,"],
+    [
+      "git -c with a variable",
+      'git -c core.pager="$P" log',
+      'git -c core.pager="$P", a value built from',
+    ],
+    [
+      "git -c attached, with a variable",
+      'git -ccore.pager="$P" log',
+      'git -ccore.pager="$P", a value built from',
+    ],
+  ])("%s", async (_, command, named) => {
+    const reason = await bash(command, "/tmp")
+    expect(reason).toContain(named)
+    expect(reason).not.toContain("\u0000")
   })
 })

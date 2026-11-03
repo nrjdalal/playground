@@ -5,10 +5,13 @@ import { basename, isAbsolute, resolve } from "node:path"
 // `variable` names the first shell variable a text expands, so a hook can tell `"$HERDR_BIN_PATH"` from any other unknown program.
 export type Text = { reads?: Text[]; unknown?: string; value: string; variable?: string }
 // `glob` marks a word with a glob character the shell sees outside quotes, so `'{print $1}'` holds none and `{a,'b'}` one.
-export type Word = Text & { glob?: boolean; procs?: Command[]; quoted: boolean }
+// `raw` keeps the source of a word that holds a value the lexer cannot read, so a hook can lex it again once the call has set its variables.
+export type Word = Text & { glob?: boolean; procs?: Command[]; quoted: boolean; raw?: string }
 type Redirect = { body?: Text; fd: string; op: string; target?: Word }
 export type Command = {
   detached?: boolean
+  // the operator that ended the command before it in its scope (`;`, `&&`, `||`, `|`, `&`, `)` or `;;`), none for a scope's first
+  follows?: string
   group?: boolean
   inner?: () => Command[]
   redirects: Redirect[]
@@ -72,9 +75,12 @@ export function pastDeadline(): void {
 
 let steps = 0
 
-// The one choke point every lex, expansion and walk step passes through; it reads the clock once every 1024 steps, so a tight loop pays for a counter alone.
+// The steps tick() has counted so far, so a test bounds a reader's work by a count that holds under any load.
+export const stepsTaken = (): number => steps
+
+// The one choke point every lex, expansion and walk step passes through; it counts each step and reads the clock once every 1024 under a deadline, so a tight loop pays for a counter alone.
 export function tick(): void {
-  if (deadline === undefined || ++steps % 1024 !== 0) return
+  if (++steps % 1024 !== 0 || deadline === undefined) return
   if (performance.now() > deadline) throw new RangeError("past the hook's time")
 }
 
@@ -413,6 +419,7 @@ function decode(raw: string): string {
   return raw.replace(
     /\\(?:x([\da-fA-F]{1,2})|u([\da-fA-F]{1,4})|U([\da-fA-F]{1,8})|0?([0-7]{1,3})|([\s\S]))/g,
     (whole, hex?: string, u4?: string, u8?: string, octal?: string, other?: string) => {
+      tick()
       const point =
         hex || u4 || u8
           ? Number.parseInt(hex ?? u4 ?? u8 ?? "", 16)
@@ -472,6 +479,7 @@ function walk(lx: Lexer, scope: number, nested: boolean, inherit?: Command): voi
       lx.commands.push(done)
     }
     cmd = fresh()
+    cmd.follows = op
     if (pipe) {
       cmd.stdin = done
       cmd.detached = true
@@ -491,7 +499,7 @@ function walk(lx: Lexer, scope: number, nested: boolean, inherit?: Command): voi
       while (lx.i < src.length && src[lx.i] !== "\n") lx.i++
     } else if (c === ")") {
       lx.i++
-      end(";")
+      end(")")
       if (nested) return
     } else if (c === "(") {
       lx.i++
@@ -641,6 +649,7 @@ function word(lx: Lexer): Word {
   // the lookahead finds the close once, so a { with no } costs its length rather than its square
   if (/\{(?=[^{}]*\})[^{}]*(?:,|\.\.)/.test(bare)) out.unknown ??= "a brace expansion"
   if (GLOB_CHARS.test(bare)) out.glob = true
+  if (marked(out.value)) out.raw = src.slice(start, lx.i)
   return out
 }
 
@@ -693,7 +702,7 @@ function dollar(lx: Lexer): Text {
     lx.i += 2
     const from = lx.commands.length
     nest(lx)
-    return substituted(lx.commands.slice(from))
+    return substituted(lx.commands.slice(from), lx.known)
   }
   if (next === "{") {
     const end = balanced(src, lx.i + 1, "{", "}")
@@ -706,6 +715,11 @@ function dollar(lx: Lexer): Text {
     const from = ++lx.i
     while (/\w/.test(src[lx.i] ?? "")) lx.i++
     return variable(src.slice(from, lx.i))
+  }
+  // the shell's pid is digits whatever its value, so a path built around it is judged by where it lands
+  if (next === "$") {
+    lx.i += 2
+    return { value: "99999" }
   }
   if (/[\d@*#?$!-]/.test(next)) {
     lx.i += 2
@@ -758,9 +772,11 @@ function backtick(lx: Lexer): Text {
 }
 
 // `$(cat <<'EOF' ... EOF)`, `$(cat file)` and `$(< file)` are read; any other command substitution is unknown.
-function substituted(inner: Command[]): Text {
+function substituted(inner: Command[], known: Record<string, string>): Text {
   const [only] = inner
   if (inner.length !== 1 || only.stdin || only.group) return unknown("a command substitution")
+  const made = mktempPath(only, known)
+  if (made) return { value: made }
   const [first, ...args] = only.words
   const plainCat = first?.value === "cat" && !first.unknown && !first.reads?.length
   const input = only.redirects[0]
@@ -781,6 +797,30 @@ function substituted(inner: Command[]): Text {
     return { reads: [input.target], value: READ }
   }
   return unknown("a command substitution")
+}
+
+// mktemp's flags that leave it making a fresh name under TMPDIR; a dry run (-u) makes none, so its name can be one that exists
+const MKTEMP_FLAGS = new Set(["d", "q"])
+const MKTEMP_LONG = new Set(["--directory", "--quiet"])
+
+// The path a plain `mktemp` makes, on a line that never sets TMPDIR (knownVariables drops it then), with no -p, --tmpdir or -t to steer it: its one held template as written, judged where it lands from the call's folder, else a name under TMPDIR standing in for its random part
+function mktempPath(cmd: Command, known: Record<string, string>): string | undefined {
+  const [first, ...args] = cmd.words
+  if (!first || first.quoted || first.value !== "mktemp" || cmd.redirects.length > 0) return
+  if (!known.TMPDIR) return
+  const flag = ({ quoted, value }: Word) =>
+    !quoted &&
+    (MKTEMP_LONG.has(value) ||
+      (/^-[a-z]+$/.test(value) &&
+        value
+          .slice(1)
+          .split("")
+          .every((c) => MKTEMP_FLAGS.has(c))))
+  const templates = args.filter((word) => !flag(word))
+  const [template] = templates
+  if (templates.length > 1 || template?.value.startsWith("-") || marked(template?.value ?? ""))
+    return
+  return template ? template.value : `${known.TMPDIR.replace(/\/$/, "")}/tmp.mktemp`
 }
 
 // xargs in front of a command: `replace` is its -I (or BSD -J) string, which marks where stdin goes; without one, stdin is appended as arguments.
@@ -837,6 +877,7 @@ function unwrap(state: State, inside: string | undefined, budget: Budget): Parse
   const take = (): Word | undefined => rest.pop()
   const also: Parsed[] = []
   const fork = (wrapper: string, drop: number) => {
+    tick()
     if (budget.left-- <= 0) {
       budget.capped = true
       return

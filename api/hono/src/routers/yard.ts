@@ -5,6 +5,8 @@ import { db } from "@packages/db"
 import { env } from "@packages/env/api-hono"
 import {
   channelSchema,
+  githubLoginSchema,
+  inviteCodeSchema,
   MAX_TEXT,
   MESSAGE_KINDS,
   messageSchema,
@@ -74,11 +76,6 @@ const inviteSchema = z.object({
   status: z.enum(["open", "redeemed", "requested", "revoked"]),
 })
 
-const login = z
-  .string()
-  .trim()
-  .regex(/^[a-z\d](?:[a-z\d-]{0,38})$/i, "a GitHub login")
-
 // The hosted web's origin, the one a socket opens from; with HONO_WEB_URL unset, no socket opens, while the other routes still serve.
 const webOrigin = env.HONO_WEB_URL ? new URL(env.HONO_WEB_URL).origin : null
 
@@ -98,10 +95,42 @@ const fanOut = async (caller: store.Caller, message: z.infer<typeof messageSchem
 
 // Yard's routes, which only the hosted build mounts (hosted.ts), each on the member rung or the narrower one it names.
 export const yardRouter = new Hono<{ Variables: YardVariables }>()
+  // who a token or a session belongs to, so the local Playground knows which @login is its owner's
+  .get(
+    "/me",
+    doc(
+      "Who you are on Yard: your login, and whether you are its owner",
+      z.object({ login: z.string(), owner: z.boolean() }),
+    ),
+    member,
+    (c) => {
+      const { login, owner } = c.get("caller")
+      return c.json({ data: { login, owner } })
+    },
+  )
+  // what the local Playground cards in its Inbox: mentions, a thread's replies included, which a channel's page of top-level messages leaves out, and your own held posts
+  .get(
+    "/waiting",
+    doc(
+      "What waits on you past a mark, oldest first by when it showed, then by id: every sent message that names you in the channels and DMs you are in, a thread's replies included, and your own posts held for your approval; take the last item's shownAt as the next since and its message's id as the next after",
+      z.object({
+        items: z.array(
+          z.object({ held: z.boolean(), message: messageSchema, shownAt: z.iso.datetime() }),
+        ),
+      }),
+      [validationErrorResponses],
+    ),
+    member,
+    valid("query", z.object({ after: z.string().min(1).optional(), since: z.iso.datetime() })),
+    async (c) =>
+      c.json({
+        data: { items: await store.waiting(db, c.get("caller"), c.req.valid("query")) },
+      }),
+  )
   .get(
     "/channels",
     doc(
-      "Every channel, joined or not, and your DMs, with unread and mention counts",
+      "Every channel, joined or not, and your DMs, with unread and mention counts; a first list joins you to Yard's own channels",
       z.object({ channels: z.array(channelSchema) }),
     ),
     member,
@@ -149,7 +178,7 @@ export const yardRouter = new Hono<{ Variables: YardVariables }>()
       [validationErrorResponses, notFoundErrorResponses],
     ),
     member,
-    valid("json", z.object({ login })),
+    valid("json", z.object({ login: githubLoginSchema })),
     async (c) =>
       c.json({
         data: { channel: await store.openDm(db, c.get("caller"), c.req.valid("json").login) },
@@ -307,7 +336,7 @@ export const yardRouter = new Hono<{ Variables: YardVariables }>()
       "json",
       z.object({
         expiresInDays: z.number().int().min(1).max(30).optional(),
-        forLogin: login.optional(),
+        forLogin: githubLoginSchema.optional(),
       }),
     ),
     async (c) =>
@@ -325,7 +354,7 @@ export const yardRouter = new Hono<{ Variables: YardVariables }>()
       201,
     ),
     web,
-    valid("json", z.object({ forLogin: login })),
+    valid("json", z.object({ forLogin: githubLoginSchema })),
     async (c) =>
       c.json(
         {
@@ -371,7 +400,7 @@ export const yardRouter = new Hono<{ Variables: YardVariables }>()
       [validationErrorResponses, notFoundErrorResponses],
     ),
     yardCaller({ rung: "user", web: true }),
-    valid("json", z.object({ code: z.string().trim().min(1).max(64) })),
+    valid("json", z.object({ code: inviteCodeSchema })),
     async (c) =>
       c.json({ data: await store.redeemInvite(db, c.get("caller"), c.req.valid("json").code) }),
   )

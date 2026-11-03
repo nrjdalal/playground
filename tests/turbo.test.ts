@@ -1,14 +1,110 @@
 import { describe, expect, test } from "bun:test"
-import { join } from "node:path"
+import { dirname, join, relative } from "node:path"
 
 const ROOT = join(import.meta.dir, "..")
+const SCRIPTS = join(ROOT, "packages/scripts/src")
 
-type Turbo = { tasks: Record<string, { outputs?: string[] }> }
+type Task = { cache?: boolean; dependsOn?: string[]; inputs?: string[]; outputs?: string[] }
+type Turbo = { globalDependencies?: string[]; tasks: Record<string, Task> }
 
-// next dev keeps its Turbopack cache in .next/dev, so a build output that takes in .next/** stores it in every snapshot, and a cache hit restores another state's dev cache over the checkout's.
+const readTurbo = async () =>
+  Bun.JSONC.parse(await Bun.file(join(ROOT, "turbo.json")).text()) as Turbo
+
+const imports = async (file: string, seen = new Set<string>()): Promise<Set<string>> => {
+  if (seen.has(file)) return seen
+  seen.add(file)
+  const text = await Bun.file(join(SCRIPTS, file)).text()
+  for (const [, spec] of text.matchAll(/from "(\.\.?\/[^"]+)"/g)) {
+    const target = relative(SCRIPTS, join(SCRIPTS, dirname(file), spec))
+    if (!target.startsWith(".."))
+      await imports(target.endsWith(".ts") ? target : `${target}.ts`, seen)
+  }
+  return seen
+}
+
+const generators = async (scripts: Record<string, string>, name: string): Promise<Set<string>> => {
+  const line = scripts[name] ?? ""
+  const files = new Set<string>()
+  for (const [, file] of line.matchAll(/(?:\.\.\/)+(?:packages\/)?scripts\/src\/(\S+\.ts)/g))
+    for (const each of await imports(file)) files.add(each)
+  for (const [, other] of line.matchAll(/\bbun run (?:--bun )?([\w:-]+)/g))
+    for (const each of await generators(scripts, other)) files.add(each)
+  return files
+}
+
+const workspaceTasks = async (turbo: Turbo) => {
+  const found: { dependsOn: string[]; generators: string[]; id: string; linked: boolean }[] = []
+  for await (const path of new Bun.Glob("{api,packages,web}/*/package.json").scan(ROOT)) {
+    const pkg = await Bun.file(join(ROOT, path)).json()
+    const scripts: Record<string, string> = pkg.scripts ?? {}
+    const linked = "@packages/scripts" in { ...pkg.dependencies, ...pkg.devDependencies }
+    for (const script of Object.keys(scripts)) {
+      const task = turbo.tasks[`${pkg.name}#${script}`] ?? turbo.tasks[script]
+      if (!task || task.cache === false) continue
+      const files = [...(await generators(scripts, script))].sort()
+      if (files.length)
+        found.push({
+          dependsOn: task.dependsOn ?? [],
+          generators: files,
+          id: `${pkg.name}#${script}`,
+          linked,
+        })
+    }
+  }
+  return found.sort((a, b) => a.id.localeCompare(b.id))
+}
+
+type DryTask = { dependencies: string[]; inputs: Record<string, string>; taskId: string }
+let dry: DryTask[] | undefined
+const dryRun = () => {
+  if (dry) return dry
+  const run = Bun.spawnSync(
+    ["bunx", "turbo", "run", "check-types", "build", "--filter=@web/next", "--dry=json"],
+    { cwd: ROOT, env: { ...process.env, TURBO_TELEMETRY_DISABLED: "1" } },
+  )
+  expect(run.exitCode).toBe(0)
+  dry = (JSON.parse(run.stdout.toString()) as { tasks: DryTask[] }).tasks
+  return dry
+}
+
 describe("turbo.json", () => {
+  // #700: a global packages/scripts/src/** glob moved every task's hash on any edit there, so 4 in 10 merges sent each worktree's next commit build cold
+  test("no packages/scripts/src glob is a global dependency, so an edit to a script no build runs keeps every build's cache", async () => {
+    const { globalDependencies = [] } = await readTurbo()
+    expect(globalDependencies.filter((entry) => entry.includes("packages/scripts"))).toEqual([])
+  })
+
+  // turbo folds @packages/scripts#build's hash into each dependent's through ^build, so that task's inputs decide which script edits rebuild web and auth
+  test("every generator a cached task's script runs, and each file it imports, is an input of @packages/scripts#build, which the task depends on", async () => {
+    const turbo = await readTurbo()
+    const inputs = turbo.tasks["@packages/scripts#build"]?.inputs ?? []
+    const tasks = await workspaceTasks(turbo)
+    expect(tasks.map((task) => task.id)).toContain("@web/next#build")
+    for (const { dependsOn, generators: files, id, linked } of tasks)
+      expect({
+        id,
+        linked,
+        missing: files.filter((file) => !inputs.includes(`src/${file}`)),
+        upstream: dependsOn.includes("^build"),
+      }).toEqual({
+        id,
+        linked: true,
+        missing: [],
+        upstream: true,
+      })
+  })
+
+  test("every @packages/scripts#build input names a file that exists", async () => {
+    const inputs = (await readTurbo()).tasks["@packages/scripts#build"]?.inputs ?? []
+    const missing = []
+    for (const input of inputs)
+      if (!(await Bun.file(join(ROOT, "packages/scripts", input)).exists())) missing.push(input)
+    expect(missing).toEqual([])
+  })
+
+  // next dev keeps its Turbopack cache in .next/dev, so a build output that takes in .next/** stores it in every snapshot, and a cache hit restores another state's dev cache over the checkout's.
   test("every outputs list that takes in .next leaves out next dev's cache", async () => {
-    const turbo = Bun.JSONC.parse(await Bun.file(join(ROOT, "turbo.json")).text()) as Turbo
+    const turbo = await readTurbo()
     const web = Object.entries(turbo.tasks).filter(([, task]) => task.outputs?.includes(".next/**"))
     expect(web.map(([name]) => name).sort()).toEqual(["@web/next#build", "build", "build:vercel"])
     expect(web.filter(([, task]) => !task.outputs?.includes("!.next/dev/**"))).toEqual([])
@@ -16,16 +112,19 @@ describe("turbo.json", () => {
 
   // check-types writes and reads .next/types while next build deletes and rewrites it, so CI's `turbo run check-types build` fails on a missing ./routes.js when the two run side by side.
   test("web's build waits for web's check-types, so the two never share .next/types at once", () => {
-    const dry = Bun.spawnSync(
-      ["bunx", "turbo", "run", "check-types", "build", "--filter=@web/next", "--dry=json"],
-      { cwd: ROOT, env: { ...process.env, TURBO_TELEMETRY_DISABLED: "1" } },
-    )
-    expect(dry.exitCode).toBe(0)
-    const { tasks } = JSON.parse(dry.stdout.toString()) as {
-      tasks: { dependencies: string[]; taskId: string }[]
-    }
-    expect(tasks.find((task) => task.taskId === "@web/next#build")?.dependencies).toContain(
+    expect(dryRun().find((task) => task.taskId === "@web/next#build")?.dependencies).toContain(
       "@web/next#check-types",
     )
+  }, 60_000)
+
+  test("turbo hashes @packages/scripts#build from its manifest and listed generators alone, and web's and auth's builds take that hash", async () => {
+    const listed = (await readTurbo()).tasks["@packages/scripts#build"]?.inputs ?? []
+    const tasks = dryRun()
+    const hashed = tasks.find((task) => task.taskId === "@packages/scripts#build")?.inputs ?? {}
+    expect(Object.keys(hashed).sort()).toEqual(["package.json", ...listed].sort())
+    for (const id of ["@packages/auth#build", "@web/next#build"])
+      expect(tasks.find((task) => task.taskId === id)?.dependencies).toContain(
+        "@packages/scripts#build",
+      )
   }, 60_000)
 })

@@ -20,7 +20,9 @@ import {
   RiKey2Line,
   RiMoneyDollarCircleLine,
   RiProgress4Line,
+  RiPuzzleLine,
   RiQuestionAnswerLine,
+  RiQuestionLine,
   RiRefreshLine,
   RiReplyLine,
   RiSearchEyeLine,
@@ -109,6 +111,7 @@ import {
   cardKey,
   type CardKey,
   changedAt,
+  checkAnswerNote,
   dismissable,
   dismissItems,
   focusAfterTake,
@@ -136,6 +139,7 @@ import {
   scheduleChoices,
   scheduleItem,
   sendFailed,
+  sendUnconfirmed,
   sendWhy,
   type Shelf,
   takenBy,
@@ -151,6 +155,7 @@ import { inboxMark, readMark } from "@/lib/tab-dot"
 import { fullTime, relativeTime } from "@/lib/time"
 
 const DECISION_ICONS: Record<InboxPreview["type"], RemixiconComponentType> = {
+  accept: RiPuzzleLine,
   ask: RiQuestionAnswerLine,
   budget: RiMoneyDollarCircleLine,
   delete: RiDeleteBinLine,
@@ -514,6 +519,17 @@ function Preview({ item }: { item: Extract<InboxItem, { kind: "decision" }> }) {
           for {preview.sink.environments.join(", ")}. It is kept nowhere.
         </p>
       )
+    case "accept":
+      return (
+        <>
+          <p>
+            On Approve, the dashboard accepts the proposed {preview.kind}{" "}
+            <code className="font-mono">{preview.key}</code> in {preview.scope}, as it reads at{" "}
+            <code className="font-mono">{preview.rev.slice(0, 7)}</code>.
+          </p>
+          <p className="break-words whitespace-pre-wrap">Why: {preview.why}</p>
+        </>
+      )
   }
 }
 
@@ -692,8 +708,11 @@ export function InboxCard({
   updated: boolean
 }) {
   const queryClient = useQueryClient()
+  const { dispatcher, outbox } = useDashboard()
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // Check it for me sends its note once
+  const [asked, setAsked] = useState(false)
   // a draft's words, editable where they stand
   const posted = item.kind === "draft" ? item.preview.text : ""
   const [draft, setDraft] = useState(posted)
@@ -896,18 +915,36 @@ export function InboxCard({
     )
 
   const left = folded ? null : outcome !== null ? (
-    retryable(item) && (
-      <Hint content={held}>
+    sendUnconfirmed(item) && dispatcher ? (
+      <Hint content="Ask the dispatcher to look at the session and tell you whether your answer arrived">
         <Button
           size="sm"
-          disabled={busy}
+          variant="outline"
+          disabled={busy || asked}
           {...hold}
-          onClick={() => void settle(() => retryItem(item.id))}
+          onClick={() => {
+            setAsked(true)
+            outbox.send(dispatcher, { attachments: [], text: checkAnswerNote(item) })
+          }}
         >
-          <RiRefreshLine data-icon="inline-start" />
-          Retry
+          <RiQuestionLine data-icon="inline-start" />
+          Check it for me
         </Button>
       </Hint>
+    ) : (
+      retryable(item, now) && (
+        <Hint content={held}>
+          <Button
+            size="sm"
+            disabled={busy}
+            {...hold}
+            onClick={() => void settle(() => retryItem(item.id))}
+          >
+            <RiRefreshLine data-icon="inline-start" />
+            Retry
+          </Button>
+        </Hint>
+      )
     )
   ) : secretAsk ? (
     <Hint content={held}>
@@ -1001,6 +1038,19 @@ export function InboxCard({
         </Button>
       </Hint>
     </>
+  ) : item.kind === "update" && item.preview.approve ? (
+    // a pending Yard post's Approve opens Yard's approve page in the browser, where the owner is signed in, since a token never approves (the tier-two rule)
+    <Button
+      size="sm"
+      variant="outline"
+      className={SIDE_TONES.approve}
+      render={<a href={item.preview.approve} target="_blank" rel="noopener noreferrer" />}
+      nativeButton={false}
+      onClick={read}
+    >
+      <RiExternalLinkLine data-icon="inline-start" />
+      Approve
+    </Button>
   ) : null
 
   const right = (

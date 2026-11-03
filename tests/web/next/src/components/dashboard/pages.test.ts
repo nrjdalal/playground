@@ -4,6 +4,7 @@ import { join } from "node:path"
 import fixture from "../../../../../../api/hono/src/fixtures/dashboard.json"
 import type { Preview } from "../../../../../../api/hono/src/lib/apps/previews"
 import {
+  deleteDescription,
   groupVersions,
   PageList,
   versionKey,
@@ -95,5 +96,35 @@ describe("one row a page, its older versions in a dropdown", () => {
     expect(html).not.toContain('href="https://api.test/api/v1/apps/previews/dune-2668-3.html"')
     expect(html).toContain("3 versions")
     expect(html.match(/versions<svg/g) ?? []).toHaveLength(1)
+  })
+
+  test("with a delete handler, each row holds one delete button named for its page; with none, no row does", () => {
+    const html = renderToStaticMarkup(
+      createElement(PageList, {
+        apiUrl: "https://api.test",
+        now: Date.now(),
+        onDelete: () => {},
+        pages,
+      }),
+    )
+    expect(html.match(/aria-label="Delete [^"]+"/g)).toHaveLength(2)
+    const without = renderToStaticMarkup(
+      createElement(PageList, { apiUrl: "https://api.test", now: Date.now(), pages }),
+    )
+    expect(without).not.toContain('aria-label="Delete')
+  })
+
+  test("the delete confirm says a row's older versions stay and the newest of them takes its row, so the row left showing is not a failed delete", () => {
+    const [[latest, ...older]] = groupVersions(pages)
+    expect(latest.name).toBe("dune-2668-8.html")
+    expect(deleteDescription(latest.name, older.length)).toBe(
+      "dune-2668-8.html and its caption leave the previews folder for good. Its 2 older versions stay, and the newest of them takes its row.",
+    )
+    expect(deleteDescription("dune-2668-3.html", 1)).toBe(
+      "dune-2668-3.html and its caption leave the previews folder for good. Its older version stays and takes its row.",
+    )
+    expect(deleteDescription("lookup.html", 0)).toBe(
+      "lookup.html and its caption leave the previews folder for good.",
+    )
   })
 })
