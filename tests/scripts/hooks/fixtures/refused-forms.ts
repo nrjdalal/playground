@@ -2504,6 +2504,18 @@ gh api graphql -f query="$QUERY"`,
         "a removal echoed to sudo's shell behind more shortened prompt options than the parse's readings",
         `echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sudo ${"--pro x ".repeat(24)}--us root -s`,
       ],
+      [
+        "a removal echoed to a shell behind sudo and more shortened user options than the parse's readings",
+        `echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sudo ${"--us root ".repeat(17)}bash`,
+      ],
+      [
+        "a removal echoed to a shell behind sudo, more shortened options than the parse's readings and env",
+        `echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sudo ${"--bac x ".repeat(17)}env bash`,
+      ],
+      [
+        "a removal echoed to a shell behind nice and more unlisted options than the parse's readings",
+        `echo 'rm -rf ~/.playground/extensions/.no-such-folder' | nice ${"--zz x ".repeat(17)}sh`,
+      ],
     ],
     source: "#652",
   },
