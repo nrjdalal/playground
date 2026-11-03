@@ -1,5 +1,5 @@
-- ALWAYS: Start it (`bun run dev`) as a process of a cmux terminal, or as a background task of an agent session running in one (Bash `run_in_background`), never detached with `( … &)` or `nohup`.
-  The API of a stack that opts in to cmux's sessions (below) reads sessions, the Feed and screens through cmux's socket, which answers only a process that descends from a cmux terminal: turbo drops cmux's capability token from the environment, so a stack reparented to launchd is refused.
+- ALWAYS: Start it (`bun run dev`) as a process of a herdr pane, or as a background task of an agent session running in one (Bash `run_in_background`), never detached with `( … &)` or `nohup`.
+  The API of a stack that opts in to cmux's sessions (below; cmux is deprecated, cmux.md) reads sessions, the Feed and screens through cmux's socket, which answers only a process that descends from a cmux terminal, so that stack starts in one: turbo drops cmux's capability token from the environment, so a stack reparented to launchd is refused.
   A Vibeground's stack is the one a session never starts: the Preview row's Start (`startVibe()` in `api/hono/src/lib/dashboard/vibe.ts`) runs `bun run dev` as the API's own child in a process group of its own, as the same user (so it reads the same Keychain) with the API's environment cut to `HOME`, `PATH` and the user's own, since it reads herdr alone and never asks cmux,
   and `PLAYGROUND_DATA_DIR` naming its own data folder, `.turbo/vibe-data`, a clone of the live one's folders, files and symlinks but its archive, bin, debug, dumps and trash, so its settings and store edits stay in the copy.
   The clone is taken once, at Start, so a Vibeground shows the roster and each session's state as they were then.
@@ -90,11 +90,10 @@
 - ALWAYS: Keep the `claude_*` tables (`packages/db/src/schema/claude.ts`: every Claude Code session the ingest stores, Playground's own on a stack that reads this machine (above), each transcript line as a `claude_entry`, and how far each file has been read) in the dashboard's local Postgres on 127.0.0.1, never a shared database:
   they hold whatever a session read or ran, secrets and customer data included.
   `api/hono/src/lib/sessions/lines.ts` turns a transcript line into an entry and its session's facts.
-- ALWAYS: Read an organisation's own values from `packages/config/src/org.ts`, one zod schema over env with generic defaults: the owner (`PLAYGROUND_OWNER_NAME`, Owner) and the integrations, each off by default:
-  Slack (`SLACK_ENABLED`) and the work queue (`WORK_GITHUB_ORG`, a GitHub login or none, and `WORK_LABEL`, Work; dashboard.md).
+- ALWAYS: Read an organisation's own values from `packages/config/src/org.ts`, one zod schema over env with generic defaults: the owner (`PLAYGROUND_OWNER_NAME`, Owner) and the work queue, off by default (`WORK_GITHUB_ORG`, a GitHub login or none, and `WORK_LABEL`, Work; dashboard.md).
   The owner's name is the prefix Next up ranks second (roster.md).
-  `SLACK_ENABLED` is read and not yet acted on.
-  The API reads it once as it starts (`api/hono/src/lib/org.ts`).
+  The API reads the config once as it starts (`api/hono/src/lib/org.ts`).
+  Slack is opted into in each machine's own job settings: ops-dm-watch by the `jobs.opsDmWatch` setting, off by default, and ops-channel-watch by a row listed by hand in `jobs.json` (playbook's LIFECYCLE.md).
   Every file the dashboard keeps outside the database sits in its data folder, `dataDir()` in `api/hono/src/lib/sessions/paths.ts` over `dataDirOf()` in `packages/env/src/data-dir.ts`: `PLAYGROUND_DATA_DIR` on a stack that reads this machine, else `~/.playground`,
   so every `playground/<path>` these rules name is under it;
   a fixture stack keeps to its fixture's `playground`.

@@ -30,8 +30,9 @@ import { dataDir } from "@/lib/sessions/paths"
 const USAGE = `usage: bun run ask new [--thread <id>] < item.json
                                                 posts an inbox item from JSON on stdin, prints its id
                                                 options and approve/deny labels go in plain words (ELI5, ASD-STE100)
-                                                an ask's or a draft's attachments name files on this Mac by absolute
-                                                path; a draft's show on its card, and Send gives Slack the words alone
+                                                an ask's, a draft's or a slack decision's attachments name files on
+                                                this Mac by absolute path; a draft's or a slack decision's show on
+                                                its card alone, and Slack gets the words
                                                 an update with text and attachments is a read-only card: it shows
                                                 them as an ask does, with no Approve or Deny
                                                 a secret ask names a key and a sink (Vercel alone); the owner's

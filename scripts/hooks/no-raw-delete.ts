@@ -1,4 +1,4 @@
-// PreToolUse hook, acting for every session and sub-agent: refuses a recursive delete and the calls that strip a file's delete protection, since a recursive delete is final and a prompt line against one does not hold (2 Nov: two code-review sub-agents each deleted recursively in their own scratch folders), and names playground rm, which moves a path into a 7-day trash. A speed bump: a script file a session writes and runs passes it.
+// PreToolUse hook, acting for every session and sub-agent: refuses a recursive delete, an option that deletes the files a program reads, and the calls that strip a file's delete protection, since a recursive delete is final and a prompt line against one does not hold (2 Nov: two code-review sub-agents each deleted recursively in their own scratch folders), and names playground rm, which moves a path into a 7-day trash. A speed bump: a script file a session writes and runs passes it.
 
 import { realpathSync } from "node:fs"
 import { basename, dirname, resolve, sep } from "node:path"
@@ -20,6 +20,7 @@ import {
   run,
   slotWords,
   stdinOf,
+  UNKNOWN,
   unreadable,
   visible,
   type Visit,
@@ -66,8 +67,46 @@ const isData = (name: string) => DATA.has(name) || /^python[\d.]*$/.test(name)
 const STARTERS = new Set(["screen", "tmux"])
 // rm under its own name and GNU rm's Homebrew name.
 const RM = new Set(["grm", "rm"])
+// del-cli's names, judged in a program's place or as a runner's package alone, since `del` is a word of other programs (`redis-cli del lock`).
+const DEL = new Set(["del", "del-cli"])
+// The npm packages whose one job is a recursive delete, del-cli under each of its bins.
+const DELETER_PROGRAMS = new Set([...DEL, "rimraf"])
+// The package runners, each with the subcommands that run a package's bin (`pnpm dlx`), none for one that runs it directly (`npx`).
+const RUNNERS = new Map<string, string[]>([
+  ["bun", ["x"]],
+  ["bunx", []],
+  ["npm", ["exec", "x"]],
+  ["npx", []],
+  ["pnpm", ["dlx", "exec"]],
+  ["pnpx", []],
+  ["yarn", ["dlx", "exec"]],
+])
+// shred and tar under their own names and GNU's Homebrew names.
+const SHRED = new Set(["gshred", "shred"])
+const TAR = new Set(["gtar", "tar"])
 // The programs the hook judges, read wherever another program names one among its words (`arch -arm64 rm -rf`, `busybox rm`), since any program may run its arguments.
-const JUDGED = new Set([...RM, "chflags", "chmod", "fd", "find", "gfind", "git", "rimraf", "rsync"])
+const JUDGED = new Set([
+  ...RM,
+  ...SHRED,
+  ...TAR,
+  "chflags",
+  "chmod",
+  "fd",
+  "find",
+  "gfind",
+  "git",
+  "rimraf",
+  "rsync",
+])
+
+// The package a runner runs: its first word that is no option, after the subcommand it needs (`npx -y del-cli`, `pnpm dlx del-cli`).
+function packageOf(name: string, args: Word[]): Word | undefined {
+  const subs = RUNNERS.get(name)
+  if (!subs) return
+  const words = args.filter((a) => !a.value.startsWith("-"))
+  if (subs.length === 0) return words[0]
+  return words[0] && subs.includes(words[0].value) ? words[1] : undefined
+}
 // Programs that print or search their words, so a judged name among them is text.
 const READERS = new Set([...PRINTERS, "egrep", "fgrep", "grep", "rg"])
 // Runners that add arguments the hook cannot see, as xargs does.
@@ -84,8 +123,8 @@ const QUEUES = new Set(["at", "batch"])
 // A package runner's name with its version dropped (`rimraf@5`), a scope's leading @ kept.
 const unversioned = (name: string) => name.replace(/(?<=.)@[^@/]*$/, "")
 
-// fd's exec option with its value attached (`--exec=rm`, `-x=rm`, `-xrm`).
-const ATTACHED = /^(?:--exec(?:-batch)?=|-[xX]=?)(.+)$/s
+// fd's exec option, alone or last in a cluster of short flags that take no value (`-HX`), with any value attached (`--exec=rm`, `-x=rm`, `-Hxrm`).
+const ATTACHED = /^(?:--exec(?:-batch)?=|-[01FHILVaghilpqsu]*[xX]=?)(.*)$/s
 
 // rm's recursive option: -r or -R in a cluster, or --recursive by any prefix GNU rm takes (`--rec`).
 const recursive = (v: string): boolean =>
@@ -218,6 +257,7 @@ async function inspect(raw: string, environment: Record<string, string | undefin
       const { args, name } = parsed
       const verdict = await judge(cmd, parsed, at, reach)
       if (verdict) return verdict
+      const pkg = packageOf(name, args)
       // a judged program named among another's words runs as that program, behind any runner
       if (!READERS.has(name) && !JUDGED.has(name))
         for (const [k, a] of args.entries()) {
@@ -227,7 +267,8 @@ async function inspect(raw: string, environment: Record<string, string | undefin
               return refuse(`a program the hook cannot read (${shown(a)}) given -r`, "it may be rm")
             continue
           }
-          if (!JUDGED.has(unversioned(program(a.value)))) continue
+          const named = unversioned(program(a.value))
+          if (!JUDGED.has(named) && !(a === pkg && DEL.has(named))) continue
           const found = await examine(
             { ...cmd, words: args.slice(k) },
             at,
@@ -268,27 +309,53 @@ async function inspect(raw: string, environment: Record<string, string | undefin
         lead.some((a) => hidden(a) && !a.quoted))
     )
       return refuse(`a program the hook cannot read (${shown(first)}) given -r`, "it may be rm")
+    // an unquoted variable in a program's place splits at its spaces under bash (`c="rm -rf x"; $c`), with no quote or pipe read again, so its words lead the command's own
+    const held =
+      first && !first.quoted && first.value === UNKNOWN && first.variable
+        ? at.vars.get(first.variable)
+        : undefined
+    if (held && !held.unknown && /\s/.test(held.value.trim())) {
+      const split = held.value
+        .trim()
+        .split(/\s+/)
+        .map((value) => ({ quoted: false, value }))
+      const found = await examine({ ...cmd, words: [...split, ...args] }, at, visitAs(reach), false)
+      if (found) return found
+    }
     const slot = slotWords(parsed)
     if (slot) return examine({ ...cmd, words: slot }, at, visitAs(reach), false)
     if (RM.has(name)) return judgeRm(args, xargs !== undefined || reach.appends, at, roots, reach)
     if (name === "git") return judgeGit(args)
-    if (name === "rimraf") return refuse("rimraf")
+    if (DELETER_PROGRAMS.has(name)) return refuse(name)
     // --del is --delete-during's alias, and --delay-updates deletes nothing
     if (
       name === "rsync" &&
       args.some(({ value }) => value === "--del" || value.startsWith("--delete"))
     )
       return refuse("rsync --delete", "it deletes every file its source lacks, for good")
+    // --remove-sent-files is --remove-source-files' old name
+    if (name === "rsync" && args.some(({ value }) => /^--remove-s(?:ent|ource)-files$/.test(value)))
+      return refuse("rsync --remove-source-files", "it deletes every source file it sends")
+    if (
+      SHRED.has(name) &&
+      args.some(
+        ({ value }) => /^-[a-z]*u/.test(value) || prefixOf(value.split("=")[0], "--remove", 4),
+      )
+    )
+      return refuse(`${name} -u`, "it overwrites each file and then deletes it, past any recovery")
+    if (TAR.has(name) && args.some(({ value }) => prefixOf(value, "--remove-files", 5)))
+      return refuse(`${name} --remove-files`, "it deletes every file it adds to the archive")
     if (name === "chflags")
       return refuse("chflags", "it lifts the flags that keep a file from deletion")
     if (name === "chmod" && args.some((a) => /^-[A-Za-z]*[aN]/.test(a.value)))
       return refuse("chmod -a or -N", "it strips the access entries that keep a file from deletion")
-    const runs = RUNS[name]
+    const runs = Object.hasOwn(RUNS, name) ? RUNS[name] : undefined
     if (runs) {
       if (args.some((a) => a.value === "-delete")) return refuse(`${name} -delete`)
       for (const [k, a] of args.entries()) {
-        const value = name === "fd" ? ATTACHED.exec(a.value)?.[1] : undefined
-        if (!runs.has(a.value) && value === undefined) continue
+        const attached = name === "fd" ? ATTACHED.exec(a.value) : null
+        if (!runs.has(a.value) && !attached) continue
+        const value = attached?.[1] || undefined
         const end = args.findIndex((w, j) => j > k && (w.value === ";" || w.value === "+"))
         const words = [
           ...(value === undefined ? [] : [{ ...a, value }]),
@@ -308,11 +375,24 @@ async function inspect(raw: string, environment: Record<string, string | undefin
         if (found) return found
       }
     }
+    // a job fed by -f, a redirect or a pipe that the hook cannot read may be any delete, while `at -l` queues none; a read that throws, on a path holding an expansion's mark (`bash -c "at now < $F"`), is one it cannot read
     if (QUEUES.has(name)) {
       const file = args.findIndex((a) => a.value === "-f")
-      const script =
-        file === -1 ? await stdinOf(cmd, at) : await readPath(args[file + 1] ?? { value: "" }, at)
-      if (!script.unknown) return line(script.value, at)
+      const fed =
+        file !== -1 ||
+        cmd.stdin !== undefined ||
+        cmd.redirects.some((r) => (r.fd === "" || r.fd === "0") && r.op.startsWith("<"))
+      if (fed) {
+        const script = await (
+          file === -1 ? stdinOf(cmd, at) : readPath(args[file + 1] ?? { value: "" }, at)
+        ).catch((error) => ({ unknown: `a read that failed: ${error}`, value: "" }))
+        if (script.unknown)
+          return refuse(
+            `${name} given a job it cannot read (${script.unknown})`,
+            "it may queue a recursive delete",
+          )
+        return line(script.value, at)
+      }
     }
     if (STARTERS.has(name))
       for (const [k, a] of args.entries()) {
@@ -333,10 +413,11 @@ const bare = (command: string) => command.replace(/[\\'"]/g, "")
 
 // The cheap first look: a name the hook judges, or a $, a backtick, a brace or a glob that can spell one.
 const CANDIDATE =
-  /rm|delete|chflags|chmod|clean|worktree|rimraf|rsync|screen|tmux|\bat\b|batch|\$|`|[{*?[]/
+  /rm|del|chflags|chmod|clean|worktree|rimraf|rsync|shred|\bg?tar\b|screen|tmux|\bat\b|batch|\$|`|[{*?[]/
 
 // A call that reads as a delete, which the hook refuses when it cannot read it.
-const DELETES = /\bg?rm\b|-delete\b|\bchflags\b|\bchmod\b|\bclean\b|\bworktree\b|\brimraf\b|--del/
+const DELETES =
+  /\bg?rm\b|-delete\b|\bchflags\b|\bchmod\b|\bclean\b|\bworktree\b|\brimraf\b|\bdel-cli\b|\bg?shred\b|--del|--rem/
 
 // The Bash command an input names, or undefined when the input does not parse as one.
 function commandOf(raw: string): string | undefined {
