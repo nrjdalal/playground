@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs"
-import { join } from "node:path"
+import { extname, join } from "node:path"
 
 import type { ActivityActor, Database } from "@packages/db"
 import { inboxItem, thread } from "@packages/db"
@@ -8,6 +8,7 @@ import { extensionsDir, slackSettings } from "@packages/settings"
 import { and, desc, eq, gt, inArray, isNotNull, isNull, or, sql } from "drizzle-orm"
 import { z } from "zod"
 
+import { fileNameOf } from "../download"
 import { ID_PATTERN } from "./attachments"
 
 // Playground's Inbox: what the factory posts for the owner, one row of inbox_item each, through the bun run ask CLI alone. A decision previews exactly what Approve does, a draft is a Slack message or Linear comment to send, and an update is an outcome to read. The dashboard records his answer and types it into the posting session through deliver(); the dashboard itself never sends, merges or files anything. Nothing here imports the API's env or an @/ path, so the CLI runs from any shell and the web reads its types.
@@ -788,6 +789,20 @@ export async function getItem(db: Database, key: string): Promise<InboxItem | nu
     .from(inboxItem)
     .where(ref ? eq(inboxItem.ref, Number(ref)) : eq(inboxItem.id, key))
   return row ? toItem(row) : null
+}
+
+// The name a kept file downloads under: the title of the newest item that carries it, with the file's own name after it when the item carries several, then the stored file's extension; "attachment" in place of the title when no item carries it.
+export async function attachmentDownloadName(db: Database, id: string): Promise<string> {
+  const [row] = await db
+    .select({ preview: inboxItem.preview, title: inboxItem.title })
+    .from(inboxItem)
+    .where(sql`${inboxItem.preview} -> 'attachments' @> ${JSON.stringify([{ id }])}::text::jsonb`)
+    .orderBy(desc(inboxItem.updatedAt))
+    .limit(1)
+  const files = (row?.preview as { attachments?: InboxAttachment[] } | undefined)?.attachments ?? []
+  const own = files.length > 1 ? files.find((file) => file.id === id)?.name : undefined
+  const title = own ? `${row?.title}, ${own.replace(/\.[^.]*$/, "")}` : (row?.title ?? "attachment")
+  return fileNameOf(title, extname(id).slice(1))
 }
 
 // Everything still waiting, and whatever else moved in the last week.

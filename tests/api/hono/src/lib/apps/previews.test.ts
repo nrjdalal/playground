@@ -14,6 +14,8 @@ import { join } from "node:path"
 import {
   findPreview,
   isPreviewName,
+  pdfPageOf,
+  previewDownloadName,
   previewHeaders,
   previewsDir,
   readPreview,
@@ -41,6 +43,7 @@ const PNG = Buffer.from(
 )
 const GIF = Buffer.from("GIF89a\x01\x00\x01\x00\x00\x00\x00;", "latin1")
 const WEBP = Buffer.concat([Buffer.from("RIFF\x1a\x00\x00\x00WEBPVP8 ", "latin1"), Buffer.alloc(8)])
+const PDF = Buffer.from("%PDF-1.4\n%%EOF\n", "latin1")
 const HTML =
   "<style>@keyframes s{to{transform:rotate(1turn)}}div{animation:s 1s infinite}</style><div>o</div>"
 
@@ -293,6 +296,88 @@ describe("previewHeaders", () => {
     expect(
       previewHeaders({ kind: "html", name: "a.html" }, [])["content-security-policy"],
     ).toContain("frame-ancestors 'none'")
+  })
+})
+
+describe("a PDF beside a page (#783)", () => {
+  test("pdfPageOf names the page a PDF stands beside, and nothing for any other name", () => {
+    expect(pdfPageOf("deck.pdf")).toBe("deck.html")
+    for (const name of ["deck.html", "../deck.pdf", "a/deck.pdf", ".pdf", "-x.pdf", "deck.PDF"]) {
+      expect(pdfPageOf(name)).toBeNull()
+    }
+  })
+
+  test("readPreviews names the PDF beside an HTML page, and lists no PDF as a preview of its own", async () => {
+    const dir = folder()
+    const outside = folder()
+    put(dir, "deck.html", HTML)
+    put(dir, "deck.pdf", PDF)
+    put(dir, "plain.html", HTML)
+    put(dir, "fake.html", HTML)
+    put(dir, "fake.pdf", HTML)
+    put(dir, "pic.png", PNG)
+    put(dir, "pic.pdf", PDF)
+    put(dir, "linked.html", HTML)
+    symlinkSync(put(outside, "target.pdf", PDF), join(dir, "linked.pdf"))
+    const { previews } = await readPreviews(dir)
+    expect(Object.fromEntries(previews.map((p) => [p.name, p.pdf ?? null]))).toEqual({
+      "deck.html": "deck.pdf",
+      "fake.html": null,
+      "linked.html": null,
+      "pic.png": null,
+      "plain.html": null,
+    })
+  })
+
+  test("the serve route finds a PDF by a page's name and reads it only when its bytes are a PDF's, a name outside the folder finding nothing", async () => {
+    const dir = folder()
+    const inner = join(dir, "inner")
+    mkdirSync(inner, { mode: 0o700 })
+    put(dir, "deck.pdf", PDF)
+    put(dir, "fake.pdf", HTML)
+    expect(await findPreview("deck.pdf", dir)).toEqual({
+      kind: "pdf",
+      name: "deck.pdf",
+      path: join(dir, "deck.pdf"),
+      size: PDF.length,
+    })
+    expect((await readPreview("deck.pdf", dir))?.bytes).toEqual(Uint8Array.from(PDF))
+    expect(await readPreview("fake.pdf", dir)).toBeNull()
+    for (const name of ["../deck.pdf", "inner/../deck.pdf", `${dir}/deck.pdf`]) {
+      expect(await findPreview(name, inner)).toBeNull()
+    }
+  })
+
+  test("a PDF is saved, never shown", () => {
+    expect(previewHeaders({ kind: "pdf", name: "deck.pdf" }, [])).toMatchObject({
+      "content-disposition": "attachment",
+      "content-security-policy": "default-src 'none'; sandbox",
+      "content-type": "application/pdf",
+      "x-content-type-options": "nosniff",
+    })
+  })
+})
+
+describe("previewDownloadName (#783)", () => {
+  test("a page saves under its title from pages.jsonl, its PDF under the same title, else its caption, else its own name", async () => {
+    const dir = folder()
+    put(dir, "deck.html", HTML)
+    put(dir, "deck.txt", "The caption")
+    put(dir, "captioned.png", PNG)
+    put(dir, "captioned.txt", "Spinner: at rest")
+    put(dir, "bare-2.png", PNG)
+    const record = {
+      at: "2026-11-01T10:00:00.000Z",
+      by: "worker",
+      file: "deck.html",
+      for: null,
+      title: "Weekly plan / updated draft",
+    }
+    put(dir, "pages.jsonl", `${JSON.stringify(record)}\n`)
+    expect(await previewDownloadName("deck.html", dir)).toBe("Weekly plan updated draft.html")
+    expect(await previewDownloadName("deck.pdf", dir)).toBe("Weekly plan updated draft.pdf")
+    expect(await previewDownloadName("captioned.png", dir)).toBe("Spinner at rest.png")
+    expect(await previewDownloadName("bare-2.png", dir)).toBe("bare-2.png")
   })
 })
 

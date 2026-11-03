@@ -8,7 +8,7 @@ import { HTML_VIEWER } from "@/components/dashboard/viewer/documents"
 import { FileIcon } from "@/components/dashboard/viewer/file-icons"
 import { type ViewerItem, VIEWERS } from "@/components/dashboard/viewer/registry"
 import { useAttachmentUrl } from "@/components/dashboard/viewer/use-attachment-url"
-import { Viewer } from "@/components/dashboard/viewer/viewer"
+import { Download, Viewer } from "@/components/dashboard/viewer/viewer"
 import { Hint } from "@/components/hint"
 import { Button } from "@/components/ui/button"
 import { BAR_ITEM, FLOATING_BAR } from "@/lib/floating-bar"
@@ -106,13 +106,14 @@ function WideSide({
 // a card has no slide before or after to hand the arrows to
 const stay = () => {}
 
-// A lone HTML page live in the card at its full width, through the viewer's own HTML view (its sandboxed frame, links opened in a tab, a page that leaves put back, Spinner and Unreadable), never taking the focus, with a one-square floating bar in its corner that opens it full screen.
+// A lone HTML page live in the card at its full width, through the viewer's own HTML view (its sandboxed frame, links opened in a tab, a page that leaves put back, Spinner and Unreadable), never taking the focus, with a floating bar in its corner that saves it (Download) and opens it full screen.
 function LivePage({ item, onOpen }: { item: ViewerItem; onOpen: () => void }) {
   const url = useAttachmentUrl(item.id, true)
   return (
     <div className="relative flex h-80 items-center justify-center overflow-hidden rounded-md border">
       {url ? <HTML_VIEWER.View active={false} item={item} onEdge={stay} url={url} /> : null}
       <div className={cn(FLOATING_BAR, "absolute top-2 right-2")}>
+        <Download className={cn("size-8", BAR_ITEM)} item={item} />
         <Button
           aria-label={`Open ${item.name} full screen`}
           className={cn("size-8", BAR_ITEM)}

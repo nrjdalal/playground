@@ -943,6 +943,36 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
     return posted.item
   }
 
+  test("a kept file downloads under its item's title, the file's own name after it when the item carries several, and as attachment when no item carries it (#783)", async () => {
+    const lone = "3f0e7a52-1c4b-4d2a-9e6f-00000000d001.html"
+    const shot = "3f0e7a52-1c4b-4d2a-9e6f-00000000d002.png"
+    const notes = "3f0e7a52-1c4b-4d2a-9e6f-00000000d003.pdf"
+    await post({
+      from: "ops",
+      kind: "update",
+      preview: { attachments: [{ id: lone, kind: "html", name: "deck.html" }], outcome: "finding" },
+      title: "Weekly plan: updated draft",
+    })
+    await post({
+      from: "ops",
+      kind: "update",
+      preview: {
+        attachments: [
+          { id: shot, kind: "image", name: "card-after.png" },
+          { id: notes, kind: "pdf", name: "notes.v2.pdf" },
+        ],
+        outcome: "finding",
+      },
+      title: "Sidebar spacing",
+    })
+    expect(await store.attachmentDownloadName(db, lone)).toBe("Weekly plan updated draft.html")
+    expect(await store.attachmentDownloadName(db, shot)).toBe("Sidebar spacing, card-after.png")
+    expect(await store.attachmentDownloadName(db, notes)).toBe("Sidebar spacing, notes.v2.pdf")
+    expect(await store.attachmentDownloadName(db, "3f0e7a52-1c4b-4d2a-9e6f-00000000d004.png")).toBe(
+      "attachment.png",
+    )
+  })
+
   test("an item gets a tag that counts up, and is found by its id or its tag", async () => {
     const a = await post(decision(SLACK))
     const b = await post(decision(PREVIEWS.ship))

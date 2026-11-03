@@ -35,6 +35,13 @@ const { errorHandler } = await import("../../../../../api/hono/src/lib/error")
 const { MAX_ATTACHMENT_BYTES, storeAttachment, readAttachment } =
   await import("../../../../../api/hono/src/lib/dashboard/attachments")
 const { mkdtempSync, rmSync } = await import("node:fs")
+
+const PNG = Uint8Array.from(
+  Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=",
+    "base64",
+  ),
+)
 const { tmpdir } = await import("node:os")
 const { join } = await import("node:path")
 const { DISPATCHER, DISPATCHER_SECONDARY } =
@@ -870,6 +877,35 @@ describe("the attachment routes", () => {
         readAttachment(id, dir),
       ).catch((thrown: { status: number }) => thrown)
       expect(gone).toMatchObject({ status: 404 })
+    } finally {
+      rmSync(dir, { force: true, recursive: true })
+    }
+  })
+
+  test("with download, a kept file saves under the name it gives for the stored file, and an id outside the folder is a 404 that asks for no name (#783)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "dashboard-serve-download-"))
+    try {
+      const stored = await storeAttachment(PNG, "shot.png", { dir })
+      if (!stored.ok) throw new Error("not stored")
+      const asked: string[] = []
+      const download = async (id: string) => {
+        asked.push(id)
+        return "Weekly plan, updated draft.png"
+      }
+      const read = (id: string) => readAttachment(id, dir)
+      const response = await serveAttachment(stored.id, read, download)
+      expect(response.headers.get("content-disposition")).toBe(
+        "attachment; filename=\"Weekly plan, updated draft.png\"; filename*=UTF-8''Weekly%20plan%2C%20updated%20draft.png",
+      )
+      expect(response.headers.get("content-type")).toBe("image/png")
+      expect(asked).toEqual([stored.id])
+      for (const id of [`../${stored.id}`, "../../etc/passwd", `${dir}/${stored.id}`]) {
+        const gone = await serveAttachment(id, read, download).catch(
+          (thrown: { status: number }) => thrown,
+        )
+        expect(gone).toMatchObject({ status: 404 })
+      }
+      expect(asked).toEqual([stored.id])
     } finally {
       rmSync(dir, { force: true, recursive: true })
     }

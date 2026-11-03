@@ -1,7 +1,7 @@
 "use client"
 
 import type { Preview } from "@api/hono"
-import { RiArrowDownSLine, RiPagesLine } from "@remixicon/react"
+import { RiArrowDownSLine, RiDownloadLine, RiPagesLine } from "@remixicon/react"
 import { useQuery } from "@tanstack/react-query"
 
 import { Hint } from "@/components/hint"
@@ -28,7 +28,7 @@ import { CenterSpinner } from "@/components/ui/spinner"
 import { agentLabel } from "@/lib/agent-label"
 import { config } from "@/lib/config"
 import { useNow } from "@/lib/dashboard"
-import { fetchPages, PREVIEWS_QUERY_KEY, previewUrl } from "@/lib/previews"
+import { fetchPages, PREVIEWS_QUERY_KEY, previewDownloadUrl, previewUrl } from "@/lib/previews"
 import { fullTime, relativeTime } from "@/lib/time"
 
 const keptAt = (preview: Preview) => preview.page?.at ?? preview.modifiedAt
@@ -62,7 +62,45 @@ function PageTime({ at, now }: { at: string; now: number }) {
 
 const pageTitle = (preview: Preview) => preview.page?.title ?? preview.caption ?? preview.name
 
-// Each page as a row that opens its newest version in a new tab through the Previews route: its title, who made it, for whom, and when it was kept; the older versions sit in the row's dropdown.
+// A page's Download, saving its file under its title as the API names it: a link, or with a PDF beside the page a menu offering the page and the PDF.
+function PageDownload({ apiUrl, page }: { apiUrl: string; page: Preview }) {
+  const label = `Download ${pageTitle(page)}`
+  if (!page.pdf)
+    return (
+      <Hint content="Download" description={null}>
+        <Button
+          aria-label={label}
+          render={<a href={previewDownloadUrl(apiUrl, page.name)} />}
+          size="icon-sm"
+          variant="ghost"
+        >
+          <RiDownloadLine />
+        </Button>
+      </Hint>
+    )
+  return (
+    <DropdownMenu>
+      <Hint content="Download" description={null}>
+        <DropdownMenuTrigger render={<Button aria-label={label} size="icon-sm" variant="ghost" />}>
+          <RiDownloadLine />
+        </DropdownMenuTrigger>
+      </Hint>
+      <DropdownMenuContent align="end" className="w-auto">
+        <DropdownMenuGroup>
+          <DropdownMenuLabel>Download</DropdownMenuLabel>
+          <DropdownMenuItem render={<a href={previewDownloadUrl(apiUrl, page.name)} />}>
+            Page (HTML)
+          </DropdownMenuItem>
+          <DropdownMenuItem render={<a href={previewDownloadUrl(apiUrl, page.pdf)} />}>
+            PDF
+          </DropdownMenuItem>
+        </DropdownMenuGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+
+// Each page as a row that opens its newest version in a new tab through the Previews route: its title, who made it, for whom, and when it was kept; the older versions sit in the row's dropdown, and its Download saves the newest version.
 export function PageList({
   apiUrl,
   now,
@@ -106,8 +144,8 @@ export function PageList({
                 </span>
               </ItemDescription>
             </ItemContent>
-            {older.length ? (
-              <ItemActions className="relative z-10">
+            <ItemActions className="relative z-10">
+              {older.length ? (
                 <DropdownMenu>
                   <DropdownMenuTrigger render={<Button size="sm" variant="ghost" />}>
                     {older.length + 1} versions
@@ -137,8 +175,9 @@ export function PageList({
                     </DropdownMenuGroup>
                   </DropdownMenuContent>
                 </DropdownMenu>
-              </ItemActions>
-            ) : null}
+              ) : null}
+              <PageDownload apiUrl={apiUrl} page={latest} />
+            </ItemActions>
           </Item>
         )
       })}

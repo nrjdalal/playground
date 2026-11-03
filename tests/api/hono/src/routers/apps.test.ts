@@ -38,7 +38,14 @@ const reorder = (headers: Record<string, string>, server?: ReturnType<typeof pee
 
 describe("the apps routes", () => {
   test("every route turns away a request with no session", async () => {
-    for (const path of ["/plan", "/previews", "/previews/spinner-preview.html", "/usage"]) {
+    for (const path of [
+      "/plan",
+      "/previews",
+      "/previews/spinner-preview.html",
+      "/previews/spinner-preview.html?download=1",
+      "/previews/sidebar-mock.pdf?download=1",
+      "/usage",
+    ]) {
       expect((await request(path)).status).toBe(401)
     }
   })
@@ -119,6 +126,44 @@ describe("servePreview", () => {
       }
     } finally {
       rmSync(dir, { force: true, recursive: true })
+    }
+  })
+
+  test("with download a file saves under the name it gives, and a name outside the folder is a 404 that asks for no name (#783)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "dashboard-previews-download-"))
+    const outside = mkdtempSync(join(tmpdir(), "dashboard-previews-outside-"))
+    try {
+      writeFileSync(join(dir, "spin.html"), "<p>hi</p>")
+      writeFileSync(join(dir, "spin.pdf"), "%PDF-1.4\n%%EOF\n")
+      writeFileSync(join(outside, "secret.pdf"), "%PDF-1.4\n%%EOF\n")
+      const named: string[] = []
+      const download = async (name: string) => {
+        named.push(name)
+        return name === "spin.pdf" ? "Spinner, both speeds.pdf" : "Spinner, both speeds.html"
+      }
+      const read = (name: string) => readPreview(name, dir)
+      const page = await servePreview("spin.html", read, [], download)
+      expect(page.headers.get("content-disposition")).toBe(
+        "attachment; filename=\"Spinner, both speeds.html\"; filename*=UTF-8''Spinner%2C%20both%20speeds.html",
+      )
+      expect(page.headers.get("content-type")).toBe("text/html; charset=utf-8")
+      const pdf = await servePreview("spin.pdf", read, [], download)
+      expect(pdf.headers.get("content-type")).toBe("application/pdf")
+      expect(pdf.headers.get("content-disposition")).toStartWith(
+        'attachment; filename="Spinner, both speeds.pdf"',
+      )
+      expect(named).toEqual(["spin.html", "spin.pdf"])
+      const outsideName = `../${outside.split("/").at(-1)}/secret.pdf`
+      for (const name of [outsideName, "../spin.pdf", `${outside}/secret.pdf`]) {
+        const gone = await servePreview(name, read, [], download).catch(
+          (thrown: { status: number }) => thrown,
+        )
+        expect(gone).toMatchObject({ status: 404 })
+      }
+      expect(named).toEqual(["spin.html", "spin.pdf"])
+    } finally {
+      rmSync(dir, { force: true, recursive: true })
+      rmSync(outside, { force: true, recursive: true })
     }
   })
 })

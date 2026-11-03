@@ -21,6 +21,10 @@ export async function fetchPages(session: string) {
 export const previewUrl = (apiUrl: string, name: string): string =>
   `${apiUrl}/api/v1/apps/previews/${encodeURIComponent(name)}`
 
+// Pure: where a preview is served as a download, saved under its page's title.
+export const previewDownloadUrl = (apiUrl: string, name: string): string =>
+  `${previewUrl(apiUrl, name)}?download=1`
+
 // Pure: an address the Inbox's Preview frame may load: a page from Previews, or a local stack (https or http on a .localhost host).
 export const loadable = (address: string, apiUrl: string): boolean => {
   if (address.startsWith(previewUrl(apiUrl, ""))) return true

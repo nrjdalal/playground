@@ -8,8 +8,15 @@ import { z } from "zod"
 import { readOpsReport } from "@/lib/apps/ops-report"
 import { readPlan } from "@/lib/apps/plan"
 import { orderLanesSchema, readOrder, writeOrder } from "@/lib/apps/plan-order"
-import { previewHeaders, previewsDir, readPreview, readPreviews } from "@/lib/apps/previews"
+import {
+  previewDownloadName,
+  previewHeaders,
+  previewsDir,
+  readPreview,
+  readPreviews,
+} from "@/lib/apps/previews"
 import { DISPATCHER } from "@/lib/dashboard/workers"
+import { attachmentDisposition } from "@/lib/download"
 import {
   ApiError,
   authErrorResponses,
@@ -31,21 +38,24 @@ export const orderLimiter = createRateLimiter({
 
 export const orderBodySchema = z.strictObject({ lanes: orderLanesSchema })
 
-// The preview route's work: the file's bytes with previewHeaders, framable by the dashboard's own pages alone, or a 404 when the name names no preview the dashboard serves.
+// The preview route's work: the file's bytes with previewHeaders, framable by the dashboard's own pages alone, or a 404 when the name names no file the dashboard serves; with download, saved under the name it gives.
 export async function servePreview(
   name: string,
   read: (name: string) => ReturnType<typeof readPreview> = readPreview,
   origins: readonly string[] = env.HONO_TRUSTED_ORIGINS,
+  download?: (name: string) => Promise<string>,
 ): Promise<Response> {
   const found = await read(name)
   if (!found) {
     throw new ApiError(
       404,
       "NOT_FOUND",
-      "No preview by that name: a PNG, GIF, WebP or HTML file directly in the previews folder",
+      "No preview by that name: a PNG, GIF, WebP or HTML file, or a PDF beside a page, directly in the previews folder",
     )
   }
-  return new Response(found.bytes, { headers: previewHeaders(found.file, origins) })
+  const headers = previewHeaders(found.file, origins)
+  if (download) headers["content-disposition"] = attachmentDisposition(await download(name))
+  return new Response(found.bytes, { headers })
 }
 
 // A Pages tab's session: its name, as the roster and pages.jsonl give it.
@@ -128,7 +138,7 @@ export const appsRouter = new Hono<{ Variables: Session }>()
     describeRoute({
       tags: ["Apps"],
       description:
-        "Every preview in previews in the data folder, newest first: each PNG, GIF, WebP or HTML file's name, kind (image or html), topic (its name before the first - or .), caption (from a .txt of the same name), last change, size and, for a page `playground page` kept, its pages.jsonl record (page: at, by, for, title) (previews), and each file that looks like a preview but is not served, or pages.jsonl line that is not a page's record, named with why (problems). With ?session=<name>, only the pages that session made or that were made for it, every page for the primary dispatcher, newest kept first. Read-only.",
+        "Every preview in previews in the data folder, newest first: each PNG, GIF, WebP or HTML file's name, kind (image or html), topic (its name before the first - or .), caption (from a .txt of the same name), last change, size and, for a page `playground page` kept, its pages.jsonl record (page: at, by, for, title) and, for an HTML page, the name of the PDF beside it (pdf) (previews), and each file that looks like a preview but is not served, or pages.jsonl line that is not a page's record, named with why (problems). With ?session=<name>, only the pages that session made or that were made for it, every page for the primary dispatcher, newest kept first. Read-only.",
       responses: {
         200: { description: "OK" },
         ...authErrorResponses,
@@ -152,7 +162,7 @@ export const appsRouter = new Hono<{ Variables: Session }>()
     describeRoute({
       tags: ["Apps"],
       description:
-        "One preview's bytes, by its name: an image as itself, an HTML page as a sandboxed document (its own inline script alone, no form, no same-origin, nothing fetched but data:) that only the Dashboard's own pages may frame",
+        "One preview's bytes, by its name: an image as itself, an HTML page as a sandboxed document (its own inline script alone, no form, no same-origin, nothing fetched but data:) that only the Dashboard's own pages may frame, and a PDF beside a page (<page>.pdf) as a download alone. With ?download, any of them saves under its page's title (from pages.jsonl, else its caption, else its name) with its own extension",
       responses: {
         200: { description: "The file" },
         ...authErrorResponses,
@@ -160,7 +170,13 @@ export const appsRouter = new Hono<{ Variables: Session }>()
         ...notFoundErrorResponses,
       },
     }),
-    (c) => servePreview(c.req.param("name")),
+    (c) =>
+      servePreview(
+        c.req.param("name"),
+        readPreview,
+        env.HONO_TRUSTED_ORIGINS,
+        c.req.query("download") === undefined ? undefined : (name) => previewDownloadName(name),
+      ),
   )
   .get(
     "/usage",

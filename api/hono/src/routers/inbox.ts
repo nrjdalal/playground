@@ -5,10 +5,12 @@ import { Hono } from "hono"
 import { describeRoute } from "hono-openapi"
 import { z } from "zod"
 
+import { readAttachment } from "@/lib/dashboard/attachments"
 import { deliver } from "@/lib/dashboard/deliver"
 import {
   answerInputSchema,
   answerItem,
+  attachmentDownloadName,
   dismissItems,
   listItems,
   markRead,
@@ -76,7 +78,7 @@ export const inboxRouter = new Hono<{ Variables: Session }>()
     describeRoute({
       tags: ["Inbox"],
       description:
-        "One file an ask, a draft, a Slack decision or a read-only update carries, by the id it was kept under: only for the Dashboard's own page on this machine, which fetches it with its cookie, so a page elsewhere cannot embed it",
+        "One file an ask, a draft, a Slack decision or a read-only update carries, by the id it was kept under: only for the Dashboard's own page on this machine, which fetches it with its cookie, so a page elsewhere cannot embed it. With ?download it saves under its item's title, the file's own name after it when the item carries several, with the stored file's extension",
       responses: {
         200: { description: "The file" },
         ...authErrorResponses,
@@ -84,7 +86,12 @@ export const inboxRouter = new Hono<{ Variables: Session }>()
         ...notFoundErrorResponses,
       },
     }),
-    (c) => serveAttachment(c.req.param("id")),
+    (c) =>
+      serveAttachment(
+        c.req.param("id"),
+        readAttachment,
+        c.req.query("download") === undefined ? undefined : (id) => attachmentDownloadName(db, id),
+      ),
   )
   .post(
     "/dismiss",
