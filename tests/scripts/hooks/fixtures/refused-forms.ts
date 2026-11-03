@@ -1992,6 +1992,43 @@ gh api graphql -f query="$QUERY"`,
     source: "#448",
   },
   {
+    folders: ["process home"],
+    guards: ["no-extensions-write"],
+    rows: () => [
+      [
+        "rm of a variable print's v option sets by a built name",
+        "XY=/tmp/a; N=X; print -v ${N}Y ''; rm -rf ${XY}.playground/./extensions/.no-such-folder",
+        "process home",
+      ],
+      [
+        "rm of a variable print's v option sets from inside a flag cluster",
+        "XY=/tmp/a; N=X; print -rv ${N}Y ''; rm -rf ${XY}.playground/./extensions/.no-such-folder",
+        "process home",
+      ],
+      [
+        "rm of a variable zsh's P flag assigns through a name",
+        "XY=/tmp/a; N=X; N+=Y; : ${(P)N::=}; rm -rf ${XY}.playground/./extensions/.no-such-folder",
+        "process home",
+      ],
+      [
+        "rm of a variable bash's indirect expansion assigns through a name",
+        "XY=; N=X; N+=Y; : ${!N:=.playground/./exten}; rm -rf ${XY}sions/.no-such-folder",
+        "process home",
+      ],
+      [
+        "rm of a scalar its tied zsh array empties",
+        "CDPATH=/tmp/a; cdpath=(); rm -rf ${CDPATH}.playground/./extensions/.no-such-folder",
+        "process home",
+      ],
+      [
+        "rm of a prompt variable its zsh alias empties",
+        "PS1=/tmp/a; PROMPT=; rm -rf ${PS1}.playground/./extensions/.no-such-folder",
+        "process home",
+      ],
+    ],
+    source: "#728",
+  },
+  {
     folders: ["process home", "process data folder", "process worktree"],
     guards: ["no-extensions-write"],
     rows: () => [
