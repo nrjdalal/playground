@@ -817,18 +817,29 @@ swapin_rate() {
 SWAPINS_MAX=100
 # `<idle> <swapins>`: the CPU's idle share in top's second sample (top -l 2 -n 0, as spawn.sh's load gate reads it) and the swap-ins a second in
 # vm_stat -c 2 1's last row (as spawn.sh's swapins() reads them), each - when unread; every look shares one reading through run-slot.gauges
-# (`<epoch> <idle> <swapins>`) for 10 s, since a top takes a second and about 0.7 s of system CPU, and some 27 waiters each look every 15 s
+# (`<epoch> <idle> <swapins>`) for 10 s, since a top takes a second and about 0.7 s of system CPU, and some 27 waiters each look every 15 s;
+# one look refreshes it, under gauges_lock, while the rest keep the reading they have (- when none), since without the lock every look that
+# found it stale ran its own top (3 Nov, 10:53Z: 16 to 23 tops at once from 26 waiters, and load1 56.8)
 gauges() {
   local now at= idle= swap=
   now=$(date +%s)
   { read -r at idle swap < "$OPS/run-slot.gauges"; } 2>/dev/null
   case "$at" in ''|*[!0-9]*) at=0 ;; esac
-  if [ $((now - at)) -ge 10 ]; then
+  if [ $((now - at)) -ge 10 ] && gauges_lock "$now"; then
     idle=$(top -l 2 -n 0 2>/dev/null | sed -nE 's/^CPU usage:.* ([0-9.]+)% idle.*/\1/p' | awk 'END { if (NR == 2) print }')
     swap=$(swapin_rate)
     printf '%s %s %s\n' "$now" "${idle:--}" "${swap:--}" > "$OPS/run-slot.gauges.$$" 2>/dev/null && mv -f "$OPS/run-slot.gauges.$$" "$OPS/run-slot.gauges" 2>/dev/null
+    rmdir "$OPS/run-slot.gauges.lock" 2>/dev/null
   fi
   echo "${idle:--} ${swap:--}"
+}
+# takes the gauges' refresh lock at epoch $1, or one aged 30 s or more by its mtime, which a refresher killed mid-refresh left (a refresh
+# takes about 2 s); a look that read the old mtime can still rename a lock another look has just taken over, so a takeover can start more than one top
+gauges_lock() {
+  local lock="$OPS/run-slot.gauges.lock" at
+  mkdir "$lock" 2>/dev/null && return
+  at=$(mtime "$lock") || return
+  [ $(($1 - at)) -ge 30 ] && mv "$lock" "$lock.$$" 2>/dev/null && rmdir "$lock.$$" 2>/dev/null && mkdir "$lock" 2>/dev/null
 }
 # macOS's memory reading $1: level (the free share) or vm_pressure_level (1 normal, 2 warn, 4 critical)
 memstat() { sysctl -n "kern.memorystatus_$1" 2>/dev/null | tr -cd 0-9; }

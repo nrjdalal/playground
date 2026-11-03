@@ -214,6 +214,56 @@ describe("commit-slot.ts", () => {
     expect(result.exitCode).toBe(7)
   })
 
+  // 3 Nov: a plain commit waited 48 minutes in the full queue, printing nothing, before its session found the commit slot's form
+  describe("a commit whose build joins the full queue", () => {
+    const FORM = "~/.playground/ops/run-slot.sh <your name> -- git commit"
+    const queue = (room: string, step: () => ReturnType<typeof run>) => {
+      writeFileSync(
+        join(ops, "run-slot.sh"),
+        `#!/bin/sh\n[ "$1" = room ] && { printf '${room}'; exit 0; }\nexit 7\n`,
+      )
+      chmodSync(join(ops, "run-slot.sh"), 0o755)
+      try {
+        return step()
+      } finally {
+        rmSync(join(ops, "run-slot.sh"))
+      }
+    }
+    const notices = (result: ReturnType<typeof run>) =>
+      result.stderr
+        .toString()
+        .split("\n")
+        .filter((line) => line.startsWith("commit-slot: "))
+
+    test("says once how many runs wait there and names the commit slot's form", () => {
+      const result = queue("4 4 0 27\\n", () => run(["echo", "hi"]))
+      expect(notices(result)).toEqual([
+        `commit-slot: this commit's build joins run-slot's full queue as commit-wt-one, 27 runs waiting; a commit through ${FORM} takes the commit slot instead`,
+      ])
+      expect(result.exitCode).toBe(7)
+    })
+
+    test("still names the form when run-slot.sh room gives no reading", () => {
+      const result = queue("", () => run(["echo", "hi"]))
+      expect(notices(result)).toEqual([
+        `commit-slot: this commit's build joins run-slot's full queue as commit-wt-one; a commit through ${FORM} takes the commit slot instead`,
+      ])
+    })
+
+    test("says nothing for a commit already under run-slot, whose build runs bare", () => {
+      const result = queue("4 4 0 27\\n", () =>
+        Bun.spawnSync(["bun", "--no-env-file", SCRIPT, "echo", "hi"], {
+          cwd: worktree,
+          env: { ...env(), RUN_SLOT_NICE: "10" },
+          stderr: "pipe",
+          stdout: "pipe",
+        }),
+      )
+      expect(notices(result)).toEqual([])
+      expect(result.stdout.toString()).toBe("hi\n")
+    })
+  })
+
   test("runs the step bare with no run-slot.sh, keeping its output and exit code", () => {
     const ok = run(["echo", "hi"])
     expect(ok.stdout.toString()).toBe("hi\n")
