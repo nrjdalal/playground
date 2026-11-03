@@ -18,6 +18,7 @@ import {
   listTrash,
   MARKER,
   makeScratch,
+  type Proc,
   purgeTrash,
   quarantine,
   removeScratch,
@@ -29,6 +30,14 @@ import {
 const dirs: string[] = []
 afterAll(() => {
   for (const dir of dirs) rmSync(dir, { force: true, recursive: true })
+})
+
+// A made-up process for the holder check: no process starts, the list is data.
+const proc = (pid: number, command: string, cwd: string, sockets: string[] = []): Proc => ({
+  command,
+  cwd,
+  pid,
+  sockets,
 })
 
 // A fake machine on a mkdtemp root of its own: a HOME, a main checkout in it, and the trash in its state folder.
@@ -191,7 +200,7 @@ describe("quarantine, listTrash and restore", () => {
       refused: expect.stringContaining("--worktree"),
     })
     const plain = file(join(roots.home, "plain"))
-    const holders = { cwds: [], live: ["working"], roster: join(roots.root, "roster.json") }
+    const holders = { live: ["working"], procs: [], roster: join(roots.root, "roster.json") }
     expect(quarantine(plain, { ...opts, worktree: holders }, roots)).toHaveProperty("refused")
   })
 })
@@ -268,7 +277,7 @@ const withWorktree = () => {
   git(wt, "commit", "-qm", "work")
   const roster = join(roots.root, "roster.json")
   writeFileSync(roster, JSON.stringify({ agents: [] }))
-  return { holders: { cwds: [], live: ["working"], roster }, roots, wt }
+  return { holders: { live: ["working"], procs: [], roster }, roots, wt }
 }
 
 describe("worktreeRefusal", () => {
@@ -303,10 +312,36 @@ describe("worktreeRefusal", () => {
     expect(worktreeRefusal(wt, roots, holders)).toBeNull()
     rosterOf([{ branch: "PG-1-thing", name: "abc123-worker", status: "ended" }])
     expect(worktreeRefusal(wt, roots, holders)).toBeNull()
-    expect(worktreeRefusal(wt, roots, { ...holders, cwds: [join(wt, "packages")] })).toContain(
-      "process",
+    expect(
+      worktreeRefusal(wt, roots, { ...holders, procs: [proc(7, "zsh", join(wt, "packages"))] }),
+    ).toContain("pid 7")
+    expect(worktreeRefusal(wt, roots, { ...holders, procs: null })).toContain("process")
+  })
+
+  test("names a holder's pid and command, and an agent-browser daemon's session and the close that frees it", () => {
+    const { holders, roots, wt } = withWorktree()
+    git(wt, "push", "-q", "origin", "PG-1-thing")
+    const refusal = (...procs: Proc[]) => worktreeRefusal(wt, roots, { ...holders, procs })
+    const away = proc(3, "zsh", roots.home)
+    expect(refusal(away)).toBeNull()
+    expect(refusal(away, proc(41, "bun run dev", join(wt, "api")))).toBe(
+      `${wt} is held by pid 41 (bun run dev) working in ${join(wt, "api")}`,
     )
-    expect(worktreeRefusal(wt, roots, { ...holders, cwds: null })).toContain("process")
+    const long = `/opt/chrome/Google Chrome for Testing --type=renderer ${"--flag ".repeat(30)}`
+    expect(refusal(proc(42, long, wt))).toBe(
+      `${wt} is held by pid 42 (${long.slice(0, 117)}...) working in ${wt}`,
+    )
+    const daemon = "/x/node_modules/agent-browser/bin/agent-browser-darwin-arm64"
+    const bySocket = proc(43, daemon, wt, ["/h/.agent-browser/verify-1-shots.sock"])
+    expect(refusal(proc(42, long, wt), bySocket)).toBe(
+      `${wt} is held by pid 43 (${daemon}) working in ${wt}: agent-browser session verify-1-shots, which agent-browser --session verify-1-shots close frees`,
+    )
+    expect(refusal(proc(44, "agent-browser --session s2 open http://x", wt))).toContain(
+      "agent-browser --session s2 close",
+    )
+    expect(refusal(proc(45, daemon, wt))).toContain(
+      "agent-browser session default, which agent-browser --session default close frees",
+    )
   })
 
   test("quarantine runs the holder check itself, so a held worktree stays", () => {
