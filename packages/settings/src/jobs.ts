@@ -96,7 +96,7 @@ export const JOBS: Record<string, Job> = {
   }),
   "ops-dm-watch": terminal("ops-dm-watch", bunJob("ops-dm-watch"), {
     description:
-      "In Slack mode, hands each message in the owner's DM to the dispatcher, the second dispatcher too when no reply lands in 3 minutes.",
+      "In Slack mode, hands each message in the owner's DM to the dispatcher, the session in the assistant seat too when no reply lands in 3 minutes.",
     schedule: { every: 60 },
   }),
   "ops-ext-sync": terminal("ops-ext-sync", bunJob("ops-ext-sync"), {

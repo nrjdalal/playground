@@ -1,9 +1,11 @@
 "use client"
 
 import type { Preview } from "@api/hono"
-import { RiArrowDownSLine, RiDownloadLine, RiPagesLine } from "@remixicon/react"
-import { useQuery } from "@tanstack/react-query"
+import { RiArrowDownSLine, RiDeleteBinLine, RiDownloadLine, RiPagesLine } from "@remixicon/react"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import * as React from "react"
 
+import { ConfirmDialog } from "@/components/common/confirm-dialog"
 import { Hint } from "@/components/hint"
 import { Button } from "@/components/ui/button"
 import {
@@ -25,10 +27,17 @@ import {
   ItemTitle,
 } from "@/components/ui/item"
 import { CenterSpinner } from "@/components/ui/spinner"
+import { toast } from "@/components/ui/toast"
 import { agentLabel } from "@/lib/agent-label"
 import { config } from "@/lib/config"
 import { useNow } from "@/lib/dashboard"
-import { fetchPages, PREVIEWS_QUERY_KEY, previewDownloadUrl, previewUrl } from "@/lib/previews"
+import {
+  deletePage,
+  fetchPages,
+  PREVIEWS_QUERY_KEY,
+  previewDownloadUrl,
+  previewUrl,
+} from "@/lib/previews"
 import { fullTime, relativeTime } from "@/lib/time"
 
 const keptAt = (preview: Preview) => preview.page?.at ?? preview.modifiedAt
@@ -100,14 +109,28 @@ function PageDownload({ apiUrl, page }: { apiUrl: string; page: Preview }) {
   )
 }
 
-// Each page as a row that opens its newest version in a new tab through the Previews route: its title, who made it, for whom, and when it was kept; the older versions sit in the row's dropdown, and its Download saves the newest version.
+// Pure: what the delete confirm says: the newest version's file and caption go, and a row's older versions stay, so the row still showing reads as the next version, not a failed delete.
+export const deleteDescription = (name: string, older: number): string => {
+  const gone = `${name} and its caption leave the previews folder for good.`
+  if (!older) return gone
+  return older === 1
+    ? `${gone} Its older version stays and takes its row.`
+    : `${gone} Its ${older} older versions stay, and the newest of them takes its row.`
+}
+
+// The row a delete asks about: its newest version, and how many older versions stay.
+type Deleting = { older: number; preview: Preview }
+
+// Each page as a row that opens its newest version in a new tab through the Previews route: its title, who made it, for whom, and when it was kept; the older versions sit in the row's dropdown, its Download saves the newest version, and its delete button asks to delete it.
 export function PageList({
   apiUrl,
   now,
+  onDelete,
   pages,
 }: {
   apiUrl: string
   now: number
+  onDelete?: (deleting: Deleting) => void
   pages: Preview[]
 }) {
   return (
@@ -177,6 +200,18 @@ export function PageList({
                 </DropdownMenu>
               ) : null}
               <PageDownload apiUrl={apiUrl} page={latest} />
+              {onDelete && (
+                <Hint content="Delete page">
+                  <Button
+                    aria-label={`Delete ${pageTitle(latest)}`}
+                    size="icon-sm"
+                    variant="ghost"
+                    onClick={() => onDelete({ older: older.length, preview: latest })}
+                  >
+                    <RiDeleteBinLine />
+                  </Button>
+                </Hint>
+              )}
             </ItemActions>
           </Item>
         )
@@ -185,13 +220,27 @@ export function PageList({
   )
 }
 
-// An agent's Pages tab: the pages it made with playground page or that were made for it, newest first, every page on the dispatcher's view, so a page stays after its Inbox card is answered.
+// An agent's Pages tab: the pages it made with playground page or that were made for it, newest first, every page on the dispatcher's view, so a page stays after its Inbox card is answered; a row's delete asks first, then deletes its newest version.
 export function Pages({ all, session }: { all: boolean; session: string }) {
   const now = useNow()
+  const queryClient = useQueryClient()
   const { data, error, isPending } = useQuery({
     queryFn: () => fetchPages(session),
     queryKey: [...PREVIEWS_QUERY_KEY, "pages", session],
     refetchInterval: 30_000,
+  })
+  const [deleting, setDeleting] = React.useState<Deleting | null>(null)
+  // the dialog keeps its title through its close animation
+  const shown = React.useRef<Deleting | null>(null)
+  if (deleting) shown.current = deleting
+  const remove = useMutation({
+    mutationFn: deletePage,
+    onError: (error) => toast.add({ title: error.message, type: "error" }),
+    onSuccess: () => {
+      setDeleting(null)
+      toast.add({ title: "Page deleted", type: "success" })
+      queryClient.invalidateQueries({ queryKey: PREVIEWS_QUERY_KEY })
+    },
   })
   return (
     <section aria-labelledby="pages" className="flex flex-col gap-3">
@@ -204,7 +253,7 @@ export function Pages({ all, session }: { all: boolean; session: string }) {
       ) : error ? (
         <p className="text-destructive text-sm">{error.message}</p>
       ) : data.previews.length ? (
-        <PageList apiUrl={config.api.url} now={now} pages={data.previews} />
+        <PageList apiUrl={config.api.url} now={now} onDelete={setDeleting} pages={data.previews} />
       ) : (
         <Empty>
           <EmptyHeader>
@@ -220,6 +269,23 @@ export function Pages({ all, session }: { all: boolean; session: string }) {
           </EmptyHeader>
         </Empty>
       )}
+      <ConfirmDialog
+        open={deleting !== null}
+        onOpenChange={(open) => {
+          if (!open) setDeleting(null)
+        }}
+        title={`Delete ${shown.current ? pageTitle(shown.current.preview) : "page"}?`}
+        description={deleteDescription(
+          shown.current?.preview.name ?? "Its file",
+          shown.current?.older ?? 0,
+        )}
+        action="Delete"
+        variant="destructive"
+        pending={remove.isPending}
+        onConfirm={() => {
+          if (deleting) remove.mutate(deleting.preview.name)
+        }}
+      />
     </section>
   )
 }

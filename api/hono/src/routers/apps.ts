@@ -9,6 +9,7 @@ import { readOpsReport } from "@/lib/apps/ops-report"
 import { readPlan } from "@/lib/apps/plan"
 import { orderLanesSchema, readOrder, writeOrder } from "@/lib/apps/plan-order"
 import {
+  deletePage,
   previewDownloadName,
   previewHeaders,
   previewsDir,
@@ -31,6 +32,13 @@ import { pluginsRouter } from "@/plugins/registry"
 
 // A drag writes the whole order; a run of quick drags stays well under this, which only stops a stuck client.
 export const orderLimiter = createRateLimiter({
+  getUserId: (c) => c.get("session")?.userId,
+  limit: 30,
+  windowMs: 60_000,
+})
+
+// A delete is one click behind a confirm; this only stops a stuck client.
+export const deleteLimiter = createRateLimiter({
   getUserId: (c) => c.get("session")?.userId,
   limit: 30,
   windowMs: 60_000,
@@ -61,7 +69,7 @@ export async function servePreview(
 // A Pages tab's session: its name, as the roster and pages.jsonl give it.
 const previewsQuerySchema = z.object({ session: z.string().min(1).max(200).optional() })
 
-// Apps are tools on the dashboard beside the workers, on the dashboard's own owner rung, since they read the same transcripts. Each shows what a skill produced. One writes: the Plan board's order, which steers what the planner builds first; so before anything else it must come from the dashboard's own page on this machine.
+// Apps are tools on the dashboard beside the workers, on the dashboard's own owner rung, since they read the same transcripts. Each shows what a skill produced. Two write: the Plan board's order, which steers what the planner builds first, and a kept page's delete from the Pages tab; so before anything else each must come from the dashboard's own page on this machine.
 export const appsRouter = new Hono<{ Variables: Session }>()
   .use("/*", guardWrites)
   .use("/*", authMiddleware)
@@ -138,7 +146,7 @@ export const appsRouter = new Hono<{ Variables: Session }>()
     describeRoute({
       tags: ["Apps"],
       description:
-        "Every preview in previews in the data folder, newest first: each PNG, GIF, WebP or HTML file's name, kind (image or html), topic (its name before the first - or .), caption (from a .txt of the same name), last change, size and, for a page `playground page` kept, its pages.jsonl record (page: at, by, for, title) and, for an HTML page, the name of the PDF beside it (pdf) (previews), and each file that looks like a preview but is not served, or pages.jsonl line that is not a page's record, named with why (problems). With ?session=<name>, only the pages that session made or that were made for it, every page for the primary dispatcher, newest kept first. Read-only.",
+        "Every preview in previews in the data folder, newest first: each PNG, GIF, WebP or HTML file's name, kind (image or html), topic (its name before the first - or .), caption (from a .txt of the same name), last change, size and, for a page `playground page` kept, its pages.jsonl record (page: at, by, for, title) and, for an HTML page, the name of the PDF beside it (pdf) (previews), and each file that looks like a preview but is not served, or pages.jsonl line that is neither a page's record nor a tombstone, named with why (problems). With ?session=<name>, only the pages that session made or that were made for it, every page for the primary dispatcher, newest kept first. Read-only.",
       responses: {
         200: { description: "OK" },
         ...authErrorResponses,
@@ -177,6 +185,35 @@ export const appsRouter = new Hono<{ Variables: Session }>()
         env.HONO_TRUSTED_ORIGINS,
         c.req.query("download") === undefined ? undefined : (name) => previewDownloadName(name),
       ),
+  )
+  .delete(
+    "/previews/:name",
+    describeRoute({
+      tags: ["Apps"],
+      description:
+        "Delete a page `playground page` kept, by its name, from an agent's Pages tab: only an HTML file pages.jsonl keeps a record for, directly in the previews folder as a regular file with one link; a tombstone line ({at, deleted: true, file}) appended to pages.jsonl first drops its record, then its file and its caption (.txt of the same name) are unlinked; a page kept again under the name lists again. Any other name is a 404 that touches nothing. Returns the deleted name.",
+      responses: {
+        200: {
+          description: "Deleted",
+          content: {
+            "application/json": {
+              schema: resolver(z.object({ data: z.object({ name: z.string() }) })),
+            },
+          },
+        },
+        ...authErrorResponses,
+        ...forbiddenErrorResponses,
+        ...notFoundErrorResponses,
+      },
+    }),
+    deleteLimiter,
+    async (c) => {
+      const name = c.req.param("name")
+      if (!(await deletePage(name))) {
+        throw new ApiError(404, "NOT_FOUND", "No kept page by that name in the previews folder")
+      }
+      return c.json({ data: { name } })
+    },
   )
   .get(
     "/usage",
