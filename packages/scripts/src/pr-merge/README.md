@@ -36,7 +36,9 @@ When every lost line sits under `scripts/hooks/bundled/`, the refusal names its 
 ## Holds and rulings
 
 A hold is a line in the `held` object of `~/.playground/ops/report/held-prs.json`, `"<owner>/<name>#<n>": "<reason>"`, which Ops writes the moment a lead sends `hold <owner>/<name>#<n>: <reason>` and removes on the lead's word; pr:merge and merge-on-ready refuse a listed PR, naming the reason: each reads the file at the gates and again inside the merge lock, after the types gate and just before the merge call, so a hold written while the type check runs still stops the merge.
-One `"*": "<reason>"` line holds every PR at once, as a ship's merge hold does, while a PR's own line keeps its own reason; Ops writes and removes it as it does any hold.
+One `"*": "<reason>"` line holds every PR at once, as a ship's merge hold does, while a PR's own line keeps its own reason.
+The ship flow writes it with `bun run ship:freeze <version>` when its freeze starts (`startFreeze` in `held.ts`), with the time in the file's `since` object, and removes it with `bun run ship:freeze --end` once the tag lands or the ship stops (`endFreeze`).
+A `"*"` line lapses 4 hours after that time (`FREEZE_LAPSE_MS`), so a ship that stopped without its `--end` holds no PR for long, and a ship still running then writes it again; a `"*"` line with no time, one Ops wrote by hand, and a PR's own line never lapse.
 A lead that overrules a reviewer's FAIL posts one comment on the PR whose first line is `Lead ruling: ReviewBot round <r> at <sha7> overruled: <evidence>; the fault moves to #<issue>`, with that issue filed first; pr:merge reads no ruling, so the merge still waits for a fresh verdict at the head, or the Builder's merge by hand.
 A red check that `canary` caused needs a fresh run once `canary`'s fix lands: merge `canary` into the PR, since `gh run rerun` reuses the run's original merge commit, which holds the red `canary`.
 An outside author's PR goes to the Builder, who gives its go only after a read-only review of its diff.
