@@ -207,7 +207,7 @@ playground ext reject <scope> <kind> <key> <sha> --reason "<why>"
 ```
 
 - A score below 5 is recorded as a commit of its own and leaves the proposal for a later revision or another score; a 5 accepts it.
-- A score from the proposal's own author is refused, so another session or you score it.
+- A proposal is scored by another session, or by you: a score from the proposal's own author is refused.
 - An accepted proposal moves out of `proposed/` over the accepted copy, and sessions read it at once.
 - `accept` is your own call: the CLI refuses it whenever `PLAYGROUND_ROLE` is set.
   The dispatcher's window carries `PLAYGROUND_ROLE=dispatcher`, so run it there as `! env -u PLAYGROUND_ROLE playground ext accept …`.
@@ -216,6 +216,7 @@ playground ext reject <scope> <kind> <key> <sha> --reason "<why>"
 - Each decision is a commit whose trailers name the verdict, the score and the reviewer, so `playground ext why` lists it beside each revision.
 - A write's author is the calling session: its name in Claude Code's registry, else its `PLAYGROUND_ROLE`, and `owner` from your own terminal or the dashboard.
   `ext` refuses `--by`, so no call names an author of its own.
+  A score is the one write that takes the name alone: a session with a role whose name does not resolve is refused, so two sessions of one role never score as one author.
 
 ## History
 

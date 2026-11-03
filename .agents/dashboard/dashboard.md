@@ -32,7 +32,7 @@
   An agent the board holds reads by its label in `AgentLink` and the System page's Agent column (`labelOf`: `ENG-262#73 Worker`, `ENG-262#73 Reviewer`, Builder, the sidebar's rule in `.agents/dashboard/sidebar.md`), whose search matches the label and the name.
   A live dispatcher reads as its chat names it, Alpha or Bravo (`chatLabel`), and a place that has only a name (the Inbox's sender, a Feed card) keeps `agentLabel`.
   A cell too narrow for a label passes `AgentLink` its `truncate`, which cuts a title or first ask and keeps the kind after it whole (`labelSplit`: `Review the pull… · reviewer`).
-  An agent's name opens `/dashboard?worker=<session>`, that session's own view: its stream from the top of the page, with no header, beside its aside window, the Inbox, Playground's chat and Pages tabs (your chat's has no Chat tab, being it; the owner: "just keep inbox, changelog, documents"),
+  An agent's name opens `/dashboard?worker=<session>`, that session's own view: its stream from the top of the page, with no header, beside its aside window, the Inbox, Playground's chat and Pages tabs (your chat's has no Chat tab, being it; the Inbox, Changelog and Documents alone),
   in the Changelog's resizable halves the dashboard's layout draws once around every dashboard page.
   Every other dashboard page's aside has the Inbox and Playground's chat alone of these (`DashboardAside`, `asideView` and `asideTabs` in `web/next/src/components/dashboard/dashboard-aside.tsx`); every view adds your app squares after the Inbox and the chat and the Apps tab last (`.agents/dashboard/apps.md`).
   On a phone the page's own square comes first, then the aside's, the composer on the page's square or Chat alone.

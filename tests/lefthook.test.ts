@@ -673,7 +673,7 @@ test("the pre-commit docs-wrap step covers every docs:wrap file and runs after l
   expect(wrap!.priority as number).toBeGreaterThan(lint!.priority as number)
 })
 
-// the pre-commit build, next build included, goes through commit-slot.ts, which takes the run slot in a worktree when turbo finds a build task with work to do; env-keys' build of @packages/env stays bare, since it ran 8s after a 829s queue wait (measured); both share one turbo cache outside every checkout
+// the pre-commit build, next build included, goes through commit-slot.ts, which takes the commit slot in a worktree when turbo finds a build task with work to do; env-keys' build of @packages/env stays bare, since it ran 8s after a 829s queue wait (measured); both share one turbo cache outside every checkout
 test("the pre-commit build goes through commit-slot, which slots a build with work to do, env-keys' small build does not, and both share the turbo cache", async () => {
   const config = Bun.YAML.parse(await Bun.file(join(ROOT, "lefthook.yml")).text()) as {
     "pre-commit": { commands: Record<string, Record<string, unknown>> }
