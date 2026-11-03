@@ -364,7 +364,7 @@ export function worktreeRefusal(path: string, roots: Roots, holders: Holders): s
     if (byBranch || byPr || tokens.some((t) => where.includes(t)))
       return `${at} is held by ${agent.name}, which the roster lists as ${agent.status}`
   }
-  // a clone's cp works in its destination and only reads its source, so no working folder names the source (PG-699)
+  // a clone's cp only reads its source and works in whatever folder run-slot was called from, so no working folder need name either end (PG-699)
   const clone = holders.clones.find(
     (c) => inside(real(c.source), at) || inside(real(c.destination), at),
   )

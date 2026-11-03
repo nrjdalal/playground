@@ -137,7 +137,7 @@ test("runRm --worktree checks the holders, moves the worktree and prunes it from
   expect(git(main, "worktree", "list")).not.toContain("pg-1")
 })
 
-// run-slot's clone lane copies <source>/node_modules with its cwd in the destination, so only its holder record names the source (PG-699)
+// run-slot's clone lane copies <source>/node_modules from its caller's folder, so only its holder record names the source (PG-699)
 test("runRm --worktree refuses a worktree a running clone reads from, naming the clone, and moves it once the record is gone", async () => {
   const { deps, main, root } = machine()
   git(root, "init", "--bare", "-q", join(root, "remote.git"))
@@ -193,6 +193,28 @@ test("rmDeps' notify queues a safe-delete line for the dispatcher through notify
     readFileSync(join(data, "ops", "outbox", "ops-safe-delete.jsonl"), "utf8"),
   )
   expect(line).toMatchObject({ job: "safe-delete", text: "s: /x is protected" })
+})
+
+test("rmDeps' clones reads run-slot's clone holder line from the data folder's ops, and no line as no clone", () => {
+  const { root } = machine()
+  const data = join(root, "data")
+  mkdirSync(join(data, "ops"), { recursive: true })
+  const before = process.env.PLAYGROUND_DATA_DIR
+  process.env.PLAYGROUND_DATA_DIR = data
+  try {
+    const deps = rmDeps(join(import.meta.dir, "..", "..", "..", "..", ".."))
+    expect(deps.clones()).toEqual([])
+    writeFileSync(
+      join(data, "ops", "run-slot-clone.holder"),
+      `k3m9px-worker ${process.pid} 2026-11-03T05:21:53Z\t/a/src\t/a/dst\n`,
+    )
+    expect(deps.clones()).toEqual([
+      { destination: "/a/dst", pid: process.pid, source: "/a/src", who: "k3m9px-worker" },
+    ])
+  } finally {
+    if (before === undefined) delete process.env.PLAYGROUND_DATA_DIR
+    else process.env.PLAYGROUND_DATA_DIR = before
+  }
 })
 
 test("processesOf joins lsof's working folders with ps's command lines and each process's sockets", () => {

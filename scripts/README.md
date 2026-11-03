@@ -156,7 +156,7 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
   and once that clone succeeds, run-slot clones each workspace's own `node_modules` from the sibling with the same flags (`CLONE_WORKSPACES` in `scripts/ops/run-slot.sh`, run in the clone's own process group), so the worktree is ready for its checks with no install.
   While the clone runs, its holder line (`run-slot-clone.holder` in the ops folder) names the sibling it reads from and the worktree it copies into, so `playground rm --worktree` refuses either one, naming the clone, until the clone ends (`clone_ends` in `scripts/ops/run-slot.sh`, `clonesOf` in `packages/scripts/src/playground/rm.ts`).
   When the copy prints any error, run `~/.playground/ops/run-slot.sh <your name> -- bun install --force --ignore-scripts --cwd <worktree>`, since a plain install then looks healthy while check-types fails on a missing module.
-  Tests: `bun run test:file tests/scripts/ops/run-slot-nested-clone.test.ts tests/packages/scripts/src/playground/rm.test.ts`.
+  Tests: `bun run test:file tests/scripts/ops/run-slot-nested-clone.test.ts tests/packages/scripts/src/playground/rm.test.ts tests/packages/safe-delete/src/index.test.ts`.
   A review worktree that only reads (no test run, no commit) takes no clone at all.
   AGENTS.md has worktrees removed one at a time, since removing several at once drove fseventsd past 300% CPU and the load to 77.
 - After `git worktree move`, remove the moved worktree's `web/next/.source` and `web/next/.next`, which keep the old absolute path, so the next pre-commit build fails with `webpack loader path ... is outside configured roots`.

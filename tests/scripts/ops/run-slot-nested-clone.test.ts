@@ -104,7 +104,7 @@ describe("a node_modules clone of a checkout into another", () => {
   })
 })
 
-// PG-714: a clone's cp works in its destination and only reads its source, so its holder line names both, for playground rm's refusal
+// PG-714: a clone's cp only reads its source and works in its caller's folder, so its holder line names both ends, for playground rm's refusal
 describe("a node_modules clone's holder line", () => {
   const holderLine = async (args: (root: string) => string[]) => {
     const m = machine()
@@ -145,5 +145,15 @@ describe("a node_modules clone's holder line", () => {
       destination: join(root, "to"),
       source: join(root, "from"),
     })
+  })
+
+  test("names no checkout for a clone of another shape, so playground rm reads no clone", async () => {
+    const { line } = await holderLine((r) => [
+      join(r, "from", "node_modules"),
+      join(r, "to"),
+      join(r, "else"),
+    ])
+    expect(line).toMatch(/^worker-c \d+ \S+\n$/)
+    expect(clonesOf(line, () => true)).toEqual([])
   })
 })
