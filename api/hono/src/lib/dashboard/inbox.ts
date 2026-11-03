@@ -114,7 +114,7 @@ export const attachmentSchema = z.strictObject({
 
 export type InboxAttachment = z.infer<typeof attachmentSchema>
 
-// The files an ask, a draft or a read-only update shows on its card.
+// The files an ask, a draft, a Slack decision or a read-only update shows on its card.
 const attachments = z.array(attachmentSchema).min(1).max(MAX_INBOX_ATTACHMENTS).optional()
 
 // What the other side has said so far, one line per message in their words' gist, oldest first, so a Slack message or draft reads in its context.
@@ -177,6 +177,7 @@ export const previewSchema = z.discriminatedUnion("type", [
     type: z.literal("ask"),
   }),
   z.strictObject({
+    attachments,
     ...place,
     text: words,
     thread: soFar,

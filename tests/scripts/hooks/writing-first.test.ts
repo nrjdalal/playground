@@ -413,7 +413,7 @@ describe("registration", () => {
       const commandOf = (event: string) =>
         factory.hooks[event]!.flatMap((entry) => entry.hooks)
           .map((hook) => hook.command)
-          .find((c) => c.includes("scripts/hooks/writing-first.ts"))
+          .find((c) => /scripts\/hooks\/(bundled\/)?writing-first\.[jt]s/.test(c))
       const matchers = (event: string) =>
         settings.hooks[event]
           ?.filter((entry) => entry.hooks.some((hook) => hook.command === commandOf(event)))
