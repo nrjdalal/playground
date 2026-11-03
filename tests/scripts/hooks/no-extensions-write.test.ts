@@ -449,6 +449,16 @@ describe("a direct write into the extensions root is refused, naming the owner's
   test("a Bash call whose cwd is already inside the root runs no writer", async () => {
     expect(await bash("node -e 'x'", SCOPE)).toContain("no-extensions-write hook refuses")
   })
+
+  // zsh's ~- is the folder it last left, so an OLDPWD assignment keeps it in the root, and a popd that lands back leaves it unread
+  test("pushd ~- after an OLDPWD assignment is still the folder zsh last left", async () => {
+    expect(await bash(`cd ${SCOPE}; cd /usr; OLDPWD=/usr; pushd ~-; touch f`)).toContain("refuses")
+  })
+
+  test("pushd ~- after a popd leaves the folder unread", async () => {
+    expect(await bash(`cd ${SCOPE}; pushd /usr; popd; pushd ~-; touch f`)).toBeUndefined()
+    expect(await bash(`cd ${SCOPE}; pushd /usr; pushd ~-; touch f`)).toContain("refuses")
+  })
 })
 
 // The shell reads ~ as the process's home, so these rows judge the real home's root, which the hook only reads.
@@ -487,6 +497,33 @@ describe("a quoted argument is read as a command line only where a program runs 
     ["awk matching a field to a regex", "awk '$3 ~ /runner/' /dev/null"],
     ["awk matching a field to a string", `awk '$3 ~ "runner"' /dev/null`],
     ["awk matching a line naming a runner", "awk '/watch/' /dev/null"],
+    ["awk matching a regex alternation", "awk '/foo|bar/' f"],
+    ["awk matching a regex alternation with a block", "awk '/foo|bar/ {print $2}' f"],
+    ["awk matching a field to a string alternation", `awk '$1 ~ "a|b"' f`],
+    ["awk matching a field to a grouped alternation", "awk '$1 ~ /^(a|b)/' f"],
+    [
+      "awk counting a field's regex alternation",
+      "awk '$3 ~ /runner|watch/ {n++} END {print n}' /dev/null",
+    ],
+    [
+      "awk matching an escaped paren and a quoted word",
+      `awk '/startsWith\\("--del"\\)/{print NR}' f`,
+    ],
+    ["awk matching a line of three dashes and a space", "awk '/^--- /' f"],
+    ["sed printing a line of three dashes and a space", "sed -n '/^--- /p' f"],
+    ["jq formatting two fields around a slash", `jq -r '"\\(.a)/-\\(.b)"' f`],
+    [
+      "awk printing from a heading in a handoff",
+      "awk '/^## .*6/{p=1} p' ~/.playground/handoffs/x.md",
+    ],
+    [
+      "awk printing from a heading alternation in a handoff",
+      "awk '/^## .*6|7/{p=1} p' ~/.playground/handoffs/x.md",
+    ],
+    [
+      "sed -i replacing text with a slash and parens in a handoff",
+      "sed -i '' 's/a / b (c)/new/' ~/.playground/handoffs/x.md",
+    ],
     ["awk with a block matching a line naming a runner", "awk '/watch/ {print}' /dev/null"],
     ["awk with its errors sent to /dev/null", "awk '$3 ~ /runner/' /dev/null 2>/dev/null"],
     [
@@ -512,6 +549,11 @@ describe("a quoted argument is read as a command line only where a program runs 
     ["cut at a quoted brace", "cut -d'{' -f1 /dev/null"],
     ["sort keyed at a quoted bracket", "sort -t'[' -k2 /dev/null"],
     ["awk matching a regex that starts at / and holds a glob", "awk '/^a*b/' /dev/null"],
+    ["git -c with a literal pager", "git -c core.pager=less log"],
+    ["rm of a glob in a build folder", "rm -rf build/*"],
+    ["rm of a held folder's glob", "X=build; rm -rf $X/*"],
+    ["rm of a held temporary folder", 'D=/tmp/x.1; rm -rf "$D"'],
+    ["rm under HOME, which the hook holds", 'rm -rf "$HOME/tmp-x"'],
     ["a quiet commit with -m", `git commit -m "fix(x): y"`],
     ["a quiet commit with -am", `git commit -am "fix(x): y"`],
     ["a quiet commit with --message", `git commit --message "fix(x): y"`],
@@ -562,8 +604,36 @@ describe("a quoted argument is read as a command line only where a program runs 
       "doas whose user option comes first in a cluster and takes the shell letter as its value",
       "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | doas -us",
     ],
+    [
+      "sudo with its full user option and a harmless command",
+      "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sudo --user root ls",
+    ],
+    [
+      "sudo with no options and a harmless command",
+      "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sudo ls",
+    ],
+    [
+      "sudo with a shortened user option and a harmless command",
+      "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sudo --us root ls",
+    ],
   ])("%s runs from a worktree", async (_, command) => {
     expect(await at(command, join(homedir(), "x", ".claude", "worktrees", "y"))).toBeUndefined()
+  })
+
+  test.each([
+    ["rm of mktemp's folder", 'T=$(mktemp -d); rm -rf "$T"'],
+    ["rm of mktemp's quiet folder", 'T="$(mktemp -dq)"; rm -rf "$T"'],
+    ["rm of mktemp's file", 'F=$(mktemp); rm -f "$F"'],
+    ["rm of a pid-named temporary file", "rm -f /tmp/x.$$"],
+    ["rm of mktemp's folder from a literal template", 'T=$(mktemp -d /tmp/x.XXXX); rm -rf "$T"'],
+    [
+      "rm of mktemp's folder from a held variable's template",
+      'D=/tmp/w; T=$(mktemp -d "$D/x.XXXX"); rm -rf "$T"',
+    ],
+  ])("%s runs from the home with TMPDIR set", async (_, command) => {
+    const env = { HOME: homedir(), TMPDIR: tmpdir() }
+    const raw = JSON.stringify({ cwd: homedir(), tool_input: { command }, tool_name: "Bash" })
+    expect(await check(raw, env)).toBeUndefined()
   })
 
   test("the dispatcher brief's call that finds the Dashboard's checkout runs from a worktree", async () => {
@@ -1589,5 +1659,27 @@ describe("the gated keys are every key the guards read", () => {
   test("spawn.sh's code root is gated", async () => {
     expect(await read("scripts/spawn.sh")).toContain("setting_text paths.codeRoot")
     expect(GUARD_KEYS.has("paths.codeRoot")).toBe(true)
+  })
+})
+
+describe("a refusal for a value the hook does not hold names it in readable text", () => {
+  test.each([
+    ["a variable", "rm -f $X/x", "rm on $X/x,"],
+    ["a loop variable", 'for d in a b; do rm -f "$d/x"; done', 'rm on "$d/x",'],
+    ["a variable inside a nested shell's script", 'bash -c "rm -f $X/x"', "rm on $…/x,"],
+    [
+      "git -c with a variable",
+      'git -c core.pager="$P" log',
+      'git -c core.pager="$P", a value built from',
+    ],
+    [
+      "git -c attached, with a variable",
+      'git -ccore.pager="$P" log',
+      'git -ccore.pager="$P", a value built from',
+    ],
+  ])("%s", async (_, command, named) => {
+    const reason = await bash(command, "/tmp")
+    expect(reason).toContain(named)
+    expect(reason).not.toContain("\u0000")
   })
 })
