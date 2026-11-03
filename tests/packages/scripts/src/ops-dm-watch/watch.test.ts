@@ -4,7 +4,13 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { PLAYGROUND, recordSent, USER } from "../../../../../packages/scripts/src/dm/slack"
-import { type Stuck, stuckOf, watch } from "../../../../../packages/scripts/src/ops-dm-watch/watch"
+import {
+  assistantOf,
+  busyOf,
+  type Stuck,
+  stuckOf,
+  watch,
+} from "../../../../../packages/scripts/src/ops-dm-watch/watch"
 import { DM, fakeDm, OWNER } from "../dm/fake-dm"
 
 const dirs: string[] = []
@@ -17,25 +23,45 @@ const scratch = () => {
   return dir
 }
 
-// One watch over a fake DM, its passes at the times given, recording every line it sends; ours posts as dm send does, its ts in the record.
-const harness = (dm: ReturnType<typeof fakeDm>, stuck: Stuck = null) => {
+const ASSISTANT = "k3m9px-worker"
+
+// One watch over a fake DM, its passes at the times given, recording every line it sends and logs; the assistant seat is ASSISTANT's unless seat says otherwise.
+const harness = (
+  dm: ReturnType<typeof fakeDm>,
+  stuck: Stuck = null,
+  working = false,
+  seat: string | null = ASSISTANT,
+) => {
   const dir = scratch()
   const sent: { text: string; to: string }[] = []
   const ops: string[] = []
+  const logs: string[] = []
   let blocked = stuck
+  let busy = working
   const pass = (now: number) =>
     watch({
       channel: DM,
       dir,
+      log: (line) => logs.push(line),
       now,
       owner: OWNER,
+      assistant: async () => seat ?? undefined,
+      busy: async () => busy,
       send: async (to, text) => sent.push({ text, to }),
       slack: dm.slack,
       stuck: async () => blocked,
       tellOps: async (text) => ops.push(text),
     })
   const ours = async (text: string) => recordSent(dir, dm.add(text).ts)
-  return { ops, ours, pass, sent, setStuck: (s: Stuck) => (blocked = s) }
+  return {
+    logs,
+    ops,
+    ours,
+    pass,
+    sent,
+    setBusy: (b: boolean) => (busy = b),
+    setStuck: (s: Stuck) => (blocked = s),
+  }
 }
 
 describe("the DM watch", () => {
@@ -55,7 +81,7 @@ describe("the DM watch", () => {
     expect(w.sent.some((s) => s.text.includes("our answer"))).toBe(false)
   })
 
-  test("a message with no reply in 3 minutes goes to dispatcher-2 as well, once; one answered in time does not", async () => {
+  test("a message with no reply in 3 minutes goes to the assistant as well, once; one answered in time does not", async () => {
     const dm = fakeDm([{ text: "anyone there?", ts: "1000.000100", user: OWNER }])
     const w = harness(dm)
     await w.pass(1010)
@@ -63,7 +89,7 @@ describe("the DM watch", () => {
     expect(w.sent.map((s) => s.to)).toEqual(["dispatcher"])
     await w.pass(1191)
     await w.pass(1251)
-    expect(w.sent.map((s) => s.to)).toEqual(["dispatcher", "dispatcher-2"])
+    expect(w.sent.map((s) => s.to)).toEqual(["dispatcher", ASSISTANT])
     expect(w.sent[1]!.text).toContain("anyone there?")
 
     const answered = fakeDm([{ text: "quick one", ts: "1000.000100", user: OWNER }])
@@ -74,7 +100,31 @@ describe("the DM watch", () => {
     expect(a.sent.map((s) => s.to)).toEqual(["dispatcher"])
   })
 
-  test("the lone PLAYGROUND line a mid-send repair leaves is no reply, so the owner's message still goes to dispatcher-2", async () => {
+  // #779: a busy dispatcher's reply waits behind its turn, so 3 minutes of silence alone escalated a healthy busy spell
+  test("a message with no reply in 3 minutes waits while the dispatcher works on a fresh record, and goes to the assistant once it stops", async () => {
+    const dm = fakeDm([{ text: "busy?", ts: "1000.000100", user: OWNER }])
+    const w = harness(dm, null, true)
+    await w.pass(1010)
+    await w.pass(1251)
+    expect(w.sent.map((s) => s.to)).toEqual(["dispatcher"])
+    w.setBusy(false)
+    await w.pass(1311)
+    expect(w.sent.map((s) => s.to)).toEqual(["dispatcher", ASSISTANT])
+  })
+
+  test("with no session in the assistant seat, an unanswered message stays with the dispatcher alone, and the log says so once", async () => {
+    const dm = fakeDm([{ text: "hello?", ts: "1000.000100", user: OWNER }])
+    const w = harness(dm, null, false, null)
+    await w.pass(1010)
+    await w.pass(1191)
+    await w.pass(1251)
+    expect(w.sent.map((s) => s.to)).toEqual(["dispatcher"])
+    expect(w.logs).toEqual([
+      "no live session holds the assistant seat, so the owner's DM at 1000.000100 stays with the dispatcher alone",
+    ])
+  })
+
+  test("the lone PLAYGROUND line a mid-send repair leaves is no reply, so the owner's message still goes to the assistant", async () => {
     const dm = fakeDm([{ text: "status?", ts: "1000.000100", user: OWNER }])
     const w = harness(dm)
     await w.ours(PLAYGROUND)
@@ -83,24 +133,32 @@ describe("the DM watch", () => {
     await w.ours(PLAYGROUND)
     await w.pass(1010)
     await w.pass(1250)
-    expect(w.sent.map((s) => s.to)).toEqual(["dispatcher", "dispatcher", "dispatcher-2"])
+    expect(w.sent.map((s) => s.to)).toEqual(["dispatcher", "dispatcher", ASSISTANT])
     expect(w.sent[2]!.text).toContain("wait, one more thing")
   })
 
-  test("while the dispatcher has read stuck for 3 minutes, a new message goes to dispatcher-2 at once and Ops hears it once", async () => {
+  test("while the dispatcher has read stuck for 3 minutes, a new message goes to the assistant at once and Ops hears it once", async () => {
     const dm = fakeDm([{ text: "help", ts: "1000.000100", user: OWNER }])
     const w = harness(dm, { at: "2026-10-31T06:00:00.000Z", state: "stuck" })
     await w.pass(1010)
     dm.add("still there?")
     await w.pass(1070)
-    expect(w.sent.map((s) => s.to)).toEqual([
-      "dispatcher",
-      "dispatcher-2",
-      "dispatcher",
-      "dispatcher-2",
-    ])
+    expect(w.sent.map((s) => s.to)).toEqual(["dispatcher", ASSISTANT, "dispatcher", ASSISTANT])
     expect(w.ops).toHaveLength(1)
     expect(w.ops[0]).toContain("dispatcher has read stuck since 2026-10-31T06:00:00.000Z")
+  })
+
+  test("while the dispatcher has read stuck with no session in the assistant seat, nothing more is sent and Ops hears that no one else holds it, once", async () => {
+    const dm = fakeDm([{ text: "help", ts: "1000.000100", user: OWNER }])
+    const w = harness(dm, { at: "2026-10-31T06:00:00.000Z", state: "stuck" }, false, null)
+    await w.pass(1010)
+    dm.add("still there?")
+    await w.pass(1070)
+    expect(w.sent.map((s) => s.to)).toEqual(["dispatcher", "dispatcher"])
+    expect(w.ops).toEqual([
+      "dispatcher has read stuck since 2026-10-31T06:00:00.000Z, so the owner's DM messages have no one else to go to, since no live session holds the assistant seat; unstick dispatcher.",
+    ])
+    expect(w.logs).toHaveLength(2)
   })
 
   test("a first pass hands on only the last 2 minutes, so a new install replays no history", async () => {
@@ -176,6 +234,49 @@ describe("stuckOf", () => {
     })
     turn("2026-10-31T06:01:00.000Z")
     expect(await stuckOf("dispatcher", data, config, now)).toBeNull()
+  })
+})
+
+describe("assistantOf", () => {
+  test("names the live session the roster gives the assistant kind, and none while no live one holds it", async () => {
+    const data = scratch()
+    expect(await assistantOf(data)).toBeUndefined()
+    const roster = (agents: object[]) =>
+      writeFileSync(join(data, "roster.json"), JSON.stringify({ agents }))
+    roster([{ kind: "assistant", name: ASSISTANT, role: "manager", status: "ended", task: "t" }])
+    expect(await assistantOf(data)).toBeUndefined()
+    roster([{ kind: "assistant", name: ASSISTANT, role: "manager", status: "working", task: "t" }])
+    expect(await assistantOf(data)).toBe(ASSISTANT)
+  })
+})
+
+describe("busyOf", () => {
+  test("reads the dispatcher as busy only while a live session's working record is under 3 minutes old", async () => {
+    const data = scratch()
+    const config = scratch()
+    mkdirSync(join(config, "sessions"))
+    mkdirSync(join(data, "session-state"))
+    const live = (id: string, name: string) =>
+      writeFileSync(
+        join(config, "sessions", `${id}.json`),
+        JSON.stringify({ name, pid: process.pid, sessionId: id }),
+      )
+    const state = (id: string, s: string, at: string) =>
+      writeFileSync(
+        join(data, "session-state", `${id}.json`),
+        JSON.stringify({ at, event: "PostToolUse", sessionId: id, state: s }),
+      )
+    const now = Date.parse("2026-10-31T06:10:00Z") / 1000
+    live("a", "dispatcher")
+    live("b", "builder")
+    state("b", "working", "2026-10-31T06:09:00.000Z")
+    expect(await busyOf("dispatcher", data, config, now)).toBe(false)
+    state("a", "working", "2026-10-31T06:06:00.000Z")
+    expect(await busyOf("dispatcher", data, config, now)).toBe(false)
+    state("a", "idle", "2026-10-31T06:09:00.000Z")
+    expect(await busyOf("dispatcher", data, config, now)).toBe(false)
+    state("a", "working", "2026-10-31T06:09:00.000Z")
+    expect(await busyOf("dispatcher", data, config, now)).toBe(true)
   })
 })
 

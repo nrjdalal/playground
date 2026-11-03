@@ -64,6 +64,7 @@ import { basename as basename2, dirname, isAbsolute as isAbsolute2, join as join
 
 // packages/config/src/kinds.ts
 var ROSTER_KINDS = [
+  "assistant",
   "builder",
   "dispatcher",
   "ops",
