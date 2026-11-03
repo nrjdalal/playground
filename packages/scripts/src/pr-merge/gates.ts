@@ -274,7 +274,7 @@ export function gatesOf(facts: PrFacts, { gitGuardian, outsideAuthor }: GateOpti
   ]
   gates.push(ciGate(facts.checks, { gitGuardian, required: REQUIRED_CHECKS }))
   if (facts.body !== undefined) {
-    const why = bodyRefusal(facts.body)
+    const why = bodyRefusal(facts.body, facts.files)
     gates.push(
       why
         ? { detail: `${why}; fix the body (no push)`, name: "body", ok: false }

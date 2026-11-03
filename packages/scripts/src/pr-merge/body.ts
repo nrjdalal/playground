@@ -49,12 +49,37 @@ export function tldrLabel(body: string): string | null {
   return null
 }
 
-// Pure: why the gate refuses a PR's body, or null when it takes it: the PR template, its TL;DR holding no Outcome label line.
-export function bodyRefusal(body: string): string | null {
+// Pure: the text of a body's Evidence section, up to its next ## heading.
+function evidenceOf(body: string): string {
+  const lines = body.split(/\r?\n/)
+  const at = lines.findIndex((line) => /^##\s+evidence\s*$/i.test(line))
+  if (at === -1) return ""
+  const end = lines.findIndex((line, i) => i > at && /^##\s/.test(line))
+  return lines.slice(at + 1, end === -1 ? undefined : end).join("\n")
+}
+
+const escaped = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+
+// Pure: each changed doc (a *.md path) that a body's Evidence leaves out, a path counting as named where its full repo-relative path stands whole in that section's text.
+export function unnamedDocs(body: string, files: string[]): string[] {
+  const evidence = evidenceOf(body)
+  return files.filter(
+    (path) =>
+      /\.md$/i.test(path) &&
+      !new RegExp(`(?<![\\w./-])${escaped(path)}(?![\\w/-]|\\.\\w)`).test(evidence),
+  )
+}
+
+// Pure: why the gate refuses a PR's body, or null when it takes it: the PR template, its TL;DR holding no Outcome label line, its Evidence naming each changed doc in files (AGENTS.md's Shipping a Playground PR, step 1).
+export function bodyRefusal(body: string, files: string[] = []): string | null {
   const label = tldrLabel(body)
   if (label) {
     return `its body's TL;DR holds a line labelled "${label}:", which the pr skill's template (extensions/core/skills/pr/SKILL.md) leaves out; delete that line`
   }
-  if (templateBody(body)) return null
-  return "its body needs the PR template: a TL;DR of 2 sentences or more, the pr skill's Summary, Evidence and Merge Danger, then Links (extensions/core/skills/pr/SKILL.md)"
+  if (!templateBody(body)) {
+    return "its body needs the PR template: a TL;DR of 2 sentences or more, the pr skill's Summary, Evidence and Merge Danger, then Links (extensions/core/skills/pr/SKILL.md)"
+  }
+  const unnamed = unnamedDocs(body, files)
+  if (unnamed.length === 0) return null
+  return `its body's Evidence leaves out ${unnamed.length === 1 ? "a changed doc" : `${unnamed.length} changed docs`}: ${unnamed.join(", ")}; name each by its full path with its check (AGENTS.md, Shipping a Playground PR, step 1)`
 }
