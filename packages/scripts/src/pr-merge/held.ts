@@ -8,7 +8,7 @@ import { dataDir } from "@packages/env/data-dir"
 export const heldPath = (): string =>
   envValue(process.env, "PLAYGROUND_HELD_PRS") || join(dataDir(), "ops", "report", "held-prs.json")
 
-// Pure: why this PR is held, or null when the file is missing or does not list it. A file that does not read holds every PR, since a hold lost to a typo would let the PR merge.
+// Pure: why this PR is held, or null when the file is missing or does not list it. A `"*"` key holds every PR, a floor-wide hold such as a ship's, while a PR's own line keeps its own reason. A file that does not read holds every PR, since a hold lost to a typo would let the PR merge.
 export function heldOf(text: string | null, repo: string, n: number): string | null {
   if (text === null) return null
   let held: unknown
@@ -20,8 +20,8 @@ export function heldOf(text: string | null, repo: string, n: number): string | n
   if (typeof held !== "object" || held === null || Array.isArray(held)) {
     return "held-prs.json does not read: held is not an object"
   }
-  const key = `${repo}#${n}`
-  if (!Object.hasOwn(held, key)) return null
+  const key = [`${repo}#${n}`, "*"].find((name) => Object.hasOwn(held, name))
+  if (!key) return null
   const why = (held as Record<string, unknown>)[key]
   return typeof why === "string" && why.trim() ? why.trim() : "no reason given"
 }

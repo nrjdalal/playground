@@ -5,6 +5,7 @@ import { join } from "node:path"
 
 import {
   answerKeys,
+  FIXTURE_SOCKET,
   HerdrDown,
   herdrEvents,
   herdrProblem,
@@ -759,15 +760,14 @@ describe("herdrServers and readScreen", () => {
     ])
   })
 
-  test("a stack reading a fixture names no server and connects to none, though one listens where the settings point", async () => {
+  test("a stack reading a fixture names the fixture's own server alone and connects to no socket, though one listens where the settings point", async () => {
     const s = stub()
     const env = { PLAYGROUND_HERDR_DIR: s.dir, PLAYGROUND_HERDR_SESSIONS: "s" }
     expect(herdrServers(env)).toEqual([{ name: "s", socket: s.path }])
     const live = process.env.PLAYGROUND_LIVE_READS
     delete process.env.PLAYGROUND_LIVE_READS
     try {
-      expect(herdrServers(env)).toEqual([])
-      expect(await readHerdr(herdrServers(env))).toEqual([])
+      expect(herdrServers(env)).toEqual([{ name: "playground", socket: FIXTURE_SOCKET }])
       const events = herdrEvents(herdrServers(env), 20)
       await Bun.sleep(100)
       events.kill()

@@ -13,7 +13,15 @@ import {
 import { dataDirOf } from "@packages/env/data-dir"
 import { z } from "zod"
 
-import { readsLive } from "@/lib/dashboard/fixture"
+import {
+  currentSource,
+  fixtureHerdrInput,
+  fixtureHerdrPane,
+  FixtureHerdrRefusal,
+  fixtureHerdrScreen,
+  readFixtureHerdr,
+  readsLive,
+} from "@/lib/dashboard/fixture"
 import type { Registry } from "@/lib/dashboard/peers"
 import type { UsageLimit } from "@/lib/dashboard/unstick"
 import { ApiError } from "@/lib/error"
@@ -23,7 +31,7 @@ import { claudeDir, dataDir, transcriptPath } from "@/lib/sessions/paths"
 
 type Json = Record<string, unknown>
 
-// The servers Playground runs: PLAYGROUND_HERDR_SESSIONS names them (playground and playground-probes, plus the folder's other server sockets while it is blank), each serving its socket at <PLAYGROUND_HERDR_DIR>/<name>.sock, the dir herdr in the data folder, ~/.playground, unless set, following HOME and never CLAUDE_CONFIG_DIR or PLAYGROUND_DATA_DIR as ops-herdr serves them, so a session on another login reads the same servers. A stack that does not read this machine reads no herdr server.
+// The servers Playground runs: PLAYGROUND_HERDR_SESSIONS names them (playground and playground-probes, plus the folder's other server sockets while it is blank), each serving its socket at <PLAYGROUND_HERDR_DIR>/<name>.sock, the dir herdr in the data folder, ~/.playground, unless set, following HOME and never CLAUDE_CONFIG_DIR or PLAYGROUND_DATA_DIR as ops-herdr serves them, so a session on another login reads the same servers. A fixture stack reads the fixture's own playground server alone (FIXTURE_SOCKET), and a hosted or refused one reads none.
 export type HerdrServer = { name: string; socket: string }
 
 const SERVER_NAME = /^[a-z0-9][a-z0-9_-]*$/
@@ -31,7 +39,11 @@ const SERVER_NAME = /^[a-z0-9][a-z0-9_-]*$/
 export const herdrServers = (
   env: Record<string, string | undefined> = process.env,
 ): HerdrServer[] => {
-  if (!readsLive()) return []
+  if (!readsLive()) {
+    return currentSource().kind === "fixture"
+      ? [{ name: "playground", socket: FIXTURE_SOCKET }]
+      : []
+  }
   const dir =
     envValue(env, "PLAYGROUND_HERDR_DIR") || join(dataDirOf({}, env.HOME || homedir()), "herdr")
   const named = envValue(env, "PLAYGROUND_HERDR_SESSIONS")
@@ -128,6 +140,43 @@ const lineWriter = (line: string) => {
   }
 }
 
+// A fixture stack's herdr server, on no socket: each request is answered from the fixture's herdr.json (fixture.ts) in the shape herdr's own answer takes, so every read and write in this file runs on it as it is.
+export const FIXTURE_SOCKET = "fixture:herdr"
+
+const fixtureAnswer = (method: string, params: Json): Json => {
+  const pane = String(params.pane_id ?? params.target ?? "")
+  try {
+    switch (method) {
+      case "session.snapshot": {
+        const { panes, workspaces } = readFixtureHerdr()
+        return { snapshot: { panes, workspaces } }
+      }
+      case "pane.process_info":
+        return { process_info: { foreground_processes: fixtureHerdrPane(pane).processes } }
+      case "pane.get":
+        return { pane: fixtureHerdrPane(pane) }
+      case "pane.read": {
+        const rows = fixtureHerdrScreen(pane).split("\n")
+        return { read: { text: rows.slice(-Number(params.lines || rows.length)).join("\n") } }
+      }
+      case "agent.prompt":
+        fixtureHerdrInput(pane, { prompt: String(params.text ?? "") })
+        return {}
+      case "pane.send_keys":
+        fixtureHerdrInput(pane, { keys: (params.keys as string[] | undefined) ?? [] })
+        return {}
+      case "pane.send_text":
+        fixtureHerdrInput(pane, { text: String(params.text ?? "") })
+        return {}
+    }
+  } catch (error) {
+    if (error instanceof FixtureHerdrRefusal)
+      throw new HerdrRefused(method, error.code, error.message)
+    throw error
+  }
+  throw new HerdrRefused(method, "unknown_method", "the fixture holds no answer to it")
+}
+
 // One request on its own connection: the server writes one JSON line back and closes it.
 export async function request(
   socket: string,
@@ -135,6 +184,7 @@ export async function request(
   params: Json,
   timeoutMs = 2000,
 ): Promise<Json> {
+  if (socket === FIXTURE_SOCKET) return fixtureAnswer(method, params)
   let buffered = ""
   let settle: (value: unknown) => void = () => {}
   const answered = new Promise<unknown>((resolve) => (settle = resolve))
@@ -648,6 +698,8 @@ export function herdrEvents(servers = herdrServers(), retryMs = RETRY_MS): Herdr
     timers.add(timer)
   }
   const watch = (server: HerdrServer) => {
+    // the fixture's server has no events: fixture.ts's onFixtureChange moves the hub instead
+    if (server.socket === FIXTURE_SOCKET) return
     let current: { end: () => void } | null = null
     let wait = retryMs
     const again = (ms: number) => {

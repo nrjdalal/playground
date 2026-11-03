@@ -631,9 +631,39 @@ gone() {
   return 1
 }
 
+# a clone runs through this: the clone itself, then, once it exits 0 from one checkout's root node_modules into another, each workspace's own the same way, so no bun install has to follow (PG-655: 74 of 80 clones in a day were followed by one, 177 min queued)
+CLONE_WORKSPACES='
+import glob, json, os, subprocess, sys
+code = subprocess.call(sys.argv[1:])
+if code:
+    sys.exit(code)
+words = sys.argv[1:]
+words = words[next((i for i, w in enumerate(words) if os.path.basename(w) == "cp"), len(words)):]
+flags = [w for w in words[1:] if w.startswith("-")]
+paths = [w.rstrip("/") for w in words[1:] if not w.startswith("-")]
+if not words or len(paths) != 2 or os.path.basename(paths[0]) != "node_modules":
+    sys.exit(0)
+src = os.path.dirname(paths[0]) or "."
+dst = os.path.dirname(paths[1]) if os.path.basename(paths[1]) == "node_modules" else paths[1]
+try:
+    workspaces = json.load(open(os.path.join(src, "package.json"))).get("workspaces", [])
+    json.load(open(os.path.join(dst, "package.json")))
+except (OSError, ValueError):
+    sys.exit(0)
+if isinstance(workspaces, dict):
+    workspaces = workspaces.get("packages", [])
+for pattern in workspaces:
+    for ws in sorted(glob.glob(os.path.join(src, pattern, "node_modules"))):
+        into = os.path.join(dst, os.path.relpath(os.path.dirname(ws), src))
+        if os.path.isdir(into) and not os.path.lexists(os.path.join(into, "node_modules")):
+            code = subprocess.call([words[0], *flags, ws, into + "/"])
+            if code:
+                sys.exit(code)'
+
 # runs the command as the leader of a process group of its own (macOS has no setsid(1)), which reap stops once it ends, and exits with its code; where Claude Code's sandbox refuses the new group or the nice, it says so on stderr and runs the command without it
 run_command() {
   local code
+  [ "${KIND:-}" = clone ] && set -- python3 -I -c "$CLONE_WORKSPACES" "$@"
   python3 -I -c '
 import os, sys
 for step, call in (("its own process group", os.setsid), ("nice " + os.environ.get("RUN_SLOT_NICE", "10"), lambda: os.nice(int(os.environ.get("RUN_SLOT_NICE", "10"))))):

@@ -120,6 +120,7 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
   A person brings herdr back with bare `playground`, which runs its `start` first.
   A server hands its panes the shell basics alone, so `spawn.sh`'s herdr launch file sets `TMPDIR` to `$(getconf DARWIN_USER_TEMP_DIR)`, keeping one already set: every start, resume and restore writes that file, so a running server needs no restart for it.
   Nothing in the factory lives under the Desktop folder: macOS guards it by each binary's Full Disk Access, which a herdr or Claude Code update can drop, so the job asks for no grant, and `tests/desktop-paths.test.ts` fails on a tracked file naming a path there.
+  A plain shell pane on `playground-probes`, with no Claude in it, opens, runs, reads and closes only through `scripts/shell-pane.ts` (the `shell-pane` skill), which types a command only once every registered Bash guard's `check()` has passed it, in a child bun started as the hooks start, since a pane has no PreToolUse hook of its own.
   A scratch herdr server, for a test or a smoke, takes its folder from `mktemp -d "$(getconf DARWIN_USER_TEMP_DIR)<prefix>.XXXX"`: macOS caps a socket path at 104 bytes (`sun_path`), a session scratchpad path alone runs past that, and the server then stops with `local socket name length exceeds capacity of sun_path`.
   playbook's LIFECYCLE.md, Ops jobs, has the rest.
 
@@ -132,6 +133,8 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
 - `playground orgs home` loads the workspace packages, and `playground update` runs link-skills.sh before its own install, so link-skills.sh first runs `bun install --frozen-lockfile --ignore-scripts` when a workspace package declares a dependency no `node_modules` of its checkout links (`packages/scripts/src/playground/unlinked.ts` names each one).
   The hop to v0.0.34 declared settings' `@packages/safe-delete`, and the home set failed on `Cannot find module` until the install.
   A fully linked checkout skips the install.
+  `playground update` installs before it moves the checkout when the target declares such a dependency, so a hook that runs its source reads new code only once its imports link (a PreToolUse guard runs its bundle, which needs none);
+  this install is the fallback for a target that deletes or moves a manifest, a tree with edits or untracked files of its own, an install there that failed and put the old manifests back, or an update run by an older `update.ts`.
 - Beside the home set, it symlinks `~/.playground/factory-settings.json` to `scripts/factory-settings.json`, each brief template in `~/.playground/handoffs/` to its file in `scripts/briefs/`, `~/.playground/brief-rush.md` to `scripts/briefs/brief-rush.md`,
   `~/.bun/bin/playground` and its old name to the `playground` command (`packages/scripts/src/playground/cli.ts`; `playground --help` lists what it does),
   and each ops script it names into `~/.playground/ops/`;
@@ -146,8 +149,9 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
 ## A worktree's node_modules
 
 - A new worktree can take `node_modules` as an APFS clone of a sibling worktree's with the same `bun.lock` (`~/.playground/ops/run-slot.sh <your name> -- cp -cR <sibling>/node_modules <worktree>/`, through run-slot since a clone is a heavy run: three load spikes on 13 Oct, fseventsd near 100%, came from clones),
-  then `~/.playground/ops/run-slot.sh <your name> -- bun install --ignore-scripts --cwd <worktree>`, which fills each package's own `node_modules/.bin` the clone lacks; when the copy prints any error, run `~/.playground/ops/run-slot.sh <your name> -- bun install --force --ignore-scripts --cwd <worktree>` instead,
-  since a plain install then looks healthy while check-types fails on a missing module.
+  and once that clone succeeds, run-slot clones each workspace's own `node_modules` from the sibling with the same flags (`CLONE_WORKSPACES` in `scripts/ops/run-slot.sh`, run in the clone's own process group), so the worktree is ready for its checks with no install.
+  When the copy prints any error, run `~/.playground/ops/run-slot.sh <your name> -- bun install --force --ignore-scripts --cwd <worktree>`, since a plain install then looks healthy while check-types fails on a missing module.
+  Tests: `bun run test:file tests/scripts/ops/run-slot-nested-clone.test.ts`.
   A review worktree that only reads (no test run, no commit) takes no clone at all.
   AGENTS.md has worktrees removed one at a time, since removing several at once drove fseventsd past 300% CPU and the load to 77.
 - After `git worktree move`, remove the moved worktree's `web/next/.source` and `web/next/.next`, which keep the old absolute path, so the next pre-commit build fails with `webpack loader path ... is outside configured roots`.
