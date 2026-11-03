@@ -66,6 +66,8 @@ const PATHS: Paths = {
 for (const dir of [
   join(ROOT, "hooks"),
   join(SCOPE, "lists"),
+  join(ROOT, "hooks", "~-"),
+  join(ROOT, "hooks", "~+"),
   join(DATA, "handoffs"),
   join(PATHS.WORK, "playground"),
   join(PATHS.MAIN, ".claude", "worktrees", "a"),

@@ -1,8 +1,10 @@
 import { describe, expect, test } from "bun:test"
-import { readdirSync, readFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync } from "node:fs"
+import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { type Env, GIT_TAKES, lex, run } from "../../../scripts/hooks/shell"
+import { type Paths, REFUSED_FORMS } from "./fixtures/refused-forms"
 
 const HOOKS = join(import.meta.dir, "..", "..", "..", "scripts", "hooks")
 
@@ -50,5 +52,54 @@ describe("an alternate reading runs on its own copy of the env", () => {
 
   test("the primary reading still moves the folder and sets the variables", async () => {
     expect(await seen("cd /; export A=1; probe")).toEqual({ cwd: "/", vars: ["A"] })
+  })
+})
+
+// Env.cwd's own reading follows zsh's ~- through the one folder Env.old names, and the proven reading through the set Env.cwdBack holds, so the set must hold that folder or the two readings could disagree on where a `cd -` or `pushd ~-` goes back to.
+describe("the folder Env.old names is always one Env.cwdBack holds", () => {
+  // each row is read as text by the reader alone and never run, in folders made under a mkdtemp root so Env.cwd's reading lands in them
+  test("after every cd, pushd and popd of the refused-forms rows", async () => {
+    const root = mkdtempSync(join(tmpdir(), "old-in-back-"))
+    const extensions = join(root, "data", "extensions")
+    const paths: Paths = {
+      BARE: join(root, "bare"),
+      CLI_DIR: join(root, "cli"),
+      DATA: join(root, "data"),
+      HOME: join(root, "home"),
+      LINK: join(root, "home", "store"),
+      LIST: join(extensions, "hooks", "list.json"),
+      MAIN: join(root, "main"),
+      ROOT: extensions,
+      SCOPE: join(extensions, "login"),
+      WORDS: join(root, "home", "words"),
+      WORK: join(root, "home", "work"),
+    }
+    for (const [key, dir] of Object.entries(paths))
+      if (key !== "LIST") mkdirSync(dir, { recursive: true })
+    let read = 0
+    const misses: string[] = []
+    for (const { rows } of REFUSED_FORMS)
+      for (const [, call] of rows(paths)) {
+        if (typeof call !== "string" || !/\b(?:cd|pushd|popd)\b/.test(call)) continue
+        const start = paths.WORK
+        const env: Env = {
+          cwd: start,
+          cwdSure: start,
+          files: new Map(),
+          known: {},
+          old: { dir: start },
+          process: {},
+          vars: new Map(),
+        }
+        await run(lex(call), env, async (_cmd, _parsed, here) => {
+          const dir = here.old?.dir
+          if (dir === undefined || here.cwdBack === undefined) return undefined
+          read++
+          if (!here.cwdBack.includes(dir)) misses.push(`${call} :: ${dir}`)
+          return undefined
+        })
+      }
+    expect(misses).toEqual([])
+    expect(read).toBeGreaterThan(100)
   })
 })

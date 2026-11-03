@@ -37,6 +37,7 @@ type Lexer = {
 }
 type Lexed = { commands: Command[]; scopes: number[] }
 type Pending = { delim: string; quoted: boolean; redirect: Redirect; strip: boolean }
+// `old` is set by a hook that follows zsh's ~-, `old.dir` the folder the shell last left (unset when the hook cannot tell), which an assignment to OLDPWD leaves as it is, so a pushd of ~- or ~+ reads a folder there; a hook that leaves it unset reads both as typed.
 export type Env = {
   // Set once the line names more folders than the reader carries, so the shell may be in any folder, the one a hook guards included: a hook refuses the command it guards outright, since `places` can enumerate no such set
   cwdAnywhere?: boolean
@@ -58,6 +59,7 @@ export type Env = {
   cwdUnread?: boolean
   files: Map<string, Text>
   known: Record<string, string>
+  old?: { dir?: string }
   process: Record<string, string | undefined>
   vars: Map<string, Text>
 }
@@ -1083,6 +1085,9 @@ async function examineReading(
     for (const [key, value] of local) setVar(env.vars, key, value)
     if (builtins) verdict = await visit(cmd, parsed, here)
   } else if (name === "cd" || name === "popd" || name === "pushd") {
+    // a glob in the folder is judged as any program's words are, since it may land anywhere it matches
+    if (name !== "popd" && args.some((a) => GLOB_CHARS.test(a.value)))
+      verdict = await visit(cmd, parsed, here)
     await chdirTo(name, cmd, parsed, env)
   } else if (EXPORTS.has(name)) {
     for (const w of args.filter((a) => ASSIGN.test(a.value))) {
@@ -1195,10 +1200,20 @@ function ancestors(path: string): string[] {
 }
 
 // The one folder a cd names, taken as the shell's own wherever the reader reads it: `Env.cwd`'s own rule, which every hook read before the proven folder arrived and a hook outside `places` reads still.
-async function cdTarget(args: Word[], env: Env): Promise<string | undefined> {
+async function cdTarget(name: string, args: Word[], env: Env): Promise<string | undefined> {
   const dir = args.find((a) => !(a.value.startsWith("-") && a.value.length > 1))
   if (!dir) return homedir()
-  const path = dir.value === "-" ? undefined : pathOf(dir, env)
+  const typed = dir.value === "-" ? undefined : await folder(pathOf(dir, env))
+  // in a hook that follows ~-, a pushd's unquoted ~- is the folder the shell last left and ~+ the current one, as the shell expands them; beside a folder named ~- or ~+ the typed reading stays, though the shell still expands the word
+  const tilde =
+    !typed && name === "pushd" && env.old && !dir.quoted && !dir.unknown && !dir.reads?.length
+      ? /^~([-+])(?=\/|$)/.exec(dir.value)
+      : null
+  const base = tilde && (tilde[1] === "-" ? env.old?.dir : env.cwd)
+  return base ? await folder(base + dir.value.slice(2)) : typed
+}
+
+async function folder(path: string | undefined): Promise<string | undefined> {
   if (!path) return undefined
   return (await isFolder(path)) ? path : undefined
 }
@@ -1236,18 +1251,50 @@ function cdTargets(name: string, cmd: Command, parsed: Parsed, env: Env, from: s
   return { back: dirs.length > 1, paths: [...paths], unread }
 }
 
+// In a hook that follows zsh's ~- (`Env.old` set), a pushd's unquoted ~- returns to a folder the shell was in and ~+ stays in the one it is in; the reader takes every folder `cd -` would go back to, or each one the shell may be in, beside the typed reading and the folder `Env.cwd`'s own reading lands in, so it is never looser than that reading.
+function pushdTilde(
+  move: Move,
+  name: string,
+  parsed: Parsed,
+  env: Env,
+  from: string[],
+  back: string[],
+): Move {
+  const dir = parsed.args.find((a) => !(a.value.startsWith("-") && a.value.length > 1))
+  const tilde =
+    name === "pushd" && env.old && dir && !dir.quoted && !dir.unknown && !dir.reads?.length
+      ? /^~([-+])(?=\/|$)/.exec(dir.value)
+      : null
+  if (!tilde || !dir) return move
+  const bases = tilde[1] === "-" ? back : from
+  const paths = [
+    ...move.paths,
+    ...bases.map((base) => base + dir.value.slice(2)),
+    ...(env.cwd === undefined ? [] : [env.cwd]),
+  ]
+  return {
+    back: move.back || tilde[1] === "-",
+    paths: [...new Set(paths)],
+    unread: move.unread || bases.length === 0,
+  }
+}
+
 // Where a cd, pushd or popd leaves the folder. A cd the shell is sure to run once, into one folder the reader reads, moves it there and clears each folder it may have been in, since the shell is certainly in that one; any other leaves `cwd` unnamed with every folder it may have reached a candidate, so each hook judges the commands after it in all of them. A cd inside a body the shell keeps for a later call moves nothing now, and its folder stays a candidate through every later cd, since the line may call that body at any point.
 async function chdirTo(name: string, cmd: Command, parsed: Parsed, env: Env): Promise<void> {
   // `cwd` moves by the reading every hook had before the proven folder arrived, so a hook that reads it alone keeps its verdicts; it is read first, since it resolves a relative target against the folder this cd leaves
-  env.cwd = name === "popd" || cmd.detached ? undefined : await cdTarget(parsed.args, env)
+  const left = env.cwd
+  env.cwd = name === "popd" || cmd.detached ? undefined : await cdTarget(name, parsed.args, env)
+  if (env.old) env.old = name === "popd" ? {} : { dir: env.cwd === undefined ? undefined : left }
   const from = startFolders(env)
   const back = [...new Set([...(env.cwdBack ?? []), ...from])]
   const move: Move =
     name === "popd"
       ? { back: true, paths: [], unread: true }
-      : cdTargets(name, cmd, parsed, env, from)
+      : pushdTilde(cdTargets(name, cmd, parsed, env, from), name, parsed, env, from, back)
   const { paths, unread } = move
-  env.cwdBack = keep([...new Set([...back, ...paths])], env)
+  // the folder `Env.cwd`'s own reading left and the one it lands in join them, so the one folder `Env.old` names is always one a `cd -` or a `pushd ~-` of the reader's may go back to
+  const named = [left, env.cwd].filter((dir): dir is string => dir !== undefined)
+  env.cwdBack = keep([...new Set([...back, ...paths, ...named])], env)
   if (cmd.held) {
     env.cwdHeld = keep([...new Set([...(env.cwdHeld ?? []), ...paths])], env)
     env.cwdUnread ||= unread

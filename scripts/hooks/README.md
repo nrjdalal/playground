@@ -80,6 +80,7 @@ Only the first reading moves the folder, sets variables and records files for th
   A relative target a count or a loop may run again adds every folder above it.
   A function's or a brace group's own `cd` adds its folder to `Env.cwdHeld`, which no later `cd` clears, since the line may call that body at any point.
   `popd`, `cd -` and a bare `pushd` take every folder the line has named (`Env.cwdBack`).
+  In a hook that follows zsh's `~-` (`Env.old` set), a `pushd ~-` takes those folders too, the start folder among them, and a `pushd ~+` each folder the shell may be in, each beside the folder literally named `~-` or `~+` and the one `Env.cwd`'s own reading lands in.
   `Env.cwdUnread` marks a `cd` whose landing folder nothing names (`cd "$X"`, zsh's two-operand `cd`, a `popd` whose stack the reader cannot see).
   At most 32 folders are carried for one line, since each hook judges every command in all of them; past that `Env.cwdAnywhere` is set for the rest of the line, and each of the three hooks below refuses the command it guards outright, since a folder the reader dropped stays one the shell may be in.
   A command that names its own folder keeps running on such a line, as everywhere else.
@@ -272,8 +273,11 @@ Only the first reading moves the folder, sets variables and records files for th
   It refuses a closed list of write forms, so a same-user session can still get past it by a form outside that list, such as a script file it writes and then runs.
   An `ext score` after an `unset` or an `export -n` of one of those variables earlier on the line gets past, since the hook tracks a variable set, not one unset or un-exported.
   A path through a link into the root with `..` after the link (`echo x > <link>/../f`) is judged as typed, so a write by one passes.
-  A `cd` or `pushd` whose landing folder nothing on the line names (`cd "$X"`, `cd -`, `cd ~-`, `popd`'s stack, a glob in the folder, a `CDPATH` lookup) leaves the command's folder unread, so a relative write after one is judged against the folders the line does name, the one before that `cd` included, and passes when none of them is this root.
+  A `cd` or `pushd` whose landing folder nothing on the line names (`cd "$X"`, `cd -`, `cd ~-`, `popd`'s stack, a `CDPATH` lookup) leaves the command's folder unread, so a relative write after one is judged against the folders the line does name, the one before that `cd` included, and passes when none of them is this root.
   A `cd` whose target the reader names is judged in every folder it may reach, this root included ([The folder a hook reads](#the-folder-a-hook-reads)).
+  A `pushd ~-` is judged in every folder a `cd -` would go back to, the start folder among them, and a `pushd ~+` in each folder the shell may be in, so a write after either is refused wherever zsh may land.
+  An assignment to `OLDPWD` leaves `~-` where it was, since zsh's `~-` reads the folder it last left rather than the variable.
+  A glob in a `cd` or `pushd` folder is judged as any word holding one, so `cd ~/.playground/e*` is refused as `ls ~/.playground/e*` is.
   From a cwd at or above the root (`~`, `~/.playground`), a quoted `(`, `[`, `*`, `?` or `{` reads as a glob there, so a call holding one is refused; run it from a worktree.
   A closed-list reader on a line read call by call is the exception: its quoted glob is text, so `awk '{print $1}' f` runs, since the lexer marks each word whose glob the shell sees outside quotes (`Word.glob` in `scripts/hooks/shell.ts`).
   A quiet commit's message is the other exception (above).
@@ -420,7 +424,7 @@ Only the first reading moves the folder, sets variables and records files for th
 ## no-main-checkout
 
 - A factory session keeps the main checkout clean: `scripts/hooks/no-main-checkout.ts`, registered beside no-stash on Bash and the file tools (Edit, MultiEdit, NotebookEdit and Write), refuses lefthook, turbo (but for its packages build, below), `git commit` (it runs pre-commit), `bun run build`, `bun run check-types`,
-  `bun run test`, `bun run test:file` and `bun test` while the command's directory ([The folder a hook reads](#the-folder-a-hook-reads), and a `git -C` or `bun --cwd` in it, but for `bun x` and `bunx`, which run in the shell's folder whatever bun's own `--cwd` says) is the main checkout and not a worktree under `.claude/worktrees/`,
+  `bun run test`, `bun run test:file` and `bun test` while the command's directory ([The folder a hook reads](#the-folder-a-hook-reads), a `pushd`'s `~-` and `~+` among it, and a `git -C` or `bun --cwd` in it, but for `bun x` and `bunx`, which run in the shell's folder whatever bun's own `--cwd` says) is the main checkout and not a worktree under `.claude/worktrees/`,
   and a write into the main checkout from anywhere (a redirect, `cp`, `mv`, `touch`, `tee`, curl's `-c` or `-o`, the files `sed -i`, BSD's `sed -I`, `sed --in-place` or `perl -i` edits in place, or a file tool's path), naming the fix: run it in your own worktree.
   A command run through `run-slot.sh`, typed bare or as a shell's script (`bash <path>/run-slot.sh <who> -- <command>`, `shellSlot`), is read as the words after its `--` (`slotWords` in `scripts/hooks/shell.ts`, which no-glm-heavy-path and no-false-green read it by too), so a commit, a build or a write through run-slot is refused as the same command typed bare.
   It refuses a git move there too: `add` (but `-n` or `--dry-run`), `am`, `apply` (but `--check`, `--numstat`, `--stat` or `--summary` without `--apply`), `bisect`, `branch -f`, `checkout`, `cherry-pick`, `clean` (but `-n`), `merge`, `mv`, `pull`, `rebase`, `reset` (but the one below), `restore`, `revert`, `rm`, `stash` (but `list` and `show`), `switch` and `update-ref`,
