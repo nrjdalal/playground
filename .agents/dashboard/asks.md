@@ -382,7 +382,7 @@
     The outbox matches the message to its transcript line past the marker (`findDelivery` in `web/next/src/lib/outbox.ts`).
     The marker routes the message's line alone, so `threadMessages` names its image by the session's untagged source line of the same prompt (`sourceLines`).
     Until it is routed, a message sent from the view shows at its end as on its way (`pendingIn`), for up to 90 seconds; one that failed points to the full chat for Retry or Edit.
-- The main chat starts a thread: the primary dispatcher's composer there has a New thread toggle, and a message sent with it on goes with `newThread: true` in place of `threadId`.
+- The main chat's New thread toggle, which sent a message with `newThread: true` in place of `threadId` to start a thread, is off for now: the composer renders none, while `sendMessage` still takes `newThread`.
   The API opens a thread titled from the message's first line (`quoteOf`: up to a pasted path, at most 80 characters, `Attached:` for files alone; renamed later through the PATCH), sends the message with its marker, and names the thread under `threadId` in its answer.
   A new thread whose message was refused before typing is removed (`dropThread`), while one cut off as it typed stays, since the message may have gone, and the refusal names it under `threadId`, so the outbox's Retry sends to it; one left pasted and unsent in a herdr session's box stays too, and the outbox's own wait sends its retry there (messages.md).
   A retry that `deliver()` answers from its first try's row (`replayed`) drops the thread it opened and names none, since the first try's marker already routed the message.
