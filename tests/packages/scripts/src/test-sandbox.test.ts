@@ -221,3 +221,22 @@ test("a failed run in a folder with an unbuilt package ends naming it and the bu
     rmSync(folder, { force: true, recursive: true })
   }
 }, 30_000)
+
+// A git hook exports GIT_DIR and GIT_INDEX_FILE, and a test's scratch git init once took them and set the real repository's core.bare (3 Nov), so the sandbox hands its tests none
+test("a test's scratch git init, run under a hook's GIT_DIR and GIT_INDEX_FILE, leaves them untouched", () => {
+  const decoy = join(DIR, "decoy-git")
+  const repo = join(DIR, "scratch-repo")
+  writeFileSync(
+    join(DIR, "git-init.test.ts"),
+    `import { expect, test } from "bun:test"\ntest("git init", () => { expect(Bun.spawnSync(["git", "init", "-q", ${JSON.stringify(repo)}]).exitCode).toBe(0) })\n`,
+  )
+  const run = Bun.spawnSync(["bun", SCRIPT, "./git-init.test.ts"], {
+    cwd: DIR,
+    env: { ...process.env, GIT_DIR: decoy, GIT_INDEX_FILE: join(decoy, "index") },
+    stderr: "pipe",
+    stdout: "ignore",
+  })
+  expect(existsSync(decoy)).toBe(false)
+  expect(existsSync(join(repo, ".git"))).toBe(true)
+  expect(run.exitCode).toBe(0)
+}, 30_000)
