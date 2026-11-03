@@ -27,8 +27,9 @@ at that head and the head is up to date with canary:
   body          the PR body is the PR template the Changelog reads
   review        ## ReviewBot · round <n>: 5/5 at <sha7>, at the head
   types         last, inside the merge lock: the tree the squash makes type-checks by CI's own
-                type steps in a scratch worktree, each through run-slot; skipped when the head
-                already holds canary's tip, and a type error refuses with the first errors
+                type steps in the kept merge-types worktree, each through run-slot; skipped
+                when the head already holds canary's tip, and a type error refuses with the
+                first errors
 
 A gate reads only comments the repo's owner wrote; the newest review at the head wins, so a
 lower score after a 5/5 refuses.
