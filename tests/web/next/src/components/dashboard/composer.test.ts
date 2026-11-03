@@ -116,10 +116,9 @@ describe("the composer's sources", () => {
   // the owner: the model and effort picker stood taller than the row's 28px buttons, second from the left; it sits directly left of Send at their height
   test("the model and effort picker is 28px tall, directly left of Send, in the right-hand group", async () => {
     const composer = await read("dashboard/composer.tsx")
-    const right = composer.slice(
-      composer.indexOf('<div className="ml-auto flex items-center gap-2">'),
-    )
-    expect(right.length).toBeLessThan(composer.length)
+    const group = composer.indexOf('<div className="ml-auto flex items-center gap-2">')
+    expect(group).toBeGreaterThan(-1)
+    const right = composer.slice(group)
     const picker = right.indexOf("<SettingPicker ")
     const send = right.indexOf("aria-label={`Send to ${label}`}")
     expect(picker).toBeGreaterThan(-1)

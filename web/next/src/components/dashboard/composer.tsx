@@ -97,7 +97,7 @@ export function Composer({ threadId, worker }: { threadId?: string; worker: Work
   const { allowed, approvals, dispatcher, outbox } = useDashboard()
   // The session is shown by its label as its chat names it (chatLabel: Message Alpha); the message still goes to its raw name.
   const label = chatLabel(worker, dispatcher)
-  // the main chat of the primary dispatcher, the one session a thread's messages go to, can open a thread with its next message
+  // the main chat of the primary dispatcher, the one session a thread's messages go to, could open a thread with its next message; New thread is off for now, so nothing sets newThread
   const opensThreads = !threadId && worker.name === dispatcher
   const [newThread, setNewThread] = useState(false)
   const startsThread = newThread && opensThreads
