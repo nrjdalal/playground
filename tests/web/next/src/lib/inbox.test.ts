@@ -12,6 +12,7 @@ import {
 import {
   ACKS_STAMPED_FROM,
   canDraft,
+  checkAnswerNote,
   cardKey,
   changedAt,
   dismissable,
@@ -44,6 +45,7 @@ import {
   schedulable,
   scheduleChoices,
   sendFailed,
+  sendUnconfirmed,
   sendWhy,
   updatedSince,
   upfrontLink,
@@ -695,7 +697,9 @@ describe("an answer that failed to send", () => {
       }
       expect(sendFailed(cut), code).toBe(true)
       expect(retryable(cut), code).toBe(false)
-      expect(outcomeLine(cut), code).toBe("You sent it · Send unconfirmed: cut off")
+      expect(outcomeLine(cut), code).toMatch(
+        /^You sent it · Send unconfirmed: whether \S+ has it is not known$/,
+      )
     }
     expect(retryable(failed(78, ago(1_000)))).toBe(false)
   })
@@ -1393,5 +1397,38 @@ describe("a card a chat reply collapsed opens again", () => {
       expect(reopenKey({ ...e, [modifier]: true })).toBe(false)
     expect(reopenKey({ ...e, key: "E", shiftKey: true })).toBe(false)
     expect(reopenKey({ ...e, key: "Enter" })).toBe(false)
+  })
+})
+
+// An answer's line reads what the session has: queued while Claude Code holds it, delivered once it went, lost when neither its screen nor its transcript shows it, which offers Retry
+describe("an answer queued, delivered or lost", () => {
+  const base = items[4]!
+  test("each state reads in the answer line", () => {
+    const queued = {
+      ...base,
+      delivery: { at: "x", id: "d1", status: "queued", to: "ops" },
+    } as InboxItem
+    expect(outcomeLine(queued)).toBe("You approved it · Queued: Ops holds it, to take once free")
+    expect(itemState(queued)).toBe("sending")
+    const lost = {
+      ...base,
+      delivery: { code: "LOST", reason: "Retry sends it again.", status: "failed" },
+    } as InboxItem
+    expect(outcomeLine(lost)).toBe("You approved it · Lost: Retry sends it again.")
+    expect(retryable(lost)).toBe(true)
+  })
+
+  test("an unconfirmed send names no terminal and offers Check it for me, a note naming the item", () => {
+    const cut = {
+      ...base,
+      delivery: { code: "INTERRUPTED", reason: "whatever deliver said", status: "failed" },
+    } as InboxItem
+    expect(outcomeLine(cut)).toBe(
+      "You approved it · Send unconfirmed: whether Ops has it is not known",
+    )
+    expect(sendUnconfirmed(cut)).toBe(true)
+    expect(retryable(cut)).toBe(false)
+    expect(checkAnswerNote(cut)).toContain(`#i${cut.ref}`)
+    expect(checkAnswerNote(cut)).not.toMatch(/\bre #i\d/i)
   })
 })

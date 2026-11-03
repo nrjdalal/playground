@@ -2,7 +2,9 @@ import { describe, expect, test } from "bun:test"
 
 import { type Entry, parseLines } from "../../../../../api/hono/src/lib/dashboard/transcript"
 import {
+  canCheck,
   canRetry,
+  checkNote,
   comparable,
   deliveredAt,
   failWithFiles,
@@ -15,7 +17,9 @@ import {
   onRefusal,
   othersWaiting,
   outboxReducer,
+  pendingAction,
   pickerMoves,
+  QUEUED_POLL_MS,
   refusalCode,
   retryDelay,
   retryNote,
@@ -416,16 +420,16 @@ describe("refusals", () => {
   })
 
   // deliver() throws when it cannot write its activity row, which can come after the Enter, so a 500 is as unknown as no answer at all.
-  test("the API's own failure fails at once, saying to look before a Retry it offers", () => {
+  test("the API's own failure fails at once, saying it reads Delivered once it lands, beside the Retry it offers", () => {
     const sent = { attempts: 1, code: null, id: "a", unreached: 0 }
     const action = onRefusal(sent, { code: "INTERNAL_SERVER_ERROR", message: "x" }, "dispatcher", 0)
     expect(action).toMatchObject({ code: "INTERNAL_SERVER_ERROR", type: "fail" })
-    expect(action.type === "fail" ? action.reason : "").toContain("look at its terminal")
+    expect(action.type === "fail" ? action.reason : "").toContain("reads Delivered once")
     expect(canRetry("INTERNAL_SERVER_ERROR")).toBe(true)
   })
 
   // A dashboard restart answers nothing for a while; each retry carries the message's id, so the API answers one it already typed as delivered.
-  test("no answer waits out about 2 minutes of tries, then fails saying to look before a Retry it offers", () => {
+  test("no answer waits out about 2 minutes of tries, then fails saying it reads Delivered once it lands, beside the Retry it offers", () => {
     for (const code of ["NETWORK_ERROR", "UNKNOWN_ERROR"]) {
       let waited = 0
       for (let unreached = 0; unreached < UNREACHED_ATTEMPTS - 1; unreached++) {
@@ -443,7 +447,7 @@ describe("refusals", () => {
       }
       const action = onRefusal(sent, { code, message: "x" }, "dispatcher", 0)
       expect(action).toMatchObject({ code, type: "fail" })
-      expect(action.type === "fail" ? action.reason : "").toContain("look at its terminal")
+      expect(action.type === "fail" ? action.reason : "").toContain("reads Delivered once")
       expect(canRetry(code)).toBe(true)
     }
   })
@@ -866,13 +870,77 @@ describe("statusLine", () => {
   })
 })
 
-// A loader, then one tick, then two, in one fixed slot so nothing shifts.
-test("statusMark draws each state as one mark: a spinner on its way, a tick once typed, two once delivered", () => {
-  expect(statusMark("queued")).toBe("sending")
-  expect(statusMark("sending")).toBe("sending")
-  expect(statusMark("typed")).toBe("sent")
-  expect(statusMark("delivered")).toBe("delivered")
-  expect(statusMark("failed")).toBe("failed")
+// A loader, a quiet clock while Claude Code holds it, then one tick, then two, in one fixed slot so nothing shifts.
+test("statusMark draws each message as one mark: a spinner on its way, a clock while held, a tick once typed, two once delivered", () => {
+  expect(statusMark(message("a", { state: "queued" }))).toBe("sending")
+  expect(statusMark(message("a", { code: "QUEUED", state: "queued" }))).toBe("queued")
+  expect(statusMark(message("a", { state: "sending" }))).toBe("sending")
+  expect(statusMark(message("a", { state: "typed" }))).toBe("sent")
+  expect(statusMark(message("a", { state: "typed" }), true)).toBe("queued")
+  expect(statusMark(message("a", { state: "delivered" }))).toBe("delivered")
+  expect(statusMark(message("a", { state: "failed" }))).toBe("failed")
+})
+
+// Claude Code holds a message typed while it compacts, or sent while it works, and takes it once free, so the bubble reads queued with a quiet mark and nothing to undo or retry, then delivered
+describe("a message Claude Code holds", () => {
+  const QUEUED = {
+    code: "QUEUED",
+    message: "dispatcher holds the message and takes it once it is free",
+  }
+  const T1 = "2026-10-06T00:01:00.000Z"
+
+  test("the outbox turns queued, then delivered, offering no ✕ or Retry while queued", () => {
+    let list = outboxReducer([message("a")], { id: "a", type: "sending" })
+    const wait = onRefusal(list[0]!, QUEUED, "dispatcher", 0)
+    expect(wait).toMatchObject({ code: "QUEUED", type: "wait" })
+    expect(wait.type === "wait" ? wait.retryAt : Infinity).toBeLessThanOrEqual(QUEUED_POLL_MS)
+    list = outboxReducer(list, wait)
+    const held = list[0]!
+    expect(held).toMatchObject({ code: "QUEUED", state: "queued" })
+    expect(statusMark(held)).toBe("queued")
+    for (const busy of [false, true]) {
+      expect(pendingAction(held, { busy, held: true })).toBeNull()
+    }
+    expect(canRetry(held.code) && held.state === "failed").toBe(false)
+    expect(retryNote(held)).toBeNull()
+    expect(statusLine(held, { busy: true, label: "dispatcher", next: true })).toContain(
+      "holds it, to take once free",
+    )
+    // a compaction can run for minutes, so its tries are uncounted
+    const later = onRefusal({ ...held, attempts: MAX_ATTEMPTS + 5 }, QUEUED, "dispatcher", 0)
+    expect(later).toMatchObject({ type: "wait" })
+    // the API reads it arrived: typed, then the transcript's line turns it delivered
+    list = outboxReducer(list, { id: "a", type: "sending" })
+    list = outboxReducer(list, { at: T1, id: "a", sessionId: SESSION.id, type: "typed" })
+    const [found] = matchDeliveries(list, [human("e1", T1, "a")], SESSION)
+    list = outboxReducer(list, { ...found!, type: "delivered" })
+    expect(list[0]).toMatchObject({ entryId: "e1", state: "delivered" })
+    expect(statusMark(list[0]!)).toBe("delivered")
+  })
+
+  test("a message waiting here offers Unsend, and one typed into an idle session Dismiss once held", () => {
+    expect(pendingAction(message("a"), { busy: false, held: false })).toBe("unsend")
+    const typed = message("a", { state: "typed" })
+    expect(pendingAction(typed, { busy: false, held: true })).toBe("dismiss")
+    expect(pendingAction(typed, { busy: false, held: false })).toBeNull()
+    expect(pendingAction(typed, { busy: true, held: true })).toBeNull()
+  })
+
+  test("a lost message fails, offering Retry", () => {
+    const sent = { attempts: 3, code: "QUEUED", id: "a", unreached: 0 }
+    const lost = { code: "LOST", message: "Retry sends it again." }
+    expect(onRefusal(sent, lost, "dispatcher", 0)).toMatchObject({ code: "LOST", type: "fail" })
+    expect(canRetry("LOST")).toBe(true)
+  })
+
+  test("a message cut off while typing offers Check it for me, a note naming the session and its words", () => {
+    expect(canCheck("INTERRUPTED")).toBe(true)
+    expect(canCheck("LOST")).toBe(false)
+    const note = checkNote("Bravo", "Ship it")
+    expect(note).toContain("Bravo")
+    expect(note).toContain('"Ship it"')
+    expect(note).not.toMatch(/\bre #i\d/)
+  })
 })
 
 // A message ending in one backslash never submits: Claude Code reads a trailing \ before Enter as a line continuation, so the text sat in the session's input and its bubble waited as Queued. The composer drops it before the send. The end is judged trimmed, since the API's own normalize trims the ends before typing (a review's round 1).

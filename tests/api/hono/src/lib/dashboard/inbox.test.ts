@@ -2009,6 +2009,65 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
     })
   })
 
+  // An answer Claude Code holds (typed while its poster compacts) reads queued, and is read again under the same id until it reads delivered, or lost, which offers Retry
+  test("an answer Claude Code holds reads queued, then delivered once a later read finds it arrived", async () => {
+    const posted = await post(decision(SLACK))
+    const sent: Delivery[] = []
+    const answers = [
+      { code: "QUEUED", ok: false as const, reason: "ops holds the message" },
+      { code: "QUEUED", ok: false as const, reason: "ops holds the message" },
+      { at: "2026-10-12T07:00:00.000Z", ok: true as const, sessionId: "s1" },
+    ]
+    const deliver = async (delivery: Delivery) => {
+      sent.push(delivery)
+      return answers.shift() ?? answers.at(-1)!
+    }
+    const answered = await store.answerItem(
+      db,
+      posted.id,
+      { action: "approve" },
+      { actor, deliver, wait: async () => {} },
+    )
+    expect(answered.ok && answered.item.delivery).toMatchObject({ status: "queued", to: "ops" })
+    for (
+      let i = 0;
+      i < 50 && (await store.getItem(db, posted.id))?.delivery?.status === "queued";
+      i++
+    )
+      await Bun.sleep(20)
+    expect((await store.getItem(db, posted.id))?.delivery).toMatchObject({
+      status: "delivered",
+      via: "session",
+    })
+    expect(new Set(sent.map((d) => d.id)).size).toBe(1)
+    expect(sent[0]?.id).toBeString()
+  })
+
+  test("an answer lost from the screen and the transcript fails as LOST, which Retry follows", async () => {
+    const posted = await post(decision(SLACK))
+    const answers = [
+      { code: "QUEUED", ok: false as const, reason: "ops holds the message" },
+      { code: "LOST", ok: false as const, reason: "Retry sends it again." },
+    ]
+    let settle = () => {}
+    const settled = new Promise<void>((resolve) => (settle = resolve))
+    const deliver = async () => {
+      const answer = answers.shift()!
+      if (!answers.length) setTimeout(settle, 50)
+      return answer
+    }
+    await store.answerItem(
+      db,
+      posted.id,
+      { action: "approve" },
+      { actor, deliver, wait: async () => {} },
+    )
+    await settled
+    const item = await store.getItem(db, posted.id)
+    expect(item?.delivery).toMatchObject({ code: "LOST", status: "failed" })
+    expect(item && store.retryable(item)).toBe(true)
+  })
+
   test("the stale read lists an answer its poster has not acked after the minutes given, not before, and not once acked", async () => {
     const posted = await post(decision(PREVIEWS.budget))
     const at = new Date()
