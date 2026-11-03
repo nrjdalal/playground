@@ -9,7 +9,7 @@ const { mountOldPaths, OLD_PATHS, OLD_PATHS_DOC } =
 const { env } = await import("../../../../../packages/env/dist/api-hono.mjs")
 const { Hono } = await import("../../../../../api/hono/node_modules/hono")
 
-// The API's own mounts of these routers, as index.ts makes them, then the old paths beside them.
+// The API's own mounts of these routers, as local.ts makes them, then the old paths beside them.
 const api = new Hono()
   .basePath("/api")
   .route("/v1", dashboardRouter)
