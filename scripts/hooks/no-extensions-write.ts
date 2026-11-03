@@ -124,7 +124,7 @@ function reads(parsed: Parsed, env: Env): boolean {
   )
 }
 
-type Namings = { counts: Map<string, number>; plain: Set<string> }
+type Namings = { blind: boolean; counts: Map<string, number>; plain: Set<string> }
 
 // The operators after ${K that only read K; any other (`=`, `:=`, zsh's `::=`, a subscript, a modifier) may set it, so it counts as a naming
 const READS_ONLY = /^(?:\}|:?[-+?]|[#%/])/
@@ -134,10 +134,13 @@ function namings(command: string): Namings {
   const counts = new Map<string, number>()
   const plain = new Set<string>()
   const add = (key: string) => counts.set(key, (counts.get(key) ?? 0) + 1)
+  // a name indirection that assigns sets a variable whose name the hook cannot read: zsh's P flag (`${(P)N::=…}`), and bash's `${!N:=…}` but its reads of the name list or an array's keys (`${!N*}`, `${!N[@]}`)
+  let blind = /\$\{\([^)]*P/.test(command)
   for (const m of command.matchAll(/(\$\{[#!]?)?(?<![\w$])([A-Za-z_]\w*)/g)) {
     const [whole, expanded, key] = m
     const next = command.slice(m.index + whole.length)
     if (expanded && READS_ONLY.test(next)) continue
+    if (expanded === "${!" && !/^[*@[]/.test(next)) blind = true
     const assigns = next[0] === "=" ? "=" : undefined
     const at = m.index + (expanded?.length ?? 0)
     if (!expanded && command[at - 1] === "-" && (at < 2 || /\s/.test(command[at - 2]))) {
@@ -160,7 +163,7 @@ function namings(command: string): Namings {
     const end = m.index + m[0].length - 1
     if (from[end] - from[m.index] !== end - m.index) add(m[0])
   }
-  return { counts, plain }
+  return { blind, counts, plain }
 }
 
 // The parameters the shell sets itself, whose value a later word reads is the shell's and not an assignment's: bash 5.3's bash(1), PARAMETERS, Shell Variables ("The shell sets following variables"); zsh 5.9's zshparam(1), PARAMETERS SET BY THE SHELL; and the names a builtin or a match writes with no name among its words (read's and select's REPLY and reply, `=~`'s and the glob flags' MATCH, MBEGIN, MEND, match, mbegin and mend, and bash's COLUMNS and LINES under checkwinsize)
@@ -226,44 +229,109 @@ const SHELL_SETS = new Set([
 ])
 // the families of those the manuals list by prefix (BASH_ARGV, COMP_WORDS, READLINE_LINE, ZSH_SUBSHELL, zsh_eval_context)
 const SHELL_SETS_PREFIX = /^(?:BASH_|COMP_|READLINE_|ZSH_|zsh_)/
+// zsh's tied parameters, where a write to either side rewrites the other: each array and its colon-joined scalar, and the aliases, from zsh 5.9's zshparam(1), PARAMETERS USED BY THE SHELL
+const TIED = new Set([
+  "CDPATH",
+  "FIGNORE",
+  "FPATH",
+  "HISTCHARS",
+  "MAILPATH",
+  "MANPATH",
+  "MODULE_PATH",
+  "PATH",
+  "PROMPT",
+  "PROMPT2",
+  "PROMPT3",
+  "PROMPT4",
+  "PS1",
+  "PS2",
+  "PS3",
+  "PS4",
+  "PSVAR",
+  "cdpath",
+  "fignore",
+  "fpath",
+  "histchars",
+  "mailpath",
+  "manpath",
+  "module_path",
+  "path",
+  "prompt",
+  "psvar",
+])
 
-// The allow-list, the one way a variable's value is held: a name the shell does not set itself, which a plain NAME=value the hook reads whole names once on a line that names no IFS (the rest of steadyNames places that assignment)
+// The allow-list, the one way a variable's value is held: a name the shell neither sets itself nor ties to another, which a plain NAME=value the hook reads whole names once on a line that names no IFS (the rest of steadyNames places that assignment)
 function holdable(key: string, named: Namings, counts: Map<string, number>): boolean {
   return (
     counts.get(key) === 1 &&
     named.plain.has(key) &&
     !SHELL_SETS.has(key) &&
-    !SHELL_SETS_PREFIX.test(key)
+    !SHELL_SETS_PREFIX.test(key) &&
+    !TIED.has(key)
   )
 }
 
 type Steady = { has: (key: string) => boolean }
 const NONE: Steady = { has: () => false }
 
-// The builtins that set a variable by a name among their words, and the ones that run text as the line's own shell, which can set any
+// The builtins that set a variable by a name among their words, from bash 5.3's bash(1), SHELL BUILTIN COMMANDS, and zsh 5.9's zshbuiltins(1) and zshmodules(1); and the ones that run text as the line's own shell, which can set any
 const NAME_SETTERS = new Set([
+  "compgen",
   "declare",
   "export",
+  "float",
+  "getln",
   "getopts",
+  "integer",
   "let",
   "local",
   "mapfile",
+  "pcre_match",
+  "print",
   "printf",
+  "private",
   "read",
   "readarray",
   "readonly",
+  "set",
+  "shift",
+  "stat",
+  "strftime",
+  "sysread",
+  "syswrite",
   "typeset",
   "unset",
+  "vared",
+  "wait",
+  "zcurses",
+  "zformat",
+  "zgdbmpath",
+  "zgetattr",
+  "zlistattr",
+  "zmodload",
+  "zparseopts",
+  "zpty",
+  "zregexparse",
+  "zselect",
+  "zsocket",
+  "zstat",
+  "zstyle",
+  "zsystem",
+  "ztcp",
+  "ztie",
+  "zuntie",
 ])
+// the setters that name a variable only by their v option, so their other words are text they print
+const PRINTS = new Set(["print", "printf"])
 const RUNS_TEXT = new Set([".", "eval", "source"])
 // the words that open and close a compound body or group, and the other reserved words a command may lead with
 const OPENS = new Set(["case", "for", "if", "select", "until", "while", "{"])
 const CLOSES = new Set(["done", "esac", "fi", "}"])
 const LEADS = new Set(["!", "coproc", "do", "elif", "else", "then", "time"])
 
-// For each command of the line, the variables whose value the shell has when it runs: each named once, by an unquoted plain assignment that is its command's first word, at the line's top level (outside any function, compound body, group or subshell) and not piped or sent to the background; one the shell always runs (first, or after `;` or `&`) holds for every later command, and one after `&&` only along that `&&` chain, since the shell skips the rest of the chain with it. A line that runs eval or source, sets a variable by a name the hook cannot read whole, or names IFS, holds none, and holdable() is the rest of the allow-list
+// For each command of the line, the variables whose value the shell has when it runs: each named once, by an unquoted plain assignment that is its command's first word, at the line's top level (outside any function, compound body, group or subshell) and not piped or sent to the background; one the shell always runs (first, or after `;` or `&`) holds for every later command, and one after `&&` only along that `&&` chain, since the shell skips the rest of the chain with it. A line that runs eval or source, sets a variable by a name the hook cannot read whole (a name-indirection assignment among them), or names IFS, holds none, and holdable() is the rest of the allow-list
 function steadyNames(named: Namings, commands: Command[]): (cmd: Command) => Steady {
-  if (named.counts.has("IFS")) return () => NONE
+  if (named.blind || named.counts.has("IFS")) return () => NONE
   const counts = new Map(named.counts)
   const parses = commands.map((cmd) => parse(cmd))
   for (const [at, cmd] of commands.entries()) {
@@ -274,13 +342,16 @@ function steadyNames(named: Namings, commands: Command[]): (cmd: Command) => Ste
     )
     if (!NAME_SETTERS.has(name) && loop === -1) continue
     // a name the shell reads after quote removal (`read X\Y` sets XY) counts as written, and one the hook cannot read could be any
-    // printf names one only by -v, so its other words are text it prints
-    const v = cmd.words.findIndex((w) => /^-v/.test(w.value))
-    const vName =
-      cmd.words[v]?.value === "-v"
-        ? cmd.words[v + 1]
-        : cmd.words[v] && { ...cmd.words[v], value: cmd.words[v].value.slice(2) }
-    const names = loop !== -1 ? [cmd.words[loop + 1]] : name === "printf" ? [vName] : cmd.words
+    // print and printf name one only by a v in an option cluster (`-v N`, `-vN`, `-rv N`): both the rest of the cluster and the next word count, since either may be the name
+    const v = cmd.words.findIndex((w, k) => k > 0 && /^-[^-\s]*v/.test(w.value))
+    const cluster = cmd.words[v]
+    const vNames = cluster
+      ? [
+          { ...cluster, value: cluster.value.slice(cluster.value.indexOf("v") + 1) },
+          cmd.words[v + 1],
+        ]
+      : []
+    const names = loop !== -1 ? [cmd.words[loop + 1]] : PRINTS.has(name) ? vNames : cmd.words
     for (const word of names) {
       if (!word) continue
       if (marked(word.value.split("=")[0])) return () => NONE
