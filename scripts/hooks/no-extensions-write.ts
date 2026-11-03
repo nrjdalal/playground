@@ -305,6 +305,7 @@ const SHELL_SETS = new Set([
   "modules",
   "nameddirs",
   "options",
+  "parameters",
   "patchars",
   "pipestatus",
   "reply",
@@ -322,6 +323,7 @@ const SHELL_SETS = new Set([
   "zcurses_colors",
   "zcurses_keycodes",
   "zcurses_windows",
+  "zgdbm_tied",
 ])
 // the families of those the manuals list by prefix (BASH_ARGV, COMP_WORDS, READLINE_LINE, ZSH_SUBSHELL, zsh_eval_context)
 const SHELL_SETS_PREFIX = /^(?:BASH_|COMP_|READLINE_|ZFTP_|ZSH_|zsh_)/
