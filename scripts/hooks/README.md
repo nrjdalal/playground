@@ -61,6 +61,42 @@ Only the first reading moves the folder, sets variables and records files for th
   A shell script that judges by a list of words reads it whole through `bun packages/scripts/src/playground/guard-list.ts <guard> <list>`, which takes `guardList`'s fallbacks and prints the words as JSON, or exits 2 with its refusal, as spawn.sh does for `glm-refused-sources`.
   Its tests are `bun run test:file tests/scripts/hooks/guard-lists.test.ts tests/scripts/hooks/read-only.test.ts tests/packages/settings/src/rendered.test.ts tests/packages/scripts/src/playground/guard-list.test.ts`.
 
+## The folder a hook reads
+
+- The shared reader (`scripts/hooks/shell.ts`) follows the folder a command runs in from the Bash tool's cwd through the line's `cd` steps, and holds two readings of it.
+  `Env.cwd` takes a `cd`'s own target wherever the reader reads it: the reading every hook had before the proven folder arrived, kept so a hook that reads that field alone keeps the verdicts it had.
+  `Env.cwdSure` names a folder only where the shell is sure to run that `cd` once, and `places` gives every folder the shell may be in otherwise.
+  The three hooks below read the folder through `places`, and moving another hook onto it is a change of its own: a guard written as "refuse where the path is inside the folder I guard" reads a folder it cannot place as outside that folder, so it fails open until it judges each of `places`'s folders.
+  Sure means, for `Env.cwdSure`: `cd` is the command's own first word, or `builtin` or `command` runs it, since every other wrapper runs no builtin (`env cd`, `xargs cd`); it stands outside a pipeline, a background and an `||`'s right side (`cmd || cd x`); it stands outside every body the shell may run no time or many (`if`, `while`, `until`, `for`, `case`, a function, a brace group, `coproc`);
+  and no count or loop runs it again.
+  A reserved word counts in command position alone, so an argument that spells one (`echo if`, `grep -q done`) opens and closes no body.
+  The folder a sure `cd` names has to be there for the reader to name it, but for a `cd` an `&&` joins to what follows: such a `cd` has certainly run and succeeded for each command that chain joins after it, since a `cd` that does not run, or that fails, stops the chain before them.
+  So the reader names its folder whether or not the folder is there as it reads the line, which is how the worktree line of [AGENTS.md](../../AGENTS.md)'s Workflow rule reaches its new worktree (`git worktree add <path> && cd <path> && git merge origin/canary`, `mkdir -p <path> && cd <path> && git commit -m x`).
+  That reading holds for the commands of that `cd`'s own run and no others: a run ends at each operator that runs the next command whatever the one before it did (a `;`, a newline, an `&`, an `||`), and there the folders from before the `cd` are the shell's again beside the one it named (`Env.cwdChain`, held under that run's own token in `Env.cwdChainToken`),
+  since such a command runs whether or not the `cd` did (`false && cd <path>; git commit -m x`, refused in both folders).
+  A command keeps the named folder by proof alone, its own run matching the `cd`'s, and every other command reads the folders from before it: an `&&` carries the run on, a pipeline's stages run with the command the run reached (`cd <path> && echo x | tee f`), and a group, a body or a substitution carries the run it was entered through,
+  so `cd <path> && (git commit -m x)` keeps the folder while `cd <path>; (git commit -m x)` and `cd <path> || (git commit -m x)` read both.
+  A `!` in front of the `cd` keeps the folders from before it from the start, since it turns the `cd`'s own failure into success and the run carries on with the shell where it was (`! cd <path> && git commit -m x`); an even count of them reads as none.
+  A script a command reads (`sh -c`, `eval`, `source`) reads with no run of the line's, since every command in it runs because that command ran; what the script's own trailing run leaves joins the line's on the way out, under the reading command's run,
+  since a `cd` an `&&` made sure at the end of an `eval` or a `source` may not have run either (`eval 'true && cd <path>'; git commit -m x`, refused in both folders).
+- Every other `cd` leaves `Env.cwdSure` unnamed and keeps each folder the shell may be in: the folder before it, and each folder its target names, read against every folder the shell may already be in (`Env.cwdMaybe`).
+  A relative target a count or a loop may run again adds every folder above it.
+  A function's or a brace group's own `cd` adds its folder to `Env.cwdHeld`, which no later `cd` clears, since the line may call that body at any point.
+  `popd`, `cd -` and a bare `pushd` take every folder the line has named (`Env.cwdBack`).
+  In a hook that follows zsh's `~-` (`Env.old` set), a `pushd ~-` takes those folders too, the start folder among them, and a `pushd ~+` each folder the shell may be in, each beside the folder literally named `~-` or `~+` and the one `Env.cwd`'s own reading lands in.
+  `Env.cwdUnread` marks a `cd` whose landing folder nothing names (`cd "$X"`, zsh's two-operand `cd`, a `popd` whose stack the reader cannot see).
+  At most 32 folders are carried for one line, since each hook judges every command in all of them; past that `Env.cwdAnywhere` is set for the rest of the line, and each of the three hooks below refuses the command it guards outright, since a folder the reader dropped stays one the shell may be in.
+  A command that names its own folder keeps running on such a line, as everywhere else.
+- `places(env, fallback)` gives each folder the shell may be in as an `Env` of its own, each carrying its own folder as both `cwd` and `cwdSure`, so a hook judges a command in every folder it cannot rule out and refuses where any is the folder it guards:
+  [no-main-checkout](#no-main-checkout) the main checkout, [no-unslotted-run](#no-unslotted-run) a worktree, [no-extensions-write](#no-extensions-write) the extensions root.
+  Each hook reads an unread folder by its own fail-closed rule: no-main-checkout passes the folder the line started in as `places`'s fallback, and the hooks that place a repository, a socket or a file by the folder refuse the call they cannot place, as they already refuse one after a `cd` they cannot read.
+  A line on which the reader can name no folder keeps canary's reading, since nothing on it says where the shell goes (a bare `cd -` with no earlier `cd` to return to).
+  A command that names its own folder (`git -C <path>`, `bun --cwd <path>`, turbo's `--cwd`, `env -C <path>`) is judged by that path, whatever the shell's folder.
+  Its tests are in `bun run test:file tests/scripts/hooks`.
+- Repetition is the open class, which canary shares and a follow-up holds: where a line may run one `cd` more times than the reader counts it, the reader keeps the folders of a single run, so a target that climbs reaches a folder it kept none of.
+  The follow-up is filed as the reader treating a `cd` that may run more than once as reaching every folder above its base, which is the wording to search the tracker for.
+  Name the folder in the command itself (`git -C <path>`, `bun --cwd <path>`), which holds whatever the line's `cd` steps do, when a `cd` of the line sits in a body the line calls, in a loop's own test, or in text the shell reads again as a command.
+
 ## after-compact
 
 - A factory session that has just compacted its context is told what to reread: `scripts/hooks/after-compact.ts`, a SessionStart hook with the `compact` matcher in both `scripts/factory-settings.json` and `.claude/settings.json`,
@@ -261,10 +297,10 @@ Only the first reading moves the folder, sets variables and records files for th
   It refuses a closed list of write forms, so a same-user session can still get past it by a form outside that list, such as a script file it writes and then runs, an awk program file run with `-f` included.
   An `ext score` after an `unset` or an `export -n` of one of those variables earlier on the line gets past, since the hook tracks a variable set, not one unset or un-exported.
   A path through a link into the root with `..` after the link (`echo x > <link>/../f`) is judged as typed, so a write by one passes.
-  A `cd` or `pushd` it cannot follow (`cd -`, `cd ~-`, `popd`'s stack, a `CDPATH` lookup) leaves the command's folder unread, so a relative write after one passes.
-  A `pushd ~-` or `pushd ~+` lands where zsh takes it, `~-` reading the folder before the last `cd` or `pushd`, the start folder before any.
+  A `cd` or `pushd` whose landing folder nothing on the line names (`cd "$X"`, `cd -`, `cd ~-`, `popd`'s stack, a `CDPATH` lookup) leaves the command's folder unread, so a relative write after one is judged against the folders the line does name, the one before that `cd` included, and passes when none of them is this root.
+  A `cd` whose target the reader names is judged in every folder it may reach, this root included ([The folder a hook reads](#the-folder-a-hook-reads)).
+  A `pushd ~-` is judged in every folder a `cd -` would go back to, the start folder among them, and a `pushd ~+` in each folder the shell may be in, so a write after either is refused wherever zsh may land.
   An assignment to `OLDPWD` leaves `~-` where it was, since zsh's `~-` reads the folder it last left rather than the variable.
-  Beside a folder named `~-` or `~+` it keeps the typed reading, though zsh still lands in the folder it last left or the current one, so a relative write after one is judged in a folder zsh does not enter.
   A glob in a `cd` or `pushd` folder is judged as any word holding one, so `cd ~/.playground/e*` is refused as `ls ~/.playground/e*` is.
   From a cwd at or above the root (`~`, `~/.playground`), a quoted `(`, `[`, `*`, `?` or `{` reads as a glob there, so a call holding one is refused; run it from a worktree.
   A closed-list reader on a line read call by call is the exception: its quoted glob is text, so `awk '{print $1}' f` runs, since the lexer marks each word whose glob the shell sees outside quotes (`Word.glob` in `scripts/hooks/shell.ts`).
@@ -417,7 +453,7 @@ Only the first reading moves the folder, sets variables and records files for th
 ## no-main-checkout
 
 - A factory session keeps the main checkout clean: `scripts/hooks/no-main-checkout.ts`, registered beside no-stash on Bash and the file tools (Edit, MultiEdit, NotebookEdit and Write), refuses lefthook, turbo (but for its packages build, below), `git commit` (it runs pre-commit), `bun run build`, `bun run check-types`,
-  `bun run test`, `bun run test:file` and `bun test` while the command's directory (the Bash tool's cwd, after any `cd`, `pushd` (its `~-` and `~+` read as zsh reads them), `git -C` or `bun --cwd` in it, but for `bun x` and `bunx`, which run in the shell's folder whatever bun's own `--cwd` says) is the main checkout and not a worktree under `.claude/worktrees/`,
+  `bun run test`, `bun run test:file` and `bun test` while the command's directory ([The folder a hook reads](#the-folder-a-hook-reads), a `pushd`'s `~-` and `~+` among it, and a `git -C` or `bun --cwd` in it, but for `bun x` and `bunx`, which run in the shell's folder whatever bun's own `--cwd` says) is the main checkout and not a worktree under `.claude/worktrees/`,
   and a write into the main checkout from anywhere (a redirect, `cp`, `mv`, `touch`, `tee`, curl's `-c` or `-o`, the files `sed -i`, BSD's `sed -I`, `sed --in-place` or `perl -i` edits in place, or a file tool's path), naming the fix: run it in your own worktree.
   A command run through `run-slot.sh`, typed bare or as a shell's script (`bash <path>/run-slot.sh <who> -- <command>`, `shellSlot`), is read as the words after its `--` (`slotWords` in `scripts/hooks/shell.ts`, which no-glm-heavy-path and no-false-green read it by too), so a commit, a build or a write through run-slot is refused as the same command typed bare.
   It refuses a git move there too: `add` (but `-n` or `--dry-run`), `am`, `apply` (but `--check`, `--numstat`, `--stat` or `--summary` without `--apply`), `bisect`, `branch -f`, `checkout`, `cherry-pick`, `clean` (but `-n`), `merge`, `mv`, `pull`, `rebase`, `reset` (but the one below), `restore`, `revert`, `rm`, `stash` (but `list` and `show`), `switch` and `update-ref`,
@@ -431,6 +467,12 @@ Only the first reading moves the folder, sets variables and records files for th
   Reads, `git fetch`, step 5's `git merge --ff-only origin/main` (with `-q` or `--quiet` before or after `--ff-only`), `scripts/link-skills.sh`, `bun install` and `env NODE_ENV=production SKIP_ENV_VALIDATION=true turbo run build --filter='./packages/*'` alone run, as the release skill's step 5 needs:
   the install a pull that changes `bun.lock` or a `package.json` needs, and the build a pull that changes `packages/` needs, since the `playground` command imports their `dist`.
   That build needs `NODE_ENV` set and `SKIP_ENV_VALIDATION=true`, on its line, exported or in the session, since the main checkout has no `.env` and the packages' env checks fail without them, so a bare one is refused with the line `playground update`'s build step runs.
+  Where the reader names no one folder ([The folder a hook reads](#the-folder-a-hook-reads)), it judges the command in every folder the shell may be in, and in the folder the line started in when a `cd`'s landing folder is unread: a build, a test run, a commit, a git move, a tool and a write by a path that lands in the main checkout in any of those folders is refused,
+  and the refusal names the fix, naming the folder (`git -C <your worktree>`, `bun --cwd <your worktree>`) or a `cd` to a literal path that is there.
+  So a line that starts in a worktree is refused too where a `cd` of its own may reach the main checkout, and one that starts in the main checkout runs where every folder its `cd` steps may reach is a worktree.
+  It reads the shell a pipeline feeds (`<reader> | sh`, `<reader> | sudo -s`) as the shell's own command line: a script it cannot read is refused where that shell may run in the main checkout.
+  A script it reads is judged command by command wherever the shell's stdin comes from, since the shared reader runs a shell's script itself.
+  Two forms keep canary's reading: a privilege wrapper's shell fed by a here-string or a heredoc (`sudo -s <<< '<command>'`), whose script this hook does not read, and a heredoc holding a value it cannot read (`sh <<EOF` around a substitution).
   It fails open on a call it cannot read.
   Its tests are in `bun run test:file tests/scripts/hooks`.
   The backstop behind it is `lefthook.yml`'s pre-commit step `main-checkout`, alone at priority 1 so it runs first, before any step that writes (lefthook runs a tie in any order).
@@ -524,7 +566,7 @@ Only the first reading moves the folder, sets variables and records files for th
 
 - A factory session runs every heavy run in a worktree through run-slot: `scripts/hooks/no-unslotted-run.ts`, registered beside no-stash, refuses `bun install`, a recursive `cp` of a `node_modules` folder, `bun run build`, `bun run check-types`, `bun run test`, a `bun test` or `bun run test:file` that names no file, `next build`,
   and turbo running `build`, `check-types`, `lint` or `test` (`turbo run <task>` or `turbo <task>`), by name, path or versioned package (`turbo@latest`), through `bunx`, `npx` (past their own options, `-y` or `-p turbo`) or `bun x`, but for `--help`, `--version` and `--dry-run`,
-  whose directory (the Bash tool's cwd after any `cd`, or a `bun --cwd`, `bun run --cwd`, `bun install --cwd`, `bun test --cwd` or turbo's `--cwd`, so one typed from anywhere counts, and a clone's destination) is inside a worktree under `.claude/worktrees/`,
+  whose directory (every folder the shell may be in, [The folder a hook reads](#the-folder-a-hook-reads), or a `bun --cwd`, `bun run --cwd`, `bun install --cwd`, `bun test --cwd` or turbo's `--cwd`, so one typed from anywhere counts, and a clone's destination) is inside a worktree under `.claude/worktrees/`,
   unless the command runs through `~/.playground/ops/run-slot.sh`, naming that form (18 Oct: five worktree installs at once drove load1 to 66.8).
   The main checkout is no-main-checkout's. It fails open on a call it cannot read, and its tests are in `bun run test:file tests/scripts/hooks`.
   A commit's pre-commit steps take `run-slot-commit` through `packages/scripts/src/commit-slot.ts`, which hands each to run-slot as `commit-<worktree>` marked `RUN_SLOT_COMMIT_STEP=1`, as `run-slot.sh <who> -- git commit` takes it, and playbook's **slots** rule says which slot each way of committing takes.

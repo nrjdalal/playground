@@ -492,8 +492,9 @@ describe("a direct write into the extensions root is refused, naming the owner's
     expect(await bash(`cd ${SCOPE}; cd /usr; OLDPWD=/usr; pushd ~-; touch f`)).toContain("refuses")
   })
 
-  test("pushd ~- after a popd leaves the folder unread", async () => {
-    expect(await bash(`cd ${SCOPE}; pushd /usr; popd; pushd ~-; touch f`)).toBeUndefined()
+  // zsh lands in /usr here, but the reader cannot see popd's stack, so it takes every folder the line named after a popd, the scope among them, as it does for popd itself
+  test("pushd ~- after a popd may go back to any folder the line named", async () => {
+    expect(await bash(`cd ${SCOPE}; pushd /usr; popd; pushd ~-; touch f`)).toContain("refuses")
     expect(await bash(`cd ${SCOPE}; pushd /usr; pushd ~-; touch f`)).toContain("refuses")
   })
 })
