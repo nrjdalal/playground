@@ -579,6 +579,10 @@ describe("a quoted argument is read as a command line only where a program runs 
       "agent-browser eval holding an anchored regex of a tag",
       `agent-browser eval 'const ok = /^<div>/.test(document.body.innerHTML); ok'`,
     ],
+    [
+      "bun -e holding a string with a tilde and a pipe",
+      `bun -e 'const s = "a ~ b | c"; console.log(s.split("|").length)'`,
+    ],
   ])("%s runs from a worktree and the home", async (_, command) => {
     for (const cwd of [join(homedir(), "x", ".claude", "worktrees", "y"), homedir()])
       expect(await at(command, cwd)).toBeUndefined()
