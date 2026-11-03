@@ -148,7 +148,7 @@ describe("missingOn origin/main", () => {
 
   test("throws when the ref does not read, rather than passing", async () => {
     const root = repo({}, {})
-    expect(missingOn(root, "origin/nope")).rejects.toThrow("origin/nope does not read")
+    await expect(missingOn(root, "origin/nope")).rejects.toThrow("origin/nope does not read")
   })
 
   test("every hook this checkout registers runs a script its own tree holds", async () => {
@@ -163,13 +163,14 @@ describe("the command", () => {
     git(root, "update-ref", "-d", "refs/remotes/origin/main")
     const result = Bun.spawnSync(["bun", CLI], { cwd: root })
     expect(result.exitCode).toBe(1)
-    expect(result.stderr.toString()).toContain("origin/main does not read")
+    expect(result.stdout.toString()).toContain("FAIL origin/main does not read")
   })
 
   test("exits 1, naming the script, when a registration's script main lacks", () => {
     const root = repo({}, { ".claude/settings.json": settings(single("no-raw-delete")) })
     const result = Bun.spawnSync(["bun", CLI], { cwd: root })
     expect(result.exitCode).toBe(1)
-    expect(result.stderr.toString()).toContain("scripts/hooks/no-raw-delete.ts")
+    expect(result.stdout.toString()).toContain("FAIL .claude/settings.json:")
+    expect(result.stdout.toString()).toContain("scripts/hooks/no-raw-delete.ts")
   })
 })
