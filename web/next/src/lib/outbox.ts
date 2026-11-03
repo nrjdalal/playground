@@ -12,7 +12,7 @@ export type OutboxAttachment = {
   size: number
 }
 
-// queued: waiting its turn, or for a retry after a refusal that can pass (reason says why). sending: its request is out. typed: the session has it, in its input or, while it is busy, in its own queue. delivered: its transcript holds it (entryId). failed: refused for good, given up on, or cut off with its fate unknown (reason says which).
+// queued: waiting its turn, for a retry after a refusal that can pass (reason says why), or held by Claude Code until the session is free (code QUEUED), which its retries read again until the API reads it delivered or lost. sending: its request is out. typed: the session has it, in its input or, while it is busy, in its own queue. delivered: its transcript holds it (entryId). failed: refused for good, given up on, or cut off with its fate unknown (reason says which).
 export type OutboxState = "delivered" | "failed" | "queued" | "sending" | "typed"
 
 export type OutboxMessage = {
@@ -49,14 +49,19 @@ export const MAX_ATTEMPTS = 20
 export const sentSince = (seen: ReadonlySet<string>, messages: { id: string }[]): boolean =>
   messages.some((m) => !seen.has(m.id))
 
-// Refusals the API gives before typing anything, or with the message left pasted and unsent for a retry's Enter (INPUT_NOT_EMPTY, deliver.ts), which a later try can pass: the session is on a picker, its input holds a draft, its terminal stumbled reading it, the session is between lives, or the rate limit is full. These are retried on their own.
+// Refusals the API gives before typing anything, or with the message left pasted and unsent for a retry's Enter (INPUT_NOT_EMPTY, deliver.ts), which a later try can pass: the session is on a picker, its input holds a draft, its terminal stumbled reading it, the session is between lives, or the rate limit is full. QUEUED is Claude Code holding it, which each try reads again and types nothing, until the API reads it delivered or lost. These are retried on their own.
 const AUTO_RETRY = new Set([
   "CMUX_FAILED",
   "INPUT_NOT_EMPTY",
   "NOT_FOUND",
   "ON_PICKER",
+  "QUEUED",
   "TOO_MANY_REQUESTS",
 ])
+
+// Claude Code holds a queued message until it is free, a compaction (up to 7 minutes measured) or a turn, so its tries are uncounted, and come at most 5s apart, so it reads delivered soon after it arrives.
+const QUEUED = "QUEUED"
+export const QUEUED_POLL_MS = 5000
 
 // No answer, one that is not the API's, or the API's own failure (deliver() throws when it cannot write its activity row, which can come after the Enter): the message may or may not have been typed, so once it fails only a person retries it, after a look at the session. The API's own failure fails at once; no answer is retried on its own first (UNREACHED).
 const UNANSWERED = new Set(["INTERNAL_SERVER_ERROR", "NETWORK_ERROR", "UNKNOWN_ERROR"])
@@ -65,9 +70,16 @@ const UNANSWERED = new Set(["INTERNAL_SERVER_ERROR", "NETWORK_ERROR", "UNKNOWN_E
 const UNREACHED = new Set(["NETWORK_ERROR", "UNKNOWN_ERROR"])
 export const UNREACHED_ATTEMPTS = 8
 
-// Whether a failed message offers Retry: one that ran out of tries on a refusal that can pass, or one whose fate is unknown. A message cut off while typing (INTERRUPTED) or refused for what it says offers Edit alone.
+// Whether a failed message offers Retry: one that ran out of tries on a refusal that can pass, one whose fate is unknown, or one Claude Code held and lost (LOST: neither its screen nor its transcript shows it). A message cut off while typing (INTERRUPTED) offers Edit and Check it for me, and one refused for what it says Edit alone.
 export const canRetry = (code: string | null): boolean =>
-  code !== null && (AUTO_RETRY.has(code) || UNANSWERED.has(code))
+  code !== null && (AUTO_RETRY.has(code) || UNANSWERED.has(code) || code === "LOST")
+
+// Whether a failed message offers Check it for me, a note asking the dispatcher whether its session got it: one cut off while typing, which may have gone, so no Retry is offered.
+export const canCheck = (code: string | null): boolean => code === "INTERRUPTED"
+
+// The note Check it for me sends the dispatcher: the session's name, and the message's first words, so it knows which to look for.
+export const checkNote = (to: string, short: string): string =>
+  `Check it for me: did my message "${short}" reach ${to}? Look at ${to}'s transcript and tell me whether it arrived.`
 
 // 2s, 4s, 8s, 16s, then every 30s.
 export const retryDelay = (attempts: number): number =>
@@ -86,6 +98,8 @@ export const waitWhy = (code: string, label: string, limited = false): string | 
       return `${label} is not live`
     case "ON_PICKER":
       return limited ? `${label} is at its usage limit` : `${label} is on a prompt`
+    case "QUEUED":
+      return `${label} holds it, to take once free`
     case "TOO_MANY_REQUESTS":
       return "too many messages this minute"
     case "UNKNOWN_ERROR":
@@ -254,7 +268,10 @@ export function onRefusal(
 ): OutboxAction {
   const { code } = error
   const { id } = message
-  const attempts = message.code === "ON_PICKER" && code !== "ON_PICKER" ? 1 : message.attempts
+  const attempts =
+    (message.code === "ON_PICKER" || message.code === QUEUED) && code !== message.code
+      ? 1
+      : message.attempts
   const reason = waitReason(code, label)
   if (UNREACHED.has(code)) {
     const unreached = message.unreached + 1
@@ -262,12 +279,16 @@ export function onRefusal(
       const retryAt = now + retryDelay(unreached)
       return { attempts, code, id, reason, retryAt, type: "wait", unreached }
     }
-  } else if (AUTO_RETRY.has(code) && (code === "ON_PICKER" || attempts < MAX_ATTEMPTS)) {
-    const retryAt = now + retryDelay(attempts)
+  } else if (
+    AUTO_RETRY.has(code) &&
+    (code === "ON_PICKER" || code === QUEUED || attempts < MAX_ATTEMPTS)
+  ) {
+    const delay = retryDelay(attempts)
+    const retryAt = now + (code === QUEUED ? Math.min(QUEUED_POLL_MS, delay) : delay)
     return { attempts, code, id, reason, retryAt, type: "wait", unreached: 0 }
   }
   if (UNANSWERED.has(code)) {
-    const unknown = `the server did not answer, so ${label} may have it already: look at its terminal before Retry`
+    const unknown = `the server did not answer, so ${label} may have it already: it reads Delivered once its transcript shows it, else Retry sends it`
     return { code, id, reason: unknown, type: "fail" }
   }
   return { code, id, reason: error.message, type: "fail" }
@@ -463,11 +484,26 @@ export function statusLine(
   }
 }
 
-// The mark his footer draws for a state, in one fixed-width slot whatever the state: a spinner while on its way, one tick once typed, two once delivered; statusLine's words are its hover and its screen-reader text.
-export type StatusMarkKind = "delivered" | "failed" | "sending" | "sent"
+// The mark his footer draws for a message, in one fixed-width slot whatever the state: a spinner while on its way, a quiet clock while Claude Code holds it (QUEUED, or typed while its session works), one tick once typed, two once delivered; statusLine's words are its hover and its screen-reader text.
+export type StatusMarkKind = "delivered" | "failed" | "queued" | "sending" | "sent"
 
-export const statusMark = (state: OutboxState): StatusMarkKind =>
-  state === "queued" || state === "sending" ? "sending" : state === "typed" ? "sent" : state
+export const statusMark = (
+  { code, state }: Pick<OutboxMessage, "code" | "state">,
+  busy = false,
+): StatusMarkKind => {
+  if (state === "queued") return code === QUEUED ? "queued" : "sending"
+  if (state === "typed") return busy ? "queued" : "sent"
+  return state
+}
+
+// The one action his pending message's footer offers in its slot: Unsend while it waits here, Dismiss once typed into an idle session and held a moment (typedHeld); none while Claude Code holds it, since it goes on its own.
+export const pendingAction = (
+  message: Pick<OutboxMessage, "code" | "state">,
+  { busy, held }: { busy: boolean; held: boolean },
+): "dismiss" | "unsend" | null => {
+  if (message.state === "queued") return message.code === QUEUED ? null : "unsend"
+  return message.state === "typed" && !busy && held ? "dismiss" : null
+}
 
 // How long a message's Dismiss stays back once it is typed, so a state the send passes through in a moment never flashes its button (LIGHT_HOLD_MS holds a light the same way).
 export const TYPED_HOLD_MS = 1000
@@ -551,6 +587,7 @@ export function undoOf(messages: OutboxMessage[], sent: OutboxMessage): OutboxMe
 // A refused message's try count, then why it waits after a dot, or the count alone when the outbox has no words for its code; none for a message nothing has refused, such as one a reload caught mid-send.
 export function retryNote(message: OutboxMessage, limited = false): string | null {
   if (message.state !== "queued" || message.attempts === 0 || !message.code) return null
+  if (message.code === QUEUED) return null
   const why = queuedWhy(message, limited)
   return why ? `retry ${message.attempts} · ${why}` : `retry ${message.attempts}`
 }

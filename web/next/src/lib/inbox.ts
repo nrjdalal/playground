@@ -105,7 +105,23 @@ export const sendFailed = (item: InboxItem): boolean =>
   item.kind !== "update" && item.delivery?.status === "failed" && !answeredDismissedAt(item)
 
 // The failures Retry is offered after, the API's RETRY_CODES restated since the web imports its types alone (a test holds the two equal): nothing was typed, so a retry cannot type the answer twice.
-export const RETRY_CODES = ["CMUX_FAILED", "INPUT_NOT_EMPTY", "NOT_FOUND", "ON_PICKER"] as const
+export const RETRY_CODES = [
+  "CMUX_FAILED",
+  "INPUT_NOT_EMPTY",
+  "LOST",
+  "NOT_FOUND",
+  "ON_PICKER",
+] as const
+
+// Pure: an answer whose send is unconfirmed (typing began, INTERRUPTED, or the adapter threw, ERROR), which may be in the session already, so its card offers Check it for me rather than Retry.
+export const sendUnconfirmed = (item: InboxItem): boolean =>
+  sendFailed(item) &&
+  item.delivery?.status === "failed" &&
+  (item.delivery.code === "INTERRUPTED" || item.delivery.code === "ERROR")
+
+// The note Check it for me sends the dispatcher for an unconfirmed answer: the item and the session it went to, so the dispatcher looks there and reports.
+export const checkAnswerNote = (item: InboxItem): string =>
+  `Check it for me: did ${agentLabel(item.from)} get my answer to ${itemTag(item)}? Look at its transcript and tell me whether it arrived.`
 
 // Pure: an answer that failed to send that Retry can safely follow; after any other failure it may be in the session already, so it offers Dismiss alone.
 export const retryable = (item: InboxItem): boolean =>
@@ -521,7 +537,9 @@ export const updatedSince = (
 
 // Pure: the session that took an item's answer, which is not its poster once the poster has ended; a row from before the taker was recorded reads as its poster.
 export const takenBy = (item: InboxItem): string =>
-  item.delivery?.status === "delivered" && item.delivery.to ? item.delivery.to : item.from
+  (item.delivery?.status === "delivered" || item.delivery?.status === "queued") && item.delivery.to
+    ? item.delivery.to
+    : item.from
 
 // Pure: what became of an answer, in the words the list shows once an item is answered.
 export function outcomeLine(item: InboxItem): string | null {
@@ -561,22 +579,26 @@ export function outcomeLine(item: InboxItem): string | null {
     send: item.answer.editedText ? "You sent it with changes" : "You sent it",
   }[item.answer.choice]
   const delivery = item.delivery
+  // Claude Code holds it until the session is free, whatever the answer
+  if (delivery?.status === "queued") return `${done} · Queued: ${who} holds it, to take once free`
   if (isGo(item.answer.choice) && delivery?.status !== "failed" && !carriedOut(item)) {
     if (item.answer.choice === "draft") return `${done} · Saving a Slack draft…`
     const slack = item.kind === "decision" && item.preview.type === "slack"
     if (item.answer.choice !== "send" && !slack) return `${done} · Being carried out by ${who}…`
     return `${done} · ${kindWord(item) === "Linear comment" ? "Sending to Linear…" : "Sending in Slack…"}`
   }
+  // queued, delivered or lost: as the session has it
   const reached =
     delivery?.status === "delivered"
       ? delivery.via === "cli"
         ? `Read by ${who}`
         : `Delivered to ${who}`
       : delivery?.status === "failed"
-        ? // typing began (INTERRUPTED) or the adapter threw (ERROR): the answer may be in the session already
-          delivery.code === "INTERRUPTED" || delivery.code === "ERROR"
-          ? `Send unconfirmed: ${delivery.reason}`
-          : `Send failed: ${delivery.reason}`
+        ? delivery.code === "LOST"
+          ? `Lost: ${delivery.reason}`
+          : sendUnconfirmed(item)
+            ? `Send unconfirmed: whether ${who} has it is not known`
+            : `Send failed: ${delivery.reason}`
         : "Delivery pending"
   return item.answer.noLink
     ? `${done} · ${reached} · No link: ${item.answer.noLink}`

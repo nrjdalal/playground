@@ -394,9 +394,10 @@ export type SinkResult = { environment: string; exitCode: number | null }
 // An open decision or draft he pushed out of his list until a time (Schedule); it asks again once the time passes.
 export type InboxScheduled = { snoozedUntil: string }
 
-// How the answer reached its poster, or the dispatcher when the poster had ended: typed into a session (to: the session that took it, absent on a row from before it was recorded), or read through bun run ask.
+// How the answer reached its poster, or the dispatcher when the poster had ended: typed into a session (to: the session that took it, absent on a row from before it was recorded), or read through bun run ask. queued: Claude Code holds it until the session is free (deliver.ts's QUEUED), under the delivery's id, which the dashboard reads again until it reads delivered, or failed as LOST.
 export type InboxDelivery =
   | { status: "pending" }
+  | { at: string; id: string; status: "queued"; to: string }
   | { at: string; status: "delivered"; to?: string; via: "cli" | "session" }
   | { code: string; reason: string; status: "failed" }
 
@@ -440,7 +441,7 @@ export const answerInputSchema = z.strictObject({
 export type AnswerInput = z.input<typeof answerInputSchema>
 
 // The delivery adapter's contract, deliver() in deliver.ts, restated since this file cannot resolve the API's @/ paths; routers/inbox.ts passes deliver() as a Deliver, so the compiler fails if the two drift apart. It throws only when it cannot write its activity row, which may come after the Enter.
-export type Delivery = { actor: ActivityActor; text: string; to: string }
+export type Delivery = { actor: ActivityActor; id?: string; text: string; to: string }
 export type DeliveryResult =
   | { at: string; ok: true; sessionId: string }
   | { code: string; ok: false; reason: string }
@@ -602,8 +603,14 @@ export const deliveryFailed = (item: InboxItem): boolean =>
   item.delivery?.status === "failed" &&
   !(item.answer && "dismissedAt" in item.answer && item.answer.dismissedAt)
 
-// The delivery failures that come before anything is typed (deliver.ts's DELIVERY_FAILURES says which), so Retry cannot type the answer twice; after any other (INTERRUPTED, or ERROR when the adapter threw) the answer may be in the session already, so it waits on a look at the session.
-export const RETRY_CODES = ["CMUX_FAILED", "INPUT_NOT_EMPTY", "NOT_FOUND", "ON_PICKER"] as const
+// The delivery failures that come before anything is typed (deliver.ts's DELIVERY_FAILURES says which), and LOST, an answer Claude Code held that neither its screen nor its transcript shows QUEUED_MS on, so Retry cannot type the answer twice; after any other (INTERRUPTED, or ERROR when the adapter threw) the answer may be in the session already, so its card offers Check it for me.
+export const RETRY_CODES = [
+  "CMUX_FAILED",
+  "INPUT_NOT_EMPTY",
+  "LOST",
+  "NOT_FOUND",
+  "ON_PICKER",
+] as const
 
 // Pure: a failed answer he has not dismissed whose failure Retry can safely follow.
 export const retryable = (item: InboxItem): boolean =>
@@ -816,7 +823,11 @@ export async function answerItem(
     deliver,
     dispatcher,
     now = new Date(),
-  }: { actor: ActivityActor; deliver?: Deliver; dispatcher?: string; now?: Date },
+    wait,
+  }: { actor: ActivityActor; deliver?: Deliver; dispatcher?: string; now?: Date } & Pick<
+    Sending,
+    "wait"
+  >,
 ): Promise<{ item: InboxItem; ok: true } | Refused> {
   const current = await getItem(db, id)
   if (!current || current.id !== id) return NOT_FOUND
@@ -862,28 +873,66 @@ export async function answerItem(
       deliver,
       dispatcher,
       now,
+      wait,
     }),
     ok: true,
   }
 }
 
-// Types the answer into the posting session and records how that went; a poster that has ended hands it to the dispatcher instead.
+// How often a queued answer is read again: deliver() types nothing for it, and reads it delivered once its transcript shows it, or lost QUEUED_MS on.
+export const QUEUED_POLL_MS = 5000
+
+type Sending = {
+  actor: ActivityActor
+  deliver: Deliver
+  dispatcher?: string
+  now: Date
+  wait?: (ms: number) => Promise<void>
+}
+
+// Types the answer into the posting session and records how that went; a poster that has ended hands it to the dispatcher instead. Each try goes under its own id, so one Claude Code holds (queued) is read again under it until it settles: this process's own reads, so a restart leaves it reading queued, its poster getting it all the same.
 async function send(
   db: Database,
   item: InboxItem,
   { relay, text }: { relay: string; text: string },
-  {
-    actor,
-    deliver,
-    dispatcher,
-    now,
-  }: { actor: ActivityActor; deliver: Deliver; dispatcher?: string; now: Date },
+  { actor, deliver, dispatcher, now, wait = (ms) => Bun.sleep(ms) }: Sending,
 ): Promise<InboxItem> {
-  let delivery = await attempt(deliver, { actor, text, to: item.from })
+  const one = (to: string, words: string) => ({ actor, id: crypto.randomUUID(), text: words, to })
+  let sent = one(item.from, text)
+  let delivery = await attempt(deliver, sent, now)
   if (dispatcher && item.from !== dispatcher && posterGone(delivery)) {
-    delivery = await attempt(deliver, { actor, text: relay, to: dispatcher })
+    sent = one(dispatcher, relay)
+    delivery = await attempt(deliver, sent, now)
   }
-  return (await recordDelivery(db, item.id, delivery, now)) ?? item
+  const recorded = (await recordDelivery(db, item.id, delivery, now)) ?? item
+  if (delivery.status === "queued") void follow(db, item.id, sent, { deliver, wait })
+  return recorded
+}
+
+// Reads a queued answer again until Claude Code lets it go, then records what became of it in place of queued, while the item still reads queued under this delivery's id.
+async function follow(
+  db: Database,
+  id: string,
+  sent: Delivery & { id: string },
+  { deliver, wait }: { deliver: Deliver; wait: (ms: number) => Promise<void> },
+): Promise<void> {
+  for (;;) {
+    await wait(QUEUED_POLL_MS)
+    const now = new Date()
+    const delivery = await attempt(deliver, sent, now)
+    if (delivery.status === "queued") continue
+    await db
+      .update(inboxItem)
+      .set({ delivery, updatedAt: now, version: sql`${inboxItem.version} + 1` })
+      .where(
+        and(
+          eq(inboxItem.id, id),
+          sql`${inboxItem.delivery} ->> 'status' = 'queued'`,
+          sql`${inboxItem.delivery} ->> 'id' = ${sent.id}`,
+        ),
+      )
+    return
+  }
 }
 
 // deliver.ts reports a poster that has ended as NOT_FOUND with one of these two reasons; its other NOT_FOUNDs ("now names another session", "has no terminal") come from a live session, which a relay would leave to carry the go out beside the dispatcher.
@@ -897,11 +946,16 @@ const posterGone = (delivery: InboxDelivery): boolean =>
   delivery.code === "NOT_FOUND" &&
   GONE_REASONS.some((reason) => reason.test(delivery.reason))
 
-async function attempt(deliver: Deliver, delivery: Delivery): Promise<InboxDelivery> {
+async function attempt(
+  deliver: Deliver,
+  delivery: Delivery & { id: string },
+  now: Date,
+): Promise<InboxDelivery> {
   try {
     const result = await deliver(delivery)
-    return result.ok
-      ? { at: result.at, status: "delivered", to: delivery.to, via: "session" }
+    if (result.ok) return { at: result.at, status: "delivered", to: delivery.to, via: "session" }
+    return result.code === "QUEUED"
+      ? { at: now.toISOString(), id: delivery.id, status: "queued", to: delivery.to }
       : { code: result.code, reason: result.reason, status: "failed" }
   } catch (error) {
     // ERROR, not one of the adapter's codes, since the answer may have reached the session after all.
@@ -913,12 +967,7 @@ async function attempt(deliver: Deliver, delivery: Delivery): Promise<InboxDeliv
 export async function retryDelivery(
   db: Database,
   id: string,
-  {
-    actor,
-    deliver,
-    dispatcher,
-    now = new Date(),
-  }: { actor: ActivityActor; deliver: Deliver; dispatcher?: string; now?: Date },
+  { actor, deliver, dispatcher, now = new Date(), wait }: Omit<Sending, "now"> & { now?: Date },
 ): Promise<{ item: InboxItem; ok: true } | Refused> {
   const current = await getItem(db, id)
   if (!current || current.id !== id) return NOT_FOUND
@@ -955,7 +1004,13 @@ export async function retryDelivery(
   if (!row) return { code: "CONFLICT", message: "This item changed; try again", ok: false }
   const item = toItem(row)
   return {
-    item: await send(db, item, textsOf(item, current.answer), { actor, deliver, dispatcher, now }),
+    item: await send(db, item, textsOf(item, current.answer), {
+      actor,
+      deliver,
+      dispatcher,
+      now,
+      wait,
+    }),
     ok: true,
   }
 }

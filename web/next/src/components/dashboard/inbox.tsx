@@ -20,6 +20,7 @@ import {
   RiMoneyDollarCircleLine,
   RiProgress4Line,
   RiQuestionAnswerLine,
+  RiQuestionLine,
   RiRefreshLine,
   RiReplyLine,
   RiSearchEyeLine,
@@ -107,6 +108,7 @@ import {
   answerItem,
   canDraft,
   cardKey,
+  checkAnswerNote,
   type CardKey,
   changedAt,
   dismissable,
@@ -135,6 +137,7 @@ import {
   scheduleChoices,
   scheduleItem,
   sendFailed,
+  sendUnconfirmed,
   sendWhy,
   takenBy,
   updatedSince,
@@ -683,6 +686,7 @@ export function InboxCard({
   updated: boolean
 }) {
   const queryClient = useQueryClient()
+  const { dispatcher, outbox } = useDashboard()
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
   // a draft's words, editable where they stand
@@ -873,18 +877,33 @@ export function InboxCard({
 
   const left =
     outcome !== null ? (
-      retryable(item) && (
-        <Hint content={held}>
+      sendUnconfirmed(item) && dispatcher ? (
+        <Hint content="Ask the dispatcher to look at the session and tell you whether your answer arrived">
           <Button
             size="sm"
-            disabled={busy}
-            {...hold}
-            onClick={() => void settle(() => retryItem(item.id))}
+            variant="outline"
+            onClick={() =>
+              outbox.send(dispatcher, { attachments: [], text: checkAnswerNote(item) })
+            }
           >
-            <RiRefreshLine data-icon="inline-start" />
-            Retry
+            <RiQuestionLine data-icon="inline-start" />
+            Check it for me
           </Button>
         </Hint>
+      ) : (
+        retryable(item) && (
+          <Hint content={held}>
+            <Button
+              size="sm"
+              disabled={busy}
+              {...hold}
+              onClick={() => void settle(() => retryItem(item.id))}
+            >
+              <RiRefreshLine data-icon="inline-start" />
+              Retry
+            </Button>
+          </Hint>
+        )
       )
     ) : secretAsk ? (
       <Hint content={held}>
