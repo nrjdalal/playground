@@ -26,6 +26,7 @@ Moving a schedule or pausing a job with `pausedFor` is the same kind of write.
 
 At the top of every pass, the ops runner (`scripts/ops/up.py`) renders the jobs from your extensions into `<data>/ops/jobs.json` and writes a plist for each launchd job that is on into `<data>/ops/launch-agents`.
 A machine with no extensions keeps its own `jobs.json`.
+A plist whose job is now off moves to the trash under the `jobs` carve-out ([CLI](/docs/cli)); one the trash refuses stays, and the runner writes why to `<data>/ops/up.log`.
 When that render cannot be trusted, the runner keeps the last `jobs.json` and writes why to `<data>/ops/up.log`.
 A job the registry does not know, such as one of your own scripts, stays in `jobs.json` as it is.
 Each `script` item an org holds as a folder is installed into `<data>/ops/<key>/` in the same pass, beside the state its job keeps there, which the render never touches.

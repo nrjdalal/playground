@@ -951,17 +951,10 @@ async function examineReading(cmd, parsed, env, visit, builtins) {
     if (builtins)
       verdict = await visit(cmd, parsed, here);
   } else if (name === "cd" || name === "pushd") {
-    if (args.some((a) => GLOB_CHARS.test(a.value)))
-      verdict = await visit(cmd, parsed, here);
-    const from = env.cwd;
-    env.cwd = cmd.detached ? undefined : await cdTarget(name, args, env);
-    if (env.old)
-      env.old = { dir: env.cwd === undefined ? undefined : from };
-  } else if (name === "popd") {
+    env.cwd = cmd.detached ? undefined : await cdTarget(args, env);
+  } else if (name === "popd")
     env.cwd = undefined;
-    if (env.old)
-      env.old = {};
-  } else if (EXPORTS.has(name)) {
+  else if (EXPORTS.has(name)) {
     for (const w of args.filter((a) => ASSIGN.test(a.value))) {
       const eq = w.value.indexOf("=");
       setVar(env.vars, w.value.slice(0, eq), slice(w, eq + 1));
@@ -980,16 +973,11 @@ async function examineReading(cmd, parsed, env, visit, builtins) {
   await record(cmd, name, args, here);
   return verdict;
 }
-async function cdTarget(name, args, env) {
+async function cdTarget(args, env) {
   const dir = args.find((a) => !(a.value.startsWith("-") && a.value.length > 1));
   if (!dir)
     return homedir3();
-  const typed = dir.value === "-" ? undefined : await folder(pathOf(dir, env));
-  const tilde = !typed && name === "pushd" && env.old && !dir.quoted && !dir.unknown && !dir.reads?.length ? /^~([-+])(?=\/|$)/.exec(dir.value) : null;
-  const base = tilde && (tilde[1] === "-" ? env.old?.dir : env.cwd);
-  return base ? await folder(base + dir.value.slice(2)) : typed;
-}
-async function folder(path) {
+  const path = dir.value === "-" ? undefined : pathOf(dir, env);
   if (!path)
     return;
   try {
