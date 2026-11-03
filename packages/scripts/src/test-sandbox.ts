@@ -24,6 +24,8 @@ const unbuilt = existsSync("packages")
   : []
 
 const { env, scratch } = sandbox()
+// a git hook (pre-commit runs tests) exports GIT_DIR and GIT_INDEX_FILE, which turn a test's scratch git init or commit onto the real repository: one set its core.bare (3 Nov); a test that needs a GIT_ variable sets it on its own git call
+for (const name of Object.keys(env)) if (name.startsWith("GIT_")) delete env[name]
 const dropScratch = () => {
   const refused = removeScratch(scratch)
   if (refused) console.error(`test-sandbox: ${refused}`)

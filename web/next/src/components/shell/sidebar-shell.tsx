@@ -14,7 +14,7 @@ import {
   SidebarProvider,
 } from "@/components/ui/sidebar"
 
-// Shared collapsible sidebar shell used by the dashboard and console layouts. Owns the sidebar chrome (provider, header brand, footer, rail) and the persisted open state; callers supply the badge, the stats and a mark on the title's row (hidden with it on the rail), nav, and footer. The rail and Cmd+B toggle the sidebar, so the row holds no toggle.
+// Shared collapsible sidebar shell used by the dashboard, console and hosted Yard layouts. Owns the sidebar chrome (provider, header brand, footer, rail) and the persisted open state; callers supply the badge, the stats and a mark on the title's row (hidden with it on the rail), nav, and footer. The rail and Cmd+B toggle the sidebar, so the row holds no toggle.
 export async function SidebarShell({
   badge,
   homeHref = "/dashboard",
