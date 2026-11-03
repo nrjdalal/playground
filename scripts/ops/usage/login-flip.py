@@ -30,7 +30,9 @@ MIN_ROOM = 10  # dispatcher, 25 Oct: a switch restarts every session, so a renew
 # dispatcher, 25 Oct: the accounts whose plan ends, each with its end (None until known), spent to 100% and out ENDS_LEAD before it, ENDING_FIRST leading; every other account renews
 ENDS = {a["email"]: a["ends"] for a in ROWS if "ends" in a}
 ENDING_FIRST, ENDS_LEAD = [a["email"] for a in ROWS if a.get("endsFirst")], 2 * 3600
-RENEWS = {a["email"]: a["renews"] for a in ROWS if "renews" in a}  # each renewing account's billing day of the month (None until known), for the dashboard's Renews lines
+RENEWS = {a["email"]: a["renews"] for a in ROWS if "renews" in a}
+# the owner, 3 Nov: the accounts the owner pays for personally (own) are spent less, a fifth of their weight, unless their deadline is within a day, so their week left is still spent before it resets
+OWN, OWN_SHARE, OWN_SOON = {a["email"] for a in ROWS if a.get("own")}, 0.2, 24 * 3600  # each renewing account's billing day of the month (None until known), for the dashboard's Renews lines
 PROBE_MODEL = setting("models.probe")
 
 
@@ -157,14 +159,15 @@ def usable(a):
 
 
 def weight(a):
-    """Week points left per hour to the account's deadline: its week reset or, for an ending account, ENDS_LEAD before its end, whichever comes first; 0 when it is not usable or its deadline is unknown or past."""
+    """Week points left per hour to the account's deadline: its week reset or, for an ending account, ENDS_LEAD before its end, whichever comes first, an own account's OWN_SHARE of that while its deadline is over OWN_SOON away; 0 when it is not usable or its deadline is unknown or past."""
     end, reset = ends_at(a), resets(a)
     deadline = min(reset, end - ENDS_LEAD) if end is not None else reset
     if not usable(a) or not now < deadline < float("inf"):
         return 0
     s = seen.get(a) or {}
     week = 0 if s.get("weekReset") and now >= s["weekReset"] else s["week"]
-    return (100 - week) / ((deadline - now) / 3600)
+    pace = (100 - week) / ((deadline - now) / 3600)
+    return pace * OWN_SHARE if a in OWN and deadline - now > OWN_SOON else pace
 
 
 def ending_order():
