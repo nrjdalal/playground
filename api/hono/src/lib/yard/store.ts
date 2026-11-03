@@ -270,6 +270,8 @@ export const post = async (
   const [row] = await db
     .insert(yardMessage)
     .values({
+      // the app's clock in milliseconds, as the API answers it, so reading up to a message's own time clears it; the column's default keeps microseconds
+      at: new Date(),
       channelId,
       device: caller.device,
       kind: body.kind,

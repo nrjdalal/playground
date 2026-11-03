@@ -115,6 +115,15 @@ describe.skipIf(!dockerUp())("Yard's store", () => {
       expect([after.unread, after.mentions]).toEqual([0, 0])
     })
 
+    // the API answers a message's time in milliseconds, so a stored time finer than that left the message read at its own time still unread
+    test("reading up to a message's own returned time clears it from unread and mentions", async () => {
+      const { id } = await both("read-at")
+      const message = await send(web("ada", true), id, { kind: "text", text: "@bo here" })
+      await store.markRead(db, web("bo"), id, message.at)
+      const after = (await store.channels(db, web("bo"))).find((c) => c.id === id)!
+      expect([after.unread, after.mentions]).toEqual([0, 0])
+    })
+
     test("a member cannot make #general or #releases before the first redeem does, so #releases stays the owner's", async () => {
       for (const name of ["general", "releases"])
         await expect(store.createChannel(db, web("bo"), { name })).rejects.toMatchObject({
