@@ -10,12 +10,13 @@ const RUNS = ["Bun.spawn", "spawnSync", "child_process", "$`", "exec("]
 
 type File = { path: string; text: string }
 
-// Each file that imports the fixture from outside tests/scripts/hooks/*.test.ts, and each importer that names a way to run a command.
+// Each file that imports the fixture from outside tests/scripts/hooks/*.test.ts and the shell-pane launcher's test, which feeds its rows to every registered guard through the launcher's screen, and each importer that names a way to run a command.
 function offenders(files: File[]): string[] {
   const found: string[] = []
   for (const { path, text } of files) {
     if (!IMPORTS.test(text)) continue
-    if (!/^tests\/scripts\/hooks\/[^/]+\.test\.ts$/.test(path)) found.push(`${path} imports it`)
+    if (!/^tests\/scripts\/(?:hooks\/[^/]+|shell-pane)\.test\.ts$/.test(path))
+      found.push(`${path} imports it`)
     for (const word of RUNS) if (text.includes(word)) found.push(`${path} names ${word}`)
   }
   return found
@@ -44,7 +45,7 @@ async function repoFiles(): Promise<File[]> {
 }
 
 describe("the refused-forms fixture's rows reach a guard only as check() input", () => {
-  test("only a hooks test imports the fixture, and none of its importers names a way to run a command", async () => {
+  test("only a hooks test or the shell-pane test imports the fixture, and none of its importers names a way to run a command", async () => {
     const files = await repoFiles()
     expect(files.filter((file) => IMPORTS.test(file.text)).map((file) => file.path)).toContain(
       "tests/scripts/hooks/refused-forms.test.ts",
