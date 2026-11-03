@@ -391,6 +391,11 @@ test("a commit through the pre-commit's lint-staged leaves the stash list as it 
     "pre-commit": { commands: Record<string, Record<string, unknown>>; piped?: boolean }
   }
   const lint = config["pre-commit"].commands["lint-staged"]!
+  const linter = String(lint.run).replace(
+    "bunx lint-staged",
+    join(ROOT, "node_modules/.bin/lint-staged"),
+  )
+  expect(linter).not.toBe(String(lint.run))
   const dir = mkdtempSync(join(tmpdir(), "lefthook-no-stash-"))
   const run = (argv: string[]) => {
     const result = Bun.spawnSync(argv, { cwd: dir, env: SCRATCH_ENV, stdin: "ignore" })
@@ -419,10 +424,7 @@ test("a commit through the pre-commit's lint-staged leaves the stash list as it 
           commands: {
             "lint-staged": {
               ...lint,
-              run: String(lint.run).replace(
-                "bunx lint-staged",
-                join(ROOT, "node_modules/.bin/lint-staged"),
-              ),
+              run: linter,
             },
           },
           piped: config["pre-commit"].piped,
@@ -441,7 +443,9 @@ test("a commit through the pre-commit's lint-staged leaves the stash list as it 
       join(dir, "a.ts"),
       `${["const   a   =   10", ...lines.slice(1, -1), "const z = 20; // unstaged"].join("\n")}\n`,
     )
-    expect(run(["bun", join(ROOT, LEFTHOOK_BIN), "run", "pre-commit"])).toMatchObject({ code: 0 })
+    const hook = run(["bun", join(ROOT, LEFTHOOK_BIN), "run", "pre-commit"])
+    expect(hook).toMatchObject({ code: 0 })
+    expect(hook.out).toContain("Skipping backup because `--no-stash` was used")
     expect(run(["git", "stash", "list"]).out).toBe(before)
     const staged = run(["git", "show", ":a.ts"]).out.trimEnd().split("\n")
     expect([staged[0], staged.at(-1)]).toEqual(["const a = 10;", "const z = 1;"])
