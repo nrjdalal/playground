@@ -190,6 +190,7 @@ const messageSchema = z.object({
   attachments: z.array(z.string().regex(ID_PATTERN)).max(MAX_ATTACHMENTS).default([]),
   id: z.uuid().optional(),
   newThread: z.boolean().optional(),
+  queuedAt: z.iso.datetime().optional(),
   text: z.string().max(MAX_CHARS * 2),
   threadId: threadIdSchema.optional(),
   to: z.string().min(1).max(200),
@@ -214,6 +215,7 @@ export async function sendMessage(
     attachments: ids = [],
     id: messageId,
     newThread,
+    queuedAt,
     text,
     threadId: named,
     to,
@@ -269,15 +271,17 @@ export async function sendMessage(
     to,
     ...(attachments.length && { attachments }),
     ...(messageId && { id: messageId }),
+    ...(messageId && queuedAt && { queuedAt }),
   })
   if (!result.ok) {
-    // a message cut off while typing may have gone, marker and all, and one left pasted and unsent waits for its retry's Enter, so its thread stays and is named, for a retry to send to it
+    // a message cut off while typing may have gone, marker and all, and one left pasted and unsent waits for its retry's Enter, as one Claude Code holds (QUEUED, marked pasted) waits to be read again, so its thread stays and is named, for a retry to send to it
     const held = result.code === "INTERRUPTED" || result.pasted
     const kept = opened && held ? opened : undefined
     if (opened && !kept) await threads.drop(opened)
     const [status, code] = FAILURE_STATUS[result.code]
     throw new ApiError(status, code, result.reason, {
       delivery: result.code,
+      ...(result.queuedAt && { queuedAt: result.queuedAt }),
       ...(kept && { threadId: kept }),
     })
   }
@@ -771,7 +775,7 @@ const dashboardRoutes = new Hono<{ Variables: Session }>()
     "/messages",
     describeRoute({
       tags: ["Dashboard"],
-      description: `Send a message to a live session as the owner, and record it in the console's activity. Phase 2a sends to each dispatcher (${DISPATCHERS.join(" and ")}), typed into its terminal as if the owner typed it, and to ${SDK_PROBE}, the session the dashboard hosts on the Agent SDK, whose message goes on its input rather than into a terminal; a message to any other session is refused as FORBIDDEN before anything is sent. \`attachments\` names up to ${MAX_ATTACHMENTS} uploaded files by id; each one's absolute path follows the words on an "Attached:" line, for the session to Read. \`id\`, the composer's own for the message, makes a retry safe: a message already recorded under it is answered as delivered, not typed again. A refusal names its reason in \`delivery\`: CMUX_FAILED, COMMAND, EMPTY, INPUT_NOT_EMPTY (nothing typed, or, for a message with an \`id\` to a herdr session, its paste left unsent in the box, which its retry presses Enter on and, for a new thread, names under \`threadId\`), INTERRUPTED (typing began and did not finish, so look at the session before sending again), NOT_FOUND, ON_PICKER or TOO_LONG; an attachment that is gone is a 404 naming it under \`attachment\` (GONE) and \`id\`. A message naming an inbox item (\`re #iN\`) records the reply on it once sent, which takes it off his count and list until its poster closes it. \`threadId\`, for the primary dispatcher alone, puts that thread's marker (\`[thread:<id>] \`) before the words, which routes the message to the thread once ingest brings it; a thread that does not exist is a 404 before anything is sent. \`newThread: true\`, in place of \`threadId\`, opens a thread titled from the message's first line and sends the message as its first, naming it under \`threadId\`.`,
+      description: `Send a message to a live session as the owner, and record it in the console's activity. Phase 2a sends to each dispatcher (${DISPATCHERS.join(" and ")}), typed into its terminal as if the owner typed it, and to ${SDK_PROBE}, the session the dashboard hosts on the Agent SDK, whose message goes on its input rather than into a terminal; a message to any other session is refused as FORBIDDEN before anything is sent. \`attachments\` names up to ${MAX_ATTACHMENTS} uploaded files by id; each one's absolute path follows the words on an "Attached:" line, for the session to Read. \`id\`, the composer's own for the message, makes a retry safe: a message already recorded under it is answered as delivered, not typed again. \`queuedAt\`, with an \`id\`, is the time an earlier try's QUEUED refusal gave under \`queuedAt\` (when the message was pasted), so an API that restarted since reads the message again rather than typing it twice. A refusal names its reason in \`delivery\`: CMUX_FAILED, COMMAND, EMPTY, INPUT_NOT_EMPTY (nothing typed, or, for a message with an \`id\` to a herdr session, its paste left unsent in the box, which its retry presses Enter on and, for a new thread, names under \`threadId\`), INTERRUPTED (typing began and did not finish, or a QUEUED message left the screen with a transcript that cannot be read back to when it was queued, so whether it went is not known and it is never retried unseen), LOST (a QUEUED message that neither the session's screen nor its transcript, read back to when it was queued, shows 10 minutes after it was queued, which a retry sends again), NOT_FOUND, ON_PICKER, QUEUED (Claude Code holds the message, in its box while it compacts or in its queue while it works, and takes it once free: a retry under the same \`id\` types nothing and reads it again, answering it delivered once its transcript shows it) or TOO_LONG; an attachment that is gone is a 404 naming it under \`attachment\` (GONE) and \`id\`. A message naming an inbox item (\`re #iN\`) records the reply on it once sent, which takes it off his count and list until its poster closes it. \`threadId\`, for the primary dispatcher alone, puts that thread's marker (\`[thread:<id>] \`) before the words, which routes the message to the thread once ingest brings it; a thread that does not exist is a 404 before anything is sent. \`newThread: true\`, in place of \`threadId\`, opens a thread titled from the message's first line and sends the message as its first, naming it under \`threadId\`.`,
       responses: {
         200: {
           description: "Sent and recorded",
@@ -795,11 +799,11 @@ const dashboardRoutes = new Hono<{ Variables: Session }>()
         ...notFoundErrorResponses,
         409: errorResponse(
           "CONFLICT",
-          "The session cannot take it now: it waits on a picker (ON_PICKER) or its input holds something (INPUT_NOT_EMPTY)",
+          "The session cannot take it now: it waits on a picker (ON_PICKER), its input holds something (INPUT_NOT_EMPTY), Claude Code holds the message to take once free (QUEUED), or a held message was lost (LOST)",
         ),
         502: errorResponse(
           "CMUX_FAILED",
-          "cmux could not read the session, or refused the send before anything was typed and again on a second try (CMUX_FAILED, which the outbox retries), or typing began and did not finish (INTERRUPTED): look at the session before sending again",
+          "cmux could not read the session, or refused the send before anything was typed and again on a second try (CMUX_FAILED, which the outbox retries), or typing began and did not finish (INTERRUPTED), which reads Delivered once its transcript shows it",
         ),
       },
     }),
@@ -841,7 +845,7 @@ const dashboardRoutes = new Hono<{ Variables: Session }>()
         ),
         502: errorResponse(
           "CMUX_FAILED",
-          "The reply may not have gone (CMUX_FAILED), cmux took it and the prompt still waits (NOT_TAKEN), or it went and could not be seen to land (UNCONFIRMED): look at the session",
+          "The reply may not have gone (CMUX_FAILED), cmux took it and the prompt still waits (NOT_TAKEN), or it went and could not be seen to land (UNCONFIRMED): its card stays while the prompt waits, and leaves once it is answered",
         ),
       },
     }),

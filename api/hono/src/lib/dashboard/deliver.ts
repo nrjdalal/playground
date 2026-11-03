@@ -39,11 +39,13 @@ export type Delivery = {
   actor: ActivityActor
   attachments?: Attachment[]
   id?: string
+  // When an earlier try of this id read QUEUED, as the outbox recorded it, so an API that restarted since, and lost its own record, reads the message again rather than typing it twice.
+  queuedAt?: string
   text: string
   to: string
 }
 
-// Why a delivery did not happen. CMUX_FAILED, INPUT_NOT_EMPTY, NOT_FOUND and ON_PICKER come before anything is typed (CMUX_FAILED includes a send cmux refused before its first text, tried twice here), so they can succeed on a retry once the session or cmux changes, but for an INPUT_NOT_EMPTY marked `pasted`, whose message sits unsent in the box for its retry to press Enter on; AMBIGUOUS, COMMAND, EMPTY and TOO_LONG cannot until the text or the names change. INTERRUPTED means typing began and did not finish: some or all of the message may be in the session's input or already sent, so it is never retried without a look at the session first.
+// Why a delivery did not happen, or has not yet. CMUX_FAILED, INPUT_NOT_EMPTY, NOT_FOUND and ON_PICKER come before anything is typed (CMUX_FAILED includes a send cmux refused before its first text, tried twice here), so they can succeed on a retry once the session or cmux changes, but for an INPUT_NOT_EMPTY marked `pasted`, whose message sits unsent in the box for its retry to press Enter on; AMBIGUOUS, COMMAND, EMPTY and TOO_LONG cannot until the text or the names change. INTERRUPTED means typing began and did not finish, or a held message left the screen with a transcript that cannot be read back to when it was queued: some or all of the message may be in the session's input or already sent, so it is never retried unseen. QUEUED means Claude Code holds a herdr session's message, in its box while it compacts or in its queue while it works, and takes it on its own: a retry under the same id types nothing and reads it again, and LOST is that retry finding it neither on the screen nor in the transcript QUEUED_MS after it was queued, so Retry sends it again.
 export const DELIVERY_FAILURES = [
   "AMBIGUOUS",
   "CMUX_FAILED",
@@ -51,8 +53,10 @@ export const DELIVERY_FAILURES = [
   "EMPTY",
   "INPUT_NOT_EMPTY",
   "INTERRUPTED",
+  "LOST",
   "NOT_FOUND",
   "ON_PICKER",
+  "QUEUED",
   "TOO_LONG",
 ] as const
 
@@ -66,15 +70,20 @@ export const FAILURE_STATUS: Record<DeliveryFailure, [ContentfulStatusCode, Erro
   EMPTY: [400, "VALIDATION_ERROR"],
   INPUT_NOT_EMPTY: [409, "CONFLICT"],
   INTERRUPTED: [502, "CMUX_FAILED"],
+  LOST: [409, "CONFLICT"],
   NOT_FOUND: [404, "NOT_FOUND"],
   ON_PICKER: [409, "CONFLICT"],
+  QUEUED: [409, "CONFLICT"],
   TOO_LONG: [400, "VALIDATION_ERROR"],
 }
+
+// How long a queued message may be gone from the screen with no transcript line before it reads lost: the longest compaction measured took 411s (3,224 compactions in this machine's transcripts on 3 Nov, p99 199s), so 10 minutes covers it with room.
+export const QUEUED_MS = 10 * 60_000
 
 // `at` is when the delivery finished, its Enter typed and its activity row written (for a retry answered by its row, when that row's transaction began, and `replayed` set); `reason` is a sentence to show as it is. `pasted` marks an INPUT_NOT_EMPTY whose message sits pasted and unsent in the box, which its retry presses Enter on, so a thread it opened is kept for that retry.
 export type DeliveryResult =
   | { at: string; ok: true; replayed?: true; sessionId: string }
-  | { code: DeliveryFailure; ok: false; pasted?: true; reason: string }
+  | { code: DeliveryFailure; ok: false; pasted?: true; queuedAt?: string; reason: string }
 
 export const MAX_CHARS = 8000
 export const MAX_LINES = 100
@@ -273,6 +282,43 @@ export const holdsMessage = (screen: string, text: string): boolean => {
   return start !== "" && (start.startsWith(first) || first.startsWith(start))
 }
 
+// The lines above the input box's top rule, or none when no rules frame a box.
+const aboveBox = (screen: string): string[] => {
+  const lines = screen.split("\n").map((line) => line.trimEnd())
+  const bottom = lines.findLastIndex((line) => RULE.test(line))
+  const top = lines.findLastIndex((line, i) => i < bottom && NAMED_RULE.test(line))
+  return bottom < 1 || top < 0 ? [] : lines.slice(0, top)
+}
+
+// The first line of a message's words, as a box or a queue draws it.
+const firstLine = (text: string): string =>
+  text
+    .split("\n")
+    .find((line) => line.trim() && !line.startsWith(ATTACHED_LABEL))
+    ?.trim() ?? ""
+
+// Pure: whether Claude Code holds the message to take on its own: in its box while its spinner says it compacts (its "Compacting conversation" status), or drawn in its queue above a box showing a queue hint while it works. Either goes once the session is free, so it reads queued rather than failed.
+export const holdsQueued = (screen: string, text: string): boolean => {
+  const above = aboveBox(screen)
+  if (above.some((line) => line.includes("Compacting conversation"))) {
+    return holdsMessage(screen, text)
+  }
+  const start = firstLine(text)
+  const box = inputBox(screen)
+  const words = box ? boxWords(box) : null
+  const hinted = box !== null && words !== null && (QUEUED_HINTS.has(words) || cutHint(box, words))
+  return (
+    hinted &&
+    start !== "" &&
+    above.some((line) => {
+      const drawn = line.replace(/^❯\s*/, "").trim()
+      return (
+        line.startsWith("❯") && drawn !== "" && (start.startsWith(drawn) || drawn.startsWith(start))
+      )
+    })
+  )
+}
+
 // `board` finds the session a name names, from the board the dashboard already streams; `readSession` reads that one session again from cmux before it is typed into, and before the Enter. `canForce` says whether cmux's send takes --force, and `prompts` lists the requests the session has pending in cmux's Feed. `prompt` sends a herdr session its whole message in one call, and `pressEnter` one Enter when that call's own did not land (herdr.ts); `wait` sleeps between the reads of its box after the send, and `said` reads a session's transcript, its tail as readTail bounds it.
 export type DeliverDeps = {
   board: () => Promise<Live>
@@ -393,6 +439,8 @@ export const wentIn = (entries: Entry[], paste: Paste): boolean | null => {
 const PASTES_KEPT = 5
 const pastes = new Map<string, Paste[]>()
 const unsent = new Set<string>()
+// The messages Claude Code held when their try ended (QUEUED), by id, with when they were pasted, so a retry reads them again rather than pasting them twice; this process's own, as `unsent` is.
+const queued = new Map<string, number>()
 
 const oneAtATime = <T>(key: string, work: () => Promise<T>): Promise<T> => {
   const next = (typingLines.get(key) ?? Promise.resolve()).then(work, work)
@@ -529,17 +577,61 @@ export async function deliver(
         )
       }
       const input = inputState(screen)
+      // QUEUED carries when the message was pasted, which a queued_command's stamp follows within moments, so the outbox's retry after a restart reads the transcript from there
+      const stillQueued = (at: number): Refusal => ({
+        ...refused(
+          "QUEUED",
+          `${worker.name} holds the message and takes it once it is free, after a compaction or its turn: it reads Delivered once its transcript shows it.`,
+        ),
+        pasted: true,
+        queuedAt: new Date(at).toISOString(),
+      })
+      // A message Claude Code held when an earlier try ended, by this process's record or, after a restart, by the outbox's queuedAt, is read again, never pasted twice: still held, it waits; gone from the screen, the transcript says it went, or, QUEUED_MS on, that it was lost when the transcript reaches back with no line, and unconfirmed when it does not. One back in the box with no compaction left goes on below, where it gets its Enter as a paste of ours.
+      const told = delivery.queuedAt ? Date.parse(delivery.queuedAt) : Number.NaN
+      const queuedAt = delivery.id
+        ? (queued.get(delivery.id) ?? (told <= deps.now().getTime() ? told : undefined))
+        : undefined
+      if (delivery.id && queuedAt !== undefined) {
+        if (holdsQueued(screen, text)) return stillQueued(queuedAt)
+        if (!(input === "holds" && holdsMessage(screen, text))) {
+          let went: boolean | null = null
+          try {
+            went = wentIn(await deps.said(worker), { at: queuedAt, images, text })
+          } catch {}
+          if (went) {
+            queued.delete(delivery.id)
+            await deps.record(event, async () => {})
+            return { at: deps.now().toISOString(), ok: true, sessionId }
+          }
+          if (deps.now().getTime() - queuedAt < QUEUED_MS) return stillQueued(queuedAt)
+          queued.delete(delivery.id)
+          // a transcript that does not reach back to when it was queued, or could not be read, cannot say it never went, so it reads unconfirmed rather than lost
+          if (went === null) {
+            return refused(
+              "INTERRUPTED",
+              `${worker.name} no longer shows the message, and its transcript cannot be read back to when it was queued, so it may have gone: check it before sending it again.`,
+            )
+          }
+          return refused(
+            "LOST",
+            `${worker.name} no longer shows the message, and its transcript holds no sign of it ${QUEUED_MS / 60_000} minutes after it was queued. Retry sends it again.`,
+          )
+        }
+        queued.delete(delivery.id)
+      }
       // A message an earlier try left unsent that has left the box since went by a late Enter or the owner's own, or was cleared by hand; either way it is never pasted twice.
       if (delivery.id && unsent.has(delivery.id) && input === "empty") {
         await deps.record(event, async () => {})
         return { at: deps.now().toISOString(), ok: true, sessionId }
       }
-      // A paste of the dashboard's own that its Enter left in the box, this message's or an earlier one's, gets that Enter rather than reading as a draft; any other text in the box is someone's. Claude Code folds a long paste into [Pasted text #n +k lines], which is taken as a paste whose line breaks k counts.
+      // A paste of the dashboard's own that its Enter left in the box, this message's or an earlier one's, gets that Enter rather than reading as a draft, this held message's first, even with no paste remembered after a restart; any other text in the box is someone's. Claude Code folds a long paste into [Pasted text #n +k lines], which is taken as a paste whose line breaks k counts.
       const held =
         herdr && input === "holds"
-          ? (pastes.get(sessionId) ?? []).findLast((paste) =>
-              holdsUnsent(screen, paste.text, paste.images),
-            )
+          ? queuedAt !== undefined && holdsMessage(screen, text)
+            ? { at: queuedAt, id: delivery.id, images, text }
+            : (pastes.get(sessionId) ?? []).findLast((paste) =>
+                holdsUnsent(screen, paste.text, paste.images),
+              )
           : undefined
       // one the transcript shows went, or cannot show did not, is the owner's recall of it or may be, so it holds as a draft
       let stuck = held
@@ -553,13 +645,13 @@ export async function deliver(
       if (input === "holds" && !stuck) {
         return refused(
           "INPUT_NOT_EMPTY",
-          `${worker.name}'s input already holds something, or a picker covers it: a draft, or a ! or / waiting for a command. Clear it in its terminal first, since anything typed now would join it.`,
+          `${worker.name}'s input already holds something, or a picker covers it: a draft, or a ! or / waiting for a command, which anything typed now would join. Nothing was typed, so it can go once the box is clear.`,
         )
       }
       if (input === "missing") {
         return refused(
           "INPUT_NOT_EMPTY",
-          `Cannot find ${worker.name}'s input box on its screen: something covers it, or Claude Code's layout has changed. Look at its terminal before sending again.`,
+          `Cannot find ${worker.name}'s input box on its screen: something covers it, or Claude Code's layout has changed. Nothing was typed, so it can go once the box shows.`,
         )
       }
       // herdr pastes the message and then presses Enter, and Claude Code can still be taking a pasted image's path in when the Enter comes, so the Enter is lost and the message sits in the box. So the box is read after the send: empty, it went; holding this message, it gets one more Enter and is read again; holding it still, or holding text that does not start as it does, it is typed but not submitted, and no client retries it unseen, but for a message with an id still holding it, which waits as INPUT_NOT_EMPTY for its retry's Enter. The box read empty just before the send, so what it holds then is this message unless someone typed into it meanwhile. After a prompt that failed as typed (`lost`), an empty box cannot tell a message that went from one never pasted, so it stays interrupted, and the outbox reads it delivered once the transcript holds it.
@@ -583,11 +675,22 @@ export async function deliver(
           refused(
             "INTERRUPTED",
             inputState(after) === "missing"
-              ? `Cannot find ${worker.name}'s input box after the send, so whether the message went is not known. Look at its terminal before sending again.`
-              : `${worker.name}'s input holds text that does not start as the message does, so no Enter was pressed: the message may be typed but not submitted. Look at its terminal before sending again.`,
+              ? `Cannot find ${worker.name}'s input box after the send, so whether the message went is not known: it reads Delivered once its transcript shows it.`
+              : `${worker.name}'s input holds text that does not start as the message does, so no Enter was pressed: the message may be typed but not submitted, and it reads Delivered once its transcript shows it.`,
           ),
           "held",
         )
+      // A message with an id that Claude Code holds after the send waits as QUEUED, its row left for the retry that sees it arrive; it gets no Enter, since Claude Code takes it on its own.
+      // the hold is timed from the paste, not from this read after herdr's answer and the settle, since Claude Code stamps a queued_command at its Enter
+      let pastedAt: number | undefined
+      const queueIt = (): TypingStopped => {
+        const now = deps.now().getTime()
+        const held = pastedAt ?? now
+        // an entry past the bound has settled, or its message was discarded; a retry still carries its queuedAt
+        for (const [id, at] of queued) if (now - at >= QUEUED_MS) queued.delete(id)
+        if (delivery.id) queued.set(delivery.id, held)
+        return new TypingStopped(stillQueued(held), "held")
+      }
       // `sent` is the paste the box should hold, and `own` whether it is this message's, whose Enter left unsent is this message's to retry.
       const submitted = async (
         at: string,
@@ -596,6 +699,7 @@ export async function deliver(
         own = true,
       ): Promise<void> => {
         const first = await settled(at, lost)
+        if (own && delivery.id && holdsQueued(first, sent)) throw queueIt()
         if (inputState(first) === "empty") {
           if (lost) throw new TypingFailed(1, true, lost, false)
           return
@@ -607,6 +711,7 @@ export async function deliver(
           throw new TypingFailed(1, true, error, false)
         }
         const second = await settled(at, lost)
+        if (own && delivery.id && holdsQueued(second, sent)) throw queueIt()
         if (inputState(second) === "empty") return
         if (!holdsMessage(second, sent)) throw unseen(second)
         // With an id the outbox tries it again on its own, and that try presses Enter on it, so it waits queued rather than failing in front of the owner.
@@ -626,7 +731,7 @@ export async function deliver(
         throw new TypingStopped(
           refused(
             "INTERRUPTED",
-            `The message is typed but not submitted: ${worker.name}'s input still holds it after one more Enter. Look at its terminal before sending again.`,
+            `The message is typed but not submitted: ${worker.name}'s input still holds it after one more Enter, and it reads Delivered once its transcript shows it.`,
           ),
           "held",
         )
@@ -644,6 +749,7 @@ export async function deliver(
               )
             }
             if (stuck && isThis(stuck)) {
+              pastedAt = stuck.at
               await submitted(again.surface, null)
               pastes.set(
                 sessionId,
@@ -668,6 +774,7 @@ export async function deliver(
               pastes.set(sessionId, left)
             }
             const at = deps.now().getTime()
+            pastedAt = at
             let lost: unknown = null
             try {
               await deps.prompt(again.surface, text)
@@ -752,7 +859,7 @@ export async function deliver(
           return new BeforeTyping(error.message)
         }
         const left = error.atEnter
-          ? ` The Enter may have gone through anyway: check ${worker.name}'s terminal before sending again.`
+          ? ` The Enter may have gone through anyway: it reads Delivered once its transcript shows it.`
           : error.typed > 0
             ? ` Part of it may sit unsent in ${worker.name}'s input.`
             : ""
