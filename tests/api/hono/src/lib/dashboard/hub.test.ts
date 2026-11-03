@@ -8,7 +8,6 @@ import {
   DashboardHub,
   movesTheBoard,
   type DashboardFrame,
-  type Pace,
 } from "../../../../../../api/hono/src/lib/dashboard/hub"
 import {
   DISPATCHER,
@@ -111,18 +110,15 @@ const until = async (what: string, is: () => boolean, ms = 5_000) => {
 
 // Windows the negative waits hold for, each proving a read does not start: all well past the 300ms debounce.
 const NO_SECOND_READ_MS = 400
-const HELD_BACK_MS = 200
-const NO_THIRD_READ_MS = 800
 const UNREREAD_MS = 500
 
-// A hub with cmux's live list replaced by answers the test releases one at a time.
+// A hub with herdr's live list replaced by answers the test releases one at a time.
 const hubWith = (
   refreshTimeoutMs?: number,
   stat?: (path: string) => { birthtimeMs: number; size: number },
-  pace?: Pace,
+  refreshGapMs?: number,
 ) => {
   const calls: Deferred[] = []
-  const asked: unknown[] = []
   // when each read started, so a case can measure the space between reads from the reads themselves
   const starts: number[] = []
   // each tail's change listener, fired by the case after it appends: fs.watch's FSEvents lost 6 of 15 changes to a file at load5 13
@@ -130,14 +126,13 @@ const hubWith = (
   const changed = (path: string) => watchers.get(path)?.()
   const hub = new DashboardHub({
     events: false,
-    listLive: (options) => {
-      asked.push(options)
+    listLive: () => {
       starts.push(Date.now())
       const call = deferred()
       calls.push(call)
       return call.promise
     },
-    pace,
+    refreshGapMs,
     refreshTimeoutMs,
     stat,
     watch: (path, onChange) => {
@@ -145,7 +140,7 @@ const hubWith = (
       return { close: () => watchers.delete(path) }
     },
   })
-  return { asked, calls, changed, hub, starts }
+  return { calls, changed, hub, starts }
 }
 
 describe("DashboardHub", () => {
@@ -155,16 +150,7 @@ describe("DashboardHub", () => {
   afterAll(() => rmSync(dir, { recursive: true, force: true }))
 
   test("a snapshot that returns after the last viewer left is dropped, and opens no watcher", async () => {
-    // due() is called in the refresh's finally, so it marks the exact point past which the snapshot was dropped or sent
-    let settled = false
-    const { calls, hub } = hubWith(undefined, undefined, {
-      due: () => {
-        settled = true
-        return null
-      },
-      onRead: () => () => {},
-      refreshGapMs: 0,
-    })
+    const { calls, hub } = hubWith()
     const frames: DashboardFrame[] = []
     const unsubscribe = hub.subscribe((frame) => frames.push(frame))
     await until("the hub's first read", () => calls.length === 1)
@@ -174,7 +160,8 @@ describe("DashboardHub", () => {
       transcripts: new Map([["s-greed", transcript]]),
       workers: [worker("greed")],
     })
-    await until("the read to settle after the last viewer left", () => settled)
+    // proves the negative: the settled read sends nothing and opens no watcher
+    await sleep(NO_SECOND_READ_MS)
     expect(frames).toEqual([])
     expect(hub.watching).toBe(0)
   })
@@ -205,11 +192,11 @@ describe("DashboardHub", () => {
     leave()
   })
 
-  // herdr's stream (herdr.ts) runs beside cmux's, a move on it refreshes the board on the cmux records already read, and it ends with the last viewer
-  test("a herdr event refreshes the board without asking cmux for a new read, and the stream is killed when the last viewer leaves", async () => {
+  // herdr's stream (herdr.ts) moves the board, and it ends with the last viewer
+  test("a herdr event refreshes the board, and the stream is killed when the last viewer leaves", async () => {
     let push: (line: string) => void = () => {}
     let killed = false
-    const asked: unknown[] = []
+    let asked = 0
     const hub = new DashboardHub({
       events: false,
       herdr: () => ({
@@ -222,18 +209,16 @@ describe("DashboardHub", () => {
           },
         }),
       }),
-      listLive: async (options) => {
-        asked.push(options)
+      listLive: async () => {
+        asked++
         return { surfaces: new Map(), transcripts: new Map(), workers: [worker("one")] }
       },
     })
     const leave = hub.subscribe(() => {})
-    await until("the hub's first read", () => asked.length === 1)
-    const since = (asked[0] as { since: number }).since
+    await until("the hub's first read", () => asked === 1)
     await sleep(NO_SECOND_READ_MS)
     push(JSON.stringify({ name: "herdr.pane.agent_status_changed", type: "event" }))
-    await until("the refresh the event asks for", () => asked.length === 2)
-    expect(asked[1]).toEqual({ since, wait: false })
+    await until("the refresh the event asks for", () => asked === 2)
     leave()
     expect(killed).toBe(true)
   })
@@ -259,9 +244,8 @@ describe("DashboardHub", () => {
     leave()
   })
 
-  // A re-run after a read must see what cmux reported during it, so each refresh asks for what moved since its last move, and never waits on the full read (workers.ts's recordsFor).
-  test("refreshes never overlap, each asks for the newest moves without waiting, and the newest snapshot is the last one sent", async () => {
-    const { asked, calls, hub } = hubWith()
+  test("refreshes never overlap, and the newest snapshot is the last one sent", async () => {
+    const { calls, hub } = hubWith()
     const frames: DashboardFrame[] = []
     const first = hub.subscribe((frame) => frames.push(frame))
     await until("the hub's first read", () => calls.length === 1)
@@ -275,15 +259,12 @@ describe("DashboardHub", () => {
     await until("the workers frames", () => frames.length === 2)
     const names = frames.map((f) => (f.type === "workers" ? f.workers[0]?.name : f.type))
     expect(names).toEqual(["old", "new"])
-    const options = asked as { since: number; wait: boolean }[]
-    expect(options.map((o) => o.wait)).toEqual([false, false])
-    expect(options[1]!.since).toBeGreaterThan(options[0]!.since)
     first()
     second()
   })
 
   // cmux's `sessions list` took 12.7s at load 19 (9 Oct), longer than a refresh waits, and a new read started beside each slow one stacked them until the live chat went down.
-  test("a slow cmux read times out with an error frame, and no new read starts until it settles", async () => {
+  test("a slow sessions read times out with an error frame, and no new read starts until it settles", async () => {
     const { calls, hub } = hubWith(200)
     const frames: DashboardFrame[] = []
     const first = hub.subscribe((frame) => frames.push(frame))
@@ -303,42 +284,10 @@ describe("DashboardHub", () => {
 
   const empty = (): Live => ({ surfaces: new Map(), transcripts: new Map(), workers: [] })
 
-  // cmux's full read is paced (workers.ts's readDue), so the hub composes each board from the newest records it has and comes back for the moves those miss once the next read may start.
-  test("a refresh the pace holds back runs again once due, for the same moves", async () => {
-    const dues: (number | null)[] = [400, null]
-    const { asked, calls, hub } = hubWith(undefined, undefined, {
-      due: () => dues.shift() ?? null,
-      onRead: () => () => {},
-      refreshGapMs: 0,
-    })
-    const leave = hub.subscribe(() => {})
-    await until("the hub's first read", () => calls.length === 1)
-    calls[0]?.resolve(empty())
-    // proves the negative: the pace holds the retry back
-    await sleep(HELD_BACK_MS)
-    expect(calls).toHaveLength(1)
-    await until("the held-back second read", () => calls.length === 2)
-    calls[1]?.resolve(empty())
-    // proves the negative: with due() spent, no third read starts
-    await sleep(NO_THIRD_READ_MS)
-    expect(calls).toHaveLength(2)
-    const options = asked as { since: number }[]
-    expect(options[1]!.since).toBe(options[0]!.since)
-    leave()
-  })
-
-  // Board moves arrived about four a second on 12 Oct; each refresh reads the Feed and the workspaces from cmux, so the hub starts one at most once a gap however many arrive.
-  test("a burst of moves runs one refresh a gap, and a full read landing runs one more", async () => {
-    let landed = () => {}
+  // Board moves arrived about four a second on 12 Oct; each refresh reads every herdr server, so the hub starts one at most once a gap however many arrive.
+  test("a burst of moves runs one refresh a gap", async () => {
     const gap = 1000
-    const { calls, hub, starts } = hubWith(undefined, undefined, {
-      due: () => null,
-      onRead: (listener) => {
-        landed = listener
-        return () => {}
-      },
-      refreshGapMs: gap,
-    })
+    const { calls, hub, starts } = hubWith(undefined, undefined, gap)
     const leaves = [hub.subscribe(() => {})]
     await until("the hub's first read", () => calls.length === 1)
     calls[0]?.resolve(empty())
@@ -352,9 +301,6 @@ describe("DashboardHub", () => {
     // the gap holds the burst back, measured between the two reads' starts; the 5ms covers the clock ticks between the hub's reads of the time and these stamps
     expect(starts[1]! - starts[0]!).toBeGreaterThanOrEqual(gap - 5)
     calls[1]?.resolve(empty())
-    landed()
-    await until("the third read after the full one landed", () => calls.length === 3)
-    calls[2]?.resolve(empty())
     for (const leave of leaves) leave()
   })
 
