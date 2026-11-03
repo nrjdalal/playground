@@ -441,8 +441,10 @@ describe("sendMessage", () => {
       EMPTY: [400, "VALIDATION_ERROR"],
       INPUT_NOT_EMPTY: [409, "CONFLICT"],
       INTERRUPTED: [502, "CMUX_FAILED"],
+      LOST: [409, "CONFLICT"],
       NOT_FOUND: [404, "NOT_FOUND"],
       ON_PICKER: [409, "CONFLICT"],
+      QUEUED: [409, "CONFLICT"],
       TOO_LONG: [400, "VALIDATION_ERROR"],
     }
     expect(Object.keys(expected)).toEqual([...DELIVERY_FAILURES])
