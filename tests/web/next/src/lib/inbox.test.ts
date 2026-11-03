@@ -17,6 +17,7 @@ import {
   dismissable,
   DONE_AFTER_MS,
   focusAfterTake,
+  foldsByDefault,
   GO_CHOICES,
   inboxLight,
   inboxPosters,
@@ -36,6 +37,7 @@ import {
   pickedAt,
   pinnedView,
   PLACED_TYPES,
+  PROGRESS_AFTER_MS,
   resultLink,
   RETRY_CODES,
   retryable,
@@ -1393,5 +1395,67 @@ describe("a card a chat reply collapsed opens again", () => {
       expect(reopenKey({ ...e, [modifier]: true })).toBe(false)
     expect(reopenKey({ ...e, key: "E", shiftKey: true })).toBe(false)
     expect(reopenKey({ ...e, key: "Enter" })).toBe(false)
+  })
+})
+
+describe("a card folds by priority, the ones needing an answer staying open", () => {
+  const NOW = Date.parse("2026-11-03T10:00:00.000Z")
+  const ago = (ms: number) => new Date(NOW - ms).toISOString()
+  const decision = item({ kind: "decision", ref: 1 })
+  const draft = item({ kind: "draft", ref: 2 })
+  const unread = item({ kind: "update", ref: 3 })
+  const read = item({ kind: "update", readAt: ago(60_000), ref: 4 })
+  const answered = item({
+    answer: { at: ago(60_000), choice: "approve" },
+    kind: "decision",
+    ref: 5,
+    status: "approved",
+  })
+  const replied = item({ answer: { at: ago(60_000), choice: "replied" }, kind: "draft", ref: 6 })
+
+  test("an open decision or draft and an unread update show open", () => {
+    for (const card of [decision, draft, unread]) expect(foldsByDefault(card, NOW)).toBe(false)
+  })
+
+  test("a read update, an answered decision and a chat reply waiting on its poster fold in the list", () => {
+    expect(inboxView([read, answered, replied], NOW).shown).toEqual([read, answered, replied])
+    for (const card of [read, answered, replied]) expect(foldsByDefault(card, NOW)).toBe(true)
+  })
+
+  test("every card on the In progress, Archived and Done shelves folds", () => {
+    const working = item({
+      answer: { at: ago(PROGRESS_AFTER_MS), choice: "replied" },
+      kind: "decision",
+      ref: 7,
+    })
+    const archived = item({
+      answer: { at: ago(60_000), choice: "clear" },
+      kind: "decision",
+      ref: 8,
+      status: "cleared",
+    })
+    const settled = item({ kind: "update", readAt: ago(DONE_AFTER_MS), ref: 9 })
+    const view = inboxView([working, archived, settled], NOW)
+    expect([view.progress, view.archived, view.done]).toEqual([[working], [archived], [settled]])
+    for (const card of [working, archived, settled]) expect(foldsByDefault(card, NOW)).toBe(true)
+  })
+
+  test("a snoozed ask folds until its time, then shows open", () => {
+    const snoozed = item({
+      answer: { snoozedUntil: new Date(NOW + 60_000).toISOString() },
+      kind: "decision",
+      ref: 10,
+    })
+    expect(foldsByDefault(snoozed, NOW)).toBe(true)
+    expect(foldsByDefault(snoozed, NOW + 60_000)).toBe(false)
+  })
+
+  test("a card that rises to an open tier shows open: an answer that failed to send, an update made unread", () => {
+    const failed = {
+      ...answered,
+      delivery: { code: "CMUX_FAILED", reason: "no answer from cmux", status: "failed" },
+    } as InboxItem
+    expect(foldsByDefault(failed, NOW)).toBe(false)
+    expect(foldsByDefault({ ...read, readAt: null }, NOW)).toBe(false)
   })
 })
