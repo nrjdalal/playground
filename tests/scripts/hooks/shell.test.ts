@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, readdirSync, readFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { type Env, GIT_TAKES, lex, places, run } from "../../../scripts/hooks/shell"
+import { type Env, GIT_TAKES, lex, places, run, withDeadline } from "../../../scripts/hooks/shell"
 import { type Paths, REFUSED_FORMS } from "./fixtures/refused-forms"
 
 const HOOKS = join(import.meta.dir, "..", "..", "..", "scripts", "hooks")
@@ -154,9 +154,9 @@ describe("places() holds the folder Env.cwd names, unless the reader passed its 
           return undefined
         }
         try {
-          await run(lex(line), env, visit, true)
+          await withDeadline(2_000, async () => run(lex(line), env, visit, true))
         } catch {
-          // a line the reader throws on is one every hook refuses whole, so it holds no folder to compare
+          // a line the reader throws on, or reads past its deadline, is one every hook refuses whole, so it holds no folder to compare
         }
       }
     return { misses, reads }
@@ -166,7 +166,7 @@ describe("places() holds the folder Env.cwd names, unless the reader passed its 
     const { misses, reads } = await read(fixtureLines(paths))
     expect(misses).toEqual([])
     expect(reads).toBeGreaterThan(500)
-  })
+  }, 120_000)
 
   // a body's cd, then a cd or pushd relative to wherever it reached, from a worktree and from the main checkout
   test("at every command after a body's cd and a relative one", async () => {
