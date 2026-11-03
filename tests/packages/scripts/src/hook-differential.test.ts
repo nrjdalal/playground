@@ -13,6 +13,8 @@ import { join } from "node:path"
 
 import {
   calls,
+  canaryTree,
+  cwdsOf,
   replay,
   routed,
   sweep,
@@ -62,6 +64,48 @@ describe("a start of hook-differential", () => {
     start(at, { RUN_SLOT_NICE: "10" })
     expect(existsSync(join(at, "tickets"))).toBe(false)
   })
+
+  test("a sweep with no --forms prints the usage and ends with 2", () => {
+    const run = Bun.spawnSync(
+      ["bun", SCRIPT, "sweep", "--canary", "HEAD", "--hook", "no-extensions-write"],
+      { env: { ...process.env, RUN_SLOT_NICE: "10" }, stderr: "pipe", stdout: "pipe" },
+    )
+    expect(run.exitCode).toBe(2)
+    expect(run.stderr.toString()).toContain("usage: bun run hooks:differential")
+  })
+})
+
+describe("canaryTree", () => {
+  const recorder =
+    (steps: string[], failing = "") =>
+    (argv: string[], cwd: string) => {
+      steps.push(`${cwd} :: ${argv.join(" ")}`)
+      return { exitCode: argv[0] === failing ? 1 : 0, stdout: new Uint8Array() }
+    }
+
+  test("unpacks the sha's whole tree and installs it from its own lockfile with no install scripts, once", () => {
+    const base = join(DIR, "trees")
+    const steps: string[] = []
+    const dir = canaryTree({ base, root: "/repo", run: recorder(steps), sha: "abc" })
+    expect(dir).toBe(join(base, "abc"))
+    expect(steps).toEqual([
+      "/repo :: git archive abc",
+      `${dir} :: tar -x -C ${dir}`,
+      `${dir} :: bun install --frozen-lockfile --ignore-scripts`,
+    ])
+    canaryTree({ base, root: "/repo", run: recorder(steps), sha: "abc" })
+    expect(steps).toHaveLength(3)
+  })
+
+  test("a failed install throws and leaves the tree to be installed again", () => {
+    const base = join(DIR, "failed")
+    const steps: string[] = []
+    expect(() =>
+      canaryTree({ base, root: "/repo", run: recorder(steps, "bun"), sha: "abc" }),
+    ).toThrow("could not install abc")
+    canaryTree({ base, root: "/repo", run: recorder(steps), sha: "abc" })
+    expect(steps).toHaveLength(6)
+  })
 })
 
 describe("routed", () => {
@@ -104,7 +148,7 @@ describe("sweep and replay", () => {
     const { counts } = await sweep(recorder(before), recorder(after), forms, "/h")
     expect(after.map((raw) => JSON.parse(raw))).toEqual(
       forms.flatMap(({ command }) =>
-        ["/h", "/h/.playground", "/h/x/.claude/worktrees/y"].map((cwd) => ({
+        cwdsOf("/h").map((cwd) => ({
           cwd,
           tool_input: { command },
           tool_name: "Bash",
@@ -128,12 +172,12 @@ describe("sweep and replay", () => {
     expect(changed).toEqual([])
   })
 
-  test("the replay reads each made-up Bash call of the day's transcripts once, and only as data", async () => {
+  test("the replay reads each made-up Bash call of the day's transcripts once, a sub-agent's included, and only as data", async () => {
     const projects = join(DIR, "projects")
-    mkdirSync(join(projects, "p"), { recursive: true })
-    const line = (command: string, timestamp: string) =>
+    mkdirSync(join(projects, "p", "s", "subagents"), { recursive: true })
+    const line = (command: string, timestamp: string, cwd = "/h/w") =>
       JSON.stringify({
-        cwd: "/h/w",
+        cwd,
         message: { content: [{ input: { command }, name: "Bash", type: "tool_use" }] },
         timestamp,
       })
@@ -147,10 +191,17 @@ describe("sweep and replay", () => {
         "not json",
       ].join("\n"),
     )
+    writeFileSync(
+      join(projects, "p", "s", "subagents", "a.jsonl"),
+      line(`touch ${ran} ALLOW`, now, "/h/sub"),
+    )
     const list = await calls(projects, Date.now() - 3600_000)
-    expect(list).toEqual([{ command: `touch ${ran} ALLOW`, cwd: "/h/w" }])
+    expect(list.toSorted((x, y) => x.cwd.localeCompare(y.cwd))).toEqual([
+      { command: `touch ${ran} ALLOW`, cwd: "/h/sub" },
+      { command: `touch ${ran} ALLOW`, cwd: "/h/w" },
+    ])
     const { counts } = await replay(() => "refused", recorder([]), list, "/h")
-    expect(counts).toEqual({ calls: 1, "newly allowed": 1, "newly refused": 0, same: 0 })
+    expect(counts).toEqual({ calls: 2, "newly allowed": 2, "newly refused": 0, same: 0 })
     expect(existsSync(ran)).toBe(false)
   })
 })

@@ -1,7 +1,8 @@
 # scripts
 
-The factory's own scripts: `spawn.sh`, which starts and resumes every factory session, `link-skills.sh`, which installs the skills, the herdr servers' ops job, a worktree's `node_modules` clone, `bun run test:skills` and a hook PR's sweep and replay.
+The factory's own scripts: `spawn.sh`, which starts and resumes every factory session, `link-skills.sh`, which installs the skills, the herdr servers' ops job, a worktree's `node_modules` clone and `bun run test:skills`.
 AGENTS.md keeps one line for each, and this file holds the text that line stands for.
+It also holds `bun run hooks:differential`, the sweep and replay a hook PR's Evidence quotes.
 Read a section before you change its script or its tests, or when it refuses a start you did not expect.
 The factory's hooks are in [hooks/README.md](./hooks/README.md).
 
@@ -166,9 +167,9 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
 
 - A hook PR measures its hooks against `canary` with `bun run hooks:differential` ([packages/scripts/src/hook-differential.ts](../packages/scripts/src/hook-differential.ts)), naming each hook with `--hook <name>` and the base with `--canary <sha>`:
   - `sweep --forms <module>` passes the forms the module exports (`forms: { command, inClass }[]`) from the home, the data folder and a worktree;
-  - `replay` passes every Bash call of this machine's transcripts from the last 24 hours (`--hours <n>`), each from its own folder.
+  - `replay` passes every Bash call of this machine's transcripts from the last 24 hours (`--hours <n>`), a sub-agent's nested transcripts included, each from its own folder.
 - Each form and call reaches the hook only as data, through its `check()` with `HOME` alone in its environment, and none is run.
-  Canary's hooks load from a `git archive` of its `scripts` and `packages`, unpacked once per sha in the temp folder.
+  Canary's hooks load from canary's whole tree at the sha, unpacked by `git archive` once per sha in the temp folder and installed there from its own lockfile (`bun install --frozen-lockfile --ignore-scripts`), so every hook loads canary's packages, `extensions/core` and dependencies, and the install leaves the shared git hooks alone.
 - It prints one line of counts per hook, the figures a hook PR's Evidence quotes: forms, cases, the same, newly allowed and newly refused, split by the form's class; calls, the same, newly allowed and newly refused.
   The first 20 changed cases go to stderr, so read them there; transcript text stays out of the repo and the PR.
 - Started bare, it queues itself through `run-slot.sh`, as `commit-slot.ts` queues a commit's build, and says so on stderr with the queue's depth; inside a ticket it runs as it is.

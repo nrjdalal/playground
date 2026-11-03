@@ -16,8 +16,8 @@ export type Check = (
   raw: string,
   env: Record<string, string | undefined>,
 ) => Promise<string | undefined> | string | undefined
-export type Form = { command: string; inClass?: boolean }
-export type Call = { command: string; cwd: string }
+type Form = { command: string; inClass?: boolean }
+type Call = { command: string; cwd: string }
 type Tally = { inClass: number; outClass: number }
 
 const USAGE =
@@ -85,40 +85,37 @@ export async function sweep(canary: Check, head: Check, forms: Form[], home: str
   return { changed, counts }
 }
 
-// Every Bash call of the transcripts under `projects` newer than `since`, one per folder and command
+// Every Bash call of the transcripts under `projects` newer than `since`, a sub-agent's nested ones included, one per folder and command
 export async function calls(projects: string, since: number): Promise<Call[]> {
   const found = new Map<string, Call>()
-  for (const project of existsSync(projects) ? readdirSync(projects) : []) {
-    const dir = join(projects, project)
-    if (!statSync(dir).isDirectory()) continue
-    for (const file of readdirSync(dir).filter((f) => f.endsWith(".jsonl"))) {
-      const path = join(dir, file)
-      if (statSync(path).mtimeMs < since) continue
-      for (const line of (await Bun.file(path).text()).split("\n")) {
-        if (!line.includes('"Bash"')) continue
-        let entry: { cwd?: unknown; message?: { content?: unknown }; timestamp?: string }
-        try {
-          entry = JSON.parse(line)
-        } catch {
-          continue
-        }
-        if (Date.parse(entry.timestamp ?? "") < since || typeof entry.cwd !== "string") continue
-        const content = Array.isArray(entry.message?.content) ? entry.message.content : []
-        for (const part of content as {
-          input?: { command?: unknown }
-          name?: string
-          type?: string
-        }[])
-          if (
-            part?.type === "tool_use" &&
-            part.name === "Bash" &&
-            typeof part.input?.command === "string"
-          )
-            found.set(`${entry.cwd}\0${part.input.command}`, {
-              command: part.input.command,
-              cwd: entry.cwd,
-            })
+  const files = existsSync(projects) ? readdirSync(projects, { recursive: true }) : []
+  for (const file of files.map(String).filter((f) => f.endsWith(".jsonl"))) {
+    const path = join(projects, file)
+    if (statSync(path).mtimeMs < since) continue
+    for (const line of (await Bun.file(path).text()).split("\n")) {
+      if (!line.includes('"Bash"')) continue
+      let entry: { cwd?: unknown; message?: { content?: unknown }; timestamp?: string }
+      try {
+        entry = JSON.parse(line)
+      } catch {
+        continue
       }
+      if (Date.parse(entry.timestamp ?? "") < since || typeof entry.cwd !== "string") continue
+      const content = Array.isArray(entry.message?.content) ? entry.message.content : []
+      for (const part of content as {
+        input?: { command?: unknown }
+        name?: string
+        type?: string
+      }[])
+        if (
+          part?.type === "tool_use" &&
+          part.name === "Bash" &&
+          typeof part.input?.command === "string"
+        )
+          found.set(`${entry.cwd}\0${part.input.command}`, {
+            command: part.input.command,
+            cwd: entry.cwd,
+          })
     }
   }
   return [...found.values()]
@@ -145,19 +142,27 @@ const git = (cwd: string, args: string[]) => {
   return run.stdout.toString().trim()
 }
 
-// canary's scripts and packages, unpacked once per sha into the temp folder, which its hooks import from alone
-function canaryTree(root: string, ref: string): string {
-  const sha = git(root, ["rev-parse", "--verify", `${ref}^{commit}`])
-  const dir = join(tmpdir(), "hook-differential", sha)
-  if (existsSync(join(dir, ".unpacked"))) return dir
+// canary's whole tree at the sha, installed from its own lockfile with no install scripts, once per sha in `base`, so its hooks load canary's packages, extensions/core and dependencies, never the head's
+export function canaryTree({
+  base,
+  root,
+  run,
+  sha,
+}: {
+  base: string
+  root: string
+  run: (argv: string[], cwd: string, stdin?: Uint8Array) => { exitCode: number; stdout: Uint8Array }
+  sha: string
+}): string {
+  const dir = join(base, sha)
+  if (existsSync(join(dir, ".installed"))) return dir
   mkdirSync(dir, { recursive: true })
-  const archive = Bun.spawnSync(["git", "archive", sha, "scripts", "packages"], {
-    cwd: root,
-    stdout: "pipe",
-  })
-  const tar = Bun.spawnSync(["tar", "-x", "-C", dir], { stdin: archive.stdout })
-  if (archive.exitCode !== 0 || tar.exitCode !== 0) throw new Error(`could not unpack ${sha}`)
-  writeFileSync(join(dir, ".unpacked"), "")
+  const archive = run(["git", "archive", sha], root)
+  if (archive.exitCode !== 0 || run(["tar", "-x", "-C", dir], dir, archive.stdout).exitCode !== 0)
+    throw new Error(`could not unpack ${sha}`)
+  if (run(["bun", "install", "--frozen-lockfile", "--ignore-scripts"], dir).exitCode !== 0)
+    throw new Error(`could not install ${sha}'s dependencies in ${dir}`)
+  writeFileSync(join(dir, ".installed"), "")
   return dir
 }
 
@@ -170,7 +175,13 @@ async function main(args: string[]): Promise<number> {
   const [mode] = args
   const ref = option(args, "--canary")
   const hooks = args.flatMap((a, i) => (args[i - 1] === "--hook" ? [a] : []))
-  if ((mode !== "sweep" && mode !== "replay") || !ref || hooks.length === 0) {
+  const formsAt = option(args, "--forms")
+  if (
+    (mode !== "sweep" && mode !== "replay") ||
+    !ref ||
+    hooks.length === 0 ||
+    (mode === "sweep" && !formsAt)
+  ) {
     console.error(USAGE)
     return 2
   }
@@ -181,9 +192,14 @@ async function main(args: string[]): Promise<number> {
     return 2
   }
   const home = process.env.HOME || homedir()
-  const before = canaryTree(root, ref)
-  const forms: Form[] =
-    mode === "sweep" ? (await import(resolve(option(args, "--forms") ?? ""))).forms : []
+  const before = canaryTree({
+    base: join(tmpdir(), "hook-differential"),
+    root,
+    run: (argv, cwd, stdin) =>
+      Bun.spawnSync(argv, { cwd, stderr: "inherit", stdin, stdout: "pipe" }),
+    sha: git(root, ["rev-parse", "--verify", `${ref}^{commit}`]),
+  })
+  const forms: Form[] = formsAt ? (await import(resolve(formsAt))).forms : []
   if (mode === "sweep" && !Array.isArray(forms)) {
     console.error(`hook-differential: the --forms module exports no forms array\n${USAGE}`)
     return 2
