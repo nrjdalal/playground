@@ -140,6 +140,7 @@ export type RosterPlace = Pick<RosterAgent, "kind" | "role">
 
 // The group each kind sits in. The dispatcher's own role still goes by DISPATCHERS' names, so a dispatcher kind under any other name reads as a manager until 966's PR 6 moves the dispatcher.
 const ROLE_OF_KIND: Record<RosterKind, Role> = {
+  assistant: "manager",
   builder: "manager",
   dispatcher: "manager",
   ops: "manager",
