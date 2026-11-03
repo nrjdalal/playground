@@ -8,10 +8,10 @@ import { createServer } from "@/lib/server"
 import { type Fetch, firstRun } from "@/lib/setup/app"
 import { setupName, startLocal } from "@/lib/setup/container"
 
-// The dev entry (`bun run dev`): with a database it serves index.ts's app; with POSTGRES_URL unset or empty it serves setup mode (lib/setup/app.ts) until Start a local container has made one, then index.ts's app in this process. The built bundle serves index.ts alone.
+// The dev entry (`bun run dev`): with a database it serves index.ts's app; with POSTGRES_URL unset or empty it serves setup mode (lib/setup/app.ts) until Start a local container has made one, then index.ts's app in this process. The Docker bundle serves index.ts alone, and the Vercel bundle hosted.ts alone.
 
 const normal = async (): Promise<Fetch> =>
-  ((await import("@/index")).default as unknown as { fetch: Fetch }).fetch
+  ((await import("@/index")).app as unknown as { fetch: Fetch }).fetch
 
 const root = resolve(process.cwd(), "../..")
 
