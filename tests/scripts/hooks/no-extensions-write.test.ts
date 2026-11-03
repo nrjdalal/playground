@@ -591,6 +591,27 @@ describe("a quoted argument is read as a command line only where a program runs 
     ["rm of a held folder's glob", "X=build; rm -rf $X/*"],
     ["rm of a held temporary folder", 'D=/tmp/x.1; rm -rf "$D"'],
     ["rm under HOME, which the hook holds", 'rm -rf "$HOME/tmp-x"'],
+    [
+      "rm of a held variable on a line whose print prints it",
+      'X=/tmp/a; print -r -- "$X"; rm -rf "$X"',
+    ],
+    [
+      "rm of a held variable beside a printf -v of another",
+      'X=/tmp/a; printf -v Y "%s" a; rm -rf "$X"',
+    ],
+    ["rm of a held variable beside set -o", 'X=/tmp/a; set -o pipefail; rm -rf "$X"'],
+    ["rm of a held variable zsh ties to nothing", 'P=/tmp/a; rm -rf "$P"'],
+    ["rm of a held variable beside a plain zsh P read", 'D=/tmp/a; echo ${(P)N}; rm -rf "$D"'],
+    ["rm of a held variable beside bash's indirect read", 'X=/tmp/a; echo "${!N}"; rm -rf "$X"'],
+    [
+      "rm of a held variable beside a subscripted bash indirect read",
+      'X=/tmp/a; N=Y; echo "${!N[0]}"; rm -rf "$X"',
+    ],
+    ["rm of a held variable beside bash's array keys", 'X=/tmp/a; echo "${!N[@]}"; rm -rf "$X"'],
+    [
+      "rm of a held variable beside arithmetic on literals",
+      'X=/tmp/a; echo $((1 + 2)); rm -rf "$X"',
+    ],
     ["a quiet commit with -m", `git commit -m "fix(x): y"`],
     ["a quiet commit with -am", `git commit -am "fix(x): y"`],
     ["a quiet commit with --message", `git commit --message "fix(x): y"`],

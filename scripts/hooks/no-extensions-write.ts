@@ -163,18 +163,31 @@ type Namings = { blind: boolean; counts: Map<string, number>; plain: Set<string>
 // The operators after ${K that only read K; any other (`=`, `:=`, zsh's `::=`, a subscript, a modifier) may set it, so it counts as a naming
 const READS_ONLY = /^(?:\}|:?[-+?]|[#%/])/
 
+// Text the shell evaluates, where an assignment sets a name the hook never reads: arithmetic naming a variable, whose value it evaluates as an expression (`V=XY=0; (( V ))` sets XY), in `(( ))`, `$(( ))`, `$[ ]`, `let`, a `[[ ]]` comparison, an array subscript or a substring offset; bash's prompt transformation (`${V@P}`); and zsh's glob qualifiers that run code (`*(e:…:)`, `*(+f)`)
+const EVALUATES = [
+  /\(\([^)]*[A-Za-z_]/,
+  /\$\[[^\]]*[A-Za-z_]/,
+  /(?:^|[\s;&|(])let\s[^;&|]*[A-Za-z_]/,
+  /\[\[.*\s-(?:eq|ge|gt|le|lt|ne)\s/s,
+  /\$\{[#!]?\w+\[[^\]]*[A-Za-z_]/,
+  /(?:^|[\s;&|(])\w+\[[^\]]*[A-Za-z_][^\]]*\]\+?=/,
+  /\$\{[#!]?\w+:(?![-+=?:])[^}]*[A-Za-z_]/,
+  /@P\}/,
+  /[^\s(|&;<>$]\((?:#q)?[^()\s]*?(?:e[^\w\s()]|\+)/,
+]
+
 // How many times the line names each variable other than by reading it ($K, ${K}, ${K:-…} and the other READS_ONLY forms): every other spelling of the name counts, an assignment, an append, a bare word (read's, a for loop's, arithmetic's) and a name spelled across a quote or a backslash (`X\Y`, `X"Y"`, which the shell reads as XY) included, as does one attached after an option cluster's a or v (`printf -vK`), a lone flag (`-K`) aside; and the names an unquoted plain assignment sets (`K=`, where a quoted `"K=a"` is a command), read in one pass
 function namings(command: string): Namings {
   const counts = new Map<string, number>()
   const plain = new Set<string>()
   const add = (key: string) => counts.set(key, (counts.get(key) ?? 0) + 1)
-  // a name indirection that assigns sets a variable whose name the hook cannot read; zsh's P flag holds only as a plain read (`${(P)N}`, `${(P)N:-…}`), and a flag with a delimited argument (`${(j:…:)…}`) holds nothing, since its argument can hide a `)` and a P
-  let blind = false
+  // a name indirection that assigns sets a variable whose name the hook cannot read; zsh's P flag holds only as a plain read (`${(P)N}`, `${(P)N:-…}`), a flag with a delimited argument (`${(j:…:)…}`) holds nothing, since its argument can hide a `)` and a P, and nor do the e, % and # flags, which evaluate a value as shell text, a prompt or arithmetic
+  let blind = EVALUATES.some((evaluates) => evaluates.test(command))
   for (const m of command.matchAll(/\$\{\(([^)]*)(\)?)/g)) {
     const [whole, flags, closed] = m
     const rest = command.slice(m.index + whole.length)
     const name = rest.match(/^[A-Za-z_]\w*/)?.[0]
-    if (!closed || !/^[\w@#%~^=!*-]*$/.test(flags)) blind = true
+    if (!closed || !/^[\w@#%~^=!*-]*$/.test(flags) || /[#%e]/.test(flags)) blind = true
     else if (flags.includes("P") && (!name || !READS_ONLY.test(rest.slice(name.length))))
       blind = true
   }
@@ -425,8 +438,10 @@ const NAME_SETTERS = new Set([
 ])
 // the setters that name a variable only by their v option, so their other words are text they print
 const PRINTS = new Set(["print", "printf"])
-// the builtins whose n option makes a bash nameref, a name whose every later write sets the variable its value names
-const NAMEREFS = new Set(["declare", "local", "typeset"])
+// zsh's builtins that make a name integer or float, so every later assignment to it is an arithmetic evaluation
+const NUMERIC = new Set(["float", "integer"])
+// the builtins that give a name an attribute: n makes a bash nameref, a name whose every later write sets the variable its value names, and i (zsh's E and F too) makes every later assignment to it an arithmetic evaluation
+const TYPESETS = new Set(["declare", "export", "local", "readonly", "typeset"])
 // the builtins that run text as the line's own shell, which can set any variable
 const RUNS_TEXT = new Set([".", "eval", "source"])
 // the words that open and close a compound body or group, and the other reserved words a command may lead with
@@ -434,7 +449,7 @@ const OPENS = new Set(["case", "for", "if", "select", "until", "while", "{"])
 const CLOSES = new Set(["done", "esac", "fi", "}"])
 const LEADS = new Set(["!", "coproc", "do", "elif", "else", "then", "time"])
 
-// For each command of the line, the variables whose value the shell has when it runs: each named once, by an unquoted plain assignment that is its command's first word, at the line's top level (outside any function, compound body, group or subshell) and not piped or sent to the background; one the shell always runs (first, or after `;` or `&`) holds for every later command, and one after `&&` only along that `&&` chain, since the shell skips the rest of the chain with it. A line that runs eval or source, sets a variable by a name the hook cannot read whole (a name-indirection assignment or a bash nameref among them), or names IFS, holds none, and holdable() is the rest of the allow-list
+// For each command of the line, the variables whose value the shell has when it runs: each named once, by an unquoted plain assignment that is its command's first word, at the line's top level (outside any function, compound body, group or subshell) and not piped or sent to the background; one the shell always runs (first, or after `;` or `&`) holds for every later command, and one after `&&` only along that `&&` chain, since the shell skips the rest of the chain with it. A line that runs eval or source, sets a variable by a name the hook cannot read whole (a name-indirection assignment, a bash nameref, an integer attribute or text the shell evaluates among them), or names IFS, holds none, and holdable() is the rest of the allow-list
 function steadyNames(named: Namings, commands: Command[]): (cmd: Command) => Steady {
   if (named.blind || named.counts.has("IFS")) return () => NONE
   const counts = new Map(named.counts)
@@ -442,21 +457,21 @@ function steadyNames(named: Namings, commands: Command[]): (cmd: Command) => Ste
   for (const [at, cmd] of commands.entries()) {
     const { name } = parses[at]
     if (RUNS_TEXT.has(name)) return () => NONE
-    if (NAMEREFS.has(name) && cmd.words.some((w, k) => k > 0 && /^-[^-\s]*n/.test(w.value)))
-      return () => NONE
+    const flagged = (letters: RegExp) =>
+      cmd.words.some((w, k) => k > 0 && /^-[^-\s]/.test(w.value) && letters.test(w.value))
+    if (NUMERIC.has(name) || (TYPESETS.has(name) && flagged(/[EFin]/))) return () => NONE
+    // zsh's print -P expands its words as a prompt, which with PROMPT_SUBST set runs their expansions
+    if (name === "print" && flagged(/P/)) return () => NONE
     const loop = cmd.words.findIndex(
       (w) => !w.quoted && (w.value === "for" || w.value === "select"),
     )
     if (!NAME_SETTERS.has(name) && loop === -1) continue
-    // print and printf name one only by a v in an option cluster (`-v N`, `-vN`, `-rv N`): both the rest of the cluster and the next word count, since either may be the name
-    const v = cmd.words.findIndex((w, k) => k > 0 && /^-[^-\s]*v/.test(w.value))
-    const cluster = cmd.words[v]
-    const vNames = cluster
-      ? [
-          { ...cluster, value: cluster.value.slice(cluster.value.indexOf("v") + 1) },
-          cmd.words[v + 1],
-        ]
-      : []
+    // print and printf name one only by a v in an option cluster (`-v N`, `-vN`, `-rv N`), the last one given winning: every cluster's rest and the word after it count, since any may be the name
+    const vNames = cmd.words.flatMap((w, k) =>
+      k > 0 && /^-[^-\s]*v/.test(w.value)
+        ? [{ ...w, value: w.value.slice(w.value.indexOf("v") + 1) }, cmd.words[k + 1]]
+        : [],
+    )
     const names = loop !== -1 ? [cmd.words[loop + 1]] : PRINTS.has(name) ? vNames : cmd.words
     // a name the shell reads after quote removal (`read X\Y` sets XY) counts as written, and one the hook cannot read could be any
     for (const word of names) {
