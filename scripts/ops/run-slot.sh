@@ -384,6 +384,7 @@ ran_long() { ran_last3 over 60 "$@"; }
 quick_kind() {
   # a read command takes no slot and runs a bare true, so three short true runs in the log would take can-take and head down the quick lane, past their own exits (issue 285)
   [ -n "$CAN_TAKE" ] && return
+  heavy_build "$@" && return
   local kind
   kind=$(quick_rule "$@")
   [ "$kind" = quick ] && ran_long "$@" && kind=""
@@ -409,6 +410,23 @@ sys.exit(0 if p.returncode == 0 and tasks and all(t["cache"]["status"] == "HIT" 
 PY
   )
 }
+# a commit whose pre-commit build runs next build: a git commit staging a web/next file (with -a, one it will stage), or commit-slot.ts's build
+# (commit-<worktree>) for one; it goes through the queue as a big run (3 Nov: at 04:05Z one took run-slot-commit beside its own session's big run
+# and built at 1.7 cores, and at 06:41Z one ran beside a node_modules clone with no units held, and load1 reached 56)
+heavy_build() {
+  local a dir="" commit="" all="" next=""
+  case "$WHO" in commit-*) commit=1 ;; esac
+  for a in "$@"; do case "$a" in env|*=*) continue ;; esac; [ "$(basename -- "$a")" = git ] || break; next=git; break; done
+  if [ "$next" = git ]; then
+    next=""
+    for a in "$@"; do
+      [ "$next" = C ] && { dir=$a; next=""; continue; }
+      case "$a" in -C) next=C ;; commit) commit=1 ;; --all) all=1 ;; --*) ;; -*a*) all=1 ;; esac
+    done
+  fi
+  [ -n "$commit" ] || return 1
+  { git ${dir:+-C "$dir"} diff --cached --name-only; [ -z "$all" ] || git ${dir:+-C "$dir"} diff --name-only; } 2>/dev/null | grep -q '^web/next/'
+}
 # a light run, whatever its session's size: a quick kind, a bun install or add, a filtered turbo run, a plain tsc, or a check-types whose work is cached (retro 3, 31 Oct: a big session's 2s git push and 1s bun install each waited over 1,290s for the age bump)
 light_run() {
   [ -n "$(quick_kind "$@")" ] && return
@@ -431,6 +449,7 @@ EOF
 case "$UNITS" in 1|2|3) ;; *) SIZE=medium UNITS=2 ;; esac
 # a ticket's units come from the run, so a light run from a big session ranks as small; a suite or a full build keeps its session's size
 light_run "$@" && SIZE=small UNITS=1
+heavy_build "$@" && SIZE=big UNITS=3
 # Merging keeps going: a run that gates a merge (Checks, local CI, the merge train, the dashboard's build) goes before the
 # rest and may use the small reserve, as may an org's run (below) and the run-slot.priority pick. A checker's run is ranked by its worker's size (size_of), and
 # the rest keep class 2 so an older copy's ticket still ranks.
@@ -757,12 +776,13 @@ burst_held() {
     END { if (n > 0) print n; exit !(n > 0) }'
 }
 
-# Load units: each held slot's run counts the units on its holder line (2, a medium, for a line with none), and the slots the load rules
+# Load units: each held slot's run counts the units on its holder line (2, a medium, for a line with none, as the commit and clone lanes write
+# theirs, so a big run waits beside a commit's build and a clone), and the slots the load rules
 # open now, or a holder already has, give 2 units each. A quarter of them, at least 1, stays for small runs and the runs that gate a
 # merge, so a big run never blocks a small one
 held_units() {
   local s u total=0
-  for s in run-slot run-slot-2 run-slot-3 run-slot-4; do
+  for s in run-slot run-slot-2 run-slot-3 run-slot-4 run-slot-commit run-slot-clone; do
     reclaim "$OPS/$s"
     [ -d "$OPS/$s" ] || continue
     u=$(cut -d' ' -f4 "$OPS/$s.holder" 2>/dev/null)
