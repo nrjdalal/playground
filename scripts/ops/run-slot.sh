@@ -819,7 +819,7 @@ SWAPINS_MAX=100
 # vm_stat -c 2 1's last row (as spawn.sh's swapins() reads them), each - when unread; every look shares one reading through run-slot.gauges
 # (`<epoch> <idle> <swapins>`) for 10 s, since a top takes a second and about 0.7 s of system CPU, and some 27 waiters each look every 15 s
 gauges() {
-  local now at idle swap
+  local now at= idle= swap=
   now=$(date +%s)
   { read -r at idle swap < "$OPS/run-slot.gauges"; } 2>/dev/null
   case "$at" in ''|*[!0-9]*) at=0 ;; esac
