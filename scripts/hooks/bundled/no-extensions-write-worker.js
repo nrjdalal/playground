@@ -1401,11 +1401,14 @@ function namings(command) {
   const counts = new Map;
   const plain = new Set;
   const add = (key) => counts.set(key, (counts.get(key) ?? 0) + 1);
+  let blind = /\$\{\([^)]*P/.test(command);
   for (const m of command.matchAll(/(\$\{[#!]?)?(?<![\w$])([A-Za-z_]\w*)/g)) {
     const [whole, expanded, key] = m;
     const next = command.slice(m.index + whole.length);
     if (expanded && READS_ONLY.test(next))
       continue;
+    if (expanded === "${!" && !/^[*@[]/.test(next))
+      blind = true;
     const assigns = next[0] === "=" ? "=" : undefined;
     const at = m.index + (expanded?.length ?? 0);
     if (!expanded && command[at - 1] === "-" && (at < 2 || /\s/.test(command[at - 2]))) {
@@ -1430,7 +1433,7 @@ function namings(command) {
     if (from[end] - from[m.index] !== end - m.index)
       add(m[0]);
   }
-  return { counts, plain };
+  return { blind, counts, plain };
 }
 var SHELL_SETS = new Set([
   "ARGC",
@@ -1493,30 +1496,92 @@ var SHELL_SETS = new Set([
   "status"
 ]);
 var SHELL_SETS_PREFIX = /^(?:BASH_|COMP_|READLINE_|ZSH_|zsh_)/;
+var TIED = new Set([
+  "CDPATH",
+  "FIGNORE",
+  "FPATH",
+  "HISTCHARS",
+  "MAILPATH",
+  "MANPATH",
+  "MODULE_PATH",
+  "PATH",
+  "PROMPT",
+  "PROMPT2",
+  "PROMPT3",
+  "PROMPT4",
+  "PS1",
+  "PS2",
+  "PS3",
+  "PS4",
+  "PSVAR",
+  "cdpath",
+  "fignore",
+  "fpath",
+  "histchars",
+  "mailpath",
+  "manpath",
+  "module_path",
+  "path",
+  "prompt",
+  "psvar"
+]);
 function holdable(key, named, counts) {
-  return counts.get(key) === 1 && named.plain.has(key) && !SHELL_SETS.has(key) && !SHELL_SETS_PREFIX.test(key);
+  return counts.get(key) === 1 && named.plain.has(key) && !SHELL_SETS.has(key) && !SHELL_SETS_PREFIX.test(key) && !TIED.has(key);
 }
 var NONE = { has: () => false };
 var NAME_SETTERS = new Set([
+  "compgen",
   "declare",
   "export",
+  "float",
+  "getln",
   "getopts",
+  "integer",
   "let",
   "local",
   "mapfile",
+  "pcre_match",
+  "print",
   "printf",
+  "private",
   "read",
   "readarray",
   "readonly",
+  "set",
+  "shift",
+  "stat",
+  "strftime",
+  "sysread",
+  "syswrite",
   "typeset",
-  "unset"
+  "unset",
+  "vared",
+  "wait",
+  "zcurses",
+  "zformat",
+  "zgdbmpath",
+  "zgetattr",
+  "zlistattr",
+  "zmodload",
+  "zparseopts",
+  "zpty",
+  "zregexparse",
+  "zselect",
+  "zsocket",
+  "zstat",
+  "zstyle",
+  "zsystem",
+  "ztcp",
+  "ztie",
+  "zuntie"
 ]);
+var PRINTS = new Set(["print", "printf"]);
 var RUNS_TEXT = new Set([".", "eval", "source"]);
 var OPENS = new Set(["case", "for", "if", "select", "until", "while", "{"]);
 var CLOSES = new Set(["done", "esac", "fi", "}"]);
 var LEADS = new Set(["!", "coproc", "do", "elif", "else", "then", "time"]);
 function steadyNames(named, commands) {
-  if (named.counts.has("IFS"))
+  if (named.blind || named.counts.has("IFS"))
     return () => NONE;
   const counts = new Map(named.counts);
   const parses = commands.map((cmd) => parse(cmd));
@@ -1527,9 +1592,13 @@ function steadyNames(named, commands) {
     const loop = cmd.words.findIndex((w) => !w.quoted && (w.value === "for" || w.value === "select"));
     if (!NAME_SETTERS.has(name) && loop === -1)
       continue;
-    const v = cmd.words.findIndex((w) => /^-v/.test(w.value));
-    const vName = cmd.words[v]?.value === "-v" ? cmd.words[v + 1] : cmd.words[v] && { ...cmd.words[v], value: cmd.words[v].value.slice(2) };
-    const names = loop !== -1 ? [cmd.words[loop + 1]] : name === "printf" ? [vName] : cmd.words;
+    const v = cmd.words.findIndex((w, k) => k > 0 && /^-[^-\s]*v/.test(w.value));
+    const cluster = cmd.words[v];
+    const vNames = cluster ? [
+      { ...cluster, value: cluster.value.slice(cluster.value.indexOf("v") + 1) },
+      cmd.words[v + 1]
+    ] : [];
+    const names = loop !== -1 ? [cmd.words[loop + 1]] : PRINTS.has(name) ? vNames : cmd.words;
     for (const word of names) {
       if (!word)
         continue;
