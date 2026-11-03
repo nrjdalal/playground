@@ -5,6 +5,7 @@ import { join } from "node:path"
 
 import { dataDir } from "../../packages/env/src/data-dir"
 import { UNSET_REPOS } from "../../packages/scripts/src/trace-count/kinds"
+import { mainCheckout } from "../../scripts/hooks/no-main-checkout"
 import {
   bashGuards,
   close,
@@ -17,8 +18,12 @@ import {
 } from "../../scripts/shell-pane"
 import { ALLOWED, type Paths, REFUSED_FORMS } from "./hooks/fixtures/refused-forms"
 import { storeWith } from "./hooks/render-set"
+import { git } from "./hooks/scratch-git"
 
 const CHECKOUT = join(import.meta.dir, "..", "..")
+// The pane's folder: a worktree of the main checkout the guards read, as a session's pane opens in its own worktree, here or on CI's checkout.
+const MAIN = mainCheckout(CHECKOUT)
+const WORKTREE = join(MAIN, ".claude", "worktrees", "shell-pane-test")
 const SCRATCH = mkdtempSync(join(tmpdir(), "shell-pane-"))
 afterAll(() => rmSync(SCRATCH, { force: true, recursive: true }))
 
@@ -52,7 +57,7 @@ const OWN_ROWS: Record<string, string[]> = {
   "no-false-green": ["bun run test | grep pass"],
   "no-linear-ticket": [`cp /dev/null ${join(dataDir(), "ticket-approvals")}/`],
   "no-mac-web-build": ["docker compose build web"],
-  "no-main-checkout": [`touch ${join(CHECKOUT, "..", "..", "..", "made-up-file")}`],
+  "no-main-checkout": [`touch ${join(MAIN, "made-up-file")}`],
   "no-off-palette-label": [`gh label create made-up --color 123456`],
   "no-ours-merge": ["git merge -s ours origin/canary"],
   "no-prompt-stop": ["rmdir $HOME/$s"],
@@ -67,6 +72,15 @@ const SYNCED = storeWith(
   { "ext.repos": { acme: "quillco/acme-skills" } },
 )
 mkdirSync(join(SYNCED, "extensions", "acme"), { recursive: true })
+// A repo with a heavy path staged, as no-glm-heavy-path's own test stages one, for that guard's case to run in.
+const GLM_REPO = join(SCRATCH, "glm-repo")
+git(SCRATCH, "init", "-q", "-b", "canary", GLM_REPO)
+git(GLM_REPO, "commit", "-q", "--allow-empty", "-m", "base")
+mkdirSync(join(GLM_REPO, "web", "next", "src"), { recursive: true })
+writeFileSync(join(GLM_REPO, "web", "next", "src", "x.ts"), "x\n")
+git(GLM_REPO, "add", ".")
+// The folder a guard's case runs in, where it is not the worktree.
+const CWDS: Record<string, string> = { "no-glm-heavy-path": GLM_REPO }
 // The environment a guard's case runs in beyond the session's role, set on the process, since run calls each check() with its own defaults.
 const ENVS: Record<string, Record<string, string>> = {
   "no-extension-repo-write": { PLAYGROUND_DATA_DIR: SYNCED },
@@ -87,14 +101,14 @@ async function withEnv<T>(vars: Record<string, string>, body: () => Promise<T>):
 type Pane = { agent_session?: Record<string, string>; cwd: string; workspace_id: string }
 
 // A herdr with no server, answering as herdr 0.9.5's CLI does (measured): a JSON line for most calls, nothing for a pane run that typed, plain text for a pane read. Its workspaces and panes sit in memory; `seen` is the pane's text, and a stuck close leaves the workspace listed.
-function stubHerdr(seen = "", { stuck = false } = {}) {
+function stubHerdr(seen = "", { cwd = WORKTREE, stuck = false } = {}) {
   const workspaces = new Map<string, string>([
     ["w1", "shell-vtqhxp-worker-1"],
     ["w2", "vtqhxp-worker"],
   ])
   const panes = new Map<string, Pane>([
-    ["w1:p1", { cwd: CHECKOUT, workspace_id: "w1" }],
-    ["w2:p1", { cwd: CHECKOUT, workspace_id: "w2" }],
+    ["w1:p1", { cwd, workspace_id: "w1" }],
+    ["w2:p1", { cwd, workspace_id: "w2" }],
   ])
   const calls: string[][] = []
   const ok = (result: Record<string, unknown>) => ({ code: 0, out: JSON.stringify({ result }) })
@@ -202,7 +216,7 @@ describe("run screens the command through every registered Bash guard before it 
     async (guard) => {
       const repo = repoOf(guard)
       for (const row of rowsFor(guard)) {
-        const { calls, herdr } = stubHerdr()
+        const { calls, herdr } = stubHerdr("", { cwd: CWDS[guard] ?? WORKTREE })
         try {
           await withEnv(ENVS[guard] ?? {}, () => run("w1:p1", row, herdr, repo))
         } catch (error) {
