@@ -25,10 +25,10 @@ export type OutboxMessage = {
   id: string
   // Sent as the first message of a new thread, which the API opens.
   newThread?: boolean
-  reason: string | null
-  retryAt: number | null
   // When Claude Code first held it (QUEUED), kept through every later refusal and a page reload and sent with each retry, so an API that restarted since reads it again rather than typing it twice; it goes once the message is typed or reads LOST, whose Retry sends it afresh.
   queuedAt?: string
+  reason: string | null
+  retryAt: number | null
   // The session has been seen on its picker since this message was refused for one.
   sawPicker: boolean
   // The session that took it, from the API's reply: its transcript is the one to find it in.

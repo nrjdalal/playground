@@ -963,7 +963,7 @@ async function send(
   held?: Extract<InboxDelivery, { status: "queued" }>,
 ): Promise<InboxItem> {
   const one = (to: string, words: string) => ({ actor, id: crypto.randomUUID(), text: words, to })
-  // a stuck queued answer is read again under its own id and queued time, so deliver() types it only once it reads lost
+  // a stuck queued answer is read again under its own id and queued time, so this try types nothing: it reads queued, delivered, lost or unconfirmed, and only a Retry after lost types it
   let sent: Delivery & { id: string } = held
     ? {
         actor,

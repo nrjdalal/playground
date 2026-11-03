@@ -1751,6 +1751,32 @@ describe("deliver to a herdr session", () => {
         expect(run.recorded).toHaveLength(1)
       })
 
+      // a busy session can write more than the tail read in the wait, so a transcript that starts after the message was held cannot say it never went
+      test("past the bound, a transcript that does not reach back to the hold reads unconfirmed, and no Retry pastes it", async () => {
+        const run = queuedRun(compacting(`❯ ${MESSAGE}`))
+        await run.send()
+        run.deps.readScreen = async () => EMPTY
+        run.deps.said = async () => [{ ...OLDER, at: "2026-10-06T12:05:00.000Z", text: "later" }]
+        run.at(QUEUED_MS)
+        const unknown = await run.send()
+        expect(unknown).toMatchObject({ code: "INTERRUPTED", ok: false })
+        expect(unknown.ok ? "" : unknown.reason).toContain("may have gone")
+        expect(run.sent).toHaveLength(1)
+        expect(run.recorded).toEqual([])
+      })
+
+      test("past the bound, a transcript that cannot be read reads unconfirmed", async () => {
+        const run = queuedRun(compacting(`❯ ${MESSAGE}`))
+        await run.send()
+        run.deps.readScreen = async () => EMPTY
+        run.deps.said = async () => {
+          throw new Error("no transcript")
+        }
+        run.at(QUEUED_MS)
+        expect(await run.send()).toMatchObject({ code: "INTERRUPTED", ok: false })
+        expect(run.sent).toHaveLength(1)
+      })
+
       // an API restart forgets the ids it queued, and the outbox's queuedAt stands in for them, so the message is read again and never pasted twice
       describe("after an API restart", () => {
         const restarted = (shown: string, ms: number) => {

@@ -45,7 +45,7 @@ export type Delivery = {
   to: string
 }
 
-// Why a delivery did not happen, or has not yet. CMUX_FAILED, INPUT_NOT_EMPTY, NOT_FOUND and ON_PICKER come before anything is typed (CMUX_FAILED includes a send cmux refused before its first text, tried twice here), so they can succeed on a retry once the session or cmux changes, but for an INPUT_NOT_EMPTY marked `pasted`, whose message sits unsent in the box for its retry to press Enter on; AMBIGUOUS, COMMAND, EMPTY and TOO_LONG cannot until the text or the names change. INTERRUPTED means typing began and did not finish: some or all of the message may be in the session's input or already sent, so it is never retried unseen. QUEUED means Claude Code holds a herdr session's message, in its box while it compacts or in its queue while it works, and takes it on its own: a retry under the same id types nothing and reads it again, and LOST is that retry finding it neither on the screen nor in the transcript QUEUED_MS after it was queued, so Retry sends it again.
+// Why a delivery did not happen, or has not yet. CMUX_FAILED, INPUT_NOT_EMPTY, NOT_FOUND and ON_PICKER come before anything is typed (CMUX_FAILED includes a send cmux refused before its first text, tried twice here), so they can succeed on a retry once the session or cmux changes, but for an INPUT_NOT_EMPTY marked `pasted`, whose message sits unsent in the box for its retry to press Enter on; AMBIGUOUS, COMMAND, EMPTY and TOO_LONG cannot until the text or the names change. INTERRUPTED means typing began and did not finish, or a held message left the screen with a transcript that cannot be read back to when it was queued: some or all of the message may be in the session's input or already sent, so it is never retried unseen. QUEUED means Claude Code holds a herdr session's message, in its box while it compacts or in its queue while it works, and takes it on its own: a retry under the same id types nothing and reads it again, and LOST is that retry finding it neither on the screen nor in the transcript QUEUED_MS after it was queued, so Retry sends it again.
 export const DELIVERY_FAILURES = [
   "AMBIGUOUS",
   "CMUX_FAILED",
@@ -584,7 +584,7 @@ export async function deliver(
         ),
         pasted: true,
       })
-      // A message Claude Code held when an earlier try ended, by this process's record or, after a restart, by the outbox's queuedAt, is read again, never pasted twice: still held, it waits; gone from the screen, the transcript says it went, or, QUEUED_MS on with no line, that it was lost. One back in the box with no compaction left goes on below, where it gets its Enter as a paste of ours.
+      // A message Claude Code held when an earlier try ended, by this process's record or, after a restart, by the outbox's queuedAt, is read again, never pasted twice: still held, it waits; gone from the screen, the transcript says it went, or, QUEUED_MS on, that it was lost when the transcript reaches back with no line, and unconfirmed when it does not. One back in the box with no compaction left goes on below, where it gets its Enter as a paste of ours.
       const told = delivery.queuedAt ? Date.parse(delivery.queuedAt) : Number.NaN
       const queuedAt = delivery.id
         ? (queued.get(delivery.id) ?? (told <= deps.now().getTime() ? told : undefined))
@@ -603,6 +603,13 @@ export async function deliver(
           }
           if (deps.now().getTime() - queuedAt < QUEUED_MS) return stillQueued()
           queued.delete(delivery.id)
+          // a transcript that does not reach back to when it was queued, or could not be read, cannot say it never went, so it reads unconfirmed rather than lost
+          if (went === null) {
+            return refused(
+              "INTERRUPTED",
+              `${worker.name} no longer shows the message, and its transcript cannot be read back to when it was queued, so it may have gone: check it before sending it again.`,
+            )
+          }
           return refused(
             "LOST",
             `${worker.name} no longer shows the message, and its transcript holds no sign of it ${QUEUED_MS / 60_000} minutes after it was queued. Retry sends it again.`,
