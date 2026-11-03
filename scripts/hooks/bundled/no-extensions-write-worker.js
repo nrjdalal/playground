@@ -1325,7 +1325,7 @@ var REMOVERS = new Set(["find", "mv", "rm", "rmdir", "rsync", "unlink"]);
 var DUPLICATE = /^(?:\d+|-)$/;
 var writer = ({ op, target }) => [">", ">>", ">|", "<>"].includes(op) || op === ">&" && !DUPLICATE.test(target?.value ?? "");
 var GLOB = /[*?[{(]/;
-var RUNS = /^(?:EDITOR|GH_EDITOR|GH_PAGER|GIT_[A-Z_]+|LESSOPEN|PAGER|VISUAL)$/;
+var RUNS = /^(?:EDITOR|GIT_[A-Z_]+|LESSOPEN|PAGER|VISUAL)$/;
 var CLI = join5("packages", "scripts", "src", "playground", "cli.ts");
 var varsRun = new WeakMap;
 function runsVariable(vars) {
@@ -1350,40 +1350,6 @@ function reads(parsed, env) {
   const { rest, sub } = gitCall(args, env);
   const before = args.slice(0, args.length - rest.length - 1).map((a) => a.value);
   return !!sub && GIT_READS.has(sub) && !before.some((w) => w === "-c" || /^--(?:config-env|exec-path)/.test(w)) && !rest.some((w) => /^(?:--output|-O|--open-files-in-pager|--ext-diff|--textconv)/.test(w));
-}
-var GH_READS = new Set([
-  "api",
-  "issue list",
-  "issue view",
-  "pr list",
-  "pr view",
-  "run list",
-  "run view",
-  "search"
-]);
-var GH_API_SENDS = /^(?:-[^-=qt]*[FXf]|--(?:cache|field|input|method|raw-field)(?:=|$))/;
-var GH_WEB = /^(?:-[^-=qt]*w|--web(?:=|$))/;
-function ghFilters(parsed) {
-  const { args, first, name } = parsed;
-  const filters = new Set;
-  if (name !== "gh" || !first || marked(first.value))
-    return filters;
-  const [verb, sub] = args.map((a) => a.value);
-  const call = verb === "api" || verb === "search" ? verb : `${verb} ${sub}`;
-  if (!GH_READS.has(call))
-    return filters;
-  if (verb === "api" && args.some((a) => GH_API_SENDS.test(a.value)))
-    return filters;
-  if (args.some((a) => GH_WEB.test(a.value)))
-    return filters;
-  for (let k = 0;k < args.length; k++) {
-    const { value } = args[k];
-    if (["-q", "--jq", "-t", "--template"].includes(value) && args[k + 1])
-      filters.add(args[++k]);
-    else if (/^(?:-[qt].|--(?:jq|template)=)/.test(value))
-      filters.add(args[k]);
-  }
-  return filters;
 }
 var GUARD_KEYS = new Set([
   "ext.links",
@@ -1443,7 +1409,15 @@ function scoreAsOther(words, cmd, parsed, env) {
   return changes(at === -1 ? cmd.words : cmd.words.slice(0, at));
 }
 var AWKS = new Set(["awk", "gawk", "mawk", "nawk"]);
-var AWK_RUNS = /system|getline|[|>@]/;
+var AWK_RUNS = /system|getline|[>@]/;
+var awkRuns = (program) => AWK_RUNS.test(program) || awkPipe(program);
+var AWK_LEAD = /^\s*\/(?:[^\\/"[\n]|\\.)*\/(?=\s*(?:\{|$))/;
+var AWK_MATCH = /~\s*(?:\/(?:[^\\/"[\n]|\\.)*\/|"[^"\\\n]*")/g;
+function awkPipe(program) {
+  if (!program.includes("|"))
+    return false;
+  return /["/#\\|]/.test(program.replace(AWK_LEAD, " ").replace(AWK_MATCH, " "));
+}
 function awkPrograms(words) {
   const programs = [];
   for (let k = 0;k < words.length; k++) {
@@ -1468,7 +1442,7 @@ function awkPrograms(words) {
 function programLines({ args, first }, rooted) {
   if (!AWKS.has(program(first?.value ?? "").toLowerCase()))
     return [];
-  return (awkPrograms(args) ?? []).filter(({ value }) => rooted || AWK_RUNS.test(value)).flatMap(({ value }) => [...value.matchAll(/"((?:[^"\\]|\\.)*)"/g)].map((m) => m[1]));
+  return (awkPrograms(args) ?? []).filter(({ value }) => rooted || awkRuns(value)).flatMap(({ value }) => [...value.matchAll(/"((?:[^"\\]|\\.)*)"/g)].map((m) => m[1]));
 }
 function ownProgram(cmd, { first, name }) {
   return ownFirst(cmd, first) && !marked(name) && /^(?:\/(?:bin|opt\/homebrew\/bin|usr\/bin|usr\/local\/bin)\/)?[^/]+$/.test(first.value);
@@ -1484,16 +1458,12 @@ function narrow(cmd, env) {
   const base = program(first.value).toLowerCase();
   if (AWKS.has(base)) {
     const programs = awkPrograms(args);
-    return !!programs && programs.every(({ value }) => !marked(value) && !AWK_RUNS.test(value));
+    return !!programs && programs.every(({ value }) => !marked(value) && !awkRuns(value));
   }
   if (["cat", "grep", "head", "tail", "wc"].includes(base))
     return reads(parsed, env);
   if (base === "cut")
     return true;
-  if (base === "gh") {
-    const filters = ghFilters(parsed);
-    return filters.size > 0 && args.every((a) => filters.has(a) || !/\s/.test(a.value));
-  }
   if (base === "sort")
     return !args.some(({ value }) => /^-[a-zA-Z]*o|^--./.test(value));
   if (base === "uniq")
@@ -1716,10 +1686,8 @@ function inspect(raw, environment) {
         return refuse(`${verb} with a variable on ${named}`);
     }
     const literal = !whole && narrow(cmd, env);
-    const filters = whole ? new Set : ghFilters(parsed);
     for (const word of [first, ...args]) {
-      const text = quiet && /\s/.test(word.value) || filters.has(word) && !word.glob;
-      if (text && !texts(word).some((t) => holds(t.value, env)))
+      if (quiet && /\s/.test(word.value) && !texts(word).some((t) => holds(t.value, env)))
         continue;
       const named = names(word, env, remover, literal);
       if (named)

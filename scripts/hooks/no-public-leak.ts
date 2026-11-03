@@ -5,6 +5,7 @@ import {
   EMPTY_LIST,
   isPublicList,
   type Kind,
+  LIST_KEYS,
   type PublicList,
   patterns,
   readPast,
@@ -69,7 +70,11 @@ export async function check(
     EMPTY_LIST,
     environment,
   )
-  if (loaded.refusal) return refusedList(raw, loaded.refusal)
+  if (loaded.refusal)
+    return refusedList(
+      raw,
+      `${loaded.refusal} The list is a JSON object with an array of strings under each of ${LIST_KEYS.join(", ")}.`,
+    )
   const read = await readPolicy(dataDir(environment))
   if (read.refusal !== undefined)
     return refusedList(
