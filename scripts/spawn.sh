@@ -1108,7 +1108,7 @@ case "$MODE" in
     if [[ $ROLE =~ ^(reviewer|tester)$ ]]; then
       serves=$(roster_field "$NAME" worker)
       [ -z "$serves" ] || [ "$(roster_field "$serves" status)" != ended ] ||
-        refuse "its roster row names $serves as its worker, which has ended, so the checker reaper would end it again: point it at the worker it serves first, with bun scripts/roster.ts assign $NAME \"<title>\" review worker=<live worker> pr=<url>"
+        refuse "its roster row names $serves as its worker, which has ended, so the checker reaper would end it again: point it at the worker it serves first, with bun scripts/roster.ts assign $NAME \"<title>\" review worker=<live worker> pr=<url>, or, when it serves none, end its row with bun scripts/roster.ts set $NAME status=ended"
     fi
     # macOS guards the Desktop folder, so a new pane there fails until Full Disk Access is granted again after each update: a folder there resumes in the same tree under the code root, and in place where the code root is on the Desktop itself.
     desktop="$HOME/Desktop/" # the folder the factory left

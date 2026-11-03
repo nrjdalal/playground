@@ -758,35 +758,59 @@ describe("a resume with no id finds its session by name in its folder (#1201)", 
 // the checker reaper ends a checker whose roster worker has ended, so one resumed to serve another worker with its old row would be ended again on its next pass
 describe("a resume of a checker whose roster worker has ended", () => {
   const SESSION = "5e6f7a8b-9c0d-4e1f-8a2b-3c4d5e6f7a8b"
-  const NAME = "k3m9px-reviewer"
-  const claude = { name: NAME, backend: "claude" }
-  const roster = (status: string) => ({
+  const roster = (name: string, kind: string, status: string) => ({
     NO_SESSION_TRANSCRIPT: "1",
     ROSTER_JSON: JSON.stringify({
       agents: [
-        { kind: "reviewer", name: NAME, worker: "v2pq8t-worker" },
+        { kind, name, worker: "v2pq8t-worker" },
         { kind: "worker", name: "v2pq8t-worker", status },
       ],
     }),
   })
 
-  test("refuses before any pane opens, naming the roster.ts assign that points it at a live worker", async () => {
-    const r = await spawn(["resume", NAME, root, SESSION], [], roster("ended"), undefined, claude)
-    expect(r.code).toBe(1)
-    expect(r.err).toContain(
-      `spawn.sh refuses ${NAME}: its roster row names v2pq8t-worker as its worker, which has ended`,
-    )
-    expect(r.err).toContain(
-      `bun scripts/roster.ts assign ${NAME} "<title>" review worker=<live worker> pr=<url>`,
-    )
-    expect(r.cmux).toBeUndefined()
-    expect(existsSync(lw(r.home, "resume", `${NAME}.sh`))).toBe(false)
-  })
+  test.each([
+    ["k3m9px-reviewer", "reviewer"],
+    ["k3m9px-tester", "tester"],
+  ])(
+    "%s refuses before any pane opens, naming the assign to a live worker, else ending its row",
+    async (name, kind) => {
+      const r = await spawn(
+        ["resume", name, root, SESSION],
+        [],
+        roster(name, kind, "ended"),
+        undefined,
+        {
+          name,
+          backend: "claude",
+        },
+      )
+      expect(r.code).toBe(1)
+      expect(r.err).toContain(
+        `spawn.sh refuses ${name}: its roster row names v2pq8t-worker as its worker, which has ended`,
+      )
+      expect(r.err).toContain(
+        `bun scripts/roster.ts assign ${name} "<title>" review worker=<live worker> pr=<url>`,
+      )
+      expect(r.err).toContain(`bun scripts/roster.ts set ${name} status=ended`)
+      expect(r.cmux).toBeUndefined()
+      expect(existsSync(lw(r.home, "resume", `${name}.sh`))).toBe(false)
+    },
+  )
 
   test("a checker whose worker is live resumes as before", async () => {
-    const r = await spawn(["resume", NAME, root, SESSION], [], roster("working"), undefined, claude)
+    const name = "k3m9px-reviewer"
+    const r = await spawn(
+      ["resume", name, root, SESSION],
+      [],
+      roster(name, "reviewer", "working"),
+      undefined,
+      {
+        name,
+        backend: "claude",
+      },
+    )
     expect(r.err).toBe("")
     expect(r.code).toBe(0)
-    expect(launchOf(r)).toContain(`claude --session-id ${SESSION} -n ${NAME} `)
+    expect(launchOf(r)).toContain(`claude --session-id ${SESSION} -n ${name} `)
   })
 })
