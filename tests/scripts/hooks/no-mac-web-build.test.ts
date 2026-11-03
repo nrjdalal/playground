@@ -237,26 +237,33 @@ describe("the dashboard's container decides", () => {
     expect(reason).toContain("no docker on PATH")
   })
 
-  // The stub's sleep outlives the killed bash and holds its pipes, so this reaches the read's backstop too.
+  // The hook's timeout in each settings file Claude Code reads, in ms.
+  const registered = ["scripts/factory-settings.json", ".claude/settings.json"].map((settings) => {
+    const { hooks } = JSON.parse(readFileSync(join(root, settings), "utf8")) as {
+      hooks: { PreToolUse: { hooks: { command: string; timeout: number }[] }[] }
+    }
+    const timeout =
+      hooks.PreToolUse.flatMap((e) => e.hooks).find((h) =>
+        h.command.includes("scripts/hooks/bundled/no-mac-web-build.js"),
+      )?.timeout ?? NaN
+    return [settings, timeout * 1000] as const
+  })
+
+  test.each(registered)(
+    "%s registers a timeout past the inspect's, with room to answer",
+    (_, ms) => {
+      expect(ms).toBeGreaterThan(INSPECT_TIMEOUT_MS + 4000)
+    },
+  )
+
+  // The stub's sleep outlives the killed bash and holds its pipes, so this reaches the read's backstop too; a hook that waited on them would run past this test's time, the hook's registered timeout.
   test(
     "a Docker that never answers refuses inside the hook's registered timeout",
     async () => {
-      const started = performance.now()
       const reason = await dashboard("hung").bash("docker compose build web")
       expect(reason).toContain(`gave no answer in ${INSPECT_TIMEOUT_MS / 1000}s`)
       expect(reason).toContain("ci.sh web HEAD")
-      expect(performance.now() - started).toBeLessThan(INSPECT_TIMEOUT_MS + 3000)
-      for (const settings of ["scripts/factory-settings.json", ".claude/settings.json"]) {
-        const { hooks } = JSON.parse(readFileSync(join(root, settings), "utf8")) as {
-          hooks: { PreToolUse: { hooks: { command: string; timeout: number }[] }[] }
-        }
-        const timeout =
-          hooks.PreToolUse.flatMap((e) => e.hooks).find((h) =>
-            h.command.includes("scripts/hooks/bundled/no-mac-web-build.js"),
-          )?.timeout ?? NaN
-        expect(timeout * 1000, settings).toBeGreaterThan(INSPECT_TIMEOUT_MS + 4000)
-      }
     },
-    INSPECT_TIMEOUT_MS + 10_000,
+    Math.min(...registered.map(([, ms]) => ms)),
   )
 })

@@ -5,7 +5,8 @@ import { basename, dirname, isAbsolute, resolve } from "node:path"
 // `variable` names the first shell variable a text expands, so a hook can tell `"$HERDR_BIN_PATH"` from any other unknown program.
 export type Text = { reads?: Text[]; unknown?: string; value: string; variable?: string }
 // `glob` marks a word with a glob character the shell sees outside quotes, so `'{print $1}'` holds none and `{a,'b'}` one.
-export type Word = Text & { glob?: boolean; procs?: Command[]; quoted: boolean }
+// `raw` keeps the source of a word that holds a value the lexer cannot read, so a hook can lex it again once the call has set its variables.
+export type Word = Text & { glob?: boolean; procs?: Command[]; quoted: boolean; raw?: string }
 type Redirect = { body?: Text; fd: string; op: string; target?: Word }
 export type Command = {
   // The token of the run of commands this one belongs to: it changes at each operator that runs a command whatever the one before it did (a `;`, a newline, an `&`, an `||`), and carries into every group, body and pipeline the run reaches, so a cd is read as having moved the shell only for the commands whose token is its own
@@ -13,6 +14,8 @@ export type Command = {
   // Set when the command runs only if the one before it succeeded (it sits on the right of an `&&`), so a cd of its own has certainly run for every command the same chain joins after it
   chained?: boolean
   detached?: boolean
+  // the operator that ended the command before it in its scope (`;`, `&&`, `||`, `|`, `&`, `)` or `;;`), none for a scope's first
+  follows?: string
   group?: boolean
   // Set when the command sits in a body the shell keeps for a later call (a function's, a brace group's, a coproc's), so a cd of its own may move the shell at any point of the line
   held?: boolean
@@ -100,9 +103,12 @@ export function pastDeadline(): void {
 
 let steps = 0
 
-// The one choke point every lex, expansion and walk step passes through; it reads the clock once every 1024 steps, so a tight loop pays for a counter alone.
+// The steps tick() has counted so far, so a test bounds a reader's work by a count that holds under any load.
+export const stepsTaken = (): number => steps
+
+// The one choke point every lex, expansion and walk step passes through; it counts each step and reads the clock once every 1024 under a deadline, so a tight loop pays for a counter alone.
 export function tick(): void {
-  if (deadline === undefined || ++steps % 1024 !== 0) return
+  if (++steps % 1024 !== 0 || deadline === undefined) return
   if (performance.now() > deadline) throw new RangeError("past the hook's time")
 }
 
@@ -239,9 +245,19 @@ const ROOT_SHELLS = new Map([
   ["doas", new Set(["-s"])],
   ["sudo", new Set(["--login", "--shell", "-i", "-s"])],
 ])
-// Whether a command starts a shell that reads its script from stdin, with no command of its own: "root" for a privilege wrapper's shell (`sudo -s`, `nice doas -s`, an option or program in a variable taken as one), "shell" for a shell given no script (`sh`, `sudo bash`); a reserved word, a function's name or an assignment before it skipped
+// Whether a command starts a shell that reads its script from stdin, with no command of its own, under any of parse's readings (a shortened long option is one its lists lack, so it is read as taking the next word too); once the readings ran out, any privilege wrapper among its words counts as a root shell and any shell's name as a shell: "root" for a privilege wrapper's shell (`sudo -s`, `nice doas -s`, an option or program in a variable taken as one), "shell" for a shell given no script (`sh`, `sudo bash`); a reserved word, a function's name or an assignment before it skipped
 export function stdinShell(cmd: Command): "root" | "shell" | undefined {
-  const { args, first, name } = parse(cmd)
+  const parsed = parse(cmd)
+  const kinds = readings(parsed).map((reading) => stdinShellOf(cmd, reading))
+  if (parsed.capped) {
+    const names = cmd.words.map((w) => program(w.value))
+    if (names.some((n) => ROOT_SHELLS.has(n))) kinds.push("root")
+    else if (names.some((n) => SHELLS.has(n))) kinds.push("shell")
+  }
+  return kinds.includes("root") ? "root" : kinds.find(Boolean)
+}
+
+function stdinShellOf(cmd: Command, { args, first, name }: Parsed): "root" | "shell" | undefined {
   if (first && !marked(first.value)) {
     if (!SHELLS.has(name)) return undefined
     const { inline, operand } = shellOperand(args, name)
@@ -454,6 +470,7 @@ function decode(raw: string): string {
   return raw.replace(
     /\\(?:x([\da-fA-F]{1,2})|u([\da-fA-F]{1,4})|U([\da-fA-F]{1,8})|0?([0-7]{1,3})|([\s\S]))/g,
     (whole, hex?: string, u4?: string, u8?: string, octal?: string, other?: string) => {
+      tick()
       const point =
         hex || u4 || u8
           ? Number.parseInt(hex ?? u4 ?? u8 ?? "", 16)
@@ -534,6 +551,7 @@ function walk(lx: Lexer, scope: number, nested: boolean, inherit?: Command): voi
       lx.commands.push(done)
     }
     cmd = fresh()
+    cmd.follows = op
     if (pipe) {
       cmd.stdin = done
       cmd.detached = true
@@ -553,7 +571,7 @@ function walk(lx: Lexer, scope: number, nested: boolean, inherit?: Command): voi
       while (lx.i < src.length && src[lx.i] !== "\n") lx.i++
     } else if (c === ")") {
       lx.i++
-      end(";")
+      end(")")
       if (nested) return
     } else if (c === "(") {
       lx.i++
@@ -703,6 +721,7 @@ function word(lx: Lexer): Word {
   // the lookahead finds the close once, so a { with no } costs its length rather than its square
   if (/\{(?=[^{}]*\})[^{}]*(?:,|\.\.)/.test(bare)) out.unknown ??= "a brace expansion"
   if (GLOB_CHARS.test(bare)) out.glob = true
+  if (marked(out.value)) out.raw = src.slice(start, lx.i)
   return out
 }
 
@@ -755,7 +774,7 @@ function dollar(lx: Lexer): Text {
     lx.i += 2
     const from = lx.commands.length
     nest(lx)
-    return substituted(lx.commands.slice(from))
+    return substituted(lx.commands.slice(from), lx.known)
   }
   if (next === "{") {
     const end = balanced(src, lx.i + 1, "{", "}")
@@ -768,6 +787,11 @@ function dollar(lx: Lexer): Text {
     const from = ++lx.i
     while (/\w/.test(src[lx.i] ?? "")) lx.i++
     return variable(src.slice(from, lx.i))
+  }
+  // the shell's pid is digits whatever its value, so a path built around it is judged by where it lands
+  if (next === "$") {
+    lx.i += 2
+    return { value: "99999" }
   }
   if (/[\d@*#?$!-]/.test(next)) {
     lx.i += 2
@@ -820,9 +844,11 @@ function backtick(lx: Lexer): Text {
 }
 
 // `$(cat <<'EOF' ... EOF)`, `$(cat file)` and `$(< file)` are read; any other command substitution is unknown.
-function substituted(inner: Command[]): Text {
+function substituted(inner: Command[], known: Record<string, string>): Text {
   const [only] = inner
   if (inner.length !== 1 || only.stdin || only.group) return unknown("a command substitution")
+  const made = mktempPath(only, known)
+  if (made) return { value: made }
   const [first, ...args] = only.words
   const plainCat = first?.value === "cat" && !first.unknown && !first.reads?.length
   const input = only.redirects[0]
@@ -845,6 +871,30 @@ function substituted(inner: Command[]): Text {
   return unknown("a command substitution")
 }
 
+// mktemp's flags that leave it making a fresh name under TMPDIR; a dry run (-u) makes none, so its name can be one that exists
+const MKTEMP_FLAGS = new Set(["d", "q"])
+const MKTEMP_LONG = new Set(["--directory", "--quiet"])
+
+// The path a plain `mktemp` makes, on a line that never sets TMPDIR (knownVariables drops it then), with no -p, --tmpdir or -t to steer it: its one held template as written, judged where it lands from the call's folder, else a name under TMPDIR standing in for its random part
+function mktempPath(cmd: Command, known: Record<string, string>): string | undefined {
+  const [first, ...args] = cmd.words
+  if (!first || first.quoted || first.value !== "mktemp" || cmd.redirects.length > 0) return
+  if (!known.TMPDIR) return
+  const flag = ({ quoted, value }: Word) =>
+    !quoted &&
+    (MKTEMP_LONG.has(value) ||
+      (/^-[a-z]+$/.test(value) &&
+        value
+          .slice(1)
+          .split("")
+          .every((c) => MKTEMP_FLAGS.has(c))))
+  const templates = args.filter((word) => !flag(word))
+  const [template] = templates
+  if (templates.length > 1 || template?.value.startsWith("-") || marked(template?.value ?? ""))
+    return
+  return template ? template.value : `${known.TMPDIR.replace(/\/$/, "")}/tmp.mktemp`
+}
+
 // xargs in front of a command: `replace` is its -I (or BSD -J) string, which marks where stdin goes; without one, stdin is appended as arguments.
 export type Xargs = { replace?: string } | undefined
 
@@ -852,6 +902,8 @@ export type Parsed = {
   // the other readings of a wrapper's option it cannot read, each judged as the command too
   also: Parsed[]
   args: Word[]
+  // the parse ran out of other readings (READINGS), so an option it cannot read was read as a flag alone
+  capped?: boolean
   chdir?: Word
   first?: Word
   local: Map<string, Text>
@@ -865,6 +917,7 @@ const SPLIT = /^(?:-[0iv]*S|--split-string(?:=|$))(.*)$/
 type State = { chdir?: Word; local: Map<string, Text>; rest: Word[]; xargs: Xargs }
 // The other readings one command's parse makes at most, so options it cannot read cost a bounded time; past them it reads each as canary did, a flag
 const READINGS = 16
+type Budget = { capped?: boolean; left: number }
 
 export function parse(cmd: Command): Parsed {
   // the words still to read, the next one last, so env -S puts its words back in front in the time of their own count
@@ -876,8 +929,13 @@ export function parse(cmd: Command): Parsed {
     else break
   }
   while (ASSIGN.test(rest.at(-1)?.value ?? "")) assign(state.local, rest.pop() as Word)
-  return unwrap(state, undefined, { left: READINGS })
+  const budget: Budget = { left: READINGS }
+  const parsed = unwrap(state, undefined, budget)
+  return budget.capped ? { ...parsed, capped: true } : parsed
 }
+
+// A parse's primary reading, then each other reading in `also`, depth first.
+const readings = (parsed: Parsed): Parsed[] => [parsed, ...parsed.also.flatMap(readings)]
 
 const assign = (local: Map<string, Text>, w: Word) => {
   const eq = w.value.indexOf("=")
@@ -885,13 +943,17 @@ const assign = (local: Map<string, Text>, w: Word) => {
 }
 
 // The program behind the wrappers at the front of the words, resumed inside `inside`'s options for a second reading: an option the wrapper's lists lack is read as a flag, as a value-less option, and again as taking the next word, and a value in a variable again as expanding to no word and to more than one, each other reading kept in `also`.
-function unwrap(state: State, inside: string | undefined, budget: { left: number }): Parsed {
+function unwrap(state: State, inside: string | undefined, budget: Budget): Parsed {
   const { local, rest } = state
   const peek = (): Word | undefined => rest[rest.length - 1]
   const take = (): Word | undefined => rest.pop()
   const also: Parsed[] = []
-  const fork = (wrapper: string, drop: number) =>
-    budget.left-- > 0 &&
+  const fork = (wrapper: string, drop: number) => {
+    tick()
+    if (budget.left-- <= 0) {
+      budget.capped = true
+      return
+    }
     also.push(
       unwrap(
         {
@@ -904,6 +966,7 @@ function unwrap(state: State, inside: string | undefined, budget: { left: number
         budget,
       ),
     )
+  }
   for (let wrapper = inside; ; wrapper = undefined) {
     if (!wrapper) {
       wrapper = program(peek()?.value ?? "")
@@ -1034,7 +1097,6 @@ export async function examine(
 ): Promise<string | undefined> {
   tick()
   unchain(cmd, env)
-  const readings = (parsed: Parsed): Parsed[] => [parsed, ...parsed.also.flatMap(readings)]
   const [primary, ...others] = readings(parse(cmd))
   // only the primary reading moves the folder, sets variables and records files, as canary's one reading did; each other runs on a copy of the env before the command
   const before = others.length > 0 ? apart(env) : env

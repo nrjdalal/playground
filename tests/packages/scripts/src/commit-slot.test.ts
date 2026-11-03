@@ -214,10 +214,110 @@ describe("commit-slot.ts", () => {
     expect(result.exitCode).toBe(7)
   })
 
+  // 3 Nov: a plain commit waited 48 minutes in the full queue, printing nothing, before its session found the commit slot's form
+  describe("a commit whose build joins the full queue", () => {
+    const FORM = "~/.playground/ops/run-slot.sh <your name> -- git commit"
+    const queue = (room: string, step: () => ReturnType<typeof run>) => {
+      writeFileSync(
+        join(ops, "run-slot.sh"),
+        `#!/bin/sh\n[ "$1" = room ] && { printf '${room}'; exit 0; }\nexit 7\n`,
+      )
+      chmodSync(join(ops, "run-slot.sh"), 0o755)
+      try {
+        return step()
+      } finally {
+        rmSync(join(ops, "run-slot.sh"))
+      }
+    }
+    const notices = (result: ReturnType<typeof run>) =>
+      result.stderr
+        .toString()
+        .split("\n")
+        .filter((line) => line.startsWith("commit-slot: "))
+
+    test("says once how many runs wait there and names the commit slot's form", () => {
+      const result = queue("4 4 0 27\\n", () => run(["echo", "hi"]))
+      expect(notices(result)).toEqual([
+        `commit-slot: this commit's build joins run-slot's full queue as commit-wt-one, 27 runs waiting; a commit through ${FORM} takes the commit slot instead`,
+      ])
+      expect(result.exitCode).toBe(7)
+    })
+
+    test("still names the form when run-slot.sh room gives no reading", () => {
+      const result = queue("", () => run(["echo", "hi"]))
+      expect(notices(result)).toEqual([
+        `commit-slot: this commit's build joins run-slot's full queue as commit-wt-one; a commit through ${FORM} takes the commit slot instead`,
+      ])
+    })
+
+    test("says nothing for a commit already under run-slot, whose build runs bare", () => {
+      const result = queue("4 4 0 27\\n", () =>
+        Bun.spawnSync(["bun", "--no-env-file", SCRIPT, "echo", "hi"], {
+          cwd: worktree,
+          env: { ...env(), RUN_SLOT_NICE: "10" },
+          stderr: "pipe",
+          stdout: "pipe",
+        }),
+      )
+      expect(notices(result)).toEqual([])
+      expect(result.stdout.toString()).toBe("hi\n")
+    })
+  })
+
   test("runs the step bare with no run-slot.sh, keeping its output and exit code", () => {
     const ok = run(["echo", "hi"])
     expect(ok.stdout.toString()).toBe("hi\n")
     expect(ok.exitCode).toBe(0)
     expect(run(["sh", "-c", "exit 3"]).exitCode).toBe(3)
+  })
+})
+
+// PG-672: a canary merge that brings a new workspace package left its dependency unlinked, and the build waited for a slot before it failed with exit 127, naming nothing
+describe("commit-slot.ts on a worktree whose install predates a workspace dependency", () => {
+  const home = join(DIR, "home-unlinked")
+  const ops = join(home, ".playground/ops")
+  const worktree = join(DIR, "repo/.claude/worktrees/wt-unlinked")
+  const slot = join(DIR, "seen-unlinked-slot")
+  mkdirSync(ops, { recursive: true })
+  mkdirSync(join(worktree, "packages/fresh"), { recursive: true })
+  writeFileSync(join(worktree, "package.json"), JSON.stringify({ workspaces: ["packages/*"] }))
+  writeFileSync(
+    join(worktree, "packages/fresh/package.json"),
+    JSON.stringify({ dependencies: { "left-pad": "^1.3.0" } }),
+  )
+  writeFileSync(join(ops, "run-slot.sh"), `#!/bin/sh\necho "$@" > '${slot}'\nshift 2\nexec "$@"\n`)
+  chmodSync(join(ops, "run-slot.sh"), 0o755)
+  const run = () =>
+    Bun.spawnSync(["bun", "--no-env-file", SCRIPT, "echo", "built"], {
+      cwd: worktree,
+      env: {
+        ...Object.fromEntries(
+          Object.entries(process.env).filter(([key]) => key !== "RUN_SLOT_NICE"),
+        ),
+        HOME: home,
+      },
+      stderr: "pipe",
+      stdout: "pipe",
+    })
+
+  test("fails before it asks for a slot, naming the package and bun install", () => {
+    rmSync(slot, { force: true })
+    const result = run()
+    expect(result.exitCode).not.toBe(0)
+    expect(existsSync(slot)).toBe(false)
+    expect(result.stdout.toString()).toBe("")
+    const said = result.stderr.toString()
+    expect(said).toContain("packages/fresh: left-pad")
+    expect(said).toContain("bun install")
+  })
+
+  test("with every dependency linked, takes the slot and runs the step as before", () => {
+    mkdirSync(join(worktree, "node_modules/left-pad"), { recursive: true })
+    writeFileSync(join(worktree, "node_modules/left-pad/package.json"), "{}")
+    rmSync(slot, { force: true })
+    const result = run()
+    expect(readFileSync(slot, "utf8")).toBe("commit-wt-unlinked -- echo built\n")
+    expect(result.stdout.toString()).toBe("built\n")
+    expect(result.exitCode).toBe(0)
   })
 })

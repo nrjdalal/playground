@@ -141,6 +141,10 @@ describe("a build, a test run, lefthook, turbo or a file write in the main check
     const reason = await bash(command)
     expect(reason).toContain("no-main-checkout hook refuses")
     expect(reason).toContain(".claude/worktrees/")
+    // the worktree start it advises writes no branch config into the shared .git/config, which Claude Code's sandbox refuses
+    expect(reason).toContain(
+      "git worktree add --no-track .claude/worktrees/<name> -b <branch> origin/canary",
+    )
   })
 
   test.each([

@@ -163,6 +163,7 @@ const CHECK_NAMES = [
   "mainCheckout",
   "playgroundLeak",
   "publicLeak",
+  "rawDelete",
   "rawSpawn",
   "releaseComment",
   "stash",
@@ -180,6 +181,7 @@ const SOURCE: Checks = {
   mainCheckout,
   playgroundLeak,
   publicLeak,
+  rawDelete,
   rawSpawn,
   releaseComment,
   stash,
@@ -197,6 +199,7 @@ const GUARD_OF: Record<(typeof CHECK_NAMES)[number], Guard> = {
   mainCheckout: "no-main-checkout",
   playgroundLeak: "no-playground-leak",
   publicLeak: "no-public-leak",
+  rawDelete: "no-raw-delete",
   rawSpawn: "no-raw-spawn",
   releaseComment: "no-release-comment",
   stash: "no-stash",
@@ -309,13 +312,12 @@ const guardsOf = (
     folders: { checkout: [CHECKOUT, HOME], home: [HOME, HOME] },
     run: (raw) => c.publicLeak(raw, { CLAUDE_CONFIG_DIR: SCRATCH, PLAYGROUND_DATA_DIR: LISTLESS }),
   },
-  // No bundle while no settings file registers it, so only its source runs, and the bundled pass below leaves it out, since GUARD_OF names no check of it.
   "no-raw-delete": {
     folders: {
       checkout: [CHECKOUT, HOME],
       "process worktree": [join(homedir(), "x", ".claude", "worktrees", "y"), homedir()],
     },
-    run: (raw) => rawDelete(raw),
+    run: (raw) => c.rawDelete(raw),
   },
   "no-raw-spawn": { folders: { checkout: [CHECKOUT, HOME] }, run: (raw) => c.rawSpawn(raw) },
   "no-release-comment": {

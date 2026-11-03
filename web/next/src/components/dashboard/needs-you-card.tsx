@@ -136,7 +136,7 @@ export function NeedsYouCard({
       if (!result.ok) throw Object.assign(new Error(result.reason), { sent: result.sent === true })
       return result
     },
-    // A refusal that says to look at the terminal stays on the card, and sending again becomes its own step.
+    // A refusal stays on the card with its reason, and sending again becomes its own step.
     onMutate: () => setFailure(null),
     onError: (error) => {
       setFailure({ reason: error.message, sent: (error as { sent?: boolean }).sent === true })

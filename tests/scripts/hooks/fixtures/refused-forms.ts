@@ -71,8 +71,10 @@ export type Group = {
     | "#411"
     | "#443"
     | "#446"
+    | "#448"
     | "#452"
     | "#456"
+    | "#462"
     | "#463"
     | "#466"
     | "#469"
@@ -85,6 +87,7 @@ export type Group = {
     | "#573"
     | "#579"
     | "#614"
+    | "#652"
 }
 
 // The rows a guard-loosening PR lets run on purpose, and the rows that show the one form a guard lets run, each written as a row's "<source> <what>" for all its cases, or as one case's "<source> <what> | <guard> | <folder>".
@@ -1807,6 +1810,195 @@ gh api graphql -f query="$QUERY"`,
     folders: ["process home", "process data folder", "process worktree"],
     guards: ["no-extensions-write"],
     rows: () => [
+      ["rm of a substitution the hook cannot read", "rm -rf $(echo .p*)/.no-such-folder"],
+      ["rm of a backtick substitution the hook cannot read", "rm -rf `echo .p*`/.no-such-folder"],
+      ["rm of a variable the call never sets", "rm -rf $X/.no-such-folder"],
+      ["mv of a quoted variable the call never sets", 'mv "$X" /tmp/y'],
+      [
+        "rm of a glob after a variable the call held",
+        "X=.p; rm -rf $X*/.no-such-folder",
+        "process home",
+      ],
+      [
+        "rm of a variable's glob inside .playground",
+        "X=e; rm -rf .playground/$X*/.no-such-folder",
+        "process home",
+      ],
+      ["rm of a held path's glob", "X=.playground/e; rm -rf $X*/.no-such-folder", "process home"],
+      [
+        "git -c running a pager exported earlier in the call",
+        `export P='rm -rf .playground/.no-such-folder'; true; cd \${HOME}; git -c core.pager="$P" log`,
+        "process tmp",
+      ],
+      ["git -c with a value the call never sets", 'git -c core.pager="$P" log'],
+      ["git -c attached with a value the call never sets", 'git -ccore.pager="$P" log'],
+      [
+        "rm of mktemp's folder made from a template in the root",
+        'T=$(mktemp -d ~/.playground/extensions/x.XXXX); rm -rf "$T/.no-such-folder"',
+      ],
+      [
+        "rm of mktemp's folder made with -p in the root",
+        'T=$(mktemp -d -p ~/.playground/extensions); rm -rf "$T/.no-such-folder"',
+      ],
+      [
+        "rm of mktemp's folder made with --tmpdir= in the root",
+        'T=$(mktemp -d --tmpdir=$HOME/.playground/extensions); rm -rf "$T/.no-such-folder"',
+      ],
+      [
+        "rm of mktemp's folder made with TMPDIR set inline",
+        'T=$(TMPDIR=$HOME/.playground/extensions mktemp -d); rm -rf "$T/.no-such-folder"',
+      ],
+      [
+        "rm of mktemp's folder made with TMPDIR exported",
+        'export TMPDIR=$HOME/.playground/extensions; T=$(mktemp -d); rm -rf "$T/.no-such-folder"',
+      ],
+      ["rm of a pid-named path in the root", "rm -f ~/.playground/extensions/$$"],
+      [
+        "rm of mktemp's folder from a held variable's template in the root",
+        'D=~/.playground/extensions; T=$(mktemp -d "$D/x.XXXX"); rm -rf "$T/.no-such-folder"',
+      ],
+      [
+        "rm of mktemp's folder from a relative template inside the root",
+        'T=$(mktemp -d x.XXXX); rm -rf "$T/.no-such-folder"',
+        "extensions root",
+      ],
+      [
+        "rm of a variable built on one the call sets again after",
+        'S=extensions; T="$S/.no-such-folder"; S=/tmp; rm -rf $T',
+        "process data folder",
+      ],
+      [
+        "rm of a variable set again where the shell skips it",
+        "X=extensions/.no-such-folder || X=/tmp/a; rm -rf $X",
+        "process data folder",
+      ],
+      [
+        "rm of a variable set again in a pipeline's subshell",
+        "X=extensions/.no-such-folder; X=/tmp/a | X=/tmp/b; rm -rf $X",
+        "process data folder",
+      ],
+      [
+        "rm of a variable set again in a backgrounded subshell",
+        "X=extensions/.no-such-folder; X=/tmp/a & rm -rf $X",
+        "process data folder",
+      ],
+      [
+        "rm of a variable a quoted assignment, a command the shell runs, never sets",
+        '"X=/tmp/a"; rm -rf ${X}extensions/.no-such-folder',
+        "process data folder",
+      ],
+      [
+        "rm after a ; of a variable an && chain set, which the shell may skip",
+        "false && X=/tmp/a; rm -rf ${X}extensions/.no-such-folder",
+        "process data folder",
+      ],
+      [
+        "rm of a variable set only in a function the line never calls",
+        "f() { true; X=/tmp/a; }; rm -rf ${X}.playground/./extensions/.no-such-folder",
+        "process home",
+      ],
+      [
+        "rm of a variable set only in an untaken if branch",
+        "if false; then true; X=/tmp/a; fi; rm -rf ${X}.playground/./extensions/.no-such-folder",
+        "process home",
+      ],
+      [
+        "rm of a variable set only in an untaken if branch on its own line",
+        "if false; then\nX=/tmp/a\nfi\nrm -rf ${X}.playground/./extensions/.no-such-folder",
+        "process home",
+      ],
+      [
+        "rm of a variable set only in a loop body that never runs",
+        "while false; do true; X=/tmp/a; done; rm -rf ${X}.playground/./extensions/.no-such-folder",
+        "process home",
+      ],
+      [
+        "rm of a variable set only in an untaken case arm",
+        "case a in b) true; X=/tmp/a;; esac; rm -rf ${X}.playground/./extensions/.no-such-folder",
+        "process home",
+      ],
+      [
+        "rm of a variable set only in a group behind a failing &&",
+        "false && { true; X=/tmp/a; }; rm -rf ${X}.playground/./extensions/.no-such-folder",
+        "process home",
+      ],
+      [
+        "rm of a variable read sets by a name spelled in pieces",
+        "XY=/tmp/a; read X\\Y <<< exten; rm -rf ${XY}sions/.no-such-folder",
+        "process data folder",
+      ],
+      [
+        "rm of a variable eval sets by a name it builds",
+        'XY=/tmp/a; N=X; eval "${N}Y=exten"; rm -rf ${XY}sions/.no-such-folder',
+        "process data folder",
+      ],
+      [
+        "rm of the parameter _, which the shell sets itself after each command",
+        "_=/tmp/a; rm -rf ${_}.playground/./extensions/.no-such-folder",
+        "process home",
+      ],
+      [
+        "rm of the parameter RANDOM, which the shell sets itself to digits",
+        "RANDOM=/tmp/a; rm -rf ${RANDOM}.playground/./extensions/.no-such-folder",
+        "process home",
+      ],
+      [
+        "rm of a variable zsh's ::= expansion sets again",
+        "X=/tmp/a; : ${X::=}; rm -rf ${X}.playground/./extensions/.no-such-folder",
+        "process home",
+      ],
+      [
+        "rm of a held variable on a line that sets IFS, which bash splits it at",
+        "IFS=q; X=.no-such-folderq.playground/./extensions/.no-such-folder; rm -rf $X",
+        "process home",
+      ],
+      [
+        "rm of a variable the call appends to",
+        "X=ext; X+=ensions/.no-such-folder; rm -rf $X",
+        "process data folder",
+      ],
+      [
+        "rm of a variable printf -v sets again",
+        "X=/tmp/a; printf -v X %s%s exten sions/.no-such-folder; rm -rf $X",
+        "process data folder",
+      ],
+      [
+        "rm of a variable read sets again",
+        "X=/tmp/a; read X <<< exten; rm -rf ${X}sions/.no-such-folder",
+        "process data folder",
+      ],
+      [
+        "rm of a variable a for loop sets again",
+        "X=/tmp/a; for X in exten; do rm -rf ${X}sions/.no-such-folder; done",
+        "process data folder",
+      ],
+      [
+        "rm under a TMPDIR a for loop sets",
+        "for TMPDIR in ext; do rm -rf ${TMPDIR}ensions/.no-such-folder; done",
+        "process data folder",
+      ],
+      [
+        "rm of mktemp's dry-run name",
+        'T=$(mktemp -u .playgrounX); rm -rf "$T/extensions/.no-such-folder"',
+        "process home",
+      ],
+      [
+        "rm of mktemp's --dry-run name",
+        'T=$(mktemp --dry-run .playgrounX); rm -rf "$T/extensions/.no-such-folder"',
+        "process home",
+      ],
+      [
+        "rm under xargs fed by a command the hook cannot read",
+        "ls -a | xargs -I% rm -rf %/.no-such-folder",
+        "process data folder",
+      ],
+    ],
+    source: "#448",
+  },
+  {
+    folders: ["process home", "process data folder", "process worktree"],
+    guards: ["no-extensions-write"],
+    rows: () => [
       [
         "a delete behind sudo, its -p value in a cluster",
         "sudo -Hp wc watch 'rm -rf ~/.playground/extensions/.no-such-folder'",
@@ -2897,6 +3089,269 @@ gh api graphql -f query="$QUERY"`,
     guards: ["no-extensions-write"],
     rows: () => [
       [
+        "a removal in an extension's jq filter",
+        `gh my-ext --jq '"rm -rf ~/.playground/extensions/.no-such-folder"'`,
+      ],
+      [
+        "a removal in a jq filter under gh extension exec",
+        `gh extension exec x -q '"rm -rf ~/.playground/extensions/.no-such-folder"'`,
+      ],
+      [
+        "a removal in a shell alias gh sets",
+        "gh alias set --shell v 'rm -rf ~/.playground/extensions/.no-such-folder'",
+      ],
+      [
+        "a removal in a jq filter of an alias called by name",
+        `gh v -q '"rm -rf ~/.playground/extensions/.no-such-folder"'`,
+      ],
+      [
+        "a removal in a jq filter with GH_PAGER set",
+        `GH_PAGER=less gh pr view 1 -q '"rm -rf ~/.playground/extensions/.no-such-folder"'`,
+      ],
+      [
+        "a removal in a jq filter with PAGER set",
+        `PAGER=less gh run view 1 --jq '"rm -rf ~/.playground/extensions/.no-such-folder"'`,
+      ],
+      [
+        "a removal in a jq filter with GH_EDITOR set",
+        `GH_EDITOR=vi gh issue view 1 --jq '"rm -rf ~/.playground/extensions/.no-such-folder"'`,
+      ],
+      [
+        "a removal in a jq filter with EDITOR exported",
+        `export EDITOR=vi; gh api x --jq '"rm -rf ~/.playground/extensions/.no-such-folder"'`,
+      ],
+      [
+        "a removal in gh config's pager",
+        "gh config set pager 'rm -rf ~/.playground/extensions/.no-such-folder'",
+      ],
+      [
+        "a removal in a jq filter of gh repo clone",
+        `gh repo clone o/r --jq '"rm -rf ~/.playground/extensions/.no-such-folder"'`,
+      ],
+      [
+        "a removal in a jq filter of gh pr checkout",
+        `gh pr checkout 1 --jq '"rm -rf ~/.playground/extensions/.no-such-folder"'`,
+      ],
+      [
+        "a removal in a jq filter of gh run download",
+        `gh run download 1 --jq '"rm -rf ~/.playground/extensions/.no-such-folder"'`,
+      ],
+      [
+        "a removal in a jq filter of gh release download",
+        `gh release download v1 --jq '"rm -rf ~/.playground/extensions/.no-such-folder"'`,
+      ],
+      [
+        "a removal in a jq filter of gh codespace",
+        `gh codespace ssh --jq '"rm -rf ~/.playground/extensions/.no-such-folder"'`,
+      ],
+      [
+        "a gh pr view template's printed removal piped to a shell",
+        `gh pr view 1 --template '"rm -rf ~/.playground/extensions/.no-such-folder"' | sh`,
+      ],
+      [
+        "a removal in gh api's field",
+        "gh api x -q '.a' -f q='rm -rf ~/.playground/extensions/.no-such-folder'",
+      ],
+      [
+        "a removal in the jq filter of gh api with -X",
+        `gh api x -X POST -q '"rm -rf ~/.playground/extensions/.no-such-folder"'`,
+      ],
+      [
+        "a removal in the jq filter of gh api with -X attached",
+        `gh api x -XPOST -q '"rm -rf ~/.playground/extensions/.no-such-folder"'`,
+      ],
+      [
+        "a removal in the jq filter of gh api with --method=",
+        `gh api x --method=PATCH -q '"rm -rf ~/.playground/extensions/.no-such-folder"'`,
+      ],
+      [
+        "a removal in the jq filter of gh api with -F",
+        `gh api x -F k=v -q '"rm -rf ~/.playground/extensions/.no-such-folder"'`,
+      ],
+      [
+        "a removal in the jq filter of gh api with --field",
+        `gh api x --field k=v -q '"rm -rf ~/.playground/extensions/.no-such-folder"'`,
+      ],
+      [
+        "a removal in the jq filter of gh api with -f",
+        `gh api x -f k=v -q '"rm -rf ~/.playground/extensions/.no-such-folder"'`,
+      ],
+      [
+        "a removal in the jq filter of gh api with --raw-field",
+        `gh api x --raw-field k=v -q '"rm -rf ~/.playground/extensions/.no-such-folder"'`,
+      ],
+      [
+        "a removal in the jq filter of gh api with --input",
+        `gh api x --input f.json -q '"rm -rf ~/.playground/extensions/.no-such-folder"'`,
+      ],
+      [
+        "a removal in the jq filter of gh api with --cache",
+        `gh api x --cache 1h -q '"rm -rf ~/.playground/extensions/.no-such-folder"'`,
+      ],
+      [
+        "a jq filter's printed removal piped to a shell",
+        `gh api x -q '"rm -rf ~/.playground/extensions/.no-such-folder"' | sh`,
+      ],
+      [
+        "a jq filter's printed removal piped to sudo's shell",
+        `gh api x -q '"rm -rf ~/.playground/extensions/.no-such-folder"' | sudo -s`,
+      ],
+      [
+        "a jq filter's printed removal written to a script, then run",
+        `gh api x -q '"rm -rf ~/.playground/extensions/.no-such-folder"' > s.sh; sh s.sh`,
+      ],
+      [
+        "a jq filter's printed removal run by eval",
+        `eval "$(gh api x -q '"rm -rf ~/.playground/extensions/.no-such-folder"')"`,
+      ],
+      [
+        "a jq filter's printed removal run by xargs",
+        `gh api x -q '"rm -rf ~/.playground/extensions/.no-such-folder"' | xargs -I{} sh -c '{}'`,
+      ],
+      [
+        "a jq filter's printed removal run by a read loop",
+        `gh api x -q '"rm -rf ~/.playground/extensions/.no-such-folder"' | while read l; do $l; done`,
+      ],
+      [
+        "a list's jq filter printing a removal piped to a shell",
+        `gh pr list --json number -q '"rm -rf ~/.playground/extensions/.no-such-folder"' | sh`,
+      ],
+      [
+        "a jq filter, then a removal",
+        "gh api x --jq '.[]'; rm -rf ~/.playground/extensions/.no-such-folder",
+      ],
+    ],
+    source: "#462",
+  },
+  {
+    folders: ["checkout", "data folder", "home"],
+    guards: ["no-extensions-write"],
+    rows: ({ ROOT }) => [
+      ["a jq filter's output redirected into the root", `gh api x --jq '.[]' > ${ROOT}/x`],
+      ["a template's output teed into the root", `gh pr view 1 -t '{{.a}}' | tee ${ROOT}/x`],
+      ["gh api with a jq filter and an input in the root", `gh api x --jq '.[]' --input ${ROOT}/x`],
+      ["a jq filter naming the root", `gh api x --jq '"${ROOT}/x"'`],
+      ["gh release download into the root", `gh release download v1 --output ${ROOT}/x`],
+      ["gh run download into the root", `gh run download 1 -D ${ROOT}`],
+    ],
+    source: "#462",
+  },
+  {
+    folders: ["data folder", "home"],
+    guards: ["no-extensions-write"],
+    rows: () => [
+      ["a jq filter's unquoted glob in the home", "gh api x --jq .[]"],
+      ["a template's unquoted glob in the home", "gh pr view 1 -t .pl*"],
+    ],
+    source: "#462",
+  },
+  {
+    folders: ["data folder", "home"],
+    guards: ["no-extensions-write"],
+    rows: () => [
+      [
+        "a spaced jq filter in the home on gh repo clone, which is no listed read",
+        `gh repo clone o/r -q '.a+" \\(.b)/x"'`,
+      ],
+      [
+        "a spaced jq filter in the home on gh pr checkout, which is no listed read",
+        `gh pr checkout 1 -q '.a+" \\(.b)/x"'`,
+      ],
+      [
+        "a spaced jq filter in the home on gh extension exec, which is no listed read",
+        `gh extension exec x -q '.a+" \\(.b)/x"'`,
+      ],
+      [
+        "a spaced jq filter in the home on an extension, which is no listed read",
+        `gh my-ext -q '.a+" \\(.b)/x"'`,
+      ],
+      [
+        "a spaced jq filter in the home on an alias, which is no listed read",
+        `gh v -q '.a+" \\(.b)/x"'`,
+      ],
+      [
+        "a spaced jq filter in the home on GH_PAGER set in the call",
+        `GH_PAGER=less gh pr view 1 -q '.a+" \\(.b)/x"'`,
+      ],
+      [
+        "a spaced jq filter in the home on GH_EDITOR set in the call",
+        `GH_EDITOR=vi gh issue view 1 -q '.a+" \\(.b)/x"'`,
+      ],
+      [
+        "a spaced jq filter in the home on PAGER set in the call",
+        `PAGER=less gh run view 1 -q '.a+" \\(.b)/x"'`,
+      ],
+      [
+        "a spaced jq filter in the home on GH_PAGER set on the line",
+        `GH_PAGER=less; gh pr view 1 -q '.a+" \\(.b)/x"'`,
+      ],
+      [
+        "a spaced jq filter in the home on EDITOR exported on the line",
+        `export EDITOR=vi; gh api x -q '.a+" \\(.b)/x"'`,
+      ],
+      ["a spaced jq filter in the home on gh api with -X", `gh api x -X POST -q '.a+" \\(.b)/x"'`],
+      [
+        "a spaced jq filter in the home on gh api with -X attached",
+        `gh api x -XPOST -q '.a+" \\(.b)/x"'`,
+      ],
+      [
+        "a spaced jq filter in the home on gh api with --method=",
+        `gh api x --method=PATCH -q '.a+" \\(.b)/x"'`,
+      ],
+      [
+        "a spaced jq filter in the home on gh api with --method",
+        `gh api x --method PATCH -q '.a+" \\(.b)/x"'`,
+      ],
+      ["a spaced jq filter in the home on gh api with -F", `gh api x -F a=b -q '.a+" \\(.b)/x"'`],
+      ["a spaced jq filter in the home on gh api with -f", `gh api x -f a=b -q '.a+" \\(.b)/x"'`],
+      [
+        "a spaced jq filter in the home on gh api with --field",
+        `gh api x --field a=b -q '.a+" \\(.b)/x"'`,
+      ],
+      [
+        "a spaced jq filter in the home on gh api with --raw-field",
+        `gh api x --raw-field a=b -q '.a+" \\(.b)/x"'`,
+      ],
+      [
+        "a spaced jq filter in the home on gh api with --input",
+        `gh api x --input f.json -q '.a+" \\(.b)/x"'`,
+      ],
+      [
+        "a spaced jq filter in the home on gh api with --cache",
+        `gh api x --cache 1h -q '.a+" \\(.b)/x"'`,
+      ],
+      [
+        "a spaced jq filter in the home on gh api with -X in a cluster",
+        `gh api x -iX POST -q '.a+" \\(.b)/x"'`,
+      ],
+      [
+        "a spaced jq filter in the home on gh api with -f in a cluster",
+        `gh api x -if a=b -q '.a+" \\(.b)/x"'`,
+      ],
+      [
+        "a spaced jq filter in the home on gh api with -F in a cluster",
+        `gh api x -iF a=b -q '.a+" \\(.b)/x"'`,
+      ],
+      [
+        "a spaced jq filter in the home on gh pr view with --web",
+        `gh pr view 1 --web -q '.a+" \\(.b)/x"'`,
+      ],
+      [
+        "a spaced jq filter in the home on gh pr view with -w",
+        `gh pr view 1 -w -q '.a+" \\(.b)/x"'`,
+      ],
+      [
+        "a spaced jq filter in the home on gh issue view with -w in a cluster",
+        `gh issue view 1 -cw -q '.a+" \\(.b)/x"'`,
+      ],
+    ],
+    source: "#462",
+  },
+  {
+    folders: ["process home", "process data folder", "process worktree"],
+    guards: ["no-extensions-write"],
+    rows: () => [
+      [
         "a removal echoed to sudo's shell, its user option after it in a cluster",
         "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sudo -su root",
       ],
@@ -3038,6 +3493,57 @@ gh api graphql -f query="$QUERY"`,
       ["the same with each command on its own line", "f() { cd /tmp; }\nf\nrm foo"],
     ],
     source: "#573",
+  },
+  {
+    folders: ["process home", "process data folder", "process worktree"],
+    guards: ["no-extensions-write"],
+    rows: () => [
+      [
+        "a removal echoed to sudo's shell behind a shortened user option and its value",
+        "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sudo --us root -s",
+      ],
+      [
+        "a removal echoed to sudo's shell behind a one-letter user option and its value",
+        "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sudo --u root -s",
+      ],
+      [
+        "a removal echoed to sudo's login shell behind a shortened user option and its value",
+        "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sudo --use root --login",
+      ],
+      [
+        "a removal echoed to sudo's shell behind a shortened prompt option and its value",
+        "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sudo --pro x -s",
+      ],
+      [
+        "a removal echoed to sudo's shell behind a flag and a shortened user option",
+        "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sudo -E --us root -s",
+      ],
+      [
+        "a removal echoed to sudo's shell behind nice and a shortened user option",
+        "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | nice sudo --us root -s",
+      ],
+      [
+        "a removal echoed to sudo's shell behind more shortened user options than the parse's readings",
+        `echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sudo ${"--us root ".repeat(16)}--us root -s`,
+      ],
+      [
+        "a removal echoed to sudo's shell behind more shortened prompt options than the parse's readings",
+        `echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sudo ${"--pro x ".repeat(24)}--us root -s`,
+      ],
+      [
+        "a removal echoed to a shell behind sudo and more shortened user options than the parse's readings",
+        `echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sudo ${"--us root ".repeat(17)}bash`,
+      ],
+      [
+        "a removal echoed to a shell behind sudo, more shortened options than the parse's readings and env",
+        `echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sudo ${"--bac x ".repeat(17)}env bash`,
+      ],
+      [
+        "a removal echoed to a shell behind nice and more unlisted options than the parse's readings",
+        `echo 'rm -rf ~/.playground/extensions/.no-such-folder' | nice ${"--zz x ".repeat(17)}sh`,
+      ],
+    ],
+    source: "#652",
   },
   {
     folders: ["home"],

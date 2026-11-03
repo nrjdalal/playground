@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 
 import type { Delivery } from "../../../../../api/hono/src/lib/dashboard/deliver"
+import type { SettingChanging } from "../../../../../api/hono/src/lib/dashboard/sdk"
 
 // The router's auth refuses Better Auth's default secret under NODE_ENV=production, which CI's build step sets; any secret serves requests that carry no session. Set before the router loads.
 process.env.BETTER_AUTH_SECRET ||= "dashboard-router-test-secret-not-for-use-anywhere"
@@ -8,6 +9,7 @@ const {
   answerPrompt,
   attachmentLimiter,
   changeMode,
+  changeSetting,
   dashboardRouter,
   feedAnswerSchema,
   feedParamsSchema,
@@ -22,6 +24,7 @@ const {
   sendMessage,
   serveAttachment,
   servedHeaders,
+  settingLimiter,
   threadParamsSchema,
   threadsQuerySchema,
   uploadAttachment,
@@ -438,8 +441,10 @@ describe("sendMessage", () => {
       EMPTY: [400, "VALIDATION_ERROR"],
       INPUT_NOT_EMPTY: [409, "CONFLICT"],
       INTERRUPTED: [502, "CMUX_FAILED"],
+      LOST: [409, "CONFLICT"],
       NOT_FOUND: [404, "NOT_FOUND"],
       ON_PICKER: [409, "CONFLICT"],
+      QUEUED: [409, "CONFLICT"],
       TOO_LONG: [400, "VALIDATION_ERROR"],
     }
     expect(Object.keys(expected)).toEqual([...DELIVERY_FAILURES])
@@ -1012,6 +1017,128 @@ describe("the mode route", () => {
         ok: true,
       })),
     ).toEqual({ at: "2026-10-08T17:00:00.000Z", mode: "plan" })
+  })
+})
+
+describe("the setting route", () => {
+  const handlersOf = (method: string, path: string) =>
+    dashboardRouter.routes
+      .filter((r) => r.method === method && r.path === path)
+      .map((r) => r.handler)
+  const actor = { email: "owner@local.host", id: "u-1" }
+  const board = (workers: { hosted?: true; name: string; sessionId: string }[]) => async () =>
+    ({ workers }) as never
+  const ok = (sessionId: string) => async () => ({
+    at: "2026-11-03T06:00:00.000Z",
+    ok: true as const,
+    sessionId,
+  })
+
+  test("setting a model or effort is a write: it needs the dashboard's origin, a loopback connection and a session, in that order", async () => {
+    const path = "/workers/s-1/setting"
+    const body = { model: "opus" }
+    expect((await post(path, {}, body, from("127.0.0.1"))).status).toBe(403)
+    expect((await post(path, { origin: trusted() }, body, from("192.168.1.20"))).status).toBe(403)
+    expect((await post(path, { origin: trusted() }, body, from("127.0.0.1"))).status).toBe(401)
+    expect(handlersOf("POST", "/workers/:sessionId/setting")).toContain(settingLimiter)
+  })
+
+  test("a dispatcher's setting goes through deliver() as the setting alone, and the hosted session's to changeHostedSetting() by its id", async () => {
+    const sent: { via: string; delivery: unknown }[] = []
+    const live = board([
+      { name: DISPATCHER, sessionId: "s-d" },
+      { name: DISPATCHER_SECONDARY, sessionId: "s-d2" },
+      { hosted: true, name: SDK_PROBE, sessionId: "s-h" },
+    ])
+    const send = (via: string) => async (delivery: Delivery | SettingChanging) => {
+      sent.push({ delivery, via })
+      return ok("sessionId" in delivery ? delivery.sessionId : "s-d")()
+    }
+    await changeSetting(
+      { sessionId: "s-d", setting: { model: "sonnet" } },
+      actor,
+      live,
+      send("deliver"),
+      send("hosted"),
+    )
+    await changeSetting(
+      { sessionId: "s-d2", setting: { effort: "low" } },
+      actor,
+      live,
+      send("deliver"),
+      send("hosted"),
+    )
+    await changeSetting(
+      { sessionId: "s-h", setting: { effort: "max" } },
+      actor,
+      live,
+      send("deliver"),
+      send("hosted"),
+    )
+    expect(sent).toEqual([
+      {
+        delivery: { actor, setting: { model: "sonnet" }, text: "", to: DISPATCHER },
+        via: "deliver",
+      },
+      {
+        delivery: { actor, setting: { effort: "low" }, text: "", to: DISPATCHER_SECONDARY },
+        via: "deliver",
+      },
+      { delivery: { actor, sessionId: "s-h", setting: { effort: "max" } }, via: "hosted" },
+    ])
+  })
+
+  test("any other session is FORBIDDEN and an unknown one NOT_FOUND, before anything is sent; a delivery's refusal keeps its code under delivery", async () => {
+    let sends = 0
+    const send = async () => {
+      sends++
+      return ok("s-d")()
+    }
+    const live = board([
+      { name: DISPATCHER, sessionId: "s-d" },
+      { name: "k3m9px-worker", sessionId: "s-w" },
+    ])
+    const worker = await changeSetting(
+      { sessionId: "s-w", setting: { model: "opus" } },
+      actor,
+      live,
+      send,
+      send,
+    ).catch((thrown) => thrown)
+    expect(worker).toMatchObject({ code: "FORBIDDEN", status: 403 })
+    const gone = await changeSetting(
+      { sessionId: "s-x", setting: { model: "opus" } },
+      actor,
+      live,
+      send,
+      send,
+    ).catch((thrown) => thrown)
+    expect(gone).toMatchObject({ code: "NOT_FOUND", status: 404 })
+    expect(sends).toBe(0)
+    const busy = await changeSetting(
+      { sessionId: "s-d", setting: { model: "opus" } },
+      actor,
+      live,
+      async () => ({ code: "ON_PICKER", ok: false, reason: "waiting on a card" }),
+      send,
+    ).catch((thrown) => thrown)
+    expect(busy).toMatchObject({ extra: { delivery: "ON_PICKER" } })
+  })
+})
+
+describe("settingLimiter", () => {
+  test("lets one person set 10 a minute and refuses the 11th", async () => {
+    const app = new Hono<{ Variables: { session: { userId: string } } }>()
+      .use("*", async (c, next) => {
+        c.set("session", { userId: "u-setting-limit" })
+        await next()
+      })
+      .use("*", settingLimiter)
+      .post("/", (c) => c.text("ok"))
+    const statuses: number[] = []
+    for (let i = 0; i < 11; i++) statuses.push((await app.request("/", { method: "POST" })).status)
+    expect(statuses.slice(0, 10).every((status) => status === 200)).toBe(true)
+    expect(statuses[10]).toBe(429)
   })
 })
 

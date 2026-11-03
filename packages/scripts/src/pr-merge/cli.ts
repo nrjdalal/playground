@@ -13,7 +13,8 @@ at that head and the head is up to date with canary:
   author        the repo's owner opened it, or --outside-author names who did
   held          ~/.playground/ops/report/held-prs.json does not list it (or
                 PLAYGROUND_HELD_PRS) at the gates or just before the merge call; a "*"
-                line, or a file that does not read, holds every PR
+                line, until it lapses (bun run ship:freeze), or a file that does not read,
+                holds every PR
   base          it merges into canary
   up to date    canary has no commit the head lacks, or the head merges with canary clean;
                 a conflict needs canary merged in, then checks and a 5/5 at the new head
