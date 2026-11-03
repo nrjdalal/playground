@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 // idle_sessions.ts [hours]: live sessions that run with nothing to do, with each one's measured Claude spend over the last N hours (default 1).
-// Ported from ~/.playground/ops/optimizer/idle_sessions.py; a session's PRs are its roster pr, its worker's, every open one on its branch and every one its transcript links, so a checker serving a second PR is never listed while that one is open.
+// Ported from ~/.playground/ops/optimizer/idle_sessions.py; a session's PRs are its roster pr and prs list, its worker's, every open one on its branch and every one its transcript links, so a checker serving a second PR is never listed while that one is open.
 // Flags, from Claude's session registry (live pid, status, statusUpdatedAt), roster.json and GitHub REST reads per PR (an open PR cached 5 minutes, a merged or closed one for good):
 // Every flag needs 10+ minutes not busy, so a session finishing a step is never listed. ops-tick's auto-end beat ends what auto_end.ts takes of it.
 //   checker-worker-gone  a reviewer or tester whose worker has no live session
@@ -23,6 +23,8 @@ import { dataDirOf } from "../../../packages/env/src/data-dir"
 const CACHE_TTL_S = 300
 
 const PR_URL = /github\.com\/([^/]+\/[^/]+)\/pull\/(\d+)/
+// A checker's prs list names a PR not yet opened by its issue, which reads open until the PR that closes it merges.
+const ISSUE_URL = /github\.com\/([^/]+\/[^/]+)\/issues\/(\d+)/
 
 export type RegistryEntry = {
   cwd?: string
@@ -39,6 +41,8 @@ export type RosterEntry = {
   lead?: string
   name?: string
   pr?: string
+  // every PR a checker serves, its pr among them, or an issue whose PR is not yet opened
+  prs?: string[]
   repo?: string
   status?: string
   worker?: string
@@ -79,17 +83,18 @@ export type CollectInput = {
   workerPrs: (worker: string) => Promise<string[]>
 }
 
-// A session's PRs: its roster pr and open branch PRs, its worker's, and every PR its own or its worker's transcript links.
+// A session's PRs: its roster prs list, its roster pr and open branch PRs, its worker's, and every PR its own or its worker's transcript links.
 export async function sessionPrs(
   input: CollectInput,
   name: string,
   worker?: string,
   sessionId?: string,
 ): Promise<string[]> {
-  const { linkedPrs, sessions, workerPrs } = input
+  const { linkedPrs, roster, sessions, workerPrs } = input
   const workerSession = worker ? sessions[worker]?.sessionId : undefined
   return [
     ...new Set([
+      ...(roster[name]?.prs ?? []),
       ...(await workerPrs(name)),
       ...(worker ? await workerPrs(worker) : []),
       ...(sessionId && linkedPrs ? await linkedPrs(sessionId) : []),
@@ -323,11 +328,24 @@ export async function prStateLive(
   api: (path: string) => Promise<unknown> = ghApi,
 ): Promise<CachedState | null> {
   const m = PR_URL.exec(url ?? "")
-  if (!m) return null
+  const issue = ISSUE_URL.exec(url ?? "")
+  if (!m && !issue) return null
   const cache = await readCache(cachePath)
   const hit = cache[url]
   // Only merged is final: go.py closes a PR and reopens it to rebuild its merge commit.
   if (hit && (hit.state === "merged" || now - hit.at < CACHE_TTL_S)) return hit
+  const keep = async (fresh: CachedState) => {
+    cache[url] = fresh
+    try {
+      mkdirSync(dirname(cachePath), { recursive: true })
+      await Bun.write(cachePath, JSON.stringify(cache))
+    } catch {}
+    return fresh
+  }
+  if (!m) {
+    const read = (await api(`repos/${issue![1]}/issues/${issue![2]}`)) as { state?: string } | null
+    return read?.state ? keep({ at: now, head: "", state: read.state, verdicts: [] }) : null
+  }
   const pr = (await api(`repos/${m[1]}/pulls/${m[2]}`)) as {
     comments?: number
     head?: { ref?: string; sha?: string }
@@ -347,7 +365,7 @@ export async function prStateLive(
     // a checker's verdict: the reviewer's score, or the tester's word
     for (const c of comments ?? []) for (const v of verdictsOf(c.body ?? "")) verdicts.push(v.at)
   }
-  const fresh: CachedState = {
+  return keep({
     at: now,
     head: pr.head.sha,
     mergeSha: (pr.merged_at && pr.merge_commit_sha) || undefined,
@@ -355,13 +373,7 @@ export async function prStateLive(
     ref: pr.head.ref,
     state,
     verdicts,
-  }
-  cache[url] = fresh
-  try {
-    mkdirSync(dirname(cachePath), { recursive: true })
-    await Bun.write(cachePath, JSON.stringify(cache))
-  } catch {}
-  return fresh
+  })
 }
 
 async function gitIn(cwd: string, args: string[]): Promise<string | null> {

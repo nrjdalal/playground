@@ -90,7 +90,7 @@ export async function sweep(input: CollectInput, deps: EndDeps): Promise<Line[]>
   return out
 }
 
-// Right after a merge: the PR's worker, reviewer and tester by their roster pr. A worker the roster gave a next task holds no pr of this PR (assign clears it), and a checker whose worker's row names another PR may serve it, so neither is ended, nor is one with another of its PRs open, as the sweep holds it. One with no live session has its row ended; a busy one, or one quiet under 10 minutes, is left to the sweep.
+// Right after a merge: the PR's worker, reviewer and tester by their roster pr. A worker the roster gave a next task holds no pr of this PR (assign clears it), and a checker whose worker's row names another PR may serve it, so neither is ended, nor is one with another of its PRs open, as the sweep holds it, nor one whose roster prs list holds a PR or issue not merged or closed. One with no live session has its row ended; a busy one, or one quiet under 10 minutes, is left to the sweep.
 export async function endMerged(
   url: string,
   sha: string,
@@ -109,6 +109,10 @@ export async function endMerged(
     const next = worker ? input.roster[worker]?.pr : undefined
     if (next && next !== url) continue
     const lead = r.lead ?? (worker ? input.roster[worker]?.lead : undefined)
+    const listed = await Promise.all(
+      (r.prs ?? []).filter((u) => u !== url).map((u) => input.prState(u)),
+    )
+    if (listed.some((s) => s === null || (s.state !== "merged" && s.state !== "closed"))) continue
     const d = input.sessions[name]
     if (!d) {
       await deps.report(name, `ended automatically: ${why}, with no live session`)

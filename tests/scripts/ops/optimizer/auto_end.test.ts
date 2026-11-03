@@ -432,6 +432,58 @@ describe("endMerged: right after a merge", () => {
   })
 })
 
+// 3 Nov, 05:35Z: a reviewer whose row named #689 was ended when #689 merged, while it still held #683, #693 and #106.
+describe("a checker's prs list (#706)", () => {
+  const A = "https://github.com/o/r/pull/2120"
+  const B = "https://github.com/o/r/pull/2121"
+  const C = "https://github.com/o/r/pull/2122"
+  const OPEN: PrState = { head: "bbb2222", ref: "pg-2100-y", state: "open", verdicts: [] }
+  const world = (prs?: string[]) =>
+    input({
+      prState: async (url) => (url === URL ? MERGED : [A, B, C].includes(url) ? OPEN : null),
+      roster: {
+        "x7rv2k-reviewer": {
+          kind: "reviewer",
+          name: "x7rv2k-reviewer",
+          pr: URL,
+          ...(prs ? { prs } : {}),
+          worker: "x7rv2k-worker",
+        },
+      },
+      sessions: {
+        "x7rv2k-reviewer": live("x7rv2k-reviewer"),
+        "x7rv2k-worker": live("x7rv2k-worker", { status: "busy" }),
+      },
+      workerPrs: async (name) => (name === "x7rv2k-worker" ? [URL] : []),
+    })
+
+  test("a reviewer holding the merged PR and three open ones stays, through endMerged and the sweep", async () => {
+    const merged = fakes()
+    expect(await endMerged(URL, "daaac8e0000", world([URL, A, B, C]), merged.deps)).toEqual([])
+    const swept = fakes()
+    expect(await sweep(world([URL, A, B, C]), swept.deps)).toEqual([])
+    expect([...merged.closed, ...swept.closed]).toEqual([])
+  })
+
+  test("a row whose session is gone keeps its row while its list holds an open PR", async () => {
+    const gone = { ...world([URL, A]), sessions: {} }
+    const { deps, reported } = fakes()
+    expect(await endMerged(URL, "daaac8e0000", gone, deps)).toEqual([])
+    expect(reported).toEqual([])
+  })
+
+  test("a row with no prs list, or one whose PRs are all done, ends as today", async () => {
+    for (const prs of [undefined, [URL]]) {
+      const merged = fakes()
+      await endMerged(URL, "daaac8e0000", world(prs), merged.deps)
+      expect(merged.closed).toEqual(["x7rv2k-reviewer"])
+      const swept = fakes()
+      await sweep(world(prs), swept.deps)
+      expect(swept.closed).toEqual(["x7rv2k-reviewer"])
+    }
+  })
+})
+
 describe("unsavedLive: the worktrees a session used, read for unsaved work", () => {
   const sh = (cwd: string, ...argv: string[]) => {
     const r = Bun.spawnSync(argv, {
