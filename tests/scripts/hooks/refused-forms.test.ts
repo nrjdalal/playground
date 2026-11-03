@@ -1,5 +1,15 @@
 import { afterAll, describe, expect, test } from "bun:test"
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs"
 import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -132,8 +142,81 @@ afterAll(() =>
 
 type Run = (raw: string, home: string) => Promise<string | undefined>
 
+// Each guard's check() by the name this file calls it: the source's, and the bundle's its wrapper runs.
+// oxlint-disable-next-line typescript/no-explicit-any
+type Checks = Record<(typeof CHECK_NAMES)[number], (...args: any[]) => Promise<string | undefined>>
+const CHECK_NAMES = [
+  "desktopOwnerApp",
+  "envDump",
+  "extensionRepoWrite",
+  "extensionsWrite",
+  "glmHeavyPath",
+  "headlessLogin",
+  "killByName",
+  "mainCheckout",
+  "playgroundLeak",
+  "publicLeak",
+  "rawSpawn",
+  "releaseComment",
+  "stash",
+] as const
+const SOURCE: Checks = {
+  desktopOwnerApp,
+  envDump,
+  extensionRepoWrite,
+  extensionsWrite,
+  glmHeavyPath,
+  headlessLogin,
+  killByName,
+  mainCheckout,
+  playgroundLeak,
+  publicLeak,
+  rawSpawn,
+  releaseComment,
+  stash,
+}
+const GUARD_OF: Record<(typeof CHECK_NAMES)[number], Guard> = {
+  desktopOwnerApp: "no-desktop-owner-app",
+  envDump: "no-env-dump",
+  extensionRepoWrite: "no-extension-repo-write",
+  extensionsWrite: "no-extensions-write",
+  glmHeavyPath: "no-glm-heavy-path",
+  headlessLogin: "no-headless-login",
+  killByName: "no-kill-by-name",
+  mainCheckout: "no-main-checkout",
+  playgroundLeak: "no-playground-leak",
+  publicLeak: "no-public-leak",
+  rawSpawn: "no-raw-spawn",
+  releaseComment: "no-release-comment",
+  stash: "no-stash",
+}
+
+// Each guard's bundle, copied into a scratch checkout with no node_modules above it, as a damaged install leaves one; the folders the bundles read beside them (extensions' lists, the settings reader role.ts runs in its own process) link to this checkout's.
+const BUNDLED_ROOT = join(SCRATCH, "bundled-checkout")
+const BUNDLED_DIR = join(BUNDLED_ROOT, "scripts", "hooks", "bundled")
+mkdirSync(BUNDLED_DIR, { recursive: true })
+for (const file of readdirSync(join(CHECKOUT, "scripts", "hooks", "bundled")))
+  copyFileSync(join(CHECKOUT, "scripts", "hooks", "bundled", file), join(BUNDLED_DIR, file))
+for (const path of [
+  "extensions",
+  "packages",
+  join("scripts", "roster-statuses.json"),
+  join("scripts", "spawn.sh"),
+])
+  symlinkSync(join(CHECKOUT, path), join(BUNDLED_ROOT, path))
+const BUNDLED: Checks = Object.fromEntries(
+  await Promise.all(
+    CHECK_NAMES.map(async (name) => [
+      name,
+      (await import(join(BUNDLED_DIR, `${GUARD_OF[name]}.js`))).check,
+    ]),
+  ),
+) as Checks
+
 // Each guard's check with the environment its own test gives it, and the folders it runs in, each a cwd and the HOME that goes with it.
-const GUARDS: Record<Guard, { folders: Partial<Record<Folder, [string, string]>>; run: Run }> = {
+const guardsOf = (
+  c: Checks,
+): Record<Guard, { folders: Partial<Record<Folder, [string, string]>>; run: Run }> => ({
   "no-desktop-owner-app": {
     folders: {
       checkout: [CHECKOUT, HOME],
@@ -141,13 +224,13 @@ const GUARDS: Record<Guard, { folders: Partial<Record<Folder, [string, string]>>
       "main checkout": [NDMAIN, HOME],
       worktree: [NDWORK, HOME],
     },
-    run: (raw) => desktopOwnerApp(raw, { PLAYGROUND_DATA_DIR: DESKTOP }),
+    run: (raw) => c.desktopOwnerApp(raw, { PLAYGROUND_DATA_DIR: DESKTOP }),
   },
-  "no-env-dump": { folders: { checkout: [CHECKOUT, HOME] }, run: (raw) => envDump(raw) },
+  "no-env-dump": { folders: { checkout: [CHECKOUT, HOME] }, run: (raw) => c.envDump(raw) },
   "no-extension-repo-write": {
     folders: { checkout: [OTHER, HOME] },
     run: (raw, home) =>
-      extensionRepoWrite(raw, {
+      c.extensionRepoWrite(raw, {
         HOME: home,
         PLAYGROUND_DATA_DIR: SYNCED,
         PLAYGROUND_ROLE: "worker",
@@ -167,33 +250,33 @@ const GUARDS: Record<Guard, { folders: Partial<Record<Folder, [string, string]>>
       "process worktree": [join(homedir(), "x", ".claude", "worktrees", "y"), homedir()],
       tmp: ["/tmp", HOME],
     },
-    run: (raw, home) => extensionsWrite(raw, { HOME: home }),
+    run: (raw, home) => c.extensionsWrite(raw, { HOME: home }),
   },
   "no-glm-heavy-path": {
     folders: { "glm repo": [GLM_REPO, HOME] },
-    run: (raw) => glmHeavyPath(raw, { ANTHROPIC_BASE_URL: "https://api.z.ai/api/anthropic" }, 1),
+    run: (raw) => c.glmHeavyPath(raw, { ANTHROPIC_BASE_URL: "https://api.z.ai/api/anthropic" }, 1),
   },
   "no-headless-login": {
     folders: { checkout: [CHECKOUT, "/nonexistent"] },
     run: (raw, home) =>
-      headlessLogin(raw, {
+      c.headlessLogin(raw, {
         CLAUDE_CONFIG_DIR: "/nonexistent",
         HOME: home,
         PLAYGROUND_ROLE: "worker",
       }),
   },
-  "no-kill-by-name": { folders: { checkout: [CHECKOUT, HOME] }, run: (raw) => killByName(raw) },
+  "no-kill-by-name": { folders: { checkout: [CHECKOUT, HOME] }, run: (raw) => c.killByName(raw) },
   "no-main-checkout": {
     folders: {
       checkout: [join(PATHS.MAIN, ".claude", "worktrees", "a"), HOME],
       "main checkout": [PATHS.MAIN, HOME],
     },
-    run: (raw, home) => mainCheckout(raw, { HOME: home }, PATHS.MAIN),
+    run: (raw, home) => c.mainCheckout(raw, { HOME: home }, PATHS.MAIN),
   },
   "no-playground-leak": {
     folders: { "data folder": [DATA, HOME], home: [HOME, HOME] },
     run: (raw) =>
-      playgroundLeak(
+      c.playgroundLeak(
         raw,
         { CLAUDE_CONFIG_DIR: LEAK, PLAYGROUND_DATA_DIR: join(LEAK, "playground") },
         undefined,
@@ -202,8 +285,9 @@ const GUARDS: Record<Guard, { folders: Partial<Record<Folder, [string, string]>>
   },
   "no-public-leak": {
     folders: { checkout: [CHECKOUT, HOME], home: [HOME, HOME] },
-    run: (raw) => publicLeak(raw, { CLAUDE_CONFIG_DIR: SCRATCH, PLAYGROUND_DATA_DIR: LISTLESS }),
+    run: (raw) => c.publicLeak(raw, { CLAUDE_CONFIG_DIR: SCRATCH, PLAYGROUND_DATA_DIR: LISTLESS }),
   },
+  // No bundle while no settings file registers it, so only its source runs, and the bundled pass below leaves it out, since GUARD_OF names no check of it.
   "no-raw-delete": {
     folders: {
       checkout: [CHECKOUT, HOME],
@@ -211,16 +295,20 @@ const GUARDS: Record<Guard, { folders: Partial<Record<Folder, [string, string]>>
     },
     run: (raw) => rawDelete(raw),
   },
-  "no-raw-spawn": { folders: { checkout: [CHECKOUT, HOME] }, run: (raw) => rawSpawn(raw) },
+  "no-raw-spawn": { folders: { checkout: [CHECKOUT, HOME] }, run: (raw) => c.rawSpawn(raw) },
   "no-release-comment": {
     folders: { checkout: [OTHER, HOME] },
-    run: (raw) => releaseComment(raw, { PLAYGROUND_DATA_DIR: OWNED }),
+    run: (raw) => c.releaseComment(raw, { PLAYGROUND_DATA_DIR: OWNED }),
   },
   "no-stash": {
     folders: { checkout: [CHECKOUT, HOME], "data folder": [DATA, HOME], home: [HOME, HOME] },
-    run: (raw) => stash(raw, {}),
+    run: (raw) => c.stash(raw, {}),
   },
-}
+})
+
+const GUARDS = guardsOf(SOURCE)
+const BUNDLED_GUARDS = guardsOf(BUNDLED)
+const BUNDLED_PASS = new Set<Guard>(Object.values(GUARD_OF))
 
 const input = (call: Call, cwd: string) =>
   JSON.stringify(
@@ -332,5 +420,45 @@ describe("every refused form stays refused unless the allow list names it", () =
   test("every allow-list entry names a case", () => {
     for (const entry of ALLOWED)
       expect(CASES.some(({ id, key }) => entry === id || entry === key)).toBe(true)
+  })
+})
+
+// A guard's wrapper runs its bundle, so the bundle is held to its source's verdict on every row, run where no node_modules can be reached.
+describe("each bundled guard gives its source's verdict with no node_modules reachable", () => {
+  test("no package resolves from the bundles' folder", () => {
+    expect(() => Bun.resolveSync("zod", BUNDLED_DIR)).toThrow()
+  })
+
+  // A guard with a bundle goes through its bundle's check(), so registering one with no entry in GUARD_OF fails here rather than comparing its source with itself.
+  test("every guard here has a bundle exactly when GUARD_OF names its check", () => {
+    for (const guard of Object.keys(GUARDS))
+      expect({ bundled: existsSync(join(BUNDLED_DIR, `${guard}.js`)), guard }).toEqual({
+        bundled: BUNDLED_PASS.has(guard as Guard),
+        guard,
+      })
+  })
+
+  test.each(CASES.filter((c) => BUNDLED_PASS.has(c.guard)).map((c) => [c.key, c] as const))(
+    "%s",
+    async (_, c) => {
+      const at = GUARDS[c.guard].folders[c.folder] as [string, string]
+      const [source, bundled] = await Promise.all([
+        GUARDS[c.guard].run(input(c.call, at[0]), at[1]),
+        BUNDLED_GUARDS[c.guard].run(input(c.call, at[0]), at[1]),
+      ])
+      expect(bundled === undefined).toBe(source === undefined)
+      if (bundled !== undefined) expect(bundled).toContain(`${c.guard} hook `)
+    },
+    60_000,
+  )
+
+  test("the bundled no-extensions-write's worker gives its check's verdict", async () => {
+    const { guarded } = await import(join(BUNDLED_DIR, "no-extensions-write.js"))
+    const refused = CASES.find((c) => c.guard === "no-extensions-write" && !allowed(c))!
+    const [cwd, home] = GUARDS["no-extensions-write"].folders[refused.folder]!
+    expect(await guarded(input(refused.call, cwd), { HOME: home })).toContain(
+      "no-extensions-write hook ",
+    )
+    expect(await guarded(input("true", CHECKOUT), { HOME })).toBeUndefined()
   })
 })

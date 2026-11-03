@@ -90,6 +90,14 @@ fi
 for script in beat.py merge-train/run.py notify.sh usage/account-watch.py usage/glm-credits.py usage/login-flip.py usage/near-limit.py usage/run.py usage/week-marks.py; do
   link_file "$REPO/scripts/ops/$script" "$HOME/.playground/ops/$script"
 done
+# orgs.ts home loads the workspace packages, and playground update runs this script before its own install, so a pull that declared a dependency the checkout has not linked (settings' safe-delete, on the hop to v0.0.34) installs first (the check exits 3 for that alone); a fully linked checkout skips it, and a check that fails another way marks the run failed
+unlinked=0
+"$BUN" --no-env-file "$REPO/packages/scripts/src/playground/unlinked.ts" "$REPO" || unlinked=$?
+if [ "$unlinked" = 3 ]; then
+  "$BUN" install --frozen-lockfile --ignore-scripts --cwd "$REPO" || status=1
+elif [ "$unlinked" != 0 ]; then
+  status=1
+fi
 # The home skill set, written from this checkout and the extensions and installed at user scope as ws-home@ws (playground orgs home), so a pull's skills reach the next session started by hand
 "$BUN" --no-env-file "$REPO/packages/scripts/src/playground/orgs.ts" home || status=1
 # Every worktree shares .git/rr-cache, so rerere would replay one worktree's merge resolution in another's merge

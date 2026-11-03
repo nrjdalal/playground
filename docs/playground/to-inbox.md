@@ -18,7 +18,8 @@ Agent-fired: a session loads it before every `playground ask new`, and the owner
 | Something to look at, with no answer         | an update with text and files, read-only       |
 | A plain update, or a ship or schema decision | its fields alone, under a plain title          |
 | A delete or budget decision                  | its why as plain lines, one fact each          |
-| A draft, or a Slack or ticket decision       | the message or ticket itself, in its own shape |
+| A draft                                      | the message, with any files under its words    |
+| A Slack or ticket decision                   | the message or ticket itself, in its own shape |
 | A secret ask                                 | its key and sink alone, under a plain title    |
 
 The kind also decides how the card closes.
@@ -36,6 +37,7 @@ choices   Approve: <verb ...>  Deny: <verb ...>
 ```
 
 Mermaid is to join the pictures; until then a flow is drawn in ASCII.
+A whole patch can ride along as a file: a `.diff` or `.patch` attachment (`git diff > x.diff`) opens in the viewer as a patch view, each changed file side by side, or in one column on a phone.
 
 ## It's working if
 
