@@ -1506,34 +1506,12 @@ function scoreAsOther(words, cmd, parsed, env) {
 var AWKS = new Set(["awk", "gawk", "mawk", "nawk"]);
 var AWK_RUNS = /system|getline|[>@]/;
 var awkRuns = (program) => AWK_RUNS.test(program) || awkPipe(program);
+var AWK_LEAD = /^\s*\/(?:[^\\/"[\n]|\\.)*\/(?=\s*(?:\{|$))/;
+var AWK_MATCH = /~\s*(?:\/(?:[^\\/"[\n]|\\.)*\/|"[^"\\\n]*")/g;
 function awkPipe(program) {
   if (!program.includes("|"))
     return false;
-  let last = "";
-  for (let i = 0;i < program.length; i++) {
-    const c = program[i];
-    if (c === "#")
-      return true;
-    if (c === '"' || c === "/" && /^[(,{};!~&|=?:]?$/.test(last)) {
-      let end = i + 1;
-      while (end < program.length && program[end] !== c) {
-        if (program[end] === `
-` || c === "/" && program[end] === "[")
-          return true;
-        end += program[end] === "\\" ? 2 : 1;
-      }
-      if (end >= program.length)
-        return true;
-      i = end;
-      last = c;
-      continue;
-    }
-    if (c === "|")
-      return true;
-    if (!/\s/.test(c))
-      last = c;
-  }
-  return false;
+  return /["/#\\|]/.test(program.replace(AWK_LEAD, " ").replace(AWK_MATCH, " "));
 }
 function awkPrograms(words) {
   const programs = [];
