@@ -40,7 +40,13 @@ export function SettingPicker({ worker }: { worker: Worker }) {
   const change = useMutation({
     mutationFn: async (setting: SessionSetting) => {
       const { error } = await changeSetting(worker.sessionId, setting)
+      // Claude Code holds the command while it compacts and runs it once free, so the pick stays shown
+      if (error && "delivery" in error && error.delivery === "QUEUED") return { queued: true }
       if (error) throw new Error(error.message)
+      return { queued: false }
+    },
+    onSuccess: ({ queued }) => {
+      if (queued) toast.add({ title: `${worker.name} takes it once free`, type: "info" })
     },
     onError: (error, setting) => {
       if ("model" in setting) setModel(null)

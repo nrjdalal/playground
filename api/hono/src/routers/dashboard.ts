@@ -80,7 +80,7 @@ import {
   type ModeResult,
   type SettingChanging,
 } from "@/lib/dashboard/sdk"
-import { settingSchema, type SessionSetting } from "@/lib/dashboard/setting"
+import { settingRequestSchema, type SessionSetting } from "@/lib/dashboard/setting"
 import { readStacks } from "@/lib/dashboard/stacks"
 import {
   createThread,
@@ -463,9 +463,9 @@ export async function changeMode(
   return { at: result.at, mode: result.mode }
 }
 
-// The setting route's work once the request is through its guards: a model or an effort for a dispatcher, typed as its one slash command through deliver(), or for the session the dashboard hosts, set through the SDK by changeHostedSetting(); any other session is refused as FORBIDDEN before anything is sent, and a delivery's refusal is turned into the API's error envelope with its code under `delivery`.
+// The setting route's work once the request is through its guards: a model or an effort for a dispatcher, typed as its one slash command through deliver() under the composer's id, or for the session the dashboard hosts, set through the SDK by changeHostedSetting(); any other session is refused as FORBIDDEN before anything is sent, and a delivery's refusal is turned into the API's error envelope with its code under `delivery`.
 export async function changeSetting(
-  { sessionId, setting }: { sessionId: string; setting: SessionSetting },
+  { id, sessionId, setting }: { id?: string; sessionId: string; setting: SessionSetting },
   actor: Delivery["actor"],
   live: () => Promise<Live> = listLive,
   send: (delivery: Delivery) => Promise<DeliveryResult> = deliver,
@@ -482,7 +482,7 @@ export async function changeSetting(
     )
   }
   const result = typed
-    ? await send({ actor, setting, text: "", to: worker.name })
+    ? await send({ actor, setting, text: "", to: worker.name, ...(id && { id }) })
     : await setHosted({ actor, sessionId, setting })
   if (!result.ok) {
     const [status, code] = FAILURE_STATUS[result.code]
@@ -964,7 +964,7 @@ const dashboardRoutes = new Hono<{ Variables: Session }>()
     "/workers/:sessionId/setting",
     describeRoute({
       tags: ["Dashboard"],
-      description: `Set the model or the effort of a dispatcher (${DISPATCHERS.join(" or ")}) or of ${SDK_PROBE}, the session the dashboard hosts on the Agent SDK, as the owner's own pick in the composer: \`model\` one of ${SESSION_MODELS.join(", ")}, or \`effort\` one of ${SESSION_EFFORTS.join(", ")}, never both. For a dispatcher the API builds the one slash command (\`/model <alias>\` or \`/effort <level>\`) from those lists and types it as a message is typed; the hosted session takes it through the SDK's own calls. Either way it records a dashboard.setting row naming the session and the value. Any other session is refused as FORBIDDEN before anything is sent. A delivery's refusal names its reason in \`delivery\`, as the message route's does.`,
+      description: `Set the model or the effort of a dispatcher (${DISPATCHERS.join(" or ")}) or of ${SDK_PROBE}, the session the dashboard hosts on the Agent SDK, as the owner's own pick in the composer: \`model\` one of ${SESSION_MODELS.join(", ")}, or \`effort\` one of ${SESSION_EFFORTS.join(", ")}, never both. For a dispatcher the API builds the one slash command (\`/model <alias>\` or \`/effort <level>\`) from those lists and types it as a message is typed; the hosted session takes it through the SDK's own calls. Either way it records a dashboard.setting row naming the session and the value. Any other session is refused as FORBIDDEN before anything is sent. \`id\`, the composer's own for the pick, lets a dispatcher that holds the command while it compacts read QUEUED rather than INTERRUPTED, and makes a retry under it safe, as the message route's does. A delivery's refusal names its reason in \`delivery\`, as the message route's does.`,
       responses: {
         200: {
           description:
@@ -985,11 +985,12 @@ const dashboardRoutes = new Hono<{ Variables: Session }>()
     }),
     settingLimiter,
     sValidator("param", z.object({ sessionId: z.string().min(1).max(200) }), invalidInput),
-    sValidator("json", settingSchema, invalidInput),
+    sValidator("json", settingRequestSchema, invalidInput),
     async (c) => {
       const user = c.get("user")
+      const { id, ...setting } = c.req.valid("json")
       const data = await changeSetting(
-        { sessionId: c.req.valid("param").sessionId, setting: c.req.valid("json") },
+        { id, sessionId: c.req.valid("param").sessionId, setting },
         { email: user.email, id: user.id },
       )
       return c.json({ data })
