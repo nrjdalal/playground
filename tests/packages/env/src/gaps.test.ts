@@ -26,10 +26,20 @@ const read = (name: string, env?: string) => {
 test("a checkout with no .env is told to copy .env.example, its keys named after", () => {
   const { refusal } = read("none")
   expect(refusal).toStartWith(
-    "no .env in this checkout: copy .env.example to .env, then fill the keys it leaves empty: ",
+    "no .env in this checkout: copy .env.example to .env, then fill the keys still empty: ",
   )
   expect(refusal).toContain("BETTER_AUTH_SECRET")
+  expect(refusal).not.toContain("HONO_APP_URL")
   expect(refusal).not.toContain("\n")
+})
+
+test("with no .env, the keys named are the ones a copy of .env.example leaves to fill", async () => {
+  const { absent, refusal } = read("bare")
+  const copied = read("copied", await Bun.file(join(ROOT, ".env.example")).text())
+  const left = [...copied.missing, ...copied.empty].sort()
+  expect(left.length).toBeGreaterThan(0)
+  expect(absent?.fill.toSorted()).toEqual(left)
+  expect(refusal).toEndWith(`: ${absent!.fill.join(", ")}`)
 })
 
 test("a .env that lacks keys keeps the refusal that names them", () => {

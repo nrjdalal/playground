@@ -2,6 +2,7 @@ import "@packages/env/aliases"
 import { homedir } from "node:os"
 import { dirname, isAbsolute, join, resolve } from "node:path"
 
+import type { GapsRead } from "@packages/env/gaps"
 import { SQL } from "bun"
 import { RouteStore } from "portless"
 
@@ -241,13 +242,7 @@ export const apiSettings = (
 }
 
 // The .env's gaps among the required keys, read in a fresh bun child of the API's working directory: @packages/env/gaps owns the schemas, the .env.example filter, the child and the refusal words. A module the build writes during the run is read in a fresh child process, since this process's resolver has cached the old dist for the whole package: it has already resolved other @packages/env exports, so a require or import here would miss the file the build just wrote. The caller names the built module by gapsPath, as it names apiSettings's loader. POSTGRES_URL is never a gap here, since with none the API serves its setup (SETUP_MODE, below).
-export const envGaps = (
-  root: string,
-  env: Record<string, string>,
-  gapsPath: string,
-):
-  | { error: string; ok: false }
-  | { empty: string[]; missing: string[]; ok: true; refusal: string } => {
+export const envGaps = (root: string, env: Record<string, string>, gapsPath: string): GapsRead => {
   const read = Bun.spawnSync(
     [
       process.execPath,
