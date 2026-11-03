@@ -64,7 +64,7 @@ describe("runUpdate", () => {
   const repo = "/repo"
   const quiet = () => {}
 
-  test("nothing changed: fetch, merge, link-skills first (every later step reads the data folder it links), ops-restart, then the roll, with no install or build", async () => {
+  test("nothing changed: fetch, read the target's manifests, merge, link-skills first (every later step reads the data folder it links), ops-restart, then the roll, with no install or build", async () => {
     const { calls, run } = fakeRun({ "rev-parse": { out: "old\n" } })
     let rolled = 0
     const code = await runUpdate(repo, run, async () => (rolled++, 0), quiet)
@@ -74,6 +74,8 @@ describe("runUpdate", () => {
       ["git", "-C", repo, "rev-parse", "HEAD"],
       ["git", "-C", repo, "fetch", "-q", "origin", "main"],
       ["git", "-C", repo, "branch", "--show-current"],
+      ["git", "-C", repo, "merge-base", "--is-ancestor", "HEAD", "origin/main"],
+      ["git", "-C", repo, "ls-tree", "-r", "--name-only", "origin/main"],
       ["git", "-C", repo, "merge", "--ff-only", "-q", "origin/main"],
       ["bash", `${repo}/scripts/link-skills.sh`],
       ["git", "-C", repo, "diff", "--name-only", "old", "HEAD"],
@@ -196,9 +198,11 @@ describe("runUpdate", () => {
     )
     expect(code).toBe(0)
     expect(rolled).toBe(false)
-    expect(calls.slice(1, 4)).toEqual([
+    expect(calls.slice(1, 6)).toEqual([
       ["git", "-C", repo, "fetch", "-q", "--tags", "origin", "main"],
       ["git", "-C", repo, "merge-base", "--is-ancestor", "HEAD", "origin/main"],
+      ["git", "-C", repo, "merge-base", "--is-ancestor", "HEAD", "refs/tags/v0.0.20"],
+      ["git", "-C", repo, "ls-tree", "-r", "--name-only", "refs/tags/v0.0.20"],
       ["git", "-C", repo, "checkout", "-q", "-B", "main", "refs/tags/v0.0.20"],
     ])
     expect(said.at(-1)).toStartWith("playground update: at v0.0.20; the Dashboard rolls on its own")
@@ -208,6 +212,69 @@ describe("runUpdate", () => {
     const { calls, run } = fakeRun({ "merge-base": { code: 1 } })
     expect(await runUpdate(repo, run, async () => 0, quiet, "v0.0.20")).toBe(1)
     expect(calls.some((argv) => argv.includes("checkout"))).toBe(false)
+  })
+
+  // a target whose settings package declares x, which nothing in /repo links
+  const declares = {
+    "ls-tree": { out: "package.json\npackages/settings/package.json\n" },
+    show: { out: JSON.stringify({ dependencies: { x: "^1" }, workspaces: ["packages/*"] }) },
+  }
+
+  test("a target that declares an unlinked dependency checks out its changed manifests and installs before the merge", async () => {
+    const { calls, run } = fakeRun({
+      "--diff-filter=D": { out: "" },
+      ...declares,
+      diff: { out: "bun.lock\npackages/settings/package.json\npackages/settings/src/a.ts\n" },
+    })
+    expect(await runUpdate(repo, run, async () => 0, quiet)).toBe(0)
+    const at = (argv: string[]) => calls.findIndex((call) => call.join(" ") === argv.join(" "))
+    const checkout = at([
+      "git",
+      "-C",
+      repo,
+      "checkout",
+      "origin/main",
+      "--",
+      "bun.lock",
+      "packages/settings/package.json",
+    ])
+    const install = at([
+      process.execPath,
+      "install",
+      "--frozen-lockfile",
+      "--ignore-scripts",
+      "--cwd",
+      repo,
+    ])
+    const merge = at(["git", "-C", repo, "merge", "--ff-only", "-q", "origin/main"])
+    expect(checkout).toBeGreaterThan(-1)
+    expect([checkout < install, install < merge]).toEqual([true, true])
+  })
+
+  test("a target that deletes a manifest merges first as before, since the old code may still read it", async () => {
+    const { calls, run } = fakeRun({
+      "--diff-filter=D": { out: "packages/old/package.json\n" },
+      ...declares,
+    })
+    expect(await runUpdate(repo, run, async () => 0, quiet)).toBe(0)
+    expect(calls.some((argv) => argv.includes("--") || argv.includes("install"))).toBe(false)
+  })
+
+  test("a failed install before the merge stops the update and says the manifests may be the new commit's", async () => {
+    const said: string[] = []
+    const { calls, run } = fakeRun({ install: { code: 1 }, ...declares })
+    expect(
+      await runUpdate(
+        repo,
+        run,
+        async () => 0,
+        (l) => said.push(l),
+      ),
+    ).toBe(1)
+    expect(calls.some((argv) => argv.includes("merge"))).toBe(false)
+    expect(said.at(-1)).toBe(
+      "playground update: link the new commit's dependencies failed; its manifests may be the new commit's; run playground update again, which moves the checkout over them",
+    )
   })
 
   test("the roll's own code is the update's", async () => {
@@ -513,7 +580,7 @@ test("with no record, a checkout reset past its last fast-forward reads what cha
   expect(readFileSync(done, "utf8").trim()).toBe(git(checkout, "rev-parse", "HEAD"))
 })
 
-// #641: the hooks read the checkout's code as soon as it moves, so a commit whose code imports a workspace dependency this checkout has not linked gets that install before any of its code lands
+// the hooks read the checkout's code as soon as it moves, so a commit whose code imports a workspace dependency this checkout has not linked gets that install before any of its code lands
 describe("runUpdate onto a commit that declares a dependency the checkout has not linked", () => {
   const env = { GIT_CONFIG_NOSYSTEM: "1", HOME: scratch, PATH: process.env.PATH }
   const git = (cwd: string, ...args: string[]) =>
@@ -538,6 +605,7 @@ describe("runUpdate onto a commit that declares a dependency the checkout has no
     const origin = join(scratch, `${name}-origin`)
     write(join(origin, "scripts", "link-skills.sh"), "true\n")
     write(join(origin, "packages", "scripts", "src", "ops-restart", "cli.ts"), "\n")
+    write(join(origin, ".gitignore"), "node_modules\n")
     write(join(origin, "package.json"), JSON.stringify({ workspaces: ["packages/*"] }))
     write(join(origin, "bun.lock"), "one\n")
     write(join(origin, "packages", "safe-delete", "package.json"), "{}")

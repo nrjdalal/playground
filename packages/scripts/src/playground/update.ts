@@ -2,6 +2,7 @@
 import { basename, join } from "node:path"
 
 import { CORE_SKILLS } from "./orgs"
+import { unlinked } from "./unlinked"
 
 // A step's argv run to its end; `show` streams its output to the terminal instead of keeping it.
 export type Run = (argv: string[], show?: boolean) => Promise<{ code: number; out: string }>
@@ -14,12 +15,14 @@ export const spawnRun: Run = async (argv, show = false) => {
   return { code: await proc.exited, out }
 }
 
+const MANIFEST = /(^|\/)(bun\.lock|package\.json)$/
+
 // What the merge changed asks for: an install for a lockfile or a package.json, a build for a package with a dist (packages/scripts runs from source).
 export const updateSteps = (changed: string[]) => ({
   build: changed.some(
     (path) => path.startsWith("packages/") && !path.startsWith("packages/scripts/"),
   ),
-  install: changed.some((path) => /(^|\/)(bun\.lock|package\.json)$/.test(path)),
+  install: changed.some((path) => MANIFEST.test(path)),
   // each changed skill's folder, A to Z by name, which a live session reads the new text from (the release rule)
   skills: [
     ...new Set(
@@ -81,23 +84,57 @@ export const runUpdate = async (
     )
     return git("checkout", "-q", "-B", "main", "origin/main")
   }
-  const steps: [string, () => ReturnType<Run>][] = to
+  const install = [
+    process.execPath,
+    "install",
+    "--frozen-lockfile",
+    "--ignore-scripts",
+    "--cwd",
+    repo,
+  ]
+  const target = to ? `refs/tags/${to}` : "origin/main"
+  // every session's hooks run this checkout's code the moment it moves, so a target that declares a dependency the checkout has not linked gets its manifests and that install first, while the code is still the old commit's; a target that deletes a manifest moves first as before, since the old code may still read it
+  const prelink = async (): ReturnType<Run> => {
+    const ok = { code: 0, out: "" }
+    if ((await git("merge-base", "--is-ancestor", "HEAD", target)).code !== 0) return ok
+    const lines = async (...args: string[]) => (await git(...args)).out.split("\n").filter(Boolean)
+    const manifests: Record<string, string> = {}
+    for (const path of await lines("ls-tree", "-r", "--name-only", target))
+      if (/(^|\/)package\.json$/.test(path))
+        manifests[path] = (await git("show", `${target}:${path}`)).out
+    const missing = await unlinked(repo, manifests)
+    if (!missing.length) return ok
+    const changed = (await lines("diff", "--name-only", "HEAD", target)).filter((path) =>
+      MANIFEST.test(path),
+    )
+    if ((await lines("diff", "--name-only", "--diff-filter=D", "HEAD", target)).length) return ok
+    log(
+      `playground update: install the new commit's dependencies before its code, since it declares ${missing.join(", ")}, which this checkout has not linked`,
+    )
+    const staged = await git("checkout", target, "--", ...changed)
+    return staged.code === 0 ? run(install, true) : staged
+  }
+  const prelinked =
+    "its manifests may be the new commit's; run playground update again, which moves the checkout over them"
+  const steps: [string, () => ReturnType<Run>, string?][] = to
     ? [
         ["fetch origin main and its tags", () => git("fetch", "-q", "--tags", "origin", "main")],
         [
           "a checkout with no commits of its own",
           () => git("merge-base", "--is-ancestor", "HEAD", "origin/main"),
         ],
+        ["link the new commit's dependencies", prelink, prelinked],
         [`check out ${to}`, () => git("checkout", "-q", "-B", "main", `refs/tags/${to}`)],
       ]
     : [
         ["fetch origin main", () => git("fetch", "-q", "origin", "main")],
         ["move to main, on a tree with no uncommitted changes", onMain],
+        ["link the new commit's dependencies", prelink, prelinked],
         ["merge --ff-only origin/main", () => git("merge", "--ff-only", "-q", "origin/main")],
       ]
-  for (const [name, step] of steps)
+  for (const [name, step, state = "the checkout is as it was"] of steps)
     if ((await step()).code !== 0) {
-      log(`playground update: ${name} failed; the checkout is as it was`)
+      log(`playground update: ${name} failed; ${state}`)
       return 1
     }
   // link-skills.sh first, as the release skill's step 5 runs it: every later step and every ops job reads the data folder it links
@@ -107,7 +144,7 @@ export const runUpdate = async (
   ]
   if (!(await shown(linkSkills))) return 1
   const changed = (await git("diff", "--name-only", old, "HEAD")).out.split("\n").filter(Boolean)
-  const { build, install, skills } = updateSteps(changed)
+  const { build, install: installs, skills } = updateSteps(changed)
   if (skills.length)
     log(
       `playground update: skills changed: ${skills.map((folder) => basename(folder)).join(", ")}; a running session's Skill tool serves the copy it started with, so a live session reads each one's files here: ${skills.map((folder) => `${join(repo, folder)}/`).join(", ")}; send each lead these folders, for the lead to have each of its live checkers read the new text there (release)`,
@@ -115,11 +152,7 @@ export const runUpdate = async (
   const turbo = join(repo, "node_modules", ".bin", "turbo")
   const restart = join(repo, "packages", "scripts", "src", "ops-restart", "cli.ts")
   const after: [string, string[]][] = []
-  if (install)
-    after.push([
-      "install",
-      [process.execPath, "install", "--frozen-lockfile", "--ignore-scripts", "--cwd", repo],
-    ])
+  if (installs) after.push(["install", install])
   if (build)
     after.push([
       "build",
