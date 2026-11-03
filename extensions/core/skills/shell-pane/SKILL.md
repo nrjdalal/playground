@@ -20,6 +20,8 @@ Run `shell-pane run <pane id> '<command>'`, the command in single quotes. The la
 
 - A heavy command (a suite, a build, an install) goes inside run-slot, as `~/.playground/ops/run-slot.sh <your name> -- <command>`, as in your own Bash (**slots**).
 - A refusal prints the guard's reason, the same one its hook gives your own Bash call: follow it, then run again.
+- The launcher's own `claude` check reads the words with quotes and backslashes taken out; a word built from a variable or a glob gets past it, as past no-raw-spawn, so a session start goes through `scripts/spawn.sh` alone.
+- A command is one line of printable ASCII, spaces and tabs: the launcher refuses any other character, naming it, since a control character or a newline could edit or end the typed line itself.
 
 Done when it prints `sent <marker>`, or a refusal you have acted on.
 

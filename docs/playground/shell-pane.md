@@ -19,7 +19,8 @@ A session loads it on its own when a step needs a terminal that outlives one too
 
 `open` makes a workspace labelled `shell-<session name>-<n>`, its shell in the session's worktree.
 `run` checks the command, then types it with a fresh marker that prints its exit status.
-Each command runs in a shell of its own, so nothing one command sets carries to the next, as between a session's own commands, and a pane still running one takes no other until it is read.
+A command is one line of printable ASCII, spaces and tabs, since any other character, a control character or a newline, could edit the typed line itself.
+Each command runs in a shell of its own, so nothing one command sets carries to the next, as between a session's own commands, and a pane still running one takes no other until that one finishes.
 `read` waits for that marker and prints the output and `rc=<n>`; with no marker by its timeout, the result reads as unknown, never as a pass.
 `close` closes the workspace by its id, and confirms its label is gone from the server's list.
 
@@ -27,7 +28,7 @@ Each command runs in a shell of its own, so nothing one command sets carries to 
 
 **Does a pane get macOS grants a session's own Bash lacks?**
 No.
-A session and a pane on the factory's servers run under the same herdr server, so Screen Recording and Accessibility are granted the same way for both.
+A session on `playground` and a pane on `playground-probes` both run under herdr, so Screen Recording and Accessibility are granted the same way for both.
 
 ## It's working if
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-// A plain shell pane a session drives (skills/playground/shell-pane): a workspace on the playground-probes herdr server, which takes a command only after every registered Bash guard passes it, since a pane has no PreToolUse hook of its own.
+// A plain shell pane a session drives (extensions/core/skills/shell-pane): a workspace on the playground-probes herdr server, which takes a command only after every registered Bash guard passes it, since a pane has no PreToolUse hook of its own.
 import { homedir } from "node:os"
 import { join } from "node:path"
 
@@ -17,6 +17,8 @@ const LABEL = /^shell-[a-z0-9]+(?:-[a-z0-9]+)*-\d+$/
 const MARKER = /^__shell_pane_[0-9a-f]{12}$/
 // no-raw-spawn's STARTS_CLAUDE: claude as a word, but not the .claude folder or a longer word
 const CLAUDE = /(?<![.\w])claude(?!\w)/i
+// the one set of characters run types: printable ASCII, space and tab
+const UNTYPED = /[^\t\x20-\x7e]/u
 
 type Json = Record<string, any>
 // One herdr CLI call on the probes server: its exit code and what it printed (stdout, else stderr).
@@ -62,7 +64,13 @@ export async function bashGuards(repo: string): Promise<string[]> {
   const entries: { hooks: { command: string }[]; matcher: string }[] =
     settings.hooks?.PreToolUse ?? []
   const commands = entries
-    .filter((entry) => new RegExp(entry.matcher).test("Bash"))
+    .filter((entry) => {
+      try {
+        return new RegExp(entry.matcher).test("Bash")
+      } catch {
+        throw new Refusal(`shell-pane cannot read a registered hook's matcher: ${entry.matcher}`)
+      }
+    })
     .flatMap((entry) => entry.hooks.map((h) => h.command))
   const names = commands.map((command) => command.match(/scripts\/hooks\/([\w-]+)\.ts/)?.[1])
   const unread = commands.find((_, i) => !names[i])
@@ -158,7 +166,18 @@ export async function run(
     throw new Refusal(
       `shell-pane refuses ${pane}: a command is still running there, or herdr did not say; read its marker first`,
     )
-  const reason = await screen(command, info.foreground_cwd || info.cwd, repo)
+  // a control byte could edit the typed line itself (a Ctrl-U erasing the zsh -f prefix), a newline end it, outside every guard's view
+  const odd = command.match(UNTYPED)?.[0]
+  if (odd !== undefined)
+    throw new Refusal(
+      `shell-pane refuses a command holding U+${odd.codePointAt(0)!.toString(16).toUpperCase().padStart(4, "0")}: it types printable ASCII, space and tab alone`,
+    )
+  const cwd = info.foreground_cwd || info.cwd
+  if (!cwd)
+    throw new Refusal(
+      `shell-pane refuses ${pane}: herdr gave no folder for its shell, which the guards judge`,
+    )
+  const reason = await screen(command, cwd, repo)
   if (reason) throw new Refusal(reason)
   const marker = `__shell_pane_${crypto.randomUUID().replaceAll("-", "").slice(0, 12)}`
   const quoted = `'${command.replaceAll("'", "'\\''")}'`

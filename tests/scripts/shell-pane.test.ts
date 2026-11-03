@@ -332,6 +332,45 @@ describe("run's own refusals", () => {
     expect(typed(calls)).toEqual([])
   })
 
+  test.each([
+    ["a Ctrl-U", "echo a\x15alias st=git", "U+0015"],
+    ["an escape", "echo a\x1b[2K", "U+001B"],
+    ["a newline", "echo a\ngit stash", "U+000A"],
+    ["a non-ASCII character", "echo caf\u00e9", "U+00E9"],
+    ["a DEL", "echo a\x7f", "U+007F"],
+  ])("a command holding %s is refused before typing, naming it", async (_, command, named) => {
+    const { calls, herdr } = stubHerdr()
+    const repo = repoWith({ "no-made-up": `export const check = async () => undefined\n` })
+    expect(await refusal(run("w1:p1", command, herdr, repo))).toBe(
+      `shell-pane refuses a command holding ${named}: it types printable ASCII, space and tab alone`,
+    )
+    expect(typed(calls)).toEqual([])
+  })
+
+  test("a tab passes", async () => {
+    const { calls, herdr } = stubHerdr()
+    const repo = repoWith({ "no-made-up": `export const check = async () => undefined\n` })
+    await run("w1:p1", "printf 'a\tb'", herdr, repo)
+    expect(typed(calls)).toHaveLength(1)
+  })
+
+  test("a pane herdr gives no folder for, which the guards judge", async () => {
+    const { calls, herdr, panes } = stubHerdr()
+    panes.get("w1:p1")!.cwd = ""
+    expect(await refusal(run("w1:p1", "echo hi", herdr, CHECKOUT))).toContain("gave no folder")
+    expect(typed(calls)).toEqual([])
+  })
+
+  test("a registered matcher that is no regex refuses", async () => {
+    const repo = repoWith(
+      { "no-made-up": `export const check = async () => undefined\n` },
+      "^(Bash",
+    )
+    expect(await refusal(run("w1:p1", "echo hi", stubHerdr().herdr, repo))).toContain(
+      "cannot read a registered hook's matcher",
+    )
+  })
+
   test("a pane herdr gives no process info for, since it cannot be told idle", async () => {
     const { calls, herdr, panes } = stubHerdr()
     panes.get("w1:p1")!.silent = true
