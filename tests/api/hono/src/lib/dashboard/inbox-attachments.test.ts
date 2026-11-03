@@ -13,7 +13,10 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { MAX_ATTACHMENT_BYTES } from "../../../../../../api/hono/src/lib/dashboard/attachments"
-import { inboxInputSchema } from "../../../../../../api/hono/src/lib/dashboard/inbox"
+import {
+  inboxInputSchema,
+  MAX_INBOX_ATTACHMENTS,
+} from "../../../../../../api/hono/src/lib/dashboard/inbox"
 import { keepAttachments } from "../../../../../../api/hono/src/lib/dashboard/inbox-attachments"
 
 const scratch = mkdtempSync(join(tmpdir(), "inbox-attachments-"))
@@ -223,4 +226,59 @@ describe("bun run ask keeps an ask's pages, docs, code and PDFs (#2276, #2277)",
     const climb = join(data, "..", "sources", "climb.html")
     expect(await keepFrom([{ src: climb }])).toEqual(refused(climb))
   })
+})
+
+describe("a draft carries pictures as an ask does (PG-501)", () => {
+  const id = "3f0e7a52-1c4b-4d2a-9e6f-0000000000a1.png"
+  const ok = { id, kind: "image", name: "a.png" }
+  const item = (kind: "ask" | "draft", attachments: unknown) =>
+    kind === "ask"
+      ? { from: "dispatcher", preview: { attachments, text: "Look", type: "ask" }, title: "A mock" }
+      : {
+          from: "dispatcher",
+          kind: "draft",
+          preview: { attachments, noLink: "A made-up thread", text: "Look", to: "@Merritt" },
+          title: "A mock",
+        }
+
+  test("bun run ask copies a draft's before and after in, and the draft keeps them", async () => {
+    const before = file("draft-before.png", PNG)
+    const after = file("draft-after.png", PNG)
+    const dir = join(scratch, `kept${folders++}`)
+    const kept = await keepAttachments(
+      item("draft", [
+        { label: "before", src: before },
+        { label: "after", src: after },
+      ]),
+      { dir },
+    )
+    if (!kept.ok) throw new Error(kept.message)
+    const parsed = inboxInputSchema.safeParse(kept.input)
+    expect(parsed.error).toBeUndefined()
+    const preview = parsed.data?.preview as { attachments?: { label?: string; name: string }[] }
+    expect(preview.attachments?.map((a) => [a.name, a.label])).toEqual([
+      ["draft-before.png", "before"],
+      ["draft-after.png", "after"],
+    ])
+    expect(readdirSync(dir)).toHaveLength(2)
+  })
+
+  test.each(["ask", "draft"] as const)(
+    "a %s's stored attachments are judged by the ask's own checks",
+    (kind) => {
+      const refused = (attachments: unknown) => {
+        const issues = inboxInputSchema.safeParse(item(kind, attachments)).error?.issues ?? []
+        expect(issues.length, JSON.stringify(attachments)).toBeGreaterThan(0)
+        for (const issue of issues)
+          expect(issue.path.slice(0, 2)).toEqual(["preview", "attachments"])
+      }
+      expect(inboxInputSchema.safeParse(item(kind, [ok])).success).toBe(true)
+      refused([])
+      refused(Array.from({ length: MAX_INBOX_ATTACHMENTS + 1 }, () => ok))
+      refused([{ ...ok, kind: "video" }])
+      refused([{ kind: "image", name: "a.png", src: "/tmp/a.png" }])
+      refused([{ ...ok, id: "../a.png" }])
+      refused([{ ...ok, url: "x" }])
+    },
+  )
 })
