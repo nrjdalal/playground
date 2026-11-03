@@ -23,6 +23,7 @@
     "@packages/auth": "workspace:*",
     "@packages/config": "workspace:*",
     "@packages/env": "workspace:*",
+    "@packages/message": "workspace:*",
     "@pierre/diffs": "catalog:",
     "@remixicon/react": "catalog:",
     "@shadcn/react": "catalog:",
