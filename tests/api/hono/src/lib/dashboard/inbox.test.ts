@@ -1415,6 +1415,14 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
     expect(archived.ok && archived.item.status).toBe("cleared")
     const reopened = await store.answerItem(db, draft.id, { action: "unarchive" }, { actor })
     expect(reopened.ok && reopened.item.status).toBe("open")
+    // an archived item already sent to Done stays there, as the Archived shelf leaves it out
+    const done = await post(decision(PREVIEWS.ship))
+    await store.answerItem(db, done.id, { action: "clear" }, { actor })
+    await store.dismissItems(db, [done.id])
+    expect(await store.answerItem(db, done.id, { action: "unarchive" }, { actor })).toMatchObject({
+      code: "CONFLICT",
+      ok: false,
+    })
   })
 
   test("a settle takes no reply its poster closed, and keeps its link (PG-2444)", async () => {

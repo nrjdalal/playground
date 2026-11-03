@@ -887,7 +887,11 @@ async function unarchive(
   current: InboxItem,
   now: Date,
 ): Promise<{ item: InboxItem; ok: true } | Refused> {
-  if (current.status !== "cleared") {
+  // the Archived shelf's own rule: cleared and not yet dismissed to Done
+  if (
+    current.status !== "cleared" ||
+    (current.answer && "dismissedAt" in current.answer && current.answer.dismissedAt)
+  ) {
     return { code: "CONFLICT", message: "Only an archived item moves back to the Inbox", ok: false }
   }
   const [row] = await db
@@ -903,6 +907,7 @@ async function unarchive(
       and(
         eq(inboxItem.id, current.id),
         eq(inboxItem.status, "cleared"),
+        sql`${inboxItem.answer} ->> 'dismissedAt' is null`,
         eq(inboxItem.version, current.version),
       ),
     )

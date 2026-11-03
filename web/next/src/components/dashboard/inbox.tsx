@@ -38,7 +38,6 @@ import { cn } from "cn"
 import {
   type ComponentProps,
   type KeyboardEvent,
-  type ReactNode,
   type Ref,
   useEffect,
   useId,
@@ -134,7 +133,6 @@ import {
   resultLink,
   retryable,
   retryItem,
-  schedulable,
   scheduleChoices,
   scheduleItem,
   sendFailed,
@@ -765,6 +763,8 @@ export function InboxCard({
   const held = paused ? PAUSED_WHY : undefined
   const quiet = (outcome !== null && !failed) || (item.kind === "update" && item.readAt !== null)
   const buttons = folded ? [] : lifecycle(item, shelf)
+  // an archived card's Dismiss, renamed Done
+  const dismiss = buttons.includes("done") ? "Done" : buttons.includes("dismiss") ? "Dismiss" : null
 
   const title =
     item.kind === "update" && item.preview.link ? (
@@ -1053,15 +1053,10 @@ export function InboxCard({
         </Hint>
       )}
       {/* Dismiss sends an update or an answered card to Done; on an archived card the same button reads Done */}
-      {(buttons.includes("dismiss") || buttons.includes("done")) && (
-        <Hint
-          content={
-            held ??
-            (buttons.includes("done") ? "Done: it goes to Done" : "Dismiss: it goes to Done")
-          }
-        >
+      {dismiss && (
+        <Hint content={held ?? `${dismiss}: it goes to Done`}>
           <Button
-            aria-label={buttons.includes("done") ? "Done" : "Dismiss"}
+            aria-label={dismiss}
             size="icon-sm"
             variant="outline"
             disabled={busy}
