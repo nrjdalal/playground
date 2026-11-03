@@ -150,20 +150,76 @@ function namings(command: string): Namings {
 type Steady = { has: (key: string) => boolean }
 const NONE: Steady = { has: () => false }
 
-// For each command of the line, the variables whose value the shell has when it runs: each named once, by an unquoted plain assignment that is its command's first word, in a command not piped or sent to the background; one the shell always runs (first, or after `;` or `&`) holds for every later command, one after `&&` only along that `&&` chain, since the shell skips the rest of the chain with it, and one after `||`, a case arm or a keyword holds for none
+// The builtins that set a variable by a name among their words, and the ones that run text as the line's own shell, which can set any
+const NAME_SETTERS = new Set([
+  "declare",
+  "export",
+  "getopts",
+  "let",
+  "local",
+  "mapfile",
+  "printf",
+  "read",
+  "readarray",
+  "readonly",
+  "typeset",
+  "unset",
+])
+const RUNS_TEXT = new Set([".", "eval", "source"])
+// the words that open and close a compound body or group, and the other reserved words a command may lead with
+const OPENS = new Set(["case", "for", "if", "select", "until", "while", "{"])
+const CLOSES = new Set(["done", "esac", "fi", "}"])
+const LEADS = new Set(["!", "coproc", "do", "elif", "else", "then", "time"])
+
+// For each command of the line, the variables whose value the shell has when it runs: each named once, by an unquoted plain assignment that is its command's first word, at the line's top level (outside any function, compound body, group or subshell) and not piped or sent to the background; one the shell always runs (first, or after `;` or `&`) holds for every later command, and one after `&&` only along that `&&` chain, since the shell skips the rest of the chain with it. A line that runs eval or source, or sets a variable by a name the hook cannot read whole, holds none
 function steadyNames(named: Namings, commands: Command[]): (cmd: Command) => Steady {
+  const counts = new Map(named.counts)
+  const parses = commands.map((cmd) => parse(cmd))
+  for (const [at, cmd] of commands.entries()) {
+    const { name } = parses[at]
+    if (RUNS_TEXT.has(name)) return () => NONE
+    const loop = cmd.words.findIndex(
+      (w) => !w.quoted && (w.value === "for" || w.value === "select"),
+    )
+    if (!NAME_SETTERS.has(name) && loop === -1) continue
+    // a name the shell reads after quote removal (`read X\Y` sets XY) counts as written, and one the hook cannot read could be any
+    // printf names one only by -v, so its other words are text it prints
+    const v = cmd.words.findIndex((w) => /^-v/.test(w.value))
+    const vName =
+      cmd.words[v]?.value === "-v"
+        ? cmd.words[v + 1]
+        : cmd.words[v] && { ...cmd.words[v], value: cmd.words[v].value.slice(2) }
+    const names = loop !== -1 ? [cmd.words[loop + 1]] : name === "printf" ? [vName] : cmd.words
+    for (const word of names) {
+      if (!word) continue
+      if (marked(word.value.split("=")[0])) return () => NONE
+      for (const key of word.value.match(/[A-Za-z_]\w*/g) ?? [])
+        counts.set(key, (counts.get(key) ?? 0) + 1)
+    }
+  }
   const set = new Map<string, { at: number; chain?: number }>()
   const where = new Map<Command, { at: number; chain: number }>()
   let chain = 0
+  let depth = 0
   for (const [at, cmd] of commands.entries()) {
     if (cmd.follows !== "&&") chain++
     where.set(cmd, { at, chain })
+    const top = depth === 0 && cmd.scope === 0
+    for (let k = 0; k < cmd.words.length; k++) {
+      const { quoted, value } = cmd.words[k]
+      if (quoted) break
+      if (value === "function") k++
+      else if (OPENS.has(value)) depth++
+      else if (CLOSES.has(value)) depth--
+      else if (!LEADS.has(value)) break
+    }
+    if (depth < 0) return () => NONE
     const always = !cmd.follows || cmd.follows === ";" || cmd.follows === "&"
-    if (cmd.detached || (!always && cmd.follows !== "&&")) continue
+    if (!top || cmd.detached || (!always && cmd.follows !== "&&")) continue
     const [first] = cmd.words
-    if (!first || !ASSIGN.test(first.value) || parse(cmd).name !== "") continue
-    for (const key of parse(cmd).local.keys())
-      if (named.counts.get(key) === 1 && named.plain.has(key))
+    if (!first || !ASSIGN.test(first.value) || parses[at].name !== "") continue
+    for (const key of parses[at].local.keys())
+      if (counts.get(key) === 1 && named.plain.has(key))
         set.set(key, always ? { at } : { at, chain })
   }
   return (cmd) => {
