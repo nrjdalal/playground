@@ -5520,11 +5520,8 @@ function parse3(cmd) {
   }
   while (ASSIGN.test(rest.at(-1)?.value ?? ""))
     assign(state.local, rest.pop());
-  const budget = { left: READINGS };
-  const parsed = unwrap(state, undefined, budget);
-  return budget.capped ? { ...parsed, capped: true } : parsed;
+  return unwrap(state, undefined, { left: READINGS });
 }
-var readings = (parsed) => [parsed, ...parsed.also.flatMap(readings)];
 var assign = (local, w) => {
   const eq = w.value.indexOf("=");
   local.set(w.value.slice(0, eq), slice(w, eq + 1));
@@ -5534,18 +5531,12 @@ function unwrap(state, inside, budget) {
   const peek = () => rest[rest.length - 1];
   const take = () => rest.pop();
   const also = [];
-  const fork = (wrapper, drop) => {
-    if (budget.left-- <= 0) {
-      budget.capped = true;
-      return;
-    }
-    also.push(unwrap({
-      chdir: state.chdir,
-      local: new Map(local),
-      rest: rest.slice(0, Math.max(0, rest.length - drop)),
-      xargs: state.xargs && { ...state.xargs }
-    }, wrapper, budget));
-  };
+  const fork = (wrapper, drop) => budget.left-- > 0 && also.push(unwrap({
+    chdir: state.chdir,
+    local: new Map(local),
+    rest: rest.slice(0, Math.max(0, rest.length - drop)),
+    xargs: state.xargs && { ...state.xargs }
+  }, wrapper, budget));
   for (let wrapper = inside;; wrapper = undefined) {
     if (!wrapper) {
       wrapper = program(peek()?.value ?? "");
@@ -5645,6 +5636,7 @@ async function runAll(lexed, env, visit, builtins) {
 var subshell = (env) => ({ ...env, vars: new Map(env.vars) });
 async function examine(cmd, env, visit, builtins) {
   tick();
+  const readings = (parsed) => [parsed, ...parsed.also.flatMap(readings)];
   const [primary, ...others] = readings(parse3(cmd));
   const before = others.length > 0 ? apart(env) : env;
   const verdict = await examineReading(cmd, primary, env, visit, builtins);
@@ -5680,10 +5672,17 @@ async function examineReading(cmd, parsed, env, visit, builtins) {
     if (builtins)
       verdict = await visit(cmd, parsed, here);
   } else if (name === "cd" || name === "pushd") {
-    env.cwd = cmd.detached ? undefined : await cdTarget(args, env);
-  } else if (name === "popd")
+    if (args.some((a) => GLOB_CHARS.test(a.value)))
+      verdict = await visit(cmd, parsed, here);
+    const from = env.cwd;
+    env.cwd = cmd.detached ? undefined : await cdTarget(name, args, env);
+    if (env.old)
+      env.old = { dir: env.cwd === undefined ? undefined : from };
+  } else if (name === "popd") {
     env.cwd = undefined;
-  else if (EXPORTS.has(name)) {
+    if (env.old)
+      env.old = {};
+  } else if (EXPORTS.has(name)) {
     for (const w of args.filter((a) => ASSIGN.test(a.value))) {
       const eq = w.value.indexOf("=");
       setVar(env.vars, w.value.slice(0, eq), slice(w, eq + 1));
@@ -5702,11 +5701,16 @@ async function examineReading(cmd, parsed, env, visit, builtins) {
   await record2(cmd, name, args, here);
   return verdict;
 }
-async function cdTarget(args, env) {
+async function cdTarget(name, args, env) {
   const dir = args.find((a) => !(a.value.startsWith("-") && a.value.length > 1));
   if (!dir)
     return homedir3();
-  const path = dir.value === "-" ? undefined : pathOf(dir, env);
+  const typed = dir.value === "-" ? undefined : await folder(pathOf(dir, env));
+  const tilde = !typed && name === "pushd" && env.old && !dir.quoted && !dir.unknown && !dir.reads?.length ? /^~([-+])(?=\/|$)/.exec(dir.value) : null;
+  const base = tilde && (tilde[1] === "-" ? env.old?.dir : env.cwd);
+  return base ? await folder(base + dir.value.slice(2)) : typed;
+}
+async function folder(path) {
   if (!path)
     return;
   try {
