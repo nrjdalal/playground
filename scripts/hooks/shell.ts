@@ -1349,10 +1349,12 @@ async function chdirTo(name: string, cmd: Command, parsed: Parsed, env: Env): Pr
   if (env.old) env.old = name === "popd" ? {} : { dir: env.cwd === undefined ? undefined : left }
   const from = startFolders(env)
   const back = [...new Set([...(env.cwdBack ?? []), ...from])]
+  // a relative target resolves against each folder a body's cd may have reached too, since a brace group's cd, or a called function's, runs before this one
+  const bases = [...new Set([...from, ...(env.cwdHeld ?? [])])]
   const move: Move =
     name === "popd"
       ? { back: true, paths: [], unread: true }
-      : pushdTilde(cdTargets(name, cmd, parsed, env, from), name, parsed, env, from, back)
+      : pushdTilde(cdTargets(name, cmd, parsed, env, bases), name, parsed, env, from, back)
   const { paths, unread } = move
   // the folder `Env.cwd`'s own reading left and the one it lands in join them, so the one folder `Env.old` names is always one a `cd -` or a `pushd ~-` of the reader's may go back to
   const named = [left, env.cwd].filter((dir): dir is string => dir !== undefined)
