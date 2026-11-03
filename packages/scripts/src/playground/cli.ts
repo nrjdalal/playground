@@ -444,17 +444,26 @@ const code =
                                       ? await runAccounts(rest, accountsIo(dataDir()))
                                       : command === "rm"
                                         ? await rm(rest)
-                                        : command === "herdr" && rest[0] === "stop"
-                                          ? (await opsHerdr(["stop-all"]).exited) === 0
-                                            ? 0
-                                            : 1
-                                          : command === "herdr" && rest[0] === "pin"
-                                            ? await (
-                                                await import("./herdr-pin")
-                                              ).runHerdrPin(rest.slice(1))
-                                            : VERBS.includes(command)
-                                              ? await verb(command, rest)
-                                              : fail(
-                                                  `no command ${command}; playground --help lists them`,
-                                                )
+                                        : command === "yard"
+                                          ? await (
+                                              await import("./yard")
+                                            ).runYard(
+                                              rest,
+                                              await (
+                                                await import("./yard")
+                                              ).yardIo(REPO, accountsIo(dataDir()).readSecret),
+                                            )
+                                          : command === "herdr" && rest[0] === "stop"
+                                            ? (await opsHerdr(["stop-all"]).exited) === 0
+                                              ? 0
+                                              : 1
+                                            : command === "herdr" && rest[0] === "pin"
+                                              ? await (
+                                                  await import("./herdr-pin")
+                                                ).runHerdrPin(rest.slice(1))
+                                              : VERBS.includes(command)
+                                                ? await verb(command, rest)
+                                                : fail(
+                                                    `no command ${command}; playground --help lists them`,
+                                                  )
 process.exit(code)
