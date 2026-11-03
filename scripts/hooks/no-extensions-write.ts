@@ -128,19 +128,21 @@ const GH_READS = new Set([
   "run view",
   "search",
 ])
-const GH_API_SENDS = /^(?:-[FXf]|--(?:cache|field|input|method|raw-field)(?:=|$))/
+// a gh api option that sends, and a read's option that opens the browser, each alone or in a cluster of short flags ahead of a filter's or template's own letter
+const GH_API_SENDS = /^(?:-[^-=qt]*[FXf]|--(?:cache|field|input|method|raw-field)(?:=|$))/
+const GH_WEB = /^(?:-[^-=qt]*w|--web(?:=|$))/
 
-// The words of a read-only gh call's jq filter or Go template (`-q '<filter>'`, `--jq=<filter>`, `-t '<template>'`), read as text rather than a command line; none for any other gh call, or when a variable on the line makes gh run a pager or an editor
-function ghFilters(parsed: Parsed, env: Env): Set<Word> {
-  const { args, first, local, name } = parsed
+// The words of a read-only gh call's jq filter or Go template (`-q '<filter>'`, `--jq=<filter>`, `-t '<template>'`), read as text rather than a command line; none for any other gh call. A pager or editor variable set on the line needs no check here, since an assignment or an export keeps the line from being read call by call.
+function ghFilters(parsed: Parsed): Set<Word> {
+  const { args, first, name } = parsed
   const filters = new Set<Word>()
   if (name !== "gh" || !first || marked(first.value)) return filters
   const [verb, sub] = args.map((a) => a.value)
   const call = verb === "api" || verb === "search" ? verb : `${verb} ${sub}`
-  if (!GH_READS.has(call) || [...local.keys()].some((key) => RUNS.test(key))) return filters
-  // gh api with a method, a field, an input file or a cache writes or sends, so it is no reader
+  if (!GH_READS.has(call)) return filters
+  // gh api with a method, a field, an input file or a cache writes or sends, and --web opens a browser, so neither is a reader
   if (verb === "api" && args.some((a) => GH_API_SENDS.test(a.value))) return filters
-  if (runsVariable(env.vars)) return filters
+  if (args.some((a) => GH_WEB.test(a.value))) return filters
   for (let k = 0; k < args.length; k++) {
     const { value } = args[k]
     if (["-q", "--jq", "-t", "--template"].includes(value) && args[k + 1]) filters.add(args[++k])
@@ -297,7 +299,7 @@ function narrow(cmd: Command, env: Env): boolean {
   if (base === "cut") return true
   // a read-only gh call is narrow when its jq filter is the only word that holds a space
   if (base === "gh") {
-    const filters = ghFilters(parsed, env)
+    const filters = ghFilters(parsed)
     return filters.size > 0 && args.every((a) => filters.has(a) || !/\s/.test(a.value))
   }
   if (base === "sort") return !args.some(({ value }) => /^-[a-zA-Z]*o|^--./.test(value))
@@ -569,7 +571,7 @@ function inspect(raw: string, environment: Environment) {
     }
     const literal = !whole && narrow(cmd, env)
     // on a line read call by call, a read-only gh call's jq filter is text, never a path
-    const filters = whole ? new Set<Word>() : ghFilters(parsed, env)
+    const filters = whole ? new Set<Word>() : ghFilters(parsed)
     for (const word of [first, ...args]) {
       // a quiet commit's message and a gh filter are text, judged only when the root is in it; a filter's unquoted glob is the shell's, judged as any glob
       const text = (quiet && /\s/.test(word.value)) || (filters.has(word) && !word.glob)
