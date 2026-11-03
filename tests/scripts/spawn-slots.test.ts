@@ -30,8 +30,9 @@ const slots =
       )
   }
 
+// the CPU 80% idle, so run-slot's gauges open every lane it does not hold
 const start = (args: string[], held: number, waiters: number, units?: number) =>
-  spawn(args, [], {}, undefined, undefined, slots(held, waiters, units))
+  spawn(args, [], { FAKE_CPU_IDLE: "80" }, undefined, undefined, slots(held, waiters, units))
 const worker = ["worker", "worker-brave-otter", "b.md"]
 
 describe("the slots gate admits a new worker only when run-slot has room for its runs", () => {
