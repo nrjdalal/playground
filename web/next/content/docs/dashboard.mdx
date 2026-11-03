@@ -17,7 +17,7 @@ A stack that shows test data instead, a made-up machine for tests and screenshot
 `/dashboard` opens your chat with the dispatcher, the session you talk to (`sessions.names`' dispatcher, `dispatcher` by default, unless `PLAYGROUND_DISPATCHER` names another), with the box to message it.
 A second dispatcher can run beside it on another model (the first's name plus `-2`, unless `PLAYGROUND_DISPATCHER_SECONDARY` names another), with a chat and a box of its own, opened from its row in the sidebar.
 Each dispatcher's chat and its box are named by its label, such as Message Alpha; the model its newest reply ran shows in its sidebar row's tooltip.
-A menu beside the box's attach button, such as **Opus · High**, shows the model and effort the dispatcher's newest reply ran with, and a pick types `/model` or `/effort` into it for you; the row shows the new one from its next reply.
+A menu directly left of the box's send button, such as **Opus · High**, shows the model and effort the dispatcher's newest reply ran with, and a pick types `/model` or `/effort` into it for you; the row shows the new one from its next reply.
 On a first run the chat starts with **Let's check this Mac**, each check marked there or missing with the button that fixes it, then **Continue**, which makes you this Mac's owner ([Where to start](/docs#where-to-start)).
 Once every check has passed, it shows one line, **This Mac has everything Playground needs**, over the steps left, each ticked once done: GitHub, Settings (**Set up settings**), a Claude account (**Add a Claude account**) and **Start** with the dispatcher's name.
 Once the dispatcher runs, its chat takes their place.
@@ -100,7 +100,7 @@ Scroll to end shows in the bar while there is more below you, and takes you to t
 
 `probe-sdk` is a throwaway session the Dashboard runs itself on the Claude Agent SDK, when `PLAYGROUND_SDK_PROBE_DIR` names its folder.
 Its view has a box too: your message goes straight into it, and its questions, permission requests and plans show as cards in its view.
-A menu beside its attach button shows its permission mode (Default, Accept edits, Plan or Bypass permissions) and changes it while approvals are on (`PLAYGROUND_APPROVALS_ENABLED`), and the model and effort menu beside it sets those through the Agent SDK, its row showing the value set.
+A menu beside its attach button shows its permission mode (Default, Accept edits, Plan or Bypass permissions) and changes it while approvals are on (`PLAYGROUND_APPROVALS_ENABLED`), and the model and effort menu directly left of send sets those through the Agent SDK, its row showing the value set.
 It shows no `/` list yet, since it cannot run a skill.
 
 ## Sidebar
@@ -166,7 +166,7 @@ Each row leads with the thread icon, the one a thread shows everywhere, and with
 Click a row to open the thread on its own page, which holds only its messages, in order: what you asked first, then what others wrote since you last opened it, then the rest under **Full history**, folded until you click it, then whatever arrives while it is open, your replies included.
 Opening it marks the thread read.
 The box at its bottom messages the dispatcher, and what you send there goes to the thread; your full chat still shows it, in time order.
-To start a thread from your chat, turn on **New thread**, the round thread button left of send, then send your message: the thread takes its title from your message's first line.
+Starting a new thread from your chat is off for now, so its box has no **New thread** button; the threads you have keep working.
 Every message in a thread opens with a small chip showing the thread's 4-character id, in your chat too, and the dispatcher's replies carry the same chip, so they land in the thread as well; click a chip to open its thread.
 **Back to chat** at the top, or the browser's Back, returns to your chat, and a Cmd-click (Ctrl-click) opens the thread in a new tab.
 A row's menu marks it read or unread, renames, pins or archives it.
