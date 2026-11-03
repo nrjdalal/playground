@@ -35,6 +35,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SELF = os.path.relpath(os.path.abspath(__file__), ROOT)
 SKIP = {
     "CHANGELOG.md",
+    "scripts/hooks/bundled/no-kill-by-name.js",
     "scripts/hooks/no-kill-by-name.ts",
     "tests/scripts/hooks/fixtures/refused-forms.ts",
     "tests/scripts/hooks/no-kill-by-name.test.ts",
