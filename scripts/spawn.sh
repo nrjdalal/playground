@@ -1104,6 +1104,12 @@ case "$MODE" in
     KIND=$(kind_of "$NAME")
     ROLE=$(role_of_kind "$KIND")
     [ -n "$ROLE" ] || refuse "$NAME is not a factory session's name, and the roster gives it no kind"
+    # A checker whose roster row names an ended worker is ended again on the checker reaper's next pass (checker-worker-gone, scripts/ops/optimizer/idle_sessions.ts), so its row moves to the worker it now serves before it comes back.
+    if [[ $ROLE =~ ^(reviewer|tester)$ ]]; then
+      serves=$(roster_field "$NAME" worker)
+      [ -z "$serves" ] || [ "$(roster_field "$serves" status)" != ended ] ||
+        refuse "its roster row names $serves as its worker, which has ended, so the checker reaper would end it again: point it at the worker it serves first, with bun scripts/roster.ts assign $NAME \"<title>\" review worker=<live worker> pr=<url>"
+    fi
     # macOS guards the Desktop folder, so a new pane there fails until Full Disk Access is granted again after each update: a folder there resumes in the same tree under the code root, and in place where the code root is on the Desktop itself.
     desktop="$HOME/Desktop/" # the folder the factory left
     off_desktop() { local rest=${1#"$desktop"} root; root=$(code_root); [[ $1 == "$desktop"* && -d $root && $root/ != "$desktop"* ]] && echo "$root/${rest#"$(basename "$root")"/}" || echo "$1"; }
