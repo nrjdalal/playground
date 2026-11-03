@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 
 import {
   EFFORT_LABELS,
+  heldPick,
   isEffort,
   isModel,
   MODEL_LABELS,
@@ -41,5 +42,13 @@ describe("the composer's model and effort picker", () => {
     expect(shownValue({ from: "opus", to: "sonnet" }, "haiku")).toBe("haiku")
     expect(shownValue({ from: null, to: "high" }, null)).toBe("high")
     expect(shownValue(null, "low")).toBe("low")
+  })
+
+  test("a pick the dispatcher holds (QUEUED) stays shown, while any other refusal fails it", () => {
+    expect(heldPick({ code: "CONFLICT", delivery: "QUEUED", message: "holds it" })).toBe(true)
+    expect(heldPick({ code: "CONFLICT", delivery: "ON_PICKER", message: "on a card" })).toBe(false)
+    expect(heldPick({ code: "CONFLICT", delivery: "INTERRUPTED", message: "typed" })).toBe(false)
+    expect(heldPick({ code: "NETWORK_ERROR", message: "Network request failed" })).toBe(false)
+    expect(heldPick(null)).toBe(false)
   })
 })
