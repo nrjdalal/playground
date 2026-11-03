@@ -1,8 +1,10 @@
+import { readFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
 
 import { dataDir } from "@packages/env/data-dir"
 import {
+  type Clone,
   isAgentBrowser,
   listTrash,
   type Proc,
@@ -42,8 +44,9 @@ export const rmArgs = (words: string[]): RmArgs | { error: string } => {
   return path === undefined ? { error: RM_USAGE } : { path, reason, worktree }
 }
 
-// What playground rm reads and calls beyond its words, so a test hands it a mkdtemp machine: the folders it starts from, every process with a working folder, the ops notify line to the dispatcher, and the session's name.
+// What playground rm reads and calls beyond its words, so a test hands it a mkdtemp machine: the running clones, the folders it starts from, every process with a working folder, the ops notify line to the dispatcher, and the session's name.
 export type RmDeps = {
+  clones: () => Clone[]
   data: string
   home: string
   main: string
@@ -84,6 +87,34 @@ export const processesOf = (cwds: string, ps: string, sockets: string): Proc[] =
   )
 }
 
+// run-slot's clone holder line, "<who> <pid> <iso>" then a tab, the source checkout, a tab and the destination, as the clone it names while its pid lives; a line with no source names none.
+export const clonesOf = (line: string, alive: (pid: number) => boolean): Clone[] => {
+  const [head = "", source, destination] = line.trim().split("\t")
+  const [who, pidText] = head.split(" ")
+  const pid = Number(pidText)
+  return who && Number.isInteger(pid) && source && destination && alive(pid)
+    ? [{ destination, pid, source, who }]
+    : []
+}
+
+const alive = (pid: number): boolean => {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "EPERM"
+  }
+}
+
+// The clone run-slot's clone lane runs now, from its holder record in the data folder's ops folder, or none.
+const clones = (data: string) => (): Clone[] => {
+  try {
+    return clonesOf(readFileSync(join(data, "ops", "run-slot-clone.holder"), "utf8"), alive)
+  } catch {
+    return []
+  }
+}
+
 const output = (argv: string[]): string =>
   Bun.spawnSync(argv, { stderr: "ignore", stdout: "pipe" }).stdout.toString()
 
@@ -99,8 +130,9 @@ const processes = (): Proc[] | null => {
   return procs.length ? procs : null
 }
 
-// This machine's: HOME, the data folder, the main checkout, notify.sh to the dispatcher, lsof and ps, and the Claude Code registry's name for this session, else "shell".
+// This machine's: run-slot's running clone, HOME, the data folder, the main checkout, notify.sh to the dispatcher, lsof and ps, and the Claude Code registry's name for this session, else "shell".
 export const rmDeps = (repo: string): RmDeps => ({
+  clones: clones(dataDir()),
   data: dataDir(),
   home: homedir(),
   main: mainCheckout(repo),
@@ -139,7 +171,12 @@ export async function runRm(words: string[], deps: RmDeps): Promise<number> {
             reason: args.reason,
             session,
             worktree: args.worktree
-              ? { live: STATUSES.live, procs: deps.procs(), roster: join(deps.data, "roster.json") }
+              ? {
+                  clones: deps.clones(),
+                  live: STATUSES.live,
+                  procs: deps.procs(),
+                  roster: join(deps.data, "roster.json"),
+                }
               : undefined,
           },
           roots,
