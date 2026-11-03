@@ -286,7 +286,7 @@ export class DashboardHub {
     }
   }
 
-  // herdr's stream reconnects by itself and ends only when killed, and a herdr move needs no new cmux read, since every board reads herdr afresh: so its moves refresh on the cmux records already read. herdrServers() names none on a stack that does not read this machine.
+  // herdr's stream reconnects by itself and ends only when killed, and a herdr move needs no new cmux read, since every board reads herdr afresh: so its moves refresh on the cmux records already read. herdrServers() names none on a hosted or refused stack, and on a fixture stack the fixture's own server, whose events herdrEvents skips.
   private startHerdr() {
     const servers = this.deps.herdr || !this.deps.events ? [] : herdrServers()
     const events = this.deps.herdr?.() ?? (servers.length ? herdrEvents(servers) : null)

@@ -478,6 +478,16 @@ describe("a direct write into the extensions root is refused, naming the owner's
   test("a Bash call whose cwd is already inside the root runs no writer", async () => {
     expect(await bash("node -e 'x'", SCOPE)).toContain("no-extensions-write hook refuses")
   })
+
+  // zsh's ~- is the folder it last left, so an OLDPWD assignment keeps it in the root, and a popd that lands back leaves it unread
+  test("pushd ~- after an OLDPWD assignment is still the folder zsh last left", async () => {
+    expect(await bash(`cd ${SCOPE}; cd /usr; OLDPWD=/usr; pushd ~-; touch f`)).toContain("refuses")
+  })
+
+  test("pushd ~- after a popd leaves the folder unread", async () => {
+    expect(await bash(`cd ${SCOPE}; pushd /usr; popd; pushd ~-; touch f`)).toBeUndefined()
+    expect(await bash(`cd ${SCOPE}; pushd /usr; pushd ~-; touch f`)).toContain("refuses")
+  })
 })
 
 // The shell reads ~ as the process's home, so these rows judge the real home's root, which the hook only reads.

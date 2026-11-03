@@ -4,6 +4,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   writeFileSync,
@@ -437,6 +438,36 @@ test("a pass writes jobs.json into the data folder dataDir() resolves, playgroun
     "jobs: rendered jobs.json",
   )
   expect(existsSync(join(config, "dispatcher", "ops", "jobs.json"))).toBe(false)
+})
+
+test("a pass moves a turned-off job's plist from ops/launch-agents to the data folder's trash, and logs one the trash keeps without calling jobs.json kept", () => {
+  const config = join(scratch, "config-plists")
+  const data = join(config, "playground")
+  const agents = join(data, "ops", "launch-agents")
+  mkdirSync(join(agents, "com.playground.ops-odd.plist"), { recursive: true })
+  writeFileSync(join(agents, "com.playground.ops-gone.plist"), "stale")
+  writeFileSync(join(agents, "com.playground.ops-odd.plist", "a"), "x")
+  writeFileSync(join(agents, "com.playground.ops-odd.plist", "b"), "x")
+  const pass = Bun.spawnSync(["python3", "-I", "-c", RENDER, upPy], {
+    env: {
+      CLAUDE_CONFIG_DIR: config,
+      PLAYGROUND_DATA_DIR: data,
+      HOME: scratch,
+      PATH: `${dirname(process.execPath)}:/usr/bin:/bin`,
+    },
+    stderr: "pipe",
+  })
+  expect(pass.stderr.toString()).toBe("")
+  expect(existsSync(join(agents, "com.playground.ops-gone.plist"))).toBe(false)
+  const [batch] = readdirSync(join(data, "trash"))
+  expect(
+    readFileSync(join(data, "trash", batch!, "1", "com.playground.ops-gone.plist"), "utf8"),
+  ).toBe("stale")
+  expect(existsSync(join(agents, "com.playground.ops-odd.plist", "a"))).toBe(true)
+  const log = readFileSync(join(data, "ops", "up.log"), "utf8")
+  expect(log).toContain("-com.playground.ops-gone.plist")
+  expect(log).toContain("jobs: kept com.playground.ops-odd.plist:")
+  expect(log).not.toContain("jobs.json kept: ")
 })
 
 // Loads up.py and prints --sessions' resume lines, with no session running, no factory session unguarded and no checkout around a cwd.

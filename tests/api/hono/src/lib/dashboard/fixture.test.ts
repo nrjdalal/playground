@@ -25,6 +25,7 @@ import {
   fixtureWrite,
   loadFixture,
   readFixtureCmux,
+  readFixtureHerdr,
   writeFixture,
 } from "../../../../../../api/hono/src/lib/dashboard/fixture"
 import { parseLines } from "../../../../../../api/hono/src/lib/dashboard/transcript"
@@ -67,12 +68,66 @@ const shipped = (): Fixture => {
   return loaded.fixture
 }
 
+// A made-up herdr server of two panes in one workspace: one idle at its input box, its messages going to a transcript, and one blocked on a picker.
+const HERDR_SESSION = "11111111-1111-4111-8111-0000000000a1"
+const HERDR_TRANSCRIPT = `projects/-fixture-playground/${HERDR_SESSION}.jsonl`
+const withHerdr = (): Fixture => {
+  const base = shipped()
+  const pane = (id: string, status: string, pid: number) => ({
+    agent_session: { kind: "id", value: HERDR_SESSION },
+    agent_status: status,
+    pane_id: id,
+    processes: [{ argv: ["claude", "-n", "ada"], cwd: "/fixture/playground", pid }],
+    scroll: { offset_from_bottom: 0 },
+    terminal_id: `t-${id}`,
+    workspace_id: "w1",
+  })
+  return {
+    ...base,
+    files: { ...base.files, [HERDR_TRANSCRIPT]: [] },
+    herdr: {
+      panes: [
+        {
+          ...pane("w1:p1", "idle", 910001),
+          session_id: HERDR_SESSION,
+          transcript_path: `$CONFIG/${HERDR_TRANSCRIPT}`,
+        },
+        pane("w1:p2", "blocked", 910002),
+      ],
+      prompts: { "w1:p2": "Which colour?\n❯ 1. Teal\n  2. Plum\n  3. Type something." },
+      screens: { "w1:p1": "● Done.", "w1:p2": "● Asking." },
+      workspaces: [{ label: "Builder", workspace_id: "w1" }],
+    },
+  }
+}
+
 describe("dashboardSource", () => {
   // A person's own clone, outside any factory folder; FACTORY is a worker's worktree.
   const OWN = "/home/me/dispatcher"
   const FACTORY = "/home/me/dispatcher/.claude/worktrees/pg-1"
   const source = (branch: string | null, env: Record<string, string> = {}, root: string = ROOT) =>
     dashboardSource({ branch, env, root })
+
+  test("rule 0: a hosted build reads no machine, whatever else is set", () => {
+    const anything: Record<string, string>[] = [
+      {},
+      { PLAYGROUND_LIVE_READS: "1" },
+      { PLAYGROUND_FIXTURE: "mine.json" },
+      { PLAYGROUND_ROLE: "worker" },
+      { NODE_ENV: "test" },
+      { CLAUDECODE: "1" },
+    ]
+    for (const env of anything) {
+      for (const branch of [LIVE_DASHBOARD_BRANCH, "feat/a", null]) {
+        expect(source(branch, { ...env, PLAYGROUND_HOSTED: "1" }, OWN)).toEqual({ kind: "hosted" })
+        expect(source(branch, { ...env, PLAYGROUND_HOSTED: "true" }, FACTORY)).toEqual({
+          kind: "hosted",
+        })
+      }
+    }
+    expect(source("feat/a", { PLAYGROUND_HOSTED: "0" }, OWN)).toEqual({ kind: "live", rule: "own" })
+    expect(() => ensureFixture({ kind: "hosted" })).toThrow("reads no machine")
+  })
 
   test("rule 1: the live dashboard's checkout reads the live machine, and never a fixture", () => {
     expect(source(LIVE_DASHBOARD_BRANCH)).toEqual({ kind: "live", rule: "live-branch" })
@@ -455,6 +510,25 @@ describe("writeFixture", () => {
       expect(loaded.ok).toBe(false)
       if (!loaded.ok) expect(loaded.error).toContain("cmux.sessions.0.transcript_path")
     }
+  })
+
+  test("writes herdr's server into herdr.json, its $CONFIG paths moved into the folder, and an empty server for a fixture with none", () => {
+    const dir = join(scratch("fixture-herdr-json"), "fixture")
+    writeFixture(withHerdr(), dir, ROOTS)
+    const herdr = readFixtureHerdr(dir)
+    expect(herdr.inputs).toEqual({})
+    expect(herdr.panes.map((p) => p.pane_id)).toEqual(["w1:p1", "w1:p2"])
+    expect(herdr.panes[0]?.transcript_path).toBe(join(dir, "claude", HERDR_TRANSCRIPT))
+    expect(herdr.prompts["w1:p2"]).toContain("Which colour?")
+    const bare = join(scratch("fixture-herdr-none"), "fixture")
+    writeFixture({ ...shipped(), herdr: undefined }, bare, ROOTS)
+    expect(readFixtureHerdr(bare)).toEqual({
+      inputs: {},
+      panes: [],
+      prompts: {},
+      screens: {},
+      workspaces: [],
+    })
   })
 
   test("refuses a send into an input that holds text unless it is forced, as cmux 0.65's draft guard does", () => {
@@ -964,6 +1038,27 @@ describe("the shipped fixture's pulls", () => {
   })
 })
 
+describe("configDir on a hosted source", () => {
+  const keep = ["PLAYGROUND_FIXTURE_DIR", "PLAYGROUND_HOSTED", "PLAYGROUND_LIVE_READS"].map(
+    (name) => [name, process.env[name]] as const,
+  )
+  const scratch = mkdtempSync(join(tmpdir(), "hosted-config-"))
+  afterAll(() => {
+    for (const [name, value] of keep)
+      if (value === undefined) delete process.env[name]
+      else process.env[name] = value
+    rmSync(scratch, { force: true, recursive: true })
+  })
+
+  test("names the fixture's unwritten folder and writes nothing, live reads asked for or not", () => {
+    process.env.PLAYGROUND_FIXTURE_DIR = scratch
+    process.env.PLAYGROUND_HOSTED = "1"
+    process.env.PLAYGROUND_LIVE_READS = "1"
+    expect(configDir()).toBe(join(scratch, "claude"))
+    expect(readdirSync(scratch)).toEqual([])
+  })
+})
+
 // A dispatcher spawn.sh started under inscope registered in ~/.claude/sessions while the board read inscope's own folder, so the board showed it off and Start said it was already running
 describe("configDir on a live source", () => {
   const keep = ["CLAUDE_CONFIG_DIR", "INSCOPE_CCD", "PLAYGROUND_LIVE_READS"].map(
@@ -986,4 +1081,57 @@ describe("configDir on a live source", () => {
     delete process.env.CLAUDE_CONFIG_DIR
     expect(configDir()).toBe(join(homedir(), ".claude"))
   })
+})
+
+describe.skipIf(onLiveDashboard())("herdr on a fixture stack", () => {
+  // every read and write in herdr.ts runs on the fixture's own server, answered from herdr.json, and no socket is reached
+  test("reads the fixture's panes and screens, sends a prompt into its transcript, and answers a picker by keys", async () => {
+    const dir = scratch("fixture-herdr")
+    writeFixture(withHerdr(), join(dir, "fixture"), ROOTS)
+    const { code, result, stderr } = await inFixture(
+      `const h = await import(\`\${API}/lib/dashboard/herdr\`)
+const idle = "herdr:playground:w1:p1"
+const blocked = "herdr:playground:w1:p2"
+const outcome = (write) => write.then(() => "sent", (error) => h.promptOutcome(error))
+const servers = h.herdrServers()
+const [before] = await h.readHerdr()
+const screen = await h.readScreen(idle, 40)
+const picker = await h.readScreen(blocked, 40)
+await h.prompt(idle, "hello there")
+const onPicker = await outcome(h.prompt(blocked, "hi"))
+const noPane = await outcome(h.prompt("herdr:playground:w9:p9", "hi"))
+await h.typeKeys(blocked, [{ key: "down" }, { key: "enter" }])
+await h.typeKeys(idle, [{ text: "typed" }, { key: "enter" }])
+const [after] = await h.readHerdr()
+const answered = await h.readScreen(blocked, 40)
+const events = h.herdrEvents()
+events.kill()
+const { fixtureConfigDir } = await import(\`\${API}/lib/dashboard/fixture\`)
+const lines = (await Bun.file(\`\${fixtureConfigDir()}/${HERDR_TRANSCRIPT}\`).text()).trim().split("\\n").map((line) => JSON.parse(line).message.content)
+console.log(JSON.stringify({ after: after.panes.map((p) => p.agent_status), answered, before: { panes: before.panes.map((p) => [p.pane_id, p.agent_status, p.processes.map((x) => x.pid)]), server: before.server, workspaces: before.workspaces }, lines, noPane, onPicker, picker, screen, servers }))
+process.exit(0)
+`,
+      dir,
+    )
+    expect({ code, stderr: code === 0 ? "" : stderr }).toEqual({ code: 0, stderr: "" })
+    const out = result as Record<string, unknown>
+    expect(out.servers).toEqual([{ name: "playground", socket: "fixture:herdr" }])
+    expect(out.before).toEqual({
+      panes: [
+        ["w1:p1", "idle", [910001]],
+        ["w1:p2", "blocked", [910002]],
+      ],
+      server: "playground",
+      workspaces: [{ label: "Builder", workspace_id: "w1" }],
+    })
+    expect(out.screen as string).toStartWith("● Done.\n")
+    expect(out.screen as string).toContain("❯")
+    expect(out.picker).toBe("● Asking.\nWhich colour?\n❯ 1. Teal\n  2. Plum\n  3. Type something.")
+    // herdr refuses a prompt into a session blocked on a picker, and names a pane it does not hold as gone
+    expect([out.onPicker, out.noPane]).toEqual(["picker", "gone"])
+    // the prompt and the words typed then sent each reach the transcript, and the answered picker leaves its pane working at its input box
+    expect(out.lines).toEqual(["hello there", "typed"])
+    expect(out.after).toEqual(["working", "working"])
+    expect(out.answered as string).toStartWith("● Asking.\n─")
+  }, 60_000)
 })

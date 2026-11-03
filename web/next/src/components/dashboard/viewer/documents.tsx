@@ -1,12 +1,19 @@
 "use client"
 
 import { RiCodeSSlashLine, RiFilePdf2Line, RiHtml5Line, RiMarkdownLine } from "@remixicon/react"
+import dynamic from "next/dynamic"
 import { type Ref, useEffect, useRef, useState } from "react"
 
 import type { KindViewer, ViewProps } from "@/components/dashboard/viewer/registry"
 import { TranscriptMarkdown } from "@/components/transcript-markdown"
 import { Spinner } from "@/components/ui/spinner"
-import { asViewerPage, fenced, frameLoad, viewerFrameMessage } from "@/lib/viewer"
+import { asViewerPage, fenced, frameLoad, isPatch, viewerFrameMessage } from "@/lib/viewer"
+
+// The patch view's package loads only when a diff or patch is shown, so every other page carries none of it.
+const PatchView = dynamic(() => import("@/components/dashboard/viewer/patch-view"), {
+  loading: () => <Spinner />,
+  ssr: false,
+})
 
 // The file's text, read from the blob the viewer fetched it into; null while it loads, and false when it cannot be read.
 function useText(url: string): string | null | false {
@@ -174,11 +181,17 @@ function TextView({ code, item, onEdge, url }: ViewProps & { code?: boolean }) {
         ) : text === false ? (
           <Unreadable />
         ) : (
-          <TranscriptMarkdown>{code ? fenced(item.name, text) : text}</TranscriptMarkdown>
+          <ShownText code={code} name={item.name} text={text} />
         )}
       </div>
     </div>
   )
+}
+
+// A diff or patch shows as a patch view, and as the highlighted text when it holds no patch the view can draw.
+export function ShownText({ code, name, text }: { code?: boolean; name: string; text: string }) {
+  const shown = <TranscriptMarkdown>{code ? fenced(name, text) : text}</TranscriptMarkdown>
+  return code && isPatch(name) ? <PatchView fallback={shown} text={text} /> : shown
 }
 
 export const HTML_VIEWER: KindViewer = { icon: RiHtml5Line, View: HtmlView }

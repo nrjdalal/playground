@@ -7,11 +7,13 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
 
 ## spawn.sh
 
-- A factory session starts another only through `scripts/spawn.sh` (playbook's SESSIONS.md, Spawn), which runs a capacity gate that refuses, failing closed, unless three checks pass in order, the first failure naming its gate and its reading,
+- A factory session starts another only through `scripts/spawn.sh` (playbook's SESSIONS.md, Spawn), which runs a capacity gate that refuses, failing closed, unless four checks pass in order, the first failure naming its gate and its reading,
   and counts no live sessions or workers (no count is capped; Ops watches the live board for the risk of cmux no longer answering, as it once stopped at 49 live sessions and load5 97): the higher of load1 and load5 (the third field of `sysctl -n vm.loadavg`), plus the starts of the last 5 minutes (`gates.startsWindow`) in its own `capacity.jsonl` and in each `slots.peers` folder's,
   each weighing half its item's load units (small 1, medium 2, big 3; `--size`, else small for a reviewer or tester, else what `scripts/ops/run-slot.sh size <name>` reads from the roster and plan.json), under the core count (`sysctl hw.ncpu`) times `PLAYGROUND_LOAD_MULT` (default 1.0),
   less a quarter of that (`gates.smallReserve`) kept for small items unless the start is small, so a big plan never blocks the small ones, while a small worker keeps an eighth (`gates.reviewReserve`) in its place for the reviewers and testers, which start small, so a held review starts ahead of a new worker,
-  and once over that line the CPU's busy cores plus the starts too (`top -l 2 -n 0`'s idle share of the cores, held to the same line at no more than the core count), refusing only when both are over or `top` gives no reading, the refusal naming both; memory pressure level 1 or 2 with 8% or more free (`gates.memoryFreeMin`); and the launching backend's usage:
+  and once over that line the CPU's busy cores plus the starts too (`top -l 2 -n 0`'s idle share of the cores, held to the same line at no more than the core count), refusing only when both are over or `top` gives no reading, the refusal naming both; memory pressure level 1 or 2 with 8% or more free (`gates.memoryFreeMin`); for a fresh worker start alone, room for its runs:
+  `scripts/ops/run-slot.sh room`'s lanes, held lanes, free lanes (open, unheld and with the load units for a medium run, `slots.peers`' holders counted) and live waiters, refusing while no lane is free and a run waits in the queue, or when room gives no reading, so a new worker never joins a queue it has no room in, while a reviewer, tester,
+  resume or move skips it and work already admitted finishes; and the launching backend's usage:
   Claude's from `usage.json` (written in the last 15 minutes, the 5-hour window under 90%, the week within its pace, which never sits below one day's share of 14.3 points, so a week that has just reset passes its first day,
   or under 98%, a sanity backup, while `~/.playground/usage-pace-off-until` holds a future ISO 8601 time with its zone, which the dispatcher writes on the owner's go (#i509) and the pass line names, a missing, empty, past or unreadable time leaving the pace on;
   a `usage.json` never written, as on a fresh install before the ops-usage job first runs, passes every start, its pass line reading `unread (usage.json not yet written)`, while one that exists still has to read, be fresh and be under its limits;
@@ -118,6 +120,7 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
   A person brings herdr back with bare `playground`, which runs its `start` first.
   A server hands its panes the shell basics alone, so `spawn.sh`'s herdr launch file sets `TMPDIR` to `$(getconf DARWIN_USER_TEMP_DIR)`, keeping one already set: every start, resume and restore writes that file, so a running server needs no restart for it.
   Nothing in the factory lives under the Desktop folder: macOS guards it by each binary's Full Disk Access, which a herdr or Claude Code update can drop, so the job asks for no grant, and `tests/desktop-paths.test.ts` fails on a tracked file naming a path there.
+  A plain shell pane on `playground-probes`, with no Claude in it, opens, runs, reads and closes only through `scripts/shell-pane.ts` (the `shell-pane` skill), which types a command only once every registered Bash guard's `check()` has passed it, in a child bun started as the hooks start, since a pane has no PreToolUse hook of its own.
   A scratch herdr server, for a test or a smoke, takes its folder from `mktemp -d "$(getconf DARWIN_USER_TEMP_DIR)<prefix>.XXXX"`: macOS caps a socket path at 104 bytes (`sun_path`), a session scratchpad path alone runs past that, and the server then stops with `local socket name length exceeds capacity of sun_path`.
   playbook's LIFECYCLE.md, Ops jobs, has the rest.
 
@@ -127,6 +130,11 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
   inscope 0.15 and older put that link back on an `apply`, so run link-skills.sh again after one.
 - It then installs the home skill set at user scope with `playground orgs home`, through the `ws` marketplace it writes in `~/.playground/orgs`; a later run moves the marketplace's entry to the new set and runs `claude plugin update ws-home@ws`, since Claude Code installs a copy.
   Before it installs, it removes each `~/.claude/skills` link at a name the set ships that points into Playground's checkout, and keeps a link that points anywhere else (inscope's cache, another checkout) as the user's own, naming the clash in one line.
+- `playground orgs home` loads the workspace packages, and `playground update` runs link-skills.sh before its own install, so link-skills.sh first runs `bun install --frozen-lockfile --ignore-scripts` when a workspace package declares a dependency no `node_modules` of its checkout links (`packages/scripts/src/playground/unlinked.ts` names each one).
+  The hop to v0.0.34 declared settings' `@packages/safe-delete`, and the home set failed on `Cannot find module` until the install.
+  A fully linked checkout skips the install.
+  `playground update` installs before it moves the checkout when the target declares such a dependency, so a hook that runs its source reads new code only once its imports link (a PreToolUse guard runs its bundle, which needs none);
+  this install is the fallback for a target that deletes or moves a manifest, a tree with edits or untracked files of its own, an install there that failed and put the old manifests back, or an update run by an older `update.ts`.
 - Beside the home set, it symlinks `~/.playground/factory-settings.json` to `scripts/factory-settings.json`, each brief template in `~/.playground/handoffs/` to its file in `scripts/briefs/`, `~/.playground/brief-rush.md` to `scripts/briefs/brief-rush.md`,
   `~/.bun/bin/playground` and its old name to the `playground` command (`packages/scripts/src/playground/cli.ts`; `playground --help` lists what it does),
   and each ops script it names into `~/.playground/ops/`;
@@ -136,13 +144,14 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
 - Beside its links, `scripts/link-skills.sh` sets `rerere.enabled false` in the checkout's config, which every worktree reads.
   Every worktree shares one `.git/rr-cache`, and git runs rerere wherever that folder exists while the setting is unset, so a merge in one worktree replayed a resolution another had recorded, printing `using previous resolution` over a file its author never read.
   The folder stays in place, and a merge now stops on each conflict for its author to resolve.
-  Tests: `bun run test:file tests/scripts/link-skills-settings.test.ts`.
+  Tests: `bun run test:file tests/scripts/link-skills-settings.test.ts tests/scripts/link-skills-unlinked.test.ts`.
 
 ## A worktree's node_modules
 
 - A new worktree can take `node_modules` as an APFS clone of a sibling worktree's with the same `bun.lock` (`~/.playground/ops/run-slot.sh <your name> -- cp -cR <sibling>/node_modules <worktree>/`, through run-slot since a clone is a heavy run: three load spikes on 13 Oct, fseventsd near 100%, came from clones),
-  then `~/.playground/ops/run-slot.sh <your name> -- bun install --ignore-scripts --cwd <worktree>`, which fills each package's own `node_modules/.bin` the clone lacks; when the copy prints any error, run `~/.playground/ops/run-slot.sh <your name> -- bun install --force --ignore-scripts --cwd <worktree>` instead,
-  since a plain install then looks healthy while check-types fails on a missing module.
+  and once that clone succeeds, run-slot clones each workspace's own `node_modules` from the sibling with the same flags (`CLONE_WORKSPACES` in `scripts/ops/run-slot.sh`, run in the clone's own process group), so the worktree is ready for its checks with no install.
+  When the copy prints any error, run `~/.playground/ops/run-slot.sh <your name> -- bun install --force --ignore-scripts --cwd <worktree>`, since a plain install then looks healthy while check-types fails on a missing module.
+  Tests: `bun run test:file tests/scripts/ops/run-slot-nested-clone.test.ts`.
   A review worktree that only reads (no test run, no commit) takes no clone at all.
   AGENTS.md has worktrees removed one at a time, since removing several at once drove fseventsd past 300% CPU and the load to 77.
 - After `git worktree move`, remove the moved worktree's `web/next/.source` and `web/next/.next`, which keep the old absolute path, so the next pre-commit build fails with `webpack loader path ... is outside configured roots`.

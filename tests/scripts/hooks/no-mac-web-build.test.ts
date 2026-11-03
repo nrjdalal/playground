@@ -244,7 +244,7 @@ describe("the dashboard's container decides", () => {
     }
     const timeout =
       hooks.PreToolUse.flatMap((e) => e.hooks).find((h) =>
-        h.command.includes("scripts/hooks/no-mac-web-build.ts"),
+        h.command.includes("scripts/hooks/bundled/no-mac-web-build.js"),
       )?.timeout ?? NaN
     return [settings, timeout * 1000] as const
   })
