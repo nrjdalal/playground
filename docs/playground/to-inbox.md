@@ -36,6 +36,7 @@ choices   Approve: <verb ...>  Deny: <verb ...>
 ```
 
 Mermaid is to join the pictures; until then a flow is drawn in ASCII.
+A whole patch can ride along as a file: a `.diff` or `.patch` attachment (`git diff > x.diff`) opens in the viewer as a patch view, each changed file side by side, or in one column on a phone.
 
 ## It's working if
 
