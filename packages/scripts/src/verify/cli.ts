@@ -105,7 +105,8 @@ Checks (default: all)
                 the footer is 32px, every row's and member row's words fit its box and none
                 runs past its padded edge, no first-line label ends in an ellipsis at the
                 stock width, and no row covers another, so a row never grows or draws over
-                its neighbours
+                its neighbours, and the sidebar body is never wider than it shows, so it
+                scrolls only up and down
   screenshots   each route, full page, at 1280x800, 1782x972 and 390x844, light then dark
                 (named -dark), named before-* or after-* by --label; only on a stack whose
                 /api/health reports dashboard: fixture, since any other shows live sessions

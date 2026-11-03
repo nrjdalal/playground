@@ -6,6 +6,7 @@ import {
   RiErrorWarningLine,
   RiFileCopyLine,
   RiLoader4Line,
+  RiTimeLine,
   type RemixiconComponentType,
 } from "@remixicon/react"
 import { cn } from "cn"
@@ -20,6 +21,7 @@ import type { StatusMarkKind } from "@/lib/outbox"
 const MARKS: Record<StatusMarkKind, { Icon: RemixiconComponentType; className?: string }> = {
   delivered: { Icon: RiCheckDoubleLine },
   failed: { Icon: RiErrorWarningLine, className: "text-destructive" },
+  queued: { Icon: RiTimeLine, className: "text-muted-foreground" },
   sending: { Icon: RiLoader4Line, className: "motion-safe:animate-spin" },
   sent: { Icon: RiCheckLine },
 }

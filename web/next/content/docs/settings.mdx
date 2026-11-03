@@ -31,6 +31,7 @@ While something Playground needs is missing on this Mac, Settings lists it under
 ### Accounts
 
 Accounts lists every Claude account and GLM key your sessions spend: a Claude account by its label or email, a GLM key by its label, each saying whether its token is kept, and Logged in on the one Claude Code is logged in as.
+Each Claude account has an **Own account** switch: turn it on for your personal account, and new sessions go to it at a fifth of its share until its week resets (or its plan ends) within a day, so its week is still spent before it resets; the switch sets `own` on its row in `usage.accounts`.
 Accounts are kept in your settings (`usage.accounts`), so a machine needs a GitHub login and its settings set up first: until then the section reads **Your settings aren't set up yet** over **Set up settings**, which names the private repo it reuses or makes on GitHub and sets it up once you confirm, and **Add account** stays off ([Where to start](/docs#where-to-start) gives the order).
 
 #### Add an account

@@ -142,7 +142,14 @@ describe("the guided Claude sign-in", () => {
     expect(started.browser).toBeNull()
     const kept = await submitCode(started.id, "made-up-code", who, { ...fakes, data })
     expect(kept).toEqual({
-      account: { email: EMAIL, key: EMAIL, label: "work", provider: "claude", stored: true },
+      account: {
+        email: EMAIL,
+        key: EMAIL,
+        label: "work",
+        own: false,
+        provider: "claude",
+        stored: true,
+      },
       confirmed: true,
       ok: true,
     })

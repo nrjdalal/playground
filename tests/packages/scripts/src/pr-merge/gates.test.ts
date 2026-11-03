@@ -172,6 +172,14 @@ describe("gatesOf", () => {
     expect(gatesOf(facts()).some((gate) => gate.name === "body")).toBe(false)
   })
 
+  test("the body gate refuses a changed doc the Evidence leaves out, from the PR's files", () => {
+    const gate = gatesOf(facts({ body: SKILL_BODY })).find((g) => g.name === "body")
+    expect(gate?.ok).toBe(false)
+    expect(gate?.detail).toContain("AGENTS.md")
+    const named = SKILL_BODY.replace("**After:** one.", "**After:** one. `AGENTS.md` checked.")
+    expect(gatesOf(facts({ body: named })).find((g) => g.name === "body")?.ok).toBe(true)
+  })
+
   test("the body gate refuses an Outcome line in a PR's TL;DR, naming it", () => {
     const body = SKILL_BODY.replace("The board", "Outcome: The board")
     const gate = gatesOf(facts({ body })).find((g) => g.name === "body")
