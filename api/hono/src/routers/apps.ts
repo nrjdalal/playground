@@ -141,7 +141,7 @@ export const appsRouter = new Hono<{ Variables: Session }>()
     describeRoute({
       tags: ["Apps"],
       description:
-        "Every preview in previews in the data folder, newest first: each PNG, GIF, WebP or HTML file's name, kind (image or html), topic (its name before the first - or .), caption (from a .txt of the same name), last change, size and, for a page `playground page` kept, its pages.jsonl record (page: at, by, for, title) (previews), and each file that looks like a preview but is not served, or pages.jsonl line that is not a page's record, named with why (problems). With ?session=<name>, only the pages that session made or that were made for it, every page for the primary dispatcher, newest kept first. Read-only.",
+        "Every preview in previews in the data folder, newest first: each PNG, GIF, WebP or HTML file's name, kind (image or html), topic (its name before the first - or .), caption (from a .txt of the same name), last change, size and, for a page `playground page` kept, its pages.jsonl record (page: at, by, for, title) (previews), and each file that looks like a preview but is not served, or pages.jsonl line that is neither a page's record nor a tombstone, named with why (problems). With ?session=<name>, only the pages that session made or that were made for it, every page for the primary dispatcher, newest kept first. Read-only.",
       responses: {
         200: { description: "OK" },
         ...authErrorResponses,
@@ -180,7 +180,7 @@ export const appsRouter = new Hono<{ Variables: Session }>()
     describeRoute({
       tags: ["Apps"],
       description:
-        "Delete a page `playground page` kept, by its name, from an agent's Pages tab: only an HTML file pages.jsonl keeps a record for, directly in the previews folder as a regular file with one link; its file and its caption (.txt of the same name) are unlinked, and a tombstone line ({at, deleted: true, file}) appended to pages.jsonl drops its record, so a page kept again under the name lists again. Any other name is a 404 that touches nothing. Returns the deleted name.",
+        "Delete a page `playground page` kept, by its name, from an agent's Pages tab: only an HTML file pages.jsonl keeps a record for, directly in the previews folder as a regular file with one link; a tombstone line ({at, deleted: true, file}) appended to pages.jsonl first drops its record, then its file and its caption (.txt of the same name) are unlinked; a page kept again under the name lists again. Any other name is a 404 that touches nothing. Returns the deleted name.",
       responses: {
         200: {
           description: "Deleted",

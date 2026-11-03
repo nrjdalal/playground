@@ -65,6 +65,18 @@ function PageTime({ at, now }: { at: string; now: number }) {
 
 const pageTitle = (preview: Preview) => preview.page?.title ?? preview.caption ?? preview.name
 
+// Pure: what the delete confirm says: the newest version's file and caption go, and a row's older versions stay, so the row still showing reads as the next version, not a failed delete.
+export const deleteDescription = (name: string, older: number): string => {
+  const gone = `${name} and its caption leave the previews folder for good.`
+  if (!older) return gone
+  return older === 1
+    ? `${gone} Its older version stays and takes its row.`
+    : `${gone} Its ${older} older versions stay, and the newest of them takes its row.`
+}
+
+// The row a delete asks about: its newest version, and how many older versions stay.
+type Deleting = { older: number; preview: Preview }
+
 // Each page as a row that opens its newest version in a new tab through the Previews route: its title, who made it, for whom, and when it was kept; the older versions sit in the row's dropdown, and its delete button asks to delete the newest.
 export function PageList({
   apiUrl,
@@ -74,7 +86,7 @@ export function PageList({
 }: {
   apiUrl: string
   now: number
-  onDelete?: (preview: Preview) => void
+  onDelete?: (deleting: Deleting) => void
   pages: Preview[]
 }) {
   return (
@@ -150,7 +162,7 @@ export function PageList({
                       aria-label={`Delete ${pageTitle(latest)}`}
                       size="icon-sm"
                       variant="ghost"
-                      onClick={() => onDelete(latest)}
+                      onClick={() => onDelete({ older: older.length, preview: latest })}
                     >
                       <RiDeleteBinLine />
                     </Button>
@@ -174,9 +186,9 @@ export function Pages({ all, session }: { all: boolean; session: string }) {
     queryKey: [...PREVIEWS_QUERY_KEY, "pages", session],
     refetchInterval: 30_000,
   })
-  const [deleting, setDeleting] = React.useState<Preview | null>(null)
+  const [deleting, setDeleting] = React.useState<Deleting | null>(null)
   // the dialog keeps its title through its close animation
-  const shown = React.useRef<Preview | null>(null)
+  const shown = React.useRef<Deleting | null>(null)
   if (deleting) shown.current = deleting
   const remove = useMutation({
     mutationFn: deletePage,
@@ -219,13 +231,16 @@ export function Pages({ all, session }: { all: boolean; session: string }) {
         onOpenChange={(open) => {
           if (!open) setDeleting(null)
         }}
-        title={`Delete ${shown.current ? pageTitle(shown.current) : "page"}?`}
-        description={`${shown.current?.name ?? "Its file"} and its caption leave the previews folder for good.`}
+        title={`Delete ${shown.current ? pageTitle(shown.current.preview) : "page"}?`}
+        description={deleteDescription(
+          shown.current?.preview.name ?? "Its file",
+          shown.current?.older ?? 0,
+        )}
         action="Delete"
         variant="destructive"
         pending={remove.isPending}
         onConfirm={() => {
-          if (deleting) remove.mutate(deleting.name)
+          if (deleting) remove.mutate(deleting.preview.name)
         }}
       />
     </section>

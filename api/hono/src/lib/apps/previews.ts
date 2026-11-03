@@ -103,9 +103,13 @@ async function readOwnFile(
   }
 }
 
-// The caption beside a preview: <name without its extension>.txt, a regular file with one link, read as UTF-8 and trimmed. Null when there is none or it is not that.
+// Where a preview's caption sits: <name without its extension>.txt beside it.
+const captionPath = (folder: string, name: string): string =>
+  join(folder, `${name.slice(0, -extname(name).length)}.txt`)
+
+// The caption beside a preview, a regular file with one link, read as UTF-8 and trimmed. Null when there is none or it is not that.
 async function captionOf(folder: string, name: string): Promise<string | null> {
-  const path = join(folder, `${name.slice(0, -extname(name).length)}.txt`)
+  const path = captionPath(folder, name)
   const info = await lstat(path).catch(() => null)
   if (!info?.isFile() || info.nlink !== 1) return null
   const bytes = await readOwnFile(path, MAX_CAPTION_BYTES)
@@ -232,7 +236,7 @@ export async function findPreview(name: string, dir = previewsDir()): Promise<Pr
   return { kind: previewKindOf(name), name, path, size: info.size }
 }
 
-// Deletes a page the Pages tab lists: only a name pages.jsonl keeps a record for, found as findPreview finds it, its file and its caption unlinked one by one, then a tombstone appended to pages.jsonl, so a concurrent `playground page` append stays. False, touching nothing, for any other name.
+// Deletes a page the Pages tab lists: only a name pages.jsonl keeps a record for, found as findPreview finds it. A tombstone is appended to pages.jsonl first, so a concurrent `playground page` append stays and a failure leaves no record naming a freed name; then its file and its caption are unlinked one by one. False, touching nothing, for any other name.
 export async function deletePage(
   name: string,
   dir = previewsDir(),
@@ -242,16 +246,15 @@ export async function deletePage(
   if (!file || file.kind !== "html") return false
   const folder = dirname(file.path)
   if (!(await readPages(folder)).pages.has(name)) return false
-  try {
-    await unlink(file.path)
-  } catch {
-    return false
-  }
-  const caption = join(folder, `${name.slice(0, -extname(name).length)}.txt`)
-  const info = await lstat(caption).catch(() => null)
-  if (info?.isFile() && info.nlink === 1) await unlink(caption)
   const line = { at: now.toISOString(), deleted: true, file: name }
   await appendFile(join(folder, PAGES_FILE), `${JSON.stringify(line)}\n`)
+  // a delete running beside this one may have unlinked it already
+  await unlink(file.path).catch((error: NodeJS.ErrnoException) => {
+    if (error.code !== "ENOENT") throw error
+  })
+  const caption = captionPath(folder, name)
+  const info = await lstat(caption).catch(() => null)
+  if (info?.isFile() && info.nlink === 1) await unlink(caption).catch(() => {})
   return true
 }
 

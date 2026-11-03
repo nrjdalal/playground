@@ -1,5 +1,6 @@
 import { afterAll, describe, expect, test } from "bun:test"
 import {
+  chmodSync,
   existsSync,
   linkSync,
   mkdirSync,
@@ -481,5 +482,13 @@ describe("deletePage", () => {
     symlinkSync(target, join(dir, "mock.html"))
     expect(await deletePage("mock.html", dir, now)).toBe(false)
     expect(existsSync(target)).toBe(true)
+  })
+
+  test("a pages.jsonl it cannot append to fails the delete before anything is unlinked, so no record names a freed name", async () => {
+    const dir = kept()
+    chmodSync(join(dir, "pages.jsonl"), 0o444)
+    await expect(deletePage("lookup.html", dir, now)).rejects.toThrow()
+    expect(existsSync(join(dir, "lookup.html"))).toBe(true)
+    expect(existsSync(join(dir, "lookup.txt"))).toBe(true)
   })
 })

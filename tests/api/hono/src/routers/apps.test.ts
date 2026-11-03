@@ -88,19 +88,35 @@ describe("the apps routes", () => {
 })
 
 describe("the page delete route", () => {
-  test("refuses an untrusted origin and a request from another machine before the session is read, then a missing session and a session below the owner rung", async () => {
+  // The owner's session is stubbed in the origin and machine cases, so each 403 can come only from guardWrites.
+  test("refuses a request with no origin before the session is read", async () => {
     spy = signedIn("owner")
     expect((await remove("lookup.html", {}, peer("127.0.0.1"))).status).toBe(403)
-    expect(
-      (await remove("lookup.html", { origin: "http://evil.localhost" }, peer("127.0.0.1"))).status,
-    ).toBe(403)
+  })
+
+  test("refuses an untrusted origin before the session is read", async () => {
+    spy = signedIn("owner")
+    const at = { origin: "http://evil.localhost" }
+    expect((await remove("lookup.html", at, peer("127.0.0.1"))).status).toBe(403)
+  })
+
+  test("refuses a request from another machine before the session is read", async () => {
+    spy = signedIn("owner")
     expect((await remove("lookup.html", { origin: trusted() }, peer("192.168.1.20"))).status).toBe(
       403,
     )
+  })
+
+  test("refuses a request whose peer cannot be read", async () => {
+    spy = signedIn("owner")
     expect((await remove("lookup.html", { origin: trusted() })).status).toBe(403)
-    spy.mockRestore()
-    spy = null
+  })
+
+  test("refuses a request with no session", async () => {
     expect((await remove("lookup.html", { origin: trusted() }, peer("127.0.0.1"))).status).toBe(401)
+  })
+
+  test("refuses a session below the owner rung", async () => {
     spy = signedIn("admin")
     expect((await remove("lookup.html", { origin: trusted() }, peer("127.0.0.1"))).status).toBe(403)
   })
