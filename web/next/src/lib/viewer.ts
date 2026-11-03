@@ -31,6 +31,9 @@ export function viewerFrameMessage(data: unknown): ViewerFrameMessage | null {
     : null
 }
 
+// A git diff or patch, which the viewer draws as a patch view rather than as text.
+export const isPatch = (name: string): boolean => /\.(diff|patch)$/i.test(name)
+
 // A source file as one fenced block, its extension naming its language, so it draws as chat's code blocks do; the fence is longer than any run of backticks in the file, so none closes it early.
 export const fenced = (name: string, text: string): string => {
   const language = /\.([A-Za-z0-9]+)$/.exec(name)?.[1]?.toLowerCase() ?? ""

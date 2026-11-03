@@ -143,7 +143,11 @@ describe("AGENTS.md", () => {
   test("every hook .claude/settings.json registers is named in AGENTS.md (#2242)", async () => {
     const settings = await Bun.file(join(ROOT, ".claude/settings.json")).text()
     const hooks = [
-      ...new Set([...settings.matchAll(/scripts\/hooks\/([a-z0-9-]+)\.ts/g)].map((m) => m[1])),
+      ...new Set(
+        [...settings.matchAll(/scripts\/hooks\/(?:bundled\/)?([a-z0-9-]+)\.[jt]s/g)].map(
+          (m) => m[1],
+        ),
+      ),
     ]
     const agents = await Bun.file(join(ROOT, "AGENTS.md")).text()
     expect(hooks.length).toBeGreaterThan(20)

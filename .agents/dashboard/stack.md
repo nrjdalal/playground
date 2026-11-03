@@ -1,5 +1,5 @@
-- ALWAYS: Start it (`bun run dev`) as a process of a cmux terminal, or as a background task of an agent session running in one (Bash `run_in_background`), never detached with `( … &)` or `nohup`.
-  The API of a stack that opts in to cmux's sessions (below) reads sessions, the Feed and screens through cmux's socket, which answers only a process that descends from a cmux terminal: turbo drops cmux's capability token from the environment, so a stack reparented to launchd is refused.
+- ALWAYS: Start it (`bun run dev`) as a process of a herdr pane, or as a background task of an agent session running in one (Bash `run_in_background`), never detached with `( … &)` or `nohup`.
+  The API of a stack that opts in to cmux's sessions (below; cmux is deprecated, cmux.md) reads sessions, the Feed and screens through cmux's socket, which answers only a process that descends from a cmux terminal, so that stack starts in one: turbo drops cmux's capability token from the environment, so a stack reparented to launchd is refused.
   A Vibeground's stack is the one a session never starts: the Preview row's Start (`startVibe()` in `api/hono/src/lib/dashboard/vibe.ts`) runs `bun run dev` as the API's own child in a process group of its own, as the same user (so it reads the same Keychain) with the API's environment cut to `HOME`, `PATH` and the user's own, since it reads herdr alone and never asks cmux,
   and `PLAYGROUND_DATA_DIR` naming its own data folder, `.turbo/vibe-data`, a clone of the live one's folders, files and symlinks but its archive, bin, debug, dumps and trash, so its settings and store edits stay in the copy.
   The clone is taken once, at Start, so a Vibeground shows the roster and each session's state as they were then.
@@ -39,7 +39,7 @@
   reusing the URL it prints when that name already runs, `docker update --restart unless-stopped` on the live dashboard's own container (`isLiveDatabase()`), so it starts again with Docker after a reboot, `docker exec <container> pg_isready -U postgres` for up to 30 s, `provenLocal()`, the migrations,
   and the URL written into `.env` at 0600 while its `POSTGRES_URL` is empty.
   It mounts no named volume, so `docker rm -f -v` takes the data with the container, and a failed step leaves the container running, so Try again reuses it through pglaunch's name match.
-  Once it is done, `firstRun()` loads `index.ts` in the same process and serves it from then on, so setup's routes answer 404 with no restart; the built bundle serves `index.ts` alone.
+  Once it is done, `firstRun()` loads `index.ts` in the same process and serves it from then on, so setup's routes answer 404 with no restart; the Docker bundle serves `index.ts` alone, and the Vercel bundle (`build:vercel`) `hosted.ts` alone.
   `@packages/db` builds with no `POSTGRES_URL`, checking it only when set, and `@packages/env`'s db keys read it when the schema is built rather than when the module loads, so the app `firstRun()` loads takes the URL setup set.
   On the web, first run lives on `/dashboard`: its layout (`web/next/src/app/(protected)/layout.tsx`) reads `GET /api/setup` before any session read, and while it answers 200 (setup) or no session exists renders the first-run pane (`web/next/src/components/first-run/first-run.tsx`) in place of the dashboard,
   asking no more once it answers 404 (`readSetup`, `gateOf` and `firstRunView` in `web/next/src/lib/first-run.ts`).
@@ -48,7 +48,7 @@
   The checks read writes the done mark the first time every row is ok or optional with a database, and once `done` reads true the home shows one ✓ line over the steps (GitHub, Settings, a Claude account, Start Alpha), which Alpha's chat replaces once it runs; the checks and the steps lead the home whatever the board holds (`homeOf()`), so a Mac that runs no session yet still sees them.
   The old first-run pages, `/onboard` and `/setup`, are gone, and their URLs redirect to `/dashboard` (`redirects` in `web/next/next.config.ts`).
 - ALWAYS: A person's stack reads their own machine; factory, test and `PLAYGROUND_FIXTURE` stacks read the fixture ([ADR 0008](../adr/0008-a-persons-stack-reads-their-own-machine.md), since a professional app shows real data, never made-up data).
-  `dashboardSource()` in `api/hono/src/lib/dashboard/fixture.ts` takes the first rule that matches, from the checkout's branch and path and the API's settings: 1 the live dashboard's checkout (branch `live.branch`) and 2 `PLAYGROUND_LIVE_READS=true` read the live machine and refuse `PLAYGROUND_FIXTURE`;
+  `dashboardSource()` in `api/hono/src/lib/dashboard/fixture.ts` takes the first rule that matches, from the checkout's branch and path and the API's settings: 0 a hosted build (`PLAYGROUND_HOSTED=1`) reads no machine, whatever else is set; 1 the live dashboard's checkout (branch `live.branch`) and 2 `PLAYGROUND_LIVE_READS=true` read the live machine and refuse `PLAYGROUND_FIXTURE`;
   3 `PLAYGROUND_FIXTURE` (`shipped` names the shipped fixture), 4 a factory stack, a checkout under `.claude/worktrees/` or a session with `PLAYGROUND_ROLE` set, and 5 a test run (`NODE_ENV=test`, which `bun run test` sets) read a fixture, a made-up machine;
   6 anything else, a person's own clone on any branch, reads their own machine, and is refused when it runs under Claude Code (`CLAUDECODE`) with no role, since an agent started it.
   So a worker's stack reads the fixture by rule 4; prove rule 6 with unit tests on `dashboardSource()`, never by starting a live-source stack.
@@ -71,22 +71,29 @@
   a fixture stack never runs cmux, the System probes, `git -C` or `gh` on the live machine, and its writes (a message, a Feed answer) land in that scratch copy and an inbox answer in the worktree's own database, so a tester drives every flow end to end on it.
   To undo a hand edit to that scratch copy, restart the stack, which writes it fresh, before taking evidence, rather than editing it back in place: a board once stayed two checkers short after an in-place revert until the restart.
   `bun run ingest` on a fixture stack reads that copy's transcripts, and its Sessions pages show only the sessions read from there (`shownHere()` in `api/hono/src/lib/sessions/read.ts`), so rows a worktree's database kept from a live config folder never show.
-  `/api/health` names the source in `dashboard` (`fixture`, `live` or `refused`), and `bun run verify screenshots` refuses any stack but a fixture one.
+  `/api/health` names the source in `dashboard` (`fixture`, `hosted`, `live` or `refused`), and `bun run verify screenshots` refuses any stack but a fixture one.
   A fixture stack is data-free and open to any session, agents included, but for one opt-in exception: with `PLAYGROUND_SDK_PROBE_DIR` set, it hosts `probe-sdk`, a real throwaway session on this user's own login (messages.md), listed beside the fixture's sessions, its view showing only its own turns;
   `tests/api/hono/src/lib/dashboard/fixture.test.ts` holds a fixture process to no cmux call and no socket connection, and `tests/web/next/src/lib/dashboard.test.ts` the shipped fixture to every sidebar group; a test that drives the live paths against scratch files opts in through `tests/live-reads.ts`.
 - ALWAYS: Keep it on loopback: the API binds `HONO_HOSTNAME` (127.0.0.1), `next dev` and the live dashboard's built next server (`HOSTNAME=127.0.0.1` in `web/next`'s `serve:app`) bind 127.0.0.1, and the dashboard is never deployed, since it reads every session's transcript.
+  The hosted build is the one exception, since the owner chose Yard to be Playground deployed as a server: under `PLAYGROUND_HOSTED=1` it deploys, mounting only sign-in, health and Yard's routes (the hosted rule below).
+- ALWAYS: Keep the hosted build to its allowlist, decided once at boot: `api/hono/src/index.ts` imports `hosted.ts` (sign-in, health and Yard's router) under `PLAYGROUND_HOSTED=1` and `local.ts` (every other route) otherwise, so a local route never exists there, and `build:vercel` bundles `hosted.ts` alone.
+  It fails closed: `hosted.ts` refuses to start without the flag, a local build refuses to serve on Vercel (`VERCEL=1`), and a hosted build without `GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET` refuses to start, since its sign-in is GitHub's alone (a local stack offers no provider).
+  On Vercel the export is an `http.Server` that never listens (`createServer` in `lib/server.ts`), since one that has called `listen()`, as `serve()` does, hangs 60s there and answers 500.
+  Under `NEXT_PUBLIC_PLAYGROUND_HOSTED=1` the dashboard pages' layout answers every `/dashboard` page with the app's 404 before it reads anything (`localPagesOnly` in `web/next/src/lib/local-pages.ts`), since a Next rewrite to `/404` breaks behind portless, whose `https` origin Next proxies as an external one.
+  `/`, which redirects to `/dashboard` locally, is the hosted build's way in, the navbar's Sign in with GitHub.
+  `tests/api/hono/src/hosted.test.ts` holds the mounted routes to the allowlist and the hosted import graph to no local-only package or machine-reading folder.
 - ALWAYS: Stop `bun run dev` before running `bun run build`, `bun run check-types` or `bun run test`, or committing, in the same worktree.
   They rebuild `packages/*` (a commit through its pre-commit build), and a rebuild deletes the `dist` the running servers import; pre-commit's `dev-stack` step (`api/hono/src/bin/dev-running.ts`) refuses a commit while the launcher's record names a stack still running there.
 - ALWAYS: Keep the dashboard on the owner rung: every route and the WebSocket pass `requireConsoleRole("owner")`, but first run's setup routes, which serve before any user exists (the setup rule above).
+  Under `PLAYGROUND_HOSTED=1` Yard's routes take the `member` rung instead (the hosted rule above).
   An open WebSocket is authorised once, at its upgrade, so a demotion or sign-out elsewhere takes effect when it next reconnects.
 - ALWAYS: Keep the `claude_*` tables (`packages/db/src/schema/claude.ts`: every Claude Code session the ingest stores, Playground's own on a stack that reads this machine (above), each transcript line as a `claude_entry`, and how far each file has been read) in the dashboard's local Postgres on 127.0.0.1, never a shared database:
   they hold whatever a session read or ran, secrets and customer data included.
   `api/hono/src/lib/sessions/lines.ts` turns a transcript line into an entry and its session's facts.
-- ALWAYS: Read an organisation's own values from `packages/config/src/org.ts`, one zod schema over env with generic defaults: the owner (`PLAYGROUND_OWNER_NAME`, Owner) and the integrations, each off by default:
-  Slack (`SLACK_ENABLED`) and the work queue (`WORK_GITHUB_ORG`, a GitHub login or none, and `WORK_LABEL`, Work; dashboard.md).
+- ALWAYS: Read an organisation's own values from `packages/config/src/org.ts`, one zod schema over env with generic defaults: the owner (`PLAYGROUND_OWNER_NAME`, Owner) and the work queue, off by default (`WORK_GITHUB_ORG`, a GitHub login or none, and `WORK_LABEL`, Work; dashboard.md).
   The owner's name is the prefix Next up ranks second (roster.md).
-  `SLACK_ENABLED` is read and not yet acted on.
-  The API reads it once as it starts (`api/hono/src/lib/org.ts`).
+  The API reads the config once as it starts (`api/hono/src/lib/org.ts`).
+  Slack is opted into in each machine's own job settings: ops-dm-watch by the `jobs.opsDmWatch` setting, off by default, and ops-channel-watch by a row listed by hand in `jobs.json` (playbook's LIFECYCLE.md).
   Every file the dashboard keeps outside the database sits in its data folder, `dataDir()` in `api/hono/src/lib/sessions/paths.ts` over `dataDirOf()` in `packages/env/src/data-dir.ts`: `PLAYGROUND_DATA_DIR` on a stack that reads this machine, else `~/.playground`,
   so every `playground/<path>` these rules name is under it;
   a fixture stack keeps to its fixture's `playground`.

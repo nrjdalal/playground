@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, setDefaultTimeout, test } from "bun:test"
-import { mkdtempSync, rmSync } from "node:fs"
+import { mkdtempSync, readdirSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 
@@ -537,6 +537,36 @@ describe.skipIf(!dockerUp())("the bun run ask CLI", () => {
       "no inbox item",
     )
     expect((await cli(["resolve", id, "--note", "Plugged in"])).code).toBe(2)
+  })
+
+  test("new copies a slack decision's attachment into the attachments folder, and the card's item names it (PG-648)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "dashboard-ask-slack-"))
+    const kept = join(dir, "kept")
+    const shot = join(dir, "slack-shot.png")
+    await Bun.write(
+      shot,
+      Uint8Array.from(
+        Buffer.from(
+          "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+          "base64",
+        ),
+      ),
+    )
+    const slack = { ...DECISION, preview: { ...DECISION.preview, attachments: [{ src: shot }] } }
+    const env = liveReadsEnv({
+      ...process.env,
+      PLAYGROUND_ATTACHMENTS_DIR: kept,
+      POSTGRES_URL: url,
+    })
+    const posted = await cli(["new"], JSON.stringify(slack), env)
+    expect(posted.stderr).not.toContain("error")
+    expect(posted.code).toBe(0)
+    const got = JSON.parse((await cli(["get", posted.stdout.trim()], undefined, env)).stdout)
+    expect(got.preview.attachments).toEqual([
+      expect.objectContaining({ kind: "image", name: "slack-shot.png" }),
+    ])
+    expect(readdirSync(kept)).toEqual([got.preview.attachments[0].id])
+    rmSync(dir, { force: true, recursive: true })
   })
 
   test("edit replaces the poster's own item's title, preview and attachments in place, by its id or its tag (PG-2547)", async () => {

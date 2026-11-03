@@ -198,7 +198,7 @@ if [ "${1:-}" = set ]; then
   exit 0
 fi
 # every read subcommand below sets CAN_TAKE, so quick_kind never sends its bare true down the quick lane (run-slot-can-take.test.ts runs each)
-# run-slot.sh can-take <slot> <who>: exit 0 when that slot is free, its off-switches and load rules open it, and the load units (with that
+# run-slot.sh can-take <slot> <who>: exit 0 when that slot is free, its off-switches, load rules and burst_held open it, and the load units (with that
 # session's reserve) fit, else 1, so a script that takes its slot itself reads them as every run here does (ops-unstick does; localci and
 # the merge train still take theirs by their own mkdir for now); it reads neither the queue nor run-slot.priority
 CAN_TAKE=
@@ -214,6 +214,13 @@ SLOTS_ONLY=
 if [ "${1:-}" = slots ]; then
   [ $# -eq 1 ] || { echo "usage: run-slot.sh slots" >&2; exit 2; }
   SLOTS_ONLY=1 CAN_TAKE=run-slot
+  set -- ops-unstick -- true
+fi
+# run-slot.sh room: prints "<lanes> <held> <free> <waiters>": the lanes slots counts, how many a run holds, how many a medium run could take now (the open, unheld ones while its load units fit beside the held runs' and slots.peers', less the reserve), and the live tickets in the queue, which spawn.sh's slots gate reads
+ROOM_ONLY=
+if [ "${1:-}" = room ]; then
+  [ $# -eq 1 ] || { echo "usage: run-slot.sh room" >&2; exit 2; }
+  ROOM_ONLY=1 CAN_TAKE=run-slot
   set -- ops-unstick -- true
 fi
 if [ "${1:-}" = can-take ]; then
@@ -475,9 +482,10 @@ if [ "$WHO" != ops-dashboard ] && [ "$WHO" != ops-merge-train ] && [ -z "$CAN_TA
   # Then its rank (class and units, 01 to 23), units and size, which order the queue
   echo "s2 $CLASS$UNITS $UNITS $SIZE" > "$TICKET"
 fi
-# A pinned ticket keeps its place by age, so no newer ticket passes it: one with no rank, from an older copy or local CI (plain "s2", or
-# empty), since those take a slot only while theirs is the oldest live ticket and any other order deadlocks them (a review's round 1), and
-# one that has waited AGED seconds, 20 minutes, so the slots drain and a run too big for the free units still starts
+# A pinned ticket keeps its place by age: one with no rank, from an older copy or local CI (plain "s2", or empty), which no newer ticket
+# passes, since those take a slot only while theirs is the oldest live ticket and any other order deadlocks them (a review's round 1), and
+# one that has waited AGED seconds, 20 minutes, which no newer ticket of its class passes, so the slots drain and a run too big for the free
+# units still starts; a class above it (ordered_waiters) passes it, as a merge's gates and a reviewer's pass an aged worker's
 AGED=1200
 # the ready line, "<pr> <place>" a line: merge-queue.json's entries (PLAYGROUND_MERGE_QUEUE moves it, as for the train) with a readyAt, by goAt (one with none after) and then readyAt
 # (Checks on a ready PR goes first by itself, as run-slot.priority does by hand, after an org's runs); a file that does not read ranks nothing
@@ -505,10 +513,13 @@ ready_place() {
   echo "$best"
 }
 ordered_waiters() {
-  # the live tickets in the order they take slots, one "<pinned 0|1> <ticket>" a line: between pinned tickets, an org's, then Checks for a
-  # PR in the ready line by its place there, then those that gate a merge, then the rest, each small before medium
-  # before big, oldest first. A dead waiter's goes on the way
-  local t pid rank m p seg=0 now ready
+  # the live tickets in the order they take slots, one "<pinned 0|1> <ticket>" a line. A ticket with no rank (local CI's, an older copy's) is
+  # a wall no newer ticket passes. Between walls go first the runs that go ahead, past AGED or not, class by class: an org's, then Checks for
+  # a PR in the ready line by its place there, then those that gate a merge, then a reviewer's (<id>-reviewer, -reviewer-spec), so a drafted
+  # review is never held behind workers' long runs (Ops, 2 Nov: 9 of 17 waiters were reviewers). Then the rest. Within each class one past
+  # AGED is pinned, so no newer ticket of its class passes it; each small before medium before big, oldest first. A dead waiter's goes on the way
+  local t pid rank m p aged k sub seg=0 now ready
+  local -a subs=(1 1 1 1 1)
   now=$(date +%s)
   ready=$(ready_line)
   for t in $(ls "$QUEUE" 2>/dev/null | sort -t- -k1,1n); do
@@ -516,17 +527,22 @@ ordered_waiters() {
     if ! alive "$pid"; then rm -f "${QUEUE:?}/${t:?}"; continue; fi
     m=$(mtime "$QUEUE/$t") || continue
     rank=$(cut -d' ' -f2 "$QUEUE/$t" 2>/dev/null)
-    case "$rank" in [0-2][1-3]) [ $((now - m)) -lt "$AGED" ] && {
-      case "$rank" in
-        1?) rank=0$rank ;;
-        *) p=$(ready_place "${t#*-*-}" "$ready"); if [ -n "$p" ]; then rank=1$(printf '%04d' "$p"); else rank=2$rank; fi ;;
-      esac
-      echo "$seg $rank 0 $t"
-      continue
-    } ;; esac
-    echo "$((seg + 1)) 00 1 $t"
-    seg=$((seg + 2))
-  done | sort -s -k1,1n -k2,2 | cut -d' ' -f3,4
+    case "$rank" in
+      [0-2][1-3]) ;;
+      *) echo "$((seg + 1)) 0 0 00 1 $t"; seg=$((seg + 2)); subs=(1 1 1 1 1); continue ;;
+    esac
+    aged=0
+    [ $((now - m)) -lt "$AGED" ] || aged=1
+    case "$rank" in
+      1?) rank=0$rank ;;
+      2?) case "${t#*-*-}" in *-reviewer|*-reviewer-spec) rank=21${rank#2} ;; *) rank=2$rank ;; esac ;;
+      *) p=$(ready_place "${t#*-*-}" "$ready"); if [ -n "$p" ]; then rank=1$(printf '%04d' "$p"); else rank=2$rank; fi ;;
+    esac
+    # the class: 0 an org's, 1 the ready line, 2 the merge gates, 3 a reviewer's, 4 the rest
+    case "$rank" in 0*) k=0 ;; 1*) k=1 ;; 20?) k=2 ;; 21?) k=3 ;; *) k=4 ;; esac
+    sub=${subs[$k]}
+    if [ "$aged" = 0 ]; then echo "$seg $k $sub $rank 0 $t"; else echo "$seg $k $((sub + 1)) 00 1 $t"; subs[$k]=$((sub + 2)); fi
+  done | sort -s -k1,1n -k2,2n -k3,3n -k4,4 | cut -d' ' -f5,6
 }
 first_waiter() {
   # the first waiter in that order whose run fits the units free now, so a run too big for them never holds back a smaller one behind it,
@@ -678,6 +694,23 @@ slot_open() {
   return 0
 }
 
+# A burst of starts outruns the reading the slots open on, since load1 shows a run's load about a minute after it starts (issue 610, 2 Nov:
+# five medium suites and two clones started in 70 s at load1 16, and load1 reached 64): while run-slot.runs.log shows more runs started on
+# run-slot to run-slot-4 or the clone slot in the last minute than ended there, so the held runs grew, a medium or big run waits for the
+# reading to show them and the slots fill one a minute; a run that takes a slot a run freed adds nothing and goes on, as does a small run,
+# and the dashboard's and the merge train's runs go on too, as they pass slot 2's load line; prints how many runs the last
+# minute added when it holds
+burst_held() {
+  local now cutoff
+  [ "$SIZE" != small ] && [ "$WHO" != ops-dashboard ] && [ "$WHO" != ops-merge-train ] || return 1
+  now=$(date +%s)
+  cutoff=$(date -u -r $((now - 60)) +%FT%TZ 2>/dev/null || date -u -d "@$((now - 60))" +%FT%TZ 2>/dev/null) || return 1
+  tail -n 3000 "$OPS/run-slot.runs.log" 2>/dev/null | CUTOFF=$cutoff awk '
+    $2 == "start" && $5 ~ /^run-slot(-[234]|-clone)?$/ { run[$3 " " $4] = 1; if ($1 > ENVIRON["CUTOFF"]) n++ }
+    $2 == "end" && run[$3 " " $4] { delete run[$3 " " $4]; if ($1 > ENVIRON["CUTOFF"]) n-- }
+    END { if (n > 0) print n; exit !(n > 0) }'
+}
+
 # Load units: each held slot's run counts the units on its holder line (2, a medium, for a line with none), and the slots the load rules
 # open now, or a holder already has, give 2 units each. A quarter of them, at least 1, stays for small runs and the runs that gate a
 # merge, so a big run never blocks a small one
@@ -814,10 +847,22 @@ fi
 PEERS=$(setting slots.peers 2>/dev/null | python3 -I -c 'import json, sys; [print(p) for p in json.load(sys.stdin) if isinstance(p, str)]' 2>/dev/null)
 [ -n "$HEAD_ONLY" ] && { first_waiter; exit 0; }
 [ -n "$SLOTS_ONLY" ] && { echo $(($(capacity) / 2)); exit 0; }
+if [ -n "$ROOM_ONLY" ]; then
+  held=0
+  for s in run-slot run-slot-2 run-slot-3 run-slot-4; do
+    reclaim "$OPS/$s"
+    [ -d "$OPS/$s" ] && held=$((held + 1))
+  done
+  c=$(capacity)
+  free=0
+  fits "$(held_units)" 2 $((c - $(reserve "$c"))) && free=$((c / 2 - held))
+  echo "$((c / 2)) $held $free $(ordered_waiters | grep -c .)"
+  exit 0
+fi
 
 if [ -n "$CAN_TAKE" ]; then
   reclaim "$OPS/$CAN_TAKE"
-  [ ! -d "$OPS/$CAN_TAKE" ] && slot_open "$CAN_TAKE" || exit 1
+  [ ! -d "$OPS/$CAN_TAKE" ] && slot_open "$CAN_TAKE" && ! burst_held > /dev/null || exit 1
   c=$(capacity)
   fits "$(held_units)" "$UNITS" $((c - $(may_reserve "$CLASS$UNITS" "$SIZE" "$WHO" "$(reserve "$c")")))
   exit
@@ -845,6 +890,12 @@ while :; do
   c=$(capacity)
   if ! fits "$(held_units)" "$UNITS" $((c - $(may_reserve "$CLASS$UNITS" "$SIZE" "$WHO" "$(reserve "$c")"))); then
     [ $((waited % 300)) -eq 0 ] && echo "run-slot.sh: waiting for $UNITS free load units ($SIZE; $(held_units) of $c held)" >&2
+    sleep "$POLL"
+    waited=$((waited + 15))
+    continue
+  fi
+  if added=$(burst_held); then
+    [ $((waited % 300)) -eq 0 ] && echo "run-slot.sh: waiting for the load to show the $added run(s) the last minute added" >&2
     sleep "$POLL"
     waited=$((waited + 15))
     continue
