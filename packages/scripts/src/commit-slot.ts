@@ -45,7 +45,7 @@ export const slotted = ({
 export const queued = (slot: string, room: string): string => {
   const waiting = /^\d+ \d+ \d+ (\d+)$/.exec(room.trim())?.[1]
   const count = waiting === undefined ? "" : `, ${waiting} run${waiting === "1" ? "" : "s"} waiting`
-  return `commit-slot: this commit's build joins run-slot's full queue as ${slot}${count}; a commit through ~/.playground/ops/run-slot.sh <your name> -- git commit takes the commit slot instead, unless it stages web/next/`
+  return `commit-slot: this commit's build joins run-slot's full queue as ${slot}${count}; a commit through ~/.playground/ops/run-slot.sh <your name> -- git commit takes the commit slot instead, unless it stages web/next/, api/hono/ or packages/`
 }
 
 // Pure: why the step stops before it asks for a slot, or null: a workspace dependency no node_modules holds, which a canary merge that adds a package leaves until the worktree installs (PG-672: the build waited for a slot, then failed with exit 127, naming nothing).

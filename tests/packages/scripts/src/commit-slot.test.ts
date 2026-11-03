@@ -238,7 +238,7 @@ describe("commit-slot.ts", () => {
     test("says once how many runs wait there and names the commit slot's form", () => {
       const result = queue("4 4 0 27\\n", () => run(["echo", "hi"]))
       expect(notices(result)).toEqual([
-        `commit-slot: this commit's build joins run-slot's full queue as commit-wt-one, 27 runs waiting; a commit through ${FORM} takes the commit slot instead, unless it stages web/next/`,
+        `commit-slot: this commit's build joins run-slot's full queue as commit-wt-one, 27 runs waiting; a commit through ${FORM} takes the commit slot instead, unless it stages web/next/, api/hono/ or packages/`,
       ])
       expect(result.exitCode).toBe(7)
     })
@@ -246,7 +246,7 @@ describe("commit-slot.ts", () => {
     test("still names the form when run-slot.sh room gives no reading", () => {
       const result = queue("", () => run(["echo", "hi"]))
       expect(notices(result)).toEqual([
-        `commit-slot: this commit's build joins run-slot's full queue as commit-wt-one; a commit through ${FORM} takes the commit slot instead, unless it stages web/next/`,
+        `commit-slot: this commit's build joins run-slot's full queue as commit-wt-one; a commit through ${FORM} takes the commit slot instead, unless it stages web/next/, api/hono/ or packages/`,
       ])
     })
 
