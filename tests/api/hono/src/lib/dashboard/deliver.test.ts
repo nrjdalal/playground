@@ -1777,6 +1777,31 @@ describe("deliver to a herdr session", () => {
         expect(run.sent).toHaveLength(1)
       })
 
+      // Claude Code stamps a queued_command at its Enter, and a loaded machine can take more than the transcript's 5s slack from the paste to the read that sees it held
+      test("a hold is timed from the paste, so after a restart a line stamped at its Enter reads delivered", async () => {
+        const run = queuedRun(compacting(`❯ ${MESSAGE}`))
+        const prompt = run.deps.prompt
+        run.deps.prompt = async (surface, text) => {
+          await prompt(surface, text)
+          run.at(8000)
+        }
+        const held = await run.send()
+        expect(held).toMatchObject({
+          code: "QUEUED",
+          ok: false,
+          queuedAt: new Date(NOW).toISOString(),
+        })
+        run.deps.readScreen = async () => EMPTY
+        run.deps.said = async () => [OLDER, { ...arrived, at: new Date(NOW + 1000).toISOString() }]
+        run.at(QUEUED_MS)
+        const queuedAt = held.ok ? undefined : held.queuedAt
+        const id = nextId()
+        expect(
+          await deliver({ actor, id, queuedAt, text: MESSAGE, to: "dispatcher" }, run.deps),
+        ).toMatchObject({ ok: true })
+        expect(run.sent).toHaveLength(1)
+      })
+
       // an API restart forgets the ids it queued, and the outbox's queuedAt stands in for them, so the message is read again and never pasted twice
       describe("after an API restart", () => {
         const restarted = (shown: string, ms: number) => {

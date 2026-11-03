@@ -83,7 +83,7 @@ export const QUEUED_MS = 10 * 60_000
 // `at` is when the delivery finished, its Enter typed and its activity row written (for a retry answered by its row, when that row's transaction began, and `replayed` set); `reason` is a sentence to show as it is. `pasted` marks an INPUT_NOT_EMPTY whose message sits pasted and unsent in the box, which its retry presses Enter on, so a thread it opened is kept for that retry.
 export type DeliveryResult =
   | { at: string; ok: true; replayed?: true; sessionId: string }
-  | { code: DeliveryFailure; ok: false; pasted?: true; reason: string }
+  | { code: DeliveryFailure; ok: false; pasted?: true; queuedAt?: string; reason: string }
 
 export const MAX_CHARS = 8000
 export const MAX_LINES = 100
@@ -577,12 +577,14 @@ export async function deliver(
         )
       }
       const input = inputState(screen)
-      const stillQueued = (): Refusal => ({
+      // QUEUED carries when the message was pasted, which a queued_command's stamp follows within moments, so the outbox's retry after a restart reads the transcript from there
+      const stillQueued = (at: number): Refusal => ({
         ...refused(
           "QUEUED",
           `${worker.name} holds the message and takes it once it is free, after a compaction or its turn: it reads Delivered once its transcript shows it.`,
         ),
         pasted: true,
+        queuedAt: new Date(at).toISOString(),
       })
       // A message Claude Code held when an earlier try ended, by this process's record or, after a restart, by the outbox's queuedAt, is read again, never pasted twice: still held, it waits; gone from the screen, the transcript says it went, or, QUEUED_MS on, that it was lost when the transcript reaches back with no line, and unconfirmed when it does not. One back in the box with no compaction left goes on below, where it gets its Enter as a paste of ours.
       const told = delivery.queuedAt ? Date.parse(delivery.queuedAt) : Number.NaN
@@ -590,7 +592,7 @@ export async function deliver(
         ? (queued.get(delivery.id) ?? (told <= deps.now().getTime() ? told : undefined))
         : undefined
       if (delivery.id && queuedAt !== undefined) {
-        if (holdsQueued(screen, text)) return stillQueued()
+        if (holdsQueued(screen, text)) return stillQueued(queuedAt)
         if (!(input === "holds" && holdsMessage(screen, text))) {
           let went: boolean | null = null
           try {
@@ -601,7 +603,7 @@ export async function deliver(
             await deps.record(event, async () => {})
             return { at: deps.now().toISOString(), ok: true, sessionId }
           }
-          if (deps.now().getTime() - queuedAt < QUEUED_MS) return stillQueued()
+          if (deps.now().getTime() - queuedAt < QUEUED_MS) return stillQueued(queuedAt)
           queued.delete(delivery.id)
           // a transcript that does not reach back to when it was queued, or could not be read, cannot say it never went, so it reads unconfirmed rather than lost
           if (went === null) {
@@ -679,12 +681,15 @@ export async function deliver(
           "held",
         )
       // A message with an id that Claude Code holds after the send waits as QUEUED, its row left for the retry that sees it arrive; it gets no Enter, since Claude Code takes it on its own.
+      // the hold is timed from the paste, not from this read after herdr's answer and the settle, since Claude Code stamps a queued_command at its Enter
+      let pastedAt: number | undefined
       const queueIt = (): TypingStopped => {
         const now = deps.now().getTime()
+        const held = pastedAt ?? now
         // an entry past the bound has settled, or its message was discarded; a retry still carries its queuedAt
         for (const [id, at] of queued) if (now - at >= QUEUED_MS) queued.delete(id)
-        if (delivery.id) queued.set(delivery.id, now)
-        return new TypingStopped(stillQueued(), "held")
+        if (delivery.id) queued.set(delivery.id, held)
+        return new TypingStopped(stillQueued(held), "held")
       }
       // `sent` is the paste the box should hold, and `own` whether it is this message's, whose Enter left unsent is this message's to retry.
       const submitted = async (
@@ -744,6 +749,7 @@ export async function deliver(
               )
             }
             if (stuck && isThis(stuck)) {
+              pastedAt = stuck.at
               await submitted(again.surface, null)
               pastes.set(
                 sessionId,
@@ -768,6 +774,7 @@ export async function deliver(
               pastes.set(sessionId, left)
             }
             const at = deps.now().getTime()
+            pastedAt = at
             let lost: unknown = null
             try {
               await deps.prompt(again.surface, text)

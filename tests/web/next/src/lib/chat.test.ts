@@ -635,6 +635,36 @@ describe("DashboardChats", () => {
       jest.useRealTimers()
     }
   })
+
+  // the API times the hold from the paste, which a queued_command's stamp follows, rather than from when this tab read the answer
+  test("a held message keeps the API's time for the hold, when its refusal gives one", async () => {
+    const pasted = "2026-10-18T02:29:50.000Z"
+    const held: (string | undefined)[] = []
+    let tries = 0
+    const send = (async (
+      _to: string,
+      _text: string,
+      _files: string[],
+      _id: string,
+      { queuedAt }: { queuedAt?: string } = {},
+    ) => {
+      held.push(queuedAt)
+      tries += 1
+      return tries === 1 ? refused("CONFLICT", { delivery: "QUEUED", queuedAt: pasted }) : typed
+    }) as never
+    jest.useFakeTimers()
+    try {
+      const chats = new DashboardChats({ label: (name) => name, send })
+      chats.post("dispatcher", { attachments: [], text: "while it compacts" })
+      for (let second = 0; second <= 20 && chats.outbox()[0]?.state !== "typed"; second++) {
+        await flush()
+        jest.advanceTimersByTime(1000)
+      }
+      expect(held).toEqual([undefined, pasted])
+    } finally {
+      jest.useRealTimers()
+    }
+  })
 })
 
 describe("refreshingReplies", () => {

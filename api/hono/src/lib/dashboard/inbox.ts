@@ -980,7 +980,15 @@ async function send(
   }
   const recorded = (await recordDelivery(db, item.id, delivery, now)) ?? item
   if (delivery.status === "queued") {
-    void follow(db, item.id, { ...sent, queuedAt: sent.queuedAt ?? delivery.at }, { deliver, wait })
+    // a write that fails while it follows (the database restarting) leaves the card queued, which offers Retry once stuck, rather than ending the API
+    void follow(
+      db,
+      item.id,
+      { ...sent, queuedAt: sent.queuedAt ?? delivery.at },
+      { deliver, wait },
+    ).catch((error: unknown) => {
+      console.warn(`Could not follow the queued answer on ${item.id}:`, error)
+    })
   }
   return recorded
 }
@@ -1031,7 +1039,12 @@ async function attempt(
     const result = await deliver(delivery)
     if (result.ok) return { at: result.at, status: "delivered", to: delivery.to, via: "session" }
     return result.code === "QUEUED"
-      ? { at: now.toISOString(), id: delivery.id, status: "queued", to: delivery.to }
+      ? {
+          at: result.queuedAt ?? now.toISOString(),
+          id: delivery.id,
+          status: "queued",
+          to: delivery.to,
+        }
       : { code: result.code, reason: result.reason, status: "failed" }
   } catch (error) {
     // ERROR, not one of the adapter's codes, since the answer may have reached the session after all.

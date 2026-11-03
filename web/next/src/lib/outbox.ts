@@ -51,18 +51,19 @@ export const MAX_ATTEMPTS = 20
 export const sentSince = (seen: ReadonlySet<string>, messages: { id: string }[]): boolean =>
   messages.some((m) => !seen.has(m.id))
 
+const QUEUED = "QUEUED"
+
 // Refusals the API gives before typing anything, or with the message left pasted and unsent for a retry's Enter (INPUT_NOT_EMPTY, deliver.ts), which a later try can pass: the session is on a picker, its input holds a draft, its terminal stumbled reading it, the session is between lives, or the rate limit is full. QUEUED is Claude Code holding it, which each try reads again and types nothing, until the API reads it delivered or lost. These are retried on their own.
 const AUTO_RETRY = new Set([
   "CMUX_FAILED",
   "INPUT_NOT_EMPTY",
   "NOT_FOUND",
   "ON_PICKER",
-  "QUEUED",
+  QUEUED,
   "TOO_MANY_REQUESTS",
 ])
 
 // Claude Code holds a queued message until it is free, a compaction (up to 7 minutes measured) or a turn, so its tries are uncounted, and come at most 5s apart, so it reads delivered soon after it arrives.
-const QUEUED = "QUEUED"
 export const QUEUED_POLL_MS = 5000
 
 // No answer, one that is not the API's, or the API's own failure (deliver() throws when it cannot write its activity row, which can come after the Enter): the message may or may not have been typed, so once it fails only a person retries it, after a look at the session. The API's own failure fails at once; no answer is retried on its own first (UNREACHED).
@@ -100,7 +101,7 @@ export const waitWhy = (code: string, label: string, limited = false): string | 
       return `${label} is not live`
     case "ON_PICKER":
       return limited ? `${label} is at its usage limit` : `${label} is on a prompt`
-    case "QUEUED":
+    case QUEUED:
       return `${label} holds it, to take once free`
     case "TOO_MANY_REQUESTS":
       return "too many messages this minute"

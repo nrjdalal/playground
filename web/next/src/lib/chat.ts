@@ -488,7 +488,9 @@ export class DashboardChats {
         attempts: message.attempts,
         code: message.code,
         id,
-        queuedAt: message.queuedAt,
+        // the API's own time for the hold, when it gives one, is when the message was pasted
+        queuedAt:
+          message.queuedAt ?? (typeof error.queuedAt === "string" ? error.queuedAt : undefined),
         unreached: message.unreached,
       }
       const refusal = { code: refusalCode(error), message: error.message }
