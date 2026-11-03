@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 
 import type { Delivery } from "../../../../../api/hono/src/lib/dashboard/deliver"
+import type { SettingChanging } from "../../../../../api/hono/src/lib/dashboard/sdk"
 
 // The router's auth refuses Better Auth's default secret under NODE_ENV=production, which CI's build step sets; any secret serves requests that carry no session. Set before the router loads.
 process.env.BETTER_AUTH_SECRET ||= "dashboard-router-test-secret-not-for-use-anywhere"
@@ -1040,16 +1041,16 @@ describe("the setting route", () => {
     expect(handlersOf("POST", "/workers/:sessionId/setting")).toContain(settingLimiter)
   })
 
-  test("a dispatcher's setting goes through deliver() and the hosted session's through sendToHosted(), as the setting alone", async () => {
-    const sent: { via: string; delivery: Delivery }[] = []
+  test("a dispatcher's setting goes through deliver() as the setting alone, and the hosted session's to changeHostedSetting() by its id", async () => {
+    const sent: { via: string; delivery: unknown }[] = []
     const live = board([
       { name: DISPATCHER, sessionId: "s-d" },
       { name: DISPATCHER_SECONDARY, sessionId: "s-d2" },
       { hosted: true, name: SDK_PROBE, sessionId: "s-h" },
     ])
-    const send = (via: string) => async (delivery: Delivery) => {
+    const send = (via: string) => async (delivery: Delivery | SettingChanging) => {
       sent.push({ delivery, via })
-      return ok(delivery.to === SDK_PROBE ? "s-h" : "s-d")()
+      return ok("sessionId" in delivery ? delivery.sessionId : "s-d")()
     }
     await changeSetting(
       { sessionId: "s-d", setting: { model: "sonnet" } },
@@ -1081,7 +1082,7 @@ describe("the setting route", () => {
         delivery: { actor, setting: { effort: "low" }, text: "", to: DISPATCHER_SECONDARY },
         via: "deliver",
       },
-      { delivery: { actor, setting: { effort: "max" }, text: "", to: SDK_PROBE }, via: "hosted" },
+      { delivery: { actor, sessionId: "s-h", setting: { effort: "max" } }, via: "hosted" },
     ])
   })
 

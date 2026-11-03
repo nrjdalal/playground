@@ -71,12 +71,14 @@ import { readRoster } from "@/lib/dashboard/roster"
 import {
   answerHosted,
   changeHostedMode,
+  changeHostedSetting,
   HOSTED_MODES,
   hosts,
   SDK_PROBE,
   sendToHosted,
   type ModeChanging,
   type ModeResult,
+  type SettingChanging,
 } from "@/lib/dashboard/sdk"
 import { settingSchema, type SessionSetting } from "@/lib/dashboard/setting"
 import { readStacks } from "@/lib/dashboard/stacks"
@@ -457,13 +459,13 @@ export async function changeMode(
   return { at: result.at, mode: result.mode }
 }
 
-// The setting route's work once the request is through its guards: a model or an effort for a dispatcher, typed as its one slash command through deliver(), or for the session the dashboard hosts, put on its input through sendToHosted(); any other session is refused as FORBIDDEN before anything is sent, and a delivery's refusal is turned into the API's error envelope with its code under `delivery`.
+// The setting route's work once the request is through its guards: a model or an effort for a dispatcher, typed as its one slash command through deliver(), or for the session the dashboard hosts, set through the SDK by changeHostedSetting(); any other session is refused as FORBIDDEN before anything is sent, and a delivery's refusal is turned into the API's error envelope with its code under `delivery`.
 export async function changeSetting(
   { sessionId, setting }: { sessionId: string; setting: SessionSetting },
   actor: Delivery["actor"],
   live: () => Promise<Live> = listLive,
   send: (delivery: Delivery) => Promise<DeliveryResult> = deliver,
-  sendHosted: (delivery: Delivery) => Promise<DeliveryResult> = sendToHosted,
+  setHosted: (changing: SettingChanging) => Promise<DeliveryResult> = changeHostedSetting,
 ): Promise<{ at: string; sessionId: string }> {
   const worker = (await live()).workers.find((w) => w.sessionId === sessionId)
   if (!worker) throw new ApiError(404, "NOT_FOUND", "No live session with that id")
@@ -475,8 +477,9 @@ export async function changeSetting(
       `A model or effort is set on ${[...DISPATCHERS, SDK_PROBE].join(", ")} only`,
     )
   }
-  const to = typed ? worker.name : SDK_PROBE
-  const result = await (typed ? send : sendHosted)({ actor, setting, text: "", to })
+  const result = typed
+    ? await send({ actor, setting, text: "", to: worker.name })
+    : await setHosted({ actor, sessionId, setting })
   if (!result.ok) {
     const [status, code] = FAILURE_STATUS[result.code]
     throw new ApiError(status, code, result.reason, { delivery: result.code })
@@ -957,10 +960,11 @@ const dashboardRoutes = new Hono<{ Variables: Session }>()
     "/workers/:sessionId/setting",
     describeRoute({
       tags: ["Dashboard"],
-      description: `Set the model or the effort of a dispatcher (${DISPATCHERS.join(" or ")}) or of ${SDK_PROBE}, the session the dashboard hosts on the Agent SDK, as the owner's own pick in the composer: \`model\` one of ${SESSION_MODELS.join(", ")}, or \`effort\` one of ${SESSION_EFFORTS.join(", ")}, never both. The API builds the one slash command (\`/model <alias>\` or \`/effort <level>\`) from those lists and types it as a message is typed, or puts it on the hosted session's input, and records a dashboard.setting row naming the session and the value. Any other session is refused as FORBIDDEN before anything is sent. A delivery's refusal names its reason in \`delivery\`, as the message route's does.`,
+      description: `Set the model or the effort of a dispatcher (${DISPATCHERS.join(" or ")}) or of ${SDK_PROBE}, the session the dashboard hosts on the Agent SDK, as the owner's own pick in the composer: \`model\` one of ${SESSION_MODELS.join(", ")}, or \`effort\` one of ${SESSION_EFFORTS.join(", ")}, never both. For a dispatcher the API builds the one slash command (\`/model <alias>\` or \`/effort <level>\`) from those lists and types it as a message is typed; the hosted session takes it through the SDK's own calls. Either way it records a dashboard.setting row naming the session and the value. Any other session is refused as FORBIDDEN before anything is sent. A delivery's refusal names its reason in \`delivery\`, as the message route's does.`,
       responses: {
         200: {
-          description: "Typed: the session runs the command",
+          description:
+            "Set: a dispatcher runs the typed command, or the hosted session has taken the value",
           content: {
             "application/json": {
               schema: resolver(

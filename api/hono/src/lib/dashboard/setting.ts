@@ -9,6 +9,7 @@ export const settingSchema = z.union([
 ])
 
 export type SessionSetting = z.infer<typeof settingSchema>
+export type SessionEffort = (typeof SESSION_EFFORTS)[number]
 
 // Pure: the one slash command a setting types, built from the lists alone.
 export const settingCommand = (setting: SessionSetting): string =>
