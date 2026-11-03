@@ -407,7 +407,13 @@ const trashFixture = (path: string, roots: Roots) => {
 }
 
 // Writes a fixture into dir, fresh, as of now: the config folder, cmux's state (cmux.json), herdr's (herdr.json) and the rest of the machine (machine.json). The folder is replaced whole and only when it is a fixture's own (its stamp.json), so a misnamed folder (a real config folder) is refused rather than overwritten; the one it replaces goes to the trash of the roots given before anything is written, so a refusal changes nothing.
-export function writeFixture(fixture: Fixture, dir: string, roots: Roots, now = new Date()): void {
+export function writeFixture(
+  fixture: Fixture,
+  dir: string,
+  roots: Roots,
+  now = new Date(),
+  rename = renameSync,
+): void {
   const target = resolve(dir)
   if (existsSync(target) && !existsSync(join(target, STAMP))) {
     throw new Error(`${target} exists and is not a fixture's folder, so it is left alone`)
@@ -471,7 +477,14 @@ export function writeFixture(fixture: Fixture, dir: string, roots: Roots, now = 
     worktrees: fixture.worktrees ?? [],
   })
   writeEntry(join(fresh, STAMP), { writtenAt: now.toISOString() })
-  renameSync(fresh, target)
+  try {
+    rename(fresh, target)
+  } catch (error) {
+    // Another writer's rename landed first (two test files in one shard), so its complete fixture stands and this one's copy goes.
+    const code = (error as NodeJS.ErrnoException).code
+    if ((code !== "ENOTEMPTY" && code !== "EEXIST") || !existsSync(join(target, STAMP))) throw error
+    trashFixture(fresh, roots)
+  }
 }
 
 // Moves a fixture's folder into the trash of the roots given when it is one (a stack's scratch state goes with the stack).

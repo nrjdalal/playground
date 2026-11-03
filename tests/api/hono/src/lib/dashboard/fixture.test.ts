@@ -6,6 +6,7 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  renameSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -469,6 +470,36 @@ describe("writeFixture", () => {
     expect(readdirSync(clone)).toEqual([".git"])
     expect(readdirSync(tmp)).toEqual([])
     expect(trashed(roots).filter((path) => path === dir)).toHaveLength(2)
+  })
+
+  test("a writer whose rename loses the race to another's returns, leaving that complete fixture and no .writing folder (#797)", () => {
+    const root = scratch("fixture-race")
+    const dir = join(root, "fixture")
+    const roots = freshRoots()
+    const later = new Date(Date.parse(ANCHOR) + DAY)
+    writeFixture(small(), dir, roots, new Date(Date.parse(ANCHOR)), (from, to) => {
+      writeFixture(small(), join(root, "winner"), roots, later)
+      renameSync(join(root, "winner"), to)
+      renameSync(from, to)
+    })
+    expect(readdirSync(root)).toEqual(["fixture"])
+    expect(JSON.parse(readFileSync(join(dir, "stamp.json"), "utf8"))).toEqual({
+      writtenAt: later.toISOString(),
+    })
+  })
+
+  test("a rename that fails another way, or onto a folder that is no fixture's, still throws (#797)", () => {
+    const root = scratch("fixture-race-fail")
+    const roots = freshRoots()
+    const failing = (code: string) => () => {
+      throw Object.assign(new Error(`rename failed: ${code}`), { code })
+    }
+    expect(() =>
+      writeFixture(small(), join(root, "a"), roots, undefined, failing("ENOSPC")),
+    ).toThrow("rename failed: ENOSPC")
+    expect(() =>
+      writeFixture(small(), join(root, "b"), roots, undefined, failing("ENOTEMPTY")),
+    ).toThrow("rename failed: ENOTEMPTY")
   })
 
   test("leaves a folder that is not a fixture's alone, a real config folder named by mistake included", () => {
