@@ -35,6 +35,18 @@ test("a dependency linked in the package's own node_modules or one above it coun
   expect(await unlinked(dir)).toEqual([])
 })
 
+test("a commit's manifests, by path, stand in for the disk's, against the checkout's links", async () => {
+  const dir = repo()
+  const manifests = {
+    "package.json": JSON.stringify({ workspaces: ["packages/*"] }),
+    "packages/settings/package.json": JSON.stringify({ dependencies: { zod: "catalog:" } }),
+    "packages/new/package.json": JSON.stringify({ dependencies: { kleur: "^4" } }),
+    "fixtures/x/package.json": JSON.stringify({ dependencies: { nope: "1" } }),
+  }
+  expect(await unlinked(dir, manifests)).toEqual(["packages/new: kleur"])
+  expect(await unlinked(dir, {})).toEqual([])
+})
+
 test("a folder with no package.json declares nothing", async () => {
   expect(await unlinked(join(scratch, "nowhere"))).toEqual([])
 })

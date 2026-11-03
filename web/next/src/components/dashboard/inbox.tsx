@@ -445,6 +445,7 @@ function Preview({ item }: { item: Extract<InboxItem, { kind: "decision" }> }) {
           <SoFar thread={preview.thread} />
           <p>On Approve, {preview.to} gets:</p>
           <p className={QUOTE}>{preview.text}</p>
+          {preview.attachments ? <Attachments items={preview.attachments} /> : null}
         </>
       )
     case "ship":

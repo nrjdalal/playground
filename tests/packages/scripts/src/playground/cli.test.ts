@@ -118,22 +118,20 @@ describe("bare dispatcher", () => {
     expect(out).toContain(`Starting the Dashboard…\n${upPy}\n`)
   }, 15_000)
 
-  // up.py's exit 3 says a job is down only because the pass runs outside cmux, so waiting for the Dashboard would only time out
-  test("stops non-zero right after up.py exits 3, with no wait for the Dashboard", async () => {
+  // up.py exits 0 on every pass, so a jobs exit of 3 is a failed step like any other: with no cmux present the run goes on to the dispatcher step
+  test("with no cmux present, an up.py exit of 3 no longer stops the run", async () => {
     const { child, upPy } = await dispatcher('echo "python3 $*"; exit 3')
-    let killed = false
-    const deadline = setTimeout(() => {
-      killed = true
-      child.kill()
-    }, 10_000)
-    const code = await child.exited
+    const deadline = setTimeout(() => child.kill(), 10_000)
+    let out = ""
+    const decoder = new TextDecoder()
+    for await (const chunk of child.stdout) {
+      out += decoder.decode(chunk)
+      if (out.includes(`${upPy}\nStarting `)) break
+    }
     clearTimeout(deadline)
-    const out = await new Response(child.stdout).text()
-    const err = await new Response(child.stderr).text()
-    expect(killed).toBe(false)
-    expect(code).not.toBe(0)
-    expect(out).toEndWith(`Starting the Dashboard…\n${upPy}\n`)
-    expect(err).not.toContain("supervisor.log")
+    child.kill()
+    await child.exited
+    expect(out).toContain(`Starting the Dashboard…\n${upPy}\nStarting `)
   }, 15_000)
 
   // On a fresh Mac spawn.sh printed a traceback before its refusal, and the run that exited 1 still closed on the Dashboard's own lines.

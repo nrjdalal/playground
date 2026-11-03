@@ -5937,6 +5937,7 @@ var claudeAccount = strictObject({
   endsFirst: boolean2().optional(),
   label: label.optional(),
   nearLimit: boolean2().optional(),
+  own: boolean2().optional(),
   provider: literal("claude").optional(),
   renews: number2().int().min(1).max(31).nullable().optional(),
   weekReset: strictObject({ hour: number2().min(0).lt(24), weekday: number2().int().min(0).max(6) }).optional()
@@ -5953,7 +5954,7 @@ var accountSettings = defineSettings({
   },
   "usage.accounts": {
     default: [],
-    description: "The accounts the factory spends, any number of each provider: a Claude row by its email, in the order the login flip reads them, with its plan's end or billing day, whether the near-limit marks count it, and its week's reset; a GLM row (provider glm) by its label, the Keychain item its key is kept under.",
+    description: "The accounts the factory spends, any number of each provider: a Claude row by its email, in the order the login flip reads them, with its plan's end or billing day, whether the near-limit marks count it, whether it is the owner's own (own, spent at a fifth of its share unless it resets within a day), and its week's reset; a GLM row (provider glm) by its label, the Keychain item its key is kept under.",
     schema: array(account).refine((rows) => new Set(rows.map((row) => `${providerOf(row)}:${accountKey(row)}`)).size === rows.length, "each account is listed once")
   },
   "usage.keychainService": {
@@ -7261,11 +7262,8 @@ function parse3(cmd) {
   }
   while (ASSIGN.test(rest.at(-1)?.value ?? ""))
     assign(state.local, rest.pop());
-  const budget = { left: READINGS };
-  const parsed = unwrap(state, undefined, budget);
-  return budget.capped ? { ...parsed, capped: true } : parsed;
+  return unwrap(state, undefined, { left: READINGS });
 }
-var readings = (parsed) => [parsed, ...parsed.also.flatMap(readings)];
 var assign = (local, w) => {
   const eq = w.value.indexOf("=");
   local.set(w.value.slice(0, eq), slice(w, eq + 1));
@@ -7275,18 +7273,12 @@ function unwrap(state, inside, budget) {
   const peek = () => rest[rest.length - 1];
   const take = () => rest.pop();
   const also = [];
-  const fork = (wrapper, drop) => {
-    if (budget.left-- <= 0) {
-      budget.capped = true;
-      return;
-    }
-    also.push(unwrap({
-      chdir: state.chdir,
-      local: new Map(local),
-      rest: rest.slice(0, Math.max(0, rest.length - drop)),
-      xargs: state.xargs && { ...state.xargs }
-    }, wrapper, budget));
-  };
+  const fork = (wrapper, drop) => budget.left-- > 0 && also.push(unwrap({
+    chdir: state.chdir,
+    local: new Map(local),
+    rest: rest.slice(0, Math.max(0, rest.length - drop)),
+    xargs: state.xargs && { ...state.xargs }
+  }, wrapper, budget));
   for (let wrapper = inside;; wrapper = undefined) {
     if (!wrapper) {
       wrapper = program(peek()?.value ?? "");
@@ -7386,6 +7378,7 @@ async function runAll(lexed, env, visit, builtins) {
 var subshell = (env) => ({ ...env, vars: new Map(env.vars) });
 async function examine(cmd, env, visit, builtins) {
   tick();
+  const readings = (parsed) => [parsed, ...parsed.also.flatMap(readings)];
   const [primary, ...others] = readings(parse3(cmd));
   const before = others.length > 0 ? apart(env) : env;
   const verdict = await examineReading(cmd, primary, env, visit, builtins);
