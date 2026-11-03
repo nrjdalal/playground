@@ -427,6 +427,63 @@ describe("every refused form stays refused unless the allow list names it", () =
   })
 })
 
+// Two guard PRs used to meet on one fixture file's shared lines; with a file a source, each adds only its own file.
+describe("two branches that each add a source's file merge with no conflict, in either order", () => {
+  // A new source's file with one row, as a guard PR writes it.
+  const sourceFile = (what: string) =>
+    [
+      `import { type Group } from "./_shared"`,
+      ``,
+      `export const groups: Group[] = [`,
+      `  { folders: ["checkout"], guards: ["no-stash"], rows: () => [[${JSON.stringify(what)}, "git stash"]] },`,
+      `]`,
+      ``,
+      `export const allowed: string[] = [${JSON.stringify(what)}]`,
+      ``,
+    ].join("\n")
+
+  // A scratch repo holding a copy of the fixture, its reader and its folder, with two branches from one base each adding its own source's file.
+  const repo = () => {
+    const dir = mkdtempSync(join(SCRATCH, "merge-"))
+    const from = join(import.meta.dir, "fixtures")
+    mkdirSync(join(dir, "refused-forms"))
+    copyFileSync(join(from, "refused-forms.ts"), join(dir, "refused-forms.ts"))
+    for (const name of readdirSync(join(from, "refused-forms")))
+      copyFileSync(join(from, "refused-forms", name), join(dir, "refused-forms", name))
+    git(dir, "init", "-q", "-b", "base")
+    git(dir, "add", "-A")
+    git(dir, "commit", "-q", "-m", "base")
+    for (const [branch, n] of [
+      ["a", 9001],
+      ["b", 9002],
+    ] as const) {
+      git(dir, "checkout", "-q", "-b", branch, "base")
+      writeFileSync(join(dir, "refused-forms", `${n}.ts`), sourceFile(`branch ${branch}'s row`))
+      git(dir, "add", "-A")
+      git(dir, "commit", "-q", "-m", branch)
+    }
+    return dir
+  }
+
+  test.each([
+    ["a", "b"],
+    ["b", "a"],
+  ])("%s, then %s merged into it", async (first, second) => {
+    const dir = repo()
+    git(dir, "checkout", "-q", first)
+    const merge = git(dir, "merge", "-q", "--no-edit", second)
+    expect(merge.exitCode).toBe(0)
+    expect(git(dir, "diff", "--name-only", "--diff-filter=U").stdout.toString()).toBe("")
+    const merged = await import(join(dir, "refused-forms.ts"))
+    const sources = merged.REFUSED_FORMS.map((group: { source: string }) => group.source)
+    expect(sources).toContain("#9001")
+    expect(sources).toContain("#9002")
+    expect(merged.ALLOWED).toEqual(
+      expect.arrayContaining(["#9001 branch a's row", "#9002 branch b's row"]),
+    )
+  })
+})
+
 // A guard's wrapper runs its bundle, so the bundle is held to its source's verdict on every row, run where no node_modules can be reached.
 describe("each bundled guard gives its source's verdict with no node_modules reachable", () => {
   test("no package resolves from the bundles' folder", () => {
