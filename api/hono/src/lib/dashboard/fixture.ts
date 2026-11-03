@@ -221,21 +221,6 @@ export const fixtureSchema = z.object({
   account: z.object({ email: z.email(), name: z.string().nullable() }).optional(),
   // Every ISO time in the file, and every epoch-seconds `resets_at`, moves by the time between this and the moment the fixture is written, so ages, ETAs and usage stay as current as they read here.
   anchor: z.iso.datetime({ offset: true }),
-  cmux: z.object({
-    // Each Feed item names its session by `session`, which becomes the workstream id cmux gives it.
-    feed: z.array(z.looseObject({ request_id: z.string().min(1), session: z.string().min(1) })),
-    // What each surface's screen shows above its input box; the box itself is drawn from what has been typed.
-    screens: z.record(z.string(), z.string()),
-    sessions: z.array(
-      z.looseObject({
-        // a session the dashboard pastes into, as herdr's agent.prompt does, so its Enter writes what Claude Code writes for a paste
-        pastes: z.boolean().optional(),
-        session_id: z.string().min(1),
-        transcript_path: transcriptPath.optional(),
-      }),
-    ),
-    workspaces: z.array(json),
-  }),
   // Onboarding's tool rows on the made-up machine, the database's left to the API: every one ok, and the missing set a stack answers while PLAYGROUND_ONBOARD_MISSING is set.
   doctor: z.object({ checks: z.array(doctorCheck), missing: z.array(doctorCheck) }).optional(),
   // Each file under the config folder by its path: a .jsonl as an array of lines, a { "$base64": … } as bytes, anything else as JSON. `$CONFIG` in any string is that folder.
@@ -245,24 +230,22 @@ export const fixtureSchema = z.object({
     z.object({ branch: z.string().nullable(), repo: z.string().nullable() }),
   ),
   // herdr's playground server on the made-up machine, which herdr.ts answers its requests from (herdr.json): each pane as session.snapshot gives it, with the processes pane.process_info names and the session its messages go to, what each pane's screen shows above its input box, the picker a blocked pane draws in place of that box, and the workspaces.
-  herdr: z
-    .object({
-      panes: z.array(
-        z.looseObject({
-          pane_id: z.string().min(1),
-          processes: z.array(json),
-          // the session a prompt or a sent input goes to; a pane with no transcript takes them and records nothing
-          session_id: z.string().min(1).optional(),
-          terminal_id: z.string().min(1),
-          transcript_path: transcriptPath.optional(),
-          workspace_id: z.string().min(1),
-        }),
-      ),
-      prompts: z.record(z.string(), z.string()),
-      screens: z.record(z.string(), z.string()),
-      workspaces: z.array(json),
-    })
-    .optional(),
+  herdr: z.object({
+    panes: z.array(
+      z.looseObject({
+        pane_id: z.string().min(1),
+        processes: z.array(json),
+        // the session a prompt or a sent input goes to; a pane with no transcript takes them and records nothing
+        session_id: z.string().min(1).optional(),
+        terminal_id: z.string().min(1),
+        transcript_path: transcriptPath.optional(),
+        workspace_id: z.string().min(1),
+      }),
+    ),
+    prompts: z.record(z.string(), z.string()),
+    screens: z.record(z.string(), z.string()),
+    workspaces: z.array(json),
+  }),
   // Each repo's merged PullRequest nodes, as the Usage app's query reads them (lib/usage/prs.ts).
   merged: z.record(z.string(), z.array(json)).optional(),
   // The made-up checkout's origin remote, which the sidebar's GitHub icon links to as its pull requests page.
@@ -369,10 +352,6 @@ export function settle(value: unknown, shiftMs: number, config: string, key = ""
   return value
 }
 
-// cmux names a Feed item's session by a workstream id that ends in the session's id, base64-encoded.
-export const workstreamOf = (session: string): string =>
-  `cmux-feed-v1:${Buffer.from("claude").toString("base64")}:${Buffer.from(session).toString("base64")}`
-
 const STAMP = "stamp.json"
 
 const writeEntry = (path: string, content: unknown): void => {
@@ -406,7 +385,7 @@ const trashFixture = (path: string, roots: Roots) => {
   if (refused) throw new Error(`the fixture's ${path} stays: ${refused}`)
 }
 
-// Writes a fixture into dir, fresh, as of now: the config folder, cmux's state (cmux.json), herdr's (herdr.json) and the rest of the machine (machine.json). The folder is replaced whole and only when it is a fixture's own (its stamp.json), so a misnamed folder (a real config folder) is refused rather than overwritten; the one it replaces goes to the trash of the roots given before anything is written, so a refusal changes nothing.
+// Writes a fixture into dir, fresh, as of now: the config folder, herdr's state (herdr.json) and the rest of the machine (machine.json). The folder is replaced whole and only when it is a fixture's own (its stamp.json), so a misnamed folder (a real config folder) is refused rather than overwritten; the one it replaces goes to the trash of the roots given before anything is written, so a refusal changes nothing.
 export function writeFixture(fixture: Fixture, dir: string, roots: Roots, now = new Date()): void {
   const target = resolve(dir)
   if (existsSync(target) && !existsSync(join(target, STAMP))) {
@@ -443,19 +422,7 @@ export function writeFixture(fixture: Fixture, dir: string, roots: Roots, now = 
     mkdirSync(join(fresh, "claude", folder), { mode: 0o700, recursive: true })
     chmodSync(join(fresh, "claude", folder), 0o700)
   }
-  const cmux = at(fixture.cmux)
-  writeEntry(join(fresh, "cmux.json"), {
-    feed: cmux.feed.map(({ session, ...item }) => ({
-      status: "pending",
-      ...item,
-      workstream_id: workstreamOf(session),
-    })),
-    inputs: {},
-    screens: cmux.screens,
-    sessions: cmux.sessions,
-    workspaces: cmux.workspaces,
-  })
-  writeEntry(join(fresh, "herdr.json"), { inputs: {}, ...at(fixture.herdr ?? NO_HERDR) })
+  writeEntry(join(fresh, "herdr.json"), { inputs: {}, ...at(fixture.herdr) })
   writeEntry(join(fresh, "machine.json"), {
     account: fixture.account ?? null,
     doctor: fixture.doctor ?? null,
@@ -505,21 +472,12 @@ export function ensureFixture(source: DashboardSource = currentSource()): string
   return dir
 }
 
-export type FixtureCmux = {
-  feed: Record<string, unknown>[]
-  // What has been typed into each surface's input and not yet sent.
-  inputs: Record<string, string>
-  screens: Record<string, string>
-  sessions: Record<string, unknown>[]
-  workspaces: Record<string, unknown>[]
-}
-
-export type FixtureHerdr = NonNullable<Fixture["herdr"]> & {
+export type FixtureHerdr = Fixture["herdr"] & {
   // What has been typed into each pane's input and not yet sent.
   inputs: Record<string, string>
 }
 
-const NO_HERDR: NonNullable<Fixture["herdr"]> = {
+const NO_HERDR: Fixture["herdr"] = {
   panes: [],
   prompts: {},
   screens: {},
@@ -542,15 +500,6 @@ export type FixtureMachine = {
 }
 
 const readJson = <T>(path: string): T => JSON.parse(readFileSync(path, "utf8")) as T
-
-export const readFixtureCmux = (dir = ensureFixture()): FixtureCmux =>
-  readJson<FixtureCmux>(join(dir, "cmux.json"))
-
-const writeFixtureCmux = (state: FixtureCmux, dir: string): void => {
-  const path = join(dir, "cmux.json")
-  writeFileSync(`${path}.tmp`, JSON.stringify(state, null, 2), { mode: 0o600 })
-  renameSync(`${path}.tmp`, path)
-}
 
 // A fixture written before herdr.json was runs no herdr server.
 export const readFixtureHerdr = (dir = ensureFixture()): FixtureHerdr => {
@@ -575,7 +524,7 @@ export const readFixtureMachine = (dir = ensureFixture()): FixtureMachine => {
   return machine.value
 }
 
-// Told whenever a write changes the fixture's cmux or herdr state, so the dashboard's hub refreshes as cmux's events would make it.
+// Told whenever a write changes the fixture's herdr state, so the dashboard's hub refreshes as herdr's events would make it.
 const listeners = new Set<() => void>()
 
 export const onFixtureChange = (listener: () => void): (() => void) => {
@@ -596,12 +545,6 @@ const inputBox = (above: string, typed: string): string => {
   return [above, rule, ...box, rule, "  ? for shortcuts"].join("\n")
 }
 
-export const screenOf = (state: FixtureCmux, surface: string): string =>
-  inputBox(state.screens[surface] ?? "", state.inputs[surface] ?? "")
-
-const sessionOnSurface = (state: FixtureCmux, surface: string) =>
-  state.sessions.find((s) => str(s.surface_id) === surface && s.stored_pid_exists === true)
-
 // A Vibeground's Start or Stop on a fixture stack: its made-up worktree runs on this stack's own dashboard, a path of its own so the pane tells it from `$WEB`, or stops, in the scratch copy alone.
 export function fixtureVibe(path: string, running: boolean, dir = ensureFixture()): void {
   const file = join(dir, "machine.json")
@@ -614,27 +557,6 @@ export function fixtureVibe(path: string, running: boolean, dir = ensureFixture(
   writeFileSync(`${file}.tmp`, JSON.stringify(state, null, 2), { mode: 0o600 })
   renameSync(`${file}.tmp`, file)
 }
-
-// What cmux's reads answer on a fixture stack, from the fixture's own state: sessions, workspaces, the Feed, and a session's screen. Any other read is one the fixture does not hold.
-export function fixtureRead(args: readonly string[], dir = ensureFixture()): string {
-  const state = readFixtureCmux(dir)
-  const [command, sub] = args
-  if (command === "sessions" && sub === "list") return JSON.stringify({ sessions: state.sessions })
-  if (command === "list-workspaces") return JSON.stringify({ workspaces: state.workspaces })
-  if (command === "rpc" && sub === "feed.list") {
-    return JSON.stringify({ items: state.feed.filter((item) => item.status === "pending") })
-  }
-  if (command === "read-screen") {
-    const surface = args[args.indexOf("--surface") + 1] ?? ""
-    if (!sessionOnSurface(state, surface)) throw new Error(`no session on surface ${surface}`)
-    return screenOf(state, surface)
-  }
-  throw new Error(`the fixture holds no answer to ${command ?? "nothing"}`)
-}
-
-export type FixtureWrite =
-  | { key: string; surface: string }
-  | { force?: boolean; surface: string; text: string }
 
 const IMAGE_PATH = /\.(gif|jpe?g|png|webp)$/i
 
@@ -714,27 +636,6 @@ const sent = (
   appendFileSync(path, lines.map((l) => `${JSON.stringify(l)}\n`).join(""))
 }
 
-// A keystroke typed into a fixture session's terminal: text and Shift+Enter fill its input, and Enter sends it, as a line its transcript records, so the page sees it delivered as it would a live session's. Text sent into an input that holds some is refused unless forced, as cmux 0.65's draft guard refuses it.
-export function fixtureWrite(step: FixtureWrite, dir = ensureFixture(), now = new Date()): void {
-  const state = readFixtureCmux(dir)
-  const session = sessionOnSurface(state, step.surface)
-  if (!session) throw new Error(`no session on surface ${step.surface}`)
-  const typed = state.inputs[step.surface] ?? ""
-  if ("text" in step) {
-    if (typed && !step.force) {
-      throw new Error("send: the agent prompt holds text someone is typing, so nothing was sent")
-    }
-    state.inputs[step.surface] = typed + step.text
-  } else if (step.key === "shift+enter") state.inputs[step.surface] = `${typed}\n`
-  else if (step.key === "enter") {
-    delete state.inputs[step.surface]
-    sent(session, typed, session.pastes === true, dir, now)
-    session.agent_lifecycle = "running"
-  } else throw new Error(`the fixture types no ${step.key}`)
-  writeFixtureCmux(state, dir)
-  changed()
-}
-
 // The name a fixture session was started with, `claude -n <name>`, as workers.ts reads a live one's.
 const startedAs = (args: unknown): string => {
   const argv = Array.isArray(args) ? args.map(str) : []
@@ -748,47 +649,36 @@ const lstart = (at: Date): string => {
   return `${day} ${month} ${date.padStart(2, " ")} ${at.toTimeString().slice(0, 8)} ${year}`
 }
 
-// A made-up session started as name, as a spawn leaves one: its cmux workspace and record, Claude's registry file at a new pid, and that pid's row in ps, so the live proof holds.
-const madeUp = (state: FixtureCmux, name: string, dir: string, now: Date): void => {
-  const like = state.sessions[0] ?? {}
+// A made-up session started as name, as a spawn leaves one: its herdr workspace and pane, Claude's registry file at a new pid, and that pid's row in ps, so the live proof holds.
+const madeUp = (state: FixtureHerdr, name: string, dir: string, now: Date): void => {
+  const like = state.panes[0]?.processes[0] ?? {}
   const cwd = str(like.cwd) || "/fixture/playground"
-  const claude = (Array.isArray(like.launch_arguments) && str(like.launch_arguments[0])) || "claude"
+  const claude = (Array.isArray(like.argv) && str(like.argv[0])) || "claude"
   const machine = readFixtureMachine(dir)
   const pid = Math.max(900000, ...Object.keys(machine.processes).map(Number)) + 1
   const sessionId = crypto.randomUUID()
-  const workspace = crypto.randomUUID().toUpperCase()
+  const workspace = `w${(state.workspaces.length + 1).toString(36).toUpperCase()}`
   const start = lstart(now)
-  const config = fixtureConfigDir(dir)
   const transcript = join(
-    config,
+    fixtureConfigDir(dir),
     "projects",
     cwd.replace(/[^a-zA-Z0-9]/g, "-"),
     `${sessionId}.jsonl`,
   )
-  state.workspaces.push({
-    custom_title: name,
-    id: workspace,
-    ref: `workspace:${state.workspaces.length + 1}`,
-    title: name,
-  })
-  state.sessions.push({
-    agent: "claude",
-    agent_lifecycle: "idle",
-    cwd,
-    launch_arguments: [claude, "-n", name],
-    launch_backed: true,
-    pastes: true,
-    pid,
+  state.workspaces.push({ label: name, workspace_id: workspace })
+  state.panes.push({
+    agent_session: { kind: "id", value: sessionId },
+    agent_status: "idle",
+    pane_id: `${workspace}:p1`,
+    processes: [{ argv: [claude, "-n", name], cwd, pid }],
+    scroll: { offset_from_bottom: 0 },
     session_id: sessionId,
-    started_at: now.toISOString(),
-    stored_pid_exists: true,
-    surface_id: crypto.randomUUID().toUpperCase(),
+    terminal_id: `t-${crypto.randomUUID()}`,
     transcript_path: transcript,
-    updated_at: now.toISOString(),
     workspace_id: workspace,
   })
   writeEntry(transcript, "")
-  writeEntry(join(config, "sessions", `${pid}.json`), {
+  writeEntry(join(fixtureConfigDir(dir), "sessions", `${pid}.json`), {
     cwd,
     kind: "interactive",
     name,
@@ -804,33 +694,14 @@ const madeUp = (state: FixtureCmux, name: string, dir: string, now: Date): void 
   renameSync(`${path}.tmp`, path)
 }
 
-// A start of a made-up session on a fixture stack, which spawns nothing: the record cmux kept of the session started as name comes back live, or, on a fixture with none (a fresh machine), a made-up one starts. True when one started, false when one already runs.
+// A start of a made-up session on a fixture stack, which spawns nothing: a pane runs the session started as name, or a made-up one starts in a pane of its own, as spawn.sh would start it in herdr. True when one started, false when one already runs.
 export function fixtureStart(name: string, dir = ensureFixture(), now = new Date()): boolean {
-  const state = readFixtureCmux(dir)
-  const named = state.sessions.filter((s) => startedAs(s.launch_arguments) === name)
-  if (named.some((s) => s.stored_pid_exists === true)) return false
-  const [session] = named
-  if (session) {
-    session.stored_pid_exists = true
-    session.agent_lifecycle = "idle"
-    session.updated_at = now.toISOString()
-  } else madeUp(state, name, dir, now)
-  writeFixtureCmux(state, dir)
+  const state = readFixtureHerdr(dir)
+  if (state.panes.some((p) => p.processes.some((x) => startedAs(x.argv) === name))) return false
+  madeUp(state, name, dir, now)
+  writeFixtureHerdr(state, dir)
   changed()
   return true
-}
-
-// An answer to a fixture session's Feed prompt: the prompt leaves the Feed and the session goes back to work, as cmux shows a reply landing.
-export function fixtureReply(requestId: string, dir = ensureFixture()): void {
-  const state = readFixtureCmux(dir)
-  const item = state.feed.find((i) => i.request_id === requestId && i.status === "pending")
-  if (!item) return
-  item.status = "answered"
-  const workstream = str(item.workstream_id)
-  const session = state.sessions.find((s) => workstreamOf(str(s.session_id)) === workstream)
-  if (session) session.agent_lifecycle = "running"
-  writeFixtureCmux(state, dir)
-  changed()
 }
 
 // herdr refusing a request on a fixture stack, by the code herdr's own error would carry (herdr.ts answers it as HerdrRefused).

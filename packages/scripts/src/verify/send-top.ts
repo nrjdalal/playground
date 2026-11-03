@@ -419,17 +419,18 @@ const STATUS_FROM_MIDDLE = `(() => { const box = document.querySelector("[data-s
 // Long enough for the board to read the session's new light and the stream to redraw.
 const LIGHT_MS = 3000
 
-// The session's light, as cmux reports it, set in the fixture's scratch copy, which the dashboard reads on every refresh.
+// The session's light, as herdr reports its agent status, set on its pane in the fixture's scratch copy, which the dashboard reads on every refresh.
+const STATUS: Record<string, string> = { idle: "idle", running: "working" }
 const setLifecycle = async (fixture: string, text: string, lifecycle: string): Promise<boolean> => {
   const transcript = await transcriptOf(fixture, text)
   if (!transcript) return false
-  const path = join(fixture, "cmux.json")
+  const path = join(fixture, "herdr.json")
   const state = (await Bun.file(path).json()) as {
-    sessions?: { agent_lifecycle?: string; session_id?: string }[]
+    panes?: { agent_status?: string; session_id?: string }[]
   }
-  const session = state.sessions?.find((s) => s.session_id === transcript.sessionId)
-  if (!session) return false
-  session.agent_lifecycle = lifecycle
+  const pane = state.panes?.find((p) => p.session_id === transcript.sessionId)
+  if (!pane) return false
+  pane.agent_status = STATUS[lifecycle] ?? lifecycle
   await Bun.write(`${path}.tmp`, JSON.stringify(state, null, 2))
   await rename(`${path}.tmp`, path)
   return true
