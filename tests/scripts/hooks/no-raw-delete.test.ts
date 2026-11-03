@@ -67,6 +67,20 @@ describe("a delete the hook lets run", () => {
     "fd . src --exec=echo",
     "rsync -a --delay-updates src/ dst/",
     "npx -y @scope/tool@1 build",
+    "shred notes.txt",
+    "tar -czf out.tgz src",
+    "fd -tx . bin",
+    "fd -Hx echo",
+    "fd -te -x echo",
+    "at -l",
+    "echo 'ls' | at now",
+    'c="ls -la"; $c',
+    'c="rm -rf x"; "$c"',
+    "git diff | delta",
+    "redis-cli del lock",
+    "docker exec playground-x-redis redis-cli del k",
+    "bun run del",
+    "bun add -d del-cli",
   ])("%s", async (command) => {
     expect(await check(input(command))).toBeUndefined()
   })
