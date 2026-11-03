@@ -421,7 +421,7 @@ export function Composer({ threadId, worker }: { threadId?: string; worker: Work
                     </InputGroupButton>
                   </Hint>
                   <ModePicker approvals={approvals} worker={worker} />
-                  <SettingPicker worker={worker} />
+                  <SettingPicker label={label} worker={worker} />
                   {opensThreads ? (
                     <Hint content="Start a thread with this message">
                       <InputGroupButton
