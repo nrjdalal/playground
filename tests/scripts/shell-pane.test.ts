@@ -4,6 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { dataDir } from "../../packages/env/src/data-dir"
+import { UNSET_REPOS } from "../../packages/scripts/src/trace-count/kinds"
 import {
   bashGuards,
   close,
@@ -55,7 +56,7 @@ const OWN_ROWS: Record<string, string[]> = {
   "no-off-palette-label": [`gh label create made-up --color 123456`],
   "no-ours-merge": ["git merge -s ours origin/canary"],
   "no-prompt-stop": ["rmdir $HOME/$s"],
-  "no-public-leak": [`gh pr comment 1 --repo nrjdalal/playground --body "$X"`],
+  "no-public-leak": [`gh pr comment 1 --repo ${UNSET_REPOS.public[0]} --body "$X"`],
   "no-unslotted-run": ["bun run test"],
 }
 
@@ -78,14 +79,15 @@ async function withEnv<T>(vars: Record<string, string>, body: () => Promise<T>):
     return await body()
   } finally {
     for (const [key, value] of Object.entries(prior))
-      value === undefined ? delete process.env[key] : (process.env[key] = value)
+      if (value === undefined) delete process.env[key]
+      else process.env[key] = value
   }
 }
 
 type Pane = { agent_session?: Record<string, string>; cwd: string; workspace_id: string }
 
-// A herdr with no server: workspaces and panes in memory, each call it took, and the text a wait-output finds.
-function stubHerdr(seen = "") {
+// A herdr with no server, answering as herdr 0.9.5's CLI does (measured): a JSON line for most calls, nothing for a pane run that typed, plain text for a pane read. Its workspaces and panes sit in memory; `seen` is the pane's text, and a stuck close leaves the workspace listed.
+function stubHerdr(seen = "", { stuck = false } = {}) {
   const workspaces = new Map<string, string>([
     ["w1", "shell-vtqhxp-worker-1"],
     ["w2", "vtqhxp-worker"],
@@ -95,7 +97,11 @@ function stubHerdr(seen = "") {
     ["w2:p1", { cwd: CHECKOUT, workspace_id: "w2" }],
   ])
   const calls: string[][] = []
-  const ok = (result: Record<string, unknown>) => ({ code: 0, json: { result } })
+  const ok = (result: Record<string, unknown>) => ({ code: 0, out: JSON.stringify({ result }) })
+  const failed = (code: string) => ({
+    code: 1,
+    out: JSON.stringify({ error: { code, message: code } }),
+  })
   const herdr: Herdr = async (args) => {
     calls.push(args)
     const [group, verb, id] = args
@@ -112,21 +118,21 @@ function stubHerdr(seen = "") {
         workspace: { label: workspaces.get(workspace_id), workspace_id },
       })
     }
-    if (group === "workspace" && (verb === "get" || verb === "close") && workspaces.has(id!)) {
-      const label = workspaces.get(id!)
-      if (verb === "close") workspaces.delete(id!)
-      return ok({ workspace: { label, workspace_id: id } })
+    if (group === "workspace" && verb === "get" && workspaces.has(id!))
+      return ok({ workspace: { label: workspaces.get(id!), workspace_id: id } })
+    if (group === "workspace" && verb === "close" && workspaces.has(id!)) {
+      if (!stuck) workspaces.delete(id!)
+      return ok({ type: "ok" })
     }
     if (group === "pane" && verb === "get" && panes.has(id!))
       return ok({ pane: { pane_id: id, ...panes.get(id!) } })
-    if (group === "pane" && verb === "run") return ok({})
+    if (group === "pane" && verb === "run") return { code: 0, out: "" }
+    if (group === "pane" && verb === "read") return { code: 0, out: seen }
     if (group === "pane" && verb === "wait-output") {
       const marker = args[args.indexOf("--regex") + 1]!.slice(1).split(" ")[0]!
-      if (!seen.includes(`${marker} rc=`))
-        return { code: 1, json: { error: { code: "timeout", message: "timed out" } } }
-      return ok({ read: { text: seen } })
+      return seen.includes(`${marker} rc=`) ? ok({ read: { text: seen } }) : failed("timeout")
     }
-    return { code: 1, json: { error: { code: "not_found", message: `no ${args.join(" ")}` } } }
+    return failed("not_found")
   }
   return { calls, herdr, panes, workspaces }
 }
@@ -294,13 +300,13 @@ describe("run types the command with a fresh exit marker", () => {
 describe("read waits for the marker", () => {
   const marker = "__shell_pane_0123456789ab"
   const screenText = [
-    "nrjdalal /work",
+    "me /work",
     `> echo hi; printf '\\n%s rc=%s\\n' ${marker} "$?"`,
     "hi",
     "",
     `${marker} rc=0`,
     "",
-    "nrjdalal /work",
+    "me /work",
     ">",
   ].join("\n")
 
@@ -311,19 +317,22 @@ describe("read waits for the marker", () => {
     })
   })
 
-  test("no marker by the timeout reads as unknown, never a pass", async () => {
-    expect(await read("w1:p1", marker, 50, stubHerdr("hi\n").herdr)).toBeUndefined()
+  test("no marker by the timeout reads as unknown, never a pass, with what showed so far", async () => {
+    const shown = `> long-run; printf '\\n%s rc=%s\\n' ${marker} "$?"\nstep 1 of 3`
+    expect(await read("w1:p1", marker, 50, stubHerdr(shown).herdr)).toEqual({
+      output: "step 1 of 3",
+    })
     const log = console.log
     const printed: string[] = []
     console.log = (line: string) => printed.push(line)
     try {
-      expect(
-        await main(["read", "w1:p1", marker, "--timeout", "50"], stubHerdr("hi\n").herdr),
-      ).toBe(2)
+      expect(await main(["read", "w1:p1", marker, "--timeout", "50"], stubHerdr(shown).herdr)).toBe(
+        2,
+      )
     } finally {
       console.log = log
     }
-    expect(printed).toEqual(["no exit marker by 50 ms: the result is unknown"])
+    expect(printed).toEqual(["step 1 of 3", "no exit marker by 50 ms: the result is unknown"])
   })
 
   test("a word that is not a marker run printed is refused", async () => {
@@ -363,5 +372,17 @@ describe("open and close", () => {
     await close("w1", herdr)
     expect(workspaces.has("w1")).toBe(false)
     expect(workspaces.has("w2")).toBe(true)
+  })
+
+  test("close refuses to report closed while the server still lists the label", async () => {
+    expect(await refusal(close("w1", stubHerdr("", { stuck: true }).herdr))).toContain(
+      "still lists shell-vtqhxp-worker-1",
+    )
+  })
+
+  test("a herdr error reaches the caller as a refusal naming it", async () => {
+    expect(await refusal(run("w9:p1", "echo hi", stubHerdr().herdr, CHECKOUT))).toBe(
+      "herdr pane get: not_found",
+    )
   })
 })
