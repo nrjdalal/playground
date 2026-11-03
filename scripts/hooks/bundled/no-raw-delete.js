@@ -182,6 +182,7 @@ var ROOT_SHELLS = new Map([
 ]);
 var COUNTED = new Set(["repeat", "timeout"]);
 var SHELLS = new Set(["bash", "dash", "ksh", "sh", "zsh"]);
+var BUSYBOX_SHELLS = new Set([...SHELLS, "ash", "hush"]);
 var EXPORTS = new Set(["declare", "export", "local", "readonly", "typeset"]);
 var PRINTERS = new Set(["echo", "printf"]);
 var GIT_TAKES = new Set([
@@ -951,6 +952,8 @@ function shellOperand(args, shell) {
     const v = args[k].value;
     if (takes.has(v))
       k++;
+    else if (v === "-")
+      return { inline, operand: args[k + 1] };
     else if (/^[-+][A-Za-z]+$/.test(v))
       inline ||= v.startsWith("-") && v.includes("c");
     else if (!v.startsWith("--"))
