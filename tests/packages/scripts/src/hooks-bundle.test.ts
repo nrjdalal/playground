@@ -244,6 +244,16 @@ describe("hooks:bundle during a merge (#673)", () => {
     expect(written()).toEqual(["a-guard.js", "no-extensions-write-worker.js"])
   })
 
+  test("write mode removes a bundle no build writes, a removed guard's, so --check passes after it (#694)", () => {
+    const { root, run, written } = checkout()
+    expect(run().code).toBe(0)
+    writeFileSync(join(root, BUNDLED, "gone-guard.js"), "old\n")
+    expect(run("--check").stderr).toContain("gone-guard.js")
+    expect(run().code).toBe(0)
+    expect(written()).toEqual(["a-guard.js", "no-extensions-write-worker.js"])
+    expect(run("--check")).toEqual({ code: 0, stderr: "" })
+  })
+
   test("--check runs during a merge as before: fresh bundles pass, a stale one is named", () => {
     const { git, merging, root, run } = checkout()
     expect(run().code).toBe(0)
