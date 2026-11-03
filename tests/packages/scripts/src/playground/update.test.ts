@@ -512,3 +512,92 @@ test("with no record, a checkout reset past its last fast-forward reads what cha
   )
   expect(readFileSync(done, "utf8").trim()).toBe(git(checkout, "rev-parse", "HEAD"))
 })
+
+// #641: the hooks read the checkout's code as soon as it moves, so a commit whose code imports a workspace dependency this checkout has not linked gets that install before any of its code lands
+describe("runUpdate onto a commit that declares a dependency the checkout has not linked", () => {
+  const env = { GIT_CONFIG_NOSYSTEM: "1", HOME: scratch, PATH: process.env.PATH }
+  const git = (cwd: string, ...args: string[]) =>
+    Bun.spawnSync(["git", "-c", "user.name=t", "-c", "user.email=t@t", ...args], { cwd, env })
+      .stdout.toString()
+      .trim()
+  const write = (path: string, text: string) => {
+    mkdirSync(dirname(path), { recursive: true })
+    writeFileSync(path, text)
+  }
+  const FOLDER = join("packages", "settings", "src", "folder.ts")
+  const LINK = join(
+    "packages",
+    "settings",
+    "node_modules",
+    "@packages",
+    "safe-delete",
+    "package.json",
+  )
+  // an origin whose second commit makes settings import safe-delete, and a checkout of its first with every declared dependency linked
+  const setup = (name: string) => {
+    const origin = join(scratch, `${name}-origin`)
+    write(join(origin, "scripts", "link-skills.sh"), "true\n")
+    write(join(origin, "packages", "scripts", "src", "ops-restart", "cli.ts"), "\n")
+    write(join(origin, "package.json"), JSON.stringify({ workspaces: ["packages/*"] }))
+    write(join(origin, "bun.lock"), "one\n")
+    write(join(origin, "packages", "safe-delete", "package.json"), "{}")
+    write(
+      join(origin, "packages", "settings", "package.json"),
+      JSON.stringify({ dependencies: {} }),
+    )
+    write(join(origin, FOLDER), "export const one = 1\n")
+    git(scratch, "init", "-q", "-b", "main", origin)
+    git(origin, "add", ".")
+    git(origin, "commit", "-q", "-m", "one")
+    const checkout = join(scratch, `${name}-checkout`)
+    git(scratch, "clone", "-q", origin, checkout)
+    write(join(origin, "bun.lock"), "two\n")
+    write(
+      join(origin, "packages", "settings", "package.json"),
+      JSON.stringify({ dependencies: { "@packages/safe-delete": "workspace:*" } }),
+    )
+    write(join(origin, FOLDER), 'import "@packages/safe-delete"\n')
+    git(origin, "add", ".")
+    git(origin, "commit", "-q", "-m", "two")
+    git(origin, "tag", "v0.0.2")
+    return { checkout, two: git(origin, "rev-parse", "HEAD") }
+  }
+
+  test.each([
+    ["a plain update", undefined],
+    ["--to", "v0.0.2"],
+  ])(
+    "%s links it before the commit's code lands, from the commit's own manifests",
+    async (name, to) => {
+      const { checkout, two } = setup(name === "--to" ? "prelink-to" : "prelink")
+      // what a hook would read at each install: the code it loads and the manifest that declares its imports
+      const seen: string[] = []
+      // the install and the build stand in for bun's and turbo's, which the scratch checkout lacks
+      const run: Run = async (argv, show) => {
+        if (argv.includes("build")) return { code: 0, out: "" }
+        if (argv[1] !== "install") return spawnRun(argv, show)
+        seen.push(
+          `${readFileSync(join(checkout, FOLDER), "utf8").trim()} | ${readFileSync(join(checkout, "bun.lock"), "utf8").trim()}`,
+        )
+        write(join(checkout, LINK), "{}")
+        return { code: 0, out: "" }
+      }
+      const lines: string[] = []
+      expect(
+        await runUpdate(
+          checkout,
+          run,
+          async () => 0,
+          (l) => lines.push(l),
+          to,
+        ),
+      ).toBe(0)
+      expect(git(checkout, "rev-parse", "HEAD")).toBe(two)
+      expect(seen[0]).toBe("export const one = 1 | two")
+      expect(lines).toContain(
+        "playground update: install the new commit's dependencies before its code, since it declares packages/settings: @packages/safe-delete, which this checkout has not linked",
+      )
+      expect(git(checkout, "status", "--short")).toBe("")
+    },
+  )
+})
