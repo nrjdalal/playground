@@ -1,5 +1,5 @@
 import { constants } from "node:fs"
-import { lstat, open, readdir } from "node:fs/promises"
+import { appendFile, lstat, open, readdir, unlink } from "node:fs/promises"
 import { dirname, extname, join, resolve } from "node:path"
 
 import { z } from "zod"
@@ -36,6 +36,13 @@ const pageLine = z.object({
   file: z.string(),
   for: z.string().min(1).nullable(),
   title: z.string().min(1),
+})
+
+// A page the Pages tab deleted: its file, and when; the reader drops the file's record, and a later line for it keeps it again.
+const tombstoneLine = z.strictObject({
+  at: z.iso.datetime(),
+  deleted: z.literal(true),
+  file: z.string(),
 })
 
 // A preview the serve route found: its name, kind, absolute path and size.
@@ -96,9 +103,13 @@ async function readOwnFile(
   }
 }
 
-// The caption beside a preview: <name without its extension>.txt, a regular file with one link, read as UTF-8 and trimmed. Null when there is none or it is not that.
+// Where a preview's caption sits: <name without its extension>.txt beside it.
+const captionPath = (folder: string, name: string): string =>
+  join(folder, `${name.slice(0, -extname(name).length)}.txt`)
+
+// The caption beside a preview, a regular file with one link, read as UTF-8 and trimmed. Null when there is none or it is not that.
 async function captionOf(folder: string, name: string): Promise<string | null> {
-  const path = join(folder, `${name.slice(0, -extname(name).length)}.txt`)
+  const path = captionPath(folder, name)
   const info = await lstat(path).catch(() => null)
   if (!info?.isFile() || info.nlink !== 1) return null
   const bytes = await readOwnFile(path, MAX_CAPTION_BYTES)
@@ -110,7 +121,7 @@ async function captionOf(folder: string, name: string): Promise<string | null> {
   }
 }
 
-// Each page's record by its file, from pages.jsonl (a later line for the same file wins), and each line that is not a page's record, named (problems). A missing file holds none.
+// Each page's record by its file, from pages.jsonl (a later line for the same file wins, a tombstone dropping it), and each line that is neither a page's record nor a tombstone, named (problems). A missing file holds none.
 async function readPages(
   folder: string,
 ): Promise<{ pages: Map<string, PageRecord>; problems: string[] }> {
@@ -125,11 +136,17 @@ async function readPages(
     .split("\n")
     .forEach((text, i) => {
       if (!text.trim()) return
-      let parsed: ReturnType<typeof pageLine.safeParse> | null = null
+      let json: unknown
       try {
-        parsed = pageLine.safeParse(JSON.parse(text))
+        json = JSON.parse(text)
       } catch {}
-      if (!parsed?.success || !isPreviewName(parsed.data.file)) {
+      const tombstone = tombstoneLine.safeParse(json)
+      if (tombstone.success && isPreviewName(tombstone.data.file)) {
+        pages.delete(tombstone.data.file)
+        return
+      }
+      const parsed = pageLine.safeParse(json)
+      if (!parsed.success || !isPreviewName(parsed.data.file)) {
         problems.push(`${PAGES_FILE} line ${i + 1}: not a page's record`)
         return
       }
@@ -217,6 +234,28 @@ export async function findPreview(name: string, dir = previewsDir()): Promise<Pr
   const info = await lstat(path).catch(() => null)
   if (!info?.isFile() || info.nlink !== 1) return null
   return { kind: previewKindOf(name), name, path, size: info.size }
+}
+
+// Deletes a page the Pages tab lists: only a name pages.jsonl keeps a record for, found as findPreview finds it. A tombstone is appended to pages.jsonl first, so a concurrent `playground page` append stays and a failure leaves no record naming a freed name; then its file and its caption are unlinked one by one. False, touching nothing, for any other name.
+export async function deletePage(
+  name: string,
+  dir = previewsDir(),
+  now = new Date(),
+): Promise<boolean> {
+  const file = await findPreview(name, dir)
+  if (!file || file.kind !== "html") return false
+  const folder = dirname(file.path)
+  if (!(await readPages(folder)).pages.has(name)) return false
+  const line = { at: now.toISOString(), deleted: true, file: name }
+  await appendFile(join(folder, PAGES_FILE), `${JSON.stringify(line)}\n`)
+  // a delete running beside this one may have unlinked it already
+  await unlink(file.path).catch((error: NodeJS.ErrnoException) => {
+    if (error.code !== "ENOENT") throw error
+  })
+  const caption = captionPath(folder, name)
+  const info = await lstat(caption).catch(() => null)
+  if (info?.isFile() && info.nlink === 1) await unlink(caption).catch(() => {})
+  return true
 }
 
 // A found preview's bytes, read through an O_NOFOLLOW handle and checked again, and only when its bytes are what its name says (a PNG named .png, UTF-8 text named .html). Null otherwise.

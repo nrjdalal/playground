@@ -1,8 +1,11 @@
 import { afterAll, describe, expect, test } from "bun:test"
 import {
+  chmodSync,
+  existsSync,
   linkSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   rmSync,
   symlinkSync,
   utimesSync,
@@ -12,6 +15,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import {
+  deletePage,
   findPreview,
   isPreviewName,
   previewHeaders,
@@ -382,5 +386,109 @@ describe("readPreviews with a session (#1850)", () => {
     ])
     expect(previews[0]!.page).toBeUndefined()
     expect(previews[1]!.page?.by).toBe("k3m9px-worker")
+  })
+})
+
+// The Pages tab's delete: a page pages.jsonl names, by its plain name, its file and caption unlinked and a tombstone line appended, which the reader honours
+describe("deletePage", () => {
+  const line = (file: string, at: string) =>
+    JSON.stringify({ at, by: "planner", file, for: null, title: `Title of ${file}` })
+
+  // Two kept pages with their captions, a screenshot with no line, and a line that is not a page's record.
+  const kept = () => {
+    const dir = folder()
+    put(dir, "lookup.html", HTML, 20)
+    put(dir, "lookup.txt", "Lookup")
+    put(dir, "mock.html", HTML, 10)
+    put(dir, "mock.txt", "Mock")
+    put(dir, "shot.png", PNG)
+    writeFileSync(
+      join(dir, "pages.jsonl"),
+      `${[line("lookup.html", "2026-11-03T10:00:00.000Z"), line("mock.html", "2026-11-03T11:00:00.000Z"), "not json"].join("\n")}\n`,
+    )
+    return dir
+  }
+  const now = new Date("2026-11-03T12:00:00.000Z")
+
+  test("deletes a listed page: its file and caption leave the folder, a tombstone follows its line, and the list no longer holds it", async () => {
+    const dir = kept()
+    const before = readFileSync(join(dir, "pages.jsonl"), "utf8")
+    expect(await deletePage("lookup.html", dir, now)).toBe(true)
+    expect(existsSync(join(dir, "lookup.html"))).toBe(false)
+    expect(existsSync(join(dir, "lookup.txt"))).toBe(false)
+    expect(readFileSync(join(dir, "pages.jsonl"), "utf8")).toBe(
+      `${before}${JSON.stringify({ at: now.toISOString(), deleted: true, file: "lookup.html" })}\n`,
+    )
+    const { previews, problems } = await readPreviews(dir, {
+      dispatcher: "dispatcher",
+      session: "dispatcher",
+    })
+    expect(previews.map((p) => p.name)).toEqual(["mock.html"])
+    expect(problems).toEqual(["pages.jsonl line 3: not a page's record"])
+  })
+
+  test("a page kept again under a deleted name lists again, since a later line wins", async () => {
+    const dir = kept()
+    await deletePage("lookup.html", dir, now)
+    put(dir, "lookup.html", HTML)
+    writeFileSync(
+      join(dir, "pages.jsonl"),
+      `${line("lookup.html", "2026-11-03T13:00:00.000Z")}\n`,
+      {
+        flag: "a",
+      },
+    )
+    expect(
+      (await readPreviews(dir, { dispatcher: "dispatcher", session: "planner" })).previews.map(
+        (p) => p.name,
+      ),
+    ).toEqual(["lookup.html", "mock.html"])
+  })
+
+  test("refuses a file pages.jsonl does not name, and leaves it", async () => {
+    const dir = kept()
+    expect(await deletePage("shot.png", dir, now)).toBe(false)
+    expect(await deletePage("missing.html", dir, now)).toBe(false)
+    expect(existsSync(join(dir, "shot.png"))).toBe(true)
+  })
+
+  test("refuses a name isPreviewName rejects, and a path with a separator or .., leaving every file", async () => {
+    const dir = kept()
+    const before = readFileSync(join(dir, "pages.jsonl"), "utf8")
+    for (const name of [
+      "lookup.txt",
+      "-lookup.html",
+      ".lookup.html",
+      "pages.jsonl",
+      "sub/lookup.html",
+      "../lookup.html",
+      `../${dir.split("/").pop()}/lookup.html`,
+      "lookup..html",
+      "lookup.html/..",
+      join(dir, "lookup.html"),
+      "",
+    ]) {
+      expect(await deletePage(name, dir, now)).toBe(false)
+    }
+    expect(existsSync(join(dir, "lookup.html"))).toBe(true)
+    expect(existsSync(join(dir, "lookup.txt"))).toBe(true)
+    expect(readFileSync(join(dir, "pages.jsonl"), "utf8")).toBe(before)
+  })
+
+  test("refuses a listed name that is a symlink, leaving its target", async () => {
+    const dir = kept()
+    const target = put(folder(), "elsewhere.html", HTML)
+    rmSync(join(dir, "mock.html"))
+    symlinkSync(target, join(dir, "mock.html"))
+    expect(await deletePage("mock.html", dir, now)).toBe(false)
+    expect(existsSync(target)).toBe(true)
+  })
+
+  test("a pages.jsonl it cannot append to fails the delete before anything is unlinked, so no record names a freed name", async () => {
+    const dir = kept()
+    chmodSync(join(dir, "pages.jsonl"), 0o444)
+    await expect(deletePage("lookup.html", dir, now)).rejects.toThrow()
+    expect(existsSync(join(dir, "lookup.html"))).toBe(true)
+    expect(existsSync(join(dir, "lookup.txt"))).toBe(true)
   })
 })
