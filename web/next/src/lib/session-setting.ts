@@ -47,9 +47,16 @@ export type Pending<T> = { from: T | null; to: T }
 export const shownValue = <T>(pending: Pending<T> | null, reported: T | null): T | null =>
   pending && reported === pending.from ? pending.to : reported
 
-// Sets a dispatcher's or the hosted session's model or effort through the API, which sets it on the session and records it in the console's activity.
+// Pure: whether the API's refusal is a dispatcher holding the pick (QUEUED, as while it compacts), which Claude Code runs once free, so the pick stays shown rather than failing.
+export const heldPick = (error: object | null): boolean =>
+  error !== null && "delivery" in error && error.delivery === "QUEUED"
+
+// Sets a dispatcher's or the hosted session's model or effort through the API, which sets it on the session and records it in the console's activity; the pick's own id lets a dispatcher that holds it while it compacts read QUEUED.
 export async function changeSetting(sessionId: string, setting: SessionSetting) {
   return unwrap(
-    apiClient.v1.workers[":sessionId"].setting.$post({ json: setting, param: { sessionId } }),
+    apiClient.v1.workers[":sessionId"].setting.$post({
+      json: { ...setting, id: crypto.randomUUID() },
+      param: { sessionId },
+    }),
   )
 }

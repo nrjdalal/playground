@@ -1088,6 +1088,22 @@ describe("the setting route", () => {
     ])
   })
 
+  test("a dispatcher's setting carries the composer's id to deliver(), and one Claude Code holds reads QUEUED under delivery", async () => {
+    const sent: unknown[] = []
+    const id = "11111111-2222-4333-8444-555555555555"
+    const held = await changeSetting(
+      { id, sessionId: "s-d", setting: { model: "opus" } },
+      actor,
+      board([{ name: DISPATCHER, sessionId: "s-d" }]),
+      async (delivery) => {
+        sent.push(delivery)
+        return { code: "QUEUED", ok: false, pasted: true, reason: "holds it" }
+      },
+    ).catch((thrown) => thrown)
+    expect(sent).toEqual([{ actor, id, setting: { model: "opus" }, text: "", to: DISPATCHER }])
+    expect(held).toMatchObject({ extra: { delivery: "QUEUED" }, status: 409 })
+  })
+
   test("any other session is FORBIDDEN and an unknown one NOT_FOUND, before anything is sent; a delivery's refusal keeps its code under delivery", async () => {
     let sends = 0
     const send = async () => {

@@ -103,6 +103,65 @@ describe.skipIf(!dockerUp())("Yard's store", () => {
     return channel
   }
 
+  // first in the file, so #general and #releases do not exist yet when it runs
+  describe("Yard's own channels, joined on a member's first list", () => {
+    const own = async (userId?: string) =>
+      userId
+        ? await sql`select c.name, count(*)::int as n from yard_member m join yard_channel c on c.id = m.channel_id where m.user_id = ${userId} and c.name in ('general', 'releases') group by c.name order by c.name`
+        : await sql`select name, post_rule, count(*)::int as n from yard_channel where name in ('general', 'releases') group by name, post_rule order by name`
+
+    test("two first lists at once make one #general and one #releases, each listing caller joined", async () => {
+      const [ada, bo] = await Promise.all([
+        store.channels(db, web("ada", true)),
+        store.channels(db, web("bo")),
+      ])
+      for (const list of [ada, bo])
+        expect(list.filter((c) => c.joined).map((c) => [c.name, c.postRule])).toEqual(
+          expect.arrayContaining([
+            ["general", "members"],
+            ["releases", "owner"],
+          ]),
+        )
+      expect([...(await own())]).toEqual([
+        { n: 1, name: "general", post_rule: "members" },
+        { n: 1, name: "releases", post_rule: "owner" },
+      ])
+    })
+
+    test("a second list adds no row or membership", async () => {
+      await store.channels(db, web("ada", true))
+      await store.channels(db, web("ada", true))
+      expect([...(await own())].map((r: { n: number }) => r.n)).toEqual([1, 1])
+      expect([...(await own("ada"))]).toEqual([
+        { n: 1, name: "general" },
+        { n: 1, name: "releases" },
+      ])
+    })
+
+    test("joins the caller alone: a member who has not listed is in neither", async () => {
+      expect([...(await own("ed"))]).toEqual([])
+    })
+
+    test("a member in one of the two, by a join of its own or a list cut short, joins the other on its next list", async () => {
+      const general = (await store.channels(db, web("ada", true))).find(
+        (c) => c.name === "general",
+      )!
+      await store.joinChannel(db, web("ed"), general.id)
+      await store.channels(db, web("ed"))
+      expect([...(await own("ed"))]).toEqual([
+        { n: 1, name: "general" },
+        { n: 1, name: "releases" },
+      ])
+    })
+
+    test("#releases stays the owner's: a member's post there is refused", async () => {
+      const releases = (await store.channels(db, web("bo"))).find((c) => c.name === "releases")!
+      await expect(
+        send(web("bo"), releases.id, { kind: "text", text: "can I post here?" }),
+      ).rejects.toMatchObject({ status: 403 })
+    })
+  })
+
   describe("channels", () => {
     test("count a member's unread and mentions since they last read, and a read clears them", async () => {
       const { id } = await both("unread")
@@ -113,6 +172,96 @@ describe.skipIf(!dockerUp())("Yard's store", () => {
       await store.markRead(db, web("bo"), id)
       const after = (await store.channels(db, web("bo"))).find((c) => c.id === id)!
       expect([after.unread, after.mentions]).toEqual([0, 0])
+    })
+
+    test("waiting lists every sent mention of a member since a time, a thread's reply included, and their own held posts, oldest first", async () => {
+      const { id } = await both("waiting")
+      const since = new Date(Date.now() - 1000).toISOString()
+      const top = await send(web("ada", true), id, { kind: "question", text: "@bo can you look?" })
+      await send(web("ada", true), id, { kind: "text", text: "no mention, @bob is someone else" })
+      const reply = await send(web("ada", true), id, {
+        kind: "answer",
+        parent: top.id,
+        text: "@bo and this reply",
+      })
+      await send(token("ada", true), id, { kind: "steps", text: "@bo held, not sent" })
+      await send(web("bo"), id, { kind: "text", text: "@bo my own" })
+      const held = await send(token("bo"), id, { kind: "steps", text: "run the suite" })
+      // other tests post to bo's other channels in the same second, so this reads this channel's alone
+      const here = async (from: string) =>
+        (await store.waiting(db, web("bo"), { since: from }))
+          .filter((item) => item.message.channel === id)
+          .map((item) => [item.held, item.message.id])
+      expect(await here(since)).toEqual([
+        [false, top.id],
+        [false, reply.id],
+        [true, held.id],
+      ])
+      const last = (await store.waiting(db, web("bo"), { since })).at(-1)!.shownAt
+      expect(await here(last)).toEqual([])
+      expect(
+        (await store.waiting(db, web("di"), { since })).filter((i) => i.message.channel === id),
+      ).toEqual([])
+    })
+
+    test("a mention held, then approved after a later mark, still waits, from when it was sent", async () => {
+      const { id } = await both("approved-later")
+      const asked = await send(token("ada", true), id, { kind: "question", text: "@bo approve me" })
+      expect(asked.status).toBe("pending")
+      await Bun.sleep(5)
+      await send(web("ada", true), id, { kind: "text", text: "@bo a later one" })
+      const mark = (await store.waiting(db, web("bo"), { since: asked.at }))
+        .filter((i) => i.message.channel === id)
+        .at(-1)!.shownAt
+      await store.decide(db, web("ada", true), asked.id, "sent")
+      const after = (await store.waiting(db, web("bo"), { since: mark })).filter(
+        (i) => i.message.channel === id,
+      )
+      expect(after.map((i) => i.message.id)).toEqual([asked.id])
+      expect(after[0]!.shownAt > mark).toBe(true)
+    })
+
+    test("a full list stops both lists at its last time, so the next since skips nothing", async () => {
+      const channel = await store.createChannel(db, web("ada", true), { name: "full" })
+      await store.joinChannel(db, web("ed"), channel.id)
+      const since = new Date(Date.now() - 1000).toISOString()
+      const mention = async (text: string) => {
+        await Bun.sleep(3)
+        return (await send(web("ada", true), channel.id, { kind: "text", text })).id
+      }
+      const early = [await mention("@ed 0"), await mention("@ed 1"), await mention("@ed 2")]
+      await Bun.sleep(3)
+      const held = (await send(token("ed"), channel.id, { kind: "steps", text: "run it" })).id
+      const late = await mention("@ed 3")
+      // the three mentions fill their list, so the held post after them waits for the next read
+      const first = await store.waiting(db, web("ed"), { limit: 3, since })
+      expect(first.map((i) => i.message.id)).toEqual(early)
+      const next = await store.waiting(db, web("ed"), { limit: 3, since: first.at(-1)!.shownAt })
+      expect(next.map((i) => [i.held, i.message.id])).toEqual([
+        [true, held],
+        [false, late],
+      ])
+    })
+
+    test("rows in one millisecond on either side of a full list's limit all wait, the next read going on from the last id", async () => {
+      const channel = await store.createChannel(db, web("ada", true), { name: "tie" })
+      await store.joinChannel(db, web("ed"), channel.id)
+      const ids: string[] = []
+      for (const text of ["@ed a", "@ed b", "@ed c"])
+        ids.push((await send(web("ada", true), channel.id, { kind: "text", text })).id)
+      // an hour ahead, so no other test's row falls between since and the three
+      const tied = new Date(Date.now() + 3_600_000)
+      await sql`update yard_message set at = ${tied} where id in ${sql(ids)}`
+      const since = new Date(tied.getTime() - 1).toISOString()
+      const here = (items: { message: { id: string } }[]) => items.map((i) => i.message.id)
+      const first = await store.waiting(db, web("ed"), { limit: 2, since })
+      const last = first.at(-1)!
+      const next = await store.waiting(db, web("ed"), {
+        after: last.message.id,
+        limit: 2,
+        since: last.shownAt,
+      })
+      expect([...here(first), ...here(next)].sort()).toEqual([...ids].sort())
     })
 
     // the API answers a message's time in milliseconds, so a stored time finer than that left the message read at its own time still unread

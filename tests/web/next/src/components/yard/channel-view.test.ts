@@ -16,4 +16,12 @@ describe("Yard's composer", () => {
     expect(yard.row).toBeString()
     expect(yard).toEqual(boxClasses(await read("dashboard/composer.tsx")))
   })
+
+  // its words live in its own state alone, so a build reload waits while they show (build-reload.ts)
+  test("holds a build reload while it holds typed words", async () => {
+    const source = await read("yard/channel-view.tsx")
+    const composer = source.slice(source.indexOf("function YardComposer"))
+    expect(source).toContain('import { HOLDS_RELOAD } from "@/lib/build-reload"')
+    expect(composer).toMatch(/<form\s+\{\.\.\.\{ \[HOLDS_RELOAD\]: "" \}\}/)
+  })
 })

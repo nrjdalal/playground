@@ -275,7 +275,7 @@ describe("previewHeaders", () => {
     })
   })
 
-  test('an HTML page runs its own inline script in a sandbox with an opaque origin, its sandbox lifting scripts alone and nothing loading but its own inline script and styles and data: images and fonts, framed by the dashboard alone (the owner: "why navigation is not working in html")', () => {
+  test("an HTML page runs its own inline script in a sandbox with an opaque origin, its sandbox lifting scripts alone and nothing loading but its own inline script and styles and data: images and fonts, framed by the dashboard alone", () => {
     const csp = previewHeaders({ kind: "html", name: "a.html" }, origins)[
       "content-security-policy"
     ]!

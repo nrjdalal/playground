@@ -21,6 +21,7 @@ import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { CenterSpinner } from "@/components/ui/spinner"
 import { toast } from "@/components/ui/toast"
 import { MessageLinks } from "@/components/yard/message-links"
+import { HOLDS_RELOAD } from "@/lib/build-reload"
 import { config } from "@/lib/config"
 import {
   approveHref,
@@ -193,6 +194,7 @@ function YardComposer({ channel }: { channel: YardChannel }) {
   }
   return (
     <form
+      {...{ [HOLDS_RELOAD]: "" }}
       onSubmit={(event) => {
         event.preventDefault()
         void send()

@@ -28,8 +28,11 @@ Only the first reading moves the folder, sets variables and records files for th
 - A PreToolUse guard's wrapper runs its bundle, `scripts/hooks/bundled/<hook>.js`, which `bun run hooks:bundle` (`packages/scripts/src/hooks-bundle.ts`) builds from `scripts/hooks/<hook>.ts` with everything it imports, so the guard starts with a missing or damaged `node_modules`; every other hook runs its source.
   While the checkout holds no bundle, as the main checkout holds none until a ship brings them, the wrapper runs `scripts/hooks/<hook>.ts`, which keeps every guard running across that gap; with neither file it refuses under `PLAYGROUND_ROLE`, as above.
   The source stays the one place a guard's logic is edited: after an edit to a guard or to anything it imports, run `bun run hooks:bundle` and commit `scripts/hooks/bundled/` (`bun run hooks:bundle --check` names each stale bundle and writes nothing), since `tests/packages/scripts/src/hooks-bundle.test.ts` fails on a bundle a fresh build would write otherwise.
+  Write mode also removes a bundle no build writes, a removed guard's: each `.js` file directly in `scripts/hooks/bundled/` that no build writes, one file at a time, and nothing else there.
   The bundles are committed, so a git restore of a deleted checkout brings them back with no install (so a guard that cannot start needs its bundle back, by `git checkout` or `bun run hooks:bundle`, where the wrapper's refusal still reads `bun install`).
-  Two branches that both change a shared hook file conflict there: take `canary`'s side, commit the merge, then run `bun run hooks:bundle` and commit the rebuild on its own.
+  Two branches that both change a shared hook file conflict there, so merge `canary` into a hook PR with `bun run hooks:merge-canary` (`packages/scripts/src/hooks-merge-canary.ts`), from a clean tree.
+  It takes `canary`'s side of each conflicted bundle, commits the merge, rebuilds the bundles with the merged checkout's own `hooks-bundle.ts` and commits the rebuild on its own, then runs `--check`.
+  A conflict outside `scripts/hooks/bundled/` aborts the merge and names its paths, and a merge that changes `bun.lock` stops after the merge commit for a `bun install` before you run `bun run hooks:bundle`.
   `bun run hooks:bundle` refuses to write while a merge is in progress (`MERGE_HEAD` set), naming that order, since bundles rebuilt inside the merge commit read to pr:merge's keeps-canary gate as lines lost from `canary`; `--check` runs during a merge as before.
   pr:merge's `types` gate runs `--check` on the tree the squash makes when the PR touches `scripts/hooks/` or `packages/`, and refuses a bundle stale there ([packages/scripts/src/pr-merge/README.md](../../packages/scripts/src/pr-merge/README.md)).
   Each guard is its own build, since a build that also takes a guard it imports keeps that guard's `import.meta.main` block live, and the bundle would then judge by both guards' rules.
@@ -381,7 +384,8 @@ Only the first reading moves the folder, sets variables and records files for th
   It reads past the lockfiles too (`bun.lock`, `package-lock.json`), whose integrity hashes can spell a list value by chance.
   It fails when a count is over `packages/scripts/src/trace-count/counts.json`, and so does `tests/packages/scripts/src/trace-count/count.test.ts`, which `bun run test` runs and pre-commit's `trace-count` step runs on every commit but one of images and fonts alone, over every file the index holds as it stands on disk; `--write` lowers each count a trace-out brought down.
   A refusal names each `path:line: kind` holding a hit of a risen kind (`located()`), for each kind the files changed against `HEAD` alone when they hold one, past the lines `kept.json` keeps while they hold no more than its hits.
-  It exits 2, naming the fix, when no-public-leak's list (`extensions/hooks/no-public-leak.json` in the data folder) is missing or a key of it is empty, or when `owner.names` or `factory.archiveRepo` is unset, since those kinds would count nothing; the test counts the kinds that read neither alone.
+  It exits 2, naming the fix, when no-public-leak's list (`extensions/hooks/no-public-leak.json` in the data folder) is missing or a key of it is empty, or when `owner.names` or `factory.archiveRepo` is unset, since those kinds would count nothing.
+  The test counts the kinds that read neither, and `ownerName`'s quote patterns under a made-up owner name built at run time, so a new quote fails the commit while the owner's names count only in `bun run trace-count`.
   To watch a refusal end to end on a machine where it exits 2, point `PLAYGROUND_DATA_DIR` at a scratch folder whose `extensions/policy.json` holds made-up settings, `{ "values": { "owner.names": ["<made-up name>"], "factory.archiveRepo": "<made-up owner>/<repo>" } }`, and whose `extensions/hooks/no-public-leak.json` holds a made-up entry under each key the exit-2 message names.
   Append a line holding one of those list values to an ordinary tracked file in your own worktree, such as `GLOSSARY.md`, `git add` it, and run `PLAYGROUND_DATA_DIR=<scratch> bun run trace-count`; done when its refusal names `<file>:<line>: names` (or the list kind you used).
   Probe with a list value, since each list kind's floor in `counts.json` is 0, so its one hit refuses; then restore the file with `git reset -q HEAD <file>` and `git checkout HEAD -- <file>`.
@@ -518,7 +522,7 @@ Only the first reading moves the folder, sets variables and records files for th
 
 ## no-stash
 
-- Every worktree of a checkout shares one `git stash` list, so a pop can take another worker's entry, lint-staged's commit backup included: take a before-shot from a separate worktree on `origin/canary`, or commit first.
+- Every worktree of a checkout shares one `git stash` list, so a pop can take another worker's entry (the pre-commit's lint-staged runs with `--no-stash`, so a commit adds none): take a before-shot from a separate worktree on `origin/canary`, or commit first.
   The factory's `scripts/hooks/no-stash.ts` (registered in `scripts/factory-settings.json`, and in `.claude/settings.json` for a session cmux restores without it) refuses a stash that could take another worktree's work, and `agent-browser close --all`, which closes every session's browser on the machine.
   It finds git's subcommand past git's own options through `GIT_TAKES` in `scripts/hooks/shell.ts`, as [no-playground-leak](#no-playground-leak) does, so `git --attr-source HEAD stash pop` reads as a stash.
 
@@ -529,12 +533,12 @@ Only the first reading moves the folder, sets variables and records files for th
   whose directory (the Bash tool's cwd after any `cd`, or a `bun --cwd`, `bun run --cwd`, `bun install --cwd`, `bun test --cwd` or turbo's `--cwd`, so one typed from anywhere counts, and a clone's destination) is inside a worktree under `.claude/worktrees/`,
   unless the command runs through `~/.playground/ops/run-slot.sh`, naming that form (18 Oct: five worktree installs at once drove load1 to 66.8).
   The main checkout is no-main-checkout's. It fails open on a call it cannot read, and its tests are in `bun run test:file tests/scripts/hooks`.
-  A commit's pre-commit build takes a slot through `packages/scripts/src/commit-slot.ts` when turbo's dry run finds a build task with work to do, and playbook's **slots** rule says which slot each way of committing takes.
+  A commit's pre-commit steps take `run-slot-commit` through `packages/scripts/src/commit-slot.ts`, which hands each to run-slot as `commit-<worktree>` marked `RUN_SLOT_COMMIT_STEP=1`, as `run-slot.sh <who> -- git commit` takes it, and playbook's **slots** rule says which slot each way of committing takes.
+  The build runs bare when turbo's dry run finds every build task cached, while a type check takes the slot whenever it would, since the build's cache says nothing of its cost.
   Before the dry run or any slot, `commit-slot.ts` runs `unlinked()` (`packages/scripts/src/playground/unlinked.ts`, link-skills.sh's check) on the checkout and, when a workspace package's dependency is unlinked, as a canary merge that adds a package leaves it, exits 1 at once, naming each `<package>: <dependency>` and the run-slot `bun install --ignore-scripts --cwd <checkout>` that links it.
   The pre-commit steps `check-types-scripts` and `check-types-tests` run CI's two type checks the build leaves out, `packages/scripts`' `check-types` when a staged file is under `packages/scripts/` and `check-types:tests` when one is under `tests/`, after the build (priority 7 to its 6) and through the same `commit-slot.ts`, so a type error there stops the commit in place of a CI round.
   `check-types-tests` first writes `web/next`'s data-table metrics, outside the slot, as CI does.
-  Their run lines set no `TURBO_CACHE_DIR`, so `commit-slot.ts`'s dry run reads the worktree's own `.turbo/cache`: a check joins the queue even when the build replayed, and runs bare only when that cache holds every build task.
-  Tests: `bun run test:file tests/packages/scripts/src/commit-slot.test.ts tests/lefthook.test.ts`.
+  Tests: `bun run test:file tests/packages/scripts/src/commit-slot.test.ts tests/lefthook.test.ts tests/scripts/ops/run-slot-quick.test.ts`.
 
 ## rules
 
