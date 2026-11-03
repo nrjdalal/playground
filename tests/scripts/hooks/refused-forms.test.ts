@@ -277,7 +277,7 @@ const guardsOf = (
         LISTS,
       ),
   },
-  // No bundle while no settings file registers it, so only its source runs, and the bundled pass below leaves it out.
+  // No bundle while no settings file registers it, so only its source runs, and the bundled pass below leaves it out, since GUARD_OF names no check of it.
   "no-raw-delete": {
     folders: {
       checkout: [CHECKOUT, HOME],
@@ -298,6 +298,7 @@ const guardsOf = (
 
 const GUARDS = guardsOf(SOURCE)
 const BUNDLED_GUARDS = guardsOf(BUNDLED)
+const BUNDLED_PASS = new Set<Guard>(Object.values(GUARD_OF))
 
 const input = (call: Call, cwd: string) =>
   JSON.stringify(
@@ -418,11 +419,16 @@ describe("each bundled guard gives its source's verdict with no node_modules rea
     expect(() => Bun.resolveSync("zod", BUNDLED_DIR)).toThrow()
   })
 
-  test.each(
-    CASES.filter((c) => existsSync(join(BUNDLED_DIR, `${c.guard}.js`))).map(
-      (c) => [c.key, c] as const,
-    ),
-  )(
+  // A guard with a bundle goes through its bundle's check(), so registering one with no entry in GUARD_OF fails here rather than comparing its source with itself.
+  test("every guard here has a bundle exactly when GUARD_OF names its check", () => {
+    for (const guard of Object.keys(GUARDS))
+      expect({ bundled: existsSync(join(BUNDLED_DIR, `${guard}.js`)), guard }).toEqual({
+        bundled: BUNDLED_PASS.has(guard as Guard),
+        guard,
+      })
+  })
+
+  test.each(CASES.filter((c) => BUNDLED_PASS.has(c.guard)).map((c) => [c.key, c] as const))(
     "%s",
     async (_, c) => {
       const at = GUARDS[c.guard].folders[c.folder] as [string, string]

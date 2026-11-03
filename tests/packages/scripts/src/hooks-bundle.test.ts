@@ -146,7 +146,7 @@ test("every bundle imports nothing but Bun's and Node's own modules", () => {
   }
 })
 
-// Each bundle copied to a folder with no node_modules above it, as a damaged install leaves the checkout, starts and allows an empty call; the scratch folder stays for the system to clear, since a test removes no tree.
+// Each bundle copied to a folder with no node_modules above it, as a damaged install leaves the checkout, starts and allows an empty call.
 test("every bundled guard runs on {} with no node_modules reachable and exits 0", async () => {
   const scratch = realpathSync(mkdtempSync(join(tmpdir(), "hooks-bundle-")))
   const bundled = join(scratch, BUNDLED)
