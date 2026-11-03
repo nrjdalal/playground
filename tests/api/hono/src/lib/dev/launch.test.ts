@@ -1415,7 +1415,7 @@ describe.skipIf(!dockerUp())("preflight against a real container", () => {
     if (!checked.ok) expect(checked.refusal).toContain(`points at ${name}`)
   }, 30_000)
 
-  // drizzle's migrator applies each journal entry newer than the last one it recorded, so the count of missing ones reads the same rows.
+  // drizzle's migrator applies each journal entry newer than the last one it recorded, so the count of missing ones reads the same rows; with no journal named, it reads the shipped one, all of whose migrations a fresh database lacks.
   test("counts the journal's migrations newer than the last one drizzle recorded", async () => {
     const dir = mkdtempSync(join(tmpdir(), "dev-journal-"))
     const journal = join(dir, "_journal.json")
@@ -1429,8 +1429,12 @@ describe.skipIf(!dockerUp())("preflight against a real container", () => {
         ],
       }),
     )
+    const shipped = await Bun.file(
+      join(import.meta.dir, "../../../../../../packages/db/drizzle/meta/_journal.json"),
+    ).json()
     const sql = new SQL(url, { max: 1 })
     try {
+      expect(await pendingMigrations(url)).toBe(shipped.entries.length)
       expect(await pendingMigrations(url, journal)).toBe(3)
       await sql`create schema if not exists drizzle`
       await sql`create table drizzle.__drizzle_migrations (id serial primary key, hash text not null, created_at bigint)`
