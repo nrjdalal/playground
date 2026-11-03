@@ -272,7 +272,7 @@ export async function extCommand(words: string[], io: Io): Promise<number> {
     // a score's author is the session by name, never its role, since two sessions of one role, or one whose registry a command redirects, would read as one author
     if (verb === "score" && io.role && !io.name)
       throw new Error(
-        `no name in Claude Code's registry resolves for this session (role ${io.role}), so its score is refused rather than recorded under the role`,
+        `no name in Claude Code's registry resolves for this session (role ${io.role}), so its score is refused rather than recorded under the role; score from a named session, as every session spawn.sh starts is`,
       )
     const at = ref()
     const rev = need(positional[3], "a rev")
