@@ -149,7 +149,8 @@ const hooks = (parsed: Settings[]): string[] => {
       for (const group of groups)
         for (const handler of group.hooks) {
           const script =
-            handler.command.match(/scripts\/hooks\/([\w.-]+)\.\w+/)?.[1] ?? handler.command
+            handler.command.match(/scripts\/hooks\/(?:bundled\/)?([\w.-]+)\.\w+/)?.[1] ??
+            handler.command
           seen.set(
             [event, group.matcher, handler.command].join("\0"),
             `${event} ${group.matcher ?? "*"} ${script} timeout=${handler.timeout ?? "default"}`,

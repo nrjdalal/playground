@@ -28,6 +28,7 @@ Pick the kind by how its card closes (asks.md's `settle` and `resolve` lines): y
    | ------------------------------ | ----------------------------------------------------------------------------------------- |
    | A number or a short comparison | a markdown table of three columns or fewer                                                |
    | A UI not yet built, or a demo  | an ASCII sketch of the page; one `html` attachment built by [HTML.md](references/HTML.md) |
+   | A code change past a few lines | its patch as a file, `git diff > x.diff`, which the viewer draws as a patch view          |
 
    Mermaid is to render once the Inbox takes it; until then, draw the flow in ASCII.
 

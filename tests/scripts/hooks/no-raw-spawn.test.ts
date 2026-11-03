@@ -605,7 +605,7 @@ test("the factory settings register it for Bash", async () => {
     hooks: { PreToolUse: { hooks: { command: string }[]; matcher: string }[] }
   }
   const entry = settings.hooks.PreToolUse.find((e) =>
-    e.hooks.some((h) => h.command.includes("scripts/hooks/no-raw-spawn.ts")),
+    e.hooks.some((h) => h.command.includes("scripts/hooks/bundled/no-raw-spawn.js")),
   )
   expect(entry?.matcher).toBe("^Bash$")
 })
