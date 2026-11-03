@@ -51,3 +51,5 @@ if (!(await hooksMatch())) {
   })
   process.exit(install.exitCode ?? 1)
 }
+
+export {}
