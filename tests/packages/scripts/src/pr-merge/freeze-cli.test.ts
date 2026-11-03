@@ -38,9 +38,9 @@ test('ship:freeze <version> writes the "*" line beside the PRs\' own, and --end 
   expect(JSON.parse(readFileSync(path, "utf8"))).toEqual({ held: { "acme/archive#9": "own" } })
 })
 
-test("ship:freeze with no version, or a version beside --end, prints its usage and changes nothing", async () => {
+test("ship:freeze with no version, a version beside --end, or a mistyped flag prints its usage and changes nothing", async () => {
   const path = join(mkdtempSync(join(tmpdir(), "freeze-")), "held-prs.json")
-  for (const args of [[], ["--end", "v0.0.38"]]) {
+  for (const args of [[], ["--end", "v0.0.38"], ["--ends"]]) {
     const result = await run(path, ...args)
     expect(result.code).toBe(1)
     expect(result.out).toContain("Usage: bun run ship:freeze")

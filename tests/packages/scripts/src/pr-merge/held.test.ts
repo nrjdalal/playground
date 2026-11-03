@@ -101,9 +101,12 @@ describe("the ship's freeze", () => {
 
   test('startFreeze writes the "*" line with its time, keeping every other line, and endFreeze removes both', async () => {
     const path = join(mkdtempSync(join(tmpdir(), "held-")), "ops", "held-prs.json")
-    expect(await endFreeze(path)).toBe(false)
-    const reason = await startFreeze(path, "v0.0.38", new Date(NOW))
-    expect(reason).toBe("v0.0.38 ships: canary is frozen until its tag lands")
+    expect(await endFreeze(path)).toBe("none")
+    const { kept, line: reason } = await startFreeze(path, "v0.0.38", new Date(NOW))
+    expect({ kept, reason }).toEqual({
+      kept: false,
+      reason: "v0.0.38 ships: canary is frozen until its tag lands",
+    })
     writeFileSync(
       path,
       JSON.stringify({
@@ -117,9 +120,30 @@ describe("the ship's freeze", () => {
       since: { "*": new Date(NOW + 60_000).toISOString() },
     })
     expect(await readHeld(path, REPO, 742)).toBe(reason)
-    expect(await endFreeze(path)).toBe(true)
+    expect(await endFreeze(path)).toBe("removed")
     expect(JSON.parse(readFileSync(path, "utf8"))).toEqual({ held: { "acme/archive#9": "own" } })
     expect(await readHeld(path, REPO, 742)).toBeNull()
+  })
+
+  // a freeze that never ran --end leaves its time behind, and a hold Ops writes by hand after it must not inherit that time and lapse at once
+  test('a "*" line Ops wrote by hand beside a time an earlier freeze left never lapses', () => {
+    const text = JSON.stringify({
+      held: { "*": "incident: hold everything (by hand)" },
+      since: { "*": at(FREEZE_LAPSE_MS * 2) },
+    })
+    expect(heldOf(text, REPO, 742, NOW)).toBe("incident: hold everything (by hand)")
+  })
+
+  test('a "*" line Ops wrote by hand stays through a freeze\'s start and end', async () => {
+    const path = join(mkdtempSync(join(tmpdir(), "held-")), "held-prs.json")
+    const before = JSON.stringify({ held: { "*": "by hand: incident" } })
+    writeFileSync(path, before)
+    expect(await startFreeze(path, "v0.0.38", new Date(NOW))).toEqual({
+      kept: true,
+      line: "by hand: incident",
+    })
+    expect(await endFreeze(path)).toBe("kept")
+    expect(readFileSync(path, "utf8")).toBe(before)
   })
 
   test("a file that does not read is left as it is, and the freeze says why", async () => {
