@@ -2074,8 +2074,8 @@ async function inspect(raw, environment, unknown = false) {
     }
   };
   const named = namings(command);
-  const steered = Object.keys(knownVariables(command, environment, directory)).filter((key) => named.counts.has(key));
   const known = knownVariables(command, environment, directory);
+  const steered = Object.keys(known).filter((key) => named.counts.has(key));
   if (unknown)
     for (const key of steered)
       delete known[key];
