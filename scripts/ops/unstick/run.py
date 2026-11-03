@@ -765,9 +765,9 @@ def api_stop_alerts(state, found, now_t):
 # dispatcher, 15 Oct: worker-sure-note's harness held run-slot-3 at 0% CPU for 35 minutes after it moved on; a holder whose run used under
 # SLOT_IDLE_CPU seconds of CPU in SLOT_IDLE seconds is flagged to the builder once
 SLOT_IDLE, SLOT_IDLE_CPU = 900, 2.0
-# PG-731: a bun install downloads at near 0% CPU for up to about 31 minutes, and macOS's ps reports no I/O to tell it is moving, so a tree running one waits SLOT_IDLE_INSTALL instead
+# PG-731: a bun install downloads at near 0% CPU for up to about 31 minutes, and macOS's ps reports no I/O to tell it is moving, so a tree with a bun install process running (its own command, not a wrapper's argv) waits SLOT_IDLE_INSTALL instead
 SLOT_IDLE_INSTALL = 2700
-INSTALL = re.compile(r"(?:^|[\s/])bun\s+(?:add|i|install)(?:\s|$)")
+INSTALL = re.compile(r"^(?:\S*/)?bun\s+(?:add|i|install)(?:\s|$)")
 
 
 def cpu_seconds(t):

@@ -1245,17 +1245,18 @@ describe("ops-unstick's slot alerts", () => {
       "  999473 999472 3:40.00 bun packages/scripts/src/verdicts.ts",
     ]
     expect(await idleCheck(rows, 600, 1000)).toEqual([])
+    expect(await idleCheck(rows, 0.04, 1000)).toEqual([])
   })
 
-  test("a bun install at near 0% CPU waits SLOT_IDLE_INSTALL, then still raises slot-idle", async () => {
+  test("a bun install process at near 0% CPU waits SLOT_IDLE_INSTALL, then still raises slot-idle, and a wrapper naming one in its argv waits SLOT_IDLE", async () => {
     const rows = [`  999474 ${process.pid} 0:01.00 bun install --frozen-lockfile`]
     expect(await idleCheck(rows, 1, 1500)).toEqual([])
     expect(await idleCheck(rows, 1, 2800)).toEqual(["slot-idle"])
-  })
-
-  test("a holder whose tree used no CPU since its baseline still raises slot-idle", async () => {
-    const rows = [`  999475 ${process.pid} 0:00.00 sleep 900`]
-    expect(await idleCheck(rows, 0, 1000)).toEqual(["slot-idle"])
+    const wrapped = [
+      `  999476 ${process.pid} 0:00.01 bash -c bun install; sleep 900`,
+      "  999477 999476 0:00.00 sleep 900",
+    ]
+    expect(await idleCheck(wrapped, 0.01, 1000)).toEqual(["slot-idle"])
   })
 
   // the heavy-job cap reads run-slot.sh's own count of the CPU slots held or open, on a machine at load1 2 with the given off-switches
