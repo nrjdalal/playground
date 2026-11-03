@@ -434,13 +434,13 @@ describe("a hold written after the gates are read", () => {
   })
 
   test('with "*" removed, the PR merges as before', async () => {
+    writeFileSync(HELD, JSON.stringify({ held: { "*": "merges held until v0.0.35 ships" } }))
+    const held = stub()
+    expect((await prMerge(112, { repo: REPO }, held.run, local())).kind).toBe("refused")
+    expect(merges(held.calls)).toEqual([])
+    writeFileSync(HELD, JSON.stringify({ held: {} }))
     const { calls, run } = stub()
-    const outcome = await prMerge(
-      112,
-      { repo: REPO },
-      run,
-      holdingDuringTypes(JSON.stringify({ held: {} })),
-    )
+    const outcome = await prMerge(112, { repo: REPO }, run, local())
     expect(outcome).toMatchObject({ kind: "merged", sha: "abc1234def" })
     expect(merges(calls)).toHaveLength(1)
   })
