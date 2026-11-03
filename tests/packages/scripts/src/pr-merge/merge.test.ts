@@ -291,6 +291,22 @@ describe("prMerge", () => {
     }
   })
 
+  test('a floor-wide "*" hold refuses a PR the list does not name, giving its reason, and never calls gh pr merge', async () => {
+    writeFileSync(HELD, JSON.stringify({ held: { "*": "merges held until v0.0.35 ships" } }))
+    try {
+      const { calls, run } = stub()
+      const outcome = await prMerge(112, { repo: REPO }, run, local())
+      expect(outcome.kind).toBe("refused")
+      expect(outcome.gates.find((gate) => gate.name === "held")).toMatchObject({
+        detail: "merges held until v0.0.35 ships",
+        ok: false,
+      })
+      expect(merges(calls)).toEqual([])
+    } finally {
+      rmSync(HELD, { force: true })
+    }
+  })
+
   test("refuses, and never calls gh pr merge, when canary is ahead and the head conflicts with it", async () => {
     const { calls, run } = stub({ aheadBy: "1" })
     const outcome = await prMerge(112, { repo: REPO }, run, local({ tree: null }))
@@ -399,6 +415,34 @@ describe("a hold written after the gates are read", () => {
       ok: false,
     })
     expect(merges(calls)).toEqual([])
+  })
+
+  test('a floor-wide "*" hold written during the type check refuses at the re-read and never calls gh pr merge', async () => {
+    const { calls, run } = stub()
+    const outcome = await prMerge(
+      112,
+      { repo: REPO },
+      run,
+      holdingDuringTypes(JSON.stringify({ held: { "*": "merges held until v0.0.35 ships" } })),
+    )
+    expect(outcome.kind).toBe("refused")
+    expect(outcome.gates.find((gate) => gate.name === "held")).toMatchObject({
+      detail: "read again before the merge: merges held until v0.0.35 ships",
+      ok: false,
+    })
+    expect(merges(calls)).toEqual([])
+  })
+
+  test('with "*" removed, the PR merges as before', async () => {
+    const { calls, run } = stub()
+    const outcome = await prMerge(
+      112,
+      { repo: REPO },
+      run,
+      holdingDuringTypes(JSON.stringify({ held: {} })),
+    )
+    expect(outcome).toMatchObject({ kind: "merged", sha: "abc1234def" })
+    expect(merges(calls)).toHaveLength(1)
   })
 
   test("merges as before when the list still does not name the PR at the merge call", async () => {
