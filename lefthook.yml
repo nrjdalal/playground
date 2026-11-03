@@ -20,8 +20,9 @@ pre-commit:
         - "packages/scripts/src/skills-manager.ts"
       run: bun packages/scripts/src/skills-manager.ts && git add AGENTS.md
     lint-staged:
+      # --no-stash: lint-staged keeps no backup in the stash list every worktree shares, so no session's pop can take it
       priority: 3
-      run: bunx lint-staged --verbose
+      run: bunx lint-staged --verbose --no-stash
       stage_fixed: true
     agents-rules:
       # the rule test pins each ALWAYS rule by its opening words; its own glob, so a Markdown-only commit still runs it; priority 5, so a broken pin stops the commit before the build and its queue

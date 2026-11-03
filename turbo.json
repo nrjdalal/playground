@@ -11,6 +11,16 @@
       "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/package.json"],
       "outputs": ["dist/**"]
     },
+    // @packages/scripts has no build script, but its build task's hash reaches every workspace that depends on it (web and auth run its generators in their builds) through ^build; hashing only the generators keeps a stale build from a generator edit out of the cache, while an edit to any other script (pr-merge, hooks, ops jobs) leaves every build's cache whole (tests/turbo.test.ts keeps this list whole)
+    "@packages/scripts#build": {
+      "dependsOn": ["^build"],
+      "inputs": [
+        "src/compress-images.ts",
+        "src/data-table-metrics.ts",
+        "src/docs.ts",
+        "src/generate-env.ts"
+      ]
+    },
     // web's build also writes .generated/ at the repo root, which a bare check-types:tests reads, so a cached replay restores it too; it waits for web's check-types, whose tsc reads the .next/types next build deletes and rewrites
     "@web/next#build": {
       "dependsOn": ["^build", "check-types"],
@@ -75,11 +85,7 @@
       "cache": false
     }
   },
-  "globalDependencies": [
-    ".env*",
-    // build-time generators (font metrics, env derivation): a build cached before an edit here would ship their stale output
-    "packages/scripts/src/**"
-  ],
+  "globalDependencies": [".env*"],
   "globalEnv": [
     // CI variables
     "SKIP_ENV_VALIDATION",
@@ -109,6 +115,8 @@
     "PLAYGROUND_SDK_PROBE_DIR",
     "POSTGRES_URL",
     "REDIS_URL",
+    "YARD_API_URL",
+    "YARD_WEB_URL",
     // Client variables
     "NEXT_PUBLIC_API_URL",
     "NEXT_PUBLIC_APP_URL",
