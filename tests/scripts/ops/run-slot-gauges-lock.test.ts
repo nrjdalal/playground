@@ -22,10 +22,11 @@ const held = (m: Machine, age: number) => {
   mkdirSync(lock(m))
   utimesSync(lock(m), now() - age, now() - age)
 }
-const look = (m: Machine) =>
+// starts one look, as a waiter's poll does
+const start = (m: Machine) =>
   Bun.spawn(["bash", SCRIPT, "slots"], { cwd: m.root, env: m.env(), stderr: "pipe" })
 // what one look printed: how many of run-slot to run-slot-4 are held or open, and its stderr
-const read = async (p: ReturnType<typeof look>) => {
+const read = async (p: ReturnType<typeof start>) => {
   await p.exited
   return {
     err: await new Response(p.stderr).text(),
@@ -34,7 +35,7 @@ const read = async (p: ReturnType<typeof look>) => {
 }
 // the slot counts `count` looks started together read
 const slotsTogether = async (m: Machine, count = 1) =>
-  (await Promise.all(Array.from({ length: count }, () => read(look(m))))).map((r) => r.slots)
+  (await Promise.all(Array.from({ length: count }, () => read(start(m))))).map((r) => r.slots)
 
 // 3 Nov, 10:53 to 10:58Z: 26 waiters each found run-slot.gauges stale and ran top at once, 16 to 23 tops at a time, and load1 reached 56.8
 describe("the gauges refresh under one lock", () => {
@@ -69,7 +70,7 @@ describe("the gauges refresh under one lock", () => {
   test("a look that finds the lock held and no reading at all keeps the lanes shut, saying a reading is in progress", async () => {
     const m = machine({ idle: 80 })
     held(m, 0)
-    const { err, slots } = await read(look(m))
+    const { err, slots } = await read(start(m))
     expect(slots).toBe("1")
     expect(err).toContain("another look is reading the CPU's idle share")
     expect(err).not.toContain("cannot read the CPU's idle share")
@@ -95,7 +96,7 @@ describe("the gauges refresh under one lock", () => {
 
   test("a refresher whose lock was taken over leaves the new holder's lock in place", async () => {
     const m = machine({ topDelay: 2 })
-    const p = look(m)
+    const p = start(m)
     while (!existsSync(lock(m))) await Bun.sleep(20)
     utimesSync(lock(m), now() + 100, now() + 100)
     expect((await read(p)).slots).toBe("4")
@@ -106,7 +107,7 @@ describe("the gauges refresh under one lock", () => {
     const m = machine({ idle: 80 })
     cache(m, 60, "30")
     held(m, 31)
-    const p = look(m)
+    const p = start(m)
     mkdirSync(`${lock(m)}.${p.pid}`)
     expect((await read(p)).slots).toBe("4")
     expect(tops(m)).toBe(1)
