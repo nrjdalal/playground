@@ -99,7 +99,11 @@ const flip = (
   factory?: string,
   keepDue = false,
   probeRead = false,
-  extra: { noFive?: boolean; prior?: Record<string, Reading> } = {},
+  extra: {
+    accounts?: Record<string, unknown>[]
+    noFive?: boolean
+    prior?: Record<string, Reading>
+  } = {},
 ) => {
   const env: Record<string, string | undefined> = {
     ...process.env,
@@ -108,7 +112,7 @@ const flip = (
   delete env.CLAUDE_CONFIG_DIR
   const spec = JSON.stringify({
     ...extra,
-    accounts: ACCOUNTS,
+    accounts: extra.accounts ?? ACCOUNTS,
     factory,
     keepDue,
     now,
@@ -305,6 +309,30 @@ test("an ending account is weighted to its end when that comes before its week r
   }
   const { split } = flip("ND", seen, now)
   expect(split.ND / split.OWN2).toBeCloseTo(110 / 22, 1)
+})
+
+// The owner, 3 Nov: spend the accounts the owner pays for personally less than the rest, unless one resets soon. own@ (renewing, marked own) and pride@ (renewing) have the same week left and the same reset, every other account spent.
+test("an own account takes about a fifth of an equal account's share while its reset is more than 24 h out, and an equal share inside 24 h", () => {
+  const accounts = ACCOUNTS.map((row) => (row.email === "OWN" ? { ...row, own: true } : row))
+  const split = (hours: number, rows = accounts) => {
+    const reading = { five: 0, week: 40, weekReset: TONIGHT + hours * 3600 }
+    return flip(
+      "OWN",
+      { ...spentLater, OWN: reading, PRIDE: reading },
+      TONIGHT,
+      undefined,
+      undefined,
+      false,
+      false,
+      { accounts: rows },
+    ).split
+  }
+  const far = split(48)
+  expect(far.OWN / far.PRIDE).toBeCloseTo(0.2, 2)
+  const soon = split(12)
+  expect(soon.OWN / soon.PRIDE).toBeCloseTo(1, 2)
+  const unmarked = split(48, ACCOUNTS)
+  expect(unmarked.OWN / unmarked.PRIDE).toBeCloseTo(1, 2)
 })
 
 test("spent by the split, an ending account reaches 100% before its end, and pride@ keeps a share while its week lasts", () => {

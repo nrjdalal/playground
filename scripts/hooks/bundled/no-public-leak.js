@@ -5937,6 +5937,7 @@ var claudeAccount = strictObject({
   endsFirst: boolean2().optional(),
   label: label.optional(),
   nearLimit: boolean2().optional(),
+  own: boolean2().optional(),
   provider: literal("claude").optional(),
   renews: number2().int().min(1).max(31).nullable().optional(),
   weekReset: strictObject({ hour: number2().min(0).lt(24), weekday: number2().int().min(0).max(6) }).optional()
@@ -5953,7 +5954,7 @@ var accountSettings = defineSettings({
   },
   "usage.accounts": {
     default: [],
-    description: "The accounts the factory spends, any number of each provider: a Claude row by its email, in the order the login flip reads them, with its plan's end or billing day, whether the near-limit marks count it, and its week's reset; a GLM row (provider glm) by its label, the Keychain item its key is kept under.",
+    description: "The accounts the factory spends, any number of each provider: a Claude row by its email, in the order the login flip reads them, with its plan's end or billing day, whether the near-limit marks count it, whether it is the owner's own (own, spent at a fifth of its share unless it resets within a day), and its week's reset; a GLM row (provider glm) by its label, the Keychain item its key is kept under.",
     schema: array(account).refine((rows) => new Set(rows.map((row) => `${providerOf(row)}:${accountKey(row)}`)).size === rows.length, "each account is listed once")
   },
   "usage.keychainService": {
@@ -6007,6 +6008,14 @@ var extSettings = defineSettings({
 });
 // packages/safe-delete/src/index.ts
 var LIMITS = { bytes: 2 * 1024 ** 3, files: 5000, perMinute: 3 };
+var CARVE_OUTS = {
+  "dashboard-supervisor": {
+    bytes: 256 * 1024 ** 2,
+    files: 4000,
+    folder: "ops/dashboard/builds"
+  },
+  jobs: { bytes: 64 * 1024, files: 1, folder: "ops/launch-agents" }
+};
 
 // packages/settings/src/folder.ts
 var STALE_MS = 5 * 60000;

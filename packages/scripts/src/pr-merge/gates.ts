@@ -190,8 +190,11 @@ function keepsCanary(lost: Lost): Gate {
   const where = [...byFile]
     .map(([path, merges]) => `${path} (dropped in ${[...merges].join(", ")})`)
     .join(", ")
+  const redo = lost.every((line) => line.path.startsWith("scripts/hooks/bundled/"))
+    ? `these are bundles rebuilt inside the merge: redo that merge plainly (reset the branch to the commit before it, then git merge origin/${BASE}), commit the merge with ${BASE}'s bundles as they are, then run \`bun run hooks:bundle\` and commit the rebuild on its own, and re-gate`
+    : `redo that merge plainly (reset the branch to the commit before it, then git merge origin/${BASE}, resolving each conflict with both sides' meaning) and re-apply your change in a commit of your own, or keep the lines, and re-gate`
   return {
-    detail: `the squash would delete ${lost.length} line${lost.length === 1 ? "" : "s"} ${BASE} added that a merge of ${BASE} dropped, which git's own merge keeps: ${where}. Only a squash that holds them again clears this, so a new merge of ${BASE} leaves them lost: redo that merge plainly (reset the branch to the commit before it, then git merge origin/${BASE}, resolving each conflict with both sides' meaning) and re-apply your change in a commit of your own, or keep the lines, and re-gate`,
+    detail: `the squash would delete ${lost.length} line${lost.length === 1 ? "" : "s"} ${BASE} added that a merge of ${BASE} dropped, which git's own merge keeps: ${where}. Only a squash that holds them again clears this, so a new merge of ${BASE} leaves them lost: ${redo}`,
     name,
     ok: false,
   }

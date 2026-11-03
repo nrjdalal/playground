@@ -6,7 +6,7 @@ This file holds the gates, the merge lock and the merge queue's readers.
 ## Gates
 
 A draft left green reaches `canary` too: when the owner's draft passes every gate but ready, pr:merge marks it ready (`gh pr ready`) just before its squash, merge-on-ready takes it, `--explain` names it, and an outside author's draft is never touched (`marksReady` in `gates.ts`).
-pr:merge refuses a PR the repo's owner did not open unless `--outside-author <login>` names its author (an outside PR's code runs here, so it merges only on a lead's go, after its read-only review), refuses a PR `~/.playground/ops/report/held-prs.json` lists at the gates or just before the merge call, naming its reason (`PLAYGROUND_HELD_PRS` moves it, as the tests do; a file that does not read holds every PR), and refuses unless:
+pr:merge refuses a PR the repo's owner did not open unless `--outside-author <login>` names its author (an outside PR's code runs here, so it merges only on a lead's go, after its read-only review), refuses a PR `~/.playground/ops/report/held-prs.json` lists at the gates or just before the merge call, naming its reason (`PLAYGROUND_HELD_PRS` moves it, as the tests do; a `"*"` line, or a file that does not read, holds every PR), and refuses unless:
 
 - `up to date`: the head holds everything on `canary`, or merges with it clean; a conflict waits for a merge of `canary`, whose new head then needs its own checks and 5/5.
 - `ci`: the newest run of every GitHub check on the head, by workflow and name, has finished and passed, since a rerun or a close and reopen leaves the older runs listed; `Audit, Lint, and Build` and `test` (`REQUIRED_CHECKS` in `gates.ts`) are among them, and on factory.repo (the checkout's origin when unset) a GitGuardian check too, since a head GitGuardian never started on ran no secret scan.
@@ -30,10 +30,12 @@ a merge with `-s ours` leaves exactly that while `canary` reads as merged in.
 A read it cannot finish refuses too.
 A blank line, a move (its text added elsewhere in the merge's diff) and a rewrite (a line its hunk adds is 80% alike) pass.
 A line a merge of `canary` dropped clears once the squash holds it again or `canary` drops it too, so it stays lost after a new merge of `canary` and after a restore that a later own commit replaces: redo that merge plainly and re-apply the change in a commit of the PR's own, or keep the line.
+When every lost line sits under `scripts/hooks/bundled/`, the refusal names its cause, bundles rebuilt inside the merge, and that redo: merge `canary` plainly, commit the merge with `canary`'s bundles as they are, then run `bun run hooks:bundle` and commit the rebuild on its own (`hooks:bundle` refuses to write while a merge is in progress).
 
 ## Holds and rulings
 
 A hold is a line in the `held` object of `~/.playground/ops/report/held-prs.json`, `"<owner>/<name>#<n>": "<reason>"`, which Ops writes the moment a lead sends `hold <owner>/<name>#<n>: <reason>` and removes on the lead's word; pr:merge and merge-on-ready refuse a listed PR, naming the reason: each reads the file at the gates and again inside the merge lock, after the types gate and just before the merge call, so a hold written while the type check runs still stops the merge.
+One `"*": "<reason>"` line holds every PR at once, as a ship's merge hold does, while a PR's own line keeps its own reason; Ops writes and removes it as it does any hold.
 A lead that overrules a reviewer's FAIL posts one comment on the PR whose first line is `Lead ruling: ReviewBot round <r> at <sha7> overruled: <evidence>; the fault moves to #<issue>`, with that issue filed first; pr:merge reads no ruling, so the merge still waits for a fresh verdict at the head, or the Builder's merge by hand.
 A red check that `canary` caused needs a fresh run once `canary`'s fix lands: merge `canary` into the PR, since `gh run rerun` reuses the run's original merge commit, which holds the red `canary`.
 An outside author's PR goes to the Builder, who gives its go only after a read-only review of its diff.
