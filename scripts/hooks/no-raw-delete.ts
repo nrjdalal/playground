@@ -67,19 +67,20 @@ const isData = (name: string) => DATA.has(name) || /^python[\d.]*$/.test(name)
 const STARTERS = new Set(["screen", "tmux"])
 // rm under its own name and GNU rm's Homebrew name.
 const RM = new Set(["grm", "rm"])
-// The npm packages whose one job is a recursive delete, del-cli under each of its bins.
-const DELETER_PROGRAMS = new Set(["del", "del-cli", "rimraf"])
 // del-cli's names, judged in a program's place or as a runner's package alone, since `del` is a word of other programs (`redis-cli del lock`).
 const DEL = new Set(["del", "del-cli"])
+// The npm packages whose one job is a recursive delete, del-cli under each of its bins.
+const DELETER_PROGRAMS = new Set([...DEL, "rimraf"])
 // The package runners, each with the subcommands that run a package's bin (`pnpm dlx`), none for one that runs it directly (`npx`).
-const RUNNERS: Record<string, string[]> = {
-  bun: ["x"],
-  bunx: [],
-  npm: ["exec", "x"],
-  npx: [],
-  pnpm: ["dlx", "exec"],
-  yarn: ["dlx", "exec"],
-}
+const RUNNERS = new Map<string, string[]>([
+  ["bun", ["x"]],
+  ["bunx", []],
+  ["npm", ["exec", "x"]],
+  ["npx", []],
+  ["pnpm", ["dlx", "exec"]],
+  ["pnpx", []],
+  ["yarn", ["dlx", "exec"]],
+])
 // shred and tar under their own names and GNU's Homebrew names.
 const SHRED = new Set(["gshred", "shred"])
 const TAR = new Set(["gtar", "tar"])
@@ -100,7 +101,7 @@ const JUDGED = new Set([
 
 // The package a runner runs: its first word that is no option, after the subcommand it needs (`npx -y del-cli`, `pnpm dlx del-cli`).
 function packageOf(name: string, args: Word[]): Word | undefined {
-  const subs = RUNNERS[name]
+  const subs = RUNNERS.get(name)
   if (!subs) return
   const words = args.filter((a) => !a.value.startsWith("-"))
   if (subs.length === 0) return words[0]
@@ -256,8 +257,8 @@ async function inspect(raw: string, environment: Record<string, string | undefin
       const { args, name } = parsed
       const verdict = await judge(cmd, parsed, at, reach)
       if (verdict) return verdict
-      // a judged program named among another's words runs as that program, behind any runner
       const pkg = packageOf(name, args)
+      // a judged program named among another's words runs as that program, behind any runner
       if (!READERS.has(name) && !JUDGED.has(name))
         for (const [k, a] of args.entries()) {
           // a word it cannot read in a program's place, given -r, may be rm; a data program's words stay its own (`gh pr checks $N -R <repo>`)
@@ -348,7 +349,7 @@ async function inspect(raw: string, environment: Record<string, string | undefin
       return refuse("chflags", "it lifts the flags that keep a file from deletion")
     if (name === "chmod" && args.some((a) => /^-[A-Za-z]*[aN]/.test(a.value)))
       return refuse("chmod -a or -N", "it strips the access entries that keep a file from deletion")
-    const runs = RUNS[name]
+    const runs = Object.hasOwn(RUNS, name) ? RUNS[name] : undefined
     if (runs) {
       if (args.some((a) => a.value === "-delete")) return refuse(`${name} -delete`)
       for (const [k, a] of args.entries()) {
@@ -384,7 +385,7 @@ async function inspect(raw: string, environment: Record<string, string | undefin
       if (fed) {
         const script = await (
           file === -1 ? stdinOf(cmd, at) : readPath(args[file + 1] ?? { value: "" }, at)
-        ).catch(() => ({ unknown: "a path holding an expansion", value: "" }))
+        ).catch((error) => ({ unknown: `a read that failed: ${error}`, value: "" }))
         if (script.unknown)
           return refuse(
             `${name} given a job it cannot read (${script.unknown})`,
