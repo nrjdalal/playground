@@ -18,7 +18,7 @@ const { renderToStaticMarkup } = (await import(Bun.resolveSync("react-dom/server
 }
 
 describe("the accordion rows the Inbox and the Changelog share", () => {
-  // the owner: "when done opens there should be botter bottom at accordion trigger"
+  // the owner asked for a bottom border on the trigger once Done opens
   test("a stuck header draws its full-width line, the last row's too once it is open", () => {
     expect(STICKY_HEADER).toContain("sticky top-[calc(var(--pane-top,0px)*-1)]")
     expect(STICKY_HEADER).toContain("-mx-(--pane-x) px-(--pane-x)")
@@ -33,7 +33,7 @@ describe("the accordion rows the Inbox and the Changelog share", () => {
     expect(SHELF_ROW.split(" ")).toContain("min-w-0")
   })
 
-  // the owner: "show circle icon if no items in accordion, and right chevron on closed?", "and hover state like this"
+  // the owner asked for a circle on an empty row, a right chevron on a shut one, and a hover state
   test("a row hides the stock chevrons for its ShelfMark: a circle when empty, else a right chevron turning down while open, on a square while hovered", () => {
     expect(SHELF_ROW).toContain("[&>[data-slot=accordion-trigger-icon]]:hidden!")
     const empty = renderToStaticMarkup(createElement(ShelfMark, { empty: true }))

@@ -115,7 +115,7 @@ describe("startAddress", () => {
   })
 })
 
-// the owner: "this preview thingy should be vibeground, working on multiple projects, or worktrees and things"
+// the owner asked for the preview to become Vibeground, across projects and worktrees
 describe("stackGroups", () => {
   const stack = (
     project: string,
@@ -161,7 +161,7 @@ describe("stackGroups", () => {
   })
 })
 
-// the owner: "also clicking on Playground logo should switch it to vibeground"
+// the owner asked for a click on the Playground logo to switch to Vibeground
 describe("openPreview", () => {
   test("the brand's click asks for the Preview row once, so an Inbox that mounts after it still opens it, and one that mounts later does not", () => {
     const heard: string[] = []

@@ -37,7 +37,7 @@ const render = (list: ViewerItem[]) =>
     ),
   )
 
-describe('an ask\'s thumbnails (the owner: "4 by 4 grid and sqaure")', () => {
+describe("an ask's thumbnails", () => {
   test("twenty files fill the grid with fifteen square thumbnails and a +5 tile", () => {
     const html = render(items(20))
     expect(html).toContain("grid-cols-4")
@@ -62,13 +62,13 @@ describe('an ask\'s thumbnails (the owner: "4 by 4 grid and sqaure")', () => {
   })
 })
 
-describe('Slider mode\'s keys (the owner: "left right up down navigate")', () => {
+describe("Slider mode's keys", () => {
   test("Left and Up go back, Right and Down go on", () => {
     expect(STEP_OF_KEY).toEqual({ ArrowDown: 1, ArrowLeft: -1, ArrowRight: 1, ArrowUp: -1 })
   })
 })
 
-describe('the thumbnail grid takes the arrows too (the owner: "so small image icons, as I said, should be naviagatable in inbox too")', () => {
+describe("the thumbnail grid takes the arrows too", () => {
   test("Left and Right step a tile, Up and Down a row of four, held at the edges", () => {
     expect(focusTarget("ArrowRight", 1, 16)).toBe(2)
     expect(focusTarget("ArrowLeft", 1, 16)).toBe(0)
@@ -92,12 +92,12 @@ describe('the thumbnail grid takes the arrows too (the owner: "so small image ic
     expect(render(items(2))).toContain('aria-label="Attached files"')
   })
 
-  test('its tiles sit gap-3 apart, its own gap, the one the files sit below the words (the owner: "gap bewteen should be same")', () => {
+  test("its tiles sit gap-3 apart, its own gap, the one the files sit below the words", () => {
     expect(render(items(2))).toContain("grid grid-cols-4 gap-3")
   })
 })
 
-// the owner: "Before: <full width image> After: <full width image>"
+// the owner asked for a lone before and after pair at full width, one over the other
 describe("a lone before/after pair", () => {
   test("shows at the card's full width, Before over After, each opening the pair", () => {
     const [before, after] = items(2)
