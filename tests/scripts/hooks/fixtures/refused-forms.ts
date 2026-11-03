@@ -1948,6 +1948,26 @@ gh api graphql -f query="$QUERY"`,
         'awk \'/[/]"/ { print | "sh" }\' f',
       ],
       [
+        "awk piping into a shell beside a regex holding a quote after print",
+        'awk \'{ print /"/ | "sh"; print /"/ }\' f',
+      ],
+      [
+        "awk piping into a shell beside a regex holding a quote after printf",
+        'awk \'{ printf /"/ | "sh"; printf /"/ }\' f',
+      ],
+      [
+        "awk piping into a shell between regexes holding a quote after a plus",
+        'awk \'{ x = 1 + /"/; print | "sh"; y = 1 + /"/ }\' f',
+      ],
+      [
+        "awk piping into a shell between regexes holding a quote after a less-than",
+        'awk \'{ if (n < /"/) print | "sh"; m = n < /"/ }\' f',
+      ],
+      [
+        "awk piping into a shell between regexes holding a quote after return and a call",
+        'awk \'function f() { return /"/ } { print | "sh"; x = f() /"/ }\' f',
+      ],
+      [
         "awk matching an alternation and printing into the root",
         `awk '/a|b/ { print > "${ROOT}/x" }'`,
       ],
