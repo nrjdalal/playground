@@ -145,6 +145,26 @@ describe("a commit whose pre-commit runs next build", () => {
     m.hold("run-slot-2", 2, "medium")
     expect(await m.start("commit-wt", {}, undefined, step("check-types")).ran()).toBe(true)
   })
+
+  // commit-slot.ts marks each step it hands run-slot RUN_SLOT_COMMIT_STEP=1, which sends it to run-slot-commit, but for a build that runs next build
+  test("commit-slot.ts's marked build for it still waits as a big run, off run-slot-commit", async () => {
+    const m = repo({ idle: 30 }, ["web/next/src/app/page.tsx"])
+    m.hold("run-slot", 3, "big")
+    const run = m.start("commit-wt", { RUN_SLOT_COMMIT_STEP: "1" }, undefined, step("build"))
+    expect(await run.waits()).toBe(true)
+    expect(log(m)).not.toContain("run-slot-commit")
+  })
+
+  test("while its marked type check takes run-slot-commit", async () => {
+    const m = repo({ idle: 30 }, ["web/next/src/app/page.tsx"])
+    m.hold("run-slot", 3, "big")
+    expect(
+      await m
+        .start("commit-wt", { RUN_SLOT_COMMIT_STEP: "1" }, undefined, step("check-types"))
+        .ran(),
+    ).toBe(true)
+    expect(log(m)).toMatch(/ start commit-wt \d+ run-slot-commit waited=/)
+  })
 })
 
 describe("a commit that stages no web/next file", () => {
