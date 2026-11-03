@@ -90,7 +90,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
 
       - id: plan
-        run: echo "matrix=$(bun packages/scripts/src/test-shards.ts matrix)" >> "$GITHUB_OUTPUT"
+        run: echo "matrix=$(bun packages/scripts/src/test-shards.ts legs)" >> "$GITHUB_OUTPUT"
 
       # each shard splits by the same merged timings, so the shards' files add up to the suite once
       - name: Keep the split's timings
@@ -107,10 +107,8 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
-      matrix:
-        shard: ${{ fromJSON(needs.shards.outputs.matrix) }}
-        # each shard once on the real clock and once 30 days ahead (CLOCK_AHEAD_DAYS, test-sandbox.ts), side by side, so a test that takes its clock from two sources goes red on its own PR, not on the day the real clock reaches it
-        clock: ["", "30"]
+      # every real-clock shard, and beside them the clock-ahead pass (CLOCK_AHEAD_DAYS, test-sandbox.ts) split on its own, since it leaves out clock-exempt.ts's files, so a test that takes its clock from two sources goes red on its own PR, not on the day the real clock reaches it
+      matrix: ${{ fromJSON(needs.shards.outputs.matrix) }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7

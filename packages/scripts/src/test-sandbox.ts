@@ -5,6 +5,7 @@ import { join, relative } from "node:path"
 
 import { removeScratch } from "@packages/safe-delete"
 
+import { CLOCK_EXEMPT, clockExempt } from "./clock-exempt"
 import { sandbox } from "./sandbox"
 
 const TIMINGS = "tests/timings.json"
@@ -14,21 +15,6 @@ const SERIAL = [
   "tests/api/hono/src/bin/dev.test.ts",
   "tests/api/hono/src/lib/dashboard/workers.test.ts",
   "tests/api/hono/src/lib/dev/launch.test.ts",
-]
-
-// Files the clock-ahead pass (CLOCK_AHEAD_DAYS, below) leaves out, each for a clock its preload cannot move: a child process keeps the real clock while the test's own fixtures take the moved one, and a file's mtime comes from the OS's clock, so each reads red on the shift alone
-const CLOCK_EXEMPT: [pattern: string, reason: string][] = [
-  ["tests/api/hono/src/bin/dashboard-ask.test.ts", "runs bun run ask as a child"],
-  ["tests/api/hono/src/lib/dashboard/attachments.test.ts", "sweeps by a file's mtime"],
-  ["tests/api/hono/src/lib/dashboard/inbox-attachments.test.ts", "sweeps by a file's mtime"],
-  ["tests/packages/scripts/src/dm/send.test.ts", "takes a lock by its file's mtime"],
-  ["tests/packages/scripts/src/hook-differential.test.ts", "reads transcripts by their mtime"],
-  ["tests/packages/scripts/src/pr-merge/freeze-cli.test.ts", "runs ship:freeze as a child"],
-  ["tests/scripts/ops/run-slot*.test.ts", "runs run-slot.sh as a child"],
-  ["tests/scripts/ops/unstick/run.test.ts", "runs ops-unstick's Python as a child"],
-  ["tests/scripts/ops/usage/week-marks.test.ts", "runs the usage job's Python as a child"],
-  ["tests/scripts/roster.test.ts", "runs roster.ts as a child"],
-  ["tests/scripts/spawn*.test.ts", "runs spawn.sh as a child"],
 ]
 
 // test:file skips the build, and a test importing an unbuilt package fails on a missing module, which hides the failure it reproduces; named only after a failed run, since lefthook's agents-rules runs test:file on a commit that builds nothing
@@ -138,9 +124,9 @@ const serial = SERIAL.filter((file) =>
   paths.map(bare).some((path) => path === "." || file === path || file.startsWith(`${path}/`)),
 )
 // a shard names its files, which no ignore pattern drops, so the clock-ahead pass drops its exempt ones here
-const exempt = (path: string) =>
-  ahead && CLOCK_EXEMPT.some(([pattern]) => new Bun.Glob(pattern).match(bare(path)))
-const rest = paths.filter((path) => !SERIAL.includes(bare(path)) && !exempt(path))
+const rest = paths.filter(
+  (path) => !SERIAL.includes(bare(path)) && !(ahead && clockExempt(bare(path))),
+)
 
 console.error(
   `test-sandbox: ${workers} workers with a ${Math.round(DEADLINE_MS / 1000)}s deadline, then ${serial.length} serial files`,
