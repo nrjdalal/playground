@@ -797,6 +797,23 @@ describe("a resume of a checker whose roster worker has ended", () => {
     },
   )
 
+  test.each([
+    ["no worker= on its row", [{ kind: "reviewer", name: "k3m9px-reviewer" }]],
+    [
+      "a worker the roster has no row for",
+      [{ kind: "reviewer", name: "k3m9px-reviewer", worker: "v2pq8t-worker" }],
+    ],
+  ])("a checker with %s resumes as before", async (_, agents) => {
+    const name = "k3m9px-reviewer"
+    const env = { NO_SESSION_TRANSCRIPT: "1", ROSTER_JSON: JSON.stringify({ agents }) }
+    const r = await spawn(["resume", name, root, SESSION], [], env, undefined, {
+      name,
+      backend: "claude",
+    })
+    expect(r.err).toBe("")
+    expect(r.code).toBe(0)
+  })
+
   test("a checker whose worker is live resumes as before", async () => {
     const name = "k3m9px-reviewer"
     const r = await spawn(
