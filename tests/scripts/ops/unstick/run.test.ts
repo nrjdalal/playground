@@ -1253,7 +1253,7 @@ describe("ops-unstick's slot alerts", () => {
     expect(await idleCheck(rows, 1, 1500)).toEqual([])
     expect(await idleCheck(rows, 1, 2800)).toEqual(["slot-idle"])
     const wrapped = [
-      `  999476 ${process.pid} 0:00.01 bash -c bun install; sleep 900`,
+      `  999476 ${process.pid} 0:00.01 bash -c bun install && sleep 900`,
       "  999477 999476 0:00.00 sleep 900",
     ]
     expect(await idleCheck(wrapped, 0.01, 1000)).toEqual(["slot-idle"])
