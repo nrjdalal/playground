@@ -392,6 +392,27 @@ describe("restore resumes the herdr sessions its resume files list", () => {
     )
   })
 
+  test("a session whose roster row reads done stays down, as an ended one does", async () => {
+    const r = await spawn(
+      ["restore"],
+      [{ name: "worker-d", pid: 5100 }],
+      {
+        ROSTER_JSON: JSON.stringify({
+          agents: [
+            { name: "worker-b", role: "worker", status: "ended", task: "t" },
+            { name: "worker-a", role: "worker", status: "done", task: "t" },
+          ],
+        }),
+      },
+      undefined,
+      undefined,
+      listed,
+    )
+    expect(r.out).toBe("skipped worker-d: live\n")
+    expect(r.code).toBe(0)
+    expect(placing(r).filter((c) => c[1] === "run")).toEqual([])
+  })
+
   test("under inscope it reads the roster roster.ts writes, ~/.claude's", async () => {
     const r = await spawn(
       ["restore"],
