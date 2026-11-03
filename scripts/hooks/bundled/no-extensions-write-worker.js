@@ -1409,7 +1409,15 @@ function scoreAsOther(words, cmd, parsed, env) {
   return changes(at === -1 ? cmd.words : cmd.words.slice(0, at));
 }
 var AWKS = new Set(["awk", "gawk", "mawk", "nawk"]);
-var AWK_RUNS = /system|getline|[|>@]/;
+var AWK_RUNS = /system|getline|[>@]/;
+var awkRuns = (program) => AWK_RUNS.test(program) || awkPipe(program);
+var AWK_LEAD = /^\s*\/(?:[^\\/"[\n]|\\.)*\/(?=\s*(?:\{|$))/;
+var AWK_MATCH = /~\s*(?:\/(?:[^\\/"[\n]|\\.)*\/|"[^"\\\n]*")/g;
+function awkPipe(program) {
+  if (!program.includes("|"))
+    return false;
+  return /["/#\\|]/.test(program.replace(AWK_LEAD, " ").replace(AWK_MATCH, " "));
+}
 function awkPrograms(words) {
   const programs = [];
   for (let k = 0;k < words.length; k++) {
@@ -1434,7 +1442,7 @@ function awkPrograms(words) {
 function programLines({ args, first }, rooted) {
   if (!AWKS.has(program(first?.value ?? "").toLowerCase()))
     return [];
-  return (awkPrograms(args) ?? []).filter(({ value }) => rooted || AWK_RUNS.test(value)).flatMap(({ value }) => [...value.matchAll(/"((?:[^"\\]|\\.)*)"/g)].map((m) => m[1]));
+  return (awkPrograms(args) ?? []).filter(({ value }) => rooted || awkRuns(value)).flatMap(({ value }) => [...value.matchAll(/"((?:[^"\\]|\\.)*)"/g)].map((m) => m[1]));
 }
 function ownProgram(cmd, { first, name }) {
   return ownFirst(cmd, first) && !marked(name) && /^(?:\/(?:bin|opt\/homebrew\/bin|usr\/bin|usr\/local\/bin)\/)?[^/]+$/.test(first.value);
@@ -1450,7 +1458,7 @@ function narrow(cmd, env) {
   const base = program(first.value).toLowerCase();
   if (AWKS.has(base)) {
     const programs = awkPrograms(args);
-    return !!programs && programs.every(({ value }) => !marked(value) && !AWK_RUNS.test(value));
+    return !!programs && programs.every(({ value }) => !marked(value) && !awkRuns(value));
   }
   if (["cat", "grep", "head", "tail", "wc"].includes(base))
     return reads(parsed, env);

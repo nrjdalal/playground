@@ -205,7 +205,10 @@ Only the first reading moves the folder, sets variables and records files for th
   A line is read call by call instead when every command on it, a substitution's included, is on a closed list of readers or a quiet git commit, and no redirect on it writes a file (`2>&1` and `>/dev/null` write none): then only a variable's text is read that way, so `awk '$3 ~ /runner/' f` runs from `~`.
   The closed list is an `awk`, `gawk`, `mawk` or `nawk` whose program runs nothing, a `cat`, `grep`, `head`, `tail` or `wc` that is a reader by the list above, `cut`, a `sort` with no `-o` and no long option (macOS sort takes an abbreviation, `--out=`), and a `uniq` with at most one file, since its second is its output.
   Each is its command's own first word as a reader is, named bare or by a system folder's path (`/usr/bin/awk`), so a script the session wrote (`./awk`), a `PATH` set in the call and a reader behind a wrapper (`time cut …`) keep canary's reading.
-  An awk program runs something when it holds `system`, `getline`, `|`, `>` or `@`, or comes from `-f` or an option the hook does not know; each string literal of such a program is judged as a command line wherever it stands (`awk 'BEGIN{system("…")}'`).
+  An awk program runs something when it holds `system`, `getline`, `>` or `@`, or comes from `-f` or an option the hook does not know.
+  It runs something too when it holds a `|` anywhere but two places: a regex that is the whole leading pattern (`/a|b/`, `/a|b/ {print $2}`) and a regex or a string right after `~` (`$1 ~ /a|b/`, `$1 ~ "a|b"`), each holding no quote, `[` or newline.
+  Once those are cut out, any `|`, quote, `/`, `#` or backslash left counts as a pipe, as canary counted every `|`, so `awk '!/a|b/' f` and `awk '/[ab]|c/' f` keep canary's reading.
+  Each string literal of such a program is judged as a command line wherever it stands (`awk 'BEGIN{system("…")}'`).
   A quiet commit is a `git commit` whose `git` is its command's own first word as a reader is, named bare or by a system folder's path, so `sudo git`, `env git` and `./git` keep canary's reading.
   It sets no shell variable and no git option ahead of `commit` that changes what git runs or where (`-c`, `-C`, `--config-env`, `--exec-path`, `--git-dir`, `--work-tree`), and its every spaced word is a quoted message it holds (after `-m`, a flag cluster ending in `m`, `--message`, or `--message=`).
   Its message is text the hook never reads as a command line, so `git commit -m "fix(x): y"` runs from `~`, though a message that holds the root's path as text or names a gated call (`playground ext sync`) is still refused.
@@ -237,7 +240,7 @@ Only the first reading moves the folder, sets variables and records files for th
   A write to a scope's GitHub repository, which `ops:ext-sync` renders into the root, is outside its reach too; [no-extension-repo-write](#no-extension-repo-write) refuses one.
   An awk program that builds the line it runs (`system("rm " x)`) without naming the root literally gets past.
   A line holding `sed` keeps canary's reading, so `sed -n '/sh -c/p' f` is refused from `~` as on canary.
-  It refuses a closed list of write forms, so a same-user session can still get past it by a form outside that list, such as a script file it writes and then runs.
+  It refuses a closed list of write forms, so a same-user session can still get past it by a form outside that list, such as a script file it writes and then runs, an awk program file run with `-f` included.
   An `ext score` after an `unset` or an `export -n` of one of those variables earlier on the line gets past, since the hook tracks a variable set, not one unset or un-exported.
   A path through a link into the root with `..` after the link (`echo x > <link>/../f`) is judged as typed, so a write by one passes.
   A `cd` or `pushd` it cannot follow (`cd -`, `cd ~-`, `popd`'s stack, a `CDPATH` lookup) leaves the command's folder unread, so a relative write after one passes.
@@ -248,7 +251,7 @@ Only the first reading moves the folder, sets variables and records files for th
   From a cwd at or above the root (`~`, `~/.playground`), a quoted `(`, `[`, `*`, `?` or `{` reads as a glob there, so a call holding one is refused; run it from a worktree.
   A closed-list reader on a line read call by call is the exception: its quoted glob is text, so `awk '{print $1}' f` runs, since the lexer marks each word whose glob the shell sees outside quotes (`Word.glob` in `scripts/hooks/shell.ts`).
   A quiet commit's message is the other exception (above).
-  A quoted regex that starts at `/` reads its glob characters as a glob in `/`, which holds the root, so `sed -n '/^a*b/p' f` and `awk '$1 ~ /^(a|b)/' f` (whose `|` takes awk off the closed list) are refused from any folder, while `awk '/^a*b/' f` runs; run such a script from a file (`awk -f <file>`, `sed -f <file>`).
+  A quoted regex that starts at `/` reads its glob characters as a glob in `/`, which holds the root, so `sed -n '/^a*b/p' f` is refused from any folder, while `awk '/^a*b/' f` runs; run such a script from a file (`awk -f <file>`, `sed -f <file>`).
   A gh `-q` filter that holds a jq interpolation is refused from the home (`-q '"\(.a)"'`), and from any folder once it holds a space and a `/` after the `(` (`-q '.a+" +\(.a)/-\(.b)"'`); pipe the JSON to jq, a reader, instead (`gh … --json <fields> | jq -r '<filter>'`).
   It fails open on any other error, and its tests are in `bun run test:file tests/scripts/hooks/no-extensions-write.test.ts`.
 
