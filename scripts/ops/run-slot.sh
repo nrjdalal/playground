@@ -695,22 +695,20 @@ slot_open() {
 }
 
 # A burst of starts outruns the reading the slots open on, since load1 shows a run's load about a minute after it starts (issue 610, 2 Nov:
-# five medium suites and two clones started in 70 s at load1 16, and load1 reached 64): while a holder of run-slot to run-slot-4, or of the
-# clone slot, started under a minute ago, a medium or big run waits for the reading to show it, so slots fill one a minute; a small run and
-# the dashboard's and the merge train's runs go on, as they pass slot 2's load line; prints the newest start's age in seconds when it holds
+# five medium suites and two clones started in 70 s at load1 16, and load1 reached 64): while run-slot.runs.log shows more runs started on
+# run-slot to run-slot-4 or the clone slot in the last minute than ended there, so the held runs grew, a medium or big run waits for the
+# reading to show them and the slots fill one a minute; a run that takes a slot a run freed adds nothing and goes on, and a small run and the
+# dashboard's and the merge train's runs go on, as they pass slot 2's load line; prints how many runs the last minute added when it holds
 burst_held() {
-  local s at newest=0
+  local now cutoff
   [ "$SIZE" != small ] && [ "$WHO" != ops-dashboard ] && [ "$WHO" != ops-merge-train ] || return 1
-  for s in run-slot run-slot-2 run-slot-3 run-slot-4 run-slot-clone; do
-    [ -d "$OPS/$s" ] || continue
-    at=$(epoch "$(cut -d' ' -f3 "$OPS/$s.holder" 2>/dev/null)")
-    [ -n "$at" ] && [ "$at" -gt "$newest" ] && newest=$at
-  done
-  at=$(($(date +%s) - newest))
-  [ "$at" -lt 60 ] && echo "$at"
+  now=$(date +%s)
+  cutoff=$(date -u -r $((now - 60)) +%FT%TZ 2>/dev/null || date -u -d "@$((now - 60))" +%FT%TZ 2>/dev/null) || return 1
+  tail -n 3000 "$OPS/run-slot.runs.log" 2>/dev/null | CUTOFF=$cutoff awk '
+    $2 == "start" && $5 ~ /^run-slot(-[234]|-clone)?$/ { run[$3 " " $4] = 1; if ($1 > ENVIRON["CUTOFF"]) n++ }
+    $2 == "end" && run[$3 " " $4] { delete run[$3 " " $4]; if ($1 > ENVIRON["CUTOFF"]) n-- }
+    END { if (n > 0) print n; exit !(n > 0) }'
 }
-# the epoch seconds of a holder line's UTC time (2026-11-03T00:04:11Z), by GNU date or BSD date, or nothing for a line that holds none
-epoch() { [ -n "$1" ] && { date -u -d "$1" +%s 2>/dev/null || date -u -j -f %Y-%m-%dT%H:%M:%SZ "$1" +%s 2>/dev/null; }; }
 
 # Load units: each held slot's run counts the units on its holder line (2, a medium, for a line with none), and the slots the load rules
 # open now, or a holder already has, give 2 units each. A quarter of them, at least 1, stays for small runs and the runs that gate a
@@ -896,7 +894,7 @@ while :; do
     continue
   fi
   if ago=$(burst_held); then
-    [ $((waited % 300)) -eq 0 ] && echo "run-slot.sh: waiting for the load to show the run that started ${ago}s ago" >&2
+    [ $((waited % 300)) -eq 0 ] && echo "run-slot.sh: waiting for the load to show the $ago run(s) the last minute added" >&2
     sleep "$POLL"
     waited=$((waited + 15))
     continue

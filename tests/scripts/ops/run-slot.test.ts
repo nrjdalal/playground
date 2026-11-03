@@ -1,5 +1,12 @@
 import { describe, expect, setDefaultTimeout, test } from "bun:test"
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
+import {
+  appendFileSync,
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs"
 import { join } from "node:path"
 
 import { SCRIPT, WAITING, stop, machine } from "./run-slot-fake"
@@ -176,25 +183,48 @@ describe("load units", () => {
   })
 })
 
-// #610: load1 shows a run's load about a minute after it starts, so a drained queue once started five suites in 70 s at load1 16, and load1 reached 64; a run started under a minute ago holds the next medium or big one, at any load.
+// #610: load1 shows a run's load about a minute after it starts, so a drained queue once started five suites in 70 s at load1 16, and load1 reached 64; while the runs started in the last minute outnumber those that ended in it, the next medium or big run waits, at any load.
 describe("a burst of starts", () => {
   const medium = { RUN_SLOT_SIZE: "medium" }
+  const iso = (ago: number) =>
+    new Date(Date.now() - ago * 1000).toISOString().replace(/\.\d+Z$/, "Z")
+  // run-slot.runs.log's start line for a run on slot `ago` seconds back, and its end line `ended` seconds back when given
+  const ran = (ops: string, pid: number, slot: string, ago: number, ended?: number) =>
+    appendFileSync(
+      join(ops, "run-slot.runs.log"),
+      `${iso(ago)} start worker-r ${pid} ${slot} waited=0s\n` +
+        (ended === undefined ? "" : `${iso(ended)} end worker-r ${pid} rc=0 ran=${ago - ended}s\n`),
+    )
 
   test("a medium run waits while a run started under a minute ago, with load1 under every line", async () => {
     const m = machine({ load1: 2 })
-    m.hold("run-slot", 2, "medium", 10)
+    ran(m.ops, 101, "run-slot", 10)
     expect(await m.waits("worker-m", medium)).toBe(true)
   })
 
-  test("and starts once that run is a minute old", async () => {
+  test("and starts once that run started a minute ago", async () => {
     const m = machine({ load1: 2 })
-    m.hold("run-slot", 2, "medium", 61)
+    ran(m.ops, 101, "run-slot", 61)
     expect(await m.runs("worker-m", medium)).toBe(true)
   })
 
   test("a clone started under a minute ago holds it too", async () => {
     const m = machine({ load1: 2 })
-    m.hold("run-slot-clone", 1, "small", 10)
+    ran(m.ops, 101, "run-slot-clone", 10)
+    expect(await m.waits("worker-m", medium)).toBe(true)
+  })
+
+  test("a run that took the slot a run freed in the last minute adds nothing, so the next goes on", async () => {
+    const m = machine({ load1: 2 })
+    ran(m.ops, 101, "run-slot", 300, 15)
+    ran(m.ops, 102, "run-slot", 10)
+    expect(await m.runs("worker-m", medium)).toBe(true)
+  })
+
+  test("a run that started and ended inside the minute frees nothing that was held before it", async () => {
+    const m = machine({ load1: 2 })
+    ran(m.ops, 101, "run-slot", 40, 20)
+    ran(m.ops, 102, "run-slot-2", 10)
     expect(await m.waits("worker-m", medium)).toBe(true)
   })
 
@@ -224,17 +254,17 @@ describe("a burst of starts", () => {
 
   test("a small run and the merge train's go on beside a fresh start", async () => {
     const m = machine({ load1: 2 })
-    m.hold("run-slot", 2, "medium", 5)
+    ran(m.ops, 101, "run-slot", 5)
     expect(await m.runs("worker-s", { RUN_SLOT_SIZE: "small" })).toBe(true)
     expect(await m.runs("ops-merge-train", medium)).toBe(true)
   })
 
-  test("can-take answers no while a run started under a minute ago, and yes once it is a minute old", async () => {
+  test("can-take answers no while a run started under a minute ago, and yes once it started a minute ago", async () => {
     const fresh = machine({ load1: 2 })
-    fresh.hold("run-slot", 2, "medium", 5)
+    ran(fresh.ops, 101, "run-slot", 5)
     expect(await fresh.canTake("run-slot-2", "worker-m", medium)).toBe(false)
     const old = machine({ load1: 2 })
-    old.hold("run-slot", 2, "medium", 61)
+    ran(old.ops, 101, "run-slot", 61)
     expect(await old.canTake("run-slot-2", "worker-m", medium)).toBe(true)
   })
 })
