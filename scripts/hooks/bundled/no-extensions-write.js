@@ -1025,10 +1025,17 @@ async function examineReading(cmd, parsed, env, visit, builtins) {
     if (builtins)
       verdict = await visit(cmd, parsed, here);
   } else if (name === "cd" || name === "pushd") {
-    env.cwd = cmd.detached ? undefined : await cdTarget(args, env);
-  } else if (name === "popd")
+    if (args.some((a) => GLOB_CHARS.test(a.value)))
+      verdict = await visit(cmd, parsed, here);
+    const from = env.cwd;
+    env.cwd = cmd.detached ? undefined : await cdTarget(name, args, env);
+    if (env.old)
+      env.old = { dir: env.cwd === undefined ? undefined : from };
+  } else if (name === "popd") {
     env.cwd = undefined;
-  else if (EXPORTS.has(name)) {
+    if (env.old)
+      env.old = {};
+  } else if (EXPORTS.has(name)) {
     for (const w of args.filter((a) => ASSIGN.test(a.value))) {
       const eq = w.value.indexOf("=");
       setVar(env.vars, w.value.slice(0, eq), slice(w, eq + 1));
@@ -1047,11 +1054,16 @@ async function examineReading(cmd, parsed, env, visit, builtins) {
   await record(cmd, name, args, here);
   return verdict;
 }
-async function cdTarget(args, env) {
+async function cdTarget(name, args, env) {
   const dir = args.find((a) => !(a.value.startsWith("-") && a.value.length > 1));
   if (!dir)
     return homedir3();
-  const path = dir.value === "-" ? undefined : pathOf(dir, env);
+  const typed = dir.value === "-" ? undefined : await folder(pathOf(dir, env));
+  const tilde = !typed && name === "pushd" && env.old && !dir.quoted && !dir.unknown && !dir.reads?.length ? /^~([-+])(?=\/|$)/.exec(dir.value) : null;
+  const base = tilde && (tilde[1] === "-" ? env.old?.dir : env.cwd);
+  return base ? await folder(base + dir.value.slice(2)) : typed;
+}
+async function folder(path) {
   if (!path)
     return;
   try {
@@ -1420,7 +1432,7 @@ var REMOVERS = new Set(["find", "mv", "rm", "rmdir", "rsync", "unlink"]);
 var DUPLICATE = /^(?:\d+|-)$/;
 var writer = ({ op, target }) => [">", ">>", ">|", "<>"].includes(op) || op === ">&" && !DUPLICATE.test(target?.value ?? "");
 var GLOB = /[*?[{(]/;
-var RUNS = /^(?:EDITOR|GH_EDITOR|GH_PAGER|GIT_[A-Z_]+|LESSOPEN|PAGER|VISUAL)$/;
+var RUNS = /^(?:EDITOR|GIT_[A-Z_]+|LESSOPEN|PAGER|VISUAL)$/;
 var CLI = join6("packages", "scripts", "src", "playground", "cli.ts");
 var varsRun = new WeakMap;
 function runsVariable(vars) {
@@ -1445,39 +1457,6 @@ function reads(parsed, env) {
   const { rest, sub } = gitCall(args, env);
   const before = args.slice(0, args.length - rest.length - 1).map((a) => a.value);
   return !!sub && GIT_READS.has(sub) && !before.some((w) => w === "-c" || /^--(?:config-env|exec-path)/.test(w)) && !rest.some((w) => /^(?:--output|-O|--open-files-in-pager|--ext-diff|--textconv)/.test(w));
-}
-var GH_READS = new Set([
-  "api",
-  "issue list",
-  "issue view",
-  "pr list",
-  "pr view",
-  "run list",
-  "run view",
-  "search"
-]);
-var GH_API_SENDS = /^(?:-[FXf]|--(?:cache|field|input|method|raw-field)(?:=|$))/;
-function ghFilters(parsed, env) {
-  const { args, first, local, name } = parsed;
-  const filters = new Set;
-  if (name !== "gh" || !first || marked(first.value))
-    return filters;
-  const [verb, sub] = args.map((a) => a.value);
-  const call = verb === "api" || verb === "search" ? verb : `${verb} ${sub}`;
-  if (!GH_READS.has(call) || [...local.keys()].some((key) => RUNS.test(key)))
-    return filters;
-  if (verb === "api" && args.some((a) => GH_API_SENDS.test(a.value)))
-    return filters;
-  if (runsVariable(env.vars))
-    return filters;
-  for (let k = 0;k < args.length; k++) {
-    const { value } = args[k];
-    if (["-q", "--jq", "-t", "--template"].includes(value) && args[k + 1])
-      filters.add(args[++k]);
-    else if (/^(?:-[qt].|--(?:jq|template)=)/.test(value))
-      filters.add(args[k]);
-  }
-  return filters;
 }
 var GUARD_KEYS = new Set([
   "ext.links",
@@ -1584,10 +1563,6 @@ function narrow(cmd, env) {
     return reads(parsed, env);
   if (base === "cut")
     return true;
-  if (base === "gh") {
-    const filters = ghFilters(parsed, env);
-    return filters.size > 0 && args.every((a) => filters.has(a) || !/\s/.test(a.value));
-  }
   if (base === "sort")
     return !args.some(({ value }) => /^-[a-zA-Z]*o|^--./.test(value));
   if (base === "uniq")
@@ -1810,10 +1785,8 @@ function inspect(raw, environment) {
         return refuse(`${verb} with a variable on ${named}`);
     }
     const literal = !whole && narrow(cmd, env);
-    const filters = whole ? new Set : ghFilters(parsed, env);
     for (const word of [first, ...args]) {
-      const text = quiet && /\s/.test(word.value) || filters.has(word) && !word.glob;
-      if (text && !texts(word).some((t) => holds(t.value, env)))
+      if (quiet && /\s/.test(word.value) && !texts(word).some((t) => holds(t.value, env)))
         continue;
       const named = names(word, env, remover, literal);
       if (named)
@@ -1833,6 +1806,7 @@ function inspect(raw, environment) {
     cwd: directory,
     files: new Map,
     known,
+    old: { dir: directory },
     process: environment,
     vars: new Map
   };

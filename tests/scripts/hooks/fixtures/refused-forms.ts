@@ -79,6 +79,7 @@ export type Group = {
     | "#533"
     | "#536"
     | "#579"
+    | "#614"
 }
 
 // The rows a guard-loosening PR lets run on purpose, and the rows that show the one form a guard lets run, each written as a row's "<source> <what>" for all its cases, or as one case's "<source> <what> | <guard> | <folder>".
@@ -2628,5 +2629,63 @@ gh api graphql -f query="$QUERY"`,
       ],
     ],
     source: "#533",
+  },
+  {
+    folders: ["home"],
+    guards: ["no-extensions-write"],
+    rows: ({ ROOT }) => {
+      const from: [Folder, string, string[]][] = [
+        [
+          "extensions root",
+          "",
+          ["acme", "extensions/acme", ".playground/extensions/acme", "../extensions/acme"],
+        ],
+        [
+          "data folder",
+          "",
+          ["extensions/acme", ".playground/extensions/acme", "../extensions/acme"],
+        ],
+        ["home", "", [".playground/extensions/acme"]],
+        [
+          "home",
+          "/.playground",
+          ["extensions/acme", ".playground/extensions/acme", "../extensions/acme"],
+        ],
+      ]
+      return [
+        ...["~-", "~+"].flatMap((tilde) =>
+          from.flatMap(([folder, tail, paths]) =>
+            paths.map(
+              (path) =>
+                [
+                  `pushd ${tilde}${tail} from the ${folder} before rm of ${path}`,
+                  `pushd ${tilde}${tail}; rm -rf ${path}`,
+                  folder,
+                ] as const,
+            ),
+          ),
+        ),
+        [
+          "pushd ~- beside a folder named ~-, read as typed",
+          `cd /tmp; cd ${ROOT}/hooks; pushd ~-; rm -rf acme`,
+        ],
+        [
+          "pushd ~+ beside a folder named ~+, read as typed",
+          `cd ${ROOT}/hooks; pushd ~+/../..; rm -rf acme`,
+        ],
+        ["a glob in cd's folder", "cd .playground/e*; rm -rf login"],
+        ["a glob in pushd's folder", "pushd .playground/ext?nsions; rm -rf login"],
+      ]
+    },
+    source: "#614",
+  },
+  {
+    folders: ["main checkout"],
+    guards: ["no-main-checkout"],
+    rows: () => [
+      ["pushd ~+ before a build", "pushd ~+; bun run build"],
+      ["pushd ~+ before a commit", "pushd ~+; git commit -m x"],
+    ],
+    source: "#614",
   },
 ]
