@@ -198,7 +198,7 @@ if [ "${1:-}" = set ]; then
   exit 0
 fi
 # every read subcommand below sets CAN_TAKE, so quick_kind never sends its bare true down the quick lane (run-slot-can-take.test.ts runs each)
-# run-slot.sh can-take <slot> <who>: exit 0 when that slot is free, its off-switches and load rules open it, and the load units (with that
+# run-slot.sh can-take <slot> <who>: exit 0 when that slot is free, its off-switches, load rules and burst_held open it, and the load units (with that
 # session's reserve) fit, else 1, so a script that takes its slot itself reads them as every run here does (ops-unstick does; localci and
 # the merge train still take theirs by their own mkdir for now); it reads neither the queue nor run-slot.priority
 CAN_TAKE=
@@ -631,9 +631,39 @@ gone() {
   return 1
 }
 
+# a clone runs through this: the clone itself, then, once it exits 0 from one checkout's root node_modules into another, each workspace's own the same way, so no bun install has to follow (PG-655: 74 of 80 clones in a day were followed by one, 177 min queued)
+CLONE_WORKSPACES='
+import glob, json, os, subprocess, sys
+code = subprocess.call(sys.argv[1:])
+if code:
+    sys.exit(code)
+words = sys.argv[1:]
+words = words[next((i for i, w in enumerate(words) if os.path.basename(w) == "cp"), len(words)):]
+flags = [w for w in words[1:] if w.startswith("-")]
+paths = [w.rstrip("/") for w in words[1:] if not w.startswith("-")]
+if not words or len(paths) != 2 or os.path.basename(paths[0]) != "node_modules":
+    sys.exit(0)
+src = os.path.dirname(paths[0]) or "."
+dst = os.path.dirname(paths[1]) if os.path.basename(paths[1]) == "node_modules" else paths[1]
+try:
+    workspaces = json.load(open(os.path.join(src, "package.json"))).get("workspaces", [])
+    json.load(open(os.path.join(dst, "package.json")))
+except (OSError, ValueError):
+    sys.exit(0)
+if isinstance(workspaces, dict):
+    workspaces = workspaces.get("packages", [])
+for pattern in workspaces:
+    for ws in sorted(glob.glob(os.path.join(src, pattern, "node_modules"))):
+        into = os.path.join(dst, os.path.relpath(os.path.dirname(ws), src))
+        if os.path.isdir(into) and not os.path.lexists(os.path.join(into, "node_modules")):
+            code = subprocess.call([words[0], *flags, ws, into + "/"])
+            if code:
+                sys.exit(code)'
+
 # runs the command as the leader of a process group of its own (macOS has no setsid(1)), which reap stops once it ends, and exits with its code; where Claude Code's sandbox refuses the new group or the nice, it says so on stderr and runs the command without it
 run_command() {
   local code
+  [ "${KIND:-}" = clone ] && set -- python3 -I -c "$CLONE_WORKSPACES" "$@"
   python3 -I -c '
 import os, sys
 for step, call in (("its own process group", os.setsid), ("nice " + os.environ.get("RUN_SLOT_NICE", "10"), lambda: os.nice(int(os.environ.get("RUN_SLOT_NICE", "10"))))):
@@ -692,6 +722,23 @@ slot_open() {
     return 1
   fi
   return 0
+}
+
+# A burst of starts outruns the reading the slots open on, since load1 shows a run's load about a minute after it starts (issue 610, 2 Nov:
+# five medium suites and two clones started in 70 s at load1 16, and load1 reached 64): while run-slot.runs.log shows more runs started on
+# run-slot to run-slot-4 or the clone slot in the last minute than ended there, so the held runs grew, a medium or big run waits for the
+# reading to show them and the slots fill one a minute; a run that takes a slot a run freed adds nothing and goes on, as does a small run,
+# and the dashboard's and the merge train's runs go on too, as they pass slot 2's load line; prints how many runs the last
+# minute added when it holds
+burst_held() {
+  local now cutoff
+  [ "$SIZE" != small ] && [ "$WHO" != ops-dashboard ] && [ "$WHO" != ops-merge-train ] || return 1
+  now=$(date +%s)
+  cutoff=$(date -u -r $((now - 60)) +%FT%TZ 2>/dev/null || date -u -d "@$((now - 60))" +%FT%TZ 2>/dev/null) || return 1
+  tail -n 3000 "$OPS/run-slot.runs.log" 2>/dev/null | CUTOFF=$cutoff awk '
+    $2 == "start" && $5 ~ /^run-slot(-[234]|-clone)?$/ { run[$3 " " $4] = 1; if ($1 > ENVIRON["CUTOFF"]) n++ }
+    $2 == "end" && run[$3 " " $4] { delete run[$3 " " $4]; if ($1 > ENVIRON["CUTOFF"]) n-- }
+    END { if (n > 0) print n; exit !(n > 0) }'
 }
 
 # Load units: each held slot's run counts the units on its holder line (2, a medium, for a line with none), and the slots the load rules
@@ -845,7 +892,7 @@ fi
 
 if [ -n "$CAN_TAKE" ]; then
   reclaim "$OPS/$CAN_TAKE"
-  [ ! -d "$OPS/$CAN_TAKE" ] && slot_open "$CAN_TAKE" || exit 1
+  [ ! -d "$OPS/$CAN_TAKE" ] && slot_open "$CAN_TAKE" && ! burst_held > /dev/null || exit 1
   c=$(capacity)
   fits "$(held_units)" "$UNITS" $((c - $(may_reserve "$CLASS$UNITS" "$SIZE" "$WHO" "$(reserve "$c")")))
   exit
@@ -873,6 +920,12 @@ while :; do
   c=$(capacity)
   if ! fits "$(held_units)" "$UNITS" $((c - $(may_reserve "$CLASS$UNITS" "$SIZE" "$WHO" "$(reserve "$c")"))); then
     [ $((waited % 300)) -eq 0 ] && echo "run-slot.sh: waiting for $UNITS free load units ($SIZE; $(held_units) of $c held)" >&2
+    sleep "$POLL"
+    waited=$((waited + 15))
+    continue
+  fi
+  if added=$(burst_held); then
+    [ $((waited % 300)) -eq 0 ] && echo "run-slot.sh: waiting for the load to show the $added run(s) the last minute added" >&2
     sleep "$POLL"
     waited=$((waited + 15))
     continue

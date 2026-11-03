@@ -275,7 +275,7 @@ function KindBand({
               <button
                 type="button"
                 aria-label="Mark as read"
-                className="hover:text-foreground text-muted-foreground focus-visible:ring-ring/50 -m-1 rounded-sm p-1 outline-none focus-visible:ring-2 disabled:opacity-50"
+                className="hover:text-foreground text-muted-foreground -m-1 rounded-sm p-1 outline-none disabled:opacity-50"
                 disabled={busy}
                 onClick={onRead}
               >
@@ -445,6 +445,7 @@ function Preview({ item }: { item: Extract<InboxItem, { kind: "decision" }> }) {
           <SoFar thread={preview.thread} />
           <p>On Approve, {preview.to} gets:</p>
           <p className={QUOTE}>{preview.text}</p>
+          {preview.attachments ? <Attachments items={preview.attachments} /> : null}
         </>
       )
     case "ship":
@@ -1142,11 +1143,11 @@ export function InboxCard({
       // focusable from script alone, so taking the pill can hand focus to the card it put on top
       tabIndex={-1}
       size="sm"
-      // the item a reply is being written about, until it is sent
+      // the item a reply is being written about takes a muted fill, until it is sent
       className={cn(
         // no outer card: the item sits flat on the Inbox, edge to edge, under its KindBand
-        "focus-visible:ring-ring/50 wrap-anywhere overflow-visible rounded-none bg-transparent px-0 pt-0 ring-0 outline-none focus-visible:ring-[3px] [&_[data-slot=card-content]]:px-0 [&_[data-slot=card-footer]]:rounded-none [&_[data-slot=card-footer]]:border-t-0 [&_[data-slot=card-footer]]:bg-transparent [&_[data-slot=card-footer]]:px-0 [&_[data-slot=card-header]]:px-0",
-        marked && "ring-ring ring-2",
+        "wrap-anywhere overflow-visible rounded-none bg-transparent px-0 pt-0 ring-0 outline-none [&_[data-slot=card-content]]:px-0 [&_[data-slot=card-footer]]:rounded-none [&_[data-slot=card-footer]]:border-t-0 [&_[data-slot=card-footer]]:bg-transparent [&_[data-slot=card-footer]]:px-0 [&_[data-slot=card-header]]:px-0",
+        marked && "bg-muted/50",
         folded && "cursor-pointer",
       )}
       // a click on a card a chat reply collapsed opens it, and E opens or folds it, with focus anywhere in the card but its box

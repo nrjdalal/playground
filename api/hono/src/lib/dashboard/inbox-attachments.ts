@@ -33,6 +33,7 @@ export const KIND_OF_EXTENSION: Record<string, InboxAttachmentKind> = {
   js: "code",
   json: "code",
   md: "doc",
+  patch: "code",
   pdf: "pdf",
   png: "image",
   py: "code",
@@ -67,7 +68,7 @@ type Kept = { input: unknown; ok: true } | { message: string; ok: false }
 
 const sourcesSchema = z.array(attachmentSourceSchema).min(1).max(MAX_INBOX_ATTACHMENTS)
 
-// bun run ask's step before posting: each file an ask's, a draft's or a read-only update's preview names is checked, all of them first, then copied into the attachments folder, and the item keeps the copies' ids in place of the paths. Any other item, or one with none, passes as it is; the item's own schema judges the rest.
+// bun run ask's step before posting: each file an ask's, a draft's, a Slack decision's or a read-only update's preview names is checked, all of them first, then copied into the attachments folder, and the item keeps the copies' ids in place of the paths. Any other item, or one with none, passes as it is; the item's own schema judges the rest.
 export async function keepAttachments(
   input: unknown,
   { data = dataDir(), dir = attachmentsDir() }: { data?: string; dir?: string } = {},

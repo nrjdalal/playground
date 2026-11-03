@@ -11,7 +11,7 @@ import { assetOf, herdrPath, PIN_SOURCE, pinnedSum } from "./pin"
 
 export const CYCLE_SECONDS = 60
 
-// Two separate herdr servers: playground for every session, playground-probes for drills and upgrades. herdr keeps a server's state, its saved layout and logs included, under ~/.config/herdr/sessions/<name> (measured on 0.9.5: HERDR_HOME and XDG_STATE_HOME move none of it, and XDG_CONFIG_HOME, which would, reaches every pane), so the names are Playground's own and never a name another herdr setup on the Mac uses, such as factory or probes.
+// Two separate herdr servers: playground for every session, playground-probes for drills, upgrades and the shell-pane skill's plain shell panes. herdr keeps a server's state, its saved layout and logs included, under ~/.config/herdr/sessions/<name> (measured on 0.9.5: HERDR_HOME and XDG_STATE_HOME move none of it, and XDG_CONFIG_HOME, which would, reaches every pane), so the names are Playground's own and never a name another herdr setup on the Mac uses, such as factory or probes.
 export const HERDR_SESSIONS = ["playground", "playground-probes"]
 
 // Where herdr keeps a server's state, read by the job for its log.

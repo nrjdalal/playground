@@ -12,6 +12,7 @@ import {
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
+import { CARVE_OUTS } from "../../../../../packages/safe-delete/src"
 import {
   RM_USAGE,
   type RmDeps,
@@ -99,6 +100,19 @@ test("runRm tells the dispatcher of a protected path, and not of a missing one",
   expect(told.length).toBe(1)
   expect(await runRm(["a", "b"], deps)).toBe(2)
 })
+
+// A carve-out is its own script's alone: playground rm names none, so an entry in each carve-out's folder stays protected and nothing moves.
+test.each(Object.entries(CARVE_OUTS))(
+  "runRm takes no carve-out: an entry in %s's folder stays protected",
+  async (_, carve) => {
+    const { deps, told } = machine()
+    const entry = join(deps.data, carve.folder, "entry")
+    mkdirSync(entry, { recursive: true })
+    expect(await runRm([entry], deps)).toBe(1)
+    expect(existsSync(entry)).toBe(true)
+    expect(told).toEqual([`j6rjgy-worker: ${entry} is inside the protected ${deps.data}`])
+  },
+)
 
 test("runRm --worktree checks the holders, moves the worktree and prunes it from git", async () => {
   const { deps, main, root } = machine()

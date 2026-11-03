@@ -322,40 +322,25 @@ function stdinShell(cmd) {
   }
   const end = first ? cmd.words.indexOf(first) : -1;
   const before = cmd.words.slice(at, end === -1 ? undefined : end);
-  const k = before.findIndex((w) => ROOT_SHELLS.has(program(w.value)));
+  const k = before.findIndex((w) => !w.quoted && ROOT_SHELLS.has(program(w.value)));
   if (k === -1)
     return;
-  if (first)
-    return "root";
-  const wrappers = [];
-  for (const { value } of before.slice(k)) {
-    if (ROOT_SHELLS.has(program(value)))
-      wrappers.push(program(value));
-    else if (wrappers.some((wrapper) => startsRootShell(wrapper, value)))
-      return "root";
-  }
-  return;
-}
-function startsRootShell(wrapper, value) {
-  if (marked(value))
-    return true;
+  const wrapper = program(before[k].value);
   const shells = ROOT_SHELLS.get(wrapper);
   const { flags, values } = WRAPPERS.get(wrapper);
-  if (value.startsWith("--")) {
-    const named = [...flags, ...values].filter((o) => o.startsWith(value));
-    return shells.has(named.length === 1 ? named[0] : value);
-  }
-  if (!/^-[A-Za-z]/.test(value))
-    return false;
-  let shell = false;
-  for (const c of value.slice(1)) {
-    if (values.has(`-${c}`))
-      return shell;
-    if (!flags.has(`-${c}`))
-      return false;
-    shell ||= shells.has(`-${c}`);
-  }
-  return shell;
+  const clustered = (value) => {
+    let shell = false;
+    for (const c of value.slice(1)) {
+      if (values.has(`-${c}`))
+        return shell;
+      if (!flags.has(`-${c}`))
+        return false;
+      shell ||= shells.has(`-${c}`);
+    }
+    return shell;
+  };
+  const starts = ({ quoted, value }) => marked(value) || !quoted && (shells.has(value) || /^-[A-Za-z]/.test(value) && clustered(value));
+  return !!first || before.slice(k + 1).some(starts) ? "root" : undefined;
 }
 var COUNTED = new Set(["repeat", "timeout"]);
 var SHELLS = new Set(["bash", "dash", "ksh", "sh", "zsh"]);
@@ -1040,10 +1025,17 @@ async function examineReading(cmd, parsed, env, visit, builtins) {
     if (builtins)
       verdict = await visit(cmd, parsed, here);
   } else if (name === "cd" || name === "pushd") {
-    env.cwd = cmd.detached ? undefined : await cdTarget(args, env);
-  } else if (name === "popd")
+    if (args.some((a) => GLOB_CHARS.test(a.value)))
+      verdict = await visit(cmd, parsed, here);
+    const from = env.cwd;
+    env.cwd = cmd.detached ? undefined : await cdTarget(name, args, env);
+    if (env.old)
+      env.old = { dir: env.cwd === undefined ? undefined : from };
+  } else if (name === "popd") {
     env.cwd = undefined;
-  else if (EXPORTS.has(name)) {
+    if (env.old)
+      env.old = {};
+  } else if (EXPORTS.has(name)) {
     for (const w of args.filter((a) => ASSIGN.test(a.value))) {
       const eq = w.value.indexOf("=");
       setVar(env.vars, w.value.slice(0, eq), slice(w, eq + 1));
@@ -1062,11 +1054,16 @@ async function examineReading(cmd, parsed, env, visit, builtins) {
   await record(cmd, name, args, here);
   return verdict;
 }
-async function cdTarget(args, env) {
+async function cdTarget(name, args, env) {
   const dir = args.find((a) => !(a.value.startsWith("-") && a.value.length > 1));
   if (!dir)
     return homedir3();
-  const path = dir.value === "-" ? undefined : pathOf(dir, env);
+  const typed = dir.value === "-" ? undefined : await folder(pathOf(dir, env));
+  const tilde = !typed && name === "pushd" && env.old && !dir.quoted && !dir.unknown && !dir.reads?.length ? /^~([-+])(?=\/|$)/.exec(dir.value) : null;
+  const base = tilde && (tilde[1] === "-" ? env.old?.dir : env.cwd);
+  return base ? await folder(base + dir.value.slice(2)) : typed;
+}
+async function folder(path) {
   if (!path)
     return;
   try {
@@ -1809,6 +1806,7 @@ function inspect(raw, environment) {
     cwd: directory,
     files: new Map,
     known,
+    old: { dir: directory },
     process: environment,
     vars: new Map
   };

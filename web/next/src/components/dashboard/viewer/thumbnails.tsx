@@ -127,7 +127,7 @@ function LivePage({ item, onOpen }: { item: ViewerItem; onOpen: () => void }) {
   )
 }
 
-// An ask's, a draft's or a read-only update's files under its text: a lone HTML page live (LivePage), a lone before/after pair at full width, Before over After, else up to GRID_TILES thumbnails (a kind with no Thumb a titled tile, its icon over its name), then a +N tile that opens the first one it stands for; each opens the viewer at its own place.
+// An ask's, a draft's, a Slack decision's or a read-only update's files under its text: a lone HTML page live (LivePage), a lone before/after pair at full width, Before over After, else up to GRID_TILES thumbnails (a kind with no Thumb a titled tile, its icon over its name), then a +N tile that opens the first one it stands for; each opens the viewer at its own place.
 export function AttachmentThumbs({
   items,
   onOpen,
