@@ -129,6 +129,18 @@ describe("bodyRefusal, given the PR's changed files", () => {
     expect(why).toContain("docs/playground/pr.md")
   })
 
+  // review round 1: the Evidence section is read as templateBody reads it, so a ## line inside a code fence is a sample, not a heading
+  test("reads past a fenced ## sample, in the Evidence or before it", () => {
+    const fence = "```"
+    const inEvidence = named(`${fence}md\n## x\n${fence}\n- \`README.md\` checked.`)
+    expect(bodyRefusal(inEvidence, ["README.md"])).toBeNull()
+    const inSummary = named("- `README.md` checked.").replace(
+      "The board reads each PR once.",
+      `The board reads each PR once.\n\n${fence}md\n## Evidence\n\nnone\n${fence}`,
+    )
+    expect(bodyRefusal(inSummary, ["README.md"])).toBeNull()
+  })
+
   test("counts a path as named only in the Evidence, and only whole", () => {
     const summary = SKILL_BODY.replace(
       "The board reads each PR once.",
