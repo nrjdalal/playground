@@ -703,7 +703,7 @@ slot_open() {
   # ...except for the dashboard's own build and the merge train (12 Oct: single-slot mode left both waiting an hour behind testers' runs), which shut lanes leave run-slot-2 open to as well (retro 22: two 5/5 PRs sat about 55 min while the train raced the queue for run-slot alone)
   # #i162: in single-slot mode run-slot-2 still opens for a second suite; since 13 Oct (dispatcher, so work runs while the
   # machine allows) it opens on memory: free share 40% or more (ops, 19 Oct 01:16Z, from the optimizer: 9 Mac-only waiters at
-  # pressure 1 with 43% free), pressure normal, and the 5-minute load under 22 as a backstop
+  # pressure 1 with 43% free), pressure normal and swap-ins under SWAPINS_MAX (mem_ok), and the 5-minute load under 22 as a backstop
   if [ "$s" != run-slot ] && switch_on run-slot.single && [ "$WHO" != ops-dashboard ] && [ "$WHO" != ops-merge-train ]; then
     if [ "$s" = run-slot-2 ] && [ "$(load5)" -lt "$(load_line)" ] && mem_ok; then :; else return 1; fi
   elif [ "$s" = run-slot-2 ] && [ "$WHO" != ops-dashboard ] && [ "$WHO" != ops-merge-train ] && ! lanes_open; then
@@ -744,7 +744,7 @@ lanes_open() {
 # five medium suites and two clones started in 70 s at load1 16, and load1 reached 64): while run-slot.runs.log shows more runs started on
 # run-slot to run-slot-4 or the clone slot in the last minute than ended there, so the held runs grew, a medium or big run waits for the
 # reading to show them and the slots fill one a minute; a run that takes a slot a run freed adds nothing and goes on, as does a small run,
-# and the dashboard's and the merge train's runs go on too, as they pass slot 2's load line; prints how many runs the last
+# and the dashboard's and the merge train's runs go on too, as they pass slot 2's lanes_open; prints how many runs the last
 # minute added when it holds
 burst_held() {
   local now cutoff
@@ -813,7 +813,7 @@ load5() { loadavg | awk '{print int($3)}'; }
 swapin_rate() {
   vm_stat -c 2 1 2>/dev/null | awk '!c { for (i = 1; i <= NF; i++) if ($i == "swapins") c = i; next } { n++; v = $c } END { if (n == 2 && v ~ /^[0-9]+$/) print v }'
 }
-# the swap-ins a second at which memory has no room for another heavy run: spawn.sh's line for a GLM start
+# the swap-ins a second at which memory has no room for another heavy run: spawn.sh's line for a GLM start, the gates.glmSwapinsMax setting's default (packages/settings/src/gates.ts): change both together
 SWAPINS_MAX=100
 # `<idle> <swapins>`: the CPU's idle share in top's second sample (top -l 2 -n 0, as spawn.sh's load gate reads it) and the swap-ins a second in
 # vm_stat -c 2 1's last row (as spawn.sh's swapins() reads them), each - when unread; every look shares one reading through run-slot.gauges

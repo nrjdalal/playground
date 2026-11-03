@@ -552,7 +552,7 @@ describe("the slot-stuck alert", () => {
     mkdirSync(bin)
     writeFileSync(
       join(bin, "sysctl"),
-      `#!/bin/bash\ncase "$2" in hw.ncpu) echo 15 ;; vm.loadavg) echo "{ 2.00 2.00 2.00 }" ;; esac\n`,
+      `#!/bin/bash\ncase "$2" in vm.loadavg) echo "{ 2.00 2.00 2.00 }" ;; esac\n`,
     )
     chmodSync(join(bin, "sysctl"), 0o755)
     for (const off of ["run-slot.3-off", "run-slot.4-off"]) writeFileSync(join(ops, off), "")
@@ -1218,7 +1218,7 @@ describe("ops-unstick's slot alerts", () => {
     mkdirSync(bin)
     writeFileSync(
       join(bin, "sysctl"),
-      `#!/bin/bash\ncase "$2" in hw.ncpu) echo 15 ;; vm.loadavg) echo "{ 2.00 2.00 2.00 }" ;; kern.memorystatus_level) echo 80 ;; kern.memorystatus_vm_pressure_level) echo 1 ;; esac\n`,
+      `#!/bin/bash\ncase "$2" in vm.loadavg) echo "{ 2.00 2.00 2.00 }" ;; kern.memorystatus_level) echo 80 ;; kern.memorystatus_vm_pressure_level) echo 1 ;; esac\n`,
     )
     chmodSync(join(bin, "sysctl"), 0o755)
     // the CPU 80% idle in top's second sample and no swap-ins in vm_stat's last row, so run-slot's gauges open every lane
