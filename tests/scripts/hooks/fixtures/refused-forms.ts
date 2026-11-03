@@ -77,6 +77,7 @@ export type Group = {
     | "#509"
     | "#533"
     | "#536"
+    | "#579"
 }
 
 // The rows a guard-loosening PR lets run on purpose, and the rows that show the one form a guard lets run, each written as a row's "<source> <what>" for all its cases, or as one case's "<source> <what> | <guard> | <folder>".
@@ -2318,7 +2319,13 @@ gh api graphql -f query="$QUERY"`,
       ["at fed a job from an unquoted variable's file", `at now < $F`],
       ["at given -f a variable's file", `at -f "$F" now`],
       ["at fed a variable's file inside bash -c's double quotes", `bash -c "at now < $F"`],
+      ["at fed a program's output, which the hook cannot read", "ls | at now"],
       ["a variable holding a recursive delete, run unquoted", `c="rm -rf ${NEVER_MADE}"; $c`],
+      [
+        "an exported variable holding a recursive delete, run unquoted",
+        `export c="rm -rf ${NEVER_MADE}"; $c`,
+      ],
+      ["a variable holding a recursive delete, run as ${c}", `c="rm -rf ${NEVER_MADE}"; \${c}`],
       [
         "a variable holding a recursive delete, run unquoted under bash",
         `bash -c 'c="rm -rf ${NEVER_MADE}"; $c'`,

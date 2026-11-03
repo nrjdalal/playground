@@ -68,13 +68,23 @@ const STARTERS = new Set(["screen", "tmux"])
 // rm under its own name and GNU rm's Homebrew name.
 const RM = new Set(["grm", "rm"])
 // The npm packages whose one job is a recursive delete, del-cli under each of its bins.
-const DELETERS = new Set(["del", "del-cli", "rimraf"])
+const DELETER_PROGRAMS = new Set(["del", "del-cli", "rimraf"])
+// del-cli's names, judged in a program's place or as a runner's package alone, since `del` is a word of other programs (`redis-cli del lock`).
+const DEL = new Set(["del", "del-cli"])
+// The package runners, each with the subcommands that run a package's bin (`pnpm dlx`), none for one that runs it directly (`npx`).
+const RUNNERS: Record<string, string[]> = {
+  bun: ["x"],
+  bunx: [],
+  npm: ["exec", "x"],
+  npx: [],
+  pnpm: ["dlx", "exec"],
+  yarn: ["dlx", "exec"],
+}
 // shred and tar under their own names and GNU's Homebrew names.
 const SHRED = new Set(["gshred", "shred"])
 const TAR = new Set(["gtar", "tar"])
 // The programs the hook judges, read wherever another program names one among its words (`arch -arm64 rm -rf`, `busybox rm`), since any program may run its arguments.
 const JUDGED = new Set([
-  ...DELETERS,
   ...RM,
   ...SHRED,
   ...TAR,
@@ -84,8 +94,18 @@ const JUDGED = new Set([
   "find",
   "gfind",
   "git",
+  "rimraf",
   "rsync",
 ])
+
+// The package a runner runs: its first word that is no option, after the subcommand it needs (`npx -y del-cli`, `pnpm dlx del-cli`).
+function packageOf(name: string, args: Word[]): Word | undefined {
+  const subs = RUNNERS[name]
+  if (!subs) return
+  const words = args.filter((a) => !a.value.startsWith("-"))
+  if (subs.length === 0) return words[0]
+  return words[0] && subs.includes(words[0].value) ? words[1] : undefined
+}
 // Programs that print or search their words, so a judged name among them is text.
 const READERS = new Set([...PRINTERS, "egrep", "fgrep", "grep", "rg"])
 // Runners that add arguments the hook cannot see, as xargs does.
@@ -237,6 +257,7 @@ async function inspect(raw: string, environment: Record<string, string | undefin
       const verdict = await judge(cmd, parsed, at, reach)
       if (verdict) return verdict
       // a judged program named among another's words runs as that program, behind any runner
+      const pkg = packageOf(name, args)
       if (!READERS.has(name) && !JUDGED.has(name))
         for (const [k, a] of args.entries()) {
           // a word it cannot read in a program's place, given -r, may be rm; a data program's words stay its own (`gh pr checks $N -R <repo>`)
@@ -245,7 +266,8 @@ async function inspect(raw: string, environment: Record<string, string | undefin
               return refuse(`a program the hook cannot read (${shown(a)}) given -r`, "it may be rm")
             continue
           }
-          if (!JUDGED.has(unversioned(program(a.value)))) continue
+          const named = unversioned(program(a.value))
+          if (!JUDGED.has(named) && !(a === pkg && DEL.has(named))) continue
           const found = await examine(
             { ...cmd, words: args.slice(k) },
             at,
@@ -303,7 +325,7 @@ async function inspect(raw: string, environment: Record<string, string | undefin
     if (slot) return examine({ ...cmd, words: slot }, at, visitAs(reach), false)
     if (RM.has(name)) return judgeRm(args, xargs !== undefined || reach.appends, at, roots, reach)
     if (name === "git") return judgeGit(args)
-    if (DELETERS.has(name)) return refuse(name)
+    if (DELETER_PROGRAMS.has(name)) return refuse(name)
     // --del is --delete-during's alias, and --delay-updates deletes nothing
     if (
       name === "rsync" &&
@@ -352,7 +374,7 @@ async function inspect(raw: string, environment: Record<string, string | undefin
         if (found) return found
       }
     }
-    // a job fed by -f, a redirect or a pipe that the hook cannot read may be any delete, while `at -l` queues none
+    // a job fed by -f, a redirect or a pipe that the hook cannot read may be any delete, while `at -l` queues none; a read that throws, on a path holding an expansion's mark (`bash -c "at now < $F"`), is one it cannot read
     if (QUEUES.has(name)) {
       const file = args.findIndex((a) => a.value === "-f")
       const fed =
@@ -360,8 +382,9 @@ async function inspect(raw: string, environment: Record<string, string | undefin
         cmd.stdin !== undefined ||
         cmd.redirects.some((r) => (r.fd === "" || r.fd === "0") && r.op.startsWith("<"))
       if (fed) {
-        const script =
-          file === -1 ? await stdinOf(cmd, at) : await readPath(args[file + 1] ?? { value: "" }, at)
+        const script = await (
+          file === -1 ? stdinOf(cmd, at) : readPath(args[file + 1] ?? { value: "" }, at)
+        ).catch(() => ({ unknown: "a path holding an expansion", value: "" }))
         if (script.unknown)
           return refuse(
             `${name} given a job it cannot read (${script.unknown})`,
@@ -393,7 +416,7 @@ const CANDIDATE =
 
 // A call that reads as a delete, which the hook refuses when it cannot read it.
 const DELETES =
-  /\bg?rm\b|-delete\b|\bchflags\b|\bchmod\b|\bclean\b|\bworktree\b|\brimraf\b|\bdel\b|\bg?shred\b|--del|--rem/
+  /\bg?rm\b|-delete\b|\bchflags\b|\bchmod\b|\bclean\b|\bworktree\b|\brimraf\b|\bdel-cli\b|\bg?shred\b|--del|--rem/
 
 // The Bash command an input names, or undefined when the input does not parse as one.
 function commandOf(raw: string): string | undefined {

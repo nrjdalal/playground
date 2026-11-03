@@ -77,6 +77,10 @@ describe("a delete the hook lets run", () => {
     'c="ls -la"; $c',
     'c="rm -rf x"; "$c"',
     "git diff | delta",
+    "redis-cli del lock",
+    "docker exec playground-x-redis redis-cli del k",
+    "bun run del",
+    "bun add -d del-cli",
   ])("%s", async (command) => {
     expect(await check(input(command))).toBeUndefined()
   })
