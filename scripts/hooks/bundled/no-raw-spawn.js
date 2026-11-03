@@ -941,8 +941,6 @@ async function examineReading(cmd, parsed, env, visit, builtins) {
   const { args, chdir, local, name } = parsed;
   const here = chdir ? { ...env, cwd: pathOf(chdir, env) } : env;
   let verdict;
-  if (env.old && [...args.map((a) => a.value), ...[...local].map(([key]) => key)].some((v) => v.includes("OLDPWD")))
-    env.old = {};
   const followed = SHELLS.has(name) || [".", "cd", "eval", "popd", "pushd", "source"].includes(name);
   if (followed && builtins && cmd.redirects.length > 0) {
     const bare = { ...cmd, words: [] };
