@@ -48,15 +48,18 @@ Only the first reading moves the folder, sets variables and records files for th
   which only the extensions hold) loads it through `guardList` in `scripts/hooks/lists.ts` inside its check, at every call,
   and fails closed on it:
   on a machine with extensions (its data folder holds `extensions/`) the list comes from `extensions/hooks/<list>.json`, which every list write derives as the union of every scope's `lists/<list>.json` (the login's, each org's, then core's), read by `packages/settings/src/rendered.ts`, and never from this folder.
-  A root that lacks the list refuses the guarded call, naming the file and `playground ext import --from-tree extensions/core/lists`, which seeds it: the session tells its lead, and the dispatcher hands the owner the command to type as a `!` command in the dispatcher's terminal window, since the Dashboard's composer types no `!` command.
+  A root that lacks the list refuses the guarded call, naming the file and the owner's command that writes it: `playground ext import --from-tree extensions/core/lists` for a list core ships, and `playground ext put <login> list <list> <file> --reason <why>` for one it ships none of (no-public-leak's, whose refusal also names its five keys), since that import never seeds it.
+  The session tells its lead, and the dispatcher hands the owner the command to type as a `!` command in the dispatcher's terminal window, since the Dashboard's composer types no `!` command.
   A factory session writes nothing in the root itself and changes no list or guard setting through the CLI: [no-extensions-write](#no-extensions-write) refuses both, so a list changes only on the owner's own command.
   With no extensions, the list is core's file; with no file either, the guard takes its empty default.
   A list file that is there but empty, malformed or missing a key refuses the guarded call, extensions or not; an explicit empty list (`[]`, or every key empty) is the owner's choice and loads.
   A broken list refuses only the calls its guard checks, so every other call runs.
+  Each refusal above, for a missing list and a broken one alike, follows one read rule.
+  The leak guards and no-extension-repo-write give a list's or `policy.json`'s refusal to a call that names `curl`, `gh`, `git`, GitHub, Linear or Slack, unless it only reads, as `scripts/hooks/read-only.ts` judges it: a Bash line of exact read shapes from a closed set, each with its own option list, which takes a read over a `.git` path; an MCP call keeps the refusal.
   `GUARD_LISTS` in `packages/settings/src/rendered.ts` names every guard's list, and a root that lacks one refuses its guard, so a new guard list goes there and into core's `lists/`.
   A shell or Python script reads the set through `bun packages/scripts/src/playground/rendered.ts <file>`: exit 0 prints the path, 2 is extensions that lack the file, 3 is no extensions.
   A shell script that judges by a list of words reads it whole through `bun packages/scripts/src/playground/guard-list.ts <guard> <list>`, which takes `guardList`'s fallbacks and prints the words as JSON, or exits 2 with its refusal, as spawn.sh does for `glm-refused-sources`.
-  Its tests are `bun run test:file tests/scripts/hooks/guard-lists.test.ts tests/packages/settings/src/rendered.test.ts tests/packages/scripts/src/playground/guard-list.test.ts`.
+  Its tests are `bun run test:file tests/scripts/hooks/guard-lists.test.ts tests/scripts/hooks/read-only.test.ts tests/packages/settings/src/rendered.test.ts tests/packages/scripts/src/playground/guard-list.test.ts`.
 
 ## after-compact
 
