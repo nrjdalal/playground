@@ -765,6 +765,9 @@ def api_stop_alerts(state, found, now_t):
 # dispatcher, 15 Oct: worker-sure-note's harness held run-slot-3 at 0% CPU for 35 minutes after it moved on; a holder whose run used under
 # SLOT_IDLE_CPU seconds of CPU in SLOT_IDLE seconds is flagged to the builder once
 SLOT_IDLE, SLOT_IDLE_CPU = 900, 2.0
+# PG-731: a bun install downloads at near 0% CPU for up to about 31 minutes, and macOS's ps reports no I/O to tell it is moving, so a tree running one waits SLOT_IDLE_INSTALL instead
+SLOT_IDLE_INSTALL = 2700
+INSTALL = re.compile(r"(?:^|[\s/])bun\s+(?:add|i|install)(?:\s|$)")
 
 
 def cpu_seconds(t):
@@ -805,11 +808,13 @@ def slot_idle_alerts(state, now_t):
         total = sum(cpu.get(c, 0.0) for c in tree)
         key = f"{slot}:{pid}"
         e = prev.get(key)
-        if not e or total - e["cpu"] >= SLOT_IDLE_CPU:
+        # a total below the saved one means a step exited and took its CPU time with it, so the next step is measured from the new total
+        if not e or total - e["cpu"] >= SLOT_IDLE_CPU or total < e["cpu"]:
             cur[key] = {"cpu": total, "since": now_t, "told": False}
             continue
         cur[key] = e
-        if now_t - e["since"] >= SLOT_IDLE:
+        idle = SLOT_IDLE_INSTALL if any(INSTALL.search(cmd.get(c, "")) for c in tree) else SLOT_IDLE
+        if now_t - e["since"] >= idle:
             top = " ".join((cmd.get(kids.get(pid, [""])[0], "") or "?").split())[:90]
             line = f"{who} holds {slot} with a run idle at 0% CPU for {ago(e['since'])} (pid {pid}: {top}); stop it if it is done, and run a server outside run-slot"
             out.append({"at": now(), "kind": "slot-idle", "line": line, "name": who, "since": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(e["since"]))})

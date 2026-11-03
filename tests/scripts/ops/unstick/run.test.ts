@@ -1209,6 +1209,55 @@ describe("ops-unstick's slot alerts", () => {
     expect(new Set(alerts.map((a) => a.kind))).toEqual(new Set(["slot-idle"]))
   })
 
+  // run-slot's holder on run-slot-3 with the given ps rows under it, its saved baseline at cpu seconds, idle since `ago` seconds
+  const idleCheck = async (rows: string[], cpu: number, ago: number) => {
+    const config = scratch()
+    const ops = join(config, "playground", "ops")
+    const bin = join(config, "bin")
+    mkdirSync(join(ops, "run-slot-3"), { recursive: true })
+    mkdirSync(bin)
+    writeFileSync(join(ops, "run-slot-3.holder"), `worker-x ${process.pid} 2026-11-03T10:17:00Z\n`)
+    writeFileSync(
+      join(bin, "ps"),
+      `#!/bin/bash\n${rows.map((row) => `echo "${row}"`).join("\n")}\n`,
+    )
+    chmodSync(join(bin, "ps"), 0o755)
+    const now = Date.now() / 1000
+    const key = `run-slot-3:${process.pid}`
+    const state = { slot_idle: { [key]: { cpu, since: now - ago, told: true } } }
+    const alerts = (await callWith(
+      { PATH: `${bin}:${process.env.PATH}` },
+      config,
+      "slot_idle_alerts",
+      state,
+      now,
+    )) as { kind: string }[]
+    return alerts.map((a) => a.kind)
+  }
+
+  test("a batch whose earlier step exited is measured from its new total, so its busy next step raises no slot-idle", async () => {
+    expect(await idleCheck([`  999471 ${process.pid} 5:00.00 bun test`], 600, 1000)).toEqual([])
+  })
+
+  test("a busy grandchild under an idle batch script counts, even below an exited step's baseline", async () => {
+    const rows = [
+      `  999472 ${process.pid} 0:00.04 bash -c batch`,
+      "  999473 999472 3:40.00 bun packages/scripts/src/verdicts.ts",
+    ]
+    expect(await idleCheck(rows, 600, 1000)).toEqual([])
+  })
+
+  test("a bun install at near 0% CPU waits SLOT_IDLE_INSTALL, then still raises slot-idle", async () => {
+    const rows = [`  999474 ${process.pid} 0:01.00 bun install --frozen-lockfile`]
+    expect(await idleCheck(rows, 1, 1500)).toEqual([])
+    expect(await idleCheck(rows, 1, 2800)).toEqual(["slot-idle"])
+  })
+
+  test("a holder whose tree used no CPU since its baseline still raises slot-idle", async () => {
+    const rows = [`  999475 ${process.pid} 0:00.00 sleep 900`]
+    expect(await idleCheck(rows, 0, 1000)).toEqual(["slot-idle"])
+  })
+
   // the heavy-job cap reads run-slot.sh's own count of the CPU slots held or open, on a machine at load1 2 with the given off-switches
   const capped = (off: string[] = [], held: string[] = []) => {
     const config = scratch()
