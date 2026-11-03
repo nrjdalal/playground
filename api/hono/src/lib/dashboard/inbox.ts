@@ -462,7 +462,7 @@ export type Delivery = {
 }
 export type DeliveryResult =
   | { at: string; ok: true; sessionId: string }
-  | { code: string; ok: false; reason: string }
+  | { code: string; ok: false; queuedAt?: string; reason: string }
 export type Deliver = (delivery: Delivery) => Promise<DeliveryResult>
 
 export type InboxFailure = { code: "CONFLICT" | "NOT_FOUND" | "VALIDATION_ERROR"; message: string }
