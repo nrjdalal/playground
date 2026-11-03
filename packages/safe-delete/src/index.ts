@@ -48,7 +48,7 @@ export const PURGE = { days: 7, minFree: 50e9 }
 // One script's exception to the protected list: the entries directly in one exact folder in the data folder (the trash's parent, so it follows PLAYGROUND_DATA_DIR), each at most its files and bytes; the folder itself, its parent, a sibling and anything deeper stay protected.
 export type CarveOut = { bytes: number; files: number; folder: string }
 
-// Each script's carve-out by the script's name, which only that script passes as quarantine's carveOut; playground rm takes none.
+// Each script's carve-out by the script's name, one entry per script, A to Z, which only that script passes as quarantine's carveOut; playground rm takes none.
 export const CARVE_OUTS: Record<string, CarveOut> = {
   // scripts/ops/dashboard/supervisor.sh's production builds, one folder per head; one measured 2,251 files and 78 MB on 2 Nov
   "dashboard-supervisor": {
@@ -56,7 +56,6 @@ export const CARVE_OUTS: Record<string, CarveOut> = {
     files: 4000,
     folder: "ops/dashboard/builds",
   },
-  // (one entry per script, A to Z; the PR that adds one lists its files and lines, so a small edit takes it out)
   // packages/scripts/src/playground/jobs.ts's rendered LaunchAgent plists, one file each, for a job jobs.json no longer holds
   jobs: { bytes: 64 * 1024, files: 1, folder: "ops/launch-agents" },
 }

@@ -294,10 +294,11 @@ def render_jobs():
     except Exception as e:
         log(f"jobs.json kept: {e}")
         return
-    if r.returncode in (0, 1) and "unchanged" not in r.stdout:
+    if r.returncode in (0, 1) and r.stdout.strip() and "unchanged" not in r.stdout:
         log(r.stdout.strip())
-    if r.returncode == 1:
-        log(one_line_answer(r.stderr))
+    kept = [line for line in (r.stderr or "").splitlines() if line.startswith("jobs: kept ")]
+    if r.returncode == 1 and kept:
+        log(" ".join(kept))
     elif r.returncode not in (0, 3):
         log(f"jobs.json kept: {one_line_answer(r.stderr or r.stdout)}")
 

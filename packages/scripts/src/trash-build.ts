@@ -14,6 +14,7 @@ export const trashBuild = (
   deps: { notify: (text: string) => void; roots: Roots },
 ): string | null => {
   const builds = join(dirname(deps.roots.trash), CARVE_OUTS[SCRIPT]!.folder)
+  // quarantine passes an unprotected path with no carve-out at all, so this check alone keeps the script to its folder
   const moved =
     dirname(resolve(path)) === builds
       ? quarantine(path, { carveOut: SCRIPT, reason, session: SCRIPT }, deps.roots)
