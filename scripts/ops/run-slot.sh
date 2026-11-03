@@ -198,7 +198,7 @@ if [ "${1:-}" = set ]; then
   exit 0
 fi
 # every read subcommand below sets CAN_TAKE, so quick_kind never sends its bare true down the quick lane (run-slot-can-take.test.ts runs each)
-# run-slot.sh can-take <slot> <who>: exit 0 when that slot is free, its off-switches and load rules open it, and the load units (with that
+# run-slot.sh can-take <slot> <who>: exit 0 when that slot is free, its off-switches, load rules and burst_held open it, and the load units (with that
 # session's reserve) fit, else 1, so a script that takes its slot itself reads them as every run here does (ops-unstick does; localci and
 # the merge train still take theirs by their own mkdir for now); it reads neither the queue nor run-slot.priority
 CAN_TAKE=
@@ -678,6 +678,24 @@ slot_open() {
   return 0
 }
 
+# A burst of starts outruns the reading the slots open on, since load1 shows a run's load about a minute after it starts (issue 610, 2 Nov:
+# five medium suites and two clones started in 70 s at load1 16, and load1 reached 64): while a holder of run-slot to run-slot-4, or of the
+# clone slot, started under a minute ago, a medium or big run waits for the reading to show it, so slots fill one a minute; a small run and
+# the dashboard's and the merge train's runs go on, as they pass slot 2's load line; prints the newest start's age in seconds when it holds
+burst_held() {
+  local s at newest=0
+  [ "$SIZE" != small ] && [ "$WHO" != ops-dashboard ] && [ "$WHO" != ops-merge-train ] || return 1
+  for s in run-slot run-slot-2 run-slot-3 run-slot-4 run-slot-clone; do
+    [ -d "$OPS/$s" ] || continue
+    at=$(epoch "$(cut -d' ' -f3 "$OPS/$s.holder" 2>/dev/null)")
+    [ -n "$at" ] && [ "$at" -gt "$newest" ] && newest=$at
+  done
+  at=$(($(date +%s) - newest))
+  [ "$at" -lt 60 ] && echo "$at"
+}
+# the epoch seconds of a holder line's UTC time (2026-11-03T00:04:11Z), by GNU date or BSD date, or nothing for a line that holds none
+epoch() { [ -n "$1" ] && { date -u -d "$1" +%s 2>/dev/null || date -u -j -f %Y-%m-%dT%H:%M:%SZ "$1" +%s 2>/dev/null; }; }
+
 # Load units: each held slot's run counts the units on its holder line (2, a medium, for a line with none), and the slots the load rules
 # open now, or a holder already has, give 2 units each. A quarter of them, at least 1, stays for small runs and the runs that gate a
 # merge, so a big run never blocks a small one
@@ -817,7 +835,7 @@ PEERS=$(setting slots.peers 2>/dev/null | python3 -I -c 'import json, sys; [prin
 
 if [ -n "$CAN_TAKE" ]; then
   reclaim "$OPS/$CAN_TAKE"
-  [ ! -d "$OPS/$CAN_TAKE" ] && slot_open "$CAN_TAKE" || exit 1
+  [ ! -d "$OPS/$CAN_TAKE" ] && slot_open "$CAN_TAKE" && ! burst_held > /dev/null || exit 1
   c=$(capacity)
   fits "$(held_units)" "$UNITS" $((c - $(may_reserve "$CLASS$UNITS" "$SIZE" "$WHO" "$(reserve "$c")")))
   exit
@@ -845,6 +863,12 @@ while :; do
   c=$(capacity)
   if ! fits "$(held_units)" "$UNITS" $((c - $(may_reserve "$CLASS$UNITS" "$SIZE" "$WHO" "$(reserve "$c")"))); then
     [ $((waited % 300)) -eq 0 ] && echo "run-slot.sh: waiting for $UNITS free load units ($SIZE; $(held_units) of $c held)" >&2
+    sleep "$POLL"
+    waited=$((waited + 15))
+    continue
+  fi
+  if ago=$(burst_held); then
+    [ $((waited % 300)) -eq 0 ] && echo "run-slot.sh: waiting for the load to show the run that started ${ago}s ago" >&2
     sleep "$POLL"
     waited=$((waited + 15))
     continue
