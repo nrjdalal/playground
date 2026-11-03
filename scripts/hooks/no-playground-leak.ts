@@ -512,7 +512,13 @@ const leak: Visit = async (cmd, parsed, env) => {
     first: args[at],
     name: program(args[at].value),
   }
-  return leak(cmd, inner, env)
+  const verdict = await leak(cmd, inner, env)
+  // A path word read as the program may be a folder or file the program the hook does not know takes, so the refusal says what it read.
+  if (!verdict || args[at].value === inner.name) return verdict
+  const read = `It read a word whose path ends in /${inner.name} as ${inner.name} run by ${name}, a program it does not know: a folder or file passes under a path that does not end in /${inner.name}, and ${inner.name} run by ${name} is read the same when written by its own name, ${inner.name}.`
+  return verdict.endsWith(NOT_RUN)
+    ? `${verdict.slice(0, -NOT_RUN.length)}${read} ${NOT_RUN}`
+    : `${verdict} ${read}`
 }
 
 // Under anyWrite, whether a command changes what a later write in the call is placed by: a git config write, a remote added, renamed, removed or repointed, a clone, init or submodule, gh's clone, fork, set-default or config set, or any other command naming a .git path or a git config file.
