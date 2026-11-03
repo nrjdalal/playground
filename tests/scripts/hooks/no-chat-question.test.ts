@@ -465,14 +465,17 @@ describe("the dashboard read's time limits (#1269)", () => {
     expect(reason).toContain("timed out")
   })
 
-  test("a stalled first item does not hold a second that reads open", async () => {
-    const started = performance.now()
-    const reason = await asDispatcher("Ship it? See #i1 and #i2.", (ref) =>
-      ref === "#i2" ? Promise.resolve("open") : new Promise<string>(() => {}),
-    )
-    expect(reason).toBeUndefined()
-    expect(performance.now() - started).toBeLessThan(1000)
-  })
+  // a hook that held the stalled read would answer only at its backstop, DASHBOARD_DEADLINE_MS, past this test's own time
+  test(
+    "a stalled first item does not hold a second that reads open",
+    async () => {
+      const reason = await asDispatcher("Ship it? See #i1 and #i2.", (ref) =>
+        ref === "#i2" ? Promise.resolve("open") : new Promise<string>(() => {}),
+      )
+      expect(reason).toBeUndefined()
+    },
+    DASHBOARD_DEADLINE_MS / 2,
+  )
 
   test("a read still running when an open item passes the stop is killed with it", async () => {
     const dashboard = stubDashboard({ "#i2": 30_000 })
