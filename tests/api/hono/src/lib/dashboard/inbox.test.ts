@@ -1204,6 +1204,18 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
           await expect(uploadSpec(db, id, read)).rejects.toThrow("no Inbox item")
       })
 
+      test("refuses a Send whose words already went, as every Send from before this PR did", async () => {
+        const shot = await kept(PNG, "before.png", "image")
+        const old = await post({
+          from: "ops",
+          kind: "draft",
+          preview: { attachments: [shot], link: THREAD, text: "hi", to: "@Merritt" },
+          title: "Sent before",
+        })
+        await store.answerItem(db, old.id, { action: "send" }, { actor, deliver: delivered })
+        await expect(uploadSpec(db, old.id, read)).rejects.toThrow("not in flight")
+      })
+
       test("refuses an item still open, denied, already shared, or whose file left the folder", async () => {
         const shot = await kept(PNG, "before.png", "image")
         const draft = { attachments: [shot], link: THREAD, text: "hi", to: "@Merritt" }
@@ -1233,7 +1245,7 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       })
     })
 
-    test("a Slack draft saved as a draft, a Linear draft and a Deny upload nothing", async () => {
+    test("a Slack draft saved as a draft, a Linear draft, a Deny and a Send whose link's thread part does not parse upload nothing, the last still delivering its words", async () => {
       const { calls, upload } = recorder()
       const saved = await filedDraft()
       await store.answerItem(
@@ -1256,6 +1268,16 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
         { action: "deny" },
         { actor, deliver: delivered, upload },
       )
+      const broken = await filedDraft(`${CHANNEL}/thread/C0MADEUP01-notats`)
+      const sent = await store.answerItem(
+        db,
+        broken.id,
+        { action: "send" },
+        { actor, deliver: delivered, upload },
+      )
+      if (!sent.ok) throw new Error("not answered")
+      expect(sent.item.delivery).toMatchObject({ status: "delivered" })
+      expect(sent.item.answer).not.toHaveProperty("uploaded")
       expect(calls).toEqual([])
     })
   })

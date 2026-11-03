@@ -13,7 +13,7 @@ export type UploadSpec = {
   thread?: string
 }
 
-// The spec for an answered item whose go shares its files and has shared none yet (filesToUpload), its files read from the attachments folder alone; throws why for any other item, so a caller can name only an item the owner sent, never a channel, a thread or a path.
+// The spec for an answered item whose go shares its files and has shared none yet (filesToUpload), while its send is pending, its files read from the attachments folder alone; throws why for any other item, so a caller can name only an item the owner sent, never a channel, a thread or a path.
 export async function uploadSpec(
   db: Database,
   id: string,
@@ -21,8 +21,12 @@ export async function uploadSpec(
 ): Promise<UploadSpec> {
   const item = await getItem(db, id)
   if (!item || item.id !== id) throw new Error(`no Inbox item ${id}`)
-  const shared = filesToUpload(item)
-  if (!shared) throw new Error(`${id} holds no files a Send or an Approve shares into Slack`)
+  // only while the API's own send is in flight: an item sent before, its words gone or failed, shares nothing unasked
+  const shared = item.delivery?.status === "pending" ? filesToUpload(item) : null
+  if (!shared)
+    throw new Error(
+      `${id} holds no files a Send or an Approve shares into Slack, or its send is not in flight`,
+    )
   const files = []
   for (const file of shared.files) {
     const kept = await read(file.id)
