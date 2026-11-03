@@ -34,10 +34,11 @@ const CLAUDE = {
   email: "pat@example.com",
   key: "pat@example.com",
   label: "work",
+  own: false,
   provider: "claude",
   stored: true,
 }
-const GLM = { email: null, key: "zai", label: "zai", provider: "glm", stored: false }
+const GLM = { email: null, key: "zai", label: "zai", own: false, provider: "glm", stored: false }
 
 const render = (
   accounts?: unknown[],
@@ -45,7 +46,12 @@ const render = (
   extensionsLogin = true,
 ) => {
   const client = new QueryClient()
-  if (accounts) client.setQueryData(ACCOUNTS_QUERY_KEY, { accounts, login: extensionsLogin })
+  if (accounts)
+    client.setQueryData(ACCOUNTS_QUERY_KEY, {
+      accounts,
+      login: extensionsLogin,
+      scope: extensionsLogin ? "made-up-me" : null,
+    })
   if (login) client.setQueryData(SYSTEM_QUERY_KEY, { account: login })
   return renderToStaticMarkup(
     createElement(QueryClientProvider, { client }, createElement(Accounts)),
@@ -106,5 +112,20 @@ describe("Settings > Accounts", () => {
     expect(html).toContain("Accounts could not be read")
     expect(html).toContain("The API answered 500")
     expect(html).not.toContain("No accounts yet")
+  })
+
+  test("each Claude row has an Own account switch showing whether its row sets own, and a GLM row has none", () => {
+    const html = render([
+      CLAUDE,
+      { ...CLAUDE, email: "sam@example.com", key: "sam@example.com", label: null, own: true },
+      GLM,
+    ])
+    const switches = html.match(/<button[^>]*role="switch"[^>]*>/g) ?? []
+    expect(switches).toHaveLength(2)
+    expect(switches[0]).toContain('aria-label="Own account: work"')
+    expect(switches[0]).toContain('aria-checked="false"')
+    expect(switches[1]).toContain('aria-label="Own account: sam@example.com"')
+    expect(switches[1]).toContain('aria-checked="true"')
+    expect(html).toContain(">Own account<")
   })
 })

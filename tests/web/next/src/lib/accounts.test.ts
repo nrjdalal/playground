@@ -11,6 +11,7 @@ import {
   setupBody,
   signInFor,
   signInServes,
+  withOwn,
 } from "../../../../../web/next/src/lib/accounts"
 
 const form = (more: Partial<AccountForm>): AccountForm => ({
@@ -108,6 +109,7 @@ describe("an account's row", () => {
           email: "made-up@example.test",
           key: "made-up@example.test",
           label: "work",
+          own: false,
           provider: "claude",
           stored: true,
         },
@@ -118,13 +120,27 @@ describe("an account's row", () => {
       title: "work",
     })
     expect(
-      accountWords({ email: null, key: "zai", label: "zai", provider: "glm", stored: false }),
+      accountWords({
+        email: null,
+        key: "zai",
+        label: "zai",
+        own: false,
+        provider: "glm",
+        stored: false,
+      }),
     ).toEqual({ description: "GLM · No token kept", title: "zai" })
   })
 })
 
 describe("an Add's answer", () => {
-  const account = { email: null, key: "zai", label: "zai", provider: "glm" as const, stored: true }
+  const account = {
+    email: null,
+    key: "zai",
+    label: "zai",
+    own: false,
+    provider: "glm" as const,
+    stored: true,
+  }
 
   test("is the account added, or the API's own words for a refusal, the 409 for no login included", async () => {
     expect(await addOutcome(async () => ({ data: { account }, error: null }))).toEqual({ account })
@@ -147,5 +163,33 @@ describe("an Add's answer", () => {
     )
     expect(addedTitle("pat@example.com", true)).toBe("pat@example.com added")
     expect(addedTitle("zai")).toBe("zai added")
+  })
+})
+
+describe("withOwn", () => {
+  const rows = [
+    { email: "pat@example.com", label: "work", renews: 17 },
+    { email: "sam@example.com", own: true },
+    { label: "zai", provider: "glm" },
+  ]
+
+  test("marks the one Claude row by its email own, and leaves every other row as it was", () => {
+    expect(withOwn(rows, "pat@example.com", true)).toEqual([
+      { email: "pat@example.com", label: "work", own: true, renews: 17 },
+      rows[1],
+      rows[2],
+    ])
+  })
+
+  test("switched off, drops own from the row, so it reads as unset", () => {
+    expect(withOwn(rows, "sam@example.com", false)).toEqual([
+      rows[0],
+      { email: "sam@example.com" },
+      rows[2],
+    ])
+  })
+
+  test("never marks a GLM row, whose label can match no Claude email", () => {
+    expect(withOwn(rows, "zai", true)).toEqual(rows)
   })
 })

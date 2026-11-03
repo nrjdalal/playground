@@ -3,6 +3,8 @@ import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
+import { withOwn } from "../../../../web/next/src/lib/accounts"
+
 const script = join(
   import.meta.dir,
   "..",
@@ -333,6 +335,27 @@ test("an own account takes about a fifth of an equal account's share while its r
   expect(soon.OWN / soon.PRIDE).toBeCloseTo(1, 2)
   const unmarked = split(48, ACCOUNTS)
   expect(unmarked.OWN / unmarked.PRIDE).toBeCloseTo(1, 2)
+})
+
+// Settings > Accounts' Own account switch writes usage.accounts through withOwn, so a row it marks is the row the split weighs as own, and switching it off gives the full share back.
+test("a row the Settings switch marks own takes a fifth of an equal account's share, and its full share once switched off", () => {
+  const ratio = (rows: Record<string, unknown>[]) => {
+    const reading = { five: 0, week: 40, weekReset: TONIGHT + 48 * 3600 }
+    const { split } = flip(
+      "OWN",
+      { ...spentLater, OWN: reading, PRIDE: reading },
+      TONIGHT,
+      undefined,
+      undefined,
+      false,
+      false,
+      { accounts: rows },
+    )
+    return split.OWN / split.PRIDE
+  }
+  const marked = withOwn(ACCOUNTS, "OWN", true)
+  expect(ratio(marked)).toBeCloseTo(0.2, 2)
+  expect(ratio(withOwn(marked, "OWN", false))).toBeCloseTo(1, 2)
 })
 
 test("spent by the split, an ending account reaches 100% before its end, and pride@ keeps a share while its week lasts", () => {
