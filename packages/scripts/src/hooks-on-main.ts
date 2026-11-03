@@ -2,7 +2,7 @@ import { join } from "node:path"
 
 // A hook wrapper runs its script from the main checkout, which follows main, so a factory session on canary loses the hook's tool the moment canary registers a script main lacks; this check fails such a registration until a ship puts its script on main.
 
-export type Wrapper = { file: string; line: number; scripts: string[] }
+type Wrapper = { file: string; line: number; scripts: string[] }
 
 const SCRIPT = /scripts\/hooks\/(?:bundled\/)?[\w-]+\.(?:ts|js)/g
 const RUNS = "bun --no-env-file"

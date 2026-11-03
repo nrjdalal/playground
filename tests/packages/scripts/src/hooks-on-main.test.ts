@@ -9,18 +9,8 @@ import { missingOn, wrappersOf } from "../../../../packages/scripts/src/hooks-on
 const scratch = mkdtempSync(join(tmpdir(), "hooks-on-main-"))
 afterAll(() => rmSync(scratch, { force: true, recursive: true }))
 
-const CLI = join(
-  import.meta.dir,
-  "..",
-  "..",
-  "..",
-  "..",
-  "packages",
-  "scripts",
-  "src",
-  "hooks-on-main.ts",
-)
 const REPO_ROOT = join(import.meta.dir, "..", "..", "..", "..")
+const CLI = join(REPO_ROOT, "packages", "scripts", "src", "hooks-on-main.ts")
 
 // today's single-path guard wrapper, as .claude/settings.json writes it
 const single = (name: string) =>
