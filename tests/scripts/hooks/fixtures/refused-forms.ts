@@ -85,6 +85,7 @@ export type Group = {
     | "#579"
     | "#614"
     | "#652"
+    | "#728"
 }
 
 // The rows a guard-loosening PR lets run on purpose, and the rows that show the one form a guard lets run, each written as a row's "<source> <what>" for all its cases, or as one case's "<source> <what> | <guard> | <folder>".
