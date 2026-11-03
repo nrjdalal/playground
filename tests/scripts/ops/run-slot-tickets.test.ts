@@ -177,18 +177,30 @@ describe("a reviewer's run", () => {
     expect(await worker.waits("g7h8i9-worker", { RUN_SLOT_SIZE: "small" })).toBe(true)
   })
 
-  test("still waits behind an older Checks, merge-train or org run, fresh or past AGED, and behind local CI", async () => {
-    for (const [who, line] of [
-      ["ops-checks-5", "s2 02 2 medium"],
-      ["ops-localci", "s2"],
-      ["a1b2c3-worker", "s2 12 2 medium"],
-    ])
-      for (const ago of [0, 21 * 60]) {
+  // the merge train takes its slot outside the queue, so it leaves no ticket to wait behind
+  for (const [who, line] of [
+    ["ops-checks-5", "s2 02 2 medium"],
+    ["ops-localci", "s2"],
+    ["a1b2c3-worker", "s2 12 2 medium"],
+  ])
+    for (const ago of [0, 21 * 60])
+      test(`still waits behind an older ${who} ticket "${line}"${ago ? " past AGED" : ""}`, async () => {
         const m = machine()
         m.ticket(1, who, line, ago)
         expect(await m.waits("d4e5f6-reviewer", { RUN_SLOT_SIZE: "small" })).toBe(true)
-      }
-  })
+      })
+
+  // past AGED a ticket is pinned within its own class, as canary held it, so a big reviewer or Checks run still drains its class
+  for (const [who, line, newer] of [
+    ["a1b2c3-reviewer", "s2 23 3 big", "d4e5f6-reviewer"],
+    ["a1b2c3-reviewer", "s2 22 2 medium", "d4e5f6-reviewer"],
+    ["ops-checks-7", "s2 03 3 big", "ops-checks-9"],
+  ])
+    test(`a newer small ${newer} waits behind an aged ${who} ticket "${line}"`, async () => {
+      const m = machine()
+      m.ticket(1, who, line, 21 * 60)
+      expect(await m.waits(newer, { RUN_SLOT_SIZE: "small" })).toBe(true)
+    })
 
   test("goes ahead of a worker's newer small run, which its size alone ranked first before", async () => {
     const m = machine()
