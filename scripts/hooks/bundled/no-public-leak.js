@@ -7263,6 +7263,7 @@ function parse3(cmd) {
     assign(state.local, rest.pop());
   return unwrap(state, undefined, { left: READINGS });
 }
+var readings = (parsed) => [parsed, ...parsed.also.flatMap(readings)];
 var assign = (local, w) => {
   const eq = w.value.indexOf("=");
   local.set(w.value.slice(0, eq), slice(w, eq + 1));
@@ -7377,7 +7378,6 @@ async function runAll(lexed, env, visit, builtins) {
 var subshell = (env) => ({ ...env, vars: new Map(env.vars) });
 async function examine(cmd, env, visit, builtins) {
   tick();
-  const readings = (parsed) => [parsed, ...parsed.also.flatMap(readings)];
   const [primary, ...others] = readings(parse3(cmd));
   const before = others.length > 0 ? apart(env) : env;
   const verdict = await examineReading(cmd, primary, env, visit, builtins);

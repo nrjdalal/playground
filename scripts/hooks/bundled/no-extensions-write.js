@@ -304,7 +304,10 @@ var ROOT_SHELLS = new Map([
   ["sudo", new Set(["--login", "--shell", "-i", "-s"])]
 ]);
 function stdinShell(cmd) {
-  const { args, first, name } = parse(cmd);
+  const found = readings(parse(cmd)).map((parsed) => shellOf(cmd, parsed));
+  return found.includes("root") ? "root" : found.find(Boolean);
+}
+function shellOf(cmd, { args, first, name }) {
   if (first && !marked(first.value)) {
     if (!SHELLS.has(name))
       return;
@@ -869,6 +872,7 @@ function parse(cmd) {
     assign(state.local, rest.pop());
   return unwrap(state, undefined, { left: READINGS });
 }
+var readings = (parsed) => [parsed, ...parsed.also.flatMap(readings)];
 var assign = (local, w) => {
   const eq = w.value.indexOf("=");
   local.set(w.value.slice(0, eq), slice(w, eq + 1));
@@ -989,7 +993,6 @@ async function runAll(lexed, env, visit, builtins) {
 var subshell = (env) => ({ ...env, vars: new Map(env.vars) });
 async function examine(cmd, env, visit, builtins) {
   tick();
-  const readings = (parsed) => [parsed, ...parsed.also.flatMap(readings)];
   const [primary, ...others] = readings(parse(cmd));
   const before = others.length > 0 ? apart(env) : env;
   const verdict = await examineReading(cmd, primary, env, visit, builtins);
