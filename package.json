@@ -45,7 +45,7 @@
     "ops:tick": "bun packages/scripts/src/ops-tick/cli.ts",
     "ops:zai-usage": "bun packages/scripts/src/ops-zai-usage/cli.ts",
     "postinstall": "bun packages/scripts/src/deps-manager.ts",
-    "prepare": "bunx lefthook install",
+    "prepare": "bun packages/scripts/src/lefthook-prepare.ts",
     "parity": "bun packages/scripts/src/parity/cli.ts",
     "pr:merge": "bun packages/scripts/src/verify/prebuild.ts pr-merge && bun --no-env-file packages/scripts/src/pr-merge/cli.ts",
     "pr:train": "bun packages/scripts/src/verify/prebuild.ts pr-merge && bun --no-env-file packages/scripts/src/pr-merge/train-cli.ts",
