@@ -127,7 +127,7 @@ async function labelOf(herdr: Herdr, workspace: string): Promise<string> {
   return String(w.label)
 }
 
-// Types `command` into a pane of a workspace this launcher labelled, once screen() passes it, followed by a printf of a fresh marker and its exit status.
+// Types `command` into an idle pane of a workspace this launcher labelled, once screen() passes it: in a fresh `zsh -f` of its own, so no alias, function, variable, folder or open quote one run leaves reaches the next, as none carries between Bash tool calls, then a printf of a fresh marker and its exit status.
 export async function run(
   pane: string,
   command: string,
@@ -141,10 +141,22 @@ export async function run(
       `shell-pane types only into a workspace it labelled (shell-<name>-<n>); ${pane} is in "${label}"`,
     )
   if (info.agent_session) throw new Refusal(`shell-pane refuses ${pane}: it holds an agent session`)
+  // idle when the pane's shell holds its terminal (measured on 0.9.5), so a line is never typed into a running program's input
+  const { process_info: proc } = await call(herdr, ["pane", "process-info", "--pane", pane])
+  if (proc?.foreground_process_group_id !== proc?.shell_pid)
+    throw new Refusal(
+      `shell-pane refuses ${pane}: a command is still running there; read its marker first`,
+    )
   const reason = await screen(command, info.foreground_cwd || info.cwd, repo)
   if (reason) throw new Refusal(reason)
   const marker = `__shell_pane_${crypto.randomUUID().replaceAll("-", "").slice(0, 12)}`
-  await call(herdr, ["pane", "run", pane, `${command}; printf '\\n%s rc=%s\\n' ${marker} "$?"`])
+  const quoted = `'${command.replaceAll("'", "'\\''")}'`
+  await call(herdr, [
+    "pane",
+    "run",
+    pane,
+    `/bin/zsh -f -c ${quoted}; printf '\\n%s rc=%s\\n' ${marker} "$?"`,
+  ])
   return marker
 }
 

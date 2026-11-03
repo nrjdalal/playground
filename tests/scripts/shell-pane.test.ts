@@ -98,7 +98,12 @@ async function withEnv<T>(vars: Record<string, string>, body: () => Promise<T>):
   }
 }
 
-type Pane = { agent_session?: Record<string, string>; cwd: string; workspace_id: string }
+type Pane = {
+  agent_session?: Record<string, string>
+  busy?: boolean
+  cwd: string
+  workspace_id: string
+}
 
 // A herdr with no server, answering as herdr 0.9.5's CLI does (measured): a JSON line for most calls, nothing for a pane run that typed, plain text for a pane read. Its workspaces and panes sit in memory; `seen` is the pane's text, and a stuck close leaves the workspace listed.
 function stubHerdr(seen = "", { cwd = WORKTREE, stuck = false } = {}) {
@@ -138,6 +143,13 @@ function stubHerdr(seen = "", { cwd = WORKTREE, stuck = false } = {}) {
       if (!stuck) workspaces.delete(id!)
       return ok({ type: "ok" })
     }
+    if (group === "pane" && verb === "process-info" && panes.has(args[3]!))
+      return ok({
+        process_info: {
+          foreground_process_group_id: panes.get(args[3]!)!.busy ? 2 : 1,
+          shell_pid: 1,
+        },
+      })
     if (group === "pane" && verb === "get" && panes.has(id!))
       return ok({ pane: { pane_id: id, ...panes.get(id!) } })
     if (group === "pane" && verb === "run") return { code: 0, out: "" }
@@ -296,6 +308,15 @@ describe("run's own refusals", () => {
     )
     expect(typed(calls)).toEqual([])
   })
+
+  test("a pane whose last command still runs, so no line is typed into its input", async () => {
+    const { calls, herdr, panes } = stubHerdr()
+    panes.get("w1:p1")!.busy = true
+    expect(await refusal(run("w1:p1", "echo hi", herdr, CHECKOUT))).toContain(
+      "a command is still running there",
+    )
+    expect(typed(calls)).toEqual([])
+  })
 })
 
 describe("run types the command with a fresh exit marker", () => {
@@ -305,9 +326,22 @@ describe("run types the command with a fresh exit marker", () => {
     expect(marker).toMatch(/^__shell_pane_[0-9a-f]{12}$/)
     const [[, , pane, line]] = typed(calls) as [string[]]
     expect(pane).toBe("w1:p1")
-    expect(line).toBe(`echo hi; id; printf '\\n%s rc=%s\\n' ${marker} "$?"`)
+    expect(line).toBe(`/bin/zsh -f -c 'echo hi; id'; printf '\\n%s rc=%s\\n' ${marker} "$?"`)
     expect(line).not.toMatch(new RegExp(`${marker} rc=\\d`))
     expect(await run("w1:p1", "echo hi", herdr, CHECKOUT)).not.toBe(marker)
+  })
+
+  // Each run is a zsh of its own, so the pane's shell never reads a command's text as its own line: no alias, function, variable or open quote carries to the next run, as none carries between Bash tool calls.
+  test.each([
+    ["an alias", "alias st=git", `/bin/zsh -f -c 'alias st=git'`],
+    ["an open quote", "echo 'x", `/bin/zsh -f -c 'echo '\\''x'`],
+    ["a quote meant to close one", "x' ; git stash", `/bin/zsh -f -c 'x'\\'' ; git stash'`],
+  ])("%s stays inside its own shell", async (_, command, shell) => {
+    const repo = repoWith({ "no-made-up": `export const check = async () => undefined\n` })
+    const { calls, herdr } = stubHerdr()
+    await run("w1:p1", command, herdr, repo)
+    const [[, , , line]] = typed(calls) as [string[]]
+    expect(line!.startsWith(`${shell}; printf `)).toBe(true)
   })
 })
 

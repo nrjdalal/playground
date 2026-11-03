@@ -16,11 +16,10 @@ Done when it prints the pane id and the workspace id.
 
 ## 2. Run
 
-Run `shell-pane run <pane id> '<command>'`, one command line in single quotes. The launcher screens it, refuses a word naming `claude` and a pane in a workspace it did not label, then types it with a fresh **marker** after it, and prints `sent <marker>`.
+Run `shell-pane run <pane id> '<command>'`, the command in single quotes. The launcher screens it, refuses a word naming `claude`, a pane in a workspace it did not label and a pane whose last command still runs, then types it with a fresh **marker** after it, and prints `sent <marker>`. Each run is a `zsh -f` of its own in the pane's folder, so, as between your Bash calls, nothing one run sets (an alias, a variable, a `cd`) reaches the next: put a step's whole setup in one command.
 
 - A heavy command (a suite, a build, an install) goes inside run-slot, as `~/.playground/ops/run-slot.sh <your name> -- <command>`, as in your own Bash (**slots**).
 - A refusal prints the guard's reason, the same one its hook gives your own Bash call: follow it, then run again.
-- End the line on a command, not a trailing `#` comment or `&`, so the marker runs.
 
 Done when it prints `sent <marker>`, or a refusal you have acted on.
 
