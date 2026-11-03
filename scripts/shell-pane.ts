@@ -298,6 +298,8 @@ export const askInbox = (cwd: string): Inbox => ({
     if ((await ask(cwd, ["ack", id, "--no-link", note])).code === 0) return
     const read = await ask(cwd, ["get", id, "--ack"])
     if (read.code !== 0) throw new Refusal(`bun run ask could not close ${id}: ${read.err}`)
+    if (/"status":\s*"open"/.test(read.out))
+      throw new Refusal(`bun run ask could not close ${id}: it is still open`)
   },
   post: async (item) => {
     const posted = await ask(cwd, ["new"], JSON.stringify(item))

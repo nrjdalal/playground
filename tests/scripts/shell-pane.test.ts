@@ -703,7 +703,33 @@ describe("login drives GitHub's browser login and hands the owner its code on a 
     ])
   })
 
-  test("askInbox closes an open card by settle, an approved one by ack, and a denied one by get --ack", async () => {
+  test("onStop closes the card on SIGTERM and SIGINT, then exits 143 and 130", async () => {
+    const child = join(SCRATCH, "on-stop.ts")
+    writeFileSync(
+      child,
+      [
+        `const { onStop } = await import(${JSON.stringify(join(CHECKOUT, "scripts", "shell-pane.ts"))})`,
+        "onStop(() => Bun.write(process.argv[2]!, 'closed').then(() => {}))",
+        "console.log('ready')",
+        "setInterval(() => {}, 1000)",
+      ].join("\n"),
+    )
+    for (const [signal, code] of [
+      ["SIGTERM", 143],
+      ["SIGINT", 130],
+    ] as const) {
+      const closed = join(SCRATCH, `on-stop-${signal}`)
+      const proc = Bun.spawn([process.execPath, "--no-env-file", child, closed], { stdout: "pipe" })
+      const reader = proc.stdout.getReader()
+      let out = ""
+      while (!out.includes("ready")) out += new TextDecoder().decode((await reader.read()).value)
+      proc.kill(signal)
+      expect(await proc.exited).toBe(code)
+      expect(await Bun.file(closed).text()).toBe("closed")
+    }
+  })
+
+  test("askInbox closes an open card by settle, an approved one by ack, and a denied one by get --ack, refusing one get still reads open", async () => {
     const root = join(SCRATCH, "inbox-close")
     mkdirSync(root)
     writeFileSync(join(root, "package.json"), JSON.stringify({ scripts: { ask: "sh ask.sh" } }))
@@ -715,7 +741,7 @@ describe("login drives GitHub's browser login and hands the owner its code on a 
         'case "$1" in',
         '  settle) [ "$a" = open ] ;;',
         '  ack) [ "$a" = approve ] ;;',
-        '  get) [ "$a" = deny ] && [ "$3" = --ack ] ;;',
+        `  get) [ "$3" = --ack ] || exit 1; case "$a" in deny) echo '"status": "done"' ;; stuck) echo '"status": "open"' ;; *) exit 1 ;; esac ;;`,
         "  *) exit 1 ;;",
         "esac",
       ].join("\n"),
@@ -730,6 +756,7 @@ describe("login drives GitHub's browser login and hands the owner its code on a 
     expect(await closing("approve")).toBe("settle --note\nack --no-link\n")
     expect(await closing("deny")).toBe("settle --note\nack --no-link\nget --ack\n")
     expect(await refusal(closing("gone"))).toStartWith("bun run ask could not close i1")
+    expect(await refusal(closing("stuck"))).toBe("bun run ask could not close i1: it is still open")
   })
 
   test("askInbox runs bun run ask in the checkout it names, with no POSTGRES_URL, as the clone root's ask forwards it", async () => {
