@@ -244,6 +244,22 @@ export const fixtureSchema = z.object({
     z.string(),
     z.object({ branch: z.string().nullable(), repo: z.string().nullable() }),
   ),
+  // herdr's playground server on the made-up machine, which herdr.ts answers its requests from (herdr.json): each pane as session.snapshot gives it, with the processes pane.process_info names and the session its messages go to, what each pane's screen shows above its input box, the picker a blocked pane draws in place of that box, and the workspaces.
+  herdr: z
+    .object({
+      panes: z.array(
+        z.looseObject({
+          pane_id: z.string().min(1),
+          processes: z.array(json),
+          session_id: z.string().min(1).optional(),
+          transcript_path: transcriptPath.optional(),
+        }),
+      ),
+      prompts: z.record(z.string(), z.string()),
+      screens: z.record(z.string(), z.string()),
+      workspaces: z.array(json),
+    })
+    .optional(),
   // Each repo's merged PullRequest nodes, as the Usage app's query reads them (lib/usage/prs.ts).
   merged: z.record(z.string(), z.array(json)).optional(),
   // The made-up checkout's origin remote, which the sidebar's GitHub icon links to as its pull requests page.
@@ -387,7 +403,7 @@ const trashFixture = (path: string, roots: Roots) => {
   if (refused) throw new Error(`the fixture's ${path} stays: ${refused}`)
 }
 
-// Writes a fixture into dir, fresh, as of now: the config folder, cmux's state (cmux.json) and the rest of the machine (machine.json). The folder is replaced whole and only when it is a fixture's own (its stamp.json), so a misnamed folder (a real config folder) is refused rather than overwritten; the one it replaces goes to the trash of the roots given before anything is written, so a refusal changes nothing.
+// Writes a fixture into dir, fresh, as of now: the config folder, cmux's state (cmux.json), herdr's (herdr.json) and the rest of the machine (machine.json). The folder is replaced whole and only when it is a fixture's own (its stamp.json), so a misnamed folder (a real config folder) is refused rather than overwritten; the one it replaces goes to the trash of the roots given before anything is written, so a refusal changes nothing.
 export function writeFixture(fixture: Fixture, dir: string, roots: Roots, now = new Date()): void {
   const target = resolve(dir)
   if (existsSync(target) && !existsSync(join(target, STAMP))) {
@@ -436,6 +452,7 @@ export function writeFixture(fixture: Fixture, dir: string, roots: Roots, now = 
     sessions: cmux.sessions,
     workspaces: cmux.workspaces,
   })
+  writeEntry(join(fresh, "herdr.json"), { inputs: {}, ...at(fixture.herdr ?? NO_HERDR) })
   writeEntry(join(fresh, "machine.json"), {
     account: fixture.account ?? null,
     doctor: fixture.doctor ?? null,
@@ -494,6 +511,18 @@ export type FixtureCmux = {
   workspaces: Record<string, unknown>[]
 }
 
+export type FixtureHerdr = NonNullable<Fixture["herdr"]> & {
+  // What has been typed into each pane's input and not yet sent.
+  inputs: Record<string, string>
+}
+
+const NO_HERDR: NonNullable<Fixture["herdr"]> = {
+  panes: [],
+  prompts: {},
+  screens: {},
+  workspaces: [],
+}
+
 export type FixtureMachine = {
   account?: Fixture["account"] | null
   doctor?: Fixture["doctor"] | null
@@ -520,6 +549,18 @@ const writeFixtureCmux = (state: FixtureCmux, dir: string): void => {
   renameSync(`${path}.tmp`, path)
 }
 
+// A fixture written before herdr.json was runs no herdr server.
+export const readFixtureHerdr = (dir = ensureFixture()): FixtureHerdr => {
+  const path = join(dir, "herdr.json")
+  return existsSync(path) ? readJson<FixtureHerdr>(path) : { ...NO_HERDR, inputs: {} }
+}
+
+const writeFixtureHerdr = (state: FixtureHerdr, dir: string): void => {
+  const path = join(dir, "herdr.json")
+  writeFileSync(`${path}.tmp`, JSON.stringify(state, null, 2), { mode: 0o600 })
+  renameSync(`${path}.tmp`, path)
+}
+
 let machine: { at: number; path: string; value: FixtureMachine } | null = null
 
 export const readFixtureMachine = (dir = ensureFixture()): FixtureMachine => {
@@ -531,7 +572,7 @@ export const readFixtureMachine = (dir = ensureFixture()): FixtureMachine => {
   return machine.value
 }
 
-// Told whenever a write changes the fixture's cmux state, so the dashboard's hub refreshes as cmux's events would make it.
+// Told whenever a write changes the fixture's cmux or herdr state, so the dashboard's hub refreshes as cmux's events would make it.
 const listeners = new Set<() => void>()
 
 export const onFixtureChange = (listener: () => void): (() => void) => {
@@ -546,12 +587,14 @@ const changed = () => {
 const str = (value: unknown): string => (typeof value === "string" ? value : "")
 
 // An input box as Claude Code draws it, between two rules: empty, or holding what has been typed.
-export const screenOf = (state: FixtureCmux, surface: string): string => {
-  const typed = state.inputs[surface] ?? ""
+const inputBox = (above: string, typed: string): string => {
   const rule = "─".repeat(60)
   const box = typed ? typed.split("\n").map((line, i) => `${i ? "  " : "❯ "}${line}`) : ["❯"]
-  return [state.screens[surface] ?? "", rule, ...box, rule, "  ? for shortcuts"].join("\n")
+  return [above, rule, ...box, rule, "  ? for shortcuts"].join("\n")
 }
+
+export const screenOf = (state: FixtureCmux, surface: string): string =>
+  inputBox(state.screens[surface] ?? "", state.inputs[surface] ?? "")
 
 const sessionOnSurface = (state: FixtureCmux, surface: string) =>
   state.sessions.find((s) => str(s.surface_id) === surface && s.stored_pid_exists === true)
@@ -642,6 +685,32 @@ const pastedLines = (typed: string, line: Record<string, unknown>): Record<strin
   ]
 }
 
+// A message sent into a made-up session, as the lines its transcript records for typed words or a paste, so the page sees it delivered as it would a live session's.
+const sent = (
+  session: Record<string, unknown>,
+  typed: string,
+  pasted: boolean,
+  dir: string,
+  now: Date,
+): void => {
+  const path = str(session.transcript_path)
+  if (!path) return
+  if (!resolve(path).startsWith(`${resolve(fixtureConfigDir(dir))}${sep}`)) {
+    throw new Error(`${path} is outside the fixture's folder`)
+  }
+  const line = {
+    cwd: str(session.cwd),
+    message: { content: typed, role: "user" },
+    origin: { kind: "human" },
+    sessionId: str(session.session_id),
+    timestamp: now.toISOString(),
+    type: "user",
+    uuid: crypto.randomUUID(),
+  }
+  const lines = pasted ? pastedLines(typed, line) : [line]
+  appendFileSync(path, lines.map((l) => `${JSON.stringify(l)}\n`).join(""))
+}
+
 // A keystroke typed into a fixture session's terminal: text and Shift+Enter fill its input, and Enter sends it, as a line its transcript records, so the page sees it delivered as it would a live session's. Text sent into an input that holds some is refused unless forced, as cmux 0.65's draft guard refuses it.
 export function fixtureWrite(step: FixtureWrite, dir = ensureFixture(), now = new Date()): void {
   const state = readFixtureCmux(dir)
@@ -656,23 +725,7 @@ export function fixtureWrite(step: FixtureWrite, dir = ensureFixture(), now = ne
   } else if (step.key === "shift+enter") state.inputs[step.surface] = `${typed}\n`
   else if (step.key === "enter") {
     delete state.inputs[step.surface]
-    const path = str(session.transcript_path)
-    if (path) {
-      if (!resolve(path).startsWith(`${resolve(fixtureConfigDir(dir))}${sep}`)) {
-        throw new Error(`${path} is outside the fixture's folder`)
-      }
-      const line = {
-        cwd: str(session.cwd),
-        message: { content: typed, role: "user" },
-        origin: { kind: "human" },
-        sessionId: str(session.session_id),
-        timestamp: now.toISOString(),
-        type: "user",
-        uuid: crypto.randomUUID(),
-      }
-      const lines = session.pastes === true ? pastedLines(typed, line) : [line]
-      appendFileSync(path, lines.map((l) => `${JSON.stringify(l)}\n`).join(""))
-    }
+    sent(session, typed, session.pastes === true, dir, now)
     session.agent_lifecycle = "running"
   } else throw new Error(`the fixture types no ${step.key}`)
   writeFixtureCmux(state, dir)
@@ -774,5 +827,73 @@ export function fixtureReply(requestId: string, dir = ensureFixture()): void {
   const session = state.sessions.find((s) => workstreamOf(str(s.session_id)) === workstream)
   if (session) session.agent_lifecycle = "running"
   writeFixtureCmux(state, dir)
+  changed()
+}
+
+// herdr refusing a request on a fixture stack, by the code herdr's own error would carry (herdr.ts answers it as HerdrRefused).
+export class FixtureHerdrRefusal extends Error {
+  constructor(
+    readonly code: string,
+    message: string,
+  ) {
+    super(message)
+  }
+}
+
+const paneOf = (state: FixtureHerdr, pane: string) => {
+  const found = state.panes.find((p) => p.pane_id === pane)
+  if (!found) throw new FixtureHerdrRefusal("pane_not_found", `no pane ${pane}`)
+  return found
+}
+
+// One made-up pane as the fixture's herdr.json holds it, or herdr's refusal when there is none.
+export const fixtureHerdrPane = (pane: string, dir = ensureFixture()) =>
+  paneOf(readFixtureHerdr(dir), pane)
+
+// A made-up pane's screen: what it shows above, then the picker a blocked pane draws, else its input box.
+export function fixtureHerdrScreen(pane: string, dir = ensureFixture()): string {
+  const state = readFixtureHerdr(dir)
+  paneOf(state, pane)
+  const above = state.screens[pane] ?? ""
+  const picker = state.prompts[pane]
+  return picker === undefined ? inputBox(above, state.inputs[pane] ?? "") : `${above}\n${picker}`
+}
+
+export type FixtureHerdrInput = { keys: string[] } | { prompt: string } | { text: string }
+
+// What a request types into a made-up pane. A prompt (agent.prompt) sends its text as a paste and its Enter, as herdr's bracketed paste does, refused while the pane draws a picker, as herdr refuses one into a blocked session; words fill the input box; Enter sends the box, and Enter or a number key answers a picker, whose rows the arrows and Space move over unseen. A message sent or a picker answered sets the pane working.
+export function fixtureHerdrInput(
+  pane: string,
+  input: FixtureHerdrInput,
+  dir = ensureFixture(),
+  now = new Date(),
+): void {
+  const state = readFixtureHerdr(dir)
+  const found = paneOf(state, pane)
+  const session = { ...found, cwd: str(found.processes[0]?.cwd) }
+  const send = (typed: string, pasted: boolean) => {
+    sent(session, typed, pasted, dir, now)
+    found.agent_status = "working"
+  }
+  if ("prompt" in input) {
+    if (state.prompts[pane] !== undefined) {
+      throw new FixtureHerdrRefusal("agent_blocked", `${pane} waits on a prompt`)
+    }
+    send(input.prompt, true)
+  } else if ("text" in input) {
+    if (state.prompts[pane] === undefined)
+      state.inputs[pane] = (state.inputs[pane] ?? "") + input.text
+  } else {
+    for (const key of input.keys) {
+      if (state.prompts[pane] !== undefined && (key === "enter" || /^\d$/.test(key))) {
+        delete state.prompts[pane]
+        found.agent_status = "working"
+      } else if (key === "enter" && state.inputs[pane]) {
+        send(state.inputs[pane], false)
+        delete state.inputs[pane]
+      }
+    }
+  }
+  writeFixtureHerdr(state, dir)
   changed()
 }
