@@ -14,6 +14,9 @@ export const MESSAGE_KINDS = [
 
 export const MAX_TEXT = 4000
 
+// How long a message is kept before the API's daily sweep deletes it (the owner's #i6); the web says so on an empty channel.
+export const RETENTION_DAYS = 90
+
 // A message's state: sent to the channel, or a tier-two post pending its sender's approval, or denied.
 export const MESSAGE_STATUSES = ["denied", "pending", "sent"] as const
 
@@ -26,11 +29,24 @@ const device = z
 
 export const WEB_DEVICE = "web"
 
+// Where the hosted web approves what waits on you, built in one place for every link to it: a pending message's sender sends or denies it, and the owner opens or denies an invite request.
+export const approvePath = (messageId: string) => `/yard/approve/${encodeURIComponent(messageId)}`
+export const invitePath = (inviteId: string) => `/yard/invites/${encodeURIComponent(inviteId)}`
+
 // A token's name, which a post made with it carries as from.device, so none may take the browser's name.
 export const tokenNameSchema = device.refine(
   (name) => name !== WEB_DEVICE,
   `${WEB_DEVICE} is the browser's name, not a token's`,
 )
+
+// A GitHub login as Yard takes one for a DM or an invite, checked alike by the API and the web's forms.
+export const githubLoginSchema = z
+  .string()
+  .trim()
+  .regex(/^[a-z\d](?:[a-z\d-]{0,38})$/i, "a GitHub login")
+
+// An invite code as a newcomer types it, the one shape the redeem route takes.
+export const inviteCodeSchema = z.string().trim().min(1, "the invite code").max(64)
 
 // One message as the server stores and sends it: the server stamps from and at; channel is the channel's id, parent the message a reply answers, and a message with no status is sent.
 export const messageSchema = z.object({
