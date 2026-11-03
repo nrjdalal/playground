@@ -135,7 +135,7 @@ export const modeLimiter = createRateLimiter({
   windowMs: 60_000,
 })
 
-// A person sets a model or an effort a few times at most; each one is a command typed into the session.
+// A person sets a model or an effort a few times at most; each one changes a running session.
 export const settingLimiter = createRateLimiter({
   getUserId: (c) => c.get("session")?.userId,
   limit: 10,

@@ -40,14 +40,14 @@ export const reportedSetting = (
   model: modelAlias(worker.model),
 })
 
-// A pick not yet on the session's row: the value picked, and the value the row showed when it was picked; the row takes a new model or effort only from the session's next reply.
+// A pick not yet on the session's row: the value picked, and the value the row showed when it was picked; a dispatcher's row takes a new model or effort only from its next reply, while the hosted session's shows it at once.
 export type Pending<T> = { from: T | null; to: T }
 
 // Pure: the value a picker shows: a pick from the moment it is made until the row reports a value other than the one it was picked over.
 export const shownValue = <T>(pending: Pending<T> | null, reported: T | null): T | null =>
   pending && reported === pending.from ? pending.to : reported
 
-// Sets a dispatcher's or the hosted session's model or effort through the API, which types its one slash command and records it in the console's activity.
+// Sets a dispatcher's or the hosted session's model or effort through the API, which sets it on the session and records it in the console's activity.
 export async function changeSetting(sessionId: string, setting: SessionSetting) {
   return unwrap(
     apiClient.v1.workers[":sessionId"].setting.$post({ json: setting, param: { sessionId } }),

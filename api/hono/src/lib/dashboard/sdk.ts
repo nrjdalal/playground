@@ -202,6 +202,8 @@ export class SdkHost {
     const resume = Boolean(known) && this.deps.exists(this.transcript)
     this.startedAt = this.deps.now().toISOString()
     this.mode = mode
+    this.model = null
+    this.effort = null
     const stream = this.deps.query({
       options: {
         allowDangerouslySkipPermissions: true,
@@ -233,7 +235,7 @@ export class SdkHost {
     this.changed()
   }
 
-  // Sets the running session's model or effort as /model and /effort do in a terminal; the row shows the value the session took.
+  // Sets the running session's model or effort as /model and /effort do in a terminal; the row shows the value set.
   async setSetting(setting: SessionSetting): Promise<void> {
     if (!this.session) throw new Error(`${SDK_PROBE} is not running`)
     if ("model" in setting) {

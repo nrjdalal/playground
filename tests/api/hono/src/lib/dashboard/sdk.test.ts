@@ -571,6 +571,19 @@ describe("changeHostedSetting", () => {
     }
   })
 
+  test("a session started again on the same host shows no model or effort from before", async () => {
+    const { changing, dir, host, on } = started()
+    try {
+      await changeHostedSetting(changing({ model: "haiku" }), on)
+      await changeHostedSetting(changing({ effort: "low" }), on)
+      expect(host.worker()).toMatchObject({ effort: "low", model: "haiku" })
+      host.start(dir, CLAUDE, "default")
+      expect(host.worker()).toMatchObject({ effort: null, model: null })
+    } finally {
+      rmSync(dir, { force: true, recursive: true })
+    }
+  })
+
   test("a session not hosted gets NOT_FOUND, and a value the session refuses is not recorded and leaves the row as it was", async () => {
     const { changing, dir, fake, host, on, recorded } = started({ refuseSetting: true })
     try {
