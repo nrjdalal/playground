@@ -343,6 +343,8 @@ fi
 # docs:wrap or format:check takes run-slot-quick
 quick_rule() {
   local a first=""
+  # a pre-commit step commit-slot.ts hands over (the build or a type check), marked RUN_SLOT_COMMIT_STEP=1 under its commit-<worktree> name, is a plain git commit's own step, so it takes run-slot-commit too (3 Nov: a plain commit's build waited about an hour in the queue)
+  case "$WHO" in commit-*) [ "${RUN_SLOT_COMMIT_STEP:-}" = 1 ] && { echo commit; return; } ;; esac
   # the command's first word past env and VAR=x, as box_fits finds it (optimizer, 19 Oct: a commit run as env NODE_ENV=... git commit waited 14 min in the queue)
   for a in "$@"; do case "$a" in env|*=*) continue ;; esac; first=$a; break; done
   if [ "$(basename -- "$first")" = git ]; then
