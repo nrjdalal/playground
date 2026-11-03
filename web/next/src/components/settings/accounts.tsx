@@ -134,21 +134,21 @@ export function Accounts() {
                     {words.description}
                   </ItemDescription>
                 </ItemContent>
+                {row.provider === "claude" && (
+                  <label className="text-muted-foreground flex cursor-pointer items-center gap-2 text-xs max-sm:order-last max-sm:basis-full max-sm:justify-end">
+                    <span>Own account</span>
+                    <Switch
+                      aria-label={`Own account: ${words.title}`}
+                      checked={row.own}
+                      disabled={!data?.scope || markOwn.isPending}
+                      onCheckedChange={(own) => {
+                        if (data?.scope) markOwn.mutate({ own, row, scope: data.scope })
+                      }}
+                      size="sm"
+                    />
+                  </label>
+                )}
                 <ItemActions>
-                  {row.provider === "claude" && (
-                    <label className="text-muted-foreground flex cursor-pointer items-center gap-2 text-xs">
-                      <span>Own account</span>
-                      <Switch
-                        aria-label={`Own account: ${words.title}`}
-                        checked={row.own}
-                        disabled={!data?.scope || markOwn.isPending}
-                        onCheckedChange={(own) => {
-                          if (data?.scope) markOwn.mutate({ own, row, scope: data.scope })
-                        }}
-                        size="sm"
-                      />
-                    </label>
-                  )}
                   <Hint content="Remove">
                     <Button
                       variant="ghost"
