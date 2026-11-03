@@ -375,6 +375,83 @@ test("the pre-commit marker check refuses a staged conflict marker before lint-s
   }
 }, 60_000)
 
+// every worktree of a checkout shares one stash list, so the pre-commit's lint-staged keeps no backup there (PG-715)
+test("the pre-commit's lint-staged runs with --no-stash", async () => {
+  const config = Bun.YAML.parse(await Bun.file(join(ROOT, "lefthook.yml")).text()) as {
+    "pre-commit": { commands: Record<string, { run: string }> }
+  }
+  expect(config["pre-commit"].commands["lint-staged"]!.run).toMatch(
+    /\blint-staged\b.*\s--no-stash\b/,
+  )
+})
+
+// lefthook on this repo's own lint-staged step (bunx swapped for this checkout's binary, the formatter this checkout's oxfmt), in a scratch repo holding one stash entry of its own: the commit's run leaves the stash list as it was, stages the formatted line and keeps a partially staged file's unstaged line
+test("a commit through the pre-commit's lint-staged leaves the stash list as it was and keeps unstaged lines", async () => {
+  const config = Bun.YAML.parse(await Bun.file(join(ROOT, "lefthook.yml")).text()) as {
+    "pre-commit": { commands: Record<string, Record<string, unknown>>; piped?: boolean }
+  }
+  const lint = config["pre-commit"].commands["lint-staged"]!
+  const dir = mkdtempSync(join(tmpdir(), "lefthook-no-stash-"))
+  const run = (argv: string[]) => {
+    const result = Bun.spawnSync(argv, { cwd: dir, env: SCRATCH_ENV, stdin: "ignore" })
+    return { code: result.exitCode, out: result.stdout.toString() + result.stderr.toString() }
+  }
+  const lines = [
+    "const a = 1;",
+    ...Array.from({ length: 12 }, (_, i) => `const k${i} = ${i};`),
+    "const z = 1;",
+  ]
+  try {
+    for (const argv of [
+      ["git", "init", "-q"],
+      ["git", "config", "user.email", "t@t"],
+      ["git", "config", "user.name", "t"],
+    ])
+      expect(run(argv)).toMatchObject({ code: 0 })
+    await Bun.write(
+      join(dir, ".lintstagedrc.json"),
+      JSON.stringify({ "*.ts": [join(ROOT, "node_modules/.bin/oxfmt")] }),
+    )
+    await Bun.write(
+      join(dir, "lefthook.yml"),
+      JSON.stringify({
+        "pre-commit": {
+          commands: {
+            "lint-staged": {
+              ...lint,
+              run: String(lint.run).replace(
+                "bunx lint-staged",
+                join(ROOT, "node_modules/.bin/lint-staged"),
+              ),
+            },
+          },
+          piped: config["pre-commit"].piped,
+        },
+      }),
+    )
+    await Bun.write(join(dir, "a.ts"), `${lines.join("\n")}\n`)
+    expect(run(["git", "add", "-A"])).toMatchObject({ code: 0 })
+    expect(run(["git", "commit", "-qm", "init"])).toMatchObject({ code: 0 })
+    await Bun.write(join(dir, "seed.txt"), "seed\n")
+    expect(run(["git", "stash", "push", "-u", "-m", "seed"])).toMatchObject({ code: 0 })
+    const before = run(["git", "stash", "list"]).out
+    await Bun.write(join(dir, "a.ts"), `${["const   a   =   10", ...lines.slice(1)].join("\n")}\n`)
+    expect(run(["git", "add", "a.ts"])).toMatchObject({ code: 0 })
+    await Bun.write(
+      join(dir, "a.ts"),
+      `${["const   a   =   10", ...lines.slice(1, -1), "const z = 20; // unstaged"].join("\n")}\n`,
+    )
+    expect(run(["bun", join(ROOT, LEFTHOOK_BIN), "run", "pre-commit"])).toMatchObject({ code: 0 })
+    expect(run(["git", "stash", "list"]).out).toBe(before)
+    const staged = run(["git", "show", ":a.ts"]).out.trimEnd().split("\n")
+    expect([staged[0], staged.at(-1)]).toEqual(["const a = 10;", "const z = 1;"])
+    const working = (await Bun.file(join(dir, "a.ts")).text()).trimEnd().split("\n")
+    expect(working.at(-1)).toBe("const z = 20; // unstaged")
+  } finally {
+    rmSync(dir, { force: true, recursive: true })
+  }
+}, 60_000)
+
 // lefthook on this repo's own env-keys and build steps (each run swapped for an echo, env-keys's failing or passing), in a scratch repo: a .env with gaps stops the commit at env-keys, named in one step, before the build fails on its first missing key
 test("the pre-commit env-keys step runs before the build and stops it on a short .env", async () => {
   const config = Bun.YAML.parse(await Bun.file(join(ROOT, "lefthook.yml")).text()) as {
