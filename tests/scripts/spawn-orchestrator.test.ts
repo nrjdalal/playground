@@ -83,6 +83,16 @@ describe("spawn.sh manager starts any orchestrator the roster kinds", () => {
     )
   })
 
+  test("its long column form is refused the same way", async () => {
+    const r = await spawn(["column", "lead", ASSISTANT, "dispatcher", "w1:p2", "b.md"], [], {
+      ROSTER_JSON: seated,
+    })
+    expect(r.code).toBe(1)
+    expect(r.err).toContain(
+      `${ASSISTANT} opens in a workspace of its own: spawn.sh manager ${ASSISTANT} <brief>`,
+    )
+  })
+
   test("a name the roster gives no manager kind is refused, naming the roster.ts set that fixes it", async () => {
     const r = await spawn(["manager", "x7mh4d-worker", "b.md"], [], {
       ROSTER_JSON: rosterOf([
@@ -181,6 +191,38 @@ describe("a manager start takes the capacity gate, and the first dispatcher star
         verdict: "skipped",
       }),
     ])
+  })
+
+  test("the first dispatcher past load, memory and usage starts on its own login, one row naming all three", async () => {
+    const r = await spawn(["manager", "dispatcher", "b.md"], [], {
+      FAKE_LOAD5: "15.00",
+      FAKE_PRESSURE: "4",
+      USAGE_JSON: "{ nope",
+    })
+    expect(r.code, r.err).toBe(0)
+    expect(launchAfterRm(r)).toContain("claude -n dispatcher")
+    for (const gate of ["load", "memory", "usage"])
+      expect(r.out).toContain(`spawn.sh: the first dispatcher starts past the ${gate} gate`)
+    expect(r.out).not.toContain("starts on ")
+    expect(capacityLog(r)).toEqual([
+      expect.objectContaining({ gate: "load, memory, usage", verdict: "skipped" }),
+    ])
+  })
+
+  test("a stale usage.json's skip line drops its advice to run again", async () => {
+    const r = await spawn(["manager", "dispatcher", "b.md"], [], {
+      USAGE_JSON: JSON.stringify({ ...JSON.parse(weekAt(20)), writtenAt: minutesAgo(16) }),
+    })
+    expect(r.code, r.err).toBe(0)
+    expect(r.out).toContain("usage.json was written 16 minutes ago")
+    expect(r.out).not.toContain("wait for its next run")
+  })
+
+  test("--check on the first dispatcher past a gate writes a check row and says it can start", async () => {
+    const r = await spawn(["manager", "dispatcher", "b.md", "--check"], [], { FAKE_LOAD5: "15.00" })
+    expect(r.code, r.err).toBe(0)
+    expect(r.out).toContain("ok: dispatcher can start")
+    expect(capacityLog(r)).toEqual([expect.objectContaining({ gate: "load", verdict: "check" })])
   })
 
   test("a first dispatcher's skipped row counts as a start in the load gate's window", async () => {

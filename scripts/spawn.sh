@@ -250,7 +250,7 @@ for pid, data in sorted(entries.items()):
         print(pid, field(data.get("sessionId")), field(data.get("cwd")), starts[pid], sep="\t")
 PY
 }
-# The capacity gate: four gates in order (load, memory, slots for a fresh worker start, usage; a move skips load and memory, since the copy it closes frees what the new one takes), the first failure naming its gate and its reading, every pass and refusal one JSON line in ~/.playground/ops/capacity.jsonl (the load gate reads the last 5 minutes of starts back; a refusal's carries its printed words as detail); python exits 0 printing ok, or the refusal for refuse() to print.
+# The capacity gate: four gates in order (load, memory, slots for a fresh worker start, usage; a move skips load and memory, since the copy it closes frees what the new one takes), the first failure naming its gate and its reading (a first dispatcher's failures each kept as a skip, the gates after it still read), every pass and refusal, and a first dispatcher's skipped start, one JSON line in ~/.playground/ops/capacity.jsonl (the load gate reads the last 5 minutes of starts back; a refusal's carries its printed words as detail); python exits 0 printing a past line for each skip and then ok, or the refusal for refuse() to print.
 # The login a launch runs on with no --account, from Claude Code's config, which the launch reads from ~ when it drops inscope's folder.
 own_config() { if [ -n "$UNSET" ]; then echo "$HOME/.claude.json"; else echo "${CLAUDE_CONFIG_DIR:-$HOME}/.claude.json"; fi; }
 gate_capacity() {
@@ -267,6 +267,7 @@ import glob
 import json
 import math
 import os
+import re
 import subprocess
 import sys
 
@@ -727,9 +728,11 @@ try:
         f.write(json.dumps(row, sort_keys=True) + "\n")
 except OSError:
     pass
-# each skip's words without the refusal's advice to run it again, since this start goes ahead
+# each skip's words without the refusal's advice to run it again, since this start goes ahead; the pattern stays outside the f-string, where macOS's own python3 (3.9, on launchd's PATH) refuses a backslash
+advice = re.compile(r"\. Wait for|\. Close a session|; wait for its next run")
 for gate, detail in skips:
-    print(f"past the first dispatcher starts past the {gate} gate, which would hold another start: {detail.split('. Wait for')[0].split('. Close a session')[0]}")
+    words = advice.split(detail)[0]
+    print(f"past the first dispatcher starts past the {gate} gate, which would hold another start: {words}")
 why = f"next in the account split ({fmt(readings['share'] * 100)}% of new sessions)" if "share" in readings else "the login with the most room this week"
 if any(gate == "usage" for gate, _ in skips):
     print("ok")
@@ -1094,7 +1097,7 @@ case "$MODE" in
     ROLE=$1 NAME=$2 TO=$3 SURFACE=$4 BRIEF=$5
     case "$ROLE" in
       reviewer | tester | probe) ;;
-      lead) [[ $(kind_of "$NAME") =~ ^(builder|ops|planner)$ ]] || refuse "a lead is a builder, ops or planner by its roster kind, else by its sessions.names name; give a new name its kind first: roster.ts set <name> kind=<kind> task=<what it does>" ;;
+      lead) kind=$(kind_of "$NAME"); [[ $kind =~ ^(builder|ops|planner)$ ]] || { [ "$(role_of_kind "$kind")" = lead ] && refuse "$NAME opens in a workspace of its own: spawn.sh manager $NAME <brief>"; } || refuse "a lead is a builder, ops or planner by its roster kind, else by its sessions.names name; give a new name its kind first: roster.ts set <name> kind=<kind> task=<what it does>" ;;
       dispatcher)
         ROLE=dispatcher
         [ "$(kind_of "$NAME")" = dispatcher ] || refuse "the dispatcher is an <id>-dispatcher, or sessions.names' dispatcher"
