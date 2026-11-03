@@ -1928,6 +1928,26 @@ gh api graphql -f query="$QUERY"`,
         "process data folder",
       ],
       [
+        "rm of the parameter _, which the shell sets itself after each command",
+        "_=/tmp/a; rm -rf ${_}.playground/./extensions/.no-such-folder",
+        "process home",
+      ],
+      [
+        "rm of the parameter RANDOM, which the shell sets itself to digits",
+        "RANDOM=/tmp/a; rm -rf ${RANDOM}.playground/./extensions/.no-such-folder",
+        "process home",
+      ],
+      [
+        "rm of a variable zsh's ::= expansion sets again",
+        "X=/tmp/a; : ${X::=}; rm -rf ${X}.playground/./extensions/.no-such-folder",
+        "process home",
+      ],
+      [
+        "rm of a held variable on a line that sets IFS, which bash splits it at",
+        "IFS=q; X=.no-such-folderq.playground/./extensions/.no-such-folder; rm -rf $X",
+        "process home",
+      ],
+      [
         "rm of a variable the call appends to",
         "X=ext; X+=ensions/.no-such-folder; rm -rf $X",
         "process data folder",
