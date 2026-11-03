@@ -29,23 +29,23 @@ export type Command = {
   words: Word[]
 }
 type Lexer = {
-  // The run of commands the walk is in, carried into every group and substitution it enters, so one reached through a chain keeps that chain's token
-  token: number
   commands: Command[]
   i: number
   known: Record<string, string>
   scope: number
   scopes: number[]
   src: string
+  // The run of commands the walk is in, carried into every group and substitution it enters, so one reached through a chain keeps that chain's token
+  token: number
 }
 type Lexed = { commands: Command[]; scopes: number[] }
 type Pending = { delim: string; quoted: boolean; redirect: Redirect; strip: boolean }
 // `old` is set by a hook that follows zsh's ~-, `old.dir` the folder the shell last left (unset when the hook cannot tell), which an assignment to OLDPWD leaves as it is, so a pushd of ~- or ~+ reads a folder there; a hook that leaves it unset reads both as typed.
 export type Env = {
-  // Set once the line names more folders than the reader carries, so the shell may be in any folder, the one a hook guards included: a hook refuses the command it guards outright, since `places` can enumerate no such set
-  cwdAnywhere?: boolean
   // The folder a cd names where the reader can read it, taken as the shell's own: the reading every hook had before the proven folder arrived, kept so a hook that reads this field alone keeps its verdicts. A hook reads the proven folder, and every folder the shell may be in, through `places` instead.
   cwd?: string
+  // Set once the line names more folders than the reader carries, so the shell may be in any folder, the one a hook guards included: a hook refuses the command it guards outright, since `places` can enumerate no such set
+  cwdAnywhere?: boolean
   // Every folder a cd on the line has named, which `cd -`, `popd` and a bare `pushd` go back to
   cwdBack?: string[]
   // The folders the shell was in before a cd an `&&` alone made sure, which become the shell's again at the first command outside that cd's own run, since such a command runs whether or not the cd did
