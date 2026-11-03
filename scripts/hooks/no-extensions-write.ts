@@ -1,7 +1,7 @@
 // PreToolUse hook: refuses a factory session's write into the extensions root, where every guard's list, policy.json and each scope's sources live, and its playground CLI call that changes what a guard reads to allow or deny a call, so no session edits a list in one call and makes the guarded call in the next.
 import { existsSync, statSync } from "node:fs"
 import { homedir } from "node:os"
-import { dirname, join, resolve, sep } from "node:path"
+import { basename, dirname, join, resolve, sep } from "node:path"
 
 import { dataDir } from "../../packages/env/src/data-dir"
 import { extensionsDir } from "../../packages/settings/src/rendered"
@@ -222,6 +222,22 @@ function awkPrograms(words: Word[]): Word[] | undefined {
     else return programs.length ? programs : [words[k]]
   }
   return programs.length ? programs : undefined
+}
+
+const EVALUATES = new Set(["-e", "--eval", "-p", "--print"])
+// An inline evaluator's program word, JavaScript the shell never reads as a line: bun's or node's -e, --eval, -p or --print value among the options before any script, or agent-browser's eval script; undefined for any other call
+function evalProgram({ args, name }: Parsed): Word | undefined {
+  if (name === "agent-browser")
+    return args.find((w) => !w.value.startsWith("-"))?.value === "eval"
+      ? args[args.findIndex((w) => w.value === "eval") + 1]
+      : undefined
+  if (name !== "bun" && name !== "node") return
+  for (let k = 0; k < args.length; k++) {
+    const { value } = args[k]
+    if (EVALUATES.has(value)) return args[k + 1]
+    if (/^--(?:eval|print)=/.test(value)) return args[k]
+    if (!value.startsWith("-")) return
+  }
 }
 
 // The lines an awk program runs, read whatever the line: each string literal of a program that can run a command or write a file
@@ -500,7 +516,22 @@ function inspect(raw: string, environment: Environment) {
         )
       script.push(text.value)
     }
-    for (const raw of reader ? [] : [...script, ...runsOf(parsed, vars, whole, rootLine)]) {
+    // an inline evaluator's program is one opaque word, its regex or arrow neither a path, a glob nor a redirect, unless the line holds a root shell, the shell expands a glob in it, or its text names the root or the data folder
+    const program = rootLine ? undefined : evalProgram(parsed)
+    const opaque =
+      program &&
+      !program.glob &&
+      !marked(program.value) &&
+      !texts(program).some((t) => holds(t.value, env) || t.value.includes(basename(dirname(root))))
+        ? program
+        : undefined
+    const lines = runsOf(
+      opaque ? { ...parsed, args: args.filter((w) => w !== opaque) } : parsed,
+      vars,
+      whole,
+      rootLine,
+    )
+    for (const raw of reader ? [] : [...script, ...lines]) {
       const line =
         xargs?.replace && fed ? filled(raw, xargs.replace, fed.unknown ? UNKNOWN : fed.value) : raw
       if (seen.has(line)) continue
@@ -532,6 +563,7 @@ function inspect(raw: string, environment: Environment) {
     }
     const literal = !whole && narrow(cmd, env)
     for (const word of [first, ...args]) {
+      if (word === opaque) continue
       if (quiet && /\s/.test(word.value) && !texts(word).some((t) => holds(t.value, env))) continue
       const named = names(word, env, remover, literal)
       if (named) return refuse(`${verb} on ${named}`)
