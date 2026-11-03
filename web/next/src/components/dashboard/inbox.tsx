@@ -677,6 +677,7 @@ export function InboxCard({
   item,
   marked,
   now,
+  onBack,
   paused,
   shelf = "inbox",
   updated,
@@ -686,6 +687,8 @@ export function InboxCard({
   item: InboxItem
   marked: boolean
   now: number
+  // Move to Inbox's click, before its answer, so the list shows the card at its top rather than behind the pill
+  onBack?: () => void
   paused: boolean
   shelf?: Shelf
   updated: boolean
@@ -1040,7 +1043,10 @@ export function InboxCard({
             variant="outline"
             disabled={busy}
             {...hold}
-            onClick={() => void onAnswer("unarchive")}
+            onClick={() => {
+              onBack?.()
+              void onAnswer("unarchive")
+            }}
           >
             <RiInboxUnarchiveLine />
           </Button>
@@ -1513,6 +1519,12 @@ export function Inbox({ viewing }: { viewing: boolean }) {
   const updated = (item: InboxItem) => look !== null && updatedSince(item, look.since, look.upto)
   const rowIds = rows.map((item) => item.id)
   if (data && order?.join(" ") !== rowIds.join(" ")) setOrder(rowIds)
+  // a card he moved back from Archived takes the list's top once it arrives, his own click, never behind the pill
+  const [back, setBack] = useState<string | null>(null)
+  if (back !== null && held.some((item) => item.id === back)) {
+    setBack(null)
+    setOrder([back, ...rowIds])
+  }
   const paused = useMovedPause(data ? [...rowIds, ...done.map((item) => item.id)].join(" ") : null)
   const list = useRef<HTMLDivElement>(null)
   const below = useRef<HTMLDivElement>(null)
@@ -1741,6 +1753,7 @@ export function Inbox({ viewing }: { viewing: boolean }) {
                       marked={item.ref === reply?.ref}
                       now={now}
                       paused={paused.has(item.id)}
+                      onBack={() => setBack(item.id)}
                       shelf={place}
                       updated={updated(item)}
                     />

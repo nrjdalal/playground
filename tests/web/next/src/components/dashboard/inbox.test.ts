@@ -783,6 +783,10 @@ describe("the Inbox as one accordion: the open items, then Snoozed, Archived and
     expect(named(html, "Done")).not.toBe("")
     for (const label of ["Archive", "Dismiss", "Snooze"]) expect(named(html, label)).toBe("")
     expect(source).toContain("shelf={place}")
+    // Move to Inbox is his own click, so the card takes the list's top as it arrives, never behind the new-updates pill
+    expect(source).toContain("onBack={() => setBack(item.id)}")
+    expect(source).toContain("if (back !== null && held.some((item) => item.id === back)) {")
+    expect(source).toContain("setOrder([back, ...rowIds])")
     expect(source).toContain(
       'label === "Archived" ? "Dismiss all archived" : "Mark all done as read"',
     )
