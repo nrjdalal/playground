@@ -785,6 +785,17 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
       )
       if (into?.target) return refuse(`a write to ${pathOf(into.target, here)}`)
     }
+    // past the cap the root may be a folder places() dropped, so a writing redirect whose target leans on the shell's own folder is refused before a reader or an echo lets it run
+    const blind = env.cwdAnywhere
+      ? cmd.redirects.find(
+          (r) =>
+            r.target && writer(r) && pathOf(r.target, { ...env, cwd: undefined }) === undefined,
+        )
+      : undefined
+    if (blind?.target)
+      return refuse(
+        `a write to ${blind.target.value} on a line that names more folders than the hook carries, since it cannot rule out ${root}; run it as a line of its own after a cd to a literal path`,
+      )
     // a reader is its command's own first word, so a wrapper's option value parse misread never stands in for one
     const reader = !rootLine && ownFirst(cmd, first) && reads(parsed, env)
     const fed = xargs ? await stdinOf(cmd, env) : undefined
