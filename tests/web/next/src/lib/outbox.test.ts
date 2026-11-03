@@ -939,7 +939,27 @@ describe("a message Claude Code holds", () => {
     list = outboxReducer(list, { id: "a", type: "sending" })
     list = outboxReducer(list, onRefusal(list[0]!, restart, "dispatcher", Date.parse(T1) + 9000))
     expect(list[0]).toMatchObject({ code: "NETWORK_ERROR", queuedAt: T1, state: "queued" })
+    // an answered refusal after it keeps it too, waiting or failed, so a later retry still reads the message again
+    for (const code of [
+      "CMUX_FAILED",
+      "INPUT_NOT_EMPTY",
+      "NOT_FOUND",
+      "ON_PICKER",
+      "TOO_MANY_REQUESTS",
+    ]) {
+      list = outboxReducer(list, { id: "a", type: "sending" })
+      list = outboxReducer(list, onRefusal(list[0]!, { code, message: code }, "dispatcher", 0))
+      expect(list[0]).toMatchObject({ code, queuedAt: T1, state: "queued" })
+    }
     list = outboxReducer(list, { id: "a", type: "sending" })
+    const failed = outboxReducer(list, {
+      code: "INTERNAL_SERVER_ERROR",
+      id: "a",
+      reason: "x",
+      type: "fail",
+    })
+    expect(failed[0]).toMatchObject({ queuedAt: T1, state: "failed" })
+    expect(outboxReducer(failed, { id: "a", type: "retry" })[0]?.queuedAt).toBe(T1)
     const typed = outboxReducer(list, { at: T1, id: "a", sessionId: SESSION.id, type: "typed" })
     expect(typed[0]).toMatchObject({ queuedAt: undefined, state: "typed" })
     const lost = outboxReducer(list, { code: "LOST", id: "a", reason: "lost", type: "fail" })
@@ -1140,6 +1160,15 @@ describe("resumable", () => {
         state: "queued",
       },
     ])
+  })
+
+  test("a held message resumes with when it was first held, so a restarted API reads it again", () => {
+    const kept = message("q", { code: "QUEUED", queuedAt: "2026-10-06T00:01:00.000Z" })
+    expect(resumable(JSON.parse(JSON.stringify([kept])))[0]?.queuedAt).toBe(kept.queuedAt)
+    expect(resumable([message("u")])[0]).not.toHaveProperty("queuedAt")
+    expect(resumable([{ ...message("v"), queuedAt: "not a time" }])[0]).not.toHaveProperty(
+      "queuedAt",
+    )
   })
 
   test("a message sent from a thread's view resumes filed under its thread", () => {

@@ -27,7 +27,7 @@ export type OutboxMessage = {
   newThread?: boolean
   reason: string | null
   retryAt: number | null
-  // When Claude Code first held it (QUEUED), kept through tries the API does not answer and sent with each retry, so an API that restarted since reads it again rather than typing it twice; it goes once the message is typed or fails for another reason.
+  // When Claude Code first held it (QUEUED), kept through every later refusal and a page reload and sent with each retry, so an API that restarted since reads it again rather than typing it twice; it goes once the message is typed or reads LOST, whose Retry sends it afresh.
   queuedAt?: string
   // The session has been seen on its picker since this message was refused for one.
   sawPicker: boolean
@@ -239,7 +239,7 @@ export function outboxReducer(messages: OutboxMessage[], action: OutboxAction): 
           ...(action.threadId && { newThread: undefined, threadId: action.threadId }),
           attempts: action.attempts,
           code: action.code,
-          queuedAt: action.queuedAt ?? (UNREACHED.has(action.code) ? m.queuedAt : undefined),
+          queuedAt: action.queuedAt ?? m.queuedAt,
           reason: action.reason,
           retryAt: action.retryAt,
           sawPicker: false,
@@ -253,7 +253,7 @@ export function outboxReducer(messages: OutboxMessage[], action: OutboxAction): 
           ...(action.threadId && { newThread: undefined, threadId: action.threadId }),
           attachments: action.attachments ?? m.attachments,
           code: action.code,
-          queuedAt: UNANSWERED.has(action.code) ? m.queuedAt : undefined,
+          queuedAt: action.code === "LOST" ? undefined : m.queuedAt,
           reason: action.reason,
           retryAt: null,
           state: "failed",
@@ -614,6 +614,7 @@ export function resumable(saved: unknown): OutboxMessage[] {
     const to = text(item?.to)
     const words = text(item?.text)
     const threadId = text(item?.threadId)
+    const queuedAt = text(item?.queuedAt)
     if (!item || !id || !to || words === null || !Array.isArray(item.attachments)) return []
     const attachments = item.attachments.flatMap(
       (file: Record<string, unknown> | null): OutboxAttachment[] => {
@@ -635,6 +636,7 @@ export function resumable(saved: unknown): OutboxMessage[] {
         entryId: null,
         id,
         ...(item.newThread === true ? { newThread: true } : {}),
+        ...(queuedAt && !Number.isNaN(Date.parse(queuedAt)) ? { queuedAt } : {}),
         reason: text(item.reason),
         retryAt: null,
         sawPicker: false,
