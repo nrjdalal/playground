@@ -529,7 +529,7 @@ describe("writeFixture", () => {
     })
   })
 
-  // herdr pastes a message, and Claude Code takes each image path in as an image; the dispatcher's fixture session stands for one
+  // herdr pastes a message, and Claude Code takes each image path in as an image; a fixture pane with a transcript stands for one
   test("a prompt into a pane writes a message with an image as Claude Code writes the paste", () => {
     const dir = join(scratch("fixture-paste"), "fixture")
     writeFixture(shipped(), dir, ROOTS)
@@ -791,6 +791,7 @@ console.log(JSON.stringify({
   opsLater: opsLater.map((row) => [row.job, row.status]),
   names: live.workers.map((w) => w.name),
   paused: named("planner").usageLimit ?? null,
+  feed: live.workers.flatMap((w) => w.feed.map((item) => [w.name, item.kind, item.requestId])).sort(),
   pending: Object.keys(readFixtureHerdr().prompts),
   greedPane: live.surfaces.get(greed.sessionId),
   picker: picker.requestId,
@@ -981,6 +982,11 @@ describe.skipIf(onLiveDashboard())("a fixture stack", () => {
     // the answer cleared the picker the question's pane drew, in the scratch copy
     expect(out.pending).not.toContain(String(out.greedPane).split(":").slice(2).join(":"))
     expect(out.picker).toBe("toolu_fixture_prompt_2")
+    expect(out.feed).toEqual([
+      ["ops", "permission", "toolu_fixture_prompt_1"],
+      ["p9c3wx-tester", "plan", "toolu_fixture_prompt_3"],
+      ["worker-greed", "question", "toolu_fixture_prompt_2"],
+    ])
   }, 60_000)
 })
 

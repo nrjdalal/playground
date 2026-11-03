@@ -420,8 +420,11 @@ const STATUS_FROM_MIDDLE = `(() => { const box = document.querySelector("[data-s
 const LIGHT_MS = 3000
 
 // The session's light, as herdr reports its agent status, set on its pane in the fixture's scratch copy, which the dashboard reads on every refresh.
-const STATUS: Record<string, string> = { idle: "idle", running: "working" }
-const setLifecycle = async (fixture: string, text: string, lifecycle: string): Promise<boolean> => {
+const setStatus = async (
+  fixture: string,
+  text: string,
+  status: "idle" | "working",
+): Promise<boolean> => {
   const transcript = await transcriptOf(fixture, text)
   if (!transcript) return false
   const path = join(fixture, "herdr.json")
@@ -430,7 +433,7 @@ const setLifecycle = async (fixture: string, text: string, lifecycle: string): P
   }
   const pane = state.panes?.find((p) => p.session_id === transcript.sessionId)
   if (!pane) return false
-  pane.agent_status = STATUS[lifecycle] ?? lifecycle
+  pane.agent_status = status
   await Bun.write(`${path}.tmp`, JSON.stringify(state, null, 2))
   await rename(`${path}.tmp`, path)
   return true
@@ -1010,9 +1013,9 @@ export const sendTop = async (
   const landed = await toolRows(browser, fixture, hop, 2)
   await browser.run("wait", String(SETTLE_MS))
   let flipped = false
-  if (landed && (await setLifecycle(fixture, hop, "idle"))) {
+  if (landed && (await setStatus(fixture, hop, "idle"))) {
     await browser.run("wait", String(LIGHT_MS))
-    flipped = await setLifecycle(fixture, hop, "running")
+    flipped = await setStatus(fixture, hop, "working")
   }
   await browser.run("wait", String(LIGHT_MS))
   const tops = (await browser.eval<(number | null)[]>(FRAME_LOG_STOP)) ?? []
@@ -1030,7 +1033,7 @@ export const sendTop = async (
   const ended = `send-top ended ${tag}`
   const endedCheck = `send-top ${at} a turn that ends past the screen keeps his send at the top`
   await send(browser, ended)
-  let past = (await delivered(browser, ended)) && (await setLifecycle(fixture, ended, "running"))
+  let past = (await delivered(browser, ended)) && (await setStatus(fixture, ended, "working"))
   if (past) {
     await browser.run("wait", String(LIGHT_MS))
     past = false
@@ -1039,13 +1042,13 @@ export const sendTop = async (
       past = (await browser.eval<Blank>(blankScript(ended)))?.past ?? false
     }
   }
-  if (!past || !(await setLifecycle(fixture, ended, "idle"))) {
+  if (!past || !(await setStatus(fixture, ended, "idle"))) {
     results.push({ check: endedCheck, detail: "the reply never ran past the screen", ok: false })
     return results
   }
   await browser.run("wait", String(LIGHT_MS))
   results.push(sendTopResult(endedCheck, await place(browser, ended)))
-  await setLifecycle(fixture, ended, "running")
+  await setStatus(fixture, ended, "working")
   await browser.run("wait", String(LIGHT_MS))
 
   // a short turn whose status line sits at the middle of the view (the window sized to put it there), then the turn ends and the line leaves: his send keeps its rest
@@ -1054,7 +1057,7 @@ export const sendTop = async (
   await send(browser, middle)
   const going =
     (await delivered(browser, middle)) &&
-    (await setLifecycle(fixture, middle, "running")) &&
+    (await setStatus(fixture, middle, "working")) &&
     (await toolRows(browser, fixture, middle, 2))
   await browser.run("wait", String(LIGHT_MS))
   const offset = going ? await browser.eval<number | null>(STATUS_FROM_MIDDLE) : null
@@ -1064,11 +1067,11 @@ export const sendTop = async (
   }
   await browser.viewport({ height: viewport.height + 2 * offset, width: viewport.width })
   await browser.run("wait", String(SETTLE_MS))
-  await setLifecycle(fixture, middle, "idle")
+  await setStatus(fixture, middle, "idle")
   await browser.run("wait", String(LIGHT_MS))
   results.push(sendTopResult(middleCheck, await place(browser, middle)))
   await browser.viewport(viewport)
-  await setLifecycle(fixture, middle, "running")
+  await setStatus(fixture, middle, "working")
   await browser.run("wait", String(LIGHT_MS))
 
   const leading = `send-top leading ${tag}`
