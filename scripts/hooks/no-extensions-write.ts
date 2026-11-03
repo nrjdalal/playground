@@ -209,19 +209,23 @@ const AWKS = new Set(["awk", "gawk", "mawk", "nawk"])
 const AWK_RUNS = /system|getline|[>@]/
 const awkRuns = (program: string) => AWK_RUNS.test(program) || awkPipe(program)
 
-// Whether a | stands outside every string and regex literal; a / opens a regex only where an operand starts, so a division (`$1/2`, `3/4`) never hides a pipe after it
+// Whether a program holding a | may pipe: a | outside every string and regex literal, or anything the scanner cannot read whole, which counts as one as canary counted every |: a # comment, a [ in a regex, a newline or no end in a literal; a / opens a regex only where an operand starts, so a division (`$1/2`, `3/4`) never hides a pipe after it
 function awkPipe(program: string): boolean {
+  if (!program.includes("|")) return false
   let last = ""
   for (let i = 0; i < program.length; i++) {
     const c = program[i]!
+    if (c === "#") return true
     if (c === '"' || (c === "/" && /^[(,{};!~&|=?:]?$/.test(last))) {
       let end = i + 1
-      while (end < program.length && program[end] !== c) end += program[end] === "\\" ? 2 : 1
-      if (end < program.length) {
-        i = end
-        last = c
-        continue
+      while (end < program.length && program[end] !== c) {
+        if (program[end] === "\n" || (c === "/" && program[end] === "[")) return true
+        end += program[end] === "\\" ? 2 : 1
       }
+      if (end >= program.length) return true
+      i = end
+      last = c
+      continue
     }
     if (c === "|") return true
     if (!/\s/.test(c)) last = c
