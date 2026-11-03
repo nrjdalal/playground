@@ -292,7 +292,6 @@ const guardsOf = (
     folders: { checkout: [CHECKOUT, HOME], home: [HOME, HOME] },
     run: (raw) => c.publicLeak(raw, { CLAUDE_CONFIG_DIR: SCRATCH, PLAYGROUND_DATA_DIR: LISTLESS }),
   },
-  // No bundle while no settings file registers it, so only its source runs, and the bundled pass below leaves it out, since GUARD_OF names no check of it.
   "no-raw-delete": {
     folders: {
       checkout: [CHECKOUT, HOME],
