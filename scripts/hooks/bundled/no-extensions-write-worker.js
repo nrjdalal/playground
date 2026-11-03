@@ -215,36 +215,25 @@ function stdinShell(cmd) {
   }
   const end = first ? cmd.words.indexOf(first) : -1;
   const before = cmd.words.slice(at, end === -1 ? undefined : end);
-  const own = before.find((w) => !w.quoted && ROOT_SHELLS.has(program(w.value)));
-  const wrappers = [];
-  for (const w of before) {
-    if (wrappers.some((wrapper) => startsRootShell(wrapper, w.value)))
-      return "root";
-    if (w === own || ROOT_SHELLS.has(w.value))
-      wrappers.push(program(w.value));
-  }
-  return first && wrappers.length ? "root" : undefined;
-}
-function startsRootShell(wrapper, value) {
-  if (marked(value))
-    return true;
+  const k = before.findIndex((w) => !w.quoted && ROOT_SHELLS.has(program(w.value)));
+  if (k === -1)
+    return;
+  const wrapper = program(before[k].value);
   const shells = ROOT_SHELLS.get(wrapper);
   const { flags, values } = WRAPPERS.get(wrapper);
-  if (value.startsWith("--")) {
-    const named = [...flags, ...values].filter((o) => o.startsWith(value));
-    return shells.has(named.length === 1 ? named[0] : value);
-  }
-  if (!/^-[A-Za-z]/.test(value))
-    return false;
-  let shell = false;
-  for (const c of value.slice(1)) {
-    if (values.has(`-${c}`))
-      return shell;
-    if (!flags.has(`-${c}`))
-      return false;
-    shell ||= shells.has(`-${c}`);
-  }
-  return shell;
+  const clustered = (value) => {
+    let shell = false;
+    for (const c of value.slice(1)) {
+      if (values.has(`-${c}`))
+        return shell;
+      if (!flags.has(`-${c}`))
+        return false;
+      shell ||= shells.has(`-${c}`);
+    }
+    return shell;
+  };
+  const starts = ({ quoted, value }) => marked(value) || !quoted && (shells.has(value) || /^-[A-Za-z]/.test(value) && clustered(value));
+  return !!first || before.slice(k + 1).some(starts) ? "root" : undefined;
 }
 var COUNTED = new Set(["repeat", "timeout"]);
 var SHELLS = new Set(["bash", "dash", "ksh", "sh", "zsh"]);
@@ -1420,7 +1409,15 @@ function scoreAsOther(words, cmd, parsed, env) {
   return changes(at === -1 ? cmd.words : cmd.words.slice(0, at));
 }
 var AWKS = new Set(["awk", "gawk", "mawk", "nawk"]);
-var AWK_RUNS = /system|getline|[|>@]/;
+var AWK_RUNS = /system|getline|[>@]/;
+var awkRuns = (program) => AWK_RUNS.test(program) || awkPipe(program);
+var AWK_LEAD = /^\s*\/(?:[^\\/"[\n]|\\.)*\/(?=\s*(?:\{|$))/;
+var AWK_MATCH = /~\s*(?:\/(?:[^\\/"[\n]|\\.)*\/|"[^"\\\n]*")/g;
+function awkPipe(program) {
+  if (!program.includes("|"))
+    return false;
+  return /["/#\\|]/.test(program.replace(AWK_LEAD, " ").replace(AWK_MATCH, " "));
+}
 function awkPrograms(words) {
   const programs = [];
   for (let k = 0;k < words.length; k++) {
@@ -1445,7 +1442,7 @@ function awkPrograms(words) {
 function programLines({ args, first }, rooted) {
   if (!AWKS.has(program(first?.value ?? "").toLowerCase()))
     return [];
-  return (awkPrograms(args) ?? []).filter(({ value }) => rooted || AWK_RUNS.test(value)).flatMap(({ value }) => [...value.matchAll(/"((?:[^"\\]|\\.)*)"/g)].map((m) => m[1]));
+  return (awkPrograms(args) ?? []).filter(({ value }) => rooted || awkRuns(value)).flatMap(({ value }) => [...value.matchAll(/"((?:[^"\\]|\\.)*)"/g)].map((m) => m[1]));
 }
 function ownProgram(cmd, { first, name }) {
   return ownFirst(cmd, first) && !marked(name) && /^(?:\/(?:bin|opt\/homebrew\/bin|usr\/bin|usr\/local\/bin)\/)?[^/]+$/.test(first.value);
@@ -1461,7 +1458,7 @@ function narrow(cmd, env) {
   const base = program(first.value).toLowerCase();
   if (AWKS.has(base)) {
     const programs = awkPrograms(args);
-    return !!programs && programs.every(({ value }) => !marked(value) && !AWK_RUNS.test(value));
+    return !!programs && programs.every(({ value }) => !marked(value) && !awkRuns(value));
   }
   if (["cat", "grep", "head", "tail", "wc"].includes(base))
     return reads(parsed, env);
