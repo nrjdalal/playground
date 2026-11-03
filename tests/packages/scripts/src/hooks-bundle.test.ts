@@ -254,6 +254,20 @@ describe("hooks:bundle during a merge (#673)", () => {
     expect(run("--check")).toEqual({ code: 0, stderr: "" })
   })
 
+  test("write mode leaves a file in the bundled folder that is no .js bundle, and a folder there (#694)", () => {
+    const { root, run, written } = checkout()
+    mkdirSync(join(root, BUNDLED, "kept.js"), { recursive: true })
+    writeFileSync(join(root, BUNDLED, "notes.txt"), "kept\n")
+    expect(run().code).toBe(0)
+    expect(written()).toEqual([
+      "a-guard.js",
+      "kept.js",
+      "no-extensions-write-worker.js",
+      "notes.txt",
+    ])
+    expect(readFileSync(join(root, BUNDLED, "notes.txt"), "utf8")).toBe("kept\n")
+  })
+
   test("--check runs during a merge as before: fresh bundles pass, a stale one is named", () => {
     const { git, merging, root, run } = checkout()
     expect(run().code).toBe(0)
