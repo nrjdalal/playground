@@ -29,6 +29,7 @@
     "gate:new-user": "bun packages/scripts/src/new-user-gate/cli.ts",
     "health-beat": "bun packages/scripts/src/health-beat/cli.ts",
     "hooks:bundle": "bun packages/scripts/src/hooks-bundle.ts",
+    "hooks:differential": "bun packages/scripts/src/hook-differential.ts",
     "ingest": "bun api/hono/src/bin/dashboard-ingest.ts",
     "linear:read": "bun --no-env-file packages/scripts/src/linear-read/cli.ts",
     "lint": "oxlint",
