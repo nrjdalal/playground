@@ -5,6 +5,7 @@ import { join } from "node:path"
 
 import { SQL } from "bun"
 
+import { QUEUED_MS } from "../../../../../../api/hono/src/lib/dashboard/deliver"
 import {
   ACTIONS,
   answerInputSchema,
@@ -2041,6 +2042,46 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
     })
     expect(new Set(sent.map((d) => d.id)).size).toBe(1)
     expect(sent[0]?.id).toBeString()
+    // each later read carries when it was first held, so it holds across an API restart too
+    const held = answered.ok ? answered.item.delivery : null
+    const at = held?.status === "queued" ? held.at : "not queued"
+    expect(sent.slice(1).map((d) => d.queuedAt ?? "none")).toEqual([at, at])
+  })
+
+  // An API restart ends the follow-up, so a card still queued past STUCK_QUEUED_MS offers Retry, which reads it again under its own id and types nothing while it is held
+  test("an answer stuck queued offers Retry past the bound, which reads it again under its own id", async () => {
+    expect(store.STUCK_QUEUED_MS).toBe(QUEUED_MS + 60_000)
+    const posted = await post(decision(SLACK))
+    const sent: Delivery[] = []
+    const answers = [
+      { code: "QUEUED", ok: false as const, reason: "ops holds the message" },
+      { at: "2026-10-12T07:00:00.000Z", ok: true as const, sessionId: "s1" },
+    ]
+    const deliver = async (delivery: Delivery) => {
+      sent.push(delivery)
+      return answers.shift()!
+    }
+    const at = new Date("2026-10-12T06:00:00.000Z")
+    const restarted = () => new Promise<void>(() => {})
+    await store.answerItem(
+      db,
+      posted.id,
+      { action: "approve" },
+      { actor, deliver, now: at, wait: restarted },
+    )
+    const queued = await store.getItem(db, posted.id)
+    expect(queued?.delivery).toMatchObject({ status: "queued" })
+    const early = new Date(at.getTime() + store.STUCK_QUEUED_MS - 1)
+    expect(queued && store.retryable(queued, early)).toBe(false)
+    expect(await store.retryDelivery(db, posted.id, { actor, deliver, now: early })).toMatchObject({
+      code: "CONFLICT",
+      ok: false,
+    })
+    const stuck = new Date(at.getTime() + store.STUCK_QUEUED_MS)
+    expect(queued && store.retryable(queued, stuck)).toBe(true)
+    const retried = await store.retryDelivery(db, posted.id, { actor, deliver, now: stuck })
+    expect(retried.ok && retried.item.delivery).toMatchObject({ status: "delivered" })
+    expect(sent[1]).toMatchObject({ id: sent[0]?.id, queuedAt: at.toISOString(), to: "ops" })
   })
 
   test("an answer lost from the screen and the transcript fails as LOST, which Retry follows", async () => {

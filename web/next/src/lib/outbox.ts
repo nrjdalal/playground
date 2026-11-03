@@ -27,6 +27,8 @@ export type OutboxMessage = {
   newThread?: boolean
   reason: string | null
   retryAt: number | null
+  // When Claude Code first held it (QUEUED), kept through tries the API does not answer and sent with each retry, so an API that restarted since reads it again rather than typing it twice; it goes once the message is typed or fails for another reason.
+  queuedAt?: string
   // The session has been seen on its picker since this message was refused for one.
   sawPicker: boolean
   // The session that took it, from the API's reply: its transcript is the one to find it in.
@@ -138,6 +140,7 @@ export type OutboxAction =
       attempts: number
       code: string
       id: string
+      queuedAt?: string
       reason: string
       retryAt: number
       // the thread a New thread send opened and kept, its message left pasted and unsent, which the retry sends to
@@ -223,6 +226,7 @@ export function outboxReducer(messages: OutboxMessage[], action: OutboxAction): 
         return {
           ...m,
           code: null,
+          queuedAt: undefined,
           reason: null,
           retryAt: null,
           sessionId: action.sessionId,
@@ -235,6 +239,7 @@ export function outboxReducer(messages: OutboxMessage[], action: OutboxAction): 
           ...(action.threadId && { newThread: undefined, threadId: action.threadId }),
           attempts: action.attempts,
           code: action.code,
+          queuedAt: action.queuedAt ?? (UNREACHED.has(action.code) ? m.queuedAt : undefined),
           reason: action.reason,
           retryAt: action.retryAt,
           sawPicker: false,
@@ -248,6 +253,7 @@ export function outboxReducer(messages: OutboxMessage[], action: OutboxAction): 
           ...(action.threadId && { newThread: undefined, threadId: action.threadId }),
           attachments: action.attachments ?? m.attachments,
           code: action.code,
+          queuedAt: UNANSWERED.has(action.code) ? m.queuedAt : undefined,
           reason: action.reason,
           retryAt: null,
           state: "failed",
@@ -261,7 +267,7 @@ export function outboxReducer(messages: OutboxMessage[], action: OutboxAction): 
 
 // What a refusal does to the message whose send it answers, at its attempts-th try: a refusal a later try can pass waits with backoff, a picker for as long as it takes (it is released once the picker is seen answered, and a person may take hours), and no answer for about 2 minutes of tries in a row, counted on their own; a draft waits like any other, after a try that came back with no answer too, since deliver() refuses it before typing anything (whether that try landed is kept as `unanswered`); anything else fails with the API's reason, and an unanswered request says to look before retrying. A picker's tries are its own (message.code is the last refusal's): the count starts over once the picker gives way to another reason, so hours on a picker cannot fail the refusal that follows, while every other reason shares one count, so two that take turns still run out. No answer counts its run of tries on its own (unreached), while each of its tries still counts toward the shared one.
 export function onRefusal(
-  message: Pick<OutboxMessage, "attempts" | "code" | "id" | "unreached">,
+  message: Pick<OutboxMessage, "attempts" | "code" | "id" | "queuedAt" | "unreached">,
   error: { code: string; message: string },
   label: string,
   now: number,
@@ -284,8 +290,12 @@ export function onRefusal(
     (code === "ON_PICKER" || code === QUEUED || attempts < MAX_ATTEMPTS)
   ) {
     const delay = retryDelay(attempts)
-    const retryAt = now + (code === QUEUED ? Math.min(QUEUED_POLL_MS, delay) : delay)
-    return { attempts, code, id, reason, retryAt, type: "wait", unreached: 0 }
+    if (code === QUEUED) {
+      const queuedAt = message.queuedAt ?? new Date(now).toISOString()
+      const retryAt = now + Math.min(QUEUED_POLL_MS, delay)
+      return { attempts, code, id, queuedAt, reason, retryAt, type: "wait", unreached: 0 }
+    }
+    return { attempts, code, id, reason, retryAt: now + delay, type: "wait", unreached: 0 }
   }
   if (UNANSWERED.has(code)) {
     const unknown = `the server did not answer, so ${label} may have it already: it reads Delivered once its transcript shows it, else Retry sends it`

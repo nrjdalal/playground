@@ -477,6 +477,7 @@ export class DashboardChats {
       const files = message.attachments.map((file) => file.id)
       const { data, error } = await this.send(to, message.text, files, id, {
         newThread: message.newThread,
+        queuedAt: message.queuedAt,
         threadId: message.threadId,
       })
       if (data) {
@@ -487,6 +488,7 @@ export class DashboardChats {
         attempts: message.attempts,
         code: message.code,
         id,
+        queuedAt: message.queuedAt,
         unreached: message.unreached,
       }
       const refusal = { code: refusalCode(error), message: error.message }

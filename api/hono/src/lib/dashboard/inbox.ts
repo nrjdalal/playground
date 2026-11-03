@@ -442,7 +442,13 @@ export const answerInputSchema = z.strictObject({
 export type AnswerInput = z.input<typeof answerInputSchema>
 
 // The delivery adapter's contract, deliver() in deliver.ts, restated since this file cannot resolve the API's @/ paths; routers/inbox.ts passes deliver() as a Deliver, so the compiler fails if the two drift apart. It throws only when it cannot write its activity row, which may come after the Enter.
-export type Delivery = { actor: ActivityActor; id?: string; text: string; to: string }
+export type Delivery = {
+  actor: ActivityActor
+  id?: string
+  queuedAt?: string
+  text: string
+  to: string
+}
 export type DeliveryResult =
   | { at: string; ok: true; sessionId: string }
   | { code: string; ok: false; reason: string }
@@ -613,11 +619,20 @@ export const RETRY_CODES = [
   "ON_PICKER",
 ] as const
 
-// Pure: a failed answer he has not dismissed whose failure Retry can safely follow.
-export const retryable = (item: InboxItem): boolean =>
-  deliveryFailed(item) &&
-  item.delivery?.status === "failed" &&
-  (RETRY_CODES as readonly string[]).includes(item.delivery.code)
+// How long an answer reads queued before its card offers Retry: deliver.ts's QUEUED_MS, by which its follow-up reads it delivered or lost, and a minute more, so a card still queued then lost its follow-up to an API restart (a test holds the two apart by that minute).
+export const STUCK_QUEUED_MS = 11 * 60_000
+
+// Pure: an answer still reading queued STUCK_QUEUED_MS after it was queued, whose follow-up has gone.
+export const stuckQueued = (item: InboxItem, now: Date): boolean =>
+  item.delivery?.status === "queued" &&
+  now.getTime() - Date.parse(item.delivery.at) >= STUCK_QUEUED_MS
+
+// Pure: a failed answer he has not dismissed whose failure Retry can safely follow, or a stuck queued one, whose Retry reads it again under its own id and types nothing while Claude Code still holds it.
+export const retryable = (item: InboxItem, now = new Date()): boolean =>
+  (deliveryFailed(item) &&
+    item.delivery?.status === "failed" &&
+    (RETRY_CODES as readonly string[]).includes(item.delivery.code)) ||
+  stuckQueued(item, now)
 
 // Pure: when an open item is scheduled to ask again, while that time is still ahead; null once it is awake, and on anything not scheduled.
 export const snoozedUntil = (item: InboxItem, now: Date): string | null => {
@@ -891,22 +906,34 @@ type Sending = {
   wait?: (ms: number) => Promise<void>
 }
 
-// Types the answer into the posting session and records how that went; a poster that has ended hands it to the dispatcher instead. Each try goes under its own id, so one Claude Code holds (queued) is read again under it until it settles: this process's own reads, so a restart leaves it reading queued, its poster getting it all the same.
+// Types the answer into the posting session and records how that went; a poster that has ended hands it to the dispatcher instead. Each try goes under its own id, so one Claude Code holds (queued) is read again under it until it settles: this process's own reads, so a restart leaves it reading queued until its card offers Retry (stuckQueued).
 async function send(
   db: Database,
   item: InboxItem,
   { relay, text }: { relay: string; text: string },
   { actor, deliver, dispatcher, now, wait = (ms) => Bun.sleep(ms) }: Sending,
+  held?: Extract<InboxDelivery, { status: "queued" }>,
 ): Promise<InboxItem> {
   const one = (to: string, words: string) => ({ actor, id: crypto.randomUUID(), text: words, to })
-  let sent = one(item.from, text)
+  // a stuck queued answer is read again under its own id and queued time, so deliver() types it only once it reads lost
+  let sent: Delivery & { id: string } = held
+    ? {
+        actor,
+        id: held.id,
+        queuedAt: held.at,
+        text: held.to === item.from ? text : relay,
+        to: held.to,
+      }
+    : one(item.from, text)
   let delivery = await attempt(deliver, sent, now)
   if (dispatcher && item.from !== dispatcher && posterGone(delivery)) {
     sent = one(dispatcher, relay)
     delivery = await attempt(deliver, sent, now)
   }
   const recorded = (await recordDelivery(db, item.id, delivery, now)) ?? item
-  if (delivery.status === "queued") void follow(db, item.id, sent, { deliver, wait })
+  if (delivery.status === "queued") {
+    void follow(db, item.id, { ...sent, queuedAt: sent.queuedAt ?? delivery.at }, { deliver, wait })
+  }
   return recorded
 }
 
@@ -964,7 +991,7 @@ async function attempt(
   }
 }
 
-// Retry on an answer whose delivery failed: marks it pending in one write that holds only while it still reads failed at the version read, so a double click types it once, then delivers it again and records the new result.
+// Retry on an answer whose delivery failed, or that is stuck queued: marks it pending in one write that holds only while it still reads failed at the version read, so a double click types it once, then delivers it again and records the new result.
 export async function retryDelivery(
   db: Database,
   id: string,
@@ -974,7 +1001,7 @@ export async function retryDelivery(
   if (!current || current.id !== id) return NOT_FOUND
   if (
     current.kind === "update" ||
-    !retryable(current) ||
+    !retryable(current, now) ||
     !current.answer ||
     !("choice" in current.answer) ||
     current.answer.choice === "settled" ||
@@ -982,7 +1009,8 @@ export async function retryDelivery(
   ) {
     return {
       code: "CONFLICT",
-      message: "Only an answer that failed before anything was typed is retried",
+      message:
+        "Only an answer that failed before anything was typed, or one stuck queued, is retried",
       ok: false,
     }
   }
@@ -996,7 +1024,7 @@ export async function retryDelivery(
     .where(
       and(
         eq(inboxItem.id, id),
-        sql`${inboxItem.delivery} ->> 'status' = 'failed'`,
+        sql`${inboxItem.delivery} ->> 'status' in ('failed', 'queued')`,
         sql`${inboxItem.answer} ->> 'dismissedAt' is null`,
         eq(inboxItem.version, current.version),
       ),
@@ -1005,13 +1033,13 @@ export async function retryDelivery(
   if (!row) return { code: "CONFLICT", message: "This item changed; try again", ok: false }
   const item = toItem(row)
   return {
-    item: await send(db, item, textsOf(item, current.answer), {
-      actor,
-      deliver,
-      dispatcher,
-      now,
-      wait,
-    }),
+    item: await send(
+      db,
+      item,
+      textsOf(item, current.answer),
+      { actor, deliver, dispatcher, now, wait },
+      current.delivery?.status === "queued" ? current.delivery : undefined,
+    ),
     ok: true,
   }
 }

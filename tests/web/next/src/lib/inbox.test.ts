@@ -6,8 +6,11 @@ import {
   ACKS_STAMPED_FROM as API_ACKS_STAMPED_FROM,
   GO_CHOICES as API_GO_CHOICES,
   PLACED_TYPES as API_PLACED_TYPES,
+  QUEUED_POLL_MS as API_QUEUED_POLL_MS,
   RETRY_CODES as API_RETRY_CODES,
+  retryable as API_retryable,
   savesDraft as API_savesDraft,
+  STUCK_QUEUED_MS as API_STUCK_QUEUED_MS,
 } from "../../../../../api/hono/src/lib/dashboard/inbox"
 import {
   ACKS_STAMPED_FROM,
@@ -47,9 +50,11 @@ import {
   sendFailed,
   sendUnconfirmed,
   sendWhy,
+  STUCK_QUEUED_MS,
   updatedSince,
   upfrontLink,
 } from "../../../../../web/next/src/lib/inbox"
+import { QUEUED_POLL_MS } from "../../../../../web/next/src/lib/outbox"
 import { statusIcon } from "../../../../../web/next/src/lib/status-icons"
 
 // Remix's icons resolve from the web app's own packages, which this directory cannot see.
@@ -1430,5 +1435,19 @@ describe("an answer queued, delivered or lost", () => {
     expect(retryable(cut)).toBe(false)
     expect(checkAnswerNote(cut)).toContain(`#i${cut.ref}`)
     expect(checkAnswerNote(cut)).not.toMatch(/\bre #i\d/i)
+  })
+
+  // an API restart ends a queued answer's follow-up, so its card offers Retry once it has read queued past the API's bound
+  test("a queued answer offers Retry once stuck past the bound, as the API reads it", () => {
+    expect(STUCK_QUEUED_MS).toBe(API_STUCK_QUEUED_MS)
+    expect(QUEUED_POLL_MS).toBe(API_QUEUED_POLL_MS)
+    const at = Date.parse("2026-10-12T06:00:00.000Z")
+    const queued = {
+      ...base,
+      delivery: { at: new Date(at).toISOString(), id: "d1", status: "queued", to: "ops" },
+    } as InboxItem
+    expect(retryable(queued, at + STUCK_QUEUED_MS - 1)).toBe(false)
+    expect(retryable(queued, at + STUCK_QUEUED_MS)).toBe(true)
+    expect(API_retryable(queued, new Date(at + STUCK_QUEUED_MS))).toBe(true)
   })
 })

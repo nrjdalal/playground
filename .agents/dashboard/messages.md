@@ -63,6 +63,8 @@
   since Claude Code takes either once the session is free (on 3 Nov an Inbox answer typed during a compaction read failed, yet arrived once the compaction ended).
   A try of a queued id reads it again and types nothing (`queued` in deliver.ts, the API process's own, as `unsent` is): still held, `QUEUED`; gone from the screen, delivered with its row once the transcript shows it (`wentIn`), else `QUEUED` until `QUEUED_MS`, 10 minutes, then `LOST`, which a retry under the same id sends again.
   `QUEUED_MS` covers the longest compaction measured, 411s across 3,224 in this machine's transcripts on 3 Nov (p99 199s); one back in the box with no compaction left gets its Enter, as an unsent paste does.
+  An emptied box alone never reads delivered, since the owner's own clear empties it too: the transcript's line is the proof, and with none the message stays `QUEUED` until `LOST`.
+  An API restart forgets `queued`, so each retry carries `queuedAt`, when the outbox first read the message `QUEUED`, kept through the restart's unanswered tries; a try under an id this process does not know but with a `queuedAt` is read again the same way, never pasted twice.
 - ALWAYS: Reach the session the dashboard hosts on the Claude Agent SDK only through `api/hono/src/lib/dashboard/sdk.ts`, the dashboard's second path beside `deliver()` (phase 1), whose contract is documented on its exports.
   While `PLAYGROUND_SDK_PROBE_DIR` names a folder (a scratch checkout under `.claude/worktrees/`, resolved to its real path, since Claude Code names the transcript's folder from it), the API's entry starts one session, `probe-sdk`, there through the SDK's `query()` in streaming input mode:
   the installed `claude` found on PATH past cmux's shims (`claudeBinary()`; with none it refuses to start, rather than let the SDK run a copy of its own), with the factory's settings (`hostedSettings()`, `~/.playground/factory-settings.json` and its hooks, since `PLAYGROUND_ROLE=probe` makes it a factory session),
@@ -174,7 +176,7 @@
   since a wrong match would type onto someone else's words.
   The API's own failure (`INTERNAL_SERVER_ERROR`) fails at once.
   Retry re-runs the same loop rather than `sendMessage({ messageId })`, which would drop every message after it.
-  A message still waiting in the outbox (queued, or waiting on a retry), but one Claude Code holds, offers Unsend, which drops it before anything is typed; once its request is out it can no longer be pulled back from here.
+  A message still waiting in the outbox (queued, or waiting on a retry), and not one Claude Code holds, offers Unsend, which drops it before anything is typed; once its request is out it can no longer be pulled back from here.
   The owner's newest delivered message offers Undo for 2 minutes after it arrived, while no other message to that session is still on its way (a failed one included, since its fate may be unknown: `othersWaiting()`) and only on this page's last send to the session (`DashboardChats.lastPosted()`, which nothing moves back:
   a newer message dismissed, unsent, discarded or edited still keeps Undo off the older one), since the marker would land after that one and take it back instead (`UNDO_MS`, `undoState()` in `web/next/src/lib/outbox.ts`):
   Undo sends one fixed line through the outbox, `UNSENT_MARKER` (`[The user unsent their previous message: ignore it and anything you started because of it]`), which never echoes their words; the marker shows as no row of its own,

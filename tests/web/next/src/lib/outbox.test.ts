@@ -926,6 +926,27 @@ describe("a message Claude Code holds", () => {
     expect(pendingAction(typed, { busy: true, held: true })).toBeNull()
   })
 
+  // the API forgets what it queued when it restarts, so the outbox keeps when the message was first held and sends it with each retry
+  test("a held message keeps when it was first held through retries and an API restart, and drops it once typed or lost", () => {
+    let list = outboxReducer([message("a")], { id: "a", type: "sending" })
+    list = outboxReducer(list, onRefusal(list[0]!, QUEUED, "dispatcher", Date.parse(T1)))
+    expect(list[0]?.queuedAt).toBe(T1)
+    list = outboxReducer(list, { id: "a", type: "sending" })
+    list = outboxReducer(list, onRefusal(list[0]!, QUEUED, "dispatcher", Date.parse(T1) + 5000))
+    expect(list[0]?.queuedAt).toBe(T1)
+    // the restart's unanswered tries keep it, so the first answered try still carries it
+    const restart = { code: "NETWORK_ERROR", message: "Network request failed" }
+    list = outboxReducer(list, { id: "a", type: "sending" })
+    list = outboxReducer(list, onRefusal(list[0]!, restart, "dispatcher", Date.parse(T1) + 9000))
+    expect(list[0]).toMatchObject({ code: "NETWORK_ERROR", queuedAt: T1, state: "queued" })
+    list = outboxReducer(list, { id: "a", type: "sending" })
+    const typed = outboxReducer(list, { at: T1, id: "a", sessionId: SESSION.id, type: "typed" })
+    expect(typed[0]).toMatchObject({ queuedAt: undefined, state: "typed" })
+    const lost = outboxReducer(list, { code: "LOST", id: "a", reason: "lost", type: "fail" })
+    expect(lost[0]?.state).toBe("failed")
+    expect(lost[0]?.queuedAt).toBeUndefined()
+  })
+
   test("a lost message fails, offering Retry", () => {
     const sent = { attempts: 3, code: "QUEUED", id: "a", unreached: 0 }
     const lost = { code: "LOST", message: "Retry sends it again." }

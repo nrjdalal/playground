@@ -690,6 +690,8 @@ export function InboxCard({
   const { dispatcher, outbox } = useDashboard()
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // Check it for me sends its note once
+  const [asked, setAsked] = useState(false)
   // a draft's words, editable where they stand
   const posted = item.kind === "draft" ? item.preview.text : ""
   const [draft, setDraft] = useState(posted)
@@ -883,16 +885,19 @@ export function InboxCard({
           <Button
             size="sm"
             variant="outline"
-            onClick={() =>
+            disabled={busy || asked}
+            {...hold}
+            onClick={() => {
+              setAsked(true)
               outbox.send(dispatcher, { attachments: [], text: checkAnswerNote(item) })
-            }
+            }}
           >
             <RiQuestionLine data-icon="inline-start" />
             Check it for me
           </Button>
         </Hint>
       ) : (
-        retryable(item) && (
+        retryable(item, now) && (
           <Hint content={held}>
             <Button
               size="sm"

@@ -123,11 +123,15 @@ export const sendUnconfirmed = (item: InboxItem): boolean =>
 export const checkAnswerNote = (item: InboxItem): string =>
   `Check it for me: did ${agentLabel(item.from)} get my answer to ${itemTag(item)}? Look at its transcript and tell me whether it arrived.`
 
-// Pure: an answer that failed to send that Retry can safely follow; after any other failure it may be in the session already, so it offers Dismiss alone.
-export const retryable = (item: InboxItem): boolean =>
-  sendFailed(item) &&
-  item.delivery?.status === "failed" &&
-  (RETRY_CODES as readonly string[]).includes(item.delivery.code)
+// The API's STUCK_QUEUED_MS restated (a test holds the two equal): an answer reading queued this long after it was queued lost its follow-up to an API restart.
+export const STUCK_QUEUED_MS = 11 * 60_000
+
+// Pure: an answer that failed to send that Retry can safely follow, or one stuck queued, whose Retry reads it again and types nothing while Claude Code still holds it; after any other failure it may be in the session already, so it offers Check it for me or Dismiss.
+export const retryable = (item: InboxItem, now = Date.now()): boolean =>
+  (sendFailed(item) &&
+    item.delivery?.status === "failed" &&
+    (RETRY_CODES as readonly string[]).includes(item.delivery.code)) ||
+  (item.delivery?.status === "queued" && now - Date.parse(item.delivery.at) >= STUCK_QUEUED_MS)
 
 // The API's ACKS_STAMPED_FROM restated, since the web imports its types alone (a test holds the two equal): an answer delivered before then may have been acked with no stamp, so it reads as closed.
 export const ACKS_STAMPED_FROM = "2026-10-12T08:05:50.000Z"
@@ -587,7 +591,6 @@ export function outcomeLine(item: InboxItem): string | null {
     if (item.answer.choice !== "send" && !slack) return `${done} · Being carried out by ${who}…`
     return `${done} · ${kindWord(item) === "Linear comment" ? "Sending to Linear…" : "Sending in Slack…"}`
   }
-  // queued, delivered or lost: as the session has it
   const reached =
     delivery?.status === "delivered"
       ? delivery.via === "cli"

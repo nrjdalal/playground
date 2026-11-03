@@ -39,6 +39,8 @@ export type Delivery = {
   actor: ActivityActor
   attachments?: Attachment[]
   id?: string
+  // When an earlier try of this id read QUEUED, as the outbox recorded it, so an API that restarted since, and lost its own record, reads the message again rather than typing it twice.
+  queuedAt?: string
   text: string
   to: string
 }
@@ -582,8 +584,11 @@ export async function deliver(
         ),
         pasted: true,
       })
-      // A message Claude Code held when an earlier try ended is read again, never pasted twice: still held, it waits; gone from the screen, the transcript says it went, or, QUEUED_MS on with no line, that it was lost. One back in the box with no compaction left goes on below, where its paste gets its Enter.
-      const queuedAt = delivery.id ? queued.get(delivery.id) : undefined
+      // A message Claude Code held when an earlier try ended, by this process's record or, after a restart, by the outbox's queuedAt, is read again, never pasted twice: still held, it waits; gone from the screen, the transcript says it went, or, QUEUED_MS on with no line, that it was lost. One back in the box with no compaction left goes on below, where it gets its Enter as a paste of ours.
+      const told = delivery.queuedAt ? Date.parse(delivery.queuedAt) : Number.NaN
+      const queuedAt = delivery.id
+        ? (queued.get(delivery.id) ?? (told <= deps.now().getTime() ? told : undefined))
+        : undefined
       if (delivery.id && queuedAt !== undefined) {
         if (holdsQueued(screen, text)) return stillQueued()
         if (!(input === "holds" && holdsMessage(screen, text))) {
@@ -610,12 +615,14 @@ export async function deliver(
         await deps.record(event, async () => {})
         return { at: deps.now().toISOString(), ok: true, sessionId }
       }
-      // A paste of the dashboard's own that its Enter left in the box, this message's or an earlier one's, gets that Enter rather than reading as a draft; any other text in the box is someone's. Claude Code folds a long paste into [Pasted text #n +k lines], which is taken as a paste whose line breaks k counts.
+      // A paste of the dashboard's own that its Enter left in the box, this message's or an earlier one's, gets that Enter rather than reading as a draft, this held message's first, even with no paste remembered after a restart; any other text in the box is someone's. Claude Code folds a long paste into [Pasted text #n +k lines], which is taken as a paste whose line breaks k counts.
       const held =
         herdr && input === "holds"
-          ? (pastes.get(sessionId) ?? []).findLast((paste) =>
-              holdsUnsent(screen, paste.text, paste.images),
-            )
+          ? queuedAt !== undefined && holdsMessage(screen, text)
+            ? { at: queuedAt, id: delivery.id, images, text }
+            : (pastes.get(sessionId) ?? []).findLast((paste) =>
+                holdsUnsent(screen, paste.text, paste.images),
+              )
           : undefined
       // one the transcript shows went, or cannot show did not, is the owner's recall of it or may be, so it holds as a draft
       let stuck = held
@@ -666,7 +673,10 @@ export async function deliver(
         )
       // A message with an id that Claude Code holds after the send waits as QUEUED, its row left for the retry that sees it arrive; it gets no Enter, since Claude Code takes it on its own.
       const queueIt = (): TypingStopped => {
-        if (delivery.id) queued.set(delivery.id, deps.now().getTime())
+        const now = deps.now().getTime()
+        // an entry past the bound has settled, or its message was discarded; a retry still carries its queuedAt
+        for (const [id, at] of queued) if (now - at >= QUEUED_MS) queued.delete(id)
+        if (delivery.id) queued.set(delivery.id, now)
         return new TypingStopped(stillQueued(), "held")
       }
       // `sent` is the paste the box should hold, and `own` whether it is this message's, whose Enter left unsent is this message's to retry.

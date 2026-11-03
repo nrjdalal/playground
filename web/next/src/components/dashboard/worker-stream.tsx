@@ -668,6 +668,8 @@ function PendingMessage({
   const short = oneLine(message.text, 40) || `${files} file${files === 1 ? "" : "s"}`
   const focusComposer = () => document.getElementById(composer)?.focus()
   const dismissHeld = useTypedHold(message.typedAt)
+  // Check it for me sends its note once
+  const [asked, setAsked] = useState(false)
   const action = pendingAction(message, { busy, held: dismissHeld })
   return (
     <TranscriptMessage
@@ -727,11 +729,12 @@ function PendingMessage({
             }}
           />
         ) : null}
-        {failed && dispatcher && canCheck(message.code) ? (
+        {failed && dispatcher && canCheck(message.code) && !asked ? (
           <FooterAction
             Icon={RiQuestionLine}
             label={`Check it for me: ask the dispatcher whether "${short}" arrived`}
             onClick={() => {
+              setAsked(true)
               outbox.send(dispatcher, { attachments: [], text: checkNote(label, short) })
               focusComposer()
             }}

@@ -1750,6 +1750,52 @@ describe("deliver to a herdr session", () => {
         expect(run.sent).toHaveLength(2)
         expect(run.recorded).toHaveLength(1)
       })
+
+      // an API restart forgets the ids it queued, and the outbox's queuedAt stands in for them, so the message is read again and never pasted twice
+      describe("after an API restart", () => {
+        const restarted = (shown: string, ms: number) => {
+          const run = herdr()
+          const enters: string[] = []
+          run.deps.readScreen = async () => (enters.length ? EMPTY : shown)
+          run.deps.pressEnter = async (surface) => {
+            enters.push(surface)
+          }
+          run.deps.wait = async () => {}
+          run.deps.now = () => new Date(NOW + ms)
+          const queuedAt = new Date(NOW).toISOString()
+          const send = () =>
+            deliver({ actor, id: nextId(), queuedAt, text: MESSAGE, to: "dispatcher" }, run.deps)
+          return { ...run, enters, send }
+        }
+
+        test("a message its transcript shows reads delivered, typing nothing", async () => {
+          const run = restarted(EMPTY, 60_000)
+          run.deps.said = async () => [OLDER, arrived]
+          expect(await run.send()).toMatchObject({ ok: true, sessionId: "s-dispatcher" })
+          expect(run.sent).toEqual([])
+          expect(run.recorded).toHaveLength(1)
+        })
+
+        test("a message still queued above the box reads queued, typing nothing", async () => {
+          const run = restarted(QUEUED_ABOVE, 60_000)
+          expect(await run.send()).toMatchObject({ code: "QUEUED", ok: false })
+          expect(run.sent).toEqual([])
+          expect(run.enters).toEqual([])
+        })
+
+        test("a message gone with no transcript line past the bound reads lost, typing nothing", async () => {
+          const run = restarted(EMPTY, QUEUED_MS)
+          expect(await run.send()).toMatchObject({ code: "LOST", ok: false })
+          expect(run.sent).toEqual([])
+        })
+
+        test("a message back in the box once the compaction ends gets its Enter, pasted once", async () => {
+          const run = restarted(screen(`❯ ${MESSAGE}`), 60_000)
+          expect(await run.send()).toMatchObject({ ok: true })
+          expect(run.sent).toEqual([])
+          expect(run.enters).toEqual([HERDR])
+        })
+      })
     })
 
     // 24 Oct 02:58Z: dispatcher's box held the owner's image message, pasted and never submitted, which every later try refused as a draft until the owner pressed Enter in the terminal; the box's shape is the one dispatcher's transcript recorded at 03:13Z
