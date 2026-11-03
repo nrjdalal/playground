@@ -191,6 +191,143 @@ test("the pre-commit build skips a commit of docs and Python tests alone", async
   }
 }, 60_000)
 
+// lefthook on this repo's own type-check steps, through this checkout's commit-slot.ts and tsc, in a scratch repo holding a minimal tests/ and packages/scripts: a staged type error in either tree fails the commit, as CI's check-types does, and a commit staging neither runs neither, whatever the working tree holds
+test("the pre-commit type checks fail a staged type error in a test or a packages/scripts file", async () => {
+  const config = Bun.YAML.parse(await Bun.file(join(ROOT, "lefthook.yml")).text()) as {
+    "pre-commit": { commands: Record<string, Record<string, unknown>>; piped?: boolean }
+  }
+  const { "check-types-scripts": scripts, "check-types-tests": tests } =
+    config["pre-commit"].commands
+  const own = (step: Record<string, unknown> | undefined) => ({
+    ...step,
+    run: String(step?.run).replaceAll(
+      "packages/scripts/src/",
+      `${join(ROOT, "packages/scripts/src")}/`,
+    ),
+  })
+  const manifest = async (path: string) =>
+    (await Bun.file(join(ROOT, path)).json()) as { scripts: Record<string, string> }
+  const dir = mkdtempSync(join(tmpdir(), "lefthook-types-"))
+  const env = { ...SCRATCH_ENV, PATH: `${join(ROOT, "node_modules/.bin")}:${SCRATCH_ENV.PATH}` }
+  const run = (argv: string[]) => {
+    const result = Bun.spawnSync(argv, { cwd: dir, env, stdin: "ignore" })
+    return { code: result.exitCode, out: result.stdout.toString() + result.stderr.toString() }
+  }
+  const tsconfig = JSON.stringify({
+    compilerOptions: { module: "ESNext", noEmit: true, strict: true, target: "ESNext", types: [] },
+  })
+  const commitWith = async (files: Record<string, string>) => {
+    expect(run(["git", "rm", "-q", "-r", "--cached", "-f", "--ignore-unmatch", "."])).toMatchObject(
+      {
+        code: 0,
+      },
+    )
+    for (const [file, text] of Object.entries(files)) await Bun.write(join(dir, file), text)
+    expect(run(["git", "add", ...Object.keys(files)])).toMatchObject({ code: 0 })
+    return run(["bun", join(ROOT, LEFTHOOK_BIN), "run", "pre-commit"])
+  }
+  try {
+    expect(run(["git", "init", "-q"])).toMatchObject({ code: 0 })
+    await Bun.write(
+      join(dir, "package.json"),
+      JSON.stringify({
+        scripts: {
+          "check-types:tests": (await manifest("package.json")).scripts["check-types:tests"],
+        },
+      }),
+    )
+    await Bun.write(
+      join(dir, "packages/scripts/package.json"),
+      JSON.stringify({
+        scripts: {
+          "check-types": (await manifest("packages/scripts/package.json")).scripts["check-types"],
+        },
+      }),
+    )
+    await Bun.write(join(dir, "packages/scripts/tsconfig.json"), tsconfig)
+    await Bun.write(join(dir, "tests/tsconfig.json"), tsconfig)
+    // JSON is YAML, so the steps go in as lefthook read them
+    await Bun.write(
+      join(dir, "lefthook.yml"),
+      JSON.stringify({
+        "pre-commit": {
+          commands: { "check-types-scripts": own(scripts), "check-types-tests": own(tests) },
+          piped: config["pre-commit"].piped,
+        },
+      }),
+    )
+    const broken = await commitWith({ "tests/a.test.ts": 'export const n: number = "one"\n' })
+    expect(broken.code).not.toBe(0)
+    expect(broken.out).toContain("TS2322")
+    // TS1375: a top-level await in a file with no import or export, which reached CI alone on 3 Nov
+    const script = await commitWith({
+      "packages/scripts/src/x.ts": "await Promise.resolve()\n",
+      "tests/a.test.ts": "export const n: number = 1\n",
+    })
+    expect(script.code).not.toBe(0)
+    expect(script.out).toContain("TS1375")
+    expect(
+      await commitWith({
+        "packages/scripts/src/x.ts": "export const x = await Promise.resolve(1)\n",
+        "tests/a.test.ts": "export const n: number = 1\n",
+      }),
+    ).toMatchObject({ code: 0 })
+    // both trees broken on disk but neither staged: the commit runs neither check
+    await Bun.write(join(dir, "packages/scripts/src/x.ts"), "await Promise.resolve()\n")
+    await Bun.write(join(dir, "tests/a.test.ts"), 'export const n: number = "one"\n')
+    const neither = await commitWith({ "api/hono/src/y.ts": "export {}\n", "README.md": "x\n" })
+    expect(neither).toMatchObject({ code: 0 })
+    expect(neither.out).not.toContain("tsc")
+  } finally {
+    rmSync(dir, { force: true, recursive: true })
+  }
+}, 120_000)
+
+// lefthook on this repo's own build and type-check steps, each run swapped for an echo, in a scratch repo: the type checks read the build's dist, so they run after it
+test("the pre-commit type checks run after the build", async () => {
+  const config = Bun.YAML.parse(await Bun.file(join(ROOT, "lefthook.yml")).text()) as {
+    "pre-commit": { commands: Record<string, Record<string, unknown>>; piped?: boolean }
+  }
+  const {
+    build,
+    "check-types-scripts": scripts,
+    "check-types-tests": tests,
+  } = config["pre-commit"].commands
+  const dir = mkdtempSync(join(tmpdir(), "lefthook-types-order-"))
+  const run = (argv: string[]) => {
+    const result = Bun.spawnSync(argv, { cwd: dir, env: SCRATCH_ENV, stdin: "ignore" })
+    return { code: result.exitCode, out: result.stdout.toString() + result.stderr.toString() }
+  }
+  try {
+    expect(run(["git", "init", "-q"])).toMatchObject({ code: 0 })
+    await Bun.write(
+      join(dir, "lefthook.yml"),
+      JSON.stringify({
+        "pre-commit": {
+          commands: {
+            build: { ...build, run: "echo build-ran" },
+            "check-types-scripts": { ...scripts, run: "echo scripts-ran" },
+            "check-types-tests": { ...tests, run: "echo tests-ran" },
+          },
+          piped: config["pre-commit"].piped,
+        },
+      }),
+    )
+    for (const file of ["packages/scripts/src/x.ts", "tests/a.test.ts"])
+      await Bun.write(join(dir, file), "x")
+    expect(run(["git", "add", "."])).toMatchObject({ code: 0 })
+    const hook = run(["bun", join(ROOT, LEFTHOOK_BIN), "run", "pre-commit"])
+    expect(hook).toMatchObject({ code: 0 })
+    const [built, ...checked] = ["build-ran", "scripts-ran", "tests-ran"].map((mark) =>
+      hook.out.indexOf(mark),
+    )
+    expect(built).toBeGreaterThanOrEqual(0)
+    for (const at of checked) expect(at).toBeGreaterThan(built!)
+  } finally {
+    rmSync(dir, { force: true, recursive: true })
+  }
+}, 60_000)
+
 // lefthook on this repo's own conflict-marker step, its script run from this checkout, beside lint-staged (run swapped for an echo), in a scratch repo: a staged marker refuses the commit before the formatter can rewrite it
 test("the pre-commit marker check refuses a staged conflict marker before lint-staged runs", async () => {
   const config = Bun.YAML.parse(await Bun.file(join(ROOT, "lefthook.yml")).text()) as {
