@@ -107,6 +107,13 @@ const args = process.argv.slice(2)
 const paths = args.length > 0 ? args : ["tests"]
 // compared without a leading ./ or a trailing /, and passed to bun as given, since bun reads ./name as a path and name as a filter
 const bare = (path: string) => path.replace(/^(\.\/)+/, "").replace(/\/+$/, "") || "."
+// bun reads a path it cannot find as a name filter that matches nothing, so the run would pass on the other files: a test path names a file or the run stops
+const missing = args.filter((arg) => /\.test\.tsx?$/.test(arg) && !existsSync(bare(arg)))
+if (missing.length > 0) {
+  console.error(`test-sandbox: no test file at ${missing.join(", ")}; check the path and run again`)
+  dropScratch()
+  process.exit(1)
+}
 const serial = SERIAL.filter((file) =>
   paths.map(bare).some((path) => path === "." || file === path || file.startsWith(`${path}/`)),
 )
