@@ -494,7 +494,7 @@ describe("DashboardChats", () => {
     calls[0]?.resolve(refused("INTERNAL_SERVER_ERROR"))
     await settle()
     expect(chats.outbox().map((m) => m.state)).toEqual(["failed", "sending"])
-    expect(chats.outbox()[0]?.reason).toContain("look at its terminal before Retry")
+    expect(chats.outbox()[0]?.reason).toContain("reads Delivered once its transcript shows it")
   })
 
   // A dashboard restart restarts next dev too, and the page reloads when its dev socket reaches the new server: what was unsent goes again from the tab's storage, under the same id.
