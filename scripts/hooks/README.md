@@ -81,7 +81,7 @@ Only the first reading moves the folder, sets variables and records files for th
   since a `cd` an `&&` made sure at the end of an `eval` or a `source` may not have run either (`eval 'true && cd <path>'; git commit -m x`, refused in both folders).
 - Every other `cd` leaves `Env.cwdSure` unnamed and keeps each folder the shell may be in: the folder before it, and each folder its target names, read against every folder the shell may already be in (`Env.cwdMaybe`).
   A relative target a count or a loop may run again adds every folder above it.
-  A function's or a brace group's own `cd` adds its folder to `Env.cwdHeld`, which no later `cd` clears, since the line may call that body at any point.
+  A function's or a brace group's own `cd` adds its folder to `Env.cwdHeld`, which no later `cd` clears, since the line may call that body at any point, and a relative `cd` after it resolves from those folders too, since the body may already have run.
   `popd`, `cd -` and a bare `pushd` take every folder the line has named (`Env.cwdBack`).
   In a hook that follows zsh's `~-` (`Env.old` set), a `pushd ~-` takes those folders too, the start folder among them, and a `pushd ~+` each folder the shell may be in, each beside the folder literally named `~-` or `~+` and the one `Env.cwd`'s own reading lands in.
   `Env.cwdUnread` marks a `cd` whose landing folder nothing names (`cd "$X"`, zsh's two-operand `cd`, a `popd` whose stack the reader cannot see).
