@@ -21,14 +21,9 @@ import {
 } from "@/components/ui/item"
 import { Switch } from "@/components/ui/switch"
 import { toast } from "@/components/ui/toast"
-import {
-  ACCOUNTS_QUERY_KEY,
-  type AccountRow,
-  accountWords,
-  readAccounts,
-  withOwn,
-} from "@/lib/accounts"
+import { ACCOUNTS_QUERY_KEY, type AccountRow, accountWords, readAccounts } from "@/lib/accounts"
 import { apiClient, unwrap } from "@/lib/api/client"
+import { withOwn } from "@/lib/own-account"
 import { PROVIDER_ICONS } from "@/lib/status-icons"
 import { useAccount } from "@/lib/system"
 

@@ -138,14 +138,6 @@ export const accountWords = (row: AccountRow, login?: string | null) => ({
   title: row.label ?? row.email ?? row.key,
 })
 
-// Pure: usage.accounts with own set on the Claude row whose email is key, or dropped from it when switched off, every other row as it was; the value Settings' Own account switch writes.
-export const withOwn = <R extends Record<string, unknown>>(rows: R[], key: string, own: boolean) =>
-  rows.map((row) => {
-    if ((row.provider ?? "claude") !== "claude" || row.email !== key) return row
-    const { own: _, ...rest } = row
-    return own ? { ...rest, own: true } : rest
-  })
-
 // GET /api/v1/accounts: every account the factory spends, whether ext init has named the login they need and the scope a write goes to, read by Settings and by the home's empty state, which asks whether a Claude one exists.
 export const readAccounts = async (): Promise<{
   accounts: AccountRow[]

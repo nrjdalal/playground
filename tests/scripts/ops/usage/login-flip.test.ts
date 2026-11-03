@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { withOwn } from "../../../../web/next/src/lib/accounts"
+import { withOwn } from "../../../../web/next/src/lib/own-account"
 
 const script = join(
   import.meta.dir,

@@ -11,7 +11,6 @@ import {
   setupBody,
   signInFor,
   signInServes,
-  withOwn,
 } from "../../../../../web/next/src/lib/accounts"
 
 const form = (more: Partial<AccountForm>): AccountForm => ({
@@ -163,33 +162,5 @@ describe("an Add's answer", () => {
     )
     expect(addedTitle("pat@example.com", true)).toBe("pat@example.com added")
     expect(addedTitle("zai")).toBe("zai added")
-  })
-})
-
-describe("withOwn", () => {
-  const rows = [
-    { email: "pat@example.com", label: "work", renews: 17 },
-    { email: "sam@example.com", own: true },
-    { label: "zai", provider: "glm" },
-  ]
-
-  test("marks the one Claude row by its email own, and leaves every other row as it was", () => {
-    expect(withOwn(rows, "pat@example.com", true)).toEqual([
-      { email: "pat@example.com", label: "work", own: true, renews: 17 },
-      rows[1],
-      rows[2],
-    ])
-  })
-
-  test("switched off, drops own from the row, so it reads as unset", () => {
-    expect(withOwn(rows, "sam@example.com", false)).toEqual([
-      rows[0],
-      { email: "sam@example.com" },
-      rows[2],
-    ])
-  })
-
-  test("never marks a GLM row, whose label can match no Claude email", () => {
-    expect(withOwn(rows, "zai", true)).toEqual(rows)
   })
 })
