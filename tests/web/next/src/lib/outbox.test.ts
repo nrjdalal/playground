@@ -871,7 +871,7 @@ describe("statusLine", () => {
 })
 
 // A loader, a faint tick while Claude Code holds it, then one tick, then two, in one fixed slot so nothing shifts.
-test("statusMark draws each message as one mark: a spinner on its way, a clock while held, a tick once typed, two once delivered", () => {
+test("statusMark draws each message as one mark: a spinner on its way, a faint tick while held, a tick once typed, two once delivered", () => {
   expect(statusMark(message("a", { state: "queued" }))).toBe("sending")
   expect(statusMark(message("a", { code: "QUEUED", state: "queued" }))).toBe("queued")
   expect(statusMark(message("a", { state: "sending" }))).toBe("sending")
