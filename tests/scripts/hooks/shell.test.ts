@@ -54,7 +54,7 @@ describe("an alternate reading runs on its own copy of the env", () => {
 })
 
 describe("stdinShell reads a privilege wrapper's root shell", () => {
-  test.each([
+  test.each<[string, string, "root" | undefined]>([
     ["a program in a variable behind a quoted bare wrapper", `'sudo' "$X"`, "root"],
     ["a second wrapper's shell option behind a plain first wrapper", "doas sudo -i", "root"],
     ["a quoted shell option", "sudo '-s'", "root"],
