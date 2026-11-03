@@ -1,5 +1,14 @@
 import { afterAll, describe, expect, test } from "bun:test"
-import { chmodSync, existsSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from "node:fs"
+import {
+  chmodSync,
+  existsSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+} from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -890,7 +899,7 @@ bun() {
       ! listed install-fails ;;
     "run dev") echo "dev" >> ${keptCalls} ;;
     "build packages/scripts/src/portless.ts") echo "launcher $(git rev-parse --short HEAD)" > "\${4#--outfile=}" ;;
-    "--no-env-file "*/playground/cli.ts) [ "$3" = rm ] && { echo "trash $(basename "$4") $6" >> ${keptCalls}; mkdir -p ${kept}/trashed; mv "$4" ${kept}/trashed/; } ;;
+    "--no-env-file "*/trash-build.ts) echo "trash $(basename "$3")" >> ${keptCalls}; [ ! -e ${kept}/trash-refuses ] || return 1; mkdir -p ${kept}/trashed; mv "$3" ${kept}/trashed/ ;;
   esac
 }
 alive() { kill -0 "$(cat "$S/$1.pid" 2>/dev/null)" 2>/dev/null; }
@@ -905,6 +914,7 @@ check_dev() { local p i; p=$(cat "$S/dashboard-dev.pid"); for i in $(seq 1 100);
 start_follower() { :; }; check_follower() { echo "follower=running"; }; setup_pending() { return 1; }
 ${fn("behind")}
 ${fn("trash_build")}
+${fn("set_aside")}
 ${block("dev_reason")}
 ${block("reload_if")}
 ${block("finish_roll")}
@@ -1009,11 +1019,33 @@ describe("the supervisor's production build", () => {
       `say rebuilding ${short(c1)}: its build was for http://playground.localhost:1355 http://api.playground.localhost:1355, the Dashboard is now on ${WEB} ${API}`,
     ])
     expect(await keptLines(/^(build|serve)/)).toEqual([`build ${short(c1)}`, `serve ${c1}`])
+    expect(await keptLines(/^trash /)).toEqual([
+      expect.stringMatching(new RegExp(`^trash ${c1}\\.aside-\\d+$`)),
+    ])
   })
 
-  test("a pass keeps its own build and the last one that passed before it, and removes the rest", async () => {
+  test("a rebuild whose old folder the trash refuses still serves, keeps the head out of bad-builds, and leaves the old folder aside for keep_builds", async () => {
     fresh()
-    for (const name of ["a", "b", "c"]) Bun.spawnSync(["mkdir", "-p", join(builds, name)])
+    expect((await keptRun("roll_up START", c1)).code).toBe(0)
+    await Bun.write(join(builds, c1, "urls"), "http://elsewhere http://elsewhere\n")
+    await Bun.write(join(kept, "trash-refuses"), "")
+    rmSync(keptCalls)
+    expect((await keptRun("roll_up START", c1)).code).toBe(0)
+    rmSync(join(kept, "trash-refuses"))
+    expect(await keptLines(/^(build|serve)/)).toEqual([`build ${short(c1)}`, `serve ${c1}`])
+    expect(await Bun.file(join(builds, c1, "urls")).text()).toBe(`${WEB} ${API}\n`)
+    const aside = readdirSync(builds).filter((name) => name.startsWith(`${c1}.aside-`))
+    expect(aside).toHaveLength(1)
+    const bad = join(kept, "bad-builds")
+    expect(existsSync(bad) ? readFileSync(bad, "utf8") : "").not.toContain(c1)
+    expect((await keptRun(`keep_builds ${c1}`, c1)).code).toBe(0)
+    expect(readdirSync(builds).filter((name) => name.startsWith(`${c1}.aside-`))).toEqual([])
+  })
+
+  test("a pass keeps its own build and the last one that passed before it, and moves the rest to the trash, a stray aside included", async () => {
+    fresh()
+    for (const name of ["a", "b", "c", "c.aside-1"])
+      Bun.spawnSync(["mkdir", "-p", join(builds, name)])
     await Bun.write(join(builds, "passed"), "b\n")
     expect((await keptRun("keep_builds c", c2)).code).toBe(0)
     expect(Bun.spawnSync(["ls", builds]).stdout.toString().trim().split("\n")).toEqual([
@@ -1021,7 +1053,7 @@ describe("the supervisor's production build", () => {
       "c",
       "passed",
     ])
-    expect(await keptLines(/^trash /)).toEqual(["trash a dashboard-supervisor"])
+    expect(await keptLines(/^trash /)).toEqual(["trash a", "trash c.aside-1"])
     expect(await Bun.file(join(builds, "passed")).text()).toBe("c\n")
   })
 })
@@ -1441,7 +1473,7 @@ describe("the supervisor's alias check", () => {
   })
 })
 
-// trash_build through the real playground rm, on a HOME of the test's own: a folder in its builds folder goes to that HOME's trash under the dashboard-supervisor carve-out, and the staging folder beside it is refused, stays, and is named in the log and to the dispatcher's outbox
+// trash_build through the real trash-build.ts, on a HOME of the test's own: a folder in its builds folder goes to that HOME's trash under the dashboard-supervisor carve-out, and the staging folder beside it is refused, stays, and is named in the log and to the dispatcher's outbox
 describe("trash_build", () => {
   const home = join(scratch, "trash-home")
   const state = join(home, ".playground", "ops", "dashboard")
@@ -1483,6 +1515,6 @@ describe("trash_build", () => {
     )
     expect(
       await Bun.file(join(home, ".playground", "ops", "outbox", "ops-safe-delete.jsonl")).text(),
-    ).toContain(`dashboard-supervisor: ${staging} is inside the protected`)
+    ).toContain(`dashboard-supervisor: ${staging} is not directly in ${join(state, "builds")}`)
   }, 30_000)
 })
