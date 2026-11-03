@@ -468,6 +468,7 @@ export function kindWord(item: InboxItem): string {
     return word.charAt(0).toUpperCase() + word.slice(1)
   }
   const words = {
+    accept: "Accept",
     ask: "Ask",
     budget: "Budget",
     delete: "Delete",
@@ -520,6 +521,9 @@ export function itemState(item: InboxItem): ItemState {
     if (!provided.results) return "sending"
     return provided.results.every((result) => result.exitCode === 0) ? "done" : "failed"
   }
+  // an accept the dashboard ran is done or failed by its exit code alone, since nothing is left for its poster to carry out
+  if (provided && "accepted" in provided && provided.accepted)
+    return provided.accepted.exitCode === 0 ? "done" : "failed"
   // a chat reply is being carried out by its poster until it is closed, then done
   if (item.kind !== "update" && chosen(item)?.choice === "replied")
     return carriedOut(item) ? "done" : "sending"
@@ -610,6 +614,13 @@ export function outcomeLine(item: InboxItem): string | null {
     send: item.answer.editedText ? "You sent it with changes" : "You sent it",
   }[item.answer.choice]
   const delivery = item.delivery
+  // an accept the dashboard ran says what the run gave, the card's whole result
+  const accepted = "accepted" in item.answer ? item.answer.accepted : undefined
+  if (accepted) {
+    return accepted.exitCode === 0
+      ? `${done} · Accepted: ${accepted.line}`
+      : `${done} · Accept failed (exit ${accepted.exitCode}): ${accepted.line}`
+  }
   // Claude Code holds it until the session is free, whatever the answer
   if (delivery?.status === "queued") return `${done} · Queued: ${who} holds it, to take once free`
   if (isGo(item.answer.choice) && delivery?.status !== "failed" && !carriedOut(item)) {

@@ -120,7 +120,8 @@
   The answer is recorded in one write that holds only while the item is open at the version read, then typed into the posting session through `deliver()` (`Inbox #i41 (<id>) "<title>": Approved. Carry it out.`), and the item records how that delivery went.
   A poster that has ended (the delivery reads `NOT_FOUND` with deliver.ts's reason `No live session is named <poster>.` or `<poster>'s Claude is not running in its pane any more.`; `posterGone` in `inbox.ts`) hands the answer to the dispatcher instead (`DISPATCHER`, which the router passes to `answerItem` and `retryDelivery`; `relayText`).
   Any other `NOT_FOUND` (`now names another session`, `has no terminal to type into`) comes from a live session and stays failed, so the go is never carried out twice.
-  The dispatcher is typed the same text, led by a line saying the poster has ended: for a go, that it posts a sent message through the MCP server `slack.sendServer` names, else its Slack tool, or saves a draft as the text says and then acks the item; for a deny, a clear, a discard or a provided secret, that nothing is carried out and the item closes with `bun run ask get --ack`.
+  The dispatcher is typed the same text, led by a line saying the poster has ended: for a go, that it posts a sent message through the MCP server `slack.sendServer` names, else its Slack tool, or saves a draft as the text says and then acks the item; for a deny, a clear, a discard or a provided secret, that nothing is carried out and the item closes with `bun run ask get --ack`;
+  for an accept the Dashboard ran (below), that nothing is carried out and the item closes with `bun run ask ack --no-link`.
   The item's kind and exact preview text follow.
   That delivery records `delivered` with `to`, the session that took it: the dispatcher here, the poster otherwise.
   A row from before `to` was recorded has none and reads as its poster (`takenBy` in `web/next/src/lib/inbox.ts`).
@@ -176,7 +177,8 @@
   ```
 
   `kind` is `decision` (left out, it is one), `draft` or `update`; `from` is the posting session's name as the Dashboard shows it, since the answer is typed into that session; `title` is one line.
-  A decision's `preview` is one of eight, each what Approve does except the `secret` ask (below), written in ELI5 / ASD-STE100 plain words: `ask` (`text`, what its poster does on Approve, for a decision no other shape fits: a production port, a work request from outside the chain, its text naming the session asking and the work it wants, or a step only the owner can take, its text the step,
+  A decision's `preview` is one of nine, each what Approve does except the `secret` ask (below), written in ELI5 / ASD-STE100 plain words: `accept` (`scope`, `kind`, `key`, `rev`, `why`, below), `ask` (`text`, what its poster does on Approve, for a decision no other shape fits:
+  a production port, a work request from outside the chain, its text naming the session asking and the work it wants, or a step only the owner can take, its text the step,
   Approve meaning done and Deny meaning the owner can't, or a grilling batch, its text each open question numbered with its recommended answer, Approve taking them all and the owner's Note giving his own by number;
   with optional `approve` and `deny` labels, one line each, which the owner's card shows as two choices under its text, the quoted block, when both are there, and optional `attachments`, below), `slack` (`to`, `text`, optional `attachments`),
   `ship` (`sha`, `prs` of `{number, title}`), `ticket` (`team`, `title`, `body`), `delete` (`what`, `why`), `schema` (`shape`), `budget` (`amount`, `why`) or `secret` (`key`, `sink`); a decision with none is refused.
@@ -269,6 +271,21 @@
    "preview": {"type": "secret", "key": "GITHUB_CLIENT_SECRET",
                "sink": {"type": "vercel", "project": "web-app", "scope": "acme",
                         "environments": ["production", "preview", "development"]}}}
+  EOF
+  ```
+
+- An `accept` decision asks the owner to accept an extension proposal (`web/next/content/docs/extensions.mdx`'s Review), the one decision whose Approve the Dashboard carries out itself, since an accept is the owner's own act and the CLI refuses one from a session with a role.
+  Its `scope`, `kind` and `key` name the proposal in the store's own patterns, none able to start as a flag; its `rev` (7 to 40 hex) is the proposal's head the poster read, so a proposal written since is refused with a 409 (`acceptSchema` in `api/hono/src/lib/dashboard/inbox.ts`); `why` says why to accept it.
+  Its card reads `On Approve, the dashboard accepts the proposed <kind> <key> in <scope>, as it reads at <rev>.` and the why; Edit is refused, so the words approved are the words posted.
+  Approve is claimed in `answerItem`'s one versioned write, so a double click runs once, then runs `ext accept <scope> <kind> <key> <rev> --reason "the owner approved it in the Inbox (#iN)"` through `runCli()` (`api/hono/src/lib/store/extensions.ts`): one fixed argv (`acceptArgs`), no shell, no `PLAYGROUND_ROLE`, against the stack's data folder, a fixture stack's own.
+  The answer keeps `accepted: {exitCode, line}`, the CLI's first line or its error; the card reads `Accepted: <line>` green or `Accept failed (exit N): <line>` red, and the poster, or the dispatcher in an ended poster's place, is typed that result with nothing left to carry out, closing it with `bun run ask ack #iN --no-link "<why>"`.
+  Deny and Archive run nothing; a failed accept takes a new decision for the proposal's current rev.
+
+  ```bash
+  bun run ask new <<'EOF'
+  {"from": "dispatcher", "title": "Accept the end-of-day skill in acme?",
+   "preview": {"type": "accept", "scope": "acme", "kind": "skill", "key": "end-of-day",
+               "rev": "3f9a2c1d", "why": "Scored 4 by two reviewers; it reads the day's merges"}}
   EOF
   ```
 
