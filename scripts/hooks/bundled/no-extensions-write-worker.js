@@ -215,25 +215,40 @@ function stdinShell(cmd) {
   }
   const end = first ? cmd.words.indexOf(first) : -1;
   const before = cmd.words.slice(at, end === -1 ? undefined : end);
-  const k = before.findIndex((w) => !w.quoted && ROOT_SHELLS.has(program(w.value)));
+  const k = before.findIndex((w) => ROOT_SHELLS.has(program(w.value)));
   if (k === -1)
     return;
-  const wrapper = program(before[k].value);
+  if (first)
+    return "root";
+  const wrappers = [];
+  for (const { value } of before.slice(k)) {
+    if (ROOT_SHELLS.has(program(value)))
+      wrappers.push(program(value));
+    else if (wrappers.some((wrapper) => startsRootShell(wrapper, value)))
+      return "root";
+  }
+  return;
+}
+function startsRootShell(wrapper, value) {
+  if (marked(value))
+    return true;
   const shells = ROOT_SHELLS.get(wrapper);
   const { flags, values } = WRAPPERS.get(wrapper);
-  const clustered = (value) => {
-    let shell = false;
-    for (const c of value.slice(1)) {
-      if (values.has(`-${c}`))
-        return shell;
-      if (!flags.has(`-${c}`))
-        return false;
-      shell ||= shells.has(`-${c}`);
-    }
-    return shell;
-  };
-  const starts = ({ quoted, value }) => marked(value) || !quoted && (shells.has(value) || /^-[A-Za-z]/.test(value) && clustered(value));
-  return !!first || before.slice(k + 1).some(starts) ? "root" : undefined;
+  if (value.startsWith("--")) {
+    const named = [...flags, ...values].filter((o) => o.startsWith(value));
+    return shells.has(named.length === 1 ? named[0] : value);
+  }
+  if (!/^-[A-Za-z]/.test(value))
+    return false;
+  let shell = false;
+  for (const c of value.slice(1)) {
+    if (values.has(`-${c}`))
+      return shell;
+    if (!flags.has(`-${c}`))
+      return false;
+    shell ||= shells.has(`-${c}`);
+  }
+  return shell;
 }
 var COUNTED = new Set(["repeat", "timeout"]);
 var SHELLS = new Set(["bash", "dash", "ksh", "sh", "zsh"]);
