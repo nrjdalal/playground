@@ -180,6 +180,20 @@ describe.skipIf(!dockerUp())("Yard's routes on the hosted build", () => {
     expect([stale.login, fresh.login]).toEqual([null, "taken"])
   })
 
+  // Yard's member rung keys on user.login, so a sign-up that carries one is refused or stored without it, and stampLogin drops a login off GitHub's callback
+  test("a sign-up carrying a login stores no login, and stampLogin drops it off the callback", async () => {
+    const email = ["signup", "example.com"].join("@")
+    const script = `const { stampLogin } = await import("@packages/auth"); const server = Bun.serve((await import(process.env.YARD_HOSTED)).default); const signUp = await fetch("http://127.0.0.1:" + server.port + "/api/auth/sign-up/email", { body: JSON.stringify({ email: process.env.EMAIL, login: "signedup", name: "Signed Up", password: "a-long-test-password" }), headers: { "content-type": "application/json", origin: process.env.HONO_WEB_URL }, method: "POST" }); const stamped = await stampLogin({ login: "signedup" }, { params: {}, path: "/sign-up/email" }); console.log(JSON.stringify({ dropped: Boolean(stamped) && "login" in stamped.data && stamped.data.login === undefined, signUp: signUp.status })); process.exit(0)`
+    const run = child(script, { EMAIL: email, POSTGRES_URL: url })
+    expect(run.err).not.toContain("error:")
+    const { dropped, signUp } = JSON.parse(last(run.out))
+    expect(dropped).toBe(true)
+    const rows = await sql`select login from "user" where email = ${email} or login = 'signedup'`
+    expect(signUp >= 400 ? rows : rows.map((row: { login: string | null }) => row.login)).toEqual(
+      signUp >= 400 ? [] : [null],
+    )
+  })
+
   test("the socket upgrades on the Vercel export, a server that never listened", async () => {
     const script = `const server = (await import(${JSON.stringify(HOSTED)})).default; await new Promise((done) => server.listen(0, "127.0.0.1", done)); const socket = new WebSocket("ws://127.0.0.1:" + server.address().port + "/api/v1/yard/socket?token=${await ott("bo")}", { headers: { origin: ${JSON.stringify(WEB)} } }); socket.onopen = () => { console.log("open"); process.exit(0) }; socket.onerror = () => { console.log("error"); process.exit(1) }`
     const run = child(script, { POSTGRES_URL: url, VERCEL: "1" })
