@@ -128,10 +128,12 @@ Until the session confirms it, the card reads what is happening, such as Sending
 Once confirmed, the card links to where it landed, such as Open thread for a Slack message.
 A Draft that Slack refused, because that conversation already holds one, reads in gray Draft not saved, with the reason.
 
+While the session holds your answer, during a compaction or its own turn, the card reads Queued, and it turns Delivered by itself once the session takes it.
+A card still Queued after 11 minutes offers **Retry**, which looks again and types nothing while the session still holds it.
 When your answer cannot reach the session, the card stays in the list in red, reading Send failed with the reason.
-When nothing reached the session yet, **Retry** sends it again.
-When part of it may have reached the session already, it reads Send unconfirmed and has no Retry, so it is never sent twice.
-A card with no Retry offers Dismiss alone.
+When nothing reached the session yet, **Retry** sends it again, and an answer the session held but never took reads Lost, with Retry too.
+When part of it may have reached the session already, it reads Send unconfirmed and has no Retry, so it is never sent twice: **Check it for me** asks your dispatcher to look and tell you.
+A card with no Retry offers Dismiss.
 
 ## Put an item away
 

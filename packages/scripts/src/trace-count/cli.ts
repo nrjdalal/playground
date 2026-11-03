@@ -7,13 +7,16 @@ import { readPolicy } from "../../../settings/src/rendered"
 import {
   COUNTS,
   type Counts,
+  changedFiles,
   count,
   KEPT,
   type Kept,
   list,
+  located,
   lowered,
   refusal,
   risen,
+  risenKinds,
   tree,
 } from "./count"
 import { publicListPath, reposOf } from "./kinds"
@@ -99,7 +102,9 @@ const over = risen(now, baseline)
 for (const [kind, n] of Object.entries(now))
   console.log(`${kind}\t${n}\t${baseline[kind as keyof Counts] ?? "-"}`)
 if (over.length > 0 && !values.write) {
-  console.error(refusal(over))
+  console.error(
+    refusal(over, located(files, risenKinds(over), publicList, repos, kept, changedFiles(root))),
+  )
   process.exit(1)
 }
 if (values.write) {

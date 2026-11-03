@@ -3,7 +3,7 @@ import { DISPATCHER_SLOT_LABELS } from "@packages/config/kinds"
 
 type ModelFacts = { effort: string | null; model: string | null }
 
-const MODEL_FAMILIES: Record<string, string> = {
+export const MODEL_FAMILIES: Record<string, string> = {
   fable: "Fable",
   haiku: "Haiku",
   opus: "Opus",
