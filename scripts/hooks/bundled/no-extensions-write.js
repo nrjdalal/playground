@@ -1544,13 +1544,22 @@ function namings(command) {
   const counts = new Map;
   const plain = new Set;
   const add = (key) => counts.set(key, (counts.get(key) ?? 0) + 1);
-  let blind = /\$\{\([^)]*P/.test(command);
+  let blind = false;
+  for (const m of command.matchAll(/\$\{\(([^)]*)(\)?)/g)) {
+    const [whole, flags, closed] = m;
+    const rest = command.slice(m.index + whole.length);
+    const name = rest.match(/^[A-Za-z_]\w*/)?.[0];
+    if (!closed || !/^[\w@#%~^=!*-]*$/.test(flags))
+      blind = true;
+    else if (flags.includes("P") && (!name || !READS_ONLY.test(rest.slice(name.length))))
+      blind = true;
+  }
   for (const m of command.matchAll(/(\$\{[#!]?)?(?<![\w$])([A-Za-z_]\w*)/g)) {
     const [whole, expanded, key] = m;
     const next = command.slice(m.index + whole.length);
     if (expanded && READS_ONLY.test(next))
       continue;
-    if (expanded === "${!" && !/^[*@[]/.test(next))
+    if (expanded === "${!" && !/^(?:[*@]|\[[*@]\])\}/.test(next) && !READS_ONLY.test(next.replace(/^\[[^\][$`]*\]/, "")))
       blind = true;
     const assigns = next[0] === "=" ? "=" : undefined;
     const at = m.index + (expanded?.length ?? 0);
@@ -1719,6 +1728,7 @@ var NAME_SETTERS = new Set([
   "zuntie"
 ]);
 var PRINTS = new Set(["print", "printf"]);
+var NAMEREFS = new Set(["declare", "local", "typeset"]);
 var RUNS_TEXT = new Set([".", "eval", "source"]);
 var OPENS = new Set(["case", "for", "if", "select", "until", "while", "{"]);
 var CLOSES = new Set(["done", "esac", "fi", "}"]);
@@ -1731,6 +1741,8 @@ function steadyNames(named, commands) {
   for (const [at, cmd] of commands.entries()) {
     const { name } = parses[at];
     if (RUNS_TEXT.has(name))
+      return () => NONE;
+    if (NAMEREFS.has(name) && cmd.words.some((w, k) => k > 0 && /^-[^-\s]*n/.test(w.value)))
       return () => NONE;
     const loop = cmd.words.findIndex((w) => !w.quoted && (w.value === "for" || w.value === "select"));
     if (!NAME_SETTERS.has(name) && loop === -1)
