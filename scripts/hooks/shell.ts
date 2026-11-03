@@ -172,7 +172,7 @@ function optionValue(word: string, { flags, values }: Options): "next" | "own" |
   return "own"
 }
 
-// The privilege wrappers' options that start a root shell, which reads its script from stdin when no command follows them: a closed list, read quoted or not, as a word, a long one's unambiguous prefix, or in a cluster of the wrapper's own flags ahead of its first value-taking letter
+// The privilege wrappers' options that start a root shell, which reads its script from stdin when no command follows them: a closed list, which startsRootShell reads
 const ROOT_SHELLS = new Map([
   ["doas", new Set(["-s"])],
   ["sudo", new Set(["--login", "--shell", "-i", "-s"])],
@@ -195,29 +195,33 @@ export function stdinShell(cmd: Command): "root" | "shell" | undefined {
   const before = cmd.words.slice(at, end === -1 ? undefined : end)
   const k = before.findIndex((w) => ROOT_SHELLS.has(program(w.value)))
   if (k === -1) return undefined
-  const wrapper = program(before[k].value)
+  if (first) return "root"
+  // each word after the first wrapper, read against every wrapper named before it, so a second one (`doas sudo -i`) or one's name taken as another's value (`sudo -u doas -i`) hides no shell option
+  const wrappers: string[] = []
+  for (const { value } of before.slice(k)) {
+    if (ROOT_SHELLS.has(program(value))) wrappers.push(program(value))
+    else if (wrappers.some((wrapper) => startsRootShell(wrapper, value))) return "root"
+  }
+  return undefined
+}
+
+// Whether a word, by its unquoted value, starts a wrapper's root shell: a listed option, alone, as a long one's unambiguous prefix (`--sh`, as getopt_long reads it) or in a cluster of the wrapper's own flags ahead of its first value-taking letter (`-Es`, `-su root`, `-su#0`; in `-us` the `-u` takes the `s`), or a word the hook cannot read, which may hold one
+function startsRootShell(wrapper: string, value: string): boolean {
+  if (marked(value)) return true
   const shells = ROOT_SHELLS.get(wrapper) as Set<string>
   const { flags, values } = WRAPPERS.get(wrapper) as Options
-  const longs = [...flags, ...values].filter((o) => o.startsWith("--"))
-  // the long option a word names: itself, or the one long option it is a prefix of (`--sh`), as getopt_long reads an unambiguous abbreviation
-  const long = (value: string) => {
-    const hits = longs.filter((o) => o.startsWith(value))
-    return hits.length === 1 && value.startsWith("--") ? hits[0] : value
+  if (value.startsWith("--")) {
+    const named = [...flags, ...values].filter((o) => o.startsWith(value))
+    return shells.has(named.length === 1 ? named[0] : value)
   }
-  // a cluster's letters up to its first value-taking one, which takes the rest as its value (`-su root`, `-su#0`, `-us`): a shell letter among them, each a flag of the wrapper's own
-  const clustered = (value: string) => {
-    let shell = false
-    for (const c of value.slice(1)) {
-      if (values.has(`-${c}`)) return shell
-      if (!flags.has(`-${c}`)) return false
-      shell ||= shells.has(`-${c}`)
-    }
-    return shell
+  if (!/^-[A-Za-z]/.test(value)) return false
+  let shell = false
+  for (const c of value.slice(1)) {
+    if (values.has(`-${c}`)) return shell
+    if (!flags.has(`-${c}`)) return false
+    shell ||= shells.has(`-${c}`)
   }
-  // a listed option, alone, abbreviated (`--sh`) or in a cluster of the wrapper's own flags (`-Es`, `-su root`), quoted or not, or a word the hook cannot read, which may hold one
-  const starts = ({ value }: Word) =>
-    marked(value) || shells.has(long(value)) || (/^-[A-Za-z]/.test(value) && clustered(value))
-  return !!first || before.slice(k + 1).some(starts) ? "root" : undefined
+  return shell
 }
 
 // Wrappers that take one positional argument (a count or a duration) before the command.
