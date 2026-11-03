@@ -4,6 +4,8 @@ import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { check, GUARD_KEYS, guarded } from "../../../scripts/hooks/no-extensions-write"
+import { stepsTaken } from "../../../scripts/hooks/shell"
+import { overBaseline } from "./pace"
 
 // A home whose data folder holds an extensions root, with a list, policy.json and a scope's sources, as a machine with extensions has.
 const HOME = mkdtempSync(join(tmpdir(), "no-extensions-write-"))
@@ -34,7 +36,7 @@ const ENV = { HOME }
 const CHECKOUT = join(import.meta.dir, "..", "..", "..")
 const CLI_DIR = join(CHECKOUT, "packages", "scripts", "src", "playground")
 
-const bash = (command: string, cwd = HOME) =>
+const bash = (command: string, cwd = HOME, budget?: number) =>
   check(
     JSON.stringify({
       cwd,
@@ -43,6 +45,7 @@ const bash = (command: string, cwd = HOME) =>
       tool_name: "Bash",
     }),
     ENV,
+    budget,
   )
 
 // A harmless git alias nest of the given depth around an inner command line, each level double-quoted.
@@ -331,12 +334,12 @@ describe("a direct write into the extensions root is refused, naming the owner's
     expect(reason).toContain("split it into shorter calls")
   })
 
-  test("a long run of closing braces ahead of the CLI is read inside the hook's time", async () => {
-    const started = performance.now()
-    const reason = await bash(`${"ls; }\n".repeat(21_000)}playground ext sync`, "/tmp")
-    expect(reason).toContain("no-extensions-write hook refuses")
-    expect(performance.now() - started).toBeLessThan(1_000)
-  }, 20_000)
+  // a scan back for each brace's open runs past x3000 over the baseline, where the stack of opens stays near x20
+  test("a long run of closing braces ahead of the CLI is read in a time linear in its length", async () => {
+    const command = `${"ls; }\n".repeat(21_000)}playground ext sync`
+    expect(await bash(command, "/tmp")).toContain("no-extensions-write hook refuses")
+    expect(await overBaseline((c) => bash(c, "/tmp"), command)).toBeLessThan(300)
+  }, 60_000)
 
   // a variable set once, then a program after each, at the cap
   const variables = (each: string) => {
@@ -346,43 +349,54 @@ describe("a direct write into the extensions root is refused, naming the owner's
   }
   const fill = (head: string, unit: string, tail: string) =>
     head + unit.repeat(Math.floor((130_000 - head.length - tail.length) / unit.length)) + tail
+  // a native step the walk cannot count (a backtracking regex, a string built whole, an array shifted), bounded by its time over a same-length echo; canary's ran x1500 to x5000
   test.each([
-    ["a brace with no close", fill("echo {", ",", ""), false, 1_000],
+    ["a brace with no close", fill("echo {", ",", ""), false, 50],
     [
       "xargs -I over a large stdin",
       fill(`cat ${WORDS} | xargs -I@ git -c alias.x="!`, "@ ", '" x'),
       true,
-      1_000,
+      150,
     ],
-    ["env -S", fill("env -S'", "-S ", "' true"), false, 1_000],
-    // each variable's path is still read from the filesystem, so these take longer, inside bounds canary misses (2.4 to 2.9 s and 6 to 9.5 s)
-    ["distinct variables", variables(""), false, 2_000],
-    ["distinct variables, each with a program", variables("true; "), false, 3_000],
-    [
-      "a printf escape format over many arguments",
-      `printf '%s${"\\\\x41".repeat(16_000)}' ${"x ".repeat(3_000)}> /tmp/nxw-p`,
-      false,
-      1_000,
-    ],
+    ["env -S", fill("env -S'", "-S ", "' true"), false, 150],
   ])(
-    "%s at the command cap is read inside its bound",
-    async (_, command, refused, bound) => {
-      const started = performance.now()
+    "%s at the command cap is read in a time linear in its length",
+    async (_, command, refused, ratio) => {
       const reason = await bash(command, "/tmp")
       if (refused) expect(reason).toContain("split it into shorter calls")
       else expect(reason).toBeUndefined()
-      expect(performance.now() - started).toBeLessThan(bound)
+      expect(await overBaseline((c) => bash(c, "/tmp"), command)).toBeLessThan(ratio)
     },
     60_000,
   )
 
+  // each variable read once and each printf escape decoded once: canary's reread every variable before each command and decoded the format each round, past 40 million steps
+  test.each([
+    ["distinct variables", variables(""), 400_000],
+    ["distinct variables, each with a program", variables("true; "), 400_000],
+    [
+      "a printf escape format over many arguments",
+      `printf '%s${"\\\\x41".repeat(16_000)}' ${"x ".repeat(3_000)}> /tmp/nxw-p`,
+      100_000,
+    ],
+  ])(
+    "%s at the command cap is read in a bounded count of steps",
+    async (_, command, cap) => {
+      const before = stepsTaken()
+      expect(await bash(command, "/tmp", 120_000)).toBeUndefined()
+      expect(stepsTaken() - before).toBeLessThan(cap)
+    },
+    60_000,
+  )
+
+  // each level costs about 3000 steps under the cap on shells a call runs; without that cap a chain 2000 deep took 8 times the steps
   test.each([300, 8_000])(
-    "an eval chain %d deep ahead of a write is refused inside the hook's time",
+    "an eval chain %d deep ahead of a write is refused in a count of steps linear in its depth",
     async (depth) => {
-      const started = performance.now()
-      const reason = await bash(`${"eval 'eval '\\''".repeat(depth)}\nrm ${LIST}`, "/tmp")
+      const before = stepsTaken()
+      const reason = await bash(`${"eval 'eval '\\''".repeat(depth)}\nrm ${LIST}`, "/tmp", 120_000)
       expect(reason).toContain("no-extensions-write hook refuses")
-      expect(performance.now() - started).toBeLessThan(12_000)
+      expect(stepsTaken() - before).toBeLessThan(4_000 * depth)
     },
     60_000,
   )
@@ -434,16 +448,17 @@ describe("a direct write into the extensions root is refused, naming the owner's
     expect(await bash(command, "/tmp")).toContain("no-extensions-write hook refuses")
   })
 
+  // a deadline already past stops the walk at its first clock read, 1024 steps in, where the whole lex takes tens of thousands
   test("a slow lex refuses at the walk's deadline, whatever made it slow", async () => {
     const command = `echo ${"a(".repeat(20_000)}${")".repeat(20_000)}`
-    const started = performance.now()
+    const before = stepsTaken()
     const reason = await check(
       JSON.stringify({ cwd: "/tmp", tool_input: { command }, tool_name: "Bash" }),
       ENV,
-      50,
+      0,
     )
     expect(reason).toContain("split it into shorter calls")
-    expect(performance.now() - started).toBeLessThan(250)
+    expect(stepsTaken() - before).toBeLessThan(2_048)
   })
 
   test("a Bash call whose cwd is already inside the root runs no writer", async () => {
@@ -1516,20 +1531,17 @@ describe("the hook's run", () => {
     expect(await guarded(read, ENV)).toBeUndefined()
   })
 
+  // without the main thread's timer the worker's one step runs on past this test's time
   test("a single step the deadline cannot interrupt is refused when the main thread's timer fires", async () => {
     const command = `printf '%s${",".repeat(60)}' '{' ${"x ".repeat(6_000)}| xargs -I @ watch '@ a'; playground ext import x`
     const raw = JSON.stringify({ cwd: "/tmp", tool_input: { command }, tool_name: "Bash" })
-    const started = performance.now()
     expect(await guarded(raw, ENV, 1_000)).toContain("split it into shorter calls")
-    expect(performance.now() - started).toBeLessThan(3_000)
   })
 
+  // a worker that never answers leaves only the main thread's timer to end the call
   test("a check that never answers is refused when the main thread's timer fires", async () => {
     const busy = new URL("./fixtures/busy-worker.ts", import.meta.url).href
-    const started = performance.now()
-    const reason = await guarded("{}", ENV, 300, busy)
-    expect(reason).toContain("split it into shorter calls")
-    expect(performance.now() - started).toBeLessThan(2_000)
+    expect(await guarded("{}", ENV, 300, busy)).toContain("split it into shorter calls")
   })
 
   test("it fails open on input it cannot read", async () => {
