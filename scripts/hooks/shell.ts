@@ -187,6 +187,7 @@ const ROOT_SHELLS = new Map([
 ])
 // Whether a command starts a shell that reads its script from stdin, with no command of its own, under any of parse's readings (a shortened long option is one its lists lack, so it is read as taking the next word too); once the readings ran out, any privilege wrapper among its words counts as a root shell and any shell's name as a shell: "root" for a privilege wrapper's shell (`sudo -s`, `nice doas -s`, an option or program in a variable taken as one), "shell" for a shell given no script (`sh`, `sudo bash`); a reserved word, a function's name or an assignment before it skipped
 export function stdinShell(cmd: Command): "root" | "shell" | undefined {
+  cmd = spreadSplit(cmd)
   const parsed = parse(cmd)
   const kinds = readings(parsed).map((reading) => stdinShellOf(cmd, reading))
   if (parsed.capped) {
@@ -197,10 +198,44 @@ export function stdinShell(cmd: Command): "root" | "shell" | undefined {
   return kinds.includes("root") ? "root" : kinds.find(Boolean)
 }
 
+// The command with the words env runs from each split string (`env -S 'sudo -s'`) spread in its place, an env among them read again, in one pass over a stack of the words still to read, so a long run of them costs a linear time; env's own grammar read as far as a root shell needs: a `\_` or a whitespace escape splits, a quote or another backslash is dropped, and a `${…}` is a word the hook cannot read
+function spreadSplit(cmd: Command): Command {
+  const e = cmd.words.findIndex((w) => !w.quoted && program(w.value) === "env")
+  if (e === -1) return cmd
+  const options = WRAPPERS.get("env") as Options
+  const out = cmd.words.slice(0, e + 1)
+  const rest = cmd.words.slice(e + 1).reverse()
+  let spread = false
+  for (let w = rest.pop(); w; w = rest.pop()) {
+    const v = w.value
+    const split = SPLIT.exec(v)
+    if (split) {
+      const text = (split[1] || rest.pop()?.value || "")
+        .replace(/\$\{[^}]*\}/g, UNKNOWN)
+        .replace(/\\[_fnrtv]/g, " ")
+        .replace(/['"\\]/g, "")
+      const words = text.split(/\s+/).filter(Boolean)
+      for (let j = words.length - 1; j >= 0; j--) rest.push({ quoted: false, value: words[j] })
+      spread = true
+      continue
+    }
+    out.push(w)
+    if (ASSIGN.test(v) || (!w.quoted && program(v) === "env")) continue
+    if (!v.startsWith("-") || v === "-" || v === "--") break
+    if (v === "-C" || v === "--chdir" || optionValue(v, options) === "next") {
+      const value = rest.pop()
+      if (value) out.push(value)
+    }
+  }
+  return spread ? { ...cmd, words: [...out, ...rest.reverse()] } : cmd
+}
+
 function stdinShellOf(cmd: Command, { args, first, name }: Parsed): "root" | "shell" | undefined {
   if (first && !marked(first.value)) {
-    if (!SHELLS.has(name)) return undefined
-    const { inline, operand } = shellOperand(args, name)
+    const applet = name === "busybox" && args[0] ? program(args[0].value) : name
+    const words = applet === name ? args : args.slice(1)
+    if (!(applet === name ? SHELLS : BUSYBOX_SHELLS).has(applet)) return undefined
+    const { inline, operand } = shellOperand(words, applet)
     return inline || operand ? undefined : "shell"
   }
   let at = 0
@@ -236,6 +271,8 @@ function stdinShellOf(cmd: Command, { args, first, name }: Parsed): "root" | "sh
 // Wrappers that take one positional argument (a count or a duration) before the command.
 const COUNTED = new Set(["repeat", "timeout"])
 export const SHELLS = new Set(["bash", "dash", "ksh", "sh", "zsh"])
+// busybox runs its first word as the applet, a shell among them
+const BUSYBOX_SHELLS = new Set([...SHELLS, "ash", "hush"])
 const EXPORTS = new Set(["declare", "export", "local", "readonly", "typeset"])
 export const PRINTERS = new Set(["echo", "printf"])
 // Every git-reading hook's one list of the words git 2.56 steps over before its subcommand: each option that takes the next word as its value, and --exec-path, which takes none but whose bare form prints git's folder and exits, so the word after it never runs.
@@ -1119,6 +1156,8 @@ export function shellOperand(args: Word[], shell: string): { inline: boolean; op
   for (let k = 0; k < args.length; k++) {
     const v = args[k].value
     if (takes.has(v)) k++
+    // a lone `-` ends the options, so the word after it is the operand, and with none the shell reads stdin
+    else if (v === "-") return { inline, operand: args[k + 1] }
     else if (/^[-+][A-Za-z]+$/.test(v)) inline ||= v.startsWith("-") && v.includes("c")
     else if (!v.startsWith("--")) return { inline, operand: args[k] }
   }
