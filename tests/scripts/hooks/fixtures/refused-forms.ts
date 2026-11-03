@@ -1936,6 +1936,18 @@ gh api graphql -f query="$QUERY"`,
       ["awk piping into a shell after a regex alternation", `awk '/a|b/ { print | "sh" }'`],
       ["awk piping into a shell after a string alternation", `awk '$1 ~ "a|b" { print | "sh" }'`],
       [
+        "awk piping into a shell after a comment holding a quote",
+        'awk \'# "\n{ print | "sh" }\' f',
+      ],
+      [
+        "awk piping into a shell after a block and a comment holding a quote",
+        'awk \'{ n++ } # "\n{ print | "sh" }\' f',
+      ],
+      [
+        "awk piping into a shell after a bracketed slash and a quote",
+        'awk \'/[/]"/ { print | "sh" }\' f',
+      ],
+      [
         "awk matching an alternation and printing into the root",
         `awk '/a|b/ { print > "${ROOT}/x" }'`,
       ],

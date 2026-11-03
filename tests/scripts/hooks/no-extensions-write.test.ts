@@ -490,6 +490,7 @@ describe("a quoted argument is read as a command line only where a program runs 
     ["awk matching a regex alternation", "awk '/foo|bar/' f"],
     ["awk matching a regex alternation with a block", "awk '/foo|bar/ {print $2}' f"],
     ["awk matching a field to a string alternation", `awk '$1 ~ "a|b"' f`],
+    ["awk matching a field to a grouped alternation", "awk '$1 ~ /^(a|b)/' f"],
     [
       "awk counting a field's regex alternation",
       "awk '$3 ~ /runner|watch/ {n++} END {print n}' /dev/null",
