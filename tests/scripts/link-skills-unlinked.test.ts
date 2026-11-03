@@ -111,7 +111,7 @@ describe("link-skills.sh on a checkout a pull has outgrown", () => {
   })
 
   test("a check that fails another way installs nothing and fails the run", async () => {
-    const { home, repo } = checkout("settings @packages/safe-delete")
+    const { home, repo } = checkout()
     writeFileSync(join(repo, "package.json"), JSON.stringify({ workspaces: 1 }))
     expect((await run(repo, home)).code).toBe(1)
     expect(installs(home)).toEqual([])
