@@ -95,7 +95,7 @@
 - ALWAYS: Stop `bun run dev` before running `bun run build`, `bun run check-types` or `bun run test`, or committing, in the same worktree.
   They rebuild `packages/*` (a commit through its pre-commit build), and a rebuild deletes the `dist` the running servers import; pre-commit's `dev-stack` step (`api/hono/src/bin/dev-running.ts`) refuses a commit while the launcher's record names a stack still running there.
 - ALWAYS: Keep the dashboard on the owner rung: every route and the WebSocket pass `requireConsoleRole("owner")`, but first run's setup routes, which serve before any user exists (the setup rule above).
-  Under `PLAYGROUND_HOSTED=1` Yard's routes take the `member` rung instead (the hosted rule above).
+  Under `PLAYGROUND_HOSTED=1` Yard's routes take the `member` rung, or the one their route names, instead (the hosted rule above).
   An open WebSocket is authorised once, at its upgrade, so a demotion or sign-out elsewhere takes effect when it next reconnects.
 - ALWAYS: Keep the `claude_*` tables (`packages/db/src/schema/claude.ts`: every Claude Code session the ingest stores, Playground's own on a stack that reads this machine (above), each transcript line as a `claude_entry`, and how far each file has been read) in the dashboard's local Postgres on 127.0.0.1, never a shared database:
   they hold whatever a session read or ran, secrets and customer data included.
