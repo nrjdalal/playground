@@ -1,14 +1,7 @@
 "use client"
 
 import type { Worker } from "@api/hono"
-import {
-  RiAddLine,
-  RiArrowUpLine,
-  RiChatThreadFill,
-  RiChatThreadLine,
-  RiCloseLine,
-  RiReplyLine,
-} from "@remixicon/react"
+import { RiAddLine, RiArrowUpLine, RiCloseLine, RiReplyLine } from "@remixicon/react"
 import { useForm, useStore } from "@tanstack/react-form"
 import { useQuery } from "@tanstack/react-query"
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react"
@@ -422,20 +415,7 @@ export function Composer({ threadId, worker }: { threadId?: string; worker: Work
                   </Hint>
                   <ModePicker approvals={approvals} worker={worker} />
                   <div className="ml-auto flex items-center gap-2">
-                    {opensThreads ? (
-                      <Hint content="Start a thread with this message">
-                        <InputGroupButton
-                          aria-label="New thread"
-                          aria-pressed={newThread}
-                          className="aria-pressed:border-foreground aria-pressed:bg-input aria-pressed:text-foreground dark:aria-pressed:border-foreground dark:aria-pressed:bg-input rounded-full"
-                          onClick={() => setNewThread((on) => !on)}
-                          size="icon-sm"
-                          variant="outline"
-                        >
-                          {newThread ? <RiChatThreadFill /> : <RiChatThreadLine />}
-                        </InputGroupButton>
-                      </Hint>
-                    ) : null}
+                    {/* New thread is off for now, so this row renders no toggle and a send starts no thread */}
                     <SettingPicker worker={worker} />
                     {/* the box's own aria-description already speaks the key hint */}
                     <Hint content={hint} description={null}>
