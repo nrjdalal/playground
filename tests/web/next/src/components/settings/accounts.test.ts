@@ -120,7 +120,7 @@ describe("Settings > Accounts", () => {
       { ...CLAUDE, email: "sam@example.com", key: "sam@example.com", label: null, own: true },
       GLM,
     ])
-    const switches = html.match(/<button[^>]*role="switch"[^>]*>/g) ?? []
+    const switches = html.match(/<[^>]*role="switch"[^>]*>/g) ?? []
     expect(switches).toHaveLength(2)
     expect(switches[0]).toContain('aria-label="Own account: work"')
     expect(switches[0]).toContain('aria-checked="false"')

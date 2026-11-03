@@ -19,15 +19,24 @@ import {
   ItemMedia,
   ItemTitle,
 } from "@/components/ui/item"
+import { Switch } from "@/components/ui/switch"
 import { toast } from "@/components/ui/toast"
-import { ACCOUNTS_QUERY_KEY, type AccountRow, accountWords, readAccounts } from "@/lib/accounts"
+import {
+  ACCOUNTS_QUERY_KEY,
+  type AccountRow,
+  accountWords,
+  readAccounts,
+  withOwn,
+} from "@/lib/accounts"
 import { apiClient, unwrap } from "@/lib/api/client"
 import { PROVIDER_ICONS } from "@/lib/status-icons"
 import { useAccount } from "@/lib/system"
 
 const ICONS = { claude: PROVIDER_ICONS.anthropic, glm: PROVIDER_ICONS.zai }
 
-// Settings > Accounts: every Claude and GLM account the factory spends, each with whether its token is kept, Add account and Remove; the token is pasted once and goes to the Keychain, never back to the page. While the first read is pending it holds its space empty, never a placeholder box.
+const KEY = "usage.accounts"
+
+// Settings > Accounts: every Claude and GLM account the factory spends, each with whether its token is kept, Add account and Remove, and on a Claude row an Own account switch, whose account the login flip spends at a fifth unless it resets within a day; the token is pasted once and goes to the Keychain, never back to the page. While the first read is pending it holds its space empty, never a placeholder box.
 export function Accounts() {
   const { data, error, isPending } = useQuery({
     queryKey: ACCOUNTS_QUERY_KEY,
@@ -60,6 +69,33 @@ export function Accounts() {
       toast.add({ title: `${data.key} removed`, type: "success" })
       refresh()
     },
+  })
+
+  // reads usage.accounts whole, so a row the page has not drawn yet is written back as it is
+  const markOwn = useMutation({
+    mutationFn: async ({ own, row, scope }: { own: boolean; row: AccountRow; scope: string }) => {
+      const read = await unwrap(
+        apiClient.v1.settings[":key"].$get({ param: { key: KEY }, query: {} }),
+      )
+      if (read.error) throw new Error(read.error.message)
+      const rows = Array.isArray(read.data.value)
+        ? (read.data.value as Record<string, unknown>[])
+        : []
+      const { error } = await unwrap(
+        apiClient.v1.settings[":key"].$put({
+          param: { key: KEY },
+          json: {
+            by: "Settings",
+            reason: `${own ? "Marked" : "Unmarked"} an account own in Settings`,
+            scope,
+            value: withOwn(rows, row.key, own),
+          },
+        }),
+      )
+      if (error) throw new Error(error.message)
+    },
+    onError: (error) => toast.add({ title: error.message, type: "error" }),
+    onSettled: refresh,
   })
 
   const title = shown.current ? accountWords(shown.current).title : ""
@@ -99,6 +135,20 @@ export function Accounts() {
                   </ItemDescription>
                 </ItemContent>
                 <ItemActions>
+                  {row.provider === "claude" && (
+                    <label className="text-muted-foreground flex cursor-pointer items-center gap-2 text-xs">
+                      <span>Own account</span>
+                      <Switch
+                        aria-label={`Own account: ${words.title}`}
+                        checked={row.own}
+                        disabled={!data?.scope || markOwn.isPending}
+                        onCheckedChange={(own) => {
+                          if (data?.scope) markOwn.mutate({ own, row, scope: data.scope })
+                        }}
+                        size="sm"
+                      />
+                    </label>
+                  )}
                   <Hint content="Remove">
                     <Button
                       variant="ghost"
