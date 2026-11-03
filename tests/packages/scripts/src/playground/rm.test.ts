@@ -29,18 +29,6 @@ test("rm takes one path, or --worktree's, with an optional reason", () => {
   })
 })
 
-test("rm takes --carve-out <script> with a path, never with --worktree", () => {
-  expect(rmArgs(["old", "--carve-out", "jobs", "--reason", "dropped"])).toEqual({
-    carveOut: "jobs",
-    path: "old",
-    reason: "dropped",
-    worktree: false,
-  })
-  expect(rmArgs(["--worktree", "wt", "--carve-out", "jobs"])).toEqual({ error: RM_USAGE })
-  expect(rmArgs(["old", "--carve-out", "a", "--carve-out", "b"])).toEqual({ error: RM_USAGE })
-  expect(rmArgs(["old", "--carve-out"])).toEqual({ error: RM_USAGE })
-})
-
 test("rm takes --list or --restore <id> alone", () => {
   expect(rmArgs(["--list"])).toEqual({ list: true })
   expect(rmArgs(["--restore", "20261102T120000Z-s/1"])).toEqual({ restore: "20261102T120000Z-s/1" })
@@ -110,17 +98,6 @@ test("runRm tells the dispatcher of a protected path, and not of a missing one",
   expect(await runRm([join(home, "gone")], deps)).toBe(1)
   expect(told.length).toBe(1)
   expect(await runRm(["a", "b"], deps)).toBe(2)
-})
-
-test("runRm with --carve-out deletes as that script, and a name no carve-out has is refused to the dispatcher", async () => {
-  const { deps, home, told } = machine()
-  const path = join(home, ".playground", "ops", "x")
-  mkdirSync(path, { recursive: true })
-  expect(await runRm([path, "--carve-out", "nobody"], deps)).toBe(1)
-  expect(told).toEqual([
-    `nobody: ${path} is inside the protected ${join(home, ".playground")}; no carve-out is named nobody`,
-  ])
-  expect(existsSync(path)).toBe(true)
 })
 
 test("runRm --worktree checks the holders, moves the worktree and prunes it from git", async () => {

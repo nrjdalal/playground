@@ -9,34 +9,30 @@ import { mainCheckout } from "../main-checkout"
 import { sessionName } from "../trash"
 
 export const RM_USAGE =
-  'usage: playground rm <path> [--reason "<why>"] [--carve-out <script>] | --worktree <path> [--reason "<why>"] | --list | --restore <id>'
+  'usage: playground rm <path> [--reason "<why>"] | --worktree <path> [--reason "<why>"] | --list | --restore <id>'
 
 export type RmArgs =
   | { list: true }
   | { restore: string }
-  | { carveOut?: string; path: string; reason: string; worktree: boolean }
+  | { path: string; reason: string; worktree: boolean }
 
-// playground rm's words: one path, or --worktree's, with an optional --reason, and for a path an optional --carve-out naming its script; --list or --restore <id> alone.
+// playground rm's words: one path, or --worktree's, with an optional --reason; --list or --restore <id> alone.
 export const rmArgs = (words: string[]): RmArgs | { error: string } => {
   if (words.length === 1 && words[0] === "--list") return { list: true }
   if (words.length === 2 && words[0] === "--restore") return { restore: words[1]! }
   let path: string | undefined
   let reason = "playground rm"
   let worktree = false
-  let carveOut: string | undefined
   for (let i = 0; i < words.length; i++) {
     const word = words[i]!
     if (word === "--reason" && words[i + 1] !== undefined) reason = words[++i]!
-    else if (word === "--carve-out" && words[i + 1] !== undefined && carveOut === undefined)
-      carveOut = words[++i]!
     else if (word === "--worktree" && words[i + 1] !== undefined && path === undefined) {
       worktree = true
       path = words[++i]!
     } else if (!word.startsWith("--") && path === undefined) path = word
     else return { error: RM_USAGE }
   }
-  if (path === undefined || (worktree && carveOut !== undefined)) return { error: RM_USAGE }
-  return carveOut === undefined ? { path, reason, worktree } : { carveOut, path, reason, worktree }
+  return path === undefined ? { error: RM_USAGE } : { path, reason, worktree }
 }
 
 // What playground rm reads and calls beyond its words, so a test hands it a mkdtemp machine: the folders it starts from, every process's working folder, the ops notify line to the dispatcher, and the session's name.
@@ -90,19 +86,13 @@ export async function runRm(words: string[], deps: RmDeps): Promise<number> {
       )
     return 0
   }
-  const session =
-    "restore" in args
-      ? ""
-      : "carveOut" in args && args.carveOut
-        ? args.carveOut
-        : await deps.session()
+  const session = "restore" in args ? "" : await deps.session()
   const done =
     "restore" in args
       ? restore(args.restore, roots)
       : quarantine(
           args.path,
           {
-            carveOut: args.carveOut,
             reason: args.reason,
             session,
             worktree: args.worktree

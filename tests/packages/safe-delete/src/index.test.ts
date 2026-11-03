@@ -276,8 +276,8 @@ const withWorktree = () => {
 
 // A carve-out table for the mechanism's own cases: one script's builds folder, under a cap of 3 files and 100 bytes.
 const TABLE: Record<string, CarveOut> = {
-  builder: { bytes: 100, files: 3, folder: ".playground/ops/builds" },
-  trashy: { bytes: 100, files: 3, folder: ".playground" },
+  builder: { bytes: 100, files: 3, folder: "ops/builds" },
+  trashy: { bytes: 100, files: 3, folder: "." },
 }
 const carved = { ...opts, carveOut: "builder" }
 
@@ -340,6 +340,19 @@ describe("a carve-out", () => {
     expect(existsSync(dir)).toBe(true)
   })
 
+  test("follows a data folder outside HOME", () => {
+    const roots = { ...machine(), trash: "" }
+    roots.trash = join(roots.root, "data", "trash")
+    const path = file(join(roots.root, "data", "ops", "builds", "abc"))
+    expect(quarantine(path, carved, roots, { carveOuts: TABLE, now: NOW })).toMatchObject({
+      files: 1,
+    })
+    const home = file(join(roots.home, ".playground", "ops", "builds", "abc"))
+    expect(quarantine(home, carved, roots, { carveOuts: TABLE, now: NOW })).toMatchObject({
+      kind: "protected",
+    })
+  })
+
   test("refuses a name no carve-out has, a link out of its folder, and the trash in its folder", () => {
     const roots = machine()
     const path = file(join(roots.home, ".playground", "ops", "builds", "abc"))
@@ -366,22 +379,19 @@ describe("a carve-out", () => {
   })
 })
 
-// Every real carve-out: one exact folder at least two deep in a protected HOME folder, a cap within the tripwire's, its own entry let through, and its parent, a sibling and an entry over its cap refused.
+// Every real carve-out: one exact folder in the data folder, a cap within the tripwire's, its own entry let through, and its parent, a sibling and an entry over its cap refused.
 describe.each(Object.entries(CARVE_OUTS))("the %s carve-out", (name, carve) => {
-  test("names one exact folder inside a protected HOME folder, under a cap within the tripwire's", () => {
+  test("names one exact folder in the data folder, beside the trash, under a cap within the tripwire's", () => {
     const parts = carve.folder.split("/")
-    expect(parts.length).toBeGreaterThanOrEqual(2)
     expect(parts.every((part) => part && part !== "." && part !== "..")).toBe(true)
-    expect([".claude", ".config", ".gnupg", ".playground", ".ssh", "Library", "Music"]).toContain(
-      parts[0]!,
-    )
+    expect(parts[0]).not.toBe("trash")
     expect(carve.files).toBeLessThanOrEqual(LIMITS.files)
     expect(carve.bytes).toBeLessThanOrEqual(LIMITS.bytes)
   })
 
   test("lets its own entry through and refuses its parent, a sibling and an entry over its cap", () => {
     const roots = machine()
-    const folder = join(roots.home, carve.folder)
+    const folder = join(roots.home, ".playground", carve.folder)
     const own = file(join(folder, "own"))
     const sibling = file(join(folder, "..", "sibling-of-carve-out", "own"))
     const over = join(folder, "over")
