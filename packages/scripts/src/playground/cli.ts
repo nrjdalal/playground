@@ -48,7 +48,7 @@ import {
 } from "./probe"
 import { runSpawn, startDispatcher } from "./spawn"
 import { runStore, terminalIo } from "./store"
-import { OUTSIDE_CMUX, startJobs, TERMINAL } from "./terminal"
+import { startJobs, TERMINAL } from "./terminal"
 import { askPurge, uninstall } from "./uninstall"
 import { runUpdate, spawnRun } from "./update"
 import { version } from "./version"
@@ -206,8 +206,6 @@ const dashboard = async (): Promise<number> => {
     if (step === "jobs") {
       console.log("Starting the Dashboard…")
       const jobs = await startJobs(REPO)
-      // up.py has just said to open a cmux terminal, and the Dashboard cannot come up until one is open
-      if (jobs === OUTSIDE_CMUX) return 1
       if (jobs !== 0) failed.push(`The Dashboard's jobs didn't start: up.py exited ${jobs}`)
     } else if (step === "dispatcher") {
       console.log(`Starting ${getSessionNames().names.dispatcher}…`)
