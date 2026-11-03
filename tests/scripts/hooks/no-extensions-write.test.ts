@@ -572,6 +572,9 @@ describe("a quoted argument is read as a command line only where a program runs 
       "doas whose user option comes first in a cluster and takes the shell letter as its value",
       "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | doas -us",
     ],
+    ["a quoted ~- used as a literal folder name", "mkdir '~-' && touch '~-/f'"],
+    ["a write under ~+, the worktree itself", "touch ~+/f"],
+    ["a write under ~- after a cd out of the worktree", "cd /usr; touch ~-/f"],
   ])("%s runs from a worktree", async (_, command) => {
     expect(await at(command, join(homedir(), "x", ".claude", "worktrees", "y"))).toBeUndefined()
   })

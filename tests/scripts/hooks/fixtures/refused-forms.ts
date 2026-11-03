@@ -79,6 +79,7 @@ export type Group = {
     | "#536"
     | "#579"
     | "#614"
+    | "#656"
 }
 
 // The rows a guard-loosening PR lets run on purpose, and the rows that show the one form a guard lets run, each written as a row's "<source> <what>" for all its cases, or as one case's "<source> <what> | <guard> | <folder>".
@@ -2525,5 +2526,42 @@ gh api graphql -f query="$QUERY"`,
       ["pushd ~+ before a commit", "pushd ~+; git commit -m x"],
     ],
     source: "#614",
+  },
+  {
+    folders: ["checkout", "data folder", "home"],
+    guards: ["no-extensions-write"],
+    rows: ({ ROOT, SCOPE }) => [
+      ["cd ~- back into the root before a write", `cd ${SCOPE}; cd /usr; cd ~-; touch f`],
+      [
+        "cd ~-/.. back into the root before a removal",
+        `cd ${SCOPE}; cd /usr; cd ~-/..; rm -rf login`,
+      ],
+      ["a write to a path under ~-", `cd ${SCOPE}; cd /usr; touch ~-/f`],
+      ["a redirect to a path under ~-", `cd ${SCOPE}; cd /usr; echo x > ~-/f`],
+      ["a removal of ~- itself", `cd ${SCOPE}; cd /usr; rm -rf ~-`],
+      ["a removal under ~- after a pushd", `pushd ${ROOT}; pushd /usr; rm -rf ~-/login`],
+      [
+        "pushd -n ~-, which zsh fails, staying in the root",
+        `cd /usr; cd ${SCOPE}; pushd -n ~-; touch f`,
+      ],
+      [
+        "pushd ~- ~-, which zsh fails, staying in the root",
+        `cd /usr; cd ${SCOPE}; pushd ~- ~-; touch f`,
+      ],
+      ["cd -n ~-, which zsh fails, staying in the root", `cd /usr; cd ${SCOPE}; cd -n ~-; touch f`],
+    ],
+    source: "#656",
+  },
+  {
+    folders: ["checkout"],
+    guards: ["no-main-checkout"],
+    rows: ({ MAIN }) => [
+      [
+        "cd ~- back into the main checkout before a build",
+        `cd ${MAIN}; cd /usr; cd ~-; bun run build`,
+      ],
+      ["a commit with -C ~- into the main checkout", `cd ${MAIN}; cd /usr; git -C ~- commit -m x`],
+    ],
+    source: "#656",
   },
 ]
