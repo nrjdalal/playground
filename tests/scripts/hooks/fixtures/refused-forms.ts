@@ -2494,6 +2494,38 @@ gh api graphql -f query="$QUERY"`,
         "a removal echoed to a quoted sudo's shell flag behind nice",
         "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | nice 'sudo' -s",
       ],
+      [
+        "a removal echoed to sudo's login flag behind a quoted doas",
+        "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | 'doas' sudo -i",
+      ],
+      [
+        "a removal echoed to sudo's login long option behind a quoted doas",
+        "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | 'doas' sudo --login",
+      ],
+      [
+        "a removal echoed to sudo's shell in a cluster behind a quoted doas",
+        "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | 'doas' sudo -Es",
+      ],
+      [
+        "a removal echoed to sudo's login flag behind an escaped doas",
+        "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | \\doas sudo -i",
+      ],
+      [
+        "a removal in a here-string to sudo's login flag behind a quoted doas",
+        "'doas' sudo -i <<< 'rm -rf ~/.playground/extensions/.no-such-folder'",
+      ],
+      [
+        "a removal echoed to doas's shell in a cluster behind a quoted sudo",
+        "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | 'sudo' doas -Ls",
+      ],
+      [
+        "a removal echoed to sudo's login flag behind doas",
+        "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | doas sudo -i",
+      ],
+      [
+        "a removal echoed to doas's shell in a cluster behind sudo",
+        "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sudo doas -Ls",
+      ],
     ],
     source: "#582",
   },
