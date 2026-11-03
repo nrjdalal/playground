@@ -571,8 +571,8 @@ function inspect(raw: string, environment: Environment) {
     // on a line read call by call, a read-only gh call's jq filter is text, never a path
     const filters = whole ? new Set<Word>() : ghFilters(parsed, env)
     for (const word of [first, ...args]) {
-      // a quiet commit's message and a gh filter are text, judged only when the root is in it
-      const text = (quiet && /\s/.test(word.value)) || filters.has(word)
+      // a quiet commit's message and a gh filter are text, judged only when the root is in it; a filter's unquoted glob is the shell's, judged as any glob
+      const text = (quiet && /\s/.test(word.value)) || (filters.has(word) && !word.glob)
       if (text && !texts(word).some((t) => holds(t.value, env))) continue
       const named = names(word, env, remover, literal)
       if (named) return refuse(`${verb} on ${named}`)

@@ -189,6 +189,7 @@ Only the first reading moves the folder, sets variables and records files for th
   It also holds a read-only gh call (`gh api` with no `-X`, `--method`, `-f`, `-F`, `--field`, `--raw-field`, `--input` or `--cache`; `issue list`, `issue view`, `pr list`, `pr view`, `run list`, `run view`, `search`) with a `-q` or `--jq` filter or a `-t` or `--template` template.
   Such a call holds no other word with a space, and no pager or editor variable (`GH_PAGER`, `GH_EDITOR`, `PAGER`, `EDITOR`, `VISUAL`) is set on its line.
   Its filter or template is text, never a path, so `gh pr view 1 --json a,b -q '.a+" \(.b)/x"'` runs from every folder, and is judged only when it names the root.
+  An unquoted glob in it is the shell's, so `gh api x --jq .[]` is judged as any glob and refused from the home.
   Each is its command's own first word as a reader is, named bare or by a system folder's path (`/usr/bin/awk`), so a script the session wrote (`./awk`), a `PATH` set in the call and a reader behind a wrapper (`time cut …`) keep canary's reading.
   An awk program runs something when it holds `system`, `getline`, `|`, `>` or `@`, or comes from `-f` or an option the hook does not know; each string literal of such a program is judged as a command line wherever it stands (`awk 'BEGIN{system("…")}'`).
   A quiet commit is a `git commit` whose `git` is its command's own first word as a reader is, named bare or by a system folder's path, so `sudo git`, `env git` and `./git` keep canary's reading.

@@ -2330,4 +2330,13 @@ gh api graphql -f query="$QUERY"`,
     ],
     source: "#462",
   },
+  {
+    folders: ["data folder", "home"],
+    guards: ["no-extensions-write"],
+    rows: () => [
+      ["a jq filter's unquoted glob in the home", "gh api x --jq .[]"],
+      ["a template's unquoted glob in the home", "gh pr view 1 -t .pl*"],
+    ],
+    source: "#462",
+  },
 ]
