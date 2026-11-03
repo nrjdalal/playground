@@ -966,6 +966,31 @@ describe("every kind of card on the Questionnaire", () => {
     expect(reply).not.toContain("data-streamdown")
   })
 
+  test("a Slack decision shows its files under the message, as an ask's show (PG-648)", () => {
+    const shot = { id: "3f0e7a52-1c4b-4d2a-9e6f-0000000000a1.png", kind: "image", name: "a.png" }
+    const preview = {
+      link: "https://app.slack.com/client/T0000000000/D0MADEUP11",
+      text: "the fix is on staging",
+      to: "@Merritt",
+      type: "slack",
+    }
+    const thumbs = (html: string) => html.split('data-slot="attachment-thumbs"').length - 1
+    const shown = render(false, {
+      ...decision,
+      preview: { ...preview, attachments: [shot] },
+    } as InboxItem)
+    const ask = render(false, {
+      ...decision,
+      preview: { attachments: [shot], text: "hi", type: "ask" },
+    } as InboxItem)
+    expect(thumbs(shown)).toBe(1)
+    expect(thumbs(shown)).toBe(thumbs(ask))
+    expect(shown.indexOf('data-slot="attachment-thumbs"')).toBeGreaterThan(
+      shown.indexOf("the fix is on staging"),
+    )
+    expect(thumbs(render(false, { ...decision, preview } as InboxItem))).toBe(0)
+  })
+
   test("a labelled ask is shadcn's questionnaire card: numbered choices, and Send as Submit in the footer's actions inside the form", () => {
     const labelled = {
       ...decision,
