@@ -67,7 +67,7 @@ import {
   storePasteReport,
 } from "@/lib/dashboard/paste-report"
 import { restartSession } from "@/lib/dashboard/restart"
-import { readRoster } from "@/lib/dashboard/roster"
+import { assistantSeat, readRoster } from "@/lib/dashboard/roster"
 import {
   answerHosted,
   changeHostedMode,
@@ -238,6 +238,7 @@ export async function sendMessage(
   recordReply: (ref: number, text: string) => Promise<unknown> = (ref, text) =>
     recordReplyItem(db, ref, undefined, text),
   threads: typeof threadStore = threadStore,
+  assistant: () => Promise<string | undefined> = assistantSeat,
 ): Promise<{ at: string; sessionId: string; threadId?: string }> {
   const typed = DISPATCHERS.includes(to)
   if (!typed && to !== SDK_PROBE) {

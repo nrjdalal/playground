@@ -4,6 +4,7 @@ import { site } from "../../../../../packages/config/src/site"
 import {
   agentLabel,
   chatLabel,
+  hasChat,
   homeTitle,
   labelOf,
   type LabelFacts,
@@ -201,6 +202,22 @@ describe("agentLabel", () => {
     for (const label of [chatLabel(opus, "dispatcher"), chatLabel(glm, "dispatcher")])
       expect(label.toLowerCase()).not.toContain("dispatcher")
     expect(chatLabel({ ...opus, name: "worker-greed", role: "worker" }, "dispatcher")).toBe("Greed")
+  })
+
+  // #780: the Assistant's chat and its sidebar row read Assistant whatever its session's name
+  test("the session in the assistant seat reads Assistant, by its chat and by its kind", () => {
+    const errands = { effort: null, model: null, name: "q2w8rt-assistant", role: "manager" }
+    expect(chatLabel({ ...errands, assistant: true }, "dispatcher")).toBe("Assistant")
+    expect(chatLabel(errands, "dispatcher")).not.toBe("Assistant")
+    expect(labelOf(facts("errands", { kind: "assistant" }), () => undefined)).toBe("Assistant")
+  })
+
+  test("a chat opens on a dispatcher, the hosted session and the assistant, and on no other session", () => {
+    expect(hasChat({ role: "dispatcher" })).toBe(true)
+    expect(hasChat({ hosted: true, role: "other" })).toBe(true)
+    expect(hasChat({ assistant: true, role: "manager" })).toBe(true)
+    expect(hasChat({ role: "manager" })).toBe(false)
+    expect(hasChat({ role: "worker" })).toBe(false)
   })
 
   test("a session's name reads as one word, with no @", () => {

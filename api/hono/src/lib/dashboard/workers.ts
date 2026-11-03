@@ -196,6 +196,8 @@ const rankOf = (worker: { name: string; role: Role }): number => {
 }
 
 export type Worker = {
+  // Set on the session the roster seats as the assistant (rosterFacts), whose view gets a chat as a dispatcher's does.
+  assistant?: true
   cwd: string
   // The reasoning effort its newest reply ran with, as its transcript records it (low, medium, high, xhigh, max); null when none is known.
   effort: string | null
@@ -492,6 +494,8 @@ export type Live = {
 
 // What the roster says about each agent, by its full session name (worker-greed, runner-pride, the dispatcher's): its ETA, its kind and role, and its triaged title.
 export type RosterFacts = {
+  // The session in the assistant seat (seatOf), the one manager the composer writes to; unset while none holds it.
+  assistant?: string
   etas: Map<string, string>
   roles: Map<string, RosterPlace>
   titles: Map<string, string>
@@ -499,7 +503,7 @@ export type RosterFacts = {
 
 const NO_ROSTER: RosterFacts = { etas: new Map(), roles: new Map(), titles: new Map() }
 
-export const rosterFacts = (roster: Roster | null): RosterFacts => ({
+export const rosterFacts = (roster: Roster | null, _redirected = false): RosterFacts => ({
   etas: new Map(
     (roster?.agents ?? []).flatMap((agent) =>
       agent.eta ? [[agent.name, agent.eta] as const] : [],

@@ -65,6 +65,19 @@ describe("a chat's heading", () => {
     expect(view).toContain('<h1 className="sr-only">{chatLabel(selected, dispatcher)}</h1>')
     expect(view).not.toContain("agentLabel(selected.name)")
   })
+
+  // #780: the Assistant's view gets the composer, as a dispatcher's does
+  test("a view draws the composer for every session that has a chat (hasChat), the assistant's included", async () => {
+    const view = await Bun.file(
+      new URL(
+        "../../../../../../web/next/src/components/dashboard/dashboard-view.tsx",
+        import.meta.url,
+      ),
+    ).text()
+    expect(view).toMatch(
+      /\{hasChat\(selected\) \? \(\s*<Composer key=\{selected\.name\} worker=\{selected\} \/>/,
+    )
+  })
 })
 
 // The page needs the dashboard's context to render, so its loading state is read from the source.

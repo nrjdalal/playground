@@ -143,9 +143,19 @@ export const labelOf = (
 export const homeTitle = (dispatcher: string | null): string | null =>
   dispatcher === null ? null : dispatcherLabel(null, true)
 
+// Pure: whether a session's view has a chat, a composer under its stream: a dispatcher's and the hosted session's.
+export const hasChat = (worker: { assistant?: true; hosted?: true; role: string }): boolean =>
+  worker.role === "dispatcher" || Boolean(worker.hosted)
+
 // A session as its chat names it, in its heading and its composer: a dispatcher by its label, Alpha or Bravo, else by its model (dispatcherLabel), the primary's or the second's, whose name the API gives as primary; any other session by its label.
 export const chatLabel = (
-  worker: { effort: string | null; model: string | null; name: string; role: string },
+  worker: {
+    assistant?: true
+    effort: string | null
+    model: string | null
+    name: string
+    role: string
+  },
   primary: string | null,
 ): string =>
   worker.role === "dispatcher"
