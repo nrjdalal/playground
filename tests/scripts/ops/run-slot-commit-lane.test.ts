@@ -109,6 +109,19 @@ describe("a commit whose pre-commit runs next build", () => {
     })
   }
 
+  // lefthook skips its build only when every staged file is Markdown or a Python test under tests/, and a README feeds @web/next#build's hash
+  test("staging Markdown under api/hono beside a file outside the build trees waits as a big run too", async () => {
+    const m = repo({ idle: 30 }, ["api/hono/README.md", "scripts/ops/run-slot.sh"])
+    m.hold("run-slot", 3, "big")
+    expect(await m.start("worker-x", {}, undefined, ["git", "commit"]).waits()).toBe(true)
+  })
+
+  test("staging a Python file under packages waits as a big run, since lefthook skips only tests/'s", async () => {
+    const m = repo({ idle: 30 }, ["packages/scripts/src/tool.py"])
+    m.hold("run-slot", 3, "big")
+    expect(await m.start("worker-x", {}, undefined, ["git", "commit"]).waits()).toBe(true)
+  })
+
   test("git -C <dir> commit -C <rev> reads the rev as the message's commit and still counts a staged web/next file", async () => {
     const m = repo({ idle: 30 }, ["web/next/src/app/page.tsx"])
     m.hold("run-slot", 3, "big")
@@ -120,7 +133,7 @@ describe("a commit whose pre-commit runs next build", () => {
   })
 
   test("git commit -- <path> counts the web/next path it commits", async () => {
-    const m = repo({ idle: 30 }, ["docs/notes.md"])
+    const m = repo({ idle: 30 }, ["docs/notes.md"], ["web/next/src/app/page.tsx"])
     m.hold("run-slot", 3, "big")
     expect(
       await m
@@ -136,7 +149,7 @@ describe("a commit whose pre-commit runs next build", () => {
     ).toBe(true)
   })
 
-  test("git commit <folder> counts a web/next file git finds under the folder it names", async () => {
+  test("git commit <folder> counts a build file git finds under the folder it names", async () => {
     const m = repo({ idle: 30 }, ["docs/notes.md"], ["packages/env/src/data-dir.ts"])
     m.hold("run-slot", 3, "big")
     expect(
@@ -214,7 +227,7 @@ describe("a commit that stages no web/next file", () => {
     expect(log(m)).toMatch(/ start worker-x \d+ run-slot-commit waited=/)
   })
 
-  // lefthook's build step skips a commit whose every staged file is Markdown or a Python test, so it runs no next build
+  // lefthook's build step skips a commit whose every staged file is Markdown or a Python test under tests/, so it runs no next build
   test("nor does one staging only Markdown under api/hono and packages", async () => {
     const m = repo({ idle: 30 }, ["api/hono/README.md", "packages/env/README.md"])
     m.hold("run-slot", 3, "big")
