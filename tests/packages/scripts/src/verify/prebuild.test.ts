@@ -1,10 +1,11 @@
 import { expect, test } from "bun:test"
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
+import { cpSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join, relative } from "node:path"
 
 import {
   isMainCheckout,
+  prebuildStep,
   sourcesIn,
   staleInstall,
   unbuilt,
@@ -194,6 +195,69 @@ test("staleInstall passes a worktree whose every workspace package has its depen
     mkdirSync(join(dir, "packages/added/node_modules/tsdown"), { recursive: true })
     expect(staleInstall("pr-merge", dir)).toBeNull()
     expect(staleInstall("pr-merge", ROOT)).toBeNull()
+  } finally {
+    rmSync(dir, { force: true, recursive: true })
+  }
+})
+
+// On 2 Nov a canary merge made packages/settings depend on @packages/safe-delete while every dist was still built, so the check never ran and pr:merge failed on "Cannot find module".
+test("prebuildStep refuses pr-merge on a stale install with every dist built, naming the install, and leaves verify and the API building on", () => {
+  const dir = worktree()
+  try {
+    expect(prebuildStep("pr-merge", [], dir, undefined)).toEqual({
+      refused: staleInstall("pr-merge", dir)!,
+    })
+    expect(prebuildStep("pr-merge", [], dir, undefined)).toMatchObject({
+      refused: expect.stringContaining("bun install --ignore-scripts"),
+    })
+    expect(prebuildStep("verify", [], dir, undefined)).toEqual({ build: [] })
+    expect(prebuildStep("api", ["@packages/x"], dir, undefined)).toEqual({ build: ["@packages/x"] })
+  } finally {
+    rmSync(dir, { force: true, recursive: true })
+  }
+})
+
+test("prebuildStep adds no install and no refusal on an install that matches, building only what is unbuilt", () => {
+  const dir = worktree()
+  try {
+    mkdirSync(join(dir, "packages/added/node_modules/tsdown"), { recursive: true })
+    expect(prebuildStep("pr-merge", [], dir, undefined)).toEqual({ build: [] })
+    expect(prebuildStep("pr-merge", ["@packages/x"], dir, undefined)).toEqual({
+      build: ["@packages/x"],
+    })
+    expect(prebuildStep("pr-merge", ["@packages/x"], dir, dir)).toMatchObject({
+      refused: expect.stringContaining("run it from your own worktree"),
+    })
+  } finally {
+    rmSync(dir, { force: true, recursive: true })
+  }
+})
+
+test("bun run pr:merge's prebuild stops on a stale install even with every dist built, and passes once it is installed", () => {
+  const dir = worktree()
+  try {
+    const verify = join(dir, "packages/scripts/src/verify")
+    mkdirSync(verify, { recursive: true })
+    mkdirSync(join(dir, "packages/scripts/src/pr-merge"))
+    cpSync(join(ROOT, "packages/scripts/src/verify/prebuild.ts"), join(verify, "prebuild.ts"))
+    cpSync(
+      join(ROOT, "packages/scripts/src/shebang.ts"),
+      join(dir, "packages/scripts/src/shebang.ts"),
+    )
+    writeFileSync(join(dir, "packages/scripts/src/pr-merge/cli.ts"), "export const x = 1\n")
+    symlinkSync(
+      join(ROOT, "packages/scripts/node_modules"),
+      join(dir, "packages/scripts/node_modules"),
+    )
+    const { PLAYGROUND_REPO: _, ...env } = process.env
+    const run = () =>
+      Bun.spawnSync(["bun", join(verify, "prebuild.ts"), "pr-merge"], { cwd: dir, env })
+    const stale = run()
+    expect(stale.exitCode).toBe(1)
+    expect(stale.stderr.toString()).toContain("packages/added (tsdown)")
+    expect(stale.stderr.toString()).toContain("bun install --ignore-scripts")
+    mkdirSync(join(dir, "packages/added/node_modules/tsdown"), { recursive: true })
+    expect(run().exitCode).toBe(0)
   } finally {
     rmSync(dir, { force: true, recursive: true })
   }

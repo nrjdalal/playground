@@ -36,6 +36,7 @@ const SOURCE_FILES = [
   "packages/scripts/src/playground/doctor.ts",
   "packages/scripts/src/playground/links.ts",
   "packages/scripts/src/playground/orgs.ts",
+  "packages/scripts/src/playground/unlinked.ts",
   "packages/settings/src/rendered.ts",
   "scripts/factory-settings.json",
   "scripts/link-skills.sh",

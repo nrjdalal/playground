@@ -3,7 +3,7 @@ set -euo pipefail
 
 # Spawns a factory session in herdr, the one way a factory session starts one
 # (the no-raw-spawn hook refuses the rest). A capacity gate refuses, failing
-# closed, unless three gates pass in order (a move runs the usage gate alone),
+# closed, unless four gates pass in order (a move runs the usage gate alone),
 # the first failure naming its gate and its reading, every pass and refusal
 # logged as one JSON line in ~/.playground/ops/capacity.jsonl, where the
 # load gate reads the starts of the last 5 minutes back, with each slots.peers folder's own log's. No count of live sessions holds a spawn, so
@@ -21,7 +21,10 @@ set -euo pipefail
 #   A GLM session takes its own load and memory gate in place of both:
 #   load5 under 30, pressure level 1 and swap-ins under 100/s (vm_stat -c 2 1)
 #   Under Claude Code's sandbox the load comes from uptime, and a refused pressure level leaves the swap-ins to decide (scripts/README.md)
-#   3. usage, the launching backend's own window: Claude reads usage.json
+#   3. slots, for a fresh worker start alone (a reviewer, tester, resume or move skips it, so work
+#      already admitted finishes): `ops/run-slot.sh room`, refusing while runs wait in its queue and no
+#      lane is free with the load units for a run, or when room gives no reading
+#   4. usage, the launching backend's own window: Claude reads usage.json
 #      (5-hour under 90%, the week within 14.3 points a day of pace, floored at one day's share, readings
 #      no older than 15 minutes; one never written, as on a fresh install before ops-usage first runs, passes,
 #      its row reading it unread; a missing 5-hour window is an account with no 5-hour limit, read as none) and each other login's
@@ -241,12 +244,18 @@ for pid, data in sorted(entries.items()):
         print(pid, field(data.get("sessionId")), field(data.get("cwd")), starts[pid], sep="\t")
 PY
 }
-# The capacity gate: three gates in order (load, memory, usage; a move skips load and memory, since the copy it closes frees what the new one takes), the first failure naming its gate and its reading, every pass and refusal one JSON line in ~/.playground/ops/capacity.jsonl (the load gate reads the last 5 minutes of starts back; a refusal's carries its printed words as detail); python exits 0 printing ok, or the refusal for refuse() to print.
+# The capacity gate: four gates in order (load, memory, slots for a fresh worker start, usage; a move skips load and memory, since the copy it closes frees what the new one takes), the first failure naming its gate and its reading, every pass and refusal one JSON line in ~/.playground/ops/capacity.jsonl (the load gate reads the last 5 minutes of starts back; a refusal's carries its printed words as detail); python exits 0 printing ok, or the refusal for refuse() to print.
 # The login a launch runs on with no --account, from Claude Code's config, which the launch reads from ~ when it drops inscope's folder.
 own_config() { if [ -n "$UNSET" ]; then echo "$HOME/.claude.json"; else echo "${CLAUDE_CONFIG_DIR:-$HOME}/.claude.json"; fi; }
 gate_capacity() {
+  # run-slot's room, for the slots gate (the header's gate 3)
+  room=
+  if [ "$MODE" = worker ]; then
+    room=$(RUN_SLOT_OPS="$DATA/ops" bash "$REPO/scripts/ops/run-slot.sh" room 2>/dev/null) || room=
+    [ -n "$room" ] || room=unread
+  fi
   verdict=$(
-    python3 -I - "$DATA" "$ACCOUNT" "$BACKEND" "${CLAUDE_CONFIG_DIR:-$HOME/.claude}" "$(own_config)" "${CHECK:+check}" "$MOVE_PID" "$GATES" $ITEM "$ROLE" <<'PY'
+    python3 -I - "$DATA" "$ACCOUNT" "$BACKEND" "${CLAUDE_CONFIG_DIR:-$HOME/.claude}" "$(own_config)" "${CHECK:+check}" "$MOVE_PID" "$GATES" $ITEM "$ROLE" "$room" <<'PY'
 import datetime as dt
 import glob
 import json
@@ -255,7 +264,7 @@ import os
 import subprocess
 import sys
 
-data_dir, account, backend, config_dir, own_config, check, move, gates, size, units, role = sys.argv[1:12]
+data_dir, account, backend, config_dir, own_config, check, move, gates, size, units, role, room = sys.argv[1:13]
 log_path = os.path.join(data_dir, "ops", "capacity.jsonl")
 units = int(units)
 gates = json.loads(gates)
@@ -457,7 +466,18 @@ else:
         if readings["free"] < gates["memoryFreeMin"]:
             refuse("memory", f"free is {readings['free']}% (sysctl kern.memorystatus_level), {gates['memoryFreeMin']}% is the floor. Close a session or wait for the pressure to pass, and run it again.")
 
-# 3 usage: the launching backend's own window
+# 3 slots (the header's gate 3)
+if room:
+    try:
+        lanes, held, free, waiters = (int(n) for n in room.split())
+    except ValueError:
+        refuse("slots", "it cannot read run-slot's lanes and queue (run-slot.sh room)")
+    readings.update(lanes=lanes, lanes_free=free, lanes_held=held, waiters=waiters)
+    if free == 0 and waiters > 0:
+        short = "run-slot has no lane open" if lanes == 0 else f"run-slot's {lanes} lanes are all held" if held >= lanes else f"{held} of run-slot's {lanes} lanes are held and the rest lack the load units for a run"
+        refuse("slots", f"{short}, and {waiters} {'run waits' if waiters == 1 else 'runs wait'} in its queue (run-slot.sh room). Wait for the queue to drain, or close a worker that is done, and run it again.")
+
+# 4 usage: the launching backend's own window
 readings["backend"] = backend or "claude"
 if account:
     # a week at 100% leaves no room on any login, so a reading that names the account (usage.json, stored-login.json or a usage-<name>.json) refuses it before its week resets.
