@@ -168,13 +168,27 @@ function namings(command: string): Namings {
   const counts = new Map<string, number>()
   const plain = new Set<string>()
   const add = (key: string) => counts.set(key, (counts.get(key) ?? 0) + 1)
-  // a name indirection that assigns sets a variable whose name the hook cannot read: zsh's P flag (`${(P)N::=…}`), and bash's `${!N:=…}` but its reads of the name list or an array's keys (`${!N*}`, `${!N[@]}`)
-  let blind = /\$\{\([^)]*P/.test(command)
+  // a name indirection that assigns sets a variable whose name the hook cannot read; zsh's P flag holds only as a plain read (`${(P)N}`, `${(P)N:-…}`), and a flag with a delimited argument (`${(j:…:)…}`) holds nothing, since its argument can hide a `)` and a P
+  let blind = false
+  for (const m of command.matchAll(/\$\{\(([^)]*)(\)?)/g)) {
+    const [whole, flags, closed] = m
+    const rest = command.slice(m.index + whole.length)
+    const name = rest.match(/^[A-Za-z_]\w*/)?.[0]
+    if (!closed || !/^[\w@#%~^=!*-]*$/.test(flags)) blind = true
+    else if (flags.includes("P") && (!name || !READS_ONLY.test(rest.slice(name.length))))
+      blind = true
+  }
   for (const m of command.matchAll(/(\$\{[#!]?)?(?<![\w$])([A-Za-z_]\w*)/g)) {
     const [whole, expanded, key] = m
     const next = command.slice(m.index + whole.length)
     if (expanded && READS_ONLY.test(next)) continue
-    if (expanded === "${!" && !/^[*@[]/.test(next)) blind = true
+    // bash's `${!N…}` holds only as a read: the name list or an array's keys closed right after (`${!N*}`, `${!N[@]}`), or an indirect read past a plain subscript (`${!N[0]}`); `${!N:=…}`, `${!N[0]:=…}` and `${!N[*]:=…}` assign
+    if (
+      expanded === "${!" &&
+      !/^(?:[*@]|\[[*@]\])\}/.test(next) &&
+      !READS_ONLY.test(next.replace(/^\[[^\][$`]*\]/, ""))
+    )
+      blind = true
     const assigns = next[0] === "=" ? "=" : undefined
     const at = m.index + (expanded?.length ?? 0)
     if (!expanded && command[at - 1] === "-" && (at < 2 || /\s/.test(command[at - 2]))) {
@@ -357,13 +371,15 @@ const NAME_SETTERS = new Set([
 ])
 // the setters that name a variable only by their v option, so their other words are text they print
 const PRINTS = new Set(["print", "printf"])
+// the builtins whose n option makes a bash nameref, a name whose every later write sets the variable its value names
+const NAMEREFS = new Set(["declare", "local", "typeset"])
 const RUNS_TEXT = new Set([".", "eval", "source"])
 // the words that open and close a compound body or group, and the other reserved words a command may lead with
 const OPENS = new Set(["case", "for", "if", "select", "until", "while", "{"])
 const CLOSES = new Set(["done", "esac", "fi", "}"])
 const LEADS = new Set(["!", "coproc", "do", "elif", "else", "then", "time"])
 
-// For each command of the line, the variables whose value the shell has when it runs: each named once, by an unquoted plain assignment that is its command's first word, at the line's top level (outside any function, compound body, group or subshell) and not piped or sent to the background; one the shell always runs (first, or after `;` or `&`) holds for every later command, and one after `&&` only along that `&&` chain, since the shell skips the rest of the chain with it. A line that runs eval or source, sets a variable by a name the hook cannot read whole (a name-indirection assignment among them), or names IFS, holds none, and holdable() is the rest of the allow-list
+// For each command of the line, the variables whose value the shell has when it runs: each named once, by an unquoted plain assignment that is its command's first word, at the line's top level (outside any function, compound body, group or subshell) and not piped or sent to the background; one the shell always runs (first, or after `;` or `&`) holds for every later command, and one after `&&` only along that `&&` chain, since the shell skips the rest of the chain with it. A line that runs eval or source, sets a variable by a name the hook cannot read whole (a name-indirection assignment or a bash nameref among them), or names IFS, holds none, and holdable() is the rest of the allow-list
 function steadyNames(named: Namings, commands: Command[]): (cmd: Command) => Steady {
   if (named.blind || named.counts.has("IFS")) return () => NONE
   const counts = new Map(named.counts)
@@ -371,6 +387,8 @@ function steadyNames(named: Namings, commands: Command[]): (cmd: Command) => Ste
   for (const [at, cmd] of commands.entries()) {
     const { name } = parses[at]
     if (RUNS_TEXT.has(name)) return () => NONE
+    if (NAMEREFS.has(name) && cmd.words.some((w, k) => k > 0 && /^-[^-\s]*n/.test(w.value)))
+      return () => NONE
     const loop = cmd.words.findIndex(
       (w) => !w.quoted && (w.value === "for" || w.value === "select"),
     )
