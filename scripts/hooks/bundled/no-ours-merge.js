@@ -477,6 +477,7 @@ function walk(lx, scope, nested, inherit) {
       lx.commands.push(done);
     }
     cmd = fresh();
+    cmd.follows = op;
     if (pipe) {
       cmd.stdin = done;
       cmd.detached = true;
@@ -502,7 +503,7 @@ function walk(lx, scope, nested, inherit) {
         lx.i++;
     } else if (c === ")") {
       lx.i++;
-      end(";");
+      end(")");
       if (nested)
         return;
     } else if (c === "(") {
@@ -650,6 +651,8 @@ function word(lx) {
     out.unknown ??= "a brace expansion";
   if (GLOB_CHARS.test(bare))
     out.glob = true;
+  if (marked(out.value))
+    out.raw = src.slice(start, lx.i);
   return out;
 }
 var GLOB_CHARS = /[*?[{(]/;
@@ -700,7 +703,7 @@ function dollar(lx) {
     lx.i += 2;
     const from = lx.commands.length;
     nest(lx);
-    return substituted(lx.commands.slice(from));
+    return substituted(lx.commands.slice(from), lx.known);
   }
   if (next === "{") {
     const end = balanced(src, lx.i + 1, "{", "}");
@@ -714,6 +717,10 @@ function dollar(lx) {
     while (/\w/.test(src[lx.i] ?? ""))
       lx.i++;
     return variable(src.slice(from, lx.i));
+  }
+  if (next === "$") {
+    lx.i += 2;
+    return { value: "99999" };
   }
   if (/[\d@*#?$!-]/.test(next)) {
     lx.i += 2;
@@ -767,10 +774,13 @@ function backtick(lx) {
   list({ ...lx, i: 0, src: inner }, lx.scopes.push(lx.scope) - 1, false);
   return unknown("a command substitution");
 }
-function substituted(inner) {
+function substituted(inner, known) {
   const [only] = inner;
   if (inner.length !== 1 || only.stdin || only.group)
     return unknown("a command substitution");
+  const made = mktempPath(only, known);
+  if (made)
+    return { value: made };
   const [first, ...args] = only.words;
   const plainCat = first?.value === "cat" && !first.unknown && !first.reads?.length;
   const input = only.redirects[0];
@@ -784,6 +794,21 @@ function substituted(inner) {
     return { reads: [input.target], value: READ };
   }
   return unknown("a command substitution");
+}
+var MKTEMP_FLAGS = new Set(["d", "q"]);
+var MKTEMP_LONG = new Set(["--directory", "--quiet"]);
+function mktempPath(cmd, known) {
+  const [first, ...args] = cmd.words;
+  if (!first || first.quoted || first.value !== "mktemp" || cmd.redirects.length > 0)
+    return;
+  if (!known.TMPDIR)
+    return;
+  const flag = ({ quoted, value }) => !quoted && (MKTEMP_LONG.has(value) || /^-[a-z]+$/.test(value) && value.slice(1).split("").every((c) => MKTEMP_FLAGS.has(c)));
+  const templates = args.filter((word) => !flag(word));
+  const [template] = templates;
+  if (templates.length > 1 || template?.value.startsWith("-") || marked(template?.value ?? ""))
+    return;
+  return template ? template.value : `${known.TMPDIR.replace(/\/$/, "")}/tmp.mktemp`;
 }
 var SPLIT = /^(?:-[0iv]*S|--split-string(?:=|$))(.*)$/;
 var READINGS = 16;
