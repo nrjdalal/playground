@@ -156,6 +156,23 @@ describe("no-playground-leak fails closed on its lists", () => {
     ).toBeUndefined()
   })
 
+  test("a missing list lets a git or gh read run and still refuses a push", async () => {
+    const dir = await lists("leak-git-read", {})
+    const data = store("leak-git-read", { "slack-cleared.json": JSON.stringify(CLEARED) })
+    const bash = (command: string) =>
+      JSON.stringify({
+        cwd: scratch,
+        hook_event_name: "PreToolUse",
+        tool_input: { command },
+        tool_name: "Bash",
+      })
+    for (const command of ["git log --oneline -5", "gh issue list -R acme/app", "cat .git/HEAD"])
+      expect(await run(bash(command), dir, data)).toBeUndefined()
+    expect(await run(bash("git push https://github.com/acme/app.git main"), dir, data)).toContain(
+      "hooks/playground-terms.json",
+    )
+  })
+
   test("explicit empty lists pass a company write", async () => {
     const data = store("leak-empty", {
       "playground-terms.json": JSON.stringify({

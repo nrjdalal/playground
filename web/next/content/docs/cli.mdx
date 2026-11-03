@@ -160,6 +160,8 @@ The ops runner's render takes `jobs`: the plist of a job `jobs.json` no longer h
 
 `playground rm --worktree <path>` removes a worktree under `.claude/worktrees/`: it refuses when the roster cannot be read, when a live session on the roster holds it by its branch, its name or its pull request's number, when a process works inside it, or when its commit is on no remote branch, then moves it to the trash and runs `git worktree prune`.
 A live session whose roster entry names no branch and no pull request, and with no process inside the worktree, is not seen as holding it; the trash keeps the worktree 7 days for `--restore`.
+A process inside it is named in the refusal, `<path> is held by pid <n> (<command>) working in <folder>`, and nothing is signalled, so the session that started it closes it by its own handle.
+When that process is agent-browser, the refusal adds its session, from its `--session` argument or its socket's name, else `default`, and the close that frees the folder: `agent-browser session <name>, which agent-browser --session <name> close frees`.
 Uncommitted changes go into the trash with the worktree, so they come back with it.
 A worktree restored from the trash has its files back, but git no longer lists it as a worktree.
 Ops empties the trash every hour: each delete over 7 days old goes, and the oldest go sooner while the disk has under 50 GB free.
