@@ -1253,7 +1253,7 @@ var FILE_TOOLS = {
   NotebookEdit: "notebook_path",
   Write: "file_path"
 };
-var INSTEAD = "the main checkout is what every installed skill follows, so it stays clean. Run it in your own worktree under .claude/worktrees/ (git worktree add .claude/worktrees/<name> -b <branch> origin/canary), or start lefthook from a script with cwd set to a scratch repo, as tests/lefthook.test.ts does.";
+var INSTEAD = "the main checkout is what every installed skill follows, so it stays clean. Run it in your own worktree under .claude/worktrees/ (git worktree add --no-track .claude/worktrees/<name> -b <branch> origin/canary), or start lefthook from a script with cwd set to a scratch repo, as tests/lefthook.test.ts does.";
 var refuse = (what, fix = INSTEAD) => `no-main-checkout hook refuses ${what}: ${fix}`;
 var BUN_SCRIPTS = new Set(["build", "check-types", "test", "test:file"]);
 var RUNNERS = new Set(["npx"]);
