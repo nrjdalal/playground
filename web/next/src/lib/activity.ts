@@ -11,6 +11,7 @@ export const ACTION_LABELS: Record<ActivityAction, string> = {
   "dashboard.answer": "Answered prompt",
   "dashboard.message": "Sent message",
   "dashboard.mode": "Changed mode",
+  "dashboard.setting": "Changed setting",
   "role.change": "Set role",
   "user.ban": "Banned",
   "user.unban": "Unbanned",

@@ -72,9 +72,7 @@ const privateRepo = async (
   if ("local" in where) {
     const question = `playground ${command} will create ${slug} on GitHub, private, with issues, wiki and projects off. Create it? [y/N]`
     if (!(await confirm(question)))
-      throw new Error(
-        `${slug} was not created: run playground ${command} in a terminal and answer y, or pass --yes`,
-      )
+      throw new Error(`${slug} was not created: run playground ${command} again with --yes`)
     const steps = [
       ["gh", "repo", "create", slug, "--private", "--disable-issues", "--disable-wiki"],
       ["gh", "repo", "edit", slug, "--enable-projects=false"],
