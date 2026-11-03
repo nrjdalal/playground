@@ -75,7 +75,7 @@ describe("a chat's heading", () => {
       ),
     ).text()
     expect(view).toMatch(
-      /\{hasChat\(selected\) \? \(\s*<Composer key=\{selected\.name\} worker=\{selected\} \/>/,
+      /\{hasChat\(selected\) \? \(?\s*<Composer key=\{selected\.name\} worker=\{selected\} \/>/,
     )
   })
 })

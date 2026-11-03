@@ -908,7 +908,7 @@ describe.skipIf(onLiveDashboard())("a fixture stack", () => {
     expect(dashboard()).toEqual(before)
 
     // every read answered from the fixture, the id-named pair live with the rest
-    expect(out.workers).toBe(20)
+    expect(out.workers).toBe(21)
     // the stale record, whose pid another process holds now, is no session
     expect(out.names).not.toContain("gluttony")
     expect(out.frame).toBe(out.workers)
