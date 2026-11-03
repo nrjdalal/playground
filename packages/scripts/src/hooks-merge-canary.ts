@@ -6,19 +6,21 @@ import { BUNDLED, ROOT } from "./hooks-bundle"
 
 type Outcome = { code: number; message: string }
 
-const git = (args: string[]) => {
-  const proc = Bun.spawnSync(["git", "-C", ROOT, ...args], { stderr: "pipe", stdout: "pipe" })
+const run = (argv: string[]) => {
+  const proc = Bun.spawnSync(argv, { cwd: ROOT, stderr: "pipe", stdout: "pipe" })
   return { code: proc.exitCode, out: `${proc.stdout}${proc.stderr}`.trim() }
 }
 
+const git = (args: string[]) => run(["git", ...args])
+
 // The merged checkout's own hooks-bundle.ts, run as a child, since a merge can change it or what it imports.
-const hooksBundle = (...args: string[]) => {
-  const proc = Bun.spawnSync(
-    ["bun", "--no-env-file", join(ROOT, "packages", "scripts", "src", "hooks-bundle.ts"), ...args],
-    { cwd: ROOT, stderr: "pipe", stdout: "pipe" },
-  )
-  return { code: proc.exitCode, out: `${proc.stdout}${proc.stderr}`.trim() }
-}
+const hooksBundle = (...args: string[]) =>
+  run([
+    "bun",
+    "--no-env-file",
+    join(ROOT, "packages", "scripts", "src", "hooks-bundle.ts"),
+    ...args,
+  ])
 
 function mergeCanary(): Outcome {
   // A merge abort cannot always bring back uncommitted changes, so the merge starts from a clean tree.
@@ -47,7 +49,7 @@ function mergeCanary(): Outcome {
           : `hooks-merge-canary: git merge origin/canary failed, so it was aborted: ${merge.out}`,
       }
     }
-    // canary's side of each conflicted bundle, or its removal where canary deleted it; the rebuild settles the rest.
+    // canary's side of each conflicted bundle, or its removal where canary deleted it; the rebuild below brings each bundle up to the merged sources.
     for (const path of conflicts)
       if (git(["cat-file", "-e", `MERGE_HEAD:${path}`]).code === 0) {
         git(["checkout", "--theirs", "--", path])
@@ -67,11 +69,11 @@ function mergeCanary(): Outcome {
       code: 1,
       message: `hooks-merge-canary: merged origin/canary as ${merged.slice(0, 7)}, and it changed bun.lock: run \`bun install\`, then \`bun run hooks:bundle\`, and commit the rebuild on its own`,
     }
-  const rebuilt = hooksBundle()
-  if (rebuilt.code !== 0)
+  const written = hooksBundle()
+  if (written.code !== 0)
     return {
       code: 1,
-      message: `hooks-merge-canary: merged origin/canary as ${merged.slice(0, 7)}, but hooks:bundle failed: ${rebuilt.out}`,
+      message: `hooks-merge-canary: merged origin/canary as ${merged.slice(0, 7)}, but hooks:bundle failed: ${written.out}`,
     }
   let done = `merged origin/canary as ${merged.slice(0, 7)}; the bundles already match its sources`
   if (git(["status", "--porcelain", "--", BUNDLED]).out) {
