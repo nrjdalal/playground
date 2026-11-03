@@ -687,7 +687,7 @@ const read =
 const OWN_ROOT = "/home/me/dispatcher"
 const FACTORY_ROOT = "/home/me/dispatcher/.claude/worktrees/pg-1"
 // A live-reads stack that opts in to cmux's sessions, as the attachment tests below need.
-const OPT_IN = { PLAYGROUND_CMUX_SESSIONS: "true" }
+const OPT_IN = { PLAYGROUND_ALL_SESSIONS: "true" }
 const LIVE_READS = { ...OPT_IN, PLAYGROUND_LIVE_READS: "1" }
 
 // Stand-ins for the guard: the container that publishes the port, or the guard's own refusal, and a proof that records each call.
@@ -1010,7 +1010,7 @@ describe("preflight", () => {
     for (const [checkout, settings, root] of [
       [{ branch: LIVE_DASHBOARD.branch, linked: true }, {}, undefined],
       [BRANCH, { PLAYGROUND_LIVE_READS: "1" }, undefined],
-      [{ branch: "main", linked: false }, { PLAYGROUND_CMUX_SESSIONS: "false" }, OWN_ROOT],
+      [{ branch: "main", linked: false }, { PLAYGROUND_ALL_SESSIONS: "false" }, OWN_ROOT],
     ] as const) {
       const { prove } = proving()
       const checked = await preflight(checkout, read(URL, settings), {
