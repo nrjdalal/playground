@@ -14,6 +14,7 @@ export type Guard =
   | "no-glm-heavy-path"
   | "no-headless-login"
   | "no-kill-by-name"
+  | "no-linear-ticket"
   | "no-main-checkout"
   | "no-playground-leak"
   | "no-raw-delete"
@@ -76,9 +77,9 @@ export type Group = {
     | "#486"
     | "#508"
     | "#509"
-    | "#514"
     | "#533"
     | "#536"
+    | "#573"
 }
 
 // The rows a guard-loosening PR lets run on purpose, and the rows that show the one form a guard lets run, each written as a row's "<source> <what>" for all its cases, or as one case's "<source> <what> | <guard> | <folder>".
@@ -2393,7 +2394,7 @@ gh api graphql -f query="$QUERY"`,
         ["a write after a cd behind ||", `true || cd ${W}; echo x > f`],
       ]
     },
-    source: "#514",
+    source: "#573",
   },
   {
     folders: ["main checkout"],
@@ -2413,13 +2414,13 @@ gh api graphql -f query="$QUERY"`,
         `pushd ${MAIN}/.claude/worktrees/a; pushd ${homedir()}; popd; popd; git commit -m x`,
       ],
     ],
-    source: "#514",
+    source: "#573",
   },
   {
     folders: ["main checkout"],
     guards: ["no-main-checkout"],
     rows: () => [["a script's output piped into a shell", "bun run ask list | sh"]],
-    source: "#514",
+    source: "#573",
   },
   // each form reaches the main checkout from a worktree, where the folder the line started in is not the guarded one
   {
@@ -2456,7 +2457,7 @@ gh api graphql -f query="$QUERY"`,
         `true || cd ${MAIN}; echo x > f`,
       ],
     ],
-    source: "#514",
+    source: "#573",
   },
   {
     folders: ["main checkout"],
@@ -2474,7 +2475,7 @@ gh api graphql -f query="$QUERY"`,
         ],
       ]
     },
-    source: "#514",
+    source: "#573",
   },
   // a line that names more folders than the reader carries, the guarded one past its cap of 32, so the shell reads as able to be in any folder
   {
@@ -2486,7 +2487,7 @@ gh api graphql -f query="$QUERY"`,
         `${Array.from({ length: 32 }, (_, k) => `true || cd /tmp/d${k}`).join("; ")}; true || cd ${MAIN}; git commit -m x`,
       ],
     ],
-    source: "#514",
+    source: "#573",
   },
   {
     folders: ["main checkout"],
@@ -2497,7 +2498,7 @@ gh api graphql -f query="$QUERY"`,
         `true || cd ${MAIN}/.claude/worktrees/a; bun run check-types`,
       ],
     ],
-    source: "#514",
+    source: "#573",
   },
   {
     folders: ["data folder"],
@@ -2508,7 +2509,7 @@ gh api graphql -f query="$QUERY"`,
         `true || cd ${WORK}; echo x > extensions/policy.json`,
       ],
     ],
-    source: "#514",
+    source: "#573",
   },
   {
     folders: ["tmp"],
@@ -2517,7 +2518,7 @@ gh api graphql -f query="$QUERY"`,
       ["a program run after a cd behind || into the extensions root", `true || cd ${SCOPE}; true`],
       ["a program run after a two-operand cd into the extensions root", `cd ${ROOT} ${ROOT}; true`],
     ],
-    source: "#514",
+    source: "#573",
   },
   // a bare pushd, which zsh sends home on a one-folder stack, so a relative path after one may be in the root; the home is the one ~ expands to, so these rows sit in the process's own worktree folder
   {
@@ -2530,7 +2531,7 @@ gh api graphql -f query="$QUERY"`,
       ],
       ["a relative write after a bare pushd", `pushd; echo x > ${NEVER_MADE.replace("~/", "")}/f`],
     ],
-    source: "#514",
+    source: "#573",
   },
   {
     folders: ["home", "data folder"],
@@ -2640,5 +2641,77 @@ gh api graphql -f query="$QUERY"`,
       ],
     ],
     source: "#533",
+  },
+  {
+    folders: ["checkout"],
+    guards: ["no-linear-ticket"],
+    rows: ({ DATA }) => [
+      [
+        "a write to the approvals folder after a brace group's cd into the data folder",
+        `{ cd ${DATA}; }; echo x > ticket-approvals/foo`,
+      ],
+      ["the same write inside that brace group", `{ cd ${DATA}; echo x > ticket-approvals/foo; }`],
+      [
+        "a write to the approvals folder after a function body's cd the line calls",
+        `f() { cd ${DATA}; }; f; touch ticket-approvals/foo`,
+      ],
+      [
+        "a write to the approvals folder after a cd on an ||'s right side",
+        `false || cd ${DATA}; touch ticket-approvals/foo`,
+      ],
+      [
+        "a write to the approvals folder a ; frees from the && that made the cd before it sure",
+        `true && cd ${DATA}; touch ticket-approvals/foo`,
+      ],
+      [
+        "a write to the approvals folder after a cd an if branch holds",
+        `if true; then cd ${DATA}; fi; touch ticket-approvals/foo`,
+      ],
+    ],
+    source: "#573",
+  },
+  {
+    folders: ["data folder"],
+    guards: ["no-playground-leak"],
+    rows: () => [
+      [
+        "a pull request naming no repository after a brace group's cd the hook cannot read",
+        `{ cd ${NEVER_MADE}; }; gh pr create --title t --body b`,
+      ],
+      [
+        "the same after a function body's cd the line calls",
+        `f() { cd ${NEVER_MADE}; }; f; gh pr create --title t --body b`,
+      ],
+    ],
+    source: "#573",
+  },
+  {
+    folders: ["process worktree"],
+    guards: ["no-raw-delete"],
+    rows: () => [
+      ["a delete after a brace group's cd out of the worktree", "{ cd /tmp; }; rm foo"],
+      ["the same with the group joined to it by an &&", "{ cd /tmp; } && rm foo"],
+      ["the same with a chain inside the group", "{ cd /tmp && true; }; rm foo"],
+      ["the same with the group's output redirected", "{ cd /tmp; } > /dev/null; rm foo"],
+      ["the same with a newline for the ;", "{ cd /tmp; }\nrm foo"],
+      ["the same with the group behind an &&", "true && { cd /tmp; }; rm foo"],
+      ["a delete inside the group that holds the cd", "{ cd /tmp; rm foo; }"],
+      ["a delete after a brace group's cd into the main checkout", "{ cd ~/playground; }; rm foo"],
+      ["a delete after a brace group's cd to the home", "{ cd ~; }; rm foo"],
+      ["a delete after a brace group's relative cd above the worktree", "{ cd ..; }; rm foo"],
+      ["a delete after a brace group's cd on an ||'s left side", "{ cd /tmp; } || true; rm foo"],
+      ["a delete after a negated brace group's cd", "! { cd /tmp; }; rm foo"],
+      ["a delete after a cd two brace groups deep", "{ { cd /tmp; }; }; rm foo"],
+      ["a delete by a relative path after a brace group's cd", "{ cd /tmp; }; rm ./foo"],
+      ["a delete after a function body's cd the line calls", "f() { cd /tmp; }; f; rm foo"],
+      [
+        "the same with the function written with the function word",
+        "function f { cd /tmp; }; f; rm foo",
+      ],
+      ["the same with the delete joined to the call by an &&", "f() { cd /tmp; }; f && rm foo"],
+      ["a delete inside the function body that holds the cd", "f() { cd /tmp; rm foo; }; f"],
+      ["the same with each command on its own line", "f() { cd /tmp; }\nf\nrm foo"],
+    ],
+    source: "#573",
   },
 ]

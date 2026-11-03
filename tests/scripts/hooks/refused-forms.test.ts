@@ -10,6 +10,7 @@ import { check as extensionsWrite } from "../../../scripts/hooks/no-extensions-w
 import { check as glmHeavyPath } from "../../../scripts/hooks/no-glm-heavy-path"
 import { check as headlessLogin } from "../../../scripts/hooks/no-headless-login"
 import { check as killByName } from "../../../scripts/hooks/no-kill-by-name"
+import { check as linearTicket } from "../../../scripts/hooks/no-linear-ticket"
 import { check as mainCheckout } from "../../../scripts/hooks/no-main-checkout"
 import { check as playgroundLeak } from "../../../scripts/hooks/no-playground-leak"
 import { check as rawDelete } from "../../../scripts/hooks/no-raw-delete"
@@ -81,6 +82,8 @@ git(GLM_REPO, "add", ".")
 // The leak guard's lists as core holds them, with ext.links guarding a made-up org's repositories, as its own test sets them.
 const LISTS = join(CHECKOUT, "extensions", "core", "lists")
 const LEAK = join(SCRATCH, "leak")
+// no-linear-ticket reads its approvals folder under PLAYGROUND_DATA_DIR, so its rows cd into the data folder the fixture makes
+const TICKETS = join(SCRATCH, "tickets")
 storeWith(
   join(LEAK, "playground"),
   {
@@ -181,6 +184,16 @@ const GUARDS: Record<Guard, { folders: Partial<Record<Folder, [string, string]>>
       }),
   },
   "no-kill-by-name": { folders: { checkout: [CHECKOUT, HOME] }, run: (raw) => killByName(raw) },
+  "no-linear-ticket": {
+    folders: { checkout: [CHECKOUT, HOME], "data folder": [DATA, HOME] },
+    run: (raw, home) =>
+      linearTicket(raw, {
+        CLAUDE_CONFIG_DIR: TICKETS,
+        HOME: home,
+        PLAYGROUND_DATA_DIR: DATA,
+        PLAYGROUND_ROLE: "worker",
+      }),
+  },
   "no-main-checkout": {
     folders: {
       checkout: [join(PATHS.MAIN, ".claude", "worktrees", "a"), HOME],
