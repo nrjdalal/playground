@@ -2,11 +2,18 @@ import { homedir } from "node:os"
 import { join } from "node:path"
 
 import { dataDir } from "@packages/env/data-dir"
-import { listTrash, quarantine, restore, type Roots } from "@packages/safe-delete"
+import {
+  isAgentBrowser,
+  listTrash,
+  type Proc,
+  quarantine,
+  restore,
+  type Roots,
+} from "@packages/safe-delete"
 
-import { registryName } from "../../../../scripts/hooks/role"
 import STATUSES from "../../../../scripts/roster-statuses.json"
 import { mainCheckout } from "../main-checkout"
+import { sessionName } from "../trash"
 
 export const RM_USAGE =
   'usage: playground rm <path> [--reason "<why>"] | --worktree <path> [--reason "<why>"] | --list | --restore <id>'
@@ -35,30 +42,65 @@ export const rmArgs = (words: string[]): RmArgs | { error: string } => {
   return path === undefined ? { error: RM_USAGE } : { path, reason, worktree }
 }
 
-// What playground rm reads and calls beyond its words, so a test hands it a mkdtemp machine: the folders it starts from, every process's working folder, the ops notify line to the dispatcher, and the session's name.
+// What playground rm reads and calls beyond its words, so a test hands it a mkdtemp machine: the folders it starts from, every process with a working folder, the ops notify line to the dispatcher, and the session's name.
 export type RmDeps = {
-  cwds: () => string[] | null
   data: string
   home: string
   main: string
   notify: (text: string) => void
+  procs: () => Proc[] | null
   session: () => Promise<string>
 }
 
-// Every process's working folder, as lsof lists them, or null when it lists none.
-const processFolders = (): string[] | null => {
-  const run = Bun.spawnSync(["lsof", "-d", "cwd", "-Fn"], { stderr: "ignore", stdout: "pipe" })
-  const dirs = run.stdout
-    .toString()
-    .split("\n")
-    .filter((line) => line.startsWith("n/"))
-    .map((line) => line.slice(1))
-  return dirs.length ? dirs : null
+// lsof -F's names for each pid: its "p<pid>" line, then each "n<name>" line under it.
+const namesByPid = (out: string): Map<number, string[]> => {
+  const names = new Map<number, string[]>()
+  let pid = 0
+  for (const line of out.split("\n"))
+    if (line.startsWith("p")) names.set((pid = Number(line.slice(1))), [])
+    else if (line.startsWith("n")) names.get(pid)?.push(line.slice(1))
+  return names
 }
 
-// This machine's: HOME, the data folder, the main checkout, lsof, notify.sh to the dispatcher, and the Claude Code registry's name for this session, else "shell".
+// Each process lsof gives a working folder, with its command line from ps and its unix socket paths from a second lsof.
+export const processesOf = (cwds: string, ps: string, sockets: string): Proc[] => {
+  const commands = new Map<number, string>()
+  for (const line of ps.split("\n")) {
+    const row = /^\s*(\d+) (.*)$/.exec(line)
+    if (row) commands.set(Number(row[1]), row[2]!)
+  }
+  const paths = namesByPid(sockets)
+  return [...namesByPid(cwds)].flatMap(([pid, [cwd]]) =>
+    cwd?.startsWith("/")
+      ? [
+          {
+            command: commands.get(pid) ?? "",
+            cwd,
+            pid,
+            sockets: (paths.get(pid) ?? []).filter((p) => p.startsWith("/")),
+          },
+        ]
+      : [],
+  )
+}
+
+const output = (argv: string[]): string =>
+  Bun.spawnSync(argv, { stderr: "ignore", stdout: "pipe" }).stdout.toString()
+
+// Every process with a working folder, as lsof and ps list them, an agent-browser one with its sockets, or null when lsof lists none.
+const processes = (): Proc[] | null => {
+  const cwds = output(["lsof", "-d", "cwd", "-Fpn"])
+  const ps = output(["ps", "-axo", "pid=,args="])
+  const browsers = processesOf(cwds, ps, "").filter((p) => isAgentBrowser(p.command))
+  const sockets = browsers.length
+    ? output(["lsof", "-a", "-U", "-p", browsers.map((p) => p.pid).join(","), "-Fpn"])
+    : ""
+  const procs = processesOf(cwds, ps, sockets)
+  return procs.length ? procs : null
+}
+
+// This machine's: HOME, the data folder, the main checkout, notify.sh to the dispatcher, lsof and ps, and the Claude Code registry's name for this session, else "shell".
 export const rmDeps = (repo: string): RmDeps => ({
-  cwds: processFolders,
   data: dataDir(),
   home: homedir(),
   main: mainCheckout(repo),
@@ -68,10 +110,8 @@ export const rmDeps = (repo: string): RmDeps => ({
       stderr: "ignore",
       stdout: "ignore",
     }),
-  session: async () =>
-    (process.env.CLAUDE_CODE_SESSION_ID &&
-      (await registryName(process.env.CLAUDE_CODE_SESSION_ID))) ||
-    "shell",
+  procs: processes,
+  session: sessionName,
 })
 
 // playground rm: one quarantine, list or restore against the deps' HOME, main checkout and trash; a protected or tripwire refusal goes to the dispatcher; exit 0 done, 1 refused, 2 a usage error.
@@ -99,7 +139,7 @@ export async function runRm(words: string[], deps: RmDeps): Promise<number> {
             reason: args.reason,
             session,
             worktree: args.worktree
-              ? { cwds: deps.cwds(), live: STATUSES.live, roster: join(deps.data, "roster.json") }
+              ? { live: STATUSES.live, procs: deps.procs(), roster: join(deps.data, "roster.json") }
               : undefined,
           },
           roots,

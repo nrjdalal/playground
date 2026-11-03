@@ -449,6 +449,16 @@ describe("a direct write into the extensions root is refused, naming the owner's
   test("a Bash call whose cwd is already inside the root runs no writer", async () => {
     expect(await bash("node -e 'x'", SCOPE)).toContain("no-extensions-write hook refuses")
   })
+
+  // zsh's ~- is the folder it last left, so an OLDPWD assignment keeps it in the root, and a popd that lands back leaves it unread
+  test("pushd ~- after an OLDPWD assignment is still the folder zsh last left", async () => {
+    expect(await bash(`cd ${SCOPE}; cd /usr; OLDPWD=/usr; pushd ~-; touch f`)).toContain("refuses")
+  })
+
+  test("pushd ~- after a popd leaves the folder unread", async () => {
+    expect(await bash(`cd ${SCOPE}; pushd /usr; popd; pushd ~-; touch f`)).toBeUndefined()
+    expect(await bash(`cd ${SCOPE}; pushd /usr; pushd ~-; touch f`)).toContain("refuses")
+  })
 })
 
 // The shell reads ~ as the process's home, so these rows judge the real home's root, which the hook only reads.
@@ -487,6 +497,33 @@ describe("a quoted argument is read as a command line only where a program runs 
     ["awk matching a field to a regex", "awk '$3 ~ /runner/' /dev/null"],
     ["awk matching a field to a string", `awk '$3 ~ "runner"' /dev/null`],
     ["awk matching a line naming a runner", "awk '/watch/' /dev/null"],
+    ["awk matching a regex alternation", "awk '/foo|bar/' f"],
+    ["awk matching a regex alternation with a block", "awk '/foo|bar/ {print $2}' f"],
+    ["awk matching a field to a string alternation", `awk '$1 ~ "a|b"' f`],
+    ["awk matching a field to a grouped alternation", "awk '$1 ~ /^(a|b)/' f"],
+    [
+      "awk counting a field's regex alternation",
+      "awk '$3 ~ /runner|watch/ {n++} END {print n}' /dev/null",
+    ],
+    [
+      "awk matching an escaped paren and a quoted word",
+      `awk '/startsWith\\("--del"\\)/{print NR}' f`,
+    ],
+    ["awk matching a line of three dashes and a space", "awk '/^--- /' f"],
+    ["sed printing a line of three dashes and a space", "sed -n '/^--- /p' f"],
+    ["jq formatting two fields around a slash", `jq -r '"\\(.a)/-\\(.b)"' f`],
+    [
+      "awk printing from a heading in a handoff",
+      "awk '/^## .*6/{p=1} p' ~/.playground/handoffs/x.md",
+    ],
+    [
+      "awk printing from a heading alternation in a handoff",
+      "awk '/^## .*6|7/{p=1} p' ~/.playground/handoffs/x.md",
+    ],
+    [
+      "sed -i replacing text with a slash and parens in a handoff",
+      "sed -i '' 's/a / b (c)/new/' ~/.playground/handoffs/x.md",
+    ],
     ["awk with a block matching a line naming a runner", "awk '/watch/ {print}' /dev/null"],
     ["awk with its errors sent to /dev/null", "awk '$3 ~ /runner/' /dev/null 2>/dev/null"],
     [
@@ -554,6 +591,18 @@ describe("a quoted argument is read as a command line only where a program runs 
     [
       "sudo with a flag cluster holding a value option",
       "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sudo -ui",
+    ],
+    [
+      "sudo whose user option comes first in a cluster and takes the shell letter as its value",
+      "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sudo -us",
+    ],
+    [
+      "sudo whose user option comes first in a cluster, its value a uid",
+      "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sudo -us#0",
+    ],
+    [
+      "doas whose user option comes first in a cluster and takes the shell letter as its value",
+      "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | doas -us",
     ],
   ])("%s runs from a worktree", async (_, command) => {
     expect(await at(command, join(homedir(), "x", ".claude", "worktrees", "y"))).toBeUndefined()

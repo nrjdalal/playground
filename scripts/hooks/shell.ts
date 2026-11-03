@@ -29,10 +29,12 @@ type Lexer = {
 }
 type Lexed = { commands: Command[]; scopes: number[] }
 type Pending = { delim: string; quoted: boolean; redirect: Redirect; strip: boolean }
+// `old` is set by a hook that follows zsh's ~-, `old.dir` the folder the shell last left (unset when the hook cannot tell), which an assignment to OLDPWD leaves as it is, so a pushd of ~- or ~+ reads a folder there; a hook that leaves it unset reads both as typed.
 export type Env = {
   cwd?: string
   files: Map<string, Text>
   known: Record<string, string>
+  old?: { dir?: string }
   process: Record<string, string | undefined>
   vars: Map<string, Text>
 }
@@ -175,7 +177,7 @@ function optionValue(word: string, { flags, values }: Options): "next" | "own" |
   return "own"
 }
 
-// The privilege wrappers' options that start a root shell, which reads its script from stdin when no command follows them: a closed list, read as a word or in a cluster of the wrapper's own flags
+// The privilege wrappers' options that start a root shell, which reads its script from stdin when no command follows them: a closed list, read as a word or in a cluster of the wrapper's own flags ahead of its first value-taking letter
 const ROOT_SHELLS = new Map([
   ["doas", new Set(["-s"])],
   ["sudo", new Set(["--login", "--shell", "-i", "-s"])],
@@ -200,21 +202,21 @@ export function stdinShell(cmd: Command): "root" | "shell" | undefined {
   if (k === -1) return undefined
   const wrapper = program(before[k].value)
   const shells = ROOT_SHELLS.get(wrapper) as Set<string>
-  const { flags } = WRAPPERS.get(wrapper) as Options
-  // a listed option, alone or in a cluster of the wrapper's own flags (`-Es`), or a word the hook cannot read, which may hold one
+  const { flags, values } = WRAPPERS.get(wrapper) as Options
+  // a cluster's letters up to its first value-taking one, which takes the rest as its value (`-su root`, `-su#0`, `-us`): a shell letter among them, each a flag of the wrapper's own
+  const clustered = (value: string) => {
+    let shell = false
+    for (const c of value.slice(1)) {
+      if (values.has(`-${c}`)) return shell
+      if (!flags.has(`-${c}`)) return false
+      shell ||= shells.has(`-${c}`)
+    }
+    return shell
+  }
+  // a listed option, alone or in a cluster of the wrapper's own flags (`-Es`, `-su root`), or a word the hook cannot read, which may hold one
   const starts = ({ quoted, value }: Word) =>
     marked(value) ||
-    (!quoted &&
-      (shells.has(value) ||
-        (/^-[A-Za-z]+$/.test(value) &&
-          value
-            .slice(1)
-            .split("")
-            .every((c) => flags.has(`-${c}`)) &&
-          value
-            .slice(1)
-            .split("")
-            .some((c) => shells.has(`-${c}`)))))
+    (!quoted && (shells.has(value) || (/^-[A-Za-z]/.test(value) && clustered(value))))
   return !!first || before.slice(k + 1).some(starts) ? "root" : undefined
 }
 
@@ -1026,9 +1028,15 @@ async function examineReading(
     for (const [key, value] of local) setVar(env.vars, key, value)
     if (builtins) verdict = await visit(cmd, parsed, here)
   } else if (name === "cd" || name === "pushd") {
-    env.cwd = cmd.detached ? undefined : await cdTarget(args, env)
-  } else if (name === "popd") env.cwd = undefined
-  else if (EXPORTS.has(name)) {
+    // a glob in the folder is judged as any program's words are, since it may land anywhere it matches
+    if (args.some((a) => GLOB_CHARS.test(a.value))) verdict = await visit(cmd, parsed, here)
+    const from = env.cwd
+    env.cwd = cmd.detached ? undefined : await cdTarget(name, args, env)
+    if (env.old) env.old = { dir: env.cwd === undefined ? undefined : from }
+  } else if (name === "popd") {
+    env.cwd = undefined
+    if (env.old) env.old = {}
+  } else if (EXPORTS.has(name)) {
     for (const w of args.filter((a) => ASSIGN.test(a.value))) {
       const eq = w.value.indexOf("=")
       setVar(env.vars, w.value.slice(0, eq), slice(w, eq + 1))
@@ -1051,11 +1059,21 @@ async function examineReading(
   return verdict
 }
 
-// The directory a cd lands in; undefined when the hook cannot tell, or the cd would fail and leave the shell where it was.
-async function cdTarget(args: Word[], env: Env): Promise<string | undefined> {
+// The directory a cd or pushd lands in; undefined when the hook cannot tell, or the cd would fail and leave the shell where it was.
+async function cdTarget(name: string, args: Word[], env: Env): Promise<string | undefined> {
   const dir = args.find((a) => !(a.value.startsWith("-") && a.value.length > 1))
   if (!dir) return homedir()
-  const path = dir.value === "-" ? undefined : pathOf(dir, env)
+  const typed = dir.value === "-" ? undefined : await folder(pathOf(dir, env))
+  // in a hook that follows ~-, a pushd's unquoted ~- is the folder the shell last left and ~+ the current one, as the shell expands them; beside a folder named ~- or ~+ the typed reading stays, though the shell still expands the word
+  const tilde =
+    !typed && name === "pushd" && env.old && !dir.quoted && !dir.unknown && !dir.reads?.length
+      ? /^~([-+])(?=\/|$)/.exec(dir.value)
+      : null
+  const base = tilde && (tilde[1] === "-" ? env.old?.dir : env.cwd)
+  return base ? await folder(base + dir.value.slice(2)) : typed
+}
+
+async function folder(path: string | undefined): Promise<string | undefined> {
   if (!path) return undefined
   try {
     return (await Bun.file(path).stat()).isDirectory() ? path : undefined

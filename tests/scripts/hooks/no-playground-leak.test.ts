@@ -1136,7 +1136,7 @@ describe("as Claude Code runs it", () => {
       hooks: { PreToolUse: Entry[] }
     }
     const found = settings.hooks.PreToolUse.find((e) =>
-      e.hooks.some((h) => h.command.includes("scripts/hooks/no-playground-leak.ts")),
+      e.hooks.some((h) => h.command.includes("scripts/hooks/bundled/no-playground-leak.js")),
     )
     if (!found)
       throw new Error("scripts/factory-settings.json registers no no-playground-leak hook")

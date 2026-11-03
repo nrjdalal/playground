@@ -368,8 +368,19 @@ function scoreAsOther(words: Word[], cmd: Command, parsed: Parsed, env: Env): bo
 }
 
 const AWKS = new Set(["awk", "gawk", "mawk", "nawk"])
-// what lets an awk program run a command or write a file: system(), a | pipe, getline, a > redirect or an @ directive
-const AWK_RUNS = /system|getline|[|>@]/
+// what lets an awk program run a command or write a file: system(), getline, a > redirect or an @ directive, and a | pipe outside the literals awkPipe allows
+const AWK_RUNS = /system|getline|[>@]/
+const awkRuns = (program: string) => AWK_RUNS.test(program) || awkPipe(program)
+
+// The literals a | may sit in without piping: a regex that is the program's whole leading pattern (`/a|b/`, `/a|b/ {…}`), and a regex or a string right after ~ (`$1 ~ /a|b/`, `$1 ~ "a|b"`), each holding no quote, no [ and no newline
+const AWK_LEAD = /^\s*\/(?:[^\\/"[\n]|\\.)*\/(?=\s*(?:\{|$))/
+const AWK_MATCH = /~\s*(?:\/(?:[^\\/"[\n]|\\.)*\/|"[^"\\\n]*")/g
+
+// Whether a program holding a | may pipe: once the allowed literals are cut out, any |, quote, /, # or backslash left counts as one, as canary counted every |
+function awkPipe(program: string): boolean {
+  if (!program.includes("|")) return false
+  return /["/#\\|]/.test(program.replace(AWK_LEAD, " ").replace(AWK_MATCH, " "))
+}
 
 // awk's program words, or undefined when a program comes from a file or an option the hook does not know: -F and -v take a value, gawk's -e and --source a program, and the first other word is the program
 function awkPrograms(words: Word[]): Word[] | undefined {
@@ -391,7 +402,7 @@ function awkPrograms(words: Word[]): Word[] | undefined {
 function programLines({ args, first }: Parsed, rooted: boolean): string[] {
   if (!AWKS.has(program(first?.value ?? "").toLowerCase())) return []
   return (awkPrograms(args) ?? [])
-    .filter(({ value }) => rooted || AWK_RUNS.test(value))
+    .filter(({ value }) => rooted || awkRuns(value))
     .flatMap(({ value }) => [...value.matchAll(/"((?:[^"\\]|\\.)*)"/g)].map((m) => m[1]))
 }
 
@@ -422,7 +433,7 @@ function narrow(cmd: Command, env: Env): boolean {
   const base = program(first.value).toLowerCase()
   if (AWKS.has(base)) {
     const programs = awkPrograms(args)
-    return !!programs && programs.every(({ value }) => !marked(value) && !AWK_RUNS.test(value))
+    return !!programs && programs.every(({ value }) => !marked(value) && !awkRuns(value))
   }
   if (["cat", "grep", "head", "tail", "wc"].includes(base)) return reads(parsed, env)
   if (base === "cut") return true
@@ -499,7 +510,7 @@ function cliWrite(words: Word[]): string | undefined {
   if (command === "migrate") return "playground migrate, which seeds the lists and settings"
   if (command === "uninstall")
     return words.some((w) => w.value === "--purge")
-      ? "playground uninstall --purge, which removes the data folder"
+      ? "playground uninstall --purge, which moves the data folder aside"
       : undefined
   const switches = SWITCHES[command]
   if (!switches) return
@@ -744,6 +755,8 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
     cwd: directory,
     files: new Map(),
     known,
+    // zsh starts with OLDPWD at the folder it starts in
+    old: { dir: directory },
     process: environment,
     vars: new Map(),
   }
@@ -771,12 +784,15 @@ export async function check(
   }
 }
 
-// The check run in a Worker and refused when it has not answered by the main thread's timer, so no synchronous step (a regex, a copy) can hold the hook past its timeout.
+// The check run in a Worker and refused when it has not answered by the main thread's timer, so no synchronous step (a regex, a copy) can hold the hook past its timeout; the bundle in bundled/ starts the worker's bundle beside it.
 export async function guarded(
   raw: string,
   environment: Environment = process.env,
   wait = 12_000,
-  url = new URL("./no-extensions-write-worker.ts", import.meta.url).href,
+  url = new URL(
+    `./no-extensions-write-worker.${import.meta.path.endsWith(".js") ? "js" : "ts"}`,
+    import.meta.url,
+  ).href,
 ): Promise<string | undefined> {
   const worker = new Worker(url)
   let timer: ReturnType<typeof setTimeout> | undefined

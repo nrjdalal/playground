@@ -22,13 +22,21 @@ export type Roots = { home: string; main: string; trash: string }
 // protected and tripwire refusals go to the dispatcher through the ops notify line; refused is a plain no.
 export type Refusal = { kind: "protected" | "refused" | "tripwire"; refused: string }
 
-// What tells a worktree is held: every process's working folder (null when they cannot be listed), the roster's live statuses, and the roster's path.
-export type Holders = { cwds: string[] | null; live: string[]; roster: string }
+// A process with a working folder: its command line, and the unix sockets it holds open, read for an agent-browser daemon alone.
+export type Proc = { command: string; cwd: string; pid: number; sockets: string[] }
+
+// What tells a worktree is held: the roster's live statuses, every process with a working folder (null when they cannot be listed), and the roster's path.
+export type Holders = { live: string[]; procs: Proc[] | null; roster: string }
+
+// An agent-browser process, its daemon or a client, by its command's first word.
+export const isAgentBrowser = (command: string): boolean =>
+  /^agent-browser(?:-[\w-]+)?$/.test(basename(command.split(" ")[0]!))
 
 export type Quarantined = { files: number; id: string; size: number; to: string }
 
 export type TrashEntry = {
   at: string
+  carveOut?: string
   files: number
   id: string
   path: string
@@ -43,6 +51,21 @@ export const MARKER = ".safe-delete-scratch"
 export const LIMITS = { bytes: 2 * 1024 ** 3, files: 5000, perMinute: 3 }
 
 export const PURGE = { days: 7, minFree: 50e9 }
+
+// One script's exception to the protected list: the entries directly in one exact folder in the data folder (the trash's parent, so it follows PLAYGROUND_DATA_DIR), each at most its files and bytes; the folder itself, its parent, a sibling and anything deeper stay protected.
+export type CarveOut = { bytes: number; files: number; folder: string }
+
+// Each script's carve-out by the script's name, one entry per script, A to Z, which only that script passes as quarantine's carveOut; playground rm takes none.
+export const CARVE_OUTS: Record<string, CarveOut> = {
+  // scripts/ops/dashboard/supervisor.sh's production builds, one folder per head; one measured 2,251 files and 78 MB on 2 Nov
+  "dashboard-supervisor": {
+    bytes: 256 * 1024 ** 2,
+    files: 4000,
+    folder: "ops/dashboard/builds",
+  },
+  // packages/scripts/src/playground/jobs.ts's rendered LaunchAgent plists, one file each, for a job jobs.json no longer holds
+  jobs: { bytes: 64 * 1024, files: 1, folder: "ops/launch-agents" },
+}
 
 const HOME_DIRS = [".claude", ".config", ".gnupg", ".playground", ".ssh", "Library", "Music"]
 const BATCH = /^(\d{8}T\d{6}Z)-([A-Za-z0-9][A-Za-z0-9-]*)$/
@@ -73,15 +96,28 @@ const inside = (path: string, root: string): boolean =>
 
 const worktreesOf = (roots: Roots): string => join(real(roots.main), ".claude", "worktrees")
 
-const whyProtected = (path: string, roots: Roots): string | null => {
+// The folders under HOME that are protected whole, and the trash's parent.
+const subtreesOf = (home: string, trash: string): string[] => [
+  ...HOME_DIRS.map((dir) => real(join(home, dir))),
+  dirname(trash),
+]
+
+// Why path is or holds a protected root or the trash, or null.
+const whyHolds = (path: string, roots: Roots): string | null => {
   const home = real(roots.home)
-  const main = real(roots.main)
   const trash = real(roots.trash)
   if (inside(path, trash)) return `${path} is in the trash, which the trash-purge beat empties`
-  const subtrees = [...HOME_DIRS.map((dir) => real(join(home, dir))), dirname(trash)]
-  for (const root of [home, main, ...subtrees])
+  for (const root of [home, real(roots.main), ...subtreesOf(home, trash)])
     if (inside(root, path))
       return path === root ? `${path} is protected` : `${path} holds the protected ${root}`
+  return null
+}
+
+const whyProtected = (path: string, roots: Roots): string | null => {
+  const held = whyHolds(path, roots)
+  if (held) return held
+  const main = real(roots.main)
+  const subtrees = subtreesOf(real(roots.home), real(roots.trash))
   for (const root of subtrees)
     if (inside(path, root)) return `${path} is inside the protected ${root}`
   if (inside(path, main) && !path.startsWith(worktreesOf(roots) + sep))
@@ -94,6 +130,38 @@ export function isProtected(path: string, roots: Roots): string | null {
   const abs = resolve(path)
   const own = join(real(dirname(abs)), basename(abs))
   return whyProtected(own, roots) ?? whyProtected(real(abs), roots)
+}
+
+// The carve-out named name when path is an entry directly in its folder, symlinks resolved, that is not and holds no protected root; else the refusal's text.
+const carveOutAt = (
+  path: string,
+  name: string,
+  roots: Roots,
+  table: Record<string, CarveOut>,
+): CarveOut | string => {
+  const carve = Object.hasOwn(table, name) ? table[name]! : undefined
+  if (!carve) return `no carve-out is named ${name}`
+  const folder = real(join(dirname(roots.trash), carve.folder))
+  const abs = resolve(path)
+  const own = join(real(dirname(abs)), basename(abs))
+  if (dirname(own) !== folder || dirname(real(abs)) !== folder)
+    return `${abs} is not directly in ${folder}, the ${name} carve-out's folder`
+  return whyHolds(own, roots) ?? carve
+}
+
+// A protected path's refusal, unless carveOut names a carve-out that lets it through: then that carve-out; null for a path nothing protects.
+const carveOutOf = (
+  path: string,
+  carveOut: string | undefined,
+  roots: Roots,
+  table: Record<string, CarveOut>,
+): CarveOut | Refusal | null => {
+  const why = isProtected(path, roots)
+  if (!why) return null
+  const found = carveOut === undefined ? why : carveOutAt(path, carveOut, roots, table)
+  return typeof found === "string"
+    ? refused(found === why ? why : `${why}; ${found}`, "protected")
+    : found
 }
 
 // The files and bytes under a path, symlinks not followed; the walk stops once either passes its limit.
@@ -161,16 +229,16 @@ const refused = (text: string, kind: Refusal["kind"] = "refused"): Refusal => ({
 // Renames a path into <trash>/<UTC-ts>-<session>/<n>/ with a manifest line, after the protected list, worktreeRefusal for a worktree (which only the worktree option's holders move), the tripwire and the volume check.
 export function quarantine(
   path: string,
-  opts: { reason: string; session: string; worktree?: Holders },
+  opts: { carveOut?: string; reason: string; session: string; worktree?: Holders },
   roots: Roots,
-  io: { dev?: (path: string) => number; now?: Date } = {},
+  io: { carveOuts?: Record<string, CarveOut>; dev?: (path: string) => number; now?: Date } = {},
 ): Quarantined | Refusal {
   const abs = resolve(path)
   if (!SESSION.test(opts.session))
     return refused(`the session name ${opts.session} is not a word of letters, digits and hyphens`)
   if (!lstat(abs)) return refused(`no such path ${abs}`)
-  const why = isProtected(abs, roots)
-  if (why) return refused(why, "protected")
+  const carve = carveOutOf(abs, opts.carveOut, roots, io.carveOuts ?? CARVE_OUTS)
+  if (carve && "refused" in carve) return carve
   const isWorktree = dirname(join(real(dirname(abs)), basename(abs))) === worktreesOf(roots)
   if (isWorktree && !opts.worktree)
     return refused(`${abs} is a worktree: playground rm --worktree removes it`)
@@ -186,10 +254,13 @@ export function quarantine(
       `${opts.session} quarantined ${recent} paths in the last minute, the most one session may`,
       "tripwire",
     )
-  const { files, size } = measure(abs, opts.worktree ? undefined : LIMITS)
-  if (!opts.worktree && (files > LIMITS.files || size > LIMITS.bytes))
+  const cap = carve ?? LIMITS
+  const { files, size } = measure(abs, opts.worktree ? undefined : cap)
+  if (!opts.worktree && (files > cap.files || size > cap.bytes))
     return refused(
-      `${abs} holds over ${LIMITS.files} files or ${LIMITS.bytes / 1024 ** 3} GB, past the tripwire`,
+      carve
+        ? `${abs} holds over ${cap.files} files or ${cap.bytes} bytes, past the ${opts.carveOut} carve-out's cap`
+        : `${abs} holds over ${LIMITS.files} files or ${LIMITS.bytes / 1024 ** 3} GB, past the tripwire`,
       "tripwire",
     )
   mkdirSync(trash, { recursive: true })
@@ -216,6 +287,7 @@ export function quarantine(
   const id = `${batch}/${n}`
   const entry: TrashEntry = {
     at: now.toISOString(),
+    ...(carve ? { carveOut: opts.carveOut } : {}),
     files,
     id,
     path: abs,
@@ -234,8 +306,12 @@ export function listTrash(trash: string): TrashEntry[] {
     .filter((entry) => existsSync(join(trash, entry.id)))
 }
 
-// Moves a trash item back to the path it came from, refusing a protected path, one anything stands at, and one whose folder is gone.
-export function restore(id: string, roots: Roots): { path: string } | Refusal {
+// Moves a trash item back to the path it came from, refusing a protected path (but for an item its carve-out let through, back into that carve-out's folder), one anything stands at, and one whose folder is gone.
+export function restore(
+  id: string,
+  roots: Roots,
+  carveOuts: Record<string, CarveOut> = CARVE_OUTS,
+): { path: string } | Refusal {
   const trash = roots.trash
   const match = ID.exec(id)
   if (!match) return refused(`${id} is not a trash id; playground rm --list prints them`)
@@ -243,8 +319,8 @@ export function restore(id: string, roots: Roots): { path: string } | Refusal {
   const slot = join(trash, id)
   const items = existsSync(slot) ? readdirSync(slot) : []
   if (!entry || items.length !== 1) return refused(`no trash item ${id}`)
-  const why = isProtected(entry.path, roots)
-  if (why) return refused(why, "protected")
+  const carve = carveOutOf(entry.path, entry.carveOut, roots, carveOuts)
+  if (carve && "refused" in carve) return carve
   if (lstat(entry.path)) return refused(`${entry.path} already exists; move it aside first`)
   if (!existsSync(dirname(entry.path)))
     return refused(`${dirname(entry.path)}, the folder ${id} came from, is gone`)
@@ -285,9 +361,20 @@ export function worktreeRefusal(path: string, roots: Roots, holders: Holders): s
     if (byBranch || byPr || tokens.some((t) => where.includes(t)))
       return `${at} is held by ${agent.name}, which the roster lists as ${agent.status}`
   }
-  if (holders.cwds === null) return `the processes' folders cannot be listed, so ${at} stays`
-  const cwd = holders.cwds.find((dir) => inside(real(dir), at))
-  if (cwd) return `${at} is held by a process working in ${cwd}`
+  if (holders.procs === null) return `the processes' folders cannot be listed, so ${at} stays`
+  const held = holders.procs.filter((p) => inside(real(p.cwd), at))
+  const holder = held.find((p) => isAgentBrowser(p.command)) ?? held[0]
+  if (holder) {
+    const command =
+      holder.command.length > 120 ? `${holder.command.slice(0, 117)}...` : holder.command
+    const by = `${at} is held by pid ${holder.pid} (${command}) working in ${holder.cwd}`
+    if (!isAgentBrowser(holder.command)) return by
+    const session =
+      /(?:^| )--session[= ](\S+)/.exec(holder.command)?.[1] ??
+      holder.sockets.map((s) => /([^/]+)\.sock$/.exec(s)?.[1]).find(Boolean) ??
+      "default"
+    return `${by}: agent-browser session ${session}, which agent-browser --session ${session} close frees`
+  }
   if (!git("branch", "-r", "--contains", "HEAD").out)
     return `${at}'s HEAD is on no remote branch: push it first`
   return null
