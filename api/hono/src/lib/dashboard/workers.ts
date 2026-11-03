@@ -12,17 +12,13 @@ import { env } from "@packages/env/api-hono"
 import { dataDir } from "@packages/env/data-dir"
 import { readSessionNames } from "@packages/settings"
 
-import { herdrAlone, runJson } from "@/lib/dashboard/cmux"
-import { readsLive } from "@/lib/dashboard/fixture"
 import {
   herdrRecords,
   type HerdrWait,
   herdrWorkspaces,
   isHerdrSurface,
-  isHerdrWorkspace,
   readHerdr,
   readStates,
-  type ServerRead,
   withHerdrState,
 } from "@/lib/dashboard/herdr"
 import {
@@ -50,7 +46,6 @@ import {
 import {
   type Blocked,
   blockedSessions,
-  type Held,
   readUnstick,
   UNSTICK_STALE_MS,
   type UsageLimit,
@@ -703,10 +698,7 @@ export function composeWorkers(
 // A session's task never changes once it has one, and a full head with none never gains one, so each head is read until it settles; a session whose first message alone overflows the head (a pasted image) keeps 'No task yet', the price of not re-reading 256KB on every refresh. Ended sessions are dropped.
 const taskCache = new Map<string, string | null>()
 
-async function tasksFor(
-  sessions: LiveRecords,
-  prune: boolean,
-): Promise<Map<string, string | null>> {
+async function tasksFor(sessions: LiveRecords): Promise<Map<string, string | null>> {
   const out = new Map<string, string | null>()
   const live = new Set<string>()
   await Promise.all(
@@ -721,17 +713,14 @@ async function tasksFor(
       out.set(sessionId, task)
     }),
   )
-  if (prune) for (const id of taskCache.keys()) if (!live.has(id)) taskCache.delete(id)
+  for (const id of taskCache.keys()) if (!live.has(id)) taskCache.delete(id)
   return out
 }
 
 // A session's name changes only when it is renamed, and it sends a message only by writing it down, both of which append to its transcript, so each refresh reads just the lines appended since the last one.
 const sessionCache = new Map<string, SessionRead>()
 
-async function sessionsRead(
-  sessions: LiveRecords,
-  prune: boolean,
-): Promise<Map<string, SessionRead | null>> {
+async function sessionsRead(sessions: LiveRecords): Promise<Map<string, SessionRead | null>> {
   const out = new Map<string, SessionRead | null>()
   const live = new Set<string>()
   await Promise.all(
@@ -746,7 +735,7 @@ async function sessionsRead(
       out.set(sessionId, read)
     }),
   )
-  if (prune) for (const id of sessionCache.keys()) if (!live.has(id)) sessionCache.delete(id)
+  for (const id of sessionCache.keys()) if (!live.has(id)) sessionCache.delete(id)
   return out
 }
 
@@ -770,7 +759,7 @@ async function activityOf(sessions: LiveRecords): Promise<Map<string, string | n
   )
 }
 
-// Sessions the dashboard hosts itself (sdk.ts registers its own), listed after cmux's: each one's row and transcript.
+// Sessions the dashboard hosts itself (sdk.ts registers its own), listed after herdr's: each one's row and transcript.
 type Hosted = { transcript: string | null; worker: Worker }
 
 let hosted: () => Hosted[] = () => []
@@ -781,7 +770,7 @@ export const hostSessions = (list: () => Hosted[]): void => {
 
 export const hostedNow = (): Hosted[] => hosted()
 
-// Pure: cmux's live list with the hosted sessions added; a hosted session has no terminal, so it has no surface.
+// Pure: the live list with the hosted sessions added; a hosted session has no terminal, so it has no surface.
 export const withHosted = (live: Live, own: Hosted[]): Live =>
   own.length === 0
     ? live
@@ -796,77 +785,7 @@ export const withHosted = (live: Live, own: Hosted[]): Live =>
         workers: [...live.workers, ...own.map(({ worker }) => worker)],
       }
 
-// cmux lists its records newest first and cuts the list at --limit: at 1,000 a session quiet since the day before fell off the board once cmux held 1,873 (9 Oct), so the limit is far past any count it holds.
-const sessionRecords = (filter: string[]): Promise<unknown> =>
-  runJson(["sessions", "list", ...filter, "--json", "--limit", "1000000"])
-
-// The full read costs the same at any --limit, since cmux builds every record it holds before it cuts the list (2,806 records: 5.2s and 5s of CPU at --limit 50 or 1,000,000, 12 Oct), and the hub ran it back to back under a stream of board moves until cmux timed out. So it is paced: one at a time, the next no sooner than GAP_FACTOR times as long as the last took, at least MIN_GAP_MS on a stack that reads this machine, and twice the last wait after a failure, up to MAX_GAP_MS.
-export const MIN_GAP_MS = 10_000
-export const MAX_GAP_MS = 120_000
-const GAP_FACTOR = 3
-
-// A read that took this long ran far past run()'s 20s timeout, which in practice only a process suspended with the machine does (a CLI slow to die after SIGTERM could too, and starting at once costs nothing there): on 15 Oct the Mac hibernated for ten minutes on 1% battery, the read in flight then failed on waking, and the wait it set (three times its own time, capped at 2 minutes) held the Dashboard on "cmux isn't running" while cmux answered. Such a read says nothing of cmux, so the next starts at once, failed or not.
-const SLEPT_MS = 60_000
-
-export const nextGap = (previous: number, took: number, ok: boolean, min = MIN_GAP_MS): number =>
-  took >= SLEPT_MS
-    ? 0
-    : Math.min(MAX_GAP_MS, Math.max(min, GAP_FACTOR * took, ok ? 0 : 2 * previous))
-
-// A caller that names no moment takes records from a read that started this recently, and a board stands on the last good records this long while reads fail.
-const SHARED_MS = 2000
-const STALE_MS = 5 * 60_000
-
-let good: { records: unknown; startedAt: number } | null = null
-let inFlight: { read: Promise<unknown>; startedAt: number } | null = null
-let failed: { at: number; read: Promise<unknown>; why: string } | null = null
-let gap = 0
-let nextAt = 0
-const landed = new Set<() => void>()
-
-// Called each time a full read settles, so the hub can show what it read.
-export const onRead = (listener: () => void): (() => void) => {
-  landed.add(listener)
-  return () => void landed.delete(listener)
-}
-
-const startRead = () => {
-  const startedAt = Date.now()
-  const read = sessionRecords([])
-  inFlight = { read, startedAt }
-  const settle = (records: unknown, error: unknown) => {
-    const now = Date.now()
-    inFlight = null
-    gap = nextGap(gap, now - startedAt, error === null, readsLive() ? MIN_GAP_MS : 0)
-    nextAt = now + gap
-    if (error === null) good = { records, startedAt }
-    failed =
-      error === null
-        ? null
-        : { at: now, read, why: error instanceof Error ? error.message : String(error) }
-    if (failed)
-      console.warn(`The full sessions read from cmux failed, next in ${gap / 1000}s: ${failed.why}`)
-    for (const listener of landed) listener()
-  }
-  read.then(
-    (records) => settle(records, null),
-    (error: unknown) => settle(null, error ?? "failed"),
-  )
-}
-
-// The last good records, while they are young enough for a board to stand on.
-const standing = (now = Date.now()) => (good && now - good.startedAt < STALE_MS ? good : null)
-
-// While boards stand on older records because the newest full read failed, so the stale lights are named in the System report rather than silent; past STALE_MS the error frames say it instead.
-export const recordsProblem = (now = Date.now()): string | null => {
-  const stand = standing(now)
-  return failed && stand
-    ? `The full sessions read from cmux failed ${Math.round((now - failed.at) / 1000)}s ago (${failed.why}), so boards stand on sessions read ${Math.round((now - stand.startedAt) / 1000)}s ago, for up to ${STALE_MS / 60_000} minutes`
-    : null
-}
-
-// The sessions of the last whole board, so a read of one workspace still knows the surface and the name another session holds, and the ops-unstick entries that board found conflicting.
-let wholeHeld: Held[] = []
+// The ops-unstick entries the last board found conflicting.
 let unstickConflicts = { at: 0, lines: [] as string[] }
 
 // Each ops-unstick entry whose surface and name point at two live sessions, so the System report says why neither reads stuck; gone once no board has read it for as long as ops-unstick's own file stays fresh.
@@ -875,80 +794,12 @@ export const unstickProblem = (now = Date.now()): string | null =>
     ? unstickConflicts.lines.join("; ")
     : null
 
-// The records a board is composed from: a read started at or after `since` when there is one, starting it when the pace allows. `wait` holds for a read in flight (a route), falling back on the last good records if it fails; without it the newest good records serve now (the hub, which readDue and onRead bring back for the newer read), so the Feed, read afresh with every board, shows a prompt at once.
-const recordsFor = (since: number, wait: boolean): Promise<unknown> => {
-  const current = good !== null && good.startedAt >= since
-  if (!current && !inFlight && Date.now() >= nextAt) startRead()
-  if (current || ((!wait || !inFlight) && standing())) return Promise.resolve(good?.records)
-  if (inFlight)
-    return inFlight.read.catch((error: unknown) => standing()?.records ?? Promise.reject(error))
-  return failed?.read ?? Promise.reject(new Error("cmux sessions were never read"))
-}
-
-// How long until a board can hold the records cmux reported since `since`: null once the newest good read has them, or while a read is in flight (onRead says when it lands), else the wait until the pace lets the next one start.
-export const readDue = (since: number): number | null =>
-  herdrAlone() || (good && good.startedAt >= since) || inFlight
-    ? null
-    : Math.max(0, nextAt - Date.now())
-
-// A read that fails elsewhere waits for its sessions read, since the hub starts its next once this settles. A dashboard that reads herdr alone asks cmux nothing.
-export const listLive = ({ since = Date.now() - SHARED_MS, wait = true } = {}): Promise<Live> => {
-  if (herdrAlone()) return liveFrom(null, null, readHerdr(), true)
-  const read = recordsFor(since, wait)
-  return liveFrom(read, runJson(["list-workspaces", "--json"]), readHerdr(), true).catch(
-    async (error) => {
-      await read.catch(() => null)
-      throw error
-    },
-  )
-}
-
-// The board as listLive reads it, kept to the workspace that holds one session, so deliver() checks a session without walking every record cmux holds (0.37s against 2.6s, measured 9 Oct). The workspace's records alone still name its sessions as the whole board does, since a name falls back on a workspace's title only while the workspace holds one session; one with no workspace is read by its id.
-export async function listSpace(worker: Worker): Promise<Live> {
-  if (worker.workspace && isHerdrWorkspace(worker.workspace.ref)) {
-    return liveFrom(null, null, readHerdr(), false)
-  }
-  const workspaces = await runJson(["list-workspaces", "--json"])
-  const space = list(isRecord(workspaces) ? workspaces.workspaces : undefined).find(
-    (w) => worker.workspace !== null && str(w.ref) === worker.workspace.ref,
-  )
-  const id = str(space?.id)
-  const filter = id ? ["--workspace", id] : ["--session", worker.sessionId]
-  return liveFrom(sessionRecords(filter), Promise.resolve(workspaces), Promise.resolve([]), false)
-}
-
-// `whole` is a read of every session, the only one that may drop the transcript reads kept for sessions it does not hold, since one workspace's read would drop every other's and the next board would read them cold. A null `read` is a read of herdr's sessions alone (listSpace for a herdr session), which asks cmux nothing. herdr's servers are read afresh on every board (herdr.ts) and their sessions join cmux's records, so each read below sees both.
-async function liveFrom(
-  read: Promise<unknown> | null,
-  spaces: Promise<unknown> | null,
-  herdr: Promise<ServerRead[]>,
-  whole: boolean,
-): Promise<Live> {
-  const asksCmux = read !== null
-  const [cmuxRecords, cmuxSpaces, feed, files, tree, servers] = await Promise.all([
-    read,
-    spaces,
-    asksCmux ? runJson(["rpc", "feed.list", '{"pending_only":true}']) : Promise.resolve(null),
-    readRegistry(),
-    // The tree names each surface (surface:<n>) and holds its own title, what a session in a shared workspace is named and paired by; one that fails leaves the names as they were. A fixture asks cmux nothing.
-    asksCmux && readsLive()
-      ? runJson(["tree", "--json", "--all", "--id-format", "both"]).catch(() => null)
-      : Promise.resolve(null),
-    herdr,
-  ])
+// Every session herdr's servers run, read afresh on each board (herdr.ts). A board asks cmux nothing.
+export async function listLive(): Promise<Live> {
+  const [files, servers] = await Promise.all([readRegistry(), readHerdr()])
   const registry = registryOf(files)
-  const records = {
-    sessions: [
-      ...list(isRecord(cmuxRecords) ? cmuxRecords.sessions : undefined),
-      ...herdrRecords(servers, registry, new Date().toISOString()),
-    ],
-  }
-  const workspaces = {
-    workspaces: [
-      ...list(isRecord(cmuxSpaces) ? cmuxSpaces.workspaces : undefined),
-      ...herdrWorkspaces(servers),
-    ],
-  }
+  const records = { sessions: herdrRecords(servers, registry, new Date().toISOString()) }
+  const workspaces = { workspaces: herdrWorkspaces(servers) }
   const starts = await processStarts(
     [...(registry ?? [])].flatMap(([pid, entry]) => (entry?.procStart ? [pid] : [])),
   )
@@ -956,8 +807,8 @@ async function liveFrom(
   const proven = liveRecords(records, { projects: projectsDir(), registry, starts })
   const [activity, tasks, reads, roster, blocked, usage, states] = await Promise.all([
     activityOf(proven),
-    tasksFor(proven, whole),
-    sessionsRead(proven, whole),
+    tasksFor(proven),
+    sessionsRead(proven),
     readRoster().catch(() => null),
     readUnstick(),
     readUsage(),
@@ -973,28 +824,22 @@ async function liveFrom(
   const live = composeWorkers(
     sessions,
     workspaces,
-    feed,
+    null,
     tasks,
     names,
     facts,
     reads,
     Date.now(),
     activity,
-    tree,
+    null,
   )
   const held = live.workers.map((w) => ({
     name: w.name,
     sessionId: w.sessionId,
     surface: live.surfaces.get(w.sessionId) ?? null,
   }))
-  if (whole) wholeHeld = held
-  const marked = blockedSessions(
-    blocked,
-    whole
-      ? held
-      : [...held, ...wholeHeld.filter((h) => !held.some((s) => s.sessionId === h.sessionId))],
-  )
-  if (whole) unstickConflicts = { at: Date.now(), lines: marked.conflicts }
+  const marked = blockedSessions(blocked, held)
+  unstickConflicts = { at: Date.now(), lines: marked.conflicts }
   return withHosted(withBlocked(live, marked.sessions, usage), hosted())
 }
 

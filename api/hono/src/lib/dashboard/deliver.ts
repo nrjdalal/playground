@@ -32,7 +32,7 @@ import { isHerdrSurface, pressEnter, prompt, promptOutcome } from "@/lib/dashboa
 import { settingCommand, settingSummary, type SessionSetting } from "@/lib/dashboard/setting"
 import { readScreen } from "@/lib/dashboard/terminal"
 import { readTail, type Entry } from "@/lib/dashboard/transcript"
-import { feedBySession, listLive, listSpace, type Live, type Worker } from "@/lib/dashboard/workers"
+import { feedBySession, listLive, type Live, type Worker } from "@/lib/dashboard/workers"
 import type { ErrorCode } from "@/lib/error"
 
 // What to deliver: `to` is the session's name as the dashboard lists it (Worker.name), `text` is what to say, `attachments` the stored files it carries (findAttachment's, so each path is one the dashboard made), and `actor` is who says it, the signed-in person for a route. `id`, the composer's own for the message, becomes its activity row's id, so a retry of a request that went unanswered finds the message delivered rather than typing it again.
@@ -362,7 +362,7 @@ export const holdsQueued = (screen: string, text: string): boolean => {
   )
 }
 
-// `board` finds the session a name names, from the board the dashboard already streams; `readSession` reads that one session again from cmux before it is typed into, and before the Enter. `canForce` says whether cmux's send takes --force, and `prompts` lists the requests the session has pending in cmux's Feed. `prompt` sends a herdr session its whole message in one call, and `pressEnter` one Enter when that call's own did not land (herdr.ts); `wait` sleeps between the reads of its box after the send, and `said` reads a session's transcript, its tail as readTail bounds it.
+// `board` finds the session a name names, from the board the dashboard already streams; `readSession` reads the board again before the session is typed into, and before the Enter. `canForce` says whether cmux's send takes --force, and `prompts` lists the requests the session has pending in cmux's Feed. `prompt` sends a herdr session its whole message in one call, and `pressEnter` one Enter when that call's own did not land (herdr.ts); `wait` sleeps between the reads of its box after the send, and `said` reads a session's transcript, its tail as readTail bounds it.
 export type DeliverDeps = {
   board: () => Promise<Live>
   canForce: () => Promise<boolean>
@@ -415,10 +415,10 @@ export const deliverDeps: DeliverDeps = {
       []
     ).map((item) => item.requestId),
   readScreen: (surface) => readScreen(surface, 40),
-  readSession: listSpace,
+  readSession: listLive,
   record: recordWhileTyping,
   said: async (worker) => {
-    const path = (await listSpace(worker)).transcripts.get(worker.sessionId)
+    const path = (await listLive()).transcripts.get(worker.sessionId)
     return path ? readTail(path, Number.POSITIVE_INFINITY) : []
   },
   skills: sessionSkills,

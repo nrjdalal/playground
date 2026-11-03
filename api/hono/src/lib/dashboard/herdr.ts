@@ -359,7 +359,7 @@ const FILED: Record<SessionState["state"], string> = {
   working: "running",
 }
 
-// Pure but for the change times (state.changed: when each session's herdr state last changed, as this process saw it, by its terminal and session, which a move does not change; herdr keeps no such time, and answeredSince() compares a picker's answer with it): every server's panes as the session records cmux's `sessions list` gives, which liveRecords() and composeWorkers() read. A pane holds a session when a process in its foreground has a registry file naming one, so a pane whose Claude has exited, or one never registered, is no session (St3); a file mid-rewrite leaves herdr's own agent_session, when it has one.
+// Pure but for the change times (state.changed: when each session's herdr state last changed, as this process saw it, by its terminal and session, which a move does not change; herdr keeps no such time, and answeredSince() compares a picker's answer with it): every server's panes as the session records liveRecords() and composeWorkers() read. A pane holds a session when a process in its foreground has a registry file naming one, so a pane whose Claude has exited, or one never registered, is no session (St3); a file mid-rewrite leaves herdr's own agent_session, when it has one.
 export function herdrRecords(reads: ServerRead[], registry: Registry, now: string): Json[] {
   const changes = new Map<string, Change>()
   const records = reads.flatMap((read) =>
@@ -404,7 +404,7 @@ export function herdrRecords(reads: ServerRead[], registry: Registry, now: strin
       ]
     }),
   )
-  // a board that did not read a server (a cmux session's listSpace(), a failed read) keeps that server's times
+  // a board that did not read a server (a failed read) keeps that server's times
   const servers = new Set(reads.map((read) => read.server))
   for (const [key, change] of state.changed)
     if (!servers.has(change.server)) changes.set(key, change)
@@ -464,7 +464,7 @@ export const readStates = async (sessionIds: string[]): Promise<Map<string, Sess
     ),
   )
 
-// Pure: the herdr records with herdrState() applied, each one's lifecycle, the prompt its hooks named (`herdr_wait`, which composeWorkers() builds its card from) and, while the usage limit alone holds it, `usage_limit`, which composeWorkers() reads as Worker.usageLimit. cmux's records pass as they are.
+// Pure: the herdr records with herdrState() applied, each one's lifecycle, the prompt its hooks named (`herdr_wait`, which composeWorkers() builds its card from) and, while the usage limit alone holds it, `usage_limit`, which composeWorkers() reads as Worker.usageLimit. A record without herdr's status passes as it is.
 export const withHerdrState = <T extends { sessions: Json[] }>(
   records: T,
   files: Map<string, SessionState | null>,
