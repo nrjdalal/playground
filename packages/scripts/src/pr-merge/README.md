@@ -6,7 +6,7 @@ This file holds the gates, the merge lock and the merge queue's readers.
 ## Gates
 
 A draft left green reaches `canary` too: when the owner's draft passes every gate but ready, pr:merge marks it ready (`gh pr ready`) just before its squash, merge-on-ready takes it, `--explain` names it, and an outside author's draft is never touched (`marksReady` in `gates.ts`).
-pr:merge refuses a PR the repo's owner did not open unless `--outside-author <login>` names its author (an outside PR's code runs here, so it merges only on a lead's go, after its read-only review), refuses a PR `~/.playground/ops/report/held-prs.json` lists at the gates or just before the merge call, naming its reason (`PLAYGROUND_HELD_PRS` moves it, as the tests do; a `"*"` line, or a file that does not read, holds every PR), and refuses unless:
+pr:merge refuses a PR the repo's owner did not open unless `--outside-author <login>` names its author (an outside PR's code runs here, so it merges only on a lead's go, after its read-only review), refuses a PR `~/.playground/ops/report/held-prs.json` lists at the gates or just before the merge call, naming its reason (`PLAYGROUND_HELD_PRS` moves it, as the tests do; a `"*"` line until it lapses (Holds and rulings), or a file that does not read, holds every PR), and refuses unless:
 
 - `up to date`: the head holds everything on `canary`, or merges with it clean; a conflict waits for a merge of `canary`, whose new head then needs its own checks and 5/5.
 - `ci`: the newest run of every GitHub check on the head, by workflow and name, has finished and passed, since a rerun or a close and reopen leaves the older runs listed; `Audit, Lint, and Build` and `test` (`REQUIRED_CHECKS` in `gates.ts`) are among them, and on factory.repo (the checkout's origin when unset) a GitGuardian check too, since a head GitGuardian never started on ran no secret scan.
@@ -36,7 +36,10 @@ When every lost line sits under `scripts/hooks/bundled/`, the refusal names its 
 ## Holds and rulings
 
 A hold is a line in the `held` object of `~/.playground/ops/report/held-prs.json`, `"<owner>/<name>#<n>": "<reason>"`, which Ops writes the moment a lead sends `hold <owner>/<name>#<n>: <reason>` and removes on the lead's word; pr:merge and merge-on-ready refuse a listed PR, naming the reason: each reads the file at the gates and again inside the merge lock, after the types gate and just before the merge call, so a hold written while the type check runs still stops the merge.
-One `"*": "<reason>"` line holds every PR at once, as a ship's merge hold does, while a PR's own line keeps its own reason; Ops writes and removes it as it does any hold.
+One `"*": "<reason>"` line holds every PR at once, as a ship's merge hold does, while a PR's own line keeps its own reason.
+The ship flow writes it with `bun run ship:freeze <version>` when its freeze starts (`startFreeze` in `held.ts`), with the time in the file's `since` object, and removes it with `bun run ship:freeze --end` once the tag lands or the ship stops (`endFreeze`).
+A freeze's own `"*"` line (its reason ends `ships: canary is frozen until its tag lands`) lapses 4 hours after that time (`FREEZE_LAPSE_MS`), so a ship that stopped without its `--end` holds no PR for long, and a ship still running then writes it again.
+A `"*"` line Ops wrote by hand never lapses, even beside a time an earlier freeze left, and both forms of `ship:freeze` leave it for Ops to remove; a PR's own line never lapses either.
 A lead that overrules a reviewer's FAIL posts one comment on the PR whose first line is `Lead ruling: ReviewBot round <r> at <sha7> overruled: <evidence>; the fault moves to #<issue>`, with that issue filed first; pr:merge reads no ruling, so the merge still waits for a fresh verdict at the head, or the Builder's merge by hand.
 A red check that `canary` caused needs a fresh run once `canary`'s fix lands: merge `canary` into the PR, since `gh run rerun` reuses the run's original merge commit, which holds the red `canary`.
 An outside author's PR goes to the Builder, who gives its go only after a read-only review of its diff.
