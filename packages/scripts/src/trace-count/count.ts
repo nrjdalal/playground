@@ -147,7 +147,7 @@ export const risen = (now: Counts, baseline: Counts): string[] =>
 export const refusal = (over: string[], at: string[] = []): string =>
   `trace-count: a count rose; write the new text in plain words${over.some((line) => line.startsWith("issueRefs:")) ? "; describe the case in words; a doc cites no issue number" : ""}:\n${[...over, ...at].join("\n")}`
 
-// Each line holding a hit of one of the kinds, as path:line: kind, past the paths never counted and the lines kept.json keeps; the changed files' alone when they hold one, since a kind's floor can hold many older hits.
+// Each line holding a hit of one of the kinds, as path:line: kind, past the paths never counted and the lines kept.json keeps while they hold no more than its hits; for each kind, the changed files' alone when they hold one, since a kind's floor can hold many older hits.
 export function located(
   files: File[],
   wanted: Kind[],
@@ -156,27 +156,35 @@ export function located(
   kept: Kept[] = [],
   changed: string[] = [],
 ): string[] {
-  const kinds = patterns(list, repos).filter(([kind]) => wanted.includes(kind))
-  const at = (from: File[]) =>
-    from.flatMap(({ path, text }) =>
-      [...LEFT_OUT, ...LOCKFILES].some((re) => re.test(path))
-        ? []
-        : text.split("\n").flatMap((line, i) =>
-            Object.entries(hitsIn(path, line, kinds, repos))
-              .filter(
-                ([kind, n]) =>
-                  n &&
-                  !kept.some(
-                    (entry) =>
-                      entry.kind === kind && entry.path === path && entry.line === line.trim(),
-                  ),
-              )
-              .map(([kind]) => `${path}:${i + 1}: ${kind}`),
-          ),
-    )
-  const near = at(files.filter((file) => changed.includes(file.path)))
-  return near.length > 0 ? near : at(files)
+  const near = files.filter((file) => changed.includes(file.path))
+  return patterns(list, repos)
+    .filter(([kind]) => wanted.includes(kind))
+    .flatMap((kind) => {
+      const own = locatedIn(near, [kind], repos, kept)
+      return own.length > 0 ? own : locatedIn(files, [kind], repos, kept)
+    })
 }
+
+const locatedIn = (from: File[], kinds: [Kind, RegExp][], repos: Repos, kept: Kept[]) =>
+  from.flatMap(({ path, text }) =>
+    [...LEFT_OUT, ...LOCKFILES].some((re) => re.test(path))
+      ? []
+      : text.split("\n").flatMap((line, i) =>
+          Object.entries(hitsIn(path, line, kinds, repos))
+            .filter(
+              ([kind, n]) =>
+                n &&
+                !kept.some(
+                  (entry) =>
+                    entry.kind === kind &&
+                    entry.path === path &&
+                    entry.line === line.trim() &&
+                    n <= entry.hits,
+                ),
+            )
+            .map(([kind]) => `${path}:${i + 1}: ${kind}`),
+        ),
+  )
 
 // The files the index or the working tree changes against HEAD, which located names first.
 export const changedFiles = (root: string): string[] => {

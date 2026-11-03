@@ -388,7 +388,7 @@ describe("no-public-leak's list", () => {
   })
 })
 
-// PG-671: a harness's untracked output in a worktree tripped the ratchet, and the refusal named no file
+// a harness's untracked output in a worktree tripped the ratchet, and the refusal named no file
 describe("the tree a count reads", () => {
   const scratch = mkdtempSync(join(tmpdir(), "trace-count-tree-"))
   afterAll(() => rmSync(scratch, { force: true, recursive: true }))
@@ -449,5 +449,26 @@ describe("a refusal names where each hit is", () => {
       "docs/b.md:1: issueRefs",
     ])
     expect(located(files, ["issueRefs"], undefined, undefined, [], ["c.ts"])).toHaveLength(2)
+  })
+
+  test("names every risen kind, each from the changed files when they hold it and from every file when they do not", () => {
+    const two: File[] = [...files, { path: "docs/old.md", text: `ask ${OLD}\n` }]
+    expect(
+      located(two, ["issueRefs", "oldNames"], undefined, undefined, [], ["docs/b.md"]),
+    ).toEqual(["docs/b.md:1: issueRefs", "docs/old.md:1: oldNames"])
+  })
+
+  test("names a kept line once it holds more hits than kept.json keeps", () => {
+    const kept: Kept = {
+      hits: 1,
+      kind: "issueRefs",
+      line: `see ${ref(12)} and ${ref(34)}`,
+      path: "docs/a.md",
+      reason: "made up",
+    }
+    const grown: File[] = [{ path: "docs/a.md", text: `see ${ref(12)} and ${ref(34)}\n` }]
+    expect(located(grown, ["issueRefs"], undefined, undefined, [kept])).toEqual([
+      "docs/a.md:1: issueRefs",
+    ])
   })
 })

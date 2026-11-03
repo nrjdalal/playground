@@ -359,8 +359,7 @@ Only the first reading moves the folder, sets variables and records files for th
   Its `ownerName` kind counts the owner's names (`owner.names`, then the owner part of `factory.archiveRepo`, read from the settings at run time), a quote set against the owner and anyone's dated quote; `companyName` counts the company's name, and `lightWords` a factory or old skill word glued into a longer one.
   It reads past the lockfiles too (`bun.lock`, `package-lock.json`), whose integrity hashes can spell a list value by chance.
   It fails when a count is over `packages/scripts/src/trace-count/counts.json`, and so does `tests/packages/scripts/src/trace-count/count.test.ts`, which `bun run test` runs and pre-commit's `trace-count` step runs on every commit but one of images and fonts alone, over every file the index holds as it stands on disk; `--write` lowers each count a trace-out brought down.
-  A refusal names each `path:line: kind` holding a hit of a risen kind (`located()`), the files changed against `HEAD` alone when they hold one, past the lines `kept.json` keeps.
-  Tests: `bun run test:file tests/packages/scripts/src/trace-count/count.test.ts`.
+  A refusal names each `path:line: kind` holding a hit of a risen kind (`located()`), for each kind the files changed against `HEAD` alone when they hold one, past the lines `kept.json` keeps while they hold no more than its hits.
   It exits 2, naming the fix, when no-public-leak's list (`extensions/hooks/no-public-leak.json` in the data folder) is missing or a key of it is empty, or when `owner.names` or `factory.archiveRepo` is unset, since those kinds would count nothing; the test counts the kinds that read neither alone.
 
 ## no-linear-ticket
