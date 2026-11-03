@@ -113,6 +113,24 @@ describe("the composer's sources", () => {
     expect(row).not.toContain("[&_button]:")
   })
 
+  // the owner: the model and effort picker stood taller than the row's 28px buttons, second from the left; it sits directly left of Send at their height
+  test("the model and effort picker is 28px tall, directly left of Send, in the right-hand group", async () => {
+    const composer = await read("dashboard/composer.tsx")
+    const group = composer.indexOf('<div className="ml-auto flex items-center gap-2">')
+    expect(group).toBeGreaterThan(-1)
+    const right = composer.slice(group)
+    const picker = right.indexOf("<SettingPicker ")
+    const send = right.indexOf("aria-label={`Send to ${label}`}")
+    expect(picker).toBeGreaterThan(-1)
+    expect(right.slice(picker, send).match(/<InputGroupButton/g)).toHaveLength(1)
+    expect(composer.match(/<SettingPicker /g)).toHaveLength(1)
+    expect(composer).not.toContain('className="ml-auto rounded-full"')
+    const trigger = (await read("dashboard/setting-picker.tsx")).match(
+      /<InputGroupButton[\s\S]*?\/>/,
+    )?.[0]
+    expect(trigger).toContain('className="h-7 gap-1 px-2.5 text-xs"')
+  })
+
   // a tester: flush on the window's bottom edge, the stock box's rounded bottom and focus ring were cut
   test("it keeps 8px under its box, level with the music player, and on a phone 8px over the tab bar", async () => {
     const group =
@@ -188,42 +206,11 @@ describe("the composer's sources", () => {
     expect(html).not.toContain("text-xs")
   })
 
-  // New thread is a circular icon button, the same size as Attach beside it
-  test("New thread is Attach's round icon button, its on state filled apart from the box and from Send", async () => {
+  // the owner: New thread is off for now, so the main chat's box renders no toggle and a send starts no thread
+  test("renders no New thread toggle", async () => {
     const composer = await read("dashboard/composer.tsx")
-    const button = (label: string) =>
-      composer.match(
-        new RegExp(`<InputGroupButton\\s+aria-label="${label}"[\\s\\S]*?</InputGroupButton>`),
-      )?.[0] ?? ""
-    const thread = button("New thread")
-    expect(thread).toContain("aria-pressed={newThread}")
-    expect(thread).toMatch(
-      />\s*\{newThread \? <RiChatThreadFill \/> : <RiChatThreadLine \/>\}\s*<\/InputGroupButton>$/,
-    )
-    const { InputGroupButton } =
-      await import("../../../../../../web/next/src/components/ui/input-group")
-    const classes = (source: string, pressed?: boolean) => {
-      const prop = (name: string) => source.match(new RegExp(`${name}="([^"]*)"`))?.[1]
-      const props = {
-        "aria-pressed": pressed,
-        className: prop("className"),
-        size: prop("size"),
-        variant: prop("variant"),
-      }
-      return (
-        renderToStaticMarkup(createElement(InputGroupButton, props))
-          .match(/class="([^"]*)"/)?.[1]
-          .split(" ") ?? []
-      )
-    }
-    const attach = classes(button("Attach files"))
-    const own = classes(thread, true)
-    expect(attach).toEqual(expect.arrayContaining(["size-8", "rounded-full"]))
-    expect(own).toEqual(expect.arrayContaining(attach))
-    // the stock toggle's bg-muted reads as off on the box's own fill, and Send already wears bg-primary
-    expect(own).toEqual(
-      expect.arrayContaining(["aria-pressed:bg-input", "dark:aria-pressed:bg-input"]),
-    )
+    expect(composer).not.toContain('aria-label="New thread"')
+    expect(composer).not.toContain("RiChatThread")
   })
 
   test("its icons are Remix: no lucide icon", async () => {

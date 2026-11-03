@@ -95,10 +95,42 @@ const fanOut = async (caller: store.Caller, message: z.infer<typeof messageSchem
 
 // Yard's routes, which only the hosted build mounts (hosted.ts), each on the member rung or the narrower one it names.
 export const yardRouter = new Hono<{ Variables: YardVariables }>()
+  // who a token or a session belongs to, so the local Playground knows which @login is its owner's
+  .get(
+    "/me",
+    doc(
+      "Who you are on Yard: your login, and whether you are its owner",
+      z.object({ login: z.string(), owner: z.boolean() }),
+    ),
+    member,
+    (c) => {
+      const { login, owner } = c.get("caller")
+      return c.json({ data: { login, owner } })
+    },
+  )
+  // what the local Playground cards in its Inbox: mentions, a thread's replies included, which a channel's page of top-level messages leaves out, and your own held posts
+  .get(
+    "/waiting",
+    doc(
+      "What waits on you past a mark, oldest first by when it showed, then by id: every sent message that names you in the channels and DMs you are in, a thread's replies included, and your own posts held for your approval; take the last item's shownAt as the next since and its message's id as the next after",
+      z.object({
+        items: z.array(
+          z.object({ held: z.boolean(), message: messageSchema, shownAt: z.iso.datetime() }),
+        ),
+      }),
+      [validationErrorResponses],
+    ),
+    member,
+    valid("query", z.object({ after: z.string().min(1).optional(), since: z.iso.datetime() })),
+    async (c) =>
+      c.json({
+        data: { items: await store.waiting(db, c.get("caller"), c.req.valid("query")) },
+      }),
+  )
   .get(
     "/channels",
     doc(
-      "Every channel, joined or not, and your DMs, with unread and mention counts",
+      "Every channel, joined or not, and your DMs, with unread and mention counts; a first list joins you to Yard's own channels",
       z.object({ channels: z.array(channelSchema) }),
     ),
     member,

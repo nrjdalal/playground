@@ -3,11 +3,15 @@ import { homedir } from "node:os"
 
 import { unlinked } from "./playground/unlinked"
 
-// Runs the pre-commit build through the machine's run slot, `~/.playground/ops/run-slot.sh commit-<worktree> -- <step>`, when the commit is in a worktree under `.claude/worktrees/`, that script is executable and turbo's dry run finds a build task with work to do, so a real build waits its turn beside every other heavy run; it runs the step bare anywhere else, in a commit already running under run-slot (whose child carries the `RUN_SLOT_NICE` it exports), so a commit never waits on a slot it holds, and when turbo can replay every build task from its cache, since a replay ran 2 s or less after waits of up to 1,788 s (2 Nov, run-slot.runs.log).
+// Runs a pre-commit step (the build or a type check) through the machine's commit slot, `~/.playground/ops/run-slot.sh commit-<worktree> -- <step>` marked `RUN_SLOT_COMMIT_STEP=1`, which run-slot gives `run-slot-commit` as it gives `run-slot.sh <who> -- git commit` (3 Nov: a plain commit's build waited about an hour in the full queue), when the commit is in a worktree under `.claude/worktrees/` and that script is executable; it runs the step bare anywhere else, in a commit already running under run-slot (whose child carries the `RUN_SLOT_NICE` it exports), so a commit never waits on a slot it holds, and for the build when turbo can replay every build task from its cache, since a replay ran 2 s or less after waits of up to 1,788 s (2 Nov, run-slot.runs.log); a type check reads no such cache, so it takes the slot whenever it would.
 
 const WORKTREE = /\/\.claude\/worktrees\/([^/]+)/
 
 const DRY_RUN = ["bun", "run", "turbo", "run", "build", "--dry=json"]
+
+// The one step whose cost turbo's cache speaks for.
+const BUILD = ["bun", "run", "build"]
+export const isBuild = (step: string[]): boolean => step.join(" ") === BUILD.join(" ")
 
 export const replays = (dry: string): boolean => {
   try {
@@ -57,9 +61,11 @@ if (import.meta.main) {
     console.error(refusal)
     process.exit(1)
   }
+  const step = process.argv.slice(2)
   const argv = slotted({
-    argv: process.argv.slice(2),
+    argv: step,
     cached: () => {
+      if (!isBuild(step)) return false
       const dry = Bun.spawnSync(DRY_RUN, { stderr: "ignore", stdout: "pipe", timeout: 10_000 })
       return dry.exitCode === 0 && replays(dry.stdout.toString())
     },
@@ -75,6 +81,9 @@ if (import.meta.main) {
     },
     home: process.env.HOME || homedir(),
   })
-  const child = Bun.spawn(argv, { stdio: ["inherit", "inherit", "inherit"] })
+  const child = Bun.spawn(argv, {
+    env: argv === step ? process.env : { ...process.env, RUN_SLOT_COMMIT_STEP: "1" },
+    stdio: ["inherit", "inherit", "inherit"],
+  })
   process.exit(await child.exited)
 }

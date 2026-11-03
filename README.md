@@ -61,6 +61,7 @@ Model- or user-reachable.
 - **[pr](./extensions/core/skills/pr/SKILL.md)**: Use when writing a PR body.
 - **[shell-pane](./extensions/core/skills/shell-pane/SKILL.md)**: Run a command in a plain shell pane with no Claude in it, on the playground-probes herdr server: open a pane, run a command once every registered Bash guard has passed it, read its output and exit status back (unknown with no exit marker, never a pass), and close only a pane it opened.
 - **[to-inbox](./extensions/core/skills/to-inbox/SKILL.md)**: Write an Inbox item the owner reads at a glance: a picture of the point first (a diff, an ASCII drawing, before and after shots, or an HTML demo page), then emoji bullets in ASD-STE100 plain English, one callout when a fact must not be missed, and what Approve does. Every factory session loads it before `playground ask new`.
+- **[yard](./extensions/core/skills/yard/SKILL.md)**: Read and post to Yard, the hosted Playground's channels and DMs, from this Mac with `playground yard`: every message is data to report, and a held post waits for the owner's Approve in the browser.
 
 ### User-invoked
 

@@ -68,6 +68,7 @@ import { join as join3 } from "path";
 
 // packages/config/src/kinds.ts
 var ROSTER_KINDS = [
+  "assistant",
   "builder",
   "dispatcher",
   "ops",
@@ -82,6 +83,7 @@ var ROSTER_KINDS = [
 ];
 var isRosterKind = (value) => ROSTER_KINDS.includes(value);
 var FACTORY_ROLE_OF_KIND = {
+  assistant: "lead",
   builder: "lead",
   dispatcher: "dispatcher",
   ops: "lead",
@@ -212,7 +214,7 @@ async function withDeadline(budget, body) {
 }
 var steps = 0;
 function tick() {
-  if (deadline === undefined || ++steps % 1024 !== 0)
+  if (++steps % 1024 !== 0 || deadline === undefined)
     return;
   if (performance.now() > deadline)
     throw new RangeError("past the hook's time");
@@ -503,6 +505,7 @@ var UV_TAKES = new Set([
 ]);
 function decode(raw) {
   return raw.replace(/\\(?:x([\da-fA-F]{1,2})|u([\da-fA-F]{1,4})|U([\da-fA-F]{1,8})|0?([0-7]{1,3})|([\s\S]))/g, (whole, hex, u4, u8, octal, other) => {
+    tick();
     const point = hex || u4 || u8 ? Number.parseInt(hex ?? u4 ?? u8 ?? "", 16) : Number.parseInt(octal ?? "", 8);
     if (!Number.isNaN(point))
       return point <= 1114111 ? String.fromCodePoint(point) : whole;
@@ -555,6 +558,7 @@ function walk(lx, scope, nested, inherit) {
       lx.commands.push(done);
     }
     cmd = fresh();
+    cmd.follows = op;
     if (pipe) {
       cmd.stdin = done;
       cmd.detached = true;
@@ -580,7 +584,7 @@ function walk(lx, scope, nested, inherit) {
         lx.i++;
     } else if (c === ")") {
       lx.i++;
-      end(";");
+      end(")");
       if (nested)
         return;
     } else if (c === "(") {
@@ -728,6 +732,8 @@ function word(lx) {
     out.unknown ??= "a brace expansion";
   if (GLOB_CHARS.test(bare))
     out.glob = true;
+  if (marked(out.value))
+    out.raw = src.slice(start, lx.i);
   return out;
 }
 var GLOB_CHARS = /[*?[{(]/;
@@ -778,7 +784,7 @@ function dollar(lx) {
     lx.i += 2;
     const from = lx.commands.length;
     nest(lx);
-    return substituted(lx.commands.slice(from));
+    return substituted(lx.commands.slice(from), lx.known);
   }
   if (next === "{") {
     const end = balanced(src, lx.i + 1, "{", "}");
@@ -792,6 +798,10 @@ function dollar(lx) {
     while (/\w/.test(src[lx.i] ?? ""))
       lx.i++;
     return variable(src.slice(from, lx.i));
+  }
+  if (next === "$") {
+    lx.i += 2;
+    return { value: "99999" };
   }
   if (/[\d@*#?$!-]/.test(next)) {
     lx.i += 2;
@@ -845,10 +855,13 @@ function backtick(lx) {
   list({ ...lx, i: 0, src: inner }, lx.scopes.push(lx.scope) - 1, false);
   return unknown("a command substitution");
 }
-function substituted(inner) {
+function substituted(inner, known) {
   const [only] = inner;
   if (inner.length !== 1 || only.stdin || only.group)
     return unknown("a command substitution");
+  const made = mktempPath(only, known);
+  if (made)
+    return { value: made };
   const [first, ...args] = only.words;
   const plainCat = first?.value === "cat" && !first.unknown && !first.reads?.length;
   const input = only.redirects[0];
@@ -862,6 +875,21 @@ function substituted(inner) {
     return { reads: [input.target], value: READ };
   }
   return unknown("a command substitution");
+}
+var MKTEMP_FLAGS = new Set(["d", "q"]);
+var MKTEMP_LONG = new Set(["--directory", "--quiet"]);
+function mktempPath(cmd, known) {
+  const [first, ...args] = cmd.words;
+  if (!first || first.quoted || first.value !== "mktemp" || cmd.redirects.length > 0)
+    return;
+  if (!known.TMPDIR)
+    return;
+  const flag = ({ quoted, value }) => !quoted && (MKTEMP_LONG.has(value) || /^-[a-z]+$/.test(value) && value.slice(1).split("").every((c) => MKTEMP_FLAGS.has(c)));
+  const templates = args.filter((word) => !flag(word));
+  const [template] = templates;
+  if (templates.length > 1 || template?.value.startsWith("-") || marked(template?.value ?? ""))
+    return;
+  return template ? template.value : `${known.TMPDIR.replace(/\/$/, "")}/tmp.mktemp`;
 }
 var SPLIT = /^(?:-[0iv]*S|--split-string(?:=|$))(.*)$/;
 var READINGS = 16;
@@ -893,6 +921,7 @@ function unwrap(state, inside, budget) {
   const take = () => rest.pop();
   const also = [];
   const fork = (wrapper, drop) => {
+    tick();
     if (budget.left-- <= 0) {
       budget.capped = true;
       return;
@@ -1414,6 +1443,7 @@ var SED_VALUES = new Set(["--expression", "--file", "--line-length"]);
 if (false) {}
 
 // scripts/hooks/no-extensions-write.ts
+var shown = (word) => (word.raw ?? word.value).replaceAll(UNKNOWN, () => "$\u2026").replaceAll(READ, () => "$\u2026");
 var ROUTE = "every guard reads its list and policy.json from there, so a session's write would change what a guard allows. A guard's list or setting changes only by the owner typing the playground command as a ! command in the dispatcher's terminal window, which runs without hooks: tell your lead, and the dispatcher hands the owner the command. A session writes nothing there by hand.";
 var refuse = (what) => `no-extensions-write hook refuses ${what}: ${ROUTE}`;
 var TOO_LONG = "a command too long or nested too deep to read inside the hook's time: split it into shorter calls";
@@ -1475,7 +1505,268 @@ function reads(parsed, env) {
     return false;
   const { rest, sub } = gitCall(args, env);
   const before = args.slice(0, args.length - rest.length - 1).map((a) => a.value);
-  return !!sub && GIT_READS.has(sub) && !before.some((w) => w === "-c" || /^--(?:config-env|exec-path)/.test(w)) && !rest.some((w) => /^(?:--output|-O|--open-files-in-pager|--ext-diff|--textconv)/.test(w));
+  return !!sub && GIT_READS.has(sub) && !before.some((w) => /^-c|^--(?:config-env|exec-path)/.test(w)) && !rest.some((w) => /^(?:--output|-O|--open-files-in-pager|--ext-diff|--textconv)/.test(w));
+}
+var GH_READS = new Set([
+  "api",
+  "issue list",
+  "issue view",
+  "pr list",
+  "pr view",
+  "run list",
+  "run view",
+  "search"
+]);
+var GH_API_SENDS = /^(?:-[^-=qt]*[FXf]|--(?:cache|field|input|method|raw-field)(?:=|$))/;
+var GH_WEB = /^(?:-[^-=qt]*w|--web(?:=|$))/;
+function ghFilters(parsed) {
+  const { args, first, name } = parsed;
+  const filters = new Set;
+  if (name !== "gh" || !first || marked(first.value))
+    return filters;
+  const [verb, sub] = args.map((a) => a.value);
+  const call = verb === "api" || verb === "search" ? verb : `${verb} ${sub}`;
+  if (!GH_READS.has(call))
+    return filters;
+  if (verb === "api" && args.some((a) => GH_API_SENDS.test(a.value)))
+    return filters;
+  if (args.some((a) => GH_WEB.test(a.value)))
+    return filters;
+  for (let k = 0;k < args.length; k++) {
+    const { value } = args[k];
+    if (["-q", "--jq", "-t", "--template"].includes(value) && args[k + 1])
+      filters.add(args[++k]);
+    else if (/^(?:-[qt].|--(?:jq|template)=)/.test(value))
+      filters.add(args[k]);
+  }
+  return filters;
+}
+var READS_ONLY = /^(?:\}|:?[-+?]|[#%/])/;
+function namings(command) {
+  const counts = new Map;
+  const plain = new Set;
+  const add = (key) => counts.set(key, (counts.get(key) ?? 0) + 1);
+  for (const m of command.matchAll(/(\$\{[#!]?)?(?<![\w$])([A-Za-z_]\w*)/g)) {
+    const [whole, expanded, key] = m;
+    const next = command.slice(m.index + whole.length);
+    if (expanded && READS_ONLY.test(next))
+      continue;
+    const assigns = next[0] === "=" ? "=" : undefined;
+    const at = m.index + (expanded?.length ?? 0);
+    if (!expanded && command[at - 1] === "-" && (at < 2 || /\s/.test(command[at - 2]))) {
+      for (let k = 0;k < key.length - 1; k++)
+        if (key[k] === "a" || key[k] === "v")
+          add(key.slice(k + 1));
+      continue;
+    }
+    add(key);
+    if (!expanded && assigns === "=" && (at === 0 || /[\s;&|(]/.test(command[at - 1])))
+      plain.add(key);
+  }
+  const from = [];
+  let joined = "";
+  for (let i = 0;i < command.length; i++)
+    if (!'\\\'"'.includes(command[i])) {
+      from.push(i);
+      joined += command[i];
+    }
+  for (const m of joined.matchAll(/(?<![\w$])[A-Za-z_]\w*/g)) {
+    const end = m.index + m[0].length - 1;
+    if (from[end] - from[m.index] !== end - m.index)
+      add(m[0]);
+  }
+  return { counts, plain };
+}
+var SHELL_SETS = new Set([
+  "ARGC",
+  "BASH",
+  "BASHOPTS",
+  "BASHPID",
+  "COLUMNS",
+  "COPROC",
+  "CPUTYPE",
+  "DIRSTACK",
+  "EGID",
+  "EPOCHREALTIME",
+  "EPOCHSECONDS",
+  "ERRNO",
+  "EUID",
+  "FUNCNAME",
+  "FUNCNEST",
+  "GID",
+  "GROUPS",
+  "HISTCMD",
+  "HOST",
+  "HOSTNAME",
+  "HOSTTYPE",
+  "LINENO",
+  "LINES",
+  "LOGNAME",
+  "MACHTYPE",
+  "MAPFILE",
+  "MATCH",
+  "MBEGIN",
+  "MEND",
+  "OLDPWD",
+  "OPTARG",
+  "OPTIND",
+  "OSTYPE",
+  "PIPESTATUS",
+  "PPID",
+  "PWD",
+  "RANDOM",
+  "REPLY",
+  "SECONDS",
+  "SHELLOPTS",
+  "SHLVL",
+  "SRANDOM",
+  "TRY_BLOCK_ERROR",
+  "TRY_BLOCK_INTERRUPT",
+  "TTY",
+  "TTYIDLE",
+  "UID",
+  "USERNAME",
+  "VENDOR",
+  "_",
+  "argv",
+  "match",
+  "mbegin",
+  "mend",
+  "pipestatus",
+  "reply",
+  "signals",
+  "status"
+]);
+var SHELL_SETS_PREFIX = /^(?:BASH_|COMP_|READLINE_|ZSH_|zsh_)/;
+function holdable(key, named, counts) {
+  return counts.get(key) === 1 && named.plain.has(key) && !SHELL_SETS.has(key) && !SHELL_SETS_PREFIX.test(key);
+}
+var NONE = { has: () => false };
+var NAME_SETTERS = new Set([
+  "declare",
+  "export",
+  "getopts",
+  "let",
+  "local",
+  "mapfile",
+  "printf",
+  "read",
+  "readarray",
+  "readonly",
+  "typeset",
+  "unset"
+]);
+var RUNS_TEXT = new Set([".", "eval", "source"]);
+var OPENS = new Set(["case", "for", "if", "select", "until", "while", "{"]);
+var CLOSES = new Set(["done", "esac", "fi", "}"]);
+var LEADS = new Set(["!", "coproc", "do", "elif", "else", "then", "time"]);
+function steadyNames(named, commands) {
+  if (named.counts.has("IFS"))
+    return () => NONE;
+  const counts = new Map(named.counts);
+  const parses = commands.map((cmd) => parse(cmd));
+  for (const [at, cmd] of commands.entries()) {
+    const { name } = parses[at];
+    if (RUNS_TEXT.has(name))
+      return () => NONE;
+    const loop = cmd.words.findIndex((w) => !w.quoted && (w.value === "for" || w.value === "select"));
+    if (!NAME_SETTERS.has(name) && loop === -1)
+      continue;
+    const v = cmd.words.findIndex((w) => /^-v/.test(w.value));
+    const vName = cmd.words[v]?.value === "-v" ? cmd.words[v + 1] : cmd.words[v] && { ...cmd.words[v], value: cmd.words[v].value.slice(2) };
+    const names = loop !== -1 ? [cmd.words[loop + 1]] : name === "printf" ? [vName] : cmd.words;
+    for (const word of names) {
+      if (!word)
+        continue;
+      if (marked(word.value.split("=")[0]))
+        return () => NONE;
+      for (const key of word.value.match(/[A-Za-z_]\w*/g) ?? [])
+        counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+  }
+  const set = new Map;
+  const where = new Map;
+  let chain = 0;
+  let depth = 0;
+  for (const [at, cmd] of commands.entries()) {
+    if (cmd.follows !== "&&")
+      chain++;
+    where.set(cmd, { at, chain });
+    const top = depth === 0 && cmd.scope === 0;
+    for (let k = 0;k < cmd.words.length; k++) {
+      const { quoted, value } = cmd.words[k];
+      if (quoted)
+        break;
+      if (value === "function")
+        k++;
+      else if (OPENS.has(value))
+        depth++;
+      else if (CLOSES.has(value))
+        depth--;
+      else if (!LEADS.has(value))
+        break;
+    }
+    if (depth < 0)
+      return () => NONE;
+    const always = !cmd.follows || cmd.follows === ";" || cmd.follows === "&";
+    if (!top || cmd.detached || !always && cmd.follows !== "&&")
+      continue;
+    const [first] = cmd.words;
+    if (!first || !ASSIGN.test(first.value) || parses[at].name !== "")
+      continue;
+    for (const key of parses[at].local.keys())
+      if (holdable(key, named, counts))
+        set.set(key, always ? { at } : { at, chain });
+  }
+  return (cmd) => {
+    const here = where.get(cmd);
+    if (!here)
+      return NONE;
+    return {
+      has: (key) => {
+        const from = set.get(key);
+        return !!from && from.at < here.at && (from.chain === undefined || from.chain === here.chain);
+      }
+    };
+  };
+}
+function heldWord(word, env, steady) {
+  return word.raw && marked(word.value) ? relexed(word.raw, heldVars(env, steady)) : undefined;
+}
+function relexed(raw, known) {
+  const words = lex(raw, known).commands.at(-1)?.words ?? [];
+  return words.length === 1 && !marked(words[0].value) ? words[0] : undefined;
+}
+function heldVars(env, steady) {
+  const known = { ...env.known };
+  for (const [key, text] of env.vars) {
+    if (key === "TMPDIR" || !steady.has(key))
+      continue;
+    if (!text.unknown && !marked(text.value))
+      known[key] = text.value;
+    else if ("raw" in text && typeof text.raw === "string") {
+      const again = relexed(text.raw, known)?.value;
+      if (again?.startsWith(`${key}=`))
+        known[key] = again.slice(key.length + 1);
+    }
+  }
+  return known;
+}
+var held3 = (word, env, steady) => !marked(word.value) || !!heldWord(word, env, steady);
+function gitConfigs(args) {
+  const configs = [];
+  for (let k = 0;k < args.length; k++) {
+    const { value } = args[k];
+    if (value === "-c" && args[k + 1])
+      configs.push(args[++k]);
+    else if (value.startsWith("-c") && value.length > 2)
+      configs.push(args[k]);
+    else if (GIT_TAKES.has(value))
+      k++;
+    else if (!value.startsWith("-"))
+      break;
+  }
+  return configs;
 }
 var GUARD_KEYS = new Set([
   "ext.links",
@@ -1590,6 +1881,10 @@ function narrow(cmd, env) {
     return reads(parsed, env);
   if (base === "cut")
     return true;
+  if (base === "gh") {
+    const filters = ghFilters(parsed);
+    return filters.size > 0 && args.every((a) => filters.has(a) || !/\s/.test(a.value));
+  }
   if (base === "sort")
     return !args.some(({ value }) => /^-[a-zA-Z]*o|^--./.test(value));
   if (base === "uniq")
@@ -1622,7 +1917,10 @@ function wholeLine(commands, env) {
 }
 function runsOf(parsed, vars, whole, rootLine) {
   const { args, first, local } = parsed;
-  const values = [...local.values(), ...vars].flatMap((text) => text.unknown ? [] : [text.value]);
+  const values = [...local.values(), ...vars].flatMap((text) => {
+    tick();
+    return text.unknown ? [] : [text.value];
+  });
   for (const word of whole ? first ? [first, ...args] : args : [])
     for (const text of texts(word)) {
       values.push(text.value.replace(/^!/, ""));
@@ -1682,7 +1980,7 @@ var texts = (word) => {
     out.push({ ...word, value: v.slice(2) });
   return out;
 };
-function inspect(raw, environment) {
+async function inspect(raw, environment, unknown = false) {
   const { cwd, tool_input: toolInput, tool_name: tool } = JSON.parse(raw);
   const input = toolInput ?? {};
   const directory = typeof cwd === "string" ? cwd : undefined;
@@ -1746,6 +2044,7 @@ function inspect(raw, environment) {
     }
   };
   const seen = new Set;
+  let steadyAt = () => NONE;
   let whole = false;
   let rootLine = false;
   const varsRead = new WeakMap;
@@ -1755,7 +2054,10 @@ function inspect(raw, environment) {
     store.set(vars, cursors);
     const [keys, next] = varsSince(vars, cursors.get(key));
     cursors.set(key, next);
-    return keys.flatMap((k) => vars.get(k) ?? []);
+    return keys.flatMap((k) => {
+      tick();
+      return vars.get(k) ?? [];
+    });
   };
   const visit = async (cmd, parsed, env) => {
     const slot = slotWords(parsed);
@@ -1805,6 +2107,15 @@ function inspect(raw, environment) {
     if (name === "git" && inRoot(gitCall(args, env).cwd))
       return refuse(`git on a clone in ${root}`);
     const remover = REMOVERS.has(name);
+    const steady = steadyAt(cmd);
+    const unheld = remover ? args.find((word) => !held3(word, env, steady)) : undefined;
+    if (unheld)
+      return refuse(`${verb} on ${shown(unheld)}, a value the hook does not hold; hold it in the same call (X=<path>; ${verb} "$X") or write the path literally`);
+    if (name === "git") {
+      const config = gitConfigs(args).find((word) => marked(word.value));
+      if (config)
+        return refuse(`git ${/^-c./.test(config.raw ?? config.value) ? "" : "-c "}${shown(config)}, a value built from a variable or a substitution; write the value literally in the call`);
+    }
     const scope = since(varsJudged, env.vars, `${env.cwd}\x00${remover}`);
     for (const value of [...parsed.local.values(), ...scope]) {
       const named = names({ ...value, quoted: false }, env, remover);
@@ -1812,8 +2123,10 @@ function inspect(raw, environment) {
         return refuse(`${verb} with a variable on ${named}`);
     }
     const literal = !whole && narrow(cmd, env);
-    for (const word of [first, ...args]) {
-      if (quiet && /\s/.test(word.value) && !texts(word).some((t) => holds(t.value, env)))
+    const filters = whole ? new Set : ghFilters(parsed);
+    for (const word of [first, ...args].map((word) => heldWord(word, env, steady) ?? word)) {
+      const text = quiet && /\s/.test(word.value) || filters.has(word) && !word.glob;
+      if (text && !texts(word).some((t) => holds(t.value, env)))
         continue;
       const named = names(word, env, remover, literal);
       if (named)
@@ -1821,14 +2134,22 @@ function inspect(raw, environment) {
     }
     if (cmd.redirects.some((r) => r.body && holds(r.body.value, env)))
       return refuse(`${verb} with a script that names ${root}`);
+    if (fed && remover && (fed.unknown || marked(fed.value)))
+      return refuse(`${verb} under xargs fed by ${fed.unknown ?? "a value it cannot read"}, a value the hook does not hold; write the paths literally in the call`);
     if (fed) {
       const named = !fed.unknown && fed.value.split(/\s+/).filter(Boolean).map((value) => names({ quoted: false, value }, env, remover)).find(Boolean);
       if (named)
         return refuse(`${verb} under xargs on ${named}`);
     }
   };
+  const named = namings(command);
   const known = knownVariables(command, environment, directory);
+  const steered = Object.keys(known).filter((key) => named.counts.has(key));
+  if (unknown)
+    for (const key of steered)
+      delete known[key];
   const lexed = lex(command, known);
+  steadyAt = steadyNames(named, lexed.commands);
   const env = {
     cwd: directory,
     files: new Map,
@@ -1841,7 +2162,10 @@ function inspect(raw, environment) {
   whole = rootLine || wholeLine(lexed.commands, env);
   if (SCORE.test(unquoted(command)) && changesIdentity(lexed.commands))
     return refuse(SCORE_AS_OTHER);
-  return run(lexed, env, visit, true);
+  const verdict = await run(lexed, env, visit, true);
+  if (verdict || unknown || steered.length === 0)
+    return verdict;
+  return inspect(raw, environment, true);
 }
 async function check(raw, environment = process.env, budget = 1e4) {
   try {

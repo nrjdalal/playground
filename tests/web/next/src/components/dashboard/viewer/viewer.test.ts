@@ -37,7 +37,7 @@ describe("Open in new tab opens a blob URL with the Dashboard's origin, so only 
   })
 })
 
-describe('a step past either end wraps (the owner: "back and forth not working right")', () => {
+describe("a step past either end wraps", () => {
   test("Next on the last goes to the first and Previous on the first to the last, each a jump", () => {
     expect(wrapStep(19, 1, 20)).toEqual({ next: 0, wraps: true })
     expect(wrapStep(0, -1, 20)).toEqual({ next: 19, wraps: true })
@@ -66,7 +66,7 @@ describe("a frame keeps a touch to itself, so on a screen with no hover its bars
   })
 })
 
-describe('the bar holds one width from slide to slide (the owner: "it\'s size changes? width should be fixed")', () => {
+describe("the bar holds one width from slide to slide", () => {
   const web = join(import.meta.dir, "../../../../../../../web/next")
   const render = async (kind: (typeof INBOX_ATTACHMENT_KINDS)[number]) => {
     const { createElement } = await import(Bun.resolveSync("react", web))

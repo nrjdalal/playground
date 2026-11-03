@@ -7,7 +7,7 @@ const view = await Bun.file(
   join(import.meta.dir, "../../../../../../web/next/src/plugins/changelog/view.tsx"),
 ).text()
 
-describe('each changelog version an accordion row (the owner: "changelog should look like inbox, like the accordions")', () => {
+describe("each changelog version an accordion row", () => {
   test("each version is one accordion row on the shelf classes", () => {
     expect(view).toContain("<AccordionItem value={group.id} className={SHELF_ITEM}>")
     expect(view).toContain("className={SHELF_ROW}")
@@ -16,7 +16,7 @@ describe('each changelog version an accordion row (the owner: "changelog should 
     )
   })
 
-  test('a stuck header sticks up over its pane\'s top padding, so no row shows above it in the aside (the owner: "please no text can go above the entry")', () => {
+  test("a stuck header sticks up over its pane's top padding, so no row shows above it in the aside", () => {
     expect(STICKY_HEADER.split(" ")).toContain("top-[calc(var(--pane-top,0px)*-1)]")
   })
 
