@@ -1,5 +1,7 @@
-import { mkdirSync, readdirSync, rmSync, symlinkSync } from "node:fs"
+import { mkdirSync, readdirSync, symlinkSync } from "node:fs"
 import { dirname, join } from "node:path"
+
+import { makeScratch } from "@packages/safe-delete"
 
 import {
   boardSignature,
@@ -152,7 +154,7 @@ export const linkSkills = (home: string, skillDir: string) => {
     if (entry.isDirectory()) symlinkSync(join(root, entry.name), join(skills, entry.name))
 }
 
-// One side's runs, each in its own sandboxed HOME, started empty so a side rerun at 5 reuses no earlier run's folder; a miss in any run is kept, so the replay fails on a read the recording lacks.
+// One side's runs, each in its own sandboxed HOME in a fresh scratch folder (run-<i>-<random>), so a side rerun at 5 reuses no earlier run's folder; a miss in any run is kept, so the replay fails on a read the recording lacks.
 export const runSide = async (o: {
   claude: string
   env: Record<string, string | undefined>
@@ -166,8 +168,8 @@ export const runSide = async (o: {
 }): Promise<Side> => {
   const side: Side = { misses: [], signatures: [] }
   for (let i = 0; i < o.runs; i++) {
-    const dir = join(o.scratch, `run-${i}`)
-    rmSync(dir, { force: true, recursive: true })
+    mkdirSync(o.scratch, { recursive: true })
+    const dir = makeScratch(`run-${i}-`, o.scratch)
     const misses = join(dir, "misses.jsonl")
     await Bun.write(misses, "")
     await Bun.write(join(dir, "home", ".keep"), "")

@@ -1,6 +1,6 @@
 # Lifecycle
 
-When each kind of factory session starts and ends, what the Dashboard shows for each role, and the ops jobs that run with no session.
+When each kind of factory session starts and ends, what the Dashboard shows for each role, the ops jobs that run with no session, and how the main checkout is restored.
 The commands for each start and end are in [SESSIONS.md](SESSIONS.md), and every start and end lands in the roster ([ROSTER.md](ROSTER.md)).
 
 ## Roles on the Dashboard
@@ -27,7 +27,7 @@ Sessions that work together share a workspace as full-height columns ([SESSIONS.
 
 - **Workers** are spawned by the Builder, one per chore, and close with their checkers once their chore is done.
   A worker ends when its chore is done: its PR merged (or dropped with the Builder's ok), its branch pushed (`git push -u origin <branch>`), so its commits show on origin even with no PR,
-  its worktrees, branches, containers and probes cleaned up from the main checkout (`cd` there before `git worktree remove`, since the session sits inside its own last worktree: the one `cd` a worker runs), and its final report sent, naming the pushed head.
+  its worktrees, branches, containers and probes cleaned up from the main checkout (`cd` there before `playground rm --worktree <path>`, since the session sits inside its own last worktree: the one `cd` a worker runs), and its final report sent, naming the pushed head.
   Remove a worktree another session holds only once that session is closed or off the roster and no live session's cwd is inside it: a clean tree is not a free tree, since a reviewer keeps its worktree across PRs (**rounds**).
   The Builder then closes its workspace, which takes any split still open in it, and its slot returns to the pool.
   Ending is automatic, by [SESSIONS.md](SESSIONS.md#end)'s path: `pr:merge` and the train's land end the merged PR's worker, reviewer and tester, and ops-tick's auto-end beat ends the rest every 5 minutes, each with one line to its lead.
@@ -50,24 +50,28 @@ Sessions that work together share a workspace as full-height columns ([SESSIONS.
   it queues one resume line in the ops outbox, which the relay sends with `SendMessage` (**voice**), and one carry-on line to each such session whose turn a restart lost (its newest state `working`, written before its process started, 2 minutes on, with no Escape after it in the transcript),
   and one to each such session whose state reads `failed` on an API error, alerting its lead and the dispatcher once when a later pass finds the same record still standing or a new failure follows its line within 30 minutes;
   it tells the dispatcher of a live session still `stuck` once the `unstick.escalateMinutes` setting's minutes pass (5 by default, read at each pass), and a live session's manager of one reading `working` with no transcript write for 15 minutes (**unstick**); `--once` runs one cycle with no beat.
-  ops-sweep is `bun --no-env-file <dashboard checkout>/packages/scripts/src/ops-sweep/cli.ts no-headroom`, its `jobs.json` command naming the script by its absolute path so `up.py` keys it by its folder (each word after `cli.ts` a finding known at start and never told):
+  ops-sweep runs from the install's checkout, `{checkout}` in `bunJob`'s default (`packages/settings/src/jobs.ts`), and reads the Dashboard's checkout from its context (`ctx.dashboard`), never from where it runs.
+  It is `bun --no-env-file <checkout>/packages/scripts/src/ops-sweep/cli.ts no-headroom`, its `jobs.json` command naming the script by its absolute path so `up.py` keys it by its folder (each word after `cli.ts` a finding known at start and never told):
   every 300 seconds it brings up any ops job that is down, then reads the runners (a parked one is never down), the probes, the managers' asks, the unclosed answers (`bun run ask stale`), the heartbeats, the runner-box route (`run-slot.sh box-off`, a `box-route-off:<reasons>` finding while a run would fall back to the Mac),
   each worker's PR whose head has been ready 20 minutes with no review round and no live reviewer (told to the worker's lead once per head, a parked worker's never),
-  each live worker's `PG-` branch, the one its roster row records at first push, whose head is 15 minutes old with no PR, so no CI runs on it (told to the worker's lead once per head, a row holding a `pr` never, every branch in one GraphQL read) and the usage forecast,
+  each live worker's `PG-` branch, the one its roster row records at first push, whose head is 15 minutes old with no PR, so no CI runs on it (told to the worker's lead once per head, a row holding a `pr` never, every branch in one GraphQL read),
+  the open PRs of ours idle 30 minutes or at one sub-5 score 4 verdicts running (`pr-stalled` alerts written to `ops/alerts-prs.json` for ops-unstick, every PR in one GraphQL search, [SWEEP.md](SWEEP.md) step 4) and the usage forecast,
   and the `playground-*` databases (and the older-named ones) idle 2 hours with no client (never the dashboard's own, found by `POSTGRES_URL`'s port, nor a Checks lane's `playground-chk-<k>-db` while a run holds `ops/checks/lane-chk-<k>.lock`, whose idle clock starts again after), telling ops each finding once, while it is new, and keeping its state in `ops/sweep/` in the state folder.
   ops-tick is `bun run ops:tick` in a checkout of `canary`: the factory's timed beats, each at its old cron in machine wall time with no model call, running the same script as before and queueing what it prints in the ops outbox for the seat or session it went to before, through `scripts/ops/notify.sh`, silent when nothing prints:
   the roll gate, the tick (usage marks, a `switch due`, load, the train's slot wait, near-limit marks, and the switch watch, which at a full week writes ops-unstick's move file and tells both dispatchers and both leads), the usage-limit watch (each session on the usage-limit screen named to the builder once with its account, and the lowest-week account with its 5-hour window under 90% to move to),
   the auto-end beat every 5 minutes (`scripts/ops/optimizer/auto_end.ts` over `idle_sessions.ts`'s flags, [SESSIONS.md](SESSIONS.md#end)), each end or `Not ended` line to the session's lead, a `Not ended` line once until its words change,
-  ops-up every 5 minutes (`scripts/ops/up.py`, each line it prints told to ops once until it changes, so a reboot or a quit cmux brings every job back with no hand step, and its warning that a job runs outside cmux while cmux holds a factory session also shown as a macOS banner once per holder),
+  ops-up every 5 minutes (`scripts/ops/up.py`, each line it prints told to ops once until it changes, so a reboot or a herdr server that went down brings every job back with no hand step),
   the sweep (each felled session to its lead once, never a probe or one the roster holds parked, paused, ended or starting, but runner-plain-relay, the relay itself, whose resume line it runs through spawn.sh's capacity gate at every sweep that prints it, with `--brief brief-runner-plain-relay.md` so the relay starts its wait task again,
   never marked told since a resume keeps the session id and the line returns with the next outage,
   rather than queueing it for a relay that is down, naming the outcome to ops, and load past 30 once a crossing), the GLM credits log line, the optimizer's wake words,
   the canary pull (every clean worktree on `canary` fast-forwarded to origin's head every 5 minutes,
-  then installed through run-slot when the pull changed `bun.lock` or a `package.json` and again each beat until one exits 0, a failed pull or install told to ops once until its words change),
+  its fast-forward and install run back to back inside one run-slot slot when the incoming change touches `bun.lock` or a `package.json`, so no session runs new code on old `node_modules` while the install waits for a slot, and the install runs again each beat until one exits 0, a failed fetch, pull or install told to ops once until its words change),
+  the trash purge (hourly, `purgeTrash` of `@packages/safe-delete` removing each batch in the data folder's `trash` over 7 days old, `playground rm`'s and the dashboard's alike, then the oldest while the disk has under 50 GB free, its one recursive delete, one line to `ops/log/trash-purge.log`),
   the turbo prune (weekly, each file in the shared turbo cache `~/.cache/turbo/playground` last modified over 7 days ago removed, one line to `ops/log/turbo-prune.log`),
   the dashboard watch (every minute: once the live dashboard's `/api/health` has failed 5 minutes in a row, a gap of over 2 minutes with no check starting the count again, one macOS banner and one ops line through `notify.sh` with `NOTIFY_MAC=1`, since the Inbox shows only on the dashboard, and one more when it answers again,
-  its state in `ops/tick/dashboard-watch.json`) and the relay watch (every 5 minutes:
-  a line the relay would send, read by ops-outbox's `pending()`, is timed from the first cycle it reads pending, and once it has waited 10 minutes with no relay cursor moved since, one Inbox alert update is posted straight to the dashboard with `bun run ask new` under the ops manager's name, and resolved with `bun run ask resolve` once a cursor moves or its item is gone);
+  its state in `ops/tick/dashboard-watch.json`), the relay watch (every 5 minutes:
+  a line the relay would send, read by ops-outbox's `pending()`, is timed from the first cycle it reads pending, and once it has waited 10 minutes with no relay cursor moved since, one Inbox alert update is posted straight to the dashboard with `bun run ask new` under the ops manager's name, and resolved with `bun run ask resolve` once a cursor moves or its item is gone),
+  and the guard probe (every 10 minutes: each PreToolUse guard the factory settings register run on `{}` from its bundle, else its source, without its wrapper's tail, and each that exits other than 0 or 2 named to the dispatcher with the fix, once a change of what is broken, [Restoring the main checkout](#restoring-the-main-checkout));
   `--dry` prints each beat's next due time and target, and `--once <beat>` runs one beat now.
   The relay, runner-plain-relay, sends every line `outbox/relay.py` prints to its `to`, since relay.py applies quiet mode before it prints; only the drops the relay's brief names hold a line back.
   ops-flow is `bun run ops:flow` in a checkout of `canary`: every 60 seconds it reads the process table and each run-slot `.holder`,
@@ -79,23 +83,25 @@ Sessions that work together share a workspace as full-height columns ([SESSIONS.
   ops-ext-sync is `bun run ops:ext-sync`, off until its registry setting `jobs.opsExtSync` is enabled (`packages/settings/src/jobs.ts`).
   At 02:30 machine time it syncs each scope's clone in the data folder's `extensions/` with its private repository, `<login>/playground-<scope>` unless the setting `ext.repos` names another: a pull with rebase, then a push, so every machine's commits meet in one history.
   It scans every file with the extensions' secret shapes and the history with gitleaks when installed, and pushes only when clean; a public repository is refused, a scope with no repository stays on the machine, a refusal or failure goes to ops naming the scope, the file and the kind of secret, never its text, and `--once [<scope>]` runs one sync.
-  ops-zai-usage is `bun run ops:zai-usage`: every 5 minutes it reads Z.ai's quota endpoint, writes `zai-usage.json`, the readings the GLM spawn gate reads, with `balance` marked empty for an hour after a session-state record's `balance` failure (the quota endpoint never reports the balance) and `error` over the last windows on a failed read, and beats its own heartbeat;
+  ops-zai-usage is `bun run ops:zai-usage`: every 5 minutes it reads Z.ai's quota endpoint, retrying for about 2 minutes a fetch that never reached Z.ai (DNS or the network just after boot),
+  writes `zai-usage.json`, the readings the GLM spawn gate reads, with `balance` marked empty for an hour after a session-state record's `balance` failure (the quota endpoint never reports the balance) and `error` over the last windows on a failed read, and beats its own heartbeat;
   `--once` runs one read and writes only `zai-usage.json`, no beat.
   Five jobs took over what runners held as background tasks, each `bun <checkout>/packages/scripts/src/<job>/cli.ts` with its script named by absolute path, so `up.py` keys it by its folder:
   ops-awake holds `caffeinate -s -i` by default, the system awake on AC power and on battery with the display free to sleep and lock (#i19); the repo job alone reads `ops-awake.json` in its data folder, so a machine whose file sets `"lidSleep": true` runs `caffeinate -i` after a restart, to sleep with its lid shut, while a launchd `awake/run.sh` keeps its own flags and reads no setting.
   Add ops-awake to `jobs.json` only on a Mac with no launchd `com.playground.ops-awake`, since both would post the same battery alerts; the repo job runs the battery check each minute (`ops-awake/battery.ts`), as a launchd `awake/run.sh` runs its own where it is installed.
   ops-awake and ops-machine write only under the data folder their `--data` names, which the jobs render passes; run with no `--data` from any checkout but the live dashboard's, each exits 2 before it writes.
-  ops-changelog (`bun run changelog sync`, `4-59/5 * * * *`, skipped quietly while a `bun run changelog seed` runs) runs from the live dashboard's checkout, as its runner's cron did:
+  ops-changelog (`bun run changelog sync`, `4-59/5 * * * *`, skipped quietly while a `bun run changelog seed` runs) runs from the live dashboard's checkout, the one holding the database's `.env`, as its runner's cron did:
   skipped with a line to ops while load5 (the third field of `sysctl -n vm.loadavg`) passes 12 or memory pressure reads critical, never overlapping, its output appended to `dashboard-changelog.log` in the data folder, and a failure sent to ops with its last 5 lines.
   ops-channel-watch is the factory channel's watch: a quick pass every 3 minutes and a full one, which also relays edits, at minutes 7 and 37, each new post sent to the dispatcher as one outbox line; each pass runs `watch.ts` under `vault.py run -e SLACK_TOKEN=local.slack.channel_token`, so the token reaches only that process, and a failure goes to ops once per kind until a pass succeeds.
-  Add ops-changelog this way only on a Mac whose `jobs.json` has no job by that name, and ops-channel-watch only on the Mac of the person whose Slack id `watch.ts` skips (`SKIP`).
+  Add ops-changelog this way only on a Mac whose `jobs.json` has no job by that name, and ops-channel-watch only on the Mac of the Slack member the `channel.skipUser` setting names, since the watch relays every post but that member's own.
   ops-dm-watch (`jobs.opsDmWatch`, off by default) is the owner's DM watch in Slack mode (DISPATCH.md's Slack mode): each minute, while `slack.mode` is on and `slack.dmChannel` and `slack.dmOwner` are set, it runs `watch.ts` under `vault.py run -e SLACK_TOKEN=local.slack.channel_token`,
   which sends each new owner message to the dispatcher in full and to dispatcher-2 when none is answered in 3 minutes or the dispatcher's session state has read stuck or failed for 3 minutes, telling Ops of that once through ops-unstick's outbox;
   every 15 minutes it tells the dispatcher to post an update, and a failure goes to ops once per kind until a pass succeeds.
-  ops-herdr is `bun run ops:herdr` in the main checkout: every minute it starts each herdr server that is down, `playground` for every session and `playground-probes` for drills and upgrades (names of Playground's own, since herdr keeps each server's state and logs under `~/.config/herdr/sessions/<name>`), under `env -i` with HOME, LANG, LOGNAME, PATH, SHELL, TERM and USER alone,
+  ops-herdr is `bun run ops:herdr` in the main checkout: every minute it starts each herdr server that is down, `playground` for every session and `playground-probes` for drills, upgrades and shell panes (names of Playground's own, since herdr keeps each server's state and logs under `~/.config/herdr/sessions/<name>`), under `env -i` with HOME, LANG, LOGNAME, PATH, SHELL, TERM and USER alone,
   on the absolute path the repo's `packages/scripts/src/ops-herdr/pin.json` names, as launchd's child, so stopping the job leaves it running.
   It refuses to start a binary whose version or sha256 differs from the pin and beats the mismatch, naming both, and never restarts a running server, since a stop exits every pane.
-  Once it has started a server, any of `PLAYGROUND_HERDR_SESSIONS` (`playground,playground-probes` by default; a name that is not a word is named on its beat and skipped), it runs `spawn.sh restore` (SESSIONS.md, Spawn) pointed at that server, which resumes the sessions whose records name it, and again each cycle until restore passes, its beat naming each session not restored;
+  Once it has started a server, any of `PLAYGROUND_HERDR_SESSIONS` (`playground,playground-probes` by default; a name that is not a word is named on its beat and skipped), it runs `spawn.sh restore` (SESSIONS.md, Spawn) pointed at that server, which resumes the sessions whose records name it, and again each cycle until restore passes,
+  printing one line of counts (restored, already running, waiting on each gate, not restored) once, a failed restore's as its beat's problem with the log's path, and writing each session's line to `<server>.restore.log` in the herdr folder;
   `<session>.restore` beside the server's socket marks a restore still owed, set as the server starts, so the job finishes one that `start` (`bun run dev`, the dispatcher) began, or gave up on at 10s, and the gate cut short; herdr's own resume stays off in the pinned config (`resume_agents_on_restore = false`), since it runs a bare `claude --resume` without the session's settings.
   It copies `config.toml` from beside the pin into `~/.playground/herdr/`, so both change only through a merged PR, and applies a changed config with `server reload-config`; it copies the pin there too, for the scripts that open herdr panes.
   Its `lastResult` names a pin mismatch, a server it could not start or read, and every config warning in the server's log since its last start or reload, since herdr falls back to a default with only a warning.
@@ -105,15 +111,14 @@ Sessions that work together share a workspace as full-height columns ([SESSIONS.
 - **The `playground` command** (`dispatcher` is its name from before the rename) is the owner's way in from his own terminal, linked into `~/.bun/bin` by `scripts/link-skills.sh`; `playground --help` and the docs site's `/docs/cli` give its words.
   Bare `dispatcher` first runs ops-herdr's `start`, so it brings back every herdr server that is down and names each it started; then, from any terminal while the Dashboard's API does not answer 200 on `/api/health` (portless's 404 for a stack that is down is no answer), it runs ops-up (`scripts/ops/up.py`), which starts each ops job that is not healthy,
   ops-dashboard's stack and follower among them,
-  and stops a job's holder a cmux restart left outside cmux by its recorded pid; it starts no Claude session, and names a missing dispatcher for you to start.
-  When up.py exits with its outside-cmux code (named in its docstring: the Dashboard's cmux job is down and the pass runs outside cmux), `dispatcher` stops right after up.py's "open a cmux terminal" line with a non-zero exit.
-  Otherwise it waits for the Dashboard's API, printing a progress line every 10s, and stops with an error once ops-dashboard's supervisor is gone or its heartbeat is past three cycles (after a 30s grace for the start), else at 15 minutes (`waitOutcome` in `packages/scripts/src/playground/plan.ts`).
-  A job's `runtime` in `~/.playground/ops/jobs.json` places it: `cmux` as a split in cmux's Ops workspace, `auto` in cmux while cmux holds a factory session and in herdr once it holds none (`cmux_held()` in up.py, read as the dashboard's cmuxHeldOf() reads it),
-  so a quit cmux moves ops-dashboard to herdr on the next pass and a copy healthy in herdr moves back to cmux once cmux holds a factory session again, or `herdr` (the default for a job ops starts) as a pane labelled with its name in the Ops workspace on the factory herdr server, by the binary herdr's `pin.json` names,
-  skipped while herdr fails spawn.sh's checks (its pin's sha256, its version, its server's socket and that server running);
-  when it changes, the next pass stops the copy in the old runtime by its recorded pid and starts the job in the new one.
-  A pass outside cmux (ops-tick, ops-sweep) skips a job placed in cmux, since cmux answers only its own terminals, and a start that fails is logged whole in `up.log` and tried again on the next pass, with no GRACE wait.
-  A job moved to herdr keeps `needsCmux: true`, which is how the way back to cmux finds it.
+  and stops a job's holder still running under cmux by its recorded pid; it starts no Claude session, and names a missing dispatcher for you to start.
+  Before ops-up it sets the Dashboard's database container (the `live.container` setting's) to restart with Docker and starts it when stopped, saying so in one line each (`ensureDatabase` in `packages/scripts/src/playground/database.ts`).
+  Then it waits for the Dashboard's API, printing a progress line every 10s, and stops with an error once ops-dashboard's supervisor is gone or its heartbeat is past three cycles, else at 15 minutes (`waitOutcome` in `packages/scripts/src/playground/plan.ts`).
+  It also stops on a START or RESTART roll begun after the database step that failed on the stack, in the supervisor's own words (`startFailure`); each early stop waits out a 30s grace for the start.
+  Every job ops starts in a terminal (`runtime: "herdr"` in `~/.playground/ops/jobs.json`) runs as a pane labelled with its name in the Ops workspace on the factory herdr server, by the binary herdr's `pin.json` names,
+  skipped while herdr fails spawn.sh's checks (its pin's sha256, its version, its server's socket and that server running).
+  A job row stored with the old `cmux` or `auto` runtime, or with no runtime and the retired flag that marked a terminal job, reads as `herdr` (`jobSchema` in `packages/settings/src/jobs.ts`), so its copy still under cmux is stopped by its recorded pid and started in herdr on the next pass, from any terminal.
+  A start that fails is logged whole in `up.log` and tried again on the next pass, with no GRACE wait.
   `playground add` starts one session through `spawn.sh` under all its gates, one start at a time (`~/.playground/spawn.lock`), under a name from `bun run name <kind>` or a given name that gives its kind, as spawn.sh asks.
   `playground view` runs ops-herdr's `attach factory`, opening the server the sessions run on, and takes no other word; probes stay on their own server.
   `playground update` touches ops-dashboard's `roll-now`, and `playground status` only reads, ops-herdr's `status` lines among its own.
@@ -136,6 +141,8 @@ Anything a session needs across a restart goes under `~/.playground/scratchpad/<
 After a restart, a PR body is pulled back with `gh pr view <n> --json body -q .body` before it is edited, so a stale local copy never overwrites the live one.
 
 Every start and every end, with its reason, lands in the roster the moment it happens (**roster**).
+
+A session takes its skills from the copy written when it started (`~/.playground/orgs/<set>/<hash>/`), so after any `playground update` that prints `skills changed`, a ship or the user menu's Update now alike, the session that ran it sends each lead the folders that line names in the main checkout, and a live session reads each changed skill's files there (**release**).
 
 ## Updating Claude Code
 
@@ -169,3 +176,14 @@ Ops runs an update when the owner asks for one:
    **Done when** every other named session on the list runs again under its name.
 4. Run step 1's loop again, into a second file.
    **Done when** no line with `-n` reads `deleted`; each one that does goes back to step 3.
+
+## Restoring the main checkout
+
+Every PreToolUse guard runs from the main checkout and fails closed ([scripts/hooks/README.md](../../../../scripts/hooks/README.md#registered-in-both-settings-files)): with its scripts gone every factory session's Bash is refused, its Edit and Write too, while with only its packages gone the guards still run, since each runs a committed bundle that needs none.
+No session can then repair it, so the restore runs from the owner's own `!` window, whose commands run with no hook:
+
+1. The owner puts the files back: `! git -C <main checkout> checkout -- .` while its `.git` is in place.
+   With it gone, restore in place, since a clone refuses the folder the delete left `node_modules`, `.env` and `.claude/worktrees` in: `! git -C <main checkout> init`, `! git -C <main checkout> remote add origin <the repo's URL>`, `! git -C <main checkout> fetch origin`, then `! git -C <main checkout> checkout -f -B main origin/main`.
+   **Done when** `! git -C <main checkout> status` reads clean and a factory session's Bash call runs again.
+2. The owner runs `! bun install --cwd <main checkout>`, then `! <main checkout>/scripts/link-skills.sh`, for the hooks and scripts that run from source.
+   **Done when** both exit 0.

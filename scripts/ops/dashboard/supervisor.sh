@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# The live dashboard's supervisor: one background task of runner-pride's cmux session that keeps the dashboard stack and
-# the session follower running as its own children (so both stay descendants of a cmux terminal), the web beside them, and rolls them
+# The live dashboard's supervisor: run.sh's child in ops-dashboard's herdr pane, which keeps the dashboard stack and
+# the session follower running as its own children (so both stay descendants of that terminal), the web beside them, and rolls them
 # to every new head of the branch upstream.sh names end to end: build it while the old stack serves (prebuild, from a staging worktree, unless it migrates), swap the web to that build with no stop (swap_web), stop the API and the follower by their recorded process groups, reset to it, install, build or
 # migrate when the merge needs it, take its build (build_head, kept per head in $S/builds) and serve it, check it, start the follower, check it. Each roll, outage or anomaly
 # appends one line to results.log (a refused roll a second, naming its refusal), which wakes the runner to report it. It signals only processes it started.
@@ -34,6 +34,10 @@ branch=$(git symbolic-ref --short HEAD 2>/dev/null)
 [ "$branch" = "$LIVE" ] || { echo "supervisor: refusing to run in $WT on ${branch:-a detached HEAD}: the dashboard's checkout is on $LIVE" >&2; exit 1; }
 
 say() { echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) $*" >> "$LOG"; }
+# A folder in $S/builds goes to the trash through trash-build.ts, the dashboard-supervisor carve-out's one caller, $2 its reason; a refusal is logged and returns 1, and the folder stays for the next keep_builds
+trash_build() { [ -e "$1" ] || return 0; bun --no-env-file "$D/../../../packages/scripts/src/trash-build.ts" "$1" "$2" >> "$LOG" 2>&1 || { say "the trash refused $1, so it stays (supervisor.log has why)"; return 1; }; }
+# A folder in $S/builds moves aside as <name>.aside-<epoch> and then to the trash, so a refusal leaves only a stray that keep_builds trashes later and never fails the build; returns 1 only when the move aside fails
+set_aside() { [ -e "$1" ] || return 0; local aside; aside="$1.aside-$(date +%s)"; mv "$1" "$aside" || return 1; trash_build "$aside" "$2" || :; }
 result() { echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) $*" >> "$RESULTS"; say "RESULT $*"; }
 
 # The head's production build, kept in $S/builds/<sha> outside the checkout: made by bun run build when it is missing, or when it was built for other URLs, since next bakes NEXT_PUBLIC_APP_URL and NEXT_PUBLIC_API_URL into its client and auth bakes HONO_APP_URL's host; NODE_ENV and SKIP_ENV_VALIDATION_SERVER let it build before first run writes its .env, whose values the stack reads at its start; a failure prints its last error line; $1 is the tree it builds, the checkout by default, or prebuild's staging worktree
@@ -51,12 +55,14 @@ build_head() {
     echo "$out" >> "$LOG"
     echo "$out" | grep -E 'error|Error|ERR' | tail -1 | cut -c1-200; return 1
   fi
-  rm -rf "$dir.tmp"; mkdir -p "$dir.tmp"
+  set_aside "$dir.tmp" "a build copy an earlier run left half made" || { echo "moving $dir.tmp aside failed"; return 1; }; mkdir -p "$dir.tmp"
   # next's standalone server leaves .next/static and public for its host to copy beside it
   cp -R "$src/web/next/.next/standalone" "$dir.tmp/web" && mkdir -p "$dir.tmp/web/web/next/.next" && cp -R "$src/web/next/.next/static" "$dir.tmp/web/web/next/.next/static" &&
     { [ ! -d "$src/web/next/public" ] || cp -R "$src/web/next/public" "$dir.tmp/web/web/next/public"; } &&
     echo "$WEB $API" > "$dir.tmp/urls" || { echo "copying the build to $dir failed"; return 1; }
-  rm -rf "$dir"; mv "$dir.tmp" "$dir"
+  # the head's own web launcher, bundled into one file, so the web a roll swaps in runs the target's launcher, not the checkout's older one
+  (cd "$src" && bun build packages/scripts/src/portless.ts --target=bun --outfile="$dir.tmp/launcher.js") >> "$LOG" 2>&1 || say "bundling ${sha:0:7}'s web launcher failed; its web starts through the checkout's portless.ts"
+  set_aside "$dir" "rebuilt for the Dashboard's URLs" || { echo "moving $dir aside failed"; return 1; }; mv "$dir.tmp" "$dir"
   say "built ${sha:0:7} in $(( $(date +%s) - started ))s, $(du -sh "$dir" | cut -f1)"
 }
 # Before a roll stops anything: build the target ($1, the roll tagged $2) into $S/builds/<sha> from a detached staging worktree while the old stack serves, so build_head finds it kept after the stop; a target that migrates, whose commit cannot be had here, or whose staging worktree or install fails, builds after the stop as before; a build that fails lists the target in bad-builds and returns 1 with nothing stopped; the staging worktree goes either way
@@ -84,10 +90,10 @@ prebuild() {
   tell_dispatcher "Dashboard roll to ${target:0:7} FAILED its build; nothing stopped, still on $(git rev-parse --short HEAD)"
   return 1
 }
-# After a pass: keep this head's build and the last one that passed before it, for the next fallback, and remove the rest
+# After a pass: keep this head's build and the last one that passed before it, for the next fallback, and move the rest to the trash, a stray .tmp or .aside-<epoch> folder included
 keep_builds() {
   local before d; before=$(cat "$S/builds/passed" 2>/dev/null)
-  for d in "$S/builds"/*/; do d=$(basename "$d"); [ "$d" = "$1" ] || [ "$d" = "$before" ] || rm -rf "${S:?}/builds/$d"; done
+  for d in "$S/builds"/*/; do d=$(basename "$d"); [ "$d" = "$1" ] || [ "$d" = "$before" ] || trash_build "${S:?}/builds/$d" "neither this head's build nor the last one that passed"; done
   [ "$before" = "$1" ] || echo "$1" > "$S/builds/passed"
 }
 # The API alone, from the checkout's source, under the dev launcher; the web runs on its own (web_up)
@@ -99,12 +105,19 @@ start_follower() {
   bash "$D/start-ingest.sh" &
   echo $! > "$S/dashboard-ingest.pid"; say "follower started, pid $!"
 }
-# The web: next's standalone server from the head's kept build ($2), started as job $1 on a port of its own, with the env packages/scripts/src/portless.ts gives the serve task; ready once / answers 2xx or 3xx, within 60s
+# The web launcher for the build of $1: the head's own, which build_head bundles beside it, else the checkout's packages/scripts/src/portless.ts (a build kept from before the bundle), with a line saying why
+launcher() {
+  [ -f "$S/builds/$1/launcher.js" ] && { echo "$S/builds/$1/launcher.js"; return; }
+  say "the build of ${1:0:7} keeps no launcher; its web starts through the checkout's portless.ts"
+  echo ../../packages/scripts/src/portless.ts
+}
+# The web: next's standalone server from the head's kept build ($2), started as job $1 on a port of its own, with the env the head's launcher gives the serve task; ready once / answers 2xx or 3xx, within 60s
 # It returns 1 for the head's fault (its web exited, or answered only errors) and 2 for the machine's (no free port, the port taken, a web still silent at 60s), and names which in web_why
 web_up() {
-  local job=$1 sha=$2 port i code=000
+  local job=$1 sha=$2 port i code=000 launch
   port=$(bun --no-env-file -e 'const s = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: () => new Response() }); console.log(s.port); s.stop(true)') || { web_why="no free port for the web"; return 2; }
-  (cd web/next && PORTLESS_URL=$WEB PORT=$port HOSTNAME=127.0.0.1 exec bun ../../packages/scripts/src/portless.ts bun "$S/builds/$sha/web/web/next/server.js") > "$S/$job.log" 2>&1 &
+  launch=$(launcher "$sha")
+  (cd web/next && PORTLESS_URL=$WEB PORT=$port HOSTNAME=127.0.0.1 exec bun "$launch" bun "$S/builds/$sha/web/web/next/server.js") > "$S/$job.log" 2>&1 &
   echo $! > "$S/$job.pid"; echo "$port" > "$S/$job.port"; echo "$sha" > "$S/$job.sha"
   for i in $(seq 1 60); do
     code=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$port/")

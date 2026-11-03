@@ -112,7 +112,7 @@ test("a multi-line line within 400 characters goes whole, each newline one space
   const text = Array.from(
     { length: 3 },
     (_, i) =>
-      `  stale /Users/owner/acme/archive/.claude/worktrees/lm-${1000 + i}-some-chore lm-${1000 + i}`,
+      `  stale /Users/owner/acme/archive/.claude/worktrees/vx-${1000 + i}-some-chore vx-${1000 + i}`,
   ).join("\n")
   expect(text.length).toBeLessThanOrEqual(400)
   expect((await queued(text)).text).toBe(text.replace(/\n/g, " "))

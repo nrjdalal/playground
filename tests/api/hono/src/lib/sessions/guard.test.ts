@@ -11,7 +11,7 @@ import {
   systemIdentifierOf,
   targetOf,
 } from "../../../../../../api/hono/src/lib/sessions/guard"
-import { OLD } from "../../../../../old-names"
+import { OLD } from "../../../../../session-names"
 
 describe("checkoutMismatch", () => {
   const url = (port: number) => `postgres://postgres:pw@127.0.0.1:${port}/postgres`

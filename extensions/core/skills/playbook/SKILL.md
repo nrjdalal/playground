@@ -7,7 +7,7 @@ hooks:
     - matcher: '^(Bash|Edit|MultiEdit|NotebookEdit|Write|mcp__.+__((\w+_)?[Cc]reate_?[Ii]ssues?|[Ii]ssues?_?[Cc]reate|save_issue))$'
       hooks:
         - type: command
-          command: '[ -f "$PLAYGROUND_REPO/scripts/hooks/no-linear-ticket.ts" ] || exit 0; cd -P "$PLAYGROUND_REPO" && bun --no-env-file scripts/hooks/no-linear-ticket.ts'
+          command: '{ s=scripts/hooks/bundled/no-linear-ticket.js; [ -f "$PLAYGROUND_REPO/$s" ] || s=scripts/hooks/no-linear-ticket.ts; [ -f "$PLAYGROUND_REPO/$s" ]; } || { [ -z "$PLAYGROUND_ROLE" ] && exit 0; echo "no-linear-ticket: no guard script in the main checkout (${PLAYGROUND_REPO:-not found}); refusing. Restore it from the owner''s own window: playbook LIFECYCLE.md, Restoring the main checkout" >&2; exit 2; }; cd -P "$PLAYGROUND_REPO" && bun --no-env-file "$s"; c=$?; [ $c = 0 ] || [ $c = 2 ] || { echo "no-linear-ticket: crashed (exit $c); refusing. Fix: bun install in $PLAYGROUND_REPO" >&2; exit 2; }; exit $c'
           timeout: 15
 ---
 
@@ -67,6 +67,8 @@ Cite a rule by its name, in bold; read it whole with `playground rules <name>` w
 - [SESSIONS.md](SESSIONS.md): the commands to spawn, brief, rename, check and end a session, and the headless run that writes Notion for a session with no Notion tools.
 - [ROSTER.md](ROSTER.md): what to write to the roster, and when.
 - [CHANNEL.md](CHANNEL.md): the factory channel's lists, limits and triage.
+- [VERCEL.md](VERCEL.md): the Vercel CLI's traps: the env `vercel link` and `vercel integration add` pull, `vercel api`'s first line and an empty `vercel logs`.
+  Read it before you run any `vercel` command.
 
 ## Keep the skills learning
 

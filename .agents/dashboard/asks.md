@@ -1,7 +1,7 @@
 - Playground's Inbox is what the factory posts for the owner: a decision to approve, a draft to send, or an update to read.
   It replaced the asks (their JSON files, locks, in-chat cards and `/dashboard/asks`) and the old approval channel.
   It is one table, `inbox_item` (`packages/db/src/schema/inbox.ts`), in the dashboard's local Postgres, read and written through `api/hono/src/lib/dashboard/inbox.ts`, whose zod schemas check each kind's payload,
-  and served by `/api/v1/inbox` (`GET` the list, `POST /api/v1/inbox/:id/answer`, `POST /api/v1/inbox/:id/retry`, `POST /api/v1/inbox/dismiss`, `POST /api/v1/inbox/read`, `POST /api/v1/inbox/:id/schedule`, `POST /api/v1/inbox/:id/secret` for a secret ask's value (below), and `GET /api/v1/inbox/attachments/:id` for an ask's or a read-only update's files).
+  and served by `/api/v1/inbox` (`GET` the list, `POST /api/v1/inbox/:id/answer`, `POST /api/v1/inbox/:id/retry`, `POST /api/v1/inbox/dismiss`, `POST /api/v1/inbox/read`, `POST /api/v1/inbox/:id/schedule`, `POST /api/v1/inbox/:id/secret` for a secret ask's value (below), and `GET /api/v1/inbox/attachments/:id` for an ask's, a draft's, a `slack` decision's or a read-only update's files).
   It shows first in the aside window beside every dashboard page (`DashboardAside` in `web/next/src/components/dashboard/dashboard-aside.tsx`, drawn once by `web/next/src/app/(protected)/dashboard/layout.tsx`, so the Inbox and the chat are on every page and only the session panes differ by view),
   in stock Tabs whose squares float centred over the bottom of that half in the table's selection-bar look (`FLOATING_BAR`), one icon square a tab, `APP_SQUARE`'s shape (`iconTab` in `web/next/src/components/dashboard/dashboard-aside.tsx`), in one row that scrolls sideways once the squares outgrow it (`TAB_BAR`),
   above every layer a pane holds, since the panes stack in an isolated layer of their own (`PANES`, since a table's sticky header once painted over the bar),
@@ -65,10 +65,10 @@
   discarded, set aside (`cleared`), settled or read,
   or a failed send dismissed;
   an unread update keeps its dot.
-  An `ask`'s text, and a read-only update's, renders as a chat message's does, through `TranscriptMarkdown card` with its line breaks kept, so a fenced block (`ts`, `sql`, `diff`, `text`) shows highlighted with its copy button, at text-xs and wrapping at any character.
+  An `ask`'s text, and a read-only update's, renders as a chat message's does, through `TranscriptMarkdown card` with its line breaks kept, so a fenced block (`ts`, `sql`, `diff`, `text`) shows highlighted with its copy button, at text-xs and wrapping at any character, a `diff` block's added and removed lines tinted as a chat message's are (`messages.md`).
   A drawing (a `text`, `txt` or `ascii` block, or one with no language) keeps its lines whole, its font shrinking from 12px to fit its widest line, measured with pretext, down to 10px before it scrolls sideways.
   `ASK_CODE_COLUMNS` (`@packages/config/inbox`) is the widest drawing line that fits the narrowest card at 12px.
-  Every other preview's words, a Slack message's included, stay plain text, since they go out exactly as written, marked as quoted by a `border-l-2` rule rather than a background, and no card's body, a Done one's included, sits on gray, the band alone muted.
+  Every other preview's words, a Slack message's included, stay plain text, since they go out exactly as written, marked as quoted by a `border-l-2` rule rather than a background, and no card's body, a Done one's included, sits on gray, the band alone muted, but the card a reply is about (Chat about it, below).
   The card's header is one `minmax(0,1fr)` column and a card's table cells wrap, so a wide table or drawing stays inside the card.
   A decision previews exactly what Approve does, then Approve and Deny, except a secret ask (below), and no card offers Edit: a change goes in the comment box, while the API still reads `edit` on an older row; an `ask` whose poster labelled both sides is shadcn's questionnaire card instead:
   its text as the quoted block, then its sides as numbered choices, the keys 1 and 2 picking one, and the card's footer inside its form, Send first, the form's Submit, which sends the picked side,
@@ -103,7 +103,7 @@
   An answered item's result line ends with a link to where its poster carried it out, when the poster acked or settled it with `--link <https url>` (stored as `answer.link`; a Slack link in its `https://app.slack.com/client/<team>/<channel>` form, a message's ending `/thread/<channel>-<ts>`), named for what was done by `--label` (`answer.linkLabel`, "Filed FIX-12"),
   else from the link (a Linear ID, `owner/repo#N`, Open thread for a Slack link, else the site), opening in a new tab (`resultLink` in `web/next/src/lib/inbox.ts`; a result carries the link it acted on, so the reader can open the thread or ticket themselves).
   Each item's Chat about it button, at the right of its footer, prefills Playground's composer with a removable Replying to #iN chip and puts focus in the box in the click's own frame, a phone's too, its Chat tab coming forward in the same render, so a dictation app's Cmd+V sent at once lands there (`bun run verify reply-focus`),
-  and marks the item until the message is sent, which goes as `re #iN: <words>`; words that already say `re #iN` resolve to the item the same way (`web/next/src/lib/reply.ts`).
+  and marks the item with a muted fill on its card (`bg-muted/50`) until the message is sent, which goes as `re #iN: <words>`; words that already say `re #iN` resolve to the item the same way (`web/next/src/lib/reply.ts`).
   A reply takes the item off the open list, the count and the open row's summary at once, and the owner's card reads `You replied "<his words>" · <poster> is on it…` until the poster closes it, then `You replied "<his words>"`:
   the reply keeps his words after the tag, at most 280 characters (`said`, `saidOf`; the owner: "should show what action, I don't even know what's in progress"), and 5 minutes on the item moves to In progress.
   Until then the card folds to that line, and its Show actions chevron left of Reply, a click on the card or E while it holds focus opens it again with its answers and Snooze (`reopenable` and `reopenKey` in `web/next/src/lib/inbox.ts`).
@@ -134,7 +134,7 @@
   Before that it refuses, naming both ports, a `POSTGRES_URL` whose port is not the one in the `.env` of the checkout `dashboard-ask.ts` lives in (`checkoutMismatch` in `api/hono/src/lib/sessions/guard.ts`): a run by path from another checkout, or a URL exported in the shell over the `.env`.
   A test run (`NODE_ENV=test`) passes its own container's URL on purpose, and the check skips it.
   Run it in the checkout that serves the dashboard, from anywhere with `bun run --cwd <checkout> ask`: any other checkout has its own database, which the live dashboard never shows, and says so on stderr.
-  From a user install's clone root with no `POSTGRES_URL`, `bun run ask` runs as the Dashboard's checkout's (`.claude/worktrees/desk`, whose `.env` holds the database), through `api/hono/src/bin/ask-from-clone.ts`.
+  From a user install's clone root with no `POSTGRES_URL`, `bun run ask` runs as the Dashboard's checkout's, the worktree on `live.branch` wherever it sits (`dashboardCheckout()`), whose `.env` holds the database, through `api/hono/src/bin/ask-from-clone.ts`; from any other worktree it runs as that worktree's own.
   A fresh worktree runs it once its `.env` is set up (the `dev` skill's Start) and its shared packages are built (`~/.playground/ops/run-slot.sh <your name> -- bunx turbo run build --filter='./packages/*'`), since a cloned `node_modules` alone leaves `@packages/db` unresolved.
   Before every `bun run ask new`, run `bun run ask open` and read what is already open: when an open item asks the same thing, name its `#iN` in chat and post nothing, since two sessions once posted one question as two items.
   It lists a snoozed item and one the owner replied to in chat, since each still asks something, until it moves to Done or its poster closes it.
@@ -165,9 +165,9 @@
   `kind` is `decision` (left out, it is one), `draft` or `update`; `from` is the posting session's name as the Dashboard shows it, since the answer is typed into that session; `title` is one line.
   A decision's `preview` is one of eight, each what Approve does except the `secret` ask (below), written in ELI5 / ASD-STE100 plain words: `ask` (`text`, what its poster does on Approve, for a decision no other shape fits: a production port, a work request from outside the chain, its text naming the session asking and the work it wants, or a step only the owner can take, its text the step,
   Approve meaning done and Deny meaning the owner can't, or a grilling batch, its text each open question numbered with its recommended answer, Approve taking them all and the owner's Note giving his own by number;
-  with optional `approve` and `deny` labels, one line each, which the owner's card shows as two choices under its text, the quoted block, when both are there, and optional `attachments`, below), `slack` (`to`, `text`),
+  with optional `approve` and `deny` labels, one line each, which the owner's card shows as two choices under its text, the quoted block, when both are there, and optional `attachments`, below), `slack` (`to`, `text`, optional `attachments`),
   `ship` (`sha`, `prs` of `{number, title}`), `ticket` (`team`, `title`, `body`), `delete` (`what`, `why`), `schema` (`shape`), `budget` (`amount`, `why`) or `secret` (`key`, `sink`); a decision with none is refused.
-  An `ask`'s `attachments`, and a read-only update's, are up to 20 files on this Mac, each `{src, kind?, label?, group?}`: `src` an absolute path, never a URL; `kind` one of `code`, `doc`, `html`, `image` or `pdf`,
+  An `ask`'s `attachments`, a draft's, a `slack` decision's and a read-only update's, are up to 20 files on this Mac, each `{src, kind?, label?, group?}`: `src` an absolute path, never a URL; `kind` one of `code`, `doc`, `html`, `image` or `pdf`,
   read from the extension when left out (`KIND_OF_EXTENSION` in `api/hono/src/lib/dashboard/inbox-attachments.ts`); `label` `before` or `after`; `group` a one-line section heading.
   `bun run ask new` and `edit` fill each `{now}` in the item's text with the time they post at in the owner's zone (`clock.ownerZone`, `fillNow` in `api/hono/src/lib/dashboard/ask-clock.ts`), and refuse a `measured` or `now` time more than 2 minutes ahead of the clock (`futureNowTimes`), naming it;
   an ETA or a finish carries neither word and posts, and plan.json's reader refuses its own now-stamps the same way (`.agents/dashboard/apps.md`).
@@ -189,7 +189,7 @@
   A Close of its own stays shown at the top-right corner, one square on a floating bar of the same look.
   Open in new tab opens an image or a PDF at full size in a browser tab (`OPENS_IN_TAB`), on a pair the Before, whose id the folded item keeps, never an HTML page, code or an SVG, since a blob URL runs with the Dashboard's origin.
   Each kind's renderer is one line of `VIEWERS` in `registry.tsx`; a renderer that keeps its own pointer or keys marks itself `data-viewer-owns-pointer` or `data-viewer-owns-keys`, and hands the arrows back with `onEdge`.
-  An `ask`'s image `attachments` labelled `before` and `after` in one `group`, or both with no `group`, show as one slide in the viewer and one split tile on the card (`foldPairs` in `web/next/src/lib/pictures.ts`).
+  An item's image `attachments` labelled `before` and `after` in one `group`, or both with no `group`, show as one slide in the viewer and one split tile on the card (`foldPairs` in `web/next/src/lib/pictures.ts`).
   That slide has one row of buttons floating at the stage's top over the whole-stage picture, Before, Side, Slider and After, Side and Slider joined in the middle, 3.5rem clear of each side on a narrow screen so the viewer's top-right Close never covers After; the row and the Side divider keep Left and Right and hand Up and Down back with `onEdge` (`handBack`).
   Side, the first view, shows them side by side at a divider that drags from the centre; Slider stacks them under a drag slider (`role="slider"`, 5% a Left or Right press, Home and End to the ends, Up and Down handed back with `onEdge` for the slide before or after).
   Both use one 1px divider, the knob on the slider alone, Before on the left, and Before or After shows that picture alone; a picture zooms in at a click or Enter and pans on a drag, while a touch tap on it shows or hides the bars as on every kind and a tap on the slider or the bar's buttons acts on it alone (`web/next/src/components/dashboard/viewer/image.tsx`).
@@ -203,12 +203,15 @@
   It runs in an `<iframe sandbox="allow-scripts">` from `srcdoc` alone; its blob is plain text, and it has no Open in new tab.
   A link clicked in it opens in a browser tab of its own, http or https alone (`viewer: "link"`), and one to a place on the page scrolls there with no load.
   Since a policy reaches no navigation, each load is judged by whether its page posted `viewer: "ready"` (`frameLoad`): a page a script or a refresh sent the frame off to is put back once, then stopped on a notice, each request that took it off having left.
-  A `doc` renders through `TranscriptMarkdown` and a `code` file as one fenced block named by its extension (`fenced`), both in a region that keeps Up and Down for scrolling; a `pdf` opens in the browser's own viewer in an unsandboxed frame.
+  A `doc` renders through `TranscriptMarkdown` and a `code` file as one fenced block named by its extension (`fenced`), both in a region that keeps Up and Down for scrolling;
+  a `.diff` or `.patch` draws there as a patch view instead (`patch-view.tsx`, loaded through `next/dynamic` only when one opens), one block a changed file, split from 768px up and unified below, its lines wrapping, and as that fenced block when it holds no patch the view can read or the view throws; a `pdf` opens in the browser's own viewer in an unsandboxed frame.
   An `ask` whose title, text or labels have the owner quit, restart, close or stop something, in any form of the four verbs but a past form after after, since, because or while, a determiner and one word ("after the dashboard restarted"), carries `checked`,
   one line saying what the four checks of playbook's **ask** found (the ops jobs and their runtimes in the data folder's `ops/jobs.json`, the live processes under the target, the sessions in it, and the Dashboard's `/api/health`),
   `none` or what still depends on the target, and is refused without it,
   the refusal naming the checks; `checked` stays in the stored payload and the owner's card does not show it.
-  A draft's is `{to, text, thread?}`: `to` a short name ("a teammate's thread", "a teammate's DM").
+  A draft's is `{to, text, thread?, attachments?}`: `to` a short name ("a teammate's thread", "a teammate's DM").
+  Its `attachments`, such as an issue's before and after shots, show under its words as an ask's do, and stay on the card: Send hands its poster the words alone (`deliveryText`), since the dashboard uploads no file to Slack.
+  A `slack` decision's `attachments` show under its message the same way, and Approve hands its poster the words alone too.
   A draft, and a `slack` decision, carries `thread` whenever the reply answers a Slack conversation (the owner: "for slack previews the draft should show what's going on at other end summary of who said what as tldrs and drafted reply below").
   It holds 1 to 12 `{who, said}`, oldest first: `who` the display name as Slack shows it (a first name, never a raw token), `said` the gist of that message in one line of plain STE100 words.
   The card shows them as So far above the words to send, a draft's under Your reply, each gist rendered through `TranscriptMarkdown card`; `bun run ask example slack` prints a `slack` decision with its `thread` filled.
@@ -257,7 +260,7 @@
 
 - The ask's shape: an `ask` decision's text reads the way chat talks to the owner, in three parts, top to bottom:
   1. A picture of the point: a diff or code block for a code change, before and after pictures for a UI change (as `attachments` with the smart viewer), an ASCII flow in a code block for a plain decision.
-     Keep each code or ASCII line within `ASK_CODE_COLUMNS` characters, the drawing width the card paragraph above names, whose source (`packages/config/src/inbox.ts`) gives the card width and character width it comes from.
+     Keep each code or ASCII line within `ASK_CODE_COLUMNS` characters, the drawing width the card paragraph above names, whose source (`packages/config/src/inbox.ts`) gives the card width and character width it comes from; a `diff` block's lines may run longer, since the card wraps them.
      A wider drawing still posts and shrinks to 10px, then scrolls, so the limit is a writing guide.
   2. Short bullets, one fact each, an emoji as each one's marker.
   3. What Approve does, in the `approve` label, with `deny` beside it: the card shows the two as its choices under the text, in place of its On Approve line.
@@ -265,7 +268,7 @@
   A factory session writes each item's words and pictures by the `to-inbox` skill (`extensions/core/skills/to-inbox/SKILL.md`), loaded before `bun run ask new`.
 
   `bun run ask example code|decision|slack|ui` prints each worked example as an item to fill in, the three asks below and the slack decision above.
-  `bun run ask new` prints a hint on stderr, and posts the item all the same, when an ask's text runs past 300 characters with no list, code block or attachment, or a code block in an ask's or a read-only update's text holds a line past `ASK_CODE_COLUMNS` (`shapeHints`).
+  `bun run ask new` prints a hint on stderr, and posts the item all the same, when an ask's text runs past 300 characters with no list, code block or attachment, or a code block other than a `diff` one in an ask's or a read-only update's text holds a line past `ASK_CODE_COLUMNS` (`shapeHints`).
   The three, as their card shows the text (`tests/api/hono/src/lib/dashboard/ask-shape.test.ts` holds this file to the templates):
 
   ````markdown

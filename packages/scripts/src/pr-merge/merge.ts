@@ -23,6 +23,8 @@ import {
 } from "./gates"
 import { heldPath, readHeld } from "./held"
 import { lostLines } from "./lost"
+import { onStop, settleFirst, stopping } from "./stop"
+import { ciSteps, typesExplained, typesGate, type TypeSteps } from "./types"
 
 export type RunResult = { code: number; stderr: string; stdout: string }
 
@@ -49,12 +51,14 @@ export const runGit: Run = async (args) => {
   return { code, stderr, stdout }
 }
 
-// What runs outside GitHub's API: git in this checkout, the folder the merge lock lives in, and the Redis store that holds it (REDIS_URL's under the command, none under a test that hands in none).
+// What runs outside GitHub's API: git in this checkout, the folder the merge lock lives in, the Redis store that holds it (REDIS_URL's under the command, none under a test that hands in none), and the types gate's steps (CI's own under the command) and time budget.
 export type Local = {
   ended?: Ended
   git?: Run
   lockRoot?: string
   store?: LockStore | null
+  types?: TypeSteps
+  typesBudgetMs?: number
 }
 
 // Ends a merged PR's worker, reviewer and tester, given the PR's URL and its merge sha.
@@ -360,19 +364,20 @@ export async function takeLock(
   }
   await Bun.write(join(lock, "pr"), `${n}\n`)
   if (held !== null) await Bun.write(join(lock, "redis"), `${held}\n${process.pid}\n`)
-  return {
-    // Moves the lock aside only while it still names this PR, so a lock someone else took after it went stale is never moved, then frees the key.
-    release: async () => {
+  // Moves the lock aside only while it still names this PR, so a lock someone else took after it went stale is never moved, then frees the key; once, however many ends ask, and named for the signal stopping the run in place of the random tag. It stops listening only once done, so a signal's exit waits for a release already under way.
+  let released: Promise<void> | null = null
+  const release = (): Promise<void> =>
+    (released ??= (async () => {
       if ((await folderOf(lock)).holder === String(n)) {
         await mkdir(join(root, "merge-locks"), { recursive: true })
-        await rename(
-          lock,
-          join(root, "merge-locks", `${n}-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`),
-        )
+        const tag = stopping() ?? crypto.randomUUID().slice(0, 8)
+        await rename(lock, join(root, "merge-locks", `${n}-${Date.now()}-${tag}`))
       }
       await letGo()
-    },
-  }
+      unlisten()
+    })())
+  const unlisten = onStop(release)
+  return { release }
 }
 
 // The Redis lock store REDIS_URL names, for the pr:merge and pr:train commands alone, or null: none set, or the package will not load (unbuilt, or REDIS_URL is not a URL), which keeps the lock folder alone.
@@ -420,8 +425,17 @@ export async function prMerge(
   if (explain) {
     const facts = await factsOf(run, name, n, git)
     const gates = withReadyDraft(facts, gatesOf(facts, options), WILL_MARK)
+    gates.push(await typesExplained(git, facts))
     return { gates, kind: "explained", merge: mergeLine(n, facts) }
   }
+  // a test whose head lacks canary's tip hands in its own steps, or the gate refuses: none may run CI's for real
+  const steps: TypeSteps =
+    local.types ??
+    (cli
+      ? ciSteps
+      : () => {
+          throw new Error("prMerge under test needs its types gate's steps (local.types)")
+        })
   const store = await storeOf(local, cli)
   let outcome: Outcome
   let head = ""
@@ -431,13 +445,20 @@ export async function prMerge(
     try {
       const facts = await factsOf(run, name, n, git)
       head = facts.head
-      outcome = await mergeAt(run, name, n, facts, options)
+      outcome = await mergeAt(run, name, n, facts, options, {
+        budgetMs: local.typesBudgetMs,
+        git,
+        lockRoot,
+        steps,
+      })
     } finally {
       await lock.release()
     }
   } finally {
     store?.close()
   }
+  // a signal's stop exits once its cleanups finish, so a stopped run waits for that: no merge comment, no session ends, and no exit code of its own
+  if (stopping()) await new Promise<never>(() => {})
   if (outcome.kind === "merged") {
     await run(["pr", "comment", String(n), "-R", name, "--body", mergeNote(head, outcome.gates)])
     await endSessions(
@@ -455,18 +476,35 @@ async function mergeAt(
   n: number,
   facts: PrFacts,
   options: GateOptions,
+  types: { budgetMs?: number; git: Run; lockRoot: string; steps: TypeSteps },
 ): Promise<Outcome> {
   const judged = gatesOf(facts, options)
   const gates = withReadyDraft(facts, judged, MARKED)
   if (gates.some((gate) => !gate.ok)) return { gates, kind: "refused" }
-  if (marksReady(facts, judged)) {
-    const reason = await markReady(run, name, n)
-    if (reason) return { gates, kind: "failed", reason }
+  // last, since it is the one slow gate: a PR another gate refuses never waits on a type check
+  gates.push(await typesGate({ ...types, facts }))
+  if (gates.some((gate) => !gate.ok)) return { gates, kind: "refused" }
+  // read again inside the lock, since a hold written while the types gate ran would otherwise not stop the merge
+  const heldNow = await readHeld(heldPath(), name, n)
+  if (heldNow !== null) {
+    const detail = `read again before the merge: ${heldNow}`
+    return {
+      gates: gates.map((gate) => (gate.name === "held" ? { ...gate, detail, ok: false } : gate)),
+      kind: "refused",
+    }
   }
-  const squashed = await squashAt(run, name, n, facts.head)
-  return "sha" in squashed
-    ? { gates, kind: "merged", sha: squashed.sha }
-    : { gates, kind: "failed", reason: squashed.reason }
+  // a signal before this point has let the lock go already, so nothing merges outside it; one from here on waits for the squash to settle, since its spawned gh would carry on past an exit, so nothing is awaited between this check and settleFirst
+  if (stopping()) return { gates, kind: "failed", reason: `stopped by ${stopping()}` }
+  return settleFirst(async () => {
+    if (marksReady(facts, judged)) {
+      const reason = await markReady(run, name, n)
+      if (reason) return { gates, kind: "failed", reason }
+    }
+    const squashed = await squashAt(run, name, n, facts.head)
+    return "sha" in squashed
+      ? { gates, kind: "merged", sha: squashed.sha }
+      : { gates, kind: "failed", reason: squashed.reason }
+  })
 }
 
 // The ready gate's words for a draft the merge path marks ready: before, as --explain reads it, and after.

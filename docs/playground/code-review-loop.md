@@ -6,7 +6,7 @@ Each round reads what was asked (the plan item and the brief for a Playground PR
 It treats a review as a **subscription**, not a one-off: every push gets a round, a finding stays open until a round sees it fixed in the code, and a faultless push does not raise the score while anyone's finding is still open.
 The score is the PR's, never the delta's.
 
-The reviewer loads the skill again at the start of every round, so a fix to the skill reaches it at its next round.
+The reviewer reads the skill's newest text, its scripts included, from the main checkout at the start of every round, so a fix to the skill reaches it at its next round.
 
 It replaces review-bot.
 What review-bot learned stays; what changed is who runs it: one reviewer session per PR, spawned by the PR's worker once its head is ready, in the same step as its tester, rather than one loop polling every repo in an org.
@@ -28,6 +28,7 @@ The review itself is core's `code-review`, loaded by name and never copied: a **
 A changed skill, agent guide or docs page is also held to core's `writing-for-agents`, which the reviewer loads first, so an agent doc that sprawls or leaves a step with no completion criterion costs the score as code would.
 The two stay apart in the verdict, so a well-built change that misses the ask cannot hide behind its quality.
 Its two sub-agents start with no memory of earlier rounds, which is what makes the read before the last 5/5 fresh.
+The reviewer pastes the spec's text beside its path into the `code-review` call and on into its Spec sub-agent's prompt, and a Spec read that reports the spec missing runs again rather than passing.
 
 ## State lives on the PR
 
@@ -44,15 +45,21 @@ Its waiter for the next push polls GitHub's REST API, so a reviewer waiting all 
 - Each finding of a round below 5/5 sits on its line in Files changed as well as in the verdict, while a 5/5's nits sit in the verdict alone, and the threads still open are exactly the findings still open.
 - A push gets its round within a few minutes, announced or not.
 - Round 1 of a PR that adds a member to a kind (a status, a type, a choice, a button) files every list still naming the kind's old members as one finding, found by one grep for each list's wording, so later rounds spend no turn on lists outside the diff.
-- Round 1 also greps the agent-facing docs for each term whose meaning the diff changes, and files every doc still describing the old meaning as one finding, each by `file:line`, so later rounds spend no turn finding them one at a time.
+- Round 1 also greps the agent-facing and web docs for each term whose meaning the diff changes, and files every doc still describing the old meaning as one finding, each by `file:line`, so later rounds spend no turn finding them one at a time.
 - A verdict posts with every blank filled, and a review's sub-agents search inside its clone and the paths its brief names, stopping every background task of theirs before they report.
+  Each sub-agent makes its scratch folder first and writes every probe output to an absolute path inside it.
 - No verdict stands on stale CI: the reviewer reads the head's checks again right before it posts, and a check gone red since its earlier read is a blocking finding in that verdict.
 - A reviewer stays up after its 5/5, its waiter on the head, until the PR merges or stays closed a poll later (Checks closes and reopens a PR to rebuild its merge commit), so a canary move after the score gets its merge round from the same session, not a new one.
 - A reviewer idle 30 minutes with every head scored may be ended by the factory's 5-minute check, and its worker resumes it under the same name on the next push.
 - A 5/5 can go stale with no push and no conflict: each time the reviewer sees canary move, it diffs what landed since each waiting 5/5's canary, checks that PR for any file:line or quoted text in those files, and scores each match again.
+  When a test that scans the repo or reads the schema lands on canary, it runs that test and the touched tests on a local merge before it calls a waiting 5/5 still good, since a clean merge can still fail that test.
+  A waiting 5/5 that adds or changes a repo scanner takes that local merge at every canary move, whatever landed, since CI's merge holds only the canary of its run.
+- A reviewer also checks each waiting 5/5's head for a merge conflict with canary each time canary moves, with `git merge-tree --write-tree --name-only`: a conflict is a blocking verdict that names the conflicted files, and the worker merges canary in.
+  On a stack held at 5/5 until the owner's try, that verdict is one signal to sync it with canary, and between syncs the reviewer runs only this conflict check on it.
 - The touched tests a reviewer runs come from the diff: the test of every file the PR changes, every test file it changes, every test that names or imports one of those files, by its path or from the test's own folder, plus the tests that scan the whole repo;
   `state.py touched-tests` lists them, and in a Python repo it adds each test that scans a folder holding a changed file and, when a prompt template changes, each test that pins a built prompt's digest.
 - When GitHub's `test` and `Audit, Lint, and Build` checks are green at the exact head, and canary has changed none of the PR's files since the base that run merged, the last 5/5 cites that run's link in place of a local run of the touched tests, since CI already ran the whole suite there.
+  It fetches canary again once both checks are green and reads those conditions against it, since canary can move while CI runs.
   While those checks still run at the head, with canary unchanged on the PR's files, the reviewer waits for CI still running at the head and cites it, queueing a local run only when a condition fails or a check goes red.
 - On a large app repo, when the touched tests run past about 100 files, green PR CI at the exact head stands as the merge evidence, and the reviewer runs the changed modules' own tests locally.
 - When canary has moved and changed a file the PR changes, or the PR adds or changes a repo scanner, unless CI stands in, the 5/5 verdict names the touched tests it ran on a local merge with canary, since a merge git calls clean can still break; a red run or a conflict there blocks the 5/5.
@@ -69,6 +76,7 @@ Its waiter for the next push polls GitHub's REST API, so a reviewer waiting all 
 - A test that fails only on the runner box counts against the score once a rerun on the Mac fails too, so a difference in the box alone never lowers a score.
 - A report that fails to send by name reaches the worker anyway, sent again to the `uds:` address its newest message came from.
 - The reviewer's small fix goes to the worker as a patch, never as a commit of its own, since ADR 0004 makes the gate a reviewer independent of the code it scores: save `git -C <clone> diff > <scratch>/fix.patch`, restore the clone, check it with `git -C <clone> apply --check <scratch>/fix.patch`, and hand it over, since the worker applies it word for word.
+  It applies a patch or a suggested wording in its clone and runs the checks its files call for before it posts, so its own fix never costs the PR a round.
 - After a compaction, a resume, or a notice that background tasks did not finish before the previous session ended, the reviewer runs `state.py pr` for each PR it holds and re-arms every `state.py wait` with none running, since an account flip kills the waiters with no notice.
 - A finding that asks for a behaviour states the behaviour wanted, not only the defect.
 - On a collaborator's org PR whose review ask came to you, the session that posts your review replies to the ask right after, in the same DM or thread, with what you approved and any blocking note.
@@ -79,6 +87,8 @@ Its waiter for the next push polls GitHub's REST API, so a reviewer waiting all 
 - A PR body with no `test:skills` result in it is a nit, since GitHub Actions runs the suite at the head.
 - When the ticket carries samples, the verdict holds a samples table, and a sample left unhandled holds the score down.
 - When the diff holds a long-lived connection (a socket, a pub/sub subscriber, a retrying client), the PR's Evidence holds a lifecycle table, one row per path from connect to close, and a missing table holds the score at 3.
+- When the diff loosens a guard, the PR's Evidence holds a `canary | head` table of refusal rows from round 1 for each refused-forms row it adds or allows and each bypass the review finds that canary refuses, with the refused-forms test's pass count for the rest, and a row canary refuses that runs at the head, unless the fixture's allow list names it, holds the score at 3.
+- A working bypass the review finds in a guard is explained on the PR by its mechanism alone, and its exact forms go to the worker in a message until the fix refuses them, so no working payload sits in a public comment.
 - A PR that changes a skill, an agent guide or a docs page has its writing judged against writing-for-agents in the verdict, beside the code.
 - A FAIL a lead overruled on the PR (`Lead ruling:`) no longer counts against the score, once the issue the ruling names exists.
 - The recovery scan lists no unscored PR held by a worker without a live reviewer, and no PR as lost: every open PR is held by an agent (its roster row, or a live worker `plan.json` gives it), parked by a plan (`plan.json` or a plans file), or another author's for the Builder to triage.

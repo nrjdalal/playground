@@ -147,15 +147,64 @@ describe("the ready line", () => {
     expect(await m.waits("ops-checks-8", { RUN_SLOT_SIZE: "medium" })).toBe(true)
   })
 
-  test("never passes an older pinned big ticket", async () => {
+  test("passes a worker's older pinned big ticket, as every run that goes ahead does", async () => {
     const aged = machine({ mergeQueue: line("2026-10-19T00:20:00Z", "2026-10-19T00:10:00Z") })
     aged.ticket(1, "worker-big", "s2 23 3 big", 21 * 60)
-    expect(await aged.waits("ops-checks-8", { RUN_SLOT_SIZE: "medium" })).toBe(true)
+    expect(await aged.runs("ops-checks-8", { RUN_SLOT_SIZE: "medium" })).toBe(true)
   })
 
   test("never passes local CI's older pinned ticket", async () => {
     const localci = machine({ mergeQueue: line("2026-10-19T00:20:00Z", "2026-10-19T00:10:00Z") })
     localci.ticket(1, "ops-localci", "s2")
     expect(await localci.waits("ops-checks-8", { RUN_SLOT_SIZE: "medium" })).toBe(true)
+  })
+})
+
+// Ops, 2 Nov 21:32Z: 9 of 17 waiters were reviewers, 486 to 1304 s in, while a drafted 5/5 waited behind workers' long runs at the same class
+describe("a reviewer's run", () => {
+  test("takes the one free slot ahead of an older worker's medium run", async () => {
+    const m = machine()
+    m.ticket(1, "a1b2c3-worker", "s2 22 2 medium")
+    expect(await m.runs("d4e5f6-reviewer", { RUN_SLOT_SIZE: "medium" })).toBe(true)
+  })
+
+  test("and ahead of one past AGED, which still holds back a worker's newer run", async () => {
+    const aged = machine()
+    aged.ticket(1, "a1b2c3-worker", "s2 22 2 medium", 21 * 60)
+    expect(await aged.runs("d4e5f6-reviewer-spec", { RUN_SLOT_SIZE: "medium" })).toBe(true)
+    const worker = machine()
+    worker.ticket(1, "a1b2c3-worker", "s2 22 2 medium", 21 * 60)
+    expect(await worker.waits("g7h8i9-worker", { RUN_SLOT_SIZE: "small" })).toBe(true)
+  })
+
+  // the merge train takes its slot outside the queue, so it leaves no ticket to wait behind
+  for (const [who, line] of [
+    ["ops-checks-5", "s2 02 2 medium"],
+    ["ops-localci", "s2"],
+    ["a1b2c3-worker", "s2 12 2 medium"],
+  ])
+    for (const ago of [0, 21 * 60])
+      test(`still waits behind an older ${who} ticket "${line}"${ago ? " past AGED" : ""}`, async () => {
+        const m = machine()
+        m.ticket(1, who, line, ago)
+        expect(await m.waits("d4e5f6-reviewer", { RUN_SLOT_SIZE: "small" })).toBe(true)
+      })
+
+  // past AGED a ticket is pinned within its own class, as canary held it, so a big reviewer or Checks run still drains its class
+  for (const [who, line, newer] of [
+    ["a1b2c3-reviewer", "s2 23 3 big", "d4e5f6-reviewer"],
+    ["a1b2c3-reviewer", "s2 22 2 medium", "d4e5f6-reviewer"],
+    ["ops-checks-7", "s2 03 3 big", "ops-checks-9"],
+  ])
+    test(`a newer small ${newer} waits behind an aged ${who} ticket "${line}"`, async () => {
+      const m = machine()
+      m.ticket(1, who, line, 21 * 60)
+      expect(await m.waits(newer, { RUN_SLOT_SIZE: "small" })).toBe(true)
+    })
+
+  test("goes ahead of a worker's newer small run, which its size alone ranked first before", async () => {
+    const m = machine()
+    m.ticket(1, "d4e5f6-reviewer", "s2 22 2 medium")
+    expect(await m.waits("a1b2c3-worker", { RUN_SLOT_SIZE: "small" })).toBe(true)
   })
 })

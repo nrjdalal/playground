@@ -4,7 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { check, skillNames } from "../../../scripts/hooks/no-playground-leak"
-import { OLD } from "../../old-names"
+import { OLD } from "../../session-names"
 import { storeWith } from "./render-set"
 
 const root = join(import.meta.dir, "..", "..", "..")
@@ -69,13 +69,18 @@ beforeAll(async () => {
   await Bun.write(join(scratch, "broken", "playground", "roster.json"), "{ not json")
   lists = join(scratch, "lists")
   await mkdir(lists)
-  // The repo's terms, plus a made-up org's own words, as that org's extension adds them.
+  // The repo's terms, plus the stand-in old names a machine's own list holds and a made-up org's own words, as that org's extension adds them.
   const terms = await Bun.file(
     join(root, "extensions", "core", "lists", "playground-terms.json"),
   ).json()
   await Bun.write(
     join(lists, "playground-terms.json"),
-    JSON.stringify({ ...terms, everyday: [...terms.everyday, "acme", "acme-blue"] }),
+    JSON.stringify({
+      ...terms,
+      aliases: [...terms.aliases, OLD.builder, OLD.ops, OLD.planner],
+      everyday: [...terms.everyday, "acme", "acme-blue"],
+      names: [...terms.names, OLD.dispatcher],
+    }),
   )
   await Bun.write(
     join(lists, "slack-cleared.json"),
@@ -284,6 +289,10 @@ describe(`a Acme write holding a ${OLD.dispatcher} term is refused`, () => {
     ["git commit -F", "git commit -F leaky.md"],
     ["git -C commit", `git -C ${"$PWD"} commit -am "${OLD.dispatcher}"`],
     ["git push to a branch named for a session", "git push origin HEAD:worker-greed/fix"],
+    [
+      "git --attr-source <tree> before a push to a branch named for a session",
+      "git --attr-source HEAD push origin HEAD:worker-greed/fix",
+    ],
     ["curl to Slack", `curl -d text="${OLD.builder} here" https://slack.com/api/chat.postMessage`],
     [
       "curl to Linear",
@@ -296,6 +305,15 @@ describe(`a Acme write holding a ${OLD.dispatcher} term is refused`, () => {
   ])("%s", async (_, command) => {
     const reason = await bash(command)
     expect(reason).toContain("no-playground-leak hook refused")
+    expect(reason).toContain("a factory term")
+  })
+
+  // no-extension-repo-write reads `repo` as a gh verb after an unknown program, which must leave this verdict as it is
+  test("an unknown program's words before a git push still carry it to the push", async () => {
+    const reason = await bash(
+      `$X repo git push https://github.com/acme-blue/app.git HEAD:${OLD.dispatcher}`,
+    )
+    expect(reason).toContain("no-playground-leak hook refused git push")
     expect(reason).toContain("a factory term")
   })
 
@@ -499,6 +517,11 @@ describe("the same Acme writes without a term pass", () => {
   test("a commit and a push on an ordinary probe branch", async () => {
     expect(await bash(`git commit -m "Raise the timeout"`, dirs.infra)).toBeUndefined()
     expect(await bash("git push -u origin HEAD", dirs.infra)).toBeUndefined()
+  })
+
+  test("a read through a literal -c alias, and a push through one to a clean branch", async () => {
+    expect(await bash("git -c alias.l=log l")).toBeUndefined()
+    expect(await bash("git -c alias.p=push p -u origin HEAD", dirs.infra)).toBeUndefined()
   })
 })
 
@@ -1113,7 +1136,7 @@ describe("as Claude Code runs it", () => {
       hooks: { PreToolUse: Entry[] }
     }
     const found = settings.hooks.PreToolUse.find((e) =>
-      e.hooks.some((h) => h.command.includes("scripts/hooks/no-playground-leak.ts")),
+      e.hooks.some((h) => h.command.includes("scripts/hooks/bundled/no-playground-leak.js")),
     )
     if (!found)
       throw new Error("scripts/factory-settings.json registers no no-playground-leak hook")
@@ -1153,6 +1176,11 @@ describe("as Claude Code runs it", () => {
     tool_input: { text: OLD.dispatcher },
     tool_name: "mcp__slack-shared__chat_post_message",
   }
+  // The config folder whose list holds the stand-in old names, so a run refuses one.
+  const listed = () => ({
+    CLAUDE_CONFIG_DIR: config,
+    PLAYGROUND_DATA_DIR: join(config, "playground"),
+  })
 
   // CLAUDE_PROJECT_DIR is a folder in no repository, so only PLAYGROUND_REPO can name the checkout
   const away = (home: string, repo: string) => ({
@@ -1166,23 +1194,29 @@ describe("as Claude Code runs it", () => {
     const home = join(scratch, "home")
     await mkdir(home, { recursive: true })
     const [{ command }] = (await entry()).hooks
-    const refused = await hook(command, leaky, away(home, root))
+    const refused = await hook(command, leaky, { ...away(home, root), ...listed() })
     expect(refused.code).toBe(2)
     expect(refused.stderr).toContain("no-playground-leak hook refused")
     const clean = { ...leaky, tool_input: { text: "PR is up" } }
     expect(await hook(command, clean, away(home, root))).toEqual({ code: 0, stderr: "" })
   })
 
-  test("a hook that finds no checkout lets the call through", async () => {
+  test("a hook that finds no checkout refuses a factory session's call and lets any other through", async () => {
     const home = join(scratch, "nowhere")
     await mkdir(home, { recursive: true })
     const [{ command }] = (await entry()).hooks
-    expect(await hook(command, leaky, away(home, ""))).toEqual({ code: 0, stderr: "" })
+    const refused = await hook(command, leaky, away(home, ""))
+    expect(refused.code).toBe(2)
+    expect(refused.stderr).toContain("Restoring the main checkout")
+    expect(await hook(command, leaky, { ...away(home, ""), PLAYGROUND_ROLE: "" })).toEqual({
+      code: 0,
+      stderr: "",
+    })
   })
 
   test("the script runs on its own", async () => {
     const proc = Bun.spawn(["bun", script], {
-      env: { ...process.env, PLAYGROUND_ROLE: "worker" },
+      env: { ...process.env, ...listed(), PLAYGROUND_ROLE: "worker" },
       stderr: "pipe",
       stdin: new Blob([JSON.stringify(leaky)]),
     })

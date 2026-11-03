@@ -12,10 +12,11 @@ import {
   type ColumnConfig,
 } from "@/components/data-table"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { useOwnerZone } from "@/hooks/use-owner-zone"
 import { useNow } from "@/lib/dashboard"
 import type { Features } from "@/lib/data-table-features"
 import { duration, remaining } from "@/lib/eta"
-import { istTime, prLabel, statusLabel } from "@/lib/plan"
+import { prLabel, statusLabel, zoneTime } from "@/lib/plan"
 import { relativeTime } from "@/lib/time"
 
 const DASH = "-"
@@ -62,9 +63,10 @@ const TICK_MS = 60_000
 // How long something has been on, inside a sentence, where it ends the line and so needs no fixed width.
 const SINCE: TimeKind = { ...ELAPSED, ch: "" }
 
-// A time that ticks: read again every minute, mono and right-aligned at a fixed width, its IST clock on hover. A passed time is overdue, in orange, while it is still due, and how long ago it was once it is not (an item that has started or finished).
+// A time that ticks: read again every minute, mono and right-aligned at a fixed width, its clock in the owner's zone on hover. A passed time is overdue, in orange, while it is still due, and how long ago it was once it is not (an item that has started or finished).
 function LiveTime({ at, due, kind }: { at: string; due: boolean; kind: TimeKind }) {
   const now = useNow(TICK_MS)
+  const zone = useOwnerZone()
   const passed = kind.overdue && Date.parse(at) <= now
   const text = passed && !due ? `${duration(now - Date.parse(at))} ago` : kind.words(at, now)
   if (!text) return DASH
@@ -84,12 +86,12 @@ function LiveTime({ at, due, kind }: { at: string; due: boolean; kind: TimeKind 
       >
         {text}
       </TooltipTrigger>
-      <TooltipContent>{istTime(at)} IST</TooltipContent>
+      <TooltipContent>{zoneTime(at, zone)}</TooltipContent>
     </Tooltip>
   )
 }
 
-// How long a finding has held, its IST clock on hover, ticking each minute.
+// How long a finding has held, its clock in the owner's zone on hover, ticking each minute.
 export const Since = ({ at }: { at: string }) => <LiveTime at={at} due kind={SINCE} />
 
 // A live time column; due says whether a row's time still counts as owed once passed. Its value is the ISO time, so a sort would order by the moment rather than the words; unsorted, as every plan column is.

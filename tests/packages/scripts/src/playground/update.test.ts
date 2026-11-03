@@ -1,5 +1,13 @@
 import { afterAll, describe, expect, test } from "bun:test"
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs"
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 
@@ -20,7 +28,7 @@ describe("updateSteps", () => {
     expect(updateSteps(["README.md", "package.json.bak"]).install).toBe(false)
   })
 
-  test("the skills a merge changed are named once each, A to Z, a long-lived checker running each only once it loads it again", () => {
+  test("the skills a merge changed are each one folder, once, A to Z by name, for a live session to read the new text from", () => {
     expect(
       updateSteps([
         "extensions/core/skills/pr/SKILL.md",
@@ -31,7 +39,12 @@ describe("updateSteps", () => {
         "skills/playground/inbox/SKILL.md",
         "extensions/core/rules/ci.md",
       ]).skills,
-    ).toEqual(["code-review-loop", "inbox", "pr", "ui-verify"])
+    ).toEqual([
+      "extensions/core/skills/code-review-loop",
+      "skills/playground/inbox",
+      "extensions/core/skills/pr",
+      "skills/zerostarter/ui-verify",
+    ])
     expect(updateSteps(["README.md"]).skills).toEqual([])
   })
 
@@ -59,7 +72,7 @@ describe("runUpdate", () => {
   const repo = "/repo"
   const quiet = () => {}
 
-  test("nothing changed: fetch, merge, link-skills first (every later step reads the data folder it links), ops-restart, then the roll, with no install or build", async () => {
+  test("nothing changed: fetch, read the target's manifests, merge, link-skills first (every later step reads the data folder it links), ops-restart, then the roll, with no install or build", async () => {
     const { calls, run } = fakeRun({ "rev-parse": { out: "old\n" } })
     let rolled = 0
     const code = await runUpdate(repo, run, async () => (rolled++, 0), quiet)
@@ -69,6 +82,9 @@ describe("runUpdate", () => {
       ["git", "-C", repo, "rev-parse", "HEAD"],
       ["git", "-C", repo, "fetch", "-q", "origin", "main"],
       ["git", "-C", repo, "branch", "--show-current"],
+      ["git", "-C", repo, "merge-base", "--is-ancestor", "HEAD", "origin/main"],
+      ["git", "-C", repo, "status", "--porcelain", "--untracked-files=all"],
+      ["git", "-C", repo, "ls-tree", "-r", "--name-only", "origin/main"],
       ["git", "-C", repo, "merge", "--ff-only", "-q", "origin/main"],
       ["bash", `${repo}/scripts/link-skills.sh`],
       ["git", "-C", repo, "diff", "--name-only", "old", "HEAD"],
@@ -83,7 +99,7 @@ describe("runUpdate", () => {
     ])
   })
 
-  test("a merge that changed a skill names it and says a session that loaded it runs its old text; one that changed none says nothing of skills", async () => {
+  test("a merge that changed a skill names it and the folder in the checkout a live session reads it from; one that changed none says nothing of skills", async () => {
     const said: string[] = []
     const { run } = fakeRun({
       diff: { out: "extensions/core/skills/pr/SKILL.md\nskills/zerostarter/dev/SKILL.md\n" },
@@ -97,7 +113,7 @@ describe("runUpdate", () => {
       ),
     ).toBe(0)
     expect(said).toContain(
-      "playground update: skills changed: dev, pr; a session that loaded one runs its old text until it loads it again",
+      `playground update: skills changed: dev, pr; a running session's Skill tool serves the copy it started with, so a live session reads each one's files here: ${repo}/skills/zerostarter/dev/, ${repo}/extensions/core/skills/pr/; send each lead these folders, for the lead to have each of its live checkers read the new text there (release)`,
     )
     const quietSaid: string[] = []
     expect(
@@ -135,6 +151,33 @@ describe("runUpdate", () => {
     ])
   })
 
+  test("a run after one cut short past its fast-forward diffs from the commit the last finished update reached, and records the new one once its steps pass", async () => {
+    const done = join(scratch, "fake-update-head")
+    writeFileSync(done, "old\n")
+    const { calls, run } = fakeRun({
+      diff: { out: "bun.lock\npackages/db/src/index.ts\n" },
+      "rev-parse": { out: "new\n" },
+    })
+    expect(await runUpdate(repo, run, async () => 0, quiet, undefined, done)).toBe(0)
+    expect(calls).toContainEqual(["git", "-C", repo, "diff", "--name-only", "old", "HEAD"])
+    expect(calls.some((argv) => argv.includes("install"))).toBe(true)
+    expect(calls.some((argv) => argv.includes("build"))).toBe(true)
+    expect(calls.find((argv) => argv.includes("--no-env-file"))?.slice(-2)).toEqual(["old", "HEAD"])
+    expect(readFileSync(done, "utf8")).toBe("new\n")
+  })
+
+  test("a recorded commit the checkout lacks diffs from HEAD, and a failed step leaves the record as it was", async () => {
+    const done = join(scratch, "fake-update-head-gone")
+    writeFileSync(done, "gone\n")
+    const { calls, run } = fakeRun({ "cat-file": { code: 128 }, "rev-parse": { out: "new\n" } })
+    expect(await runUpdate(repo, run, async () => 0, quiet, undefined, done)).toBe(0)
+    expect(calls).toContainEqual(["git", "-C", repo, "diff", "--name-only", "new", "HEAD"])
+    writeFileSync(done, "old\n")
+    const failed = fakeRun({ "rev-parse": { out: "new\n" }, "--no-env-file": { code: 1 } })
+    expect(await runUpdate(repo, failed.run, async () => 0, quiet, undefined, done)).toBe(1)
+    expect(readFileSync(done, "utf8")).toBe("old\n")
+  })
+
   test("a merge that is not a fast-forward stops the update, names the step, and rolls nothing", async () => {
     const { calls, run } = fakeRun({ merge: { code: 128 } })
     const said: string[] = []
@@ -164,9 +207,11 @@ describe("runUpdate", () => {
     )
     expect(code).toBe(0)
     expect(rolled).toBe(false)
-    expect(calls.slice(1, 4)).toEqual([
+    expect(calls.slice(1, 6)).toEqual([
       ["git", "-C", repo, "fetch", "-q", "--tags", "origin", "main"],
       ["git", "-C", repo, "merge-base", "--is-ancestor", "HEAD", "origin/main"],
+      ["git", "-C", repo, "status", "--porcelain", "--untracked-files=all"],
+      ["git", "-C", repo, "ls-tree", "-r", "--name-only", "refs/tags/v0.0.20"],
       ["git", "-C", repo, "checkout", "-q", "-B", "main", "refs/tags/v0.0.20"],
     ])
     expect(said.at(-1)).toStartWith("playground update: at v0.0.20; the Dashboard rolls on its own")
@@ -176,6 +221,119 @@ describe("runUpdate", () => {
     const { calls, run } = fakeRun({ "merge-base": { code: 1 } })
     expect(await runUpdate(repo, run, async () => 0, quiet, "v0.0.20")).toBe(1)
     expect(calls.some((argv) => argv.includes("checkout"))).toBe(false)
+  })
+
+  // a target whose settings package declares x, which nothing in /repo links
+  const declares = {
+    "ls-tree": { out: "package.json\npackages/settings/package.json\n" },
+    show: { out: JSON.stringify({ dependencies: { x: "^1" }, workspaces: ["packages/*"] }) },
+  }
+
+  test("a target that declares an unlinked dependency checks out its changed manifests and installs before the merge", async () => {
+    const { calls, run } = fakeRun({
+      ...declares,
+      "--name-status": {
+        out: "M\tbun.lock\nM\tpackages/settings/package.json\nM\tpackages/settings/src/a.ts\n",
+      },
+    })
+    expect(await runUpdate(repo, run, async () => 0, quiet)).toBe(0)
+    const at = (argv: string[]) => calls.findIndex((call) => call.join(" ") === argv.join(" "))
+    const checkout = at([
+      "git",
+      "-C",
+      repo,
+      "checkout",
+      "origin/main",
+      "--",
+      "bun.lock",
+      "packages/settings/package.json",
+    ])
+    const install = at([
+      process.execPath,
+      "install",
+      "--frozen-lockfile",
+      "--ignore-scripts",
+      "--cwd",
+      repo,
+    ])
+    const merge = at(["git", "-C", repo, "merge", "--ff-only", "-q", "origin/main"])
+    expect(checkout).toBeGreaterThan(-1)
+    expect([checkout < install, install < merge]).toEqual([true, true])
+  })
+
+  test("a target that deletes a file that is not a manifest still installs before the merge", async () => {
+    const { calls, run } = fakeRun({
+      ...declares,
+      "--name-status": { out: "D\tdocs/old.md\nM\tpackages/settings/package.json\n" },
+    })
+    expect(await runUpdate(repo, run, async () => 0, quiet)).toBe(0)
+    const install = calls.findIndex((argv) => argv[1] === "install")
+    expect(install).toBeGreaterThan(-1)
+    expect(install).toBeLessThan(calls.findIndex((argv) => argv.includes("merge")))
+  })
+
+  test("a link already missing on a hop that changes no manifest installs before the merge and checks out nothing", async () => {
+    const { calls, run } = fakeRun({
+      ...declares,
+      "--name-status": { out: "M\tpackages/settings/src/a.ts\n" },
+    })
+    expect(await runUpdate(repo, run, async () => 0, quiet)).toBe(0)
+    expect(calls.some((argv) => argv.includes("checkout"))).toBe(false)
+    const install = calls.findIndex((argv) => argv[1] === "install")
+    expect(install).toBeGreaterThan(-1)
+    expect(install).toBeLessThan(calls.findIndex((argv) => argv.includes("merge")))
+  })
+
+  test("a tree with edits or untracked files of its own merges first as before, leaving them to the fast-forward", async () => {
+    const { calls, run } = fakeRun({ "--porcelain": { out: "?? notes.md\n" }, ...declares })
+    expect(await runUpdate(repo, run, async () => 0, quiet)).toBe(0)
+    expect(calls.some((argv) => argv.includes("ls-tree") || argv[1] === "install")).toBe(false)
+  })
+
+  test("a target that deletes a manifest merges first as before, since the old code may still read it", async () => {
+    const { calls, run } = fakeRun({
+      ...declares,
+      "--name-status": { out: "D\tpackages/old/package.json\nM\tbun.lock\n" },
+    })
+    expect(await runUpdate(repo, run, async () => 0, quiet)).toBe(0)
+    expect(calls.some((argv) => argv.includes("--") || argv.includes("install"))).toBe(false)
+  })
+
+  test("a failed install before the merge puts the old manifests back and moves first, installing after, as before", async () => {
+    const said: string[] = []
+    const fake = fakeRun({
+      ...declares,
+      "--name-status": { out: "M\tpackages/settings/package.json\n" },
+    })
+    // the first install, before the move, fails as one needing a patch file the prelink did not stage does; the one after the move passes
+    let installs = 0
+    const run: Run = async (argv, show) =>
+      argv[1] === "install" && ++installs === 1 ? { code: 1, out: "" } : fake.run(argv, show)
+    expect(
+      await runUpdate(
+        repo,
+        run,
+        async () => 0,
+        (l) => said.push(l),
+      ),
+    ).toBe(0)
+    const at = (word: string) => fake.calls.findIndex((argv) => argv.includes(word))
+    expect(fake.calls[at("restore")]).toEqual([
+      "git",
+      "-C",
+      repo,
+      "restore",
+      "-q",
+      "--source=HEAD",
+      "--staged",
+      "--worktree",
+      "--",
+      "packages/settings/package.json",
+    ])
+    expect(at("restore")).toBeLessThan(at("merge"))
+    expect(said).toContain(
+      "playground update: the install before the move failed, so the checkout's files go back as they were and it moves first, installing after, as before",
+    )
   })
 
   test("the roll's own code is the update's", async () => {
@@ -222,6 +380,54 @@ test("runUpdate fast-forwards a real checkout onto origin/main and runs its own 
   ).toBe(0)
   expect(git(checkout, "rev-parse", "HEAD").stdout.toString().trim()).toBe(head)
   expect(readFileSync(marks, "utf8")).toBe(`linked\nrestart ${old} HEAD\n`)
+})
+
+test("a real update cut short after its fast-forward is finished by the next run, which restarts from the commit the last finished update reached", async () => {
+  const env = { GIT_CONFIG_NOSYSTEM: "1", HOME: scratch, PATH: process.env.PATH }
+  const git = (cwd: string, ...args: string[]) =>
+    Bun.spawnSync(["git", "-c", "user.name=t", "-c", "user.email=t@t", ...args], { cwd, env })
+      .stdout.toString()
+      .trim()
+  const origin = join(scratch, "rerun-origin")
+  const marks = join(scratch, "rerun-marks")
+  const cut = join(scratch, "rerun-cut")
+  const done = join(scratch, "rerun-update-head")
+  mkdirSync(join(origin, "scripts"), { recursive: true })
+  mkdirSync(join(origin, "packages", "scripts", "src", "ops-restart"), { recursive: true })
+  writeFileSync(join(origin, "scripts", "link-skills.sh"), "true\n")
+  // an ops-restart that fails while the cut file exists, standing in for an update cut short after its fast-forward
+  writeFileSync(
+    join(origin, "packages", "scripts", "src", "ops-restart", "cli.ts"),
+    `const fs = require("node:fs"); if (fs.existsSync(${JSON.stringify(cut)})) process.exit(1); fs.appendFileSync(${JSON.stringify(marks)}, "restart " + process.argv.slice(3).join(" ") + "\\n")\n`,
+  )
+  git(scratch, "init", "-q", "-b", "main", origin)
+  git(origin, "add", ".")
+  git(origin, "commit", "-q", "-m", "one")
+  const checkout = join(scratch, "rerun-checkout")
+  git(scratch, "clone", "-q", origin, checkout)
+  const one = git(checkout, "rev-parse", "HEAD")
+  const update = () =>
+    runUpdate(
+      checkout,
+      spawnRun,
+      async () => 0,
+      () => {},
+      undefined,
+      done,
+    )
+
+  expect(await update()).toBe(0)
+  writeFileSync(join(origin, "README.md"), "two\n")
+  git(origin, "add", ".")
+  git(origin, "commit", "-q", "-m", "two")
+  const two = git(origin, "rev-parse", "HEAD")
+  writeFileSync(cut, "")
+  expect(await update()).toBe(1)
+  expect(git(checkout, "rev-parse", "HEAD")).toBe(two)
+  rmSync(cut)
+  expect(await update()).toBe(0)
+  expect(readFileSync(marks, "utf8")).toBe(`restart ${one} HEAD\nrestart ${one} HEAD\n`)
+  expect(readFileSync(done, "utf8").trim()).toBe(two)
 })
 
 test("runUpdate --to moves a real checkout's main back to a tag, and a plain update moves it on again", async () => {
@@ -334,5 +540,226 @@ describe("runUpdate on a checkout left on another branch", () => {
       ["canary", head],
     )
     expect(readFileSync(join(checkout, "README.md"), "utf8")).toBe("mine\n")
+  })
+})
+
+test("a run cut short after its fast-forward with no record yet is finished by the next run, which restarts from where the first one started", async () => {
+  const env = { GIT_CONFIG_NOSYSTEM: "1", HOME: scratch, PATH: process.env.PATH }
+  const git = (cwd: string, ...args: string[]) =>
+    Bun.spawnSync(["git", "-c", "user.name=t", "-c", "user.email=t@t", ...args], { cwd, env })
+      .stdout.toString()
+      .trim()
+  const origin = join(scratch, "first-origin")
+  const marks = join(scratch, "first-marks")
+  const cut = join(scratch, "first-cut")
+  const done = join(scratch, "first-update-head")
+  mkdirSync(join(origin, "scripts"), { recursive: true })
+  mkdirSync(join(origin, "packages", "scripts", "src", "ops-restart"), { recursive: true })
+  writeFileSync(join(origin, "scripts", "link-skills.sh"), "true\n")
+  writeFileSync(
+    join(origin, "packages", "scripts", "src", "ops-restart", "cli.ts"),
+    `const fs = require("node:fs"); if (fs.existsSync(${JSON.stringify(cut)})) process.exit(1); fs.appendFileSync(${JSON.stringify(marks)}, "restart " + process.argv.slice(3).join(" ") + "\\n")\n`,
+  )
+  git(scratch, "init", "-q", "-b", "main", origin)
+  git(origin, "add", ".")
+  git(origin, "commit", "-q", "-m", "one")
+  const checkout = join(scratch, "first-checkout")
+  git(scratch, "clone", "-q", origin, checkout)
+  const one = git(checkout, "rev-parse", "HEAD")
+  const lines: string[] = []
+  const update = () =>
+    runUpdate(
+      checkout,
+      spawnRun,
+      async () => 0,
+      (line) => lines.push(line),
+      undefined,
+      done,
+    )
+  writeFileSync(join(origin, "README.md"), "two\n")
+  git(origin, "add", ".")
+  git(origin, "commit", "-q", "-m", "two")
+  writeFileSync(cut, "")
+  expect(await update()).toBe(1)
+  expect(lines).toContain(
+    `playground update: no ${done} yet and no fast-forward onto origin/main in the reflog, so it reads what changed since HEAD, ${one.slice(0, 7)}`,
+  )
+  rmSync(cut)
+  expect(await update()).toBe(0)
+  expect(readFileSync(marks, "utf8")).toBe(`restart ${one} HEAD\n`)
+})
+
+test("with no record, a checkout reset past its last fast-forward reads what changed since that fast-forward, and says so", async () => {
+  const env = { GIT_CONFIG_NOSYSTEM: "1", HOME: scratch, PATH: process.env.PATH }
+  const git = (cwd: string, ...args: string[]) =>
+    Bun.spawnSync(["git", "-c", "user.name=t", "-c", "user.email=t@t", ...args], { cwd, env })
+      .stdout.toString()
+      .trim()
+  const origin = join(scratch, "reset-origin")
+  const marks = join(scratch, "reset-marks")
+  const done = join(scratch, "reset-update-head")
+  mkdirSync(join(origin, "scripts"), { recursive: true })
+  mkdirSync(join(origin, "packages", "scripts", "src", "ops-restart"), { recursive: true })
+  writeFileSync(join(origin, "scripts", "link-skills.sh"), "true\n")
+  writeFileSync(
+    join(origin, "packages", "scripts", "src", "ops-restart", "cli.ts"),
+    `require("node:fs").appendFileSync(${JSON.stringify(marks)}, "restart " + process.argv.slice(3).join(" ") + "\\n")\n`,
+  )
+  git(scratch, "init", "-q", "-b", "main", origin)
+  git(origin, "add", ".")
+  git(origin, "commit", "-q", "-m", "one")
+  const checkout = join(scratch, "reset-checkout")
+  git(scratch, "clone", "-q", origin, checkout)
+  writeFileSync(join(origin, "README.md"), "two\n")
+  git(origin, "add", ".")
+  git(origin, "commit", "-q", "-m", "two")
+  git(checkout, "fetch", "-q", "origin", "main")
+  git(checkout, "merge", "--ff-only", "-q", "origin/main")
+  const two = git(checkout, "rev-parse", "HEAD")
+  writeFileSync(join(origin, "README.md"), "three\n")
+  git(origin, "commit", "-q", "-am", "three")
+  git(checkout, "fetch", "-q", "origin", "main")
+  git(checkout, "reset", "-q", "--keep", "origin/main")
+  const lines: string[] = []
+
+  expect(
+    await runUpdate(
+      checkout,
+      spawnRun,
+      async () => 0,
+      (line) => lines.push(line),
+      undefined,
+      done,
+    ),
+  ).toBe(0)
+  expect(readFileSync(marks, "utf8")).toBe(`restart ${two} HEAD\n`)
+  expect(lines).toContain(
+    `playground update: no ${done} yet, so it reads what changed since the reflog's last fast-forward onto origin/main, ${two.slice(0, 7)}`,
+  )
+  expect(readFileSync(done, "utf8").trim()).toBe(git(checkout, "rev-parse", "HEAD"))
+})
+
+// the hooks read the checkout's code as soon as it moves, so a commit whose code imports a workspace dependency this checkout has not linked gets that install before any of its code lands
+describe("runUpdate onto a commit that declares a dependency the checkout has not linked", () => {
+  const env = { GIT_CONFIG_NOSYSTEM: "1", HOME: scratch, PATH: process.env.PATH }
+  const git = (cwd: string, ...args: string[]) =>
+    Bun.spawnSync(["git", "-c", "user.name=t", "-c", "user.email=t@t", ...args], { cwd, env })
+      .stdout.toString()
+      .trim()
+  const write = (path: string, text: string) => {
+    mkdirSync(dirname(path), { recursive: true })
+    writeFileSync(path, text)
+  }
+  const FOLDER = join("packages", "settings", "src", "folder.ts")
+  const LINK = join(
+    "packages",
+    "settings",
+    "node_modules",
+    "@packages",
+    "safe-delete",
+    "package.json",
+  )
+  // an origin whose second commit makes settings import safe-delete, and a checkout of its first with every declared dependency linked
+  const setup = (name: string) => {
+    const origin = join(scratch, `${name}-origin`)
+    write(join(origin, "scripts", "link-skills.sh"), "true\n")
+    write(join(origin, "packages", "scripts", "src", "ops-restart", "cli.ts"), "\n")
+    write(join(origin, ".gitignore"), "node_modules\n")
+    write(join(origin, "package.json"), JSON.stringify({ workspaces: ["packages/*"] }))
+    write(join(origin, "bun.lock"), "one\n")
+    write(join(origin, "packages", "safe-delete", "package.json"), "{}")
+    write(
+      join(origin, "packages", "settings", "package.json"),
+      JSON.stringify({ dependencies: {} }),
+    )
+    write(join(origin, FOLDER), "export const one = 1\n")
+    git(scratch, "init", "-q", "-b", "main", origin)
+    git(origin, "add", ".")
+    git(origin, "commit", "-q", "-m", "one")
+    const checkout = join(scratch, `${name}-checkout`)
+    git(scratch, "clone", "-q", origin, checkout)
+    write(join(origin, "bun.lock"), "two\n")
+    write(
+      join(origin, "packages", "settings", "package.json"),
+      JSON.stringify({ dependencies: { "@packages/safe-delete": "workspace:*" } }),
+    )
+    write(join(origin, FOLDER), 'import "@packages/safe-delete"\n')
+    git(origin, "add", ".")
+    git(origin, "commit", "-q", "-m", "two")
+    git(origin, "tag", "v0.0.2")
+    return { checkout, two: git(origin, "rev-parse", "HEAD") }
+  }
+
+  test.each([
+    ["a plain update", undefined, "prelink"],
+    ["--to", "v0.0.2", "prelink-to"],
+    ["a plain update on a checkout left on canary", undefined, "prelink-canary"],
+  ])(
+    "%s links it before the commit's code lands, from the commit's own manifests",
+    async (_, to, name) => {
+      const { checkout, two } = setup(name)
+      if (name === "prelink-canary") git(checkout, "checkout", "-q", "-b", "canary")
+      // what a hook would read at each install: the code it loads and the manifest that declares its imports
+      const seen: string[] = []
+      // the install and the build stand in for bun's and turbo's, which the scratch checkout lacks
+      const run: Run = async (argv, show) => {
+        if (argv.includes("build")) return { code: 0, out: "" }
+        if (argv[1] !== "install") return spawnRun(argv, show)
+        seen.push(
+          `${readFileSync(join(checkout, FOLDER), "utf8").trim()} | ${readFileSync(join(checkout, "bun.lock"), "utf8").trim()}`,
+        )
+        write(join(checkout, LINK), "{}")
+        return { code: 0, out: "" }
+      }
+      const lines: string[] = []
+      expect(
+        await runUpdate(
+          checkout,
+          run,
+          async () => 0,
+          (l) => lines.push(l),
+          to,
+        ),
+      ).toBe(0)
+      expect([
+        git(checkout, "rev-parse", "HEAD"),
+        git(checkout, "branch", "--show-current"),
+      ]).toEqual([two, "main"])
+      expect(seen[0]).toBe("export const one = 1 | two")
+      expect(lines).toContain(
+        "playground update: install the new commit's dependencies before its code, since it declares packages/settings: @packages/safe-delete, which this checkout has not linked",
+      )
+      expect(git(checkout, "status", "--short")).toBe("")
+    },
+  )
+
+  test("a target that moves a package moves first as before, never staging its new manifest beside the old", async () => {
+    const { checkout } = setup("prelink-mv")
+    const origin = join(scratch, "prelink-mv-origin")
+    // the checkout at the second commit, its link still missing, so the move below is a rename git pairs whole
+    git(checkout, "fetch", "-q", "origin", "main")
+    git(checkout, "merge", "--ff-only", "-q", "origin/main")
+    git(origin, "mv", join("packages", "settings"), join("packages", "prefs"))
+    git(origin, "commit", "-q", "-m", "three")
+    const three = git(origin, "rev-parse", "HEAD")
+    // bun refuses a workspace whose name two package.json files claim, as the old and the moved one would
+    const run: Run = async (argv, show) => {
+      if (argv.includes("build")) return { code: 0, out: "" }
+      if (argv[1] !== "install") return spawnRun(argv, show)
+      const both = ["settings", "prefs"].every((name) =>
+        existsSync(join(checkout, "packages", name, "package.json")),
+      )
+      return { code: both ? 1 : 0, out: "" }
+    }
+    expect(
+      await runUpdate(
+        checkout,
+        run,
+        async () => 0,
+        () => {},
+      ),
+    ).toBe(0)
+    expect(git(checkout, "rev-parse", "HEAD")).toBe(three)
+    expect(git(checkout, "status", "--short")).toBe("")
   })
 })

@@ -27,11 +27,12 @@ Sessions run in bypass-permissions mode, yet some commands still prompt (`rm`, a
    and a scratch world's of the session's own ([scripts/README.md](../../../../scripts/README.md#spawnsh)),
    naming the script; type every program by its literal name, since one held in a variable (`$V integration add`) reads as herdr when a herdr command group follows it.
    It holds the machine's room in code (the owner: "It's not about the slot at all.
-   It's about how many cores we are using."), through a capacity gate that refuses, failing closed, unless three checks pass in order, the first failure naming its gate and its reading, and counts no live sessions or workers (the owner, 18 Oct: "don't cap anything"; Ops watches the live board for the risk of a cmux that stopped answering at 49 live sessions and load5 97):
+   It's about how many cores we are using."), through a capacity gate that refuses, failing closed, unless four checks pass in order, the first failure naming its gate and its reading, and counts no live sessions or workers (the owner, 18 Oct: "don't cap anything"; Ops watches the live board for the risk of a cmux that stopped answering at 49 live sessions and load5 97):
    the higher of load1 and load5 (the third field of `sysctl -n vm.loadavg`), plus the starts of the last 5 minutes (`gates.startsWindow`), its own and each `slots.peers` folder's, each weighing half its item's load units, under the core count (`sysctl hw.ncpu`) times `PLAYGROUND_LOAD_MULT` (default 1.0),
    less a quarter (`gates.smallReserve`) kept for small items unless the start is small (`--size small|medium|big`, else small for a reviewer or tester, else the roster's or plan.json's size, else medium; [rules/slots.md](../../rules/slots.md)), while a small worker keeps an eighth (`gates.reviewReserve`) in its place for the checkers,
    and once over that line the CPU's busy cores plus the starts too (`top -l 2 -n 0`'s idle share of the cores, held to the same line at no more than the core count), so it refuses only when both are over or `top` gives no reading, and the refusal names both (load 24 on 15 cores read 55% idle, 22 Oct);
-   memory pressure level 1 or 2 with 8% or more free (`gates.memoryFreeMin`); and the launching backend's usage: Claude's from `usage.json` (written in the last 15 minutes, the 5-hour window under 90%, the week within its pace, or under 98%, a sanity backup, while `~/.playground/usage-pace-off-until` holds a future ISO 8601 time with its zone,
+   memory pressure level 1 or 2 with 8% or more free (`gates.memoryFreeMin`); for a fresh worker start alone, a run-slot lane free with the load units for a run, or an empty queue (`scripts/ops/run-slot.sh room`), so a new worker never joins a queue it has no room in, while checkers, resumes and moves skip it; and the launching backend's usage:
+   Claude's from `usage.json` (written in the last 15 minutes, the 5-hour window under 90%, the week within its pace, or under 98%, a sanity backup, while `~/.playground/usage-pace-off-until` holds a future ISO 8601 time with its zone,
    which the dispatcher writes on the owner's go (#i509) and the pass line names, a missing, empty, past or unreadable time leaving the pace on;
    a `usage.json` never written, as on a fresh install before the ops-usage job first runs, passes every start, its pass line reading `unread (usage.json not yet written)`, while one that exists still has to read, be fresh and be under its limits;
    each other login's `usage-<name>.json`, and each account login-flip probes by its reading in `login-flip.json`'s `seen`, takes the same checks, its reading valid for 60 minutes, a missing 5-hour window reading as no 5-hour limit;
@@ -45,7 +46,7 @@ Sessions run in bypass-permissions mode, yet some commands still prompt (`rm`, a
    A session that works with others opens as a full-height column to the right of the newest one in their workspace, never wrapped into a grid (the owner: "They can be horizontal because then we have much more estate.
    We don't need to wrap them around"): a worker's workspace reads worker | reviewer | tester, and the managers' reads `dispatcher` | `planner` | `builder` | `ops`.
    A session already running stays where it is until its next restart.
-   spawn.sh starts each as `env PLAYGROUND_ROLE=<role> claude -n <name> --model claude-opus-5-5 --effort high --settings $HOME/.playground/factory-settings-400k.json --dangerously-skip-permissions`:
+   spawn.sh starts each as `env PLAYGROUND_ROLE=<role> claude -n <name> --model claude-opus-5-5 --effort high --settings $HOME/.playground/factory-settings-400k.json --dangerously-skip-permissions` (a probe's file is `factory-settings-sandbox-400k.json`):
    every session starts at high effort; another effort is the owner's choice alone, which a lead sets with spawn.sh's `--effort` at a start or a resume, on the owner's word relayed in the **override** shape;
    every session runs on `models.default` (Opus) unless it starts with `--model` naming another of `models.claude` (Fable, Sonnet or Haiku by default; spawn.sh refuses any other id, `--model` beside `--backend glm`, and any but `models.checker` (Opus) for a reviewer or tester, whose verdict gates a merge, and records none of them,
    so a resume takes `--model` afresh and one without it runs on Opus) or with `--backend glm` (below) (the owner, 8 Oct: "Don't use Sonnet, use Opus X High for research and everything.
@@ -91,13 +92,13 @@ Sessions run in bypass-permissions mode, yet some commands still prompt (`rm`, a
    On a Mac whose inscope exports a workspace's own `CLAUDE_CONFIG_DIR` (its `inscope.zsh` names it, or `INSCOPE_CCD` is set), it launches with `env -u CLAUDE_CONFIG_DIR -u INSCOPE_CCD`, where a session would otherwise start with no login, and reads the live sessions and the roster under `~/.claude`; elsewhere it leaves the environment as it is.
 
    `--account <email>`, with any mode and anywhere among its words, has the session log in as that Claude account: the lead names it to pin a login (`spawn.sh resume dispatcher <dir> <session-id> --account <email>`, `spawn.sh worker <name> <brief> --title "<title>" --in <dir> --account <email>`), and a running session never switches accounts by itself.
-   spawn.sh refuses, before any cmux call, an email that is not a plain `local@domain`, the machine's own login (`oauthAccount.emailAddress` in Claude Code's `.claude.json`, under `$CLAUDE_CONFIG_DIR` else in `~`, matched in any case), since a session on it would share that login's usage while `--account` skips the usage check, and one with no item in the Keychain under `usage.keychainService`,
+   spawn.sh refuses, before it opens a pane, an email that is not a plain `local@domain`, the machine's own login (`oauthAccount.emailAddress` in Claude Code's `.claude.json`, under `$CLAUDE_CONFIG_DIR` else in `~`, matched in any case), since a session on it would share that login's usage while `--account` skips the usage check, and one with no item in the Keychain under `usage.keychainService`,
    checking only that the item exists.
    It also refuses an `--account` whose week a reading names at 100% (`usage.json`, `ops/usage/stored-login.json` or a `usage-<name>.json`, until its `resets_at`), naming the account and its reading, in any mode, a resume included.
-   The launch then starts with `CLAUDE_CODE_OAUTH_TOKEN="$(security find-generic-password -s <usage.keychainService> -a <email> -w)"` as text, so the new pane's own shell reads the token into the session's environment and it never reaches cmux's argv, spawn.sh's output, the roster or a log; a read that comes back empty stops the pane there, before claude runs, naming the save-it-again command.
+   The launch then starts with `CLAUDE_CODE_OAUTH_TOKEN="$(security find-generic-password -s <usage.keychainService> -a <email> -w)"` as text, so the new pane's own shell reads the token into the session's environment and it never reaches herdr's argv, spawn.sh's output, the roster or a log; a read that comes back empty stops the pane there, before claude runs, naming the save-it-again command.
    With no `--account`, spawn.sh picks among the machine's own login (the one in `.claude.json`'s `oauthAccount`, judged by `usage.json`, or by `ops/usage/stored-login.json` while `usage.json` reads the factory account, which then counts as another login), each other login with a `usage-<name>.json`, and each account login-flip probes with a reading in `login-flip.json`'s `seen`,
    keeping those that pass the usage gate.
-   It takes the one next in the account split: `ops/usage/login-flip.json`'s `split.shares`, each account's week left per hour to its week reset or, for an ending account, 2 hours before its end, whichever comes first, read when under 30 minutes old (two of the ops tick's 15-minute beats).
+   It takes the one next in the account split: `ops/usage/login-flip.json`'s `split.shares`, each account's week left per hour to its week reset or, for an ending account, 2 hours before its end, whichever comes first, a fifth of that for an account whose row sets `own` while that deadline is over a day away, read when under 30 minutes old (two of the ops tick's 15-minute beats).
    The pick is a smooth weighted round robin: each start adds every passing login's share to its credit in `ops/usage/split-picks.json`, takes the highest, and takes the shares' sum off it.
    With no fresh split, or none of it passing, it takes the one with the lowest week.
    It prints `no --account, so it starts on <email>, next in the account split (<share>% of new sessions)` (or `the login with the most room this week`) when that is another login, which then starts on it as `--account <email>` would, and `so it stays on <email>` when it is the machine's own.
@@ -150,7 +151,8 @@ Sessions run in bypass-permissions mode, yet some commands still prompt (`rm`, a
    `--settings` adds the factory's own hooks, such as the `no-playground-leak` hook (**classified**), on top of the owner's settings, wherever the session works;
    `scripts/link-skills.sh` links that file to the checkout's `scripts/factory-settings.json`, whose hooks find the main checkout through `PLAYGROUND_REPO`, which spawn.sh exports to every session it starts, so they run wherever the session works.
    A session gets exactly one `--settings`, since Claude Code keeps only the last one given, and anything extra is merged into that file, as a GLM launch merges its telemetry off.
-   Every launch merges its compact window (**context**): spawn.sh rebuilds the linked file on each launch into `factory-settings-400k.json` for every kind, `factory-settings-glm-400k.json` on GLM, so a resume keeps the same window.
+   Every launch merges its compact window (**context**): spawn.sh rebuilds the linked file on each launch into `factory-settings-400k.json` for every kind but a probe, `factory-settings-glm-400k.json` on GLM, so a resume keeps the same window.
+   A probe takes `factory-settings-sandbox-400k.json` (`factory-settings-glm-sandbox-400k.json` on GLM), the same file plus Claude Code's sandbox around its shell commands (scripts/README.md, spawn.sh).
    cmux restores a session after a restart without `--settings` or the role: Claude Code loads `.claude/settings.json` from the session's own folder, and in a checkout whose settings carry the same hooks they load from there and read the role from the session's name, but anywhere else (a work-org checkout, an older checkout, a subfolder) nothing does,
    so a factory session cmux restores where its own folder's `.claude/settings.json` lacks them is respawned from its handoff through spawn.sh, never left running as restored.
    Every Ops sweep runs `python3 -I <main checkout>/scripts/ops/up.py --sessions`, which names each one (and none once each is respawned), and sends each to the one it reports to (a checker's or probe's spawner; the dispatcher's goes to Ops), which respawns it, since a live session keeps its name:
@@ -166,26 +168,43 @@ Sessions run in bypass-permissions mode, yet some commands still prompt (`rm`, a
    apart from the one at a worker's end (LIFECYCLE.md), which prompts once, the **signal** rule, a literal absolute path for `gh --body-file`, since `no-playground-leak` and `no-release-comment` each refuse a path built from a shell variable,
    that a worker starts its fixture stack outside run-slot, only while it takes shots, since a command that never exits would hold a slot until it is stopped (**slots**), that a multi-stack ask (a bisect, an A/B) builds one stack at a time, and the **writing** rule: load writing-for-agents with the Skill tool before writing any agent-facing doc, a handoff included.
    A worker's brief says that any change under `web/next/`, a docs `.mdx` included, gets its tester's drive, posted as a `## TesterBot · PASS at <sha7>` comment.
+   A guard's plan and its brief (a hook or a gate that refuses calls) each name its threat model as a closed list of literal forms (for a path guard: an Edit or Write tool call on the path, and a shell write, copy, move or delete that names the path literally),
+   say plainly that a same-user session can still get past the guard by a form outside that list, and hold a Done when that names only forms from that list.
+   A guard's brief tells its worker that it, and every harness it starts, tests each form only as data, through the hook's own `check()` or test entry point, and runs no recursive-delete form at all, since a form can name a path outside HOME, so pointing HOME at a scratch folder contains nothing.
+   A loosening's plan and brief name the one class of forms it lets run, and every other form keeps canary's verdict, as `tests/scripts/hooks/refused-forms.test.ts` checks row by row.
+   By round 3 on that guard, or at its reviewer's ask for a scope ruling, the lead narrows the PR to that list or moves the protection to a layer that parses no shell, since a guard asked to stop every form never closes: on 1 Nov one ran 16 rounds over 299 minutes, each finding one more shell form, then shipped refusing read-only awk.
    A worker starts its checkers in one step, once its PR's head is ready (its checks green at it): its reviewer always, and its tester (`bun run name tester`) with it when a tester's drive is due, since a reviewer started later left heads waiting over an hour; ops-sweep tells the worker's lead of a head ready 20 minutes with no review round and no live reviewer.
    Done when both are briefed, or the reviewer alone for a PR with no `web/next/` change.
    A worker's brief says that before a push it runs only the touched tests, the list `extensions/core/skills/code-review-loop/scripts/state.py touched-tests <worktree> origin/canary HEAD` writes to a file it checks is non-empty before passing it to xargs (code-review-loop's two steps), and check-types, through run-slot, and leaves the full suite to GitHub Actions,
    whose `Audit, Lint, and Build` and `test` checks gate the head (**ci**).
    A worker's brief says that a PR holding a long-lived connection (a socket, a pub/sub subscriber, a retrying client) puts code-review-loop's lifecycle table in its Evidence before round 1, one row per path from connect to close.
+   A worker's brief says that a PR loosening a guard puts code-review-loop's refusal table in its Evidence before round 1: a `canary | head` row for each row it adds to `tests/scripts/hooks/fixtures/refused-forms.ts` or names in its `ALLOWED` list, and the refused-forms test's pass count at canary and at the head for the rest.
+   It also says that before each review round the worker sweeps: it runs canary's hook and the head's hook over that fixture plus forms of its own around the loosened class (a `source`, a function or alias defined in the same call, a name hashed in the same call), and fixes each form outside the class whose verdict differs, pinning each one canary refuses as a fixture row,
+   since on 2 Nov the one hook PR that swept about 75 forms before round 3 found three classes there that the reviewer would otherwise have found one a round.
+   The sweep is done when every form it ran outside the class gets canary's verdict at the head under review.
+   The body labels both counts apart: the refused-forms test's own result as `refused-forms.test.ts: N/M` passing, and the sweep harness's form count as forms swept, since on 2 Nov a body gave a harness's 1,248 forms as the test's pass count and round 1 filed it as a should-fix.
    A worker's brief says that CI starts only on a pull request into `canary`, so the worker opens its draft PR before it waits on CI, cites a run by its run id or link, and records its branch on the roster at its first push (ROSTER.md's It pushes its branch), so ops-sweep tells its lead when the branch goes 15 minutes with no PR.
    A worker's brief says that a docs-only worktree still runs `bun install` through run-slot before its first commit, since lefthook's hook runs the worktree's own `node_modules/.bin/lefthook` and the commit stops without it, while a review worktree that only reads needs no install.
    It also says that after a merge of canary that moves a path a test fixture uses, the worker points the fixture's reader at a missing path, confirms each fixture-reading case goes red, then restores the reader with `git checkout --`, since a reader that fails open passes a fixture at the old path.
-   It also says that a worker that merges `canary` or its stack's parent into its PR keeps the merge commit a plain merge, holding its conflict resolutions alone, and lands each edit after it as a commit of its own, since code-review-loop scores an edit inside a merge as blocking, and that a stacked child merges its parent in once, by DISPATCH.md's bundles.
+   It also says that a worker that merges `canary` or its stack's parent into its PR keeps the merge commit a plain merge, holding its conflict resolutions alone, and lands each edit after it as a commit of its own, since code-review-loop scores an edit inside a merge as blocking, and that a stacked child takes its parent's final head, by DISPATCH.md's bundles.
+   It also says that a stacked child retargeted to `canary` after its parent merges pushes a merge of `canary` before it asks for review, since on 2 Nov GitHub kept one retargeted PR CONFLICTING with no CI run while a local `git merge-tree` was clean, and only a push made it recompute.
    A lead's instruction or a reviewer's brief leaves any raise of a ratchet, or bend of a check whose own rule says it never rises, to that rule's owner, asked on the PR or directly, before the code relies on it, and lists one as agreed only with the owner's words quoted (23 Oct: a raise a brief listed as agreed reached 5/5, and the code owner blocked it).
    A worker started `--in` another repository takes that folder's MCP tools, so its brief names the capability it needs (search Slack, read Datadog logs) and has the worker find the tool with its own `ToolSearch` (21 Oct: a brief named a Slack tool by the factory's own server, and the worker found it under its folder's server).
    A worker briefs its checker by filling a template: it copies `~/.playground/handoffs/new-reviewer.md`, or `new-tester.md` for a Playground PR, to a file of its own under `~/.playground/`, since the linked template is the main checkout's file, fills each slot and passes that file to spawn.sh as `<brief>`.
    The fill rule: a slot is a word of capitals and digits with two underscores on each side, in backticks since the formatter turns a bare one bold, such as `__NAME__` for the session's own name, and a fill replaces those tokens alone.
    So `<owner>/<name>` and every other angle-bracket word stays as written for the reader (22 Oct: a fill of `<name>` by `sed` also rewrote `--repo <owner>/<name>`), and a brief or template that names a token in its own text spells it in words (two underscores, NAME, two underscores), so a fill leaves that text alone.
+   Fill the brief and read it back in one call, then run spawn.sh in a later call, once the read shows every slot filled: spawn.sh refuses a brief still holding a slot of its role's template, naming each one, and a fill a hook refused in the same batch as the spawn would leave one.
    The template points at code-review-loop, dev and ui-verify for every step, so the filled brief adds only what its PR needs beyond them.
+   The reviewer template's `__SPEC__` slot, under its This PR heading, holds the PR's scope as the lead ruled it, the bar the review scores against and any harness the reviewer re-runs, so the reviewer scores the ruled scope rather than the issue's first Done when.
+   Fill it from the lead's ruling and the PR body's scope, and where the lead ruled nothing beyond the ticket, say so.
+   Unlike the other slots, the `__SPEC__` fill replaces the backticked token together with its backticks, since the spec runs to paragraphs that inline code would break; the template keeps the backticks only so the slots test, which wants every slot backticked, stays green.
+   Done when the filled brief's This PR section names the scope, the bar and the harness, or that there is none, with no `__SPEC__` token left.
+   The tester template carries no such slot, since a tester drives the diff's surfaces for CI and posts PASS or FAIL, not a score against the scope.
    A probe's brief adds that it ends by telling its spawner it is done, so the spawner closes its surface (End).
    A brief that has a script written for `/bin/bash` keeps it to macOS's bash 3.2.57, which stops on a fractional `read -t 0.5` (`invalid timeout specification`): wait in whole seconds (`read -t 1`), or run the script under zsh or bun.
    A rule that changes while a checker is live goes to it at once from its worker's lead by `SendMessage`, as an addition to its brief, since a checker that never heard of the change scores it as a finding (12 Oct).
-4. Record a cmux session's start with its `workspace` and `surface` (a herdr session records neither: its pane's label finds it) ([ROSTER.md](ROSTER.md); a session respawned after a cmux restore, by the respawned-session row, which keeps the entry's work).
-   spawn.sh records the refs; a worker that spawned a checker or a probe sends the Builder its name and both refs, and adds `pr=<its PR's URL>` to a checker's entry beside the `worker=` spawn.sh wrote, which the Dashboard nests it under its worker by.
+4. Record the start by [ROSTER.md](ROSTER.md)'s start rows (a session respawned after a cmux restore, by the respawned-session row, which keeps the entry's work).
+   A worker that spawned a checker or a probe sends the Builder its name, and adds `pr=<its PR's URL>` to a checker's entry beside the `worker=` spawn.sh wrote, which the Dashboard nests it under its worker by.
 
 Send the brief with `notify_when_idle: true`, so its next idle arrives as a notice.
 Done when `ListAgents` shows the session busy on the brief and the roster shows the task.
@@ -252,26 +271,28 @@ Done when the after-file holds the change, or, after a restore, the third file p
 
 ## Answer a permission prompt
 
-A manager answers the permission prompt its session's stuck alert names, by the key the alert gives its call (**unstick**):
+A manager answers the permission prompt its session's stuck alert names, by the key the alert gives its call (**unstick**), the session-state hook's alert or ops-unstick's alike:
 
 ```bash
 playground picker <session> allow <key>
 playground picker <session> deny <key> "<why, and the simpler shape to run instead>"
 ```
 
-Allow presses Yes once in a herdr pane whose prompt shows that call, a subagent's command included, or answers a cmux session's Feed permission for it once; deny presses No (Escape) or denies it, and the relay sends the session the reason.
+Allow presses Yes once in the session's herdr pane while its prompt shows that call, a subagent's command included; deny presses No (Escape), and the relay sends the session the reason.
 Each answer is a line in `ops/picker.log`: the time, the manager, the answer, the session and the command's first 120 characters.
-Done when it prints that line; it refuses any caller but the session's manager or the primary dispatcher, a deny with no reason, a dispatcher's session, and a key no waiting call or shown prompt matches, which means the prompt changed: wait for its next alert.
-On herdr it also refuses a prompt that may be another waiting call's, as a subagent's file or URL prompt always is while its parent waits: deny that one by hand with Escape (below) and a `SendMessage` of the reason, or take it to the dispatcher.
-
-By hand, Escape is the one key a session presses in another's pane: it types no text, so it says nothing in the owner's name (the pane-typing test in `tests/api/hono/src/lib/dashboard/cmux.test.ts` allows this line alone).
+Done when it prints that line; it refuses any caller but the session's manager or the primary dispatcher, a deny with no reason, a dispatcher's session, a session in no herdr pane, and a key no waiting call or shown prompt matches, which means the prompt changed: wait for its next alert.
+An ops-unstick alert that says picker cannot answer the prompt found no waiting call surely its own, and names the close and resume below.
+Picker also refuses a prompt that may be another waiting call's, as a subagent's file or URL prompt always is while its parent waits.
+A herdr pane takes no key from your hand, since `no-raw-spawn` refuses every herdr call but a read, so end that prompt by a close and a resume under the session's name:
 
 ```bash
-cmux send-key --workspace workspace:N --surface surface:N escape
+"${PLAYGROUND_REPO:?}/scripts/spawn.sh" close <session>
+# the exec line ~/.playground/resume/<session>.sh holds, whole but its exec, so the session keeps its account, model and effort
+<that line> --brief <a file under ~/.playground of the reason and the simpler shape to run>
 ```
 
-Then `SendMessage` the session the plain commands to run in place of the one that prompted.
-Done when `read-screen` shows the prompt gone and the session working.
+The session comes back by its session id with its transcript, and the prompted call never runs.
+Done when the session works again from its brief.
 
 ## Keep the sweep running
 
@@ -302,20 +323,13 @@ Done when every wait ends on a signal and every gap you name is checked against 
 ## Answer a picker
 
 Sessions in the chain ask by `SendMessage`.
-A picker that shows anyway (a skill's own `AskUserQuestion`) is answered through the Feed:
+A picker that shows anyway (a skill's own `AskUserQuestion`) sits in a herdr pane, which takes no key from your hand, as Answer a permission prompt says:
 
-```bash
-cmux rpc feed.list '{"pending_only":true}'
-cmux rpc feed.question.reply '{"request_id":"<id>","selections":["<label>"]}'
-```
+- When a rule or a sound default decides it, end it by that section's close and resume, with a brief that gives the answer.
+- When only the owner decides it, give the resume brief the choice to post as an Inbox decision (**ask**), so the session carries on.
+- When the owner is answering the picker in that pane or on the Dashboard, leave it to the owner and wait for the session's report.
 
-- One string per question, each an exact option label; a multi-select joins its labels with `, `.
-  An unmatched string goes through as free text, so a typo becomes a real answer.
-- A Feed item maps to its session by the base64 session id at the end of its `workstream_id`: `cmux sessions list --session <id> --json`.
-- `"delivered": true` prints even for a made-up id.
-  Done only when `read-screen` shows the picker gone.
-- The Feed gives up after 120s. After that the picker is the owner's to answer in that pane, where the dashboard shows the session as Stuck (only Playground's own row reads Waiting on you): file nothing, and type nothing, since keys typed into a pane read as his.
-- When the owner is answering the picker in that pane himself, leave it to him and wait for the session's report.
+Done when the session's state record reads `working` with `at` after the resume, or the owner has the picker.
 
 ## End
 

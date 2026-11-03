@@ -55,9 +55,11 @@ Core's own skills; the rest are in [Skills and orgs](web/next/content/docs/skill
 
 Model- or user-reachable.
 
+- **[agent-desktop](./extensions/core/skills/agent-desktop/SKILL.md)**: Operate a desktop app through the agent-desktop CLI: check its install and macOS grants and stop with the one action needed when either is missing, load the binary's own docs, stay headless, leave the owner's own apps alone, and keep desktop content out of every outward write.
 - **[code-review-loop](./extensions/core/skills/code-review-loop/SKILL.md)**: Review one PR as its reviewer session, round by round until 5/5: core's code-review on two axes (the right thing, built well), a score out of 5 checked against the ticket, inline comments, a re-review on every push, its own threads resolved, and a fresh full read before the last 5/5. Its recovery scan lists the open PRs whose head nobody has scored.
 - **[playbook](./extensions/core/skills/playbook/SKILL.md)**: Run Playground's factory of herdr sessions by one set of rules: the roles (the dispatcher, the Planner, the two leads Builder and Ops, the Optimizer, workers with their reviewers and testers, runners, probes), who reports to whom, how work is routed and bundled, how sessions start and end, the leads' sweep, and the standing rules every session keeps.
 - **[pr](./extensions/core/skills/pr/SKILL.md)**: Use when writing a PR body.
+- **[shell-pane](./extensions/core/skills/shell-pane/SKILL.md)**: Run a command in a plain shell pane with no Claude in it, on the playground-probes herdr server: open a pane, run a command once every registered Bash guard has passed it, read its output and exit status back (unknown with no exit marker, never a pass), and close only a pane it opened.
 - **[to-inbox](./extensions/core/skills/to-inbox/SKILL.md)**: Write an Inbox item the owner reads at a glance: a picture of the point first (a diff, an ASCII drawing, before and after shots, or an HTML demo page), then emoji bullets in ASD-STE100 plain English, one callout when a fact must not be missed, and what Approve does. Every factory session loads it before `playground ask new`.
 
 ### User-invoked

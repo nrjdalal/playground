@@ -31,8 +31,8 @@ const step = async (record: string) => {
 }
 
 describe("pre-commit's dev-stack step", () => {
-  // a fresh worktree has no packages/*/dist, and the step runs before the build that makes them
-  test("imports no workspace package", async () => {
+  // a fresh worktree has no packages/*/dist, and the step runs before the build that makes them; safe-delete's bun export is its own source, which imports node: built-ins alone, so it loads unbuilt
+  test("imports no workspace package but safe-delete", async () => {
     const reached: string[] = []
     const built = await Bun.build({
       entrypoints: [join(ROOT, SCRIPT)],
@@ -40,7 +40,7 @@ describe("pre-commit's dev-stack step", () => {
         {
           name: "workspace-packages",
           setup(build) {
-            build.onResolve({ filter: /^@packages\// }, ({ path }) => {
+            build.onResolve({ filter: /^@packages\/(?!safe-delete$)/ }, ({ path }) => {
               reached.push(path)
               return { external: true, path }
             })

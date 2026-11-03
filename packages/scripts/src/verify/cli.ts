@@ -1,7 +1,7 @@
 import "@packages/env/aliases"
 import { mkdir } from "node:fs/promises"
 import { tmpdir } from "node:os"
-import { join, resolve } from "node:path"
+import { join } from "node:path"
 import { parseArgs } from "node:util"
 
 import { withPortlessCa } from "../portless-ca"
@@ -17,6 +17,7 @@ import {
   cursor,
   dashboardSocket,
   ended,
+  fixtureDirOf,
   fixtureOnly,
   health,
   type Label,
@@ -448,14 +449,9 @@ const layoutShifts = (at: Target, inAll = false) =>
 // The phone's width as well as the dashboard's, since the composer and the stream share a short screen there.
 const CHAT_VIEWPORTS = [VIEWPORTS[0]!, { height: 844, width: 390 }]
 
-// The fixture's scratch folder the reply checks write to, as the launcher names it (fixtureDir in api/hono/src/lib/dashboard/fixture.ts): only this checkout's own stack's, so a stack named by --web and --api skips them.
+// The fixture's scratch folder the reply checks write to (fixtureDirOf): only this checkout's own stack's, so a stack named by --web and --api skips them.
 const ROOT = join(import.meta.dir, "../../../..")
-const fixture =
-  values.web || values.api
-    ? null
-    : process.env.PLAYGROUND_FIXTURE_DIR
-      ? resolve(ROOT, process.env.PLAYGROUND_FIXTURE_DIR)
-      : join(ROOT, ".turbo/dashboard-fixture")
+const fixture = values.web || values.api ? null : fixtureDirOf(process.env, ROOT)
 
 const sendTops = (at: Target) =>
   guard("send-top", async () => {

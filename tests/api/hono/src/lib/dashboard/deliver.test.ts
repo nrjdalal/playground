@@ -183,6 +183,9 @@ describe("refusal", () => {
     ).toMatchObject({ code: "TOO_LONG" })
     expect(refusal("/clear")).toMatchObject({ code: "COMMAND" })
     expect(refusal("!rm -rf build")).toMatchObject({ code: "COMMAND" })
+    expect(refusal("!rm -rf build")?.reason).toContain(
+      "Type a ! command in the dispatcher's terminal window.",
+    )
   })
 
   test("the composer's paste rule holds the same caps, so a long paste goes as a file and his words alone are judged", () => {

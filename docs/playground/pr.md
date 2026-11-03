@@ -58,4 +58,4 @@ Nothing in the template: it is settled by the owner, and [code-review-loop](./co
 
 ## Where it fits
 
-Every skill that opens a PR leans on it: triage-and-implement, in the org's extension, writes its PR bodies with it, and [code-review-loop](./code-review-loop.md) reads a body against it before it scores.
+Every skill that opens a PR leans on it: an org's ticket skill, in its extension, writes its PR bodies with it, and [code-review-loop](./code-review-loop.md) reads a body against it before it scores.

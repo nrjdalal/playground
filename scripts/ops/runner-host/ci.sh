@@ -20,7 +20,7 @@ PROGRESS=${RUNNER_HOST_PROGRESS:-300}
 # temporary suffix), so a $HOME up to 37 characters fits
 mkdir -p -m 700 "$HOME/.ssh"
 SSH=(ssh -i "$KEY" -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o BatchMode=yes -o ConnectTimeout=15 -o ServerAliveInterval=15
-  -o ControlMaster=auto -o ControlPersist=60 -o "ControlPath=$HOME/.ssh/lm-%C" "root@$IP")
+  -o ControlMaster=auto -o ControlPersist=60 -o "ControlPath=$HOME/.ssh/pg-%C" "root@$IP")
 new_run() { RUN=${1:0:12}-$(LC_ALL=C tr -dc 'a-z0-9' < /dev/urandom | head -c 6); }
 upload() {
   # a new copy replaces the old by a rename, since bash reads a running script as it goes

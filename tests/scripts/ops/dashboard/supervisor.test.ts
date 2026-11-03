@@ -1,5 +1,14 @@
 import { afterAll, describe, expect, test } from "bun:test"
-import { chmodSync, existsSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from "node:fs"
+import {
+  chmodSync,
+  existsSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+} from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -889,6 +898,8 @@ bun() {
     "install --frozen-lockfile") echo "NODE_ENV=\${NODE_ENV:-} SKIP_ENV_VALIDATION=\${SKIP_ENV_VALIDATION:-}" >> ${kept}/installs
       ! listed install-fails ;;
     "run dev") echo "dev" >> ${keptCalls} ;;
+    "build packages/scripts/src/portless.ts") echo "launcher $(git rev-parse --short HEAD)" > "\${4#--outfile=}" ;;
+    "--no-env-file "*/trash-build.ts) echo "trash $(basename "$3")" >> ${keptCalls}; [ ! -e ${kept}/trash-refuses ] || return 1; mkdir -p ${kept}/trashed; mv "$3" ${kept}/trashed/ ;;
   esac
 }
 alive() { kill -0 "$(cat "$S/$1.pid" 2>/dev/null)" 2>/dev/null; }
@@ -902,6 +913,8 @@ ROUTE_SETTLE=0
 check_dev() { local p i; p=$(cat "$S/dashboard-dev.pid"); for i in $(seq 1 100); do kill -0 "$p" 2>/dev/null || break; sleep 0.05; done; listed verify-fails && { echo "verify=FAIL"; return 1; }; echo "verify=PASS"; }
 start_follower() { :; }; check_follower() { echo "follower=running"; }; setup_pending() { return 1; }
 ${fn("behind")}
+${fn("trash_build")}
+${fn("set_aside")}
 ${block("dev_reason")}
 ${block("reload_if")}
 ${block("finish_roll")}
@@ -947,6 +960,12 @@ describe("the supervisor's production build", () => {
     expect(await keptLines(/^result /)).toEqual([
       `result START ${short(c2)} PASS verify=PASS follower=running`,
     ])
+  })
+
+  test("a build keeps its head's own web launcher beside it, bundled into one file", async () => {
+    fresh()
+    expect((await keptRun("roll_up START", c2)).code).toBe(0)
+    expect(await Bun.file(join(builds, c2, "launcher.js")).text()).toBe(`launcher ${short(c2)}\n`)
   })
 
   test("a build reads the Dashboard's URLs and needs no server secret, since a first run's .env holds none yet", async () => {
@@ -1000,11 +1019,33 @@ describe("the supervisor's production build", () => {
       `say rebuilding ${short(c1)}: its build was for http://playground.localhost:1355 http://api.playground.localhost:1355, the Dashboard is now on ${WEB} ${API}`,
     ])
     expect(await keptLines(/^(build|serve)/)).toEqual([`build ${short(c1)}`, `serve ${c1}`])
+    expect(await keptLines(/^trash /)).toEqual([
+      expect.stringMatching(new RegExp(`^trash ${c1}\\.aside-\\d+$`)),
+    ])
   })
 
-  test("a pass keeps its own build and the last one that passed before it, and removes the rest", async () => {
+  test("a rebuild whose old folder the trash refuses still serves, keeps the head out of bad-builds, and leaves the old folder aside for keep_builds", async () => {
     fresh()
-    for (const name of ["a", "b", "c"]) Bun.spawnSync(["mkdir", "-p", join(builds, name)])
+    expect((await keptRun("roll_up START", c1)).code).toBe(0)
+    await Bun.write(join(builds, c1, "urls"), "http://elsewhere http://elsewhere\n")
+    await Bun.write(join(kept, "trash-refuses"), "")
+    rmSync(keptCalls)
+    expect((await keptRun("roll_up START", c1)).code).toBe(0)
+    rmSync(join(kept, "trash-refuses"))
+    expect(await keptLines(/^(build|serve)/)).toEqual([`build ${short(c1)}`, `serve ${c1}`])
+    expect(await Bun.file(join(builds, c1, "urls")).text()).toBe(`${WEB} ${API}\n`)
+    const aside = readdirSync(builds).filter((name) => name.startsWith(`${c1}.aside-`))
+    expect(aside).toHaveLength(1)
+    const bad = join(kept, "bad-builds")
+    expect(existsSync(bad) ? readFileSync(bad, "utf8") : "").not.toContain(c1)
+    expect((await keptRun(`keep_builds ${c1}`, c1)).code).toBe(0)
+    expect(readdirSync(builds).filter((name) => name.startsWith(`${c1}.aside-`))).toEqual([])
+  })
+
+  test("a pass keeps its own build and the last one that passed before it, and moves the rest to the trash, a stray aside included", async () => {
+    fresh()
+    for (const name of ["a", "b", "c", "c.aside-1"])
+      Bun.spawnSync(["mkdir", "-p", join(builds, name)])
     await Bun.write(join(builds, "passed"), "b\n")
     expect((await keptRun("keep_builds c", c2)).code).toBe(0)
     expect(Bun.spawnSync(["ls", builds]).stdout.toString().trim().split("\n")).toEqual([
@@ -1012,6 +1053,7 @@ describe("the supervisor's production build", () => {
       "c",
       "passed",
     ])
+    expect(await keptLines(/^trash /)).toEqual(["trash a", "trash c.aside-1"])
     expect(await Bun.file(join(builds, "passed")).text()).toBe("c\n")
   })
 })
@@ -1051,6 +1093,13 @@ describe("the supervisor's build before the stop (#122)", () => {
     ])
     expect(existsSync(join(kept, "staging"))).toBe(false)
     expect(worktrees()).toBe(1)
+  })
+
+  test("the target's build keeps the target's own web launcher, bundled in the staging worktree while the checkout is still on the head before", async () => {
+    fresh()
+    const rolled = await prebuiltRun(`running=${c1}; roll_to ${c2} canary; echo "$running"`, c1)
+    expect(rolled).toEqual({ code: 0, out: c2 })
+    expect(await Bun.file(join(builds, c2, "launcher.js")).text()).toBe(`launcher ${short(c2)}\n`)
   })
 
   test("the staging install runs without the supervisor's NODE_ENV, so bun installs the dev dependencies the build needs", async () => {
@@ -1225,6 +1274,48 @@ describe("the supervisor's web swap (#122)", () => {
   })
 })
 
+// The real web_up and swap_web: a stand-in bun on PATH records the launcher the new web is exec'd through, and curl answers 200 at once
+describe("the web a swap starts runs the target head's launcher", () => {
+  const swapped = async (withLauncher: boolean) => {
+    fresh()
+    const bin = join(kept, "bin")
+    const cwd = join(kept, "checkout")
+    Bun.spawnSync(["mkdir", "-p", bin, join(cwd, "web", "next"), join(builds, c2)])
+    await Bun.write(join(bin, "bun"), `#!/bin/sh\necho "launch $1" >> ${keptCalls}\n`)
+    chmodSync(join(bin, "bun"), 0o755)
+    if (withLauncher) await Bun.write(join(builds, c2, "launcher.js"), "")
+    await Bun.write(join(kept, "dashboard-web.pid"), `${process.pid}\n`)
+    const proc = Bun.spawn(
+      [
+        "bash",
+        "-c",
+        `D=${dashboardDir} S=${kept} LOG=${kept}/supervisor.log WEB=${WEB} ROUTE_SETTLE=0
+say() { echo "say $*" >> ${keptCalls}; }; bun() { echo 5101; }; curl() { echo 200; }
+alive() { [ "$1" = dashboard-web ]; }; web_route() { :; }; web_stop() { :; }
+${upto("launcher")}
+${upto("web_up")}
+${block("swap_web")}
+swap_web ${c2}`,
+      ],
+      { cwd, env: { ...process.env, PATH: `${bin}:${process.env.PATH}` }, stdout: "pipe" },
+    )
+    expect(await proc.exited).toBe(0)
+    for (let i = 0; i < 200 && (await keptLines(/^launch /)).length === 0; i++) await Bun.sleep(25)
+    return keptLines(/^(launch|say the build)/)
+  }
+
+  test("through the launcher kept with the target's build", async () => {
+    expect(await swapped(true)).toEqual([`launch ${join(builds, c2, "launcher.js")}`])
+  })
+
+  test("through the checkout's portless.ts, with a line saying why, for a build that keeps none", async () => {
+    expect(await swapped(false)).toEqual([
+      `say the build of ${short(c2)} keeps no launcher; its web starts through the checkout's portless.ts`,
+      "launch ../../packages/scripts/src/portless.ts",
+    ])
+  })
+})
+
 // First run's setup writes POSTGRES_URL into the checkout's .env; until then the follower, which validates it at once, would exit on every tick (#31).
 describe("the follower before first run's setup (#31)", () => {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), "supervisor-setup-")))
@@ -1380,4 +1471,50 @@ describe("the supervisor's alias check", () => {
     const reader = await Bun.file(join(root, "scripts", "ops", "dashboard", "alias.ts")).text()
     expect(reader).not.toMatch(/Bun\.write|writeFile|\.kill\(|process\.kill|spawn/)
   })
+})
+
+// trash_build through the real trash-build.ts, on a HOME of the test's own: a folder in its builds folder goes to that HOME's trash under the dashboard-supervisor carve-out, and the staging folder beside it is refused, stays, and is named in the log and to the dispatcher's outbox
+describe("trash_build", () => {
+  const home = join(scratch, "trash-home")
+  const state = join(home, ".playground", "ops", "dashboard")
+  const trashRun = async (path: string) => {
+    const proc = Bun.spawn(
+      [
+        "bash",
+        "-c",
+        `D=${join(root, "scripts", "ops", "dashboard")} LOG=${state}/supervisor.log\n${fn("say")}\n${fn("trash_build")}\ntrash_build "${path}" "a test"`,
+      ],
+      {
+        env: { ...process.env, HOME: home, PLAYGROUND_DATA_DIR: join(home, ".playground") },
+        stderr: "pipe",
+        stdout: "pipe",
+      },
+    )
+    return proc.exited
+  }
+
+  test("moves a build folder to the trash as dashboard-supervisor, and refuses the staging folder beside it", async () => {
+    const build = join(state, "builds", "abc")
+    const staging = join(state, "staging")
+    for (const dir of [join(build, "web"), staging]) Bun.spawnSync(["mkdir", "-p", dir])
+    await Bun.write(join(build, "urls"), "x\n")
+    await Bun.write(join(staging, "file"), "x\n")
+    expect(await trashRun(build)).toBe(0)
+    expect(existsSync(build)).toBe(false)
+    const trash = join(home, ".playground", "trash")
+    const [batch] = Bun.spawnSync(["ls", trash]).stdout.toString().trim().split("\n")
+    expect(batch).toMatch(/-dashboard-supervisor$/)
+    expect(await Bun.file(join(trash, batch!, "1", "abc", "urls")).text()).toBe("x\n")
+    expect(await Bun.file(join(trash, batch!, "manifest.jsonl")).text()).toContain(
+      '"carveOut":"dashboard-supervisor"',
+    )
+    expect(await trashRun(staging)).toBe(1)
+    expect(existsSync(join(staging, "file"))).toBe(true)
+    expect(await Bun.file(join(state, "supervisor.log")).text()).toContain(
+      `the trash refused ${staging}, so it stays`,
+    )
+    expect(
+      await Bun.file(join(home, ".playground", "ops", "outbox", "ops-safe-delete.jsonl")).text(),
+    ).toContain(`dashboard-supervisor: ${staging} is not directly in ${join(state, "builds")}`)
+  }, 30_000)
 })

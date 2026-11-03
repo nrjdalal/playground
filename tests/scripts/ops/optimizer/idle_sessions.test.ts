@@ -397,11 +397,15 @@ describe("prStateLive: the PR cache", () => {
     }
   }
 
-  test("a merged PR is read once and kept; a closed one is read again, since go.py reopens it", async () => {
+  test("a merged PR is read once and kept with its merged_at; a closed one is read again, since go.py reopens it", async () => {
     const cache = join(emptyDir(), "prs.json")
     const merged = reads([pull("closed", true)])
-    expect((await prStateLive(URL, 1_000, cache, merged.api))?.state).toBe("merged")
-    expect((await prStateLive(URL, 1_000_000, cache, merged.api))?.state).toBe("merged")
+    const first = await prStateLive(URL, 1_000, cache, merged.api)
+    expect(first?.state).toBe("merged")
+    expect(first?.mergedAt).toBe("2026-10-26T04:00:00Z")
+    const kept = await prStateLive(URL, 1_000_000, cache, merged.api)
+    expect(kept?.state).toBe("merged")
+    expect(kept?.mergedAt).toBe("2026-10-26T04:00:00Z")
     expect(merged.paths).toHaveLength(1)
 
     const other = "https://github.com/o/r/pull/2111"
