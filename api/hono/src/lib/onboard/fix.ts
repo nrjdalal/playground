@@ -6,6 +6,7 @@ import { makeScratch, removeScratch } from "@packages/safe-delete"
 import type { Context } from "hono"
 
 import { readsLive } from "@/lib/dashboard/fixture"
+import { serviceDir } from "@/lib/dev/proxy"
 import { ApiError } from "@/lib/error"
 import { FIX_IDS, type FixId, fixtureFixed } from "@/lib/onboard/fix-ids"
 
@@ -170,6 +171,9 @@ const PLANS: Record<FixId, ((has: (tool: string) => boolean, dir: string) => Ste
 
 const NAMES: Record<string, string> = { brew: "Homebrew", docker: "Docker" }
 
+// What macOS's window says the password is for, in place of its default "osascript wants to make changes".
+const PROMPT = `${site.name} sets up its web address on your Mac.`
+
 const shellWord = (word: string) => `'${word.replaceAll("'", `'\\''`)}'`
 
 // An admin step's line for macOS's administrator dialog, which runs it as root as sudo does in a terminal: osascript's do shell script, built from the step's fixed argv and this user's own home, ids and portless folder alone, each word single-quoted for the shell and the line escaped for AppleScript, so a home or folder holding a quote, a space or `$(...)` stays one literal word.
@@ -181,7 +185,8 @@ export const adminLine = (
   const vars = {
     HOME: user.homedir,
     PATH: "/usr/bin:/bin:/usr/sbin:/sbin",
-    PORTLESS_STATE_DIR: base.PORTLESS_STATE_DIR || join(user.homedir, ".portless"),
+    PORTLESS_PORT: "443",
+    PORTLESS_STATE_DIR: serviceDir(base.PORTLESS_STATE_DIR || join(user.homedir, ".portless")),
     SUDO_GID: String(user.gid),
     SUDO_UID: String(user.uid),
     SUDO_USER: user.username,
@@ -194,7 +199,7 @@ export const adminLine = (
   ]
     .map(shellWord)
     .join(" ")
-  return `do shell script "${line.replace(/[\\"]/g, (c) => `\\${c}`)}" with administrator privileges`
+  return `do shell script "${line.replace(/[\\"]/g, (c) => `\\${c}`)}" with prompt "${PROMPT}" with administrator privileges`
 }
 
 export const isFixId = (id: string): id is FixId => (FIX_IDS as readonly string[]).includes(id)

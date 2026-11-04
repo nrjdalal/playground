@@ -216,6 +216,7 @@ describe("each fix runs its fixed argv", () => {
       "-i",
       `HOME=${user.homedir}`,
       "PATH=/usr/bin:/bin:/usr/sbin:/sbin",
+      "PORTLESS_PORT=443",
       `PORTLESS_STATE_DIR=${join(user.homedir, ".portless")}`,
       `SUDO_GID=${user.gid}`,
       `SUDO_UID=${user.uid}`,
@@ -226,7 +227,7 @@ describe("each fix runs its fixed argv", () => {
       "install",
     ]
     expect(m.calls()).toEqual([
-      `osascript -e do shell script "${words.map((word) => `'${word}'`).join(" ")}" with administrator privileges`,
+      `osascript -e do shell script "${words.map((word) => `'${word}'`).join(" ")}" with prompt "Playground sets up its web address on your Mac." with administrator privileges`,
     ])
   })
 
@@ -248,8 +249,17 @@ describe("each fix runs its fixed argv", () => {
     expect(line).toStartWith("do shell script \"'/usr/bin/env' '-i' ")
     expect(line).toContain("'PORTLESS_STATE_DIR=/state'")
     expect(line).toEndWith(
-      ` '/a b/it'\\\\''s' 'say \\"hi\\" \\\\ bye'" with administrator privileges`,
+      ` '/a b/it'\\\\''s' 'say \\"hi\\" \\\\ bye'" with prompt "Playground sets up its web address on your Mac." with administrator privileges`,
     )
+  })
+
+  // #810 review: the service install reads its folder for a running proxy and stops it, so it runs on portless's own folder and 443, never the 1355 proxy's folder the clicking stack runs on
+  test("the administrator line installs into portless's own folder on 443, leaving the 1355 proxy's folder alone", async () => {
+    const { adminLine } = await import("../../../../../../api/hono/src/lib/onboard/fix")
+    const line = adminLine(["/x"], { PORTLESS_STATE_DIR: "/h/.portless/fallback" })
+    expect(line).toContain("'PORTLESS_STATE_DIR=/h/.portless'")
+    expect(line).toContain("'PORTLESS_PORT=443'")
+    expect(line).not.toContain("fallback")
   })
 
   // The home and portless folder are the only words in the administrator line that come from the environment: one holding a quote, a space and $(...) reaches the shell as one literal word, and runs nothing.
@@ -263,7 +273,8 @@ describe("each fix runs its fixed argv", () => {
       { PORTLESS_STATE_DIR: `${home}/.portless` },
       { gid: 20, homedir: home, uid: 501, username: "o'b" },
     )
-    const literal = /^do shell script "(.*)" with administrator privileges$/.exec(line)![1]!
+    const literal =
+      /^do shell script "(.*)" with prompt "[^"]*" with administrator privileges$/.exec(line)![1]!
     const shell = literal.replace(/\\(["\\])/g, "$1")
     const run = Bun.spawnSync(["/bin/sh", "-c", shell])
     expect(run.exitCode).toBe(0)
@@ -587,7 +598,9 @@ describe("the guards", () => {
     expect((await begin(app, "/fix/proxy")).status).toBe(202)
     expect((await settled(app, "/fix/proxy")).state).toBe("ok")
     expect(m.calls()).toEqual([
-      expect.stringMatching(/^osascript -e .* 'service' 'install'" with administrator privileges$/),
+      expect.stringMatching(
+        /^osascript -e .* 'service' 'install'" with prompt "[^"]*" with administrator privileges$/,
+      ),
     ])
   })
 

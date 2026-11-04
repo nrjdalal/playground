@@ -154,7 +154,7 @@ describe("proxyCheck", () => {
   })
 
   test("a proxy kept on a port of 1024 or above is ok, since it needs no sudo", async () => {
-    const check = proxyCheck("/h/playground", await proxyDown({}, portless("high", "1355"), silent))
+    const check = proxyCheck("/h/playground", await proxyDown({}, portless("high", "8443"), silent))
     expect(check.status).toBe("ok")
   })
 

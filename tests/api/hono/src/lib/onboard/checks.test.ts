@@ -286,7 +286,11 @@ describe("the rows the app cannot fix itself", () => {
       expect(await at([443])).toBe("not running")
       expect(await at([444])).toBe("ready")
       writeFileSync(join(dir, "proxy.port"), "1355\n")
-      expect(await at([])).toBe("not on 443")
+      expect(await at([])).toBe("not running")
+      expect(await at([1355])).toBe("not on 443")
+      expect(await at([1355, 443])).toBe("set up")
+      writeFileSync(join(dir, "proxy.port"), "8443\n")
+      expect(await at([8443])).toBe("ready")
     } finally {
       rmSync(dir, { force: true, recursive: true })
     }

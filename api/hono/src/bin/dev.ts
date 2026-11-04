@@ -20,7 +20,15 @@ import {
   type SettingsRead,
   syncAliases,
 } from "@/lib/dev/launch"
-import { FALLBACK_PORT, proxyDown, proxySetup, startFallback } from "@/lib/dev/proxy"
+import {
+  FALLBACK_PORT,
+  fallbackDir,
+  portlessDir,
+  proxyDown,
+  proxySetup,
+  serviceDir,
+  startFallback,
+} from "@/lib/dev/proxy"
 import {
   claimRecord,
   clearRecord,
@@ -125,14 +133,20 @@ if (!dry) {
     console.error(`dev: refusing to start: ${checked.refusal}`)
     leave(1)
   }
-  const down = await proxyDown(env)
+  const main = serviceDir(env.PORTLESS_STATE_DIR || portlessDir())
+  const down = await proxyDown(env, main)
   if (down !== null) {
-    const failed = await startFallback(join(ROOT, "node_modules/.bin/portless"), env)
+    const state = fallbackDir(main)
+    const failed = await startFallback(join(ROOT, "node_modules/.bin/portless"), {
+      ...env,
+      PORTLESS_STATE_DIR: state,
+    })
     if (failed) {
       console.error(`dev: refusing to start: ${proxySetup(down)} (on ${FALLBACK_PORT}: ${failed})`)
       leave(1)
     }
     env.PORTLESS_PORT = String(FALLBACK_PORT)
+    env.PORTLESS_STATE_DIR = state
     console.error(
       `dev: portless's proxy is not running on port ${down}, which needs your Mac's password, so it runs on ${FALLBACK_PORT}, which needs none; Settings' Things to fix sets up the web address on ${down}`,
     )

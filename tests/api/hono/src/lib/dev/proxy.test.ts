@@ -5,9 +5,11 @@ import { join } from "node:path"
 
 import {
   FALLBACK_PORT,
+  fallbackDir,
   listening,
   proxyDown,
   proxySetup,
+  serviceDir,
   startFallback,
 } from "../../../../../../api/hono/src/lib/dev/proxy"
 
@@ -35,21 +37,34 @@ describe("proxyDown", () => {
     expect(await proxyDown({}, saved("service", "443"), answers)).toBeNull()
   })
 
-  test("passes a proxy portless keeps on an unprivileged port, as on 1355", async () => {
-    expect(await proxyDown({}, saved("old", "1355"), silent)).toBeNull()
-    expect(await proxyDown({ PORTLESS_PORT: "1355" }, join(dir, "fresh"), silent)).toBeNull()
+  test("passes a proxy portless keeps on an unprivileged port of the owner's own, and a 1355 that answers", async () => {
+    expect(await proxyDown({}, saved("own", "8443"), silent)).toBeNull()
+    expect(await proxyDown({ PORTLESS_PORT: "8443" }, join(dir, "fresh"), silent)).toBeNull()
+    expect(await proxyDown({}, saved("up1355", "1355"), answers)).toBeNull()
+  })
+
+  // #810 review: a 1355 proxy that ended uncleanly leaves its port saved, and portless's own start would trust the CA with no click, so the launcher starts it again through startFallback
+  test("a saved 1355 that answers nothing reads as 443 down", async () => {
+    expect(await proxyDown({}, saved("dead1355", "1355"), silent)).toBe(443)
+    expect(await proxyDown({ PORTLESS_PORT: "1355" }, join(dir, "fresh"), silent)).toBe(443)
+  })
+
+  // #810 review: the 1355 proxy keeps its own folder, so a service install, which reads portless's own folder, leaves it running
+  test("the 1355 proxy's folder sits in portless's own, and maps back to it", () => {
+    expect(fallbackDir("/h/.portless")).toBe("/h/.portless/fallback")
+    expect(serviceDir("/h/.portless/fallback")).toBe("/h/.portless")
+    expect(serviceDir("/h/.portless")).toBe("/h/.portless")
   })
 
   test("passes a stack that skips portless", async () => {
     expect(await proxyDown({ PORTLESS: "0" }, join(dir, "fresh"), silent)).toBeNull()
   })
 
-  test("the setup a stack cannot do names the sudo commands, fixed ports and Settings' button", () => {
+  test("the setup a stack cannot do names the sudo commands and fixed ports", () => {
     const setup = proxySetup(443)
     expect(setup).toContain("port 443 needs sudo")
     expect(setup).toContain("`sudo node_modules/.bin/portless service install`")
     expect(setup).toContain("`PORTLESS=0 bun run dev`")
-    expect(setup).toContain("Settings' Things to fix sets up the web address with a button")
   })
 })
 
