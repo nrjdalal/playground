@@ -308,7 +308,7 @@ export async function sendMessage(
   const replayed = opened && result.replayed ? opened : undefined
   if (replayed) await threads.drop(replayed)
   const reply = REPLY_RE.exec(text)
-  // only the primary dispatcher carries his Inbox, so a quote in the second's or a hosted session's message records nothing
+  // only the primary dispatcher carries his Inbox, so a quote in the second's, the assistant's or a hosted session's message records nothing
   if (reply && to === DISPATCHER) {
     try {
       await recordReply(Number(reply[1]), text)
