@@ -4,6 +4,7 @@ import type { InboxAction, InboxItem, InboxPreview, InboxUpdate } from "@api/hon
 import type { DISPATCHER_SLOT_LABELS } from "@packages/config/kinds"
 import {
   RiAlarmWarningLine,
+  RiAppsLine,
   RiArchive2Line,
   RiArrowDownSLine,
   RiArrowUpLine,
@@ -27,6 +28,7 @@ import {
   RiReplyLine,
   RiSearchEyeLine,
   RiSendPlaneLine,
+  RiShieldKeyholeLine,
   RiShipLine,
   RiSlackLine,
   RiTableLine,
@@ -158,9 +160,11 @@ import { fullTime, relativeTime } from "@/lib/time"
 
 const DECISION_ICONS: Record<InboxPreview["type"], RemixiconComponentType> = {
   accept: RiPuzzleLine,
+  apps: RiAppsLine,
   ask: RiQuestionAnswerLine,
   budget: RiMoneyDollarCircleLine,
   delete: RiDeleteBinLine,
+  grant: RiShieldKeyholeLine,
   schema: RiTableLine,
   secret: RiKey2Line,
   ship: RiShipLine,
@@ -541,6 +545,29 @@ function Preview({ item }: { item: Extract<InboxItem, { kind: "decision" }> }) {
             On Approve, the dashboard accepts the proposed {preview.kind}{" "}
             <code className="font-mono">{preview.key}</code> in {preview.scope}, as it reads at{" "}
             <code className="font-mono">{preview.rev.slice(0, 7)}</code>.
+          </p>
+          <p className="break-words whitespace-pre-wrap">Why: {preview.why}</p>
+        </>
+      )
+    case "apps":
+      return (
+        <>
+          <p>
+            On Approve, the dashboard {preview.change === "add" ? "adds" : "removes"}{" "}
+            <code className="font-mono">{preview.app}</code>{" "}
+            {preview.change === "add" ? "to" : "from"} your apps, which no session may drive.
+          </p>
+          <p className="break-words whitespace-pre-wrap">Why: {preview.why}</p>
+        </>
+      )
+    case "grant":
+      return (
+        <>
+          <p>
+            On Approve, System Settings opens at Privacy &amp; Security &gt;{" "}
+            {preview.permission === "accessibility" ? "Accessibility" : "Screen Recording"}, where
+            you turn it on for {agentLabel(item.from)}&apos;s terminal app, and{" "}
+            {agentLabel(item.from)} checks it again.
           </p>
           <p className="break-words whitespace-pre-wrap">Why: {preview.why}</p>
         </>

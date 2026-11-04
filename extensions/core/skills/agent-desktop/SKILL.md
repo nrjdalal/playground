@@ -17,7 +17,7 @@ Run `agent-desktop version`, then `agent-desktop permissions`, which reads the g
 
 macOS grants the app that launches agent-desktop. A factory session runs under the launchd herdr server (`~/.playground/bin/herdr`), not a GUI terminal, so that is the binary the grant most likely names (untested until the owner's first grant).
 
-On a missing binary or a grant that is not `granted`, **stop** and tell your manager the one action needed: Ops installs `agent-desktop` (npm), or the owner grants the named permission to the launching app in System Settings. Granting is the owner's step, and so are `permissions --guide` and `permissions --request`, which open System Settings or a system prompt on the owner's screen.
+On a missing binary or a grant that is not `granted`, **stop** and tell your manager the one action needed: Ops installs `agent-desktop` (npm), or the owner grants the named permission to the launching app in System Settings, which your manager asks for as a `grant` decision (`.agents/dashboard/asks.md`) whose Approve opens System Settings at that pane; once its answer reaches you, recheck with `agent-desktop permissions`. Granting is the owner's step, and so are `permissions --guide` and `permissions --request`, which open System Settings or a system prompt on the owner's screen.
 
 Done when `version` answers and each grant the task needs reads `granted`, or when your manager has the stop and its one action.
 
@@ -35,7 +35,7 @@ Done when every command in the session runs headless.
 
 ## 4. Leave the owner's apps alone
 
-Name only apps off the owner's list in a snapshot, act, launch or close, matching a name in any case and with or without `.app`. Read the list with `bun "$PLAYGROUND_REPO/packages/scripts/src/playground/guard-list.ts" no-desktop-owner-app desktop-owner-apps`, which prints it as JSON. On any answer that is not a printed list (an exit 2, an unset `$PLAYGROUND_REPO`, no `bun`), **stop** and tell your manager, since there is no list to trust. The owner's login extension fills the list, which changes only by the owner's own `!` command that the dispatcher hands the owner; the `no-desktop-owner-app` hook refuses a command that names a listed app, its refusal naming the two routes: the owner runs the command with `!`, or takes the app off the list.
+Name only apps off the owner's list in a snapshot, act, launch or close, matching a name in any case and with or without `.app`. Read the list with `bun "$PLAYGROUND_REPO/packages/scripts/src/playground/guard-list.ts" no-desktop-owner-app desktop-owner-apps`, which prints it as JSON. On any answer that is not a printed list (an exit 2, an unset `$PLAYGROUND_REPO`, no `bun`), **stop** and tell your manager, since there is no list to trust. The owner's login extension fills the list, which changes only by the owner's Approve on an `apps` decision your manager posts (`.agents/dashboard/asks.md`); the `no-desktop-owner-app` hook refuses a command that names a listed app, its refusal naming the two routes: the owner runs the command with `!`, or takes the app off the list.
 
 Done when every app the session's commands name is off the list the reader printed.
 

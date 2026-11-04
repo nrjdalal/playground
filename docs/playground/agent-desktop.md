@@ -8,19 +8,20 @@ Your desktop is your own screen, so the skill keeps every session headless, away
 
 A session loads it on its own before any `agent-desktop` command, or when a task needs a desktop app driven.
 
-| Case                                                 | What the skill does                                                                                          |
-| ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| The binary is missing, or a macOS grant is not given | Stops, and tells its manager the one action: Ops installs it, or you grant the permission in System Settings |
-| Both are in place                                    | Loads the binary's own docs (`skills get desktop`, `skills get platform`), then works headless               |
-| The task would touch one of your own apps            | Leaves the app alone                                                                                         |
-| The task needs `--headed`                            | Hands it to you as one command to run with `!`                                                               |
+| Case                                                 | What the skill does                                                                                                                     |
+| ---------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| The binary is missing, or a macOS grant is not given | Stops, and tells its manager the one action: Ops installs it, or you approve an Inbox card that opens System Settings at the permission |
+| Both are in place                                    | Loads the binary's own docs (`skills get desktop`, `skills get platform`), then works headless                                          |
+| The task would touch one of your own apps            | Leaves the app alone                                                                                                                    |
+| The task needs `--headed`                            | Hands it to you as one command to run with `!`                                                                                          |
 
 ## The grants
 
 macOS asks you, not the session, for two permissions: Accessibility, which every task needs, and Screen Recording, which only a screenshot needs.
 macOS gives them to the app that launches `agent-desktop`.
 A factory session runs under the herdr server, not a terminal you opened, so herdr is most likely the app to grant; the first trial after your grant confirms it.
-The session reads the grants with `agent-desktop permissions`, which never prompts, and leaves the commands that open System Settings or a prompt on your screen to you.
+The session reads the grants with `agent-desktop permissions`, which never prompts.
+For a grant that is missing, its manager posts an Inbox card: its Approve opens System Settings at Privacy & Security, Accessibility or Screen Recording, you turn it on there, and the session checks the grant again.
 
 ## It's working if
 
@@ -32,5 +33,5 @@ The session reads the grants with `agent-desktop permissions`, which never promp
 ## Where it fits
 
 A core skill beside [agent-browser](../../skills/zerostarter/agent-browser/SKILL.md), its browser sibling from the same upstream.
-The `no-desktop-owner-app` hook refuses the skill's two rules in every session, `--headed` and any command naming an app on your list, and its refusal names the two routes past it: you run the command with `!`, or you take the app off your list with a `!` command the dispatcher hands you.
+The `no-desktop-owner-app` hook refuses the skill's two rules in every session, `--headed` and any command naming an app on your list, and its refusal names the two routes past it: you run the command with `!`, or you take the app off your list by approving an Inbox card a session's manager posts.
 A session trying it before it merges follows [.agents/skill-trial.md](../../.agents/skill-trial.md).

@@ -193,7 +193,7 @@ describe("migrate's machine half", () => {
       "export NEWCO_PLANS_DIR=~/plans\nexport NEWCO_LOAD_MULT=2\nexport NEWCO_SOURCES=x\n",
     )
     expect(steps.map((step) => step.line)).toContain(
-      `! ${join(home, ".zshrc")} sets OLDCO_SOURCES, which nothing reads now: move its words into its list`,
+      `~ ${join(home, ".zshrc")} sets OLDCO_SOURCES, which nothing reads now: delete that line from it, and send your lead the words it held, so the owner can add them to the list that replaced it`,
     )
     expect(read(join(home, ".zshrc.pre-migrate"))).toContain("OLDCO_PLANS_DIR")
     expect(read(join(home, "Library/LaunchAgents/com.example.ops-flow.plist"))).toBe(

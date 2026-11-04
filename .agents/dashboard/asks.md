@@ -179,11 +179,11 @@
   ```
 
   `kind` is `decision` (left out, it is one), `draft` or `update`; `from` is the posting session's name as the Dashboard shows it, since the answer is typed into that session; `title` is one line.
-  A decision's `preview` is one of nine, each what Approve does except the `secret` ask (below), written in ELI5 / ASD-STE100 plain words: `accept` (`scope`, `kind`, `key`, `rev`, `why`, below), `ask` (`text`, what its poster does on Approve, for a decision no other shape fits:
+  A decision's `preview` is one of eleven, each what Approve does except the `secret` ask (below), written in ELI5 / ASD-STE100 plain words: `accept` (`scope`, `kind`, `key`, `rev`, `why`, below), `apps` (`app`, `change`, `why`, below), `ask` (`text`, what its poster does on Approve, for a decision no other shape fits:
   a production port, a work request from outside the chain, its text naming the session asking and the work it wants, or a step only the owner can take, its text the step,
   Approve meaning done and Deny meaning the owner can't, or a grilling batch, its text each open question numbered with its recommended answer, Approve taking them all and the owner's Note giving his own by number;
   with optional `approve` and `deny` labels, one line each, which the owner's card shows as two choices under its text, the quoted block, when both are there, and optional `attachments`, below), `slack` (`to`, `text`, optional `attachments`),
-  `ship` (`sha`, `prs` of `{number, title}`), `ticket` (`team`, `title`, `body`), `delete` (`what`, `why`), `schema` (`shape`), `budget` (`amount`, `why`) or `secret` (`key`, `sink`); a decision with none is refused.
+  `ship` (`sha`, `prs` of `{number, title}`), `ticket` (`team`, `title`, `body`), `delete` (`what`, `why`), `schema` (`shape`), `budget` (`amount`, `why`), `grant` (`permission`, `why`, below) or `secret` (`key`, `sink`); a decision with none is refused.
   An `ask`'s `attachments`, a draft's, a `slack` decision's and a read-only update's, are up to 20 files on this Mac, each `{src, kind?, label?, group?}`: `src` an absolute path, never a URL; `kind` one of `code`, `doc`, `html`, `image` or `pdf`,
   read from the extension when left out (`KIND_OF_EXTENSION` in `api/hono/src/lib/dashboard/inbox-attachments.ts`); `label` `before` or `after`; `group` a one-line section heading.
   `bun run ask new` and `edit` fill each `{now}` in the item's text with the time they post at in the owner's zone (`clock.ownerZone`, `fillNow` in `api/hono/src/lib/dashboard/ask-clock.ts`), and refuse a `measured` or `now` time more than 2 minutes ahead of the clock (`futureNowTimes`), naming it;
@@ -242,7 +242,7 @@
   What that read found goes in the item's `thread`, a line for each message that leads up to the reply.
   A draft, and a `slack`, `ship` or `ticket` decision, also names where it will land, upfront, not after the send: `link`, the https URL of the Slack thread, channel or DM it posts in (a DM's conversation found or opened first, read-only where it already exists), the canary compare or the pull request,
   or the Linear team or project; or, with no place yet (a brand-new DM nobody can open), `noLink`, one line saying why.
-  One of the two is required and both are refused; `accept`, `ask`, `budget`, `delete`, `schema` and `secret` take neither.
+  One of the two is required and both are refused; `accept`, `apps`, `ask`, `budget`, `delete`, `grant`, `schema` and `secret` take neither.
   A draft that asks or nudges a named person goes to that person's DM, never a public comment: its `to` names the DM and its `link` is that DM conversation, never a thread reply or a PR comment; a channel ask, such as the one in #peer-review-chat, stays in its channel.
   Its card's place line, above its title, shows the link by name (Open thread for a draft or a Slack link, `owner/repo#N`, `owner/repo compare`, a Linear ID) or `No link: <why>` (`upfrontLink` in `web/next/src/lib/inbox.ts`), until the poster's ack links where it landed.
   An update's is `{outcome, link?, text?, attachments?}`, its outcome one of `alert`, `decision`, `finding`, `merged` or `shipped`, so progress or an ETA is no outcome of its own: a session carries its progress in the one item it keeps editing with `bun run ask edit`, never a new item a step, which keeps the Inbox one card a thread.
@@ -294,6 +294,31 @@
   {"from": "dispatcher", "title": "Accept the end-of-day skill in acme?",
    "preview": {"type": "accept", "scope": "acme", "kind": "skill", "key": "end-of-day",
                "rev": "3f9a2c1d", "why": "Scored 4 by two reviewers; it reads the day's merges"}}
+  EOF
+  ```
+
+- An `apps` decision asks the owner to add an app to the owner's own apps, the `desktop-owner-apps` guard list no-desktop-owner-app keeps agent-desktop away from, or to remove one, since that list changes only by the owner's act (`scripts/hooks/README.md`'s no-desktop-owner-app).
+  Its `app` is the app's name, a letter or digit first, so none starts as a flag or names a path, `change` is `add` or `remove`, and `why` says why (`appsSchema` in `api/hono/src/lib/dashboard/inbox.ts`); Edit is refused.
+  Approve, claimed as an accept's is, reads the login scope's own list as accepted, adds or removes the app matched as the hook matches it (`appsChange`), and runs `ext put <login> list desktop-owner-apps - --reason "the owner approved it in the Inbox (#iN)"` with the new list on its stdin (`appsArgs`, `ownerApps` in `api/hono/src/lib/store/extensions.ts`), no shell, no `PLAYGROUND_ROLE`.
+  An app already on the list, one to remove that the login's list lacks, or a list that is not names writes nothing.
+  The answer keeps `listed: {exitCode, line}`, and the card reads `Your apps: <line>` green or `Apps change failed (exit N): <line>` red; the poster closes it with `bun run ask ack #iN --no-link "<why>"`.
+
+  ```bash
+  bun run ask new <<'EOF'
+  {"from": "dispatcher", "title": "Keep agent-desktop away from Notes?",
+   "preview": {"type": "apps", "app": "Notes", "change": "add", "why": "It holds your own notes"}}
+  EOF
+  ```
+
+- A `grant` decision asks the owner to grant agent-desktop a macOS permission, `permission` `accessibility` or `screen-recording`, and `why` (`grantSchema`); Edit is refused.
+  Its Approve runs `/usr/bin/open x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility` (or `?Privacy_ScreenCapture`), one fixed argv (`grantArgv`, run by `api/hono/src/lib/dashboard/run-argv.ts`), which opens System Settings at that pane on this Mac for the owner to turn it on; a stack showing test data refuses it, opening nothing.
+  The answer keeps `opened: {exitCode, line}`, and the poster rechecks the grant with `agent-desktop permissions` and closes the item with what it reads, since macOS grants the app that launches agent-desktop, which only the poster's own run reads; until then the card reads that it is being carried out.
+
+  ```bash
+  bun run ask new <<'EOF'
+  {"from": "dispatcher", "title": "Let agent-desktop see the screen?",
+   "preview": {"type": "grant", "permission": "screen-recording",
+               "why": "The simulator check takes a screenshot"}}
   EOF
   ```
 

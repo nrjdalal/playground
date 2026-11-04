@@ -181,6 +181,11 @@ export const canDraft = (item: InboxItem): boolean =>
 const chosen = (item: InboxItem) =>
   item.kind !== "update" && item.answer && "choice" in item.answer ? item.answer : null
 
+// What the dashboard's own run on an accept's, an apps change's or a grant's Approve gave, read off any answer, none for the rest.
+type StepResult = { exitCode: number; line: string }
+type Steps = { accepted?: StepResult; listed?: StepResult; opened?: StepResult }
+const stepsOf = (answer: object | null): Steps => (answer ?? {}) as Steps
+
 // Pure: whether a card a chat reply collapsed opens again to its full self, its answers and Schedule back: an open decision or draft whose answer is that reply, its poster not done with it, which an answer or a Schedule from the card replaces.
 export const reopenable = (item: InboxItem): boolean => {
   const answer = chosen(item)
@@ -500,9 +505,11 @@ export function kindWord(item: InboxItem): string {
   }
   const words = {
     accept: "Accept",
+    apps: "Your apps",
     ask: "Ask",
     budget: "Budget",
     delete: "Delete",
+    grant: "Permission",
     schema: "Schema",
     secret: "Secret",
     ship: "Ship",
@@ -552,9 +559,11 @@ export function itemState(item: InboxItem): ItemState {
     if (!provided.results) return "sending"
     return provided.results.every((result) => result.exitCode === 0) ? "done" : "failed"
   }
-  // an accept the dashboard ran is done or failed by its exit code alone, since nothing is left for its poster to carry out
-  if (provided && "accepted" in provided && provided.accepted)
-    return provided.accepted.exitCode === 0 ? "done" : "failed"
+  // an accept or an apps change the dashboard ran is done or failed by its exit code alone, since nothing is left for its poster to carry out; a grant that opened nothing failed, and one that opened its pane waits on its poster's recheck
+  const { accepted, listed, opened } = stepsOf(provided)
+  const ran = accepted ?? listed
+  if (ran) return ran.exitCode === 0 ? "done" : "failed"
+  if (opened && opened.exitCode !== 0) return "failed"
   // a chat reply is being carried out by its poster until it is closed, then done
   if (item.kind !== "update" && chosen(item)?.choice === "replied")
     return carriedOut(item) ? "done" : "sending"
@@ -659,15 +668,12 @@ export function outcomeLine(item: InboxItem): string | null {
             ? `Send unconfirmed: whether ${who} has it is not known`
             : `Send failed: ${delivery.reason}`
         : "Delivery pending"
-  // an accept the dashboard ran says what the run gave, the card's whole result, and why its poster was not told when that failed
-  const accepted = "accepted" in item.answer ? item.answer.accepted : undefined
-  if (accepted) {
-    const ran =
-      accepted.exitCode === 0
-        ? `Accepted: ${accepted.line}`
-        : `Accept failed (exit ${accepted.exitCode}): ${accepted.line}`
-    return delivery?.status === "failed" ? `${done} · ${ran} · ${reached}` : `${done} · ${ran}`
-  }
+  // a step the dashboard ran says what it gave, the card's whole result, and why its poster was not told when that failed; a grant that opened its pane says so, then waits on its poster's recheck
+  const step = stepLine(stepsOf(item.answer))
+  if (step)
+    return delivery?.status === "failed" ? `${done} · ${step} · ${reached}` : `${done} · ${step}`
+  const { opened } = stepsOf(item.answer)
+  if (opened) done += ` · ${opened.line.charAt(0).toUpperCase()}${opened.line.slice(1)}`
   // Claude Code holds it until the session is free, whatever the answer
   if (delivery?.status === "queued") return `${done} · Queued: ${who} holds it, to take once free`
   if (isGo(item.answer.choice) && delivery?.status !== "failed" && !carriedOut(item)) {
@@ -679,6 +685,22 @@ export function outcomeLine(item: InboxItem): string | null {
   return item.answer.noLink
     ? `${done} · ${reached} · No link: ${item.answer.noLink}`
     : `${done} · ${reached}`
+}
+
+// Pure: the result line of a step the dashboard ran on Approve that leaves its poster nothing to do: an accept's, an apps change's, or a grant that opened nothing; null for any other answer.
+const stepLine = (answer: Steps): string | null => {
+  const { accepted, listed, opened } = answer
+  if (accepted)
+    return accepted.exitCode === 0
+      ? `Accepted: ${accepted.line}`
+      : `Accept failed (exit ${accepted.exitCode}): ${accepted.line}`
+  if (listed)
+    return listed.exitCode === 0
+      ? `Your apps: ${listed.line}`
+      : `Apps change failed (exit ${listed.exitCode}): ${listed.line}`
+  if (opened && opened.exitCode !== 0)
+    return `Opening System Settings failed (exit ${opened.exitCode}): ${opened.line}`
+  return null
 }
 
 // Pure: what a link points to, named from the link itself when its poster gave no label: a Linear ticket's ID, a pull request or issue as owner/repo#N, Open thread for a Slack link, else the site.
