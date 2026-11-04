@@ -339,9 +339,16 @@ describe("a build, a test run, lefthook, turbo or a file write in the main check
     ["an eval of a script that only reads, fed by a pipe", "echo x | eval 'git status'"],
     ["a pipe into sh of a script that only reads", "echo 'git status' | sh -"],
     ["a script's output piped into a node script", "bun run ask list | node x.js"],
+    ["a script's output piped into a python3 module", "bun run ask list | python3 -m json.tool"],
+    ["a script's output piped into an attached python3 module", "echo '{}' | python3 -mjson.tool"],
     [
-      "a script's output piped into python3's own program",
-      "bun run ask list | python3 -c 'import sys'",
+      "a script's output piped into a node script past a preload",
+      "bun run ask list | node -r fs x.js",
+    ],
+    ["a script's output piped into a script bun runs", "bun run ask list | bun run x.ts"],
+    [
+      "a script's output piped into a versioned python3's script",
+      "bun run ask list | python3.12 x.py",
     ],
     [
       "a script's output handed by xargs to a python3 script",

@@ -60,4 +60,155 @@ export const groups: Group[] = [
       ["a write into the root sourced from -", `echo 'touch ${ROOT}/a' | . -`],
     ],
   },
+  // a script's output piped into a named interpreter or shell, whatever its options or inline program say, its name read through a version suffix
+  {
+    folders: ["main checkout"],
+    guards: ["no-main-checkout"],
+    rows: () => [
+      [
+        "a script's output piped into python3 with a warning option's value before stdin's name",
+        "bun run ask list | python3 -W ignore -",
+      ],
+      [
+        "a script's output piped into python3 with a warning option's value and no script",
+        "bun run ask list | python3 -W ignore",
+      ],
+      [
+        "a script's output piped into python3 with an -X option's value before stdin's name",
+        "bun run ask list | python3 -X dev -",
+      ],
+      [
+        "a script's output piped into node with a preload and no script",
+        "bun run ask list | node -r fs",
+      ],
+      [
+        "a script's output piped into node with a long preload and no script",
+        "bun run ask list | node --require fs",
+      ],
+      [
+        "a script's output piped into node with an import and no script",
+        "bun run ask list | node --import fs",
+      ],
+      [
+        "a script's output piped into node with a valued option before stdin's name",
+        "bun run ask list | node --max-old-space-size 100 -",
+      ],
+      [
+        "a script's output piped into ruby with a library and no script",
+        "bun run ask list | ruby -r json",
+      ],
+      [
+        "a script's output piped into ruby with a load path before stdin's name",
+        "bun run ask list | ruby -I lib -",
+      ],
+      [
+        "a script's output piped into perl with a load path before stdin's name",
+        "bun run ask list | perl -I lib -",
+      ],
+      [
+        "a script's output piped into osascript with a language before stdin's name",
+        "bun run ask list | osascript -l JavaScript -",
+      ],
+      [
+        "a script's output piped into bun with a preload before stdin's name",
+        "bun run ask list | bun -r ./x -",
+      ],
+      [
+        "a script's output piped into bun with a long preload before stdin's name",
+        "bun run ask list | bun --preload ./x -",
+      ],
+      [
+        "a script's output piped into bun with a folder before stdin's name",
+        "bun run ask list | bun --cwd . -",
+      ],
+      [
+        "a script's output piped into python3 with a flag that is no inline program",
+        "bun run ask list | python3 -E",
+      ],
+      [
+        "a script's output piped into python3 with that flag before stdin's name",
+        "bun run ask list | python3 -E -",
+      ],
+      [
+        "a script's output piped into perl looping over its input with no program",
+        "bun run ask list | perl -p",
+      ],
+      [
+        "a script's output piped into python3 running a program filled from stdin",
+        'bun run ask list | python3 -c "$(cat)"',
+      ],
+      [
+        "a script's output piped into node running a program filled from stdin",
+        'bun run ask list | node -e "$(cat)"',
+      ],
+      [
+        "a script's output piped into node's long eval of a program filled from stdin",
+        'bun run ask list | node --eval "$(cat)"',
+      ],
+      [
+        "a script's output piped into perl running a program filled from stdin",
+        'bun run ask list | perl -e "$(cat)"',
+      ],
+      [
+        "a script's output piped into bun running a program filled from stdin",
+        'bun run ask list | bun -e "$(cat)"',
+      ],
+      [
+        "a script's output piped into php running a program filled from stdin",
+        'bun run ask list | php -r "$(cat)"',
+      ],
+      [
+        "a script's output piped into deno evaluating a program filled from stdin",
+        'bun run ask list | deno eval "$(cat)"',
+      ],
+      [
+        "a script's output piped into a loop handing each line to python3 -c",
+        'bun run ask list | while read l; do python3 -c "$l"; done',
+      ],
+      [
+        "a script's output piped into python3 running an inline program of its own",
+        "bun run ask list | python3 -c 'import sys'",
+      ],
+      [
+        "a script's output piped into python3 running an attached inline program",
+        "bun run ask list | python3 -c'x'",
+      ],
+      [
+        "a script's output piped into node running an inline program of its own",
+        "bun run ask list | node -e '1'",
+      ],
+      [
+        "a script's output piped into node running an attached long inline program",
+        "bun run ask list | node --eval='1'",
+      ],
+      [
+        "a script's output piped into a versioned python3 reading stdin's name",
+        "bun run ask list | python3.12 -",
+      ],
+      [
+        "a script's output piped into a versioned python3 with no script",
+        "bun run ask list | python3.9",
+      ],
+      ["a script's output piped into python2 with no script", "bun run ask list | python2"],
+      ["a script's output piped into a versioned node with no script", "bun run ask list | node18"],
+      ["a script's output piped into nodejs with no script", "bun run ask list | nodejs"],
+      ["a script's output piped into a versioned lua with no script", "bun run ask list | lua5.4"],
+      ["a script's output piped into luajit with no script", "bun run ask list | luajit"],
+      ["a script's output piped into csh with no script", "bun run ask list | csh"],
+      ["a script's output piped into tcsh with no script", "bun run ask list | tcsh"],
+      ["a script's output piped into fish with no script", "bun run ask list | fish"],
+      ["a script's output piped into busybox's sh with no script", "bun run ask list | busybox sh"],
+    ],
+  },
+  // a reader of the root piped into a loop whose body runs each line as code, which runs whatever the reader prints
+  {
+    folders: ["home"],
+    guards: ["no-extensions-write"],
+    rows: ({ ROOT }) => [
+      [
+        "a read of the root piped into a loop that evals each line",
+        `cat ${ROOT}/a | while read l; do eval "$l"; done`,
+      ],
+    ],
+  },
 ]
