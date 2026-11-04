@@ -481,8 +481,8 @@ function inspect(raw: string, environment: Record<string, string | undefined>, m
   const fed = new Map<Command, Command>()
   for (const cmd of lexed.commands) if (cmd.stdin && stdinShell(cmd)) fed.set(cmd.stdin, cmd)
   const visit: Visit = async (cmd, parsed, env) => {
-    // a builtin is read only for the script a here-string, a heredoc or a pipeline feeds it, so a bare `sudo -s` and a bare copy of a followed shell are judged by that script alone
-    if (parsed.name === "" || EXPORTS.has(parsed.name)) {
+    // a builtin run() hands over for this hook alone (a bare `sudo -s`, a bare copy of a followed shell, an export) is read only for the script a here-string, a heredoc or a pipeline feeds it; one that feeds a shell (a loop's `done`) is judged in full, as the reader hands it to every hook
+    if ((parsed.name === "" && !cmd.feedsShell) || EXPORTS.has(parsed.name)) {
       for (const here of places(env, directory)) {
         const sure = env.cwdSure !== undefined && here.cwd === env.cwdSure
         const verdict = await fedScript(cmd, here, sure, inMain, visit)
