@@ -3,7 +3,15 @@ import { mkdirSync, mkdtempSync, readdirSync, readFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { type Env, GIT_TAKES, lex, places, run, withDeadline } from "../../../scripts/hooks/shell"
+import {
+  type Env,
+  GIT_TAKES,
+  lex,
+  places,
+  run,
+  stdinShell,
+  withDeadline,
+} from "../../../scripts/hooks/shell"
 import { type Paths, REFUSED_FORMS } from "./fixtures/refused-forms"
 
 const HOOKS = join(import.meta.dir, "..", "..", "..", "scripts", "hooks")
@@ -193,5 +201,16 @@ describe("places() holds the folder Env.cwd names, unless the reader passed its 
     const { misses, reads } = await read(lines)
     expect(misses).toEqual([])
     expect(reads).toBeGreaterThan(lines.length)
+  })
+})
+
+describe("stdinShell reads a privilege wrapper's root shell", () => {
+  test.each<[string, string, "root" | undefined]>([
+    ["a program in a variable behind a quoted bare wrapper", `'sudo' "$X"`, "root"],
+    ["a second wrapper's shell option behind a plain first wrapper", "doas sudo -i", "root"],
+    ["a quoted shell option", "sudo '-s'", "root"],
+    ["the shell long option given its command", "sudo --shell ls", undefined],
+  ])("%s", (_, line, kind) => {
+    expect(stdinShell(lex(line).commands[0])).toBe(kind)
   })
 })

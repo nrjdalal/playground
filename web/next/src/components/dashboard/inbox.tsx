@@ -527,6 +527,13 @@ function Preview({ item }: { item: Extract<InboxItem, { kind: "decision" }> }) {
         </>
       )
     case "secret":
+      if (preview.sink.type === "keychain")
+        return (
+          <p>
+            On Submit, the value is saved in this Mac's Keychain as its{" "}
+            <code className="font-mono">{preview.sink.item}</code> item. It is kept nowhere else.
+          </p>
+        )
       return (
         <p>
           On Submit, the value goes to <code className="font-mono">{preview.key}</code> in Vercel

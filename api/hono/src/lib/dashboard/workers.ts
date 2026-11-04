@@ -3,6 +3,7 @@ import { stat } from "node:fs/promises"
 import { folderName } from "@packages/config/console"
 import {
   getSessionNames,
+  isEndedStatus,
   kindOfName,
   managerKindOfName,
   type RosterKind,
@@ -110,7 +111,7 @@ export const DISPATCHER_SECONDARY = secondaryOf(DISPATCHER, env.PLAYGROUND_DISPA
 // Every name the dispatcher role goes to, the primary first, whose chat is the Dashboard's home and holds the Inbox; a secondary that repeats the primary adds none.
 export const DISPATCHERS: readonly string[] = [...new Set([DISPATCHER, DISPATCHER_SECONDARY])]
 
-// Pure: how many dispatcher rows the sidebar's header draws, by the web's dispatchersOf rule: the primary's always, each other one's while a session of its name is shown (registered or on the roster). /api/health carries it, so a stored sidebar's header holds that many rows and the board's arrival moves nothing below it (verify cls).
+// Pure: how many dispatcher rows the sidebar's header draws, by the web's dispatchersOf rule: the primary's always, each other one's while a session of its name is shown (registered, or on the roster in a status that has not ended). /api/health carries it, so a stored sidebar's header holds that many rows and the board's arrival moves nothing below it (verify cls).
 export const dispatcherSlots = (names: readonly string[], shown: ReadonlySet<string>): number =>
   names.filter((name, i) => i === 0 || shown.has(name)).length
 
@@ -122,7 +123,9 @@ export const readDispatcherSlots = async (): Promise<number> => {
   ])
   const shown = [
     ...registeredSessionsOf(files).map((session) => session.name),
-    ...(roster?.agents ?? []).map((agent) => agent.name),
+    ...(roster?.agents ?? [])
+      .filter((agent) => !isEndedStatus(agent.status))
+      .map((agent) => agent.name),
   ]
   return dispatcherSlots(DISPATCHERS, new Set(shown))
 }
