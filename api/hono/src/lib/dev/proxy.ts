@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs"
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { basename, dirname, join } from "node:path"
 
@@ -51,6 +51,31 @@ export const fallbackDir = (dir: string): string => join(dir, "fallback")
 // Whether a stack's state folder is the 1355 proxy's fallback folder.
 export const isFallback = (dir: string): boolean => basename(dir) === "fallback"
 
+const readOrNull = (path: string): Buffer | null => {
+  try {
+    return readFileSync(path)
+  } catch {
+    return null
+  }
+}
+
+// Copies portless's own CA into the fallback folder when it holds one and the fallback holds none, the key at mode 600, so the 1355 proxy serves under the CA the owner trusted for 443; answers whether the fallback's CA is that one. Trusting a CA stays the owner's click.
+export const shareCa = (own: string, fallback: string): boolean => {
+  const cert = readOrNull(join(own, "ca.pem"))
+  const key = readOrNull(join(own, "ca-key.pem"))
+  if (!cert || !key) return false
+  try {
+    if (!existsSync(join(fallback, "ca.pem"))) {
+      mkdirSync(fallback, { recursive: true })
+      writeFileSync(join(fallback, "ca-key.pem"), key, { flag: "wx", mode: 0o600 })
+      writeFileSync(join(fallback, "ca.pem"), cert, { flag: "wx", mode: 0o644 })
+    }
+  } catch {
+    return false
+  }
+  return readOrNull(join(fallback, "ca.pem"))?.equals(cert) ?? false
+}
+
 // portless's own folder for a stack's state folder, the one a fallback folder sits in.
 export const serviceDir = (dir: string): string => (isFallback(dir) ? dirname(dir) : dir)
 
@@ -82,7 +107,7 @@ export const proxyDown = async (
 export const proxySetup = (port: number): string =>
   `portless's proxy is not running, and starting it on port ${port} needs sudo, which a stack cannot ask for; once, in a terminal in the main checkout, run \`sudo node_modules/.bin/portless service install\` and then \`node_modules/.bin/portless trust\`, or start on fixed ports with \`PORTLESS=0 bun run dev\``
 
-// Starts portless's proxy on FALLBACK_PORT as this user, through the checkout's own portless (cli), with its trust step skipped, since trusting the certificate waits for the owner's click in Settings; answers why it is still not listening, else null. A proxy another stack started there first counts as started.
+// Starts portless's proxy on FALLBACK_PORT as this user, through the checkout's own portless (cli), with its trust step skipped, since trusting a certificate waits for the owner's click (Set up the web address, or Trust the certificate on 443); it serves under portless's own CA once shareCa has copied it; answers why it is still not listening, else null. A proxy another stack started there first counts as started.
 export const startFallback = async (
   cli: string,
   env: Record<string, string | undefined>,

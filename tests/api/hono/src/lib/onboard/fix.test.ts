@@ -253,7 +253,7 @@ describe("each fix runs its fixed argv", () => {
     )
   })
 
-  // #810 review: the service install reads its folder for a running proxy and stops it, so it runs on portless's own folder and 443, never the 1355 proxy's folder the clicking stack runs on
+  // the service install reads its folder for a running proxy and stops it, so it runs on portless's own folder and 443, never the 1355 proxy's folder the clicking stack runs on
   test("the administrator line installs into portless's own folder on 443, leaving the 1355 proxy's folder alone", async () => {
     const { adminLine } = await import("../../../../../../api/hono/src/lib/onboard/fix")
     const line = adminLine(["/x"], { PORTLESS_STATE_DIR: "/h/.portless/fallback" })

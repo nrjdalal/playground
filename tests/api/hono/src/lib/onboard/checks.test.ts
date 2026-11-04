@@ -293,7 +293,7 @@ describe("the rows the app cannot fix itself", () => {
       expect(await at([], {}, fallback)).toBe("not running")
       expect(await at([1355], {}, fallback)).toBe("not on 443")
       expect(await at([1355, 443], {}, fallback)).toBe("set up")
-      // #810 review: a 1355 proxy in a folder of the owner's own is no fallback, so no button offers the install that would stop it
+      // a 1355 proxy in a folder of the owner's own is no fallback, so no button offers the install that would stop it
       writeFileSync(join(dir, "proxy.port"), "1355\n")
       expect(await at([1355])).toBe("ready")
       writeFileSync(join(dir, "proxy.port"), "8443\n")

@@ -1,5 +1,13 @@
 import { afterAll, describe, expect, test } from "bun:test"
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -11,6 +19,7 @@ import {
   proxyDown,
   proxySetup,
   serviceDir,
+  shareCa,
   startFallback,
 } from "../../../../../../api/hono/src/lib/dev/proxy"
 
@@ -44,20 +53,20 @@ describe("proxyDown", () => {
     expect(await proxyDown({}, saved("up1355", "1355"), answers)).toBeNull()
   })
 
-  // #810 review: a 1355 proxy that ended uncleanly leaves its port saved, and portless's own start would trust the CA with no click, so the launcher starts it again through startFallback
+  // a 1355 proxy that ended uncleanly leaves its port saved, and portless's own start would trust the CA with no click, so the launcher starts it again through startFallback
   test("a saved 1355 that answers nothing reads as 443 down", async () => {
     expect(await proxyDown({}, saved("dead1355", "1355"), silent)).toBe(443)
     expect(await proxyDown({ PORTLESS_PORT: "1355" }, join(dir, "fresh"), silent)).toBe(443)
   })
 
-  // #810 review: the 1355 proxy keeps its own folder, so a service install, which reads portless's own folder, leaves it running
+  // the 1355 proxy keeps its own folder, so a service install, which reads portless's own folder, leaves it running
   test("the 1355 proxy's folder sits in portless's own, and maps back to it", () => {
     expect(fallbackDir("/h/.portless")).toBe("/h/.portless/fallback")
     expect(serviceDir("/h/.portless/fallback")).toBe("/h/.portless")
     expect(serviceDir("/h/.portless")).toBe("/h/.portless")
   })
 
-  // #810 review: a process outside the stack (the supervisor's web route, health-beat) has no PORTLESS_STATE_DIR, so it finds the 1355 proxy's folder by whose proxy serves
+  // a process outside the stack (the supervisor's web route, health-beat) has no PORTLESS_STATE_DIR, so it finds the 1355 proxy's folder by whose proxy serves
   test("portlessDir names the fallback folder while only its proxy serves", () => {
     const home = join(dir, "home")
     const own = join(home, ".portless")
@@ -73,6 +82,29 @@ describe("proxyDown", () => {
     expect(pids(live, live)).toBe(own)
     expect(pids(dead, dead)).toBe(own)
     expect(portlessDir({ HOME: home, PORTLESS_STATE_DIR: "/set" })).toBe("/set")
+  })
+
+  // one CA for both proxies: the 1355 proxy serves under the CA the owner trusted for 443, and a fallback that holds its own keeps it
+  test("shareCa copies portless's own CA into an empty fallback folder, the key at mode 600, and leaves one there alone", () => {
+    const own = join(dir, "share-own")
+    mkdirSync(own)
+    writeFileSync(join(own, "ca.pem"), "own cert")
+    writeFileSync(join(own, "ca-key.pem"), "own key", { mode: 0o600 })
+    const fresh = fallbackDir(own)
+    expect(shareCa(own, fresh)).toBe(true)
+    expect(readFileSync(join(fresh, "ca.pem"), "utf8")).toBe("own cert")
+    expect(readFileSync(join(fresh, "ca-key.pem"), "utf8")).toBe("own key")
+    expect(statSync(join(fresh, "ca-key.pem")).mode & 0o777).toBe(0o600)
+    expect(shareCa(own, fresh)).toBe(true)
+    const kept = join(dir, "share-kept")
+    mkdirSync(kept)
+    writeFileSync(join(kept, "ca.pem"), "its own cert")
+    expect(shareCa(own, kept)).toBe(false)
+    expect(readFileSync(join(kept, "ca.pem"), "utf8")).toBe("its own cert")
+    expect(existsSync(join(kept, "ca-key.pem"))).toBe(false)
+    const none = join(dir, "share-none")
+    expect(shareCa(none, fallbackDir(none))).toBe(false)
+    expect(existsSync(fallbackDir(none))).toBe(false)
   })
 
   test("passes a stack that skips portless", async () => {

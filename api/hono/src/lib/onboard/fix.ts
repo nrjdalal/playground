@@ -54,7 +54,7 @@ const HERDR_PIN = join(
   import.meta.dir,
   "../../../../../packages/scripts/src/playground/herdr-pin.ts",
 )
-// portless's own CLI in this checkout, which trusts its certificate as the signed-in user: any password macOS asks for goes to its own dialog.
+// portless's own CLI in this checkout, which the trust fix runs as the signed-in user and the proxy fix as root through macOS's administrator dialog: any password goes to macOS's own window.
 const PORTLESS_CLI = join(import.meta.dir, "../../../../../node_modules/portless/dist/cli.js")
 const FAKE = join(import.meta.dir, "../../fixtures/fix.ts")
 const BREW_PATHS = ["/opt/homebrew/bin", "/usr/local/bin"]
@@ -174,6 +174,9 @@ const NAMES: Record<string, string> = { brew: "Homebrew", docker: "Docker" }
 // What macOS's window says the password is for, in place of its default "osascript wants to make changes".
 const PROMPT = `${site.name} sets up its web address on your Mac.`
 
+// Pure: words as an AppleScript string literal, its backslashes and quotes escaped.
+const appleString = (words: string) => `"${words.replace(/[\\"]/g, (c) => `\\${c}`)}"`
+
 const shellWord = (word: string) => `'${word.replaceAll("'", `'\\''`)}'`
 
 // An admin step's line for macOS's administrator dialog, which runs it as root as sudo does in a terminal: osascript's do shell script, built from the step's fixed argv and this user's own home, ids and portless folder alone, each word single-quoted for the shell and the line escaped for AppleScript, so a home or folder holding a quote, a space or `$(...)` stays one literal word.
@@ -199,7 +202,7 @@ export const adminLine = (
   ]
     .map(shellWord)
     .join(" ")
-  return `do shell script "${line.replace(/[\\"]/g, (c) => `\\${c}`)}" with prompt "${PROMPT}" with administrator privileges`
+  return `do shell script ${appleString(line)} with prompt ${appleString(PROMPT)} with administrator privileges`
 }
 
 export const isFixId = (id: string): id is FixId => (FIX_IDS as readonly string[]).includes(id)

@@ -27,6 +27,7 @@ import {
   proxyDown,
   proxySetup,
   serviceDir,
+  shareCa,
   startFallback,
 } from "@/lib/dev/proxy"
 import {
@@ -137,6 +138,7 @@ if (!dry) {
   const down = await proxyDown(env, portlessOwn)
   if (down !== null) {
     const state = fallbackDir(portlessOwn)
+    const shared = shareCa(portlessOwn, state)
     const failed = await startFallback(join(ROOT, "node_modules/.bin/portless"), {
       ...env,
       PORTLESS_STATE_DIR: state,
@@ -149,7 +151,7 @@ if (!dry) {
     // process.env too, so this launcher's own route and alias writes reach the 1355 proxy's folder
     env.PORTLESS_STATE_DIR = process.env.PORTLESS_STATE_DIR = state
     console.error(
-      `dev: portless's proxy is not running on port ${down}, which needs your Mac's password, so it runs on ${FALLBACK_PORT}, which needs none; Settings' Things to fix sets up the web address on ${down}`,
+      `dev: portless's proxy is not running on port ${down}, which needs your Mac's password, so it runs on ${FALLBACK_PORT}, which needs none; Settings' Things to fix sets up the web address on ${down}${shared ? "" : `, and until then your browser warns that the certificate on ${FALLBACK_PORT} is not trusted, once on the web's address and once on the API's`}`,
     )
   }
   console.error(`dev: database ${checked.proof}`)
