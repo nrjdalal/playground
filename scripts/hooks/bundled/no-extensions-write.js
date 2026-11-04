@@ -774,7 +774,12 @@ function word(lx) {
       merge(out, text);
       if (GLOB_CHARS.test(text.value))
         out.glob = true;
-    } else if (c === "~" && lx.i === start && (next === "" || next === "/" || BREAK.has(next))) {
+    } else if (c === "~" && lx.i === start && (next === "-" || next === "+") && ends(src[lx.i + 2])) {
+      out.tilde = true;
+      out.value += c + next;
+      bare += c + next;
+      lx.i += 2;
+    } else if (c === "~" && lx.i === start && ends(next)) {
       out.value += homedir3();
       lx.i++;
     } else {
@@ -792,6 +797,7 @@ function word(lx) {
   return out;
 }
 var GLOB_CHARS = /[*?[{(]/;
+var ends = (c = "") => c === "" || c === "/" || BREAK.has(c);
 function double(lx) {
   const { src } = lx;
   const out = { value: "" };
@@ -1094,6 +1100,7 @@ var subshell = (env) => ({ ...env, vars: new Map(env.vars) });
 async function examine(cmd, env, visit, builtins) {
   tick();
   unchain(cmd, env);
+  blindTilde(cmd, env);
   const [primary, ...others] = readings(parse(cmd));
   const before = others.length > 0 ? apart(env) : env;
   const verdict = await examineReading(cmd, primary, env, visit, builtins);
@@ -1211,12 +1218,13 @@ function ancestors(path) {
       return out;
   }
 }
+var asTyped = (word) => ({ ...word, tilde: undefined });
 async function cdTarget(name, args, env) {
   const dir = args.find((a) => !(a.value.startsWith("-") && a.value.length > 1));
   if (!dir)
     return homedir3();
-  const typed = dir.value === "-" ? undefined : await folder(pathOf(dir, env));
-  const tilde = !typed && name === "pushd" && env.old && !dir.quoted && !dir.unknown && !dir.reads?.length ? /^~([-+])(?=\/|$)/.exec(dir.value) : null;
+  const typed = dir.value === "-" ? undefined : await folder(pathOf(asTyped(dir), env));
+  const tilde = !typed && (name === "cd" || name === "pushd") && env.old && !dir.quoted && !dir.unknown && !dir.reads?.length ? /^~([-+])(?=\/|$)/.exec(dir.value) : null;
   const base = tilde && (tilde[1] === "-" ? env.old?.dir : env.cwd);
   return base ? await folder(base + dir.value.slice(2)) : typed;
 }
@@ -1239,7 +1247,7 @@ function cdTargets(name, cmd, parsed, env, from) {
   for (const word of dirs.length > 1 ? dirs : [dir]) {
     for (const base of from.length > 0 ? from : [undefined]) {
       tick();
-      const path = pathOf(word, { ...env, cwd: base });
+      const path = pathOf(asTyped(word), { ...env, cwd: base });
       if (path === undefined) {
         unread = true;
         continue;
@@ -1255,7 +1263,7 @@ function cdTargets(name, cmd, parsed, env, from) {
 }
 function pushdTilde(move, name, parsed, env, from, back) {
   const dir = parsed.args.find((a) => !(a.value.startsWith("-") && a.value.length > 1));
-  const tilde = name === "pushd" && env.old && dir && !dir.quoted && !dir.unknown && !dir.reads?.length ? /^~([-+])(?=\/|$)/.exec(dir.value) : null;
+  const tilde = (name === "cd" || name === "pushd") && env.old && dir && !dir.quoted && !dir.unknown && !dir.reads?.length ? /^~([-+])(?=\/|$)/.exec(dir.value) : null;
   if (!tilde || !dir)
     return move;
   const bases = tilde[1] === "-" ? back : from;
@@ -1275,6 +1283,8 @@ async function chdirTo(name, cmd, parsed, env) {
   env.cwd = name === "popd" || cmd.detached ? undefined : await cdTarget(name, parsed.args, env);
   if (env.old)
     env.old = name === "popd" ? {} : { dir: env.cwd === undefined ? undefined : left };
+  if (env.old)
+    env.oldFrom = [];
   const from = startFolders(env);
   const back = [...new Set([...env.cwdBack ?? [], ...from])];
   const bases = [...new Set([...from, ...env.cwdHeld ?? []])];
@@ -1292,6 +1302,8 @@ async function chdirTo(name, cmd, parsed, env) {
     env.cwdSure = paths[0];
     env.cwdMaybe = [];
     env.cwdUnread = false;
+    if (env.old)
+      env.oldFrom = bases;
     if (chained) {
       env.cwdChain = keep([...new Set([...env.cwdChain ?? [], ...from])], env);
       env.cwdChainToken = cmd.chain;
@@ -1308,6 +1320,8 @@ function unchain(cmd, env) {
     return;
   env.cwdMaybe = keep([...new Set([...env.cwdMaybe ?? [], ...env.cwdSure ? [env.cwdSure] : [], ...env.cwdChain])], env);
   env.cwdSure = undefined;
+  if (env.old)
+    env.oldFrom = [];
   env.cwdChain = [];
   env.cwdChainToken = undefined;
 }
@@ -1493,9 +1507,30 @@ async function resolveText(text, env) {
 function pathOf(text, env) {
   if (text.unknown || text.reads?.length || text.value === "")
     return;
+  const sign = env.old && text.tilde ? /^~([-+])(?=\/|$)/.exec(text.value)?.[1] : undefined;
+  if (sign) {
+    const base = sign === "+" ? env.cwd : leftFolder(env);
+    return base === undefined ? undefined : resolve2(base + text.value.slice(2));
+  }
   if (isAbsolute(text.value))
     return text.value;
   return env.cwd ? resolve2(env.cwd, text.value) : undefined;
+}
+function leftFolder(env) {
+  const left = env.oldFrom ?? (env.old?.dir === undefined ? [] : [env.old.dir]);
+  return left.length === 1 ? left[0] : undefined;
+}
+var BLIND = "zsh's ~-, the folder the shell last left, which the hook cannot name on this line";
+function blindTilde(cmd, env) {
+  if (!env.old || leftFolder(env) !== undefined)
+    return;
+  const blind = (w) => !!w?.tilde && /^~-(?=\/|$)/.test(w.value);
+  const hide = (w) => blind(w) ? { ...w, tilde: undefined, unknown: BLIND, value: UNKNOWN + w.value.slice(2) } : w;
+  for (const r of cmd.redirects)
+    if (blind(r.target))
+      r.target = hide(r.target);
+  if (cmd.words.some(blind) && !["cd", "popd", "pushd"].includes(parse(cmd).name))
+    cmd.words = cmd.words.map(hide);
 }
 async function readFile(path) {
   const file = Bun.file(path);
