@@ -212,7 +212,7 @@ describe("a diff that loosens a guard is reviewed by a refusal table (PG-439)", 
     expect(line).toContain("ask from round 1 for a `canary | head` table of refusal rows")
     expect(line).toContain("`tests/scripts/hooks/fixtures/refused-forms/`")
     expect(line).toContain(
-      "Each row canary refuses stays refused at the head, or `ALLOWED` names it",
+      "Each row canary refuses stays refused at the head, or its source file's `allowed` list names it",
     )
     expect(line).toContain(
       "the fixture's other rows stand through `tests/scripts/hooks/refused-forms.test.ts`'s pass count at canary and at the head",
