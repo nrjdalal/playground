@@ -6,6 +6,7 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  renameSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -22,9 +23,8 @@ import {
   ensureFixture,
   type Fixture,
   fixtureDir,
-  fixtureWrite,
+  fixtureHerdrInput,
   loadFixture,
-  readFixtureCmux,
   readFixtureHerdr,
   writeFixture,
 } from "../../../../../../api/hono/src/lib/dashboard/fixture"
@@ -471,6 +471,36 @@ describe("writeFixture", () => {
     expect(trashed(roots).filter((path) => path === dir)).toHaveLength(2)
   })
 
+  test("a writer whose rename loses the race to another's returns, leaving that complete fixture and no .writing folder (#797)", () => {
+    const root = scratch("fixture-race")
+    const dir = join(root, "fixture")
+    const roots = freshRoots()
+    const later = new Date(Date.parse(ANCHOR) + DAY)
+    writeFixture(small(), dir, roots, new Date(Date.parse(ANCHOR)), (from, to) => {
+      writeFixture(small(), join(root, "winner"), roots, later)
+      renameSync(join(root, "winner"), to)
+      renameSync(from, to)
+    })
+    expect(readdirSync(root)).toEqual(["fixture"])
+    expect(JSON.parse(readFileSync(join(dir, "stamp.json"), "utf8"))).toEqual({
+      writtenAt: later.toISOString(),
+    })
+  })
+
+  test("a rename that fails another way, or onto a folder that is no fixture's, still throws (#797)", () => {
+    const root = scratch("fixture-race-fail")
+    const roots = freshRoots()
+    const failing = (code: string) => () => {
+      throw Object.assign(new Error(`rename failed: ${code}`), { code })
+    }
+    expect(() =>
+      writeFixture(small(), join(root, "a"), roots, undefined, failing("ENOSPC")),
+    ).toThrow("rename failed: ENOSPC")
+    expect(() =>
+      writeFixture(small(), join(root, "b"), roots, undefined, failing("ENOTEMPTY")),
+    ).toThrow("rename failed: ENOTEMPTY")
+  })
+
   test("leaves a folder that is not a fixture's alone, a real config folder named by mistake included", () => {
     const dir = scratch("fixture-foreign")
     writeFileSync(join(dir, "roster.json"), "real")
@@ -502,17 +532,17 @@ describe("writeFixture", () => {
     const file = join(scratch("fixture-transcript"), "outside.json")
     const fixture = shipped()
     for (const path of ["/Users/someone/.claude/projects/p/s.jsonl", "$CONFIG/../real.jsonl"]) {
-      const sessions = fixture.cmux.sessions.map((session, i) =>
-        i === 0 ? { ...session, transcript_path: path } : session,
+      const panes = fixture.herdr.panes.map((pane, i) =>
+        i === 0 ? { ...pane, transcript_path: path } : pane,
       )
-      writeFileSync(file, JSON.stringify({ ...fixture, cmux: { ...fixture.cmux, sessions } }))
+      writeFileSync(file, JSON.stringify({ ...fixture, herdr: { ...fixture.herdr, panes } }))
       const loaded = loadFixture(file)
       expect(loaded.ok).toBe(false)
-      if (!loaded.ok) expect(loaded.error).toContain("cmux.sessions.0.transcript_path")
+      if (!loaded.ok) expect(loaded.error).toContain("herdr.panes.0.transcript_path")
     }
   })
 
-  test("writes herdr's server into herdr.json, its $CONFIG paths moved into the folder, and an empty server for a fixture with none", () => {
+  test("writes herdr's server into herdr.json, its $CONFIG paths moved into the folder, and a folder written before herdr.json reads as an empty server", () => {
     const dir = join(scratch("fixture-herdr-json"), "fixture")
     writeFixture(withHerdr(), dir, ROOTS)
     const herdr = readFixtureHerdr(dir)
@@ -520,9 +550,8 @@ describe("writeFixture", () => {
     expect(herdr.panes.map((p) => p.pane_id)).toEqual(["w1:p1", "w1:p2"])
     expect(herdr.panes[0]?.transcript_path).toBe(join(dir, "claude", HERDR_TRANSCRIPT))
     expect(herdr.prompts["w1:p2"]).toContain("Which colour?")
-    const bare = join(scratch("fixture-herdr-none"), "fixture")
-    writeFixture({ ...shipped(), herdr: undefined }, bare, ROOTS)
-    expect(readFixtureHerdr(bare)).toEqual({
+    rmSync(join(dir, "herdr.json"))
+    expect(readFixtureHerdr(dir)).toEqual({
       inputs: {},
       panes: [],
       prompts: {},
@@ -531,30 +560,14 @@ describe("writeFixture", () => {
     })
   })
 
-  test("refuses a send into an input that holds text unless it is forced, as cmux 0.65's draft guard does", () => {
-    const dir = join(scratch("fixture-guard"), "fixture")
-    writeFixture(shipped(), dir, ROOTS)
-    const session = readFixtureCmux(dir).sessions.find(
-      (s) => s.stored_pid_exists === true && typeof s.surface_id === "string",
-    )
-    if (!session) throw new Error("the shipped fixture has a live session")
-    const surface = String(session.surface_id)
-    fixtureWrite({ surface, text: "one" }, dir)
-    fixtureWrite({ key: "shift+enter", surface }, dir)
-    expect(() => fixtureWrite({ surface, text: "two" }, dir)).toThrow(
-      "holds text someone is typing",
-    )
-    fixtureWrite({ force: true, surface, text: "two" }, dir)
-    expect(readFixtureCmux(dir).inputs[surface]).toBe("one\ntwo")
-  })
-
-  // herdr pastes a message, and Claude Code takes each image path in as an image; the dispatcher's fixture session stands for one
-  test("a session the dashboard pastes into writes a message with an image as Claude Code writes the paste", () => {
+  // herdr pastes a message, and Claude Code takes each image path in as an image; a fixture pane with a transcript stands for one
+  test("a prompt into a pane writes a message with an image as Claude Code writes the paste", () => {
     const dir = join(scratch("fixture-paste"), "fixture")
     writeFixture(shipped(), dir, ROOTS)
-    const session = readFixtureCmux(dir).sessions.find((s) => s.pastes === true)
-    if (!session) throw new Error("the shipped fixture has a session the dashboard pastes into")
-    const surface = String(session.surface_id)
+    const session = readFixtureHerdr(dir).panes.find((p) => p.transcript_path)
+    if (!session) throw new Error("the shipped fixture has a pane with a transcript")
+    const pane = session.pane_id
+    const paste = (text: string) => fixtureHerdrInput(pane, { prompt: text }, dir)
     const files = join(dir, "claude/playground/attachments")
     const png = join(files, "3f0e7a52-1c4b-4d2a-9e6f-0000000000a1.png")
     const pdf = join(files, "3f0e7a52-1c4b-4d2a-9e6f-0000000000a3.pdf")
@@ -564,8 +577,7 @@ describe("writeFixture", () => {
         .split("\n")
         .slice(-n)
         .map((line) => JSON.parse(line))
-    fixtureWrite({ surface, text: `Two files.\n\nAttached: ${png}\nAttached: ${pdf}` }, dir)
-    fixtureWrite({ key: "enter", surface }, dir)
+    paste(`Two files.\n\nAttached: ${png}\nAttached: ${pdf}`)
     const [message, source] = last(2)
     expect(message.message.content).toMatchObject([
       { text: `[Image #1]Two files.\nAttached:\nAttached:\n${pdf}`, type: "text" },
@@ -579,13 +591,11 @@ describe("writeFixture", () => {
     })
     expect(source.origin).toBeUndefined()
     // with no image, the paste is kept as it came
-    fixtureWrite({ surface, text: `One file.\n\nAttached: ${pdf}` }, dir)
-    fixtureWrite({ key: "enter", surface }, dir)
+    paste(`One file.\n\nAttached: ${pdf}`)
     expect(last(1)[0].message.content).toBe(`One file.\n\nAttached: ${pdf}`)
     // a long paste is wrapped in <pasted_content> tags, its id on both
     const long = `Rameen  [3:53 PM]\n${"words ".repeat(40)}`
-    fixtureWrite({ surface, text: long }, dir)
-    fixtureWrite({ key: "enter", surface }, dir)
+    paste(long)
     expect(last(1)[0].message.content).toMatch(
       /^\n\n<pasted_content id="([0-9a-f]{4})">\n[\s\S]*\n<\/pasted_content id="\1">\n$/,
     )
@@ -599,16 +609,13 @@ describe("writeFixture", () => {
     writeFixture(shipped(), dir, ROOTS)
     const outside = join(scratch("fixture-real"), "real.jsonl")
     writeFileSync(outside, "")
-    const state = readFixtureCmux(dir)
-    const session = state.sessions.find(
-      (s) => s.stored_pid_exists === true && typeof s.surface_id === "string",
-    )
-    if (!session) throw new Error("the shipped fixture has a live session")
-    session.transcript_path = outside
-    writeFileSync(join(dir, "cmux.json"), JSON.stringify(state))
-    const surface = String(session.surface_id)
-    fixtureWrite({ surface, text: "hello" }, dir)
-    expect(() => fixtureWrite({ key: "enter", surface }, dir)).toThrow(
+    const state = readFixtureHerdr(dir)
+    const pane = state.panes.find((p) => p.transcript_path)
+    if (!pane) throw new Error("the shipped fixture has a pane with a transcript")
+    pane.transcript_path = outside
+    writeFileSync(join(dir, "herdr.json"), JSON.stringify(state))
+    fixtureHerdrInput(pane.pane_id, { text: "hello" }, dir)
+    expect(() => fixtureHerdrInput(pane.pane_id, { keys: ["enter"] }, dir)).toThrow(
       "outside the fixture's folder",
     )
     expect(readFileSync(outside, "utf8")).toBe("")
@@ -636,38 +643,36 @@ describe("writeFixture", () => {
 
   // An unpriced model would put a problem line on every fixture stack's Usage page and count its calls at $0.
   // Two PRs' merge gave dispatcher-2 and worker-bright-lark one session id, pid and registry file: JSON keeps the last of a repeated key, so a session went missing with no error.
-  test("no two of the shipped fixture's sessions share an id, and no key repeats", () => {
+  test("no two of the shipped fixture's panes share an id, and no key repeats", () => {
     const raw = readFileSync(
       join(import.meta.dir, "../../../../../../api/hono/src/fixtures/dashboard.json"),
       "utf8",
     )
     const keys = [...raw.matchAll(/^ {4}"([^"]+)": [[{]/gm)].map((match) => match[1])
     expect(keys.filter((key, i) => keys.indexOf(key) !== i)).toEqual([])
-    const { cmux } = shipped() as unknown as {
-      cmux: { sessions: Record<string, unknown>[]; workspaces: Record<string, unknown>[] }
-    }
+    const { herdr } = shipped()
     const repeated = (values: unknown[]) => values.filter((value, i) => values.indexOf(value) !== i)
-    for (const field of ["pid", "session_id", "surface_id", "workspace_id"])
-      expect([field, repeated(cmux.sessions.map((s) => s[field]))]).toEqual([field, []])
-    for (const field of ["id", "ref"])
-      expect([field, repeated(cmux.workspaces.map((w) => w[field]))]).toEqual([field, []])
+    for (const field of ["pane_id", "session_id", "terminal_id"] as const)
+      expect([field, repeated(herdr.panes.map((p) => p[field]))]).toEqual([field, []])
+    expect(["pid", repeated(herdr.panes.flatMap((p) => p.processes.map((x) => x.pid)))]).toEqual([
+      "pid",
+      [],
+    ])
+    expect(repeated(herdr.workspaces.map((w) => w.workspace_id))).toEqual([])
   })
 
   test("the shipped fixture holds an id-named worker and an id-named checker live, the checker stuck at a prompt (#1592)", () => {
-    const { cmux, files } = shipped() as unknown as {
-      cmux: { sessions: Record<string, unknown>[] }
-      files: Record<string, unknown>
-    }
-    const nameOf = (session: Record<string, unknown>) => {
-      const args = session.launch_arguments as string[]
+    const { files, herdr } = shipped()
+    const nameOf = (pane: (typeof herdr.panes)[number]) => {
+      const args = (pane.processes[0]?.argv ?? []) as string[]
       return args[args.indexOf("-n") + 1] ?? ""
     }
-    const names = cmux.sessions.map(nameOf)
+    const names = herdr.panes.map(nameOf)
     // an id-named worker live, so its K3m9px-style label shows with no scratch edit
     expect(names).toContain("k3m9px-worker")
     // an id-named reviewer live and stuck at a prompt under the worker, so the sidebar draws the pair; the sinName reading itself is tested on its own
-    const checker = cmux.sessions.find((s) => nameOf(s) === "q7w8f2-reviewer")
-    expect(checker?.agent_lifecycle).toBe("needsInput")
+    const checker = herdr.panes.find((p) => nameOf(p) === "q7w8f2-reviewer")
+    expect(checker?.agent_status).toBe("blocked")
     // each live session's registry file at its pid, what a live read takes
     expect(files["sessions/900021.json"]).toBeTruthy()
     expect(files["sessions/900022.json"]).toBeTruthy()
@@ -761,11 +766,11 @@ const { homedir } = await import("node:os")
 const { listLive } = await import(\`\${API}/lib/dashboard/workers\`)
 const { dashboardHub } = await import(\`\${API}/lib/dashboard/hub\`)
 const { agentsBoard } = await import(\`\${API}/lib/dashboard/agents\`)
-const { run } = await import(\`\${API}/lib/dashboard/cmux\`)
+const { readScreen } = await import(\`\${API}/lib/dashboard/terminal\`)
 const { read } = await import(\`\${API}/lib/system/sampler\`)
 const { deliver, deliverDeps } = await import(\`\${API}/lib/dashboard/deliver\`)
 const { answerFeed, answerDeps } = await import(\`\${API}/lib/dashboard/feed\`)
-const { readFixtureCmux } = await import(\`\${API}/lib/dashboard/fixture\`)
+const { readFixtureHerdr } = await import(\`\${API}/lib/dashboard/fixture\`)
 const { mergedPrs } = await import(\`\${API}/lib/usage/prs\`)
 const { readOps } = await import(\`\${API}/lib/dashboard/ops\`)
 
@@ -778,7 +783,7 @@ off()
 const board = await agentsBoard()
 const named = (name) => live.workers.find((w) => w.name === name)
 const sloth = named("worker-sloth")
-const screen = await run(["read-screen", "--surface", live.surfaces.get(sloth.sessionId), "--lines", "40"])
+const screen = await readScreen(live.surfaces.get(sloth.sessionId), 40)
 const readings = await read()
 const merged = await mergedPrs(["example/fixture"], 0)
 const ops = await readOps()
@@ -817,7 +822,9 @@ console.log(JSON.stringify({
   opsLater: opsLater.map((row) => [row.job, row.status]),
   names: live.workers.map((w) => w.name),
   paused: named("planner").usageLimit ?? null,
-  pending: readFixtureCmux().feed.filter((i) => i.status === "pending").map((i) => i.request_id),
+  feed: live.workers.flatMap((w) => w.feed.map((item) => [w.name, item.kind, item.requestId])).sort(),
+  pending: Object.keys(readFixtureHerdr().prompts),
+  greedPane: live.surfaces.get(greed.sessionId),
   picker: picker.requestId,
   problems: readings.problems,
   pulls: readings.pulls,
@@ -850,7 +857,7 @@ describe.skipIf(onLiveDashboard())("a fixture stack", () => {
       `const { listLive } = await import(\`\${API}/lib/dashboard/workers\`)\nawait listLive().catch(() => null)\nconsole.log("{}")\nprocess.exit(0)\n`,
       dir,
       {
-        PLAYGROUND_CMUX_SESSIONS: "true",
+        PLAYGROUND_ALL_SESSIONS: "true",
         PLAYGROUND_LIVE_READS: "1",
         PATH: `${bin}:${process.env.PATH}`,
       },
@@ -1003,8 +1010,14 @@ describe.skipIf(onLiveDashboard())("a fixture stack", () => {
       "weekly-review",
     ])
     expect(out.answered).toMatchObject({ ok: true })
-    expect(out.pending).not.toContain(out.picker)
-    expect(readFixtureCmux(join(dir, "fixture")).feed.length).toBeGreaterThan(0)
+    // the answer cleared the picker the question's pane drew, in the scratch copy
+    expect(out.pending).not.toContain(String(out.greedPane).split(":").slice(2).join(":"))
+    expect(out.picker).toBe("toolu_fixture_prompt_2")
+    expect(out.feed).toEqual([
+      ["ops", "permission", "toolu_fixture_prompt_1"],
+      ["p9c3wx-tester", "plan", "toolu_fixture_prompt_3"],
+      ["worker-greed", "question", "toolu_fixture_prompt_2"],
+    ])
   }, 60_000)
 })
 

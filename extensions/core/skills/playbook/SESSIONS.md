@@ -179,7 +179,7 @@ Sessions run in bypass-permissions mode, yet some commands still prompt (`rm`, a
    A worker's brief says that before a push it runs only the touched tests, the list `extensions/core/skills/code-review-loop/scripts/state.py touched-tests <worktree> origin/canary HEAD` writes to a file it checks is non-empty before passing it to xargs (code-review-loop's two steps), and check-types, through run-slot, and leaves the full suite to GitHub Actions,
    whose `Audit, Lint, and Build` and `test` checks gate the head (**ci**).
    A worker's brief says that a PR holding a long-lived connection (a socket, a pub/sub subscriber, a retrying client) puts code-review-loop's lifecycle table in its Evidence before round 1, one row per path from connect to close.
-   A worker's brief says that a PR loosening a guard puts code-review-loop's refusal table in its Evidence before round 1: a `canary | head` row for each row it adds to `tests/scripts/hooks/fixtures/refused-forms.ts` or names in its `ALLOWED` list, and the refused-forms test's pass count at canary and at the head for the rest.
+   A worker's brief says that a PR loosening a guard puts code-review-loop's refusal table in its Evidence before round 1: a `canary | head` row for each row it adds to `tests/scripts/hooks/fixtures/refused-forms/` or names in a source file's `allowed` list, and the refused-forms test's pass count at canary and at the head for the rest.
    It also says that before each review round the worker sweeps: it runs canary's hook and the head's hook over that fixture plus forms of its own around the loosened class (a `source`, a function or alias defined in the same call, a name hashed in the same call), and fixes each form outside the class whose verdict differs, pinning each one canary refuses as a fixture row,
    since on 2 Nov the one hook PR that swept about 75 forms before round 3 found three classes there that the reviewer would otherwise have found one a round.
    The sweep is done when every form it ran outside the class gets canary's verdict at the head under review.
@@ -336,9 +336,9 @@ Done when the session's state record reads `working` with `at` after the resume,
 
 A finished worker, reviewer or tester ends automatically (`scripts/ops/optimizer/auto_end.ts`), so a lead ends one by hand only on a `Not ended` line:
 
-- `pr:merge` and the train's land end the merged PR's sessions by their roster `pr`, right after the merge; a worker `assign` gave a next task holds no `pr` of it, a checker whose worker's row names another PR stays to serve it, and a session with another of its PRs open stays, as the sweep holds it.
+- `pr:merge` and the train's land end the merged PR's sessions by their roster `pr`, right after the merge; a worker `assign` gave a next task holds no `pr` of it, a checker whose worker's row names another PR stays to serve it, and a session with another of its PRs open, its roster `prs` list's among them, stays, as the sweep holds it.
 - ops-tick's auto-end beat, every 5 minutes, ends a checker whose PRs are all merged or closed or whose worker is gone, a worker whose PRs are all merged or closed, and a reviewer idle 30+ minutes whose every head carries its verdict.
-  A session's PRs are its roster `pr` and open branch PRs, its worker's, and every PR its own or its worker's transcript links, so one still open keeps it.
+  A session's PRs are its roster `pr` and `prs` list, its open branch PRs, its worker's, and every PR its own or its worker's transcript links, so one still open keeps it.
 - Each end runs `spawn.sh close <name>`, then `roster.ts report <name> "ended automatically: <why>" status=ended`, the merged sha in the why, and sends its lead one line: its roster `lead`, else its worker's.
 - Guards: only a worker, reviewer or tester, not busy for 10+ minutes, with no uncommitted or unpushed work in a worktree it used (the main checkout, where every session starts, is not one); otherwise its lead gets a `Not ended` line saying why, and the session waits.
   A cmux session's close is refused the same way, so its lead closes it by hand below.

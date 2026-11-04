@@ -25,7 +25,7 @@ import { onLiveDashboard } from "../../../../../dashboard-fixture"
 import { liveReads } from "../../../../../live-reads"
 
 // These drive the live paths against the test's own scratch files, every one of them stored as on a stack opted in to every session (own.ts).
-liveReads({ PLAYGROUND_CMUX_SESSIONS: "true" })
+liveReads({ PLAYGROUND_ALL_SESSIONS: "true" })
 
 // Reads back what the importer wrote, from a throwaway Postgres in Docker published on 127.0.0.1 only, with the repo's migrations applied; skipped where Docker is not running.
 const MIGRATIONS = join(import.meta.dir, "../../../../../../packages/db/drizzle")
