@@ -5,6 +5,7 @@ import { join, relative } from "node:path"
 
 import { removeScratch } from "@packages/safe-delete"
 
+import { CLOCK_EXEMPT, clockExempt } from "./clock-exempt"
 import { sandbox } from "./sandbox"
 
 const TIMINGS = "tests/timings.json"
@@ -33,9 +34,14 @@ const dropScratch = () => {
 // a worktree with none of the env files bun test loads (a skill-only chore; it skips .env.local) has no values for the apps' env schemas, so a test that imports one would fail its validation, unless the caller set the flag
 if (![".env", ".env.test", ".env.test.local"].some((file) => existsSync(file)))
   Object.assign(env, { SKIP_ENV_VALIDATION: process.env.SKIP_ENV_VALIDATION ?? "true" })
+// CI's clock-ahead pass: with CLOCK_AHEAD_DAYS set, every test file reads a clock that many days on, so a test that mixes a fixed clock with the real one fails on its own PR rather than on the day the real clock reaches it
+const ahead = Boolean(process.env.CLOCK_AHEAD_DAYS)
+const clock = ahead ? [`--preload=${join(import.meta.dir, "../../../tests/clock-ahead.ts")}`] : []
 const run = (argv: string[]) =>
-  Bun.spawnSync(["bun", "test", ...argv], { env, stdio: ["inherit", "inherit", "inherit"] })
-    .exitCode ?? 1
+  Bun.spawnSync(["bun", "test", ...clock, ...argv], {
+    env,
+    stdio: ["inherit", "inherit", "inherit"],
+  }).exitCode ?? 1
 
 // bun's own test timeout cannot stop a test blocked in sync code (a spawnSync that never returns held a worker 29 minutes once), so the parallel pass has a deadline: each worker marks the file it holds through a preload that runs once per test file, and a pass past the deadline is killed as a group and fails naming the files still marked
 const DEADLINE_MS = Number(process.env.TEST_PARALLEL_DEADLINE_MS) || 20 * 60_000
@@ -56,7 +62,7 @@ const held = () =>
   })
 let interrupted: NodeJS.Signals | undefined
 const runParallel = async (argv: string[]) => {
-  const child = Bun.spawn(["bun", "test", `--preload=${preload}`, ...argv], {
+  const child = Bun.spawn(["bun", "test", `--preload=${preload}`, ...clock, ...argv], {
     detached: true,
     env,
     stdio: ["inherit", "inherit", "inherit"],
@@ -117,7 +123,11 @@ if (missing.length > 0) {
 const serial = SERIAL.filter((file) =>
   paths.map(bare).some((path) => path === "." || file === path || file.startsWith(`${path}/`)),
 )
-const rest = paths.filter((path) => !SERIAL.includes(bare(path)))
+// a shard names its files, which no ignore pattern drops, so the clock-ahead pass drops its exempt ones here
+const left = ahead ? paths.filter((path) => clockExempt(bare(path))) : []
+const rest = paths.filter((path) => !SERIAL.includes(bare(path)) && !left.includes(path))
+if (left.length > 0)
+  console.error(`test-sandbox: the clock-ahead pass leaves out ${left.join(", ")}`)
 
 console.error(
   `test-sandbox: ${workers} workers with a ${Math.round(DEADLINE_MS / 1000)}s deadline, then ${serial.length} serial files`,
@@ -130,6 +140,7 @@ const parallel =
         ...timings,
         ...(update ? ["--update-timings"] : []),
         ...SERIAL.map((file) => `--path-ignore-patterns=${file}`),
+        ...(ahead ? CLOCK_EXEMPT.map(([pattern]) => `--path-ignore-patterns=${pattern}`) : []),
         ...rest,
       ])
     : 0

@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test"
-import { mkdtempSync, rmSync } from "node:fs"
+import { mkdtempSync, rmSync, utimesSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -1229,6 +1229,8 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       const kept = async (bytes: Uint8Array, name: string, kind: string) => {
         const stored = await storeAttachment(bytes, name, { dir })
         if (!stored.ok) throw new Error("not stored")
+        // its mtime on the test's clock, which the next store's sweep ages it by, so the clock-ahead pass reads it as just stored
+        utimesSync(join(dir, stored.id), new Date(), new Date())
         return { id: stored.id, kind, name }
       }
       beforeAll(() => {

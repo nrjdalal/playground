@@ -27,7 +27,7 @@
   Each section is a component of its own under `components/settings/`.
   Its words say Dashboard, never dashboard.
   A place that has only an agent's name names it by `agentLabel`, the name alone with no @ (`web/next/src/lib/agent-label.ts`): `worker-gluttony` reads Gluttony and `k3m9px-worker` K3m9px, a reviewer or tester keeping its role (`k3m9px-reviewer` K3m9pxReviewer);
-  a manager reads its role word and a dispatcher Alpha or Bravo (`roleLabel`: `builder` Builder, `ops` Ops, `planner` Planner, `dispatcher` Alpha, `dispatcher-2` Bravo); `site.name` keeps its own spelling (Playground) and any other name has its first letter capitalised),
+  a manager reads its role word and a dispatcher Alpha or Bravo (`roleLabel`: `builder` Builder, `ops` Ops, `planner` Planner, any other manager kind its kind's word (`assistant` Assistant), `dispatcher` Alpha, `dispatcher-2` Bravo); `site.name` keeps its own spelling (Playground) and any other name has its first letter capitalised),
   through `AgentLink` (`components/dashboard/agent-link.tsx`), which links it to its view while its session is live, resolves a peer address to its session's name, and keeps the raw name on hover; message bodies stay as written.
   An agent the board holds reads by its label in `AgentLink` and the System page's Agent column (`labelOf`: `ENG-262#73 Worker`, `ENG-262#73 Reviewer`, Builder, the sidebar's rule in `.agents/dashboard/sidebar.md`), whose search matches the label and the name.
   A live dispatcher reads as its chat names it, Alpha or Bravo (`chatLabel`), and a place that has only a name (the Inbox's sender, a Feed card) keeps `agentLabel`.
