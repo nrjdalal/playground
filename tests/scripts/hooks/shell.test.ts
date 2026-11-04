@@ -1,8 +1,18 @@
 import { describe, expect, test } from "bun:test"
-import { readdirSync, readFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync } from "node:fs"
+import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { type Env, GIT_TAKES, lex, run, stdinShell } from "../../../scripts/hooks/shell"
+import {
+  type Env,
+  GIT_TAKES,
+  lex,
+  places,
+  run,
+  stdinShell,
+  withDeadline,
+} from "../../../scripts/hooks/shell"
+import { type Paths, REFUSED_FORMS } from "./fixtures/refused-forms"
 
 const HOOKS = join(import.meta.dir, "..", "..", "..", "scripts", "hooks")
 
@@ -50,6 +60,147 @@ describe("an alternate reading runs on its own copy of the env", () => {
 
   test("the primary reading still moves the folder and sets the variables", async () => {
     expect(await seen("cd /; export A=1; probe")).toEqual({ cwd: "/", vars: ["A"] })
+  })
+})
+
+// Env.cwd's own reading follows zsh's ~- through the one folder Env.old names, and the proven reading through the set Env.cwdBack holds, so the set must hold that folder or the two readings could disagree on where a `cd -` or `pushd ~-` goes back to.
+// The fixture's paths as folders made under a mkdtemp root, so Env.cwd's reading lands in them; each line is read as text by the reader alone and never run.
+const madePaths = (prefix: string): Paths => {
+  const root = mkdtempSync(join(tmpdir(), prefix))
+  const extensions = join(root, "data", "extensions")
+  const paths: Paths = {
+    BARE: join(root, "bare"),
+    CLI_DIR: join(root, "cli"),
+    DATA: join(root, "data"),
+    HOME: join(root, "home"),
+    LINK: join(root, "home", "store"),
+    LIST: join(extensions, "hooks", "list.json"),
+    MAIN: join(root, "main"),
+    ROOT: extensions,
+    SCOPE: join(extensions, "login"),
+    WORDS: join(root, "home", "words"),
+    WORK: join(root, "home", "work"),
+  }
+  for (const [key, dir] of Object.entries(paths))
+    if (key !== "LIST") mkdirSync(dir, { recursive: true })
+  mkdirSync(join(paths.MAIN, ".claude", "worktrees", "a"), { recursive: true })
+  return paths
+}
+
+const fixtureLines = (paths: Paths) =>
+  REFUSED_FORMS.flatMap(({ rows }) => rows(paths))
+    .map(([, call]) => call)
+    .filter((call): call is string => typeof call === "string")
+
+describe("the folder Env.old names is always one Env.cwdBack holds", () => {
+  const paths = madePaths("old-in-back-")
+
+  const read = async (lines: string[]) => {
+    let reads = 0
+    const misses: string[] = []
+    for (const line of lines) {
+      const start = paths.WORK
+      const env: Env = {
+        cwd: start,
+        cwdSure: start,
+        files: new Map(),
+        known: {},
+        old: { dir: start },
+        process: {},
+        vars: new Map(),
+      }
+      await run(lex(line), env, async (_cmd, _parsed, here) => {
+        const dir = here.old?.dir
+        if (dir === undefined || here.cwdBack === undefined) return undefined
+        reads++
+        if (!here.cwdBack.includes(dir)) misses.push(`${line} :: ${dir}`)
+        return undefined
+      })
+    }
+    return { misses, reads }
+  }
+
+  test("after every cd, pushd and popd of the refused-forms rows", async () => {
+    const lines = fixtureLines(paths).filter((call) => /\b(?:cd|pushd|popd)\b/.test(call))
+    const { misses, reads } = await read(lines)
+    expect(misses).toEqual([])
+    expect(reads).toBeGreaterThan(50)
+  })
+
+  // a body's cd moves Env.cwd's reading but not the proven one, so a relative cd after it lands somewhere only Env.cwd's reading names, and the cd after that leaves it as the folder Env.old names
+  test("after a relative cd that follows a function body's cd", async () => {
+    const { misses, reads } = await read(["f() { cd /usr; }; cd lib; cd ..; touch x"])
+    expect(misses).toEqual([])
+    expect(reads).toBeGreaterThan(0)
+  })
+})
+
+// The hooks that judge each folder places() names see what canary's hooks see only while that set holds the folder Env.cwd's own reading names, so a form whose folder only Env.cwd's reading reaches would run under them; past the cap the reader names no set and each hook refuses outright.
+describe("places() holds the folder Env.cwd names, unless the reader passed its cap", () => {
+  const paths = madePaths("places-hold-cwd-")
+  const worktree = join(paths.MAIN, ".claude", "worktrees", "a")
+
+  const read = async (lines: string[]) => {
+    let reads = 0
+    const misses: string[] = []
+    for (const line of lines)
+      for (const start of [worktree, paths.MAIN]) {
+        const env: Env = {
+          cwd: start,
+          cwdSure: start,
+          files: new Map(),
+          known: {},
+          old: { dir: start },
+          process: {},
+          vars: new Map(),
+        }
+        const visit: Parameters<typeof run>[2] = async (_cmd, _parsed, here) => {
+          if (here.cwd === undefined || here.cwdAnywhere) return undefined
+          reads++
+          const folders = places(here, start).map((place) => place.cwd)
+          if (!folders.includes(here.cwd)) misses.push(`${line} :: ${here.cwd}`)
+          return undefined
+        }
+        try {
+          await withDeadline(2_000, async () => run(lex(line), env, visit, true))
+        } catch {
+          // a line the reader throws on, or reads past its deadline, is one every hook refuses whole, so it holds no folder to compare
+        }
+      }
+    return { misses, reads }
+  }
+
+  test("at every command of the refused-forms rows", async () => {
+    const { misses, reads } = await read(fixtureLines(paths))
+    expect(misses).toEqual([])
+    expect(reads).toBeGreaterThan(500)
+  }, 120_000)
+
+  // a body's cd, then a cd or pushd relative to wherever it reached, from a worktree and from the main checkout
+  test("at every command after a body's cd and a relative one", async () => {
+    const lines: string[] = []
+    for (const open of [
+      "{ cd X; }",
+      "f() { cd X; }; f",
+      "f() { cd X; }",
+      "coproc cd X",
+      "{ cd X; cd ..; }",
+    ])
+      for (const to of ["..", "../..", paths.MAIN, `${paths.MAIN}/.claude`, "/tmp"])
+        for (const tail of [
+          "cd ..; P",
+          "cd ..; cd ..; P",
+          "pushd .. >/dev/null; P",
+          "(cd ..; P)",
+          "cd .. && P",
+          "cd worktrees/a && P",
+          "cd -; P",
+          "pushd; P",
+        ])
+          lines.push(`${open.replace("X", to)}; ${tail.replaceAll("P", "git commit -m x")}`)
+    const { misses, reads } = await read(lines)
+    expect(misses).toEqual([])
+    expect(reads).toBeGreaterThan(lines.length)
   })
 })
 

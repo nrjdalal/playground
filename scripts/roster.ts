@@ -23,13 +23,14 @@ import STATUSES from "./roster-statuses.json"
 export const USAGE = `Usage:
   roster.ts set <name> key=value [key=value ...]    (creates the agent if missing, its role from kind= or its name; a new one needs task=)
   roster.ts report <name> <text> [key=value ...]    (sets lastReport, stamps lastReportAt; a new one needs task=)
-  roster.ts assign <name> <title> <task> [k=v ...]  (new task, or a checker's next PR with worker= pr=; clears pr/branch/repo/lastReport)
+  roster.ts assign <name> <title> <task> [k=v ...]  (new task, or a checker's next PR with worker= pr=, which joins its prs list; clears pr/branch/repo/lastReport)
   roster.ts backlog <text>
   roster.ts backlog-done <index> <issue>            (marks the 0-based entry filed: "[#<issue>] <text>")
   roster.ts backfill                                (gives each entry with no kind the one its name's prefix gives)
   roster.ts who <kind>                              (prints the name holding a manager kind's seat; writes nothing)
   roster.ts who dispatcher [1|2]                    (prints the dispatcher in slot 1, Alpha, by default, or 2, Bravo; writes nothing)
   roster.ts who assistant                           (prints the live session the roster gives the assistant kind, else exits 1; writes nothing)
+A checker's prs list holds every PR it serves, so auto-end keeps it while one is open: prs=<pr>,<pr> sets it, prs+=<pr> adds one, prs-=<pr> removes one, and a PR not yet opened goes in as its issue's URL.
 Times always come from the UTC clock; titles are capped at 40 chars.`
 
 type Agent = Record<string, unknown> & { name: string }
@@ -105,10 +106,39 @@ const prUrl = (raw: string, repo: string): string => {
   )
 }
 
+const ISSUE_URL_RE = /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/issues\/\d+$/
+
+// A prs entry: a PR as pr takes one, or the issue of a PR not yet opened, by its URL.
+const prsEntry = (raw: string, repo: string): string => {
+  if (ISSUE_URL_RE.test(raw)) return raw
+  try {
+    return prUrl(raw, repo)
+  } catch {
+    throw new Refusal(
+      `roster.ts: prs takes https://github.com/<owner>/<name>/pull/<n> or its number alone, or a PR not yet opened as https://github.com/<owner>/<name>/issues/<n>, not ${raw}`,
+      2,
+    )
+  }
+}
+
+const PRS_KEYS = new Set(["prs", "prs+", "prs-"])
+
 function apply(entry: Agent, pairs: [string, string][], factoryRepo: string): void {
   const given = pairs.find(([k]) => k === "repo")
   const repo = (given ? given[1] : (entry.repo as string | undefined)) || factoryRepo
   for (const [k, raw] of pairs) {
+    if (PRS_KEYS.has(k)) {
+      const named = raw
+        .split(",")
+        .filter((one) => one.trim())
+        .map((one) => prsEntry(one.trim(), repo))
+      const held = k === "prs" ? [] : ((entry.prs as string[] | undefined) ?? [])
+      const next =
+        k === "prs-" ? held.filter((u) => !named.includes(u)) : [...new Set([...held, ...named])]
+      if (next.length) entry.prs = next
+      else delete entry.prs
+      continue
+    }
     const v = k === "title" ? titled(raw) : k === "pr" && raw !== "" ? prUrl(raw, repo) : raw
     if (v === "") delete entry[k]
     else entry[k] = v
@@ -216,7 +246,7 @@ async function main(argv: string[]): Promise<void> {
   }
   const roster = await load()
   // A bare PR number links into factory.repo, read only when one is given.
-  const factoryRepo = rest.some((word) => /^pr=#?[1-9]\d*$/.test(word))
+  const factoryRepo = rest.some((word) => /^(?:pr|prs[+-]?)=(?:.*,)?#?[1-9]\d*(?:,|$)/.test(word))
     ? await factoryRepoOf().catch((error: Error) => {
         throw new Refusal(`roster.ts: ${error.message}`, 2)
       })
@@ -250,10 +280,18 @@ async function main(argv: string[]): Promise<void> {
     checkPairs(name!, pairs)
     const entry = agent(roster, name!, pairs, task)
     checkRetask(entry, pairs, factoryRepo, true)
+    // A checker keeps every PR it served in its prs list, and its next PR joins it, so auto-end holds it while any is open.
+    const checker = ["reviewer", "tester"].includes(kindOf(entry.name, entry.kind) ?? "")
+    const served =
+      checker && entry.pr && !pairs.some(([k]) => PRS_KEYS.has(k)) ? [entry.pr as string] : []
     for (const k of ["pr", "branch", "repo", "lastReport", "lastReportAt", "eta", "ticket"])
       delete entry[k]
     Object.assign(entry, { status: "working", task })
     apply(entry, [["title", title], ...pairs], factoryRepo)
+    if (checker && entry.pr)
+      entry.prs = [
+        ...new Set([...served, ...((entry.prs as string[] | undefined) ?? []), entry.pr as string]),
+      ]
   } else if (cmd === "backlog") {
     if (rest.length > 0) throw new Refusal('usage: roster.ts backlog "<text>"', 2)
     roster.backlog = [...(roster.backlog ?? []), name!]

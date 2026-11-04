@@ -136,9 +136,10 @@
   An answer whose delivery failed (on 9 Oct, 11 failed unseen with `CMUX_FAILED` and #i76's Send never went out) still needs them (`deliveryFailed` in `api/hono/src/lib/dashboard/inbox.ts`, `sendFailed` in `web/next/src/lib/inbox.ts`):
   it stays in the list and its count past ten minutes and past the week, its result line in red reading `Send failed: <reason>`, `Lost: <reason>` for `LOST`, or `Send unconfirmed: whether <taker> has it is not known` when typing began or a held answer's transcript could not be read back (`INTERRUPTED`), or the adapter threw (`ERROR`), so the answer may be in the session already;
   an unconfirmed one offers Check it for me (`sendUnconfirmed`), which sends the dispatcher a note through the outbox asking it to look at the poster's transcript and report (`checkAnswerNote`), since the owner works in the Dashboard alone;
-  Retry is offered only after a failure that comes before anything is typed, a lost one, or a stuck queued one (`RETRY_CODES`: `CMUX_FAILED`, `INPUT_NOT_EMPTY`, `LOST`, `NOT_FOUND`, `ON_PICKER`, and `stuckQueued`, so it never types an answer twice) and marks it pending in one write that holds only while it still reads failed or queued at the version read and types it again (`retryDelivery`),
+  Retry is offered only after a failure that comes before anything is typed, a lost one, or a stuck queued one (`RETRY_CODES`: `CMUX_FAILED`, `INPUT_NOT_EMPTY`, `LOST`, `NOT_FOUND`, `ON_PICKER`, `UPLOAD_FAILED`, and `stuckQueued`,
+  so it never types an answer twice) and marks it pending in one write that holds only while it still reads failed or queued at the version read and types it again (`retryDelivery`),
   until it is delivered or they press its own Dismiss;
-  the session carries it out, and the Dashboard itself never sends, merges or files anything.
+  the session carries it out, and the Dashboard itself never sends a message, merges or files anything, sharing only a Slack send's files and running only an `accept` decision's accept (both below).
   No session row carries a count, Playground's included (Worker Lights): the Inbox tab counts what needs the owner and arrived since their last look at the Inbox (`newInInboxCount` in `web/next/src/lib/tab-dot.ts`, the rule `newInInbox` lights the tab dot by), so a look clears it with no answer given,
   its name reading `N new` (a click made only to clear the bar's dot),
   while the Inbox's first row counts every item in the list; the API's `inboxCount` (`api/hono/src/lib/dashboard/inbox.ts`), which Needs you and the sidebar read, counts the open decisions and drafts and the answers that failed to send, plus the unread updates, one put away with Snooze counted again only once its time has passed,
@@ -226,8 +227,13 @@
   `none` or what still depends on the target, and is refused without it,
   the refusal naming the checks; `checked` stays in the stored payload and the owner's card does not show it.
   A draft's is `{to, text, thread?, attachments?}`: `to` a short name ("a teammate's thread", "a teammate's DM").
-  Its `attachments`, such as an issue's before and after shots, show under its words as an ask's do, and stay on the card: Send hands its poster the words alone (`deliveryText`), since the dashboard uploads no file to Slack.
-  A `slack` decision's `attachments` show under its message the same way, and Approve hands its poster the words alone too.
+  Its `attachments`, such as an issue's before and after shots, show under its words as an ask's do, and while it is open its card reads `2 files · uploads on Send` under them when its `link` names a Slack conversation (`uploadsOn` in `web/next/src/lib/inbox.ts`).
+  On Send, the dashboard shares those files into that link's channel and thread before the words reach the poster (`filesToUpload` in `inbox.ts`, through `playground dm upload <item id>`, messages.md), and the card's result line counts them (`You sent it · 2 files shared`); the poster still gets the words alone (`deliveryText`).
+  A Linear draft's files, a draft's with no Slack link, and one whose link's thread part does not parse (`slackPlace`) stay on the card; a link that names no thread shares them at its conversation's top level.
+  A `slack` decision's `attachments` show under its message the same way, its card reading `uploads on Approve`, and Approve or Edit shares them the same way.
+  A share Slack refuses, or a file gone from the attachments folder, fails the send before anything is typed (`UPLOAD_FAILED`, `Send failed: The files did not upload to Slack: <why>`), which Retry shares again;
+  a send that shared its files keeps their count in its answer (`uploaded`), so a Retry after the words failed to type shares none twice, and a fixture or test stack shares nothing and counts 0, which its line leaves out.
+  Once the files have gone, words that then fail unconfirmed (`INTERRUPTED`, `ERROR`) or go to the dispatcher by relay leave the files in the thread with no reply yet.
   A draft, and a `slack` decision, carries `thread` whenever the reply answers a Slack conversation, so a Slack draft shows a short summary of who said what at the other end, with the drafted reply below.
   It holds 1 to 12 `{who, said}`, oldest first: `who` the display name as Slack shows it (a first name, never a raw token), `said` the gist of that message in one line of plain STE100 words.
   The card shows them as So far above the words to send, a draft's under Your reply, each gist rendered through `TranscriptMarkdown card`; `bun run ask example slack` prints a `slack` decision with its `thread` filled.
