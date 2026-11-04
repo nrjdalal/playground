@@ -784,19 +784,22 @@ slot_open() {
   fi
   return 0
 }
-# whether the gauges open slots 2 to 4: the CPU 40% idle or more, load1 under 30 and mem_ok passing (dispatcher, 3 Nov: the resting sessions
-# held load1 at 14 to 20 on 15 cores while the CPU sat 53 to 67% idle, so the old load1 lines of 12 and the cores left one lane open with 24 to
-# 33 runs waiting; load1 30 stays a hard stop for the spikes, load1 64 after a burst of starts and 73 after a clone); a run's verdict that
-# differs from the last, run-slot.lanes, is a lanes line in run-slot.runs.log with both gauges, while a read subcommand writes neither
+# whether the gauges open slots 2 to 4: mem_ok passing and the CPU 40% idle or more under load1 30, or 50% idle or more from load1 30 up to 45
+# (dispatcher, 3 Nov: the resting sessions held load1 at 14 to 20 on 15 cores while the CPU sat 53 to 67% idle, so the old load1 lines of 12
+# and the cores left one lane open with 24 to 33 runs waiting; retro 36, 4 Nov: at a load1 30 stop the lanes were shut 109 of 120 minutes
+# with the CPU about half idle, and heavy runs waited up to 122 minutes); load1 45 stays a hard stop for the spikes, load1 64 after a burst
+# of starts and 73 after a clone; a run's verdict that differs from the last, run-slot.lanes, is a lanes line in run-slot.runs.log with both
+# gauges, while a read subcommand writes neither
 lanes_open() {
-  local idle swap load verdict=shut seen
+  local idle swap load need="" verdict=shut seen
   read -r idle swap <<< "$(gauges)"
   load=$(loadavg | awk '{print $2}')
   case "$idle" in
     -) told idle "run-slot.sh: cannot read the CPU's idle share (top -l 2 -n 0), so slots 2 to 4 stay shut" ;;
     busy) told busy "$BUSY_TOLD" ;;
   esac
-  [ "$idle" != - ] && [ "$idle" != busy ] && [ "${idle%.*}" -ge 40 ] && [ "${load%.*}" -lt 30 ] 2>/dev/null && mem_ok && verdict=open
+  if [ "${load%.*}" -lt 30 ] 2>/dev/null; then need=40; elif [ "${load%.*}" -lt 45 ] 2>/dev/null; then need=50; fi
+  [ -n "$need" ] && [ "$idle" != - ] && [ "$idle" != busy ] && [ "${idle%.*}" -ge "$need" ] 2>/dev/null && mem_ok && verdict=open
   seen=$(cat "$OPS/run-slot.lanes" 2>/dev/null)
   if [ -z "$CAN_TAKE" ] && [ "$seen" != "$verdict" ]; then
     echo "$verdict" > "$OPS/run-slot.lanes"

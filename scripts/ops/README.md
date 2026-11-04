@@ -19,8 +19,8 @@ The factory's ops scripts, moving here from `~/.playground/ops`. The code lives 
 
 How run-slot runs the factory's **slots** rule (`extensions/core/rules/slots.md`), beside its entry above.
 
-- Slots open one to four, each giving 2 load units: `run-slot` always, and `run-slot-2` to `run-slot-4` while the CPU is 40% idle or more in `top -l 2 -n 0`'s second sample, load1 is under 30 and memory passes `mem_ok` (`lanes_open`).
-  The idle share is the gauge, since the factory's resting sessions hold load1 at 14 to 20 on 15 cores while the CPU sits 53 to 67% idle (3 Nov); load1 30 stays a hard stop for the spikes a fresh run shows only a minute late, load1 64 after a burst of starts and 73 after a clone.
+- Slots open one to four, each giving 2 load units: `run-slot` always, and `run-slot-2` to `run-slot-4` while memory passes `mem_ok` and the CPU, in `top -l 2 -n 0`'s second sample, is 40% idle or more with load1 under 30, or 50% idle or more with load1 from 30 up to 45 (`lanes_open`).
+  The idle share is the gauge, since the factory's resting sessions hold load1 at 14 to 20 on 15 cores while the CPU sits 53 to 67% idle (3 Nov), and a load1 30 stop kept the lanes shut 109 of 120 minutes with the CPU about half idle while heavy runs waited up to 122 minutes (retro 36, 4 Nov); load1 45 stays a hard stop for the spikes a fresh run shows only a minute late, load1 64 after a burst of starts and 73 after a clone.
   `mem_ok` asks for a free share of 40% or more, pressure normal and swap-ins under `SWAPINS_MAX` (100) a second, the rate `swapin_rate` reads from `vm_stat -c 2 1`'s second sample, as spawn.sh's `swapins()` does, since the first counts since boot; an unread `top`, or a `vm_stat` missing either sample, keeps the lanes shut, said once a run on stderr.
   The swap-in rate stands in for swap use, since macOS grows its swap files as they fill, so used over total read about 88% at 08:47Z on 3 Nov, a record of past swapping that a 70% line would turn into one lane all day.
   Every look shares one reading of both through `run-slot.gauges` for 10 s, since a `top` takes a second and about 0.7 s of system CPU.

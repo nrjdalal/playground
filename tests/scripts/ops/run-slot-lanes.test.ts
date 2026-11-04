@@ -44,15 +44,53 @@ describe("slots 2 to 4 open on the CPU's idle share", () => {
 })
 
 // load1 64 after a burst of starts, 73 after a clone let through at load5 under 30, and 58 at 04:15Z on 3 Nov: a spike shuts the lanes however idle top found the CPU
-describe("load1 at 30 is a hard stop", () => {
-  test("load1 at 30 shuts slots 2 to 4 at 80% idle", () => {
-    expect(slots({ idle: 80, load1: 30 })).toBe("1\n")
+describe("load1 at 45 is a hard stop", () => {
+  test("load1 at 45 shuts slots 2 to 4 at 80% idle", () => {
+    expect(slots({ idle: 80, load1: 45 })).toBe("1\n")
   })
 
-  test("the 08:47Z reading shuts them: load1 31 with the CPU 57% idle, its runs waiting on paging", () => {
-    expect(slots({ idle: 57, load1: 31 })).toBe("1\n")
+  test("load1 64 shuts them at 60% idle", () => {
+    expect(slots({ idle: 60, load1: 64 })).toBe("1\n")
+  })
+})
+
+// retro 36, 4 Nov: lanes 2 to 4 were shut 109 of 120 minutes at load1 30 or more with the CPU about half idle ("shut idle=60.94% load1=33.75" at 19:29:23Z), and heavy runs waited up to 122 minutes
+describe("from load1 30 up to 45 the CPU must be half idle", () => {
+  test("idle 56% at load1 31 opens them", () => {
+    expect(slots({ idle: 56, load1: 31 })).toBe("4\n")
   })
 
+  test("idle 50% at load1 44.9 opens them", () => {
+    expect(slots({ idle: 50, load1: 44.9 })).toBe("4\n")
+  })
+
+  test("idle 45% at load1 31 shuts them", () => {
+    expect(slots({ idle: 45, load1: 31 })).toBe("1\n")
+  })
+
+  test("idle 49.9% at load1 30 shuts them", () => {
+    expect(slots({ idle: 49.9, load1: 30 })).toBe("1\n")
+  })
+
+  test("idle 56% at load1 31 with swap-ins at 100/s shuts them, as mem_ok reads it", () => {
+    expect(slots({ idle: 56, load1: 31, swapins: 100 })).toBe("1\n")
+  })
+
+  // PG-704's 08:47Z reading on 3 Nov, its runs waiting on paging: 176M of this Mac's 24 GB unused, a free share under 1%, so mem_ok shuts it
+  test("the 08:47Z reading shuts them through mem_ok: load1 31, 57% idle, 176M of memory unused", () => {
+    expect(slots({ free: 0, idle: 57, load1: 31 })).toBe("1\n")
+  })
+
+  test("the 10:39:51Z reading on 3 Nov shuts them: load1 31.53, 32.89% idle, swap-ins at 335/s", () => {
+    expect(slots({ idle: 32.89, load1: 31.53, swapins: 335 })).toBe("1\n")
+  })
+
+  test("tonight's 19:29:23Z reading opens them: load1 33.75, 60.94% idle, no swap-ins", () => {
+    expect(slots({ idle: 60.94, load1: 33.75, swapins: 0 })).toBe("4\n")
+  })
+})
+
+describe("under load1 30 the CPU must be 40% idle", () => {
   test("load1 at 29 leaves them open", () => {
     expect(slots({ idle: 80, load1: 29.9 })).toBe("4\n")
   })
