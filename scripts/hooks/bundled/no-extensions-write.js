@@ -2064,7 +2064,7 @@ function awkPrograms(words) {
   return programs.length ? programs : undefined;
 }
 var LITERALS = [/"((?:[^"\\\n]|\\.)*)"/g, /'((?:[^'\\\n]|\\.)*)'/g, /`((?:[^`\\]|\\.)*)`/g];
-var NAMES_HOME = /\bHOME\b|\bhomedir\b/;
+var NAMES_HIDDEN = /\bHOME\b|\bhomedir\b|\bplayground\b/;
 var SHELL_GLOB = /[*?[]/;
 var BUILTINS = new Set([
   ".",
@@ -2391,7 +2391,7 @@ async function inspect(raw, environment, unknown = false) {
       script.push(text.value);
     }
     const program = rootLine || feeds(cmd, env) ? undefined : evalProgram(parsed);
-    const opaque = program && !program.glob && !marked(program.value) && !texts(program).some((t) => places(env).some((here) => holds(t.value, here)) || t.value.includes(basename3(dirname3(root))) || NAMES_HOME.test(t.value)) ? program : undefined;
+    const opaque = program && !program.glob && !marked(program.value) && !texts(program).some((t) => places(env).some((here) => holds(t.value, here)) || t.value.includes(basename3(dirname3(root))) || NAMES_HIDDEN.test(t.value)) ? program : undefined;
     const lines = runsOf(opaque ? { ...parsed, args: args.filter((w) => w !== opaque) } : parsed, vars, whole, rootLine);
     for (const raw of reader ? [] : [...script, ...lines]) {
       const line = xargs?.replace && fed ? filled(raw, xargs.replace, fed.unknown ? UNKNOWN : fed.value) : raw;
