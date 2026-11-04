@@ -210,7 +210,7 @@ describe("dispatcherOf: the dispatcher holding a slot", () => {
 })
 
 describe("rosteredOf", () => {
-  // #798 round 1: the roster keeps an ended dispatcher-2 for good, which kept a Bravo, Not running row
+  // the roster keeps an ended dispatcher-2 for good, which kept a Bravo, Not running row
   test("the roster's names but an ended entry's, a crashed or parked one kept", () => {
     const agents = [
       { name: "dispatcher", status: "working" },

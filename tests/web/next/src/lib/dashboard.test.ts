@@ -1048,7 +1048,7 @@ describe("dispatchersOf", () => {
     ])
   })
 
-  // #798 round 1: the roster keeps an ended dispatcher-2 for good, so the board's agents still list it
+  // the roster keeps an ended dispatcher-2 for good, so the board's agents still list it
   test("a second dispatcher whose roster entry has ended keeps no slot", () => {
     const agents = [
       { name: OLD.dispatcher, status: "working" },

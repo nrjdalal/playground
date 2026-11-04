@@ -257,7 +257,7 @@ describe("DISPATCHERS", () => {
     expect(dispatcherSlots([OLD.dispatcher], new Set([`${OLD.dispatcher}-2`]))).toBe(1)
   })
 
-  // #798 round 1: an ended dispatcher-2 entry, which the roster keeps for good, counted a second slot
+  // an ended dispatcher-2 entry, which the roster keeps for good, counted a second slot
   test("an ended second dispatcher's roster entry counts no slot", () => {
     const agents = [
       { name: OLD.dispatcher, status: "working" },
