@@ -602,13 +602,12 @@ describe("a quoted argument is read as a command line only where a program runs 
     ],
     ["rm of a held variable beside set -o", 'X=/tmp/a; set -o pipefail; rm -rf "$X"'],
     ["rm of a held variable zsh ties to nothing", 'P=/tmp/a; rm -rf "$P"'],
-    ["rm of a held variable beside a plain zsh P read", 'D=/tmp/a; echo ${(P)N}; rm -rf "$D"'],
-    ["rm of a held variable beside bash's indirect read", 'X=/tmp/a; echo "${!N}"; rm -rf "$X"'],
-    [
-      "rm of a held variable beside a subscripted bash indirect read",
-      'X=/tmp/a; N=Y; echo "${!N[0]}"; rm -rf "$X"',
-    ],
+    ["rm of a held variable beside bash's name list", 'X=/tmp/a; echo "${!N*}"; rm -rf "$X"'],
     ["rm of a held variable beside bash's array keys", 'X=/tmp/a; echo "${!N[@]}"; rm -rf "$X"'],
+    [
+      "rm of a held variable beside tests that read no name",
+      'X=/tmp/a; test -v Y && [ -n "$X" ] && [ "$X" = /tmp/a ] && rm -rf "$X"',
+    ],
     [
       "rm of a held variable beside arithmetic on literals",
       'X=/tmp/a; echo $((1 + 2)); rm -rf "$X"',

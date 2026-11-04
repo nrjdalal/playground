@@ -211,6 +211,96 @@ export const groups: Group[] = [
         "D=~/.playground/./extensions/x; XY=/../../y; V=X; V+=Y=0; printf -v a$'\\x5b'V] x; rm -rf $D$XY/../.no-such-folder",
         "process tmp",
       ],
+      [
+        "rm of a variable a [[ -v ]] test's subscript sets, its [ spelt as a hex escape",
+        "D=~/.playground/./extensions/x; XY=/../../y; V=X; V+=Y=0; a=(1); [[ -v a$'\\x5b'V] ]]; rm -rf $D$XY/../.no-such-folder",
+        "process tmp",
+      ],
+      [
+        "rm of a variable a [[ -v ]] test's subscript sets, its [ spelt as an octal escape",
+        "D=~/.playground/./extensions/x; XY=/../../y; V=X; V+=Y=0; a=(1); [[ -v a$'\\133'V] ]]; rm -rf $D$XY/../.no-such-folder",
+        "process tmp",
+      ],
+      [
+        "rm of a variable a [[ -v ]] test's subscript sets, its [ spelt as a unicode escape",
+        "D=~/.playground/./extensions/x; XY=/../../y; V=X; V+=Y=0; a=(1); [[ -v a$'\\u005b'V] ]]; rm -rf $D$XY/../.no-such-folder",
+        "process tmp",
+      ],
+      [
+        "rm of a variable test -v's subscript sets, its [ spelt as an escape",
+        "D=~/.playground/./extensions/x; XY=/../../y; V=X; V+=Y=0; a=(1); test -v a$'\\x5b'V]; rm -rf $D$XY/../.no-such-folder",
+        "process tmp",
+      ],
+      [
+        "rm of a variable a [ -v ] test's subscript sets, its [ spelt as an escape",
+        "D=~/.playground/./extensions/x; XY=/../../y; V=X; V+=Y=0; a=(1); [ -v a$'\\x5b'V] ]; rm -rf $D$XY/../.no-such-folder",
+        "process tmp",
+      ],
+      [
+        "rm of a variable test's quoted -v reads a subscript that sets",
+        "D=~/.playground/./extensions/x; XY=/../../y; V=X; V+=Y=0; a=(1); test \"-v\" a$'\\x5b'V]; rm -rf $D$XY/../.no-such-folder",
+        "process tmp",
+      ],
+      [
+        "rm of a variable a [[ -v ]] test of a built name's subscript sets",
+        "D=~/.playground/./extensions/x; XY=/../../y; V=X; V+=Y=0; a=(1); N=a; N+=[V]; [[ -v $N ]]; rm -rf $D$XY/../.no-such-folder",
+        "process tmp",
+      ],
+      [
+        "rm of a variable test -v of a quoted built name's subscript sets",
+        'D=~/.playground/./extensions/x; XY=/../../y; V=X; V+=Y=0; a=(1); N=a; N+=[V]; test -v "$N"; rm -rf $D$XY/../.no-such-folder',
+        "process tmp",
+      ],
+      [
+        "rm of a variable a [ -v ] test of a built name's subscript sets",
+        "D=~/.playground/./extensions/x; XY=/../../y; V=X; V+=Y=0; a=(1); N=a; N+=[V]; [ -v $N ]; rm -rf $D$XY/../.no-such-folder",
+        "process tmp",
+      ],
+      [
+        "rm of a variable test's -v held in a variable reads a subscript that sets",
+        "D=~/.playground/./extensions/x; XY=/../../y; V=X; V+=Y=0; a=(1); O=-v; test $O a$'\\x5b'V]; rm -rf $D$XY/../.no-such-folder",
+        "process tmp",
+      ],
+      [
+        "rm of a variable test's -v held in a quoted variable reads a subscript that sets",
+        "D=~/.playground/./extensions/x; XY=/../../y; V=X; V+=Y=0; a=(1); O=-v; test \"$O\" a$'\\x5b'V]; rm -rf $D$XY/../.no-such-folder",
+        "process tmp",
+      ],
+      [
+        "rm of a variable a [ ] test's word that splits into -v and a subscript sets",
+        "D=~/.playground/./extensions/x; XY=/../../y; V=X; V+=Y=0; a=(1); X=$(printf -- '-v a\\x5bV]'); [ $X ]; rm -rf $D$XY/../.no-such-folder",
+        "process tmp",
+      ],
+      [
+        "rm of a variable bash's indirect read of a built name's subscript sets",
+        "D=~/.playground/./extensions/x; XY=/../../y; V=X; V+=Y=0; a=(1); N=a; N+=[V]; : ${!N}; rm -rf $D$XY/../.no-such-folder",
+        "process tmp",
+      ],
+      [
+        "rm of a variable bash's quoted indirect read of a built name's subscript sets",
+        'D=~/.playground/./extensions/x; XY=/../../y; V=X; V+=Y=0; a=(1); N=a; N+=[V]; : "${!N}"; rm -rf $D$XY/../.no-such-folder',
+        "process tmp",
+      ],
+      [
+        "rm of a variable bash's indirect read of a name whose [ is an escape sets",
+        "D=~/.playground/./extensions/x; XY=/../../y; V=X; V+=Y=0; a=(1); N=a$'\\x5b'V]; : ${!N}; rm -rf $D$XY/../.no-such-folder",
+        "process tmp",
+      ],
+      [
+        "rm of a variable bash's subscripted indirect read of a built name's subscript sets",
+        "D=~/.playground/./extensions/x; XY=/../../y; V=X; V+=Y=0; a=(1); N=(a); N[0]+=[V]; : ${!N[0]}; rm -rf $D$XY/../.no-such-folder",
+        "process tmp",
+      ],
+      [
+        "rm of a variable bash's indirect read with a default of a built name's subscript sets",
+        "D=~/.playground/./extensions/x; XY=/../../y; V=X; V+=Y=0; a=(1); N=a; N+=[V]; : ${!N:-x}; rm -rf $D$XY/../.no-such-folder",
+        "process tmp",
+      ],
+      [
+        "rm of a variable zsh's P flag read of a built name's subscript sets",
+        "D=~/.playground/./extensions/x; XY=/../../y; V=X; V+=Y=0; a=(1); N=a; N+=[V]; : ${(P)N}; rm -rf $D$XY/../.no-such-folder",
+        "process tmp",
+      ],
     ],
   },
 ]
