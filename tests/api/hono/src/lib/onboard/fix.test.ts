@@ -182,7 +182,7 @@ describe("each fix runs its fixed argv", () => {
     expect((await begin(app, `${FIX}/trust?bin=/bin/sh`)).status).toBe(202)
     const trust = await settled(app, `${FIX}/trust`)
     expect(trust.state).toBe("ok")
-    expect(trust.lines).toContain("Your Mac asks for your password in its own window")
+    expect(trust.lines).toContain("Your Mac may ask for your password in its own window")
     expect(m.calls()).toEqual([
       expect.stringMatching(/^node \/\S+\/node_modules\/portless\/dist\/cli\.js trust$/),
     ])

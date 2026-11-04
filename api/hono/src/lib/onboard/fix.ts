@@ -43,7 +43,7 @@ const HERDR_PIN = join(
   import.meta.dir,
   "../../../../../packages/scripts/src/playground/herdr-pin.ts",
 )
-// portless's own CLI in this checkout, which trusts its certificate as the signed-in user: macOS asks for the Mac's password in its own dialog.
+// portless's own CLI in this checkout, which trusts its certificate as the signed-in user: any password macOS asks for goes to its own dialog.
 const PORTLESS_CLI = join(import.meta.dir, "../../../../../node_modules/portless/dist/cli.js")
 const FAKE = join(import.meta.dir, "../../fixtures/fix.ts")
 const BREW_PATHS = ["/opt/homebrew/bin", "/usr/local/bin"]
@@ -137,7 +137,7 @@ const PLANS: Record<FixId, ((has: (tool: string) => boolean, dir: string) => Ste
       argv: ["node", PORTLESS_CLI, "trust"],
       label: "Trusting the local web proxy's certificate",
       ms: 5 * MINUTE,
-      note: "Your Mac asks for your password in its own window",
+      note: "Your Mac may ask for your password in its own window",
     },
   ],
 }

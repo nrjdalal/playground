@@ -711,7 +711,7 @@
         "detail": "not trusted",
         "name": "portless",
         "need": "the Dashboard's https address",
-        "note": "Your Mac does not trust the local web proxy's certificate yet. Trust it here, and your Mac asks for your password in its own window.",
+        "note": "Your Mac does not trust the local web proxy's certificate yet. Trust it here; your Mac may ask for your password in its own window.",
         "status": "optional"
       },
       {

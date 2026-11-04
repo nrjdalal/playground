@@ -194,7 +194,7 @@ const homebrewCheck = (reader: Reader): Check => {
   }
 }
 
-// portless: its proxy runs by the dev launcher's own rule (proxyRefusal), and the Mac trusts its CA for the Dashboard's https address; both need the Mac's password, so the app reports a stopped proxy, which no running stack can show, and trusts the CA on the owner's click (the trust fix), macOS asking for the password in its own window.
+// portless: its proxy runs by the dev launcher's own rule (proxyRefusal), and the Mac trusts its CA for the Dashboard's https address; both need the Mac's password, so the app reports a stopped proxy, which no running stack can show, and trusts the CA on the owner's click (the trust fix), any password going to macOS's own window.
 const portlessCheck = async (reader: Reader, env: Env): Promise<Check> => {
   const need = "the Dashboard's https address"
   const row = (detail: string, note: string, action: Action | null = null): Check => ({
@@ -213,7 +213,7 @@ const portlessCheck = async (reader: Reader, env: Env): Promise<Check> => {
   if (!reader.exists(ca) || (await reader.run([...COMMANDS.caTrusted(ca)])).code !== 0)
     return row(
       "not trusted",
-      "Your Mac does not trust the local web proxy's certificate yet. Trust it here, and your Mac asks for your password in its own window.",
+      "Your Mac does not trust the local web proxy's certificate yet. Trust it here; your Mac may ask for your password in its own window.",
       { id: "trust", label: "Trust the certificate" },
     )
   return okRow("portless", need, "ready")

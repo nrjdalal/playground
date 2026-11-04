@@ -74,7 +74,7 @@
   from `docker port`.
   The fourth is the first run's fixes (`api/hono/src/lib/onboard/fix.ts`), which install what a check found missing: each id in `FIX_IDS` (`fix-ids.ts`) runs its own fixed argv from `PLANS` with no shell, picked by what is on PATH and never from a request, one fix at a time,
   each step killed by its own handle past its bound and given only the variables in `PASSED` (a proxy's included), so the API's settings and tokens reach no installer.
-  The `trust` fix runs this checkout's own portless CLI (`node <checkout>/node_modules/portless/dist/cli.js trust`) as the signed-in user, so macOS asks for the Mac's password in its own window, and the app never sees it.
+  The `trust` fix runs this checkout's own portless CLI (`node <checkout>/node_modules/portless/dist/cli.js trust`) as the signed-in user, so any password macOS asks for goes to its own window, and the app never sees it.
   gh's sign-in answers Enter to its Authenticate Git prompt, since the settings repo's push needs git to use it, and says so in the fix's lines.
   A fixture stack runs `api/hono/src/fixtures/fix.ts` in their place.
   The fifth is a secret ask's sink (`api/hono/src/lib/dashboard/secret-sink.ts`, asks.md), whose `vercel env add` is a write: it runs with no shell, an argv built only from the item's checked key, project and scope, the value on its stdin alone, its output dropped and only what `vercel` needs in its environment (`sinkEnv`), and a fixture or test stack runs nothing in its place.
