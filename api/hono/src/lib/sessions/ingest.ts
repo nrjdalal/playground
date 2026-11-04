@@ -55,7 +55,7 @@ export const fence = (db: Database, pid: number, onLost: (why: string) => void) 
   fences.set(db, { onLost, pid })
 }
 
-const holdsLock = async (db: Database, tx: Transaction) => {
+const requireLock = async (db: Database, tx: Transaction) => {
   const held = fences.get(db)
   if (!held) return
   const [row] = await tx.execute<{ held: boolean }>(sql`
@@ -205,7 +205,7 @@ const recomputeTokens = (db: Database, id: string) =>
       .where(eq(claudeSession.id, id))
       .for("update")
     await recompute(tx, id)
-    await holdsLock(db, tx)
+    await requireLock(db, tx)
   })
 
 // Each fire queues its recount behind the one before it, one chain a database, so windows that close together send Postgres one session's sort at a time; a session already waiting there is queued once, since its recount reads the rows when it starts, and a recount that throws marks its session again.
@@ -384,7 +384,7 @@ async function applyChunk(
         set: { ...read, updatedAt: sql`now()` },
         target: claudeTranscript.path,
       })
-    await holdsLock(db, tx)
+    await requireLock(db, tx)
     return { duplicate: kept, inserted }
   })
 }
@@ -467,7 +467,7 @@ export async function ingestFile(
   } else if (same && looked > known.size) {
     await db.transaction(async (tx) => {
       await tx.update(claudeTranscript).set({ size: looked }).where(eq(claudeTranscript.path, path))
-      await holdsLock(db, tx)
+      await requireLock(db, tx)
     })
   }
   return duplicate

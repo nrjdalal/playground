@@ -138,6 +138,31 @@ if (!got?.ok) {
 const [held] = await lock`select pg_backend_pid() as pid`
 fence(db, Number(held?.pid), lost)
 
+// The lock lives on this one connection: if it drops, a second importer could start, so this one stops within seconds and the runner restarts it, from the lock on: through the backfill, a one-shot run and the follow. A connection dropped without a reset hangs rather than errs, so a check with no answer by its deadline counts as lost.
+let checking = false
+setInterval(() => {
+  if (checking) return
+  checking = true
+  const deadline = setTimeout(
+    () => lost(`no answer in ${LOCK_DEADLINE_MS / 1000}s`),
+    LOCK_DEADLINE_MS,
+  )
+  lock`
+    select exists (
+      select 1 from pg_locks
+      where pid = pg_backend_pid() and locktype = 'advisory' and granted
+        and classid = 0 and objid = ${INGEST_LOCK} and objsubid = 1
+    ) as held
+  `.then(
+    ([row]) => {
+      clearTimeout(deadline)
+      checking = false
+      if (!row?.held) lost("it no longer holds the lock")
+    },
+    (err) => lost(errorText(err)),
+  )
+}, LOCK_CHECK_MS)
+
 // A stop finishes the chunk in hand, so the last thing written is a whole transaction.
 const stopping = new AbortController()
 let follower: Follower | null = null
@@ -182,28 +207,3 @@ follower = follow(
   Number(process.env.INGEST_RESCAN_MS) || undefined,
 )
 say(`following ${projects}`)
-
-// The lock lives on this one connection: if it drops, a second importer could start, so this one stops within seconds and the runner restarts it. A connection dropped without a reset hangs rather than errs, so a check with no answer by its deadline counts as lost.
-let checking = false
-setInterval(() => {
-  if (checking) return
-  checking = true
-  const deadline = setTimeout(
-    () => lost(`no answer in ${LOCK_DEADLINE_MS / 1000}s`),
-    LOCK_DEADLINE_MS,
-  )
-  lock`
-    select exists (
-      select 1 from pg_locks
-      where pid = pg_backend_pid() and locktype = 'advisory' and granted
-        and classid = 0 and objid = ${INGEST_LOCK} and objsubid = 1
-    ) as held
-  `.then(
-    ([row]) => {
-      clearTimeout(deadline)
-      checking = false
-      if (!row?.held) lost("it no longer holds the lock")
-    },
-    (err) => lost(errorText(err)),
-  )
-}, LOCK_CHECK_MS)

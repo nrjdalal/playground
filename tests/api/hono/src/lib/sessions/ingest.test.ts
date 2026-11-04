@@ -1161,7 +1161,7 @@ describe.skipIf(!dockerUp())("ingest", () => {
       await holder`select pg_advisory_unlock(${INGEST_LOCK})`
       appendFileSync(path, human("f2", "second", "2026-10-06T10:00:01.000Z"))
       await expect(ingestFile(fenced, projects, path)).rejects.toThrow("no longer holds it")
-      await Bun.sleep(50)
+      for (let i = 0; i < 100 && told.length === 0; i++) await Bun.sleep(10)
       expect(await entryCount(session)).toBe(1)
       expect(await offset()).toBe(before)
       expect(told).toEqual([`pid ${row?.pid} no longer holds it, so a write rolled back`])

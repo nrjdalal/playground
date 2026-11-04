@@ -20,5 +20,8 @@
   Healthy is `follower: running`, with `never read` and `with unread bytes` small and back at 0 once the sessions go quiet (a line still being written counts as unread until its newline lands).
   The log has one line a minute while it reads anything, and a `reads failed` line when any read failed.
   When status exits 1, or the unread counts keep climbing for a minute, stop the background task (a stop finishes the chunk in hand) and start it again: a restart reads only what changed while it was down.
-  The follower exits 1 by itself when the connection holding its lock drops, stops answering for 10s (it checks every 2s) or no longer holds the lock, when a write finds the lock gone (every write transaction checks it last, so that write rolls back), or when every read fails for three rescans in a row; start it again after fixing what the log names.
+  The importer exits 1 by itself on any of these, its two lock checks running from the moment it takes the lock, through the backfill as well as the follow; start it again after fixing what the log names:
+  - the connection holding its lock drops, no longer holds the lock, or leaves a check unanswered for 10s (`LOCK_CHECK_MS`, `LOCK_DEADLINE_MS` in `dashboard-ingest.ts`), since a connection dropped without a reset hangs rather than errs;
+  - a write finds the lock gone, since every write transaction checks it last, so that write rolls back;
+  - every read fails for three rescans in a row.
   After a pull, or the live dashboard's roll onto a new canary head, restart it as well, since a running follower keeps the code it started with: when that changes `packages/*`, restart `bun run dev` first (its build of `packages/*` is what the follower imports) and run `bun run db:migrate` when a migration landed, then the follower.
