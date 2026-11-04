@@ -1745,22 +1745,16 @@ function namings(command) {
   const plain = new Set;
   const add = (key) => counts.set(key, (counts.get(key) ?? 0) + 1);
   let blind = EVALUATES.some((evaluates) => evaluates.test(command)) || SUBSCRIPT.test(command) || SUBSCRIPT.test(unquoted(command)) || QUALIFIER.test(singleQuotesOut(command));
-  for (const m of command.matchAll(/\$\{\(([^)]*)(\)?)/g)) {
-    const [whole, flags, closed] = m;
-    const rest = command.slice(m.index + whole.length);
-    const name = rest.match(/^[A-Za-z_]\w*/)?.[0];
-    if (!closed || !/^[\w@#%~^=!*-]*$/.test(flags) || /[#%e]/.test(flags))
+  for (const [, flags, closed] of command.matchAll(/\$\{\(([^)]*)(\)?)/g))
+    if (!closed || !/^[\w@#%~^=!*-]*$/.test(flags) || /[#%eP]/.test(flags))
       blind = true;
-    else if (flags.includes("P") && (!name || !READS_ONLY.test(rest.slice(name.length))))
-      blind = true;
-  }
   for (const m of command.matchAll(/(\$\{[#!]?)?(?<![\w$])([A-Za-z_]\w*)/g)) {
     const [whole, expanded, key] = m;
     const next = command.slice(m.index + whole.length);
+    if (expanded === "${!" && !/^(?:[*@]|\[[*@]\])\}/.test(next))
+      blind = true;
     if (expanded && READS_ONLY.test(next))
       continue;
-    if (expanded === "${!" && !/^(?:[*@]|\[[*@]\])\}/.test(next) && !READS_ONLY.test(next.replace(/^\[[^\][$`]*\]/, "")))
-      blind = true;
     const assigns = next[0] === "=" ? "=" : undefined;
     const at = m.index + (expanded?.length ?? 0);
     if (!expanded && command[at - 1] === "-" && (at < 2 || /\s/.test(command[at - 2]))) {
@@ -1985,6 +1979,34 @@ var PRINTS = new Set(["print", "printf"]);
 var NUMERIC = new Set(["float", "integer"]);
 var TYPESETS = new Set(["declare", "export", "local", "readonly", "typeset"]);
 var RUNS_TEXT = new Set([".", "eval", "source"]);
+var TESTS = new Set(["[", "[[", "test"]);
+var BINARY = new Set([
+  "!=",
+  "-a",
+  "-ef",
+  "-eq",
+  "-ge",
+  "-gt",
+  "-le",
+  "-lt",
+  "-ne",
+  "-nt",
+  "-o",
+  "-ot",
+  "<",
+  "=",
+  "==",
+  "=~",
+  ">"
+]);
+var testsAName = (args, expands) => args.some((w, k) => {
+  const next = args[k + 1];
+  if (w.value === "-v")
+    return next !== undefined && (next.quoted || !/^[A-Za-z_]\w*$/.test(next.value));
+  if (!expands || !w.value.includes("\x00"))
+    return false;
+  return !w.quoted || next !== undefined && next.value !== "]" && !BINARY.has(next.value);
+});
 var OPENS2 = new Set(["case", "for", "if", "select", "until", "while", "{"]);
 var CLOSES2 = new Set(["done", "esac", "fi", "}"]);
 var LEADS = new Set(["!", "coproc", "do", "elif", "else", "then", "time"]);
@@ -2003,6 +2025,8 @@ function steadyNames(named, commands) {
     if (name === "let" && cmd.words.some((w, k) => k > 0 && /[A-Za-z_]/.test(w.value)))
       return () => NONE;
     if (name === "print" && flagged(/P/))
+      return () => NONE;
+    if (TESTS.has(name) && testsAName(parses[at].args, name !== "[["))
       return () => NONE;
     const loop = cmd.words.findIndex((w) => !w.quoted && (w.value === "for" || w.value === "select"));
     if (!NAME_SETTERS.has(name) && loop === -1)
