@@ -56,6 +56,30 @@ export const groups: Group[] = [
         "a commit su's root shell runs from a here-string, -c the value of an abbreviated long option",
         "sudo su --white -c root <<< 'git commit -m x'",
       ],
+      [
+        "a commit su's root shell runs from a here-string, an unset variable's word before its -c",
+        "su $X -c root <<< 'git commit -m x'",
+      ],
+      [
+        "a commit su's root shell runs from a here-string, a substitution's word before its -c",
+        "su $(printf %s -w) -c root <<< 'git commit -m x'",
+      ],
+      [
+        "a commit su's root shell runs from a here-string, a quoted substitution's word before its -c",
+        `su "$(printf %s -w)" -c root <<< 'git commit -m x'`,
+      ],
+      [
+        "a commit su's root shell runs from a here-string, a default's word before its -c",
+        "su ${X:--w} -c root <<< 'git commit -m x'",
+      ],
+      [
+        "a commit su's root shell runs from a here-string, a set variable's word before its -c",
+        "X=-w; su $X -c root <<< 'git commit -m x'",
+      ],
+      [
+        "a commit su's root shell runs from a here-string, a glob's word before its -c",
+        "su -[w] -c root <<< 'git commit -m x'",
+      ],
     ],
   },
 ]
