@@ -2,11 +2,23 @@
 import { appendFile, mkdir, readdir } from "node:fs/promises"
 import { join } from "node:path"
 
-import { dispatcherOf, isManagerKind, managerOf, placedKindOf } from "../../config/src/kinds"
+import {
+  dispatcherOf,
+  isManagerKind,
+  managerOf,
+  placedKindOf,
+  ROSTER_ROLE_OF_KIND,
+} from "../../config/src/kinds"
 import { configDirOf, dataDir } from "../../env/src/data-dir"
 
 type Environment = Record<string, string | undefined>
-type Agent = { kind?: unknown; name?: unknown; task?: unknown; worker?: unknown }
+type Agent = {
+  kind?: unknown
+  name?: unknown
+  reportsTo?: unknown
+  task?: unknown
+  worker?: unknown
+}
 
 // The outbox file the relay sends from (ADR 0010), ops-<job>.jsonl.
 export const ALERT_JOB = "stuck-alert"
@@ -23,7 +35,7 @@ const clip = (text: string, size = CLIP): string => {
   return flat.length > size ? `${flat.slice(0, size - 1)}…` : flat
 }
 
-// Pure: the session a stuck session's alert goes to, or null when none does (a session outside the factory, or a dispatcher's own, which the owner may be answering). A checker's goes to its worker's lead, by kind; a worker's, runner's or probe's to the session its brief reports to, else its kind's manager; a manager's own to the primary dispatcher, as is any whose manager is not live.
+// Pure: the session a stuck session's alert goes to, or null when none does (a session outside the factory, or a dispatcher's own, which the owner may be answering). A checker's goes to its worker's lead, by kind; a worker's, runner's or probe's to the session its brief reports to, else its kind's manager; an orchestrator's (another manager kind, the Assistant's) to the session its roster row reports to; a manager's own to the primary dispatcher, as is any whose manager is not live.
 export function managerFor(
   name: string,
   agents: Agent[],
@@ -36,6 +48,8 @@ export function managerFor(
   const primary = dispatcherOf(agents, 1)
   let to: string
   if (isManagerKind(kind)) to = primary
+  else if (ROSTER_ROLE_OF_KIND[kind] === "manager")
+    to = typeof agent?.reportsTo === "string" && agent.reportsTo ? agent.reportsTo : primary
   else if (kind === "reviewer" || kind === "tester") {
     const worker = typeof agent?.worker === "string" ? agent.worker : ""
     const workerKind = placedKindOf(worker, agents.find((entry) => entry?.name === worker)?.kind)
