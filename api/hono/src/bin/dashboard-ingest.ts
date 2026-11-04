@@ -8,6 +8,7 @@ import { provenLocal } from "@/lib/sessions/guard"
 import {
   backfill,
   connect,
+  fence,
   follow,
   type Follower,
   INGEST_LOCK,
@@ -22,6 +23,15 @@ const USAGE = `usage: bun run ingest            read every transcript to its end
 transcripts are read from ${projectsDir()}`
 
 const say = (line: string) => console.log(`${new Date().toISOString()} ${line}`)
+
+// How often the follower checks that its connection still holds the lock, and how long a check may go unanswered.
+const LOCK_CHECK_MS = 2_000
+const LOCK_DEADLINE_MS = 10_000
+
+const lost = (why: string): never => {
+  say(`lost the connection holding the lock (${why}); exiting so the runner restarts the follower`)
+  process.exit(1)
+}
 
 const fail = (message: string, code = 1): never => {
   console.error(`ingest: ${message}`)
@@ -118,12 +128,15 @@ if (mode === "status") {
   }
 }
 
+// Named before it locks, so status never meets a holder without its name.
+await lock.unsafe(`set application_name = 'dashboard-ingest ${mode}'`)
 const [got] = await lock`select pg_try_advisory_lock(${INGEST_LOCK}) as ok`
 if (!got?.ok) {
   say("another importer holds the lock; nothing to do")
   process.exit(0)
 }
-await lock.unsafe(`set application_name = 'dashboard-ingest ${mode}'`)
+const [held] = await lock`select pg_backend_pid() as pid`
+fence(db, Number(held?.pid), lost)
 
 // A stop finishes the chunk in hand, so the last thing written is a whole transaction.
 const stopping = new AbortController()
@@ -170,10 +183,27 @@ follower = follow(
 )
 say(`following ${projects}`)
 
-// The lock lives on this one connection: if it drops, a second importer could start, so this one stops and the runner restarts it.
+// The lock lives on this one connection: if it drops, a second importer could start, so this one stops within seconds and the runner restarts it. A connection dropped without a reset hangs rather than errs, so a check with no answer by its deadline counts as lost.
+let checking = false
 setInterval(() => {
-  lock`select 1`.catch(() => {
-    say("lost the connection holding the lock; exiting so the runner restarts the follower")
-    process.exit(1)
-  })
-}, 30_000)
+  if (checking) return
+  checking = true
+  const deadline = setTimeout(
+    () => lost(`no answer in ${LOCK_DEADLINE_MS / 1000}s`),
+    LOCK_DEADLINE_MS,
+  )
+  lock`
+    select exists (
+      select 1 from pg_locks
+      where pid = pg_backend_pid() and locktype = 'advisory' and granted
+        and classid = 0 and objid = ${INGEST_LOCK} and objsubid = 1
+    ) as held
+  `.then(
+    ([row]) => {
+      clearTimeout(deadline)
+      checking = false
+      if (!row?.held) lost("it no longer holds the lock")
+    },
+    (err) => lost(errorText(err)),
+  )
+}, LOCK_CHECK_MS)

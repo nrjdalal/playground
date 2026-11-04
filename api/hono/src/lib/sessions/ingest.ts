@@ -47,6 +47,30 @@ export const INGEST_LOCK = 0x6c69_6768
 // The importer writes through its own client on the URL the guard proved, never the shared `db`.
 export const connect = (url: string): Database => createDatabase(url)
 
+// A follower's fence on its client: the backend pid of the connection holding INGEST_LOCK, read as the last statement of each write transaction, so a write after the lock is gone rolls back and onLost is told, and two followers never write at once.
+type Fence = { onLost: (why: string) => void; pid: number }
+const fences = new WeakMap<Database, Fence>()
+
+export const fence = (db: Database, pid: number, onLost: (why: string) => void) => {
+  fences.set(db, { onLost, pid })
+}
+
+const holdsLock = async (db: Database, tx: Transaction) => {
+  const held = fences.get(db)
+  if (!held) return
+  const [row] = await tx.execute<{ held: boolean }>(sql`
+    select exists (
+      select 1 from pg_locks
+      where pid = ${held.pid} and locktype = 'advisory' and granted
+        and classid = 0 and objid = ${INGEST_LOCK} and objsubid = 1
+    ) as held
+  `)
+  if (row?.held) return
+  const why = `pid ${held.pid} no longer holds it, so a write rolled back`
+  setImmediate(() => held.onLost(why))
+  throw new Error(why)
+}
+
 type SessionRow = typeof claudeSession.$inferSelect
 
 export type SessionFields = Pick<
@@ -181,6 +205,7 @@ const recomputeTokens = (db: Database, id: string) =>
       .where(eq(claudeSession.id, id))
       .for("update")
     await recompute(tx, id)
+    await holdsLock(db, tx)
   })
 
 // Each fire queues its recount behind the one before it, one chain a database, so windows that close together send Postgres one session's sort at a time; a session already waiting there is queued once, since its recount reads the rows when it starts, and a recount that throws marks its session again.
@@ -359,6 +384,7 @@ async function applyChunk(
         set: { ...read, updatedAt: sql`now()` },
         target: claudeTranscript.path,
       })
+    await holdsLock(db, tx)
     return { duplicate: kept, inserted }
   })
 }
@@ -439,7 +465,10 @@ export async function ingestFile(
     const applied = await applyChunk(db, file, path, stat, [], emptyFacts(), position, meta, true)
     duplicate ??= applied.duplicate
   } else if (same && looked > known.size) {
-    await db.update(claudeTranscript).set({ size: looked }).where(eq(claudeTranscript.path, path))
+    await db.transaction(async (tx) => {
+      await tx.update(claudeTranscript).set({ size: looked }).where(eq(claudeTranscript.path, path))
+      await holdsLock(db, tx)
+    })
   }
   return duplicate
     ? { duplicate, entries: inserted, id: file.id }
