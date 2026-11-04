@@ -163,7 +163,7 @@ if (!dry) {
       herdrOnly = true
       console.error(
         checked.dashboard.reason === null
-          ? "dev: the dashboard reads herdr alone, the sessions Playground started; PLAYGROUND_ALL_SESSIONS=true adds cmux's"
+          ? "dev: the dashboard reads herdr alone, the sessions Playground started; PLAYGROUND_ALL_SESSIONS=true adds every other session to Sessions and System"
           : `dev: cmux would not answer this stack (${checked.dashboard.reason}) and holds no live factory session, so the dashboard reads herdr alone and shows none of your own sessions in cmux`,
       )
     }
