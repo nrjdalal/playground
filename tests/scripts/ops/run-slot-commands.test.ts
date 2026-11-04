@@ -167,6 +167,22 @@ describe("a slot folder with no holder line", () => {
   })
 })
 
+// the dispatcher, 4 Nov: a slot with no pid in its holder line, whose mtime read back empty, printed "<epoch> -  : syntax error: operand expected"
+test("a slot with no holder pid and no readable mtime reads as young, with no error line", async () => {
+  const m = machine()
+  mkdirSync(join(m.ops, "run-slot"))
+  writeFileSync(
+    join(m.bin, "stat"),
+    `#!/bin/bash\ncase "\${@: -1}" in */run-slot|*/run-slot.holder) exit 0 ;; esac\nexec /usr/bin/stat "$@"\n`,
+  )
+  chmodSync(join(m.bin, "stat"), 0o755)
+  const p = Bun.spawn(["bash", SCRIPT, "clear-stale"], { env: m.env(), stderr: "pipe" })
+  const [code, err] = await Promise.all([p.exited, new Response(p.stderr).text()])
+  expect(err).toBe("")
+  expect(code).toBe(0)
+  expect(existsSync(join(m.ops, "run-slot"))).toBe(true)
+})
+
 // dispatcher, 19 Oct: a tester's `bun run dev` held run-slot.single with 7 waiters
 describe("a dev stack is refused", () => {
   for (const argv of [
