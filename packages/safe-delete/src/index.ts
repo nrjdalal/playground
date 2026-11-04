@@ -28,8 +28,15 @@ export type Proc = { command: string; cwd: string; pid: number; sockets: string[
 // A running node_modules clone, from run-slot's clone holder record: the session that runs it, its pid, the checkout it copies from and the one it copies into.
 export type Clone = { destination: string; pid: number; source: string; who: string }
 
-// What tells a worktree is held: each running clone, the roster's live statuses, every process with a working folder (null when they cannot be listed), and the roster's path.
-export type Holders = { clones: Clone[]; live: string[]; procs: Proc[] | null; roster: string }
+// What tells a worktree is held: each running clone, the roster's live statuses, every process with a working folder (null when they cannot be listed), and the roster's path; whether a merged PR holds a commit (null when that cannot be asked), and --discard, which lets uncommitted or unlanded work go.
+export type Holders = {
+  clones: Clone[]
+  discard: boolean
+  live: string[]
+  merged: (sha: string, at: string) => boolean | null
+  procs: Proc[] | null
+  roster: string
+}
 
 // An agent-browser process, its daemon or a client, by its command's first word.
 export const isAgentBrowser = (command: string): boolean =>
@@ -332,7 +339,7 @@ export function restore(
   return { path: entry.path }
 }
 
-// Why a worktree may not be removed, or null: it sits in <main>/.claude/worktrees, the roster reads, no live session, running clone or process holds it, and its HEAD is on a remote branch.
+// Why a worktree may not be removed, or null: it sits in <main>/.claude/worktrees, the roster reads, no live session, running clone or process holds it, and, unless --discard, it holds no uncommitted change and its HEAD's work is on origin/canary.
 export function worktreeRefusal(path: string, roots: Roots, holders: Holders): string | null {
   const at = real(path)
   if (dirname(at) !== worktreesOf(roots)) return `${at} is not a worktree in ${worktreesOf(roots)}`
@@ -345,7 +352,7 @@ export function worktreeRefusal(path: string, roots: Roots, holders: Holders): s
   }
   const git = (...args: string[]) => {
     const run = Bun.spawnSync(["git", "-C", at, ...args], { stderr: "pipe", stdout: "pipe" })
-    return { ok: run.exitCode === 0, out: run.stdout.toString().trim() }
+    return { ok: run.exitCode === 0, out: run.stdout.toString().trimEnd() }
   }
   const top = git("rev-parse", "--show-toplevel")
   if (!top.ok || real(top.out) !== at) return `${at} is not a git worktree`
@@ -384,9 +391,38 @@ export function worktreeRefusal(path: string, roots: Roots, holders: Holders): s
       "default"
     return `${by}: agent-browser session ${session}, which agent-browser --session ${session} close frees`
   }
-  if (!git("branch", "-r", "--contains", "HEAD").out)
-    return `${at}'s HEAD is on no remote branch: push it first`
+  if (holders.discard) return null
+  const discard = `playground rm --worktree ${at} --discard removes it anyway, which a session runs with --decision <id> once an Inbox delete decision naming it is approved`
+  const changed = git("status", "--porcelain", "-z", "--no-renames").out.split("\0").filter(Boolean)
+  if (changed.length) {
+    const paths = changed.slice(0, 3).map((line) => line.slice(3))
+    const more = changed.length > 3 ? `, and ${changed.length - 3} more` : ""
+    return `${at} holds ${changed.length} uncommitted change${changed.length === 1 ? "" : "s"} (${paths.join(", ")}${more}): ${discard}`
+  }
+  if (!landed(git, holders, at))
+    return `${at}'s HEAD holds work not landed on origin/canary (fetch origin canary if it merged since): ${discard}`
   return null
+}
+
+// Whether HEAD's work is on origin/canary: each file HEAD changed since their merge-base, named raw (-z) and matched literally so no name is quoted or globbed, reads the same there, or, since canary squash-merges and may change those files again, a merged PR holds HEAD's commit.
+const landed = (
+  git: (...args: string[]) => { ok: boolean; out: string },
+  holders: Holders,
+  at: string,
+): boolean => {
+  const base = git("merge-base", "HEAD", "origin/canary")
+  if (base.ok) {
+    const files = git("diff", "--name-only", "-z", "--no-renames", base.out, "HEAD")
+    const paths = files.out.split("\0").filter(Boolean)
+    if (
+      files.ok &&
+      (!paths.length ||
+        git("--literal-pathspecs", "diff", "--quiet", "HEAD", "origin/canary", "--", ...paths).ok)
+    )
+      return true
+  }
+  const head = git("rev-parse", "HEAD")
+  return head.ok && holders.merged(head.out, at) === true
 }
 
 // A mkdtemp folder under the temp folder, marked so removeScratch will remove it.

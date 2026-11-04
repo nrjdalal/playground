@@ -17,17 +17,38 @@ import {
   clonesOf,
   processesOf,
   RM_USAGE,
+  type Decision,
+  discardRefusal,
   type RmDeps,
   rmArgs,
   rmDeps,
   runRm,
 } from "../../../../../packages/scripts/src/playground/rm"
 
-test("rm takes one path, or --worktree's, with an optional reason", () => {
-  expect(rmArgs(["old"])).toEqual({ path: "old", reason: "playground rm", worktree: false })
+test("rm takes one path, or --worktree's with an optional --discard, with an optional reason", () => {
+  expect(rmArgs(["old"])).toEqual({
+    discard: false,
+    path: "old",
+    reason: "playground rm",
+    worktree: false,
+  })
   expect(rmArgs(["--worktree", "wt", "--reason", "merged"])).toEqual({
+    discard: false,
     path: "wt",
     reason: "merged",
+    worktree: true,
+  })
+  expect(rmArgs(["--worktree", "wt", "--discard"])).toEqual({
+    discard: true,
+    path: "wt",
+    reason: "playground rm",
+    worktree: true,
+  })
+  expect(rmArgs(["--worktree", "wt", "--discard", "--decision", "#i9"])).toEqual({
+    decision: "#i9",
+    discard: true,
+    path: "wt",
+    reason: "playground rm",
     worktree: true,
   })
 })
@@ -44,6 +65,10 @@ test.each([
   [["--force", "a"]],
   [["--list", "a"]],
   [["a", "--worktree", "b"]],
+  [["a", "--discard"]],
+  [["--worktree", "wt", "--discard", "--discard"]],
+  [["--worktree", "wt", "--decision", "#i9"]],
+  [["--worktree", "wt", "--discard", "--decision"]],
 ])("rm refuses %j with its usage", (words) => {
   expect(rmArgs(words)).toEqual({ error: RM_USAGE })
 })
@@ -74,9 +99,12 @@ const machine = () => {
     clones: () => [],
     procs: () => [],
     data,
+    decision: async () => null,
     home,
     main,
+    merged: () => false,
     notify: (text) => void told.push(text),
+    role: undefined,
     session: async () => "j6rjgy-worker",
   }
   return { deps, home, main, root, told }
@@ -135,6 +163,90 @@ test("runRm --worktree checks the holders, moves the worktree and prunes it from
   expect(await runRm(["--worktree", wt], deps)).toBe(0)
   expect(existsSync(wt)).toBe(false)
   expect(git(main, "worktree", "list")).not.toContain("pg-1")
+})
+
+test("runRm --worktree refuses a worktree with uncommitted work, naming --discard, which a session with a role passes only with an approved delete decision", async () => {
+  const { deps, main, root } = machine()
+  git(root, "init", "--bare", "-q", join(root, "remote.git"))
+  git(main, "init", "-q", "-b", "canary")
+  writeFileSync(join(main, "README.md"), "x")
+  git(main, "add", ".")
+  git(main, "commit", "-qm", "init")
+  git(main, "remote", "add", "origin", join(root, "remote.git"))
+  git(main, "push", "-q", "origin", "canary")
+  const wt = join(main, ".claude", "worktrees", "pg-1")
+  git(main, "worktree", "add", "-q", "-b", "PG-1-thing", wt)
+  writeFileSync(join(wt, "wip.txt"), "x")
+  const said: string[] = []
+  const error = console.error
+  console.error = (line: string) => void said.push(line)
+  try {
+    expect(await runRm(["--worktree", wt], deps)).toBe(1)
+  } finally {
+    console.error = error
+  }
+  expect(said).toEqual([
+    `playground: ${wt} holds 1 uncommitted change (wip.txt): playground rm --worktree ${wt} --discard removes it anyway, which a session runs with --decision <id> once an Inbox delete decision naming it is approved`,
+  ])
+  expect(existsSync(wt)).toBe(true)
+  said.length = 0
+  const session = { ...deps, role: "worker" }
+  console.error = (line: string) => void said.push(line)
+  try {
+    expect(await runRm(["--worktree", wt, "--discard"], session)).toBe(1)
+  } finally {
+    console.error = error
+  }
+  expect(said).toEqual([
+    `playground: a session with a role (worker) passes --discard only with --decision <id>: post an Inbox delete decision with bun run ask new naming ${wt} and why, then run playground rm --worktree ${wt} --discard --decision <id> once it is approved`,
+  ])
+  expect(existsSync(wt)).toBe(true)
+  const approved = async (id: string): Promise<Decision | null> =>
+    id === "#i9"
+      ? {
+          kind: "decision",
+          preview: { type: "delete", what: `the worktree ${wt}` },
+          status: "approved",
+        }
+      : null
+  expect(
+    await runRm(["--worktree", wt, "--discard", "--decision", "#i9"], {
+      ...session,
+      decision: approved,
+    }),
+  ).toBe(0)
+  expect(existsSync(wt)).toBe(false)
+})
+
+test("a session's --discard passes only on an approved delete decision whose what names the path", async () => {
+  const wt = "/h/playground/.claude/worktrees/pg-1"
+  const item = (
+    status: string,
+    what = `\`${wt}/\`, its work is stale`,
+    type = "delete",
+  ): Decision => ({
+    kind: "decision",
+    preview: { type, what },
+    status,
+  })
+  const refusal = (found: Decision | null) =>
+    discardRefusal(wt, "#i9", { decision: async () => found, role: "worker" })
+  const route = `post an Inbox delete decision with bun run ask new naming ${wt} and why, then run playground rm --worktree ${wt} --discard --decision <id> once it is approved`
+  expect(await refusal(item("approved"))).toBeNull()
+  expect(await refusal(item("denied"))).toBe(`--decision #i9 is denied, not approved: ${route}`)
+  expect(await refusal(item("open"))).toBe(`--decision #i9 is open, not approved: ${route}`)
+  expect(await refusal(null)).toBe(
+    `--decision #i9 names no Inbox item the Dashboard's checkout can read: ${route}`,
+  )
+  expect(await refusal(item("approved", `${wt}-old`))).toBe(
+    `--decision #i9's delete names another path, not ${wt}: ${route}`,
+  )
+  expect(await refusal(item("approved", wt, "ask"))).toBe(
+    `--decision #i9 is not a delete decision: ${route}`,
+  )
+  expect(
+    await discardRefusal(wt, undefined, { decision: async () => item("approved"), role: "worker" }),
+  ).toBe(`a session with a role (worker) passes --discard only with --decision <id>: ${route}`)
 })
 
 // run-slot's clone lane copies <source>/node_modules from its caller's folder, so only its holder record names the source (PG-699)
