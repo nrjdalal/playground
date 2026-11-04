@@ -261,7 +261,7 @@ export async function callerRefusal(
     .json()
     .catch(() => null)) as Partial<SessionState> | null
   if (held?.sessionId !== above || typeof held.role !== "string")
-    return `shell-pane refuses: session ${above}'s state records no role yet; its hooks write one at its next prompt`
+    return `shell-pane refuses: session ${above}'s state records no role yet; the session-state hook writes one with its next record, at its next prompt, and none while the session's hooks do not run`
   const role = environment.PLAYGROUND_ROLE ?? ""
   if (role !== held.role)
     return `shell-pane refuses: its PLAYGROUND_ROLE (${role || "unset"}) is not the role session ${above}'s hooks recorded (${held.role || "unset"})`
