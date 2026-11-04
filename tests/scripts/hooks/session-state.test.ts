@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, test } from "bun:test"
-import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -7,6 +7,8 @@ import { sessionStateDir, sessionStateSchema } from "../../../packages/config/sr
 import { callKey } from "../../../packages/scripts/src/stuck-alert"
 import {
   callerRefusal,
+  type Proc,
+  procOf,
   herdrArgs,
   recordOf,
   run,
@@ -545,115 +547,176 @@ describe("a stuck or failed record tells the session's manager at once (PG-2184)
   })
 })
 
-describe("the record holds the session's role, which the shell-pane launcher checks its own environment against", () => {
-  // A machine whose Claude Code registry names `pid` as session ID's claude process, and whose state file the hook wrote under `role`.
-  const machine = async (name: string, pid: number, role?: string) => {
+describe("the shell-pane launcher checks its environment against the claude process it runs under", () => {
+  // A config folder whose Claude Code registry names `pid` as session ID's claude process.
+  const registry = (name: string, pid: number, entry: object = { pid, sessionId: ID }) => {
     const config = join(scratch, name)
     mkdirSync(join(config, "sessions"), { recursive: true })
-    writeFileSync(join(config, "sessions", `${pid}.json`), JSON.stringify({ pid, sessionId: ID }))
-    const env = envOf(config)
-    await run(
-      JSON.stringify(PROMPT),
-      role === undefined ? env : { ...env, PLAYGROUND_ROLE: role },
-      NOW,
-    )
-    return env
+    writeFileSync(join(config, "sessions", `${pid}.json`), JSON.stringify(entry))
+    return config
   }
-  // A launcher two processes below its claude process, 300, as a Bash call's shell puts it.
-  const PARENTS: Record<number, number> = { 100: 200, 200: 300, 300: 1 }
-  const parentOf = (pid: number) => PARENTS[pid] ?? 0
-  const caller = (env: Record<string, string>, extra: Record<string, string | undefined>) =>
-    callerRefusal({ ...env, CLAUDE_CODE_SESSION_ID: ID, ...extra }, 100, parentOf)
+  // A launcher, 100, two shells below its claude process, 300, as a Bash call puts it; claude was started with `role` and the config folder named.
+  const procsOf =
+    (config: string, role?: string, claude = "/opt/claude/bin/claude") =>
+    (pid: number): Proc | undefined =>
+      ({
+        100: { comm: "/bin/zsh", env: {}, ppid: 200 },
+        200: { comm: "bash", env: {}, ppid: 300 },
+        300: {
+          comm: claude,
+          env: {
+            CLAUDE_CONFIG_DIR: config,
+            ...(role === undefined ? {} : { PLAYGROUND_ROLE: role }),
+          },
+          ppid: 1,
+        },
+      })[pid]
+  const caller = (
+    config: string,
+    role: string | undefined,
+    extra: Record<string, string | undefined>,
+  ) => callerRefusal({ CLAUDE_CODE_SESSION_ID: ID, ...extra }, 100, procsOf(config, role))
 
-  test("the hook writes PLAYGROUND_ROLE, or an empty role when it is unset", async () => {
-    const worker = await machine("role-worker", 300, "worker")
-    expect(await Bun.file(statePath(worker, ID)).json()).toMatchObject({ role: "worker" })
-    const owner = await machine("role-owner", 300)
-    expect(await Bun.file(statePath(owner, ID)).json()).toMatchObject({ role: "" })
+  test("the hook's record holds no role, since the check reads claude's own", async () => {
+    const env = envOf(join(scratch, "no-role"))
+    await run(JSON.stringify(PROMPT), { ...env, PLAYGROUND_ROLE: "worker" }, NOW)
+    expect(await Bun.file(statePath(env, ID)).json()).not.toHaveProperty("role")
   })
 
-  test("a caller whose session id and role match the record passes", async () => {
-    const env = await machine("caller-match", 300, "worker")
-    expect(await caller(env, { PLAYGROUND_ROLE: "worker" })).toBeUndefined()
-    const owner = await machine("caller-owner", 300)
-    expect(await caller(owner, { PLAYGROUND_ROLE: undefined })).toBeUndefined()
+  test("a caller whose session id and role match its claude process's passes", async () => {
+    const config = registry("caller-match", 300)
+    expect(await caller(config, "worker", { PLAYGROUND_ROLE: "worker" })).toBeUndefined()
+    expect(await caller(config, undefined, { PLAYGROUND_ROLE: undefined })).toBeUndefined()
   })
 
   test("a caller that names another role, or drops its own, is refused", async () => {
-    const env = await machine("caller-role", 300, "worker")
-    expect(await caller(env, { PLAYGROUND_ROLE: "lead" })).toContain(
-      "PLAYGROUND_ROLE (lead) is not the role",
+    const config = registry("caller-role", 300)
+    expect(await caller(config, "worker", { PLAYGROUND_ROLE: "lead" })).toContain(
+      "PLAYGROUND_ROLE (lead) is not the role its claude process was started with (worker)",
     )
-    expect(await caller(env, { PLAYGROUND_ROLE: undefined })).toContain(
-      "PLAYGROUND_ROLE (unset) is not the role",
+    expect(await caller(config, "worker", { PLAYGROUND_ROLE: undefined })).toContain(
+      "PLAYGROUND_ROLE (unset) is not the role its claude process was started with (worker)",
+    )
+  })
+
+  test("a prefix that moves the config, data or home folder still reads the claude process above", async () => {
+    const config = registry("caller-moved", 300)
+    const moved = {
+      CLAUDE_CONFIG_DIR: "/nowhere",
+      HOME: "/nowhere",
+      PLAYGROUND_DATA_DIR: "/nowhere",
+    }
+    expect(await sessionAbove(100, procsOf(config, "worker"))).toEqual({
+      pid: 300,
+      role: "worker",
+      sessionId: ID,
+    })
+    expect(await caller(config, "worker", { ...moved, PLAYGROUND_ROLE: "worker" })).toBeUndefined()
+    expect(await caller(config, "worker", { ...moved, PLAYGROUND_ROLE: undefined })).toContain(
+      "PLAYGROUND_ROLE (unset)",
     )
   })
 
   test("a caller that names another session id, or none, is refused", async () => {
-    const env = await machine("caller-id", 300, "worker")
-    const other = { CLAUDE_CODE_SESSION_ID: "s-other", PLAYGROUND_ROLE: "worker" }
-    expect(await callerRefusal({ ...env, ...other }, 100, parentOf)).toContain(
-      `CLAUDE_CODE_SESSION_ID (s-other) is not the session it runs under (${ID})`,
-    )
-    expect(await callerRefusal({ ...env, PLAYGROUND_ROLE: "worker" }, 100, parentOf)).toContain(
-      "CLAUDE_CODE_SESSION_ID (unset)",
-    )
+    const config = registry("caller-id", 300)
+    expect(
+      await caller(config, "worker", {
+        CLAUDE_CODE_SESSION_ID: "s-other",
+        PLAYGROUND_ROLE: "worker",
+      }),
+    ).toContain(`CLAUDE_CODE_SESSION_ID (s-other) is not the session it runs under (${ID})`)
+    expect(
+      await caller(config, "worker", {
+        CLAUDE_CODE_SESSION_ID: undefined,
+        PLAYGROUND_ROLE: "worker",
+      }),
+    ).toContain("CLAUDE_CODE_SESSION_ID (unset)")
   })
 
-  test("a caller with no claude process above it, or whose session has no role recorded, is refused", async () => {
-    const env = await machine("caller-none", 999, "worker")
-    expect(await caller(env, { PLAYGROUND_ROLE: "worker" })).toContain(
-      "no Claude Code session runs above it",
-    )
-    const bare = join(scratch, "caller-unrecorded")
-    mkdirSync(join(bare, "sessions"), { recursive: true })
-    writeFileSync(join(bare, "sessions", "300.json"), JSON.stringify({ pid: 300, sessionId: ID }))
-    expect(await caller(envOf(bare), { PLAYGROUND_ROLE: "worker" })).toContain(
-      "records no role yet",
-    )
+  test("a registry entry for a process that is not claude names no session", async () => {
+    const config = registry("caller-not-claude", 200)
+    const procs = procsOf(config, "worker", "/usr/bin/python3")
+    expect(await sessionAbove(100, procs)).toBeUndefined()
+    expect(
+      await callerRefusal({ CLAUDE_CODE_SESSION_ID: ID, PLAYGROUND_ROLE: "worker" }, 100, procs),
+    ).toContain("no Claude Code session runs above it")
   })
 
-  test("a registry file whose pid is another process's names no session", async () => {
-    const config = join(scratch, "caller-misnamed")
-    mkdirSync(join(config, "sessions"), { recursive: true })
-    writeFileSync(join(config, "sessions", "300.json"), JSON.stringify({ pid: 7, sessionId: ID }))
-    expect(await sessionAbove(envOf(config), 100, parentOf)).toBeUndefined()
+  test("a claude process the registry has no entry for, or one whose pid is another's, names no session id", async () => {
+    expect(
+      await caller(registry("caller-unregistered", 999), "worker", { PLAYGROUND_ROLE: "worker" }),
+    ).toContain("registry names no session for the claude process above it (300)")
+    const misnamed = registry("caller-misnamed", 300, { pid: 7, sessionId: ID })
+    expect((await sessionAbove(100, procsOf(misnamed, "worker")))?.sessionId).toBeUndefined()
   })
 
-  // The launcher as a session runs it, under this test's process, which the registry names as the claude process; its herdr, a stand-in that logs each call and fails, is the first thing a passed check reaches.
+  test("procOf reads this process's parent and executable", () => {
+    const self = procOf(process.pid)
+    expect(self?.ppid).toBe(process.ppid)
+    expect(self?.comm).toContain("bun")
+    expect(procOf(2 ** 22 + 1)).toBeUndefined()
+  })
+
+  // The launcher as a session runs it: under a stand-in claude process (this test's bun, linked as claude) started with `role` and a scratch config folder whose registry it writes for itself; its herdr, a stand-in that logs each call and fails, is the first thing a passed check reaches.
   async function launch(
     name: string,
-    role: string | undefined,
-    launcherRole: string | undefined,
-    launcherId = ID,
+    role: string,
+    launcherEnv: Record<string, string | undefined>,
   ) {
-    const env = await machine(name, process.pid, role)
-    const home = join(scratch, name, "home")
+    const root = join(scratch, name)
+    const config = join(root, "config")
+    const home = join(root, "home")
+    mkdirSync(join(config, "sessions"), { recursive: true })
     mkdirSync(join(home, ".playground", "bin"), { recursive: true })
-    const log = join(home, "herdr.log")
-    const herdr = join(home, ".playground", "bin", "herdr")
+    const claude = join(root, "bin", "claude")
+    mkdirSync(join(root, "bin"))
+    symlinkSync(process.execPath, claude)
+    const wrapper = join(root, "claude.ts")
     writeFileSync(
-      herdr,
+      wrapper,
+      [
+        `import { writeFileSync } from "node:fs"`,
+        `writeFileSync(${JSON.stringify(join(config, "sessions"))} + "/" + process.pid + ".json", JSON.stringify({ pid: process.pid, sessionId: ${JSON.stringify(ID)} }))`,
+        `const [env, ...cmd] = process.argv.slice(2)`,
+        `const child = Bun.spawn(cmd, { env: JSON.parse(env!), stderr: "inherit", stdout: "inherit" })`,
+        `process.exit(await child.exited)`,
+      ].join("\n"),
+    )
+    const log = join(home, "herdr.log")
+    writeFileSync(
+      join(home, ".playground", "bin", "herdr"),
       `#!/bin/sh\necho "$@" >> '${log}'\necho '{"error":{"message":"stand-in herdr"}}'\nexit 1\n`,
       { mode: 0o755 },
     )
+    const env = {
+      ...envOf(config),
+      CLAUDE_CODE_SESSION_ID: ID,
+      HOME: home,
+      PATH: process.env.PATH,
+      ...launcherEnv,
+    }
+    const shellPane = join(import.meta.dir, "..", "..", "..", "scripts", "shell-pane.ts")
     const launcher = Bun.spawn(
       [
+        claude,
+        "run",
+        "--no-env-file",
+        wrapper,
+        JSON.stringify(env),
         process.execPath,
         "run",
         "--no-env-file",
-        join(import.meta.dir, "..", "..", "..", "scripts", "shell-pane.ts"),
+        shellPane,
         "run",
         "w1:p1",
         "echo hi",
       ],
       {
         env: {
-          ...env,
-          CLAUDE_CODE_SESSION_ID: launcherId,
+          CLAUDE_CONFIG_DIR: config,
           HOME: home,
           PATH: process.env.PATH,
-          ...(launcherRole === undefined ? {} : { PLAYGROUND_ROLE: launcherRole }),
+          PLAYGROUND_ROLE: role,
         },
         stderr: "pipe",
         stdout: "pipe",
@@ -661,25 +724,65 @@ describe("the record holds the session's role, which the shell-pane launcher che
     )
     const [err, code] = await Promise.all([new Response(launcher.stderr).text(), launcher.exited])
     const calls = (await Bun.file(log).exists()) ? await Bun.file(log).text() : ""
-    return { calls, code, err }
+    return { calls, code, config, err }
   }
 
-  test("a launcher whose role differs from the record refuses and calls no herdr", async () => {
-    const { calls, code, err } = await launch("launch-refused", "worker", "lead")
+  test("a session that rewrote its record's role to none and drops its own is still refused, and calls no herdr", async () => {
+    const config = join(scratch, "launch-rewrote", "config")
+    const record = statePath(envOf(config), ID)
+    mkdirSync(join(record, ".."), { recursive: true })
+    writeFileSync(
+      record,
+      JSON.stringify({
+        at: NOW.toISOString(),
+        event: "UserPromptSubmit",
+        role: "",
+        sessionId: ID,
+        state: "working",
+      }),
+    )
+    const { calls, code, err } = await launch("launch-rewrote", "worker", {
+      PLAYGROUND_ROLE: undefined,
+    })
+    expect(code).toBe(1)
+    expect(err).toContain(
+      "PLAYGROUND_ROLE (unset) is not the role its claude process was started with (worker)",
+    )
+    expect(calls).toBe("")
+  })
+
+  test("a launcher whose role differs from its claude process's refuses and calls no herdr", async () => {
+    const { calls, code, err } = await launch("launch-refused", "worker", {
+      PLAYGROUND_ROLE: "lead",
+    })
     expect(code).toBe(1)
     expect(err).toContain("PLAYGROUND_ROLE (lead) is not the role")
     expect(calls).toBe("")
   })
 
   test("a launcher whose session id differs from its claude process's refuses and calls no herdr", async () => {
-    const { calls, code, err } = await launch("launch-other-id", "worker", "worker", "s-other")
+    const { calls, code, err } = await launch("launch-other-id", "worker", {
+      CLAUDE_CODE_SESSION_ID: "s-other",
+      PLAYGROUND_ROLE: "worker",
+    })
     expect(code).toBe(1)
     expect(err).toContain("CLAUDE_CODE_SESSION_ID (s-other) is not the session it runs under")
     expect(calls).toBe("")
   })
 
-  test("a launcher whose environment matches the record goes on to herdr as before", async () => {
-    const { calls, code, err } = await launch("launch-passed", "worker", "worker")
+  test("a launcher whose prefix moved the config folder still reads its claude process, and goes on to herdr", async () => {
+    const { calls, err } = await launch("launch-moved", "worker", {
+      CLAUDE_CONFIG_DIR: join(scratch, "launch-moved", "elsewhere"),
+      PLAYGROUND_ROLE: "worker",
+    })
+    expect(err).toContain("herdr pane get: stand-in herdr")
+    expect(calls).toBe("pane get w1:p1\n")
+  })
+
+  test("a launcher whose environment matches its claude process's goes on to herdr as before", async () => {
+    const { calls, code, err } = await launch("launch-passed", "worker", {
+      PLAYGROUND_ROLE: "worker",
+    })
     expect(code).toBe(1)
     expect(err).toContain("herdr pane get: stand-in herdr")
     expect(calls).toBe("pane get w1:p1\n")

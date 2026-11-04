@@ -1,6 +1,7 @@
-// Notification, PermissionDenied, PermissionRequest, PostToolUse, PostToolUseFailure, SessionEnd, Stop, StopFailure and UserPromptSubmit hook: writes the session's state to the file ops-session-resume reads and the Dashboard is to read, the data folder's session-state/<session id>.json, in the shape packages/config/src/session-state.ts checks, with the role claude's own environment holds, which the shell-pane launcher checks its own against (callerRefusal), and inside herdr reports it as herdr's own state, handing the pane back when the session ends. A stuck or failed record also queues one alert to the session's manager (packages/scripts/src/stuck-alert.ts). Every session writes it, the owner's own included, since the Dashboard is to show them all. It never blocks: whatever fails, the hook exits 0.
+// Notification, PermissionDenied, PermissionRequest, PostToolUse, PostToolUseFailure, SessionEnd, Stop, StopFailure and UserPromptSubmit hook: writes the session's state to the file ops-session-resume reads and the Dashboard is to read, the data folder's session-state/<session id>.json, in the shape packages/config/src/session-state.ts checks, and inside herdr reports it as herdr's own state, handing the pane back when the session ends. A stuck or failed record also queues one alert to the session's manager (packages/scripts/src/stuck-alert.ts). Every session writes it, the owner's own included, since the Dashboard is to show them all. It never blocks: whatever fails, the hook exits 0. The file also holds the caller check the shell-pane launcher runs (sessionAbove, callerRefusal).
+import { readFileSync } from "node:fs"
 import { open } from "node:fs/promises"
-import { join } from "node:path"
+import { basename, join } from "node:path"
 
 import type { SessionState } from "../../packages/config/src/session-state"
 import { configDirOf, dataDir } from "../../packages/env/src/data-dir"
@@ -209,10 +210,7 @@ export async function run(
         .catch(() => null)) as Partial<SessionState> | null
       if (!replaces(record, held)) return
     }
-    await writeAtomic(
-      path,
-      `${JSON.stringify({ ...record, role: environment.PLAYGROUND_ROLE ?? "" })}\n`,
-    )
+    await writeAtomic(path, `${JSON.stringify(record)}\n`)
     report(herdrArgs(record, environment, seqNow()))
     if (record.state === "stuck" || record.state === "failed") {
       await loadNames(environment)
@@ -224,47 +222,94 @@ export async function run(
 // How many parent processes the launcher climbs looking for its claude process: a Bash call's shell sits one or two below it.
 const HOPS = 32
 
-// A process's parent, read through ps by its absolute path, so a PATH the caller sets names no other ps; 0 when ps cannot say.
-export function parentPid(pid: number): number {
-  const ps = Bun.spawnSync(["/bin/ps", "-o", "ppid=", "-p", String(pid)], { stderr: "ignore" })
-  return Number(ps.stdout.toString().trim()) || 0
+// A process as the kernel reports it, which no prefix on a Bash call reaches: its parent, its executable's name, and, for a claude process alone, the environment it was started with.
+export type Proc = { comm: string; env: Environment; ppid: number }
+
+const isClaude = (comm: string) => basename(comm) === "claude"
+
+// An environment's KEY=value entries in one line, as ps -E prints them after the arguments; a value that holds a space and a KEY= reads as two entries.
+const entriesOf = (line: string): Environment => {
+  const env: Environment = {}
+  const keys = [...line.matchAll(/(?:^| )([A-Za-z_][A-Za-z0-9_]*)=/g)]
+  keys.forEach((key, i) => {
+    env[key[1]!] = line.slice(key.index + key[0].length, keys[i + 1]?.index ?? line.length)
+  })
+  return env
 }
 
-// The session id of the nearest process at or above `pid` that Claude Code's own registry names (<config>/sessions/<pid>.json, whose pid is that process's): the claude process a Bash call runs under.
+// A process read through /proc on Linux, or through ps by its absolute path on macOS, so a PATH the caller sets names no other ps; undefined when the process is gone.
+export function procOf(pid: number): Proc | undefined {
+  if (process.platform === "linux") {
+    try {
+      const stat = readFileSync(`/proc/${pid}/stat`, "utf8")
+      const comm = readFileSync(`/proc/${pid}/comm`, "utf8").trim()
+      const env = isClaude(comm)
+        ? Object.fromEntries(
+            readFileSync(`/proc/${pid}/environ`, "utf8")
+              .split("\0")
+              .filter((entry) => entry.includes("="))
+              .map((entry) => [
+                entry.slice(0, entry.indexOf("=")),
+                entry.slice(entry.indexOf("=") + 1),
+              ]),
+          )
+        : {}
+      return { comm, env, ppid: Number(stat.slice(stat.lastIndexOf(")") + 2).split(" ")[1]) || 0 }
+    } catch {
+      return undefined
+    }
+  }
+  const ps = (field: string, ...flags: string[]) =>
+    Bun.spawnSync(["/bin/ps", ...flags, "-ww", "-o", `${field}=`, "-p", String(pid)], {
+      stderr: "ignore",
+    })
+      .stdout.toString()
+      .replace(/\n$/, "")
+  const comm = ps("comm").trim()
+  if (!comm) return undefined
+  const args = isClaude(comm) ? ps("command") : ""
+  const full = isClaude(comm) ? ps("command", "-E") : ""
+  const env = full.startsWith(args) ? entriesOf(full.slice(args.length).trim()) : {}
+  return { comm, env, ppid: Number(ps("ppid").trim()) || 0 }
+}
+
+// The claude process a Bash call runs under, the nearest at or above `pid` whose executable is claude: the role it was started with, and the session id Claude Code's registry in its own config folder holds for it (<config>/sessions/<pid>.json, whose pid is that process's), so a prefix that drops PLAYGROUND_ROLE or moves CLAUDE_CONFIG_DIR or HOME changes nothing it reads.
 export async function sessionAbove(
-  environment: Environment,
-  pid: number,
-  parentOf: (pid: number) => number = parentPid,
-): Promise<string | undefined> {
-  const dir = join(configDirOf(environment), "sessions")
-  for (let at = pid, hop = 0; at > 1 && hop < HOPS; at = parentOf(at), hop++) {
-    const entry = (await Bun.file(join(dir, `${at}.json`))
-      .json()
-      .catch(() => null)) as { pid?: unknown; sessionId?: unknown } | null
-    if (entry?.pid === at && typeof entry.sessionId === "string") return entry.sessionId
+  pid: number = process.ppid,
+  procs: (pid: number) => Proc | undefined = procOf,
+): Promise<{ pid: number; role: string; sessionId?: string } | undefined> {
+  for (let at = pid, hop = 0; at > 1 && hop < HOPS; hop++) {
+    const proc = procs(at)
+    if (!proc) return undefined
+    if (isClaude(proc.comm)) {
+      const entry = (await Bun.file(join(configDirOf(proc.env), "sessions", `${at}.json`))
+        .json()
+        .catch(() => null)) as { pid?: unknown; sessionId?: unknown } | null
+      const sessionId =
+        entry?.pid === at && typeof entry.sessionId === "string" ? entry.sessionId : undefined
+      return { pid: at, role: proc.env.PLAYGROUND_ROLE ?? "", sessionId }
+    }
+    at = proc.ppid
   }
 }
 
-// Why the shell-pane launcher refuses a caller whose environment names a session id or role other than its claude process's: the session id the registry above it holds, and the role this hook last wrote for that session from claude's own environment, which no prefix on a Bash call reaches; undefined when both match.
+// Why the shell-pane launcher refuses a caller whose environment names a session id or role other than its claude process's (sessionAbove); undefined when both match.
 export async function callerRefusal(
   environment: Environment = process.env,
   pid: number = process.ppid,
-  parentOf: (pid: number) => number = parentPid,
+  procs: (pid: number) => Proc | undefined = procOf,
 ): Promise<string | undefined> {
-  const above = await sessionAbove(environment, pid, parentOf)
+  const above = await sessionAbove(pid, procs)
   if (!above)
     return "shell-pane refuses: no Claude Code session runs above it, so it cannot check the session id and role its environment names"
+  if (!above.sessionId)
+    return `shell-pane refuses: Claude Code's registry names no session for the claude process above it (${above.pid})`
   const named = environment.CLAUDE_CODE_SESSION_ID
-  if (named !== above)
-    return `shell-pane refuses: its CLAUDE_CODE_SESSION_ID (${named ?? "unset"}) is not the session it runs under (${above})`
-  const held = (await Bun.file(statePath(environment, above))
-    .json()
-    .catch(() => null)) as Partial<SessionState> | null
-  if (held?.sessionId !== above || typeof held.role !== "string")
-    return `shell-pane refuses: session ${above}'s state records no role yet; the session-state hook writes one with its next record, at its next prompt, and none while the session's hooks do not run`
+  if (named !== above.sessionId)
+    return `shell-pane refuses: its CLAUDE_CODE_SESSION_ID (${named ?? "unset"}) is not the session it runs under (${above.sessionId})`
   const role = environment.PLAYGROUND_ROLE ?? ""
-  if (role !== held.role)
-    return `shell-pane refuses: its PLAYGROUND_ROLE (${role || "unset"}) is not the role session ${above}'s hooks recorded (${held.role || "unset"})`
+  if (role !== above.role)
+    return `shell-pane refuses: its PLAYGROUND_ROLE (${role || "unset"}) is not the role its claude process was started with (${above.role || "unset"})`
 }
 
 if (import.meta.main) {
