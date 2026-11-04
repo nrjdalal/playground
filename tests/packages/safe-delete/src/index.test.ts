@@ -541,11 +541,11 @@ describe("worktreeRefusal", () => {
     const { holders, roots, wt } = withWorktree()
     file(join(wt, "wip.txt"))
     expect(worktreeRefusal(wt, roots, holders)).toBe(
-      `${wt} holds 1 uncommitted change (wip.txt): the owner's own playground rm --worktree ${wt} --discard removes it anyway, which a factory session asks for as an Inbox delete decision`,
+      `${wt} holds 1 uncommitted change (wip.txt): playground rm --worktree ${wt} --discard removes it anyway, which a session runs with --decision <id> once an Inbox delete decision naming it is approved`,
     )
     for (const name of ["new.txt", "b", "c", "d"]) file(join(wt, name), "changed")
     expect(worktreeRefusal(wt, roots, holders)).toBe(
-      `${wt} holds 5 uncommitted changes (new.txt, b, c, and 2 more): the owner's own playground rm --worktree ${wt} --discard removes it anyway, which a factory session asks for as an Inbox delete decision`,
+      `${wt} holds 5 uncommitted changes (new.txt, b, c, and 2 more): playground rm --worktree ${wt} --discard removes it anyway, which a session runs with --decision <id> once an Inbox delete decision naming it is approved`,
     )
     expect(worktreeRefusal(wt, roots, { ...holders, discard: true })).toBeNull()
     const moved = quarantine(wt, { ...opts, worktree: { ...holders, discard: true } }, roots, {
@@ -559,7 +559,7 @@ describe("worktreeRefusal", () => {
     const { holders, roots, wt } = withWorktree()
     const unmerged = { ...holders, merged: () => false }
     expect(worktreeRefusal(wt, roots, unmerged)).toBe(
-      `${wt}'s HEAD holds work not landed on origin/canary (fetch origin canary if it merged since): the owner's own playground rm --worktree ${wt} --discard removes it anyway, which a factory session asks for as an Inbox delete decision`,
+      `${wt}'s HEAD holds work not landed on origin/canary (fetch origin canary if it merged since): playground rm --worktree ${wt} --discard removes it anyway, which a session runs with --decision <id> once an Inbox delete decision naming it is approved`,
     )
     git(wt, "push", "-q", "origin", "PG-1-thing")
     expect(worktreeRefusal(wt, roots, unmerged)).toContain("not landed on origin/canary")
@@ -594,6 +594,21 @@ describe("worktreeRefusal", () => {
     const moved = quarantine(wt, { ...opts, worktree: { ...holders, merged } }, roots, { now: NOW })
     expect(moved).toHaveProperty("id")
     expect(existsSync(wt)).toBe(false)
+  })
+
+  test("refuses unlanded work in a file whose name git quotes, and names a dirty one as it is", () => {
+    const { holders, roots, wt } = withWorktree()
+    const unmerged = { ...holders, merged: () => false }
+    file(join(roots.main, "new.txt"))
+    git(roots.main, "add", ".")
+    git(roots.main, "commit", "-qm", "the squash of PG-1-thing")
+    git(roots.main, "push", "-q", "origin", "canary")
+    expect(worktreeRefusal(wt, roots, unmerged)).toBeNull()
+    file(join(wt, "caf\u00e9.txt"))
+    expect(worktreeRefusal(wt, roots, unmerged)).toContain("1 uncommitted change (caf\u00e9.txt)")
+    git(wt, "add", ".")
+    git(wt, "commit", "-qm", "more work")
+    expect(worktreeRefusal(wt, roots, unmerged)).toContain("not landed")
   })
 
   test("removes a review clone detached at a merged PR's head, and a branch with no work of its own", () => {

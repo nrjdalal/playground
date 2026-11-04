@@ -392,8 +392,8 @@ export function worktreeRefusal(path: string, roots: Roots, holders: Holders): s
     return `${by}: agent-browser session ${session}, which agent-browser --session ${session} close frees`
   }
   if (holders.discard) return null
-  const discard = `the owner's own playground rm --worktree ${at} --discard removes it anyway, which a factory session asks for as an Inbox delete decision`
-  const changed = git("status", "--porcelain").out.split("\n").filter(Boolean)
+  const discard = `playground rm --worktree ${at} --discard removes it anyway, which a session runs with --decision <id> once an Inbox delete decision naming it is approved`
+  const changed = git("status", "--porcelain", "-z", "--no-renames").out.split("\0").filter(Boolean)
   if (changed.length) {
     const paths = changed.slice(0, 3).map((line) => line.slice(3))
     const more = changed.length > 3 ? `, and ${changed.length - 3} more` : ""
@@ -404,7 +404,7 @@ export function worktreeRefusal(path: string, roots: Roots, holders: Holders): s
   return null
 }
 
-// Whether HEAD's work is on origin/canary: each file HEAD changed since their merge-base reads the same there, or, since canary squash-merges and may change those files again, a merged PR holds HEAD's commit.
+// Whether HEAD's work is on origin/canary: each file HEAD changed since their merge-base, named raw (-z) and matched literally so no name is quoted or globbed, reads the same there, or, since canary squash-merges and may change those files again, a merged PR holds HEAD's commit.
 const landed = (
   git: (...args: string[]) => { ok: boolean; out: string },
   holders: Holders,
@@ -412,11 +412,12 @@ const landed = (
 ): boolean => {
   const base = git("merge-base", "HEAD", "origin/canary")
   if (base.ok) {
-    const files = git("diff", "--name-only", base.out, "HEAD")
-    const paths = files.out.split("\n").filter(Boolean)
+    const files = git("diff", "--name-only", "-z", "--no-renames", base.out, "HEAD")
+    const paths = files.out.split("\0").filter(Boolean)
     if (
       files.ok &&
-      (!paths.length || git("diff", "--quiet", "HEAD", "origin/canary", "--", ...paths).ok)
+      (!paths.length ||
+        git("--literal-pathspecs", "diff", "--quiet", "HEAD", "origin/canary", "--", ...paths).ok)
     )
       return true
   }
