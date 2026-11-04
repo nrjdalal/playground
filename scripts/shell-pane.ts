@@ -413,10 +413,17 @@ export async function close(workspace: string, herdr: Herdr = herdrCli) {
     throw new Refusal(`shell-pane closed ${workspace}, but the server still lists ${label}`)
 }
 
+// Refuses a run or a login whose environment names a session id or role other than the session the launcher runs under, before any guard reads them.
+async function checkCaller(caller: () => Promise<string | undefined>): Promise<void> {
+  const refused = await caller()
+  if (refused) throw new Refusal(refused)
+}
+
 export async function main(
   argv: string[],
   herdr: Herdr = herdrCli,
   inbox: Inbox = askInbox(mainCheckout()),
+  caller: () => Promise<string | undefined> = callerRefusal,
 ): Promise<number> {
   const [verb, first, second, ...rest] = argv
   try {
@@ -430,8 +437,7 @@ export async function main(
         `shell-pane ${verb} takes bun run --no-env-file, as the hooks run with no env file, so no worktree .env reaches the guards`,
       )
     if (verb === "run" && first && second && rest.length === 0) {
-      const refused = await callerRefusal()
-      if (refused) throw new Refusal(refused)
+      await checkCaller(caller)
       console.log(`sent ${await run(first, second, herdr)}`)
       return 0
     }
@@ -452,6 +458,7 @@ export async function main(
       const at = rest.indexOf("--timeout")
       const timeout = at === -1 ? 900_000 : Number(rest[at + 1])
       if (!Number.isInteger(timeout) || timeout <= 0) throw new Refusal(USAGE)
+      await checkCaller(caller)
       const { id, rc } = await login(first, timeout, herdr, inbox)
       console.log(
         rc === 0
