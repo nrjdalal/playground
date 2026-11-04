@@ -350,11 +350,17 @@ function stdinShell(cmd) {
   }
   return kinds.includes("root") ? "root" : kinds.find(Boolean);
 }
-function stdinShellOf(cmd, { args, first, name }) {
+function stdinShellOf(cmd, { args, first, name, xargs }) {
   if (first && !marked(first.value)) {
+    if (name === "." || name === "source")
+      return args[0]?.value === "/dev/stdin" ? "shell" : undefined;
     if (!SHELLS.has(name))
       return;
     const { inline, operand } = shellOperand(args, name);
+    if (xargs && (!operand || xargs.replace !== undefined && operand.value.includes(xargs.replace)))
+      return "shell";
+    if (inline && operand && cmd.stdin && marked(operand.value))
+      return "shell";
     return inline || operand ? undefined : "shell";
   }
   let at = 0;
@@ -1084,6 +1090,9 @@ async function runAll(lexed, env, visit, builtins) {
     envs.set(scope, child);
     return child;
   };
+  for (const cmd of lexed.commands)
+    if (cmd.stdin && stdinShell(cmd))
+      cmd.stdin.feedsShell = true;
   for (const cmd of lexed.commands) {
     const verdict = await examine(cmd, envOf(cmd.scope), visit, builtins);
     if (verdict)
@@ -1134,7 +1143,7 @@ async function examineReading(cmd, parsed, env, visit, builtins) {
   if (name === "") {
     for (const [key, value] of local)
       setVar(env.vars, key, value);
-    if (builtins)
+    if (builtins || cmd.feedsShell)
       verdict = await visit(cmd, parsed, here);
   } else if (name === "cd" || name === "popd" || name === "pushd") {
     if (name !== "popd" && args.some((a) => GLOB_CHARS.test(a.value)))
@@ -1354,7 +1363,10 @@ async function shell(name, args, cmd, env, visit, builtins, xargs) {
       const fed = await stdinOf(cmd, env);
       script = filled(script, xargs.replace, fed.unknown ? UNKNOWN : fed.value.trim());
     }
-    return run(lexScript(script, env), subshell(env), visit, builtins);
+    const verdict = await run(lexScript(script, env), subshell(env), visit, builtins);
+    if (verdict || !cmd.stdin || !marked(operand.value))
+      return verdict;
+    return run(lexScript(known(await stdinOf(cmd, env)), env), subshell(env), visit, builtins);
   }
   const script = await scriptOf(operand, cmd, env);
   return run(lexScript(known(script), env), subshell(env), visit, builtins);

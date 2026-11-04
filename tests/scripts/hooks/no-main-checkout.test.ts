@@ -265,6 +265,31 @@ describe("a build, a test run, lefthook, turbo or a file write in the main check
   })
 
   test.each([
+    ["xargs sh -c", "| xargs sh -c"],
+    ["xargs with a placeholder script", "| xargs -I{} sh -c {}"],
+    ["a while loop piped into a shell", "| while read l; do echo $l; done | sh"],
+    [". /dev/stdin", "| . /dev/stdin"],
+    ["source /dev/stdin", "| source /dev/stdin"],
+    ["sh -c of a substitution reading stdin", '| sh -c "$(cat)"'],
+  ])(
+    "a script's output handed to a shell through %s is judged as a pipe into one",
+    async (_name, tail) => {
+      expect(await bash(`bun run ask list ${tail}`)).toContain("no-main-checkout hook refuses")
+      expect(await bash(`echo 'git commit -m x' ${tail}`)).toContain(
+        "no-main-checkout hook refuses",
+      )
+    },
+  )
+
+  test.each([
+    ["xargs sh -c of a script that only reads", "echo 'git status' | xargs sh -c"],
+    ["xargs handing words to a script it names", "echo x | xargs sh -c 'echo $0'"],
+    ["a while loop piped into a reader", "echo x | while read l; do echo $l; done | cat"],
+  ])("from the main checkout, %s runs", async (_name, command) => {
+    expect(await bash(command)).toBeUndefined()
+  })
+
+  test.each([
     ["a cd into it", `cd ${MAIN} && bun run build`],
     ["bun's --cwd", `bun run --cwd ${MAIN} build`],
     ["bun's --cwd=", `bun --cwd=${MAIN} test`],
