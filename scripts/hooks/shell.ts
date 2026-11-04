@@ -17,7 +17,7 @@ export type Command = {
   // the operator that ended the command before it in its scope (`;`, `&&`, `||`, `|`, `&`, `)` or `;;`), none for a scope's first
   follows?: string
   group?: boolean
-  // Set when the command sits in a body the shell keeps for a later call (a function's, a brace group's, a coproc's), so a cd of its own may move the shell at any point of the line
+  // Set on the command that opens a body the shell keeps for a later call (a function's, a brace group's, a coproc's), so a cd there may move the shell at any point of the line; a later command of the body is read where it stands
   held?: boolean
   inner?: () => Command[]
   redirects: Redirect[]
@@ -52,7 +52,7 @@ export type Env = {
   cwdChain?: string[]
   // The `Command.chain` token of that cd, so only a command of its own run keeps the folder it named
   cwdChainToken?: number
-  // The folders a body on the line may cd into, which no later cd clears, since the shell may run that body at any point of the line
+  // The folders the cd that opens a body on the line may reach, which no later cd clears, since the shell may run that body at any point of the line
   cwdHeld?: string[]
   // The folders a cd the reader could not be sure of may have left the shell in, beside `cwdSure`; `cwdSure` is unnamed whenever one of them is the shell's instead
   cwdMaybe?: string[]
