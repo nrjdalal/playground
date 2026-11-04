@@ -286,7 +286,37 @@ describe("the rows the app cannot fix itself", () => {
       expect(await at([443])).toBe("not running")
       expect(await at([444])).toBe("ready")
       writeFileSync(join(dir, "proxy.port"), "1355\n")
-      expect(await at([])).toBe("ready")
+      expect(await at([])).toBe("not on 443")
+    } finally {
+      rmSync(dir, { force: true, recursive: true })
+    }
+  })
+
+  // #810: a stack whose proxy was down runs it on 1355, and Settings offers to set up 443, whose service install trusts the CA too, so it comes before the trust fix
+  test("a proxy on 1355 offers the proxy fix, before the trust fix, naming its port", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "portless-state-"))
+    writeFileSync(join(dir, "proxy.port"), "1355\n")
+    const ca = join(dir, "ca.pem")
+    try {
+      const row = byName(
+        await onboardChecks({
+          ...signedUp,
+          database: "ok",
+          env: { HOME, PORTLESS_STATE_DIR: dir },
+          reader: machine(
+            TOOLS,
+            { ...ANSWERS, [`security verify-cert -c ${ca} -L -p ssl`]: { code: 1 } },
+            [ca],
+            { ports: [1355] },
+          ).reader,
+        }),
+      ).portless
+      expect(row).toMatchObject({
+        action: { id: "proxy", label: "Set up the web address" },
+        detail: "not on 443",
+        status: "optional",
+      })
+      expect(row!.note).toContain("runs on port 1355 for now")
     } finally {
       rmSync(dir, { force: true, recursive: true })
     }

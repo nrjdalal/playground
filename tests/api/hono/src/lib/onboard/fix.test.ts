@@ -9,7 +9,7 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs"
-import { tmpdir } from "node:os"
+import { tmpdir, userInfo } from "node:os"
 import { dirname, join } from "node:path"
 
 // The routers' auth refuses Better Auth's default secret under NODE_ENV=production, which CI's build step sets. Set before the router loads.
@@ -197,6 +197,81 @@ describe("each fix runs its fixed argv", () => {
     expect(trust.state).toBe("failed")
     expect(trust.reason).toContain("Click Trust the certificate again")
     expect(trust.reason).not.toContain("portless trust")
+  })
+
+  // #810: the proxy fix runs portless's service install as root through macOS's own administrator dialog, its line built from the fixed argv and this user's own ids alone
+  test("proxy runs this checkout's portless service install as root through the administrator dialog, with nothing from the request", async () => {
+    const m = machine()
+    m.stub("node")
+    m.stub("osascript", 'echo "Portless service installed."')
+    const app = setup(m.fixes)
+    expect((await begin(app, `${FIX}/proxy?bin=/bin/sh&argv=rm`)).status).toBe(202)
+    const proxy = await settled(app, `${FIX}/proxy`)
+    expect(proxy.state).toBe("ok")
+    expect(proxy.lines).toContain("Your Mac asks for your password in its own window")
+    const user = userInfo()
+    const cli = join(import.meta.dir, "../../../../../../node_modules/portless/dist/cli.js")
+    const words = [
+      "/usr/bin/env",
+      "-i",
+      `HOME=${user.homedir}`,
+      "PATH=/usr/bin:/bin:/usr/sbin:/sbin",
+      `PORTLESS_STATE_DIR=${join(user.homedir, ".portless")}`,
+      `SUDO_GID=${user.gid}`,
+      `SUDO_UID=${user.uid}`,
+      `SUDO_USER=${user.username}`,
+      join(m.bin, "node"),
+      cli,
+      "service",
+      "install",
+    ]
+    expect(m.calls()).toEqual([
+      `osascript -e do shell script "${words.map((word) => `'${word}'`).join(" ")}" with administrator privileges`,
+    ])
+  })
+
+  test("a web address setup the owner cancels fails in plain words, naming no command", async () => {
+    const m = machine()
+    m.stub("node")
+    m.stub("osascript", 'echo "execution error: User canceled. (-128)" >&2; exit 1')
+    const app = setup(m.fixes)
+    expect((await begin(app, `${FIX}/proxy`)).status).toBe(202)
+    const proxy = await settled(app, `${FIX}/proxy`)
+    expect(proxy.state).toBe("failed")
+    expect(proxy.reason).toContain("Click Set up the web address again")
+    expect(proxy.reason).not.toContain("-128")
+  })
+
+  test("the administrator line quotes a word for the shell, then the line for AppleScript", async () => {
+    const { adminLine } = await import("../../../../../../api/hono/src/lib/onboard/fix")
+    const line = adminLine(["/a b/it's", 'say "hi" \\ bye'], { PORTLESS_STATE_DIR: "/state" })
+    expect(line).toStartWith("do shell script \"'/usr/bin/env' '-i' ")
+    expect(line).toContain("'PORTLESS_STATE_DIR=/state'")
+    expect(line).toEndWith(
+      ` '/a b/it'\\\\''s' 'say \\"hi\\" \\\\ bye'" with administrator privileges`,
+    )
+  })
+
+  // The home and portless folder are the only words in the administrator line that come from the environment: one holding a quote, a space and $(...) reaches the shell as one literal word, and runs nothing.
+  test("the administrator line keeps a home holding a quote, a space and $(...) one literal word", async () => {
+    const { adminLine } = await import("../../../../../../api/hono/src/lib/onboard/fix")
+    const m = machine()
+    const marker = join(m.root, "ran")
+    const home = `/Users/o'b "x" $(touch ${marker}) \\ \`touch ${marker}\``
+    const line = adminLine(
+      ["/usr/bin/env"],
+      { PORTLESS_STATE_DIR: `${home}/.portless` },
+      { gid: 20, homedir: home, uid: 501, username: "o'b" },
+    )
+    const literal = /^do shell script "(.*)" with administrator privileges$/.exec(line)![1]!
+    const shell = literal.replace(/\\(["\\])/g, "$1")
+    const run = Bun.spawnSync(["/bin/sh", "-c", shell])
+    expect(run.exitCode).toBe(0)
+    const vars = run.stdout.toString().split("\n")
+    expect(vars).toContain(`HOME=${home}`)
+    expect(vars).toContain(`PORTLESS_STATE_DIR=${home}/.portless`)
+    expect(vars).toContain("SUDO_USER=o'b")
+    expect(existsSync(marker)).toBe(false)
   })
 
   test("docker installs, opens once, then waits for docker info", async () => {
@@ -497,6 +572,23 @@ describe("the guards", () => {
     expect((await begin(app, "/fix/trust")).status).toBe(202)
     expect((await settled(app, "/fix/trust")).state).toBe("ok")
     expect(m.calls()).toEqual([expect.stringMatching(/ trust$/)])
+  })
+
+  // #810: the proxy fix runs only on the owner's own click, from a trusted origin over loopback
+  test("proxy runs nothing off loopback, from another origin, or without its start", async () => {
+    const m = machine()
+    m.stub("node")
+    m.stub("osascript")
+    const app = full(m.fixes, [])
+    for (const refusal of refusals)
+      expect((await begin(app, "/fix/proxy", refusal)).status).toBe(403)
+    expect((await read(app, "/fix/proxy")).state).toBe("idle")
+    expect(m.calls()).toEqual([])
+    expect((await begin(app, "/fix/proxy")).status).toBe(202)
+    expect((await settled(app, "/fix/proxy")).state).toBe("ok")
+    expect(m.calls()).toEqual([
+      expect.stringMatching(/^osascript -e .* 'service' 'install'" with administrator privileges$/),
+    ])
   })
 
   test("the app answers the database's fix with 409, since it runs on one", async () => {

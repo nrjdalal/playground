@@ -20,7 +20,7 @@ import {
   type SettingsRead,
   syncAliases,
 } from "@/lib/dev/launch"
-import { proxyRefusal } from "@/lib/dev/proxy"
+import { FALLBACK_PORT, proxyDown, proxySetup, startFallback } from "@/lib/dev/proxy"
 import {
   claimRecord,
   clearRecord,
@@ -125,10 +125,17 @@ if (!dry) {
     console.error(`dev: refusing to start: ${checked.refusal}`)
     leave(1)
   }
-  const proxy = await proxyRefusal(env)
-  if (proxy) {
-    console.error(`dev: refusing to start: ${proxy}`)
-    leave(1)
+  const down = await proxyDown(env)
+  if (down !== null) {
+    const failed = await startFallback(join(ROOT, "node_modules/.bin/portless"), env)
+    if (failed) {
+      console.error(`dev: refusing to start: ${proxySetup(down)} (on ${FALLBACK_PORT}: ${failed})`)
+      leave(1)
+    }
+    env.PORTLESS_PORT = String(FALLBACK_PORT)
+    console.error(
+      `dev: portless's proxy is not running on port ${down}, which needs your Mac's password, so it runs on ${FALLBACK_PORT}, which needs none; Settings' Things to fix sets up the web address on ${down}`,
+    )
   }
   console.error(`dev: database ${checked.proof}`)
   // The live dashboard takes the bare names beside its own: the reconcile tick below points them at the ports its stack bound.

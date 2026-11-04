@@ -3,7 +3,7 @@ import { chmodSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync }
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { proxyRefusal } from "../../../../../api/hono/src/lib/dev/proxy"
+import { proxyDown } from "../../../../../api/hono/src/lib/dev/proxy"
 import {
   dataCheck,
   herdrCheck,
@@ -137,7 +137,7 @@ describe("dataCheck", () => {
   })
 })
 
-// doctor reads portless's proxy by the stack's own rule, so a plist left by a service that never started reads MISSING, and a proxy already up on its port reads ok with no plist.
+// doctor reads portless's proxy by the stack's own rule, so a plist left by a service that never started reads optional, since the stack starts on 1355 meanwhile, and a proxy already up on its port reads ok with no plist.
 describe("proxyCheck", () => {
   const portless = (name: string, port?: string) => {
     const dir = join(scratch, name)
@@ -149,24 +149,20 @@ describe("proxyCheck", () => {
   const answers = async () => true
 
   test("a proxy answering on 443 is ok", async () => {
-    const check = proxyCheck(
-      "/h/playground",
-      await proxyRefusal({}, portless("up", "443"), answers),
-    )
+    const check = proxyCheck("/h/playground", await proxyDown({}, portless("up", "443"), answers))
     expect(check).toMatchObject({ name: "portless proxy", status: "ok" })
   })
 
   test("a proxy kept on a port of 1024 or above is ok, since it needs no sudo", async () => {
-    const check = proxyCheck(
-      "/h/playground",
-      await proxyRefusal({}, portless("high", "1355"), silent),
-    )
+    const check = proxyCheck("/h/playground", await proxyDown({}, portless("high", "1355"), silent))
     expect(check.status).toBe("ok")
   })
 
-  test("nothing answering on 443, as after a service install whose start failed, is MISSING, fixed by running install.sh again", async () => {
-    const check = proxyCheck("/h/playground", await proxyRefusal({}, portless("down"), silent))
-    expect(check.status).toBe("MISSING")
+  test("nothing answering on 443, as after a service install whose start failed, is optional, since the Dashboard runs on 1355 meanwhile; Settings' button or install.sh fixes it", async () => {
+    const check = proxyCheck("/h/playground", await proxyDown({}, portless("down"), silent))
+    expect(check.status).toBe("optional")
+    expect(check.detail).toContain("runs on port 1355 meanwhile")
+    expect(check.detail).toContain("Set up the web address")
     expect(check.detail).toContain("bash /h/playground/install.sh")
   })
 })

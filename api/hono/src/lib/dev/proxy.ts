@@ -26,17 +26,50 @@ export const listening = (port: number, timeout = 500): Promise<boolean> =>
     }).catch(() => settle(false))
   })
 
-// Why a stack cannot start its proxy here: portless asks for sudo to start one below port 1024, as on a fresh machine before `portless service install` keeps it on 443, and a stack gives it no terminal to ask in, so its own refusal scrolls past inside turbo's output.
-export const proxyRefusal = async (
+// The unprivileged port a stack starts portless's proxy on while the one below 1024 is down: it needs no sudo, so no terminal, and every stack keeps its name on it.
+export const FALLBACK_PORT = 1355
+
+// The port portless serves on here: the one it saved, else PORTLESS_PORT, else 443.
+export const proxyPort = async (
+  env: Record<string, string | undefined>,
+  dir = portlessDir(),
+): Promise<number> => {
+  const saved = Bun.file(join(dir, "proxy.port"))
+  return (await saved.exists())
+    ? Number((await saved.text()).trim())
+    : Number(env.PORTLESS_PORT) || 443
+}
+
+// The port below 1024 portless's proxy belongs on and does not answer, which only sudo starts: a fresh machine before `portless service install` keeps it on 443, or a service that stopped; null when the stack skips portless, its port needs no sudo, or the proxy answers.
+export const proxyDown = async (
   env: Record<string, string | undefined>,
   dir = portlessDir(),
   listens = listening,
-): Promise<string | null> => {
+): Promise<number | null> => {
   if (env.PORTLESS === "0") return null
-  const saved = Bun.file(join(dir, "proxy.port"))
-  const port = (await saved.exists())
-    ? Number((await saved.text()).trim())
-    : Number(env.PORTLESS_PORT) || 443
+  const port = await proxyPort(env, dir)
   if (port >= 1024 || (await listens(port))) return null
-  return `portless's proxy is not running, and starting it on port ${port} needs sudo, which a stack cannot ask for; once, in a terminal in the main checkout, run \`sudo node_modules/.bin/portless service install\` and then \`node_modules/.bin/portless trust\`, or start on fixed ports with \`PORTLESS=0 bun run dev\`; once a stack is up, Settings' Things to fix trusts the certificate with a button`
+  return port
+}
+
+// What the owner runs once, in a terminal, to put the proxy on its port below 1024: the setup a stack cannot do itself.
+export const proxySetup = (port: number): string =>
+  `portless's proxy is not running, and starting it on port ${port} needs sudo, which a stack cannot ask for; once, in a terminal in the main checkout, run \`sudo node_modules/.bin/portless service install\` and then \`node_modules/.bin/portless trust\`, or start on fixed ports with \`PORTLESS=0 bun run dev\`; once a stack is up, Settings' Things to fix sets up the web address with a button`
+
+// Starts portless's proxy on FALLBACK_PORT as this user, through the checkout's own portless (cli), with its trust step skipped, since trusting the certificate waits for the owner's click in Settings; answers why it is still not listening, else null. A proxy another stack started there first counts as started.
+export const startFallback = async (
+  cli: string,
+  env: Record<string, string | undefined>,
+  listens = listening,
+): Promise<string | null> => {
+  const run = Bun.spawnSync([cli, "proxy", "start", "-p", String(FALLBACK_PORT), "--skip-trust"], {
+    env,
+    stderr: "pipe",
+    stdin: "ignore",
+    stdout: "pipe",
+    timeout: 60_000,
+  })
+  if (await listens(FALLBACK_PORT, 2_000)) return null
+  const said = Bun.stripANSI(`${run.stdout}${run.stderr}`).trim().split("\n").at(-1)
+  return said || `portless exited ${run.exitCode ?? run.signalCode}`
 }

@@ -5,7 +5,7 @@ import { site } from "@packages/config/site"
 import { dataDirOf } from "@packages/env/data-dir"
 
 import { type DashboardSource, currentSource, readFixtureMachine } from "@/lib/dashboard/fixture"
-import { proxyRefusal } from "@/lib/dev/proxy"
+import { proxyDown, proxyPort } from "@/lib/dev/proxy"
 import { type FixId, fixtureFixed } from "@/lib/onboard/fix-ids"
 import { machine, type Reader } from "@/lib/onboard/machine"
 import type { SetupState } from "@/lib/setup/app"
@@ -194,7 +194,7 @@ const homebrewCheck = (reader: Reader): Check => {
   }
 }
 
-// portless: its proxy runs by the dev launcher's own rule (proxyRefusal), and the Mac trusts its CA for the Dashboard's https address; both need the Mac's password, so the app reports a stopped proxy, which no running stack can show, and trusts the CA on the owner's click (the trust fix), any password going to macOS's own window.
+// portless: its proxy runs by the dev launcher's own rule (proxyDown), on 443 or, while that is down, on 1355, which needs no password; the app sets up 443 (the proxy fix, which trusts the CA too) and trusts the CA (the trust fix) on the owner's click, any password going to macOS's own window, and reports a stopped proxy, which no running stack can show.
 const portlessCheck = async (reader: Reader, env: Env): Promise<Check> => {
   const need = "the Dashboard's https address"
   const row = (detail: string, note: string, action: Action | null = null): Check => ({
@@ -207,8 +207,15 @@ const portlessCheck = async (reader: Reader, env: Env): Promise<Check> => {
   })
   if (env.PORTLESS === "0") return okRow("portless", need, "not needed")
   const dir = env.PORTLESS_STATE_DIR || join(env.HOME || homedir(), ".portless")
-  if (await proxyRefusal(env, dir, reader.listens))
+  if (await proxyDown(env, dir, reader.listens))
     return row("not running", `The local web proxy is not running. ${INSTALLER_NOTE}`)
+  const port = await proxyPort(env, dir)
+  if (port >= 1024)
+    return row(
+      "not on 443",
+      `The Dashboard's web address runs on port ${port} for now. Set it up here, and it drops the port number; your Mac asks for your password in its own window.`,
+      { id: "proxy", label: "Set up the web address" },
+    )
   const ca = join(dir, "ca.pem")
   if (!reader.exists(ca) || (await reader.run([...COMMANDS.caTrusted(ca)])).code !== 0)
     return row(

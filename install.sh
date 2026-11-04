@@ -289,7 +289,7 @@ ext_init() {
   fi
 }
 
-# Whether a stack starts on portless's proxy, by the stack's own rule (proxyRefusal in api/hono/src/lib/dev/proxy.ts): the port portless saved, else PORTLESS_PORT, else 443; a port of 1024 or above needs no sudo, and a lower one is ready once something answers on it.
+# Whether a stack starts on portless's proxy, by the stack's own rule (proxyDown in api/hono/src/lib/dev/proxy.ts): the port portless saved, else PORTLESS_PORT, else 443; a port of 1024 or above needs no sudo, and a lower one is ready once something answers on it.
 proxy_ready() {
   [ "${PORTLESS:-}" = 0 ] && return 0
   local saved="${PORTLESS_STATE_DIR:-$HOME/.portless}/proxy.port" port="${PORTLESS_PORT:-443}"
