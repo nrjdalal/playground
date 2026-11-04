@@ -318,20 +318,16 @@ function startsRootShell(wrapper: string, value: string): boolean {
   return shell
 }
 
-// Interpreters of another language, whose script the hook cannot read, each by its family: the short letters that give it its program inline, the long options that do, and the options that take the next word as their value, so its script operand is found past them; `own` names an option whose value is a program of its own (a module, a file), which the line does not hold either
-type Family = { inline: string; long: string[]; own?: string; takes: string[]; values: string }
+// Interpreters of another language, whose script the hook cannot read, each by its family: the options that take the next word as their value when none is attached (`values` short, `takes` long), so its script operand is found past them; `own` names an option whose value is a program of its own (a module, a file), which the line does not hold either; any other option, inline code's among them, reads as code
+type Family = { own?: string; takes: string[]; values: string }
 const FAMILIES: Record<string, Family> = {
   bun: {
-    inline: "ep",
-    long: ["--eval", "--print"],
     takes: ["--config", "--cwd", "--env-file", "--preload", "--tsconfig-override"],
     values: "r",
   },
-  deno: { inline: "", long: [], takes: ["--config", "--import-map"], values: "c" },
-  lua: { inline: "e", long: [], takes: [], values: "l" },
+  deno: { takes: ["--config", "--import-map"], values: "c" },
+  lua: { takes: [], values: "l" },
   node: {
-    inline: "ep",
-    long: ["--eval", "--print"],
     takes: [
       "--conditions",
       "--env-file",
@@ -347,11 +343,11 @@ const FAMILIES: Record<string, Family> = {
     ],
     values: "Cr",
   },
-  osascript: { inline: "e", long: [], takes: [], values: "ls" },
-  perl: { inline: "eE", long: [], takes: [], values: "IMm" },
-  php: { inline: "BER", long: [], own: "f", takes: [], values: "cdf" },
-  python: { inline: "c", long: [], own: "m", takes: ["--check-hash-based-pycs"], values: "QWXm" },
-  ruby: { inline: "e", long: [], takes: [], values: "CEFIr" },
+  osascript: { takes: [], values: "ls" },
+  perl: { takes: [], values: "I" },
+  php: { own: "f", takes: [], values: "cdf" },
+  python: { own: "m", takes: ["--check-hash-based-pycs"], values: "WXm" },
+  ruby: { takes: [], values: "CEIr" },
 }
 // An interpreter's name, by its family, through a version suffix (`python3.12`, `node18`, `lua5.4`) and the family's other names (`nodejs`, `luajit`)
 const FAMILY = /^(bun|deno|lua|luajit|node|nodejs|osascript|perl|php|python|ruby)[\d.]*$/
@@ -359,7 +355,7 @@ const familyOf = (name: string): Family | undefined => {
   const base = FAMILY.exec(name)?.[1]
   return base ? FAMILIES[base === "nodejs" ? "node" : base === "luajit" ? "lua" : base] : undefined
 }
-// Whether a piped interpreter may take its piped input as code: whatever its options or inline program say, unless it runs a script file or a module of its own, named by a literal word the input does not fill in (`node x.js`, `python3 -m json.tool`), whose text is outside the line
+// Whether a piped interpreter may take its piped input as code: whatever its options say, unless it runs a script file or a module of its own past options its family's table names, named by a literal word the input does not fill in (`node x.js`, `python3 -m json.tool`), whose text is outside the line
 function interpreted(family: Family, args: Word[], xargs: Xargs): boolean {
   const filled = (word: Word) =>
     marked(word.value) || (!!xargs?.replace && word.value.includes(xargs.replace))
@@ -369,31 +365,25 @@ function interpreted(family: Family, args: Word[], xargs: Xargs): boolean {
     const { value } = args[k]
     if (value === "--") return !own(args[k + 1])
     if (value.startsWith("--")) {
-      const name = value.split("=")[0]
-      if (family.long.includes(name)) return true
-      if (family.takes.includes(name) && !value.includes("=")) k++
+      if (!family.takes.includes(value.split("=")[0])) return true
+      if (!value.includes("=")) k++
       continue
     }
     if (value.startsWith("-") && value !== "-") {
-      for (const [at, c] of [...value.slice(1)].entries()) {
-        if (family.inline.includes(c)) return true
-        if (!family.values.includes(c)) continue
-        const attached = value.slice(at + 2)
-        if (c === family.own) return !own(attached ? { ...args[k], value: attached } : args[k + 1])
-        if (!attached) k++
-        break
-      }
+      const [letter, attached] = [value[1], value.slice(2)]
+      if (!family.values.includes(letter)) return true
+      if (letter === family.own)
+        return !own(attached ? { ...args[k], value: attached } : args[k + 1])
+      if (!attached) k++
       continue
     }
-    // bun and deno take a subcommand before the script (`bun run x.ts`, `deno run x.ts`); deno's eval runs its program inline
-    if (
-      !sub &&
-      (family === FAMILIES.bun || family === FAMILIES.deno) &&
-      ["eval", "run"].includes(value)
-    ) {
-      if (value === "eval") return true
-      sub = true
-      continue
+    // bun and deno take a subcommand before the script (`bun run x.ts`, `deno run x.ts`), and their eval, exec and repl run code the line does not hold
+    if (!sub && (family === FAMILIES.bun || family === FAMILIES.deno)) {
+      if (["eval", "exec", "repl"].includes(value)) return true
+      if (value === "run") {
+        sub = true
+        continue
+      }
     }
     return !own(args[k])
   }
