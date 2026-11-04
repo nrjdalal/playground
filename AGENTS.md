@@ -234,7 +234,7 @@ Playground's sessions run as a factory: the dispatcher manages, the Builder lead
 
 ### The dashboard app
 
-The app in `api/hono` and `web/next` is Playground's dashboard: a local-only board of the Claude Code sessions Playground started (its herdr servers' and the one it hosts), and of every one cmux runs on a stack that opts in, reached at `/dashboard`.
+The app in `api/hono` and `web/next` is Playground's dashboard: a local-only board of the Claude Code sessions Playground started (its herdr servers' and the one it hosts), reached at `/dashboard`.
 
 Its rules live in one file per topic under `.agents/dashboard/`, and a change to a dashboard rule edits the topic file that holds it.
 Each topic below names when to read its file, and each ALWAYS line is that file's rule in short: the file holds it whole, with its reasons.
@@ -252,11 +252,11 @@ When a dashboard rule's meaning changes, its ALWAYS line here changes with it.
     Under `PLAYGROUND_HOSTED=1` Yard's routes take the `member` rung or the one their route names (stack.md's hosted rule).
   - ALWAYS: Keep the `claude_*` tables (`packages/db/src/schema/claude.ts`: each stored session's transcript, line by line, Playground's own alone unless the stack opts in) in the dashboard's local Postgres on 127.0.0.1, never a shared database.
   - ALWAYS: Read an organisation's own values from `packages/config/src/org.ts`, and every file the dashboard keeps outside the database from its data folder, `dataDir()`.
-- Cmux: read `.agents/dashboard/cmux.md` before you change a cmux or herdr call, how a session counts as live, the board's read pacing or the System panel's commands.
+- Cmux: read `.agents/dashboard/cmux.md` before you change a cmux or herdr call, how a session counts as live, how often the board refreshes or the System panel's commands.
   cmux is deprecated: it takes no new work, only a fix for a break, and herdr is the terminal.
   - ALWAYS: Route every cmux call through `api/hono/src/lib/dashboard/cmux.ts`, which takes only the reads in `READ_COMMANDS`, one session's own writes and `reply()`'s answer to one pending Feed prompt.
-  - ALWAYS: Route every herdr call through `api/hono/src/lib/dashboard/herdr.ts`, the dashboard's terminal, which takes over from cmux.
-  - ALWAYS: Count a cmux record as a live session only through `liveRecords()`, and keep the read of every record paced as `workers.ts` paces it.
+  - ALWAYS: Route every herdr call through `api/hono/src/lib/dashboard/herdr.ts`, the terminal the dashboard reads every session from.
+  - ALWAYS: Count a session record as live only through `liveRecords()`, which `listLive` applies to herdr's records before any read.
   - ALWAYS: Run the System panel's commands only through `api/hono/src/lib/system/probe.ts`, whose `COMMANDS` holds each one's fixed argv.
 - Messages: read `.agents/dashboard/messages.md` before you change how a message, a file or an answer reaches a session, the composer, the session the dashboard hosts on the Agent SDK, how a transcript renders, or the outbox and the stream's scroll.
   - ALWAYS: Send anything to a session through `deliver()` in `api/hono/src/lib/dashboard/deliver.ts`, and only for the owner's own clicks, since its text reads as the owner's.
@@ -268,7 +268,7 @@ When a dashboard rule's meaning changes, its ALWAYS line here changes with it.
 - Writes: read `.agents/dashboard/writes.md` before you change a dashboard write or a `bun run verify` check, and before you add, move or remove a dashboard page, a sidebar group or an owner-rung API route.
   - ALWAYS: Guard every dashboard write with `requireTrustedOrigin` and `requireLoopback` (`api/hono/src/middlewares/dashboard.ts`) before the session is read, then the owner rung; first run's writes, with no session yet, take `requireThisMachine` in place of the rung.
     Under `PLAYGROUND_HOSTED=1` Yard's writes take the `member` rung or the one their route names, no `requireLoopback`, and a browser's write `requireTrustedOrigin`.
-  - ALWAYS: Test a dashboard write on a fixture stack, and reach a real cmux session only from a live-reads stack opted in to cmux's sessions, against a throwaway probe.
+  - ALWAYS: Test a dashboard write on a fixture stack, and reach a real session only from a live-reads stack, against a throwaway probe.
   - ALWAYS: Verify dashboard work with `bun run verify` (`--help` lists its checks) rather than a script of your own.
   - ALWAYS: Keep the dashboard map current.
     `packages/scripts/src/verify/dashboard-map.json` changes in the same PR as a dashboard page, a sidebar group or an owner-rung API route.

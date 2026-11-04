@@ -671,12 +671,7 @@ function word(lx) {
       merge(out, text);
       if (GLOB_CHARS.test(text.value))
         out.glob = true;
-    } else if (c === "~" && lx.i === start && (next === "-" || next === "+") && ends(src[lx.i + 2])) {
-      out.tilde = true;
-      out.value += c + next;
-      bare += c + next;
-      lx.i += 2;
-    } else if (c === "~" && lx.i === start && ends(next)) {
+    } else if (c === "~" && lx.i === start && (next === "" || next === "/" || BREAK.has(next))) {
       out.value += homedir3();
       lx.i++;
     } else {
@@ -694,7 +689,6 @@ function word(lx) {
   return out;
 }
 var GLOB_CHARS = /[*?[{(]/;
-var ends = (c = "") => c === "" || c === "/" || BREAK.has(c);
 function double(lx) {
   const { src } = lx;
   const out = { value: "" };

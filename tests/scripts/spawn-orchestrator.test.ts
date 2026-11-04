@@ -74,6 +74,29 @@ describe("spawn.sh manager starts any orchestrator the roster kinds", () => {
     expect(launchAfterRm(r)).toStartWith(`(env PLAYGROUND_ROLE=lead claude --resume ${ASSISTANT} `)
   })
 
+  // The Assistant ran under a worker's name, and a resume that read its kind from the name rewrote its row to kind=worker (#805).
+  test("a resume of a worker-named orchestrator keeps the row's kind, not the name's", async () => {
+    const name = "r4qmq4-worker"
+    const roster = rosterOf([
+      {
+        kind: "assistant",
+        name,
+        reportsTo: "dispatcher",
+        role: "manager",
+        status: "ended",
+        task: "t",
+      },
+    ])
+    const r = await spawn(["resume", name, root], [], { ROSTER_JSON: roster }, undefined, {
+      name,
+      backend: "claude",
+    })
+    expect(r.code, r.err).toBe(0)
+    expect(launchAfterRm(r)).toStartWith(`(env PLAYGROUND_ROLE=lead claude --resume ${name} `)
+    expect(r.roster).toContain("kind=assistant")
+    expect(r.roster).not.toContain("kind=worker")
+  })
+
   test("a column of it is refused, naming the manager start it takes", async () => {
     const r = await spawn(["column", ASSISTANT, "w1:p2", "b.md"], [], { ROSTER_JSON: seated })
     expect(r.code).toBe(1)

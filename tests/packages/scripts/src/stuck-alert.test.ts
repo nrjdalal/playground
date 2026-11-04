@@ -25,6 +25,8 @@ const AGENTS = [
   { kind: "runner", name: "runner-plain-relay" },
   { kind: "researcher", name: "c8d9fg-researcher" },
   { kind: "probe", name: "h2j3kl-probe" },
+  { kind: "assistant", name: "r4qmq4-worker", reportsTo: "planner" },
+  { kind: "assistant", name: "w8x2zc-assistant" },
 ]
 const ALL = new Set(["m4n7pq-builder", "ops", "planner", "dispatcher", "k3m9px-worker"])
 
@@ -44,6 +46,18 @@ describe("the manager a stuck session's alert goes to (PG-2184)", () => {
     ["a probe's to its spawner", "h2j3kl-probe", "k3m9px-worker", "k3m9px-worker"],
     ["a lead's own to dispatcher", "m4n7pq-builder", undefined, "dispatcher"],
     ["one whose manager is down to dispatcher", "k3m9px-worker", "worker-gone", "dispatcher"],
+    [
+      "an orchestrator's to its row's reportsTo, over a worker start's brief",
+      "r4qmq4-worker",
+      "m4n7pq-builder",
+      "planner",
+    ],
+    [
+      "an orchestrator's with no reportsTo to dispatcher",
+      "w8x2zc-assistant",
+      undefined,
+      "dispatcher",
+    ],
   ])("%s", (_, name, reportsTo, to) => {
     expect(managerFor(name, AGENTS, reportsTo, ALL)).toBe(to)
   })

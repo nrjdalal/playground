@@ -1,7 +1,7 @@
 // Brand identity for this app: the single source a fork edits to rebrand. web reads it via lib/config.ts.
 export const site = {
   name: "Playground",
-  description: "Every Claude Code session Playground runs, live from cmux.",
+  description: "Every Claude Code session Playground runs, live from herdr.",
   tagline: "Run a team of Claude agents",
   social: {
     discord: "",
