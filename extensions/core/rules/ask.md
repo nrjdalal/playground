@@ -2,7 +2,7 @@
 decisions: [i580, i734, i737]
 ---
 
-Decide every two-way door yourself and record it; only a one-way door goes to the owner, as one Inbox decision posted with `bun run ask new` while you carry on, so chat holds no question for the owner.
+Decide every two-way door yourself and record it; only a one-way door goes to the owner, as one Inbox decision posted with `bun run ask new` while you carry on, so chat holds no question for the owner, and no steps, plan or list the owner comes back to: those go in one Inbox card whose progress is edited in place.
 The owner reads the Inbox, not the chat, so a question asked in chat goes unanswered, and a session waiting on one holds up the factory.
 A two-way door is a choice that can be undone (a design, an order, scope inside an approved ask, upkeep of our own tools with a backup first, a recovery a machine can finish): take the recommendation, record it in an ADR when its reason should outlast the work, else on the issue, and tell the owner only when it changes what the owner sees or does.
 A one-way door is a send that commits the owner to something new, an approval in the owner's name, a ship outside the standing yes, a new ticket, an irreversible delete or breaking change, a breaking schema or production data change, or a budget, each one decision whose preview is exactly what Approve does.
