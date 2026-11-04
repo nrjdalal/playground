@@ -18,6 +18,7 @@ Done when it prints the pane id and the workspace id.
 
 Run `shell-pane run <pane id> '<command>'`, the command in single quotes. The launcher screens it, refuses a word naming `claude`, a pane in a workspace it did not label and a pane whose last command still runs, then types it with a fresh **marker** after it, and prints `sent <marker>`. Each run is a `zsh -f` of its own in the pane's folder, so, as between your Bash calls, nothing one run sets (an alias, a variable, a `cd`) reaches the next: put a step's whole setup in one command.
 
+- Run the launcher with your session's own `CLAUDE_CODE_SESSION_ID` and `PLAYGROUND_ROLE`, as your Bash call has them: it checks both against your session's state record and refuses a call that changes either. A session whose hooks have recorded no role yet gets one at its next prompt.
 - A heavy command (a suite, a build, an install) goes inside run-slot, as `~/.playground/ops/run-slot.sh <your name> -- <command>`, as in your own Bash (**slots**).
 - A refusal prints the guard's reason, the same one its hook gives your own Bash call: follow it, then run again.
 - The launcher's own `claude` check reads the words with quotes and backslashes taken out; a word built from a variable or a glob gets past it, as past no-raw-spawn, so a session start goes through `scripts/spawn.sh` alone.

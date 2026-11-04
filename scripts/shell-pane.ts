@@ -4,6 +4,7 @@ import { homedir } from "node:os"
 import { join } from "node:path"
 
 import { mainCheckout } from "../packages/scripts/src/main-checkout"
+import { callerRefusal } from "./hooks/session-state"
 
 const USAGE = `usage:
   bun run --no-env-file scripts/shell-pane.ts open <session name>
@@ -287,6 +288,8 @@ export async function main(argv: string[], herdr: Herdr = herdrCli): Promise<num
         "shell-pane run takes bun run --no-env-file, as the hooks run with no env file, so no worktree .env reaches the guards",
       )
     if (verb === "run" && first && second && rest.length === 0) {
+      const refused = await callerRefusal()
+      if (refused) throw new Refusal(refused)
       console.log(`sent ${await run(first, second, herdr)}`)
       return 0
     }
