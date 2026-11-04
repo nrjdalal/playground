@@ -32,6 +32,7 @@
   through `AgentLink` (`components/dashboard/agent-link.tsx`), which links it to its view while its session is live, resolves a peer address to its session's name, and keeps the raw name on hover; message bodies stay as written.
   An agent the board holds reads by its label in `AgentLink` and the System page's Agent column (`labelOf`: `ENG-262#73 Worker`, `ENG-262#73 Reviewer`, Builder, the sidebar's rule in `.agents/dashboard/sidebar.md`), whose search matches the label and the name.
   A live dispatcher reads as its chat names it, Alpha or Bravo (`chatLabel`), and a place that has only a name (the Inbox's sender, a Feed card) keeps `agentLabel`.
+  `agentLabel` reads a name by its roster kind once the agents read has given one (`setRosterKinds`, from `fetchAgents`), so an `assistant` row under a worker's name reads Assistant in its chat's heading, its composer and the Inbox.
   A cell too narrow for a label passes `AgentLink` its `truncate`, which cuts a title or first ask and keeps the kind after it whole (`labelSplit`: `Review the pull… · reviewer`).
   An agent's name opens `/dashboard?worker=<session>`, that session's own view: its stream from the top of the page, with no header, beside its aside window, the Inbox, Playground's chat and Pages tabs (your chat's has no Chat tab, being it; the Inbox, Changelog and Documents alone),
   in the Changelog's resizable halves the dashboard's layout draws once around every dashboard page.
