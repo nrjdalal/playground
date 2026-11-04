@@ -12,6 +12,7 @@ import {
   removeExtension,
   type Result,
   setBundled,
+  showItem,
   unlinkExtension,
   type Who,
   writeAtomically,
@@ -19,6 +20,7 @@ import {
 
 // Relative, not @/: the web's tests type-check this file under web/next's own @/ paths.
 import { checkoutRoot, readsLive } from "../dashboard/fixture"
+import { OWNER_APPS, type OwnerApps } from "../dashboard/inbox"
 import { dataDir } from "../sessions/paths"
 import { NOT_SET_UP } from "./app-words"
 
@@ -29,18 +31,18 @@ export const REPO = /^[A-Za-z0-9-]+\/[A-Za-z0-9._-]+$/
 export const SKILL_NAME = /^[a-z0-9][a-z0-9._-]*$/
 
 export type CliRun = { code: number; err: string; out: string }
-export type Cli = (args: string[]) => Promise<CliRun>
+export type Cli = (args: string[], stdin?: string) => Promise<CliRun>
 
 const CLI_TIMEOUT_MS = 180_000
 
-// `playground ext <args>` from this checkout under this process's bun, reading the data folder the API reads, with no shell and only what gh and git need from the environment.
+// `playground ext <args>` from this checkout under this process's bun, reading the data folder the API reads, with no shell, only what gh and git need from the environment, and stdin on its input when given.
 export const runCli =
   (cli = join(checkoutRoot() ?? process.cwd(), "packages/scripts/src/playground/cli.ts")): Cli =>
-  async (args) => {
+  async (args, stdin) => {
     const child = Bun.spawn([process.execPath, "--no-env-file", cli, "ext", ...args], {
       env: { HOME: process.env.HOME, PATH: process.env.PATH, PLAYGROUND_DATA_DIR: dataDir() },
       stderr: "pipe",
-      stdin: "ignore",
+      stdin: stdin === undefined ? "ignore" : new Blob([stdin]),
       stdout: "pipe",
       timeout: CLI_TIMEOUT_MS,
     })
@@ -64,6 +66,26 @@ const FIXTURE_GITHUB = {
   ok: false,
   status: 409,
 } as const
+
+// The owner's own apps list (OwnerApps in inbox.ts): the login's scope, its desktop-owner-apps list as accepted there, and the CLI that writes it; undefined before playground ext init names a login.
+export const ownerApps = (data = dataDir(), cli = runCli()): OwnerApps | undefined => {
+  let login: string
+  try {
+    login = loginOf(data)
+  } catch {
+    return undefined
+  }
+  return {
+    login,
+    read: () => {
+      const item = showItem(data, { kind: "list", key: OWNER_APPS, scope: login })
+      if (item?.state !== "accepted") return []
+      const value = item.content.value
+      return Array.isArray(value) && value.every((name) => typeof name === "string") ? value : null
+    },
+    run: cli,
+  }
+}
 
 // Whether playground ext init has named a login, which every account and extension write needs.
 export const hasLogin = (data = dataDir()): boolean => {
