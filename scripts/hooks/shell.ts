@@ -249,8 +249,8 @@ const ROOT_SHELLS = new Map([
   ["doas", new Set(["-s"])],
   ["sudo", new Set(["--login", "--shell", "-i", "-s"])],
 ])
-// Whether a command starts a shell that reads its script from stdin, with no command of its own, under any of parse's readings (a shortened long option is one its lists lack, so it is read as taking the next word too); once the readings ran out, any privilege wrapper among its words counts as a root shell and any shell's name as a shell: "root" for a privilege wrapper's shell (`sudo -s`, `nice doas -s`, an option or program in a variable taken as one), "shell" for a shell given no script or stdin's name as one (`sh`, `sudo bash`, `sh -`, `. /dev/fd/0`), and for a shell, an eval, a source or a program the hook cannot read that a pipe or xargs feeds, whatever its arguments; a reserved word, a function's name or an assignment before it skipped
-export function stdinShell(cmd: Command): "root" | "shell" | undefined {
+// Whether a command starts a shell that reads its script from stdin, with no command of its own, under any of parse's readings (a shortened long option is one its lists lack, so it is read as taking the next word too); once the readings ran out, any privilege wrapper among its words counts as a root shell and any shell's name as a shell: "root" for a privilege wrapper's shell (`sudo -s`, `nice doas -s`, an option or program in a variable taken as one), "shell" for a shell given no script or stdin's name as one (`sh`, `sudo bash`, `sh -`, `. /dev/fd/0`), and for a shell, an eval, a source or a program the hook cannot read that a pipe or xargs feeds, whatever its arguments; "code" for an interpreter of another language (`python3`, `node`) whose script is the input a pipe or xargs feeds it; a reserved word, a function's name or an assignment before it skipped
+export function stdinShell(cmd: Command): StdinKind | undefined {
   const parsed = parse(cmd)
   const kinds = readings(parsed).map((reading) => stdinShellOf(cmd, reading))
   if (parsed.capped) {
@@ -258,18 +258,18 @@ export function stdinShell(cmd: Command): "root" | "shell" | undefined {
     if (names.some((n) => ROOT_SHELLS.has(n))) kinds.push("root")
     else if (names.some((n) => SHELLS.has(n))) kinds.push("shell")
   }
-  return kinds.includes("root") ? "root" : kinds.find(Boolean)
+  return kinds.includes("root") ? "root" : kinds.includes("shell") ? "shell" : kinds.find(Boolean)
 }
 
-function stdinShellOf(
-  cmd: Command,
-  { args, first, name, xargs }: Parsed,
-): "root" | "shell" | undefined {
+export type StdinKind = "code" | "root" | "shell"
+
+function stdinShellOf(cmd: Command, { args, first, name, xargs }: Parsed): StdinKind | undefined {
   // piped input, or input xargs hands on as words, reaches whatever the command runs, so a command that can run code takes it as code whatever its arguments say
   const fed = !!cmd.stdin || !!xargs
   if (first && !marked(first.value)) {
     if (name === "." || name === "source" || name === "eval")
       return fed || (name !== "eval" && STDIN_PATHS.has(args[0]?.value ?? "")) ? "shell" : undefined
+    if (INTERPRETERS.has(name)) return fed && interpreted(args, xargs) ? "code" : undefined
     if (!SHELLS.has(name)) return undefined
     if (fed) return "shell"
     const { inline, operand } = shellOperand(args, name)
@@ -306,17 +306,49 @@ function stdinShellOf(
   return !!first || before.slice(k + 1).some(starts) ? "root" : undefined
 }
 
-// Every command whose piped input may run as code, by the command whose output it reads: one stdinShell names, or one that opens a loop, a conditional or a brace group whose body up to its closing word holds a command that would be one under the same pipe, since every command of the body reads that stdin
-export function codeFed(commands: Command[]): Map<Command, Command> {
-  const fed = new Map<Command, Command>()
+// Interpreters of another language, whose script the hook cannot read
+const INTERPRETERS = new Set([
+  "bun",
+  "deno",
+  "lua",
+  "node",
+  "osascript",
+  "perl",
+  "php",
+  "python",
+  "python3",
+  "ruby",
+])
+// The options that give an interpreter its program inline or name a module to run (`python3 -c`, `node -e`, `python3 -m`), so stdin is its data
+const INLINE_CODE = new Set(["--eval", "--print", "-E", "-c", "-e", "-m", "-p", "-r"])
+// Whether an interpreter takes its piped input as its script: no script of its own (`python3`, `node -`, `deno run /dev/stdin`), or xargs filling in its program or script from that input (`xargs python3`, `xargs -I{} python3 -c {}`, `xargs perl -e`)
+function interpreted(args: Word[], xargs: Xargs): boolean {
+  const filled = (word: Word | undefined) =>
+    !!xargs?.replace && !!word?.value.includes(xargs.replace)
+  const k = args.findIndex((a) => INLINE_CODE.has(a.value))
+  // xargs appends its input after a program option left without its value, which makes that input the program
+  if (k !== -1) return args[k + 1] ? filled(args[k + 1]) : !!xargs
+  const operands = args.filter((a) => !a.value.startsWith("-") || a.value === "-")
+  const script = operands[0]?.value === "run" ? operands[1] : operands[0]
+  return !script || STDIN_PATHS.has(script.value) || filled(script)
+}
+
+// Every command whose piped input may run as code, by the command whose output it reads, with the kind stdinShell gives it: one stdinShell names, or one that opens a loop, a conditional or a brace group whose body up to its closing word holds a command that would be one under the same pipe, since every command of the body reads that stdin; "code" wins over "shell", since the hook can read none of it
+export function codeFed(commands: Command[]): Map<Command, { consumer: Command; kind: StdinKind }> {
+  const fed = new Map<Command, { consumer: Command; kind: StdinKind }>()
+  const add = (cmd: Command, kind: StdinKind | undefined) => {
+    if (!kind || !cmd.stdin) return
+    const known = fed.get(cmd.stdin)
+    if (known?.kind !== "code") fed.set(cmd.stdin, { consumer: cmd, kind })
+  }
   for (const [k, cmd] of commands.entries()) {
     if (!cmd.stdin) continue
-    if (stdinShell(cmd)) fed.set(cmd.stdin, cmd)
+    add(cmd, stdinShell(cmd))
     let depth = 0
     for (let j = k; j < commands.length; j++) {
       const body = commands[j]
       for (const m of markers(body.words)) depth += OPENS.has(m) ? 1 : CLOSES.has(m) ? -1 : 0
-      if (j > k && stdinShell({ ...body, stdin: cmd.stdin })) fed.set(cmd.stdin, cmd)
+      if (j > k) add(cmd, stdinShell({ ...body, stdin: cmd.stdin }))
       if (depth <= 0) break
     }
   }
@@ -1112,9 +1144,10 @@ async function runAll(
     envs.set(scope, child)
     return child
   }
-  for (const [producer, consumer] of codeFed(lexed.commands)) {
+  for (const [producer, { consumer, kind }] of codeFed(lexed.commands)) {
     producer.feedsShell = true
-    consumer.runsStdin = true
+    // a script in another language is not read as shell
+    consumer.runsStdin = kind !== "code"
   }
   for (const cmd of lexed.commands) {
     const verdict = await examine(cmd, envOf(cmd.scope), visit, builtins)

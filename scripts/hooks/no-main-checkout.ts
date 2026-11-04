@@ -470,10 +470,15 @@ function inspect(raw: string, environment: Record<string, string | undefined>, m
     for (const here of places(env, directory)) {
       // only the folder the reader proved takes the command's own fix, so a refusal in any other folder names the fix for a folder the hook cannot pin down
       const sure = env.cwdSure !== undefined && here.cwd === env.cwdSure
-      // the shell this command's output feeds runs whatever it prints, so a script the hook cannot read is refused where that shell would run in the main checkout
+      // the command this command's output feeds runs whatever it prints as code, so a script the hook cannot read is refused where it would run in the main checkout, and one in another language always is
       const pipedTo = fed.get(cmd)
+      if (pipedTo?.kind === "code" && inMain(here.cwd))
+        return refuse(
+          `a pipe into an interpreter whose script, the piped input, the hook cannot read`,
+          fixFor(sure),
+        )
       if (pipedTo) {
-        const verdict = await unreadScript(pipedTo, here, sure, inMain)
+        const verdict = await unreadScript(pipedTo.consumer, here, sure, inMain)
         if (verdict) return verdict
       }
       const ran = runs(name, args, local, here)
