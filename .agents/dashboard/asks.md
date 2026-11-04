@@ -193,7 +193,8 @@
   it refuses another session's item (its `from` differs), a change of `kind`, and an item answered, closed or replied to in chat (a decision or draft not open or holding a reply, an update dismissed or resolved).
   `bun run ask new` checks every file first, then copies each into the attachments folder (`keepAttachments`, through `storeAttachment`: bytes sniffed, 10 MB a file, a week's retention), and the item keeps `{id, kind, name, label?, group?}`.
   It refuses, with one line naming the file, an unknown key, a relative path, a missing file, a file over the cap, and bytes that do not match the kind; it takes every kind (code, doc, html, image and pdf).
-  `GET /api/v1/inbox/attachments/:id` serves a kept file behind `requireTrustedOrigin`, `requireLoopback` and the owner rung, so the web fetches it with its cookie into a blob URL (`useAttachmentUrl`), since an `<img>` sends no Origin.
+  `GET /api/v1/inbox/attachments/:id` serves a kept file behind `requireTrustedOrigin`, `requireLoopback` and the owner rung, so the web fetches it with its cookie into a blob URL (`useAttachment`), since an `<img>` sends no Origin.
+  A 404 (a fixture stack's restart drops its files, or the week's sweep took one) settles as missing for the page's life, asked once and never retried, and the card shows Missing in the file's place, or a folded pair's before alone when its after is the one gone.
   With `?download` it saves the file under its item's title, the file's own name after it when the item carries several, with the stored file's extension (`attachmentDownloadName`), in `Content-Disposition`'s `filename*` (`fileNameOf` and `attachmentDisposition` in `api/hono/src/lib/download.ts`), a header CORS exposes,
   so the card's Download fetches it with the cookie and saves it under that name (`saveFrom` in `web/next/src/lib/download.ts`).
   The card shows its files under the text gap-3 below the words:
@@ -268,7 +269,7 @@
   ops-sweep reminds each live poster on it once, then at most every 4 hours, and a lead hears of a poster that is down (playbook's Sweep).
 - A `secret` ask asks the owner for a value (a client secret, an API key) that goes straight to one sink and is kept nowhere: no row, log line, transcript, response, error or argv holds it.
   Its `key` is the environment variable's name and its `sink` one of the allowlist in code, `secretSinkSchema` in `api/hono/src/lib/dashboard/inbox.ts`, `{type: "vercel", project, scope, environments}`, each environment of `development`, `preview` and `production` named once, or `{type: "keychain", item}`,
-  one of this Mac's Keychain items `KEYCHAIN_ITEMS` in `api/hono/src/lib/keychain-items.ts` allows (`yard` today, the Yard token `playground yard` and the local Dashboard read), so a new item is one entry there.
+  one of this Mac's Keychain items `KEYCHAIN_ITEMS` in `api/hono/src/lib/keychain-items.ts` allows (`slack`, the Slack user token the Slack extension reads, and `yard`, the Yard token `playground yard` and the local Dashboard read), so a new item is one entry there.
   Its card shows what Submit does, a masked field and Submit, Enter submitting too, with no comment box, Archive or Chat about it, so nothing else invites the value; Snooze stays.
   Submit posts `{value, seen}`, the value trimmed of its edge whitespace (a pasted newline), to `POST /api/v1/inbox/:id/secret`, which `provideSecret()` claims in one write that holds only while the item is open at the version read, so the sink runs once, then hands the value on stdin to `vercel env add <key> --environment <env> --project <project> --scope <scope> --yes`,
   once an environment in order,

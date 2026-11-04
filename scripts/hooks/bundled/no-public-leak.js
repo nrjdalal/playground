@@ -5999,7 +5999,13 @@ var contentFields = {
   value: union([array(unknown()), record(string2(), unknown())]).nullable()
 };
 // packages/settings/src/ext.ts
+var BUNDLED_EXTENSIONS = ["slack"];
 var extSettings = defineSettings({
+  "ext.bundled": {
+    default: [],
+    description: "The extensions Playground ships under extensions/ that you have turned on, each read as a scope after your installed extensions and before core; one not named here loads no skill.",
+    schema: array(_enum(BUNDLED_EXTENSIONS)).refine((names) => new Set(names).size === names.length, "a bundled extension is on once")
+  },
   "ext.links": {
     default: {},
     description: "Each extension to the GitHub orgs whose repos read it, lowercase, or * for every repo; your login's is read by every repo, and an extension it does not name by none.",
