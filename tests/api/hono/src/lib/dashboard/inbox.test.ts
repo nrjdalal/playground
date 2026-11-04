@@ -2564,8 +2564,13 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       },
     )
     expect(sent.map((d) => d.to)).toEqual(["worker-eod", "dispatcher"])
-    expect(sent[1]?.text).toContain("nothing is carried out")
-    expect(sent[1]?.text).not.toContain("you carry this out")
+    expect(payloadOf(sent[1]?.text ?? "")).toMatchObject({
+      close: `bun run ask get #i${posted.ref} --ack`,
+      go: false,
+      next: "close",
+      relay: { for: "worker-eod", why: "poster-ended" },
+      verb: "pick",
+    })
   })
 
   test("a clear reaches its poster as set aside, not denied, and its poster's read closes it as a non-go", async () => {
@@ -3317,8 +3322,14 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       // the poster is told when and each status, and never the value
       expect(sent).toHaveLength(1)
       expect(sent[0]?.to).toBe("dispatcher")
-      expect(sent[0]?.text).toContain("production: exit 0")
-      expect(sent[0]?.text).toContain("preview: exit 1")
+      expect(payloadOf(sent[0]?.text ?? "")).toMatchObject({
+        next: "close",
+        results: [
+          { environment: "production", exitCode: 0 },
+          { environment: "preview", exitCode: 1 },
+        ],
+        verb: "submit",
+      })
       expect(sent[0]?.text).not.toContain(VALUE)
       expect(JSON.stringify(provided.item)).not.toContain(VALUE)
       expect(logged.join("\n")).not.toContain(VALUE)
@@ -3380,7 +3391,9 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
         choice: "provided",
         results: [{ environment: "Keychain", exitCode: 0, line: "saved" }],
       })
-      expect(sent[0]?.text).toContain("Keychain: saved")
+      expect(payloadOf(sent[0]?.text ?? "")?.results).toEqual([
+        { environment: "Keychain", exitCode: 0, line: "saved" },
+      ])
       for (const kept of [
         JSON.stringify(provided),
         JSON.stringify(sent),
@@ -3578,8 +3591,10 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
           line: "playground ext: 409 the proposal is at 0a1b2c3d4e5f, not 3f9a2c1d; read it again",
         },
       })
-      expect(sent[0]?.text).toContain("failed (exit 1)")
-      expect(sent[0]?.text).toContain("Nothing was accepted")
+      expect(payloadOf(sent[0]?.text ?? "")).toMatchObject({
+        accepted: { exitCode: 1 },
+        next: "nothing",
+      })
     })
 
     test("a runner that throws is recorded as a failed accept, never an approve with no result", async () => {
@@ -3680,7 +3695,7 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
         next: "nothing",
         relay: { for: "worker-eod", why: "poster-ended" },
       })
-      expect(relayedPayload?.accepted?.exitCode).not.toBe(0)
+      expect(relayedPayload?.accepted).toEqual({ exitCode: 0, line: "rev 9b8c7d6 is accepted" })
       // an approved accept is a go, which get --ack leaves open, so the relay names the one close that closes it
       expect(relayed?.text).not.toContain("--ack")
     })
