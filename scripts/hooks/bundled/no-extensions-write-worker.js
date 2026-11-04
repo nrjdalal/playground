@@ -32,7 +32,12 @@ var DESK_ENV = new Set([
   "SDK_PERMISSION_MODE",
   "SDK_PROBE_DIR"
 ]);
+var RENAMED_ENV = {
+  PLAYGROUND_CMUX_SESSIONS: "PLAYGROUND_ALL_SESSIONS"
+};
 var renamedEnv = (name) => {
+  if (Object.hasOwn(RENAMED_ENV, name))
+    return RENAMED_ENV[name];
   if (!name.startsWith("DESK_"))
     return;
   const rest = name.slice("DESK_".length);
@@ -255,36 +260,25 @@ function stdinShellOf(cmd, { args, first, name }) {
   }
   const end = first ? cmd.words.indexOf(first) : -1;
   const before = cmd.words.slice(at, end === -1 ? undefined : end);
-  const firstWrapper = before.find((w) => !w.quoted && ROOT_SHELLS.has(program(w.value)));
-  const wrappers = [];
-  for (const w of before) {
-    if (wrappers.some((wrapper) => startsRootShell(wrapper, w.value)))
-      return "root";
-    if (w === firstWrapper || ROOT_SHELLS.has(w.value))
-      wrappers.push(program(w.value));
-  }
-  return first && wrappers.length ? "root" : undefined;
-}
-function startsRootShell(wrapper, value) {
-  if (marked(value))
-    return true;
+  const k = before.findIndex((w) => !w.quoted && ROOT_SHELLS.has(program(w.value)));
+  if (k === -1)
+    return;
+  const wrapper = program(before[k].value);
   const shells = ROOT_SHELLS.get(wrapper);
   const { flags, values } = WRAPPERS.get(wrapper);
-  if (value.startsWith("--")) {
-    const named = [...flags, ...values].filter((o) => o.startsWith(value));
-    return shells.has(named.length === 1 ? named[0] : value);
-  }
-  if (!/^-[A-Za-z]/.test(value))
-    return false;
-  let shell = false;
-  for (const c of value.slice(1)) {
-    if (values.has(`-${c}`))
-      return shell;
-    if (!flags.has(`-${c}`))
-      return false;
-    shell ||= shells.has(`-${c}`);
-  }
-  return shell;
+  const clustered = (value) => {
+    let shell = false;
+    for (const c of value.slice(1)) {
+      if (values.has(`-${c}`))
+        return shell;
+      if (!flags.has(`-${c}`))
+        return false;
+      shell ||= shells.has(`-${c}`);
+    }
+    return shell;
+  };
+  const starts = ({ quoted, value }) => marked(value) || !quoted && (shells.has(value) || /^-[A-Za-z]/.test(value) && clustered(value));
+  return !!first || before.slice(k + 1).some(starts) ? "root" : undefined;
 }
 var COUNTED = new Set(["repeat", "timeout"]);
 var SHELLS = new Set(["bash", "dash", "ksh", "sh", "zsh"]);
