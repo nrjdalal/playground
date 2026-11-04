@@ -32,6 +32,14 @@ export const groups: Group[] = [
         "sudo -s < <(echo 'git commit -m x')",
       ],
       ["a root shell's script file the hook cannot read", `sudo -s < ${MAIN}/.no-such-file`],
+      [
+        "a commit su's root shell runs from a here-string, its shell given with an attached value",
+        "su -s/usr/local/bin/bash root <<< 'git commit -m x'",
+      ],
+      [
+        "a commit su's root shell runs from a here-string, its group given with an attached value",
+        "sudo su -gdocker root <<< 'git commit -m x'",
+      ],
     ],
   },
 ]
