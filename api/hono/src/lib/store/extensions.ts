@@ -4,12 +4,14 @@ import { dirname, join } from "node:path"
 import {
   extRepoOf,
   linkExtension,
+  listBundled,
   listExtensions,
   loginOf,
   loginPath,
   orderExtensions,
   removeExtension,
   type Result,
+  setBundled,
   showItem,
   unlinkExtension,
   type Who,
@@ -138,6 +140,12 @@ export const setUpSettings = async (
 
 export type ExtensionRow = ReturnType<typeof listExtensions>[number]
 
+export type BundledRow = ReturnType<typeof listBundled>[number]
+
+// The extensions Playground ships under extensions/, each with whether ext.bundled turns it on, or none before playground ext init names a login.
+export const bundledOf = (data = dataDir()): BundledRow[] | null =>
+  hasLogin(data) ? listBundled(data) : null
+
 // The extensions in priority order with core last, or none before playground ext init names a login.
 export const extensionsOf = (data = dataDir()): ExtensionRow[] | null =>
   hasLogin(data) ? listExtensions(data) : null
@@ -228,4 +236,7 @@ export const unlinkOf = withLogin((data, name: string, org: string, who: Who) =>
 )
 export const removeOf = withLogin((data, name: string, who: Who) =>
   removeExtension(data, name, who),
+)
+export const bundledSwitchOf = withLogin((data, name: string, on: boolean, who: Who) =>
+  setBundled(data, name, on, who),
 )

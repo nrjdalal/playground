@@ -1,10 +1,17 @@
-import { describe, expect, test } from "bun:test"
+import { afterEach, describe, expect, spyOn, test } from "bun:test"
 
 // The router's auth refuses Better Auth's default secret under NODE_ENV=production, which CI's build step sets; any secret serves requests that carry no session. Set before the router loads.
 process.env.BETTER_AUTH_SECRET ||= "extensions-router-test-secret-not-for-use-anywhere"
 const { extensionsRouter } = await import("../../../../../api/hono/src/routers/extensions")
 const { Hono } = await import("../../../../../api/hono/node_modules/hono")
 const { env } = await import("../../../../../packages/env/dist/api-hono.mjs")
+// Resolved from the API's own source, so the test holds the same auth instance the middlewares do.
+const { auth } = await import(
+  Bun.resolveSync(
+    "@packages/auth",
+    new globalThis.URL("../../../../../api/hono/src", import.meta.url).pathname,
+  )
+)
 
 // Validated, the setting is a list; with validation skipped, as in CI, it is the raw comma-separated string.
 const trusted = (): string => {
@@ -34,7 +41,26 @@ const WRITES: [string, RequestInit][] = [
   [`${URL}/acme/sync`, { method: "POST" }],
   [`${URL}/acme`, { method: "DELETE" }],
   [`${URL}/init`, { method: "POST" }],
+  [`${URL}/bundled/slack`, json("PUT", { on: true })],
 ]
+
+// Stands in for Better Auth's session read: authMiddleware asks with returnHeaders and takes { headers, response }, requireConsoleRole asks without and takes the session.
+const signedIn = (role: string) =>
+  spyOn(auth.api, "getSession").mockImplementation((async (options: {
+    returnHeaders?: boolean
+  }) => {
+    const session = {
+      session: { id: "s-extensions", userId: `u-${role}` },
+      user: { banned: false, id: `u-${role}`, role },
+    }
+    return options.returnHeaders ? { headers: new Headers(), response: session } : session
+  }) as never)
+
+let spy: { mockRestore: () => void } | null = null
+afterEach(() => {
+  spy?.mockRestore()
+  spy = null
+})
 
 const send = (
   [url, init]: [string, RequestInit],
@@ -53,6 +79,7 @@ describe("the extensions routes", () => {
     expect((await app.request(`${URL}/why?skill=end-of-day`)).status).toBe(401)
     expect((await app.request(`${URL}/check?name=acme`)).status).toBe(401)
     expect((await app.request(`${URL}/init/check`)).status).toBe(401)
+    expect((await app.request(`${URL}/bundled`)).status).toBe(401)
   })
 
   test("a write from another origin or off this machine is refused before the session is read", async () => {
@@ -65,5 +92,21 @@ describe("the extensions routes", () => {
       expect((await send(write, { origin: trusted() })).status).toBe(403)
       expect((await send(write, { origin: trusted() }, peer("127.0.0.1"))).status).toBe(401)
     }
+  })
+
+  // The owner's session is stubbed, so each 403 can come only from guardWrites, and the last only from the rung.
+  test("a bundled extension's switch is refused off its origin or machine even for the owner, and below the owner rung", async () => {
+    const turnOn: [string, RequestInit] = [`${URL}/bundled/slack`, json("PUT", { on: true })]
+    spy = signedIn("owner")
+    expect((await send(turnOn, {}, peer("127.0.0.1"))).status).toBe(403)
+    expect(
+      (await send(turnOn, { origin: "http://evil.localhost" }, peer("127.0.0.1"))).status,
+    ).toBe(403)
+    expect((await send(turnOn, { origin: trusted() }, peer("192.168.1.20"))).status).toBe(403)
+    expect((await send(turnOn, { origin: trusted() })).status).toBe(403)
+    spy.mockRestore()
+    spy = signedIn("admin")
+    expect((await send(turnOn, { origin: trusted() }, peer("127.0.0.1"))).status).toBe(403)
+    expect((await app.request(`${URL}/bundled`)).status).toBe(403)
   })
 })

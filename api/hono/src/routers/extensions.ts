@@ -11,6 +11,8 @@ import {
 import { dataDir } from "@/lib/sessions/paths"
 import {
   addExtension,
+  bundledOf,
+  bundledSwitchOf,
   checkExtension,
   checkSettings,
   EXTENSION_NAME,
@@ -53,6 +55,40 @@ export const extensionsRouter = new Hono<{ Variables: StoreVariables }>()
       ...responses(),
     }),
     (c) => c.json({ data: { extensions: extensionsOf() } }),
+  )
+  .get(
+    "/bundled",
+    describeRoute({
+      tags: ["Settings"],
+      description:
+        "Each extension Playground ships under extensions/ with whether ext.bundled turns it on, or null before ext init names a login",
+      ...responses(),
+    }),
+    (c) => c.json({ data: { bundled: bundledOf() } }),
+  )
+  .put(
+    "/bundled/:name",
+    describeRoute({
+      tags: ["Settings"],
+      description:
+        "Turn a bundled extension on or off in ext.bundled at the login's scope, so its skills load, or stop loading, from the next session",
+      ...responses(validationErrorResponses, notFoundErrorResponses, conflictErrorResponses),
+    }),
+    sValidator("param", z.strictObject({ name }), invalid),
+    sValidator("json", z.strictObject({ on: z.boolean() }), invalid),
+    (c) => {
+      const extension = c.req.valid("param").name
+      const { on } = c.req.valid("json")
+      done(
+        bundledSwitchOf(
+          dataDir(),
+          extension,
+          on,
+          who(c, `turn the bundled ${extension} extension ${on ? "on" : "off"} from Settings`),
+        ),
+      )
+      return c.json({ data: { bundled: bundledOf() } })
+    },
   )
   .get(
     "/why",

@@ -852,11 +852,12 @@ describe("a secret ask (PG-59)", () => {
     expect(refused({}, "-e")).toBe(false)
   })
 
-  test("takes a keychain sink naming an allowlisted item, yard alone today, and no other sink", () => {
+  test("takes a keychain sink naming an allowlisted item, slack or yard, and no other sink", () => {
     const sinkOf = (sink: object) =>
       inboxInputSchema.safeParse(decision({ ...SECRET, key: "YARD_TOKEN", sink })).success
     expect(sinkOf({ item: "yard", type: "keychain" })).toBe(true)
-    expect(sinkOf({ item: "slack", type: "keychain" })).toBe(false)
+    expect(sinkOf({ item: "slack", type: "keychain" })).toBe(true)
+    expect(sinkOf({ item: "vault", type: "keychain" })).toBe(false)
     expect(sinkOf({ item: "../x", type: "keychain" })).toBe(false)
     expect(sinkOf({ type: "keychain" })).toBe(false)
     expect(sinkOf({ item: "yard", project: "api-made-up", type: "keychain" })).toBe(false)
