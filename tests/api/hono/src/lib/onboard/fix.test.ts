@@ -188,6 +188,17 @@ describe("each fix runs its fixed argv", () => {
     ])
   })
 
+  test("a trust the owner cancels fails in plain words, naming no command", async () => {
+    const m = machine()
+    m.stub("node", 'echo "Failed to trust CA: Permission denied. Try: portless trust" >&2; exit 1')
+    const app = setup(m.fixes)
+    expect((await begin(app, `${FIX}/trust`)).status).toBe(202)
+    const trust = await settled(app, `${FIX}/trust`)
+    expect(trust.state).toBe("failed")
+    expect(trust.reason).toContain("Click Trust the certificate again")
+    expect(trust.reason).not.toContain("portless trust")
+  })
+
   test("docker installs, opens once, then waits for docker info", async () => {
     const m = machine()
     m.held(

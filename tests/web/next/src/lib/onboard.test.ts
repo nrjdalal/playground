@@ -103,7 +103,7 @@ describe("toFix", () => {
     expect(toFix([docker, database, git, portless])).toEqual([docker])
   })
 
-  test("and an optional row with a fix the app runs, but the settings step", () => {
+  test("keeps an optional row whose fix the app runs, but never the settings step", () => {
     const trust: Check = { ...portless, action: { id: "trust", label: "Trust the certificate" } }
     expect(toFix([docker, git, trust, settings])).toEqual([docker, trust])
   })

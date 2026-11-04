@@ -21,7 +21,15 @@ export type FixRead = {
 }
 
 type Step =
-  | { argv: string[]; label: string; login?: true; ms: number; note?: string }
+  | {
+      argv: string[]
+      detached?: true
+      failed?: string
+      label: string
+      login?: true
+      ms: number
+      note?: string
+    }
   | { label: string; tries: number; until: string[] }
 
 type Env = Record<string, string | undefined>
@@ -135,6 +143,10 @@ const PLANS: Record<FixId, ((has: (tool: string) => boolean, dir: string) => Ste
   trust: () => [
     {
       argv: ["node", PORTLESS_CLI, "trust"],
+      // no terminal of the API's, so portless's sudo retry after a cancelled window fails at once rather than asking in the Dashboard's pane
+      detached: true,
+      failed:
+        "Your Mac did not trust the certificate. Click Trust the certificate again, and answer your Mac's password window if it shows one.",
       label: "Trusting the local web proxy's certificate",
       ms: 5 * MINUTE,
       note: "Your Mac may ask for your password in its own window",
@@ -208,6 +220,7 @@ export const createFixes = ({
     if (step.login) return login(job, command, base, step.ms)
     const child = Bun.spawn(command, {
       cwd: dir,
+      detached: step.detached,
       env: base,
       stderr: "pipe",
       stdin: "ignore",
@@ -223,7 +236,7 @@ export const createFixes = ({
     // A grandchild left holding the pipes keeps reading open, so a step past its bound settles without it.
     if (timing.done()) throw new Error(LATE)
     await reading
-    if (code !== 0) throw new Error(job.lines.at(-1) ?? `it exited with ${code}`)
+    if (code !== 0) throw new Error(step.failed ?? job.lines.at(-1) ?? `it exited with ${code}`)
   }
 
   // gh auth login --web in a pty: Enter takes its default for each prompt (git over https, and the browser it would open, which is /usr/bin/true), and the code it prints shows in the pane until the owner enters it at GitHub and gh exits.

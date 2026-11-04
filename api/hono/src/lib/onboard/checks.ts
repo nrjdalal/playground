@@ -202,13 +202,13 @@ const portlessCheck = async (reader: Reader, env: Env): Promise<Check> => {
     detail,
     name: "portless",
     need,
-    note: action ? note : `${note} ${INSTALLER_NOTE}`,
+    note,
     status: "optional",
   })
   if (env.PORTLESS === "0") return okRow("portless", need, "not needed")
   const dir = env.PORTLESS_STATE_DIR || join(env.HOME || homedir(), ".portless")
   if (await proxyRefusal(env, dir, reader.listens))
-    return row("not running", "The local web proxy is not running.")
+    return row("not running", `The local web proxy is not running. ${INSTALLER_NOTE}`)
   const ca = join(dir, "ca.pem")
   if (!reader.exists(ca) || (await reader.run([...COMMANDS.caTrusted(ca)])).code !== 0)
     return row(
