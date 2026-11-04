@@ -175,6 +175,19 @@ describe("each fix runs its fixed argv", () => {
     ])
   })
 
+  test("trust runs this checkout's own portless trust under node, with nothing from the request", async () => {
+    const m = machine()
+    m.stub("node", 'echo "Local CA added to system trust store."')
+    const app = setup(m.fixes)
+    expect((await begin(app, `${FIX}/trust?bin=/bin/sh`)).status).toBe(202)
+    const trust = await settled(app, `${FIX}/trust`)
+    expect(trust.state).toBe("ok")
+    expect(trust.lines).toContain("Your Mac asks for your password in its own window")
+    expect(m.calls()).toEqual([
+      expect.stringMatching(/^node \/\S+\/node_modules\/portless\/dist\/cli\.js trust$/),
+    ])
+  })
+
   test("docker installs, opens once, then waits for docker info", async () => {
     const m = machine()
     m.held(
@@ -459,6 +472,20 @@ describe("the guards", () => {
     expect((await begin(app, "/fix/git")).status).toBe(401)
     expect((await app.request("http://127.0.0.1/fix/git", {}, peer("127.0.0.1"))).status).toBe(401)
     expect(m.calls()).toEqual([])
+  })
+
+  // #658: the trust fix runs only on the owner's own click, from a trusted origin over loopback
+  test("trust runs nothing off loopback, from another origin, or without its start", async () => {
+    const m = machine()
+    m.stub("node")
+    const app = full(m.fixes, [])
+    for (const refusal of refusals)
+      expect((await begin(app, "/fix/trust", refusal)).status).toBe(403)
+    expect((await read(app, "/fix/trust")).state).toBe("idle")
+    expect(m.calls()).toEqual([])
+    expect((await begin(app, "/fix/trust")).status).toBe(202)
+    expect((await settled(app, "/fix/trust")).state).toBe("ok")
+    expect(m.calls()).toEqual([expect.stringMatching(/ trust$/)])
   })
 
   test("the app answers the database's fix with 409, since it runs on one", async () => {

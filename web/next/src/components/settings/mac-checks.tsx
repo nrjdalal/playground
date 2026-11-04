@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { LIVE_CHECKS_QUERY_KEY, fixTitle, toFix } from "@/lib/onboard"
 
-// Settings > what first run left: each check still missing on this Mac, read live whatever the done mark says, with the fix the app runs for it and Re-check. Shown only while one is missing, so a Mac whose checks are done shows nothing here.
+// Settings > what first run left: each check still missing on this Mac, or optional with a fix the app runs, read live whatever the done mark says, with the fix the app runs for it and Re-check. Shown only while one is missing, so a Mac whose checks are done shows nothing here.
 export function MacChecks() {
   const { data, isFetching, refetch } = useQuery({
     queryKey: LIVE_CHECKS_QUERY_KEY,

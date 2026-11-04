@@ -152,7 +152,7 @@ describe("onboardChecks on a machine it reads", () => {
       herdr: "herdr",
       Homebrew: null,
       node: "node",
-      portless: null,
+      portless: "trust",
       python3: "python",
       Settings: null,
       uv: null,
@@ -232,7 +232,7 @@ describe("the rows the app cannot fix itself", () => {
     expect(absent!.note).toBeTruthy()
   })
 
-  test("portless is ok once its proxy answers and its CA is trusted, and optional with a note otherwise", async () => {
+  test("portless is ok once its proxy answers and its CA is trusted, and optional with a note otherwise, a CA not trusted offering the trust fix", async () => {
     const at = async (files: string[], trusted: boolean, ports = [443]) =>
       byName(
         await onboardChecks({
@@ -253,7 +253,11 @@ describe("the rows the app cannot fix itself", () => {
       [[], true, [443], "not trusted"],
     ] as const) {
       const row = await at([...files], trusted, [...ports])
-      expect(row).toMatchObject({ action: null, detail, status: "optional" })
+      expect(row).toMatchObject({
+        action: detail === "not trusted" ? { id: "trust", label: "Trust the certificate" } : null,
+        detail,
+        status: "optional",
+      })
       expect(row!.note).toBeTruthy()
     }
   })
