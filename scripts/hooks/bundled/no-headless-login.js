@@ -371,13 +371,15 @@ function stdinShell(cmd) {
     else if (names.some((n) => SHELLS.has(n)))
       kinds.push("shell");
   }
-  return kinds.includes("root") ? "root" : kinds.find(Boolean);
+  return kinds.includes("root") ? "root" : kinds.includes("shell") ? "shell" : kinds.find(Boolean);
 }
 function stdinShellOf(cmd, { args, first, name, xargs }) {
   const fed = !!cmd.stdin || !!xargs;
   if (first && !marked(first.value)) {
     if (name === "." || name === "source" || name === "eval")
       return fed || name !== "eval" && STDIN_PATHS.has(args[0]?.value ?? "") ? "shell" : undefined;
+    if (INTERPRETERS.has(name))
+      return fed && interpreted(args, xargs) ? "code" : undefined;
     if (!SHELLS.has(name))
       return;
     if (fed)
@@ -416,20 +418,48 @@ function stdinShellOf(cmd, { args, first, name, xargs }) {
   const starts = ({ quoted, value }) => marked(value) || !quoted && (shells.has(value) || /^-[A-Za-z]/.test(value) && clustered(value));
   return !!first || before.slice(k + 1).some(starts) ? "root" : undefined;
 }
+var INTERPRETERS = new Set([
+  "bun",
+  "deno",
+  "lua",
+  "node",
+  "osascript",
+  "perl",
+  "php",
+  "python",
+  "python3",
+  "ruby"
+]);
+var INLINE_CODE = new Set(["--eval", "--print", "-E", "-c", "-e", "-m", "-p", "-r"]);
+function interpreted(args, xargs) {
+  const filled = (word) => !!xargs?.replace && !!word?.value.includes(xargs.replace);
+  const k = args.findIndex((a) => INLINE_CODE.has(a.value));
+  if (k !== -1)
+    return args[k + 1] ? filled(args[k + 1]) : !!xargs;
+  const operands = args.filter((a) => !a.value.startsWith("-") || a.value === "-");
+  const script = operands[0]?.value === "run" ? operands[1] : operands[0];
+  return !script || STDIN_PATHS.has(script.value) || filled(script);
+}
 function codeFed(commands) {
   const fed = new Map;
+  const add = (cmd, kind) => {
+    if (!kind || !cmd.stdin)
+      return;
+    const known = fed.get(cmd.stdin);
+    if (known?.kind !== "code")
+      fed.set(cmd.stdin, { consumer: cmd, kind });
+  };
   for (const [k, cmd] of commands.entries()) {
     if (!cmd.stdin)
       continue;
-    if (stdinShell(cmd))
-      fed.set(cmd.stdin, cmd);
+    add(cmd, stdinShell(cmd));
     let depth = 0;
     for (let j = k;j < commands.length; j++) {
       const body = commands[j];
       for (const m of markers(body.words))
         depth += OPENS.has(m) ? 1 : CLOSES.has(m) ? -1 : 0;
-      if (j > k && stdinShell({ ...body, stdin: cmd.stdin }))
-        fed.set(cmd.stdin, cmd);
+      if (j > k)
+        add(cmd, stdinShell({ ...body, stdin: cmd.stdin }));
       if (depth <= 0)
         break;
     }
@@ -1123,9 +1153,9 @@ async function runAll(lexed, env, visit, builtins) {
     envs.set(scope, child);
     return child;
   };
-  for (const [producer, consumer] of codeFed(lexed.commands)) {
+  for (const [producer, { consumer, kind }] of codeFed(lexed.commands)) {
     producer.feedsShell = true;
-    consumer.runsStdin = true;
+    consumer.runsStdin = kind !== "code";
   }
   for (const cmd of lexed.commands) {
     const verdict = await examine(cmd, envOf(cmd.scope), visit, builtins);

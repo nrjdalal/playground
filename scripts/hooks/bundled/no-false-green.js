@@ -298,6 +298,19 @@ var ROOT_SHELLS = new Map([
   ["doas", new Set(["-s"])],
   ["sudo", new Set(["--login", "--shell", "-i", "-s"])]
 ]);
+var INTERPRETERS = new Set([
+  "bun",
+  "deno",
+  "lua",
+  "node",
+  "osascript",
+  "perl",
+  "php",
+  "python",
+  "python3",
+  "ruby"
+]);
+var INLINE_CODE = new Set(["--eval", "--print", "-E", "-c", "-e", "-m", "-p", "-r"]);
 var COUNTED = new Set(["repeat", "timeout"]);
 var SHELLS = new Set(["bash", "dash", "ksh", "sh", "zsh"]);
 var STDIN_PATHS = new Set(["-", "/dev/fd/0", "/dev/stdin", "/proc/self/fd/0"]);
