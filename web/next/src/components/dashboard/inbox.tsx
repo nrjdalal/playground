@@ -566,7 +566,7 @@ function Preview({ item }: { item: Extract<InboxItem, { kind: "decision" }> }) {
           <p>
             On Approve, System Settings opens at Privacy &amp; Security &gt;{" "}
             {preview.permission === "accessibility" ? "Accessibility" : "Screen Recording"}, where
-            you turn it on for {agentLabel(item.from)}&apos;s terminal app, and{" "}
+            you turn it on for the app that runs {agentLabel(item.from)}, and{" "}
             {agentLabel(item.from)} checks it again.
           </p>
           <p className="break-words whitespace-pre-wrap">Why: {preview.why}</p>
