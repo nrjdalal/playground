@@ -119,3 +119,31 @@ describe("marking updates read", () => {
     expect((await read({ origin: trusted() }, peer("127.0.0.1"))).status).toBe(401)
   })
 })
+
+describe("an accept decision's Approve (PG-658)", () => {
+  // the same answer an accept card's Approve posts; past every guard it runs the store's accept, so each refusal below is one that runs nothing
+  const approve = (headers: Record<string, string>, server?: ReturnType<typeof peer>) =>
+    inboxRouter.request(
+      "http://127.0.0.1/0b9c6f1e-1111-4111-8111-000000000658/answer",
+      {
+        body: JSON.stringify({ action: "approve", seen: "2026-11-03T20:00:00.000Z" }),
+        headers: { "content-type": "application/json", ...headers },
+        method: "POST",
+      },
+      server,
+    )
+
+  test("is refused without the dashboard's own origin", async () => {
+    expect((await approve({}, peer("127.0.0.1"))).status).toBe(403)
+    expect((await approve({ origin: "http://evil.localhost" }, peer("127.0.0.1"))).status).toBe(403)
+  })
+
+  test("is refused off loopback, and where the peer cannot be read", async () => {
+    expect((await approve({ origin: trusted() }, peer("192.168.1.20"))).status).toBe(403)
+    expect((await approve({ origin: trusted() })).status).toBe(403)
+  })
+
+  test("is refused with no session, so only the signed-in owner's click reaches it", async () => {
+    expect((await approve({ origin: trusted() }, peer("127.0.0.1"))).status).toBe(401)
+  })
+})

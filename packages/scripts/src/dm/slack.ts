@@ -13,7 +13,14 @@ export const USER = "━━━━━━━━  USER   ━━━━━━━━"
 export const TOKEN_KEY = "local.slack.channel_token"
 
 export type Message = { subtype?: string; text?: string; ts: string; user?: string }
-type Reply = { error?: string; messages?: Message[]; ok: boolean; ts?: string }
+type Reply = {
+  error?: string
+  file_id?: string
+  messages?: Message[]
+  ok: boolean
+  ts?: string
+  upload_url?: string
+}
 export type Slack = (method: string, params: Record<string, string>) => Promise<Reply>
 
 export const slackOf =

@@ -495,7 +495,7 @@ export function statusLine(
   }
 }
 
-// The mark his footer draws for a message, in one fixed-width slot whatever the state: a spinner while on its way, a quiet clock while Claude Code holds it (QUEUED, or typed while its session works), one tick once typed, two once delivered; statusLine's words are its hover and its screen-reader text.
+// The mark his footer draws for a message, in one fixed-width slot whatever the state: a spinner while on its way, one faint tick while Claude Code holds it (QUEUED, or typed while its session works), one tick once typed, two once delivered; statusLine's words are its hover and its screen-reader text.
 export type StatusMarkKind = "delivered" | "failed" | "queued" | "sending" | "sent"
 
 export const statusMark = (

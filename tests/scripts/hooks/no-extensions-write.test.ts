@@ -1566,7 +1566,7 @@ describe("a factory session's ext accept is refused, since accepting a proposal 
     ],
   ])("%s", async (_, command) => {
     expect(await bash(command)).toContain(
-      "refuses playground ext accept, the owner's own call, which the owner runs as `! env -u PLAYGROUND_ROLE playground ext accept …`",
+      "refuses playground ext accept, the owner's own call: post it as an accept decision with bun run ask new (.agents/dashboard/asks.md), whose Approve has the dashboard run it with no role",
     )
   })
 })

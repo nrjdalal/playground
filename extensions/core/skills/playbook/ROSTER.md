@@ -46,7 +46,8 @@ Run each row as `bun <main checkout>/scripts/roster.ts <row>` (`$PLAYGROUND_REPO
   `set`, `report` and `assign` refuse any `eta=` that is not a future `YYYY-MM-DDTHH:MM:SSZ` time, naming the recipe (`date -u` plus the estimate), and an empty `eta=` clears it.
   The lead writes the worker's own time, since the dashboard counts down to it and shows nothing once it passes; a worker that has sent none has none.
   A runner carries none.
-- `kind` says what a session is, whatever its name: `worker`, `researcher`, `reviewer`, `tester`, `runner` or `probe`, or a manager's `builder` (`builder`), `ops` (`ops`), `planner` (`planner`), `optimizer` or `dispatcher` (the dispatcher, dispatcher-2), or the Assistant's `assistant`, which `set <name> kind=assistant` writes, since spawn.sh does not start it yet.
+- `kind` says what a session is, whatever its name: `worker`, `researcher`, `reviewer`, `tester`, `runner` or `probe`, or a manager's `builder` (`builder`), `ops` (`ops`), `planner` (`planner`), `optimizer` or `dispatcher` (the dispatcher, dispatcher-2), or the Assistant's `assistant`.
+  `spawn.sh manager` starts an `assistant`, as any orchestrator, once `set <name> kind=assistant reportsTo=<session>` gives it its kind and whom it reports to (SESSIONS.md).
   spawn.sh writes it at every start and reads it on a resume, and the dashboard, the hooks, the optimizer and the Usage app read it before the name's prefix, so a name such as `k3v9q2-reviewer` places as its kind says.
   An off-list kind is refused.
   The role follows from the kind when the agent is first written (`manager` for assistant, builder, dispatcher, ops, optimizer and planner, `runner` for runner, `worker` for the rest), else from the name's kind (`kindOfName`: `k3m9px-runner` and `runner-*` are `runner`, `x7mh4d-builder` is `manager`), and a name with no kind is `manager` for `dispatcher` and `worker` for the rest.
