@@ -525,8 +525,8 @@ function awkPrograms(words: Word[]): Word[] | undefined {
 
 // A JavaScript string literal's text, each quote read on its own so a stray one of another kind hides none: double-quoted, single-quoted or a template
 const LITERALS = [/"((?:[^"\\\n]|\\.)*)"/g, /'((?:[^'\\\n]|\\.)*)'/g, /`((?:[^`\\]|\\.)*)`/g]
-// A program that reads the home's path at run time, whose writes the hook cannot see by name
-const NAMES_HOME = /\bHOME\b|\bhomedir\b/
+// A program that reads the home's path or names the playground command, so a path or a guarded call it builds at run time is one the hook cannot see by name
+const NAMES_HIDDEN = /\bHOME\b|\bhomedir\b|\bplayground\b/
 // The shell's own glob characters in a redirect's target
 const SHELL_GLOB = /[*?[]/
 // The shell builtins a spawned line can run that no PATH lookup finds
@@ -928,7 +928,7 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
         )
       script.push(text.value)
     }
-    // an inline evaluator's program is no word of the call, unless the line holds a root shell, its print feeds a program other than a reader, the shell expands a glob in it, it holds a value the hook cannot read, or its text names the root, the data folder or the home's variable; its text is read as a line in program mode, where a regex or an arrow names no folder
+    // an inline evaluator's program is no word of the call, unless the line holds a root shell, its print feeds a program other than a reader, the shell expands a glob in it, it holds a value the hook cannot read, or its text names the root, the data folder, the home's variable or the playground command; its text is read as a line in program mode, where a regex or an arrow names no folder
     const program = rootLine || feeds(cmd, env) ? undefined : evalProgram(parsed)
     const opaque =
       program &&
@@ -938,7 +938,7 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
         (t) =>
           places(env).some((here) => holds(t.value, here)) ||
           t.value.includes(basename(dirname(root))) ||
-          NAMES_HOME.test(t.value),
+          NAMES_HIDDEN.test(t.value),
       )
         ? program
         : undefined

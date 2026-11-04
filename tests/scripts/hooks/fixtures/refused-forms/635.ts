@@ -148,12 +148,6 @@ export const groups: Group[] = [
         "an inline bun program printing a removal through a reader into a shell",
         `bun -e 'console.log("rmdir ~/.pl" + "ayground/e*")' | cat | sh -`,
       ],
-    ],
-  },
-  {
-    folders: ["process home", "process data folder", "process worktree"],
-    guards: ["no-extensions-write"],
-    rows: () => [
       [
         "an inline node program running a guarded playground call joined from two strings through execSync",
         `node -e 'require("child_process").execSync("playground" + " ext add a b")'`,
@@ -164,10 +158,4 @@ export const groups: Group[] = [
       ],
     ],
   },
-]
-
-// A guarded call whose command word the program assembles at run time names the call in no text the hook reads; canary refused these only from the home and the data folder, for a glob character in the program's text
-export const allowed: string[] = [
-  "an inline node program running a guarded playground call joined from two strings through execSync",
-  "an inline bun program whose shell template runs a guarded playground call by a variable command word",
 ]
