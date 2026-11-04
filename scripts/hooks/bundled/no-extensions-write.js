@@ -1126,7 +1126,7 @@ async function examineReading(cmd, parsed, env, visit, builtins) {
   let verdict;
   const followed = SHELLS.has(name) || [".", "cd", "eval", "popd", "pushd", "source"].includes(name);
   if (followed && builtins && cmd.redirects.length > 0) {
-    const bare = { ...cmd, words: [] };
+    const bare = { ...cmd, bareOf: cmd, words: [] };
     verdict = await visit(bare, parse(bare), here);
     if (verdict)
       return verdict;
@@ -1647,6 +1647,8 @@ var GIT_MOVES = new Set([
 var APPLY_READS = new Set(["--check", "--numstat", "--stat", "--summary"]);
 var RUNNER_TAKES = new Set(["--package", "-p"]);
 var SED_VALUES = new Set(["--expression", "--file", "--line-length"]);
+var FEEDS = new Set(["<<", "<<-", "<<<"]);
+var EXPORTS2 = new Set(["declare", "export", "local", "readonly", "typeset"]);
 if (false) {}
 
 // scripts/hooks/no-extensions-write.ts
@@ -1683,7 +1685,7 @@ var GIT_READS = new Set([
   "show",
   "status"
 ]);
-var EXPORTS2 = new Set(["declare", "export", "local", "readonly", "typeset"]);
+var EXPORTS3 = new Set(["declare", "export", "local", "readonly", "typeset"]);
 var REMOVERS = new Set(["find", "mv", "rm", "rmdir", "rsync", "unlink"]);
 var DUPLICATE = /^(?:\d+|-)$/;
 var writer = ({ op, target }) => [">", ">>", ">|", "<>"].includes(op) || op === ">&" && !DUPLICATE.test(target?.value ?? "");
@@ -2311,7 +2313,7 @@ async function inspect(raw, environment, unknown = false) {
       if (named)
         return refuse(named);
     }
-    if (!first || EXPORTS2.has(name) || reader)
+    if (!first || EXPORTS3.has(name) || reader)
       return;
     const verb = name && !marked(name) ? name : "a program it cannot read";
     const remover = REMOVERS.has(name);
