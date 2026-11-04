@@ -312,7 +312,7 @@
 
 - A `grant` decision asks the owner to grant agent-desktop a macOS permission, `permission` `accessibility` or `screen-recording`, and `why` (`grantSchema`); Edit is refused.
   Its Approve runs `/usr/bin/open x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility` (or `?Privacy_ScreenCapture`), one fixed argv (`grantArgv`, run by `api/hono/src/lib/dashboard/run-argv.ts`), which opens System Settings at that pane on this Mac for the owner to turn it on; a stack showing test data refuses it, opening nothing.
-  The answer keeps `opened: {exitCode, line}`, and the poster rechecks the grant with `agent-desktop permissions` and closes the item with what it reads, since macOS grants the app that launches agent-desktop, which only the poster's own run reads; until then the card reads that it is being carried out.
+  The answer keeps `opened: {exitCode, line}`, and the poster rechecks the grant with `agent-desktop permissions`, closes the item with what it reads and tells the session that stopped for it, since macOS grants the app that launches agent-desktop, which only the poster's own run reads; until then the card reads that it is being carried out.
 
   ```bash
   bun run ask new <<'EOF'

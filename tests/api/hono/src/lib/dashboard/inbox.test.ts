@@ -1048,6 +1048,13 @@ describe("an apps decision (PG-658)", () => {
       exitCode: 1,
       line: "Notes is not on your own apps list, so nothing changed",
     })
+    for (const entry of ["/Applications/Notes.app", " Notes", "Notes.APP"]) {
+      expect(appsChange(["Slack", entry], apps())).toEqual({
+        exitCode: 0,
+        line: "Notes is on your apps already",
+      })
+      expect(appsChange(["Slack", entry], apps({ change: "remove" }))).toEqual({ list: ["Slack"] })
+    }
   })
 
   test("is approved, denied or cleared as it reads, never edited", () => {

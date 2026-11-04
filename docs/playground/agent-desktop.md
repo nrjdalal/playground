@@ -21,7 +21,7 @@ macOS asks you, not the session, for two permissions: Accessibility, which every
 macOS gives them to the app that launches `agent-desktop`.
 A factory session runs under the herdr server, not a terminal you opened, so herdr is most likely the app to grant; the first trial after your grant confirms it.
 The session reads the grants with `agent-desktop permissions`, which never prompts.
-For a grant that is missing, its manager posts an Inbox card: its Approve opens System Settings at Privacy & Security, Accessibility or Screen Recording, you turn it on there, and the session checks the grant again.
+For a grant that is missing, its manager posts an Inbox card: its Approve opens System Settings at Privacy & Security, Accessibility or Screen Recording, you turn it on there, and the manager checks the grant again and tells the session that stopped, which goes on once it reads granted.
 
 ## It's working if
 

@@ -191,7 +191,7 @@ export function moveMachine(
     for (const name of names.filter((each) => table.droppedEnv.includes(each)))
       say(
         true,
-        `~ ${file} sets ${name}, which nothing reads now: delete that line from it, and send your lead the words it held, so the owner can add them to the list that replaced it`,
+        `* to do: ${file} sets ${name}, which nothing reads now: delete that line from it, and send your lead the words it held, so the owner can add them to the list that replaced it`,
       )
     const changes = [
       ...names

@@ -17,7 +17,7 @@ Run `agent-desktop version`, then `agent-desktop permissions`, which reads the g
 
 macOS grants the app that launches agent-desktop. A factory session runs under the launchd herdr server (`~/.playground/bin/herdr`), not a GUI terminal, so that is the binary the grant most likely names (untested until the owner's first grant).
 
-On a missing binary or a grant that is not `granted`, **stop** and tell your manager the one action needed: Ops installs `agent-desktop` (npm), or the owner grants the named permission to the launching app in System Settings, which your manager asks for as a `grant` decision (`.agents/dashboard/asks.md`) whose Approve opens System Settings at that pane; once its answer reaches you, recheck with `agent-desktop permissions`. Granting is the owner's step, and so are `permissions --guide` and `permissions --request`, which open System Settings or a system prompt on the owner's screen.
+On a missing binary or a grant that is not `granted`, **stop** and tell your manager the one action needed: Ops installs `agent-desktop` (npm), or the owner grants the named permission to the launching app in System Settings, which your manager asks for as a `grant` decision (`.agents/dashboard/asks.md`) whose Approve opens System Settings at that pane. Your manager rechecks the grant after the Approve and tells you what it reads; once it reads `granted`, run `agent-desktop permissions` yourself and go on. Granting is the owner's step, and so are `permissions --guide` and `permissions --request`, which open System Settings or a system prompt on the owner's screen.
 
 Done when `version` answers and each grant the task needs reads `granted`, or when your manager has the stop and its one action.
 

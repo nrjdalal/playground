@@ -243,8 +243,12 @@ export const appsArgs = (login: string, ref: number): string[] => [
   `the owner approved it in the Inbox (${itemTag(ref)})`,
 ]
 
-// Pure: an app's name as the hook matches it, without case and without .app.
-const appKey = (name: string): string => name.toLowerCase().replace(/\.app$/, "")
+// Pure: an app's name as the hook's appName matches it (no-desktop-owner-app.ts): its last path part, without .app, spaces or case.
+const appKey = (name: string): string =>
+  (name.split("/").filter(Boolean).pop() ?? "")
+    .replace(/\.app$/i, "")
+    .trim()
+    .toLowerCase()
 
 // Pure: the owner's own list after the change, or the result when there is nothing to write: an app already on it, or one to remove that it does not hold.
 export const appsChange = (list: string[], preview: InboxApps): { list: string[] } | RunResult => {
@@ -696,7 +700,7 @@ function answerWords(
   if (answer.choice === "approve" && opened) {
     const close = `bun run ask ack ${itemTag(item.ref)} --no-link`
     return opened.exitCode === 0
-      ? `${head} Approved, and the dashboard ${opened.line}, where the owner grants it. Recheck with agent-desktop permissions every 30 seconds for up to 5 minutes: once it reads granted, close it with ${close} "granted"; if it never does, close it with ${close} and what it reads, and tell your lead.`
+      ? `${head} Approved, and the dashboard ${opened.line}, where the owner grants it. Recheck with agent-desktop permissions every 30 seconds for up to 5 minutes: once it reads granted, close it with ${close} "granted" and tell the session that stopped for it, if one did, that it reads granted; if it never does, close it with ${close} and what it reads, and tell your lead.`
       : `${head} Approved, but opening System Settings failed (exit ${opened.exitCode}): ${opened.line}. Nothing opened: tell your lead, and close this one with ${close} and why.`
   }
   switch (answer.choice) {

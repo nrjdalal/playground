@@ -127,7 +127,7 @@ const front = (sub: string) =>
 const SCRIPT_IN_CALL =
   "a script file in a call that names agent-desktop, since the call may change it"
 
-// A list refusal's reason alone, without the fix it names, since only the owner's own ! command changes the list.
+// A list refusal's reason alone, without the fix it names, since only the owner's act changes the list.
 const reasonOf = (refusal: string) =>
   refusal.split(/: tell your lead, and the dispatcher hands the owner|\. Restore the file/)[0]
 
@@ -268,7 +268,7 @@ function lister(environment: Environment) {
     (loaded ??= guardList(GUARD, "desktop-owner-apps", isStrings, [], environment).then((l) =>
       l.refusal
         ? {
-            refusal: `${reasonOf(l.refusal)}. The list changes only by the owner's own ! command: tell your lead, and the dispatcher hands the owner the command, then run the call again.`,
+            refusal: `${reasonOf(l.refusal)}. The list changes only by the owner's act: tell your lead, and the dispatcher hands the owner the command, then run the call again.`,
           }
         : { apps: new Set((l.list ?? []).map(appName)) },
     ))
