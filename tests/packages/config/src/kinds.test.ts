@@ -10,6 +10,7 @@ import {
   managerKindOfName,
   managerOf,
   roleOfName,
+  rosteredOf,
   setSessionNames,
   slotOfName,
 } from "../../../../packages/config/src/kinds"
@@ -205,5 +206,20 @@ describe("dispatcherOf: the dispatcher holding a slot", () => {
     expect(dispatcherOf(agents, 2)).toBe("q8r2tx-dispatcher")
     expect(dispatcherOf([agent("m4n7vw-dispatcher", "working")], 1)).toBe("m4n7vw-dispatcher")
     expect(dispatcherOf([agent("m4n7vw-dispatcher", "ended")], 1)).toBe("dispatcher")
+  })
+})
+
+describe("rosteredOf", () => {
+  // #798 round 1: the roster keeps an ended dispatcher-2 for good, which kept a Bravo, Not running row
+  test("the roster's names but an ended entry's, a crashed or parked one kept", () => {
+    const agents = [
+      { name: "dispatcher", status: "working" },
+      { name: "dispatcher-2", status: "ended" },
+      { name: "crashed", status: "working" },
+      { name: "parked", status: "parked" },
+      { status: "working" },
+    ]
+    expect([...rosteredOf(agents)]).toEqual(["dispatcher", "crashed", "parked"])
+    expect(rosteredOf(null).size).toBe(0)
   })
 })

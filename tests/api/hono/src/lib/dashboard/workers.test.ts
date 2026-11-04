@@ -33,7 +33,7 @@ import {
   sessionOfWorkstream,
   surfacesOf,
 } from "../../../../../../api/hono/src/lib/dashboard/workers"
-import { setSessionNames } from "../../../../../../packages/config/src/kinds"
+import { rosteredOf, setSessionNames } from "../../../../../../packages/config/src/kinds"
 import { inFixture, onLiveDashboard } from "../../../../../dashboard-fixture"
 import { capital, OLD, SEEDED_NAMES } from "../../../../../session-names"
 import { slowChild } from "../../../../../slow-child"
@@ -255,6 +255,15 @@ describe("DISPATCHERS", () => {
       dispatcherSlots([OLD.dispatcher, `${OLD.dispatcher}-2`], new Set([OLD.dispatcher])),
     ).toBe(1)
     expect(dispatcherSlots([OLD.dispatcher], new Set([`${OLD.dispatcher}-2`]))).toBe(1)
+  })
+
+  // #798 round 1: an ended dispatcher-2 entry, which the roster keeps for good, counted a second slot
+  test("an ended second dispatcher's roster entry counts no slot", () => {
+    const agents = [
+      { name: OLD.dispatcher, status: "working" },
+      { name: `${OLD.dispatcher}-2`, status: "ended" },
+    ]
+    expect(dispatcherSlots([OLD.dispatcher, `${OLD.dispatcher}-2`], rosteredOf(agents))).toBe(1)
   })
 
   test("both names take the dispatcher role, whatever the roster calls them", () => {

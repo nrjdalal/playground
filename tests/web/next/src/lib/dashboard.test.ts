@@ -4,6 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { parseLine, type Entry } from "../../../../../api/hono/src/lib/dashboard/transcript"
+import { rosteredOf } from "../../../../../packages/config/src/kinds"
 import {
   LIGHT_HOLD_MS,
   LIGHT_LABELS,
@@ -1045,6 +1046,17 @@ describe("dispatchersOf", () => {
       { name: OLD.dispatcher, worker: opus as never },
       { name: `${OLD.dispatcher}-2`, worker: null },
     ])
+  })
+
+  // #798 round 1: the roster keeps an ended dispatcher-2 for good, so the board's agents still list it
+  test("a second dispatcher whose roster entry has ended keeps no slot", () => {
+    const agents = [
+      { name: OLD.dispatcher, status: "working" },
+      { name: `${OLD.dispatcher}-2`, status: "ended" },
+    ]
+    expect(
+      dispatchersOf([opus] as Workers, [OLD.dispatcher, `${OLD.dispatcher}-2`], rosteredOf(agents)),
+    ).toEqual([{ name: OLD.dispatcher, worker: opus as never }])
   })
 
   test("a live second dispatcher takes its slot with its session, roster or not", () => {
