@@ -427,24 +427,29 @@ async function unreadScript(
   return refuse(`a shell whose script (${script.unknown}) the hook cannot read`, fixFor(sure))
 }
 
-const FEEDS = new Set(["<<", "<<-", "<<<"])
+// su with no command of its own starts a root shell that reads its script from stdin, as `sudo -s` does; one with -c or --command runs that command alone
+const suShell = ({ args, name }: { args: Word[]; name: string }) =>
+  name === "su" && !args.some((a) => /^-[^-]*c|^--command/.test(a.value))
 // The builtins run() hands visit beside a bare wrapper and a bare copy of a followed command, each with no command of its own to judge.
 const EXPORTS = new Set(["declare", "export", "local", "readonly", "typeset"])
 
-// The shell a here-string, a heredoc or a pipeline feeds runs that text as its script: one the hook cannot read is refused where the shell would run in the main checkout, and a root shell's, which the shared reader leaves, is judged command by command (the reader runs a plain shell's itself).
+// The shell a here-string, a heredoc, a pipeline, a file or a process substitution feeds runs that text as its script: one the hook cannot read is refused where the shell would run in the main checkout, and a root shell's, which the shared reader leaves, is judged command by command (the reader runs a plain shell's itself).
 async function fedScript(
   cmd: Command,
   here: Env,
   sure: boolean,
   inMain: (path: string | undefined) => boolean,
   visit: Visit,
+  parsed?: { args: Word[]; name: string },
 ): Promise<string | undefined> {
   const shell = cmd.bareOf ?? cmd
   const input = shell.redirects.findLast(
     (r) => (r.fd === "" || r.fd === "0") && r.op.startsWith("<") && r.op !== "<&",
   )
-  const fed = input ? FEEDS.has(input.op) : shell.stdin !== undefined
-  const kind = fed ? stdinShell(shell) : undefined
+  const fed = input !== undefined || shell.stdin !== undefined
+  const kind = !fed
+    ? undefined
+    : (stdinShell(shell) ?? (parsed && suShell(parsed) ? "root" : undefined))
   if (!kind) return
   const script = await stdinOf(shell, here)
   const unread = script.unknown ?? (marked(script.value) ? "a value it cannot read" : undefined)
@@ -516,7 +521,7 @@ function inspect(raw: string, environment: Record<string, string | undefined>, m
         const verdict = await unreadScript(pipedTo, here, sure, inMain)
         if (verdict) return verdict
       }
-      const script = await fedScript(cmd, here, sure, inMain, visit)
+      const script = await fedScript(cmd, here, sure, inMain, visit, parsed)
       if (script) return script
       const ran = runs(name, args, local, here)
       if (ran && inMain(ran.cwd)) return refuse(ran.what, fixFor(sure, ran.fix))
