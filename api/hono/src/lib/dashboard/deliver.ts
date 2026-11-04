@@ -407,7 +407,7 @@ class BeforeTyping {
   constructor(readonly message: string) {}
 }
 
-// Two deliveries to one session would interleave their keystrokes, so each session's deliveries run one at a time, from reading it to its Enter. The queue is this process's own: a second dashboard stack (a worktree's test stack beside the live dashboard) types into the same surface independently.
+// Two deliveries to one session would each pass the screen check before either sends, so each session's deliveries run one at a time, from reading its screen to its send. The queue is this process's own: a second dashboard stack (a worktree's test stack beside the live dashboard) sends to the same pane independently.
 const typingLines = new Map<string, Promise<unknown>>()
 
 // The dashboard's own last pastes into each herdr session, newest last: a later try that finds one unsent in the box (its Enter lost, though its own settle read the box empty before the paste was drawn) presses Enter on it rather than reading it as a draft. `unsent` holds the ids a try left pasted and unsent until one is delivered, so their retry that finds the box empty never pastes them twice. Both are this process's own, as typingLines is, so a restart forgets them.

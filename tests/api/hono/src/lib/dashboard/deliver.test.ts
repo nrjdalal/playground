@@ -70,7 +70,7 @@ const live = (workers: Worker[], surfaces: Record<string, string> = {}): Live =>
   workers,
 })
 
-// A Claude Code screen's last lines as read-screen gives them, measured on a probe session: the input box between the rule carrying the session's name and a plain rule, then the status lines.
+// A Claude Code screen's last lines as the screen read gives them, measured on a probe session: the input box between the rule carrying the session's name and a plain rule, then the status lines.
 const RULE = "─".repeat(40)
 const screen = (...box: string[]) =>
   [
@@ -377,7 +377,7 @@ describe("inputState", () => {
     ).toBe("holds")
   })
 
-  // A prompt suggestion is the dim text Claude Code fills an empty box with after a turn: read-screen drops the dimming, so it reads like a draft and the dashboard refuses the send rather than typing over it. Factory sessions start with suggestions off (scripts/factory-settings.json), so this is the shape a session with them on still shows.
+  // A prompt suggestion is the dim text Claude Code fills an empty box with after a turn: the screen read drops the dimming, so it reads like a draft and the dashboard refuses the send rather than typing over it. Factory sessions start with suggestions off (scripts/factory-settings.json), so this is the shape a session with them on still shows.
   test("an input holding only a prompt suggestion holds something", () => {
     expect(inputState(screen('❯ Try "run the suite"'))).toBe("holds")
     expect(inputState(screen('❯\u00a0Try "run the suite"'))).toBe("holds")
