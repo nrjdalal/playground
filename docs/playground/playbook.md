@@ -1,7 +1,7 @@
 ## What it does
 
 `playbook` holds the operating rules of Playground's factory, the Claude Code sessions cmux or herdr runs on the owner's behalf: who does what, who reports to whom, how sessions start and end, how the leads keep watch,
-and the standing rules (override, gate, comments, release, dashboard, clock, eta, roster, ask, tickets, classified, signal, main, voice, terminal, local page, correction, upstream, verify, memory, writing, ci, slots, unstick, usage, glm, battery, context, rounds, polling, github, workers, meetings).
+and the standing rules (override, gate, comments, release, dashboard, clock, eta, roster, ask, tickets, classified, signal, main, voice, terminal, local page, correction, upstream, verify, memory, writing, ci, slots, unstick, usage, glm, battery, context, rounds, polling, github, workers, meetings, talk).
 It lives in the repo rather than in one session's memory, so every session loads the same rules.
 
 ## When to reach for it
