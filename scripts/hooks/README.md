@@ -480,6 +480,7 @@ Only the first reading moves the folder, sets variables and records files for th
   and the refusal names the fix, naming the folder (`git -C <your worktree>`, `bun --cwd <your worktree>`) or a `cd` to a literal path that is there.
   So a line that starts in a worktree is refused too where a `cd` of its own may reach the main checkout, and one that starts in the main checkout runs where every folder its `cd` steps may reach is a worktree.
   It reads the shell a pipeline feeds (`<reader> | sh`, `<reader> | sudo -s`, `<reader> | xargs sh -c`, `<reader> | . /dev/stdin`, a loop's output piped into one) as the shell's own command line: a script it cannot read is refused where that shell may run in the main checkout.
+  A root shell there is one as [no-extensions-write](#no-extensions-write) reads it (`<reader> | sudo '-s'`, `<reader> | sudo --sh`).
   A script it reads is judged command by command wherever the shell's stdin comes from, since the shared reader runs a shell's script itself.
   Two forms keep canary's reading: a privilege wrapper's shell fed by a here-string or a heredoc (`sudo -s <<< '<command>'`), whose script this hook does not read, and a heredoc holding a value it cannot read (`sh <<EOF` around a substitution).
   It fails open on a call it cannot read.
