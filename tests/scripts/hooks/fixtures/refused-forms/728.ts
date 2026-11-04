@@ -111,6 +111,46 @@ export const groups: Group[] = [
         "D=~/.playground/./extensions/x; XY=/../../y; V=X; V+=Y=0; declare -i Z; Z=V; rm -rf $D$XY/../.no-such-folder",
         "process home",
       ],
+      [
+        "rm of a variable zsh's unbraced subscript sets from a built value",
+        "D=~/.playground/./extensions/x; XY=/../../y; V=X; V+=Y=0; : $a[V]; rm -rf $D$XY/../.no-such-folder",
+        "process home",
+      ],
+      [
+        "rm of a variable read's subscripted name sets from a built value",
+        "D=~/.playground/./extensions/x; XY=/../../y; V=X; V+=Y=0; read 'a[V]' <<< 1; rm -rf $D$XY/../.no-such-folder",
+        "process tmp",
+      ],
+      [
+        "rm of a variable unset's subscripted name sets from a built value",
+        "D=~/.playground/./extensions/x; XY=/../../y; V=X; V+=Y=0; unset 'a[V]'; rm -rf $D$XY/../.no-such-folder",
+        "process tmp",
+      ],
+      [
+        "rm of a variable printf -v's subscripted name sets from a built value",
+        "D=~/.playground/./extensions/x; XY=/../../y; V=X; V+=Y=0; printf -v 'a[V]' x; rm -rf $D$XY/../.no-such-folder",
+        "process home",
+      ],
+      [
+        "rm of a variable a [[ -v ]] test's subscript sets from a built value",
+        "D=~/.playground/./extensions/x; XY=/../../y; V=X; V+=Y=0; [[ -v a[V] ]]; rm -rf $D$XY/../.no-such-folder",
+        "process tmp",
+      ],
+      [
+        "rm of a variable a zsh glob qualifier's comma-held code sets",
+        "XY=/tmp/a; : /tmp/*(e,$V,); rm -rf ${XY}.playground/./extensions/.no-such-folder",
+        "process home",
+      ],
+      [
+        "rm of a variable a zsh glob qualifier's brace-held code sets",
+        "XY=/tmp/a; : /tmp/*(.e{$V}); rm -rf ${XY}.playground/./extensions/.no-such-folder",
+        "process home",
+      ],
+      [
+        "rm of a variable a zsh glob qualifier after a quoted word sets",
+        "XY=/tmp/a; : '/tmp'/*(e,$V,); rm -rf ${XY}.playground/./extensions/.no-such-folder",
+        "process home",
+      ],
     ],
   },
 ]

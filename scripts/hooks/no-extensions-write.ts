@@ -164,17 +164,77 @@ type Namings = { blind: boolean; counts: Map<string, number>; plain: Set<string>
 // The operators after ${K that only read K; any other (`=`, `:=`, zsh's `::=`, a subscript, a modifier) may set it, so it counts as a naming
 const READS_ONLY = /^(?:\}|:?[-+?]|[#%/])/
 
-// Text the shell evaluates, where an assignment sets a name the hook never reads: arithmetic naming a variable, whose value it evaluates as an expression (`V=XY=0; (( V ))` sets XY), in `(( ))`, `$(( ))`, `$[ ]`, a `[[ ]]` comparison, an array subscript or a substring offset; bash's prompt transformation (`${V@P}`); and zsh's glob qualifiers that run code, an e with its code in `:`, `'` or `"` or a `+` with a function's name, closed at a word's end (`*(e:…:)`, `*(.e'…')`, `*(+f)`)
+// Text the shell evaluates, where an assignment sets a name the hook never reads: arithmetic naming a variable, whose value it evaluates as an expression (`V=XY=0; (( V ))` sets XY), in `(( ))`, `$(( ))`, `$[ ]`, a `[[ ]]` comparison or a substring offset; any subscript but an empty one, `@`, `*`, digits with only `-`, `:`, `,` and spaces among them, or one that starts with `^`, where both shells stop on a math error before reading a name (`a[]`, `a[@]`, `a[-1]`, `a[0:9]`, `a[1,5]`, `a[^;]`), wherever it sits, quoted or not (`${a[V]}`, zsh's `$a[V]`, `a[V]=`, `read 'a[V]'`, `unset 'a[V]'`, `printf -v 'a[V]'`, `[[ -v a[V] ]]`); and bash's prompt transformation (`${V@P}`)
 const EVALUATES = [
   /\(\([^)]*[A-Za-z_]/,
   /\$\[[^\]]*[A-Za-z_]/,
   /\[\[.*\s-(?:eq|ge|gt|le|lt|ne)\s/s,
-  /\$\{[#!]?\w+\[[^\]]*[A-Za-z_]/,
-  /(?:^|[\s;&|(])\w+\[[^\]]*[A-Za-z_][^\]]*\]\+?=/,
+  /\w\[(?!(?:[@*]|[-\d:,\s]*)\]|\^)/,
   /\$\{[#!]?\w+:(?![-+=?:])[^}]*[A-Za-z_]/,
   /@P\}/,
-  /[^\s(|&;<>$=]\((?:#q)?(?:[^()\s=|"']*?e([:'"])[^]*?\1|\+\w+)[^()\s]*\)(?=$|[\s;&|)<>])/,
 ]
+
+// zsh's glob qualifiers that run code, an e with its code up to its separator's match (`[`, `{` and `<` pair with their closers, any other character with itself) or a `+` with a function's name, closed at a word's end (`*(e:…:)`, `*(.e{…})`, `*(+f)`); read on singleQuotesOut's text, since a qualifier acts only on unquoted text
+const QUALIFIER =
+  /[^\s(|&;<>$=]\((?:#q)?[^()\s|]*?(?:e(?:\[[^]*?\]|\{[^]*?\}|<[^]*?>|([^\s[{<])[^]*?\1)|\+\w+)[^()\s]*\)(?=$|[\s;&|)<>`}])/
+
+// The line with each single-quoted span outside double quotes, comments, backslash escapes and heredoc bodies put as one letter, so a jq filter's `select(…)` reads as no qualifier while `'f1'(e:…:)` still does; a heredoc's body is kept as written, and the line as written when a quote or a heredoc is left open or the line holds `$'…'`, whose quoting this scan does not read
+function singleQuotesOut(command: string): string {
+  if (command.includes("$'")) return command
+  let out = ""
+  let double = false
+  const docs: { delim: string; strip: boolean }[] = []
+  for (let i = 0; i < command.length; i++) {
+    const c = command[i]
+    if (c === "\\") {
+      out += command.slice(i, i + 2)
+      i++
+    } else if (double) {
+      if (c === '"') double = false
+      out += c
+    } else if (c === '"') {
+      double = true
+      out += c
+    } else if (c === "#" && (i === 0 || /[\s;&|(]/.test(command[i - 1]))) {
+      const end = command.indexOf("\n", i)
+      const stop = end === -1 ? command.length : end
+      out += command.slice(i, stop)
+      i = stop - 1
+    } else if (c === "'") {
+      const end = command.indexOf("'", i + 1)
+      if (end === -1) return command
+      out += "x"
+      i = end
+    } else if (command.startsWith("<<<", i)) {
+      out += "<<<"
+      i += 2
+    } else if (command.startsWith("<<", i)) {
+      const doc = command.slice(i).match(/^<<(-?)[ \t]*(?:'([^'\n]*)'|"([^"\n]*)"|\\?([\w.-]+))/)
+      if (!doc) return command
+      docs.push({ delim: doc[2] ?? doc[3] ?? doc[4], strip: doc[1] === "-" })
+      out += doc[0]
+      i += doc[0].length - 1
+    } else if (c === "\n" && docs.length) {
+      out += c
+      let at = i + 1
+      for (const { delim, strip } of docs) {
+        for (;;) {
+          if (at > command.length) return command
+          const end = command.indexOf("\n", at)
+          const stop = end === -1 ? command.length : end
+          const line = command.slice(at, stop)
+          out += command.slice(at, Math.min(stop + 1, command.length))
+          at = stop + 1
+          if ((strip ? line.replace(/^\t+/, "") : line) === delim) break
+          if (end === -1) return command
+        }
+      }
+      docs.length = 0
+      i = at - 1
+    } else out += c
+  }
+  return double || docs.length ? command : out
+}
 
 // How many times the line names each variable other than by reading it ($K, ${K}, ${K:-…} and the other READS_ONLY forms): every other spelling of the name counts, an assignment, an append, a bare word (read's, a for loop's, arithmetic's) and a name spelled across a quote or a backslash (`X\Y`, `X"Y"`, which the shell reads as XY) included, as does one attached after an option cluster's a or v (`printf -vK`), a lone flag (`-K`) aside; and the names an unquoted plain assignment sets (`K=`, where a quoted `"K=a"` is a command), read in one pass
 function namings(command: string): Namings {
@@ -182,7 +242,9 @@ function namings(command: string): Namings {
   const plain = new Set<string>()
   const add = (key: string) => counts.set(key, (counts.get(key) ?? 0) + 1)
   // a name indirection that assigns sets a variable whose name the hook cannot read; zsh's P flag holds only as a plain read (`${(P)N}`, `${(P)N:-…}`), a flag with a delimited argument (`${(j:…:)…}`) holds nothing, since its argument can hide a `)` and a P, and nor do the e, % and # flags, which evaluate a value as shell text, a prompt or arithmetic
-  let blind = EVALUATES.some((evaluates) => evaluates.test(command))
+  let blind =
+    EVALUATES.some((evaluates) => evaluates.test(command)) ||
+    QUALIFIER.test(singleQuotesOut(command))
   for (const m of command.matchAll(/\$\{\(([^)]*)(\)?)/g)) {
     const [whole, flags, closed] = m
     const rest = command.slice(m.index + whole.length)

@@ -613,6 +613,22 @@ describe("a quoted argument is read as a command line only where a program runs 
       "rm of a held variable beside arithmetic on literals",
       'X=/tmp/a; echo $((1 + 2)); rm -rf "$X"',
     ],
+    [
+      "rm of a held variable beside subscripts that name nothing",
+      'X=/tmp/a; echo ${a[1]} $a[-1] ${a[@]} "${a[*]}" ${a[]} ${a[0:9]} $a[1,5] ${a[^V]}; rm -rf "$X"',
+    ],
+    [
+      "rm of a held variable beside a glob qualifier that runs nothing",
+      'X=/tmp/a; : /tmp/*(.N); rm -rf "$X"',
+    ],
+    [
+      "rm of a held variable beside a single-quoted jq filter that reads as a qualifier",
+      `X=/tmp/a; jq '(.items[]|select(.id=="x"))' f; rm -rf "$X"`,
+    ],
+    [
+      "rm of a held variable beside a jq filter after a heredoc whose body holds a lone quote",
+      `X=/tmp/a; cat > f <<'EOF'\nit's\nEOF\njq '(.items[]|select(.id=="x"))' f; rm -rf "$X"`,
+    ],
     ["a quiet commit with -m", `git commit -m "fix(x): y"`],
     ["a quiet commit with -am", `git commit -am "fix(x): y"`],
     ["a quiet commit with --message", `git commit --message "fix(x): y"`],
