@@ -166,7 +166,11 @@ describe("Feed cards", () => {
   })
 
   test("a permission or plan cut short offers only refusing it", () => {
-    const cut = feedItemNeed(worker(), permission({ clipped: true, whole: false }), true)
+    const cut = feedItemNeed(
+      worker({ name: "greed", role: "worker" }),
+      permission({ clipped: true, whole: false }),
+      true,
+    )
     expect(cut.questions[0]?.options.map((o) => o.label)).toEqual(["Deny"])
     expect(cut.context).toContain("ask Playground in the chat to allow it")
     const empty = feedItemNeed(worker(), permission({ detail: "", input: "", whole: false }))
@@ -213,12 +217,26 @@ describe("Feed cards", () => {
 
   test("a card that cannot be approved here says where to answer it, by whether approvals are on", () => {
     const cut = permission({ clipped: true, whole: false })
-    expect(feedItemNeed(worker(), cut, true).context).toBe(
+    const greed = worker({ name: "greed", role: "worker" })
+    expect(feedItemNeed(greed, cut, true).context).toBe(
       "Not all of it can be shown here: deny it here, or ask Playground in the chat to allow it, and the session's manager does.",
     )
-    expect(feedItemNeed(worker(), cut, false).context).toBe(
+    expect(feedItemNeed(greed, cut, false).context).toBe(
       "Not all of it can be shown here: ask Playground in the chat, and the session's manager answers it.",
     )
+    expect(feedItemNeed(greed, cut).dispatcher).toBeUndefined()
+  })
+
+  // A dispatcher has no manager to answer through the chat, so its own card keeps naming its terminal.
+  test("a dispatcher's own card says to answer it in its terminal, and is marked as the dispatcher's", () => {
+    const cut = permission({ clipped: true, whole: false })
+    expect(feedItemNeed(worker(), cut, true).context).toBe(
+      "Not all of it can be shown here: allow it from the session's terminal, or deny it here.",
+    )
+    expect(feedItemNeed(worker(), cut, false).context).toBe(
+      "Not all of it can be shown here: answer it in the session's terminal.",
+    )
+    expect(feedItemNeed(worker(), cut).dispatcher).toBe(true)
   })
 
   // Only after a refusal that may have let the answer through does the card ask to send again deliberately.

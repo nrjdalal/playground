@@ -267,7 +267,9 @@ export async function answerFeed(
     if (worker.herdr && item.kind !== "question") {
       return refused(
         "TERMINAL_ONLY",
-        `The Dashboard answers only a herdr session's pickers: for this ${item.kind}, ask Playground in the chat, and ${worker.name}'s manager answers it.`,
+        worker.role === "dispatcher"
+          ? `The Dashboard answers only a herdr session's pickers: answer this ${item.kind} in ${worker.name}'s terminal.`
+          : `The Dashboard answers only a herdr session's pickers: for this ${item.kind}, ask Playground in the chat, and ${worker.name}'s manager answers it.`,
       )
     }
     if (item.kind !== "question" && !deps.approvals) return off

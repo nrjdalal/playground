@@ -112,6 +112,26 @@ function Body({ body, label }: { body: NeedsYouBody; label: string }) {
 }
 
 // What waits on the owner, inside the stream of the session that asked: a Feed prompt (a picker, a permission, a plan), one card shape for all, on shadcn's Questionnaire. One question shows at a time, with Previous and Next between them; pick an option (the recommended one comes first and says so), add words where a question takes them, and Submit sends every answer at once. Without onAnswer the card is shown as it would be answered but can only be answered in the session's terminal: its options stay in sight, disabled one by one, since Questionnaire hides a disabled question whole. With a resolution it collapses to one line.
+// Where a card that cannot be answered here is answered: through the chat, by the session's manager, or in its terminal for a dispatcher's own card, since a dispatcher has no manager.
+function readOnlyFooter(item: NeedsYou): string {
+  const label = agentLabel(item.from)
+  const approving = item.kind === "permission" || item.kind === "plan"
+  if (item.hosted)
+    return `Approving a ${item.kind} here is off for now, so it is refused after 10 minutes.`
+  if (item.dispatcher) {
+    if (item.herdr)
+      return `Answer it in ${label}'s terminal, in herdr: the Dashboard answers only a herdr session's pickers.`
+    return approving
+      ? `Answer it in ${label}'s terminal: approving a ${item.kind} here is off for now.`
+      : `This can only be answered in ${label}'s terminal.`
+  }
+  const manager = `ask Playground in the chat, and ${label}'s manager answers it.`
+  if (item.herdr) return `The Dashboard answers only a herdr session's pickers: ${manager}`
+  return approving
+    ? `Approving a ${item.kind} here is off for now: ${manager}`
+    : `This cannot be answered here: ${manager}`
+}
+
 export function NeedsYouCard({
   item,
   now,
@@ -365,15 +385,7 @@ export function NeedsYouCard({
         )}
       </CardContent>
       {readOnly && (
-        <CardFooter className="text-muted-foreground text-xs">
-          {item.herdr
-            ? `The Dashboard answers only a herdr session's pickers: ask Playground in the chat, and ${agentLabel(item.from)}'s manager answers it.`
-            : item.hosted
-              ? `Approving a ${item.kind} here is off for now, so it is refused after 10 minutes.`
-              : item.kind === "permission" || item.kind === "plan"
-                ? `Approving a ${item.kind} here is off for now: ask Playground in the chat, and ${agentLabel(item.from)}'s manager answers it.`
-                : `This cannot be answered here: ask Playground in the chat, and ${agentLabel(item.from)}'s manager answers it.`}
-        </CardFooter>
+        <CardFooter className="text-muted-foreground text-xs">{readOnlyFooter(item)}</CardFooter>
       )}
     </Card>
   )

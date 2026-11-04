@@ -41,6 +41,8 @@ export type NeedsYou = {
   at: string | null
   body?: NeedsYouBody | null
   context: string | null
+  // Set for a dispatcher's own prompt: it has no manager to answer it through the chat, so its card names its terminal.
+  dispatcher?: true
   from: string
   // Set for a prompt from a session herdr runs: its picker is answered here, by keys into its pane, and its permission or plan in its terminal alone.
   herdr?: true
@@ -147,7 +149,7 @@ const choice = (label: string, description: string | null = null): NeedsYouOptio
 
 // What a Feed item asks, as a card shows it. A permission shows the whole input the tool was given and a plan its text, so what is approved is what was read; when either was cut short, or a permission came with nothing to show, only refusing it is offered here.
 export function feedItemNeed(worker: Worker, item: FeedItem, approvals = false): NeedsYou {
-  // Where to approve something that cannot be approved here: through the chat, whose session's manager answers it, and here only refusing it, when approvals are on. The session the dashboard hosts has no terminal: unanswered, it is refused after 10 minutes (PROMPT_TIMEOUT_MS in sdk.ts). A herdr session's permission or plan card answers nothing, and its footer names the chat.
+  // Where to approve something that cannot be approved here: through the chat, whose session's manager answers it, and here only refusing it, when approvals are on. The session the dashboard hosts has no terminal: unanswered, it is refused after 10 minutes (PROMPT_TIMEOUT_MS in sdk.ts). A herdr session's permission or plan card answers nothing, and its footer names the chat. A dispatcher has no manager, so its own card names its terminal.
   const elsewhere = (approve: string, refuse: string) =>
     worker.herdr
       ? "Not all of it can be shown here."
@@ -155,14 +157,19 @@ export function feedItemNeed(worker: Worker, item: FeedItem, approvals = false):
         ? approvals
           ? `Not all of it can be shown here: ${refuse} here, or it is refused after 10 minutes.`
           : `Not all of it can be shown here, so it is refused after 10 minutes.`
-        : approvals
-          ? `Not all of it can be shown here: ${refuse} here, or ask Playground in the chat to ${approve}, and the session's manager does.`
-          : `Not all of it can be shown here: ask Playground in the chat, and the session's manager answers it.`
+        : worker.role === "dispatcher"
+          ? approvals
+            ? `Not all of it can be shown here: ${approve} from the session's terminal, or ${refuse} here.`
+            : `Not all of it can be shown here: answer it in the session's terminal.`
+          : approvals
+            ? `Not all of it can be shown here: ${refuse} here, or ask Playground in the chat to ${approve}, and the session's manager does.`
+            : `Not all of it can be shown here: ask Playground in the chat, and the session's manager answers it.`
   // A prompt waits now, so its card stands under the latest step, after the tool call that raised it.
   const base = {
     at: null,
     from: worker.name,
     id: feedNeedId(item.requestId),
+    ...(worker.role === "dispatcher" && { dispatcher: true as const }),
     ...(worker.herdr && { herdr: true as const }),
     ...(worker.hosted && { hosted: true as const }),
   }
