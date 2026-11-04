@@ -621,7 +621,7 @@ Only the first reading moves the folder, sets variables and records files for th
   Each record it writes carries `role`, the `PLAYGROUND_ROLE` of claude's own environment (`""` when unset), which no prefix on one of its Bash calls reaches,
   and the shell-pane launcher's `run` and `login` refuse a call whose `CLAUDE_CODE_SESSION_ID` is not the session Claude Code's registry (`<config>/sessions/<pid>.json`) names for the claude process above it,
   or whose `PLAYGROUND_ROLE` is not that session's recorded role (`callerRefusal`).
-  `playground rm --discard` reads the same registry lookup (`sessionAbove`) the other way: a claude process above the call makes it a session's, which needs an approved delete decision, and none makes it a terminal's (`callerOf` in `packages/scripts/src/playground/rm.ts`).
+  `playground rm --discard` reads the same registry lookup (`sessionAbove`) the other way: a claude process above the call makes it a session's, which needs an approved delete decision, and none makes it a terminal's, once rm has refused a call whose parent is pid 1 or one `ps` cannot read (`callerOf` in `packages/scripts/src/playground/rm.ts`).
   When it writes `stuck` or `failed` for a factory session, it also queues one line in the ops outbox (`ops-stuck-alert.jsonl`, which the relay sends by SendMessage) for the session's manager alone, by `managerFor()` in `packages/scripts/src/stuck-alert.ts`: the session, its roster task, the reason, the command or question, and its last message (playbook's **unstick**);
   An orchestrator's manager, the Assistant's for one, is the session its roster row reports to.
   The dispatcher's own and a session outside the factory queue nothing.
