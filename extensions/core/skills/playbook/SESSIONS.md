@@ -336,9 +336,9 @@ Done when the session's state record reads `working` with `at` after the resume,
 
 A finished worker, reviewer or tester ends automatically (`scripts/ops/optimizer/auto_end.ts`), so a lead ends one by hand only on a `Not ended` line:
 
-- `pr:merge` and the train's land end the merged PR's sessions by their roster `pr`, right after the merge; a worker `assign` gave a next task holds no `pr` of it, a checker whose worker's row names another PR stays to serve it, and a session with another of its PRs open stays, as the sweep holds it.
+- `pr:merge` and the train's land end the merged PR's sessions by their roster `pr`, right after the merge; a worker `assign` gave a next task holds no `pr` of it, a checker whose worker's row names another PR stays to serve it, and a session with another of its PRs open, its roster `prs` list's among them, stays, as the sweep holds it.
 - ops-tick's auto-end beat, every 5 minutes, ends a checker whose PRs are all merged or closed or whose worker is gone, a worker whose PRs are all merged or closed, and a reviewer idle 30+ minutes whose every head carries its verdict.
-  A session's PRs are its roster `pr` and open branch PRs, its worker's, and every PR its own or its worker's transcript links, so one still open keeps it.
+  A session's PRs are its roster `pr` and `prs` list, its open branch PRs, its worker's, and every PR its own or its worker's transcript links, so one still open keeps it.
 - Each end runs `spawn.sh close <name>`, then `roster.ts report <name> "ended automatically: <why>" status=ended`, the merged sha in the why, and sends its lead one line: its roster `lead`, else its worker's.
 - Guards: only a worker, reviewer or tester, not busy for 10+ minutes, with no uncommitted or unpushed work in a worktree it used (the main checkout, where every session starts, is not one); otherwise its lead gets a `Not ended` line saying why, and the session waits.
   A cmux session's close is refused the same way, so its lead closes it by hand below.
