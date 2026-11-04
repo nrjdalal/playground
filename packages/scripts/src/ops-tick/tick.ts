@@ -3,7 +3,13 @@ import { appendFile, lstat, mkdir, readdir, stat, unlink } from "node:fs/promise
 import { homedir } from "node:os"
 import { basename, dirname, join } from "node:path"
 
-import { dispatcherOf, kindOf, managerKindOfName, managerOf } from "@packages/config/kinds"
+import {
+  dispatcherOf,
+  dispatcherSeatOf,
+  kindOf,
+  managerKindOfName,
+  managerOf,
+} from "@packages/config/kinds"
 import { purgeTrash } from "@packages/safe-delete"
 import { accountSettings, readPolicy } from "@packages/settings"
 
@@ -170,7 +176,7 @@ export const switchAccount = async (ops: string): Promise<string> => {
   return read.refusal === undefined ? accountSettings.get(read.settings, "usage.switchAccount") : ""
 }
 
-// While usage.json reads that account: its week at 98% told to ops, and at 100% ops-unstick's move file written for 4 hours with its text sent to both dispatchers and both leads, each once a week, marked in usage/switch-watch.json once sent (told100 once all four are), so a failed send goes again on the next tick. The move itself is the account rotation's.
+// While usage.json reads that account: its week at 98% told to ops, and at 100% ops-unstick's move file written for 4 hours with its text sent to both dispatchers and both leads, each once a week, marked in usage/switch-watch.json once sent (told100 once all are); with no second dispatcher seated, which the move hands the factory to, no move file is written and the first and both leads are told so, so a failed send goes again on the next tick. The move itself is the account rotation's.
 const switchWatch = async (ctx: Context) => {
   const usage = (await readJson(join(ctx.ops, "..", "usage.json")).catch(() => null)) as {
     account?: string
@@ -207,8 +213,8 @@ const switchWatch = async (ctx: Context) => {
     const roster = (await readJson(join(ctx.ops, "..", "roster.json")).catch(() => null)) as {
       agents?: unknown
     } | null
-    const [first, second] = [dispatcherOf(roster?.agents, 1), dispatcherOf(roster?.agents, 2)]
-    if (!told("moved100")) {
+    const [first, second] = [dispatcherOf(roster?.agents, 1), dispatcherSeatOf(roster?.agents, 2)]
+    if (second && !told("moved100")) {
       const text = JSON.stringify({
         to: second,
         until: isoSeconds(new Date(ctx.now.getTime() + 4 * 3_600_000)),
@@ -216,12 +222,13 @@ const switchWatch = async (ctx: Context) => {
       await writeAtomic(move, `${text}\n`)
       await mark("moved100")
     }
-    const text = (await Bun.file(move).text()).trim()
+    const line = second
+      ? `${handle} week at 100%: wrote ${move}: ${(await Bun.file(move).text()).trim()}`
+      : `${handle} week at 100%: no second dispatcher is seated, so no move`
     let all = true
-    for (const to of [second, first, "builder", "ops"]) {
+    for (const to of [...(second ? [second] : []), first, "builder", "ops"]) {
       if (told(`told100 ${to}`)) continue
-      if (await ctx.send(to, `${handle} week at 100%: wrote ${move}: ${text}`, true))
-        await mark(`told100 ${to}`)
+      if (await ctx.send(to, line, true)) await mark(`told100 ${to}`)
       else all = false
     }
     if (all) await mark("told100")

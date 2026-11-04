@@ -25,6 +25,7 @@ import {
   rmDeps,
   runRm,
 } from "../../../../../packages/scripts/src/playground/rm"
+import type { Proc } from "../../../../../scripts/hooks/session-state"
 
 test("rm takes one path, or --worktree's with an optional --discard, with an optional reason", () => {
   expect(rmArgs(["old"])).toEqual({
@@ -252,7 +253,7 @@ test("a session's --discard passes only on an approved delete decision whose wha
   ).toBe(`a session (role worker) passes --discard only with --decision <id>: ${route}`)
 })
 
-// A mkdtemp Claude Code registry naming session s-1 at pid 300, and a parent chain 100 -> 200 -> 300 -> 1 to climb.
+// A mkdtemp Claude Code registry naming session s-1 for the claude process at pid 300, started with it as its CLAUDE_CONFIG_DIR, and a process chain 100 -> 200 -> 300 -> 1 to climb; pid 400 is gone.
 const registry = (root: string) => {
   const config = join(root, "claude")
   mkdirSync(join(config, "sessions"), { recursive: true })
@@ -260,7 +261,13 @@ const registry = (root: string) => {
     join(config, "sessions", "300.json"),
     JSON.stringify({ pid: 300, sessionId: "s-1" }),
   )
-  return { config, parentOf: (pid: number) => ({ 100: 200, 200: 300, 300: 1 })[pid] ?? 0 }
+  const chain: Record<number, Proc> = {
+    1: { comm: "/sbin/launchd", env: {}, ppid: 0 },
+    100: { comm: "bun", env: {}, ppid: 200 },
+    200: { comm: "/bin/zsh", env: {}, ppid: 300 },
+    300: { comm: "/opt/bin/claude", env: { CLAUDE_CONFIG_DIR: config, HOME: root }, ppid: 1 },
+  }
+  return { config, procs: (pid: number): Proc | undefined => chain[pid] }
 }
 
 // A main checkout on canary with worktree pg-1 holding one uncommitted file, and the route a --discard refusal names for it.
@@ -288,22 +295,16 @@ const discardBy = async (wt: string, deps: RmDeps) => {
   }
 }
 
-// PG-825: a Bash prefix drops PLAYGROUND_ROLE, but not the claude process Claude Code's registry names above the call
+// PG-825: a Bash prefix drops PLAYGROUND_ROLE, but not the claude process above the call
 test("a caller with no role, or whose role a prefix dropped, is still a session when a claude process runs above it, and --discard needs its decision", async () => {
   const { deps, main, root } = machine()
-  const { config, parentOf } = registry(root)
-  expect(await callerOf({ CLAUDE_CONFIG_DIR: config }, 100, parentOf)).toBe(
-    "a session (session s-1)",
-  )
-  expect(await callerOf({ CLAUDE_CONFIG_DIR: config, PLAYGROUND_ROLE: "" }, 100, parentOf)).toBe(
-    "a session (session s-1)",
-  )
-  expect(
-    await callerOf({ CLAUDE_CONFIG_DIR: config, PLAYGROUND_ROLE: "worker" }, 100, parentOf),
-  ).toBe("a session (role worker)")
+  const { procs } = registry(root)
+  expect(await callerOf({}, 100, procs)).toBe("a session (session s-1)")
+  expect(await callerOf({ PLAYGROUND_ROLE: "" }, 100, procs)).toBe("a session (session s-1)")
+  expect(await callerOf({ PLAYGROUND_ROLE: "worker" }, 100, procs)).toBe("a session (role worker)")
   const { route, wt } = dirtyWorktree(main)
   for (const environment of [{}, { PLAYGROUND_ROLE: "" }]) {
-    const caller = () => callerOf({ CLAUDE_CONFIG_DIR: config, ...environment }, 100, parentOf)
+    const caller = () => callerOf(environment, 100, procs)
     expect(await discardBy(wt, { ...deps, caller })).toEqual({
       code: 1,
       said: [
@@ -315,16 +316,13 @@ test("a caller with no role, or whose role a prefix dropped, is still a session 
 })
 
 // A session's call detached from it is adopted by pid 1 before rm reads its parent, so its climb would find no session
-test("a detached call, or one whose parent ps cannot read, needs the decision too", async () => {
+test("a detached call, or one whose parent the system cannot read, needs the decision too", async () => {
   const { deps, main, root } = machine()
-  const { config, parentOf } = registry(root)
-  const environment = { CLAUDE_CONFIG_DIR: config }
-  expect(await callerOf(environment, 1, parentOf)).toBe("a detached call (its parent is pid 1)")
-  expect(await callerOf(environment, 400, parentOf)).toBe(
-    "a call whose parent ps cannot read (pid 400)",
-  )
+  const { procs } = registry(root)
+  expect(await callerOf({}, 1, procs)).toBe("a detached call (its parent is pid 1)")
+  expect(await callerOf({}, 400, procs)).toBe("a call whose parent ps cannot read (pid 400)")
   const { route, wt } = dirtyWorktree(main)
-  const caller = () => callerOf(environment, 1, parentOf)
+  const caller = () => callerOf({}, 1, procs)
   expect(await discardBy(wt, { ...deps, caller })).toEqual({
     code: 1,
     said: [
@@ -334,14 +332,35 @@ test("a detached call, or one whose parent ps cannot read, needs the decision to
   expect(existsSync(wt)).toBe(true)
 })
 
-// Known residual, which PG-828 flips: a prefix that moves CLAUDE_CONFIG_DIR hides the registry, so the caller reads as a terminal no session runs in and --discard passes alone
-test("a caller whose registry a prefix moved reads as no session, so --discard passes without a decision", async () => {
+// PG-828 flipped the residual this pinned: the registry is found through the claude process's own environment, so a prefix that moves CLAUDE_CONFIG_DIR or HOME hides nothing
+test("a caller whose prefix moved the registry still reads as the session above it, and a claude process the registry does not name is a session too", async () => {
   const { deps, main, root } = machine()
-  const { parentOf } = registry(root)
-  const moved = { CLAUDE_CONFIG_DIR: join(root, "elsewhere") }
-  expect(await callerOf(moved, 100, parentOf)).toBeUndefined()
+  const { procs } = registry(root)
+  const moved = { CLAUDE_CONFIG_DIR: join(root, "elsewhere"), HOME: join(root, "elsewhere") }
+  expect(await callerOf(moved, 100, procs)).toBe("a session (session s-1)")
+  const unnamed = (pid: number): Proc | undefined =>
+    pid === 300 ? { comm: "claude", env: { HOME: join(root, "elsewhere") }, ppid: 1 } : procs(pid)
+  expect(await callerOf({}, 100, unnamed)).toBe("a session (claude pid 300)")
+  const { route, wt } = dirtyWorktree(main)
+  const caller = () => callerOf(moved, 100, procs)
+  expect(await discardBy(wt, { ...deps, caller })).toEqual({
+    code: 1,
+    said: [
+      `playground: a session (session s-1) passes --discard only with --decision <id>: ${route}`,
+    ],
+  })
+  expect(existsSync(wt)).toBe(true)
+})
+
+// The owner's own terminal: no claude process anywhere up its chain, so --discard passes alone
+test("a terminal no claude process runs above passes --discard without a decision", async () => {
+  const { deps, main, root } = machine()
+  const { procs } = registry(root)
+  const terminal = (pid: number): Proc | undefined =>
+    pid === 200 ? { comm: "/bin/zsh", env: {}, ppid: 1 } : procs(pid)
+  expect(await callerOf({}, 100, terminal)).toBeUndefined()
   const { wt } = dirtyWorktree(main)
-  const caller = () => callerOf(moved, 100, parentOf)
+  const caller = () => callerOf({}, 100, terminal)
   expect(await discardBy(wt, { ...deps, caller })).toEqual({ code: 0, said: [] })
   expect(existsSync(wt)).toBe(false)
 })

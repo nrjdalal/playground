@@ -12,7 +12,7 @@ import { fileNameOf } from "../download"
 import { KEYCHAIN_ITEM_NAMES, KEYCHAIN_ITEMS, type KeychainItemName } from "../keychain-items"
 import { ID_PATTERN } from "./attachments"
 
-// Playground's Inbox: what the factory posts for the owner, one row of inbox_item each, through the bun run ask CLI alone. A decision previews exactly what Approve does, a draft is a Slack message or Linear comment to send, and an update is an outcome to read. The dashboard records his answer and types it into the posting session through deliver(); the dashboard itself never sends a message, merges or files anything, sharing only a Slack send's files (filesToUpload) and running only an accept decision's accept. Nothing here imports the API's env or an @/ path, so the CLI runs from any shell and the web reads its types.
+// Playground's Inbox: what the factory posts for the owner, one row of inbox_item each, through the bun run ask CLI alone. A decision previews exactly what Approve does, a draft is a Slack message or Linear comment to send, and an update is an outcome to read. The dashboard records his answer and types it into the posting session through deliver(); the dashboard itself never sends a message, merges or files anything, sharing only a Slack send's files (filesToUpload) and running only the step an accept's, an apps change's or a grant's Approve names (stepOf). Nothing here imports the API's env or an @/ path, so the CLI runs from any shell and the web reads its types.
 
 const LIMITS = { line: 200, name: 120, prs: 50, text: 4000 }
 
@@ -197,8 +197,92 @@ export const acceptArgs = (preview: InboxAccept, ref: number): string[] => [
   `the owner approved it in the Inbox (${itemTag(ref)})`,
 ]
 
-// Runs `playground ext <args>` with no role and returns its exit code and output: store/extensions.ts's runCli is the real one, which the router passes, and a test passes its own. It restates that file's Cli, since the web reads this file's types and that file's imports reach the API's own.
-export type ExtRun = (args: string[]) => Promise<{ code: number; err: string; out: string }>
+// Runs `playground ext <args>` with no role, stdin on its input when given, and returns its exit code and output: store/extensions.ts's runCli is the real one, which the router passes, and a test passes its own. It restates that file's Cli, since the web reads this file's types and that file's imports reach the API's own.
+export type ExtRun = (
+  args: string[],
+  stdin?: string,
+) => Promise<{ code: number; err: string; out: string }>
+
+// The System Settings pane for each permission agent-desktop needs, by the name a grant decision gives it.
+export const GRANT_PANES = {
+  accessibility: "Privacy_Accessibility",
+  "screen-recording": "Privacy_ScreenCapture",
+} as const
+
+// A macOS permission agent-desktop needs, which the owner grants in System Settings: Approve opens its pane on this Mac, and the poster rechecks the grant itself, since macOS grants the app that launches agent-desktop, which only the poster's own run reads.
+const grantSchema = z.strictObject({
+  permission: z.enum(Object.keys(GRANT_PANES) as [keyof typeof GRANT_PANES]),
+  type: z.literal("grant"),
+  why: words,
+})
+
+export type InboxGrant = z.infer<typeof grantSchema>
+
+// Pure: the one command a grant's Approve runs: macOS's open, at the pane the preview names.
+export const grantArgv = (preview: InboxGrant): string[] => [
+  "/usr/bin/open",
+  `x-apple.systempreferences:com.apple.preference.security?${GRANT_PANES[preview.permission]}`,
+]
+
+// Runs an argv with no shell and returns its exit code and output; run-argv.ts holds the real one, and a test passes its own.
+export type ArgvRun = (argv: string[]) => Promise<{ code: number; err: string; out: string }>
+
+// The guard list that holds the owner's own apps, which no-desktop-owner-app keeps agent-desktop away from.
+export const OWNER_APPS = "desktop-owner-apps"
+
+// An app's name as the owner's list holds it: a letter or digit of any script first, then letters, digits, spaces and . _ & ' ( ) + -, so none starts as a flag or names a path.
+const APP_NAME = /^[\p{L}\p{N}][\p{L}\p{N} ._&'()+-]*$/u
+
+// A change to the owner's own apps, which the owner approves from the Inbox in place of a terminal: the app to add or remove, and why.
+const appsSchema = z.strictObject({
+  app: z.string().trim().min(1).max(LIMITS.name).regex(APP_NAME, "Must be an app's name"),
+  change: z.enum(["add", "remove"]),
+  type: z.literal("apps"),
+  why: words,
+})
+
+export type InboxApps = z.infer<typeof appsSchema>
+
+// Pure: the one command an apps change's Approve runs, as `playground ext <args>` with the new list on its stdin: a put of the login's own list, with a reason naming the item.
+export const appsArgs = (login: string, ref: number): string[] => [
+  "put",
+  login,
+  "list",
+  OWNER_APPS,
+  "-",
+  "--reason",
+  `the owner approved it in the Inbox (${itemTag(ref)})`,
+]
+
+// Pure: an app's name as the hook's appName matches it (no-desktop-owner-app.ts): its last path part, without .app, edge spaces or case.
+const appKey = (name: string): string =>
+  (name.split("/").filter(Boolean).pop() ?? "")
+    .replace(/\.app$/i, "")
+    .trim()
+    .toLowerCase()
+
+// One apps change at a time in this process: each reads the whole list and puts it back with no base rev, so a second Approve waits and reads the list the first wrote.
+let appsQueue: Promise<unknown> = Promise.resolve()
+const oneAppsChange = <T>(change: () => Promise<T>): Promise<T> => {
+  const next = appsQueue.then(change, change)
+  appsQueue = next.catch(() => undefined)
+  return next
+}
+
+// Pure: the owner's own list after the change, or the result when there is nothing to write: an app already on it, or one to remove that it does not hold.
+export const appsChange = (list: string[], preview: InboxApps): { list: string[] } | RunResult => {
+  const held = list.some((name) => appKey(name) === appKey(preview.app))
+  if (preview.change === "add")
+    return held
+      ? { exitCode: 0, line: `${preview.app} is on your apps already` }
+      : { list: [...list, preview.app] }
+  return held
+    ? { list: list.filter((name) => appKey(name) !== appKey(preview.app)) }
+    : { exitCode: 1, line: `${preview.app} is not on your own apps list, so nothing changed` }
+}
+
+// The owner's own apps list and the CLI that writes it: the login's scope, its list as accepted (empty when it has none, null when it is not a list of names), and `playground ext`. store/extensions.ts's ownerApps is the real one.
+export type OwnerApps = { login: string; read: () => string[] | null; run: ExtRun }
 
 // Runs a sink's argv with the value on its stdin and returns its exit code: null once stopped by a signal (its time limit's included), 127 when it could not start. secret-sink.ts holds the real one; a test passes its own.
 export type SinkRun = (argv: string[], stdin: string) => Promise<number | null>
@@ -206,7 +290,7 @@ export type SinkRun = (argv: string[], stdin: string) => Promise<number | null>
 // Saves the value as one allowlisted Keychain item, throwing on a refusal; secret-sink.ts holds the real one, and a test passes its own.
 export type KeychainSave = (item: KeychainItemName, value: string) => Promise<void>
 
-// What Approve does, one shape per kind of approval the owner keeps (playbook's ask rule): an extension accept the dashboard runs itself, a Slack message, a ship of canary, a new Linear ticket, a delete, a schema, a budget, or a plain ask, whose words say what its poster does on Approve, for a decision no other shape fits (a production port, a work request from outside the chain, or a step only he can take, such as plugging in the Mac, where Approve means done and Deny means he can't). An ask may label each side in ELI5 / ASD-STE100, one line; the card then shows its text as the quoted block above the two labelled options. A secret asks for a value instead of a yes, which goes straight to its sink and is kept nowhere.
+// What Approve does, one shape per kind of approval the owner keeps (playbook's ask rule): an extension accept, an apps change or a grant's System Settings pane, which the dashboard carries out itself, a Slack message, a ship of canary, a new Linear ticket, a delete, a schema, a budget, or a plain ask, whose words say what its poster does on Approve, for a decision no other shape fits (a production port, a work request from outside the chain, or a step only he can take, such as plugging in the Mac, where Approve means done and Deny means he can't). An ask may label each side in ELI5 / ASD-STE100, one line; the card then shows its text as the quoted block above the two labelled options. A secret asks for a value instead of a yes, which goes straight to its sink and is kept nowhere.
 export const previewSchema = z.discriminatedUnion("type", [
   z.strictObject({
     approve: oneLine(LIMITS.line).optional(),
@@ -252,6 +336,8 @@ export const previewSchema = z.discriminatedUnion("type", [
     type: z.literal("secret"),
   }),
   acceptSchema,
+  appsSchema,
+  grantSchema,
 ])
 
 const link = z
@@ -365,9 +451,9 @@ export type InboxAction = (typeof ACTIONS)[number]
 // What an answer holds: every action but Move to Inbox, which undoes a set-aside and leaves no answer.
 export type InboxChoice = Exclude<InboxAction, "unarchive">
 
-// ackedAt: when its poster closed it through bun run ask, so the sweep stops chasing it; accepted: what the accept an accept decision's Approve ran gave; dismissedAt: when he dismissed the answered item or its poster closed it, which moves it to Done at once; noLink: why a go closed with no link; uploaded: how many files a Slack send shared into its channel and thread, so a retry shares none twice.
+// ackedAt: when its poster closed it through bun run ask, so the sweep stops chasing it; accepted, listed and opened: what the dashboard ran on an accept's, an apps change's and a grant's Approve gave; dismissedAt: when he dismissed the answered item or its poster closed it, which moves it to Done at once; noLink: why a go closed with no link; uploaded: how many files a Slack send shared into its channel and thread, so a retry shares none twice.
 export type InboxAnswer = {
-  accepted?: AcceptResult
+  accepted?: RunResult
   ackedAt?: string
   at: string
   choice: InboxChoice
@@ -375,16 +461,18 @@ export type InboxAnswer = {
   editedText?: string
   link?: string
   linkLabel?: string
+  listed?: RunResult
   noLink?: string
   note?: string
+  opened?: RunResult
   uploaded?: number
 }
 
-// What an accept's run gave: its exit code and the line it printed, the result or why it was refused.
-export type AcceptResult = { exitCode: number; line: string }
+// What a run the dashboard carried out on Approve gave: its exit code and the line it printed, the result or why it was refused.
+export type RunResult = { exitCode: number; line: string }
 
-// Pure: an accept's run as a result: its exit code, and its first line, the CLI's error when it failed, cut to a line.
-export const acceptResult = (ran: { code: number; err: string; out: string }): AcceptResult => {
+// Pure: a run as a result: its exit code, and its first line, its error when it failed, cut to a line.
+export const runResult = (ran: { code: number; err: string; out: string }): RunResult => {
   const line = ((ran.code === 0 ? ran.out : ran.err || ran.out).split("\n")[0] ?? "").trim()
   return {
     exitCode: ran.code,
@@ -572,6 +660,9 @@ function answerOf(
     if (item.preview.type === "accept" && action === "edit") {
       return { message: "An accept is approved or denied as its proposal reads" }
     }
+    if ((item.preview.type === "apps" || item.preview.type === "grant") && action === "edit") {
+      return { message: "This decision is approved or denied as it reads" }
+    }
     // Clear: neither a yes nor a no; he has set the talk aside and will pick it up later, while whatever is already moving keeps moving
     if (action === "clear") return { answer: { choice: action }, status: "cleared" }
     if (action === "approve") return { answer: { choice: action }, status: "approved" }
@@ -620,6 +711,20 @@ function answerWords(
     return accepted.exitCode === 0
       ? `${head} Approved, and the dashboard ran the accept: ${accepted.line}. Nothing is left to carry out: close it with ${close} "accepted in the extensions store".`
       : `${head} Approved, but the accept the dashboard ran failed (exit ${accepted.exitCode}): ${accepted.line}. Nothing was accepted: read the proposal again, post a new accept decision for its current rev if it still stands, and close this one with ${close} and why.`
+  }
+  const listed = answer.listed
+  if (answer.choice === "approve" && listed) {
+    const close = `bun run ask ack ${itemTag(item.ref)} --no-link`
+    return listed.exitCode === 0
+      ? `${head} Approved, and the dashboard changed the owner's apps: ${listed.line}. Nothing is left to carry out: close it with ${close} "the owner's apps list changed".`
+      : `${head} Approved, but the apps change the dashboard ran failed (exit ${listed.exitCode}): ${listed.line}. The list is as it was: tell your lead, and close this one with ${close} and why.`
+  }
+  const opened = answer.opened
+  if (answer.choice === "approve" && opened) {
+    const close = `bun run ask ack ${itemTag(item.ref)} --no-link`
+    return opened.exitCode === 0
+      ? `${head} Approved, and the dashboard ${opened.line}, where the owner grants it. Recheck with agent-desktop permissions every 30 seconds for up to 5 minutes: once it reads granted, close it with ${close} "granted" and tell the session that stopped for it, if one did, that it reads granted; if it never does, close it with ${close} and what it reads, and tell your lead.`
+      : `${head} Approved, but opening System Settings failed (exit ${opened.exitCode}): ${opened.line}. Nothing opened: tell your lead, and close this one with ${close} and why.`
   }
   switch (answer.choice) {
     case "approve":
@@ -688,6 +793,12 @@ const textsOf = (
   if (answer.accepted) {
     const text = deliveryText(item, answer)
     const lead = `${item.from} has ended, and the dashboard already ran this accept, so nothing is carried out: close the item with bun run ask ack ${itemTag(item.ref)} --no-link and why, as below.`
+    return { relay: relayWith(item, lead, text), text }
+  }
+  // an apps change or a grant the dashboard carried out leaves its poster only the close, or a grant's recheck, which the dispatcher does in an ended poster's place
+  if (answer.listed || answer.opened) {
+    const text = deliveryText(item, answer)
+    const lead = `${item.from} has ended, and the dashboard already carried out this decision's Approve, so you finish it in its place, as below.`
     return { relay: relayWith(item, lead, text), text }
   }
   return { relay: relayText(item, answer), text: deliveryText(item, answer) }
@@ -982,16 +1093,20 @@ export async function answerItem(
   {
     accept,
     actor,
+    apps,
     deliver,
     dispatcher,
+    grant,
     now = new Date(),
     upload,
     wait,
   }: {
     accept?: ExtRun
     actor: ActivityActor
+    apps?: OwnerApps
     deliver?: Deliver
     dispatcher?: string
+    grant?: ArgvRun
     now?: Date
   } & Pick<Sending, "upload" | "wait">,
 ): Promise<{ item: InboxItem; ok: true } | Refused> {
@@ -1013,14 +1128,13 @@ export async function answerItem(
     return { code, message: checked.message, ok: false }
   }
   const answer: InboxAnswer = { ...checked.answer, at: now.toISOString() }
-  // an accept's Approve runs the accept, so one with nothing to run it is refused before it is recorded
-  const accepting =
-    current.kind === "decision" && current.preview.type === "accept" && answer.choice === "approve"
-      ? current.preview
+  // an accept's, an apps change's or a grant's Approve runs its step, so one with nothing to run it is refused before it is recorded
+  const step =
+    current.kind === "decision" && answer.choice === "approve"
+      ? stepOf(current.preview, current.ref, { accept, apps, grant })
       : undefined
-  if (accepting && !accept) {
-    return { code: "VALIDATION_ERROR", message: "This dashboard cannot run an accept", ok: false }
-  }
+  if (step && "refusal" in step)
+    return { code: "VALIDATION_ERROR", message: step.refusal, ok: false }
   const [row] = await db
     .update(inboxItem)
     .set({
@@ -1042,20 +1156,22 @@ export async function answerItem(
   if (!row) return { code: "CONFLICT", message: "This item is already answered", ok: false }
   let answered = toItem(row)
   let given: Omit<InboxAnswer, "at"> = checked.answer
-  // run once, after the claim above, so a double click or a second tab accepts once
-  if (accepting && accept) {
-    const ran = await accept(acceptArgs(accepting, current.ref)).catch((error: unknown) => ({
-      code: 1,
-      err: error instanceof Error ? error.message : String(error),
-      out: "",
+  // run once, after the claim above, so a double click or a second tab runs it once
+  if (step) {
+    const result = await step.run().catch((error: unknown) => ({
+      exitCode: 1,
+      line: runResult({
+        code: 1,
+        err: error instanceof Error ? error.message : String(error),
+        out: "",
+      }).line,
     }))
-    const accepted = acceptResult(ran)
-    given = { ...given, accepted }
+    given = { ...given, [step.key]: result }
     // merged key by key, so a poster's read that landed while it ran keeps its close
     const [recorded] = await db
       .update(inboxItem)
       .set({
-        answer: sql`${inboxItem.answer} || jsonb_build_object('accepted', (${JSON.stringify(accepted)}::text)::jsonb)`,
+        answer: sql`${inboxItem.answer} || (${JSON.stringify({ [step.key]: result })}::text)::jsonb`,
         version: sql`${inboxItem.version} + 1`,
       })
       .where(eq(inboxItem.id, id))
@@ -1074,6 +1190,62 @@ export async function answerItem(
     }),
     ok: true,
   }
+}
+
+// The step an Approve runs, by the decision's kind, and the answer key its result is kept under: an accept's `ext accept`, an apps change's write of the owner's list, a grant's System Settings pane; undefined for a decision whose poster carries it out, and a refusal when this dashboard has nothing to run it with.
+function stepOf(
+  preview: InboxPreview,
+  ref: number,
+  { accept, apps, grant }: { accept?: ExtRun; apps?: OwnerApps; grant?: ArgvRun },
+):
+  | { key: "accepted" | "listed" | "opened"; run: () => Promise<RunResult> }
+  | { refusal: string }
+  | undefined {
+  if (preview.type === "accept") {
+    if (!accept) return { refusal: "This dashboard cannot run an accept" }
+    return { key: "accepted", run: async () => runResult(await accept(acceptArgs(preview, ref))) }
+  }
+  if (preview.type === "apps") {
+    if (!apps)
+      return { refusal: "This dashboard cannot change your apps: its extensions have no login" }
+    return {
+      key: "listed",
+      run: () =>
+        oneAppsChange(async () => {
+          const list = apps.read()
+          if (!list)
+            return {
+              exitCode: 1,
+              line: `your ${OWNER_APPS} list is not a list of names, so nothing changed`,
+            }
+          const changed = appsChange(list, preview)
+          if (!("list" in changed)) return changed
+          const ran = runResult(
+            await apps.run(appsArgs(apps.login, ref), JSON.stringify(changed.list)),
+          )
+          if (ran.exitCode !== 0) return ran
+          const verb = preview.change === "add" ? "added" : "removed"
+          return {
+            exitCode: 0,
+            line: `${verb} ${preview.app}; your apps are ${changed.list.join(", ") || "none"}`,
+          }
+        }),
+    }
+  }
+  if (preview.type === "grant") {
+    if (!grant) return { refusal: "This dashboard opens no System Settings: it shows test data" }
+    return {
+      key: "opened",
+      run: async () => {
+        const ran = runResult(await grant(grantArgv(preview)))
+        const pane = preview.permission === "accessibility" ? "Accessibility" : "Screen Recording"
+        return ran.exitCode === 0
+          ? { exitCode: 0, line: `opened System Settings at Privacy & Security > ${pane}` }
+          : ran
+      },
+    }
+  }
+  return undefined
 }
 
 // Move to Inbox: an archived item goes back to open with no answer, so it can be answered again; nothing is typed into its poster, since nothing was decided.

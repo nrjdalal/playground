@@ -29,6 +29,9 @@ const MANAGER_LABELS: Record<ManagerKind, string> = {
   planner: "Planner",
 }
 
+// The assistant's chat heading and box read by its role, whatever its session's name.
+const ASSISTANT_LABEL = "Assistant"
+
 // The dispatchers' names in slot order, as the dashboard's frame gives them (setDispatcherOrder), so an `<id>-dispatcher` reads its slot's label.
 let dispatcherOrder: readonly string[] = []
 
@@ -157,15 +160,27 @@ export const labelOf = (
 export const homeTitle = (dispatcher: string | null): string | null =>
   dispatcher === null ? null : dispatcherLabel(null, true)
 
-// A session as its chat names it, in its heading and its composer: a dispatcher by its label, Alpha or Bravo, else by its model (dispatcherLabel), the primary's or the second's, whose name the API gives as primary; any other session by its label.
+// Pure: whether a session's view has a chat, a composer under its stream: a dispatcher's, the hosted session's and the assistant's.
+export const hasChat = (worker: { assistant?: true; hosted?: true; role: string }): boolean =>
+  worker.role === "dispatcher" || Boolean(worker.hosted) || Boolean(worker.assistant)
+
+// A session as its chat names it, in its heading and its composer: the assistant as Assistant, a dispatcher by its label, Alpha or Bravo, else by its model (dispatcherLabel), the primary's or the second's, whose name the API gives as primary; any other session by its label.
 export const chatLabel = (
-  worker: { effort: string | null; model: string | null; name: string; role: string },
+  worker: {
+    assistant?: true
+    effort: string | null
+    model: string | null
+    name: string
+    role: string
+  },
   primary: string | null,
 ): string =>
-  worker.role === "dispatcher"
-    ? (roleLabel(worker.name) ??
-      dispatcherLabel(worker, primary === null || worker.name === primary))
-    : agentLabel(worker.name)
+  worker.assistant
+    ? ASSISTANT_LABEL
+    : worker.role === "dispatcher"
+      ? (roleLabel(worker.name) ??
+        dispatcherLabel(worker, primary === null || worker.name === primary))
+      : agentLabel(worker.name)
 
 // A peer's message that opens with its sender's own name or label ("builder: done", "Builder: done", "@Builder: done") drops it, since the label above the message already names the sender.
 export const withoutSenderName = (text: string, sender: string): string => {

@@ -13,7 +13,7 @@ import {
   type Roots,
 } from "@packages/safe-delete"
 
-import { parentPid, sessionAbove } from "../../../../scripts/hooks/session-state"
+import { procOf, sessionAbove, type Proc as Process } from "../../../../scripts/hooks/session-state"
 import STATUSES from "../../../../scripts/roster-statuses.json"
 import { mainCheckout } from "../main-checkout"
 import { sessionName } from "../trash"
@@ -73,17 +73,18 @@ export type RmDeps = {
   session: () => Promise<string>
 }
 
-// Who a caller that may be a session is, or undefined for a terminal no Claude Code session runs in: its PLAYGROUND_ROLE, a call detached from its parent or whose parent ps cannot read, since no terminal's own call is, else the session the shell-pane caller check (sessionAbove) finds above it in Claude Code's registry, which no prefix that drops the role reaches.
+// Who a caller that may be a session is, or undefined for a terminal no Claude Code session runs in: its PLAYGROUND_ROLE, a call detached from its parent or whose parent the system cannot read, since no terminal's own call is, else the claude process the shell-pane caller check (sessionAbove) finds above it, which no prefix on the call reaches.
 export const callerOf = async (
   environment: Record<string, string | undefined>,
   pid: number,
-  parentOf: (pid: number) => number = parentPid,
+  procs: (pid: number) => Process | undefined = procOf,
 ): Promise<string | undefined> => {
   if (environment.PLAYGROUND_ROLE) return `a session (role ${environment.PLAYGROUND_ROLE})`
   if (pid <= 1) return "a detached call (its parent is pid 1)"
-  if (!parentOf(pid)) return `a call whose parent ps cannot read (pid ${pid})`
-  const id = await sessionAbove(environment, pid, parentOf)
-  return id && `a session (session ${id})`
+  if (!procs(pid)) return `a call whose parent ps cannot read (pid ${pid})`
+  const above = await sessionAbove(pid, procs)
+  if (!above) return undefined
+  return `a session (${above.sessionId ? `session ${above.sessionId}` : `claude pid ${above.pid}`})`
 }
 
 // lsof -F's names for each pid: its "p<pid>" line, then each "n<name>" line under it.

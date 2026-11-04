@@ -603,9 +603,14 @@ describe("sweep", () => {
 })
 
 describe("switch watch, in the tick", () => {
-  // usage.json reading that account, in a data folder whose policy sets usage.switchAccount to switch@.
-  const usage = (ops: string, account: string, used: number) => {
+  // usage.json reading that account, in a data folder whose policy sets usage.switchAccount to switch@, and a roster seating both dispatchers unless `second` is false.
+  const usage = (ops: string, account: string, used: number, second = true) => {
     storeWith(join(ops, ".."), {}, { "usage.switchAccount": "switch@example.test" })
+    const agents = [
+      { kind: "dispatcher", name: OLD.dispatcher, status: "working" },
+      { kind: "dispatcher", name: `${OLD.dispatcher}-2`, status: second ? "working" : "ended" },
+    ]
+    writeFileSync(join(ops, "..", "roster.json"), JSON.stringify({ agents }))
     writeFileSync(
       join(ops, "..", "usage.json"),
       JSON.stringify({
@@ -634,6 +639,20 @@ describe("switch watch, in the tick", () => {
       "ops",
     ])
     expect(sent[1]!.text).toContain(`"to":"${OLD.dispatcher}-2"`)
+    const again = fake(ops, at(13, 33), QUIET_LOAD)
+    await beat("tick").run(again.ctx)
+    expect(again.sent).toEqual([])
+  })
+
+  // the move hands the factory to the second dispatcher, which resumes every stopped session; with none running, ops-unstick's own alerts carry on
+  test("at 100% with no second dispatcher seated, writes no move file and tells the first and both leads", async () => {
+    const ops = scratch()
+    usage(ops, "switch@example.test", 100, false)
+    const { ctx, sent } = fake(ops, at(13, 18), QUIET_LOAD)
+    await beat("tick").run(ctx)
+    expect(existsSync(join(ops, "unstick", "move.json"))).toBe(false)
+    expect(sent.slice(1).map((m) => m.to)).toEqual([OLD.dispatcher, "builder", "ops"])
+    expect(sent[1]!.text).toBe("switch@ week at 100%: no second dispatcher is seated, so no move")
     const again = fake(ops, at(13, 33), QUIET_LOAD)
     await beat("tick").run(again.ctx)
     expect(again.sent).toEqual([])
