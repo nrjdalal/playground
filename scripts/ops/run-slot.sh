@@ -27,11 +27,11 @@ mtime() { stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null; }
 stamp() { stat -L -c '%i %Y' "$1" 2>/dev/null || stat -L -f '%i %m' "$1" 2>/dev/null; }
 STAMP=$(stamp "$SELF")
 # A hand-set runner-host/slot-off kept the runner box idle for two days, so each ops switch carries "<who> <iso set> <iso expiry> <reason>"
-# (run-slot.sh set, below) and drops itself past its expiry; a file with no such line counts as set at its mtime with the default 4 hours
+# (run-slot.sh set, below) and drops itself past its expiry; a file with no such line counts as set at its mtime with the default 4 hours, and as off while that mtime reads back empty
 SWITCHES="run-slot.3-off run-slot.4-off run-slot.clone-off run-slot.load5-cap run-slot.single runner-host/off runner-host/slot-off"
 # whether switch $1 (a path under ops) is on; one past its expiry is moved to <name>.expired-<ts> and logged in run-slot.runs.log
 switch_on() {
-  local f="$OPS/$1" line ends now
+  local f="$OPS/$1" line ends now m
   [ -e "$f" ] || return 1
   line=$(head -n 1 "$f" 2>/dev/null)
   ends=$(printf '%s\n' "$line" | grep -E '^[^ ]+ [0-9-]{10}T[0-9:]{8}Z [0-9-]{10}T[0-9:]{8}Z ' | cut -d' ' -f3)
@@ -39,7 +39,10 @@ switch_on() {
   if [ -n "$ends" ]; then
     [[ "$now" < "$ends" ]] && return 0
   else
-    [ $(( $(date +%s) - $(mtime "$f" || date +%s) )) -lt 14400 ] && return 0
+    m=$(mtime "$f" || date +%s)
+    # an mtime that reads back empty counts as the file gone, rather than as a shell error (4 Nov: the same read in stale printed "syntax error: operand expected")
+    case "$m" in '' | *[!0-9]*) return 1 ;; esac
+    [ $(( $(date +%s) - m )) -lt 14400 ] && return 0
   fi
   mv "$f" "$f.expired-$(date -u +%Y%m%dT%H%M%SZ)" 2>/dev/null && echo "$now expire ${WHO:-run-slot} $$ $1 $line" >> "$OPS/run-slot.runs.log"
   return 1
@@ -619,7 +622,11 @@ reread() {
 # run-slot.priority (a lead's pick, under an hour old) works with the queue (builder, 12 Oct: a priority naming the 8th waiter deadlocked it):
 # the named session may take a slot whatever its place, and the reservation holds only while that session is itself waiting in the queue
 prio_holder() {
-  [ -f "$OPS/run-slot.priority" ] && [ $(( $(date +%s) - $(mtime "$OPS/run-slot.priority") )) -lt 3600 ] && cut -d' ' -f1 "$OPS/run-slot.priority"
+  local m
+  m=$(mtime "$OPS/run-slot.priority") || return
+  # an mtime that reads back empty counts as no pick, rather than as a shell error, as in stale
+  case "$m" in '' | *[!0-9]*) return 1 ;; esac
+  [ $(( $(date +%s) - m )) -lt 3600 ] && cut -d' ' -f1 "$OPS/run-slot.priority"
 }
 prio_waiting() {
   # true while the priority holder has a ticket whose waiter still runs
