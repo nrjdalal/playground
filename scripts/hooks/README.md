@@ -475,9 +475,8 @@ Only the first reading moves the folder, sets variables and records files for th
   Where the reader names no one folder ([The folder a hook reads](#the-folder-a-hook-reads)), it judges the command in every folder the shell may be in, and in the folder the line started in when a `cd`'s landing folder is unread: a build, a test run, a commit, a git move, a tool and a write by a path that lands in the main checkout in any of those folders is refused,
   and the refusal names the fix, naming the folder (`git -C <your worktree>`, `bun --cwd <your worktree>`) or a `cd` to a literal path that is there.
   So a line that starts in a worktree is refused too where a `cd` of its own may reach the main checkout, and one that starts in the main checkout runs where every folder its `cd` steps may reach is a worktree.
-  It reads the shell a pipeline feeds (`<reader> | sh`, `<reader> | sudo -s`) as the shell's own command line: a script it cannot read is refused where that shell may run in the main checkout.
-  A script it reads is judged command by command wherever the shell's stdin comes from, since the shared reader runs a shell's script itself.
-  Two forms keep canary's reading: a privilege wrapper's shell fed by a here-string or a heredoc (`sudo -s <<< '<command>'`), whose script this hook does not read, and a heredoc holding a value it cannot read (`sh <<EOF` around a substitution).
+  It reads the script a pipeline, a here-string or a heredoc feeds a shell (`<reader> | sh`, `sudo -s <<< '<command>'`, `sh <<EOF`) as the shell's own command line: a script it cannot read is refused where that shell may run in the main checkout.
+  A script it reads is judged command by command, a root shell's (`sudo -s`, `sudo -i`) by this hook and a plain shell's by the shared reader, which runs it itself.
   It fails open on a call it cannot read.
   Its tests are in `bun run test:file tests/scripts/hooks`.
   The backstop behind it is `lefthook.yml`'s pre-commit step `main-checkout`, alone at priority 1 so it runs first, before any step that writes (lefthook runs a tie in any order).
