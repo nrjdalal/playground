@@ -5,11 +5,13 @@ import { join } from "node:path"
 
 import {
   linkExtension,
+  listBundled,
   listExtensions,
   orderExtensions,
   readSetting,
   removeExtension,
   scopeDir,
+  setBundled,
   setSetting,
   unlinkExtension,
   type Who,
@@ -118,4 +120,31 @@ test("remove takes an extension out of the order, links and repos and leaves its
   ])
   expect(existsSync(join(scopeDir(data, "acme"), ".git"))).toBe(true)
   expect(removeExtension(data, ME, WHO)).toMatchObject({ ok: false, status: 409 })
+})
+
+test("a bundled extension is off until its switch turns it on in ext.bundled at the login's scope, and back off (#849)", () => {
+  const data = fresh()
+  expect(listBundled(data)).toEqual([{ name: "slack", on: false }])
+  expect(value(data, "ext.bundled")).toEqual([])
+  expect(setBundled(data, "slack", true, WHO)).toEqual({
+    key: "ext.bundled",
+    ok: true,
+    scope: ME,
+    value: ["slack"],
+  })
+  expect(listBundled(data)).toEqual([{ name: "slack", on: true }])
+  expect(setBundled(data, "slack", true, WHO)).toMatchObject({ ok: false, status: 409 })
+  expect(setBundled(data, "slack", false, WHO)).toMatchObject({ ok: true, value: [] })
+  expect(listBundled(data)).toEqual([{ name: "slack", on: false }])
+})
+
+test("a name Playground does not ship is refused, and ext.bundled refuses one twice or one unknown", () => {
+  const data = fresh()
+  expect(setBundled(data, "vault", true, WHO)).toMatchObject({ ok: false, status: 404 })
+  expect(
+    setSetting(data, { key: "ext.bundled", scope: ME, value: ["slack", "slack"] }, WHO),
+  ).toMatchObject({ ok: false })
+  expect(setSetting(data, { key: "ext.bundled", scope: ME, value: ["vault"] }, WHO)).toMatchObject({
+    ok: false,
+  })
 })
