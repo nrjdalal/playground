@@ -1765,10 +1765,10 @@ var EVALUATES = [
   /\(\([^)]*[A-Za-z_]/,
   /\$\[[^\]]*[A-Za-z_]/,
   /\[\[.*\s-(?:eq|ge|gt|le|lt|ne)\s/s,
-  /\w\[(?!(?:[@*]|[-\d:,\s]*)\]|\^)/,
   /\$\{[#!]?\w+:(?![-+=?:])[^}]*[A-Za-z_]/,
   /@P\}/
 ];
+var SUBSCRIPT = /\w\[(?!(?:[@*]|[-\d:,\s]*)\]|\^)/;
 var QUALIFIER = /[^\s(|&;<>$=]\((?:#q)?[^()\s|]*?(?:e(?:\[[^]*?\]|\{[^]*?\}|<[^]*?>|([^\s[{<])[^]*?\1)|\+\w+)[^()\s]*\)(?=$|[\s;&|)<>`}])/;
 function singleQuotesOut(command) {
   if (command.includes("$'"))
@@ -1841,7 +1841,7 @@ function namings(command) {
   const counts = new Map;
   const plain = new Set;
   const add = (key) => counts.set(key, (counts.get(key) ?? 0) + 1);
-  let blind = EVALUATES.some((evaluates) => evaluates.test(command)) || QUALIFIER.test(singleQuotesOut(command));
+  let blind = EVALUATES.some((evaluates) => evaluates.test(command)) || SUBSCRIPT.test(command) || SUBSCRIPT.test(unquoted(command)) || QUALIFIER.test(singleQuotesOut(command));
   for (const m of command.matchAll(/\$\{\(([^)]*)(\)?)/g)) {
     const [whole, flags, closed] = m;
     const rest = command.slice(m.index + whole.length);
@@ -2110,6 +2110,8 @@ function steadyNames(named, commands) {
       if (!word)
         continue;
       if (marked(word.value.split("=")[0]))
+        return () => NONE;
+      if (word.quoted && word.value.includes("["))
         return () => NONE;
       for (const key of word.value.match(/[A-Za-z_]\w*/g) ?? [])
         counts.set(key, (counts.get(key) ?? 0) + 1);
