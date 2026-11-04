@@ -1889,7 +1889,21 @@ async function unreadScript(shell, here, sure, inMain) {
     return;
   return refuse(`a shell whose script (${script.unknown}) the hook cannot read`, fixFor(sure));
 }
-var suShell = ({ args, name }) => name === "su" && !args.some((a) => /^-[^-]*c|^--command/.test(a.value));
+var SU_VALUES = new Set(["G", "g", "s", "w"]);
+var suCommand = (value) => {
+  if (value.startsWith("--"))
+    return /^--command(=|$)/.test(value);
+  if (!value.startsWith("-"))
+    return false;
+  for (const letter of value.slice(1)) {
+    if (letter === "c")
+      return true;
+    if (SU_VALUES.has(letter))
+      return false;
+  }
+  return false;
+};
+var suShell = ({ args, name }) => name === "su" && !args.some((a) => suCommand(a.value));
 var EXPORTS2 = new Set(["declare", "export", "local", "readonly", "typeset"]);
 async function fedScript(cmd, here, sure, inMain, visit, parsed) {
   const shell = cmd.bareOf ?? cmd;
