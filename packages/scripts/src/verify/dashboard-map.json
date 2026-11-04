@@ -332,7 +332,7 @@
   "sidebar": [
     {
       "label": "Dispatchers",
-      "shows": "No group in the nav: the dispatchers' rows sit in the sidebar's header, under its name row and above Threads, with no title or count (the map keeps this entry since GROUP_ORDER still lists Dispatchers for the System page's table): a row for each the API names, the primary's first, each drawn as every agent's and named Alpha or Bravo, with the usage windows after its name (Sidebar dispatcher rows on /dashboard's reach); the primary's row stays while its session is down, Not running in its tooltip, and the second's shows only while it is live or in the roster; before the sidebar is read, as many empty rows as /api/health counts. Owner rung only."
+      "shows": "No group in the nav: the dispatchers' rows sit in the sidebar's header, under its name row and above Threads, with no title or count (the map keeps this entry since GROUP_ORDER still lists Dispatchers for the System page's table): a row for each the API names, the primary's first, each drawn as every agent's and named Alpha or Bravo, with the usage windows after its name (Sidebar dispatcher rows on /dashboard's reach); the primary's row stays while its session is down, Not running in its tooltip, and the second's shows only while it is live or the roster lists it in a status other than done or ended; before the sidebar is read, as many empty rows as /api/health counts. Owner rung only."
     },
     {
       "label": "Threads",

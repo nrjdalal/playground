@@ -35,6 +35,10 @@ export const ROSTER_ROLE_OF_KIND: Record<RosterKind, "manager" | "runner" | "wor
   worker: "worker",
 }
 
+// Pure: whether a roster row's status ends its session for good, done or ended, so the row lists no seat (an ended second dispatcher draws no sidebar row); a parked or paused row still holds one.
+export const isEndedStatus = (status: string | null | undefined): boolean =>
+  status === "done" || status === "ended"
+
 // The PLAYGROUND_ROLE a session of each kind runs under, as spawn.sh sets it and the hooks read it.
 export const FACTORY_ROLE_OF_KIND: Record<RosterKind, string> = {
   assistant: "lead",

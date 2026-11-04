@@ -1029,22 +1029,49 @@ describe("dispatchersOf", () => {
       dispatchersOf(
         [opus] as Workers,
         [OLD.dispatcher, `${OLD.dispatcher}-2`],
-        new Set([OLD.builder]),
+        [{ name: OLD.builder, status: "working" }],
       ),
     ).toHaveLength(1)
   })
 
-  test("a second dispatcher the roster lists but no live session holds keeps a slot with no session, to read Not running", () => {
+  test.each(["parked", "working", null])(
+    "a second dispatcher the roster lists as %p but no live session holds keeps a slot with no session, to read Not running",
+    (status) => {
+      expect(
+        dispatchersOf(
+          [opus] as Workers,
+          [OLD.dispatcher, `${OLD.dispatcher}-2`],
+          [{ name: `${OLD.dispatcher}-2`, status }],
+        ),
+      ).toEqual([
+        { name: OLD.dispatcher, worker: opus as never },
+        { name: `${OLD.dispatcher}-2`, worker: null },
+      ])
+    },
+  )
+
+  // The owner, with the sidebar's Bravo row reading Not running: "if no bravo? why listed?" (#850).
+  test.each(["done", "ended"])(
+    "a second dispatcher the roster marks %s, with no live session, keeps no slot",
+    (status) => {
+      expect(
+        dispatchersOf(
+          [opus] as Workers,
+          [OLD.dispatcher, `${OLD.dispatcher}-2`],
+          [{ name: `${OLD.dispatcher}-2`, status }],
+        ),
+      ).toEqual([{ name: OLD.dispatcher, worker: opus as never }])
+    },
+  )
+
+  test("a live second dispatcher keeps its slot while the roster still marks it ended", () => {
     expect(
       dispatchersOf(
-        [opus] as Workers,
+        [opus, glm] as Workers,
         [OLD.dispatcher, `${OLD.dispatcher}-2`],
-        new Set([`${OLD.dispatcher}-2`]),
-      ),
-    ).toEqual([
-      { name: OLD.dispatcher, worker: opus as never },
-      { name: `${OLD.dispatcher}-2`, worker: null },
-    ])
+        [{ name: `${OLD.dispatcher}-2`, status: "ended" }],
+      ).map((s) => s.worker),
+    ).toEqual([opus as never, glm as never])
   })
 
   test("a live second dispatcher takes its slot with its session, roster or not", () => {

@@ -605,10 +605,9 @@ export function DashboardDispatchers({ rows = 1 }: { rows?: number }) {
   const names = dispatchers ??
     workers?.filter((w) => w.role === "dispatcher").map((w) => w.name) ?? [""]
   const agents = "agents" in source ? source.agents : board.agents
-  const rostered = new Set((agents ?? []).map((agent) => agent.name))
   const muted = source.kind === "stored"
   const shown = dispatcherSlotsShown(
-    dispatchersOf(workers, names.length ? names : [""], rostered),
+    dispatchersOf(workers, names.length ? names : [""], agents ?? []),
     rows,
     muted,
   )
