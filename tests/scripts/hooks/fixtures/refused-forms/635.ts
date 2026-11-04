@@ -1,5 +1,10 @@
 import { type Group } from "./_shared"
 
+// The one pure-compute program this PR lets run: its dead text names a gated call but the program can neither spawn, write nor feed a shell, so the name carries no meaning; every other playground-naming row below keeps a subprocess token and stays refused.
+export const allowed: string[] = [
+  "an inline node program holding a guarded playground call as a statement",
+]
+
 // The forms the review of this file's source found refused; rows are data, as refused-forms.ts says.
 export const groups: Group[] = [
   {
@@ -155,6 +160,18 @@ export const groups: Group[] = [
       [
         "an inline bun program whose shell template runs a guarded playground call by a variable command word",
         "bun -e 'const p = \"playground\"; await Bun.$`${p} ext add a b`'",
+      ],
+      [
+        "an inline bun program feeding a removal into eval through a command substitution",
+        `eval "$(bun -e 'console.log("rmdir ~/.pl" + "ayground/e*")')"`,
+      ],
+      [
+        "an inline bun program feeding a removal into eval through a backtick substitution",
+        'eval "`bun -e \'console.log("rmdir ~/.playground/e*")\'`"',
+      ],
+      [
+        "an inline bun program in a subshell feeding a removal into a shell",
+        `( bun -e 'console.log("rmdir ~/.playground/e*")' ) | sh -`,
       ],
     ],
   },
