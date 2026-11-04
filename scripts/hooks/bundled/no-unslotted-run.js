@@ -1617,7 +1617,6 @@ function runnerTarget(args) {
 }
 var isTurbo = (word) => program((word ?? "").replace(/(?<=.)@[^/]*$/, "")) === "turbo";
 var SED_VALUES = new Set(["--expression", "--file", "--line-length"]);
-var FEEDS = new Set(["<<", "<<-", "<<<"]);
 var EXPORTS2 = new Set(["declare", "export", "local", "readonly", "typeset"]);
 if (false) {}
 

@@ -1889,13 +1889,13 @@ async function unreadScript(shell, here, sure, inMain) {
     return;
   return refuse(`a shell whose script (${script.unknown}) the hook cannot read`, fixFor(sure));
 }
-var FEEDS = new Set(["<<", "<<-", "<<<"]);
+var suShell = ({ args, name }) => name === "su" && !args.some((a) => /^-[^-]*c|^--command/.test(a.value));
 var EXPORTS2 = new Set(["declare", "export", "local", "readonly", "typeset"]);
-async function fedScript(cmd, here, sure, inMain, visit) {
+async function fedScript(cmd, here, sure, inMain, visit, parsed) {
   const shell = cmd.bareOf ?? cmd;
   const input = shell.redirects.findLast((r) => (r.fd === "" || r.fd === "0") && r.op.startsWith("<") && r.op !== "<&");
-  const fed = input ? FEEDS.has(input.op) : shell.stdin !== undefined;
-  const kind = fed ? stdinShell(shell) : undefined;
+  const fed = input !== undefined || shell.stdin !== undefined;
+  const kind = !fed ? undefined : stdinShell(shell) ?? (parsed && suShell(parsed) ? "root" : undefined);
   if (!kind)
     return;
   const script = await stdinOf(shell, here);
@@ -1966,7 +1966,7 @@ function inspect(raw, environment, main) {
         if (verdict)
           return verdict;
       }
-      const script = await fedScript(cmd, here, sure, inMain, visit);
+      const script = await fedScript(cmd, here, sure, inMain, visit, parsed);
       if (script)
         return script;
       const ran = runs(name, args, local, here);
