@@ -22,6 +22,7 @@ import {
   parse,
   type Parsed,
   pathOf,
+  places,
   PRINTERS,
   program,
   READ,
@@ -838,14 +839,28 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
     if (slot)
       return slot.length === 0 ? undefined : examine({ ...cmd, words: slot }, env, visit, false)
     const { args, first, name, xargs } = parsed
-    const into = cmd.redirects.find(
-      (r) =>
-        r.target &&
-        writer(r) &&
-        (inRoot(pathOf(r.target, env)) ||
-          (GLOB.test(r.target.value) && !!names(r.target, env, true))),
-    )
-    if (into?.target) return refuse(`a write to ${pathOf(into.target, env)}`)
+    // every folder the shell may be in, so a write a cd the reader cannot be sure of would land in the root is judged there too
+    for (const here of places(env)) {
+      const into = cmd.redirects.find(
+        (r) =>
+          r.target &&
+          writer(r) &&
+          (inRoot(pathOf(r.target, here)) ||
+            (GLOB.test(r.target.value) && !!names(r.target, here, true))),
+      )
+      if (into?.target) return refuse(`a write to ${pathOf(into.target, here)}`)
+    }
+    // past the cap the root may be a folder places() dropped, so a writing redirect whose target leans on the shell's own folder is refused before a reader or an echo lets it run
+    const blind = env.cwdAnywhere
+      ? cmd.redirects.find(
+          (r) =>
+            r.target && writer(r) && pathOf(r.target, { ...env, cwd: undefined }) === undefined,
+        )
+      : undefined
+    if (blind?.target)
+      return refuse(
+        `a write to ${blind.target.value} on a line that names more folders than the hook carries, since it cannot rule out ${root}; run it as a line of its own after a cd to a literal path`,
+      )
     // a reader is its command's own first word, so a wrapper's option value parse misread never stands in for one
     const reader = !rootLine && ownFirst(cmd, first) && reads(parsed, env)
     const fed = xargs ? await stdinOf(cmd, env) : undefined
@@ -882,7 +897,11 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
       program &&
       !program.glob &&
       !marked(program.value) &&
-      !texts(program).some((t) => holds(t.value, env) || t.value.includes(basename(dirname(root))))
+      !texts(program).some(
+        (t) =>
+          places(env).some((here) => holds(t.value, here)) ||
+          t.value.includes(basename(dirname(root))),
+      )
         ? program
         : undefined
     const lines = runsOf(
@@ -924,55 +943,64 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
     if (!first || EXPORTS.has(name) || reader) return
     // a program word the hook cannot read is named as such, so a refusal always names what runs
     const verb = name && !marked(name) ? name : "a program it cannot read"
-    if (inRoot(env.cwd)) return refuse(`${verb} run inside ${root}`)
-    if (name === "git" && inRoot(gitCall(args, env).cwd)) return refuse(`git on a clone in ${root}`)
     const remover = REMOVERS.has(name)
-    const steady = steadyAt(cmd)
-    // a value the hook cannot read under a remover, or in git's -c, could name the root, so it is refused unless the call holds it
-    const unheld = remover ? args.find((word) => !held(word, env, steady)) : undefined
-    if (unheld)
+    // a line that names more folders than the reader carries (`Env.cwdAnywhere` in shell.ts) may run inside this root, whatever folder it started in
+    if (env.cwdAnywhere)
       return refuse(
-        `${verb} on ${shown(unheld)}, a value the hook does not hold; hold it in the same call (X=<path>; ${verb} "$X") or write the path literally`,
+        `${verb} on a line that names more folders than the hook carries, since it cannot rule out ${root}; run it as a line of its own after a cd to a literal path`,
       )
-    if (name === "git") {
-      const config = gitConfigs(args).find((word) => marked(word.value))
-      if (config)
-        return refuse(
-          `git ${/^-c./.test(config.raw ?? config.value) ? "" : "-c "}${shown(config)}, a value built from a variable or a substitution; write the value literally in the call`,
-        )
-    }
-    const scope = since(varsJudged, env.vars, `${env.cwd}\0${remover}`)
-    for (const value of [...parsed.local.values(), ...scope]) {
-      const named = names({ ...value, quoted: false }, env, remover)
-      if (named) return refuse(`${verb} with a variable on ${named}`)
-    }
-    const literal = !whole && narrow(cmd, env)
+    const steady = steadyAt(cmd)
     // on a line read call by call, a read-only gh call's jq filter is text, never a path
     const filters = whole ? new Set<Word>() : ghFilters(parsed)
-    for (const word of [first, ...args]
-      .filter((word) => word !== opaque)
-      .map((word) => heldWord(word, env, steady) ?? word)) {
-      // a quiet commit's message and a gh filter are text, judged only when the root is in it; a filter's unquoted glob is the shell's, judged as any glob
-      const text = (quiet && /\s/.test(word.value)) || (filters.has(word) && !word.glob)
-      if (text && !texts(word).some((t) => holds(t.value, env))) continue
-      const named = names(word, env, remover, literal)
-      if (named) return refuse(`${verb} on ${named}`)
-    }
-    if (cmd.redirects.some((r) => r.body && holds(r.body.value, env)))
-      return refuse(`${verb} with a script that names ${root}`)
-    if (fed && remover && (fed.unknown || marked(fed.value)))
-      return refuse(
-        `${verb} under xargs fed by ${fed.unknown ?? "a value it cannot read"}, a value the hook does not hold; write the paths literally in the call`,
-      )
-    if (fed) {
-      const named =
-        !fed.unknown &&
-        fed.value
-          .split(/\s+/)
-          .filter(Boolean)
-          .map((value) => names({ quoted: false, value }, env, remover))
-          .find(Boolean)
-      if (named) return refuse(`${verb} under xargs on ${named}`)
+    // each folder the shell may be in, so a program a cd the reader cannot be sure of would run inside the root, or a path of its own that lands there, is judged in every one
+    for (const here of places(env)) {
+      if (inRoot(here.cwd)) return refuse(`${verb} run inside ${root}`)
+      if (name === "git" && inRoot(gitCall(args, here).cwd))
+        return refuse(`git on a clone in ${root}`)
+      // a value the hook cannot read under a remover, or in git's -c, could name the root, so it is refused unless the call holds it
+      const unheld = remover ? args.find((word) => !held(word, here, steady)) : undefined
+      if (unheld)
+        return refuse(
+          `${verb} on ${shown(unheld)}, a value the hook does not hold; hold it in the same call (X=<path>; ${verb} "$X") or write the path literally`,
+        )
+      if (name === "git") {
+        const config = gitConfigs(args).find((word) => marked(word.value))
+        if (config)
+          return refuse(
+            `git ${/^-c./.test(config.raw ?? config.value) ? "" : "-c "}${shown(config)}, a value built from a variable or a substitution; write the value literally in the call`,
+          )
+      }
+      const scope = since(varsJudged, here.vars, `${here.cwd}\0${remover}`)
+      for (const value of [...parsed.local.values(), ...scope]) {
+        const named = names({ ...value, quoted: false }, here, remover)
+        if (named) return refuse(`${verb} with a variable on ${named}`)
+      }
+      const literal = !whole && narrow(cmd, here)
+      for (const word of [first, ...args]
+        .filter((word) => word !== opaque)
+        .map((word) => heldWord(word, here, steady) ?? word)) {
+        // a quiet commit's message and a gh filter are text, judged only when the root is in it; a filter's unquoted glob is the shell's, judged as any glob
+        const text = (quiet && /\s/.test(word.value)) || (filters.has(word) && !word.glob)
+        if (text && !texts(word).some((t) => holds(t.value, here))) continue
+        const named = names(word, here, remover, literal)
+        if (named) return refuse(`${verb} on ${named}`)
+      }
+      if (cmd.redirects.some((r) => r.body && holds(r.body.value, here)))
+        return refuse(`${verb} with a script that names ${root}`)
+      if (fed && remover && (fed.unknown || marked(fed.value)))
+        return refuse(
+          `${verb} under xargs fed by ${fed.unknown ?? "a value it cannot read"}, a value the hook does not hold; write the paths literally in the call`,
+        )
+      if (fed) {
+        const named =
+          !fed.unknown &&
+          fed.value
+            .split(/\s+/)
+            .filter(Boolean)
+            .map((value) => names({ quoted: false, value }, here, remover))
+            .find(Boolean)
+        if (named) return refuse(`${verb} under xargs on ${named}`)
+      }
     }
   }
   const named = namings(command)
@@ -983,6 +1011,8 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
   steadyAt = steadyNames(named, lexed.commands)
   const env: Env = {
     cwd: directory,
+    // the line starts in the folder the tool names, which the reader has proved by the payload itself
+    cwdSure: directory,
     files: new Map(),
     known,
     // zsh starts with OLDPWD at the folder it starts in
