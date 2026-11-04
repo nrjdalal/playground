@@ -250,25 +250,36 @@ function stdinShellOf(cmd, { args, first, name, xargs }) {
   }
   const end = first ? cmd.words.indexOf(first) : -1;
   const before = cmd.words.slice(at, end === -1 ? undefined : end);
-  const k = before.findIndex((w) => !w.quoted && ROOT_SHELLS.has(program(w.value)));
-  if (k === -1)
-    return;
-  const wrapper = program(before[k].value);
+  const firstWrapper = before.find((w) => !w.quoted && ROOT_SHELLS.has(program(w.value)));
+  const wrappers = [];
+  for (const w of before) {
+    if (wrappers.some((wrapper) => startsRootShell(wrapper, w.value)))
+      return "root";
+    if (w === firstWrapper || ROOT_SHELLS.has(w.value))
+      wrappers.push(program(w.value));
+  }
+  return first && wrappers.length ? "root" : undefined;
+}
+function startsRootShell(wrapper, value) {
+  if (marked(value))
+    return true;
   const shells = ROOT_SHELLS.get(wrapper);
   const { flags, values } = WRAPPERS.get(wrapper);
-  const clustered = (value) => {
-    let shell = false;
-    for (const c of value.slice(1)) {
-      if (values.has(`-${c}`))
-        return shell;
-      if (!flags.has(`-${c}`))
-        return false;
-      shell ||= shells.has(`-${c}`);
-    }
-    return shell;
-  };
-  const starts = ({ quoted, value }) => marked(value) || !quoted && (shells.has(value) || /^-[A-Za-z]/.test(value) && clustered(value));
-  return !!first || before.slice(k + 1).some(starts) ? "root" : undefined;
+  if (value.startsWith("--")) {
+    const named = [...flags, ...values].filter((o) => o.startsWith(value));
+    return shells.has(named.length === 1 ? named[0] : value);
+  }
+  if (!/^-[A-Za-z]/.test(value))
+    return false;
+  let shell = false;
+  for (const c of value.slice(1)) {
+    if (values.has(`-${c}`))
+      return shell;
+    if (!flags.has(`-${c}`))
+      return false;
+    shell ||= shells.has(`-${c}`);
+  }
+  return shell;
 }
 var COUNTED = new Set(["repeat", "timeout"]);
 var SHELLS = new Set(["bash", "dash", "ksh", "sh", "zsh"]);
@@ -1424,7 +1435,7 @@ if (false) {}
 
 // scripts/hooks/no-raw-delete.ts
 var INSTEAD = "Move it to the 7-day trash with playground rm <path> (a worktree: playground rm --worktree <path>), which takes up to 5,000 files or 2 GB; leave a bigger tree or a scratch folder in place for your lead's cleanup, and let bun install rebuild a node_modules in place. A plain rm of a file inside your own worktree or scratchpad, with no -r, still runs.";
-var WORKTREE = "Remove a worktree with playground rm --worktree <path>, which moves it to the 7-day trash once no live session holds it and its commit is on a remote branch.";
+var WORKTREE = "Remove a worktree with playground rm --worktree <path>, which moves it to the 7-day trash once no live session holds it, it holds no uncommitted change and its work has landed on canary.";
 var refuse = (what, why = "a recursive delete is final, and one aimed wrong takes a whole tree", instead = INSTEAD) => `no-raw-delete hook refuses ${what}: ${why}. ${instead}`;
 var shown = (word) => word.variable ? `$${word.variable}` : visible(word.value);
 var DATA = new Set([

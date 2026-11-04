@@ -5,10 +5,12 @@ import { Hono } from "hono"
 import { describeRoute } from "hono-openapi"
 import { z } from "zod"
 
+import { readAttachment } from "@/lib/dashboard/attachments"
 import { deliver } from "@/lib/dashboard/deliver"
 import {
   answerInputSchema,
   answerItem,
+  attachmentDownloadName,
   dismissItems,
   listItems,
   markRead,
@@ -17,7 +19,7 @@ import {
   scheduleItem,
   secretInputSchema,
 } from "@/lib/dashboard/inbox"
-import { runSink } from "@/lib/dashboard/secret-sink"
+import { runSink, saveToKeychain } from "@/lib/dashboard/secret-sink"
 import { slackUpload } from "@/lib/dashboard/slack-upload"
 import { DISPATCHER } from "@/lib/dashboard/workers"
 import {
@@ -78,7 +80,7 @@ export const inboxRouter = new Hono<{ Variables: Session }>()
     describeRoute({
       tags: ["Inbox"],
       description:
-        "One file an ask, a draft, a Slack decision or a read-only update carries, by the id it was kept under: only for the Dashboard's own page on this machine, which fetches it with its cookie, so a page elsewhere cannot embed it",
+        "One file an ask, a draft, a Slack decision or a read-only update carries, by the id it was kept under: only for the Dashboard's own page on this machine, which fetches it with its cookie, so a page elsewhere cannot embed it. With ?download it saves under its item's title, the file's own name after it when the item carries several, with the stored file's extension",
       responses: {
         200: { description: "The file" },
         ...authErrorResponses,
@@ -86,7 +88,12 @@ export const inboxRouter = new Hono<{ Variables: Session }>()
         ...notFoundErrorResponses,
       },
     }),
-    (c) => serveAttachment(c.req.param("id")),
+    (c) =>
+      serveAttachment(
+        c.req.param("id"),
+        readAttachment,
+        c.req.query("download") === undefined ? undefined : (id) => attachmentDownloadName(db, id),
+      ),
   )
   .post(
     "/dismiss",
@@ -202,7 +209,7 @@ export const inboxRouter = new Hono<{ Variables: Session }>()
     describeRoute({
       tags: ["Inbox"],
       description:
-        "Answer an open secret ask with its value, which goes straight to the ask's sink on stdin, once an environment, and is kept nowhere: the item records only when it was provided and each exit status, and its poster is told that alone",
+        "Answer an open secret ask with its value, which goes straight to the ask's sink on stdin, once a Vercel environment or once to a Keychain item, and is kept nowhere: the item records only when it was provided and each exit status or saved, and its poster is told that alone",
       responses: {
         200: { description: "OK" },
         ...validationErrorResponses,
@@ -219,6 +226,7 @@ export const inboxRouter = new Hono<{ Variables: Session }>()
         actor: { email: user.email, id: user.id },
         deliver,
         dispatcher: DISPATCHER,
+        keychain: saveToKeychain,
         run: runSink,
       })
       if (!result.ok) throw new ApiError(STATUS[result.code], result.code, result.message)

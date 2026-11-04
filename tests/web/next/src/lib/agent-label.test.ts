@@ -11,6 +11,7 @@ import {
   labelText,
   mention,
   setDispatcherOrder,
+  setRosterKinds,
   messageRecipient,
   remarkMentions,
   withoutRef,
@@ -208,6 +209,23 @@ describe("agentLabel", () => {
     for (const label of [chatLabel(opus, "dispatcher"), chatLabel(glm, "dispatcher")])
       expect(label.toLowerCase()).not.toContain("dispatcher")
     expect(chatLabel({ ...opus, name: "worker-greed", role: "worker" }, "dispatcher")).toBe("Greed")
+  })
+
+  // The Assistant ran as r4qmq4-worker, and its chat heading, composer and Inbox sender read its id where its sidebar row read Assistant (#818).
+  test("a session reads by its roster kind whatever its name, so an assistant under a worker's name reads Assistant", () => {
+    setRosterKinds([
+      { kind: "assistant", name: "r4qmq4-worker" },
+      { kind: "worker", name: "k3m9px-worker" },
+      { kind: null, name: "brave-otter" },
+    ])
+    const session = { effort: "high", model: "claude-opus-5-5", role: "worker" }
+    expect(chatLabel({ ...session, name: "r4qmq4-worker" }, "dispatcher")).toBe("Assistant")
+    expect(agentLabel("r4qmq4-worker")).toBe("Assistant")
+    expect(chatLabel({ ...session, name: "k3m9px-worker" }, "dispatcher")).toBe("K3m9px")
+    expect(agentLabel("k3m9px-worker")).toBe("K3m9px")
+    expect(agentLabel("brave-otter")).toBe("BraveOtter")
+    setRosterKinds([])
+    expect(agentLabel("r4qmq4-worker")).toBe("R4qmq4")
   })
 
   test("a session's name reads as one word, with no @", () => {
