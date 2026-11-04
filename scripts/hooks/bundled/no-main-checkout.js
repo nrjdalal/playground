@@ -1368,7 +1368,7 @@ function shellOperand(args, shell) {
     const v = args[k].value;
     if (takes.has(v))
       k++;
-    else if (v === "-")
+    else if (v === "-" && args[k - 1]?.value !== "--")
       return { inline, operand: args[k + 1] };
     else if (/^[-+][A-Za-z]+$/.test(v))
       inline ||= v.startsWith("-") && v.includes("c");
