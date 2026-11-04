@@ -308,7 +308,8 @@
 
 - An `apps` decision asks the owner to add an app to the owner's own apps, the `desktop-owner-apps` guard list no-desktop-owner-app keeps agent-desktop away from, or to remove one, since that list changes only by the owner's act (`scripts/hooks/README.md`'s no-desktop-owner-app).
   Its `app` is the app's name, a letter or digit first, so none starts as a flag or names a path, `change` is `add` or `remove`, and `why` says why (`appsSchema` in `api/hono/src/lib/dashboard/inbox.ts`); Edit is refused.
-  Approve, claimed as an accept's is and run one at a time in the API process so two overlapping Approves both land, reads the login scope's own list as accepted, adds or removes the app matched as the hook matches it (`appsChange`),
+  Approve is claimed as an accept's is, and runs one at a time in the API process, so two overlapping Approves both land.
+  It reads the login scope's own list as accepted, adds or removes the app matched as the hook matches it (`appsChange`),
   and runs `ext put <login> list desktop-owner-apps - --reason "the owner approved it in the Inbox (#iN)"` with the new list on its stdin (`appsArgs`, `ownerApps` in `api/hono/src/lib/store/extensions.ts`), no shell, no `PLAYGROUND_ROLE`.
   An app already on the list, one to remove that the login's list lacks, or a list that is not names writes nothing.
   The answer keeps `listed: {exitCode, line}`, and the card reads `Your apps: <line>` green or `Apps change failed (exit N): <line>` red; the poster closes it with `bun run ask ack #iN --no-link "<why>"`.
