@@ -70,7 +70,7 @@ export type Message = z.infer<typeof messageSchema>
 export const channelSchema = z.object({
   id: z.string().min(1),
   joined: z.boolean(),
-  kind: z.enum(["channel", "dm"]),
+  kind: z.enum(["channel", "dm", "self"]),
   lastMessageAt: z.iso.datetime().nullable(),
   mentions: z.number().int().min(0),
   name: z.string().min(1),

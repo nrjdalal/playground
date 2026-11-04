@@ -116,6 +116,12 @@ describe("the sidebar's rows", () => {
     })
   })
 
+  test("leave a self channel out of both groups, and never land on one", () => {
+    const self = channel({ id: "s1", kind: "self", name: "self:u1" })
+    expect(yardGroups([self, channel(), dm])).toEqual({ channels: [channel()], dms: [dm] })
+    expect(landingChannel([self])).toBeNull()
+  })
+
   test("a channel reads #name and a DM its other member's login", () => {
     expect(channelTitle(channel())).toBe("#general")
     expect(channelTitle(dm)).toBe("octocat")

@@ -12,6 +12,19 @@ const MESSAGE = {
   kind: "text",
   text: "hello",
 }
+// The owner's own self channel, a kind the hosted Yard adds for remote control.
+const SELF = {
+  id: "s1",
+  joined: true,
+  kind: "self",
+  lastMessageAt: null,
+  mentions: 0,
+  name: "self:u1",
+  peer: null,
+  postRule: "members",
+  topic: null,
+  unread: 0,
+}
 const server = Bun.serve({
   hostname: "127.0.0.1",
   port: 0,
@@ -29,6 +42,7 @@ const server = Bun.serve({
         { status: 403 },
       )
     if (url.pathname.endsWith("/odd")) return Response.json({ data: { channels: "no" } })
+    if (url.pathname.endsWith("/self")) return Response.json({ data: { channels: [SELF] } })
     if (url.pathname.endsWith("/messages") && request.method === "POST")
       return Response.json(
         { data: { message: { ...MESSAGE, status: "pending" } } },
@@ -65,6 +79,11 @@ describe("the hosted Yard client", () => {
       403,
       "Yard is invite-only",
     ])
+  })
+
+  test("a self channel in the list reads, so a hosted Yard that makes one leaves the Mac's list working", async () => {
+    const withSelf = yardClient(base, "yard_mac", (_, init) => fetch(`${base}/self`, init))
+    expect((await withSelf.channels()).map((channel) => channel.kind)).toEqual(["self"])
   })
 
   test("an answer in a shape it does not read is refused, never passed on", async () => {

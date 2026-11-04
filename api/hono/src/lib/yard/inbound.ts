@@ -37,10 +37,11 @@ export const untrusted = (message: Message, channel: Channel): string => {
   return `${fence}text\n${body}\n${fence}`
 }
 
-// Whether an inbound message calls on the owner, decided by its channel's kind, so a new kind (`self`, for remote work) adds one branch here.
+// Whether an inbound message calls on the owner, decided by its channel's kind: a self channel is the owner's own, kept for remote work, so nothing in it calls on them.
 const CALLS_ON: Record<Channel["kind"], (message: Message, login: string) => boolean> = {
   channel: (message, login) => mentionsOf(message.text).includes(login.toLowerCase()),
   dm: (message, login) => mentionsOf(message.text).includes(login.toLowerCase()),
+  self: () => false,
 }
 
 // The Inbox card for a message someone else sent that calls on the owner, or null.

@@ -53,6 +53,10 @@ describe("a message that calls on the owner becomes one Inbox card", () => {
     }
   })
 
+  test("nothing for a mention in a self channel, which no one else reads", () => {
+    expect(inboundCard(message(), channel({ kind: "self", name: "self:u1" }), "owner")).toBeNull()
+  })
+
   test("nothing for a message naming someone else, the owner's own post, or one not sent", () => {
     expect(inboundCard(message({ text: "@bo and @di" }), channel(), "owner")).toBeNull()
     expect(
