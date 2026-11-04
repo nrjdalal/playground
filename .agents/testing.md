@@ -35,7 +35,8 @@ Run it locally with `CLOCK_AHEAD_DAYS=30 bun run test:file [paths]`: `test-sandb
 Give the shift to `test-sandbox.ts` alone, since `BUN_OPTIONS` breaks `bun run` itself.
 The preload swaps in a `Date` that keeps running, moved ahead, because bun's `setSystemTime` stops the clock as it moves it (a 50 ms `Bun.sleep` read 0 ms elapsed, measured), which turns every test that times a wait red.
 The shift reaches the test's own process alone, so two clocks stay real: a child process (spawn.sh, run-slot.sh, a CLI, a Python job), and a file's mtime, which the OS stamps.
-A test that reads either against the moved clock is red on the shift alone, so its file joins `CLOCK_EXEMPT` with the reason, unless the child is a bun process the test starts through a helper of its own, which passes the preload on (`inFixture` in `tests/dashboard-fixture.ts`).
+A test that reads either against the moved clock is red on the shift alone, so it carries the moved clock to that source where it can: a bun child it starts through a helper of its own that passes the preload on (`inFixture` in `tests/dashboard-fixture.ts`), or a file it writes, whose mtime it sets from its own clock (`kept` in `tests/api/hono/src/lib/dashboard/inbox.test.ts`).
+Where it cannot, its file joins `CLOCK_EXEMPT` with the reason.
 Any other red in the pass is a real clock mix: fix it so the code takes one clock, passed in as `readHeld` takes its `now` (`packages/scripts/src/pr-merge/held.ts`).
 
 ## Traps
