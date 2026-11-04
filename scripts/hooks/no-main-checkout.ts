@@ -429,9 +429,11 @@ async function unreadScript(
 
 // The option words su takes before -c or --command for its line to read as a command of its own, each known exactly; any other option word reads as a root shell, so an option's value never hides a -c
 const SU_PLAIN = new Set(["-", "-f", "-l", "-m"])
-// Whether su's words hand it a command: -c or --command with its command, after option words of SU_PLAIN alone (`su root -c <cmd>`, `su - -c <cmd>`)
+// Whether su's words hand it a command: -c or --command with its command, after option words of SU_PLAIN and words the hook reads whole alone (`su root -c <cmd>`, `su - -c <cmd>`), since a value it cannot read, or a glob, may be any option
 const suCommand = (args: Word[]) => {
-  for (const [at, { value }] of args.entries()) {
+  for (const [at, word] of args.entries()) {
+    const { value } = word
+    if (word.unknown !== undefined || word.glob || marked(value)) return false
     if (value === "-c" || value === "--command") return at + 1 < args.length
     if (value.startsWith("--command=")) return true
     if (value.startsWith("-") && !SU_PLAIN.has(value)) return false
