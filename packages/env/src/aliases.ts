@@ -29,8 +29,14 @@ export const DESK_ENV = new Set([
   "SDK_PROBE_DIR",
 ])
 
+// The names renamed whole rather than by their DESK_ prefix, each read under its old name for one ship.
+export const RENAMED_ENV: Record<string, string> = {
+  PLAYGROUND_CMUX_SESSIONS: "PLAYGROUND_ALL_SESSIONS",
+}
+
 // The name an old env name became, or undefined for a name the rename left alone.
 export const renamedEnv = (name: string): string | undefined => {
+  if (Object.hasOwn(RENAMED_ENV, name)) return RENAMED_ENV[name]
   if (!name.startsWith("DESK_")) return
   const rest = name.slice("DESK_".length)
   if (DESK_ENV.has(rest) || [...DESK_ENV].some((p) => p.endsWith("_") && rest.startsWith(p)))

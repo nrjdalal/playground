@@ -7,7 +7,7 @@ description: Your chat with the dispatcher, the sidebar and the apps.
 # Dashboard
 
 The Dashboard reads your own machine: your Claude Code sessions in herdr, your `~/.claude` folder and your repos.
-Its sessions are the ones Playground started, on the board, under Sessions and in System; a session another terminal runs stays off it and out of its database, and every session, cmux's included, joins it once you set `PLAYGROUND_CMUX_SESSIONS=true` in the app's `.env`.
+Its sessions are the ones Playground started, on the board, under Sessions and in System; a session another terminal runs stays off it and out of its database, and joins Sessions, System and the database, never the board, once you set `PLAYGROUND_ALL_SESSIONS=true` in the app's `.env`.
 Where an area has nothing to show yet, it says what is missing and what fills it, naming the button or page when the app has one, such as "No Claude Code sessions yet.
 Sessions appear here once Playground starts them, the first from the Dashboard's chat."
 A stack that shows test data instead, a made-up machine for tests and screenshots, wears a **Test data** badge beside the name in the sidebar and in the tab's title, as a Vibeground wears its own (below).
@@ -129,7 +129,7 @@ Click the sidebar's right edge, or press Cmd+B (Ctrl+B), to collapse or expand i
 
 Below the header are the live sessions in groups:
 
-- **Orchestrators**: the sessions that lead the others, each by its role (Builder, Ops, Planner, Optimizer), A to Z by title until you drag them into an order of your own.
+- **Orchestrators**: the sessions that lead the others, each by its role (Builder, Ops, Planner, Optimizer, Assistant), A to Z by title until you drag them into an order of your own.
   Drag a row, or focus it and press Space, the arrows and Space, or use Move up and Move down in its menu (a right click, a long press, or Shift+F10).
   Reset order to A to Z, in the Orchestrators label's own menu, brings the default back.
 - **Subagents**: the `worker-` sessions, with each reviewer and tester under the worker it checks.

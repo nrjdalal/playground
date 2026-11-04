@@ -748,6 +748,7 @@ export type SystemBody = {
   capacity?: {
     idle?: { line?: string | null; ready?: boolean }
     line?: unknown
+    orchestrators?: { line?: unknown }
     workers?: unknown
   }
   problems?: string[]
@@ -773,7 +774,7 @@ const windowWords = (label: string, window: UsageWindow, now: number): string | 
 // A sample older than this means sampling has stopped (it runs every 30s), so its room is no longer this machine's.
 export const SYSTEM_STALE_MS = 90_000
 
-// Pure: the system route's body as four lines, room, idle stacks, usage and what did not read (a probe that failed, or a timer a failed hot reload stopped, which a restart of the API mends). A body without a room line or a worker count, or one sampled over 90s ago, fails, since a lead would spawn on it; no usage passes and says so, since usage holds back no spawn.
+// Pure: the system route's body as a line each: room, the orchestrators' room when the body holds it, idle stacks, usage and what did not read (a probe that failed, or a timer a failed hot reload stopped, which a restart of the API mends). A body without a room line or a worker count, or one sampled over 90s ago, fails, since a lead would spawn on it; no usage passes and says so, since usage holds back no spawn.
 export const systemResults = (body: SystemBody, now = Date.now()): Result[] => {
   const capacity = body.capacity
   if (typeof capacity?.line !== "string" || typeof capacity.workers !== "number") {
@@ -797,6 +798,9 @@ export const systemResults = (body: SystemBody, now = Date.now()): Result[] => {
     : []
   return [
     pass("system", `${capacity.line} (sampled ${body.sampledAt})`),
+    ...(typeof capacity.orchestrators?.line === "string"
+      ? [pass("orchestrators", capacity.orchestrators.line)]
+      : []),
     pass(
       "idle",
       idle?.line ??
@@ -826,7 +830,7 @@ export const system = async ({ api, web }: Target, cookie: string): Promise<Resu
 
 export type AgentRow = { name: string; state: string; status?: string | null }
 
-// Pure: whether the agents route reads a session as ended, the roster's `ended` and no live session of its name, which is how the Dashboard reads Ended; a read with no live sessions (cmux refused) or a herdr server that did not read would show a live session as down, so either fails rather than pass on it.
+// Pure: whether the agents route reads a session as ended, the roster's `ended` and no live session of its name, which is how the Dashboard reads Ended; a read with no live sessions (the sessions read failed) or a herdr server that did not read would show a live session as down, so either fails rather than pass on it.
 export const endedResult = (
   name: string,
   agents: AgentRow[],

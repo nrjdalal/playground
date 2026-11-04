@@ -4,12 +4,14 @@ import { join } from "node:path"
 import type { InboxItem } from "../../../../../api/hono/src/lib/dashboard/inbox"
 import {
   ACKS_STAMPED_FROM as API_ACKS_STAMPED_FROM,
+  filesToUpload as API_filesToUpload,
   GO_CHOICES as API_GO_CHOICES,
   PLACED_TYPES as API_PLACED_TYPES,
   QUEUED_POLL_MS as API_QUEUED_POLL_MS,
   RETRY_CODES as API_RETRY_CODES,
   retryable as API_retryable,
   savesDraft as API_savesDraft,
+  slackPlace as API_slackPlace,
   STUCK_QUEUED_MS as API_STUCK_QUEUED_MS,
 } from "../../../../../api/hono/src/lib/dashboard/inbox"
 import {
@@ -56,6 +58,8 @@ import {
   STUCK_QUEUED_MS,
   updatedSince,
   upfrontLink,
+  slackPlaced,
+  uploadsOn,
 } from "../../../../../web/next/src/lib/inbox"
 import { QUEUED_POLL_MS } from "../../../../../web/next/src/lib/outbox"
 import { statusIcon } from "../../../../../web/next/src/lib/status-icons"
@@ -1572,6 +1576,88 @@ describe("a card's lifecycle buttons on each shelf (PG-654)", () => {
 
   test("a secret ask is snoozed, never archived, since its value comes through Submit alone", () => {
     expect(lifecycle(secret, "inbox")).toEqual(["snooze"])
+  })
+})
+
+// PG-649: a Slack send shares its files into the same thread, and its card says so until the go
+describe("uploadsOn", () => {
+  const THREAD =
+    "https://app.slack.com/client/T0000000000/C0MADEUP01/thread/C0MADEUP01-1700000000.000100"
+  const FILES = [
+    { id: "3f0e7a52-1c4b-4d2a-9e6f-0000000000a1.png", kind: "image" as const, name: "before.png" },
+  ]
+  const words = { text: "hi", to: "@Merritt" }
+  const cases: [InboxItem, InboxItem["answer"]][] = [
+    [item({ kind: "draft", preview: { ...words, attachments: FILES, link: THREAD } }), null],
+    [
+      item({
+        kind: "draft",
+        preview: { ...words, attachments: FILES, link: "https://linear.app/acme/issue/DUNE-1/x" },
+      }),
+      null,
+    ],
+    [item({ kind: "draft", preview: { ...words, attachments: FILES, noLink: "a new DM" } }), null],
+    [item({ kind: "draft", preview: { ...words, link: THREAD } }), null],
+    [
+      item({
+        kind: "decision",
+        preview: { ...words, attachments: FILES, link: THREAD, type: "slack" },
+      }),
+      null,
+    ],
+    [item({ kind: "decision", preview: { attachments: FILES, text: "look", type: "ask" } }), null],
+  ]
+
+  test("names Send on a Slack draft and Approve on a slack decision with files, and nothing else", () => {
+    expect(cases.map(([open]) => uploadsOn(open))).toEqual([
+      "Send",
+      null,
+      null,
+      null,
+      "Approve",
+      null,
+    ])
+  })
+
+  test("marks the same items whose go the API shares into Slack", () => {
+    for (const [open] of cases) {
+      const choice = open.kind === "draft" ? "send" : "approve"
+      const answered = { ...open, answer: { at: "x", choice } } as InboxItem
+      expect(uploadsOn(open) !== null).toBe(API_filesToUpload(answered) !== null)
+    }
+  })
+
+  test("reads a Slack link as the API's slackPlace does, a query, a hash and a thread that does not parse included", () => {
+    const team = "https://app.slack.com/client/T0000000000"
+    for (const link of [
+      THREAD,
+      `${team}/C0MADEUP01`,
+      `${team}/C0MADEUP01/`,
+      `${team}/D0MADEUP11?cdn_fallback=1#top`,
+      `${THREAD}?x=1`,
+      `${team}/C0MADEUP01/thread/C0MADEUP01-notats`,
+      `${team}/C0MADEUP01/thread/C0OTHER001-1700000000.000100`,
+      `${team}/C0MADEUP01/thread`,
+      `${THREAD}/more`,
+      `${team}/C0MADEUP01/files/F0MADEUP01`,
+      team,
+      "https://evil.example/client/T0000000000/C0MADEUP01",
+      "http://app.slack.com/client/T0000000000/C0MADEUP01",
+      "not a link",
+    ])
+      expect([link, slackPlaced(link)]).toEqual([link, API_slackPlace(link) !== null])
+  })
+
+  test("leaves an answered card unmarked, its result line counting the files shared", () => {
+    const [open] = cases[0]!
+    const sent = {
+      ...open,
+      answer: { at: "x", choice: "send", uploaded: 2 },
+      delivery: { at: "x", status: "delivered", to: "ops", via: "session" },
+      status: "sent",
+    } as InboxItem
+    expect(uploadsOn(sent)).toBeNull()
+    expect(outcomeLine(sent)).toBe("You sent it · 2 files shared · Sending in Slack…")
   })
 })
 

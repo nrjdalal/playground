@@ -94,6 +94,7 @@ import { AGENT_ID_PATTERN, readTail, subagentPath } from "@/lib/dashboard/transc
 import { startVibe, stopVibe, VibeError } from "@/lib/dashboard/vibe"
 import { DISPATCHER, DISPATCHERS, listLive, type Live } from "@/lib/dashboard/workers"
 import { searchYouTube } from "@/lib/dashboard/youtube-search"
+import { attachmentDisposition } from "@/lib/download"
 import {
   ApiError,
   authErrorResponses,
@@ -351,10 +352,11 @@ export const servedHeaders = (file: Attachment): Record<string, string> => ({
   "x-content-type-options": "nosniff",
 })
 
-// The serve route's work: the file's bytes with servedHeaders, or a 404 once it has gone.
+// The serve route's work: the file's bytes with servedHeaders, or a 404 once it has gone; with download, saved under the name it gives.
 export async function serveAttachment(
   id: string,
   read: (id: string) => ReturnType<typeof readAttachment> = readAttachment,
+  download?: (id: string) => Promise<string>,
 ): Promise<Response> {
   const found = await read(id)
   if (!found) {
@@ -364,7 +366,10 @@ export async function serveAttachment(
       "No attachment by that id: files are kept for a week after they arrive",
     )
   }
-  return new Response(found.bytes, { headers: servedHeaders(found.file) })
+  const headers = servedHeaders(found.file)
+  if (download)
+    headers["content-disposition"] = attachmentDisposition(await download(found.file.id))
+  return new Response(found.bytes, { headers })
 }
 
 // A body is cut off once it outgrows a file and its form's framing, before it is all read.
@@ -526,7 +531,7 @@ const dashboardRoutes = new Hono<{ Variables: Session }>()
     describeRoute({
       tags: ["Dashboard"],
       description:
-        "Every agent the roster lists or cmux runs, for the dashboard: its role, task, live state, last activity, last report to the dispatcher, branch and pull request, with the roster's backlog still waiting, in the order they go out",
+        "Every agent the roster lists or herdr runs, for the dashboard: its role, task, live state, last activity, last report to the dispatcher, branch and pull request, with the roster's backlog still waiting, in the order they go out",
       responses: { 200: { description: "OK" }, ...authErrorResponses },
     }),
     async (c) => c.json({ data: await agentsBoard() }),
@@ -635,7 +640,7 @@ const dashboardRoutes = new Hono<{ Variables: Session }>()
     describeRoute({
       tags: ["Dashboard"],
       description:
-        "This machine's room for more workers, read every 30s while anyone reads it: RAM used and free with macOS's memory pressure, swap, the load average against the cores, disk free, Docker's VM and containers, each live session's footprint (its claude process, everything under it, and the dev stack it serves with that stack's Postgres container) and processes left running in a checkout with no session, an hour of totals, the usage windows the usage job writes, `account`, the Claude account the usage windows reflect (its email and display name alone), `pulls`, the pull requests page of the checkout's GitHub origin, and `update`, how many commits this build is behind the branch its checkout follows (main on origin/main, canary and the live dashboard's branch on origin/canary, fetched at most every 10 minutes in the background) with the newest one's title and time, and `live` when that branch is the live dashboard's. `capacity.line` says how many more workers fit and what limits them; `capacity.idle.line` how much stopping a worker's dev stack idle for 15 minutes would free. Read-only but for the update check's fetch, which moves only origin/<upstream>: every other command it runs only reports.",
+        "This machine's room for more workers, read every 30s while anyone reads it: RAM used and free with macOS's memory pressure, swap, the load average against the cores, disk free, Docker's VM and containers, each live session's footprint (its claude process, everything under it, and the dev stack it serves with that stack's Postgres container) and processes left running in a checkout with no session, an hour of totals, the usage windows the usage job writes, `account`, the Claude account the usage windows reflect (its email and display name alone), `pulls`, the pull requests page of the checkout's GitHub origin, and `update`, how many commits this build is behind the branch its checkout follows (main on origin/main, canary and the live dashboard's branch on origin/canary, fetched at most every 10 minutes in the background) with the newest one's title and time, and `live` when that branch is the live dashboard's. `capacity.line` says how many more workers fit and what limits them, `capacity.orchestrators` how many more orchestrators (a claude with no dev stack, `capacity.perOrchestrator`); `capacity.idle.line` how much stopping a worker's dev stack idle for 15 minutes would free. Read-only but for the update check's fetch, which moves only origin/<upstream>: every other command it runs only reports.",
       responses: { 200: { description: "OK" }, ...authErrorResponses },
     }),
     async (c) => c.json({ data: await systemReport() }),
@@ -727,7 +732,7 @@ const dashboardRoutes = new Hono<{ Variables: Session }>()
     describeRoute({
       tags: ["Dashboard"],
       description:
-        "Every live Claude Code session cmux knows, with its light, task, any picker waiting on you, and every prompt it left in cmux's Feed (`feed`: a picker's questions, a permission request with the tool's whole input, a plan)",
+        "Every live Claude Code session herdr runs, with its light, task, any picker waiting on you, and each prompt it waits on as a card (`feed`: a picker's questions, a permission request with the tool's whole input, a plan)",
       responses: { 200: { description: "OK" }, ...authErrorResponses },
     }),
     async (c) => {
@@ -842,7 +847,7 @@ const dashboardRoutes = new Hono<{ Variables: Session }>()
         ),
         502: errorResponse(
           "CMUX_FAILED",
-          "cmux could not read the session, or refused the send before anything was typed and again on a second try (CMUX_FAILED, which the outbox retries), or typing began and did not finish (INTERRUPTED), which reads Delivered once its transcript shows it",
+          "the sessions could not be read, or the send was refused before anything was typed and again on a second try (CMUX_FAILED, which the outbox retries), or typing began and did not finish (INTERRUPTED), which reads Delivered once its transcript shows it",
         ),
       },
     }),
@@ -1215,7 +1220,7 @@ const dashboardRoutes = new Hono<{ Variables: Session }>()
     describeRoute({
       tags: ["Dashboard"],
       description:
-        "Live frames over a WebSocket: { type: workers } whenever a session changes, { type: entries } as transcripts grow, { type: error } when cmux cannot be read, and { type: activity } for the one chat the client has open, once it sends { type: watch, sessionId } (null to stop): the session's spinner line as verb, elapsed, tokens and thought, read at most once a second while it works, and null when it stops",
+        "Live frames over a WebSocket: { type: workers } whenever a session changes, { type: entries } as transcripts grow, { type: error } when the sessions cannot be read, and { type: activity } for the one chat the client has open, once it sends { type: watch, sessionId } (null to stop): the session's spinner line as verb, elapsed, tokens and thought, read at most once a second while it works, and null when it stops",
       responses: { 101: { description: "Switching Protocols" }, ...authErrorResponses },
     }),
     upgradeWebSocket(() => {

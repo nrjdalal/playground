@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test"
 import { join } from "node:path"
 
+import { clockExempt } from "../../../../packages/scripts/src/clock-exempt"
 import { shards } from "../../../../packages/scripts/src/test-shards"
 
 const sum = (files: string[], timings: Record<string, number>) =>
@@ -44,21 +45,32 @@ test("the shard count grows with the suite", () => {
   expect(shards(timings, Object.keys(timings), 100)).toHaveLength(10)
 })
 
-test("the CLI prints the matrix and one shard's files as paths bun reads as paths", () => {
+test("the CLI prints both clocks' legs and each shard's files as paths bun reads as paths, the clock-ahead pass without its exempt files", () => {
   const cli = join(import.meta.dir, "../../../../packages/scripts/src/test-shards.ts")
-  const run = (...args: string[]) => {
-    const child = Bun.spawnSync(["bun", cli, ...args])
+  const { CLOCK_AHEAD_DAYS: _, ...env } = process.env
+  const run = (clock: string, ...args: string[]) => {
+    const child = Bun.spawnSync(["bun", cli, ...args], {
+      env: clock ? { ...env, CLOCK_AHEAD_DAYS: clock } : env,
+    })
     expect(child.stderr.toString()).toBe("")
     expect(child.exitCode).toBe(0)
     return child.stdout.toString()
   }
-  const matrix = JSON.parse(run("matrix"))
-  expect(matrix.length).toBeGreaterThan(1)
-  expect(matrix).toEqual(matrix.map((_: unknown, i: number) => i + 1))
-  const all = matrix.flatMap((shard: number) => run("files", String(shard)).trim().split("\n"))
-  expect(
-    all.every((file: string) => file.startsWith("./tests/") && file.endsWith(".test.ts")),
-  ).toBe(true)
-  expect(new Set(all).size).toBe(all.length)
-  expect(all).toContain("./tests/packages/scripts/src/test-shards.test.ts")
+  const { include } = JSON.parse(run("", "legs")) as { include: { clock: string; shard: number }[] }
+  const files = (clock: string) => {
+    const legs = include.filter((leg) => leg.clock === clock).map((leg) => leg.shard)
+    expect(legs).toEqual(legs.map((_, i) => i + 1))
+    return legs.flatMap((shard) => run(clock, "files", String(shard)).trim().split("\n"))
+  }
+  const real = files("")
+  const ahead = files("30")
+  expect(real.length).toBeGreaterThan(ahead.length)
+  for (const all of [real, ahead]) {
+    expect(all.every((file) => file.startsWith("./tests/") && file.endsWith(".test.ts"))).toBe(true)
+    expect(new Set(all).size).toBe(all.length)
+  }
+  expect(real).toContain("./tests/packages/scripts/src/test-shards.test.ts")
+  expect(ahead.toSorted()).toEqual(real.filter((file) => !clockExempt(file)).toSorted())
+  expect(real).toContain("./tests/scripts/roster.test.ts")
+  expect(ahead).not.toContain("./tests/scripts/roster.test.ts")
 })

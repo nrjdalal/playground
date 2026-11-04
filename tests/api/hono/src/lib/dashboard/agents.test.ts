@@ -1299,11 +1299,11 @@ describe("agentsBoard", () => {
     rmSync(home2, { force: true, recursive: true })
   })
 
-  test("when cmux cannot be read, the roster still shows, every agent down, with the reason", async () => {
+  test("when the sessions cannot be read, the roster still shows, every agent down, with the reason", async () => {
     const board = await agentsBoard(async () => {
-      throw new Error("cmux did not answer in time")
+      throw new Error("the sessions read did not answer in time")
     })
-    expect(board.liveProblem).toBe("cmux did not answer in time")
+    expect(board.liveProblem).toBe("the sessions read did not answer in time")
     expect(board.agents.map((a) => [a.name, a.state])).toEqual([
       [DISPATCHER, "down"],
       ["worker-sloth", "down"],

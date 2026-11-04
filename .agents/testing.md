@@ -20,12 +20,24 @@ So does one that rebuilds a package or moves a file other tests read, since a wo
 In the parallel pass each test gets 30s where bun gives 5s, since a test runs slower beside other workers; a test's own timeout wins, so read it first.
 A parallel pass still running at its deadline (`TEST_PARALLEL_DEADLINE_MS`, 20 minutes, which the runner box's `suite.sh` raises and each of GitHub's shards lowers to 10, inside its own 20-minute `timeout-minutes`) is killed and fails, naming the files its workers still held, since bun's own timeout cannot stop synchronous code; the run's first line names the deadline it holds.
 GitHub runs the suite as shards rather than one run: `packages/scripts/src/test-shards.ts` packs the files longest first into as many shards as its budget of recorded file time (`BUDGET_MS`) needs, by `tests/timings.json`, where a file with none weighs the mean.
-Each shard runs its own files through `test-sandbox.ts`, and the `Audit, Lint, and Build` check is green only when every shard and the lint and build job passed.
+Each shard runs its own files through `test-sandbox.ts`, and the `Audit, Lint, and Build` check is green only when every shard, on both clocks (the clock-ahead pass, below), and the lint and build job passed.
 A new test file needs no timing to run, and the split follows the suite with no hand run: each shard keeps its files' times as the run artifact `timings-<n>` (`TEST_TIMINGS_UPDATE`; bun times no `SERIAL` file, so those keep the committed time until a hand `bun run test:timings`).
 The Shards job merges the newest passing run's over `tests/timings.json` before it splits (`packages/scripts/src/test-timings.ts`), every shard splitting by that one merged file.
 Only a run from a branch of this repo counts, since a fork's run could upload any times; with none to read, the split keeps the committed file, and a shard whose artifact does not read is skipped by name.
 No workflow commits the merged times, since a change reaches `canary` only through `pr:merge`, so the committed file stays a seed that `bun run test:timings`, committed in any PR, refreshes.
 `tests/` is fork-excluded, so the root script no-ops where the directory is absent.
+
+## The clock-ahead pass
+
+Beside the shards, GitHub runs the suite once more as `Suite (<n>, clock ahead)` jobs with every test's clock 30 days on, so a test that takes its clock from two sources (a fixed `NOW` passed to one call while another defaults to `Date.now()`) goes red on its own PR, not on the day the real clock reaches it.
+Those jobs split on their own (`test-shards.ts legs`) without the exempt files, so they number fewer than the shards, and they keep no timings.
+Run it locally with `CLOCK_AHEAD_DAYS=30 bun run test:file [paths]`: `test-sandbox.ts` then preloads `tests/clock-ahead.ts` into both passes and leaves out the files `CLOCK_EXEMPT` (`packages/scripts/src/clock-exempt.ts`) lists, named or matched, and names each named file it leaves out.
+Give the shift to `test-sandbox.ts` alone, since `BUN_OPTIONS` breaks `bun run` itself.
+The preload swaps in a `Date` that keeps running, moved ahead, because bun's `setSystemTime` stops the clock as it moves it (a 50 ms `Bun.sleep` read 0 ms elapsed, measured), which turns every test that times a wait red.
+The shift reaches the test's own process alone, so two clocks stay real: a child process (spawn.sh, run-slot.sh, a CLI, a Python job), and a file's mtime, which the OS stamps.
+A test that reads either against the moved clock is red on the shift alone, so it carries the moved clock to that source where it can: a bun child it starts through a helper of its own that passes the preload on (`inFixture` in `tests/dashboard-fixture.ts`), or a file it writes, whose mtime it sets from its own clock (`kept` in `tests/api/hono/src/lib/dashboard/inbox.test.ts`).
+Where it cannot, its file joins `CLOCK_EXEMPT` with the reason.
+Any other red in the pass is a real clock mix: fix it so the code takes one clock, passed in as `readHeld` takes its `now` (`packages/scripts/src/pr-merge/held.ts`).
 
 ## Traps
 

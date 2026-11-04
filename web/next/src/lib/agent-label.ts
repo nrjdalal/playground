@@ -37,16 +37,29 @@ export const setDispatcherOrder = (names: readonly string[]): void => {
   dispatcherOrder = names
 }
 
+// Each session's roster kind, as the agents read gives it (setRosterKinds), so a label that has only a name reads the session by its kind: an assistant under a worker's name reads Assistant.
+let rosterKinds: ReadonlyMap<string, RosterKind> = new Map()
+
+// Set from each agents read, before the board draws.
+export const setRosterKinds = (
+  agents: readonly { kind: RosterKind | null; name: string }[],
+): void => {
+  rosterKinds = new Map(agents.flatMap(({ kind, name }) => (kind ? [[name, kind] as const] : [])))
+}
+
 // A dispatcher's label: its slot's in the dashboard's order, else its set name's (dispatcherLabelOfName), else the first slot's, which an `<id>-dispatcher` holds by default.
 const dispatcherRole = (name: string): string => {
   const slot = dispatcherOrder.indexOf(name)
   return DISPATCHER_SLOT_LABELS[slot] ?? dispatcherLabelOfName(name) ?? DISPATCHER_SLOT_LABELS[0]
 }
 
-// A manager's role word, by its kind or else its name, so a builder under any name reads Builder; a dispatcher's, a set name or an `<id>-dispatcher`, Alpha or Bravo by its slot; null for any other session, a dispatcher under another name (PLAYGROUND_DISPATCHER) included, which its chat names by its model.
+// A manager's role word, by its kind or else its name, so a builder under any name reads Builder, and an orchestrator of any other manager kind its kind's word (Assistant); a dispatcher's, a set name or an `<id>-dispatcher`, Alpha or Bravo by its slot; null for any other session, a dispatcher under another name (PLAYGROUND_DISPATCHER) included, which its chat names by its model.
 export const roleLabel = (name: string, kind: RosterKind | null = null): string | null => {
   const manager = isManagerKind(kind) ? kind : managerKindOfName(name)
   if (manager) return MANAGER_LABELS[manager]
+  const placed = kind ?? kindOfName(name)
+  if (placed && placed !== "dispatcher" && ROSTER_ROLE_OF_KIND[placed] === "manager")
+    return capitalise(placed)
   return dispatcherLabelOfName(name) || kindOfName(name) === "dispatcher"
     ? dispatcherRole(name)
     : null
@@ -63,11 +76,12 @@ export const withoutIdKind = (name: string): string => {
     : name
 }
 
-// A session's name as people read it, one word with no @: a manager's or a dispatcher's role word (roleLabel), else the role word or an id's kind dropped and each dash- or space-separated word capitalised and joined, so `worker-gluttony` reads "Gluttony", `brave-otter` "BraveOtter" and `builder` "Builder".
+// A session's name as people read it, one word with no @: a manager's or a dispatcher's role word (roleLabel, by its roster kind when the agents read gave one), else the role word or an id's kind dropped and each dash- or space-separated word capitalised and joined, so `worker-gluttony` reads "Gluttony", `brave-otter` "BraveOtter" and `builder` "Builder".
 export const agentLabel = (name: string): string =>
   NOT_A_NAME.test(name)
     ? name
-    : (roleLabel(name) ?? mention(withoutIdKind(name).replace(ROLE_WORD, "")))
+    : (roleLabel(name, rosterKinds.get(name) ?? null) ??
+      mention(withoutIdKind(name).replace(ROLE_WORD, "")))
 
 // A name as one word, every word kept: `runner-pride` reads "RunnerPride".
 export const mention = (name: string): string => {

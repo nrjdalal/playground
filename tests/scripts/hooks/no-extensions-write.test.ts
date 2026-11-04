@@ -492,8 +492,9 @@ describe("a direct write into the extensions root is refused, naming the owner's
     expect(await bash(`cd ${SCOPE}; cd /usr; OLDPWD=/usr; pushd ~-; touch f`)).toContain("refuses")
   })
 
-  test("pushd ~- after a popd leaves the folder unread", async () => {
-    expect(await bash(`cd ${SCOPE}; pushd /usr; popd; pushd ~-; touch f`)).toBeUndefined()
+  // zsh lands in /usr here, but the reader cannot see popd's stack, so it takes every folder the line named after a popd, the scope among them, as it does for popd itself
+  test("pushd ~- after a popd may go back to any folder the line named", async () => {
+    expect(await bash(`cd ${SCOPE}; pushd /usr; popd; pushd ~-; touch f`)).toContain("refuses")
     expect(await bash(`cd ${SCOPE}; pushd /usr; pushd ~-; touch f`)).toContain("refuses")
   })
 })
@@ -666,6 +667,32 @@ describe("a quoted argument is read as a command line only where a program runs 
     [
       "doas whose user option comes first in a cluster and takes the shell letter as its value",
       "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | doas -us",
+    ],
+    ["a quoted root shell flag given its command", "sudo '-s' ls"],
+    ["a quoted root shell cluster given its command", "sudo '-su' root ls"],
+    ["a quoted doas shell flag given its command", "doas '-s' ls"],
+    ["a quoted sudo given its command", "'sudo' -s ls"],
+    ["a quoted attached user value given its command", "sudo -su'root' ls"],
+    ["an escaped shell letter given its command", "sudo -\\s ls"],
+    ["a here-string to a quoted cluster given its command", "sudo -su'root' cat <<< 'ls -la'"],
+    ["a second wrapper behind a quoted doas given its command", "'doas' sudo -i ls"],
+    ["the shell long option given its command", "sudo --shell ls"],
+    ["a shortened login long option given its command", "sudo --lo -u root ls"],
+    [
+      "sudo whose quoted user option comes first in a cluster and takes the shell letter as its value",
+      "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sudo '-us'",
+    ],
+    [
+      "sudo whose user value is a quoted shell flag",
+      "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sudo -u'-s'",
+    ],
+    [
+      "sudo given a long option prefix shared by its shell, set-home and stdin options",
+      "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sudo --s",
+    ],
+    [
+      "sudo given a long option prefix shared by its list and login options",
+      "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sudo --l",
     ],
     [
       "sudo with its full user option and a harmless command",

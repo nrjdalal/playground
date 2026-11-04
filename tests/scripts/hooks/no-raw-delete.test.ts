@@ -5,7 +5,7 @@ import { join } from "node:path"
 import { check } from "../../../scripts/hooks/no-raw-delete"
 import { NEVER_MADE } from "./fixtures/refused-forms"
 
-// Every form here is data passed to check(); none runs. Refused rows live in fixtures/refused-forms.ts.
+// Every form here is data passed to check(); none runs. Refused rows live in fixtures/refused-forms/, one file a source.
 const SESSION = "0a1b2c3d-4e5f-6789-abcd-ef0123456789"
 const SCRATCH = `/private/tmp/claude-501/-Users-x-playground/${SESSION}/scratchpad`
 const WORKTREE = join(homedir(), "x", ".claude", "worktrees", "y")
