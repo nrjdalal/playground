@@ -282,9 +282,47 @@ describe("a build, a test run, lefthook, turbo or a file write in the main check
   )
 
   test.each([
+    [". /dev/fd/0", "| . /dev/fd/0"],
+    ["source /dev/fd/0", "| source /dev/fd/0"],
+    [". /proc/self/fd/0", "| . /proc/self/fd/0"],
+    [". -", "| . -"],
+    ["eval of a substitution reading stdin", '| eval "$(cat)"'],
+    ["sh -c of a quoted substitution", "| sh -c '$(cat)'"],
+    ["sh -", "| sh -"],
+    ["sh /dev/stdin", "| sh /dev/stdin"],
+    ["bash of a process substitution", "| bash <(cat)"],
+    ["a while loop that evals each line", "| while read l; do eval $l; done"],
+    ["sh -c sourcing stdin", "| sh -c '. /dev/stdin'"],
+    ["sh -c piping stdin into a shell", "| sh -c 'cat | sh'"],
+    ["xargs running $SHELL", "| xargs -I{} $SHELL -c {}"],
+    ["$SHELL -", "| $SHELL -"],
+    ["env -i bash -s", "| env -i bash -s"],
+    ["command eval", '| command eval "$(cat)"'],
+    ["nice sh /dev/fd/0", "| nice sh /dev/fd/0"],
+    ["a brace group that evals a line", '| { read a; eval "$a"; }'],
+    ["an until loop handing each line to sh -c", '| until ! read l; do sh -c "$l"; done'],
+  ])(
+    "a script's output piped into %s, a command that can run its input as code, is judged as a pipe into a shell",
+    async (_name, tail) => {
+      expect(await bash(`bun run ask list ${tail}`)).toContain("no-main-checkout hook refuses")
+      expect(await bash(`echo 'git commit -m x' ${tail}`)).toContain(
+        "no-main-checkout hook refuses",
+      )
+    },
+  )
+
+  test.each([
     ["xargs sh -c of a script that only reads", "echo 'git status' | xargs sh -c"],
     ["xargs handing words to a script it names", "echo x | xargs sh -c 'echo $0'"],
     ["a while loop piped into a reader", "echo x | while read l; do echo $l; done | cat"],
+    ["a script's output piped into a reader", "bun run ask list | cat"],
+    ["a script's output handed to grep by xargs", "bun run ask list | xargs grep x"],
+    [
+      "a script's output read by a loop that runs no code",
+      "bun run ask list | while read l; do echo $l; done",
+    ],
+    ["an eval of a script that only reads, fed by a pipe", "echo x | eval 'git status'"],
+    ["a pipe into sh of a script that only reads", "echo 'git status' | sh -"],
   ])("from the main checkout, %s runs", async (_name, command) => {
     expect(await bash(command)).toBeUndefined()
   })
