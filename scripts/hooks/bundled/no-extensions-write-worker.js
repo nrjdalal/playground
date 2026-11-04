@@ -1978,7 +1978,7 @@ async function inspect(raw, environment, unknown = false) {
         if (remover && above(path, true))
           return `${path}, which holds ${root}`;
         if (path && !quotedGlob && !marked(text.value) && rootGlob(path))
-          return `${text.value}, a glob matching ${root}`;
+          return `${text.value}, a glob matching ${root} or the data folder that holds it`;
         continue;
       }
       if (above(path, remover))

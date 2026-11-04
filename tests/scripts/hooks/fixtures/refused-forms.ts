@@ -3235,11 +3235,11 @@ gh api graphql -f query="$QUERY"`,
       ],
       [
         "an inline bun program whose shell template removes a glob matching the data folder",
-        "bun -e 'await Bun.$`rm -rf ~/.play*`'",
+        "bun -e 'await Bun.$`rmdir ~/.play*`'",
       ],
       [
         "an inline bun program whose shell template removes the home",
-        "bun -e 'await Bun.$`rm -rf ~`'",
+        "bun -e 'await Bun.$`rmdir ~`'",
       ],
       [
         "an inline node program, its -pe cluster, naming the root in its text",
