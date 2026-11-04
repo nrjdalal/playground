@@ -1575,7 +1575,7 @@ async function callsTool(code) {
 function lister(environment) {
   let loaded;
   return () => loaded ??= guardList(GUARD, "desktop-owner-apps", isStrings, [], environment).then((l) => l.refusal ? {
-    refusal: `${reasonOf(l.refusal)}. The list changes only by the owner's act: tell your lead, and the dispatcher hands the owner the command, then run the call again.`
+    refusal: `${reasonOf(l.refusal)}. The list changes only by the owner's act: tell your lead, and the dispatcher hands the owner the command that restores the list, then run the call again.`
   } : { apps: new Set((l.list ?? []).map(appName)) });
 }
 async function judgeText(text, cwd, apps, depth) {

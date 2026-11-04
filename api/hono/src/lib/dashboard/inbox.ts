@@ -219,8 +219,8 @@ export type ArgvRun = (argv: string[]) => Promise<{ code: number; err: string; o
 // The guard list that holds the owner's own apps, which no-desktop-owner-app keeps agent-desktop away from.
 export const OWNER_APPS = "desktop-owner-apps"
 
-// An app's name as the owner's list holds it: a letter or digit first, then letters, digits, spaces and . _ & ' ( ) + -, so none starts as a flag or names a path.
-const APP_NAME = /^[A-Za-z0-9][A-Za-z0-9 ._&'()+-]*$/
+// An app's name as the owner's list holds it: a letter or digit of any script first, then letters, digits, spaces and . _ & ' ( ) + -, so none starts as a flag or names a path.
+const APP_NAME = /^[\p{L}\p{N}][\p{L}\p{N} ._&'()+-]*$/u
 
 // A change to the owner's own apps, which the owner approves from the Inbox in place of a terminal: the app to add or remove, and why.
 const appsSchema = z.strictObject({
@@ -249,6 +249,14 @@ const appKey = (name: string): string =>
     .replace(/\.app$/i, "")
     .trim()
     .toLowerCase()
+
+// One apps change at a time in this process: each reads the whole list and puts it back with no base rev, so a second Approve waits and reads the list the first wrote.
+let appsQueue: Promise<unknown> = Promise.resolve()
+const oneAppsChange = <T>(change: () => Promise<T>): Promise<T> => {
+  const next = appsQueue.then(change, change)
+  appsQueue = next.catch(() => undefined)
+  return next
+}
 
 // Pure: the owner's own list after the change, or the result when there is nothing to write: an app already on it, or one to remove that it does not hold.
 export const appsChange = (list: string[], preview: InboxApps): { list: string[] } | RunResult => {
@@ -1067,9 +1075,9 @@ export async function answerItem(
     accept?: ExtRun
     actor: ActivityActor
     apps?: OwnerApps
-    grant?: ArgvRun
     deliver?: Deliver
     dispatcher?: string
+    grant?: ArgvRun
     now?: Date
   } & Pick<Sending, "upload" | "wait">,
 ): Promise<{ item: InboxItem; ok: true } | Refused> {
@@ -1173,25 +1181,26 @@ function stepOf(
       return { refusal: "This dashboard cannot change your apps: its extensions have no login" }
     return {
       key: "listed",
-      run: async () => {
-        const list = apps.read()
-        if (!list)
+      run: () =>
+        oneAppsChange(async () => {
+          const list = apps.read()
+          if (!list)
+            return {
+              exitCode: 1,
+              line: `your ${OWNER_APPS} list is not a list of names, so nothing changed`,
+            }
+          const changed = appsChange(list, preview)
+          if (!("list" in changed)) return changed
+          const ran = runResult(
+            await apps.run(appsArgs(apps.login, ref), JSON.stringify(changed.list)),
+          )
+          if (ran.exitCode !== 0) return ran
+          const verb = preview.change === "add" ? "added" : "removed"
           return {
-            exitCode: 1,
-            line: `your ${OWNER_APPS} list is not a list of names, so nothing changed`,
+            exitCode: 0,
+            line: `${verb} ${preview.app}; your apps are ${changed.list.join(", ") || "none"}`,
           }
-        const changed = appsChange(list, preview)
-        if (!("list" in changed)) return changed
-        const ran = runResult(
-          await apps.run(appsArgs(apps.login, ref), JSON.stringify(changed.list)),
-        )
-        if (ran.exitCode !== 0) return ran
-        const verb = preview.change === "add" ? "added" : "removed"
-        return {
-          exitCode: 0,
-          line: `${verb} ${preview.app}; your apps are ${changed.list.join(", ") || "none"}`,
-        }
-      },
+        }),
     }
   }
   if (preview.type === "grant") {

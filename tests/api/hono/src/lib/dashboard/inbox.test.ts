@@ -1011,6 +1011,7 @@ describe("an apps decision (PG-658)", () => {
     ).toBe(true)
     const takes = (change: object) =>
       inboxInputSchema.safeParse(decision({ ...APPS, ...change })).success
+    expect(takes({ app: "Téléphone" })).toBe(true)
     for (const change of [
       { app: "--headed" },
       { app: "-Notes" },
@@ -3541,6 +3542,39 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       })
       expect(answered.ok && answered.item.status).toBe("approved")
       expect(sent[0]?.text).toContain("the dashboard changed the owner's apps")
+    })
+
+    test("two Approves that overlap change the list one at a time, so neither app is lost", async () => {
+      const notes = await post(decision(APPS))
+      const mail = await post(decision({ ...APPS, app: "Mail" }))
+      let list = ["Slack"]
+      let firstStarted!: () => void
+      const started = new Promise<void>((resolve) => (firstStarted = resolve))
+      let releaseFirst!: () => void
+      const held = new Promise<void>((resolve) => (releaseFirst = resolve))
+      let puts = 0
+      const apps = {
+        login: "owner",
+        read: () => list,
+        run: async (_args: string[], stdin?: string) => {
+          if (++puts === 1) {
+            firstStarted()
+            await held
+          }
+          list = JSON.parse(stdin ?? "[]")
+          return { code: 0, err: "", out: '{"rev":"9b8c7d6","state":"accepted"}' }
+        },
+      }
+      const first = store.answerItem(db, notes.id, { action: "approve" }, { actor, apps })
+      await started
+      const second = store.answerItem(db, mail.id, { action: "approve" }, { actor, apps })
+      await Bun.sleep(50)
+      releaseFirst()
+      await Promise.all([first, second])
+      expect(list).toEqual(["Slack", "Notes", "Mail"])
+      expect((await store.getItem(db, mail.id))?.answer).toMatchObject({
+        listed: { exitCode: 0, line: "added Mail; your apps are Slack, Notes, Mail" },
+      })
     })
 
     test("removing an app the list does not hold, or a list that is not names, writes nothing and records why", async () => {

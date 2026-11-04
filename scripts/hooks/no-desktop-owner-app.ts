@@ -268,7 +268,7 @@ function lister(environment: Environment) {
     (loaded ??= guardList(GUARD, "desktop-owner-apps", isStrings, [], environment).then((l) =>
       l.refusal
         ? {
-            refusal: `${reasonOf(l.refusal)}. The list changes only by the owner's act: tell your lead, and the dispatcher hands the owner the command, then run the call again.`,
+            refusal: `${reasonOf(l.refusal)}. The list changes only by the owner's act: tell your lead, and the dispatcher hands the owner the command that restores the list, then run the call again.`,
           }
         : { apps: new Set((l.list ?? []).map(appName)) },
     ))
