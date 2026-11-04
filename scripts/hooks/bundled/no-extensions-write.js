@@ -4,7 +4,7 @@ const __CHECKOUT = import.meta.dir.slice(0, import.meta.dir.lastIndexOf("/script
 // scripts/hooks/no-extensions-write.ts
 import { existsSync, statSync } from "fs";
 import { homedir as homedir4 } from "os";
-import { basename as basename3, dirname as dirname3, join as join6, resolve as resolve4, sep as sep2 } from "path";
+import { dirname as dirname3, join as join6, resolve as resolve4, sep as sep2 } from "path";
 
 // packages/env/src/aliases.ts
 var DESK_ENV = new Set([
@@ -2075,45 +2075,22 @@ function awkPrograms(words) {
   }
   return programs.length ? programs : undefined;
 }
-var LITERALS = [/"((?:[^"\\\n]|\\.)*)"/g, /'((?:[^'\\\n]|\\.)*)'/g, /`((?:[^`\\]|\\.)*)`/g];
-var NAMES_HIDDEN = /\bHOME\b|\bhomedir\b|\bplayground\b/;
-var SHELL_GLOB = /[*?[]/;
-var BUILTINS = new Set([
-  ".",
-  "[",
-  "[[",
-  "alias",
-  "builtin",
-  "cd",
-  "command",
-  "declare",
-  "echo",
-  "eval",
-  "exec",
-  "export",
-  "getopts",
-  "hash",
-  "kill",
-  "let",
-  "local",
-  "mapfile",
-  "popd",
-  "printf",
-  "pushd",
-  "read",
-  "readarray",
-  "readonly",
-  "set",
-  "source",
-  "test",
-  "trap",
-  "type",
-  "typeset",
-  "ulimit",
-  "umask",
-  "unset",
-  "wait"
-]);
+var READ_ONLY_MODULES = /^(?:node:)?(?:assert|buffer|console|crypto|events|node:test|path|punycode|querystring|string_decoder|timers|url|util|zlib)$/;
+var IMPURE = [
+  /\bchild_process\b|\bexec(?:File)?(?:Sync)?\s*\(|\bspawn(?:Sync)?\s*\(|\bBun\s*\.\s*\$|\bBun\s*\.\s*spawn/,
+  /\b(?:rm|rmSync|rmdir|rmdirSync|unlink|unlinkSync|rename|renameSync|write|writeSync|writeFile|writeFileSync|appendFile|appendFileSync|mkdir|mkdirSync|mkdtemp|mkdtempSync|cp|cpSync|copyFile|copyFileSync|symlink|symlinkSync|link|linkSync|truncate|truncateSync|ftruncate|chmod|chmodSync|chown|chownSync|utimes|utimesSync|createWriteStream|open|openSync)\s*\(|\bBun\s*\.\s*write\b/,
+  /\beval\s*\(|\bnew\s+Function\b|\bimport\s*\(|\[[^\]]*\]\s*\(|\bprocess\s*\.\s*binding\b|\bglobalThis\b|\bglobal\s*\[/,
+  /\\x[0-9a-fA-F]|\\u|\\[0-7]/
+];
+function pureCompute(source) {
+  if (IMPURE.some((re) => re.test(source)))
+    return false;
+  const refs = [...source.matchAll(/\b(?:require|import)\s*\(\s*(["'`])([^"'`]*)\1\s*\)/g)];
+  if (refs.some((m) => !READ_ONLY_MODULES.test(m[2])))
+    return false;
+  const statics = [...source.matchAll(/\bimport\b[^;]*?\bfrom\s*(["'`])([^"'`]*)\1/g)];
+  return !statics.some((m) => !READ_ONLY_MODULES.test(m[2]));
+}
 var EVALUATES = new Set(["-e", "-ep", "--eval", "-p", "-pe", "--print"]);
 function evalProgram({ args, name }) {
   if (name === "agent-browser") {
@@ -2301,8 +2278,6 @@ async function inspect(raw, environment, unknown = false) {
     return value.includes(needle) || !!near && value.includes(near);
   };
   const judged = new Map;
-  let inProgram = false;
-  let argLine = false;
   const consumers = new WeakMap;
   const lexLine = (line, known) => {
     const out = lex(line, known);
@@ -2315,22 +2290,7 @@ async function inspect(raw, environment, unknown = false) {
     for (let next = consumers.get(cmd);next; next = consumers.get(next))
       if (!passes(next, env))
         return true;
-    return false;
-  };
-  const lookup = [
-    ...(environment.PATH ?? "").split(":"),
-    ...["/bin", "/sbin", "/usr/bin", "/usr/sbin", "/usr/local/bin", "/opt/homebrew/bin"],
-    join6(home, ".bun", "bin"),
-    join6(home, ".local", "bin")
-  ].filter(Boolean).join(":");
-  const found = new Map;
-  const runs = (name, env) => {
-    if (marked(name) || name.includes("/") || BUILTINS.has(name))
-      return true;
-    const dirs = env.cwd ? `${join6(env.cwd, "node_modules", ".bin")}:${lookup}` : lookup;
-    if (!found.has(`${dirs}\x00${name}`))
-      found.set(`${dirs}\x00${name}`, !!Bun.which(name, { PATH: dirs }));
-    return found.get(`${dirs}\x00${name}`);
+    return cmd.redirects.some((r) => writer(r) && r.target?.value !== "/dev/null");
   };
   const names = (word, env, remover, literal = false) => {
     const quotedGlob = literal && !word.glob;
@@ -2380,7 +2340,7 @@ async function inspect(raw, environment, unknown = false) {
       return slot.length === 0 ? undefined : examine({ ...cmd, words: slot }, env, visit, false);
     const { args, first, name, xargs } = parsed;
     for (const here of places(env)) {
-      const into = cmd.redirects.find((r) => r.target && writer(r) && (inRoot(pathOf(r.target, here)) || (inProgram ? SHELL_GLOB : GLOB).test(r.target.value) && !!names(r.target, here, true)));
+      const into = cmd.redirects.find((r) => r.target && writer(r) && (inRoot(pathOf(r.target, here)) || GLOB.test(r.target.value) && !!names(r.target, here, true)));
       if (into?.target)
         return refuse(`a write to ${pathOf(into.target, here)}`);
     }
@@ -2402,8 +2362,8 @@ async function inspect(raw, environment, unknown = false) {
         return refuse(`a root shell whose script (${text.unknown ?? "a value it cannot read"}) the hook cannot read; run its commands as calls of their own, with no root shell`);
       script.push(text.value);
     }
-    const program = rootLine || feeds(cmd, env) ? undefined : evalProgram(parsed);
-    const opaque = program && !program.glob && !marked(program.value) && !texts(program).some((t) => places(env).some((here) => holds(t.value, here)) || t.value.includes(basename3(dirname3(root))) || NAMES_HIDDEN.test(t.value)) ? program : undefined;
+    const program = rootLine || cmd.scope !== 0 || feeds(cmd, env) ? undefined : evalProgram(parsed);
+    const opaque = program && !program.glob && !marked(program.value) && pureCompute(program.value) ? program : undefined;
     const lines = runsOf(opaque ? { ...parsed, args: args.filter((w) => w !== opaque) } : parsed, vars, whole, rootLine);
     for (const raw of reader ? [] : [...script, ...lines]) {
       const line = xargs?.replace && fed ? filled(raw, xargs.replace, fed.unknown ? UNKNOWN : fed.value) : raw;
@@ -2414,28 +2374,6 @@ async function inspect(raw, environment, unknown = false) {
       if (verdict)
         return verdict;
     }
-    if (opaque) {
-      const was = inProgram;
-      const wasArg = argLine;
-      inProgram = true;
-      try {
-        const text = opaque.value.replace(/^--(?:eval|print)=/, "");
-        const literals = LITERALS.flatMap((re) => [...text.matchAll(re)].map((m) => m[1]));
-        const source = text.replace(/#/g, " ");
-        const lines = [source, ...literals, ...literals.flatMap((l) => l.split("\\n"))];
-        for (const line of new Set(lines)) {
-          if (!/\S/.test(line))
-            continue;
-          argLine = line !== source && !/\s/.test(line.trim());
-          const verdict = await run(lexLine(line, env.known), { ...env, vars: new Map }, visit, true);
-          if (verdict)
-            return verdict;
-        }
-      } finally {
-        inProgram = was;
-        argLine = wasArg;
-      }
-    }
     const quiet = !whole && quietCommit(cmd, parsed, env);
     for (const word of quiet ? args : []) {
       if (!/\s/.test(word.value))
@@ -2445,8 +2383,6 @@ async function inspect(raw, environment, unknown = false) {
         return refuse(named);
     }
     if (!first || EXPORTS2.has(name) || reader)
-      return;
-    if (inProgram && !argLine && !runs(first.value, env))
       return;
     const verb = name && !marked(name) ? name : "a program it cannot read";
     const remover = REMOVERS.has(name);
@@ -2474,7 +2410,7 @@ async function inspect(raw, environment, unknown = false) {
           return refuse(`${verb} with a variable on ${named}`);
       }
       const literal = !whole && narrow(cmd, here);
-      for (const word of [first, ...args].filter((word) => word !== opaque && !(inProgram && !argLine && word === first)).map((word) => heldWord(word, here, steady) ?? word)) {
+      for (const word of [first, ...args].filter((word) => word !== opaque).map((word) => heldWord(word, here, steady) ?? word)) {
         const text = quiet && /\s/.test(word.value) || filters.has(word) && !word.glob;
         if (text && !texts(word).some((t) => holds(t.value, here)))
           continue;
