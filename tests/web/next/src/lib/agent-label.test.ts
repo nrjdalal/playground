@@ -42,6 +42,13 @@ describe("labelOf", () => {
     expect(labelOf(worker, none)).toBe("PG-14#118 Worker")
   })
 
+  // An orchestrator of a manager kind outside the named four reads its kind's word, under any name, as a builder reads Builder (#805).
+  test("an assistant-kind manager reads Assistant, a worker's name or an <id>-assistant", () => {
+    expect(labelOf(facts("r4qmq4-worker", { kind: "assistant" }), none)).toBe("Assistant")
+    expect(labelOf(facts("w8x2zc-assistant", { kind: "assistant" }), none)).toBe("Assistant")
+    expect(agentLabel("w8x2zc-assistant")).toBe("Assistant")
+  })
+
   test("a pull request alone reads #<pr> Worker, a ticket alone <ticket> Worker", () => {
     expect(labelOf(facts("a", { kind: "worker", pr: { number: 173 } }), none)).toBe("#173 Worker")
     expect(labelOf(facts("a", { kind: "worker", ticket: "PG-14" }), none)).toBe("PG-14 Worker")
