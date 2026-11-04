@@ -4,7 +4,7 @@ const __CHECKOUT = import.meta.dir.slice(0, import.meta.dir.lastIndexOf("/script
 // scripts/hooks/no-extensions-write.ts
 import { existsSync, statSync } from "fs";
 import { homedir as homedir4 } from "os";
-import { dirname as dirname2, join as join6, resolve as resolve4, sep as sep2 } from "path";
+import { basename as basename3, dirname as dirname2, join as join6, resolve as resolve4, sep as sep2 } from "path";
 
 // packages/env/src/aliases.ts
 var DESK_ENV = new Set([
@@ -1856,6 +1856,32 @@ function awkPrograms(words) {
   }
   return programs.length ? programs : undefined;
 }
+function segment(part) {
+  const lead = /^[*?[{]/.test(part) ? "(?!\\.)" : "";
+  const source = (classes) => part.replace(classes ? /[.+^$|()\\]/g : /[.+^$|()\\[\]]/g, "\\$&").replace(classes ? /\[!/g : /$^/g, "[^").replace(/\*/g, "[^/]*").replace(/\?/g, "[^/]").replace(/\{([^{}]*)\}/g, (_, alts) => `(?:${alts.split(",").join("|")})`);
+  for (const classes of [true, false]) {
+    try {
+      return new RegExp(`^${lead}${source(classes)}$`);
+    } catch {}
+  }
+  return /^/;
+}
+var EVALUATES = new Set(["-e", "-ep", "--eval", "-p", "-pe", "--print"]);
+function evalProgram({ args, name }) {
+  if (name === "agent-browser")
+    return args.find((w) => !w.value.startsWith("-"))?.value === "eval" ? args[args.findIndex((w) => w.value === "eval") + 1] : undefined;
+  if (name !== "bun" && name !== "node")
+    return;
+  for (let k = 0;k < args.length; k++) {
+    const { value } = args[k];
+    if (EVALUATES.has(value))
+      return args[k + 1];
+    if (/^--(?:eval|print)=/.test(value))
+      return args[k];
+    if (!value.startsWith("-"))
+      return;
+  }
+}
 function programLines({ args, first }, rooted) {
   if (!AWKS.has(program(first?.value ?? "").toLowerCase()))
     return [];
@@ -2016,10 +2042,34 @@ async function inspect(raw, environment, unknown = false) {
     const near = relative(env);
     return value.includes(needle) || !!near && value.includes(near);
   };
+  const targets = [
+    { exact: false, parts: root.split(sep2).filter(Boolean) },
+    { exact: true, parts: dirname2(root).split(sep2).filter(Boolean) }
+  ];
+  const rootGlob = (path) => {
+    const parts = path.split(sep2).filter(Boolean);
+    const at = parts.findIndex((part) => GLOB.test(part));
+    if (at < 0)
+      return false;
+    const literal = real(sep2 + parts.slice(0, at).join(sep2)).split(sep2).filter(Boolean);
+    const pattern = [...literal, ...parts.slice(at)];
+    return targets.some(({ exact, parts: target }) => {
+      if (exact && pattern.length !== target.length && !pattern.includes("**"))
+        return false;
+      for (let k = 0;k < target.length; k++) {
+        if (pattern[k] === "**")
+          return true;
+        if (pattern[k] === undefined || !segment(pattern[k]).test(target[k]))
+          return false;
+      }
+      return true;
+    });
+  };
   const judged = new Map;
+  let inProgram = false;
   const names = (word, env, remover, literal = false) => {
     const quotedGlob = literal && !word.glob;
-    const key = `${remover}\x00${quotedGlob}\x00${env.cwd}\x00${word.value}`;
+    const key = `${inProgram}\x00${remover}\x00${quotedGlob}\x00${env.cwd}\x00${word.value}`;
     if (!judged.has(key))
       judged.set(key, judge(word, env, remover, quotedGlob));
     return judged.get(key);
@@ -2032,6 +2082,13 @@ async function inspect(raw, environment, unknown = false) {
       const path = pathOf(text, env);
       if (inRoot(path))
         return path;
+      if (inProgram) {
+        if (remover && above(path, true))
+          return `${path}, which holds ${root}`;
+        if (path && !quotedGlob && !marked(text.value) && rootGlob(path))
+          return `${text.value}, a glob matching ${root}`;
+        continue;
+      }
       if (above(path, remover))
         return `${path}, which holds ${root}`;
       const glob = GLOB.exec(text.value);
@@ -2082,7 +2139,10 @@ async function inspect(raw, environment, unknown = false) {
         return refuse(`a root shell whose script (${text.unknown ?? "a value it cannot read"}) the hook cannot read; run its commands as calls of their own, with no root shell`);
       script.push(text.value);
     }
-    for (const raw of reader ? [] : [...script, ...runsOf(parsed, vars, whole, rootLine)]) {
+    const program = rootLine ? undefined : evalProgram(parsed);
+    const opaque = program && !program.glob && !marked(program.value) && !texts(program).some((t) => holds(t.value, env) || t.value.includes(basename3(dirname2(root)))) ? program : undefined;
+    const lines = runsOf(opaque ? { ...parsed, args: args.filter((w) => w !== opaque) } : parsed, vars, whole, rootLine);
+    for (const raw of reader ? [] : [...script, ...lines]) {
       const line = xargs?.replace && fed ? filled(raw, xargs.replace, fed.unknown ? UNKNOWN : fed.value) : raw;
       if (seen.has(line))
         continue;
@@ -2090,6 +2150,18 @@ async function inspect(raw, environment, unknown = false) {
       const verdict = await run(lex(line, env.known), { ...env, vars: new Map }, visit, true);
       if (verdict)
         return verdict;
+    }
+    if (opaque) {
+      const was = inProgram;
+      inProgram = true;
+      try {
+        const text = opaque.value.replace(/^--(?:eval|print)=/, "");
+        const verdict = await run(lex(text, env.known), { ...env, vars: new Map }, visit, true);
+        if (verdict)
+          return verdict;
+      } finally {
+        inProgram = was;
+      }
     }
     const quiet = !whole && quietCommit(cmd, parsed, env);
     for (const word of quiet ? args : []) {
@@ -2124,7 +2196,7 @@ async function inspect(raw, environment, unknown = false) {
     }
     const literal = !whole && narrow(cmd, env);
     const filters = whole ? new Set : ghFilters(parsed);
-    for (const word of [first, ...args].map((word) => heldWord(word, env, steady) ?? word)) {
+    for (const word of [first, ...args].filter((word) => word !== opaque).map((word) => heldWord(word, env, steady) ?? word)) {
       const text = quiet && /\s/.test(word.value) || filters.has(word) && !word.glob;
       if (text && !texts(word).some((t) => holds(t.value, env)))
         continue;

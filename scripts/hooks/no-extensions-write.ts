@@ -522,8 +522,27 @@ function awkPrograms(words: Word[]): Word[] | undefined {
   return programs.length ? programs : undefined
 }
 
-const EVALUATES = new Set(["-e", "--eval", "-p", "--print"])
-// An inline evaluator's program word, JavaScript the shell never reads as a line: bun's or node's -e, --eval, -p or --print value among the options before any script, or agent-browser's eval script; undefined for any other call
+// A glob segment as the shell matches it: * and ? within the segment and never over a leading dot, [...] a class, {a,b} a choice, and a bracket no class closes taken literally
+function segment(part: string): RegExp {
+  const lead = /^[*?[{]/.test(part) ? "(?!\\.)" : ""
+  const source = (classes: boolean) =>
+    part
+      .replace(classes ? /[.+^$|()\\]/g : /[.+^$|()\\[\]]/g, "\\$&")
+      .replace(classes ? /\[!/g : /$^/g, "[^")
+      .replace(/\*/g, "[^/]*")
+      .replace(/\?/g, "[^/]")
+      .replace(/\{([^{}]*)\}/g, (_, alts: string) => `(?:${alts.split(",").join("|")})`)
+  for (const classes of [true, false]) {
+    try {
+      return new RegExp(`^${lead}${source(classes)}$`)
+    } catch {}
+  }
+  // a segment no regex reads matches every name, so it is refused rather than let through
+  return /^/
+}
+
+const EVALUATES = new Set(["-e", "-ep", "--eval", "-p", "-pe", "--print"])
+// An inline evaluator's program word, JavaScript the shell never reads as a line: bun's or node's -e, --eval, -p or --print value (-pe and -ep included) among the options before any script, or agent-browser's eval script; undefined for any other call
 function evalProgram({ args, name }: Parsed): Word | undefined {
   if (name === "agent-browser")
     return args.find((w) => !w.value.startsWith("-"))?.value === "eval"
@@ -736,12 +755,36 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
     const near = relative(env)
     return value.includes(needle) || (!!near && value.includes(near))
   }
+  // Whether a glob's pattern names the root or a path in it, or the data folder itself, segment by segment, its literal folder resolved as the filesystem resolves it
+  const targets = [
+    { exact: false, parts: root.split(sep).filter(Boolean) },
+    { exact: true, parts: dirname(root).split(sep).filter(Boolean) },
+  ]
+  const rootGlob = (path: string): boolean => {
+    const parts = path.split(sep).filter(Boolean)
+    const at = parts.findIndex((part) => GLOB.test(part))
+    if (at < 0) return false
+    const literal = real(sep + parts.slice(0, at).join(sep))
+      .split(sep)
+      .filter(Boolean)
+    const pattern = [...literal, ...parts.slice(at)]
+    return targets.some(({ exact, parts: target }) => {
+      if (exact && pattern.length !== target.length && !pattern.includes("**")) return false
+      for (let k = 0; k < target.length; k++) {
+        if (pattern[k] === "**") return true
+        if (pattern[k] === undefined || !segment(pattern[k]).test(target[k])) return false
+      }
+      return true
+    })
+  }
   // What a word of a program that is no reader names: a path in the root, a folder above it, a glob there, or the root's path in its text.
   const judged = new Map<string, string | undefined>()
+  // set while an inline evaluator's program is read as a line, where a word counts only as a path in the root, a remover's folder above it, or a glob matching the root or the data folder
+  let inProgram = false
   // literal: a closed-list reader's word on a line read call by call, whose quoted glob character is text the reader never expands
   const names = (word: Word, env: Env, remover: boolean, literal = false): string | undefined => {
     const quotedGlob = literal && !word.glob
-    const key = `${remover}\0${quotedGlob}\0${env.cwd}\0${word.value}`
+    const key = `${inProgram}\0${remover}\0${quotedGlob}\0${env.cwd}\0${word.value}`
     if (!judged.has(key)) judged.set(key, judge(word, env, remover, quotedGlob))
     return judged.get(key)
   }
@@ -756,6 +799,12 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
       if (holds(text.value, env)) return `${root} in its text`
       const path = pathOf(text, env)
       if (inRoot(path)) return path
+      if (inProgram) {
+        if (remover && above(path, true)) return `${path}, which holds ${root}`
+        if (path && !quotedGlob && !marked(text.value) && rootGlob(path))
+          return `${text.value}, a glob matching ${root}`
+        continue
+      }
       if (above(path, remover)) return `${path}, which holds ${root}`
       const glob = GLOB.exec(text.value)
       if (glob && !quotedGlob && !marked(text.value)) {
@@ -827,7 +876,7 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
         )
       script.push(text.value)
     }
-    // an inline evaluator's program is one opaque word, its regex or arrow neither a path, a glob nor a redirect, unless the line holds a root shell, the shell expands a glob in it, or its text names the root or the data folder
+    // an inline evaluator's program is no word of the call, unless the line holds a root shell, the shell expands a glob in it, it holds a value the hook cannot read, or its text names the root or the data folder; its text is read as a line in program mode, where a regex or an arrow names no folder
     const program = rootLine ? undefined : evalProgram(parsed)
     const opaque =
       program &&
@@ -849,6 +898,17 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
       seen.add(line)
       const verdict = await run(lex(line, env.known), { ...env, vars: new Map() }, visit, true)
       if (verdict) return verdict
+    }
+    if (opaque) {
+      const was = inProgram
+      inProgram = true
+      try {
+        const text = opaque.value.replace(/^--(?:eval|print)=/, "")
+        const verdict = await run(lex(text, env.known), { ...env, vars: new Map() }, visit, true)
+        if (verdict) return verdict
+      } finally {
+        inProgram = was
+      }
     }
     // a quiet commit's message is text git never runs, but one naming a gated call is refused all the same
     const quiet = !whole && quietCommit(cmd, parsed, env)

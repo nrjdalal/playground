@@ -3217,6 +3217,34 @@ gh api graphql -f query="$QUERY"`,
         "an inline bun program printing a removal into sudo's shell",
         `bun -e 'console.log("rm -rf ~/.playground/extensions/.no-such-folder")' | sudo -s`,
       ],
+      [
+        "an inline bun program whose shell template runs a guarded playground call",
+        "bun -e 'await Bun.$`playground ext add a b`'",
+      ],
+      [
+        "an inline node program holding a guarded playground call as a statement",
+        `node -e 'console.log; playground ext add a b'`,
+      ],
+      [
+        "an inline bun program spawning a guarded playground call from a string",
+        `bun -e 'const c = "playground ext remove a b"; Bun.spawnSync(c.split(" "))'`,
+      ],
+      [
+        "an inline bun program whose shell template removes a glob matching the root",
+        "bun -e 'await Bun.$`rm -rf ~/.play*/ext*/.no-such-folder`'",
+      ],
+      [
+        "an inline bun program whose shell template removes a glob matching the data folder",
+        "bun -e 'await Bun.$`rm -rf ~/.play*`'",
+      ],
+      [
+        "an inline bun program whose shell template removes the home",
+        "bun -e 'await Bun.$`rm -rf ~`'",
+      ],
+      [
+        "an inline node program, its -pe cluster, naming the root in its text",
+        `node -pe 'require("fs").writeFileSync(process.env.HOME + "/.playground/extensions/.no-such-folder/x", "")'`,
+      ],
     ],
     source: "#635",
   },

@@ -700,6 +700,8 @@ describe("a quoted argument is read as a command line only where a program runs 
       "bun -e holding a string with a tilde and a pipe",
       `bun -e 'const s = "a ~ b | c"; console.log(s.split("|").length)'`,
     ],
+    ["node -pe holding a regex with a lookbehind", `node -pe '/(?<=a)b/.test("ab")'`],
+    ["bun -e whose shell template lists a glob in the home", "bun -e 'await Bun.$`ls ~/*.md`'"],
   ])("%s runs from a worktree and the home", async (_, command) => {
     for (const cwd of [join(homedir(), "x", ".claude", "worktrees", "y"), homedir()])
       expect(await at(command, cwd)).toBeUndefined()
