@@ -191,12 +191,12 @@
         "status": "ok"
       },
       {
-        "action": null,
-        "detail": "ready",
+        "action": { "id": "trust", "label": "Trust the certificate" },
+        "detail": "not trusted",
         "name": "portless",
         "need": "the Dashboard's https address",
-        "note": null,
-        "status": "ok"
+        "note": "Your Mac does not trust the local web proxy's certificate yet. Trust it here; your Mac may ask for your password in its own window.",
+        "status": "optional"
       },
       {
         "action": null,

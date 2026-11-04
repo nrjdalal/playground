@@ -50,6 +50,7 @@ Your sessions run in herdr, which `playground` starts, and `playground view` ope
 - **`portless's proxy is not running, and starting it on port 443 needs sudo`** when you run `bun run dev`: this Mac has no Playground proxy yet.
   Run the installer again in a terminal (`bash ~/playground/install.sh`), which sets it up with your Mac's password, or in the main folder run `sudo node_modules/.bin/portless service install`, which asks for your password, then `node_modules/.bin/portless trust`, and run `bun run dev` again.
   Or run `PORTLESS=0 bun run dev`, which serves the app on fixed ports instead.
+  Once the Dashboard runs, Settings' **Things to fix** trusts the proxy's certificate with **Trust the certificate**.
 - **`a stack already runs in this checkout`** when you run `bun run dev` yourself: the Dashboard already runs from this folder.
   Use the one that runs, or stop it with `bun run dev:stop` first.
 
