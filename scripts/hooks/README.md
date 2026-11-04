@@ -245,7 +245,10 @@ Only the first reading moves the folder, sets variables and records files for th
   A command of reserved words alone (`fi`, `done`) runs nothing; one with no program read otherwise (`sudo -s`, a group, a redirect or an assignment alone) has its whole line judged.
   A line holding a shell that reads its script from stdin (`stdinShell` in `scripts/hooks/shell.ts`) runs whatever is printed into it, so from every folder no reader on it is spared: a shell given no script (`sh`, `sudo bash`), one xargs hands its script to (`xargs sh -c`, or an `-I` placeholder in the script), a piped `sh -c` whose script the shell fills in at run time (`sh -c "$(cat)"`),
   a `source` or `.` of `/dev/stdin`, or a root shell with no command of its own.
-  A root shell is sudo's `-s`, `-i`, `--shell` or `--login`, or doas's `-s`, alone or in a cluster of the wrapper's flags ahead of its first value-taking letter (`-Es`, `-su root`, `-su#0`; in `-us` the `-u` takes the `s`), behind any wrapper; an option or a program in a variable counts as one.
+  A root shell is sudo's `-s`, `-i`, `--shell` or `--login`, or doas's `-s`, alone or in a cluster of the wrapper's flags ahead of its first value-taking letter (`-Es`, `-su root`, `-su#0`; in `-us` the `-u` takes the `s`).
+  Such an option counts behind any wrapper and quoted or not (`'-s'`, `-su'root'`, `'sudo' -s`), and an option or a program in a variable counts as one.
+  Each word is read as an option of every privilege wrapper before it: the first unquoted word naming one, and any word whose unquoted value is `sudo` or `doas` (`'doas' sudo -i`, `doas sudo -i`); any other word ending in a wrapper's name (a quoted path, or a path after the first wrapper) is read as an option, never as a wrapper.
+  A long option's unambiguous prefix counts as that option, as sudo's getopt_long reads it (`--sh`, `--lo`), while sudo itself refuses the ambiguous `--s` and `--l`.
   The root shell is looked for under each reading of the wrapper's options (above); once the parse runs out of readings, any sudo or doas among the command's words counts as a root shell and any shell's name as a shell.
   Every spaced text of every program on such a line, each `\n`-separated part of it and an awk program's strings are read as command lines.
   A root shell's stdin is read as its script, and one the hook cannot read (a download, a file it cannot see, a bare `sudo -s`) is refused: run its commands as calls of their own.
@@ -483,6 +486,7 @@ Only the first reading moves the folder, sets variables and records files for th
   and the refusal names the fix, naming the folder (`git -C <your worktree>`, `bun --cwd <your worktree>`) or a `cd` to a literal path that is there.
   So a line that starts in a worktree is refused too where a `cd` of its own may reach the main checkout, and one that starts in the main checkout runs where every folder its `cd` steps may reach is a worktree.
   It reads the shell a pipeline feeds (`<reader> | sh`, `<reader> | sudo -s`, `<reader> | xargs sh -c`, `<reader> | . /dev/stdin`, a loop's output piped into one) as the shell's own command line: a script it cannot read is refused where that shell may run in the main checkout.
+  A root shell there is one as [no-extensions-write](#no-extensions-write) reads it (`<reader> | sudo '-s'`, `<reader> | sudo --sh`).
   A script it reads is judged command by command wherever the shell's stdin comes from, since the shared reader runs a shell's script itself.
   Two forms keep canary's reading: a privilege wrapper's shell fed by a here-string or a heredoc (`sudo -s <<< '<command>'`), whose script this hook does not read, and a heredoc holding a value it cannot read (`sh <<EOF` around a substitution).
   It fails open on a call it cannot read.

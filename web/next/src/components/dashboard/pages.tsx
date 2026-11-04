@@ -1,7 +1,7 @@
 "use client"
 
 import type { Preview } from "@api/hono"
-import { RiArrowDownSLine, RiDeleteBinLine, RiPagesLine } from "@remixicon/react"
+import { RiArrowDownSLine, RiDeleteBinLine, RiDownloadLine, RiPagesLine } from "@remixicon/react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import * as React from "react"
 
@@ -31,7 +31,13 @@ import { toast } from "@/components/ui/toast"
 import { agentLabel } from "@/lib/agent-label"
 import { config } from "@/lib/config"
 import { useNow } from "@/lib/dashboard"
-import { deletePage, fetchPages, PREVIEWS_QUERY_KEY, previewUrl } from "@/lib/previews"
+import {
+  deletePage,
+  fetchPages,
+  PREVIEWS_QUERY_KEY,
+  previewDownloadUrl,
+  previewUrl,
+} from "@/lib/previews"
 import { fullTime, relativeTime } from "@/lib/time"
 
 const keptAt = (preview: Preview) => preview.page?.at ?? preview.modifiedAt
@@ -65,9 +71,47 @@ function PageTime({ at, now }: { at: string; now: number }) {
 
 const pageTitle = (preview: Preview) => preview.page?.title ?? preview.caption ?? preview.name
 
-// Pure: what the delete confirm says: the newest version's file and caption go, and a row's older versions stay, so the row still showing reads as the next version, not a failed delete.
-export const deleteDescription = (name: string, older: number): string => {
-  const gone = `${name} and its caption leave the previews folder for good.`
+// A page's Download, saving its file under its title as the API names it: a link, or with a PDF beside the page a menu offering the page and the PDF.
+function PageDownload({ apiUrl, page }: { apiUrl: string; page: Preview }) {
+  const label = `Download ${pageTitle(page)}`
+  if (!page.pdf)
+    return (
+      <Hint content="Download" description={null}>
+        <Button
+          aria-label={label}
+          render={<a href={previewDownloadUrl(apiUrl, page.name)} />}
+          size="icon-sm"
+          variant="ghost"
+        >
+          <RiDownloadLine />
+        </Button>
+      </Hint>
+    )
+  return (
+    <DropdownMenu>
+      <Hint content="Download" description={null}>
+        <DropdownMenuTrigger render={<Button aria-label={label} size="icon-sm" variant="ghost" />}>
+          <RiDownloadLine />
+        </DropdownMenuTrigger>
+      </Hint>
+      <DropdownMenuContent align="end" className="w-auto">
+        <DropdownMenuGroup>
+          <DropdownMenuLabel>Download</DropdownMenuLabel>
+          <DropdownMenuItem render={<a href={previewDownloadUrl(apiUrl, page.name)} />}>
+            Page (HTML)
+          </DropdownMenuItem>
+          <DropdownMenuItem render={<a href={previewDownloadUrl(apiUrl, page.pdf)} />}>
+            PDF
+          </DropdownMenuItem>
+        </DropdownMenuGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+
+// Pure: what the delete confirm says: the newest version's file and caption go, its PDF too when one stands beside it, and a row's older versions stay, so the row still showing reads as the next version, not a failed delete.
+export const deleteDescription = (name: string, older: number, pdf = false): string => {
+  const gone = `${name} and its caption${pdf ? " and PDF" : ""} leave the previews folder for good.`
   if (!older) return gone
   return older === 1
     ? `${gone} Its older version stays and takes its row.`
@@ -77,7 +121,7 @@ export const deleteDescription = (name: string, older: number): string => {
 // The row a delete asks about: its newest version, and how many older versions stay.
 type Deleting = { older: number; preview: Preview }
 
-// Each page as a row that opens its newest version in a new tab through the Previews route: its title, who made it, for whom, and when it was kept; the older versions sit in the row's dropdown, and its delete button asks to delete the newest.
+// Each page as a row that opens its newest version in a new tab through the Previews route: its title, who made it, for whom, and when it was kept; the older versions sit in the row's dropdown, its Download saves the newest version, and its delete button asks to delete it.
 export function PageList({
   apiUrl,
   now,
@@ -123,53 +167,52 @@ export function PageList({
                 </span>
               </ItemDescription>
             </ItemContent>
-            {older.length || onDelete ? (
-              <ItemActions className="relative z-10">
-                {older.length ? (
-                  <DropdownMenu>
-                    <DropdownMenuTrigger render={<Button size="sm" variant="ghost" />}>
-                      {older.length + 1} versions
-                      <RiArrowDownSLine />
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" className="w-auto min-w-56">
-                      <DropdownMenuGroup>
-                        <DropdownMenuLabel>Older versions</DropdownMenuLabel>
-                        {older.map((preview) => (
-                          <DropdownMenuItem
-                            key={preview.name}
-                            className="justify-between gap-4"
-                            render={
-                              <a
-                                href={previewUrl(apiUrl, preview.name)}
-                                rel="noreferrer"
-                                target="_blank"
-                              />
-                            }
-                          >
-                            <span className="truncate">{preview.name}</span>
-                            <span className="text-muted-foreground text-xs">
-                              <PageTime at={keptAt(preview)} now={now} />
-                            </span>
-                          </DropdownMenuItem>
-                        ))}
-                      </DropdownMenuGroup>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                ) : null}
-                {onDelete && (
-                  <Hint content="Delete page">
-                    <Button
-                      aria-label={`Delete ${pageTitle(latest)}`}
-                      size="icon-sm"
-                      variant="ghost"
-                      onClick={() => onDelete({ older: older.length, preview: latest })}
-                    >
-                      <RiDeleteBinLine />
-                    </Button>
-                  </Hint>
-                )}
-              </ItemActions>
-            ) : null}
+            <ItemActions className="relative z-10">
+              {older.length ? (
+                <DropdownMenu>
+                  <DropdownMenuTrigger render={<Button size="sm" variant="ghost" />}>
+                    {older.length + 1} versions
+                    <RiArrowDownSLine />
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-auto min-w-56">
+                    <DropdownMenuGroup>
+                      <DropdownMenuLabel>Older versions</DropdownMenuLabel>
+                      {older.map((preview) => (
+                        <DropdownMenuItem
+                          key={preview.name}
+                          className="justify-between gap-4"
+                          render={
+                            <a
+                              href={previewUrl(apiUrl, preview.name)}
+                              rel="noreferrer"
+                              target="_blank"
+                            />
+                          }
+                        >
+                          <span className="truncate">{preview.name}</span>
+                          <span className="text-muted-foreground text-xs">
+                            <PageTime at={keptAt(preview)} now={now} />
+                          </span>
+                        </DropdownMenuItem>
+                      ))}
+                    </DropdownMenuGroup>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              ) : null}
+              <PageDownload apiUrl={apiUrl} page={latest} />
+              {onDelete && (
+                <Hint content="Delete page">
+                  <Button
+                    aria-label={`Delete ${pageTitle(latest)}`}
+                    size="icon-sm"
+                    variant="ghost"
+                    onClick={() => onDelete({ older: older.length, preview: latest })}
+                  >
+                    <RiDeleteBinLine />
+                  </Button>
+                </Hint>
+              )}
+            </ItemActions>
           </Item>
         )
       })}
@@ -235,6 +278,7 @@ export function Pages({ all, session }: { all: boolean; session: string }) {
         description={deleteDescription(
           shown.current?.preview.name ?? "Its file",
           shown.current?.older ?? 0,
+          Boolean(shown.current?.preview.pdf),
         )}
         action="Delete"
         variant="destructive"
