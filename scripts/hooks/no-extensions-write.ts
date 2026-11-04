@@ -176,6 +176,9 @@ const EVALUATES = [
 // A subscript, which both shells evaluate as arithmetic naming a variable, but an empty one, `@`, `*`, digits with only `-`, `:`, `,` and spaces among them, or one that starts with `^`, where both shells stop on a math error before reading a name (`a[]`, `a[@]`, `a[-1]`, `a[0:9]`, `a[1,5]`, `a[^;]`); read on the line as written and on its unquoted text, since the shell removes a quote or a backslash between a name and its `[` before read, unset or printf -v sees it (`${a[V]}`, zsh's `$a[V]`, `a[V]=`, `read 'a[V]'`, `printf -v 'a[V]'`, `[[ -v a[V] ]]`)
 const SUBSCRIPT = /\w\[(?!(?:[@*]|[-\d:,\s]*)\]|\^)/
 
+// bash's indirection, `${!…}` through any parameter, a positional or special one included, which assigns (`${!N:=…}`) or evaluates any subscript the parameter's value holds; only the name list and an array's keys closed right after (`${!N*}`, `${!N[@]}`) and `${!}`, the last background job's pid, are no indirection
+const INDIRECTS = /\$\{!(?!\}|[A-Za-z_]\w*(?:[*@]|\[[*@]\])\})/
+
 // zsh's glob qualifiers that run code, an e with its code up to its separator's match (`[`, `{` and `<` pair with their closers, any other character with itself) or a `+` with a function's name, closed at a word's end (`*(e:…:)`, `*(.e{…})`, `*(+f)`); read on singleQuotesOut's text, since a qualifier acts only on unquoted text
 const QUALIFIER =
   /[^\s(|&;<>$=]\((?:#q)?[^()\s|]*?(?:e(?:\[[^]*?\]|\{[^]*?\}|<[^]*?>|([^\s[{<])[^]*?\1)|\+\w+)[^()\s]*\)(?=$|[\s;&|)<>`}])/
@@ -248,14 +251,13 @@ function namings(command: string): Namings {
     EVALUATES.some((evaluates) => evaluates.test(command)) ||
     SUBSCRIPT.test(command) ||
     SUBSCRIPT.test(unquoted(command)) ||
-    QUALIFIER.test(singleQuotesOut(command))
+    QUALIFIER.test(singleQuotesOut(command)) ||
+    INDIRECTS.test(command)
   for (const [, flags, closed] of command.matchAll(/\$\{\(([^)]*)(\)?)/g))
-    if (!closed || !/^[\w@#%~^=!*-]*$/.test(flags) || /[#%eP]/.test(flags)) blind = true
+    if (!closed || !/^[\w@~^=!*-]*$/.test(flags) || /[eP]/.test(flags)) blind = true
   for (const m of command.matchAll(/(\$\{[#!]?)?(?<![\w$])([A-Za-z_]\w*)/g)) {
     const [whole, expanded, key] = m
     const next = command.slice(m.index + whole.length)
-    // bash's `${!N…}` holds only as the name list or an array's keys closed right after (`${!N*}`, `${!N[@]}`); any other is an indirection, which assigns (`${!N:=…}`) or evaluates the subscript N's value may hold (`${!N}`, `${!N[0]}`)
-    if (expanded === "${!" && !/^(?:[*@]|\[[*@]\])\}/.test(next)) blind = true
     if (expanded && READS_ONLY.test(next)) continue
     const assigns = next[0] === "=" ? "=" : undefined
     const at = m.index + (expanded?.length ?? 0)
@@ -499,8 +501,13 @@ const NUMERIC = new Set(["float", "integer"])
 const TYPESETS = new Set(["declare", "export", "local", "readonly", "typeset"])
 // the builtins that run text as the line's own shell, which can set any variable
 const RUNS_TEXT = new Set([".", "eval", "source"])
-// the tests whose -v reads its operand as a name, evaluating any subscript it holds; test and [ take their operators after expansion, so a word the hook cannot read may be a -v or split into one and its operand, while [[ reads its operators as written
+// the tests whose -v reads its operand as a name, evaluating any subscript it holds; test and [ take their operators after expansion, so a word that expands may be a -v or split into one and its operand, while [[ reads its operators as written
 const TESTS = new Set(["[", "[[", "test"])
+// the -v operand that names no subscript: a plain unquoted name, as written
+const PLAIN_NAME = /^[A-Za-z_]\w*$/
+// a word written with any expansion but a plain `$name` or `${name}`: a command substitution, a backtick, a process substitution, arithmetic, an ANSI-C string, a positional or special parameter, a parameter with an operator
+const EXPANDS = /\$(?![A-Za-z_]\w*|\{[A-Za-z_]\w*\})|`|[<>]\(/
+// the operators of test and [ that take a value after them, so a quoted word ahead of one, or of the closing ], is an operand
 const BINARY = new Set([
   "!=",
   "-a",
@@ -523,9 +530,10 @@ const BINARY = new Set([
 const testsAName = (args: Parsed["args"], expands: boolean): boolean =>
   args.some((w, k) => {
     const next = args[k + 1]
-    if (w.value === "-v")
-      return next !== undefined && (next.quoted || !/^[A-Za-z_]\w*$/.test(next.value))
-    if (!expands || !w.value.includes("\u0000")) return false
+    if (w.value === "-v") return next !== undefined && !PLAIN_NAME.test(next.source ?? "")
+    if (!expands) return false
+    if (EXPANDS.test(w.source ?? "$")) return true
+    if (!marked(w.value)) return false
     return !w.quoted || (next !== undefined && next.value !== "]" && !BINARY.has(next.value))
   })
 // the words that open and close a compound body or group, and the other reserved words a command may lead with
@@ -549,7 +557,7 @@ function steadyNames(named: Namings, commands: Command[]): (cmd: Command) => Ste
       return () => NONE
     // zsh's print -P expands its words as a prompt, which with PROMPT_SUBST set runs their expansions
     if (name === "print" && flagged(/P/)) return () => NONE
-    // a -v operand holds only as a plain name, since any other may name a subscript (`[[ -v $N ]]`, an escaped `[`), and in test and [ a word the hook cannot read holds nothing but as a quoted operand
+    // a -v operand holds only as a PLAIN_NAME, since any other may name a subscript, and in test and [ a word that EXPANDS holds nothing, nor does a plain `$name` the hook cannot read but as a quoted operand
     if (TESTS.has(name) && testsAName(parses[at].args, name !== "[[")) return () => NONE
     const loop = cmd.words.findIndex(
       (w) => !w.quoted && (w.value === "for" || w.value === "select"),

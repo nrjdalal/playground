@@ -605,6 +605,10 @@ describe("a quoted argument is read as a command line only where a program runs 
     ["rm of a held variable beside bash's name list", 'X=/tmp/a; echo "${!N*}"; rm -rf "$X"'],
     ["rm of a held variable beside bash's array keys", 'X=/tmp/a; echo "${!N[@]}"; rm -rf "$X"'],
     [
+      "rm of a held variable beside the last background job's pid",
+      'X=/tmp/a; echo "${!}"; rm -rf "$X"',
+    ],
+    [
       "rm of a held variable beside tests that read no name",
       'X=/tmp/a; test -v Y && [ -n "$X" ] && [ "$X" = /tmp/a ] && rm -rf "$X"',
     ],

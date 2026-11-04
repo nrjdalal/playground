@@ -6,7 +6,14 @@ import { basename, dirname, isAbsolute, resolve } from "node:path"
 export type Text = { reads?: Text[]; unknown?: string; value: string; variable?: string }
 // `glob` marks a word with a glob character the shell sees outside quotes, so `'{print $1}'` holds none and `{a,'b'}` one.
 // `raw` keeps the source of a word that holds a value the lexer cannot read, so a hook can lex it again once the call has set its variables.
-export type Word = Text & { glob?: boolean; procs?: Command[]; quoted: boolean; raw?: string }
+// `source` is the word as written, quotes and expansions included, so a hook can judge what a word expands rather than what it came to.
+export type Word = Text & {
+  glob?: boolean
+  procs?: Command[]
+  quoted: boolean
+  raw?: string
+  source?: string
+}
 type Redirect = { body?: Text; fd: string; op: string; target?: Word }
 export type Command = {
   // The token of the run of commands this one belongs to: it changes at each operator that runs a command whatever the one before it did (a `;`, a newline, an `&`, an `||`), and carries into every group, body and pipeline the run reaches, so a cd is read as having moved the shell only for the commands whose token is its own
@@ -745,7 +752,8 @@ function word(lx: Lexer): Word {
   // the lookahead finds the close once, so a { with no } costs its length rather than its square
   if (/\{(?=[^{}]*\})[^{}]*(?:,|\.\.)/.test(bare)) out.unknown ??= "a brace expansion"
   if (GLOB_CHARS.test(bare)) out.glob = true
-  if (marked(out.value)) out.raw = src.slice(start, lx.i)
+  out.source = src.slice(start, lx.i)
+  if (marked(out.value)) out.raw = out.source
   return out
 }
 

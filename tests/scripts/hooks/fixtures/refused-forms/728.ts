@@ -301,6 +301,16 @@ export const groups: Group[] = [
         "D=~/.playground/./extensions/x; XY=/../../y; V=X; V+=Y=0; a=(1); N=a; N+=[V]; : ${(P)N}; rm -rf $D$XY/../.no-such-folder",
         "process tmp",
       ],
+      [
+        "rm of a variable bash's indirect read through a positional parameter holding a built subscript sets",
+        "D=~/.playground/./extensions/x; XY=/../../y; V=X; V+=Y=0; a=(1); N=a; N+=[V]; f() { : ${!1}; }; f $N; rm -rf $D$XY/../.no-such-folder",
+        "process tmp",
+      ],
+      [
+        "rm of a variable a [ word read from a file may split into a -v test that sets",
+        "D=~/.playground/./extensions/x; XY=/../../y; V=X; V+=Y=0; a=(1); [ $(<t) ]; rm -rf $D$XY/../.no-such-folder",
+        "process tmp",
+      ],
     ],
   },
 ]
