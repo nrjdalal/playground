@@ -32,8 +32,12 @@ const machine = (name: string) => {
     const args = argv.slice(argv.indexOf("ask") + 1)
     calls.push({ args, ...(stdin ? { stdin: JSON.parse(stdin) } : {}) })
     if (args[0] === "new") return { code: 0, out: `${ID(++posted)}\n` }
-    if (args[0] === "get" && args.length === 2)
-      return { code: 0, out: JSON.stringify({ status: status[args[1]!] }) }
+    // ask's run prints its JSON on stdout, then bun's echo of the command on stderr, which the job's run() appends
+    if (args[0] === "get")
+      return {
+        code: 0,
+        out: `${JSON.stringify({ status: status[args[1]!] }, null, 2)}\n$ bun api/hono/src/bin/dashboard-ask.ts ${args.join(" ")}\n$ bun --no-env-file api/hono/src/bin/dashboard-ask.ts ${args.join(" ")}\n`,
+      }
     return { code: 0, out: "" }
   }
   const check = (at = 0) => checkBattery({ now: new Date(at), ops, repo: "/r", run })
@@ -98,10 +102,27 @@ test("back on power, an open ask is settled, an approved one acked, and the stat
   mac.calls.length = 0
   await mac.check()
   expect(mac.calls.map((c) => c.args)).toEqual([
-    ["get", ID(1)],
+    ["get", ID(1), "--ack"],
     ["ack", ID(1), "--no-link", "The Mac is back on power"],
-    ["get", ID(2)],
+    ["get", ID(2), "--ack"],
     ["settle", ID(2), "--note", "The Mac is back on power"],
+  ])
+  expect(JSON.parse(readFileSync(join(mac.ops, "awake", "battery-state.json"), "utf8"))).toEqual({})
+})
+
+// retro 35: ask get's JSON, then bun's echo lines, failed the parse, so 349 "not closed" lines went to ops and the orange ask was never armed again
+test("back on power, a cleared or denied item leaves state on its read, which marks the answer read, with no further ask call", async () => {
+  const mac = machine("cleared")
+  mac.set(ON_BATTERY(4))
+  await mac.check()
+  mac.status[ID(1)] = "cleared"
+  mac.status[ID(2)] = "denied"
+  mac.set(ON_AC)
+  mac.calls.length = 0
+  expect(await mac.check(1_000_000_000)).toBeUndefined()
+  expect(mac.calls.map((c) => c.args)).toEqual([
+    ["get", ID(1), "--ack"],
+    ["get", ID(2), "--ack"],
   ])
   expect(JSON.parse(readFileSync(join(mac.ops, "awake", "battery-state.json"), "utf8"))).toEqual({})
 })
