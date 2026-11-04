@@ -23,6 +23,15 @@ export const groups: Group[] = [
         `sh <<EOF\n$(cat ${MAIN}/.no-such-file)\nEOF`,
       ],
       ["a heredoc a shell runs around a variable the hook cannot read", "bash <<EOF\n$SCRIPT\nEOF"],
+      ["a commit su's root shell runs from a here-string", "sudo su <<< 'git commit -m x'"],
+      ["a commit su's login shell runs from a here-string", "sudo su - <<< 'git commit -m x'"],
+      ["a commit su runs as root from a here-string", "su root <<< 'git commit -m x'"],
+      ["a commit su's root shell runs from a pipeline", "echo 'git commit -m x' | sudo su"],
+      [
+        "a commit a root shell runs from a process substitution",
+        "sudo -s < <(echo 'git commit -m x')",
+      ],
+      ["a root shell's script file the hook cannot read", `sudo -s < ${MAIN}/.no-such-file`],
     ],
   },
 ]
