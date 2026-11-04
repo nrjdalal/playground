@@ -210,6 +210,7 @@ var GROUPING = new Set(["}", "done", "esac", "fi"]);
 var ASSIGN = /^[A-Za-z_]\w*=/;
 var WRAPPERS = new Map(Object.entries({
   builtin: ["", ""],
+  busybox: ["", ""],
   caffeinate: ["-d -i -m -s -u", "-t -w"],
   command: ["-p -V -v", ""],
   doas: ["-L -n -s", "-a -C -u"],
@@ -276,8 +277,9 @@ function stdinShellOf(cmd, { args, first, name, xargs }) {
   if (first && !marked(first.value)) {
     if (name === "." || name === "source" || name === "eval")
       return fed || name !== "eval" && STDIN_PATHS.has(args[0]?.value ?? "") ? "shell" : undefined;
-    if (INTERPRETERS.has(name))
-      return fed && interpreted(args, xargs) ? "code" : undefined;
+    const family = familyOf(name);
+    if (family)
+      return fed && interpreted(family, args, xargs) ? "code" : undefined;
     if (!SHELLS.has(name))
       return;
     if (fed)
@@ -329,27 +331,84 @@ function startsRootShell(wrapper, value) {
   }
   return shell;
 }
-var INTERPRETERS = new Set([
-  "bun",
-  "deno",
-  "lua",
-  "node",
-  "osascript",
-  "perl",
-  "php",
-  "python",
-  "python3",
-  "ruby"
-]);
-var INLINE_CODE = new Set(["--eval", "--print", "-E", "-c", "-e", "-m", "-p", "-r"]);
-function interpreted(args, xargs) {
-  const filled = (word) => !!xargs?.replace && !!word?.value.includes(xargs.replace);
-  const k = args.findIndex((a) => INLINE_CODE.has(a.value));
-  if (k !== -1)
-    return args[k + 1] ? filled(args[k + 1]) : !!xargs;
-  const operands = args.filter((a) => !a.value.startsWith("-") || a.value === "-");
-  const script = operands[0]?.value === "run" ? operands[1] : operands[0];
-  return !script || STDIN_PATHS.has(script.value) || filled(script);
+var FAMILIES = {
+  bun: {
+    inline: "ep",
+    long: ["--eval", "--print"],
+    takes: ["--config", "--cwd", "--env-file", "--preload", "--tsconfig-override"],
+    values: "r"
+  },
+  deno: { inline: "", long: [], takes: ["--config", "--import-map"], values: "c" },
+  lua: { inline: "e", long: [], takes: [], values: "l" },
+  node: {
+    inline: "ep",
+    long: ["--eval", "--print"],
+    takes: [
+      "--conditions",
+      "--env-file",
+      "--experimental-loader",
+      "--import",
+      "--input-type",
+      "--inspect-port",
+      "--loader",
+      "--max-old-space-size",
+      "--require",
+      "--stack-size",
+      "--title"
+    ],
+    values: "Cr"
+  },
+  osascript: { inline: "e", long: [], takes: [], values: "ls" },
+  perl: { inline: "eE", long: [], takes: [], values: "IMm" },
+  php: { inline: "BER", long: [], own: "f", takes: [], values: "cdf" },
+  python: { inline: "c", long: [], own: "m", takes: ["--check-hash-based-pycs"], values: "QWXm" },
+  ruby: { inline: "e", long: [], takes: [], values: "CEFIr" }
+};
+var FAMILY = /^(bun|deno|lua|luajit|node|nodejs|osascript|perl|php|python|ruby)[\d.]*$/;
+var familyOf = (name) => {
+  const base = FAMILY.exec(name)?.[1];
+  return base ? FAMILIES[base === "nodejs" ? "node" : base === "luajit" ? "lua" : base] : undefined;
+};
+function interpreted(family, args, xargs) {
+  const filled = (word) => marked(word.value) || !!xargs?.replace && word.value.includes(xargs.replace);
+  const own = (word) => !!word && !filled(word) && !STDIN_PATHS.has(word.value);
+  let sub = false;
+  for (let k = 0;k < args.length; k++) {
+    const { value } = args[k];
+    if (value === "--")
+      return !own(args[k + 1]);
+    if (value.startsWith("--")) {
+      const name = value.split("=")[0];
+      if (family.long.includes(name))
+        return true;
+      if (family.takes.includes(name) && !value.includes("="))
+        k++;
+      continue;
+    }
+    if (value.startsWith("-") && value !== "-") {
+      for (const [at, c] of [...value.slice(1)].entries()) {
+        if (family.inline.includes(c))
+          return true;
+        if (!family.values.includes(c))
+          continue;
+        const attached = value.slice(at + 2);
+        if (c === family.own)
+          return !own(attached ? { ...args[k], value: attached } : args[k + 1]);
+        if (!attached)
+          k++;
+        break;
+      }
+      continue;
+    }
+    if (!sub && (family === FAMILIES.bun || family === FAMILIES.deno) && ["eval", "run"].includes(value)) {
+      if (value === "eval")
+        return true;
+      sub = true;
+      continue;
+    }
+    return !own(args[k]);
+  }
+  return true;
 }
 function codeFed(commands) {
   const fed = new Map;
@@ -378,7 +437,7 @@ function codeFed(commands) {
   return fed;
 }
 var COUNTED = new Set(["repeat", "timeout"]);
-var SHELLS = new Set(["bash", "dash", "ksh", "sh", "zsh"]);
+var SHELLS = new Set(["bash", "csh", "dash", "fish", "ksh", "sh", "tcsh", "zsh"]);
 var STDIN_PATHS = new Set(["-", "/dev/fd/0", "/dev/stdin", "/proc/self/fd/0"]);
 var EXPORTS = new Set(["declare", "export", "local", "readonly", "typeset"]);
 var PRINTERS = new Set(["echo", "printf"]);
@@ -1549,7 +1608,7 @@ async function mapsDataScript(cwd, script) {
 }
 var LINES = new Set(["flock", "setsid", "watch"]);
 var WATCH_TAKES = new Set(["--equexit", "--interval", "--shotsdir", "-n", "-q", "-s"]);
-var INTERPRETERS2 = new Set([
+var INTERPRETERS = new Set([
   "bun",
   "deno",
   "node",
@@ -1676,7 +1735,7 @@ var RUNNERS = new Set([...LAUNCHERS, ...SHELLS, "command", "exec", "time", "xarg
 async function runsTool(line) {
   try {
     const env = { cwd: undefined, files: new Map, known: {}, process: {}, vars: new Map };
-    const visit = async (_, { args, first, name }) => TOOL.test(name) || first !== undefined && unreadable(first) || LAUNCHERS.has(name) && args.some((a) => TOOL.test(program(a.value))) || (INTERPRETERS2.has(name) || LINES.has(name)) && args.some((a) => MENTION.test(a.value)) || name === "source" || name === "." || first?.value.includes("/") ? "runs" : undefined;
+    const visit = async (_, { args, first, name }) => TOOL.test(name) || first !== undefined && unreadable(first) || LAUNCHERS.has(name) && args.some((a) => TOOL.test(program(a.value))) || (INTERPRETERS.has(name) || LINES.has(name)) && args.some((a) => MENTION.test(a.value)) || name === "source" || name === "." || first?.value.includes("/") ? "runs" : undefined;
     return await run(lex(line), env, visit) !== undefined;
   } catch {
     return true;
@@ -1769,7 +1828,7 @@ async function judgeText(text, cwd, apps, depth) {
       return unread(`the program it runs (it comes from ${first.unknown ?? "a word it cannot read"})`);
     if (name === "bun" && args[0]?.value === "run" && args[1] !== undefined && !unreadable(args[1]) && args.slice(2).every((a) => !unreadable(a)) && await mapsDataScript(here.cwd, args[1].value))
       return;
-    if (INTERPRETERS2.has(name)) {
+    if (INTERPRETERS.has(name)) {
       for (const a of args)
         if (await callsTool(a.value))
           return unread(`what ${name} runs`);
