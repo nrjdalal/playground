@@ -11,7 +11,7 @@
   Before the sidebar is read, the server's paint holds that many empty rows too, so the header never grows under the nav (`verify cls`).
   The primary's slot never empties, so nothing below it moves: once the sidebar is read, while its session is down, a row reading its slot's label (`dispatcherLabel` in `web/next/src/lib/model-label.ts`), Alpha, with Not running in its tooltip
   (`NoDispatcherRow`, Cannot be read while the feed is lost before any board, as the groups then show no None running, and muted while the sidebar is the stored one), opening `/dashboard`'s empty state.
-  The second's row shows only while its session is live or the roster lists it (the board's agents), so a machine that runs no second dispatcher draws none; listed and down, it reads Bravo, Not running in its tooltip, and opens nothing.
+  The second's row shows only while its session is live or the roster lists it, ended entries aside (`rosteredOf` in `packages/config/src/kinds.ts`, over the board's agents), so a machine that runs no second dispatcher, or whose second has ended, draws none; listed and down (a crash, its entry still working), it reads Bravo, Not running in its tooltip, and opens nothing.
   On the collapsed rail every row shows its one icon and nothing else.
   Every hover the sidebar names is shadcn's Tooltip at the one shared delay, one second, each waiting its own (`TOOLTIP_DELAY_MS` in `web/next/src/lib/tooltip.ts`, `timeout={0}` on the provider, at one second), opening on keyboard focus too where its item takes focus,
   never a native `title` (the design skill's Tooltips): an ops row and a roster row show their full label in it while the sidebar is expanded too (`tooltip={{ hidden: false }}`).

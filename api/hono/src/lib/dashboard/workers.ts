@@ -6,6 +6,7 @@ import {
   kindOfName,
   managerKindOfName,
   type RosterKind,
+  rosteredOf,
   seatOf,
   setSessionNames,
 } from "@packages/config/kinds"
@@ -110,13 +111,13 @@ export const DISPATCHER = env.PLAYGROUND_DISPATCHER || getSessionNames().names.d
 // Pure: the second dispatcher's name, the one set, else the primary's with -2, so a test stack that names only its probe as the primary never reaches the real second dispatcher.
 export const secondaryOf = (primary: string, set?: string): string => set || `${primary}-2`
 
-// The second dispatcher, running beside the first on another model, with its own chat (#i520); PLAYGROUND_DISPATCHER_SECONDARY renames it.
+// The second dispatcher, which, when started, runs beside the first on another model, with its own chat (#i520); PLAYGROUND_DISPATCHER_SECONDARY renames it.
 export const DISPATCHER_SECONDARY = secondaryOf(DISPATCHER, env.PLAYGROUND_DISPATCHER_SECONDARY)
 
 // Every name the dispatcher role goes to, the primary first, whose chat is the Dashboard's home and holds the Inbox; a secondary that repeats the primary adds none.
 export const DISPATCHERS: readonly string[] = [...new Set([DISPATCHER, DISPATCHER_SECONDARY])]
 
-// Pure: how many dispatcher rows the sidebar's header draws, by the web's dispatchersOf rule: the primary's always, each other one's while a session of its name is shown (registered or on the roster). /api/health carries it, so a stored sidebar's header holds that many rows and the board's arrival moves nothing below it (verify cls).
+// Pure: how many dispatcher rows the sidebar's header draws, by the web's dispatchersOf rule: the primary's always, each other one's while a session of its name is shown (registered, or on the roster and not ended). /api/health carries it, so a stored sidebar's header holds that many rows and the board's arrival moves nothing below it (verify cls).
 export const dispatcherSlots = (names: readonly string[], shown: ReadonlySet<string>): number =>
   names.filter((name, i) => i === 0 || shown.has(name)).length
 
@@ -128,7 +129,7 @@ export const readDispatcherSlots = async (): Promise<number> => {
   ])
   const shown = [
     ...registeredSessionsOf(files).map((session) => session.name),
-    ...(roster?.agents ?? []).map((agent) => agent.name),
+    ...rosteredOf(roster?.agents),
   ]
   return dispatcherSlots(DISPATCHERS, new Set(shown))
 }
@@ -504,7 +505,7 @@ export type RosterFacts = {
 
 const NO_ROSTER: RosterFacts = { etas: new Map(), roles: new Map(), titles: new Map() }
 
-// Pure: the session the roster seats as the assistant (seatOf), none on a stack whose PLAYGROUND_DISPATCHER points the composer at a throwaway probe, so the real assistant stays out of a test's reach as the real second dispatcher does.
+// The session the roster seats as the assistant (seatOf), none on a stack whose PLAYGROUND_DISPATCHER points the composer at a throwaway probe, so the real assistant stays out of a test's reach as the real second dispatcher does; `redirected` defaults to reading that env.
 export const assistantOf = (
   agents: unknown,
   redirected = Boolean(env.PLAYGROUND_DISPATCHER),

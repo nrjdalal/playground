@@ -498,7 +498,7 @@ export const dispatcherOf = (
   primary: string | null = null,
 ): Worker | null => workers?.find((w) => isPrimary(w, primary)) ?? null
 
-// Pure: the header's dispatcher slots, a list by role in the order the API names them (PLAYGROUND_DISPATCHER, then PLAYGROUND_DISPATCHER_SECONDARY), each the live session holding the role under that name, or none while it is down. The primary's slot is always kept; the second's only while its session is live or the roster lists it (rostered, the board's agent names), so a machine that runs no second dispatcher shows no row for it.
+// Pure: the header's dispatcher slots, a list by role in the order the API names them (PLAYGROUND_DISPATCHER, then PLAYGROUND_DISPATCHER_SECONDARY), each the live session holding the role under that name, or none while it is down. The primary's slot is always kept; the second's only while its session is live or the roster lists it (rostered, the board's agent names but an ended entry's, rosteredOf), so a machine that runs no second dispatcher shows no row for it.
 export const dispatchersOf = (
   workers: Worker[] | null,
   names: readonly string[],

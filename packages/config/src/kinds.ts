@@ -162,8 +162,8 @@ const SEATLESS = new Set(["ended", "parked"])
 export const rosteredOf = (agents: unknown): Set<string> =>
   new Set(
     (Array.isArray(agents) ? agents : []).flatMap((agent: unknown) => {
-      const { name } = (agent ?? {}) as { name?: unknown; status?: unknown }
-      return typeof name === "string" ? [name] : []
+      const { name, status } = (agent ?? {}) as { name?: unknown; status?: unknown }
+      return typeof name === "string" && status !== "ended" ? [name] : []
     }),
   )
 
