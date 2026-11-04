@@ -557,7 +557,7 @@ describe("a write by ~ is judged against the home the shell expands it to", () =
     expect(reason).toContain("no-extensions-write hook refuses")
   })
 
-  // PG-840 residual, named in the hook's README as the guard's known limit: a command string the hook cannot read as literals (a variable, a template with a substitution), an argument list no shell runs its ~, a shell named as the program with its line in an argv -c element, a non-JavaScript inline program handing a shell its string, and a regex's .exec whose string no shell runs, all stay as canary judged them, so none is newly refused from a worktree.
+  // PG-840 residual, named in the hook's README as the guard's known limit: a command string the hook cannot read as literals (a variable, a template with a substitution), an argument list no shell runs its ~, and a regex's .exec whose string no shell runs, each stays as canary judged them, so none is newly refused from a worktree. The README names the rest of the residual, whose working forms are kept out of this file.
   test.each([
     [
       "a removal built from a variable through execSync",
@@ -570,14 +570,6 @@ describe("a write by ~ is judged against the home the shell expands it to", () =
     [
       "a benign home path removed through execSync",
       `node -e 'require("child_process").execSync("rmdir ~/.no-such-benign-dir")'`,
-    ],
-    [
-      "a shell named as the program with its line in an argv -c element",
-      `node -e 'require("child_process").spawnSync("sh", ["-c", "rmdir ~/.play*"])'`,
-    ],
-    [
-      "a non-JavaScript inline program handing a shell its string",
-      `python3 -c 'import os; os.system("rmdir ~/.play*")'`,
     ],
     [
       "a regex exec whose string no shell runs",
