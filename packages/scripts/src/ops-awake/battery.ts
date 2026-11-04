@@ -5,7 +5,7 @@ import { managerOf } from "@packages/config/kinds"
 
 import type { Run } from "../ops-tick/tick"
 
-// The battery check ops-awake runs each minute: the battery never holds work, so while the Mac discharges the Ops lead posts the owner two Inbox items, each at most once a discharge, and nothing above 10%: an orange ask at 10% or less and a red alert at 5% or less. Back on power it closes both, an item already closed (cleared, denied, acked) by its read alone, and re-arms. It returns a line for ops only when a post or a close fails, at most every 15 minutes.
+// The battery check ops-awake runs each minute: the battery never holds work, so while the Mac discharges the Ops lead posts the owner two Inbox items, each at most once a discharge, and nothing above 10%: an orange ask at 10% or less and a red alert at 5% or less. Back on power it closes both, the alert by resolving it and an ask already closed (cleared, denied, acked) by its read alone, and re-arms. It returns a line for ops only when a post or a close fails, at most every 15 minutes.
 
 export const ORANGE = 10
 export const RED = 5
@@ -78,18 +78,28 @@ export const checkBattery = async (ctx: {
       if (!id) continue
       // the read marks any answer read, which closes a clear, a deny or a discard; the JSON runs to its last brace, since run() appends bun's `$ bun ...` echo from stderr
       const got = await ask(["get", id, "--ack"])
-      let item: { answer?: { ackedAt?: unknown }; status?: string } = {}
+      let item: {
+        answer?: { ackedAt?: unknown; choice?: string }
+        from?: string
+        kind?: string
+        status?: string
+      } = {}
       try {
         item = JSON.parse(got.out.slice(got.out.indexOf("{"), got.out.lastIndexOf("}") + 1))
       } catch {}
+      // the red alert is an update, posted at status done, which only its poster's resolve closes
       const closing =
-        item.status === "open"
-          ? ["settle", id, "--note", BACK]
-          : item.status === "approved" && !item.answer?.ackedAt
-            ? ["ack", id, "--no-link", BACK]
-            : item.status
-              ? null
-              : undefined
+        item.kind === "update" && item.from
+          ? item.answer?.choice === "resolved"
+            ? null
+            : ["resolve", id, "--by", item.from, "--note", BACK]
+          : item.status === "open"
+            ? ["settle", id, "--note", BACK]
+            : item.status === "approved" && !item.answer?.ackedAt
+              ? ["ack", id, "--no-link", BACK]
+              : item.status
+                ? null
+                : undefined
       const closed = closing === null ? { code: 0, out: "" } : closing && (await ask(closing))
       if (closed && closed.code === 0) delete state[key]
       else
