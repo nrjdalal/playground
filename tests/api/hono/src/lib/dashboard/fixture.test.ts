@@ -857,7 +857,7 @@ describe.skipIf(onLiveDashboard())("a fixture stack", () => {
       `const { listLive } = await import(\`\${API}/lib/dashboard/workers\`)\nawait listLive().catch(() => null)\nconsole.log("{}")\nprocess.exit(0)\n`,
       dir,
       {
-        PLAYGROUND_CMUX_SESSIONS: "true",
+        PLAYGROUND_ALL_SESSIONS: "true",
         PLAYGROUND_LIVE_READS: "1",
         PATH: `${bin}:${process.env.PATH}`,
       },

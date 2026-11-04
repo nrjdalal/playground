@@ -18,7 +18,7 @@ const MARKER = /^__shell_pane_[0-9a-f]{12}$/
 // no-raw-spawn's STARTS_CLAUDE: claude as a word, but not the .claude folder or a longer word
 const CLAUDE = /(?<![.\w])claude(?!\w)/i
 // the one set of characters run types: printable ASCII and space
-const UNTYPED = /[^\x20-\x7e]/u
+export const UNTYPED = /[^\x20-\x7e]/u
 
 type Json = Record<string, any>
 // One herdr CLI call on the probes server: its exit code and what it printed (stdout, else stderr).

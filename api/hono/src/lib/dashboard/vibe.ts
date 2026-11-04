@@ -131,11 +131,11 @@ export const setKey = (text: string, key: string, value: string): string => {
   return `${text}${text === "" || text.endsWith("\n") ? "" : "\n"}${line}\n`
 }
 
-// Pure: the stack's .env, the worktree's own .env.example with the copy's database, a fresh secret, and the live machine's reads, so a key the branch adds comes with it; cmux's sessions stay off, so it reads the sessions Playground started.
+// Pure: the stack's .env, the worktree's own .env.example with the copy's database, a fresh secret, and the live machine's reads, so a key the branch adds comes with it; every session stays off, so it reads the sessions Playground started.
 export const vibeEnv = (example: string, url: string, secret: string): string =>
   [
     ["BETTER_AUTH_SECRET", secret],
-    ["PLAYGROUND_CMUX_SESSIONS", ""],
+    ["PLAYGROUND_ALL_SESSIONS", ""],
     ["PLAYGROUND_LIVE_READS", "true"],
     ["POSTGRES_URL", url],
   ].reduce((text, [key, value]) => setKey(text, key!, value!), example)

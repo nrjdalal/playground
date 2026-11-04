@@ -35,7 +35,7 @@ import { SEEDED_NAMES } from "../../../../../session-names"
 setSessionNames(SEEDED_NAMES)
 
 // The reads below run against the test's own scratch transcripts, as a live-reads stack opted in to every session would (own.ts).
-liveReads({ PLAYGROUND_CMUX_SESSIONS: "true" })
+liveReads({ PLAYGROUND_ALL_SESSIONS: "true" })
 
 const NOW = new Date("2026-10-06T12:30:00Z")
 const MIN = 60_000
