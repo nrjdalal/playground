@@ -274,6 +274,13 @@ commit-msg:
     expect(log(m)).toMatch(/ start worker-x \d+ run-slot-commit waited=/)
   })
 
+  test("while one whose pre-commit lists its build as a quoted job still waits as a big run", async () => {
+    const jobs = `pre-commit:\n  jobs:\n    - run: "bun run build"\n`
+    const m = repo({ idle: 30 }, ["web/next/src/app/page.tsx"], [], jobs)
+    m.hold("run-slot", 3, "big")
+    expect(await m.start("worker-x", {}, undefined, ["git", "commit"]).waits()).toBe(true)
+  })
+
   test("and so does one in a repo with no lefthook.yml", async () => {
     const m = repo({ idle: 30 }, ["web/next/src/app/page.tsx"], [], null)
     m.hold("run-slot", 3, "big")

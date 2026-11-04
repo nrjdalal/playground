@@ -335,6 +335,10 @@ describe("a quick run takes its own slot past a full queue", () => {
     expect(await quick(["bun", "test", "replay/b.test.ts"])).toBe(false)
   })
 
+  test("nor one whose tests/ path climbs out of the folder", async () => {
+    expect(await quick(["bun", "test", "tests/../replay.test.ts"])).toBe(false)
+  })
+
   test("but a bun test naming a ./tests/ file", async () => {
     expect(await quick(["bun", "test", "./tests/b.test.ts"])).toBe(true)
   })

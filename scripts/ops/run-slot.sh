@@ -370,7 +370,7 @@ quick_rule() {
       case "$a" in env|*=*|-*) continue ;; esac
       [ "$a" = "$first" ] && continue
       # only a test file under the repo's tests/ folder counts, so a replay of scratch test files goes through the queue (retro 35: one held the quick slot 30 min, and its waiters waited 87 min in all)
-      case "$a" in run|test|test:file) t="$t $a" ;; *.e2e.*) return ;; tests/*.test.ts|tests/*.test.tsx|./tests/*.test.ts|./tests/*.test.tsx) n=$((n + 1)) ;; *) return ;; esac
+      case "$a" in run|test|test:file) t="$t $a" ;; *.e2e.* | */../*) return ;; tests/*.test.ts|tests/*.test.tsx|./tests/*.test.ts|./tests/*.test.tsx) n=$((n + 1)) ;; *) return ;; esac
     done
     case "$t" in " test" | " run test:file") [ "$n" -ge 1 ] && [ "$n" -le 3 ] && echo quick ;; esac
   fi
@@ -446,7 +446,7 @@ heavy_build() {
   done
   [ -n "$commit" ] || return 1
   # only a repo whose own lefthook.yml pre-commit runs a build builds on commit (the dispatcher, 4 Nov: another repo's lint-staged commit sat 65 min in the big-run queue for a 1 s job)
-  awk '/^[^ #]/ { pre = ($0 ~ /^pre-commit:/) } pre && /^ +run:.* run build( |$)/ { found = 1 } END { exit !found }' \
+  awk '/^[^ #]/ { pre = ($0 ~ /^pre-commit:/) } pre && /^ +(- )?run:.* run build([ "'"'"']|$)/ { found = 1 } END { exit !found }' \
     "$(git ${dir:+-C "$dir"} rev-parse --show-toplevel 2>/dev/null)/lefthook.yml" 2>/dev/null || return 1
   files=$({ git ${dir:+-C "$dir"} diff --cached --name-only; [ -z "$all" ] || git ${dir:+-C "$dir"} diff --name-only
     [ ${#paths[@]} -eq 0 ] || git ${dir:+-C "$dir"} diff --name-only HEAD -- "${paths[@]}"; } 2>/dev/null)
