@@ -230,7 +230,7 @@ describe("DISPATCHERS", () => {
     expect(dispatcherSlots([OLD.dispatcher], new Set([`${OLD.dispatcher}-2`]))).toBe(1)
   })
 
-  // The owner, with the sidebar's Bravo row reading Not running: "if no bravo? why listed?"; a second dispatcher the roster marks done or ended lists no seat (#850).
+  // A second dispatcher the roster marks done or ended counts no row, while a parked or working one still does (#850).
   test.each([
     ["ended", 1],
     ["done", 1],

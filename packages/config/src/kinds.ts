@@ -35,7 +35,7 @@ export const ROSTER_ROLE_OF_KIND: Record<RosterKind, "manager" | "runner" | "wor
   worker: "worker",
 }
 
-// Pure: whether a roster row's status ends its session for good, done or ended, so the row lists no seat (an ended second dispatcher draws no sidebar row); a parked or paused row still holds one.
+// Pure: whether a roster row's status ends its session for good, done or ended, so the row no longer counts as listed (an ended second dispatcher draws no sidebar row); a parked or paused row still does.
 export const isEndedStatus = (status: string | null | undefined): boolean =>
   status === "done" || status === "ended"
 

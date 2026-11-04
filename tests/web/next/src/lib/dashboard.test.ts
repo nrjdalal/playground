@@ -1050,7 +1050,7 @@ describe("dispatchersOf", () => {
     },
   )
 
-  // The owner, with the sidebar's Bravo row reading Not running: "if no bravo? why listed?" (#850).
+  // An ended second dispatcher with no live session draws no row, so the sidebar shows no Bravo the machine has ended (#850).
   test.each(["done", "ended"])(
     "a second dispatcher the roster marks %s, with no live session, keeps no slot",
     (status) => {
