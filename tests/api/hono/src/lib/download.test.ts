@@ -1,0 +1,40 @@
+import { describe, expect, test } from "bun:test"
+
+import { attachmentDisposition, fileNameOf } from "../../../../../api/hono/src/lib/download"
+
+describe("fileNameOf (#783)", () => {
+  test("a title becomes a name a file can hold: each character a file name cannot hold a space, spaces run together, no dot or space at either end", () => {
+    expect(fileNameOf("Weekly plan, updated draft", "html")).toBe("Weekly plan, updated draft.html")
+    expect(fileNameOf(' Plan: a/b\\c *?"<>| \u0007 ', "pdf")).toBe("Plan a b c.pdf")
+    expect(fileNameOf("..hidden..", "png")).toBe("hidden.png")
+    expect(fileNameOf("Café, 100% ✓", "md")).toBe("Café, 100% ✓.md")
+  })
+
+  test("a title with nothing left is download, and a long one is cut to 120 code points before its extension", () => {
+    expect(fileNameOf("/:*?", "png")).toBe("download.png")
+    expect(fileNameOf("", "pdf")).toBe("download.pdf")
+    expect(fileNameOf("a".repeat(300), "html")).toBe(`${"a".repeat(120)}.html`)
+  })
+
+  test("a long title is cut by code point, so an emoji at the cut stays whole and the name still encodes (#821)", () => {
+    const name = fileNameOf(`${"a".repeat(119)}🚀 tail`, "html")
+    expect(name).toBe(`${"a".repeat(119)}🚀.html`)
+    expect(() => attachmentDisposition(name)).not.toThrow()
+  })
+
+  test("a lone surrogate and a format character become spaces, the joiner inside an emoji staying, so every title encodes (#821)", () => {
+    const lone = JSON.parse('{"title":"Plan \\ud800 draft"}').title as string
+    expect(fileNameOf(lone, "html")).toBe("Plan draft.html")
+    expect(() => attachmentDisposition(fileNameOf(lone, "html"))).not.toThrow()
+    expect(fileNameOf("invoice\u202Elmth", "pdf")).toBe("invoice lmth.pdf")
+    expect(fileNameOf("Team 👨\u200d👩", "png")).toBe("Team 👨\u200d👩.png")
+  })
+})
+
+describe("attachmentDisposition (#783)", () => {
+  test("saves under the name, whole in filename* and as ASCII in filename", () => {
+    expect(attachmentDisposition("Café 100% (draft).pdf")).toBe(
+      "attachment; filename=\"Caf_ 100_ (draft).pdf\"; filename*=UTF-8''Caf%C3%A9%20100%25%20%28draft%29.pdf",
+    )
+  })
+})

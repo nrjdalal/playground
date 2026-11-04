@@ -5999,7 +5999,13 @@ var contentFields = {
   value: union([array(unknown()), record(string2(), unknown())]).nullable()
 };
 // packages/settings/src/ext.ts
+var BUNDLED_EXTENSIONS = ["slack"];
 var extSettings = defineSettings({
+  "ext.bundled": {
+    default: [],
+    description: "The extensions Playground ships under extensions/ that you have turned on, each read as a scope after your installed extensions and before core; one not named here loads no skill.",
+    schema: array(_enum(BUNDLED_EXTENSIONS)).refine((names) => new Set(names).size === names.length, "a bundled extension is on once")
+  },
   "ext.links": {
     default: {},
     description: "Each extension to the GitHub orgs whose repos read it, lowercase, or * for every repo; your login's is read by every repo, and an extension it does not name by none.",
@@ -6693,25 +6699,36 @@ function stdinShellOf(cmd, { args, first, name, xargs }) {
   }
   const end = first ? cmd.words.indexOf(first) : -1;
   const before = cmd.words.slice(at, end === -1 ? undefined : end);
-  const k = before.findIndex((w) => !w.quoted && ROOT_SHELLS.has(program(w.value)));
-  if (k === -1)
-    return;
-  const wrapper = program(before[k].value);
+  const firstWrapper = before.find((w) => !w.quoted && ROOT_SHELLS.has(program(w.value)));
+  const wrappers = [];
+  for (const w of before) {
+    if (wrappers.some((wrapper) => startsRootShell(wrapper, w.value)))
+      return "root";
+    if (w === firstWrapper || ROOT_SHELLS.has(w.value))
+      wrappers.push(program(w.value));
+  }
+  return first && wrappers.length ? "root" : undefined;
+}
+function startsRootShell(wrapper, value) {
+  if (marked(value))
+    return true;
   const shells = ROOT_SHELLS.get(wrapper);
   const { flags, values } = WRAPPERS.get(wrapper);
-  const clustered = (value) => {
-    let shell = false;
-    for (const c of value.slice(1)) {
-      if (values.has(`-${c}`))
-        return shell;
-      if (!flags.has(`-${c}`))
-        return false;
-      shell ||= shells.has(`-${c}`);
-    }
-    return shell;
-  };
-  const starts = ({ quoted, value }) => marked(value) || !quoted && (shells.has(value) || /^-[A-Za-z]/.test(value) && clustered(value));
-  return !!first || before.slice(k + 1).some(starts) ? "root" : undefined;
+  if (value.startsWith("--")) {
+    const named = [...flags, ...values].filter((o) => o.startsWith(value));
+    return shells.has(named.length === 1 ? named[0] : value);
+  }
+  if (!/^-[A-Za-z]/.test(value))
+    return false;
+  let shell = false;
+  for (const c of value.slice(1)) {
+    if (values.has(`-${c}`))
+      return shell;
+    if (!flags.has(`-${c}`))
+      return false;
+    shell ||= shells.has(`-${c}`);
+  }
+  return shell;
 }
 var COUNTED = new Set(["repeat", "timeout"]);
 var SHELLS = new Set(["bash", "dash", "ksh", "sh", "zsh"]);

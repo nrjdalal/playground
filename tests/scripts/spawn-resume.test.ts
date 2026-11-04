@@ -334,7 +334,7 @@ describe("a resume keeps a session out of the main checkout and out of a removed
     })
     expect(r.out).toContain("restored worker-a\n")
     expect(r.out).toContain(
-      `not restored: spawn.sh refuses worker-x: ${tree} is not a folder, and its branch is pg-9-x`,
+      `not restored worker-x: ${tree} is not a folder, and its branch is pg-9-x`,
     )
     expect(r.code).toBe(1)
   })
@@ -379,7 +379,9 @@ describe("restore resumes the herdr sessions its resume files list", () => {
       undefined,
       listed,
     )
-    expect(r.out).toBe("restored worker-a\nskipped worker-d: live\n")
+    expect(r.out).toBe(
+      "restored worker-a\nskipped worker-b: its roster row reads ended\nskipped worker-c: it runs in cmux, not herdr\nskipped worker-d: live\n",
+    )
     expect(r.code).toBe(0)
     expect(placing(r).filter((c) => c[1] === "run")).toEqual([
       ["pane", "run", "w5:p1", `exec bash '${lw(r.home, "launch", "worker-a.sh")}'`],
@@ -408,7 +410,9 @@ describe("restore resumes the herdr sessions its resume files list", () => {
       undefined,
       listed,
     )
-    expect(r.out).toBe("skipped worker-d: live\n")
+    expect(r.out).toBe(
+      "skipped worker-a: its roster row reads done\nskipped worker-b: its roster row reads ended\nskipped worker-c: it runs in cmux, not herdr\nskipped worker-d: live\n",
+    )
     expect(r.code).toBe(0)
     expect(placing(r).filter((c) => c[1] === "run")).toEqual([])
   })
@@ -427,7 +431,7 @@ describe("restore resumes the herdr sessions its resume files list", () => {
       listed,
     )
     expect(r.out).toContain("restored worker-a")
-    expect(r.out).not.toContain("worker-b")
+    expect(r.out).toContain("skipped worker-b: its roster row reads ended\n")
   })
 
   test("a resume that fails is named and the run exits 1", async () => {
@@ -439,9 +443,7 @@ describe("restore resumes the herdr sessions its resume files list", () => {
       undefined,
       listed,
     )
-    expect(r.out).toContain(
-      "not restored: spawn.sh refuses worker-a: herdr opened no session for worker-a",
-    )
+    expect(r.out).toContain("not restored worker-a: herdr opened no session for worker-a")
     expect(r.code).toBe(1)
   })
 
@@ -460,7 +462,9 @@ describe("restore resumes the herdr sessions its resume files list", () => {
         )
       },
     )
-    expect(r.out).toBe("restored worker-d\n")
+    expect(r.out).toBe(
+      "skipped worker-a: its exec line is not a resume restore runs\nskipped worker-b: its roster row reads ended\nskipped worker-c: it runs in cmux, not herdr\nrestored worker-d\n",
+    )
   })
 
   const onProbes = (home: string) => {
@@ -480,7 +484,9 @@ describe("restore resumes the herdr sessions its resume files list", () => {
       undefined,
       onProbes,
     )
-    expect(factory.out).toBe("restored worker-a\n")
+    expect(factory.out).toBe(
+      "restored worker-a\nskipped worker-b: its roster row reads ended\nskipped worker-c: it runs in cmux, not herdr\n",
+    )
     const probes = await spawn(
       ["restore"],
       [],

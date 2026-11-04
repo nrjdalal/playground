@@ -95,7 +95,7 @@ const { data, error } = await unwrap(apiClient.health.$get())`,
                     }),
                     dispatcherSlots: z.number().int().min(1).meta({
                       description:
-                        "How many dispatcher rows the Dashboard's sidebar header draws: the primary's, plus the second's while a session of its name is registered or the roster lists it. A stored sidebar draws that many rows, placeholders for those it lacks, so the rows arriving move nothing below them",
+                        "How many dispatcher rows the Dashboard's sidebar header draws: the primary's, plus the second's while a session of its name is registered or the roster lists it in a status other than done or ended. A stored sidebar draws that many rows, placeholders for those it lacks, so the rows arriving move nothing below them",
                       example: 2,
                     }),
                     environment: z
@@ -239,7 +239,7 @@ export type {
 } from "@/lib/apps/plan"
 export type { PlanOrder } from "@/lib/apps/plan-order"
 export type { AccountRow } from "@/lib/store/accounts"
-export type { ExtensionRow } from "@/lib/store/extensions"
+export type { BundledRow, ExtensionRow } from "@/lib/store/extensions"
 export type { Preview, PreviewKind } from "@/lib/apps/previews"
 export type * from "@/plugins/registry"
 export type { BatchAnswer, BatchOutcome, BatchRefusalCode } from "@/lib/batch"

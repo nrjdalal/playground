@@ -23,6 +23,7 @@ import {
   type LiveProof,
   nameOf,
   questionsBySession,
+  readDispatcherSlots,
   roleOf,
   rosterFacts,
   rosterRoleOf,
@@ -228,6 +229,51 @@ describe("DISPATCHERS", () => {
     ).toBe(1)
     expect(dispatcherSlots([OLD.dispatcher], new Set([`${OLD.dispatcher}-2`]))).toBe(1)
   })
+
+  // A second dispatcher the roster marks done or ended counts no row, while a parked or working one still does (#850).
+  test.each([
+    ["ended", 1],
+    ["done", 1],
+    ["parked", 2],
+    ["working", 2],
+  ])(
+    "a roster whose second dispatcher reads %s counts %i dispatcher rows",
+    async (status, rows) => {
+      const dir = mkdtempSync(join(tmpdir(), "dispatcher-slots-"))
+      // a live-reads process, whose data folder is PLAYGROUND_DATA_DIR, reading the roster alone (no opt-in to Claude's registry)
+      const set: Record<string, string> = {
+        CLAUDE_CONFIG_DIR: join(dir, "config"),
+        PLAYGROUND_ALL_SESSIONS: "",
+        PLAYGROUND_DATA_DIR: join(dir, "data"),
+        PLAYGROUND_LIVE_READS: "1",
+      }
+      const saved = Object.keys(set).map((key) => [key, process.env[key]] as const)
+      Object.assign(process.env, set)
+      mkdirSync(set.PLAYGROUND_DATA_DIR!, { recursive: true })
+      const agent = (name: string, status: string) => ({
+        name,
+        role: "manager",
+        status,
+        task: "Dispatch",
+      })
+      writeFileSync(
+        join(set.PLAYGROUND_DATA_DIR!, "roster.json"),
+        JSON.stringify({
+          agents: [agent(DISPATCHER, "working"), agent(DISPATCHER_SECONDARY, status)],
+          updatedAt: "2026-11-04T14:00:00Z",
+        }),
+      )
+      try {
+        expect(await readDispatcherSlots()).toBe(rows)
+      } finally {
+        for (const [key, value] of saved) {
+          if (value === undefined) delete process.env[key]
+          else process.env[key] = value
+        }
+        rmSync(dir, { force: true, recursive: true })
+      }
+    },
+  )
 
   test("both names take the dispatcher role, whatever the roster calls them", () => {
     for (const name of DISPATCHERS) {

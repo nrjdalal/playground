@@ -2,12 +2,16 @@ import { describe, expect, test } from "bun:test"
 import { join } from "node:path"
 
 import type { InboxAttachment } from "../../../../../../../api/hono/src/lib/dashboard/inbox"
+import { attachmentDisposition, fileNameOf } from "../../../../../../../api/hono/src/lib/download"
 import type { ViewerItem } from "../../../../../../../web/next/src/components/dashboard/viewer/registry"
 import {
   AttachmentThumbs,
   focusTarget,
 } from "../../../../../../../web/next/src/components/dashboard/viewer/thumbnails"
-import { STEP_OF_KEY } from "../../../../../../../web/next/src/components/dashboard/viewer/viewer"
+import {
+  saveItem,
+  STEP_OF_KEY,
+} from "../../../../../../../web/next/src/components/dashboard/viewer/viewer"
 
 type Node = unknown
 const web = join(import.meta.dir, "../../../../../../../web/next")
@@ -182,5 +186,73 @@ describe("a lone HTML page", () => {
     ])
     expect(html).not.toContain("full screen")
     expect(html).toContain("grid-cols-4")
+  })
+})
+
+// each file on the card saves from its own tile, the viewer's Download staying (#783's Fix, the Builder's ruling on #821)
+describe("a tile's Download", () => {
+  test("every tile but +N holds a Download naming its file, and the arrows step the tiles alone", async () => {
+    const html = render(items(20))
+    expect(html.match(/aria-label="Download shot-/g)).toHaveLength(15)
+    expect(html).not.toContain('aria-label="Download 5 more"')
+    expect(html.match(/data-tile=""/g)).toHaveLength(16)
+    const source = await Bun.file(
+      join(web, "src/components/dashboard/viewer/thumbnails.tsx"),
+    ).text()
+    expect(source).toContain('querySelectorAll<HTMLButtonElement>("button[data-tile]")')
+  })
+
+  test("each side of a lone pair saves its own file", () => {
+    const [before, after] = items(2)
+    const html = render([{ ...before!, pair: { after: after!, before: before! } }])
+    expect(html).toContain('aria-label="Download shot-0.png"')
+    expect(html).toContain('aria-label="Download shot-1.png"')
+  })
+
+  test("sits in the tile's corner on the glass, shown on hover or focus and always on a touch screen", () => {
+    const html = render(items(1))
+    expect(html).toContain("group/tile relative")
+    expect(html).toContain("group-hover/tile:opacity-100")
+    expect(html).toContain("group-focus-within/tile:opacity-100")
+    expect(html).toContain("pointer-coarse:opacity-100")
+  })
+
+  test("fetches its file from the Inbox's route in download mode with the cookie, and saves it under the readable name the API gives", async () => {
+    const [file] = items(1)
+    const name = fileNameOf("Weekly plan, updated draft", "png")
+    const fetched: { credentials?: RequestCredentials; url: string }[] = []
+    const saved: { download: string; href: string }[] = []
+    const scope = globalThis as { document?: unknown; fetch: typeof fetch }
+    const [realFetch, realDocument] = [scope.fetch, scope.document]
+    scope.fetch = (async (url: string, init?: RequestInit) => {
+      fetched.push({ credentials: init?.credentials, url: String(url) })
+      return new Response("png", {
+        headers: { "content-disposition": attachmentDisposition(name) },
+      })
+    }) as typeof fetch
+    scope.document = {
+      createElement: () => {
+        const link = {
+          click: () => saved.push({ download: link.download, href: link.href }),
+          download: "",
+          href: "",
+        }
+        return link
+      },
+    }
+    try {
+      await saveItem(file!)
+    } finally {
+      scope.fetch = realFetch
+      scope.document = realDocument
+    }
+    expect(fetched).toHaveLength(1)
+    const url = new URL(fetched[0]!.url)
+    expect(url.pathname).toBe(`/api/v1/inbox/attachments/${file!.id}`)
+    expect(url.searchParams.get("download")).toBe("1")
+    expect(fetched[0]!.credentials).toBe("include")
+    expect(saved).toEqual([
+      { download: "Weekly plan, updated draft.png", href: expect.stringMatching(/^blob:/) },
+    ])
   })
 })

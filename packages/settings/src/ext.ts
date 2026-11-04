@@ -2,8 +2,19 @@ import { z } from "zod"
 
 import { defineSettings, extLinksSchema, extOrderSchema, extScopeSchema } from "./settings"
 
-// The extensions: the repository each one's clone syncs with, the order a name is taken from them, and the orgs whose repos read each; extChain in settings.ts reads the last two.
+// The extensions this checkout ships under extensions/, beside core, each off until the owner turns it on in ext.bundled.
+export const BUNDLED_EXTENSIONS = ["slack"] as const
+
+// The extensions: the bundled ones turned on, the repository each one's clone syncs with, the order a name is taken from them, and the orgs whose repos read each; extChain in settings.ts reads the last two.
 export const extSettings = defineSettings({
+  "ext.bundled": {
+    default: [],
+    description:
+      "The extensions Playground ships under extensions/ that you have turned on, each read as a scope after your installed extensions and before core; one not named here loads no skill.",
+    schema: z
+      .array(z.enum(BUNDLED_EXTENSIONS))
+      .refine((names) => new Set(names).size === names.length, "a bundled extension is on once"),
+  },
   "ext.links": {
     default: {},
     description:

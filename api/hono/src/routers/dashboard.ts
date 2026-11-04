@@ -95,6 +95,7 @@ import { AGENT_ID_PATTERN, readTail, subagentPath } from "@/lib/dashboard/transc
 import { startVibe, stopVibe, VibeError } from "@/lib/dashboard/vibe"
 import { DISPATCHER, DISPATCHERS, listLive, type Live } from "@/lib/dashboard/workers"
 import { searchYouTube } from "@/lib/dashboard/youtube-search"
+import { attachmentDisposition } from "@/lib/download"
 import {
   ApiError,
   authErrorResponses,
@@ -352,10 +353,11 @@ export const servedHeaders = (file: Attachment): Record<string, string> => ({
   "x-content-type-options": "nosniff",
 })
 
-// The serve route's work: the file's bytes with servedHeaders, or a 404 once it has gone.
+// The serve route's work: the file's bytes with servedHeaders, or a 404 once it has gone; with download, saved under the name it gives.
 export async function serveAttachment(
   id: string,
   read: (id: string) => ReturnType<typeof readAttachment> = readAttachment,
+  download?: (id: string) => Promise<string>,
 ): Promise<Response> {
   const found = await read(id)
   if (!found) {
@@ -365,7 +367,10 @@ export async function serveAttachment(
       "No attachment by that id: files are kept for a week after they arrive",
     )
   }
-  return new Response(found.bytes, { headers: servedHeaders(found.file) })
+  const headers = servedHeaders(found.file)
+  if (download)
+    headers["content-disposition"] = attachmentDisposition(await download(found.file.id))
+  return new Response(found.bytes, { headers })
 }
 
 // A body is cut off once it outgrows a file and its form's framing, before it is all read.

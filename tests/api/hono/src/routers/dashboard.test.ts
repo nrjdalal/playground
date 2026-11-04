@@ -45,6 +45,13 @@ const { DELIVERY_FAILURES } = await import("../../../../../api/hono/src/lib/dash
 const { Hono } = await import("../../../../../api/hono/node_modules/hono")
 const { env } = await import("../../../../../packages/env/dist/api-hono.mjs")
 
+const PNG = Uint8Array.from(
+  Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=",
+    "base64",
+  ),
+)
+
 // The router on its own, at its own root (the API mounts it at /api/v1): the API's entry reads a version constant only its build defines. ApiError is an HTTPException, so its status survives without the API's error handler.
 const request = (path: string, headers: Record<string, string> = {}) =>
   dashboardRouter.request(`http://127.0.0.1${path}`, { headers })
@@ -869,6 +876,35 @@ describe("the attachment routes", () => {
         readAttachment(id, dir),
       ).catch((thrown: { status: number }) => thrown)
       expect(gone).toMatchObject({ status: 404 })
+    } finally {
+      rmSync(dir, { force: true, recursive: true })
+    }
+  })
+
+  test("with download, a kept file saves under the name it gives for the stored file, and an id outside the folder is a 404 that asks for no name (#783)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "dashboard-serve-download-"))
+    try {
+      const stored = await storeAttachment(PNG, "shot.png", { dir })
+      if (!stored.ok) throw new Error("not stored")
+      const asked: string[] = []
+      const download = async (id: string) => {
+        asked.push(id)
+        return "Weekly plan, updated draft.png"
+      }
+      const read = (id: string) => readAttachment(id, dir)
+      const response = await serveAttachment(stored.id, read, download)
+      expect(response.headers.get("content-disposition")).toBe(
+        "attachment; filename=\"Weekly plan, updated draft.png\"; filename*=UTF-8''Weekly%20plan%2C%20updated%20draft.png",
+      )
+      expect(response.headers.get("content-type")).toBe("image/png")
+      expect(asked).toEqual([stored.id])
+      for (const id of [`../${stored.id}`, "../../etc/passwd", `${dir}/${stored.id}`]) {
+        const gone = await serveAttachment(id, read, download).catch(
+          (thrown: { status: number }) => thrown,
+        )
+        expect(gone).toMatchObject({ status: 404 })
+      }
+      expect(asked).toEqual([stored.id])
     } finally {
       rmSync(dir, { force: true, recursive: true })
     }
