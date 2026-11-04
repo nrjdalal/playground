@@ -722,6 +722,10 @@ describe("a quoted argument is read as a command line only where a program runs 
       "busybox's shell applet given a harmless command",
       "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sudo busybox sh -c ls",
     ],
+    [
+      "a shell given a script named by a lone dash after `--`",
+      "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sh -- -",
+    ],
   ])("%s runs from a worktree", async (_, command) => {
     expect(await at(command, join(homedir(), "x", ".claude", "worktrees", "y"))).toBeUndefined()
   })

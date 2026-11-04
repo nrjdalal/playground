@@ -214,3 +214,14 @@ describe("stdinShell reads a privilege wrapper's root shell", () => {
     expect(stdinShell(lex(line).commands[0])).toBe(kind)
   })
 })
+
+describe("stdinShell reads a shell's lone dash", () => {
+  test.each<[string, string, "shell" | undefined]>([
+    ["a lone dash alone reads stdin", "sh -", "shell"],
+    ["a lone dash after an option reads stdin", "bash -e -", "shell"],
+    ["the word after a lone dash is the script", "sh - script.sh", undefined],
+    ["a lone dash right after `--` is the script's name", "sh -- -", undefined],
+  ])("%s", (_, line, kind) => {
+    expect(stdinShell(lex(line).commands[0])).toBe(kind)
+  })
+})
