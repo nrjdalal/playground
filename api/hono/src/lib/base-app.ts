@@ -15,7 +15,7 @@ export const baseApp = () => {
       origin: env.HONO_TRUSTED_ORIGINS,
       allowHeaders: ["content-type", "authorization"],
       allowMethods: ["DELETE", "GET", "OPTIONS", "PATCH", "POST", "PUT"],
-      exposeHeaders: ["content-length"],
+      exposeHeaders: ["content-disposition", "content-length"],
       maxAge: 600,
       credentials: true,
     }),

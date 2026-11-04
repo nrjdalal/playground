@@ -6,6 +6,7 @@ import { z } from "zod"
 
 // Relative, not @/: the web's tests import this file.
 import { isOwnFolder, sniff } from "../dashboard/attachments"
+import { fileNameOf } from "../download"
 import { dataDir, livePath } from "../sessions/paths"
 
 // What a preview is drawn as: an image as itself, an HTML page live in a sandboxed frame, so its CSS motion shows.
@@ -14,13 +15,14 @@ export type PreviewKind = "html" | "image"
 // A page `playground page` kept: one line of pages.jsonl in the folder, naming its file, its title, the session that made it (by), the session it was made for (for) and when.
 export type PageRecord = { at: string; by: string; for: string | null; title: string }
 
-// A preview as the page lists it, by name, never a path: its topic (the name before its first - or .), its caption from a .txt beside it, when it last changed, its size in bytes, and its record when `playground page` kept it.
+// A preview as the page lists it, by name, never a path: its topic (the name before its first - or .), its caption from a .txt beside it, when it last changed, its size in bytes, its record when `playground page` kept it, and for an HTML page the name of the PDF beside it, when there is one.
 export type Preview = {
   caption: string | null
   kind: PreviewKind
   modifiedAt: string
   name: string
   page?: PageRecord
+  pdf?: string
   size: number
   topic: string
 }
@@ -45,8 +47,8 @@ const tombstoneLine = z.strictObject({
   file: z.string(),
 })
 
-// A preview the serve route found: its name, kind, absolute path and size.
-export type PreviewFile = { kind: PreviewKind; name: string; path: string; size: number }
+// A file the serve route found: its name, kind (a preview's, or pdf for a PDF beside a page), absolute path and size.
+export type PreviewFile = { kind: PreviewKind | "pdf"; name: string; path: string; size: number }
 
 export const IMAGE_PREVIEW_EXTENSIONS = ["gif", "png", "webp"] as const
 export const PREVIEW_EXTENSIONS = [...IMAGE_PREVIEW_EXTENSIONS, "html"] as const
@@ -69,12 +71,22 @@ const extensionOf = (name: string): string => extname(name).slice(1)
 export const previewKindOf = (name: string): PreviewKind =>
   extensionOf(name) === "html" ? "html" : "image"
 
+// Pure: the name of the PDF that stands beside a page, <page>.pdf beside <page>.html.
+const pdfOf = (page: string): string => `${page.slice(0, -".html".length)}.pdf`
+
+// Pure: the page a PDF stands beside (<page>.pdf beside <page>.html), or null when the name is not such a PDF's.
+export const pdfPageOf = (name: string): string | null => {
+  const page = name.endsWith(".pdf") ? `${name.slice(0, -".pdf".length)}.html` : null
+  return page && isPreviewName(page) ? page : null
+}
+
 // The topic a preview is grouped under: its name up to the first - or . (spinner-light-1.png and spinner-preview.html are both spinner).
 export const topicOf = (name: string): string => name.split(/[-.]/)[0] ?? name
 
 const CONTENT_TYPES: Record<string, string> = {
   gif: "image/gif",
   html: "text/html; charset=utf-8",
+  pdf: "application/pdf",
   png: "image/png",
   webp: "image/webp",
 }
@@ -119,6 +131,13 @@ async function captionOf(folder: string, name: string): Promise<string | null> {
   } catch {
     return null
   }
+}
+
+// The PDF beside a page by its name, <page>.pdf: a regular file with one link whose bytes are a PDF's. Null when there is none or it is not that.
+async function pdfBeside(folder: string, page: string): Promise<string | null> {
+  const name = pdfOf(page)
+  const bytes = await readOwnFile(join(folder, name), MAX_PREVIEW_BYTES, SNIFF_BYTES)
+  return bytes && sniff(bytes, name) === "pdf" ? name : null
 }
 
 // Each page's record by its file, from pages.jsonl (a later line for the same file wins, a tombstone dropping it), and each line that is neither a page's record nor a tombstone, named (problems). A missing file holds none.
@@ -210,12 +229,14 @@ export async function readPreviews(
       continue
     }
     const page = pages.get(name)
+    const pdf = kind === "html" ? await pdfBeside(folder, name) : null
     previews.push({
       caption: await captionOf(folder, name),
       kind,
       modifiedAt: file.mtime.toISOString(),
       name,
       ...(page && { page }),
+      ...(pdf && { pdf }),
       size: file.size,
       topic: topicOf(name),
     })
@@ -225,18 +246,33 @@ export async function readPreviews(
   return { previews, problems }
 }
 
-// The file a name names, or null: the name must be one the dashboard serves, sitting directly in the folder as a regular file with one link (not a symlink, and not a hard link to a file elsewhere), in a folder its owner owns.
+// The file a name names, or null: the name must be one the dashboard serves (a preview's, or a PDF's while its page stands beside it), sitting directly in the folder as a regular file with one link (not a symlink, and not a hard link to a file elsewhere), in a folder its owner owns.
 export async function findPreview(name: string, dir = previewsDir()): Promise<PreviewFile | null> {
-  if (!isPreviewName(name)) return null
+  const page = pdfPageOf(name)
+  const pdf = page !== null
+  if (!pdf && !isPreviewName(name)) return null
+  // a PDF is served only while its page stands beside it
+  if (page && !(await findPreview(page, dir))) return null
   const folder = resolve(dir)
   const path = join(folder, name)
   if (dirname(path) !== folder || !(await isOwnFolder(folder))) return null
   const info = await lstat(path).catch(() => null)
   if (!info?.isFile() || info.nlink !== 1) return null
-  return { kind: previewKindOf(name), name, path, size: info.size }
+  return { kind: pdf ? "pdf" : previewKindOf(name), name, path, size: info.size }
 }
 
-// Deletes a page the Pages tab lists: only a name pages.jsonl keeps a record for, found as findPreview finds it. A tombstone is appended to pages.jsonl first, so a concurrent `playground page` append stays and a failure leaves no record naming a freed name; then its file and its caption are unlinked one by one. False, touching nothing, for any other name.
+// The name a served file downloads under: its page's title from pages.jsonl, else its caption, else its own name, with its own extension; a PDF takes the title of the page it stands beside.
+export async function previewDownloadName(name: string, dir = previewsDir()): Promise<string> {
+  const folder = resolve(dir)
+  const titled = pdfPageOf(name) ?? name
+  const title =
+    (await readPages(folder)).pages.get(titled)?.title ??
+    (await captionOf(folder, titled)) ??
+    titled.slice(0, -extname(titled).length)
+  return fileNameOf(title, extensionOf(name))
+}
+
+// Deletes a page the Pages tab lists: only a name pages.jsonl keeps a record for, found as findPreview finds it. A tombstone is appended to pages.jsonl first, so a concurrent `playground page` append stays and a failure leaves no record naming a freed name; then its file, its caption and the PDF beside it are unlinked one by one, so a page kept later under the freed name offers no PDF of this one. False, touching nothing, for any other name.
 export async function deletePage(
   name: string,
   dir = previewsDir(),
@@ -252,9 +288,10 @@ export async function deletePage(
   await unlink(file.path).catch((error: NodeJS.ErrnoException) => {
     if (error.code !== "ENOENT") throw error
   })
-  const caption = captionPath(folder, name)
-  const info = await lstat(caption).catch(() => null)
-  if (info?.isFile() && info.nlink === 1) await unlink(caption).catch(() => {})
+  for (const beside of [captionPath(folder, name), join(folder, pdfOf(name))]) {
+    const info = await lstat(beside).catch(() => null)
+    if (info?.isFile() && info.nlink === 1) await unlink(beside).catch(() => {})
+  }
   return true
 }
 
@@ -270,13 +307,13 @@ export async function readPreview(
   return { bytes, file: { ...file, size: bytes.length } }
 }
 
-// What a browser may do with a preview: show it as the type its name gives and nothing else. An image loads nothing and runs nothing. An HTML page is a sandboxed document with an opaque origin, so it runs its own inline script (a deck's keys and tabs: the owner, "why navigation is not working in html") but submits no form, opens no window and cannot read the dashboard's cookies; it may use its own inline styles and data: images and fonts, and fetches nothing else, so it cannot reach the dashboard's API. Only the dashboard's own pages may frame it.
+// What a browser may do with a preview: show it as the type its name gives and nothing else. An image loads nothing and runs nothing; a PDF beside a page is saved, never shown. An HTML page is a sandboxed document with an opaque origin, so it runs its own inline script (a deck's keys and tabs: the owner, "why navigation is not working in html") but submits no form, opens no window and cannot read the dashboard's cookies; it may use its own inline styles and data: images and fonts, and fetches nothing else, so it cannot reach the dashboard's API. Only the dashboard's own pages may frame it.
 export const previewHeaders = (
   file: Pick<PreviewFile, "kind" | "name">,
   frameAncestors: readonly string[],
 ): Record<string, string> => ({
   "cache-control": "private, no-cache",
-  "content-disposition": "inline",
+  "content-disposition": file.kind === "pdf" ? "attachment" : "inline",
   "content-security-policy":
     file.kind === "html"
       ? `sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; base-uri 'none'; form-action 'none'; frame-ancestors ${frameAncestors.length ? frameAncestors.join(" ") : "'none'"}`

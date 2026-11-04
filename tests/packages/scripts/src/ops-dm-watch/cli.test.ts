@@ -85,6 +85,19 @@ describe("the DM watch job", () => {
     expect(failing.sent).toHaveLength(2)
   })
 
+  test("with no vault this Mac reads, ops is told the vault is not installed, and nothing runs", async () => {
+    settle({ ...SET, "ext.links": { acme: ["acme"] }, "slack.mode": true })
+    const { ctx, ran, sent } = fake()
+    await expect(watchBeat.run(ctx)).rejects.toThrow("exit 2: the vault is not installed")
+    expect(ran).toEqual([])
+    expect(sent).toEqual([
+      {
+        text: "DM watch failed (exit 2): the vault is not installed: install an extension that holds the vault skill and link it to * (playground ext link <name> '*')",
+        to: "ops",
+      },
+    ])
+  })
+
   test("vault's 1Password error names an empty op account list as the job's context, and a listed account leaves vault's words", async () => {
     settle({ ...SET, "slack.mode": true })
     const locked = {

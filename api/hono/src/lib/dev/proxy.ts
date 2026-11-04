@@ -38,5 +38,5 @@ export const proxyRefusal = async (
     ? Number((await saved.text()).trim())
     : Number(env.PORTLESS_PORT) || 443
   if (port >= 1024 || (await listens(port))) return null
-  return `portless's proxy is not running, and starting it on port ${port} needs sudo, which a stack cannot ask for; once, in a terminal in the main checkout, run \`sudo node_modules/.bin/portless service install\` and then \`node_modules/.bin/portless trust\`, or start on fixed ports with \`PORTLESS=0 bun run dev\``
+  return `portless's proxy is not running, and starting it on port ${port} needs sudo, which a stack cannot ask for; once, in a terminal in the main checkout, run \`sudo node_modules/.bin/portless service install\` and then \`node_modules/.bin/portless trust\`, or start on fixed ports with \`PORTLESS=0 bun run dev\`; once a stack is up, Settings' Things to fix trusts the certificate with a button`
 }

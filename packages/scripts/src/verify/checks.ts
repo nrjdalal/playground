@@ -830,7 +830,7 @@ export const system = async ({ api, web }: Target, cookie: string): Promise<Resu
 
 export type AgentRow = { name: string; state: string; status?: string | null }
 
-// Pure: whether the agents route reads a session as ended, the roster's `ended` and no live session of its name, which is how the Dashboard reads Ended; a read with no live sessions (cmux refused) or a herdr server that did not read would show a live session as down, so either fails rather than pass on it.
+// Pure: whether the agents route reads a session as ended, the roster's `ended` and no live session of its name, which is how the Dashboard reads Ended; a read with no live sessions (the sessions read failed) or a herdr server that did not read would show a live session as down, so either fails rather than pass on it.
 export const endedResult = (
   name: string,
   agents: AgentRow[],
