@@ -73,7 +73,7 @@ export const movesTheBoard = (line: string): boolean => {
   return !TOOL_HOOKS.has(hook) || BOARD_TOOLS.has(String(fields.tool_name))
 }
 
-// A slow sessions read would hold the board on its old frame, so a refresh gives up after a while with an error frame; the next starts once that read settles, which herdr's deadline a server (readServer() in herdr.ts) bounds.
+// A slow sessions read would hold the board on its old frame, so a refresh gives up after a while with an error frame; the next starts once that read settles, which readServer()'s deadline in herdr.ts bounds.
 const withTimeout = <T>(promise: Promise<T>, ms: number): Promise<T> =>
   new Promise<T>((resolve, reject) => {
     const timer = setTimeout(
@@ -115,7 +115,7 @@ export class DashboardHub {
       // herdr's events on one stream, every server's (herdr.ts), or null where this machine runs none; herdrEvents() for every server a stack that reads this machine names unless a test stubs it.
       herdr?: () => HerdrEvents | null
       listLive: typeof listLive
-      // Reads one surface's screen for the activity line, from cmux or herdr (terminal.ts) unless a test stubs it.
+      // Reads one session's screen for the activity line (terminal.ts) unless a test stubs it.
       readScreen?: (surface: string) => Promise<string>
       refreshGapMs?: number
       refreshTimeoutMs?: number

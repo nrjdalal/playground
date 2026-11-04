@@ -1215,7 +1215,7 @@ const dashboardRoutes = new Hono<{ Variables: Session }>()
     describeRoute({
       tags: ["Dashboard"],
       description:
-        "Live frames over a WebSocket: { type: workers } whenever a session changes, { type: entries } as transcripts grow, { type: error } when herdr cannot be read, and { type: activity } for the one chat the client has open, once it sends { type: watch, sessionId } (null to stop): the session's spinner line as verb, elapsed, tokens and thought, read at most once a second while it works, and null when it stops",
+        "Live frames over a WebSocket: { type: workers } whenever a session changes, { type: entries } as transcripts grow, { type: error } when the sessions cannot be read, and { type: activity } for the one chat the client has open, once it sends { type: watch, sessionId } (null to stop): the session's spinner line as verb, elapsed, tokens and thought, read at most once a second while it works, and null when it stops",
       responses: { 101: { description: "Switching Protocols" }, ...authErrorResponses },
     }),
     upgradeWebSocket(() => {

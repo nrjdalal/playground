@@ -104,7 +104,7 @@ export type PullsQueue = {
   repo: string
 }
 
-// liveProblem says why live sessions could not be read (herdr refused or timed out); the roster's agents then all read as down. sockets names each live session's peer socket (`uds:<path>`), so a message sent to an address can be shown by its recipient's name.
+// liveProblem says why live sessions could not be read (the sessions read failed or timed out); the roster's agents then all read as down. sockets names each live session's peer socket (`uds:<path>`), so a message sent to an address can be shown by its recipient's name.
 export type AgentsBoard = {
   agents: Agent[]
   liveProblem: string | null

@@ -150,7 +150,7 @@ export const devEnv = (shell: Record<string, string | undefined>, gitSha: string
   return { env, notes }
 }
 
-// The stack of a live dashboard that reads herdr alone: the API's cmux reads go quiet (herdrAlone in lib/dashboard/cmux.ts).
+// The stack of a live dashboard that cmux would not answer, started anyway since cmux held no live factory session (herdrAlone in lib/dashboard/cmux.ts, which no read heeds now).
 export const herdrAloneEnv = (env: Record<string, string>): Record<string, string> => ({
   ...env,
   PLAYGROUND_HERDR_ALONE: "1",
@@ -301,7 +301,7 @@ const FIX: Record<GuardFailure, string> = {
   vanished: "Docker is up, so run `bun run dev` again",
 }
 
-// What the stack's dashboard reads, and the rule of dashboardSource's that chose it: the live machine, the fixture the launcher writes for it, or, on a stack of the hosted build, nothing. A live dashboard reads herdr alone (`cmux: false`) unless it opts in to cmux's sessions (`reason` null), or when cmux would not answer it while cmux held no live factory session (`reason` says why).
+// What the stack's dashboard reads, and the rule of dashboardSource's that chose it: the live machine, the fixture the launcher writes for it, or, on a stack of the hosted build, nothing. A live dashboard reads herdr alone; `cmux` says whether cmux answers the stack, asked only of one that opts in to every session, for cmux's write path, and `reason` says why it does not (null when the stack did not opt in).
 export type Dashboard =
   | { fixture: Fixture; kind: "fixture"; rule: DashboardRule }
   | { kind: "hosted" }

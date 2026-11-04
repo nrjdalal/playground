@@ -228,7 +228,7 @@ describe("DashboardHub", () => {
     const hub = new DashboardHub({
       events: false,
       listLive: () =>
-        Promise.reject(Object.assign(new Error("cmux is down"), { code: "CMUX_FAILED" })),
+        Promise.reject(Object.assign(new Error("the registry is down"), { code: "CMUX_FAILED" })),
     })
     const frames: DashboardFrame[] = []
     const leave = hub.subscribe((frame) => frames.push(frame))
@@ -237,7 +237,7 @@ describe("DashboardHub", () => {
       code: "CMUX_FAILED",
       dispatcher: DISPATCHER,
       dispatchers: DISPATCHERS,
-      message: "cmux is down",
+      message: "the registry is down",
       names: getSessionNames(),
       type: "error",
     })
@@ -263,7 +263,7 @@ describe("DashboardHub", () => {
     second()
   })
 
-  // cmux's `sessions list` took 12.7s at load 19 (9 Oct), longer than a refresh waits, and a new read started beside each slow one stacked them until the live chat went down.
+  // A sessions read once took 12.7s at load 19 (9 Oct), longer than a refresh waits, and a new read started beside each slow one stacked them until the live chat went down.
   test("a slow sessions read times out with an error frame, and no new read starts until it settles", async () => {
     const { calls, hub } = hubWith(200)
     const frames: DashboardFrame[] = []
@@ -408,7 +408,7 @@ describe("DashboardHub", () => {
   test("a line whose change event is lost reaches the board on a refresh whose sessions read fails", async () => {
     const { frames, leave, path, refresh } = await opened("failed.jsonl")
     appendFileSync(path, line("u-1", "read on a failed refresh"))
-    const again = await refresh((call) => call.reject(new Error("cmux is down")))
+    const again = await refresh((call) => call.reject(new Error("the registry is down")))
     await until("the lost line", () => sentBy(frames).length === 1)
     expect(sentBy(frames)).toEqual(["s-tail:read on a failed refresh"])
     leave()
@@ -477,7 +477,7 @@ describe("DashboardHub", () => {
     leave()
   })
 
-  // cmux keeps an answered picker until the turn ends; the session writing again is the first sign he answered it.
+  // A session's record keeps an answered picker until the turn ends; the session writing again is the first sign it was answered.
   test("a line from a session waiting on you re-reads the board at once; one from a working session does not", async () => {
     const { born, stat } = birthtimes()
     const waiting = join(dir, "waiting.jsonl")
