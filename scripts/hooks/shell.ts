@@ -3,7 +3,14 @@ import { homedir } from "node:os"
 import { basename, dirname, isAbsolute, resolve } from "node:path"
 
 // `variable` names the first shell variable a text expands, so a hook can tell `"$HERDR_BIN_PATH"` from any other unknown program.
-export type Text = { reads?: Text[]; unknown?: string; value: string; variable?: string }
+// `tilde` marks a word that opens with an unquoted ~- or ~+, which zsh expands to the folder it last left or the one it is in.
+export type Text = {
+  reads?: Text[]
+  tilde?: boolean
+  unknown?: string
+  value: string
+  variable?: string
+}
 // `glob` marks a word with a glob character the shell sees outside quotes, so `'{print $1}'` holds none and `{a,'b'}` one.
 // `raw` keeps the source of a word that holds a value the lexer cannot read, so a hook can lex it again once the call has set its variables.
 export type Word = Text & { glob?: boolean; procs?: Command[]; quoted: boolean; raw?: string }
@@ -63,6 +70,8 @@ export type Env = {
   files: Map<string, Text>
   known: Record<string, string>
   old?: { dir?: string }
+  // In a hook that follows ~-, each folder the shell may have left at its last cd, which a word's ~- names; `pathOf` reads ~- only when this holds one folder, and before any cd it is `old.dir` alone
+  oldFrom?: string[]
   process: Record<string, string | undefined>
   vars: Map<string, Text>
 }
@@ -709,7 +718,17 @@ function word(lx: Lexer): Word {
       const text = c === "$" ? dollar(lx) : backtick(lx)
       merge(out, text)
       if (GLOB_CHARS.test(text.value)) out.glob = true
-    } else if (c === "~" && lx.i === start && (next === "" || next === "/" || BREAK.has(next))) {
+    } else if (
+      c === "~" &&
+      lx.i === start &&
+      (next === "-" || next === "+") &&
+      ends(src[lx.i + 2])
+    ) {
+      out.tilde = true
+      out.value += c + next
+      bare += c + next
+      lx.i += 2
+    } else if (c === "~" && lx.i === start && ends(next)) {
       out.value += homedir()
       lx.i++
     } else {
@@ -726,6 +745,9 @@ function word(lx: Lexer): Word {
 }
 
 const GLOB_CHARS = /[*?[{(]/
+
+// Whether the character after a word's opening ~, ~- or ~+ ends that part, so the shell expands it: the word's end, a slash or a break
+const ends = (c = ""): boolean => c === "" || c === "/" || BREAK.has(c)
 
 function double(lx: Lexer): Text {
   const { src } = lx
@@ -1097,6 +1119,7 @@ export async function examine(
 ): Promise<string | undefined> {
   tick()
   unchain(cmd, env)
+  blindTilde(cmd, env)
   const [primary, ...others] = readings(parse(cmd))
   // only the primary reading moves the folder, sets variables and records files, as canary's one reading did; each other runs on a copy of the env before the command
   const before = others.length > 0 ? apart(env) : env
@@ -1261,14 +1284,22 @@ function ancestors(path: string): string[] {
   }
 }
 
+// A word as typed, its ~- or ~+ left to the cd's own reading of it below
+const asTyped = (word: Word): Word => ({ ...word, tilde: undefined })
+
 // The one folder a cd names, taken as the shell's own wherever the reader reads it: `Env.cwd`'s own rule, which every hook read before the proven folder arrived and a hook outside `places` reads still.
 async function cdTarget(name: string, args: Word[], env: Env): Promise<string | undefined> {
   const dir = args.find((a) => !(a.value.startsWith("-") && a.value.length > 1))
   if (!dir) return homedir()
-  const typed = dir.value === "-" ? undefined : await folder(pathOf(dir, env))
-  // in a hook that follows ~-, a pushd's unquoted ~- is the folder the shell last left and ~+ the current one, as the shell expands them; beside a folder named ~- or ~+ the typed reading stays, though the shell still expands the word
+  const typed = dir.value === "-" ? undefined : await folder(pathOf(asTyped(dir), env))
+  // in a hook that follows ~-, a cd's or pushd's unquoted ~- is the folder the shell last left and ~+ the current one, as the shell expands them; beside a folder named ~- or ~+ the typed reading stays, though the shell still expands the word
   const tilde =
-    !typed && name === "pushd" && env.old && !dir.quoted && !dir.unknown && !dir.reads?.length
+    !typed &&
+    (name === "cd" || name === "pushd") &&
+    env.old &&
+    !dir.quoted &&
+    !dir.unknown &&
+    !dir.reads?.length
       ? /^~([-+])(?=\/|$)/.exec(dir.value)
       : null
   const base = tilde && (tilde[1] === "-" ? env.old?.dir : env.cwd)
@@ -1298,7 +1329,7 @@ function cdTargets(name: string, cmd: Command, parsed: Parsed, env: Env, from: s
   for (const word of dirs.length > 1 ? dirs : [dir]) {
     for (const base of from.length > 0 ? from : [undefined]) {
       tick()
-      const path = pathOf(word, { ...env, cwd: base })
+      const path = pathOf(asTyped(word), { ...env, cwd: base })
       if (path === undefined) {
         unread = true
         continue
@@ -1313,7 +1344,7 @@ function cdTargets(name: string, cmd: Command, parsed: Parsed, env: Env, from: s
   return { back: dirs.length > 1, paths: [...paths], unread }
 }
 
-// In a hook that follows zsh's ~- (`Env.old` set), a pushd's unquoted ~- returns to a folder the shell was in and ~+ stays in the one it is in; the reader takes every folder `cd -` would go back to, or each one the shell may be in, beside the typed reading and the folder `Env.cwd`'s own reading lands in, so it is never looser than that reading.
+// In a hook that follows zsh's ~- (`Env.old` set), a cd's or pushd's unquoted ~- returns to a folder the shell was in and ~+ stays in the one it is in; the reader takes every folder `cd -` would go back to, or each one the shell may be in, beside the typed reading and the folder `Env.cwd`'s own reading lands in, so it is never looser than that reading.
 function pushdTilde(
   move: Move,
   name: string,
@@ -1324,7 +1355,12 @@ function pushdTilde(
 ): Move {
   const dir = parsed.args.find((a) => !(a.value.startsWith("-") && a.value.length > 1))
   const tilde =
-    name === "pushd" && env.old && dir && !dir.quoted && !dir.unknown && !dir.reads?.length
+    (name === "cd" || name === "pushd") &&
+    env.old &&
+    dir &&
+    !dir.quoted &&
+    !dir.unknown &&
+    !dir.reads?.length
       ? /^~([-+])(?=\/|$)/.exec(dir.value)
       : null
   if (!tilde || !dir) return move
@@ -1347,6 +1383,8 @@ async function chdirTo(name: string, cmd: Command, parsed: Parsed, env: Env): Pr
   const left = env.cwd
   env.cwd = name === "popd" || cmd.detached ? undefined : await cdTarget(name, parsed.args, env)
   if (env.old) env.old = name === "popd" ? {} : { dir: env.cwd === undefined ? undefined : left }
+  // a word's ~- names a folder only after a cd the reader is sure of, set below
+  if (env.old) env.oldFrom = []
   const from = startFolders(env)
   const back = [...new Set([...(env.cwdBack ?? []), ...from])]
   // a relative target resolves against each folder a body's cd may have reached too, since a brace group's cd, or a called function's, runs before this one
@@ -1375,6 +1413,7 @@ async function chdirTo(name: string, cmd: Command, parsed: Parsed, env: Env): Pr
     env.cwdSure = paths[0]
     env.cwdMaybe = []
     env.cwdUnread = false
+    if (env.old) env.oldFrom = bases
     // the chain holds only to the first command it does not reach, so the folders from before this cd are kept for that one
     if (chained) {
       env.cwdChain = keep([...new Set([...(env.cwdChain ?? []), ...from])], env)
@@ -1400,6 +1439,8 @@ function unchain(cmd: Command, env: Env): void {
     env,
   )
   env.cwdSure = undefined
+  // the chain's cd may not have run, so the folder a ~- names is no longer one the reader is sure of
+  if (env.old) env.oldFrom = []
   env.cwdChain = []
   env.cwdChainToken = undefined
 }
@@ -1609,8 +1650,33 @@ export async function resolveText(text: Text, env: Env): Promise<Text> {
 
 export function pathOf(text: Text, env: Env): string | undefined {
   if (text.unknown || text.reads?.length || text.value === "") return undefined
+  // in a hook that follows ~-, the shell expands a word's unquoted ~+ to the folder it is in and ~- to the one it last left, read only when the reader can name that one folder
+  const sign = env.old && text.tilde ? /^~([-+])(?=\/|$)/.exec(text.value)?.[1] : undefined
+  if (sign) {
+    const base = sign === "+" ? env.cwd : leftFolder(env)
+    return base === undefined ? undefined : resolve(base + text.value.slice(2))
+  }
   if (isAbsolute(text.value)) return text.value
   return env.cwd ? resolve(env.cwd, text.value) : undefined
+}
+
+// The one folder a ~- names in a hook that follows it, when the reader can name it
+function leftFolder(env: Env): string | undefined {
+  const left = env.oldFrom ?? (env.old?.dir === undefined ? [] : [env.old.dir])
+  return left.length === 1 ? left[0] : undefined
+}
+
+const BLIND = "zsh's ~-, the folder the shell last left, which the hook cannot name on this line"
+
+// In a hook that follows ~-, a command's unquoted ~- the reader cannot name reads as unknown, as a variable it cannot expand does, so each guard's own rule for one applies; a cd's own folder word keeps its reading of every folder it may go back to. The words are replaced in place, since hooks key their notes on the command itself.
+function blindTilde(cmd: Command, env: Env): void {
+  if (!env.old || leftFolder(env) !== undefined) return
+  const blind = (w?: Word): w is Word => !!w?.tilde && /^~-(?=\/|$)/.test(w.value)
+  const hide = (w: Word): Word =>
+    blind(w) ? { ...w, tilde: undefined, unknown: BLIND, value: UNKNOWN + w.value.slice(2) } : w
+  for (const r of cmd.redirects) if (blind(r.target)) r.target = hide(r.target)
+  if (cmd.words.some(blind) && !["cd", "popd", "pushd"].includes(parse(cmd).name))
+    cmd.words = cmd.words.map(hide)
 }
 
 // Reads a regular file of at most MAX_BYTES; undefined when there is no file at the path.
