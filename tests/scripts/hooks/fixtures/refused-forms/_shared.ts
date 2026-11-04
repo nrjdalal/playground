@@ -10,6 +10,7 @@ export type Guard =
   | "no-glm-heavy-path"
   | "no-headless-login"
   | "no-kill-by-name"
+  | "no-linear-ticket"
   | "no-main-checkout"
   | "no-playground-leak"
   | "no-public-leak"
@@ -17,6 +18,7 @@ export type Guard =
   | "no-raw-spawn"
   | "no-release-comment"
   | "no-stash"
+  | "no-unslotted-run"
 
 // "process …" folders sit in the home `~` expands to (the process's own), the rest in the test's scratch machine.
 export type Folder =

@@ -20,6 +20,7 @@ import {
   RiKey2Line,
   RiMoneyDollarCircleLine,
   RiProgress4Line,
+  RiPuzzleLine,
   RiQuestionAnswerLine,
   RiQuestionLine,
   RiRefreshLine,
@@ -113,6 +114,7 @@ import {
   checkAnswerNote,
   dismissable,
   dismissItems,
+  filesCount,
   focusAfterTake,
   foldsByDefault,
   INBOX_QUERY_KEY,
@@ -144,6 +146,7 @@ import {
   takenBy,
   updatedSince,
   upfrontLink,
+  uploadsOn,
   useInbox,
 } from "@/lib/inbox"
 import { needsYouAnchor, useNeedsYouTarget } from "@/lib/needs-you"
@@ -154,6 +157,7 @@ import { inboxMark, readMark } from "@/lib/tab-dot"
 import { fullTime, relativeTime } from "@/lib/time"
 
 const DECISION_ICONS: Record<InboxPreview["type"], RemixiconComponentType> = {
+  accept: RiPuzzleLine,
   ask: RiQuestionAnswerLine,
   budget: RiMoneyDollarCircleLine,
   delete: RiDeleteBinLine,
@@ -418,6 +422,18 @@ function SoFar({ thread }: { thread?: { said: string; who: string }[] }) {
   )
 }
 
+// Under a Slack send's files while it is open: that its go shares them into the same thread (uploadsOn).
+function UploadMark({ item }: { item: InboxItem }) {
+  const on = uploadsOn(item)
+  if (!on || item.kind === "update" || !("attachments" in item.preview)) return null
+  const count = item.preview.attachments?.length ?? 0
+  return (
+    <p className="text-muted-foreground text-xs">
+      {filesCount(count)} · uploads on {on}
+    </p>
+  )
+}
+
 // An ask's words and files, and a read-only update's, which shows them with no Approve.
 function Shown({ preview }: { preview: Pick<InboxUpdate, "attachments" | "text"> }) {
   return (
@@ -451,6 +467,7 @@ function Preview({ item }: { item: Extract<InboxItem, { kind: "decision" }> }) {
           <p>On Approve, {preview.to} gets:</p>
           <p className={QUOTE}>{preview.text}</p>
           {preview.attachments ? <Attachments items={preview.attachments} /> : null}
+          <UploadMark item={item} />
         </>
       )
     case "ship":
@@ -516,6 +533,17 @@ function Preview({ item }: { item: Extract<InboxItem, { kind: "decision" }> }) {
           project <code className="font-mono">{preview.sink.project}</code> ({preview.sink.scope})
           for {preview.sink.environments.join(", ")}. It is kept nowhere.
         </p>
+      )
+    case "accept":
+      return (
+        <>
+          <p>
+            On Approve, the dashboard accepts the proposed {preview.kind}{" "}
+            <code className="font-mono">{preview.key}</code> in {preview.scope}, as it reads at{" "}
+            <code className="font-mono">{preview.rev.slice(0, 7)}</code>.
+          </p>
+          <p className="break-words whitespace-pre-wrap">Why: {preview.why}</p>
+        </>
       )
   }
 }
@@ -854,6 +882,7 @@ export function InboxCard({
         />
       </div>
       {item.preview.attachments ? <Attachments items={item.preview.attachments} /> : null}
+      <UploadMark item={item} />
     </div>
   ) : null
 

@@ -252,8 +252,9 @@ describe("playground ext", () => {
       expect(refused.code).toBe(1)
       expect(refused.err).toContain("accept is the owner's own call")
       expect(refused.err).toContain(
-        "`env -u PLAYGROUND_ROLE playground ext accept …` as a ! command",
+        "asks for the accept as an accept decision with bun run ask new, whose Approve has the dashboard run it",
       )
+      expect(refused.err).not.toContain("! command")
       expect(existsSync(join(scopeDir(at, "tester"), "rules/less.md"))).toBe(false)
     }
     const bare = await ext(at, ["accept"], "", "worker")

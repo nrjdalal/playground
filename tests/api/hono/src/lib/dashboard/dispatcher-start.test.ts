@@ -8,9 +8,11 @@ const { dispatcherArgv, startDispatcher } =
 const { loadFixture, writeFixture } =
   await import("../../../../../../api/hono/src/lib/dashboard/fixture")
 const { isLiveRecord } = await import("../../../../../../api/hono/src/lib/dashboard/workers")
+const { herdrRecords } = await import("../../../../../../api/hono/src/lib/dashboard/herdr")
 const { readRegistry, registryOf, startsOf } =
   await import("../../../../../../api/hono/src/lib/dashboard/peers")
 type Run = import("../../../../../../api/hono/src/lib/dashboard/dispatcher-start").Run
+type Pane = import("../../../../../../api/hono/src/lib/dashboard/herdr").Pane
 
 const scratch = mkdtempSync(join(tmpdir(), "dispatcher-start-"))
 afterAll(() => rmSync(scratch, { force: true, recursive: true }))
@@ -58,7 +60,7 @@ describe("startDispatcher on a stack reading its own machine", () => {
 })
 
 describe("startDispatcher on a fixture stack", () => {
-  // The shipped fixture with its dispatcher's record ended, the home's no-dispatcher state.
+  // The shipped fixture with its dispatcher's pane closed, the home's no-dispatcher state.
   let made = 0
   const ended = () => {
     const dir = join(scratch, `fixture-${made++}`)
@@ -69,54 +71,37 @@ describe("startDispatcher on a fixture stack", () => {
       main: join(scratch, "main"),
       trash: join(scratch, "data", "trash"),
     })
-    const path = join(dir, "cmux.json")
+    const path = join(dir, "herdr.json")
     const state = JSON.parse(readFileSync(path, "utf8"))
-    for (const s of state.sessions) {
-      if (s.launch_arguments?.includes("dispatcher")) s.stored_pid_exists = false
-    }
+    state.panes = state.panes.filter((p: Pane) => !p.processes[0]?.argv?.includes("dispatcher"))
     writeFileSync(path, JSON.stringify(state))
     return dir
   }
-  const dispatcherRecord = (dir: string) =>
-    JSON.parse(readFileSync(join(dir, "cmux.json"), "utf8")).sessions.find(
-      (s: { launch_arguments?: string[] }) => s.launch_arguments?.includes("dispatcher"),
+  const dispatcherPane = (dir: string): Pane | undefined =>
+    JSON.parse(readFileSync(join(dir, "herdr.json"), "utf8")).panes.find((p: Pane) =>
+      p.processes[0]?.argv?.includes("dispatcher"),
     )
 
-  test("runs no process, brings the made-up dispatcher back, and a second start reads already running", async () => {
+  test("runs no process, makes a made-up dispatcher the board reads as live, and a second start reads already running", async () => {
     const dir = ended()
     const { calls, run } = cli({ code: 0 })
     const start = () =>
       startDispatcher({ dir, live: false, name: "dispatcher", root: "/fixture/playground", run })
     expect(await start()).toEqual({ name: "dispatcher", status: "started" })
-    expect(dispatcherRecord(dir).stored_pid_exists).toBe(true)
-    expect(await start()).toEqual({ name: "dispatcher", status: "running" })
-    expect(calls).toEqual([])
-  })
-
-  test("a fixture with no dispatcher at all, a fresh machine, starts a made-up one the board reads as live", async () => {
-    const dir = ended()
-    const path = join(dir, "cmux.json")
-    const state = JSON.parse(readFileSync(path, "utf8"))
-    state.sessions = state.sessions.filter(
-      (s: { launch_arguments?: string[] }) => !s.launch_arguments?.includes("dispatcher"),
-    )
-    writeFileSync(path, JSON.stringify(state))
-    const { calls, run } = cli({ code: 0 })
-    const start = () =>
-      startDispatcher({ dir, live: false, name: "dispatcher", root: "/fixture/playground", run })
-    expect(await start()).toEqual({ name: "dispatcher", status: "started" })
-    const record = dispatcherRecord(dir)
-    expect(record).toMatchObject({ agent: "claude", stored_pid_exists: true })
+    const pane = dispatcherPane(dir)
+    expect(pane).toMatchObject({ agent_status: "idle" })
     const machine = JSON.parse(readFileSync(join(dir, "machine.json"), "utf8"))
     const ps = Object.entries(machine.processes as Record<string, { start: string }>)
       .map(([pid, p]) => `${pid} ${p.start}`)
       .join("\n")
-    const proof = {
-      projects: join(dir, "claude", "projects"),
-      registry: registryOf(await readRegistry(join(dir, "claude", "sessions"))),
-      starts: startsOf(ps),
-    }
-    expect(isLiveRecord(record, proof)).toBe(true)
+    const registry = registryOf(await readRegistry(join(dir, "claude", "sessions")))
+    const proof = { projects: join(dir, "claude", "projects"), registry, starts: startsOf(ps) }
+    const [record] = herdrRecords(
+      [{ panes: pane ? [pane] : [], server: "playground", workspaces: [] }],
+      registry,
+      new Date().toISOString(),
+    )
+    expect(record && isLiveRecord(record, proof)).toBe(true)
     expect(await start()).toEqual({ name: "dispatcher", status: "running" })
     expect(calls).toEqual([])
   })

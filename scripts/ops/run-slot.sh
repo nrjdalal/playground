@@ -972,6 +972,12 @@ if [ -n "$MODEL_BOUND" ]; then
   run_command "$@"
 fi
 KIND=$(quick_kind "$@")
+# the merge train's quick run starts at once, past the quick slot's race: only pr:merge's types gate runs as ops-merge-train, inside the merge lock, which keeps it to one run at a time (PG-796, 3 Nov: its 1 s metrics step waited 263 s for the slot, and its cached build ran past the gate's 600 s twice)
+if [ "$KIND" = quick ] && [ "$WHO" = ops-merge-train ]; then
+  [ -n "$TICKET" ] && rm -f "$TICKET" && TICKET=""
+  TOOK=$(date +%s); rlog start "bare waited=$((TOOK - ASKED))s"
+  run_command "$@"
+fi
 if [ -n "$KIND" ]; then
   [ -n "$TICKET" ] && rm -f "$TICKET" && TICKET=""
   waited=0
