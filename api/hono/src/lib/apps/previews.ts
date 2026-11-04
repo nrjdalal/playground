@@ -71,6 +71,9 @@ const extensionOf = (name: string): string => extname(name).slice(1)
 export const previewKindOf = (name: string): PreviewKind =>
   extensionOf(name) === "html" ? "html" : "image"
 
+// Pure: the name of the PDF that stands beside a page, <page>.pdf beside <page>.html.
+const pdfOf = (page: string): string => `${page.slice(0, -".html".length)}.pdf`
+
 // Pure: the page a PDF stands beside (<page>.pdf beside <page>.html), or null when the name is not such a PDF's.
 export const pdfPageOf = (name: string): string | null => {
   const page = name.endsWith(".pdf") ? `${name.slice(0, -".pdf".length)}.html` : null
@@ -132,7 +135,7 @@ async function captionOf(folder: string, name: string): Promise<string | null> {
 
 // The PDF beside a page by its name, <page>.pdf: a regular file with one link whose bytes are a PDF's. Null when there is none or it is not that.
 async function pdfBeside(folder: string, page: string): Promise<string | null> {
-  const name = `${page.slice(0, -".html".length)}.pdf`
+  const name = pdfOf(page)
   const bytes = await readOwnFile(join(folder, name), MAX_PREVIEW_BYTES, SNIFF_BYTES)
   return bytes && sniff(bytes, name) === "pdf" ? name : null
 }
@@ -282,10 +285,7 @@ export async function deletePage(
   await unlink(file.path).catch((error: NodeJS.ErrnoException) => {
     if (error.code !== "ENOENT") throw error
   })
-  for (const beside of [
-    captionPath(folder, name),
-    join(folder, `${name.slice(0, -".html".length)}.pdf`),
-  ]) {
+  for (const beside of [captionPath(folder, name), join(folder, pdfOf(name))]) {
     const info = await lstat(beside).catch(() => null)
     if (info?.isFile() && info.nlink === 1) await unlink(beside).catch(() => {})
   }

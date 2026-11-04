@@ -9,6 +9,9 @@ describe("dispositionName (#783)", () => {
       expect(dispositionName(attachmentDisposition(name))).toBe(name)
     }
     expect(dispositionName('attachment; filename="plain.png"')).toBe("plain.png")
+    expect(dispositionName(`attachment; filename="plain.png"; filename*=UTF-8''%E0%A4`)).toBe(
+      "plain.png",
+    )
     expect(dispositionName("attachment")).toBeNull()
     expect(dispositionName(null)).toBeNull()
   })

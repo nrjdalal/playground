@@ -10,10 +10,16 @@ describe("fileNameOf (#783)", () => {
     expect(fileNameOf("Café, 100% ✓", "md")).toBe("Café, 100% ✓.md")
   })
 
-  test("a title with nothing left is download, and a long one is cut to 120 characters before its extension", () => {
+  test("a title with nothing left is download, and a long one is cut to 120 code points before its extension", () => {
     expect(fileNameOf("/:*?", "png")).toBe("download.png")
     expect(fileNameOf("", "pdf")).toBe("download.pdf")
     expect(fileNameOf("a".repeat(300), "html")).toBe(`${"a".repeat(120)}.html`)
+  })
+
+  test("a long title is cut by code point, so an emoji at the cut stays whole and the name still encodes (#821)", () => {
+    const name = fileNameOf(`${"a".repeat(119)}🚀 tail`, "html")
+    expect(name).toBe(`${"a".repeat(119)}🚀.html`)
+    expect(() => attachmentDisposition(name)).not.toThrow()
   })
 })
 

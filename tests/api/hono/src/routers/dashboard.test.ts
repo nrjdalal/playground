@@ -35,13 +35,6 @@ const { errorHandler } = await import("../../../../../api/hono/src/lib/error")
 const { MAX_ATTACHMENT_BYTES, storeAttachment, readAttachment } =
   await import("../../../../../api/hono/src/lib/dashboard/attachments")
 const { mkdtempSync, rmSync } = await import("node:fs")
-
-const PNG = Uint8Array.from(
-  Buffer.from(
-    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=",
-    "base64",
-  ),
-)
 const { tmpdir } = await import("node:os")
 const { join } = await import("node:path")
 const { DISPATCHER, DISPATCHER_SECONDARY } =
@@ -51,6 +44,13 @@ const { changeHostedMode, SDK_PROBE, SdkHost } =
 const { DELIVERY_FAILURES } = await import("../../../../../api/hono/src/lib/dashboard/deliver")
 const { Hono } = await import("../../../../../api/hono/node_modules/hono")
 const { env } = await import("../../../../../packages/env/dist/api-hono.mjs")
+
+const PNG = Uint8Array.from(
+  Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=",
+    "base64",
+  ),
+)
 
 // The router on its own, at its own root (the API mounts it at /api/v1): the API's entry reads a version constant only its build defines. ApiError is an HTTPException, so its status survives without the API's error handler.
 const request = (path: string, headers: Record<string, string> = {}) =>

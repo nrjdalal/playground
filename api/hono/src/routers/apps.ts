@@ -183,7 +183,7 @@ export const appsRouter = new Hono<{ Variables: Session }>()
         c.req.param("name"),
         readPreview,
         env.HONO_TRUSTED_ORIGINS,
-        c.req.query("download") === undefined ? undefined : (name) => previewDownloadName(name),
+        c.req.query("download") === undefined ? undefined : previewDownloadName,
       ),
   )
   .delete(
