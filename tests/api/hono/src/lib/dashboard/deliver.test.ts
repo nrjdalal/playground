@@ -704,7 +704,7 @@ describe("deliver", () => {
     }
     const result = await deliver({ actor, text: "hi", to: "dispatcher" }, deps)
     expect(result).toMatchObject({ code: "CMUX_FAILED" })
-    expect(result.ok ? "" : result.reason).toBe("Could not read cmux: Access denied")
+    expect(result.ok ? "" : result.reason).toBe("Could not read the sessions: Access denied")
   })
 
   // A keystroke cmux refuses after typing began is INTERRUPTED, saying what may be left in the input: cmux ends a write that runs past its timeout, so even the Enter reported failed may have landed.
@@ -1243,7 +1243,7 @@ describe("deliver", () => {
     }
     const result = await deliver({ actor, text: "hi", to: "dispatcher" }, deps)
     expect(result).toMatchObject({ code: "CMUX_FAILED", ok: false })
-    expect(result.ok ? "" : result.reason).toBe("Could not read cmux: cmux did not answer")
+    expect(result.ok ? "" : result.reason).toBe("Could not read the sessions: cmux did not answer")
     expect(typed).toEqual([])
   })
 })

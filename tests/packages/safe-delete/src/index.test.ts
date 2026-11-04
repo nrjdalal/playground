@@ -206,7 +206,9 @@ describe("quarantine, listTrash and restore", () => {
     const plain = file(join(roots.home, "plain"))
     const holders = {
       clones: [],
+      discard: false,
       live: ["working"],
+      merged: () => true,
       procs: [],
       roster: join(roots.root, "roster.json"),
     }
@@ -268,7 +270,7 @@ const git = (cwd: string, ...args: string[]) => {
   return run.stdout.toString().trim()
 }
 
-// A main checkout with a remote, and a worktree on branch feat whose one commit is not pushed.
+// A main checkout with a remote, and a worktree on branch PG-1-thing whose one commit is not pushed; its holders call that commit's PR merged, so a test of the holders meets no landed check.
 const withWorktree = () => {
   const roots = machine()
   const remote = join(roots.root, "remote.git")
@@ -286,7 +288,15 @@ const withWorktree = () => {
   git(wt, "commit", "-qm", "work")
   const roster = join(roots.root, "roster.json")
   writeFileSync(roster, JSON.stringify({ agents: [] }))
-  return { holders: { clones: [] as Clone[], live: ["working"], procs: [], roster }, roots, wt }
+  const holders = {
+    clones: [] as Clone[],
+    discard: false,
+    live: ["working"],
+    merged: (_sha: string, _at: string): boolean | null => true,
+    procs: [] as Proc[] | null,
+    roster,
+  }
+  return { holders, roots, wt }
 }
 
 // A carve-out table for the mechanism's own cases: one script's builds folder, under a cap of 3 files and 100 bytes.
@@ -527,14 +537,97 @@ describe("worktreeRefusal", () => {
     expect(existsSync(wt)).toBe(true)
   })
 
-  test("refuses a worktree whose branch is not pushed, and passes it once pushed", () => {
+  test("refuses a dirty worktree, naming its changes and --discard, and --discard lets it go", () => {
     const { holders, roots, wt } = withWorktree()
-    expect(worktreeRefusal(wt, roots, holders)).toContain("push")
-    git(wt, "push", "-q", "origin", "PG-1-thing")
-    expect(worktreeRefusal(wt, roots, holders)).toBeNull()
-    const moved = quarantine(wt, { ...opts, worktree: holders }, roots, { now: NOW })
+    file(join(wt, "wip.txt"))
+    expect(worktreeRefusal(wt, roots, holders)).toBe(
+      `${wt} holds 1 uncommitted change (wip.txt): playground rm --worktree ${wt} --discard removes it anyway, which a session runs with --decision <id> once an Inbox delete decision naming it is approved`,
+    )
+    for (const name of ["new.txt", "b", "c", "d"]) file(join(wt, name), "changed")
+    expect(worktreeRefusal(wt, roots, holders)).toBe(
+      `${wt} holds 5 uncommitted changes (new.txt, b, c, and 2 more): playground rm --worktree ${wt} --discard removes it anyway, which a session runs with --decision <id> once an Inbox delete decision naming it is approved`,
+    )
+    expect(worktreeRefusal(wt, roots, { ...holders, discard: true })).toBeNull()
+    const moved = quarantine(wt, { ...opts, worktree: { ...holders, discard: true } }, roots, {
+      now: NOW,
+    })
     expect(moved).toHaveProperty("id")
     expect(existsSync(wt)).toBe(false)
+  })
+
+  test("refuses a worktree whose branch has not landed on canary, pushed or not, and --discard lets it go", () => {
+    const { holders, roots, wt } = withWorktree()
+    const unmerged = { ...holders, merged: () => false }
+    expect(worktreeRefusal(wt, roots, unmerged)).toBe(
+      `${wt}'s HEAD holds work not landed on origin/canary (fetch origin canary if it merged since): playground rm --worktree ${wt} --discard removes it anyway, which a session runs with --decision <id> once an Inbox delete decision naming it is approved`,
+    )
+    git(wt, "push", "-q", "origin", "PG-1-thing")
+    expect(worktreeRefusal(wt, roots, unmerged)).toContain("not landed on origin/canary")
+    expect(worktreeRefusal(wt, roots, { ...holders, merged: () => null })).toContain("not landed")
+    expect(worktreeRefusal(wt, roots, { ...unmerged, discard: true })).toBeNull()
+    expect(quarantine(wt, { ...opts, worktree: unmerged }, roots, { now: NOW })).toHaveProperty(
+      "refused",
+    )
+    expect(existsSync(wt)).toBe(true)
+  })
+
+  test("removes a clean worktree whose branch canary squash-merged, and asks for a merged PR once canary changes its files again", () => {
+    const { holders, roots, wt } = withWorktree()
+    const head = git(wt, "rev-parse", "HEAD")
+    const asked: string[] = []
+    const merged = (sha: string, at: string) => {
+      asked.push(at)
+      return sha === head
+    }
+    const unmerged = { ...holders, merged: () => false }
+    file(join(roots.main, "new.txt"))
+    git(roots.main, "add", ".")
+    git(roots.main, "commit", "-qm", "the squash of PG-1-thing")
+    git(roots.main, "push", "-q", "origin", "canary")
+    expect(worktreeRefusal(wt, roots, unmerged)).toBeNull()
+    file(join(roots.main, "new.txt"), "changed on canary since")
+    git(roots.main, "commit", "-qam", "a later change")
+    git(roots.main, "push", "-q", "origin", "canary")
+    expect(worktreeRefusal(wt, roots, unmerged)).toContain("not landed")
+    expect(worktreeRefusal(wt, roots, { ...holders, merged })).toBeNull()
+    expect(asked).toEqual([wt])
+    const moved = quarantine(wt, { ...opts, worktree: { ...holders, merged } }, roots, { now: NOW })
+    expect(moved).toHaveProperty("id")
+    expect(existsSync(wt)).toBe(false)
+  })
+
+  test("refuses unlanded work in a file whose name git quotes, and names a dirty one as it is", () => {
+    const { holders, roots, wt } = withWorktree()
+    const unmerged = { ...holders, merged: () => false }
+    file(join(roots.main, "new.txt"))
+    git(roots.main, "add", ".")
+    git(roots.main, "commit", "-qm", "the squash of PG-1-thing")
+    git(roots.main, "push", "-q", "origin", "canary")
+    expect(worktreeRefusal(wt, roots, unmerged)).toBeNull()
+    file(join(wt, "caf\u00e9.txt"))
+    expect(worktreeRefusal(wt, roots, unmerged)).toContain("1 uncommitted change (caf\u00e9.txt)")
+    git(wt, "add", ".")
+    git(wt, "commit", "-qm", "more work")
+    expect(worktreeRefusal(wt, roots, unmerged)).toContain("not landed")
+  })
+
+  test("removes a review clone detached at a merged PR's head, and a branch with no work of its own", () => {
+    const { holders, roots, wt } = withWorktree()
+    const unmerged = { ...holders, merged: () => false }
+    git(wt, "checkout", "-q", "--detach")
+    expect(worktreeRefusal(wt, roots, unmerged)).toContain("not landed")
+    file(join(roots.main, "new.txt"))
+    git(roots.main, "add", ".")
+    git(roots.main, "commit", "-qm", "the squash of PG-1-thing")
+    git(roots.main, "push", "-q", "origin", "canary")
+    expect(worktreeRefusal(wt, roots, unmerged)).toBeNull()
+    const fresh = join(roots.main, ".claude", "worktrees", "pg-2")
+    git(roots.main, "worktree", "add", "-q", "-b", "PG-2-next", fresh, "HEAD~1")
+    file(join(roots.main, "later.txt"))
+    git(roots.main, "add", ".")
+    git(roots.main, "commit", "-qm", "canary moves on")
+    git(roots.main, "push", "-q", "origin", "canary")
+    expect(worktreeRefusal(fresh, roots, unmerged)).toBeNull()
   })
 })
 
