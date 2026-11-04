@@ -7,6 +7,7 @@ import { DashboardContext } from "../../../../../../web/next/src/components/dash
 import {
   AskChoices,
   FOLDS_OPEN,
+  Inbox,
   InboxCard,
   NewPill,
   ShelfDismiss,
@@ -1350,5 +1351,33 @@ describe("a held Yard post's card", () => {
     expect(html).toMatch(
       /<a [^>]*href="https:\/\/yard.example\/yard\/approve\/m1"[^>]*target="_blank"[^>]*>.*?Approve<\/a>/,
     )
+  })
+})
+
+// The aside's first load drew a Spinner in the pane's middle, then swapped it for the whole Inbox at once (PG-875).
+describe("the Inbox before its first read lands", () => {
+  // a dashboard the owner may not read keeps the read pending, as a first load is
+  const html = renderToStaticMarkup(
+    createElement(
+      QueryClientProvider,
+      { client: new QueryClient() },
+      createElement(
+        DashboardContext,
+        { value: { allowed: false, workers: [] } as unknown as DashboardContext },
+        createElement(Inbox, { viewing: true }),
+      ),
+    ),
+  )
+  test("draws its open row where it will sit, a blank fixed-width count and the Mark all as read room kept", () => {
+    expect(html).toMatch(/<section aria-busy="true" aria-label="Inbox"/)
+    const row = html.split("<h3")[1]!.split("</h3>")[0]!
+    expect(row).toContain(">Inbox</span>")
+    expect(row).toContain("pr-10")
+    expect(row).toMatch(/data-slot="badge"[^>]*class="[^"]*\bw-5\b/)
+  })
+  test("shows the Spinner under the row and no shelf until the read lands", () => {
+    expect(html.indexOf('data-slot="spinner"')).toBeGreaterThan(html.indexOf("</h3>"))
+    expect(html.match(/<h3/g)).toHaveLength(1)
+    expect(html).not.toContain("absolute inset-0")
   })
 })
