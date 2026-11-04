@@ -65,7 +65,7 @@ describe("SESSIONS.md", () => {
     expect(brief).toContain("a PR loosening a guard puts code-review-loop's refusal table")
     expect(brief).toContain("in its Evidence before round 1")
     expect(brief).toContain(
-      "a `canary | head` row for each row it adds to `tests/scripts/hooks/fixtures/refused-forms.ts` or names in its `ALLOWED` list",
+      "a `canary | head` row for each row it adds to `tests/scripts/hooks/fixtures/refused-forms/` or names in a source file's `allowed` list",
     )
     expect(brief).toContain(
       "the refused-forms test's pass count at canary and at the head for the rest",

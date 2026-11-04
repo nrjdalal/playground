@@ -7,7 +7,7 @@ Every session shares one GitHub account, and with it one GraphQL budget (`gh api
 ## A working bypass
 
 When the review finds a working way past a guard (a form the guard should refuse that runs), the verdict and its inline finding explain the mechanism in words, the shape and the parse step that misses it, and the exact forms go to the worker by `SendMessage` alone.
-The forms stay off the PR until the fix pins each as a refused row in `tests/scripts/hooks/fixtures/refused-forms.ts`, so a working payload never sits in a public comment while the guard still lets it run; on 2 Nov one guard PR's round 1 took this path on its lead's ruling.
+The forms stay off the PR until the fix pins each as a refused row in `tests/scripts/hooks/fixtures/refused-forms/`, so a working payload never sits in a public comment while the guard still lets it run; on 2 Nov one guard PR's round 1 took this path on its lead's ruling.
 Done when each bypass's mechanism is in the verdict, its forms are in the worker's inbox, and a later round confirms each refused at the head.
 
 ## The verdict comment
