@@ -76,9 +76,9 @@ Pick the kind by how its card closes (asks.md's `settle` and `resolve` lines): y
 
 ## Fit the card
 
-Draw each code or ASCII line up to `ASK_CODE_COLUMNS` (`packages/config/src/inbox.ts`), 60 columns, an emoji counted as two.
-The card sizes a drawing's font so its widest line fills the block, from 16px on a wide card down to 7px on the narrowest one, so a line of 60 columns shows whole on every card and a short drawing grows to fill a wide one.
-A picture that runs past 60 columns becomes a table of three columns or fewer, or bullets.
+Draw each code or ASCII line up to `ASK_CODE_COLUMNS` (`packages/config/src/inbox.ts`), 58 columns, an emoji counted as two.
+The card sizes a drawing's font so its widest line fills the block, from 16px on a wide card down to 7px on the narrowest one, so a line of that width shows whole on every card and a short drawing grows to fill a wide one.
+A picture that runs past it becomes a table of three columns or fewer, or bullets.
 
 ## Example
 
