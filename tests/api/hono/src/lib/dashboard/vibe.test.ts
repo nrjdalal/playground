@@ -158,7 +158,7 @@ describe("the pure parts", () => {
     expect(text).toContain("NEW_KEY=x\n")
     expect(text).toContain("POSTGRES_URL=postgresql://c\n")
     expect(text).toContain("PLAYGROUND_LIVE_READS=true\n")
-    expect(text).toContain("PLAYGROUND_CMUX_SESSIONS=\n")
+    expect(text).toContain("PLAYGROUND_ALL_SESSIONS=\n")
     expect(setKey("A=1", "B", "$2")).toBe("A=1\nB=$2\n")
   })
 

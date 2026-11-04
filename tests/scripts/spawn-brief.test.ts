@@ -113,6 +113,7 @@ describe("--reports-to names the session a worker reports to (#1727)", () => {
       expect(r.code).toBe(0)
       expect(launchOf(r)).toContain("you report to planner.")
       expect(launchOf(r)).toContain("Report to planner with SendMessage (to: planner).")
+      expect(r.roster).toContain("reportsTo=planner")
     },
   )
 

@@ -2,6 +2,8 @@ import { describe, expect, test } from "bun:test"
 
 import {
   idleLineOf,
+  orchestratorsOf,
+  PER_ORCHESTRATOR,
   PER_WORKER,
   roomOf,
   type CapacityInput,
@@ -68,6 +70,37 @@ describe("roomOf", () => {
 
   test("a worker is costed at 1.3 GB and a core", () => {
     expect(PER_WORKER).toEqual({ bytes: 1.3 * GB, cores: 1 })
+  })
+})
+
+describe("orchestratorsOf", () => {
+  test("how many more orchestrators fit and what limits them, a claude alone each", () => {
+    expect(orchestratorsOf(snapshot)).toEqual({
+      count: 13,
+      limitedBy: "memory",
+      line: "Room for ~13 more orchestrators, by memory",
+    })
+    expect(orchestratorsOf({ ...snapshot, load5: 14.5 })).toEqual({
+      count: 5,
+      limitedBy: "cpu",
+      line: "Room for ~5 more orchestrators, by CPU load",
+    })
+  })
+
+  test("none under memory pressure, past the reserve or the cores, saying which", () => {
+    expect(orchestratorsOf({ ...snapshot, pressure: "warn" }).line).toBe(
+      "No room: memory pressure is warn",
+    )
+    expect(orchestratorsOf({ ...snapshot, freePercent: 17 }).line).toBe(
+      "No room: 0.5 GB free past the reserve, under the 0.6 GB an orchestrator takes",
+    )
+    expect(orchestratorsOf({ ...snapshot, load5: 15 }).line).toBe(
+      "No room: the 5-minute load 15.0 leaves under 0.1 cores of 15",
+    )
+  })
+
+  test("an orchestrator is costed at 0.6 GB and a tenth of a core, as measured", () => {
+    expect(PER_ORCHESTRATOR).toEqual({ bytes: 0.6 * GB, cores: 0.1 })
   })
 })
 

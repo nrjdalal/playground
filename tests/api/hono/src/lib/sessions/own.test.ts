@@ -4,7 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import {
-  cmuxSessions,
+  allSessions,
   ownRegistered,
   SESSION_FILE,
 } from "../../../../../../api/hono/src/lib/sessions/own"
@@ -54,16 +54,16 @@ const withEnv = <T>(env: Record<string, string | undefined>, fn: () => T): T => 
   }
 }
 
-// PLAYGROUND_CMUX_SESSIONS read as the env schema's stringbool reads it, so the launcher, which reads the raw setting, and the API agree; a value it cannot read keeps the rest out
-test("cmuxSessions opts in only on a value the env schema reads as true", () => {
-  expect(["true", "1", "yes", "on", "TRUE"].map(cmuxSessions)).toEqual([
+// PLAYGROUND_ALL_SESSIONS read as the env schema's stringbool reads it, so the launcher, which reads the raw setting, and the API agree; a value it cannot read keeps the rest out
+test("allSessions opts in only on a value the env schema reads as true", () => {
+  expect(["true", "1", "yes", "on", "TRUE"].map(allSessions)).toEqual([
     true,
     true,
     true,
     true,
     true,
   ])
-  expect([undefined, "", "false", "0", "no", "maybe"].map(cmuxSessions)).toEqual([
+  expect([undefined, "", "false", "0", "no", "maybe"].map(allSessions)).toEqual([
     false,
     false,
     false,
@@ -88,21 +88,21 @@ describe("ownRegistered", () => {
   }
 
   test("a stack that reads this machine counts the sessions Playground's hooks recorded and the one it hosts, never another's", () => {
-    expect(names({ PLAYGROUND_CMUX_SESSIONS: undefined, PLAYGROUND_LIVE_READS: "1" })).toEqual([
+    expect(names({ PLAYGROUND_ALL_SESSIONS: undefined, PLAYGROUND_LIVE_READS: "1" })).toEqual([
       "dispatcher",
       "probe-sdk",
     ])
   })
 
   test("opted in, or on a fixture, every session counts", () => {
-    expect(names({ PLAYGROUND_CMUX_SESSIONS: "true", PLAYGROUND_LIVE_READS: "1" })).toEqual([
+    expect(names({ PLAYGROUND_ALL_SESSIONS: "true", PLAYGROUND_LIVE_READS: "1" })).toEqual([
       "dispatcher",
       "probe-sdk",
       "optimizer",
     ])
-    expect(
-      names({ PLAYGROUND_CMUX_SESSIONS: undefined, PLAYGROUND_LIVE_READS: undefined }),
-    ).toEqual(["dispatcher", "probe-sdk", "optimizer"])
+    expect(names({ PLAYGROUND_ALL_SESSIONS: undefined, PLAYGROUND_LIVE_READS: undefined })).toEqual(
+      ["dispatcher", "probe-sdk", "optimizer"],
+    )
   })
 })
 
@@ -135,7 +135,7 @@ process.exit(0)
 
   test("reads Playground's own sessions alone, and every one once the stack opts in", async () => {
     expect(await sampled({})).toEqual(["dispatcher", "probe-sdk"])
-    expect(await sampled({ PLAYGROUND_CMUX_SESSIONS: "true" })).toEqual([
+    expect(await sampled({ PLAYGROUND_ALL_SESSIONS: "true" })).toEqual([
       "dispatcher",
       "probe-sdk",
       "optimizer",
