@@ -126,5 +126,8 @@ describe("one row a page, its older versions in a dropdown", () => {
     expect(deleteDescription("lookup.html", 0)).toBe(
       "lookup.html and its caption leave the previews folder for good.",
     )
+    expect(deleteDescription("lookup.html", 0, true)).toBe(
+      "lookup.html and its caption and PDF leave the previews folder for good.",
+    )
   })
 })
