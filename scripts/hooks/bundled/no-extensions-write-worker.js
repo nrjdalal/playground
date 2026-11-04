@@ -1562,7 +1562,7 @@ var GIT_MOVES = new Set([
 var APPLY_READS = new Set(["--check", "--numstat", "--stat", "--summary"]);
 var RUNNER_TAKES = new Set(["--package", "-p"]);
 var SED_VALUES = new Set(["--expression", "--file", "--line-length"]);
-var SU_VALUES = new Set(["G", "g", "s", "w"]);
+var SU_PLAIN = new Set(["-", "-f", "-l", "-m"]);
 var EXPORTS2 = new Set(["declare", "export", "local", "readonly", "typeset"]);
 if (false) {}
 
