@@ -4,7 +4,7 @@ const __CHECKOUT = import.meta.dir.slice(0, import.meta.dir.lastIndexOf("/script
 // scripts/hooks/no-extensions-write.ts
 import { existsSync, statSync } from "fs";
 import { homedir as homedir3 } from "os";
-import { dirname as dirname3, join as join5, resolve as resolve4, sep as sep2 } from "path";
+import { basename as basename3, dirname as dirname3, join as join5, resolve as resolve4, sep as sep2 } from "path";
 
 // packages/env/src/aliases.ts
 var DESK_ENV = new Set([
@@ -1955,6 +1955,35 @@ function awkPrograms(words) {
   }
   return programs.length ? programs : undefined;
 }
+var LITERALS = [/"((?:[^"\\\n]|\\.)*)"/g, /'((?:[^'\\\n]|\\.)*)'/g, /`((?:[^`\\]|\\.)*)`/g];
+var NAMES_HOME = /\bHOME\b|\bhomedir\b/;
+var SHELL_GLOB = /[*?[]/;
+var BUILTINS = new Set([".", "[", "[[", "alias", "builtin", "cd", "command", "declare", "echo", "eval", "exec", "export", "getopts", "hash", "kill", "let", "local", "mapfile", "popd", "printf", "pushd", "read", "readarray", "readonly", "set", "source", "test", "trap", "type", "typeset", "ulimit", "umask", "unset", "wait"]);
+var EVALUATES = new Set(["-e", "-ep", "--eval", "-p", "-pe", "--print"]);
+function evalProgram({ args, name }) {
+  if (name === "agent-browser") {
+    for (let k = 0;k < args.length; k++) {
+      const { value } = args[k];
+      if (value === "eval")
+        return args[k + 1];
+      const option = args[k - 1]?.value ?? "";
+      if (!value.startsWith("-") && !(option.startsWith("--") && !option.includes("=")))
+        return;
+    }
+    return;
+  }
+  if (name !== "bun" && name !== "node")
+    return;
+  for (let k = 0;k < args.length; k++) {
+    const { value } = args[k];
+    if (EVALUATES.has(value))
+      return args[k + 1];
+    if (/^--(?:eval|print)=/.test(value))
+      return args[k];
+    if (!value.startsWith("-"))
+      return;
+  }
+}
 function programLines({ args, first }, rooted) {
   if (!AWKS.has(program(first?.value ?? "").toLowerCase()))
     return [];
@@ -1990,6 +2019,7 @@ function narrow(cmd, env) {
     return args.filter(({ value }) => value === "-" || !value.startsWith("-")).length <= 1;
   return false;
 }
+var passes = (cmd, env) => narrow(cmd, env) || reads(parse(cmd), env);
 function rooted(commands) {
   return commands.some((cmd) => !!stdinShell(cmd) || !!cmd.inner && rooted(cmd.inner()) || [...cmd.words, ...cmd.redirects.flatMap((r) => r.target ? [r.target] : [])].some((word) => !!word.procs && rooted(word.procs)));
 }
@@ -2116,6 +2146,37 @@ async function inspect(raw, environment, unknown = false) {
     return value.includes(needle) || !!near && value.includes(near);
   };
   const judged = new Map;
+  let inProgram = false;
+  let argLine = false;
+  const consumers = new WeakMap;
+  const lexLine = (line, known) => {
+    const out = lex(line, known);
+    for (const cmd of out.commands)
+      if (cmd.stdin)
+        consumers.set(cmd.stdin, cmd);
+    return out;
+  };
+  const feeds = (cmd, env) => {
+    for (let next = consumers.get(cmd);next; next = consumers.get(next))
+      if (!passes(next, env))
+        return true;
+    return false;
+  };
+  const lookup = [
+    ...(environment.PATH ?? "").split(":"),
+    ...["/bin", "/sbin", "/usr/bin", "/usr/sbin", "/usr/local/bin", "/opt/homebrew/bin"],
+    join5(home, ".bun", "bin"),
+    join5(home, ".local", "bin")
+  ].filter(Boolean).join(":");
+  const found = new Map;
+  const runs = (name, env) => {
+    if (marked(name) || name.includes("/") || BUILTINS.has(name))
+      return true;
+    const dirs = env.cwd ? `${join5(env.cwd, "node_modules", ".bin")}:${lookup}` : lookup;
+    if (!found.has(`${dirs}\x00${name}`))
+      found.set(`${dirs}\x00${name}`, !!Bun.which(name, { PATH: dirs }));
+    return found.get(`${dirs}\x00${name}`);
+  };
   const names = (word, env, remover, literal = false) => {
     const quotedGlob = literal && !word.glob;
     const key = `${remover}\x00${quotedGlob}\x00${env.cwd}\x00${word.value}`;
@@ -2164,7 +2225,7 @@ async function inspect(raw, environment, unknown = false) {
       return slot.length === 0 ? undefined : examine({ ...cmd, words: slot }, env, visit, false);
     const { args, first, name, xargs } = parsed;
     for (const here of places(env)) {
-      const into = cmd.redirects.find((r) => r.target && writer(r) && (inRoot(pathOf(r.target, here)) || GLOB.test(r.target.value) && !!names(r.target, here, true)));
+      const into = cmd.redirects.find((r) => r.target && writer(r) && (inRoot(pathOf(r.target, here)) || (inProgram ? SHELL_GLOB : GLOB).test(r.target.value) && !!names(r.target, here, true)));
       if (into?.target)
         return refuse(`a write to ${pathOf(into.target, here)}`);
     }
@@ -2186,14 +2247,38 @@ async function inspect(raw, environment, unknown = false) {
         return refuse(`a root shell whose script (${text.unknown ?? "a value it cannot read"}) the hook cannot read; run its commands as calls of their own, with no root shell`);
       script.push(text.value);
     }
-    for (const raw of reader ? [] : [...script, ...runsOf(parsed, vars, whole, rootLine)]) {
+    const program = rootLine || feeds(cmd, env) ? undefined : evalProgram(parsed);
+    const opaque = program && !program.glob && !marked(program.value) && !texts(program).some((t) => places(env).some((here) => holds(t.value, here)) || t.value.includes(basename3(dirname3(root))) || NAMES_HOME.test(t.value)) ? program : undefined;
+    const lines = runsOf(opaque ? { ...parsed, args: args.filter((w) => w !== opaque) } : parsed, vars, whole, rootLine);
+    for (const raw of reader ? [] : [...script, ...lines]) {
       const line = xargs?.replace && fed ? filled(raw, xargs.replace, fed.unknown ? UNKNOWN : fed.value) : raw;
       if (seen.has(line))
         continue;
       seen.add(line);
-      const verdict = await run(lex(line, env.known), { ...env, vars: new Map }, visit, true);
+      const verdict = await run(lexLine(line, env.known), { ...env, vars: new Map }, visit, true);
       if (verdict)
         return verdict;
+    }
+    if (opaque) {
+      const was = inProgram;
+      inProgram = true;
+      try {
+        const text = opaque.value.replace(/^--(?:eval|print)=/, "");
+        const literals = LITERALS.flatMap((re) => [...text.matchAll(re)].map((m) => m[1]));
+        const source = text.replace(/#/g, " ");
+        const lines = [source, ...literals, ...literals.flatMap((l) => l.split("\\n"))];
+        for (const line of new Set(lines)) {
+          if (!/\S/.test(line))
+            continue;
+          argLine = line !== source && !/\s/.test(line.trim());
+          const verdict = await run(lexLine(line, env.known), { ...env, vars: new Map }, visit, true);
+          if (verdict)
+            return verdict;
+        }
+      } finally {
+        inProgram = was;
+        argLine = false;
+      }
     }
     const quiet = !whole && quietCommit(cmd, parsed, env);
     for (const word of quiet ? args : []) {
@@ -2204,6 +2289,8 @@ async function inspect(raw, environment, unknown = false) {
         return refuse(named);
     }
     if (!first || EXPORTS2.has(name) || reader)
+      return;
+    if (inProgram && !argLine && !runs(first.value, env))
       return;
     const verb = name && !marked(name) ? name : "a program it cannot read";
     const remover = REMOVERS.has(name);
@@ -2231,7 +2318,7 @@ async function inspect(raw, environment, unknown = false) {
           return refuse(`${verb} with a variable on ${named}`);
       }
       const literal = !whole && narrow(cmd, here);
-      for (const word of [first, ...args].map((word) => heldWord(word, here, steady) ?? word)) {
+      for (const word of [first, ...args].filter((word) => word !== opaque && !(inProgram && !argLine && word === first)).map((word) => heldWord(word, here, steady) ?? word)) {
         const text = quiet && /\s/.test(word.value) || filters.has(word) && !word.glob;
         if (text && !texts(word).some((t) => holds(t.value, here)))
           continue;
@@ -2256,7 +2343,7 @@ async function inspect(raw, environment, unknown = false) {
   if (unknown)
     for (const key of steered)
       delete known[key];
-  const lexed = lex(command, known);
+  const lexed = lexLine(command, known);
   steadyAt = steadyNames(named, lexed.commands);
   const env = {
     cwd: directory,
