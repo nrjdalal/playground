@@ -120,8 +120,8 @@ describe("marking updates read", () => {
   })
 })
 
-describe("an accept decision's Approve (PG-658)", () => {
-  // the same answer an accept card's Approve posts; past every guard it runs the store's accept, so each refusal below is one that runs nothing
+describe("an Approve the dashboard carries out: an accept, an apps change or a grant (PG-658)", () => {
+  // the same answer such a card's Approve posts; past every guard it runs the decision's step (stepOf), so each refusal below is one that runs nothing
   const approve = (headers: Record<string, string>, server?: ReturnType<typeof peer>) =>
     inboxRouter.request(
       "http://127.0.0.1/0b9c6f1e-1111-4111-8111-000000000658/answer",

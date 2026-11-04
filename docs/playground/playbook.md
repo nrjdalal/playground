@@ -176,6 +176,7 @@ Like the ticket guard, a hook that cannot start refuses the call, and one that t
   The inbox gate, a hook on Playground and the leads, refuses to end a turn whose last reply asks him to decide (any question mark outside code, quotes and lines to other agents, rhetorical ones and headings included, or words such as "say yes", "your call" or "should I") until that reply names an item open in his Inbox, so the session names the one already open on the same thing,
   or else posts it there and says so; a pointer he is free to skip ("if you want to look") is no ask.
   It refuses a request for his own action the same way, such as "you need to", "please", "when you can" or "the owner, plug in the Mac", so a step only he can take goes to his Inbox too.
+  Steps he comes back to (3 or more numbered lines, or a table) go in one Inbox card whose progress is edited in place, since chat scrolls; a lead sends them to the dispatcher as a draft instead, so the card is posted once.
   A question quoted from someone else, or put to another agent, passes.
   Anything promised to him for later, and any later outcome of something he asked, reaches him as an Inbox update; chat answers only what he is asking now.
 - Every Slack link in the Inbox opens in Slack's app: `playground ask` refuses an archives-style link, and an org extension's link script rewrites one from the org's workspace (another workspace's is named on stderr, left as it is).

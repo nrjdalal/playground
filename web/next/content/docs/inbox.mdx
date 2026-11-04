@@ -16,7 +16,7 @@ Untick **Auto-hide tab bar** at the top of the user menu to keep it shown, with 
 
 Each item is a card of one of three kinds:
 
-- **Decision**: something a session will do only with your yes, such as a question only you can answer, a Slack message, a ship to main, a new Linear ticket, a delete, a database change, a spend, or accepting an extension proposal.
+- **Decision**: something a session will do only with your yes, such as a question only you can answer, a Slack message, a ship to main, a new Linear ticket, a delete, a database change, a spend, accepting an extension proposal, adding an app to your apps or taking one off, or opening System Settings for a permission agent-desktop needs.
   The card shows exactly what happens when you approve it, except a secret ask, which takes a value instead (see Give a secret).
   On an accept, your **Approve** has the dashboard accept the proposal itself, and the card then shows what that gave ([Extensions](/docs/extensions#review)).
 - **Draft**: a Slack message or a Linear comment, ready to send in your name.
@@ -95,11 +95,12 @@ An HTML page that is the only file shows live in the card, with buttons in its c
 A page runs only inside the view: its own keys work there, the arrows included, so a slide deck moves through its slides, Esc still closes the view, and a link in it opens in a new tab.
 An arrow the page does nothing with moves on to the next file.
 A markdown file reads like a chat message, code shows highlighted, a `.diff` or `.patch` file shows as a patch view (each changed file side by side, or one column on a phone), and a PDF opens in the browser's own viewer.
+A file the dashboard no longer keeps, such as one past its week, reads Missing in its place.
 
 ## Give a secret
 
 A session that needs a value only you hold, such as a client secret or an API key, asks for it as a **Secret** card.
-The card names the variable and where the value goes: a Vercel project and its environments, or an item in this Mac's Keychain, such as your Yard token.
+The card names the variable and where the value goes: a Vercel project and its environments, or an item in this Mac's Keychain, such as your Slack or Yard token.
 Paste the value into the masked box, then press **Submit** or Enter.
 
 The value goes straight to that project, once for each environment, or into the Keychain, and is kept nowhere else: not in the Inbox, the chat, a log or the session.

@@ -12,19 +12,19 @@ The defining constraint is the card itself: it sits in the aside's narrow column
 Agent-fired: a session loads it before every `playground ask new` and before it writes to the owner, and the owner can name it too.
 A message outside the Inbox takes the same picture, bullets, plain words, callout and fake-data check, and leaves out the card's choices and its post; a relay in chat, the dispatcher passing a session's message on, is one of them.
 
-| You are posting                              | What it leads with                          |
-| -------------------------------------------- | ------------------------------------------- |
-| A decision about a code change               | a `diff` block of the lines that change     |
-| A decision about a flow or a plan            | an ASCII drawing                            |
-| A UI change                                  | before and after shots in one group         |
-| A UI not yet built, or a demo                | an HTML page                                |
-| A job of several steps                       | a work status block, edited as steps land   |
-| Something to look at, with no answer         | an update with text and files, read-only    |
-| A plain update, or a ship or schema decision | its fields alone, under a plain title       |
-| A delete or budget decision                  | its why as plain lines, one fact each       |
-| A draft or a Slack decision                  | the message, with any files under its words |
-| A ticket decision                            | the ticket itself, in its own shape         |
-| A secret ask                                 | its key and sink alone, under a plain title |
+| You are posting                                   | What it leads with                          |
+| ------------------------------------------------- | ------------------------------------------- |
+| A decision about a code change                    | a `diff` block of the lines that change     |
+| A decision about a flow or a plan                 | an ASCII drawing                            |
+| A UI change                                       | before and after shots in one group         |
+| A UI not yet built, or a demo                     | an HTML page                                |
+| A job of several steps                            | a work status block, edited as steps land   |
+| Something to look at, with no answer              | an update with text and files, read-only    |
+| A plain update, or a ship or schema decision      | its fields alone, under a plain title       |
+| An accept, apps, budget, delete or grant decision | its why as plain lines, one fact each       |
+| A draft or a Slack decision                       | the message, with any files under its words |
+| A ticket decision                                 | the ticket itself, in its own shape         |
+| A secret ask                                      | its key and sink alone, under a plain title |
 
 The kind also decides how the card closes.
 A decision or a draft the session decided another way is settled.
