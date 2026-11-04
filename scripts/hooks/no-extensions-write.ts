@@ -958,6 +958,7 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
     }
     if (opaque) {
       const was = inProgram
+      const wasArg = argLine
       inProgram = true
       try {
         // the program, and each of its string literals, each \n part included, since a spawn or a shell template runs one as a line
@@ -979,7 +980,7 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
         }
       } finally {
         inProgram = was
-        argLine = false
+        argLine = wasArg
       }
     }
     // a quiet commit's message is text git never runs, but one naming a gated call is refused all the same
