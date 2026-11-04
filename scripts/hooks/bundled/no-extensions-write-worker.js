@@ -1958,7 +1958,42 @@ function awkPrograms(words) {
 var LITERALS = [/"((?:[^"\\\n]|\\.)*)"/g, /'((?:[^'\\\n]|\\.)*)'/g, /`((?:[^`\\]|\\.)*)`/g];
 var NAMES_HOME = /\bHOME\b|\bhomedir\b/;
 var SHELL_GLOB = /[*?[]/;
-var BUILTINS = new Set([".", "[", "[[", "alias", "builtin", "cd", "command", "declare", "echo", "eval", "exec", "export", "getopts", "hash", "kill", "let", "local", "mapfile", "popd", "printf", "pushd", "read", "readarray", "readonly", "set", "source", "test", "trap", "type", "typeset", "ulimit", "umask", "unset", "wait"]);
+var BUILTINS = new Set([
+  ".",
+  "[",
+  "[[",
+  "alias",
+  "builtin",
+  "cd",
+  "command",
+  "declare",
+  "echo",
+  "eval",
+  "exec",
+  "export",
+  "getopts",
+  "hash",
+  "kill",
+  "let",
+  "local",
+  "mapfile",
+  "popd",
+  "printf",
+  "pushd",
+  "read",
+  "readarray",
+  "readonly",
+  "set",
+  "source",
+  "test",
+  "trap",
+  "type",
+  "typeset",
+  "ulimit",
+  "umask",
+  "unset",
+  "wait"
+]);
 var EVALUATES = new Set(["-e", "-ep", "--eval", "-p", "-pe", "--print"]);
 function evalProgram({ args, name }) {
   if (name === "agent-browser") {
