@@ -5,7 +5,7 @@ import type { Group } from "./refused-forms/_shared"
 
 export * from "./refused-forms/_shared"
 
-// Every bypass form a review found, refused on canary or since the PR whose tests pinned it: one file a source in refused-forms/, `<n>.ts` holding #<n>'s groups, so a new source is a new file and two guard PRs add theirs without touching a shared line; tests/scripts/hooks/refused-forms.test.ts runs every row through each guard its group names and expects a refusal.
+// Every bypass form a review found, refused on canary or since the PR whose tests pinned it: one file a source in refused-forms/, `<n>.ts` holding #<n>'s groups, so a new source is a new file and two guard PRs each put their rows in their own; tests/scripts/hooks/refused-forms.test.ts runs every row through each guard its group names and expects a refusal.
 // Each row is data: it reaches a hook only as a check() input or through that test, and no session runs it as a command, in any mode, since a form can name a path outside HOME, so pointing HOME at a scratch folder contains nothing.
 // A file's `allowed` lists the rows a guard-loosening PR lets run on purpose, and the rows that show the one form a guard lets run, each written as a row's "<what>" for all its cases, or as one case's "<what> | <guard> | <folder>"; ALLOWED below puts its file's source in front of each.
 const FOLDER = join(import.meta.dir, "refused-forms")

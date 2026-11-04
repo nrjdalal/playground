@@ -427,7 +427,7 @@ describe("every refused form stays refused unless the allow list names it", () =
   })
 })
 
-// Two guard PRs used to meet on one fixture file's shared lines; with a file a source, each adds only its own file.
+// Each guard PR puts its rows in its own source's file, so two of them merge in either order.
 describe("two branches that each add a source's file merge with no conflict, in either order", () => {
   // A new source's file with one row, as a guard PR writes it.
   const sourceFile = (what: string) =>
