@@ -19,7 +19,7 @@ import {
 } from "react"
 
 import { type ViewerItem, VIEWERS } from "@/components/dashboard/viewer/registry"
-import { useAttachmentUrl } from "@/components/dashboard/viewer/use-attachment-url"
+import { useAttachment, useAttachmentUrl } from "@/components/dashboard/viewer/use-attachment-url"
 import { OFF_FOCUSABLE } from "@/components/hint"
 import { Button } from "@/components/ui/button"
 import { Carousel, type CarouselApi, CarouselContent, CarouselItem } from "@/components/ui/carousel"
@@ -96,7 +96,7 @@ function Slide({
   onEdge: (direction: -1 | 1) => void
 }) {
   const viewer = VIEWERS[item.kind]
-  const url = useAttachmentUrl(item.id, near && Boolean(viewer))
+  const { missing, url } = useAttachment(item.id, near && Boolean(viewer))
   const Icon = viewer?.icon ?? RiFileLine
   return (
     <CarouselItem
@@ -107,7 +107,10 @@ function Slide({
       {viewer && url ? (
         <viewer.View active={active} item={item} onEdge={onEdge} url={url} />
       ) : (
-        <Icon className="text-muted-foreground size-8" />
+        <span className="text-muted-foreground flex flex-col items-center gap-2 text-xs">
+          <Icon className="size-8" />
+          {missing ? "Missing" : null}
+        </span>
       )}
     </CarouselItem>
   )

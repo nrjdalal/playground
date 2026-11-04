@@ -7,7 +7,7 @@ import { type KeyboardEvent, useState } from "react"
 import { HTML_VIEWER } from "@/components/dashboard/viewer/documents"
 import { FileIcon } from "@/components/dashboard/viewer/file-icons"
 import { type ViewerItem, VIEWERS } from "@/components/dashboard/viewer/registry"
-import { useAttachmentUrl } from "@/components/dashboard/viewer/use-attachment-url"
+import { useAttachment } from "@/components/dashboard/viewer/use-attachment-url"
 import { Viewer } from "@/components/dashboard/viewer/viewer"
 import { Hint } from "@/components/hint"
 import { Button } from "@/components/ui/button"
@@ -33,9 +33,9 @@ function Thumb({
   onOpen: (index: number) => void
 }) {
   const viewer = VIEWERS[item.kind]
-  const url = useAttachmentUrl(item.id, Boolean(viewer?.Thumb))
+  const { missing, url } = useAttachment(item.id, Boolean(viewer?.Thumb))
   return (
-    <Hint content={item.name}>
+    <Hint content={missing ? `${item.name} is missing` : item.name}>
       <button
         aria-label={`Open ${item.name}`}
         className={TILE}
@@ -47,7 +47,9 @@ function Thumb({
         ) : (
           <span className="flex w-full min-w-0 flex-col items-center gap-2 px-2">
             <FileIcon className="size-8 shrink-0" name={item.name} />
-            <span className="text-2xs w-full truncate text-center">{item.name}</span>
+            <span className="text-2xs w-full truncate text-center">
+              {missing ? "Missing" : item.name}
+            </span>
           </span>
         )}
       </button>
@@ -87,7 +89,7 @@ function WideSide({
   label: string
   onOpen: () => void
 }) {
-  const url = useAttachmentUrl(item.id)
+  const { missing, url } = useAttachment(item.id)
   return (
     <div className="flex flex-col gap-1.5">
       <span className="text-muted-foreground text-xs">{label}</span>
@@ -97,7 +99,11 @@ function WideSide({
         onClick={onOpen}
         type="button"
       >
-        {url ? <img alt={item.name} className="size-full object-contain" src={url} /> : null}
+        {url ? (
+          <img alt={item.name} className="size-full object-contain" src={url} />
+        ) : missing ? (
+          <span className="text-muted-foreground text-xs">Missing</span>
+        ) : null}
       </button>
     </div>
   )
@@ -108,10 +114,14 @@ const stay = () => {}
 
 // A lone HTML page live in the card at its full width, through the viewer's own HTML view (its sandboxed frame, links opened in a tab, a page that leaves put back, Spinner and Unreadable), never taking the focus, with a one-square floating bar in its corner that opens it full screen.
 function LivePage({ item, onOpen }: { item: ViewerItem; onOpen: () => void }) {
-  const url = useAttachmentUrl(item.id, true)
+  const { missing, url } = useAttachment(item.id, true)
   return (
     <div className="relative flex h-80 items-center justify-center overflow-hidden rounded-md border">
-      {url ? <HTML_VIEWER.View active={false} item={item} onEdge={stay} url={url} /> : null}
+      {url ? (
+        <HTML_VIEWER.View active={false} item={item} onEdge={stay} url={url} />
+      ) : missing ? (
+        <span className="text-muted-foreground text-xs">Missing</span>
+      ) : null}
       <div className={cn(FLOATING_BAR, "absolute top-2 right-2")}>
         <Button
           aria-label={`Open ${item.name} full screen`}
