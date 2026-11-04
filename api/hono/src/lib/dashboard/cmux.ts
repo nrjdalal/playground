@@ -4,7 +4,7 @@ import { join } from "node:path"
 
 import { factoryRoleOf } from "@packages/config/kinds"
 
-import { currentSource, fixtureRead, fixtureReply, fixtureWrite } from "@/lib/dashboard/fixture"
+import { currentSource } from "@/lib/dashboard/fixture"
 import {
   readRegistry,
   type RegistryFile,
@@ -147,7 +147,7 @@ export class CmuxTimedOut extends ApiError {
   }
 }
 
-// Only a stack that reads the live machine opens cmux (fixture.ts's dashboardSource): any other answers from its fixture, or, refused for its settings, from nothing. Every process this file starts for the stack passes through here.
+// Only a stack that reads the live machine opens cmux (fixture.ts's dashboardSource): a fixture stack's sessions are herdr panes (herdr.ts), so it asks cmux nothing, and a refused or hosted one reads nothing. Every process this file starts for the stack passes through here.
 const offLive = (): "fixture" | null => {
   const source = currentSource()
   if (source.kind === "live") return null
@@ -156,13 +156,6 @@ const offLive = (): "fixture" | null => {
     throw new ApiError(503, "SOURCE_REFUSED", "the hosted build reads no machine")
   return "fixture"
 }
-
-const fixtureFailure = (args: readonly string[], error: unknown): ApiError =>
-  new ApiError(
-    502,
-    "CMUX_FAILED",
-    `The fixture could not answer ${args[0]}: ${error instanceof Error ? error.message : String(error)}`,
-  )
 
 // A kill at a timeout is bounded: SIGTERM first, then this grace, then SIGKILL, and the pipes stop being waited on a moment later, since a CLI that traps TERM, or a child holding its stdout, never settles them alone.
 const KILL_GRACE_MS = 3000
@@ -200,20 +193,15 @@ async function spawn(command: string[], timeoutMs: number, env = cmuxEnv()): Pro
 // `sessions list` walks cmux's whole hook-session file, 12.7s at load 19 (9 Oct), and the board waits on it, so a read gets 20s.
 export const run = async (args: readonly string[], timeoutMs = 20_000): Promise<string> => {
   const command = cmuxCommand(args)
-  if (!offLive()) return spawn(command, timeoutMs)
-  try {
-    return fixtureRead(args)
-  } catch (error) {
-    throw fixtureFailure(args, error)
-  }
+  return spawn(command, timeoutMs)
 }
 
 export type CmuxStream = Bun.Subprocess<"ignore", "pipe", "ignore">
 
-// A read that keeps running, such as `events --reconnect`: the caller reads its stdout and kills it when done. A non-read throws as run() would, and so does a cmux that cannot start or a fixture, which has no events (fixture.ts's onFixtureChange stands in for them).
+// A read that keeps running, such as `events --reconnect`: the caller reads its stdout and kills it when done. A non-read throws as run() would, and so does a cmux that cannot start or a fixture stack, which asks cmux nothing.
 export const stream = (args: readonly string[]): CmuxStream => {
   const command = cmuxCommand(args)
-  if (offLive()) throw new ApiError(503, "CMUX_UNAVAILABLE", "A fixture has no event stream")
+  if (offLive()) throw new ApiError(503, "CMUX_UNAVAILABLE", "This stack reads a fixture")
   try {
     return Bun.spawn(command, { env: cmuxEnv(), stdin: "ignore", stdout: "pipe", stderr: "ignore" })
   } catch {
@@ -221,22 +209,16 @@ export const stream = (args: readonly string[]): CmuxStream => {
   }
 }
 
-// On a fixture stack the keystroke or the answer lands in the fixture's own scratch state, built and checked as the live one would be, and nothing reaches cmux.
+// A fixture stack types into herdr's made-up panes (herdr.ts) and refuses a cmux keystroke or answer, as spawn() does.
 export const write = async (step: Write, timeoutMs = 5000): Promise<void> => {
   const command = writeCommand(step)
-  if (!offLive()) return void (await spawn(command, timeoutMs))
-  try {
-    fixtureWrite(step)
-  } catch (error) {
-    throw fixtureFailure(["send"], error)
-  }
+  await spawn(command, timeoutMs)
 }
 
-// Whether this cmux's send takes --force: 0.65 added it with the draft guard, while 0.64 types the flag into the input as text (measured on a probe), so its own help decides, read once a process. A fixture keeps 0.65's guard.
+// Whether this cmux's send takes --force: 0.65 added it with the draft guard, while 0.64 types the flag into the input as text (measured on a probe), so its own help decides, read once a process.
 let forceable: Promise<boolean> | null = null
 
 export const canForce = (): Promise<boolean> => {
-  if (offLive()) return Promise.resolve(true)
   forceable ??= spawn(["cmux", "send", "--help"], 5000).then(
     (help) => /(^|\s)--force\b/.test(help),
     (error: unknown) => {
@@ -249,12 +231,7 @@ export const canForce = (): Promise<boolean> => {
 
 export const reply = async (answer: FeedReply, timeoutMs = 5000): Promise<void> => {
   const command = replyCommand(answer)
-  if (!offLive()) return void (await spawn(command, timeoutMs))
-  try {
-    fixtureReply(answer.requestId)
-  } catch (error) {
-    throw fixtureFailure(["rpc"], error)
-  }
+  await spawn(command, timeoutMs)
 }
 
 export const runJson = async (args: readonly string[]): Promise<unknown> => {
@@ -399,6 +376,9 @@ export const cmuxHeld = async (dir = sessionsDir()): Promise<string[] | null> =>
   )
 }
 
-// A stack that reads this machine reads herdr alone unless it shows every session (everySession in lib/sessions/own.ts), or when the launcher's word says cmux would not answer it and held no live factory session when it started: no sessions, Feed, tree or events read reaches cmux.
-export const herdrAlone = (): boolean =>
-  currentSource().kind === "live" && (process.env.PLAYGROUND_HERDR_ALONE === "1" || !everySession())
+// A fixture stack reads herdr alone, its sessions being herdr panes, and a stack that reads this machine reads herdr alone unless it shows every session (everySession in lib/sessions/own.ts), or when the launcher's word says cmux would not answer it and held no live factory session when it started: no sessions, Feed, tree or events read reaches cmux.
+export const herdrAlone = (): boolean => {
+  const source = currentSource().kind
+  if (source === "fixture") return true
+  return source === "live" && (process.env.PLAYGROUND_HERDR_ALONE === "1" || !everySession())
+}

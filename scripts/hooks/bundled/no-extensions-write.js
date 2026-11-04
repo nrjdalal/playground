@@ -4,7 +4,7 @@ const __CHECKOUT = import.meta.dir.slice(0, import.meta.dir.lastIndexOf("/script
 // scripts/hooks/no-extensions-write.ts
 import { existsSync, statSync } from "fs";
 import { homedir as homedir4 } from "os";
-import { basename as basename3, dirname as dirname2, join as join6, resolve as resolve4, sep as sep2 } from "path";
+import { dirname as dirname2, join as join6, resolve as resolve4, sep as sep2 } from "path";
 
 // packages/env/src/aliases.ts
 var DESK_ENV = new Set([
@@ -1856,22 +1856,6 @@ function awkPrograms(words) {
   }
   return programs.length ? programs : undefined;
 }
-var EVALUATES = new Set(["-e", "--eval", "-p", "--print"]);
-function evalProgram({ args, name }) {
-  if (name === "agent-browser")
-    return args.find((w) => !w.value.startsWith("-"))?.value === "eval" ? args[args.findIndex((w) => w.value === "eval") + 1] : undefined;
-  if (name !== "bun" && name !== "node")
-    return;
-  for (let k = 0;k < args.length; k++) {
-    const { value } = args[k];
-    if (EVALUATES.has(value))
-      return args[k + 1];
-    if (/^--(?:eval|print)=/.test(value))
-      return args[k];
-    if (!value.startsWith("-"))
-      return;
-  }
-}
 function programLines({ args, first }, rooted) {
   if (!AWKS.has(program(first?.value ?? "").toLowerCase()))
     return [];
@@ -1980,7 +1964,7 @@ function cliWrite(words) {
     return GUARD_KEYS.has(key) ? `playground settings ${verb} of ${key}, a key a guard reads` : undefined;
   }
   if (verb === "accept")
-    return "playground ext accept, the owner's own call, which the owner runs as `! env -u PLAYGROUND_ROLE playground ext accept \u2026` in the dispatcher's terminal window, since the CLI refuses an accept with PLAYGROUND_ROLE set and that window carries one";
+    return "playground ext accept, the owner's own call: post it as an accept decision with bun run ask new (.agents/dashboard/asks.md), whose Approve has the dashboard run it with no role, since the CLI refuses an accept with PLAYGROUND_ROLE set";
   if (verb === "put")
     return unread || positional[1] === "list" ? "playground ext put of a list, or with a word it cannot read, which may render into a guard's list" : undefined;
   if (EXT_WRITES.has(verb) && !(dry && EXT_DRY.has(verb)))
@@ -2098,10 +2082,7 @@ async function inspect(raw, environment, unknown = false) {
         return refuse(`a root shell whose script (${text.unknown ?? "a value it cannot read"}) the hook cannot read; run its commands as calls of their own, with no root shell`);
       script.push(text.value);
     }
-    const program = rootLine ? undefined : evalProgram(parsed);
-    const opaque = program && !program.glob && !marked(program.value) && !texts(program).some((t) => holds(t.value, env) || t.value.includes(basename3(dirname2(root)))) ? program : undefined;
-    const lines = runsOf(opaque ? { ...parsed, args: args.filter((w) => w !== opaque) } : parsed, vars, whole, rootLine);
-    for (const raw of reader ? [] : [...script, ...lines]) {
+    for (const raw of reader ? [] : [...script, ...runsOf(parsed, vars, whole, rootLine)]) {
       const line = xargs?.replace && fed ? filled(raw, xargs.replace, fed.unknown ? UNKNOWN : fed.value) : raw;
       if (seen.has(line))
         continue;
@@ -2143,7 +2124,7 @@ async function inspect(raw, environment, unknown = false) {
     }
     const literal = !whole && narrow(cmd, env);
     const filters = whole ? new Set : ghFilters(parsed);
-    for (const word of [first, ...args].filter((word) => word !== opaque).map((word) => heldWord(word, env, steady) ?? word)) {
+    for (const word of [first, ...args].map((word) => heldWord(word, env, steady) ?? word)) {
       const text = quiet && /\s/.test(word.value) || filters.has(word) && !word.glob;
       if (text && !texts(word).some((t) => holds(t.value, env)))
         continue;
