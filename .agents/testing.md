@@ -30,7 +30,7 @@ No workflow commits the merged times, since a change reaches `canary` only throu
 ## The clock-ahead pass
 
 Beside the shards, GitHub runs the suite once more as `Suite (<n>, clock ahead)` jobs with every test's clock 30 days on, so a test that takes its clock from two sources (a fixed `NOW` passed to one call while another defaults to `Date.now()`) goes red on its own PR, not on the day the real clock reaches it.
-Those jobs split on their own (`test-shards.ts legs`) without the exempt files, so they number fewer than the shards and finish within the slowest one, and they keep no timings.
+Those jobs split on their own (`test-shards.ts legs`) without the exempt files, so they number fewer than the shards, and they keep no timings.
 Run it locally with `CLOCK_AHEAD_DAYS=30 bun run test:file [paths]`: `test-sandbox.ts` then preloads `tests/clock-ahead.ts` into both passes and leaves out the files `CLOCK_EXEMPT` (`packages/scripts/src/clock-exempt.ts`) lists, named or matched, and names each named file it leaves out.
 Give the shift to `test-sandbox.ts` alone, since `BUN_OPTIONS` breaks `bun run` itself.
 The preload swaps in a `Date` that keeps running, moved ahead, because bun's `setSystemTime` stops the clock as it moves it (a 50 ms `Bun.sleep` read 0 ms elapsed, measured), which turns every test that times a wait red.
