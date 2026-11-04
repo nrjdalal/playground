@@ -427,21 +427,20 @@ async function unreadScript(
   return refuse(`a shell whose script (${script.unknown}) the hook cannot read`, fixFor(sure))
 }
 
-// su's options that take a value, which a cluster's letters after it are (`-s/bin/bash`, `-gdocker`)
-const SU_VALUES = new Set(["G", "g", "s", "w"])
-// Whether one of su's words hands it a command: --command, or a cluster of option letters with c among them before any letter that takes a value (`-c`, `-lc`)
-const suCommand = (value: string) => {
-  if (value.startsWith("--")) return /^--command(=|$)/.test(value)
-  if (!value.startsWith("-")) return false
-  for (const letter of value.slice(1)) {
-    if (letter === "c") return true
-    if (SU_VALUES.has(letter)) return false
+// The option words su takes before -c or --command for its line to read as a command of its own, each known exactly; any other option word reads as a root shell, so an option's value never hides a -c
+const SU_PLAIN = new Set(["-", "-f", "-l", "-m"])
+// Whether su's words hand it a command: -c or --command with its command, after option words of SU_PLAIN alone (`su root -c <cmd>`, `su - -c <cmd>`)
+const suCommand = (args: Word[]) => {
+  for (const [at, { value }] of args.entries()) {
+    if (value === "-c" || value === "--command") return at + 1 < args.length
+    if (value.startsWith("--command=")) return true
+    if (value.startsWith("-") && !SU_PLAIN.has(value)) return false
   }
   return false
 }
 // su with no command of its own starts a root shell that reads its script from stdin, as `sudo -s` does; one with -c or --command runs that command alone
 const suShell = ({ args, name }: { args: Word[]; name: string }) =>
-  name === "su" && !args.some((a) => suCommand(a.value))
+  name === "su" && !suCommand(args)
 // The builtins run() hands visit beside a bare wrapper and a bare copy of a followed command, each with no command of its own to judge.
 const EXPORTS = new Set(["declare", "export", "local", "readonly", "typeset"])
 
