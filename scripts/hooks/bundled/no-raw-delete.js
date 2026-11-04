@@ -214,6 +214,73 @@ var ROOT_SHELLS = new Map([
   ["doas", new Set(["-s"])],
   ["sudo", new Set(["--login", "--shell", "-i", "-s"])]
 ]);
+function stdinShell(cmd) {
+  const parsed = parse(cmd);
+  const kinds = readings(parsed).map((reading) => stdinShellOf(cmd, reading));
+  if (parsed.capped) {
+    const names = cmd.words.map((w) => program(w.value));
+    if (names.some((n) => ROOT_SHELLS.has(n)))
+      kinds.push("root");
+    else if (names.some((n) => SHELLS.has(n)))
+      kinds.push("shell");
+  }
+  return kinds.includes("root") ? "root" : kinds.find(Boolean);
+}
+function stdinShellOf(cmd, { args, first, name, xargs }) {
+  if (first && !marked(first.value)) {
+    if (name === "." || name === "source")
+      return args[0]?.value === "/dev/stdin" ? "shell" : undefined;
+    if (!SHELLS.has(name))
+      return;
+    const { inline, operand } = shellOperand(args, name);
+    if (xargs && (!operand || xargs.replace !== undefined && operand.value.includes(xargs.replace)))
+      return "shell";
+    if (inline && operand && cmd.stdin && marked(operand.value))
+      return "shell";
+    return inline || operand ? undefined : "shell";
+  }
+  let at = 0;
+  for (let w = cmd.words[at];w && !w.quoted; w = cmd.words[at]) {
+    if (w.value === "function")
+      at += 2;
+    else if (RESERVED.has(w.value) || ASSIGN.test(w.value))
+      at++;
+    else
+      break;
+  }
+  const end = first ? cmd.words.indexOf(first) : -1;
+  const before = cmd.words.slice(at, end === -1 ? undefined : end);
+  const firstWrapper = before.find((w) => !w.quoted && ROOT_SHELLS.has(program(w.value)));
+  const wrappers = [];
+  for (const w of before) {
+    if (wrappers.some((wrapper) => startsRootShell(wrapper, w.value)))
+      return "root";
+    if (w === firstWrapper || ROOT_SHELLS.has(w.value))
+      wrappers.push(program(w.value));
+  }
+  return first && wrappers.length ? "root" : undefined;
+}
+function startsRootShell(wrapper, value) {
+  if (marked(value))
+    return true;
+  const shells = ROOT_SHELLS.get(wrapper);
+  const { flags, values } = WRAPPERS.get(wrapper);
+  if (value.startsWith("--")) {
+    const named = [...flags, ...values].filter((o) => o.startsWith(value));
+    return shells.has(named.length === 1 ? named[0] : value);
+  }
+  if (!/^-[A-Za-z]/.test(value))
+    return false;
+  let shell = false;
+  for (const c of value.slice(1)) {
+    if (values.has(`-${c}`))
+      return shell;
+    if (!flags.has(`-${c}`))
+      return false;
+    shell ||= shells.has(`-${c}`);
+  }
+  return shell;
+}
 var COUNTED = new Set(["repeat", "timeout"]);
 var SHELLS = new Set(["bash", "dash", "ksh", "sh", "zsh"]);
 var EXPORTS = new Set(["declare", "export", "local", "readonly", "typeset"]);
@@ -907,6 +974,9 @@ async function runAll(lexed, env, visit, builtins) {
     envs.set(scope, child);
     return child;
   };
+  for (const cmd of lexed.commands)
+    if (cmd.stdin && stdinShell(cmd))
+      cmd.stdin.feedsShell = true;
   for (const cmd of lexed.commands) {
     const verdict = await examine(cmd, envOf(cmd.scope), visit, builtins);
     if (verdict)
@@ -957,7 +1027,7 @@ async function examineReading(cmd, parsed, env, visit, builtins) {
   if (name === "") {
     for (const [key, value] of local)
       setVar(env.vars, key, value);
-    if (builtins)
+    if (builtins || cmd.feedsShell)
       verdict = await visit(cmd, parsed, here);
   } else if (name === "cd" || name === "popd" || name === "pushd") {
     if (name !== "popd" && args.some((a) => GLOB_CHARS.test(a.value)))
@@ -1160,7 +1230,10 @@ async function shell(name, args, cmd, env, visit, builtins, xargs) {
       const fed = await stdinOf(cmd, env);
       script = filled(script, xargs.replace, fed.unknown ? UNKNOWN : fed.value.trim());
     }
-    return run(lexScript(script, env), subshell(env), visit, builtins);
+    const verdict = await run(lexScript(script, env), subshell(env), visit, builtins);
+    if (verdict || !cmd.stdin || !marked(operand.value))
+      return verdict;
+    return run(lexScript(known(await stdinOf(cmd, env)), env), subshell(env), visit, builtins);
   }
   const script = await scriptOf(operand, cmd, env);
   return run(lexScript(known(script), env), subshell(env), visit, builtins);
@@ -1362,7 +1435,7 @@ if (false) {}
 
 // scripts/hooks/no-raw-delete.ts
 var INSTEAD = "Move it to the 7-day trash with playground rm <path> (a worktree: playground rm --worktree <path>), which takes up to 5,000 files or 2 GB; leave a bigger tree or a scratch folder in place for your lead's cleanup, and let bun install rebuild a node_modules in place. A plain rm of a file inside your own worktree or scratchpad, with no -r, still runs.";
-var WORKTREE = "Remove a worktree with playground rm --worktree <path>, which moves it to the 7-day trash once no live session holds it and its commit is on a remote branch.";
+var WORKTREE = "Remove a worktree with playground rm --worktree <path>, which moves it to the 7-day trash once no live session holds it, it holds no uncommitted change and its work has landed on canary.";
 var refuse = (what, why = "a recursive delete is final, and one aimed wrong takes a whole tree", instead = INSTEAD) => `no-raw-delete hook refuses ${what}: ${why}. ${instead}`;
 var shown = (word) => word.variable ? `$${word.variable}` : visible(word.value);
 var DATA = new Set([

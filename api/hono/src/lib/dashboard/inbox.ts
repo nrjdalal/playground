@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs"
-import { join } from "node:path"
+import { extname, join } from "node:path"
 
 import type { ActivityActor, Database } from "@packages/db"
 import { inboxItem, thread } from "@packages/db"
@@ -8,6 +8,8 @@ import { extensionsDir, itemKeySchema, KINDS, SCOPE_NAME, slackSettings } from "
 import { and, desc, eq, gt, inArray, isNotNull, isNull, or, sql } from "drizzle-orm"
 import { z } from "zod"
 
+import { fileNameOf } from "../download"
+import { KEYCHAIN_ITEM_NAMES, KEYCHAIN_ITEMS, type KeychainItemName } from "../keychain-items"
 import { ID_PATTERN } from "./attachments"
 
 // Playground's Inbox: what the factory posts for the owner, one row of inbox_item each, through the bun run ask CLI alone. A decision previews exactly what Approve does, a draft is a Slack message or Linear comment to send, and an update is an outcome to read. The dashboard records his answer and types it into the posting session through deliver(); the dashboard itself never sends a message, merges or files anything, sharing only a Slack send's files (filesToUpload) and running only the step an accept's, an apps change's or a grant's Approve names (stepOf). Nothing here imports the API's env or an @/ path, so the CLI runs from any shell and the web reads its types.
@@ -135,8 +137,7 @@ const argName = z
 
 const SECRET_ENVIRONMENTS = ["development", "preview", "production"] as const
 
-// Where a secret ask's value goes, the allowlist in code: Vercel alone, `vercel env add` once an environment for one project.
-export const secretSinkSchema = z.strictObject({
+const vercelSinkSchema = z.strictObject({
   environments: z
     .array(z.enum(SECRET_ENVIRONMENTS))
     .min(1)
@@ -146,10 +147,20 @@ export const secretSinkSchema = z.strictObject({
   type: z.literal("vercel"),
 })
 
+// Where a secret ask's value goes, the allowlist in code: Vercel, `vercel env add` once an environment for one project, or keychain, one of this Mac's Keychain items keychain-items.ts allows.
+export const secretSinkSchema = z.discriminatedUnion("type", [
+  vercelSinkSchema,
+  z.strictObject({ item: z.enum(KEYCHAIN_ITEM_NAMES), type: z.literal("keychain") }),
+])
+
 export type SecretSink = z.infer<typeof secretSinkSchema>
 
-// Pure: the one command a sink runs for an environment; the value goes on its stdin alone, so it is never in an argv a process list shows.
-export const sinkArgv = (key: string, sink: SecretSink, environment: string): string[] => [
+// Pure: the one command a Vercel sink runs for an environment; the value goes on its stdin alone, so it is never in an argv a process list shows.
+export const sinkArgv = (
+  key: string,
+  sink: z.infer<typeof vercelSinkSchema>,
+  environment: string,
+): string[] => [
   "vercel",
   "env",
   "add",
@@ -275,6 +286,9 @@ export type OwnerApps = { login: string; read: () => string[] | null; run: ExtRu
 
 // Runs a sink's argv with the value on its stdin and returns its exit code: null once stopped by a signal (its time limit's included), 127 when it could not start. secret-sink.ts holds the real one; a test passes its own.
 export type SinkRun = (argv: string[], stdin: string) => Promise<number | null>
+
+// Saves the value as one allowlisted Keychain item, throwing on a refusal; secret-sink.ts holds the real one, and a test passes its own.
+export type KeychainSave = (item: KeychainItemName, value: string) => Promise<void>
 
 // What Approve does, one shape per kind of approval the owner keeps (playbook's ask rule): an extension accept, an apps change or a grant's System Settings pane, which the dashboard carries out itself, a Slack message, a ship of canary, a new Linear ticket, a delete, a schema, a budget, or a plain ask, whose words say what its poster does on Approve, for a decision no other shape fits (a production port, a work request from outside the chain, or a step only he can take, such as plugging in the Mac, where Approve means done and Deny means he can't). An ask may label each side in ELI5 / ASD-STE100, one line; the card then shows its text as the quoted block above the two labelled options. A secret asks for a value instead of a yes, which goes straight to its sink and is kept nowhere.
 export const previewSchema = z.discriminatedUnion("type", [
@@ -532,7 +546,8 @@ export type InboxProvided = {
   results?: SinkResult[]
 }
 
-export type SinkResult = { environment: string; exitCode: number | null }
+// line: what the card shows in place of the exit status, "saved" or a refusal's first line, never the value
+export type SinkResult = { environment: string; exitCode: number | null; line?: string }
 
 // An open decision or draft he pushed out of his list until a time (Schedule); it asks again once the time passes.
 export type InboxScheduled = { snoozedUntil: string }
@@ -760,7 +775,7 @@ function providedText(
   answer: Pick<InboxProvided, "at" | "results">,
 ): string {
   const results = (answer.results ?? [])
-    .map((result) => `${result.environment}: ${exitWords(result.exitCode)}`)
+    .map((result) => `${result.environment}: ${result.line ?? exitWords(result.exitCode)}`)
     .join("; ")
   return `Inbox ${itemTag(item.ref)} (${item.id}) "${item.title}": Provided at ${answer.at}. ${results || "No sink ran"}. Close it with bun run ask get ${itemTag(item.ref)} --ack.`
 }
@@ -1001,6 +1016,20 @@ export async function getItem(db: Database, key: string): Promise<InboxItem | nu
     .from(inboxItem)
     .where(ref ? eq(inboxItem.ref, Number(ref)) : eq(inboxItem.id, key))
   return row ? toItem(row) : null
+}
+
+// The name a kept file downloads under: the title of the newest item that carries it, with the file's own name after it when the item carries several, then the stored file's extension; "attachment" in place of the title when no item carries it.
+export async function attachmentDownloadName(db: Database, id: string): Promise<string> {
+  const [row] = await db
+    .select({ preview: inboxItem.preview, title: inboxItem.title })
+    .from(inboxItem)
+    .where(sql`${inboxItem.preview} -> 'attachments' @> ${JSON.stringify([{ id }])}::text::jsonb`)
+    .orderBy(desc(inboxItem.updatedAt))
+    .limit(1)
+  const files = (row?.preview as { attachments?: InboxAttachment[] } | undefined)?.attachments ?? []
+  const own = files.length > 1 ? files.find((file) => file.id === id)?.name : undefined
+  const title = own ? `${row?.title}, ${own.replace(/\.[^.]*$/, "")}` : (row?.title ?? "attachment")
+  return fileNameOf(title, extname(id).slice(1))
 }
 
 // Everything still waiting, and whatever else moved in the last week.
@@ -1453,9 +1482,17 @@ export async function provideSecret(
     actor,
     deliver,
     dispatcher,
+    keychain,
     now = new Date(),
     run,
-  }: { actor: ActivityActor; deliver?: Deliver; dispatcher?: string; now?: Date; run: SinkRun },
+  }: {
+    actor: ActivityActor
+    deliver?: Deliver
+    dispatcher?: string
+    keychain?: KeychainSave
+    now?: Date
+    run: SinkRun
+  },
 ): Promise<{ item: InboxItem; ok: true } | Refused> {
   const current = await getItem(db, id)
   if (!current || current.id !== id) return NOT_FOUND
@@ -1463,6 +1500,9 @@ export async function provideSecret(
     return { code: "VALIDATION_ERROR", message: "Only a secret ask takes a value", ok: false }
   }
   const { key, sink } = current.preview
+  // a paste off the item's shape is refused before the claim, so the card stays open for the right one
+  if (sink.type === "keychain" && !KEYCHAIN_ITEMS[sink.item].valid.test(value))
+    return { code: "VALIDATION_ERROR", message: KEYCHAIN_ITEMS[sink.item].invalid, ok: false }
   if (seen !== undefined && seen !== current.updatedAt) {
     return {
       code: "CONFLICT",
@@ -1491,9 +1531,11 @@ export async function provideSecret(
     .returning()
   if (!claimed) return { code: "CONFLICT", message: "This item is already answered", ok: false }
   const results: SinkResult[] = []
-  for (const environment of sink.environments) {
-    results.push({ environment, exitCode: await run(sinkArgv(key, sink, environment), value) })
-  }
+  if (sink.type === "keychain") results.push(await saveKeychain(sink.item, value, keychain))
+  else
+    for (const environment of sink.environments) {
+      results.push({ environment, exitCode: await run(sinkArgv(key, sink, environment), value) })
+    }
   const answer: InboxProvided = { at, choice: "provided", results }
   // merged key by key, so a poster's read that landed while the sink ran keeps its close
   const [row] = await db
@@ -1509,6 +1551,23 @@ export async function provideSecret(
   return {
     item: await send(db, item, textsOf(item, answer), { actor, deliver, dispatcher, now }),
     ok: true,
+  }
+}
+
+// A keychain sink's one result: saved, or the writer's first line, which names the refusal and never the value.
+async function saveKeychain(
+  item: KeychainItemName,
+  value: string,
+  keychain: KeychainSave | undefined,
+): Promise<SinkResult> {
+  if (!keychain)
+    return { environment: "Keychain", exitCode: 1, line: "no Keychain writer on this stack" }
+  try {
+    await keychain(item, value)
+    return { environment: "Keychain", exitCode: 0, line: "saved" }
+  } catch (error) {
+    const line = (error instanceof Error ? error.message : "the save failed").split("\n")[0] ?? ""
+    return { environment: "Keychain", exitCode: 1, line: line.split(value).join("…") }
   }
 }
 

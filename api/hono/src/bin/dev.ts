@@ -152,7 +152,7 @@ if (!dry) {
       leave(1)
     }
     console.error(
-      `dev: dashboard reads the fixture written to ${scratch}, test data: no cmux, no ~/.claude; its writes land there and go when the stack stops`,
+      `dev: dashboard reads the fixture written to ${scratch}, test data: no cmux, no ~/.claude; its writes land there and go when the stack stops, Inbox files among them, so a card an earlier start kept in the database shows its file as missing`,
     )
   } else {
     console.error(`dev: dashboard source matched ${DASHBOARD_RULES[checked.dashboard.rule]}`)
@@ -163,7 +163,7 @@ if (!dry) {
       herdrOnly = true
       console.error(
         checked.dashboard.reason === null
-          ? "dev: the dashboard reads herdr alone, the sessions Playground started; PLAYGROUND_ALL_SESSIONS=true adds cmux's"
+          ? "dev: the dashboard reads herdr alone, the sessions Playground started; PLAYGROUND_ALL_SESSIONS=true adds every other session to Sessions and System"
           : `dev: cmux would not answer this stack (${checked.dashboard.reason}) and holds no live factory session, so the dashboard reads herdr alone and shows none of your own sessions in cmux`,
       )
     }

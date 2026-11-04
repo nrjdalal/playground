@@ -76,6 +76,7 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
   and one `exec <main checkout>/scripts/spawn.sh resume <name> <dir> <session id>` line with the `--account` its start was given (never a usage-gate pick), the `--model` it started with and an `--effort` other than high, never a token.
   `spawn.sh restore` reads both, taking no other option, and resumes each session on the server `PLAYGROUND_HERDR_SESSION` names (`playground` by default; a record with no server line is playground's) not done, ended, parked or paused in the roster, through the gate, in the restored pane holding its label;
   a live one is skipped (the live-name refusal exits 3), and each resume of a herdr session stamps its run in `<name>.ran`.
+  It prints one line a record on its server, `restored <name>`, `skipped <name>: <reason>` or `not restored <name>: <reason>`, so a session it passed over or a gate held is named with the reason.
   `spawn.sh close <name>`, taking no other word, ends a herdr session for the one it reports to: it closes the one pane labelled with the name on the server its resume record names, refuses a runtime pin that is not herdr, a missing record, no pane or two carrying the label, and the caller's own pane;
   once the pane closes it ends the session's roster row, which a resume or a new start of that name sets back to starting.
   `spawn.sh move <name>` takes a live cmux session to herdr past the load and memory gates, since the copy it closes frees what the new one takes; playbook's SESSIONS.md, Spawn, holds its contract.
@@ -108,7 +109,7 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
   A `<dir>` under the Desktop folder resumes in the same tree under the code root, and with a session id its transcript is copied into that folder's project after `--check`, so a moved session keeps its conversation; with no code root folder, or one on the Desktop, it resumes in the Desktop folder itself.
   At `--check`, before any close, a resume refuses the main checkout for a session whose transcript is not already in its project folder, naming the folder the session ran in, and refuses a missing folder, naming its branch, and for a worktree under the main checkout's `.claude/worktrees/` the `git -C <main> worktree add` line that brings it back,
   from the newest transcript copy's last `cwd` and `gitBranch`;
-  `spawn.sh restore` reports either as `not restored:` and runs the rest.
+  `spawn.sh restore` reports either as `not restored <name>:` and runs the rest.
   A shared herdr workspace has one factory path, `spawn.sh column`, which opens its session as a split right of a herdr pane, in that pane's own workspace; every other factory start opens a workspace of its own.
   `spawn.sh move` takes a live cmux session to herdr and nothing else, `spawn.sh resume` reopens a session in the pane herdr kept under its label, else in a workspace of its own, and the `no-raw-spawn` hook refuses every herdr call but its reads (`herdr pane move` is no read).
   `spawn.sh restore` after a herdr restart refills the panes herdr kept, each resumed through `spawn.sh resume`, so a shared workspace, the column's or one arranged by hand, survives a restart as herdr restores it.
@@ -127,7 +128,9 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
   A person brings herdr back with bare `playground`, which runs its `start` first.
   A server hands its panes the shell basics alone, so `spawn.sh`'s herdr launch file sets `TMPDIR` to `$(getconf DARWIN_USER_TEMP_DIR)`, keeping one already set: every start, resume and restore writes that file, so a running server needs no restart for it.
   Nothing in the factory lives under the Desktop folder: macOS guards it by each binary's Full Disk Access, which a herdr or Claude Code update can drop, so the job asks for no grant, and `tests/desktop-paths.test.ts` fails on a tracked file naming a path there.
-  A plain shell pane on `playground-probes`, with no Claude in it, opens, runs, reads and closes only through `scripts/shell-pane.ts` (the `shell-pane` skill), which types a command only once every registered Bash guard's `check()` has passed it, in a child bun started as the hooks start, since a pane has no PreToolUse hook of its own.
+  A plain shell pane on `playground-probes`, with no Claude in it, opens, runs, reads and closes only through `scripts/shell-pane.ts` (the `shell-pane` skill), which types a command only once its caller's session id and role match the session it runs under (session-state's `callerRefusal`, [hooks/README.md](hooks/README.md#session-state)) and every registered Bash guard's `check()` has passed it,
+  in a child bun started as the hooks start, since a pane has no PreToolUse hook of its own.
+  Its `login <pane> github` runs `gh auth login --web` there and posts the owner an Inbox card with `gh`'s one-time code and link (`bun run ask new`), closing it once the login ends.
   A scratch herdr server, for a test or a smoke, takes its folder from `mktemp -d "$(getconf DARWIN_USER_TEMP_DIR)<prefix>.XXXX"`: macOS caps a socket path at 104 bytes (`sun_path`), a session scratchpad path alone runs past that, and the server then stops with `local socket name length exceeds capacity of sun_path`.
   playbook's LIFECYCLE.md, Ops jobs, has the rest.
 

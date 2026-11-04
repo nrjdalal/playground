@@ -14,6 +14,8 @@ export type Command = {
   // Set when the command runs only if the one before it succeeded (it sits on the right of an `&&`), so a cd of its own has certainly run for every command the same chain joins after it
   chained?: boolean
   detached?: boolean
+  // Set when the command's output feeds a shell that reads its script from stdin, so the walk visits it even with no program of its own (a loop's `done`), and a hook judges the pipe there
+  feedsShell?: boolean
   // the operator that ended the command before it in its scope (`;`, `&&`, `||`, `|`, `&`, `)` or `;;`), none for a scope's first
   follows?: string
   group?: boolean
@@ -240,7 +242,7 @@ function optionValue(word: string, { flags, values }: Options): "next" | "own" |
   return "own"
 }
 
-// The privilege wrappers' options that start a root shell, which reads its script from stdin when no command follows them: a closed list, read as a word or in a cluster of the wrapper's own flags ahead of its first value-taking letter
+// The privilege wrappers' options that start a root shell, which reads its script from stdin when no command follows them: a closed list, which startsRootShell reads
 const ROOT_SHELLS = new Map([
   ["doas", new Set(["-s"])],
   ["sudo", new Set(["--login", "--shell", "-i", "-s"])],
@@ -257,10 +259,23 @@ export function stdinShell(cmd: Command): "root" | "shell" | undefined {
   return kinds.includes("root") ? "root" : kinds.find(Boolean)
 }
 
-function stdinShellOf(cmd: Command, { args, first, name }: Parsed): "root" | "shell" | undefined {
+function stdinShellOf(
+  cmd: Command,
+  { args, first, name, xargs }: Parsed,
+): "root" | "shell" | undefined {
   if (first && !marked(first.value)) {
+    if (name === "." || name === "source")
+      return args[0]?.value === "/dev/stdin" ? "shell" : undefined
     if (!SHELLS.has(name)) return undefined
     const { inline, operand } = shellOperand(args, name)
+    // xargs hands its input to the shell as words, so with no script of its own, or a placeholder in it, that input is the script
+    if (
+      xargs &&
+      (!operand || (xargs.replace !== undefined && operand.value.includes(xargs.replace)))
+    )
+      return "shell"
+    // a script the shell fills in at run time may be the piped input itself (`sh -c "$(cat)"`)
+    if (inline && operand && cmd.stdin && marked(operand.value)) return "shell"
     return inline || operand ? undefined : "shell"
   }
   let at = 0
@@ -271,26 +286,35 @@ function stdinShellOf(cmd: Command, { args, first, name }: Parsed): "root" | "sh
   }
   const end = first ? cmd.words.indexOf(first) : -1
   const before = cmd.words.slice(at, end === -1 ? undefined : end)
-  const k = before.findIndex((w) => !w.quoted && ROOT_SHELLS.has(program(w.value)))
-  if (k === -1) return undefined
-  const wrapper = program(before[k].value)
+  // the first unquoted word naming a wrapper, by its basename, as the reading before quoted words were read
+  const firstWrapper = before.find((w) => !w.quoted && ROOT_SHELLS.has(program(w.value)))
+  const wrappers: string[] = []
+  for (const w of before) {
+    if (wrappers.some((wrapper) => startsRootShell(wrapper, w.value))) return "root"
+    // a wrapper: that first one, or a word whose unquoted value is a wrapper's bare name (`'sudo'`, `\doas`, `doas sudo`)
+    if (w === firstWrapper || ROOT_SHELLS.has(w.value)) wrappers.push(program(w.value))
+  }
+  // a program the hook cannot read, behind a wrapper, may be a root shell
+  return first && wrappers.length ? "root" : undefined
+}
+
+// Whether a word, by its unquoted value, starts a wrapper's root shell: a listed option, alone, as a long one's unambiguous prefix (`--sh`) or in a cluster of the wrapper's flags ahead of its first value-taking letter, or a word the hook cannot read
+function startsRootShell(wrapper: string, value: string): boolean {
+  if (marked(value)) return true
   const shells = ROOT_SHELLS.get(wrapper) as Set<string>
   const { flags, values } = WRAPPERS.get(wrapper) as Options
-  // a cluster's letters up to its first value-taking one, which takes the rest as its value (`-su root`, `-su#0`, `-us`): a shell letter among them, each a flag of the wrapper's own
-  const clustered = (value: string) => {
-    let shell = false
-    for (const c of value.slice(1)) {
-      if (values.has(`-${c}`)) return shell
-      if (!flags.has(`-${c}`)) return false
-      shell ||= shells.has(`-${c}`)
-    }
-    return shell
+  if (value.startsWith("--")) {
+    const named = [...flags, ...values].filter((o) => o.startsWith(value))
+    return shells.has(named.length === 1 ? named[0] : value)
   }
-  // a listed option, alone or in a cluster of the wrapper's own flags (`-Es`, `-su root`), or a word the hook cannot read, which may hold one
-  const starts = ({ quoted, value }: Word) =>
-    marked(value) ||
-    (!quoted && (shells.has(value) || (/^-[A-Za-z]/.test(value) && clustered(value))))
-  return !!first || before.slice(k + 1).some(starts) ? "root" : undefined
+  if (!/^-[A-Za-z]/.test(value)) return false
+  let shell = false
+  for (const c of value.slice(1)) {
+    if (values.has(`-${c}`)) return shell
+    if (!flags.has(`-${c}`)) return false
+    shell ||= shells.has(`-${c}`)
+  }
+  return shell
 }
 
 // Wrappers that take one positional argument (a count or a duration) before the command.
@@ -1080,6 +1104,7 @@ async function runAll(
     envs.set(scope, child)
     return child
   }
+  for (const cmd of lexed.commands) if (cmd.stdin && stdinShell(cmd)) cmd.stdin.feedsShell = true
   for (const cmd of lexed.commands) {
     const verdict = await examine(cmd, envOf(cmd.scope), visit, builtins)
     if (verdict) return verdict
@@ -1145,7 +1170,7 @@ async function examineReading(
   }
   if (name === "") {
     for (const [key, value] of local) setVar(env.vars, key, value)
-    if (builtins) verdict = await visit(cmd, parsed, here)
+    if (builtins || cmd.feedsShell) verdict = await visit(cmd, parsed, here)
   } else if (name === "cd" || name === "popd" || name === "pushd") {
     // a glob in the folder is judged as any program's words are, since it may land anywhere it matches
     if (name !== "popd" && args.some((a) => GLOB_CHARS.test(a.value)))
@@ -1459,7 +1484,10 @@ async function shell(
       const fed = await stdinOf(cmd, env)
       script = filled(script, xargs.replace, fed.unknown ? UNKNOWN : fed.value.trim())
     }
-    return run(lexScript(script, env), subshell(env), visit, builtins)
+    const verdict = await run(lexScript(script, env), subshell(env), visit, builtins)
+    // a script filled in at run time may be the piped input itself (`sh -c "$(cat)"`), so that input is judged as the script too
+    if (verdict || !cmd.stdin || !marked(operand.value)) return verdict
+    return run(lexScript(known(await stdinOf(cmd, env)), env), subshell(env), visit, builtins)
   }
   const script = await scriptOf(operand, cmd, env)
   return run(lexScript(known(script), env), subshell(env), visit, builtins)

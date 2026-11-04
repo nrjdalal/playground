@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test"
-import { mkdtempSync, rmSync } from "node:fs"
+import { mkdtempSync, rmSync, utimesSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -35,6 +35,7 @@ import {
   slackPlace,
 } from "../../../../../../api/hono/src/lib/dashboard/inbox"
 import { uploadSpec } from "../../../../../../api/hono/src/lib/dashboard/slack-upload"
+import { keychain } from "../../../../../../api/hono/src/lib/yard/keychain"
 
 const CHANNEL = "https://app.slack.com/client/T0000000000/C0MADEUP01"
 const SLACK = {
@@ -851,8 +852,20 @@ describe("a secret ask (PG-59)", () => {
     expect(refused({}, "-e")).toBe(false)
   })
 
+  test("takes a keychain sink naming an allowlisted item, yard alone today, and no other sink", () => {
+    const sinkOf = (sink: object) =>
+      inboxInputSchema.safeParse(decision({ ...SECRET, key: "YARD_TOKEN", sink })).success
+    expect(sinkOf({ item: "yard", type: "keychain" })).toBe(true)
+    expect(sinkOf({ item: "slack", type: "keychain" })).toBe(false)
+    expect(sinkOf({ item: "../x", type: "keychain" })).toBe(false)
+    expect(sinkOf({ type: "keychain" })).toBe(false)
+    expect(sinkOf({ item: "yard", project: "api-made-up", type: "keychain" })).toBe(false)
+    expect(sinkOf({ item: "yard", type: "yard" })).toBe(false)
+    expect(sinkOf({})).toBe(false)
+  })
+
   test("runs one vercel env add an environment, the value never in its argv", () => {
-    const sink = SECRET.sink as SecretSink
+    const sink = SECRET.sink as Extract<SecretSink, { type: "vercel" }>
     expect(sinkArgv(SECRET.key, sink, "preview")).toEqual([
       "vercel",
       "env",
@@ -1176,6 +1189,43 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
     return posted.item
   }
 
+  test("a kept file downloads under its item's title, the file's own name after it when the item carries several, and as attachment when no item carries it (#783)", async () => {
+    const lone = "3f0e7a52-1c4b-4d2a-9e6f-00000000d001.html"
+    const shot = "3f0e7a52-1c4b-4d2a-9e6f-00000000d002.png"
+    const notes = "3f0e7a52-1c4b-4d2a-9e6f-00000000d003.pdf"
+    await post({
+      from: "ops",
+      kind: "update",
+      preview: { attachments: [{ id: lone, kind: "html", name: "deck.html" }], outcome: "finding" },
+      title: "Weekly plan: updated draft",
+    })
+    await post({
+      from: "ops",
+      kind: "update",
+      preview: {
+        attachments: [
+          { id: shot, kind: "image", name: "card-after.png" },
+          { id: notes, kind: "pdf", name: "notes.v2.pdf" },
+        ],
+        outcome: "finding",
+      },
+      title: "Sidebar spacing",
+    })
+    expect(await store.attachmentDownloadName(db, lone)).toBe("Weekly plan updated draft.html")
+    expect(await store.attachmentDownloadName(db, shot)).toBe("Sidebar spacing, card-after.png")
+    expect(await store.attachmentDownloadName(db, notes)).toBe("Sidebar spacing, notes.v2.pdf")
+    expect(await store.attachmentDownloadName(db, "3f0e7a52-1c4b-4d2a-9e6f-00000000d004.png")).toBe(
+      "attachment.png",
+    )
+    await post({
+      from: "ops",
+      kind: "update",
+      preview: { attachments: [{ id: lone, kind: "html", name: "deck.html" }], outcome: "finding" },
+      title: "Weekly plan, final",
+    })
+    expect(await store.attachmentDownloadName(db, lone)).toBe("Weekly plan, final.html")
+  })
+
   test("an item gets a tag that counts up, and is found by its id or its tag", async () => {
     const a = await post(decision(SLACK))
     const b = await post(decision(PREVIEWS.ship))
@@ -1346,6 +1396,8 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       const kept = async (bytes: Uint8Array, name: string, kind: string) => {
         const stored = await storeAttachment(bytes, name, { dir })
         if (!stored.ok) throw new Error("not stored")
+        // its mtime on the test's clock, which the next store's sweep ages it by, so the clock-ahead pass reads it as just stored
+        utimesSync(join(dir, stored.id), new Date(), new Date())
         return { id: stored.id, kind, name }
       }
       beforeAll(() => {
@@ -2647,21 +2699,19 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       { code: "QUEUED", ok: false as const, reason: "ops holds the message" },
       { code: "LOST", ok: false as const, reason: "Retry sends it again." },
     ]
-    let settle = () => {}
-    const settled = new Promise<void>((resolve) => (settle = resolve))
-    const deliver = async () => {
-      const answer = answers.shift()!
-      if (!answers.length) setTimeout(settle, 50)
-      return answer
-    }
+    const deliver = async () => answers.shift()!
     await store.answerItem(
       db,
       posted.id,
       { action: "approve" },
       { actor, deliver, wait: async () => {} },
     )
-    await settled
-    const item = await store.getItem(db, posted.id)
+    // follow() records LOST in its own write after deliver returns, so the item is read again until that write lands, for 2s at most
+    let item = await store.getItem(db, posted.id)
+    for (let i = 0; i < 200 && item?.delivery?.status === "queued"; i++) {
+      await Bun.sleep(10)
+      item = await store.getItem(db, posted.id)
+    }
     expect(item?.delivery).toMatchObject({ code: "LOST", status: "failed" })
     expect(item && store.retryable(item)).toBe(true)
   })
@@ -3159,6 +3209,113 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       // the poster's read closes it, as a deny's read does
       const read = await store.readAnswer(db, provided.item)
       expect(read.answer).toMatchObject({ ackedAt: expect.any(String), choice: "provided" })
+    })
+
+    test("a keychain sink hands the Yard token to the Keychain writer on stdin, and keeps only saved", async () => {
+      const posted = await post({
+        ...decision({
+          key: "YARD_TOKEN",
+          sink: { item: "yard", type: "keychain" },
+          type: "secret",
+        }),
+        from: "dispatcher",
+      })
+      const token = `yard_${VALUE}`
+      const sink = stub()
+      const security: { argv: string[]; input?: string }[] = []
+      const writer = keychain(async (argv, input) => {
+        security.push({ argv, input })
+        return { code: 0, stderr: "", stdout: "" }
+      }, "owner")
+      const sent: Delivery[] = []
+      const logged: string[] = []
+      const console_ = { error: console.error, log: console.log, warn: console.warn }
+      for (const name of ["error", "log", "warn"] as const)
+        console[name] = (...args: unknown[]) => void logged.push(args.map(String).join(" "))
+      let provided: Awaited<ReturnType<typeof store.provideSecret>>
+      try {
+        provided = await store.provideSecret(
+          db,
+          posted.id,
+          { value: token },
+          {
+            actor,
+            deliver: async (delivery) => {
+              sent.push(delivery)
+              return { at: new Date().toISOString(), ok: true, sessionId: "s1" }
+            },
+            run: sink.run,
+            keychain: async (item, value) => {
+              expect(item).toBe("yard")
+              await writer.write(value)
+            },
+          },
+        )
+      } finally {
+        Object.assign(console, console_)
+      }
+      expect(sink.calls).toHaveLength(0)
+      expect(security).toHaveLength(1)
+      expect(security[0]?.argv).toEqual(["security", "-i"])
+      expect(security[0]?.input).toContain(`-w "${token}"`)
+      expect(provided.ok && provided.item.answer).toMatchObject({
+        choice: "provided",
+        results: [{ environment: "Keychain", exitCode: 0, line: "saved" }],
+      })
+      expect(sent[0]?.text).toContain("Keychain: saved")
+      for (const kept of [
+        JSON.stringify(provided),
+        JSON.stringify(sent),
+        logged.join("\n"),
+        await everyRow(),
+      ])
+        expect(kept).not.toContain(VALUE)
+    })
+
+    test("a keychain save that fails keeps the refusal's first line, with the value cut out", async () => {
+      const posted = await post(
+        decision({ key: "YARD_TOKEN", sink: { item: "yard", type: "keychain" }, type: "secret" }),
+      )
+      const refused = await store.provideSecret(
+        db,
+        posted.id,
+        { value: `yard_${VALUE}` },
+        {
+          actor,
+          run: stub().run,
+          keychain: async (_item, value) => {
+            throw new Error(`the Keychain refused it: no item for ${value}\nsecond line`)
+          },
+        },
+      )
+      expect(refused.ok && refused.item.answer).toMatchObject({
+        results: [
+          { environment: "Keychain", exitCode: 1, line: "the Keychain refused it: no item for …" },
+        ],
+      })
+      expect(JSON.stringify(refused)).not.toContain(VALUE)
+      expect(await everyRow()).not.toContain(VALUE)
+    })
+
+    test("a keychain paste off the item's shape is refused before the claim, so the card stays open", async () => {
+      const posted = await post(
+        decision({ key: "YARD_TOKEN", sink: { item: "yard", type: "keychain" }, type: "secret" }),
+      )
+      let saved = 0
+      const refused = await store.provideSecret(
+        db,
+        posted.id,
+        { value: VALUE },
+        { actor, keychain: async () => void saved++, run: stub().run },
+      )
+      expect(refused).toMatchObject({
+        code: "VALIDATION_ERROR",
+        message: "a Yard token starts yard_",
+        ok: false,
+      })
+      expect(saved).toBe(0)
+      expect((await store.getItem(db, posted.id))?.status).toBe("open")
+      expect(JSON.stringify(refused)).not.toContain(VALUE)
     })
 
     test("runs once: a second Submit, or one on words changed since, is refused and runs nothing", async () => {
