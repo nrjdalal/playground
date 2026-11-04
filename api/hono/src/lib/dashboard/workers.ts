@@ -114,7 +114,7 @@ export const DISPATCHERS: readonly string[] = [...new Set([DISPATCHER, DISPATCHE
 export const dispatcherSlots = (names: readonly string[], shown: ReadonlySet<string>): number =>
   names.filter((name, i) => i === 0 || shown.has(name)).length
 
-// The header's dispatcher slot count from Claude's registry and the roster, two file reads, so /api/health never asks cmux; a crashed session's leftover file can count one row the board then drops. A stack that reads this machine without the opt-in to every session (own.ts) counts the roster's alone, where every session Playground starts lands, since the registry names every session on the machine; one that opts in reads the registry even while the launcher keeps it on herdr alone.
+// The header's dispatcher slot count from Claude's registry and the roster, two file reads, so /api/health never asks cmux; a crashed session's leftover file can count one row the board then drops. A stack that reads this machine without the opt-in to every session (own.ts) counts the roster's alone, where every session Playground starts lands, since the registry names every session on the machine; one that opts in reads the registry.
 export const readDispatcherSlots = async (): Promise<number> => {
   const [files, { roster }] = await Promise.all([
     everySession() ? readRegistry() : null,

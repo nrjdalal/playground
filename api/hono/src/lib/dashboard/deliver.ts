@@ -392,11 +392,11 @@ class TypingFailed extends Error {
   }
 }
 
-// Where typing stood when it stopped: `nothing` before the first text, or `held` when the refusal's reason already says where the message stands (both stand as they are), `part` after some of the message was typed, `typed` once all of it was but not the Enter.
+// Where typing stood when it stopped: `nothing` before the first text, or `held` when the refusal's reason already says where the message stands (both stand as they are), `typed` once all of it was but not the Enter.
 class TypingStopped extends Error {
   constructor(
     readonly result: Refusal,
-    readonly stood: "held" | "nothing" | "part" | "typed" = "typed",
+    readonly stood: "held" | "nothing" | "typed" = "typed",
   ) {
     super(result.reason)
   }
@@ -777,11 +777,10 @@ export async function deliver(
       } catch (error) {
         if (error instanceof TypingStopped) {
           if (error.stood === "nothing" || error.stood === "held") return error.result
-          const left =
-            error.stood === "part"
-              ? `Part of it sits unsent in ${worker.name}'s input.`
-              : `The message is typed but not sent: it sits in ${worker.name}'s input.`
-          return refused("INTERRUPTED", `${error.result.reason} ${left}`)
+          return refused(
+            "INTERRUPTED",
+            `${error.result.reason} The message is typed but not sent: it sits in ${worker.name}'s input.`,
+          )
         }
         if (!(error instanceof TypingFailed)) throw error
         // A first send herdr refused before sending anything typed nothing and is tried again; one that may have sent stays INTERRUPTED, which no client retries unseen.
@@ -790,9 +789,7 @@ export async function deliver(
         }
         const left = error.atEnter
           ? ` The Enter may have gone through anyway: it reads Delivered once its transcript shows it.`
-          : error.typed > 0
-            ? ` Part of it may sit unsent in ${worker.name}'s input.`
-            : ""
+          : ""
         return refused("INTERRUPTED", `The message did not go through: ${error.message}${left}`)
       }
       return { at: deps.now().toISOString(), ok: true, sessionId: worker.sessionId }
