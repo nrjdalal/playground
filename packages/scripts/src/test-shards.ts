@@ -1,4 +1,6 @@
-// test-shards.ts matrix | files <shard>: CI's split of the suite into shards by tests/timings.json, each about BUDGET_MS of file time, so the suite's wall time stays near one shard's as it grows.
+// test-shards.ts legs | files <shard>: CI's split of the suite into shards by tests/timings.json, each about BUDGET_MS of file time, so the suite's wall time stays near one shard's as it grows. With CLOCK_AHEAD_DAYS set, files splits the clock-ahead pass, which leaves out clock-exempt.ts's files and so needs fewer shards; legs lists every shard of both, one matrix entry each.
+import { clockExempt } from "./clock-exempt"
+
 // recorded file time per shard, by CI's own merged times: a shard of 3 workers ran 184s of tests for 347s recorded, one file of it 160s (the slowest of four, measured), so 240s keeps 5 shards or more and each inside the 3-minute target
 export const BUDGET_MS = 240_000
 const TIMINGS = "tests/timings.json"
@@ -39,12 +41,23 @@ if (import.meta.main) {
     ? ((await file.json()).files ?? {})
     : {}
   const files = [...new Bun.Glob(PATTERN).scanSync(".")].sort()
-  const split = shards(timings, files, BUDGET_MS)
-  if (verb === "matrix") console.log(JSON.stringify(split.map((_, i) => i + 1)))
+  const real = shards(timings, files, BUDGET_MS)
+  const ahead = shards(
+    timings,
+    files.filter((file) => !clockExempt(file)),
+    BUDGET_MS,
+  )
+  const split = process.env.CLOCK_AHEAD_DAYS ? ahead : real
+  const legs = (n: number, clock: string) =>
+    Array.from({ length: n }, (_, i) => ({ clock, shard: i + 1 }))
+  if (verb === "legs")
+    console.log(
+      JSON.stringify({ include: [...legs(real.length, ""), ...legs(ahead.length, "30")] }),
+    )
   else if (verb === "files" && Number(shard) >= 1 && Number(shard) <= split.length)
     console.log(split[Number(shard) - 1]!.map((file) => `./${file}`).join("\n"))
   else {
-    console.error(`usage: test-shards.ts matrix | files <1-${split.length}>`)
+    console.error(`usage: test-shards.ts legs | files <1-${split.length}>`)
     process.exit(2)
   }
 }

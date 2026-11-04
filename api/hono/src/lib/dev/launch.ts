@@ -31,7 +31,7 @@ import {
   locate as locateOwner,
   prove as proveOwner,
 } from "@/lib/sessions/guard"
-import { cmuxSessions } from "@/lib/sessions/own"
+import { allSessions } from "@/lib/sessions/own"
 
 // What `bun run dev` hands turbo: the shell's environment, less what would boot the wrong stage, plus the settings and the sha the stack runs with.
 
@@ -203,7 +203,7 @@ export const mainCheckoutOf = (root: string): string | null => {
 // The settings the API reads that decide what its stack is: where the dashboard's data comes from (fixture.ts's dashboardSource, which also reads who runs the stack: Claude Code, a factory role, a test run), the folder a fixture stack's scratch copy sits in, and the database it writes.
 export const API_SETTINGS = [
   "CLAUDECODE",
-  "PLAYGROUND_CMUX_SESSIONS",
+  "PLAYGROUND_ALL_SESSIONS",
   "PLAYGROUND_FIXTURE",
   "PLAYGROUND_FIXTURE_DIR",
   "PLAYGROUND_HOSTED",
@@ -390,7 +390,7 @@ export type Guard = {
 const SETUP_MODE =
   "none yet: POSTGRES_URL is unset, so the dashboard opens on its first run, whose database check starts a local container"
 
-// Whether the stack may start here, checked before turbo runs and cheapest first: the branch, and for a checkout portless gives the bare names, whether a running stack or a live alias holds them, then the API's settings (read only once the branch passes), then where its dashboard reads from: nothing on a hosted build, a fixture that must load, or the live machine, read through herdr alone unless the stack opts in to cmux's sessions (PLAYGROUND_CMUX_SESSIONS), when it needs cmux to answer this process as it would the stack's API, or else no session live in cmux, read from ps and Claude's registry, when the dashboard reads herdr alone (a fixture stack never asks cmux, so it never opens the live socket); then POSTGRES_URL's container, refused by name before anything runs inside it or connects, then the proof that it is that container's own Postgres, then that its database has the schema the migration makes and, but on the live dashboard's own checkout, whose roll migrates or holds a migration itself, every migration in the journal. The first refusal names its fix.
+// Whether the stack may start here, checked before turbo runs and cheapest first: the branch, and for a checkout portless gives the bare names, whether a running stack or a live alias holds them, then the API's settings (read only once the branch passes), then where its dashboard reads from: nothing on a hosted build, a fixture that must load, or the live machine, read through herdr alone unless the stack opts in to every session (PLAYGROUND_ALL_SESSIONS), when it needs cmux to answer this process as it would the stack's API, or else no session live in cmux, read from ps and Claude's registry, when the dashboard reads herdr alone (a fixture stack never asks cmux, so it never opens the live socket); then POSTGRES_URL's container, refused by name before anything runs inside it or connects, then the proof that it is that container's own Postgres, then that its database has the schema the migration makes and, but on the live dashboard's own checkout, whose roll migrates or holds a migration itself, every migration in the journal. The first refusal names its fix.
 export async function preflight(
   { branch, linked }: Checkout,
   readSettings: () => SettingsRead,
@@ -439,7 +439,7 @@ export async function preflight(
     const loaded = loadFixture(source.file)
     if (!loaded.ok) return refuse(`${loaded.error}; ${FIXTURE_FIX}`)
     dashboard = { fixture: loaded.fixture, kind: "fixture", rule: source.rule }
-  } else if (source.kind === "live" && !cmuxSessions(read.settings.PLAYGROUND_CMUX_SESSIONS)) {
+  } else if (source.kind === "live" && !allSessions(read.settings.PLAYGROUND_ALL_SESSIONS)) {
     dashboard = { cmux: false, kind: "live", reason: null, rule: source.rule }
   } else if (source.kind === "live") {
     const reach = await attach()

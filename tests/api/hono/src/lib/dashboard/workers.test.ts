@@ -1634,7 +1634,7 @@ process.exit(0)
       dir,
       {
         CLAUDE_CONFIG_DIR: join(dir, "config"),
-        PLAYGROUND_CMUX_SESSIONS: "true",
+        PLAYGROUND_ALL_SESSIONS: "true",
         PLAYGROUND_DATA_DIR: join(join(dir, "config"), "playground"),
         PLAYGROUND_LIVE_READS: "1",
         FAKE_CMUX_DELAY: join(dir, "delay"),
@@ -1793,7 +1793,7 @@ console.log(JSON.stringify({
     ])(
       "with cmux %s and no opt-in, only the dispatcher Playground started in herdr shows, with one dispatcher slot, and cmux is asked nothing",
       async (_, silent) => {
-        const { calls, result } = await drive(own(silent), others, { PLAYGROUND_CMUX_SESSIONS: "" })
+        const { calls, result } = await drive(own(silent), others, { PLAYGROUND_ALL_SESSIONS: "" })
         expect(result).toEqual({ feed: 0, names: ["the dispatcher: dispatcher"], slots: 1 })
         expect(calls.slice(calls.indexOf("-- start") + 1)).toEqual([])
       },

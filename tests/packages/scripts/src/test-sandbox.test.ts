@@ -17,6 +17,40 @@ const DIR = mkdtempSync(join(tmpdir(), "test-sandbox-test-"))
 // removing DIR also ends the looping child's loop, even when bun drops a timed-out test's body before its finally
 afterAll(() => rmSync(DIR, { force: true, recursive: true }))
 
+test("CLOCK_AHEAD_DAYS moves a running clock that many days ahead, and leaves out a named exempt file", async () => {
+  const dir = join(DIR, "clock")
+  mkdirSync(join(dir, "tests/scripts"), { recursive: true })
+  // the OS stamps a new file's mtime on the real clock, which the preload never moves
+  writeFileSync(
+    join(dir, "ahead.test.ts"),
+    `import { expect, test } from "bun:test"\nimport { statSync, writeFileSync } from "node:fs"\ntest("ahead", async () => { writeFileSync("stamp", ""); const days = (Date.now() - statSync("stamp").mtimeMs) / 86_400_000; expect(statSync("stamp").mtime instanceof Date).toBe(true); expect(structuredClone(new Date()) instanceof Date).toBe(true); expect(days).toBeGreaterThan(29.9); expect(days).toBeLessThan(30.1); const a = Date.now(); await Bun.sleep(50); expect(Date.now() - a).toBeGreaterThanOrEqual(40) })\n`,
+  )
+  writeFileSync(
+    join(dir, "tests/scripts/roster.test.ts"),
+    'import { expect, test } from "bun:test"\ntest("exempt", () => expect(1).toBe(2))\n',
+  )
+  const files = ["./ahead.test.ts", "tests/scripts/roster.test.ts"]
+  const { CLOCK_AHEAD_DAYS: _, ...real } = process.env
+  const runs = await Promise.all(
+    [{ ...real, CLOCK_AHEAD_DAYS: "30" }, real].map(async (env) => {
+      const run = Bun.spawn(["bun", SCRIPT, ...files], {
+        cwd: dir,
+        env,
+        stderr: "pipe",
+        stdout: "ignore",
+      })
+      return { code: await run.exited, stderr: await new Response(run.stderr).text() }
+    }),
+  )
+  expect(runs[0]!.code).toBe(0)
+  expect(runs[0]!.stderr).toMatch(/\b1 pass\b/)
+  expect(runs[0]!.stderr).toContain("the clock-ahead pass leaves out tests/scripts/roster.test.ts")
+  expect(runs[0]!.stderr).not.toContain("exempt")
+  expect(runs[1]!.code).not.toBe(0)
+  expect(runs[1]!.stderr).toContain("(fail) ahead")
+  expect(runs[1]!.stderr).toContain("(fail) exempt")
+}, 60_000)
+
 test("a parallel pass past its deadline fails, naming the file still running", async () => {
   writeFileSync(
     join(DIR, "quick.test.ts"),

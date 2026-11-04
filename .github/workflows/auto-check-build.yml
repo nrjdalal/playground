@@ -61,7 +61,7 @@ jobs:
           NODE_ENV: production
           SKIP_ENV_VALIDATION: true
 
-  # the suite's shards, by tests/timings.json with the last passing run's shard timings merged over it: test-shards.ts gives as many as its budget needs
+  # the suite's shards and the clock-ahead pass's jobs, by tests/timings.json with the last passing run's shard timings merged over it: test-shards.ts legs gives each as many as its budget needs
   shards:
     name: Shards
     timeout-minutes: 20
@@ -90,7 +90,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
 
       - id: plan
-        run: echo "matrix=$(bun packages/scripts/src/test-shards.ts matrix)" >> "$GITHUB_OUTPUT"
+        run: echo "matrix=$(bun packages/scripts/src/test-shards.ts legs)" >> "$GITHUB_OUTPUT"
 
       # each shard splits by the same merged timings, so the shards' files add up to the suite once
       - name: Keep the split's timings
@@ -101,14 +101,14 @@ jobs:
           retention-days: 7
 
   suite:
-    name: Suite (${{ matrix.shard }})
+    name: Suite (${{ matrix.shard }}${{ matrix.clock && ', clock ahead' || '' }})
     needs: shards
     timeout-minutes: 20
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
-      matrix:
-        shard: ${{ fromJSON(needs.shards.outputs.matrix) }}
+      # every real-clock shard, and beside them the clock-ahead pass (CLOCK_AHEAD_DAYS, test-sandbox.ts) split on its own, since it leaves out clock-exempt.ts's files, so a test that takes its clock from two sources goes red on its own PR, not on the day the real clock reaches it
+      matrix: ${{ fromJSON(needs.shards.outputs.matrix) }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -146,24 +146,27 @@ jobs:
           bun packages/scripts/src/test-shards.ts files ${{ matrix.shard }} > "$RUNNER_TEMP/shard-files"
           NODE_ENV=test xargs bun packages/scripts/src/test-sandbox.ts < "$RUNNER_TEMP/shard-files"
         env:
+          CLOCK_AHEAD_DAYS: ${{ matrix.clock }}
           NODE_ENV: production
           SKIP_ENV_VALIDATION: true
           # the suite's parallel pass names the file it hangs in at its deadline, which lands well inside the job's 20 minutes
           TEST_PARALLEL_DEADLINE_MS: 600000
-          # the parallel pass writes each file's time into tests/timings.json, which the next run's Shards job merges
-          TEST_TIMINGS_UPDATE: 1
+          # the real clock's parallel pass writes each file's time into tests/timings.json, which the next run's Shards job merges
+          TEST_TIMINGS_UPDATE: ${{ !matrix.clock && '1' || '' }}
 
       - name: Gather this shard's timings
+        if: ${{ !matrix.clock }}
         run: mkdir -p "$RUNNER_TEMP/timings" && cp tests/timings.json "$RUNNER_TEMP/shard-files" "$RUNNER_TEMP/timings/"
 
       - name: Keep this shard's timings
+        if: ${{ !matrix.clock }}
         uses: actions/upload-artifact@v7
         with:
           name: timings-${{ matrix.shard }}
           path: ${{ runner.temp }}/timings
           retention-days: 7
 
-  # the gate's check name (REQUIRED_CHECKS in pr-merge/gates.ts): one result, green only when the lint and build job and every shard passed
+  # the gate's check name (REQUIRED_CHECKS in pr-merge/gates.ts): one result, green only when the lint and build job and every shard, on both clocks, passed
   audit-lint-build:
     name: Audit, Lint, and Build
     needs: [auto-check-build, suite]
