@@ -1,7 +1,7 @@
 // PreToolUse hook: refuses a factory session's write into the extensions root, where every guard's list, policy.json and each scope's sources live, and its playground CLI call that changes what a guard reads to allow or deny a call, so no session edits a list in one call and makes the guarded call in the next.
 import { existsSync, statSync } from "node:fs"
 import { homedir } from "node:os"
-import { basename, dirname, join, resolve, sep } from "node:path"
+import { dirname, join, resolve, sep } from "node:path"
 
 import { dataDir } from "../../packages/env/src/data-dir"
 import { extensionsDir } from "../../packages/settings/src/rendered"
@@ -523,49 +523,29 @@ function awkPrograms(words: Word[]): Word[] | undefined {
   return programs.length ? programs : undefined
 }
 
-// A JavaScript string literal's text, each quote read on its own so a stray one of another kind hides none: double-quoted, single-quoted or a template
-const LITERALS = [/"((?:[^"\\\n]|\\.)*)"/g, /'((?:[^'\\\n]|\\.)*)'/g, /`((?:[^`\\]|\\.)*)`/g]
-// A program that reads the home's path or names the playground command, so a path or a guarded call it builds at run time is one the hook cannot see by name
-const NAMES_HIDDEN = /\bHOME\b|\bhomedir\b|\bplayground\b/
-// The shell's own glob characters in a redirect's target
-const SHELL_GLOB = /[*?[]/
-// The shell builtins a spawned line can run that no PATH lookup finds
-const BUILTINS = new Set([
-  ".",
-  "[",
-  "[[",
-  "alias",
-  "builtin",
-  "cd",
-  "command",
-  "declare",
-  "echo",
-  "eval",
-  "exec",
-  "export",
-  "getopts",
-  "hash",
-  "kill",
-  "let",
-  "local",
-  "mapfile",
-  "popd",
-  "printf",
-  "pushd",
-  "read",
-  "readarray",
-  "readonly",
-  "set",
-  "source",
-  "test",
-  "trap",
-  "type",
-  "typeset",
-  "ulimit",
-  "umask",
-  "unset",
-  "wait",
-])
+// The modules an inline program may read without being able to write or run: a require or import of any other sends it to canary's reading
+const READ_ONLY_MODULES =
+  /^(?:node:)?(?:assert|buffer|console|crypto|events|node:test|path|punycode|querystring|string_decoder|timers|url|util|zlib)$/
+// A token that lets an inline program run a subprocess, write or remove a file, or name a facility the scan cannot see; any one sends the program to canary's reading rather than the lenient opaque one. Fails closed: a require or import of a module off the allowlist, any computed member access, and any string escape count too.
+const IMPURE = [
+  // a subprocess: the child_process family, the Bun shell tag, Bun.spawn and spawnSync
+  /\bchild_process\b|\bexec(?:File)?(?:Sync)?\s*\(|\bspawn(?:Sync)?\s*\(|\bBun\s*\.\s*\$|\bBun\s*\.\s*spawn/,
+  // a filesystem write or removal, by fs, fs/promises or Bun
+  /\b(?:rm|rmSync|rmdir|rmdirSync|unlink|unlinkSync|rename|renameSync|write|writeSync|writeFile|writeFileSync|appendFile|appendFileSync|mkdir|mkdirSync|mkdtemp|mkdtempSync|cp|cpSync|copyFile|copyFileSync|symlink|symlinkSync|link|linkSync|truncate|truncateSync|ftruncate|chmod|chmodSync|chown|chownSync|utimes|utimesSync|createWriteStream|open|openSync)\s*\(|\bBun\s*\.\s*write\b/,
+  // dynamic code or naming the scan cannot follow: eval, new Function, import(), a computed member access, or a module name built at run time
+  /\beval\s*\(|\bnew\s+Function\b|\bimport\s*\(|\[[^\]]*\]\s*\(|\bprocess\s*\.\s*binding\b|\bglobalThis\b|\bglobal\s*\[/,
+  // any \x, \u or octal escape in the text, which can spell a token the other scans miss
+  /\\x[0-9a-fA-F]|\\u|\\[0-7]/,
+]
+// Whether an inline program can only compute and print: no impure token, and every require or import names a read-only module
+function pureCompute(source: string): boolean {
+  if (IMPURE.some((re) => re.test(source))) return false
+  const refs = [...source.matchAll(/\b(?:require|import)\s*\(\s*(["'`])([^"'`]*)\1\s*\)/g)]
+  if (refs.some((m) => !READ_ONLY_MODULES.test(m[2]))) return false
+  // a static import statement names its module the same way
+  const statics = [...source.matchAll(/\bimport\b[^;]*?\bfrom\s*(["'`])([^"'`]*)\1/g)]
+  return !statics.some((m) => !READ_ONLY_MODULES.test(m[2]))
+}
 const EVALUATES = new Set(["-e", "-ep", "--eval", "-p", "-pe", "--print"])
 // An inline evaluator's program word, JavaScript the shell never reads as a line: bun's or node's -e, --eval, -p or --print value (-pe and -ep included) among the options before any script, or agent-browser's eval script; undefined for any other call
 function evalProgram({ args, name }: Parsed): Word | undefined {
@@ -791,9 +771,6 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
   }
   // What a word of a program that is no reader names: a path in the root, a folder above it, a glob there, or the root's path in its text.
   const judged = new Map<string, string | undefined>()
-  // set while an inline evaluator's program is read as a line: only a command that can run (runs) has its words judged, its own name no path, a one-word literal (argLine) judged whole, and a redirect's glob only the shell's *, ? or [
-  let inProgram = false
-  let argLine = false
   // each command the hook lexes that feeds a pipe, and the command it feeds, so an evaluator whose print reaches a program other than a reader is read as canary reads it, since that program may run what it prints
   const consumers = new WeakMap<Command, Command>()
   const lexLine = (line: string, known: Record<string, string>) => {
@@ -801,28 +778,11 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
     for (const cmd of out.commands) if (cmd.stdin) consumers.set(cmd.stdin, cmd)
     return out
   }
+  // Whether an evaluator's output could reach a shell: down a pipe to a program other than a reader, or into a file by a redirect, which a shell may later read. A command inside a substitution or subshell is barred from the opaque path by its scope instead, since its output leaves that scope into whatever reads it.
   const feeds = (cmd: Command, env: Env): boolean => {
     for (let next = consumers.get(cmd); next; next = consumers.get(next))
       if (!passes(next, env)) return true
-    return false
-  }
-  // the folders a spawned program is looked up in: the session's PATH and the usual install folders, so a name found nowhere runs nothing
-  const lookup = [
-    ...(environment.PATH ?? "").split(":"),
-    ...["/bin", "/sbin", "/usr/bin", "/usr/sbin", "/usr/local/bin", "/opt/homebrew/bin"],
-    join(home, ".bun", "bin"),
-    join(home, ".local", "bin"),
-  ]
-    .filter(Boolean)
-    .join(":")
-  const found = new Map<string, boolean>()
-  // Whether a program's command can run: a name the hook cannot read, a path, a shell builtin, or a program the lookup finds
-  const runs = (name: string, env: Env): boolean => {
-    if (marked(name) || name.includes("/") || BUILTINS.has(name)) return true
-    const dirs = env.cwd ? `${join(env.cwd, "node_modules", ".bin")}:${lookup}` : lookup
-    if (!found.has(`${dirs}\0${name}`))
-      found.set(`${dirs}\0${name}`, !!Bun.which(name, { PATH: dirs }))
-    return found.get(`${dirs}\0${name}`)!
+    return cmd.redirects.some((r) => writer(r) && r.target?.value !== "/dev/null")
   }
   // literal: a closed-list reader's word on a line read call by call, whose quoted glob character is text the reader never expands
   const names = (word: Word, env: Env, remover: boolean, literal = false): string | undefined => {
@@ -882,8 +842,7 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
           r.target &&
           writer(r) &&
           (inRoot(pathOf(r.target, here)) ||
-            ((inProgram ? SHELL_GLOB : GLOB).test(r.target.value) &&
-              !!names(r.target, here, true))),
+            (GLOB.test(r.target.value) && !!names(r.target, here, true))),
       )
       if (into?.target) return refuse(`a write to ${pathOf(into.target, here)}`)
     }
@@ -928,18 +887,10 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
         )
       script.push(text.value)
     }
-    // an inline evaluator's program is no word of the call, unless the line holds a root shell, its print feeds a program other than a reader, the shell expands a glob in it, it holds a value the hook cannot read, or its text names the root, the data folder, the home's variable or the playground command; its text is read as a line in program mode, where a regex or an arrow names no folder
-    const program = rootLine || feeds(cmd, env) ? undefined : evalProgram(parsed)
+    // an inline evaluator's program is no word of the call when it can only compute and print (pureCompute): its regex, arrow or property access is neither a path, a glob nor a redirect. A program that can run a subprocess, write or remove a file, run dynamic code, whose print feeds a shell, or that sits inside a substitution or subshell whose output a surrounding shell runs (scope above the line's own), is read as canary reads it, each spaced text a command line, on a root-shell line too.
+    const program = rootLine || cmd.scope !== 0 || feeds(cmd, env) ? undefined : evalProgram(parsed)
     const opaque =
-      program &&
-      !program.glob &&
-      !marked(program.value) &&
-      !texts(program).some(
-        (t) =>
-          places(env).some((here) => holds(t.value, here)) ||
-          t.value.includes(basename(dirname(root))) ||
-          NAMES_HIDDEN.test(t.value),
-      )
+      program && !program.glob && !marked(program.value) && pureCompute(program.value)
         ? program
         : undefined
     const lines = runsOf(
@@ -956,33 +907,6 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
       const verdict = await run(lexLine(line, env.known), { ...env, vars: new Map() }, visit, true)
       if (verdict) return verdict
     }
-    if (opaque) {
-      const was = inProgram
-      const wasArg = argLine
-      inProgram = true
-      try {
-        // the program, and each of its string literals, each \n part included, since a spawn or a shell template runs one as a line
-        const text = opaque.value.replace(/^--(?:eval|print)=/, "")
-        const literals = LITERALS.flatMap((re) => [...text.matchAll(re)].map((m) => m[1]))
-        // a # opens no shell comment there, since JavaScript's # is a private field or text; a literal of one word is a spawn's argument, every word of it judged
-        const source = text.replace(/#/g, " ")
-        const lines = [source, ...literals, ...literals.flatMap((l) => l.split("\\n"))]
-        for (const line of new Set(lines)) {
-          if (!/\S/.test(line)) continue
-          argLine = line !== source && !/\s/.test(line.trim())
-          const verdict = await run(
-            lexLine(line, env.known),
-            { ...env, vars: new Map() },
-            visit,
-            true,
-          )
-          if (verdict) return verdict
-        }
-      } finally {
-        inProgram = was
-        argLine = wasArg
-      }
-    }
     // a quiet commit's message is text git never runs, but one naming a gated call is refused all the same
     const quiet = !whole && quietCommit(cmd, parsed, env)
     for (const word of quiet ? args : []) {
@@ -995,7 +919,6 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
     }
     // a bare assignment or export with no command, or a reader: only its redirect writes, and a variable it sets is read where a command runs with it
     if (!first || EXPORTS.has(name) || reader) return
-    if (inProgram && !argLine && !runs(first.value, env)) return
     // a program word the hook cannot read is named as such, so a refusal always names what runs
     const verb = name && !marked(name) ? name : "a program it cannot read"
     const remover = REMOVERS.has(name)
@@ -1032,7 +955,7 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
       }
       const literal = !whole && narrow(cmd, here)
       for (const word of [first, ...args]
-        .filter((word) => word !== opaque && !(inProgram && !argLine && word === first))
+        .filter((word) => word !== opaque)
         .map((word) => heldWord(word, here, steady) ?? word)) {
         // a quiet commit's message and a gh filter are text, judged only when the root is in it; a filter's unquoted glob is the shell's, judged as any glob
         const text = (quiet && /\s/.test(word.value)) || (filters.has(word) && !word.glob)
