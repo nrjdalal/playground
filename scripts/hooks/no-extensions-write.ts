@@ -164,15 +164,17 @@ type Namings = { blind: boolean; counts: Map<string, number>; plain: Set<string>
 // The operators after ${K that only read K; any other (`=`, `:=`, zsh's `::=`, a subscript, a modifier) may set it, so it counts as a naming
 const READS_ONLY = /^(?:\}|:?[-+?]|[#%/])/
 
-// Text the shell evaluates, where an assignment sets a name the hook never reads: arithmetic naming a variable, whose value it evaluates as an expression (`V=XY=0; (( V ))` sets XY), in `(( ))`, `$(( ))`, `$[ ]`, a `[[ ]]` comparison or a substring offset; any subscript but an empty one, `@`, `*`, digits with only `-`, `:`, `,` and spaces among them, or one that starts with `^`, where both shells stop on a math error before reading a name (`a[]`, `a[@]`, `a[-1]`, `a[0:9]`, `a[1,5]`, `a[^;]`), wherever it sits, quoted or not (`${a[V]}`, zsh's `$a[V]`, `a[V]=`, `read 'a[V]'`, `unset 'a[V]'`, `printf -v 'a[V]'`, `[[ -v a[V] ]]`); and bash's prompt transformation (`${V@P}`)
+// Text the shell evaluates, where an assignment sets a name the hook never reads: arithmetic naming a variable, whose value it evaluates as an expression (`V=XY=0; (( V ))` sets XY), in `(( ))`, `$(( ))`, `$[ ]`, a `[[ ]]` comparison or a substring offset; and bash's prompt transformation (`${V@P}`)
 const EVALUATES = [
   /\(\([^)]*[A-Za-z_]/,
   /\$\[[^\]]*[A-Za-z_]/,
   /\[\[.*\s-(?:eq|ge|gt|le|lt|ne)\s/s,
-  /\w\[(?!(?:[@*]|[-\d:,\s]*)\]|\^)/,
   /\$\{[#!]?\w+:(?![-+=?:])[^}]*[A-Za-z_]/,
   /@P\}/,
 ]
+
+// A subscript, which both shells evaluate as arithmetic naming a variable, but an empty one, `@`, `*`, digits with only `-`, `:`, `,` and spaces among them, or one that starts with `^`, where both shells stop on a math error before reading a name (`a[]`, `a[@]`, `a[-1]`, `a[0:9]`, `a[1,5]`, `a[^;]`); read on the line as written and on its unquoted text, since the shell removes a quote or a backslash between a name and its `[` before read, unset or printf -v sees it (`${a[V]}`, zsh's `$a[V]`, `a[V]=`, `read 'a[V]'`, `printf -v 'a[V]'`, `[[ -v a[V] ]]`)
+const SUBSCRIPT = /\w\[(?!(?:[@*]|[-\d:,\s]*)\]|\^)/
 
 // zsh's glob qualifiers that run code, an e with its code up to its separator's match (`[`, `{` and `<` pair with their closers, any other character with itself) or a `+` with a function's name, closed at a word's end (`*(e:…:)`, `*(.e{…})`, `*(+f)`); read on singleQuotesOut's text, since a qualifier acts only on unquoted text
 const QUALIFIER =
@@ -244,6 +246,8 @@ function namings(command: string): Namings {
   // a name indirection that assigns sets a variable whose name the hook cannot read; zsh's P flag holds only as a plain read (`${(P)N}`, `${(P)N:-…}`), a flag with a delimited argument (`${(j:…:)…}`) holds nothing, since its argument can hide a `)` and a P, and nor do the e, % and # flags, which evaluate a value as shell text, a prompt or arithmetic
   let blind =
     EVALUATES.some((evaluates) => evaluates.test(command)) ||
+    SUBSCRIPT.test(command) ||
+    SUBSCRIPT.test(unquoted(command)) ||
     QUALIFIER.test(singleQuotesOut(command))
   for (const m of command.matchAll(/\$\{\(([^)]*)(\)?)/g)) {
     const [whole, flags, closed] = m
@@ -538,10 +542,11 @@ function steadyNames(named: Namings, commands: Command[]): (cmd: Command) => Ste
         : [],
     )
     const names = loop !== -1 ? [cmd.words[loop + 1]] : PRINTS.has(name) ? vNames : cmd.words
-    // a name the shell reads after quote removal (`read X\Y` sets XY) counts as written, and one the hook cannot read could be any
+    // a name the shell reads after quote removal (`read X\Y` sets XY) counts as written, and one the hook cannot read could be any; a name word with a quote or a backslash and a `[` reads as subscripted whatever the subscript, so no quoted or escaped subscript in a setter's name passes
     for (const word of names) {
       if (!word) continue
       if (marked(word.value.split("=")[0])) return () => NONE
+      if (word.quoted && word.value.includes("[")) return () => NONE
       for (const key of word.value.match(/[A-Za-z_]\w*/g) ?? [])
         counts.set(key, (counts.get(key) ?? 0) + 1)
     }

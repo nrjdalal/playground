@@ -619,7 +619,7 @@ describe("a quoted argument is read as a command line only where a program runs 
     ],
     [
       "rm of a held variable beside a glob qualifier that runs nothing",
-      'X=/tmp/a; : /tmp/*(.N); rm -rf "$X"',
+      'X=/tmp/a; : build/*(.N); rm -rf "$X"',
     ],
     [
       "rm of a held variable beside a single-quoted jq filter that reads as a qualifier",

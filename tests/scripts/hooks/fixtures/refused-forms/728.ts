@@ -151,6 +151,66 @@ export const groups: Group[] = [
         "XY=/tmp/a; : '/tmp'/*(e,$V,); rm -rf ${XY}.playground/./extensions/.no-such-folder",
         "process home",
       ],
+      [
+        "rm of a variable read's subscripted name sets, its [ set off by a backslash",
+        "D=~/.playground/./extensions/x; XY=/../../y; V=X; V+=Y=0; read a\\[V\\] <<< 1; rm -rf $D$XY/../.no-such-folder",
+        "process tmp",
+      ],
+      [
+        "rm of a variable read's subscripted name sets, its [ set off by a double quote",
+        'D=~/.playground/./extensions/x; XY=/../../y; V=X; V+=Y=0; read a"[V]" <<< 1; rm -rf $D$XY/../.no-such-folder',
+        "process tmp",
+      ],
+      [
+        "rm of a variable read's subscripted name sets, its [ set off by a single quote",
+        "D=~/.playground/./extensions/x; XY=/../../y; V=X; V+=Y=0; read a'[V]' <<< 1; rm -rf $D$XY/../.no-such-folder",
+        "process tmp",
+      ],
+      [
+        "rm of a variable unset's subscripted name sets, its [ set off by a backslash",
+        "D=~/.playground/./extensions/x; XY=/../../y; V=X; V+=Y=0; unset a\\[V\\]; rm -rf $D$XY/../.no-such-folder",
+        "process tmp",
+      ],
+      [
+        "rm of a variable unset's subscripted name sets, its [ set off by a double quote",
+        'D=~/.playground/./extensions/x; XY=/../../y; V=X; V+=Y=0; unset a"[V]"; rm -rf $D$XY/../.no-such-folder',
+        "process tmp",
+      ],
+      [
+        "rm of a variable unset's subscripted name sets, its [ set off by a single quote",
+        "D=~/.playground/./extensions/x; XY=/../../y; V=X; V+=Y=0; unset a'[V]'; rm -rf $D$XY/../.no-such-folder",
+        "process tmp",
+      ],
+      [
+        "rm of a variable printf -v's subscripted name sets, its [ set off by a backslash",
+        "D=~/.playground/./extensions/x; XY=/../../y; V=X; V+=Y=0; printf -v a\\[V\\] x; rm -rf $D$XY/../.no-such-folder",
+        "process tmp",
+      ],
+      [
+        "rm of a variable printf -v's subscripted name sets, its [ set off by a double quote",
+        'D=~/.playground/./extensions/x; XY=/../../y; V=X; V+=Y=0; printf -v a"[V]" x; rm -rf $D$XY/../.no-such-folder',
+        "process tmp",
+      ],
+      [
+        "rm of a variable printf -v's subscripted name sets, its [ set off by a single quote",
+        "D=~/.playground/./extensions/x; XY=/../../y; V=X; V+=Y=0; printf -v a'[V]' x; rm -rf $D$XY/../.no-such-folder",
+        "process tmp",
+      ],
+      [
+        "rm of a variable read's subscripted name sets, its [ spelt as an ANSI-C escape",
+        "D=~/.playground/./extensions/x; XY=/../../y; V=X; V+=Y=0; read a$'\\x5b'V] <<< 1; rm -rf $D$XY/../.no-such-folder",
+        "process tmp",
+      ],
+      [
+        "rm of a variable unset's subscripted name sets, its [ spelt as an ANSI-C escape",
+        "D=~/.playground/./extensions/x; XY=/../../y; V=X; V+=Y=0; unset a$'\\x5b'V]; rm -rf $D$XY/../.no-such-folder",
+        "process tmp",
+      ],
+      [
+        "rm of a variable printf -v's subscripted name sets, its [ spelt as an ANSI-C escape",
+        "D=~/.playground/./extensions/x; XY=/../../y; V=X; V+=Y=0; printf -v a$'\\x5b'V] x; rm -rf $D$XY/../.no-such-folder",
+        "process tmp",
+      ],
     ],
   },
 ]
