@@ -269,7 +269,7 @@
   ops-sweep reminds each live poster on it once, then at most every 4 hours, and a lead hears of a poster that is down (playbook's Sweep).
 - A `secret` ask asks the owner for a value (a client secret, an API key) that goes straight to one sink and is kept nowhere: no row, log line, transcript, response, error or argv holds it.
   Its `key` is the environment variable's name and its `sink` one of the allowlist in code, `secretSinkSchema` in `api/hono/src/lib/dashboard/inbox.ts`, `{type: "vercel", project, scope, environments}`, each environment of `development`, `preview` and `production` named once, or `{type: "keychain", item}`,
-  one of this Mac's Keychain items `KEYCHAIN_ITEMS` in `api/hono/src/lib/keychain-items.ts` allows (`yard` today, the Yard token `playground yard` and the local Dashboard read), so a new item is one entry there.
+  one of this Mac's Keychain items `KEYCHAIN_ITEMS` in `api/hono/src/lib/keychain-items.ts` allows (`slack`, the Slack user token the Slack extension reads, and `yard`, the Yard token `playground yard` and the local Dashboard read), so a new item is one entry there.
   Its card shows what Submit does, a masked field and Submit, Enter submitting too, with no comment box, Archive or Chat about it, so nothing else invites the value; Snooze stays.
   Submit posts `{value, seen}`, the value trimmed of its edge whitespace (a pasted newline), to `POST /api/v1/inbox/:id/secret`, which `provideSecret()` claims in one write that holds only while the item is open at the version read, so the sink runs once, then hands the value on stdin to `vercel env add <key> --environment <env> --project <project> --scope <scope> --yes`,
   once an environment in order,
