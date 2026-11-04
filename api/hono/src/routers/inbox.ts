@@ -209,7 +209,7 @@ export const inboxRouter = new Hono<{ Variables: Session }>()
     describeRoute({
       tags: ["Inbox"],
       description:
-        "Answer an open secret ask with its value, which goes straight to the ask's sink on stdin, once an environment, and is kept nowhere: the item records only when it was provided and each exit status, and its poster is told that alone",
+        "Answer an open secret ask with its value, which goes straight to the ask's sink on stdin, once a Vercel environment or once to a Keychain item, and is kept nowhere: the item records only when it was provided and each exit status or saved, and its poster is told that alone",
       responses: {
         200: { description: "OK" },
         ...validationErrorResponses,
@@ -226,8 +226,8 @@ export const inboxRouter = new Hono<{ Variables: Session }>()
         actor: { email: user.email, id: user.id },
         deliver,
         dispatcher: DISPATCHER,
-        run: runSink,
         keychain: saveToKeychain,
+        run: runSink,
       })
       if (!result.ok) throw new ApiError(STATUS[result.code], result.code, result.message)
       return c.json({ data: result.item })

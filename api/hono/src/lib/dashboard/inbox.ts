@@ -9,7 +9,7 @@ import { and, desc, eq, gt, inArray, isNotNull, isNull, or, sql } from "drizzle-
 import { z } from "zod"
 
 import { fileNameOf } from "../download"
-import { KEYCHAIN_ITEM_NAMES, type KeychainItemName } from "../keychain-items"
+import { KEYCHAIN_ITEM_NAMES, KEYCHAIN_ITEMS, type KeychainItemName } from "../keychain-items"
 import { ID_PATTERN } from "./attachments"
 
 // Playground's Inbox: what the factory posts for the owner, one row of inbox_item each, through the bun run ask CLI alone. A decision previews exactly what Approve does, a draft is a Slack message or Linear comment to send, and an update is an outcome to read. The dashboard records his answer and types it into the posting session through deliver(); the dashboard itself never sends a message, merges or files anything, sharing only a Slack send's files (filesToUpload) and running only an accept decision's accept. Nothing here imports the API's env or an @/ path, so the CLI runs from any shell and the web reads its types.
@@ -1310,16 +1310,16 @@ export async function provideSecret(
     actor,
     deliver,
     dispatcher,
+    keychain,
     now = new Date(),
     run,
-    keychain,
   }: {
     actor: ActivityActor
     deliver?: Deliver
     dispatcher?: string
+    keychain?: KeychainSave
     now?: Date
     run: SinkRun
-    keychain?: KeychainSave
   },
 ): Promise<{ item: InboxItem; ok: true } | Refused> {
   const current = await getItem(db, id)
@@ -1328,6 +1328,9 @@ export async function provideSecret(
     return { code: "VALIDATION_ERROR", message: "Only a secret ask takes a value", ok: false }
   }
   const { key, sink } = current.preview
+  // a paste off the item's shape is refused before the claim, so the card stays open for the right one
+  if (sink.type === "keychain" && !KEYCHAIN_ITEMS[sink.item].valid.test(value))
+    return { code: "VALIDATION_ERROR", message: KEYCHAIN_ITEMS[sink.item].invalid, ok: false }
   if (seen !== undefined && seen !== current.updatedAt) {
     return {
       code: "CONFLICT",

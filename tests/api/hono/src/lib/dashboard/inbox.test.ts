@@ -3162,7 +3162,7 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       const refused = await store.provideSecret(
         db,
         posted.id,
-        { value: VALUE },
+        { value: `yard_${VALUE}` },
         {
           actor,
           run: stub().run,
@@ -3178,6 +3178,27 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       })
       expect(JSON.stringify(refused)).not.toContain(VALUE)
       expect(await everyRow()).not.toContain(VALUE)
+    })
+
+    test("a keychain paste off the item's shape is refused before the claim, so the card stays open", async () => {
+      const posted = await post(
+        decision({ key: "YARD_TOKEN", sink: { item: "yard", type: "keychain" }, type: "secret" }),
+      )
+      let saved = 0
+      const refused = await store.provideSecret(
+        db,
+        posted.id,
+        { value: VALUE },
+        { actor, keychain: async () => void saved++, run: stub().run },
+      )
+      expect(refused).toMatchObject({
+        code: "VALIDATION_ERROR",
+        message: "a Yard token starts yard_",
+        ok: false,
+      })
+      expect(saved).toBe(0)
+      expect((await store.getItem(db, posted.id))?.status).toBe("open")
+      expect(JSON.stringify(refused)).not.toContain(VALUE)
     })
 
     test("runs once: a second Submit, or one on words changed since, is refused and runs nothing", async () => {
