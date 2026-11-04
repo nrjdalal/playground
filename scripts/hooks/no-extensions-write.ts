@@ -618,10 +618,16 @@ function wholeLine(commands: Command[], env: Env): boolean {
   })
 }
 
-// Calls whose string argument a shell runs: exec and execSync always, and execFile, execFileSync, spawn and spawnSync beside a literal `shell: true`. A ~ in that string expands to the home as the shell runs it, so the string is judged as its own shell line rather than left relative to the cwd.
+// Calls whose string argument a shell runs: exec and execSync in a program that names child_process, and execFile, execFileSync, spawn and spawnSync beside a literal `shell: true`. A ~ in that string expands to the home as the shell runs it, so the string is judged as its own shell line rather than left relative to the cwd.
 const ALWAYS_SHELL = new Set(["exec", "execSync"])
 const SHELL_RUNNER = /\b(exec|execFile|execFileSync|execSync|spawn|spawnSync)\s*\(/g
 const SHELL_TRUE = /\bshell\s*:\s*true\b/
+
+// The index of the first non-whitespace character at or after `k`.
+function skipSpace(src: string, k: number): number {
+  while (k < src.length && /\s/.test(src[k])) k++
+  return k
+}
 
 // A JavaScript string literal at `src[i]` (a ', " or ` quote): its content and the index past the close, or undefined when `src[i]` is no quote or a template holds a ${…} substitution.
 function stringLiteral(src: string, i: number): { end: number; value: string } | undefined {
@@ -639,21 +645,20 @@ function stringLiteral(src: string, i: number): { end: number; value: string } |
   return { end: k + 1, value }
 }
 
-// The command string a shell-running call is given, read from just after its `(`: a run of string literals joined by `+`, or undefined when the first argument is not a literal run (an array, a variable, a template with a substitution) or holds a shell variable, which the hook judges as canary does.
+// The command string a shell-running call is given, read from just after its `(`: a run of string literals joined by `+`, or undefined when the first argument is not a literal run (an array, a variable, a template with a substitution). A shell variable ($VAR) inside the literal is kept and judged as the shell reads it, so the rest of the line is still judged.
 function commandString(src: string, open: number): string | undefined {
   let value = ""
   let k = open
   for (;;) {
-    while (k < src.length && /\s/.test(src[k])) k++
+    k = skipSpace(src, k)
     const literal = stringLiteral(src, k)
     if (!literal) return undefined
     value += literal.value
-    k = literal.end
-    while (k < src.length && /\s/.test(src[k])) k++
+    k = skipSpace(src, literal.end)
     if (src[k] !== "+") break
     k++
   }
-  return value.includes("$") ? undefined : value
+  return value
 }
 
 // The index past a call's closing `)`, counting from just inside its `(`, so a `shell: true` is read from the call's own text.
@@ -674,14 +679,18 @@ function callEnd(src: string, open: number): number {
   return k
 }
 
-// Each command string a shell-running call in a program's text is given, so a ~ in one is judged as the shell expands it; a spawn, spawnSync, execFile or execFileSync counts only beside a literal `shell: true`.
+// Each command string a shell-running call in a program's text is given, so a ~ in one is judged as the shell expands it; exec and execSync count only in a program that names child_process, so a regex's or a query's `.exec` is left alone, and a spawn, spawnSync, execFile or execFileSync counts only beside a literal `shell: true`.
 function shellRunnerArgs(text: string): string[] {
   const out: string[] = []
+  const childProcess = text.includes("child_process")
   for (const m of text.matchAll(SHELL_RUNNER)) {
     const open = m.index + m[0].length
     const command = commandString(text, open)
     if (command === undefined) continue
-    if (ALWAYS_SHELL.has(m[1]) || SHELL_TRUE.test(text.slice(open, callEnd(text, open))))
+    if (
+      (ALWAYS_SHELL.has(m[1]) && childProcess) ||
+      SHELL_TRUE.test(text.slice(open, callEnd(text, open)))
+    )
       out.push(command)
   }
   return out

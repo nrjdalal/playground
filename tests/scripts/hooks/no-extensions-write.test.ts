@@ -541,6 +541,14 @@ describe("a write by ~ is judged against the home the shell expands it to", () =
       "a data-folder glob removed through spawnSync with shell true",
       `bun -e 'Bun.spawnSync("rmdir ~/.play*", { shell: true })'`,
     ],
+    [
+      "a data-folder glob removed through execSync beside an unrelated shell variable",
+      `node -e 'require("child_process").execSync("rmdir ~/.play* $1")'`,
+    ],
+    [
+      "a data-folder glob removed through execSync before an echo of a variable",
+      `node -e 'require("child_process").execSync("rmdir ~/.play*; echo $HOME")'`,
+    ],
   ])("%s is refused from a worktree", async (_, command) => {
     const reason = await check(
       JSON.stringify({ cwd: worktree, tool_input: { command }, tool_name: "Bash" }),
@@ -549,7 +557,7 @@ describe("a write by ~ is judged against the home the shell expands it to", () =
     expect(reason).toContain("no-extensions-write hook refuses")
   })
 
-  // PG-840 residual, named in the hook's README and the PR's Merge Danger and filed as a follow-up: a command string the hook cannot read as literals (a variable, a template with a substitution), and an argument list no shell runs its ~, stay as canary judged them, so none is newly refused from a worktree.
+  // PG-840 residual, named in the hook's README as the guard's known limit: a command string the hook cannot read as literals (a variable, a template with a substitution), an argument list no shell runs its ~, a shell named as the program with its line in an argv -c element, a non-JavaScript inline program handing a shell its string, and a regex's .exec whose string no shell runs, all stay as canary judged them, so none is newly refused from a worktree.
   test.each([
     [
       "a removal built from a variable through execSync",
@@ -562,6 +570,18 @@ describe("a write by ~ is judged against the home the shell expands it to", () =
     [
       "a benign home path removed through execSync",
       `node -e 'require("child_process").execSync("rmdir ~/.no-such-benign-dir")'`,
+    ],
+    [
+      "a shell named as the program with its line in an argv -c element",
+      `node -e 'require("child_process").spawnSync("sh", ["-c", "rmdir ~/.play*"])'`,
+    ],
+    [
+      "a non-JavaScript inline program handing a shell its string",
+      `python3 -c 'import os; os.system("rmdir ~/.play*")'`,
+    ],
+    [
+      "a regex exec whose string no shell runs",
+      `node -e 'const re = /a b/; re.exec("rmdir ~/.play*")'`,
     ],
   ])("%s runs from a worktree", async (_, command) => {
     const reason = await check(

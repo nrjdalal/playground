@@ -31,6 +31,14 @@ export const groups: Group[] = [
         "an inline node program removing a data-folder glob through execFile with shell true",
         `node -e 'require("child_process").execFile("rmdir ~/.play*", { shell: true })'`,
       ],
+      [
+        "an inline node program removing a data-folder glob through execSync beside an unrelated shell variable",
+        `node -e 'require("child_process").execSync("rmdir ~/.play* $1")'`,
+      ],
+      [
+        "an inline node program removing a data-folder glob through execSync before an echo of a variable",
+        `node -e 'require("child_process").execSync("rmdir ~/.play*; echo $HOME")'`,
+      ],
     ],
   },
 ]

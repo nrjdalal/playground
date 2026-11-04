@@ -2040,6 +2040,11 @@ function wholeLine(commands, env) {
 var ALWAYS_SHELL = new Set(["exec", "execSync"]);
 var SHELL_RUNNER = /\b(exec|execFile|execFileSync|execSync|spawn|spawnSync)\s*\(/g;
 var SHELL_TRUE = /\bshell\s*:\s*true\b/;
+function skipSpace(src, k) {
+  while (k < src.length && /\s/.test(src[k]))
+    k++;
+  return k;
+}
 function stringLiteral(src, i) {
   const quote = src[i];
   if (quote !== '"' && quote !== "'" && quote !== "`")
@@ -2061,20 +2066,17 @@ function commandString(src, open) {
   let value = "";
   let k = open;
   for (;; ) {
-    while (k < src.length && /\s/.test(src[k]))
-      k++;
+    k = skipSpace(src, k);
     const literal = stringLiteral(src, k);
     if (!literal)
       return;
     value += literal.value;
-    k = literal.end;
-    while (k < src.length && /\s/.test(src[k]))
-      k++;
+    k = skipSpace(src, literal.end);
     if (src[k] !== "+")
       break;
     k++;
   }
-  return value.includes("$") ? undefined : value;
+  return value;
 }
 function callEnd(src, open) {
   let depth = 1;
@@ -2096,12 +2098,13 @@ function callEnd(src, open) {
 }
 function shellRunnerArgs(text) {
   const out = [];
+  const childProcess = text.includes("child_process");
   for (const m of text.matchAll(SHELL_RUNNER)) {
     const open = m.index + m[0].length;
     const command = commandString(text, open);
     if (command === undefined)
       continue;
-    if (ALWAYS_SHELL.has(m[1]) || SHELL_TRUE.test(text.slice(open, callEnd(text, open))))
+    if (ALWAYS_SHELL.has(m[1]) && childProcess || SHELL_TRUE.test(text.slice(open, callEnd(text, open))))
       out.push(command);
   }
   return out;
