@@ -191,7 +191,7 @@ export const appsRouter = new Hono<{ Variables: Session }>()
     describeRoute({
       tags: ["Apps"],
       description:
-        "Delete a page `playground page` kept, by its name, from an agent's Pages tab: only an HTML file pages.jsonl keeps a record for, directly in the previews folder as a regular file with one link; a tombstone line ({at, deleted: true, file}) appended to pages.jsonl first drops its record, then its file and its caption (.txt of the same name) are unlinked; a page kept again under the name lists again. Any other name is a 404 that touches nothing. Returns the deleted name.",
+        "Delete a page `playground page` kept, by its name, from an agent's Pages tab: only an HTML file pages.jsonl keeps a record for, directly in the previews folder as a regular file with one link; a tombstone line ({at, deleted: true, file}) appended to pages.jsonl first drops its record, then its file, its caption (.txt of the same name) and the PDF beside it (.pdf of the same name) are unlinked; a page kept again under the name lists again. Any other name is a 404 that touches nothing. Returns the deleted name.",
       responses: {
         200: {
           description: "Deleted",

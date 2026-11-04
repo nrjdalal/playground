@@ -971,6 +971,13 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
     expect(await store.attachmentDownloadName(db, "3f0e7a52-1c4b-4d2a-9e6f-00000000d004.png")).toBe(
       "attachment.png",
     )
+    await post({
+      from: "ops",
+      kind: "update",
+      preview: { attachments: [{ id: lone, kind: "html", name: "deck.html" }], outcome: "finding" },
+      title: "Weekly plan, final",
+    })
+    expect(await store.attachmentDownloadName(db, lone)).toBe("Weekly plan, final.html")
   })
 
   test("an item gets a tag that counts up, and is found by its id or its tag", async () => {

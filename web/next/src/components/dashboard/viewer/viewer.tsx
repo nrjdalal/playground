@@ -181,14 +181,27 @@ export function OpenInNewTab({ item }: { item: ViewerItem }) {
   )
 }
 
-// Saves the shown file, or both sides of a before/after pair, under its item's title, as the API names it; off while it saves, and a failed save shows a warning in its place and says so in its name, so another press tries again.
-export function Download({ className = SQUARE, item }: { className?: string; item: ViewerItem }) {
+// Saves a file, or both sides of a before/after pair one after the other, through the Inbox's route in its download mode, under the name the API builds from its item's title.
+export async function saveItem(item: ViewerItem): Promise<void> {
+  for (const file of item.pair ? [item.pair.before, item.pair.after] : [item])
+    await saveFrom(attachmentDownloadUrl(file.id))
+}
+
+// Saves the shown file, or both sides of a before/after pair, under its item's title, as the API names it; off while it saves, and a failed save shows a warning in its place and says so in its name, so another press tries again. label names it where several sit together, a tile's naming its file.
+export function Download({
+  className = SQUARE,
+  item,
+  label = "Download",
+}: {
+  className?: string
+  item: ViewerItem
+  label?: string
+}) {
   const [state, setState] = useState<"failed" | "idle" | "saving">("idle")
   const save = async () => {
     setState("saving")
     try {
-      for (const file of item.pair ? [item.pair.before, item.pair.after] : [item])
-        await saveFrom(attachmentDownloadUrl(file.id))
+      await saveItem(item)
       setState("idle")
     } catch {
       setState("failed")
@@ -196,7 +209,7 @@ export function Download({ className = SQUARE, item }: { className?: string; ite
   }
   return (
     <Button
-      aria-label={state === "failed" ? "Download failed, try again" : "Download"}
+      aria-label={state === "failed" ? `${label} failed, try again` : label}
       className={cn(className, state === "saving" && OFF_FOCUSABLE.className)}
       disabled={state === "saving"}
       focusableWhenDisabled={OFF_FOCUSABLE.focusableWhenDisabled}

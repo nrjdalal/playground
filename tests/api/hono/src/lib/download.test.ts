@@ -21,6 +21,14 @@ describe("fileNameOf (#783)", () => {
     expect(name).toBe(`${"a".repeat(119)}🚀.html`)
     expect(() => attachmentDisposition(name)).not.toThrow()
   })
+
+  test("a lone surrogate and a format character become spaces, the joiner inside an emoji staying, so every title encodes (#821)", () => {
+    const lone = JSON.parse('{"title":"Plan \\ud800 draft"}').title as string
+    expect(fileNameOf(lone, "html")).toBe("Plan draft.html")
+    expect(() => attachmentDisposition(fileNameOf(lone, "html"))).not.toThrow()
+    expect(fileNameOf("invoice\u202Elmth", "pdf")).toBe("invoice lmth.pdf")
+    expect(fileNameOf("Team 👨\u200d👩", "png")).toBe("Team 👨\u200d👩.png")
+  })
 })
 
 describe("attachmentDisposition (#783)", () => {

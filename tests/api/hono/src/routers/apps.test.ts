@@ -172,6 +172,40 @@ describe("the page delete route", () => {
       }
     }
   })
+
+  test("the owner's ?download saves a page under its title through the router, and without it the page shows inline (#821)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "dashboard-previews-route-download-"))
+    const saved = {
+      dir: process.env.PLAYGROUND_PREVIEWS_DIR,
+      live: process.env.PLAYGROUND_LIVE_READS,
+    }
+    try {
+      Object.assign(process.env, { PLAYGROUND_LIVE_READS: "1", PLAYGROUND_PREVIEWS_DIR: dir })
+      writeFileSync(join(dir, "lookup.html"), "<p>hi</p>")
+      writeFileSync(
+        join(dir, "pages.jsonl"),
+        `${JSON.stringify({ at: "2026-11-03T10:00:00.000Z", by: "planner", file: "lookup.html", for: null, title: "Lookup: weekly" })}\n`,
+      )
+      spy = signedIn("owner")
+      const download = await request("/previews/lookup.html?download=1")
+      expect(download.status).toBe(200)
+      expect(download.headers.get("content-disposition")).toBe(
+        "attachment; filename=\"Lookup weekly.html\"; filename*=UTF-8''Lookup%20weekly.html",
+      )
+      const shown = await request("/previews/lookup.html")
+      expect(shown.status).toBe(200)
+      expect(shown.headers.get("content-disposition")).toBe("inline")
+    } finally {
+      for (const [key, value] of [
+        ["PLAYGROUND_PREVIEWS_DIR", saved.dir],
+        ["PLAYGROUND_LIVE_READS", saved.live],
+      ] as const) {
+        if (value === undefined) delete process.env[key]
+        else process.env[key] = value
+      }
+      rmSync(dir, { force: true, recursive: true })
+    }
+  })
 })
 
 describe("the order route's own checks", () => {

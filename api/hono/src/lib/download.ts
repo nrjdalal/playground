@@ -1,8 +1,10 @@
 const MAX_NAME = 120
 
-// Pure: a title as the name a file saves under: each character a file name cannot hold (/ \ : * ? " < > | and control characters) a space, each run of spaces one, no dot or space at either end, at most 120 code points, "download" when nothing is left, then the extension.
+// Pure: a title as the name a file saves under: each character a file name cannot hold (/ \ : * ? " < > |, control characters, a lone surrogate, and a format character such as a right-to-left override but the joiner inside an emoji) a space, each run of spaces one, no dot or space at either end, at most 120 code points, "download" when nothing is left, then the extension.
 export function fileNameOf(title: string, extension: string): string {
-  const clean = title.replace(/[/\\:*?"<>|\p{Cc}]/gu, " ").replace(/\s+/g, " ")
+  const clean = title
+    .replace(/[/\\:*?"<>|\p{Cc}\p{Cs}]|(?!\u200d)\p{Cf}/gu, " ")
+    .replace(/\s+/g, " ")
   // cut by code point, since a cut through an emoji's surrogate pair leaves a name encodeURIComponent throws on
   const base =
     Array.from(clean)

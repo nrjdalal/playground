@@ -337,7 +337,9 @@ describe("a PDF beside a page (#783)", () => {
     const dir = folder()
     const inner = join(dir, "inner")
     mkdirSync(inner, { mode: 0o700 })
+    put(dir, "deck.html", HTML)
     put(dir, "deck.pdf", PDF)
+    put(dir, "fake.html", HTML)
     put(dir, "fake.pdf", HTML)
     expect(await findPreview("deck.pdf", dir)).toEqual({
       kind: "pdf",
@@ -350,6 +352,14 @@ describe("a PDF beside a page (#783)", () => {
     for (const name of ["../deck.pdf", "inner/../deck.pdf", `${dir}/deck.pdf`]) {
       expect(await findPreview(name, inner)).toBeNull()
     }
+  })
+
+  test("a PDF with no page beside it is served nothing, so a page's delete leaves no PDF to reach (#821)", async () => {
+    const dir = folder()
+    put(dir, "lone.pdf", PDF)
+    expect(await findPreview("lone.pdf", dir)).toBeNull()
+    put(dir, "lone.html", HTML)
+    expect((await findPreview("lone.pdf", dir))?.kind).toBe("pdf")
   })
 
   test("a PDF is saved, never shown", () => {

@@ -23,6 +23,20 @@ const GRID_COLUMNS = 4
 const TILE =
   "text-muted-foreground hover:bg-muted/50 [&_img]:transition dark:[&_img]:brightness-75 dark:hover:[&_img]:brightness-100 dark:focus-visible:[&_img]:brightness-100 relative flex aspect-square w-full items-center justify-center overflow-hidden rounded-md border focus-visible:ring-ring/50 outline-none focus-visible:ring-3 focus-visible:border-ring"
 
+// A tile's own Download on the glass in its top-right corner, shown while the tile is hovered or holds focus and always on a touch screen, as a code block's copy button is.
+function TileDownload({ item }: { item: ViewerItem }) {
+  return (
+    <div
+      className={cn(
+        FLOATING_BAR,
+        "absolute top-1.5 right-1.5 opacity-0 transition-opacity group-focus-within/tile:opacity-100 group-hover/tile:opacity-100 pointer-coarse:opacity-100",
+      )}
+    >
+      <Download className={cn("size-7", BAR_ITEM)} item={item} label={`Download ${item.name}`} />
+    </div>
+  )
+}
+
 function Thumb({
   index,
   item,
@@ -35,23 +49,27 @@ function Thumb({
   const viewer = VIEWERS[item.kind]
   const url = useAttachmentUrl(item.id, Boolean(viewer?.Thumb))
   return (
-    <Hint content={item.name}>
-      <button
-        aria-label={`Open ${item.name}`}
-        className={TILE}
-        onClick={() => onOpen(index)}
-        type="button"
-      >
-        {viewer?.Thumb && url ? (
-          <viewer.Thumb item={item} url={url} />
-        ) : (
-          <span className="flex w-full min-w-0 flex-col items-center gap-2 px-2">
-            <FileIcon className="size-8 shrink-0" name={item.name} />
-            <span className="text-2xs w-full truncate text-center">{item.name}</span>
-          </span>
-        )}
-      </button>
-    </Hint>
+    <div className="group/tile relative">
+      <Hint content={item.name}>
+        <button
+          aria-label={`Open ${item.name}`}
+          className={TILE}
+          data-tile=""
+          onClick={() => onOpen(index)}
+          type="button"
+        >
+          {viewer?.Thumb && url ? (
+            <viewer.Thumb item={item} url={url} />
+          ) : (
+            <span className="flex w-full min-w-0 flex-col items-center gap-2 px-2">
+              <FileIcon className="size-8 shrink-0" name={item.name} />
+              <span className="text-2xs w-full truncate text-center">{item.name}</span>
+            </span>
+          )}
+        </button>
+      </Hint>
+      <TileDownload item={item} />
+    </div>
   )
 }
 
@@ -68,7 +86,8 @@ export function focusTarget(
 }
 
 const moveFocus = (columns: number) => (event: KeyboardEvent<HTMLDivElement>) => {
-  const tiles = [...event.currentTarget.querySelectorAll<HTMLButtonElement>("button")]
+  // the tiles alone, so a tile's Download takes no arrow stop
+  const tiles = [...event.currentTarget.querySelectorAll<HTMLButtonElement>("button[data-tile]")]
   const at = tiles.indexOf(document.activeElement as HTMLButtonElement)
   const to = at === -1 ? null : focusTarget(event.key, at, tiles.length, columns)
   if (to === null) return
@@ -77,7 +96,7 @@ const moveFocus = (columns: number) => (event: KeyboardEvent<HTMLDivElement>) =>
   tiles[to]?.focus()
 }
 
-// One side of a lone before/after pair, its label over the picture at the card's full width in a box of fixed height, so it holds its room before the picture loads and a tall screenshot cannot stretch the card; it opens the pair in the viewer.
+// One side of a lone before/after pair, its label over the picture at the card's full width in a box of fixed height, so it holds its room before the picture loads and a tall screenshot cannot stretch the card; it opens the pair in the viewer, and its corner Download saves its own file.
 function WideSide({
   item,
   label,
@@ -91,14 +110,18 @@ function WideSide({
   return (
     <div className="flex flex-col gap-1.5">
       <span className="text-muted-foreground text-xs">{label}</span>
-      <button
-        aria-label={`Open ${label.toLowerCase()}: ${item.name}`}
-        className="focus-visible:border-ring block h-48 w-full overflow-hidden rounded-md border outline-none"
-        onClick={onOpen}
-        type="button"
-      >
-        {url ? <img alt={item.name} className="size-full object-contain" src={url} /> : null}
-      </button>
+      <div className="group/tile relative">
+        <button
+          aria-label={`Open ${label.toLowerCase()}: ${item.name}`}
+          className="focus-visible:border-ring block h-48 w-full overflow-hidden rounded-md border outline-none"
+          data-tile=""
+          onClick={onOpen}
+          type="button"
+        >
+          {url ? <img alt={item.name} className="size-full object-contain" src={url} /> : null}
+        </button>
+        <TileDownload item={item} />
+      </div>
     </div>
   )
 }
@@ -128,7 +151,7 @@ function LivePage({ item, onOpen }: { item: ViewerItem; onOpen: () => void }) {
   )
 }
 
-// An ask's, a draft's, a Slack decision's or a read-only update's files under its text: a lone HTML page live (LivePage), a lone before/after pair at full width, Before over After, else up to GRID_TILES thumbnails (a kind with no Thumb a titled tile, its icon over its name), then a +N tile that opens the first one it stands for; each opens the viewer at its own place.
+// An ask's, a draft's, a Slack decision's or a read-only update's files under its text: a lone HTML page live (LivePage), a lone before/after pair at full width, Before over After, else up to GRID_TILES thumbnails (a kind with no Thumb a titled tile, its icon over its name), then a +N tile that opens the first one it stands for; each opens the viewer at its own place, and each tile but +N saves its file, a pair's both, with its corner Download.
 export function AttachmentThumbs({
   items,
   onOpen,
@@ -175,6 +198,7 @@ export function AttachmentThumbs({
           <button
             aria-label={`Open ${more} more`}
             className={`${TILE} text-foreground text-sm font-medium`}
+            data-tile=""
             onClick={() => onOpen(shown)}
             type="button"
           >

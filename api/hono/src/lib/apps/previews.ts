@@ -246,10 +246,13 @@ export async function readPreviews(
   return { previews, problems }
 }
 
-// The file a name names, or null: the name must be one the dashboard serves (a preview's, or a PDF's beside a page), sitting directly in the folder as a regular file with one link (not a symlink, and not a hard link to a file elsewhere), in a folder its owner owns.
+// The file a name names, or null: the name must be one the dashboard serves (a preview's, or a PDF's while its page stands beside it), sitting directly in the folder as a regular file with one link (not a symlink, and not a hard link to a file elsewhere), in a folder its owner owns.
 export async function findPreview(name: string, dir = previewsDir()): Promise<PreviewFile | null> {
-  const pdf = pdfPageOf(name) !== null
+  const page = pdfPageOf(name)
+  const pdf = page !== null
   if (!pdf && !isPreviewName(name)) return null
+  // a PDF is served only while its page stands beside it
+  if (page && !(await findPreview(page, dir))) return null
   const folder = resolve(dir)
   const path = join(folder, name)
   if (dirname(path) !== folder || !(await isOwnFolder(folder))) return null
