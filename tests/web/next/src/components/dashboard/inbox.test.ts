@@ -917,10 +917,16 @@ describe("the Inbox as one accordion: the open items, then Snoozed, Archived and
     expect(note).toContain('className={cn("min-h-14 py-2", BOX)}')
   })
 
-  test("inbox.tsx draws no Marker of its own and no second fold: the accordion is its one", () => {
+  test("inbox.tsx draws no Marker of its own and no second fold: the accordion is its one, the first load's disabled row aside", () => {
+    const loading = source.slice(
+      source.indexOf("function InboxLoading"),
+      source.indexOf("export function Inbox("),
+    )
+    expect(loading.match(/<Accordion\b/g)?.length).toBe(1)
+    expect(loading).toContain('<AccordionItem value="open" disabled')
     expect(source).not.toContain("<Marker")
     expect(source).not.toContain("<Collapsible")
-    expect(source.match(/<Accordion\b/g)?.length).toBe(1)
+    expect(source.replace(loading, "").match(/<Accordion\b/g)?.length).toBe(1)
   })
 })
 
