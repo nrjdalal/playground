@@ -23,7 +23,7 @@ test("CLOCK_AHEAD_DAYS moves a running clock that many days ahead, and leaves ou
   // the OS stamps a new file's mtime on the real clock, which the preload never moves
   writeFileSync(
     join(dir, "ahead.test.ts"),
-    `import { expect, test } from "bun:test"\nimport { statSync, writeFileSync } from "node:fs"\ntest("ahead", async () => { writeFileSync("stamp", ""); const days = (Date.now() - statSync("stamp").mtimeMs) / 86_400_000; expect(days).toBeGreaterThan(29.9); expect(days).toBeLessThan(30.1); const a = Date.now(); await Bun.sleep(50); expect(Date.now() - a).toBeGreaterThanOrEqual(40) })\n`,
+    `import { expect, test } from "bun:test"\nimport { statSync, writeFileSync } from "node:fs"\ntest("ahead", async () => { writeFileSync("stamp", ""); const days = (Date.now() - statSync("stamp").mtimeMs) / 86_400_000; expect(statSync("stamp").mtime instanceof Date).toBe(true); expect(structuredClone(new Date()) instanceof Date).toBe(true); expect(days).toBeGreaterThan(29.9); expect(days).toBeLessThan(30.1); const a = Date.now(); await Bun.sleep(50); expect(Date.now() - a).toBeGreaterThanOrEqual(40) })\n`,
   )
   writeFileSync(
     join(dir, "tests/scripts/roster.test.ts"),
@@ -43,6 +43,8 @@ test("CLOCK_AHEAD_DAYS moves a running clock that many days ahead, and leaves ou
     }),
   )
   expect(runs[0]!.code).toBe(0)
+  expect(runs[0]!.stderr).toMatch(/\b1 pass\b/)
+  expect(runs[0]!.stderr).toContain("the clock-ahead pass leaves out tests/scripts/roster.test.ts")
   expect(runs[0]!.stderr).not.toContain("exempt")
   expect(runs[1]!.code).not.toBe(0)
   expect(runs[1]!.stderr).toContain("(fail) ahead")

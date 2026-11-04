@@ -61,7 +61,7 @@ jobs:
           NODE_ENV: production
           SKIP_ENV_VALIDATION: true
 
-  # the suite's shards, by tests/timings.json with the last passing run's shard timings merged over it: test-shards.ts gives as many as its budget needs
+  # the suite's shards and the clock-ahead pass's jobs, by tests/timings.json with the last passing run's shard timings merged over it: test-shards.ts legs gives each as many as its budget needs
   shards:
     name: Shards
     timeout-minutes: 20

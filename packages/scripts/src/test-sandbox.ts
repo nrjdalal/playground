@@ -124,9 +124,10 @@ const serial = SERIAL.filter((file) =>
   paths.map(bare).some((path) => path === "." || file === path || file.startsWith(`${path}/`)),
 )
 // a shard names its files, which no ignore pattern drops, so the clock-ahead pass drops its exempt ones here
-const rest = paths.filter(
-  (path) => !SERIAL.includes(bare(path)) && !(ahead && clockExempt(bare(path))),
-)
+const left = ahead ? paths.filter((path) => clockExempt(bare(path))) : []
+const rest = paths.filter((path) => !SERIAL.includes(bare(path)) && !left.includes(path))
+if (left.length > 0)
+  console.error(`test-sandbox: the clock-ahead pass leaves out ${left.join(", ")}`)
 
 console.error(
   `test-sandbox: ${workers} workers with a ${Math.round(DEADLINE_MS / 1000)}s deadline, then ${serial.length} serial files`,
