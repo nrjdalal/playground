@@ -182,7 +182,7 @@ function sessionOf(raw) {
 
 // scripts/hooks/shell.ts
 import { homedir as homedir3 } from "os";
-import { basename, isAbsolute, resolve as resolve2 } from "path";
+import { basename, dirname, isAbsolute, resolve as resolve2 } from "path";
 var UNKNOWN = "\x00";
 var READ = "\x01";
 var deadline;
@@ -212,6 +212,34 @@ var RESERVED = new Set([
   "until",
   "while"
 ]);
+var OPENS = new Set(["case", "coproc", "for", "if", "select", "until", "while", "{"]);
+var CLOSES = new Set(["done", "esac", "fi", "}"]);
+var HELD = new Set(["coproc", "function", "{"]);
+var FREES = new Set([`
+`, ";", ";;", "&", "||"]);
+var tokens = 0;
+var freshToken = () => ++tokens;
+var BODIES = new Set(["do", "elif", "else", "then"]);
+var MARKERS = new Set([...RESERVED, ...OPENS, ...CLOSES, ...BODIES]);
+function markers(words) {
+  const out = [];
+  for (let k = 0;k < words.length; ) {
+    const w = words[k];
+    if (w.quoted)
+      break;
+    if (w.value === "function") {
+      out.push("function");
+      k += 2;
+    } else if (MARKERS.has(w.value)) {
+      out.push(w.value);
+      k++;
+    } else if (ASSIGN.test(w.value))
+      k++;
+    else
+      break;
+  }
+  return out;
+}
 var GROUPING = new Set(["}", "done", "esac", "fi"]);
 var ASSIGN = /^[A-Za-z_]\w*=/;
 var WRAPPERS = new Map(Object.entries({
@@ -410,7 +438,7 @@ function decode(raw) {
   });
 }
 function lex(src, known = {}) {
-  const lx = { commands: [], i: 0, known, scope: 0, scopes: [-1], src };
+  const lx = { commands: [], i: 0, known, scope: 0, scopes: [-1], src, token: freshToken() };
   list(lx, 0, false);
   return { commands: lx.commands, scopes: lx.scopes };
 }
@@ -432,6 +460,9 @@ function walk(lx, scope, nested, inherit) {
   const fresh = () => ({ redirects: [], scope, stdin: inherit, words: [] });
   let cmd = fresh();
   const opens = [];
+  let depth = 0;
+  let loops = 0;
+  let after = "";
   const end = (op) => {
     const done = cmd;
     const pipe = op === "|" || op === "|&";
@@ -447,6 +478,25 @@ function walk(lx, scope, nested, inherit) {
     if (pipe || op === "&")
       done.detached = true;
     if (done.words.length > 0 || done.redirects.length > 0 || done.group) {
+      const reserved = markers(done.words);
+      const opened = reserved.filter((w) => OPENS.has(w)).length;
+      const closed = reserved.filter((w) => CLOSES.has(w)).length;
+      const body = reserved.some((w) => HELD.has(w) || BODIES.has(w));
+      const loop = reserved.includes("do");
+      if (after === "||" || depth > 0 || body)
+        done.unsure = true;
+      if (after === "&&")
+        done.chained = true;
+      done.chain = lx.token;
+      if (reserved.some((w) => HELD.has(w)))
+        done.held = true;
+      if (loops > 0 || loop)
+        done.repeated = true;
+      depth = Math.max(0, depth + opened - closed);
+      loops = Math.max(0, loops + (loop ? 1 : 0) - (reserved.includes("done") ? 1 : 0));
+      if (depth === 0 && FREES.has(op))
+        lx.token = freshToken();
+      after = op;
       for (const w of done.words) {
         if (w.value !== "{" || w.quoted)
           break;
@@ -902,6 +952,7 @@ function shellSlot(args, shell) {
     return;
   return args.slice(args.indexOf(operand));
 }
+var BUILTIN = new Set(["builtin", "command"]);
 var SHELL_TAKES = new Set(["-o", "+o", "--init-file", "--rcfile"]);
 var BASH_TAKES = new Set([...SHELL_TAKES, "-O", "+O"]);
 function shellOperand(args, shell) {
