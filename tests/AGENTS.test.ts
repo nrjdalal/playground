@@ -47,7 +47,7 @@ const ALWAYS = [
   "Read an organisation's own values",
   "Route every cmux call through",
   "Route every herdr call through",
-  "Count a cmux record as",
+  "Count a session record as",
   "Run the System panel's commands",
   "Send anything to a session",
   "Send a herdr session (cmux.md)",

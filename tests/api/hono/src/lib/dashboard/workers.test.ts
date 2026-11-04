@@ -21,10 +21,7 @@ import {
   lightOf,
   liveRecords,
   type LiveProof,
-  MAX_GAP_MS,
-  MIN_GAP_MS,
   nameOf,
-  nextGap,
   questionsBySession,
   roleOf,
   rosterFacts,
@@ -49,34 +46,9 @@ import {
 // workers.ts sets the names its data folder holds when it loads; the cases name the managers' old names, as a machine past the switch does.
 setSessionNames(SEEDED_NAMES)
 
-describe("nextGap", () => {
-  test("the next full read waits three times as long as the last took, at least MIN_GAP_MS", () => {
-    expect(nextGap(0, 1000, true)).toBe(MIN_GAP_MS)
-    expect(nextGap(0, 5000, true)).toBe(15_000)
-    expect(nextGap(60_000, 5000, true)).toBe(15_000)
-  })
-
-  test("a failed read doubles the wait, up to MAX_GAP_MS", () => {
-    expect(nextGap(15_000, 1000, false)).toBe(30_000)
-    expect(nextGap(0, 20_000, false)).toBe(60_000)
-    expect(nextGap(90_000, 20_000, false)).toBe(MAX_GAP_MS)
-  })
-
-  test("a fixture, which costs cmux nothing, sets no floor", () => {
-    expect(nextGap(0, 1, true, 0)).toBe(3)
-  })
-
-  // 15 Oct: the Mac hibernated for ten minutes on 1% battery, and the read out then failed on waking, which held the next for MAX_GAP_MS while cmux answered.
-  test("a read that ran a minute or more was suspended with the machine, so the next starts at once, failed or not", () => {
-    expect(nextGap(60_000, 60_000, false)).toBe(0)
-    expect(nextGap(60_000, 600_000, true)).toBe(0)
-    expect(nextGap(0, 59_999, false)).toBe(MAX_GAP_MS)
-  })
-})
-
 const b64 = (s: string) => Buffer.from(s).toString("base64")
 
-// cmux's raw list with every record taken at its word, as listLive hands it on when it has no registry to read.
+// A raw session list with every record taken at its word, as listLive hands it on when it has no registry to read.
 const fromCmux = (
   sessions: unknown,
   ...rest: Parameters<typeof composeWorkers> extends [unknown, ...infer R] ? R : never
@@ -1476,7 +1448,7 @@ describe("isLiveRecord", () => {
     expect(isLiveRecord({ ...running, session_id: "" }, proof({ registry }))).toBe(false)
   })
 
-  test("with no registry to read, cmux's stored pid is trusted as before", () => {
+  test("with no registry to read, the record's own pid is trusted as before", () => {
     expect(isLiveRecord(reused, proof({ registry: null }))).toBe(true)
     expect(isLiveRecord(reused, null)).toBe(true)
   })
@@ -1641,48 +1613,23 @@ describe("answeredSince", () => {
   })
 })
 
-// A cmux on PATH that answers from 1,500 records, or those FAKE_CMUX_RECORDS names, newest first, and cuts its list at --limit as cmux does (its own default is 100); each call it gets is logged; a sessions read waits the milliseconds FAKE_CMUX_DELAY's file holds, read before the log, the command FAKE_CMUX_FAIL's file names exits 1, and the Feed holds what FAKE_CMUX_FEED's file holds.
+// A cmux on PATH that logs each call it gets and answers none, so a case shows the board asks cmux nothing.
 const FAKE_CMUX = `#!/usr/bin/env bun
-const { appendFileSync, existsSync, readFileSync } = await import("node:fs")
-const args = process.argv.slice(2)
-const delay = args[0] === "sessions" && existsSync(process.env.FAKE_CMUX_DELAY) ? Number(readFileSync(process.env.FAKE_CMUX_DELAY, "utf8")) : 0
-appendFileSync(process.env.FAKE_CMUX_LOG, args.join(" ") + "\\n")
-await Bun.sleep(delay)
-if (existsSync(process.env.FAKE_CMUX_FAIL) && readFileSync(process.env.FAKE_CMUX_FAIL, "utf8") === args[0]) process.exit(1)
-const opt = (flag) => (args.includes(flag) ? args[args.indexOf(flag) + 1] : null)
-const records = process.env.FAKE_CMUX_RECORDS ? JSON.parse(readFileSync(process.env.FAKE_CMUX_RECORDS, "utf8")) : Array.from({ length: 1500 }, (_, i) => ({
-  agent: "claude",
-  agent_lifecycle: "idle",
-  launch_arguments: ["claude", "-n", i === 1499 ? "worker-quiet" : "worker-" + i],
-  launch_backed: true,
-  pid: 10000 + i,
-  session_id: "s-" + i,
-  stored_pid_exists: true,
-  surface_id: "surface-" + i,
-  workspace_id: i === 1499 ? "W-QUIET" : "W-BUSY",
-}))
-if (args[0] === "sessions") {
-  const sessions = records
-    .filter((r) => !opt("--workspace") || r.workspace_id === opt("--workspace"))
-    .filter((r) => !opt("--session") || r.session_id === opt("--session"))
-  console.log(JSON.stringify({ sessions: sessions.slice(0, Number(opt("--limit") ?? 100)) }))
-} else if (args[0] === "list-workspaces") {
-  const ids = [...new Set(records.map((r) => r.workspace_id))]
-  console.log(JSON.stringify({ workspaces: ids.map((id) => ({ id, ref: "ref-" + id, title: id })) }))
-} else if (args[0] === "rpc") console.log(existsSync(process.env.FAKE_CMUX_FEED) ? readFileSync(process.env.FAKE_CMUX_FEED, "utf8") : JSON.stringify({ items: [] }))
-else process.exit(1)
+const { appendFileSync } = await import("node:fs")
+appendFileSync(process.env.FAKE_CMUX_LOG, process.argv.slice(2).join(" ") + "\\n")
+process.exit(1)
 `
 
-describe.skipIf(onLiveDashboard())("reading cmux's sessions", () => {
+describe.skipIf(onLiveDashboard())("reading herdr's sessions", () => {
   const dirs: string[] = []
   afterAll(() => {
     for (const dir of dirs) rmSync(dir, { force: true, recursive: true })
   })
 
-  // A script on a live-reads process whose cmux is the fake above, started SLOW_CHILD seconds late when that is set, and whose Claude config folder is empty, with the calls that cmux got. It opts in to cmux's sessions unless `env` says otherwise.
+  // A script on a live-reads process whose cmux is the fake above, started SLOW_CHILD seconds late when that is set, and whose Claude config folder holds what `setup` writes, with the calls that cmux got. It opts in to every session on the machine unless `env` says otherwise.
   async function drive(
     script: string,
-    records?: (dir: string) => unknown[],
+    setup?: (dir: string) => void,
     env: Record<string, string> = {},
   ) {
     const dir = mkdtempSync(join(tmpdir(), "workers-read-"))
@@ -1693,11 +1640,11 @@ describe.skipIf(onLiveDashboard())("reading cmux's sessions", () => {
     chmodSync(join(bin, "cmux"), 0o755)
     slowChild("bun", bin)
     mkdirSync(join(dir, "config"))
+    setup?.(dir)
     const log = join(dir, "cmux.log")
-    const file = join(dir, "records.json")
-    if (records) writeFileSync(file, JSON.stringify(records(dir)))
+    writeFileSync(log, "")
     const { code, result, stderr } = await inFixture(
-      `const { listLive, listSpace, readDue, recordsProblem } = await import(\`\${API}/lib/dashboard/workers\`)
+      `const { listLive } = await import(\`\${API}/lib/dashboard/workers\`)
 const { appendFileSync } = await import("node:fs")
 const mark = (what) => appendFileSync(process.env.FAKE_CMUX_LOG, "-- " + what + "\\n")
 ${script}
@@ -1709,11 +1656,7 @@ process.exit(0)
         PLAYGROUND_ALL_SESSIONS: "true",
         PLAYGROUND_DATA_DIR: join(join(dir, "config"), "playground"),
         PLAYGROUND_LIVE_READS: "1",
-        FAKE_CMUX_DELAY: join(dir, "delay"),
-        FAKE_CMUX_FAIL: join(dir, "fail"),
-        FAKE_CMUX_FEED: join(dir, "feed.json"),
         FAKE_CMUX_LOG: log,
-        ...(records ? { FAKE_CMUX_RECORDS: file } : {}),
         PATH: `${bin}:${process.env.PATH}`,
         ...env,
       },
@@ -1722,16 +1665,9 @@ process.exit(0)
     expect(code).toBe(0)
     return { calls: readFileSync(log, "utf8").trim().split("\n"), result }
   }
+  const after = (calls: string[], mark: string) => calls.slice(calls.indexOf(`-- ${mark}`) + 1)
 
-  // At a limit of 1,000, cmux's 1,873 records (9 Oct) left out every session quiet since the day before.
-  test("the board asks cmux for every record it holds, so a session quiet for a day still shows", async () => {
-    const { result } = await drive(`const board = await listLive()
-console.log(JSON.stringify({ board: board.workers.length, quiet: board.workers.some((w) => w.name === "worker-quiet") }))`)
-    expect(result).toEqual({ board: 1500, quiet: true })
-  }, 60_000)
-
-  // a herdr server's sessions join cmux's on the board (the fake cmux's records have no registry file here, so only herdr's is live), and a message's check of one reads herdr alone
-  test("herdr's sessions join the board, with herdr's state and the C5 file's usage limit, a pane with no registry file is none, and a herdr session's check asks cmux nothing", async () => {
+  test("herdr's sessions make the board, with herdr's state and the C5 file's usage limit, a pane with no registry file is none, and cmux is asked nothing", async () => {
     const { calls, result } =
       await drive(`const { mkdirSync, writeFileSync } = await import("node:fs")
 const { join } = await import("node:path")
@@ -1754,14 +1690,12 @@ mkdirSync(join(config, "sessions"))
 writeFileSync(join(config, "sessions", "4242.json"), JSON.stringify({ pid: 4242, sessionId: "h-1" }))
 mkdirSync(join(config, "playground", "session-state"), { recursive: true })
 writeFileSync(join(config, "playground", "session-state", "h-1.json"), JSON.stringify({ at: new Date().toISOString(), event: "StopFailure", resetsAt: "2026-10-18T05:00:00.000Z", sessionId: "h-1", state: "usage-limit" }))
+mark("start")
 const board = await listLive()
 const herdr = board.workers.find((w) => w.name === "worker-herdr-a")
-mark("space")
-const space = await listSpace(herdr)
 console.log(JSON.stringify({
   board: board.workers.length,
   herdr: [herdr.light, herdr.lifecycle, herdr.surface, herdr.workspace, herdr.usageLimit, board.surfaces.get("h-1")],
-  space: space.workers.map((w) => w.name),
 }))`)
     expect(result).toEqual({
       board: 1,
@@ -1773,40 +1707,11 @@ console.log(JSON.stringify({
         { resets: null, resetsAt: "2026-10-18T05:00:00.000Z" },
         "herdr:probes:w1:p1",
       ],
-      space: ["worker-herdr-a"],
     })
-    expect(calls.slice(calls.indexOf("-- space") + 1)).toEqual([])
+    expect(after(calls, "start")).toEqual([])
   }, 60_000)
 
-  // the launcher hands a stack cmux would not answer, while cmux held no live session, PLAYGROUND_HERDR_ALONE, and its boards then read herdr alone
-  test("a dashboard that reads herdr alone shows herdr's sessions and asks cmux nothing, its board paced by no cmux read", async () => {
-    const { calls, result } =
-      await drive(`const { mkdirSync, writeFileSync } = await import("node:fs")
-const { join } = await import("node:path")
-const config = process.env.CLAUDE_CONFIG_DIR
-process.env.PLAYGROUND_HERDR_ALONE = "1"
-process.env.PLAYGROUND_HERDR_DIR = join(config, "playground", "herdr")
-process.env.PLAYGROUND_HERDR_SESSIONS = "probes"
-mkdirSync(join(config, "playground", "herdr"), { recursive: true })
-Bun.listen({ unix: join(config, "playground", "herdr", "probes.sock"), socket: { data(conn, chunk) {
-  const req = JSON.parse(new TextDecoder().decode(chunk).split("\\n")[0])
-  const result = req.method === "session.snapshot"
-    ? { snapshot: { panes: [{ agent_status: "working", pane_id: "w1:p1", terminal_id: "t-1", workspace_id: "w1" }], workspaces: [{ label: "probes", workspace_id: "w1" }] } }
-    : { process_info: { foreground_processes: [{ argv: ["claude", "-n", "worker-herdr-a"], cwd: "/tmp/probe-a", pid: 4242 }] } }
-  conn.write(JSON.stringify({ id: req.id, result }) + "\\n")
-  conn.end()
-} } })
-mkdirSync(join(config, "sessions"))
-writeFileSync(join(config, "sessions", "4242.json"), JSON.stringify({ pid: 4242, sessionId: "h-1" }))
-mark("start")
-const board = await listLive()
-const again = await listLive({ since: Date.now(), wait: false })
-console.log(JSON.stringify({ again: again.workers.length, due: readDue(Date.now()), names: board.workers.map((w) => w.name) }))`)
-    expect(result).toEqual({ again: 1, due: null, names: ["worker-herdr-a"] })
-    expect(calls.slice(calls.indexOf("-- start") + 1)).toEqual([])
-  }, 60_000)
-
-  // A fresh Playground on a Mac whose cmux runs sessions it never started: unless the stack opts in, its board, Feed and dispatcher slots hold its own herdr sessions alone, cmux answering or not
+  // A fresh Playground on a Mac whose cmux runs sessions it never started: its board holds its own herdr sessions alone, opted in or not, and the opt-in adds only the registry's second dispatcher to the header's slots
   describe("a stack's own sessions", () => {
     const others = (dir: string) => {
       mkdirSync(join(dir, "config", "sessions"), { recursive: true })
@@ -1814,24 +1719,9 @@ console.log(JSON.stringify({ again: again.workers.length, due: readDue(Date.now(
         join(dir, "config", "sessions", `${process.pid}.json`),
         JSON.stringify({ name: "optimizer", pid: process.pid, sessionId: "c-1" }),
       )
-      return [
-        {
-          agent: "claude",
-          agent_lifecycle: "idle",
-          launch_arguments: ["claude", "-n", "optimizer"],
-          launch_backed: true,
-          pid: process.pid,
-          session_id: "c-1",
-          stored_pid_exists: true,
-          surface_id: "surface-c1",
-          workspace_id: "W-OTHER",
-        },
-      ]
     }
-    const own = (
-      silent: boolean,
-    ) => `const { mkdirSync, rmSync, writeFileSync } = await import("node:fs")
-const { dirname, join } = await import("node:path")
+    const own = `const { mkdirSync, writeFileSync } = await import("node:fs")
+const { join } = await import("node:path")
 const { DISPATCHER, DISPATCHER_SECONDARY, readDispatcherSlots } = await import(\`\${API}/lib/dashboard/workers\`)
 const config = process.env.CLAUDE_CONFIG_DIR
 process.env.PLAYGROUND_HERDR_DIR = join(config, "playground", "herdr")
@@ -1849,8 +1739,6 @@ const sessions = join(config, "sessions")
 mkdirSync(sessions, { recursive: true })
 writeFileSync(join(sessions, "4242.json"), JSON.stringify({ name: DISPATCHER, pid: 4242, sessionId: "h-1" }))
 writeFileSync(join(sessions, "4343.json"), JSON.stringify({ name: DISPATCHER_SECONDARY, pid: 4343, sessionId: "c-2" }))
-writeFileSync(process.env.FAKE_CMUX_FEED, ${JSON.stringify(JSON.stringify({ items: [questionItem("c-1")] }))})
-${silent ? 'rmSync(join(dirname(process.env.FAKE_CMUX_LOG), "bin", "cmux"))' : ""}
 mark("start")
 const board = await listLive()
 console.log(JSON.stringify({
@@ -1860,32 +1748,17 @@ console.log(JSON.stringify({
 }))`
 
     test.each([
-      ["answering", false],
-      ["silent", true],
+      ["no opt-in", "", 1],
+      ["the opt-in", "true", 2],
     ])(
-      "with cmux %s and no opt-in, only the dispatcher Playground started in herdr shows, with one dispatcher slot, and cmux is asked nothing",
-      async (_, silent) => {
-        const { calls, result } = await drive(own(silent), others, { PLAYGROUND_ALL_SESSIONS: "" })
-        expect(result).toEqual({ feed: 0, names: ["the dispatcher: dispatcher"], slots: 1 })
-        expect(calls.slice(calls.indexOf("-- start") + 1)).toEqual([])
+      "with %s, only the dispatcher Playground started in herdr shows, and cmux is asked nothing",
+      async (_, optIn, slots) => {
+        const { calls, result } = await drive(own, others, { PLAYGROUND_ALL_SESSIONS: optIn })
+        expect(result).toEqual({ feed: 0, names: ["the dispatcher: dispatcher"], slots })
+        expect(after(calls, "start")).toEqual([])
       },
       60_000,
     )
-
-    test("opted in, cmux's sessions, their Feed and the second dispatcher's slot join the board as before", async () => {
-      const { result } = await drive(own(false), others)
-      expect(result).toEqual({
-        feed: 1,
-        names: ["optimizer: manager", "the dispatcher: dispatcher"],
-        slots: 2,
-      })
-    }, 60_000)
-
-    test("opted in but kept on herdr alone by the launcher, the board reads herdr alone and the slots still count the registry's second dispatcher, as before", async () => {
-      const { calls, result } = await drive(own(true), others, { PLAYGROUND_HERDR_ALONE: "1" })
-      expect(result).toEqual({ feed: 0, names: ["the dispatcher: dispatcher"], slots: 2 })
-      expect(calls.slice(calls.indexOf("-- start") + 1)).toEqual([])
-    }, 60_000)
   })
 
   // the session's transcript reaches herdrState through the board, so a turn after a stuck record (an Escape fires no hook) ends herdr's blocked
@@ -1966,294 +1839,40 @@ console.log(JSON.stringify([herdr.light, herdr.herdr, herdr.feed]))`)
     ])
   }, 60_000)
 
-  test("a message's check reads only the workspace that holds its session, or the session alone when it has none", async () => {
-    const { calls, result } = await drive(`const board = await listLive()
-const quiet = board.workers.find((w) => w.name === "worker-quiet")
-mark("space")
-const space = await listSpace(quiet)
-mark("loose")
-const loose = await listSpace({ ...quiet, workspace: null })
-console.log(JSON.stringify({
-  loose: loose.workers.map((w) => w.name),
-  space: space.workers.map((w) => [w.name, space.surfaces.get(w.sessionId)]),
-}))`)
-    expect(result).toEqual({
-      loose: ["worker-quiet"],
-      space: [["worker-quiet", "surface-1499"]],
-    })
-    const after = (mark: string) => calls.slice(calls.indexOf(`-- ${mark}`) + 1)
-    const sessionReads = (lines: string[]) => lines.filter((line) => line.startsWith("sessions"))
-    expect(sessionReads(after("space")).slice(0, 1)).toEqual([
-      "sessions list --workspace W-QUIET --json --limit 1000000",
-    ])
-    expect(sessionReads(after("loose"))).toEqual([
-      "sessions list --session s-1499 --json --limit 1000000",
-    ])
-  }, 60_000)
-
-  // an ops-unstick entry naming one session on another's surface put a wrong Waiting on you on Playground's row and held his messages, through deliver()'s read of his workspace alone
-  test("an ops-unstick entry whose surface and name disagree marks neither session, on the board and in a workspace's read, and names itself", async () => {
-    const { result } = await drive(
-      `const { unstickProblem } = await import(\`\${API}/lib/dashboard/workers\`)
+  // an ops-unstick entry naming one session on another's surface put a wrong Waiting on you on Playground's row and held his messages
+  test("an ops-unstick entry whose surface and name disagree marks neither session, and names itself", async () => {
+    const { result } =
+      await drive(`const { unstickProblem } = await import(\`\${API}/lib/dashboard/workers\`)
 const { mkdirSync, writeFileSync } = await import("node:fs")
 const { join } = await import("node:path")
+const config = process.env.CLAUDE_CONFIG_DIR
+const panes = { "w1:p1": ["worker-a", 4242, "h-a"], "w1:p2": ["worker-b", 4343, "h-b"] }
+process.env.PLAYGROUND_HERDR_DIR = join(config, "playground", "herdr")
+process.env.PLAYGROUND_HERDR_SESSIONS = "probes"
+mkdirSync(process.env.PLAYGROUND_HERDR_DIR, { recursive: true })
+Bun.listen({ unix: join(process.env.PLAYGROUND_HERDR_DIR, "probes.sock"), socket: { data(conn, chunk) {
+  const req = JSON.parse(new TextDecoder().decode(chunk).split("\\n")[0])
+  const result = req.method === "session.snapshot"
+    ? { snapshot: { panes: Object.keys(panes).map((id) => ({ agent_status: "idle", pane_id: id, terminal_id: "t-" + id, workspace_id: "w1" })), workspaces: [{ label: "probes", workspace_id: "w1" }] } }
+    : { process_info: { foreground_processes: [{ argv: ["claude", "-n", panes[req.params.pane_id][0]], cwd: "/tmp/probe", pid: panes[req.params.pane_id][1] }] } }
+  conn.write(JSON.stringify({ id: req.id, result }) + "\\n")
+  conn.end()
+} } })
+mkdirSync(join(config, "sessions"))
+for (const [, pid, sessionId] of Object.values(panes)) writeFileSync(join(config, "sessions", pid + ".json"), JSON.stringify({ pid, sessionId }))
 const dir = join(process.env.PLAYGROUND_DATA_DIR, "ops", "unstick")
 mkdirSync(dir, { recursive: true })
-const entry = { kind: "permission", line: "Allow?", name: "worker-a", since: new Date().toISOString(), surface: "surface-b", workspace: "W-B" }
+const entry = { kind: "permission", line: "Allow?", name: "worker-a", since: new Date().toISOString(), surface: "herdr:probes:w1:p2", workspace: "herdr:probes:w1" }
 writeFileSync(join(dir, "state.json"), JSON.stringify({ blocked: [entry], writtenAt: new Date().toISOString() }))
 const board = await listLive()
-const space = async (name) => (await listSpace(board.workers.find((w) => w.name === name))).workers.map((w) => [w.name, w.light])
-console.log(JSON.stringify({
-  board: board.workers.map((w) => [w.name, w.light]).sort(),
-  problem: unstickProblem(),
-  spaces: [...(await space("worker-a")), ...(await space("worker-b"))],
-}))`,
-      () =>
-        ["a", "b"].map((id, i) => ({
-          agent: "claude",
-          agent_lifecycle: "idle",
-          launch_arguments: ["claude", "-n", `worker-${id}`],
-          launch_backed: true,
-          pid: 40000 + i,
-          session_id: `s-${id}`,
-          stored_pid_exists: true,
-          surface_id: `surface-${id}`,
-          workspace_id: `W-${id.toUpperCase()}`,
-        })),
-    )
+console.log(JSON.stringify({ board: board.workers.map((w) => [w.name, w.light]).sort(), problem: unstickProblem() }))`)
     expect(result).toEqual({
       board: [
         ["worker-a", "idle"],
         ["worker-b", "idle"],
       ],
       problem:
-        "ops-unstick lists worker-a as blocked (permission) on surface surface-b, which worker-b holds, so neither is marked",
-      spaces: [
-        ["worker-a", "idle"],
-        ["worker-b", "idle"],
-      ],
-    })
-  }, 60_000)
-
-  // Three full reads ran at once on the live dashboard (9 Oct, load 58), and on 12 Oct the hub's back-to-back reads kept cmux's store read running at about a core (2,806 records, 5s of CPU a read) until the live board went blank.
-  const twoSessions = () =>
-    ["a", "b"].map((id, i) => ({
-      agent: "claude",
-      agent_lifecycle: "idle",
-      launch_arguments: ["claude", "-n", `worker-${id}`],
-      launch_backed: true,
-      pid: 30000 + i,
-      session_id: `s-${id}`,
-      stored_pid_exists: true,
-      surface_id: `surface-${id}`,
-      workspace_id: `W-${id.toUpperCase()}`,
-    }))
-  const FULL = "sessions list --json --limit 1000000"
-  const between = (calls: string[], from: string, to?: string) =>
-    calls.slice(calls.indexOf(`-- ${from}`) + 1, to ? calls.indexOf(`-- ${to}`) : undefined)
-  const fullReads = (calls: string[], from: string, to?: string) =>
-    between(calls, from, to).filter((line) => line === FULL).length
-
-  test("callers share the read in flight, and one right after it takes the records it read", async () => {
-    const { calls } = await drive(
-      `mark("five")
-await Promise.all(Array.from({ length: 5 }, () => listLive()))
-mark("soon")
-await listLive()
-console.log("{}")`,
-      twoSessions,
-    )
-    expect([fullReads(calls, "five", "soon"), fullReads(calls, "soon")]).toEqual([1, 0])
-  }, 60_000)
-
-  test("a burst of board moves during a slow read starts no read beside it, and the next waits three times as long as it took", async () => {
-    const { calls, result } = await drive(
-      `const { onRead } = await import(\`\${API}/lib/dashboard/workers\`)
-const { writeFileSync } = await import("node:fs")
-let landed = 0
-onRead(() => (landed ||= Date.now()))
-writeFileSync(process.env.FAKE_CMUX_DELAY, "4000")
-mark("burst")
-const started = Date.now()
-const boards = [listLive({ since: started, wait: false })]
-// five moves across the read, not twenty: each board starts three fake cmux processes, and sixty at once ran a list-workspaces past its 20s on a loaded runner
-for (let i = 0; i < 5; i++) {
-  await Bun.sleep(400)
-  boards.push(listLive({ since: Date.now(), wait: false }))
-}
-await Promise.all(boards)
-writeFileSync(process.env.FAKE_CMUX_DELAY, "0")
-mark("paced")
-const since = Date.now()
-const board = await listLive({ since, wait: false })
-await listLive()
-const now = Date.now()
-console.log(JSON.stringify({ gap: readDue(since) + now - landed, took: landed - started, workers: board.workers.length }))`,
-      twoSessions,
-    )
-    expect([fullReads(calls, "burst", "paced"), fullReads(calls, "paced")]).toEqual([1, 0])
-    const { gap, took, workers } = result as { gap: number; took: number; workers: number }
-    expect(workers).toBe(2)
-    expect(took).toBeGreaterThanOrEqual(4000)
-    // took ends and gap starts at the read's landing, so gap falls short of three times took only by the synchronous steps around the read's start and end
-    expect(gap).toBeLessThanOrEqual(3 * took)
-    expect(gap).toBeGreaterThan(3 * took - 1000)
-  }, 60_000)
-
-  test("a Feed prompt shows on the next board at once, from the newest records, with no full read", async () => {
-    const { calls, result } = await drive(
-      `const { writeFileSync } = await import("node:fs")
-await listLive()
-await Bun.sleep(2100)
-writeFileSync(process.env.FAKE_CMUX_FEED, ${JSON.stringify(JSON.stringify({ items: [questionItem("s-a")] }))})
-mark("prompt")
-const board = await listLive({ since: Date.now(), wait: false })
-console.log(JSON.stringify({ light: board.workers.find((w) => w.sessionId === "s-a")?.light }))`,
-      twoSessions,
-    )
-    expect(result).toEqual({ light: "needs-you" })
-    expect(between(calls, "prompt").filter((line) => line.startsWith("sessions"))).toEqual([])
-    expect(between(calls, "prompt")).toContain('rpc feed.list {"pending_only":true}')
-  }, 60_000)
-
-  test("a failed read is shared until the pace allows the next", async () => {
-    const { calls, result } = await drive(
-      `const { writeFileSync } = await import("node:fs")
-writeFileSync(process.env.FAKE_CMUX_FAIL, "sessions")
-mark("fail")
-const first = await listLive().then(() => false, () => true)
-const again = await listLive({ since: Date.now(), wait: false }).then(() => false, () => true)
-console.log(JSON.stringify({ again, due: readDue(Date.now()), first }))`,
-      twoSessions,
-    )
-    expect(fullReads(calls, "fail")).toBe(1)
-    const { again, due, first } = result as { again: boolean; due: number; first: boolean }
-    expect([first, again]).toEqual([true, true])
-    expect(due).toBeGreaterThan(9_000)
-  }, 60_000)
-
-  // 15 Oct: the Mac hibernated from 10:06:56Z to 10:17:00Z on 1% battery; the read out then failed on waking, the next waited MAX_GAP_MS, and the Dashboard read "cmux isn't running" while cmux answered, until a restart of the stack.
-  test("after a read the machine slept through fails, the hub reads cmux again at once and its next frame is the board", async () => {
-    const { calls, result } = await drive(
-      `const { DashboardHub } = await import(\`\${API}/lib/dashboard/hub\`)
-const { onRead } = await import(\`\${API}/lib/dashboard/workers\`)
-const { rmSync, writeFileSync } = await import("node:fs")
-const awake = Date.now
-let slept = 0
-Date.now = () => awake() + slept
-writeFileSync(process.env.FAKE_CMUX_FAIL, "sessions")
-// the clock jumps once the first read has started, so the read spans the sleep however late the hub starts it
-const asleep = (options) => {
-  const live = listLive(options)
-  slept = 10 * 60_000
-  return live
-}
-const frames = []
-const hub = new DashboardHub({ approvals: false, events: false, listLive: asleep, pace: { due: readDue, onRead, refreshGapMs: 0 } })
-mark("down")
-// a hub that waits out the pace instead (MAX_GAP_MS) sends no board before the test's timeout
-const { promise: board, resolve } = Promise.withResolvers()
-const leave = hub.subscribe((frame) => {
-  frames.push(frame.type === "workers" ? frame.workers.length : frame.type)
-  if (frame.type === "workers") resolve()
-  if (frame.type !== "error") return
-  rmSync(process.env.FAKE_CMUX_FAIL, { force: true })
-})
-await board
-leave()
-console.log(JSON.stringify({ frames }))`,
-      twoSessions,
-    )
-    const { frames } = result as { frames: unknown[] }
-    expect(fullReads(calls, "down")).toBe(2)
-    expect(frames[0]).toBe("error")
-    expect(frames.slice(1)).toContain(2)
-    expect(frames.slice(1).every((frame) => frame === 2)).toBe(true)
-  }, 60_000)
-
-  test("a route waiting on a read that fails takes the last good records, and the System report names the stand", async () => {
-    const { calls, result } = await drive(
-      `const { writeFileSync } = await import("node:fs")
-await listLive()
-await Bun.sleep(10_200)
-const before = recordsProblem()
-writeFileSync(process.env.FAKE_CMUX_FAIL, "sessions")
-mark("fail")
-const workers = await listLive().then((board) => board.workers.length, () => -1)
-console.log(JSON.stringify({ before, problem: recordsProblem(), workers }))`,
-      twoSessions,
-    )
-    expect(fullReads(calls, "fail")).toBe(1)
-    const { before, problem, workers } = result as {
-      before: unknown
-      problem: string
-      workers: number
-    }
-    expect([before, workers]).toEqual([null, 2])
-    expect(problem).toMatch(
-      /^The full sessions read from cmux failed \d+s ago \(.+\), so boards stand on sessions read 1\ds ago/,
-    )
-  }, 60_000)
-
-  // The hub runs one refresh at a time, judged by when its listLive settles, so one that failed on another read while its sessions read ran on let the next start a read beside it (4 at once, in a review's round 3).
-  test("a board read that fails elsewhere settles only once its sessions read has", async () => {
-    const { result } = await drive(
-      `const { writeFileSync } = await import("node:fs")
-writeFileSync(process.env.FAKE_CMUX_DELAY, "3000")
-writeFileSync(process.env.FAKE_CMUX_FAIL, "rpc")
-const started = Date.now()
-const failed = await listLive({ since: started, wait: false }).then(() => false, () => true)
-console.log(JSON.stringify({ failed, waited: Date.now() - started >= 3000 }))`,
-      twoSessions,
-    )
-    expect(result).toEqual({ failed: true, waited: true })
-  }, 60_000)
-
-  test("a message's one-session read is never shared", async () => {
-    const { calls } = await drive(
-      `const a = (await listLive()).workers.find((w) => w.name === "worker-a")
-mark("narrow")
-await Promise.all([listSpace(a), listSpace(a), listSpace(a)])
-console.log("{}")`,
-      twoSessions,
-    )
-    expect(between(calls, "narrow").filter((line) => line.startsWith("sessions"))).toEqual(
-      Array(3).fill("sessions list --workspace W-A --json --limit 1000000"),
-    )
-  }, 60_000)
-
-  // A name a /rename set more than 8MB back is known only from the reads kept between boards, so a message's check of another workspace must keep them.
-  test("a message's check leaves the board's reads of every other session as they were", async () => {
-    const records = (dir: string) =>
-      ["a", "b"].map((id, i) => ({
-        agent: "claude",
-        agent_lifecycle: "idle",
-        launch_arguments: ["claude", "-n", `worker-${id}`],
-        launch_backed: true,
-        pid: 20000 + i,
-        session_id: `s-${id}`,
-        stored_pid_exists: true,
-        surface_id: `surface-${id}`,
-        transcript_path: join(dir, `${id}.jsonl`),
-        workspace_id: `W-${id.toUpperCase()}`,
-      }))
-    const { result } = await drive(
-      `const { writeFileSync } = await import("node:fs")
-const { join } = await import("node:path")
-writeFileSync(join(process.cwd(), "a.jsonl"), JSON.stringify({ type: "agent-name", agentName: "worker-renamed" }) + "\\n")
-writeFileSync(join(process.cwd(), "b.jsonl"), "")
-const names = (live) => live.workers.map((w) => w.name).sort()
-const before = names(await listLive())
-const b = (await listLive()).workers.find((w) => w.name === "worker-b")
-await listSpace(b)
-const pad = (JSON.stringify({ pad: "x".repeat(1000), type: "progress" }) + "\\n").repeat(9 * 1024)
-appendFileSync(join(process.cwd(), "a.jsonl"), pad)
-console.log(JSON.stringify({ after: names(await listLive()), before }))`,
-      records,
-    )
-    expect(result).toEqual({
-      after: ["worker-b", "worker-renamed"],
-      before: ["worker-b", "worker-renamed"],
+        "ops-unstick lists worker-a as blocked (permission) on surface herdr:probes:w1:p2, which worker-b holds, so neither is marked",
     })
   }, 60_000)
 })
