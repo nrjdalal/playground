@@ -365,6 +365,39 @@ describe("a quick run takes its own slot past a full queue", () => {
   })
 })
 
+// PG-796, 3 Nov: pr:merge's types gate, holding the merge lock, waited 263 s for the quick slot on a 1 s step, and ran past its 600 s twice on a cached build
+describe("the merge train's quick run skips the quick slot's race", () => {
+  // A machine whose fake bun touches its last argument, its one quick slot held by a live session's run
+  const busy = () => {
+    const m = machine()
+    writeFileSync(join(m.bin, "bun"), '#!/bin/bash\ntouch "${@: -1}"\n')
+    chmodSync(join(m.bin, "bun"), 0o755)
+    writeFileSync(
+      join(m.ops, "run-slot-quick.holder"),
+      `worker-q ${process.pid} 2026-11-03T21:29:51Z\n`,
+    )
+    mkdirSync(join(m.ops, "run-slot-quick"))
+    return m
+  }
+
+  test("ops-merge-train's starts at once while the quick slot is held, logged bare", async () => {
+    const m = busy()
+    expect(await m.start("ops-merge-train", {}, undefined, ["bun", "run", "docs:wrap"]).ran()).toBe(
+      true,
+    )
+    expect(readFileSync(join(m.ops, "run-slot.runs.log"), "utf8")).toMatch(
+      / start ops-merge-train \d+ bare waited=\d+s/,
+    )
+  })
+
+  test("while another session's waits for it", async () => {
+    const run = busy().start("worker-x", {}, undefined, ["bun", "run", "docs:wrap"])
+    expect(await run.saw(/waiting for the quick slot/g)).toBe(true)
+    expect(existsSync(run.marker)).toBe(false)
+    await stop(run.p)
+  })
+})
+
 // #547: load from outside run-slot kept 44 quick runs waiting 201 min for 8 min of work after the 15 s pass (2 Nov), and the one quick slot adds about a core at most, so it runs whatever load5 reads
 describe("the quick slot runs whatever load5 reads", () => {
   // A machine whose fake bun and git touch their last argument, at the load5 asked for

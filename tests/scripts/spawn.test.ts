@@ -44,6 +44,7 @@ describe("under the gates it spawns", () => {
       "set",
       "worker-brave-otter",
       "kind=worker",
+      "reportsTo=builder",
       "surface=",
       "title=Plain test work",
       "task=brief-x.md",
@@ -62,6 +63,7 @@ describe("under the gates it spawns", () => {
     expect(r.code).toBe(0)
     expect(launchOf(r)).toContain(`you report to ${manager}.`)
     expect(launchOf(r)).toContain(`(to: ${manager})`)
+    expect(r.roster).toContain(`reportsTo=${manager}`)
   })
 
   const kinds = {

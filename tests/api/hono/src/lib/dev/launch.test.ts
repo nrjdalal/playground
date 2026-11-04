@@ -934,7 +934,7 @@ describe("preflight", () => {
     if (checked.ok) {
       expect(checked.dashboard.kind).toBe("fixture")
       if (checked.dashboard.kind === "fixture") {
-        expect(checked.dashboard.fixture.cmux.sessions.length).toBeGreaterThan(0)
+        expect(checked.dashboard.fixture.herdr.panes.length).toBeGreaterThan(0)
       }
     }
   })
