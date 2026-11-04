@@ -98,7 +98,7 @@ import {
   QuestionnaireSubmit,
   QuestionnaireTitle,
 } from "@/components/ui/questionnaire"
-import { CenterSpinner } from "@/components/ui/spinner"
+import { Spinner } from "@/components/ui/spinner"
 import { Textarea } from "@/components/ui/textarea"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { agentLabel, roleLabel } from "@/lib/agent-label"
@@ -1561,6 +1561,38 @@ export function NewPill({
 }
 
 // Playground's Inbox: one list of cards, each keeping its place while he looks, what arrived since waiting behind a pill until he takes it, then In progress, Snoozed, Archived and Done as rows that open and shut.
+// The Inbox's first load: its open row where it will sit, a blank count and the Mark all as read room kept, the Spinner under it, so the data lands below without moving the row
+function InboxLoading() {
+  return (
+    <section aria-busy aria-label="Inbox" className="@container flex flex-col gap-3">
+      <Accordion className={SHELVES}>
+        <AccordionItem value="open" disabled className={SHELF_ITEM}>
+          <AccordionTrigger
+            className={SHELF_ROW}
+            header={(props) => (
+              <h3 {...props} className={cn(props.className, STICKY_HEADER, OPEN_HEADER)} />
+            )}
+          >
+            <span className="flex min-w-0 flex-1 items-center gap-2 pr-10">
+              <RiInboxLine className="size-3.5 shrink-0" aria-hidden />
+              <span className="text-muted-foreground truncate">Inbox</span>
+              <Badge
+                aria-hidden
+                variant="outline"
+                className="text-2xs h-4 w-5 px-1.5 font-mono tabular-nums"
+              />
+            </span>
+            <ShelfMark empty />
+          </AccordionTrigger>
+        </AccordionItem>
+      </Accordion>
+      <div className="text-muted-foreground grid place-items-center pt-8">
+        <Spinner />
+      </div>
+    </section>
+  )
+}
+
 export function Inbox({ viewing }: { viewing: boolean }) {
   const { allowed } = useDashboard()
   const { data, error, isPending } = useInbox(allowed)
@@ -1645,7 +1677,7 @@ export function Inbox({ viewing }: { viewing: boolean }) {
   const picked = useReply()
   const typed = useTypedReply()
   const reply = picked ?? typed
-  if (isPending) return <CenterSpinner />
+  if (isPending) return <InboxLoading />
   if (error) return <p className="text-destructive text-sm">{error.message}</p>
   const summary = inboxSummary(shown)
   // what Mark all as read marks: every unread update, ask and draft on screen, each staying in the list as it is until done
