@@ -5,7 +5,7 @@ import { join } from "node:path"
 
 import { inFixture, onLiveDashboard } from "../../../../../dashboard-fixture"
 
-// A cmux on PATH that logs each call and answers read-screen with a screen of its own.
+// A cmux on PATH that logs each call and answers read-screen with a screen of its own, so a read that reached it would show.
 const FAKE_CMUX = `#!/usr/bin/env bun
 const { appendFileSync } = await import("node:fs")
 const args = process.argv.slice(2)
@@ -18,7 +18,7 @@ describe.skipIf(onLiveDashboard())("readScreen", () => {
   const dir = mkdtempSync(join(tmpdir(), "dashboard-terminal-"))
   afterAll(() => rmSync(dir, { force: true, recursive: true }))
 
-  test("a herdr surface reads its pane through herdr's socket, and any other surface through cmux's read-screen", async () => {
+  test("a herdr surface reads its pane through herdr's socket, and any other surface is refused with nothing asked of cmux", async () => {
     const bin = join(dir, "bin")
     mkdirSync(bin)
     writeFileSync(join(bin, "cmux"), FAKE_CMUX)
@@ -38,7 +38,7 @@ Bun.listen({ unix: join(process.env.PLAYGROUND_HERDR_DIR, "s.sock"), socket: { d
   conn.end()
 } } })
 const herdr = await readScreen("herdr:s:w1:p1", 40)
-const cmux = await readScreen("surface:7", 40)
+const cmux = await readScreen("surface:7", 40).catch((error) => "refused: " + error.message)
 console.log(JSON.stringify({ cmux, herdr, seen }))
 process.exit(0)`,
       dir,
@@ -54,15 +54,13 @@ process.exit(0)`,
     expect(stderr).not.toContain("error:")
     expect(code).toBe(0)
     expect(result).toEqual({
-      cmux: "cmux screen\n",
+      cmux: "refused: surface:7 is no herdr pane, and herdr is the one terminal the dashboard reads",
       herdr: "herdr screen",
       seen: [
         ["pane.get", { pane_id: "w1:p1" }],
         ["pane.read", { lines: 40, pane_id: "w1:p1", source: "visible" }],
       ],
     })
-    expect(readFileSync(log, "utf8").trim().split("\n")).toEqual([
-      "read-screen --surface surface:7 --lines 40",
-    ])
+    expect(readFileSync(log, "utf8")).toBe("")
   }, 60_000)
 })

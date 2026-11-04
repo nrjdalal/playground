@@ -225,7 +225,6 @@ describe("answerPrompt", () => {
       INVALID: [400, "VALIDATION_ERROR"],
       NOT_FOUND: [404, "NOT_FOUND"],
       NOT_PENDING: [409, "CONFLICT"],
-      NOT_TAKEN: [502, "CMUX_FAILED"],
       UNCONFIRMED: [502, "CMUX_FAILED"],
     }
     for (const [code, [status, apiCode]] of Object.entries(expected)) {

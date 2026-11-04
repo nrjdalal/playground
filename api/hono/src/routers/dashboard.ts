@@ -32,7 +32,6 @@ import {
   type StoreRefusal,
   type Stored,
 } from "@/lib/dashboard/attachments"
-import { PERMISSION_MODES, PLAN_MODES } from "@/lib/dashboard/cmux"
 import {
   COMMAND_START,
   deliver,
@@ -45,6 +44,8 @@ import {
 } from "@/lib/dashboard/deliver"
 import {
   answerFeed,
+  PERMISSION_MODES,
+  PLAN_MODES,
   TEXT_LIMIT,
   type FeedAnswering,
   type FeedFailure,
@@ -121,7 +122,7 @@ export const messageLimiter = createRateLimiter({
   windowMs: 60_000,
 })
 
-// A person answers a prompt or two a minute; this stops a stuck client from replaying answers into cmux.
+// A person answers a prompt or two a minute; this stops a stuck client from replaying answers into a session's pane.
 export const answerLimiter = createRateLimiter({
   getUserId: (c) => c.get("session")?.userId,
   limit: 20,
@@ -383,7 +384,7 @@ export const uploadForm = sValidator("form", z.object({ file: z.instanceof(File)
   }
 })
 
-// A card's id: a cmux Feed id (a UUID) or, for a herdr card, the id of the tool call that raised it (toolu_01...), both in the charset the Messages API gives a tool_use id; replyCommand() still takes cmux's UUID alone.
+// A card's id: the id of the tool call that raised it (toolu_01...), in the charset the Messages API gives a tool_use id.
 const CARD_REQUEST_ID = /^[A-Za-z0-9_-]{1,100}$/
 
 export const feedParamsSchema = z.object({
@@ -421,7 +422,6 @@ const FEED_FAILURE_STATUS: Record<FeedFailure, [ContentfulStatusCode, ErrorCode]
   INVALID: [400, "VALIDATION_ERROR"],
   NOT_FOUND: [404, "NOT_FOUND"],
   NOT_PENDING: [409, "CONFLICT"],
-  NOT_TAKEN: [502, "CMUX_FAILED"],
   TERMINAL_ONLY: [403, "FORBIDDEN"],
   UNCONFIRMED: [502, "CMUX_FAILED"],
 }
@@ -863,11 +863,11 @@ const dashboardRoutes = new Hono<{ Variables: Session }>()
     describeRoute({
       tags: ["Dashboard"],
       description:
-        "Answer a prompt a live session waits on, as the owner would in its terminal: one it left in cmux's Feed, one a herdr session's pane shows, answered by keys, or for the session the dashboard hosts on the Agent SDK, one its canUseTool callback holds. A picker's questions (each by option labels, or the person's own words), a permission request (once or deny, never always), or a plan (manual, which starts it with edits still asking, or deny with an optional note). Permission and plan answers go only while PLAYGROUND_APPROVALS_ENABLED is on. A Feed prompt is read as waiting on that session before the reply and again after it, since cmux reports any reply as delivered; a herdr session's picker is typed only while its pane shows the question the card shows (answerHerdr() in feed.ts), and its permission or plan is answered in its terminal alone; a hosted session's answer goes straight to its callback. The answer is recorded in the console's activity without its words. A refusal names its reason in `feed`: BUSY, CMUX_FAILED, DISABLED, FORBIDDEN, INTERRUPTED (keys went into a herdr session's pane, yet its picker still shows or changed partway), INVALID, NOT_FOUND, NOT_PENDING, NOT_TAKEN, TERMINAL_ONLY (a herdr session's permission or plan) or UNCONFIRMED (the reply went, but the Feed or the pane could not be read to see it land).",
+        "Answer a prompt a live session waits on, as the owner would in its terminal: a picker its herdr pane shows, answered by keys, or for the session the dashboard hosts on the Agent SDK, one its canUseTool callback holds. A picker's questions (each by option labels, or the person's own words), a permission request (once or deny, never always), or a plan (manual, which starts it with edits still asking, or deny with an optional note). Permission and plan answers go only while PLAYGROUND_APPROVALS_ENABLED is on. A herdr session's picker is typed only while its pane shows the question the card shows (answerHerdr() in feed.ts), and its permission or plan is answered in its terminal alone; a hosted session's answer goes straight to its callback. The answer is recorded in the console's activity without its words. A refusal names its reason in `feed`: BUSY, CMUX_FAILED, DISABLED, FORBIDDEN, INTERRUPTED (keys went into a herdr session's pane, yet its picker still shows or changed partway), INVALID, NOT_FOUND, NOT_PENDING, TERMINAL_ONLY (a herdr session's permission or plan) or UNCONFIRMED (the keys went, but the pane could not be read to see them land).",
       responses: {
         200: {
           description:
-            "Answered: the prompt has left the Feed, or the hosted session's callback has its answer",
+            "Answered: the prompt has left the pane, or the hosted session's callback has its answer",
           content: {
             "application/json": {
               schema: resolver(z.object({ data: z.object({ at: z.string() }) })),
@@ -884,7 +884,7 @@ const dashboardRoutes = new Hono<{ Variables: Session }>()
         ),
         502: errorResponse(
           "CMUX_FAILED",
-          "The reply may not have gone (CMUX_FAILED), cmux took it and the prompt still waits (NOT_TAKEN), or it went and could not be seen to land (UNCONFIRMED): its card stays while the prompt waits, and leaves once it is answered",
+          "The session's pane could not be read (CMUX_FAILED), keys went yet the prompt still shows (INTERRUPTED), or they went and could not be seen to land (UNCONFIRMED): look at the session",
         ),
       },
     }),

@@ -12,7 +12,6 @@ import {
   devEnv,
   envGaps,
   fixtureStackEnv,
-  herdrAloneEnv,
   isDryRun,
   mainCheckoutOf,
   prefixOf,
@@ -99,7 +98,6 @@ if (pgid && started) {
   if (claim.warning) console.error(`dev: ${claim.warning}`)
 }
 let wrote: string | null = null
-let herdrOnly = false
 let aliasPairs: [string, string][] = []
 let aliasFailed = ""
 let reconcile: ReturnType<typeof setInterval> | null = null
@@ -152,21 +150,13 @@ if (!dry) {
       leave(1)
     }
     console.error(
-      `dev: dashboard reads the fixture written to ${scratch}, test data: no cmux, no ~/.claude; its writes land there and go when the stack stops`,
+      `dev: dashboard reads the fixture written to ${scratch}, test data: no ~/.claude; its writes land there and go when the stack stops`,
     )
   } else {
     console.error(`dev: dashboard source matched ${DASHBOARD_RULES[checked.dashboard.rule]}`)
     console.error(
       "dev: dashboard reads this machine's own sessions, every real one included: take no screenshots of this stack",
     )
-    if (!checked.dashboard.cmux) {
-      herdrOnly = true
-      console.error(
-        checked.dashboard.reason === null
-          ? "dev: the dashboard reads herdr alone, the sessions Playground started; PLAYGROUND_ALL_SESSIONS=true adds every other session to Sessions and System"
-          : `dev: cmux would not answer this stack (${checked.dashboard.reason}) and holds no live factory session, so the dashboard reads herdr alone and shows none of your own sessions in cmux`,
-      )
-    }
     // The live dashboard and a person's own clone bring the herdr servers up when they are down, so restarting the app alone brings the factory back; a test stack with PLAYGROUND_LIVE_READS never does. It runs the main checkout's job, never this checkout's: the live dashboard runs the latest head of the branch its main checkout sits on, so there the pin and config change only once they reach that checkout; a person's own clone is its own main checkout, on whatever branch it holds. A failure is named and the stack starts anyway.
     const main = mainCheckoutOf(ROOT)
     if (main && (checked.dashboard.rule === "live-branch" || checked.dashboard.rule === "own")) {
@@ -191,7 +181,7 @@ const turbo = Bun.spawn(
   [process.env.DEV_TURBO_BIN || TURBO, "run", serving ? "serve" : "dev", ...args],
   {
     cwd: ROOT,
-    env: wrote ? fixtureStackEnv(env, wrote) : herdrOnly ? herdrAloneEnv(env) : env,
+    env: wrote ? fixtureStackEnv(env, wrote) : env,
     stdio: ["inherit", "inherit", "inherit"],
   },
 )

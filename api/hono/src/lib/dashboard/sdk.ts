@@ -19,7 +19,6 @@ import { dataDirOf } from "@packages/env/data-dir"
 
 import { claudeBinary } from "@/lib/claude-binary"
 import { withAttachments } from "@/lib/dashboard/attachments"
-import type { FeedReply } from "@/lib/dashboard/cmux"
 import {
   deliverDeps,
   deliveryEvent,
@@ -33,6 +32,7 @@ import {
   canApprove,
   replyFor,
   type FeedAnswering,
+  type FeedReply,
   type FeedResult,
 } from "@/lib/dashboard/feed"
 import { settingSummary, type SessionEffort, type SessionSetting } from "@/lib/dashboard/setting"
