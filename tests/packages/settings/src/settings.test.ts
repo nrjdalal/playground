@@ -50,6 +50,7 @@ describe("defineSettings", () => {
       "channel.slackId",
       "clock.ownerZone",
       "context.window",
+      "ext.bundled",
       "ext.links",
       "ext.order",
       "ext.repos",

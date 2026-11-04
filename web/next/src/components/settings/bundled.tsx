@@ -13,17 +13,9 @@ import {
 import { Switch } from "@/components/ui/switch"
 import { toast } from "@/components/ui/toast"
 import { apiClient, unwrap } from "@/lib/api/client"
-import { BUNDLED_QUERY_KEY, BUNDLED_WORDS } from "@/lib/extensions"
+import { answer, BUNDLED_QUERY_KEY, BUNDLED_WORDS, type BundledRow } from "@/lib/extensions"
 
-type Bundled = { bundled: { name: string; on: boolean }[] | null }
-
-const answer = async <R extends { data: unknown; error: { message: string } | null }>(
-  call: Promise<R>,
-): Promise<NonNullable<R["data"]>> => {
-  const { data, error } = await call
-  if (error) throw new Error(error.message)
-  return data as NonNullable<R["data"]>
-}
+type Bundled = { bundled: BundledRow[] | null }
 
 const readBundled = async (): Promise<Bundled> =>
   answer(unwrap(apiClient.v1.extensions.bundled.$get()))

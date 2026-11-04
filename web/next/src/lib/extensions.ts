@@ -1,6 +1,15 @@
-import type { ExtensionRow } from "@api/hono"
+import type { BundledRow, ExtensionRow } from "@api/hono"
 
-export type { ExtensionRow }
+export type { BundledRow, ExtensionRow }
+
+// An answer's data, or its error thrown with the API's own words.
+export const answer = async <R extends { data: unknown; error: { message: string } | null }>(
+  call: Promise<R>,
+): Promise<NonNullable<R["data"]>> => {
+  const { data, error } = await call
+  if (error) throw new Error(error.message)
+  return data as NonNullable<R["data"]>
+}
 
 export const EXTENSIONS_QUERY_KEY = ["extensions"] as const
 

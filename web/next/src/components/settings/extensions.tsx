@@ -59,6 +59,7 @@ import { toast } from "@/components/ui/toast"
 import { apiClient, unwrap } from "@/lib/api/client"
 import { useNow } from "@/lib/dashboard"
 import {
+  answer,
   countsLine,
   EXTENSION_NAME,
   EXTENSIONS_QUERY_KEY,
@@ -72,15 +73,6 @@ import {
 import { relativeTime } from "@/lib/time"
 
 type Rows = ExtensionRow[] | null
-
-// An answer's data, or its error thrown with the API's own words.
-const answer = async <R extends { data: unknown; error: { message: string } | null }>(
-  call: Promise<R>,
-): Promise<NonNullable<R["data"]>> => {
-  const { data, error } = await call
-  if (error) throw new Error(error.message)
-  return data as NonNullable<R["data"]>
-}
 
 const readExtensions = async (): Promise<Rows> =>
   (await answer(unwrap(apiClient.v1.extensions.$get()))).extensions
