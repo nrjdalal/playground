@@ -56,6 +56,8 @@ const ACTION = new RegExp(
 // A ? that is not inside a word or a URL's query (x?status=todo).
 const QUESTION = /\?(?![\w/=&%#-])/
 const BLOCKQUOTE = /^\s*>/
+// A fenced code block, or one left open to the reply's end.
+const FENCE = /```[\s\S]*?(?:```|$)/g
 // Someone else's words: a line that says who asked ("A colleague asks: …", "A colleague asks in Slack: …"), never I or we, whose words are the session's own.
 const QUOTED =
   /^\s*(?:[-*]\s+)?(?!(?:i|we)\s)[@\w][\w@.' -]{0,40}?\s(?:asks|asked|wrote|writes|said|says|replied|replies)(?:\s(?:in|on|via|from|over)\s[\w#@.-]+(?:\s[\w#@.-]+)?)?\s*:/i
@@ -127,7 +129,7 @@ export function asksDecision(reply: string, names: string[] = [], owner: string[
   const toAgentLine = toAgent(names, owner)
   const toOwnerLine = toOwner(owner)
   const lines = reply
-    .replace(/```[\s\S]*?(?:```|$)/g, "")
+    .replace(FENCE, "")
     .replace(CODE_SPAN, "")
     .replace(/[“”]/g, '"')
     .replace(/[‘’]/g, "'")
@@ -150,14 +152,14 @@ export function asksDecision(reply: string, names: string[] = [], owner: string[
 const STEP = /^\s*\d+[.)]\s/
 const TABLE_ROW = /^\s*\|.*\|\s*$/
 const TABLE_RULE = /^\s*\|\s*:?-{3,}/
-// A sentence saying the steps went to the dispatcher as a draft, never one that says they did not: a past-tense hand-off verb, then the dispatcher, then "as a draft", or the reason's own "the dispatcher has the draft".
+// A sentence saying the steps went to the dispatcher as a draft, never one that says they did not or will later (not, never, n't, be, get, gets, to or will before the verb): a past-tense hand-off verb, then the dispatcher, then "as a draft", or the reason's own "the dispatcher has the draft".
 const DRAFT_HANDED =
-  /(?<!(?:\bnot|\bnever|n't)\s+(?:\w+\s+)?)\b(?:(?:forwarded|gave|handed|passed|sent)\b[^.;!?\n]*?\bdispatcher\b[^.;!?\n]*?\bas a draft\b|went to the dispatcher as a draft\b|the dispatcher has the draft\b)/i
+  /(?<!(?:\bnot|\bnever|n't|\bbe|\bget|\bgets|\bto|\bwill)\s+(?:\w+\s+)?)\b(?:(?:forwarded|gave|handed|passed|sent)\b[^.;!?\n]*?\bdispatcher\b[^.;!?\n]*?\bas a draft\b|went to the dispatcher as a draft\b|the dispatcher has the draft\b)/i
 
 // Pure: the reply's lines with fenced code and blockquotes left out.
 const ownLines = (reply: string) =>
   reply
-    .replace(/```[\s\S]*?(?:```|$)/g, "")
+    .replace(FENCE, "")
     .split("\n")
     .filter((line) => !BLOCKQUOTE.test(line))
 

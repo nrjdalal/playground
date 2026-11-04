@@ -467,6 +467,9 @@ describe("a manager's reply that keeps steps or a table for Quilla goes in one I
     ["handed", "I handed the card to the dispatcher as a draft."],
     ["went", "They went to the dispatcher as a draft for one card."],
     ["says the reason's own words for", "The dispatcher has the draft."],
+    ["says it has been sent", "These have been sent to the dispatcher as a draft."],
+    ["says it has sent", "I've sent these to the dispatcher as a draft."],
+    ["says it passed", "These were passed to the dispatcher as a draft."],
   ])("passed: a lead's steps it %s to the dispatcher as a draft", async (_name, line) => {
     expect(await stop(`${STEPS}\n${line}`, { role: "lead" })).toBeUndefined()
   })
@@ -483,6 +486,16 @@ describe("a manager's reply that keeps steps or a table for Quilla goes in one I
     ["a draft PR in a status line", "All checks passed; the dispatcher reviews the draft PR next."],
     ["a draft PR beside the dispatcher", "PR #859 went up as a draft; the dispatcher has it."],
     ["a note on a draft PR", "Sent the dispatcher a note on the draft PR."],
+    [
+      "a hand-off once a PR lands",
+      "These will be sent to the dispatcher as a draft once #500 lands.",
+    ],
+    [
+      "a hand-off after the merge",
+      "They're to be sent to the dispatcher as a draft after the merge.",
+    ],
+    ["a hand-off it will get done", "I'll get these sent to the dispatcher as a draft next."],
+    ["a hand-off still to come", "Will be sent to the dispatcher as a draft."],
   ])("refused: a lead's steps beside %s", async (_name, line) => {
     expect(await stop(`${STEPS}\n${line}`, { role: "lead" })).toBe(DRAFT_REASON)
   })
