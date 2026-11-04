@@ -111,6 +111,7 @@ export const RETRY_CODES = [
   "LOST",
   "NOT_FOUND",
   "ON_PICKER",
+  "UPLOAD_FAILED",
 ] as const
 
 // Pure: an answer whose send is unconfirmed (typing began, INTERRUPTED, or the adapter threw, ERROR), which may be in the session already, so its card offers Check it for me rather than Retry.
@@ -141,6 +142,36 @@ export const isGo = (choice: string): boolean => (GO_CHOICES as readonly string[
 
 // The API's GO_CHOICES restated (a test holds the two equal).
 export const GO_CHOICES = ["approve", "draft", "edit", "send"] as const
+
+// Pure: a Slack link in its app form naming a conversation, or one parsed thread in it, its query and hash aside: the only place a send shares its files into, the API's slackPlace restated (a test holds the two agreeing).
+export const slackPlaced = (link: string): boolean => {
+  if (!URL.canParse(link)) return false
+  const url = new URL(link)
+  if (url.protocol !== "https:" || url.hostname !== "app.slack.com") return false
+  const [, client, team, channel, ...rest] = url.pathname.replace(/\/$/, "").split("/")
+  if (client !== "client" || !team || !channel || !/^[CDG][A-Z0-9]+$/.test(channel)) return false
+  if (rest.length === 0) return true
+  const [word, parent, ...more] = rest
+  return (
+    word === "thread" &&
+    more.length === 0 &&
+    (parent ?? "").startsWith(`${channel}-`) &&
+    /^\d+\.\d+$/.test((parent ?? "").slice(channel.length + 1))
+  )
+}
+
+// Pure: "1 file" or "N files", as a Slack send's mark and its result line count them.
+export const filesCount = (n: number): string => (n === 1 ? "1 file" : `${n} files`)
+
+// Pure: the button whose go shares an open item's files into Slack, a Slack draft's Send or a slack decision's Approve, or null when its files stay on the card (a Linear draft's, an ask's, one with no Slack link); the API's filesToUpload decides the same.
+export const uploadsOn = (item: InboxItem): "Approve" | "Send" | null => {
+  if (item.status !== "open" || item.kind === "update") return null
+  const preview = item.preview
+  if (!("attachments" in preview) || !preview.attachments?.length) return null
+  if (!("link" in preview) || !preview.link || !slackPlaced(preview.link)) return null
+  if (item.kind === "draft") return "Send"
+  return item.kind === "decision" && item.preview.type === "slack" ? "Approve" : null
+}
 
 // Pure: whether an open draft offers Draft beside Send: a Slack draft, which Slack's MCP server saves as a draft, never a Linear comment, whose API creates none; the API's savesDraft decides the same (a test holds the two equal).
 export const canDraft = (item: InboxItem): boolean =>
@@ -468,6 +499,7 @@ export function kindWord(item: InboxItem): string {
     return word.charAt(0).toUpperCase() + word.slice(1)
   }
   const words = {
+    accept: "Accept",
     ask: "Ask",
     budget: "Budget",
     delete: "Delete",
@@ -520,6 +552,9 @@ export function itemState(item: InboxItem): ItemState {
     if (!provided.results) return "sending"
     return provided.results.every((result) => result.exitCode === 0) ? "done" : "failed"
   }
+  // an accept the dashboard ran is done or failed by its exit code alone, since nothing is left for its poster to carry out
+  if (provided && "accepted" in provided && provided.accepted)
+    return provided.accepted.exitCode === 0 ? "done" : "failed"
   // a chat reply is being carried out by its poster until it is closed, then done
   if (item.kind !== "update" && chosen(item)?.choice === "replied")
     return carriedOut(item) ? "done" : "sending"
@@ -598,7 +633,7 @@ export function outcomeLine(item: InboxItem): string | null {
     const said = item.answer.said ? `You replied "${item.answer.said}"` : "You replied"
     return carriedOut(item) ? said : `${said} · ${who} is on it…`
   }
-  const done = {
+  let done = {
     approve: "You approved it",
     clear: `Archived ${fullTime(item.answer.at)}`,
     deny: "You denied it",
@@ -609,15 +644,9 @@ export function outcomeLine(item: InboxItem): string | null {
     edit: "You approved it with changes",
     send: item.answer.editedText ? "You sent it with changes" : "You sent it",
   }[item.answer.choice]
+  const uploaded = item.answer.uploaded
+  if (uploaded) done += ` · ${filesCount(uploaded)} shared`
   const delivery = item.delivery
-  // Claude Code holds it until the session is free, whatever the answer
-  if (delivery?.status === "queued") return `${done} · Queued: ${who} holds it, to take once free`
-  if (isGo(item.answer.choice) && delivery?.status !== "failed" && !carriedOut(item)) {
-    if (item.answer.choice === "draft") return `${done} · Saving a Slack draft…`
-    const slack = item.kind === "decision" && item.preview.type === "slack"
-    if (item.answer.choice !== "send" && !slack) return `${done} · Being carried out by ${who}…`
-    return `${done} · ${kindWord(item) === "Linear comment" ? "Sending to Linear…" : "Sending in Slack…"}`
-  }
   const reached =
     delivery?.status === "delivered"
       ? delivery.via === "cli"
@@ -630,6 +659,23 @@ export function outcomeLine(item: InboxItem): string | null {
             ? `Send unconfirmed: whether ${who} has it is not known`
             : `Send failed: ${delivery.reason}`
         : "Delivery pending"
+  // an accept the dashboard ran says what the run gave, the card's whole result, and why its poster was not told when that failed
+  const accepted = "accepted" in item.answer ? item.answer.accepted : undefined
+  if (accepted) {
+    const ran =
+      accepted.exitCode === 0
+        ? `Accepted: ${accepted.line}`
+        : `Accept failed (exit ${accepted.exitCode}): ${accepted.line}`
+    return delivery?.status === "failed" ? `${done} · ${ran} · ${reached}` : `${done} · ${ran}`
+  }
+  // Claude Code holds it until the session is free, whatever the answer
+  if (delivery?.status === "queued") return `${done} · Queued: ${who} holds it, to take once free`
+  if (isGo(item.answer.choice) && delivery?.status !== "failed" && !carriedOut(item)) {
+    if (item.answer.choice === "draft") return `${done} · Saving a Slack draft…`
+    const slack = item.kind === "decision" && item.preview.type === "slack"
+    if (item.answer.choice !== "send" && !slack) return `${done} · Being carried out by ${who}…`
+    return `${done} · ${kindWord(item) === "Linear comment" ? "Sending to Linear…" : "Sending in Slack…"}`
+  }
   return item.answer.noLink
     ? `${done} · ${reached} · No link: ${item.answer.noLink}`
     : `${done} · ${reached}`

@@ -26,7 +26,7 @@ export const slackSettings = defineSettings({
   "slack.mode": {
     default: false,
     description:
-      "Slack mode: the owner is away and the DM is the owner's remote access, so the DM watch hands each owner message to the dispatcher, nudges it for an update every 15 minutes and fails over to the second dispatcher; off until the owner turns it on, on until the owner turns it off.",
+      "Slack mode: the owner is away and the DM is the owner's remote access, so the DM watch hands each owner message to the dispatcher, nudges it for an update every 15 minutes and fails over to the session in the assistant seat; off until the owner turns it on, on until the owner turns it off.",
     schema: z.boolean(),
   },
   "slack.sendServer": {

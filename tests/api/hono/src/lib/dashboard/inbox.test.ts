@@ -5,8 +5,14 @@ import { join } from "node:path"
 
 import { SQL } from "bun"
 
+import {
+  readAttachment,
+  storeAttachment,
+} from "../../../../../../api/hono/src/lib/dashboard/attachments"
 import { QUEUED_MS } from "../../../../../../api/hono/src/lib/dashboard/deliver"
 import {
+  acceptArgs,
+  acceptResult,
   ACTIONS,
   answerInputSchema,
   checkAnswer,
@@ -22,7 +28,9 @@ import {
   secretInputSchema,
   type SecretSink,
   sinkArgv,
+  slackPlace,
 } from "../../../../../../api/hono/src/lib/dashboard/inbox"
+import { uploadSpec } from "../../../../../../api/hono/src/lib/dashboard/slack-upload"
 
 const CHANNEL = "https://app.slack.com/client/T0000000000/C0MADEUP01"
 const SLACK = {
@@ -714,7 +722,7 @@ describe("an answer", () => {
     )
   })
 
-  // the dashboard uploads nothing to Slack: Send types these words into the poster, so a draft's pictures stay on its card
+  // Send types the words alone into the poster: a draft's files are shared into Slack by the dashboard itself (PG-649), never handed to the session
   test("sends a draft's words alone, its pictures left on the card (PG-501)", () => {
     const words = { text: "the fix is live", to: "@Merritt" }
     const plain = item({ kind: "draft", preview: words })
@@ -873,6 +881,73 @@ describe("a secret ask (PG-59)", () => {
   })
 })
 
+const ACCEPT = {
+  key: "end-of-day",
+  kind: "skill",
+  rev: "3f9a2c1d",
+  scope: "acme",
+  type: "accept",
+  why: "Scored 4 by two reviewers; it reads the day's merges",
+}
+
+describe("an accept decision (PG-658)", () => {
+  test("names a scope, kind, key and rev the store takes, none of which can start as a flag", () => {
+    expect(inboxInputSchema.safeParse(decision(ACCEPT)).success).toBe(true)
+    const takes = (change: object) =>
+      inboxInputSchema.safeParse(decision({ ...ACCEPT, ...change })).success
+    for (const change of [
+      { scope: "--yes" },
+      { scope: "-acme" },
+      { scope: "acme/../core" },
+      { key: "--reason" },
+      { key: "End-Of-Day" },
+      { key: "a b" },
+      { kind: "hook" },
+      { rev: "--all" },
+      { rev: "HEAD" },
+      { rev: "3f9a2c" },
+      { why: "" },
+      { extra: "--yes" },
+    ]) {
+      expect(takes(change), JSON.stringify(change)).toBe(false)
+    }
+  })
+
+  test("its Approve runs one fixed argv: the preview's words and a reason naming the item", () => {
+    const parsed = inboxInputSchema.parse(decision(ACCEPT))
+    if (parsed.kind !== "decision" || parsed.preview.type !== "accept") throw new Error("no accept")
+    expect(acceptArgs(parsed.preview, 41)).toEqual([
+      "accept",
+      "acme",
+      "skill",
+      "end-of-day",
+      "3f9a2c1d",
+      "--reason",
+      "the owner approved it in the Inbox (#i41)",
+    ])
+  })
+
+  test("is approved, denied or cleared as it reads, never edited", () => {
+    const open = { kind: "decision", preview: ACCEPT, status: "open" } as never
+    expect(checkAnswer(open, { action: "approve" })).toMatchObject({ status: "approved" })
+    expect(checkAnswer(open, { action: "deny" })).toMatchObject({ status: "denied" })
+    expect(checkAnswer(open, { action: "edit", text: "accept core's too" })).toHaveProperty(
+      "message",
+    )
+  })
+
+  test("its result is the exit code and one line: the CLI's line, else its error, cut to a line", () => {
+    expect(acceptResult({ code: 0, err: "", out: "rev 9b8c7d6 is accepted\n" })).toEqual({
+      exitCode: 0,
+      line: "rev 9b8c7d6 is accepted",
+    })
+    expect(
+      acceptResult({ code: 1, err: "409 the proposal is at 0a1b2c3, not 3f9a2c1d\nmore", out: "" }),
+    ).toEqual({ exitCode: 1, line: "409 the proposal is at 0a1b2c3, not 3f9a2c1d" })
+    expect(acceptResult({ code: 1, err: "x".repeat(500), out: "" }).line).toHaveLength(200)
+  })
+})
+
 // The store against a throwaway Postgres in Docker published on 127.0.0.1 only, migrated as the dashboard's is, so the table's own rules hold. Skipped where Docker is not running.
 const MIGRATIONS = join(import.meta.dir, "../../../../../../packages/db/drizzle")
 // made at run time, so no password is ever written into the repo
@@ -881,6 +956,47 @@ const PASSWORD = crypto.randomUUID()
 const dockerUp = (): boolean =>
   Bun.which("docker") !== null &&
   Bun.spawnSync(["docker", "info"], { stderr: "ignore", stdout: "ignore" }).exitCode === 0
+
+// PG-649: a Slack send uploads its files into the link's channel and thread
+describe("slackPlace", () => {
+  test("reads a thread's channel and its parent's ts from the app form", () => {
+    expect(
+      slackPlace(
+        "https://app.slack.com/client/T0000000000/C0MADEUP01/thread/C0MADEUP01-1700000000.000100",
+      ),
+    ).toEqual({ channel: "C0MADEUP01", thread: "1700000000.000100" })
+  })
+
+  test("reads a channel or a DM with no thread as its top level", () => {
+    expect(slackPlace(CHANNEL)).toEqual({ channel: "C0MADEUP01" })
+    expect(slackPlace("https://app.slack.com/client/T0000000000/D0MADEUP11")).toEqual({
+      channel: "D0MADEUP11",
+    })
+  })
+
+  test("reads past a query or a hash, as the web's card does", () => {
+    expect(slackPlace(`${CHANNEL}?cdn_fallback=1#top`)).toEqual({ channel: "C0MADEUP01" })
+  })
+
+  // a reply that goes in a thread its files would miss: they would land at the conversation's top level
+  test("is null for a thread part that does not parse, so the files never land outside the reply's thread", () => {
+    for (const bad of [
+      `${CHANNEL}/thread/C0MADEUP01-notats`,
+      `${CHANNEL}/thread/C0OTHER001-1700000000.000100`,
+      `${CHANNEL}/thread`,
+      `${CHANNEL}/thread/C0MADEUP01-1700000000.000100/more`,
+      `${CHANNEL}/files/F0MADEUP01`,
+    ])
+      expect(slackPlace(bad)).toBeNull()
+  })
+
+  test("is null for no link, a place outside Slack, or a Slack link that names no conversation", () => {
+    expect(slackPlace(undefined)).toBeNull()
+    expect(slackPlace("https://linear.app/acme/issue/DUNE-1401")).toBeNull()
+    expect(slackPlace("https://app.slack.com/client/T0000000000")).toBeNull()
+    expect(slackPlace("https://evil.example/client/T0000000000/C0MADEUP01")).toBeNull()
+  })
+})
 
 describe.skipIf(!dockerUp())("the inbox store", () => {
   let container = ""
@@ -982,6 +1098,256 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       status: "delivered",
       to: "ops",
       via: "session",
+    })
+  })
+
+  describe("a Slack send's files (PG-649)", () => {
+    const THREAD =
+      "https://app.slack.com/client/T0000000000/C0MADEUP01/thread/C0MADEUP01-1700000000.000100"
+    const FILES = [
+      { id: "3f0e7a52-1c4b-4d2a-9e6f-0000000000a1.png", kind: "image", name: "before.png" },
+      { id: "3f0e7a52-1c4b-4d2a-9e6f-0000000000a2.png", kind: "image", name: "after.png" },
+    ]
+    const delivered = async () =>
+      ({ at: "2026-10-07T12:00:00.000Z", ok: true, sessionId: "s1" }) as const
+    const filedDraft = (link = THREAD) =>
+      post({
+        from: "ops",
+        kind: "draft",
+        preview: { attachments: FILES, link, text: "the fix is live", to: "@Merritt" },
+        title: "Tell Merritt",
+      })
+    // the upload is handed the answered item alone, as dm upload is handed its id
+    const recorder = (fail?: string) => {
+      const calls: string[] = []
+      const upload = async (item: { id: string }) => {
+        calls.push(item.id)
+        if (fail) throw new Error(fail)
+        return FILES.length
+      }
+      return { calls, upload }
+    }
+
+    test("Send uploads the files into the link's channel and thread before the words reach the poster, and the answer keeps the count", async () => {
+      const posted = await filedDraft()
+      const order: string[] = []
+      const { calls, upload } = recorder()
+      const answered = await store.answerItem(
+        db,
+        posted.id,
+        { action: "send" },
+        {
+          actor,
+          deliver: async () => {
+            order.push("typed")
+            return delivered()
+          },
+          upload: async (item) => {
+            order.push("uploaded")
+            return upload(item)
+          },
+        },
+      )
+      expect(order).toEqual(["uploaded", "typed"])
+      expect(calls).toEqual([posted.id])
+      if (!answered.ok) throw new Error("not answered")
+      expect(answered.item.answer).toMatchObject({ choice: "send", uploaded: 2 })
+      expect(answered.item.delivery).toMatchObject({ status: "delivered" })
+    })
+
+    test("a failed upload fails the send before anything is typed, and Retry uploads again, then types", async () => {
+      const posted = await filedDraft()
+      const typed: Delivery[] = []
+      const deliver = async (delivery: Delivery) => {
+        typed.push(delivery)
+        return delivered()
+      }
+      const failing = recorder("files.completeUploadExternal: not_in_channel")
+      const answered = await store.answerItem(
+        db,
+        posted.id,
+        { action: "send" },
+        { actor, deliver, upload: failing.upload },
+      )
+      if (!answered.ok) throw new Error("not answered")
+      expect(typed).toEqual([])
+      expect(answered.item.delivery).toEqual({
+        code: "UPLOAD_FAILED",
+        reason: "The files did not upload to Slack: files.completeUploadExternal: not_in_channel",
+        status: "failed",
+      })
+      expect(store.retryable(answered.item)).toBe(true)
+      const working = recorder()
+      const retried = await store.retryDelivery(db, posted.id, {
+        actor,
+        deliver,
+        upload: working.upload,
+      })
+      if (!retried.ok) throw new Error("not retried")
+      expect(working.calls).toHaveLength(1)
+      expect(typed).toHaveLength(1)
+      expect(retried.item.delivery).toMatchObject({ status: "delivered" })
+      expect(retried.item.answer).toMatchObject({ uploaded: 2 })
+    })
+
+    test("a Retry after the words failed to type keeps the files it uploaded, uploading none twice", async () => {
+      const posted = await filedDraft()
+      const { calls, upload } = recorder()
+      const failed = await store.answerItem(
+        db,
+        posted.id,
+        { action: "send" },
+        {
+          actor,
+          deliver: async () => ({ code: "ON_PICKER", ok: false, reason: "A picker is open." }),
+          upload,
+        },
+      )
+      if (!failed.ok) throw new Error("not answered")
+      expect(failed.item.delivery).toMatchObject({ code: "ON_PICKER", status: "failed" })
+      await store.retryDelivery(db, posted.id, { actor, deliver: delivered, upload })
+      expect(calls).toHaveLength(1)
+    })
+
+    test("Approve of a slack decision with files uploads them too", async () => {
+      const posted = await post(decision({ ...SLACK, attachments: FILES }))
+      const { calls, upload } = recorder()
+      await store.answerItem(
+        db,
+        posted.id,
+        { action: "approve" },
+        { actor, deliver: delivered, upload },
+      )
+      expect(calls).toEqual([posted.id])
+    })
+
+    // what dm upload shares comes from the stored item alone: it takes an id, never a channel, a thread or a path
+    describe("uploadSpec", () => {
+      const PNG = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3])
+      let dir = ""
+      const read = (id: string) => readAttachment(id, dir)
+      const kept = async (bytes: Uint8Array, name: string, kind: string) => {
+        const stored = await storeAttachment(bytes, name, { dir })
+        if (!stored.ok) throw new Error("not stored")
+        return { id: stored.id, kind, name }
+      }
+      beforeAll(() => {
+        dir = mkdtempSync(join(tmpdir(), "pg-649-files-"))
+      })
+      afterAll(() => {
+        if (dir) rmSync(dir, { force: true, recursive: true })
+      })
+
+      test("reads the place from the sent item's link and each file's bytes from the attachments folder, its text told by the kept file's kind", async () => {
+        const shot = await kept(PNG, "before.png", "image")
+        // text bytes under a picture's name: the folder keeps them as .txt, so the guard reads their words
+        const notes = await kept(
+          new TextEncoder().encode("the fix is live\n"),
+          "notes.png",
+          "image",
+        )
+        const posted = await post({
+          from: "ops",
+          kind: "draft",
+          preview: { attachments: [shot, notes], link: THREAD, text: "hi", to: "@Merritt" },
+          title: "Tell Merritt",
+        })
+        await store.answerItem(db, posted.id, { action: "send" }, { actor })
+        const spec = await uploadSpec(db, posted.id, read)
+        expect(spec).toEqual({
+          channel: "C0MADEUP01",
+          files: [
+            { bytes: Buffer.from(PNG).toString("base64"), name: "before.png", text: false },
+            {
+              bytes: Buffer.from("the fix is live\n").toString("base64"),
+              name: "notes.png",
+              text: true,
+            },
+          ],
+          thread: "1700000000.000100",
+        })
+      })
+
+      test("refuses an id naming no item, a channel, a thread or a path, so no caller picks the place or the file", async () => {
+        for (const id of ["C0MADEUP01", THREAD, join(dir, "x.png"), "/etc/hosts", "#i999999"])
+          await expect(uploadSpec(db, id, read)).rejects.toThrow("no Inbox item")
+      })
+
+      test("refuses a Send whose words already went, as every Send from before this PR did", async () => {
+        const shot = await kept(PNG, "before.png", "image")
+        const old = await post({
+          from: "ops",
+          kind: "draft",
+          preview: { attachments: [shot], link: THREAD, text: "hi", to: "@Merritt" },
+          title: "Sent before",
+        })
+        await store.answerItem(db, old.id, { action: "send" }, { actor, deliver: delivered })
+        await expect(uploadSpec(db, old.id, read)).rejects.toThrow("not in flight")
+      })
+
+      test("refuses an item still open, denied, already shared, or whose file left the folder", async () => {
+        const shot = await kept(PNG, "before.png", "image")
+        const draft = { attachments: [shot], link: THREAD, text: "hi", to: "@Merritt" }
+        const open = await post({ from: "ops", kind: "draft", preview: draft, title: "Open" })
+        await expect(uploadSpec(db, open.id, read)).rejects.toThrow("holds no files")
+        const denied = await post(decision({ ...SLACK, attachments: [shot] }))
+        await store.answerItem(db, denied.id, { action: "deny" }, { actor })
+        await expect(uploadSpec(db, denied.id, read)).rejects.toThrow("holds no files")
+        const shared = await post({ from: "ops", kind: "draft", preview: draft, title: "Shared" })
+        await store.answerItem(
+          db,
+          shared.id,
+          { action: "send" },
+          { actor, deliver: delivered, upload: async () => 1 },
+        )
+        await expect(uploadSpec(db, shared.id, read)).rejects.toThrow("holds no files")
+        const gone = await post({
+          from: "ops",
+          kind: "draft",
+          preview: { ...draft, attachments: [{ ...shot, id: `${crypto.randomUUID()}.png` }] },
+          title: "Gone",
+        })
+        await store.answerItem(db, gone.id, { action: "send" }, { actor })
+        await expect(uploadSpec(db, gone.id, read)).rejects.toThrow(
+          "before.png is gone from the attachments folder",
+        )
+      })
+    })
+
+    test("a Slack draft saved as a draft, a Linear draft, a Deny and a Send whose link's thread part does not parse upload nothing, the last still delivering its words", async () => {
+      const { calls, upload } = recorder()
+      const saved = await filedDraft()
+      await store.answerItem(
+        db,
+        saved.id,
+        { action: "draft" },
+        { actor, deliver: delivered, upload },
+      )
+      const linear = await filedDraft("https://linear.app/acme/issue/DUNE-1401")
+      await store.answerItem(
+        db,
+        linear.id,
+        { action: "send" },
+        { actor, deliver: delivered, upload },
+      )
+      const denied = await post(decision({ ...SLACK, attachments: FILES }))
+      await store.answerItem(
+        db,
+        denied.id,
+        { action: "deny" },
+        { actor, deliver: delivered, upload },
+      )
+      const broken = await filedDraft(`${CHANNEL}/thread/C0MADEUP01-notats`)
+      const sent = await store.answerItem(
+        db,
+        broken.id,
+        { action: "send" },
+        { actor, deliver: delivered, upload },
+      )
+      if (!sent.ok) throw new Error("not answered")
+      expect(sent.item.delivery).toMatchObject({ status: "delivered" })
+      expect(sent.item.answer).not.toHaveProperty("uploaded")
+      expect(calls).toEqual([])
     })
   })
 
@@ -2733,6 +3099,194 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
         { ok: false },
       )
       expect((await store.getItem(db, secret.id))?.status).toBe("open")
+    })
+  })
+
+  describe("an accept decision's Approve (PG-658)", () => {
+    // what the stubbed runner was handed, per call, and what it answers
+    const runner = (ran: Partial<{ code: number; err: string; out: string }> = {}) => {
+      const calls: string[][] = []
+      const accept = async (args: string[]) => {
+        calls.push(args)
+        return { code: 0, err: "", out: "rev 9b8c7d6 is accepted", ...ran }
+      }
+      return { accept, calls }
+    }
+
+    test("runs the one fixed argv once the answer is kept, records its exit code and line, and tells the poster there is nothing left to do", async () => {
+      const posted = await post(decision(ACCEPT))
+      const run = runner()
+      const sent: Delivery[] = []
+      const answered = await store.answerItem(
+        db,
+        posted.id,
+        { action: "approve", seen: posted.updatedAt },
+        {
+          accept: run.accept,
+          actor,
+          deliver: async (delivery) => {
+            sent.push(delivery)
+            return { at: "2026-11-03T20:00:00.000Z", ok: true, sessionId: "s1" }
+          },
+        },
+      )
+      expect(run.calls).toEqual([
+        [
+          "accept",
+          "acme",
+          "skill",
+          "end-of-day",
+          "3f9a2c1d",
+          "--reason",
+          `the owner approved it in the Inbox (#i${posted.ref})`,
+        ],
+      ])
+      expect(answered.ok).toBe(true)
+      if (!answered.ok) return
+      expect(answered.item.status).toBe("approved")
+      expect(answered.item.answer).toMatchObject({
+        accepted: { exitCode: 0, line: "rev 9b8c7d6 is accepted" },
+        choice: "approve",
+      })
+      expect((await store.getItem(db, posted.id))?.answer).toMatchObject({
+        accepted: { exitCode: 0, line: "rev 9b8c7d6 is accepted" },
+      })
+      expect(sent).toHaveLength(1)
+      expect(sent[0]?.text).toContain("the dashboard ran the accept: rev 9b8c7d6 is accepted")
+      expect(sent[0]?.text).toContain(`bun run ask ack #i${posted.ref} --no-link`)
+      expect(sent[0]?.text).not.toContain("Carry it out")
+    })
+
+    test("a refused accept records the CLI's exit code and its error line, and the poster reads that nothing was accepted", async () => {
+      const posted = await post(decision(ACCEPT))
+      const run = runner({
+        code: 1,
+        err: "playground ext: 409 the proposal is at 0a1b2c3d4e5f, not 3f9a2c1d; read it again",
+        out: "",
+      })
+      const sent: Delivery[] = []
+      const answered = await store.answerItem(
+        db,
+        posted.id,
+        { action: "approve" },
+        {
+          accept: run.accept,
+          actor,
+          deliver: async (delivery) => {
+            sent.push(delivery)
+            return { at: "2026-11-03T20:00:00.000Z", ok: true, sessionId: "s1" }
+          },
+        },
+      )
+      expect(answered.ok && answered.item.answer).toMatchObject({
+        accepted: {
+          exitCode: 1,
+          line: "playground ext: 409 the proposal is at 0a1b2c3d4e5f, not 3f9a2c1d; read it again",
+        },
+      })
+      expect(sent[0]?.text).toContain("failed (exit 1)")
+      expect(sent[0]?.text).toContain("Nothing was accepted")
+    })
+
+    test("a runner that throws is recorded as a failed accept, never an approve with no result", async () => {
+      const posted = await post(decision(ACCEPT))
+      const accept = async () => {
+        throw new Error("spawn ENOENT")
+      }
+      const answered = await store.answerItem(
+        db,
+        posted.id,
+        { action: "approve" },
+        { accept, actor },
+      )
+      expect(answered.ok && answered.item.answer).toMatchObject({
+        accepted: { exitCode: 1, line: "spawn ENOENT" },
+      })
+    })
+
+    test("runs once: a double click, or an answer to a card read before it changed, runs one accept or none", async () => {
+      const posted = await post(decision(ACCEPT))
+      const run = runner()
+      const stale = await store.answerItem(
+        db,
+        posted.id,
+        { action: "approve", seen: "2026-01-01T00:00:00.000Z" },
+        { accept: run.accept, actor },
+      )
+      expect(stale).toMatchObject({ code: "CONFLICT", ok: false })
+      expect(run.calls).toHaveLength(0)
+      const [one, two] = await Promise.all([
+        store.answerItem(db, posted.id, { action: "approve" }, { accept: run.accept, actor }),
+        store.answerItem(db, posted.id, { action: "approve" }, { accept: run.accept, actor }),
+      ])
+      expect([one.ok, two.ok].sort()).toEqual([false, true])
+      expect(run.calls).toHaveLength(1)
+    })
+
+    test("Deny and Archive run nothing, and Edit is refused with the item left open", async () => {
+      const run = runner()
+      const denied = await post(decision(ACCEPT))
+      const cleared = await post(decision(ACCEPT))
+      const edited = await post(decision(ACCEPT))
+      const deps = { accept: run.accept, actor }
+      expect(await store.answerItem(db, denied.id, { action: "deny" }, deps)).toMatchObject({
+        item: { status: "denied" },
+        ok: true,
+      })
+      expect(await store.answerItem(db, cleared.id, { action: "clear" }, deps)).toMatchObject({
+        item: { status: "cleared" },
+        ok: true,
+      })
+      expect(
+        await store.answerItem(db, edited.id, { action: "edit", text: "accept core's" }, deps),
+      ).toMatchObject({ code: "VALIDATION_ERROR", ok: false })
+      expect((await store.getItem(db, edited.id))?.status).toBe("open")
+      expect(run.calls).toHaveLength(0)
+    })
+
+    test("with no runner its Approve is refused and the item stays open, and no other decision ever runs one", async () => {
+      const posted = await post(decision(ACCEPT))
+      expect(await store.answerItem(db, posted.id, { action: "approve" }, { actor })).toMatchObject(
+        {
+          code: "VALIDATION_ERROR",
+          message: "This dashboard cannot run an accept",
+          ok: false,
+        },
+      )
+      expect((await store.getItem(db, posted.id))?.status).toBe("open")
+      const run = runner()
+      const other = await post(decision(PREVIEWS.delete))
+      expect(
+        await store.answerItem(db, other.id, { action: "approve" }, { accept: run.accept, actor }),
+      ).toMatchObject({ ok: true })
+      expect(run.calls).toHaveLength(0)
+    })
+
+    test("an accept answered for an ended poster reaches the dispatcher as an item to close, not a go", async () => {
+      const posted = await post({ ...decision(ACCEPT), from: "worker-eod" })
+      const sent: Delivery[] = []
+      await store.answerItem(
+        db,
+        posted.id,
+        { action: "approve" },
+        {
+          accept: runner().accept,
+          actor,
+          deliver: async (delivery) => {
+            sent.push(delivery)
+            return afterPoster(delivery)
+          },
+          dispatcher: "dispatcher",
+        },
+      )
+      const relayed = sent.find((delivery) => delivery.to === "dispatcher")
+      expect(relayed?.text).toStartWith(
+        `worker-eod has ended, and the dashboard already ran this accept, so nothing is carried out: close the item with bun run ask ack #i${posted.ref} --no-link`,
+      )
+      expect(relayed?.text).toContain("the dashboard ran the accept")
+      expect(relayed?.text).not.toContain("you carry this out in its place")
+      // an approved accept is a go, which get --ack leaves open, so the relay names the one close that closes it
+      expect(relayed?.text).not.toContain("--ack")
     })
   })
 })

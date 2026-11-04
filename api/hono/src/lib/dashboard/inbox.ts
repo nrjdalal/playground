@@ -4,13 +4,13 @@ import { join } from "node:path"
 import type { ActivityActor, Database } from "@packages/db"
 import { inboxItem, thread } from "@packages/db"
 import { dataDir } from "@packages/env/data-dir"
-import { extensionsDir, slackSettings } from "@packages/settings"
+import { extensionsDir, itemKeySchema, KINDS, SCOPE_NAME, slackSettings } from "@packages/settings"
 import { and, desc, eq, gt, inArray, isNotNull, isNull, or, sql } from "drizzle-orm"
 import { z } from "zod"
 
 import { ID_PATTERN } from "./attachments"
 
-// Playground's Inbox: what the factory posts for the owner, one row of inbox_item each, through the bun run ask CLI alone. A decision previews exactly what Approve does, a draft is a Slack message or Linear comment to send, and an update is an outcome to read. The dashboard records his answer and types it into the posting session through deliver(); the dashboard itself never sends, merges or files anything. Nothing here imports the API's env or an @/ path, so the CLI runs from any shell and the web reads its types.
+// Playground's Inbox: what the factory posts for the owner, one row of inbox_item each, through the bun run ask CLI alone. A decision previews exactly what Approve does, a draft is a Slack message or Linear comment to send, and an update is an outcome to read. The dashboard records his answer and types it into the posting session through deliver(); the dashboard itself never sends a message, merges or files anything, sharing only a Slack send's files (filesToUpload) and running only an accept decision's accept. Nothing here imports the API's env or an @/ path, so the CLI runs from any shell and the web reads its types.
 
 const LIMITS = { line: 200, name: 120, prs: 50, text: 4000 }
 
@@ -163,10 +163,36 @@ export const sinkArgv = (key: string, sink: SecretSink, environment: string): st
   "--yes",
 ]
 
+// An extension proposal the owner accepts from the Inbox in place of a terminal: its scope, kind and key, and the rev he reads, which the accept holds to, so a proposal written after he read it is refused. Each word is one the store takes, none can start as a flag, and no session supplies the argv.
+const acceptSchema = z.strictObject({
+  key: z.string().max(LIMITS.name).pipe(itemKeySchema),
+  kind: z.enum(KINDS),
+  rev: z.string().regex(/^[0-9a-f]{7,40}$/, "Must be a commit SHA"),
+  scope: z.string().max(LIMITS.name).regex(SCOPE_NAME, "Must be a login, an org or core"),
+  type: z.literal("accept"),
+  why: words,
+})
+
+export type InboxAccept = z.infer<typeof acceptSchema>
+
+// Pure: the one command Approve runs for an accept, as `playground ext <args>`: the preview's words, and a reason naming the item.
+export const acceptArgs = (preview: InboxAccept, ref: number): string[] => [
+  "accept",
+  preview.scope,
+  preview.kind,
+  preview.key,
+  preview.rev,
+  "--reason",
+  `the owner approved it in the Inbox (${itemTag(ref)})`,
+]
+
+// Runs `playground ext <args>` with no role and returns its exit code and output: store/extensions.ts's runCli is the real one, which the router passes, and a test passes its own. It restates that file's Cli, since the web reads this file's types and that file's imports reach the API's own.
+export type ExtRun = (args: string[]) => Promise<{ code: number; err: string; out: string }>
+
 // Runs a sink's argv with the value on its stdin and returns its exit code: null once stopped by a signal (its time limit's included), 127 when it could not start. secret-sink.ts holds the real one; a test passes its own.
 export type SinkRun = (argv: string[], stdin: string) => Promise<number | null>
 
-// What Approve does, one shape per kind of approval the owner keeps (playbook's ask rule): a Slack message, a ship of canary, a new Linear ticket, a delete, a schema, a budget, or a plain ask, whose words say what its poster does on Approve, for a decision no other shape fits (a production port, a work request from outside the chain, or a step only he can take, such as plugging in the Mac, where Approve means done and Deny means he can't). An ask may label each side in ELI5 / ASD-STE100, one line; the card then shows its text as the quoted block above the two labelled options. A secret asks for a value instead of a yes, which goes straight to its sink and is kept nowhere.
+// What Approve does, one shape per kind of approval the owner keeps (playbook's ask rule): an extension accept the dashboard runs itself, a Slack message, a ship of canary, a new Linear ticket, a delete, a schema, a budget, or a plain ask, whose words say what its poster does on Approve, for a decision no other shape fits (a production port, a work request from outside the chain, or a step only he can take, such as plugging in the Mac, where Approve means done and Deny means he can't). An ask may label each side in ELI5 / ASD-STE100, one line; the card then shows its text as the quoted block above the two labelled options. A secret asks for a value instead of a yes, which goes straight to its sink and is kept nowhere.
 export const previewSchema = z.discriminatedUnion("type", [
   z.strictObject({
     approve: oneLine(LIMITS.line).optional(),
@@ -211,6 +237,7 @@ export const previewSchema = z.discriminatedUnion("type", [
     sink: secretSinkSchema,
     type: z.literal("secret"),
   }),
+  acceptSchema,
 ])
 
 const link = z
@@ -218,7 +245,7 @@ const link = z
   .max(2000)
   .optional()
 
-// A draft's words, who they go to by a short name ("a colleague's thread"), the thread they reply in, which its card links to, and files its card shows, which Send leaves out of Slack.
+// A draft's words, who they go to by a short name ("a colleague's thread"), the thread they reply in, which its card links to, and files its card shows, which Send shares into that Slack thread (filesToUpload).
 export const draftSchema = z.strictObject({
   attachments,
   ...place,
@@ -324,8 +351,9 @@ export type InboxAction = (typeof ACTIONS)[number]
 // What an answer holds: every action but Move to Inbox, which undoes a set-aside and leaves no answer.
 export type InboxChoice = Exclude<InboxAction, "unarchive">
 
-// ackedAt: when its poster closed it through bun run ask, so the sweep stops chasing it; dismissedAt: when he dismissed the answered item or its poster closed it, which moves it to Done at once; noLink: why a go closed with no link.
+// ackedAt: when its poster closed it through bun run ask, so the sweep stops chasing it; accepted: what the accept an accept decision's Approve ran gave; dismissedAt: when he dismissed the answered item or its poster closed it, which moves it to Done at once; noLink: why a go closed with no link; uploaded: how many files a Slack send shared into its channel and thread, so a retry shares none twice.
 export type InboxAnswer = {
+  accepted?: AcceptResult
   ackedAt?: string
   at: string
   choice: InboxChoice
@@ -335,6 +363,19 @@ export type InboxAnswer = {
   linkLabel?: string
   noLink?: string
   note?: string
+  uploaded?: number
+}
+
+// What an accept's run gave: its exit code and the line it printed, the result or why it was refused.
+export type AcceptResult = { exitCode: number; line: string }
+
+// Pure: an accept's run as a result: its exit code, and its first line, the CLI's error when it failed, cut to a line.
+export const acceptResult = (ran: { code: number; err: string; out: string }): AcceptResult => {
+  const line = ((ran.code === 0 ? ran.out : ran.err || ran.out).split("\n")[0] ?? "").trim()
+  return {
+    exitCode: ran.code,
+    line: line.length > LIMITS.line ? `${line.slice(0, LIMITS.line - 1)}…` : line,
+  }
 }
 
 // Pure: a go, an answer he gave to carry out (Approve, Edit, Send, Draft), which closes only with where it landed or why there is no link.
@@ -513,6 +554,9 @@ function answerOf(
     if (item.preview.type === "secret") {
       return { message: "A secret ask takes its value through its Submit alone" }
     }
+    if (item.preview.type === "accept" && action === "edit") {
+      return { message: "An accept is approved or denied as its proposal reads" }
+    }
     // Clear: neither a yes nor a no; he has set the talk aside and will pick it up later, while whatever is already moving keeps moving
     if (action === "clear") return { answer: { choice: action }, status: "cleared" }
     if (action === "approve") return { answer: { choice: action }, status: "approved" }
@@ -555,6 +599,13 @@ function answerWords(
 ): string {
   const head = `Inbox ${itemTag(item.ref)} (${item.id}) "${item.title}":`
   const edited = answer.editedText
+  const accepted = answer.accepted
+  if (answer.choice === "approve" && accepted) {
+    const close = `bun run ask ack ${itemTag(item.ref)} --no-link`
+    return accepted.exitCode === 0
+      ? `${head} Approved, and the dashboard ran the accept: ${accepted.line}. Nothing is left to carry out: close it with ${close} "accepted in the extensions store".`
+      : `${head} Approved, but the accept the dashboard ran failed (exit ${accepted.exitCode}): ${accepted.line}. Nothing was accepted: read the proposal again, post a new accept decision for its current rev if it still stands, and close this one with ${close} and why.`
+  }
   switch (answer.choice) {
     case "approve":
       return `${head} Approved. Carry it out.`
@@ -580,14 +631,17 @@ function answerWords(
 
 // Pure: what the dispatcher is typed when the poster has ended, so the item's kind and exact words travel with the answer. A go is carried out in the poster's place; a deny, a clear or a discard has nothing to carry out, only an item to close.
 export function relayText(item: InboxItem, answer: Omit<InboxAnswer, "at">): string {
-  return relayWith(item, isGo(answer.choice), deliveryText(item, answer))
+  const lead = isGo(answer.choice)
+    ? `${item.from} has ended, so you carry this out in its place: a sent Slack message goes out through ${slack("slack.sendServer") || "your Slack tool"} (never the claude.ai connector), a Slack draft is saved with slack_send_message_draft as below, and you bun run ask ack the item with where it landed (bun run ask get shows its link).`
+    : closeLead(item)
+  return relayWith(item, lead, deliveryText(item, answer))
 }
 
-function relayWith(item: InboxItem, go: boolean, text: string): string {
+const closeLead = (item: InboxItem): string =>
+  `${item.from} has ended, so nothing is carried out: close the item with bun run ask get ${itemTag(item.ref)} --ack.`
+
+function relayWith(item: InboxItem, lead: string, text: string): string {
   const words = "text" in item.preview ? item.preview.text : JSON.stringify(item.preview)
-  const lead = go
-    ? `${item.from} has ended, so you carry this out in its place: a sent Slack message goes out through ${slack("slack.sendServer") || "your Slack tool"} (never the claude.ai connector), a Slack draft is saved with slack_send_message_draft as below, and you bun run ask ack the item with where it landed (bun run ask get shows its link).`
-    : `${item.from} has ended, so nothing is carried out: close the item with bun run ask get ${itemTag(item.ref)} --ack.`
   return `${lead} ${text}\nKind: ${item.kind}\nPreview text:\n${words}`
 }
 
@@ -613,7 +667,13 @@ const textsOf = (
 ): { relay: string; text: string } => {
   if (answer.choice === "provided") {
     const text = providedText(item, answer)
-    return { relay: relayWith(item, false, text), text }
+    return { relay: relayWith(item, closeLead(item), text), text }
+  }
+  // an accept the dashboard ran is carried out already, so the dispatcher closes it in an ended poster's place
+  if (answer.accepted) {
+    const text = deliveryText(item, answer)
+    const lead = `${item.from} has ended, and the dashboard already ran this accept, so nothing is carried out: close the item with bun run ask ack ${itemTag(item.ref)} --no-link and why, as below.`
+    return { relay: relayWith(item, lead, text), text }
   }
   return { relay: relayText(item, answer), text: deliveryText(item, answer) }
 }
@@ -624,13 +684,14 @@ export const deliveryFailed = (item: InboxItem): boolean =>
   item.delivery?.status === "failed" &&
   !(item.answer && "dismissedAt" in item.answer && item.answer.dismissedAt)
 
-// The delivery failures that come before anything is typed (deliver.ts's DELIVERY_FAILURES says which), and LOST, an answer Claude Code held that neither its screen nor its transcript shows QUEUED_MS on, so Retry cannot type the answer twice; after any other (INTERRUPTED, or ERROR when the adapter threw) the answer may be in the session already, so its card offers Check it for me.
+// The delivery failures that come before anything is typed (deliver.ts's DELIVERY_FAILURES says which, and UPLOAD_FAILED, a Slack send's files refused before its words), and LOST, an answer Claude Code held that neither its screen nor its transcript shows QUEUED_MS on, so Retry cannot type the answer twice; after any other (INTERRUPTED, or ERROR when the adapter threw) the answer may be in the session already, so its card offers Check it for me.
 export const RETRY_CODES = [
   "CMUX_FAILED",
   "INPUT_NOT_EMPTY",
   "LOST",
   "NOT_FOUND",
   "ON_PICKER",
+  "UPLOAD_FAILED",
 ] as const
 
 // How long an answer reads queued before its card offers Retry: deliver.ts's QUEUED_MS, by which its follow-up reads it delivered or lost, and a minute more, so a card still queued then lost its follow-up to an API restart (a test holds the two apart by that minute).
@@ -647,6 +708,47 @@ export const retryable = (item: InboxItem, now = new Date()): boolean =>
     item.delivery?.status === "failed" &&
     (RETRY_CODES as readonly string[]).includes(item.delivery.code)) ||
   stuckQueued(item, now)
+
+// Where a Slack send's files go: the conversation, and the thread's parent message when it replies in one.
+export type UploadPlace = { channel: string; thread?: string }
+
+// Shares an answered item's files into the place its link names (dm upload, run where the Slack token lives, given the item's id alone) and says how many it shared, throwing why when Slack refuses any step; slack-upload.ts holds the real one, a test passes its own.
+export type Upload = (item: InboxItem) => Promise<number>
+
+const CONVERSATION = /^[CDG][A-Z0-9]+$/
+
+// Pure: the place a Slack link in its app form names (https://app.slack.com/client/<team>/<conversation>, then /thread/<conversation>-<ts> for a thread), its query and hash aside; null for no link, a link outside Slack, one naming no conversation, or a path past the conversation that is not one parsed thread, so a file never lands outside the thread its reply goes to.
+export function slackPlace(link: string | undefined): UploadPlace | null {
+  if (!link || !URL.canParse(link)) return null
+  const url = new URL(link)
+  if (url.protocol !== "https:" || url.hostname !== "app.slack.com") return null
+  const [, client, team, channel, ...rest] = url.pathname.replace(/\/$/, "").split("/")
+  if (client !== "client" || !team || !channel || !CONVERSATION.test(channel)) return null
+  if (rest.length === 0) return { channel }
+  const [word, parent, ...more] = rest
+  const thread = new RegExp(`^${channel}-(\\d+\\.\\d+)$`).exec(parent ?? "")?.[1]
+  return word === "thread" && thread && more.length === 0 ? { channel, thread } : null
+}
+
+// Pure: the files a go shares into Slack before its words reach the poster: a Slack draft's on Send, or a slack decision's on Approve or Edit, when its link names a Slack place and it has shared none yet; null for anything else, whose files stay on the card.
+export function filesToUpload(
+  item: InboxItem,
+): { files: InboxAttachment[]; place: UploadPlace } | null {
+  const answer = item.answer
+  if (!answer || !("choice" in answer) || ("uploaded" in answer && answer.uploaded !== undefined))
+    return null
+  const preview = item.preview
+  const go =
+    item.kind === "draft"
+      ? answer.choice === "send"
+      : item.kind === "decision" &&
+        "type" in preview &&
+        preview.type === "slack" &&
+        (answer.choice === "approve" || answer.choice === "edit")
+  if (!go || !("attachments" in preview) || !preview.attachments?.length) return null
+  const place = slackPlace("link" in preview ? preview.link : undefined)
+  return place && { files: preview.attachments, place }
+}
 
 // Pure: when an open item is scheduled to ask again, while that time is still ahead; null once it is awake, and on anything not scheduled.
 export const snoozedUntil = (item: InboxItem, now: Date): string | null => {
@@ -849,15 +951,20 @@ export async function answerItem(
   id: string,
   input: AnswerInput,
   {
+    accept,
     actor,
     deliver,
     dispatcher,
     now = new Date(),
+    upload,
     wait,
-  }: { actor: ActivityActor; deliver?: Deliver; dispatcher?: string; now?: Date } & Pick<
-    Sending,
-    "wait"
-  >,
+  }: {
+    accept?: ExtRun
+    actor: ActivityActor
+    deliver?: Deliver
+    dispatcher?: string
+    now?: Date
+  } & Pick<Sending, "upload" | "wait">,
 ): Promise<{ item: InboxItem; ok: true } | Refused> {
   const current = await getItem(db, id)
   if (!current || current.id !== id) return NOT_FOUND
@@ -877,6 +984,14 @@ export async function answerItem(
     return { code, message: checked.message, ok: false }
   }
   const answer: InboxAnswer = { ...checked.answer, at: now.toISOString() }
+  // an accept's Approve runs the accept, so one with nothing to run it is refused before it is recorded
+  const accepting =
+    current.kind === "decision" && current.preview.type === "accept" && answer.choice === "approve"
+      ? current.preview
+      : undefined
+  if (accepting && !accept) {
+    return { code: "VALIDATION_ERROR", message: "This dashboard cannot run an accept", ok: false }
+  }
   const [row] = await db
     .update(inboxItem)
     .set({
@@ -896,14 +1011,36 @@ export async function answerItem(
     )
     .returning()
   if (!row) return { code: "CONFLICT", message: "This item is already answered", ok: false }
-  const answered = toItem(row)
+  let answered = toItem(row)
+  let given: Omit<InboxAnswer, "at"> = checked.answer
+  // run once, after the claim above, so a double click or a second tab accepts once
+  if (accepting && accept) {
+    const ran = await accept(acceptArgs(accepting, current.ref)).catch((error: unknown) => ({
+      code: 1,
+      err: error instanceof Error ? error.message : String(error),
+      out: "",
+    }))
+    const accepted = acceptResult(ran)
+    given = { ...given, accepted }
+    // merged key by key, so a poster's read that landed while it ran keeps its close
+    const [recorded] = await db
+      .update(inboxItem)
+      .set({
+        answer: sql`${inboxItem.answer} || jsonb_build_object('accepted', (${JSON.stringify(accepted)}::text)::jsonb)`,
+        version: sql`${inboxItem.version} + 1`,
+      })
+      .where(eq(inboxItem.id, id))
+      .returning()
+    if (recorded) answered = toItem(recorded)
+  }
   if (!deliver) return { item: answered, ok: true }
   return {
-    item: await send(db, answered, textsOf(answered, checked.answer), {
+    item: await send(db, answered, textsOf(answered, given), {
       actor,
       deliver,
       dispatcher,
       now,
+      upload,
       wait,
     }),
     ok: true,
@@ -953,6 +1090,7 @@ type Sending = {
   deliver: Deliver
   dispatcher?: string
   now: Date
+  upload?: Upload
   wait?: (ms: number) => Promise<void>
 }
 
@@ -961,9 +1099,22 @@ async function send(
   db: Database,
   item: InboxItem,
   { relay, text }: { relay: string; text: string },
-  { actor, deliver, dispatcher, now, wait = (ms) => Bun.sleep(ms) }: Sending,
+  { actor, deliver, dispatcher, now, upload, wait = (ms) => Bun.sleep(ms) }: Sending,
   held?: Extract<InboxDelivery, { status: "queued" }>,
 ): Promise<InboxItem> {
+  // the files go first, so an upload Slack refuses fails the send with nothing typed, and Retry shares them again
+  const shared = upload && filesToUpload(item)
+  if (shared) {
+    let count: number
+    try {
+      count = await upload(item)
+    } catch (error) {
+      const reason = `The files did not upload to Slack: ${(error as Error).message}`
+      const failed: InboxDelivery = { code: "UPLOAD_FAILED", reason, status: "failed" }
+      return (await recordDelivery(db, item.id, failed, now)) ?? item
+    }
+    item = (await recordUploaded(db, item.id, count)) ?? item
+  }
   const one = (to: string, words: string) => ({ actor, id: crypto.randomUUID(), text: words, to })
   // a stuck queued answer is read again under its own id and queued time, so this try types nothing: it reads queued, delivered, lost or unconfirmed, and only a Retry after lost types it
   let sent: Delivery & { id: string } = held
@@ -1058,7 +1209,14 @@ async function attempt(
 export async function retryDelivery(
   db: Database,
   id: string,
-  { actor, deliver, dispatcher, now = new Date(), wait }: Omit<Sending, "now"> & { now?: Date },
+  {
+    actor,
+    deliver,
+    dispatcher,
+    now = new Date(),
+    upload,
+    wait,
+  }: Omit<Sending, "now"> & { now?: Date },
 ): Promise<{ item: InboxItem; ok: true } | Refused> {
   const current = await getItem(db, id)
   if (!current || current.id !== id) return NOT_FOUND
@@ -1100,7 +1258,7 @@ export async function retryDelivery(
       db,
       item,
       textsOf(item, current.answer),
-      { actor, deliver, dispatcher, now, wait },
+      { actor, deliver, dispatcher, now, upload, wait },
       current.delivery?.status === "queued" ? current.delivery : undefined,
     ),
     ok: true,
@@ -1180,6 +1338,16 @@ export async function provideSecret(
     item: await send(db, item, textsOf(item, answer), { actor, deliver, dispatcher, now }),
     ok: true,
   }
+}
+
+// Keeps how many files a send shared in its answer, 0 on a stack that shares none, so a Retry after the words failed to type shares none twice.
+async function recordUploaded(db: Database, id: string, count: number): Promise<InboxItem | null> {
+  const [row] = await db
+    .update(inboxItem)
+    .set({ answer: sql`${inboxItem.answer} || jsonb_build_object('uploaded', ${count}::int)` })
+    .where(eq(inboxItem.id, id))
+    .returning()
+  return row ? toItem(row) : null
 }
 
 // The first delivery recorded stands: a poster that read its answer through bun run ask while the adapter typed keeps that record.

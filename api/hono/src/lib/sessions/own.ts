@@ -13,13 +13,13 @@ import { dataDir } from "@/lib/sessions/paths"
 // The file in the hosted session's folder (PLAYGROUND_SDK_PROBE_DIR) that names its session, so the API resumes it after a restart rather than starting another (sdk.ts).
 export const SESSION_FILE = ".sdk-session"
 
-// Pure: whether a stack opts in to every session on the machine (PLAYGROUND_CMUX_SESSIONS), read as the env schema's stringbool reads it, so the launcher, which reads the raw setting, and the API agree; a value it cannot read keeps them out.
-export const cmuxSessions = (value: string | undefined): boolean =>
+// Pure: whether a stack opts in to every session on the machine, read as the env schema's stringbool reads it, so the launcher, which reads the raw setting, and the API agree; a value it cannot read keeps them out.
+export const allSessions = (value: string | undefined): boolean =>
   z.stringbool().safeParse(value).data === true
 
 // Whether this process shows every session: a fixture's are all made up, and a stack that reads this machine shows them all only once it opts in.
 export const everySession = (): boolean =>
-  !readsLive() || cmuxSessions(process.env.PLAYGROUND_CMUX_SESSIONS)
+  !readsLive() || allSessions(process.env.PLAYGROUND_ALL_SESSIONS)
 
 const hostedId = (): string | null => {
   const dir = process.env.PLAYGROUND_SDK_PROBE_DIR
