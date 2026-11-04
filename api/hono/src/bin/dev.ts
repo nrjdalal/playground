@@ -152,7 +152,7 @@ if (!dry) {
       leave(1)
     }
     console.error(
-      `dev: dashboard reads the fixture written to ${scratch}, test data: no cmux, no ~/.claude; its writes land there and go when the stack stops`,
+      `dev: dashboard reads the fixture written to ${scratch}, test data: no cmux, no ~/.claude; its writes land there and go when the stack stops, Inbox files among them, so a card an earlier start kept in the database shows its file as missing`,
     )
   } else {
     console.error(`dev: dashboard source matched ${DASHBOARD_RULES[checked.dashboard.rule]}`)

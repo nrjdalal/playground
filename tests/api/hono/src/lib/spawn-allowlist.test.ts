@@ -20,6 +20,7 @@ const ALLOWLIST = [
   "dashboard/vibe.ts",
   "dev/launch.ts",
   "dev/stop.ts",
+  "keychain.ts",
   "onboard/fix.ts",
   "onboard/machine.ts",
   "sessions/guard.ts",
@@ -27,7 +28,6 @@ const ALLOWLIST = [
   "store/extensions.ts",
   "system/probe.ts",
   "trash.ts",
-  "yard/keychain.ts",
 ]
 
 // A call shape, not the word: Bun's spawners and shell tag, a `$` imported from bun (matched through the import, so a regex source ending in `$` before its template's backtick never reads as one), the child_process module in any import form (probe.test.ts's SPAWNS shapes), or a bare call of the child_process family, so prose and re.exec never match. `from "bun"` alone is not a spawn (Glob reaches lib through it), and `= Bun` matches every `= Bun.file(...)` at repo scale.
