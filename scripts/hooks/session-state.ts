@@ -230,7 +230,7 @@ export function parentPid(pid: number): number {
   return Number(ps.stdout.toString().trim()) || 0
 }
 
-// The session id of the nearest process at or above `pid` that Claude Code's own registry names (<config>/sessions/<pid>.json, whose pid is that process's): the claude process a Bash call runs under.
+// The session id of the nearest process at or above `pid` that Claude Code's own registry names (<config>/sessions/<pid>.json, whose pid is that process's): the claude process a Bash call runs under. Two readers: callerRefusal, below, refuses when it finds none, and playground rm --discard (callerOf in packages/scripts/src/playground/rm.ts) reads none as a terminal's own call.
 export async function sessionAbove(
   environment: Environment,
   pid: number,

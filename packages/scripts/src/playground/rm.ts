@@ -13,7 +13,7 @@ import {
   type Roots,
 } from "@packages/safe-delete"
 
-import { sessionAbove } from "../../../../scripts/hooks/session-state"
+import { parentPid, sessionAbove } from "../../../../scripts/hooks/session-state"
 import STATUSES from "../../../../scripts/roster-statuses.json"
 import { mainCheckout } from "../main-checkout"
 import { sessionName } from "../trash"
@@ -73,15 +73,17 @@ export type RmDeps = {
   session: () => Promise<string>
 }
 
-// The session a caller is, or undefined for a terminal no Claude Code session runs in: its PLAYGROUND_ROLE, else the session the shell-pane caller check (sessionAbove) finds above it in Claude Code's registry, which no prefix that drops the role reaches.
+// Who a caller that may be a session is, or undefined for a terminal no Claude Code session runs in: its PLAYGROUND_ROLE, a call detached from its parent or whose parent ps cannot read, since no terminal's own call is, else the session the shell-pane caller check (sessionAbove) finds above it in Claude Code's registry, which no prefix that drops the role reaches.
 export const callerOf = async (
   environment: Record<string, string | undefined>,
   pid: number,
-  parentOf?: (pid: number) => number,
+  parentOf: (pid: number) => number = parentPid,
 ): Promise<string | undefined> => {
-  if (environment.PLAYGROUND_ROLE) return `role ${environment.PLAYGROUND_ROLE}`
+  if (environment.PLAYGROUND_ROLE) return `a session (role ${environment.PLAYGROUND_ROLE})`
+  if (pid <= 1) return "a detached call (its parent is pid 1)"
+  if (!parentOf(pid)) return `a call whose parent ps cannot read (pid ${pid})`
   const id = await sessionAbove(environment, pid, parentOf)
-  return id && `session ${id}`
+  return id && `a session (session ${id})`
 }
 
 // lsof -F's names for each pid: its "p<pid>" line, then each "n<name>" line under it.
@@ -213,7 +215,7 @@ export const rmDeps = (repo: string): RmDeps => ({
   session: sessionName,
 })
 
-// Why a session (callerOf names it) may not pass --discard here, or null: it names with --decision an approved Inbox delete decision whose what names this path, so the owner's Approve is the authority and the session runs it.
+// Why a caller callerOf names may not pass --discard here, or null: it names with --decision an approved Inbox delete decision whose what names this path, so the owner's Approve is the authority and the session runs it.
 export const discardRefusal = async (
   path: string,
   id: string | undefined,
@@ -221,8 +223,7 @@ export const discardRefusal = async (
   deps: Pick<RmDeps, "decision">,
 ): Promise<string | null> => {
   const route = `post an Inbox delete decision with bun run ask new naming ${resolve(path)} and why, then run playground rm --worktree ${path} --discard --decision <id> once it is approved`
-  if (id === undefined)
-    return `a session (${caller}) passes --discard only with --decision <id>: ${route}`
+  if (id === undefined) return `${caller} passes --discard only with --decision <id>: ${route}`
   const item = await deps.decision(id)
   if (!item)
     return `--decision ${id} names no Inbox item the Dashboard's checkout can read: ${route}`
@@ -249,14 +250,13 @@ export async function runRm(words: string[], deps: RmDeps): Promise<number> {
     console.error(`playground: ${args.error}`)
     return 2
   }
-  const caller = "discard" in args && args.discard ? await deps.caller() : undefined
-  const refusal =
-    caller && "discard" in args
-      ? await discardRefusal(args.path, args.decision, caller, deps)
-      : null
-  if (refusal) {
-    console.error(`playground: ${refusal}`)
-    return 1
+  if ("discard" in args && args.discard) {
+    const caller = await deps.caller()
+    const refusal = caller ? await discardRefusal(args.path, args.decision, caller, deps) : null
+    if (refusal) {
+      console.error(`playground: ${refusal}`)
+      return 1
+    }
   }
   const roots: Roots = { home: deps.home, main: deps.main, trash: join(deps.data, "trash") }
   if ("list" in args) {
