@@ -40,6 +40,22 @@ export const groups: Group[] = [
         "a commit su's root shell runs from a here-string, its group given with an attached value",
         "sudo su -gdocker root <<< 'git commit -m x'",
       ],
+      [
+        "a commit su's root shell runs from a here-string, -c the value of the -w before it",
+        "su -w -c root <<< 'git commit -m x'",
+      ],
+      [
+        "a commit su's root shell runs from a here-string, -c the value of a cluster's -w",
+        "su -lw -c root <<< 'git commit -m x'",
+      ],
+      [
+        "a commit su's root shell runs from a here-string, -c the value of --whitelist-environment",
+        "sudo su --whitelist-environment -c root <<< 'git commit -m x'",
+      ],
+      [
+        "a commit su's root shell runs from a here-string, -c the value of an abbreviated long option",
+        "sudo su --white -c root <<< 'git commit -m x'",
+      ],
     ],
   },
 ]
