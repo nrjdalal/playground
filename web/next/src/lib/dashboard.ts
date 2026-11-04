@@ -1,7 +1,7 @@
 "use client"
 
 import type { Agent, DashboardFrame, Entry, Worker } from "@api/hono"
-import { kindOfName, setSessionNames } from "@packages/config/kinds"
+import { isEndedStatus, kindOfName, setSessionNames } from "@packages/config/kinds"
 import { replaceEqualDeep } from "@tanstack/react-query"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
@@ -498,15 +498,16 @@ export const dispatcherOf = (
   primary: string | null = null,
 ): Worker | null => workers?.find((w) => isPrimary(w, primary)) ?? null
 
-// Pure: the header's dispatcher slots, a list by role in the order the API names them (PLAYGROUND_DISPATCHER, then PLAYGROUND_DISPATCHER_SECONDARY), each the live session holding the role under that name, or none while it is down. The primary's slot is always kept; the second's only while its session is live or the roster lists it (rostered, the board's agent names but an ended entry's, rosteredOf), so a machine that runs no second dispatcher shows no row for it.
+// Pure: the header's dispatcher slots, a list by role in the order the API names them (PLAYGROUND_DISPATCHER, then PLAYGROUND_DISPATCHER_SECONDARY), each the live session holding the role under that name, or none while it is down. The primary's slot is always kept; the second's only while its session is live or the roster lists it in a status that has not ended (rostered, the board's agents), so a machine that runs no second dispatcher, or ended it, shows no row for it.
 export const dispatchersOf = (
   workers: Worker[] | null,
   names: readonly string[],
-  rostered: ReadonlySet<string> = new Set(),
+  rostered: readonly { name: string; status: string | null }[] = [],
 ): { name: string; worker: Worker | null }[] =>
   names.flatMap((name, i) => {
     const worker = workers?.find((w) => w.role === "dispatcher" && w.name === name) ?? null
-    return worker || i === 0 || rostered.has(name) ? [{ name, worker }] : []
+    const listed = rostered.some((agent) => agent.name === name && !isEndedStatus(agent.status))
+    return worker || i === 0 || listed ? [{ name, worker }] : []
   })
 
 // The worker /dashboard shows: the one the URL asks for while it is live, else the primary dispatcher, whose chat is the dashboard's home, since the owner talks to the dispatcher alone. None while the list has not come or the primary is not live.

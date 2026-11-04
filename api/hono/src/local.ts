@@ -95,7 +95,7 @@ const { data, error } = await unwrap(apiClient.health.$get())`,
                     }),
                     dispatcherSlots: z.number().int().min(1).meta({
                       description:
-                        "How many dispatcher rows the Dashboard's sidebar header draws: the primary's, plus the second's while a session of its name is registered or the roster lists it not ended. A stored sidebar draws that many rows, placeholders for those it lacks, so the rows arriving move nothing below them",
+                        "How many dispatcher rows the Dashboard's sidebar header draws: the primary's, plus the second's while a session of its name is registered or the roster lists it in a status other than done or ended. A stored sidebar draws that many rows, placeholders for those it lacks, so the rows arriving move nothing below them",
                       example: 2,
                     }),
                     environment: z
