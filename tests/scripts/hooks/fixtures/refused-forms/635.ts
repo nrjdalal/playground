@@ -100,18 +100,6 @@ export const groups: Group[] = [
         "bun -e 'await Bun.$`tar -xf /tmp/no-such-a.tar -C ~`'",
       ],
       [
-        "an inline node program running a removal of a glob through execSync",
-        `node -e 'require("child_process").execSync("rmdir ~/.play*")'`,
-      ],
-      [
-        "an inline node program running a removal joined from two strings through execSync",
-        `node -e 'require("child_process").execSync("rmdir " + "~/.play*")'`,
-      ],
-      [
-        "an inline bun program spawning a removal of a glob as an argument list",
-        `bun -e 'Bun.spawnSync(["rmdir", "~/.play*"])'`,
-      ],
-      [
         "an inline bun program whose private field reads as a shell comment ahead of a removal",
         "bun -e 'class A { #x = 1 }; await Bun.$`rmdir ~`'",
       ],
@@ -140,6 +128,18 @@ export const groups: Group[] = [
       [
         "an inline bun program spawning a copy into the home's variable",
         `bun -e 'Bun.spawnSync(["cp", "-R", "/tmp/no-such-x/.", process.env.HOME])'`,
+      ],
+      [
+        "an inline node program running a removal of a glob through execSync",
+        `node -e 'require("child_process").execSync("rmdir ~/.play*")'`,
+      ],
+      [
+        "an inline node program running a removal joined from two strings through execSync",
+        `node -e 'require("child_process").execSync("rmdir " + "~/.play*")'`,
+      ],
+      [
+        "an inline bun program spawning a removal of a glob as an argument list",
+        `bun -e 'Bun.spawnSync(["rmdir", "~/.play*"])'`,
       ],
       [
         "an inline bun program printing a removal joined from two strings into a shell",
