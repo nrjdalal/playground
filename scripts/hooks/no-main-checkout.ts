@@ -427,9 +427,21 @@ async function unreadScript(
   return refuse(`a shell whose script (${script.unknown}) the hook cannot read`, fixFor(sure))
 }
 
+// su's options that take a value, which a cluster's letters after it are (`-s/bin/bash`, `-gdocker`)
+const SU_VALUES = new Set(["G", "g", "s", "w"])
+// Whether one of su's words hands it a command: --command, or a cluster of option letters with c among them before any letter that takes a value (`-c`, `-lc`)
+const suCommand = (value: string) => {
+  if (value.startsWith("--")) return /^--command(=|$)/.test(value)
+  if (!value.startsWith("-")) return false
+  for (const letter of value.slice(1)) {
+    if (letter === "c") return true
+    if (SU_VALUES.has(letter)) return false
+  }
+  return false
+}
 // su with no command of its own starts a root shell that reads its script from stdin, as `sudo -s` does; one with -c or --command runs that command alone
 const suShell = ({ args, name }: { args: Word[]; name: string }) =>
-  name === "su" && !args.some((a) => /^-[^-]*c|^--command/.test(a.value))
+  name === "su" && !args.some((a) => suCommand(a.value))
 // The builtins run() hands visit beside a bare wrapper and a bare copy of a followed command, each with no command of its own to judge.
 const EXPORTS = new Set(["declare", "export", "local", "readonly", "typeset"])
 
