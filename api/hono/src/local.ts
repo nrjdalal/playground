@@ -239,7 +239,7 @@ export type {
 } from "@/lib/apps/plan"
 export type { PlanOrder } from "@/lib/apps/plan-order"
 export type { AccountRow } from "@/lib/store/accounts"
-export type { ExtensionRow } from "@/lib/store/extensions"
+export type { BundledRow, ExtensionRow } from "@/lib/store/extensions"
 export type { Preview, PreviewKind } from "@/lib/apps/previews"
 export type * from "@/plugins/registry"
 export type { BatchAnswer, BatchOutcome, BatchRefusalCode } from "@/lib/batch"
