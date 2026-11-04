@@ -147,23 +147,30 @@ describe("a write is refused before any session read or handler unless it comes 
 
 describe("an ask's file is read only from the dashboard's own page on this machine (#2282)", () => {
   const inbox = found.find((f) => f.file === "inbox.ts")!.router
-  const read = (origin: string, server?: ReturnType<typeof peer>) =>
+  const read = (origin: string, server?: ReturnType<typeof peer>, query = "") =>
     inbox.request(
-      "http://127.0.0.1/attachments/3f0e7a52-1c4b-4d2a-9e6f-0000000000a1.png",
+      `http://127.0.0.1/attachments/3f0e7a52-1c4b-4d2a-9e6f-0000000000a1.png${query}`,
       { headers: origin ? { origin } : {} },
       server,
     )
 
-  test("refused from another origin, with no origin (an <img> elsewhere), off loopback or from an unknown peer", async () => {
-    expect((await read("http://evil.localhost", peer("127.0.0.1"))).status).toBe(403)
-    expect((await read("", peer("127.0.0.1"))).status).toBe(403)
-    expect((await read(trusted(), peer("192.168.1.20"))).status).toBe(403)
-    expect((await read(trusted())).status).toBe(403)
-  })
+  // a download (#783) is the same read, so a plain link to it from anywhere is refused alike
+  test.each(["", "?download=1"])(
+    "refused from another origin, with no origin (an <img> elsewhere), off loopback or from an unknown peer%s",
+    async (query) => {
+      expect((await read("http://evil.localhost", peer("127.0.0.1"), query)).status).toBe(403)
+      expect((await read("", peer("127.0.0.1"), query)).status).toBe(403)
+      expect((await read(trusted(), peer("192.168.1.20"), query)).status).toBe(403)
+      expect((await read(trusted(), undefined, query)).status).toBe(403)
+    },
+  )
 
-  test("past both guards it still needs the owner's session", async () => {
-    expect((await read(trusted(), peer("127.0.0.1"))).status).toBe(401)
-  })
+  test.each(["", "?download=1"])(
+    "past both guards it still needs the owner's session%s",
+    async (query) => {
+      expect((await read(trusted(), peer("127.0.0.1"), query)).status).toBe(401)
+    },
+  )
 })
 
 // writes.md's hosted rule: Yard's writes, which hosted.ts alone mounts, take a trusted origin and the member rung or the one their route names, with no loopback check, since the hosted build serves the network.

@@ -6,6 +6,7 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  renameSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -470,6 +471,36 @@ describe("writeFixture", () => {
     expect(trashed(roots).filter((path) => path === dir)).toHaveLength(2)
   })
 
+  test("a writer whose rename loses the race to another's returns, leaving that complete fixture and no .writing folder (#797)", () => {
+    const root = scratch("fixture-race")
+    const dir = join(root, "fixture")
+    const roots = freshRoots()
+    const later = new Date(Date.parse(ANCHOR) + DAY)
+    writeFixture(small(), dir, roots, new Date(Date.parse(ANCHOR)), (from, to) => {
+      writeFixture(small(), join(root, "winner"), roots, later)
+      renameSync(join(root, "winner"), to)
+      renameSync(from, to)
+    })
+    expect(readdirSync(root)).toEqual(["fixture"])
+    expect(JSON.parse(readFileSync(join(dir, "stamp.json"), "utf8"))).toEqual({
+      writtenAt: later.toISOString(),
+    })
+  })
+
+  test("a rename that fails another way, or onto a folder that is no fixture's, still throws (#797)", () => {
+    const root = scratch("fixture-race-fail")
+    const roots = freshRoots()
+    const failing = (code: string) => () => {
+      throw Object.assign(new Error(`rename failed: ${code}`), { code })
+    }
+    expect(() =>
+      writeFixture(small(), join(root, "a"), roots, undefined, failing("ENOSPC")),
+    ).toThrow("rename failed: ENOSPC")
+    expect(() =>
+      writeFixture(small(), join(root, "b"), roots, undefined, failing("ENOTEMPTY")),
+    ).toThrow("rename failed: ENOTEMPTY")
+  })
+
   test("leaves a folder that is not a fixture's alone, a real config folder named by mistake included", () => {
     const dir = scratch("fixture-foreign")
     writeFileSync(join(dir, "roster.json"), "real")
@@ -818,21 +849,20 @@ const spies = (dir: string): { bin: string; log: string } => {
 }
 
 describe.skipIf(onLiveDashboard())("a fixture stack", () => {
-  // The control: the same spies catch a process that reads the live machine, opted in to cmux's sessions, so a quiet log below means the fixture held, not a blind spy.
-  test("the spies catch a live-reads process asking cmux", async () => {
+  // The control: the same spies catch a process that reads the live machine, so a quiet log below means the fixture held, not a blind spy.
+  test("the spies catch a live-reads process probing the machine", async () => {
     const dir = scratch("fixture-control")
     const { bin, log } = spies(dir)
     const { code } = await inFixture(
-      `const { listLive } = await import(\`\${API}/lib/dashboard/workers\`)\nawait listLive().catch(() => null)\nconsole.log("{}")\nprocess.exit(0)\n`,
+      `const { read } = await import(\`\${API}/lib/system/sampler\`)\nawait read().catch(() => null)\nconsole.log("{}")\nprocess.exit(0)\n`,
       dir,
       {
-        PLAYGROUND_CMUX_SESSIONS: "true",
         PLAYGROUND_LIVE_READS: "1",
         PATH: `${bin}:${process.env.PATH}`,
       },
     )
     expect(code).toBe(0)
-    expect(readFileSync(log, "utf8")).toContain("cmux sessions list")
+    expect(readFileSync(log, "utf8")).toContain("ps -axo")
   }, 60_000)
 
   test("never runs cmux or the machine's probes, never connects to cmux's socket, and keeps its writes in its own scratch copy", async () => {

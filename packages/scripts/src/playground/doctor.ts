@@ -114,7 +114,7 @@ export const proxyCheck = (repo: string, refusal: string | null): Check =>
     "portless proxy",
     true,
     refusal === null,
-    `run bash ${repo}/install.sh again in a terminal, which asks for your Mac's password once`,
+    `run bash ${repo}/install.sh again in a terminal, which asks for your Mac's password once; once the Dashboard runs, Settings' Things to fix trusts its certificate with a button`,
     "the Dashboard's https://playground.localhost",
   )
 

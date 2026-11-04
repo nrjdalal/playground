@@ -191,12 +191,12 @@
         "status": "ok"
       },
       {
-        "action": null,
-        "detail": "ready",
+        "action": { "id": "trust", "label": "Trust the certificate" },
+        "detail": "not trusted",
         "name": "portless",
         "need": "the Dashboard's https address",
-        "note": null,
-        "status": "ok"
+        "note": "Your Mac does not trust the local web proxy's certificate yet. Trust it here; your Mac may ask for your password in its own window.",
+        "status": "optional"
       },
       {
         "action": null,
@@ -3203,6 +3203,9 @@
       }
     ],
     "playground/previews/sidebar-mock.html": "<!doctype html><title>Sidebar spacing</title><style>body{margin:0;padding:32px;font:14px system-ui;background:#fafafa;color:#18181b;display:grid;gap:24px;grid-template-columns:1fr 1fr}@media (prefers-color-scheme:dark){body{background:#18181b;color:#fafafa}}section{border:1px solid #a1a1aa;border-radius:8px;padding:16px}h2{font-size:14px;margin:0 0 12px}p{margin:0;padding:6px 0}.tight p{padding:2px 0}</style><section><h2>Option A: 6px rows</h2><p>Builder</p><p>Planner</p><p>Ops</p></section><section class=\"tight\"><h2>Option B: 2px rows</h2><p>Builder</p><p>Planner</p><p>Ops</p></section>",
+    "playground/previews/sidebar-mock.pdf": {
+      "$base64": "JVBERi0xLjQKMSAwIG9iajw8L1R5cGUvQ2F0YWxvZy9QYWdlcyAyIDAgUj4+ZW5kb2JqCjIgMCBvYmo8PC9UeXBlL1BhZ2VzL0tpZHNbMyAwIFJdL0NvdW50IDE+PmVuZG9iagozIDAgb2JqPDwvVHlwZS9QYWdlL1BhcmVudCAyIDAgUi9NZWRpYUJveFswIDAgMzAwIDE0NF0vQ29udGVudHMgNCAwIFIvUmVzb3VyY2VzPDwvRm9udDw8L0YxIDUgMCBSPj4+Pj4+ZW5kb2JqCjQgMCBvYmo8PC9MZW5ndGggNDQ+PnN0cmVhbQpCVCAvRjEgMTggVGYgNDAgNzAgVGQgKEZpeHR1cmUgUERGKSBUaiBFVAplbmRzdHJlYW0gZW5kb2JqCjUgMCBvYmo8PC9UeXBlL0ZvbnQvU3VidHlwZS9UeXBlMS9CYXNlRm9udC9IZWx2ZXRpY2E+PmVuZG9iagp0cmFpbGVyPDwvUm9vdCAxIDAgUj4+CiUlRU9GCg=="
+    },
     "playground/previews/sidebar-mock.txt": "Fixture: sidebar spacing, two options side by side",
     "playground/previews/spinner-dark-1.png": {
       "$base64": "iVBORw0KGgoAAAANSUhEUgAAAUAAAAC0CAIAAABqhmJGAAADHUlEQVR42u3cy20CQRBFUcJAcjDsyD8eViYBW8PQn3o1B90109X0Uc/C8u1+/5EU2s0WSABLAlgSwBLAkgCWBLAkgCWAJQEsCWAJYEkASwJYEsASwJIAlgSwJIAlgCUBLAlgCWBJAEsCWBLAEsCSAJYEsCSAJYAlASwJYAlgSQBLAlgSwBLAkgCWBLAEsF2QAJYEsCSAJYAV0uvvz+Px/CdbB7DKoT0OGGaAVdHtCcAkA6xCdE8Dxhhg7af7JWCMAdZOukMAYwyw9tAdCBhjgLVB71jADAOsdXRnAMYYYK3T+/68v5ZhgFVd74knMgywNusd8nSGAdZSupMWgzHAmqt3waoYBljjAS9eG8AAK1UvwwBrjN7tS2UYYKXqZRhgZetlGGB9DLjgygEGmN5UvQwDTG+2XoYBBjhb73HDfm6A6WVYAIcAjpsIYIDp7QyYYYBdvy5hAUwvwwALYIABprePXoYBBhhgAZwJuM2YAAPs+nUJC2CAAQZY3p+9RQMMMMAAA+z92Vu0AHb9uoQBFsAAAwwwwAIYYIABtgsAAwywAAYYYIABFsAAAwyw5gBuPDXAALuOjCyAnWYjAyyn2cgAAwwwwAA7zUYWwE6zkQGW02xkgAE2sgD2HyrMC7DcSIYFWAADDLC3SpMKYMfapADLi6UxAQa45eF2/QIMsBkFsPNtOoDliJsOYPU/5fQCDHDqWW85FMC6ymVFL8AAp5541y/ADKceenoBBjj16PeYAmBd8fTTCzDDqQboBVhHGVSTELpsgAUDvQArlgS9AOsrGLts1F+hAGaYXoA1H8kyKjVXJYCbGJ4HptRiBHBzxqPw7H26AL604dOW1j9RADP8MbNJXyuAtcIwvQALY3QBVrJhPwrAimTshwBYkYxtPsCKZGzDAVYkY5sMsPIk21KAdcW/xBTAkgCWAJYEsCSAJQEsASwJYEkASwJYAlgSwJIAlgCWBLAkgCUBLAEsCWBJAEsASwJYEsCSAJYAlgSwJIAlASwBLAlgSQBLAEsCWBLAkgCWAJYEsCSAJQEsASwJYEkASwBLAljS5H4BwwgakSbsQDEAAAAASUVORK5CYII="

@@ -30,3 +30,10 @@ export function useAttachment(
   const { data } = useQuery(attachmentQuery(id, enabled))
   return { missing: data === MISSING, url: data && data !== MISSING ? data : null }
 }
+
+// Pure: where a kept file is served as a download, saved under its item's title.
+export function attachmentDownloadUrl(id: string): string {
+  const url = new URL(apiClient.v1.inbox.attachments[":id"].$url({ param: { id } }))
+  url.searchParams.set("download", "1")
+  return url.toString()
+}

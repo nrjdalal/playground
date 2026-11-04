@@ -158,12 +158,16 @@ The Dashboard's supervisor takes `dashboard-supervisor`, through `packages/scrip
 The trash records the script as who deleted it, and `--restore` puts its entry back into that folder.
 The ops runner's render takes `jobs`: the plist of a job `jobs.json` no longer holds, out of `ops/launch-agents`, one file of at most 64 KB.
 
-`playground rm --worktree <path>` removes a worktree under `.claude/worktrees/`: it refuses when the roster cannot be read, when a live session on the roster holds it by its branch, its name or its pull request's number, when a running `node_modules` clone reads from it or copies into it, when a process works inside it, or when its commit is on no remote branch, then moves it to the trash and runs `git worktree prune`.
+`playground rm --worktree <path>` removes a worktree under `.claude/worktrees/`: it refuses when the roster cannot be read, when a live session on the roster holds it by its branch, its name or its pull request's number, when a running `node_modules` clone reads from it or copies into it, when a process works inside it, when `git status --porcelain` lists an uncommitted change in it (the refusal names the count and the first three paths), or when its HEAD's work has not landed on `origin/canary`, then moves it to the trash and runs `git worktree prune`.
 A live session whose roster entry names no branch and no pull request, and with no process inside the worktree, is not seen as holding it; the trash keeps the worktree 7 days for `--restore`.
 A process inside it is named in the refusal, `<path> is held by pid <n> (<command>) working in <folder>`, and nothing is signalled, so the session that started it closes it by its own handle.
 When that process is agent-browser, the refusal adds its session, from its `--session` argument or its socket's name, else `default`, and the close that frees the folder: `agent-browser session <name>, which agent-browser --session <name> close frees`.
 A clone is read from run-slot's clone holder record (`run-slot-clone.holder` in the data folder's `ops`), which names its source and destination while its pid lives, since the clone's `cp` only reads its source and works in whatever folder run-slot was called from, so neither end need be a process's working folder; the refusal reads `<path> is held by <session>'s node_modules clone (pid <n>) from <source> into <destination>`.
-Uncommitted changes go into the trash with the worktree, so they come back with it.
+Its work has landed when each file HEAD changed since its merge-base with `origin/canary` reads the same there, or, since canary squash-merges and may change those files again, when GitHub lists a merged pull request holding HEAD's commit; a review clone detached at a merged pull request's head lands the same way.
+`--discard` lets the uncommitted changes and the unlanded work go, and both refusals name it; it never passes a holder, a clone or a process.
+The owner's Approve is the authority for it: a session with `PLAYGROUND_ROLE` set passes `--discard` only with `--decision <id>`, naming an Inbox `delete` decision the owner has approved whose `what` names that worktree's path, read through `bun run ask get` in the Dashboard's checkout.
+So a session posts the `delete` decision with `bun run ask new`, naming the path and why, and once it reads approved runs `playground rm --worktree <path> --discard --decision <id>`; an open, denied or missing decision, another kind, or one naming another path is refused.
+Discarded work goes into the trash with the worktree, so it comes back with it.
 A worktree restored from the trash has its files back, but git no longer lists it as a worktree.
 Ops empties the trash every hour: each delete over 7 days old goes, and the oldest go sooner while the disk has under 50 GB free.
 
@@ -225,7 +229,7 @@ Each runs the package script of the same name in the Dashboard's checkout, the o
 - `playground changelog` adds rows to the Changelog from GitHub's merges and versions, or a line by hand.
 - `playground dm send <file>` posts the reply in the file, named by its absolute path, to your own Slack DM in Slack mode, framed, and records each post so the DM watch tells it from your messages.
 - `playground dm upload <item id>` shares a Slack send's files into its channel and thread, read from the answered Inbox item that id names; the Inbox runs it on Send or Approve.
-- `playground ingest` reads every Claude Code session Playground has run (every one on this machine with `PLAYGROUND_CMUX_SESSIONS=true`) into the Dashboard's database; `--follow` keeps reading, and `status` says how far it is.
+- `playground ingest` reads every Claude Code session Playground has run (every one on this machine with `PLAYGROUND_ALL_SESSIONS=true`) into the Dashboard's database; `--follow` keeps reading, and `status` says how far it is.
 - `playground queues` prints the merge queue and the work queue.
 - `playground thread` opens, routes, renames and lists the Inbox's threads.
 

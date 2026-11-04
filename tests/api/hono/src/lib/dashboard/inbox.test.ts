@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test"
-import { mkdtempSync, rmSync } from "node:fs"
+import { mkdtempSync, rmSync, utimesSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -1059,6 +1059,43 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
     return posted.item
   }
 
+  test("a kept file downloads under its item's title, the file's own name after it when the item carries several, and as attachment when no item carries it (#783)", async () => {
+    const lone = "3f0e7a52-1c4b-4d2a-9e6f-00000000d001.html"
+    const shot = "3f0e7a52-1c4b-4d2a-9e6f-00000000d002.png"
+    const notes = "3f0e7a52-1c4b-4d2a-9e6f-00000000d003.pdf"
+    await post({
+      from: "ops",
+      kind: "update",
+      preview: { attachments: [{ id: lone, kind: "html", name: "deck.html" }], outcome: "finding" },
+      title: "Weekly plan: updated draft",
+    })
+    await post({
+      from: "ops",
+      kind: "update",
+      preview: {
+        attachments: [
+          { id: shot, kind: "image", name: "card-after.png" },
+          { id: notes, kind: "pdf", name: "notes.v2.pdf" },
+        ],
+        outcome: "finding",
+      },
+      title: "Sidebar spacing",
+    })
+    expect(await store.attachmentDownloadName(db, lone)).toBe("Weekly plan updated draft.html")
+    expect(await store.attachmentDownloadName(db, shot)).toBe("Sidebar spacing, card-after.png")
+    expect(await store.attachmentDownloadName(db, notes)).toBe("Sidebar spacing, notes.v2.pdf")
+    expect(await store.attachmentDownloadName(db, "3f0e7a52-1c4b-4d2a-9e6f-00000000d004.png")).toBe(
+      "attachment.png",
+    )
+    await post({
+      from: "ops",
+      kind: "update",
+      preview: { attachments: [{ id: lone, kind: "html", name: "deck.html" }], outcome: "finding" },
+      title: "Weekly plan, final",
+    })
+    expect(await store.attachmentDownloadName(db, lone)).toBe("Weekly plan, final.html")
+  })
+
   test("an item gets a tag that counts up, and is found by its id or its tag", async () => {
     const a = await post(decision(SLACK))
     const b = await post(decision(PREVIEWS.ship))
@@ -1229,6 +1266,8 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       const kept = async (bytes: Uint8Array, name: string, kind: string) => {
         const stored = await storeAttachment(bytes, name, { dir })
         if (!stored.ok) throw new Error("not stored")
+        // its mtime on the test's clock, which the next store's sweep ages it by, so the clock-ahead pass reads it as just stored
+        utimesSync(join(dir, stored.id), new Date(), new Date())
         return { id: stored.id, kind, name }
       }
       beforeAll(() => {
@@ -2530,21 +2569,19 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       { code: "QUEUED", ok: false as const, reason: "ops holds the message" },
       { code: "LOST", ok: false as const, reason: "Retry sends it again." },
     ]
-    let settle = () => {}
-    const settled = new Promise<void>((resolve) => (settle = resolve))
-    const deliver = async () => {
-      const answer = answers.shift()!
-      if (!answers.length) setTimeout(settle, 50)
-      return answer
-    }
+    const deliver = async () => answers.shift()!
     await store.answerItem(
       db,
       posted.id,
       { action: "approve" },
       { actor, deliver, wait: async () => {} },
     )
-    await settled
-    const item = await store.getItem(db, posted.id)
+    // follow() records LOST in its own write after deliver returns, so the item is read again until that write lands, for 2s at most
+    let item = await store.getItem(db, posted.id)
+    for (let i = 0; i < 200 && item?.delivery?.status === "queued"; i++) {
+      await Bun.sleep(10)
+      item = await store.getItem(db, posted.id)
+    }
     expect(item?.delivery).toMatchObject({ code: "LOST", status: "failed" })
     expect(item && store.retryable(item)).toBe(true)
   })
