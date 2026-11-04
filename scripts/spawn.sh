@@ -964,7 +964,7 @@ for file in sorted(os.listdir(folder)) if os.path.isdir(folder) else []:
         skip(name, "it has no runtime pin")
         continue
     if runtime != "herdr":
-        skip(name, "it runs in " + (runtime or "no runtime") + ", not herdr")
+        skip(name, "it runs in " + (runtime if runtime.isalnum() else "another runtime") + ", not herdr")
         continue
     extras = words[6:]
     keys = extras[::2]
@@ -985,7 +985,7 @@ PY
   lines=$(restore_list) || refuse "it cannot read the roster or the resume files"
   failed=0
   while IFS=$'\t' read -r -a args; do
-    case "${args[0]}" in
+    case "${args[0]:-}" in
       skip) echo "skipped ${args[1]}: ${args[2]}" ;;
       run)
         args=("${args[@]:1}")
