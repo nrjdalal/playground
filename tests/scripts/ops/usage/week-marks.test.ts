@@ -112,8 +112,8 @@ test("a week past 90% and a 5-hour window past 85% each alert once", () => {
   expect(alerts(home)).toEqual([])
 })
 
-// the owner's drain order: every account is used to 100%, where Bravo switches, so no mark parks or stops work
-test("the 97% and 98% alerts say nothing parks and Bravo switches at 100%", () => {
+// the owner's drain order: every account is used to 100%, where a seated second dispatcher switches, so no mark parks or stops work
+test("the 97% and 98% alerts say nothing parks and a seated second dispatcher switches at 100%", () => {
   const home = setup("drain", 99, 20)
   const env: Record<string, string | undefined> = {
     ...process.env,
@@ -125,7 +125,9 @@ test("the 97% and 98% alerts say nothing parks and Bravo switches at 100%", () =
   const lines = out.split("\n").filter((line) => /^ALERT 9[78] /.test(line))
   expect(lines).toHaveLength(2)
   for (const line of lines) {
-    expect(line).toContain("nothing parks: at 100% Bravo switches the factory to the next account")
+    expect(line).toContain(
+      "nothing parks: at 100% a seated second dispatcher switches the factory to the next account",
+    )
     expect(line).not.toMatch(/push WIP|stops now/)
   }
 })
