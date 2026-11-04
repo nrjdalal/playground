@@ -16,6 +16,7 @@ import {
   type Inbox,
   login,
   main,
+  onStop,
   open,
   read,
   Refusal,
@@ -703,30 +704,24 @@ describe("login drives GitHub's browser login and hands the owner its code on a 
     ])
   })
 
+  // the signal is emitted in this process and its exit recorded, since this file imports the refused-forms fixture and so starts no process (fixtures-are-data)
   test("onStop closes the card on SIGTERM and SIGINT, then exits 143 and 130", async () => {
-    const child = join(SCRATCH, "on-stop.ts")
-    writeFileSync(
-      child,
-      [
-        `const { onStop } = await import(${JSON.stringify(join(CHECKOUT, "scripts", "shell-pane.ts"))})`,
-        "onStop(() => Bun.write(process.argv[2]!, 'closed').then(() => {}))",
-        "console.log('ready')",
-        "setInterval(() => {}, 1000)",
-      ].join("\n"),
-    )
-    for (const [signal, code] of [
-      ["SIGTERM", 143],
-      ["SIGINT", 130],
-    ] as const) {
-      const closed = join(SCRATCH, `on-stop-${signal}`)
-      const proc = Bun.spawn([process.execPath, "--no-env-file", child, closed], { stdout: "pipe" })
-      const reader = proc.stdout.getReader()
-      let out = ""
-      while (!out.includes("ready")) out += new TextDecoder().decode((await reader.read()).value)
-      proc.kill(signal)
-      expect(await proc.exited).toBe(code)
-      expect(await Bun.file(closed).text()).toBe("closed")
+    const exit = process.exit
+    const exits: number[] = []
+    let closes = 0
+    process.exit = ((code?: number) => void exits.push(code ?? 0)) as typeof process.exit
+    try {
+      for (const signal of ["SIGTERM", "SIGINT"] as const) {
+        const unlisten = onStop(async () => void closes++)
+        process.emit(signal, signal)
+        await Bun.sleep(10)
+        unlisten()
+      }
+    } finally {
+      process.exit = exit
     }
+    expect(closes).toBe(2)
+    expect(exits).toEqual([143, 130])
   })
 
   test("askInbox closes an open card by settle, an approved one by ack, and a denied one by get --ack, refusing one get still reads open", async () => {

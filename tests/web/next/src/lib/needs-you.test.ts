@@ -594,13 +594,22 @@ describe("lostPrompt", () => {
   test("a worker at a prompt the Feed no longer holds is stuck, a plain notice", () => {
     expect(
       lostPrompt(worker({ lifecycle: "needsInput", name: "worker-greed", role: "worker" })),
-    ).toEqual({ onYou: false, title: "Greed · Stuck" })
+    ).toEqual({
+      onYou: false,
+      text: "Its prompt is not in the Feed any more: ask Playground in the chat what it is asking.",
+      title: "Greed · Stuck",
+    })
   })
 
-  test("Playground at such a prompt waits on you, in red", () => {
+  // the chat is the stuck dispatcher itself, so its notice names its terminal
+  test("Playground at such a prompt waits on you, in red, and names its terminal", () => {
     expect(
       lostPrompt(worker({ effort: "high", lifecycle: "needsInput", model: "claude-opus-5-5" })),
-    ).toEqual({ onYou: true, title: "Alpha · Waiting on you" })
+    ).toEqual({
+      onYou: true,
+      text: "Its prompt is not in the Feed any more. Its terminal shows what it is asking.",
+      title: "Alpha · Waiting on you",
+    })
   })
 
   // a dispatcher reads Alpha or Bravo, never its session name

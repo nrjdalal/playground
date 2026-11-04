@@ -111,7 +111,6 @@ function Body({ body, label }: { body: NeedsYouBody; label: string }) {
   )
 }
 
-// What waits on the owner, inside the stream of the session that asked: a Feed prompt (a picker, a permission, a plan), one card shape for all, on shadcn's Questionnaire. One question shows at a time, with Previous and Next between them; pick an option (the recommended one comes first and says so), add words where a question takes them, and Submit sends every answer at once. Without onAnswer the card is shown as it would be answered but can only be answered in the session's terminal: its options stay in sight, disabled one by one, since Questionnaire hides a disabled question whole. With a resolution it collapses to one line.
 // Where a card that cannot be answered here is answered: through the chat, by the session's manager, or in its terminal for a dispatcher's own card, since a dispatcher has no manager.
 function readOnlyFooter(item: NeedsYou): string {
   const label = agentLabel(item.from)
@@ -132,6 +131,7 @@ function readOnlyFooter(item: NeedsYou): string {
     : `This cannot be answered here: ${manager}`
 }
 
+// What waits on the owner, inside the stream of the session that asked: a Feed prompt (a picker, a permission, a plan), one card shape for all, on shadcn's Questionnaire. One question shows at a time, with Previous and Next between them; pick an option (the recommended one comes first and says so), add words where a question takes them, and Submit sends every answer at once. Without onAnswer the card is shown as it would be answered but can only be answered in the session's terminal: its options stay in sight, disabled one by one, since Questionnaire hides a disabled question whole. With a resolution it collapses to one line.
 export function NeedsYouCard({
   item,
   now,

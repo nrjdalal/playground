@@ -321,14 +321,20 @@ export const waitingSessions = (
       .map((worker) => worker.sessionId),
   )
 
-// Pure: the notice a session's view shows while it waits at a prompt its terminal no longer holds: on you, in red, for a dispatcher's own (onYou), named as its chat names it (chatLabel, primary the name the API gives the first); any other session waits on Playground, a plain notice. null while it waits on no such prompt.
+// Pure: the notice a session's view shows while it waits at a prompt its terminal no longer holds: on you, in red, for a dispatcher's own (onYou), named as its chat names it (chatLabel, primary the name the API gives the first); any other session waits on Playground, a plain notice. Its text sends the owner to the chat, but for a dispatcher's own, whose chat is the stuck session, so it names its terminal. null while it waits on no such prompt.
 export const lostPrompt = (
   worker: Worker,
   primary: string | null = null,
-): { onYou: boolean; title: string } | null => {
+): { onYou: boolean; text: string; title: string } | null => {
   if (worker.feed.length > 0 || worker.lifecycle !== "needsInput") return null
   const onYou = worker.role === "dispatcher"
-  return { onYou, title: `${chatLabel(worker, primary)} · ${waitLabel(onYou)}` }
+  return {
+    onYou,
+    text: onYou
+      ? "Its prompt is not in the Feed any more. Its terminal shows what it is asking."
+      : "Its prompt is not in the Feed any more: ask Playground in the chat what it is asking.",
+    title: `${chatLabel(worker, primary)} · ${waitLabel(onYou)}`,
+  }
 }
 
 // One place where something waits on you, as the Dashboard lists it: a live session, how many, and the link to its first card (the newest Inbox item, else the oldest prompt); label names it as its chat does (chatLabel), name is its session's own.
