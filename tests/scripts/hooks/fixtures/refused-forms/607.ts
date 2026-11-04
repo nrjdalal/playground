@@ -7,6 +7,7 @@ export const groups: Group[] = [
     guards: ["no-main-checkout"],
     rows: ({ MAIN }) => [
       ["a commit a root shell runs from a here-string", "sudo -s <<< 'git commit -m x'"],
+      ["a commit a root shell runs from a pipeline", "echo 'git commit -m x' | sudo -s"],
       ["a commit a root shell runs from a heredoc", "sudo -s <<EOF\ngit commit -m x\nEOF"],
       ["a commit a root shell's login runs from a here-string", "sudo -i <<< 'git commit -m x'"],
       [
